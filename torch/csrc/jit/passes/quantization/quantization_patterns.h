@@ -1133,9 +1133,13 @@ graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
         %r = aten::conv1d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
         return (%r) )";
 
+  // Note: input_qrange_le_128 is always set to True here because this codepath
+  // is deprecated and it's not worth the engineering time to properly calculate
+  // it.
   std::string conv1d_with_quant_prepack = R"(
 graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
-        %packed_params : __torch__.torch.classes.quantized.Conv2dPackedParamsBase = quantized::conv1d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
+        %input_qrange_le_128 : bool = prim::Constant[value=1]()
+        %packed_params : __torch__.torch.classes.quantized.Conv2dPackedParamsBase = quantized::conv1d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups, %input_qrange_le_128)
         %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::conv1d_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant_unpacked)
         %r = aten::conv1d(%a_dequant, %w_dequant, %b_unpacked, %stride, %padding, %dilation, %groups)
@@ -1147,9 +1151,13 @@ graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
         %r = aten::conv2d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
         return (%r) )";
 
+  // Note: input_qrange_le_128 is always set to True here because this codepath
+  // is deprecated and it's not worth the engineering time to properly calculate
+  // it.
   std::string conv2d_with_quant_prepack = R"(
 graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
-        %packed_params : __torch__.torch.classes.quantized.Conv2dPackedParamsBase = quantized::conv2d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
+        %input_qrange_le_128 : bool = prim::Constant[value=1]()
+        %packed_params : __torch__.torch.classes.quantized.Conv2dPackedParamsBase = quantized::conv2d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups, %input_qrange_le_128)
         %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::conv2d_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant_unpacked)
         %r = aten::conv2d(%a_dequant, %w_dequant, %b_unpacked, %stride, %padding, %dilation, %groups)
@@ -1161,9 +1169,13 @@ graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
         %r = aten::conv3d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
         return (%r) )";
 
+  // Note: input_qrange_le_128 is always set to True here because this codepath
+  // is deprecated and it's not worth the engineering time to properly calculate
+  // it.
   std::string conv3d_with_quant_prepack = R"(
 graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
-        %packed_params : __torch__.torch.classes.quantized.Conv3dPackedParamsBase = quantized::conv3d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
+        %input_qrange_le_128 : bool = prim::Constant[value=1]()
+        %packed_params : __torch__.torch.classes.quantized.Conv3dPackedParamsBase = quantized::conv3d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups, %input_qrange_le_128)
         %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::conv3d_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant_unpacked)
         %r = aten::conv3d(%a_dequant, %w_dequant, %b_unpacked, %stride, %padding, %dilation, %groups)
@@ -1175,9 +1187,13 @@ graph(%a_dequant, %w_quant, %b, %stride, %padding, %output_padding, %groups, %di
         %r = aten::conv_transpose1d(%a_dequant, %w_dequant, %b, %stride, %padding, %output_padding, %groups, %dilation)
         return (%r) )";
 
+  // Note: input_qrange_le_128 is always set to True here because this codepath
+  // is deprecated and it's not worth the engineering time to properly calculate
+  // it.
   std::string conv_transpose1d_with_quant_prepack = R"(
 graph(%a_dequant, %w_quant, %b, %stride, %padding, %output_padding, %groups, %dilation):
-        %packed_params : __torch__.torch.classes.quantized.Conv2dPackedParamsBase = quantized::conv_transpose1d_prepack(%w_quant, %b, %stride, %padding, %output_padding, %dilation, %groups)
+        %input_qrange_le_128 : bool = prim::Constant[value=1]()
+        %packed_params : __torch__.torch.classes.quantized.Conv2dPackedParamsBase = quantized::conv_transpose1d_prepack(%w_quant, %b, %stride, %padding, %output_padding, %dilation, %groups, %input_qrange_le_128)
         %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::conv_transpose1d_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant_unpacked)
         %r = aten::conv_transpose1d(%a_dequant, %w_dequant, %b_unpacked, %stride, %padding, %output_padding, %groups, %dilation)
@@ -1189,9 +1205,13 @@ graph(%a_dequant, %w_quant, %b, %stride, %padding, %output_padding, %groups, %di
         %r = aten::conv_transpose2d(%a_dequant, %w_dequant, %b, %stride, %padding, %output_padding, %groups, %dilation)
         return (%r) )";
 
+  // Note: input_qrange_le_128 is always set to True here because this codepath
+  // is deprecated and it's not worth the engineering time to properly calculate
+  // it.
   std::string conv_transpose2d_with_quant_prepack = R"(
 graph(%a_dequant, %w_quant, %b, %stride, %padding, %output_padding, %groups, %dilation):
-        %packed_params : __torch__.torch.classes.quantized.Conv2dPackedParamsBase = quantized::conv_transpose2d_prepack(%w_quant, %b, %stride, %padding, %output_padding, %dilation, %groups)
+        %input_qrange_le_128 : bool = prim::Constant[value=1]()
+        %packed_params : __torch__.torch.classes.quantized.Conv2dPackedParamsBase = quantized::conv_transpose2d_prepack(%w_quant, %b, %stride, %padding, %output_padding, %dilation, %groups, %input_qrange_le_128)
         %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::conv_transpose2d_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant_unpacked)
         %r = aten::conv_transpose2d(%a_dequant, %w_dequant, %b_unpacked, %stride, %padding, %output_padding, %groups, %dilation)

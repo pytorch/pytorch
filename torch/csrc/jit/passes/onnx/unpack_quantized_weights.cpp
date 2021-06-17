@@ -175,6 +175,7 @@ void unpackQuantizedWeightsHelper(
         output_padding;
     c10::optional<int64_t> groups;
     c10::optional<int64_t> transpose;
+    c10::optional<int64_t> input_qrange_le_128;
 
     torch::List<int64_t> stride_int, padding_int, dilation_int,
         output_padding_int;
@@ -182,6 +183,8 @@ void unpackQuantizedWeightsHelper(
     int64_t groups_int;
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t transpose_int;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    int64_t input_qrange_le_128_int;
 
     if (itr->second.isTuple()) {
       // Pre-unpacked weights. Comes from Conv/Linear weights which are
@@ -192,7 +195,7 @@ void unpackQuantizedWeightsHelper(
           ser_tup->elements()[0].isString()) {
         auto elements = ser_tup->elements();
         auto version = elements[0].toStringRef();
-        TORCH_INTERNAL_ASSERT(version == "2", "Unknown serialization version");
+        TORCH_INTERNAL_ASSERT(version == "3", "Unknown serialization version");
         std::vector<at::Tensor> non_optional = elements[1].toTensorVector();
 
         at::Tensor conv_params_packed = non_optional[0];
@@ -222,6 +225,8 @@ void unpackQuantizedWeightsHelper(
         idx++;
         transpose_int = conv_params_packed[idx].item<int64_t>();
         idx++;
+        input_qrange_le_128_int = conv_params_packed[idx].item<int64_t>();
+        idx++;
         TORCH_INTERNAL_ASSERT(
             idx == conv_params_packed.numel(),
             "Unexpected length of conv_params_packed, expected ",
@@ -237,6 +242,7 @@ void unpackQuantizedWeightsHelper(
         dilation = dilation_int;
         groups = groups_int;
         transpose = transpose_int;
+        input_qrange_le_128 = input_qrange_le_128_int;
       } else { // Legacy
         unpacked_weight = ser_tup->elements()[0].toTensor();
         bias = ser_tup->elements()[1].toOptional<at::Tensor>();

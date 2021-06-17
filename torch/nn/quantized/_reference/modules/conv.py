@@ -46,10 +46,11 @@ class Conv1d(_ConvNd, nnq.Conv1d):
                  dilation: _size_1_t = 1,
                  groups: int = 1,
                  bias: bool = True,
-                 padding_mode: str = 'zeros'):
+                 padding_mode: str = 'zeros',
+                 input_qrange_le_128: bool = True):
         nnq.Conv1d.__init__(
             self, in_channels, out_channels, kernel_size, stride, padding, dilation,
-            groups, bias, padding_mode)
+            groups, bias, padding_mode, input_qrange_le_128)
         # self.stride, self.padding, self.dilation are 2d tuple since
         # current quantized conv1d is using Conv2dPackedParams
         # TODO: we should fix this if we implemenet Conv1dPackedParams
@@ -83,6 +84,12 @@ class Conv1d(_ConvNd, nnq.Conv1d):
         self.output_padding = state[7]
         self.groups = state[8]
         self.padding_mode = state[9]
+        # Note: this has to be before self.set_weight_bias because
+        # self.input_qrange_le_128 is used inside of that function
+        if len(state) > 14:
+            self.input_qrange_le_128 = state[15]
+        else:
+            self.input_qrange_le_128 = True
         self.set_weight_bias(state[10], state[11])
         self.scale = state[12]
         self.zero_point = state[13]
@@ -94,10 +101,10 @@ class Conv1d(_ConvNd, nnq.Conv1d):
 class Conv2d(_ConvNd, nnq.Conv2d):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
-                 padding_mode='zeros'):
+                 padding_mode='zeros', input_qrange_le_128=True):
         nnq.Conv2d.__init__(
             self, in_channels, out_channels, kernel_size, stride, padding, dilation,
-            groups, bias, padding_mode)
+            groups, bias, padding_mode, input_qrange_le_128)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x_dequant = x.dequantize()
@@ -116,10 +123,10 @@ class Conv2d(_ConvNd, nnq.Conv2d):
 class Conv3d(_ConvNd, nnq.Conv3d):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
-                 padding_mode='zeros'):
+                 padding_mode='zeros', input_qrange_le_128=True):
         nnq.Conv3d.__init__(
             self, in_channels, out_channels, kernel_size, stride, padding, dilation,
-            groups, bias, padding_mode)
+            groups, bias, padding_mode, input_qrange_le_128)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x_dequant = x.dequantize()

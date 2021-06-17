@@ -23,11 +23,11 @@ class ConvReLU1d(nnq.Conv1d):
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
-                 padding_mode='zeros'):
+                 padding_mode='zeros', input_qrange_le_128=True):
         super(ConvReLU1d, self).__init__(
             in_channels, out_channels, kernel_size, stride=stride,
             padding=padding, dilation=dilation, groups=groups, bias=bias,
-            padding_mode=padding_mode)
+            padding_mode=padding_mode, input_qrange_le_128=input_qrange_le_128)
 
     def forward(self, input):
         # Temporarily using len(shape) instead of ndim due to JIT issue
@@ -67,11 +67,11 @@ class ConvReLU2d(nnq.Conv2d):
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
-                 padding_mode='zeros'):
+                 padding_mode='zeros', input_qrange_le_128=True):
         super(ConvReLU2d, self).__init__(
             in_channels, out_channels, kernel_size, stride=stride,
             padding=padding, dilation=dilation, groups=groups, bias=bias,
-            padding_mode=padding_mode)
+            padding_mode=padding_mode, input_qrange_le_128=input_qrange_le_128)
 
     def forward(self, input):
         # Temporarily using len(shape) instead of ndim due to JIT issue
@@ -110,12 +110,12 @@ class ConvReLU3d(nnq.Conv3d):
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
-                 padding_mode='zeros'):
+                 padding_mode='zeros', input_qrange_le_128=True):
         assert padding_mode != 'reflect', "Conv3d does not support reflection padding"
         super(ConvReLU3d, self).__init__(
             in_channels, out_channels, kernel_size, stride=stride,
             padding=padding, dilation=dilation, groups=groups, bias=bias,
-            padding_mode=padding_mode)
+            padding_mode=padding_mode, input_qrange_le_128=input_qrange_le_128)
 
     def forward(self, input):
         # Temporarily using len(shape) instead of ndim due to JIT issue

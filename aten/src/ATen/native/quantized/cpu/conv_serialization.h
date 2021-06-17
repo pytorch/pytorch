@@ -240,7 +240,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
   std::vector<c10::optional<at::Tensor>> optional;
 
   std::tie(version, non_optional, optional) = state;
-  TORCH_INTERNAL_ASSERT(version == "2", "Unexpected serialized qconv version: ",
+  TORCH_INTERNAL_ASSERT(version == "3", "Unexpected serialized qconv version: ",
       version);
 
   at::Tensor conv_params_packed = non_optional[0];
