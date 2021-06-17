@@ -32,33 +32,39 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output, bool is_i
     // is saved for backward.  Whether a tensor is saved for backward is determined
     // by derivative formula and thus varies op by op, so by saying "no inference
     // tensor in autograd" it's easier for users to understand and follow.
-    TORCH_CHECK(!variable.unsafeGetTensorImpl()->is_inference_tensor(),
+    TORCH_CHECK(!variable.is_inference(),
       "Inference tensors cannot be saved for backward. To work around "
       "you can make a clone to get a normal tensor and use it in autograd.")
 
     was_default_constructed_ = false;
+    is_inplace_view_ = is_inplace_view;
+    version_counter_ = impl::version_counter(variable);
+    saved_version_ = version_counter_.current_version();
+
     output_nr_ = variable.output_nr();
     requires_grad_ = variable.requires_grad();
     has_grad_fn_ = !variable.is_leaf();
-    is_inplace_view_ = is_inplace_view;
+
     // These copies are all shared_ptr copies, so slightly more expensive.
     // Do them here instead of in the init list in case data is undefined.
     data_ = variable.tensor_data();
+
+    if (variable.is_leaf()) {
+      grad_accumulator_ = impl::grad_accumulator(variable);
+    } else if (!is_output) {
+      grad_fn_ = variable.grad_fn();
+    }
+
+    if(is_output && is_inplace_view) {
+      weak_grad_fn_ = variable.grad_fn();
+    }
+
     // TODO(albanD) This needs to be updated when moving to multiple levels
     const auto& fw_grad = variable._fw_grad(/* level */ 0);
     if (fw_grad.defined()) {
       fw_grad_ = std::make_shared<ForwardGrad>();
       fw_grad_->set_value(fw_grad, /* level */ 0);
     }
-    if (variable.is_leaf()) {
-      grad_accumulator_ = impl::grad_accumulator(variable);
-    } else if (!is_output) {
-      grad_fn_ = variable.grad_fn();
-    } else if (is_inplace_view) {
-      weak_grad_fn_ = variable.grad_fn();
-    }
-    version_counter_ = impl::version_counter(variable);
-    saved_version_ = version_counter_.current_version();
   }
 }
 
@@ -67,19 +73,15 @@ SavedVariable::SavedVariable(const c10::optional<Variable>& variable, bool is_ou
 
 Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   if (!data_.defined()) {
-    if (!was_default_constructed_) {
-      throw std::runtime_error(ERR_BACKWARD_TWICE);
-    }
+    TORCH_CHECK(was_default_constructed_, ERR_BACKWARD_TWICE);
     return Variable();
   }
 
+  // We want grad_fn here to provide the most hlepful debug message to the user
+  // if versions don't match
   auto grad_fn = is_inplace_view_ ? weak_grad_fn_.lock() : grad_fn_;
   if (has_grad_fn_ && !grad_fn) {
-    if (!saved_for) {
-      // If saving the grad_fn would create a circular reference, then it must
-      // be passed in to the unpack function.
-      throw std::runtime_error("No grad_fn for non-leaf saved variable");
-    }
+    TORCH_CHECK(saved_for,"No grad_fn for non-leaf saved variable");
     grad_fn = std::move(saved_for);
   }
 
@@ -104,7 +106,7 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
             "that failed to compute its gradient. The variable in question "
             "was changed in there or anywhere later. Good luck!";
     }
-    throw std::runtime_error(message.str());
+    TORCH_CHECK(false, message.str());
   }
 
   // NB: saved views are unpacked as normal Variables (not views) even though
@@ -122,8 +124,9 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   // should have saved the grad accumulator. Even if the Variable no longer
   // alive, the accumulator should be kept alive by the references in the
   // graph).
-  if (requires_grad_ && !var.grad_fn() && grad_accumulator_.expired())
-    throw std::logic_error("No grad accumulator for a saved leaf!");
+  if (requires_grad_ && !var.grad_fn() && grad_accumulator_.expired()) {
+    TORCH_CHECK(false, "No grad accumulator for a saved leaf!");
+  }
   impl::set_grad_accumulator(var, grad_accumulator_);
 
   // NB: var here is never a view so there is no need to make anything special

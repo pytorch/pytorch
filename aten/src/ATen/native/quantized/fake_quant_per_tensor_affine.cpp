@@ -179,11 +179,11 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_tensor_affine_ba
   auto dZeroPoint_vec = at::empty_like(X, X.options(), MemoryFormat::Preserve);
 
   auto iter = TensorIteratorConfig()
-    .add_borrowed_output(dX)
-    .add_borrowed_output(dScale_vec)
-    .add_borrowed_output(dZeroPoint_vec)
-    .add_borrowed_input(X)
-    .add_borrowed_input(dY)
+    .add_output(dX)
+    .add_output(dScale_vec)
+    .add_output(dZeroPoint_vec)
+    .add_input(X)
+    .add_input(dY)
     .build();
 
   fake_quant_grad_learnable_tensor_stub(

@@ -20,9 +20,9 @@ void quantize_tensor_per_tensor_affine_cuda(
 
         auto iter = TensorIteratorConfig()
           .check_all_same_dtype(false)
-          .add_borrowed_output(qtensor)
-          .add_borrowed_input(rtensor)
-          .add_borrowed_input(qtensor)
+          .add_output(qtensor)
+          .add_input(rtensor)
+          .add_input(qtensor)
           .build();
 
         gpu_kernel(
@@ -47,8 +47,8 @@ void dequantize_tensor_per_tensor_affine_cuda(
       qtensor.scalar_type(), "dequantize_tensor_per_tensor_affine_cuda", [&]() {
         auto iter = TensorIteratorConfig()
           .check_all_same_dtype(false)
-          .add_borrowed_output(rtensor)
-          .add_borrowed_input(qtensor)
+          .add_output(rtensor)
+          .add_input(qtensor)
           .build();
         gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t value) -> float {
           return (static_cast<float>(value.val_) - zero_point) * scale;
