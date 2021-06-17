@@ -20,6 +20,7 @@
 #include "lazy_tensor_core/csrc/ops/softmax.h"
 #include "lazy_tensor_core/csrc/ops/stack.h"
 #include "lazy_tensor_core/csrc/ops/sum.h"
+#include "lazy_tensor_core/csrc/ops/ts_embedding_dense_backward.h"
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_backward.h"
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_forward.h"
 #include "lazy_tensor_core/csrc/ops/ts_softmax_backward.h"
@@ -61,6 +62,11 @@ class TSNodeLowering : public NodeLowering {
         const ir::Output& argument = node->operand(0);
         return lazy_tensors::Shape(argument.shape().element_type(),
                                    expand->size());
+      }
+      case at::aten::embedding_dense_backward: {
+        return InferEmbeddingDenseBackward(
+            ir::NodeCast<ir::ops::TSEmbeddingDenseBackward>(
+                node, ir::OpKind(at::aten::embedding_dense_backward)));
       }
       case at::aten::index_select: {
         return InferIndexSelect(ir::NodeCast<ir::ops::IndexSelect>(
@@ -176,6 +182,11 @@ class TSNodeLowering : public NodeLowering {
       return LowerConstantPad(ir::NodeCast<ir::ops::ConstantPadNd>(
           node, ir::OpKind(at::aten::constant_pad_nd)));
     }
+    if (node->op().op == at::aten::embedding_dense_backward) {
+      return LowerEmbeddingDenseBackward(
+          ir::NodeCast<ir::ops::TSEmbeddingDenseBackward>(
+              node, ir::OpKind(at::aten::embedding_dense_backward)));
+    }
     if (node->op().op == at::aten::expand) {
       return LowerExpand(
           ir::NodeCast<ir::ops::Expand>(node, ir::OpKind(at::aten::expand)));
@@ -263,6 +274,16 @@ class TSNodeLowering : public NodeLowering {
     LTC_CHECK_EQ(tensor2_shape.dimensions(1), m1);
     lazy_tensors::int64 p = tensor2_shape.dimensions(2);
     return lazy_tensors::Shape(tensor1_shape.element_type(), {b, n, p});
+  }
+
+  static lazy_tensors::Shape InferEmbeddingDenseBackward(
+      const ir::ops::TSEmbeddingDenseBackward* node) {
+    const ir::Output& grad_output = node->operand(0);
+    const lazy_tensors::Shape& grad_output_shape = grad_output.shape();
+    return lazy_tensors::Shape(
+        grad_output_shape.element_type(),
+        {node->num_weights(),
+         grad_output_shape.dimensions(grad_output_shape.rank() - 1)});
   }
 
   static lazy_tensors::Shape InferIndexSelect(
@@ -449,6 +470,17 @@ class TSNodeLowering : public NodeLowering {
     arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
     arguments.emplace_back(node->pad());
     arguments.emplace_back(node->value());
+    return LowerBuiltin(node, arguments);
+  }
+
+  TSOpVector LowerEmbeddingDenseBackward(
+      const ir::ops::TSEmbeddingDenseBackward* node) {
+    std::vector<torch::jit::NamedValue> arguments;
+    arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
+    arguments.emplace_back(loctx()->GetOutputOp(node->operand(1)));
+    arguments.emplace_back(node->num_weights());
+    arguments.emplace_back(node->padding_idx());
+    arguments.emplace_back(node->scale_grad_by_freq());
     return LowerBuiltin(node, arguments);
   }
 

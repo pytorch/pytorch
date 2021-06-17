@@ -114,6 +114,7 @@
 #include "lazy_tensor_core/csrc/ops/triangular_solve.h"
 #include "lazy_tensor_core/csrc/ops/tril.h"
 #include "lazy_tensor_core/csrc/ops/triu.h"
+#include "lazy_tensor_core/csrc/ops/ts_embedding_dense_backward.h"
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_backward.h"
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_forward.h"
 #include "lazy_tensor_core/csrc/ops/uniform.h"
@@ -1249,6 +1250,15 @@ LazyTensor LazyTensor::embedding_dense_backward(const LazyTensor& grad_output,
                                                 bool scale_grad_by_freq) {
   return tensor_ops::EmbeddingDenseBackward(grad_output, indices, num_weights,
                                             padding_idx, scale_grad_by_freq);
+}
+
+LazyTensor LazyTensor::ts_embedding_dense_backward(
+    const LazyTensor& grad_output, const LazyTensor& indices,
+    lazy_tensors::int64 num_weights, lazy_tensors::int64 padding_idx,
+    bool scale_grad_by_freq) {
+  return grad_output.CreateFrom(ir::MakeNode<ir::ops::TSEmbeddingDenseBackward>(
+      grad_output.GetIrValue(), indices.GetIrValue(), num_weights, padding_idx,
+      scale_grad_by_freq));
 }
 
 LazyTensor LazyTensor::erf(const LazyTensor& input) {

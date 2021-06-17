@@ -443,6 +443,17 @@ at::Tensor& AtenXlaType::div_(at::Tensor& self, const at::Scalar& other) {
   return self;
 }
 
+at::Tensor AtenXlaType::embedding_dense_backward(const at::Tensor& grad_output,
+                                                 const at::Tensor& indices,
+                                                 int64_t num_weights,
+                                                 int64_t padding_idx,
+                                                 bool scale_grad_by_freq) {
+  LTC_FN_COUNTER("xla::");
+  return bridge::AtenFromLtcTensor(LazyTensor::ts_embedding_dense_backward(
+      bridge::GetLtcTensor(grad_output), bridge::GetLtcTensor(indices),
+      num_weights, padding_idx, scale_grad_by_freq));
+}
+
 at::Tensor AtenXlaType::empty(at::IntArrayRef size,
                               c10::optional<at::ScalarType> dtype,
                               c10::optional<at::Layout> layout,
