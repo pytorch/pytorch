@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/Operators.h>
 #include <c10/core/Device.h>
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
@@ -366,8 +367,15 @@ class TORCH_API Tensor {
   bool is_alias_of(const at::Tensor& other) const{
     return impl_->storage().is_alias_of(other.storage());
   }
-  Tensor toType(ScalarType t) const;
-  Tensor toBackend(Backend b) const;
+
+  Tensor toType(ScalarType t) const {
+    return to(options().dtype(t), /*non_blocking*/ false, /*copy*/ false);
+  }
+
+  // TODO: Deprecate me
+  Tensor toBackend(Backend b) const {
+    return to(options().device(backendToDeviceType(b)).layout(layout_from_backend(b)), /*non_blocking*/ false, /*copy*/ false);
+  }
 
   C10_DEPRECATED_MESSAGE("Tensor.is_variable() is deprecated; everything is a variable now. (If you want to assert that variable has been appropriately handled already, use at::impl::variable_excluded_from_dispatch())")
   bool is_variable() const noexcept {
@@ -515,7 +523,11 @@ class TORCH_API Tensor {
 
   /// Returns the `TensorOptions` corresponding to this `Tensor`. Defined in
   /// TensorOptions.h.
-  TensorOptions options() const;
+  TensorOptions options() const {
+    return TensorOptions().dtype(dtype())
+                          .device(device())
+                          .layout(layout());
+  }
 
   void* data_ptr() const {
     return this->unsafeGetTensorImpl()->data();
@@ -609,11 +621,26 @@ class TORCH_API Tensor {
   Tensor & index_put_(std::initializer_list<at::indexing::TensorIndex> indices, Tensor const & rhs);
   Tensor & index_put_(std::initializer_list<at::indexing::TensorIndex> indices, const Scalar& v);
 
-  Tensor cpu() const;
-  Tensor cuda() const;
-  Tensor hip() const;
-  Tensor vulkan() const;
-  Tensor metal() const;
+  Tensor cpu() const {
+    return to(options().device(DeviceType::CPU), /*non_blocking*/ false, /*copy*/ false);
+  }
+
+  // TODO: The Python version also accepts arguments
+  Tensor cuda() const {
+    return to(options().device(DeviceType::CUDA), /*non_blocking*/ false, /*copy*/ false);
+  }
+
+  Tensor hip() const {
+    return to(options().device(DeviceType::HIP), /*non_blocking*/ false, /*copy*/ false);
+  }
+
+  Tensor vulkan() const {
+    return to(options().device(DeviceType::Vulkan), /*non_blocking*/ false, /*copy*/ false);
+  }
+
+  Tensor metal() const {
+    return to(options().device(DeviceType::Metal), /*non_blocking*/ false, /*copy*/ false);
+  }
 
   // ~~~~~ Autograd API ~~~~~
 
@@ -944,6 +971,31 @@ inline int64_t get_device(const Tensor& self) {
   return self.get_device();
 }
 
+#define DEFINE_CAST(T, name)                                        \
+  template <>                                                       \
+  TORCH_API inline T* Tensor::data_ptr() const {                    \
+    TORCH_CHECK(                                                    \
+        scalar_type() == ScalarType::name,                          \
+        "expected scalar type "                                     \
+        #name                                                       \
+        " but found ",                                              \
+        scalar_type());                                             \
+    return this->unsafeGetTensorImpl()->data_ptr_impl<T>();         \
+  }
+
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_CAST)
+AT_FORALL_QINT_TYPES(DEFINE_CAST)
+#undef DEFINE_CAST
+
+#define DEFINE_ITEM(T, name)                \
+  template <>                               \
+  TORCH_API inline T Tensor::item() const { \
+    return item().to##name();               \
+  }
+
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_ITEM)
+#undef DEFINE_ITEM
+
 template <typename T>
 auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_void_t<T> {
   // Return the grad argument in case of a hook with void return type to have an
@@ -977,6 +1029,13 @@ static inline DispatchKey legacyExtractDispatchKey(const Tensor& t) {
 }
 
 } // namespace at
+
+// See Note [Avoiding Include Cycles In Static Dispatch]
+${static_dispatch_extra_headers}
+namespace at {
+${tensor_method_definitions}
+} // namespace at
+
 
 namespace c10 {
 template <>
