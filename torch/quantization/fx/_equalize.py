@@ -277,7 +277,7 @@ def get_weight_eq_obs(
         return None, None
     return None, None
 
-def get_weight_eq_obs_node(op_node: Node, modules: Dict[str, nn.Module]) -> Optional[Node]:
+def maybe_get_weight_eq_obs_node(op_node: Node, modules: Dict[str, nn.Module]) -> Optional[Node]:
     """ Given the operation node, we want to find its previous weight
     equalization observer node
     """
@@ -295,22 +295,39 @@ def get_weight_eq_obs_node(op_node: Node, modules: Dict[str, nn.Module]) -> Opti
 
     return None
 
-def get_next_input_obs(node: Node, modules: Dict[str, nn.Module]):
-    """ Gets the following input observer. We can use this function for both
-    obtaining the next input equalization observer and the next input
-    quantization observer
+def maybe_get_next_input_eq_obs(node: Node, modules: Dict[str, nn.Module]) -> Optional[_InputEqualizationObserver]:
+    """ Gets the following input equalization observer if it exists.
 
-    Returns the node containing the input observer, and the input observer
+    For example, in the case of connecting linear layers:
+        x -> inp_obs1 -> eq_obs1 -> linear1 -> out_obs1 -> eq_obs2 -> linear2 -> out_obs2
+    If the node being passed in is the linear1 node, then we want to return eq_obs2,
+    the following equalization observer for linear2.
+
+    However, if there are no connecting layers:
+        x -> inp_obs1 -> eq_obs1 -> linear1 -> out_obs1 -> add
+    Then we want to return None.
     """
-    node = node.next
-    while node.op not in ('call_module', 'call_function', 'output'):
-        node = node.next
-    if node.op in ('output', 'call_function'):
-        return None, None
 
-    assert(isinstance(node.target, str))
-    input_obs = modules[node.target]
-    return node, input_obs
+    assert((node.op == 'call_module' and isinstance(modules[str(node.target)], nn.Linear)) or
+           (node.op == 'call_function' and node.target == nn.functional.linear))
+
+    # Locate the following output observer if it exists
+    maybe_obs_node = None  
+    for user, _ in node.users.items():
+        if user.op == 'call_module' and isinstance(modules[str(user.target)], ObserverBase):
+            maybe_obs_node = user
+
+    if maybe_obs_node is None:
+        return None
+
+    # Locate the input equalization observer following the output observer if it exists
+    for user, _ in maybe_obs_node.users.items():
+        if user.op == 'call_module':
+            maybe_eq_obs = modules[str(user.target)]
+            if isinstance(maybe_eq_obs, _InputEqualizationObserver):
+                return maybe_eq_obs
+
+    return None
 
 def maybe_get_next_equalization_scale(node: Node, modules: Dict[str, nn.Module]) -> Optional[torch.Tensor]:
     """ If the next next node is an InputEqualizationObserver then we want to
@@ -320,12 +337,9 @@ def maybe_get_next_equalization_scale(node: Node, modules: Dict[str, nn.Module])
         linear1 -> LinearOutObs -> InputEqObs -> linear2
     In this case, the node given is linear1 and we want to locate the InputEqObs.
     """
-    # TODO: This code seems a little hacky/hard-coded, so any suggestions for
-    # how to improve it would be greatly appreciated!
-    next_node, _ = get_next_input_obs(node, modules)
-    _, next_next_obs = get_next_input_obs(next_node, modules)
-    if isinstance(next_next_obs, _InputEqualizationObserver):
-        return next_next_obs.equalization_scale
+    next_inp_eq_obs = maybe_get_next_input_eq_obs(node, modules)
+    if isinstance(next_inp_eq_obs, _InputEqualizationObserver):
+        return next_inp_eq_obs.equalization_scale
     return None
 
 def scale_input_observer(node: Node, modules: Dict[str, nn.Module]) -> None:
@@ -333,14 +347,13 @@ def scale_input_observer(node: Node, modules: Dict[str, nn.Module]) -> None:
     updating the values with the scaled min/max values calculated by the input
     equalization observer
     """
-    assert(isinstance(node.target, str))
-    input_eq_obs = modules[node.target]
+    input_eq_obs = modules[str(node.target)]
     assert(isinstance(input_eq_obs, _InputEqualizationObserver))
 
     input_quant_obs_node = node.args[0]
-    assert(isinstance(input_quant_obs_node, Node) and isinstance(input_quant_obs_node.target, str))
-    input_quant_obs = modules[input_quant_obs_node.target]
+    assert(isinstance(input_quant_obs_node, Node))
 
+    input_quant_obs = modules[str(input_quant_obs_node.target)]
     if not isinstance(input_quant_obs, ObserverBase):
         return
 
@@ -437,8 +450,7 @@ def update_obs_for_equalization(model: GraphModule, modules: Dict[str, nn.Module
             if op_node.op == 'call_module':
                 # Calibrate the weight equalization observer since it has just
                 # been created
-                assert(isinstance(op_node.target, str))
-                weight_eq_obs(modules[op_node.target].weight)
+                weight_eq_obs(modules[str(op_node.target)].weight)
 
             # Calculate and set the equalization scale values
             equalization_scale = calculate_equalization_scale(input_eq_obs, weight_eq_obs)
@@ -539,7 +551,7 @@ def convert_eq_obs(
             elif node.op == 'call_function':
                 scale_weight_functional(node, model, equalization_scale)
 
-                weight_eq_obs_node = get_weight_eq_obs_node(node, modules)
+                weight_eq_obs_node = maybe_get_weight_eq_obs_node(node, modules)
                 if weight_eq_obs_node is None:
                     return
 
