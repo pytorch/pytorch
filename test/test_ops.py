@@ -494,11 +494,7 @@ class TestCommon(JitCommonTestCase):
         # Below we prepare strings of args/kwargs with and without type annotations.
         # These strings are inserted into function template strings which is then torch scripted.
         # - args string is ["t0"] corresponding to the "input" tensor required by the op
-        # - args_annot_kw is the string for the template function signature, for example,
-        # ["t0", "s0: float", "s1: bool", "max: float = 1.0", "min: float = 0.0"] ->
-        #    def fn(t0, s0: float, s1: bool, max: float = 1.0, min: float = 0.0)
-        # - args_kw is the string of args/kwargs used to call the op, same as args_annot_kw but
-        # without type annotations
+        # - args_kw is the value of args and strings of kwargs used to call the op (without type annotations)
         args = ["t0"]
 
         def quote_strs(v):
@@ -507,9 +503,6 @@ class TestCommon(JitCommonTestCase):
 
             return str(v)
 
-        args_annot_kw = args + \
-            [f"s{i}: {type(v).__name__}" for i, v in enumerate(sample.args)] + \
-            [f"{k}: {type(v).__name__} = {quote_strs(v)}" for k, v in sample.kwargs.items()]
         args_kw = args + \
             [f"{v}" for v in sample.args] + \
             [f"{k}={quote_strs(v)}" for k, v in sample.kwargs.items()]
@@ -542,7 +535,7 @@ class TestCommon(JitCommonTestCase):
                     '''
                     # remove the first input tensor
                     script = fn_template.format(
-                        c=", " if len(args_kw[1:]) > 1 or len(args_annot_kw[1:]) >= 1 else "",
+                        c=", " if len(args_kw[1:]) > 1 else "",
                         args_kw=", ".join(args_kw[1:]),
                         alias_name=variant_name,
                     )
