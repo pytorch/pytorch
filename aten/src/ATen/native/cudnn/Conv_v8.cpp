@@ -62,7 +62,7 @@ cudnn_frontend::ConvDesc_v8 getConvDescriptor(cudnnDataType_t dataType, IntArray
     .setPrePadding(convDim, padding.data())
     .setPostPadding(convDim, padding.data())
     .setDilation(convDim, dilation.data());
-  if (scalar_type == kBFloat16) {
+  if (scalar_type == kBFloat16 || scalar_type == kHalf) {
     builder.setDataType(CUDNN_DATA_FLOAT);
   }
   return builder.build();
