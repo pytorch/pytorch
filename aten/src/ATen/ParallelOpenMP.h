@@ -12,26 +12,9 @@
 #endif
 
 namespace at {
-namespace detail {
-
-TORCH_API void set_thread_num(int);
-
-class ThreadIdGuard {
-public:
-  ThreadIdGuard(int new_id):
-    old_id_(at::get_thread_num()) {
-    set_thread_num(new_id);
-  }
-
-  ~ThreadIdGuard() {
-    set_thread_num(old_id_);
-  }
-
-private:
-  int old_id_;
-};
 
 #ifdef _OPENMP
+namespace internal {
 template <typename F>
 inline void invoke_parallel(int64_t begin, int64_t end, int64_t grain_size, const F& f) {
   std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
@@ -51,7 +34,7 @@ inline void invoke_parallel(int64_t begin, int64_t end, int64_t grain_size, cons
     int64_t begin_tid = begin + tid * chunk_size;
     if (begin_tid < end) {
       try {
-        detail::ThreadIdGuard tid_guard(tid);
+        internal::ThreadIdGuard tid_guard(tid);
         f(begin_tid, std::min(end, chunk_size + begin_tid));
       } catch (...) {
         if (!err_flag.test_and_set()) {
@@ -64,9 +47,8 @@ inline void invoke_parallel(int64_t begin, int64_t end, int64_t grain_size, cons
     std::rethrow_exception(eptr);
   }
 }
-#endif
-
-} // namespace detail
+} // namespace internal
+#endif // _OPENMP
 
 
 template <class F>
@@ -87,14 +69,14 @@ inline void parallel_for(
     numiter > grain_size && numiter > 1 &&
     omp_get_max_threads() > 1 && !omp_in_parallel());
   if (!use_parallel) {
-    detail::ThreadIdGuard tid_guard(0);
+    internal::ThreadIdGuard tid_guard(0);
     f(begin, end);
     return;
   }
 
-  detail::invoke_parallel(begin, end, grain_size, f);
+  internal::invoke_parallel(begin, end, grain_size, f);
 #else
-  detail::ThreadIdGuard tid_guard(0);
+  internal::ThreadIdGuard tid_guard(0);
   f(begin, end);
 #endif
 }
@@ -119,12 +101,12 @@ inline scalar_t parallel_reduce(
       in_parallel_region() ||
       get_num_threads() == 1);
   if (!use_parallel) {
-    detail::ThreadIdGuard tid_guard(0);
+    internal::ThreadIdGuard tid_guard(0);
     return f(begin, end, ident);
   }
 
   c10::SmallVector<scalar_t, 64> results(at::get_num_threads(), ident);
-  detail::invoke_parallel(begin, end, grain_size, [&](int64_t begin, int64_t end) {
+  internal::invoke_parallel(begin, end, grain_size, [&](int64_t begin, int64_t end) {
     auto tid = at::get_thread_num();
     results[tid] = f(begin, end, ident);
   });
@@ -135,7 +117,7 @@ inline scalar_t parallel_reduce(
   }
   return result;
 #else
-  detail::ThreadIdGuard tid_guard(0);
+  internal::ThreadIdGuard tid_guard(0);
   return f(begin, end, ident);
 #endif
 }
