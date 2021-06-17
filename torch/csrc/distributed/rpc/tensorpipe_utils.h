@@ -15,7 +15,7 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-TORCH_API const c10::Stream& getStreamForDevice(
+const c10::Stream& getStreamForDevice(
     const std::vector<c10::Stream>& streams,
     const c10::Device& device);
 
@@ -44,12 +44,12 @@ class TensorpipeDeviceTypeConverter {
   virtual ~TensorpipeDeviceTypeConverter() = default;
 };
 
-extern TORCH_API std::array<
+extern C10_API std::array<
     std::atomic<const TensorpipeDeviceTypeConverter*>,
     static_cast<size_t>(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)>
     device_type_converter_registry;
 
-class TORCH_API TensorpipeDeviceTypeConverterRegistrar {
+class C10_API TensorpipeDeviceTypeConverterRegistrar {
  public:
   TensorpipeDeviceTypeConverterRegistrar(
       DeviceType,

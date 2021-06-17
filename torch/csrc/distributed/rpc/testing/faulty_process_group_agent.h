@@ -7,7 +7,7 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-struct TORCH_API FaultyProcessGroupRpcBackendOptions
+struct FaultyProcessGroupRpcBackendOptions
     : public ProcessGroupRpcBackendOptions {
   FaultyProcessGroupRpcBackendOptions(
       int num_send_recv_threads,
@@ -31,7 +31,7 @@ struct TORCH_API FaultyProcessGroupRpcBackendOptions
   int numFailSends;
 };
 
-class TORCH_API FaultyProcessGroupAgent : public ProcessGroupAgent {
+class FaultyProcessGroupAgent : public ProcessGroupAgent {
  public:
   FaultyProcessGroupAgent(
       const c10::intrusive_ptr<::c10d::Store>& store,
