@@ -2799,8 +2799,7 @@ class RfactorStoreRewriter : public IRMutator {
         old_indices_(old_indices),
         new_buf_(new_buf),
         reduction_var_(reduction_var),
-        new_indices_({reduction_var_}) {
-  }
+        new_indices_({reduction_var_}) {}
 
   const Expr* mutate(const Load* v) override {
     if (v->buf() != old_buf_) {
@@ -2925,12 +2924,9 @@ bool LoopNest::rfactor(Stmt* st, For* outer_reduction_for, Buf** rfac_buf_ptr) {
   // iteration space of the outer reduction loop.
   auto start = outer_reduction_for->start();
   auto stop = outer_reduction_for->stop();
-  auto rfac_dims = {
-    IRSimplifier::simplify(new Sub(stop, start))
-  };
-  auto rfac_init = new Cast(
-      reduce_op->dtype(),
-      reduce_op->reducer().initializer());
+  auto rfac_dims = {IRSimplifier::simplify(new Sub(stop, start))};
+  auto rfac_init =
+      new Cast(reduce_op->dtype(), reduce_op->reducer().initializer());
   auto rfac_buf = new Buf(
       orig_buf->name_hint() + "_rfac",
       rfac_dims,
