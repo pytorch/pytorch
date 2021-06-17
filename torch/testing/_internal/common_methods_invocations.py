@@ -33,6 +33,7 @@ from torch.testing._internal.common_utils import \
      TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor, TEST_SCIPY,
      torch_to_numpy_dtype_dict, slowTest, TEST_WITH_ASAN,
      GRADCHECK_NONDET_TOL,)
+import torch.testing._internal.opinfo_helper as opinfo_helper
 
 from setuptools import distutils
 
@@ -232,13 +233,27 @@ class OpInfo(object):
                  test_conjugated_samples=True,
                  ):
 
+        dtypes_args = (dtypes, dtypesIfCPU, dtypesIfCUDA, dtypesIfROCM)
         # Validates the dtypes are generated from the dispatch-related functions
-        for dtype_list in (dtypes, dtypesIfCPU, dtypesIfCUDA, dtypesIfROCM):
+        for dtype_list in dtypes_args:
             assert isinstance(dtype_list, (_dispatch_dtypes, type(None)))
 
         self.name = name
         self.aten_name = aten_name if aten_name is not None else name
         self.variant_test_name = variant_test_name
+
+        # Attribute to verify dynamic_dtypes are used.
+        self.dynamic_dtypes = any(map(lambda dtypes: isinstance(
+            dtypes, opinfo_helper._dynamic_dispatch_dtypes), dtypes_args))
+
+        if self.dynamic_dtypes:
+            # Make sure `dtyesIfCUDA` is dynamic, if dynamic dispatch is used for CPU
+            # This is because, below we set dtypesIfCUDA to dtypes if they are None.
+            assert isinstance(dtypesIfCUDA, opinfo_helper._dynamic_dispatch_dtypes), \
+                (f"To use dynamic dypes for operator {name}, "
+                 "acquire the dtypes dynamically for argument `dtypesIfCUDA`."
+                 "This is to ensure that CUDA dtypes are acquired correctly as they"
+                 "differ from CPU dtypes occasionally")
 
         self.dtypes = set(dtypes)
         self.dtypesIfCPU = set(dtypesIfCPU) if dtypesIfCPU is not None else self.dtypes
