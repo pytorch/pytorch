@@ -94,8 +94,7 @@ TensorTypePtr TorchTensorTypeFromONNX(
       {});
   if (onnx_tensor_type.has_shape()) {
     std::vector<c10::ShapeSymbol> sizes;
-    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-    auto onnx_shape = onnx_tensor_type.shape();
+    const auto& onnx_shape = onnx_tensor_type.shape();
 
     for (int i = 0; i < onnx_shape.dim_size(); ++i) {
       auto& dim = onnx_shape.dim(i);
@@ -108,8 +107,7 @@ TensorTypePtr TorchTensorTypeFromONNX(
           // Search if this is already known,
           // and assign the same Symbol.
           GRAPH_UPDATE("Got dim_param:", dim.dim_param());
-          // NOLINTNEXTLINE(performance-for-range-copy)
-          for (auto pair : symbol_map) {
+          for (const auto& pair : symbol_map) {
             if (pair.second == dim.dim_param()) {
               sym = pair.first;
               break;
@@ -146,12 +144,10 @@ ListTypePtr TorchListTypeFromONNX(
     SymbolDimMap& symbol_map) {
   c10::optional<at::ScalarType> scalar_type;
   if (onnx_sequence_type.has_elem_type()) {
-    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-    auto onnx_seq_elem_type = onnx_sequence_type.elem_type();
+    const auto& onnx_seq_elem_type = onnx_sequence_type.elem_type();
     if (onnx_seq_elem_type.has_tensor_type()) {
-      // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-      auto onnx_tensor_type = onnx_seq_elem_type.tensor_type();
-      auto v_tensor_type =
+      const auto& onnx_tensor_type = onnx_seq_elem_type.tensor_type();
+      const auto v_tensor_type =
           TorchTensorTypeFromONNX(onnx_tensor_type, symbol_map);
       auto v_type = ListType::create(v_tensor_type);
       return v_type;
@@ -168,16 +164,15 @@ void UpdateTorchValueByOnnxValueInfo(
     return;
   }
 
-  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-  auto p_type = p_info.type();
+  const auto& p_type = p_info.type();
   if (p_type.has_tensor_type()) {
-    auto torch_tensor_type =
+    const auto torch_tensor_type =
         TorchTensorTypeFromONNX(p_type.tensor_type(), symbol_map);
     if (torch_tensor_type) {
       v->setType(MergeInferredType(v->type(), torch_tensor_type));
     }
   } else if (p_type.has_sequence_type()) {
-    auto torch_list_type =
+    const auto torch_list_type =
         TorchListTypeFromONNX(p_type.sequence_type(), symbol_map);
     if (torch_list_type) {
       v->setType(MergeInferredType(v->type(), torch_list_type));
@@ -1316,11 +1311,10 @@ void UpdateOutputTypeByONNXProto(
     Node* clone_node,
     const onnx::ModelProto& model_proto,
     SymbolDimMap& symbol_map) {
-  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-  auto graph_proto = model_proto.graph();
+  const auto& graph_proto = model_proto.graph();
 
   // get data from value_info and updated original graph.
-  auto updateNodeOutputsByONNXValueInfo =
+  const auto updateNodeOutputsByONNXValueInfo =
       [&](const onnx::ValueInfoProto& v_info) {
         for (size_t i = 0; i < n->outputs().size(); ++i) {
           if (clone_node->output(i)->debugName() == v_info.name()) {
@@ -1486,10 +1480,9 @@ void ONNXSetDynamicInputShape(
           shape_ref.has_value(), "Input tensor shape should have value.");
       auto shape = shape_ref.value();
 
-      // NOLINTNEXTLINE(performance-for-range-copy)
-      for (auto pair : axes_names) {
-        auto axis = pair.first;
-        auto name = pair.second;
+      for (const auto& pair : axes_names) {
+        const auto axis = pair.first;
+        const auto name = pair.second;
         if (name_to_sym.find(name) == name_to_sym.end()) {
           name_to_sym[name] = ::c10::ShapeSymbol::newSymbol();
         }
@@ -1547,8 +1540,7 @@ size_t ONNXAssignOutputShape(
   index_check();
 
   if (THPVariable_Check(output_obj)) {
-    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-    at::Tensor var = THPVariable_Unpack(output_obj);
+    const at::Tensor& var = THPVariable_Unpack(output_obj);
     ONNXUpdateTypeFromTensor(
         graph->outputs().at(outputs_index), var, onnx_shape_inference);
     outputs_index++;
@@ -1562,7 +1554,7 @@ size_t ONNXAssignOutputShape(
           onnx_shape_inference);
     }
   } else if (PyList_Check(output_obj)) {
-    size_t list_len = PyList_GET_SIZE(output_obj);
+    const auto list_len = PyList_GET_SIZE(output_obj);
     if (HasSequenceTypeOutput(graph->outputs().at(outputs_index)->node())) {
       auto output_type = graph->outputs().at(outputs_index)->type();
       TORCH_CHECK(
