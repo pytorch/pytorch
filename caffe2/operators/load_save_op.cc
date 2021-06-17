@@ -177,7 +177,7 @@ bool SaveOpImpl::RunOnDevice() {
         VLOG(2) << "Sending " << blobName << " blob's data of size "
                 << data.size() << " to db";
         auto transaction = out_db->NewTransaction();
-        transaction->Put(blobName, data);
+        transaction->Put(blobName, std::move(data));
         transaction->Commit();
       };
 
