@@ -41,7 +41,7 @@ inline void parallel_for(
     return;
   }
   if ((end - begin) < grain_size || in_parallel_region()) {
-    ThreadIdGuard tid_guard(0);
+    internal::ThreadIdGuard tid_guard(0);
     f(begin, end);
     return;
   }
@@ -68,7 +68,7 @@ inline scalar_t parallel_reduce(
     return ident;
   }
   if ((end - begin) < grain_size || in_parallel_region()) {
-    ThreadIdGuard tid_guard(0);
+    internal::ThreadIdGuard tid_guard(0);
     return f(begin, end, ident);
   }
   size_t num_tasks, chunk_size;
