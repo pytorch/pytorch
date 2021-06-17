@@ -1122,6 +1122,13 @@ diagonal(offset=0, dim1=0, dim2=1) -> Tensor
 See :func:`torch.diagonal`
 """)
 
+add_docstr_all('lab_diagonal',
+               r"""
+lab_diagonal(offset=0, dim1=0, dim2=1) -> Tensor
+
+See :func:`torch.lab_diagonal`
+""")
+
 add_docstr_all('fill_diagonal_',
                r"""
 fill_diagonal_(fill_value, wrap=False) -> Tensor
@@ -4471,6 +4478,13 @@ add_docstr_all('chunk',
 chunk(chunks, dim=0) -> List of Tensors
 
 See :func:`torch.chunk`
+""")
+
+add_docstr_all('lab_chunk',
+               r"""
+lab_chunk(chunks, dim=0) -> List of Tensors
+
+See :func:`torch.lab_chunk`
 """)
 
 add_docstr_all('unsafe_chunk',

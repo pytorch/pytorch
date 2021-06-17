@@ -89,6 +89,7 @@ Indexing, Slicing, Joining, Mutating Ops
     cat
     conj
     chunk
+    lab_chunk
     dsplit
     column_stack
     dstack
@@ -486,6 +487,7 @@ Other Operations
     diag_embed
     diagflat
     diagonal
+    lab_diagonal
     diff
     einsum
     flatten

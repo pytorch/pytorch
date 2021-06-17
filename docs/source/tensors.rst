@@ -268,6 +268,7 @@ Tensor class reference
     Tensor.cholesky_inverse
     Tensor.cholesky_solve
     Tensor.chunk
+    Tensor.lab_chunk
     Tensor.clamp
     Tensor.clamp_
     Tensor.clip
@@ -311,6 +312,7 @@ Tensor class reference
     Tensor.diag_embed
     Tensor.diagflat
     Tensor.diagonal
+    Tensor.lab_diagonal
     Tensor.fill_diagonal_
     Tensor.fmax
     Tensor.fmin
