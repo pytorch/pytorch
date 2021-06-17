@@ -38,6 +38,7 @@ supported:
   - _softmax_backward_data
   - squeeze_
   - squeeze_.dim
+  - stack
   - sum
   - sum.dim_IntList
   - t

@@ -18,6 +18,7 @@
 #include "lazy_tensor_core/csrc/ops/permute.h"
 #include "lazy_tensor_core/csrc/ops/scalar.h"
 #include "lazy_tensor_core/csrc/ops/softmax.h"
+#include "lazy_tensor_core/csrc/ops/stack.h"
 #include "lazy_tensor_core/csrc/ops/sum.h"
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_backward.h"
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_forward.h"
@@ -89,6 +90,10 @@ class TSNodeLowering : public NodeLowering {
       case at::aten::pow: {
         const ir::Output& argument = node->operand(0);
         return argument.shape();
+      }
+      case at::aten::stack: {
+        return InferStack(
+            ir::NodeCast<ir::ops::Stack>(node, ir::OpKind(at::aten::stack)));
       }
       case at::aten::sum: {
         return InferSum(
@@ -191,6 +196,10 @@ class TSNodeLowering : public NodeLowering {
       return LowerSoftmaxBackward(ir::NodeCast<ir::ops::TSSoftmaxBackward>(
           node, ir::OpKind(at::aten::_softmax_backward_data)));
     }
+    if (node->op().op == at::aten::stack) {
+      return LowerStack(
+          ir::NodeCast<ir::ops::Stack>(node, ir::OpKind(at::aten::stack)));
+    }
     if (node->op().op == at::aten::sum) {
       return LowerSum(
           ir::NodeCast<ir::ops::Sum>(node, ir::OpKind(at::aten::sum)));
@@ -284,6 +293,23 @@ class TSNodeLowering : public NodeLowering {
     LTC_CHECK_EQ(tensor2_shape.dimensions(0), m);
     lazy_tensors::int64 p = tensor2_shape.dimensions(1);
     return lazy_tensors::Shape(tensor1_shape.element_type(), {n, p});
+  }
+
+  static lazy_tensors::Shape InferStack(const ir::ops::Stack* stack) {
+    const auto& inputs = stack->operands();
+    LTC_CHECK(!inputs.empty());
+    const lazy_tensors::Shape& input_shape = inputs[0].shape();
+    for (const ir::Output& input : inputs) {
+      LTC_CHECK_EQ(input.shape(), input_shape);
+    }
+    const auto input_dimensions = input_shape.dimensions();
+    std::vector<lazy_tensors::int64> output_dimensions(input_dimensions.begin(),
+                                                       input_dimensions.end());
+    LTC_CHECK_GE(stack->dim(), 0);
+    LTC_CHECK_LE(stack->dim(), output_dimensions.size());
+    output_dimensions.insert(output_dimensions.begin() + stack->dim(),
+                             inputs.size());
+    return lazy_tensors::Shape(input_shape.element_type(), output_dimensions);
   }
 
   static lazy_tensors::Shape InferSum(const ir::ops::Sum* sum) {
@@ -470,6 +496,23 @@ class TSNodeLowering : public NodeLowering {
     arguments.emplace_back(node->dim());
     arguments.emplace_back(loctx()->GetOutputOp(node->operand(2)));
     return LowerBuiltin(node, arguments);
+  }
+
+  TSOpVector LowerStack(const ir::ops::Stack* stack) {
+    std::vector<torch::jit::NamedValue> arguments;
+    std::vector<torch::jit::Value*> tensor_list;
+    const auto& operands = stack->operands();
+    LTC_CHECK(!operands.empty());
+    for (const ir::Output& operand : operands) {
+      tensor_list.emplace_back(loctx()->GetOutputOp(operand));
+    }
+    auto graph = function_->graph();
+    arguments.emplace_back(
+        graph
+            ->insertNode(graph->createList(tensor_list[0]->type(), tensor_list))
+            ->output());
+    arguments.emplace_back(stack->dim());
+    return LowerBuiltin(stack, arguments);
   }
 
   TSOpVector LowerSum(const ir::ops::Sum* sum) {

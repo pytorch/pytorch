@@ -818,6 +818,12 @@ at::Tensor AtenXlaType::permute(const at::Tensor& self, at::IntArrayRef dims) {
       LazyTensor::permute(self_tensor, Helpers::I64List(dims)));
 }
 
+at::Tensor AtenXlaType::stack(at::TensorList tensors, int64_t dim) {
+  LTC_FN_COUNTER("xla::");
+  return bridge::AtenFromLtcTensor(
+      LazyTensor::stack(bridge::GetLtcTensors(tensors), dim));
+}
+
 at::Tensor& AtenXlaType::squeeze_(at::Tensor& self) {
   LTC_FN_TRACK(3);
   LTC_COUNTER("aten::squeeze_", 1);
