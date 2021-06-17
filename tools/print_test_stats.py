@@ -599,7 +599,7 @@ class TestSuite:
         self.skipped_count += 1 if test_case.skipped else 0
         self.errored_count += 1 if test_case.errored else 0
 
-    def update(self, test_case: TestCase) -> float:
+    def update(self, test_case: TestCase) -> None:
         name = test_case.name
         assert name in self.test_cases, f'Error: attempting to replace nonexistent test case {name}'
         self.test_cases[name].time += test_case.time
