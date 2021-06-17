@@ -33,7 +33,7 @@ def _reverse_repeat_padding(padding: List[int]) -> List[int]:
 class _ConvNd(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
-                 padding_mode='zeros', device=None, dtype=None):
+                 padding_mode='zeros', input_qrange_le_128=True, device=None, dtype=None):
         # All subclasses have this signature - See PR #49702s
         raise NotImplementedError
 
@@ -42,6 +42,7 @@ class _ConvNd(nn.Module):
               transposed, output_padding,
               groups, bias,
               padding_mode='zeros',
+              input_qrange_le_128=True,
               device=None,
               dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
@@ -60,6 +61,7 @@ class _ConvNd(nn.Module):
         self.transposed = transposed
         self.output_padding = output_padding
         self.groups = groups
+        self.input_qrange_le_128 = input_qrange_le_128
         if padding_mode not in _SUPPORTED_PADDING:
             raise ValueError("'padding_mode' {} is not supported by quantized convolution".format(padding_mode))
         self.padding_mode = padding_mode
@@ -142,7 +144,8 @@ class _ConvNd(nn.Module):
             b,
             self.scale,
             self.zero_point,
-            self.training
+            self.training,
+            self.input_qrange_le_128,
         )
 
     # ===== Deserialization methods =====
@@ -174,6 +177,12 @@ class _ConvNd(nn.Module):
         self.output_padding = state[7]
         self.groups = state[8]
         self.padding_mode = state[9]
+        # Note: this has to be before self.set_weight_bias because
+        # self.input_qrange_le_128 is used inside of that function
+        if len(state) > 14:
+            self.input_qrange_le_128 = state[15]
+        else:
+            self.input_qrange_le_128 = True
         self.set_weight_bias(state[10], state[11])
         self.scale = state[12]
         self.zero_point = state[13]
@@ -201,12 +210,12 @@ class _ConvNd(nn.Module):
             'Weight observer must have a dtype of qint8'
         qweight = _quantize_weight(mod.weight.float(), weight_post_process)
         # the __init__ call used is the one from derived classes and not the one from _ConvNd
-        qconv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,  # type: ignore[call-arg]
-                    mod.stride, mod.padding, mod.dilation, mod.groups,
-                    mod.bias is not None, mod.padding_mode)
         # TODO(before land): also set this for all other conv modules and functionals
         activation_input_qrange_le_128 = activation_post_process.reduce_range
-        qconv.set_weight_bias(qweight, mod.bias, activation_input_qrange_le_128)
+        qconv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,  # type: ignore[call-arg]
+                    mod.stride, mod.padding, mod.dilation, mod.groups,
+                    mod.bias is not None, mod.padding_mode, activation_input_qrange_le_128)
+        qconv.set_weight_bias(qweight, mod.bias)
         qconv.scale = float(act_scale)
         qconv.zero_point = int(act_zp)
         return qconv
@@ -385,7 +394,7 @@ class Conv2d(_ConvNd):
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
-                 padding_mode='zeros', device=None, dtype=None):
+                 padding_mode='zeros', input_qrange_le_128=True, device=None, dtype=None):
         factory_kwargs = {'device': device, 'dtype': dtype}
         kernel_size = _pair(kernel_size)
         stride = _pair(stride)
@@ -395,25 +404,21 @@ class Conv2d(_ConvNd):
         # discussion on PR #49702
         super(Conv2d, self)._init(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
-            False, _pair(0), groups, bias, padding_mode, **factory_kwargs)
+            False, _pair(0), groups, bias, padding_mode, input_qrange_le_128,
+            **factory_kwargs)
 
     def _get_name(self):
         return 'QuantizedConv2d'
 
-    def set_weight_bias(
-        self,
-        w: torch.Tensor,
-        b: Optional[torch.Tensor],
-        input_qrange_le_128: Optional[bool] = True,
-    ) -> None:
+    def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
         if self.padding_mode == 'zeros':
             self._packed_params = torch.ops.quantized.conv2d_prepack(
                 w, b, self.stride, self.padding, self.dilation, self.groups,
-                input_qrange_le_128)
+                self.input_qrange_le_128)
         else:
             self._packed_params = torch.ops.quantized.conv2d_prepack(
                 w, b, self.stride, _pair(0), self.dilation, self.groups,
-                input_qrange_le_128)
+                self.input_qrange_le_128)
 
     def _weight_bias(self):
         return self._packed_params.unpack()
