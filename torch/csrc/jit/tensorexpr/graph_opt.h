@@ -9,7 +9,7 @@ namespace tensorexpr {
 // Optimize aten::cat ops in the given subgraph.
 //
 // Moving users of cat to its inputs.
-//    Cat ops gets lowered into multiple loops, one per input. When the result
+//    Cat ops get lowered into multiple loops, one per input. When the result
 //    of cat is used by some other op, it results in a situation where inlining
 //    of cat does not happen. This in turn results in intermediate buffers
 //    being created for the result of cat, since it is not inlined.
@@ -32,8 +32,8 @@ namespace tensorexpr {
 //         for (...)
 //           aten_log[...] = log(aten_cat[...])
 //         Free(aten_cat);
-//     Note that aten_cat is not inlined into aten_log and there is an
-//     an intermediate buffer allocated as well.
+//     Note that aten_cat is not inlined into aten_log and it results in
+//     an intermediate buffer allocation as well.
 //
 //     Optimization:
 //        We move the ops that use the result of `cat` into its inputs whenever
@@ -54,8 +54,8 @@ namespace tensorexpr {
 //           aten_cat[...] = log(x[...])
 //         for (...)
 //           aten_cat[...] = log(y[...])
-//
-//     Note that aten_cat is the output buffer here.
+//     aten_cat is the output buffer here.
+
 bool OptimizeCat(const std::shared_ptr<Graph>& graph);
 
 } // namespace tensorexpr
