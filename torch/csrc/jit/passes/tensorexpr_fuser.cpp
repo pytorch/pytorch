@@ -60,7 +60,7 @@ Value* broadcastSizes(at::ArrayRef<Value*> sizes, AliasDb* db) {
 
 namespace tensorexpr {
 
-static const OperatorSet& supported_eltwise_set() {
+const OperatorSet& supported_eltwise_set() {
   // clang-format off
   // breaks up the schema strings so they are no longer discoverable with ctrl-F
     static const OperatorSet supported_eltwise_set{
@@ -123,6 +123,7 @@ static const OperatorSet& supported_eltwise_set() {
       "aten::sinh(Tensor self) -> Tensor",
       "aten::tanh(Tensor self) -> Tensor",
       "aten::hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1) -> Tensor",
+      "aten::hardsigmoid(Tensor self) -> Tensor",
       "aten::hardswish(Tensor self) -> Tensor",
       "aten::hardshrink(Tensor self, Scalar lambd=0.5) -> Tensor",
       "aten::sqrt(Tensor self) -> Tensor",
@@ -140,6 +141,7 @@ static const OperatorSet& supported_eltwise_set() {
       "aten::sigmoid(Tensor self) -> Tensor",
       "aten::relu(Tensor self) -> Tensor",
       "aten::leaky_relu(Tensor self, Scalar negative_slope=0.01) -> Tensor",
+      "aten::relu6(Tensor self) -> Tensor",
       "aten::gelu(Tensor self) -> Tensor",
       "aten::addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor",
       "aten::neg(Tensor self) -> Tensor",
@@ -859,17 +861,20 @@ class TensorExprFuser {
       if (!v->isCompleteTensor()) {
         return false;
       }
-      if (*v->type()->castRaw<TensorType>()->dim() == 0) {
-        return false;
-      }
     }
     return true;
   }
+
   bool allShapesAreKnown(Node* node) {
     // TODO: Relax the checks to support dynamic shapes
     for (Value* input : node->inputs()) {
       if (!shapeIsKnown(input)) {
         return false;
+      }
+      if (input->node()->kind() == prim::ListConstruct) {
+        if (!allShapesAreKnown(input->node())) {
+          return false;
+        }
       }
     }
     for (Value* output : node->outputs()) {
@@ -1125,6 +1130,16 @@ class TensorExprFuser {
     TORCH_INTERNAL_ASSERT(
         consumer->kind() == prim::TensorExprGroup || canHandle(consumer));
 
+    // nvrtc has a limit on the number of arguments allowed in a CUDA kernel.
+    // The specific limit is a function of constant memory size, amount
+    // available to pass arguments, and some implementation dependence. Select a
+    // safe limit here.
+    constexpr size_t subgraphArgLimit = 128;
+    auto const nInputs = consumer->inputs().size() +
+        consumer->outputs().size() + producer->inputs().size() +
+        producer->outputs().size();
+    REQ(nInputs <= subgraphArgLimit);
+
     // Device checks
     if (consumer->kind() != aten::cat && producer->kind() != aten::cat) {
       // aten::cat needs a special handling because it takes a Tensor[] as its
@@ -1177,6 +1192,7 @@ class TensorExprFuser {
       for (auto const& input : listConstruct->inputs()) {
         REQ(isFusableOnDevice(input->node()));
       }
+      REQ((nInputs + listConstruct->inputs().size()) <= subgraphArgLimit);
     } else if (consumer->kind() == aten::cat) {
       REQ(consumer->input(0)->node()->kind() == prim::ListConstruct);
       REQ(consumer->input(0)->uses().size() == 1);
@@ -1189,6 +1205,7 @@ class TensorExprFuser {
       auto listconstruct_device =
           tensorexpr::pickDeviceType(listConstruct->inputs());
       REQ(listconstruct_device);
+      REQ((nInputs + listConstruct->inputs().size()) <= subgraphArgLimit);
     } else {
       REQ(isFusableOnDevice(producer));
     }
@@ -1196,113 +1213,6 @@ class TensorExprFuser {
     return true;
   }
 #undef REQ
-
-  // Move the given user of `aten::cat` op to its inputs.
-  Node* moveCatAfterUse(
-      Node* cat,
-      Node* user,
-      std::shared_ptr<Graph> subgraph) {
-    // Example IR:
-    //   %1 = ...
-    //   %2 = ...
-    //   %3 = prim::ListConstruct(%1, %2)
-    //   %4 = aten::cat(%3, ...)
-    //   %5 = aten::relu(%4)
-    //   return (%5)
-    //
-    // To be transformed to:
-    //   %1 = ...
-    //   %2 = ...
-    //   %5.1 = aten::relu(%1)
-    //   %5.2 = aten::relu(%2)
-    //   %3 = prim::ListConstruct(%5.1, %5.2)
-    //   %4 = aten::cat(%3, ...)
-    //   return (%4)
-
-    TORCH_INTERNAL_ASSERT(cat->output()->hasUses());
-    TORCH_INTERNAL_ASSERT(cat->output()->uses().size() == 1);
-    TORCH_INTERNAL_ASSERT(cat->input(0)->node()->kind() == prim::ListConstruct);
-    auto cat_list = cat->input(0)->node();
-    auto cat_inputs = cat_list->inputs();
-
-    std::unordered_map<Value*, Value*> new_cat_inputs;
-    for (auto inp : cat_inputs) {
-      auto new_cat_input = subgraph->createClone(
-          user, [&](Value* k) { return (k == cat->output()) ? inp : k; });
-      new_cat_input->output()->setType(inp->type());
-      new_cat_input->insertBefore(cat_list);
-      new_cat_inputs[inp] = new_cat_input->output();
-    }
-    auto new_cat_list = subgraph->createClone(
-        cat_list, [&](Value* k) { return new_cat_inputs[k]; });
-    new_cat_list->insertBefore(cat);
-    auto new_cat = subgraph->createClone(cat, [&](Value* k) {
-      return (k == cat_list->output()) ? new_cat_list->output() : k;
-    });
-    new_cat->insertBefore(cat);
-
-    user->output()->replaceAllUsesWith(new_cat->output());
-    user->destroy();
-
-    TORCH_INTERNAL_ASSERT(!cat->output()->hasUses());
-    cat->destroy();
-
-    if (!cat_list->output()->hasUses()) {
-      cat_list->destroy();
-    }
-
-    return new_cat;
-  }
-
-  // Move the users of the given `aten::cat` op to its inputs.
-  // The following constraints need to be satisfied on the cat op and its user.
-  //   * the cat op should have only one use.
-  //   * the user should be an element-wise op.
-  //   * the user should have only one tensor input.
-  //   * the user should belong to the given subgraph.
-  void moveCatOpToEnd(Node* cat, std::shared_ptr<Graph> subgraph) {
-    auto num_tensor_inputs = [](Node* node) -> int {
-      int count = 0;
-      for (auto v : node->inputs()) {
-        if (v->type()->cast<c10::TensorType>() != nullptr) {
-          ++count;
-        }
-      }
-      return count;
-    };
-
-    TORCH_INTERNAL_ASSERT(cat->kind() == aten::cat);
-    if (cat->output()->hasUses()) {
-      if (cat->output()->uses().size() == 1) {
-        auto use = cat->output()->uses().front();
-        if (use.user->isMemberOf(tensorexpr::supported_eltwise_set()) &&
-            num_tensor_inputs(use.user) == 1) {
-          if (use.user->output()->owningGraph() == subgraph.get()) {
-            auto new_cat = moveCatAfterUse(cat, use.user, subgraph);
-            moveCatOpToEnd(new_cat, subgraph);
-          }
-        }
-      }
-    }
-  }
-
-  // Moves the users of `aten::cat` ops to its inputs whenever possible
-  // in the given fusion group subgraph.
-  void moveCatOpsToEnd(Node* fusion_group) {
-    if (fusion_group->kind() != prim::TensorExprGroup) {
-      return;
-    }
-    auto subgraph = SubgraphUtils::getSubgraph(fusion_group);
-    std::vector<Node*> cat_nodes;
-    for (Node* n : subgraph->nodes()) {
-      if (n->kind() == aten::cat) {
-        cat_nodes.push_back(n);
-      }
-    }
-    for (auto cat : cat_nodes) {
-      moveCatOpToEnd(cat, subgraph);
-    }
-  }
 
   void prepareFusionGroupAndGuardOutputs(Block* block) {
     std::vector<Node*> fusion_groups;
@@ -1320,7 +1230,6 @@ class TensorExprFuser {
           fusion_group,
           [](const TensorTypePtr& t) { return t; },
           prim::TypeCheck);
-      moveCatOpsToEnd(fusion_group);
     }
   }
 
