@@ -31,7 +31,7 @@ class BlobSerializerBase {
  public:
   virtual ~BlobSerializerBase() {}
   using SerializationAcceptor =
-     std::function<void(const std::string& blobName, const std::string& data)>;
+     std::function<void(const std::string& blobName, std::string&& data)>;
   /**
    * @brief The virtual function that returns a serialized string for the input
    * blob.
