@@ -4042,6 +4042,35 @@ inverse(input, *, out=None) -> Tensor
 Alias for :func:`torch.linalg.inv`
 """.format(**common_args))
 
+add_docstr(torch.isin, r"""
+isin(elements, test_elements, *, assume_unique=False, invert=False) -> Tensor
+
+Tests if each element of :attr:`elements` is in :attr:`test_elements`. Returns
+a boolean tensor of the same shape as :attr:`elements` that is True for elements
+in :attr:`test_elements` and False otherwise.
+
+.. note::
+    One of :attr:`elements` or :attr:`test_elements` can be a scalar, but not both.
+
+Args:
+    elements (Tensor or Scalar): Input elements
+    test_elements (Tensor or Scalar): Values against which to test for each input element
+    assume_unique (bool, optional): If True, assumes both :attr:`elements` and
+        :attr:`test_elements` contain unique elements, which can speed up the
+        calculation. Default: False
+    invert (bool, optional): If True, inverts the boolean return tensor, resulting in True
+        values for elements *not* in :attr:`test_elements`. Default: False
+
+Returns:
+    A boolean tensor of the same shape as :attr:`elements` that is True for elements in
+    :attr:`test_elements` and False otherwise
+
+Example:
+    >>> torch.isin(torch.tensor([[1, 2], [3, 4]]), torch.tensor([2, 3]))
+    tensor([[False,  True],
+            [ True, False]])
+""")
+
 add_docstr(torch.isinf, r"""
 isinf(input) -> Tensor
 
