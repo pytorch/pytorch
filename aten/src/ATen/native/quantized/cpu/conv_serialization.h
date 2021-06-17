@@ -110,7 +110,7 @@ ConvParamsSerializationType parse_conv_serialized_state(c10::IValue v) {
     torch::List<at::Tensor> dilation_x_kSpatialDim = elements[4].toTensorList();
     at::Tensor groups = elements[5].toTensor();
 
-    std::string version = "2";
+    std::string version = "3";
     std::vector<at::Tensor> non_optional;
     std::vector<c10::optional<at::Tensor>> optional;
 
@@ -182,7 +182,7 @@ ConvParamsSerializationType parse_conv_serialized_state(c10::IValue v) {
       }
     }
 
-    std::string version_str = version == 2 ? "2" : "3";
+    std::string version_str = "3";
     return std::tie(version_str, non_optional, optional);
   } else {
     TORCH_INTERNAL_ASSERT(false, "Unexpected serialized qconv version: ",
