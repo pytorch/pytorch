@@ -12,7 +12,9 @@ import asyncio
 import re
 import os
 import sys
-from clang_format_utils import get_and_check_clang_format, CLANG_FORMAT_PATH
+from typing import List, Set
+
+from .clang_format_utils import get_and_check_clang_format, CLANG_FORMAT_PATH
 
 # Allowlist of directories to check. All files that in that directory
 # (recursively) will be checked.
@@ -28,7 +30,7 @@ CLANG_FORMAT_ALLOWLIST = [
 CPP_FILE_REGEX = re.compile(".*\\.(h|cpp|cc|c|hpp)$")
 
 
-def get_allowlisted_files():
+def get_allowlisted_files() -> Set[str]:
     """
     Parse CLANG_FORMAT_ALLOWLIST and resolve all directories.
     Returns the set of allowlist cpp source files.
@@ -42,7 +44,11 @@ def get_allowlisted_files():
     return set(matches)
 
 
-async def run_clang_format_on_file(filename, semaphore, verbose=False):
+async def run_clang_format_on_file(
+    filename: str,
+    semaphore: asyncio.Semaphore,
+    verbose: bool = False,
+) -> None:
     """
     Run clang-format on the provided file.
     """
@@ -55,7 +61,11 @@ async def run_clang_format_on_file(filename, semaphore, verbose=False):
         print("Formatted {}".format(filename))
 
 
-async def file_clang_formatted_correctly(filename, semaphore, verbose=False):
+async def file_clang_formatted_correctly(
+    filename: str,
+    semaphore: asyncio.Semaphore,
+    verbose: bool = False,
+) -> bool:
     """
     Checks if a file is formatted correctly and returns True if so.
     """
@@ -80,7 +90,11 @@ async def file_clang_formatted_correctly(filename, semaphore, verbose=False):
     return ok
 
 
-async def run_clang_format(max_processes, diff=False, verbose=False):
+async def run_clang_format(
+    max_processes: int,
+    diff: bool = False,
+    verbose: bool = False,
+) -> bool:
     """
     Run clang-format to all files in CLANG_FORMAT_ALLOWLIST that match CPP_FILE_REGEX.
     """
@@ -114,7 +128,7 @@ async def run_clang_format(max_processes, diff=False, verbose=False):
 
     return ok
 
-def parse_args(args):
+def parse_args(args: List[str]) -> argparse.Namespace:
     """
     Parse and return command-line arguments.
     """
@@ -134,7 +148,7 @@ def parse_args(args):
     return parser.parse_args(args)
 
 
-def main(args):
+def main(args: List[str]) -> bool:
     # Parse arguments.
     options = parse_args(args)
     # Get clang-format and make sure it is the right binary and it is in the right place.

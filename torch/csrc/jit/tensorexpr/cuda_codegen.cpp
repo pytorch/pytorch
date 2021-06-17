@@ -3,6 +3,7 @@
 
 #include <ATen/CUDAGeneratorImpl.h>
 #include <c10/cuda/CUDAFunctions.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/fuser/cuda/resource_strings.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
@@ -306,7 +307,7 @@ void CudaPrinter::visit(const Intrinsics* v) {
   }
 
   os() << func_name << "(";
-  for (int i = 0; i < v->nparams(); i++) {
+  for (const auto i : c10::irange(v->nparams())) {
     if (i > 0) {
       os() << ", ";
     }
@@ -362,9 +363,6 @@ class AtomicAddFuser : public IRMutator {
       const std::unordered_set<const Var*>& thread_local_bufs,
       const GPUMetaVarRewriter& metavars)
       : thread_local_bufs_(thread_local_bufs) {
-    // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-    size_t DIMS = 3;
-
     const std::vector<const Expr*>& block_extents =
         metavars.gpu_block_extents();
     const std::vector<const Var*>& block_vars = metavars.gpu_block_vars();
@@ -611,9 +609,6 @@ class PrioritizeLoad : public IRMutator {
   }
 
   Stmt* mutate(const Block* v) override {
-    // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-    bool any_change = false;
-
     Block* v1 = const_cast<Block*>(v); // NOLINT
     assert(v1);
     std::list<Stmt*> stmts = v1->stmts();

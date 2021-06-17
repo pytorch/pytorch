@@ -133,7 +133,7 @@ void BackgroundThread::join() {
 void BackgroundThread::initStopSignal() {
   ghStopEvent_ = CreateEvent(NULL, TRUE, FALSE, NULL);
   if (ghStopEvent_ == NULL) {
-    throw std::runtime_error(
+    TORCH_CHECK(false,
         "Failed to create the control pipe to start the "
         "BackgroundThread run");
   }
@@ -149,7 +149,7 @@ void BackgroundThread::stop() {
 #else
 void BackgroundThread::initStopSignal() {
   if (pipe(controlPipeFd_.data()) == -1) {
-    throw std::runtime_error(
+    TORCH_CHECK(false,
         "Failed to create the control pipe to start the "
         "BackgroundThread run");
   }
@@ -336,7 +336,7 @@ void TCPStoreMasterDaemon::query(int socket) {
     watchHandler(socket);
 
   } else {
-    throw std::runtime_error("Unexpected query type");
+    TORCH_CHECK(false, "Unexpected query type");
   }
 }
 
@@ -1126,7 +1126,7 @@ bool TCPStore::check(const std::vector<std::string>& keys) {
   if (response == detail::CheckResponseType::NOT_READY) {
     return false;
   }
-  throw std::runtime_error("ready or not_ready response expected");
+  TORCH_CHECK(false, "ready or not_ready response expected");
 }
 
 void TCPStore::wait(const std::vector<std::string>& keys) {
@@ -1156,7 +1156,7 @@ void TCPStore::doWait(
 
   auto response = client_->receiveValue<detail::WaitResponseType>();
   if (response != detail::WaitResponseType::STOP_WAITING) {
-    throw std::runtime_error("Stop_waiting response is expected");
+    TORCH_CHECK(false, "Stop_waiting response is expected");
   }
 }
 

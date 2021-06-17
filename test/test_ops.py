@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from functools import partial, wraps
 import warnings
 
@@ -7,25 +8,37 @@ from torch.testing import \
     (FileCheck, floating_and_complex_types_and)
 from torch.testing._internal.common_utils import \
     (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor,
-     gradcheck, gradgradcheck)
+     gradcheck, gradgradcheck, IS_PYTORCH_CI)
 from torch.testing._internal.common_methods_invocations import \
-    (op_db, method_tests)
+    (op_db,)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, onlyCPU, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
+    (instantiate_device_type_tests, ops, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
 
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, create_traced_fn, \
     check_alias_annotation
 from torch.testing._internal.jit_utils import disable_autodiff_subgraph_inlining
-from collections.abc import Sequence
+import torch.testing._internal.opinfo_helper as opinfo_helper
 
-# Get names of all the operators which have entry in `method_tests` (legacy testing infra)
-method_tested_operators = set(map(lambda test_details: test_details[0], method_tests()))
 
 # Tests that apply to all operators
-
 class TestOpInfo(TestCase):
     exact_dtype = True
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+
+        if IS_PYTORCH_CI:
+            err_msg = ("The operator(s) below is(are) using dynamic_dtypes in the OpInfo entries."
+                       "This is OK for testing, but be sure to set the dtypes manually before landing your PR!")
+            # Assure no opinfo entry has dynamic_dtypes
+            filtered_ops = list(filter(opinfo_helper.is_dynamic_dtype_set, op_db))
+            for op in filtered_ops:
+                fmt_str = opinfo_helper.str_format_dynamic_dtype(op)
+                err_msg += "\n" + fmt_str
+
+            assert len(filtered_ops) == 0, err_msg
 
     # Verifies that ops have their unsupported dtypes
     #   registered correctly by testing that each claimed unsupported dtype
@@ -38,12 +51,8 @@ class TestOpInfo(TestCase):
         # https://github.com/pytorch/pytorch/issues/49024
         with self.assertRaises(RuntimeError):
             samples = op.sample_inputs(device, dtype)
-            if len(samples) == 0:
-                self.skipTest("Skipped! No sample inputs!")
-
-            # NOTE: only tests on first sample
-            sample = samples[0]
-            op(sample.input, *sample.args, **sample.kwargs)
+            for sample in samples:
+                op(sample.input, *sample.args, **sample.kwargs)
 
     # Verifies that ops have their supported dtypes
     #   registered correctly by testing that each claimed supported dtype
@@ -58,6 +67,34 @@ class TestOpInfo(TestCase):
             sample_input = sample.input[0] if is_iterable_of_tensors(sample.input) else sample.input
             self.assertTrue(sample_input.dtype == dtype)
             self.assertTrue(sample_input.device.type == self.device_type)
+
+    # Verifies that backward for each unsupported floating or complex dtype
+    #   throw a runtime error.
+    @onlyOnCPUAndCUDA
+    @ops(op_db, dtypes=OpDTypes.unsupported_backward,
+         allowed_dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16))
+    def test_unsupported_backward(self, device, dtype, op):
+        if not op.supports_autograd:
+            self.skipTest("Skipped! Autograd not supported.")
+
+        try:
+            samples = op.sample_inputs(device, dtype, requires_grad=True)
+        except RuntimeError as e:
+            self.skipTest(f"Skipped! unable to generate sample. {e}")
+
+        if len(samples) == 0:
+            self.skipTest("Skipped! No sample inputs!")
+
+        # NOTE: assert exception raised on ANY sample input
+        with self.assertRaises(RuntimeError):
+            for sample in op.sample_inputs(device, dtype, requires_grad=True):
+                result = op(sample.input, *sample.args, **sample.kwargs)
+                # TODO: handle non-tensor outputs
+                if not isinstance(result, torch.Tensor):
+                    self.skipTest("Skipped! Test does not handle non-tensor outputs")
+                if sample.output_process_fn_grad is not None:
+                    result = sample.output_process_fn_grad(result)
+                result.sum().backward()
 
     # Verifies that backward for each supported floating or complex dtype
     #   does NOT throw a runtime error.
@@ -77,12 +114,6 @@ class TestOpInfo(TestCase):
                 result = sample.output_process_fn_grad(result)
             result.sum().backward()
 
-    # Verifies that ops do not have an entry in
-    # `method_tests` (legacy testing infra).
-    @onlyCPU
-    @ops(op_db, allowed_dtypes=[torch.float32])
-    def test_duplicate_method_tests(self, device, dtype, op):
-        self.assertFalse(op.name in method_tested_operators)
 
 # gradcheck requires double precision
 _gradcheck_ops = partial(ops, dtypes=OpDTypes.supported,
@@ -237,7 +268,7 @@ class TestGradients(TestCase):
             err_msg = r"Trying to use forward AD with .* that does not support it\."
             hint_msg = ("Running forward AD for an OP that has does not support it did not "
                         "raise any error. If your op supports forward AD, you should set supports_forward_ad=True")
-            with self.assertRaisesRegex(RuntimeError, err_msg, msg=hint_msg):
+            with self.assertRaisesRegex(NotImplementedError, err_msg, msg=hint_msg):
                 self._grad_test_helper(device, dtype, op, op.get_op(), check_forward_ad=True)
 
 
