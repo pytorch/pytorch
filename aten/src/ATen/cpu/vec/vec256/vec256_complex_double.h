@@ -105,7 +105,7 @@ public:
   }
   const c10::complex<double>& operator[](int idx) const  = delete;
   c10::complex<double>& operator[](int idx) = delete;
-  Vectorized<c10::complex<double>> map(c10::complex<double> (*f)(const c10::complex<double> &)) const {
+  Vectorized<c10::complex<double>> map(c10::complex<double> (*const f)(const c10::complex<double> &)) const {
     __at_align32__ c10::complex<double> tmp[size()];
     store(tmp);
     for (int i = 0; i < size(); i++) {

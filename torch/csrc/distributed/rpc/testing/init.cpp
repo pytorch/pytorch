@@ -1,7 +1,6 @@
 #include <torch/csrc/python_headers.h>
 
 #include <torch/csrc/distributed/rpc/process_group_agent.h>
-#include <torch/csrc/distributed/rpc/request_callback_impl.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/testing/faulty_process_group_agent.h>
 #include <torch/csrc/utils/pybind.h>
@@ -83,7 +82,6 @@ PyObject* faulty_agent_init(PyObject* _unused, PyObject* noargs) {
                     process_group,
                     num_send_recv_threads,
                     rpc_timeout,
-                    std::make_unique<RequestCallbackImpl>(),
                     messages_to_fail,
                     messages_to_delay,
                     failNumSends),
