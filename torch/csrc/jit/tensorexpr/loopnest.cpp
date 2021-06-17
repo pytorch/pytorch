@@ -2799,8 +2799,7 @@ class RfactorStoreRewriter : public IRMutator {
         old_indices_(old_indices),
         new_buf_(new_buf),
         reduction_var_(reduction_var),
-        new_indices_(old_indices) {
-    new_indices_.push_back(reduction_var_);
+        new_indices_({reduction_var_}) {
   }
 
   const Expr* mutate(const Load* v) override {
@@ -2922,22 +2921,25 @@ bool LoopNest::rfactor(Stmt* st, For* outer_reduction_for, Buf** rfac_buf_ptr) {
   // assert: reduce_axis match loop vars from outer_reduction_for and inside
   // assert: no other stmts in outer_reduction_for or its child loops
 
-  std::vector<const Expr*> rfac_dims = orig_buf->dims();
-  const Expr* extra_dim = IRSimplifier::simplify(
-      new Sub(outer_reduction_for->stop(), outer_reduction_for->start()));
-  rfac_dims.push_back(extra_dim);
-  const Expr* rfac_init =
-      new Cast(reduce_op->dtype(), reduce_op->reducer().initializer());
-
-  *rfac_buf_ptr = new Buf(
+  // Compute size of the rfac buffer, which is equal to the size of the
+  // iteration space of the outer reduction loop.
+  auto start = outer_reduction_for->start();
+  auto stop = outer_reduction_for->stop();
+  auto rfac_dims = {
+    IRSimplifier::simplify(new Sub(stop, start))
+  };
+  auto rfac_init = new Cast(
+      reduce_op->dtype(),
+      reduce_op->reducer().initializer());
+  auto rfac_buf = new Buf(
       orig_buf->name_hint() + "_rfac",
       rfac_dims,
       reduce_op->dtype(),
       rfac_init);
-  Buf* rfac_buf = *rfac_buf_ptr;
+  *rfac_buf_ptr = rfac_buf;
 
   // Rewrite the original reduction store to use the temporary rfac buffer:
-  //   1) X[*indexes] --> T[*indexes + {reduction_var}]
+  //   1) X[*indexes] --> T[{reduction_var}]
   //   2) reduce_axis -= {reduction_var}
   RfactorStoreRewriter rfac_rewriter(
       orig_buf, orig_buf_indices, rfac_buf, reduction_var);
@@ -2946,13 +2948,12 @@ bool LoopNest::rfactor(Stmt* st, For* outer_reduction_for, Buf** rfac_buf_ptr) {
 
   // Insert a store for the final reduction over the temp buffer into the
   // original buffer:
-  //   X[*indexes] = ReduceOp(X[*indexes] + T[*indexes + {reduction_var}],
+  //   X[*indexes] = ReduceOp(X[*indexes] + T[{reduction_var}],
   //                          reduce_axis={reduction_var})
   Block* b = outer_reduction_for->body();
   TORCH_INTERNAL_ASSERT(b->nstmts() == 1);
   Stmt* first_reduction_loop = b->stmts().front();
-  auto rfac_buf_indices = orig_buf_indices;
-  rfac_buf_indices.emplace_back(reduction_var);
+  std::vector<const Expr*> rfac_buf_indices = {reduction_var};
 
   const Expr* final_reduce_load = new Load(rfac_buf, rfac_buf_indices);
   outer_reduction_for->body()->insert_stmt_after(
