@@ -65,25 +65,22 @@ Tensor _segment_reduce_cpu_kernel(
                     ? data
                     : std::max<scalar_t>(initial_value, data);
               } else if (reduction == SegmentReductionType::MEAN) {
-                initial_value =
-                    at::_isnan(data) ? data : (initial_value + data);
+                initial_value = initial_value + data;
               }
             }
 
             // ===== step3: finalize reduction
             TORCH_CHECK(lengths_data[i] >= 0);
-            int64_t output_index = (i * stride_count) + l;
+
             if (lengths_data[i] == 0 && !initial.has_value()) {
-              output_data[output_index] = static_cast<scalar_t>(NAN);
-            } else {
-              output_data[output_index] = initial_value;
-              if (reduction == SegmentReductionType::MEAN &&
-                  lengths_data[i] > 0 &&
-                  !at::_isnan(output_data[output_index])) {
-                output_data[output_index] =
-                    output_data[output_index] / lengths_data[i];
-              }
+              initial_value = static_cast<scalar_t>(NAN);
+            } else if (
+                reduction == SegmentReductionType::MEAN &&
+                lengths_data[i] > 0 && !at::_isnan(initial_value)) {
+              initial_value = initial_value / lengths_data[i];
             }
+            int64_t output_index = (i * stride_count) + l;
+            output_data[output_index] = initial_value;
           }
           lengths_cum_sum += lengths_data[i];
         }
@@ -114,53 +111,56 @@ Tensor _segment_reduce_cpu_backward_kernel(
       data_contig.scalar_type(),
       "_segment_reduce_cpu",
       ([&]() {
-    auto* output_data = output_contig.data_ptr<scalar_t>();
-    auto* grad_data = grad_contig.data_ptr<scalar_t>();
-    auto* grad_input_data = grad_input.data_ptr<scalar_t>();
-    const auto* values_data = data_contig.data_ptr<scalar_t>();
+        auto* output_data = output_contig.data_ptr<scalar_t>();
+        auto* grad_data = grad_contig.data_ptr<scalar_t>();
+        auto* grad_input_data = grad_input.data_ptr<scalar_t>();
+        const auto* values_data = data_contig.data_ptr<scalar_t>();
 
-    int64_t lengths_cum_sum = 0;
-    for (int64_t i = 0; i < segment_count; ++i) {
-      if (lengths_data[i] == 0) {
-        continue;
-      }
-
-      for (int64_t l = 0; l < stride_count; ++l) {
-        int64_t output_index = (i * stride_count) + l;
-
-        if (reduction == SegmentReductionType::MAX) {
-          int64_t counter = 0;
-          for (int64_t j = 0; j < lengths_data[i]; ++j) {
-            int64_t starting_index = ((lengths_cum_sum + j) * stride_count) + l;
-            if (at::_isnan(values_data[starting_index]) ||
-                values_data[starting_index] == output_data[output_index]) {
-              grad_input_data[starting_index] = grad_data[output_index];
-              counter++;
-            }
-          }
-          // Average gradient based on number of maximum elements in the
-          // segment
-          if (counter < 2) {
+        int64_t lengths_cum_sum = 0;
+        for (int64_t i = 0; i < segment_count; ++i) {
+          if (lengths_data[i] == 0) {
             continue;
           }
-          for (int64_t j = 0; j < lengths_data[i]; ++j) {
-            int64_t starting_index = ((lengths_cum_sum + j) * stride_count) + l;
-            if (grad_input_data[starting_index] > 0) {
-              grad_input_data[starting_index] =
-                  grad_input_data[starting_index] / counter;
+
+          for (int64_t l = 0; l < stride_count; ++l) {
+            int64_t output_index = (i * stride_count) + l;
+
+            if (reduction == SegmentReductionType::MAX) {
+              int64_t counter = 0;
+              for (int64_t j = 0; j < lengths_data[i]; ++j) {
+                int64_t starting_index =
+                    ((lengths_cum_sum + j) * stride_count) + l;
+                if (at::_isnan(values_data[starting_index]) ||
+                    values_data[starting_index] == output_data[output_index]) {
+                  grad_input_data[starting_index] = grad_data[output_index];
+                  counter++;
+                }
+              }
+              // Average gradient based on number of maximum elements in the
+              // segment
+              if (counter < 2) {
+                continue;
+              }
+              for (int64_t j = 0; j < lengths_data[i]; ++j) {
+                int64_t starting_index =
+                    ((lengths_cum_sum + j) * stride_count) + l;
+                if (grad_input_data[starting_index] > 0) {
+                  grad_input_data[starting_index] =
+                      grad_input_data[starting_index] / counter;
+                }
+              }
+            } else if (reduction == SegmentReductionType::MEAN) {
+              auto grad_val = grad_data[output_index] / lengths_data[i];
+              for (int64_t j = 0; j < lengths_data[i]; ++j) {
+                int64_t starting_index =
+                    ((lengths_cum_sum + j) * stride_count) + l;
+                grad_input_data[starting_index] = grad_val;
+              }
             }
           }
-        } else if (reduction == SegmentReductionType::MEAN) {
-          auto grad_val = grad_data[output_index] / lengths_data[i];
-          for (int64_t j = 0; j < lengths_data[i]; ++j) {
-            int64_t starting_index = ((lengths_cum_sum + j) * stride_count) + l;
-            grad_input_data[starting_index] = grad_val;
-          }
-        }
-      }
 
-      lengths_cum_sum += lengths_data[i];
-    }
+          lengths_cum_sum += lengths_data[i];
+        }
       }));
 
   return grad_input;
