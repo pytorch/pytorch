@@ -1911,6 +1911,30 @@ std::vector<For*> LoopNest::reorder(
   return result;
 }
 
+For* LoopNest::getLoopAt(For* root, const std::vector<int>& indicies) const {
+  if (indicies.empty()){
+      return root;
+  }
+  if (root == nullptr) {
+    throw malformed_input("root loop is null");
+  }
+
+  For* curr = root;
+  for (auto i : indicies){
+      if (i<0 || curr->body()->nstmts()<=i){
+          return nullptr;
+      }
+      std::list<Stmt*>::iterator stmtp = curr->body()->begin();
+      std::advance(stmtp, i);
+      curr = dynamic_cast<For*>(*stmtp);
+      if (curr == nullptr){
+          return nullptr;
+      }
+  }
+
+  return curr;
+}
+
 For* LoopNest::tile(For* x, For* y, int x_factor, int y_factor) {
   auto parent = dynamic_cast<Block*>(x->get_parent());
   if (parent == nullptr) {

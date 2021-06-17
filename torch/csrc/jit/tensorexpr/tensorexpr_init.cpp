@@ -404,6 +404,12 @@ void initTensorExprBindings(PyObject* module) {
             return self.getParentLoop(s);
           },
           py::return_value_policy::reference)
+      .def(
+          "get_loop_at",
+          [](const LoopNest& self, For* root, const std::vector<int>& indicies) {
+            return self.getLoopAt(root, indicies);
+          },
+          py::return_value_policy::reference)
       .def_static(
           "get_loop_stmts_in_loopnest",
           [](For* f, size_t num) {

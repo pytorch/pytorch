@@ -50,6 +50,9 @@ class TORCH_API LoopNest {
   Stmt* getLoopBodyFor(Tensor*) const;
   Stmt* getLoopBodyFor(const Buf*) const;
 
+  //Returns the For stmt indexed by 'indicies' in the 'root' For stmt.
+  For* getLoopAt(For* root, const std::vector<int>& indicies) const;
+
   // Returns the For stmt that is immediately enclosing the given stmt.
   static For* getParentLoop(const Stmt* st);
 
