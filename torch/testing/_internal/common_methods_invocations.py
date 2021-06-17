@@ -159,8 +159,8 @@ class SampleInput(object):
             # Local function to convert input of tensor/tensors to numpy array/arrays
             if isinstance(torch_inp, torch.Tensor):
                 numpy_inp = torch_inp.cpu().numpy()
-            else is_iterable_of_tensors(torch_inp):
-                numpy_inp = [sample_inp.cpu().numpy() for t_inp in torch_input]
+            elif is_iterable_of_tensors(torch_inp):
+                numpy_inp = [t_inp.cpu().numpy() for t_inp in torch_inp]
             else:
                 raise TypeError(f"Only torch.Tensor types supported but got {type(torch_inp)}")
             return numpy_inp

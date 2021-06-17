@@ -6,7 +6,7 @@ import torch
 from torch.testing import \
     (FileCheck, floating_and_complex_types_and)
 from torch.testing._internal.common_utils import \
-    (TestCase, compare_with_reference, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor,
+    (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor,
      gradcheck, gradgradcheck, suppress_warnings)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, _NOTHING, UnaryUfuncInfo, SpectralFuncInfo)
@@ -55,7 +55,7 @@ class TestOpInfo(TestCase):
 
         sample_inputs = op.sample_inputs(device, dtype)
         for sample_input in sample_inputs:
-            compare_with_reference(op, op.ref, sample_input)
+            self.compare_with_reference(op, op.ref, sample_input)
 
     # Verifies that ops have their supported dtypes
     #   registered correctly by testing that each claimed supported dtype
