@@ -8,4 +8,4 @@ bool GradMode::is_enabled() {
 void GradMode::set_enabled(bool enabled) {
   impl::_get_thread_local_state()->GradMode_disabled = !enabled;
 }
-}  // namespace c10
+} // namespace c10
