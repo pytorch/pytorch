@@ -493,17 +493,14 @@ class MultiProcessTestCase(TestCase):
         self = cls(test_name)
 
         # Start event listener thread.
-        event_listener_thread = threading.Thread(
+        threading.Thread(
             target=MultiProcessTestCase._event_listener,
-            args=(pipe, rank))
-        event_listener_thread.start()
+            args=(pipe, rank),
+            daemon=True).start()
 
         self.rank = rank
         self.file_name = file_name
         self.run_test(test_name, pipe)
-
-        event_listener_thread.join()
-
         # exit to avoid run teardown() for fork processes
         sys.exit(0)
 
@@ -536,24 +533,21 @@ class MultiProcessTestCase(TestCase):
                 try:
                     pipe.send(MultiProcessTestCase.Event.GET_TRACEBACK)
                     pipes.append((i, pipe))
-                except ConnectionError as e:
+                except BrokenPipeError as e:
                     logger.error(f'Encountered error while trying to get traceback for process {i}: {e}')
 
         # Wait for results.
         for rank, pipe in pipes:
-            try:
-                # Wait for traceback
-                if pipe.poll(5):
-                    if pipe.closed:
-                        logger.info(f'Pipe closed for process {rank}, cannot retrieve traceback')
-                        continue
+            # Wait for traceback
+            if pipe.poll(5):
+                if pipe.closed:
+                    logger.info(f'Pipe closed for process {rank}, cannot retrieve traceback')
+                    continue
 
-                    traceback = pipe.recv()
-                    logger.error(f'Process {rank} timed out with traceback: \n\n{traceback}')
-                else:
-                    logger.error(f'Could not retrieve traceback for timed out process: {rank}')
-            except ConnectionError as e:
-                logger.error(f'Encountered error while trying to get traceback for process {rank}: {e}')
+                traceback = pipe.recv()
+                logger.error(f'Process {rank} timed out with traceback: \n\n{traceback}')
+            else:
+                logger.error(f'Could not retrieve traceback for timed out process: {rank}')
 
     def _join_processes(self, fn) -> None:
         timeout = get_timeout(self.id())
