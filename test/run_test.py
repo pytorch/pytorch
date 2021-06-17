@@ -23,7 +23,11 @@ from typing_extensions import TypedDict
 
 try:
     sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-    from tools.stats_utils.s3_stat_parser import (get_previous_reports_for_branch, Report, HAVE_BOTO3)
+    from tools.stats_utils.s3_stat_parser import (
+        get_previous_reports_for_branch,
+        get_previous_reports_for_pr,
+        Report,
+        HAVE_BOTO3)
 except ImportError:
     print("Unable to import s3_stat_parser from tools. Running without S3 stats...")
     HAVE_BOTO3 = False
@@ -49,6 +53,7 @@ TESTS = [
     'distributed/test_c10d_spawn_gloo',
     'distributed/test_c10d_spawn_nccl',
     'distributed/test_store',
+    'distributed/test_pg_wrapper',
     'test_cuda',
     'test_jit_cuda_fuser',
     'test_cuda_primary_ctx',
@@ -311,6 +316,7 @@ TARGET_DET_LIST = [
     'distributed/test_c10d_spawn_gloo',
     'distributed/test_c10d_spawn_nccl',
     'distributed/test_store',
+    'distributed/test_pg_wrapper',
     'test_quantization',
     'test_pruning_op',
     'test_determination',
@@ -383,6 +389,8 @@ or `conda install ninja`. Alternatively, disable said tests with
 
 PYTORCH_COLLECT_COVERAGE = bool(os.environ.get("PYTORCH_COLLECT_COVERAGE"))
 
+ENABLE_PR_HISTORY_REORDERING = bool(os.environ.get("ENABLE_PR_HISTORY_REORDERING", "0") == "1")
+
 JIT_EXECUTOR_TESTS = [
     'test_jit_cuda_fuser',
     'test_jit_profiling',
@@ -397,7 +405,7 @@ JIT_EXECUTOR_TESTS = [
 #   "test_nn": ["test_doubletensor_avg_pool3d", "test_share_memory", "test_hook_requires_grad"],
 #   ...
 # }
-# For test_nn.py, we would ONLY run test_doubletensor_avg_pool3d, test_share_memory, and test_hook_requires_grad.
+# then for test_nn.py, we would ONLY run test_doubletensor_avg_pool3d, test_share_memory, and test_hook_requires_grad.
 SPECIFIED_TEST_CASES_DICT: Dict[str, List[str]] = {}
 
 # The file from which the SPECIFIED_TEST_CASES_DICT will be filled, a CSV of test cases that would be run when
@@ -449,7 +457,7 @@ def calculate_job_times(reports: List["Report"]) -> Dict[str, float]:
 def pull_job_times_from_S3() -> Dict[str, float]:
     if HAVE_BOTO3:
         ci_job_prefix = get_stripped_CI_job()
-        s3_reports: List["Report"] = get_previous_reports_for_branch('origin/nightly', ci_job_prefix)
+        s3_reports: List["Report"] = get_previous_reports_for_branch('origin/viable/strict', ci_job_prefix)
     else:
         print('Uh oh, boto3 is not found. Either it is not installed or we failed to import s3_stat_parser.')
         print('If not installed, please install boto3 for automatic sharding and test categorization.')
@@ -532,10 +540,10 @@ def get_slow_tests_based_on_S3() -> List[str]:
 
 
 def get_test_case_args(test_module, using_pytest) -> List[str]:
-    if test_module not in SPECIFIED_TEST_CASES_DICT:
-        sys.exit(f'Warning! Test module {test_module} is not found in the specified tests dict. This should never'
-                 'happen as we make a check for that before entering this function.')
     args = []
+    # if test_module not specified or specified with '__all__' then run all tests
+    if test_module not in SPECIFIED_TEST_CASES_DICT or '__all__' in SPECIFIED_TEST_CASES_DICT[test_module]:
+        return args
 
     if using_pytest:
         args.append('-k')
@@ -583,6 +591,7 @@ def run_test(test_module, test_directory, options, launcher_cmd=None, extra_unit
     executable = get_executable_command(options, allow_pytest=not extra_unittest_args,
                                         disable_coverage=disable_coverage)
 
+    # TODO: move this logic into common_utils.py instead of passing in "-k" individually
     # The following logic for running specified tests will only run for non-distributed tests, as those are dispatched
     # to test_distributed and not run_test (this function)
     if options.run_specified_test_cases:
@@ -739,7 +748,8 @@ class TestChoices(list):
 def parse_args():
     parser = argparse.ArgumentParser(
         description='Run the PyTorch unit test suite',
-        epilog='where TESTS is any of: {}'.format(', '.join(TESTS)))
+        epilog='where TESTS is any of: {}'.format(', '.join(TESTS)),
+        formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument(
         '-v',
         '--verbose',
@@ -838,8 +848,25 @@ def parse_args():
         nargs='?',
         type=str,
         const=SPECIFIED_TEST_CASES_FILE,
-        help='runs specified test cases from previous OSS CI stats from a file, format CSV',
-
+        help='load specified test cases file dumped from previous OSS CI stats, format CSV. '
+        ' If all test cases should run for a <test_module> please add a single row: \n'
+        ' test_filename,test_case_name\n'
+        ' ...\n'
+        ' <test_module>,__all__\n'
+        ' ...\n'
+        'how we use the stats will be based on option "--use-specified-test-cases-by".'
+    )
+    parser.add_argument(
+        '--use-specified-test-cases-by',
+        type=str,
+        choices=['include', 'bring-to-front'],
+        default='include',
+        help='used together with option "--run-specified-test-cases". When specified test case '
+        'file is set, this option allows the user to control whether to only run the specified test '
+        'modules or to simply bring the specified modules to front and also run the remaining '
+        'modules. Note: regardless of this option, we will only run the specified test cases '
+        ' within a specified test module. For unspecified test modules with the bring-to-front '
+        'option, all test cases will be run, as one may expect.',
     )
     return parser.parse_args()
 
@@ -893,6 +920,12 @@ def exclude_tests(exclude_list, selected_tests, exclude_message=None):
 
 
 def get_selected_tests(options):
+    if options.run_specified_test_cases:
+        if options.use_specified_test_cases_by == 'include':
+            options.include = list(SPECIFIED_TEST_CASES_DICT.keys())
+        elif options.use_specified_test_cases_by == 'bring-to-front':
+            options.bring_to_front = list(SPECIFIED_TEST_CASES_DICT.keys())
+
     selected_tests = options.include
 
     if options.bring_to_front:
@@ -910,10 +943,6 @@ def get_selected_tests(options):
 
     if options.exclude_jit_executor:
         options.exclude.extend(JIT_EXECUTOR_TESTS)
-
-    if options.run_specified_test_cases:
-        # Filter out any unspecified test modules.
-        selected_tests = [t for t in selected_tests if t in SPECIFIED_TEST_CASES_DICT]
 
     selected_tests = exclude_tests(options.exclude, selected_tests)
 
@@ -1140,35 +1169,65 @@ def query_changed_test_files() -> List[str]:
     lines = [line.strip() for line in lines]
     return lines
 
+def query_failure_test_module(reports: List[Tuple["Report", str]]) -> List[str]:
+    test_modules = []
+    if len(reports) == 0 or len(reports[0]) == 0:
+        return test_modules
+    report = reports[0][0]
+    assert report.get('format_version') == 2, "S3 format currently handled is version 2 only"
+    files: Dict[str, Any] = report['files']
+    for fname, file in files.items():
+        contains_failure = any(
+            any(case['status'] == 'errored' or case['status'] == 'failed'
+                for _, case in suite['cases'].items())
+            for _, suite in file['suites'].items())
+        if contains_failure:
+            test_modules.append(fname)
+    return test_modules
+
 
 def reorder_tests(tests: List[str]) -> List[str]:
-    try:
-        changed_files = query_changed_test_files()
-    except Exception:
-        # If unable to get changed files from git, quit without doing any sorting
-        return tests
+    prioritized_tests = []
+    # Try using historic stats from PR.
+    if ENABLE_PR_HISTORY_REORDERING and HAVE_BOTO3:
+        pr_number = os.environ.get("CIRCLE_PR_NUMBER", "")
+        if len(pr_number):
+            ci_job_prefix = get_stripped_CI_job()
+            s3_reports: List[Tuple["Report", str]] = get_previous_reports_for_pr(
+                pr_number, ci_job_prefix)
+            prioritized_tests = query_failure_test_module(s3_reports)
+            print("Prioritized test from previous CI info.")
 
-    prefix = f"test{os.path.sep}"
-    changed_tests = [f for f in changed_files if f.startswith(prefix) and f.endswith(".py")]
-    changed_tests = [f[len(prefix):] for f in changed_tests]
-    changed_tests = [f[:-len(".py")] for f in changed_tests]
+    # Using file changes priority if no stats found from previous PR.
+    if len(prioritized_tests) == 0:
+        try:
+            changed_files = query_changed_test_files()
+        except Exception:
+            # If unable to get changed files from git, quit without doing any sorting
+            return tests
+
+        prefix = f"test{os.path.sep}"
+        prioritized_tests = [f for f in changed_files if f.startswith(prefix) and f.endswith(".py")]
+        prioritized_tests = [f[len(prefix):] for f in prioritized_tests]
+        prioritized_tests = [f[:-len(".py")] for f in prioritized_tests]
+        print("Prioritized test from test file changes.")
 
     bring_to_front = []
     the_rest = []
 
     for test in tests:
-        if test in changed_tests:
+        if test in prioritized_tests:
             bring_to_front.append(test)
         else:
             the_rest.append(test)
-
-    sorted_tests = bring_to_front + the_rest
-
-    if len(sorted_tests) != len(tests):
-        # Something went wrong, bail out without doing any sorting
+    if len(tests) == len(bring_to_front) + len(the_rest):
+        print(f"reordering tests for PR:\n"
+              f"prioritized: {bring_to_front}\nthe rest: {the_rest}\n")
+        return bring_to_front + the_rest
+    else:
+        print(f"Something went wrong in CI reordering, expecting total of {len(tests)}:\n"
+              f"but found prioritized: {len(bring_to_front)}\nthe rest: {len(the_rest)}\n")
         return tests
-
-    return sorted_tests
 
 
 def main():
