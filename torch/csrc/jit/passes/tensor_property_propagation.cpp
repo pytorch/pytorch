@@ -14,9 +14,6 @@ namespace jit {
 
 namespace {
 
-#define TRACE_EXEC(msg, ...) \
-  std::cout << "TRACE_EXEC:" << msg << c10::str(__VA_ARGS__) << std::endl;
-
 using dtype_func_t = std::function<c10::optional<ScalarType>(Node*)>;
 static std::vector<std::pair<OperatorSet, dtype_func_t>>
     dtype_transfer_functions;
@@ -55,7 +52,7 @@ struct TensorPropertyPropagationPass {
       stype = tryScalarTypeFromJitType(type);
     }
     if (stype.has_value()) {
-      TRACE_EXEC("getScalarType = ", stype.value());
+      GRAPH_DEBUG("getScalarType = ", stype.value());
     }
     return stype;
   }
@@ -82,7 +79,7 @@ struct TensorPropertyPropagationPass {
   }
 
   bool processBlocks(at::ArrayRef<Block*> blocks) {
-    TRACE_EXEC("processBlocks");
+    GRAPH_DEBUG("processBlocks");
     bool changed = false;
     for (auto block : blocks) {
       changed |= processBlock(block);
@@ -91,7 +88,7 @@ struct TensorPropertyPropagationPass {
   }
 
   bool processBlock(Block* block) {
-    TRACE_EXEC("processBlock");
+    GRAPH_DEBUG("processBlock");
     bool changed = false;
     for (auto it = block->nodes().begin(); it != block->nodes().end(); it++) {
       changed |= processNode(*it);
@@ -100,7 +97,7 @@ struct TensorPropertyPropagationPass {
   }
 
   bool processNode(Node* n) {
-    TRACE_EXEC("processNode");
+    GRAPH_DEBUG("processNode");
     switch (n->kind()) {
       case prim::If:
         return processIf(n);
@@ -166,7 +163,7 @@ struct TensorPropertyPropagationPass {
   }
 
   bool processIf(Node* node) {
-    TRACE_EXEC("processIf");
+    GRAPH_DEBUG("processIf");
     bool changed = false;
     auto blocks = node->blocks();
     auto true_block = blocks.at(0);
@@ -212,15 +209,15 @@ struct TensorPropertyPropagationPass {
   // TODO: keep a cache of valid schema to avoid repeated schema checking
   // for efficiency
   bool processAtenOps(Node* n) {
-    TRACE_EXEC("processAtenOps");
+    GRAPH_DEBUG("processAtenOps");
 
     auto schema_opt = n->maybeSchema();
     if (!schema_opt || !checkSchemaReturnsTensors(schema_opt)) {
-      TRACE_EXEC("schema not found or op does not return tensors");
+      GRAPH_DEBUG("schema not found or op does not return tensors");
       return false;
     }
 
-    TRACE_EXEC("case = ", n->kind(), " ", *n);
+    GRAPH_DEBUG("case = ", n->kind(), " ", *n);
 
     bool changed = false;
     bool found = false;
@@ -311,7 +308,7 @@ struct TensorPropertyPropagationPass {
         }
       }
     }
-    TRACE_EXEC("SimpleTypeTransferFunction: result = ", stype);
+    GRAPH_DEBUG("SimpleTypeTransferFunction: result = ", stype);
     return stype;
   }
 
@@ -319,7 +316,7 @@ struct TensorPropertyPropagationPass {
   static c10::optional<ScalarType> typeOfNthOperand(Node* n, int idx) {
     auto stype = getScalarType(n->inputs().at(idx));
     if (stype.has_value()) {
-      TRACE_EXEC("typeOfNthOperand: result = ", stype.value());
+      GRAPH_DEBUG("typeOfNthOperand: result = ", stype.value());
     }
     return stype;
   }
