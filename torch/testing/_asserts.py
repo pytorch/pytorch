@@ -711,11 +711,10 @@ def assert_close(
         >>> import torch
         >>> assert_equal = functools.partial(torch.testing.assert_close, rtol=0, atol=0)
         >>> assert_equal(1e-9, 1e-10)
-        AssertionError: Tensors are not close!
+        AssertionError: Scalars are not equal!
 
-        Mismatched elements: 1 / 1 (100.0%)
-        Greatest absolute difference: 8.999999703829253e-10 at 0 (up to 0 allowed)
-        Greatest relative difference: 8.999999583666371 at 0 (up to 0 allowed)
+        Absolute difference: 8.999999703829253e-10
+        Relative difference: 8.999999583666371
 
     Examples:
         >>> # tensor to tensor comparison
@@ -769,16 +768,22 @@ def assert_close(
         >>> expected = torch.tensor(float("Nan"))
         >>> actual = expected.clone()
         >>> torch.testing.assert_close(actual, expected)
-        AssertionError: Tensors are not close!
+        AssertionError: Scalars are not close!
+
+        Absolute difference: nan (up to 1e-05 allowed)
+        Relative difference: nan (up to 1.3e-06 allowed)
         >>> torch.testing.assert_close(actual, expected, equal_nan=True)
 
         >>> # If equal_nan=True, the real and imaginary NaN's of complex inputs have to match.
         >>> expected = torch.tensor(complex(float("NaN"), 0))
         >>> actual = torch.tensor(complex(0, float("NaN")))
         >>> torch.testing.assert_close(actual, expected, equal_nan=True)
-        AssertionError: Tensors are not close!
+        AssertionError: Real components of complex scalars are not close!
+
+        Absolute difference: nan (up to 1e-05 allowed)
+        Relative difference: nan (up to 1.3e-06 allowed)
         >>> # If equal_nan="relaxed", however, then complex numbers are treated as NaN if any
-        >>> # of the real or imaginary component is NaN.
+        >>> # of the real or imaginary components is NaN.
         >>> torch.testing.assert_close(actual, expected, equal_nan="relaxed")
 
         >>> expected = torch.tensor([1.0, 2.0, 3.0])
