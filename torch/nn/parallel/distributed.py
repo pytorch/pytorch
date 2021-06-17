@@ -31,6 +31,8 @@ def _tree_flatten_with_rref(output):
         output_tensor_list, treespec = tree_flatten(output.local_value())
     else:
         output_tensor_list, treespec = tree_flatten(output)
+    # Need to return flattened tensors, spec to re-pack them, as well
+    # as if the return type was actually an RRef to reconstruct.
     return output_tensor_list, treespec, output_is_rref
 
 def _tree_unflatten_with_rref(output, treespec, output_is_rref):
