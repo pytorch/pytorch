@@ -350,7 +350,7 @@ PyObject * THCPModule_memoryStats(PyObject *_unused, PyObject *arg)
       "all", "small_pool", "large_pool"
     };
     py::dict dict;
-    for (size_t i = 0; i < statTypeNames.size(); ++i) {
+    for (const auto i : c10::irange(statTypeNames.size())) {
       dict[statTypeNames[i]] = statToDict(statArray[i]);
     }
     return dict;

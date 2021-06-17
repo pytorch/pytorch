@@ -12,7 +12,7 @@ from torch.testing._internal.common_utils import (
 
 
 class TestSegmentReductions(TestCase):
-    def _test_max_simple_1d(self, device, dtype, unsafe, axis):
+    def _test_simple_1d(self, reduction, device, dtype, unsafe, axis):
         lengths = torch.tensor([1, 2, 3, 0], device=device)
         data = torch.tensor(
             [1, float("nan"), 3, 4, 5, 5],
@@ -21,30 +21,40 @@ class TestSegmentReductions(TestCase):
             requires_grad=True,
         )
         initial_value = 0
-        expected_result = torch.tensor(
-            [1, float("nan"), 5, initial_value], device=device, dtype=dtype
-        )
+        if reduction == "max":
+            expected_result = torch.tensor(
+                [1, float("nan"), 5, initial_value], device=device, dtype=dtype
+            )
+            expected_grad = torch.tensor(
+                [1, 1, 0, 0, 0.5, 0.5], device=device, dtype=dtype
+            )
+        elif reduction == "mean":
+            expected_result = torch.tensor(
+                [1, float("nan"), 4.666, initial_value], device=device, dtype=dtype
+            )
+            expected_grad = torch.tensor(
+                [1.0, 0.5, 0.5, 0.333, 0.333, 0.333], device=device, dtype=dtype
+            )
         actual_result = torch.segment_reduce(
             data=data,
-            reduce="max",
+            reduce=reduction,
             lengths=lengths,
             axis=axis,
             unsafe=unsafe,
             initial=initial_value,
         )
         self.assertEqual(
-            expected_result, actual_result, rtol=1e-03, atol=1e-05, equal_nan=True
+            expected_result, actual_result, rtol=1e-02, atol=1e-05, equal_nan=True
         )
 
-        # Backward is only supported for cpu tensors for now. Return early if cuda
+        # TODO: Remove this check once cuda backward support is implemented
         if data.is_cuda:
             return
 
         # Test backward
-        expected_grad = torch.tensor([1, 1, 0, 0, 0.5, 0.5], device=device, dtype=dtype)
         actual_result.sum().backward()
         self.assertEqual(
-            expected_grad, data.grad, rtol=1e-03, atol=1e-05, equal_nan=True
+            expected_grad, data.grad, rtol=1e-02, atol=1e-05, equal_nan=True
         )
 
         # gradcheck does not work well with bfloat16 or fp16 cpu types
@@ -61,7 +71,7 @@ class TestSegmentReductions(TestCase):
                 gradcheck(
                     lambda x: torch.segment_reduce(
                         data=x,
-                        reduce="max",
+                        reduce=reduction,
                         lengths=lengths,
                         axis=axis,
                         unsafe=unsafe,
@@ -73,11 +83,12 @@ class TestSegmentReductions(TestCase):
 
     @dtypesIfCUDA(torch.half, torch.bfloat16, torch.float, torch.double)
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
-    def test_max_simple_1d(self, device, dtype):
-        self._test_max_simple_1d(device, dtype, False, 0)
-        self._test_max_simple_1d(device, dtype, False, -1)
-        self._test_max_simple_1d(device, dtype, True, 0)
-        self._test_max_simple_1d(device, dtype, True, -1)
+    def test_simple_1d(self, device, dtype):
+        for reduction in ("max", "mean"):
+            self._test_simple_1d(reduction, device, dtype, False, 0)
+            self._test_simple_1d(reduction, device, dtype, False, -1)
+            self._test_simple_1d(reduction, device, dtype, True, 0)
+            self._test_simple_1d(reduction, device, dtype, True, -1)
 
 
 instantiate_device_type_tests(TestSegmentReductions, globals())
