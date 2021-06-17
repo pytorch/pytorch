@@ -137,7 +137,6 @@ def _compress_uniform_simplified(X, bit_rate, xmin, xmax, fp16_scale_bias=True):
 
     return Xq, loss
 
-
 class TestQuantizedTensor(TestCase):
     @unittest.skipIf(not TEST_CUDA, "No gpu is available.")
     def test_qtensor_cuda(self):
@@ -337,7 +336,27 @@ class TestQuantizedTensor(TestCase):
             self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
 
     @unittest.skipIf(not TEST_CUDA, "No gpu is available.")
-    def test_qtensor_to_device(self):
+    def test_per_tensor_to_device(self):
+        dtypes = [
+            torch.quint8,
+            torch.qint8,
+            torch.qint32,
+        ]
+        device = torch.device('cuda')
+        for dtype in dtypes:
+            r = torch.rand(2, 2, dtype=torch.float) * 10
+            scale = torch.rand(2).abs().max().item()
+            zero_point = (torch.rand(2) * 10).round().to(torch.long).max().item()
+
+            qr = torch.quantize_per_tensor(r, scale, zero_point, dtype)
+            qr = qr.to(device)
+            qr_cuda = torch.quantize_per_tensor(r.to(device), scale, zero_point, dtype)
+            qr_cuda = qr_cuda.to('cpu')
+            self.assertEqual('cuda', qr.device.type)
+            self.assertEqual('cpu', qr_cuda.device.type)
+
+    @unittest.skipIf(not TEST_CUDA, "No gpu is available.")
+    def test_per_channel_to_device(self):
         dtype_and_zero_types = [
             (torch.quint8, torch.float),
             (torch.qint8, torch.float),
@@ -353,7 +372,6 @@ class TestQuantizedTensor(TestCase):
             scales = torch.rand(2).abs()
             zero_points = (torch.rand(2) * 10).round().to(zero_type)
 
-
             dqr = torch.quantize_per_channel(r, scales, zero_points, axis, dtype)
             dqr = dqr.to(device)
             dqr_cuda = torch.quantize_per_channel(r.to(device), scales.to(
@@ -362,18 +380,29 @@ class TestQuantizedTensor(TestCase):
             self.assertEqual('cuda', dqr.device.type)
             self.assertEqual('cpu', dqr_cuda.device.type)
 
-            if zero_type == torch.long:  # per_tensor doesn't have float support for zero_point
-                scale = scales.max().item()
-                zero_point = zero_points.max().item()
-                qr = torch.quantize_per_tensor(r, scale, zero_point, dtype)
-                qr = qr.to(device)
-                qr_cuda = torch.quantize_per_tensor(r.to(device), scale, zero_point, dtype)
-                qr_cuda = qr_cuda.to('cpu')
-                self.assertEqual('cuda', qr.device.type)
-                self.assertEqual('cpu', qr_cuda.device.type)
+    @unittest.skipIf(not torch.cuda.is_available() or TEST_WITH_ROCM, 'CUDA is not available')
+    def test_compare_per_tensor_device_numerics(self):
+        dtypes = [
+            torch.quint8,
+            torch.qint8,
+            torch.qint32,
+        ]
+        device = torch.device('cuda')
+        for dtype in dtypes:
+            r = torch.rand(2, 2) * 10
+            r[0, 0] = 2.5
+            scale = torch.rand(2).abs().max().item()
+            zero_point = (torch.rand(2) * 10).round().to(torch.long).max().item()
+
+            qtr = torch.quantize_per_tensor(r, scale, zero_point, dtype)
+            dqtr = qtr.dequantize()
+            qtr_cuda = torch.quantize_per_tensor(r.to(device), scale, zero_point, dtype)
+            dqtr_cuda = qtr_cuda.dequantize()
+            self.assertEqual(qtr.int_repr(), qtr_cuda.int_repr())
+            self.assertTrue(np.allclose(dqtr, dqtr_cuda.cpu()))
 
     @unittest.skipIf(not torch.cuda.is_available() or TEST_WITH_ROCM, 'CUDA is not available')
-    def test_compare_quant_dequant_device_numerics(self):
+    def test_compare_per_channel_device_numerics(self):
         dtype_and_zero_types = [
             (torch.quint8, torch.float),
             (torch.qint8, torch.float),
@@ -390,26 +419,14 @@ class TestQuantizedTensor(TestCase):
                 r[0, 0] = 2.5
                 scales = torch.rand(2).abs()
                 zero_points = (torch.rand(2) * 10).round().to(zero_type)
+
                 qr = torch.quantize_per_channel(r, scales, zero_points, axis, dtype)
                 dqr = qr.dequantize()
                 qr_cuda = torch.quantize_per_channel(r.to(device), scales.to(
                     device), zero_points.to(device), axis, dtype)
                 dqr_cuda = qr_cuda.dequantize()
-                self.assertEqual(qr, qr_cuda)
                 self.assertEqual(qr.int_repr(), qr_cuda.int_repr())
-                self.assertEqual(dqr, dqr_cuda)
-
-
-                if zero_type == torch.long:  # per_tensor doesn't have float support for zero_point
-                    scale = scales.max().item()
-                    zero_point = zero_points.max().item()
-                    qtr = torch.quantize_per_tensor(r, scale, zero_point, dtype)
-                    dqtr = qtr.dequantize()
-                    qtr_cuda = torch.quantize_per_tensor(r.to(device), scale, zero_point, dtype)
-                    dqtr_cuda = qtr_cuda.dequantize()
-                    self.assertEqual(qtr, qtr_cuda)
-                    self.assertEqual(qtr.int_repr(), qtr_cuda.int_repr())
-                    self.assertEqual(dqtr, dqtr_cuda)
+                self.assertTrue(np.allclose(dqr, dqr_cuda.cpu()))
 
     def _test_quantize_per_channel(self, r, scales, zero_points, axis, float_params):
 
@@ -789,8 +806,6 @@ class TestQuantizedTensor(TestCase):
             # torch.equal is not supported for the cuda backend
             if device == 'cpu':
                 self.assertFalse(torch.equal(b, c))
-            else:
-                self.assertRaises(RuntimeError, lambda: torch.equal(b, c))
 
             # a case can't view non-contiguos Tensor
             a_int = torch.randint(0, 100, [1, 2, 3, 4], device=device, dtype=dtype)
@@ -838,8 +853,6 @@ class TestQuantizedTensor(TestCase):
             # torch.equal is not supported for the cuda backend
             if device == 'cpu':
                 self.assertFalse(torch.equal(b, c))
-            else:
-                self.assertRaises(RuntimeError, lambda: torch.equal(b, c))
 
             # Throws an error if numel is wrong
             q1_int = torch.randint(0, 100, sizes1, dtype=dtype, device=device)
@@ -874,8 +887,6 @@ class TestQuantizedTensor(TestCase):
             # torch.equal is not supported for the cuda backend
             if device == 'cpu':
                 self.assertFalse(torch.equal(b, c))
-            else:
-                self.assertRaises(RuntimeError, lambda: torch.equal(b, c))
 
             # we can use reshape for non-contiguous Tensor
             a_int = torch.randint(0, 100, [1, 2, 3, 4], dtype=dtype, device=device)
@@ -963,6 +974,16 @@ class TestQuantizedTensor(TestCase):
         x = torch.randn(3)
         self.assertEqual(x.is_pinned(), False)
 
+    # There's no way to actually pin the memory of a quantized tensor
+    @unittest.skipIf(not torch.cuda.is_available() or TEST_WITH_ROCM, 'CUDA is not available')
+    def test_quant_pin_memory(self):
+        x = torch.randn(3).pin_memory()
+        self.assertEqual(x.is_pinned(), True)
+        x_q = torch.quantize_per_tensor(x, 1, 0, torch.quint8)
+        self.assertEqual(x_q.is_pinned(), False)
+        x_pin = torch.empty_quantized([3], x_q, pin_memory=True, dtype=torch.quint8)
+        self.assertEqual(x_pin.is_pinned(), False)
+        self.assertRaises(RuntimeError, lambda: x_q.pin_memory())
 
     def test_fp16_saturate_op(self):
         x = torch.ones(5, 5, dtype=torch.float32) * 65532

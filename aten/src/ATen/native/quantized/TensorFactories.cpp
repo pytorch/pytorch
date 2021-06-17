@@ -103,8 +103,7 @@ Tensor empty_quantized(
     c10::optional<bool> pin_memory,
     c10::optional<c10::MemoryFormat> memory_format) {
   TensorOptions specified_options =
-      TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
-          pin_memory);
+      TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   TORCH_CHECK(
       !(specified_options.has_memory_format() && memory_format.has_value()),
@@ -116,7 +115,6 @@ Tensor empty_quantized(
                               .merge_memory_format(memory_format);
 
   Tensor output;
-
   if (qtensor.qscheme() == kPerTensorAffine) {
     output = at::_empty_affine_quantized(
         size, options, qtensor.q_scale(), qtensor.q_zero_point());
