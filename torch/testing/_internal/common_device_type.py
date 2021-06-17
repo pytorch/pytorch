@@ -600,12 +600,12 @@ class OpDTypes(Enum):
 # that operator. There are a few caveats to the dtype rule, explained below.
 #
 # First, if the OpInfo defines "default_test_dtypes" then then the test
-# is instantiated for the cross-product of default_test_dtypes and the
+# is instantiated for the intersection of default_test_dtypes and the
 # dtypes the operator supports. Second, the @ops decorator can accept two
 # additional arguments, "dtypes" and "allowed_dtypes". If "dtypes" is specified
 # then the test variants are instantiated for those dtypes, regardless of
 # what the operator supports. If given "allowed_dtypes" then test variants
-# are instantiated only for the cross of allowed_dtypes and the dtypes
+# are instantiated only for the intersection of allowed_dtypes and the dtypes
 # they would otherwise be instantiated with. That is, allowed_dtypes composes
 # with the options listed above and below.
 #

@@ -3544,8 +3544,8 @@ class MvlGammaInfo(UnaryUfuncInfo):
             variant_test_name=variant_test_name,
             domain=domain,
             decorators=(precisionOverride({torch.float16: 5e-2}),),
-            dtypes=all_types_and(torch.bool),
-            dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+            dtypes=all_types(),
+            dtypesIfCUDA=all_types_and(torch.half),
             sample_inputs_func=sample_inputs_mvlgamma,
             supports_out=False,
             safe_casts_outputs=True,
@@ -4529,7 +4529,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types_and(torch.float16),
            dtypesIfCPU=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfROCM=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            assert_autodiffed=True,
            supports_inplace_autograd=False,
            supports_forward_ad=True,
@@ -4541,7 +4541,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types_and(torch.float16),
            dtypesIfCPU=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfROCM=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            assert_autodiffed=True,
            supports_inplace_autograd=False,
            supports_forward_ad=True,
@@ -4551,7 +4551,8 @@ op_db: List[OpInfo] = [
     OpInfo('addmv',
            dtypes=floating_types(),
            dtypesIfCPU=all_types_and_complex_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128, torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128,
+                                           *[torch.bfloat16] if CUDA11OrLater else []),
            dtypesIfROCM=floating_types_and(torch.half),
            supports_inplace_autograd=False,
            supports_forward_ad=True,
@@ -4561,16 +4562,13 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_out', dtypes=(torch.float32,)),
                # Reference: https://github.com/pytorch/pytorch/issues/55589
                SkipInfo('TestCommon', 'test_variant_consistency_eager'),
-               # some test samples works for ROCM backward but not all
-               SkipInfo('TestOpInfo', 'test_unsupported_backward', device_type='cuda',
-                        dtypes=(torch.bfloat16, torch.complex64, torch.complex128), active_if=TEST_WITH_ROCM),
            ),
            sample_inputs_func=sample_inputs_addmv),
     OpInfo('addbmm',
            dtypes=floating_types(),
            dtypesIfCPU=all_types_and_complex_and(torch.float16, torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
+           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if SM53OrLater else []),
            dtypesIfROCM=floating_types_and(torch.half),
            backward_dtypesIfROCM=floating_types_and(torch.half),
            supports_forward_ad=True,
@@ -4584,8 +4582,8 @@ op_db: List[OpInfo] = [
     OpInfo('baddbmm',
            dtypes=floating_types_and(torch.half),
            dtypesIfCPU=all_types_and_complex_and(torch.float16, torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128, torch.bfloat16),
-           backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128, *[torch.bfloat16] if CUDA11OrLater else []),
+           backward_dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if SM53OrLater else [], torch.complex64, torch.complex128),
            supports_forward_ad=True,
            skips=(
                # baddbmm does not correctly warn when resizing out= inputs
@@ -4594,21 +4592,21 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_baddbmm),
     OpInfo('dot',
            dtypes=all_types_and_complex_and(torch.float16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_dot_vdot,
            supports_forward_ad=True,
            ),
     OpInfo('vdot',
            dtypes=all_types_and_complex_and(torch.float16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            sample_inputs_func=sample_inputs_dot_vdot,
            supports_forward_ad=True,
            ),
     OpInfo('bmm',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
+           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if SM53OrLater else []),
            assert_autodiffed=True,
            supports_forward_ad=True,
            skips=(
@@ -4618,7 +4616,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_bmm),
     OpInfo('mv',
            dtypes=all_types_and_complex_and(torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            skips=(
                # bmm does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),),
@@ -4627,7 +4625,7 @@ op_db: List[OpInfo] = [
     OpInfo('addr',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            backward_dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
-           backward_dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           backward_dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            # Reference: https://github.com/pytorch/pytorch/issues/50747
            supports_inplace_autograd=False,
            supports_forward_ad=True,
@@ -4908,10 +4906,6 @@ op_db: List[OpInfo] = [
            dtypes=floating_types_and(torch.half),
            supports_out=False,
            supports_forward_ad=True,
-           skips=(
-               # "sum_cpu/sum_cuda" not implemented for 'ComplexHalf'
-               SkipInfo('TestOpInfo', 'test_supported_backward', dtypes=(torch.half,)),
-           ),
            sample_inputs_func=sample_inputs_view_as_complex),
     OpInfo('complex',
            dtypes=floating_types(),
@@ -5512,7 +5506,7 @@ op_db: List[OpInfo] = [
            aten_name='linalg_multi_dot',
            dtypes=floating_and_complex_types_and(torch.half),
            dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.half, *[torch.bfloat16] if CUDA11OrLater else []),
            supports_inplace_autograd=False,
            # Batched grad checks fail for empty input tensors (see https://github.com/pytorch/pytorch/issues/53407)
            check_batched_grad=False,
@@ -5709,39 +5703,22 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_masked_select),
     OpInfo('matrix_exp',
            dtypesIfCPU=floating_and_complex_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            sample_inputs_func=sample_inputs_matrix_exp,
            supports_out=False,
-           skips=(
-               # some test samples works for ROCM backward but not all
-               SkipInfo('TestOpInfo', 'test_unsupported_backward', device_type='cuda',
-                        dtypes=(torch.bfloat16,), active_if=TEST_WITH_ROCM),
-           )),
+           ),
     OpInfo('matmul',
            dtypes=floating_types(),
            dtypesIfCPU=all_types_and_complex(),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            dtypesIfROCM=floating_types_and(torch.half, torch.bfloat16),
+           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16),
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_matmul,
            skips=(
                # matmul does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),
-               # https://github.com/pytorch/pytorch/issues/55755
-               SkipInfo('TestOpInfo', 'test_unsupported_dtypes',
-                        device_type='cpu', dtypes=(torch.float16,)),
-               # Backward for BFloat16 isn't supported because of the error
-               # "RuntimeError: CUDA error: CUBLAS_STATUS_NOT_SUPPORTED when
-               # calling cublasGemmStridedBatchedExFix."
-               SkipInfo('TestOpInfo', 'test_supported_backward',
-                        device_type='cuda', dtypes=(torch.bfloat16,)),
                SkipInfo('TestCommon', 'test_conj_view', device_type='cpu'),
-               # "addmv_impl_cpu" not implemented for 'Half'
-               SkipInfo('TestOpInfo', 'test_unsupported_backward',
-                        device_type='cpu', dtypes=(torch.float16,)),
-               # some test samples works for ROCM backward but not all
-               SkipInfo('TestOpInfo', 'test_unsupported_backward', device_type='cuda',
-                        dtypes=(torch.complex64, torch.complex128), active_if=TEST_WITH_ROCM),
            )),
     OpInfo('max',
            op=torch.max,
@@ -5971,16 +5948,12 @@ op_db: List[OpInfo] = [
                  domain=(2, float('inf')),
                  skips=skips_mvlgamma(skip_redundant=True) + (
                      SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard', dtypes=(torch.float16,)),
-                     # bool can't represent the low value from the domain
-                     SkipInfo('TestOpInfo', 'test_supported_dtypes', dtypes=(torch.bool,)),
                  ),
                  sample_kwargs=lambda device, dtype, input: ({'p': 3}, {'d': 3})),
     MvlGammaInfo(variant_test_name='mvlgamma_p_5',
                  domain=(3, float('inf')),
                  skips=skips_mvlgamma(skip_redundant=True) + (
                      SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard', dtypes=(torch.float16,)),
-                     # bool can't represent the low value from the domain
-                     SkipInfo('TestOpInfo', 'test_supported_dtypes', dtypes=(torch.bool,)),
                  ),
                  sample_kwargs=lambda device, dtype, input: ({'p': 5}, {'d': 5})),
     OpInfo('ne',
@@ -6230,7 +6203,7 @@ op_db: List[OpInfo] = [
            op=torch.Tensor.__rpow__,
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
            # Reference: https://github.com/pytorch/pytorch/issues/54774
-            # "log2" "_vml_cpu" not implemented for Half
+           # "log2" "_vml_cpu" not implemented for Half
            backward_dtypesIfCPU=all_types_and_complex_and(torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_rbinops,
            supports_out=False,
@@ -6863,7 +6836,7 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_out'),
                # RuntimeError: _fn() Expected a value of type
                #   'Tensor (inferred)' for argument 't0' but instead found type 'tuple'.
-               SkipInfo('TestCommon', 'test_jit_alias_remapping'))),
+               SkipInfo('TestJit', 'test_jit_alias_remapping'))),
     OpInfo('dstack',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack,
@@ -6885,6 +6858,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_unfold),
     OpInfo('msort',
            dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
+           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
            dtypesIfROCM=all_types_and(torch.float16),
            check_batched_gradgrad=False,
            skips=(
@@ -7040,7 +7014,7 @@ op_db: List[OpInfo] = [
     OpInfo('inner',
            dtypes=floating_and_complex_types_and(torch.half),
            dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            dtypesIfROCM=floating_and_complex_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_inner,
            ),
