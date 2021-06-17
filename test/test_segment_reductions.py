@@ -4,7 +4,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     dtypes,
     dtypesIfCUDA,
-    onlyCPU,
 )
 from torch.testing._internal.common_utils import (
     TestCase,
@@ -90,9 +89,7 @@ class TestSegmentReductions(TestCase):
         lengths = [1, 2, 3, 0]
         data = [1, float("nan"), 3, 4, 5, 5]
         initial_value = 0
-
-        # TODO: Set this to true once cuda backward support is implemented
-        check_backward = device == "cpu"
+        check_backward = True
 
         for reduction in ("max", "mean"):
             if reduction == "max":
@@ -117,18 +114,16 @@ class TestSegmentReductions(TestCase):
                         check_backward,
                     )
 
-    @onlyCPU
+    @dtypesIfCUDA(torch.half, torch.bfloat16, torch.float, torch.double)
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
     def test_multi_d_simple(self, device, dtype):
         initial_value = 0
+        check_backward = True
         axis = 0
         lengths = [1, 2, 3, 0]
         data = [[1, 1], [float("nan"), 1], [3, float("nan")], [4, 1], [3, 2], [2, 3]]
 
-        # TODO: Set this to true once cuda backward support is implemented
-        check_backward = device == "cpu"
-
-        for reduction in ["max", "mean"]:
+        for reduction in ("max", "mean"):
             if reduction == "max":
                 expected_result = [
                     [1, 1],
@@ -174,7 +169,7 @@ class TestSegmentReductions(TestCase):
                     check_backward,
                 )
 
-    @onlyCPU
+    @dtypesIfCUDA(torch.half, torch.bfloat16, torch.float, torch.double)
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
     def test_multi_d(self, device, dtype):
         initial_value = 0
