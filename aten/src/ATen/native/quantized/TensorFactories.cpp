@@ -100,9 +100,10 @@ Tensor empty_quantized(
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
+    c10::optional<bool> pin_memory,
     c10::optional<c10::MemoryFormat> memory_format) {
   TensorOptions specified_options =
-      TensorOptions().dtype(dtype).layout(layout).device(device);
+      TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   TORCH_CHECK(
       !(specified_options.has_memory_format() && memory_format.has_value()),
