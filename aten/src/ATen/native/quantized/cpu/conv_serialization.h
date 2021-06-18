@@ -190,7 +190,7 @@ ConvParamsSerializationTypeV3 parse_conv_serialized_state(c10::IValue v) {
   }
 }
 
-#define QCONV_SERIALIZATION_VERSION 2
+#define QCONV_SERIALIZATION_VERSION 3
 
 #if QCONV_SERIALIZATION_VERSION == 2
 template <uint32_t kSpatialDim>
