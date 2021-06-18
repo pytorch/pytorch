@@ -74,6 +74,11 @@ RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({
     'tensor_split', 'swapdims', 'swapaxes'
 })
 
+# These are not included above, but shares storage regardless
+OTHER_VIEW_FUNCTIONS = {
+    '_unsafe_view',
+}
+
 ARRAYREF_TO_VEC = CodeTemplate("""\
 auto ${vec} = ${arg}.vec();
 """)
@@ -147,6 +152,9 @@ def is_tensor_list_type(t: Type) -> bool:
 UNPACK_TENSOR = CodeTemplate("""\
 auto${ref} ${arg_name}_ = unpack${suffix}(${arg_name}, "${arg_name}", ${arg_pos});""")
 
+def unpacked_name(arg_name: str) -> str:
+    return arg_name + '_'
+
 @with_native_function
 def unpack_args(f: NativeFunction) -> Tuple[List[str], List[Binding]]:
     body: List[str] = []
@@ -179,7 +187,7 @@ def unpack_args(f: NativeFunction) -> Tuple[List[str], List[Binding]]:
             ref='&' if ref else '',
         ))
         unpacked_bindings.append(Binding(
-            name=binding.name + '_',
+            name=unpacked_name(binding.name),
             nctype=binding.nctype,
             argument=binding.argument,
             default=binding.default,
