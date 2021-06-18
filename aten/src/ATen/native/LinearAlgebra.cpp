@@ -74,7 +74,7 @@ static inline std::tuple<c10::ExclusivelyOwned<Tensor>, c10::ExclusivelyOwned<Te
     .sum(-1, /*keepdim=*/false, /*dtype=*/at::kLong).fmod_(2);
   auto u_diagonal = lu.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1);
   num_exchanges.mul_(-2).add_(1);
-  return {c10::ExclusivelyOwned<Tensor>(std::move(num_exchanges)), c10::ExclusivelyOwned<Tensor>(std::move(u_diagonal))};
+  return std::make_tuple(c10::ExclusivelyOwned<Tensor>(std::move(num_exchanges)), c10::ExclusivelyOwned<Tensor>(std::move(u_diagonal)));
 }
 
 // torch.det, alias for torch.linalg.det
