@@ -69,6 +69,7 @@ namespace torch { namespace autograd {
                         && device_of(var) == opt_producer_stream->device();
     const auto on_consumer = opt_consumer_stream
                         && device_of(var) == opt_consumer_stream->device();
+
     if (on_producer && on_consumer) {
       // (2a)
       opt_accumulate_stream = opt_consumer_stream;
@@ -77,6 +78,9 @@ namespace torch { namespace autograd {
         auto event = c10::Event{c10::DeviceType::CUDA};
         event.record(*opt_producer_stream);
         opt_accumulate_stream->wait(event);
+        // records cross-stream memory use of var
+        const auto guard = c10::impl::VirtualGuardImpl(c10::DeviceType::CUDA);
+        guard.recordDataPtrOnStream(var.data_ptr, *opt_accumulate_stream);
       }
     } else {
       c10::optional<c10::Stream> opt_sync_stream = c10::nullopt;
@@ -99,6 +103,9 @@ namespace torch { namespace autograd {
         auto event = c10::Event{c10::DeviceType::CUDA};
         event.record(*opt_sync_stream);
         opt_accumulate_stream->wait(event);
+        // records cross-stream memory use of var
+        const auto guard = c10::impl::VirtualGuardImpl(c10::DeviceType::CUDA);
+        guard.recordDataPtrOnStream(var.data_ptr, *opt_accumulate_stream);
       }
     }
   }
