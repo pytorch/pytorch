@@ -486,7 +486,7 @@ def is_get_tensor_info_node(node: Node) -> bool:
 def maybe_get_next_module(
     node: Node,
     modules: Dict[str, nn.Module],
-    is_target_module_type: Callable[[nn.Module], bool]
+    target_module_type: nn.Module,
 ) -> Optional[Node]:
     """ Gets the next module that matches what is needed in
     is_target_module_type if it exists
@@ -498,7 +498,7 @@ def maybe_get_next_module(
     """
 
     for user, _ in node.users.items():
-        if user.op == 'call_module' and is_target_module_type(modules[str(user.target)]):
+        if user.op == 'call_module' and isinstance(modules[str(user.target)], target_module_type):
             return user
 
     return None
