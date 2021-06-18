@@ -1,3 +1,5 @@
+import itertools
+from numbers import Number
 import random
 import re
 import torch
@@ -21,7 +23,7 @@ class RegularFuncWrapper:
         self.func = func
 
     def __call__(self, inputs, **kwargs):
-        if len(inputs) == 2 and isinstance(inputs[1], (int, float, complex, bool)):
+        if len(inputs) == 2 and isinstance(inputs[1], Number):
             # binary op with tensorlist and scalar.
             inputs[1] = [inputs[1] for _ in range(len(inputs[0]))]
         return [self.func(*i, **kwargs) for i in zip(*inputs)]
@@ -200,39 +202,37 @@ class TestForeach(TestCase):
     @skipMeta
     @ops(foreach_binary_op_db)
     def test_binary_op_scalar_fastpath(self, device, dtype, op):
-        for N in N_values:
-            for i, scalar in enumerate([
-                random.randint(1, 10),
-                1.0 - random.random(),
-                True,
-                complex(1.0 - random.random(), 1.0 - random.random()),
-            ]):
-                disable_fastpath = op.ref == torch.div and dtype in torch.testing.get_all_int_dtypes() + [torch.bool]
-                # int scalar
-                if i == 0:
-                    disable_fastpath |= dtype == torch.bool
-                # float scalar
-                if i == 1:
-                    disable_fastpath |= dtype in torch.testing.get_all_int_dtypes() + [torch.bool]
-                # bool scalar
-                if i == 2:
-                    disable_fastpath |= dtype == torch.bool
-                    if op.ref in (torch.add, torch.mul):
-                        disable_fastpath = False
-                # complex scalar
-                if i == 3:
-                    disable_fastpath |= dtype not in torch.testing.get_all_complex_dtypes()
-                print(scalar, disable_fastpath)
-                self._test_binary_op_scalar(device, dtype, op, N, scalar, True, disable_fastpath)
+        scalars = (
+            random.randint(1, 10),
+            1.0 - random.random(),
+            True,
+            complex(1.0 - random.random(), 1.0 - random.random()),
+        )
+        for N, scalar in itertools.product(N_values, scalars):
+            disable_fastpath = op.ref == torch.div and dtype in torch.testing.get_all_int_dtypes() + [torch.bool]
+            if isinstance(scalar, int):
+                disable_fastpath |= dtype == torch.bool
+            if isinstance(scalar, float):
+                disable_fastpath |= dtype in torch.testing.get_all_int_dtypes() + [torch.bool]
+            if isinstance(scalar, bool):
+                disable_fastpath |= dtype == torch.bool
+                if op.ref in (torch.add, torch.mul):
+                    disable_fastpath = False
+            if isinstance(scalar, complex):
+                disable_fastpath |= dtype not in torch.testing.get_all_complex_dtypes()
+            self._test_binary_op_scalar(device, dtype, op, N, scalar, True, disable_fastpath)
 
     @dtypes(*torch.testing.get_all_dtypes())
     @ops(foreach_binary_op_db)
     def test_binary_op_scalar_slowpath(self, device, dtype, op):
-        scalar_values = [
-            random.randint(1, 10), 1.0 - random.random(), True, complex(1.0 - random.random(), 1.0 - random.random())]
-        for N in N_values:
-            for scalar in scalar_values:
-                self._test_binary_op_scalar(device, dtype, op, N, scalar, False, False)
+        scalars = (
+            random.randint(1, 10),
+            1.0 - random.random(),
+            True,
+            complex(1.0 - random.random(), 1.0 - random.random()),
+        )
+        for N, scalar in itertools.product(N_values, scalars):
+            self._test_binary_op_scalar(device, dtype, op, N, scalar, False, False)
 
     def _test_binary_op_scalarlist(self, device, dtype, opinfo, N, scalarlist, is_fastpath, disable_fastpath):
         n_expected_cudaLaunchKernels = N if disable_fastpath else 1
@@ -255,27 +255,25 @@ class TestForeach(TestCase):
     @ops(foreach_binary_op_db)
     def test_binary_op_scalarlist_fastpath(self, device, dtype, op):
         for N in N_values:
-            for i, scalarlist in enumerate([
-                [random.randint(0, 9) + 1 for _ in range(N)],
-                [1.0 - random.random() for _ in range(N)],
-                [complex(1.0 - random.random(), 1.0 - random.random()) for _ in range(N)],
-                [True for _ in range(N)],
-                [1, 2.0, 3.0 + 4.5j] + [3.0 for _ in range(N - 3)],
-                [True, 1, 2.0, 3.0 + 4.5j] + [3.0 for _ in range(N - 4)]
-            ]):
+            for type_str, scalarlist in (
+                ("int", [random.randint(0, 9) + 1 for _ in range(N)]),
+                ("float", [1.0 - random.random() for _ in range(N)]),
+                ("complex", [complex(1.0 - random.random(), 1.0 - random.random()) for _ in range(N)]),
+                ("bool", [True for _ in range(N)]),
+                ("mixed", [1, 2.0, 3.0 + 4.5j] + [3.0 for _ in range(N - 3)]),
+                ("mixed", [True, 1, 2.0, 3.0 + 4.5j] + [3.0 for _ in range(N - 4)]),
+            ):
                 bool_int_div = op.ref == torch.div and dtype in torch.testing.get_all_int_dtypes() + [torch.bool]
                 disable_fastpath = bool_int_div
-                # int scalarlist
-                if i == 0:
+                if type_str == "int":
                     disable_fastpath |= dtype == torch.bool
-                # float scalarlist
-                if i == 1:
+                if type_str == "float":
                     disable_fastpath |= dtype in torch.testing.get_all_int_dtypes() + [torch.bool]
                 # complex scalarlist
-                if i == 2:
+                if type_str == "complex":
                     disable_fastpath |= dtype not in torch.testing.get_all_complex_dtypes()
                 # mixed scalarlist
-                if i == 4 or i == 5:
+                if type_str == "mixed":
                     disable_fastpath |= True and dtype not in torch.testing.get_all_complex_dtypes()
                 self._test_binary_op_scalarlist(device, dtype, op, N, scalarlist, True, disable_fastpath)
 
