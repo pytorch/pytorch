@@ -575,15 +575,15 @@ class LSTM(RNNBase):
             of shape `(proj_size, hidden_size)`. Only present when ``proj_size > 0`` was
             specified.
         weight_ih_l[k]_reverse: Analogous to `weight_ih_l[k]` for the reverse direction.
-            Only present when `bidirectional=True`.
+            Only present when ``bidirectional=True``.
         weight_hh_l[k]_reverse:  Analogous to `weight_hh_l[k]` for the reverse direction.
-            Only present when `bidirectional=True`.
+            Only present when ``bidirectional=True``.
         bias_ih_l[k]_reverse:  Analogous to `bias_ih_l[k]` for the reverse direction.
-            Only present when `bidirectional=True`.
+            Only present when ``bidirectional=True``.
         bias_hh_l[k]_reverse:  Analogous to `bias_hh_l[k]` for the reverse direction.
-            Only present when `bidirectional=True`.
+            Only present when ``bidirectional=True``.
         weight_hr_l[k]_reverse:  Analogous to `weight_hr_l[k]` for the reverse direction.
-            Only present when `bidirectional=True` and ``proj_size > 0`` was specified.
+            Only present when ``bidirectional=True`` and ``proj_size > 0`` was specified.
 
     .. note::
         All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
