@@ -3465,7 +3465,7 @@ TEST_F(AtenLtcTsTensorTest, TestSize) {
   });
 }
 
-TEST_F(AtenLtcTsTensorTest, DISABLED_TestSelect) {
+TEST_F(AtenLtcTsTensorTest, TestSelect) {
   std::vector<int64_t> input_sizes = {14, 24, 8};
   int rank = input_sizes.size();
   for (int dim = -rank; dim < rank; ++dim) {
