@@ -3781,22 +3781,34 @@ Tensor _det_lu_based_helper_backward_helper(
     Tensor p, l, u;
     std::tie(p, l, u) = at::lu_unpack(lu, pivs, /*unpack_data=*/true, /*unpack_pivots=*/true);
 
-    auto u_h = u.transpose(-2, -1).conj();
+    // Tensors u_h and l_h should be physically conjugated prior to applying kernel stubs,
+    // as simple .conj() is lazy and will not materialize conjugated output.
+    auto u_h = u.transpose(-2, -1).conj_physical_();
     condition_diagonal(u_h);
-    auto l_h = l.transpose(-2, -1).conj();
+    auto l_h = l.transpose(-2, -1).conj_physical_();
 
-    auto permuted_grad = std::get<0>(
-      at::triangular_solve(
-        // note that d = c I for some scalar c, hence
-        // d u_h^{-1} = c I u_h^{-1} = u_h^{-1} c I = u_h^{-1} d,
-        // so, there is no need to explicitly transpose the solution below
-        std::get<0>(at::triangular_solve(d, u_h, /*upper=*/false)),
-        l_h
-      )
-    );
+    auto infos = at::zeros({std::max<int64_t>(1, batchCount(self))}, self.options().dtype(kInt));
+
+    // triangular_solve_stub performs operations in-place.
+    // Tensor d will contain the result
+    triangular_solve_stub(
+      self.device().type(), u_h, d, infos,
+      /*upper=*/false,
+      /*transpose=*/false,
+      /*conjugate_transpose=*/false,
+      /*unitriangular=*/false);
+    // note that d = c I for some scalar c, hence
+    // d u_h^{-1} = c I u_h^{-1} = u_h^{-1} c I = u_h^{-1} d.
+    // After this operation d will contain a row-wise permuted grad wrt to self
+    triangular_solve_stub(
+      self.device().type(), l_h, d, infos,
+      /*upper=*/true,
+      /*transpose=*/false,
+      /*conjugate_transpose=*/false,
+      /*unitriangular=*/true);
 
     // multiply by p to restore the row order
-    return at::matmul(p, permuted_grad);
+    return at::matmul(p, d);
   }
 }
 
