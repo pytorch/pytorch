@@ -127,53 +127,53 @@ namespace native {
 // them work for your case, but just write something new instead. Here we use helper functions instead of a flat fat
 // macro that implements everything, because the former allows some simple preprocessing that are unique to some
 // operators (more is foreseeable) and is more flexible and elegant than the latter.
-#define CREATE_UNARY_TORCH_IMPL_FUNC(func)                                \
-TORCH_IMPL_FUNC(func##_out) (const Tensor& self, const Tensor& result) {  \
-  func##_stub(device_type(), *this);                                      \
+#define CREATE_UNARY_TORCH_IMPL_FUNC(func_out, func_stub)                                \
+TORCH_IMPL_FUNC(func_out) (const Tensor& self, const Tensor& result) {  \
+  func_stub(device_type(), *this);                                      \
 }
 
-CREATE_UNARY_TORCH_IMPL_FUNC(acos)
-CREATE_UNARY_TORCH_IMPL_FUNC(acosh)
-CREATE_UNARY_TORCH_IMPL_FUNC(asin)
-CREATE_UNARY_TORCH_IMPL_FUNC(asinh)
-CREATE_UNARY_TORCH_IMPL_FUNC(atan)
-CREATE_UNARY_TORCH_IMPL_FUNC(atanh)
-CREATE_UNARY_TORCH_IMPL_FUNC(bitwise_not)
-CREATE_UNARY_TORCH_IMPL_FUNC(ceil)
-CREATE_UNARY_TORCH_IMPL_FUNC(cos)
-CREATE_UNARY_TORCH_IMPL_FUNC(cosh)
-CREATE_UNARY_TORCH_IMPL_FUNC(digamma)
-CREATE_UNARY_TORCH_IMPL_FUNC(erf)
-CREATE_UNARY_TORCH_IMPL_FUNC(erfc)
-CREATE_UNARY_TORCH_IMPL_FUNC(erfinv)
-CREATE_UNARY_TORCH_IMPL_FUNC(exp)
-CREATE_UNARY_TORCH_IMPL_FUNC(exp2)
-CREATE_UNARY_TORCH_IMPL_FUNC(expm1)
-CREATE_UNARY_TORCH_IMPL_FUNC(floor)
-CREATE_UNARY_TORCH_IMPL_FUNC(frac)
-CREATE_UNARY_TORCH_IMPL_FUNC(i0)
-CREATE_UNARY_TORCH_IMPL_FUNC(lgamma)
-CREATE_UNARY_TORCH_IMPL_FUNC(log)
-CREATE_UNARY_TORCH_IMPL_FUNC(log10)
-CREATE_UNARY_TORCH_IMPL_FUNC(log1p)
-CREATE_UNARY_TORCH_IMPL_FUNC(log2)
-CREATE_UNARY_TORCH_IMPL_FUNC(neg)
-CREATE_UNARY_TORCH_IMPL_FUNC(reciprocal)
-CREATE_UNARY_TORCH_IMPL_FUNC(round)
-CREATE_UNARY_TORCH_IMPL_FUNC(rsqrt)
-CREATE_UNARY_TORCH_IMPL_FUNC(sigmoid)
-CREATE_UNARY_TORCH_IMPL_FUNC(sign)
-CREATE_UNARY_TORCH_IMPL_FUNC(sin)
-CREATE_UNARY_TORCH_IMPL_FUNC(sinc)
-CREATE_UNARY_TORCH_IMPL_FUNC(sinh)
-CREATE_UNARY_TORCH_IMPL_FUNC(special_entr)
-CREATE_UNARY_TORCH_IMPL_FUNC(special_i0e)
-CREATE_UNARY_TORCH_IMPL_FUNC(special_i1e)
-CREATE_UNARY_TORCH_IMPL_FUNC(special_i1)
-CREATE_UNARY_TORCH_IMPL_FUNC(sqrt)
-CREATE_UNARY_TORCH_IMPL_FUNC(tan)
-CREATE_UNARY_TORCH_IMPL_FUNC(tanh)
-CREATE_UNARY_TORCH_IMPL_FUNC(trunc)
+CREATE_UNARY_TORCH_IMPL_FUNC(acos_out, acos_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(acosh_out, acosh_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(asin_out, asin_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(asinh_out, asinh_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(atan_out, atan_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(atanh_out, atanh_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(bitwise_not_out, bitwise_not_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(ceil_out, ceil_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(cos_out, cos_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(cosh_out, cosh_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(digamma_out, digamma_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(erf_out, erf_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(erfc_out, erfc_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(erfinv_out, erfinv_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(exp_out, exp_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(exp2_out, exp2_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(expm1_out, expm1_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(floor_out, floor_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(frac_out, frac_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(i0_out, i0_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(lgamma_out, lgamma_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(log_out, log_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(log10_out, log10_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(log1p_out, log1p_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(log2_out, log2_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(neg_out, neg_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(reciprocal_out, reciprocal_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(round_out, round_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(rsqrt_out, rsqrt_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(sigmoid_out, sigmoid_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(sign_out, sign_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(sin_out, sin_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(sinc_out, sinc_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(sinh_out, sinh_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_entr_out, special_entr_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_i0e_out, special_i0e_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_i1e_out, special_i1e_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_i1_out, special_i1_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(sqrt_out, sqrt_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(tan_out, tan_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(tanh_out, tanh_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(trunc_out, trunc_stub)
 
 TORCH_IMPL_FUNC(polygamma_out)
 (int64_t n, const Tensor& self, const Tensor& result) {
@@ -441,6 +441,13 @@ Tensor special_erfc(const Tensor& self) { return self.erfc(); }
 Tensor& special_erfinv_out(const Tensor& self, Tensor& result) { return at::erfinv_out(result, self); }
 Tensor special_erfinv(const Tensor& self) { return self.erfinv(); }
 
+// special_psi, alias for digamma
+Tensor& special_psi_out(const Tensor& self, Tensor& result) { return at::digamma_out(result, self); }
+Tensor special_psi(const Tensor& self) { return self.digamma(); }
+// special_digamma, alias for digamma
+Tensor& special_digamma_out(const Tensor& self, Tensor& result) { return at::digamma_out(result, self); }
+Tensor special_digamma(const Tensor& self) { return self.digamma(); }
+
 // special_i0, alias for i0
 Tensor& special_i0_out(const Tensor& self, Tensor& result) { return at::i0_out(result, self); }
 Tensor special_i0(const Tensor& self) { return self.i0(); }
@@ -638,8 +645,6 @@ constexpr double QUARTER = 0.25;
 }
 
 static inline void mvlgamma_check(const Tensor& self, int64_t p) {
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()),
-              "mvlgamma is not implemented for ", self.scalar_type());
   TORCH_CHECK((self > HALF * (p - 1)).all().item<bool>(),
               "All elements must be greater than (p-1)/2");
   TORCH_CHECK(p >= 1, "p has to be greater than or equal to 1");
@@ -647,11 +652,16 @@ static inline void mvlgamma_check(const Tensor& self, int64_t p) {
 
 Tensor mvlgamma(const Tensor& self, int64_t p) {
   mvlgamma_check(self, p);
+  auto dtype = c10::scalarTypeToTypeMeta(self.scalar_type());
+  if (at::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
+    // int -> float promotion
+    dtype = c10::get_default_dtype();
+  }
   Tensor args = native::arange(
       -p * HALF + HALF,
       HALF,
       HALF,
-      optTypeMetaToScalarType(self.options().dtype_opt()),
+      optTypeMetaToScalarType(dtype),
       self.options().layout_opt(),
       self.options().device_opt(),
       self.options().pinned_memory_opt());
