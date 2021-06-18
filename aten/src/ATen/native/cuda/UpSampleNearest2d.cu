@@ -76,15 +76,17 @@ __global__ void upsample_nearest2d_nhwc_out_frame(
 
   const int index = blockIdx.x * blockDim.x + threadIdx.x;
 
-  const int c = index % channels;
-  const int w2 = (index / channels) % width2;
-  const int h2 = (index / channels / width2) % height2;
-  const int n = index / channels / width2 / height2;
+  if (index < out_numel) {
+    const int c = index % channels;
+    const int w2 = (index / channels) % width2;
+    const int h2 = (index / channels / width2) % height2;
+    const int n = index / channels / width2 / height2;
 
-  const size_t h1 = height1 == height2 ? h2 : nearest_neighbor_compute_source_index(height_scale, h2, height1);
-  const size_t w1 = width1 == width2 ? w2 : nearest_neighbor_compute_source_index(width_scale, w2, width1);
+    const size_t h1 = height1 == height2 ? h2 : nearest_neighbor_compute_source_index(height_scale, h2, height1);
+    const size_t w1 = width1 == width2 ? w2 : nearest_neighbor_compute_source_index(width_scale, w2, width1);
 
-  odata[index] = idata[idx_cl(n, h1, w1, c, height1, width1, channels)];
+    odata[index] = idata[idx_cl(n, h1, w1, c, height1, width1, channels)];
+  }
 }
 
 // see NOTE [ Nearest neighbor upsampling kernel implementation ]
@@ -159,24 +161,26 @@ __global__ void upsample_nearest2d_backward_nhwc_out_frame(
 
   const int index = blockIdx.x * blockDim.x + threadIdx.x;
 
-  const int c = index % channels;
-  const int w2 = (index / channels) % width2;
-  const int h2 = (index / channels / width2) % height2;
-  const int n = index / channels / width2 / height2;
+  if (index < gi_numel) {
+    const int c = index % channels;
+    const int w2 = (index / channels) % width2;
+    const int h2 = (index / channels / width2) % height2;
+    const int n = index / channels / width2 / height2;
 
-  int h1 = nearest_neighbor_bw_compute_source_index(height_scale, h2, height1);
-  int h1_up = nearest_neighbor_bw_compute_source_index(height_scale, h2 + 1, height1);
+    int h1 = nearest_neighbor_bw_compute_source_index(height_scale, h2, height1);
+    int h1_up = nearest_neighbor_bw_compute_source_index(height_scale, h2 + 1, height1);
 
-  int w1 = nearest_neighbor_bw_compute_source_index(width_scale, w2, width1);
-  int w1_up = nearest_neighbor_bw_compute_source_index(width_scale, w2 + 1, width1);
+    int w1 = nearest_neighbor_bw_compute_source_index(width_scale, w2, width1);
+    int w1_up = nearest_neighbor_bw_compute_source_index(width_scale, w2 + 1, width1);
 
-  accscalar_t grad = 0;
-  for (int ih = h1; ih < h1_up; ih++) {
-    for (int iw = w1; iw < w1_up; iw++) {
-      grad += go[idx_cl(n, ih, iw, c, height1, width1, channels)];
+    accscalar_t grad = 0;
+    for (int ih = h1; ih < h1_up; ih++) {
+      for (int iw = w1; iw < w1_up; iw++) {
+        grad += go[idx_cl(n, ih, iw, c, height1, width1, channels)];
+      }
     }
+    gi[index] = static_cast<scalar_t>(grad);
   }
-  gi[index] = static_cast<scalar_t>(grad);
 }
 
 static void upsample_nearest2d_out_cuda_template(
@@ -211,6 +215,7 @@ static void upsample_nearest2d_out_cuda_template(
   }
 
   if (memory_format == at::MemoryFormat::ChannelsLast) {
+  // if (false) {
     TORCH_INTERNAL_ASSERT(output.is_contiguous(at::MemoryFormat::ChannelsLast),
       "output is not contiguous in channels_last");
     at::Tensor input = input_.contiguous(at::MemoryFormat::ChannelsLast);

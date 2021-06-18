@@ -83,33 +83,35 @@ __global__ void upsample_bilinear2d_nhwc_out_frame(
 
   const int index = blockIdx.x * blockDim.x + threadIdx.x;
 
-  const int c = index % channels;
-  const int w2 = (index / channels) % width2;
-  const int h2 = (index / channels / width2) % height2;
-  const int n = index / channels / width2 / height2;
+  if (index < out_numel) {
+    const int c = index % channels;
+    const int w2 = (index / channels) % width2;
+    const int h2 = (index / channels / width2) % height2;
+    const int n = index / channels / width2 / height2;
 
-  const accscalar_t h1r = area_pixel_compute_source_index<accscalar_t>(
-      rheight, h2, align_corners, /*cubic=*/false);
-  const int h1 = h1r;
-  const int h1p = (h1 < height1 - 1) ? 1 : 0;
-  const accscalar_t h1lambda = h1r - h1;
-  const accscalar_t h0lambda = static_cast<accscalar_t>(1) - h1lambda;
+    const accscalar_t h1r = area_pixel_compute_source_index<accscalar_t>(
+        rheight, h2, align_corners, /*cubic=*/false);
+    const int h1 = h1r;
+    const int h1p = (h1 < height1 - 1) ? 1 : 0;
+    const accscalar_t h1lambda = h1r - h1;
+    const accscalar_t h0lambda = static_cast<accscalar_t>(1) - h1lambda;
 
-  const accscalar_t w1r = area_pixel_compute_source_index<accscalar_t>(
-      rwidth, w2, align_corners, /*cubic=*/false);
-  const int w1 = w1r;
-  const int w1p = (w1 < width1 - 1) ? 1 : 0;
-  const accscalar_t w1lambda = w1r - w1;
-  const accscalar_t w0lambda = static_cast<accscalar_t>(1) - w1lambda;
+    const accscalar_t w1r = area_pixel_compute_source_index<accscalar_t>(
+        rwidth, w2, align_corners, /*cubic=*/false);
+    const int w1 = w1r;
+    const int w1p = (w1 < width1 - 1) ? 1 : 0;
+    const accscalar_t w1lambda = w1r - w1;
+    const accscalar_t w0lambda = static_cast<accscalar_t>(1) - w1lambda;
 
-  const accscalar_t val = h0lambda * (
-      w0lambda * idata[idx_cl(n, h1, w1, c, height1, width1, channels)] +
-      w1lambda * idata[idx_cl(n, h1, w1 + w1p, c, height1, width1, channels)]
-    ) + h1lambda * (
-      w0lambda * idata[idx_cl(n, h1 + h1p, w1, c, height1, width1, channels)] +
-      w1lambda * idata[idx_cl(n, h1 + h1p, w1 + w1p, c, height1, width1, channels)]
-    );
-  odata[idx_cl(n, h2, w2, c, height2, width2, channels)] = static_cast<scalar_t>(val);
+    const accscalar_t val = h0lambda * (
+        w0lambda * idata[idx_cl(n, h1, w1, c, height1, width1, channels)] +
+        w1lambda * idata[idx_cl(n, h1, w1 + w1p, c, height1, width1, channels)]
+      ) + h1lambda * (
+        w0lambda * idata[idx_cl(n, h1 + h1p, w1, c, height1, width1, channels)] +
+        w1lambda * idata[idx_cl(n, h1 + h1p, w1 + w1p, c, height1, width1, channels)]
+      );
+    odata[idx_cl(n, h2, w2, c, height2, width2, channels)] = static_cast<scalar_t>(val);
+  }
 }
 
 // Backward (adjoint) operation 1 <- 2 (accumulates)
@@ -196,50 +198,53 @@ __global__ void upsample_bilinear2d_backward_nhwc_out_frame(
     const size_t i_numel) {
 
   const int index = blockIdx.x * blockDim.x + threadIdx.x;
-  const int c = index % channels;
-  const int w2 = (index / channels) % width2;
-  const int h2 = (index / channels / width2) % height2;
-  const int n = index / channels / width2 / height2;
 
-  const accscalar_t h1r = area_pixel_compute_source_index<accscalar_t>(
-      rheight, h2, align_corners, /*cubic=*/false);
-  const int h1 = h1r;
-  const int h1p = (h1 < height1 - 1) ? 1 : 0;
-  const accscalar_t h1lambda = h1r - h1;
-  const accscalar_t h0lambda = static_cast<accscalar_t>(1) - h1lambda;
+  if (index < o_numel) {
+    const int c = index % channels;
+    const int w2 = (index / channels) % width2;
+    const int h2 = (index / channels / width2) % height2;
+    const int n = index / channels / width2 / height2;
 
-  const accscalar_t w1r = area_pixel_compute_source_index<accscalar_t>(
-      rwidth, w2, align_corners, /*cubic=*/false);
-  const int w1 = w1r;
-  const int w1p = (w1 < width1 - 1) ? 1 : 0;
-  const accscalar_t w1lambda = w1r - w1;
-  const accscalar_t w0lambda = static_cast<accscalar_t>(1) - w1lambda;
+    const accscalar_t h1r = area_pixel_compute_source_index<accscalar_t>(
+        rheight, h2, align_corners, /*cubic=*/false);
+    const int h1 = h1r;
+    const int h1p = (h1 < height1 - 1) ? 1 : 0;
+    const accscalar_t h1lambda = h1r - h1;
+    const accscalar_t h0lambda = static_cast<accscalar_t>(1) - h1lambda;
 
-  const scalar_t d2val = odata[index];
-  fastAtomicAdd(
-      idata,
-      idx_cl(n, h1, w1, c, height1, width1, channels),
-      i_numel,
-      static_cast<scalar_t>(h0lambda * w0lambda * d2val),
-      true);
-  fastAtomicAdd(
-      idata,
-      idx_cl(n, h1, w1 + w1p, c, height1, width1, channels),
-      i_numel,
-      static_cast<scalar_t>(h0lambda * w1lambda * d2val),
-      true);
-  fastAtomicAdd(
-      idata,
-      idx_cl(n, h1 + h1p, w1, c, height1, width1, channels),
-      i_numel,
-      static_cast<scalar_t>(h1lambda * w0lambda * d2val),
-      true);
-  fastAtomicAdd(
-      idata,
-      idx_cl(n, h1 + h1p, w1 + w1p, c, height1, width1, channels),
-      i_numel,
-      static_cast<scalar_t>(h1lambda * w1lambda * d2val),
-      true);
+    const accscalar_t w1r = area_pixel_compute_source_index<accscalar_t>(
+        rwidth, w2, align_corners, /*cubic=*/false);
+    const int w1 = w1r;
+    const int w1p = (w1 < width1 - 1) ? 1 : 0;
+    const accscalar_t w1lambda = w1r - w1;
+    const accscalar_t w0lambda = static_cast<accscalar_t>(1) - w1lambda;
+
+    const scalar_t d2val = odata[index];
+    fastAtomicAdd(
+        idata,
+        idx_cl(n, h1, w1, c, height1, width1, channels),
+        i_numel,
+        static_cast<scalar_t>(h0lambda * w0lambda * d2val),
+        true);
+    fastAtomicAdd(
+        idata,
+        idx_cl(n, h1, w1 + w1p, c, height1, width1, channels),
+        i_numel,
+        static_cast<scalar_t>(h0lambda * w1lambda * d2val),
+        true);
+    fastAtomicAdd(
+        idata,
+        idx_cl(n, h1 + h1p, w1, c, height1, width1, channels),
+        i_numel,
+        static_cast<scalar_t>(h1lambda * w0lambda * d2val),
+        true);
+    fastAtomicAdd(
+        idata,
+        idx_cl(n, h1 + h1p, w1 + w1p, c, height1, width1, channels),
+        i_numel,
+        static_cast<scalar_t>(h1lambda * w1lambda * d2val),
+        true);
+  }
 }
 
 static void upsample_bilinear2d_out_cuda_template(
