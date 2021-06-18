@@ -842,6 +842,18 @@ at::Tensor repeat(const at::Tensor& self, at::IntArrayRef repeats) {
       bridge::GetLtcTensor(self), Helpers::I64List(repeats)));
 }
 
+// TODO(asuhan): Fix the select and copy_ combination below and rely on the core
+// implementation of select_backward instead, removing this one.
+at::Tensor select_backward(const at::Tensor& grad, at::IntArrayRef input_sizes,
+                           int64_t dim, int64_t index) {
+  LTC_FN_COUNTER("xla::");
+  at::Tensor eager_grad =
+      grad.to(lazy_tensors::NNCComputationClient::HardwareDeviceType());
+  auto eager_grad_input = at::zeros(input_sizes, eager_grad.options());
+  eager_grad_input.select(dim, index).copy_(grad);
+  return bridge::CreateLtcTensor(eager_grad_input, bridge::GetLtcDevice(grad));
+}
+
 at::Tensor stack(at::TensorList tensors, int64_t dim) {
   LTC_FN_COUNTER("xla::");
   return bridge::AtenFromLtcTensor(
