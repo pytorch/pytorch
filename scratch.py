@@ -23,9 +23,7 @@ import struct
 scope = te.KernelScope()
 
 
-def make_nnc(var, dN=None):
-    dN = dN or var
-
+def make_nnc(dN):
     A = te.Placeholder([dN], torch.float32)
     B = te.Placeholder([dN])
 
@@ -41,24 +39,31 @@ def make_nnc(var, dN=None):
     return te.construct_codegen(
         'llvm',
         stmt,
-        [A, B, C, var])
+        [A, B, C])
 
 
 def main(n=16):
-    cg = make_nnc(te.VarHandle("n", te.Dtype.Int))
+    # cc = te.CompileCache(lambda: make_nnc(te.VarHandle("n", te.Dtype.Int)))
+    cc = te.CompileCache(lambda: make_nnc(te.ExprHandle.int(n)))
 
-    tA = torch.randn(n, requires_grad=False)
-    tB = torch.randn(n, requires_grad=False)
-    result1 = None
-    result2 = None
+    tA = torch.randn(n)
+    tB = torch.randn(n)
+    result1 = torch.randn(n)
+    result2 = torch.randn(n)
 
     def nnc_fn():
-        nonlocal result1
-        result1 = cg.call_jansel(tA, tB)
+        cc(tA, tB, result1)
 
     def aten_fn():
-        nonlocal result2
-        result2 = torch.add(tA, tB)
+        torch.add(tA, tB, out=result2)
+
+
+    if False:
+        nnc_fn()
+        aten_fn()
+        torch.testing.assert_allclose(result1, result2)
+        print("ok")
+        return
 
     nnc = np.median(timeit.repeat(nnc_fn, number=1000, repeat=100))
     aten = np.median(timeit.repeat(aten_fn, number=1000, repeat=100))
