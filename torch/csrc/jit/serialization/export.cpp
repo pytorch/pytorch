@@ -926,11 +926,6 @@ export_onnx(
       add_node_names,
       use_external_data_format,
       onnx_file_path);
-  const size_t proto_size = graph_encoder.get_model_proto().ByteSizeLong();
-  TORCH_CHECK(
-      proto_size <= INT_MAX,
-      "Exporting model exceed maximum protobuf size of 2GB. "
-      "Please call torch.onnx.export with use_external_data_format=True.");
   GRAPH_DEBUG("onnx proto:", prettyPrint(graph_encoder.get_model_proto()));
   return std::make_tuple(
       std::make_shared<::ONNX_NAMESPACE::ModelProto>(
@@ -941,6 +936,11 @@ export_onnx(
 
 std::string serialize_model_proto_to_string(
     const std::shared_ptr<::ONNX_NAMESPACE::ModelProto>& model_proto) {
+  const size_t proto_size = model_proto->ByteSizeLong();
+  TORCH_CHECK(
+      proto_size <= INT_MAX,
+      "Exporting model exceed maximum protobuf size of 2GB. "
+      "Please call torch.onnx.export with use_external_data_format=True.");
   return model_proto->SerializeAsString();
 }
 
