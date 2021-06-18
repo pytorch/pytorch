@@ -157,10 +157,10 @@ TEST(NNCBackendTest, AOTCompileThenExecute) {
         return input + self.param
   )");
 
-  // Run the TorchScript module to get baseline result.
+  // Run the TorchScript module to get reference result.
   std::vector<IValue> inputs;
   inputs.emplace_back(2.0 * torch::ones({4, 4}));
-  auto baseline = m.forward(inputs);
+  auto reference = m.forward(inputs);
 
   // Compile the model with NNC.
   auto compile_spec = create_compile_spec(
@@ -183,7 +183,7 @@ TEST(NNCBackendTest, AOTCompileThenExecute) {
   auto loaded_module = _load_for_mobile(ss);
   auto result = loaded_module.forward(inputs);
   EXPECT_TRUE(result.toTensor().equal(3.0 * torch::ones({4, 4})));
-  EXPECT_TRUE(result.toTensor().equal(baseline.toTensor()));
+  EXPECT_TRUE(result.toTensor().equal(reference.toTensor()));
 }
 
 TEST(NNCBackendTest, FakeTensor) {
@@ -198,10 +198,10 @@ TEST(NNCBackendTest, FakeTensor) {
             return input + self.param.get()
       )");
 
-  // Run the TorchScript module to get baseline result.
+  // Run the TorchScript module to get reference result.
   std::vector<IValue> inputs;
   inputs.emplace_back(2.0 * torch::ones({4, 4}));
-  auto baseline = m.forward(inputs);
+  auto reference = m.forward(inputs);
 
   // Compile the model with NNC.
   auto params = c10::impl::GenericList(c10::AnyType::get());
@@ -226,7 +226,7 @@ TEST(NNCBackendTest, FakeTensor) {
   auto loaded_module = _load_for_mobile(ss);
   auto result = loaded_module.forward(inputs);
   EXPECT_TRUE(result.toTensor().equal(5.0 * torch::ones({4, 4})));
-  EXPECT_TRUE(result.toTensor().equal(baseline.toTensor()));
+  EXPECT_TRUE(result.toTensor().equal(reference.toTensor()));
 }
 
 } // namespace nnc

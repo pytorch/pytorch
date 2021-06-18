@@ -94,6 +94,10 @@ allow_list = [
     ("aten::conj", datetime.date(2021, 8, 1)),
     ("aten::_conj", datetime.date(2021, 8, 1)),
     ("aten::conj.out", datetime.date(2021, 8, 1)),
+    ("aten::segment_reduce_backward", datetime.date(2021, 6, 15)),
+    ("aten::segment_reduce", datetime.date(2021, 8, 26)),
+    ("aten::_segment_reduce_backward", datetime.date(2021, 8, 26)),
+    ("aten::to", datetime.date(2021, 6, 22)),
 ]
 
 def allow_listed(schema, allow_list):
