@@ -117,7 +117,7 @@ public:
     return _mm512_castsi512_pd(_mm512_mask_set1_epi64(zero_vector, cmp_mask,
                                                       0xFFFFFFFFFFFFFFFF));
   }
-  Vectorized<double> map(double (*f)(double)) const {
+  Vectorized<double> map(double (*const f)(double)) const {
     __at_align64__ double tmp[size()];
     store(tmp);
     for (int64_t i = 0; i < size(); i++) {

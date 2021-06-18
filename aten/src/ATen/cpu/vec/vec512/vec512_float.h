@@ -133,7 +133,7 @@ public:
     return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, mask,
                                                       0xFFFFFFFF));
   }
-  Vectorized<float> map(float (*f)(float)) const {
+  Vectorized<float> map(float (*const f)(float)) const {
     __at_align64__ float tmp[size()];
     store(tmp);
     for (int64_t i = 0; i < size(); i++) {
