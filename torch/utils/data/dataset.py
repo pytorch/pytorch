@@ -316,6 +316,8 @@ class Subset(Dataset[T_co]):
         self.indices = indices
 
     def __getitem__(self, idx):
+        if isinstance(idx, list):
+            return self.dataset[[self.indices[i] for i in idx]]
         return self.dataset[self.indices[idx]]
 
     def __len__(self):
