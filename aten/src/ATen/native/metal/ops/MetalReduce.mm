@@ -2,7 +2,7 @@
 #import <ATen/native/metal/MetalCommandBuffer.h>
 #import <ATen/native/metal/MetalTensorImpl.h>
 #import <ATen/native/metal/MetalTensorImplStorage.h>
-#import <ATen/native/metal/MetalUtils.h>
+#import <ATen/native/metal/MetalTensorUtils.h>
 #import <ATen/native/metal/MetalContext.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
 #import <ATen/native/metal/mpscnn/MPSImageUtils.h>
@@ -40,7 +40,7 @@ Tensor wrapper_mean_dim(
     // TODO: [T87340633] Support reducing the batch dimension
     TORCH_CHECK(imageSize[0] == 1);
     auto mask = make_dim_mask(dims, input.dim());
-    MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
+    MetalCommandBuffer* commandBuffer = getCommandBuffer(input);
     MPSImage* Y = nil;
     for (int dim : dims) {
       imageSize[dim] = 1;

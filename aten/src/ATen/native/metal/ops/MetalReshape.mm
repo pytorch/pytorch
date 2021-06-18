@@ -1,7 +1,7 @@
 #import <ATen/native/metal/MetalCommandBuffer.h>
 #import <ATen/native/metal/MetalTensorImpl.h>
 #import <ATen/native/metal/MetalTensorImplStorage.h>
-#import <ATen/native/metal/MetalUtils.h>
+#import <ATen/native/metal/MetalTensorUtils.h>
 #import <ATen/native/metal/MetalContext.h>
 #import <ATen/native/metal/mpscnn/MPSCNNUtils.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
@@ -31,7 +31,7 @@ Tensor view(const Tensor& input, IntArrayRef size) {
     return makeTensor({inferred_size, stride_value}, input.options());
   }
   MPSImage* X = imageFromTensor(input);
-  MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
+  MetalCommandBuffer* commandBuffer = getCommandBuffer(input);
   MetalTensorImplStorage mt{inferred_size, stride_value};
   mt.texture()->allocateTemporaryStorage(inferred_size, commandBuffer);
   MPSImage* Y = mt.texture()->image();
