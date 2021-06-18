@@ -278,6 +278,13 @@ void nll_loss_forward_out_cuda_template(
       at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
 
+  TORCH_CHECK(
+      target.dim() == 1,
+      "1D target tensor expected, multi-target not supported");
+
+  int64_t n_classes = input.size(-1);
+  int64_t n_dims = input.dim();
+
   TensorArg output_arg{output, "output", 1};
   TensorArg total_weight_arg{total_weight, "total_weight", 2};
   TensorArg input_arg{input, "input", 3};
@@ -294,14 +301,11 @@ void nll_loss_forward_out_cuda_template(
         {output_arg, total_weight_arg, input_arg, target_arg});
   }
 
-  const int64_t n_classes = input.size(-1);
-  const int64_t n_dims = input.dim();
   TORCH_CHECK(n_dims > 0 && n_dims <= 2, "input tensor should be 1D or 2D");
+  int64_t batch_size = n_dims == 1 ? 1 : input.size(0);
+  int64_t num_targets = target.size(0);
   TORCH_CHECK(
-      target.dim() == 1,
-      "1D target tensor expected, multi-target not supported");
-  TORCH_CHECK(
-      input.size(0) == target.size(0),
+      batch_size == num_targets,
       "size mismatch (got input: ",
       input.sizes(),
       ", target: ",
@@ -315,9 +319,6 @@ void nll_loss_forward_out_cuda_template(
       " classes or no classes"
       " but got weight tensor of shape: ",
       weight.sizes());
-
-  int64_t batch_size = n_dims == 1 ? 1 : input.size(0);
-  int64_t num_targets = target.size(0);
 
   if (reduction == Reduction::None & n_dims == 2) {
     output.resize_({batch_size});
