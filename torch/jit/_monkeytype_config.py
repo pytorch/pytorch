@@ -9,11 +9,17 @@ from types import CodeType
 
 _IS_MONKEYTYPE_INSTALLED = True
 try:
-    import monkeytype  # type: ignore[import]
+    import monkeytype
     from monkeytype import trace as monkeytype_trace
+<<<<<<< HEAD
     from monkeytype.db.base import CallTraceThunk, CallTraceStore, CallTraceStoreLogger  # type: ignore[import]
     from monkeytype.config import _startswith, LIB_PATHS  # type: ignore[import]
     from monkeytype.tracing import CallTrace, CodeFilter  # type: ignore[import]
+=======
+    from monkeytype.db.base import CallTraceThunk, CallTraceStore, CallTraceStoreLogger
+    from monkeytype.config import _startswith, LIB_PATHS
+    from monkeytype.tracing import CallTrace, CodeFilter
+>>>>>>> 8f06cbd940cfbc297a1c8752067fdfc16fd561ae
 except ImportError:
     _IS_MONKEYTYPE_INSTALLED = False
 
