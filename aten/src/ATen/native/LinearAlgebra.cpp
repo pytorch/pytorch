@@ -2169,9 +2169,9 @@ static void check_str_ord_valid(const c10::string_view str_ord, optional<IntArra
 // Performs second dimension reduction for matrix norms
 static Tensor _norm_min_max(Tensor& self, double ord, int64_t dim, bool keepdim) {
   if (ord > 0) {
-    return self.amax(dim, keepdim);
+    return std::get<0>(self.max(dim, keepdim));
   } else {
-    return self.amin(dim, keepdim);
+    return std::get<0>(self.min(dim, keepdim));
   }
 }
 
