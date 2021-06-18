@@ -17,6 +17,7 @@ import torch
 import torch.cuda
 import torch.distributed as dist
 import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
+import torch.distributed.algorithms.model_averaging.utils as model_averaging_utils
 import torch.nn as nn
 import torch.nn.functional as F
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
@@ -938,6 +939,31 @@ class DistributedTest:
                 dist.new_subgroups_by_enumeration(
                     ranks_per_subgroup_list=[[0], [1, 2], [1, 3]]
                 )
+
+        @require_backend({"nccl"})
+        @require_backends_available({"nccl"})
+        @skip_if_lt_x_gpu(2)
+        def test_average_parameters_nccl(self):
+            rank = dist.get_rank()
+            rank_to_GPU = self._init_multigpu_helper()
+            device_id = rank_to_GPU[rank][0]
+            group_nccl = dist.new_group(ranks=[0, 1], backend="nccl")
+
+            model = (
+                nn.Sequential(
+                    nn.Conv2d(3, 3, kernel_size=3, padding=1),
+                    nn.ReLU(),
+                    nn.Linear(1, 5, bias=False)
+                ).cuda(device_id)
+            )
+
+            for p in model.parameters():
+                p.data = torch.ones_like(p.data) * rank
+            model_averaging_utils.average_parameters(model=model, process_group=group_nccl)
+
+            # Every element should be the average of 0 and 1, i.e., 0.5.
+            for p in model.parameters():
+                self.assertEqual(p.data, torch.ones_like(p.data) * 0.5)
 
         # NCCL Batch SEND RECV
         @skip_if_no_gpu
