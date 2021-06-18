@@ -691,28 +691,27 @@ def assert_close(
 
     - ``number_of_elements`` (int): Number of elements in each tensor being compared.
     - ``total_mismatches`` (int): Total number of mismatches.
-    - ``mismatch_ratio`` (float): Total mismatches divided by number of elements.
     - ``max_abs_diff`` (Union[int, float]): Greatest absolute difference of the inputs.
     - ``max_abs_diff_idx`` (Union[int, Tuple[int, ...]]): Index of greatest absolute difference.
+    - ``atol`` (float): Allowed absolute tolerance.
     - ``max_rel_diff`` (Union[int, float]): Greatest relative difference of the inputs.
     - ``max_rel_diff_idx`` (Union[int, Tuple[int, ...]]): Index of greatest relative difference.
+    - ``rtol`` (float): Allowed relative tolerance.
 
     For ``max_abs_diff`` and ``max_rel_diff`` the type depends on the :attr:`~torch.Tensor.dtype` of the inputs.
 
     .. note::
 
         :func:`~torch.testing.assert_close` is highly configurable with strict default settings. Users are encouraged
-        to :func:`~functools.partial` it to fit their use case. For example, if you an equality check is needed one
-        might define an ``assert_equal`` that uses zero tolrances for every ``dtype`` by default:
-
-        .. code:: python
+        to :func:`~functools.partial` it to fit their use case. For example, if an equality check is needed, one might
+        define an ``assert_equal`` that uses zero tolrances for every ``dtype`` by default:
 
         >>> import functools
         >>> import torch
         >>> assert_equal = functools.partial(torch.testing.assert_close, rtol=0, atol=0)
         >>> assert_equal(1e-9, 1e-10)
         AssertionError: Scalars are not equal!
-
+        <BLANKLINE>
         Absolute difference: 8.999999703829253e-10
         Relative difference: 8.999999583666371
 
@@ -769,7 +768,7 @@ def assert_close(
         >>> actual = expected.clone()
         >>> torch.testing.assert_close(actual, expected)
         AssertionError: Scalars are not close!
-
+        <BLANKLINE>
         Absolute difference: nan (up to 1e-05 allowed)
         Relative difference: nan (up to 1.3e-06 allowed)
         >>> torch.testing.assert_close(actual, expected, equal_nan=True)
@@ -779,7 +778,7 @@ def assert_close(
         >>> actual = torch.tensor(complex(0, float("NaN")))
         >>> torch.testing.assert_close(actual, expected, equal_nan=True)
         AssertionError: Real components of complex scalars are not close!
-
+        <BLANKLINE>
         Absolute difference: nan (up to 1e-05 allowed)
         Relative difference: nan (up to 1.3e-06 allowed)
         >>> # If equal_nan="relaxed", however, then complex numbers are treated as NaN if any
@@ -793,9 +792,10 @@ def assert_close(
         AssertionError: Argh, the tensors are not close!
         >>> # The error message can also created at runtime by passing a callable.
         >>> def custom_msg(actual, expected, diagnostic_info):
+        ...     ratio = diagnostic_info.total_mismatches / diagnostic_info.number_of_elements
         ...     return (
         ...         f"Argh, we found {diagnostic_info.total_mismatches} mismatches! "
-        ...         f"That is {diagnostic_info.mismatch_ratio:.1%}!"
+        ...         f"That is {ratio:.1%}!"
         ...     )
         >>> torch.testing.assert_close(actual, expected, msg=custom_msg)
         AssertionError: Argh, we found 2 mismatches! That is 66.7%!
