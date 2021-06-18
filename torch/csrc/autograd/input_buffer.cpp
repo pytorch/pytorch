@@ -19,14 +19,15 @@ namespace torch { namespace autograd {
     // ATen doesn't route sparse additions correctly...
     // do dense + sparse in-place if possible
     if (old_var.is_sparse()) {
-      //storage use_count is a big hammer, but for anything lighter there's an adversarial example with unexpected inplace modification
-      if (!var.is_sparse() && var.is_contiguous() && var.storage().use_count() == 1) {
+      // It is safe to change the Tensor inplace if the Tensor is only used in this buffer (this could be the gradient passed by the
+      // user) and that no other Tensor is using the same storage.
+      if (!var.is_sparse() && var.is_contiguous() && var.use_count() == 1 && var.storage().use_count() == 1) {
           buffer[pos] = var.add_(old_var);
       } else {
           buffer[pos] = var + old_var;
       }
     } else {
-      if (var.is_sparse() && !old_var.is_sparse() && old_var.is_contiguous() && old_var.storage().use_count() == 1) {
+      if (var.is_sparse() && !old_var.is_sparse() && old_var.is_contiguous() && old_var.use_count() == 1 && old_var.storage().use_count() == 1) {
           buffer[pos] = old_var.add_(var);
       } else {
           buffer[pos] = old_var + var;
