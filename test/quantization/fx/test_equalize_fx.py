@@ -248,12 +248,6 @@ class TestEqualizeFx(QuantizationTestCase):
                                         (nn.functional.linear, default_qconfig)]}
 
         default_equalization_qconfig_dict = {
-            "": default_qconfig,
-            "object_type": [(nn.Linear, default_equalization_qconfig),
-                            (nn.functional.linear, default_equalization_qconfig)]
-        }
-
-        fp32_equalization_qconfig_dict = {
             "": None,
             "object_type": [(nn.Linear, default_equalization_qconfig),
                             (nn.functional.linear, default_equalization_qconfig)]
@@ -314,9 +308,9 @@ class TestEqualizeFx(QuantizationTestCase):
                 return x
 
         tests = [(LinearModule, default_equalization_qconfig_dict),
-                 (Linear2FP32Module, fp32_equalization_qconfig_dict),
+                 (Linear2FP32Module, default_equalization_qconfig_dict),
                  (FunctionalLinearModule, default_equalization_qconfig_dict),
-                 (FunctionalLinear2FP32Module, fp32_equalization_qconfig_dict)]
+                 (FunctionalLinear2FP32Module, default_equalization_qconfig_dict)]
 
         for (M, equalization_qconfig_dict) in tests:
             m = M().eval()
