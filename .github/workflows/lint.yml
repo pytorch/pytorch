@@ -99,7 +99,10 @@ jobs:
         uses: actions/checkout@v2
       - name: Attempt to run setup.py
         run: |
-          python2 setup.py | grep "Python 2 has reached end-of-life and is no longer supported by PyTorch."
+          if ! python2 setup.py | grep -q "Python 2 has reached end-of-life and is no longer supported by PyTorch."; then
+            echo 'Running setup.py with Python 2 did not give the expected error message.'
+            false
+          fi
 
   shellcheck:
     runs-on: ubuntu-18.04
@@ -124,7 +127,19 @@ jobs:
         id: generate_workflows
         run: .github/scripts/generate_ci_workflows.py
       - name: Assert that regenerating the workflows didn't change them
-        run: .github/scripts/report_git_status.sh .github/workflows
+        run: |
+          if ! .github/scripts/report_git_status.sh .github/workflows; then
+            echo
+            echo 'As shown by the above diff, the committed .github/workflows'
+            echo 'are not up to date according to .github/templates.'
+            echo 'Please run this command, commit, and push again to your PR:'
+            echo
+            echo '    .github/scripts/generate_ci_workflows.py'
+            echo
+            echo 'If running that command does nothing, you may need to rebase'
+            echo 'onto a more recent commit from the PyTorch master branch.'
+            false
+          fi
       - name: Install ShellCheck
         id: install_shellcheck
         if: always()
@@ -145,7 +160,16 @@ jobs:
       - name: Run ShellCheck
         if: always() && steps.install_shellcheck.outcome == 'success'
         run: |
-          tools/run_shellcheck.sh .extracted_scripts .jenkins/pytorch
+          if ! tools/run_shellcheck.sh .extracted_scripts .jenkins/pytorch; then
+            echo
+            echo 'ShellCheck gave a nonzero exit code. Please fix the warnings'
+            echo 'listed above. Note that if a path in one of the above warning'
+            echo 'messages starts with .extracted_scripts/ then that means it'
+            echo 'is referring to a shell script embedded within another file,'
+            echo 'whose path is given by the path components immediately'
+            echo 'following the .extracted_scripts/ prefix.'
+            false
+          fi
       - name: Check that jobs will be cancelled
         if: always() && steps.generate_workflows.outcome == 'success'
         run: |
@@ -165,13 +189,27 @@ jobs:
         run: npm install -g markdown-toc
       - name: Regenerate ToCs and check that they didn't change
         run: |
-          set -eux
+          set -eu
           export PATH=~/.npm-global/bin:"$PATH"
           for FILE in $(git grep -Il '<!-- toc -->' -- '**.md'); do
             markdown-toc --bullets='-' -i "$FILE"
           done
 
-          .github/scripts/report_git_status.sh
+          if ! .github/scripts/report_git_status.sh .; then
+            echo
+            echo 'As shown by the above diff, the table of contents in one or'
+            echo 'more Markdown files is not up to date with the file contents.'
+            echo 'You can either apply that Git diff directly to correct the'
+            echo 'table of contents, or if you have npm installed, you can'
+            echo 'install the npm package markdown-toc and run the following'
+            # shellcheck disable=SC2016
+            echo 'command (replacing $FILE with the filename for which you want'
+            echo 'to regenerate the table of contents):'
+            echo
+            # shellcheck disable=SC2016
+            echo "    markdown-toc --bullets='-' -i \"\$FILE\""
+            false
+          fi
 
   flake8-py3:
     runs-on: ubuntu-18.04
@@ -219,17 +257,20 @@ jobs:
           path: flake8-output/
       - name: Fail if there were any warnings
         run: |
-          set -eux
+          set -eu
           # Re-output flake8 status so GitHub logs show it on the step that actually failed
           cat "${GITHUB_WORKSPACE}"/flake8-output.txt
-          [ ! -s "${GITHUB_WORKSPACE}"/flake8-output.txt ]
+          if [ -s "${GITHUB_WORKSPACE}"/flake8-output.txt ]; then
+            echo 'Please fix the above Flake8 warnings.'
+            false
+          fi
 
   clang-tidy:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-18.04
     container:
       # ubuntu18.04-cuda10.2-py3.6-tidy11
-      image: ghcr.io/pytorch/cilint-clang-tidy:e2cfc57ce4fa3a257a4b78fdfdc2b065c167b9c5
+      image: ghcr.io/pytorch/cilint-clang-tidy:52a8ad78d49fc9f40241fee7988db48c920499df
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
@@ -271,11 +312,13 @@ jobs:
           fi
       - name: Run clang-tidy
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           cd "${GITHUB_WORKSPACE}"
           set -eux
+
+          wget -O pr.diff "https://patch-diff.githubusercontent.com/raw/pytorch/pytorch/pull/$PR_NUMBER.diff"
 
           # Run Clang-Tidy
           # The negative filters below are to exclude files that include onnx_pb.h or
@@ -285,27 +328,28 @@ jobs:
           # /torch/csrc/generic/*.cpp is excluded because those files aren't actually built.
           # deploy/interpreter files are excluded due to using macros and other techniquies
           # that are not easily converted to accepted c++
-          python3 tools/clang_tidy.py                               \
-            --verbose                                              \
-            --paths torch/csrc/                                    \
-            --diff "$BASE_SHA"                                   \
-            -g"-torch/csrc/jit/passes/onnx/helper.cpp"             \
-            -g"-torch/csrc/jit/passes/onnx/shape_type_inference.cpp"\
-            -g"-torch/csrc/jit/serialization/onnx.cpp"             \
-            -g"-torch/csrc/jit/serialization/export.cpp"           \
-            -g"-torch/csrc/jit/serialization/import.cpp"           \
-            -g"-torch/csrc/jit/serialization/import_legacy.cpp"    \
-            -g"-torch/csrc/onnx/init.cpp"                          \
-            -g"-torch/csrc/cuda/nccl.*"                            \
-            -g"-torch/csrc/cuda/python_nccl.cpp"                   \
-            -g"-torch/csrc/autograd/FunctionsManual.cpp"           \
-            -g"-torch/csrc/generic/*.cpp"                          \
-            -g"-torch/csrc/jit/codegen/cuda/runtime/*"             \
-            -g"-torch/csrc/deploy/interpreter/interpreter.cpp"     \
-            -g"-torch/csrc/deploy/interpreter/interpreter.h"  \
-            -g"-torch/csrc/deploy/interpreter/interpreter_impl.h"  \
-            -g"-torch/csrc/deploy/interpreter/test_main.cpp"  \
-            "$@" > "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
+          python3 tools/clang_tidy.py \
+            --verbose \
+            --paths torch/csrc/ \
+            --diff-file pr.diff \
+            -g"-torch/csrc/jit/passes/onnx/helper.cpp" \
+            -g"-torch/csrc/jit/passes/onnx/shape_type_inference.cpp" \
+            -g"-torch/csrc/jit/serialization/onnx.cpp" \
+            -g"-torch/csrc/jit/serialization/export.cpp" \
+            -g"-torch/csrc/jit/serialization/import.cpp" \
+            -g"-torch/csrc/jit/serialization/import_legacy.cpp" \
+            -g"-torch/csrc/onnx/init.cpp" \
+            -g"-torch/csrc/cuda/nccl.*" \
+            -g"-torch/csrc/cuda/python_nccl.cpp" \
+            -g"-torch/csrc/autograd/FunctionsManual.cpp" \
+            -g"-torch/csrc/generic/*.cpp" \
+            -g"-torch/csrc/jit/codegen/cuda/runtime/*" \
+            -g"-torch/csrc/deploy/interpreter/interpreter.cpp" \
+            -g"-torch/csrc/deploy/interpreter/interpreter.h" \
+            -g"-torch/csrc/deploy/interpreter/interpreter_impl.h" \
+            -g"-torch/csrc/deploy/interpreter/test_main.cpp" \
+            "$@" >"${GITHUB_WORKSPACE}"/clang-tidy-output.txt
+
 
           cat "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
 
