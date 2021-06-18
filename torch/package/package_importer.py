@@ -381,7 +381,11 @@ class PackageImporter(Importer):
                 return self.modules[name]
             parent_module = self.modules[parent]
             try:
-                path = parent_module.__path__  # type: ignore[attr-defined]
+                # Extern check is to handle edge case described in:
+                # https://github.com/pytorch/pytorch/issues/57490, where non-package
+                # externed modules can have submodules via sys.modules manipulation
+                if parent not in self.extern_modules:
+                    path = parent_module.__path__  # type: ignore[attr-defined]
             except AttributeError:
                 msg = (_ERR_MSG + "; {!r} is not a package").format(name, parent)
                 raise ModuleNotFoundError(msg, name=name) from None
