@@ -39,7 +39,7 @@ Patterns = collections.namedtuple("Patterns", "positive, negative")
 # NOTE: Clang-tidy cannot lint headers directly, because headers are not
 # compiled -- translation units are, of which there is one per implementation
 # (c/cc/cpp) file.
-DEFAULT_FILE_PATTERN = re.compile(r".*\.c(c|pp)?")
+DEFAULT_FILE_PATTERN = re.compile(r"^.*\.c(c|pp)?$")
 
 # Search for:
 #    diff --git ...
