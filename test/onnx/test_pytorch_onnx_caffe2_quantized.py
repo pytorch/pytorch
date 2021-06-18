@@ -138,10 +138,10 @@ class TestQuantizedOps(unittest.TestCase):
             def __init__(self):
                 super(ConvModel, self).__init__()
                 self.qconfig = torch.quantization.default_qconfig
-                self.fc1 = torch.quantization.QuantWrapper(torch.nn.Conv2d(3, 5, 2, bias=True).to(dtype=torch.float))
+                self.conv1 = torch.quantization.QuantWrapper(torch.nn.Conv2d(3, 5, 2, bias=True).to(dtype=torch.float))
 
             def forward(self, x):
-                x = self.fc1(x)
+                x = self.conv1(x)
                 return x
         torch.backends.quantized.engine = "qnnpack"
         qconfig = torch.quantization.default_qconfig
