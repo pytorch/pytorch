@@ -47,7 +47,7 @@ class TORCH_API SerializationStorageContext {
 // sharing of storages between models.
 class TORCH_API DeserializationStorageContext {
  public:
-  explicit DeserializationStorageContext() {}
+  explicit DeserializationStorageContext() = default;
 
   void addStorage(const std::string& name, c10::Storage storage) {
     TORCH_INTERNAL_ASSERT(!hasStorage(name));

@@ -5132,6 +5132,11 @@
   dispatch:
     CPU, CUDA: quantize_per_tensor
 
+- func: quantize_per_tensor.tensor_qparams(Tensor self, Tensor scale, Tensor zero_point, ScalarType dtype) -> Tensor
+  variants: function
+  dispatch:
+    CPU, CUDA: quantize_per_tensor_tensor_qparams
+
 - func: quantize_per_tensor.tensors(Tensor[] tensors, Tensor scales, Tensor zero_points, ScalarType dtype) -> Tensor[]
   variants: function
   dispatch:
@@ -8382,13 +8387,13 @@
   python_module: nn
   dispatch:
     CPU: rrelu_with_noise_out_cpu
-    CUDA: legacy::cuda::_thnn_rrelu_with_noise_forward_out
+    CUDA: rrelu_with_noise_out_cuda
 
 - func: rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
   python_module: nn
   dispatch:
     CPU: rrelu_with_noise_cpu
-    CUDA: legacy::cuda::_thnn_rrelu_with_noise_forward
+    CUDA: rrelu_with_noise_cuda
 
 - func: rrelu_with_noise_backward(Tensor grad_output, Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, bool self_is_result) -> Tensor
   python_module: nn
@@ -8399,7 +8404,7 @@
   python_module: nn
   dispatch:
     CPU: rrelu_with_noise_cpu_
-    CUDA: legacy::cuda::_thnn_rrelu_with_noise_forward_
+    CUDA: rrelu_with_noise_cuda_
 
 - func: softplus.out(Tensor self, Scalar beta=1, Scalar threshold=20, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -10120,7 +10125,7 @@
   dispatch:
     CPU, CUDA: segment_reduce_kernel
 
-- func: _segment_reduce_backward(Tensor grad, Tensor output, Tensor data, str reduce, *, Tensor? lengths=None) -> Tensor
+- func: _segment_reduce_backward(Tensor grad, Tensor output, Tensor data, str reduce, *, Tensor? lengths=None, int axis=0) -> Tensor
   variants: function
   dispatch:
     CPU, CUDA: _segment_reduce_backward_kernel
