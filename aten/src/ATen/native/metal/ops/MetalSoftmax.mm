@@ -22,6 +22,9 @@ Tensor mpscnn_softmax(
   TORCH_CHECK(input.is_metal());
   // TODO: [T87180544] Implment softmax/log_softmax in metal shaders
   TORCH_CHECK(input.dim() == 2);
+  if(input.numel() == 0){
+      return makeTensor({input.sizes().vec()}, input.options());
+  }
   std::vector<int64_t> newSize(4, 1);
   if (dim == 0) {
     newSize[1] = input.size(0);
