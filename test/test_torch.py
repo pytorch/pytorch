@@ -4548,7 +4548,7 @@ else:
                 x_c = x.contiguous()
                 y_c = y.contiguous()
                 result_c = fn(x_c, y_c)
-                result = fn(x, y)
+                result = fn(x.clone(), y)
                 self.assertEqual(result, result_c)
                 self.assertTrue(
                     result.is_contiguous(memory_format=memory_format),
