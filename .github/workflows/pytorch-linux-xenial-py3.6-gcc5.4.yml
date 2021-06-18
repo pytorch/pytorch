@@ -223,6 +223,7 @@ jobs:
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
       JOB_BASE_NAME: pytorch-linux-xenial-py3.6-gcc5.4-test
+      TEST_CONFIG: ${{ matrix.config }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       SHARD_NUMBER: ${{ matrix.shard }}
     steps:
@@ -274,6 +275,11 @@ jobs:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Test PyTorch
         run: |
+          if [[ $TEST_CONFIG == 'multigpu' ]]; then
+            TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
+          else
+            TEST_COMMAND=.jenkins/pytorch/test.sh
+          fi
           if [[ $NUM_TEST_SHARDS -ne 2 ]]; then
             export SHARD_NUMBER=0
           fi
@@ -298,7 +304,7 @@ jobs:
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}" \
-            sh -c 'sudo chown -R jenkins . && pip install dist/*.whl && .jenkins/pytorch/test.sh'
+            sh -c 'sudo chown -R jenkins . && pip install dist/*.whl && '$TEST_COMMAND
       - name: Chown workspace
         if: always()
         run: |
