@@ -805,9 +805,14 @@ at::Tensor PackedConvWeightsMkldnn<kSpatialDim>::apply_impl(
     const at::Tensor& act,
     double output_scale,
     int64_t output_zero_point) {
-  const std::string func_name = transpose() ?
-                                (kReluFused ? "quantized::conv_transpose" : "quantized::conv_transpose_relu")
-                                : (kReluFused ? "quantized::conv" : "quantized::conv_relu");
+  std::string func_name = "quantized::conv";
+  if (transpose()) {
+    func_name += "_transpose";
+  }
+  func_name += std::to_string(kSpatialDim) + "d";
+  if (kReluFused) {
+    func_name += "_relu";
+  }
   ConvDimChecks<kSpatialDim>(
       act.ndimension(), stride().size(), padding().size(),
       output_padding().size(), dilation().size(), func_name, transpose());
@@ -830,7 +835,9 @@ at::Tensor PackedConvWeightsMkldnn<kSpatialDim>::apply_impl(
   std::vector<int64_t> input_size = src.get_dims();
   std::vector<int64_t> output_sizes;
   if (transpose()) {
+    // Prepacked weight format: [o, i, ...]
     const int N = act.size(0); // batch size
+    const int C = act.size(1); // input channels
     const int M = weights.get_dim(0); // output channels
     const int D = kSpatialDim == 2 ? 1 : act.size(2); // input depth
     const int H = act.size(kSpatialDim); // input height
@@ -838,6 +845,9 @@ at::Tensor PackedConvWeightsMkldnn<kSpatialDim>::apply_impl(
     const int KH = weights.get_dim(kSpatialDim); // kernel height
     const int KW = weights.get_dim(kSpatialDim + 1); // kernel width
     const int KD = kSpatialDim == 2 ? 1 : weights.get_dim(2); // kernel depth
+    TORCH_CHECK(C == groups() * weights.get_dim(1), // weight: [o, i, ...]
+                func_name, " (MKLDNN): input channel number should be ",
+                groups() * weights.get_dim(1), ", but got ", C);
     auto output_shape = MakeDeConvOutputShape<kSpatialDim>(
         N,
         M,
