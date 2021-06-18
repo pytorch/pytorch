@@ -88,7 +88,7 @@ class TestNamedTupleAPI(TestCase):
                input=(torch.tensor([3, 2, 1, 4, 5], dtype=torch.int32), True, True),
                names=('P', 'L', 'U'), hasout=True),
             op(operators=['_det_lu_based_helper'],
-               input=(), names=('det', 'p', 'l', 'u'), hasout=False),
+               input=(), names=('det', 'lu', 'pivs'), hasout=False),
         ]
 
         def get_func(f):
