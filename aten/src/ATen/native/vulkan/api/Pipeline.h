@@ -196,11 +196,8 @@ inline Pipeline::Barrier::operator bool() const {
 inline bool operator==(
     const Pipeline::Layout::Descriptor& _1,
     const Pipeline::Layout::Descriptor& _2) {
-  static_assert(
-      std::is_trivially_copyable<Pipeline::Layout::Descriptor>::value,
-      "This implementation is no longer valid!");
 
-  return (0 == memcmp(&_1, &_2, sizeof(Pipeline::Layout::Descriptor)));
+  return (_1.descriptor_set_layout == _2.descriptor_set_layout);
 }
 
 inline size_t Pipeline::Layout::Factory::Hasher::operator()(
@@ -211,11 +208,10 @@ inline size_t Pipeline::Layout::Factory::Hasher::operator()(
 inline bool operator==(
     const Pipeline::Descriptor& _1,
     const Pipeline::Descriptor& _2) {
-  static_assert(
-      std::is_trivially_copyable<Pipeline::Descriptor>::value,
-      "This implementation is no longer valid!");
 
-  return (0 == memcmp(&_1, &_2, sizeof(Pipeline::Descriptor)));
+  return (_1.pipeline_layout == _2.pipeline_layout && \
+          _1.shader_module == _2.shader_module && \
+          _1.local_work_group == _2.local_work_group);
 }
 
 inline size_t Pipeline::Factory::Hasher::operator()(
