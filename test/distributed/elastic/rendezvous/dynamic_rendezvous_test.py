@@ -4,7 +4,6 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-import codecs
 import copy
 import os
 import pickle
@@ -12,6 +11,7 @@ import socket
 import threading
 import time
 from abc import ABC, abstractmethod
+from base64 import b64encode
 from datetime import datetime, timedelta
 from typing import Callable, Optional, Tuple, cast
 from unittest import TestCase
@@ -153,7 +153,7 @@ class RendezvousStateTest(TestCase):
 
                 bits = pickle.dumps(state)
 
-                base64_bits = codecs.encode(bits, "base64")
+                base64_bits = b64encode(bits)
 
                 self.assertLessEqual(len(base64_bits), max_byte_size)
 
@@ -423,9 +423,9 @@ class BackendRendezvousStateHolderTest(TestCase, CustomAssertMixin):
             self.assertEqual(self._mock_backend.set_state.call_count, 0)
 
     def test_sync_sanitizes_state(self) -> None:
-        expected_state = self._create_state()
+        state = self._create_state()
 
-        state = copy.deepcopy(expected_state)
+        expected_state = copy.deepcopy(state)
 
         dead_node1 = _NodeDesc("dead1", 1, 1)
         dead_node2 = _NodeDesc("dead2", 1, 1)
@@ -445,6 +445,28 @@ class BackendRendezvousStateHolderTest(TestCase, CustomAssertMixin):
 
         state.wait_list.add(dead_node4)
         state.wait_list.add(dead_node5)
+
+        self._backend.set_state_internal(state)
+
+        state_holder = self._create_state_holder()
+
+        state_holder.sync()
+
+        self.assert_state_equal(state_holder.state, expected_state)
+
+    def test_sync_sanitizes_state_if_no_participants_is_left(self) -> None:
+        state = self._create_state()
+
+        expected_state = copy.deepcopy(state)
+
+        for node in state.last_heartbeats:
+            state.last_heartbeats[node] = self._now - timedelta(seconds=100)
+
+        expected_state.complete = False
+        expected_state.round = 1000
+        expected_state.participants = {}
+        expected_state.wait_list = set()
+        expected_state.last_heartbeats = {}
 
         self._backend.set_state_internal(state)
 

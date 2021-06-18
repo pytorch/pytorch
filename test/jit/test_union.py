@@ -271,7 +271,7 @@ class TestUnion(JitTestCase):
 
         for s in (fn1.graph, fn2.graph):
             FileCheck().check("x : Union[int, str]")     \
-                    .run(s)
+                .run(s)
 
     def test_union_argument_order_is_ignored_container(self):
         @torch.jit.script
@@ -284,7 +284,7 @@ class TestUnion(JitTestCase):
 
         for s in (fn1.graph, fn2.graph):
             FileCheck().check("x : Union[int[], str[]]")     \
-                    .run(s)
+                .run(s)
 
     def test_union_T_None_is_equivalent_to_optional_T(self):
         @torch.jit.script
@@ -320,36 +320,6 @@ class TestUnion(JitTestCase):
             return a_ + b_
 
         self.assertEqual(fn2(), 10)
-
-    def test_union_optional_of_union_is_flattened(self):
-        @torch.jit.script
-        def fn(flag: int) -> Union[str, int, None]:
-            y: Union[int, str, None] = "foo"
-            if flag == 0:
-                x: Optional[Union[int, str]] = y
-            elif flag == 1:
-                x: Optional[Union[int, str]] = 1
-            else:
-                x: Optional[Union[int, str]] = None
-            return x
-
-        # Can't use `checkScript` because it will flag the fact that
-        # the original code has `Optional[Union[int, str]]` but the
-        # saved/loaded code has `Union[int, NoneType, str]` (even
-        # though this is exactly what we want)
-        self.assertEqual(fn(0), "foo")
-        self.assertEqual(fn(1), 1)
-        self.assertEqual(fn(2), None)
-
-        buffer = io.BytesIO()
-        torch.jit.save(fn, buffer)
-        l = torch.jit.load(buffer)
-
-        s = l.code
-
-        FileCheck().check("Union[int, NoneType, str]")     \
-                   .check("Union[int, NoneType, str]")     \
-                   .run(s)
 
     def test_union_subclasses_larger_union(self):
         def fn() -> Union[int, str, torch.Tensor]:

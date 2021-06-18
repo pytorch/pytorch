@@ -30,7 +30,7 @@ def _export(*args, **kwargs):
 
 
 def export(model, args, f, export_params=True, verbose=False, training=TrainingMode.EVAL,
-           input_names=None, output_names=None, aten=False, export_raw_ir=False,
+           input_names=None, output_names=None, aten=False,
            operator_export_type=None, opset_version=None, _retain_param_name=True,
            do_constant_folding=True, example_outputs=None, strip_doc_string=True,
            dynamic_axes=None, keep_initializers_as_inputs=None, custom_opsets=None,
@@ -62,8 +62,8 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
 
                 "args = (x,
                         {
-                        'y': input_y,
-                        'z': input_z
+                        "y": input_y,
+                        "z": input_z
                         })"
 
             The inputs to the model are structured as a tuple consisting of
@@ -87,7 +87,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
 
                 In the previous iteration, the call to export API would look like
 
-                    torch.onnx.export(model, (k, x), 'test.onnx')
+                    torch.onnx.export(model, (k, x), "test.onnx")
 
                 This would work as intended. However, the export function
                 would now assume that the `x` input is intended to represent the optional
@@ -95,7 +95,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
                 an issue a constraint is placed to provide an empty dictionary as the last
                 input in the tuple args in such cases. The new call would look like this.
 
-                    torch.onnx.export(model, (k, x, {}), 'test.onnx')
+                    torch.onnx.export(model, (k, x, {}), "test.onnx")
 
         f: a file-like object (has to implement fileno that returns a file descriptor)
             or a string containing a file name.  A binary Protobuf will be written
@@ -118,8 +118,6 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
         aten (bool, default False): [DEPRECATED. use operator_export_type] export the
             model in aten mode. If using aten mode, all the ops original exported
             by the functions in symbolic_opset<version>.py are exported as ATen ops.
-        export_raw_ir (bool, default False): [DEPRECATED. use operator_export_type]
-            export the internal IR directly instead of converting it to ONNX ops.
         operator_export_type (enum, default OperatorExportTypes.ONNX):
             OperatorExportTypes.ONNX: All ops are exported as regular ONNX ops
             (with ONNX namespace).
@@ -146,7 +144,6 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
 
             In the above example, aten::triu is not supported in ONNX, hence
             exporter falls back on this op.
-            OperatorExportTypes.RAW: Export raw ir.
             OperatorExportTypes.ONNX_FALLTHROUGH: If an op is not supported
             in ONNX, fall through and export the operator as is, as a custom
             ONNX op. Using this mode, the op can be exported and implemented by
@@ -179,7 +176,11 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             optimization is applied to the model during export. Constant-folding
             optimization will replace some of the ops that have all constant
             inputs, with pre-computed constant nodes.
-        example_outputs (tuple of Tensors, default None): Model's example outputs being exported.
+        example_outputs (tuple of Tensors, list of Tensors, Tensor, int, float, bool, default None):
+            Model's example outputs being exported. 'example_outputs' must be provided when exporting
+            a ScriptModule or TorchScript Function. If there is more than one item, it should be passed
+            in tuple format, e.g.: example_outputs = (x, y, z). Otherwise, only one item should
+            be passed as the example output, e.g. example_outputs=x.
             example_outputs must be provided when exporting a ScriptModule or TorchScript Function.
         strip_doc_string (bool, default True): if True, strips the field
             "doc_string" from the exported model, which information about the stack
@@ -201,34 +202,34 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
 
             .. code-block:: none
 
-                shape(input_1) = ('b', 3, 'w', 'h')
-                and shape(input_2) = ('b', 4)
-                and shape(output)  = ('b', 'd', 5)
+                shape(input_1) = ("b", 3, "w", "h")
+                and shape(input_2) = ("b", 4)
+                and shape(output)  = ("b", "d", 5)
 
             Then `dynamic axes` can be defined either as:
 
             1. ONLY INDICES::
 
-                ``dynamic_axes = {'input_1':[0, 2, 3],
-                                  'input_2':[0],
-                                  'output':[0, 1]}``
+                ``dynamic_axes = {"input_1":[0, 2, 3],
+                                  "input_2":[0],
+                                  "output":[0, 1]}``
                 where automatic names will be generated for exported dynamic axes
 
             2. INDICES WITH CORRESPONDING NAMES::
 
-                ``dynamic_axes = {'input_1':{0:'batch',
-                                             1:'width',
-                                             2:'height'},
-                                  'input_2':{0:'batch'},
-                                  'output':{0:'batch',
-                                            1:'detections'}}``
+                ``dynamic_axes = {"input_1":{0:"batch",
+                                             1:"width",
+                                             2:"height"},
+                                  "input_2":{0:"batch"},
+                                  "output":{0:"batch",
+                                            1:"detections"}}``
                 where provided names will be applied to exported dynamic axes
 
             3. MIXED MODE OF (1) and (2)::
 
-                ``dynamic_axes = {'input_1':[0, 2, 3],
-                                  'input_2':{0:'batch'},
-                                  'output':[0,1]}``
+                ``dynamic_axes = {"input_1":[0, 2, 3],
+                                  "input_2":{0:"batch"},
+                                  "output":[0,1]}``
 
         keep_initializers_as_inputs (bool, default None): If True, all the
             initializers (typically corresponding to parameters) in the
@@ -260,16 +261,16 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             in external binary files and not in the ONNX model file itself. See link for format
             details:
             https://github.com/onnx/onnx/blob/8b3f7e2e7a0f2aba0e629e23d89f07c7fc0e6a5e/onnx/onnx.proto#L423
-            Also, in this case,  argument 'f' must be a string specifying the location of the model.
+            Also, in this case,  argument "f" must be a string specifying the location of the model.
             The external binary files will be stored in the same location specified by the model
-            location 'f'. If False, then the model is stored in regular format, i.e. model and
+            location "f". If False, then the model is stored in regular format, i.e. model and
             parameters are all in one file. This argument is ignored for all export types other
             than ONNX.
     """
 
     from torch.onnx import utils
     return utils.export(model, args, f, export_params, verbose, training,
-                        input_names, output_names, aten, export_raw_ir,
+                        input_names, output_names, aten,
                         operator_export_type, opset_version, _retain_param_name,
                         do_constant_folding, example_outputs,
                         strip_doc_string, dynamic_axes, keep_initializers_as_inputs,
@@ -293,8 +294,8 @@ def _optimize_trace(graph, operator_export_type):
 
 def select_model_mode_for_export(model, mode):
     r"""
-    A context manager to temporarily set the training mode of 'model'
-    to 'mode', resetting it when we exit the with-block.  A no-op if
+    A context manager to temporarily set the training mode of "model"
+    to "mode", resetting it when we exit the with-block.  A no-op if
     mode is None.
 
     In version 1.6 changed to this from set_training

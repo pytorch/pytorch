@@ -1,4 +1,7 @@
 #include <c10d/NCCLUtils.hpp>
+
+#ifdef USE_C10D_NCCL
+
 #include <mutex>
 
 namespace c10d {
@@ -32,3 +35,5 @@ std::string ncclGetErrorWithVersion(ncclResult_t error) {
 }
 
 } // namespace c10d
+
+#endif // USE_C10D_NCCL

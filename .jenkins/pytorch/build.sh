@@ -24,7 +24,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-mobile-code-analysis* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile-code-analysis.sh" "$@"
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7* ]]; then
   # Enabling DEPLOY build (embedded torch python interpreter, experimental)
   # only on one config for now, can expand later
   export USE_DEPLOY=ON
