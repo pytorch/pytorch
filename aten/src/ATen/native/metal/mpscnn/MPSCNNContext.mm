@@ -44,7 +44,7 @@ using namespace at::native::metal;
   if (!MPSSupportsMTLDevice(_device)) {
     return false;
   }
-  if ([UIDevice currentDevice].systemVersion.floatValue < 10.2) {
+  if ([UIDevice currentDevice].systemVersion.floatValue < 11.0) {
     return false;
   }
   if (![_device supportsFeatureSet:MTLFeatureSet_iOS_GPUFamily3_v2]) {
@@ -105,13 +105,13 @@ using namespace at::native::metal;
   }
   MTLFunctionConstantValues* constantValues = [MTLFunctionConstantValues new];
   NSUInteger ushortArgIndex = 0;
-  NSUInteger floatArgIndex = 10;
+  NSUInteger floatArgIndex = 12;
   for (auto i = 0; i < constants.count; ++i) {
     NSNumber* constant = constants[i];
     const char* type = constant.objCType;
     if (strcmp(type, @encode(NSUInteger)) == 0 ||
         strcmp(type, @encode(NSInteger)) == 0) {
-      TORCH_CHECK(ushortArgIndex <= 10);
+      TORCH_CHECK(ushortArgIndex <= 12);
       ushort value = ushort([constant unsignedIntegerValue]);
       [constantValues setConstantValue:&value
                                   type:MTLDataTypeUShort
@@ -120,7 +120,7 @@ using namespace at::native::metal;
     }
     if (strcmp(type, @encode(float)) == 0 ||
         strcmp(type, @encode(double)) == 0) {
-      TORCH_CHECK(floatArgIndex <= 12);
+      TORCH_CHECK(floatArgIndex <= 14);
       float value = [constant floatValue];
       [constantValues setConstantValue:&value
                                   type:MTLDataTypeFloat

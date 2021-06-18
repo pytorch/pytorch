@@ -162,11 +162,9 @@ void replaceLoopCounter(Node* loop) {
   body->insertOutput(1, result);
 }
 
-bool unroll(Node* loop) {
+void unroll(Node* loop) {
   Graph* graph = loop->owningGraph();
   Block* body = loop->blocks().at(0);
-  if (!isSmallBlock(body))
-    return false;
 
   // We will be using a "mutable" counter outside of the loop instead of the
   // default one, because this will allow us to share it between the unrolled
@@ -184,7 +182,7 @@ bool unroll(Node* loop) {
     repeatBody(body, *const_len, dest);
     loop->eraseBlock(0);
     inlineBody(loop);
-    return true;
+    return;
   }
 
   WithInsertPoint insert_point_guard{loop};
@@ -212,11 +210,9 @@ bool unroll(Node* loop) {
           aten::sub,
           {iter_count,
            graph->insert(aten::mul, {unrolled_iter_count, kUnrollFactor})}));
-
-  return true;
 }
 
-bool UnrollLoops(Block* block) {
+bool UnrollLoops(Block* block, bool constant_only) {
   bool changed = false;
   for (auto it = block->nodes().begin(); it != block->nodes().end();) {
     // XXX: unroll might destroy the current node, so we need to pre-increment
@@ -224,11 +220,21 @@ bool UnrollLoops(Block* block) {
     Node* node = *it;
     ++it;
     for (Block* subblock : node->blocks()) {
-      changed |= UnrollLoops(subblock);
+      changed |= UnrollLoops(subblock, constant_only);
     }
-    if (isForLoop(node)) {
-      changed |= unroll(node);
+    if (!isForLoop(node)) {
+      continue;
     }
+    if (constant_only) {
+      if (node->inputs().at(0)->node()->kind() != prim::Constant) {
+        continue;
+      }
+    } else if (!isSmallBlock(node->blocks().at(0))) {
+      continue;
+    }
+
+    unroll(node);
+    changed = true;
   }
   return changed;
 }
@@ -366,7 +372,15 @@ Node* PeelLoop(Node* n, size_t times) {
 }
 
 bool UnrollLoops(std::shared_ptr<Graph>& graph) {
-  bool changed = UnrollLoops(graph->block());
+  bool changed = UnrollLoops(graph->block(), false);
+  if (changed) {
+    EliminateDeadCode(graph);
+  }
+  return changed;
+}
+
+bool UnrollConstantLoops(std::shared_ptr<Graph>& graph) {
+  bool changed = UnrollLoops(graph->block(), true);
   if (changed) {
     EliminateDeadCode(graph);
   }

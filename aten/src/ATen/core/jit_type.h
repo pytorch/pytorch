@@ -135,7 +135,7 @@ struct TORCH_API UnionType : public Type {
 
   c10::optional<TypePtr> toOptional(bool unification_allowed=false) const;
 
-  UnionTypePtr withoutNone() const;
+  UnionTypePtr subtractTypeSet(std::vector<TypePtr>& to_subtract) const;
 
  protected:
     UnionType(std::vector<TypePtr> types, TypeKind kind=TypeKind::UnionType);
@@ -268,6 +268,10 @@ struct TORCH_API Stride {
         stride_ == b.stride_;
   }
 
+  bool isComplete() const {
+    return stride_index_ && contiguous_ && stride_;
+  }
+
   c10::optional<size_t> stride_index_;
   c10::optional<bool> contiguous_;
   c10::optional<size_t> stride_;
@@ -319,6 +323,10 @@ struct TORCH_API ShapeSymbol {
   }
   int64_t static_size() const {
     TORCH_CHECK(is_static());
+    return value_;
+  };
+
+  int64_t value() const {
     return value_;
   };
 
@@ -378,6 +386,8 @@ struct TORCH_API SymbolicShape {
     dims_ = shape_symbols;
   }
 
+  void dump() const;
+
   SymbolicShape(std::vector<ShapeSymbol> dims) : dims_(std::move(dims)) {}
 
   SymbolicShape(c10::IntArrayRef dims) {
@@ -390,6 +400,13 @@ struct TORCH_API SymbolicShape {
   }
 
   ShapeSymbol operator[](size_t i) const {
+    if (!dims_) {
+      throw std::runtime_error("Rank isn't fixed");
+    }
+    return (*dims_).at(i);
+  }
+
+  ShapeSymbol at(size_t i) const {
     if (!dims_) {
       throw std::runtime_error("Rank isn't fixed");
     }
@@ -432,6 +449,17 @@ struct TORCH_API SymbolicShape {
   private:
     c10::optional<std::vector<ShapeSymbol>> dims_;
 };
+
+namespace detail {
+inline bool isComplete(const Stride& s) {
+  return s.isComplete();
+}
+
+template<typename T>
+inline bool isComplete(const T& t) {
+  return true;
+}
+}
 
 template <typename T>
 struct VaryingShape {
@@ -496,7 +524,7 @@ struct VaryingShape {
       return false;
     }
     for (auto d : *dims_) {
-      if(!d) {
+      if (!d || !detail::isComplete(*d)) {
         return false;
       }
     }
@@ -1011,6 +1039,9 @@ struct TORCH_API TupleType : public NamedType {
         std::move(types),
         c10::nullopt,
         nullptr)); // NOLINT(modernize-make-shared)
+  }
+  static TupleTypePtr create() {
+    return create({});
   }
 
   at::ArrayRef<TypePtr> elements() const {
@@ -1542,6 +1573,7 @@ enum class TypeVerbosity {
   Type,
   TypeAndStride,
   Full,
+  Symbolic,
   Default = Full,
 };
 
@@ -1574,6 +1606,8 @@ inline TypePtr TensorType::fromNumberType(TypePtr typ) {
     return TensorType::createContiguous(at::kDouble, at::kCPU, {});
   } else if (typ->isSubtypeOf(BoolType::get())) {
     return TensorType::createContiguous(at::kBool, at::kCPU, {});
+  } else if (typ->kind() == NumberType::Kind) {
+    return TensorType::create(c10::nullopt, at::kCPU, {}, c10::nullopt);
   }
   TORCH_CHECK(false, "Unknown number type: ", typ->str());
 }
@@ -1731,6 +1765,12 @@ struct getTypePtr_<at::Generator> final {
 };
 template <>
 struct getTypePtr_<std::string> final {
+  static TypePtr call() {
+    return StringType::get();
+  }
+};
+template <>
+struct getTypePtr_<c10::string_view> final {
   static TypePtr call() {
     return StringType::get();
   }

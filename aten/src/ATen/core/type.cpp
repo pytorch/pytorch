@@ -34,12 +34,15 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
 
       out << "(";
       size_t i = 0;
+      bool symbolic = type_verbosity() == TypeVerbosity::Symbolic;
       for (i = 0; i < *ndim; ++i) {
         if (i > 0) {
           out << ", ";
         }
         if (auto s = value->sizes()[i]) {
           out << *s;
+        } else if (symbolic) {
+          out << value->symbolic_sizes().at(i);
         } else {
           out << "*";
         }
@@ -348,7 +351,7 @@ c10::optional<TypePtr> unifyTypeList(
 
   TypePtr ret_type = elements.at(0);
   for (size_t i = 1; i < elements.size() && ret_type; ++i) {
-    auto maybe_unified = unifyTypes(ret_type, elements.at(i));
+    auto maybe_unified = unifyTypes(ret_type, elements.at(i), default_to_union);
     if (!maybe_unified) {
       why_not << "Could not unify type list since element " << i << " of type "
               << elements.at(i)->repr_str()
@@ -721,7 +724,11 @@ std::ostream& operator<<(
 }
 
 std::ostream& operator<<(std::ostream& os, const ShapeSymbol& s) {
-  os << "SS(" << s.value_ << ')';
+  if (s.value_ >= 0) {
+    os << s.value_;
+  } else {
+    os << "SS(" << s.value_ << ')';
+  }
   return os;
 }
 
@@ -821,8 +828,6 @@ void filterDuplicateSubtypes(std::vector<TypePtr>& types, bool unification_allow
     }
   };
 
-  auto unification_fn = unification_allowed ? unify_types : get_supertype;
-
   // Coalesce types and delete all duplicates. Moving from right to left
   // through the vector, we try to unify the current element (`i`) with
   // each element (`j`) before the "new" end of the vector (`end`).
@@ -833,7 +838,13 @@ void filterDuplicateSubtypes(std::vector<TypePtr>& types, bool unification_allow
   size_t end_idx = types.size()-1;
   for (size_t i = types.size()-1; i > 0; --i) {
     for (size_t j = std::min(i-1, end_idx); ; --j) {
-      c10::optional<TypePtr> unified = unification_fn(types[i], types[j]);
+      c10::optional<TypePtr> unified;
+      if (unification_allowed) {
+        unified = unify_types(types[i], types[j]);
+      }
+      else {
+        unified = get_supertype(types[i], types[j]);
+      }
       if (unified) {
         types[j] = *unified;
         types[i] = types[end_idx];
@@ -906,7 +917,23 @@ UnionTypePtr UnionType::create(std::vector<TypePtr> types) {
 
 bool UnionType::operator==(const Type& rhs) const {
   if (auto union_rhs = rhs.cast<UnionType>()) {
-    return types_ == union_rhs->types_;
+    // We can't compare the type vectors for equality using `operator`,
+    // because the vectors hold `TypePtr`s and we want to compare `Type`
+    // equality
+    if (union_rhs->types_.size() != this->types_.size()) {
+      return false;
+    }
+
+    // Check that all the types in `this->types_` are also in
+    // `union_rhs->types_`
+    return std::all_of(this->types_.begin(), this->types_.end(),
+                       [&](TypePtr t) {
+                          return std::any_of(union_rhs->types_.begin(),
+                                             union_rhs->types_.end(),
+                                             [&](TypePtr comparison) {
+                                              return *t == *comparison;
+                                             });
+                       });
   }
   if (auto optional_rhs = rhs.cast<OptionalType>()) {
     auto optional_lhs = this->toOptional();
@@ -979,14 +1006,23 @@ c10::optional<TypePtr> UnionType::toOptional(bool unification_allowed) const {
   return OptionalType::create(std::move(contained));
 }
 
-UnionTypePtr UnionType::withoutNone() const {
+UnionTypePtr UnionType::subtractTypeSet(std::vector<TypePtr>& to_subtract) const {
   std::vector<TypePtr> types;
-  types.reserve(types_.size() - 1);
+  types.reserve(types_.size() - to_subtract.size());
+
+  auto should_subtract = [&](TypePtr t) -> bool {
+    return std::none_of(to_subtract.begin(), to_subtract.end(),
+                        [&](TypePtr s) {
+                          return t->isSubtypeOf(s);
+    });
+  };
+
   std::copy_if(types_.begin(), types_.end(),
               std::back_inserter(types),
-              [](const TypePtr t) {
-                return !t->isSubtypeOf(NoneType::get());
+              [&](const TypePtr t) {
+                return !should_subtract(t);
               });
+
   return UnionType::create(std::move(types));
 }
 
@@ -1143,20 +1179,6 @@ std::string TupleType::annotation_str_impl(TypePrinter printer) const {
     ss << "]";
   }
   return ss.str();
-}
-
-// NOLINTNEXTLINE(clang-diagnostic-unused-function)
-static std::vector<bool> findContiguous(
-    const at::IntArrayRef& sizes,
-    const at::IntArrayRef& strides) {
-  AT_ASSERT(sizes.size() == strides.size());
-  std::vector<bool> cont(sizes.size());
-  for (size_t i = 0; i < sizes.size(); ++i) {
-    const auto expected_stride =
-        (i + 1 < sizes.size()) ? sizes[i + 1] * strides[i + 1] : 1;
-    cont[i] = (strides[i] == expected_stride);
-  }
-  return cont;
 }
 
 VaryingShape<int64_t> TensorType::strides() const {
@@ -2105,6 +2127,10 @@ SymbolicShape SymbolicShape::merge(const SymbolicShape& other) const {
     dims.push_back(merge_primitive((*dims_)[i], (*other.dims_)[i]));
   }
   return SymbolicShape(std::move(dims));
+}
+
+void SymbolicShape::dump() const {
+  std::cout << *this << "\n";
 }
 
 bool EnumType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const {
