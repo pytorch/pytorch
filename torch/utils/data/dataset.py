@@ -295,7 +295,6 @@ class ChainDataset(IterableDataset):
         total = 0
         for d in self.datasets:
             assert isinstance(d, IterableDataset), "ChainDataset only supports IterableDataset"
-            # Cannot verify that all self.datasets are Sized
             total += len(d)
         return total
 
@@ -338,7 +337,7 @@ def random_split(dataset: Dataset[T], lengths: Sequence[int],
         generator (Generator): Generator used for the random permutation.
     """
     # Cannot verify that dataset is Sized
-    if sum(lengths) != len(dataset):  # type: ignore[arg-type]
+    if sum(lengths) != len(dataset):
         raise ValueError("Sum of input lengths does not equal the length of the input dataset!")
 
     indices = randperm(sum(lengths), generator=generator).tolist()
