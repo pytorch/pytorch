@@ -153,6 +153,10 @@ class ModuleInfo(object):
     def name(self):
         return formatted_module_name(self.module_cls)
 
+    @property
+    def formatted_name(self):
+        return self.name.replace('.', '_')
+
 
 def module_inputs_torch_nn_Linear(module_info, device, dtype, requires_grad, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)

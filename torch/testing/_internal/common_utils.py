@@ -76,6 +76,243 @@ SLOW_TESTS_FILE = '.pytorch-slow-tests.json'
 slow_tests_dict: Optional[Dict[str, Any]] = None
 disabled_tests_dict: Optional[Dict[str, Any]] = None
 
+
+class _TestParametrizer(object):
+    """
+    Decorator class for parametrizing a test function, yielding a set of new tests spawned
+    from the original generic test, each specialized for a specific set of test inputs. For
+    example, parametrizing a test across the set of ops will result in a test function per op.
+
+    The decision of how to parametrize / what to parametrize over is intended to be implemented
+    by each derived class.
+
+    In the details, the decorator adds a 'parametrize_fn' property to the test function that is called
+    during device-specific test instantiation performed in instantiate_device_type_tests(). Because of this,
+    there is no need to parametrize over device type, as that is already handled separately.
+    """
+    def _parametrize_test(self, test, generic_cls, device_cls):
+        """
+        Parametrizes the given test function across whatever dimension is specified by the derived class.
+        Tests can be parametrized over any arbitrary dimension or combination of dimensions, such as all
+        ops, all modules, or all ops + their associated dtypes.
+
+        Args:
+            test (fn): Test function to parametrize over
+            generic_cls (class): Generic test class object containing tests (e.g. TestFoo)
+            device_cls (class): Device-specialized test class object (e.g. TestFooCPU); set to None
+                if the tests are not part of a device-specific set
+
+        Returns:
+            Generator object returning 3-tuples of:
+                test (fn): Parametrized test function; must support a device arg and args for any params
+                test_name (str): Parametrized suffix for the test (e.g. opname_int64); will be appended to
+                    the base name of the test
+                param_kwargs (dict): Param kwargs to pass to the test (e.g. {'op': 'add', 'dtype': torch.int64})
+        """
+        raise NotImplementedError
+
+    def __call__(self, fn):
+        if hasattr(fn, 'parametrize_fn'):
+            # Do composition with the product of args.
+            old_parametrize_fn = fn.parametrize_fn
+            new_parametrize_fn = self._parametrize_test
+
+            def composite_fn(test, generic_cls, device_cls,
+                             old_parametrize_fn=old_parametrize_fn,
+                             new_parametrize_fn=new_parametrize_fn):
+                old_tests = [(test, test_name, param_kwargs) for (test, test_name, param_kwargs) in
+                             old_parametrize_fn(test, generic_cls, device_cls)]
+                for (old_test, old_test_name, old_param_kwargs) in old_tests:
+                    for (new_test, new_test_name, new_param_kwargs) in \
+                            new_parametrize_fn(old_test, generic_cls, device_cls):
+                        full_param_kwargs = {**old_param_kwargs, **new_param_kwargs}
+                        yield (new_test, '{}_{}'.format(new_test_name, old_test_name), full_param_kwargs)
+
+            fn.parametrize_fn = composite_fn
+        else:
+            fn.parametrize_fn = self._parametrize_test
+        return fn
+
+
+def instantiate_parametrized_tests(generic_cls):
+    """
+    Instantiates tests that have been decorated with a parametrize_fn. This is generally performed by a
+    decorator subclass of _TestParametrizer. The generic test will be replaced on the test class by
+    parametrized tests with specialized names.
+
+    Args:
+        generic_cls (class): Generic test class object containing tests (e.g. TestFoo)
+    """
+    for attr_name in tuple(dir(generic_cls)):
+        class_attr = getattr(generic_cls, attr_name)
+        if not hasattr(class_attr, 'parametrize_fn'):
+            continue
+
+        # Remove the generic test from the test class.
+        delattr(generic_cls, attr_name)
+
+        # Add parametrized tests to the test class.
+        def instantiate_test_helper(cls, name, test, param_kwargs):
+            @wraps(test)
+            def instantiated_test(self, param_kwargs=param_kwargs):
+                test(self, **param_kwargs)
+
+            assert not hasattr(generic_cls, name), "Redefinition of test {0}".format(name)
+            setattr(generic_cls, name, instantiated_test)
+
+        for (test, test_name, param_kwargs) in class_attr.parametrize_fn(
+                class_attr, generic_cls=generic_cls, device_cls=None):
+            full_name = '{}_{}'.format(test.__name__, test_name)
+            instantiate_test_helper(cls=generic_cls, name=full_name, test=test, param_kwargs=param_kwargs)
+
+
+class subtest(object):
+    """
+    Explicit subtest case for use with test parametrization.
+    Allows for explicit naming of individual subtest cases as well as applying
+    decorators to the parametrized test.
+
+    Args:
+        arg_values (iterable): Iterable of arg values (e.g. range(10)) or
+            tuples of arg values (e.g. [(1, 2), (3, 4)]).
+        name (str): Optional name to use for the test.
+        decorators (iterable): Iterable of decorators to apply to the generated test.
+    """
+    __slots__ = ['arg_values', 'name', 'decorators']
+
+    def __init__(self, arg_values, name=None, decorators=None):
+        self.arg_values = arg_values
+        self.name = name
+        self.decorators = decorators if decorators else []
+
+
+class parametrize(_TestParametrizer):
+    """
+    Decorator for applying generic test parametrizations.
+
+    The interface for this decorator is modeled after `@pytest.mark.parametrize`.
+    Basic usage between this decorator and pytest's is identical. The first argument
+    should be a string containing comma-separated names of parameters for the test, and
+    the second argument should be an iterable returning values or tuples of values for
+    the case of multiple parameters.
+
+    Beyond this basic usage, the decorator provides some additional functionality that
+    pytest does not.
+
+    1. Parametrized tests end up as generated test functions on unittest test classes.
+    Since this differs from how pytest works, this decorator takes on the additional
+    responsibility of naming these test functions. The default test names consists of
+    the test's base name followed by each parameter name + value (e.g. "test_bar_x_1_y_foo"),
+    but custom names can be defined using `name_fn` or the `subtest` structure (see below).
+
+    2. The decorator specially handles parameter values of type `subtest`, which allows for
+    more fine-grained control over both test naming and test execution. In particular, it can
+    be used to tag subtests with explicit test names or apply arbitrary decorators (see examples
+    below).
+
+    Examples::
+
+        @parametrize("x", range(5))
+        def test_foo(self, x):
+            ...
+
+        @parametrize("x,y", [(1, 'foo'), (2, 'bar'), (3, 'baz')])
+        def test_bar(self, x, y):
+            ...
+
+        @parametrize("x,y", [(1, 'foo'), (2, 'bar'), (3, 'baz')],
+                     name_fn=lambda x, y: '{}_{}'.format(x, y))
+        def test_bar_custom_names(self, x, y):
+            ...
+
+        @parametrize("x, y", [subtest((1, 2), name='double'),
+                              subtest((1, 3), name='triple', decorators=[unittest.expectedFailure]),
+                              subtest((1, 4), name='quadruple')])
+        def test_baz(self, x, y):
+            ...
+
+    Args:
+        arg_str (str): String of arg names separate by commas (e.g. "x,y").
+        arg_values (iterable): Iterable of arg values (e.g. range(10)) or
+            tuples of arg values (e.g. [(1, 2), (3, 4)]).
+        name_fn (callable): Optional function that takes in parameters and returns subtest name.
+    """
+    def __init__(self, arg_str, arg_values, name_fn=None):
+        self.arg_names = arg_str.split(',')
+        self.arg_values = arg_values
+        self.name_fn = name_fn
+
+    def _formatted_str_repr(self, name, value):
+        """ Returns a string representation for the given arg that is suitable for use in test function names. """
+        if isinstance(value, torch.dtype):
+            return dtype_name(value)
+        elif isinstance(value, torch.device):
+            return str(value)
+        # Can't use isinstance as it would cause a circular import
+        elif value.__class__.__name__ == 'OpInfo' or value.__class__.__name__ == 'ModuleInfo':
+            return value.formatted_name
+        else:
+            # Include name and value separated by underscore.
+            return '{}_{}'.format(name, str(value).replace('.', '_'))
+
+    def _default_subtest_name(self, values):
+        return '_'.join([self._formatted_str_repr(a, v) for a, v in zip(self.arg_names, values)])
+
+    def _get_subtest_name(self, values, explicit_name=None):
+        if explicit_name:
+            subtest_name = explicit_name
+        elif self.name_fn:
+            subtest_name = self.name_fn(*values)
+        else:
+            subtest_name = self._default_subtest_name(values)
+        return subtest_name
+
+    def _parametrize_test(self, test, generic_cls, device_cls):
+        if len(self.arg_names) == 0:
+            # No additional parameters needed for the test.
+            test_name = device_cls.device_type if device_cls else ''
+            yield (test, test_name, {})
+        else:
+            # Each "values" item is expected to be either:
+            # * A tuple of values with one for each arg. For a single arg, a single item is expected.
+            # * A subtest instance with arg_values matching the previous.
+            for values in self.arg_values:
+                maybe_name = None
+                if isinstance(values, subtest):
+                    sub = values
+                    values = sub.arg_values
+                    maybe_name = sub.name
+
+                    # Apply decorators.
+                    @wraps(test)
+                    def test_wrapper(*args, **kwargs):
+                        return test(*args, **kwargs)
+
+                    for decorator in sub.decorators:
+                        test_wrapper = decorator(test_wrapper)
+
+                    gen_test = test_wrapper
+                else:
+                    gen_test = test
+
+                values = list(values) if len(self.arg_names) > 1 else [values]
+                if len(values) != len(self.arg_names):
+                    raise RuntimeError('Expected # values == # arg names, but got: {} '
+                                       'values and {} names for test "{}"'.format(
+                                           len(values), len(self.arg_names), test.__name__))
+
+                param_kwargs = {
+                    name: value for name, value in zip(self.arg_names, values)
+                }
+
+                subtest_name = self._get_subtest_name(values, explicit_name=maybe_name)
+                test_name = '{}{}'.format(subtest_name, '_' + device_cls.device_type if device_cls else '')
+                if '.' in test_name:
+                    raise RuntimeError('Test name cannot contain periods, but got: {}'.format(test_name))
+
+                yield (gen_test, test_name, param_kwargs)
+
+
 class ProfilingMode(Enum):
     LEGACY = 1
     SIMPLE = 2
@@ -2570,3 +2807,7 @@ def sandcastle_skip_if(condition, reason):
         return wrapper
 
     return decorator
+
+def dtype_name(dtype):
+    """ Returns the pretty name of the dtype (e.g. torch.int64 -> int64). """
+    return str(dtype).split('.')[1]
