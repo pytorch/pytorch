@@ -19,9 +19,9 @@ namespace {
   // look what you made me do >.<
   // Divergent paths for per-Impl stream recording that leak implementation
   // details of the impls should not be needed here.
-  // See
-  // TODO: clean this up when
-  void record_stream_maybe_sparse(Variable& var, c10::Stream& stream) {
+  // See https://github.com/pytorch/pytorch/issues/60306
+  // TODO: clean this up when https://github.com/pytorch/pytorch/issues/60306 is improved
+  void record_stream_any_impl(Variable& var, c10::Stream& stream) {
     const auto guard = c10::impl::VirtualGuardImpl(c10::DeviceType::CUDA);
 
     if (C10_UNLIKELY(at::isBatchedTensor(var))) {
@@ -52,7 +52,7 @@ namespace {
           guard.recordDataPtrOnStream(var.storage().data_ptr(), stream);
           break;
         default:
-          TORCH_INTERNAL_ASSERT(false, "Unknown layout in record_stream_maybe_sparse");
+          TORCH_INTERNAL_ASSERT(false, "Unknown layout in record_stream_any_impl");
       }
     }
   }
@@ -125,7 +125,7 @@ namespace {
         auto event = c10::Event{c10::DeviceType::CUDA};
         event.record(*opt_producer_stream);
         opt_accumulate_stream->wait(event);
-        record_stream_maybe_sparse(var, *opt_accumulate_stream);
+        record_stream_any_impl(var, *opt_accumulate_stream);
       }
     } else {
       c10::optional<c10::Stream> opt_sync_stream = c10::nullopt;
@@ -149,7 +149,7 @@ namespace {
         event.record(*opt_sync_stream);
         opt_accumulate_stream->wait(event);
         const auto guard = c10::impl::VirtualGuardImpl(c10::DeviceType::CUDA);
-        record_stream_maybe_sparse(var, *opt_accumulate_stream);
+        record_stream_any_impl(var, *opt_accumulate_stream);
       }
     }
   }
