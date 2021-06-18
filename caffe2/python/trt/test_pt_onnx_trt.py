@@ -65,12 +65,13 @@ class Test_PT_ONNX_TRT(unittest.TestCase):
 
     def build_engine_onnx(self, model_file):
         with trt.Builder(TRT_LOGGER) as builder, builder.create_network(flags = 1) as network, trt.OnnxParser(network, TRT_LOGGER) as parser:
-            builder.max_workspace_size = 1 << 33
+            builder_config = builder.create_builder_config()
+            builder_config.max_workspace_size = 1 << 33
             with open(model_file, 'rb') as model:
                 if not parser.parse(model.read()):
                     for error in range(parser.num_errors):
                         self.fail("ERROR: {}".format(parser.get_error(error)))
-            return builder.build_cuda_engine(network)
+            return builder.build_engine(network, builder_config)
 
     def _test_model(self, model_name, input_shape = (3, 224, 224), normalization_hint = 0):
 
