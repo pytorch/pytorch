@@ -149,16 +149,24 @@ class SampleInput(object):
         return self._repr_helper(formatter)
 
     def numpy(self):
-        # Returns the NumPy version of the input
-        # Only supports torch.Tensor objects, if an arg is a scalar - a TypeError will be raised
+        # Returns the NumPy version of the sample input object in the form of a tuple: (input, args, kwargs)
         def to_numpy(torch_inp):
-            # Local function to convert input of tensor/tensors to numpy array/arrays
+            # Local function to convert given input to numpy array/arrays
+            # Input types supported: tensor/iterable tensors/list/tuple/dict/scalars
+            # For iterable tensors/list/tuple/dict - to_numpy() is recursively called trusting the end value will be
+            # either a torch tensor or a scalar
             if isinstance(torch_inp, torch.Tensor):
                 numpy_inp = torch_inp.cpu().numpy()
             elif is_iterable_of_tensors(torch_inp):
-                numpy_inp = [t_inp.cpu().numpy() for t_inp in torch_inp]
+                numpy_inp = np.array([t_inp.cpu().numpy() for t_inp in torch_inp])
+            elif isinstance(torch_inp, list):
+                numpy_inp = [to_numpy(t_inp) for t_inp in torch_inp]
+            elif isinstance(torch_inp, tuple):
+                numpy_inp = tuple(to_numpy(t_inp) for t_inp in torch_inp)
+            elif isinstance(torch_inp, dict):
+                numpy_inp = {k: to_numpy(t_inp) for k, t_inp in torch_inp.items()}
             else:
-                raise TypeError(f"Only torch.Tensor types supported but got {type(torch_inp)}")
+                numpy_inp = torch_inp
             return numpy_inp
 
         sample_np_input, np_args, np_kwargs = to_numpy(self.input), to_numpy(self.args), to_numpy(self.kwargs)
@@ -1584,19 +1592,19 @@ def sample_inputs_take_along_dim(op_info, device, dtype, requires_grad, **kwargs
 
 def sample_inputs_amax_amin(op_info, device, dtype, requires_grad, **kwargs):
     test_cases = (
-        ((S, S, S), ()),
-        ((S, S, S), (1,)),
-        ((S, S, S), ((1, 2,),)),
-        ((S, S, S), (1, True,)),
-        ((), (0,)),
-        ((), ()),
-        ((), (0, True,)),
+        ((S, S, S), (), {}),
+        ((S, S, S), (1,), {}),
+        ((S, S, S), ((1, 2,),), {}),
+        ((S, S, S), (1,), {'keepdims': True},),
+        ((), (0,), {}),
+        ((), (), {}),
+        ((), (0,), {'keepdims': True},),
     )
     return tuple(SampleInput((make_tensor(size, device, dtype,
                                           low=None, high=None,
                                           requires_grad=requires_grad)),
-                             args=args)
-                 for size, args in test_cases)
+                             args=args, kwargs=kwargs)
+                 for size, args, kwargs in test_cases)
 
 def sample_inputs_argmax_argmin(op_info, device, dtype, requires_grad, **kwargs):
     test_cases = (
@@ -1611,10 +1619,10 @@ def sample_inputs_argmax_argmin(op_info, device, dtype, requires_grad, **kwargs)
         ((), (None, True,)),
         ((1,), ()),
         ((1,), (0,)),
-        ((1,), (0, True)),
+        ((1,), (0, True,)),
         ((2,), ()),
         ((2,), (0,)),
-        ((2,), (0, True)),
+        ((2,), (0, True,)),
         ((2, 2, 3), ()),
         ((2, 2, 3), (0,)),
         ((2, 2, 3), (1,)),
@@ -4688,12 +4696,10 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_amax_amin),
     OpInfo('argmax',
-           ref=np.argmax,
            dtypes=all_types_and(torch.float16, torch.bfloat16),
            supports_autograd=False,
            sample_inputs_func=sample_inputs_argmax_argmin,),
     OpInfo('argmin',
-           ref=np.argmin,
            dtypes=all_types_and(torch.float16, torch.bfloat16),
            supports_autograd=False,
            sample_inputs_func=sample_inputs_argmax_argmin,),

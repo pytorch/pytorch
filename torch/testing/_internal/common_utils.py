@@ -1131,12 +1131,10 @@ class TestCase(expecttest.TestCase):
     def compare_with_reference(self, torch_fn, ref_fn, sample_input, **kwargs):
         # Compares torch function with reference function for given sample input (object of SampleInput)
         # Note: only values are compared, type comparison is not done here
-        try:
-            n_inp, n_args, n_kwargs = sample_input.numpy()
-        except TypeError:
-            # TODO: This needs a comment
-            return
-        t_inp, t_args, t_kwargs = sample_input.splat()
+
+        # Note: if .numpy() fails for some reason, we won't know if it failed for inp/args/kwargs (TODO)
+        n_inp, n_args, n_kwargs = sample_input.numpy()
+        t_inp, t_args, t_kwargs = sample_input.input, sample_input.args, sample_input.kwargs
 
         actual = torch_fn(t_inp, *t_args, **t_kwargs)
         expected = ref_fn(n_inp, *n_args, **n_kwargs)

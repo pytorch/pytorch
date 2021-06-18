@@ -8,9 +8,9 @@ from torch.testing import \
     (FileCheck, floating_and_complex_types_and, get_all_dtypes)
 from torch.testing._internal.common_utils import \
     (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor,
-     gradcheck, gradgradcheck, IS_PYTORCH_CI)
+     gradcheck, gradgradcheck, IS_PYTORCH_CI, suppress_warnings)
 from torch.testing._internal.common_methods_invocations import \
-    (op_db, _NOTHING, UnaryUfuncInfo, SpectralFuncInfo)
+    (op_db, _NOTHING, UnaryUfuncInfo, SpectralFuncInfo, ShapeFuncInfo)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
@@ -176,7 +176,7 @@ class TestCommon(TestCase):
     @ops(ref_test_ops, allowed_dtypes=(torch.float32, torch.long))
     def test_reference_testing(self, device, dtype, op):
         # TODO: We should ideally use these tests for UnaryUfuncInfo as well, see: https://github.com/pytorch/pytorch/pull/59369/
-        if isinstance(op, UnaryUfuncInfo) or isinstance(op, SpectralFuncInfo):
+        if isinstance(op, UnaryUfuncInfo) or isinstance(op, SpectralFuncInfo) or isinstance(op, ShapeFuncInfo):
             self.skipTest("Skipped! UnaryUfuncInfo and SpectralOpInfo have implemented reference checks separately.")
 
         sample_inputs = op.sample_inputs(device, dtype)
