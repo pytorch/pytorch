@@ -333,10 +333,10 @@ void nll_loss_forward_out_cuda_template(
         input.scalar_type(),
         "nll_loss_forward_no_reduce_cuda_kernel",
         [&] {
-          scalar_t* weight_ptr = nullptr;
+          scalar_t* weight_data = nullptr;
           if (weight.defined()) {
             auto weight_ = weight.contiguous();
-            weight_ptr = weight_.data_ptr<scalar_t>();
+            weight_data = weight_.data_ptr<scalar_t>();
           }
           nll_loss_forward_no_reduce_cuda_kernel<scalar_t>
               <<<at::cuda::detail::GET_BLOCKS(batch_size),
@@ -347,7 +347,7 @@ void nll_loss_forward_out_cuda_template(
                   input.packed_accessor64<scalar_t, 2>(),
                   target.data_ptr<int64_t>(),
                   output.data_ptr<scalar_t>(),
-                  weight_ptr,
+                  weight_data,
                   n_classes,
                   ignore_index);
           C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -368,10 +368,10 @@ void nll_loss_forward_out_cuda_template(
         input.scalar_type(),
         "nll_loss_forward_reduce_cuda_kernel_1d",
         [&] {
-          scalar_t* weight_ptr = nullptr;
+          scalar_t* weight_data = nullptr;
           if (weight.defined()) {
             auto weight_ = weight.contiguous();
-            weight_ptr = weight_.data_ptr<scalar_t>();
+            weight_data = weight_.data_ptr<scalar_t>();
           }
           nll_loss_forward_reduce_cuda_kernel_1d<scalar_t>
               <<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -379,7 +379,7 @@ void nll_loss_forward_out_cuda_template(
                   total_weight.data_ptr<scalar_t>(),
                   input_.data_ptr<scalar_t>(),
                   target_.data_ptr<int64_t>(),
-                  weight_ptr,
+                  weight_data,
                   reduction == at::Reduction::Mean,
                   n_classes,
                   ignore_index);
@@ -392,10 +392,10 @@ void nll_loss_forward_out_cuda_template(
         input.scalar_type(),
         "nll_loss_forward_reduce_cuda_kernel_2d",
         [&] {
-          scalar_t* weight_ptr = nullptr;
+          scalar_t* weight_data = nullptr;
           if (weight.defined()) {
             auto weight_ = weight.contiguous();
-            weight_ptr = weight_.data_ptr<scalar_t>();
+            weight_data = weight_.data_ptr<scalar_t>();
           }
           nll_loss_forward_reduce_cuda_kernel_2d<scalar_t, float>
               <<<1, N_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -403,7 +403,7 @@ void nll_loss_forward_out_cuda_template(
                   total_weight.data_ptr<scalar_t>(),
                   input_.data_ptr<scalar_t>(),
                   target_.data_ptr<int64_t>(),
-                  weight_ptr,
+                  weight_data,
                   reduction == at::Reduction::Mean,
                   input.size(0),
                   input.size(1),
