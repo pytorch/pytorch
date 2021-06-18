@@ -782,8 +782,6 @@ void Engine::evaluate_function(
     Node* func,
     InputBuffer& inputs,
     const std::shared_ptr<ReadyQueue>& cpu_ready_queue) {
-  // REVIEW QUESTION FOR ALBAN: Should this be up here, or down where it was originally?
-  //
   // Set the ThreadLocalState before calling the function.
   // NB: The ThreadLocalStateGuard doesn't set the grad_mode because GraphTask
   // always saves ThreadLocalState without grad_mode.
