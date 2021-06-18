@@ -27,6 +27,9 @@ Tensor view(const Tensor& input, IntArrayRef size) {
       "not compatible with input tensor's size and stride (at least one dimension"
       " spans across two contiguous subspaces). Use .reshape(...) instead.");
   auto stride_value = *stride;
+  if(input.numel() == 0) {
+    return makeTensor({inferred_size, stride_value}, input.options());
+  }
   MPSImage* X = imageFromTensor(input);
   MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
   MetalTensorImplStorage mt{inferred_size, stride_value};

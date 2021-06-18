@@ -53,7 +53,7 @@ if _IS_MONKEYTYPE_INSTALLED:
             # and create a dictionary of all the types
             # for arguments.
             records = self.trace_records[qualified_name]
-            all_args = defaultdict(set)  # type:  ignore[var-annotated]
+            all_args = defaultdict(set)
             for record in records:
                 for arg, arg_type in record.arg_types.items():
                     all_args[arg].add(arg_type)
@@ -123,4 +123,4 @@ else:
         def __init__(self):
             pass
 
-    monkeytype_trace = None  # type:  ignore[assignment]  # noqa: F811
+    monkeytype_trace = None  # noqa: F811
