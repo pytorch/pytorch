@@ -252,22 +252,9 @@ except ImportError:
 # then inherit from it for your generic test.
 
 
-def _construct_test_name(test_name, op, device_type, dtype):
-    if op is not None:
-        test_name += "_" + op.name.replace('.', '_')
-        if op.variant_test_name:
-            test_name += "_" + op.variant_test_name
-
-    test_name += "_" + device_type
-
-    if dtype is not None and dtype is not _NO_DTYPES:
-        if isinstance(dtype, (list, tuple)):
-            for d in dtype:
-                test_name += "_" + str(d).split('.')[1]
-        else:
-            test_name += "_" + str(dtype).split('.')[1]
-
-    return test_name
+def _dtype_name(dtype):
+    """ Returns the pretty form of the dtype (e.g. torch.int64 -> int64). """
+    return str(dtype).split('.')[1]
 
 
 # Marker class to signify an absense of dtypes
@@ -339,51 +326,12 @@ class DeviceTypeTestBase(TestCase):
     @classmethod
     def instantiate_test(cls, name, test, *, generic_cls=None):
 
-        def instantiate_test_helper(cls, name, *, test, dtype, op):
-
-            # Constructs the test's name
-            test_name = _construct_test_name(name, op, cls.device_type, dtype)
-
-            # Wraps instantiated test with op decorators
-            # NOTE: test_wrapper exists because we don't want to apply
-            #   op-specific decorators to the original test.
-            #   Test-specific decorators are applied to the original test,
-            #   however.
-            if op is not None:
-                try:
-                    active_decorators = []
-                    if op.should_skip(generic_cls.__name__, name, cls.device_type, dtype):
-                        active_decorators.append(skipIf(True, "Skipped!"))
-
-                    if op.decorators is not None:
-                        for decorator in op.decorators:
-                            # Can't use isinstance as it would cause a circular import
-                            if decorator.__class__.__name__ == 'DecorateInfo':
-                                if decorator.is_active(generic_cls.__name__, name, cls.device_type, dtype):
-                                    active_decorators += decorator.decorators
-                            else:
-                                active_decorators.append(decorator)
-
-                    @wraps(test)
-                    def test_wrapper(*args, **kwargs):
-                        return test(*args, **kwargs)
-
-                    for decorator in active_decorators:
-                        test_wrapper = decorator(test_wrapper)
-
-                    test_fn = test_wrapper
-                except Exception as ex:
-                    # Provides an error message for debugging before rethrowing the exception
-                    print("Failed to instantiate {0} for op {1}!".format(test_name, op.name))
-                    raise ex
-            else:
-                test_fn = test
-
+        def instantiate_test_helper(cls, name, *, test, param_kwargs=None):
             # Constructs the test
-            @wraps(test_fn)
-            def instantiated_test(self, name=name, test=test_fn, dtype=dtype, op=op):
+            @wraps(test)
+            def instantiated_test(self, param_kwargs=param_kwargs):
                 device_arg: str = cls.get_primary_device()
-                if hasattr(test_fn, 'num_required_devices'):
+                if hasattr(test, 'num_required_devices'):
                     device_arg = cls.get_all_devices()
 
                 # Sets precision and runs test
@@ -391,10 +339,10 @@ class DeviceTypeTestBase(TestCase):
                 guard_precision = self.precision
                 guard_rel_tol = self.rel_tol
                 try:
-                    self.precision = self._get_precision_override(test_fn, dtype)
-                    self.precision, self.rel_tol = self._get_tolerance_override(test_fn, dtype)
-                    args = (arg for arg in (device_arg, dtype, op) if arg is not None)
-                    result = test_fn(self, *args)
+                    if 'dtype' in param_kwargs:
+                        self.precision, self.rel_tol = self._get_tolerance_override(test, param_kwargs['dtype'])
+                    param_kwargs = {} if param_kwargs is None else param_kwargs
+                    result = test(self, device=device_arg, **param_kwargs)
                 except RuntimeError as rte:
                     # check if rte should stop entire test suite.
                     self._stop_test_suite = self._should_stop_test_suite()
@@ -409,52 +357,17 @@ class DeviceTypeTestBase(TestCase):
             assert not hasattr(cls, test_name), "Redefinition of test {0}".format(test_name)
             setattr(cls, test_name, instantiated_test)
 
-        # Handles tests using the ops decorator
-        if hasattr(test, "op_list"):
-            for op in test.op_list:
-                # Acquires dtypes, using the op data if unspecified
-                dtypes = cls._get_dtypes(test)
-                if dtypes is None:
-                    if test.opinfo_dtypes == OpDTypes.unsupported_backward:
-                        dtypes = set(get_all_dtypes()).difference(op.supported_backward_dtypes(cls.device_type))
-                    elif test.opinfo_dtypes == OpDTypes.supported_backward:
-                        dtypes = op.supported_backward_dtypes(cls.device_type)
-                    elif test.opinfo_dtypes == OpDTypes.unsupported:
-                        dtypes = set(get_all_dtypes()).difference(op.supported_dtypes(cls.device_type))
-                    elif test.opinfo_dtypes == OpDTypes.supported:
-                        dtypes = op.supported_dtypes(cls.device_type)
-                    elif test.opinfo_dtypes == OpDTypes.basic:
-                        dtypes = op.default_test_dtypes(cls.device_type)
-                    elif test.opinfo_dtypes == OpDTypes.none:
-                        dtypes = _NO_DTYPES
-                    else:
-                        raise RuntimeError(f"Unknown OpDType: {test.opinfo_dtypes}")
-
-                    if test.allowed_dtypes is not None:
-                        dtypes = dtypes.intersection(test.allowed_dtypes)
-                else:
-                    assert test.allowed_dtypes is None, "ops(allowed_dtypes=[...]) and the dtypes decorator are incompatible"
-                    assert test.opinfo_dtypes == OpDTypes.basic, "ops(dtypes=...) and the dtypes decorator are incompatible"
-
-                if dtypes is _NO_DTYPES:
-                    instantiate_test_helper(cls,
-                                            name,
-                                            test=test,
-                                            dtype=_NO_DTYPES,
-                                            op=op)
-                else:
-                    for dtype in dtypes:
-                        instantiate_test_helper(cls,
-                                                name,
-                                                test=test,
-                                                dtype=dtype,
-                                                op=op)
+        # Handles tests that need parameterization (e.g. those that run across a set of
+        # ops / modules using the @ops or @modules decorators).
+        if hasattr(test, 'parameterize_fn'):
+            for (test, test_name, param_kwargs) in test.parameterize_fn(test, generic_cls, cls):
+                instantiate_test_helper(cls=cls, name=test_name, test=test, param_kwargs=param_kwargs)
         else:
-            # Handles tests that don't use the ops decorator
             dtypes = cls._get_dtypes(test)
             dtypes = tuple(dtypes) if dtypes is not None else (None,)
             for dtype in dtypes:
-                instantiate_test_helper(cls, name, test=test, dtype=dtype, op=None)
+                test_name = '{}_{}_{}'.format(name, cls.device_type, _dtype_name(dtype))
+                instantiate_test_helper(cls=cls, name=test_name, test=test, param_kwargs={'dtype': dtype})
 
     def run(self, result=None):
         super().run(result=result)
@@ -687,6 +600,43 @@ class OpDTypes(Enum):
     none = 5  # Instantiate no dtype variants (the dtype kwarg will be None)
 
 
+class _TestParameterizer(object):
+    """
+    Decorator class for parameterizing a test function, yielding a set of new tests spawned
+    from the original generic test, each specialized for a specific set of test inputs. For
+    example, parameterizing a test across the set of ops will result in a test function per op.
+
+    The decision of how to parameterize / what to parameterize over is intended to be implemented
+    by each derived class.
+
+    In the details, the decorator adds a 'parameterize_fn' property to the test function that is called
+    during device-specific test instantiation performed in instantiate_device_type_tests(). Because of this,
+    there is no need to parameterize over device type, as that is already handled separately.
+    """
+    def _parameterize_test(self, test, generic_cls, device_cls):
+        """
+        Parameterizes the given test function across whatever dimension is specified by the derived class.
+        Tests can be parameterized over any arbitrary dimension or combination of dimensions, such as all
+        ops, all modules, or all ops + their associated dtypes.
+
+        Args:
+            test (fn): Test function to parameterize over; must support least a device arg
+            generic_cls (class): Generic test class object containing tests (e.g. TestFoo)
+            device_cls (class): Device-specialized test class object (e.g. TestFooCPU)
+
+        Returns:
+            Generator object returning 3-tuples of:
+                test (fn): Parameterized test function; must support a device arg and args for any params
+                test_name (str): Parameterized name of the test (e.g. test_bar_opname_int64)
+                param_kwargs (dict): Param kwargs to pass to the test (e.g. {'op': 'add', 'dtype': torch.int64})
+        """
+        raise NotImplementedError
+
+    def __call__(self, fn):
+        fn.parameterize_fn = self._parameterize_test
+        return fn
+
+
 # Decorator that defines the OpInfos a test template should be instantiated for.
 #
 # Example usage:
@@ -725,18 +675,82 @@ class OpDTypes(Enum):
 #   they're instantiated for. Finally, the @dtypes decorator composes with the
 #   @ops decorator, and works the same as the "dtypes" argument to @ops.
 
-class ops(object):
+class ops(_TestParameterizer):
     def __init__(self, op_list, *, dtypes: OpDTypes = OpDTypes.basic,
                  allowed_dtypes: Optional[Sequence[torch.dtype]] = None):
         self.op_list = op_list
         self.opinfo_dtypes = dtypes
         self.allowed_dtypes = set(allowed_dtypes) if allowed_dtypes is not None else None
 
-    def __call__(self, fn):
-        fn.op_list = self.op_list
-        fn.allowed_dtypes = self.allowed_dtypes
-        fn.opinfo_dtypes = self.opinfo_dtypes
-        return fn
+    def _parameterize_test(self, test, generic_cls, device_cls):
+        """ Parameterizes the given test function across each op and its associated dtypes. """
+        for op in self.op_list:
+            # Acquires dtypes, using the op data if unspecified
+            dtypes = device_cls._get_dtypes(test)
+            if dtypes is None:
+                if self.opinfo_dtypes == OpDTypes.unsupported_backward:
+                    dtypes = set(get_all_dtypes()).difference(op.supported_backward_dtypes(device_cls.device_type))
+                elif self.opinfo_dtypes == OpDTypes.supported_backward:
+                    dtypes = op.supported_backward_dtypes(device_cls.device_type)
+                elif self.opinfo_dtypes == OpDTypes.unsupported:
+                    dtypes = set(get_all_dtypes()).difference(op.supported_dtypes(device_cls.device_type))
+                elif self.opinfo_dtypes == OpDTypes.supported:
+                    dtypes = op.supported_dtypes(device_cls.device_type)
+                elif self.opinfo_dtypes == OpDTypes.basic:
+                    dtypes = op.default_test_dtypes(device_cls.device_type)
+                elif self.opinfo_dtypes == OpDTypes.none:
+                    dtypes = [_NO_DTYPES]
+                else:
+                    raise RuntimeError(f"Unknown OpDType: {self.opinfo_dtypes}")
+
+                if self.allowed_dtypes is not None:
+                    dtypes = dtypes.intersection(self.allowed_dtypes)
+            else:
+                assert self.allowed_dtypes is None, "ops(allowed_dtypes=[...]) and the dtypes decorator are incompatible"
+                assert self.opinfo_dtypes == OpDTypes.basic, "ops(dtypes=...) and the dtypes decorator are incompatible"
+
+            for dtype in dtypes:
+                # Construct the test name.
+                test_name = '{}_{}'.format(test.__name__, op.name.replace('.', '_'))
+                if op.variant_test_name:
+                    test_name += '_' + op.variant_test_name
+                test_name += '_{}'.format(device_cls.device_type)
+                if dtype is not _NO_DTYPES:
+                    test_name += '_{}'.format(_dtype_name(dtype))
+
+                # Wraps instantiated test with op decorators
+                # NOTE: test_wrapper exists because we don't want to apply
+                #   op-specific decorators to the original test.
+                #   Test-specific decorators are applied to the original test,
+                #   however.
+                try:
+                    active_decorators = []
+                    if op.should_skip(generic_cls.__name__, test.__name__, device_cls.device_type, dtype):
+                        active_decorators.append(skipIf(True, "Skipped!"))
+
+                    if op.decorators is not None:
+                        for decorator in op.decorators:
+                            # Can't use isinstance as it would cause a circular import
+                            if decorator.__class__.__name__ == 'DecorateInfo':
+                                if decorator.is_active(generic_cls.__name__, test.__name__,
+                                                       device_cls.device_type, dtype):
+                                    active_decorators += decorator.decorators
+                            else:
+                                active_decorators.append(decorator)
+
+                    @wraps(test)
+                    def test_wrapper(*args, **kwargs):
+                        return test(*args, **kwargs)
+
+                    for decorator in active_decorators:
+                        test_wrapper = decorator(test_wrapper)
+
+                    param_kwargs = {'op': op, 'dtype': dtype}
+                    yield (test_wrapper, test_name, param_kwargs)
+                except Exception as ex:
+                    # Provides an error message for debugging before rethrowing the exception
+                    print("Failed to instantiate {0} for op {1}!".format(test_name, op.name))
+                    raise ex
 
 # Decorator that skips a test if the given condition is true.
 # Notes:
