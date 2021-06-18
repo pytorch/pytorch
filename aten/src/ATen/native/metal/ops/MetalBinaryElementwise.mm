@@ -72,6 +72,9 @@ Tensor binaryElementwiseShaderKernel(
   if (broadCastFirstInput(X1, X2)) {
     outputSize = input2.sizes();
   }
+  if(c10::multiply_integers(outputSize) == 0){
+    return makeTensor({outputSize.vec()}, input1.options());
+  }
   MetalTensorImplStorage mt{outputSize.vec()};
   MetalCommandBuffer* cb1 = getCommandBufferFromTensor(input1);
   MetalCommandBuffer* cb2 = getCommandBufferFromTensor(input2);
@@ -111,6 +114,9 @@ Tensor& binaryElementwiseShaderKernel_(
   if (broadCastFirstInput(X1, X2)) {
     outputSize = input2.sizes();
   }
+  if(c10::multiply_integers(outputSize) == 0){
+      return input1;
+  }
   MetalCommandBuffer* cb1 = getCommandBufferFromTensor(input1);
   MetalCommandBuffer* cb2 = getCommandBufferFromTensor(input2);
   TORCH_CHECK(
@@ -149,6 +155,9 @@ Tensor binaryElementwiseMPSCNNKernel(
   if (broadCastFirstInput(X1, X2)) {
     outputSize = input2.sizes();
   }
+  if(c10::multiply_integers(outputSize) == 0){
+      return makeTensor({outputSize.vec()}, input1.options());
+  }
   MetalTensorImplStorage mt{outputSize.vec()};
   MetalCommandBuffer* cb1 = getCommandBufferFromTensor(input1);
   MetalCommandBuffer* cb2 = getCommandBufferFromTensor(input2);
@@ -179,6 +188,9 @@ Tensor& binaryElementwiseMPSCNNKernel_(Tensor& input1, const Tensor& input2) {
   IntArrayRef outputSize = input1.sizes();
   if (broadCastFirstInput(X1, X2)) {
     outputSize = input2.sizes();
+  }
+  if(c10::multiply_integers(outputSize) == 0){
+    return input1;
   }
   MetalCommandBuffer* cb1 = getCommandBufferFromTensor(input1);
   MetalCommandBuffer* cb2 = getCommandBufferFromTensor(input2);
