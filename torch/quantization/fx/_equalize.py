@@ -3,7 +3,7 @@ import torch.nn as nn
 from torch.fx import GraphModule
 from torch.fx.graph import Node
 
-from .utils import get_new_attr_name_with_prefix
+from .utils import get_new_attr_name_with_prefix, maybe_get_next_module
 from ..observer import (
     PerChannelMinMaxObserver,
     _with_args,
@@ -283,22 +283,19 @@ def maybe_get_next_input_eq_obs(node: Node, modules: Dict[str, nn.Module]) -> Op
            (node.op == 'call_function' and node.target == nn.functional.linear))
 
     # Locate the following output observer if it exists
-    maybe_obs_node = None  
-    for user, _ in node.users.items():
-        if user.op == 'call_module' and isinstance(modules[str(user.target)], ObserverBase):
-            maybe_obs_node = user
-
+    maybe_obs_node = maybe_get_next_module(node, modules, lambda a : isinstance(a, ObserverBase))
     if maybe_obs_node is None:
         return None
 
-    # Locate the input equalization observer following the output observer if it exists
-    for user, _ in maybe_obs_node.users.items():
-        if user.op == 'call_module':
-            maybe_eq_obs = modules[str(user.target)]
-            if isinstance(maybe_eq_obs, _InputEqualizationObserver):
-                return maybe_eq_obs
+    maybe_eq_obs_node = maybe_get_next_module(
+        maybe_obs_node, modules, lambda a : isinstance(a, _InputEqualizationObserver)
+    )
+    if maybe_eq_obs_node is None:
+        return None
 
-    return None
+    maybe_eq_obs = modules[str(maybe_eq_obs_node)]
+    assert(isinstance(maybe_eq_obs, _InputEqualizationObserver))
+    return maybe_eq_obs
 
 def maybe_get_next_equalization_scale(node: Node, modules: Dict[str, nn.Module]) -> Optional[torch.Tensor]:
     """ If the next next node is an InputEqualizationObserver then we want to

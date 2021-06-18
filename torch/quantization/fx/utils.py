@@ -1,5 +1,6 @@
 import re
 import torch
+import torch.nn as nn
 from ..utils import is_per_tensor, is_per_channel
 from ..quantize import is_activation_post_process
 
@@ -481,3 +482,23 @@ def is_get_tensor_info_node(node: Node) -> bool:
     result: bool = \
         node.op == "call_function" and node.target == getattr and node.args[1] == "shape"  # type: ignore[assignment]
     return result
+
+def maybe_get_next_module(
+    node: Node,
+    modules: Dict[str, nn.Module],
+    is_target_module_type: Callable[[nn.Module], bool]
+) -> Optional[Node]:
+    """ Gets the next module that matches what is needed in
+    is_target_module_type if it exists
+
+    Args:
+        node: The node whose users we want to look at
+        is_target_module_type: Function that returns true if the given module
+        matches the type specified in the function.
+    """
+
+    for user, _ in node.users.items():
+        if user.op == 'call_module' and is_target_module_type(modules[str(user.target)]):
+            return user
+
+    return None

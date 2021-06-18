@@ -131,10 +131,8 @@ void MPSImageWrapper::synchronize() {
 }
 
 void MPSImageWrapper::release() {
-  if ([_image isTemporaryImage]) {
-    [_image recycle];
-    [_commandBuffer remove:(MPSTemporaryImage*)_image];
-  }
+  [_image recycle];
+  [_commandBuffer remove:(MPSTemporaryImage*)_image];
   [_commandBuffer removeSubscriber:_delegate];
   _delegate = nil;
   _commandBuffer = nil;
