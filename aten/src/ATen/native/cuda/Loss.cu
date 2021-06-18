@@ -159,7 +159,7 @@ Tensor& binary_cross_entropy_backward_out_cuda(const Tensor& grad, const Tensor&
 // -----------------------------------
 namespace {
 
-const int NLL_NTHREADS = 32;
+const int NLL_LOSS_THREADS = 32;
 
 template <typename scalar_t>
 __global__ void nll_loss_forward_no_reduce_cuda_kernel(
@@ -221,7 +221,8 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_2d(
     int64_t n_classes,
     int64_t ignore_index) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  __shared__ accscalar_t sh_inputs[NLL_NTHREADS], acc_weight[NLL_NTHREADS];
+  __shared__ accscalar_t sh_inputs[NLL_LOSS_THREADS],
+      acc_weight[NLL_LOSS_THREADS];
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t i, t;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -229,7 +230,7 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_2d(
 
   sh_inputs[threadIdx.x] = static_cast<accscalar_t>(0);
   acc_weight[threadIdx.x] = static_cast<accscalar_t>(0);
-  for (i = threadIdx.x; i < nframe; i += NLL_NTHREADS) {
+  for (i = threadIdx.x; i < nframe; i += NLL_LOSS_THREADS) {
     t = target[i];
     if (t != ignore_index) {
       CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
@@ -245,7 +246,7 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_2d(
     *output = *total_weight = static_cast<scalar_t>(0);
     accscalar_t output_acc = 0;
     accscalar_t total_weight_acc = 0;
-    for (i = 0; i < NLL_NTHREADS; ++i) {
+    for (i = 0; i < NLL_LOSS_THREADS; ++i) {
       output_acc += sh_inputs[i];
       total_weight_acc += acc_weight[i];
     }
@@ -397,7 +398,7 @@ void nll_loss_forward_out_cuda_template(
             weight_data = weight_.data_ptr<scalar_t>();
           }
           nll_loss_forward_reduce_cuda_kernel_2d<scalar_t, float>
-              <<<1, NLL_NTHREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
+              <<<1, NLL_LOSS_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
                   output.data_ptr<scalar_t>(),
                   total_weight.data_ptr<scalar_t>(),
                   input_.data_ptr<scalar_t>(),
