@@ -138,10 +138,10 @@ def restore_state(
     patterns: Dict[Pattern, QuantizeHandler] = observed._patterns  # type: ignore[assignment]
     return patterns, node_name_to_scope, prepare_custom_config_dict
 
-def _convert(model: GraphModule, is_reference: bool = False,
-             convert_custom_config_dict: Dict[str, Any] = None,
-             is_standalone_module: bool = False,
-             _remove_qconfig_flag: bool = True) -> QuantizedGraphModule:
+def convert(model: GraphModule, is_reference: bool = False,
+            convert_custom_config_dict: Dict[str, Any] = None,
+            is_standalone_module: bool = False,
+            _remove_qconfig_flag: bool = True) -> QuantizedGraphModule:
     """ standalone_module means it a submodule that is not inlined in
     parent module, and will be quantized separately as one unit.
 
