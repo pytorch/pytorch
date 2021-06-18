@@ -85,7 +85,11 @@ jobs:
           path: C:\w\build-results
 
   generate-test-matrix:
+{%- if only_build_on_pull_request %}
+    if: ${{ github.repository_owner == 'pytorch' && github.event_name == 'push' }}
+{%- else %}
     if: ${{ github.repository_owner == 'pytorch' }}
+{%- endif %}
     runs-on: ubuntu-18.04
     env:
       NUM_TEST_SHARDS: !{{ num_test_shards }}
@@ -105,6 +109,9 @@ jobs:
           echo "::set-output name=matrix::${MATRIX}"
 
   test:
+{%- if only_build_on_pull_request %}
+    if: ${{ github.event_name == 'push' }}
+{%- endif %}
     runs-on: !{{ test_runner_type }}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-test
@@ -180,7 +187,11 @@ jobs:
   # logs (like test); we can always move it back to the other one, but it
   # doesn't create the best experience
   render_test_results:
+{%- if only_build_on_pull_request %}
+    if:  ${{ github.event_name == 'push' && always() }}
+{%- else %}
     if: always()
+{%- endif %}
     needs:
       - test
     runs-on: ubuntu-18.04
