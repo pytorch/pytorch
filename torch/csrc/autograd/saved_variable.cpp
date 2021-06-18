@@ -14,7 +14,7 @@
 
 namespace torch { namespace autograd {
 
-SavedVariable::SavedVariable(const Variable& variable, bool is_output, bool is_inplace_view) {
+SavedVariable::SavedVariable(const Variable& variable, bool is_output, bool is_inplace_on_view) {
   if (variable.defined()) {
     // Note [Inference tensor cannot be saved for backward]
     // Invariant:
@@ -37,53 +37,70 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output, bool is_i
       "you can make a clone to get a normal tensor and use it in autograd.")
 
     was_default_constructed_ = false;
+    const auto& version_counter = impl::version_counter(variable);
+    saved_version_ = version_counter.current_version();
+
+    // If the variable is a leaf or is not an output, we can safely save the
+    // original variable without running the risk of reference cycles.
+    // 1. If the variable is not an output, its grad_fn has already been fully
+    // created and in particular will be a different Node than the one
+    // we are currently constructing (the one that owns this SavedVariable).
+    // 2. If the variable is a leaf, it only has weak reference to the grad_accumulator
+    // which cannot create a cycle.
+    // In those cases, we save the original variable and don't need further processing.
+    if (!is_output || variable.is_leaf()) {
+      saved_original_ = true;
+      data_ = variable;
+      return;
+    }
+
+    // From now on, we can assume the variable is not a leaf and is an output.
+
+    is_inplace_on_view_ = is_inplace_on_view;
     output_nr_ = variable.output_nr();
-    requires_grad_ = variable.requires_grad();
-    has_grad_fn_ = !variable.is_leaf();
-    is_inplace_view_ = is_inplace_view;
+    version_counter_ = version_counter;
+
     // These copies are all shared_ptr copies, so slightly more expensive.
     // Do them here instead of in the init list in case data is undefined.
     data_ = variable.tensor_data();
+
+    if(is_inplace_on_view) {
+      weak_grad_fn_ = variable.grad_fn();
+    }
+
     // TODO(albanD) This needs to be updated when moving to multiple levels
     const auto& fw_grad = variable._fw_grad(/* level */ 0);
     if (fw_grad.defined()) {
       fw_grad_ = std::make_shared<ForwardGrad>();
       fw_grad_->set_value(fw_grad, /* level */ 0);
     }
-    if (variable.is_leaf()) {
-      grad_accumulator_ = impl::grad_accumulator(variable);
-    } else if (!is_output) {
-      grad_fn_ = variable.grad_fn();
-    } else if (is_inplace_view) {
-      weak_grad_fn_ = variable.grad_fn();
-    }
-    version_counter_ = impl::version_counter(variable);
-    saved_version_ = version_counter_.current_version();
   }
 }
 
-SavedVariable::SavedVariable(const c10::optional<Variable>& variable, bool is_output, bool is_inplace_view)
-  : SavedVariable(variable.has_value() ? *variable : Variable(), is_output, is_inplace_view) {}
+SavedVariable::SavedVariable(const c10::optional<Variable>& variable, bool is_output, bool is_inplace_on_view)
+  : SavedVariable(variable.has_value() ? *variable : Variable(), is_output, is_inplace_on_view) {}
 
 Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   if (!data_.defined()) {
-    if (!was_default_constructed_) {
-      throw std::runtime_error(ERR_BACKWARD_TWICE);
-    }
+    TORCH_CHECK(was_default_constructed_, ERR_BACKWARD_TWICE);
     return Variable();
   }
 
-  auto grad_fn = is_inplace_view_ ? weak_grad_fn_.lock() : grad_fn_;
-  if (has_grad_fn_ && !grad_fn) {
-    if (!saved_for) {
-      // If saving the grad_fn would create a circular reference, then it must
-      // be passed in to the unpack function.
-      throw std::runtime_error("No grad_fn for non-leaf saved variable");
-    }
+  // We want grad_fn here to provide the most helpful debug message to the user
+  // if versions don't match
+  auto grad_fn = saved_original_ ? data_.grad_fn()
+                                 : is_inplace_on_view_ ? weak_grad_fn_.lock()
+                                                       : nullptr;
+
+  if (!saved_original_ && !grad_fn) {
+    TORCH_CHECK(saved_for,"No grad_fn for non-leaf saved variable");
     grad_fn = std::move(saved_for);
   }
 
-  if (saved_version_ != version_counter_.current_version()) {
+  auto current_version = saved_original_ ? impl::version_counter(data_).current_version()
+                                         : version_counter_.current_version();
+
+  if (saved_version_ != current_version) {
     std::stringstream message;
     message << "one of the variables needed for gradient computation has been "
         "modified by an inplace operation: [" << data_.toString() << " "
@@ -92,7 +109,7 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
         message << ", which is output " << output_nr_
             << " of " << grad_fn->name() << ",";
     }
-    message << " is at version " << version_counter_.current_version()
+    message << " is at version " << current_version
         << "; expected version " << saved_version_ << " instead.";
     if (!AnomalyMode::is_enabled()) {
         message << " Hint: enable anomaly detection to find the operation "
@@ -104,27 +121,24 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
             "that failed to compute its gradient. The variable in question "
             "was changed in there or anywhere later. Good luck!";
     }
-    throw std::runtime_error(message.str());
+    TORCH_CHECK(false, message.str());
   }
+
+  // The version counter is correct. If we have the original variable, we simply return it
+
+  if (saved_original_) {
+    return data_;
+  }
+
+  // From now on, we can assume the variable is not a leaf and is an output.
+  // Additionnally, because the variable is not a leaf, we have its grad_fn
+  // (computed above) and need to attach it to the returned tensor.
 
   // NB: saved views are unpacked as normal Variables (not views) even though
   // they still share the same storage. This works only because we never call
   // in-place functions on unpacked variables.
-  Variable var;
-  if (grad_fn) {
-    var = make_variable(data_, Edge(std::move(grad_fn), output_nr_));
-  } else {
-    var = make_variable(data_, requires_grad_);
-  }
+  Variable var = make_variable(data_, Edge(std::move(grad_fn), output_nr_));
   impl::set_version_counter(var, saved_version_);
-
-  // If a Variable is a leaf (no grad_fn saved), and it requires_grad, then we
-  // should have saved the grad accumulator. Even if the Variable no longer
-  // alive, the accumulator should be kept alive by the references in the
-  // graph).
-  if (requires_grad_ && !var.grad_fn() && grad_accumulator_.expired())
-    throw std::logic_error("No grad accumulator for a saved leaf!");
-  impl::set_grad_accumulator(var, grad_accumulator_);
 
   // NB: var here is never a view so there is no need to make anything special
   // for the case where the saved Tensor was a view. This whole argument relies
