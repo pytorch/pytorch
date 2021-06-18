@@ -14,9 +14,6 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/Context.h>
 #include <ATen/TracerMode.h>
-#include <ATen/Operators.h>
-
-${static_dispatch_extra_headers}
 
 namespace at {
 
@@ -43,27 +40,32 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 AT_FORALL_COMPLEX_TYPES(TENSOR)
 #undef TENSOR
 
-${function_definitions}
+${function_declarations}
 
 // Special C++ only overloads for std()-like functions (See gh-40287)
 // These are needed because int -> bool conversion takes precedence over int -> IntArrayRef
 // So, for example std(0) would select the std(unbiased=False) overload
-TORCH_API inline Tensor var(const Tensor& self, int dim) {
-  return at::var(self, IntArrayRef{dim});
-}
-TORCH_API inline std::tuple<Tensor, Tensor> var_mean(const Tensor& self, int dim) {
-  return at::var_mean(self, IntArrayRef{dim});
-}
-TORCH_API inline Tensor std(const Tensor& self, int dim) {
-  return at::std(self, IntArrayRef{dim});
-}
-TORCH_API inline std::tuple<Tensor, Tensor> std_mean(const Tensor& self, int dim) {
-  return at::std_mean(self, IntArrayRef{dim});
-}
+TORCH_API Tensor var(const Tensor& self, int dim);
+TORCH_API std::tuple<Tensor,Tensor> var_mean(const Tensor& self, int dim);
+TORCH_API Tensor std(const Tensor& self, int dim);
+TORCH_API std::tuple<Tensor,Tensor> std_mean(const Tensor& self, int dim);
+
+
+// Special C++ only overloads for convnd functions (See gh-45667)
+// These are needed because {1, 2} is ambiguous between string and IntArrayRef overloads
+TORCH_API at::Tensor conv1d(
+    const Tensor& input, const Tensor& weight, const Tensor& bias, IntArrayRef stride,
+    std::initializer_list<int64_t> padding, IntArrayRef dilation = 1, int64_t groups = 1);
+TORCH_API at::Tensor conv2d(
+    const Tensor& input, const Tensor& weight, const Tensor& bias, IntArrayRef stride,
+    std::initializer_list<int64_t> padding, IntArrayRef dilation = 1, int64_t groups = 1);
+TORCH_API at::Tensor conv3d(
+    const Tensor& input, const Tensor& weight, const Tensor& bias, IntArrayRef stride,
+    std::initializer_list<int64_t> padding, IntArrayRef dilation = 1, int64_t groups = 1);
 
 namespace detail {
 
-TORCH_API inline void noopDelete(void*) {}
+TORCH_API void noopDelete(void*);
 
 } // namespace detail
 
@@ -115,94 +117,19 @@ class TORCH_API TensorMaker {
     return *this;
   }
 
-  Tensor make_tensor() {
-    AutoDispatchBelowADInplaceOrView guard{}; // TODO: Remove.
-    tracer::impl::NoTracerDispatchMode tracer_guard{};
-
-    check_size_nonnegative(sizes_);
-
-    TORCH_CHECK_VALUE(
-        !deleter_ || !ctx_,
-        "The deleter and context arguments are mutually exclusive.");
-
-    if (device_ == nullopt) {
-      device_ = globalContext().getDeviceFromPtr(data_, opts_.device().type());
-    }
-
-    if (opts_.device().has_index()) {
-      // clang-format off
-      TORCH_CHECK_VALUE(
-          opts_.device() == *device_,
-          "Specified device ", opts_.device(), " does not match device of data ", *device_);
-      // clang-format on
-    }
-
-    std::size_t size_bytes = computeStorageSize();
-
-    DataPtr data_ptr{};
-    if (deleter_) {
-      data_ptr = makeDataPtrFromDeleter();
-    } else {
-      data_ptr = makeDataPtrFromContext();
-    }
-
-    Storage storage{Storage::use_byte_size_t{}, size_bytes, std::move(data_ptr)};
-
-    Tensor tensor = detail::make_tensor<TensorImpl>(
-        std::move(storage), opts_.computeDispatchKey(), opts_.dtype());
-
-    if (sizes_.size() != 1 || sizes_[0] != 0) {
-      TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
-
-      if (strides_) {
-        tensor_impl->set_sizes_and_strides(sizes_, *strides_);
-      } else {
-        tensor_impl->set_sizes_contiguous(sizes_);
-      }
-    }
-
-    return tensor;
-  }
+  Tensor make_tensor();
 
  private:
   explicit TensorMaker(void* data, IntArrayRef sizes) noexcept
       : data_{data}, sizes_{sizes} {}
 
-  std::size_t computeStorageSize() const noexcept {
-    std::size_t itemsize = opts_.dtype().itemsize();
+  std::size_t computeStorageSize() const noexcept;
 
-    if (strides_) {
-      return detail::computeStorageNbytes(sizes_, *strides_, itemsize);
-    }
+  DataPtr makeDataPtrFromDeleter() const;
 
-    std::size_t size = 1;
-    for (std::int64_t s : sizes_) {
-      size *= static_cast<std::size_t>(s);
-    }
-    return size * itemsize;
-  }
+  DataPtr makeDataPtrFromContext() noexcept;
 
-  inline DataPtr makeDataPtrFromDeleter() const {
-    return InefficientStdFunctionContext::makeDataPtr(data_, deleter_, *device_);
-  }
-
-  inline DataPtr makeDataPtrFromContext() noexcept {
-    return DataPtr{data_, ctx_.release(), ctx_.get_deleter(), *device_};
-  }
-
-  IntArrayRef makeTempSizes() const noexcept {
-    static std::int64_t zeros[5] = {0, 0, 0, 0, 0};
-    if (opts_.has_memory_format()) {
-      MemoryFormat format = *opts_.memory_format_opt();
-      if (format == MemoryFormat::ChannelsLast) {
-        return IntArrayRef(zeros, 4);
-      }
-      if (format == MemoryFormat::ChannelsLast3d) {
-        return IntArrayRef(zeros, 5);
-      }
-    }
-    return IntArrayRef(zeros, 1);
-  }
+  IntArrayRef makeTempSizes() const noexcept;
 
   void* data_;
   IntArrayRef sizes_;
