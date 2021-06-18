@@ -8,8 +8,8 @@ import itertools
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA, TEST_MKL)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, dtypes, onlyOnCPUAndCUDA,
-     skipCPUIfNoMkl, skipCUDAIfRocm, deviceCountAtLeast, onlyCUDA, OpDTypes,
+    (instantiate_device_type_tests, ops, dtypes,
+     skipCPUIfNoMkl, deviceCountAtLeast, onlyCUDA, OpDTypes,
      skipIf)
 from torch.testing._internal.common_methods_invocations import spectral_funcs, SpectralFuncInfo
 
@@ -210,6 +210,7 @@ class TestFFT(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, match):
             op(t)
+
     def test_fft_invalid_dtypes(self, device):
         t = torch.randn(64, device=device, dtype=torch.complex128)
 
@@ -258,6 +259,7 @@ class TestFFT(TestCase):
             }
             C = torch.fft.rfft(t)
             self.assertEqual(C.dtype, PROMOTION_MAP_R2C[dtype])
+
     @ops(spectral_funcs, dtypes=OpDTypes.unsupported,
          allowed_dtypes=[torch.half, torch.bfloat16])
     def test_fft_half_and_bfloat16_errors(self, device, dtype, op):
@@ -337,6 +339,7 @@ class TestFFT(TestCase):
                 # For real input, ifftn(fftn(x)) will convert to complex
                 self.assertEqual(x, y, exact_dtype=(
                     forward != torch.fft.fftn or x.is_complex()))
+
     @ops([op for op in spectral_funcs if op.ndimensional],
          allowed_dtypes=[torch.float, torch.cfloat])
     def test_fftn_invalid(self, device, dtype, op):
