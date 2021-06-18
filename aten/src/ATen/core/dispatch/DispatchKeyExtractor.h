@@ -55,6 +55,11 @@ namespace detail {
     void operator()(const at::Tensor& x) {
       ts = ts | x.key_set();
     }
+    void operator()(const c10::optional<at::Tensor>& x) {
+      if (x.has_value()) {
+        ts = ts | x->key_set();
+      }
+    }
     void operator()(at::ArrayRef<at::Tensor> xs) {
       for (const auto& x : xs) {
         ts = ts | x.key_set();
@@ -65,10 +70,9 @@ namespace detail {
         ts = ts | gen.key_set();
       }
     }
-    template<typename T>
-    void operator()(const c10::optional<T>& x) {
-      if (x.has_value()) {
-        (*this)(*x);
+    void operator()(const c10::optional<at::Generator>& gen) {
+      if (gen.has_value() && gen->defined()) {
+        ts = ts | gen->key_set();
       }
     }
     template <typename T>
