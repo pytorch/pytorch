@@ -574,7 +574,7 @@ TORCH_IMPL_FUNC(reflection_pad3d_out_cuda) (
   auto input = input_.contiguous();
   bool batch_mode = (input.dim() == 5);
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
       input.scalar_type(), "reflection_pad3d_out_cuda", [&] {
         auto input_inner = input;
         auto output_inner = output;
@@ -626,7 +626,7 @@ TORCH_IMPL_FUNC(reflection_pad3d_backward_out_cuda) (
   int64_t pad_top = padding[2];
   int64_t pad_front = padding[4];
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
       input.scalar_type(), "reflection_pad3d_backward_out_cuda", [&] {
         auto grad_input_ = grad_input;
         auto grad_output_ = grad_output;

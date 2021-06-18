@@ -19,6 +19,8 @@ struct TORCH_API ReflectionPadOptions {
   /// If it is `int`, uses the same padding in all boundaries.
   /// If it is a 2-`tuple` (for ReflectionPad1d), uses (padding_left, padding_right).
   /// If it is a 4-`tuple` (for ReflectionPad2d), uses (padding_left, padding_right, padding_top, padding_bottom).
+  /// If it is a 6-`tuple` (for ReflectionPad3d), uses (padding_left, padding_right, padding_top, padding_bottom, padding_front, padding_back).
+
   TORCH_ARG(ExpandingArray<D*2>, padding);
 };
 

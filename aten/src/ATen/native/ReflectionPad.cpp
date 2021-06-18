@@ -1004,28 +1004,45 @@ TORCH_IMPL_FUNC(reflection_pad3d_out_cpu)
   auto input = input_.contiguous();
 
   if (batch_mode) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad3d_cpu", [&] {
-      auto input_data = input.data_ptr<scalar_t>();
-      auto output_data = output.data_ptr<scalar_t>();
-      auto nbatch = input.size(0);
-      reflection_pad3d_out_loop(
-          input_data, output_data,
-          nbatch, nplane,
-          input_w, input_h, input_d,
-          output_w, output_h, output_d,
-          pad_left, pad_top, pad_front);
-      });
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
+        kHalf, input.scalar_type(), "replication_pad3d_cpu", [&] {
+          auto input_data = input.data_ptr<scalar_t>();
+          auto output_data = output.data_ptr<scalar_t>();
+          auto nbatch = input.size(0);
+          reflection_pad3d_out_loop(
+              input_data,
+              output_data,
+              nbatch,
+              nplane,
+              input_w,
+              input_h,
+              input_d,
+              output_w,
+              output_h,
+              output_d,
+              pad_left,
+              pad_top,
+              pad_front);
+        });
   } else {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad3d_cpu", [&] {
-      auto input_data = input.data_ptr<scalar_t>();
-      auto output_data = output.data_ptr<scalar_t>();
-      reflection_pad3d_out_frame(
-          input_data, output_data,
-          nplane,
-          input_w, input_h, input_d,
-          output_w, output_h, output_d,
-          pad_left, pad_top, pad_front);
-    });
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
+        kHalf, input.scalar_type(), "replication_pad3d_cpu", [&] {
+          auto input_data = input.data_ptr<scalar_t>();
+          auto output_data = output.data_ptr<scalar_t>();
+          reflection_pad3d_out_frame(
+              input_data,
+              output_data,
+              nplane,
+              input_w,
+              input_h,
+              input_d,
+              output_w,
+              output_h,
+              output_d,
+              pad_left,
+              pad_top,
+              pad_front);
+        });
   }
 }
 
@@ -1065,8 +1082,8 @@ TORCH_IMPL_FUNC(reflection_pad3d_backward_out_cpu)(const Tensor& grad_output,
   grad_input.zero_();
 
   if (batch_mode) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
-        input.scalar_type(), "replication_pad3d_backward_cpu", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
+        kHalf, input.scalar_type(), "replication_pad3d_backward_cpu", [&] {
           reflection_pad3d_backward_out_loop<scalar_t>(
               grad_input.data_ptr<scalar_t>(),
               grad_output_.data_ptr<scalar_t>(),
@@ -1083,8 +1100,8 @@ TORCH_IMPL_FUNC(reflection_pad3d_backward_out_cpu)(const Tensor& grad_output,
               pad_front);
         });
   } else {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
-        input.scalar_type(), "replication_pad3d_backward_cpu", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
+        kHalf, input.scalar_type(), "replication_pad3d_backward_cpu", [&] {
           reflection_pad3d_backward_out_frame<scalar_t>(
               grad_input.data_ptr<scalar_t>(),
               grad_output_.data_ptr<scalar_t>(),
