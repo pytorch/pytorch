@@ -292,7 +292,6 @@ class OpInfo(object):
 
         self.name = name
         self.ref = ref
-        self.sample_kwargs = sample_kwargs
         self.aten_name = aten_name if aten_name is not None else name
         self.variant_test_name = variant_test_name
 
