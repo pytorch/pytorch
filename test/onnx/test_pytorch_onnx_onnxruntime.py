@@ -155,7 +155,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                 if remained_onnx_input_idx is not None:
                     test_input_onnx = []
                     for idx in remained_onnx_input_idx:
-                        test_input_onnx.append(input[idx])
+                        test_input_onnx.append(test_input[idx])
                     test_input = test_input_onnx
                 ort_outs = run_ort(ort_sess, test_input)
                 ort_compare_with_pytorch(ort_outs, output, rtol, atol)
@@ -8097,6 +8097,11 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.ones(2, 3)
         y = torch.randn(4, 6)
         self.run_test(M(), (x, y), remained_onnx_input_idx=[1])
+
+        y2 = torch.randn(5, 2)
+        self.run_test(M(), (x, y), remained_onnx_input_idx=[1], input_names=['x', 'y'],
+                      dynamic_axes={'x': [0, 1], 'y': [0, 1]},
+                      test_with_inputs=[(y, y2)])
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_set_attr_modules(self):
