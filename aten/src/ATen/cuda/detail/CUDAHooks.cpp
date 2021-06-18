@@ -206,7 +206,6 @@ bool CUDAHooks::compiledWithMIOpen() const {
 
 bool CUDAHooks::supportsDilatedConvolutionWithCuDNN() const {
 #if AT_CUDNN_ENABLED()
-  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   // NOTE: extra parenthesis around numbers disable clang warnings about
   // dead code
   return true;

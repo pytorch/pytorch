@@ -6,13 +6,11 @@
 import collections
 import copy
 import io
-from collections import OrderedDict
 from itertools import chain
 from typing import Any, Callable, Dict, List, Optional, Type
 
 import torch
 import torch.distributed as dist
-from torch.nn import Parameter
 from torch.optim import Optimizer
 import logging
 
@@ -96,7 +94,7 @@ class ZeroRedundancyOptimizer(Optimizer):
     in conjunction with :class:`torch.nn.parallel.DistributedDataparallel` to
     reduce per-rank peak memory consumption.
 
-    ``ZeroRedundancyOptimizer`` use a greedy algorithm to pack a number of
+    ``ZeroRedundancyOptimizer`` uses a sorted-greedy algorithm to pack a number of
     parameters at each rank. Each parameter belongs to a single rank and is not
     divided among ranks. The partition is arbitrary and might not match the
     the parameter registration or usage order.
@@ -110,7 +108,7 @@ class ZeroRedundancyOptimizer(Optimizer):
         group (``ProcessGroup``, optional): ``torch.distributed``
             ``ProcessGroup`` (default: ``group.WORLD`` initialized by
             :meth:`torch.distributed.init_process_group`).
-        parameters_as_bucket_views (bool): when enabled, parameters will
+        parameters_as_bucket_view (bool): when enabled, parameters will
             be packed into larger buckets to speed up communication and
             ``param.data`` fields will point to bucket views at different
             offsets. When disabled, each individual parameter will be
@@ -133,6 +131,10 @@ class ZeroRedundancyOptimizer(Optimizer):
         >>> ddp(inputs).sum().backward()
         >>> opt.step()
 
+    .. note: Currently, ``ZeroRedundancyOptimizer`` requires that all of the
+        passed-in parameters are on the same device and that they are the same
+        dense type.
+
     .. warning: ZeroRedundancyOptimizer is experimental and subject to change.
 
     .. _ZeRO: https://arxiv.org/abs/1910.02054
@@ -147,23 +149,24 @@ class ZeroRedundancyOptimizer(Optimizer):
         parameters_as_bucket_view: bool = False,
         **default: Any,
     ):
+        # Perform type and assumption checks on the input parameters
+        self._verify_and_init_params(params)
+        self._verify_same_param_device()
+        self._verify_same_dense_param_type()
+        self._device = self._all_params[0].device
+
         # Hold all the model params in the root .param_groups
         # NOTE: the default constructor uses `add_param_group` which is partially overloaded here
         # we introduce the `initialized` flag for be able to dissociate the behaviour of
         # `add_param_group` in between super() and ZeroRedundancyOptimizer
         self.initialized = False
-        super().__init__(params, default)
+        super().__init__(self._all_params, default)
 
-        # Partition information. lazy evaluation, computed if requested
-        self._per_device_params_cache: "OrderedDict[torch.device, List[List[Parameter]]]" = (
-            OrderedDict()
-        )  # device, rank, params
-        self._param_rank_cache: Dict[torch.Tensor, int] = {}
+        # Partition information (evaluated lazily)
+        self._param_to_rank_cache: Dict[torch.Tensor, int] = {}
         self._param_to_index_cache: Dict[int, int] = {}
         self._partition_parameters_cache: List[List[Dict]] = []
-        self._index_to_param_cache: Dict[int, torch.Tensor] = {}
-        self._all_params = params
-        self._reference_is_trainable_mask = list(map(_is_trainable, self._all_params))
+        self._index_to_param_cache: List[torch.Tensor] = []
 
         # Build the wrapped optimizer, responsible for a shard of the params
         self.group = group if group is not None else dist.group.WORLD
@@ -175,20 +178,21 @@ class ZeroRedundancyOptimizer(Optimizer):
         self._optim_defaults = default
         self._optim_constructor = optimizer_class
 
-        #  Optional consolidated optimizer state
+        # Optional consolidated optimizer state
         self._all_states: List[Dict[str, Any]] = []
 
-        # Current default device is set by the parameters allocated to this rank
-        self._device = list(self._per_device_params.keys())[0]
-        self.buckets: Dict[torch.device, List[torch.Tensor]] = {}
+        self._reference_is_trainable_mask = list(map(_is_trainable, self._all_params))
+        self.buckets: List[torch.Tensor] = []
 
         self._update_trainable()
         self.initialized = True
 
     def _clear_cache(self) -> None:
+        r"""
+        Clears the cached data structures giving partition information.
+        """
         self._partition_parameters_cache.clear()
-        self._per_device_params_cache.clear()
-        self._param_rank_cache.clear()
+        self._param_to_rank_cache.clear()
         self._index_to_param_cache.clear()
         self._param_to_index_cache.clear()
 
@@ -302,6 +306,11 @@ class ZeroRedundancyOptimizer(Optimizer):
             element of the list contains the param_groups for a rank. Element 0
             corresponds to rank 0, etc. We need all the ranks for the broadcast
             inside ``step()``.
+
+        NOTE: `test_sharding()` and `test_add_param_group()` rely on this
+        function using the sorted-greedy algorithm for partitioning. If the
+        algorithm is changed, please re-examine those two tests in
+        `test_zero_redundancy_optimizer.py` accordingly.
         """
         if len(self._partition_parameters_cache) == 0:
             self._partition_parameters_cache = [list() for _ in range(self.world_size)]
@@ -324,62 +333,38 @@ class ZeroRedundancyOptimizer(Optimizer):
         return self._partition_parameters_cache
 
     @property
-    def _per_device_params(self) -> Dict[torch.device, List[List[Parameter]]]:
-        r"""
-        Sorted list of all the params, first per device then per rank.
-
-        Within a list params are sorted per number of elements to allow for an easy bucketing.
-        """
-        if len(self._per_device_params_cache) == 0:
-            # Go through all params, log them per device
-            # The ordering is important here, needs to be the same on all ranks
-            # So that ulterior broadcast calls are matching
-            for param_group in self.param_groups:
-                for param in param_group["params"]:
-                    device = param.device
-                    if self._per_device_params_cache.get(device) is None:
-                        self._per_device_params_cache[device] = [[] for _ in range(self.world_size)]
-                    self._per_device_params_cache[device][self._param_to_rank[param]] += [param]
-
-            # Sort param_lists by size
-            for k in self._per_device_params_cache.keys():
-                for r in self._per_device_params_cache[k]:
-                    r.sort(key=lambda x: x.numel())
-
-        return self._per_device_params_cache
-
-    @property
     def _param_to_rank(self) -> Dict[torch.Tensor, int]:
-        r"""Look up table to match a given param with a data parallel rank"""
-        if len(self._param_rank_cache) == 0:
+        r"""
+        Hash table mapping parameters to their assigned data parallel rank in
+        the partition.
+        """
+        if len(self._param_to_rank_cache) == 0:
             for rank, param_groups in enumerate(self.partition_parameters()):
                 for param_group in param_groups:
                     for param in param_group["params"]:
-                        self._param_rank_cache[param] = rank
-        return self._param_rank_cache
+                        self._param_to_rank_cache[param] = rank
+        return self._param_to_rank_cache
 
     @property
     def _param_to_index(self) -> Dict[int, int]:
         r"""
-        Hash table in between parameter indices in the global optimizer scheme,
-        and the actual params.
+        Hash table mapping parameters to their indices in the global optimizer
+        scheme.
         """
         if len(self._param_to_index_cache) == 0:
             self._param_to_index_cache = {
                 id(p): i for i, p in enumerate(chain(*(g["params"] for g in self.param_groups)))
             }
-
         return self._param_to_index_cache
 
     @property
     def _index_to_param(self) -> Dict[int, torch.Tensor]:
         r"""
-        Hash table in between parameter indices in the global optimizer scheme,
-        and the actual params.
+        List mapping parameter indices in the global optimizer scheme to the
+        actual params.
         """
         if len(self._index_to_param_cache) == 0:
-            self._index_to_param_cache = {i: p for i, p in enumerate(chain(*(g["params"] for g in self.param_groups)))}
-
+            self._index_to_param_cache = list(chain(*(g["params"] for g in self.param_groups)))
         return self._index_to_param_cache
 
     def step(self, closure: Optional[Callable[[], float]] = None, **kwargs: Any) -> Optional[float]:
@@ -399,7 +384,8 @@ class ZeroRedundancyOptimizer(Optimizer):
         trainable_mask = list(map(_is_trainable, self._all_params))
         if trainable_mask != self._reference_is_trainable_mask:
             logging.warning(
-                "ZeroRedundancyOptimizer detected that the trainable params changed, updating the partitioning"
+                "ZeroRedundancyOptimizer detected that the trainable params "
+                "changed, updating the partitioning"
             )
             self._update_trainable()
             self._reference_is_trainable_mask = trainable_mask
@@ -416,19 +402,21 @@ class ZeroRedundancyOptimizer(Optimizer):
         # Sync all the updated shards in between the ranks
         handles = []
         if self.parameters_as_bucket_view:
-            for device in self.buckets.keys():
-                for src_rank, bucket in enumerate(self.buckets[device]):
-                    global_src_rank = _get_global_rank(self.group, src_rank)
-                    handles.append(dist.broadcast(tensor=bucket, src=global_src_rank, group=self.group, async_op=True))
+            for rank, bucket in enumerate(self.buckets):
+                global_rank = _get_global_rank(self.group, rank)
+                handles.append(
+                    dist.broadcast(tensor=bucket, src=global_rank,
+                                   group=self.group, async_op=True)
+                )
         else:
-            for device, per_rank_params in self._per_device_params.items():
-                for dst_rank, params in enumerate(per_rank_params):
-                    global_dst_rank = _get_global_rank(self.group, dst_rank)
-                    for param in params:
+            for rank, param_groups in enumerate(self.partition_parameters()):
+                global_rank = _get_global_rank(self.group, rank)
+                for param_group in param_groups:
+                    for param in param_group["params"]:
                         handles.append(
-                            dist.broadcast(tensor=param.data, src=global_dst_rank, group=self.group, async_op=True)
+                            dist.broadcast(tensor=param.data, src=global_rank,
+                                           group=self.group, async_op=True)
                         )
-
         _ = list(map(lambda x: x.wait(), handles))
 
         # Sync hypothethical new results from the wrapped optimizer to the exposed param_groups
@@ -457,8 +445,8 @@ class ZeroRedundancyOptimizer(Optimizer):
         super().load_state_dict(state_dict)
 
         # Sync with the optimizer param groups
-        ZeroRedundancyOptimizer._sync_param_groups(state_dict["param_groups"], self.param_groups)
-        ZeroRedundancyOptimizer._sync_param_groups(self.param_groups, self.optim.param_groups)
+        self._sync_param_groups(state_dict["param_groups"], self.param_groups)
+        self._sync_param_groups(self.param_groups, self.optim.param_groups)
 
     def local_state_dict(self) -> Dict:
         r"""
@@ -543,44 +531,45 @@ class ZeroRedundancyOptimizer(Optimizer):
     def _setup_flat_buffers(self) -> None:
         r"""
         Make all params which are on the same device and tied to the same rank
-        views of a single buffer. This is used at construction time, and anytime
-        parameter trainability is changed (frozen or unfrozen) and
+        views of a single buffer. This is used at construction time, and
+        anytime parameter trainability is changed (frozen or unfrozen) and
         ``_update_trainable`` is called.
         """
-
-        for device, per_rank_params in self._per_device_params.items():
-            # Only wipe the existing buckets if there are none
-            # (could be that this is called twice, when trainability changes)
-            if device not in self.buckets.keys():
-                self.buckets[device] = []
-
-            # Make parameters a view of the bucket
-            for dst_rank, params in enumerate(per_rank_params):
-                if len(params) > 0:
-
-                    # Clone the non-trainable params, if in a bucket it will get destroyed
-                    for param in filter(lambda x: not x.requires_grad, params):
+        for rank, param_groups in enumerate(self.partition_parameters()):
+            # Clone the non-trainable params, find the buffer size and dtype
+            # for the trainable params' bucket, and compile a list of the
+            # trainable params
+            buffer_size = 0
+            dtype = None
+            trainable_params = []
+            for param_group in param_groups:
+                for param in param_group["params"]:
+                    if not _is_trainable(param):
                         param.data = param.data.detach().clone()
-
-                    # Merge all the trainable params in a single bucket
-                    trainable_params = list(filter(_is_trainable, params))
-                    buffer_size = sum(map(lambda x: x.numel(), trainable_params))
-                    bucket = torch.empty(buffer_size, dtype=params[0].dtype, device=device)
-                    offset = 0
-
-                    for param in trainable_params:
-                        offset_next = offset + param.numel()
-                        bucket[offset:offset_next].copy_(param.data.flatten())
-                        param.data = bucket[offset:offset_next].view_as(param.data)
-                        offset = offset_next
-
-                    # Either replace the existing bucket, or create it
-                    if len(self.buckets[device]) == dst_rank:
-                        self.buckets[device].append(bucket)
                     else:
-                        self.buckets[device][dst_rank] = bucket
-                else:
-                    self.buckets[device].append(torch.zeros(1, device=device))
+                        buffer_size += param.numel()
+                        trainable_params.append(param)
+                    dtype = param.dtype  # assumes all dense and same dtype
+
+            # Create a dummy bucket if there are no params
+            if buffer_size == 0:
+                self.buckets.append(torch.zeros(1, device=self._device))
+                continue
+
+            # Otherwise, construct the bucket
+            bucket = torch.empty(buffer_size, dtype=dtype, device=self._device)
+            offset = 0
+            for param in trainable_params:
+                offset_next = offset + param.numel()
+                bucket[offset:offset_next].copy_(param.data.flatten())
+                param.data = bucket[offset:offset_next].view_as(param.data)
+                offset = offset_next
+
+            # Either replace the existing bucket or create it
+            if len(self.buckets) != rank:
+                self.buckets[rank] = bucket
+            else:
+                self.buckets.append(bucket)
 
     def _update_trainable(self) -> None:
         r"""
@@ -591,9 +580,90 @@ class ZeroRedundancyOptimizer(Optimizer):
         # Create the optim which will work on the param shard
         if not hasattr(self, "optim"):
             self._clear_cache()
-            self._default_device = list(self._per_device_params.keys())[0]
             self.optim = self._optim_constructor(self.partition_parameters()[self.rank], **self._optim_defaults)
             self._sync_param_groups(self.optim.param_groups, self.param_groups)
 
         if self.parameters_as_bucket_view:
             self._setup_flat_buffers()
+
+    def _verify_and_init_params(self, params: Any) -> None:
+        r"""
+        Verifies the type of ``params`` and initializes ``self._all_params``
+        if ``params`` is valid.
+
+        While :class:`optim.Optimizer <torch.optim.Optimizer>` allows
+        ``params`` to be an iterable of :class:`dict` s, currently
+        ``ZeroRedundancyOptimizer`` strictly requires ``params`` to be an
+        iterable of :class:`torch.Tensor` s.
+
+        Raises:
+            TypeError: ``params`` has an invalid type.
+            ValueError: ``params`` is empty.
+        """
+        if isinstance(params, torch.Tensor):
+            raise TypeError("params argument should be an iterable of "
+                            f"Tensors, but got {torch.typename(params)}")
+        try:
+            self._all_params = list(params)
+        except TypeError:
+            raise TypeError("params argument should be an iterable of "
+                            f"Tensors, but got {torch.typename(params)}")
+        if len(self._all_params) == 0:
+            raise ValueError("ZeroRedundancyOptimizer got an empty parameter "
+                             "list")
+        for param in self._all_params:
+            if not isinstance(param, torch.Tensor):
+                raise TypeError("params argument should be an iterable of "
+                                "Tensors, but got an iterable containing "
+                                f"{torch.typename(param)}")
+
+    def _verify_same_param_device(self) -> None:
+        r"""
+        Verifies that ZeRO is being used under the single-process single-
+        device regime where a process operates exclusively on a full model
+        replica on a single device.
+
+        The function assumes that ``self._all_params`` has been initialized
+        and is non-empty.
+
+        Raises:
+            ValueError: ``params`` contains parameters across multiple
+                devices.
+
+        NOTE: This function can be removed once support for sharding a rank's
+        model parameters across multiple devices is added.
+        """
+        device = self._all_params[0].device
+        for param in self._all_params[1:]:
+            if param.device != device:
+                raise ValueError("ZeroRedundancyOptimizer assumes that each "
+                                 "rank's model parameters are on the same "
+                                 f"device but got both {device} and "
+                                 f"{param.device}")
+
+    def _verify_same_dense_param_type(self) -> None:
+        r"""
+        Verifies that all parameters are of the same dense type.
+
+        The function assumes that ``self._all_params`` has been initialized
+        and is non-empty.
+
+        Raises:
+            ValueError: ``params`` contains sparse parameters or parameters
+            of varying dense types.
+
+        NOTE: This function can be removed once support for sparse parameters
+        and varying parameter types is added.
+        """
+        typename = torch.typename(self._all_params[0])
+        if self._all_params[0].is_sparse:
+            raise ValueError("ZeroRedundancyOptimizer only supports using "
+                             "the same dense type for all parameters but got "
+                             f"{typename}")
+        for param in self._all_params[1:]:
+            other_typename = torch.typename(param)
+            if other_typename != typename:
+                raise ValueError("ZeroRedundancyOptimizer only supports "
+                                 "using the same dense type for all "
+                                 f"parameters but got both {typename} and "
+                                 f"{other_typename}")

@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef USE_C10D_GLOO
+
 #include <condition_variable>
 #include <deque>
 #include <mutex>
@@ -15,11 +17,6 @@
 #include <gloo/transport/device.h>
 
 #include <c10/util/hash.h>
-
-#ifdef USE_CUDA
-#include <ATen/cuda/CUDAEvent.h>
-#include <c10/cuda/CUDAStream.h>
-#endif
 
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/Store.hpp>
@@ -53,7 +50,7 @@ constexpr const char* GLOO_BACKEND_NAME = "gloo";
 // number can be automatically tuned, but only if we let a single
 // process take charge, and have it broadcast the limits.
 //
-class ProcessGroupGloo : public ProcessGroup {
+class TORCH_API ProcessGroupGloo : public ProcessGroup {
  public:
   // AsyncWork is the Gloo specific superclass for asynchronous work items.
   // We can split asynchronous work into 3 phases:
@@ -71,7 +68,7 @@ class ProcessGroupGloo : public ProcessGroup {
   //
   // FIXME: This probably should be called WorkGloo since the work is executed in sync mode
   // by a background thread.
-  class AsyncWork : public ProcessGroup::Work {
+  class TORCH_API AsyncWork : public ProcessGroup::Work {
    public:
     explicit AsyncWork(
         std::vector<std::vector<at::Tensor>> outputTensors,
@@ -100,7 +97,7 @@ class ProcessGroupGloo : public ProcessGroup {
   };
 
   // Wrap c10d store as Gloo store
-  class GlooStore : public ::gloo::rendezvous::Store {
+  class TORCH_API GlooStore : public ::gloo::rendezvous::Store {
    public:
     GlooStore(const c10::intrusive_ptr<::c10d::Store>& store) : store_(store) {}
 
@@ -143,7 +140,7 @@ class ProcessGroupGloo : public ProcessGroup {
   // recv operation. It keeps a reference to the tensor it is
   // operating on to prevent it from being deallocated while the
   // operation is still in flight.
-  class SendWork : public ProcessGroup::Work {
+  class TORCH_API SendWork : public ProcessGroup::Work {
    public:
     explicit SendWork(
         at::Tensor& tensor,
@@ -158,7 +155,7 @@ class ProcessGroupGloo : public ProcessGroup {
     std::unique_ptr<::gloo::transport::UnboundBuffer> buffer_;
   };
 
-  class RecvWork : public ProcessGroup::Work {
+  class TORCH_API RecvWork : public ProcessGroup::Work {
    public:
     explicit RecvWork(
         at::Tensor& tensor,
@@ -177,7 +174,7 @@ class ProcessGroupGloo : public ProcessGroup {
     int srcRank_;
   };
 
-  struct Options : public ProcessGroup::Options {
+  struct TORCH_API Options : public ProcessGroup::Options {
     explicit Options(
         std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout);
 
@@ -362,3 +359,5 @@ class ProcessGroupGloo : public ProcessGroup {
 };
 
 } // namespace c10d
+
+#endif // USE_C10D_GLOO
