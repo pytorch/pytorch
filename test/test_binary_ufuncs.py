@@ -2774,7 +2774,11 @@ class TestBinaryUfuncs(TestCase):
             q_np = q if isinstance(q, float) else q.cpu().numpy()
             expected = torch.from_numpy(scipy.special.zeta(x_np, q_np))
             actual = torch.special.zeta(x, q)
-            self.assertEqual(expected, actual, exact_dtype=False)
+
+            rtol, atol = None, None
+            if self.device_type == 'cpu':
+                rtol, atol = 1e-6, 1e-6
+            self.assertEqual(expected, actual, rtol=rtol, atol=atol, exact_dtype=False)
 
         # x tensor - q tensor same size
         x = make_tensor((2, 3, 4), device, x_dtype)
