@@ -265,3 +265,13 @@ def rekey_logger_info_on_node_name_of_model(
         else:
             new_results[old_layer_name] = result_type_to_results
     return new_results
+
+
+def compute_sqnr(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    if x.is_quantized:
+        x = x.dequantize()
+    if y.is_quantized:
+        y = y.dequantize()
+    Ps = torch.norm(x)
+    Pn = torch.norm(x - y)
+    return 20 * torch.log10(Ps / Pn)
