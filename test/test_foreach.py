@@ -587,7 +587,7 @@ class TestForeach(TestCase):
             foreach_op_(tensors1, tensors2)
 
         # different devices
-        if torch.cuda.is_available() and torch.cuda.device_count() > 1:
+        if self.device_type == "cuda" and torch.cuda.device_count() > 1:
             tensor1 = torch.zeros(10, 10, device="cuda:0", dtype=dtype)
             tensor2 = torch.ones(10, 10, device="cuda:1", dtype=dtype)
             if dtype == torch.bool and foreach_op == torch._foreach_sub:
