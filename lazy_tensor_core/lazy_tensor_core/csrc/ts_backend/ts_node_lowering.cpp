@@ -16,6 +16,7 @@
 #include "lazy_tensor_core/csrc/ops/index_select.h"
 #include "lazy_tensor_core/csrc/ops/ltc_ops.h"
 #include "lazy_tensor_core/csrc/ops/permute.h"
+#include "lazy_tensor_core/csrc/ops/repeat.h"
 #include "lazy_tensor_core/csrc/ops/scalar.h"
 #include "lazy_tensor_core/csrc/ops/softmax.h"
 #include "lazy_tensor_core/csrc/ops/stack.h"
@@ -96,6 +97,10 @@ class TSNodeLowering : public NodeLowering {
       case at::aten::pow: {
         const ir::Output& argument = node->operand(0);
         return argument.shape();
+      }
+      case at::aten::repeat: {
+        return InferRepeat(
+            ir::NodeCast<ir::ops::Repeat>(node, ir::OpKind(at::aten::repeat)));
       }
       case at::aten::stack: {
         return InferStack(
@@ -198,6 +203,10 @@ class TSNodeLowering : public NodeLowering {
     if (node->op().op == at::aten::permute) {
       return LowerPermute(
           ir::NodeCast<ir::ops::Permute>(node, ir::OpKind(at::aten::permute)));
+    }
+    if (node->op().op == at::aten::repeat) {
+      return LowerRepeat(
+          ir::NodeCast<ir::ops::Repeat>(node, ir::OpKind(at::aten::repeat)));
     }
     if (node->op().op == at::aten::softmax) {
       return LowerSoftmax(
@@ -314,6 +323,24 @@ class TSNodeLowering : public NodeLowering {
     LTC_CHECK_EQ(tensor2_shape.dimensions(0), m);
     lazy_tensors::int64 p = tensor2_shape.dimensions(1);
     return lazy_tensors::Shape(tensor1_shape.element_type(), {n, p});
+  }
+
+  static lazy_tensors::Shape InferRepeat(const ir::ops::Repeat* repeat) {
+    const ir::Output& input = repeat->operand(0);
+    const lazy_tensors::Shape& input_shape = input.shape();
+    const auto& repeats = repeat->repeats();
+    LTC_CHECK_GE(repeats.size(), input_shape.rank());
+
+    lazy_tensors::int64 num_new_dimensions =
+        repeats.size() - input_shape.rank();
+    std::vector<lazy_tensors::int64> padded_size(num_new_dimensions, 1);
+    padded_size.insert(padded_size.end(), input_shape.dimensions().begin(),
+                       input_shape.dimensions().end());
+    std::vector<lazy_tensors::int64> target_size(repeats.size());
+    for (const auto idx : c10::irange(repeats.size())) {
+      target_size[idx] = padded_size[idx] * repeats[idx];
+    }
+    return lazy_tensors::Shape(input_shape.element_type(), target_size);
   }
 
   static lazy_tensors::Shape InferStack(const ir::ops::Stack* stack) {
@@ -503,6 +530,13 @@ class TSNodeLowering : public NodeLowering {
     std::vector<torch::jit::NamedValue> arguments;
     arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
     arguments.push_back(node->dims());
+    return LowerBuiltin(node, arguments);
+  }
+
+  TSOpVector LowerRepeat(const ir::ops::Repeat* node) {
+    std::vector<torch::jit::NamedValue> arguments;
+    arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
+    arguments.push_back(node->repeats());
     return LowerBuiltin(node, arguments);
   }
 

@@ -836,6 +836,12 @@ at::Tensor permute(const at::Tensor& self, at::IntArrayRef dims) {
       LazyTensor::permute(self_tensor, Helpers::I64List(dims)));
 }
 
+at::Tensor repeat(const at::Tensor& self, at::IntArrayRef repeats) {
+  LTC_FN_COUNTER("xla::");
+  return bridge::AtenFromLtcTensor(LazyTensor::repeat(
+      bridge::GetLtcTensor(self), Helpers::I64List(repeats)));
+}
+
 at::Tensor stack(at::TensorList tensors, int64_t dim) {
   LTC_FN_COUNTER("xla::");
   return bridge::AtenFromLtcTensor(
