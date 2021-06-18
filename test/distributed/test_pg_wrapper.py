@@ -34,6 +34,21 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
         else:
             self._fork_processes()
 
+    def _validate_error(self, exception, op_type, rank, tensor):
+        err = str(exception)
+        self.assertTrue(op_type in err, f"{err} but excepted {op_type}")
+        # User doesn't call barrier with tensor.
+        if op_type != "BARRIER":
+            self.assertTrue(f"{list(tensor.shape)}" in err)
+            self.assertTrue(str(tensor.device) in err)
+            # C++ and python type strings are not exactly the same.
+            if "float" in str(tensor.dtype):
+                self.assertTrue("Float" in err)
+            elif "int" in str(tensor.dtype):
+                self.assertTrue("Long" in err)
+            else:
+                self.fail(f"Unexpected dtype {str(tensor.dtype)} for error {err}")
+
     def _test_collective_hang(self, wrapper_pg, use_cuda=False):
         # All ranks besides 1 call allreduce and wrapper_pg should detect a hang
         # and report an issue with rank 1.
@@ -65,37 +80,56 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
             w.wait()
 
         # Simulate mismatch: allreduce vs reduce.
-        with self.assertRaisesRegex(
-            RuntimeError, "Mismatch between collective operation types"
-        ):
+        # Error including info about inconsistent collective, rank, tensor
+        # shape, device, and dtype should be raised.
+        try:
             if self.rank == 0:
                 wrapper_pg.allreduce([tensor])
             else:
                 wrapper_pg.reduce([tensor])
+        except BaseException as e:
+            self._validate_error(
+                exception=e,
+                op_type="ALLREDUCE" if self.rank == 0 else "REDUCE",
+                rank=self.rank,
+                tensor=tensor,
+            )
+        else:
+            self.fail("Error not raised!")
 
-        # Check additional mismatches
-
-        with self.assertRaisesRegex(
-            RuntimeError, "Mismatch between collective operation types"
-        ):
+        try:
             if self.rank == 0:
                 wrapper_pg.reduce([tensor])
             else:
                 wrapper_pg.barrier()
+        except BaseException as e:
+            self._validate_error(
+                exception=e,
+                op_type="REDUCE" if self.rank == 0 else "BARRIER",
+                rank=self.rank,
+                tensor=tensor,
+            )
+        else:
+            self.fail("Error not raised!")
 
-        with self.assertRaisesRegex(
-            RuntimeError, "Mismatch between collective operation types"
-        ):
+        try:
             scatter_result = [torch.ones(4) * i for i in range(self.world_size)]
             scattered_tensor = torch.empty(4)
             if self.rank == 0:
                 wrapper_pg.scatter(scattered_tensor, scatter_result, 0)
             else:
                 wrapper_pg.reduce_scatter(scattered_tensor, scatter_result)
+        except BaseException as e:
+            self._validate_error(
+                exception=e,
+                op_type="SCATTER" if self.rank == 0 else "REDUCE_SCATTER",
+                rank=self.rank,
+                tensor=scattered_tensor,
+            )
+        else:
+            self.fail("Error not raised!")
 
-        with self.assertRaisesRegex(
-            RuntimeError, "Mismatch between collective operation types"
-        ):
+        try:
             if self.rank == 0:
                 wrapper_pg.broadcast(tensor, 0)
             else:
@@ -103,6 +137,15 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
                     torch.zeros_like(tensor) for _ in range(self.world_size)
                 ]
                 wrapper_pg.allgather([output_tensors], [tensor])
+        except BaseException as e:
+            self._validate_error(
+                exception=e,
+                op_type="BROADCAST" if self.rank == 0 else "ALLGATHER",
+                rank=self.rank,
+                tensor=tensor,
+            )
+        else:
+            self.fail("Error not raised!")
 
     def _test_collective_shape_mismatch(self, wrapper_pg, use_cuda=False):
         wrapper_pg.barrier()
@@ -110,14 +153,29 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
         tensor = torch.randn(20, dim)
         if use_cuda:
             tensor = tensor.to(self.rank)
-        with self.assertRaisesRegex(RuntimeError, "Error when verifying shape tensors"):
+        try:
             wrapper_pg.allreduce([tensor])
+        except BaseException as e:
+            err = str(e)
+            self._validate_error(
+                exception=e, op_type="ALLREDUCE", rank=self.rank, tensor=tensor
+            )
+        else:
+            self.fail("Error not raised!")
+
         # Check errors are raised when dimensionality of shapes is different
         tensor = torch.randn(20, 10, 2) if self.rank == 0 else torch.randn(20, 10)
         if use_cuda:
             tensor = tensor.to(self.rank)
-        with self.assertRaisesRegex(RuntimeError, "Error when verifying shape tensors"):
+        try:
             wrapper_pg.allreduce([tensor])
+        except BaseException as e:
+            err = str(e)
+            self._validate_error(
+                exception=e, op_type="ALLREDUCE", rank=self.rank, tensor=tensor
+            )
+        else:
+            self.fail("Error not raised!")
 
         # Check shape errors with scatter
         input = [
@@ -137,11 +195,21 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
         root_rank = 0
         opts = c10d.ScatterOptions()
         opts.rootRank = root_rank
-        with self.assertRaisesRegex(RuntimeError, "Error when verifying shape tensors"):
+        try:
             if self.rank == root_rank:
                 wrapper_pg.scatter([outputs[self.rank]], [input], opts).wait()
             else:
                 wrapper_pg.scatter([outputs[self.rank]], [], opts).wait()
+        except BaseException as e:
+            err = str(e)
+            self._validate_error(
+                exception=e,
+                op_type="SCATTER",
+                rank=self.rank,
+                tensor=outputs[self.rank],
+            )
+        else:
+            self.fail("Error not raised!")
 
 
 @requires_gloo()
