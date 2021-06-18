@@ -73,7 +73,8 @@ std::vector<mobile::nnc::OutputSpec> get_output_specs(
 // does not produce the assembly with the NNC compiler.
 c10::IValue preprocess(
     const torch::jit::Module& /* mod */,
-    const c10::Dict<c10::IValue, c10::IValue>& method_compile_spec) {
+    const c10::Dict<c10::IValue, c10::IValue>& method_compile_spec,
+    const torch::jit::BackendDebugHandleGenerator&) {
   torch::jit::mobile::nnc::CompilationUnit cu;
   for (const auto& entry : method_compile_spec) {
     const std::string& method_name = entry.key().toStringRef();

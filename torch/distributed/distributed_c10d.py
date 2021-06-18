@@ -244,7 +244,7 @@ def _store_based_barrier(rank, store, timeout):
                 )
             )
 
-    logger.info(f"Rank {rank}: Completed store-based barrier for {world_size} nodes.")
+    logger.info(f"Rank {rank}: Completed store-based barrier for key:{store_key} with {world_size} nodes.")
 
 
 def _rank_not_in_group(group: ProcessGroup):

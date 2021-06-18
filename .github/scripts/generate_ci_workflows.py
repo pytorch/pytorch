@@ -25,6 +25,7 @@ def PyTorchWindowsWorkflow(
     test_runner_type: str,
     cuda_version: str,
     on_pull_request: bool = False,
+    only_build_on_pull_request: bool = False,
     num_test_shards: int = 1,
 ) -> PyTorchWorkflow:
     return {
@@ -32,6 +33,7 @@ def PyTorchWindowsWorkflow(
         "test_runner_type": test_runner_type,
         "cuda_version": cuda_version,
         "on_pull_request": on_pull_request,
+        "only_build_on_pull_request": only_build_on_pull_request and on_pull_request,
         "num_test_shards": num_test_shards,
     }
 
@@ -84,6 +86,8 @@ WINDOWS_WORKFLOWS = [
         build_environment="pytorch-win-vs2019-cuda10-cudnn7-py3",
         cuda_version="10.1",
         test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
+        on_pull_request=True,
+        only_build_on_pull_request=True
     ),
     PyTorchWindowsWorkflow(
         build_environment="pytorch-win-vs2019-cuda11-cudnn8-py3",
