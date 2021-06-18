@@ -25,6 +25,22 @@ from ..modules import Module
 from ._functions import _get_stream
 from .scatter_gather import scatter_kwargs, gather, is_namedtuple
 
+def _tree_flatten_with_rref(output):
+    output_is_rref = RPC_AVAILABLE and isinstance(output, RRef)
+    if output_is_rref:
+        output_tensor_list, treespec = tree_flatten(output.local_value())
+    else:
+        output_tensor_list, treespec = tree_flatten(output)
+    # Need to return flattened tensors, spec to re-pack them, as well
+    # as if the return type was actually an RRef to reconstruct.
+    return output_tensor_list, treespec, output_is_rref
+
+def _tree_unflatten_with_rref(output, treespec, output_is_rref):
+    output = tree_unflatten(output, treespec)
+    if output_is_rref:
+        output = RRef(output)
+    return output
+
 
 def _find_tensors(obj):
     r"""
@@ -863,14 +879,19 @@ class DistributedDataParallel(Module):
                 'find_unused': find_unused,
                 'num_iterations': self.num_iterations,
             }
-            output_tensor_list, treespec = tree_flatten(output)
+
+            output_tensor_list, treespec, output_is_rref = _tree_flatten_with_rref(
+                output
+            )
             passthrough_tensor_list = _DDPSink.apply(
                 self.reducer,
                 state_dict,
                 *output_tensor_list,
             )
             # Reconstruct output data structure.
-            output = tree_unflatten(passthrough_tensor_list, treespec)
+            output = _tree_unflatten_with_rref(
+                passthrough_tensor_list, treespec, output_is_rref
+            )
         return output
 
     def scatter(self, inputs, kwargs, device_ids):
