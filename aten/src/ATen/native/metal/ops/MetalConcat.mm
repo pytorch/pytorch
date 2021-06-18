@@ -49,7 +49,6 @@ Tensor cat_batch(const TensorList tensors, MetalTensorImplStorage& mt) {
     [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
             threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
     [encoder endEncoding];
-    [X markRead];
     cat_dim4_pointer += t.size(0) * ((t.size(1) + 3) / 4);
   }
   auto output = makeTensor(std::move(mt), tensor.options());
@@ -111,7 +110,6 @@ Tensor cat_feature(const TensorList tensors, MetalTensorImplStorage& mt) {
     [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
             threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
     [encoder endEncoding];
-    [X markRead];
     channel_offset += X.featureChannels;
   }
   auto output = makeTensor(std::move(mt), tensor.options());

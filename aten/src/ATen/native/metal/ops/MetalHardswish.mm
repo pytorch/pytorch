@@ -41,7 +41,6 @@ Tensor& hardswish_(Tensor& input) {
   [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
           threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
   [encoder endEncoding];
-  [X markRead];
   MetalTensorImpl* impl = (MetalTensorImpl*)input.unsafeGetTensorImpl();
   MetalTensorImplStorage& implStorage = impl->unsafe_opaque_handle();
   implStorage.texture()->setImage(Y);

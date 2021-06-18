@@ -54,9 +54,6 @@ std::vector<Tensor> chunk(const Tensor& input, int64_t chunks, int64_t dim) {
   [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
           threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
   [encoder endEncoding];
-  [X markRead];
-  [Y1 markRead];
-  [Y2 markRead];
   auto output1 = makeTensor(std::move(mt1), input.options());
   auto output2 = makeTensor(std::move(mt2), input.options());
   return {output1, output2};

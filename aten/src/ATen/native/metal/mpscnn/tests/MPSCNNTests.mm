@@ -115,7 +115,7 @@ bool test_copy_nchw_to_metal() {
         createTemporaryImage(cb, t1.sizes().vec(), t1.data_ptr<float>());
     MPSImage* img2 = createStaticImage(img1, cb, true);
     auto t2 = at::zeros(size);
-    copyToHost(t2.data_ptr<float>(), img2);
+    copyImageToFloatBuffer(t2.data_ptr<float>(), img2);
     return almostEqual(t1, t2);
   });
 }

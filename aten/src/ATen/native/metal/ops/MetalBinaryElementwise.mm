@@ -94,8 +94,6 @@ Tensor binaryElementwiseShaderKernel(
   [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
           threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
   [encoder endEncoding];
-  [X1 markRead];
-  [X2 markRead];
   auto output = makeTensor(std::move(mt), input1.options());
   return output;
 }
@@ -134,8 +132,6 @@ Tensor& binaryElementwiseShaderKernel_(
   [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
           threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
   [encoder endEncoding];
-  [X1 markRead];
-  [X2 markRead];
   MetalTensorImpl* impl = (MetalTensorImpl*)input1.unsafeGetTensorImpl();
   MetalTensorImplStorage& implStorage = impl->unsafe_opaque_handle();
   implStorage.texture()->setImage(Y);
