@@ -38,7 +38,7 @@ class SpecializationKey {
     STRIDE_ONE = 1 << 4, // == 1 (packed)
     STRIDE_CONTIGUOUS = 1 << 5, // stride[i+1] * sizes[i+1]
     STRIDE_TRANSPOSED_CONTIGUOUS = 1 << 6, // stride[i-1] * sizes[i-1]
-    STRIDE_OTHER = 1 << 7,
+    STRIDE_AS_ARG = 1 << 7,
   };
   static constexpr int MASK = (1 << 5) - 1;
 
@@ -80,7 +80,7 @@ class SpecializationKey {
       else if (dim > 0 && strides[dim] == strides[dim - 1] * sizes[dim - 1])
         flag |= STRIDE_TRANSPOSED_CONTIGUOUS;
       else
-        flag |= STRIDE_OTHER;
+        flag |= STRIDE_AS_ARG;
       dimflags_[out_idx++] = flag;
     }
   }
@@ -100,7 +100,60 @@ class SpecializationKey {
         sizeof(flags_) + sizeof(alias_group_) + sizeof(dimflags_));
   }
 
- protected:
+  std::vector<std::string> shape() const {
+    std::vector<std::string> result;
+    for (int i = 0; i < MAX_DIMS; ++i) {
+      if ((dimflags_[i] & SIZE_MISSING) > 0)
+        break;
+
+      if ((dimflags_[i] & SIZE_ONE) > 0)
+        result.push_back("one");
+      else
+        result.push_back("other");
+    }
+    return result;
+  }
+  std::vector<std::string> stride() const {
+    std::vector<std::string> result;
+    for (int i = 0; i < MAX_DIMS; ++i) {
+      if ((dimflags_[i] & SIZE_MISSING) > 0)
+        break;
+
+      if ((dimflags_[i] & STRIDE_ZERO) > 0)
+        result.push_back("zero");
+      else if ((dimflags_[i] & STRIDE_ONE) > 0)
+        result.push_back("one");
+      else if ((dimflags_[i] & STRIDE_CONTIGUOUS) > 0)
+        result.push_back("contiguous");
+      else if ((dimflags_[i] & STRIDE_TRANSPOSED_CONTIGUOUS) > 0)
+        result.push_back("transposed_contiguous");
+      else if ((dimflags_[i] & STRIDE_AS_ARG) > 0)
+        result.push_back("as_arg");
+      else
+        throw std::runtime_error("??");
+    }
+    return result;
+  }
+
+  py::object to_python(const at::Tensor& example) const {
+    py::object ex = py::cast(example);
+    py::object namedtuple =
+        py::module_::import("collections").attr("namedtuple");
+    py::object rtype = namedtuple(
+        "SpecializationKey",
+        "alias_group,dim,dtype,device,layout,requires_grad,shape,stride");
+    return rtype(
+        static_cast<int>(alias_group_),
+        ex.attr("dim"),
+        ex.attr("dtype"),
+        ex.attr("device"),
+        ex.attr("layout"),
+        ex.attr("requires_grad"),
+        shape(),
+        stride());
+  }
+
+ private:
   uint16_t flags_; // dtype, layout, device, and requires_grad
   int8_t alias_group_; // 0 = no aliasing
                        // >0 = same data, strides, and shapes within group
@@ -108,12 +161,17 @@ class SpecializationKey {
   uint8_t dimflags_[MAX_DIMS];
 } __attribute__((packed));
 
-class CompileResult : public KernelScopedObject {
+class CompileOptions {
  public:
-  virtual ~CompileResult() = default;
+  virtual ~CompileOptions() = default;
 };
 
-struct Less {
+struct CompileOptionsProxy {
+  py::object spec;
+  CompileOptions* options;
+};
+
+struct CmpLess {
   template <typename T>
   size_t operator()(const T& left, const T& right) const {
     for (int i = 0; i < left.size(); ++i) {
@@ -135,7 +193,7 @@ class CompileCache3 {
   typedef std::array<at::Tensor, NARGS> Args;
   typedef std::array<int8_t, NARGS> AliasGroups;
 
-  class CompileResultImpl : public CompileResult {
+  class CompileResult {
    public:
     void set_codegen(py::object cg) {
       objects_.push_back(cg);
@@ -150,16 +208,28 @@ class CompileCache3 {
     CodeGen* cg_;
     std::vector<py::object> objects_; // for ref count
   };
-  typedef std::map<Key, CompileResultImpl*, Less> Map;
+  typedef std::map<Key, CompileResult*, CmpLess> Map;
 
-  CompileResultImpl* cached_compile(const Key& key) {
+  class CompileOptionsImpl : public CompileOptions {
+   public:
+    CompileOptionsImpl(const Key& key, CompileResult& result)
+        : key_(key), result_(result) {}
+
+   private:
+    const Key& key_;
+    CompileResult& result_;
+  };
+
+  CompileResult* cached_compile(const Key& key, const Args& example) {
     std::lock_guard<std::mutex> guard(mutex_);
     auto item = cache_.find(key);
     if (item != cache_.end()) {
       return item->second;
     } else {
-      auto cr = new CompileResultImpl();
-      cr->set_codegen(compile_fn_());
+      auto cr = new CompileResult();
+      CompileOptionsImpl opts(key, *cr);
+      cr->set_codegen(compile_fn_(
+          CompileOptionsProxy({key[0].to_python(example[0]), &opts})));
       cache_.emplace(std::make_pair(key, cr));
       return cr;
     }
@@ -214,7 +284,7 @@ class CompileCache3 {
       call_args.emplace_back(arg.data_ptr());
     }
     auto key = compute_cache_key(args);
-    return cached_compile(key)->call(args, call_args);
+    return cached_compile(key, args)->call(args, call_args);
     /*
     int64_t n = a.sizes()[0];
     int64_t shapes[] = {n};
@@ -389,6 +459,8 @@ void initTensorExprAuthoringBindings(PyObject* te_obj) {
   py::class_<CompileCache>(te, "CompileCache")
       .def(py::init<py::object>())
       .def("__call__", &CompileCache::call);
+
+  py::class_<CompileOptionsProxy>(te, "CompileOptions");
 }
 } // namespace jit
 } // namespace torch

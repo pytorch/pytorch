@@ -53,7 +53,7 @@ ArgValue convertPyToArgValue(py::handle inp) {
 }
 
 Dtype parsePythonDtype(py::handle obj) {
-  if (py::isinstance(obj, py::module_::import("torch").attr("dtype"))) {
+  if (THPDtype_Check(obj.ptr())) {
     return Dtype(reinterpret_cast<THPDtype*>(obj.ptr())->scalar_type);
   } else {
     throw std::runtime_error("expected a torch.dtype instance");

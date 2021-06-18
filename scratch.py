@@ -44,7 +44,7 @@ def make_nnc(dN):
 
 def main(n=16):
     # cc = te.CompileCache(lambda: make_nnc(te.VarHandle("n", te.Dtype.Int)))
-    cc = te.CompileCache(lambda: make_nnc(te.ExprHandle.int(n)))
+    cc = te.CompileCache(lambda opts: make_nnc(te.ExprHandle.int(n)))
 
     tA = torch.randn(n)
     tB = torch.randn(n)
