@@ -4384,6 +4384,14 @@ else:
                 res = stats.kstest(t.cpu().to(torch.double), 'cauchy', args=(median, sigma))
                 self.assertTrue(res.statistic < 0.1)
 
+    @onlyCUDA
+    @dtypes(torch.bfloat16, torch.float32)
+    def test_cauchy_no_inf(self, device, dtype):
+        # torch.float16 will have `inf` because of its smaller range.
+        x = torch.empty((50000, 2000), dtype=dtype, device=device)
+        x.cauchy_()
+        self.assertFalse(x.isinf().sum())
+
     @skipIfNoSciPy
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
     def test_geometric_kstest(self, device, dtype):
