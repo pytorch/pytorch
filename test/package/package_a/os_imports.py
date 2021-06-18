@@ -1,6 +1,6 @@
 import torch
-import os
-import os.path
+import os  # noqa: F401
+import os.path  # noqa: F401
 
 
 class Module(torch.nn.Module):

@@ -204,7 +204,7 @@ class TestMisc(PackageTestCase):
         import package_a.os_imports
 
         buffer = BytesIO()
-        mod =  package_a.os_imports.Module()
+        mod = package_a.os_imports.Module()
 
         with PackageExporter(buffer, verbose=False) as pe:
             pe.intern("**")
