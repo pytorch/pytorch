@@ -205,7 +205,7 @@ Tensor einsum(
         TORCH_CHECK(
             !op_has_ellipsis.back(),
             "einsum(): at most one ellipsis can be specified per operand");
-        op_labels.back().emplace_back(ELLIPSIS);
+        op_labels.back().push_back(ELLIPSIS);
         op_has_ellipsis.back() = true;
         break;
       default:
@@ -439,7 +439,7 @@ Tensor einsum(
     for (auto dim = out_num_dim; dim < index; ++dim) {
       if (a.size(dim) != 1 && b.size(dim) != 1) {
         if (--dim_counts[dim] == 1) {
-          sum_dims.emplace_back(dim);
+          sum_dims.push_back(dim);
           dim_counts[dim] = 0;
         }
       } else if (dim_counts[dim] == 1) {
