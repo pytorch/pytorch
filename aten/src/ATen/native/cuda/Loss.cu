@@ -278,9 +278,7 @@ void nll_loss_forward_out_cuda_template(
       at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
 
-  TORCH_CHECK(
-      target.dim() == 1,
-      "1D target tensor expected, multi-target not supported");
+  TORCH_CHECK(target.dim() <= 1, "multi-target not supported");
 
   int64_t n_classes = input.size(-1);
   int64_t n_dims = input.dim();
