@@ -80,7 +80,7 @@ namespace torch { namespace autograd {
         opt_accumulate_stream->wait(event);
         // records cross-stream memory use of var
         const auto guard = c10::impl::VirtualGuardImpl(c10::DeviceType::CUDA);
-        guard.recordDataPtrOnStream(var.data_ptr, *opt_accumulate_stream);
+        guard.recordDataPtrOnStream(var.storage().data_ptr(), *opt_accumulate_stream);
       }
     } else {
       c10::optional<c10::Stream> opt_sync_stream = c10::nullopt;
@@ -105,7 +105,7 @@ namespace torch { namespace autograd {
         opt_accumulate_stream->wait(event);
         // records cross-stream memory use of var
         const auto guard = c10::impl::VirtualGuardImpl(c10::DeviceType::CUDA);
-        guard.recordDataPtrOnStream(var.data_ptr, *opt_accumulate_stream);
+        guard.recordDataPtrOnStream(var.storage().data_ptr(), *opt_accumulate_stream);
       }
     }
   }
