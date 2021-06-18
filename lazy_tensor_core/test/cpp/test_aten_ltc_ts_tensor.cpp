@@ -1697,7 +1697,7 @@ TEST_F(AtenLtcTsTensorTest, TestGroupNormBackward) {
   }
 }
 
-TEST_F(AtenLtcTsTensorTest, DISABLED_TestInstanceNorm) {
+TEST_F(AtenLtcTsTensorTest, TestInstanceNorm) {
   int batch = 5;
   int num_channels = 20;
   torch::Tensor input = torch::rand({batch, num_channels, 10, 10},
@@ -3653,7 +3653,7 @@ TEST_F(AtenLtcTsTensorTest, TestUnbind) {
   }
 }
 
-TEST_F(AtenLtcTsTensorTest, DISABLED_TestRepeat) {
+TEST_F(AtenLtcTsTensorTest, TestRepeat) {
   std::vector<std::vector<int64_t>> repeats_list = {{4, 2}, {4, 2, 3}};
   std::vector<std::vector<int64_t>> input_size_list = {{3}, {2, 4}};
   for (const auto& repeats : repeats_list) {

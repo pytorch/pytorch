@@ -36,6 +36,7 @@ supported:
   - max_pool3d_with_indices
   - max_pool3d_with_indices_backward
   - permute
+  - repeat
   - _softmax
   - _softmax_backward_data
   - squeeze_
