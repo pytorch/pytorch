@@ -1096,24 +1096,101 @@ class TestCase(expecttest.TestCase):
 
         set_rng_seed(SEED)
 
+    @staticmethod
+    def _make_crow_indices(n_rows, n_cols, nnz,
+                           *, device, dtype, random=True):
+        """Return crow_indices of a CSR tensor with size (n_rows, n_cols) and
+        the number of specified elements nnz.
+
+        If random is True, the column counts of rows are in random
+        order. Otherwise, the column counts of rows are defined by the
+        used sampling method.
+
+        Description of the method:
+          https://pearu.github.io/csr_sampling.html
+        """
+        assert 0 <= nnz << n_rows * n_cols
+
+        def sawteeth(n, m):
+            # return the total number of counts in the sequence of sawteeth
+            M = (n_cols - m) * (n_cols - m + 1) // 2
+            K = (n_rows - n) % (n_cols - m + 1)
+            return M * ((n_rows - n) // (n_cols - m + 1)) + K * (K - 1) // 2
+
+        # Different from the method description, here counts has
+        # leading extra element with value 0 required by crow_indices:
+        counts = torch.zeros(n_rows + 1, dtype=dtype, device=torch.device('cpu'))
+
+        n = m = 0
+        N = sawteeth(n, m)
+        if N and nnz >= max(N, n_cols):
+            n_left = n
+            n_right = n_rows - 1
+            N_right = sawteeth(n_right, m)
+            while n_right - n_left > 1:
+                n_middle = (n_left + n_right) // 2
+                N_middle = sawteeth(n_middle, m)
+                if N_middle == 0 or nnz - n_middle * n_cols < max(N_middle, n_cols):
+                    n_right, N_right = n_middle, N_middle
+                else:
+                    n_left = n_middle
+            n, N = n_right, N_right
+            # right rectangle:
+            assert n
+            counts[-n:].fill_(n_cols)
+
+        if N and nnz - n * n_cols >= max(N, n_rows - n):
+            m_left = m
+            m_right = n_cols - 1
+            N_right = sawteeth(n, m_right)
+            while m_right - m_left > 1:
+                m_middle = (m_left + m_right) // 2
+                N_middle = sawteeth(n, m_middle)
+                if N_middle == 0 or nnz - n * n_cols - m_middle * (n_rows - n) < max(N_middle, n_rows - n):
+                    m_right, N_right = m_middle, N_middle
+                else:
+                    m_left = m_middle
+            m, N = m_right, N_right
+            # bottom rectangle:
+            assert m
+            counts[1:n_rows - n + 1].fill_(m)
+
+        if N:
+            q, r = divmod(nnz - n * n_cols - m * (n_rows - n),
+                          (n_cols - m) * (n_cols - m + 1) // 2)
+            p = 1 + q * (n_cols - m + 1)
+            k = math.isqrt(2 * r)
+            if k * (k + 1) > 2 * r:
+                k -= 1
+            corr = r - k * (k + 1) // 2
+            assert not ((p > 1) and (m > 0))  # full sawteeth are never on top of a bottom rectangle
+            # sequence of full sawteeth:
+            counts[1:p] = torch.arange(p - 1, dtype=dtype, device=counts.device) % (n_cols - m + 1)
+            # incomplete sawtooth:
+            counts[p:p + k + 1] += torch.arange(k + 1, dtype=dtype, device=counts.device)
+            # correction:
+            counts[p] += corr
+        else:
+            # correction:
+            counts[1] = nnz - n * n_cols - m * (n_rows - n)
+
+        if random:
+            perm = torch.randperm(n_rows, device=counts.device)
+            counts[1:] = counts[1:][perm]
+
+        crow_indices = counts
+        crow_indices.cumsum_(dim=0)
+        return crow_indices.to(device=device)
+
     def genSparseCSRTensor(self, size, nnz, *, device, dtype, index_dtype):
         sparse_dim = 2
         assert all(size[d] > 0 for d in range(sparse_dim)) or nnz == 0, 'invalid arguments'
         assert len(size) == sparse_dim
 
         def random_sparse_csr(n_rows, n_cols, nnz):
-            nnz_per_row = nnz // n_rows
-            if nnz_per_row > 0:
-                crow_indices = torch.zeros(n_rows + 1, dtype=index_dtype)
-                crow_indices[1:] = nnz_per_row
-                crow_indices.cumsum_(dim=0)
-                col_indices = torch.randint(0, n_cols, size=[nnz_per_row * n_rows], dtype=index_dtype, device=device)
-            else:
-                crow_indices = torch.zeros(n_rows + 1, dtype=index_dtype)
-                crow_indices[1:nnz + 1] = 1
-                crow_indices.cumsum_(dim=0)
-                col_indices = torch.randint(0, n_cols, size=[nnz], dtype=index_dtype, device=device)
-            nnz = col_indices.shape[0]
+            crow_indices = self._make_crow_indices(n_rows, n_cols, nnz, device=device, dtype=index_dtype)
+            # TODO: check if col_indices are allowed to be unordered within the same row
+            col_indices = torch.randint(0, n_cols, size=[nnz], dtype=index_dtype, device=device)
             values = make_tensor([nnz], device=device, dtype=dtype, low=-1, high=1)
             return values, crow_indices, col_indices
 

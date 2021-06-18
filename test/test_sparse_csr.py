@@ -12,6 +12,28 @@ from torch.testing._internal.common_device_type import \
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
 
+
+class TestSparseCSRSampler(TestCase):
+
+    def test_make_crow_indices(self):
+        # Here we test the correctness of the crow_indices algorithm
+        # and testing it on CPU and with int32 dtype will be
+        # sufficient.
+        device = torch.device('cpu')
+        index_dtype = torch.int32
+        for n_rows in range(1, 10):
+            for n_cols in range(1, 10):
+                for nnz in range(0, n_rows * n_cols + 1):
+                    crow_indices = self._make_crow_indices(
+                        n_rows, n_cols, nnz,
+                        device=device, dtype=index_dtype)
+                    self.assertEqual(len(crow_indices), n_rows + 1)
+                    counts = crow_indices[1:] - crow_indices[:-1]
+                    self.assertEqual(counts.sum(), nnz)
+                    self.assertGreaterEqual(counts.min(), 0)
+                    self.assertLessEqual(counts.max(), n_cols)
+
+
 class TestSparseCSR(TestCase):
 
     @onlyCPU
