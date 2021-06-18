@@ -6236,6 +6236,21 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(DimModel(), empty_input)
         self.run_test(DimModel(), multi_dim_input)
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_dim_1(self):
+        class M(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, poses):
+                boxes = torch.zeros([poses.shape[0], 2, 4])
+                batch_boxes = []
+                for kp_boxes in boxes:
+                    kp_boxes = torchvision.ops.clip_boxes_to_image(kp_boxes, (2, 3))
+                    batch_boxes.append(kp_boxes)
+                return batch_boxes
+
+        dummy_inputs = torch.rand(2, 2, 3)
+        self.run_test(M(), (dummy_inputs, ), input_names=['x'], dynamic_axes={"x": [0]})
+
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_outer(self):
         class Outer(torch.nn.Module):
