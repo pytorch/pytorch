@@ -169,10 +169,6 @@ static const OperatorSet& supported_eltwise_set() {
       "aten::min.other(Tensor self, Tensor other) -> Tensor",
       "aten::max.other(Tensor self, Tensor other) -> Tensor",
       // TODO: enable slice, shape inference is not implemented for this op yet
-
-      // NOTE: Do not add any non-element-wise ops in this list. This set
-      // should be exclusively for element-wise ops. There are some
-      // optimizations whose correctness depend on this invariant.
   };
   // clang-format on
 
