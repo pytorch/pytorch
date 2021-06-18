@@ -4,6 +4,7 @@ import torch.nn.functional as F
 from typing import Optional
 from torch.nn.common_types import _size_1_t
 from torch.nn.modules.utils import _single
+from torch.nn.quantized._reference import functional as qrF
 
 class _ConvNd(nnq._ConvNd):
     """ A reference version of nn.quantized.Conv2d
@@ -58,15 +59,11 @@ class Conv1d(_ConvNd, nnq.Conv1d):
         self._conv1d_dilation = _single(self.dilation[0])
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x_dequant = x.dequantize()
-        weight_dequant = self._qweight.dequantize()
-        float_result = F.conv1d(
-            x_dequant, weight_dequant, self._bias, self._conv1d_stride,
-            self._conv1d_padding, self._conv1d_dilation, self.groups)
-        # NEEDFIX: we don't have dtype in the Linear module APIs right now!
-        result = torch.quantize_per_tensor(
-            float_result, self.scale, self.zero_point, torch.quint8)
-        return result
+        # TODO: add support for dtype
+        return qrF.conv1d(
+            x, self._qweight, self._bias, self._conv1d_stride,
+            self._conv1d_padding, self._conv1d_dilation, self.groups,
+            self.scale, self.zero_point, torch.quint8)
 
     def _get_name(self):
         return 'QuantizedConv1d(Reference)'
@@ -100,15 +97,10 @@ class Conv2d(_ConvNd, nnq.Conv2d):
             groups, bias, padding_mode)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x_dequant = x.dequantize()
-        weight_dequant = self._qweight.dequantize()
-        float_result = F.conv2d(
-            x_dequant, weight_dequant, self._bias, self.stride,
-            self.padding, self.dilation, self.groups)
-        # NEEDFIX: we don't have dtype in the Linear module APIs right now!
-        result = torch.quantize_per_tensor(
-            float_result, self.scale, self.zero_point, torch.quint8)
-        return result
+        return qrF.conv2d(
+            x, self._qweight, self._bias, self.stride,
+            self.padding, self.dilation, self.groups,
+            self.scale, self.zero_point, torch.quint8)
 
     def _get_name(self):
         return 'QuantizedConv2d(Reference)'
@@ -122,15 +114,9 @@ class Conv3d(_ConvNd, nnq.Conv3d):
             groups, bias, padding_mode)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x_dequant = x.dequantize()
-        weight_dequant = self._qweight.dequantize()
-        float_result = F.conv3d(
-            x_dequant, weight_dequant, self._bias, self.stride,
-            self.padding, self.dilation, self.groups)
-        # NEEDFIX: we don't have dtype in the Linear module APIs right now!
-        result = torch.quantize_per_tensor(
-            float_result, self.scale, self.zero_point, torch.quint8)
-        return result
+        return qrF.conv3d(
+            x, self._qweight, self._bias, self.stride,
+            self.padding, self.dilation, self.groups, self.scale, self.zero_point, torch.quint8)
 
     def _get_name(self):
         return 'QuantizedConv3d(Reference)'
