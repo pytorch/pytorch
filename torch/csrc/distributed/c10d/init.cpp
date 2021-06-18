@@ -273,18 +273,6 @@ This tensor can be further decomposed into a list of per-parameter tensors withi
 to apply layer-wise operations.
 )")
       .def(
-          py::init<
-              size_t,
-              const Tensor&,
-              const std::vector<size_t>&,
-              const std::vector<size_t>&,
-              const std::vector<c10::IntArrayRef>&>(),
-          py::arg("index"),
-          py::arg("tensor"),
-          py::arg("offsets"),
-          py::arg("lengths"),
-          py::arg("sizes_list"))
-      .def(
           "get_index",
           &::c10d::GradBucket::getIndex,
           py::call_guard<py::gil_scoped_release>(),
