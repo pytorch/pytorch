@@ -171,12 +171,12 @@ Tensor einsum(
   constexpr uint8_t ELLIPSIS = TOTAL_LABELS;
 
   // Convert label in [A-Za-z] to subscript in [0, TOTAL_LABELS)
-  auto get_subscript = [](unsigned char label) -> uint8_t {
+  auto get_subscript = [=](unsigned char label) -> uint8_t {
     return std::isupper(label) ? label - 'A' : label - 'a' + NUM_OF_LETTERS;
   };
 
   // Convert subscript in [0, 52) to label in [A-Za-z]
-  auto get_label = [](uint8_t s) -> unsigned char {
+  auto get_label = [=](uint8_t s) -> unsigned char {
     return s < NUM_OF_LETTERS ? s + 'A' : s + 'a' - NUM_OF_LETTERS;
   };
 
@@ -195,7 +195,7 @@ Tensor einsum(
       case ',':
         // Begin processing next operand
         op_labels.emplace_back();
-        op_has_ellipsis.emplace_back(false);
+        op_has_ellipsis.push_back(false);
         break;
       case '.':
         // Parse ellipsis
@@ -211,10 +211,10 @@ Tensor einsum(
       default:
         // Parse subscript
         TORCH_CHECK(
-            std::isalpha(*it, std::locale::classic()),
+            std::isalpha(*it),
             "einsum(): expected subscripts to be in range [A-Za-z], but got ",
             *it);
-        op_labels.back().emplace_back(get_subscript(*it));
+        op_labels.back().push_back(get_subscript(*it));
         ++label_count[get_subscript(*it)];
         break;
     }
@@ -279,21 +279,20 @@ Tensor einsum(
         default:
           // Parse subscript
           TORCH_CHECK(
-              std::isalpha(*it, std::locale::classic()),
+              std::isalpha(*it),
               "einsum(): expected subscripts to be in range [A-Za-z], but got ",
               *it);
-          const auto s = get_subscript(*it);
           TORCH_CHECK(
-              label_index[s] == -1,
+              label_index[get_subscript(*it)] == -1,
               "einsum(): subscript ",
               *it,
               " appears more than once for the output");
           TORCH_CHECK(
-              label_count[s] > 0,
+              label_count[get_subscript(*it)] > 0,
               "einsum(): output subscript",
               *it,
               " does not appear for any operand");
-          label_index[s] = index++;
+          label_index[get_subscript(*it)] = index++;
           break;
       }
     }
