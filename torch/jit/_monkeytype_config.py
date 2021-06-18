@@ -1,15 +1,18 @@
 import inspect
 import typing
+import os
+import pathlib
 import torch
 from typing import Optional, Iterable, List, Dict
 from collections import defaultdict
+from types import CodeType
 
 _IS_MONKEYTYPE_INSTALLED = True
 try:
     import monkeytype  # type: ignore[import]
     from monkeytype import trace as monkeytype_trace
     from monkeytype.db.base import CallTraceThunk, CallTraceStore, CallTraceStoreLogger  # type: ignore[import]
-    from monkeytype.config import default_code_filter  # type: ignore[import]
+    from monkeytype.config import _startswith, LIB_PATHS  # type: ignore[import]
     from monkeytype.tracing import CallTrace, CodeFilter  # type: ignore[import]
 except ImportError:
     _IS_MONKEYTYPE_INSTALLED = False
@@ -107,7 +110,7 @@ if _IS_MONKEYTYPE_INSTALLED:
             return self.s
 
         def code_filter(self) -> Optional[CodeFilter]:
-            return default_code_filter
+            return jit_code_filter
 else:
     # When MonkeyType is not installed, we provide dummy class definitions
     # for the below classes.
@@ -124,3 +127,29 @@ else:
             pass
 
     monkeytype_trace = None  # noqa: F811
+
+def jit_code_filter(code: CodeType) -> bool:
+    """
+    Custom CodeFilter for Torchscript to trace forward calls
+    The code filter is similar to default code filter for monkeytype and
+    excludes tracing of stdlib and site-packages.
+    """
+    # Filter code without a source file
+    if code.co_name != 'forward' and (not code.co_filename or code.co_filename[0] == '<'):
+        return False
+
+    filename = pathlib.Path(code.co_filename).resolve()
+    # if MONKEYTYPE_TRACE_MODULES is defined, trace only specified packages or modules
+    trace_modules_str = os.environ.get('MONKEYTYPE_TRACE_MODULES')
+    if trace_modules_str is not None:
+        trace_modules = trace_modules_str.split(',')
+        # try to remove lib_path to only check package and module names
+        for lib_path in LIB_PATHS:
+            try:
+                filename = filename.relative_to(lib_path)
+                break
+            except ValueError:
+                pass
+        return any(m == filename.stem or m in filename.parts for m in trace_modules)
+    else:
+        return not any(_startswith(filename, lib_path) for lib_path in LIB_PATHS)
