@@ -141,7 +141,6 @@ Ops that can autocast to ``float32``
 ``erfinv``,
 ``exp``,
 ``expm1``,
-``gelu``,
 ``grid_sample``,
 ``group_norm``,
 ``hinge_embedding_loss``,
