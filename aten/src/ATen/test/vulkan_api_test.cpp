@@ -925,7 +925,7 @@ TEST(VulkanAPITest, hardsigmoid_) {
   auto cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat))*12 - 6;
   auto vulkan = cpu.vulkan();
 
-  at::native::hardsigmoid_(cpu);
+  at::hardsigmoid_(cpu);
   at::hardsigmoid_(vulkan);
 
   const auto check = almostEqual(cpu, vulkan.cpu());
@@ -969,6 +969,24 @@ TEST(VulkanAPITest, hardswish_) {
   const auto check = almostEqual(cpu, vulkan.cpu());
   if (!check) {
     showRtol(cpu, vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanAPITest, max_pool2d) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+  c10::InferenceMode mode;
+
+  const auto in_cpu = at::rand({5, 13, 55, 68}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  const auto out_cpu = at::max_pool2d(in_cpu, {3, 4}, {2, 1}, {1, 1}, {1, 1}, false);
+  const auto out_vulkan = at::max_pool2d(in_cpu.vulkan(), {3, 4}, {2, 1}, {1, 1}, {1,1}, false);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);

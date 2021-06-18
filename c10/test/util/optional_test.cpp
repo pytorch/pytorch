@@ -28,6 +28,11 @@ uint64_t getSampleValue() {
 }
 
 template <>
+c10::IntArrayRef getSampleValue() {
+  return {};
+}
+
+template <>
 std::string getSampleValue() {
   return "hello";
 }
@@ -37,8 +42,17 @@ using OptionalTypes = ::testing::Types<
     bool,
     // Trivially destructible but not 32-bit scalar.
     uint64_t,
+    // ArrayRef optimization.
+    c10::IntArrayRef,
     // Non-trivial destructor.
     std::string>;
+
+// This assert is also in Optional.cpp; including here too to make it
+// more likely that we'll remember to port this optimization over when
+// we move to std::optional.
+static_assert(
+    sizeof(c10::optional<c10::IntArrayRef>) == sizeof(c10::IntArrayRef),
+    "c10::optional<IntArrayRef> should be size-optimized");
 
 TYPED_TEST_CASE(OptionalTest, OptionalTypes);
 

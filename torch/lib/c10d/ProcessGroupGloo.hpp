@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef USE_C10D_GLOO
+
 #include <condition_variable>
 #include <deque>
 #include <mutex>
@@ -15,11 +17,6 @@
 #include <gloo/transport/device.h>
 
 #include <c10/util/hash.h>
-
-#ifdef USE_CUDA
-#include <ATen/cuda/CUDAEvent.h>
-#include <c10/cuda/CUDAStream.h>
-#endif
 
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/Store.hpp>
@@ -76,10 +73,7 @@ class ProcessGroupGloo : public ProcessGroup {
     explicit AsyncWork(
         std::vector<std::vector<at::Tensor>> outputTensors,
         const char* profilingTitle = nullptr,
-        const c10::optional<std::vector<at::Tensor>>& inputTensors = c10::nullopt)
-        : ProcessGroup::Work(-1, OpType::UNKNOWN, profilingTitle, inputTensors),
-          outputTensors_(std::move(outputTensors)) {
-    }
+        const c10::optional<std::vector<at::Tensor>>& inputTensors = c10::nullopt);
 
     ~AsyncWork() override = default;
 
@@ -89,11 +83,17 @@ class ProcessGroupGloo : public ProcessGroup {
 
     std::vector<at::Tensor> result() override;
 
+    c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
+
    protected:
     friend class ProcessGroupGloo;
 
    private:
+    void finishWorkGloo();
+    void finishWorkGlooError(std::exception_ptr eptr);
+
     const std::vector<std::vector<at::Tensor>> outputTensors_;
+    c10::intrusive_ptr<at::ivalue::Future> future_;
   };
 
   // Wrap c10d store as Gloo store
@@ -359,3 +359,5 @@ class ProcessGroupGloo : public ProcessGroup {
 };
 
 } // namespace c10d
+
+#endif // USE_C10D_GLOO

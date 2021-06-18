@@ -7,14 +7,14 @@ from .glob_group import GlobPattern, GlobGroup
 class Directory:
     """A file structure representation. Organized as Directory nodes that have lists of
     their Directory children. Directories for a package are created by calling
-    :meth:`PackageExporter.file_structure` or :meth:`PackageImporter.file_structure`."""
+    :meth:`PackageImporter.file_structure`."""
 
     def __init__(self, name: str, is_dir: bool):
         self.name = name
         self.is_dir = is_dir
         self.children: Dict[str, Directory] = {}
 
-    def _get_dir(self, dirs: List[str]) -> 'Directory':
+    def _get_dir(self, dirs: List[str]) -> "Directory":
         """Builds path of Directories if not yet built and returns last directory
         in list.
 
@@ -43,12 +43,12 @@ class Directory:
         dir.children[file] = Directory(file, False)
 
     def has_file(self, filename: str) -> bool:
-        """Checks if a file is present in a Directory.
+        """Checks if a file is present in a :class:`Directory`.
 
         Args:
             filename (str): Path of file to search for.
         Returns:
-            bool: if a Directory contains the specified file.
+            bool: If a :class:`Directory` contains the specified file.
         """
         lineage = filename.split("/", maxsplit=1)
         child = lineage[0]
@@ -107,7 +107,7 @@ def _create_directory_from_file_list(
     include: "GlobPattern" = "**",
     exclude: "GlobPattern" = (),
 ) -> Directory:
-    """ Return a :class:`Directory` file structure representation created from a list of files.
+    """Return a :class:`Directory` file structure representation created from a list of files.
 
     Args:
         filename (str): The name given to the top-level directory that will be the

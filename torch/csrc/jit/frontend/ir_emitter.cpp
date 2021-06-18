@@ -2,6 +2,7 @@
 
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/frontend/canonicalize_modified_loop.h>
 #include <torch/csrc/jit/frontend/convert_to_ssa.h>
@@ -10,6 +11,7 @@
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/frontend/script_type_parser.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/ir/type_hashing.h>
 #include <torch/csrc/jit/passes/annotate_warns.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
@@ -315,7 +317,7 @@ struct Environment {
   }
 
   c10::optional<TypePtr> getType(const std::string& name) {
-    if (type_table.find(name) != type_table.end() ) {
+    if (type_table.find(name) != type_table.end()) {
       return type_table[name];
     }
     return c10::nullopt;
@@ -1197,7 +1199,8 @@ struct to_ir {
       }
     }
     if (const auto union_type = lhs_value->type()->cast<UnionType>()) {
-      UnionTypePtr remaining = union_type->withoutNone();
+      std::vector<TypePtr> to_subtract{NoneType::get()};
+      UnionTypePtr remaining = union_type->subtractTypeSet(to_subtract);
       Refinement present(name, remaining);
       if (tok == TK_IS) {
         return RefinementSet({}, {present});
@@ -1681,16 +1684,30 @@ struct to_ir {
         graph->createStore(x, fv)->insertBefore(false_block->return_node());
       }
 
-      auto unified = unifyTypes(tv->type(), fv->type());
+      // If we already know that the type is a Union, then we want to
+      // allow heterogeneous types to be unified
+      c10::optional<TypePtr> full_type = environment_stack->getType(x);
+      bool default_to_union =
+          full_type && (*full_type)->kind() == UnionType::Kind;
+      auto unified = unifyTypes(
+          tv->type(), fv->type(), /*default_to_union=*/default_to_union);
 
-      // If the variable we're looking at is known to be Union[T1, T2],
-      // then it's okay to have one branch return T1 and the other
-      // return T2. (We're not actually going to use `unified` again;
-      // it's acting as a flag)
-      c10::optional<TypePtr> full_true_type = environment_stack->getType(x);
-      c10::optional<TypePtr> full_false_type = environment_stack->getType(x);
-      if (full_true_type && full_false_type) {
-        unified = unifyTypes(*full_true_type, *full_false_type);
+      // Special logic for if we have a Union-typed value: check if
+      // the Union we got from unifying the `true` and `false` types
+      // is a subtype of the known type of the value. If so, set
+      // `unified` to be the known type to prevent unintentional
+      // narrowing of the Union type. E.g. `Union[T1, T2, T3]` should
+      // not become `Union[T1, T2]` just because its initial definition
+      // is as "`T1` if cond else `T2`". If the Union we got from type
+      // unification is not a subtype of the known Union type, set
+      // `unified` to `nullptr` to trigger the error-reporting logic
+      // below
+      if (default_to_union) {
+        if ((*unified)->isSubtypeOf(*full_type)) {
+          unified = full_type;
+        } else {
+          unified = nullptr;
+        }
       }
 
       // attempt to unify the types. we allow variables to be set to different
@@ -1750,7 +1767,13 @@ struct to_ir {
         types.emplace_back(type);
       }
       bool staticallyTrue(const TypePtr& actual_type) {
-        // is this isinstance check statically true?
+        if (types.empty()) {
+          return false;
+        }
+        if (actual_type->kind() == UnionType::Kind) {
+          TypePtr comparison = types.size() == 1 ? types[0] : UnionType::create(types);
+          return *comparison == *actual_type;
+        }
         for (const TypePtr& typ : types) {
           if (actual_type->isSubtypeOf(typ)) {
             return true;
@@ -1794,77 +1817,118 @@ struct to_ir {
     };
     GatheredTypes gathered(typeParser_);
     gathered.gather(classinfo);
-    Value* val = emitExpr(obj);
+    Value* lhs_val = emitExpr(obj);
     RefinementSet refinement;
 
-    TORCH_CHECK(!gathered.types.empty(), "`isinstance` must be used with a "
-                "type or a tuple of types");
 
-    bool all_are_subtypes = std::all_of(gathered.types.begin(), gathered.types.end(),
-                                        [&](const TypePtr t) {
-                                          return t->isSubtypeOf(val->type());
-                                        });
-    if (all_are_subtypes && obj.kind() == TK_VAR) {
-      std::string ident = Var(obj).name().name();
+    // For use with `unifyTypeList`
+    std::stringstream nowhere;
 
-      // Get the type to compare against. If we have a tuple of types,
-      // turn the tuple into a Union type to prevent unnecessary extra
-      // logic for single vs. multiple comparisons
-      const TypePtr single_comparison = gathered.types.size() == 1 ?
-                                        gathered.types[0] :
-                                        UnionType::create(gathered.types);
+    TypePtr unified_true = nullptr;
+    TypePtr unified_false = nullptr;
 
-      Refinement isinstance(ident, single_comparison);
-
-      if (val->type()->kind() == UnionType::Kind) {
-        const UnionTypePtr union_type = val->type()->expect<UnionType>();
-
-        std::vector<TypePtr> not_isinstance_types;
-
-        // O(1) lookups of all the types in `gathered.types`
-        std::unordered_set<TypePtr, std::hash<TypePtr>, c10::TypeEqual> dict{
-          gathered.types.begin(), gathered.types.end()};
-
-        for (auto type : union_type->containedTypes()) {
-          // Fast path
-          if (!dict.count(type)) {
-            not_isinstance_types.emplace_back(type);
-            break;
-          }
-          // Check all types in `gathered.types` to see if there's a
-          // common supertype
-          for (const TypePtr comparison_type : gathered.types) {
-            c10::optional<TypePtr> unified = unifyTypes(type, comparison_type);
-            if (!unified) {
-              not_isinstance_types.emplace_back(type);
-            }
-          }
-        }
-
-        if (not_isinstance_types.size() == 1) {
-          Refinement not_isinstance(std::move(ident), not_isinstance_types.at(0));
-          refinement = RefinementSet(isinstance, not_isinstance);
-        } else {
-          auto new_union = UnionType::create(std::move(not_isinstance_types));
-          Refinement not_isinstance(std::move(ident), new_union);
-          refinement = RefinementSet(isinstance, not_isinstance);
-        }
-      } else {
-        refinement = RefinementSet({isinstance}, {});
+    // Decompose Union types and delete duplicate types to reduce
+    // branching logic
+    std::vector<TypePtr> rhs_types;
+    for (const TypePtr t : gathered.types) {
+      if (t->kind() == UnionType::Kind) {
+        auto inner = t->expect<UnionType>()->containedTypes();
+        rhs_types.insert(rhs_types.end(), inner.begin(), inner.end());
+    } else if (t->kind() == OptionalType::Kind) {
+        auto inner = t->expect<OptionalType>()->containedTypes();
+        rhs_types.insert(rhs_types.end(), inner.begin(), inner.end());
+    } else {
+        rhs_types.push_back(t);
       }
     }
+    std::sort(rhs_types.begin(), rhs_types.end());
+    rhs_types.erase(std::unique(rhs_types.begin(), rhs_types.end() ), rhs_types.end());
 
-    if (gathered.staticallyTrue(val->type())) {
+    if (obj.kind() == TK_VAR) {
+      std::string ident = Var(obj).name().name();
+
+      std::vector<Refinement> true_refinements;
+      std::vector<Refinement> false_refinements;
+
+      std::vector<TypePtr> isinstance_types;
+      std::vector<TypePtr> not_isinstance_types;
+
+      // We can discard any rhs types that we know statically would be
+      // impossible. For example, if we had:
+      //
+      //    def fn(x: Optional[str]):
+      //        if isinstance(x, (List[str], str, int)):
+      //            ...
+      //
+      // then `x` would be `str` in the true branch and `None` in the
+      // false branch, not `(List[str], str, int)` in the true branch
+      // and `None` in the false branch
+      std::vector <TypePtr> lhs_types;
+      if (lhs_val->type()->kind() == UnionType::Kind) {
+       lhs_types = lhs_val->type()->expect<UnionType>()->containedTypes().vec();
+      } else if (lhs_val->type()->kind() == OptionalType::Kind) {
+        auto inner = lhs_val->type()->expect<OptionalType>()->getElementType();
+        lhs_types.push_back(inner);
+        lhs_types.push_back(NoneType::get());
+      } else {
+        lhs_types.push_back(lhs_val->type());
+      }
+
+      for (TypePtr lhs_type : lhs_types) {
+          if (lhs_type == AnyType::get()) {
+            isinstance_types.insert(isinstance_types.end(), rhs_types.begin(), rhs_types.end());
+            break;
+          }
+          if (std::any_of(
+                rhs_types.begin(),
+                rhs_types.end(),
+                [&](TypePtr rhs_type) {
+                  return lhs_type->isSubtypeOf(rhs_type);
+                })) {
+                  isinstance_types.push_back(lhs_type);
+          } else {
+            not_isinstance_types.push_back(lhs_type);
+          }
+        }
+
+
+      // Get a single type for the true and false branches
+      unified_true = isinstance_types.empty()
+                          ? nullptr
+                          : *unifyTypeList(isinstance_types,
+                                           nowhere,
+                                           /*default_to_union=*/true);
+      if (unified_true) {
+        true_refinements = {Refinement(ident, unified_true)};
+      }
+      unified_false = not_isinstance_types.empty()
+                          ? nullptr
+                          : *unifyTypeList(not_isinstance_types,
+                                           nowhere,
+                                           /*default_to_union=*/true);
+      if (unified_false) {
+        false_refinements = {Refinement(ident, unified_false)};
+      }
+
+      refinement = RefinementSet(
+          true_refinements, false_refinements);
+    }
+
+    TypePtr single_rhs = rhs_types.empty()
+                         ? nullptr
+                         : *unifyTypeList(rhs_types, nowhere, /*defult_to_union=*/true);
+
+    if (gathered.staticallyTrue(lhs_val->type())) {
       return CondValue(*graph, obj.range(), true, std::move(refinement));
     }
 
-    if (gathered.staticallyFalse(val->type())) {
+    if (gathered.staticallyFalse(lhs_val->type())) {
       return CondValue(*graph, obj.range(), false, std::move(refinement));
     }
 
     // check maybe true/false at runtime, need an actual op
     Value* result =
-        graph->insertNode(graph->createIsInstance(val, gathered.types))
+        graph->insertNode(graph->createIsInstance(lhs_val, gathered.types))
             ->output();
     return CondValue(result, std::move(refinement), c10::nullopt);
   }
@@ -3369,9 +3433,7 @@ struct to_ir {
     // AnyType is the only user-exposed type which we don't unify to from
     // its subtypes, so we add a cast for use cases like
     // x : Any = 1 if cond else "str"
-    if (type_hint &&
-          ((type_hint == AnyType::get() && out_val->type() != AnyType::get()) ||
-          (type_hint->kind() == UnionType::Kind && out_val->type()->kind() != UnionType::Kind))) {
+    if (type_hint == AnyType::get() && out_val->type() != AnyType::get()) {
       out_val = graph->insertUncheckedCast(out_val, type_hint);
     }
     return out_val;
@@ -4103,7 +4165,7 @@ struct to_ir {
       rdim =
           handle_indexing(subscript_expr, rev_idx, rdim, /*is_reverse=*/true);
     }
-    for (size_t i = 0; i < exprs.size(); i++) {
+    for (const auto i : c10::irange(exprs.size())) {
       if (!exprs[i].has_value()) {
         if (subscript_exprs[i].kind() == TK_SLICE_EXPR) {
           sliceable = emitSlice(
@@ -4334,20 +4396,29 @@ struct to_ir {
         const SliceExpr& slice = SliceExpr(subscript_exprs[0]);
         std::vector<at::optional<NamedValue>> tuple_args;
         tuple_args.reserve(3);
-        auto begin =
-            NamedValue(val_range, "begin", emitExpr(Expr(slice.startOr(0))));
-        tuple_args.emplace_back(begin);
+        if (slice.start().present()) {
+          auto begin = NamedValue(
+              val_range, "begin", emitExpr(Expr(slice.start().get())));
+          tuple_args.emplace_back(begin);
+        } else {
+          tuple_args.emplace_back(c10::nullopt);
+        }
+
         if (slice.end().present()) {
           auto end =
               NamedValue(val_range, "end", emitExpr(Expr(slice.end().get())));
           tuple_args.emplace_back(end);
-
         } else {
           tuple_args.emplace_back(c10::nullopt);
         }
-        // pushing step_size to match the tuple_args
-        tuple_args.emplace_back(c10::nullopt);
 
+        if (slice.step().present()) {
+          auto step =
+              NamedValue(val_range, "step", emitExpr(Expr(slice.step().get())));
+          tuple_args.emplace_back(step);
+        } else {
+          tuple_args.emplace_back(c10::nullopt);
+        }
         auto tupleSliceValue =
             emitTupleSlice(val_range, s_tuple_val, tuple_args);
         return std::make_shared<SimpleValue>(tupleSliceValue);
@@ -4560,7 +4631,7 @@ std::vector<Function*> CompilationUnit::define(
     this->register_function(std::move(fn));
   };
 
-  for (size_t i = 0; i < properties.size(); i++) {
+  for (const auto i : c10::irange(properties.size())) {
     PropertyPair property_fns = define_property(
         prefix,
         properties[i],
@@ -4579,7 +4650,7 @@ std::vector<Function*> CompilationUnit::define(
     }
   }
 
-  for (size_t i = 0; i < definitions.size(); i++) {
+  for (const auto i : c10::irange(definitions.size())) {
     auto fn = define(
         prefix,
         definitions[i],
@@ -4658,7 +4729,7 @@ void CompilationUnit::define_hooks(
   };
 
   // define hooks
-  for (size_t i = 0; i < hookDefs.size(); i++) {
+  for (const auto i : c10::irange(hookDefs.size())) {
     // check to see if already defined this hook
     auto existing_fn = check_collisions(hookDefs[i]);
     if (existing_fn != nullptr) {
@@ -4685,7 +4756,7 @@ void CompilationUnit::define_hooks(
   }
 
   // define pre_hooks
-  for (size_t i = 0; i < preHookDefs.size(); i++) {
+  for (const auto i : c10::irange(preHookDefs.size())) {
     // check to see if already defined this hook
     auto existing_fn = check_collisions(preHookDefs[i]);
     if (existing_fn != nullptr) {
