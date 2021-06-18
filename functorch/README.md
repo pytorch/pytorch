@@ -5,6 +5,8 @@
 | [**Transformations**](#what-are-the-transforms)
 | [**Future Plans**](#future-plans)
 
+**This library is currently under heavy development - if you have suggestions on the API or use-cases you'd like to be covered, please open an github issue or reach out. We'd love to hear about how you're using the library.**
+
 `functorch` is a prototype of [JAX-like](https://github.com/google/jax)
 composable FUNCtion transforms for pyTORCH.
 
