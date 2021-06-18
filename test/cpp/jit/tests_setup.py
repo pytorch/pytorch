@@ -15,6 +15,7 @@ class FileSetup(object):
     path = None
 
     def shutdown(self):
+        # wow!
         if os.path.exists(self.path):
             os.remove(self.path)
             pass
