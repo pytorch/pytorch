@@ -15,11 +15,7 @@ from torch.testing._internal.common_quantization import (
     TwoLayerLinearModel,
     AnnotatedNestedModel
 )
-from torch.quantization import (
-    quantize,
-    # prepare,
-    # convert,
-)
+from torch.quantization import quantize
 from torch.testing._internal.common_quantization import QuantizationTestCase, test_only_eval_fn
 
 class TestLiteScriptModule(TestCase):
@@ -448,21 +444,20 @@ class TestLiteScriptModule(TestCase):
 
 class TestLiteScriptQuantizedModule(QuantizationTestCase):
 
-    def _compare_script_and_mobile(self,
-                                   model_class: Type[torch.nn.Module],
-                                   input: torch.Tensor,
-                                   **kwargs):
+    def _create_quantized_model(self, model_class: Type[torch.nn.Module], **kwargs):
         qengine = "qnnpack"
         with override_quantized_engine(qengine):
             qconfig = torch.quantization.get_default_qconfig(qengine)
             model = model_class(**kwargs)
-            # model.qconfig = qconfig
-            # model = prepare(model)
-
-            # test_only_eval_fn(model, self.calib_data)
-            # model = convert(model)
             model = quantize(model, test_only_eval_fn, [self.calib_data])
 
+        return model
+
+    def _compare_script_and_mobile(self,
+                                   model: torch.nn.Module,
+                                   input: torch.Tensor):
+        qengine = "qnnpack"
+        with override_quantized_engine(qengine):
             script_module = torch.jit.script(model)
             script_module_result = script_module(input)
 
@@ -493,15 +488,18 @@ class TestLiteScriptQuantizedModule(QuantizationTestCase):
 
     def test_single_layer(self):
         input = torch.rand(2, 5, dtype=torch.float)
-        self._compare_script_and_mobile(model_class=AnnotatedSingleLayerLinearModel, input=input, qengine="qnnpack")
+        quantized_model = self._create_quantized_model(model_class=AnnotatedSingleLayerLinearModel, qengine="qnnpack")
+        self._compare_script_and_mobile(model=quantized_model, input=input)
 
     def test_two_layer(self):
         input = torch.rand(2, 5, dtype=torch.float)
-        self._compare_script_and_mobile(model_class=TwoLayerLinearModel, input=input)
+        quantized_model = self._create_quantized_model(model_class=TwoLayerLinearModel)
+        self._compare_script_and_mobile(model=quantized_model, input=input)
 
     def test_annotated_nested(self):
         input = torch.rand(2, 5, dtype=torch.float)
-        self._compare_script_and_mobile(model_class=AnnotatedNestedModel, input=input, qengine="qnnpack")
+        quantized_model = self._create_quantized_model(model_class=AnnotatedNestedModel, qengine="qnnpack")
+        self._compare_script_and_mobile(model=quantized_model, input=input)
 
     def test_quantization_example(self):
 
@@ -532,21 +530,7 @@ class TestLiteScriptQuantizedModule(QuantizationTestCase):
         model_int8 = torch.quantization.convert(model_fp32_prepared)
 
         input = torch.randn(4, 1, 4, 4)
-        script_module = torch.jit.script(model_int8)
-        script_module_result = script_module(input)
-
-        buffer = io.BytesIO(script_module._save_to_buffer_for_lite_interpreter())
-        buffer.seek(0)
-        mobile_module = _load_for_lite_interpreter(buffer)
-
-        mobile_module_result = mobile_module(input)
-
-        torch.testing.assert_allclose(script_module_result, mobile_module_result)
-        mobile_module_forward_result = mobile_module.forward(input)
-        torch.testing.assert_allclose(script_module_result, mobile_module_forward_result)
-
-        mobile_module_run_method_result = mobile_module.run_method("forward", input)
-        torch.testing.assert_allclose(script_module_result, mobile_module_run_method_result)
+        self._compare_script_and_mobile(model=model_int8, input=input)
 
 
 if __name__ == '__main__':
