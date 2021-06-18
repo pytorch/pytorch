@@ -155,9 +155,6 @@ def convert(model: GraphModule, is_reference: bool = False,
         convert_custom_config_dict = {}
     patterns, node_name_to_scope, prepare_custom_config_dict = restore_state(model)
     qconfig_map: Dict[str, QConfigAny] = model._qconfig_map  # type: ignore[assignment]
-    # always run weight observers in the top level forward method
-    # for dynamic quant ops or weight only quant ops
-    run_weight_observers(model)
 
     # move to cpu since we only have quantized cpu kernels
     model.eval().cpu()
@@ -186,6 +183,10 @@ def convert(model: GraphModule, is_reference: bool = False,
         # inputs, and scale the weight
         weight_eq_obs_dict = update_obs_for_equalization(model, modules)
         convert_eq_obs(model, modules, weight_eq_obs_dict)
+
+    # always run weight observers in the top level forward method
+    # for dynamic quant ops or weight only quant ops
+    run_weight_observers(model)
 
     quantized_graph = Graph()
     env: Dict[str, Tuple[Node, Optional[torch.dtype]]] = {}
@@ -402,7 +403,7 @@ def convert(model: GraphModule, is_reference: bool = False,
                 # for non-standalone module, since _standalone_module_output_quantized_idxs
                 # is only available in observed standalone module
                 if is_observed_standalone_module_node:
-                    out_quant_idxs = modules[node.target]._standalone_module_output_quantized_idxs.tolist()  # type: ignore[operator] # noqa: B950
+                    out_quant_idxs = modules[node.target]._standalone_module_output_quantized_idxs.tolist()  # noqa: B950
                     assert len(out_quant_idxs) <= 1, "Currently standalone only support one output"
                     quantized = 0 in out_quant_idxs
 

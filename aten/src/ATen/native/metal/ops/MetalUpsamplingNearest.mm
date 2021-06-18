@@ -41,6 +41,9 @@ Tensor upsample_nearest2d_vec(
       output_width);
   std::vector<int64_t> outputSizes{
       nbatch, channels, output_height, output_width};
+  if(input.numel() == 0){
+    return makeTensor({outputSizes}, input.options());
+  }
   MPSImage* X = imageFromTensor(input);
   MetalTensorImplStorage mt{outputSizes};
   MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);

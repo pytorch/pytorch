@@ -3,7 +3,12 @@ import torch.nn as nn
 from torch.fx import GraphModule
 from torch.fx.graph import Node
 
-from .utils import collect_producer_nodes, get_new_attr_name_with_prefix
+from .utils import (
+    get_new_attr_name_with_prefix,
+    maybe_get_next_module,
+    collect_producer_nodes,
+    _parent_name,
+)
 from ..observer import (
     PerChannelMinMaxObserver,
     _with_args,
@@ -267,10 +272,10 @@ def get_weight_eq_obs(
             return None, None
 
         for weight_node in weight_observer_nodes:
-            if weight_node.op == 'call_module' and isinstance(weight_node.target, str) and \
-               isinstance(modules[weight_node.target], _WeightEqualizationObserver):
-                weight_eq_obs = modules[weight_node.target]
+            if weight_node.op == 'call_module' and \
+               isinstance(modules[str(weight_node.target)], _WeightEqualizationObserver):
 
+                weight_eq_obs = modules[str(weight_node.target)]
                 assert(isinstance(weight_eq_obs, _WeightEqualizationObserver))
                 return op_node, weight_eq_obs
 
@@ -289,8 +294,8 @@ def maybe_get_weight_eq_obs_node(op_node: Node, modules: Dict[str, nn.Module]) -
         return None
 
     for weight_node in weight_observer_nodes:
-        if weight_node.op == 'call_module' and isinstance(weight_node.target, str) and \
-           isinstance(modules[weight_node.target], _WeightEqualizationObserver):
+        if weight_node.op == 'call_module' and \
+           isinstance(modules[str(weight_node.target)], _WeightEqualizationObserver):
             return weight_node
 
     return None
@@ -312,22 +317,19 @@ def maybe_get_next_input_eq_obs(node: Node, modules: Dict[str, nn.Module]) -> Op
            (node.op == 'call_function' and node.target == nn.functional.linear))
 
     # Locate the following output observer if it exists
-    maybe_obs_node = None  
-    for user, _ in node.users.items():
-        if user.op == 'call_module' and isinstance(modules[str(user.target)], ObserverBase):
-            maybe_obs_node = user
-
+    maybe_obs_node = maybe_get_next_module(node, modules, lambda a : isinstance(a, ObserverBase))
     if maybe_obs_node is None:
         return None
 
-    # Locate the input equalization observer following the output observer if it exists
-    for user, _ in maybe_obs_node.users.items():
-        if user.op == 'call_module':
-            maybe_eq_obs = modules[str(user.target)]
-            if isinstance(maybe_eq_obs, _InputEqualizationObserver):
-                return maybe_eq_obs
+    maybe_eq_obs_node = maybe_get_next_module(
+        maybe_obs_node, modules, lambda a : isinstance(a, _InputEqualizationObserver)
+    )
+    if maybe_eq_obs_node is None:
+        return None
 
-    return None
+    maybe_eq_obs = modules[str(maybe_eq_obs_node)]
+    assert(isinstance(maybe_eq_obs, _InputEqualizationObserver))
+    return maybe_eq_obs
 
 def maybe_get_next_equalization_scale(node: Node, modules: Dict[str, nn.Module]) -> Optional[torch.Tensor]:
     """ If the next next node is an InputEqualizationObserver then we want to
@@ -404,7 +406,12 @@ def scale_weight_node(
     scaled_bias = torch.mul(bias, next_equalization_scale)
     modules[node.target].bias = nn.Parameter(scaled_bias)
 
-def scale_weight_functional(op_node: Node, model: GraphModule, equalization_scale: torch.Tensor) -> None:
+def scale_weight_functional(
+    op_node: Node,
+    model: GraphModule,
+    modules: Dict[str, nn.Module],
+    equalization_scale: torch.Tensor,
+) -> None:
     """ Scales the weight value for functional layers
     """
 
@@ -417,8 +424,7 @@ def scale_weight_functional(op_node: Node, model: GraphModule, equalization_scal
     for weight_node in weight_observer_nodes:
         # Find the node containing the weight values
         if weight_node.op == 'get_attr':
-            assert(isinstance(weight_node.target, str))
-            weight = model.get_buffer(weight_node.target)
+            weight = model.get_buffer(str(weight_node.target))
 
             # Scale the weights for input-weight equalization
             # If the following layer needs to be equalized then we will multiply its scale
@@ -426,12 +432,9 @@ def scale_weight_functional(op_node: Node, model: GraphModule, equalization_scal
             # TODO: connecting functional layers?
             # scaled_weight = torch.mul(scaled_weight, next_equalization_scale)
 
-            # Set the weight with the newly scaled weight in the original model
-            # weight_node.target looks something like "linear1.w", so we want to
-            # get rid of the last two characters to retrieve the path to the
-            # submodule containing the weight
-            model.get_submodule(weight_node.target[:-2]).w = scaled_weight
-            assert(torch.allclose(model.get_buffer(weight_node.target), scaled_weight))
+            parent_name, name = _parent_name(weight_node.target)
+            setattr(modules[parent_name], name, scaled_weight)
+            assert(torch.allclose(model.get_buffer(str(weight_node.target)), scaled_weight))
 
 def update_obs_for_equalization(model: GraphModule, modules: Dict[str, nn.Module]) -> Dict[str, _WeightEqualizationObserver]:
     """ Update all of the observer's equalization scale. For each
@@ -553,7 +556,7 @@ def convert_eq_obs(
                 maybe_next_equalization_scale = maybe_get_next_equalization_scale(node, modules)
                 scale_weight_node(node, modules, equalization_scale, maybe_next_equalization_scale)
             elif node.op == 'call_function':
-                scale_weight_functional(node, model, equalization_scale)
+                scale_weight_functional(node, model, modules, equalization_scale)
 
                 weight_eq_obs_node = maybe_get_weight_eq_obs_node(node, modules)
                 if weight_eq_obs_node is None:
