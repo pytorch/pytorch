@@ -466,18 +466,29 @@ class TestLiteScriptQuantizedModule(QuantizationTestCase):
             script_module = torch.jit.script(model)
             script_module_result = script_module(input)
 
-            buffer = io.BytesIO(script_module._save_to_buffer_for_lite_interpreter())
-            buffer.seek(0)
-            mobile_module = _load_for_lite_interpreter(buffer)
+            max_retry = 5
+            for retry in range(1, max_retry + 1):
+                # retires `max_retry` times; breaks iff succeeds else throws exception
+                try:
+                    buffer = io.BytesIO(script_module._save_to_buffer_for_lite_interpreter())
+                    buffer.seek(0)
+                    mobile_module = _load_for_lite_interpreter(buffer)
 
-            mobile_module_result = mobile_module(input)
+                    mobile_module_result = mobile_module(input)
 
-            torch.testing.assert_allclose(script_module_result, mobile_module_result)
-            mobile_module_forward_result = mobile_module.forward(input)
-            torch.testing.assert_allclose(script_module_result, mobile_module_forward_result)
+                    torch.testing.assert_allclose(script_module_result, mobile_module_result)
+                    mobile_module_forward_result = mobile_module.forward(input)
+                    torch.testing.assert_allclose(script_module_result, mobile_module_forward_result)
 
-            mobile_module_run_method_result = mobile_module.run_method("forward", input)
-            torch.testing.assert_allclose(script_module_result, mobile_module_run_method_result)
+                    mobile_module_run_method_result = mobile_module.run_method("forward", input)
+                    torch.testing.assert_allclose(script_module_result, mobile_module_run_method_result)
+                except AssertionError as e:
+                    if retry == max_retry:
+                        raise e
+                    else:
+                        continue
+                break
+
 
 
     def test_single_layer(self):
