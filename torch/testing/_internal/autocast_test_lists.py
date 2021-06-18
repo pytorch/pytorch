@@ -212,7 +212,6 @@ class AutocastTestLists(object):
         ]
         self.nn_fp32 = [
             ("softplus", pointwise0_fp16),
-            ("gelu", pointwise0_fp16),
             ("nll_loss", (torch.rand((n, n), device=dev, dtype=torch.float),
                           torch.zeros((n,), device=dev, dtype=torch.long))),
             ("nll_loss2d", (torch.rand((n, n, n, n), device=dev, dtype=torch.half),

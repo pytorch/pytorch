@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/mobile/nnc/context.h>
+#include "ATen/core/ivalue_inl.h"
 
 #include <ATen/Functions.h>
 #include <ATen/core/functional.h>
@@ -164,7 +165,7 @@ void Function::init_execution_state() const {
     const c10::IValue& ivalue = (c10::IValue)param;
     if (ivalue.isTensor()) {
       arguments.emplace_back(ivalue.toTensor().data_ptr());
-    } else if (ivalue.isObject()) {
+    } else if (torch::isCustomClass(ivalue)) {
       arguments.emplace_back(ivalue.toObjectRef().getSlot(0).toCapsule().get());
     } else {
       TORCH_CHECK(false, "Invalid parameter: ", ivalue);
