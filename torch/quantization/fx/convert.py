@@ -394,7 +394,7 @@ def convert(model: GraphModule, is_reference: bool = False,
                 # for non-standalone module, since _standalone_module_output_quantized_idxs
                 # is only available in observed standalone module
                 if is_observed_standalone_module_node:
-                    out_quant_idxs = modules[node.target]._standalone_module_output_quantized_idxs.tolist()  # type: ignore[operator] # noqa: B950
+                    out_quant_idxs = modules[node.target]._standalone_module_output_quantized_idxs.tolist()  # noqa: B950
                     assert len(out_quant_idxs) <= 1, "Currently standalone only support one output"
                     quantized = 0 in out_quant_idxs
 
