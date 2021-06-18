@@ -636,17 +636,15 @@ def assert_close(
     .. note::
 
         :func:`~torch.testing.assert_close` is highly configurable with strict default settings. Users are encouraged
-        to :func:`~functools.partial` it to fit their use case. For example, if you an equality check is needed one
-        might define an ``assert_equal`` that uses zero tolrances for every ``dtype`` by default:
-
-        .. code:: python
+        to :func:`~functools.partial` it to fit their use case. For example, if an equality check is needed, one might
+        define an ``assert_equal`` that uses zero tolrances for every ``dtype`` by default:
 
         >>> import functools
         >>> import torch
         >>> assert_equal = functools.partial(torch.testing.assert_close, rtol=0, atol=0)
         >>> assert_equal(1e-9, 1e-10)
         AssertionError: Tensors are not close!
-
+        <BLANKLINE>
         Mismatched elements: 1 / 1 (100.0%)
         Greatest absolute difference: 8.999999703829253e-10 at 0 (up to 0 allowed)
         Greatest relative difference: 8.999999583666371 at 0 (up to 0 allowed)
