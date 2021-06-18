@@ -21,6 +21,23 @@ C10_DEFINE_int64(
 
 namespace c10 {
 
+namespace impl {
+
+static std::string noop_name_fn(const PyInterpreter*) {
+  return "<unloaded interpreter>";
+}
+
+static void noop_decref_fn(const PyInterpreter*, PyObject*) {
+  // no-op
+}
+
+void PyInterpreter::disarm() noexcept {
+  name_fn_ = &noop_name_fn;
+  decref_fn_ = &noop_decref_fn;
+}
+
+} // namespace impl
+
 const char* const TensorImpl::err_msg_tensor_metadata_change_not_allowed =
     "is not allowed on a Tensor created from .data or .detach().\n"
     "If your intent is to change the metadata of a Tensor (such as sizes / strides / storage / storage_offset)\n"
@@ -85,6 +102,8 @@ TensorImpl::TensorImpl(
     DispatchKeySet key_set,
     const caffe2::TypeMeta data_type)
     : storage_(std::move(storage)),
+      pyobj_interpreter_(nullptr),
+      pyobj_(nullptr),
       storage_offset_(0),
       numel_(0),
       data_type_(data_type),
@@ -92,7 +111,7 @@ TensorImpl::TensorImpl(
       key_set_(key_set) {
   init_bitfields();
   // Inference tensor doesn't have version counter.
-  if (!is_inference_tensor()) {
+  if (!is_inference()) {
     version_counter_ = VariableVersion(/*version=*/0);
   }
 }
@@ -111,6 +130,8 @@ TensorImpl::TensorImpl(
     const caffe2::TypeMeta data_type,
     c10::optional<c10::Device> device_opt)
     : storage_(std::move(storage)),
+      pyobj_interpreter_(nullptr),
+      pyobj_(nullptr),
       storage_offset_(0),
       numel_(0),
       data_type_(data_type),
@@ -146,7 +167,7 @@ TensorImpl::TensorImpl(
   }
 
   // Inference tensor doesn't have version counter.
-  if (!is_inference_tensor()) {
+  if (!is_inference()) {
     version_counter_ = VariableVersion(/*version=*/0);
   }
 
@@ -306,6 +327,18 @@ void TensorImpl::release_resources() {
   if (storage_) {
     storage_ = {};
   }
+  if (owns_pyobj_) {
+    TORCH_INTERNAL_ASSERT(pyobj_interpreter_ != nullptr);
+    TORCH_INTERNAL_ASSERT(pyobj_ != nullptr);
+    pyobj_interpreter_.load(std::memory_order_acquire)->decref(pyobj_);
+    // NB: this destructor can only be entered when there are no
+    // references to this C++ object (obviously), NOR any references
+    // to the PyObject (if there are references to the PyObject,
+    // then the PyObject holds an owning reference to the tensor).
+    // So it is OK to clear pyobj_ here as it is impossible for it to
+    // be used again (modulo weak reference races)
+    pyobj_ = nullptr; // for safety
+  }
 }
 
 #ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
@@ -387,8 +420,7 @@ AutogradMetaInterface::~AutogradMetaInterface() {}
 // to delete these setter code in their code which is not ideal.
 void TensorImpl::set_requires_grad(bool requires_grad) {
   TORCH_CHECK(
-      !(requires_grad && is_inference_tensor() &&
-        !c10::InferenceMode::is_enabled()),
+      !(requires_grad && is_inference() && !c10::InferenceMode::is_enabled()),
       "Setting requires_grad=True on inference tensor outside InferenceMode is not allowed.");
   if (!requires_grad && !autograd_meta_)
     return;
@@ -500,7 +532,7 @@ void TensorImpl::copy_tensor_metadata(
   // TODO: In the ideal end state, it's okay to set disabled version_counter
   // on inference tensor since it's a no-op. This requires refactor on call
   // sites.
-  if (!dest_impl->is_inference_tensor()) {
+  if (!dest_impl->is_inference()) {
     dest_impl->set_version_counter(version_counter);
   }
 }
@@ -512,7 +544,7 @@ void TensorImpl::copy_tensor_metadata(
     bool allow_tensor_metadata_change) {
   copy_tensor_metadata_except_version_counter(
       src_impl, dest_impl, allow_tensor_metadata_change);
-  if (!dest_impl->is_inference_tensor()) {
+  if (!dest_impl->is_inference()) {
     dest_impl->set_version_counter(std::move(version_counter));
   }
 }
