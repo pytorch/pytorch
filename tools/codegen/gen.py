@@ -246,9 +246,9 @@ class ComputeOperators:
 struct TORCH_API {name} {{
   using schema = {sig.type()};
   using ptr_schema = schema*;
-  static CONSTEXPR_EXCEPT_WIN_CUDA char* name = "aten::{str(f.func.name.name)}";
-  static CONSTEXPR_EXCEPT_WIN_CUDA char* overload_name = "{f.func.name.overload_name}";
-  static CONSTEXPR_EXCEPT_WIN_CUDA char* schema_str = {cpp_string(str(f.func))};
+  static CONSTEXPR_CONST_EXCEPT_WIN_CUDA char* name = "aten::{str(f.func.name.name)}";
+  static CONSTEXPR_CONST_EXCEPT_WIN_CUDA char* overload_name = "{f.func.name.overload_name}";
+  static CONSTEXPR_CONST_EXCEPT_WIN_CUDA char* schema_str = {cpp_string(str(f.func))};
   static {sig.defn(name=call_method_name, is_redispatching_fn=False)};
   static {sig.defn(name=redispatch_method_name, is_redispatching_fn=True)};
 }};"""
