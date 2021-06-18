@@ -292,11 +292,11 @@ void nll_loss_forward_out_cuda_template(
   if (weight.defined()) {
     TensorArg weight_arg{weight, "weight", 5};
     checkAllSameGPU(
-        "nll_loss_forward_out_cuda",
+        "nll_loss_forward_out_cuda_template",
         {output_arg, total_weight_arg, input_arg, target_arg, weight_arg});
   } else {
     checkAllSameGPU(
-        "nll_loss_forward_out_cuda",
+        "nll_loss_forward_out_cuda_template",
         {output_arg, total_weight_arg, input_arg, target_arg});
   }
 
