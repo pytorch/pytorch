@@ -172,7 +172,13 @@ class TestForeach(TestCase):
         self._regular_binary_test(dtype, op, ref, inputs, is_fastpath)
         self._inplace_binary_test(dtype, inplace_op, inplace_ref, inputs, is_fastpath)
         if opinfo.supports_alpha_param:
-            alpha = 3 if dtype in torch.testing.get_all_int_dtypes() else 3.14
+            alpha = None
+            if dtype in torch.testing.get_all_int_dtypes():
+                alpha = 3
+            elif dtype.is_complex:
+                dtype = complex(3, 3)
+            else:
+                alpha = 3.14
             self._regular_binary_test(dtype, op, ref, inputs, is_fastpath, alpha=alpha)
             self._inplace_binary_test(dtype, inplace_op, inplace_ref, inputs, is_fastpath, alpha=alpha)
 
