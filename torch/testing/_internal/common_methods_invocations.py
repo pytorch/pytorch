@@ -4801,7 +4801,7 @@ op_db: List[OpInfo] = [
            skips=(
                # FIXME: bfloat16 backward support likely depends on CUDA11+
                #   and SM53+
-               SkipInfo('TestCommon', 'test_dtypes', active_if=TEST_WINDOWS),
+               SkipInfo('TestCommon', 'test_dtypes', active_if=IS_WINDOWS),
                # addbmm does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),
                # https://github.com/pytorch/pytorch/issues/55907
@@ -4820,7 +4820,7 @@ op_db: List[OpInfo] = [
            skips=(
                # FIXME: bfloat16 backward support likely depends on CUDA11+
                #   and SM53+
-               SkipInfo('TestCommon', 'test_dtypes', active_if=TEST_WINDOWS),
+               SkipInfo('TestCommon', 'test_dtypes', active_if=IS_WINDOWS),
                # baddbmm does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),
            ),
@@ -4847,7 +4847,7 @@ op_db: List[OpInfo] = [
            skips=(
                # FIXME: bfloat16 backward support likely depends on CUDA11+
                #   and SM53+
-               SkipInfo('TestCommon', 'test_dtypes', active_if=TEST_WINDOWS),
+               SkipInfo('TestCommon', 'test_dtypes', active_if=IS_WINDOWS),
                # bmm does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),
            ),
@@ -5945,7 +5945,7 @@ op_db: List[OpInfo] = [
            skips=(
                # FIXME: bfloat16 backward support likely depends on CUDA11+
                #   and SM53+
-               SkipInfo('TestCommon', 'test_dtypes', active_if=TEST_WINDOWS),
+               SkipInfo('TestCommon', 'test_dtypes', active_if=IS_WINDOWS),
                # matmul does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),
                SkipInfo('TestCommon', 'test_conj_view', device_type='cpu'),
@@ -6413,7 +6413,7 @@ op_db: List[OpInfo] = [
            skips=(
                # FIXME: bfloat16 backward support likely depends on CUDA11+
                #   and SM53+
-               SkipInfo('TestCommon', 'test_dtypes', active_if=TEST_WINDOWS),
+               SkipInfo('TestCommon', 'test_dtypes', active_if=IS_WINDOWS),
                SkipInfo('TestJit', 'test_variant_consistency_jit',),
            )),
     OpInfo('__rmod__',
@@ -6770,7 +6770,7 @@ op_db: List[OpInfo] = [
            skips=(
                # FIXME: bfloat16 backward support likely depends on CUDA11+
                #   and SM53+
-               SkipInfo('TestCommon', 'test_dtypes', active_if=TEST_WINDOWS),
+               SkipInfo('TestCommon', 'test_dtypes', active_if=IS_WINDOWS),
                # test does not work with passing lambda for op
                # there's a test `test_einsum` in `test_jit.py` to handle this case
                SkipInfo('TestJit', 'test_variant_consistency_jit'),
