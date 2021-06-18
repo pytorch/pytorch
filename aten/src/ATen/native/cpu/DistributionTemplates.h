@@ -133,58 +133,6 @@ void normal_fill_AVX2(Tensor& self, const float mean, const float std, RNG gener
   }
 }
 #endif // CPU_CAPABILITY_AVX2 or CPU_CAPABILITY_AVX512
-#ifdef CPU_CAPABILITY_AVX512
-static void normal_fill_32_AVX512(float *data,
-                         const __m512* two_pi,
-                         const __m512* one,
-                         const __m512* minus_two,
-                         const __m512* mean,
-                         const __m512* std_v) {
-  const __m512 u1 = _mm512_sub_ps(*one, _mm512_loadu_ps(data));
-  const __m512 u2 = _mm512_loadu_ps(data + 16);
-  // sincos512_ps and log512_ps are from avx_mathfun.h
-  const __m512 radius = _mm512_sqrt_ps(_mm512_mul_ps(*minus_two, log512_ps(u1)));
-  const __m512 theta = _mm512_mul_ps(*two_pi, u2);
-  __m512 sintheta, costheta;
-  sincos512_ps(theta, &sintheta, &costheta);
-  const __m512 n1 = _mm512_mul_ps(radius, costheta);
-  const __m512 n2 = _mm512_mul_ps(radius, sintheta);
-  _mm512_storeu_ps(data, _mm512_fmadd_ps(n1, *std_v, *mean));
-  _mm512_storeu_ps(data + 16, _mm512_fmadd_ps(n2, *std_v, *mean));
-}
-
-template<typename RNG>
-void normal_fill_AVX512(Tensor& self, const float mean, const float std, RNG generator) {
-  float *data = self.data_ptr<float>();
-  auto size = self.numel();
-  std::lock_guard<std::mutex> lock(generator->mutex_);
-  for (int64_t i = 0; i < size; ++i) {
-    at::uniform_real_distribution<float> uniform(0, 1);
-    data[i] = uniform(generator);
-  }
-  const __m512 two_pi = _mm512_set1_ps(2.0f * c10::pi<double>);
-  const __m512 one = _mm512_set1_ps(1.0f);
-  const __m512 minus_two = _mm512_set1_ps(-2.0f);
-  const __m512 mean_v = _mm512_set1_ps(mean);
-  const __m512 std_v = _mm512_set1_ps(std);
-
-  int64_t j = 0;
-  for (; j < size - 31; j += 32) {
-    normal_fill_32_AVX512(data + j, &two_pi, &one, &minus_two, &mean_v, &std_v);
-  }
-
-  if (size % 32 != 0) {
-    // Recompute the last 16 or 32 values with AVX2 to same the same results as AVX2.
-      // Compute the last 16 elements. Some of them may have been computed before.
-      data = data + size - 32;
-      for (int64_t i = 0; i < 32; ++i) {
-        at::uniform_real_distribution<float> uniform(0, 1);
-        data[i] = uniform(generator);
-      }
-      normal_fill_32_AVX512(data, &two_pi, &one, &minus_two, &mean_v, &std_v);
-  }
-}
-#endif // CPU_CAPABILITY_AVX512
 
 template <typename scalar_t>
 static void normal_fill_16(scalar_t *data, const scalar_t mean, const scalar_t std) {
@@ -225,20 +173,12 @@ void normal_fill(Tensor& self, const scalar_t mean, const scalar_t std, RNG gene
 template<typename RNG>
 void normal_kernel(Tensor& self, double mean, double std, RNG generator) {
   auto size = self.numel();
-#ifdef CPU_CAPABILITY_AVX512
-  // AVX512 will be used if more than 32 elements are present & AVX2 if >= 16 but < 32.
-  if (self.scalar_type() == ScalarType::Float && size >= 32 && self.is_contiguous()) {
-    normal_fill_AVX512(self, static_cast<float>(mean), static_cast<float>(std), generator);
-  } else if (self.scalar_type() == ScalarType::Float && size >= 16 && self.is_contiguous()) {
-    normal_fill_AVX2(self, static_cast<float>(mean), static_cast<float>(std), generator);
-#else // CPU_CAPABILITY_AVX512 is not defined
   if (self.scalar_type() == ScalarType::Float && size >= 16 && self.is_contiguous()) {
-#ifdef CPU_CAPABILITY_AVX2
+#if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)
     normal_fill_AVX2(self, static_cast<float>(mean), static_cast<float>(std), generator);
 #else
     normal_fill(self, static_cast<float>(mean), static_cast<float>(std), generator);
 #endif // CPU_CAPABILITY_AVX2
-#endif // CPU_CAPABILITY_AVX512
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "normal_kernel_cpu", [&] {
       if (size >= 16 && self.is_contiguous()) {
