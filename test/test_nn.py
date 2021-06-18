@@ -15986,6 +15986,35 @@ class TestNNDeviceType(NNTestCase):
         helper([2, 3, 5, 7])
         helper([2, 3, 5, 7, 9])
 
+    # TODO: Remove onlyCPU when cuda is supported
+    @onlyCPU
+    def test_nll_loss_byte_target_matches_long(self, device):
+        N, C = 10, 4
+        data = torch.randn(N, C, device=device, requires_grad=True)
+        target = torch.empty(N, dtype=torch.long, device=device).random_(0, C)
+        gradient = torch.randn(N, device=device)
+
+        def compute_result_and_gradient(reduction, target_dtype):
+            data_clone = data.detach()
+            data_clone.requires_grad_()
+
+            prob = F.log_softmax(data_clone, dim=-1)
+            loss = nn.NLLLoss(reduction=reduction)
+            result = loss(prob, target.type(target_dtype))
+
+            if reduction == "none":
+                result.backward(gradient)
+            else:
+                result.backward(gradient[0])
+
+            return result, data_clone.grad
+
+        for reduction in ["none", "mean", "sum"]:
+            result_long, grad_long = compute_result_and_gradient(reduction, torch.long)
+            result_byte, grad_byte = compute_result_and_gradient(reduction, torch.uint8)
+            self.assertEqual(result_long, result_byte)
+            self.assertEqual(grad_long, grad_byte)
+
     def test_softshrink_negative(self, device):
         input = torch.randn(5, device=device, requires_grad=True)
         m = torch.nn.Softshrink(-1)
