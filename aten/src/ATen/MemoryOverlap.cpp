@@ -48,15 +48,13 @@ MemOverlapStatus get_overlap_status(TensorImpl* a, TensorImpl* b) {
   if (!a->is_non_overlapping_and_dense() || !b->is_non_overlapping_and_dense()) {
     return MemOverlapStatus::TOO_HARD;
   }
-  if (!a->has_storage() || !b->has_storage()) {
-    return MemOverlapStatus::NO;
-  }
   // Test for storage equality, rather than pointer equality.
   // This reduces precision, but if people are aliasing the
   // same pointer across multiple storages there are many
   // similar situations (e.g., storage().data() == storage().data()+1)
   // which we will miss.
-  if (a->storage().is_alias_of(b->storage())) {
+  auto a_storage = a->unsafe_storage();
+  if (a_storage && a_storage.is_alias_of(b->unsafe_storage())) {
     const auto a_begin = static_cast<char*>(a->data());
     const auto a_end = a_begin + a->numel() * a->itemsize();
     const auto b_begin = static_cast<char*>(b->data());

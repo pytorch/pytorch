@@ -1033,6 +1033,138 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertEqual(m.module_conv1.qconfig, module_name_regex_qconfig)
         self.assertEqual(m.module_conv2.qconfig, module_name_qconfig)
 
+    def test_qconfig_module_name_object_type_order(self):
+        class M1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(1, 1)
+                self.fc2 = nn.Linear(1, 1)
+
+            def forward(self, x):
+                x = self.fc1(x)
+                x = self.fc2(x)
+                x = torch.add(x, x)
+                x = torch.add(x, x)
+                return x
+
+        class M2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(1, 1)
+                self.fc2 = nn.Linear(1, 1)
+                self.m1 = M1()
+
+            def forward(self, x):
+                x = self.fc1(x)
+                x = self.fc2(x)
+                x = torch.add(x, x)
+                x = torch.add(x, x)
+                x = self.m1(x)
+                return x
+
+        class M3(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(1, 1)
+                self.fc2 = nn.Linear(1, 1)
+                self.m2 = M2()
+
+            def forward(self, x):
+                x = self.fc1(x)
+                x = self.fc2(x)
+                x = torch.add(x, x)
+                x = torch.add(x, x)
+                x = self.m2(x)
+                return x
+
+        m = M3().eval()
+        qconfig_dict = {
+            "module_name_object_type_order": [
+                # test various FQNs: global, single child, multiple children
+                ("", nn.Linear, 0, torch.quantization.default_qconfig),
+                ("", torch.add, 0, torch.quantization.default_qconfig),
+                ("m2", nn.Linear, 1, torch.quantization.default_qconfig),
+                ("m2", torch.add, 1, torch.quantization.default_qconfig),
+                ("m2.m1", nn.Linear, 0, torch.quantization.default_qconfig),
+                ("m2.m1", torch.add, 0, torch.quantization.default_qconfig),
+            ],
+        }
+        m = prepare_fx(m, qconfig_dict)
+        data = torch.randn(1, 1, 1, 1)
+        m(data)
+        m = convert_fx(m)
+        m(data)
+
+        node_list = [
+            # m3
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_module(nnq.Linear),
+            ns.call_method("dequantize"),
+            ns.call_module(nn.Linear),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_function(torch.ops.quantized.add),
+            ns.call_method("dequantize"),
+            ns.call_function(torch.add),
+            # m2
+            ns.call_module(nn.Linear),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_module(nnq.Linear),
+            ns.call_method("dequantize"),
+            ns.call_function(torch.add),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_function(torch.ops.quantized.add),
+            # m1
+            ns.call_module(nnq.Linear),
+            ns.call_method("dequantize"),
+            ns.call_module(nn.Linear),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_function(torch.ops.quantized.add),
+            ns.call_method("dequantize"),
+            ns.call_function(torch.add),
+        ]
+        self.checkGraphModuleNodes(m, expected_node_list=node_list)
+
+        # test that function order overrides global qconfig
+        class M4(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(1, 1)
+                self.fc2 = nn.Linear(1, 1)
+
+            def forward(self, x):
+                x = self.fc1(x)
+                x = self.fc2(x)
+                x = torch.add(x, x)
+                x = torch.add(x, x)
+                return x
+
+        m = M4().eval()
+        qconfig_dict = {
+            "": torch.quantization.default_qconfig,
+            "module_name_object_type_order": [
+                ("", nn.Linear, 1, None),
+                ("", torch.add, 1, None),
+            ],
+        }
+        m = prepare_fx(m, qconfig_dict)
+        data = torch.randn(1, 1, 1, 1)
+        m(data)
+        m = convert_fx(m)
+        m(data)
+
+        node_list = [
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_module(nnq.Linear),
+            ns.call_method("dequantize"),
+            ns.call_module(nn.Linear),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_function(torch.ops.quantized.add),
+            ns.call_method("dequantize"),
+            ns.call_function(torch.add),
+        ]
+        self.checkGraphModuleNodes(m, expected_node_list=node_list)
+
+
     def test_qconfig_dict_validity(self):
         r"""
         Verifies that if a user passes an invalid key or makes a typo when
@@ -2379,6 +2511,21 @@ class TestQuantizeFx(QuantizationTestCase):
         }
         self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
 
+    def test_trace_quantize_per_tensor(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv(x)
+                return x
+
+        m = M().eval()
+        m = prepare_fx(m, {"": default_qconfig})
+        m = convert_fx(m)
+        # Make sure this runs without error
+        m = torch.fx.Transformer(m).transform()
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
@@ -3271,6 +3418,43 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 module, F.instance_norm, [4], data,
                 quantized_module, torch.ops.quantized.instance_norm,
                 skip_op_arg_for_functional=True)
+
+    def test_norm_weight_bias(self):
+        class Linear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.ones(5, 5)
+                self.b = torch.zeros(5)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.w, self.b)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mods1 = Linear()
+                self.scale = torch.randn(5, 5)
+                self.bias = torch.randn(5, 5)
+
+            def forward(self, x):
+                x1 = self.mods1(x)
+                y = F.layer_norm(x1, [5, 5], weight=self.scale, bias=self.bias)
+                return y
+
+        model = M()
+        expected_occurrence = {
+            ns.call_function(torch.quantize_per_tensor): 1,
+            ns.call_function(torch.ops.quantized.linear): 1,
+            ns.call_function(torch.ops.quantized.layer_norm): 1,
+            ns.call_method("dequantize"): 1,
+        }
+
+        self.checkGraphModeFxOp(
+            model,
+            (torch.rand(5, 5),),
+            QuantType.STATIC,
+            expected_node_occurrence=expected_occurrence
+        )
 
     def _test_default_node_quant_handler_ops(
             self, module, functional, qconfig, is_reference=True, node_list=None, additional_quant_pattern_dict=None
