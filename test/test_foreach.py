@@ -6,9 +6,9 @@ import torch
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM, TEST_WITH_SLOW
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes, skipCUDAIfRocm, skipMeta, ops)
+    (instantiate_device_type_tests, dtypes, onlyCUDA, skipCUDAIfRocm, skipMeta, ops)
 from torch._six import inf, nan
-from torch.testing._internal.common_methods_invocations import foreach_unary_op_db, foreach_binary_op_db
+from torch.testing._internal.common_methods_invocations import foreach_unary_op_db, foreach_binary_op_db, make_tensor
 
 # Includes some values such that N * N won't be a multiple of 4,
 # which should ensure we test the vectorized and non-vectorized
@@ -610,8 +610,8 @@ class TestForeach(TestCase):
         # `cudaLaunchKernel` is 1 so ForeachFuncWrapper internal assert fails.
         foreach_op, native_op, foreach_op_, native_op_ = self._get_funcs(op, n_expected_cudaLaunchKernels=0)
         # 0-strides
-        tensor1 = torch.randn(10, 10, device=device).to(dtype)
-        tensor2 = torch.randn(1, device=device).to(dtype).expand_as(tensor1)
+        tensor1 = make_tensor((10, 10), dtype=dtype, device=device)
+        tensor2 = make_tensor((1,), device=device, dtype=dtype).expand_as(tensor1)
         inputs = ([tensor1], [tensor2])
         self._regular_binary_test(dtype, foreach_op, native_op, inputs, False)
         self._inplace_binary_test(dtype, foreach_op_, native_op_, inputs, False)
@@ -624,8 +624,8 @@ class TestForeach(TestCase):
         self._inplace_binary_test(dtype, foreach_op_, native_op_, inputs, False)
 
         # non contiguous
-        tensor1 = torch.randn(5, 2, 1, 3, device=device).to(dtype)[:, 0]
-        tensor2 = torch.randn(5, 2, 1, 3, device=device).to(dtype)[:, 0]
+        tensor1 = make_tensor((5, 2, 1, 3), device=device, dtype=dtype, noncontiguous=True)
+        tensor2 = make_tensor((5, 2, 1, 3), device=device, dtype=dtype, noncontiguous=True)
         self.assertFalse(tensor1.is_contiguous())
         self.assertFalse(tensor2.is_contiguous())
         inputs = ([tensor1], [tensor2])
@@ -633,8 +633,8 @@ class TestForeach(TestCase):
         self._inplace_binary_test(dtype, foreach_op_, native_op_, inputs, False)
 
         # sliced tensor
-        tensor1 = torch.randn(5, 2, 1, 3, device=device).to(dtype)
-        tensor2 = torch.randn(5, 2, 1, 3 * 7, device=device).to(dtype)[:, :, :, ::7]
+        tensor1 = make_tensor((5, 2, 1, 3), device=device, dtype=dtype)
+        tensor2 = make_tensor((5, 2, 1, 3 * 7), device=device, dtype=dtype)[:, :, :, ::7]
         inputs = ([tensor1], [tensor2])
         self._regular_binary_test(dtype, foreach_op, native_op, inputs, False)
         self._inplace_binary_test(dtype, foreach_op_, native_op_, inputs, False)
@@ -642,10 +642,9 @@ class TestForeach(TestCase):
     # note: Below three tests (postfixed with `_tensors_on_different_devices`)
     # checks whether foreach works with lists of tensors on different devices
     # but tensors of the same index are on the same device, e.g., ['cuda', 'cpu].
+    @onlyCUDA
     @ops(foreach_unary_op_db)
     def test_unary_op_tensors_on_different_devices(self, device, dtype, op):
-        if self.device_type != 'cuda':
-            self.skipTest('CUDA is necessary for tests with tensors on different devices')
         method, ref, inplace_method, ref_inplace = self._get_funcs(op, 1)
         # tensors: ['cuda', 'cpu]
         tensors = op.sample_inputs(device, dtype, 2)
@@ -667,11 +666,9 @@ class TestForeach(TestCase):
         else:
             self.assertEqual(expected, tensors)
 
-    @dtypes(*torch.testing.get_all_dtypes())
+    @onlyCUDA
     @ops(foreach_binary_op_db)
     def test_binary_op_tensors_on_different_devices(self, device, dtype, op):
-        if self.device_type != 'cuda':
-            self.skipTest('CUDA is necessary for tests with tensors on different devices')
         # `tensors1`: ['cuda', 'cpu']
         # `tensors2`: ['cuda', 'cpu']
         _cuda_tensors = op.sample_inputs(device, dtype, 2, same_size=True)
