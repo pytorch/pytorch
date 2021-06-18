@@ -203,7 +203,7 @@ class OpInfo(object):
                  name,  # the string name of the function
                  *,
                  ref=None,  # An optional reference function that accepts NumPy arrays.
-                            # If given, the op will be compared with its reference on each of its sample inputs. 
+                            # If given, the op will be compared with its reference on each of its sample inputs.
                  # the following metadata describes the operator, its variants,
                  #   and its aliases, if any
                  aliases=None,  # iterable of aliases, e.g. ("absolute",) for torch.abs
