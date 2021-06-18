@@ -44,9 +44,18 @@ ArgValue convertPyToArgValue(py::handle inp) {
       throw std::runtime_error("vector conversion failed");
     }
   } else {
-    throw std::runtime_error("nyi");
+    throw std::runtime_error("conversion not yet implemented");
   }
 }
+
+Dtype parsePythonDtype(py::handle obj) {
+  if (py::isinstance(obj, py::module_::import("torch").attr("dtype"))) {
+    return Dtype(reinterpret_cast<THPDtype*>(obj.ptr())->scalar_type);
+  } else {
+    throw std::runtime_error("expected a torch.dtype instance");
+  }
+}
+
 void initTensorExprBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
@@ -54,7 +63,9 @@ void initTensorExprBindings(PyObject* module) {
   auto te = m.def_submodule("_te");
   py::class_<KernelScope>(te, "KernelScope").def(py::init<>());
 
-  auto dtype_class = py::class_<Dtype>(te, "Dtype");
+  auto dtype_class =
+      py::class_<Dtype>(te, "Dtype").def(py::init(&parsePythonDtype));
+  py::implicitly_convertible<py::object, Dtype>();
 
 #define DTYPE_SINGLETON_ACCESSOR(ctype, name) \
   dtype_class.def_property_readonly_static(   \
@@ -138,21 +149,31 @@ void initTensorExprBindings(PyObject* module) {
 #undef EXPRHANDLE_CTOR
 
   py::class_<VarHandle, ExprHandle>(te, "VarHandle")
+      .def(py::init<Dtype>())
       .def(py::init<const std::string&, Dtype>());
   py::class_<BufHandle, ExprHandle>( // NOLINT
       te,
       "BufHandle")
       .def(
           py::init<const std::string&, const std::vector<ExprHandle>&, Dtype>())
-      .def("load", [](BufHandle& self, const std::vector<ExprHandle>& v) {
-        return Load::make(self, v);
+      .def(py::init<const std::vector<ExprHandle>&, Dtype>())
+      .def(py::init<Dtype>())
+      .def(
+          "load",
+          [](BufHandle& self, const std::vector<ExprHandle>& v) {
+            return Load::make(self, v);
+          })
+      .def("load", [](BufHandle& self, const ExprHandle& v) {
+        return Load::make(self, {v});
       });
 
   py::class_<Placeholder>(te, "Placeholder")
       .def(py::init<
            const std::string&,
            const Dtype&,
-           std::vector<ExprHandle>&>())
+           const std::vector<ExprHandle>&>())
+      .def(py::init<const std::vector<ExprHandle>&, const Dtype&>())
+      .def(py::init<const std::vector<ExprHandle>&>())
       .def(
           "load",
           [](Placeholder& self, const std::vector<ExprHandle>& v) {
@@ -182,6 +203,7 @@ void initTensorExprBindings(PyObject* module) {
   py::class_<DimArg>(te, "DimArg")
       .def(py::init<const ExprHandle&>())
       .def(py::init<const ExprHandle&, const std::string&>());
+  py::implicitly_convertible<ExprHandle, DimArg>();
 
   te.def(
       "Compute",
@@ -325,6 +347,16 @@ void initTensorExprBindings(PyObject* module) {
           py::return_value_policy::reference)
       .def("body", &For::body, py::return_value_policy::reference)
       .def("set_parallel", &For::set_parallel)
+      .def(
+          "set_gpu_block_index",
+          [](For& self, int block_index) {
+            self.set_gpu_block_index(block_index);
+          })
+      .def(
+          "set_gpu_thread_index",
+          [](For& self, int thread_index) {
+            self.set_gpu_thread_index(thread_index);
+          })
       .def_static(
           "make",
           [](const VarHandle& var,
@@ -425,33 +457,33 @@ void initTensorExprBindings(PyObject* module) {
           py::return_value_policy::reference)
       .def(
           "split_with_tail",
-          [](const LoopNest& self, For* f, int factor) {
+          [](For* f, int factor) {
             For *inner = nullptr, *tail = nullptr;
-            self.splitWithTail(f, factor, &inner, &tail);
+            LoopNest::splitWithTail(f, factor, &inner, &tail);
             return std::make_tuple(inner, tail);
           },
           py::return_value_policy::reference)
       .def(
           "split_with_mask",
-          [](const LoopNest& self, For* f, int factor) {
+          [](For* f, int factor) {
             For* inner = nullptr;
-            self.splitWithMask(f, factor, &inner);
+            LoopNest::splitWithMask(f, factor, &inner);
             return inner;
           },
           py::return_value_policy::reference)
       .def(
           "slice_head",
-          [](LoopNest& self, For* f, int factor) {
+          [](For* f, int factor) {
             For *head = nullptr, *tail = nullptr;
-            self.sliceHead(f, factor, &head, &tail);
+            LoopNest::sliceHead(f, factor, &head, &tail);
             return std::make_tuple(head, tail);
           },
           py::return_value_policy::reference)
       .def(
           "slice_tail",
-          [](LoopNest& self, For* f, int factor) {
+          [](For* f, int factor) {
             For *head = nullptr, *tail = nullptr;
-            self.sliceTail(f, factor, &head, &tail);
+            LoopNest::sliceTail(f, factor, &head, &tail);
             return std::make_tuple(head, tail);
           },
           py::return_value_policy::reference)
@@ -501,22 +533,25 @@ void initTensorExprBindings(PyObject* module) {
           py::return_value_policy::reference)
       .def(
           "vectorize",
-          [](const LoopNest& self, For* f) { self.vectorize(f); },
+          [](For* f) { LoopNest::vectorize(f); },
           py::return_value_policy::reference)
-      .def(
-          "cache_accesses",
-          [](LoopNest& self,
-             const BufHandle& producer,
-             const std::string& name,
-             Stmt* consumer) {
-            std::pair<const Buf*, Stmt*> ret =
-                self.cacheAccesses(producer.node(), name, consumer);
-            return std::make_pair(BufHandle(ret.first), ret.second);
+      .def_static(
+          "compress_buffer",
+          [](BufHandle& buf, Stmt* stmt) {
+            return LoopNest::compressBuffer(buf.node(), stmt);
           },
           py::return_value_policy::reference)
       .def(
-          "compute_at",
-          [](LoopNest& self, Stmt* s, For* at) { self.computeAt(s, at); })
+          "cache_accesses",
+          [](const BufHandle& producer,
+             const std::string& name,
+             Stmt* consumer) {
+            std::pair<const Buf*, Stmt*> ret =
+                LoopNest::cacheAccesses(producer.node(), name, consumer);
+            return std::make_pair(BufHandle(ret.first), ret.second);
+          },
+          py::return_value_policy::reference)
+      .def("compute_at", [](Stmt* s, For* at) { LoopNest::computeAt(s, at); })
       .def(
           "compute_inline",
           [](LoopNest& self, Stmt* s) { self.computeInline(s); },
@@ -529,17 +564,17 @@ void initTensorExprBindings(PyObject* module) {
           py::return_value_policy::reference)
       .def(
           "rfactor",
-          [](LoopNest& self, Stmt* s, For* target_for) {
+          [](Stmt* s, For* target_for) {
             Buf* rfac_buf = nullptr;
-            self.rfactor(s, target_for, &rfac_buf);
+            LoopNest::rfactor(s, target_for, &rfac_buf);
             return BufHandle(rfac_buf);
           },
           py::return_value_policy::reference)
       .def(
           "flatten",
-          [](const LoopNest& self, const std::vector<For*>& loops) {
+          [](const std::vector<For*>& loops) {
             For* flattened = nullptr;
-            self.flatten(loops, &flattened);
+            LoopNest::flatten(loops, &flattened);
             return flattened;
           },
           py::return_value_policy::reference)
@@ -548,14 +583,6 @@ void initTensorExprBindings(PyObject* module) {
           &LoopNest::reorderAxis,
           py::return_value_policy::reference)
       .def("simplify", &LoopNest::simplify, py::return_value_policy::reference)
-      .def(
-          "set_GPU_block_index",
-          &LoopNest::setGPUBlockIndex,
-          py::return_value_policy::reference)
-      .def(
-          "set_GPU_thread_index",
-          &LoopNest::setGPUThreadIndex,
-          py::return_value_policy::reference)
       .def(
           "inline_intermediate_bufs",
           [](LoopNest& self, bool allow_duplicated_work) {
@@ -647,13 +674,29 @@ void initTensorExprBindings(PyObject* module) {
   py::class_<CodeGen>(te, "CodeGen")
       .def(
           "call",
-          [](CodeGen& self, const std::vector<at::Tensor>& values) {
+          [](CodeGen& self, const py::sequence& values) {
             std::vector<CodeGen::CallArg> value_ptrs;
-            value_ptrs.reserve(values.size());
+            value_ptrs.reserve(py::len(values));
             for (const auto& value : values) {
-              value_ptrs.emplace_back(CodeGen::CallArg(value.data_ptr()));
+              if (py::isinstance<py::int_>(value)) {
+                value_ptrs.emplace_back(value.cast<int64_t>());
+              } else {
+                value_ptrs.emplace_back(value.cast<at::Tensor>().data_ptr());
+              }
             }
             self.call(value_ptrs);
+          })
+      .def(
+          "call_raw",
+          [](CodeGen& self, const py::sequence& values) {
+            std::vector<void*> value_ptrs;
+            value_ptrs.reserve(py::len(values));
+            for (const auto& value : values) {
+              // Tensor.data_ptr() returns an int in python
+              value_ptrs.emplace_back(
+                  reinterpret_cast<void*>(value.cast<intptr_t>()));
+            }
+            self.call_raw(value_ptrs);
           })
       .def(
           "get_code_text",
@@ -671,6 +714,11 @@ void initTensorExprBindings(PyObject* module) {
       .def(py::init<Tensor*>())
       .def(py::init<const VarHandle&>())
       .def(py::init<const BufHandle&>());
+
+  py::implicitly_convertible<Placeholder, CodeGen::BufferArg>();
+  py::implicitly_convertible<Tensor*, CodeGen::BufferArg>();
+  py::implicitly_convertible<VarHandle, CodeGen::BufferArg>();
+  py::implicitly_convertible<BufHandle, CodeGen::BufferArg>();
 
   te.def(
       "construct_codegen",
@@ -690,8 +738,11 @@ void initTensorExprBindings(PyObject* module) {
 #else
           throw std::runtime_error("PyTorch not compiled with CUDA support!");
 #endif
-        } else {
+        } else if (name == "ir_eval") {
           cg = new SimpleIREvaluator(stmt, args);
+        } else {
+          throw std::runtime_error(
+              "construct_codegen() expects 'llvm', 'cuda', or 'ir_eval'");
         }
         return cg;
       });
