@@ -883,6 +883,13 @@ const std::vector<std::string> functions = {
 
             return result, backward
 
+        def relu6(self):
+            result = torch.relu6(self)
+            def backward(grad_output):
+                return grad_output * ((result > 0) & (result < 6.0))
+
+            return result, backward
+
         def leaky_relu(self, negative_slope: number):
             result = torch.leaky_relu(self, negative_slope)
             def backward(grad_output):
@@ -904,10 +911,17 @@ const std::vector<std::string> functions = {
         def hardswish(self):
             result = torch.hardswish(self)
             def backward(grad_output):
-                m = (result > 3.).type_as(result)
-                m = torch.where((result >= -3.) & (result <= 3.),  result / 3. + .5, m)
+                m = (self > 3.).type_as(result)
+                m = torch.where((self >= -3.) & (self <= 3.),  self / 3. + .5, m)
                 return grad_output * m
+            return result, backward
 
+        def hardsigmoid(self):
+            result = torch.hardsigmoid(self)
+            def backward(grad_output):
+                m = (self > -3.) & (self < 3.)
+                lhs = grad_output * (1.0 / 6.0)
+                return torch.where(m, lhs, m.type_as(self))
             return result, backward
 
         def erfc(self):
