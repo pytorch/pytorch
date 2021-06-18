@@ -168,10 +168,10 @@ __global__ void nll_loss_forward_no_reduce_cuda_kernel(
     int64_t* target,
     scalar_t* output,
     scalar_t* weights,
-    int64_t n_classes,
-    int64_t ignore_index) {
+    int n_classes,
+    int ignore_index) {
   CUDA_KERNEL_LOOP(index, batch_size) {
-    int64_t cur_target = target[index];
+    int cur_target = target[index];
     if (cur_target == ignore_index) {
       output[index] = static_cast<scalar_t>(0);
       continue;
@@ -191,12 +191,12 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_1d(
     int64_t* target,
     scalar_t* weights,
     bool size_average,
-    int64_t n_classes,
+    int n_classes,
     int64_t ignore_index) {
   CUDA_KERNEL_ASSERT(threadIdx.x == 0 && threadIdx.y == 0 & threadIdx.z == 0);
 
-  int64_t t = *target;
-  if (t != ignore_index) {
+  int t = static_cast<int>(*target);
+  if (t != static_cast<int>(ignore_index)) {
     CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
     scalar_t cur_weight =
         weights != nullptr ? weights[t] : scalar_cast<scalar_t>(1);
@@ -216,15 +216,15 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_2d(
     int64_t* target,
     scalar_t* weights,
     bool size_average,
-    int64_t nframe,
-    int64_t ndim,
-    int64_t n_classes,
+    int nframe,
+    int ndim,
+    int n_classes,
     int64_t ignore_index) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   __shared__ accscalar_t sh_inputs[NLL_LOSS_THREADS],
       acc_weight[NLL_LOSS_THREADS];
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t i, t;
+  int i, t;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   scalar_t cur_weight;
 
@@ -232,7 +232,7 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_2d(
   acc_weight[threadIdx.x] = static_cast<accscalar_t>(0);
   for (i = threadIdx.x; i < nframe; i += NLL_LOSS_THREADS) {
     t = target[i];
-    if (t != ignore_index) {
+    if (t != static_cast<int>(ignore_index)) {
       CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
       cur_weight = weights != nullptr ? weights[t] : static_cast<scalar_t>(1);
       sh_inputs[threadIdx.x] -= input[i * ndim + t] * cur_weight;
