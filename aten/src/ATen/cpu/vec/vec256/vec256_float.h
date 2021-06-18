@@ -106,7 +106,7 @@ public:
   Vectorized<float> isnan() const {
     return _mm256_cmp_ps(values, _mm256_set1_ps(0.0f), _CMP_UNORD_Q);
   }
-  Vectorized<float> map(float (*f)(float)) const {
+  Vectorized<float> map(float (*const f)(float)) const {
     __at_align32__ float tmp[size()];
     store(tmp);
     for (int64_t i = 0; i < size(); i++) {
