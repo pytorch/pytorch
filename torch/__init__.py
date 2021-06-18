@@ -376,6 +376,8 @@ def use_deterministic_algorithms(mode):
           tensor
         * :func:`torch.Tensor.put_` with ``accumulate=True`` when called on a CPU
           tensor
+        * :func:`torch.Tensor.scatter_add_` when ``input`` dimension is one and called
+          on a CUDA tensor
         * :func:`torch.gather` when ``input`` dimension is one and called
           on a CUDA tensor that requires grad
         * :func:`torch.index_add` when called on CUDA tensor
@@ -410,15 +412,16 @@ def use_deterministic_algorithms(mode):
         * :class:`torch.nn.CTCLoss` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.EmbeddingBag` when attempting to differentiate a CUDA tensor when
           ``mode='max'``
-        * :func:`torch.Tensor.scatter_add_` when called on a CUDA tensor
+        * :func:`torch.Tensor.scatter_add_` when ``input`` dimension is larger than one
+          and called on a CUDA tensor
+        * :func:`torch.gather` when ``input`` dimension is larger than one
+          and called on a CUDA tensor that requires grad
         * :func:`torch.Tensor.put_` when ``accumulate=False``
         * :func:`torch.Tensor.put_` when ``accumulate=True`` and called on a CUDA tensor
         * :func:`torch.histc` when called on a CUDA tensor
         * :func:`torch.bincount` when called on a CUDA tensor
         * :func:`torch.kthvalue` with called on a CUDA tensor
         * :func:`torch.median` with indices output when called on a CUDA tensor
-        * :func:`torch.gather` when ``input`` dimension is larger than one
-          and called on a CUDA tensor that requires grad
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
 
     A handful of CUDA operations are nondeterministic if the CUDA version is
@@ -668,8 +671,8 @@ def _assert(condition, message):
 # Use the redundant form so that type checkers know that these are a part of
 # the public API. The "regular" import lines are there solely for the runtime
 # side effect of adding to the imported module's members for other users.
-
 from torch import cuda as cuda
+from torch import cpu as cpu
 from torch import autograd as autograd
 from torch.autograd import (
     no_grad as no_grad,
@@ -683,6 +686,8 @@ from torch import nn as nn
 import torch.nn.intrinsic
 import torch.nn.quantizable
 import torch.nn.quantized
+# AO depends on nn, as well as quantized stuff -- so should be after those.
+from torch import ao as ao
 from torch import optim as optim
 import torch.optim._multi_tensor
 from torch import multiprocessing as multiprocessing

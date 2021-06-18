@@ -5,7 +5,7 @@ import sys
 import math
 import numbers
 from typing import Callable, Dict, Union, List, Optional
-from torch.fx.symbolic_trace import symbolic_trace
+from torch.fx._symbolic_trace import symbolic_trace
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
 from torch.fx.experimental import graph_manipulation
@@ -123,18 +123,25 @@ class TestFXExperimental(JitTestCase):
         assert serialized_graph1["nodes"][6]["args"][0]["name"] == "add_1"
         assert serialized_graph1["nodes"][6]["args"][0]["is_node"] is True
 
+        # Test the users of the nodes. No users of the last/output node.
+        assert serialized_graph2["nodes"][0]["users"][0]["name"] == "submod_0"
+        assert serialized_graph2["nodes"][1]["users"][0]["name"] == "submod_0"
+        assert serialized_graph2["nodes"][4]["users"][0]["name"] == "output"
+        assert serialized_graph2["nodes"][5]["users"] == []
+
         # Test quantization info serialization.
         x = torch.tensor([[-1.0, 0.0], [1.0, 2.0]])
         q_tensor = torch.quantize_per_tensor(x, 1, 0, torch.qint32)
         q_tensor_channel = torch.quantize_per_channel(
             x, torch.tensor([0.1, 0.01]), torch.tensor([10, 0]), 0, torch.quint8
         )
-        result = graph_manipulation.serialize_tensor_quantization(q_tensor)
-        result2 = graph_manipulation.serialize_tensor_quantization(q_tensor_channel)
+        result, _ = graph_manipulation.serialize_tensor_quantization(q_tensor, weights={}, pcq_prefix="foo")
+        result2, per_channel_dict = graph_manipulation.serialize_tensor_quantization(q_tensor_channel, weights={}, pcq_prefix="bar")
         assert result["qscheme"] == "torch.per_tensor_affine"
         assert result["q_scale"] == 1.0
         assert result2["qscheme"] == "torch.per_channel_affine"
-        assert len(result2["q_per_channel_scales"]) == 2
+        assert result2["q_per_channel_scales"] == "bar_per_channel_scales"
+        assert per_channel_dict["bar_per_channel_zero_points"]["shape"] == "[2]"
 
     def test_find_single_partition(self):
         class TestModule(torch.nn.Module):
@@ -1243,7 +1250,7 @@ class {test_classname}(torch.nn.Module):
             self.assertFalse(type_matches(sig_type, arg_type))
 
     @skipIfNoMkldnn
-    def test_prepare_for_inference_cpu(self):
+    def test_optimize_for_inference_cpu(self):
         import torch.nn as nn
 
         class Foo(nn.Module):
@@ -1270,12 +1277,17 @@ class {test_classname}(torch.nn.Module):
         inp = torch.randn(N, C, H, W)
         with torch.no_grad():
             model = Foo().eval()
-            optimized_model = optimization.prepare_for_inference(model)
+            optimized_model = optimization.optimize_for_inference(model)
             torch.testing.assert_allclose(model(inp), optimized_model(inp))
+
+            optimized_model2 = \
+                optimization.optimize_for_inference(model, pass_config={"remove_dropout": False})
+            torch.testing.assert_allclose(model(inp), optimized_model2(inp))
+
 
     @skipIfNoTorchVision
     @skipIfNoMkldnn
-    def test_prepare_for_inference_cpu_torchvision(self):
+    def test_optimize_for_inference_cpu_torchvision(self):
         models = [
             torchvision.models.resnet18,
             torchvision.models.resnet50,
@@ -1295,7 +1307,7 @@ class {test_classname}(torch.nn.Module):
                 model.eval()
                 inp = torch.randn(1, C, H, W)
                 heuristic = optimization.gen_mkl_autotuner(inp, iters=0, warmup=0)
-                optimized_model = optimization.prepare_for_inference(model)
+                optimized_model = optimization.optimize_for_inference(model)
 
                 orig_out = model(inp)
                 new_out = optimized_model(inp)
@@ -1307,23 +1319,32 @@ class TestNormalizeOperators(JitTestCase):
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_normalize_operator_exhaustive(self, device, dtype, op):
         # Sorted and one entry on each line to minimize merge conflicts.
-        op_skip = {'einsum',
+        op_skip = {'contiguous',
+                   'einsum',
                    'expand',
                    'expand_as',
+                   'fill_',
                    'gradient',
                    'index_put',
                    'polygamma',
                    'repeat',
                    'reshape_as',
+                   'resize_',
+                   'resize_as_',
+                   'to_sparse',
                    'view',
                    'view_as',
                    'unfold',
+                   'where',
+                   'zero_',
                    '__getitem__',
                    '__radd__',
                    '__rsub__',
                    '__rmul__',
                    '__rdiv__',
-                   '__rpow__'}
+                   '__rmod__',
+                   '__rpow__',
+                   '__rmatmul__'}
 
         # Unsupported input types
         if op.name in op_skip:
@@ -1397,7 +1418,7 @@ class TestNormalizeOperators(JitTestCase):
                 if isinstance(v, torch.Tensor):
                     param_names.append(k)
                     param_values.append(v)
-                    fx_args.append(k)
+                    fx_args.append(f'{k} = {k}')
                 else:
                     fx_args.append(f'{k} = {repr(v)}')
 

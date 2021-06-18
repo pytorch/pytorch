@@ -159,7 +159,7 @@ TEST(InterpreterTest, IgnorableArgsInSchema) {
   auto op_to_specified_args = function.op_to_num_specified_args();
   ASSERT_TRUE(op_to_specified_args.size() == 2);
   ASSERT_TRUE(op_to_specified_args["aten::slice.Tensor"] == 4);
-  ASSERT_TRUE(op_to_specified_args["aten::slice.str"] == 4);
+  ASSERT_TRUE(op_to_specified_args["aten::slice.str"] == 1);
   auto graph_vararg = build_mobile_export_analysis_graph_with_vararg();
   MobileCode function_vararg(graph_vararg, "");
   auto op_to_specified_args_vararg = function_vararg.op_to_num_specified_args();
@@ -172,7 +172,7 @@ TEST(InterpreterTest, IgnorableArgsInSchema) {
   MobileCode function_nested(graph_nested, "");
   auto op_to_specified_args_nested = function_nested.op_to_num_specified_args();
   ASSERT_TRUE(op_to_specified_args_nested["aten::slice.Tensor"] == 4);
-  ASSERT_TRUE(op_to_specified_args_nested["aten::slice.str"] == 4);
+  ASSERT_TRUE(op_to_specified_args_nested["aten::slice.str"] == 1);
 
   auto graph_non_const = build_mobile_export_analysis_graph_non_const();
   MobileCode function_non_const(graph_non_const, "");

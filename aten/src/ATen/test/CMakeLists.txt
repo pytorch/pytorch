@@ -25,6 +25,7 @@ list(APPEND ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/weakref_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/quantized_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/extension_backend_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/operators_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/xla_tensor_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/tensor_iterator_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/math_kernel_test.cpp
@@ -82,13 +83,13 @@ list(APPEND ATen_VULKAN_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/vulkan_api_test.cpp)
 
 list(APPEND ATen_MOBILE_TEST_SRCS
-  ${CMAKE_CURRENT_SOURCE_DIR}/vec256_test_all_types.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/vec_test_all_types.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cpu_profiling_allocator_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cpu_caching_allocator_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/quantized_test.cpp)
 
-list(APPEND ATen_VEC256_TEST_SRCS
-  ${CMAKE_CURRENT_SOURCE_DIR}/vec256_test_all_types.cpp
+list(APPEND ATen_VEC_TEST_SRCS
+  ${CMAKE_CURRENT_SOURCE_DIR}/vec_test_all_types.cpp
   )
 
 # Caffe2 specific tests
@@ -106,4 +107,4 @@ set(ATen_CUDA_TEST_SRCS ${ATen_CUDA_TEST_SRCS} PARENT_SCOPE)
 set(ATen_HIP_TEST_SRCS ${ATen_HIP_TEST_SRCS} PARENT_SCOPE)
 set(ATen_VULKAN_TEST_SRCS ${ATen_VULKAN_TEST_SRCS} PARENT_SCOPE)
 set(ATen_MOBILE_TEST_SRCS ${ATen_MOBILE_TEST_SRCS} PARENT_SCOPE)
-set(ATen_VEC256_TEST_SRCS ${ATen_VEC256_TEST_SRCS} PARENT_SCOPE)
+set(ATen_VEC_TEST_SRCS ${ATen_VEC_TEST_SRCS} PARENT_SCOPE)

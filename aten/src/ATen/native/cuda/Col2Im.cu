@@ -25,7 +25,7 @@ void col2im_out_cuda_template(
     IntArrayRef stride) {
   TensorArg input_arg{input_, "input", 1};
   TensorArg output_arg{output, "output", 2};
-  checkAllSameGPU("col2im_out_cuda", {input_arg, output_arg});
+  checkAllSameGPU(__func__, {input_arg, output_arg});
 
   TORCH_CHECK(
       output_size.size() == 2,
