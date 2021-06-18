@@ -334,12 +334,6 @@ def is_aten_cpu_capability_avx512():
 
 IS_ATEN_CPU_CAPABILITY_AVX512 = is_aten_cpu_capability_avx512()
 
-
-try:
-    IS_ATEN_CPU_CAPABILITY_AVX512 = os.environ["ATEN_CPU_CAPABILITY"] == "avx512"
-except KeyError:
-    pass
-
 if IS_WINDOWS:
     @contextmanager
     def TemporaryFileName(*args, **kwargs):
