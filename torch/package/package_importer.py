@@ -366,7 +366,7 @@ class PackageImporter(Importer):
             return
         # Set the module as an attribute on its parent.
         parent_module = self.modules[parent]
-        if parent_module.__loader__ is self:  # type: ignore[union-attr]
+        if parent_module.__loader__ is self:
             setattr(parent_module, name.rpartition(".")[2], module)
 
     # note: copied from cpython's import code, with call to create module replaced with _make_module
