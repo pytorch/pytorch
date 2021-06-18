@@ -52,7 +52,6 @@ def _format_import_statement(name: str, obj: Any, importer: Importer) -> str:
         return _custom_builtins[name].import_str
     if _is_from_torch(name):
         return 'import torch'
-
     module_name, attr_name = importer.get_name(obj)
     return f'from {module_name} import {attr_name} as {name}'
 
@@ -96,7 +95,7 @@ def _deserialize_graph_module(forward, body: Dict[Any, Any], importer: Optional[
     # Try to retrieve the forward source in a backward-compatible way
     CodeOnlyModule.forward = forward
 
-    from .symbolic_trace import Tracer
+    from ._symbolic_trace import Tracer
 
     # we shouldn't trace into any of the submodules, they were not
     # because they were not traced in the original GraphModule

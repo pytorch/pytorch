@@ -174,6 +174,9 @@ class AutocastTestLists(object):
             ("renorm", mat0_fp16 + (2, 0, 1.0)),
             ("sum", pointwise0_fp16),
             ("sum", mat0_fp16 + (1,)),
+            ("grid_sampler", (torch.randn((2, 3, 33, 22), dtype=torch.float16, device=dev),
+                              torch.randn((2, 22, 11, 2), dtype=torch.float16, device=dev),
+                              0, 0, False)),
         ]
         self.torch_need_autocast_promote = [
             ("addcdiv", pointwise0_fp32 + pointwise1_fp16 + (pointwise2_fp16[0].clamp(0.1, 100),)),
@@ -233,4 +236,124 @@ class AutocastTestLists(object):
         self.banned = [
             ("binary_cross_entropy", (torch.rand((n, n), device=dev, dtype=torch.float32),
                                       torch.rand((n, n), device=dev, dtype=torch.float32)), torch._C._nn),
+        ]
+
+class AutocastCPUTestLists(object):
+    # Supplies ops and arguments for test_autocast_* in test/test_cpu.py
+    def __init__(self, dev):
+        super().__init__()
+        n = 8
+        # Utility arguments, created as one-element tuples
+        pointwise0_bf16 = (torch.randn(n, dtype=torch.bfloat16, device=dev),)
+        pointwise1_bf16 = (torch.randn(n, dtype=torch.bfloat16, device=dev),)
+        pointwise2_bf16 = (torch.randn(n, dtype=torch.bfloat16, device=dev),)
+        mat0_bf16 = (torch.randn((n, n), dtype=torch.bfloat16, device=dev),)
+        mat1_bf16 = (torch.randn((n, n), dtype=torch.bfloat16, device=dev),)
+        mat2_bf16 = (torch.randn((n, n), dtype=torch.bfloat16, device=dev),)
+
+        dummy_dimsets = ((n,), (n, n), (n, n, n), (n, n, n, n), (n, n, n, n, n))
+
+        dummy_bf16 = [(torch.randn(dimset, dtype=torch.bfloat16, device=dev),)
+                      for dimset in dummy_dimsets]
+
+        dimsets = ((n, n, n), (n, n, n, n), (n, n, n, n, n))
+        conv_args_bf16 = [(torch.randn(dimset, dtype=torch.bfloat16, device=dev),
+                           torch.randn(dimset, dtype=torch.bfloat16, device=dev))
+                          for dimset in dimsets]
+        conv_args_fp32 = [(torch.randn(dimset, dtype=torch.float32, device=dev),
+                           torch.randn(dimset, dtype=torch.float32, device=dev))
+                          for dimset in dimsets]
+
+        bias_fp32 = (torch.randn((n,), dtype=torch.float32, device=dev),)
+        element0_fp32 = (torch.randn(1, dtype=torch.float32, device=dev),)
+        pointwise0_fp32 = (torch.randn(n, dtype=torch.float32, device=dev),)
+        pointwise1_fp32 = (torch.randn(n, dtype=torch.float32, device=dev),)
+        mat0_fp32 = (torch.randn((n, n), dtype=torch.float32, device=dev),)
+        mat1_fp32 = (torch.randn((n, n), dtype=torch.float32, device=dev),)
+        mat2_fp32 = (torch.randn((n, n), dtype=torch.float32, device=dev),)
+        mat3_fp32 = (torch.randn((n, n), dtype=torch.float32, device=dev),)
+
+        dummy_fp32 = [(torch.randn(dimset, dtype=torch.float32, device=dev),)
+                      for dimset in dummy_dimsets]
+        # The lists below organize ops that autocast needs to test.
+        # self.list_name corresponds to test_autocast_list_name in test/test_cpu.py.
+        # Each op is associated with a tuple of valid arguments.
+
+        # Some ops implement built-in type promotion.  These don't need autocasting,
+        # but autocasting relies on their promotion, so we include tests to double-check.
+        self.torch_expect_builtin_promote = [
+            ("eq", pointwise0_fp32 + pointwise1_bf16, torch.bool),
+            ("ge", pointwise0_fp32 + pointwise1_bf16, torch.bool),
+            ("gt", pointwise0_fp32 + pointwise1_bf16, torch.bool),
+            ("le", pointwise0_fp32 + pointwise1_bf16, torch.bool),
+            ("lt", pointwise0_fp32 + pointwise1_bf16, torch.bool),
+            ("ne", pointwise0_fp32 + pointwise1_bf16, torch.bool),
+            ("add", pointwise0_fp32 + pointwise1_bf16, torch.float32),
+            ("div", pointwise0_fp32 + pointwise1_bf16, torch.float32),
+            ("mul", pointwise0_fp32 + pointwise1_bf16, torch.float32),
+        ]
+        self.methods_expect_builtin_promote = [
+            ("__eq__", pointwise0_fp32 + pointwise1_bf16, torch.bool),
+            ("__ge__", pointwise0_fp32 + pointwise1_bf16, torch.bool),
+            ("__gt__", pointwise0_fp32 + pointwise1_bf16, torch.bool),
+            ("__le__", pointwise0_fp32 + pointwise1_bf16, torch.bool),
+            ("__lt__", pointwise0_fp32 + pointwise1_bf16, torch.bool),
+            ("__ne__", pointwise0_fp32 + pointwise1_bf16, torch.bool),
+            ("__add__", pointwise0_fp32 + pointwise1_bf16, torch.float32),
+            ("__div__", pointwise0_fp32 + pointwise1_bf16, torch.float32),
+            ("__mul__", pointwise0_fp32 + pointwise1_bf16, torch.float32),
+        ]
+        # The remaining lists organize ops that autocast treats explicitly.
+        self.torch_bf16 = [
+            ("conv1d", conv_args_fp32[0]),
+            ("conv2d", conv_args_fp32[1]),
+            ("conv3d", conv_args_fp32[2]),
+            ("log_softmax", pointwise0_fp32 + (0,)),
+            ("bmm", (torch.randn((n, n, n), device=dev, dtype=torch.float32),
+                     torch.randn((n, n, n), device=dev, dtype=torch.float32))),
+            ("mm", mat0_fp32 + mat1_fp32),
+            ("baddbmm", (torch.randn((n, n, n), device=dev, dtype=torch.float32),
+                         torch.randn((n, n, n), device=dev, dtype=torch.float32),
+                         torch.randn((n, n, n), device=dev, dtype=torch.float32))),
+            ("addmm", mat1_fp32 + mat2_fp32 + mat3_fp32),
+            ("addbmm", mat0_fp32 + (torch.randn((n, n, n), device=dev, dtype=torch.float32),
+                                    torch.randn((n, n, n), device=dev, dtype=torch.float32))),
+        ]
+        self.torch_fp32 = [
+            ("conv_transpose3d", conv_args_bf16[2]),
+            ("batch_norm", dummy_bf16[2], {"weight": None, "bias": None, "running_mean": torch.rand((n), dtype=torch.float32),
+                                           "running_var": torch.rand((n), dtype=torch.float32), "training": False,
+                                           "momentum": 0.1, "eps": 1e-5, "cudnn_enabled": False}),
+            ("max_pool2d", dummy_bf16[2], {"kernel_size": (3, 2), "stride": (1, 1)}),
+            ("dropout", dummy_bf16[2], {"p": 0.1, "train": False}),
+            ("binary_cross_entropy_with_logits", mat0_bf16 + (torch.rand((n, n), device=dev, dtype=torch.bfloat16),)),
+            ("pow", ((pointwise0_bf16[0] + 1.).clamp(0.0, 100.0),) + pointwise1_bf16),
+            ("pow", ((pointwise0_bf16[0] + 1.).clamp(0.0, 100.0),) + (1.7,)),
+            ("instance_norm", dummy_bf16[2], {"weight": None, "bias": None, "running_mean": torch.rand((n), dtype=torch.float32),
+                                              "running_var": torch.rand((n), dtype=torch.float32), "use_input_stats": False,
+                                              "momentum": 0.1, "eps": 1e-5, "cudnn_enabled": False}),
+        ]
+        self.nn_bf16 = [
+            ("linear", mat0_fp32 + mat1_fp32),
+        ]
+        self.nn_fp32 = [
+            ("adaptive_avg_pool2d", dummy_bf16[2], {"output_size": (3, 2)}),
+            ("avg_pool2d", dummy_bf16[2], {"kernel_size": (3, 2), "stride": (1, 1)}),
+            ("avg_pool3d", dummy_bf16[3], {"kernel_size": (3, 3, 3), "stride": (1, 1, 1)}),
+            ("gelu", dummy_bf16[3]),
+            ("upsample_nearest1d", dummy_bf16[2], {"output_size": (n)}),
+            ("upsample_nearest2d", dummy_bf16[3], {"output_size": (n, n)}),
+            ("upsample_nearest3d", dummy_bf16[4], {"output_size": (n, n, n)}),
+            ("upsample_linear1d", dummy_bf16[2], {"output_size": (n), "align_corners": False}),
+            ("upsample_bilinear2d", dummy_bf16[3], {"output_size": (n, n), "align_corners": False}),
+            ("upsample_trilinear3d", dummy_bf16[4], {"output_size": (n, n, n), "align_corners": False}),
+            ("binary_cross_entropy", (torch.rand((n, n), device=dev, dtype=torch.bfloat16),) +
+                                     (torch.rand((n, n), device=dev, dtype=torch.bfloat16),)),
+            ("smooth_l1_loss", mat0_bf16 + mat1_bf16),
+            ("reflection_pad1d", dummy_bf16[2], {"padding": (3, 3)}),
+            ("std", dummy_bf16[2]),
+        ]
+        self.torch_need_autocast_promote = [
+            ("cat", (pointwise0_bf16 + pointwise1_fp32,)),
+            ("stack", (pointwise0_bf16 + pointwise1_fp32,)),
         ]
