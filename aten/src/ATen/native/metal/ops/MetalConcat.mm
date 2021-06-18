@@ -3,7 +3,7 @@
 #import <ATen/native/metal/MetalTensorImpl.h>
 #import <ATen/native/metal/MetalTensorImplStorage.h>
 #import <ATen/native/metal/MetalUtils.h>
-#import <ATen/native/metal/mpscnn/MPSCNNContext.h>
+#import <ATen/native/metal/MetalContext.h>
 #import <ATen/native/metal/mpscnn/MPSCNNUtils.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
 #import <ATen/native/metal/mpscnn/MPSImageUtils.h>
@@ -30,10 +30,10 @@ Tensor cat_batch(const TensorList tensors, MetalTensorImplStorage& mt) {
         @"inputs have different Metal command buffers");
     id<MTLComputeCommandEncoder> encoder =
         [commandBuffer.buffer computeCommandEncoder];
-    id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
+    id<MTLComputePipelineState> state = [[MetalContext sharedInstance]
         pipelineState:mpscnn::kernelFor(
                           X, "copy_offset", "copy_offset_nonarray")];
-    id<MTLBuffer> offsetBuffer = [[MPSCNNContext sharedInstance].device
+    id<MTLBuffer> offsetBuffer = [[MetalContext sharedInstance].device
         newBufferWithLength:1 * sizeof(ushort)
                     options:MTLResourceOptionCPUCacheModeWriteCombined];
     ushort* offsetBufferPtr = (ushort*)[offsetBuffer contents];
@@ -85,8 +85,8 @@ Tensor cat_feature(const TensorList tensors, MetalTensorImplStorage& mt) {
     }
 
     id<MTLComputePipelineState> state =
-        [[MPSCNNContext sharedInstance] pipelineState:kernelString];
-    id<MTLBuffer> offsetBuffer = [[MPSCNNContext sharedInstance].device
+        [[MetalContext sharedInstance] pipelineState:kernelString];
+    id<MTLBuffer> offsetBuffer = [[MetalContext sharedInstance].device
         newBufferWithLength:5 * sizeof(ushort)
                     options:MTLResourceOptionCPUCacheModeWriteCombined];
     ushort* offsetBufferPtr = (ushort*)[offsetBuffer contents];

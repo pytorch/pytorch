@@ -1,5 +1,5 @@
 #import <ATen/native/metal/MetalUtils.h>
-#import <ATen/native/metal/mpscnn/MPSCNNContext.h>
+#import <ATen/native/metal/MetalContext.h>
 #import <ATen/native/metal/mpscnn/MPSCNNUtils.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
 #import <ATen/native/metal/mpscnn/MPSImageUtils.h>
@@ -20,7 +20,7 @@ MPSImage* createStaticImage(IntArrayRef sizes) {
                         numberOfImages:sizes[0]
                                  usage:MTLTextureUsageShaderRead |
                                  MTLTextureUsageShaderWrite];
-  return [[MPSImage alloc] initWithDevice:[MPSCNNContext sharedInstance].device
+  return [[MPSImage alloc] initWithDevice:[MetalContext sharedInstance].device
                           imageDescriptor:desc];
 }
 
@@ -38,7 +38,7 @@ MPSImage* createStaticImage(const fp16_t* src, IntArrayRef sizes) {
                                  usage:MTLTextureUsageShaderRead |
                                  MTLTextureUsageShaderWrite];
   MPSImage* image =
-      [[MPSImage alloc] initWithDevice:[MPSCNNContext sharedInstance].device
+      [[MPSImage alloc] initWithDevice:[MetalContext sharedInstance].device
                        imageDescriptor:desc];
 
   int64_t slices = (C + 3) / 4 * N;
@@ -59,12 +59,12 @@ MPSImage* createStaticImage(const fp16_t* src, IntArrayRef sizes) {
 
 MPSImage* createStaticImage(const float* src, IntArrayRef sizes) {
   int64_t size_bytes = c10::multiply_integers(sizes) * sizeof(float);
-  id<MTLBuffer> buff = [[MPSCNNContext sharedInstance].device
+  id<MTLBuffer> buff = [[MetalContext sharedInstance].device
       newBufferWithLength:size_bytes
                   options:MTLResourceOptionCPUCacheModeWriteCombined];
   memcpy(buff.contents, src, size_bytes);
   MPSImage* output = createStaticImage(sizes);
-  id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
+  id<MTLComputePipelineState> state = [[MetalContext sharedInstance]
       specializedPipelineState:metal::mpscnn::kernelFor(
                                    output,
                                    "copy_nchw_to_metal",
@@ -103,7 +103,7 @@ MPSImage* createStaticImage(MPSImage* image) {
   MPSImage* Y = createStaticImage([image sizes]);
   MetalCommandBuffer* cb = [MetalCommandBuffer newBuffer];
   id<MTLComputeCommandEncoder> encoder = [cb.buffer computeCommandEncoder];
-  id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
+  id<MTLComputePipelineState> state = [[MetalContext sharedInstance]
       pipelineState:mpscnn::kernelFor(image, "copy", "copy_nonarray")];
   [encoder setComputePipelineState:state];
   [encoder setTexture:[image texture] atIndex:0];
@@ -125,7 +125,7 @@ MPSImage* createStaticImage(
   TORCH_CHECK(buffer);
   MPSImage* Y = createStaticImage([image sizes]);
   id<MTLComputeCommandEncoder> encoder = [buffer.buffer computeCommandEncoder];
-  id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
+  id<MTLComputePipelineState> state = [[MetalContext sharedInstance]
       pipelineState:mpscnn::kernelFor(image, "copy", "copy_nonarray")];
 
   [encoder setComputePipelineState:state];
@@ -165,12 +165,12 @@ MPSTemporaryImage* createTemporaryImage(MetalCommandBuffer* buffer, IntArrayRef 
 MPSTemporaryImage* createTemporaryImage(MetalCommandBuffer* buffer, IntArrayRef sizes, const float* src) {
   TORCH_CHECK(buffer);
   int64_t size_bytes = c10::multiply_integers(sizes) * sizeof(float);
-  id<MTLBuffer> buff = [[MPSCNNContext sharedInstance].device
+  id<MTLBuffer> buff = [[MetalContext sharedInstance].device
       newBufferWithBytes:src
                   length:size_bytes
                  options:MTLResourceStorageModeShared];
   MPSTemporaryImage* output = createTemporaryImage(buffer, sizes);
-  id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
+  id<MTLComputePipelineState> state = [[MetalContext sharedInstance]
       specializedPipelineState:metal::mpscnn::kernelFor(
                                    output,
                                    "copy_nchw_to_metal",
@@ -199,7 +199,7 @@ MPSTemporaryImage* createTemporaryImage(
   TORCH_CHECK(buffer);
   MPSTemporaryImage* Y = createTemporaryImage(buffer, [image sizes]);
   id<MTLComputeCommandEncoder> encoder = [buffer.buffer computeCommandEncoder];
-  id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
+  id<MTLComputePipelineState> state = [[MetalContext sharedInstance]
       pipelineState:metal::mpscnn::kernelFor(image, "copy", "copy_nonarray")];
   [encoder setComputePipelineState:state];
   [encoder setTexture:[image texture] atIndex:0];
@@ -215,14 +215,14 @@ MPSTemporaryImage* createTemporaryImage(
 
 void copyToHost(float* dst, MPSImage* image) {
   int64_t size_bytes = c10::multiply_integers([image sizes]) * sizeof(float);
-  id<MTLBuffer> buffer = [[MPSCNNContext sharedInstance].device
+  id<MTLBuffer> buffer = [[MetalContext sharedInstance].device
       newBufferWithLength:size_bytes
                   options:MTLResourceOptionCPUCacheModeDefault];
 
   id<MTLCommandBuffer> cb =
-      [MPSCNNContext sharedInstance].commandQueue.commandBuffer;
+      [MetalContext sharedInstance].commandQueue.commandBuffer;
   id<MTLComputeCommandEncoder> encoder = [cb computeCommandEncoder];
-  id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
+  id<MTLComputePipelineState> state = [[MetalContext sharedInstance]
       specializedPipelineState:metal::mpscnn::kernelFor(
                                    image,
                                    "copy_metal_to_nchw",
@@ -254,7 +254,7 @@ void copyToMetalBuffer(
   TORCH_CHECK(cmdBuffer.buffer);
   id<MTLComputeCommandEncoder> encoder =
       [cmdBuffer.buffer computeCommandEncoder];
-  id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
+  id<MTLComputePipelineState> state = [[MetalContext sharedInstance]
       specializedPipelineState:metal::mpscnn::kernelFor(
                                    image,
                                    "copy_metal_to_nchw",

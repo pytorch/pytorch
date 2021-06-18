@@ -2,7 +2,7 @@
 #import <ATen/native/metal/MetalTensorImpl.h>
 #import <ATen/native/metal/MetalTensorImplStorage.h>
 #import <ATen/native/metal/MetalUtils.h>
-#import <ATen/native/metal/mpscnn/MPSCNNContext.h>
+#import <ATen/native/metal/MetalContext.h>
 #import <ATen/native/metal/mpscnn/MPSCNNUtils.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
 #import <ATen/native/metal/mpscnn/MPSImageUtils.h>
@@ -33,7 +33,7 @@ Tensor transpose(const Tensor& input, int64_t dim0, int64_t dim1) {
     mt.texture()->allocateTemporaryStorage(outputSizes, commandBuffer);
     MPSImage* Y = mt.texture()->image();
     MPSImageTranspose* transpose = [[MPSImageTranspose alloc]
-        initWithDevice:[MPSCNNContext sharedInstance].device];
+        initWithDevice:[MetalContext sharedInstance].device];
     [transpose encodeToCommandBuffer:commandBuffer.buffer
                          sourceImage:X
                     destinationImage:Y];
@@ -50,7 +50,7 @@ Tensor transpose(const Tensor& input, int64_t dim0, int64_t dim1) {
     id<MTLComputeCommandEncoder> encoder =
         [commandBuffer.buffer computeCommandEncoder];
     id<MTLComputePipelineState> state =
-        [[MPSCNNContext sharedInstance] specializedPipelineState:"transpose"
+        [[MetalContext sharedInstance] specializedPipelineState:"transpose"
                                                        Constants:@[
                                                          @(dim0),
                                                          @(dim1),

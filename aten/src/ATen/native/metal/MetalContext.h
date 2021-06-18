@@ -5,7 +5,7 @@
 
 API_AVAILABLE(ios(10.0), macos(10.13))
 // TODO[T79947194]: Convert this class to C++
-@interface MPSCNNContext : NSObject
+@interface MetalContext : NSObject
 @property(nonatomic, strong, readonly) id<MTLDevice> device;
 @property(nonatomic, strong, readonly) id<MTLCommandQueue> commandQueue;
 @property(nonatomic, strong, readonly) id<MTLLibrary> library;

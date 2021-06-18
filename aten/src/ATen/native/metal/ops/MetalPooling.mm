@@ -2,7 +2,7 @@
 #import <ATen/native/metal/MetalTensorImpl.h>
 #import <ATen/native/metal/MetalTensorImplStorage.h>
 #import <ATen/native/metal/MetalUtils.h>
-#import <ATen/native/metal/mpscnn/MPSCNNContext.h>
+#import <ATen/native/metal/MetalContext.h>
 #import <ATen/native/metal/mpscnn/MPSCNNUtils.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
 #import <ATen/native/metal/mpscnn/MPSImageUtils.h>
@@ -49,7 +49,7 @@ Tensor max_pool2d(
   }
   MPSImage* X = imageFromTensor(input);
   MPSCNNPoolingMax* pool = [[MPSCNNPoolingMax alloc]
-       initWithDevice:[MPSCNNContext sharedInstance].device
+       initWithDevice:[MetalContext sharedInstance].device
           kernelWidth:kernel_size[0]
          kernelHeight:kernel_size[1]
       strideInPixelsX:stride[0]
@@ -82,7 +82,7 @@ Tensor adaptive_avg_pool2d(const Tensor& input, IntArrayRef output_size) {
   }
   MPSImage* X = imageFromTensor(input);
   MPSCNNPoolingAverage* pool = [[MPSCNNPoolingAverage alloc]
-       initWithDevice:[MPSCNNContext sharedInstance].device
+       initWithDevice:[MetalContext sharedInstance].device
           kernelWidth:X.width
          kernelHeight:X.height
       strideInPixelsX:X.width

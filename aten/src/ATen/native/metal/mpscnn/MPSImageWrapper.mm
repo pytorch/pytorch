@@ -1,6 +1,6 @@
 #import <ATen/native/metal/MetalCommandBuffer.h>
 #import <ATen/native/metal/MetalUtils.h>
-#import <ATen/native/metal/mpscnn/MPSCNNContext.h>
+#import <ATen/native/metal/MetalContext.h>
 #import <ATen/native/metal/mpscnn/MPSCNNUtils.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
 #import <ATen/native/metal/mpscnn/MPSImageUtils.h>
@@ -112,7 +112,7 @@ void MPSImageWrapper::setImage(MPSImage* image) {
 void MPSImageWrapper::prepare() {
   if (!_buffer) {
     int64_t size_bytes = c10::multiply_integers([_image sizes]) * sizeof(float);
-    _buffer = [[MPSCNNContext sharedInstance].device
+    _buffer = [[MetalContext sharedInstance].device
         newBufferWithLength:size_bytes
                     options:MTLResourceCPUCacheModeWriteCombined];
     TORCH_CHECK(_buffer, "Allocate GPU memory failed!");

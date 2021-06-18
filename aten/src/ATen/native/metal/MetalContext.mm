@@ -1,6 +1,6 @@
 #import <ATen/native/metal/MetalDevice.h>
 #import <ATen/native/metal/MetalShaders.h>
-#import <ATen/native/metal/mpscnn/MPSCNNContext.h>
+#import <ATen/native/metal/MetalContext.h>
 
 #include <c10/util/Exception.h>
 
@@ -14,7 +14,7 @@
 #endif
 
 using namespace at::native::metal;
-@implementation MPSCNNContext {
+@implementation MetalContext {
   std::mutex _pipelineCacheMutex;
   MetalDeviceInfo _deviceInfo;
   std::unordered_map<std::string, id<MTLComputePipelineState>> _pipelineCache;
@@ -22,9 +22,9 @@ using namespace at::native::metal;
 
 + (instancetype)sharedInstance {
   static dispatch_once_t onceToken;
-  static MPSCNNContext* instance = nil;
+  static MetalContext* instance = nil;
   dispatch_once(&onceToken, ^{
-    instance = [[MPSCNNContext alloc] init];
+    instance = [[MetalContext alloc] init];
     id<MTLDevice> device = MTLCreateSystemDefaultDevice();
     instance->_device = device;
     instance->_deviceInfo = createDeviceInfo(device);
