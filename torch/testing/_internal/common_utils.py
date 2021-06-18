@@ -313,7 +313,7 @@ IS_PPC = platform.machine() == "ppc64le"
 # Intel Cascade Lake has CPU Family 6, Model 85, and Stepping between 5 to 7
 def is_cascade_lake():
     if not IS_WINDOWS and not IS_MACOS:
-        info_cpu = re.sub('\s+', ' ', (subprocess.check_output("lscpu", shell=True).strip()).decode())
+        info_cpu = re.sub(r'\s+', ' ', (subprocess.check_output("lscpu", shell=True).strip()).decode())
         cpu_family_6 = "family: 6" in info_cpu
         cpu_model_85 = "Model: 85" in info_cpu
         cpu_stepping = ("Stepping: 5" in info_cpu) or ("Stepping: 6" in info_cpu) or ("Stepping: 7" in info_cpu)
@@ -324,7 +324,17 @@ def is_cascade_lake():
 
 IS_CASCADE_LAKE = is_cascade_lake()
 
-IS_ATEN_CPU_CAPABILITY_AVX512 = None
+def is_aten_cpu_capability_avx512():
+    if not IS_WINDOWS and not IS_MACOS:
+        info_cpu = re.sub(r'\s+', ' ', (subprocess.check_output("lscpu", shell=True).strip()).decode())
+        if ("avx512vl" in info_cpu) and ("avx512f" in info_cpu) and ("avx512bw" in info_cpu):
+            return True
+    else:
+        return False
+
+IS_ATEN_CPU_CAPABILITY_AVX512 = is_aten_cpu_capability_avx512()
+
+
 try:
     IS_ATEN_CPU_CAPABILITY_AVX512 = os.environ["ATEN_CPU_CAPABILITY"] == "avx512"
 except KeyError:

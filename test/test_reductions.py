@@ -1109,7 +1109,7 @@ class TestReductions(TestCase):
         with self.assertRaisesRegex(RuntimeError, "nansum does not support complex inputs"):
             torch.nansum(x)
 
-    @unittest.skipIf(IS_ATEN_CPU_CAPABILITY_AVX512, "This test is flaky. Ref: Issue 59415")
+    @unittest.skipIf(IS_ATEN_CPU_CAPABILITY_AVX512, "This test is flaky. AVX512 exposes its flakiness. Ref: Issue 59415")
     def test_nansum_out_dtype(self, device):
         dtypes = list(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False))
         for inp_dtype, out_dtype in combinations(dtypes, 2):

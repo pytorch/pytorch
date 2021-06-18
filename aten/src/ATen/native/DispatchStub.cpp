@@ -33,36 +33,16 @@ static CPUCapability compute_cpu_capability() {
   if (cpuinfo_initialize()) {
     if (cpuinfo_has_x86_avx512vl() && cpuinfo_has_x86_avx512bw() &&  \
         cpuinfo_has_x86_avx512dq() && cpuinfo_has_x86_fma3()) {
-#ifdef _WIN32
-      _putenv("ATEN_CPU_CAPABILITY=avx512");
-#else
-      setenv("ATEN_CPU_CAPABILITY", "avx512", 1);
-#endif
       return CPUCapability::AVX512;
     }
     if (cpuinfo_has_x86_avx2() && cpuinfo_has_x86_fma3()) {
-#ifdef _WIN32
-      _putenv("ATEN_CPU_CAPABILITY=avx2");
-#else
-      setenv("ATEN_CPU_CAPABILITY", "avx2", 1);
-#endif
       return CPUCapability::AVX2;
     }
   }
 #endif
 #ifdef HAVE_VSX_CPU_DEFINITION
-#ifdef _WIN32
-      _putenv("ATEN_CPU_CAPABILITY=vsx");
-#else
-      setenv("ATEN_CPU_CAPABILITY", "vsx", 1);
-#endif
   return CPUCapability::VSX;
 #else
-#ifdef _WIN32
-      _putenv("ATEN_CPU_CAPABILITY=default");
-#else
-      setenv("ATEN_CPU_CAPABILITY", "default", 1);
-#endif
   return CPUCapability::DEFAULT;
 #endif
 }
