@@ -409,12 +409,8 @@ __host__ __device__
 #define C10_HOST_CONSTEXPR_VAR constexpr
 #endif
 
-#if defined(__CUDA_ARCH__)
-#if defined(CUDA_VERSION) && (CUDA_VERSION <= 9200)
-#define C10_HOST_CONSTEXPR_EXCEPT_CUDA92 __host__
-#else
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ <= 9200)
 #define C10_HOST_CONSTEXPR_EXCEPT_CUDA92
-#endif
 #else
 #define C10_HOST_CONSTEXPR_EXCEPT_CUDA92 constexpr
 #endif
