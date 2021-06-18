@@ -1,7 +1,7 @@
 #import <ATen/native/metal/MetalCommandBuffer.h>
 #import <ATen/native/metal/MetalTensorImpl.h>
 #import <ATen/native/metal/MetalTensorImplStorage.h>
-#import <ATen/native/metal/MetalUtils.h>
+#import <ATen/native/metal/MetalTensorUtils.h>
 #import <ATen/native/metal/mpscnn/MPSCNNContext.h>
 #import <ATen/native/metal/mpscnn/MPSCNNUtils.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
@@ -24,11 +24,46 @@ static inline bool broadCastFirstInput(MPSImage* X1, MPSImage* X2) {
   return false;
 }
 
+static inline void checkInputs(const Tensor& input1, const Tensor& input2) {
+  TORCH_CHECK(
+      channelsSize(input1) == channelsSize(input2),
+      "Metal binary elementwise ops require channel dimension to be equal!");
+  if (batchSize(input1) != batchSize(input2)) {
+    TORCH_CHECK(
+        channelsSize(input1) % 4 == 0,
+        "Metal binary elementwise ops require channel to be a multiple of 4 to broadcast along batch dimension!")
+  }
+
+  const uint32_t input1_h = heightSize(input1);
+  const uint32_t input1_w = widthSize(input1);
+  const uint32_t input2_h = heightSize(input2);
+  const uint32_t input2_w = widthSize(input2);
+
+  const std::string broadcast_error_msg =
+      "Incompatible input dimensions for broadcasting for Metal binary elementwise op!";
+  if (input1_h != input2_h) {
+    if (input1_h > input2_h) {
+      TORCH_CHECK(input2_h == 1, broadcast_error_msg);
+      TORCH_CHECK(input2_w == input1_w || input2_w == 1, broadcast_error_msg);
+    } else if (input2_h > input1_h) {
+      TORCH_CHECK(input1_h == 1, broadcast_error_msg);
+      TORCH_CHECK(input1_w == input2_w || input1_w == 1, broadcast_error_msg);
+    }
+  } else if (input1_w != input2_w) {
+    if (input1_w > input2_w) {
+      TORCH_CHECK(input2_w == 1, broadcast_error_msg);
+    } else if (input2_w > input1_w) {
+      TORCH_CHECK(input1_h == 1, broadcast_error_msg);
+    }
+  }
+}
+
 Tensor binaryElementwiseShaderKernel(
     const Tensor& input1,
     const Tensor& input2,
     const std::string& arrayKernel,
     const std::string& nonarrayKernel) {
+  checkInputs(input1, input2);
   MPSImage* X1 = imageFromTensor(input1);
   MPSImage* X2 = imageFromTensor(input2);
   TORCH_CHECK(X1.numberOfImages == X2.numberOfImages &&
@@ -36,6 +71,9 @@ Tensor binaryElementwiseShaderKernel(
   IntArrayRef outputSize = input1.sizes();
   if (broadCastFirstInput(X1, X2)) {
     outputSize = input2.sizes();
+  }
+  if(c10::multiply_integers(outputSize) == 0){
+    return makeTensor({outputSize.vec()}, input1.options());
   }
   MetalTensorImplStorage mt{outputSize.vec()};
   MetalCommandBuffer* cb1 = getCommandBufferFromTensor(input1);
@@ -67,6 +105,7 @@ Tensor& binaryElementwiseShaderKernel_(
     const Tensor& input2,
     const std::string& arrayKernel,
     const std::string& nonarrayKernel) {
+  checkInputs(input1, input2);
   MPSImage* X1 = imageFromTensor(input1);
   MPSImage* X2 = imageFromTensor(input2);
   TORCH_CHECK(X1.numberOfImages == X2.numberOfImages &&
@@ -74,6 +113,9 @@ Tensor& binaryElementwiseShaderKernel_(
   IntArrayRef outputSize = input1.sizes();
   if (broadCastFirstInput(X1, X2)) {
     outputSize = input2.sizes();
+  }
+  if(c10::multiply_integers(outputSize) == 0){
+      return input1;
   }
   MetalCommandBuffer* cb1 = getCommandBufferFromTensor(input1);
   MetalCommandBuffer* cb2 = getCommandBufferFromTensor(input2);
@@ -104,6 +146,7 @@ template <typename T>
 Tensor binaryElementwiseMPSCNNKernel(
     const Tensor& input1,
     const Tensor& input2) {
+  checkInputs(input1, input2);
   MPSImage* X1 = imageFromTensor(input1);
   MPSImage* X2 = imageFromTensor(input2);
   TORCH_CHECK(X1.numberOfImages == X2.numberOfImages &&
@@ -111,6 +154,9 @@ Tensor binaryElementwiseMPSCNNKernel(
   IntArrayRef outputSize = input1.sizes();
   if (broadCastFirstInput(X1, X2)) {
     outputSize = input2.sizes();
+  }
+  if(c10::multiply_integers(outputSize) == 0){
+      return makeTensor({outputSize.vec()}, input1.options());
   }
   MetalTensorImplStorage mt{outputSize.vec()};
   MetalCommandBuffer* cb1 = getCommandBufferFromTensor(input1);
@@ -134,6 +180,7 @@ Tensor binaryElementwiseMPSCNNKernel(
 
 template <typename T>
 Tensor& binaryElementwiseMPSCNNKernel_(Tensor& input1, const Tensor& input2) {
+  checkInputs(input1, input2);
   MPSImage* X1 = imageFromTensor(input1);
   MPSImage* X2 = imageFromTensor(input2);
   TORCH_CHECK(X1.numberOfImages == X2.numberOfImages &&
@@ -141,6 +188,9 @@ Tensor& binaryElementwiseMPSCNNKernel_(Tensor& input1, const Tensor& input2) {
   IntArrayRef outputSize = input1.sizes();
   if (broadCastFirstInput(X1, X2)) {
     outputSize = input2.sizes();
+  }
+  if(c10::multiply_integers(outputSize) == 0){
+    return input1;
   }
   MetalCommandBuffer* cb1 = getCommandBufferFromTensor(input1);
   MetalCommandBuffer* cb2 = getCommandBufferFromTensor(input2);

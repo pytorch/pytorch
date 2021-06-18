@@ -142,8 +142,8 @@ if __name__ == "__main__":
         report_android_sizes(file_dir)
     else:
         size = get_size(file_dir)
-        if size != 0:
-            try:
-                send_message([build_message(size)])
-            except Exception:
-                logging.exception("can't send message")
+        # Sending the message anyway if no size info is collected.
+        try:
+            send_message([build_message(size)])
+        except Exception:
+            logging.exception("can't send message")

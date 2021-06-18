@@ -156,7 +156,7 @@ TORCH_IMPL_FUNC(topk_out_cuda)
    const Tensor& values,
    const Tensor& indices) {
   TensorArg topK_arg{values, "topK", 1}, indices_arg{indices, "indices", 2}, input_arg{self, "self", 3};
-  checkAllSameGPU("topk_out_cuda", {topK_arg, indices_arg, input_arg});
+  checkAllSameGPU(__func__, {topK_arg, indices_arg, input_arg});
   dim = at::maybe_wrap_dim(dim, self);
 
   int numDims = self.dim();
@@ -300,9 +300,10 @@ TORCH_IMPL_FUNC(topk_out_cuda)
       // allocated tensors to receive the results.
 
       Tensor sortedIndices = at::empty_like(indices);
-      // FIXME: remove const_cast once sort_out cuda is ported to structured
-      sort_out_cuda(const_cast<Tensor&>(values), dim, largest, const_cast<Tensor&>(values), const_cast<Tensor&>(sortedIndices));
+      Tensor sortedValues = at::empty_like(values);
+      sort_out_cuda(values, dim, largest, sortedValues, sortedIndices);
       indices.copy_(indices.gather(dim, sortedIndices));
+      values.copy_(sortedValues);
     }
   }
 }

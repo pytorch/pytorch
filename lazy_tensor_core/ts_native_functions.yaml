@@ -11,6 +11,7 @@ supported:
   - convolution_overrideable
   - convolution_backward_overrideable
   - _copy_from
+  - _copy_from_and_resize
   - div.Tensor
   - div_.Tensor
   - div.Tensor_mode

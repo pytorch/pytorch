@@ -15,8 +15,10 @@ constant ushort ushort_arg_6[[function_constant(6)]];
 constant ushort ushort_arg_7[[function_constant(7)]];
 constant ushort ushort_arg_8[[function_constant(8)]];
 constant ushort ushort_arg_9[[function_constant(9)]];
-constant float float_arg_0 [[function_constant(10)]];
-constant float float_arg_1 [[function_constant(11)]];
+constant ushort ushort_arg_10[[function_constant(10)]];
+constant ushort ushort_arg_11[[function_constant(11)]];
+constant float float_arg_0 [[function_constant(12)]];
+constant float float_arg_1 [[function_constant(13)]];
 
 inline constexpr ushort divRoundUp(ushort x, ushort y) { return (x + (y - 1)) / y; }
 
@@ -527,6 +529,49 @@ kernel void hardswish_nonarray(texture2d<half, access::read> in[[texture(0)]],
     out.write(outval, gid);
 }
 
+constant bool out_is_arr = (ushort_arg_3 > 1 || ushort_arg_2 > 4);
+constant bool out_is_tex = !out_is_arr;
+constant bool in_is_arr = (ushort_arg_7 > 1 || ushort_arg_6 > 4);
+constant bool in_is_tex = !in_is_arr;
+kernel void reflection_pad2d(texture2d_array<half, access::read> in_arr[[texture(0), function_constant(in_is_arr)]],
+                             texture2d<half, access::read> in_tex[[texture(0),function_constant(in_is_tex)]],
+                             texture2d_array<half, access::write> out_arr[[texture(1), function_constant(out_is_arr)]],
+                             texture2d<half, access::write> out_tex[[texture(1), function_constant(out_is_tex)]],
+                             ushort3 gid[[thread_position_in_grid]]) {
+  const ushort H2 = ushort_arg_0;
+  const ushort W2 = ushort_arg_1;
+  if (gid.x >= W2 || gid.y >= H2) {
+      return;
+  }
+
+  const ushort pad_left = ushort_arg_8;
+  const ushort pad_right = ushort_arg_9;
+  const ushort pad_top = ushort_arg_10;
+  const ushort pad_bottom = ushort_arg_11;
+
+  const ushort2 out_size = ushort2(W2, H2);
+  const ushort xoff_pre  = 2*max(pad_left - gid.x, 0);
+  const ushort xoff_post = 2*max(gid.x - (out_size.x - 1 - pad_right), 0);
+  const ushort yoff_pre  = 2*max(pad_top - gid.y, 0);
+  const ushort yoff_post = 2*max(gid.y - (out_size.y - 1 - pad_bottom), 0);
+  ushort2 inpos = ushort2(
+      gid.x + xoff_pre - xoff_post - pad_left,
+      gid.y + yoff_pre - yoff_post - pad_top);
+
+  half4 intex;
+  if (in_is_arr) {
+    intex = in_arr.read(inpos, gid.z);
+  } else {
+    intex = in_tex.read(inpos);
+  }
+
+  if (out_is_arr) {
+      out_arr.write(intex, gid.xy, gid.z);
+  } else {
+      out_tex.write(intex, gid.xy);
+  }
+}
+
 kernel void resize_nearest(texture2d_array<half, access::sample> in[[texture(0)]],
                            texture2d_array<half, access::write> out[[texture(1)]],
                            ushort3 gid[[thread_position_in_grid]]) {
@@ -828,6 +873,80 @@ kernel void split_channels(texture2d_array<half, access::read> in_arr[[texture(0
         }
     }
 }
+
+constant bool ra_has_in_arr = (ushort_arg_3 > 1 ||  ushort_arg_2 > 4);
+constant bool ra_has_out_arr = (ushort_arg_4 > 1 || ushort_arg_2 > 4);
+constant bool ra_has_in_tex = (!ra_has_in_arr);
+constant bool ra_has_out_tex = (!ra_has_out_arr);
+kernel void roi_align(texture2d_array<half, access::sample> ina[[texture(0), function_constant(ra_has_in_arr)]],
+                      texture2d<half, access::sample> in[[texture(0), function_constant(ra_has_in_tex)]],
+                      texture2d_array<half, access::write> outa[[texture(1), function_constant(ra_has_out_arr)]],
+                      texture2d<half, access::write> out[[texture(1), function_constant(ra_has_out_tex)]],
+                      constant half4* rois[[buffer(0)]],
+                      ushort3 gid[[thread_position_in_grid]]) {
+
+    ushort out_width, out_height;
+    if (ra_has_out_arr) {
+        out_width = outa.get_width();
+        out_height = outa.get_height();
+    } else {
+        out_width = out.get_width();
+        out_height = out.get_height();
+    }
+    if (gid.x >= out_width || gid.y >= out_height) {
+        return;
+    }
+    const half spatial_scale = half(ushort_arg_0) / 10000;
+    const ushort sampling_ratio = ushort_arg_1;
+    const ushort C = ushort_arg_2;
+    const ushort pw = gid.x;
+    const ushort ph = gid.y;
+    const ushort n = gid.z / divRoundUp(C, 4);
+    const ushort c = gid.z % divRoundUp(C, 4);
+
+    const half4 roi_scaled = rois[n] * spatial_scale;
+    const half roi_start_w = roi_scaled[0];
+    const half roi_start_h = roi_scaled[1];
+    const half roi_end_w = roi_scaled[2];
+    const half roi_end_h = roi_scaled[3];
+
+    // Force malformed ROIs to be 1x1
+    const half roi_width = max(roi_end_w - roi_start_w, (half)1.);
+    const half roi_height = max(roi_end_h - roi_start_h, (half)1.);
+
+    const half bin_size_h = static_cast<half>(roi_height) / static_cast<half>(out_height);
+    const half bin_size_w = static_cast<half>(roi_width) / static_cast<half>(out_width);
+
+    const ushort roi_bin_grid_h = sampling_ratio > 0 ? sampling_ratio : ceil(roi_height / static_cast<half>(out_height));
+    const ushort roi_bin_grid_w = sampling_ratio > 0 ? sampling_ratio : ceil(roi_width / static_cast<half>(out_width));
+
+    const half count = roi_bin_grid_h * roi_bin_grid_w;
+    half4 output_val = 0.0;
+
+    constexpr sampler s2(coord::pixel, address::clamp_to_edge, filter::linear);
+
+    for (int iy = 0; iy < roi_bin_grid_h; iy++) {
+        for (int ix = 0; ix < roi_bin_grid_w; ix++) {
+            // Shift the pixel by 0.5. This is critical to achieve high accuracy.
+            const half y =
+            roi_start_h + ph * bin_size_h + (iy+0.5) * bin_size_h / static_cast<half>(roi_bin_grid_h);
+            const half x =
+            roi_start_w + pw * bin_size_w + (ix+0.5) * bin_size_w / static_cast<half>(roi_bin_grid_w);
+            if (ra_has_in_arr) {
+                output_val += ina.sample(s2, float2(x, y), c);
+            } else {
+                output_val += in.sample(s2, float2(x, y));
+            }
+        }
+    }
+    output_val /= count;
+    if (ra_has_out_arr) {
+        outa.write(static_cast<half4>(output_val), gid.xy, gid.z);
+    } else {
+        out.write(static_cast<half4>(output_val), gid.xy);
+    }
+}
+
 )PT_METAL_SHADERS";
 
 #endif /* MPSCNNShaders_h */

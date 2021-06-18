@@ -1120,7 +1120,7 @@ LazyTensor LazyTensor::diagonal(const LazyTensor& input,
 }
 
 LazyTensor LazyTensor::div(const LazyTensor& input, const LazyTensor& other,
-                           const c10::optional<std::string>& rounding_mode,
+                           const c10::optional<c10::string_view>& rounding_mode,
                            c10::optional<at::ScalarType> logical_element_type) {
   at::ScalarType scalar_type =
       at::typeMetaToScalarType(c10::get_default_dtype());
@@ -1171,7 +1171,7 @@ LazyTensor LazyTensor::div(const LazyTensor& input, const at::Scalar& other) {
 }
 
 void LazyTensor::div_(LazyTensor& input, const LazyTensor& other,
-                      const c10::optional<std::string>& rounding_mode) {
+                      const c10::optional<c10::string_view>& rounding_mode) {
   at::ScalarType scalar_type =
       at::typeMetaToScalarType(c10::get_default_dtype());
   ir::Value input_value = GetFloatingIrValue(input, scalar_type);
