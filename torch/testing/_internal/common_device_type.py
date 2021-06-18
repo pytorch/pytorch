@@ -257,11 +257,6 @@ def _dtype_name(dtype):
     return str(dtype).split('.')[1]
 
 
-# Marker class to signify an absense of dtypes
-class _NO_DTYPES(object):
-    pass
-
-
 class DeviceTypeTestBase(TestCase):
     device_type: str = 'generic_device_type'
 
@@ -597,7 +592,7 @@ class OpDTypes(Enum):
     unsupported = 2  # Test only unsupported dtypes
     supported_backward = 3  # Test all supported backward dtypes
     unsupported_backward = 4  # Test only unsupported backward dtypes
-    none = 5  # Instantiate no dtype variants (the dtype kwarg will be None)
+    none = 5  # Instantiate no dtype variants (no dtype kwarg needed)
 
 
 class _TestParameterizer(object):
@@ -668,8 +663,8 @@ class _TestParameterizer(object):
 #     operator's gradient formula supports
 #   OpDTypes.unsupported_backward - the test is instantiated for all dtypes the
 #     operator's gradient formula doesn't support
-#   OpDTypes.none - the test is instantied without any dtype. The dtype
-#     arg will be set to _NO_DTYPES.
+#   OpDTypes.none - the test is instantied without any dtype. The test signature
+#     should not include a dtype kwarg in this case.
 #
 # These options allow tests to have considerable control over the dtypes
 #   they're instantiated for. Finally, the @dtypes decorator composes with the
@@ -699,7 +694,7 @@ class ops(_TestParameterizer):
                 elif self.opinfo_dtypes == OpDTypes.basic:
                     dtypes = op.default_test_dtypes(device_cls.device_type)
                 elif self.opinfo_dtypes == OpDTypes.none:
-                    dtypes = [_NO_DTYPES]
+                    dtypes = [None]
                 else:
                     raise RuntimeError(f"Unknown OpDType: {self.opinfo_dtypes}")
 
@@ -710,13 +705,16 @@ class ops(_TestParameterizer):
                 assert self.opinfo_dtypes == OpDTypes.basic, "ops(dtypes=...) and the dtypes decorator are incompatible"
 
             for dtype in dtypes:
-                # Construct the test name.
+                # Construct the test name and parameter kwargs to pass to the test.
                 test_name = '{}_{}'.format(test.__name__, op.name.replace('.', '_'))
                 if op.variant_test_name:
                     test_name += '_' + op.variant_test_name
                 test_name += '_{}'.format(device_cls.device_type)
-                if dtype is not _NO_DTYPES:
+                param_kwargs = {'op': op}
+
+                if dtype is not None:
                     test_name += '_{}'.format(_dtype_name(dtype))
+                    param_kwargs['dtype'] = dtype
 
                 # Wraps instantiated test with op decorators
                 # NOTE: test_wrapper exists because we don't want to apply
@@ -745,7 +743,6 @@ class ops(_TestParameterizer):
                     for decorator in active_decorators:
                         test_wrapper = decorator(test_wrapper)
 
-                    param_kwargs = {'op': op, 'dtype': dtype}
                     yield (test_wrapper, test_name, param_kwargs)
                 except Exception as ex:
                     # Provides an error message for debugging before rethrowing the exception
