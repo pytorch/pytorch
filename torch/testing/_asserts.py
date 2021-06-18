@@ -220,7 +220,7 @@ def _trace_mismatches(actual: Tensor, expected: Tensor, mismatches: Tensor, *, r
             the location of mismatches.
 
     Returns:
-        (DiagnosticInfo): Mismatch diagnostics with the following attributes:
+        (Diagnostics): Mismatch diagnostics with the following attributes:
 
             - ``number_of_elements`` (int): Number of elements in each tensor being compared.
             - ``total_mismatches`` (int): Total number of mismatches.
@@ -332,9 +332,8 @@ def _check_values_close(
         rtol (float): Relative tolerance.
         atol (float): Absolute tolerance.
         equal_nan (bool): If ``True``, two ``NaN`` values will be considered equal.
-        msg (Optional[Union[str, Callable[[Tensor, Tensor, DiagnosticInfo], str]]]): Optional error message. Can be
-            passed as callable in which case it will be called with the inputs and the result of
-            :func:`_trace_mismatches`.
+        msg (Optional[Union[str, Callable[[Tensor, Tensor, Diagnostics], str]]]): Optional error message. Can be passed
+            as callable in which case it will be called with the inputs and the result of :func:`_trace_mismatches`.
 
     Returns:
         (Optional[AssertionError]): If check did not pass.
@@ -647,9 +646,9 @@ def assert_close(
             check is disabled, tensors with different ``dtype``'s are promoted  to a common ``dtype`` (according to
             :func:`torch.promote_types`) before being compared.
         check_stride (bool): If ``True`` (default), asserts that corresponding tensors have the same stride.
-        msg (Optional[Union[str, Callable[[Tensor, Tensor, DiagnosticInfo], str]]]): Optional error message to use if
-            the values of corresponding tensors mismatch. Can be passed as callable in which case it will be called
-            with the mismatching tensors and a namespace of diagnostic info about the mismatches. See below for details.
+        msg (Optional[Union[str, Callable[[Tensor, Tensor, Diagnostics], str]]]): Optional error message to use if the
+            values of corresponding tensors mismatch. Can be passed as callable in which case it will be called with
+            the mismatching tensors and a namespace of diagnostics about the mismatches. See below for details.
 
     Raises:
         UsageError: If a :class:`torch.Tensor` can't be constructed from an array-or-scalar-like.
@@ -689,8 +688,7 @@ def assert_close(
     | other                     | ``0.0``    | ``0.0``  |
     +---------------------------+------------+----------+
 
-    The namespace of diagnostic information that will be passed to :attr:`msg` if its a callable has the following
-    attributes:
+    The namespace of diagnostics that will be passed to :attr:`msg` if its a callable has the following attributes:
 
     - ``number_of_elements`` (int): Number of elements in each tensor being compared.
     - ``total_mismatches`` (int): Total number of mismatches.
@@ -795,9 +793,10 @@ def assert_close(
         AssertionError: Argh, the tensors are not close!
         >>> # The error message can also created at runtime by passing a callable.
         >>> def custom_msg(actual, expected, diagnostics):
+        ...     ratio = diagnostics.total_mismatches / diagnostics.number_of_elements
         ...     return (
         ...         f"Argh, we found {diagnostics.total_mismatches} mismatches! "
-        ...         f"That is {diagnostics.total_mismatches / diagnostics.number_of_elements:.1%}!"
+        ...         f"That is {ratio:.1%}!"
         ...     )
         >>> torch.testing.assert_close(actual, expected, msg=custom_msg)
         AssertionError: Argh, we found 2 mismatches! That is 66.7%!
