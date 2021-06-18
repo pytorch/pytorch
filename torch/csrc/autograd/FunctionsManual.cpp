@@ -2717,58 +2717,10 @@ Tensor _det_lu_based_helper_backward(
     return det_backward(det_grad, self, det);
   }
 
-  auto eps = at::native::_get_epsilon(c10::toValueType(self.scalar_type()));
-  auto n = self.size(-1);
-  auto eps_tensor = at::tensor(eps, self.options());
-  auto condition_diagonal = [&](const Tensor& x) {
-    auto x_diag = x.diagonal(0, -2, -1);
-    auto x_diag_conditioned = at::where(
-      x_diag == 0.0,
-      eps_tensor,
-      x_diag
-    );
-    x_diag.copy_(x_diag_conditioned);
-  };
-
-  // create a matrix d := (det_grad * det.conj()) I
-  // NOTE: we do not use the shorter version
-  // auto d = at::zeros_like(self);
-  // d.diagonal(0, -2, -1).copy_((det_grad * det.conj()).unsqueeze(-1));
-  // to avoid in-place operations to eliminate potential issues with Vmap
-  auto det_expanded_sizes = det.sizes().vec();
-  det_expanded_sizes.push_back(n);
-  auto d = at::diag_embed((det_grad * det.conj()).unsqueeze(-1).expand(det_expanded_sizes));
-
-  if (self.device().type() == at::kCPU) {
-    auto lu_clone = lu.clone();
-    condition_diagonal(lu_clone);
-
-    auto trans = self.is_complex() ? "C" : "T";
-
-    return at::_lu_solve_trans(d, lu_clone, pivs, trans);
-  }
-  // lu_solve is less stable than two triangular_solve for CUDA tensors.
-  else {
-    Tensor p, l, u;
-    std::tie(p, l, u) = at::lu_unpack(lu, pivs, /*unpack_data=*/true, /*unpack_pivots=*/true);
-
-    auto u_h = u.transpose(-2, -1).conj();
-    condition_diagonal(u_h);
-    auto l_h = l.transpose(-2, -1).conj();
-
-    auto permuted_grad = std::get<0>(
-      at::triangular_solve(
-        // note that d = c I for some scalar c, hence
-        // d u_h^{-1} = c I u_h^{-1} = u_h^{-1} c I = u_h^{-1} d,
-        // so, there is no need to explicitly transpose the solution below
-        std::get<0>(at::triangular_solve(d, u_h, /*upper=*/false)),
-        l_h
-      )
-    );
-
-    // multiply by p to restore the row order
-    return at::matmul(p, permuted_grad);
-  }
+  // we use a sequence of kernels to avoid memory copies and checks,
+  // as in the implementation of this function we are 100% sure that
+  // `lu` and `pivs` are coming from a LAPACK routine.
+  return at::_det_lu_based_helper_backward_helper(det_grad, det, self, lu, pivs);
 }
 
 Tensor logdet_backward(const Tensor & grad, const Tensor& self, const Tensor& logdet) {

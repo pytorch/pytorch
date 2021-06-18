@@ -3730,4 +3730,74 @@ std::tuple<Tensor&,Tensor&> legacy_lstsq_out(
   return std::tuple<Tensor&, Tensor&>(B_out, A_out);
 }
 
+// The backward for this function is just a specialized version of
+// lu.backward, which is implemented in /torch/_autograd_functions.py
+Tensor _det_lu_based_helper_backward_helper(
+  const Tensor& det_grad,
+  const Tensor& det,
+  const Tensor& self,
+  const Tensor& lu,
+  const Tensor& pivs
+) {
+  auto eps = at::native::_get_epsilon(c10::toValueType(self.scalar_type()));
+  auto n = self.size(-1);
+  auto eps_tensor = at::tensor(eps, self.options());
+  auto condition_diagonal = [&](const Tensor& x) {
+    auto x_diag = x.diagonal(0, -2, -1);
+    auto x_diag_conditioned = at::where(
+      x_diag == 0.0,
+      eps_tensor,
+      x_diag
+    );
+    x_diag.copy_(x_diag_conditioned);
+  };
+
+  // create a matrix d := (det_grad * det.conj()) I
+  // NOTE: we do not use the shorter version
+  // auto d = at::zeros_like(self);
+  // d.diagonal(0, -2, -1).copy_((det_grad * det.conj()).unsqueeze(-1));
+  // to avoid in-place operations to eliminate potential issues with Vmap
+  auto det_expanded_sizes = det.sizes().vec();
+  det_expanded_sizes.push_back(n);
+  auto d_diag = det_grad * det.conj();
+  auto d = at::diag_embed(d_diag.unsqueeze(-1).expand(det_expanded_sizes));
+  // make sure that d is Fortran-contiguous. The transposition is sufficient as d is a diagonal square matrix
+  d = d.transpose(-2, -1);
+
+  if (self.device().type() == at::kCPU) {
+    // we want to condition the diagonal of the lu Tensor, but it is not allowed
+    // to modify arguments of backward functions in-place, hence the cloning.
+    auto lu_clone = lu.clone();
+    condition_diagonal(lu_clone);
+
+    auto trans = self.is_complex() ? 'C' : 'T';
+
+    // d is modified in-place and will contain the result
+    lu_solve_trans_stub(self.device().type(), d, lu_clone, pivs, trans);
+    return d;
+  }
+  // lu_solve is less stable than two triangular_solve for CUDA tensors.
+  else {
+    Tensor p, l, u;
+    std::tie(p, l, u) = at::lu_unpack(lu, pivs, /*unpack_data=*/true, /*unpack_pivots=*/true);
+
+    auto u_h = u.transpose(-2, -1).conj();
+    condition_diagonal(u_h);
+    auto l_h = l.transpose(-2, -1).conj();
+
+    auto permuted_grad = std::get<0>(
+      at::triangular_solve(
+        // note that d = c I for some scalar c, hence
+        // d u_h^{-1} = c I u_h^{-1} = u_h^{-1} c I = u_h^{-1} d,
+        // so, there is no need to explicitly transpose the solution below
+        std::get<0>(at::triangular_solve(d, u_h, /*upper=*/false)),
+        l_h
+      )
+    );
+
+    // multiply by p to restore the row order
+    return at::matmul(p, permuted_grad);
+  }
+}
+
 }}  // namespace at::native
