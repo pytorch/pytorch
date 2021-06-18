@@ -60,7 +60,7 @@ Value* broadcastSizes(at::ArrayRef<Value*> sizes, AliasDb* db) {
 
 namespace tensorexpr {
 
-static const OperatorSet& supported_eltwise_set() {
+const OperatorSet& supported_eltwise_set() {
   // clang-format off
   // breaks up the schema strings so they are no longer discoverable with ctrl-F
     static const OperatorSet supported_eltwise_set{
