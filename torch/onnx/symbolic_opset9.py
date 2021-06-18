@@ -1816,6 +1816,12 @@ def ones_like(g, input, dtype=None, layout=None, device=None, pin_memory=False, 
     return g.op("ConstantOfShape", shape,
                 value_t=torch.tensor([1], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
+def new_ones(g, self, sizes, dtype, layout, device, pin_memory=False):
+    self_dtype = sym_help._try_get_scalar_type(self)
+    if dtype is None and self_dtype is not None:
+        dtype = self_dtype
+        dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
+    return ones(g, sizes, dtype, layout, device, pin_memory)
 
 def full(g, sizes, value, dtype, layout, device, pin_memory=False):
     const_value = sym_help._maybe_get_const(value, "t")

@@ -32,6 +32,7 @@ class GraphOpt : public ::testing::Test {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(GraphOpt, OptimizeCat) {
+#ifdef TORCH_ENABLE_LLVM
   const auto graph_string = R"IR(
     graph(%x : Float(10, strides=[1], device=cpu),
           %y : Float(20, strides=[1], device=cpu),
@@ -69,10 +70,12 @@ TEST_F(GraphOpt, OptimizeCat) {
   ASSERT_EQ(out.sizes(), ref.sizes());
   ASSERT_EQ(out.dtype(), ref.dtype());
   ASSERT_TRUE(at::allclose(out, ref));
+#endif
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(GraphOpt, OptimizeCat2) {
+#ifdef TORCH_ENABLE_LLVM
   const auto graph_string = R"IR(
     graph(%x : Float(10, strides=[1], device=cpu),
           %y : Float(20, strides=[1], device=cpu),
@@ -116,10 +119,12 @@ TEST_F(GraphOpt, OptimizeCat2) {
   ASSERT_EQ(out.sizes(), ref.sizes());
   ASSERT_EQ(out.dtype(), ref.dtype());
   ASSERT_TRUE(at::allclose(out, ref));
+#endif
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(GraphOpt, OptimizeCat3) {
+#ifdef TORCH_ENABLE_LLVM
   const auto graph_string = R"IR(
     graph(%a : Float(60, strides=[1], device=cpu),
           %x : Float(10, strides=[1], device=cpu),
@@ -163,10 +168,12 @@ TEST_F(GraphOpt, OptimizeCat3) {
   ASSERT_EQ(out.sizes(), ref.sizes());
   ASSERT_EQ(out.dtype(), ref.dtype());
   ASSERT_TRUE(at::allclose(out, ref));
+#endif
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(GraphOpt, OptimizeCatWithTypePromotionInUser) {
+#ifdef TORCH_ENABLE_LLVM
   const auto graph_string = R"IR(
     graph(%x : Int(10, strides=[1], device=cpu),
           %y : Int(20, strides=[1], device=cpu),
@@ -206,10 +213,12 @@ TEST_F(GraphOpt, OptimizeCatWithTypePromotionInUser) {
   ASSERT_EQ(out.sizes(), ref.sizes());
   ASSERT_EQ(out.dtype(), ref.dtype());
   ASSERT_TRUE(at::allclose(out, ref));
+#endif
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(GraphOpt, OptimizeCatWithTypePromotionInCat) {
+#ifdef TORCH_ENABLE_LLVM
   const auto graph_string = R"IR(
     graph(%x : Float(10, strides=[1], device=cpu),
           %y : Float(20, strides=[1], device=cpu),
@@ -234,10 +243,12 @@ TEST_F(GraphOpt, OptimizeCatWithTypePromotionInCat) {
       ->check_not("aten::cat")
       ->check_not("aten::log")
       ->run(*kernel.graph());
+#endif
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(GraphOpt, OptimizeCatNoSingleTensorElementwiseOp) {
+#ifdef TORCH_ENABLE_LLVM
   const auto graph_string = R"IR(
     graph(%0 : Float(60, strides=[1], device=cpu),
           %x : Float(10, strides=[1], device=cpu),
@@ -263,10 +274,12 @@ TEST_F(GraphOpt, OptimizeCatNoSingleTensorElementwiseOp) {
       ->check_not("aten::cat")
       ->check_not("aten::mul")
       ->run(*kernel.graph());
+#endif
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(GraphOpt, OptimizeCatNoSingleTensorElementwiseOp2) {
+#ifdef TORCH_ENABLE_LLVM
   const auto graph_string = R"IR(
     graph(%0 : Float(60, strides=[1], device=cpu),
           %1 : Float(60, strides=[1], device=cpu),
@@ -297,6 +310,7 @@ TEST_F(GraphOpt, OptimizeCatNoSingleTensorElementwiseOp2) {
       ->check_not("aten::mul")
       ->check_not("aten::add")
       ->run(*kernel.graph());
+#endif
 }
 
 } // namespace jit
