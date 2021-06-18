@@ -126,13 +126,11 @@ class ShardMetadata(object):
                 2. "<worker_name>/<device>" (ex: "trainer0/cuda:0").
     """
 
-    ShardPlacement = Device
-
     __slots__ = ['shard_offsets', 'shard_lengths', 'placement']
 
     shard_offsets: List[int]
     shard_lengths: List[int]
-    placement: ShardPlacement
+    placement: Device
 
     def __post_init__(self):
         if not is_valid_device(self.placement):

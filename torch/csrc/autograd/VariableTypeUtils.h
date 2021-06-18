@@ -85,8 +85,7 @@ inline void throw_error_for_complex_autograd(const Tensor& tensor, const char* n
 }
 
 inline void throw_error_for_complex_autograd(const TensorList& tensorlist, const char* name) {
-  // NOLINTNEXTLINE(performance-for-range-copy)
-  for (auto tensor: tensorlist) {
+  for (const auto& tensor: tensorlist) {
     throw_error_for_complex_autograd(tensor, name);
   }
 }
