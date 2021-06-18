@@ -220,7 +220,7 @@ DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE = {
     # These functions are expected to change impl or storage of input tensors
     'set_', '_cudnn_rnn_flatten_weight',
 }
-DONT_ENFORCE_TENSOR_IMPL_USE_COUNT  = {
+DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
     # These functions return tensors with use_count > 1
     'native_batch_norm', 'native_batch_norm_backward', '_embedding_bag',
 }
@@ -691,19 +691,19 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
             noref_cpp_type = unpacked_binding.nctype.type.remove_const_ref()
             if noref_cpp_type == BaseCType(tensorListT):
                 stmts_before_call += [SAVE_TENSORLIST_STORAGE.substitute(tensorlist_name=arg),
-                                    SAVE_TENSORLIST_IMPL.substitute(tensorlist_name=arg)]
+                                      SAVE_TENSORLIST_IMPL.substitute(tensorlist_name=arg)]
                 stmts_after_call += [ENFORCE_SAME_TENSORLIST_STORAGE.substitute(tensorlist_name=arg),
-                                            ENFORCE_SAME_TENSORLIST_IMPL.substitute(tensorlist_name=arg)]
+                                     ENFORCE_SAME_TENSORLIST_IMPL.substitute(tensorlist_name=arg)]
             elif noref_cpp_type == ListCType(OptionalCType(BaseCType(tensorT))):
                 stmts_before_call += [SAVE_OPTIONALTENSORLIST_STORAGE.substitute(tensorlist_name=arg),
-                                    SAVE_OPTIONALTENSORLIST_IMPL.substitute(tensorlist_name=arg)]
+                                      SAVE_OPTIONALTENSORLIST_IMPL.substitute(tensorlist_name=arg)]
                 stmts_after_call += [ENFORCE_SAME_OPTIONALTENSORLIST_STORAGE.substitute(tensorlist_name=arg),
-                                            ENFORCE_SAME_OPTIONALTENSORLIST_IMPL.substitute(tensorlist_name=arg)]
+                                     ENFORCE_SAME_OPTIONALTENSORLIST_IMPL.substitute(tensorlist_name=arg)]
             elif noref_cpp_type == BaseCType(tensorT):
                 stmts_before_call += [SAVE_TENSOR_STORAGE.substitute(tensor_name=arg),
-                                    SAVE_TENSOR_IMPL.substitute(tensor_name=arg)]
+                                      SAVE_TENSOR_IMPL.substitute(tensor_name=arg)]
                 stmts_after_call += [ENFORCE_SAME_TENSOR_STORAGE.substitute(tensor_name=arg, out_tensor_name=arg),
-                                            ENFORCE_SAME_TENSOR_IMPL.substitute(tensor_name=arg)]
+                                     ENFORCE_SAME_TENSOR_IMPL.substitute(tensor_name=arg)]
 
         assert (stmts_before_call and stmts_after_call) or (not stmts_before_call and not stmts_after_call)
 
@@ -719,7 +719,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                     if aliased_arg_name is not None:
                         assert i == 0, "Expect non-CompositeImplicitAutograd view function {base} to return single output"
                         stmts_after_call += [ENFORCE_SAME_TENSOR_STORAGE.substitute(tensor_name=aliased_arg_name,
-                                                                                            out_tensor_name=ret_name)]
+                                                                                    out_tensor_name=ret_name)]
                     elif base_name not in OTHER_VIEW_FUNCTIONS:
                         stmts_after_call += [ENFORCE_TENSOR_STORAGE_USE_COUNT_EQUALS_ONE.substitute(tensor_name=ret_name)]
 
@@ -729,9 +729,9 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                 # Currently we don't have any functions that return the following types, but
                 # we should update the checks once we do
                 elif noref_cpp_type == ListCType(OptionalCType(BaseCType(tensorT))):
-                    assert False, f"Please add use_count checks for {noref_cpp_type}"
+                    raise AssertionError(f"Please add use_count checks for {noref_cpp_type}")
                 elif noref_cpp_type == BaseCType(tensorListT):
-                    assert False, f"Please add use_count checks for {noref_cpp_type}"
+                    raise AssertionError(f"Please add use_count checks for {noref_cpp_type}")
 
         if stmts_before_call and stmts_after_call:
             call = RUN_ONLY_IN_DEBUG_MODE.substitute(statements=stmts_before_call) + \
