@@ -11,21 +11,50 @@ from typing import Any, List, Optional
 
 class _ContextMethodMixin(object):
 
-    def save_for_backward(self, *tensors):
+    def save_for_backward(self, *tensors: torch.Tensor):
         r"""Saves given tensors for a future call to :func:`~Function.backward`.
 
         **This should be called at most once, and only from inside the**
-        :func:`forward` **method.**
+        :func:`forward` **method. This should only be called with input or
+        output tensors**
 
         Later, saved tensors can be accessed through the :attr:`saved_tensors`
         attribute. Before returning them to the user, a check is made to ensure
         they weren't used in any in-place operation that modified their content.
 
         Arguments can also be ``None``.
+
+        See :ref:`extending-autograd` for more details on how to use this method.
+
+        Example::
+            >>> class Func(Function):
+            >>>     @staticmethod
+            >>>     def forward(ctx, x, y, z):
+            >>>         w = x * y * z
+            >>>         out = x*y + y*z + w
+            >>>         ctx.save_for_backward(x, y, out)  # x, y, out are input or output tensors
+            >>>         ctx.z = z  # z is an input but not a tensor
+            >>>         ctx.w = w  # w is tensor but neither input nor output
+            >>>         return out
+            >>>
+            >>>     @staticmethod
+            >>>     def backward(ctx, grad_out):
+            >>>         x, y, out = ctx.saved_tensors
+            >>>         z = ctx.z
+            >>>         gx = grad_out * (y + y * z)
+            >>>         gy = grad_out * (x + z + x * z)
+            >>>         gz = None
+            >>>         return gx, gy, gz
+            >>>
+            >>> a = torch.tensor(1., requires_grad=True, dtype=torch.double)
+            >>> b = torch.tensor(2., requires_grad=True, dtype=torch.double)
+            >>> c = 4
+            >>> d = Func.apply(a, b, c)
+
         """
         self.to_save = tensors
 
-    def mark_dirty(self, *args):
+    def mark_dirty(self, *args: torch.Tensor):
         r"""Marks given tensors as modified in an in-place operation.
 
         **This should be called at most once, only from inside the**
@@ -35,6 +64,27 @@ class _ContextMethodMixin(object):
         should be given to this function, to ensure correctness of our checks.
         It doesn't matter whether the function is called before or after
         modification.
+
+        Examples::
+            >>> class Inplace(Function):
+            >>>     @staticmethod
+            >>>     def forward(ctx, x):
+            >>>         x.add_(1)
+            >>>         ctx.mark_dirty(x)
+            >>>         return x
+            >>>
+            >>>     @staticmethod
+            >>>     @once_differentiable  # grad_input is not a function of input
+            >>>     def backward(ctx, grad_output):
+            >>>         return grad_output
+            >>>
+            >>> a = torch.tensor(1., requires_grad=True, dtype=torch.double).clone()
+            >>> b = a * a
+            >>> Inplace.apply(a)  # This would lead to wrong gradients!
+            >>>                   # but the engine would not know unless we mark_dirty
+            >>> b.backward() # RuntimeError: one of the variables needed for gradient
+            >>>              # computation has been modified by an inplace operation
+
         """
         self.dirty_tensors = args
 
@@ -44,7 +94,7 @@ class _ContextMethodMixin(object):
             'Tensors with shared storages are automatically tracked. Note '
             'that calls to `set_()` are not tracked')
 
-    def mark_non_differentiable(self, *args):
+    def mark_non_differentiable(self, *args: Any):
         r"""Marks outputs as non-differentiable.
 
         **This should be called at most once, only from inside the**
@@ -56,17 +106,68 @@ class _ContextMethodMixin(object):
         be a zero tensor with the same shape as the shape of a corresponding
         output.
 
-        This is used e.g. for indices returned from a max :class:`Function`.
+        This is used e.g. for indices returned from a sort. See example::
+            >>> class Func(Function):
+            >>>     @staticmethod
+            >>>     def forward(ctx, x):
+            >>>         sorted, idx = x.sort()
+            >>>         ctx.mark_non_differentiable(idx)
+            >>>         ctx.save_for_backward(x, idx)  # x is an input
+            >>>                                        # idx is an output
+            >>>         return sorted, idx
+            >>>
+            >>>     @staticmethod
+            >>>     @once_differentiable  # grad_input is not a function of input
+            >>>     def backward(ctx, g1, g2):  # still need to accept g2
+            >>>         x, idx = ctx.saved_tensors
+            >>>         grad_input = torch.zeros_like(x)
+            >>>         grad_input.index_add_(0, idx, g1)
+            >>>         return grad_input
+
         """
         self.non_differentiable = args
 
-    def set_materialize_grads(self, value):
-        r"""Sets whether to materialize output grad tensors. Default is true.
+    def set_materialize_grads(self, value: bool):
+        r"""Sets whether to materialize output grad tensors. Default is ``True``.
 
         **This should be called only from inside the** :func:`forward` **method**
 
-        If true, undefined output grad tensors will be expanded to tensors full
+        If ``True``, undefined output grad tensors will be expanded to tensors full
         of zeros prior to calling the :func:`backward` method.
+
+        Example::
+            >>> class SimpleFunc(Function):
+            >>>     @staticmethod
+            >>>     def forward(ctx, x):
+            >>>         return x.clone(), x.clone()
+            >>>
+            >>>     @staticmethod
+            >>>     @once_differentiable  # grad_input is not a function of input
+            >>>     def backward(ctx, g1, g2):
+            >>>         return g1 + g2  # No check for None necessary
+            >>>
+            >>> # We modify SimpleFunc to handle non-materialized grad outputs
+            >>> class Func(Function):
+            >>>     @staticmethod
+            >>>     def forward(ctx, x):
+            >>>         ctx.set_materialize_grads(False)
+            >>>         ctx.save_for_backward(x)
+            >>>         return x.clone(), x.clone()
+            >>>
+            >>>     @staticmethod
+            >>>     @once_differentiable  # grad_input is not a function of input
+            >>>     def backward(ctx, g1, g2):
+            >>>         x, = ctx.saved_tensors
+            >>>         grad_input = torch.zeros_like(x)
+            >>>         if g1 is not None:  # We must check for None now
+            >>>             grad_input += g1
+            >>>         if g2 is not None:
+            >>>             grad_input += g2
+            >>>         return grad_input
+            >>>
+            >>> a = torch.tensor(1., requires_grad=True)
+            >>> b, _ = Func.apply(a)  # induces g2 to be undefined
+
         """
         self.materialize_grads = value
 
@@ -104,27 +205,23 @@ class FunctionMeta(type):
 
 # mypy doesn't understand `with_metaclass` from torch._six
 class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixin, _HookMixin)):  # type: ignore[misc]
-    r"""Records operation history and defines formulas for differentiating ops.
+    r"""Base class to create custom `autograd.Function`
 
-    See the Note on extending the autograd engine for more details on how to use
-    this class: https://pytorch.org/docs/stable/notes/extending.html#extending-torch-autograd
+    To create a custom `autograd.Function`, subclass this class and implement
+    the :meth:`forward` and :meth`backward` static methods.
 
-    Every operation performed on :class:`Tensor` s creates a new function
-    object, that performs the computation, and records that it happened.
-    The history is retained in the form of a DAG of functions, with edges
-    denoting data dependencies (``input <- output``). Then, when backward is
-    called, the graph is processed in the topological ordering, by calling
-    :func:`backward` methods of each :class:`Function` object, and passing
-    returned gradients on to next :class:`Function` s.
+    To ensure correctness and best performance, make sure you are calling the
+    correct methods on ``ctx`` and validating your backward function using
+    :func:`torch.autograd.gradcheck`.
 
-    Normally, the only way users interact with functions is by creating
-    subclasses and defining new operations. This is a recommended way of
-    extending torch.autograd.
+    See :ref:`extending-autograd` for more details on how to use this class.
+
+    .. note::
+        To use your custom op in your forward pass, call the ``apply`` class method.
 
     Examples::
 
         >>> class Exp(Function):
-        >>>
         >>>     @staticmethod
         >>>     def forward(ctx, i):
         >>>         result = i.exp()
@@ -136,7 +233,7 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
         >>>         result, = ctx.saved_tensors
         >>>         return grad_output * result
         >>>
-        >>> #Use it by calling the apply method:
+        >>> # Use it by calling the apply method:
         >>> output = Exp.apply(input)
     """
     def __init__(self, *args, **kwargs):
