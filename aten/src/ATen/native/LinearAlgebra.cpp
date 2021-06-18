@@ -2166,31 +2166,13 @@ static void check_str_ord_valid(const c10::string_view str_ord, optional<IntArra
     "\" can only be used if either len(dim) == 2 or (self.dim() == 2 and dim is None)");
 }
 
-// Performs vector norm for ord = +/-infinity, and the second dimension reduction
-// for matrix norms.
+// Performs second dimension reduction for matrix norms
 static Tensor _norm_min_max(Tensor& self, double ord, int64_t dim, bool keepdim) {
-  Tensor result;
-  if (self.numel() == 0 && self.sizes()[dim] > 0) {
-    // This special case is needed in matrix norm for tensors with 3 or more dims,
-    // or in vector norm for order inf and -inf for tesnsors with 2 or more dims.
-    // When the sizes of the dims to be reduced are greater than 0 but another dim
-    // in the tensor is size 0 (thus numel == 0), we must either flatten or resize
-    // the second reduction dim to 1, to avoid calling min/max, which would throw
-    // an error.
-    if (self.sizes()[dim] != 1) {
-      auto new_sizes = self.sizes().vec();
-      new_sizes[dim] = 1;
-      self.resize_(new_sizes);
-    }
-    result = keepdim ? self : self.flatten(dim);
+  if (ord > 0) {
+    return self.amax(dim, keepdim);
   } else {
-    if (ord > 0) {
-      result = std::get<0>(self.max(dim, keepdim));
-    } else {
-      result = std::get<0>(self.min(dim, keepdim));
-    }
+    return self.amin(dim, keepdim);
   }
-  return result;
 }
 
 // Performs matrix norm

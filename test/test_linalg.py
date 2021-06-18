@@ -1909,6 +1909,7 @@ class TestLinalg(TestCase):
                 input_numpy = input.cpu().numpy()
                 result_numpy = np.linalg.norm(input_numpy, ord, dim, keepdim)
                 result = torch.linalg.norm(input, ord, dim, keepdim)
+                self.assertEqual(result.shape, result_numpy.shape, msg=msg)
                 self.assertEqual(result, result_numpy, msg=msg)
 
         ord_vector = [0, 0.5, 1, 2, 3, inf, -0.5, -1, -2, -3, -inf, None]
@@ -1951,6 +1952,7 @@ class TestLinalg(TestCase):
                 result_numpy = np.linalg.norm(input_numpy, ord, dim, keepdim)
                 for op in ops:
                     result = op(input, ord, dim, keepdim)
+                    self.assertEqual(result.shape, result_numpy.shape, msg=msg)
                     self.assertEqual(result, result_numpy, msg=msg)
 
         ord_matrix = ['fro', 'nuc', 1, 2, inf, -1, -2, -inf, None]
