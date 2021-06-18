@@ -212,12 +212,19 @@ void DistEngine::computeDependencies(
     queue.push(mapEntry.second.get());
   }
 
+  bool might_use_cuda = at::globalContext().hasCUDA();
+  bool will_use_cuda = false;
+
   edge_list recvBackwardEdges;
   // Traverse the graph.
   auto& dependencies = graphTask->dependencies_;
   while (!queue.empty()) {
     auto fn = queue.front();
     queue.pop();
+
+    if (might_use_cuda && !will_use_cuda) {
+      will_use_cuda = fn->stream(c10::DeviceType::CUDA).has_value();
+    }
 
     for (const auto& edge : fn->next_edges()) {
       if (auto nextFn = edge.function.get()) {
@@ -253,6 +260,12 @@ void DistEngine::computeDependencies(
         }
       }
     }
+  }
+
+  if (will_use_cuda) {
+    // Collects current and default streams for devices where this process has a context,
+    // so graphTask::exec_post_processing can sync them with leaf_streams.
+    graphTask->stash_current_streams();
   }
 
   // Now lets compute which functions need to be executed. The algorithm is as
@@ -606,8 +619,6 @@ size_t DistEngine::numBackwardPasses() const {
 
 std::unordered_map<std::string, int> DistEngine::getDebugInfo() const {
   std::unordered_map<std::string, int> debugInfo;
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-  auto& DistAutogradContainer = DistAutogradContainer::getInstance();
   debugInfo[kNumBackwardPasses] = numBackwardPasses();
   debugInfo[kNumAutogradContexts] =
       DistAutogradContainer::getInstance().numAutogradContexts();

@@ -807,7 +807,7 @@ A store implementation that uses a file to store the underlying key-value pairs.
 
 Arguments:
     file_name (str): path of the file in which to store the key-value pairs
-    world_size (int): The total number of processes using the store
+    world_size (int, optional): The total number of processes using the store. Default is -1 (a negative value indicates a non-fixed number of store users).
 
 Example::
     >>> import torch.distributed as dist
@@ -818,7 +818,13 @@ Example::
     >>> store2.get("first_key")
 
       )")
-      .def(py::init<const std::string&, int>());
+      .def(py::init<const std::string&, int>(),
+           py::arg("file_name"),
+           py::arg("world_size") = -1)
+      .def_property_readonly(
+          "path",
+          &::c10d::FileStore::getPath,
+          R"(Gets the path of the file used by FileStore to store key-value pairs.)");
 
 #ifndef _WIN32
   intrusive_ptr_class_<::c10d::HashStore>(
@@ -854,7 +860,7 @@ the server to establish a connection.
 Arguments:
     host_name (str): The hostname or IP Address the server store should run on.
     port (int): The port on which the server store should listen for incoming requests.
-    world_size (int, optional): The total number of store users (number of clients + 1 for the server). Default is -1 (a negative value indicates an non-fixed number of store users).
+    world_size (int, optional): The total number of store users (number of clients + 1 for the server). Default is -1 (a negative value indicates a non-fixed number of store users).
     is_master (bool, optional): True when initializing the server store and False for client stores. Default is False.
     timeout (timedelta, optional): Timeout used by the store during initialization and for methods such as :meth:`~torch.distributed.store.get` and :meth:`~torch.distributed.store.wait`. Default is timedelta(seconds=300)
     wait_for_worker (bool, optional): Whether to wait for all the workers to connect with the server store. This is only applicable when world_size is a fixed value. Default is True.
@@ -1592,19 +1598,19 @@ Example::
         add("key3", 3);
         add("key3", 2);
         if (get("key") != "6") {
-          throw std::runtime_error("assertion failed");
+          TORCH_CHECK(false, "assertion failed");
         }
         if (get("key0") != "value0") {
-          throw std::runtime_error("assertion failed");
+          TORCH_CHECK(false, "assertion failed");
         }
         if (get("key1") != "value1") {
-          throw std::runtime_error("assertion failed");
+          TORCH_CHECK(false, "assertion failed");
         }
         if (get("key2") != "value2") {
-          throw std::runtime_error("assertion failed");
+          TORCH_CHECK(false, "assertion failed");
         }
         if (get("key3") != "15") {
-          throw std::runtime_error("assertion failed");
+          TORCH_CHECK(false, "assertion failed");
         }
       },
       py::call_guard<py::gil_scoped_release>());
