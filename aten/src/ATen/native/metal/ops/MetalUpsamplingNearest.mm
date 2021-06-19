@@ -1,7 +1,7 @@
 #import <ATen/native/metal/MetalCommandBuffer.h>
 #import <ATen/native/metal/MetalTensorImpl.h>
 #import <ATen/native/metal/MetalTensorImplStorage.h>
-#import <ATen/native/metal/MetalUtils.h>
+#import <ATen/native/metal/MetalTensorUtils.h>
 #import <ATen/native/metal/MetalContext.h>
 #import <ATen/native/metal/mpscnn/MPSCNNUtils.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
@@ -46,7 +46,7 @@ Tensor upsample_nearest2d_vec(
   }
   MPSImage* X = imageFromTensor(input);
   MetalTensorImplStorage mt{outputSizes};
-  MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
+  MetalCommandBuffer* commandBuffer = getCommandBuffer(input);
   mt.texture()->allocateTemporaryStorage(outputSizes, commandBuffer);
   MPSImage* Y = mt.texture()->image();
   if (@available(iOS 11.0, *)) {

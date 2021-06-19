@@ -2,7 +2,7 @@
 #import <ATen/native/metal/MetalCommandBuffer.h>
 #import <ATen/native/metal/MetalTensorImpl.h>
 #import <ATen/native/metal/MetalTensorImplStorage.h>
-#import <ATen/native/metal/MetalUtils.h>
+#import <ATen/native/metal/MetalTensorUtils.h>
 #import <ATen/native/metal/MetalContext.h>
 #import <ATen/native/metal/mpscnn/MPSCNNUtils.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
@@ -18,13 +18,13 @@ namespace metal {
 
 Tensor cat_batch(const TensorList tensors, MetalTensorImplStorage& mt) {
   at::Tensor tensor = tensors[0];
-  MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(tensor);
+  MetalCommandBuffer* commandBuffer = getCommandBuffer(tensor);
   MPSImage* Y = mt.texture()->image();
   ushort cat_dim4_pointer = 0;
   for (int i = 0; i < tensors.size(); ++i) {
     const auto& t = tensors[i];
     MPSImage* X = imageFromTensor(t);
-    MetalCommandBuffer* Xcb = getCommandBufferFromTensor(t);
+    MetalCommandBuffer* Xcb = getCommandBuffer(t);
     TORCH_CHECK(
         [commandBuffer isEqual:Xcb],
         @"inputs have different Metal command buffers");
@@ -58,13 +58,13 @@ Tensor cat_batch(const TensorList tensors, MetalTensorImplStorage& mt) {
 
 Tensor cat_feature(const TensorList tensors, MetalTensorImplStorage& mt) {
   at::Tensor tensor = tensors[0];
-  MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(tensor);
+  MetalCommandBuffer* commandBuffer = getCommandBuffer(tensor);
   MPSImage* Y = mt.texture()->image();
   ushort channel_offset = 0;
   for (int i = 0; i < tensors.size(); ++i) {
     const auto& t = tensors[i];
     MPSImage* X = imageFromTensor(t);
-    MetalCommandBuffer* Xcb = getCommandBufferFromTensor(t);
+    MetalCommandBuffer* Xcb = getCommandBuffer(t);
     TORCH_CHECK(
         [commandBuffer isEqual:Xcb],
         @"inputs have different Metal command buffers");
@@ -124,7 +124,7 @@ Tensor cat(const TensorList tensors, int64_t dim) {
       "Metal cat is implemented only for batch dimension");
   int64_t cat_dim_size = 0;
   at::Tensor tensor = tensors[0];
-  MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(tensor);
+  MetalCommandBuffer* commandBuffer = getCommandBuffer(tensor);
   for (int i = 0; i < tensors.size(); ++i) {
     const auto& t = tensors[i];
     TORCH_CHECK(t.dim() == 4, "Metal cat expects 4 dimensional inputs");

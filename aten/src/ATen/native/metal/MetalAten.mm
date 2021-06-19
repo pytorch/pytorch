@@ -1,7 +1,7 @@
 #import <ATen/native/metal/MetalTensorImpl.h>
 #import <ATen/native/metal/MetalTensorImplStorage.h>
 #import <ATen/native/metal/MetalContext.h>
-#import <ATen/native/metal/MetalUtils.h>
+#import <ATen/native/metal/MetalTensorUtils.h>
 #include <ATen/metal/Context.h>
 #include <torch/script.h>
 

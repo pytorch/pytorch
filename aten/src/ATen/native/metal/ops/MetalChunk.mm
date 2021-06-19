@@ -2,7 +2,7 @@
 #import <ATen/native/metal/MetalCommandBuffer.h>
 #import <ATen/native/metal/MetalTensorImpl.h>
 #import <ATen/native/metal/MetalTensorImplStorage.h>
-#import <ATen/native/metal/MetalUtils.h>
+#import <ATen/native/metal/MetalTensorUtils.h>
 #import <ATen/native/metal/MetalContext.h>
 #import <ATen/native/metal/mpscnn/MPSCNNUtils.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
@@ -28,7 +28,7 @@ std::vector<Tensor> chunk(const Tensor& input, int64_t chunks, int64_t dim) {
   std::vector<Tensor> splits(num_splits);
   int64_t last_split_size = split_size - (split_size * num_splits - dim_size);
   MPSImage* X = imageFromTensor(input);
-  MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
+  MetalCommandBuffer* commandBuffer = getCommandBuffer(input);
   auto outputSize1 = {input.size(0), split_size, input.size(2), input.size(3)};
   auto outputSize2 = {input.size(0), last_split_size, input.size(2), input.size(3)};
   MetalTensorImplStorage mt1(outputSize1);
