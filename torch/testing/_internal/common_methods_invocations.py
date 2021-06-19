@@ -157,12 +157,9 @@ class SampleInput(object):
             # either a torch tensor or a scalar
             if isinstance(torch_inp, torch.Tensor):
                 numpy_inp = torch_inp.cpu().numpy()
-            elif is_iterable_of_tensors(torch_inp):
-                numpy_inp = np.array([t_inp.cpu().numpy() for t_inp in torch_inp])
-            elif isinstance(torch_inp, list):
-                numpy_inp = [to_numpy(t_inp) for t_inp in torch_inp]
-            elif isinstance(torch_inp, tuple):
-                numpy_inp = tuple(to_numpy(t_inp) for t_inp in torch_inp)
+            elif is_iterable_of_tensors(torch_inp) or isinstance(torch_inp, (list, tuple)):
+                iter_class = type(torch_inp)
+                numpy_inp = iter_class(to_numpy(t_inp) for t_inp in torch_inp)	
             elif isinstance(torch_inp, dict):
                 numpy_inp = {k: to_numpy(t_inp) for k, t_inp in torch_inp.items()}
             else:
@@ -1591,7 +1588,7 @@ def sample_inputs_take_along_dim(op_info, device, dtype, requires_grad, **kwargs
             )
 
 def sample_inputs_amax_amin(op_info, device, dtype, requires_grad, **kwargs):
-    test_cases = (  # type: ignore[assignment]
+    test_cases = (  # type: ignore
         ((S, S, S), (), {}),
         ((S, S, S), (1,), {}),
         ((S, S, S), ((1, 2,),), {}),
