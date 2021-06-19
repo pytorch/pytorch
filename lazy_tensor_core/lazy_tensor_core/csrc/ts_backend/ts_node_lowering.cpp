@@ -13,6 +13,7 @@
 #include "lazy_tensor_core/csrc/ops/constant_pad_nd.h"
 #include "lazy_tensor_core/csrc/ops/device_data.h"
 #include "lazy_tensor_core/csrc/ops/expand.h"
+#include "lazy_tensor_core/csrc/ops/generic_slice.h"
 #include "lazy_tensor_core/csrc/ops/index_select.h"
 #include "lazy_tensor_core/csrc/ops/ltc_ops.h"
 #include "lazy_tensor_core/csrc/ops/permute.h"
@@ -26,6 +27,7 @@
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_forward.h"
 #include "lazy_tensor_core/csrc/ops/ts_softmax_backward.h"
 #include "lazy_tensor_core/csrc/ops/unsqueeze.h"
+#include "lazy_tensor_core/csrc/ops/update_slice.h"
 #include "lazy_tensor_core/csrc/ops/view.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_computation_client.h"
@@ -57,6 +59,17 @@ class TSNodeLowering : public NodeLowering {
   }
 
   lazy_tensors::Shape Infer(const ir::Node* node) override {
+    if (node->op() == *ir::ops::ltc_generic_slice) {
+      auto generic_slice = ir::NodeCast<ir::ops::GenericSlice>(
+          node, *ir::ops::ltc_generic_slice);
+      const ir::Output& argument = node->operand(0);
+      return lazy_tensors::Shape(argument.shape().element_type(),
+                                 generic_slice->sizes());
+    }
+    if (node->op() == *ir::ops::ltc_update_slice) {
+      const ir::Output& argument = node->operand(0);
+      return argument.shape();
+    }
     switch (node->op().op) {
       case at::aten::expand: {
         auto expand =
@@ -153,6 +166,14 @@ class TSNodeLowering : public NodeLowering {
     }
     if (node->op() == *ir::ops::ltc_cast) {
       return LowerCast(ir::NodeCast<ir::ops::Cast>(node, *ir::ops::ltc_cast));
+    }
+    if (node->op() == *ir::ops::ltc_generic_slice) {
+      return LowerGenericSlice(ir::NodeCast<ir::ops::GenericSlice>(
+          node, *ir::ops::ltc_generic_slice));
+    }
+    if (node->op() == *ir::ops::ltc_update_slice) {
+      return LowerUpdateSlice(
+          ir::NodeCast<ir::ops::UpdateSlice>(node, *ir::ops::ltc_update_slice));
     }
     if (node->op().op == at::prim::Constant) {
       auto scalar_node = dynamic_cast<const ir::ops::Scalar*>(node);
@@ -438,10 +459,7 @@ class TSNodeLowering : public NodeLowering {
         LowerBuiltin(at::aten::as_strided, dest_arguments);
     LTC_CHECK_EQ(as_strided_out.size(), 1);
     torch::jit::Value* as_strided = as_strided_out.front();
-    std::vector<torch::jit::NamedValue> copy_from_arguments;
-    copy_from_arguments.emplace_back(as_strided);
-    copy_from_arguments.emplace_back(loctx()->GetOutputOp(input_op));
-    LowerBuiltin(at::aten::copy_, copy_from_arguments);
+    GenerateCopy(as_strided, loctx()->GetOutputOp(input_op));
     return {destination};
   }
 
@@ -527,6 +545,20 @@ class TSNodeLowering : public NodeLowering {
     return expand_out;
   }
 
+  TSOpVector LowerGenericSlice(const ir::ops::GenericSlice* node) {
+    const ir::Output& input = node->operand(0);
+    torch::jit::Value* base = loctx()->GetOutputOp(input);
+    const auto& base_indices = node->base_indices();
+    const auto& sizes = node->sizes();
+    const lazy_tensors::Shape& input_shape = input.shape();
+    LTC_CHECK_EQ(sizes.size(), base_indices.size());
+    LTC_CHECK_EQ(input_shape.rank(), base_indices.size());
+    for (size_t dim = 0; dim < base_indices.size(); ++dim) {
+      base = GenerateOffsetSlice(base, dim, base_indices[dim], sizes[dim]);
+    }
+    return {base};
+  }
+
   TSOpVector LowerIndexSelect(const ir::ops::IndexSelect* node) {
     std::vector<torch::jit::NamedValue> arguments;
     arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
@@ -604,6 +636,22 @@ class TSNodeLowering : public NodeLowering {
     return LowerBuiltin(sum, arguments, kwarguments);
   }
 
+  TSOpVector LowerUpdateSlice(const ir::ops::UpdateSlice* node) {
+    torch::jit::Value* dest =
+        GenerateClone(loctx()->GetOutputOp(node->operand(0)));
+    const auto& base_indices = node->base_indices();
+    const ir::Output& source_argument = node->operand(1);
+    const lazy_tensors::Shape& source_shape = source_argument.shape();
+    LTC_CHECK_EQ(source_shape.rank(), base_indices.size());
+    torch::jit::Value* base = dest;
+    for (size_t dim = 0; dim < base_indices.size(); ++dim) {
+      base = GenerateOffsetSlice(base, dim, base_indices[dim],
+                                 source_shape.dimensions(dim));
+    }
+    GenerateCopy(base, loctx()->GetOutputOp(source_argument));
+    return {dest};
+  }
+
   TSOpVector LowerUnsqueeze(const ir::ops::Unsqueeze* node) {
     std::vector<torch::jit::NamedValue> arguments;
     arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
@@ -624,6 +672,28 @@ class TSNodeLowering : public NodeLowering {
     TSOpVector cloned = LowerBuiltin(at::aten::clone, clone_arguments);
     LTC_CHECK_EQ(cloned.size(), 1);
     return cloned.front();
+  }
+
+  void GenerateCopy(torch::jit::Value* destination, torch::jit::Value* source) {
+    std::vector<torch::jit::NamedValue> arguments;
+    arguments.emplace_back(destination);
+    arguments.emplace_back(source);
+    LowerBuiltin(at::aten::copy_, arguments);
+  }
+
+  torch::jit::Value* GenerateOffsetSlice(torch::jit::Value* base,
+                                         lazy_tensors::int64 dim,
+                                         lazy_tensors::int64 offset,
+                                         lazy_tensors::int64 len) {
+    std::vector<torch::jit::NamedValue> arguments;
+    arguments.emplace_back(base);
+    arguments.emplace_back(dim);
+    arguments.emplace_back(offset);
+    arguments.emplace_back(offset + len);
+    arguments.emplace_back(1);
+    TSOpVector selected = LowerBuiltin(at::aten::slice, arguments);
+    LTC_CHECK_EQ(selected.size(), 1);
+    return selected.front();
   }
 
   ts_backend::TSLoweringContext* loctx() {
