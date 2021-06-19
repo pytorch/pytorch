@@ -975,6 +975,11 @@ class DistributedTest:
                 # Every element on device 0 or 1 should be the average of 0 and 1, i.e., 0.5.
                 for p in model.parameters():
                     self.assertEqual(p.data, torch.ones_like(p.data) * 0.5)
+            else:
+                # Every element on device not in the subgroup should be -rank,
+                # because `get_world_size()` returns -1.
+                for p in model.parameters():
+                    self.assertEqual(p.data, torch.ones_like(p.data) * -rank)
 
         # NCCL Batch SEND RECV
         @skip_if_no_gpu
