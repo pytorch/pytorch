@@ -38,6 +38,7 @@ supported:
   - permute
   - repeat
   - select.int
+  - slice.Tensor
   - _softmax
   - _softmax_backward_data
   - squeeze_
