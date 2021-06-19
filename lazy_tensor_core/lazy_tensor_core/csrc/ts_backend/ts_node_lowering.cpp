@@ -5,6 +5,7 @@
 #include <torch/torch.h>
 
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
+#include "lazy_tensor_core/csrc/data_ops.h"
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/ops/as_strided.h"
 #include "lazy_tensor_core/csrc/ops/as_strided_view_update.h"
@@ -21,6 +22,7 @@
 #include "lazy_tensor_core/csrc/ops/scalar.h"
 #include "lazy_tensor_core/csrc/ops/select.h"
 #include "lazy_tensor_core/csrc/ops/softmax.h"
+#include "lazy_tensor_core/csrc/ops/squeeze.h"
 #include "lazy_tensor_core/csrc/ops/stack.h"
 #include "lazy_tensor_core/csrc/ops/sum.h"
 #include "lazy_tensor_core/csrc/ops/ts_embedding_dense_backward.h"
@@ -117,6 +119,10 @@ class TSNodeLowering : public NodeLowering {
       case at::aten::repeat: {
         return InferRepeat(
             ir::NodeCast<ir::ops::Repeat>(node, ir::OpKind(at::aten::repeat)));
+      }
+      case at::aten::squeeze: {
+        return InferSqueeze(ir::NodeCast<ir::ops::Squeeze>(
+            node, ir::OpKind(at::aten::squeeze)));
       }
       case at::aten::stack: {
         return InferStack(
@@ -243,6 +249,10 @@ class TSNodeLowering : public NodeLowering {
     if (node->op().op == at::aten::softmax) {
       return LowerSoftmax(
           ir::NodeCast<ir::ops::Softmax>(node, ir::OpKind(at::aten::softmax)));
+    }
+    if (node->op().op == at::aten::squeeze) {
+      return LowerSqueeze(
+          ir::NodeCast<ir::ops::Squeeze>(node, ir::OpKind(at::aten::squeeze)));
     }
     if (node->op().op == at::aten::_softmax_backward_data) {
       return LowerSoftmaxBackward(ir::NodeCast<ir::ops::TSSoftmaxBackward>(
@@ -373,6 +383,14 @@ class TSNodeLowering : public NodeLowering {
       target_size[idx] = padded_size[idx] * repeats[idx];
     }
     return lazy_tensors::Shape(input_shape.element_type(), target_size);
+  }
+
+  static lazy_tensors::Shape InferSqueeze(const ir::ops::Squeeze* squeeze) {
+    const ir::Output& argument = squeeze->operand(0);
+    const lazy_tensors::Shape& argument_shape = argument.shape();
+    const auto output_sizes =
+        BuildSqueezedDimensions(argument_shape.dimensions(), squeeze->dim());
+    return lazy_tensors::Shape(argument_shape.element_type(), output_sizes);
   }
 
   static lazy_tensors::Shape InferStack(const ir::ops::Stack* stack) {
@@ -627,6 +645,15 @@ class TSNodeLowering : public NodeLowering {
     arguments.emplace_back(loctx()->GetOutputOp(node->operand(1)));
     arguments.emplace_back(node->dim());
     arguments.emplace_back(loctx()->GetOutputOp(node->operand(2)));
+    return LowerBuiltin(node, arguments);
+  }
+
+  TSOpVector LowerSqueeze(const ir::ops::Squeeze* node) {
+    std::vector<torch::jit::NamedValue> arguments;
+    arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
+    if (node->dim() != -1) {
+      arguments.push_back(node->dim());
+    }
     return LowerBuiltin(node, arguments);
   }
 

@@ -41,6 +41,8 @@ supported:
   - slice.Tensor
   - _softmax
   - _softmax_backward_data
+  - squeeze
+  - squeeze.dim
   - squeeze_
   - squeeze_.dim
   - stack

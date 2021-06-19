@@ -860,39 +860,29 @@ at::Tensor stack(at::TensorList tensors, int64_t dim) {
       LazyTensor::stack(bridge::GetLtcTensors(tensors), dim));
 }
 
+at::Tensor squeeze(const at::Tensor& self) {
+  LTC_FN_COUNTER("xla::");
+  return bridge::AtenFromLtcTensor(
+      LazyTensor::squeeze(bridge::GetLtcTensor(self)));
+}
+
+at::Tensor squeeze(const at::Tensor& self, int64_t dim) {
+  LTC_FN_COUNTER("xla::");
+  return bridge::AtenFromLtcTensor(
+      LazyTensor::squeeze(bridge::GetLtcTensor(self), dim));
+}
+
 at::Tensor& squeeze_(at::Tensor& self) {
-  LTC_FN_TRACK(3);
-  LTC_COUNTER("aten::squeeze_", 1);
-  LTC_VLOG(3) << "XLA squeeze_ :"
-              << " self=" << self.toString();
-  std::vector<at::Tensor> xlatens_tensors = {self};
-  auto xlatens = bridge::LtcCreateTensorList(xlatens_tensors);
-  xlatens[0].squeeze_();
-  std::vector<size_t> xlatens_update_indices = {0};
-  if (bridge::IsInteropView(self)) {
-    bridge::LtcUpdateTensorsMeta(xlatens_tensors, xlatens,
-                                 xlatens_update_indices);
-  } else {
-    bridge::LtcUpdateTensors(xlatens_tensors, xlatens, xlatens_update_indices);
-  }
+  LTC_FN_COUNTER("xla::");
+  LazyTensor self_tensor = bridge::GetLtcTensor(self);
+  LazyTensor::squeeze_(self_tensor);
   return self;
 }
 
 at::Tensor& squeeze_(at::Tensor& self, int64_t dim) {
-  LTC_FN_TRACK(3);
-  LTC_COUNTER("aten::squeeze_", 1);
-  LTC_VLOG(3) << "XLA squeeze_ :"
-              << " self=" << self.toString();
-  std::vector<at::Tensor> xlatens_tensors = {self};
-  auto xlatens = bridge::LtcCreateTensorList(xlatens_tensors);
-  xlatens[0].squeeze_(dim);
-  std::vector<size_t> xlatens_update_indices = {0};
-  if (bridge::IsInteropView(self)) {
-    bridge::LtcUpdateTensorsMeta(xlatens_tensors, xlatens,
-                                 xlatens_update_indices);
-  } else {
-    bridge::LtcUpdateTensors(xlatens_tensors, xlatens, xlatens_update_indices);
-  }
+  LTC_FN_COUNTER("xla::");
+  LazyTensor self_tensor = bridge::GetLtcTensor(self);
+  LazyTensor::squeeze_(self_tensor, dim);
   return self;
 }
 
