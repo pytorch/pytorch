@@ -1131,7 +1131,6 @@ class TestCase(expecttest.TestCase):
     # Compares torch function with reference function for given sample input (object of SampleInput)
     # Note: only values are compared, type comparison is not done here
     def compare_with_reference(self, torch_fn, ref_fn, sample_input, **kwargs):
-        # Note: if .numpy() fails for some reason, we won't know if it failed for inp/args/kwargs (TODO)
         n_inp, n_args, n_kwargs = sample_input.numpy()
         t_inp, t_args, t_kwargs = sample_input.input, sample_input.args, sample_input.kwargs
 
@@ -1147,7 +1146,6 @@ class TestCase(expecttest.TestCase):
             for x, y in zip(actual, expected):
                 self.assertEqual(x, torch.as_tensor(y, dtype=x.dtype), exact_device=False)
         else:
-            # TODO: Does PyTorch eer return other than tensor/iterable of tensors?
             raise TypeError(f"Got type: {type(actual)} from PyTorch but only tensors/iterable of tensors are currently supported")
 
     # Compares the given Torch and NumPy functions on the given tensor-like object.

@@ -175,9 +175,8 @@ class TestCommon(TestCase):
     @suppress_warnings
     @ops(ref_test_ops, allowed_dtypes=(torch.float32, torch.long))
     def test_reference_testing(self, device, dtype, op):
-        # TODO: We should ideally use these tests for UnaryUfuncInfo as well, see: https://github.com/pytorch/pytorch/pull/59369/
         if isinstance(op, (UnaryUfuncInfo, SpectralFuncInfo, ShapeFuncInfo)):
-            self.skipTest("Skipped! UnaryUfuncInfo and SpectralOpInfo have implemented reference checks separately.")
+            self.skipTest(f"Skipped! {type(op).__name__} have implemented reference checks separately.")
 
         sample_inputs = op.sample_inputs(device, dtype)
         for sample_input in sample_inputs:
