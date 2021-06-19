@@ -6982,8 +6982,8 @@ class DistributedTest:
                     for i in range(6):
                         inp = torch.randn(10, 2, 4, 4).cuda(rank)
                         out = model_inference(inp)
-                        loss = out.sum()
-                        loss.backward()
+                        # Do not need to run backward as we are testing only
+                        # inference mode here.
 
                 # Ensure sync does not occur in eval() mode.
                 if BACKEND == "nccl":
@@ -7091,6 +7091,9 @@ class DistributedTest:
                     loss = get_loss(out)
                     loss.backward()
                     self._model_step(model)
+                    # Test non 1:1 calls to fwd/backward to ensure
+                    # https://github.com/pytorch/pytorch/issues/58111 is fixed.
+                    model_static_graph(inp, output_type=output_type)
                     out_static = model_static_graph(inp, output_type=output_type)
                     self.assertTrue(isinstance(out_static, type_mapping[output_type]))
                     loss_static = get_loss(out_static)
@@ -7100,3 +7103,140 @@ class DistributedTest:
                         model.parameters(), model_static_graph.parameters()
                     ):
                         self.assertEqual(p, p_static)
+
+        def _verify_ddp_model(self, ddp_model, local_model):
+            # Verify weights are appropriately synchronized.
+            all_params = [None for _ in range(dist.get_world_size())]
+            dist.all_gather_object(all_params, list(ddp_model.parameters()))
+            rank_0_params = all_params[0]
+            for param_list in all_params[1:]:
+                for i, p in enumerate(param_list):
+                    rank_0_param = rank_0_params[i]
+                    self.assertTrue(torch.equal(rank_0_param.data.cpu(), p.data.cpu()))
+            if self.rank == 0:
+                local_params = list(local_model.parameters())
+                for dist_param, local_param in zip(rank_0_params, local_params):
+                    self.assertTrue(torch.equal(dist_param.data.cpu(), local_param.data.cpu()))
+
+        def _test_ddp_bwd_with_retain_graph(self, static_graph, find_unused_parameters):
+            # Ensures that calling backward multiple times with retain_graph=True
+            # is supported in DDP and verifies parity with local training.
+            class ToyModel(nn.Module):
+                def __init__(self):
+                    super(ToyModel, self).__init__()
+                    self.net1 = nn.Linear(10, 10, bias=False)
+
+                def forward(self, x):
+                    return self.net1(x)
+
+            rank = self.rank
+            torch.cuda.set_device(rank)
+            model = ToyModel().cuda(torch.cuda.current_device())
+            local_model = copy.deepcopy(model)
+            ddp_model = torch.nn.parallel.DistributedDataParallel(
+                model,
+                device_ids=[torch.cuda.current_device()],
+                find_unused_parameters=find_unused_parameters,
+            )
+            if static_graph:
+                ddp_model._set_static_graph()
+
+            # Run multiple backwards for DDP and local model.
+            inp = torch.randn(20, 10, device=rank)
+            for _ in range(3):
+                loss = ddp_model(inp).sum()
+            loss.backward(retain_graph=True)
+            loss.backward(retain_graph=True)
+            loss.backward()
+
+            for _ in range(3):
+                local_loss = local_model(inp).sum()
+            local_loss.backward(retain_graph=True)
+            local_loss.backward(retain_graph=True)
+            local_loss.backward()
+
+            # Run additional forward/backward steps to ensure that things like
+            # rebuild_buckets work appropriately.
+            for _ in range(3):
+                loss = ddp_model(inp).sum()
+                local_loss = local_model(inp).sum()
+                loss.backward()
+                local_loss.backward()
+            # Compare models.
+            self._verify_ddp_model(ddp_model, local_model)
+
+        @skip_if_lt_x_gpu(2)
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        def test_ddp_bwd_with_retain_graph(self):
+            self._test_ddp_bwd_with_retain_graph(
+                static_graph=False, find_unused_parameters=False
+            )
+
+        @skip_if_lt_x_gpu(2)
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        def test_ddp_bwd_with_retain_graph_find_unused_params(self):
+            self._test_ddp_bwd_with_retain_graph(
+                static_graph=False, find_unused_parameters=True
+            )
+
+        @skip_if_lt_x_gpu(2)
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        def test_ddp_bwd_with_retain_graph_static(self):
+            self._test_ddp_bwd_with_retain_graph(
+                static_graph=True, find_unused_parameters=False
+            )
+
+        @skip_if_lt_x_gpu(2)
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        def test_ddp_bwd_with_retain_graph_static_find_unused_params(self):
+            self._test_ddp_bwd_with_retain_graph(
+                static_graph=True, find_unused_parameters=True
+            )
+
+        @skip_if_lt_x_gpu(2)
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        def test_ddp_bwd_with_retain_graph_static_single_fwd(self):
+            # Ensures that if we do 1 forward pass immediately followed by 2
+            # backward passes, there is no issue. In particular, verifies that
+            # delay allreduce is enqueued only once.
+            rank = self.rank
+            model = TwoLinLayerNet().cuda(rank)
+            model_ddp = torch.nn.parallel.DistributedDataParallel(
+                model,
+                device_ids=[rank]
+            )
+            model_ddp._set_static_graph()
+            model_local = copy.deepcopy(model)
+            inp = torch.randn(2, 10, device=rank)
+            # Run single forward pass followed by 2 calls to backward with
+            # retain_graph=True.
+            out_ddp = model_ddp(inp)
+            out_ddp = torch.add(out_ddp[0], out_ddp[1]).sum()
+            out_local = model_local(inp)
+            out_local = torch.add(out_local[0], out_local[1]).sum()
+            out_ddp.backward(retain_graph=True)
+            out_ddp.backward()
+            out_local.backward(retain_graph=True)
+            out_local.backward()
+            dist_grad_tensor = torch.cat(
+                [param.grad for param in model_ddp.module.parameters()]
+            )
+            local_grad_tensor = torch.cat(
+                [param.grad for param in model_local.parameters()]
+            )
+            self.assertEqual(dist_grad_tensor, local_grad_tensor)
