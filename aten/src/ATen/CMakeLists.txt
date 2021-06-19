@@ -19,11 +19,11 @@ endif()
 # These flag are used in Config but set externally. We must normalize them to
 # 0/1 otherwise `#if ON` will be evaluated to false.
 macro(set_bool OUT IN)
-  if (${IN})
+  if(${IN})
     set(${OUT} 1)
-  else ()
+  else()
     set(${OUT} 0)
-  endif ()
+  endif()
 endmacro()
 
 set_bool(AT_BUILD_WITH_BLAS USE_BLAS)
