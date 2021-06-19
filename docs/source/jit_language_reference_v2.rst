@@ -185,8 +185,7 @@ The example above produces the following output:
 
 .. testoutput::
 
-     1
-     1
+    tensor([1., 1.])
     [ CPUFloatType{2} ]
     True
 
@@ -1418,10 +1417,7 @@ The example above produces the following output:
 .. testoutput::
 
     3
-     1
-     1
-     1
-     1
+    tensor([1., 1., 1., 1.])
     [ CPUFloatType{4} ]
 
 

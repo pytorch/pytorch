@@ -149,16 +149,23 @@ std::string __vectorString( const Tensor& tensor_, const Formatter& formatter) {
   return ss.str();
 }
 
-// Recursive function to generate the print output. Relies on the formatter
+std::string __scalarString( const Tensor& tensor_, const Formatter& formatter) {
+  std::stringstream ss;
+  if (tensor_.numel() > 0) {
+    double* tensor_p = tensor_.data_ptr<double>();
+    ss << formatter.format(tensor_p[0]);
+  }
+  return ss.str();
+}
+
+// Recursive function to generate the print output. Relies on the formatter.
 std::string __tensorString(const Tensor & tensor_, const Formatter& formatter, int64_t indent){
   std::stringstream ss ;
   std::vector<std::string> slices;
   int64_t dim = tensor_.dim();
 
   if (dim == 0) {
-    ss << defaultfloat << tensor_.data_ptr<double>()[0] << std::endl;
-    ss << "[ " << tensor_.toString() << "{}";
-    return ss.str();
+    return __scalarString(tensor_, formatter);
   } else if (dim == 1) {
     return __vectorString(tensor_, formatter);
   } else {
@@ -210,13 +217,18 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
     bool isFloatingDtype =  tensor_.is_floating_point();
     Formatter formatter(tensor, isFloatingDtype);
 
+    // Print the formatted values
     stream << prefix;
     std::string tensorStr = __tensorString(tensor, formatter, indent);
     stream << tensorStr << ")" << std::endl;
 
-    stream << "[ " << tensor_.toString() << "{" << tensor.size(0);
-    for(int64_t i = 1; i < tensor.ndimension(); i++) {
-      stream << "," << tensor.size(i);
+    // Print the tensor type and dimensions
+    stream << "[ " << tensor_.toString() << "{";
+    if (tensor.ndimension() != 0) {
+      stream << tensor.size(0);
+      for (int64_t i = 1; i < tensor.ndimension(); i++) {
+        stream << "," << tensor.size(i);
+      }
     }
     stream << "}";
 
