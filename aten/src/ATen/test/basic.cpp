@@ -240,7 +240,7 @@ void TestToString() {
   Tensor b = ones({3, 7}) * .0000001f;
   std::stringstream s;
   s << b << "\n";
-  std::string expect = "1e-07 *";
+  std::string expect = "tensor([[1.0000e-07, 1.0000e-07, 1.0000e-07, 1.0000e-07, 1.0000e-07, 1.0000e-07, 1.0000e-07],";
   ASSERT_EQ_RESOLVED(s.str().substr(0, expect.size()), expect);
 }
 
