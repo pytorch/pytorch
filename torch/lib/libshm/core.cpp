@@ -2,7 +2,6 @@
 #include <string>
 #include <unordered_map>
 
-#include <TH/TH.h>
 #include <libshm/err.h>
 #include <libshm/socket.h>
 #include <libshm/libshm.h>
@@ -18,7 +17,7 @@ AllocInfo get_alloc_info(const char* filename) {
   info.free = false;
   size_t len = strlen(filename);
   if (len >= sizeof(info.filename)) {
-    throw std::runtime_error("THMapAllocatorContext_filename too long");
+    throw std::runtime_error("MapAllocatorContext_filename too long");
   }
   memcpy(info.filename, filename, len + 1);
   return info;
@@ -114,19 +113,19 @@ THManagedMapAllocatorInit::THManagedMapAllocatorInit(const char* manager_handle,
     AllocInfo info = get_alloc_info(filename);
     socket->register_allocation(info);
   } catch(std::exception &e) {
-    THError(e.what());
+    TORCH_CHECK(false, e.what());
   }
 }
 
 THManagedMapAllocator::THManagedMapAllocator(const char *manager_handle, const char *filename, int flags, ptrdiff_t size)
-  : THManagedMapAllocatorInit(manager_handle, filename), THRefcountedMapAllocator(filename, flags, size) {}
+  : THManagedMapAllocatorInit(manager_handle, filename), at::RefcountedMapAllocator(filename, flags, size) {}
 
 void THManagedMapAllocator::close() {
   if (closed_) return;
   AllocInfo info = get_alloc_info(filename());
   info.free = true;
   ClientSocket &socket = get_manager_socket(manager_handle_);
-  THRefcountedMapAllocator::close();
+  at::RefcountedMapAllocator::close();
   socket.register_deallocation(info);
 }
 

@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/MapAllocator.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_numbers.h>
 
@@ -226,7 +227,7 @@ static PyObject * THPStorage_(fromFile)(PyObject *_unused, PyObject *args, PyObj
     return nullptr;
   }
   if (shared)
-    shared = TH_ALLOCATOR_MAPPED_SHARED;
+    shared = at::ALLOCATOR_MAPPED_SHARED;
   THWStorage *storage = THWStorage_(newWithMapping)(LIBRARY_STATE filename, size, shared);
   return (PyObject*)THPStorage_(New)(storage);
   END_HANDLE_TH_ERRORS
