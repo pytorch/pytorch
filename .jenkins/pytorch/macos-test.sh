@@ -159,6 +159,20 @@ test_jit_hooks() {
   assert_git_not_dirty
 }
 
+test_mobile_nnc_backend() {
+  echo "Testing mobile nnc backend"
+  pushd test/mobile/nnc
+  rm -rf build && mkdir build
+  pushd build
+  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" cmake ..
+  make VERBOSE=1
+  popd
+
+  build/test_mobile_nnc
+  popd
+  assert_git_not_dirty
+}
 
 if [ -z "${BUILD_ENVIRONMENT}" ] || [[ "${BUILD_ENVIRONMENT}" == *-test ]]; then
   test_python_all
@@ -166,6 +180,7 @@ if [ -z "${BUILD_ENVIRONMENT}" ] || [[ "${BUILD_ENVIRONMENT}" == *-test ]]; then
   test_custom_script_ops
   test_jit_hooks
   test_custom_backend
+  test_mobile_nnc_backend
 else
   if [[ "${BUILD_ENVIRONMENT}" == *-test1 ]]; then
     test_python_all
@@ -174,5 +189,6 @@ else
     test_custom_script_ops
     test_jit_hooks
     test_custom_backend
+    test_mobile_nnc_backend
   fi
 fi
