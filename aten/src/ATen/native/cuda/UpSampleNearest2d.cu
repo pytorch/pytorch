@@ -214,7 +214,8 @@ static void upsample_nearest2d_out_cuda_template(
     return;
   }
 
-  if (memory_format == at::MemoryFormat::ChannelsLast) {
+  // heuristic: only use channels_last path when it's faster than the contiguous path
+  if (memory_format == at::MemoryFormat::ChannelsLast && channels >= 4) {
   // if (false) {
     TORCH_INTERNAL_ASSERT(output.is_contiguous(at::MemoryFormat::ChannelsLast),
       "output is not contiguous in channels_last");
