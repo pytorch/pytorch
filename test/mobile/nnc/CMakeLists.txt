@@ -1,5 +1,11 @@
 set(MOBILE_NNC_TEST_ROOT ${TORCH_ROOT}/test/mobile/nnc)
 
+set(MOBILE_NNC_BACKEND_LIB_SRCS
+  ${TORCH_ROOT}/torch/csrc/jit/mobile/nnc/backend.cpp
+  ${TORCH_ROOT}/torch/csrc/jit/mobile/nnc/context.cpp
+  ${TORCH_ROOT}/torch/csrc/jit/mobile/nnc/registry.cpp
+)
+
 set(MOBILE_NNC_TEST_SRCS
   ${MOBILE_NNC_TEST_ROOT}/test_context.cpp
   ${MOBILE_NNC_TEST_ROOT}/test_nnc_backend.cpp
@@ -8,17 +14,11 @@ set(MOBILE_NNC_TEST_SRCS
 
 add_executable(test_mobile_nnc
   ${TORCH_ROOT}/test/cpp/lite_interpreter_runtime/main.cpp
-  ${MOBILE_NNC_TEST_SRCS})
-
-add_library(nnc_backend_lib SHARED
-  ${TORCH_ROOT}/torch/csrc/jit/backends/backend_interface.cpp
-  ${TORCH_ROOT}/torch/csrc/jit/mobile/nnc/backend.cpp
-  ${TORCH_ROOT}/torch/csrc/jit/mobile/nnc/context.cpp
-  ${TORCH_ROOT}/torch/csrc/jit/mobile/nnc/registry.cpp
+  ${MOBILE_NNC_TEST_SRCS}
+  ${MOBILE_NNC_BACKEND_LIB_SRCS}
 )
-target_link_libraries(nnc_backend_lib PRIVATE torch)
 
-target_link_libraries(test_mobile_nnc PRIVATE torch gtest nnc_backend_lib)
+target_link_libraries(test_mobile_nnc PRIVATE torch gtest)
 target_include_directories(test_mobile_nnc PRIVATE ${ATen_CPU_INCLUDE})
 target_compile_definitions(test_mobile_nnc PRIVATE USE_GTEST)
 
