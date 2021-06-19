@@ -1,6 +1,6 @@
 #import <ATen/native/metal/MetalTensorImpl.h>
 #import <ATen/native/metal/MetalTensorImplStorage.h>
-#import <ATen/native/metal/MetalUtils.h>
+#import <ATen/native/metal/MetalTensorUtils.h>
 #import <ATen/native/metal/mpscnn/MPSImageWrapper.h>
 
 #include <ATen/Utils.h>
@@ -49,7 +49,7 @@ class API_AVAILABLE(ios(10.0), macos(10.13)) MetalTensorImplStorage::Impl {
 
 MetalTensorImplStorage::MetalTensorImplStorage(
     const std::vector<int64_t>& sizes)
-    : MetalTensorImplStorage(sizes, compute_strides(sizes)) {}
+    : MetalTensorImplStorage(sizes, computeStrides(sizes)) {}
 
 MetalTensorImplStorage::MetalTensorImplStorage(
     const std::vector<int64_t>& sizes,

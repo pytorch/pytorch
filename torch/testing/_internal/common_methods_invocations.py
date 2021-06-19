@@ -3292,24 +3292,24 @@ def sample_inputs_fmod_remainder(op_info, device, dtype, requires_grad, *, autod
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
     if autodiffed:
-        samples = (  # type: ignore[assignment]
+        samples = (
             ((S, S, S), 1.5, False),
             ((), 1.5, False),
         )
     else:
-        cases = (  # type: ignore[assignment]
+        cases = (
             ((S, S, S), (), False),
             ((S, S, S), (S, S, S), False),
             ((S, S, S), (S,), False),
         )
 
         # Sample inputs with scalars as torch tensors
-        cases_with_tensor_scalar = (  # type: ignore[assignment]
+        cases_with_tensor_scalar = (
             ((), torch.tensor(1, dtype=dtype, device=device, requires_grad=False), False),
         )
 
         # Sample inputs with broadcasting
-        cases_with_broadcasting = (  # type: ignore[assignment]
+        cases_with_broadcasting = (
             ((S,), (S, S, S), True),
             ((S, 1, S), (S, S, S), True),
             ((), (S, S, S), True),
@@ -3978,7 +3978,7 @@ def sample_inputs_split(op_info, device, dtype, requires_grad, *, list_args=Fals
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     if list_args:
-        cases = (  # type: ignore[assignment]
+        cases = (
             ((S, S, S), ([int(S / 3), S - int(S / 3) * 2, int(S / 3)],)),
             ((S, S, S), ([int(S / 2), S - int(S / 2) * 2, int(S / 2)], 2),),
             ((S, S, S), ([int(S / 2), S - int(S / 2) * 2, int(S / 2)], -2),)
