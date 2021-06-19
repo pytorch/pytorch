@@ -150,8 +150,10 @@ ir::Value MaybeExpand(const ir::Value& input,
     return input;
   }
   return ir::MakeNode<ir::ops::Expand>(
-      input, lazy_tensors::util::ToVector<lazy_tensors::int64>(
-                 target_shape.dimensions()));
+      input,
+      lazy_tensors::util::ToVector<lazy_tensors::int64>(
+          target_shape.dimensions()),
+      /*is_scalar_expand=*/false);
 }
 
 MinMaxValues GetMinMaxValues(const LazyTensor& tensor,
@@ -1298,7 +1300,8 @@ LazyTensor LazyTensor::expand(const LazyTensor& input,
   auto input_shape = input.shape();
   return input.CreateFrom(ir::MakeNode<ir::ops::Expand>(
       input.GetIrValue(),
-      GetExpandDimensions(input_shape.get(), std::move(size))));
+      GetExpandDimensions(input_shape.get(), std::move(size)),
+      /*is_scalar_expand=*/false));
 }
 
 LazyTensor LazyTensor::expm1(const LazyTensor& input) {

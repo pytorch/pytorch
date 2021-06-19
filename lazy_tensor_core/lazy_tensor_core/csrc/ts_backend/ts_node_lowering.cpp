@@ -418,18 +418,13 @@ class TSNodeLowering : public NodeLowering {
     arguments.emplace_back(node->storage_offset());
     TSOpVector as_strided_out = LowerBuiltin(node, arguments);
     LTC_CHECK_EQ(as_strided_out.size(), 1);
-    std::vector<torch::jit::NamedValue> clone_arguments;
-    clone_arguments.emplace_back(as_strided_out.front());
-    return LowerBuiltin(at::aten::clone, clone_arguments);
+    return {GenerateClone(as_strided_out.front())};
   }
 
   TSOpVector LowerAsStridedViewUpdate(
       const ir::ops::AsStridedViewUpdate* node) {
-    std::vector<torch::jit::NamedValue> clone_arguments;
-    clone_arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
-    TSOpVector clone_out = LowerBuiltin(at::aten::clone, clone_arguments);
-    LTC_CHECK_EQ(clone_out.size(), 1);
-    torch::jit::Value* destination = clone_out.front();
+    torch::jit::Value* destination =
+        GenerateClone(loctx()->GetOutputOp(node->operand(0)));
     const ir::Output& input_op = node->operand(1);
     const lazy_tensors::Shape& input_shape = input_op.shape();
     const auto input_dimensions = input_shape.dimensions();
@@ -520,7 +515,16 @@ class TSNodeLowering : public NodeLowering {
     std::vector<torch::jit::NamedValue> arguments;
     arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
     arguments.emplace_back(node->size());
-    return LowerBuiltin(node, arguments);
+    auto expand_out = LowerBuiltin(node, arguments);
+    if (node->is_scalar_expand()) {
+      // The aten::expand operations sets all strides to 0 when the original is
+      // of rank 0. This leads to false positives when checking for internal
+      // memory overlap, because at::has_internal_overlap returns
+      // MemOverlap::YES when a stride is set to 0.
+      LTC_CHECK_EQ(expand_out.size(), 1);
+      return {GenerateClone(expand_out.front())};
+    }
+    return expand_out;
   }
 
   TSOpVector LowerIndexSelect(const ir::ops::IndexSelect* node) {
@@ -612,6 +616,14 @@ class TSNodeLowering : public NodeLowering {
     arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
     arguments.push_back(node->output_size());
     return LowerBuiltin(at::aten::reshape, arguments);
+  }
+
+  torch::jit::Value* GenerateClone(torch::jit::Value* val) {
+    std::vector<torch::jit::NamedValue> clone_arguments;
+    clone_arguments.emplace_back(val);
+    TSOpVector cloned = LowerBuiltin(at::aten::clone, clone_arguments);
+    LTC_CHECK_EQ(cloned.size(), 1);
+    return cloned.front();
   }
 
   ts_backend::TSLoweringContext* loctx() {

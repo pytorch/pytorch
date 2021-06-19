@@ -757,8 +757,8 @@ ir::Value LazyTensor::GetIrValueForScalar(
   ir::Value ir_value = GetIrValueForScalar(value, type, device);
   if (!dimensions.empty()) {
     ir_value = ir::MakeNode<ir::ops::Expand>(
-        ir_value,
-        lazy_tensors::util::ToVector<lazy_tensors::int64>(dimensions));
+        ir_value, lazy_tensors::util::ToVector<lazy_tensors::int64>(dimensions),
+        /*is_scalar_expand=*/true);
   }
   return ir_value;
 }
