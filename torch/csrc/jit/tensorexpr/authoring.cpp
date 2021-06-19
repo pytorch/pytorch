@@ -222,13 +222,23 @@ class CompileCache3 {
       shape_checks_.push_back(indices);
     }
 
+    void do_shape_checks(const Args& args) {
+      for (const auto& ck : shape_checks_) {
+        if (args[std::get<0>(ck)].size(std::get<1>(ck)) !=
+            args[std::get<2>(ck)].size(std::get<3>(ck))) {
+          // TODO(jansel): make this error message match eager
+          throw std::runtime_error(
+              "The size of tensor A must match the size of tensor B at non-singleton dimension X");
+        }
+      }
+    }
+
     at::Tensor call(const Args& args, std::vector<void*>& call_args) {
+      do_shape_checks(args);
       int64_t shapes[MAX_DIMS];
       for (int i = 0; i < shape_from_.size(); ++i) {
         shapes[i] = args[shape_from_[i].first].size(shape_from_[i].second);
         call_args.emplace_back(&shapes[i]);
-        // std::cerr << shapes[i] << " from "<< shape_from_[i].first
-        //           << ", "<< shape_from_[i].second << std::endl;
       }
       cg_->call_raw(call_args);
       return args[2];
@@ -320,14 +330,6 @@ class CompileCache3 {
     }
     auto key = compute_cache_key(args, has_out);
     return cached_compile(key, args)->call(args, call_args);
-    /*
-    int64_t n = a.sizes()[0];
-    int64_t shapes[] = {n};
-    int64_t strides[] = {1};
-    at::Tensor out = at::empty_strided(shapes, strides);
-    std::vector<void*> args = {a.data_ptr(), b.data_ptr(), out.data_ptr(), &n};
-    self.call_raw(args);
-    */
   }
 
  public:
