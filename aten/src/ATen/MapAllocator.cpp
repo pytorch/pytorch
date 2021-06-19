@@ -25,9 +25,11 @@ namespace at {
 
 namespace {
 constexpr int64_t map_alloc_alignment = 64;
+}  // namespace (anonymous)
 
 #if defined(_WIN32) || defined(HAVE_MMAP)
 
+namespace {
 struct MapInfo {
   std::atomic<int> refcount;
 };
@@ -37,7 +39,6 @@ const std::string unknown_filename = "filename not specified";
 #ifdef _WIN32
 const std::string unknown_eventname = "eventname not specified";
 #endif
-
 }  // namespace (anonymous)
 
 MapAllocator::MapAllocator(WithFd, std::string filename, int fd, int flags, size_t size)
