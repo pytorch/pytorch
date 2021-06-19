@@ -343,11 +343,11 @@ MapAllocator::MapAllocator(std::string filename, int flags, size_t size)
 {}
 
 #ifdef _WIN32
-typedef struct{
+struct ReleaseContext {
   HANDLE event;
   HANDLE handle;
   HANDLE wait;
-} ReleaseContext;
+};
 static void CALLBACK WaitForReleaseHandle(PVOID lpParam, BOOLEAN TimerOrWaitFired)
 {
   if (lpParam) {
@@ -359,7 +359,7 @@ static void CALLBACK WaitForReleaseHandle(PVOID lpParam, BOOLEAN TimerOrWaitFire
 
     UnregisterWait(ctx->wait);
 
-    THFree(ctx);
+    delete ctx;
   }
 }
 #endif
@@ -450,14 +450,12 @@ void RefcountedMapAllocator::initializeAlloc() {
   MapInfo *map_info = (MapInfo*)base_ptr_;
 
 #ifdef _WIN32
-  ReleaseContext* r_ctx = (ReleaseContext *) THAlloc(sizeof(ReleaseContext));
+  ReleaseContext* r_ctx = new ReleaseContext;
   r_ctx->handle = handle_;
   r_ctx->event = event_;
   r_ctx->wait = NULL;
   BOOL can_wait = RegisterWaitForSingleObject(&r_ctx->wait, event_, WaitForReleaseHandle, (PVOID)r_ctx, INFINITE, WT_EXECUTEONLYONCE);
-  if (!can_wait) {
-    TORCH_INTERNAL_ASSERT(false, "Couldn't register wait on event, error code: <", GetLastError(), ">");
-  }
+  TORCH_INTERNAL_ASSERT(can_wait, "Couldn't register wait on event, error code: <", GetLastError(), ">");
 #endif
 
   if (flags_ & ALLOCATOR_MAPPED_EXCLUSIVE) {
