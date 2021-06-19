@@ -1161,10 +1161,11 @@ class TestCase(expecttest.TestCase):
             if sys.version_info >= (3, 8):
                 k = math.isqrt(2 * r)
             else:
-                # math.isqrt(x) is available starting from Python 3.8,
-                # so using int(math.sqrt(x)) as an approximation that
-                # appers to give exaxt result for all x values less
-                # than 2**35, at least, the upper limit of x is TBD.
+                # math.isqrt(x) is available starting from Python 3.8.
+                # Here we use int(math.sqrt(x)) as an approximation
+                # that appers to give exaxt result for all x values
+                # less than 2**35, at least, the upper limit of x is
+                # TBD.
                 k = int(math.sqrt(2 * r))
             if k * (k + 1) > 2 * r:
                 k -= 1
@@ -1195,8 +1196,12 @@ class TestCase(expecttest.TestCase):
 
         def random_sparse_csr(n_rows, n_cols, nnz):
             crow_indices = self._make_crow_indices(n_rows, n_cols, nnz, device=device, dtype=index_dtype)
-            # TODO: check if col_indices are allowed to be unordered within the same row
-            col_indices = torch.randint(0, n_cols, size=[nnz], dtype=index_dtype, device=device)
+            col_indices = torch.zeros(nnz, dtype=index_dtype, device=device)
+            n = 0
+            for i in range(n_rows):
+                count = crow_indices[i + 1] - crow_indices[i]
+                col_indices[n:n + count], _ = torch.sort(torch.randperm(n_cols, dtype=index_dtype, device=device)[:count])
+                n += count
             values = make_tensor([nnz], device=device, dtype=dtype, low=-1, high=1)
             return values, crow_indices, col_indices
 
