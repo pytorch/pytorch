@@ -47,8 +47,6 @@
   [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
           threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
   [encoder endEncoding];
-  [_X markRead];
-  [_Y markRead];
 }
 
 @end

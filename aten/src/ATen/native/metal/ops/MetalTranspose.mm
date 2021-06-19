@@ -82,9 +82,6 @@ Tensor transpose(const Tensor& input, int64_t dim0, int64_t dim1) {
     [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
             threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
     [encoder endEncoding];
-    [X markRead];
-    [Y markRead];
-
     auto output = makeTensor(std::move(mt), input.options());
     return output;
   }

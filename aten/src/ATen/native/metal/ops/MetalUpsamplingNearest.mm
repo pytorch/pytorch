@@ -81,8 +81,6 @@ Tensor upsample_nearest2d_vec(
     [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
             threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
     [encoder endEncoding];
-    [X markRead];
-    [Y markRead];
   }
   auto output = makeTensor(std::move(mt), input.options());
   return output;
