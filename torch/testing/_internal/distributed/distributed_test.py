@@ -940,14 +940,15 @@ class DistributedTest:
                     ranks_per_subgroup_list=[[0], [1, 2], [1, 3]]
                 )
 
-        @require_backend({"nccl"})
-        @require_backends_available({"nccl"})
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "MPI backend does not support creating subgroups on CUDA devices",
+        )
         @skip_if_lt_x_gpu(2)
-        def test_average_parameters_nccl(self):
+        def test_average_parameters(self):
             rank = dist.get_rank()
             rank_to_GPU = self._init_multigpu_helper()
             device_id = rank_to_GPU[rank][0]
-            group_nccl = dist.new_group(ranks=[0, 1], backend="nccl")
 
             model = (
                 nn.Sequential(
@@ -957,13 +958,23 @@ class DistributedTest:
                 ).cuda(device_id)
             )
 
+            # Test global model averaging
+            for p in model.parameters():
+                p.data = torch.ones_like(p.data)
+            model_averaging_utils.average_parameters(model=model, process_group=None)
+            # Every element will be the same as the input.
+            for p in model.parameters():
+                self.assertEqual(p.data, torch.ones_like(p.data))
+
+            # Test partial model averaging
             for p in model.parameters():
                 p.data = torch.ones_like(p.data) * rank
+            group_nccl = dist.new_group(ranks=[0, 1], backend="nccl")
             model_averaging_utils.average_parameters(model=model, process_group=group_nccl)
-
-            # Every element should be the average of 0 and 1, i.e., 0.5.
-            for p in model.parameters():
-                self.assertEqual(p.data, torch.ones_like(p.data) * 0.5)
+            if not dist._rank_not_in_group(group_nccl):
+                # Every element on device 0 or 1 should be the average of 0 and 1, i.e., 0.5.
+                for p in model.parameters():
+                    self.assertEqual(p.data, torch.ones_like(p.data) * 0.5)
 
         # NCCL Batch SEND RECV
         @skip_if_no_gpu
