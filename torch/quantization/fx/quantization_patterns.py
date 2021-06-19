@@ -4,8 +4,6 @@ from torch.fx.graph import (
     Node,
     Graph,
 )
-import torch.nn.quantized as nnq
-import torch.nn.quantized.dynamic as nnqd
 from torch.quantization import (
     default_affine_fixed_qparams_fake_quant,
     default_symmetric_fixed_qparams_fake_quant,
