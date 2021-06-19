@@ -27,8 +27,8 @@ void conjugateFallback(const c10::OperatorHandle& op, DispatchKeySet dispatch_ke
   const auto stack_start = stack->size() - num_arguments;
 
   c10::optional<bool> is_write;
-  for (int64_t i = 0; i < num_arguments; ++i) {
-    const auto& alias_info = arguments[i].alias_info();
+  for (const auto& argument : arguments) {
+    const auto& alias_info = argument.alias_info();
     // Three possible states:
     // 1. alias_info has no value --> out-of-place operation
     // 2. alias_info does have a value, alias_info->is_write=True --> in-place or out= operation
@@ -58,7 +58,7 @@ void conjugateFallback(const c10::OperatorHandle& op, DispatchKeySet dispatch_ke
   // Mutable inputs to be tracked separately
   std::vector<Tensor> mutable_inputs;
 
-  for (int64_t i = 0; i < num_arguments; ++i) {
+  for (size_t i = 0; i < num_arguments; ++i) {
     auto& ivalue = (*stack)[stack_start + i];
     if (!(ivalue.isTensor() || ivalue.isTensorList())) {
       continue;
@@ -104,7 +104,6 @@ void conjugateFallback(const c10::OperatorHandle& op, DispatchKeySet dispatch_ke
       (*stack)[stack_start + i] = std::move(tensors);
     }
   }
-
 
   op.redispatchBoxed(dispatch_keys & c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, DispatchKey::Conjugate), stack);
 

@@ -1286,7 +1286,7 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
       if (enable_multithreaded_bmm) {
         auto bmm_out_fn = [&](uint64_t start, uint64_t end) {
           c10::InferenceMode guard;
-          for (int64_t b = start; b < end; b++) {
+          for (uint64_t b = start; b < end; b++) {
             auto r = self_or_result.select(0, b);
             addmm_impl_cpu_(
                 r, r, batch1.select(0, b), batch2.select(0, b), 0, 1);
@@ -1303,7 +1303,7 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
       if (enable_multithreaded_bmm) {
         auto bmm_fn = [&](uint64_t start, uint64_t end) {
           c10::InferenceMode guard;
-          for (int64_t b = start; b < end; b++) {
+          for (uint64_t b = start; b < end; b++) {
             self_or_result.select(0, b).addmm_(
                 batch1.select(0, b), batch2.select(0, b), beta, alpha);
           }

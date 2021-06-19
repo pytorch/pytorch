@@ -147,7 +147,7 @@ std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
     return result;
   }
   // loop over all the functions in the bytecode
-  for (int i = 1; i < bytecode_ivalues.size(); i++) {
+  for (size_t i = 1; i < bytecode_ivalues.size(); i++) {
     // descend to the operators list
     auto method_tuple = bytecode_ivalues.at(i).toTuple()->elements();
     auto operators_tuple = method_tuple.at(1).toTuple()->elements()[1];
