@@ -42,31 +42,32 @@ class SpecializationKey {
   };
   static constexpr int MASK = (1 << 5) - 1;
 
-  static inline uint16_t pack_flags(const at::Tensor& v) {
+  static inline uint16_t pack_flags(const at::Tensor& v, bool is_out) {
     // pack all the tensor properties into a uint16 for fast hash/compare
-    static_assert(static_cast<int>(at::ScalarType::NumOptions) <= MASK);
-    static_assert(static_cast<int>(at::Layout::NumOptions) <= MASK);
-    static_assert(
-        static_cast<int>(at::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES) <=
-        MASK);
+    constexpr uint16_t S0 = 1;
+    constexpr uint16_t S1 = S0 * 2;
+    constexpr uint16_t S2 = S1 * 2;
+    constexpr uint16_t S3 = S2 * static_cast<int>(at::ScalarType::NumOptions);
+    constexpr uint16_t S4 = S3 * static_cast<int>(at::Layout::NumOptions);
+    constexpr uint16_t S5 =
+        S4 * static_cast<int>(at::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES);
+    static_assert(S3 < S4 && S4 < S5); // overflow check
 
     at::ScalarType dtype = v.dtype().toScalarType();
     at::DeviceType device = v.device().type();
     at::Layout layout = v.layout();
     bool requires_grad = v.requires_grad();
 
-    return static_cast<uint16_t>(dtype) + (static_cast<uint16_t>(device) << 5) +
-        (static_cast<uint16_t>(layout) << 10) +
-        (static_cast<uint16_t>(requires_grad) << 15);
+    return S0 * static_cast<uint16_t>(is_out) +
+        S1 * static_cast<uint16_t>(requires_grad) +
+        S2 * static_cast<uint16_t>(dtype) + S3 * static_cast<uint16_t>(layout) +
+        S4 * static_cast<uint16_t>(device);
   }
 
   template <typename T>
   inline void init_dimflags(const T& sizes, const T& strides, int64_t ndims) {
     // pack all the properties for each dimension into a uint8
     int out_idx = 0;
-    while (out_idx < MAX_DIMS - ndims)
-      dimflags_[out_idx++] = SIZE_MISSING | STRIDE_ZERO;
-
     for (int dim = 0; dim < ndims; ++dim) {
       uint8_t flag = (sizes[dim] == 1 ? SIZE_ONE : SIZE_OTHER);
       if (strides[dim] == 0)
@@ -83,13 +84,16 @@ class SpecializationKey {
         flag |= STRIDE_AS_ARG;
       dimflags_[out_idx++] = flag;
     }
+    while (out_idx < MAX_DIMS) {
+      dimflags_[out_idx++] = SIZE_MISSING | STRIDE_ZERO;
+    }
   }
 
  public:
   SpecializationKey() {}
 
-  SpecializationKey(const at::Tensor& v, int8_t alias_group)
-      : flags_(pack_flags(v)), alias_group_(alias_group) {
+  SpecializationKey(const at::Tensor& v, int8_t alias_group, bool is_out)
+      : flags_(pack_flags(v, is_out)), alias_group_(alias_group) {
     init_dimflags(v.sizes(), v.strides(), v.ndimension());
   }
 
@@ -141,14 +145,15 @@ class SpecializationKey {
         py::module_::import("collections").attr("namedtuple");
     py::object rtype = namedtuple(
         "SpecializationKey",
-        "alias_group,dim,dtype,device,layout,requires_grad,shape,stride");
+        "alias_group,ndim,dtype,device,layout,requires_grad,out,shape,stride");
     return rtype(
         static_cast<int>(alias_group_),
-        ex.attr("dim"),
+        ex.attr("ndim"),
         ex.attr("dtype"),
         ex.attr("device"),
         ex.attr("layout"),
         ex.attr("requires_grad"),
+        py::bool_(flags_ % 2),
         shape(),
         stride());
   }
@@ -161,14 +166,18 @@ class SpecializationKey {
   uint8_t dimflags_[MAX_DIMS];
 } __attribute__((packed));
 
-class CompileOptions {
+class CompileResultBase : public KernelScopedObject {
  public:
-  virtual ~CompileOptions() = default;
+  virtual ~CompileResultBase() = default;
+  virtual void set_code(const py::object& cg) = 0;
+  virtual void set_shape_from(const std::vector<std::pair<int, int>>& indices) = 0;
+  virtual void set_options_from(int index) = 0;
+  virtual void add_shape_check(const std::tuple<int, int, int, int>& indices) = 0;
 };
 
-struct CompileOptionsProxy {
-  py::object spec;
-  CompileOptions* options;
+struct CompileResultProxy {
+  CompileResultBase* res;
+  explicit CompileResultProxy(CompileResultBase* r) : res(r) {}
 };
 
 struct CmpLess {
@@ -193,43 +202,55 @@ class CompileCache3 {
   typedef std::array<at::Tensor, NARGS> Args;
   typedef std::array<int8_t, NARGS> AliasGroups;
 
-  class CompileResult {
+  class CompileResultImpl : public CompileResultBase {
    public:
-    void set_codegen(py::object cg) {
+    void set_code(const py::object& cg) {
       objects_.push_back(cg);
       cg_ = cg.cast<CodeGen*>();
     }
+    void set_shape_from(const std::vector<std::pair<int, int>>& indices) {
+      assert(indices.shape() <= MAX_DIMS);
+      shape_from_ = indices;
+    }
+    void set_options_from(int index) {
+      options_from_ = index;
+    }
+
+    void add_shape_check(const std::tuple<int, int, int, int>& indices){
+        shape_checks_.push_back(indices);
+    }
+
     at::Tensor call(const Args& args, std::vector<void*>& call_args) {
+      int64_t shapes[MAX_DIMS];
+      for (int i = 0; i < shape_from_.size(); ++i) {
+        shapes[i] = args[shape_from_[i].first].size(shape_from_[i].second);
+        call_args.emplace_back(shapes + i);
+      }
       cg_->call_raw(call_args);
       return args[2];
     }
 
    private:
     CodeGen* cg_;
-    std::vector<py::object> objects_; // for ref count
+    std::vector<std::pair<int, int>> shape_from_;
+    std::vector<std::tuple<int, int, int, int>> shape_checks_;
+    int options_from_ = 0;
+    std::vector<py::object> objects_; // for ref counting
   };
-  typedef std::map<Key, CompileResult*, CmpLess> Map;
+  typedef std::map<Key, CompileResultImpl*, CmpLess> Map;
 
-  class CompileOptionsImpl : public CompileOptions {
-   public:
-    CompileOptionsImpl(const Key& key, CompileResult& result)
-        : key_(key), result_(result) {}
-
-   private:
-    const Key& key_;
-    CompileResult& result_;
-  };
-
-  CompileResult* cached_compile(const Key& key, const Args& example) {
+  CompileResultImpl* cached_compile(const Key& key, const Args& example) {
     std::lock_guard<std::mutex> guard(mutex_);
     auto item = cache_.find(key);
     if (item != cache_.end()) {
       return item->second;
     } else {
-      auto cr = new CompileResult();
-      CompileOptionsImpl opts(key, *cr);
-      cr->set_codegen(compile_fn_(
-          CompileOptionsProxy({key[0].to_python(example[0]), &opts})));
+      auto cr = new CompileResultImpl();
+      std::vector<py::object> spec;
+      for (int i = 0; i < key.size(); ++i) {
+        spec.push_back(key[i].to_python(example[i]));
+      }
+      compile_fn_(spec, CompileResultProxy(cr));
       cache_.emplace(std::make_pair(key, cr));
       return cr;
     }
@@ -251,39 +272,48 @@ class CompileCache3 {
 
   AliasGroups compute_alias_groups(const Args& args) {
     AliasGroups alias_groups;
-    int8_t alias_group = 0;
+    int8_t current_id = 0;
     for (int i = 0; i < NARGS; ++i) {
-      for (int j = i + 1; j < NARGS; ++j) {
-        int8_t alias_type = aliasing_check(args[i], args[j]);
-        if (alias_type != 0) {
-          if (alias_groups[i] == 0)
-            ++alias_group;
-          alias_groups[i] = alias_group;
-          alias_groups[j] = alias_group * alias_type;
+      alias_groups[i] = 0;
+    }
+    for (int i = 0; i < NARGS; ++i) {
+      if (alias_groups[i] == 0) {
+        for (int j = i + 1; j < NARGS; ++j) {
+          int8_t alias_type = aliasing_check(args[i], args[j]);
+          if (alias_type != 0) {
+            if (alias_groups[i] == 0)
+              ++current_id;
+            alias_groups[i] = current_id;
+            alias_groups[j] = current_id * alias_type;
+          }
         }
       }
     }
     return alias_groups;
   }
 
-  Key compute_cache_key(const Args& args) {
+  Key compute_cache_key(const Args& args, bool has_out) {
     AliasGroups alias_groups = compute_alias_groups(args);
     Key key;
-    for (int i = 0; i < NARGS; ++i) {
-      key[i] = ArgKey(args[i], alias_groups[i]);
+    int i = 0;
+    for (; i < NARGS - 1; ++i) {
+      key[i] = ArgKey(args[i], alias_groups[i], false);
+    }
+    if (i < NARGS) {
+      key[i] = ArgKey(args[i], alias_groups[i], has_out);
     }
     return key;
   }
 
   CompileCache3(const py::object& compile_fn) : compile_fn_(compile_fn) {}
 
-  at::Tensor call(const Args& args) {
+  at::Tensor call(const Args& args, bool has_out) {
     std::vector<void*> call_args;
     call_args.reserve(NARGS + NARGS * MAX_DIMS);
     for (const auto& arg : args) {
       call_args.emplace_back(arg.data_ptr());
     }
-    auto key = compute_cache_key(args);
+    auto key = compute_cache_key(args, has_out);
     return cached_compile(key, args)->call(args, call_args);
     /*
     int64_t n = a.sizes()[0];
@@ -307,18 +337,18 @@ class CompileCache2 {
   CompileCache2(const py::object& compile_fn)
       : cache2(compile_fn), cache4(compile_fn), cache8(compile_fn) {}
 
-  at::Tensor call(const std::array<at::Tensor, NARGS>& args) {
+  at::Tensor call(const std::array<at::Tensor, NARGS>& args, bool has_out) {
     // fan out and and specialize on number of dimension buckets
     int64_t ndims = 0;
     for (const auto& item : args) {
       ndims = std::max(item.ndimension(), ndims);
     }
     if (ndims <= 2)
-      return cache2.call(args);
+      return cache2.call(args, has_out);
     if (ndims <= 4)
-      return cache4.call(args);
+      return cache4.call(args, has_out);
     if (ndims <= 8)
-      return cache8.call(args);
+      return cache8.call(args, has_out);
     throw std::runtime_error("TODO: handle more dims");
   }
 
@@ -338,31 +368,50 @@ class CompileCache {
 
   at::Tensor call(py::args args, py::kwargs kwargs) {
     // fan out an specialize on arg counts
-    if (py::len(kwargs) > 0) {
-      throw std::runtime_error("TODO: handle `out=` etc");
+    int num_args = py::len(args);
+    int num_kwargs = py::len(kwargs);
+    bool has_out = num_kwargs == 1;
+    at::Tensor last_arg;
+
+    if (num_kwargs == 1) {
+      last_arg = kwargs["out"].cast<at::Tensor>();
+    } else if (num_kwargs > 1) {
+      throw std::runtime_error("expected at most 1 kwarg");
+    } else {
+      last_arg = args[num_args - 1].cast<at::Tensor>();
     }
-    int nargs = py::len(args);
-    if (nargs == 1)
-      return cache1.call(std::array<at::Tensor, 1>{args[0].cast<at::Tensor>()});
-    if (nargs == 2)
-      return cache2.call(std::array<at::Tensor, 2>{
-          args[0].cast<at::Tensor>(),
-          args[1].cast<at::Tensor>(),
-      });
-    if (nargs == 3)
-      return cache3.call(std::array<at::Tensor, 3>{
-          args[0].cast<at::Tensor>(),
-          args[1].cast<at::Tensor>(),
-          args[2].cast<at::Tensor>(),
-      });
-    if (nargs == 4)
-      return cache4.call(std::array<at::Tensor, 4>{
-          args[0].cast<at::Tensor>(),
-          args[1].cast<at::Tensor>(),
-          args[2].cast<at::Tensor>(),
-          args[3].cast<at::Tensor>(),
-      });
-    throw std::runtime_error("TODO: handle other arg counts");
+
+    switch (num_args + num_kwargs) {
+      case 1:
+        return cache1.call(std::array<at::Tensor, 1>{last_arg}, has_out);
+      case 2:
+        return cache2.call(
+            std::array<at::Tensor, 2>{
+                args[0].cast<at::Tensor>(),
+                last_arg,
+            },
+            has_out);
+      case 3:
+        return cache3.call(
+            std::array<at::Tensor, 3>{
+                args[0].cast<at::Tensor>(),
+                args[1].cast<at::Tensor>(),
+                last_arg,
+            },
+            has_out);
+      case 4:
+        return cache4.call(
+            std::array<at::Tensor, 4>{
+                args[0].cast<at::Tensor>(),
+                args[1].cast<at::Tensor>(),
+                args[2].cast<at::Tensor>(),
+                last_arg,
+            },
+            has_out);
+
+      default:
+        throw std::runtime_error("TODO: handle other arg counts");
+    }
   }
 
  private:
@@ -372,85 +421,6 @@ class CompileCache {
   CompileCache2<4> cache4;
 };
 
-/*
-class KeyProxy {
- public:
-  virtual ~KeyProxy() = default;
-  virtual int ndims() const = 0;
-  virtual at::ScalarType dtype() const = 0;
-  virtual at::DeviceType device() const = 0;
-  virtual at::Layout layout() const = 0;
-  virtual bool requires_grad() const = 0;
-};
-
-template <int MAX_DIMS>
-class KeyProxyImpl : public KeyProxy, public SpecializationKey<MAX_DIMS> {
- public:
-  KeyProxyImpl(const SpecializationKey<MAX_DIMS>& key)
-      : SpecializationKey<MAX_DIMS>(key) {}
-
-  int ndims() const {
-    // this can be slow/O(MAX_DIMS) as it is only used in codegen
-    int d = MAX_DIMS;
-    while (d > 0 && (dimflags_[d - 1] & SIZE_MISSING) > 0)
-      --d;
-    return d;
-  }
-
-  at::ScalarType dtype() const {
-    return static_cast<at::ScalarType>(flags_ & MASK);
-  }
-  at::DeviceType device() const {
-    return static_cast<at::DeviceType>((flags_ >> 5) & MASK);
-  }
-  at::Layout layout() const {
-    return static_cast<at::Layout>((flags_ >> 10) & MASK);
-  }
-  bool requires_grad() const {
-    return static_cast<bool>(flags_ >> 15);
-  }
-};
-
-at::Tensor call_jansel(
-    CodeGen& self,
-    const at::Tensor& a,
-    const at::Tensor& b) {
-  typedef SpecializationKey<2> K2;
-  typedef std::array<K2, 2> A;
-
-  static std::map<A, void*, K2::Less> cache;
-  static std::mutex mutex;
-  std::lock_guard<std::mutex> guard(mutex);
-
-  A key = {K2(a, 0), K2(b, 0)};
-  auto item = cache.find(key);
-  if (item != cache.end()) {
-    AA(item->second == nullptr);
-  } else {
-    TORCH_WARN("codegen");
-    cache[key] = nullptr;
-  }
-  // std::mapstd::array<K2, 2> SpecializationKey<2> akey(a, 0);
-  // SpecializationKey<2> bkey(b, 0);
-  // AA(akey == bkey);
-  // AA(akey.dtype() == a.dtype().toScalarType());
-  // AA(akey.device() == a.device().type());
-  // AA(akey.layout() == a.layout());
-  // AA(akey.requires_grad() == a.requires_grad());
-  // AA(bkey.dtype() == b.dtype().toScalarType());
-  // AA(bkey.device() == b.device().type());
-  // AA(bkey.layout() == b.layout());
-  // AA(bkey.requires_grad() == b.requires_grad());
-
-  int64_t n = a.sizes()[0];
-  int64_t shapes[] = {n};
-  int64_t strides[] = {1};
-  at::Tensor out = at::empty_strided(shapes, strides);
-  std::vector<void*> args = {a.data_ptr(), b.data_ptr(), out.data_ptr(), &n};
-  self.call_raw(args);
-  return out;
-}
-*/
 } // namespace
 
 void initTensorExprAuthoringBindings(PyObject* te_obj) {
@@ -460,7 +430,25 @@ void initTensorExprAuthoringBindings(PyObject* te_obj) {
       .def(py::init<py::object>())
       .def("__call__", &CompileCache::call);
 
-  py::class_<CompileOptionsProxy>(te, "CompileOptions");
+  py::class_<CompileResultProxy>(te, "CompileResult")
+      .def(
+          "set_code",
+          [](CompileResultProxy& self, const py::object& cg) {
+            self.res->set_code(cg);
+          })
+      .def(
+          "add_shape_check",
+          [](CompileResultProxy& self, const std::tuple<int, int, int, int>& indices) {
+            self.res->add_shape_check(indices);
+          })
+      .def(
+          "set_shape_from",
+          [](CompileResultProxy& self, const std::vector<std::pair<int, int>>& indices) {
+            self.res->set_shape_from(indices);
+          })
+      .def("set_options_from", [](CompileResultProxy& self, int index) {
+        self.res->set_options_from(index);
+      });
 }
 } // namespace jit
 } // namespace torch
