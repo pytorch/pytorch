@@ -106,16 +106,16 @@ graph {
         elem_type: 1
         shape {
           dim {
-            dim_value: 20
+            dim_param: "ATen3_dim_0"
           }
           dim {
-            dim_value: 5
+            dim_param: "ATen3_dim_1"
           }
           dim {
-            dim_value: 10
+            dim_param: "ATen3_dim_2"
           }
           dim {
-            dim_value: 10
+            dim_param: "ATen3_dim_3"
           }
         }
       }

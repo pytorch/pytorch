@@ -3,6 +3,8 @@ from test_pytorch_common import TestCase, run_tests, flatten, skipIfNoLapack
 
 import torch
 import torch.onnx
+from torch.onnx.symbolic_helper import parse_args, _get_tensor_dim_size, _get_tensor_sizes
+from torch.onnx import register_custom_op_symbolic, unregister_custom_op_symbolic
 from torch.autograd import Variable, Function
 from torch.nn import Module, functional
 import torch.nn as nn
@@ -906,6 +908,84 @@ class TestOperators(TestCase):
         x = torch.randn(3, 5, 2, 1)
         y = torch.empty(3, 2, 1, dtype=torch.long).random_(5)
         self.assertONNX(torch.nn.CrossEntropyLoss(), (x, y), opset_version=12)
+
+    def test_aten_embedding_1(self):
+        _onnx_opset_version = 12
+
+        @parse_args('v', 'v', 'i', 'b', 'b')
+        def embedding(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
+            custom_attributes_json = (
+                '{'
+                f'"padding_idx":{str(padding_idx)},'
+                f'"scale_grad_by_freq":{str(scale_grad_by_freq).lower()},'
+                f'"sparse":{str(sparse).lower()}'
+                '}'
+            )
+            output = g.op("com.microsoft::ATenOp", weight, indices, name_s='aten::embedding',
+                          custom_attributes_json_s=custom_attributes_json)
+            return output
+
+        register_custom_op_symbolic('::embedding', embedding, _onnx_opset_version)
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb = torch.nn.Embedding(4, 8)
+
+            def forward(self, x, y):
+                res = self.emb(x)
+                res = res + y
+                return torch.ones(res.shape[0])
+
+        model = Model()
+        x = torch.ones(32, dtype=torch.long)
+        y = torch.randn(1, 8)
+        self.assertONNX(model, (x, y), opset_version=_onnx_opset_version)
+
+        unregister_custom_op_symbolic('::embedding', _onnx_opset_version)
+
+    # This is test_aten_embedding_1 with shape inference on custom symbolic aten::embedding.
+    def test_aten_embedding_2(self):
+        _onnx_opset_version = 12
+
+        @parse_args('v', 'v', 'i', 'b', 'b')
+        def embedding(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
+            custom_attributes_json = (
+                '{'
+                f'"padding_idx":{str(padding_idx)},'
+                f'"scale_grad_by_freq":{str(scale_grad_by_freq).lower()},'
+                f'"sparse":{str(sparse).lower()}'
+                '}'
+            )
+            output = g.op("com.microsoft::ATenOp", weight, indices, name_s='aten::embedding',
+                          custom_attributes_json_s=custom_attributes_json)
+
+            # do shape inference and set it via setType
+            indices_shape = _get_tensor_sizes(indices)
+            if indices_shape is not None and hasattr(weight.type(), 'with_sizes'):
+                output_type = weight.type().with_sizes(indices_shape + [_get_tensor_dim_size(weight, 1)])
+                output.setType(output_type)
+            return output
+
+        register_custom_op_symbolic('::embedding', embedding, _onnx_opset_version)
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb = torch.nn.Embedding(4, 8)
+
+            def forward(self, x, y):
+                res = self.emb(x)
+                res = res + y
+                return torch.ones(res.shape[0])
+
+        model = Model()
+        x = torch.ones(32, dtype=torch.long)
+        y = torch.randn(1, 8)
+        self.assertONNX(model, (x, y), opset_version=_onnx_opset_version, input_names=['input_1', 'input_2'],
+                        dynamic_axes={"input_1": {0: "dim_0"}, 'input_2': {0: "dim_1", 1: "dim_2"}})
+
+        unregister_custom_op_symbolic('::embedding', _onnx_opset_version)
 
 if __name__ == "__main__":
     no_onnx_dep_flag = "--no-onnx"
