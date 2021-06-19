@@ -224,7 +224,7 @@ inline bool _isCallSite(Value* V) {
 #if LLVM_VERSION_MAJOR >= 8
   return isa<CallBase>(V);
 #else
-  return CallSite(V);
+  return !!CallSite(V);
 #endif
 }
 
@@ -232,7 +232,7 @@ inline Function* _getCalledFunction(Value* V) {
 #if LLVM_VERSION_MAJOR >= 8
   return dyn_cast<CallBase>(V)->getCalledFunction();
 #else
-  return CallSite(V)->getCalledFunction();
+  return CallSite(V).getCalledFunction();
 #endif
 }
 
