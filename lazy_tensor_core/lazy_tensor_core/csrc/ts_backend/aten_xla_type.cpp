@@ -77,11 +77,7 @@ at::Tensor subtensor(const at::Tensor& tensor, int dim, int groups, int g) {
     return at::Tensor();
   }
   int64_t n = tensor.sizes()[dim] / groups;
-  at::Tensor eager_tensor =
-      tensor.to(lazy_tensors::NNCComputationClient::HardwareDeviceType());
-  return bridge::CreateLtcTensor(
-      eager_tensor.narrow(dim, n * g, n).contiguous(),
-      bridge::GetLtcDevice(tensor));
+  return tensor.narrow(dim, n * g, n).contiguous();
 }
 
 }  // namespace
@@ -846,6 +842,16 @@ at::Tensor select(const at::Tensor& self, int64_t dim, int64_t index) {
   LTC_FN_COUNTER("xla::");
   return bridge::AtenFromLtcTensor(
       LazyTensor::select(bridge::GetLtcTensor(self), dim, index));
+}
+
+at::Tensor slice(const at::Tensor& self, int64_t dim,
+                 c10::optional<int64_t> start, c10::optional<int64_t> end,
+                 int64_t step) {
+  int64_t start_val = start.has_value() ? start.value() : 0;
+  int64_t end_val = end.has_value() ? end.value() : INT64_MAX;
+  LTC_FN_COUNTER("xla::");
+  return bridge::AtenFromLtcTensor(LazyTensor::slice(
+      bridge::GetLtcTensor(self), dim, start_val, end_val, step));
 }
 
 at::Tensor stack(at::TensorList tensors, int64_t dim) {
