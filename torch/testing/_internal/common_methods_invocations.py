@@ -1591,7 +1591,7 @@ def sample_inputs_take_along_dim(op_info, device, dtype, requires_grad, **kwargs
             )
 
 def sample_inputs_amax_amin(op_info, device, dtype, requires_grad, **kwargs):
-    test_cases: Tuple[tuple, tuple, dict] = (
+    test_cases = (  # type: ignore[assignment]
         ((S, S, S), (), {}),
         ((S, S, S), (1,), {}),
         ((S, S, S), ((1, 2,),), {}),
