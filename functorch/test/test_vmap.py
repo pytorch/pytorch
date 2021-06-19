@@ -23,11 +23,11 @@ from common_utils import (
 )
 import types
 
-from functorch import vmap, functional_init_with_buffers, make_functional_with_buffers_deprecated_v1
+from functorch import vmap, functional_init_with_buffers
 from functorch._C import reshape_dim_into, reshape_dim_outof
 
+FALLBACK_REGEX = 'we have not yet implemented the batching rule for'
 
-FALLBACK_REGEX = r'falling back to slow \(for loop( and stack)?\) implementation'
 
 class EnableVmapFallbackWarnings:
     def __enter__(self):
