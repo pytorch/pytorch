@@ -1,7 +1,7 @@
 #import <ATen/native/metal/MetalCommandBuffer.h>
 #import <ATen/native/metal/MetalTensorImpl.h>
 #import <ATen/native/metal/MetalTensorImplStorage.h>
-#import <ATen/native/metal/MetalUtils.h>
+#import <ATen/native/metal/MetalTensorUtils.h>
 #import <ATen/native/metal/MetalContext.h>
 #import <ATen/native/metal/mpscnn/MPSCNNUtils.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
@@ -13,6 +13,16 @@
 namespace at {
 namespace native {
 namespace metal {
+
+// TODO: Move this function to MetalContext
+template<typename T>
+id<MTLBuffer> _makeMTLBuffer(const std::vector<T>& src) {
+    id<MTLBuffer> buffer = [[MetalContext sharedInstance].device
+          newBufferWithLength:src.size() * sizeof(T)
+                      options:MTLResourceOptionCPUCacheModeWriteCombined];
+    memcpy(buffer.contents, src.data(), src.size() * sizeof(T));
+    return buffer;
+}
 
 Tensor transpose(const Tensor& input, int64_t dim0, int64_t dim1) {
   TORCH_CHECK(input.is_metal());
@@ -27,7 +37,7 @@ Tensor transpose(const Tensor& input, int64_t dim0, int64_t dim1) {
   auto outputSizes = input.sizes().vec();
   std::swap(outputSizes[dim0], outputSizes[dim1]);
   MPSImage* X = imageFromTensor(input);
-  MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
+  MetalCommandBuffer* commandBuffer = getCommandBuffer(input);
   if (input.dim() == 2) {
     MetalTensorImplStorage mt{outputSizes};
     mt.texture()->allocateTemporaryStorage(outputSizes, commandBuffer);
@@ -40,9 +50,9 @@ Tensor transpose(const Tensor& input, int64_t dim0, int64_t dim1) {
     auto output = makeTensor(std::move(mt), input.options());
     return output;
   } else {
-    id<MTLBuffer> sizeBuf1 = makeMTLBuffer<ushort>(
+    id<MTLBuffer> sizeBuf1 = _makeMTLBuffer<ushort>(
         std::vector<ushort>{input.sizes().begin(), input.sizes().end()});
-    id<MTLBuffer> sizeBuf2 = makeMTLBuffer<ushort>(
+    id<MTLBuffer> sizeBuf2 = _makeMTLBuffer<ushort>(
         std::vector<ushort>{outputSizes.begin(), outputSizes.end()});
     MetalTensorImplStorage mt{outputSizes};
     mt.texture()->allocateTemporaryStorage(outputSizes, commandBuffer);

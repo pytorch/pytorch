@@ -65,7 +65,7 @@ using namespace at::native::metal;
 #else
   return false;
 #endif
-  NSError* error = [self compileProgram];
+  NSError* error = [self _compileProgram];
   if (error) {
     std::string compilationError = error.localizedDescription.UTF8String;
     std::string deviceInfo = self.description.UTF8String;
@@ -139,7 +139,22 @@ using namespace at::native::metal;
   return state;
 }
 
-- (NSError*)compileProgram {
+- (id<MTLBuffer>)emptyMTLBuffer:(int64_t) size {
+    TORCH_CHECK(_device);
+    id<MTLBuffer> buffer = [_device newBufferWithLength:size
+                      options:MTLResourceOptionCPUCacheModeWriteCombined];
+    return buffer;
+}
+
+- (NSString*)description {
+  NSString* desc =
+      [NSString stringWithFormat:@"DeviceName: %s, LanguageVersion: %lu",
+                                 _deviceInfo.name.c_str(),
+                                 (unsigned long)_deviceInfo.languageVersion];
+  return desc;
+}
+
+- (NSError*)_compileProgram {
   __block NSError* compilationError = nil;
   static dispatch_once_t onceToken;
   dispatch_once(&onceToken, ^{
@@ -156,12 +171,6 @@ using namespace at::native::metal;
   return compilationError;
 }
 
-- (NSString*)description {
-  NSString* desc =
-      [NSString stringWithFormat:@"DeviceName: %s, LanguageVersion: %lu",
-                                 _deviceInfo.name.c_str(),
-                                 (unsigned long)_deviceInfo.languageVersion];
-  return desc;
-}
+
 
 @end

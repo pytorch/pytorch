@@ -1,7 +1,7 @@
 #import <ATen/native/metal/MetalCommandBuffer.h>
 #import <ATen/native/metal/MetalTensorImpl.h>
 #import <ATen/native/metal/MetalTensorImplStorage.h>
-#import <ATen/native/metal/MetalUtils.h>
+#import <ATen/native/metal/MetalTensorUtils.h>
 #import <ATen/native/metal/MetalContext.h>
 #import <ATen/native/metal/mpscnn/MPSCNNUtils.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
@@ -60,7 +60,7 @@ Tensor max_pool2d(
                  .y = mpscnn::computeMPSAlignOffset(kernel_size[1], padding[1]),
                  .z = 0}];
   MetalTensorImplStorage mt{IntArrayRef(outputSize).vec()};
-  MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
+  MetalCommandBuffer* commandBuffer = getCommandBuffer(input);
   mt.texture()->allocateTemporaryStorage(outputSize, commandBuffer);
   MPSImage* Y = mt.texture()->image();
   [pool encodeToCommandBuffer:commandBuffer.buffer
@@ -93,7 +93,7 @@ Tensor adaptive_avg_pool2d(const Tensor& input, IntArrayRef output_size) {
                    .z = 0}];
 
   MetalTensorImplStorage mt{IntArrayRef(outputSize).vec()};
-  MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
+  MetalCommandBuffer* commandBuffer = getCommandBuffer(input);
   mt.texture()->allocateTemporaryStorage(outputSize, commandBuffer);
   MPSImage* Y = mt.texture()->image();
   [pool encodeToCommandBuffer:commandBuffer.buffer

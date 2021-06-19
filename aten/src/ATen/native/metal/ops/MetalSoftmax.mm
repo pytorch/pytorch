@@ -2,7 +2,7 @@
 #import <ATen/native/metal/MetalCommandBuffer.h>
 #import <ATen/native/metal/MetalTensorImpl.h>
 #import <ATen/native/metal/MetalTensorImplStorage.h>
-#import <ATen/native/metal/MetalUtils.h>
+#import <ATen/native/metal/MetalTensorUtils.h>
 #import <ATen/native/metal/MetalContext.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
 #import <ATen/native/metal/mpscnn/MPSImageUtils.h>
@@ -39,7 +39,7 @@ Tensor mpscnn_softmax(
   // https://developer.apple.com/documentation/metalperformanceshaders/mpscnnsoftmax?changes=_1&language=objc
   T* softmax = [[T alloc] initWithDevice:[MetalContext sharedInstance].device];
   MetalTensorImplStorage mt{newSize};
-  MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input_);
+  MetalCommandBuffer* commandBuffer = getCommandBuffer(input_);
   mt.texture()->allocateTemporaryStorage(newSize, commandBuffer);
   MPSImage* Y = mt.texture()->image();
   [softmax encodeToCommandBuffer:commandBuffer.buffer

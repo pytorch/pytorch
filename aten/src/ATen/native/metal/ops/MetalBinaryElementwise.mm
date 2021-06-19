@@ -76,8 +76,8 @@ Tensor binaryElementwiseShaderKernel(
     return makeTensor({outputSize.vec()}, input1.options());
   }
   MetalTensorImplStorage mt{outputSize.vec()};
-  MetalCommandBuffer* cb1 = getCommandBufferFromTensor(input1);
-  MetalCommandBuffer* cb2 = getCommandBufferFromTensor(input2);
+  MetalCommandBuffer* cb1 = getCommandBuffer(input1);
+  MetalCommandBuffer* cb2 = getCommandBuffer(input2);
   TORCH_CHECK(
       [cb1 isEqual:cb2], @"inputs have different Metal command buffers");
   mt.texture()->allocateTemporaryStorage(outputSize, cb1);
@@ -117,8 +117,8 @@ Tensor& binaryElementwiseShaderKernel_(
   if(c10::multiply_integers(outputSize) == 0){
       return input1;
   }
-  MetalCommandBuffer* cb1 = getCommandBufferFromTensor(input1);
-  MetalCommandBuffer* cb2 = getCommandBufferFromTensor(input2);
+  MetalCommandBuffer* cb1 = getCommandBuffer(input1);
+  MetalCommandBuffer* cb2 = getCommandBuffer(input2);
   TORCH_CHECK(
       [cb1 isEqual:cb2], @"inputs have different Metal command buffers");
   MPSImage* Y = createTemporaryImage(cb1, outputSize.vec());
@@ -159,8 +159,8 @@ Tensor binaryElementwiseMPSCNNKernel(
       return makeTensor({outputSize.vec()}, input1.options());
   }
   MetalTensorImplStorage mt{outputSize.vec()};
-  MetalCommandBuffer* cb1 = getCommandBufferFromTensor(input1);
-  MetalCommandBuffer* cb2 = getCommandBufferFromTensor(input2);
+  MetalCommandBuffer* cb1 = getCommandBuffer(input1);
+  MetalCommandBuffer* cb2 = getCommandBuffer(input2);
   TORCH_CHECK(
       [cb1 isEqual:cb2], @"inputs have different Metal command buffers");
   mt.texture()->allocateTemporaryStorage(outputSize, cb1);
@@ -192,8 +192,8 @@ Tensor& binaryElementwiseMPSCNNKernel_(Tensor& input1, const Tensor& input2) {
   if(c10::multiply_integers(outputSize) == 0){
     return input1;
   }
-  MetalCommandBuffer* cb1 = getCommandBufferFromTensor(input1);
-  MetalCommandBuffer* cb2 = getCommandBufferFromTensor(input2);
+  MetalCommandBuffer* cb1 = getCommandBuffer(input1);
+  MetalCommandBuffer* cb2 = getCommandBuffer(input2);
   TORCH_CHECK(
       [cb1 isEqual:cb2], @"inputs have different Metal command buffers");
   MPSImage* Y = createTemporaryImage(cb1, outputSize.vec());
