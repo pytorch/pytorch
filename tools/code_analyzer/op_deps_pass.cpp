@@ -66,6 +66,9 @@
 
 #include "llvm/Demangle/Demangle.h"
 #include "llvm/Analysis/LazyCallGraph.h"
+#if LLVM_VERSION_MAJOR < 8
+#include "llvm/IR/CallSite.h"
+#endif
 #include "llvm/IR/Constant.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instruction.h"
@@ -215,6 +218,22 @@ std::string _demangle(const std::string& mangled) {
   std::string result(undecorated ? undecorated : mangled);
   free(undecorated);
   return result;
+}
+
+inline bool _isCallSite(const Value* V) {
+#if LLVM_VERSION_MAJOR >= 8
+  return isa<CallBase>(V);
+#else
+  return CallSite(V);
+#endif
+}
+
+inline Function* _getCalledFunction(const Value* V) {
+#if LLVM_VERSION_MAJOR >= 8
+  return dyn_cast<CallBase>(V)->getCalledFunction();
+#else
+  return CallSite(V)->getCalledFunction();
+#endif
 }
 
 // LLVM_DEBUG needs opt to be built with debug support.
@@ -367,8 +386,8 @@ private:
     SmallVector<Constant*, 16> worklist;
     SmallPtrSet<Constant*, 16> visited;
 
-    if (isa<CallBase>(&I)) {
-      Function* callee = dyn_cast<CallBase>(&I)->getCalledFunction();
+    if (_isCallSite(&I)) {
+      Function* callee = _getCalledFunction(&I);
       if (callee && !callee->isIntrinsic() && visited.insert(callee).second) {
         CB(callee);
       }
@@ -628,7 +647,7 @@ private:
     for (auto V : instructions) {
       auto I = dyn_cast<Instruction>(V);
       // We only need to process call/invoke instructions.
-      if (!I || !isa<CallBase>(I)) {
+      if (!I || !_isCallSite(I)) {
         continue;
       }
       auto contextualNamespace = inferContextualNamespace(I);
@@ -721,7 +740,7 @@ private:
     for (auto V : instructions) {
       auto I = dyn_cast<Instruction>(V);
       // We only need to process call/invoke instructions.
-      if (!I || !isa<CallBase>(I)) {
+      if (!I || !_isCallSite(I)) {
         continue;
       }
       if (Verbose > 2) {
