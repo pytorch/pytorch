@@ -273,7 +273,8 @@ static void upsample_bilinear2d_out_cuda_template(
   }
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "upsample_bilinear2d_out_frame", [&] {
-    if (memory_format == at::MemoryFormat::ChannelsLast) {
+    // heuristic: only use channels_last path when it's faster than the contiguous path
+    if (memory_format == at::MemoryFormat::ChannelsLast && channels >= 16) {
       TORCH_INTERNAL_ASSERT(output.is_contiguous(at::MemoryFormat::ChannelsLast),
         "output is not contiguous in channels_last");
       using accscalar_t = at::acc_type<scalar_t, true>;
