@@ -3,7 +3,7 @@
 #import <ATen/native/metal/MetalTensorImpl.h>
 #import <ATen/native/metal/MetalTensorImplStorage.h>
 #import <ATen/native/metal/MetalUtils.h>
-#import <ATen/native/metal/mpscnn/MPSCNNContext.h>
+#import <ATen/native/metal/MetalContext.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
 #import <ATen/native/metal/mpscnn/MPSImageUtils.h>
 
@@ -17,7 +17,7 @@ namespace metal {
 
 API_AVAILABLE(ios(11.3), macos(10.13))
 static inline MPSNNReduceUnary* kernelForReducedDim(int dim) {
-  id<MTLDevice> device = [MPSCNNContext sharedInstance].device;
+  id<MTLDevice> device = [MetalContext sharedInstance].device;
   if (dim == 3) {
     return [[MPSNNReduceRowMean alloc] initWithDevice:device];
   } else if (dim == 2) {

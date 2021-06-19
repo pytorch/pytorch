@@ -1,5 +1,5 @@
 #include <ATen/Tensor.h>
-#include <ATen/native/metal/mpscnn/MPSCNNContext.h>
+#include <ATen/native/metal/MetalContext.h>
 #include <ATen/native/metal/MetalCommandBuffer.h>
 #include <ATen/native/metal/MetalTensorImpl.h>
 #include <ATen/native/metal/MetalTensorImplStorage.h>
@@ -78,7 +78,7 @@ static inline MetalCommandBuffer* getCommandBufferFromTensor(
 
 template<typename T>
 id<MTLBuffer>makeMTLBuffer(const std::vector<T>& src) {
-    id<MTLBuffer> buffer = [[MPSCNNContext sharedInstance].device
+    id<MTLBuffer> buffer = [[MetalContext sharedInstance].device
           newBufferWithLength:src.size() * sizeof(T)
                       options:MTLResourceOptionCPUCacheModeWriteCombined];
     memcpy(buffer.contents, src.data(), src.size() * sizeof(T));
@@ -86,7 +86,7 @@ id<MTLBuffer>makeMTLBuffer(const std::vector<T>& src) {
 }
 
 static inline id<MTLBuffer>makeMTLBuffer(int64_t bytes) {
-    id<MTLBuffer> buffer = [[MPSCNNContext sharedInstance].device
+    id<MTLBuffer> buffer = [[MetalContext sharedInstance].device
           newBufferWithLength:bytes
                       options:MTLResourceOptionCPUCacheModeWriteCombined];
     return buffer;

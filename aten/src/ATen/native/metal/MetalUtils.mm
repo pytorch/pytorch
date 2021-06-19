@@ -1,5 +1,5 @@
 #import <ATen/native/metal/MetalUtils.h>
-#import <ATen/native/metal/mpscnn/MPSCNNContext.h>
+#import <ATen/native/metal/MetalContext.h>
 #import <Accelerate/Accelerate.h>
 
 namespace at {

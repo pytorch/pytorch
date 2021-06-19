@@ -3,7 +3,7 @@
 #import <ATen/native/metal/MetalTensorImpl.h>
 #import <ATen/native/metal/MetalTensorImplStorage.h>
 #import <ATen/native/metal/MetalUtils.h>
-#import <ATen/native/metal/mpscnn/MPSCNNContext.h>
+#import <ATen/native/metal/MetalContext.h>
 #import <ATen/native/metal/mpscnn/MPSCNNUtils.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
 #import <ATen/native/metal/mpscnn/MPSImageUtils.h>
@@ -37,7 +37,7 @@ std::vector<Tensor> chunk(const Tensor& input, int64_t chunks, int64_t dim) {
   mt2.texture()->allocateTemporaryStorage(outputSize2, commandBuffer);
   MPSImage* Y1 = mt1.texture()->image();
   MPSImage* Y2 = mt2.texture()->image();
-  id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
+  id<MTLComputePipelineState> state = [[MetalContext sharedInstance]
       specializedPipelineState:"split_channels"
                      Constants:@[
                          @(X.featureChannels),

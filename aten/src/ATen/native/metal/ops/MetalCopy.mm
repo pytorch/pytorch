@@ -2,7 +2,7 @@
 #import <ATen/native/metal/MetalTensorImpl.h>
 #import <ATen/native/metal/MetalTensorImplStorage.h>
 #import <ATen/native/metal/MetalUtils.h>
-#import <ATen/native/metal/mpscnn/MPSCNNContext.h>
+#import <ATen/native/metal/MetalContext.h>
 #import <ATen/native/metal/mpscnn/MPSCNNUtils.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
 #import <ATen/native/metal/mpscnn/MPSImageUtils.h>
@@ -28,7 +28,7 @@ Tensor copy_to_host(const Tensor& input) {
 
   id<MTLComputeCommandEncoder> encoder =
       [commandBuffer.buffer computeCommandEncoder];
-  id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
+  id<MTLComputePipelineState> state = [[MetalContext sharedInstance]
       specializedPipelineState:metal::mpscnn::kernelFor(
                                    X, "copy", "copy_nonarray")
                      Constants:@[
