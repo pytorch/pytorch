@@ -3,7 +3,7 @@ import torch
 import torch.distributed as dist
 
 
-def average_parameters(module: nn.Module, process_group: dist.ProcessGroup):
+def average_parameters(module: torch.nn.Module, process_group: dist.ProcessGroup):
     """
     Averages all the parameters of a given module.
     For allreduce efficiency, all the parameters are flattened into a contiguous buffer.
