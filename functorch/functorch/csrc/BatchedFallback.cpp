@@ -91,9 +91,9 @@ static void warnFallback(const c10::FunctionSchema& schema, bool is_inplace) {
   if (!isVmapFallbackWarningEnabled()) {
     return;
   }
-  auto uses_stack = is_inplace ? "" : " and stack";
-  TORCH_WARN("Batching rule not implemented for ", schema.operator_name(), " falling back "
-             "to slow (for loop", uses_stack, ") implementation");
+  TORCH_WARN("There is a performance drop because we have not yet implemented ",
+             "the batching rule for ", schema.operator_name(), ". Please file ",
+             "us an issue on GitHub so that we can prioritize its implementation.");
 }
 
 // The general flow of the algorithm is as follows.
