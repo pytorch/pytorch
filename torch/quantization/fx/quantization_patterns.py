@@ -4,8 +4,6 @@ from torch.fx.graph import (
     Node,
     Graph,
 )
-import torch.nn.quantized as nnq
-import torch.nn.quantized.dynamic as nnqd
 from torch.quantization import (
     default_affine_fixed_qparams_fake_quant,
     default_symmetric_fixed_qparams_fake_quant,
@@ -675,7 +673,9 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
             # 2. select corresponding quantized linear class for the float linear class
             if activation_int8_quantized:
                 additional_static_quant_mapping = convert_custom_config_dict.get("static", {})
-                qlinear = get_static_quant_module_class(type(self.linear), additional_static_quant_mapping, is_reference=is_reference)
+                qlinear = get_static_quant_module_class(
+                    type(self.linear), additional_static_quant_mapping,
+                    is_reference=is_reference)
             else:
                 assert dtypes in [
                     (torch.float32, torch.qint8, torch.quint8),
