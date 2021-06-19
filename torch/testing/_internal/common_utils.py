@@ -1128,7 +1128,6 @@ class TestCase(expecttest.TestCase):
     def safeToDense(self, t):
         return t.coalesce().to_dense()
 
-
     # Compares torch function with reference function for given sample input (object of SampleInput)
     # Note: only values are compared, type comparison is not done here
     def compare_with_reference(self, torch_fn, ref_fn, sample_input, **kwargs):
@@ -1142,11 +1141,13 @@ class TestCase(expecttest.TestCase):
         if isinstance(actual, torch.Tensor):
             self.assertEqual(actual, torch.as_tensor(expected, dtype=actual.dtype), exact_device=False)
         elif is_iterable_of_tensors(actual):
-            msg = f"Expected both functions to return outputs of same size, got {len(actual)} from torch and {len(expected)} from NumPy"
+            msg = f"Expected both functions to return outputs of same size but 
+		   got {len(actual)} from torch and {len(expected)} from NumPy"
             assert len(actual) == len(expected), msg
             for x, y in zip(actual, expected):
                 self.assertEqual(x, torch.as_tensor(y, dtype=x.dtype), exact_device=False)
         else:
+	    # TODO: Does PyTorch eer return other than tensor/iterable of tensors?
             raise TypeError(f"Got type: {type(actual)} from PyTorch but only tensors/iterable of tensors are currently supported")
 
     # Compares the given Torch and NumPy functions on the given tensor-like object.
