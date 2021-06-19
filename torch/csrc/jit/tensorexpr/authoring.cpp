@@ -245,6 +245,7 @@ class CompileCache3 {
     if (item != cache_.end()) {
       return item->second;
     } else {
+      KernelScope scope(&arena_);
       auto cr = new CompileResultImpl();
       std::vector<py::object> spec;
       for (int i = 0; i < key.size(); ++i) {
@@ -329,6 +330,7 @@ class CompileCache3 {
   std::mutex mutex_;
   Map cache_;
   py::object compile_fn_;
+  KernelArena arena_;
 };
 
 template <int NARGS>
