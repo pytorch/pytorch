@@ -170,9 +170,11 @@ class CompileResultBase : public KernelScopedObject {
  public:
   virtual ~CompileResultBase() = default;
   virtual void set_code(const py::object& cg) = 0;
-  virtual void set_shape_from(const std::vector<std::pair<int, int>>& indices) = 0;
+  virtual void set_shape_from(
+      const std::vector<std::pair<int, int>>& indices) = 0;
   virtual void set_options_from(int index) = 0;
-  virtual void add_shape_check(const std::tuple<int, int, int, int>& indices) = 0;
+  virtual void add_shape_check(
+      const std::tuple<int, int, int, int>& indices) = 0;
 };
 
 struct CompileResultProxy {
@@ -216,15 +218,17 @@ class CompileCache3 {
       options_from_ = index;
     }
 
-    void add_shape_check(const std::tuple<int, int, int, int>& indices){
-        shape_checks_.push_back(indices);
+    void add_shape_check(const std::tuple<int, int, int, int>& indices) {
+      shape_checks_.push_back(indices);
     }
 
     at::Tensor call(const Args& args, std::vector<void*>& call_args) {
       int64_t shapes[MAX_DIMS];
       for (int i = 0; i < shape_from_.size(); ++i) {
         shapes[i] = args[shape_from_[i].first].size(shape_from_[i].second);
-        call_args.emplace_back(shapes + i);
+        call_args.emplace_back(&shapes[i]);
+        // std::cerr << shapes[i] << " from "<< shape_from_[i].first
+        //           << ", "<< shape_from_[i].second << std::endl;
       }
       cg_->call_raw(call_args);
       return args[2];
@@ -440,12 +444,14 @@ void initTensorExprAuthoringBindings(PyObject* te_obj) {
           })
       .def(
           "add_shape_check",
-          [](CompileResultProxy& self, const std::tuple<int, int, int, int>& indices) {
+          [](CompileResultProxy& self,
+             const std::tuple<int, int, int, int>& indices) {
             self.res->add_shape_check(indices);
           })
       .def(
           "set_shape_from",
-          [](CompileResultProxy& self, const std::vector<std::pair<int, int>>& indices) {
+          [](CompileResultProxy& self,
+             const std::vector<std::pair<int, int>>& indices) {
             self.res->set_shape_from(indices);
           })
       .def("set_options_from", [](CompileResultProxy& self, int index) {

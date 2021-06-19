@@ -167,9 +167,21 @@ void initTensorExprBindings(PyObject* module) {
           [](BufHandle& self, const std::vector<ExprHandle>& v) {
             return Load::make(self, v);
           })
-      .def("load", [](BufHandle& self, const ExprHandle& v) {
-        return Load::make(self, {v});
-      });
+      .def(
+          "load",
+          [](BufHandle& self, const ExprHandle& v) {
+            return Load::make(self, {v});
+          })
+      .def(
+          "store",
+          [](BufHandle& self,
+             const std::vector<ExprHandle>& i,
+             const ExprHandle& v) { return Store::make(self, i, v); })
+      .def(
+          "store",
+          [](BufHandle& self, const ExprHandle& i, const ExprHandle& v) {
+            return Store::make(self, {i}, v);
+          });
 
   py::class_<Placeholder>(te, "Placeholder")
       .def(py::init<

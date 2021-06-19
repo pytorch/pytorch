@@ -1,10 +1,12 @@
 import torch
 import itertools
+import functools
 from torch._C import _te
-from pprint import pprint
 
+FOLD_ALIASES = True
 _SHAPE_TYPES = {"one", "other"}
 _STRIDE_TYPES = {"zero", "one", "contiguous", "transposed_contiguous", "as_arg"}
+_int = _te.ExprHandle.int
 
 
 def _argmax(x):
@@ -12,11 +14,19 @@ def _argmax(x):
 
 
 def _zero():
-    return _te.ExprHandle.int(0)
+    return _int(0)
 
 
 def _one():
-    return _te.ExprHandle.int(1)
+    return _int(1)
+
+
+def _combine_dtype(a, b):
+    if a == b:
+        return a
+    # TODO(jansel): find a cleaner way to implement this
+    return (torch.zeros(1, dtype=a, device="cpu") +
+            torch.zeros(1, dtype=b, device="cpu")).dtype
 
 
 class PointwiseCompiler(object):
@@ -29,8 +39,20 @@ class PointwiseCompiler(object):
         self.strides = [["zero"] * (self.ndim - x.ndim) + x.stride for x in spec]
         self.shape_args = [_te.VarHandle(torch.int32) for _ in range(self.ndim)]
         self.shape_vars = list(self.shape_args)
+        self.iter_vars = [_te.VarHandle(torch.int32) for _ in range(self.ndim)]
         self.stride_args = []
+        self.broadcasts = []
         self.output_order = None
+
+        device, = list(set(x.device.type for x in spec))
+        self.compile_mode = {"cpu": "llvm", "cuda": "cuda"}[device]
+
+        if spec[-1].out:
+            self.dtype = spec[-1].dtype
+        else:
+            self.dtype = functools.reduce(
+                _combine_dtype, [x.dtype for x in spec])
+
         self.run()
 
     def add_stride_arg(self):
@@ -48,12 +70,8 @@ class PointwiseCompiler(object):
 
     def error_checks(self):
         spec = self.spec
-        devices = list(set(x.device for x in spec))
-        dtypes = list(set(x.dtype for x in spec))
-        layouts = list(set(x.layout for x in spec))
-        assert len(devices) == 1
-        assert len(dtypes) == 1
-        assert len(layouts) == 1
+        layout, = list(set(x.layout for x in spec))
+        assert layout == torch.strided, "TODO: support other layouts"
         assert all((not x.requires_grad) for x in spec)
         assert [x.out for x in spec] == [False] * (len(spec) - 1) + [True]
         assert all(shape_type in _SHAPE_TYPES for shape_type in itertools.chain(*self.shapes))
@@ -65,14 +83,13 @@ class PointwiseCompiler(object):
         nargs = len(spec)
         longest = _argmax([x.ndim for x in spec])
         shapes = self.shapes
-        strides = self.strides
         shape_from = [(longest, d) for d in range(ndim)]
         for d in range(ndim):
             first = None
             for a in range(nargs):
                 if shapes[a][d] == "one":
-                    strides[a][d] = "zero"  # broadcast
-                if shapes[a][d] == "other":
+                    self.broadcasts.append((a, d))
+                elif shapes[a][d] == "other":
                     if first is None:
                         shape_from[d] = first = (a, d - (ndim - spec[a].ndim))
                     else:
@@ -134,11 +151,55 @@ class PointwiseCompiler(object):
                     if isinstance(strides[a][d], str):
                         break
 
-    def indexing(self, coord, stride):
+        for a, d in self.broadcasts:
+            strides[a][d] = _zero()
+
+    def indexing(self, stride):
         result = _zero()
-        for c, s in zip(coord, stride):
+        for c, s in zip(self.iter_vars, stride):
             result = result + c * s
         return result
+
+    def compute_code(self):
+        bufs = [_te.BufHandle(s.dtype) for s in self.spec]
+        bufs_args = list(bufs)
+
+        aliases = {}
+        for i, s in enumerate(self.spec):
+            assert s.alias_group >= 0, "TODO: support complex aliasing"
+            if s.alias_group > 0 and s.alias_group not in aliases:
+                aliases[s.alias_group] = i
+            elif s.alias_group > 0 and FOLD_ALIASES:
+                # BufHandle in buf_args is now ignored
+                bufs[i] = bufs[aliases[s.alias_group]]
+
+        input_bufs = bufs[:-1]
+        input_strides = self.strides[:-1]
+        output_bufs = bufs[-1:]
+        output_strides = self.strides[-1:]
+
+        assert self.spec[-1].out
+
+        inputs = [_te.Cast.make(self.dtype,
+                                buf.load(self.indexing(stride)))
+                  for buf, stride in zip(input_bufs, input_strides)]
+        val = self.pointwise_fn(*inputs)
+        out = _te.Block([buf.store(self.indexing(stride), val)
+                         for buf, stride in zip(output_bufs, output_strides)])
+
+        for var, size in reversed(list(zip(self.iter_vars, self.shape_vars))):
+            out = _te.For.make(var, _zero(), size, out)
+
+        loopnest = _te.LoopNest(out, output_bufs)
+        loopnest.prepare_for_codegen()
+
+        # TODO(jansel): use some sort of schedule here?
+
+        cg = _te.construct_codegen(
+            self.compile_mode,
+            loopnest.simplify(),
+            bufs_args + self.stride_args + self.shape_args)
+        self.result.set_code(cg)
 
     def run(self):
         # pprint(self.spec)
@@ -146,24 +207,7 @@ class PointwiseCompiler(object):
         self.compute_broadcasts_and_size_checks()
         self.compute_output_order()
         self.compute_symbolic_shapes_and_strides()
-
-        bufs = [_te.BufHandle(s.dtype) for s in self.spec[:-1]]
-        dtype = self.spec[-1].dtype
-        assert self.spec[-1].out
-
-        def compute(*coord):
-            inputs = [_te.Cast.make(dtype,
-                                    buf.load(self.indexing(coord, stride)))
-                      for buf, stride in zip(bufs, self.strides)]
-            return self.pointwise_fn(*inputs)
-
-        out = _te.Compute('out', self.shape_vars, compute)
-        loopnest = _te.LoopNest([out])
-        loopnest.prepare_for_codegen()
-        self.result.set_code(_te.construct_codegen(
-            'llvm',
-            loopnest.simplify(),
-            bufs + [out] + self.stride_args + self.shape_args))
+        self.compute_code()
 
 
 def pointwise_operator(fn):

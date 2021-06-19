@@ -11,7 +11,6 @@ SIZES = [2 ** n for n in range(0, 13, 4)]
 NUMBER = [1000, 100, 10, 1]
 REPEAT = 10
 
-
 @torch.jit.te.pointwise_operator
 def nnc_add(a, b):
     return a + b
@@ -37,9 +36,9 @@ def make_setup(make_args, nnc=nnc_add, aten=torch.add, inplace=False):
         args = make_args(n)
         result_aten = aten(*args)
         result_nnc = torch.randn_like(result_aten)
-        result = torch.empty_like(result_aten)
         nnc(*args, out=result_nnc)
         torch.testing.assert_allclose(result_aten, result_nnc)
+        result = torch.empty_like(result_aten)
         return (lambda: nnc(*args, out=result),
                 lambda: aten(*args, out=result))
 
@@ -71,16 +70,17 @@ def benchmark(*args, **kwargs):
 
 def main():
     results = [
-        ("(n*n)+(n*n)", benchmark(lambda n: (randn(n * n), randn(n * n)))),
-        ("(n,1)+(1,n)", benchmark(lambda n: (randn(n, 1), randn(1, n)))),
         ("(n,n)+(1)", benchmark(lambda n: (randn(n, n), randn(1)))),
-        ("(n,n)+(n,1)", benchmark(lambda n: (randn(n, n), randn(n, 1)))),
-        ("(n,n)+(n,n)", benchmark(lambda n: (randn(n, n), randn(n, n)))),
-
         ("(n,n)+=(1)", benchmark(lambda n: (randn(n, n), randn(1)), inplace=True)),
+        ("(n,n)+(n,1)", benchmark(lambda n: (randn(n, n), randn(n, 1)))),
         ("(n,n)+=(n,1)", benchmark(lambda n: (randn(n, n), randn(n, 1)), inplace=True)),
+        ("(n,n)+(n,n)", benchmark(lambda n: (randn(n, n), randn(n, n)))),
         ("(n,n)+=(n,n)", benchmark(lambda n: (randn(n, n), randn(n, n)), inplace=True)),
+        ("(n,1)+(1,n)", benchmark(lambda n: (randn(n, 1), randn(1, n)))),
+        ("float+double", benchmark(lambda n: (randn(n, n), randn(n, n, dtype=torch.float64)))),
+        ("issue 57611", benchmark(lambda n: (randn(1, 32, 32, 2), randn(n, 1, 1, 2)))),
     ]
+    # TODO(jansel): implement int support
     print()
     print("Speedups over aten")
     print(pd.DataFrame(np.stack([r for n, r in results]),
