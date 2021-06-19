@@ -360,6 +360,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
       .def(
           "prepare_for_forward",
           &::c10d::Reducer::prepare_for_forward,
+          py::arg("will_run_grad_reduction") = true,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "prepare_for_backward",
@@ -414,7 +415,12 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
              const std::shared_ptr<::c10d::Logger> logger) {
             std::weak_ptr<::c10d::Logger> logger_weakref = logger;
             reducer.set_logger(logger_weakref);
-          });
+          })
+       .def(
+           "_static_graph_first_bwd",
+           &::c10d::Reducer::static_graph_first_bwd,
+           py::call_guard<py::gil_scoped_release>()
+       );
 
   shared_ptr_class_<::c10d::Logger>(module, "Logger")
       .def(
