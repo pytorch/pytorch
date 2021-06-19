@@ -1141,8 +1141,8 @@ class TestCase(expecttest.TestCase):
         if isinstance(actual, torch.Tensor):
             self.assertEqual(actual, torch.as_tensor(expected, dtype=actual.dtype), exact_device=False)
         elif is_iterable_of_tensors(actual):
-            msg = f"Expected both functions to return outputs of same size but" \
-                   " got {len(actual)} from torch and {len(expected)} from NumPy."
+            msg = "Expected both functions to return outputs of same size but" \
+                  f" got {len(actual)} from torch and {len(expected)} from NumPy."
             assert len(actual) == len(expected), msg
             for x, y in zip(actual, expected):
                 self.assertEqual(x, torch.as_tensor(y, dtype=x.dtype), exact_device=False)
