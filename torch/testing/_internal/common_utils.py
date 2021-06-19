@@ -1106,8 +1106,7 @@ class TestCase(expecttest.TestCase):
         order. Otherwise, the column counts of rows are defined by the
         used sampling method.
 
-        Description of the method:
-          https://pearu.github.io/csr_sampling.html
+        For description of the sampling method, see https://pearu.github.io/csr_sampling.html
         """
         assert 0 <= nnz << n_rows * n_cols
 
@@ -1159,7 +1158,14 @@ class TestCase(expecttest.TestCase):
             q, r = divmod(nnz - n * n_cols - m * (n_rows - n),
                           (n_cols - m) * (n_cols - m + 1) // 2)
             p = 1 + q * (n_cols - m + 1)
-            k = math.isqrt(2 * r)
+            if sys.version_info >= (3, 8):
+                k = math.isqrt(2 * r)
+            else:
+                # math.isqrt(x) is available starting from Python 3.8,
+                # so using int(math.sqrt(x)) as an approximation that
+                # appers to give exaxt result for all x values less
+                # than 2**35, at least, the upper limit of x is TBD.
+                k = int(math.sqrt(2 * r))
             if k * (k + 1) > 2 * r:
                 k -= 1
             corr = r - k * (k + 1) // 2
