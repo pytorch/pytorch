@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/nn/modules/_functions.h>
 
 using namespace torch::autograd;
@@ -22,13 +23,7 @@ Variable CrossMapLRN2d::forward(
 
   torch::Tensor output = torch::empty({0}, input.options());
 
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
-  int64_t batch_size = input.size(0);
   int64_t channels = input.size(1);
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
-  int64_t input_height = input.size(2);
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
-  int64_t input_width = input.size(3);
 
   output.resize_as_(input);
   ctx->saved_data["scale"].toTensor().resize_as_(input);
@@ -44,7 +39,7 @@ Variable CrossMapLRN2d::forward(
   scale_first.zero_();
 
   /// compute first feature map normalization
-  for (int64_t c = 0; c < pre_pad_crop; ++c) {
+  for (const auto c : c10::irange(pre_pad_crop)) {
     scale_first.add_(input_square.select(1, c));
   }
 
@@ -52,7 +47,7 @@ Variable CrossMapLRN2d::forward(
   /// by adding the next feature map and removing the previous
   torch::Tensor scale_previous, scale_current, square_next, square_previous;
 
-  for (int64_t c = 1; c < channels; ++c) {
+  for (const auto c : c10::irange(1, channels)) {
     scale_previous = ctx->saved_data["scale"].toTensor().select(1, c - 1);
     scale_current = ctx->saved_data["scale"].toTensor().select(1, c);
     scale_current.copy_(scale_previous);
@@ -103,14 +98,14 @@ variable_list CrossMapLRN2d::backward(AutogradContext *ctx, variable_list grad_o
   padded_ratio.zero_();
   auto padded_ratio_center = padded_ratio.narrow(0, inversePrePad, channels);
 
-  for (int64_t n = 0; n < batch_size; ++n) {
+  for (const auto n : c10::irange(batch_size)) {
     torch::mul_out(padded_ratio_center, grad_output[n], output[n]);
     padded_ratio_center.div_(ctx->saved_data["scale"].toTensor()[n]);
     torch::sum_out(
         accum_ratio,
         padded_ratio.narrow(0, 0, ctx->saved_data["size"].toInt() - 1),
         0, /*keepdim=*/false);
-    for (int64_t c = 0; c < channels; ++c) {
+    for (const auto c : c10::irange(channels)) {
       accum_ratio.add_(padded_ratio[c + ctx->saved_data["size"].toInt() - 1]);
       grad_input[n][c].addcmul_(input[n][c], accum_ratio, -cache_ratio_value);
       accum_ratio.add_(padded_ratio[c], -1);
