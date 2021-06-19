@@ -164,7 +164,7 @@ std::string show_config() {
   ss << "  - " << get_openmp_version() << "\n";
 #endif
 
-#ifdef USE_LAPACK
+#if AT_BUILD_WITH_LAPACK()
   // TODO: Actually record which one we actually picked
   ss << "  - LAPACK is enabled (usually provided by MKL)\n";
 #endif

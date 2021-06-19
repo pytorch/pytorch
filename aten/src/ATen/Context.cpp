@@ -14,8 +14,6 @@
 #include <ATen/Tensor.h>
 #include <ATen/cpu/FlushDenormal.h>
 
-#include <TH/TH.h> // for USE_LAPACK
-
 #ifdef USE_FBGEMM
 #include <fbgemm/Fbgemm.h>
 #endif // USE_FBGEMM
@@ -160,7 +158,7 @@ bool Context::hasOpenMP() {
 }
 
 bool Context::hasLAPACK() {
-#ifdef USE_LAPACK
+#if AT_BUILD_WITH_LAPACK()
   return true;
 #else
   return false;
