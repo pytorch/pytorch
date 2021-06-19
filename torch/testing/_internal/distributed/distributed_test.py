@@ -961,7 +961,7 @@ class DistributedTest:
             # Test global model averaging
             for p in model.parameters():
                 p.data = torch.ones_like(p.data)
-            model_averaging_utils.average_parameters(model=model, process_group=None)
+            model_averaging_utils.average_parameters(module=model, process_group=None)
             # Every element will be the same as the input.
             for p in model.parameters():
                 self.assertEqual(p.data, torch.ones_like(p.data))
@@ -970,7 +970,7 @@ class DistributedTest:
             for p in model.parameters():
                 p.data = torch.ones_like(p.data) * rank
             group_nccl = dist.new_group(ranks=[0, 1], backend="nccl")
-            model_averaging_utils.average_parameters(model=model, process_group=group_nccl)
+            model_averaging_utils.average_parameters(module=model, process_group=group_nccl)
             if not dist._rank_not_in_group(group_nccl):
                 # Every element on device 0 or 1 should be the average of 0 and 1, i.e., 0.5.
                 for p in model.parameters():
