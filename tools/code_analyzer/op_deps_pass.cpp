@@ -220,7 +220,7 @@ std::string _demangle(const std::string& mangled) {
   return result;
 }
 
-inline bool _isCallSite(const Value* V) {
+inline bool _isCallSite(Value* V) {
 #if LLVM_VERSION_MAJOR >= 8
   return isa<CallBase>(V);
 #else
@@ -228,7 +228,7 @@ inline bool _isCallSite(const Value* V) {
 #endif
 }
 
-inline Function* _getCalledFunction(const Value* V) {
+inline Function* _getCalledFunction(Value* V) {
 #if LLVM_VERSION_MAJOR >= 8
   return dyn_cast<CallBase>(V)->getCalledFunction();
 #else
