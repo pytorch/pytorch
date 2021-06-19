@@ -98,6 +98,18 @@ def skip_if_lt_x_gpu(x):
 
     return decorator
 
+def skip_if_odd_num_of_gpus():
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            if torch.cuda.is_available() and torch.cuda.device_count() % 2 == 0:
+                return func(*args, **kwargs)
+            message = "Need an even number of CUDA devices"
+            TEST_SKIPS["multi-gpu"] = TestSkip(75, message)
+            sys.exit(TEST_SKIPS['multi-gpu'].exit_code)
+        return wrapper
+
+    return decorator
 
 # This decorator helps avoiding initializing cuda while testing other backends
 def nccl_skip_if_lt_x_gpu(backend, x):
