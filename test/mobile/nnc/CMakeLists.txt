@@ -1,11 +1,5 @@
 set(MOBILE_NNC_TEST_ROOT ${TORCH_ROOT}/test/mobile/nnc)
 
-set(MOBILE_NNC_BACKEND_LIB_SRCS
-  ${TORCH_ROOT}/torch/csrc/jit/mobile/nnc/backend.cpp
-  ${TORCH_ROOT}/torch/csrc/jit/mobile/nnc/context.cpp
-  ${TORCH_ROOT}/torch/csrc/jit/mobile/nnc/registry.cpp
-)
-
 set(MOBILE_NNC_TEST_SRCS
   ${MOBILE_NNC_TEST_ROOT}/test_context.cpp
   ${MOBILE_NNC_TEST_ROOT}/test_nnc_backend.cpp
@@ -15,7 +9,6 @@ set(MOBILE_NNC_TEST_SRCS
 add_executable(test_mobile_nnc
   ${TORCH_ROOT}/test/cpp/lite_interpreter_runtime/main.cpp
   ${MOBILE_NNC_TEST_SRCS}
-  ${MOBILE_NNC_BACKEND_LIB_SRCS}
 )
 
 target_link_libraries(test_mobile_nnc PRIVATE torch gtest)
