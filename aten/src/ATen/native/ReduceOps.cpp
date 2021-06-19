@@ -5,6 +5,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/LegacyTHFunctionsCPU.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/Parallel.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/ReduceOpsUtils.h>

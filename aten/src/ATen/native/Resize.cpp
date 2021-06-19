@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/ResizeCommon.h>
-#include <torch/library.h>
+
 #include <c10/core/TensorOptions.h>
 
 namespace at { namespace native {
@@ -38,6 +38,22 @@ bool resize_output(const Tensor& output, IntArrayRef shape) {
     return true;
   } else {
     return false;
+  }
+}
+
+void resize_bytes_cpu(StorageImpl* storage, size_t size_bytes) {
+  TORCH_CHECK(storage->resizable(), "Trying to resize storage that is not resizable");
+
+  at::DataPtr new_data;
+  if (size_bytes != 0) {
+    new_data = storage->allocator()->allocate(size_bytes);
+  }
+  at::DataPtr old_data = storage->set_data_ptr(std::move(new_data));
+  const auto old_capacity = storage->nbytes();
+  storage->set_nbytes(size_bytes);
+  const auto copy_capacity = std::min(size_bytes, old_capacity);
+  if (old_data != nullptr && copy_capacity > 0) {
+    memcpy(storage->data(), old_data.get(), copy_capacity);
   }
 }
 
