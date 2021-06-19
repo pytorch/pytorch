@@ -1,5 +1,5 @@
-#import <ATen/native/metal/MetalTensorUtils.h>
 #import <ATen/native/metal/MetalContext.h>
+#import <ATen/native/metal/MetalTensorUtils.h>
 #import <ATen/native/metal/mpscnn/MPSCNNUtils.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
 #import <ATen/native/metal/mpscnn/MPSImageUtils.h>
@@ -12,16 +12,24 @@ namespace native {
 namespace metal {
 
 MPSImage* createStaticImage(IntArrayRef sizes) {
+  int64_t N = sizes[0];
+  int64_t C = sizes[1];
+  int64_t H = sizes[2];
+  int64_t W = sizes[3];
   MPSImageDescriptor* desc = [MPSImageDescriptor
       imageDescriptorWithChannelFormat:MPSImageFeatureChannelFormatFloat16
-                                 width:sizes[3]
-                                height:sizes[2]
-                       featureChannels:sizes[1]
-                        numberOfImages:sizes[0]
+                                 width:W
+                                height:H
+                       featureChannels:C
+                        numberOfImages:N
                                  usage:MTLTextureUsageShaderRead |
                                  MTLTextureUsageShaderWrite];
-  return [[MPSImage alloc] initWithDevice:[MetalContext sharedInstance].device
-                          imageDescriptor:desc];
+  MPSImage* image =
+      [[MPSImage alloc] initWithDevice:[MetalContext sharedInstance].device
+                       imageDescriptor:desc];
+  image.label = [NSString
+      stringWithFormat:@"[%d, %d, %d, %d]", (int)N, (int)C, (int)H, (int)W];
+  return image;
 }
 
 MPSImage* createStaticImage(const float* src, IntArrayRef sizes) {
@@ -74,32 +82,42 @@ MPSImage* createStaticImage(
   [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
           threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
   [encoder endEncoding];
-  [image markRead];
   if (waitUntilCompleted) {
     [buffer commit];
   }
   return Y;
 }
 
-MPSTemporaryImage* createTemporaryImage(MetalCommandBuffer* buffer, IntArrayRef sizes) {
+MPSTemporaryImage* createTemporaryImage(
+    MetalCommandBuffer* buffer,
+    IntArrayRef sizes) {
   TORCH_CHECK(buffer);
+  int64_t N = sizes[0];
+  int64_t C = sizes[1];
+  int64_t H = sizes[2];
+  int64_t W = sizes[3];
   MPSImageDescriptor* desc = [MPSImageDescriptor
       imageDescriptorWithChannelFormat:MPSImageFeatureChannelFormatFloat16
-                                 width:sizes[3]
-                                height:sizes[2]
-                       featureChannels:sizes[1]
-                        numberOfImages:sizes[0]
+                                 width:W
+                                height:H
+                       featureChannels:C
+                        numberOfImages:N
                                  usage:MTLTextureUsageShaderRead |
                                  MTLTextureUsageShaderWrite];
   MPSTemporaryImage* image =
       [MPSTemporaryImage temporaryImageWithCommandBuffer:buffer.buffer
                                          imageDescriptor:desc];
   image.readCount = INT_MAX;
+  image.label = [NSString
+      stringWithFormat:@"[%d, %d, %d, %d]", (int)N, (int)C, (int)H, (int)W];
   [buffer add:image];
   return image;
 }
 
-MPSTemporaryImage* createTemporaryImage(MetalCommandBuffer* buffer, IntArrayRef sizes, const float* src) {
+MPSTemporaryImage* createTemporaryImage(
+    MetalCommandBuffer* buffer,
+    IntArrayRef sizes,
+    const float* src) {
   TORCH_CHECK(buffer);
   int64_t size_bytes = c10::multiply_integers(sizes) * sizeof(float);
   id<MTLBuffer> buff = [[MetalContext sharedInstance].device
@@ -126,7 +144,6 @@ MPSTemporaryImage* createTemporaryImage(MetalCommandBuffer* buffer, IntArrayRef 
   [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
           threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
   [encoder endEncoding];
-  [output markRead];
   return output;
 }
 
@@ -150,7 +167,7 @@ MPSTemporaryImage* createTemporaryImage(
   return Y;
 }
 
-void copyToHost(float* dst, MPSImage* image) {
+void copyImageToFloatBuffer(float* dst, MPSImage* image) {
   int64_t size_bytes = c10::multiply_integers([image sizes]) * sizeof(float);
   id<MTLBuffer> buffer = [[MetalContext sharedInstance].device
       newBufferWithLength:size_bytes
@@ -184,7 +201,7 @@ void copyToHost(float* dst, MPSImage* image) {
   memcpy(dst, buffer.contents, buffer.length);
 }
 
-void copyToMetalBuffer(
+void copyImageToMetalBuffer(
     MetalCommandBuffer* cmdBuffer,
     id<MTLBuffer> dst,
     MPSImage* image) {

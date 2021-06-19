@@ -10,9 +10,7 @@ namespace native {
 namespace metal {
 
 MPSImage* createStaticImage(IntArrayRef sizes);
-MPSImage* createStaticImage(
-    const float* src,
-    const IntArrayRef sizes);
+MPSImage* createStaticImage(const float* src, const IntArrayRef sizes);
 MPSImage* createStaticImage(
     MPSTemporaryImage* image,
     MetalCommandBuffer* buffer,
@@ -29,8 +27,12 @@ MPSTemporaryImage* createTemporaryImage(
     MetalCommandBuffer* buffer,
     MPSImage* image);
 
-void copyToHost(float* dst, MPSImage* image);
-void copyToMetalBuffer(MetalCommandBuffer* buffer, id<MTLBuffer> dst, MPSImage* image);
+void copyImageToFloatBuffer(float* dst, MPSImage* image);
+
+void copyImageToMetalBuffer(
+    MetalCommandBuffer* buffer,
+    id<MTLBuffer> dst,
+    MPSImage* image);
 
 static inline MPSImage* imageFromTensor(const Tensor& tensor) {
   TORCH_CHECK(tensor.is_metal());
@@ -57,7 +59,7 @@ static inline std::vector<int64_t> computeImageSize(IntArrayRef sizes) {
   int64_t batch = 1;
   for (int64_t i = sizes.size() - 1; i >= 0; i--) {
     if (index != 0) {
-        imageSize[index] = sizes[i];
+      imageSize[index] = sizes[i];
       index--;
       continue;
     }

@@ -81,7 +81,6 @@ Tensor reflection_pad2d(const Tensor& input, IntArrayRef padding) {
   [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
           threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
   [encoder endEncoding];
-  [X markRead];
   auto output = makeTensor(std::move(mt), input.options());
   return output;
 }
