@@ -1595,10 +1595,10 @@ def sample_inputs_amax_amin(op_info, device, dtype, requires_grad, **kwargs):
         ((S, S, S), (), {}),
         ((S, S, S), (1,), {}),
         ((S, S, S), ((1, 2,),), {}),
-        ((S, S, S), (1,), {'keepdim': True},),
+        ((S, S, S), (1,), {'keepdim': True}),
         ((), (0,), {}),
         ((), (), {}),
-        ((), (0,), {'keepdim': True},),
+        ((), (0,), {'keepdim': True}),
     )
     return tuple(SampleInput((make_tensor(size, device, dtype,
                                           low=None, high=None,
