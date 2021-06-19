@@ -2,7 +2,7 @@
 #import <ATen/native/metal/MetalTensorImpl.h>
 #import <ATen/native/metal/MetalTensorImplStorage.h>
 #import <ATen/native/metal/MetalUtils.h>
-#import <ATen/native/metal/mpscnn/MPSCNNContext.h>
+#import <ATen/native/metal/MetalContext.h>
 #import <ATen/native/metal/mpscnn/MPSCNNUtils.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
 #import <ATen/native/metal/mpscnn/MPSImageUtils.h>
@@ -36,7 +36,7 @@ Tensor view(const Tensor& input, IntArrayRef size) {
   mt.texture()->allocateTemporaryStorage(inferred_size, commandBuffer);
   MPSImage* Y = mt.texture()->image();
   id<MTLComputePipelineState> state =
-      [[MPSCNNContext sharedInstance] specializedPipelineState:"reshape"
+      [[MetalContext sharedInstance] specializedPipelineState:"reshape"
                                                      Constants:@[
                                                        @(Y.height),
                                                        @(Y.width),
