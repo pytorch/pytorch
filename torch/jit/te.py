@@ -160,7 +160,6 @@ class PointwiseCompiler(object):
             result = result + c * s
         return result
 
-
     def compute_code(self):
         bufs = [_te.BufHandle(s.dtype) for s in self.spec]
         if not self.spec[-1].out:
@@ -201,7 +200,11 @@ class PointwiseCompiler(object):
         out = _te.Block([buf.store(self.indexing(stride), val)
                          for buf, stride in zip(output_bufs, output_strides)])
 
-        for var, size in reversed(list(zip(self.iter_vars, self.shape_vars))):
+        # TODO(jansel): flatten output vars when contiguous
+
+        for i in self.output_order:
+            var = self.iter_vars[i]
+            size = self.shape_vars[i]
             out = _te.For.make(var, _zero(), size, out)
 
         loopnest = _te.LoopNest(out, output_bufs)
@@ -216,7 +219,6 @@ class PointwiseCompiler(object):
         self.result.set_code(cg)
 
     def run(self):
-        # pprint(self.spec)
         self.error_checks()
         self.compute_broadcasts_and_size_checks()
         self.compute_output_order()

@@ -253,9 +253,9 @@ class CompileCache3 {
         auto& output_order = allocated_outputs_[0].second;
         int64_t strides[MAX_DIMS] = {0};
         int64_t next_stride = 1;
-        for(int i : output_order) {
-            strides[i] = next_stride;
-            next_stride *= shapes[i];
+        for (int i : output_order) {
+          strides[i] = next_stride;
+          next_stride *= shapes[i];
         }
         output = at::empty_strided(
             c10::IntArrayRef(shapes, shapes + ndims),
