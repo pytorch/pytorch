@@ -35,4 +35,5 @@ Functions
 .. autofunction:: logit
 .. autofunction:: logsumexp
 .. autofunction:: ndtr
+.. autofunction:: ndtri
 .. autofunction:: xlog1py

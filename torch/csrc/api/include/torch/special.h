@@ -131,6 +131,13 @@ inline Tensor logsumexp(const Tensor& self, IntArrayRef dims, bool keepdim) {
 
 inline Tensor& logsumexp_out(Tensor& result, const Tensor& self, IntArrayRef dims, bool keepdim) {
   return torch::special_logsumexp_out(result, self, dims, keepdim);
+
+inline Tensor ndtri(const Tensor& self) {
+  return torch::special_ndtri(self);
+}
+
+inline Tensor& ndtri_out(Tensor& result, const Tensor& self) {
+  return torch::special_ndtri_out(result, self);
 }
 
 /// Computes the logit of input, elementwise.
