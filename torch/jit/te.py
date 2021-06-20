@@ -73,7 +73,7 @@ class PointwiseCompiler(object):
         layout, = list(set(x.layout for x in spec))
         assert layout == torch.strided, "TODO: support other layouts"
         assert all((not x.requires_grad) for x in spec)
-        assert [x.out for x in spec] == [False] * (len(spec) - 1) + [True]
+        assert [x.out for x in spec[:-1]] == [False] * (len(spec) - 1)
         assert all(shape_type in _SHAPE_TYPES for shape_type in itertools.chain(*self.shapes))
         assert all(stride_type in _STRIDE_TYPES for stride_type in itertools.chain(*self.strides))
 
@@ -160,8 +160,24 @@ class PointwiseCompiler(object):
             result = result + c * s
         return result
 
+
     def compute_code(self):
         bufs = [_te.BufHandle(s.dtype) for s in self.spec]
+        if not self.spec[-1].out:
+            options_from = [i for i in range(len(self.spec))
+                            if self.spec[i].dtype == self.dtype][0]
+            self.result.add_allocated_output(options_from, self.output_order)
+            bufs.append(_te.BufHandle(self.dtype))
+
+            self.shapes.append(list(self.shape_vars))
+            output_strides = [None] * self.ndim
+            next_stride = _one()
+            for i in self.output_order:
+                output_strides[i] = next_stride
+                next_stride *= self.shape_vars[i]
+            assert all((x is not None) for x in output_strides)
+            self.strides.append(output_strides)
+
         bufs_args = list(bufs)
 
         aliases = {}
@@ -177,8 +193,6 @@ class PointwiseCompiler(object):
         input_strides = self.strides[:-1]
         output_bufs = bufs[-1:]
         output_strides = self.strides[-1:]
-
-        assert self.spec[-1].out
 
         inputs = [_te.Cast.make(self.dtype,
                                 buf.load(self.indexing(stride)))

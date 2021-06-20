@@ -1,9 +1,7 @@
 import torch.jit.te
 import numpy as np
 import pandas as pd
-import math
 from torch import randn
-from typing import Optional, List
 import timeit
 import functools
 
@@ -22,23 +20,48 @@ def nnc_add(a, b):
 
 
 @torch.jit.te.pointwise_operator
-def nnc_norm(v, mean, std):
-    return (v - mean) / std
+def nnc_addnorm(a, b, mean, std):
+    return (a + b - mean) / std
 
 
-def aten_norm(v, mean, std, out: Optional[torch.Tensor] = None):
-    # Baseline, non-fused
-    if out is None:
-        out = torch.empty_like(v)
-    torch.sub(v, mean, out=out)
+def eager_addnorm(a, b, mean, std):
+    return (a + b - mean) / std
+
+
+def inplace_addnorm(a, b, mean, std, out):
+    out = torch.add(a, b, out=out)
+    torch.sub(out, mean, out=out)
     torch.div(out, std, out=out)
     return out
 
 
-ts_norm = torch.jit.script(aten_norm)
+ts_addnorm = torch.jit.script(eager_addnorm)
+ts_ip_addnorm = torch.jit.script(inplace_addnorm)
 
 
-def make_setup(make_args, nnc=nnc_add, aten=torch.add, inplace=False):
+def make_setup(make_args, nnc=nnc_add, aten=torch.add, inplace=False, out=False):
+    def setup(n):
+        args = make_args(n)
+        result_aten = aten(*args)
+        result_nnc = nnc(*args)
+        assert result_nnc.dtype == result_aten.dtype
+        assert result_nnc.size() == result_aten.size()
+        assert result_nnc.stride() == result_aten.stride()
+        torch.testing.assert_allclose(result_aten, result_nnc)
+        return (lambda: nnc(*args),
+                lambda: aten(*args))
+
+    def out_setup(n):
+        args = make_args(n)
+        result_aten = out(n)
+        result_nnc = out(n)
+        aten(*args, out=result_aten)
+        nnc(*args, out=result_nnc)
+        torch.testing.assert_allclose(result_aten, result_nnc)
+        result = out(n)
+        return (lambda: nnc(*args, out=result),
+                lambda: aten(*args, out=result))
+
     def inplace_setup(n):
         a, b = make_args(n)
         result_aten = torch.clone(a)
@@ -49,18 +72,10 @@ def make_setup(make_args, nnc=nnc_add, aten=torch.add, inplace=False):
         return (lambda: nnc(a, b, out=a),
                 lambda: aten(a, b, out=a))
 
-    def setup(n):
-        args = make_args(n)
-        result_aten = aten(*args)
-        result_nnc = torch.zeros_like(result_aten)
-        nnc(*args, out=result_nnc)
-        torch.testing.assert_allclose(result_aten, result_nnc)
-        result = torch.empty_like(result_aten)
-        return (lambda: nnc(*args, out=result),
-                lambda: aten(*args, out=result))
-
     if inplace:
         return inplace_setup
+    elif out:
+        return out_setup
     else:
         return setup
 
@@ -88,34 +103,42 @@ def benchmark(*args, **kwargs):
 def main():
     results = [
         ("(n)+(n)", benchmark(lambda n: (randn(n), randn(n)))),
+        ("(n,1)+(1,n)", benchmark(lambda n: (randn(n, 1), randn(1, n)))),
         ("(n,n)+(1)", benchmark(lambda n: (randn(n, n), randn(1)))),
         ("(n,n)+=(1)", benchmark(lambda n: (randn(n, n), randn(1)), inplace=True)),
         ("(n,n)+(n,1)", benchmark(lambda n: (randn(n, n), randn(n, 1)))),
         ("(n,n)+=(n,1)", benchmark(lambda n: (randn(n, n), randn(n, 1)), inplace=True)),
         ("(n,n)+(n,n)", benchmark(lambda n: (randn(n, n), randn(n, n)))),
         ("(n,n)+=(n,n)", benchmark(lambda n: (randn(n, n), randn(n, n)), inplace=True)),
-        ("(n,1)+(1,n)", benchmark(lambda n: (randn(n, 1), randn(1, n)))),
-        ("issue 57611", benchmark(lambda n: (randn(1, 32, 32, 2), randn(n, 1, 1, 2)))),
-        ("float+double", benchmark(lambda n: (randn(n, n), randn(n, n, dtype=torch.float64)))),
-        ("int+long", benchmark(lambda n: (randi([n, n], dtype=torch.int32),
-                                          randi([n, n], dtype=torch.int64)))),
-        ("int+short", benchmark(lambda n: (randi([n, n], dtype=torch.int32),
-                                           randi([n, n], dtype=torch.int16)))),
-        ("float+int", benchmark(lambda n: (randn([n, n], dtype=torch.float32),
-                                           randi([n, n], dtype=torch.int32)))),
-        ("double+long", benchmark(lambda n: (randn([n, n], dtype=torch.float64),
-                                             randi([n, n], dtype=torch.int64)))),
-        ("fused norm (vs eager)", benchmark(lambda n: (randn(n, n), randn(n, n), randn(n, n)),
-                                            nnc=nnc_norm, aten=aten_norm)),
-        ("fused norm (vs TS)", benchmark(lambda n: (randn(n, n), randn(n, n), randn(n, n)),
-                                         nnc=nnc_norm, aten=ts_norm)),
+        ("out= (n,n)", benchmark(lambda n: (randn(n, n), randn(n, n)), out=lambda n: randn(n, n))),
+        ("issue 57611 (n,32,32,2)", benchmark(lambda n: (randn(1, 32, 32, 2), randn(n, 1, 1, 2)))),
+        ("float+double (n,n)", benchmark(lambda n: (randn(n, n), randn(n, n, dtype=torch.float64)))),
+        ("transposed (n,n)", benchmark(lambda n: (randn(n, n).transpose(0, 1),
+                                                  randn(n, n).transpose(0, 1)))),
+        ("int+long (n,n)", benchmark(lambda n: (randi([n, n], dtype=torch.int32),
+                                                randi([n, n], dtype=torch.int64)))),
+        ("int+short (n,n)", benchmark(lambda n: (randi([n, n], dtype=torch.int32),
+                                                 randi([n, n], dtype=torch.int16)))),
+        ("float+int (n,n)", benchmark(lambda n: (randn([n, n], dtype=torch.float32),
+                                                 randi([n, n], dtype=torch.int32)))),
+        ("double+long (n,n)", benchmark(lambda n: (randn([n, n], dtype=torch.float64),
+                                                   randi([n, n], dtype=torch.int64)))),
+        ("fused addnorm (vs eager)", benchmark(lambda n: (randn(n, n), randn(n, n), randn(n, n), randn(n, n)),
+                                               nnc=nnc_addnorm, aten=eager_addnorm)),
+        ("fused addnorm (vs TS)", benchmark(lambda n: (randn(n, n), randn(n, n), randn(n, n), randn(n, n)),
+                                            nnc=nnc_addnorm, aten=ts_addnorm)),
+        ("fused addnorm (out=, eager)", benchmark(lambda n: (randn(n, n), randn(n, n), randn(n, n), randn(n, n)),
+                                                  nnc=nnc_addnorm, aten=inplace_addnorm, out=lambda n: randn(n, n))),
+        ("fused addnorm (out=, TS)", benchmark(lambda n: (randn(n, n), randn(n, n), randn(n, n), randn(n, n)),
+                                               nnc=nnc_addnorm, aten=ts_ip_addnorm, out=lambda n: randn(n, n))),
     ]
     # TODO(jansel): implement int support
     print()
     print("Speedups over aten")
+    pd.options.display.float_format = ' {:.2f}x'.format
     print(pd.DataFrame(np.stack([r for n, r in results]),
-                       columns=[f"2**{int(math.log(n, 2))}" for n in SIZES],
-                       index=[n for n, r in results]).round(3))
+                       columns=[f"n={n}" for n in SIZES],
+                       index=[n for n, r in results]))
 
 
 if __name__ == '__main__':

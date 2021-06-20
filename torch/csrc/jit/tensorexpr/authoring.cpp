@@ -172,7 +172,9 @@ class CompileResultBase : public KernelScopedObject {
   virtual void set_code(const py::object& cg) = 0;
   virtual void set_shape_from(
       const std::vector<std::pair<int, int>>& indices) = 0;
-  virtual void set_options_from(int index) = 0;
+  virtual void add_allocated_output(
+      int options_from,
+      const std::vector<int>& storage_order) = 0;
   virtual void add_shape_check(
       const std::tuple<int, int, int, int>& indices) = 0;
 };
@@ -214,8 +216,11 @@ class CompileCache3 {
       assert(indices.shape() <= MAX_DIMS);
       shape_from_ = indices;
     }
-    void set_options_from(int index) {
-      options_from_ = index;
+
+    void add_allocated_output(
+        int options_from,
+        const std::vector<int>& storage_order) {
+      allocated_outputs_.push_back(std::make_pair(options_from, storage_order));
     }
 
     void add_shape_check(const std::tuple<int, int, int, int>& indices) {
@@ -235,20 +240,45 @@ class CompileCache3 {
 
     at::Tensor call(const Args& args, std::vector<void*>& call_args) {
       do_shape_checks(args);
+
       int64_t shapes[MAX_DIMS];
-      for (int i = 0; i < shape_from_.size(); ++i) {
+      int ndims = std::min<int>(shape_from_.size(), MAX_DIMS);
+      for (int i = 0; i < ndims; ++i) {
         shapes[i] = args[shape_from_[i].first].size(shape_from_[i].second);
+      }
+
+      at::Tensor output = args[NARGS - 1];
+      if (allocated_outputs_.size() == 1) {
+        int options_from = allocated_outputs_[0].first;
+        auto& output_order = allocated_outputs_[0].second;
+        int64_t strides[MAX_DIMS] = {0};
+        int64_t next_stride = 1;
+        for(int i : output_order) {
+            strides[i] = next_stride;
+            next_stride *= shapes[i];
+        }
+        output = at::empty_strided(
+            c10::IntArrayRef(shapes, shapes + ndims),
+            c10::IntArrayRef(strides, strides + ndims),
+            args[options_from].options());
+        call_args.emplace_back(output.data_ptr());
+      }
+      // TODO(jansel): add multi-output support
+      // assert(allocated_outputs_.size() <= 1);
+
+      for (int i = 0; i < ndims; ++i) {
         call_args.emplace_back(&shapes[i]);
       }
+
       cg_->call_raw(call_args);
-      return args[2];
+      return output;
     }
 
    private:
     CodeGen* cg_;
     std::vector<std::pair<int, int>> shape_from_;
     std::vector<std::tuple<int, int, int, int>> shape_checks_;
-    int options_from_ = 0;
+    std::vector<std::pair<int, std::vector<int>>> allocated_outputs_;
     std::vector<py::object> objects_; // for ref counting
   };
   typedef std::map<Key, CompileResultImpl*, CmpLess> Map;
@@ -372,7 +402,8 @@ class CompileCache {
       : cache1(compile_fn),
         cache2(compile_fn),
         cache3(compile_fn),
-        cache4(compile_fn) {}
+        cache4(compile_fn),
+        cache5(compile_fn) {}
 
   at::Tensor call(py::args args, py::kwargs kwargs) {
     // fan out an specialize on arg counts
@@ -416,6 +447,16 @@ class CompileCache {
                 last_arg,
             },
             has_out);
+      case 5:
+        return cache5.call(
+            std::array<at::Tensor, 5>{
+                args[0].cast<at::Tensor>(),
+                args[1].cast<at::Tensor>(),
+                args[2].cast<at::Tensor>(),
+                args[3].cast<at::Tensor>(),
+                last_arg,
+            },
+            has_out);
 
       default:
         throw std::runtime_error("TODO: handle other arg counts");
@@ -427,6 +468,7 @@ class CompileCache {
   CompileCache2<2> cache2;
   CompileCache2<3> cache3;
   CompileCache2<4> cache4;
+  CompileCache2<5> cache5;
 };
 
 } // namespace
@@ -456,9 +498,13 @@ void initTensorExprAuthoringBindings(PyObject* te_obj) {
              const std::vector<std::pair<int, int>>& indices) {
             self.res->set_shape_from(indices);
           })
-      .def("set_options_from", [](CompileResultProxy& self, int index) {
-        self.res->set_options_from(index);
-      });
+      .def(
+          "add_allocated_output",
+          [](CompileResultProxy& self,
+             int options_from,
+             const std::vector<int>& storage_order) {
+            self.res->add_allocated_output(options_from, storage_order);
+          });
 }
 } // namespace jit
 } // namespace torch
