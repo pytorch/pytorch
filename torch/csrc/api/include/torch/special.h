@@ -21,6 +21,38 @@ inline Tensor& gammaln_out(Tensor& result, const Tensor& self) {
   return torch::special_gammaln_out(result, self);
 }
 
+/// Computes the logarithmic derivative of the gamma function on input
+/// See https://pytorch.org/docs/master/special.html#torch.special.psi
+///
+/// Example:
+/// ```
+/// auto t = torch::randn(128, dtype=kDouble);
+/// torch::special::psi(t);
+/// ```
+inline Tensor psi(const Tensor& self) {
+  return torch::special_psi(self);
+}
+
+inline Tensor& psi_out(Tensor& result, const Tensor& self) {
+  return torch::special_psi_out(result, self);
+}
+
+/// Computes the logarithmic derivative of the gamma function on input
+/// See https://pytorch.org/docs/master/special.html#torch.special.digamma
+///
+/// Example:
+/// ```
+/// auto t = torch::randn(128, dtype=kDouble);
+/// torch::special::digamma(t);
+/// ```
+inline Tensor digamma(const Tensor& self) {
+  return torch::special_digamma(self);
+}
+
+inline Tensor& digamma_out(Tensor& result, const Tensor& self) {
+  return torch::special_digamma_out(result, self);
+}
+
 /// Computes entropy of input, elementwise
 /// See https://pytorch.org/docs/master/special.html#torch.special.entr.
 ///
@@ -83,6 +115,14 @@ inline Tensor erfinv(const Tensor& self) {
 
 inline Tensor& erfinv_out(Tensor& result, const Tensor& self) {
   return torch::special_erfinv_out(result, self);
+}
+
+inline Tensor ndtri(const Tensor& self) {
+  return torch::special_ndtri(self);
+}
+
+inline Tensor& ndtri_out(Tensor& result, const Tensor& self) {
+  return torch::special_ndtri_out(result, self);
 }
 
 /// Computes the logit of input, elementwise.

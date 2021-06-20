@@ -63,7 +63,7 @@ FILE_SCHEMA = "file://"
 if sys.platform == 'win32':
     FILE_SCHEMA = "file:///"
 
-IS_IN_CI = bool(os.environ.get('IN_CI'))
+IS_IN_CI = os.getenv('IN_CI') == '1'
 IS_SANDCASTLE = os.getenv('SANDCASTLE') == '1' or os.getenv('TW_JOB_USER') == 'sandcastle'
 IS_FBCODE = os.getenv('PYTORCH_TEST_FBCODE') == '1'
 IS_REMOTE_GPU = os.getenv('PYTORCH_TEST_REMOTE_GPU') == '1'
@@ -391,6 +391,15 @@ TEST_SKIP_FAST = os.getenv('PYTORCH_TEST_SKIP_FAST', '0') == '1'
 # (unlike slow tests!)
 TEST_SKIP_NOARCH = os.getenv('PYTORCH_TEST_SKIP_NOARCH', '0') == '1'
 
+# Determine whether to enable cuda memory leak check.
+# CUDA mem leak check is expensive and thus we don't want to execute it on every
+# test case / configuration.
+# See: https://github.com/pytorch/pytorch/pull/59402#issuecomment-858811135
+TEST_SKIP_CUDA_MEM_LEAK_CHECK = os.getenv('PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK', '0') == '1'
+
+# Disables tests for when on Github Actions
+ON_GHA = os.getenv('GITHUB_ACTIONS', '0') == '1'
+
 # Dict of NumPy dtype -> torch dtype (when the correspondence exists)
 numpy_to_torch_dtype_dict = {
     np.bool_      : torch.bool,
@@ -570,6 +579,16 @@ def skipIfNoSciPy(fn):
     def wrapper(*args, **kwargs):
         if not TEST_SCIPY:
             raise unittest.SkipTest("test require SciPy, but SciPy not found")
+        else:
+            fn(*args, **kwargs)
+    return wrapper
+
+
+def skipIfOnGHA(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if ON_GHA:
+            raise unittest.SkipTest("Test disabled for GHA")
         else:
             fn(*args, **kwargs)
     return wrapper
@@ -859,7 +878,7 @@ def check_slow_test_from_stats(test):
     if slow_tests_dict is None:
         if not IS_SANDCASTLE and os.getenv("PYTORCH_RUN_DISABLED_TESTS", "0") != "1":
             url = "https://raw.githubusercontent.com/pytorch/test-infra/master/stats/slow-tests.json"
-            slow_tests_dict = fetch_and_cache(".pytorch-slow-tests", url)
+            slow_tests_dict = fetch_and_cache(".pytorch-slow-tests.json", url)
         else:
             slow_tests_dict = {}
     test_suite = str(test.__class__).split('\'')[1]
@@ -982,10 +1001,11 @@ class TestCase(expecttest.TestCase):
         test_method = getattr(self, method_name, None)
         if test_method is not None:
             # Wraps the tested method if we should do CUDA memory check.
-            self._do_cuda_memory_leak_check &= getattr(test_method, '_do_cuda_memory_leak_check', True)
-            # FIXME: figure out the flaky -1024 anti-leaks on windows. See #8044
-            if self._do_cuda_memory_leak_check and not IS_WINDOWS:
-                self.wrap_with_cuda_policy(method_name, self.assertLeaksNoCudaTensors)
+            if not TEST_SKIP_CUDA_MEM_LEAK_CHECK:
+                self._do_cuda_memory_leak_check &= getattr(test_method, '_do_cuda_memory_leak_check', True)
+                # FIXME: figure out the flaky -1024 anti-leaks on windows. See #8044
+                if self._do_cuda_memory_leak_check and not IS_WINDOWS:
+                    self.wrap_with_cuda_policy(method_name, self.assertLeaksNoCudaTensors)
 
             # Wraps the tested method if we should enforce non default CUDA stream.
             self._do_cuda_non_default_stream &= getattr(test_method, '_do_cuda_non_default_stream', True)
@@ -1044,7 +1064,6 @@ class TestCase(expecttest.TestCase):
             result.stop()
 
     def setUp(self):
-
         check_slow_test_from_stats(self)
         if TEST_SKIP_FAST:
             if not getattr(self, self._testMethodName).__dict__.get('slow_test', False):
@@ -1421,7 +1440,7 @@ class TestCase(expecttest.TestCase):
             super().assertEqual(x, y, msg=msg)
 
     def assertNotEqual(self, x, y, msg: Optional[str] = None, *,                                       # type: ignore[override]
-                       atol: Optional[float] = None, rtol: Optional[float] = None, **kwargs) -> None:  # type: ignore[override]
+                       atol: Optional[float] = None, rtol: Optional[float] = None, **kwargs) -> None:
         with self.assertRaises(AssertionError, msg=msg):
             self.assertEqual(x, y, msg, atol=atol, rtol=rtol, **kwargs)
 

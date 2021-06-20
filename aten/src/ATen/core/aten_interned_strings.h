@@ -296,7 +296,6 @@ _(aten, diagonal) \
 _(aten, fill_diagonal_) \
 _(aten, diff) \
 _(aten, frexp) \
-_(aten, digamma) \
 _(aten, dim) \
 _(aten, dist) \
 _(aten, dot) \
@@ -533,6 +532,7 @@ _(aten, native_tensor) \
 _(aten, native_zero) \
 _(aten, special_ndtr) \
 _(aten, nextafter) \
+_(aten, special_ndtri) \
 _(aten, bitwise_and) \
 _(aten, bitwise_not) \
 _(aten, bitwise_or) \

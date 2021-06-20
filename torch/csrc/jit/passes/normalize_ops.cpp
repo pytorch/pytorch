@@ -120,6 +120,8 @@ const std::unordered_map<Symbol, Symbol>& getOperatorAliasMap() {
       {aten::special_round, aten::round},
       {aten::special_log1p, aten::log1p},
       {aten::special_sinc, aten::sinc},
+      {aten::special_digamma, aten::digamma},
+      {aten::special_psi, aten::digamma},
       {aten::special_i0, aten::i0},
       {aten::orgqr, aten::linalg_householder_product},
       {aten::special_gammaln, aten::lgamma}};
