@@ -47,7 +47,6 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
     nccl_skip_if_lt_x_gpu,
     skip_if_no_gpu,
-    skip_if_odd_num_of_gpus,
     require_n_gpus_for_nccl_backend,
     requires_nccl_version,
     captured_output,
@@ -977,13 +976,17 @@ class DistributedTest:
                 # Every element on device 0 or 1 should be the average of 0 and 1, i.e., 0.5.
                 for p in model.parameters():
                     self.assertEqual(p.data, torch.ones_like(p.data) * 0.5)
+            else:
+                # Every element on device not in the subgroup should be -rank,
+                # because `get_world_size()` returns -1.
+                for p in model.parameters():
+                    self.assertEqual(p.data, torch.ones_like(p.data) * -rank)
 
         @unittest.skipIf(
             BACKEND != "nccl" and BACKEND != "gloo",
             "MPI backend does not support creating subgroups on CUDA devices",
         )
         @skip_if_lt_x_gpu(2)
-        @skip_if_odd_num_of_gpus()
         def test_periodic_model_averager(self):
             rank = dist.get_rank()
             rank_to_GPU = self._init_multigpu_helper()
@@ -992,15 +995,15 @@ class DistributedTest:
 
             model = nn.Linear(1, 5, bias=False).cuda(device_id)
             param = next(model.parameters())
-            tensor = torch.ones_like(param.data) * ((rank + 1) // 2)
+            tensor = torch.ones_like(param.data) * rank
+            expected_avg_tensor = torch.ones_like(param.data) * sum(range(world_size)) / world_size
             averager = averagers.PeriodicModelAverager(model, warmup_steps=10, period=4)
             for step in range(0, 20):
                 # Reset the parameters at every step.
                 param.data = copy.deepcopy(tensor)
                 averager.average_parameters(step)
                 if step < 10 or step % 4 == 0:
-                    # After the model averaging is 0.5
-                    self.assertEqual(param.data, torch.ones_like(param.data) * 0.5)
+                    self.assertEqual(param.data, expected_avg_tensor)
                 else:
                     # No model averaging, so the parameters are not updated.
                     self.assertEqual(param.data, tensor)
