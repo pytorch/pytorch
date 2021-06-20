@@ -274,7 +274,7 @@ const static RegisterNNCExternalFunction nnc_triangular_solve(
 #ifdef USE_XNNPACK
 const static RegisterNNCExternalFunction reg_nnc_prepacked_linear_clamp_run(
     "nnc_prepacked_linear_clamp_run",
-    nnc_prepacked_conv2d_clamp_run);
+    nnc_prepacked_linear_clamp_run);
 const static RegisterNNCExternalFunction reg_nnc_prepacked_conv2d_clamp_run(
     "nnc_prepacked_conv2d_clamp_run",
     nnc_prepacked_conv2d_clamp_run);
