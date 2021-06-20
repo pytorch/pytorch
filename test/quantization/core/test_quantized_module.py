@@ -390,7 +390,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
     @override_qengines
     def test_conv1d_api(self):
         options = itertools.product(
-            ["zeros", "reflect"],  # pad_mode
+            ["zeros"],  # pad_mode, TODO: add "reflect"
             [True, False],  # use_bias
             [True, False],  # use_fused
             [True, False],  # use_channelwise
@@ -408,7 +408,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             stride = 2
             pad = 1
             dilation = 1
-            # Tests the correctness of the conv2d module.
+            # Tests the correctness of the conv1d module.
             in_channels = in_channels_per_group * groups
             out_channels = out_channels_per_group * groups
             input_feature_map_size = (length,)

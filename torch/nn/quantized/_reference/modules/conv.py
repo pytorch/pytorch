@@ -54,9 +54,10 @@ class Conv1d(_ConvNd, nnq.Conv1d):
         # self.stride, self.padding, self.dilation are 2d tuple since
         # current quantized conv1d is using Conv2dPackedParams
         # TODO: we should fix this if we implemenet Conv1dPackedParams
-        self._conv1d_stride = _single(self.stride[0])
-        self._conv1d_padding = _single(self.padding[0])
-        self._conv1d_dilation = _single(self.dilation[0])
+        self._conv1d_stride = self.stride[0]
+        self._conv1d_padding = self.padding[0]
+        self._conv1d_dilation = self.dilation[0]
+        assert padding_mode == 'zeros', 'Only zero padding is supported for reference conv1d module currently'
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # TODO: add support for dtype
@@ -84,9 +85,9 @@ class Conv1d(_ConvNd, nnq.Conv1d):
         self.scale = state[12]
         self.zero_point = state[13]
         self.training = state[14]
-        self._conv1d_stride = (self.stride[0],)
-        self._conv1d_padding = (self.padding[0],)
-        self._conv1d_dilation = (self.dilation[0],)
+        self._conv1d_stride = self.stride[0]
+        self._conv1d_padding = self.padding[0]
+        self._conv1d_dilation = self.dilation[0]
 
 class Conv2d(_ConvNd, nnq.Conv2d):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,

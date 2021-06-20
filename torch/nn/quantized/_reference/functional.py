@@ -1,13 +1,21 @@
 import torch
 import torch.fx
 import torch.nn.functional as F
+from torch.nn.common_types import _size_1_t
 from torch.nn.modules.utils import _single, _pair, _triple
+from typing import Optional
 
 @torch.fx.wrap
-def conv1d(input, weight, bias=None,
-           stride=1, padding=0, dilation=1, groups=1,
-           scale=1.0, zero_point=0,
-           dtype=torch.quint8):
+def conv1d(input: torch.Tensor,
+           weight: torch.Tensor,
+           bias: Optional[torch.Tensor] = None,
+           stride: _size_1_t = 1,
+           padding: _size_1_t = 0,
+           dilation: _size_1_t = 1,
+           groups: int = 1,
+           scale: float = 1.0,
+           zero_point: int = 0,
+           dtype: torch.dtype = torch.quint8):
     r"""
     Applies a 1D convolution over a quantized 1D input composed of several input
     planes.
