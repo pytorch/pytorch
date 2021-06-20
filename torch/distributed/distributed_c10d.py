@@ -23,6 +23,7 @@ from torch._C._distributed_c10d import (
     ScatterOptions,
     Store,
 )
+from torch._C._distributed_c10d import _get_debug_mode, _DistributedDebugLevel
 from torch._six import string_classes
 
 # This module is wildcard imported from torch.distributed.
@@ -243,7 +244,7 @@ def _store_based_barrier(rank, store, timeout):
                 )
             )
 
-    logger.info(f"Rank {rank}: Completed store-based barrier for {world_size} nodes.")
+    logger.info(f"Rank {rank}: Completed store-based barrier for key:{store_key} with {world_size} nodes.")
 
 
 def _rank_not_in_group(group: ProcessGroup):
@@ -298,9 +299,7 @@ def _get_group_size(group):
     if group is GroupMember.WORLD or group is None:
         default_pg = _get_default_group()
         return default_pg.size()
-    if group not in _pg_group_ranks:
-        raise RuntimeError("The given group does not exist")
-    return len(_pg_group_ranks[group])
+    return group.size()
 
 
 def _check_single_tensor(param, param_name):
@@ -559,6 +558,10 @@ def init_process_group(
             store, rank, world_size = next(rendezvous_iterator)
             store.set_timeout(timeout)
 
+            # Use a PrefixStore to avoid accidental overrides of keys used by
+            # different systems (e.g. RPC) in case the store is multi-tenant.
+            store = PrefixStore("default_pg", store)
+
         default_pg = _new_process_group_helper(
             world_size,
             rank,
@@ -661,6 +664,25 @@ def _new_process_group_helper(
             if pg_options is not None:
                 raise RuntimeError("GLOO options not supported")
             pg = ProcessGroupGloo(prefix_store, rank, world_size, timeout=timeout)
+            # In debug mode and if GLOO is available, wrap in a wrapper PG that
+            # enables enhanced collective checking for debugability.
+            if _get_debug_mode() == _DistributedDebugLevel.DETAIL:
+                if not _GLOO_AVAILABLE:
+                    logger.info(
+                        """TORCH_DISTRIBUTED_DEBUG was set to DETAIL, but
+                                GLOO is not available. Build with Gloo to
+                                create a wrapper process group in debug mode
+                                to aid collective desynchronization debugging."""
+                    )
+                else:
+                    pg = _create_process_group_wrapper(
+                        wrapped_pg=pg,
+                        store_prefix=group_name,
+                        store=store,
+                        rank=rank,
+                        world_size=world_size,
+                        timeout=timeout,
+                    )
             _pg_map[pg] = (Backend.GLOO, store)
             _pg_names[pg] = group_name
         elif backend == Backend.NCCL:
@@ -677,6 +699,25 @@ def _new_process_group_helper(
                 pg_options._timeout = timeout
 
             pg = ProcessGroupNCCL(prefix_store, rank, world_size, pg_options)
+            # In debug mode and if GLOO is available, wrap in a wrapper PG that
+            # enables enhanced collective checking for debugability.
+            if _get_debug_mode() == _DistributedDebugLevel.DETAIL:
+                if not _GLOO_AVAILABLE:
+                    logger.info(
+                        """TORCH_DISTRIBUTED_DEBUG was set to DETAIL, but
+                                GLOO is not available. Build with Gloo to
+                                create a wrapper process group in debug mode
+                                to aid collective desynchronization debugging."""
+                    )
+                else:
+                    pg = _create_process_group_wrapper(
+                        wrapped_pg=pg,
+                        store_prefix=group_name,
+                        store=store,
+                        rank=rank,
+                        world_size=world_size,
+                        timeout=timeout,
+                    )
             _pg_map[pg] = (Backend.NCCL, store)
             _pg_names[pg] = group_name
         else:
@@ -1128,8 +1169,8 @@ def all_reduce_multigpu(tensor_list, op=ReduceOp.SUM, group=None, async_op=False
         op (optional): One of the values from
             ``torch.distributed.ReduceOp``
             enum.  Specifies an operation used for element-wise reductions.
-        group (ProcessGroup, optional): The process group to work on. If None,
-            the default process group will be used.
+        group (ProcessGroup, optional): The process group to work on. If
+            ``None``, the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
 
     Returns:
@@ -1515,10 +1556,10 @@ def all_gather_object(object_list, obj, group=None):
         return
 
     input_tensor, local_size = _object_to_tensor(obj)
-    group_backend = get_backend(group)
-    is_nccl_backend = group_backend == Backend.NCCL
     current_device = torch.device("cpu")
-    if is_nccl_backend:
+    if is_nccl_available() and isinstance(
+        group or _get_default_group(), ProcessGroupNCCL
+    ):
         # See note about using torch.cuda.current_device() here in docstring.
         # We cannot simply use my_rank since rank == device is not necessarily
         # true.
@@ -1550,7 +1591,7 @@ def all_gather_object(object_list, obj, group=None):
     all_gather(output_tensors, input_tensor, group=group)
     # Deserialize outputs back to object.
     for i, tensor in enumerate(output_tensors):
-        tensor = tensor.type(torch.uint8)  # type:ignore[call-overload]
+        tensor = tensor.type(torch.uint8)
         if tensor.device != torch.device("cpu"):
             tensor = tensor.cpu()
         tensor_size = object_size_list[i]
@@ -1654,7 +1695,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
     if my_rank != dst:
         return
     for i, tensor in enumerate(output_tensors):
-        tensor = tensor.type(torch.uint8)  # type: ignore[call-overload]
+        tensor = tensor.type(torch.uint8)
         tensor_size = object_size_list[i]
         object_gather_list[i] = _tensor_to_object(tensor, tensor_size)
 
@@ -1749,7 +1790,7 @@ def broadcast_object_list(object_list, src=0, group=None):
     if my_rank != src:
         for i, obj_size in enumerate(object_sizes_tensor):
             obj_view = object_tensor[offset : offset + obj_size]
-            obj_view = obj_view.type(torch.uint8)  # type: ignore[call-overload]
+            obj_view = obj_view.type(torch.uint8)
             if obj_view.device != torch.device("cpu"):
                 obj_view = obj_view.cpu()
             offset += obj_size
@@ -1877,7 +1918,7 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
     Examples:
         >>> # All tensors below are of torch.int64 dtype.
         >>> # We have 2 process groups, 2 ranks.
-        >>> tensor_list = [torch.zero(2, dtype=torch.int64) for _ in range(2)]
+        >>> tensor_list = [torch.zeros(2, dtype=torch.int64) for _ in range(2)]
         >>> tensor_list
         [tensor([0, 0]), tensor([0, 0])] # Rank 0 and 1
         >>> tensor = torch.arange(2, dtype=torch.int64) + 1 + 2 * rank
@@ -1891,7 +1932,7 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
 
         >>> # All tensors below are of torch.cfloat dtype.
         >>> # We have 2 process groups, 2 ranks.
-        >>> tensor_list = [torch.zero(2, dtype=torch.cfloat) for _ in range(2)]
+        >>> tensor_list = [torch.zeros(2, dtype=torch.cfloat) for _ in range(2)]
         >>> tensor_list
         [tensor([0.+0.j, 0.+0.j]), tensor([0.+0.j, 0.+0.j])] # Rank 0 and 1
         >>> tensor = torch.tensor([1+1j, 2+2j], dtype=torch.cfloat) + 2 * rank * (1+1j)
@@ -1945,7 +1986,7 @@ def _all_gather_base(output_tensor, input_tensor, group=None, async_op=False):
     Examples:
         >>> # All tensors below are of torch.int64 dtype.
         >>> # We have 2 process groups, 2 ranks.
-        >>> output_tensor = torch.zero(2, dtype=torch.int64)
+        >>> output_tensor = torch.zeros(2, dtype=torch.int64)
         >>> output_tensor
         [tensor([0, 0])] # Rank 0 and 1
         >>> tensor = torch.arange(1, dtype=torch.int64) + 1 + rank
@@ -2298,6 +2339,43 @@ def reduce_scatter(output, input_list, op=ReduceOp.SUM, group=None, async_op=Fal
         work.wait()
 
 
+def _reduce_scatter_base(output, input, op=ReduceOp.SUM, group=None, async_op=False):
+    """
+    Reduces, then scatters a flattened tensor to all processes in a group.
+
+    Args:
+        output (Tensor): Output tensor.
+        input (Tensor): Input tensor that is of size output tensor size times world size
+        group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
+        async_op (bool, optional): Whether this op should be an async op.
+
+    Returns:
+        Async work handle, if async_op is set to True.
+        None, if not async_op or if not part of the group.
+
+    """
+    _check_single_tensor(output, "output")
+    _check_single_tensor(input, "input")
+
+    if _rank_not_in_group(group):
+        return
+
+    opts = ReduceScatterOptions()
+    opts.reduceOp = op
+
+    if group is None:
+        default_pg = _get_default_group()
+        work = default_pg._reduce_scatter_base(output, input, opts)
+    else:
+        work = group._reduce_scatter_base(output, input, opts)
+
+    if async_op:
+        return work
+    else:
+        work.wait()
+
+
 def all_to_all_single(
     output,
     input,
@@ -2602,26 +2680,23 @@ def monitored_barrier(group=GroupMember.WORLD, timeout=None, wait_all_ranks=Fals
     group_to_use = _get_default_group() if group is None else group
     return group_to_use.monitored_barrier(timeout, wait_all_ranks=wait_all_ranks)
 
+
 def _create_process_group_wrapper(
     wrapped_pg: ProcessGroup,
     store_prefix: str,
     store: Store,
     rank: int,
     world_size: int,
-    timeout: timedelta = default_pg_timeout
+    timeout: timedelta = default_pg_timeout,
 ):
     # Create a separate prefix store for the helper process group.
     prefix = f"{PG_WRAPPER_STORE_PREFIX}:{store_prefix}"
     store = PrefixStore(prefix, store)
-    helper_pg = ProcessGroupGloo(
-        store,
-        rank,
-        world_size,
-        timeout=timeout
-    )
+    helper_pg = ProcessGroupGloo(store, rank, world_size, timeout=timeout)
     # Wrap the underlying pg with ProcessGroupWrapper.
     wrapped_pg = _ProcessGroupWrapper(wrapped_pg, helper_pg)
     return wrapped_pg
+
 
 def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=None):
     """
@@ -2675,8 +2750,8 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=N
         pg_options (ProcessGroupOptions, optional): process group options
             specifying what additional options need to be passed in during
             the construction of specific process groups. i.e. for the ``nccl``
-            backend, is_high_priority_stream can be specified so that process
-            group can pick up high priority cuda streams.
+            backend, ``is_high_priority_stream`` can be specified so that
+            process group can pick up high priority cuda streams.
 
     Returns:
         A handle of distributed group that can be given to collective calls.
@@ -2754,3 +2829,243 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=N
             pg._set_sequence_number_for_group()
 
     return pg
+
+
+def new_subgroups(
+    group_size=None,
+    group=None,
+    timeout=default_pg_timeout,
+    backend=None,
+    pg_options=None,
+):
+    """
+    Creates GPU subgroups of equal size. By default, it creates intra-machine subgroups,
+    where each of which contains all the ranks of a machine, based on the assumption
+    that each machine has the same number of CUDA devices.
+
+    This is a convenience API that calls ``new_group`` to generate multiple subgroups.
+    It requires that all processes in the main group (i.e. all
+    processes that are part of the distributed job) enter this function, even
+    if they are not going to be members of the group.
+
+    .. warning::
+        This API only works when CUDA is available.
+
+    .. warning::
+        If ``group_size`` is passed in, the world size must be divisible by ``group_size``.
+        If no ``group_size`` is passed in, and not all the machines have the same number
+        of devices, the subgroup division will be different across nodes and can cause
+        unexpected behaviors.
+
+    .. warning::
+        Using multiple process groups with the ``NCCL`` backend concurrently
+        is not safe and the user should perform explicit synchronization in
+        their application to ensure only one process group is used at a time.
+        This means collectives from one process group should have completed
+        execution on the device (not just enqueued since CUDA execution is
+        async) before collectives from another process group are enqueued.
+        See `Using multiple NCCL communicators concurrently <https://docs.nvid
+        ia.com/deeplearning/nccl/user-guide/docs/usage/communicators.html#using
+        -multiple-nccl-communicators-concurrently>`_ for more details.
+
+    Args:
+        group_size (int, optional): The size of each subgroup. If ``None``,
+            the default subgroup size is equal to the number of devices on each machine,
+            based on the assumption that each machine has exactly the same
+            number of devices. Default is ``None``.
+        timeout (timedelta, optional): Timeout for operations executed against
+            the process group. Default value equals 30 minutes.
+            This is applicable for the ``gloo`` backend. For ``nccl``, this is
+            applicable only if the environment variable ``NCCL_BLOCKING_WAIT``
+            or ``NCCL_ASYNC_ERROR_HANDLING`` is set to 1. When
+            ``NCCL_BLOCKING_WAIT`` is set, this is the duration for which the
+            process will block and wait for collectives to complete before
+            throwing an exception. When ``NCCL_ASYNC_ERROR_HANDLING`` is set,
+            this is the duration after which collectives will be aborted
+            asynchronously and the process will crash. ``NCCL_BLOCKING_WAIT``
+            will provide errors to the user which can be caught and handled,
+            but due to its blocking nature, it has a performance overhead. On
+            the other hand, ``NCCL_ASYNC_ERROR_HANDLING`` has very little
+            performance overhead, but crashes the process on errors. This is
+            done since CUDA execution is async and it is no longer safe to
+            continue executing user code since failed async NCCL operations
+            might result in subsequent CUDA operations running on corrupted
+            data. Only one of these two environment variables should be set.
+        backend (str or Backend, optional): The backend to use. Depending on
+            build-time configurations, valid values are ``gloo`` and ``nccl``.
+            By default uses the same backend as the global group. This field
+            should be given as a lowercase string (e.g., ``"gloo"``), which can
+            also be accessed via :class:`Backend` attributes (e.g.,
+            ``Backend.GLOO``). If ``None`` is passed in, the backend
+            corresponding to the default process group will be used. Default is
+            ``None``.
+        pg_options (ProcessGroupOptions, optional): process group options
+            specifying what additional options need to be passed in during
+            the construction of specific process groups. i.e. for the ``nccl``
+            backend, ``is_high_priority_stream`` can be specified so that
+            process group can pick up high priority cuda streams.
+
+    Returns:
+        The subgroup containing the current rank, and all the subgroups used for cleanup.
+
+    Examples:
+        >>> # Create intra-machine subgroups.
+        >>> cur_subgroup, subgroups = dist.new_subgroups()
+        >>> # Allreduce within the machine.
+        >>> rank = dist.get_rank()
+        >>> tensor = torch.ones(1, device=rank) * rank
+        >>> dist.all_reduce(tensor, group=cur_subgroup)
+        >>> tensor
+        tensor([8])     # Assume 8 is the number of CUDA devices per machine.
+        >>> # Cleanup.
+        >>> for subgroup in subgroups:
+        >>>     dist.destroy_process_group(subgroup)
+    """
+    if not torch.cuda.is_available():
+        raise ValueError("Subgroups can only be created when CUDA is available")
+
+    if group_size is None:
+        group_size = torch.cuda.device_count()
+    world_size = get_world_size()
+    if world_size < group_size:
+        raise ValueError("The arg 'group_size' must not exceed the world size")
+    if world_size % group_size != 0:
+        raise ValueError("The world size must be divisible by 'group_size'")
+
+    subgroups = []
+    cur_subgroup = None
+
+    for subgroup_id in range(world_size // group_size):
+        start_rank = subgroup_id * group_size
+        end_rank = start_rank + group_size
+        ranks_in_subgroup = list(range(start_rank, end_rank))
+        subgroup = new_group(
+            ranks=ranks_in_subgroup,
+            timeout=timeout,
+            backend=backend,
+            pg_options=pg_options,
+        )
+        subgroups.append(subgroup)
+
+        rank = get_rank()
+        if rank in ranks_in_subgroup:
+            cur_subgroup = subgroup
+            logger.info(
+                "Rank {} is assigned to subgroup {}".format(
+                    rank, ranks_in_subgroup
+                )
+            )
+
+    return cur_subgroup, subgroups
+
+
+def new_subgroups_by_enumeration(
+    ranks_per_subgroup_list,
+    timeout=default_pg_timeout,
+    backend=None,
+    pg_options=None,
+):
+    """
+    Creates GPU subgroups by dividing the global world, where the division is specified by
+    a nested list of ranks. The subgroups cannot have overlap, and some ranks may not have
+    to be in any subgroup.
+
+    This is a convenience API that calls ``new_group`` to generate multiple subgroups.
+    It requires that all processes in the main group (i.e. all
+    processes that are part of the distributed job) enter this function, even
+    if they are not going to be members of the group.
+
+    .. warning::
+        Using multiple process groups with the ``NCCL`` backend concurrently
+        is not safe and the user should perform explicit synchronization in
+        their application to ensure only one process group is used at a time.
+        This means collectives from one process group should have completed
+        execution on the device (not just enqueued since CUDA execution is
+        async) before collectives from another process group are enqueued.
+        See `Using multiple NCCL communicators concurrently <https://docs.nvid
+        ia.com/deeplearning/nccl/user-guide/docs/usage/communicators.html#using
+        -multiple-nccl-communicators-concurrently>`_ for more details.
+
+    Args:
+        ranks_per_subgroup_list (list[list[int]]): A nested list of ranks of
+            group members.
+        timeout (timedelta, optional): Timeout for operations executed against
+            the process group. Default value equals 30 minutes.
+            This is applicable for the ``gloo`` backend. For ``nccl``, this is
+            applicable only if the environment variable ``NCCL_BLOCKING_WAIT``
+            or ``NCCL_ASYNC_ERROR_HANDLING`` is set to 1. When
+            ``NCCL_BLOCKING_WAIT`` is set, this is the duration for which the
+            process will block and wait for collectives to complete before
+            throwing an exception. When ``NCCL_ASYNC_ERROR_HANDLING`` is set,
+            this is the duration after which collectives will be aborted
+            asynchronously and the process will crash. ``NCCL_BLOCKING_WAIT``
+            will provide errors to the user which can be caught and handled,
+            but due to its blocking nature, it has a performance overhead. On
+            the other hand, ``NCCL_ASYNC_ERROR_HANDLING`` has very little
+            performance overhead, but crashes the process on errors. This is
+            done since CUDA execution is async and it is no longer safe to
+            continue executing user code since failed async NCCL operations
+            might result in subsequent CUDA operations running on corrupted
+            data. Only one of these two environment variables should be set.
+         backend (str or Backend, optional): The backend to use. Depending on
+             build-time configurations, valid values are ``gloo`` and ``nccl``.
+             By default uses the same backend as the global group. This field
+             should be given as a lowercase string (e.g., ``"gloo"``), which can
+             also be accessed via :class:`Backend` attributes (e.g.,
+             ``Backend.GLOO``). If ``None`` is passed in, the backend
+             corresponding to the default process group will be used. Default is
+             ``None``.
+        pg_options (ProcessGroupOptions, optional): process group options
+            specifying what additional options need to be passed in during
+            the construction of specific process groups. i.e. for the ``nccl``
+            backend, ``is_high_priority_stream`` can be specified so that
+            process group can pick up high priority cuda streams.
+
+    Returns:
+        The subgroup containing the current rank, and all the subgroups used for cleanup.
+
+    Examples:
+        >>> # Create two subgroups, where each has 2 processes.
+        >>> cur_subgroup, subgroups = dist.new_subgroups(ranks=[[0, 2], [1, 3]])
+        >>> rank = dist.get_rank()
+        >>> tensor = torch.ones(1, device=rank) * rank
+        >>> dist.all_reduce(tensor, group=cur_subgroup)
+        >>> tensor
+        tensor([2])     # Subgroup 0: ranks 0 and 2
+        tensor([4])     # Subgroup 1: ranks 1 and 3
+    """
+    if not torch.cuda.is_available():
+        raise ValueError("Subgroups can only be created when CUDA is available")
+    if ranks_per_subgroup_list is None or len(ranks_per_subgroup_list) == 0:
+        raise ValueError("The arg 'ranks_per_subgroup_list' cannot be empty")
+
+    world_size = get_world_size()
+
+    subgroups = []
+    cur_subgroup = None
+    # Create a mapping from rank to subgroup to check if there is any subgroup overlap.
+    rank_to_ranks_dict = {}  # type: ignore[var-annotated]
+    for ranks in ranks_per_subgroup_list:
+        subgroup = new_group(
+            ranks=ranks,
+            timeout=timeout,
+            backend=backend,
+            pg_options=pg_options,
+        )
+        subgroups.append(subgroup)
+        my_rank = get_rank()
+        for rank in ranks:
+            if rank in rank_to_ranks_dict:
+                raise ValueError(
+                    "Rank {} has appeared in both subgroup {} and {}".format(
+                        rank, rank_to_ranks_dict[rank], ranks
+                    )
+                )
+            rank_to_ranks_dict[rank] = ranks
+            if my_rank == rank:
+                cur_subgroup = subgroup
+                logging.info(
+                    "Rank {} is assigned to subgroup {}".format(rank, ranks)
+                )
+
+    return cur_subgroup, subgroups

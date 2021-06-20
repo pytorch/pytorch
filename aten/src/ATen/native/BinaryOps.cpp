@@ -80,6 +80,10 @@ TORCH_META_FUNC(atan2) (const Tensor& self, const Tensor& other) {
   build_borrowing_binary_float_op(maybe_get_output(), self, other);
 }
 
+TORCH_META_FUNC2(remainder, Tensor)(const Tensor& self, const Tensor& other) {
+  build_borrowing_binary_op(maybe_get_output(), self, other);
+}
+
 // These are normal binary ops that preserve dtype
 #define CREATE_BINARY_META_FUNC(func)                                 \
   TORCH_META_FUNC(func) (const Tensor& self, const Tensor& other) {   \
@@ -246,23 +250,24 @@ TORCH_IMPL_FUNC(special_xlog1py_out) (const Tensor& self, const Tensor& other, c
   xlog1py_stub(device_type(), *this);
 }
 
-#define CREATE_BINARY_TORCH_IMPL_FUNC(func)                                                    \
-TORCH_IMPL_FUNC(func##_out) (const Tensor& self, const Tensor& other, const Tensor& result) {  \
-  func##_stub(device_type(), *this);                                                           \
+#define CREATE_BINARY_TORCH_IMPL_FUNC(func_out, func_stub)                                                    \
+TORCH_IMPL_FUNC(func_out) (const Tensor& self, const Tensor& other, const Tensor& result) {  \
+  func_stub(device_type(), *this);                                                           \
 }
 
-CREATE_BINARY_TORCH_IMPL_FUNC(maximum);
-CREATE_BINARY_TORCH_IMPL_FUNC(minimum);
-CREATE_BINARY_TORCH_IMPL_FUNC(fmax);
-CREATE_BINARY_TORCH_IMPL_FUNC(fmin);
-CREATE_BINARY_TORCH_IMPL_FUNC(logaddexp);
-CREATE_BINARY_TORCH_IMPL_FUNC(logaddexp2);
-CREATE_BINARY_TORCH_IMPL_FUNC(gcd);
-CREATE_BINARY_TORCH_IMPL_FUNC(lcm);
-CREATE_BINARY_TORCH_IMPL_FUNC(hypot);
-CREATE_BINARY_TORCH_IMPL_FUNC(igamma);
-CREATE_BINARY_TORCH_IMPL_FUNC(igammac);
-CREATE_BINARY_TORCH_IMPL_FUNC(nextafter);
+CREATE_BINARY_TORCH_IMPL_FUNC(maximum_out, maximum_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(minimum_out, minimum_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(fmax_out, fmax_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(fmin_out, fmin_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(logaddexp_out, logaddexp_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(logaddexp2_out, logaddexp2_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(gcd_out, gcd_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(lcm_out, lcm_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(hypot_out, hypot_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(igamma_out, igamma_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(igammac_out, igammac_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(nextafter_out, nextafter_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(remainder_out, remainder_stub);
 
 Tensor special_xlog1py(const Scalar& x, const Tensor& y) {
   return at::special_xlog1py(wrapped_scalar_tensor(x), y);
@@ -433,23 +438,6 @@ Tensor true_divide(const Tensor& self, const Scalar& divisor) {
 
 Tensor& true_divide_(Tensor& self, const Scalar& divisor) {
   return self.div_(divisor);
-}
-
-Tensor& remainder_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  auto iter = TensorIterator::binary_op(result, self, other);
-  remainder_stub(iter.device_type(), iter);
-  return result;
-}
-
-Tensor remainder(const Tensor& self, const Tensor& other) {
-  Tensor result;
-  auto iter = TensorIterator::binary_op(result, self, other);
-  remainder_stub(iter.device_type(), iter);
-  return iter.output();
-}
-
-Tensor& remainder_(Tensor& self, const Tensor& other) {
-  return native::remainder_out(self, other, self);
 }
 
 Tensor& floor_divide_out(const Tensor& self, const Tensor& other, Tensor& result) {
@@ -627,15 +615,22 @@ Tensor& add_(Tensor& self, const Scalar& other, const Scalar& alpha) {
 }
 
 Tensor remainder(const Tensor& self, const Scalar& other) {
-  return native::remainder(self, wrapped_scalar_tensor(other));
+  // redispatch
+  return at::remainder(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& remainder_(Tensor& self, const Scalar& other) {
-  return native::remainder_(self, wrapped_scalar_tensor(other));
+  // redispatch
+  return self.remainder_(wrapped_scalar_tensor(other));
 }
 
 Tensor& remainder_out(const Tensor& self, const Scalar& other, Tensor& result) {
-  return native::remainder_out(self, wrapped_scalar_tensor(other), result);
+  // redispatch
+  return at::remainder_out(result, self, wrapped_scalar_tensor(other));
+}
+
+Tensor remainder(const Scalar& self, const Tensor& other) {
+  return at::remainder(wrapped_scalar_tensor(self), other);
 }
 
 Tensor rsub(const Tensor& self, const Scalar& other, const Scalar& alpha) {
