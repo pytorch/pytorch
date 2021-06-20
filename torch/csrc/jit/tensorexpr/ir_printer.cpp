@@ -4,9 +4,15 @@
 #include <torch/csrc/jit/tensorexpr/reduction.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
+#include <c10/util/irange.h>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
+
+std::string IRPrinter::dtypeToCppString(const Dtype& dtype) {
+  return dtype.ToCppString();
+}
 
 void IRPrinter::print(ExprHandle expr) {
   expr.node()->accept(this);
@@ -215,7 +221,7 @@ AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_PRINT_VISIT);
 
 void IRPrinter::visit(const Cast* v) {
   auto dtype = v->dtype();
-  os() << dtype.ToCppString() << "(";
+  os() << dtypeToCppString(dtype) << "(";
   v->src_value()->accept(this);
   os() << ")";
 }
@@ -260,7 +266,7 @@ void IRPrinter::visit(const IfThenElse* v) {
 
 void IRPrinter::visit(const Intrinsics* v) {
   os() << v->func_name() << "(";
-  for (int i = 0; i < v->nparams(); i++) {
+  for (const auto i : c10::irange(v->nparams())) {
     if (i > 0) {
       os() << ", ";
     }
@@ -381,7 +387,7 @@ void IRPrinter::visit(const Store* v) {
 void IRPrinter::visit(const For* v) {
   const Var* var = v->var();
   VarHandle vv(var);
-  os() << "for (" << var->dtype().ToCppString() << " " << vv << " = "
+  os() << "for (" << dtypeToCppString(var->dtype()) << " " << vv << " = "
        << ExprHandle(v->start()) << "; " << vv << " < " << ExprHandle(v->stop())
        << "; " << vv << "++) ";
   std::string loop_options_str = v->loop_options().ToString();
@@ -410,10 +416,10 @@ void IRPrinter::visit(const Block* v) {
 
 void IRPrinter::visit(const Allocate* v) {
   os() << "Allocate(" << *v->buffer_var()
-       << "); // dtype=" << v->dtype().ToCppString();
+       << "); // dtype=" << dtypeToCppString(v->dtype());
   os() << ", dims=[";
   const std::vector<const Expr*>& dims = v->dims();
-  for (size_t i = 0; i < dims.size(); i++) {
+  for (const auto i : c10::irange(dims.size())) {
     if (i != 0) {
       os() << ", ";
     }
@@ -427,7 +433,7 @@ void IRPrinter::visit(const Free* v) {
 }
 
 void IRPrinter::visit(const Let* v) {
-  os() << v->dtype().ToCppString() << " " << *v->var();
+  os() << dtypeToCppString(v->dtype()) << " " << *v->var();
   os() << " = " << *v->value();
   os() << ";";
 }
@@ -583,7 +589,7 @@ std::string to_string(const Tensor* t) {
   std::ostringstream oss;
   // TODO: move this to Buf printer
   oss << "Tensor " << t->buf()->name_hint() << "[";
-  for (size_t i = 0; i < t->buf()->ndim(); i++) {
+  for (const auto i : c10::irange(t->buf()->ndim())) {
     if (i != 0) {
       oss << ", ";
     }

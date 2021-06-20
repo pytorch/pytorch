@@ -75,7 +75,7 @@ void FloatToFused8BitRowwiseQuantized(
     int input_columns,
     std::uint8_t* output) {
 #ifdef USE_FBGEMM
-  fbgemm::FloatToFused8BitRowwiseQuantizedSBFloat(
+  fbgemm::FloatOrHalfToFused8BitRowwiseQuantizedSBFloat<float>(
       input, input_rows, input_columns, output);
 #else
   FloatToFused8BitRowwiseQuantized__base(
@@ -89,7 +89,7 @@ void Fused8BitRowwiseQuantizedToFloat(
     int input_columns,
     float* output) {
 #ifdef USE_FBGEMM
-  fbgemm::Fused8BitRowwiseQuantizedSBFloatToFloat(
+  fbgemm::Fused8BitRowwiseQuantizedSBFloatToFloatOrHalf<float>(
       input, input_rows, input_columns, output);
 #else
   Fused8BitRowwiseQuantizedToFloat__base(
@@ -196,7 +196,7 @@ void FloatToFusedNBitRowwiseQuantizedSBHalf(
     int input_columns,
     std::uint8_t* output) {
 #ifdef USE_FBGEMM
-  fbgemm::FloatToFusedNBitRowwiseQuantizedSBHalf(
+  fbgemm::FloatOrHalfToFusedNBitRowwiseQuantizedSBHalf<float>(
       bit_rate, input, input_rows, input_columns, output);
 #else
   FloatToFusedNBitRowwiseQuantizedSBHalf__base(
@@ -211,7 +211,7 @@ void FusedNBitRowwiseQuantizedSBHalfToFloat(
     int input_columns,
     float* output) {
 #ifdef USE_FBGEMM
-  fbgemm::FusedNBitRowwiseQuantizedSBHalfToFloat(
+  fbgemm::FusedNBitRowwiseQuantizedSBHalfToFloatOrHalf<float>(
       bit_rate, input, input_rows, input_columns, output);
 #else
   FusedNBitRowwiseQuantizedSBHalfToFloat__base(
