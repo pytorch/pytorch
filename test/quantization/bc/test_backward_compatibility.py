@@ -2,7 +2,6 @@
 
 import sys
 import os
-
 # torch
 import torch
 import torch.nn as nn
@@ -69,10 +68,16 @@ class TestSerialization(TestCase):
             torch.save(qmodule(input_tensor), expected_file)
 
         input_tensor = torch.load(input_file)
+        print("Input tensor")
+        print(input_tensor)
         qmodule.load_state_dict(torch.load(state_dict_file))
         qmodule_scripted = torch.jit.load(scripted_module_file)
         qmodule_traced = torch.jit.load(traced_module_file)
         expected = torch.load(expected_file)
+        print("Expected")
+        print(expected)
+        print("qmodule(input_tensor)")
+        print(qmodule(input_tensor))
         self.assertEqual(qmodule(input_tensor), expected, atol=prec)
         self.assertEqual(qmodule_scripted(input_tensor), expected, atol=prec)
         self.assertEqual(qmodule_traced(input_tensor), expected, atol=prec)
