@@ -17,12 +17,14 @@ __all__ = [
     "all_types_and",
     "all_types_and_complex",
     "all_types_and_complex_and",
+    "all_types_and_half",
     "assert_allclose",
     "complex_types",
     "floating_and_complex_types",
     "floating_and_complex_types_and",
     "floating_types",
     "floating_types_and",
+    "floating_types_and_half",
     "get_all_complex_dtypes",
     "get_all_dtypes",
     "get_all_device_types",
@@ -134,6 +136,8 @@ def _compare_tensors_internal(a: torch.Tensor, b: torch.Tensor, *, rtol, atol, e
     # Compares complex tensors' real and imaginary parts separately.
     # (see NOTE Test Framework Tensor "Equality")
     if a.is_complex():
+        a = a.resolve_conj()
+        b = b.resolve_conj()
         if equal_nan == "relaxed":
             a = a.clone()
             b = b.clone()
