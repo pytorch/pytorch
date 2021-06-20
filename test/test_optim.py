@@ -1330,6 +1330,18 @@ class TestLRScheduler(TestCase):
         closed_form_scheduler = CosineAnnealingLR(self.opt, T_max=T_max, eta_min=eta_min)
         self._test_against_closed_form(scheduler, closed_form_scheduler, epochs)
 
+    def test_cos_anneal_lr_continue(self):
+        eta_min = 0.1
+        T_max = 5
+        scheduler = CosineAnnealingLR(self.opt, T_max=T_max, eta_min=eta_min)
+        self.opt.step()
+        scheduler.step()
+        original_lrs = scheduler._last_lr
+        new_scheduler = CosineAnnealingLR(
+            self.opt, T_max=T_max, eta_min=eta_min, last_epoch=0)
+        new_lrs = new_scheduler._last_lr
+        torch.testing.assert_allclose(original_lrs, new_lrs, rtol=1e-4, atol=1e-5)
+
     def test_reduce_lr_on_plateau1(self):
         epochs = 10
         for param_group in self.opt.param_groups:
