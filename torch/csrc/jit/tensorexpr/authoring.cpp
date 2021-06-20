@@ -70,7 +70,7 @@ class SpecializationKey {
     at::ScalarType dtype = v.dtype().toScalarType();
     at::DeviceType device = v.device().type();
     at::Layout layout = v.layout();
-    bool requires_grad = v.requires_grad();
+    bool requires_grad = v.requires_grad() && at::GradMode::is_enabled();
 
     return S0 * static_cast<uint16_t>(is_out) +
         S1 * static_cast<uint16_t>(requires_grad) +
