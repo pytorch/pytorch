@@ -102,14 +102,15 @@ inline void THPUtils_internStringInPlace(PyObject** obj) {
  */
 
 // NOLINTNEXTLINE(clang-diagnostic-unused-function)
-static py::object PyObject_FastGetAttrString(PyObject *obj, char *name)
+static py::object PyObject_FastGetAttrString(PyObject *obj, const char *name)
 {
     PyTypeObject *tp = Py_TYPE(obj);
     PyObject *res = (PyObject *)nullptr;
 
     /* Attribute referenced by (char *)name */
     if (tp->tp_getattr != nullptr) {
-        res = (*tp->tp_getattr)(obj, name);
+        // This is OK per https://bugs.python.org/issue39620
+        res = (*tp->tp_getattr)(obj, const_cast<char*>(name));
         if (res == nullptr) {
           PyErr_Clear();
         }
