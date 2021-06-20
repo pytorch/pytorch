@@ -27,6 +27,19 @@ namespace jit {
 namespace {
 using namespace torch::jit::tensorexpr;
 
+py::object python_specialization_key() {
+  static py::object* rtype = nullptr;
+  if (rtype == nullptr) {
+    py::object namedtuple =
+        py::module_::import("collections").attr("namedtuple");
+    rtype = new py::object();
+    *rtype = namedtuple(
+        "SpecializationKey",
+        "alias_group,ndim,dtype,device,layout,requires_grad,out,shape,stride");
+  }
+  return *rtype;
+}
+
 template <int MAX_DIMS>
 class SpecializationKey {
  protected:
@@ -154,12 +167,7 @@ class SpecializationKey {
 
   py::object to_python(const at::Tensor& example) const {
     py::object ex = py::cast(example);
-    py::object namedtuple =
-        py::module_::import("collections").attr("namedtuple");
-    py::object rtype = namedtuple(
-        "SpecializationKey",
-        "alias_group,ndim,dtype,device,layout,requires_grad,out,shape,stride");
-    return rtype(
+    return python_specialization_key()(
         static_cast<int>(alias_group_),
         ex.attr("ndim"),
         ex.attr("dtype"),
