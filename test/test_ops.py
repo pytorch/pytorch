@@ -26,7 +26,8 @@ _variant_ops = partial(ops, dtypes=OpDTypes.supported,
 
 # Get names of all the operators which have ref in their entry in OpInfo (testing infra)
 # TODO (@krshrimali): Add None to _NOTHING?
-ref_test_ops = list(filter(lambda op: op.ref is not None and op.ref is not _NOTHING, op_db))
+ref_test_ops = list(filter(lambda op: not isinstance(op, (UnaryUfuncInfo, SpectralFuncInfo, ShapeFuncInfo)) and
+                    op.ref is not None and op.ref is not _NOTHING, op_db))
 
 
 # Tests that apply to all operators and aren't related to any particular
@@ -169,15 +170,12 @@ class TestCommon(TestCase):
 
         self.assertEqual(supported_backward_dtypes, claimed_backward_supported, msg=msg)
 
-    # Tests that the function and its (array-accepting) reference produce the same
+    # Tests that the function and its (ndarray-accepting) reference produce the same
     #   values on the tensors from sample_inputs func for the corresponding op.
     @onlyOnCPUAndCUDA
     @suppress_warnings
     @ops(ref_test_ops, allowed_dtypes=(torch.float32, torch.long))
     def test_reference_testing(self, device, dtype, op):
-        if isinstance(op, (UnaryUfuncInfo, SpectralFuncInfo, ShapeFuncInfo)):
-            self.skipTest(f"Skipped! {type(op).__name__} have implemented reference checks separately.")
-
         sample_inputs = op.sample_inputs(device, dtype)
         for sample_input in sample_inputs:
             self.compare_with_reference(op, op.ref, sample_input)

@@ -5,6 +5,7 @@ import collections
 import copy
 import operator
 import random
+import numbers
 
 import torch
 import numpy as np
@@ -1591,6 +1592,7 @@ def sample_inputs_take_along_dim(op_info, device, dtype, requires_grad, **kwargs
             )
 
 def sample_inputs_amax_amin(op_info, device, dtype, requires_grad, **kwargs):
+    # Ordered as (shape, positional args, kwargs)
     test_cases: Tuple[tuple, tuple, dict] = (  # type: ignore[assignment]
         ((S, S, S), (), {}),
         ((S, S, S), (1,), {}),
@@ -7310,7 +7312,6 @@ op_db: List[OpInfo] = [
 
 # Common operator groupings
 unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo)]
-test_funcs = [op for op in op_db if isinstance(op, OpInfo)]
 spectral_funcs = [op for op in op_db if isinstance(op, SpectralFuncInfo)]
 sparse_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse is True]
 shape_funcs = [op for op in op_db if isinstance(op, ShapeFuncInfo)]

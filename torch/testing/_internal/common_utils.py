@@ -1137,16 +1137,7 @@ class TestCase(expecttest.TestCase):
         actual = torch_fn(t_inp, *t_args, **t_kwargs)
         expected = ref_fn(n_inp, *n_args, **n_kwargs)
 
-        if isinstance(actual, torch.Tensor):
-            self.assertEqual(actual, torch.as_tensor(expected, dtype=actual.dtype), exact_device=False)
-        elif is_iterable_of_tensors(actual):
-            msg = "Expected both functions to return outputs of same size but" \
-                  f" got {len(actual)} from torch and {len(expected)} from NumPy."
-            assert len(actual) == len(expected), msg
-            for x, y in zip(actual, expected):
-                self.assertEqual(x, torch.as_tensor(y, dtype=x.dtype), exact_device=False)
-        else:
-            raise TypeError(f"Got type: {type(actual)} from PyTorch but only tensors/iterable of tensors are currently supported")
+        self.assertEqual(actual, expected, exact_device=False)
 
     # Compares the given Torch and NumPy functions on the given tensor-like object.
     # NOTE: both torch_fn and np_fn should be functions that take a single
