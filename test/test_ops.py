@@ -10,7 +10,7 @@ from torch.testing._internal.common_utils import \
     (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor,
      gradcheck, gradgradcheck, IS_PYTORCH_CI, suppress_warnings)
 from torch.testing._internal.common_methods_invocations import \
-    (op_db, _NOTHING, UnaryUfuncInfo, SpectralFuncInfo, ShapeFuncInfo)
+    (op_db, _NOTHING, UnaryUfuncInfo, SpectralFuncInfo)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
@@ -25,8 +25,9 @@ _variant_ops = partial(ops, dtypes=OpDTypes.supported,
                        allowed_dtypes=(torch.float, torch.cfloat))
 
 # Get names of all the operators which have ref in their entry in OpInfo (testing infra)
-# TODO (@krshrimali): Add None to _NOTHING?
-ref_test_ops = list(filter(lambda op: not isinstance(op, (UnaryUfuncInfo, SpectralFuncInfo, ShapeFuncInfo)) and
+#   except for Unary Ufuncs (separately implemented in test/test_unary_ufuncs.py)
+#   and Spectral Functions (separately implemented for only 1D as of now, in test/test_spectral_ops.py)
+_ref_test_ops = list(filter(lambda op: not isinstance(op, (UnaryUfuncInfo, SpectralFuncInfo)) and
                     op.ref is not None and op.ref is not _NOTHING, op_db))
 
 
@@ -174,7 +175,7 @@ class TestCommon(TestCase):
     #   values on the tensors from sample_inputs func for the corresponding op.
     @onlyOnCPUAndCUDA
     @suppress_warnings
-    @ops(ref_test_ops, allowed_dtypes=(torch.float32, torch.long))
+    @ops(_ref_test_ops, allowed_dtypes=(torch.float32, torch.long))
     def test_reference_testing(self, device, dtype, op):
         sample_inputs = op.sample_inputs(device, dtype)
         for sample_input in sample_inputs:

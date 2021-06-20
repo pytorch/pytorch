@@ -673,21 +673,7 @@ class TestShapeOps(TestCase):
         nz = x.nonzero()
         self.assertFalse(nz.requires_grad)
 
-class TestShapeFuncs(TestCase):
-    """Test suite for Shape manipulating operators using the ShapeFuncInfo."""
-
-    @dtypes(*(torch.uint8, torch.int64, torch.double, torch.complex128))
-    @ops([op for op in shape_funcs if op.name in ['tile', 'repeat']])
-    def test_repeat_tile_vs_numpy(self, device, dtype, op):
-        samples = op.sample_inputs(device, dtype, requires_grad=False)
-        for sample in samples:
-            assert isinstance(sample.input, torch.Tensor)
-            expected = op.ref(sample.input.cpu().numpy(), *sample.args, **sample.kwargs)
-            result = op(sample.input, *sample.args, **sample.kwargs).cpu().numpy()
-            self.assertEqual(expected, result)
-
 instantiate_device_type_tests(TestShapeOps, globals())
-instantiate_device_type_tests(TestShapeFuncs, globals())
 
 if __name__ == '__main__':
     run_tests()
