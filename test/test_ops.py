@@ -28,7 +28,7 @@ _variant_ops = partial(ops, dtypes=OpDTypes.supported,
 #   except for Unary Ufuncs (separately implemented in test/test_unary_ufuncs.py)
 #   and Spectral Functions (separately implemented for only 1D as of now, in test/test_spectral_ops.py)
 _ref_test_ops = list(filter(lambda op: not isinstance(op, (UnaryUfuncInfo, SpectralFuncInfo)) and
-                    op.ref is not None and op.ref is not _NOTHING, op_db))
+                     op.ref is not None and op.ref is not _NOTHING, op_db))
 
 
 # Tests that apply to all operators and aren't related to any particular
