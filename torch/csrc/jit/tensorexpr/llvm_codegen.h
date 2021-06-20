@@ -38,7 +38,11 @@ class TORCH_API LLVMCodeGen : public CodeGen {
   ~LLVMCodeGen() override;
 
   TORCH_API void call(const std::vector<CallArg>& args) override;
-  TORCH_API void call_raw(const std::vector<void*>& args) override;
+  TORCH_API void call_raw(void* const* args, size_t size) override;
+
+  void call_raw(const std::vector<void*>& args) {
+    call_raw(args.data(), args.size());
+  }
 
   at::Tensor empty_strided(
       c10::IntArrayRef size,

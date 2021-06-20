@@ -70,7 +70,7 @@ class SpecializationKey {
       const T& sizes,
       const T& strides,
       int64_t ndims,
-      std::vector<void*>& call_args_out) {
+      void**& call_args_out) {
     // pack all the properties for each dimension into a uint8
     int out_idx = 0;
     for (int dim = 0; dim < ndims; ++dim) {
@@ -84,13 +84,12 @@ class SpecializationKey {
           strides[dim] == strides[dim + 1] * sizes[dim + 1]) {
         flag |= STRIDE_CONTIGUOUS;
       } else if (
-          dim > 0 &&
-          strides[dim] == strides[dim - 1] * sizes[dim - 1] &&
+          dim > 0 && strides[dim] == strides[dim - 1] * sizes[dim - 1] &&
           (dimflags_[out_idx - 1] & STRIDE_CONTIGUOUS) == 0) {
         flag |= STRIDE_TRANSPOSED_CONTIGUOUS;
       } else {
         flag |= STRIDE_AS_ARG;
-        call_args_out.emplace_back(const_cast<int64_t*>(&strides[dim]));
+        *call_args_out++ = const_cast<int64_t*>(&strides[dim]);
       }
       dimflags_[out_idx++] = flag;
     }
@@ -106,7 +105,7 @@ class SpecializationKey {
       const at::Tensor& v,
       int8_t alias_group,
       bool is_out,
-      std::vector<void*>& call_args_out)
+      void**& call_args_out)
       : flags_(pack_flags(v, is_out)), alias_group_(alias_group) {
     init_dimflags(v.sizes(), v.strides(), v.ndimension(), call_args_out);
   }
@@ -226,32 +225,37 @@ class CompileCache3 {
 
   class CompileResultImpl : public CompileResultBase {
    public:
-    void set_code(const py::object& cg) {
+    void set_code(const py::object& cg) override {
       objects_.push_back(cg);
       cg_ = cg.cast<CodeGen*>();
     }
-    void set_shape_from(const std::vector<std::pair<int, int>>& indices) {
+    void set_shape_from(
+        const std::vector<std::pair<int, int>>& indices) override {
       assert(indices.shape() <= MAX_DIMS);
       shape_from_ = indices;
     }
 
     void add_allocated_output(
         int options_from,
-        const std::vector<int>& storage_order) {
+        const std::vector<int>& storage_order) override {
+      if (allocated_outputs_.size() > 0) {
+        throw std::runtime_error("TODO: support more than one output");
+      }
       allocated_outputs_.push_back(std::make_pair(options_from, storage_order));
     }
 
-    void add_shape_check(const std::tuple<int, int, int, int>& indices) {
+    void add_shape_check(
+        const std::tuple<int, int, int, int>& indices) override {
       shape_checks_.push_back(indices);
     }
 
-    void set_num_args(int buffer_args, int stride_args, int shape_args) {
-      num_buffer_args_ = buffer_args;
-      num_stride_args_ = stride_args;
-      num_shape_args_ = shape_args;
+    void set_num_args(int buffer_args, int stride_args, int shape_args)
+        override {
+      shape_args_offset_ = buffer_args + stride_args;
+      num_args_ = buffer_args + stride_args + shape_args;
     }
 
-    inline void do_shape_checks(const Args& args) {
+    at::Tensor call(const Args& args, void** __restrict__ call_args) {
       for (const auto& ck : shape_checks_) {
         if (args[std::get<0>(ck)].size(std::get<1>(ck)) !=
             args[std::get<2>(ck)].size(std::get<3>(ck))) {
@@ -260,19 +264,19 @@ class CompileCache3 {
               "The size of tensor A must match the size of tensor B at non-singleton dimension X");
         }
       }
-    }
-
-    at::Tensor call(const Args& args, std::vector<void*>& call_args) {
-      do_shape_checks(args);
 
       int64_t shapes[MAX_DIMS];
       int ndims = std::min<int>(shape_from_.size(), MAX_DIMS);
       for (int i = 0; i < ndims; ++i) {
         shapes[i] = args[shape_from_[i].first].size(shape_from_[i].second);
+        call_args[shape_args_offset_ + i] = &shapes[i];
       }
 
-      at::Tensor output = args[NARGS - 1];
-      if (allocated_outputs_.size() == 1) {
+      for (int i = 0; i < NARGS; ++i) {
+        call_args[i] = args[i].data_ptr();
+      }
+      at::Tensor output;
+      if (allocated_outputs_.size() > 0) {
         int options_from = allocated_outputs_[0].first;
         auto& output_order = allocated_outputs_[0].second;
         int64_t strides[MAX_DIMS] = {0};
@@ -285,25 +289,19 @@ class CompileCache3 {
             c10::IntArrayRef(shapes, shapes + ndims),
             c10::IntArrayRef(strides, strides + ndims),
             args[options_from].options());
-        // call_args.emplace_back(output.data_ptr());
         call_args[args.size()] = output.data_ptr();
-      }
-      // TODO(jansel): add multi-output support
-      // assert(allocated_outputs_.size() <= 1);
-
-      for (int i = 0; i < ndims; ++i) {
-        call_args.emplace_back(&shapes[i]);
+      } else {
+        output = args[NARGS - 1];
       }
 
-      cg_->call_raw(call_args);
+      cg_->call_raw(call_args, num_args_);
       return output;
     }
 
    private:
     CodeGen* cg_ = nullptr;
-    int num_buffer_args_ = 0;
-    int num_stride_args_ = 0;
-    int num_shape_args_ = 0;
+    int shape_args_offset_ = 0;
+    int num_args_ = 0;
     std::vector<std::pair<int, int>> shape_from_;
     std::vector<std::tuple<int, int, int, int>> shape_checks_;
     std::vector<std::pair<int, std::vector<int>>> allocated_outputs_;
@@ -365,10 +363,7 @@ class CompileCache3 {
     return alias_groups;
   }
 
-  Key compute_cache_key(
-      const Args& args,
-      bool has_out,
-      std::vector<void*>& call_args_out) {
+  Key compute_cache_key(const Args& args, bool has_out, void** call_args_out) {
     AliasGroups alias_groups = compute_alias_groups(args);
     Key key;
     int i = 0;
@@ -384,15 +379,8 @@ class CompileCache3 {
   CompileCache3(const py::object& compile_fn) : compile_fn_(compile_fn) {}
 
   at::Tensor call(const Args& args, bool has_out) {
-    std::vector<void*> call_args;
-    call_args.reserve(NARGS + NARGS * MAX_DIMS);
-    for (const auto& arg : args) {
-      call_args.emplace_back(arg.data_ptr());
-    }
-    if (!has_out) {
-      call_args.emplace_back(nullptr);
-    }
-    auto key = compute_cache_key(args, has_out, call_args);
+    void* call_args[NARGS + (!has_out) + NARGS * MAX_DIMS + MAX_DIMS];
+    auto key = compute_cache_key(args, has_out, call_args + NARGS + (!has_out));
     return cached_compile(key, args)->call(args, call_args);
   }
 
@@ -538,7 +526,7 @@ void initTensorExprAuthoringBindings(PyObject* te_obj) {
              int buffer_args,
              int stride_args,
              int shape_args) {
-            self.res->set_num_args(shape_args, stride_args, shape_args);
+            self.res->set_num_args(buffer_args, stride_args, shape_args);
           })
       .def(
           "add_allocated_output",

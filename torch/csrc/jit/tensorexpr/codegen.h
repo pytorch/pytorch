@@ -62,17 +62,21 @@ class TORCH_API CodeGen {
     return ("");
   }
 
-  // There are two ways to invoke the codegen:
+  // There are three ways to invoke the codegen:
   //  1) with a vector of CallArgs
-  //  2) with a vector of raw 'void*' pointers
+  //  2) with a array of raw 'void*' pointers
+  //  3) a vector of void* pointers (this is an alias for #2)
   //
   // The codegen knows types of all inputs from the buffer args, that's why
   // 'void*' pointers suffice.
   //
-  // TODO: Eventually we might consider killing the CallArgs version, but
-  // currently only LLVM codegen implements call_raw.
+  // TODO: Eventually we might consider killing the CallArgs version
   virtual void call(const std::vector<CallArg>& args) = 0;
-  virtual void call_raw(const std::vector<void*>& args) = 0;
+  virtual void call_raw(void* const* args, size_t size) = 0;
+
+  void call_raw(const std::vector<void*>& args) {
+    call_raw(args.data(), args.size());
+  }
 
   virtual at::Tensor empty_strided(
       c10::IntArrayRef size,

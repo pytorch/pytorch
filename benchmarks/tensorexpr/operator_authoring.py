@@ -102,8 +102,6 @@ def benchmark(*args, **kwargs):
 
 def main():
     results = [
-        ("strided (n,n)", benchmark(lambda n: (randn(n, n, 32)[:, :, 0],
-                                               randn(n, n, 32)[:, :, 0]))),
         ("(n)+(n)", benchmark(lambda n: (randn(n), randn(n)))),
         ("(n,1)+(1,n)", benchmark(lambda n: (randn(n, 1), randn(1, n)))),
         ("(n,n)+(1)", benchmark(lambda n: (randn(n, n), randn(1)))),
@@ -115,8 +113,16 @@ def main():
         ("out= (n,n)", benchmark(lambda n: (randn(n, n), randn(n, n)), out=lambda n: randn(n, n))),
         ("issue 57611 (n,32,32,2)", benchmark(lambda n: (randn(1, 32, 32, 2), randn(n, 1, 1, 2)))),
         ("float+double (n,n)", benchmark(lambda n: (randn(n, n), randn(n, n, dtype=torch.float64)))),
-        ("transposed (n,n)", benchmark(lambda n: (randn(n, n).transpose(0, 1),
-                                                  randn(n, n).transpose(0, 1)))),
+        ("transposed1 (n,n)", benchmark(lambda n: (randn(n, n),
+                                                   randn(n, n).transpose(0, 1)))),
+        ("transposed2 (n,n)", benchmark(lambda n: (randn(n, n).transpose(0, 1),
+                                                   randn(n, n).transpose(0, 1)))),
+        ("slice1 (n,n)", benchmark(lambda n: (randn(n + 10, n + 10, 32)[:n, :n, 0],
+                                              randn(n, n)))),
+        ("slice2 (n,n)", benchmark(lambda n: (randn(n, n, 32)[:, :, 0],
+                                              randn(n, n, 32)[:, :, 0]))),
+        ("strided out (n,n)", benchmark(lambda n: (randn(n, n), randn(n, n)),
+                                        out=lambda n: randn(n + 8, n + 8, 2)[:n, :n, 0], )),
         ("out convert (n,n)", benchmark(lambda n: (randn(n, n),
                                                    randn(n, n)),
                                         out=lambda n: randn(n, n, dtype=torch.float64))),

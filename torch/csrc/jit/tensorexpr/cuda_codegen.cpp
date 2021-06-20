@@ -1047,7 +1047,7 @@ void CudaCodeGen::Initialize() {
   USE_TRIGGER(cuda_codegen_created);
 }
 
-void CudaCodeGen::call_raw(const std::vector<void*>& raw_args) {
+void CudaCodeGen::call_raw(void* const* raw_args, size_t size) {
   auto const& buffer_args = this->buffer_args();
 
   // TODO: move as much of this into the constructors.
