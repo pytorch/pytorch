@@ -38,7 +38,6 @@ import torch.testing._internal.opinfo_helper as opinfo_helper
 from setuptools import distutils
 
 if TEST_SCIPY:
-    import scipy
     import scipy.special
 
 
@@ -148,23 +147,27 @@ class SampleInput(object):
 
         return self._repr_helper(formatter)
 
+    # Returns the NumPy version of the sample input object in the form of a tuple: (input, args, kwargs)
     def numpy(self):
-        # Returns the NumPy version of the sample input object in the form of a tuple: (input, args, kwargs)
-        def to_numpy(torch_inp):
-            # Local function to convert given input to numpy array/arrays
-            # Input types supported: tensor/iterable tensors/list/tuple/dict/scalars
-            # For iterable tensors/list/tuple/dict - to_numpy() is recursively called trusting the end value will be
-            # either a torch tensor or a scalar
-            if isinstance(torch_inp, torch.Tensor):
-                numpy_inp = torch_inp.cpu().numpy()
-            elif is_iterable_of_tensors(torch_inp) or isinstance(torch_inp, (list, tuple)):
-                iter_class = type(torch_inp)
-                numpy_inp = iter_class(to_numpy(t_inp) for t_inp in torch_inp)	
-            elif isinstance(torch_inp, dict):
-                numpy_inp = {k: to_numpy(t_inp) for k, t_inp in torch_inp.items()}
-            else:
-                numpy_inp = torch_inp
-            return numpy_inp
+        # Converts tensors to ndarrays by calling .detach().cpu().numpy() on them
+        # Numbers, strings, and bool are preserved as is
+        # Lists, tuples and dicts are handled by calling this function recursively
+        def to_numpy(x):
+            def _np(t):
+                return t.detach().cpu().numpy()
+
+            if isinstance(x, torch.Tensor):
+                return _np(x)
+            elif isinstance(x, list):
+                return list(map(to_numpy, x))
+            elif isinstance(x, tuple):
+                return tuple(map(to_numpy, x))
+            elif isinstance(x, dict):
+                return {k: to_numpy(v) for k, v in x.items()}
+            elif isinstance(x, (numbers.Number, bool, str)):
+                return x
+
+            raise ValueError("Unknown type {0}!".format(type(x)))
 
         sample_np_input, np_args, np_kwargs = to_numpy(self.input), to_numpy(self.args), to_numpy(self.kwargs)
         return (sample_np_input, np_args, np_kwargs)
@@ -207,7 +210,7 @@ class OpInfo(object):
     def __init__(self,
                  name,  # the string name of the function
                  *,
-                 ref=None,  # An optional reference function that accepts NumPy arrays.
+                 ref=None,  # An optional reference function that accepts ndarrays (AKA "NumPy arrays").
                             # If given, the op will be compared with its reference on each of its sample inputs.
                  # the following metadata describes the operator, its variants,
                  #   and its aliases, if any
