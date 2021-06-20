@@ -102,6 +102,8 @@ def benchmark(*args, **kwargs):
 
 def main():
     results = [
+        ("strided (n,n)", benchmark(lambda n: (randn(n, n, 32)[:, :, 0],
+                                               randn(n, n, 32)[:, :, 0]))),
         ("(n)+(n)", benchmark(lambda n: (randn(n), randn(n)))),
         ("(n,1)+(1,n)", benchmark(lambda n: (randn(n, 1), randn(1, n)))),
         ("(n,n)+(1)", benchmark(lambda n: (randn(n, n), randn(1)))),
@@ -146,4 +148,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-    # main(4096)

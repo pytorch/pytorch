@@ -217,6 +217,9 @@ class PointwiseCompiler(object):
             loopnest.simplify(),
             bufs_args + self.stride_args + self.shape_args)
         self.result.set_code(cg)
+        self.result.set_num_args(len(bufs_args),
+                                 len(self.stride_args),
+                                 len(self.shape_args))
 
     def run(self):
         self.error_checks()

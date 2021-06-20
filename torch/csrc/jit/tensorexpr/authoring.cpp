@@ -13,6 +13,7 @@
 #include <cassert>
 #include <map>
 #include <mutex>
+#include <vector>
 
 #define STRINGIFY(x) #x
 #define TOSTRING(x) STRINGIFY(x)
@@ -65,23 +66,32 @@ class SpecializationKey {
   }
 
   template <typename T>
-  inline void init_dimflags(const T& sizes, const T& strides, int64_t ndims) {
+  inline void init_dimflags(
+      const T& sizes,
+      const T& strides,
+      int64_t ndims,
+      std::vector<void*>& call_args_out) {
     // pack all the properties for each dimension into a uint8
     int out_idx = 0;
     for (int dim = 0; dim < ndims; ++dim) {
       uint8_t flag = (sizes[dim] == 1 ? SIZE_ONE : SIZE_OTHER);
-      if (strides[dim] == 0)
+      if (strides[dim] == 0) {
         flag |= STRIDE_ZERO;
-      else if (strides[dim] == 1)
+      } else if (strides[dim] == 1) {
         flag |= STRIDE_ONE;
-      else if (
+      } else if (
           dim + 1 < sizes.size() &&
-          strides[dim] == strides[dim + 1] * sizes[dim + 1])
+          strides[dim] == strides[dim + 1] * sizes[dim + 1]) {
         flag |= STRIDE_CONTIGUOUS;
-      else if (dim > 0 && strides[dim] == strides[dim - 1] * sizes[dim - 1])
+      } else if (
+          dim > 0 &&
+          strides[dim] == strides[dim - 1] * sizes[dim - 1] &&
+          (dimflags_[out_idx - 1] & STRIDE_CONTIGUOUS) == 0) {
         flag |= STRIDE_TRANSPOSED_CONTIGUOUS;
-      else
+      } else {
         flag |= STRIDE_AS_ARG;
+        call_args_out.emplace_back(const_cast<int64_t*>(&strides[dim]));
+      }
       dimflags_[out_idx++] = flag;
     }
     while (out_idx < MAX_DIMS) {
@@ -92,9 +102,13 @@ class SpecializationKey {
  public:
   SpecializationKey() {}
 
-  SpecializationKey(const at::Tensor& v, int8_t alias_group, bool is_out)
+  SpecializationKey(
+      const at::Tensor& v,
+      int8_t alias_group,
+      bool is_out,
+      std::vector<void*>& call_args_out)
       : flags_(pack_flags(v, is_out)), alias_group_(alias_group) {
-    init_dimflags(v.sizes(), v.strides(), v.ndimension());
+    init_dimflags(v.sizes(), v.strides(), v.ndimension(), call_args_out);
   }
 
   int cmp(const SpecializationKey<MAX_DIMS>& other) const {
@@ -177,6 +191,10 @@ class CompileResultBase : public KernelScopedObject {
       const std::vector<int>& storage_order) = 0;
   virtual void add_shape_check(
       const std::tuple<int, int, int, int>& indices) = 0;
+  virtual void set_num_args(
+      int buffer_args,
+      int stride_args,
+      int shape_args) = 0;
 };
 
 struct CompileResultProxy {
@@ -227,7 +245,13 @@ class CompileCache3 {
       shape_checks_.push_back(indices);
     }
 
-    void do_shape_checks(const Args& args) {
+    void set_num_args(int buffer_args, int stride_args, int shape_args) {
+      num_buffer_args_ = buffer_args;
+      num_stride_args_ = stride_args;
+      num_shape_args_ = shape_args;
+    }
+
+    inline void do_shape_checks(const Args& args) {
       for (const auto& ck : shape_checks_) {
         if (args[std::get<0>(ck)].size(std::get<1>(ck)) !=
             args[std::get<2>(ck)].size(std::get<3>(ck))) {
@@ -261,7 +285,8 @@ class CompileCache3 {
             c10::IntArrayRef(shapes, shapes + ndims),
             c10::IntArrayRef(strides, strides + ndims),
             args[options_from].options());
-        call_args.emplace_back(output.data_ptr());
+        // call_args.emplace_back(output.data_ptr());
+        call_args[args.size()] = output.data_ptr();
       }
       // TODO(jansel): add multi-output support
       // assert(allocated_outputs_.size() <= 1);
@@ -275,7 +300,10 @@ class CompileCache3 {
     }
 
    private:
-    CodeGen* cg_;
+    CodeGen* cg_ = nullptr;
+    int num_buffer_args_ = 0;
+    int num_stride_args_ = 0;
+    int num_shape_args_ = 0;
     std::vector<std::pair<int, int>> shape_from_;
     std::vector<std::tuple<int, int, int, int>> shape_checks_;
     std::vector<std::pair<int, std::vector<int>>> allocated_outputs_;
@@ -337,15 +365,18 @@ class CompileCache3 {
     return alias_groups;
   }
 
-  Key compute_cache_key(const Args& args, bool has_out) {
+  Key compute_cache_key(
+      const Args& args,
+      bool has_out,
+      std::vector<void*>& call_args_out) {
     AliasGroups alias_groups = compute_alias_groups(args);
     Key key;
     int i = 0;
     for (; i < NARGS - 1; ++i) {
-      key[i] = ArgKey(args[i], alias_groups[i], false);
+      key[i] = ArgKey(args[i], alias_groups[i], false, call_args_out);
     }
-    if (i < NARGS) {
-      key[i] = ArgKey(args[i], alias_groups[i], has_out);
+    if (NARGS != 0) {
+      key[i] = ArgKey(args[i], alias_groups[i], has_out, call_args_out);
     }
     return key;
   }
@@ -358,7 +389,10 @@ class CompileCache3 {
     for (const auto& arg : args) {
       call_args.emplace_back(arg.data_ptr());
     }
-    auto key = compute_cache_key(args, has_out);
+    if (!has_out) {
+      call_args.emplace_back(nullptr);
+    }
+    auto key = compute_cache_key(args, has_out, call_args);
     return cached_compile(key, args)->call(args, call_args);
   }
 
@@ -497,6 +531,14 @@ void initTensorExprAuthoringBindings(PyObject* te_obj) {
           [](CompileResultProxy& self,
              const std::vector<std::pair<int, int>>& indices) {
             self.res->set_shape_from(indices);
+          })
+      .def(
+          "set_num_args",
+          [](CompileResultProxy& self,
+             int buffer_args,
+             int stride_args,
+             int shape_args) {
+            self.res->set_num_args(shape_args, stride_args, shape_args);
           })
       .def(
           "add_allocated_output",
