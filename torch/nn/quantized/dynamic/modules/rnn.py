@@ -76,12 +76,24 @@ class RNNBase(torch.nn.Module):
                 layer_input_size = input_size if layer == 0 else hidden_size * num_directions
 
                 w_ih = torch.randn(gate_size, layer_input_size).to(torch.float)
+                print("w_ih")
+                print(w_ih)
                 w_hh = torch.randn(gate_size, hidden_size).to(torch.float)
+                print("w_hh")
+                print(w_hh)
                 b_ih = torch.randn(gate_size).to(torch.float)
+                print("b_ih")
+                print(b_ih)
                 b_hh = torch.randn(gate_size).to(torch.float)
+                print("b_hh")
+                print(b_hh)
                 if dtype == torch.qint8:
                     w_ih = torch.quantize_per_tensor(w_ih, scale=0.1, zero_point=0, dtype=torch.qint8)
+                    print("w_ih")
+                    print(w_ih)
                     w_hh = torch.quantize_per_tensor(w_hh, scale=0.1, zero_point=0, dtype=torch.qint8)
+                    print("w_hh")
+                    print(w_hh)
                     packed_ih = \
                         torch.ops.quantized.linear_prepack(w_ih, b_ih)
                     packed_hh = \
