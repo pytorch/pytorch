@@ -2357,8 +2357,8 @@ class TestBinaryUfuncs(TestCase):
 
     @onlyCUDA
     def test_add_half_tensor_with_alpha(self, device):
-        x = torch.tensor([6000.0], dtype=torch.half, device=device)
-        y = torch.tensor([-6000.0], dtype=torch.half, device=device)
+        x = torch.tensor([60000.0], dtype=torch.half, device=device)
+        y = torch.tensor([-60000.0], dtype=torch.half, device=device)
         actual = torch.add(x, y, alpha=2)
         self.assertTrue(not (actual.isnan() or actual.isinf()))
 
