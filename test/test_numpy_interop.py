@@ -161,8 +161,8 @@ class TestNumPyInterop(TestCase):
             for requires_grad in [False, True]:
                 for sparse in [False, True]:
                     for conj in [False, True]:
-                        data = [[1+2j, -2+3j], [-1-2j, 3-2j]]
-                        x = torch.tensor(data, requires_grad = requires_grad, device = device)    	
+                        data = [[1 + 2j, -2 + 3j], [-1 - 2j, 3 - 2j]]
+                        x = torch.tensor(data, requires_grad=requires_grad, device=device)
                         y = x
                         if sparse:
                             if requires_grad:

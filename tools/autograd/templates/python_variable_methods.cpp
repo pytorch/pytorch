@@ -800,11 +800,11 @@ static PyObject * THPVariable_numpy(PyObject* self, PyObject* args, PyObject* kw
   auto& self_ = THPVariable_Unpack(self);
   ParsedArgs<1> parsed_args;
   auto r = parser.parse(self, args, kwargs, parsed_args);
-  
+
   if (r.has_torch_function()) {
     return handle_torch_function(r, self, args, kwargs, THPVariableClass, "torch.Tensor");
   }
-  
+
   jit::tracer::warn("Converting a tensor to a NumPy array", jit::tracer::WARN_PYTHON_DATAFLOW);
   return torch::utils::tensor_to_numpy(self_, r.toBool(0));
   END_HANDLE_TH_ERRORS

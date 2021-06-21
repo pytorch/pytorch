@@ -2848,15 +2848,15 @@ Returns :attr:`self` tensor as a NumPy :class:`ndarray`.
 If :attr:`force` is ``False``, tensor :attr:`self` and the
 returned :class:`ndarray` share the same underlying storage. Changes to
 :attr:`self` tensor will be reflected in the :class:`ndarray` and vice versa.
-If tensors storage is not CPU, or if :attr:`requires_grad` is ``True`` and 
-:attr:`GradMode` is ``True``, or tensor is sprase, or :attr:`is_conj()` 
+If tensors storage is not CPU, or if :attr:`requires_grad` is ``True`` and
+:attr:`GradMode` is ``True``, or tensor is sprase, or :attr:`is_conj()`
 is ``True``, it throws exception.
 
 If :attr:`force` is ``True`` it tries to resolve issues, that would throw exception.
-It calls :func:`torch.Tensor.detach`, :func:`torch.Tensor.cpu` and if :attr:`is_conj()` 
+It calls :func:`torch.Tensor.detach`, :func:`torch.Tensor.cpu` and if :attr:`is_conj()`
 is ``True`` it calls :func:`torch.Tensor.resolve_conj`.
 Therefore tensor :attr:`self` and the returned :class:`ndarray` can have separate
-underlying storage and changes to :attr:`self` may not be reflected 
+underlying storage and changes to :attr:`self` may not be reflected
 in the :class:`ndarray` and vice versa.
 
 Args:
