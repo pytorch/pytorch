@@ -3633,12 +3633,12 @@ torch.cuda.synchronize()
         s.wait_stream(torch.cuda.current_stream())
         with torch.cuda.stream(s):
             # warmup
-            loss = (w.half() * static_input).sum()
+            loss = (weight.half() * static_input).sum()
             scaler.scale(loss).backward()
             opt.zero_grad(set_to_none=True)
             # capture
             g.capture_begin()
-            loss = (w.half() * static_input).sum()
+            loss = (weight.half() * static_input).sum()
             scaler.scale(loss).backward()
             g.capture_end()
         torch.cuda.current_stream().wait_stream(s)
