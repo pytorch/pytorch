@@ -12,8 +12,12 @@ from torch.quantization.fx._equalize import (
     _convert_equalization_ref
 )
 
-from torch.testing._internal.common_quantization import NodeSpec as ns
-from torch.testing._internal.common_quantization import QuantizationTestCase
+from torch.testing._internal.common_quantization import (
+    NodeSpec as ns,
+    QuantizationTestCase,
+    SingleLayerLinearModel,
+    TwoLayerLinearModel,
+)
 
 # Standard Libraries
 import copy
@@ -23,32 +27,13 @@ import numpy as np
 from hypothesis import given
 from hypothesis import strategies as st
 
-# Basic test with one linear layer
-class LinearModule(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.linear = nn.Linear(2, 2)
 
-    def forward(self, x):
-        return self.linear(x)
-
-# Test with two connected linear layers
-class Linear2Module(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.linear1 = nn.Linear(2, 2)
-        self.linear2 = nn.Linear(2, 2)
-
-    def forward(self, x):
-        x = self.linear1(x)
-        x = self.linear2(x)
-        return x
 # Test with two connected linear layers
 class Linear2FP32Module(nn.Module):
     def __init__(self):
         super().__init__()
-        self.linear1 = nn.Linear(2, 2)
-        self.linear2 = nn.Linear(2, 2)
+        self.linear1 = nn.Linear(5, 5)
+        self.linear2 = nn.Linear(5, 5)
 
     def forward(self, x):
         x = self.linear1(x)
@@ -59,8 +44,8 @@ class Linear2FP32Module(nn.Module):
 class Linear(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.weight = torch.rand((2, 2))
-        self.bias = torch.zeros(2)
+        self.weight = torch.rand((5, 5))
+        self.bias = torch.zeros(5)
 
     def forward(self, x):
         return F.linear(x, self.weight, self.bias)
@@ -248,8 +233,8 @@ class TestEqualizeFx(QuantizationTestCase):
             ns.call_module(MinMaxObserver): 6,
         }
 
-        tests = [(LinearModule, default_equalization_qconfig_dict, linear_node_occurrence),
-                 (Linear2Module, default_equalization_qconfig_dict, linear2_node_occurrence),
+        tests = [(SingleLayerLinearModel, default_equalization_qconfig_dict, linear_node_occurrence),
+                 (TwoLayerLinearModel, default_equalization_qconfig_dict, linear2_node_occurrence),
                  (FunctionalLinear2Module, default_equalization_qconfig_dict, functionalLinear_node_occurrence),
                  (FunctionalLinear2FP32Module, default_equalization_qconfig_dict, functionalLinear2FP32_node_occurrence)]
 
@@ -263,14 +248,14 @@ class TestEqualizeFx(QuantizationTestCase):
         returns the same output as the original model
         """
 
-        tests = [(LinearModule, default_equalization_qconfig_dict),
+        tests = [(SingleLayerLinearModel, default_equalization_qconfig_dict),
                  (Linear2FP32Module, default_equalization_qconfig_dict),
                  (FunctionalLinearModule, default_equalization_qconfig_dict),
                  (FunctionalLinear2FP32Module, default_equalization_qconfig_dict),
-                 (Linear2Module, default_equalization_qconfig_dict),
+                 (TwoLayerLinearModel, default_equalization_qconfig_dict),
                  (FunctionalLinear2Module, default_equalization_qconfig_dict)]
 
-        x = torch.rand((3, 2))
+        x = torch.rand((5, 5))
         for (M, equalization_qconfig_dict) in tests:
             m = M().eval()
             prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=equalization_qconfig_dict)
@@ -319,12 +304,12 @@ class TestEqualizeFx(QuantizationTestCase):
         scales are the expected values
         """
 
-        tests = [(LinearModule, default_equalization_qconfig_dict),
-                 (Linear2Module, default_equalization_qconfig_dict),
+        tests = [(SingleLayerLinearModel, default_equalization_qconfig_dict),
+                 (TwoLayerLinearModel, default_equalization_qconfig_dict),
                  (FunctionalLinearModule, default_equalization_qconfig_dict),
                  (FunctionalLinear2Module, default_equalization_qconfig_dict)]
 
-        x = torch.rand((3, 2))
+        x = torch.rand((5, 5))
         for (M, equalization_qconfig_dict) in tests:
             m = M().eval()
             exp_eq_scales = self.get_expected_eq_scales(m, x.detach().numpy())
@@ -368,12 +353,12 @@ class TestEqualizeFx(QuantizationTestCase):
         biases are as expected
         """
 
-        tests = [(LinearModule, default_equalization_qconfig_dict),
-                 (Linear2Module, default_equalization_qconfig_dict),
+        tests = [(SingleLayerLinearModel, default_equalization_qconfig_dict),
+                 (TwoLayerLinearModel, default_equalization_qconfig_dict),
                  (FunctionalLinearModule, default_equalization_qconfig_dict),
                  (FunctionalLinear2Module, default_equalization_qconfig_dict)]
 
-        x = torch.rand((3, 2))
+        x = torch.rand((5, 5))
         for (M, equalization_qconfig_dict) in tests:
             m = M().eval()
             exp_eq_scales = self.get_expected_eq_scales(m, x.detach().numpy())
@@ -423,12 +408,12 @@ class TestEqualizeFx(QuantizationTestCase):
         min/max values are as expected
         """
 
-        tests = [(LinearModule, default_equalization_qconfig_dict),
-                 (Linear2Module, default_equalization_qconfig_dict),
+        tests = [(SingleLayerLinearModel, default_equalization_qconfig_dict),
+                 (TwoLayerLinearModel, default_equalization_qconfig_dict),
                  (FunctionalLinearModule, default_equalization_qconfig_dict),
                  (FunctionalLinear2Module, default_equalization_qconfig_dict)]
 
-        x = torch.rand((3, 2))
+        x = torch.rand((5, 5))
         for (M, equalization_qconfig_dict) in tests:
             m = M().eval()
             exp_eq_scales = self.get_expected_eq_scales(m, x.detach().numpy())
@@ -505,15 +490,15 @@ class TestEqualizeFx(QuantizationTestCase):
         quantization).
         """
 
-        tests = [(LinearModule, default_equalization_qconfig_dict),
+        tests = [(SingleLayerLinearModel, default_equalization_qconfig_dict),
                  (Linear2FP32Module, default_equalization_qconfig_dict),
                  (FunctionalLinearModule, default_equalization_qconfig_dict),
                  (FunctionalLinear2FP32Module, default_equalization_qconfig_dict),
-                 (Linear2Module, default_equalization_qconfig_dict),
+                 (TwoLayerLinearModel, default_equalization_qconfig_dict),
                  (FunctionalLinear2Module, default_equalization_qconfig_dict)]
 
         torch.manual_seed(0)
-        x = torch.rand((3, 2))
+        x = torch.rand((5, 5))
         for (M, equalization_qconfig_dict) in tests:
             # No equalization
             m = M().eval()
