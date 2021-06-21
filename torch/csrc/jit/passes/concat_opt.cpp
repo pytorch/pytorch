@@ -517,11 +517,13 @@ class VariadicCatUpdater {
   explicit VariadicCatUpdater(std::shared_ptr<Graph> graph)
       : graph_(std::move(graph)) {}
 
-  void run() {
+  bool run() {
     collectCatNodes(graph_->block());
+    bool changed = false;
     for (auto c : cat_nodes_) {
-      replaceWithVariadicCat(c);
+      changed = changed || replaceWithVariadicCat(c);
     }
+    return changed;
   }
 
  private:
@@ -536,9 +538,9 @@ class VariadicCatUpdater {
     }
   }
 
-  void replaceWithVariadicCat(Node* cat) {
+  bool replaceWithVariadicCat(Node* cat) {
     if (cat->input(0)->node()->kind() != prim::ListConstruct) {
-      return;
+      return false;
     }
     auto list = cat->input(0)->node();
     // We do not transform cat ops whose list input has > 1 use. This is
@@ -546,7 +548,7 @@ class VariadicCatUpdater {
     // `aten::append`. So, we conservatively assume that any use other than
     // the one in cat mutates the list.
     if (list->output()->uses().size() > 1) {
-      return;
+      return false;
     }
     std::vector<Value*> inputs = list->inputs().vec();
     inputs.push_back(cat->input(1));
@@ -556,6 +558,7 @@ class VariadicCatUpdater {
     cat->destroy();
     TORCH_INTERNAL_ASSERT(!list->hasUses());
     list->destroy();
+    return true;
   }
 
   std::shared_ptr<Graph> graph_;
@@ -564,10 +567,13 @@ class VariadicCatUpdater {
 
 } // namespace
 
-void UseVariadicCat(const std::shared_ptr<Graph>& graph) {
+bool UseVariadicCat(const std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("Before VariadicCat", graph);
-  VariadicCatUpdater(graph).run();
-  GRAPH_DUMP("After VariadicCat", graph);
+  bool changed = VariadicCatUpdater(graph).run();
+  if (changed) {
+    GRAPH_DUMP("After VariadicCat", graph);
+  }
+  return changed;
 }
 
 } // namespace jit

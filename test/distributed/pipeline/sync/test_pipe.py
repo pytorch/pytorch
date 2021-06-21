@@ -13,6 +13,7 @@ import torch
 from torch import nn
 
 from torch.distributed.pipeline.sync import Pipe
+from torch.distributed.pipeline.sync.pipe import PipeSequential
 
 skip_if_no_cuda = pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")
 
@@ -177,8 +178,8 @@ def test_checkpoint_non_float_input(setup_rpc):
             return (input * 2, torch.tensor([False]))
 
     class JoinNonFloat(nn.Module):
-        def forward(self, input):
-            return input[0] * 2
+        def forward(self, input, non_float):
+            return input * 2
 
     model = nn.Sequential(ForkNonFloat(), JoinNonFloat())
     model = Pipe(model, chunks=1, checkpoint="always")
@@ -295,8 +296,7 @@ def test_input_pair(setup_rpc):
             self.fc_a = nn.Linear(1, 1)
             self.fc_b = nn.Linear(1, 1)
 
-        def forward(self, a_and_b):
-            a, b = a_and_b
+        def forward(self, a, b):
             return (self.fc_a(a), self.fc_b(b))
 
     model = nn.Sequential(Two())
@@ -305,24 +305,24 @@ def test_input_pair(setup_rpc):
     a = torch.rand(10, 1, requires_grad=True)
     b = torch.rand(10, 1, requires_grad=True)
 
-    a_out, b_out = model((a, b)).local_value()
+    a_out, b_out = model(a, b).local_value()
     loss = (a_out + b_out).mean()
     loss.backward()
 
     assert a.grad is not None
     assert b.grad is not None
 
-    # Test with list.
-    a.grad = None
-    b.grad = None
-    a_out, b_out = model([a, b]).local_value()
-    loss = (a_out + b_out).mean()
-    loss.backward()
+def test_multi_sequence_input(setup_rpc):
+    class MultiSeq(nn.Module):
+        def forward(self, tup1, tup2):
+            return tup1, tup2
 
-    assert a.grad is not None
-    assert b.grad is not None
-
-
+    model = Pipe(nn.Sequential(MultiSeq()))
+    with pytest.raises(TypeError):
+        model(
+            [torch.rand(10), torch.rand(10)],
+            [torch.rand(10), torch.rand(10)]
+        )
 
 def test_input_singleton(setup_rpc):
     class One(nn.Module):
@@ -330,8 +330,7 @@ def test_input_singleton(setup_rpc):
             super().__init__()
             self.fc = nn.Linear(1, 1)
 
-        def forward(self, only_a):
-            (a,) = only_a
+        def forward(self, a):
             return (self.fc(a),)
 
     model = nn.Sequential(One())
@@ -339,19 +338,7 @@ def test_input_singleton(setup_rpc):
 
     a = torch.rand(10, 1, requires_grad=True)
 
-    (a_out,) = model((a,)).local_value()
-    loss = a_out.mean()
-    loss.backward()
-
-    assert all(p.grad is not None for p in model.parameters())
-    assert a.grad is not None
-
-    # Test with list
-    a.grad = None
-    for p in model.parameters():
-        p.grad = None
-
-    (a_out,) = model([a]).local_value()
+    (a_out,) = model(a).local_value()
     loss = a_out.mean()
     loss.backward()
 
@@ -485,8 +472,8 @@ def test_merged_partitions(setup_rpc):
     model = Pipe(model)
 
     assert isinstance(model.partitions, nn.ModuleList)
-    assert isinstance(model.partitions[0], nn.Sequential)
-    assert isinstance(model.partitions[1], nn.Sequential)
+    assert isinstance(model.partitions[0], PipeSequential)
+    assert isinstance(model.partitions[1], PipeSequential)
     assert list(model.partitions[0]) == [a, b[0], b[1]]
     assert list(model.partitions[1]) == [c]
     assert list(model.partitions[2]) == [d]
@@ -536,7 +523,6 @@ def test_empty_module(setup_rpc):
     model = Pipe(model)
 
     assert model(torch.tensor(42)).local_value() == torch.tensor(42)
-    assert model((torch.tensor(42),)).local_value() == (torch.tensor(42),)
 
     # But only tensor or tensors is legal in Pipe.
     with pytest.raises(TypeError):
@@ -650,3 +636,19 @@ def test_forward_lockstep(setup_rpc):
     # Partition #1:    000! 111! 222!
     #
     assert timeline == [(0, 0), (1, 0), (0, 1), (2, 0), (1, 1), (2, 1)]
+
+@pytest.mark.parametrize("checkpoint", ["never", "always", "except_last"])
+@skip_if_no_cuda
+def test_multiple_inputs(checkpoint, setup_rpc):
+    class Module1(nn.Module):
+        def forward(self, a, b, c):
+            return a + b + c, a * b * c
+
+    class Module2(nn.Module):
+        def forward(self, a, b):
+            return a + b
+
+    model = Pipe(nn.Sequential(Module1().cuda(0), Module2().cuda(0)), chunks=2, checkpoint=checkpoint)
+    t = torch.rand(10)
+    res = model(t, t, t).local_value()
+    assert torch.equal(res, (t + t + t) + (t * t * t))
