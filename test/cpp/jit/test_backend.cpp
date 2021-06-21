@@ -158,7 +158,7 @@ TEST(BackendTest, TestComposite) {
     def forward(self, x, y):
       return x + y
   )");
-  auto lm_add =  torch::jit::detail::codegen_backend_module(
+  auto lm_add = torch::jit::detail::codegen_backend_module(
       "backend_with_compiler_demo", m_add, compile_spec, any_dict_ty);
 
   Module m_sub("m_sub");
@@ -166,7 +166,7 @@ TEST(BackendTest, TestComposite) {
     def forward(self, x, y):
       return x - y
   )");
-  auto lm_sub =  torch::jit::detail::codegen_backend_module(
+  auto lm_sub = torch::jit::detail::codegen_backend_module(
       "backend_with_compiler_demo", m_sub, compile_spec, any_dict_ty);
 
   Module c("C");
