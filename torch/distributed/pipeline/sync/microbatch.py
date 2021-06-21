@@ -17,7 +17,7 @@ __all__: List[str] = []
 
 Tensors = Sequence[Tensor]
 TensorOrTensors = Union[Tensor, Tensors]
-Function = Callable[[TensorOrTensors], TensorOrTensors]
+Function = Callable[[TensorOrTensors], Union[List[Any], Tensor]]
 
 
 class Batch:
@@ -63,7 +63,7 @@ class Batch:
         Retrieves the device for this microbatch.
         """
         if self.atomic:
-            return self._values.device
+            return self._values.device  # type: ignore[union-attr]
 
         for value in self._values:
             if torch.is_tensor(value):
