@@ -1,6 +1,6 @@
 #import <ATen/native/metal/MetalDevice.h>
 #import <ATen/native/metal/MetalShaders.h>
-#import <ATen/native/metal/mpscnn/MPSCNNContext.h>
+#import <ATen/native/metal/MetalContext.h>
 
 #include <c10/util/Exception.h>
 
@@ -14,7 +14,7 @@
 #endif
 
 using namespace at::native::metal;
-@implementation MPSCNNContext {
+@implementation MetalContext {
   std::mutex _pipelineCacheMutex;
   MetalDeviceInfo _deviceInfo;
   std::unordered_map<std::string, id<MTLComputePipelineState>> _pipelineCache;
@@ -22,9 +22,9 @@ using namespace at::native::metal;
 
 + (instancetype)sharedInstance {
   static dispatch_once_t onceToken;
-  static MPSCNNContext* instance = nil;
+  static MetalContext* instance = nil;
   dispatch_once(&onceToken, ^{
-    instance = [[MPSCNNContext alloc] init];
+    instance = [[MetalContext alloc] init];
     id<MTLDevice> device = MTLCreateSystemDefaultDevice();
     instance->_device = device;
     instance->_deviceInfo = createDeviceInfo(device);
@@ -65,7 +65,7 @@ using namespace at::native::metal;
 #else
   return false;
 #endif
-  NSError* error = [self compileProgram];
+  NSError* error = [self _compileProgram];
   if (error) {
     std::string compilationError = error.localizedDescription.UTF8String;
     std::string deviceInfo = self.description.UTF8String;
@@ -139,7 +139,22 @@ using namespace at::native::metal;
   return state;
 }
 
-- (NSError*)compileProgram {
+- (id<MTLBuffer>)emptyMTLBuffer:(int64_t) size {
+    TORCH_CHECK(_device);
+    id<MTLBuffer> buffer = [_device newBufferWithLength:size
+                      options:MTLResourceOptionCPUCacheModeWriteCombined];
+    return buffer;
+}
+
+- (NSString*)description {
+  NSString* desc =
+      [NSString stringWithFormat:@"DeviceName: %s, LanguageVersion: %lu",
+                                 _deviceInfo.name.c_str(),
+                                 (unsigned long)_deviceInfo.languageVersion];
+  return desc;
+}
+
+- (NSError*)_compileProgram {
   __block NSError* compilationError = nil;
   static dispatch_once_t onceToken;
   dispatch_once(&onceToken, ^{
@@ -156,12 +171,6 @@ using namespace at::native::metal;
   return compilationError;
 }
 
-- (NSString*)description {
-  NSString* desc =
-      [NSString stringWithFormat:@"DeviceName: %s, LanguageVersion: %lu",
-                                 _deviceInfo.name.c_str(),
-                                 (unsigned long)_deviceInfo.languageVersion];
-  return desc;
-}
+
 
 @end
