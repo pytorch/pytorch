@@ -243,7 +243,7 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_2d(
     *output = *total_weight = static_cast<scalar_t>(0);
     accscalar_t output_acc = 0;
     accscalar_t total_weight_acc = 0;
-    for (i = 0; i < NLL_LOSS_THREADS; ++i) {
+    for (int i = 0; i < NLL_LOSS_THREADS; ++i) {
       output_acc += sh_inputs[i];
       total_weight_acc += acc_weight[i];
     }
@@ -293,7 +293,7 @@ void nll_loss_forward_out_cuda_template(
       ")")
 
   TORCH_CHECK(
-      !weight.defined() || weight.numel() == n_classes,
+      !weight.defined() || (weight.dim() == 1 && weight.numel() == n_classes),
       "weight tensor should be defined either for all ",
       n_classes,
       " classes or no classes"
