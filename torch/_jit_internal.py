@@ -1115,12 +1115,13 @@ def container_checker(obj, target_type) -> bool:
     elif origin_type is Union:  # actually handles Optional Case
         if obj is None:  # check before recursion because None is always fine
             return True
-        optional_type = get_args(target_type)[0]
-        optional_origin = get_origin(optional_type)
-        if optional_origin:
-            return container_checker(obj, optional_type)
-        elif isinstance(obj, optional_type):
-            return True
+        inner_types = get_args(target_type)
+        for t in inner_types:
+            t_origin = get_origin(t)
+            if (t_origin):
+                return container_checker(obj, t)
+            elif isinstance(obj, t):
+                return True
     return False
 
 
