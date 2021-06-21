@@ -26,7 +26,10 @@ time python test/run_test.py --verbose -i distributed/test_c10d_nccl
 time python test/run_test.py --verbose -i distributed/test_c10d_spawn_gloo
 time python test/run_test.py --verbose -i distributed/test_c10d_spawn_nccl
 time python test/run_test.py --verbose -i distributed/test_store
+<<<<<<< HEAD
 time python test/run_test.py --verbose -i distributed/test_pg_wrapper
 time python test/run_test.py --verbose -i distributed/rpc/cuda/test_process_group_agent
+=======
+>>>>>>> 68b99a0445 (Disable group group backend rpc tests from running on CI)
 time python test/run_test.py --verbose -i distributed/rpc/cuda/test_tensorpipe_agent
 assert_git_not_dirty
