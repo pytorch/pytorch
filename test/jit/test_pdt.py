@@ -3,7 +3,11 @@ import sys
 import torch
 from torch.testing._internal.jit_utils import JitTestCase, make_global
 from torch.jit._monkeytype_config import _IS_MONKEYTYPE_INSTALLED
+<<<<<<< HEAD
 from typing import List, Dict, Tuple, Any, Optional, NamedTuple  # noqa: F401
+=======
+from typing import List, Dict, Tuple, Any, Optional  # noqa: F401
+>>>>>>> f43ddae364 (Annotate  NoneType as Optional[torch.Tensor])
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -469,3 +473,16 @@ class TestPDT(JitTestCase):
         scripted_model = torch.jit._script_pdt(pdt_model, example_inputs=[((None, ), )])
         self.assertEqual(scripted_model((torch.ones(1), torch.ones(1), None)),
                          pdt_model((torch.ones(1), torch.ones(1), None)))
+        def test_none_for_list(a) -> List:
+            for i, val in enumerate(a):
+                if val is None:
+                    a[i] = torch.ones(1)
+                else:
+                    a[i] += torch.ones(1)
+            return a
+
+        make_global(test_none_for_list)
+
+        scripted_fn = torch.jit._script_pdt(test_none_for_list, example_inputs=[([None, ], )])
+        self.assertEqual(scripted_fn([torch.ones(1), torch.ones(1), None]),
+                         test_none_for_list([torch.ones(1), torch.ones(1), None]))
