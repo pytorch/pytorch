@@ -91,6 +91,13 @@ allow_list = [
     ("aten::linalg_vector_norm", datetime.date(2021, 5, 15)),
     ("aten::repeat_interleave", datetime.date(2021, 6, 26)),
     ("aten::one_hot", datetime.date(2021, 6, 15)),
+    ("aten::conj", datetime.date(2021, 8, 1)),
+    ("aten::_conj", datetime.date(2021, 8, 1)),
+    ("aten::conj.out", datetime.date(2021, 8, 1)),
+    ("aten::segment_reduce_backward", datetime.date(2021, 6, 15)),
+    ("aten::segment_reduce", datetime.date(2021, 8, 26)),
+    ("aten::_segment_reduce_backward", datetime.date(2021, 8, 26)),
+    ("aten::to", datetime.date(2021, 6, 22)),
 ]
 
 def allow_listed(schema, allow_list):

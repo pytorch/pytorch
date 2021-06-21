@@ -8,7 +8,6 @@
 #include <THC/THCTensorCopy.h>
 #include <THC/THCApply.cuh>
 #include <THC/THCNumerics.cuh>
-#include <THC/THCReduce.cuh>
 
 template <typename T>
 struct TensorCAddOp {

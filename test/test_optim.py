@@ -512,8 +512,6 @@ class TestOptim(TestCase):
                 optimizer(None, lr=1e-2, lr_decay=-0.5)
 
     def test_adagrad_sparse(self):
-        # TODO: this test seems broken -- it doesn't fail when optim_mt.adagrad returns
-        # the wrong answer
         for optimizer in [optim.Adagrad, optim_mt.Adagrad]:
             self._test_rosenbrock_sparse(
                 lambda params: optimizer(params, lr=1e-1)
