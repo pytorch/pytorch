@@ -122,6 +122,8 @@ class Checkpointing:
 
         # Use a tensor in the batch to tie together fork-join
         tensor_idx = batch.find_tensor_idx()
+        # batch[tensor_idx] is always requiring grad, because it has been passed
+        # checkpoint with a phony requiring grad.
         batch[tensor_idx], phony = fork(batch[tensor_idx])
         phony = Recompute.apply(phony, self.recomputed, self.rng_states, self.function, input_atomic, *inputs)
         batch[tensor_idx] = join(batch[tensor_idx], phony)
@@ -324,7 +326,7 @@ class Recompute(torch.autograd.Function):
             tensors = [inputs[0]]
         else:
             tensors = []
-            for input in enumerate(inputs):
+            for input in inputs:
                 if torch.is_tensor(input):
                     tensors.append(input)
         ctx.save_for_backward(*tensors)
@@ -341,6 +343,7 @@ class Recompute(torch.autograd.Function):
         for input in inputs:
             if torch.is_tensor(input):
                 device = input.device
+                break
 
         if device is None:
             raise RuntimeError(f'No tensors found in {inputs}')
