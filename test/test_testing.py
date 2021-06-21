@@ -1260,22 +1260,6 @@ class TestAssertCloseComplex(TestCase):
         for fn in assert_close_with_inputs(actual, expected):
             fn(equal_nan="relaxed")
 
-    def test_mismatching_values_msg_real(self):
-        actual = torch.tensor(complex(0, 1))
-        expected = torch.tensor(complex(1, 1))
-
-        for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, re.escape("Real components of complex")):
-                fn()
-
-    def test_mismatching_values_msg_imag(self):
-        actual = torch.tensor(complex(1, 0))
-        expected = torch.tensor(complex(1, 1))
-
-        for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, re.escape("Imaginary components of complex")):
-                fn()
-
 
 if __name__ == '__main__':
     run_tests()
