@@ -31,10 +31,8 @@ void Function::append_instruction(OpCode op, int X, int N, int64_t dbg_handle) {
   code_->debug_handles_.emplace_back(dbg_handle);
 }
 
-bool Function::append_operator(
-    const std::string& name,
-    const std::string& overload_name,
-    int64_t model_version) {
+bool Function::
+    append_operator(const std::string& name, const std::string& overload_name, const c10::optional<int>& num_specified_args, int64_t model_version /* TODO: T90339189 deprecate all v3 when v3 models are removed */) {
   // Keep the original opname in code_
   code_->op_names_.emplace_back(name, overload_name);
   auto opname = code_->op_names_.back();
@@ -43,12 +41,19 @@ bool Function::append_operator(
   std::function<void(Stack&)> fn;
 
   auto jit_op = findOperatorFor(opname);
+  std::vector<c10::Argument> args;
   if (jit_op) {
     fn = [jit_op](Stack& stack) { jit_op->getOperation()(&stack); };
+    args = jit_op->schema().arguments();
   } else {
     auto op = c10::Dispatcher::singleton().findSchema(opname_c10);
     if (op.has_value()) {
       fn = [op](Stack& stack) { op->callBoxed(&stack); };
+      if (op->hasSchema()) {
+        args = op->schema().arguments();
+      } else {
+        TORCH_CHECK(false, "arguments are missing for operator ", opname);
+      }
     } else {
       return false;
     }
@@ -65,8 +70,30 @@ bool Function::append_operator(
       stack.push_back(true);
       fn(stack);
     };
+  } else {
+    // num_specified_args >= 0 indicates number of arguments are available
+    // from model. We can use it to handle backward compatibility.
+    if (num_specified_args &&
+        num_specified_args.value() < static_cast<int64_t>(args.size())) {
+      // Sanity check at load time, to save perf at runtime
+      for (size_t i = num_specified_args.value(); i < args.size(); ++i) {
+        auto default_val = args[i].default_value();
+        TORCH_CHECK(
+            default_val.has_value(),
+            "Error happened at preparing for default values for the argument. The ",
+            i,
+            "th arguement of operator",
+            opname,
+            " does not have a specified value or default value. ");
+      }
+      fn = [fn, num_specified_args, args](Stack& stack) {
+        for (size_t i = num_specified_args.value(); i < args.size(); ++i) {
+          stack.push_back(args[i].default_value());
+        }
+        fn(stack);
+      };
+    }
   }
-
   code_->operators_.emplace_back(fn);
   return true;
 }

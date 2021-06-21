@@ -42,6 +42,8 @@ struct KinetoObserverContext : public at::ObserverContext {
   c10::optional<std::vector<std::string>> stack;
   // Extra arguments for computing op flops
   c10::optional<std::unordered_map<std::string, c10::IValue>> extraArgs;
+  CUDAEventStub cuda_event_start_ = nullptr;
+  CUDAEventStub cuda_event_end_ = nullptr;
 };
 
 struct TORCH_API KinetoEvent {
@@ -190,6 +192,8 @@ struct TORCH_API KinetoEvent {
 
   c10::DeviceType deviceType() const;
 
+  int64_t cudaElapsedUs() const;
+
   uint64_t start_thread_id_ = 0;
   uint64_t end_thread_id_ = 0;
   uint64_t fwd_thread_id_ = 0;
@@ -210,6 +214,9 @@ struct TORCH_API KinetoEvent {
   uint64_t linked_correlation_id_ = 0;
   int64_t device_resource_id_ = 0;
   bool is_async_{false};
+
+  CUDAEventStub cuda_event_start_ = nullptr;
+  CUDAEventStub cuda_event_end_ = nullptr;
 };
 
 // Consolidating events returned directly from Kineto
@@ -249,7 +256,7 @@ TORCH_API void prepareProfiler(
     const ProfilerConfig& config,
     const std::set<ActivityType>& activities);
 
-TORCH_API void addMetadata(
+TORCH_API void addMetadataJson(
     const std::string& key, const std::string& value);
 #endif // USE_KINETO
 

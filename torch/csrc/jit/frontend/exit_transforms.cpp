@@ -149,10 +149,10 @@ struct ExitTransformer {
     registerBlockOutputs(if_view.thenBlock(), true_outs);
     registerBlockOutputs(if_view.elseBlock(), false_outs);
     for (size_t i = 0; i < true_outs.size(); ++i) {
-      auto out_type =
-          unifyTypes(true_outs.at(i)->type(),
-                    false_outs.at(i)->type(),
-                    /*default_to_union=*/true);
+      auto out_type = unifyTypes(
+          true_outs.at(i)->type(),
+          false_outs.at(i)->type(),
+          /*default_to_union=*/true);
       n->addOutput()->setType(*out_type);
     }
   }
@@ -668,8 +668,7 @@ static void convertEnterExitNodesToWithBlocks(std::shared_ptr<Graph>& graph) {
     node = it.next();
   }
 
-  // The stack should not be empty; an Exit should have been found for every
-  // Enter.
+  // The stack should be empty; an Exit should have been found for every Enter.
   TORCH_INTERNAL_ASSERT(enter_node_stack.empty());
 
   // Now, add a With block for each Enter-Exit pair. The innermost pairs were

@@ -549,7 +549,7 @@ Tensor& clamp_max_out(const Tensor& self, const Scalar& max, Tensor& result) {
 Tensor& clamp_max_out(const Tensor& self, const Tensor& max, Tensor& result) {
   TORCH_CHECK(self.layout() == Layout::Strided,
               "torch.clamp only supports strided layout, got: ", self.layout());
-  auto iter = TensorIterator::binary_op(result, self, max);
+  auto iter = TensorIterator::borrowing_binary_op(result, self, max);
   clamp_max_stub(iter.device_type(), iter);
   return result;
 }
@@ -581,7 +581,7 @@ Tensor& clamp_min_out(const Tensor& self, const Scalar& min, Tensor& result) {
 Tensor& clamp_min_out(const Tensor& self, const Tensor& min, Tensor& result) {
   TORCH_CHECK(self.layout() == Layout::Strided,
               "torch.clamp only supports strided layout, got: ", self.layout());
-  auto iter = TensorIterator::binary_op(result, self, min);
+  auto iter = TensorIterator::borrowing_binary_op(result, self, min);
   clamp_min_stub(iter.device_type(), iter);
   return result;
 }

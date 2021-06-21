@@ -7,16 +7,13 @@ import torch.distributed as dist
 def _allreduce_fut(
     process_group: dist.ProcessGroup, tensor: torch.Tensor
 ) -> torch.futures.Future:
+    "Averages the input gradient tensor by allreduce and returns a future."
     group_to_use = process_group if process_group is not None else dist.group.WORLD
 
-    "Averages the input gradient tensor by allreduce and returns a future."
-    fut = dist.all_reduce(tensor, group=group_to_use, async_op=True).get_future()
+    # Apply the division first to avoid overflow, especially for FP16.
+    tensor.div_(group_to_use.size())
 
-    def div_by_group_size(fut):
-        return [fut.value()[0].div_(group_to_use.size())]
-
-    return fut.then(div_by_group_size)
-
+    return dist.all_reduce(tensor, group=group_to_use, async_op=True).get_future()
 
 def allreduce_hook(
     process_group: dist.ProcessGroup, bucket: dist.GradBucket
@@ -41,10 +38,10 @@ def fp16_compress_hook(
 ) -> torch.futures.Future:
     """
     This DDP communication hook implements a simple gradient compression
-    approach that casts ``GradBucket`` tensors to half-precision floating-point format (``torch.float16``).
+    approach that casts ``GradBucket`` tensors to half-precision floating-point format (``torch.float16``)
+    and then divides it by the process group size.
     It allreduces those ``float16`` gradient tensors. Once compressed gradient
-    tensors are allreduced, the chained callback ``decompress`` first averages the aggregate result on all the processes,
-    and then casts it back to the input data type (such as ``float32``).
+    tensors are allreduced, the chained callback ``decompress`` casts it back to the input data type (such as ``float32``).
 
     Example::
         >>> ddp_model.register_comm_hook(process_group, fp16_compress_hook)

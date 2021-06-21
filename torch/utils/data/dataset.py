@@ -29,6 +29,7 @@ class Dataset(Generic[T_co]):
       sampler that yields integral indices.  To make it work with a map-style
       dataset with non-integral indices/keys, a custom sampler must be provided.
     """
+    functions: Dict[str, Callable] = {}
 
     def __getitem__(self, index) -> T_co:
         raise NotImplementedError
@@ -39,6 +40,27 @@ class Dataset(Generic[T_co]):
     # No `def __len__(self)` default?
     # See NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ]
     # in pytorch/torch/utils/data/sampler.py
+
+    def __getattr__(self, attribute_name):
+        if attribute_name in Dataset.functions:
+            function = functools.partial(Dataset.functions[attribute_name], self)
+            return function
+        else:
+            raise AttributeError
+
+    @classmethod
+    def register_function(cls, function_name, function):
+        cls.functions[function_name] = function
+
+    @classmethod
+    def register_datapipe_as_function(cls, function_name, cls_to_register):
+        if function_name in cls.functions:
+            raise Exception("Unable to add DataPipe function name {} as it is already taken".format(function_name))
+
+        def class_function(cls, source_dp, *args, **kwargs):
+            return cls(source_dp, *args, **kwargs)
+        function = functools.partial(class_function, cls_to_register)
+        cls.functions[function_name] = function
 
 
 class IterableDataset(Dataset[T_co], metaclass=_DataPipeMeta):
@@ -152,7 +174,7 @@ class IterableDataset(Dataset[T_co], metaclass=_DataPipeMeta):
     def __add__(self, other: Dataset[T_co]):
         return ChainDataset([self, other])
 
-    # No `def __len__(self)` default?
+    # No `def __len__(self)` default? Subclasses raise `TypeError` when needed.
     # See NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ]
 
     def __getattr__(self, attribute_name):
@@ -161,20 +183,6 @@ class IterableDataset(Dataset[T_co], metaclass=_DataPipeMeta):
             return function
         else:
             raise AttributeError
-
-    @classmethod
-    def register_function(cls, function_name, function):
-        IterableDataset.functions[function_name] = function
-
-    @classmethod
-    def register_datapipe_as_function(cls, function_name, cls_to_register):
-        if function_name in IterableDataset.functions:
-            raise Exception("Unable to add DataPipe function name {} as it is already taken".format(function_name))
-
-        def class_function(cls, source_dp, *args, **kwargs):
-            return cls(source_dp, *args, **kwargs)
-        function = functools.partial(class_function, cls_to_register)
-        IterableDataset.functions[function_name] = function
 
     def __reduce_ex__(self, *args, **kwargs):
         if IterableDataset.reduce_ex_hook is not None:
