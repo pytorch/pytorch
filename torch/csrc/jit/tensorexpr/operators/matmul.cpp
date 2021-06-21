@@ -50,6 +50,28 @@ Tensor* computeMatmul(
   }
 }
 
+Tensor* computeAddMM(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType) {
+  Dtype dtype = kFloat;
+  if (outputType) {
+    dtype = Dtype(*outputType);
+  }
+  BufHandle ResultBuf("addmm", outputShape, dtype);
+  return new Tensor(
+      ResultBuf.node(),
+      ExternalCall::make(
+          ResultBuf,
+          "nnc_aten_addmm",
+          {c10::get<BufHandle>(inputs[0]),
+           c10::get<BufHandle>(inputs[1]),
+           c10::get<BufHandle>(inputs[2])},
+          {c10::get<int64_t>(inputs[3]),
+           c10::get<int64_t>(
+               inputs[4])})); // TODO: handle other dtypes of alpha and beta
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
