@@ -145,17 +145,4 @@ def jit_code_filter(code: CodeType) -> bool:
         return False
 
     filename = pathlib.Path(code.co_filename).resolve()
-    # if MONKEYTYPE_TRACE_MODULES is defined, trace only specified packages or modules
-    trace_modules_str = os.environ.get('MONKEYTYPE_TRACE_MODULES')
-    if trace_modules_str is not None:
-        trace_modules = trace_modules_str.split(',')
-        # try to remove lib_path to only check package and module names
-        for lib_path in LIB_PATHS:
-            try:
-                filename = filename.relative_to(lib_path)
-                break
-            except ValueError:
-                pass
-        return any(m == filename.stem or m in filename.parts for m in trace_modules)
-    else:
-        return not any(_startswith(filename, lib_path) for lib_path in LIB_PATHS)
+    return not any(_startswith(filename, lib_path) for lib_path in LIB_PATHS)
