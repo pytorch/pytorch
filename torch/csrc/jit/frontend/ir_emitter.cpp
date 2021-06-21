@@ -187,7 +187,7 @@ NoneStatus canBeNone(Value* v) {
   }
   if (v->type()->kind() == OptionalType::Kind ||
       (v->type()->kind() == UnionType::Kind &&
-       v->type()->expect<UnionType>()->canHoldNone())) {
+       v->type()->expect<UnionType>()->canHoldType(NoneType::get()))) {
     return MAYBE;
   }
   return NEVER;
@@ -1016,6 +1016,21 @@ struct to_ir {
     TypePtr declared_return_type =
         def_stack_.back().declared_return_type_; // nullptr if not annotated
     TypePtr type_hint = nullptr;
+
+    // If 1) we have a return statement in one or more branches, and 2)
+    // the type of the expression returned is a subtype of the declared
+    // return type for all branches, then we should use the declared
+    // return type as the `type_hint` when we emit each return
+    // statement. If we don't do this, we'll get an error like "x is set
+    // to type T1 in the true branch and type T2 in the false branch"--
+    // even if `unifyTypes(T1, T2)->isSubtypeOf(declared_return_type)`
+    if (declared_return_type &&
+        (declared_return_type == AnyType::get() ||
+         declared_return_type->kind() == UnionType::Kind ||
+         declared_return_type->kind() == OptionalType::Kind)) {
+      type_hint = declared_return_type;
+    }
+
     Value* actual_return = emitExpr(stmt.expr(), type_hint);
     TypePtr actual_return_type = actual_return->type();
     // result type is annotated, every return must convert to that type
@@ -2865,7 +2880,7 @@ struct to_ir {
         // has the type Optional[T]
         if ((type->kind() == OptionalType::Kind ||
              (type->kind() == UnionType::Kind &&
-              type->expect<UnionType>()->canHoldNone())) &&
+              type->expect<UnionType>()->canHoldType(NoneType::get()))) &&
             expr->type()->isSubtypeOf(NoneType::get())) {
           Node* none = graph->createNone();
           none->output()->setType(type);

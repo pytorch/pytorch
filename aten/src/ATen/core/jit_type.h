@@ -116,26 +116,15 @@ struct TORCH_API UnionType : public Type {
     return create(contained_types);
   }
 
-  // `getTypes` is for testing purposes only. We need to have some way
-  // to get the underlying `types` vector even if this Union is actually
-  // an Optional (in which case only `containedTypes` is overridden for
-  // BC purposes). This method should be deleted once we canonicalize
-  // `Optional[T]` as `Union[T, None]`
-  at::ArrayRef<TypePtr> getTypes() const {
-    return types_;
-  }
-
-  bool canHoldNone() const {
-    return can_hold_none_;
-  }
+  bool canHoldType(TypePtr type) const;
 
   bool hasFreeVariables() const override {
     return has_free_variables_;
   }
 
-  c10::optional<TypePtr> toOptional(bool unification_allowed=false) const;
+  c10::optional<TypePtr> toOptional() const;
 
-  UnionTypePtr subtractTypeSet(std::vector<TypePtr>& to_subtract) const;
+  c10::optional<TypePtr> subtractTypeSet(std::vector<TypePtr>& to_subtract) const;
 
  protected:
     UnionType(std::vector<TypePtr> types, TypeKind kind=TypeKind::UnionType);
@@ -1211,9 +1200,10 @@ using NumberTypePtr = std::shared_ptr<NumberType>;
 // FloatType <: NumberType
 // ComplexType <:NumberType
 struct TORCH_API NumberType : public Type {
-  bool operator==(const Type& rhs) const override {
-    return rhs.kind() == kind();
-  }
+  bool operator==(const Type& rhs) const override;
+
+  bool isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const override;
+
   std::string str() const override {
     return "Scalar"; // match what PythonArgParser says for clarity
   }
@@ -1242,7 +1232,7 @@ struct TORCH_API FloatType : public NumberType {
     return "float";
   }
   bool isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const override {
-    return rhs->kind() == TypeKind::NumberType || NumberType::isSubtypeOfExt(rhs, why_not);
+    return rhs->kind() == TypeKind::NumberType || Type::isSubtypeOfExt(rhs, why_not);
   }
   static const TypeKind Kind = TypeKind::FloatType;
   // global singleton
@@ -1266,7 +1256,7 @@ struct TORCH_API ComplexType : public NumberType {
     return "complex";
   }
   bool isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const override {
-    return rhs->kind() == TypeKind::NumberType || NumberType::isSubtypeOfExt(rhs, why_not);
+    return rhs->kind() == TypeKind::NumberType || Type::isSubtypeOfExt(rhs, why_not);
   }
   static const TypeKind Kind = TypeKind::ComplexType;
   // global singleton
@@ -1290,7 +1280,7 @@ struct TORCH_API IntType : public NumberType {
     return "int";
   }
   bool isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const override {
-    return rhs->kind() == TypeKind::NumberType || NumberType::isSubtypeOfExt(rhs, why_not);
+    return rhs->kind() == TypeKind::NumberType || Type::isSubtypeOfExt(rhs, why_not);
   }
   static const TypeKind Kind = TypeKind::IntType;
   // global singleton
