@@ -7,7 +7,7 @@ import os.path
 import types
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, BinaryIO, Callable, Dict, List, Optional, Union
+from typing import cast, Any, BinaryIO, Callable, Dict, List, Optional, Union
 from weakref import WeakValueDictionary
 
 import torch
@@ -405,7 +405,7 @@ class PackageImporter(Importer):
         # To handle https://github.com/pytorch/pytorch/issues/57490, where os's
         # creation of os.path via the hacking of sys.modules is not import friendly
         if name == "os":
-            self.modules["os.path"] = module.path
+            self.modules["os.path"] = cast(Any, module).path
 
         return module
 
