@@ -121,16 +121,11 @@ class TestPythonDispatch(TestCase):
             # self.assertEqual(saved_x._version, x._version)
         self.assertExpectedInline('\n'.join(logs), '''\
 $0 = input('x')
-$1 = torch._ops.aten.detach($0)
-$2 = torch._ops.aten.detach($0)
-$3 = torch._ops.aten.mul($0, $0)
-$4 = torch._ops.aten.detach($1)
-$5 = input('grad_y')
-$6 = torch._ops.aten.detach($1)
-$7 = torch._ops.aten.detach($2)
-$8 = torch._ops.aten.mul($5, $6)
-$9 = torch._ops.aten.mul($5, $7)
-$10 = torch._ops.aten.add($9, $8, 1)''')
+$1 = torch._ops.aten.mul($0, $0)
+$2 = input('grad_y')
+$3 = torch._ops.aten.mul($2, $0)
+$4 = torch._ops.aten.mul($2, $0)
+$5 = torch._ops.aten.add($4, $3, 1)''')
 
     def test_out(self) -> None:
         with capture_logs() as logs:
@@ -255,12 +250,10 @@ $2 = torch._ops.aten.abs($0, $1)''')
 $0 = input('x')
 $1 = input('x.grad')
 $2 = torch._ops.aten.pow($0, 2)
-$3 = torch._ops.aten.detach($0)
-$4 = input('grad_output')
-$5 = torch._ops.aten.detach($3)
-$6 = torch._ops.aten.mul($4, tensor(2))
-$7 = torch._ops.aten.mul($6, $5)
-$8 = torch._ops.aten.add_($1, $7, 1)''')
+$3 = input('grad_output')
+$4 = torch._ops.aten.mul($3, tensor(2))
+$5 = torch._ops.aten.mul($4, $0)
+$6 = torch._ops.aten.add_($1, $5, 1)''')
 
 
 if __name__ == '__main__':
