@@ -69,7 +69,6 @@ void multinomial_with_replacement_apply(
 
     /* normalize cumulative probability distribution so that last val is 1
     i.e. doesn't assume original self row sums to one */
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if ((sum > 0) || ((sum < 1.00001) && (sum > 0.99999))) {
       for (int64_t j = 0; j < n_categories; j++) {
         cum_dist_ptr[j * cum_dist_stride_0] /= sum;

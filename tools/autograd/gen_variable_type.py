@@ -35,7 +35,7 @@ from .gen_inplace_or_view_type import (
 
 from tools.codegen.api.types import (Binding, DispatcherSignature, BaseCType, intArrayRefT,
                                      tensorT, tensorListT, MutRefCType, OptionalCType,
-                                     ListCType, SpecialArgName, scalarT)
+                                     ListCType, SpecialArgName, scalarT, stringT)
 from tools.codegen.api.autograd import (
     DifferentiableInput, NativeFunctionWithDifferentiabilityInfo,
     SavedAttribute, dispatch_strategy, gen_differentiable_outputs,
@@ -87,21 +87,30 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'sgn', 'asin', 'acos', 'sub', 'div', 'cat', 'view_as_complex',
     'neg', 'complex', 'select', '_s_where', 'as_strided', 'slice', 'constant_pad_nd',
     'unbind', 'split', 'split_with_sizes', 'unsafe_split', 'split_with_sizes_backward',
-    'dot', 'vdot', 'cholesky', 'triangular_solve', 'mm', '_unsafe_view', 'mv', 'ger',
+    'dot', 'vdot', 'cholesky', 'triangular_solve', 'mm', '_unsafe_view', 'mv', 'outer',
     'bmm', 'diagonal', 'alias', 'atan', 'log', 'log10', 'log1p', 'log2', 'reciprocal',
     'tan', 'pow', 'rsqrt', 'tanh', 'tanh_backward', 'asinh', 'acosh', 'atanh', 'take', 'fill_',
     'exp', 'nonzero', 'mean', 'inverse', 'solve', 'linalg_cholesky', 'addcmul', 'addcdiv',
     'matrix_exp', 'linalg_eigh', 'cholesky_solve', 'linalg_qr', '_svd_helper', '_fft_c2c', '_fft_r2c',
-    'linalg_solve', 'sqrt', 'stack', 'gather', 'index_select', 'index_add_', 'linalg_inv',
+    'linalg_solve', 'sqrt', 'stack', 'gather', 'index_select', 'index_add_', 'linalg_inv', 'linalg_inv_ex',
     'l1_loss_backward', 'baddbmm', 'addbmm', 'addmm', 'addmv', 'addr', 'linalg_householder_product',
-    'constant_pad_nd', 'reflection_pad1d', 'reflection_pad2d', 'linalg_cholesky_ex',
-    'reflection_pad1d_backward', 'reflection_pad2d_backward', 'symeig',
+    'constant_pad_nd', 'reflection_pad1d', 'reflection_pad2d', 'linalg_cholesky_ex', 'linalg_eig',
+    'reflection_pad1d_backward', 'reflection_pad2d_backward', 'symeig', '_sparse_sparse_matmul',
     'replication_pad1d', 'replication_pad2d', 'replication_pad3d', 'take', 'put_',
     'replication_pad1d_backward', 'replication_pad2d_backward', 'replication_pad3d_backward',
     'diag', 'masked_scatter', 'masked_select', 'index_fill', 'trace', 'polar', 'cumsum', 'rsub',
     'eig', 'lerp', 'linalg_vector_norm', 'cumprod', 'prod', 'index_copy', 'lu', 'unfold', 'unfold_backward',
-    'index', 'masked_fill', 'cross'
+    'index', 'masked_fill', 'cross', 'lu_unpack', 'renorm', '_view_as_real_physical', '_conj_physical',
+    'scatter', 'scatter_add',
+    'conj_physical_'
 }
+
+GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
+    'to_dense', '_coalesce', 'coalesce', 'values', '_sparse_coo_tensor_with_dims_and_tensors',
+    'sparse_mask_helper_cuda', '_sparse_addmm',
+}
+
+GRADIENT_IMPLEMENTED_FOR_COMPLEX.update(GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX)
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
 RESET_GRAD_ACCUMULATOR = {
@@ -304,12 +313,12 @@ if (${requires_fw_grad}) {
 """)
 
 FW_DERIVATIVE_FORBID_TEMPLATE = CodeTemplate("""\
-TORCH_CHECK(!(${cond}), "Trying to use forward AD with ${msg} that does not support it.");
+TORCH_CHECK_NOT_IMPLEMENTED(!(${cond}), "Trying to use forward AD with ${msg} that does not support it.");
 """)
 
 FW_DERIVATIVE_FORBID_LIST_TEMPLATE = CodeTemplate("""\
 for (const auto& _t: ${arg}) {
-    TORCH_CHECK(!(${cond}), "Trying to use forward AD with ${msg} that does not support it.");
+    TORCH_CHECK_NOT_IMPLEMENTED(!(${cond}), "Trying to use forward AD with ${msg} that does not support it.");
 }
 """)
 
@@ -603,6 +612,10 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                 name += '_'
             elif type == BaseCType(intArrayRefT):
                 expr = expr + ".vec()"
+            elif type == BaseCType(stringT):
+                expr = f'std::string({expr})'
+            elif type == OptionalCType(BaseCType(stringT)):
+                expr = f'{expr}.has_value() ? c10::optional<std::string>(std::string({expr}.value())) : c10::nullopt'
             guard = guard_for(arg)
             if guard is None:
                 stmts.append(f'grad_fn->{name} = {expr};')
@@ -741,10 +754,10 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                 # Handle functions like stack
                 # For these, we don't unpack anything and always call the user function
                 if not (len(differentiable_inputs) == 1 and is_tensor_list_type(differentiable_inputs[0].type)):
-                    raise RuntimeError(f'No differentiable input to "{name}" is a differentiable Tensor even though a '
-                                       'forward gradient formula has been defined for it. This case should only happen '
-                                       'for function that take a single TensorList as input. All other cases are not '
-                                       'supported right now.')
+                    raise RuntimeError(f'No differentiable input to "{name}" is a differentiable Tensor (as the provided'
+                                       'forward AD formula does not use any input tangent) even though a forward gradient '
+                                       'formula has been defined for it. This case should only happen for function that '
+                                       'take a single TensorList as input. All other cases are not supported right now.')
                 requires_fw_grad = "true"
             unpacked_arguments = ""
             for inp in differentiable_inputs:

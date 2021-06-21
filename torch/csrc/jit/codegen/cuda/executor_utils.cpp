@@ -3,6 +3,7 @@
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/util/irange.h>
 
 #include <torch/csrc/jit/codegen/cuda/executor_utils.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
@@ -39,6 +40,21 @@ std::string kernelPreamble() {
 
 #ifndef __HIP_PLATFORM_HCC__
   ss << nvfuser_resources::fp16_support_cu;
+#else
+  ss << R"(
+#ifndef __noinline__
+#define __noinline__ __attribute__((noinline))
+#endif
+#ifndef __forceinline__
+#define __forceinline__ inline __attribute__((always_inline))
+#endif
+#ifndef assert
+#define assert(expr) ((void)0)
+#endif
+#ifndef __align__
+#define __align__(x) __attribute__((aligned(x)))
+#endif
+  )";
 #endif
 
   ss << nvfuser_resources::tensor_cu;
@@ -557,7 +573,7 @@ ExpressionEvaluator bindFusionInputs(
 
   // This should probably move to EvaluationContext as we may want to bind
   // input values frequently. Bind fusion input values to runtime values.
-  for (size_t i = 0; i < inputs.size(); i++) {
+  for (const auto i : c10::irange(fusion->inputs().size())) {
     if (inputs[i]->getValType() == ValType::TensorView) {
       TensorView* cg_tensor = inputs[i]->as<TensorView>();
 
@@ -571,7 +587,7 @@ ExpressionEvaluator bindFusionInputs(
           aten_tensor.ndimension() == (int64_t)root_dom.size(),
           "Something went wrong configuring launch. Inputs no longer match.");
 
-      for (size_t dim = 0; dim < root_dom.size(); dim++) {
+      for (const auto dim : c10::irange(root_dom.size())) {
         const auto extent = root_dom[dim]->extent();
         const auto value = aten_tensor.sizes()[dim];
         const auto prev_value = evaluator.evaluate(extent);

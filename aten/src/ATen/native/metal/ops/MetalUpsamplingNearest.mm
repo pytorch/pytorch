@@ -60,8 +60,8 @@ Tensor upsample_nearest2d_vec(
     id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
         specializedPipelineState:mpscnn::kernelFor(
                                      Y,
-                                     @"resize_nearest",
-                                     @"resize_nearest_nonarray")
+                                     "resize_nearest",
+                                     "resize_nearest_nonarray")
                        Constants:@[
                          @(output_height),
                          @(output_width),

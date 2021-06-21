@@ -1077,6 +1077,18 @@ class TestIndexing(TestCase):
         for accumulate in [True, False]:
             self.assertRaises(RuntimeError, lambda: torch.index_put_(b, (idx,), c, accumulate=accumulate))
 
+    @onlyCUDA
+    def test_cpu_indices(self, device):
+        idx = torch.tensor([0, 1])
+        b = torch.zeros(2, device=device)
+        x = torch.ones(10, device=device)
+        x[idx] = b  # index_put_
+        ref = torch.ones(10, device=device)
+        ref[:2] = 0
+        self.assertEqual(x, ref, atol=0, rtol=0)
+        out = x[idx]  # index
+        self.assertEqual(out, torch.zeros(2, device=device), atol=0, rtol=0)
+
     @dtypes(torch.long, torch.float32)
     def test_take_along_dim(self, device, dtype):
         def _test_against_numpy(t, indices, dim):

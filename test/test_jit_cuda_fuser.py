@@ -2372,24 +2372,25 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
     def test_batch_norm_impl_index_correctness(self):
-        batch = [2, 7, 16]
-        channels = [4, 89, 19, 32]
-        hw = [1, 8, 17, 32]
+        with torch.backends.cudnn.flags(enabled=False):
+            batch = [2, 7, 16]
+            channels = [4, 89, 19, 32]
+            hw = [1, 8, 17, 32]
 
-        # avoid tolerance failure in CI
-        torch.cuda.manual_seed_all(211)
+            # avoid tolerance failure in CI
+            torch.cuda.manual_seed_all(211)
 
-        # failing sizes (2, 1, 1, 1)
-        # failing sizes (2, 89, 8, 8) training False, track True, affine: False
-        for b, c, hw in itertools.product(batch, channels, hw):
-            setups = [
-                [True, True],
-                [False, False],
-                [True, False],
-                [False, True]]
-            for training_and_track, affine in itertools.product(setups, [True, False]):
-                training, track_running_stats = training_and_track
-                self._test_batch_norm_impl_index_helper(b, c, hw, affine, track_running_stats, training)
+            # failing sizes (2, 1, 1, 1)
+            # failing sizes (2, 89, 8, 8) training False, track True, affine: False
+            for b, c, hw in itertools.product(batch, channels, hw):
+                setups = [
+                    [True, True],
+                    [False, False],
+                    [True, False],
+                    [False, True]]
+                for training_and_track, affine in itertools.product(setups, [True, False]):
+                    training, track_running_stats = training_and_track
+                    self._test_batch_norm_impl_index_helper(b, c, hw, affine, track_running_stats, training)
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
@@ -2416,7 +2417,6 @@ class TestCudaFuser(JitTestCase):
         assert torch.allclose(jit_o, aten_o)
         assert torch.allclose(jit_grad, aten_grad)
         self.assertGraphContains(jitted.graph_for(inp, 0.693147), FUSION_GROUP, True)
-
 
 class TestPassManagerCudaFuser(JitTestCase):
 

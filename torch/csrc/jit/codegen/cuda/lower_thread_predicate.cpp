@@ -7,6 +7,8 @@
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 
+#include <c10/util/irange.h>
+
 namespace torch {
 namespace jit {
 namespace fuser {
@@ -105,7 +107,7 @@ ParallelTypeBitmap avoidRedundantWritesToSmem(
   const auto& ca_map = GpuLower::current()->caParallelMap();
   auto new_pred = pred;
   if (out_tv->getMemoryType() == MemoryType::Shared) {
-    for (size_t i = 0; i < out_tv->nDims(); i++) {
+    for (const auto i : c10::irange(out_tv->nDims())) {
       auto id = ca_map.getConcreteMappedID(out_tv->axis(i));
       if (out_tv->axis(i)->isBroadcast() && id->isThreadDim()) {
         new_pred.set(id->getParallelType(), true);
@@ -173,7 +175,7 @@ void ThreadPredicateMap::updateBitSet(const Expr* expr) {
     }
 
     // Validate the combination of ptypes, reductions, bcasts
-    for (size_t i = 0; i < ParallelTypeBitmap::num_p_type; i++) {
+    for (const auto i : c10::irange(ParallelTypeBitmap::num_p_type)) {
       if (input_reductions[i]) {
         if (id_ptypes[i]) {
           TORCH_INTERNAL_ASSERT(
