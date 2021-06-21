@@ -480,11 +480,29 @@ class TestUnion(JitTestCase):
             .check_not("block1()")           \
             .run(s)
 
-        # Check that the ListConstruct is right before the return
-        # statements
-        FileCheck().check("int[] = prim::ListConstruct(%6, %7, %8)")   \
-            .check_next("return")                                      \
-            .run(s)
+    def test_union_type_refinement_partial_static_refinement_tuple_rhs(self):
+        def fn(x: Union[List[int], int]) -> int:
+            if torch.jit.isinstance(x, (int, float, str)):
+                # We should know that `x` is an `int` here
+                z = x + 1
+                return z
+            else:
+                return 100
+
+        self.checkScript(fn, ([1, 2, 3],))
+        self.checkScript(fn, (1,))
+
+    def test_union_type_refinement_partial_static_refinement_union_rhs(self):
+        def fn(x: Union[List[int], int]) -> int:
+            if torch.jit.isinstance(x, Union[int, float, str]):
+                # We should know that `x` is an `int` here
+                z = x + 1
+                return z
+            else:
+                return 100
+
+        self.checkScript(fn, ([1, 2, 3],))
+        self.checkScript(fn, (1,))
 
     def test_union_type_refinement_internal_declaration(self):
         def fn(flag: bool) -> str:

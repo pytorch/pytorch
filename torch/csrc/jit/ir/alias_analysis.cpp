@@ -1089,9 +1089,6 @@ void AliasDb::makePointerTo(const Value* from, const Value* to) {
            kind == TypeKind::UnionType) // immutable type containers
           || kind == TypeKind::AnyType;
     }
-    if (!expected_kind) {
-      int x = 5;
-    }
     TORCH_INTERNAL_ASSERT(
         expected_kind, from->type()->str(), to->type()->str());
     return;
