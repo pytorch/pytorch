@@ -22,8 +22,7 @@ using segment_reduce_backward_fn = Tensor (*)(
     const Tensor&,
     const Tensor&,
     SegmentReductionType,
-    const Tensor&,
-    int64_t);
+    const Tensor&);
 DECLARE_DISPATCH(segment_reduce_backward_fn, _segment_reduce_backward_stub);
 
 } // namespace native

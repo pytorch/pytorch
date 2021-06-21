@@ -61,8 +61,7 @@ MemOverlapStatus get_overlap_status(TensorImpl* a, TensorImpl* b) {
     const auto b_end = b_begin + b->numel() * b->itemsize();
 
     if (a_begin == b_begin && a_end == b_end) {
-      return (a->strides() == b->strides()) ?
-          MemOverlapStatus::FULL : MemOverlapStatus::PARTIAL;
+      return MemOverlapStatus::FULL;
     }
     if (a_begin < b_end && b_begin < a_end) {
       return MemOverlapStatus::PARTIAL;

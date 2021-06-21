@@ -1,8 +1,8 @@
 #import <ATen/native/metal/MetalCommandBuffer.h>
 #import <ATen/native/metal/MetalTensorImpl.h>
 #import <ATen/native/metal/MetalTensorImplStorage.h>
-#import <ATen/native/metal/MetalTensorUtils.h>
-#import <ATen/native/metal/MetalContext.h>
+#import <ATen/native/metal/MetalUtils.h>
+#import <ATen/native/metal/mpscnn/MPSCNNContext.h>
 #import <ATen/native/metal/mpscnn/MPSCNNUtils.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
 #import <ATen/native/metal/mpscnn/MPSImageUtils.h>
@@ -19,7 +19,7 @@ Tensor copy_to_host(const Tensor& input) {
   if (X && !X.isTemporaryImage) {
     return input;
   }
-  MetalCommandBuffer* commandBuffer = getCommandBuffer(input);
+  MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
   auto&& sizes = [X sizes];
   MetalTensorImplStorage mt{sizes};
   mt.texture()->setCommandBuffer(commandBuffer);
@@ -28,7 +28,7 @@ Tensor copy_to_host(const Tensor& input) {
 
   id<MTLComputeCommandEncoder> encoder =
       [commandBuffer.buffer computeCommandEncoder];
-  id<MTLComputePipelineState> state = [[MetalContext sharedInstance]
+  id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
       specializedPipelineState:metal::mpscnn::kernelFor(
                                    X, "copy", "copy_nonarray")
                      Constants:@[
@@ -46,6 +46,7 @@ Tensor copy_to_host(const Tensor& input) {
   [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
           threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
   [encoder endEncoding];
+  [X markRead];
   auto output = makeTensor(std::move(mt), input.options());
   return output;
 }

@@ -74,7 +74,7 @@ class NormalizeArgs(Transformer):
             args,  # type: ignore[arg-type]
             kwargs,
             arg_types,  # type: ignore[arg-type]
-            kwarg_types,
+            kwarg_types,  # type: ignore[arg-type]
             self.normalize_to_only_use_kwargs,
         )
         if new_args_and_kwargs:
@@ -93,7 +93,7 @@ class NormalizeArgs(Transformer):
             self.module,
             target,
             args,  # type: ignore[arg-type]
-            kwargs,
+            kwargs,  # type: ignore[arg-type]
             self.normalize_to_only_use_kwargs,
         )
         if new_args_and_kwargs:

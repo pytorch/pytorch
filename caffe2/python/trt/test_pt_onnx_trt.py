@@ -61,18 +61,16 @@ class Test_PT_ONNX_TRT(unittest.TestCase):
             self.image_files[index] = os.path.abspath(os.path.join(data_path, f))
             if not os.path.exists(self.image_files[index]):
                 raise FileNotFoundError(self.image_files[index] + " does not exist.")
-        with open(os.path.abspath(os.path.join(data_path, "class_labels.txt")), 'r') as f:
-            self.labels = f.read().split('\n')
+        self.labels = open(os.path.abspath(os.path.join(data_path, "class_labels.txt")), 'r').read().split('\n')
 
     def build_engine_onnx(self, model_file):
         with trt.Builder(TRT_LOGGER) as builder, builder.create_network(flags = 1) as network, trt.OnnxParser(network, TRT_LOGGER) as parser:
-            builder_config = builder.create_builder_config()
-            builder_config.max_workspace_size = 1 << 33
+            builder.max_workspace_size = 1 << 33
             with open(model_file, 'rb') as model:
                 if not parser.parse(model.read()):
                     for error in range(parser.num_errors):
                         self.fail("ERROR: {}".format(parser.get_error(error)))
-            return builder.build_engine(network, builder_config)
+            return builder.build_cuda_engine(network)
 
     def _test_model(self, model_name, input_shape = (3, 224, 224), normalization_hint = 0):
 

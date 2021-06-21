@@ -34,5 +34,4 @@ Functions
 .. autofunction:: i1e
 .. autofunction:: logit
 .. autofunction:: ndtr
-.. autofunction:: ndtri
 .. autofunction:: xlog1py
