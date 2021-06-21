@@ -129,7 +129,8 @@ void AutogradMeta::set_fw_grad(const Variable& new_grad_, const Variable& self, 
                 "forward gradient is of size ", new_grad_.sizes(), ".");
 
     if (is_inplace_op && is_view_) {
-      auto this_view_meta = static_cast<DifferentiableViewMeta*>(this);
+      auto const& this_view_meta =
+          static_cast<const DifferentiableViewMeta&>(this);
 
       // For inplace ops on a Tensor that does not already have a forward grad and is a view, we propagate
       // the tangent to the base and ensure that the new_grad is a view of that base's tangent.
@@ -140,8 +141,8 @@ void AutogradMeta::set_fw_grad(const Variable& new_grad_, const Variable& self, 
       //   - Take a view of the base's forward grad
       //   - Copy the given new_grad into this view
       //   - Use this view as the new new_grad
-      if (this_view_meta->has_fw_view()) {
-        auto view_info = this_view_meta->get_forward_view();
+      if (this_view_meta.has_fw_view()) {
+        auto view_info = this_view_meta.get_forward_view();
         auto& base = view_info.base_;
 
         if (!base._fw_grad(level).defined()) {
