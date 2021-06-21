@@ -1,3 +1,5 @@
+import inspect
+
 import torch
 import itertools
 import functools
@@ -250,4 +252,6 @@ def pointwise_operator(fn):
         def add(a, b):
             return a + b
     """
-    return _te.CompileCache(lambda spec, result: PointwiseCompiler(fn, spec, result))
+    num_args = len(inspect.signature(fn).parameters)
+    return _te.CompileCache(lambda spec, result: PointwiseCompiler(fn, spec, result),
+                            num_args)

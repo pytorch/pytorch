@@ -342,7 +342,7 @@ class CompileCache3 {
           std::make_pair(index, (CompileCache*)nullptr));
     }
 
-    at::Tensor call(const Args& args, void** __restrict__ call_args) {
+    at::Tensor call(at::Tensor* args, void** __restrict__ call_args) {
       for (const auto& ck : shape_checks_) {
         if (args[std::get<0>(ck)].size(std::get<1>(ck)) !=
             args[std::get<2>(ck)].size(std::get<3>(ck))) {
@@ -376,12 +376,13 @@ class CompileCache3 {
             c10::IntArrayRef(shapes, shapes + ndims),
             c10::IntArrayRef(strides, strides + ndims),
             args[options_from].options());
-        call_args[args.size()] = output.data_ptr();
+        call_args[NARGS] = output.data_ptr();
       } else {
         output = args[NARGS - 1];
       }
 
       cg_->call_raw(call_args, num_args_);
+
       if (backwards_functions_.size() > 0) {
         std::shared_ptr<CCNode> node(new CCNode(), torch::autograd::deleteNode);
 
@@ -397,6 +398,7 @@ class CompileCache3 {
         // node inputs
         torch::autograd::create_gradient_edge(output, node);
       }
+
       return output;
     }
 
@@ -412,7 +414,7 @@ class CompileCache3 {
   };
   typedef std::map<Key, CompileResultImpl*, CmpLess> Map;
 
-  CompileResultImpl* cached_compile(const Key& key, const Args& example) {
+  CompileResultImpl* cached_compile(const Key& key, at::Tensor* args) {
     std::lock_guard<std::mutex> guard(mutex_);
     auto item = cache_.find(key);
     if (item != cache_.end()) {
@@ -422,7 +424,7 @@ class CompileCache3 {
       auto cr = new CompileResultImpl();
       std::vector<py::object> spec;
       for (int i = 0; i < key.size(); ++i) {
-        spec.push_back(key[i].to_python(example[i]));
+        spec.push_back(key[i].to_python(args[i]));
       }
       compile_fn_(spec, CompileResultProxy(cr));
       cache_.emplace(std::make_pair(key, cr));
@@ -444,7 +446,7 @@ class CompileCache3 {
     }
   }
 
-  AliasGroups compute_alias_groups(const Args& args) {
+  AliasGroups compute_alias_groups(at::Tensor* args) {
     AliasGroups alias_groups;
     int8_t current_id = 0;
     for (int i = 0; i < NARGS; ++i) {
@@ -466,7 +468,7 @@ class CompileCache3 {
     return alias_groups;
   }
 
-  Key compute_cache_key(const Args& args, bool has_out, void** call_args_out) {
+  Key compute_cache_key(at::Tensor* args, bool has_out, void** call_args_out) {
     AliasGroups alias_groups = compute_alias_groups(args);
     Key key;
     int i = 0;
@@ -481,7 +483,7 @@ class CompileCache3 {
 
   CompileCache3(const py::object& compile_fn) : compile_fn_(compile_fn) {}
 
-  at::Tensor call(const Args& args, bool has_out) {
+  at::Tensor call(at::Tensor* args, bool has_out) {
     void* call_args[NARGS + (!has_out) + NARGS * MAX_DIMS + MAX_DIMS];
     auto key = compute_cache_key(args, has_out, call_args + NARGS + (!has_out));
     return cached_compile(key, args)->call(args, call_args);
@@ -500,11 +502,11 @@ class CompileCache2 {
   CompileCache2(const py::object& compile_fn)
       : cache2(compile_fn), cache4(compile_fn), cache8(compile_fn) {}
 
-  at::Tensor call(const std::array<at::Tensor, NARGS>& args, bool has_out) {
+  at::Tensor call(at::Tensor* args, bool has_out) {
     // fan out and and specialize on number of dimension buckets
     int64_t ndims = 0;
-    for (const auto& item : args) {
-      ndims = std::max(item.ndimension(), ndims);
+    for (int i : c10::irange(NARGS)) {
+      ndims = std::max(args[i].dim(), ndims);
     }
     if (ndims <= 2)
       return cache2.call(args, has_out);
@@ -523,78 +525,78 @@ class CompileCache2 {
 
 class CompileCache {
  public:
-  CompileCache(const py::object& compile_fn)
-      : cache1(compile_fn),
-        cache2(compile_fn),
-        cache3(compile_fn),
-        cache4(compile_fn),
-        cache5(compile_fn) {}
+  virtual ~CompileCache() = default;
+  virtual at::Tensor call(py::args args, py::kwargs kwargs) = 0;
+};
+
+template <int NARGS>
+class CompileCacheImpl : public CompileCache {
+  constexpr static int MAX_ARGS = 5;
+
+  struct Cleanup {
+    at::Tensor* tensors;
+    int count;
+
+    inline ~Cleanup() {
+      for (int i : c10::irange(count)) {
+        tensors[i].~Tensor();
+      }
+    }
+  };
+
+ public:
+  CompileCacheImpl(const py::object& compile_fn)
+      : cache(compile_fn), cache_out(compile_fn) {}
 
   at::Tensor call(py::args args, py::kwargs kwargs) {
     // fan out an specialize on arg counts
     int num_args = py::len(args);
     int num_kwargs = py::len(kwargs);
-    bool has_out = num_kwargs == 1;
-    at::Tensor last_arg;
-
-    if (num_kwargs == 1) {
-      last_arg = kwargs["out"].cast<at::Tensor>();
-    } else if (num_kwargs > 1) {
-      throw std::runtime_error("expected at most 1 kwarg");
-    } else {
-      last_arg = args[num_args - 1].cast<at::Tensor>();
+    if (C10_UNLIKELY(num_kwargs > 1 || num_args != NARGS)) {
+      throw std::runtime_error("wrong number of args");
     }
 
-    switch (num_args + num_kwargs) {
-      case 1:
-        return cache1.call(std::array<at::Tensor, 1>{last_arg}, has_out);
-      case 2:
-        return cache2.call(
-            std::array<at::Tensor, 2>{
-                args[0].cast<at::Tensor>(),
-                last_arg,
-            },
-            has_out);
-      case 3:
-        return cache3.call(
-            std::array<at::Tensor, 3>{
-                args[0].cast<at::Tensor>(),
-                args[1].cast<at::Tensor>(),
-                last_arg,
-            },
-            has_out);
-      case 4:
-        return cache4.call(
-            std::array<at::Tensor, 4>{
-                args[0].cast<at::Tensor>(),
-                args[1].cast<at::Tensor>(),
-                args[2].cast<at::Tensor>(),
-                last_arg,
-            },
-            has_out);
-      case 5:
-        return cache5.call(
-            std::array<at::Tensor, 5>{
-                args[0].cast<at::Tensor>(),
-                args[1].cast<at::Tensor>(),
-                args[2].cast<at::Tensor>(),
-                args[3].cast<at::Tensor>(),
-                last_arg,
-            },
-            has_out);
+    char tensor_args_buffer[sizeof(at::Tensor) * (NARGS + 1)];
+    at::Tensor* tensor_args = reinterpret_cast<at::Tensor*>(tensor_args_buffer);
 
-      default:
-        throw std::runtime_error("TODO: handle other arg counts");
+    for (int i = 0; i < NARGS; ++i) {
+      new (tensor_args + i) at::Tensor(std::move(args[i].cast<at::Tensor>()));
+    }
+
+    if (num_kwargs == 1) {
+      new (tensor_args + NARGS)
+          at::Tensor(std::move(kwargs["out"].cast<at::Tensor>()));
+      Cleanup call_dtors = {tensor_args, NARGS + 1};
+      return cache_out.call(tensor_args, true);
+    } else {
+      Cleanup call_dtors = {tensor_args, NARGS};
+      return cache.call(tensor_args, false);
     }
   }
 
  private:
-  CompileCache2<1> cache1;
-  CompileCache2<2> cache2;
-  CompileCache2<3> cache3;
-  CompileCache2<4> cache4;
-  CompileCache2<5> cache5;
+  CompileCache2<NARGS> cache;
+  CompileCache2<NARGS + 1> cache_out; // out variant
 };
+
+CompileCache* create_compile_cache(const py::object& compile_fn, int num_args) {
+  switch (num_args) {
+    case 1:
+      return new CompileCacheImpl<1>(compile_fn);
+    case 2:
+      return new CompileCacheImpl<2>(compile_fn);
+    case 3:
+      return new CompileCacheImpl<3>(compile_fn);
+    case 4:
+      return new CompileCacheImpl<4>(compile_fn);
+    case 5:
+      return new CompileCacheImpl<5>(compile_fn);
+    case 6:
+      return new CompileCacheImpl<6>(compile_fn);
+    default:
+      throw std::runtime_error("TODO: support other arg counts");
+  }
+}
 
 } // namespace
 
@@ -602,7 +604,7 @@ void initTensorExprAuthoringBindings(PyObject* te_obj) {
   py::handle te(te_obj);
 
   py::class_<CompileCache>(te, "CompileCache")
-      .def(py::init<py::object>())
+      .def(py::init(&create_compile_cache))
       .def("__call__", &CompileCache::call);
 
   py::class_<CompileResultProxy>(te, "CompileResult")
