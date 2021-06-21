@@ -7,6 +7,9 @@ sudo rm -f /etc/apt/heroku.list
 sudo rm -f /etc/apt/openjdk-r-ubuntu-ppa-xenial.list
 sudo rm -f /etc/apt/partner.list
 
+# To increase the network reliability, let apt decide which mirror is best to use
+sudo sed -i -e 's/http:\/\/.*archive/mirror:\/\/mirrors/' -e 's/\/ubuntu\//\/mirrors.txt/' /etc/apt/sources.list
+
 retry () {
   $*  || $* || $* || $* || $*
 }
