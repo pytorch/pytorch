@@ -165,7 +165,7 @@ const int NLL_LOSS_THREADS = 32;
 template <typename scalar_t>
 __global__ void nll_loss_backward_no_reduce_cuda_kernel(
   int batch_size,
-  PackedTensorAccessor64<int64_t, 1> target,
+  int64_t *target,
   PackedTensorAccessor64<scalar_t, 1> grad_output,
   PackedTensorAccessor64<scalar_t, 2> grad_input,
   scalar_t *weights,
@@ -317,7 +317,7 @@ void nll_loss_backward_out_cuda_template(
                  0,
                  at::cuda::getCurrentCUDAStream()>>>(
                   batch_size,
-                  target.packed_accessor64<int64_t, 1>(),
+                  target.data_ptr<int64_t>(),
                   grad_output.packed_accessor64<scalar_t, 1>(),
                   grad_input.packed_accessor64<scalar_t, 2>(),
                   weight_data,
