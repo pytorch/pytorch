@@ -141,7 +141,6 @@ struct PYBIND11_EXPORT FunctionSignature {
   int index;
   bool hidden;
   bool deprecated;
-  bool disable_torch_function;
 };
 
 struct PythonArgs {
