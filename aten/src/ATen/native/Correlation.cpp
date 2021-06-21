@@ -18,7 +18,8 @@ Tensor cov(
       " dimensions");
 
   TORCH_CHECK(
-      self.scalar_type() != kBool, "cov(): bool dtype is not supported for input");
+      self.scalar_type() != kBool,
+      "cov(): bool dtype is not supported for input");
 
   // View input tensor as 2D (variables, observations)
   auto in = self.ndimension() < 2 ? self.view({1, -1}) : self;
@@ -103,6 +104,33 @@ Tensor cov(
   in = in - avg.unsqueeze(1);
   const auto c = at::mm(in, (w.defined() ? in * w : in).t().conj());
   return at::true_divide(c, norm_factor).squeeze();
+}
+
+Tensor corrcoef(const Tensor& self) {
+  TORCH_CHECK(
+      self.ndimension() <= 2,
+      "corrcoef(): expected input to have two or fewer dimensions but got an input with ",
+      self.ndimension(),
+      " dimensions");
+
+  auto c = at::cov(self);
+
+  if (c.ndimension() == 0) {
+    // scalar covariance, return nan if c in {nan, inf, 0}, 1 otherwise
+    return c / c;
+  }
+
+  // normalize covariance
+  const auto d = c.diag();
+  const auto stddev = at::sqrt(d.is_complex() ? at::real(d) : d);
+  c = c / stddev.view({-1, 1});
+  c = c / stddev.view({1, -1});
+
+  // due to floating point rounding the values may be not within [-1, 1], so
+  // to improve the result we clip the values just as NumPy does.
+  return c.is_complex()
+      ? at::complex(at::real(c).clip(-1, 1), at::imag(c).clip(-1, 1))
+      : c.clip(-1, 1);
 }
 
 } // namespace native
