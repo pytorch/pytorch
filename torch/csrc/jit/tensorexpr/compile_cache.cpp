@@ -1,8 +1,10 @@
 #include <pybind11/functional.h>
 #include <pybind11/operators.h>
 #include <pybind11/stl.h>
+#include <torch/csrc/autograd/custom_function.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
+#include <torch/csrc/jit/tensorexpr/compile_cache.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
@@ -18,14 +20,84 @@
 #define STRINGIFY(x) #x
 #define TOSTRING(x) STRINGIFY(x)
 #define AT __FILE__ ":" TOSTRING(__LINE__)
-#define AA(test) \
-  if (!(test))   \
+#define ASSERT(test) \
+  if (!(test))       \
   throw std::runtime_error("assert failed " AT)
 
 namespace torch {
 namespace jit {
 namespace {
 using namespace torch::jit::tensorexpr;
+
+class CompileCache;
+
+class CCNode : public torch::autograd::Node {
+  typedef torch::autograd::variable_list variable_list;
+
+ public:
+  variable_list apply(variable_list&& inputs) override {
+    return {at::empty_like(inputs[0]).fill_(-99.0)};
+  }
+  // void release_variables() override {}
+
+  static void setup(
+      at::Tensor& output,
+      const std::vector<at::Tensor>& input_vars) {
+    std::shared_ptr<CCNode> node(new CCNode(), torch::autograd::deleteNode);
+
+    auto next_edges = torch::autograd::collect_next_edges(
+        std::vector<at::Tensor>{input_vars[1]});
+    // node->set_ctx_grad_fn(node);
+    node->set_next_edges(std::move(next_edges));
+
+    node->clear_input_metadata();
+    auto output_nr = node->add_input_metadata(output);
+    torch::autograd::impl::set_gradient_edge(output, {node, output_nr});
+
+    //  for(int i=0; i<input_vars.size(); ++i) {
+    //    input_vars[i] = input_vars[i].detach();
+    //  }
+    //  // TODO: check is: modified
+
+    //  torch::autograd::impl::set_gradient_edge(output, {node, output_nr});
+
+    // node->input_info_.reserve(input_vars.size());
+    // for (auto& var : input_vars) {
+    //   node->input_info_.emplace_back(var);
+    // }
+
+    // auto result = fn();
+    // using forward_return_t = forward_t<X, Args...>;
+    // forward_return_t outputs;
+    // {
+    //   AutoGradMode grad_mode(false);
+    //   outputs = T::forward(&node->ctx_, std::forward<Args>(args)...);
+    // }
+
+    // auto wrapped_outputs = _wrap_outputs(
+    //    input_vars,
+    //    {}, {},
+    //    //node->ctx_.get_non_differentiable(),
+    //    //node->ctx_.get_and_bump_dirty(),
+    //    to_optional(outputs),
+    //    node);
+
+    // node->output_info_.reserve(wrapped_outputs.size());
+    // for (auto& output : wrapped_outputs) {
+    //  if (is_executable && output.has_value()) {
+    //    node->output_info_.emplace_back(output.value());
+    //  } else if (is_executable) {
+    //    node->output_info_.emplace_back();
+    //  }
+    //}
+
+    // if (is_executable) {
+    //  node->save_variables_to_ctx();
+    //}
+
+    // return output;
+  }
+};
 
 py::object python_specialization_key() {
   static py::object* rtype = nullptr;
@@ -202,6 +274,7 @@ class CompileResultBase : public KernelScopedObject {
       int buffer_args,
       int stride_args,
       int shape_args) = 0;
+  virtual void set_backwards(int index, py::object backward_compiler) = 0;
 };
 
 struct CompileResultProxy {
@@ -263,6 +336,12 @@ class CompileCache3 {
       num_args_ = buffer_args + stride_args + shape_args;
     }
 
+    void set_backwards(int index, py::object backward_compiler) {
+      objects_.push_back(backward_compiler);
+      backwards_functions_.emplace_back(
+          std::make_pair(index, (CompileCache*)nullptr));
+    }
+
     at::Tensor call(const Args& args, void** __restrict__ call_args) {
       for (const auto& ck : shape_checks_) {
         if (args[std::get<0>(ck)].size(std::get<1>(ck)) !=
@@ -303,6 +382,21 @@ class CompileCache3 {
       }
 
       cg_->call_raw(call_args, num_args_);
+      if (backwards_functions_.size() > 0) {
+        std::shared_ptr<CCNode> node(new CCNode(), torch::autograd::deleteNode);
+
+        // node outputs
+        torch::autograd::edge_list next_edges;
+        for (auto& item : backwards_functions_) {
+          int index = item.first;
+          next_edges.emplace_back(
+              torch::autograd::impl::gradient_edge(args[index]));
+        }
+        node->set_next_edges(std::move(next_edges));
+
+        // node inputs
+        torch::autograd::create_gradient_edge(output, node);
+      }
       return output;
     }
 
@@ -313,6 +407,7 @@ class CompileCache3 {
     std::vector<std::pair<int, int>> shape_from_;
     std::vector<std::tuple<int, int, int, int>> shape_checks_;
     std::vector<std::pair<int, std::vector<int>>> allocated_outputs_;
+    std::vector<std::pair<int, CompileCache*>> backwards_functions_;
     std::vector<py::object> objects_; // for ref counting
   };
   typedef std::map<Key, CompileResultImpl*, CmpLess> Map;
@@ -542,6 +637,13 @@ void initTensorExprAuthoringBindings(PyObject* te_obj) {
              int options_from,
              const std::vector<int>& storage_order) {
             self.res->add_allocated_output(options_from, storage_order);
+          })
+      .def(
+          "set_backwards",
+          [](CompileResultProxy& self,
+             int index,
+             py::object backward_compiler) {
+            self.res->set_backwards(index, backward_compiler);
           });
 }
 } // namespace jit

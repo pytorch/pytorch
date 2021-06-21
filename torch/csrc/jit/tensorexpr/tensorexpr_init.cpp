@@ -2,8 +2,8 @@
 #include <pybind11/operators.h>
 #include <pybind11/stl.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
-#include <torch/csrc/jit/tensorexpr/authoring.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
+#include <torch/csrc/jit/tensorexpr/compile_cache.h>
 #ifdef USE_CUDA
 #include <torch/csrc/jit/tensorexpr/cuda_codegen.h>
 #endif
@@ -15,7 +15,7 @@
 #include <torch/csrc/jit/tensorexpr/reduction.h>
 
 // TODO(jansel): figure out how to get this in normal build
-#include <torch/csrc/jit/tensorexpr/authoring.cpp>
+#include <torch/csrc/jit/tensorexpr/compile_cache.cpp>
 
 namespace torch {
 namespace jit {

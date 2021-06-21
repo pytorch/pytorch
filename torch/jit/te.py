@@ -72,10 +72,21 @@ class PointwiseCompiler(object):
         spec = self.spec
         layout, = list(set(x.layout for x in spec))
         assert layout == torch.strided, "TODO: support other layouts"
-        assert all((not x.requires_grad) for x in spec)
         assert [x.out for x in spec[:-1]] == [False] * (len(spec) - 1)
         assert all(shape_type in _SHAPE_TYPES for shape_type in itertools.chain(*self.shapes))
         assert all(stride_type in _STRIDE_TYPES for stride_type in itertools.chain(*self.strides))
+
+    def handle_autograd(self):
+        cnt = sum(int(x.requires_grad) for x in self.spec)
+        if cnt == 0:
+            return
+        assert all(x.alias_group == 0 for x in self.spec), "TODO: support aliased backwards"
+
+        for i, spec in enumerate(self.spec):
+            if spec.requires_grad:
+                assert spec.alias_group == 0, "TODO: support aliased backwards"
+                assert spec.out == 0, "TODO: autograd on out?"
+                self.result.set_backwards(i, None)
 
     def compute_broadcasts_and_size_checks(self):
         ndim = self.ndim
@@ -223,6 +234,7 @@ class PointwiseCompiler(object):
 
     def run(self):
         self.error_checks()
+        self.handle_autograd()
         self.compute_broadcasts_and_size_checks()
         self.compute_output_order()
         self.compute_symbolic_shapes_and_strides()
