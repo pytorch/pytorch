@@ -2719,8 +2719,8 @@ def kl_div(
         and in the meantime, specifying either of those two args will override :attr:`reduction`.
 
     .. note::
-        :attr:``reduction`` = ``'mean'`` doesn't return the true kl divergence value, please use
-        :attr:``reduction`` = ``'batchmean'`` which aligns with KL math definition.
+        :attr:`reduction` = ``'mean'`` doesn't return the true kl divergence value, please use
+        :attr:`reduction` = ``'batchmean'`` which aligns with KL math definition.
         In the next major release, ``'mean'`` will be changed to be the same as 'batchmean'.
     """
     if has_torch_function_variadic(input, target):
@@ -4109,10 +4109,9 @@ def _pad(input: Tensor, pad: List[int], mode: str = "constant", value: float = 0
         See :class:`torch.nn.ConstantPad2d`, :class:`torch.nn.ReflectionPad2d`, and
         :class:`torch.nn.ReplicationPad2d` for concrete examples on how each of the
         padding modes works. Constant padding is implemented for arbitrary dimensions.
-        Replicate padding is implemented for padding the last 3 dimensions of 5D input
-        tensor, or the last 2 dimensions of 4D input tensor, or the last dimension of
-        3D input tensor. Reflect padding is only implemented for padding the last 2
-        dimensions of 4D input tensor, or the last dimension of 3D input tensor.
+        Replicate and reflection padding is implemented for padding the last 3
+        dimensions of 5D input tensor, or the last 2 dimensions of 4D input
+        tensor, or the last dimension of 3D input tensor.
 
     Note:
         When using the CUDA backend, this operation may induce nondeterministic
@@ -4178,7 +4177,7 @@ def _pad(input: Tensor, pad: List[int], mode: str = "constant", value: float = 0
         elif input.dim() == 5:
             assert len(pad) == 6, "5D tensors expect 6 values for padding"
             if mode == "reflect":
-                raise NotImplementedError
+                return torch._C._nn.reflection_pad3d(input, pad)
             elif mode == "replicate":
                 return torch._C._nn.replication_pad3d(input, pad)
             elif mode == "circular":
