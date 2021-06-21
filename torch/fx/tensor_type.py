@@ -1,4 +1,4 @@
-class Tensor_Type(type):
+class Tensor_Type:
     """
     Tensor_Type defines a type for tensors, which consists of a list of dimensions.
 
@@ -7,11 +7,8 @@ class Tensor_Type(type):
             def forward(self, x:Tensor_Type((1,2,3, Dyn)), y:Tensor_Type((1,2,3, Dyn))):
                 return torch.add(x, y)
     """
-    def __new__(cls, dim):
-        return super().__new__(cls,f'Tensor_Type({dim})',  (Tensor_Type,), {})
 
     def __init__(self, dim):
-        super().__init__(self,dim)
         self.__origin__ = Tensor_Type
         self.__args__ = dim
 
