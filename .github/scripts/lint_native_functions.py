@@ -14,13 +14,13 @@ is simply to make sure that there is *some* configuration of ruamel that can rou
 the YAML, not to be prescriptive about it.
 '''
 
-import ruamel.yaml
+import ruamel.yaml  # type: ignore[import]
 import difflib
 import sys
 from pathlib import Path
 from io import StringIO
 
-def fn(base):
+def fn(base: str) -> str:
     return str(base / Path("aten/src/ATen/native/native_functions.yaml"))
 
 with open(Path(__file__).parent.parent.parent / fn('.'), "r") as f:

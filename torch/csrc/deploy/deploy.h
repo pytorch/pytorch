@@ -1,6 +1,7 @@
 #pragma once
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <assert.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/deploy/interpreter/interpreter_impl.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <fstream>
@@ -108,13 +109,22 @@ struct TORCH_API LoadBalancer {
 struct TORCH_API InterpreterManager {
   InterpreterManager(size_t n_interp = 2) : resources_(n_interp) {
     TORCH_DEPLOY_TRY
-    for (size_t i = 0; i < n_interp; ++i) {
+    for (const auto i : c10::irange(n_interp)) {
       instances_.emplace_back(this);
       auto I = instances_.back().acquire_session();
       // make torch.version.interp be the interpreter id
       // can be used for balancing work across GPUs
       I.global("torch", "version").attr("__setattr__")({"interp", int(i)});
       // std::cerr << "Interpreter " << i << " initialized\n";
+      instances_.back().pImpl_->set_find_module(
+          [this](const std::string& name) -> at::optional<std::string> {
+            auto it = registered_module_sources_.find(name);
+            if (it != registered_module_sources_.end()) {
+              return it->second;
+            } else {
+              return at::nullopt;
+            }
+          });
     }
     TORCH_DEPLOY_SAFE_CATCH_RETHROW
   }
@@ -145,6 +155,16 @@ struct TORCH_API InterpreterManager {
   Package load_package(const std::string& uri);
   Package load_package(
       std::shared_ptr<caffe2::serialize::ReadAdapterInterface> reader);
+
+  // convience function for loading some python source code as a module across
+  // all interpreters. this can be used for writing tests of deploy that need to
+  // execute python code, or for small amounts of application logic that are
+  // best written in Python. For larger amounts of code, prefer creating and
+  // loading them as packages.
+  void register_module_source(std::string name, std::string src) {
+    registered_module_sources_[std::move(name)] = std::move(src);
+  }
+
   InterpreterManager(const InterpreterManager&) = delete;
   InterpreterManager& operator=(const InterpreterManager&) = delete;
   InterpreterManager& operator=(InterpreterManager&&) = delete;
@@ -155,6 +175,7 @@ struct TORCH_API InterpreterManager {
   size_t next_object_id_ = 0;
   std::vector<Interpreter> instances_;
   LoadBalancer resources_;
+  std::unordered_map<std::string, std::string> registered_module_sources_;
 };
 
 struct TORCH_API ReplicatedObjImpl {
