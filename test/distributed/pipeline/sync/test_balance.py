@@ -191,7 +191,8 @@ def test_balance_by_time_tuple():
             return x, x.detach()
 
     class Add(nn.Module):
-        def forward(self, a, b):
+        def forward(self, a_b):
+            a, b = a_b
             return a + b
 
     model = nn.Sequential(Twin(), Add())
@@ -206,7 +207,8 @@ def test_balance_by_size_tuple():
             return x, x.detach()
 
     class Add(nn.Module):
-        def forward(self, a, b):
+        def forward(self, a_b):
+            a, b = a_b
             return a + b
 
     model = nn.Sequential(Twin(), Add())

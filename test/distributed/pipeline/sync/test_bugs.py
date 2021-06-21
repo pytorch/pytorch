@@ -90,7 +90,8 @@ def test_tuple_wait(cuda_sleep, setup_rpc):
             super().__init__()
             self.ones = nn.Parameter(torch.ones(32, 3, 32, 32, requires_grad=True))
 
-        def forward(self, a, b):
+        def forward(self, pair):
+            a, b = pair
             a = a * self.ones
             return a * 1, b * 2, b * 3
 
@@ -99,7 +100,8 @@ def test_tuple_wait(cuda_sleep, setup_rpc):
             super().__init__()
             self.ones = nn.Parameter(torch.ones(32, 3, 32, 32, requires_grad=True))
 
-        def forward(self, a, b, c):
+        def forward(self, triple):
+            a, b, c = triple
             a = a * self.ones
             b = Sleep.apply(b)
             return a + b + c
@@ -110,7 +112,7 @@ def test_tuple_wait(cuda_sleep, setup_rpc):
     a = torch.rand(1024, 3, 32, 32, device=0, requires_grad=True)
     b = torch.rand(1024, 3, 32, 32, device=0, requires_grad=True)
 
-    y = model(a, b)
+    y = model((a, b))
     y.local_value().norm().backward()
 
     torch.cuda.synchronize(0)

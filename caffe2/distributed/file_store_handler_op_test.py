@@ -8,7 +8,7 @@ import os
 import tempfile
 import shutil
 
-from caffe2.distributed.python import StoreHandlerTimeoutError
+from caffe2.distributed.python import StoreHandlerTimeoutError  # type: ignore[import]
 from caffe2.distributed.store_ops_test_util import StoreOpsTests
 from caffe2.python import core, workspace, dyndep
 from caffe2.python.test_util import TestCase

@@ -6,7 +6,7 @@
 # LICENSE file in the root directory of this source tree.
 """Manipulation of micro-batches."""
 import typing
-from typing import Callable, Iterator, List, Union, cast, Sequence
+from typing import Callable, Iterable, Iterator, List, Union, cast, Sequence
 
 import torch
 from torch import Tensor
@@ -67,10 +67,7 @@ class Batch:
         """Calls a function by the underlying tensor or tensors. It also wraps
         the output with :class:`Batch`.
         """
-        if self.atomic:
-            return Batch(function(self.value))
-        else:
-            return Batch(function(*self.value))
+        return Batch(function(self.value))
 
     def __repr__(self) -> str:
         return f"Batch[atomic={self.atomic!r}]({self.value!r})"
@@ -135,32 +132,39 @@ class Batch:
         self.value = value[0]
 
 
-def check(*inputs) -> None:
+def check(input: TensorOrTensors) -> None:
     """Checks whether the input is a tensor or tensors.
 
     Raises:
         TypeError: input is not a tensor or tensors.
 
     """
-    for input in inputs:
-        if not isinstance(input, Tensor):
-            raise TypeError(f"expected Tensor, but got {input.__class__.__name__}")
+    if isinstance(input, Sequence):
+        for x in input:
+            if not isinstance(x, Tensor):
+                raise TypeError(f"expected Tensor, but got {input.__class__.__name__}")
+        return
+
+    if not isinstance(input, Tensor):
+        raise TypeError(f"expected Tensor, but got {input.__class__.__name__}")
 
 
-def scatter(*inputs, chunks: int) -> List[Batch]:
+def scatter(input: TensorOrTensors, chunks: int) -> List[Batch]:
     """Splits an input mini-batch into multiple micro-batches."""
-    if len(inputs) == 1 and isinstance(inputs[0], Tensor):
-        unwrapped_inputs = inputs[0].chunk(chunks)
+    inputs: Iterable[TensorOrTensors]
+
+    if isinstance(input, Tensor):
+        inputs = input.chunk(chunks)
     else:
         rotated: List[Tensors] = []
 
-        for tensor in inputs:
+        for tensor in input:
             tensors = tensor.chunk(chunks)
-            rotated.append(tensors)
+            rotated.append(cast(Tensors, tensors))
 
-        unwrapped_inputs = zip(*rotated)  # type: ignore[assignment]
+        inputs = zip(*rotated)
 
-    return [Batch(x) for x in unwrapped_inputs]
+    return [Batch(x) for x in inputs]
 
 
 def gather(outputs: List[Batch]) -> TensorOrTensors:

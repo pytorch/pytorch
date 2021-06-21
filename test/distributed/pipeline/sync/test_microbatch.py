@@ -49,11 +49,8 @@ def test_batch_call():
     def f(x):
         return x
 
-    def g(x, y):
-        return x, y
-
     assert a.call(f).atomic
-    assert not b.call(g).atomic
+    assert not b.call(f).atomic
 
 
 def test_batch_setitem_by_index():
@@ -89,7 +86,7 @@ def test_batch_setitem_by_slice():
 
 def test_check():
     check(torch.tensor(42))
-    check(torch.tensor(4), torch.tensor(2))
+    check((torch.tensor(4), torch.tensor(2)))
 
     with pytest.raises(TypeError):
         check(42)
@@ -130,10 +127,10 @@ def test_scatter_tensor():
     assert b.tensor.size() == (1, 1)
 
 
-def test_scatter_multiple_tensors():
+def test_scatter_tuple():
     ab = (torch.zeros(2, 1), torch.zeros(4, 2))
 
-    a, b = scatter(*ab, chunks=2)
+    a, b = scatter(ab, chunks=2)
 
     assert a.tensors[0].size() == (1, 1)
     assert b.tensors[0].size() == (1, 1)

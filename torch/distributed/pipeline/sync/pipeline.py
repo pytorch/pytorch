@@ -194,16 +194,16 @@ class Pipeline:
             if checkpoint:
 
                 def function(
-                    *inputs: TensorOrTensors,
-                    partition: nn.Module = partition,
+                    input: TensorOrTensors,
+                    partition: nn.Sequential = partition,
                     skip_tracker: SkipTrackerThroughPotals = skip_trackers[i],
                     chunk_id: int = i,
                     part_id: int = j,
                 ) -> TensorOrTensors:
                     with use_skip_tracker(skip_tracker), record_function("chunk%d-part%d" % (chunk_id, part_id)):
-                        return partition(*inputs)
+                        return partition(input)
 
-                chk = Checkpointing(function, batch)  # type: ignore[arg-type]
+                chk = Checkpointing(function, batch)
                 task = Task(streams[j], compute=chk.checkpoint, finalize=chk.recompute)
                 del function, chk
 
@@ -211,7 +211,7 @@ class Pipeline:
 
                 def compute(
                     batch: Batch = batch,
-                    partition: nn.Module = partition,
+                    partition: nn.Sequential = partition,
                     skip_tracker: SkipTrackerThroughPotals = skip_trackers[i],
                     chunk_id: int = i,
                     part_id: int = j,

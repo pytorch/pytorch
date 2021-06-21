@@ -1024,7 +1024,7 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
         # Compute loss and gradients for both outputs
         output1, output2 = model(input)
         loss1 = criterion(output1, target)
-        loss1.backward(retain_graph=True)
+        loss1.backward()
         loss2 = criterion(output2, target)
         loss2.backward()
 
@@ -1087,8 +1087,9 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
         check_no_grads()
 
     def _test_accumulate_gradients_module(self, gradient_as_bucket_view=False):
-        # Test gradient accumulation via model.no_sync context manager, which is
-        # the supported way of implementing gradient accumulation.
+        # This is NOT the recommended way to implement accumulating grads, but
+        # we would like to make sure DDP does not mess up with the underlying
+        # module.
         int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
         devices = [torch.device("cuda:" + str(i)) for i in int_devices]
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -1117,13 +1118,12 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
             step_model(model, input, target)
 
             if iteration % 2 == 0:
-                # Skip gradients sync using no_sync context manager.
-                with ddp_model.no_sync():
-                    step_model(
-                        ddp_model,
-                        input[self.rank: (self.rank + 1)],
-                        target[self.rank: (self.rank + 1)],
-                    )
+                # Skip gradients sync without calling prepare_for_backward
+                step_model(
+                    ddp_model.module,
+                    input[self.rank: (self.rank + 1)],
+                    target[self.rank: (self.rank + 1)],
+                )
                 for i, j in zip(model.parameters(), ddp_model.parameters()):
                     self.assertNotEqual(i.grad, j.grad)
             else:
