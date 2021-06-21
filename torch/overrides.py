@@ -233,6 +233,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._conj_physical,
     }
 
+
 @functools.lru_cache(None)
 def get_testing_overrides() -> Dict[Callable, Callable]:
     """Return a dict containing dummy overrides for all overridable functions
@@ -882,6 +883,10 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.special.i1: lambda input: -1,
         torch.special.i1e: lambda input: -1,
         torch.special.logit: lambda input: -1,
+        torch.special.log1p: lambda input: -1,
+        torch.special.round: lambda input: -1,
+        torch.special.sinc: lambda input: -1,
+        torch.special.ndtri: lambda input: -1,
         torch.special.ndtr: lambda input: -1,
         torch.special.xlog1py: lambda input, other, out=None: -1,
         torch.t: lambda input: -1,

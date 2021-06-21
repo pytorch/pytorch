@@ -42,12 +42,6 @@ class LoggingTensor(torch.Tensor):
     def __repr__(self):
         return f"LoggingTensor({self.elem})"
 
-    def __str__(self):
-        return f"LoggingTensor({self.elem})"
-
-    def __format__(self, format_spec):
-        return f"LoggingTensor({self.elem})"
-
     __torch_function__ = _disabled_torch_function_impl
 
     @classmethod
@@ -112,22 +106,31 @@ class TestPythonDispatch(TestCase):
             x = LoggingTensor(torch.tensor([3.0], requires_grad=True))
             log_input("x", x)
             y = x * x
+            saved_x = y.grad_fn._saved_self
             grad_y = LoggingTensor(torch.tensor([1.0]))
             log_input("grad_y", grad_y)
             g, = torch.autograd.grad((y,), (x,), (grad_y,))
 
         self.assertEqual(g.elem, torch.tensor([6.0]))
+        with torch.no_grad():
+            self.assertEqual(saved_x, x)
+            self.assertEqual(saved_x._version, x._version)
+            x.add_(2)
+            self.assertEqual(saved_x, x)
+            # TODO: figure out why broken
+            # self.assertEqual(saved_x._version, x._version)
         self.assertExpectedInline('\n'.join(logs), '''\
 $0 = input('x')
 $1 = torch._ops.aten.detach($0)
 $2 = torch._ops.aten.detach($0)
 $3 = torch._ops.aten.mul($0, $0)
-$4 = input('grad_y')
-$5 = torch._ops.aten.detach($1)
-$6 = torch._ops.aten.detach($2)
-$7 = torch._ops.aten.mul($4, $5)
-$8 = torch._ops.aten.mul($4, $6)
-$9 = torch._ops.aten.add($8, $7, 1)''')
+$4 = torch._ops.aten.detach($1)
+$5 = input('grad_y')
+$6 = torch._ops.aten.detach($1)
+$7 = torch._ops.aten.detach($2)
+$8 = torch._ops.aten.mul($5, $6)
+$9 = torch._ops.aten.mul($5, $7)
+$10 = torch._ops.aten.add($9, $8, 1)''')
 
     def test_out(self) -> None:
         with capture_logs() as logs:
@@ -200,6 +203,64 @@ $2 = torch._ops.aten.abs($0, $1)''')
         self.assertNotEqual(prev_vc, cur_vc)
         x.data.add_(2)
         self.assertEqual(cur_vc, x._version)
+
+    def test_format(self) -> None:
+        x = LoggingTensor(torch.ones(1))
+        s1 = str(x)
+        s2 = repr(x)
+        s3 = f"{x}"
+        self.assertExpectedInline(s1, """LoggingTensor(tensor([1.]))""")
+        self.assertEqual(s1, s2)
+        self.assertEqual(s1, s3)
+
+    def test_custom_autograd(self) -> None:
+        escape = [None]
+
+        class Square(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                y = x ** 2
+                ctx.save_for_backward(x)
+                return y
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                assert isinstance(grad_output, LoggingTensor)
+                x, = ctx.saved_tensors
+                assert isinstance(x, LoggingTensor)
+                escape[0] = x
+                return grad_output * 2 * x
+
+        with capture_logs() as logs:
+            x = LoggingTensor(torch.ones(1, requires_grad=True))
+            log_input("x", x)
+            x.grad = LoggingTensor(torch.zeros(1))
+            log_input("x.grad", x.grad)
+            y = Square.apply(x)
+            grad_output = LoggingTensor(torch.ones(1))
+            log_input("grad_output", grad_output)
+            y.backward(grad_output)
+
+        with torch.no_grad():
+            self.assertEqual(escape[0], x)
+            self.assertEqual(escape[0]._version, x._version)
+            # TODO: figure out why x.requires_grad = False doesn't
+            # trigger an error for LoggingTensor
+            x.add_(2)
+            self.assertEqual(escape[0], x)
+            # TODO: figure out why this is broken
+            # self.assertEqual(escape[0]._version, x._version)
+
+        self.assertExpectedInline('\n'.join(logs), '''\
+$0 = input('x')
+$1 = input('x.grad')
+$2 = torch._ops.aten.pow($0, 2)
+$3 = torch._ops.aten.detach($0)
+$4 = input('grad_output')
+$5 = torch._ops.aten.detach($3)
+$6 = torch._ops.aten.mul($4, tensor(2))
+$7 = torch._ops.aten.mul($6, $5)
+$8 = torch._ops.aten.add_($1, $7, 1)''')
 
 
 if __name__ == '__main__':

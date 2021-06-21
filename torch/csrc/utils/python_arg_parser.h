@@ -384,15 +384,15 @@ inline std::vector<int64_t> PythonArgs::intlist(int i) {
 inline std::vector<int64_t> PythonArgs::intlistWithDefault(int i, std::vector<int64_t> default_intlist) {
   if (!args[i]) return default_intlist;
   PyObject* arg = args[i];
-  auto size = signature.params[i].size;
-  if (size > 0 && THPUtils_checkLong(arg)) {
-    return std::vector<int64_t>(size, THPUtils_unpackIndex(arg));
+  const auto size1 = signature.params[i].size;
+  if (size1 > 0 && THPUtils_checkLong(arg)) {
+    return std::vector<int64_t>(size1, THPUtils_unpackIndex(arg));
   }
   auto tuple = PyTuple_Check(arg);
   // NOLINTNEXTLINE(bugprone-branch-clone)
-  size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
-  std::vector<int64_t> res(size);
-  for(const auto idx : c10::irange(size)) {
+  const auto size2 = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
+  std::vector<int64_t> res(size2);
+  for(const auto idx : c10::irange(size2)) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
     try {
       // Elements of torch.Size are tensors during tracing, and we need to record extra
@@ -400,14 +400,14 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(int i, std::vector<in
       if (traceable && jit::tracer::isTracing() && THPVariable_Check(obj)) {
         auto & var = THPVariable_Unpack(obj);
         jit::tracer::ArgumentStash::stashIntArrayRefElem(
-            signature.params[i].name, size, idx, var);
+            signature.params[i].name, size2, idx, var);
         res[idx] = var.item<int64_t>();
         continue;
       } else {
         res[idx] = THPUtils_unpackIndex(obj);
       }
     } catch (const std::exception &e) {
-      throw TypeError("%s(): argument '%s' must be %s, but found element of type %s at pos %d",
+      throw TypeError("%s(): argument '%s' must be %s, but found element of type %s at pos %ld",
           signature.name.c_str(), signature.params[i].name.c_str(),
           signature.params[i].type_name().c_str(), Py_TYPE(obj)->tp_name, idx + 1);
     }
