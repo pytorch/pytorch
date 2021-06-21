@@ -37,9 +37,8 @@ class _InputEqualizationObserver(nn.Module):
     The running minimum/maximum :math:`x_\text{min/max}` are computed in the
     same way as :class:`~torch.quantization.observer.PerChannelMinMaxObserver`,
     with the difference that the running min/max values are stored per column.
-
-    .. note:: If the running minimum equals to the running maximum, the scales
-              and zero_points are set to 1.0 and 0.
+    This observer is intended to be used along with a WeightEqualizationObserver
+    to calculate the equalization scale.
     """
 
     def __init__(self, dtype=torch.quint8, qscheme=torch.per_tensor_affine,
@@ -531,8 +530,6 @@ def convert_eq_obs(
         if node.op == 'call_module' and isinstance(modules[node.target], _InputEqualizationObserver):
             inp_quant_obs_node = node.args[0]
             prev_node = inp_quant_obs_node.args[0]
-            # Update the following input quantization observer's min/max values
-            scale_input_observer(node, modules)
 
             # Update the following input quantization observer's min/max values
             scale_input_observer(node, modules)
