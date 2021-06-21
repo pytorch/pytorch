@@ -500,7 +500,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 LinearModule,
                 (),
                 (linear_module_input,),
-                ns.call_module(nnq.Linear),
+                ns.call_module(nnqr.Linear if is_reference else nnq.Linear),
                 None,
             ),
         ]
