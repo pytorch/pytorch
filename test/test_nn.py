@@ -15935,6 +15935,12 @@ class TestNNDeviceType(NNTestCase):
         for reduction in ['mean', 'none']:
             F.nll_loss(x, t, ignore_index=255, reduction=reduction).sum().backward()
 
+    def test_nll_loss_invalid_target_dim(self, device):
+        x = torch.randn((10, 3), requires_grad=True, device=device)
+        t = torch.zeros((10, 2), dtype=torch.int64, device=device),
+        with self.assertRaisesRegex(RuntimeError, r"1D target tensor expected"):
+            F.nll_loss(x, t)
+
     def _nll_loss_helper(self, input_size, reduction, expected, device):
         input = torch.rand(input_size, requires_grad=True, device=device)
         num_channels = input_size[1]
