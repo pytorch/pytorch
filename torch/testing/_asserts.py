@@ -67,12 +67,7 @@ def _check_complex_components_individually(
 
     @functools.wraps(check_tensors)
     def wrapper(
-        actual: Tensor,
-        expected: Tensor,
-        *,
-        equal_nan: Union[str, bool],
-        msg: Optional[Union[str, Callable[[Tensor, Tensor, SimpleNamespace], str]]],
-        **kwargs: Any,
+        actual: Tensor, expected: Tensor, *, equal_nan: Union[str, bool], **kwargs: Any
     ) -> Optional[_TestingErrorMeta]:
         if equal_nan == "relaxed":
             relaxed_complex_nan = True
@@ -81,7 +76,7 @@ def _check_complex_components_individually(
             relaxed_complex_nan = False
 
         if actual.dtype not in (torch.complex32, torch.complex64, torch.complex128):
-            return check_tensors(actual, expected, equal_nan=equal_nan, msg=msg, **kwargs)  # type: ignore[call-arg]
+            return check_tensors(actual, expected, equal_nan=equal_nan, **kwargs)  # type: ignore[call-arg]
 
         if relaxed_complex_nan:
             actual, expected = [
@@ -91,23 +86,11 @@ def _check_complex_components_individually(
                 for t in (actual, expected)
             ]
 
-        error_meta = check_tensors(
-            actual.real,
-            expected.real,
-            equal_nan=equal_nan,
-            msg=msg or _make_mismatch_msg,
-            **kwargs,
-        )
+        error_meta = check_tensors(actual.real, expected.real, equal_nan=equal_nan, **kwargs)
         if error_meta:
             return error_meta
 
-        error_meta = check_tensors(
-            actual.imag,
-            expected.imag,
-            equal_nan=equal_nan,
-            msg=msg or _make_mismatch_msg,
-            **kwargs,
-        )
+        error_meta = check_tensors(actual.imag, expected.imag, equal_nan=equal_nan, **kwargs)
         if error_meta:
             return error_meta
 
