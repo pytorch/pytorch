@@ -245,34 +245,9 @@ void nll_loss_backward_out_cuda_template(
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
 
-  TORCH_CHECK(target.dim() <= 1, "multi-target not supported");
-
-  TensorArg grad_input_arg{grad_input, "grad_input", 1};
-  TensorArg grad_output_arg{grad_output, "grad_output", 2};
-  TensorArg input_arg{input, "input", 3};
-  TensorArg target_arg{target, "target", 4};
-  TensorArg total_weight_arg{total_weight, "total_weight", 5};
-
-  if (weight.defined()) {
-    TensorArg weight_arg{weight, "weight", 6};
-    checkAllSameGPU(
-        "nll_loss_backward_out_cuda_template",
-        {grad_input_arg,
-         grad_output_arg,
-         input_arg,
-         target_arg,
-         total_weight_arg,
-         weight_arg});
-  } else {
-    checkAllSameGPU(
-        "nll_loss_backward_out_cuda_template",
-        {grad_output_arg,
-         grad_input_arg,
-         input_arg,
-         target_arg,
-         total_weight_arg});
-  }
-
+  TORCH_CHECK(
+      target.dim() == 1,
+      "1D target tensor expected, multi-target not supported");
   int64_t n_dims = input.dim();
   TORCH_CHECK(
       n_dims > 0 && n_dims <= 2, "input tensor should be 1D or 2D");
@@ -289,10 +264,11 @@ void nll_loss_backward_out_cuda_template(
       target.sizes(),
       ")")
   TORCH_CHECK(
-      !weight.defined() || weight.numel() == n_classes,
+      !weight.defined() || (weight.dim() == 1 && weight.numel() == n_classes),
       "weight tensor should be defined either for all or no classes");
 
   TORCH_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
+  auto weight_ = weight.defined() ? weight.contiguous() : weight;
 
   if (reduction == at::Reduction::None && n_dims == 2) {
     check_dim_size(grad_output, 1, 0, batch_size);
@@ -306,11 +282,6 @@ void nll_loss_backward_out_cuda_template(
         input.scalar_type(),
         "nll_loss_backward_no_reduce_cuda_kernel",
         [&] {
-          scalar_t* weight_data = nullptr;
-          if (weight.defined()) {
-            auto weight_ = weight.contiguous();
-            weight_data = weight_.data_ptr<scalar_t>();
-          }
           nll_loss_backward_no_reduce_cuda_kernel<scalar_t>
               <<<at::cuda::detail::GET_BLOCKS(batch_size),
                  at::cuda::detail::CUDA_NUM_THREADS,
@@ -320,7 +291,7 @@ void nll_loss_backward_out_cuda_template(
                   target.data_ptr<int64_t>(),
                   grad_output.packed_accessor64<scalar_t, 1>(),
                   grad_input.packed_accessor64<scalar_t, 2>(),
-                  weight_data,
+                  weight.defined() ? weight.data_ptr<scalar_t>() : nullptr_t,
                   n_classes,
                   ignore_index);
           C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -339,16 +310,11 @@ void nll_loss_backward_out_cuda_template(
         input.scalar_type(),
         "nll_loss_backward_reduce_cuda_kernel_1d",
         [&] {
-          scalar_t* weight_data = nullptr;
-          if (weight.defined()) {
-            auto weight_ = weight.contiguous();
-            weight_data = weight_.data_ptr<scalar_t>();
-          }
           nll_loss_backward_reduce_cuda_kernel_1d<scalar_t>
               <<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
                    grad_input.data_ptr<scalar_t>(),
                    grad_output.data_ptr<scalar_t>(),
-                   weight_data,
+                   weight.defined() ? weight.data_ptr<scalar_t>() : nullptr_t,
                    target.data_ptr<int64_t>(),
                    total_weight.data_ptr<scalar_t>(),
                    reduction == at::Reduction::Mean,
@@ -374,7 +340,7 @@ void nll_loss_backward_out_cuda_template(
                   grad_input.data_ptr<scalar_t>(),
                   grad_output.data_ptr<scalar_t>(),
                   target.data_ptr<int64_t>(),
-                  weight_data,
+                  weight.defined() ? weight.data_ptr<scalar_t>() : nullptr_t,
                   total_weight.data_ptr<scalar_t>(),
                   reduction == at::Reduction::Mean,
                   input.size(0),
