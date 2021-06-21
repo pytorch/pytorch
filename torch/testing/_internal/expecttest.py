@@ -3,6 +3,8 @@ import unittest
 import traceback
 import os
 import string
+import sys
+import ast
 from typing import Tuple
 
 
@@ -50,6 +52,8 @@ from typing import Tuple
 
 
 ACCEPT = os.getenv('EXPECTTEST_ACCEPT')
+
+LINENO_AT_START = sys.version_info >= (3, 8)
 
 
 def nth_line(src, lineno):
@@ -132,15 +136,18 @@ def ok_for_raw_triple_quoted_string(s, quote):
     return quote * 3 not in s and (not s or s[-1] not in [quote, '\\'])
 
 
-# This operates on the REVERSED string (that's why suffix is first)
-RE_EXPECT = re.compile(r"^(?P<suffix>[^\n]*?)"
-                       r"(?P<quote>'''|" r'""")'
-                       r"(?P<body>.*?)"
-                       r"(?P=quote)"
-                       r"(?P<raw>r?)", re.DOTALL)
+RE_EXPECT = re.compile(
+    (
+        r"(?P<raw>r?)"
+        r"(?P<quote>'''|" r'""")'
+        r"(?P<body>.*?)"
+        r"(?P=quote)"
+    ),
+    re.DOTALL
+)
 
 
-def replace_string_literal(src : str, lineno : int,
+def replace_string_literal(src : str, start_lineno : int, end_lineno : int,
                            new_string : str) -> Tuple[str, int]:
     r"""
     Replace a triple quoted string literal with new contents.
@@ -152,9 +159,9 @@ def replace_string_literal(src : str, lineno : int,
     Returns a tuple of the replaced string, as well as a delta of
     number of lines added/removed.
 
-    >>> replace_string_literal("'''arf'''", 1, "barf")
+    >>> replace_string_literal("'''arf'''", 1, 1, "barf")
     ("'''barf'''", 0)
-    >>> r = replace_string_literal("  moo = '''arf'''", 1, "'a'\n\\b\n")
+    >>> r = replace_string_literal("  moo = '''arf'''", 1, 1, "'a'\n\\b\n")
     >>> print(r[0])
       moo = '''\
     'a'
@@ -162,19 +169,24 @@ def replace_string_literal(src : str, lineno : int,
     '''
     >>> r[1]
     3
-    >>> replace_string_literal("  moo = '''\\\narf'''", 2, "'a'\n\\b\n")[1]
+    >>> replace_string_literal("  moo = '''\\\narf'''", 1, 2, "'a'\n\\b\n")[1]
     2
-    >>> print(replace_string_literal("    f('''\"\"\"''')", 1, "a ''' b")[0])
+    >>> print(replace_string_literal("    f('''\"\"\"''')", 1, 1, "a ''' b")[0])
         f('''a \'\'\' b''')
     """
     # Haven't implemented correct escaping for non-printable characters
     assert all(c in string.printable for c in new_string)
-    i = nth_eol(src, lineno)
+
     new_string = normalize_nl(new_string)
 
     delta = [new_string.count("\n")]
     if delta[0] > 0:
         delta[0] += 1  # handle the extra \\\n
+
+    assert start_lineno <= end_lineno
+    start = nth_line(src, start_lineno)
+    end = nth_eol(src, end_lineno)
+    assert start <= end
 
     def replace(m):
         s = new_string
@@ -189,17 +201,13 @@ def replace_string_literal(src : str, lineno : int,
 
         new_body = "\\\n" + s if "\n" in s and not raw else s
         delta[0] -= m.group('body').count("\n")
-
-        return ''.join([m.group('suffix'),
+        return ''.join(['r' if raw else '',
                         m.group('quote'),
-                        new_body[::-1],
+                        new_body,
                         m.group('quote'),
-                        'r' if raw else '',
                         ])
 
-    # Having to do this in reverse is very irritating, but it's the
-    # only way to make the non-greedy matches work correctly.
-    return (RE_EXPECT.sub(replace, src[:i][::-1], count=1)[::-1] + src[i:], delta[0])
+    return (src[:start] + RE_EXPECT.sub(replace, src[start:end], count=1) + src[end:], delta[0])
 
 
 class TestCase(unittest.TestCase):
@@ -225,12 +233,35 @@ class TestCase(unittest.TestCase):
                 print("Accepting new output for {} at {}:{}".format(self.id(), fn, lineno))
                 with open(fn, 'r+') as f:
                     old = f.read()
+                    old_ast = ast.parse(old)
 
-                    # compute the change in lineno
+                    # NB: it's only the traceback line numbers that are wrong;
+                    # we reread the file every time we write to it, so AST's
+                    # line numbers are correct
                     lineno = EDIT_HISTORY.adjust_lineno(fn, lineno)
-                    new, delta = replace_string_literal(old, lineno, actual)
 
-                    assert old != new, f"Failed to substitute string at {fn}:{lineno}; did you use triple quotes?"
+                    # Conservative assumption to start
+                    start_lineno = lineno
+                    end_lineno = lineno
+                    # Try to give a more accurate bounds based on AST
+                    # NB: this walk is in no specified order (in practice it's
+                    # breadth first)
+                    for n in ast.walk(old_ast):
+                        if isinstance(n, ast.Expr):
+                            if hasattr(n, 'end_lineno'):
+                                assert LINENO_AT_START
+                                if n.lineno == start_lineno:
+                                    end_lineno = n.end_lineno  # type: ignore[attr-defined]
+                            else:
+                                if n.lineno == end_lineno:
+                                    start_lineno = n.lineno
+
+                    new, delta = replace_string_literal(old, start_lineno, end_lineno, actual)
+
+                    assert old != new, f"Failed to substitute string at {fn}:{lineno}; did you use triple quotes?  " \
+                        "If this is unexpected, please file a bug report at " \
+                        "https://github.com/pytorch/pytorch/issues/new?labels=module:%20expecttest " \
+                        f"with the contents of the source file near {fn}:{lineno}"
 
                     # Only write the backup file the first time we hit the
                     # file
