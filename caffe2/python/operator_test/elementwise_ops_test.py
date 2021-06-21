@@ -352,6 +352,143 @@ class TestElementwiseOps(hu.HypothesisTestCase):
             reference=swish_gradient,
         )
 
+    @given(n=st.integers(1, 6), m=st.integers(4, 6),
+           seed=st.integers(0, 1000), **hu.gcs)
+    @settings(deadline=10000)
+    def test_mul_gradient_inplace(self, n, m, gc, dc, seed):
+        np.random.seed(seed)
+
+        def mul_gradient(dC, A, B):
+            return [B * dC, A * dC]
+
+        A = np.random.rand(n, m).astype(np.float32)
+        B = np.random.rand(n, m).astype(np.float32)
+        dC = np.random.rand(n, m).astype(np.float32)
+        op_dA_inplace = core.CreateOperator(
+            "MulGradient",
+            ["dC", "A", "B"],
+            ["dC", "dB"],
+        )
+        op_dB_inplace = core.CreateOperator(
+            "MulGradient",
+            ["dC", "A", "B"],
+            ["dA", "dC"],
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op_dA_inplace,
+            inputs=[dC, A, B],
+            reference=mul_gradient,
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op_dB_inplace,
+            inputs=[dC, A, B],
+            reference=mul_gradient,
+        )
+
+    @given(n=st.integers(1, 6), m=st.integers(4, 6),
+           seed=st.integers(0, 1000), **hu.gcs)
+    @settings(deadline=10000)
+    def test_div_gradient_inplace(self, n, m, gc, dc, seed):
+        np.random.seed(seed)
+
+        def div_gradient(dC, _A, B, C):
+            return [dC / B, -dC * C / B]
+
+        A = np.random.rand(n, m).astype(np.float32)
+        B = np.random.rand(n, m).astype(np.float32)
+        C = A / B
+        dC = np.random.rand(n, m).astype(np.float32)
+        op = core.CreateOperator(
+            "DivGradient",
+            ["dC", "A", "B", "C"],
+            ["dC", "dB"],
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[dC, A, B, C],
+            reference=div_gradient,
+        )
+
+    @given(n=st.integers(1, 6), m=st.integers(4, 6),
+           seed=st.integers(0, 1000), **hu.gcs)
+    @settings(deadline=10000)
+    def test_add_gradient_inplace(self, n, m, gc, dc, seed):
+        np.random.seed(seed)
+
+        def add_gradient(dC, _A, _B):
+            return [dC, dC]
+
+        A = np.random.rand(n, m).astype(np.float32)
+        B = np.random.rand(n, m).astype(np.float32)
+        dC = np.random.rand(n, m).astype(np.float32)
+        op_dA_inplace = core.CreateOperator(
+            "AddGradient",
+            ["dC", "A", "B"],
+            ["dC", "dB"],
+        )
+        op_dB_inplace = core.CreateOperator(
+            "AddGradient",
+            ["dC", "A", "B"],
+            ["dA", "dC"],
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op_dA_inplace,
+            inputs=[dC, A, B],
+            reference=add_gradient,
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op_dB_inplace,
+            inputs=[dC, A, B],
+            reference=add_gradient,
+        )
+
+    @given(n=st.integers(1, 6), m=st.integers(4, 6),
+           seed=st.integers(0, 1000), **hu.gcs)
+    @settings(deadline=10000)
+    def test_sub_gradient_inplace(self, n, m, gc, dc, seed):
+        np.random.seed(seed)
+
+        def sub_gradient(dC, _A, _B):
+            return [dC, -dC]
+
+        A = np.random.rand(n, m).astype(np.float32)
+        B = np.random.rand(n, m).astype(np.float32)
+        dC = np.random.rand(n, m).astype(np.float32)
+        op_dA_inplace = core.CreateOperator(
+            "SubGradient",
+            ["dC", "A", "B"],
+            ["dC", "dB"],
+        )
+        op_dB_inplace = core.CreateOperator(
+            "SubGradient",
+            ["dC", "A", "B"],
+            ["dA", "dC"],
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op_dA_inplace,
+            inputs=[dC, A, B],
+            reference=sub_gradient,
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op_dB_inplace,
+            inputs=[dC, A, B],
+            reference=sub_gradient,
+        )
+
     @given(X=hu.tensor(dtype=np.float32), inplace=st.booleans(),
            engine=st.sampled_from(["", "CUDNN"]), **hu.gcs)
     @settings(deadline=10000)
@@ -371,6 +508,30 @@ class TestElementwiseOps(hu.HypothesisTestCase):
             op=op,
             inputs=[X],
             reference=sigmoid_ref,
+            ensure_outputs_are_inferred=True,
+        )
+        self.assertDeviceChecks(dc, op, [X], [0])
+        self.assertGradientChecks(gc, op, [X], 0, [0], ensure_outputs_are_inferred=True)
+
+    @given(X=hu.tensor(dtype=np.float32), inplace=st.booleans(),
+           engine=st.sampled_from(["", "CUDNN"]), **hu.gcs)
+    @settings(deadline=10000)
+    def test_tanh(self, X, inplace, engine, gc, dc):
+        op = core.CreateOperator(
+            "Tanh",
+            ["X"],
+            ["X"] if inplace else ["Y"],
+            engine=engine,
+        )
+
+        def tanh_ref(X):
+            return [np.tanh(X)]
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X],
+            reference=tanh_ref,
             ensure_outputs_are_inferred=True,
         )
         self.assertDeviceChecks(dc, op, [X], [0])

@@ -84,7 +84,7 @@ void sortKeyValueInplace(const Tensor& key,
                                                                         \
     if (dir) {                                                          \
       bitonicSortKVInPlace<scalar_t, int64_t, A, -1,                    \
-          GTComp<scalar_t, true>, TYPE, SIZE>                           \
+          GTOp<scalar_t, true>, TYPE, SIZE>                           \
         <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(        \
           keyInfo,                                                      \
           keySlices,                                                    \
@@ -92,11 +92,11 @@ void sortKeyValueInplace(const Tensor& key,
           (TYPE) keyInfo.strides[collapseKeyDim],                       \
           valueInfo,                                                    \
           (TYPE) valueInfo.strides[collapseValueDim],                   \
-          GTComp<scalar_t, true>());                                    \
+          GTOp<scalar_t, true>());                                    \
       C10_CUDA_KERNEL_LAUNCH_CHECK();                                   \
     } else {                                                            \
       bitonicSortKVInPlace<scalar_t, int64_t, A, -1,                    \
-      LTComp<scalar_t, true>, TYPE, SIZE>                               \
+      LTOp<scalar_t, true>, TYPE, SIZE>                               \
         <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(        \
           keyInfo,                                                      \
           keySlices,                                                    \
@@ -104,7 +104,7 @@ void sortKeyValueInplace(const Tensor& key,
           (TYPE) keyInfo.strides[collapseKeyDim],                       \
           valueInfo,                                                    \
           (TYPE) valueInfo.strides[collapseValueDim],                   \
-          LTComp<scalar_t, true>());                                    \
+          LTOp<scalar_t, true>());                                    \
       C10_CUDA_KERNEL_LAUNCH_CHECK();                                   \
     }                                                                   \
   } while (0)
@@ -374,7 +374,7 @@ std::tuple<Tensor,Tensor> sort_stable_cuda(const Tensor & self, c10::optional<bo
   return sort_out_stable_cuda(self, stable, dim, descending, values, indices);
 }
 
-std::tuple<Tensor,Tensor> sort_cuda(const Tensor & self, int64_t dim, bool descending) {  int64_t threshold;
+std::tuple<Tensor,Tensor> sort_cuda(const Tensor & self, int64_t dim, bool descending) {
   return sort_stable_cuda(self, /*stable=*/false, dim, descending);
 }
 

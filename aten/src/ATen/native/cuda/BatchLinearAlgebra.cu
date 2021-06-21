@@ -1320,18 +1320,6 @@ std::tuple<Tensor, Tensor> _solve_helper_cuda(const Tensor& self, const Tensor& 
   return std::tuple<Tensor, Tensor>(self_working_copy, A_working_copy);
 }
 
-// This is a type dispatching helper function for 'apply_solve'
-Tensor& _linalg_solve_out_helper_cuda(Tensor& result, Tensor& input, Tensor& infos) {
-  // 'result' and 'input' should be in column major order (it should be checked before calling this function)
-  // the content of 'result', 'input' and 'infos' is overwritten by 'apply_solve'
-  // 'result' should contain data of 'other' tensor (right-hand-side of the linear system of equations)
-  // 'input' should contain data of origianl 'input' tensor (left-hand-side of the linear system)
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "linalg_solve_out_cpu", [&]{
-    apply_solve<scalar_t>(result, input, infos);
-  });
-  return result;
-}
-
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /*
@@ -1415,7 +1403,7 @@ AT_ERROR("inverse: MAGMA library not found in "
 }
 
 template <typename scalar_t>
-static void apply_single_inverse(Tensor& self, Tensor& infos_lu, Tensor& infos_getri) {
+static void apply_single_inverse(Tensor& self, Tensor& info_lu, Tensor& info_getri) {
 #ifndef USE_MAGMA
 AT_ERROR("inverse: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
@@ -1425,15 +1413,18 @@ AT_ERROR("inverse: MAGMA library not found in "
   magma_int_t lda = std::max<magma_int_t>(1, n);
   magma_int_t lwork = n * magmaGetriOptimalBlocksize<scalar_t>(n);
 
-  // magmaLu and magmaGetri requires infos tensor to live on CPU
-  infos_lu = infos_lu.to(at::kCPU);
-  infos_getri = infos_getri.to(at::kCPU);
+  // magmaLu and magmaGetri requires info argument to live on CPU
+  // but info_lu and info_getri tensors are on the same device as self
+  magma_int_t info_lu_cpu = 0;
+  magma_int_t info_getri_cpu = 0;
 
   Tensor ipiv = at::empty({lda}, at::kInt);
   Tensor dwork = at::empty({lwork}, self.options());
-  magmaLu<scalar_t>(n, n, self_data, lda, ipiv.data_ptr<magma_int_t>(), infos_lu.data_ptr<magma_int_t>());
+  magmaLu<scalar_t>(n, n, self_data, lda, ipiv.data_ptr<magma_int_t>(), &info_lu_cpu);
   magmaGetri<scalar_t>(
-    n, self_data, lda, ipiv.data_ptr<magma_int_t>(), dwork.data_ptr<scalar_t>(), lwork, infos_getri.data_ptr<magma_int_t>());
+    n, self_data, lda, ipiv.data_ptr<magma_int_t>(), dwork.data_ptr<scalar_t>(), lwork, &info_getri_cpu);
+  info_lu.fill_(info_lu_cpu);
+  info_getri.fill_(info_getri_cpu);
 #endif
 }
 
@@ -1897,6 +1888,10 @@ static void apply_lu_batched_magma(const Tensor& input, const Tensor& pivots, co
   if (compute_pivots) {
     auto pivots_data = pivots.data_ptr<magma_int_t>();
     auto pivots_stride = pivots.size(-1);
+    // fill pivots with ones to avoid memory access violations inside magma kernels
+    // magmaLuBatched might not set the values for it
+    // see https://github.com/pytorch/pytorch/pull/53064
+    pivots.fill_(1);
     magma_int_t** pivots_array;
     ALLOCATE_ARRAY(pivots_array, magma_int_t*, batch_size);
     for (int64_t i = 0; i < batch_size; i++) {
@@ -1911,6 +1906,10 @@ static void apply_lu_batched_magma(const Tensor& input, const Tensor& pivots, co
     Tensor pivots_tmp = at::arange(1, k + 1, input.options().dtype(at::kInt)).expand_as(pivots);
     pivots.copy_(pivots_tmp);
   }
+
+  // block CPU until all operations on the queue are finished
+  // this explicit sync prevents garbage results from the subsequent magmaLuSolveBatched call from a different queue
+  magma_queue_sync(magma_queue.get_queue());
 #endif
 }
 
@@ -2841,20 +2840,41 @@ static void apply_lu_solve_batched_magma(const Tensor& b, const Tensor& lu, cons
 #endif
 }
 
-static void lu_solve_magma(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
-  // TODO: compare performance and use the best performing option based on lu's sizes
-  if (b.dim() == 2) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(b.scalar_type(), "lu_solve_magma", [&]{
-      apply_lu_solve_looped_magma<scalar_t>(b, lu, pivots);
-    });
-  } else {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(b.scalar_type(), "lu_solve_magma", [&]{
-      apply_lu_solve_batched_magma<scalar_t>(b, lu, pivots);
-    });
+static void lu_solve_batched_magma(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(b.scalar_type(), "lu_solve_batched_magma", [&]{
+    apply_lu_solve_batched_magma<scalar_t>(b, lu, pivots);
+  });
+}
+
+static void lu_solve_looped_magma(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(b.scalar_type(), "lu_solve_looped_magma", [&]{
+    apply_lu_solve_looped_magma<scalar_t>(b, lu, pivots);
+  });
+}
+
+static void lu_solve_dispatch(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
+  auto batch_size = batchCount(lu);
+  auto m = lu.size(-2);
+#ifdef USE_CUSOLVER
+  if (batch_size == 1 && m > 512) {
+    lu_solve_looped_cusolver(b, lu, pivots);
+  }
+#else
+  if (batch_size == 1) {
+    lu_solve_looped_magma(b, lu, pivots);
+  }
+#endif // ifdef USE_CUSOLVER
+#ifdef CUDART_VERSION
+  else if (batch_size > 2 && m <= 128) {
+    lu_solve_batched_cublas(b, lu, pivots);
+  }
+#endif // ifdef CUDART_VERSION
+  else {
+    lu_solve_batched_magma(b, lu, pivots);
   }
 }
 
-REGISTER_DISPATCH(lu_solve_stub, &lu_solve_magma);
+REGISTER_DISPATCH(lu_solve_stub, &lu_solve_dispatch);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lstsq ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
