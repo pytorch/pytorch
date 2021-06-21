@@ -5467,6 +5467,48 @@ for shape in [(1,), ()]:
         # Given gradients should not be modified inplace
         self.assertEqual(grad_out1, grad_out1_original)
 
+    def test_no_unnecessary_unwrapping(self):
+        a = torch.randn(5, requires_grad=True)
+        a_orig = a.detach().clone()
+        b = a * a
+        c = a * b
+        d = torch.exp(a)
+
+        # a is leaf
+        self.assertIs(b.grad_fn._saved_self, a)
+        self.assertIs(b.grad_fn._saved_other, a)
+        self.assertIs(c.grad_fn._saved_self, a)
+
+        # b is not an output
+        self.assertIs(c.grad_fn._saved_other, b)
+
+        # d is an output
+        self.assertEqual(d.grad_fn._saved_result, d)
+        self.assertIsNot(d.grad_fn._saved_result, d)
+
+        c.sum().backward()
+
+        with self.assertRaisesRegex(RuntimeError, "after they have already been freed"):
+            c.grad_fn._saved_self
+
+        # a is left untouched
+        self.assertEqual(a, a_orig)
+
+    def test_saved_variable_version_counter(self):
+        a = torch.rand(2, requires_grad=True)
+
+        b = torch.exp(a)
+
+        b_unpacked = b.grad_fn._saved_result
+        self.assertEqual(b, b_unpacked)
+        self.assertEqual(b._version, b_unpacked._version)
+
+        with torch.no_grad():
+            b += 1
+
+        self.assertEqual(b, b_unpacked)
+        self.assertEqual(b._version, b_unpacked._version)
+
 
 def index_perm_variable(shape, max_indices):
     if not isinstance(shape, tuple):
