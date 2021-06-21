@@ -7129,9 +7129,33 @@ else:
             stream = torch.cuda.Stream()
             with torch.cuda.stream(stream):
                 assert stream.query()
-                z = from_dlpack(to_dlpack(x))
+                z = from_dlpack(x)
                 assert not stream.query()
             assert stream.query()
+            self.assertEqual(z, x)
+
+    @skipMeta
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_dlpack_conversion_with_diff_streams(self, device, dtype):
+        # DLpack does not explicitly support bool
+        # It does it through uint8 type
+        if dtype is torch.bool:
+            return
+        if device == 'cuda':
+            from torch._C import _from_dlpack
+            x = make_tensor((5,), device, dtype, low=-9, high=9)
+            stream_a = torch.cuda.Stream()
+            stream_b = torch.cuda.Stream()
+            with torch.cuda.stream(stream_a):
+                assert stream_a.query()
+                assert stream_b.query()
+                z = _from_dlpack(x.__dlpack__(stream_b.cuda_stream))
+                # sync in stream a forces the stream b work to be completed
+                assert not stream_a.query()
+                assert not stream_b.query()
+                stream_a.synchronize()
+                assert stream_a.query()
+                assert stream_b.query()
             self.assertEqual(z, x)
 
     @skipMeta
