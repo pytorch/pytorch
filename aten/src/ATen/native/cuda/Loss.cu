@@ -248,15 +248,16 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_2d(
       total_weight_acc += acc_weight[i];
     }
     *total_weight = static_cast<scalar_t>(total_weight_acc);
-    *output = static_cast<scalar_t>(output_acc);
     if (size_average) {
       if (nframe == 0) {
         // Mean reduction on empty tensors produces NaN
         *output = std::numeric_limits<double>::quiet_NaN();
       }
-      if (*total_weight != 0) {
+      if (total_weight_acc != 0) {
         *output = static_cast<scalar_t>(output_acc / total_weight_acc);
       }
+    } else {
+      *output = static_cast<scalar_t>(output_acc);
     }
   }
 }
