@@ -255,7 +255,7 @@ inline static void _apply_single_inverse_helper(scalar_t* self_ptr, scalar_t* se
 
   auto handle = at::cuda::getCurrentCUDASolverDnHandle();
   at::cuda::solver::getrf<scalar_t>(handle, n, n, self_ptr, lda, ipiv_ptr, info_getrf_ptr);
-  at::cuda::solver::getrs<scalar_t>(handle, n, n, self_ptr, lda, ipiv_ptr, self_inv_ptr, lda, info_getrs_ptr);
+  at::cuda::solver::getrs<scalar_t>(handle, n, n, self_ptr, lda, ipiv_ptr, self_inv_ptr, lda, info_getrs_ptr, CUBLAS_OP_N);
 }
 
 template <typename scalar_t>
@@ -1255,7 +1255,7 @@ void linalg_eigh_cusolver(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& inf
   }
 }
 
-void lu_solve_looped_cusolver(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
+void lu_solve_looped_cusolver(const Tensor& b, const Tensor& lu, const Tensor& pivots, cublasOperation_t trans) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(b.scalar_type(), "lu_solve_cusolver", [&] {
     int n = cuda_int_cast(lu.size(-2), "n");
     int nrhs = cuda_int_cast(b.size(-1), "nrhs");
@@ -1281,7 +1281,8 @@ void lu_solve_looped_cusolver(const Tensor& b, const Tensor& lu, const Tensor& p
         pivots_data + batch * pivots_stride,
         b_data + batch * b_stride,
         leading_dimension,
-        info_data);
+        info_data,
+        trans);
 
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info.item().toInt() == 0);
     }

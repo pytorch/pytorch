@@ -50,7 +50,7 @@ void ormqr_cusolver(const Tensor& input, const Tensor& tau, const Tensor& other,
 Tensor& orgqr_helper_cusolver(Tensor& result, const Tensor& tau);
 
 void linalg_eigh_cusolver(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos, bool upper, bool compute_eigenvectors);
-void lu_solve_looped_cusolver(const Tensor& b, const Tensor& lu, const Tensor& pivots);
+void lu_solve_looped_cusolver(const Tensor& b, const Tensor& lu, const Tensor& pivots, cublasOperation_t trans);
 
 #endif  // USE_CUSOLVER
 

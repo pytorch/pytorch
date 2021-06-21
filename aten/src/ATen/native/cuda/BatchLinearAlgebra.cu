@@ -2888,7 +2888,7 @@ static void lu_solve_dispatch(const Tensor& b, const Tensor& lu, const Tensor& p
   auto m = lu.size(-2);
 #ifdef USE_CUSOLVER
   if (batch_size == 1 && m > 512) {
-    lu_solve_looped_cusolver(b, lu, pivots);
+    lu_solve_looped_cusolver(b, lu, pivots, CUBLAS_OP_N);
   }
 #else
   if (batch_size == 1) {
