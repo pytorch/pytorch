@@ -477,6 +477,8 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_cuda) (
     divisor = divisor_override.value();
   }
 
+  gradInput.zero_();
+
   const int64_t nbatch = input.ndimension() == 5 ? input.size(-5) : 1;
   const int64_t nslices = input.size(-4);
   const int64_t itime = input.size(-3);
