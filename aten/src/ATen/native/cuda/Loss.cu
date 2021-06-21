@@ -164,22 +164,22 @@ const int NLL_LOSS_THREADS = 32;
 
 template <typename scalar_t>
 __global__ void nll_loss_backward_no_reduce_cuda_kernel(
-  int64_t batch_size,
-  int64_t *target,
-  scalar_t *grad_output,
+  int batch_size,
+  PackedTensorAccessor64<int64_t, 1> target,
+  PackedTensorAccessor64<scalar_t, 1> grad_output,
   PackedTensorAccessor64<scalar_t, 2> grad_input,
   scalar_t *weights,
   int n_classes,
   int ignore_index) {
 
   CUDA_KERNEL_LOOP(index, batch_size) {
-    int t = target[index];
-    if (t == ignore_index) {
+    int cur_target = target[index];
+    if (cur_target == ignore_index) {
       continue;
     }
-    CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
-    scalar_t weight = weights != nullptr ? weights[t] : static_cast<scalar_t>(1);
-    grad_input[index][t] = -weight * grad_output[index];
+    CUDA_KERNEL_ASSERT(cur_target >= 0 && cur_target < n_classes);
+    scalar_t weight = weights != nullptr ? weights[cur_target] : static_cast<scalar_t>(1);
+    grad_input[index][cur_target] = -weight * grad_output[index];
   }
 };
 
@@ -274,12 +274,13 @@ void nll_loss_backward_out_cuda_template(
   }
 
   int64_t n_dims = input.dim();
+  TORCH_CHECK(
+      n_dims > 0 && n_dims <= 2, "input tensor should be 1D or 2D");
+
   int64_t n_classes = input.size(-1);
   int64_t batch_size = n_dims == 1 ? 1 : input.size(0);
   int64_t num_targets = target.size(0);
 
-  TORCH_CHECK(
-      n_dims > 0 && n_dims <= 2, "input tensor should be 1D or 2D");
   TORCH_CHECK(
       batch_size == num_targets,
       "size mismatch (got input: ",
@@ -316,8 +317,8 @@ void nll_loss_backward_out_cuda_template(
                  0,
                  at::cuda::getCurrentCUDAStream()>>>(
                   batch_size,
-                  target.data_ptr<int64_t>(),
-                  grad_output.data_ptr<scalar_t>(),
+                  target.packed_accessor64<int64_t, 1>(),
+                  grad_output.packed_accessor64<scalar_t, 1>(),
                   grad_input.packed_accessor64<scalar_t, 2>(),
                   weight_data,
                   n_classes,
