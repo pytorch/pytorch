@@ -27,7 +27,7 @@ namespace at { namespace cuda {
 struct TORCH_CUDA_CPP_API CUDAEvent {
   // Constructors
   // Default value for `flags` is specified below - it's cudaEventDisableTiming
-  CUDAEvent() {}
+  CUDAEvent() = default;
   CUDAEvent(unsigned int flags) : flags_{flags} {}
 
   CUDAEvent(

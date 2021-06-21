@@ -46,7 +46,7 @@ struct Vectorizedqi {
   __m256i vals __attribute__((aligned(64)));
 
  public:
-  Vectorizedqi() {}
+  Vectorizedqi() = default;
   Vectorizedqi(__m256i v) : vals(v) {}
   operator __m256i() const {
     return vals;
