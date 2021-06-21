@@ -1291,7 +1291,7 @@ class TestAssertsSparseCOO(TestCase):
                 fn()
 
 
-@unittest.skipIf(IS_FBCODE or IS_SANDCASTLE,  "Not all sandcastle jobs support CSR testing")
+@unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Not all sandcastle jobs support CSR testing")
 class TestAssertsSparseCSR(TestCase):
     def test_matching(self):
         crow_indices = (0, 1, 2)
