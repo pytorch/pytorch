@@ -383,7 +383,7 @@ class DeviceCachingAllocator {
   mutable std::recursive_mutex mutex;
 
   // device statistics
-  DeviceStats stats;
+  DeviceStats stats{};
 
   // unallocated cached blocks larger than 1 MB
   BlockPool large_blocks;

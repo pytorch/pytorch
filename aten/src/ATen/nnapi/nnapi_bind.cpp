@@ -199,8 +199,8 @@ struct NnapiCompilation : torch::jit::CustomClassHolder {
 
   ModelPtr model_;
   CompilationPtr compilation_;
-  int32_t num_inputs_;
-  int32_t num_outputs_;
+  int32_t num_inputs_{};
+  int32_t num_outputs_{};
 };
 
 #ifndef __APPLE__

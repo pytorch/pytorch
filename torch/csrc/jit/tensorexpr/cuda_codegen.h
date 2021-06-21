@@ -266,7 +266,7 @@ class TORCH_CUDA_CU_API CudaCodeGen : public CodeGen {
   std::unique_ptr<CudaAnalysis> cuda_analysis_;
   std::unique_ptr<GPUMetaVarRewriter> metavar_rewriter_;
   std::unordered_set<std::string> taken_func_names;
-  CUfunction function_;
+  CUfunction function_{};
   bool has_random_ = false;
 
   std::string GetUniqueFuncName(const std::string& func_prefix);

@@ -91,8 +91,7 @@ struct TORCH_API Function {
 /// Context to save information during `forward` that can be accessed in `backward`
 /// in custom autograd operations (see `torch::autograd::Function` for details).
 struct TORCH_API AutogradContext {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  AutogradContext() : materialize_grads_(true) {}
+  AutogradContext() : materialize_grads_(true), has_freed_buffers_(false) {}
   AutogradContext(const AutogradContext &other) = delete;
   AutogradContext& operator=(const AutogradContext& other) = delete;
 
