@@ -1,6 +1,6 @@
 #import <ATen/native/metal/MetalCommandBuffer.h>
-#import <ATen/native/metal/MetalUtils.h>
-#import <ATen/native/metal/mpscnn/MPSCNNContext.h>
+#import <ATen/native/metal/MetalTensorUtils.h>
+#import <ATen/native/metal/MetalContext.h>
 #import <ATen/native/metal/mpscnn/MPSCNNUtils.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
 #import <ATen/native/metal/mpscnn/MPSImageUtils.h>
@@ -112,12 +112,16 @@ void MPSImageWrapper::setImage(MPSImage* image) {
 void MPSImageWrapper::prepare() {
   if (!_buffer) {
     int64_t size_bytes = c10::multiply_integers([_image sizes]) * sizeof(float);
-    _buffer = [[MPSCNNContext sharedInstance].device
+    _buffer = [[MetalContext sharedInstance].device
         newBufferWithLength:size_bytes
                     options:MTLResourceCPUCacheModeWriteCombined];
     TORCH_CHECK(_buffer, "Allocate GPU memory failed!");
   }
-  copyToMetalBuffer(_commandBuffer, _buffer, _image);
+  copyImageToMetalBuffer(_commandBuffer, _buffer, _image);
+  if (_image.isTemporaryImage && _image.readCount != 0) {
+    _image =
+        createStaticImage((MPSTemporaryImage*)_image, _commandBuffer, false);
+  }
 }
 
 void MPSImageWrapper::synchronize() {
@@ -127,10 +131,8 @@ void MPSImageWrapper::synchronize() {
 }
 
 void MPSImageWrapper::release() {
-  if ([_image isTemporaryImage]) {
-    [_image recycle];
-    [_commandBuffer remove:(MPSTemporaryImage*)_image];
-  }
+  [_image recycle];
+  [_commandBuffer remove:(MPSTemporaryImage*)_image];
   [_commandBuffer removeSubscriber:_delegate];
   _delegate = nil;
   _commandBuffer = nil;
