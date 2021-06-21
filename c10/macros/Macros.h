@@ -427,22 +427,22 @@ __host__ __device__
 #if defined(__CUDA_ARCH__)
 #if defined(_MSC_VER) && defined(__CUDACC__)
 #define CONSTEXPR_EXCEPT_WIN_CUDA const
-#define CONSTEXPR_CONST_EXCEPT_WIN_CUDA const
 #define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA __host__
+#define STATIC_EXCEPT_WIN_CUDA
 #else
 #define CONSTEXPR_EXCEPT_WIN_CUDA constexpr
-#define CONSTEXPR_CONST_EXCEPT_WIN_CUDA constexpr const
 #define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA __host__
+#define STATIC_EXCEPT_WIN_CUDA static
 #endif
 #else
 #if defined(_MSC_VER) && defined(__CUDACC__)
 #define CONSTEXPR_EXCEPT_WIN_CUDA const
-#define CONSTEXPR_CONST_EXCEPT_WIN_CUDA const
 #define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA
+#define STATIC_EXCEPT_WIN_CUDA
 #else
 #define CONSTEXPR_EXCEPT_WIN_CUDA constexpr
-#define CONSTEXPR_CONST_EXCEPT_WIN_CUDA constexpr const
 #define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA constexpr
+#define STATIC_EXCEPT_WIN_CUDA static
 #endif
 #endif
 
