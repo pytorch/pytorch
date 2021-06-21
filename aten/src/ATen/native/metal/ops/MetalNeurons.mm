@@ -2,8 +2,8 @@
 #import <ATen/native/metal/MetalCommandBuffer.h>
 #import <ATen/native/metal/MetalTensorImpl.h>
 #import <ATen/native/metal/MetalTensorImplStorage.h>
-#import <ATen/native/metal/MetalUtils.h>
-#import <ATen/native/metal/mpscnn/MPSCNNContext.h>
+#import <ATen/native/metal/MetalTensorUtils.h>
+#import <ATen/native/metal/MetalContext.h>
 #import <ATen/native/metal/mpscnn/MPSCNNNeuronOp.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
 #import <ATen/native/metal/mpscnn/MPSImageUtils.h>
@@ -23,7 +23,7 @@ Tensor neuronKernel(const Tensor& input, MPSCNNNeuron* neuron) {
   }
   IntArrayRef textureSize = outputSize;
   MetalTensorImplStorage mt{outputSize.vec()};
-  MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
+  MetalCommandBuffer* commandBuffer = getCommandBuffer(input);
   mt.texture()->allocateTemporaryStorage(textureSize, commandBuffer);
   MPSImage* Y = mt.texture()->image();
   [neuron encodeToCommandBuffer:commandBuffer.buffer
@@ -40,7 +40,7 @@ Tensor& neuronKernel_(Tensor& input, MPSCNNNeuron* neuron) {
     return input;
   }
   IntArrayRef textureSize = outputSize;
-  MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
+  MetalCommandBuffer* commandBuffer = getCommandBuffer(input);
   MPSImage* Y = createTemporaryImage(commandBuffer, textureSize);
   [neuron encodeToCommandBuffer:commandBuffer.buffer
                     sourceImage:X
