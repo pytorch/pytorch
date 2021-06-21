@@ -10,6 +10,10 @@ Tensor* computeMatmul(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType);
+Tensor* computeAddMM(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType);
 
 } // namespace tensorexpr
 } // namespace jit

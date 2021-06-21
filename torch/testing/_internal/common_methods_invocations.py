@@ -3292,24 +3292,24 @@ def sample_inputs_fmod_remainder(op_info, device, dtype, requires_grad, *, autod
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
     if autodiffed:
-        samples = (  # type: ignore[assignment]
+        samples = (
             ((S, S, S), 1.5, False),
             ((), 1.5, False),
         )
     else:
-        cases = (  # type: ignore[assignment]
+        cases = (
             ((S, S, S), (), False),
             ((S, S, S), (S, S, S), False),
             ((S, S, S), (S,), False),
         )
 
         # Sample inputs with scalars as torch tensors
-        cases_with_tensor_scalar = (  # type: ignore[assignment]
+        cases_with_tensor_scalar = (
             ((), torch.tensor(1, dtype=dtype, device=device, requires_grad=False), False),
         )
 
         # Sample inputs with broadcasting
-        cases_with_broadcasting = (  # type: ignore[assignment]
+        cases_with_broadcasting = (
             ((S,), (S, S, S), True),
             ((S, 1, S), (S, S, S), True),
             ((), (S, S, S), True),
@@ -3978,7 +3978,7 @@ def sample_inputs_split(op_info, device, dtype, requires_grad, *, list_args=Fals
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     if list_args:
-        cases = (  # type: ignore[assignment]
+        cases = (
             ((S, S, S), ([int(S / 3), S - int(S / 3) * 2, int(S / 3)],)),
             ((S, S, S), ([int(S / 2), S - int(S / 2) * 2, int(S / 2)], 2),),
             ((S, S, S), ([int(S / 2), S - int(S / 2) * 2, int(S / 2)], -2),)
@@ -5819,6 +5819,7 @@ op_db: List[OpInfo] = [
                    )),
     UnaryUfuncInfo('log1p',
                    ref=np.log1p,
+                   aliases=('special.log1p',),
                    domain=(-1, float('inf')),
                    dtypes=all_types_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
@@ -6290,6 +6291,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_rot90),
     UnaryUfuncInfo('round',
                    ref=np.round,
+                   aliases=('special.round',),
                    dtypes=floating_types_and(torch.bfloat16),
                    dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
                    assert_autodiffed=True,),
@@ -6304,6 +6306,7 @@ op_db: List[OpInfo] = [
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),)),
     UnaryUfuncInfo('sinc',
                    ref=np_sinc_with_fp16_as_fp32,
+                   aliases=('special.sinc',),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    handles_large_floats=False,
@@ -7341,6 +7344,12 @@ op_db: List[OpInfo] = [
                    supports_inplace_autograd=False,
                    safe_casts_outputs=True,
                    sample_inputs_func=sample_inputs_entr),
+    UnaryUfuncInfo('special.ndtri',
+                   ref=scipy.special.ndtri if TEST_SCIPY else _NOTHING,
+                   domain=(0, 1),
+                   aten_name='special_ndtri',
+                   dtypes=all_types_and(torch.bool),
+                   safe_casts_outputs=True),
     UnaryUfuncInfo('erf',
                    ref=scipy.special.erf if TEST_SCIPY else _NOTHING,
                    aliases=('special.erf', ),
