@@ -5210,7 +5210,7 @@ op_db: List[OpInfo] = [
     OpInfo('cov',
            dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.half, *[torch.bfloat16] if CUDA11OrLater else []),
-           backward_dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
+           backward_dtypesIfCUDA=all_types_and_complex_and(torch.half, *[torch.bfloat16] if CUDA11OrLater else []),
            sample_inputs_func=sample_inputs_cov,
            supports_out=False,
            # JIT test not working for tensor kwargs (https://github.com/pytorch/pytorch/issues/58507)
