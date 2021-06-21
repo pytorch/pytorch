@@ -3,6 +3,8 @@ import operator
 
 import torch
 import torch.nn as nn
+import torch.nn.quantized as nnq
+import torch.nn.intrinsic.quantized as nniq
 toq = torch.ops.quantized
 from torch.fx import GraphModule
 from torch.fx.graph import Node
@@ -10,7 +12,7 @@ from torch.quantization.quantize import is_activation_post_process
 
 from .ns_types import NSNodeTargetType, NSResultsType
 
-from typing import Any, Tuple, Callable, Dict, Set, List
+from typing import Any, Tuple, Callable, Dict, Set, List, Optional, Union
 
 def getattr_from_fqn(gm: GraphModule, fqn: str) -> Any:
     """
@@ -132,6 +134,68 @@ def get_node_first_input_and_output_type(
         return (NodeInputOrOutputType.UNKNOWN, NodeInputOrOutputType.UNKNOWN)
     else:
         return (NodeInputOrOutputType.UNKNOWN, NodeInputOrOutputType.UNKNOWN)
+
+def get_node_input_qparams(
+    node: Node,
+    gm: GraphModule,
+) -> Optional[Tuple[Union[torch.Tensor, float], Union[torch.Tensor, int]]]:
+    """
+    Returns the qparams (scale, zero_point) of the first input to `node`,
+    if they can be inferred from the graph.
+    """
+    prev_node = node.args[0]
+
+    if not isinstance(prev_node, Node):
+        return None
+
+    # quantize - read the args directly
+    if prev_node.op == 'call_function' and prev_node.target == torch.quantize_per_tensor:
+        scale_node, zp_node = prev_node.args[1], prev_node.args[2]
+        assert isinstance(scale_node, Node) and isinstance(scale_node.target, str)
+        assert isinstance(zp_node, Node) and isinstance(zp_node.target, str)
+        scale_obj = getattr_from_fqn(gm, scale_node.target)
+        zp_obj = getattr_from_fqn(gm, zp_node.target)
+        return (scale_obj, zp_obj)
+
+    # handle modules
+    if prev_node.op == 'call_module':
+        # get type of the module
+        assert isinstance(prev_node.target, str)
+        module_obj = getattr_from_fqn(gm, prev_node.target)
+        if isinstance(
+            module_obj,
+            (
+                nnq.Linear,
+                nnq.Conv1d,
+                nnq.Conv2d,
+                nniq.ConvReLU2d,
+                nnq.Conv3d,
+                nnq.BatchNorm2d,
+                nnq.BatchNorm3d,
+                nnq.ConvTranspose1d,
+                nnq.ConvTranspose2d,
+                nnq.ELU,
+                nnq.GroupNorm,
+                nnq.InstanceNorm1d,
+                nnq.InstanceNorm2d,
+                nnq.InstanceNorm3d,
+                nnq.LayerNorm,
+                nnq.Hardswish,
+                nnq.LeakyReLU,
+                nnq.ReLU6,
+                nniq.BNReLU2d,
+                nniq.BNReLU3d,
+                nniq.ConvReLU1d,
+                nniq.ConvReLU2d,
+                nniq.ConvReLU3d,
+                nniq.LinearReLU,
+            )
+        ):
+            return (module_obj.scale, module_obj.zero_point)  # type: ignore[return-value]
+
+    # TODO(future PR): handle functionals
+    # TODO(future PR): handle ops which inherit qparams from input
+    return None
 
 def return_first_non_observer_node(
     node: Node,
