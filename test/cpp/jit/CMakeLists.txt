@@ -66,6 +66,7 @@ set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_subgraph_utils.cpp
   ${JIT_TEST_ROOT}/test_union.cpp
   ${JIT_TEST_ROOT}/test_utils.cpp
+  ${JIT_TEST_ROOT}/test_script_profile.cpp
 )
 
 if(USE_CUDA)

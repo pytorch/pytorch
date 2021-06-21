@@ -1,23 +1,24 @@
 #pragma once
 
 #include <atomic>
-#ifdef USE_CUDA
-#include <ATen/cuda/CUDAEvent.h>
-#endif
 #include <memory>
 #include <mutex>
 #include <tuple>
 #include <unordered_map>
 #include <vector>
 
+#include <ATen/core/ivalue_inl.h>
+#include <ATen/ThreadLocalState.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10d/ProcessGroup.hpp>
-#include <c10d/comm.hpp>
 #include <c10d/Utils.hpp>
+#include <c10d/comm.hpp>
 #include <c10d/default_comm_hooks.hpp>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
+#ifndef _WIN32
 #include <torch/csrc/distributed/autograd/context/context.h>
+#endif
 
 namespace c10d {
 
@@ -26,27 +27,30 @@ constexpr int kDefaultBucketBytesCap = int(25 * 1024 * 1024);
 // Collect runtime stats once for every kDDPRuntimeLoggingSampleRate iterations.
 constexpr int kDDPRuntimeLoggingSampleRate = 100;
 
-// Locates a specific variable by replica index and variable index.
-struct VariableIndex {
-  size_t replica_index;
-  size_t variable_index;
+// Forward declaration
+class Logger;
 
-  VariableIndex() = default;
+class Timer {
+ public:
+  enum class Event {
+    kForwardStart,
+    kBackwardComputeStart,
+    kBackwardComputeEnd,
+    kBackwardCommStart,
+    kBackwardCommEnd,
+  };
 
-  VariableIndex(size_t replica_index_, size_t variable_index_) {
-    replica_index = replica_index_;
-    variable_index = variable_index_;
-  }
+  // Record the current event, i.e., mark it as having occurred now.
+  virtual void record(Event event) = 0;
 
-  static size_t hash(const VariableIndex& key) {
-    return c10::get_hash(key.replica_index, key.variable_index);
-  }
+  // Return the difference between when two events occurred, in nanoseconds.
+  // Or nullopt if one of them hasn't been recorded.
+  virtual c10::optional<int64_t> measureDifference(Event start, Event end) = 0;
+
+  virtual ~Timer() = default;
 };
 
-inline bool operator==(const VariableIndex& lhs, const VariableIndex& rhs) {
-  return lhs.replica_index == rhs.replica_index
-    && lhs.variable_index == rhs.variable_index;
-}
+C10_DECLARE_TYPED_REGISTRY(TimerRegistry, c10::DeviceType, Timer, std::unique_ptr, c10::Device);
 
 class Reducer {
  public:
@@ -62,8 +66,7 @@ class Reducer {
       int64_t bucket_bytes_cap,
       bool find_unused_parameters,
       bool gradient_as_bucket_view,
-      std::unordered_map<size_t, std::string>
-          paramNames);
+      std::unordered_map<size_t, std::string> paramNames);
 
   ~Reducer() noexcept(false);
 
@@ -153,11 +156,15 @@ class Reducer {
   // Delay all reduce to be after all gradients' calculation is complete.
   void delay_all_reduce();
 
+  // Weak reference to associated DDP logger. The reference is weak to avoid
+  // refcycle between reducer and logger.
+  void set_logger(std::weak_ptr<c10d::Logger> logger);
+
  protected:
   // Forward declaration.
   struct Bucket;
 
-  void push_rebuilt_params(const VariableIndex& index);
+  void push_rebuilt_params(const size_t& index);
 
   mutable std::mutex mutex_;
   const std::vector<std::vector<at::Tensor>> replicas_;
@@ -166,8 +173,7 @@ class Reducer {
 
   std::vector<std::vector<std::shared_ptr<torch::autograd::Node>>>
       grad_accumulators_;
-  std::unordered_map<torch::autograd::Node*, VariableIndex>
-      gradAccToVariableMap_;
+  std::unordered_map<torch::autograd::Node*, size_t> gradAccToVariableMap_;
   std::vector<std::pair<uintptr_t, std::shared_ptr<torch::autograd::Node>>>
       hooks_;
 
@@ -178,7 +184,7 @@ class Reducer {
   bool has_marked_unused_parameters_;
   const bool find_unused_parameters_;
   const bool gradient_as_bucket_view_;
-  std::vector<VariableIndex> unused_parameters_;
+  std::vector<size_t> unused_parameters_;
   // Locally used parameter maps indicating if parameters are used locally
   // during the current iteration or no_sync session if no_sync is on. One
   // tensor for each model replica and each tensor is one-dim int32 tensor of
@@ -194,16 +200,19 @@ class Reducer {
   // Indicate that reduction is done and D2H copy is done as well.
   bool local_used_maps_reduced_;
 
+  // Weak pointer to associated DDP logger.
+  std::weak_ptr<c10d::Logger> logger_;
+
   // Work handle for allreduce on local_used_maps_
   c10::intrusive_ptr<c10d::ProcessGroup::Work> local_used_work_;
 
-  void mark_variable_ready_dense(VariableIndex index);
+  void mark_variable_ready_dense(size_t variable_index);
 
-  void mark_variable_ready_sparse(VariableIndex index);
+  void mark_variable_ready_sparse(size_t variable_index);
 
-  void mark_variable_ready(VariableIndex index);
+  void mark_variable_ready(size_t variable_index);
 
-  void autograd_hook(VariableIndex index);
+  void autograd_hook(size_t index);
 
   void mark_bucket_ready(size_t bucket_index);
 
@@ -219,8 +228,19 @@ class Reducer {
   // the buckets
   void sync_bucket_indices(std::vector<std::vector<size_t>>& bucket_indices);
 
-  using GradCallback =
-      torch::distributed::autograd::DistAutogradContext::GradCallback;
+  // We'd like to use DistAutogradContext::GradCallback here but dist autograd
+  // doesn't exist under Windows. So we just directly use the concrete type but
+  // to preserve and enforce our original intent we do a static assert when dist
+  // autograd is available.
+  using GradCallback = std::function<bool(at::Tensor&)>;
+#ifndef _WIN32
+  static_assert(
+      std::is_same<
+          GradCallback,
+          torch::distributed::autograd::DistAutogradContext::GradCallback>::
+          value,
+      "");
+#endif
   void runGradCallbackForVariable(at::Tensor& variable, GradCallback&& cb);
 
   // A bucket replica represents [1..N] gradients to be reduced,
@@ -293,11 +313,8 @@ class Reducer {
       Reducer::BucketReplica& replica,
       size_t intra_bucket_index,
       bool global_unused);
-  // Check layout of grad and bucket_view before calling copy_grad_to_bucket
+  // Check layout of grad and bucket_view before copying the grad to bucket.
   void check_grad_layout(const at::Tensor& grad, const at::Tensor& bucket_view);
-  // If gradient_as_bucket_view_ is false, before allreduce buckets,
-  // copy grads to buckets.
-  void copy_grad_to_bucket(const at::Tensor& grad, at::Tensor& bucket_view);
 
   // A bucket holds N bucket replicas (1 per model replica).
   //
@@ -313,11 +330,10 @@ class Reducer {
     // Number of replicas to be marked done before this bucket is ready.
     size_t pending;
 
-    // Keep work handle around when this set of buckets is being reduced.
-    c10::intrusive_ptr<c10d::ProcessGroup::Work> work;
-
-    // Keep future work handle around if DDP comm hook is registered.
-    c10::intrusive_ptr<torch::jit::Future> future_work;
+    // Keep future work handle around DDP comm hook.
+    // If no hook is registered, a temporary vanilla allreduce hook will be
+    // used.
+    c10::intrusive_ptr<at::ivalue::Future> future_work;
 
     // If this bucket should expect a single sparse gradient.
     // Implies: replicas[i].variables.size() == 1.
@@ -353,37 +369,9 @@ class Reducer {
   // communication calls like allReduce or communication hooks.
   int num_buckets_ready_;
 
-  // CPU timestamp to record event start and end time.
-  struct CPUTimer {
-    // The timestamp of forward call start time in each iteration.
-    int64_t forward_start_time;
-    // The timestamp of backward computation start and end time in each
-    // iteration.
-    int64_t backward_compute_start_time;
-    int64_t backward_compute_end_time;
-    // The timestamp of first communication call start time in each iteration.
-    int64_t backward_comm_start_time;
-    // The timestamp of last communication call end time in each iteration.
-    int64_t backward_comm_end_time;
-  };
-
-  CPUTimer cpu_timer_{};
-
-#ifdef USE_CUDA
-  // GPU events to record event start and end time.
-  struct GPUTimer {
-    at::cuda::CUDAEvent forward_start = at::cuda::CUDAEvent(cudaEventDefault);
-    at::cuda::CUDAEvent backward_compute_start =
-        at::cuda::CUDAEvent(cudaEventDefault);
-    at::cuda::CUDAEvent backward_compute_end =
-        at::cuda::CUDAEvent(cudaEventDefault);
-    at::cuda::CUDAEvent backward_comm_start =
-        at::cuda::CUDAEvent(cudaEventDefault);
-    at::cuda::CUDAEvent backward_comm_end =
-        at::cuda::CUDAEvent(cudaEventDefault);
-  };
-  GPUTimer gpu_timer_;
-#endif
+  // Timing information.
+  int64_t backward_compute_start_time_ = -1;
+  std::unique_ptr<Timer> timer_;
 
   // We collect the relative timestamp of every gradient being ready
   // when executing autograd. This can be used to derive a timeline of
@@ -408,6 +396,7 @@ class Reducer {
   std::vector<int64_t> rebuilt_param_indices_;
   const int64_t bucket_bytes_cap_;
 
+#ifndef _WIN32
   struct RpcContext {
     using ContextPtr = torch::distributed::autograd::ContextPtr;
     // The shared_ptr is to hold the context instance.
@@ -417,6 +406,7 @@ class Reducer {
     void set(ContextPtr&& new_context_ptr);
   };
   RpcContext rpc_context_;
+#endif
 
   // A struct containing work handle and tensor for allreduce scheduled in
   // forward pass, if applicable.
@@ -433,18 +423,21 @@ class Reducer {
   ForwardPassAllreduceWork forwardPassWorkHandle_;
 
   // Division factor for reduction of gradients.
-  int divFactor_;
+  // Equal to the process group size, with an exception of handling uneven
+  // input.
+  int div_factor_;
 
   bool static_graph_;
 
-  // Key: VariableIndex, Value: the number of times that a variable's autograd_hook()
-  // should be triggered before marking this variable's grad as ready for communication.
-  // Map will not change after 1st iteration.
-  std::unordered_map<VariableIndex, int, c10::hash<VariableIndex>> numGradHooksTriggeredMap_;
-  // Key: VariableIndex, Value: the number of times that a variable's autograd_hook()
-  // are left to be triggered before marking this variable's grad as ready for communication.
-  // Map will change after 1st iteration to track a grad is ready for communication or not.
-  std::unordered_map<VariableIndex, int, c10::hash<VariableIndex>> numGradHooksTriggeredMapPerIteration_;
+  // Key: size_t (index), Value: the number of times that a variable's
+  // autograd_hook() should be triggered before marking this variable's grad as
+  // ready for communication. Map will not change after 1st iteration.
+  std::unordered_map<size_t, int> numGradHooksTriggeredMap_;
+  // Key: size_t (index), Value: the number of times that a variable's
+  // autograd_hook() are left to be triggered before marking this variable's
+  // grad as ready for communication. Map will change after 1st iteration to
+  // track a grad is ready for communication or not.
+  std::unordered_map<size_t, int> numGradHooksTriggeredMapPerIteration_;
 
  private:
   // reset counting for buckets before backward starts
@@ -455,7 +448,8 @@ class Reducer {
   void set_divide_factor();
   // kick off all reduce for the ready bucket
   void all_reduce_bucket(Bucket& bucket);
-  // kick off all reduce to local used map, it can help find global unused parameters
+  // kick off all reduce to local used map, it can help find global unused
+  // parameters
   void all_reduce_local_used_map();
   // initialize locally used parameter maps
   void initialize_local_used_map();
@@ -486,6 +480,8 @@ class Reducer {
   // Raises appropriate error if mark_variable_ready is called on the same
   // variable twice, which is unexpected.
   void checkAndRaiseMarkedTwiceError(size_t curVariableIndex);
+  // Retrieves parameter corresponding to the given VariableIndex.
+  at::Tensor& get_param_from_index(size_t index);
 
   friend class Logger;
 };

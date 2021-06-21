@@ -17,6 +17,7 @@ import sys
 import builtins
 import io
 import pickle
+import functools
 # This is needed. `torch._jit_internal` is imported before `torch.distributed.__init__`.
 # Explicitly ask to import `torch.distributed.__init__` first.
 # Otherwise, "AttributeError: module 'torch' has no attribute 'distributed'" is raised.
@@ -59,6 +60,11 @@ def createResolutionCallbackFromEnv(lookup_base):
         i = 0
         while i < len(expr) and expr[i] not in (',', '[', ']'):
             i += 1
+
+        # Special case logic for the empty Tuple as a subscript (used
+        # in the type annotation `Tuple[()]`)
+        if expr[:i] == '()':
+            return (), i
 
         base = lookupInModule(expr[:i].strip(), module)
         assert base is not None, f"Unresolvable type {expr[:i]}"
@@ -540,6 +546,14 @@ def unused(fn):
     fn._torchscript_modifier = FunctionModifiers.UNUSED
     return fn
 
+# No op context manager from python side
+class _IgnoreContextManager(contextlib.AbstractContextManager):
+    def __init__(self, **kwargs):
+        pass
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        pass
+
 def ignore(drop=False, **kwargs):
     """
     This decorator indicates to the compiler that a function or method should
@@ -647,6 +661,10 @@ def module_has_exports(mod):
                     return True
     return False
 
+
+# WARNING: should_drop is currently being used by our JIT code coverage plug-in to mark JIT'd code as covered. If you
+# rename this function, please update references in tools/coverage_plugins_package/src/coverage_plugins/jit_plugin.py to
+# allow JIT'd code to still be covered.
 def should_drop(fn) -> bool:
     attr = get_torchscript_modifier(fn)
     if attr is None:
@@ -956,7 +974,11 @@ class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
     def __init__(self, source, filename, file_lineno, leading_whitespace_len, uses_true_division=True):
         super(SourceContext, self).__init__(source, filename, file_lineno, leading_whitespace_len)
         self.uses_true_division = uses_true_division
+        self.filename = filename
 
+@functools.lru_cache(maxsize=None)
+def make_source_context(*args):
+    return SourceContext(*args)
 
 def fake_range():
     return SourceContext('', None, 0, 0).make_raw_range(0, 1)
@@ -1090,15 +1112,16 @@ def container_checker(obj, target_type) -> bool:
             elif not isinstance(el, el_type):
                 return False
         return True
-    elif origin_type is Union:  # actually handles Optional Case
+    elif origin_type is Union:  # also handles Optional
         if obj is None:  # check before recursion because None is always fine
             return True
-        optional_type = get_args(target_type)[0]
-        optional_origin = get_origin(optional_type)
-        if optional_origin:
-            return container_checker(obj, optional_type)
-        elif isinstance(obj, optional_type):
-            return True
+        inner_types = get_args(target_type)
+        for t in inner_types:
+            t_origin = get_origin(t)
+            if (t_origin):
+                return container_checker(obj, t)
+            elif isinstance(obj, t):
+                return True
     return False
 
 
