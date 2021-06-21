@@ -220,12 +220,10 @@ __global__ void nll_loss_backward_reduce_cuda_kernel_2d(
   if (*total_weight <= 0) {
     return;
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int i, t;
   scalar_t norm = size_average ? (static_cast<scalar_t>(1) / *total_weight) : static_cast<scalar_t>(1);
 
-  for (i = threadIdx.x; i < nframe; i += NLL_LOSS_THREADS) {
-    t = target[i];
+  for (int i = threadIdx.x; i < nframe; i += NLL_LOSS_THREADS) {
+    int t = target[i];
     if (t != static_cast<int>(ignore_index)) {
       CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
       grad_input[i * ndim + t] = -(weights != nullptr ? weights[t] : static_cast<scalar_t>(1)) * norm * grad_output[0];
@@ -291,7 +289,7 @@ void nll_loss_backward_out_cuda_template(
                   target.data_ptr<int64_t>(),
                   grad_output.packed_accessor64<scalar_t, 1>(),
                   grad_input.packed_accessor64<scalar_t, 2>(),
-                  weight.defined() ? weight.data_ptr<scalar_t>() : nullptr_t,
+                  weight.defined() ? weight_.data_ptr<scalar_t>() : nullptr,
                   n_classes,
                   ignore_index);
           C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -314,7 +312,7 @@ void nll_loss_backward_out_cuda_template(
               <<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
                    grad_input.data_ptr<scalar_t>(),
                    grad_output.data_ptr<scalar_t>(),
-                   weight.defined() ? weight.data_ptr<scalar_t>() : nullptr_t,
+                   weight.defined() ? weight_.data_ptr<scalar_t>() : nullptr,
                    target.data_ptr<int64_t>(),
                    total_weight.data_ptr<scalar_t>(),
                    reduction == at::Reduction::Mean,
@@ -340,7 +338,7 @@ void nll_loss_backward_out_cuda_template(
                   grad_input.data_ptr<scalar_t>(),
                   grad_output.data_ptr<scalar_t>(),
                   target.data_ptr<int64_t>(),
-                  weight.defined() ? weight.data_ptr<scalar_t>() : nullptr_t,
+                  weight.defined() ? weight_.data_ptr<scalar_t>() : nullptr,
                   total_weight.data_ptr<scalar_t>(),
                   reduction == at::Reduction::Mean,
                   input.size(0),
