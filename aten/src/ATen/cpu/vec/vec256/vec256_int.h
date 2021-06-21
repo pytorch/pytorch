@@ -22,10 +22,10 @@ protected:
     return _mm256_xor_si256(ones, v);
   }
 public:
-  Vectorizedi() {}
-  Vectorizedi(__m256i v) : values(v) {}
-  operator __m256i() const {
-    return values;
+ Vectorizedi() = default;
+ Vectorizedi(__m256i v) : values(v) {}
+ operator __m256i() const {
+   return values;
   }
 };
 
