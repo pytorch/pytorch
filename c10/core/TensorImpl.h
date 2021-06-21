@@ -1504,6 +1504,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     pyobj_ = pyobj;
   }
 
+  bool has_pyobj() const  {
+    return pyobj_ != nullptr;
+  }
+
   // Test the interpreter tag.  If tagged for the current interpreter, return
   // a non-nullopt (but possibly null) PyObject.  If (possibly) untagged,
   // returns a nullopt.  If it is definitely invalid, raises an error.

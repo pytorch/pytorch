@@ -40,15 +40,17 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output, bool is_i
     const auto& version_counter = impl::version_counter(variable);
     saved_version_ = version_counter.current_version();
 
-    // If the variable is a leaf or is not an output, we can safely save the
-    // original variable without running the risk of reference cycles.
+    // If some cases, we can safely save the original variable without running
+    // the risk of reference cycles.
     // 1. If the variable is not an output, its grad_fn has already been fully
     // created and in particular will be a different Node than the one
     // we are currently constructing (the one that owns this SavedVariable).
     // 2. If the variable is a leaf, it only has weak reference to the grad_accumulator
     // which cannot create a cycle.
+    // 3. If the variable is associated with a pyobj, we can rely on Python's GC to
+    // break the cycle.
     // In those cases, we save the original variable and don't need further processing.
-    if (!is_output || variable.is_leaf()) {
+    if (!is_output || variable.is_leaf() || variable.unsafeGetTensorImpl()->has_pyobj()) {
       saved_original_ = true;
       data_ = variable;
       return;

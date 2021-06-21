@@ -5509,6 +5509,33 @@ for shape in [(1,), ()]:
         self.assertEqual(b, b_unpacked)
         self.assertEqual(b._version, b_unpacked._version)
 
+    def test_tensor_subclass(self):
+        class LoggingTensor(torch.Tensor):
+            pass
+
+        class SquareFunction(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                y = torch.mul(x, x)
+                ctx.save_for_backward(x, y)
+                ctx.ids = (id(x), id(y))
+
+                self.assertEqual(type(x), LoggingTensor)
+                self.assertEqual(type(y), LoggingTensor)
+                return y
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                x, y = ctx.saved_tensors
+                self.assertEqual(type(x), LoggingTensor)
+                self.assertEqual(type(y), LoggingTensor)
+                self.assertEqual(id(x), ctx.ids[0])
+                self.assertEqual(id(y), ctx.ids[1])
+                return 2 * x * grad_output
+
+        lt = LoggingTensor(torch.rand(3, requires_grad=True))
+        y = SquareFunction.apply(lt)
+        y.sum().backward()
 
 def index_perm_variable(shape, max_indices):
     if not isinstance(shape, tuple):
