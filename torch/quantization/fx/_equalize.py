@@ -284,8 +284,8 @@ def get_weight_eq_obs(
     return None, None
 
 def maybe_get_weight_eq_obs_node(op_node: Node, modules: Dict[str, nn.Module]) -> Optional[Node]:
-    """ Given the operation node, we want to find its previous weight
-    equalization observer node
+    """ Given the operation node, we want to find its weight equalization
+    observer node
     """
     assert(op_node.op == 'call_function')
     assert(isinstance(op_node.args[1], Node))
@@ -318,13 +318,11 @@ def maybe_get_next_input_eq_obs(node: Node, modules: Dict[str, nn.Module]) -> Op
            (node.op == 'call_function' and node.target == F.linear))
 
     # Locate the following output observer if it exists
-    maybe_obs_node = maybe_get_next_module(node, modules, lambda a : isinstance(a, ObserverBase))
+    maybe_obs_node = maybe_get_next_module(node, modules, ObserverBase)
     if maybe_obs_node is None:
         return None
 
-    maybe_eq_obs_node = maybe_get_next_module(
-        maybe_obs_node, modules, lambda a : isinstance(a, _InputEqualizationObserver)
-    )
+    maybe_eq_obs_node = maybe_get_next_module(maybe_obs_node, modules, _InputEqualizationObserver)
     if maybe_eq_obs_node is None:
         return None
 
@@ -506,21 +504,20 @@ def convert_eq_obs(
     """ Removes the input equalization observers and replaces them with mul
     operators whenever applicable. Updates the input quantization observers with
     the scaled input min/max values. Scales the weights by the current and next
-    equalization scales.
+    equalization scales, and removes the weight equalization observer node if it
+    exists.
 
     Before:
-                                     weight values
+                                    weight values
+                                          |
+                                    WeightQuantObs
                                           |
                                       WeightEqObs
-                                          |
-                                     WeightQuantObs
                                           |
         x -> InpQuantObs -> InpEqObs -> linear -> OutQuantObs
 
     After:
                                               scaled weight values
-                                                      |
-                                                 WeightEqObs
                                                       |
        equalization scale                       WeightQuantObs
               |                                       |
