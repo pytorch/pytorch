@@ -1021,6 +1021,60 @@ struct MaybeOwnedTraits<at::Tensor> {
     return true;
   }
 };
+
+template <>
+struct ExclusivelyOwnedTraits<at::Tensor> {
+  using repr_type = at::Tensor;
+  using pointer_type = at::Tensor*;
+  using const_pointer_type = const at::Tensor*;
+
+  static repr_type nullRepr() {
+    return at::Tensor();
+  }
+
+  template <class... Args>
+  static repr_type createInPlace(Args&&... args) {
+    return at::Tensor(std::forward<Args>(args)...);
+  }
+
+  static repr_type moveToRepr(at::Tensor&& x) {
+    return std::move(x);
+  }
+
+  static void destroyOwned(at::Tensor& x) {
+    TensorImpl*const toDestroy = x.unsafeReleaseTensorImpl();
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(toDestroy != nullptr, "Tensor somehow got null TensorImpl?");
+    // May be 0 because UndefinedTensorImpl doesn't get its refcount
+    // incremented.
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        toDestroy->refcount_ == 1 || (toDestroy->refcount_ == 0 && toDestroy == UndefinedTensorImpl::singleton()),
+        "ExclusivelyOwned<Tensor> destroyed with refcount ", toDestroy->refcount_, ", expected 1!");
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        toDestroy->weakcount_ == 1 || (toDestroy->weakcount_ == 0 && toDestroy == UndefinedTensorImpl::singleton()),
+        "ExclusivelyOwned<Tensor> destroyed with weakcount ", toDestroy->weakcount_, ", expected 1!");
+    if (toDestroy != UndefinedTensorImpl::singleton()) {
+#ifndef NDEBUG
+      // Needed to pass the debug assertions in ~intrusive_ptr_target.
+      toDestroy->refcount_ = 0;
+      toDestroy->weakcount_ = 0;
+#endif
+      toDestroy->release_resources();
+      delete toDestroy;
+    }
+  }
+
+  static at::Tensor take(at::Tensor& x) {
+    return std::move(x);
+  }
+
+  static pointer_type getImpl(repr_type& x) {
+    return &x;
+  }
+
+  static const_pointer_type getImpl(const repr_type& x) {
+    return &x;
+  }
+};
 } // namespace c10
 
 namespace at {
