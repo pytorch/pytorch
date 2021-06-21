@@ -1,0 +1,1 @@
+This folder contains linter scripts 
