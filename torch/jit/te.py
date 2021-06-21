@@ -87,8 +87,13 @@ class PointwiseCompiler(object):
         for i, spec in enumerate(self.spec):
             if spec.requires_grad:
                 assert spec.alias_group == 0, "TODO: support aliased backwards"
-                assert spec.out == 0, "TODO: autograd on out?"
-                self.result.set_backwards(i, None)
+                assert spec.out == 0, "TODO: support autograd on out= ?"
+                for d in range(self.ndim):
+                    shape_types = {shape[d] for shape in self.shapes}
+                    assert len(shape_types) == 1, "TODO: support backwards for broadcasting"
+
+                # TODO: compute actual backward
+                self.result.set_backwards(i, pointwise_operator(lambda a, b, c: a * c))
 
     def compute_broadcasts_and_size_checks(self):
         ndim = self.ndim
