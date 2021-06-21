@@ -497,7 +497,7 @@ class ConvReluQuantizeHandler(QuantizeHandler):
             self.conv.activation_post_process = output_activation_post_process
             # 2. select quantized class
             qconv_cls = get_static_quant_module_class(
-                type(self.conv), additional_static_quant_mapping)
+                type(self.conv), additional_static_quant_mapping, is_reference=is_reference)
             quantized = qconv_cls.from_float(self.conv)
             parent_name, name = _parent_name(self.conv_node.target)
             setattr(modules[parent_name], name, quantized)
