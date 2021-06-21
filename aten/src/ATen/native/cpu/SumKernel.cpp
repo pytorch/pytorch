@@ -71,6 +71,22 @@ struct InnerSumCastLoadPolicy<scalar_t, scalar_t>:
     LoadPolicy<scalar_t> {
 };
 
+#if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX)
+template <>
+struct InnerSumCastLoadPolicy<Vectorized<float>, Vectorized<double>> {
+  using vec_t = Vectorized<float>;
+  using vacc_t = Vectorized<double>;
+
+  static vacc_t load(const char * C10_RESTRICT data, int64_t stride, int64_t index) {
+    auto ptr = reinterpret_cast<const float*>(data + stride * index);
+    vacc_t first(_mm256_cvtps_pd(_mm_loadu_ps(ptr)));
+    ptr += vacc_t::size();
+    vacc_t second(_mm256_cvtps_pd(_mm_loadu_ps(ptr)));
+    return first + second;
+  }
+};
+#endif
+
 #if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 template <>
 struct InnerSumCastLoadPolicy<Vectorized<c10::BFloat16>, Vectorized<float>> {
@@ -106,6 +122,19 @@ struct OuterSumCastLoadPolicy {
     return vacc_t::loadu(acc);
   }
 };
+
+#if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX)
+template <>
+struct OuterSumCastLoadPolicy<Vectorized<float>, Vectorized<double>> {
+  using vec_t = Vectorized<float>;
+  using vacc_t = Vectorized<double>;
+
+  static vacc_t load(const char * C10_RESTRICT data, int64_t stride, int64_t index) {
+    auto ptr = reinterpret_cast<const float*>(data + stride * index);
+    return _mm256_cvtps_pd(_mm_loadu_ps(ptr));
+  }
+};
+#endif
 
 #if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 template <>
@@ -292,7 +321,7 @@ void vectorized_inner_sum(
     char * C10_RESTRICT data[2], int64_t outer_stride, int64_t out_stride,
     int64_t size0, int64_t size1) {
   using vec_t = Vectorized<scalar_t>;
-  using acc_t = at::acc_type<scalar_t, true>;
+  using acc_t = at::acc_type<scalar_t, false>;
   using vacc_t = Vectorized<acc_t>;
   using VecLoadPolicy = InnerSumCastLoadPolicy<vec_t, vacc_t>;
   using ScalarLoadPolicy = CastLoadPolicy<scalar_t, acc_t>;
@@ -324,7 +353,7 @@ void scalar_inner_sum(
     // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     char * C10_RESTRICT data[2], int64_t in_strides[2], int64_t out_stride,
     int64_t size0, int64_t size1) {
-  using acc_t = at::acc_type<scalar_t, true>;
+  using acc_t = at::acc_type<scalar_t, false>;
   using LoadPolicy = CastLoadPolicy<scalar_t, acc_t>;
   using StorePolicy = CastStoreAccumulate<scalar_t, acc_t>;
 
@@ -341,7 +370,7 @@ void vectorized_outer_sum(
     char * C10_RESTRICT data[2], int64_t inner_stride, int64_t out_stride,
     int64_t size0, int64_t size1) {
   using vec_t = Vectorized<scalar_t>;
-  using acc_t = at::acc_type<scalar_t, true>;
+  using acc_t = at::acc_type<scalar_t, false>;
   using vacc_t = Vectorized<acc_t>;
   using VecLoadPolicy = OuterSumCastLoadPolicy<vec_t, vacc_t>;
   using ScalarLoadPolicy = CastLoadPolicy<scalar_t, acc_t>;
@@ -385,7 +414,7 @@ void scalar_outer_sum(
     // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     char * C10_RESTRICT data[2], int64_t in_strides[2], int64_t out_stride,
     int64_t size0, int64_t size1) {
-  using acc_t = at::acc_type<scalar_t, true>;
+  using acc_t = at::acc_type<scalar_t, false>;
   using LoadPolicy = CastLoadPolicy<scalar_t, acc_t>;
   using StorePolicy = CastStoreAccumulate<scalar_t, acc_t>;
 
