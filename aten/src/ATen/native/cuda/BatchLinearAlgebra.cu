@@ -2853,25 +2853,53 @@ static void lu_solve_looped_magma(const Tensor& b, const Tensor& lu, const Tenso
   });
 }
 
+#if defined(USE_CUSOLVER) || defined(CUDART_VERSION)
+cublasOperation_t _get_cublas_trans(char trans) {
+  switch (trans) {
+    case 'N':
+      return CUBLAS_OP_N;
+    case 'T':
+      return CUBLAS_OP_T;
+    case 'C':
+      return CUBLAS_OP_C;
+    default:
+      return CUBLAS_OP_N;
+  }
+}
+#endif
+
+magma_trans_t _get_magma_trans(char trans) {
+  switch (trans) {
+    case 'N':
+      return MagmaNoTrans;
+    case 'T':
+      return MagmaTrans;
+    case 'C':
+      return MagmaConjTrans;
+    default:
+      return MagmaNoTrans;
+  }
+}
+
 static void lu_solve_trans_dispatch(const Tensor& b, const Tensor& lu, const Tensor& pivots, char trans) {
   auto batch_size = batchCount(lu);
   auto m = lu.size(-2);
 #ifdef USE_CUSOLVER
   if (batch_size == 1 && m > 512) {
-    lu_solve_looped_cusolver(b, lu, pivots, CUBLAS_OP_N);
+    lu_solve_looped_cusolver(b, lu, pivots, _get_cublas_trans(trans));
   }
 #else
   if (batch_size == 1) {
-    lu_solve_looped_magma(b, lu, pivots, MagmaNoTrans);
+    lu_solve_looped_magma(b, lu, pivots, _get_magma_trans(trans));
   }
 #endif // ifdef USE_CUSOLVER
 #ifdef CUDART_VERSION
   else if (batch_size > 2 && m <= 128) {
-    lu_solve_batched_cublas(b, lu, pivots, CUBLAS_OP_N);
+    lu_solve_batched_cublas(b, lu, pivots, _get_cublas_trans(trans));
   }
 #endif // ifdef CUDART_VERSION
   else {
-    lu_solve_batched_magma(b, lu, pivots, MagmaNoTrans);
+    lu_solve_batched_magma(b, lu, pivots, _get_magma_trans(trans));
   }
 }
 
