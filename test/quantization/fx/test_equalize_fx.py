@@ -1,8 +1,10 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.quantization import default_qconfig
 from torch.quantization.observer import MinMaxObserver, PerChannelMinMaxObserver
 from torch.quantization.quantize_fx import prepare_fx, convert_fx
+from torch.quantization.fx.convert import run_weight_observers
 from torch.quantization.fx._equalize import (
     _InputEqualizationObserver,
     _WeightEqualizationObserver,
@@ -15,11 +17,100 @@ from torch.testing._internal.common_quantization import NodeSpec as ns
 from torch.testing._internal.common_quantization import QuantizationTestCase
 
 # Standard Libraries
+import copy
 import numpy as np
 
 # Testing utils
 from hypothesis import given
 from hypothesis import strategies as st
+
+# Basic test with one linear layer
+class LinearModule(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = nn.Linear(2, 2)
+
+    def forward(self, x):
+        return self.linear(x)
+
+# Test with two connected linear layers
+class Linear2Module(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear1 = nn.Linear(2, 2)
+        self.linear2 = nn.Linear(2, 2)
+
+    def forward(self, x):
+        x = self.linear1(x)
+        x = self.linear2(x)
+        return x
+# Test with two connected linear layers
+class Linear2FP32Module(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear1 = nn.Linear(2, 2)
+        self.linear2 = nn.Linear(2, 2)
+
+    def forward(self, x):
+        x = self.linear1(x)
+        x = torch.add(x, 5)
+        x = self.linear2(x)
+        return x
+
+class Linear(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.weight = torch.rand((2, 2))
+        self.bias = torch.zeros(2)
+
+    def forward(self, x):
+        return F.linear(x, self.weight, self.bias)
+
+# Test where we have one functional linear layer
+class FunctionalLinearModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear1 = Linear()
+
+    def forward(self, x):
+        x = self.linear1(x)
+        return x
+
+# Test where we have two connected functional linear layers
+class FunctionalLinear2Module(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear1 = Linear()
+        self.linear2 = Linear()
+
+    def forward(self, x):
+        x = self.linear1(x)
+        x = self.linear2(x)
+        return x
+
+# Test where we have a Linear layer followed by a fp32 operation
+# (conv layer) without a qconfig
+class FunctionalLinear2FP32Module(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear1 = Linear()
+        self.linear2 = Linear()
+
+    def forward(self, x):
+        x = self.linear1(x)
+        x = torch.add(x, 5)
+        x = self.linear2(x)
+        return x
+
+qconfig_dict = {"": None,
+                "object_type": [(nn.Linear, default_qconfig),
+                                (F.linear, default_qconfig)]}
+
+default_equalization_qconfig_dict = {
+    "": None,
+    "object_type": [(nn.Linear, default_equalization_qconfig),
+                    (F.linear, default_equalization_qconfig)]
+}
 
 
 class TestEqualizeFx(QuantizationTestCase):
@@ -135,66 +226,16 @@ class TestEqualizeFx(QuantizationTestCase):
     def test_input_weight_equalization_prepare(self):
         """ Tests that graphs created after prepare_fx is as expected
         """
-        qconfig_dict = {"": None,
-                        "object_type": [(nn.Linear, default_qconfig), (nn.functional.linear, default_qconfig)]}
-
-        default_equalization_qconfig_dict = {
-            "": default_qconfig,
-            "object_type": [(nn.Linear, default_equalization_qconfig),
-                            (nn.functional.linear, default_equalization_qconfig)]
-        }
-
-        # Basic test with one linear layer
-        class LinearModule(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = nn.Linear(1, 1)
-
-            def forward(self, x):
-                return self.linear(x)
 
         linear_node_occurrence = {
             ns.call_module(_InputEqualizationObserver): 1,
             ns.call_module(MinMaxObserver): 2,
         }
 
-        # Test with two linear layers
-        class Linear2Module(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear1 = nn.Linear(1, 1)
-                self.linear2 = nn.Linear(1, 1)
-
-            def forward(self, x):
-                x = self.linear1(x)
-                x = self.linear2(x)
-                return x
-
         linear2_node_occurrence = {
             ns.call_module(_InputEqualizationObserver): 2,
             ns.call_module(MinMaxObserver): 3,
         }
-
-        class Linear(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.w = torch.ones(5, 5)
-                self.b = torch.zeros(5)
-
-            def forward(self, x):
-                return nn.functional.linear(x, self.w, self.b)
-
-        # Test where we have two functional linear layers
-        class FunctionalLinearModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear1 = Linear()
-                self.linear2 = Linear()
-
-            def forward(self, x):
-                x = self.linear1(x)
-                x = self.linear2(x)
-                return x
 
         functionalLinear_node_occurrence = {
             ns.call_module(_InputEqualizationObserver): 2,
@@ -202,38 +243,16 @@ class TestEqualizeFx(QuantizationTestCase):
             ns.call_module(MinMaxObserver): 5,
         }
 
-        # Test where we have a Linear layer followed by a fp32 operation
-        # (conv layer) without a qconfig
-        class FunctionalLinearFP32Module(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear1 = Linear()
-                self.conv = nn.Conv2d(3, 3, 1, 1)
-                self.linear2 = Linear()
-
-            def forward(self, x):
-                x = self.linear1(x)
-                x = torch.add(x, 5)
-                x = self.linear2(x)
-                return x
-
-        fp32_equalization_qconfig_dict = {
-            "": None,
-            "object_type": [(nn.Linear, default_equalization_qconfig),
-                            (nn.functional.linear, default_equalization_qconfig)]
-        }
-
-        functionalLinearFP32_node_occurrence = {
+        functionalLinear2FP32_node_occurrence = {
             ns.call_module(_InputEqualizationObserver): 2,
             ns.call_module(_WeightEqualizationObserver): 2,
             ns.call_module(MinMaxObserver): 6,
         }
 
         tests = [(LinearModule, default_equalization_qconfig_dict, linear_node_occurrence),
-                 (Linear2Module, fp32_equalization_qconfig_dict, linear2_node_occurrence),
-                 (FunctionalLinearModule, default_equalization_qconfig_dict, functionalLinear_node_occurrence),
-                 (FunctionalLinearFP32Module, fp32_equalization_qconfig_dict, functionalLinearFP32_node_occurrence)]
-
+                 (Linear2Module, default_equalization_qconfig_dict, linear2_node_occurrence),
+                 (FunctionalLinear2Module, default_equalization_qconfig_dict, functionalLinear_node_occurrence),
+                 (FunctionalLinear2FP32Module, default_equalization_qconfig_dict, functionalLinear2FP32_node_occurrence)]
 
         for (M, equalization_qconfig_dict, node_occurrence) in tests:
             m = M().eval()
@@ -241,95 +260,9 @@ class TestEqualizeFx(QuantizationTestCase):
             self.checkGraphModuleNodes(prepared, expected_node_occurrence=node_occurrence)
 
     def test_input_weight_equalization_convert(self):
+        """ Tests that the modified model for equalization (before quantization)
+        returns the same output as the original model
         """
-        """
-        qconfig_dict = {"": None,
-                        "object_type": [(nn.Linear, default_qconfig),
-                                        (nn.functional.linear, default_qconfig)]}
-
-        default_equalization_qconfig_dict = {
-            "": None,
-            "object_type": [(nn.Linear, default_equalization_qconfig),
-                            (nn.functional.linear, default_equalization_qconfig)]
-        }
-
-        # Basic test with one linear layer
-        class LinearModule(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = nn.Linear(2, 2)
-
-            def forward(self, x):
-                return self.linear(x)
-
-        # Test with two linear layer with a fp32 operation between
-        class Linear2FP32Module(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear1 = nn.Linear(2, 2)
-                self.linear2 = nn.Linear(2, 2)
-
-            def forward(self, x):
-                x = self.linear1(x)
-                x = torch.add(x, torch.tensor([1, 2]))
-                x = self.linear2(x)
-                return x
-
-        # Test with two connected linear layers
-        class Linear2Module(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear1 = nn.Linear(2, 2)
-                self.linear2 = nn.Linear(2, 2)
-
-            def forward(self, x):
-                x = self.linear1(x)
-                x = self.linear2(x)
-                return x
-
-        class Linear(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.w = torch.rand(2, 2)
-                self.b = torch.zeros(2)
-
-            def forward(self, x):
-                return nn.functional.linear(x, self.w, self.b)
-
-        # Test where we have one functional linear layer
-        class FunctionalLinearModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear1 = Linear()
-
-            def forward(self, x):
-                x = self.linear1(x)
-                return x
-
-        # Test where we have two functional linear layers with fp32 operation between
-        class FunctionalLinear2FP32Module(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear1 = Linear()
-                self.linear2 = Linear()
-
-            def forward(self, x):
-                x = self.linear1(x)
-                x = torch.add(x, torch.tensor([1, 2]))
-                x = self.linear2(x)
-                return x
-
-        # Test where we have two connected functional linear layers
-        class FunctionalLinear2Module(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear1 = Linear()
-                self.linear2 = Linear()
-
-            def forward(self, x):
-                x = self.linear1(x)
-                x = self.linear2(x)
-                return x
 
         tests = [(LinearModule, default_equalization_qconfig_dict),
                  (Linear2FP32Module, default_equalization_qconfig_dict),
@@ -338,9 +271,9 @@ class TestEqualizeFx(QuantizationTestCase):
                  (Linear2Module, default_equalization_qconfig_dict),
                  (FunctionalLinear2Module, default_equalization_qconfig_dict)]
 
+        x = torch.rand((3, 2))
         for (M, equalization_qconfig_dict) in tests:
             m = M().eval()
-            x = torch.tensor([[1.0, 2.0], [2.0, 2.5], [4.5, 6.0]])
             prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=equalization_qconfig_dict)
             output = prepared(x)
 
@@ -350,5 +283,260 @@ class TestEqualizeFx(QuantizationTestCase):
             m = M().eval()
             prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=equalization_qconfig_dict)
             prepared(x)
-            convert_fx(prepared)  # Check if compile?
+            convert_fx(prepared)  # Check if compile
             self.assertEqual(output, convert_ref_output)
+
+    def calculate_equalization_scale_ref(self, x, w):
+        """ Calculates the equalization scale based on the input and weight
+        """
+        min_inputs = x.min(axis=0)
+        max_inputs = x.max(axis=0)
+
+        min_weights_col = w.min(axis=0)
+        max_weights_col = w.max(axis=0)
+
+        equalization_scale = np.sqrt((max_weights_col - min_weights_col) /
+                                     (max_inputs - min_inputs))
+        return equalization_scale
+
+    def get_expected_eq_scales(self, model, x):
+        """ For each module in the graph, we want to calculate the equalization
+        scale at that point
+        """
+        exp_eq_scales = []
+        for _, module in model.named_children():
+            weight = module.weight.detach().numpy()
+            bias = module.bias.detach().numpy()
+
+            eq_scale = self.calculate_equalization_scale_ref(x, weight)
+            exp_eq_scales.append(eq_scale)
+
+            x = x @ weight.T + bias
+
+        return exp_eq_scales
+
+    def test_input_weight_equalization_equalization_scales(self):
+        """ After applying the equalization functions, check if the equalization
+        scales are the expected values
+        """
+
+        tests = [(LinearModule, default_equalization_qconfig_dict),
+                 (Linear2Module, default_equalization_qconfig_dict),
+                 (FunctionalLinearModule, default_equalization_qconfig_dict),
+                 (FunctionalLinear2Module, default_equalization_qconfig_dict)]
+
+        x = torch.rand((3, 2))
+        for (M, equalization_qconfig_dict) in tests:
+            m = M().eval()
+            exp_eq_scales = self.get_expected_eq_scales(m, x.detach().numpy())
+
+            prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=equalization_qconfig_dict)
+            prepared(x)
+            convert_ref = _convert_equalization_ref(prepared)
+            convert_ref(x)
+
+            counter = 0
+            for node in convert_ref.graph.nodes:
+                if 'equalization_scale' in node.name and node.op == 'get_attr':
+                    self.assertEqual(convert_ref.get_buffer(str(node.target)), exp_eq_scales[counter])
+                    counter += 1
+
+    def get_expected_weights_bias(self, model, x, exp_eq_scales):
+        """ For each module in the graph, we want to calculate the expected
+        scaled weight and bias values
+        """
+        exp_weights = []
+        exp_bias = []
+        for i, (_, module) in enumerate(model.named_children()):
+            weight = module.weight.detach().numpy()
+            bias = module.bias.detach().numpy()
+
+            scaled_weight = weight * np.reciprocal(exp_eq_scales[i])
+            scaled_bias = bias
+            if i + 1 < len(exp_eq_scales):
+                scaled_weight = (scaled_weight.T * exp_eq_scales[i + 1]).T
+                scaled_bias = (scaled_bias.T * exp_eq_scales[i + 1]).T
+
+            exp_weights.append(scaled_weight)
+            exp_bias.append(scaled_bias)
+
+            x = x @ weight.T + bias
+
+        return exp_weights, exp_bias
+
+    def test_input_weight_equalization_weights_bias(self):
+        """ After applying the equalization functions check if the weights and
+        biases are as expected
+        """
+
+        tests = [(LinearModule, default_equalization_qconfig_dict),
+                 (Linear2Module, default_equalization_qconfig_dict),
+                 (FunctionalLinearModule, default_equalization_qconfig_dict),
+                 (FunctionalLinear2Module, default_equalization_qconfig_dict)]
+
+        x = torch.rand((3, 2))
+        for (M, equalization_qconfig_dict) in tests:
+            m = M().eval()
+            exp_eq_scales = self.get_expected_eq_scales(m, x.detach().numpy())
+            exp_weights, exp_bias = self.get_expected_weights_bias(m, x.detach().numpy(), exp_eq_scales)
+
+            prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=equalization_qconfig_dict)
+            prepared(x)
+            convert_ref = _convert_equalization_ref(prepared)
+            convert_ref(x)
+
+            modules = dict(convert_ref.named_modules(remove_duplicate=False))
+            counter = 0
+            for node in convert_ref.graph.nodes:
+                if node.op == 'call_module' and isinstance(modules[str(node.target)], nn.Linear):
+                    self.assertEqual(modules[str(node.target)].weight, exp_weights[counter])
+                    self.assertEqual(modules[str(node.target)].bias, exp_bias[counter])
+                    counter += 1
+
+    def get_expected_inp_act_vals(self, model, x, exp_eq_scales, exp_weights, exp_bias):
+        """ For each module in the graph, we want to calculate the expected
+        min/max values for every input activation node
+        """
+        x = x * exp_eq_scales[0]
+
+        exp_inp_activation_vals = []
+        for i, _ in enumerate(model.named_children()):
+            exp_inp_activation_vals.append((x.min(), x.max()))
+            x = x @ exp_weights[i].T + exp_bias[i]
+
+        exp_inp_activation_vals.append((x.min(), x.max()))
+        return exp_inp_activation_vals
+
+    def get_expected_weight_act_vals(self, exp_weights):
+        """ For each module in the graph, we want to calculate the expected
+        min/max values for every weight activation node. This is assuming that
+        the weight observers are all MinMaxObservers.
+        """
+
+        exp_weight_activation_vals = []
+        for w in exp_weights:
+            exp_weight_activation_vals.append((w.min(), w.max()))
+
+        return exp_weight_activation_vals
+
+    def test_input_weight_equalization_activation_values(self):
+        """ After applying the equalization functions check if each observer's
+        min/max values are as expected
+        """
+
+        tests = [(LinearModule, default_equalization_qconfig_dict),
+                 (Linear2Module, default_equalization_qconfig_dict),
+                 (FunctionalLinearModule, default_equalization_qconfig_dict),
+                 (FunctionalLinear2Module, default_equalization_qconfig_dict)]
+
+        x = torch.rand((3, 2))
+        for (M, equalization_qconfig_dict) in tests:
+            m = M().eval()
+            exp_eq_scales = self.get_expected_eq_scales(m, x.detach().numpy())
+            exp_weights, exp_bias = self.get_expected_weights_bias(m, x.detach().numpy(), exp_eq_scales)
+            exp_inp_act_vals = self.get_expected_inp_act_vals(m, x, exp_eq_scales, exp_weights, exp_bias)
+            exp_weight_act_vals = self.get_expected_weight_act_vals(exp_weights)
+
+            prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=equalization_qconfig_dict)
+            prepared(x)
+            convert_ref = _convert_equalization_ref(prepared)
+            run_weight_observers(convert_ref)
+            convert_ref(x)
+
+            modules = dict(convert_ref.named_modules(remove_duplicate=False))
+            inp_counter = 0
+            weight_counter = 0
+            for node in convert_ref.graph.nodes:
+                if "weight" not in node.name and node.op == 'call_module' and \
+                   isinstance(modules[str(node.target)], MinMaxObserver):
+                    # Check min/max values of input activation layers
+                    exp_min_val, exp_max_val = exp_inp_act_vals[inp_counter]
+                    self.assertEqual(modules[str(node.target)].min_val, exp_min_val)
+                    self.assertEqual(modules[str(node.target)].max_val, exp_max_val)
+                    inp_counter += 1
+
+                elif node.op == 'call_module' and isinstance(modules[str(node.target)], MinMaxObserver):
+                    # Check min/max values of weight activation layers
+                    assert("weight" in node.name)
+                    exp_min_val, exp_max_val = exp_weight_act_vals[weight_counter]
+                    self.assertEqual(modules[str(node.target)].min_val, exp_min_val)
+                    self.assertEqual(modules[str(node.target)].max_val, exp_max_val)
+                    weight_counter += 1
+
+    def check_orig_and_eq_graphs(self, orig_model, eq_model):
+        """ Given a non-equalized model and an equalized model, check that the
+        graphs are structured in the same way, except the equalized model has
+        additional 'equalization_scale' and 'mul' nodes.
+        """
+        orig_idx = 0
+        orig_nodes = list(orig_model.graph.nodes)
+        orig_modules = dict(orig_model.named_modules(remove_duplicate=False))
+
+        eq_idx = 0
+        eq_nodes = list(eq_model.graph.nodes)
+        eq_modules = dict(eq_model.named_modules(remove_duplicate=False))
+
+        while orig_idx < len(orig_nodes) and eq_idx < len(eq_nodes):
+            if 'equalization_scale' in eq_nodes[eq_idx].name and 'mul' in eq_nodes[eq_idx + 1].name:
+                # Skip the equalization and mul nodes
+                eq_idx += 2
+                continue
+            elif orig_nodes[orig_idx].op != eq_nodes[eq_idx].op:
+                return False
+            elif orig_nodes[orig_idx].op == 'call_module':
+                # Check that the type of call_modules are the same (ex. nn.Linear, MinMaxObserver)
+                orig_node = orig_nodes[orig_idx]
+                eq_node = eq_nodes[eq_idx]
+                if type(orig_modules[orig_node.target]) is not type(eq_modules[eq_node.target]):
+                    return False
+            elif orig_nodes[orig_idx].op == 'call_function':
+                # Check that the call_functions are the same (ex. F.linear)
+                orig_node = orig_nodes[orig_idx]
+                eq_node = eq_nodes[eq_idx]
+                if orig_node.target != eq_node.target:
+                    return False
+
+            eq_idx += 1
+            orig_idx += 1
+
+        return True
+
+    def test_input_weight_equalization_graphs(self):
+        """ Tests that the modified model for equalization has the same graph
+        structure as the model without equalization (before and after
+        quantization).
+        """
+
+        tests = [(LinearModule, default_equalization_qconfig_dict),
+                 (Linear2FP32Module, default_equalization_qconfig_dict),
+                 (FunctionalLinearModule, default_equalization_qconfig_dict),
+                 (FunctionalLinear2FP32Module, default_equalization_qconfig_dict),
+                 (Linear2Module, default_equalization_qconfig_dict),
+                 (FunctionalLinear2Module, default_equalization_qconfig_dict)]
+
+        torch.manual_seed(0)
+        x = torch.rand((3, 2))
+        for (M, equalization_qconfig_dict) in tests:
+            # No equalization
+            m = M().eval()
+            prepared = prepare_fx(m, qconfig_dict)
+            prepared_model = copy.deepcopy(prepared)
+            prepared(x)
+            quantized_model = convert_fx(prepared)
+
+            # Equalization
+            m = M().eval()
+            prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=equalization_qconfig_dict)
+            prepared(x)
+            equalized_model = _convert_equalization_ref(prepared)
+
+            # Check that the graph before quantization is pretty much the same
+            self.assertTrue(self.check_orig_and_eq_graphs(prepared_model, equalized_model))
+
+            m = M().eval()
+            prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=equalization_qconfig_dict)
+            prepared(x)
+            equalized_quantized_model = convert_fx(prepared)
+
+            # Check that the graph after quantization is pretty much the same
+            self.assertTrue(self.check_orig_and_eq_graphs(quantized_model, equalized_quantized_model))

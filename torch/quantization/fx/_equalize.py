@@ -301,6 +301,24 @@ def maybe_get_weight_eq_obs_node(op_node: Node, modules: Dict[str, nn.Module]) -
 
     return None
 
+def clear_weight_quant_obs_node(op_node: Node, modules: Dict[str, nn.Module]) -> None:
+    """ Given the operation node, we want find the corresponding quantization
+    observer and reset its min/max values
+    """
+    assert(op_node.op == 'call_function')
+    assert(isinstance(op_node.args[1], Node))
+    weight_observer_nodes = collect_producer_nodes(op_node.args[1])
+
+    if weight_observer_nodes is None:
+        return None
+
+    for weight_node in weight_observer_nodes:
+        if weight_node.op == 'call_module':
+            weight_quant_obs = modules[str(weight_node.target)]
+            if isinstance(modules[str(weight_node.target)], ObserverBase):
+                weight_quant_obs.min_val = torch.tensor(float("inf"))
+                weight_quant_obs.max_val = torch.tensor(float("-inf"))
+
 def maybe_get_next_input_eq_obs(node: Node, modules: Dict[str, nn.Module]) -> Optional[_InputEqualizationObserver]:
     """ Gets the following input equalization observer if it exists.
 
@@ -527,6 +545,8 @@ def convert_eq_obs(
         if node.op == 'call_module' and isinstance(modules[node.target], _InputEqualizationObserver):
             inp_quant_obs_node = node.args[0]
             prev_node = inp_quant_obs_node.args[0]
+            # Update the following input quantization observer's min/max values
+            scale_input_observer(node, modules)
 
             if (prev_node.op == 'call_module' and isinstance(modules[str(prev_node.target)], nn.Linear)) or \
                (prev_node.op == 'call_function' and prev_node.target == F.linear):
@@ -538,9 +558,6 @@ def convert_eq_obs(
                 # Erase the node
                 model.graph.erase_node(node)
                 continue
-
-            # Update the following input quantization observer's min/max values
-            scale_input_observer(node, modules)
 
             # Remove the InputEqualization node and add a mul operator before
             # the quantization observer node that appears before the equalization node
@@ -587,6 +604,10 @@ def convert_eq_obs(
                 weight_eq_obs_node = maybe_get_weight_eq_obs_node(node, modules)
                 if weight_eq_obs_node is None:
                     return
+
+                # Clear the quantization observer's min/max values so that they
+                # can get updated later based on the new scale values
+                clear_weight_quant_obs_node(node, modules)
 
                 # Erase the weight equalization observer node
                 prev_node = weight_eq_obs_node.args[0]
