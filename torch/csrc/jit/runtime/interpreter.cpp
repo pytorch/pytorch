@@ -5,6 +5,7 @@
 #include <ATen/record_function.h>
 #include <c10/core/thread_pool.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/profiler.h>
