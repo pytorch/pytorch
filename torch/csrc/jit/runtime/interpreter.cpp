@@ -1045,15 +1045,15 @@ InterpreterState::InterpreterState(const Code& code, TaskLauncher taskLauncher)
 InterpreterState::~InterpreterState() = default;
 
 void InterpreterState::run(Stack& stack) {
-  static_cast<InterpreterStateImpl*>(pImpl.get())->run(stack);
+  dynamic_cast<InterpreterStateImpl&>(*pImpl).run(stack);
 }
 
 c10::intrusive_ptr<Future> InterpreterState::runAsync(Stack& stack) {
-  return static_cast<InterpreterStateImpl*>(pImpl.get())->runAsync(stack);
+  return dynamic_cast<InterpreterStateImpl&>(*pImpl).runAsync(stack);
 }
 
 c10::intrusive_ptr<Future> InterpreterState::getFuture() {
-  return static_cast<InterpreterStateImpl*>(pImpl.get())->getOrCreateFuture();
+  return dynamic_cast<InterpreterStateImpl&>(*pImpl).getOrCreateFuture();
 }
 
 InterpreterState::InterpreterState(

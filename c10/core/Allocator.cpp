@@ -38,7 +38,7 @@ at::Allocator* GetAllocator(const at::DeviceType& t) {
 }
 
 bool memoryProfilingEnabled() {
-  auto* reporter_ptr = static_cast<MemoryReportingInfoBase*>(
+  auto* reporter_ptr = dynamic_cast<MemoryReportingInfoBase*>(
       ThreadLocalDebugInfo::get(DebugInfoKind::PROFILER_STATE));
   return reporter_ptr && reporter_ptr->memoryProfilingEnabled();
 }
@@ -49,7 +49,7 @@ void reportMemoryUsageToProfiler(
     int64_t total_allocated,
     int64_t total_reserved,
     Device device) {
-  auto* reporter_ptr = static_cast<MemoryReportingInfoBase*>(
+  auto* reporter_ptr = dynamic_cast<MemoryReportingInfoBase*>(
       ThreadLocalDebugInfo::get(DebugInfoKind::PROFILER_STATE));
   if (reporter_ptr) {
     reporter_ptr->reportMemoryUsage(

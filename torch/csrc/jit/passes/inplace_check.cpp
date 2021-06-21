@@ -8,7 +8,7 @@ void CheckInplace(Block* block) {
     if (node->kind() == prim::PythonOp && node->hasAttribute(attr::inplace)) {
       if (node->i(attr::inplace)) {
         throw std::runtime_error(
-            std::string("inplace ") + static_cast<PythonOp*>(node)->name() +
+            std::string("inplace ") + dynamic_cast<PythonOp*>(node)->name() +
             " not supported in the JIT");
       }
     }

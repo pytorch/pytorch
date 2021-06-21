@@ -311,14 +311,15 @@ namespace impl {
   AutogradMeta* get_autograd_meta(const at::TensorBase& self) {
     // NB: could return nullptr
     TORCH_CHECK(self.defined(), "cannot call get_autograd_meta() on undefined tensor");
-    return static_cast<AutogradMeta*>(self.unsafeGetTensorImpl()->autograd_meta());
+    return dynamic_cast<AutogradMeta*>(
+        self.unsafeGetTensorImpl()->autograd_meta());
   }
 
   DifferentiableViewMeta* get_view_autograd_meta(const at::TensorBase& self) {
     // NB: return nullptr if self is not a view
     AutogradMeta* meta = get_autograd_meta(self);
     if (meta && meta->is_view_) {
-      return static_cast<DifferentiableViewMeta*>(meta);
+      return dynamic_cast<DifferentiableViewMeta*>(meta);
     } else {
       return nullptr;
     }

@@ -131,7 +131,7 @@ void AutogradMeta::set_fw_grad(const at::TensorBase& new_grad_base, const at::Te
                 "forward gradient is of size ", new_grad.sizes(), ".");
 
     if (is_inplace_op && is_view_) {
-      auto this_view_meta = static_cast<DifferentiableViewMeta*>(this);
+      auto& this_view_meta = dynamic_cast<DifferentiableViewMeta&>(*this);
 
       // For inplace ops on a Tensor that does not already have a forward grad and is a view, we propagate
       // the tangent to the base and ensure that the new_grad is a view of that base's tangent.
@@ -142,8 +142,8 @@ void AutogradMeta::set_fw_grad(const at::TensorBase& new_grad_base, const at::Te
       //   - Take a view of the base's forward grad
       //   - Copy the given new_grad into this view
       //   - Use this view as the new new_grad
-      if (this_view_meta->has_fw_view()) {
-        auto view_info = this_view_meta->get_forward_view();
+      if (this_view_meta.has_fw_view()) {
+        auto view_info = this_view_meta.get_forward_view();
         auto& base = view_info.base_;
 
         if (!base._fw_grad(level).defined()) {
@@ -200,18 +200,21 @@ const Variable& AutogradMeta::fw_grad(uint64_t level, const at::TensorBase& self
     // For view that don't have a forward grad, check if their base has one that
     // has been defined by an inplace operation.
     // This ensure that case 5 from [Forward Grad View/inplace] above works fine
-    auto const_view_meta = static_cast<const torch::autograd::DifferentiableViewMeta*>(this);
-    // This is ok to do as we ONLY modify fw_grad_ and this field is properly locked in all methods
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-    auto this_view_meta = const_cast<torch::autograd::DifferentiableViewMeta*>(const_view_meta);
-    if (this_view_meta->has_fw_view()) {
-      const auto& view_info = this_view_meta->get_forward_view();
+    auto& const_view_meta =
+        dynamic_cast<const torch::autograd::DifferentiableViewMeta&>(*this);
+    // This is ok to do as we ONLY modify fw_grad_ and this field is properly
+    // locked in all methods
+    auto& this_view_meta =
+        const_cast<torch::autograd::DifferentiableViewMeta&>(const_view_meta);
+    if (this_view_meta.has_fw_view()) {
+      const auto& view_info = this_view_meta.get_forward_view();
       const auto& base = view_info.base_;
 
       const auto& base_val = base._fw_grad(level);
       if (base_val.defined()) {
         // Lazy initialization of fw_grad_
-        this_view_meta->fw_grad_ = std::make_shared<ForwardGrad>();
+        this_view_meta.fw_grad_ = std::make_shared<ForwardGrad>();
 
         Variable new_val;
         if (view_info.has_view_fn()) {
@@ -220,8 +223,8 @@ const Variable& AutogradMeta::fw_grad(uint64_t level, const at::TensorBase& self
           new_val = base_val.as_strided(self.sizes(), self.strides(), self.storage_offset());
         }
 
-        this_view_meta->fw_grad_->set_value(new_val, level);
-        return this_view_meta->fw_grad_->value(level);
+        this_view_meta.fw_grad_->set_value(new_val, level);
+        return this_view_meta.fw_grad_->value(level);
       }
     }
   }

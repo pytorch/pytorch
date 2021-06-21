@@ -895,9 +895,10 @@ PyObject *THPFunction_metadata(THPFunction *self, void *_unused)
     "and then let the original variable get deallocated.  Don't do that!  If "
     "you really have no way of restructuring your code so this is the case, "
     "please file an issue reporting that you are affected by this.");
-  auto metadata = static_cast<PyAnomalyMetadata*>(cdata->metadata())->dict();
-
-  Py_INCREF(metadata);
+  auto metadata = dynamic_cast<PyAnomalyMetadata*>(cdata->metadata())->dict();
+  if (metadata) {
+    Py_INCREF(metadata);
+  }
   return metadata;
   END_HANDLE_TH_ERRORS
 }

@@ -85,7 +85,7 @@ Tensor AdamW::step(LossClosure closure)  {
       const auto& grad = p.grad();
       TORCH_CHECK(!grad.is_sparse(), "AdamW does not support sparse gradients"/*, please consider SparseAdamW instead*/);
       auto param_state = state_.find(c10::guts::to_string(p.unsafeGetTensorImpl()));
-      auto& options = static_cast<AdamWOptions&>(group.options());
+      auto& options = dynamic_cast<AdamWOptions&>(group.options());
 
       // Perform stepweight decay
       if(options.weight_decay() != 0) {
@@ -107,7 +107,8 @@ Tensor AdamW::step(LossClosure closure)  {
         state_[c10::guts::to_string(p.unsafeGetTensorImpl())] = std::move(state);
       }
 
-      auto& state = static_cast<AdamWParamState&>(*state_[c10::guts::to_string(p.unsafeGetTensorImpl())]);
+      auto& state = dynamic_cast<AdamWParamState&>(
+          *state_[c10::guts::to_string(p.unsafeGetTensorImpl())]);
       auto& exp_avg = state.exp_avg();
       auto& exp_avg_sq = state.exp_avg_sq();
       auto& max_exp_avg_sq = state.max_exp_avg_sq();

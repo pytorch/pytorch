@@ -76,7 +76,7 @@ QTensorImpl* get_qtensorimpl(const TensorBase& self) {
       !self.requires_grad(),
       "quantized tensors do not support autograd");
   TORCH_INTERNAL_ASSERT(self.is_quantized(), "get_qtensorimpl: not a quantized tensor");
-  return static_cast<QTensorImpl*>(self.unsafeGetTensorImpl());
+  return dynamic_cast<QTensorImpl*>(self.unsafeGetTensorImpl());
 }
 
 int64_t get_sub_byte_tensor_size(int64_t size_bytes, at::ScalarType t) {

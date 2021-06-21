@@ -248,7 +248,7 @@ optional_variable_list _process_backward_mode_ad(
       var.mutable_grad().reset();
       impl::clear_hooks(var);
       if (auto grad_acc_fn = impl::try_get_grad_accumulator(var)) {
-        auto grad_acc = dynamic_cast<AccumulateGrad*>(grad_acc_fn.get());
+        auto grad_acc = std::dynamic_pointer_cast<AccumulateGrad>(grad_acc_fn);
         grad_acc->variable.reset();
       }
       if (cdata) {

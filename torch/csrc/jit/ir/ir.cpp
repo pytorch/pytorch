@@ -297,7 +297,7 @@ std::ostream& Node::print(
   indent(out, level) << const_value_list_with_types(outs);
   out << " = ";
   if (kind() == prim::PythonOp) {
-    auto* pyOp = static_cast<const ::torch::jit::PythonOp*>(this);
+    auto* pyOp = dynamic_cast<const ::torch::jit::PythonOp*>(this);
     out << "^" << pyOp->name();
     pyOp->writeScalars(out);
   } else if (hasAttribute(attr::Subgraph) && groups) {
@@ -479,7 +479,7 @@ void Node::lint() const {
       break;
     case prim::PythonOp: {
       // Python operator cconv is correct
-      auto* value = static_cast<const PythonOp*>(this);
+      auto* value = dynamic_cast<const PythonOp*>(this);
       value->lint_python();
       break;
     }

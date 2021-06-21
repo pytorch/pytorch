@@ -70,7 +70,7 @@ void validateBlock(
       std::string("ONNX export failed: ") + name + \
       "\n\nGraph we tried to export:\n" + b->owningGraph()->toString());
     if (node->kind() == prim::PythonOp) {
-      auto py_node = static_cast<PythonOp*>(node);
+      auto py_node = dynamic_cast<PythonOp*>(node);
       FAIL_EXPORT(
           "Couldn't export Python operator " + py_node->name() +
           "\n\nDefined at:\n" + getNodeStackTraceString(node))

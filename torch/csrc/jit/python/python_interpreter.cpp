@@ -30,7 +30,7 @@ namespace {
 // Note: const_cast is used twice below to acquire a handle to a pyobject.
 Operation createPythonOperation(const Node* op_) {
   pybind11::gil_scoped_acquire gil;
-  const ConcretePythonOp* op = static_cast<const ConcretePythonOp*>(op_);
+  const ConcretePythonOp* op = dynamic_cast<const ConcretePythonOp*>(op_);
   const py::function func = py::reinterpret_borrow<const py::function>(
       // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       py::handle(const_cast<ConcretePythonOp*>(op)->pyobj.get()));

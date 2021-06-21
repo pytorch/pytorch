@@ -69,7 +69,7 @@ Tensor SGD::step(LossClosure closure)  {
     loss = closure();
   }
   for (auto& group : param_groups_) {
-    auto& options = static_cast<SGDOptions&>(group.options());
+    auto& options = dynamic_cast<SGDOptions&>(group.options());
     auto weight_decay = options.weight_decay();
     auto momentum = options.momentum();
     auto dampening = options.dampening();
@@ -92,7 +92,8 @@ Tensor SGD::step(LossClosure closure)  {
           state->momentum_buffer(buf);
           state_[c10::guts::to_string(p.unsafeGetTensorImpl())] = std::move(state);
         } else {
-          buf = static_cast<SGDParamState&>(*param_state->second).momentum_buffer();
+          buf = dynamic_cast<SGDParamState&>(*param_state->second)
+                    .momentum_buffer();
           buf.mul_(momentum).add_(d_p, 1 - dampening);
         }
         if (nesterov) {

@@ -78,8 +78,9 @@ Tensor Adagrad::step(LossClosure closure) {
       }
       auto grad = p.grad();
       TORCH_INTERNAL_ASSERT(state_[c10::guts::to_string(p.unsafeGetTensorImpl())] != nullptr, "state found NULL for the Tensor ", p);
-      auto& state = static_cast<AdagradParamState&>(*state_[c10::guts::to_string(p.unsafeGetTensorImpl())]);
-      auto& options = static_cast<AdagradOptions&>(group.options());
+      auto& state = dynamic_cast<AdagradParamState&>(
+          *state_[c10::guts::to_string(p.unsafeGetTensorImpl())]);
+      auto& options = dynamic_cast<AdagradOptions&>(group.options());
 
       state.step(state.step() + 1);
 

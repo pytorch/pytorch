@@ -388,7 +388,7 @@ Tensor LBFGS::step(LossClosure closure) {
 
   auto& group = param_groups_.at(0);
   auto& _params = group.params();
-  const auto& options = static_cast<const LBFGSOptions&>(group.options());
+  const auto& options = dynamic_cast<const LBFGSOptions&>(group.options());
   auto lr = options.lr();
   auto max_iter = options.max_iter();
   auto max_eval = options.max_eval();
@@ -403,7 +403,8 @@ Tensor LBFGS::step(LossClosure closure) {
   if (param_state == state_.end()) {
     state_[c10::guts::to_string(_params.at(0).unsafeGetTensorImpl())] = std::make_unique<LBFGSParamState>();
   }
-  auto& state = static_cast<LBFGSParamState&>(*state_[c10::guts::to_string(_params.at(0).unsafeGetTensorImpl())]);
+  auto& state = dynamic_cast<LBFGSParamState&>(
+      *state_[c10::guts::to_string(_params.at(0).unsafeGetTensorImpl())]);
   // evaluate initial f(x) and df/dx
   Tensor orig_loss;
   {

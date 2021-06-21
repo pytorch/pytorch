@@ -422,7 +422,7 @@ const std::unordered_set<std::string> disable_cuda_profiling = {
 };
 
 ProfilerThreadLocalState* getProfilerTLSState() {
-  return static_cast<ProfilerThreadLocalState*>(
+  return dynamic_cast<ProfilerThreadLocalState*>(
       c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PROFILER_STATE));
 }
 
@@ -540,7 +540,7 @@ thread_event_lists disableProfilerLegacy(c10::optional<ProfilerDisableOptions> p
     state = c10::ThreadLocalDebugInfo::_peek(c10::DebugInfoKind::PROFILER_STATE);
   }
 
-  auto state_ptr = static_cast<ProfilerThreadLocalState*>(state.get());
+  auto state_ptr = dynamic_cast<ProfilerThreadLocalState*>(state.get());
   TORCH_CHECK(state_ptr && state_ptr->config().state != ProfilerState::Disabled,
       "Can't disable profiler when it's not running");
 

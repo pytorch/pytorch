@@ -71,14 +71,14 @@ static NamedTensorMeta* get_named_tensor_meta(TensorImpl* impl) {
   if (!NamesMode::is_enabled()) {
     return nullptr;
   }
-  return static_cast<NamedTensorMeta*>(impl->named_tensor_meta());
+  return dynamic_cast<NamedTensorMeta*>(impl->named_tensor_meta());
 }
 
 static const NamedTensorMeta* get_named_tensor_meta(const TensorImpl* impl) {
   if (!NamesMode::is_enabled()) {
     return nullptr;
   }
-  return static_cast<const NamedTensorMeta*>(impl->named_tensor_meta());
+  return dynamic_cast<const NamedTensorMeta*>(impl->named_tensor_meta());
 }
 
 void check_names_valid_for(TensorImpl* impl, DimnameList names) {

@@ -467,7 +467,7 @@ void NodeToONNX(
     // Pass on Caffe2 operator, since we already preprocess it
     cloneNode(old_node);
   } else if (k == prim::PythonOp) {
-    callPySymbolicMethod(static_cast<ConcretePythonOp*>(old_node));
+    callPySymbolicMethod(dynamic_cast<ConcretePythonOp*>(old_node));
   } else {
     callPySymbolicFunction(old_node);
   }

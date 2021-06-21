@@ -946,7 +946,7 @@ struct PythonPrintImpl {
   void printRHS(TaggedStringStream& stmt, Node* node) {
     switch (node->kind()) {
       case prim::PythonOp: {
-        auto value = static_cast<const PythonOp*>(node);
+        auto value = dynamic_cast<const PythonOp*>(node);
         if (enforce_importable_) {
           throw ErrorReport(node->sourceRange())
               << "Could not export Python function call '" << value->name()

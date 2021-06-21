@@ -1827,8 +1827,9 @@ Tensor squeeze_qtensor(const Tensor& self) {
   DimVector strides;
   std::tie(sizes, strides) = inferSqueezeGeometry(self);
   if (quantizer->qscheme() == QScheme::PER_CHANNEL_AFFINE) {
-    const auto* per_channel_quantizer = static_cast<at::PerChannelAffineQuantizer*>(quantizer.get());
-    auto axis = per_channel_quantizer->axis();
+    const auto& per_channel_quantizer =
+        dynamic_cast<at::PerChannelAffineQuantizer&>(*quantizer);
+    auto axis = per_channel_quantizer.axis();
     int64_t shift = 0;
     for (const auto d : c10::irange(self.dim())) {
       if (self.sizes()[d] == 1) {
@@ -1839,10 +1840,11 @@ Tensor squeeze_qtensor(const Tensor& self) {
       }
     }
     axis = axis - shift;
-    quantizer = make_per_channel_affine_quantizer(per_channel_quantizer->scales(),
-                                                  per_channel_quantizer->zero_points(),
-                                                  axis,
-                                                  quantizer->scalar_type());
+    quantizer = make_per_channel_affine_quantizer(
+        per_channel_quantizer.scales(),
+        per_channel_quantizer.zero_points(),
+        axis,
+        quantizer->scalar_type());
   }
   return make_qtensor(self, sizes, strides, quantizer);
 }
@@ -1853,16 +1855,18 @@ Tensor squeeze_qtensor(const Tensor& self, int64_t dim) {
   DimVector strides;
   std::tie(sizes, strides) = inferSqueezeGeometry(self, dim);
   if (quantizer->qscheme() == QScheme::PER_CHANNEL_AFFINE) {
-    const auto* per_channel_quantizer = static_cast<at::PerChannelAffineQuantizer*>(quantizer.get());
-    auto axis = per_channel_quantizer->axis();
+    const auto& per_channel_quantizer =
+        dynamic_cast<at::PerChannelAffineQuantizer&>(*quantizer);
+    auto axis = per_channel_quantizer.axis();
     TORCH_CHECK(axis != dim, "Squeeze is only possible on non-axis dimension for Per-Channel Quantized Tensors.");
     if (axis >= dim) {
       axis -= 1;
     }
-    quantizer = make_per_channel_affine_quantizer(per_channel_quantizer->scales(),
-                                                  per_channel_quantizer->zero_points(),
-                                                  axis,
-                                                  quantizer->scalar_type());
+    quantizer = make_per_channel_affine_quantizer(
+        per_channel_quantizer.scales(),
+        per_channel_quantizer.zero_points(),
+        axis,
+        quantizer->scalar_type());
   }
   if (self.dim() == 0 || self.sizes()[dim] != 1) {
     sizes = self.sizes().vec();
@@ -1965,15 +1969,17 @@ Tensor unsqueeze_qtensor(const Tensor& self, int64_t dim) {
   auto g = inferUnsqueezeGeometry(self, dim);
   auto quantizer = get_qtensorimpl(self)->quantizer();
   if (quantizer->qscheme() == QScheme::PER_CHANNEL_AFFINE) {
-    const auto* per_channel_quantizer = static_cast<at::PerChannelAffineQuantizer*>(quantizer.get());
-    auto axis = per_channel_quantizer->axis();
+    const auto& per_channel_quantizer =
+        dynamic_cast<at::PerChannelAffineQuantizer&>(*quantizer);
+    auto axis = per_channel_quantizer.axis();
     if (axis >= dim) {
       axis += 1;
     }
-    quantizer = make_per_channel_affine_quantizer(per_channel_quantizer->scales(),
-                                                  per_channel_quantizer->zero_points(),
-                                                  axis,
-                                                  quantizer->scalar_type());
+    quantizer = make_per_channel_affine_quantizer(
+        per_channel_quantizer.scales(),
+        per_channel_quantizer.zero_points(),
+        axis,
+        quantizer->scalar_type());
   }
   return make_qtensor(self, g.sizes, g.strides, quantizer);
 }
