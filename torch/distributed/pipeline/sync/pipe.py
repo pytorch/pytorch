@@ -375,7 +375,7 @@ class Pipe(Module):
         :class:`~torch.distributed.rpc.RRef` pointing to the output.
         :class:`Pipe` is a fairly transparent module wrapper. It doesn't
         modify the input and output signature of the underlying module. But
-        there's type restriction. Input and output have to contain atleast one
+        there's type restriction. Input and output have to contain at least one
         tensor. This restriction is applied at partition boundaries too.
 
         The sequence of inputs are fed into the first stage of the pipeline as
@@ -397,6 +397,9 @@ class Pipe(Module):
         returning the integer 5, the user would receive the consolidated
         output of `[5, 5]`
 
+        All the input tensors need to be on the same device as the first
+        partition of the pipeline.
+
         If a tensor is wrapped with the :class:`NoChunk` wrapper, the tensor
         is not split across micro-batches and is replicated as-is similar to
         non-tensors.
@@ -411,7 +414,8 @@ class Pipe(Module):
             TypeError: input doesn't contain at least one tensor
 
         """
-        microbatch.check(*inputs)
+        first_partition_device = self.devices[0] if len(self.devices) != 0 else torch.device("cpu")
+        microbatch.check(first_partition_device, *inputs)
 
         if not self.devices:
             # Empty sequential module is not illegal.

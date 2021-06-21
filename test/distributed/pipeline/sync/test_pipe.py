@@ -400,6 +400,7 @@ def test_non_tensor_sequence(setup_rpc):
     model = Pipe(model)
 
     with pytest.raises(TypeError):
+        # Need atleast one Tensor.
         model("hello", True)
 
 
@@ -424,7 +425,7 @@ def test_valid_non_tensor(checkpoint, setup_rpc):
     c = random.randint(0, 1) == 0
     d = torch.rand(10, 10)
     res = model(a, b, c, d).local_value()
-    assert 5, len(res)
+    assert 7 == len(res)
     assert [a] * 5 == res[0]
     if c:
         assert torch.allclose(((b + a + d) * a) + b, res[1])
@@ -439,7 +440,7 @@ def test_valid_non_tensor(checkpoint, setup_rpc):
 
     # Test one of the tensors can be None
     res = model(a, b, c, None).local_value()
-    assert 5, len(res)
+    assert 7 == len(res)
     assert [a] * 5 == res[0]
     if c:
         assert torch.allclose(((b + a) * a) + b, res[1])
@@ -701,7 +702,7 @@ def test_verify_module_params_on_same_device(setup_rpc):
             ' to place the module on a single device'):
         Pipe(model)
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")
+@skip_if_no_cuda
 @pytest.mark.skipif(torch.cuda.device_count() < 2, reason="Need atleast two GPUs")
 def test_verify_nested_modules(setup_rpc):
     model = nn.Sequential(
@@ -776,3 +777,21 @@ def test_multiple_inputs(checkpoint, setup_rpc):
     t = torch.rand(10)
     res = model(t, t, t).local_value()
     assert torch.equal(res, (t + t + t) + (t * t * t))
+
+@skip_if_no_cuda
+@pytest.mark.skipif(torch.cuda.device_count() < 2, reason="Need atleast two GPUs")
+def test_inputs_wrong_device(setup_rpc):
+    class Module1(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.param = torch.nn.Parameter(torch.rand(5))
+
+        def forward(self, a, b):
+            return a + b + self.param, b
+
+    # Start inputs on wrong device and ensure Pipe moves them correctly.
+    a = torch.rand(10).cuda(1)
+    b = torch.rand(10).cuda(1)
+    model = Pipe(nn.Sequential(Module1().cuda(0), Module1().cuda(1)), chunks=2)
+    with pytest.raises(ValueError, match='All inputs should be on the same device as the first partition'):
+        model(a, b)
