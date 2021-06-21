@@ -247,12 +247,14 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_2d(
       output_acc += sh_inputs[i];
       total_weight_acc += acc_weight[i];
     }
+    *total_weight = static_cast<scalar_t>(total_weight_acc);
+    *output = static_cast<scalar_t>(output_acc);
     if (size_average) {
       if (nframe == 0) {
         // Mean reduction on empty tensors produces NaN
         *output = std::numeric_limits<double>::quiet_NaN();
       }
-      if (total_weight_acc != 0) {
+      if (*total_weight != 0) {
         *output = static_cast<scalar_t>(output_acc / total_weight_acc);
       }
     }
@@ -300,6 +302,8 @@ void nll_loss_forward_out_cuda_template(
       " but got weight tensor of shape: ",
       weight.sizes());
 
+  auto weight_ = weight.defined() ? weight.contiguous() : weight;
+
   if (reduction == Reduction::None & n_dims == 2) {
     output.resize_({batch_size});
     if (batch_size == 0) {
@@ -314,11 +318,6 @@ void nll_loss_forward_out_cuda_template(
         input.scalar_type(),
         "nll_loss_forward_no_reduce_cuda_kernel",
         [&] {
-          scalar_t* weight_data = nullptr;
-          if (weight.defined()) {
-            auto weight_ = weight.contiguous();
-            weight_data = weight_.data_ptr<scalar_t>();
-          }
           nll_loss_forward_no_reduce_cuda_kernel<scalar_t>
               <<<at::cuda::detail::GET_BLOCKS(batch_size),
                  at::cuda::detail::CUDA_NUM_THREADS,
@@ -328,7 +327,7 @@ void nll_loss_forward_out_cuda_template(
                   input.packed_accessor64<scalar_t, 2>(),
                   target.data_ptr<int64_t>(),
                   output.data_ptr<scalar_t>(),
-                  weight_data,
+                  weight_.defined() ? weight_.data_ptr<scalar_t>() : nullptr,
                   n_classes,
                   ignore_index);
           C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -349,18 +348,13 @@ void nll_loss_forward_out_cuda_template(
         input.scalar_type(),
         "nll_loss_forward_reduce_cuda_kernel_1d",
         [&] {
-          scalar_t* weight_data = nullptr;
-          if (weight.defined()) {
-            auto weight_ = weight.contiguous();
-            weight_data = weight_.data_ptr<scalar_t>();
-          }
           nll_loss_forward_reduce_cuda_kernel_1d<scalar_t>
               <<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
                   output.data_ptr<scalar_t>(),
                   total_weight.data_ptr<scalar_t>(),
                   input_.data_ptr<scalar_t>(),
                   target_.data_ptr<int64_t>(),
-                  weight_data,
+                  weight_.defined() ? weight_.data_ptr<scalar_t>() : nullptr,
                   reduction == at::Reduction::Mean,
                   n_classes,
                   ignore_index);
@@ -373,18 +367,13 @@ void nll_loss_forward_out_cuda_template(
         input.scalar_type(),
         "nll_loss_forward_reduce_cuda_kernel_2d",
         [&] {
-          scalar_t* weight_data = nullptr;
-          if (weight.defined()) {
-            auto weight_ = weight.contiguous();
-            weight_data = weight_.data_ptr<scalar_t>();
-          }
           nll_loss_forward_reduce_cuda_kernel_2d<scalar_t, float>
               <<<1, NLL_LOSS_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
                   output.data_ptr<scalar_t>(),
                   total_weight.data_ptr<scalar_t>(),
                   input_.data_ptr<scalar_t>(),
                   target_.data_ptr<int64_t>(),
-                  weight_data,
+                  weight_.defined() ? weight_.data_ptr<scalar_t>() : nullptr,
                   reduction == at::Reduction::Mean,
                   input.size(0),
                   input.size(1),
@@ -395,7 +384,6 @@ void nll_loss_forward_out_cuda_template(
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }
-
 std::tuple<Tensor&, Tensor&> nll_loss_forward_out_cuda(
     const Tensor& self,
     const Tensor& target,
