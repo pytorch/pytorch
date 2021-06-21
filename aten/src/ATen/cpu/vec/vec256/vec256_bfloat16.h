@@ -16,11 +16,15 @@ namespace {
 
 #if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 
+static inline void cvtbf16_fp32(const __m128i& a, __m256& o) {
+  o = _mm256_castsi256_ps(_mm256_slli_epi32(_mm256_cvtepu16_epi32(a), 16));
+}
+
 static inline void cvtbf16_fp32(const __m256i& a, __m256& o1, __m256& o2) {
   __m128i lo = _mm256_extractf128_si256(a, 0);
   __m128i hi = _mm256_extractf128_si256(a, 1);
-  o1 = _mm256_castsi256_ps(_mm256_slli_epi32(_mm256_cvtepu16_epi32(lo), 16));
-  o2 = _mm256_castsi256_ps(_mm256_slli_epi32(_mm256_cvtepu16_epi32(hi), 16));
+  cvtbf16_fp32(lo, o1);
+  cvtbf16_fp32(hi, o2);
 }
 static inline __m256i cvtfp32_bf16(const __m256& a, const __m256& b) {
   __m256i lo = _mm256_castps_si256(a);
