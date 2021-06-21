@@ -258,7 +258,7 @@ def chunk_list(lst, nchunks):
 
 # sanitize filename e.g., distributed/pipeline/sync/skip/test_api.py -> distributed.pipeline.sync.skip.test_api
 def sanitize_test_filename(filename):
-    # in py39 inspect.getfile returns absolute path, converting it to relative path if needed
+    # inspect.getfile returns absolute path in some CI jobs, converting it to relative path if needed
     if filename.startswith(CI_TEST_PREFIX):
         filename = filename[len(CI_TEST_PREFIX) + 1:]
     strip_py = re.sub(r'.py$', '', filename)
