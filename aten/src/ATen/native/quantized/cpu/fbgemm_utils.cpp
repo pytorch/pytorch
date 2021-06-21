@@ -5,6 +5,7 @@
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/packed_params.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <ATen/native/quantized/cpu/mkldnn_utils.h>
 #include <ATen/native/TensorFactories.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/quantized/Quantizer.h>
@@ -454,6 +455,16 @@ torch::class_<LinearPackedParamsBase> register_linear_params() {
                       std::move(weight), std::move(bias));
                 }
 #endif // USE_PYTORCH_QNNPACK
+#if AT_MKLDNN_ENABLED()
+                if (at::globalContext().qEngine() == at::QEngine::MKLDNN) {
+                  TORCH_CHECK(
+                      weight.scalar_type() == at::kQInt8,
+                      "MKLDNN only supports INT8 bit width currently. Got ",
+                      c10::toString(weight.scalar_type()));
+                  return PackedLinearWeightsMkldnn::prepack(
+                      std::move(weight), std::move(bias));
+                }
+#endif // #if AT_MKLDNN_ENABLED()
                 TORCH_CHECK(false, "Unknown qengine");
               });
   return register_linear_params;

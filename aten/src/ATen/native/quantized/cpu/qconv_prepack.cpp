@@ -351,6 +351,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsMkldnn<
       "quantized::conv_prepack: MKLDNN only supports zero output_padding.");
 
   // Weight
+  // Format: [OC IC//group KH KW] for conv; [IC OC//group KH KW] for deconv
   auto dims = weight.sizes().vec();
   auto strides = stride.vec();
   auto padding_l = padding.vec();
@@ -395,25 +396,46 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsMkldnn<
   op_attr.set_zero_points(DNNL_ARG_SRC,
                           ideep::utils::tensor_zp_mask(src_zero_point.size()),
                           src_zero_point);
+  at::Tensor weight_copy;
   ideep::tensor::desc w_desc;
+  ideep::dims dims_iohw, dims_oihw, dims_giohw;
   if (transpose) {
     w_desc = ideep::convolution_transpose_forward::expected_weights_desc(
         dims, dnnl::memory::data_type::s8,
         strides, padding_l, padding_r, dilates, groups,
         dnnl::algorithm::deconvolution_direct, dnnl::prop_kind::forward_inference,
         ideep::dims(), op_attr);
+    // convolution_transpose_forward::expected_weights_desc() gives format [i, o, ...],
+    // but MKLDNN requires [o, i, ...] for computation
+    dims_iohw = w_desc.get_dims();
+    dims_oihw = dims_iohw;
+    std::swap(dims_oihw[0], dims_oihw[1]); // iohw -> oihw
+    dims_giohw = groups > 1 ? ideep::utils::group_dims(dims_iohw, groups) : dims_iohw;
+    dnnl::memory::format_tag w_tag = dnnl::memory::format_tag::any;
+    std::vector<int64_t> perms(dims_giohw.size(), 0); // for permutation of weight
+    std::iota(perms.begin(), perms.end(), 0);
+    if (groups > 1) {
+      w_tag = kSpatialDim == 2 ? dnnl::memory::format_tag::goihw : dnnl::memory::format_tag::goidhw;
+      std::swap(perms[1], perms[2]);
+    } else {
+      w_tag = kSpatialDim == 2 ? dnnl::memory::format_tag::oihw : dnnl::memory::format_tag::oidhw;
+      std::swap(perms[0], perms[1]);
+    }
+    w_desc = w_desc.to_format(w_tag); // Without this, reorder may fail if both KH & KW are 1
+    weight_copy = weight.reshape(dims_giohw).permute(c10::IntArrayRef(perms)).clone();
   } else {
     w_desc = ideep::convolution_forward::expected_weights_desc(
         dims, dnnl::memory::data_type::s8,
         strides, padding_l, padding_r, dilates, groups,
         dnnl::algorithm::convolution_direct, dnnl::prop_kind::forward_inference,
         dnnl::memory::data_type::u8, ideep::dims(), op_attr);
+    weight_copy = weight.clone();
+    dims_oihw = w_desc.get_dims();
   }
-  auto weight_copy = weight.clone();
-  ideep::tensor wgt = ideep::tensor({dims, dnnl::memory::data_type::s8}, weight_copy.data_ptr());
+  ideep::tensor wgt = ideep::tensor({dims_oihw, dnnl::memory::data_type::s8}, weight_copy.data_ptr());
   ideep::tensor exp_wgt;
   exp_wgt.init(w_desc);
-  exp_wgt.feed_from(wgt);
+  exp_wgt.feed_from(wgt, transpose); // expect wgt to be in [OC IC KH KW] format
   ideep::tensor * packed_weight_p = new ideep::tensor(exp_wgt);
   packed_weight_p->set_scale(wgt_scales);
   packed_weight_p->set_zero_point(wgt_zero_points);
