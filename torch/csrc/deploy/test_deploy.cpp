@@ -229,3 +229,12 @@ TEST(TorchpyTest, DisarmHook) {
   auto I = m.acquire_one();
   ASSERT_THROW(I.from_ivalue(t), c10::Error); // NOT a segfault
 }
+
+TEST(TorchpyTest, RegisterModule) {
+  torch::deploy::InterpreterManager m(2);
+  m.register_module_source("foomodule", "def add1(x): return x + 1\n");
+  for (const auto& interp : m.all_instances()) {
+    auto I = interp.acquire_session();
+    AT_ASSERT(3 == I.global("foomodule", "add1")({2}).toIValue().toInt());
+  }
+}

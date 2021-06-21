@@ -294,9 +294,9 @@ def einsum(*args):
             if n == Ellipsis:
                 return '...'
             if n >= 0 and n < 26:
-                return chr(n + ord('a'))
+                return chr(ord('A') + n)
             if n >= 26 and n < 52:
-                return chr(n - 26 + ord('A'))
+                return chr(ord('a') + n - 26)
             raise ValueError('einsum(): subscript in subscript list is not within the valid range [0, 52)')
 
         # Parse subscripts for input operands
