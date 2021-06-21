@@ -63,6 +63,7 @@ FILE_SCHEMA = "file://"
 if sys.platform == 'win32':
     FILE_SCHEMA = "file:///"
 
+# Environment variable `IN_CI` is set in `.jenkins/common.sh`.
 IS_IN_CI = os.getenv('IN_CI') == '1'
 IS_SANDCASTLE = os.getenv('SANDCASTLE') == '1' or os.getenv('TW_JOB_USER') == 'sandcastle'
 IS_FBCODE = os.getenv('PYTORCH_TEST_FBCODE') == '1'
@@ -234,9 +235,6 @@ def repeat_test_for_types(dtypes):
 
         return call_helper
     return repeat_helper
-
-# Environment variable `IS_PYTORCH_CI` is set in `.jenkins/common.sh`.
-IS_PYTORCH_CI = bool(os.environ.get('IS_PYTORCH_CI'))
 
 
 def discover_test_cases_recursively(suite_or_case):
@@ -832,8 +830,7 @@ try:
             verbosity=hypothesis.Verbosity.verbose))
 
     hypothesis.settings.load_profile(
-        "pytorch_ci" if IS_PYTORCH_CI else os.getenv('PYTORCH_HYPOTHESIS_PROFILE',
-                                                     'dev')
+        "pytorch_ci" if IS_IN_CI else os.getenv('PYTORCH_HYPOTHESIS_PROFILE', 'dev')
     )
 except ImportError:
     print('Fail to import hypothesis in common_utils, tests are not derandomized')
@@ -1440,7 +1437,7 @@ class TestCase(expecttest.TestCase):
             super().assertEqual(x, y, msg=msg)
 
     def assertNotEqual(self, x, y, msg: Optional[str] = None, *,                                       # type: ignore[override]
-                       atol: Optional[float] = None, rtol: Optional[float] = None, **kwargs) -> None:  # type: ignore[override]
+                       atol: Optional[float] = None, rtol: Optional[float] = None, **kwargs) -> None:
         with self.assertRaises(AssertionError, msg=msg):
             self.assertEqual(x, y, msg, atol=atol, rtol=rtol, **kwargs)
 
