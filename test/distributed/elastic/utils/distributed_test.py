@@ -10,6 +10,7 @@ import os
 import socket
 import unittest
 from contextlib import closing
+from typing import List
 
 from torch.distributed.elastic.utils.distributed import (
     create_c10d_store,
@@ -100,12 +101,34 @@ class DistributedUtilTest(unittest.TestCase):
                 timeout=1,
             )
 
+    def _bind_to_all_resolved_addreses(self, port: int) -> List[socket.socket]:
+        addrs = socket.getaddrinfo(
+            host="localhost",
+            port=port,
+            family=socket.AF_UNSPEC,
+            type=socket.SOCK_STREAM,
+        )
+        sockets = []
+        for addr in addrs:
+            family, type, proto, _, _ = addr
+            s = socket.socket(family, type, proto)
+            try:
+                s.bind(("localhost", port))
+                s.listen(port)
+                sockets.append(s)
+            except OSError as e:
+                s.close()
+                log.info("Socket creation attempt failed.", exc_info=e)
+        return sockets
+
     def test_port_already_in_use_on_server(self):
         sock = get_socket_with_port()
         with closing(sock):
+            port = sock.getsockname()[1]
+        sockets = self._bind_to_all_resolved_addreses(port)
+        try:
             # try to create a store on the same port without releasing the socket
             # should raise a IOError
-            port = sock.getsockname()[1]
             with self.assertRaises(IOError):
                 create_c10d_store(
                     is_server=True,
@@ -113,6 +136,9 @@ class DistributedUtilTest(unittest.TestCase):
                     server_port=port,
                     timeout=1,
                 )
+        finally:
+            for s in sockets:
+                s.close()
 
     def test_port_already_in_use_on_worker(self):
         sock = get_socket_with_port()
