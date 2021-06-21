@@ -201,10 +201,14 @@ ensure proper synchronization.
 Stream semantics of backward passes
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-A. Each backward CUDA op runs on the same stream that was used for its corresponding forward op.
+Each backward CUDA op runs on the same stream that was used for its corresponding forward op.
+If your forward pass runs independent ops in parallel on different streams,
+this helps the backward pass exploit that same parallelism.
 
-B. The stream semantics of a backward call with respect to surrounding ops are the same
-as for any other call. More concretely, when calling
+The stream semantics of a backward call with respect to surrounding ops are the same
+as for any other call. The backward pass inserts internal syncs to ensure this even when
+backward ops run on multiple streams as described in the previous paragraph.
+More concretely, when calling
 :func:`autograd.backward<torch.autograd.backward>`,
 :func:`autograd.grad<torch.autograd.grad>`, or
 :meth:`tensor.backward<torch.Tensor.backward>`,
@@ -254,12 +258,6 @@ have the same stream-semantics relationship as any group of ops::
     with torch.cuda.stream(s):
         initial_grad.record_stream(s)
         loss.backward(gradient=initial_grad)
-
-If your forward pass runs some independent ops in parallel on different streams,
-A. helps the backward pass exploit that same parallelism.
-
-The backward call inserts internal syncs as needed to ensure B. holds true even if A.
-makes some backward ops run on assorted side streams.
 
 .. _CUDA stream: https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#streams
 
