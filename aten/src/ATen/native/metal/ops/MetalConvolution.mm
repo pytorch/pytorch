@@ -1,6 +1,6 @@
 #import <ATen/native/metal/MetalCommandBuffer.h>
 #import <ATen/native/metal/MetalTensorImpl.h>
-#import <ATen/native/metal/MetalUtils.h>
+#import <ATen/native/metal/MetalTensorUtils.h>
 #import <ATen/native/metal/mpscnn/MPSCNNClampOp.h>
 #import <ATen/native/metal/mpscnn/MPSCNNConvOp.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
@@ -42,7 +42,7 @@ Tensor conv2d(
                                      bias:b
                              neuronFilter:NeuronType::None];
   MetalTensorImplStorage mt{outputSize};
-  MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
+  MetalCommandBuffer* commandBuffer = getCommandBuffer(input);
   mt.texture()->allocateTemporaryStorage(outputSize, commandBuffer);
   MPSImage* Y = mt.texture()->image();
   [op encode:commandBuffer.buffer sourceImage:X destinationImage:Y];
@@ -79,7 +79,7 @@ Tensor conv2d(const Tensor& input, Conv2dOpContext& context) {
     };
   }
   MetalTensorImplStorage mt{outputSize};
-  MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
+  MetalCommandBuffer* commandBuffer = getCommandBuffer(input);
   mt.texture()->allocateTemporaryStorage(outputSize, commandBuffer);
   MPSImage* Y1 = mt.texture()->image();
   [op encode:commandBuffer.buffer sourceImage:X destinationImage:Y1];
