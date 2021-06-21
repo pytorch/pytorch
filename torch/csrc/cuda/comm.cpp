@@ -190,11 +190,9 @@ tensor_list2d broadcast_coalesced(
         auto& device_outputs = outputs[i];
         auto& inds = broadcast_indices[i];
         auto& vals = broadcast_values[i];
-        for (auto& t :
+        for (const auto& var :
              utils::unflatten_sparse_tensors(inds, vals, chunk.tensors)) {
           // See NOTE [ Version Counter in comm.*_coalesced ]
-          // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-          Variable var = t;
           device_outputs.push_back(make_variable(var.tensor_data(), false));
         }
       }
@@ -204,11 +202,9 @@ tensor_list2d broadcast_coalesced(
       for (size_t i = 1, num_devices = devices.size(); i < num_devices; ++i) {
         device_guard.set_index(devices[i]);
         auto& device_outputs = outputs[i];
-        for (auto& t :
+        for (auto& var :
              utils::unflatten_dense_tensors(results[i], chunk.tensors)) {
           // See NOTE [ Version Counter in comm.*_coalesced ]
-          // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-          Variable var = t;
           device_outputs.push_back(make_variable(var.tensor_data(), false));
         }
       }

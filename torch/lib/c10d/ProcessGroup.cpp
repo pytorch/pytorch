@@ -107,13 +107,13 @@ std::exception_ptr ProcessGroup::Work::exception() const {
 }
 
 int ProcessGroup::Work::sourceRank() const {
-  throw std::runtime_error(
+  TORCH_CHECK(false,
       "sourceRank() may only be called on work objects "
       "that correspond to a recv or recv-from-any call.");
 }
 
 std::vector<at::Tensor> ProcessGroup::Work::result() {
-  throw std::runtime_error("result() not implemented.");
+  TORCH_CHECK(false, "result() not implemented.");
 }
 
 void ProcessGroup::Work::synchronize() {}
@@ -129,7 +129,7 @@ bool ProcessGroup::Work::wait(std::chrono::milliseconds timeout) {
     if (!completed_) {
       // Throw exception if the wait operation timed out and the work was not
       // completed.
-      throw std::runtime_error("Operation timed out!");
+      TORCH_CHECK(false, "Operation timed out!");
     }
   }
   if (exception_) {
@@ -186,7 +186,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroup::allgather_coalesced(
     std::vector<std::vector<at::Tensor>>& /* usused */,
     std::vector<at::Tensor>& /* usused */,
     const AllgatherOptions& /* usused */) {
-  throw std::runtime_error(
+  TORCH_CHECK(false,
       "no support for allgather_coalesced in this process group");
 }
 
