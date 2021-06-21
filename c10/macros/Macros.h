@@ -428,21 +428,25 @@ __host__ __device__
 #if defined(_MSC_VER) && defined(__CUDACC__)
 #define CONSTEXPR_EXCEPT_WIN_CUDA const
 #define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA __host__
-#define STATIC_EXCEPT_WIN_CUDA
+#define STATIC_CONSTEXPR_EXCEPT_WIN_CUDA
+#define STATIC_ACCESSOR_EXCEPT_WIN_CUDA(cls, obj, field) obj.field
 #else
 #define CONSTEXPR_EXCEPT_WIN_CUDA constexpr
 #define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA __host__
-#define STATIC_EXCEPT_WIN_CUDA static
+#define STATIC_CONSTEXPR_EXCEPT_WIN_CUDA static constexpr
+#define STATIC_ACCESSOR_EXCEPT_WIN_CUDA(cls, obj, field) cls::field
 #endif
 #else
 #if defined(_MSC_VER) && defined(__CUDACC__)
 #define CONSTEXPR_EXCEPT_WIN_CUDA const
 #define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA
-#define STATIC_EXCEPT_WIN_CUDA
+#define STATIC_CONSTEXPR_EXCEPT_WIN_CUDA
+#define STATIC_ACCESSOR_EXCEPT_WIN_CUDA(cls, obj, field) obj.field
 #else
 #define CONSTEXPR_EXCEPT_WIN_CUDA constexpr
 #define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA constexpr
-#define STATIC_EXCEPT_WIN_CUDA static
+#define STATIC_CONSTEXPR_EXCEPT_WIN_CUDA static constexpr
+#define STATIC_ACCESSOR_EXCEPT_WIN_CUDA(cls, obj, field) cls::field
 #endif
 #endif
 

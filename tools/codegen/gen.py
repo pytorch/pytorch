@@ -246,9 +246,9 @@ class ComputeOperators:
 struct TORCH_API {name} {{
   using schema = {sig.type()};
   using ptr_schema = schema*;
-  STATIC_EXCEPT_WIN_CUDA constexpr const char* name = "aten::{str(f.func.name.name)}";
-  STATIC_EXCEPT_WIN_CUDA constexpr const char* overload_name = "{f.func.name.overload_name}";
-  STATIC_EXCEPT_WIN_CUDA constexpr const char* schema_str = {cpp_string(str(f.func))};
+  STATIC_CONSTEXPR_EXCEPT_WIN_CUDA const char* name = "aten::{str(f.func.name.name)}";
+  STATIC_CONSTEXPR_EXCEPT_WIN_CUDA const char* overload_name = "{f.func.name.overload_name}";
+  STATIC_CONSTEXPR_EXCEPT_WIN_CUDA const char* schema_str = {cpp_string(str(f.func))};
   static {sig.defn(name=call_method_name, is_redispatching_fn=False)};
   static {sig.defn(name=redispatch_method_name, is_redispatching_fn=True)};
 }};"""
@@ -267,8 +267,9 @@ struct TORCH_API {name} {{
                 defns += f"""
 // aten::{f.func}
 {sig.defn(name=method_name, is_redispatching_fn=is_redispatching_fn)} {{
+    static auto op_metadata = at::_ops::{f.func.name.unambiguous_name()}();
     static auto op = c10::Dispatcher::singleton()
-        .findSchemaOrThrow(name, overload_name)
+        .findSchemaOrThrow(STATIC_ACCESSOR_EXCEPT_WIN_CUDA(at::_ops::{f.func.name.unambiguous_name()}, op_metadata, name), STATIC_ACCESSOR_EXCEPT_WIN_CUDA(at::_ops::{f.func.name.unambiguous_name()}, op_metadata, overload_name))
         .typed<schema>();
     return op.{dispatcher_call}({dispatcher_exprs_str});
 }}
@@ -505,8 +506,9 @@ DispatchKeySet _dk_set = c10::DispatchKeySet({dispatch_key}) | c10::detail::mult
 // aten::{f.func}
 C10_ALWAYS_INLINE
 {sig.defn(name)} {{
+  static auto op_metadata = at::_ops::{f.func.name.unambiguous_name()}();
   static auto op = c10::Dispatcher::singleton()
-    .findSchemaOrThrow(at::_ops::{f.func.name.unambiguous_name()}::name, at::_ops::{f.func.name.unambiguous_name()}::overload_name)
+    .findSchemaOrThrow(STATIC_ACCESSOR_EXCEPT_WIN_CUDA(at::_ops::{f.func.name.unambiguous_name()}, op_metadata, name), STATIC_ACCESSOR_EXCEPT_WIN_CUDA(at::_ops::{f.func.name.unambiguous_name()}, op_metadata, overload_name))
     .typed<at::_ops::{f.func.name.unambiguous_name()}::schema>();
   {compute_dk}
   return op.redispatch(_dk, {', '.join(a.expr for a in dispatcher_exprs)});
