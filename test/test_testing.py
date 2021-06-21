@@ -11,7 +11,7 @@ from typing import Any, Callable, Iterator, List, Tuple
 import torch
 
 from torch.testing._internal.common_utils import \
-    (IS_SANDCASTLE, IS_WINDOWS, TestCase, make_tensor, run_tests, skipIfRocm, slowTest)
+    (IS_FBCODE, IS_SANDCASTLE, IS_WINDOWS, TestCase, make_tensor, run_tests, skipIfRocm, slowTest)
 from torch.testing._internal.framework_utils import calculate_shards
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
@@ -1272,6 +1272,7 @@ class TestAssertsSparseCOO(TestCase):
                 fn()
 
 
+@unittest.skipIf(IS_FBCODE or IS_SANDCASTLE,  "Not all sandcastle jobs support CSR testing")
 class TestAssertsSparseCSR(TestCase):
     def test_matching(self):
         crow_indices = (0, 1, 2)
