@@ -870,6 +870,7 @@ def is_future(ann) -> bool:
 
 if torch.distributed.rpc.is_available():
     from torch.distributed.rpc import RRef
+    from torch._C._distributed_rpc import PyRRef
 
     def is_rref(ann) -> bool:
         if ann is RRef:
@@ -881,7 +882,7 @@ if torch.distributed.rpc.is_available():
         return getattr(ann, "__origin__", None) is RRef
 
     def is_rref_instance(obj) -> bool:
-        return isinstance(obj, RRef)
+        return isinstance(obj, PyRRef)
 
 else:
     def is_rref_instance(obj) -> bool:

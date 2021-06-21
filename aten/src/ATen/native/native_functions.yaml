@@ -9445,6 +9445,19 @@
   dispatch:
     CPU, CUDA: special_entr_out
 
+- func: special_ndtri(Tensor self) -> Tensor
+  structured_delegate: special_ndtri.out
+  python_module: special
+  variants: function
+
+- func: special_ndtri.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
+  python_module: special
+  variants: function
+  dispatch:
+    CPU, CUDA: special_ndtri_out
+
 - func: special_expm1(Tensor self) -> Tensor
   python_module: special
   variants: function
@@ -10006,22 +10019,16 @@
   python_module: linalg
   variants: function
 
-- func: _linalg_solve_out_helper_(Tensor(a!) self, Tensor(b!) other, Tensor(c!) infos) -> Tensor(a!)
-  variants: function
-  dispatch:
-    CPU: _linalg_solve_out_helper_cpu
-    CUDA: _linalg_solve_out_helper_cuda
-
 - func: linalg_solve(Tensor input, Tensor other) -> Tensor
   python_module: linalg
   variants: function
   dispatch:
-    CompositeExplicitAutograd: linalg_solve
+    CPU, CUDA: linalg_solve
 
 - func: linalg_solve.out(Tensor input, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   dispatch:
-    CompositeExplicitAutograd: linalg_solve_out
+    CPU, CUDA: linalg_solve_out
 
 - func: linalg_tensorinv(Tensor self, int ind=2) -> Tensor
   python_module: linalg
@@ -10125,7 +10132,7 @@
   dispatch:
     CPU, CUDA: segment_reduce_kernel
 
-- func: _segment_reduce_backward(Tensor grad, Tensor output, Tensor data, str reduce, *, Tensor? lengths=None) -> Tensor
+- func: _segment_reduce_backward(Tensor grad, Tensor output, Tensor data, str reduce, *, Tensor? lengths=None, int axis=0) -> Tensor
   variants: function
   dispatch:
     CPU, CUDA: _segment_reduce_backward_kernel
