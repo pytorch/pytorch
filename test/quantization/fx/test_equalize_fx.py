@@ -233,14 +233,14 @@ class TestEqualizeFx(QuantizationTestCase):
             ns.call_module(MinMaxObserver): 6,
         }
 
-        tests = [(SingleLayerLinearModel, default_equalization_qconfig_dict, linear_node_occurrence),
-                 (TwoLayerLinearModel, default_equalization_qconfig_dict, linear2_node_occurrence),
-                 (FunctionalLinear2Module, default_equalization_qconfig_dict, functionalLinear_node_occurrence),
-                 (FunctionalLinear2FP32Module, default_equalization_qconfig_dict, functionalLinear2FP32_node_occurrence)]
+        tests = [(SingleLayerLinearModel, linear_node_occurrence),
+                 (TwoLayerLinearModel, linear2_node_occurrence),
+                 (FunctionalLinear2Module, functionalLinear_node_occurrence),
+                 (FunctionalLinear2FP32Module, functionalLinear2FP32_node_occurrence)]
 
-        for (M, equalization_qconfig_dict, node_occurrence) in tests:
+        for (M, node_occurrence) in tests:
             m = M().eval()
-            prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=equalization_qconfig_dict)
+            prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
             self.checkGraphModuleNodes(prepared, expected_node_occurrence=node_occurrence)
 
     def test_input_weight_equalization_convert(self):
@@ -248,24 +248,19 @@ class TestEqualizeFx(QuantizationTestCase):
         returns the same output as the original model
         """
 
-        tests = [(SingleLayerLinearModel, default_equalization_qconfig_dict),
-                 (Linear2FP32Module, default_equalization_qconfig_dict),
-                 (FunctionalLinearModule, default_equalization_qconfig_dict),
-                 (FunctionalLinear2FP32Module, default_equalization_qconfig_dict),
-                 (TwoLayerLinearModel, default_equalization_qconfig_dict),
-                 (FunctionalLinear2Module, default_equalization_qconfig_dict)]
+        tests = [SingleLayerLinearModel, Linear2FP32Module, TwoLayerLinearModel,
+                 FunctionalLinearModule, FunctionalLinear2FP32Module, FunctionalLinear2Module]
 
         x = torch.rand((5, 5))
-        for (M, equalization_qconfig_dict) in tests:
+        for M in tests:
             m = M().eval()
-            prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=equalization_qconfig_dict)
+            prepared = prepare_fx(copy.deepcopy(m), qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
             output = prepared(x)
 
             convert_ref = _convert_equalization_ref(prepared)
             convert_ref_output = convert_ref(x)
 
-            m = M().eval()
-            prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=equalization_qconfig_dict)
+            prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
             prepared(x)
             convert_fx(prepared)  # Check if compile
             self.assertEqual(output, convert_ref_output)
@@ -304,17 +299,14 @@ class TestEqualizeFx(QuantizationTestCase):
         scales are the expected values
         """
 
-        tests = [(SingleLayerLinearModel, default_equalization_qconfig_dict),
-                 (TwoLayerLinearModel, default_equalization_qconfig_dict),
-                 (FunctionalLinearModule, default_equalization_qconfig_dict),
-                 (FunctionalLinear2Module, default_equalization_qconfig_dict)]
+        tests = [SingleLayerLinearModel, TwoLayerLinearModel, FunctionalLinearModule, FunctionalLinear2Module]
 
         x = torch.rand((5, 5))
-        for (M, equalization_qconfig_dict) in tests:
+        for M in tests:
             m = M().eval()
             exp_eq_scales = self.get_expected_eq_scales(m, x.detach().numpy())
 
-            prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=equalization_qconfig_dict)
+            prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
             prepared(x)
             convert_ref = _convert_equalization_ref(prepared)
             convert_ref(x)
@@ -353,18 +345,15 @@ class TestEqualizeFx(QuantizationTestCase):
         biases are as expected
         """
 
-        tests = [(SingleLayerLinearModel, default_equalization_qconfig_dict),
-                 (TwoLayerLinearModel, default_equalization_qconfig_dict),
-                 (FunctionalLinearModule, default_equalization_qconfig_dict),
-                 (FunctionalLinear2Module, default_equalization_qconfig_dict)]
+        tests = [SingleLayerLinearModel, TwoLayerLinearModel, FunctionalLinearModule, FunctionalLinear2Module]
 
         x = torch.rand((5, 5))
-        for (M, equalization_qconfig_dict) in tests:
+        for M in tests:
             m = M().eval()
             exp_eq_scales = self.get_expected_eq_scales(m, x.detach().numpy())
             exp_weights, exp_bias = self.get_expected_weights_bias(m, x.detach().numpy(), exp_eq_scales)
 
-            prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=equalization_qconfig_dict)
+            prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
             prepared(x)
             convert_ref = _convert_equalization_ref(prepared)
             convert_ref(x)
@@ -408,20 +397,17 @@ class TestEqualizeFx(QuantizationTestCase):
         min/max values are as expected
         """
 
-        tests = [(SingleLayerLinearModel, default_equalization_qconfig_dict),
-                 (TwoLayerLinearModel, default_equalization_qconfig_dict),
-                 (FunctionalLinearModule, default_equalization_qconfig_dict),
-                 (FunctionalLinear2Module, default_equalization_qconfig_dict)]
+        tests = [SingleLayerLinearModel, TwoLayerLinearModel, FunctionalLinearModule, FunctionalLinear2Module]
 
         x = torch.rand((5, 5))
-        for (M, equalization_qconfig_dict) in tests:
+        for M in tests:
             m = M().eval()
             exp_eq_scales = self.get_expected_eq_scales(m, x.detach().numpy())
             exp_weights, exp_bias = self.get_expected_weights_bias(m, x.detach().numpy(), exp_eq_scales)
             exp_inp_act_vals = self.get_expected_inp_act_vals(m, x, exp_eq_scales, exp_weights, exp_bias)
             exp_weight_act_vals = self.get_expected_weight_act_vals(exp_weights)
 
-            prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=equalization_qconfig_dict)
+            prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
             prepared(x)
             convert_ref = _convert_equalization_ref(prepared)
             convert_ref(x)
@@ -490,34 +476,28 @@ class TestEqualizeFx(QuantizationTestCase):
         quantization).
         """
 
-        tests = [(SingleLayerLinearModel, default_equalization_qconfig_dict),
-                 (Linear2FP32Module, default_equalization_qconfig_dict),
-                 (FunctionalLinearModule, default_equalization_qconfig_dict),
-                 (FunctionalLinear2FP32Module, default_equalization_qconfig_dict),
-                 (TwoLayerLinearModel, default_equalization_qconfig_dict),
-                 (FunctionalLinear2Module, default_equalization_qconfig_dict)]
+        tests = [SingleLayerLinearModel, Linear2FP32Module, TwoLayerLinearModel,
+                 FunctionalLinearModule, FunctionalLinear2FP32Module, FunctionalLinear2Module]
 
         torch.manual_seed(0)
         x = torch.rand((5, 5))
-        for (M, equalization_qconfig_dict) in tests:
+        for M in tests:
             # No equalization
             m = M().eval()
-            prepared = prepare_fx(m, qconfig_dict)
+            prepared = prepare_fx(copy.deepcopy(m), qconfig_dict)
             prepared_model = copy.deepcopy(prepared)
             prepared(x)
             quantized_model = convert_fx(prepared)
 
             # Equalization
-            m = M().eval()
-            prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=equalization_qconfig_dict)
+            prepared = prepare_fx(copy.deepcopy(m), qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
             prepared(x)
             equalized_model = _convert_equalization_ref(prepared)
 
             # Check that the graph before quantization is pretty much the same
             self.assertTrue(self.check_orig_and_eq_graphs(prepared_model, equalized_model))
 
-            m = M().eval()
-            prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=equalization_qconfig_dict)
+            prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
             prepared(x)
             equalized_quantized_model = convert_fx(prepared)
 
