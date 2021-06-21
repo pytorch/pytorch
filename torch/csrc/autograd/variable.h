@@ -222,6 +222,13 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   // correctly when this variable is passed to another function.
   uint32_t output_nr_;
 
+  // Whether this variable has been saved by its *current* grad_fn
+  // This needs to be updated when
+  // 1. The variable is saved
+  // 2. The varaible is released
+  // 3. The grad_fn is changed (TODO)
+  bool is_saved_by_grad_fn_ = false;
+
   // Mutex to ensure that concurrent read operations that modify internal
   // state are still thread-safe. Used by grad_fn(), grad_accumulator(),
   // fw_grad() and set_fw_grad()
@@ -250,6 +257,18 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
 
   const Variable& grad() const override {
     return grad_;
+  }
+
+  bool is_saved_by_grad_fn() {
+    return is_saved_by_grad_fn_;
+  }
+
+  void set_is_saved_by_grad_fn(bool is_saved_by_grad_fn) {
+    TORCH_CHECK(is_saved_by_grad_fn_ != is_saved_by_grad_fn,
+        "Trying to set is_saved_by_grad_fn to ", is_saved_by_grad_fn ? "true" : "false" ,
+        " but it already is. "
+        "Are you calling save_for_backward with duplicated args?")
+    is_saved_by_grad_fn_ = is_saved_by_grad_fn;
   }
 
   const Variable& fw_grad(uint64_t level, const Variable& self) const override;

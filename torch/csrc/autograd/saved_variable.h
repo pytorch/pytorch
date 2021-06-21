@@ -37,9 +37,7 @@ class TORCH_API SavedVariable {
   /// circular reference.
   Variable unpack(std::shared_ptr<Node> saved_for = nullptr) const;
 
-  void reset_data() {
-    return data_.reset();
-  }
+  void reset_data();
 
  private:
   // This field contains either:
@@ -73,5 +71,6 @@ class TORCH_API SavedVariable {
   bool was_default_constructed_ = true;
   bool is_inplace_on_view_ = false;
   bool saved_original_ = false;
+  bool is_output_ = false;
 };
 }} // namespace torch::autograd

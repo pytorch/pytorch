@@ -1354,9 +1354,11 @@ static int THPVariable_subclass_traverse(
       // Note that this is only valid as long as user don't share non-owning references
       // across different threads (which is crazy and should never be done).
 
-      if (tensor.use_count() == 1) {
-        auto autograd_meta = torch::autograd::impl::get_autograd_meta(tensor);
-        if (autograd_meta) {
+      auto autograd_meta = torch::autograd::impl::get_autograd_meta(tensor);
+      if (autograd_meta) {
+        // The follwing check actually fails
+        // TORCH_CHECK(tensor.use_count() >= 1 + autograd_meta->is_saved_by_grad_fn_);
+        if (tensor.use_count() <= 1 + autograd_meta->is_saved_by_grad_fn_) {
           // Do NOT call grad_fn() here as that might trigger a recompute
           const auto& grad_fn = autograd_meta->grad_fn_;
           if (grad_fn && grad_fn.use_count() == 1) {

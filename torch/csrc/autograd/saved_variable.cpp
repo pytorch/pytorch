@@ -39,6 +39,7 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output, bool is_i
     was_default_constructed_ = false;
     const auto& version_counter = impl::version_counter(variable);
     saved_version_ = version_counter.current_version();
+    is_output_ = is_output;
 
     // If some cases, we can safely save the original variable without running
     // the risk of reference cycles.
@@ -53,6 +54,13 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output, bool is_i
     if (!is_output || variable.is_leaf() || variable.unsafeGetTensorImpl()->has_pyobj()) {
       saved_original_ = true;
       data_ = variable;
+
+      // If is_output is true, this Variable's current grad_fn is creating and saving
+      // this SavedVariable
+      if (is_output) {
+        impl::get_autograd_meta(data_)->set_is_saved_by_grad_fn(true);
+      }
+
       return;
     }
 
@@ -81,6 +89,15 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output, bool is_i
 
 SavedVariable::SavedVariable(const c10::optional<Variable>& variable, bool is_output, bool is_inplace_on_view)
   : SavedVariable(variable.has_value() ? *variable : Variable(), is_output, is_inplace_on_view) {}
+
+void SavedVariable::reset_data() {
+  if (data_.defined()) {
+    if (is_output_ && saved_original_) {
+      impl::get_autograd_meta(data_)->set_is_saved_by_grad_fn(false);
+    }
+  }
+  return data_.reset();
+}
 
 Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   if (!data_.defined()) {
