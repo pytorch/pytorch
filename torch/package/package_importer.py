@@ -366,7 +366,7 @@ class PackageImporter(Importer):
             return
         # Set the module as an attribute on its parent.
         parent_module = self.modules[parent]
-        if parent_module.__loader__ is self:  # type: ignore[union-attr]
+        if parent_module.__loader__ is self:
             setattr(parent_module, name.rpartition(".")[2], module)
 
     # note: copied from cpython's import code, with call to create module replaced with _make_module
@@ -381,11 +381,7 @@ class PackageImporter(Importer):
                 return self.modules[name]
             parent_module = self.modules[parent]
             try:
-                # Extern check is to handle edge case described in:
-                # https://github.com/pytorch/pytorch/issues/57490, where non-package
-                # externed modules can have submodules via sys.modules manipulation
-                if parent not in self.extern_modules:
-                    path = parent_module.__path__  # type: ignore[attr-defined]
+                path = parent_module.__path__  # type: ignore[attr-defined]
             except AttributeError:
                 msg = (_ERR_MSG + "; {!r} is not a package").format(name, parent)
                 raise ModuleNotFoundError(msg, name=name) from None
@@ -405,6 +401,11 @@ class PackageImporter(Importer):
         if module is None:
             message = "import of {} halted; " "None in sys.modules".format(name)
             raise ModuleNotFoundError(message, name=name)
+
+        # To handle https://github.com/pytorch/pytorch/issues/57490, where os's
+        # creation of os.path via the hacking of sys.modules is not import friendly
+        if name == "os":
+            self.modules["os.path"] = module.path
 
         return module
 

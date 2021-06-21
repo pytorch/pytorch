@@ -213,6 +213,7 @@ class TestMisc(PackageTestCase):
         buffer.seek(0)
         pi = PackageImporter(buffer)
         mod = pi.load_pickle("obj", "obj.pkl")
+        mod()
 
 
 if __name__ == "__main__":

@@ -187,13 +187,10 @@ autocast casts all inputs to ``float32`` and runs the op in ``float32``.
 ``addcmul``,
 ``atan2``,
 ``bilinear``,
-``cat``,
 ``cross``,
 ``dot``,
-``equal``,
 ``index_put``,
 ``scatter_add``,
-``stack``,
 ``tensordot``
 
 Some ops not listed here (e.g., binary ops like ``add``) natively promote
