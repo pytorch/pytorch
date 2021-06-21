@@ -40,7 +40,7 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   bool has_graph_exec_ = false;
 
   // uuid of this instance's current capture, retrieved from Cuda
-  CaptureId_t id_;
+  CaptureId_t id_{};
 
   // uuid used to request a particular private mempool from CUDACachingAllocator.
   // By default, this will be set to {id_, 0}.
@@ -60,17 +60,17 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   at::cuda::CUDAStream capture_stream_;
 
   // Default generator on device where capture began
-  at::CUDAGeneratorImpl* capture_gen_;
+  at::CUDAGeneratorImpl* capture_gen_{};
 
   // Device where capture occurred. Right now, for simplicity, we require all ops
   // in a capture to run on the same device, but this is a limitation of CUDAGraph,
   // not CUDA itself.  We can straightforwardly modify CUDAGraph to support multi-device
   // captures if needed.
-  int capture_dev_;
+  int capture_dev_{};
 
   // RNG state trackers
   at::Tensor offset_extragraph_;
-  uint64_t wholegraph_increment_;
+  uint64_t wholegraph_increment_{};
 };
 
 } // namespace cuda

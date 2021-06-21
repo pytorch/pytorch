@@ -24,7 +24,7 @@ struct CudaIPCSentData final {
   int64_t offset_;
   int64_t* counter_ptr_; // Reference counter shared memory block
   at::DataPtr original_ptr_; // Original mem allocation
-  cudaEvent_t event_; // Sync cuEventDestroy
+  cudaEvent_t event_{}; // Sync cuEventDestroy
   bool event_sync_required_;
   at::Device device_;
 

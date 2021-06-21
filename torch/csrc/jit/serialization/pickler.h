@@ -124,7 +124,6 @@ class TORCH_API Pickler {
   Pickler(std::function<void(const char*, size_t)> writer)
       : Pickler(std::move(writer), nullptr, nullptr, nullptr) {}
 
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Pickler(
       std::function<void(const char*, size_t)> writer,
       std::vector<at::Tensor>* tensor_table,
@@ -232,7 +231,7 @@ class TORCH_API Pickler {
   std::function<void(const char*, size_t)> writer_;
 
   // Buffer to avoid calling a writer_ on a per-byte basis.
-  std::array<char, kBufferSize> buffer_;
+  std::array<char, kBufferSize> buffer_{};
   size_t bufferPos_{0};
 
   // Stack of opcodes/data

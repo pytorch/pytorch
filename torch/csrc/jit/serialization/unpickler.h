@@ -30,7 +30,6 @@ class TORCH_API Unpickler {
   // to resolve any JIT type. class_resolver and type_resolver are not merged
   // here because some use cases need to get strong class type that
   // type_resolver_ can not return.
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Unpickler(
       std::function<size_t(char*, size_t)> reader,
       TypeResolver type_resolver,
@@ -43,7 +42,6 @@ class TORCH_API Unpickler {
 
   // tensors inside the pickle contain meta-data, the raw tensor
   // dead is retrieved by calling `read_record`.
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Unpickler(
       std::function<size_t(char*, size_t)> reader,
       TypeResolver type_resolver,
@@ -124,7 +122,7 @@ class TORCH_API Unpickler {
   // remember the position. Don't call reader_ directly.
   std::function<size_t(char*, size_t)> reader_;
   // Small buffer to avoid calling reader_ on a per-byte basis.
-  std::array<char, 256> buffer_;
+  std::array<char, 256> buffer_{};
   size_t buffer_pos_{0};
   size_t buffer_remaining_{0};
 

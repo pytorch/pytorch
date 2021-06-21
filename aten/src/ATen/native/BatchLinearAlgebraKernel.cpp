@@ -200,12 +200,10 @@ std::tuple<Tensor, Tensor> eig_kernel_impl(const Tensor& self, bool& eigenvector
                  ? at::empty_strided({n, n}, {1, n}, options)
                  : Tensor();
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t info;
+  int64_t info = 0;
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "eig_cpu", [&]{
     apply_eig<scalar_t>(self_, eigenvectors, vals_, vecs_, &info);
   });
-  // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
   singleCheckErrors(info, "eig_cpu");
   return std::tuple<Tensor, Tensor>(vals_, vecs_);
 }

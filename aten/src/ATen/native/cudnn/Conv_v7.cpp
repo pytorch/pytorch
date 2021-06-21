@@ -66,8 +66,8 @@ namespace at { namespace native {
 // Convenience struct for passing around descriptors and data
 // pointers
 struct ConvolutionArgs {
-  cudnnHandle_t handle;
-  ConvolutionParams params;
+  cudnnHandle_t handle{};
+  ConvolutionParams params{};
   TensorDescriptor idesc, odesc;
   FilterDescriptor wdesc;
   const Tensor& input, output, weight;

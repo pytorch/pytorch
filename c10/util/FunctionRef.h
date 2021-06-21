@@ -36,7 +36,7 @@ class function_ref;
 template <typename Ret, typename... Params>
 class function_ref<Ret(Params...)> {
   Ret (*callback)(intptr_t callable, Params... params) = nullptr;
-  intptr_t callable;
+  intptr_t callable{};
 
   template <typename Callable>
   static Ret callback_fn(intptr_t callable, Params... params) {

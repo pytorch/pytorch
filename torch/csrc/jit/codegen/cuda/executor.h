@@ -71,7 +71,7 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
     std::vector<at::ScalarType> empty_buffer_types;
     std::vector<std::vector<int64_t>> zero_buffer_sizes;
     std::vector<at::ScalarType> zero_buffer_types;
-    uint64_t rand_offset;
+    uint64_t rand_offset{};
   };
 
   Kernel* kernel() const {

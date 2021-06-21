@@ -6,7 +6,7 @@
 namespace at {
 
 struct TORCH_API TensorGeometry {
-  TensorGeometry() : storage_offset_(0) {}
+  TensorGeometry() : storage_offset_(0), numel_(0) {}
 
   explicit TensorGeometry(IntArrayRef sizes)
     : sizes_(sizes.vec())

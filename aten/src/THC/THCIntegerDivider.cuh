@@ -79,7 +79,7 @@ template <>
 struct IntDivider<unsigned int> {
   static_assert(sizeof(unsigned int) == 4, "Assumes 32-bit unsigned int.");
 
-  IntDivider() { }  // Dummy constructor for arrays.
+  IntDivider() = default;
 
   IntDivider(unsigned int d) : divisor(d) {
     assert(divisor >= 1 && divisor <= INT32_MAX);
@@ -115,9 +115,9 @@ struct IntDivider<unsigned int> {
     return DivMod<unsigned int>(q, n - q * divisor);
   }
 
-  unsigned int divisor;  // d above.
-  unsigned int m1;  // Magic number: m' above.
-  unsigned int shift;  // Shift amounts.
+  unsigned int divisor{};  // d above.
+  unsigned int m1{};  // Magic number: m' above.
+  unsigned int shift{};  // Shift amounts.
 };
 
 #endif // THC_INTEGER_DIVIDER_INC
