@@ -155,7 +155,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                 if remained_onnx_input_idx is not None:
                     test_input_onnx = []
                     for idx in remained_onnx_input_idx:
-                        test_input_onnx.append(input[idx])
+                        test_input_onnx.append(test_input[idx])
                     test_input = test_input_onnx
                 ort_outs = run_ort(ort_sess, test_input)
                 ort_compare_with_pytorch(ort_outs, output, rtol, atol)
@@ -8088,6 +8088,21 @@ class TestONNXRuntime(unittest.TestCase):
                       test_with_inputs=[(images, features), (images2, test_features)],
                       dict_check=False)
 
+    def test_set_(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                x.set_(y)
+                return x
+
+        x = torch.ones(2, 3)
+        y = torch.randn(4, 6)
+        self.run_test(M(), (x, y), remained_onnx_input_idx=[1])
+
+        y2 = torch.randn(5, 2)
+        self.run_test(M(), (x, y), remained_onnx_input_idx=[1], input_names=['x', 'y'],
+                      dynamic_axes={'x': [0, 1], 'y': [0, 1]},
+                      test_with_inputs=[(y, y2)])
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_set_attr_modules(self):
         class InnerModule2(torch.nn.Module):
@@ -8340,6 +8355,35 @@ class TestONNXRuntime(unittest.TestCase):
                 if self.conv.bias is not None:
                     return self.conv.weight, boxes
                 return anchors, boxes
+
+        model = torch.jit.script(MyModule())
+        anchors = torch.rand(10)
+        self.run_test(model, anchors)
+
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_set_attr_in_loop_with_list(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.conv = torch.nn.Conv1d(10, 3, 3)
+                self.conv.weight = torch.nn.Parameter(torch.zeros(3, 10))
+                self.conv.bias = torch.nn.Parameter(torch.zeros(3, 10, 3))
+                self.boxes : List[torch.Tensor] = [torch.ones(1)]  # Workaround placeholder for TorchScript
+
+            def set_cell_anchors(self, anchors):
+                self.conv.weight = torch.randn(3, 10)
+                for i in range(self.conv.weight.size(0)):
+                    for j in range(10):
+                        self.conv.bias = torch.randn(3, 10, 3)
+                        self.conv.weight = anchors * i
+                        self.boxes.append(torch.ones(3, 3))
+
+            def forward(self, anchors) -> Tuple[torch.Tensor, List[torch.Tensor]]:
+                self.boxes = []
+                self.set_cell_anchors(anchors)
+                if self.conv.bias is not None:
+                    return self.conv.weight, self.boxes
+                return anchors, self.boxes
 
         model = torch.jit.script(MyModule())
         anchors = torch.rand(10)
