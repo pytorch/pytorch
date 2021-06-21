@@ -7095,8 +7095,8 @@ else:
                 _test_helper(x, op, unary=True)
 
     @skipMeta
-    @dtypes(*get_all_dtypes())
-    def test_dlpack_conversion(self, device, dtype):
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_dlpack_capsule_conversion(self, device, dtype):
         # DLpack does not explicitly support bool
         # It does it through uint8 type
         if dtype is torch.bool:
@@ -7104,6 +7104,46 @@ else:
         x = make_tensor((5,), device, dtype, low=-9, high=9)
         z = from_dlpack(to_dlpack(x))
         self.assertEqual(z, x)
+
+    @skipMeta
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_dlpack_protocol_conversion(self, device, dtype):
+        # DLpack does not explicitly support bool
+        # It does it through uint8 type
+        if dtype is torch.bool:
+            return
+        x = make_tensor((5,), device, dtype, low=-9, high=9)
+        z = from_dlpack(x)
+        self.assertEqual(z, x)
+
+    @skipMeta
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_dlpack_conversion_with_streams(self, device, dtype):
+        # DLpack does not explicitly support bool
+        # It does it through uint8 type
+        if dtype is torch.bool:
+            return
+        # Create a stream where the tensor will reside
+        if device == 'cuda':
+            x = make_tensor((5,), device, dtype, low=-9, high=9)
+            stream = torch.cuda.Stream()
+            with torch.cuda.stream(stream):
+                assert stream.query()
+                z = from_dlpack(to_dlpack(x))
+                assert not stream.query()
+            assert stream.query()
+            self.assertEqual(z, x)
+
+    @skipMeta
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_dlpack_tensor_invalid_stream(self, device, dtype):
+        # DLpack does not explicitly support bool
+        # It does it through uint8 type
+        if dtype is torch.bool:
+            return
+        with self.assertRaises(TypeError):
+            x = make_tensor((5,), device, dtype, low=-9, high=9)
+            x.__dlpack__(stream=object())
 
     @onlyCUDA
     @unittest.skipIf(PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property")

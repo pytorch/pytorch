@@ -1,3 +1,5 @@
+from typing import Any
+
 import torch
 
 from torch._C import _from_dlpack
@@ -15,17 +17,18 @@ Note that each dlpack can only be consumed once.
 """)
 
 
-def from_dlpack(ext_tensor) -> torch.Tensor:
+def from_dlpack(ext_tensor: Any) -> torch.Tensor:
     """from_dlpack(ext_tensor) -> Tensor
 
-    Decodes a DLPack to a tensor.
-
-    Args:
-        ext_tensor: a PyCapsule object with the dltensor
+    Convers a tensor from a external library into a ``torch.Tensor``
+    by means of the ``__dlpack__`` protocol.
 
     The tensor will share the memory with the object represented
     in the dlpack.
-    Note that each dlpack can only be consumed once.
+
+    In order to keep backward compatibility, this function also admits
+    to pass a dlpack capsule object.
+    Note that each dlpack capsule can only be consumed once.
 
     Args:
         ext_tensor (object with __dlpack__ attribute or dlpack capsule):
@@ -45,5 +48,5 @@ def from_dlpack(ext_tensor) -> torch.Tensor:
             dlpack = ext_tensor.__dlpack__()
     else:
         # Old versions just call the converter
-        dlpack = tensor
-    _from_dlpack(dlpack)
+        dlpack = ext_tensor
+    return _from_dlpack(dlpack)

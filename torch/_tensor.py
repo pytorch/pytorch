@@ -1,4 +1,5 @@
 from collections import OrderedDict
+import enum
 import functools
 from numbers import Number
 from typing import Any, Dict, Optional, Tuple, Union
@@ -1063,18 +1064,19 @@ class Tensor(torch._C._TensorBase):
 
         Args:
             stream (integer or None): A Python integer representing a pointer
-            to a stream. `stream` is provided by the consumer to the producer
-            to instruct the producer to ensure that operations can safely be
-            performed on the array. The pointer must be a positive integer or
+            to a stream (CUDA or ROCm). `stream` is provided by the consumer
+            to the producer to instruct the producer to ensure that operations
+            can safely be performed on the array.
+            The pointer must be a positive integer or
             -1 . If stream is -1 , the value may be used by the consumer to
             signal "producer must not perform any synchronization. Optional.
         """
         if stream is not None and type(stream) is not int:
-            # currently in pytorch is not possible to create a stream
-            # from a given pointer
+            # Stream pointers in CUDA/ROCm are uniquely numbered and can
+            # be retrieved from their integer value. 
             raise TypeError('stream must be ``int`` or ``none``')
         elif stream is not None and stream != -1:
-            if self.device.type in ('cuda', 'rocm'):
+            if self.device.type == 'cuda':
                 stream = torch.cuda.streams.ExternalStream(stream)
                 # Only synchronize on different streams
                 if stream != torch.cuda.current_stream:
@@ -1083,16 +1085,22 @@ class Tensor(torch._C._TensorBase):
                     torch.cuda.current_stream().wait_event(event)
         return torch.utils.dlpack.to_dlpack(self)
 
-    def __dlpack_device__(self) -> Tuple[int, int]:
-        # TODO(ecastill)
-        # Add support for the following devices
-        # CPU = 1 CPU_PINNED = 3 OPENCL = 4 VULKAN = 7
-        # METAL = 8 VPI = 9
-        dlpack_ids = {'cpu': 1, 'cuda': 2, 'rocm': 10}
+    def __dlpack_device__(self) -> Tuple[enum.IntEnum, int]:
+        class DLPackIds(enum.IntEnum): 
+            cpu = 1
+            cpu_pinned = 3
+            cuda = 2
+            opencl = 4
+            vulkan = 7
+            rocm = 10
+
         idx = self.device.index if self.device.index is not None else 0
-        # TODO(ecastill) detect HIP or CUDA
-        # in torch rocm device is cuda too
-        return (dlpack_ids[self.device.type], idx)
+        device_type = self.device.type
+        if device_type == 'cuda' and torch.version.hip is not None:
+            device_type = 'rocm'
+        elif device_type == 'cpu' and self.is_pinned():
+            device_type = 'cpu_pinned'
+        return (DLPackIds[device_type], idx)
 
     __module__ = 'torch'
 
