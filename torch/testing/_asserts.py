@@ -95,11 +95,7 @@ def _check_complex_components_individually(
             actual.real,
             expected.real,
             equal_nan=equal_nan,
-            msg=msg
-            or functools.partial(
-                _make_mismatch_msg,
-                identifier=lambda default_identifier: f"Real components of complex {default_identifier.lower()}",
-            ),
+            msg=msg or _make_mismatch_msg,
             **kwargs,
         )
         if error_meta:
@@ -109,11 +105,7 @@ def _check_complex_components_individually(
             actual.imag,
             expected.imag,
             equal_nan=equal_nan,
-            msg=msg
-            or functools.partial(
-                _make_mismatch_msg,
-                identifier=lambda default_identifier: f"Imaginary components of complex {default_identifier.lower()}",
-            ),
+            msg=msg or _make_mismatch_msg,
             **kwargs,
         )
         if error_meta:
@@ -276,13 +268,14 @@ def _make_mismatch_msg(
     identifier: Optional[Union[str, Callable[[str], str]]] = None,
 ) -> str:
     scalar_comparison = actual.size() == torch.Size([])
+    equality = trace.rtol == 0 and trace.atol == 0
 
     def append_difference(msg: str, *, type: str, difference: float, index: Tuple[int, ...], tolerance: float) -> str:
         if scalar_comparison:
             msg += f"{type.title()} difference: {difference}"
         else:
             msg += f"Greatest {type} difference: {difference} at index {index}"
-        if tolerance > 0:
+        if not equality:
             msg += f" (up to {tolerance} allowed)"
         msg += "\n"
         return msg
@@ -293,7 +286,7 @@ def _make_mismatch_msg(
     elif callable(identifier):
         identifier = identifier(default_identifier)
 
-    msg = f"{identifier} are not {'equal' if trace.rtol == 0 and trace.atol == 0 else 'close'}!\n\n"
+    msg = f"{identifier} are not {'equal' if equality else 'close'}!\n\n"
 
     if not scalar_comparison:
         msg += (
@@ -707,7 +700,6 @@ def assert_close(
         define an ``assert_equal`` that uses zero tolrances for every ``dtype`` by default:
 
         >>> import functools
-        >>> import torch
         >>> assert_equal = functools.partial(torch.testing.assert_close, rtol=0, atol=0)
         >>> assert_equal(1e-9, 1e-10)
         AssertionError: Scalars are not equal!
@@ -777,7 +769,7 @@ def assert_close(
         >>> expected = torch.tensor(complex(float("NaN"), 0))
         >>> actual = torch.tensor(complex(0, float("NaN")))
         >>> torch.testing.assert_close(actual, expected, equal_nan=True)
-        AssertionError: Real components of complex scalars are not close!
+        AssertionError: Scalars are not close!
         <BLANKLINE>
         Absolute difference: nan (up to 1e-05 allowed)
         Relative difference: nan (up to 1.3e-06 allowed)
