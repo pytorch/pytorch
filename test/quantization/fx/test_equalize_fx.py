@@ -4,7 +4,6 @@ import torch.nn.functional as F
 from torch.quantization import default_qconfig
 from torch.quantization.observer import MinMaxObserver, PerChannelMinMaxObserver
 from torch.quantization.quantize_fx import prepare_fx, convert_fx
-from torch.quantization.fx.convert import run_weight_observers
 from torch.quantization.fx._equalize import (
     _InputEqualizationObserver,
     _WeightEqualizationObserver,
@@ -440,7 +439,6 @@ class TestEqualizeFx(QuantizationTestCase):
             prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=equalization_qconfig_dict)
             prepared(x)
             convert_ref = _convert_equalization_ref(prepared)
-            run_weight_observers(convert_ref)
             convert_ref(x)
 
             modules = dict(convert_ref.named_modules(remove_duplicate=False))
