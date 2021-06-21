@@ -2873,13 +2873,13 @@ REGISTER_DISPATCH(lu_solve_trans_stub, &lu_solve_trans_magma);
 
 static void lu_solve_batched_magma(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(b.scalar_type(), "lu_solve_batched_magma", [&]{
-    apply_lu_solve_batched_magma<scalar_t>(b, lu, pivots);
+    apply_lu_solve_batched_magma<scalar_t>(b, lu, pivots, MagmaNoTrans);
   });
 }
 
 static void lu_solve_looped_magma(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(b.scalar_type(), "lu_solve_looped_magma", [&]{
-    apply_lu_solve_looped_magma<scalar_t>(b, lu, pivots);
+    apply_lu_solve_looped_magma<scalar_t>(b, lu, pivots, MagmaNoTrans);
   });
 }
 

@@ -3556,6 +3556,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> linalg_lstsq(
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lu_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+DEFINE_DISPATCH(lu_solve_stub);
 DEFINE_DISPATCH(lu_solve_trans_stub);
 
 // Supports arbitrary batch dimensions for self and LU_data (implicitly LU_pivots also)
