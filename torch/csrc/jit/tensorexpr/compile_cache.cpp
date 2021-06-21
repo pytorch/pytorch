@@ -36,13 +36,13 @@ class CCNode : public torch::autograd::Node {
 
  public:
   variable_list apply(variable_list&& inputs) override {
-    // TODO(jansel): we likely need to import some error checking from eager to here
+    // TODO(jansel): we likely need to copy some error checking from eager to here
 
-    variable_list args;
-    args.reserve()
+    //variable_list args;
+    //args.reserve()
 
-    variable_list result;
-    result.reserve(backwards_functions.size());
+    //variable_list result;
+    //result.reserve(backwards_functions.size());
     return {at::empty_like(inputs[0]).fill_(-99.0)};
   }
   // void release_variables() override { _inputs.clear(); }
