@@ -2853,30 +2853,6 @@ static void lu_solve_looped_magma(const Tensor& b, const Tensor& lu, const Tenso
   });
 }
 
-static void lu_solve_dispatch(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
-  auto batch_size = batchCount(lu);
-  auto m = lu.size(-2);
-#ifdef USE_CUSOLVER
-  if (batch_size == 1 && m > 512) {
-    lu_solve_looped_cusolver(b, lu, pivots, CUBLAS_OP_N);
-  }
-#else
-  if (batch_size == 1) {
-    lu_solve_looped_magma(b, lu, pivots, MagmaNoTrans);
-  }
-#endif // ifdef USE_CUSOLVER
-#ifdef CUDART_VERSION
-  else if (batch_size > 2 && m <= 128) {
-    lu_solve_batched_cublas(b, lu, pivots, CUBLAS_OP_N);
-  }
-#endif // ifdef CUDART_VERSION
-  else {
-    lu_solve_batched_magma(b, lu, pivots, MagmaNoTrans);
-  }
-}
-
-REGISTER_DISPATCH(lu_solve_stub, &lu_solve_dispatch);
-
 static void lu_solve_trans_dispatch(const Tensor& b, const Tensor& lu, const Tensor& pivots, char trans) {
   auto batch_size = batchCount(lu);
   auto m = lu.size(-2);
@@ -2900,6 +2876,12 @@ static void lu_solve_trans_dispatch(const Tensor& b, const Tensor& lu, const Ten
 }
 
 REGISTER_DISPATCH(lu_solve_trans_stub, &lu_solve_trans_dispatch);
+
+static void lu_solve_dispatch(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
+  lu_solve_trans_dispatch(b, lu, pivots, 'N');
+}
+
+REGISTER_DISPATCH(lu_solve_stub, &lu_solve_dispatch);
 
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lstsq ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
