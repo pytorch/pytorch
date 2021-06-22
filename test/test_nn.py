@@ -15961,6 +15961,12 @@ class TestNNDeviceType(NNTestCase):
             result = F.nll_loss(x, t, weight=weight, reduction=reduction)
             self.assertAlmostEqual(result, 0.0)
 
+    def test_nll_loss_zero_weights_empty_with_mean(self, device):
+        x = torch.randn((0, 3), device=device)
+        t = torch.empty(0, dtype=torch.int64, device=device).random_(0, 3)
+        result = F.nll_loss(x, t, reduction='mean')
+        self.assertTrue(torch.isnan(result))
+
     def _nll_loss_helper(self, input_size, reduction, expected, device):
         input = torch.rand(input_size, requires_grad=True, device=device)
         num_channels = input_size[1]
