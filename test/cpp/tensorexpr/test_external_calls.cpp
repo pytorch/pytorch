@@ -260,8 +260,6 @@ TEST(ExternalCall, Prepacked_Linear_float) {
   KernelScope kernel_scope;
 
   Placeholder Input("Input", kFloat, {100, 200});
-  Placeholder Weight("Weight", kFloat, {300, 200});
-  Placeholder Bias("Bias", kFloat, {300});
   BufHandle ResultBuf("Result", {100, 300}, kFloat);
 
   // Calculate reference result using at::linear.
@@ -270,10 +268,10 @@ TEST(ExternalCall, Prepacked_Linear_float) {
                      .layout(at::kStrided)
                      .device(at::kCPU)
                      .requires_grad(false);
-  at::Tensor input = at::linspace(-10.0, 10.0, 100 * 200, options)
-      .resize_({100, 200});
-  at::Tensor weight = at::linspace(-10.0, 10.0, 300 * 200, options)
-      .resize_({300, 200});
+  at::Tensor input =
+      at::linspace(-10.0, 10.0, 100 * 200, options).resize_({100, 200});
+  at::Tensor weight =
+      at::linspace(-10.0, 10.0, 300 * 200, options).resize_({300, 200});
   at::Tensor bias = at::linspace(-10.0, 10.0, 300, options);
   at::Tensor ref = at::linear(input, weight, bias);
 
@@ -328,8 +326,6 @@ TEST(ExternalCall, Prepacked_Conv2d_float) {
   KernelScope kernel_scope;
 
   Placeholder Input("Input", kFloat, {1, 3, 224, 224});
-  Placeholder Weight("Weight", kFloat, {16, 3, 3, 3});
-  Placeholder Bias("Bias", kFloat, {16});
   BufHandle ResultBuf("Result", {1, 16, 112, 112}, kFloat);
   int64_t stride = 2;
   int64_t pad = 1;
@@ -343,9 +339,9 @@ TEST(ExternalCall, Prepacked_Conv2d_float) {
                      .device(at::kCPU)
                      .requires_grad(false);
   at::Tensor input = at::linspace(-10.0, 10.0, 1 * 3 * 224 * 224, options)
-      .resize_({1, 3, 224, 224});
-  at::Tensor weight = at::linspace(-10.0, 10.0, 16 * 3 * 3 * 3, options)
-      .resize_({16, 3, 3, 3});
+                         .resize_({1, 3, 224, 224});
+  at::Tensor weight =
+      at::linspace(-10.0, 10.0, 16 * 3 * 3 * 3, options).resize_({16, 3, 3, 3});
   at::Tensor bias = at::linspace(-10.0, 10.0, 16, options);
   at::Tensor ref = at::conv2d(
       input,
