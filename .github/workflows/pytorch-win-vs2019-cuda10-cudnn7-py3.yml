@@ -159,12 +159,12 @@ jobs:
             fi
             .jenkins/pytorch/win-test.sh
       - name: Zip test reports for upload
-        shell: bash
         if: always()
+        shell: powershell
         run: |
           # Remove any previous test reports if they exist
-          rm -f test-reports-*.zip
-          zip -r "test-reports-${TEST_CONFIG}.zip" test/**/*.xml
+          Remove-Item -Force test-reports-*.zip
+          Get-ChildItem -Path test -Recurse -Filter "*.xml" | Compress-Archive -DestinationPath "test-reports-$Env:TEST_CONFIG.zip"
       - uses: actions/upload-artifact@v2
         name: Store PyTorch Test Reports
         if: always()
