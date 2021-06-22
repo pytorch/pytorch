@@ -131,7 +131,8 @@ Tensor cudnn_convolution_deprecated(
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
     int64_t groups, bool benchmark, bool deterministic) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
 
   auto output = at::cudnn_convolution(input, weight, padding, stride, dilation, groups, benchmark, deterministic);
   if (bias.defined()) {
@@ -156,7 +157,8 @@ Tensor cudnn_convolution_transpose_deprecated(
     int64_t groups, bool benchmark, bool deterministic)
 {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
 
   auto output = at::cudnn_convolution_transpose(input, weight, padding, output_padding, stride, dilation, groups, benchmark, deterministic);
   if (bias.defined()) {

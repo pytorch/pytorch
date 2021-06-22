@@ -25,6 +25,7 @@ void dot<float, at::Half, float>(
   std::vector<float> tmp_y_vec(N);
   float* tmp_y = tmp_y_vec.data();
 #else
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   float tmp_y[N];
 #endif
   for (int i = 0; i < N; i++) {

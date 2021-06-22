@@ -18,7 +18,7 @@ constexpr const char* ROUND_ROBIN_BACKEND_NAME = "round_robin";
 // across all processes in the process group. This is the only way that we
 // can guarantee to match up the same calls among all processes.
 //
-class ProcessGroupRoundRobin final : public ProcessGroup {
+class TORCH_API ProcessGroupRoundRobin final : public ProcessGroup {
  public:
   explicit ProcessGroupRoundRobin(
       int rank,
@@ -53,7 +53,7 @@ class ProcessGroupRoundRobin final : public ProcessGroup {
       std::vector<at::Tensor>& inputs,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> allgather_base(
+  c10::intrusive_ptr<ProcessGroup::Work> _allgather_base(
       at::Tensor& outputBuffer,
       at::Tensor& inputBuffer,
       const AllgatherOptions& opts = AllgatherOptions()) override;

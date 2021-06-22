@@ -5,6 +5,7 @@
 #include <iomanip>
 #include <mutex>
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_version,
     false,
@@ -96,6 +97,7 @@ bool GlobalInit() {
   // On mobile devices, use this global init, since we cannot pass the
   // command line options to caffe2, no arguments are passed.
   int mobile_argc = 1;
+  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   static char caffe2_name[] = "caffe2";
   char* mobile_name = &caffe2_name[0];
   char** mobile_argv = &mobile_name;

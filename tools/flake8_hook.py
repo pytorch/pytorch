@@ -1,8 +1,8 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import sys
 
-from flake8.main import git
+from flake8.main import git  # type: ignore[import]
 
 if __name__ == '__main__':
     sys.exit(

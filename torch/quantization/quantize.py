@@ -22,8 +22,7 @@ from .qconfig import default_dynamic_qconfig, float16_dynamic_qconfig, float_qpa
 
 def is_activation_post_process(module):
     return (isinstance(module, torch.quantization.ObserverBase) or
-            isinstance(module, torch.quantization.FakeQuantizeBase) or
-            isinstance(module, torch.quantization.Logger))  # type: ignore
+            isinstance(module, torch.quantization.FakeQuantizeBase))
 
 def _propagate_qconfig_helper(module, qconfig_dict, allow_list=None,
                               qconfig_parent=None, prefix=''):
@@ -506,7 +505,7 @@ def _convert(
         if not isinstance(mod, _FusedModule) and \
            type(mod) not in custom_module_class_mapping:
             _convert(mod, mapping, True,  # inplace
-                     custom_module_class_mapping)
+                     convert_custom_config_dict)
         reassign[name] = swap_module(mod, mapping, custom_module_class_mapping)
 
     for key, value in reassign.items():

@@ -63,9 +63,12 @@ bool LpNormGradientOp<float, CPUContext>::RunOnDevice() {
 }
 
 // LpNorm
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(LpNorm, LpNormOp<float, CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(LpNormGradient, LpNormGradientOp<float, CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(LpNorm)
     .NumInputs(1)
     .NumOutputs(1)
@@ -138,6 +141,7 @@ Y:
           CreateTensorShape(vector<int64_t>{output_dims}, in[0].data_type())};
     });
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(LpNormGradient)
     .NumInputs(2)
     .NumOutputs(1)
@@ -168,6 +172,7 @@ class GetLpNormGradient : public GradientMakerBase {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(LpNorm, GetLpNormGradient);
 
 } // namespace caffe2

@@ -32,6 +32,10 @@ Tensor Tensor::hip() const {
   return to(options().device(DeviceType::HIP), /*non_blocking*/ false, /*copy*/ false);
 }
 
+Tensor Tensor::ve() const {
+  return to(options().device(DeviceType::VE), /*non_blocking*/ false, /*copy*/ false);
+}
+
 Tensor Tensor::vulkan() const {
   return to(options().device(DeviceType::Vulkan), /*non_blocking*/ false, /*copy*/ false);
 }
@@ -56,23 +60,6 @@ TensorOptions Tensor::options() const {
 }
 
 ${tensor_method_definitions}
-
-NamedTensorMeta* Tensor::get_named_tensor_meta() {
-  return static_cast<NamedTensorMeta*>(impl_->named_tensor_meta());
-}
-
-const NamedTensorMeta* Tensor::get_named_tensor_meta() const {
-  return static_cast<NamedTensorMeta*>(impl_->named_tensor_meta());
-}
-
-bool Tensor::has_names() const {
-  // If a user is using unnamed tensors, then we can short-circuit right here.
-  // Otherwise, impl::has_names attempts to retrieve names.
-  if (!impl_->has_named_tensor_meta()) {
-    return false;
-  }
-  return impl::has_names(unsafeGetTensorImpl());
-}
 
 #define DEFINE_CAST(T, name)                                        \
   template <>                                                       \

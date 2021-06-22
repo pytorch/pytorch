@@ -14,7 +14,9 @@
 namespace at {
 namespace native {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qadaptive_avg_pool2d_nhwc_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qadaptive_avg_pool3d_ndhwc_stub);
 
 namespace {
@@ -28,6 +30,7 @@ inline int start_index(int out_idx, int out_len, int in_len) {
    * elements in each average computation.
    * This function computes the start index on input matrix.
    */
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   return (int)std::floor((float)(out_idx * in_len) / out_len);
 }
 
@@ -36,6 +39,7 @@ inline int end_index(int out_idx, int out_len, int in_len) {
    * Parameter definition is the same as start_index.
    * This function computes the end index on input matrix.
    */
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   return (int)std::ceil((float)((out_idx + 1) * in_len) / out_len);
 }
 
@@ -58,22 +62,26 @@ static void adaptive_avg_pool_single_out_frame(
   at::parallel_for(0, sizeC, 0, [&](int64_t start, int64_t end) {
     for (auto c = start; c < end; c++) {
       /* loop over output */
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t od, oh, ow;
       for (od = 0; od < osizeD; od++) {
         int istartD = start_index(od, osizeD, isizeD);
         int iendD = end_index(od, osizeD, isizeD);
         int kD = iendD - istartD;
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         float kDr = 1.0 / kD;
         for (oh = 0; oh < osizeH; oh++) {
           int istartH = start_index(oh, osizeH, isizeH);
           int iendH = end_index(oh, osizeH, isizeH);
           int kH = iendH - istartH;
+          // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
           float kDHr = kDr / kH;
 
           for (ow = 0; ow < osizeW; ow++) {
             int istartW = start_index(ow, osizeW, isizeW);
             int iendW = end_index(ow, osizeW, isizeW);
             int kW = iendW - istartW;
+            // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
             float kDHWr = kDHr / kW;
 
             /* local pointers */
@@ -90,10 +98,12 @@ static void adaptive_avg_pool_single_out_frame(
 
             /* compute local average: */
             int64_t sum = 0;
+            // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
             int id, ih, iw;
             for (id = 0; id < kD; id++) {
               for (ih = 0; ih < kH; ih++) {
                 for (iw = 0; iw < kW; iw++) {
+                  // NOLINTNEXTLINE(bugprone-signed-char-misuse)
                   int64_t val = (ip +
                                  id * istrideD +
                                  ih * istrideH +
@@ -292,7 +302,9 @@ Tensor q_adaptive_avg_pool3d(Tensor& output, const Tensor& input,
 Tensor qnnpack_adaptive_avg_pool2d(
     const at::Tensor& input,
     IntArrayRef output_size) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   std::array<int64_t, 2> kernel_size;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   std::array<int64_t, 2> stride;
   std::array<int64_t, 2> padding{0, 0};
   bool ceil_mode{false};

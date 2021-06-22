@@ -16,7 +16,8 @@ def intern_build_aten_ops(copts, deps):
             [
                 PREFIX + "cpu/*.cpp",
                 PREFIX + "quantized/cpu/kernels/*.cpp",
-            ]):
+            ],
+        ):
             name = impl.replace(PREFIX, "")
             out = PREFIX + name + "." + cpu_capability + ".cpp"
             native.genrule(

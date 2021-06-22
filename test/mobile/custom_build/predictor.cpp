@@ -11,14 +11,8 @@ using namespace std;
 namespace {
 
 struct MobileCallGuard {
-  // AutoGrad is disabled for mobile by default.
-  torch::autograd::AutoGradMode no_autograd_guard{false};
-  // VariableType dispatch is not included in default mobile build. We need set
-  // this guard globally to avoid dispatch error (only for dynamic dispatch).
-  // Thanks to the unification of Variable class and Tensor class it's no longer
-  // required to toggle the NonVariableTypeMode per op - so it doesn't hurt to
-  // always set NonVariableTypeMode for inference only use case.
-  torch::AutoNonVariableTypeMode non_var_guard{true};
+  // Set InferenceMode for inference only use case.
+  c10::InferenceMode guard;
   // Disable graph optimizer to ensure list of unused ops are not changed for
   // custom mobile build.
   torch::jit::GraphOptimizerEnabledGuard no_optimizer_guard{false};

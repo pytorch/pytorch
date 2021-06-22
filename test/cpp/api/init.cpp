@@ -67,6 +67,7 @@ void check_initializer_against_baseline(
   check_exact_values(parameters, expected);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InitTest, ProducesPyTorchValues_XavierUniform) {
   auto expected = expected_parameters::Xavier_Uniform();
   auto initializer = [](torch::Tensor tensor) {
@@ -75,6 +76,7 @@ TEST(InitTest, ProducesPyTorchValues_XavierUniform) {
   check_initializer_against_baseline(initializer, expected);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InitTest, ProducesPyTorchValues_XavierNormal) {
   auto expected = expected_parameters::Xavier_Normal();
   auto initializer = [](torch::Tensor tensor) {
@@ -83,6 +85,7 @@ TEST(InitTest, ProducesPyTorchValues_XavierNormal) {
   check_initializer_against_baseline(initializer, expected);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InitTest, ProducesPyTorchValues_KaimingNormal) {
   auto expected = expected_parameters::Kaiming_Normal();
   auto initializer = [](torch::Tensor tensor) {
@@ -91,6 +94,7 @@ TEST(InitTest, ProducesPyTorchValues_KaimingNormal) {
   check_initializer_against_baseline(initializer, expected);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InitTest, ProducesPyTorchValues_KaimingUniform) {
   auto expected = expected_parameters::Kaiming_Uniform();
   auto initializer = [](torch::Tensor tensor) {
@@ -99,6 +103,7 @@ TEST(InitTest, ProducesPyTorchValues_KaimingUniform) {
   check_initializer_against_baseline(initializer, expected);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InitTest, CanInitializeTensorThatRequiresGrad) {
   auto tensor = torch::empty({3, 4}, torch::requires_grad());
   ASSERT_THROWS_WITH(
@@ -108,24 +113,28 @@ TEST(InitTest, CanInitializeTensorThatRequiresGrad) {
   ASSERT_EQ(torch::nn::init::ones_(tensor).sum().item<int32_t>(), 12);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InitTest, CalculateGainWithTanh) {
   double gain =
       torch::nn::init::calculate_gain(torch::kTanh);
   ASSERT_DOUBLE_EQ(gain, 5.0 / 3.0);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InitTest, CalculateGainWithRelu) {
   double gain =
       torch::nn::init::calculate_gain(torch::kReLU);
   ASSERT_DOUBLE_EQ(gain, std::sqrt(2.0));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InitTest, CalculateGainWithLeakyRelu) {
   double gain =
       torch::nn::init::calculate_gain(torch::kLeakyReLU);
   ASSERT_DOUBLE_EQ(gain, std::sqrt(2.0 / (1 + pow(0.01, 2))));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InitTest, CanInitializeCnnWithOrthogonal) {
   torch::nn::Conv2d conv_layer(torch::nn::Conv2dOptions(3, 2, 3).stride(2));
   torch::nn::init::orthogonal_(conv_layer->named_parameters()["weight"]);

@@ -20,7 +20,7 @@ class ConcatIterDataPipe(IterDataPipe):
             raise ValueError("Expected at least one DataPipe, but got nothing")
         if not all(isinstance(dp, IterDataPipe) for dp in datapipes):
             raise TypeError("Expected all inputs to be `IterDataPipe`")
-        self.datapipes = datapipes  # type: ignore
+        self.datapipes = datapipes  # type: ignore[assignment]
         self.length = None
 
     def __iter__(self) -> Iterator:
@@ -31,10 +31,10 @@ class ConcatIterDataPipe(IterDataPipe):
     def __len__(self) -> int:
         if self.length is not None:
             if self.length == -1:
-                raise NotImplementedError
+                raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
             return self.length
-        if all(isinstance(dp, Sized) and len(dp) >= 0 for dp in self.datapipes):
-            self.length = sum(len(dp) for dp in self.datapipes)  # type: ignore
+        if all(isinstance(dp, Sized) for dp in self.datapipes):
+            self.length = sum(len(dp) for dp in self.datapipes)
         else:
             self.length = -1
         return len(self)
@@ -57,7 +57,7 @@ class ZipIterDataPipe(IterDataPipe[Tuple[T_co]]):
             raise TypeError("All inputs are required to be `IterDataPipe` "
                             "for `ZipIterDataPipe`.")
         super().__init__()
-        self.datapipes = datapipes  # type: ignore
+        self.datapipes = datapipes  # type: ignore[assignment]
         self.length = None
 
     def __iter__(self) -> Iterator[Tuple[T_co]]:
@@ -67,10 +67,10 @@ class ZipIterDataPipe(IterDataPipe[Tuple[T_co]]):
     def __len__(self) -> int:
         if self.length is not None:
             if self.length == -1:
-                raise NotImplementedError
+                raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
             return self.length
         if all(isinstance(dp, Sized) for dp in self.datapipes):
-            self.length = min(len(dp) for dp in self.datapipes)  # type: ignore
+            self.length = min(len(dp) for dp in self.datapipes)
         else:
             self.length = -1
         return len(self)

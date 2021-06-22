@@ -15,7 +15,6 @@ import json
 from typing import Dict, List
 
 CUDA_ARCHES = [
-    "10.1",
     "10.2",
     "11.1"
 ]

@@ -1,5 +1,7 @@
 #include <c10d/ProcessGroupGloo.hpp>
 
+#ifdef USE_C10D_GLOO
+
 #include <c10d/GlooDeviceFactory.hpp>
 #include <chrono>
 #include <exception>
@@ -32,18 +34,9 @@
 
 #include <ATen/SparseTensorUtils.h>
 
-#ifdef USE_CUDA
-#include <ATen/cuda/CUDAEvent.h>
-#include <ATen/cuda/Exceptions.h>
-#include <ATen/cuda/PinnedMemoryAllocator.h>
-#include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/cuda/CUDAGuard.h>
-#include <c10/cuda/CUDAStream.h>
-#endif
-
-#include <c10/util/irange.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/intrusive_ptr.h>
+#include <c10/util/irange.h>
 #include <gloo/config.h>
 #include <gloo/rendezvous/context.h>
 #include <gloo/rendezvous/prefix_store.h>
@@ -73,7 +66,7 @@
       func<int64_t>(__VA_ARGS__);                      \
       break;                                           \
     default:                                           \
-      throw std::runtime_error("Invalid scalar type"); \
+      TORCH_CHECK(false, "Invalid scalar type"); \
   }
 
 #define HOST_NAME_MAX 256
@@ -102,7 +95,7 @@
       func<int64_t>(args);                             \
       break;                                           \
     default:                                           \
-      throw std::runtime_error("Invalid scalar type"); \
+      TORCH_CHECK(false, "Invalid scalar type"); \
   }
 #endif
 
@@ -110,12 +103,19 @@ namespace c10d {
 
 namespace {
 
+constexpr int kBytes = 8;
+
 using steady_clock_time_point =
     std::chrono::time_point<std::chrono::steady_clock>;
 
 std::chrono::milliseconds getRemainingTime(
     steady_clock_time_point startTime,
-    const std::chrono::milliseconds& timeout) {
+    const std::chrono::milliseconds& timeout,
+    bool waitAllRanks) {
+  if (waitAllRanks) {
+    // See Note in monitoredBarrier
+    return timeout;
+  }
   auto elapsedTime = std::chrono::steady_clock::now() - startTime;
   auto remainingMillis = timeout -
       std::chrono::duration_cast<std::chrono::milliseconds>(elapsedTime);
@@ -128,12 +128,12 @@ std::chrono::milliseconds getRemainingTime(
   return remainingMillis;
 }
 
-// Emit a LOG(ERROR) and throws runtime_error with the given messages.
+// Emit a LOG(ERROR) and throws using TORCH_CHECK with the given messages.
 void logAndThrow(
     const std::string& logMessage,
     const std::string& errorMessage) {
   LOG(ERROR) << logMessage;
-  throw std::runtime_error(errorMessage);
+  TORCH_CHECK(false, errorMessage);
 }
 
 // For monitoredBarrier, checks remaining time left to finish processing ranks
@@ -162,35 +162,6 @@ void checkRemainingTime(
   }
 }
 
-// Wrap c10d store as Gloo store
-class GlooStore : public ::gloo::rendezvous::Store {
- public:
-  GlooStore(const c10::intrusive_ptr<::c10d::Store>& store) : store_(store) {}
-
-  void set(const std::string& key, const std::vector<char>& value) override {
-    std::vector<uint8_t> tmp(value.begin(), value.end());
-    store_->set(key, tmp);
-  }
-
-  std::vector<char> get(const std::string& key) override {
-    auto value = store_->get(key);
-    return std::vector<char>(value.begin(), value.end());
-  }
-
-  void wait(const std::vector<std::string>& keys) override {
-    store_->wait(keys, Store::kDefaultTimeout);
-  }
-
-  void wait(
-      const std::vector<std::string>& keys,
-      const std::chrono::milliseconds& timeout) override {
-    store_->wait(keys, timeout);
-  }
-
- protected:
-  c10::intrusive_ptr<::c10d::Store> store_;
-};
-
 typedef void (*ReduceFunc)(void*, const void*, const void*, size_t);
 
 template <
@@ -207,22 +178,22 @@ ReduceFunc toFunction(const ReduceOp& r) {
     case ReduceOp::MAX:
       return ReduceFunc(&::gloo::max<T>);
     case ReduceOp::BAND:
-      throw std::runtime_error(
+      TORCH_CHECK(false,
           "Cannot use ReduceOp.BAND with non-integral dtype");
       break;
     case ReduceOp::BOR:
-      throw std::runtime_error(
+      TORCH_CHECK(false,
           "Cannot use ReduceOp.BOR with non-integral dtype");
       break;
     case ReduceOp::BXOR:
-      throw std::runtime_error(
+      TORCH_CHECK(false,
           "Cannot use ReduceOp.BXOR with non-integral dtype");
       break;
     case ReduceOp::UNUSED:
       break;
   }
 
-  throw std::runtime_error("Unhandled ReduceOp");
+  TORCH_CHECK(false, "Unhandled ReduceOp");
 }
 
 // Bitwise AND with SFINAE guard for integral types.
@@ -233,7 +204,7 @@ void band(void* c, const void* a, const void* b, size_t n) {
   auto tc = static_cast<T*>(c);
   auto ta = static_cast<const T*>(a);
   auto tb = static_cast<const T*>(b);
-  for (size_t i = 0; i < n; i++) {
+  for(const auto i : c10::irange(n)) {
     tc[i] = ta[i] & tb[i];
   }
 }
@@ -246,7 +217,7 @@ void bor(void* c, const void* a, const void* b, size_t n) {
   auto tc = static_cast<T*>(c);
   auto ta = static_cast<const T*>(a);
   auto tb = static_cast<const T*>(b);
-  for (size_t i = 0; i < n; i++) {
+  for(const auto i : c10::irange(n)) {
     tc[i] = ta[i] | tb[i];
   }
 }
@@ -259,7 +230,7 @@ void bxor(void* c, const void* a, const void* b, size_t n) {
   auto tc = static_cast<T*>(c);
   auto ta = static_cast<const T*>(a);
   auto tb = static_cast<const T*>(b);
-  for (size_t i = 0; i < n; i++) {
+  for(const auto i : c10::irange(n)) {
     tc[i] = ta[i] ^ tb[i];
   }
 }
@@ -287,7 +258,7 @@ ReduceFunc toFunction(const ReduceOp& r) {
       break;
   }
 
-  throw std::runtime_error("Unhandled ReduceOp");
+  TORCH_CHECK(false, "Unhandled ReduceOp");
 }
 
 template <typename T, typename O>
@@ -330,10 +301,8 @@ void setOutput(O& opts, at::Tensor& tensor, std::vector<int64_t>& counts) {
   opts.setOutput(getDataPointer<T>(tensor), counts);
 }
 
-#ifdef USE_CUDA
-
 at::Tensor pinnedLike(at::Tensor& tensor) {
-  auto* allocator = at::cuda::getPinnedMemoryAllocator();
+  auto* allocator = at::detail::getCUDAHooks().getPinnedMemoryAllocator();
   auto storage = c10::Storage(
       c10::Storage::use_byte_size_t(),
       at::detail::computeStorageNbytes(
@@ -351,20 +320,20 @@ at::Tensor pinnedLike(at::Tensor& tensor) {
 // on the tensors.
 void initializeStreamsEvents(
     const std::vector<at::Tensor>& tensors,
-    std::vector<at::cuda::CUDAStream>& streams,
-    std::vector<at::cuda::CUDAEvent>& events) {
-  at::cuda::OptionalCUDAGuard guard;
+    std::vector<c10::Stream>& streams,
+    std::vector<c10::Event>& events) {
   streams.reserve(tensors.size());
-  events.resize(tensors.size());
-  for (size_t i = 0; i < tensors.size(); i++) {
-    guard.set_index(tensors[i].device().index());
+  events.reserve(tensors.size());
+  for(const auto i : c10::irange(tensors.size())) {
+    c10::Device device = tensors[i].device();
+    c10::impl::VirtualGuardImpl impl(device.type());
     // Record event on current stream
-    events[i].record(at::cuda::getCurrentCUDAStream());
+    events.emplace_back(device.type());
+    events[i].record(impl.getStream(device));
     // Get a non-default stream to execute asynchronous CUDA operations
     // on for this device. This ensures that the default stream used
     // by the caller is not occupied by c10d related operations.
-    streams.push_back(at::cuda::getStreamFromPool(
-        /* isHighPriority */ true, tensors[i].device().index()));
+    streams.push_back(impl.getStreamFromGlobalPool(device, /*isHighPriority=*/true));
     // Ensure the new stream is synchronized with the current stream.
     events[i].block(streams[i]);
 
@@ -372,18 +341,15 @@ void initializeStreamsEvents(
     // new streams in this Work to prevent being freed before the Work finishes.
     if (tensors[i].is_sparse()) {
       if (tensors[i].is_coalesced()) {
-        c10::cuda::CUDACachingAllocator::recordStream(
-            tensors[i].indices().storage().data_ptr(), streams[i]);
-        c10::cuda::CUDACachingAllocator::recordStream(
-            tensors[i].values().storage().data_ptr(), streams[i]);
+        impl.recordDataPtrOnStream(tensors[i].indices().storage().data_ptr(), streams[i]);
+        impl.recordDataPtrOnStream(tensors[i].values().storage().data_ptr(), streams[i]);
       } else {
         // We will need to coalesce first, which means new tensors will
         // be allocated on the streams we just allocated, and there
         // is no need to record them separately.
       }
     } else {
-      c10::cuda::CUDACachingAllocator::recordStream(
-          tensors[i].storage().data_ptr(), streams[i]);
+      impl.recordDataPtrOnStream(tensors[i].storage().data_ptr(), streams[i]);
     }
   }
 }
@@ -394,33 +360,33 @@ void initializeStreamsEvents(
 // on the same device.
 void initializeStreamsEvents(
     std::vector<std::vector<at::Tensor>>& tensors,
-    std::vector<at::cuda::CUDAStream>& streams,
-    std::vector<at::cuda::CUDAEvent>& events) {
+    std::vector<c10::Stream>& streams,
+    std::vector<c10::Event>& events) {
   // Ensure that the tensors in the nested tensor vectors are on the same
   // device.
-  for (const auto & tensorgroup : tensors) {
+  for (const auto& tensorgroup : tensors) {
     const auto device_id = tensorgroup[0].device().index();
-    for (const auto & tensor: tensorgroup) {
+    for (const auto& tensor : tensorgroup) {
       if (tensor.device().index() != device_id) {
-        throw std::runtime_error(
+        TORCH_CHECK(false,
             "tensors in the nested tensor vectors need to "
             "be on the same device");
       }
     }
   }
 
-  at::cuda::OptionalCUDAGuard guard;
   streams.reserve(tensors.size());
-  events.resize(tensors.size());
-  for (size_t i = 0; i < tensors.size(); i++) {
-    guard.set_index(tensors[i][0].device().index());
+  events.reserve(tensors.size());
+  for(const auto i : c10::irange(tensors.size())) {
+    c10::Device device = tensors[i][0].device();
+    c10::impl::VirtualGuardImpl impl(device.type());
     // Record event on current stream
-    events[i].record(at::cuda::getCurrentCUDAStream());
+    events.emplace_back(device.type());
+    events[i].record(impl.getStream(device));
     // Get a non-default stream to execute asynchronous CUDA operations
     // on for this output. This ensures that the default stream used
     // by the caller is not occupied by c10d related operations.
-    streams.push_back(at::cuda::getStreamFromPool(
-        /* isHighPriority */ true, tensors[i][0].device().index()));
+    streams.push_back(impl.getStreamFromGlobalPool(device, /*isHighPriority=*/true));
     // Ensure the new stream is synchronized with the current stream.
     events[i].block(streams[i]);
 
@@ -428,17 +394,90 @@ void initializeStreamsEvents(
       // `tensors` are created on a different stream. Hence, they must record
       // new streams in this Work to prevent being freed before the Work
       // finishes.
-      c10::cuda::CUDACachingAllocator::recordStream(
-          tensor.storage().data_ptr(), streams[i]);
+      impl.recordDataPtrOnStream(tensor.storage().data_ptr(), streams[i]);
     }
   }
 }
 
-#endif
-
 const auto kLoopbackAddress = "127.0.0.1";
 
 } // namespace
+
+// static
+void ProcessGroupGloo::AsyncWork::execute(c10::intrusive_ptr<AsyncWork> work) {
+  try {
+    work->run();
+  } catch (...) {
+    work->finishWorkGlooError(std::current_exception());
+    return;
+  }
+
+  // FIXME: We need to call it here since Future completion requires all
+  // the work to be synchronized to CUDA.
+  work->synchronize();
+  work->finishWorkGloo();
+}
+
+std::vector<at::Tensor> ProcessGroupGloo::AsyncWork::result() {
+  TORCH_CHECK(
+      isCompleted(),
+      "Work needs to be completed before calling result(). "
+      "Should call wait() before result().");
+  TORCH_CHECK(
+      outputTensors_.size() <= 1,
+      "work result does not support list of lists, use .getFuture() and value()");
+  return outputTensors_.size() == 0 ? std::vector<at::Tensor>()
+                                    : outputTensors_.at(0);
+}
+
+c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupGloo::AsyncWork::
+    getFuture() {
+  return future_;
+}
+
+namespace {
+c10::intrusive_ptr<c10::ivalue::Future> createFutureAsOutput(
+    const std::vector<std::vector<at::Tensor>>& outputTensors) {
+  if (outputTensors.size() > 1) {
+    return c10::make_intrusive<c10::ivalue::Future>(
+        c10::ListType::create(c10::ListType::create(c10::TensorType::get())));
+  }
+  return c10::make_intrusive<c10::ivalue::Future>(
+      c10::ListType::create(c10::TensorType::get()));
+}
+
+void returnFutureWithOutput(
+    c10::intrusive_ptr<c10::ivalue::Future>& future,
+    const std::vector<std::vector<at::Tensor>>& outputTensors) {
+  if (outputTensors.size() == 0) {
+    future->markCompleted(c10::IValue(std::vector<at::Tensor>()));
+    return;
+  }
+  if (outputTensors.size() > 1) {
+    future->markCompleted(c10::IValue(outputTensors));
+    return;
+  }
+  future->markCompleted(c10::IValue(outputTensors[0]));
+}
+} // namespace
+
+ProcessGroupGloo::AsyncWork::AsyncWork(
+    std::vector<std::vector<at::Tensor>> outputTensors,
+    const char* profilingTitle,
+    const c10::optional<std::vector<at::Tensor>>& inputTensors)
+    : ProcessGroup::Work(-1, OpType::UNKNOWN, profilingTitle, inputTensors),
+      outputTensors_(std::move(outputTensors)),
+      future_(createFutureAsOutput(outputTensors)) {}
+
+void ProcessGroupGloo::AsyncWork::finishWorkGlooError(std::exception_ptr eptr) {
+  future_->setError(eptr);
+  finish(eptr);
+}
+
+void ProcessGroupGloo::AsyncWork::finishWorkGloo() {
+  returnFutureWithOutput(future_, outputTensors_);
+  finish();
+}
 
 ProcessGroupGloo::SendWork::SendWork(
     at::Tensor& tensor,
@@ -514,7 +553,7 @@ void ProcessGroupGloo::RecvWork::abort() {
 }
 
 ProcessGroupGloo::Options::Options(std::chrono::milliseconds timeout)
-    : ProcessGroup::Options(timeout, GLOO_BACKEND_NAME), threads(2) {}
+    : ProcessGroup::Options(GLOO_BACKEND_NAME, timeout), threads(2) {}
 
 namespace {
 
@@ -644,7 +683,7 @@ ProcessGroupGloo::ProcessGroupGloo(
       collectiveCounter_(0) {
   auto& devices = options->devices;
   if (devices.empty()) {
-    throw std::runtime_error("No device(s) specified");
+    TORCH_CHECK(false, "No device(s) specified");
   }
 
   // Create and connect a context for every device.
@@ -660,7 +699,7 @@ ProcessGroupGloo::ProcessGroupGloo(
   // by a single I/O thread.
   //
   contexts_.reserve(options->devices.size());
-  for (size_t i = 0; i < options->devices.size(); i++) {
+  for(const auto i : c10::irange(options->devices.size())) {
     auto context = std::make_shared<::gloo::rendezvous::Context>(rank_, size_);
     auto store = ::gloo::rendezvous::PrefixStore(std::to_string(i), *store_);
     context->setTimeout(options->timeout);
@@ -675,7 +714,7 @@ ProcessGroupGloo::ProcessGroupGloo(
   workInProgress_.resize(options->threads);
 
   threads_.resize(options->threads);
-  for (size_t i = 0; i < threads_.size(); i++) {
+  for(const auto i : c10::irange(threads_.size())) {
     threads_[i] = std::thread(&ProcessGroupGloo::runLoop, this, i);
   }
 }
@@ -732,6 +771,10 @@ void ProcessGroupGloo::runLoop(int workerIndex) {
 
 void ProcessGroupGloo::enqueue(c10::intrusive_ptr<AsyncWork> work) {
   std::unique_lock<std::mutex> lock(workMutex_);
+  // Bump collective counter
+  if (sequenceNum_) {
+    sequenceNum_->increment();
+  }
   workQueue_.push_back(std::move(work));
   lock.unlock();
 
@@ -750,7 +793,7 @@ class AsyncBroadcastWork : public ProcessGroupGloo::AsyncWork {
       int rootRank,
       int rootTensor,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork("gloo:broadcast", inputs),
+      : ProcessGroupGloo::AsyncWork({inputs}, "gloo:broadcast", inputs),
         context(context),
         inputs(inputs),
         rootRank(rootRank),
@@ -776,7 +819,7 @@ class AsyncBroadcastWork : public ProcessGroupGloo::AsyncWork {
     broadcast(inputs[rootTensor]);
 
     // Copy to non-root tensors
-    for (size_t i = 0; i < inputs.size(); i++) {
+    for(const auto i : c10::irange(inputs.size())) {
       if (i == static_cast<size_t>(rootTensor)) {
         continue;
       }
@@ -784,8 +827,6 @@ class AsyncBroadcastWork : public ProcessGroupGloo::AsyncWork {
     }
   }
 };
-
-#ifdef USE_CUDA
 
 class AsyncBroadcastCUDAWork : public AsyncBroadcastWork {
  public:
@@ -800,7 +841,7 @@ class AsyncBroadcastCUDAWork : public AsyncBroadcastWork {
 
     // Create pinned host side tensors.
     tmp = pinnedLike(inputs[rootTensor]);
-    at::cuda::OptionalCUDAStreamGuard guard;
+    c10::OptionalStreamGuard guard;
     if (context->rank == rootRank) {
       guard.reset_stream(streams[rootTensor]);
       tmp.copy_(inputs[rootTensor], /* non_blocking */ true);
@@ -808,19 +849,17 @@ class AsyncBroadcastCUDAWork : public AsyncBroadcastWork {
   }
 
   void run() override {
-    at::cuda::OptionalCUDAStreamGuard guard;
-
     // Synchronize with copy operation if applicable.
     if (context->rank == rootRank) {
-      guard.reset_stream(streams[rootTensor]);
-      AT_CUDA_CHECK(cudaStreamSynchronize(streams[rootTensor]));
+      streams[rootTensor].synchronize();
     }
 
     // Run broadcast on host side tensors.
     broadcast(tmp);
 
     // Kick off copy back to the CUDA tensors.
-    for (size_t i = 0; i < inputs.size(); i++) {
+    c10::OptionalStreamGuard guard;
+    for(const auto i : c10::irange(inputs.size())) {
       guard.reset_stream(streams[i]);
       inputs[i].copy_(tmp, /* non_blocking */ true);
       events[i].record(streams[i]);
@@ -828,21 +867,17 @@ class AsyncBroadcastCUDAWork : public AsyncBroadcastWork {
   }
 
   void synchronize() override {
-    at::cuda::OptionalCUDAGuard guard;
-
     // Synchronize with the copy back to CUDA tensors.
-    for (size_t i = 0; i < inputs.size(); i++) {
-      guard.set_index(inputs[i].device().index());
-      events[i].block(at::cuda::getCurrentCUDAStream());
+    for(const auto i : c10::irange(inputs.size())) {
+      c10::Device device = inputs[i].device();
+      events[i].block(c10::impl::VirtualGuardImpl(device.type()).getStream(device));
     }
   }
 
   at::Tensor tmp;
-  std::vector<at::cuda::CUDAStream> streams;
-  std::vector<at::cuda::CUDAEvent> events;
+  std::vector<c10::Stream> streams;
+  std::vector<c10::Event> events;
 };
-
-#endif
 
 } // namespace
 
@@ -861,9 +896,10 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
   const auto& device = inputs[0].device();
   switch (device.type()) {
     case at::kCPU:
-#ifdef USE_CUDA
+      break;
     case at::kCUDA:
-#endif
+      // If the user gave us a CUDA tensor then CUDA must be loaded.
+      TORCH_INTERNAL_ASSERT(at::hasCUDA());
       break;
     default:
       invalidArgument(c10::str("unsupported device type ", device.type()));
@@ -875,13 +911,11 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
   if (device.type() == at::kCPU) {
     work = c10::make_intrusive<AsyncBroadcastWork>(
         std::move(context), inputs, opts.rootRank, opts.rootTensor, tag);
-#ifdef USE_CUDA
   } else if (device.type() == at::kCUDA) {
     work = c10::make_intrusive<AsyncBroadcastCUDAWork>(
         std::move(context), inputs, opts.rootRank, opts.rootTensor, tag);
-#endif
   } else {
-    throw std::runtime_error("Invalid backend");
+    TORCH_CHECK(false, "Invalid backend");
   }
 
   enqueue(work);
@@ -897,7 +931,7 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
       std::vector<at::Tensor>& inputs,
       ReduceOp reduceOp,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork("gloo:all_reduce", inputs),
+      : ProcessGroupGloo::AsyncWork({inputs}, "gloo:all_reduce", inputs),
         context(context),
         inputs(inputs),
         reduceOp(reduceOp),
@@ -919,7 +953,6 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
 
   void run() override {
     allreduce(inputs);
-    outputs_ = inputs;
   }
 
   template <typename T>
@@ -934,17 +967,6 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
     GENERATE_ALL_TYPES(dtype, getFunction, fn, op);
     return fn;
   }
-
-  std::vector<at::Tensor> result() override {
-    TORCH_CHECK(
-        isCompleted(),
-        "Work needs to be completed before calling result(). "
-        "Should call wait() before result().");
-    return outputs_;
-  }
-
- protected:
-  std::vector<at::Tensor> outputs_;
 };
 
 class AsyncAllreduceCoalescedWork : public AsyncAllreduceWork {
@@ -985,14 +1007,13 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
       const std::shared_ptr<gloo::Context>& context,
       std::vector<at::Tensor>& inputs,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork("gloo:sparse_all_reduce", inputs),
+      : ProcessGroupGloo::AsyncWork({inputs}, "gloo:sparse_all_reduce", inputs),
         context(context),
         inputs(inputs),
         tag(tag) {}
 
   std::shared_ptr<gloo::Context> context;
   std::vector<at::Tensor> inputs;
-  std::vector<at::Tensor> outputs;
   const uint32_t tag;
 
   // We share dimensionality about the sparse tensors before collecting
@@ -1023,14 +1044,14 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     void populate_from_sparse_tensor(const at::Tensor& tensor) {
       const auto sparse_dim = tensor.sparse_dim();
       AT_ASSERT(sparse_dim <= 4);
-      for (auto i = 0; i < 4; i++) {
+      for (const auto i : c10::irange(4)) {
         if (i < sparse_dim) {
           data_[i] = tensor.size(i);
         }
       }
       const auto dense_dim = tensor.dense_dim();
       AT_ASSERT(dense_dim <= 4);
-      for (auto i = 0; i < 4; i++) {
+      for (const auto i : c10::irange(4)) {
         if (i < dense_dim) {
           data_[i + 4] = tensor.size(sparse_dim + i);
         }
@@ -1041,14 +1062,14 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     std::vector<int64_t> sizes() const {
       std::vector<int64_t> sizes;
       // Sparse sizes
-      for (auto i = 0; i < 4; i++) {
+      for (const auto i : c10::irange(4)) {
         if (data_[i] <= 0) {
           break;
         }
         sizes.push_back(data_[i]);
       }
       // Dense sizes
-      for (auto i = 4; i < 8; i++) {
+      for (const auto i : c10::irange(4, 8)) {
         if (data_[i] <= 0) {
           break;
         }
@@ -1075,15 +1096,15 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     // TODO: This is a massive hack!  There is some confusion about
     // Variable/Tensor inside the body of this function.  Turning off
     // grad smooths over the confusion for now.  This fixes
-    // test/test_c10d.py ProcessGroupGlooTest.test_sparse_allreduce_basics
+    // test/test_c10d_gloo.py ProcessGroupGlooTest.test_sparse_allreduce_basics
     //
     // The correct fix is to stop allocating tensors that are not variables,
     // but to conveniently do this c10d must depend on torch not ATen
-    at::AutoNonVariableTypeMode _no_grad(true);
+    at::AutoDispatchBelowAutograd guard;
     auto input = tensors[0];
 
     // Perform local reduction if we have multiple inputs.
-    for (size_t i = 1; i < tensors.size(); i++) {
+    for (const auto i : c10::irange(1, tensors.size())) {
       input += tensors[i];
     }
 
@@ -1126,20 +1147,11 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
   void run() override {
     auto output = allreduce(inputs);
 
-    // Copy back to input tensors.
-    outputs.reserve(inputs.size());
-    for (auto & input : inputs) {
-      input.copy_(output);
-      if (output.is_sparse()) {
-        outputs.push_back(output.clone());
-      } else {
-        outputs.push_back(output.clone(at::MemoryFormat::Contiguous));
-      }
+    // This copy is needed when we run a multi-gpu version of reduce (multiple
+    // inputs per rank).
+    for (const auto i : c10::irange(inputs.size())) {
+      inputs[i].copy_(output);
     }
-  }
-
-  std::vector<at::Tensor> result() override {
-    return outputs;
   }
 
  private:
@@ -1174,7 +1186,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
 
     std::vector<size_t> counts(context->size);
     int64_t totalSize = 0;
-    for (size_t i = 0; i < metadata.size(); i++) {
+    for(const auto i : c10::irange(metadata.size())) {
       counts[i] = metadata[i].nnz() * sparseDim;
       totalSize += counts[i];
     }
@@ -1196,7 +1208,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     std::vector<at::Tensor> indices;
     indices.reserve(metadata.size());
     size_t offset = 0;
-    for (const auto & i : metadata) {
+    for (const auto& i : metadata) {
       const auto nnz = i.nnz();
       const auto numel = sparseDim * nnz;
       indices.push_back(
@@ -1219,7 +1231,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
 
     std::vector<size_t> counts(context->size);
     int64_t totalSize = 0;
-    for (size_t i = 0; i < metadata.size(); i++) {
+    for(const auto i : c10::irange(metadata.size())) {
       counts[i] = metadata[i].nnz() * denseNumel;
       totalSize += counts[i];
     }
@@ -1241,7 +1253,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     std::vector<at::Tensor> values;
     values.reserve(metadata.size());
     size_t offset = 0;
-    for (const auto & i : metadata) {
+    for (const auto& i : metadata) {
       const auto nnz = i.nnz();
       const auto numel = denseNumel * nnz;
       auto tensorShape = std::vector<int64_t>({(int64_t)nnz});
@@ -1257,8 +1269,6 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
   }
 };
 
-#ifdef USE_CUDA
-
 class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
  public:
   AsyncAllreduceCUDAWork(
@@ -1271,8 +1281,8 @@ class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
 
     // Kick off copy from CUDA tensors to pinned CPU tensors.
     tmp.reserve(inputs.size());
-    at::cuda::OptionalCUDAStreamGuard guard;
-    for (size_t i = 0; i < inputs.size(); i++) {
+    c10::OptionalStreamGuard guard;
+    for(const auto i : c10::irange(inputs.size())) {
       guard.reset_stream(streams[i]);
       tmp.push_back(pinnedLike(inputs[i]).copy_(inputs[i], true));
     }
@@ -1280,37 +1290,32 @@ class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
 
   void run() override {
     // Synchronize with copy operations.
-    at::cuda::OptionalCUDAGuard device_guard;
-    for (size_t i = 0; i < inputs.size(); i++) {
-      device_guard.set_index(inputs[i].device().index());
-      AT_CUDA_CHECK(cudaStreamSynchronize(streams[i]));
+    for(const auto i : c10::irange(inputs.size())) {
+      streams[i].synchronize();
     }
 
     // Run allreduce on host side tensors.
     allreduce(tmp);
 
-    at::cuda::OptionalCUDAStreamGuard stream_guard;
-    for (size_t i = 0; i < inputs.size(); i++) {
-      stream_guard.reset_stream(streams[i]);
+    c10::OptionalStreamGuard guard;
+    for(const auto i : c10::irange(inputs.size())) {
+      guard.reset_stream(streams[i]);
       inputs[i].copy_(tmp[i], /* non_blocking */ true);
       events[i].record(streams[i]);
     }
-
-    outputs_ = inputs;
   }
 
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
-    at::cuda::OptionalCUDAGuard guard;
-    for (size_t i = 0; i < inputs.size(); i++) {
-      guard.set_index(inputs[i].device().index());
-      events[i].block(at::cuda::getCurrentCUDAStream());
+    for(const auto i : c10::irange(inputs.size())) {
+      c10::Device device = inputs[i].device();
+      events[i].block(c10::impl::VirtualGuardImpl(device.type()).getStream(device));
     }
   }
 
   std::vector<at::Tensor> tmp;
-  std::vector<at::cuda::CUDAStream> streams;
-  std::vector<at::cuda::CUDAEvent> events;
+  std::vector<c10::Stream> streams;
+  std::vector<c10::Event> events;
 };
 
 class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
@@ -1326,8 +1331,8 @@ class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
     // Note that both coalescing the sparse tensor and copying it to CPU
     // memory must be performed asynchronously, or we block the caller.
     tmp.reserve(inputs.size());
-    at::cuda::OptionalCUDAStreamGuard guard;
-    for (size_t i = 0; i < inputs.size(); i++) {
+    c10::OptionalStreamGuard guard;
+    for(const auto i : c10::irange(inputs.size())) {
       guard.reset_stream(streams[i]);
       tmp.push_back(
           inputs[i].coalesce().to(at::DeviceType::CPU, /*non_blocking=*/true));
@@ -1336,45 +1341,34 @@ class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
 
   void run() override {
     // Synchronize with copy operations.
-    at::cuda::OptionalCUDAGuard device_guard;
-    for (size_t i = 0; i < inputs.size(); i++) {
-      device_guard.set_index(inputs[i].device().index());
-      AT_CUDA_CHECK(cudaStreamSynchronize(streams[i]));
+    for(const auto i : c10::irange(inputs.size())) {
+      streams[i].synchronize();
     }
 
     // Run allreduce on host side tensors.
     auto output = allreduce(tmp);
 
     // Kick off copy back to the CUDA tensors.
-    at::cuda::OptionalCUDAStreamGuard stream_guard;
-    for (size_t i = 0; i < inputs.size(); i++) {
-      stream_guard.reset_stream(streams[i]);
-      outputs.push_back(output.to(inputs[i].device(), /*non_blocking=*/true));
+    c10::OptionalStreamGuard guard;
+    for(const auto i : c10::irange(inputs.size())) {
+      guard.reset_stream(streams[i]);
+      inputs[i].copy_(output, /*non_blocking=*/true);
       events[i].record(streams[i]);
     }
   }
 
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
-    at::cuda::OptionalCUDAGuard guard;
-    for (size_t i = 0; i < inputs.size(); i++) {
-      guard.set_index(inputs[i].device().index());
-      events[i].block(at::cuda::getCurrentCUDAStream());
-    }
-
-    // Copy outputs back to inputs after synchronization, so that users can
-    // access all reduce results from input tensors
-    for (size_t i = 0; i < inputs.size(); i++) {
-      inputs[i].copy_(outputs[i]);
+    for(const auto i : c10::irange(inputs.size())) {
+      c10::Device device = inputs[i].device();
+      events[i].block(c10::impl::VirtualGuardImpl(device.type()).getStream(device));
     }
   }
 
   std::vector<at::Tensor> tmp;
-  std::vector<at::cuda::CUDAStream> streams;
-  std::vector<at::cuda::CUDAEvent> events;
+  std::vector<c10::Stream> streams;
+  std::vector<c10::Event> events;
 };
-
-#endif
 
 } // namespace
 
@@ -1392,9 +1386,10 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
   const auto& device = inputs[0].device();
   switch (device.type()) {
     case at::kCPU:
-#ifdef USE_CUDA
+      break;
     case at::kCUDA:
-#endif
+      // If the user gave us a CUDA tensor then CUDA must be loaded.
+      TORCH_INTERNAL_ASSERT(at::hasCUDA());
       break;
     default:
       invalidArgument(c10::str("unsupported device type ", device.type()));
@@ -1420,7 +1415,6 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
     } else {
       invalidArgument("unsupported layout");
     }
-#ifdef USE_CUDA
   } else if (device.type() == at::kCUDA) {
     if (layout == c10::kStrided) {
       work = c10::make_intrusive<AsyncAllreduceCUDAWork>(
@@ -1431,9 +1425,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
     } else {
       invalidArgument("unsupported layout");
     }
-#endif
   } else {
-    throw std::runtime_error("Invalid backend");
+    TORCH_CHECK(false, "Invalid backend");
   }
 
   enqueue(work);
@@ -1494,7 +1487,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce_coalesced(
       invalidArgument("unsupported layout");
     }
   } else {
-    throw std::runtime_error("Invalid backend");
+    TORCH_CHECK(false, "Invalid backend");
   }
   enqueue(work);
   return work;
@@ -1511,7 +1504,7 @@ class AsyncReduceWork : public ProcessGroupGloo::AsyncWork {
       int rootTensor,
       ReduceOp reduceOp,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork("gloo:reduce", inputs),
+      : ProcessGroupGloo::AsyncWork({inputs}, "gloo:reduce", inputs),
         context(context),
         inputs(inputs),
         rootRank(rootRank),
@@ -1555,8 +1548,6 @@ class AsyncReduceWork : public ProcessGroupGloo::AsyncWork {
   }
 };
 
-#ifdef USE_CUDA
-
 class AsyncReduceCUDAWork : public AsyncReduceWork {
  public:
   AsyncReduceCUDAWork(
@@ -1571,8 +1562,8 @@ class AsyncReduceCUDAWork : public AsyncReduceWork {
 
     // Kick off copy from CUDA tensors to pinned CPU tensors.
     tmp.reserve(inputs.size());
-    at::cuda::OptionalCUDAStreamGuard guard;
-    for (size_t i = 0; i < inputs.size(); i++) {
+    c10::OptionalStreamGuard guard;
+    for(const auto i : c10::irange(inputs.size())) {
       guard.reset_stream(streams[i]);
       tmp.push_back(pinnedLike(inputs[i]).copy_(inputs[i], true));
     }
@@ -1580,19 +1571,17 @@ class AsyncReduceCUDAWork : public AsyncReduceWork {
 
   void run() override {
     // Synchronize with copy operations.
-    at::cuda::OptionalCUDAGuard device_guard;
-    for (size_t i = 0; i < inputs.size(); i++) {
-      device_guard.set_index(inputs[i].device().index());
-      AT_CUDA_CHECK(cudaStreamSynchronize(streams[i]));
+    for(const auto i : c10::irange(inputs.size())) {
+      streams[i].synchronize();
     }
 
     // Run reduce on host side tensors.
     reduce(tmp);
 
     // Kick off copy back to the CUDA tensors.
-    at::cuda::OptionalCUDAStreamGuard stream_guard;
-    for (size_t i = 0; i < inputs.size(); i++) {
-      stream_guard.reset_stream(streams[i]);
+    c10::OptionalStreamGuard guard;
+    for(const auto i : c10::irange(inputs.size())) {
+      guard.reset_stream(streams[i]);
       inputs[i].copy_(tmp[i], /* non_blocking */ true);
       events[i].record(streams[i]);
     }
@@ -1600,19 +1589,16 @@ class AsyncReduceCUDAWork : public AsyncReduceWork {
 
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
-    at::cuda::OptionalCUDAGuard guard;
-    for (size_t i = 0; i < inputs.size(); i++) {
-      guard.set_index(inputs[i].device().index());
-      events[i].block(at::cuda::getCurrentCUDAStream());
+    for(const auto i : c10::irange(inputs.size())) {
+      c10::Device device = inputs[i].device();
+      events[i].block(c10::impl::VirtualGuardImpl(device.type()).getStream(device));
     }
   }
 
   std::vector<at::Tensor> tmp;
-  std::vector<at::cuda::CUDAStream> streams;
-  std::vector<at::cuda::CUDAEvent> events;
+  std::vector<c10::Stream> streams;
+  std::vector<c10::Event> events;
 };
-
-#endif
 
 } // namespace
 
@@ -1631,9 +1617,10 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::reduce(
   const auto& device = inputs[0].device();
   switch (device.type()) {
     case at::kCPU:
-#ifdef USE_CUDA
+      break;
     case at::kCUDA:
-#endif
+      // If the user gave us a CUDA tensor then CUDA must be loaded.
+      TORCH_INTERNAL_ASSERT(at::hasCUDA());
       break;
     default:
       invalidArgument(c10::str("unsupported device type ", device.type()));
@@ -1650,7 +1637,6 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::reduce(
         opts.rootTensor,
         opts.reduceOp,
         tag);
-#ifdef USE_CUDA
   } else if (device.type() == at::kCUDA) {
     work = c10::make_intrusive<AsyncReduceCUDAWork>(
         std::move(context),
@@ -1659,9 +1645,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::reduce(
         opts.rootTensor,
         opts.reduceOp,
         tag);
-#endif
   } else {
-    throw std::runtime_error("Invalid backend");
+    TORCH_CHECK(false, "Invalid backend");
   }
   enqueue(work);
   return work;
@@ -1676,7 +1661,7 @@ class AsyncAllgatherWork : public ProcessGroupGloo::AsyncWork {
       std::vector<std::vector<at::Tensor>>& outputs,
       std::vector<at::Tensor>& inputs,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork("gloo:all_gather", inputs),
+      : ProcessGroupGloo::AsyncWork(outputs, "gloo:all_gather", inputs),
         context(context),
         outputs(outputs),
         inputs(inputs),
@@ -1706,7 +1691,7 @@ class AsyncAllgatherWork : public ProcessGroupGloo::AsyncWork {
     gloo::allgather(opts);
 
     // Unflatten into output tensors.
-    for (auto & outputgroup : outputs) {
+    for (auto& outputgroup : outputs) {
       for (const auto j : c10::irange(outputgroup.size())) {
         outputgroup[j].copy_(flatOutputTensor[j]);
       }
@@ -1717,8 +1702,6 @@ class AsyncAllgatherWork : public ProcessGroupGloo::AsyncWork {
     allgather(outputs, inputs);
   }
 };
-
-#ifdef USE_CUDA
 
 // Note: current CUDA implementation holds the assumption that the
 // tensors in the nested output tensor vectors are on the same device.
@@ -1735,16 +1718,16 @@ class AsyncAllgatherCUDAWork : public AsyncAllgatherWork {
 
     // Kick off copy from CUDA tensors to pinned CPU tensors.
     tmpInputs.reserve(inputs.size());
-    at::cuda::OptionalCUDAStreamGuard guard;
-    for (size_t i = 0; i < inputs.size(); i++) {
+    c10::OptionalStreamGuard guard;
+    for(const auto i : c10::irange(inputs.size())) {
       guard.reset_stream(inputStreams[i]);
       tmpInputs.push_back(pinnedLike(inputs[i]).copy_(inputs[i], true));
     }
 
     tmpOutputs.resize(outputs.size());
-    for (size_t i = 0; i < outputs.size(); i++) {
+    for(const auto i : c10::irange(outputs.size())) {
       tmpOutputs[i].reserve(outputs[i].size());
-      for (size_t j = 0; j < outputs[i].size(); j++) {
+      for(const auto j : c10::irange(outputs[i].size())) {
         tmpOutputs[i].push_back(pinnedLike(outputs[i][j]));
       }
     }
@@ -1752,25 +1735,22 @@ class AsyncAllgatherCUDAWork : public AsyncAllgatherWork {
 
   void run() override {
     // Synchronize with copy operations.
-    at::cuda::OptionalCUDAGuard device_guard;
-    for (size_t i = 0; i < inputs.size(); i++) {
-      device_guard.set_index(inputs[i].device().index());
-      AT_CUDA_CHECK(cudaStreamSynchronize(inputStreams[i]));
+    for(const auto i : c10::irange(inputs.size())) {
+      inputStreams[i].synchronize();
     }
 
-    for (size_t i = 0; i < outputs.size(); i++) {
-      device_guard.set_index(outputs[i][0].device().index());
-      AT_CUDA_CHECK(cudaStreamSynchronize(outputStreams[i]));
+    for(const auto i : c10::irange(outputs.size())) {
+      outputStreams[i].synchronize();
     }
 
     // Run allgather on host side tensors.
     allgather(tmpOutputs, tmpInputs);
 
     // Kick off copy back to the CUDA tensors.
-    at::cuda::OptionalCUDAStreamGuard stream_guard;
-    for (size_t i = 0; i < outputs.size(); i++) {
-      stream_guard.reset_stream(outputStreams[i]);
-      for (size_t j = 0; j < outputs[i].size(); j++) {
+    c10::OptionalStreamGuard guard;
+    for(const auto i : c10::irange(outputs.size())) {
+      guard.reset_stream(outputStreams[i]);
+      for(const auto j : c10::irange(outputs[i].size())) {
         outputs[i][j].copy_(tmpOutputs[i][j], /* non_blocking */ true);
       }
       outputEvents[i].record(outputStreams[i]);
@@ -1779,23 +1759,20 @@ class AsyncAllgatherCUDAWork : public AsyncAllgatherWork {
 
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
-    at::cuda::OptionalCUDAGuard guard;
-    for (size_t i = 0; i < outputs.size(); i++) {
-      guard.set_index(outputs[i][0].device().index());
-      outputEvents[i].block(at::cuda::getCurrentCUDAStream());
+    for(const auto i : c10::irange(outputs.size())) {
+      c10::Device device = outputs[i][0].device();
+      outputEvents[i].block(c10::impl::VirtualGuardImpl(device.type()).getStream(device));
     }
   }
 
   std::vector<at::Tensor> tmpInputs;
-  std::vector<at::cuda::CUDAStream> inputStreams;
-  std::vector<at::cuda::CUDAEvent> inputEvents;
+  std::vector<c10::Stream> inputStreams;
+  std::vector<c10::Event> inputEvents;
 
   std::vector<std::vector<at::Tensor>> tmpOutputs;
-  std::vector<at::cuda::CUDAStream> outputStreams;
-  std::vector<at::cuda::CUDAEvent> outputEvents;
+  std::vector<c10::Stream> outputStreams;
+  std::vector<c10::Event> outputEvents;
 };
-
-#endif
 
 } // namespace
 
@@ -1818,7 +1795,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather(
         "requires input/output tensor lists to have the same length");
   }
 
-  for (size_t i = 0; i < outputs.size(); i++) {
+  for(const auto i : c10::irange(outputs.size())) {
     const auto expected = inputs.size() * getSize();
     const auto actual = outputs[i].size();
     if (actual != expected) {
@@ -1835,16 +1812,17 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather(
   const auto& options = inputs[0].options();
   const auto& sizes = inputs[0].sizes();
   assertTypeAndSizesMatch(invalidArgument, inputs, options, sizes);
-  for (const auto & output : outputs) {
+  for (const auto& output : outputs) {
     assertTypeAndSizesMatch(invalidArgument, output, options, sizes);
   }
 
   const auto& device = inputs[0].device();
   switch (device.type()) {
     case at::kCPU:
-#ifdef USE_CUDA
+      break;
     case at::kCUDA:
-#endif
+      // If the user gave us a CUDA tensor then CUDA must be loaded.
+      TORCH_INTERNAL_ASSERT(at::hasCUDA());
       break;
     default:
       invalidArgument(c10::str("unsupported device type ", device.type()));
@@ -1856,13 +1834,11 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather(
   if (device.type() == at::kCPU) {
     work = c10::make_intrusive<AsyncAllgatherWork>(
         std::move(context), outputs, inputs, tag);
-#ifdef USE_CUDA
   } else if (device.type() == at::kCUDA) {
     work = c10::make_intrusive<AsyncAllgatherCUDAWork>(
         std::move(context), outputs, inputs, tag);
-#endif
   } else {
-    throw std::runtime_error("Invalid backend");
+    TORCH_CHECK(false, "Invalid backend");
   }
   enqueue(work);
   return work;
@@ -1877,7 +1853,10 @@ class AsyncAllgatherCoalescedWork : public ProcessGroupGloo::AsyncWork {
       std::vector<std::vector<at::Tensor>>& output_lists,
       std::vector<at::Tensor>& input_list,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork("gloo:all_gather", input_list),
+      : ProcessGroupGloo::AsyncWork(
+            output_lists,
+            "gloo:all_gather",
+            input_list),
         context(context),
         output_lists(output_lists),
         input_list(input_list),
@@ -1961,7 +1940,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather_coalesced(
           std::to_string(input_list.size()) + ", got " +
           std::to_string(output_list.size()) + ")");
     }
-    for (int i = 0; i < output_list.size(); ++i) {
+    for (const auto i : c10::irange(output_list.size())) {
       const auto expected = input_list[i].sizes();
       const auto actual = output_list[i].sizes();
       if (actual != expected) {
@@ -1989,12 +1968,12 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather_coalesced(
   return work;
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather_base(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::_allgather_base(
     at::Tensor& /*unused */,
     at::Tensor& /*unused */,
     const AllgatherOptions& /*unused */) {
-  throw std::runtime_error(
-      "no support for allgather_base in Gloo process group");
+  TORCH_CHECK(false,
+      "no support for _allgather_base in Gloo process group");
 }
 
 namespace {
@@ -2007,7 +1986,7 @@ class AsyncGatherWork : public ProcessGroupGloo::AsyncWork {
       std::vector<at::Tensor>& inputs,
       int root,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork("gloo:gather", inputs),
+      : ProcessGroupGloo::AsyncWork(outputs, "gloo:gather", inputs),
         context(context),
         outputs(outputs),
         inputs(inputs),
@@ -2042,7 +2021,7 @@ class AsyncGatherWork : public ProcessGroupGloo::AsyncWork {
 
     // Unflatten into output tensors on root process.
     if (context->rank == root) {
-      for (size_t i = 0; i < outputs[0].size(); i++) {
+      for(const auto i : c10::irange(outputs[0].size())) {
         outputs[0][i].copy_(flatOutputTensor[i]);
       }
     }
@@ -2052,8 +2031,6 @@ class AsyncGatherWork : public ProcessGroupGloo::AsyncWork {
     gather(outputs, inputs);
   }
 };
-
-#ifdef USE_CUDA
 
 // Note: current CUDA implementation holds the assumptions:
 //     - inputs.size() is 1
@@ -2074,16 +2051,16 @@ class AsyncGatherCUDAWork : public AsyncGatherWork {
 
     // Kick off copy from CUDA tensors to pinned CPU tensors.
     tmpInputs.reserve(inputs.size());
-    at::cuda::OptionalCUDAStreamGuard guard;
-    for (size_t i = 0; i < inputs.size(); i++) {
+    c10::OptionalStreamGuard guard;
+    for(const auto i : c10::irange(inputs.size())) {
       guard.reset_stream(inputStreams[i]);
       tmpInputs.push_back(pinnedLike(inputs[i]).copy_(inputs[i], true));
     }
 
     tmpOutputs.resize(outputs.size());
-    for (size_t i = 0; i < outputs.size(); i++) {
+    for(const auto i : c10::irange(outputs.size())) {
       tmpOutputs[i].reserve(outputs[i].size());
-      for (size_t j = 0; j < outputs[i].size(); j++) {
+      for(const auto j : c10::irange(outputs[i].size())) {
         tmpOutputs[i].push_back(pinnedLike(outputs[i][j]));
       }
     }
@@ -2091,25 +2068,22 @@ class AsyncGatherCUDAWork : public AsyncGatherWork {
 
   void run() override {
     // Synchronize with copy operations.
-    at::cuda::OptionalCUDAGuard device_guard;
-    for (size_t i = 0; i < inputs.size(); i++) {
-      device_guard.set_index(inputs[i].get_device());
-      AT_CUDA_CHECK(cudaStreamSynchronize(inputStreams[i]));
+    for(const auto i : c10::irange(inputs.size())) {
+      inputStreams[i].synchronize();
     }
 
-    for (size_t i = 0; i < outputs.size(); i++) {
-      device_guard.set_index(outputs[i][0].get_device());
-      AT_CUDA_CHECK(cudaStreamSynchronize(outputStreams[i]));
+    for(const auto i : c10::irange(outputs.size())) {
+      outputStreams[i].synchronize();
     }
 
     // Run gather on host side tensors.
     gather(tmpOutputs, tmpInputs);
 
     // Kick off copy back to the CUDA tensors.
-    at::cuda::OptionalCUDAStreamGuard stream_guard;
-    for (size_t i = 0; i < outputs.size(); i++) {
-      stream_guard.reset_stream(outputStreams[i]);
-      for (size_t j = 0; j < outputs[i].size(); j++) {
+    c10::OptionalStreamGuard guard;
+    for(const auto i : c10::irange(outputs.size())) {
+      guard.reset_stream(outputStreams[i]);
+      for(const auto j : c10::irange(outputs[i].size())) {
         outputs[i][j].copy_(tmpOutputs[i][j], /* non_blocking */ true);
       }
       outputEvents[i].record(outputStreams[i]);
@@ -2118,23 +2092,20 @@ class AsyncGatherCUDAWork : public AsyncGatherWork {
 
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
-    at::cuda::OptionalCUDAGuard guard;
-    for (size_t i = 0; i < outputs.size(); i++) {
-      guard.set_index(static_cast<at::DeviceIndex>(outputs[i][0].get_device()));
-      outputEvents[i].block(at::cuda::getCurrentCUDAStream());
+    for(const auto i : c10::irange(outputs.size())) {
+      c10::Device device = outputs[i][0].device();
+      outputEvents[i].block(c10::impl::VirtualGuardImpl(device.type()).getStream(device));
     }
   }
 
   std::vector<at::Tensor> tmpInputs;
-  std::vector<at::cuda::CUDAStream> inputStreams;
-  std::vector<at::cuda::CUDAEvent> inputEvents;
+  std::vector<c10::Stream> inputStreams;
+  std::vector<c10::Event> inputEvents;
 
   std::vector<std::vector<at::Tensor>> tmpOutputs;
-  std::vector<at::cuda::CUDAStream> outputStreams;
-  std::vector<at::cuda::CUDAEvent> outputEvents;
+  std::vector<c10::Stream> outputStreams;
+  std::vector<c10::Event> outputEvents;
 };
-
-#endif
 
 } // namespace
 
@@ -2176,9 +2147,10 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::gather(
   const auto& device = inputs[0].device();
   switch (device.type()) {
     case at::kCPU:
-#ifdef USE_CUDA
+      break;
     case at::kCUDA:
-#endif
+      // If the user gave us a CUDA tensor then CUDA must be loaded.
+      TORCH_INTERNAL_ASSERT(at::hasCUDA());
       break;
     default:
       invalidArgument(c10::str("unsupported device type ", device.type()));
@@ -2190,13 +2162,11 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::gather(
   if (device.type() == at::kCPU) {
     work = c10::make_intrusive<AsyncGatherWork>(
         std::move(context), outputs, inputs, opts.rootRank, tag);
-#ifdef USE_CUDA
   } else if (device.type() == at::kCUDA) {
     work = c10::make_intrusive<AsyncGatherCUDAWork>(
         std::move(context), outputs, inputs, opts.rootRank, tag);
-#endif
   } else {
-    throw std::runtime_error("Invalid backend");
+    TORCH_CHECK(false, "Invalid backend");
   }
   enqueue(work);
   return work;
@@ -2213,6 +2183,7 @@ class AsyncScatterWork : public ProcessGroupGloo::AsyncWork {
       int root,
       uint32_t tag)
       : ProcessGroupGloo::AsyncWork(
+            {outputs},
             "gloo:scatter",
             inputs.size() > 0
                 ? c10::optional<std::vector<at::Tensor>>(inputs[0])
@@ -2252,8 +2223,6 @@ class AsyncScatterWork : public ProcessGroupGloo::AsyncWork {
   }
 };
 
-#ifdef USE_CUDA
-
 class AsyncScatterCUDAWork : public AsyncScatterWork {
  public:
   AsyncScatterCUDAWork(
@@ -2268,41 +2237,38 @@ class AsyncScatterCUDAWork : public AsyncScatterWork {
 
     // Kick off copy from CUDA tensors to pinned CPU tensors.
     tmpInputs.resize(inputs.size());
-    at::cuda::OptionalCUDAStreamGuard guard;
-    for (size_t i = 0; i < inputs.size(); i++) {
+    c10::OptionalStreamGuard guard;
+    for(const auto i : c10::irange(inputs.size())) {
       guard.reset_stream(inputStreams[i]);
       tmpInputs[i].reserve(inputs[i].size());
-      for (size_t j = 0; j < inputs[i].size(); j++) {
+      for(const auto j : c10::irange(inputs[i].size())) {
         tmpInputs[i].push_back(
             pinnedLike(inputs[i][j]).copy_(inputs[i][j], true));
       }
     }
 
     tmpOutputs.reserve(outputs.size());
-    for (auto & output : outputs) {
+    for (auto& output : outputs) {
       tmpOutputs.push_back(pinnedLike(output));
     }
   }
 
   void run() override {
     // Synchronize with copy operations.
-    at::cuda::OptionalCUDAGuard device_guard;
-    for (size_t i = 0; i < inputs.size(); i++) {
-      device_guard.set_index(inputs[i][0].get_device());
-      AT_CUDA_CHECK(cudaStreamSynchronize(inputStreams[i]));
+    for(const auto i : c10::irange(inputs.size())) {
+      inputStreams[i].synchronize();
     }
-    for (size_t i = 0; i < outputs.size(); i++) {
-      device_guard.set_index(outputs[i].get_device());
-      AT_CUDA_CHECK(cudaStreamSynchronize(outputStreams[i]));
+    for(const auto i : c10::irange(outputs.size())) {
+      outputStreams[i].synchronize();
     }
 
     // Run scatter on host side tensors.
     scatter(tmpOutputs, tmpInputs);
 
     // Kick off copy back to the CUDA tensors.
-    at::cuda::OptionalCUDAStreamGuard stream_guard;
-    for (size_t i = 0; i < outputs.size(); i++) {
-      stream_guard.reset_stream(outputStreams[i]);
+    c10::OptionalStreamGuard guard;
+    for(const auto i : c10::irange(outputs.size())) {
+      guard.reset_stream(outputStreams[i]);
       outputs[i].copy_(tmpOutputs[i], /* non_blocking */ true);
       outputEvents[i].record(outputStreams[i]);
     }
@@ -2310,23 +2276,20 @@ class AsyncScatterCUDAWork : public AsyncScatterWork {
 
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
-    at::cuda::OptionalCUDAGuard guard;
-    for (size_t i = 0; i < outputs.size(); i++) {
-      guard.set_index(static_cast<at::DeviceIndex>(outputs[i].get_device()));
-      outputEvents[i].block(at::cuda::getCurrentCUDAStream());
+    for(const auto i : c10::irange(outputs.size())) {
+      c10::Device device = outputs[i].device();
+      outputEvents[i].block(c10::impl::VirtualGuardImpl(device.type()).getStream(device));
     }
   }
 
   std::vector<at::Tensor> tmpOutputs;
-  std::vector<at::cuda::CUDAStream> outputStreams;
-  std::vector<at::cuda::CUDAEvent> outputEvents;
+  std::vector<c10::Stream> outputStreams;
+  std::vector<c10::Event> outputEvents;
 
   std::vector<std::vector<at::Tensor>> tmpInputs;
-  std::vector<at::cuda::CUDAStream> inputStreams;
-  std::vector<at::cuda::CUDAEvent> inputEvents;
+  std::vector<c10::Stream> inputStreams;
+  std::vector<c10::Event> inputEvents;
 };
-
-#endif
 
 } // namespace
 
@@ -2367,9 +2330,10 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::scatter(
   const auto& device = outputs[0].device();
   switch (device.type()) {
     case at::kCPU:
-#ifdef USE_CUDA
+      break;
     case at::kCUDA:
-#endif
+      // If the user gave us a CUDA tensor then CUDA must be loaded.
+      TORCH_INTERNAL_ASSERT(at::hasCUDA());
       break;
     default:
       invalidArgument(c10::str("unsupported device type ", device.type()));
@@ -2381,13 +2345,11 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::scatter(
   if (device.type() == at::kCPU) {
     work = c10::make_intrusive<AsyncScatterWork>(
         std::move(context), outputs, inputs, opts.rootRank, tag);
-#ifdef USE_CUDA
   } else if (device.type() == at::kCUDA) {
     work = c10::make_intrusive<AsyncScatterCUDAWork>(
         std::move(context), outputs, inputs, opts.rootRank, tag);
-#endif
   } else {
-    throw std::runtime_error("Invalid backend");
+    TORCH_CHECK(false, "Invalid backend");
   }
   enqueue(work);
   return work;
@@ -2397,7 +2359,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::reduce_scatter(
     std::vector<at::Tensor>& outputs,
     std::vector<std::vector<at::Tensor>>& inputs,
     const ReduceScatterOptions& opts) {
-  throw std::runtime_error("ProcessGroupGloo does not support reduce_scatter");
+  TORCH_CHECK(false, "ProcessGroupGloo does not support reduce_scatter");
 }
 
 namespace {
@@ -2412,6 +2374,7 @@ class AsyncAlltoallWork : public ProcessGroupGloo::AsyncWork {
       std::vector<int64_t>& inputCounts,
       uint32_t tag)
       : ProcessGroupGloo::AsyncWork(
+            {{outputTensor}},
             "gloo:all_to_all",
             c10::optional<std::vector<at::Tensor>>({inputTensor})),
         context(context),
@@ -2462,8 +2425,6 @@ class AsyncAlltoallWork : public ProcessGroupGloo::AsyncWork {
   }
 };
 
-#ifdef USE_CUDA
-
 class AsyncAlltoallCUDAWork : public AsyncAlltoallWork {
  public:
   AsyncAlltoallCUDAWork(
@@ -2484,7 +2445,7 @@ class AsyncAlltoallCUDAWork : public AsyncAlltoallWork {
     initializeStreamsEvents({outputTensor}, outputStreams, outputEvents);
 
     // Kick off copy from CUDA tensors to pinned CPU tensors.
-    at::cuda::OptionalCUDAStreamGuard guard;
+    c10::OptionalStreamGuard guard;
     guard.reset_stream(inputStreams.front());
     cpuInput = pinnedLike(inputTensor).copy_(inputTensor, true);
 
@@ -2494,39 +2455,33 @@ class AsyncAlltoallCUDAWork : public AsyncAlltoallWork {
 
   void run() override {
     // Synchronize with copy operations.
-    at::cuda::OptionalCUDAGuard device_guard;
-    device_guard.set_index(inputTensor.get_device());
-    AT_CUDA_CHECK(cudaStreamSynchronize(inputStreams.front()));
-    device_guard.set_index(outputTensor.get_device());
-    AT_CUDA_CHECK(cudaStreamSynchronize(outputStreams.front()));
+    inputStreams.front().synchronize();
+    outputStreams.front().synchronize();
 
     // Run alltoall on host side tensors.
     alltoall(cpuOutput, cpuInput);
 
     // Kick off copy back to the CUDA tensors.
-    at::cuda::OptionalCUDAStreamGuard stream_guard;
-    stream_guard.reset_stream(outputStreams.front());
+    c10::OptionalStreamGuard guard;
+    guard.reset_stream(outputStreams.front());
     outputTensor.copy_(cpuOutput, /* non_blocking */ true);
     outputEvents.front().record(outputStreams.front());
   }
 
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
-    at::cuda::OptionalCUDAGuard guard;
-    guard.set_index(static_cast<at::DeviceIndex>(outputTensor.get_device()));
-    outputEvents.front().block(at::cuda::getCurrentCUDAStream());
+    c10::Device device = outputTensor.device();
+    outputEvents.front().block(c10::impl::VirtualGuardImpl(device.type()).getStream(device));
   }
 
   at::Tensor cpuOutput;
-  std::vector<at::cuda::CUDAStream> outputStreams;
-  std::vector<at::cuda::CUDAEvent> outputEvents;
+  std::vector<c10::Stream> outputStreams;
+  std::vector<c10::Event> outputEvents;
 
   at::Tensor cpuInput;
-  std::vector<at::cuda::CUDAStream> inputStreams;
-  std::vector<at::cuda::CUDAEvent> inputEvents;
+  std::vector<c10::Stream> inputStreams;
+  std::vector<c10::Event> inputEvents;
 };
-
-#endif
 
 } // namespace
 
@@ -2559,7 +2514,6 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::alltoall_base(
         outputCounts,
         inputCounts,
         tag);
-#ifdef USE_CUDA
   } else if (device.type() == at::kCUDA) {
     work = c10::make_intrusive<AsyncAlltoallCUDAWork>(
         std::move(context),
@@ -2568,7 +2522,6 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::alltoall_base(
         outputCounts,
         inputCounts,
         tag);
-#endif
   } else {
     invalidArgument(c10::str("unsupported device type ", device.type()));
   }
@@ -2578,14 +2531,14 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::alltoall_base(
 
 at::Tensor& checkSingleTensor(std::vector<at::Tensor>& tensors) {
   if (tensors.size() != 1) {
-    throw std::runtime_error("ProcessGroupGloo::send takes a single tensor");
+    TORCH_CHECK(false, "ProcessGroupGloo::send takes a single tensor");
   }
   auto& tensor = tensors[0];
   if (!tensor.is_contiguous()) {
-    throw std::runtime_error("input tensor has to be contiguous");
+    TORCH_CHECK(false, "input tensor has to be contiguous");
   }
   if (tensor.is_sparse()) {
-    throw std::runtime_error("input tensor has to be dense");
+    TORCH_CHECK(false, "input tensor has to be dense");
   }
   return tensor;
 }
@@ -2650,7 +2603,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::recvAnysource(
   // from any other process in the group.
   std::vector<int> srcRanks;
   srcRanks.resize(size_);
-  for (auto i = 0; i < size_; i++) {
+  for (const auto i : c10::irange(size_)) {
     srcRanks.push_back(i);
   }
 
@@ -2670,7 +2623,7 @@ class AsyncBarrierWork : public ProcessGroupGloo::AsyncWork {
       const std::shared_ptr<gloo::Context>& context,
       std::vector<c10::weak_intrusive_ptr<AsyncWork>> priorWork,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork("gloo:barrier", c10::nullopt),
+      : ProcessGroupGloo::AsyncWork({}, "gloo:barrier", c10::nullopt),
         context(context),
         priorWork(std::move(priorWork)),
         tag(tag) {}
@@ -2718,7 +2671,10 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::barrier(
   return work;
 }
 
-void ProcessGroupGloo::monitoredBarrier(const BarrierOptions& opts) {
+void ProcessGroupGloo::monitoredBarrier(
+    const BarrierOptions& opts,
+    bool waitAllRanks) {
+  C10_LOG_API_USAGE_ONCE("torch.distributed.monitored_barrier");
   // Use default timeout if no timeout was specified.
   auto monitoredBarrierTimeout =
       (opts.timeout == kUnsetTimeout) ? this->options_->timeout : opts.timeout;
@@ -2731,62 +2687,135 @@ void ProcessGroupGloo::monitoredBarrier(const BarrierOptions& opts) {
   if (rank != 0) {
     auto sendWork = send(commTensor, 0, t1);
     auto recvWork = recv(commTensor, 0, t2);
-    sendWork->wait();
-    recvWork->wait();
+    try {
+      sendWork->wait();
+      recvWork->wait();
+    } catch (const std::exception& e) {
+      const std::string error = c10::str(
+          "Rank ",
+          rank,
+          " successfully reached monitoredBarrier, but received errors while waiting",
+          " to be unblocked by rank 0. Please check rank 0 logs for faulty rank.");
+      logAndThrow(
+          error, c10::str(error, "\n Original exception: \n", e.what()));
+    }
     return;
   }
   auto startTime = std::chrono::steady_clock::now();
   auto worldSize = this->getSize();
-  // Holds mapping of rank to pair of recv/send work.
-  std::unordered_map<
-      int,
-      std::tuple<
-          c10::intrusive_ptr<ProcessGroup::Work>,
-          c10::intrusive_ptr<ProcessGroup::Work>>>
-      works;
-  // Kick off all work
-  for (int dstRank = 1; dstRank < worldSize; ++dstRank) {
-    auto recvWork = recv(commTensor, dstRank, t1);
-    auto sendWork = send(commTensor, dstRank, t2);
-    works.insert(
-        {dstRank, std::make_tuple(std::move(recvWork), std::move(sendWork))});
+  // Mappings of rank to recvWork/sendWork respectively.
+  std::map<int, c10::intrusive_ptr<ProcessGroup::Work>> recvWorkMap;
+  std::map<int, c10::intrusive_ptr<ProcessGroup::Work>> sendWorkMap;
+  // Kick off recvWork and wait to unblock sendWork->wait() from non-zero ranks.
+  // Failed/hanging ranks will not ack this call, letting rank 0 know about the
+  // failure.
+  for (const auto dstRank : c10::irange(1, worldSize)) {
+    recvWorkMap.insert({dstRank, recv(commTensor, dstRank, t1)});
   }
 
-  std::vector<int> processedRanks;
+  auto waitLoop =
+      [&](const std::map<int, c10::intrusive_ptr<ProcessGroup::Work>>& works) {
+        std::vector<int> processedRanks;
+        for (auto& work : works) {
+          bool rankResponded = false;
+          try {
+            // Note: if waitAllRanks=false, we recompute the time remaining in
+            // barrier and use this recomputed time in wait(). However, if
+            // waitAllRanks=true, we use the original timeout, since if we use
+            // up the entire timeout waiting for response from rank n, then we
+            // won't have any timeout left to query ranks beginning with n + 1.
+            auto remainingTime = getRemainingTime(
+                startTime, monitoredBarrierTimeout, waitAllRanks);
+            if (!waitAllRanks) {
+              checkRemainingTime(
+                  monitoredBarrierTimeout, remainingTime, processedRanks, rank);
+            }
+            work.second->wait(remainingTime);
+            rankResponded = true;
+          } catch (const std::exception& e) {
+            const std::string error = c10::str(
+                "Rank ",
+                work.first,
+                " failed to pass monitoredBarrier in ",
+                monitoredBarrierTimeout.count(),
+                " ms");
+            if (waitAllRanks) {
+              LOG(ERROR) << error;
+            } else {
+              logAndThrow(
+                  error,
+                  c10::str(error, "\n Original exception: \n", e.what()));
+            }
+          }
+          if (rankResponded) {
+            processedRanks.push_back(work.first);
+          }
+        }
+        // If we are collecting all failed ranks, check if we need to throw if
+        // some ranks have not responded.
+        // Ensure all ranks from 1, ... WORLD_SIZE -1 have been successfully
+        // processed.
+        auto rankFailure = (processedRanks.size() != size_ - 1);
+        if (waitAllRanks && rankFailure) {
+          std::vector<int> failedRanks;
+          for (const auto i : c10::irange(1, size_)) {
+            if (std::find(processedRanks.begin(), processedRanks.end(), i) ==
+                processedRanks.end()) {
+              failedRanks.push_back(i);
+            }
+          }
 
-  // Wait for send/recv from all ranks
-  for (auto& work : works) {
-    // Compute the remaining time for every call to wait() instead of using
-    // the whole timeout every call. Error out if no time remains.
-    try {
-      auto remainingTime = getRemainingTime(startTime, monitoredBarrierTimeout);
-      checkRemainingTime(
-          monitoredBarrierTimeout, remainingTime, processedRanks, rank);
-      std::get<0>(work.second)->wait(remainingTime);
-      remainingTime = getRemainingTime(startTime, monitoredBarrierTimeout);
-      checkRemainingTime(
-          monitoredBarrierTimeout, remainingTime, processedRanks, rank);
-      std::get<1>(work.second)->wait(remainingTime);
-    } catch (const std::exception& e) {
-      const std::string error = c10::str(
-          "Rank ",
-          work.first,
-          " failed to pass monitoredBarrier in ",
-          monitoredBarrierTimeout.count(),
-          " ms");
-      logAndThrow(
-          error, c10::str(error, "\n Original exception: \n", e.what()));
-    }
-    processedRanks.push_back(work.first);
+          TORCH_INTERNAL_ASSERT(!failedRanks.empty());
+          const std::string ranksStr = c10::Join(", ", failedRanks);
+          const std::string error = c10::str(
+              "Ranks ",
+              ranksStr,
+              " failed to pass monitoredBarrier in ",
+              monitoredBarrierTimeout.count(),
+              " ms");
+          logAndThrow(error, error);
+        }
+      };
+
+  waitLoop(recvWorkMap);
+  // If we've reached here successfully, this means all ranks have acked in
+  // monitoredBarrier. Unblock all ranks now by responding to their recv(). This
+  // ensures that this is a true barrier in that all ranks  exit it successfully
+  // or none of them do.
+  for (const auto dstRank : c10::irange(1, worldSize)) {
+    sendWorkMap.insert({dstRank, send(commTensor, dstRank, t2)});
   }
 
-  auto remainingTime = getRemainingTime(startTime, monitoredBarrierTimeout);
-  LOG(INFO) << "All ranks passed monitoredBarrier in "
-            << (remainingTime.count() > 0
-                    ? (monitoredBarrierTimeout - remainingTime)
-                    : monitoredBarrierTimeout)
-                   .count()
-            << " ms.";
+  waitLoop(sendWorkMap);
+
+  auto elapsedTime = std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now() - startTime);
+}
+
+void ProcessGroupGloo::setSequenceNumberForGroup() {
+  if (rank_ == 0) {
+    // Create and broadcast sequence number
+    auto seq = 1 + rand();
+    sequenceNum_ = c10d::SequenceNum(seq);
+    std::vector<char> values = c10d::toVec<char>(seq, kBytes);
+    store_->set(kSeqNumStoreKey, values);
+  } else {
+    // Read rank 0's sequence number from store.
+    sequenceNum_ = c10d::SequenceNum();
+    store_->wait({kSeqNumStoreKey}, options_->timeout);
+    std::vector<char> values = store_->get(kSeqNumStoreKey);
+    uint64_t num = c10d::fromVec<char>(values);
+    sequenceNum_->set(num);
+  }
+}
+
+uint64_t ProcessGroupGloo::getSequenceNumberForGroup() {
+  if (sequenceNum_ == c10::nullopt) {
+    return 0;
+  }
+  return sequenceNum_->get();
 }
 
 } // namespace c10d
+
+#endif // USE_C10D_GLOO

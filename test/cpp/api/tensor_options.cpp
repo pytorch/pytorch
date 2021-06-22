@@ -23,11 +23,13 @@ using namespace torch::test;
   ASSERT_EQ(tensor.scalar_type(), (type_));                                \
   ASSERT_TRUE(tensor.options().layout() == (layout_))
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorOptionsTest, DefaultsToTheRightValues) {
   TensorOptions options;
   REQUIRE_OPTIONS(kCPU, -1, kFloat, kStrided);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorOptionsTest, UtilityFunctionsReturnTheRightTensorOptions) {
   auto options = dtype(kInt);
   REQUIRE_OPTIONS(kCPU, -1, kInt, kStrided);
@@ -45,6 +47,7 @@ TEST(TensorOptionsTest, UtilityFunctionsReturnTheRightTensorOptions) {
   REQUIRE_OPTIONS(kCUDA, 3, kByte, kSparse);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorOptionsTest, ConstructsWellFromCPUTypes) {
   TensorOptions options;
   REQUIRE_OPTIONS(kCPU, -1, kFloat, kStrided);
@@ -65,6 +68,7 @@ TEST(TensorOptionsTest, ConstructsWellFromCPUTypes) {
   REQUIRE_OPTIONS(kCPU, -1, kByte, kSparse);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorOptionsTest, ConstructsWellFromCPUTensors) {
   auto options = empty(5, kDouble).options();
   REQUIRE_OPTIONS(kCPU, -1, kDouble, kStrided);
@@ -73,6 +77,7 @@ TEST(TensorOptionsTest, ConstructsWellFromCPUTensors) {
   REQUIRE_OPTIONS(kCPU, -1, kByte, kSparse);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorOptionsTest, ConstructsWellFromVariables) {
   auto options = torch::empty(5).options();
   REQUIRE_OPTIONS(kCPU, -1, kFloat, kStrided);
@@ -83,6 +88,7 @@ TEST(TensorOptionsTest, ConstructsWellFromVariables) {
   ASSERT_FALSE(options.requires_grad());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DeviceTest, ParsesCorrectlyFromString) {
   Device device("cpu:0");
   ASSERT_EQ(device, Device(DeviceType::CPU, 0));
@@ -117,10 +123,12 @@ TEST(DeviceTest, ParsesCorrectlyFromString) {
   std::vector<std::string> badnesses = {
       "", "cud:1", "cuda:", "cpu::1", ":1", "3", "tpu:4", "??"};
   for (const auto& badness : badnesses) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
     ASSERT_ANY_THROW({ Device d(badness); });
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DefaultDtypeTest, CanSetAndGetDefaultDtype) {
   AutoDefaultDtypeMode dtype_mode(kFloat);
 
@@ -129,6 +137,7 @@ TEST(DefaultDtypeTest, CanSetAndGetDefaultDtype) {
   ASSERT_EQ(at::get_default_dtype(), kInt);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DefaultDtypeTest, NewTensorOptionsHasCorrectDefault) {
   AutoDefaultDtypeMode dtype_mode(kFloat);
 
@@ -138,6 +147,7 @@ TEST(DefaultDtypeTest, NewTensorOptionsHasCorrectDefault) {
   ASSERT_EQ(options.dtype(), kInt);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DefaultDtypeTest, NewTensorsHaveCorrectDefaultDtype) {
   AutoDefaultDtypeMode dtype_mode(kFloat);
   set_default_dtype(caffe2::TypeMeta::Make<int>());

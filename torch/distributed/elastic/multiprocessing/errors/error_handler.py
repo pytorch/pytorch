@@ -9,7 +9,6 @@ import faulthandler
 import json
 import logging
 import os
-import shutil
 import time
 import traceback
 import warnings
@@ -68,6 +67,16 @@ class ErrorHandler:
         except Exception as e:
             warnings.warn(f"Unable to enable fault handler. {type(e).__name__}: {e}")
 
+    def _write_error_file(self, file_path: str, error_msg: str) -> None:
+        """
+        Writes error message to the file.
+        """
+        try:
+            with open(file_path, "w") as fp:
+                fp.write(error_msg)
+        except Exception as e:
+            warnings.warn(f"Unable to write error to file. {type(e).__name__}: {e}")
+
     def record_exception(self, e: BaseException) -> None:
         """
         Writes a structured information about the exception into an error file in
@@ -76,11 +85,31 @@ class ErrorHandler:
         """
         _write_error(e, self._get_error_file_path())
 
-    def copy_error_file(self, rootcause_error_file: str):
+    def dump_error_file(self, rootcause_error_file: str, error_code: int = 0):
+        """
+        Dumps parent error file from child process's root cause error and error code.
+        """
         with open(rootcause_error_file, "r") as fp:
+            rootcause_error = json.load(fp)
+            # Override error code since the child process cannot capture the error code if it
+            # is terminated by singals like SIGSEGV.
+            if error_code:
+                if "message" not in rootcause_error:
+                    log.warning(
+                        f"child error file ({rootcause_error_file}) does not have field `message`. \n"
+                        f"cannot override error code: {error_code}"
+                    )
+                elif isinstance(rootcause_error["message"], str):
+                    log.warning(
+                        f"child error file ({rootcause_error_file}) has a new message format. \n"
+                        f"skipping error code override"
+                    )
+                else:
+                    rootcause_error["message"]["errorCode"] = error_code
+
             log.info(
                 f"child error file ({rootcause_error_file}) contents:\n"
-                f"{json.dumps(json.load(fp), indent=2)}"
+                f"{json.dumps(rootcause_error, indent=2)}"
             )
 
         my_error_file = self._get_error_file_path()
@@ -96,10 +125,8 @@ class ErrorHandler:
             # will write to the parent's error file. In this case just log the
             # original error file contents and overwrite the error file.
             self._rm(my_error_file)
-            shutil.copyfile(rootcause_error_file, my_error_file)
-            log.info(
-                f"copied child error file to parent's ({rootcause_error_file} -> {my_error_file}"
-            )
+            self._write_error_file(my_error_file, json.dumps(rootcause_error))
+            log.info(f"dumped error file to parent's {my_error_file}")
         else:
             log.error(
                 f"no error file defined for parent, to copy child error file ({rootcause_error_file})"
@@ -107,11 +134,19 @@ class ErrorHandler:
 
     def _rm(self, my_error_file):
         if os.path.isfile(my_error_file):
+            # Log the contents of the original file.
             with open(my_error_file, "r") as fp:
-                original = json.dumps(json.load(fp), indent=2)
-                log.warning(
-                    f"{my_error_file} already exists"
-                    f" and will be overwritten."
-                    f" Original contents:\n{original}"
-                )
+                try:
+                    original = json.dumps(json.load(fp), indent=2)
+                    log.warning(
+                        f"{my_error_file} already exists"
+                        f" and will be overwritten."
+                        f" Original contents:\n{original}"
+                    )
+                except json.decoder.JSONDecodeError as err:
+                    log.warning(
+                        f"{my_error_file} already exists"
+                        f" and will be overwritten."
+                        f" Unable to load original contents:\n"
+                    )
             os.remove(my_error_file)

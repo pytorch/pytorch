@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/data/samplers/distributed.h>
 #include <torch/serialize/archive.h>
 #include <torch/types.h>
@@ -21,6 +22,7 @@ DistributedRandomSampler::DistributedRandomSampler(
       end_index_(0),
       sample_index_(0) {
   // shuffle first time.
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset(size_);
 }
 
@@ -56,7 +58,7 @@ void DistributedRandomSampler::populate_indices() {
       num_replicas_ == 1 ? size_ : num_local_samples * num_replicas_;
   all_indices_.resize(sample_count);
   std::iota(std::begin(all_indices_), std::end(all_indices_), 0);
-  for (size_t i = size_; i < sample_count; ++i) {
+  for (const auto i : c10::irange(size_, sample_count)) {
     // we may have added duplicate samples to make all
     // replicas to have the same number of samples.
     all_indices_[i] = i - size_;

@@ -319,8 +319,8 @@ Tensor LinearOpContext::run(
             },
             VK_KERNEL(addmm),
             {
-              div_up(unpacked_.weight.sizes()[Layout::Parameter::width], INT64_C(2)),
-              div_up(v_input.sizes()[Layout::Parameter::height], INT64_C(2)),
+              safe_downcast<uint32_t>(div_up(unpacked_.weight.sizes()[Layout::Parameter::width], INT64_C(2))),
+              safe_downcast<uint32_t>(div_up(v_input.sizes()[Layout::Parameter::height], INT64_C(2))),
               1,
             },
             {8, 8, 1},
@@ -368,8 +368,8 @@ Tensor LinearOpContext::run(
             },
             VK_KERNEL(mm),
             {
-              div_up(unpacked_.weight.sizes()[Layout::Parameter::width], INT64_C(2)),
-              div_up(v_input.sizes()[Layout::Parameter::height], INT64_C(2)),
+              safe_downcast<uint32_t>(div_up(unpacked_.weight.sizes()[Layout::Parameter::width], INT64_C(2))),
+              safe_downcast<uint32_t>(div_up(v_input.sizes()[Layout::Parameter::height], INT64_C(2))),
               1,
             },
             {8, 8, 1},

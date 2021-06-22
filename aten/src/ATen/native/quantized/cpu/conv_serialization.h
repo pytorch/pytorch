@@ -93,6 +93,7 @@ ConvParamsSerializationType parse_conv_serialized_state(c10::IValue v) {
 
     std::vector<int16_t> params_vec;
     params_vec.push_back(kSpatialDim);
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < stride_x_kSpatialDim.size(); i++) {
       auto stride = stride_x_kSpatialDim.get(i);
       params_vec.push_back(stride[0].item<int16_t>());
@@ -206,6 +207,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
   torch::List<int64_t> stride, padding, output_padding, dilation;
   // skip kSpatialDim
   int idx = 1;
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (int i = 0; i < kSpatialDim; ++i) {
     stride.emplace_back(conv_params_packed[idx].item<int64_t>());
     idx++;

@@ -2,6 +2,7 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(UnsafeCoalesce)
     .NumInputsOutputs([](int inputs, int outputs) {
       return inputs + 1 == outputs;
@@ -22,6 +23,7 @@ This is 'unsafe' as the output vectors are aliased, so use with
 caution.
 )DOC");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(UnsafeCoalesce, UnsafeCoalesceOp<CPUContext>);
 
 } // namespace caffe2

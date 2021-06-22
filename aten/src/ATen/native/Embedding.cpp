@@ -15,7 +15,7 @@ namespace at { namespace native {
 
 Tensor embedding(const Tensor & weight, const Tensor & indices,
                  int64_t padding_idx, bool scale_grad_by_freq, bool sparse) {
-  TORCH_CHECK(weight.dim() >= 1, "'weight' must be at least 1-D");
+  TORCH_CHECK(weight.dim() == 2,  "'weight' must be 2-D");
   auto indices_arg = TensorArg(indices, "indices", 1);
   checkScalarTypes("embedding", indices_arg, {kLong, kInt});
 
@@ -96,6 +96,7 @@ Tensor embedding_dense_backward_cpu(
   AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_dense_backward_cpu", [&] () {
     auto indices_data = indices_contig.data_ptr<index_t>();
 
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     std::unique_ptr<index_t[]> counts;
     if (scale_grad_by_freq) {
       counts.reset(new index_t[num_weights]);
@@ -114,6 +115,7 @@ Tensor embedding_dense_backward_cpu(
           if (k >= start && k < end) {
             double scale = 1.0;
             if (scale_grad_by_freq) {
+              // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
               scale /= counts[k];
             }
             grad_weight[k].add_(grad[i], scale);

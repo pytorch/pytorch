@@ -25,6 +25,7 @@ bool MarginRankingCriterionOp<CPUContext>::RunOnDevice() {
   const int* Ydata = Y.data<int>();
   float* output = loss->template mutable_data<float>();
   for (int i = 0; i < X1.numel(); ++i) {
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     output[i] = std::max(-Ydata[i] * (X1data[i] - X2data[i]) + margin_, 0.f);
   }
   return true;
@@ -48,24 +49,30 @@ bool MarginRankingCriterionGradientOp<CPUContext>::RunOnDevice() {
   float* dX1_data = dX1->template mutable_data<float>();
   float* dX2_data = dX2->template mutable_data<float>();
   for (int i = 0; i < X1.numel(); ++i) {
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     auto dist = -Ydata[i] * (X1data[i] - X2data[i]) + margin_;
     if (dist < 0.f) {
       dX1_data[i] = dX2_data[i] = 0.f;
     } else {
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       dX1_data[i] = -Ydata[i] * dLoss_data[i];
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       dX2_data[i] = Ydata[i] * dLoss_data[i];
     }
   }
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     MarginRankingCriterion,
     MarginRankingCriterionOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     MarginRankingCriterionGradient,
     MarginRankingCriterionGradientOp<CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(MarginRankingCriterion)
     .NumInputs(3)
     .NumOutputs(1)
@@ -86,6 +93,7 @@ y == -1.
     .Input(2, "Y", "The label as a 1-dim TensorCPU with int value of 1 or -1.")
     .Output(0, "loss", "The output loss with the same dimensionality as X1.");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(MarginRankingCriterionGradient)
     .NumInputs(4)
     .NumOutputs(2)
@@ -105,6 +113,7 @@ class GetMarginRankingCriterionGradient : public GradientMakerBase {
         vector<string>{GI(0), GI(1)});
   }
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(MarginRankingCriterion, GetMarginRankingCriterionGradient);
 
 } // namespace caffe2

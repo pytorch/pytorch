@@ -1,3 +1,4 @@
+// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <math.h>
 
 #include "caffe2/operators/glu_op.h"
@@ -7,6 +8,7 @@ namespace caffe2 {
 namespace {
 float sigmoid(const float x) {
   if (x >= 0) {
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     return 1. / (1. + exp(-x));
   } else {
     const float exp_x = exp(x);
@@ -41,6 +43,7 @@ void GluOp<float, CPUContext>::ComputeGlu(
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Glu)
     .NumInputs(1)
     .NumOutputs(1)
@@ -53,5 +56,6 @@ X(dn-1, i) * sigmoid(X(dn-1, i+N/2))
     .Input(0, "X", "1D input tensor")
     .Output(0, "Y", "1D output tensor");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Glu, GluOp<float, CPUContext>);
 } // namespace caffe2

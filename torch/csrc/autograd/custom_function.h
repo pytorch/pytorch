@@ -4,6 +4,7 @@
 #include <torch/csrc/autograd/variable.h>
 #include <ATen/core/ivalue.h>
 #include <c10/util/flat_hash_map.h>
+#include <c10/util/irange.h>
 #include <vector>
 
 namespace torch { namespace autograd {
@@ -90,11 +91,13 @@ struct TORCH_API Function {
 /// Context to save information during `forward` that can be accessed in `backward`
 /// in custom autograd operations (see `torch::autograd::Function` for details).
 struct TORCH_API AutogradContext {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   AutogradContext() : materialize_grads_(true) {}
   AutogradContext(const AutogradContext &other) = delete;
   AutogradContext& operator=(const AutogradContext& other) = delete;
 
   /// Can be used to save non-variable data for `backward`.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   ska::flat_hash_map<std::string, at::IValue> saved_data;
 
   /// Saves the list of variables for a future call to `backward`. This
@@ -285,7 +288,7 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
   int num_inputs = inputs.size();
   variable_list backward_inputs;
   backward_inputs.reserve(num_inputs);
-  for (int i = 0 ; i < num_inputs; ++i) {
+  for (const auto i : c10::irange(num_inputs)) {
     if (inputs[i].defined() || !ctx_.materialize_grads_) {
       backward_inputs.emplace_back(inputs[i]);
     } else {
@@ -305,9 +308,10 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
   auto num_outputs = outputs.size();
   // Returning too many results is ok, but only as long as they're all undefined.
   // Truncate the result vector in that case.
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   if (num_outputs > num_forward_inputs) {
     bool all_undef = true;
-    for (size_t i = num_forward_inputs; i < num_outputs; ++i) {
+    for (const auto i : c10::irange(num_forward_inputs, num_outputs)) {
       all_undef &= (!outputs[i].defined());
     }
     if (all_undef) {
@@ -316,6 +320,7 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
     }
   }
 
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   if (num_outputs != num_forward_inputs) {
     std::string msg("function ");
     msg += name() + " returned an incorrect number of gradients (expected ";
@@ -326,7 +331,7 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
 
   variable_list results;
   results.reserve(num_outputs);
-  for (int i = 0; i < num_outputs; ++i) {
+  for (const auto i : c10::irange(num_outputs)) {
     if (!is_variable_input_[i]) {
       if (outputs[i].defined()) {
         std::string msg("function ");

@@ -20,6 +20,7 @@ public:
     *self_data = *self_data && *src_data;
   }
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static ReduceMultiply reduce_multiply;
 
 class ReduceAdd {
@@ -29,6 +30,7 @@ public:
     *self_data += *src_data;
   }
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static ReduceAdd reduce_add;
 
 class TensorAssign {
@@ -38,6 +40,7 @@ public:
     *self_data = *src_data;
   }
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static TensorAssign tensor_assign;
 
 template <bool is_scatter_like = true>
@@ -110,13 +113,6 @@ struct cpu_scatter_gather_base_kernel {
 
     dim = maybe_wrap_dim(dim, self.dim());
 
-    if (is_scatter_like) {
-      scatter_shape_check(self, dim, index, self);
-    }
-    else {
-      gather_shape_check(self, dim, index, self);
-    }
-
     auto index_sizes = ensure_nonempty_vec(index.sizes().vec());
     auto index_strides = ensure_nonempty_vec(index.strides().vec());
 
@@ -130,6 +126,7 @@ struct cpu_scatter_gather_base_kernel {
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
       .resize_outputs(false)
+      // NOLINTNEXTLINE(bugprone-argument-comment)
       .declare_static_shape(index.sizes(), /*squash_dim=*/dim)
       .add_output(self)
       .add_input(index)
@@ -143,8 +140,8 @@ struct cpu_scatter_gather_base_kernel {
 
     auto index_upper_bound = self_dim_size;
 
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
-      ScalarType::Bool, ScalarType::Half, iter.dtype(),
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+      ScalarType::Bool, ScalarType::Half, ScalarType::BFloat16, iter.dtype(),
       "scatter_gather_scalar_cpu", [&] {
         constexpr auto SELF_ITER_STRIDE_IDX = 0;
         constexpr auto INDEX_ITER_STRIDE_IDX = 1;
@@ -211,16 +208,14 @@ struct cpu_scatter_gather_base_kernel {
     dim = maybe_wrap_dim(dim, self.dim());
 
     scatter_gather_dtype_check(method_name, self, index, src);
-    if (is_scatter_like) {
-      scatter_shape_check(self, dim, index, src);
-    }
-    else {
+    if (!is_scatter_like) {
       gather_shape_check(self, dim, index, src);
     }
 
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
       .resize_outputs(false)
+      // NOLINTNEXTLINE(bugprone-argument-comment)
       .declare_static_shape(index.sizes(), /*squash_dim=*/dim)
       .add_output(self)
       .add_input(src)
@@ -238,8 +233,8 @@ struct cpu_scatter_gather_base_kernel {
 
     auto index_upper_bound = is_scatter_like ? self_dim_size : src_dim_size;
 
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
-      ScalarType::Bool, ScalarType::Half, iter.dtype(),
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+      ScalarType::Bool, ScalarType::Half, ScalarType::BFloat16, iter.dtype(),
       "scatter_gather_tensor_cpu", [&] {
         constexpr auto SELF_ITER_STRIDE_IDX = 0;
         constexpr auto INDEX_ITER_STRIDE_IDX = 2;
@@ -353,11 +348,17 @@ void scatter_scalar_reduce_cpu_kernel(Tensor& self, const int64_t dim, const Ten
 
 } // anonymous namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(gather_stub, &gather_cpu_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(scatter_stub, &scatter_cpu_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(scatter_fill_stub, &scatter_fill_cpu_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(scatter_add_stub, &scatter_add_cpu_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(scatter_reduce_stub, &scatter_reduce_cpu_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(scatter_scalar_reduce_stub, &scatter_scalar_reduce_cpu_kernel);
 
 }} // namespace at::native

@@ -41,8 +41,7 @@ class TORCH_API IRPrinter : public IRVisitor {
   void visit(const Load* v) override;
   void visit(const Broadcast* v) override;
   void visit(const IfThenElse* v) override;
-  void visit(const BaseCallNode* v) override;
-  void visit(const FunctionCall* v) override;
+  void visit(const Intrinsics* v) override;
   void visit(const Term* v) override;
   void visit(const Polynomial* v) override;
   void visit(const RoundOff* v) override;
@@ -60,6 +59,10 @@ class TORCH_API IRPrinter : public IRVisitor {
   void visit(const Allocate* v) override;
   void visit(const Free* v) override;
   void visit(const Let* v) override;
+
+  // A child class may have a difference rule for generating dtype
+  // string, e.g. CUDA needs int64_t to be generated as long long.
+  virtual std::string dtypeToCppString(const Dtype& dtype);
 
   std::ostream& os() {
     return printer_os_;
@@ -84,6 +87,7 @@ class TORCH_API IRPrinter : public IRVisitor {
   }
   void emitIndent();
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   int indent_ = 0;
 
  private:

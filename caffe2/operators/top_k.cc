@@ -102,6 +102,7 @@ bool TopKOp<T, Context>::RunOnDevice() {
 
   at::IntArrayRef input_dims = input.sizes();
   if (axis_ == -1) {
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     axis_ = input_dims.size() - 1;
   }
   CAFFE_ENFORCE_GE(axis_, 0);
@@ -133,11 +134,13 @@ bool TopKOp<T, Context>::RunOnDevice() {
       input_dims.cbegin(),
       input_dims.cbegin() + axis_,
       int64_t(1),
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       std::multiplies<int64_t>());
   const int64_t next_size = std::accumulate(
       input_dims.cbegin() + axis_ + 1,
       input_dims.cend(),
       int64_t(1),
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       std::multiplies<int64_t>());
   const int64_t src_offset_stride = input_dims[axis_] * next_size;
   const int64_t dst_offset_stride = k * next_size;
@@ -176,6 +179,7 @@ bool TopKGradientOp<T, Context>::RunOnDevice() {
   const int64_t* indices_data = indices.template data<int64_t>();
   T* output_data = output->template mutable_data<T>();
   if (axis_ == -1) {
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     axis_ = values_dims.size() - 1;
   }
   const int k = values_dims[axis_];
@@ -184,11 +188,13 @@ bool TopKGradientOp<T, Context>::RunOnDevice() {
       values_dims.cbegin(),
       values_dims.cbegin() + axis_,
       int64_t(1),
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       std::multiplies<int64_t>());
   const int64_t next_size = std::accumulate(
       values_dims.cbegin() + axis_ + 1,
       values_dims.cend(),
       int64_t(1),
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       std::multiplies<int64_t>());
   const int64_t src_offset_stride = k * next_size;
   const int64_t dst_offset_stride = origin_dims[axis_] * next_size;
@@ -211,9 +217,12 @@ bool TopKGradientOp<T, Context>::RunOnDevice() {
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(TopK, TopKOp<float, CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(TopKGradient, TopKGradientOp<float, CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(TopK)
     .NumInputs(1, 2)
     .NumOutputs(2, 3)
@@ -234,6 +243,7 @@ OPERATOR_SCHEMA(TopK)
                 in[0].dims().begin(),
                 in[0].dims().end() - 1,
                 1,
+                // NOLINTNEXTLINE(modernize-use-transparent-functors)
                 std::multiplies<long>()) *
             k);
         out.push_back(flatten_indices_shape);
@@ -349,6 +359,7 @@ Flattened_indices: [ 1  0  3  4  8  7 10 11 13 14 17 16 20 18 23 22 26 25]
         "Flattened_indices",
         "(*Tensor`<int>`*): tensor of indices of shape $(a_1 * a_2 * ... * a_n * k,)$; indices values refer to each element's index in the flattened input tensor `X`");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(TopKGradient).NumInputs(3).NumOutputs(1);
 
 class GetTopKGradient : public GradientMakerBase {
@@ -362,6 +373,7 @@ class GetTopKGradient : public GradientMakerBase {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(TopK, GetTopKGradient);
 
 } // namespace caffe2

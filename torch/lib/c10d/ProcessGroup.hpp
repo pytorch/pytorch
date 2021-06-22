@@ -8,8 +8,11 @@
 #include <vector>
 
 #include <ATen/ATen.h>
+#include <c10/macros/Macros.h>
 
 #include <c10d/Types.hpp>
+#include <c10d/Utils.hpp>
+#include <c10d/sequence_num.hpp>
 
 // *************************************************************************
 // PROCESS GROUP collective communication API IS BEING CHANGED BETWEEN
@@ -20,9 +23,11 @@
 
 constexpr auto kNoTimeout = std::chrono::milliseconds(0);
 constexpr auto kProcessGroupDefaultTimeout =
-    std::chrono::milliseconds(10 * 1000);
+    std::chrono::milliseconds(30 * 60 * 1000);
 
 namespace c10d {
+
+constexpr const char * const kSeqNumStoreKey = "SEQ_NUM_STORE_KEY";
 
 enum class OpType : std::uint8_t {
   BROADCAST = 0,
@@ -30,7 +35,7 @@ enum class OpType : std::uint8_t {
   ALLREDUCE_COALESCED = 2,
   REDUCE = 3,
   ALLGATHER = 4,
-  ALLGATHER_BASE = 5,
+  _ALLGATHER_BASE = 5,
   ALLGATHER_COALESCED = 6,
   GATHER = 7,
   SCATTER = 8,
@@ -41,14 +46,15 @@ enum class OpType : std::uint8_t {
   RECV = 13,
   RECVANYSOURCE = 14,
   BARRIER = 15,
+  _REDUCE_SCATTER_BASE = 16,
   UNKNOWN = 100,
 };
 
 // Converts OpType to human readable string.
-std::string opTypeToString(OpType opType);
+TORCH_API std::string opTypeToString(OpType opType);
 
 // Whether or not an OP is an p2p op (SEND, RECV, RECVANYSOURCE)
-bool isP2POp(OpType opType);
+TORCH_API bool isP2POp(OpType opType);
 
 // ProcessGroup is a base class that captures collective and point to
 // point communication in a fixed set of processes.
@@ -70,13 +76,13 @@ bool isP2POp(OpType opType);
 // process group to find each other (referred to as rendezvous from
 // hereon)
 //
-class ProcessGroup : public torch::CustomClassHolder {
+class TORCH_API ProcessGroup : public torch::CustomClassHolder {
  public:
   // Please do not use ProcessGroup::Work API, it is going away, to be
   // replaced by ivalue::Future.
   // Python binding for this class might change, please do not assume
   // this will be bound using pybind.
-  class Work : public torch::CustomClassHolder {
+  class TORCH_API Work : public torch::CustomClassHolder {
    public:
     Work(
         int rank = -1,
@@ -101,6 +107,7 @@ class ProcessGroup : public torch::CustomClassHolder {
     virtual int sourceRank() const;
 
     // Returns result tensors, if applicable.
+    // If work is not supposed to have result, we return empty list.
     virtual std::vector<at::Tensor> result();
 
     // Ensures that operations on the output tensors that are invoked
@@ -170,8 +177,10 @@ class ProcessGroup : public torch::CustomClassHolder {
   // when constructing a ProcessGroup. Each ProcessGroup subclass should
   // extend this struct and define its options if it wants to provide more
   // config options (beyond basic ones defined here) to end user.
-  struct Options : torch::CustomClassHolder {
-    explicit Options(std::chrono::milliseconds timeout, std::string backend)
+  struct TORCH_API Options : torch::CustomClassHolder {
+    explicit Options(
+        std::string backend,
+        std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout)
         : timeout(timeout), backend(backend) {}
     virtual ~Options() = default;
 
@@ -222,14 +231,15 @@ class ProcessGroup : public torch::CustomClassHolder {
   // Gathers a single tensor inputBuffer into a single buffer outputBuffer that
   // is interpreted as a contigious collection of size inputBuffer * WORLD_SIZE.
   // For implementers of ProcessGroup API and advanced users only.
-  virtual c10::intrusive_ptr<ProcessGroup::Work> allgather_base(
+  // Note: this function will be deprecated in near future.
+  virtual c10::intrusive_ptr<ProcessGroup::Work> _allgather_base(
       at::Tensor& outputBuffer,
       at::Tensor& inputBuffer,
       const AllgatherOptions& opts = AllgatherOptions()) = 0;
 
   // This function is deprecated and will be moved out of ProcessGroup to comms:
   // * do not add dependencies on this function,
-  // * do not implement it in your ProcessGroup, implement allgather_base
+  // * do not implement it in your ProcessGroup, implement _allgather_base
   //   instead.
   virtual c10::intrusive_ptr<ProcessGroup::Work> allgather_coalesced(
       std::vector<std::vector<at::Tensor>>& outputTensorLists,
@@ -251,29 +261,61 @@ class ProcessGroup : public torch::CustomClassHolder {
       std::vector<std::vector<at::Tensor>>& inputTensors,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) = 0;
 
+  virtual c10::intrusive_ptr<ProcessGroup::Work> _reduce_scatter_base(
+      at::Tensor&,
+      at::Tensor&,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) {
+    TORCH_CHECK(false, "ProcessGroup does not support reduce_scatter_base");
+  }
+
+
   virtual c10::intrusive_ptr<ProcessGroup::Work> alltoall_base(
       at::Tensor& outputTensor,
       at::Tensor& inputTensor,
       std::vector<int64_t>& outputSplitSizes,
       std::vector<int64_t>& inputSplitSizes,
       const AllToAllOptions& opts = AllToAllOptions()) {
-    throw std::runtime_error("ProcessGroup does not support alltoall");
+    TORCH_CHECK(false, "ProcessGroup does not support alltoall");
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> alltoall(
       std::vector<at::Tensor>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const AllToAllOptions& opts = AllToAllOptions()) {
-    throw std::runtime_error("ProcessGroup does not support alltoall");
+    TORCH_CHECK(false, "ProcessGroup does not support alltoall");
   }
 
   virtual void monitoredBarrier(
-      const BarrierOptions& /* unused */) {
+      const BarrierOptions& /* unused */, bool /* unused */ = false ) {
     auto backendName = getBackendName();
-    throw std::runtime_error(
+    TORCH_CHECK(false,
         c10::str("ProcessGroup ",
         backendName,
         " does not support monitoredBarrier, only GLOO supports monitored barrier.")
+    );
+  }
+
+  // Agrees on an initial sequence number for the whole group by having rank 0
+  // create it and broadcast it to other ranks using the store. Only implemented
+  // for GLOO and NCCL backends currently.
+  virtual void setSequenceNumberForGroup() {
+    auto backendName = getBackendName();
+    TORCH_CHECK(false,
+        c10::str("ProcessGroup ",
+        backendName,
+        " does not yet support sequence numbers.")
+    );
+  }
+
+  // Retrieves the current sequence number for the whole group, which should be
+  // in sync. If the returned number is not consistent across the group, it
+  // may indicate that there is some sort of collective desynchronization.
+  virtual uint64_t getSequenceNumberForGroup() {
+      auto backendName = getBackendName();
+    TORCH_CHECK(false,
+        c10::str("ProcessGroup ",
+        backendName,
+        " does not yet support sequence numbers.")
     );
   }
 
@@ -297,6 +339,11 @@ class ProcessGroup : public torch::CustomClassHolder {
  protected:
   const int rank_;
   const int size_;
+  // Optional sequence number structure for matching collectives.
+  c10::optional<c10d::SequenceNum> sequenceNum_ = c10::nullopt;
+  // Debug level setting. It is parsed once when ProcessGroup is constructed and
+  // remains the same across use of this process group.
+  DistributedDebugLevel dist_debug_level_;
 };
 
 } // namespace c10d

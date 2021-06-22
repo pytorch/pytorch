@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <c10/util/accumulate.h>
+#include <c10/util/irange.h>
 #include <c10d/Types.hpp>
 
 #ifdef _WIN32
@@ -10,11 +11,11 @@
 typedef SSIZE_T ssize_t;
 #pragma comment(lib, "Ws2_32.lib")
 #else
-#include <sys/socket.h>
-#include <sys/poll.h>
-#include <netdb.h>
-#include <unistd.h>
 #include <fcntl.h>
+#include <netdb.h>
+#include <sys/poll.h>
+#include <sys/socket.h>
+#include <unistd.h>
 #endif
 
 #include <sys/types.h>
@@ -39,20 +40,23 @@ enum DistributedDebugLevel {
 };
 
 // String debug log levels
-extern const char * kDistDebugEnvVar;
+extern const char* kDistDebugEnvVar;
 extern const char* kDistDebugDetailLogLevel;
 extern const char* kDistDebugInfoLogLevel;
 extern const char* kDistDebugOffLogLevel;
 
-std::string parse_env(const char* env_var_name);
+TORCH_API std::string parse_env(const char* env_var_name);
 
-DistributedDebugLevel parseDistDebugLevel();
+TORCH_API DistributedDebugLevel parseDistDebugLevel();
+
+// Retrieve tensor shapes from a given tensor.
+TORCH_API std::vector<at::Tensor> getTensorShapes(const std::vector<at::Tensor>& tensors);
 
 // Turns at::IntArrayRef into "(1, 2, 3, 4)".
 inline std::string toString(at::IntArrayRef l) {
   std::stringstream ss;
   ss << "(";
-  for (size_t i = 0; i < l.size(); i++) {
+  for (const auto i : c10::irange(l.size())) {
     if (i > 0) {
       ss << ", ";
     }
@@ -71,7 +75,7 @@ inline std::string toString(const c10::Layout& layout) {
 inline void assertSameType(
     const at::DeprecatedTypeProperties& type,
     const std::vector<at::Tensor>& tensors) {
-  for (size_t i = 0; i < tensors.size(); i++) {
+  for (const auto i : c10::irange(tensors.size())) {
     if (!tensors[i].options().type_equal(type.options())) {
       const std::string expected = type.toString();
       const std::string actual = tensors[i].toString();
@@ -88,18 +92,16 @@ inline bool parseEnvVarFlag(const char* envVarName) {
     try {
       val = std::stoi(stringValue);
     } catch (std::exception& e) {
-      throw std::runtime_error(
-          "Invalid value for environment variable: " +
-          std::string(envVarName));
+      TORCH_CHECK(false,
+          "Invalid value for environment variable: " + std::string(envVarName));
     }
     if (val == 1) {
       return true;
     } else if (val == 0) {
       return false;
     } else {
-      throw std::runtime_error(
-          "Invalid value for environment variable: " +
-          std::string(envVarName));
+      TORCH_CHECK(false,
+          "Invalid value for environment variable: " + std::string(envVarName));
     }
   }
   return false;
@@ -108,7 +110,7 @@ inline bool parseEnvVarFlag(const char* envVarName) {
 inline void assertSameSizes(
     const at::IntArrayRef& sizes,
     const std::vector<at::Tensor>& tensors) {
-  for (size_t i = 0; i < tensors.size(); i++) {
+  for (const auto i : c10::irange(tensors.size())) {
     if (!tensors[i].sizes().equals(sizes)) {
       const auto expected = toString(sizes);
       const auto actual = toString(tensors[i].sizes());
@@ -127,7 +129,7 @@ inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
   // Ensure all tensors have identical type and shape
   auto options = tensors[0].options();
   auto sizes = tensors[0].sizes();
-  for (size_t i = 1; i < tensors.size(); i++) {
+  for (const auto i : c10::irange(1, tensors.size())) {
     if (!tensors[i].options().type_equal(options)) {
       const auto expected = toString(options);
       const auto actual = toString(tensors[i].options());
@@ -167,7 +169,6 @@ inline void assertTypeMatch(
   }
 }
 
-
 inline void assertSizesMatch(
     std::function<void(const std::string&)> fn,
     const at::IntArrayRef& sizes,
@@ -195,7 +196,7 @@ inline void assertLayoutMatch(
     std::function<void(const std::string&)> fn,
     const at::ArrayRef<at::Tensor> tensors) {
   const auto& layout = tensors[0].layout();
-  for (size_t i = 1; i < tensors.size(); i++) {
+  for (const auto i : c10::irange(1, tensors.size())) {
     assertLayoutMatch(fn, layout, tensors, i);
   }
 }
@@ -275,7 +276,7 @@ inline void assertSameDevice(
     return;
   }
   const auto& device = tensors[0].device();
-  for (int i = 1; i < tensors.size(); ++i) {
+  for (const auto i : c10::irange(1, tensors.size())) {
     if (tensors[i].device() != device) {
       fn("tensors should be on the same device");
     }
@@ -287,7 +288,7 @@ inline void assertTypeAndSizesMatch(
     const at::ArrayRef<at::Tensor> tensors,
     const at::DeprecatedTypeProperties& type,
     const at::IntArrayRef& sizes) {
-  for (size_t i = 0; i < tensors.size(); i++) {
+  for (const auto i : c10::irange(tensors.size())) {
     assertTypeMatch(fn, type, tensors, i);
     assertSizesMatch(fn, sizes, tensors, i);
   }
@@ -298,7 +299,7 @@ inline void assertTypeAndSizesMatch(
     const at::ArrayRef<at::Tensor> tensors,
     const at::TensorOptions& options,
     const at::IntArrayRef& sizes) {
-  for (size_t i = 0; i < tensors.size(); i++) {
+  for (const auto i : c10::irange(tensors.size())) {
     assertTypeMatch(fn, options, tensors, i);
     assertSizesMatch(fn, sizes, tensors, i);
   }
@@ -339,16 +340,16 @@ inline at::Tensor newLikeFlat(
     std::vector<std::vector<at::Tensor>>& tensors,
     size_t deviceIdx) {
   if (tensors.size() == 0 || tensors[0].size() == 0) {
-    throw std::runtime_error("Received an empty list");
+    TORCH_CHECK(false, "Received an empty list");
   }
   if (deviceIdx >= tensors.size()) {
-    throw std::runtime_error("Invalid device index");
+    TORCH_CHECK(false, "Invalid device index");
   }
   auto& t = tensors[deviceIdx][0];
   auto device = t.device();
   for (size_t i = 1; i < tensors[deviceIdx].size(); ++i) {
     if (tensors[deviceIdx][i].device() != device) {
-      throw std::runtime_error("Expecting all tensors on the same device");
+      TORCH_CHECK(false, "Expecting all tensors on the same device");
     }
   }
   at::DeviceGuard gpuGuard(device);
@@ -356,12 +357,13 @@ inline at::Tensor newLikeFlat(
   std::vector<int64_t> strides{static_cast<int64_t>(t.numel())};
   sizes.insert(sizes.end(), t.sizes().begin(), t.sizes().end());
   strides.insert(strides.end(), t.strides().begin(), t.strides().end());
-  return at::empty_strided(sizes, strides, t.options().memory_format(c10::nullopt));
+  return at::empty_strided(
+      sizes, strides, t.options().memory_format(c10::nullopt));
 }
 
 inline at::Tensor newLikeFlat(std::vector<at::Tensor>& tensors) {
   if (tensors.size() == 0) {
-    throw std::runtime_error("Received an empty list");
+    TORCH_CHECK(false, "Received an empty list");
   }
   auto& t = tensors[0];
   at::DeviceGuard gpuGuard(t.device());
@@ -373,7 +375,7 @@ inline at::Tensor newLikeFlat(std::vector<at::Tensor>& tensors) {
 inline std::vector<std::vector<int64_t>> getSizes(
     const std::vector<at::Tensor>& tensors) {
   std::vector<std::vector<int64_t>> sizes(tensors.size());
-  for (size_t i = 0; i < tensors.size(); i++) {
+  for (const auto i : c10::irange(tensors.size())) {
     sizes[i] = tensors[i].sizes().vec();
   }
   return sizes;
@@ -382,7 +384,7 @@ inline std::vector<std::vector<int64_t>> getSizes(
 inline std::vector<int> getDevices(const std::vector<at::Tensor>& tensors) {
   std::vector<int> devices(tensors.size(), -1);
   if (tensors[0].device().is_cuda()) {
-    for (size_t i = 0; i < tensors.size(); i++) {
+    for (const auto i : c10::irange(tensors.size())) {
       devices[i] = tensors[i].storage().device().index();
     }
   }
@@ -403,7 +405,7 @@ inline T* getDataPointer(const at::Tensor& tensor) {
 template <typename T>
 std::vector<T*> getDataPointers(const std::vector<at::Tensor>& tensors) {
   std::vector<T*> ptrs(tensors.size());
-  for (size_t i = 0; i < tensors.size(); i++) {
+  for (const auto i : c10::irange(tensors.size())) {
     ptrs[i] = getDataPointer<T>(tensors[i]);
   }
   return ptrs;
@@ -446,7 +448,7 @@ size_t computeLengthsAndOffsets(
     equal_splits = true;
     split_size = tensor.size(0) / group_size;
   }
-  for (int i = 0; i < group_size; i++) {
+  for(const auto i : c10::irange(group_size)) {
     size_t length = row_size * (equal_splits ? split_size : split_sizes[i]);
     TORCH_INTERNAL_ASSERT(
         length <= std::numeric_limits<int>::max() &&
@@ -466,7 +468,7 @@ size_t computeLengthsAndOffsets(
     std::vector<T>* offsets) {
   size_t group_size = lengths->size();
   size_t offset = 0;
-  for (int i = 0; i < group_size; i++) {
+  for(const auto i : c10::irange(group_size)) {
     size_t length = tensors[i].numel();
     TORCH_INTERNAL_ASSERT(
         length <= std::numeric_limits<int>::max() &&
@@ -492,22 +494,23 @@ using SizeType = uint64_t;
 // `fork()`, we can use `SYSCHECK(pid = fork(), pid != -1)`. The function output
 // is stored in variable `__output` and may be used in `success_cond`.
 #ifdef _WIN32
-#define SYSCHECK(expr, success_cond)                                               \
-  while (true) {                                                                   \
-    auto __output = (expr);                                                        \
-    auto errno_local = WSAGetLastError();                                          \
-    (void)__output;                                                                \
-    if (!(success_cond)) {                                                         \
-      if (errno == EINTR) {                                                        \
-        continue;                                                                  \
-      } else if (errno_local == WSAETIMEDOUT || errno_local == WSAEWOULDBLOCK ) {  \
-        throw std::runtime_error("Socket Timeout");                                \
-      } else {                                                                     \
-        throw std::system_error(errno_local, std::system_category());              \
-      }                                                                            \
-    } else {                                                                       \
-      break;                                                                       \
-    }                                                                              \
+#define SYSCHECK(expr, success_cond)                                      \
+  while (true) {                                                          \
+    auto __output = (expr);                                               \
+    auto errno_local = WSAGetLastError();                                 \
+    (void)__output;                                                       \
+    if (!(success_cond)) {                                                \
+      if (errno == EINTR) {                                               \
+        continue;                                                         \
+      } else if (                                                         \
+          errno_local == WSAETIMEDOUT || errno_local == WSAEWOULDBLOCK) { \
+        TORCH_CHECK(false, "Socket Timeout");                       \
+      } else {                                                            \
+        throw std::system_error(errno_local, std::system_category());     \
+      }                                                                   \
+    } else {                                                              \
+      break;                                                              \
+    }                                                                     \
   }
 #else
 #define SYSCHECK(expr, success_cond)                            \
@@ -518,7 +521,7 @@ using SizeType = uint64_t;
       if (errno == EINTR) {                                     \
         continue;                                               \
       } else if (errno == EAGAIN || errno == EWOULDBLOCK) {     \
-        throw std::runtime_error("Socket Timeout");             \
+        TORCH_CHECK(false, "Socket Timeout");             \
       } else {                                                  \
         throw std::system_error(errno, std::system_category()); \
       }                                                         \
@@ -582,10 +585,16 @@ void sendBytes(
   }
 #endif
 
+// Ignore SIGPIPE as the send() return value is always checked for error
+#ifdef MSG_NOSIGNAL
+  flags |= MSG_NOSIGNAL;
+#endif
+
   while (bytesToSend > 0) {
     ssize_t bytesSent;
     SYSCHECK_ERR_RETURN_NEG1(
-        bytesSent = ::send(socket, (const char*)currentBytes, bytesToSend, flags))
+        bytesSent =
+            ::send(socket, (const char*)currentBytes, bytesToSend, flags))
     if (bytesSent == 0) {
       throw std::system_error(ECONNRESET, std::system_category());
     }

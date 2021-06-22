@@ -58,6 +58,17 @@ struct SchemaParser {
             idx++, /*is_return=*/false, /*kwarg_only=*/kwarg_only));
       }
     });
+
+    // check if all arguments are not-default for vararg schemas
+    if (is_vararg) {
+      for (const auto& arg : arguments) {
+        if (arg.default_value().has_value()) {
+          throw ErrorReport(L.cur())
+              << "schemas with vararg (...) can't have default value args";
+        }
+      }
+    }
+
     idx = 0;
     L.expect(TK_ARROW);
     if (L.nextIf(TK_DOTS)) {
@@ -79,6 +90,7 @@ struct SchemaParser {
       returns.push_back(
           parseArgument(0, /*is_return=*/true, /*kwarg_only=*/false));
     }
+
     return make_right<OperatorName, FunctionSchema>(
         std::move(name.name),
         std::move(name.overload_name),

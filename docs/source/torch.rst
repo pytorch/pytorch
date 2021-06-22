@@ -19,6 +19,7 @@ Tensors
     is_tensor
     is_storage
     is_complex
+    is_conj
     is_floating_point
     is_nonzero
     set_default_dtype
@@ -31,7 +32,7 @@ Tensors
 .. _tensor-creation-ops:
 
 Creation Ops
-~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~
 
 .. note::
     Random sampling creation ops are listed under :ref:`random-sampling` and
@@ -77,6 +78,8 @@ Creation Ops
     polar
     heaviside
 
+.. _indexing-slicing-joining:
+
 Indexing, Slicing, Joining, Mutating Ops
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 .. autosummary::
@@ -84,10 +87,13 @@ Indexing, Slicing, Joining, Mutating Ops
     :nosignatures:
 
     cat
+    conj
     chunk
+    dsplit
     column_stack
     dstack
     gather
+    hsplit
     hstack
     index_select
     masked_select
@@ -112,6 +118,7 @@ Indexing, Slicing, Joining, Mutating Ops
     transpose
     unbind
     unsqueeze
+    vsplit
     vstack
     where
 
@@ -248,6 +255,9 @@ Examples::
     no_grad
     enable_grad
     set_grad_enabled
+    is_grad_enabled
+    inference_mode
+    is_inference_mode_enabled
 
 Math operations
 ---------------
@@ -285,7 +295,7 @@ Pointwise Ops
     ceil
     clamp
     clip
-    conj
+    conj_physical
     copysign
     cos
     cosh
@@ -308,6 +318,7 @@ Pointwise Ops
     fmod
     frac
     frexp
+    gradient
     imag
     ldexp
     lerp
@@ -335,6 +346,7 @@ Pointwise Ops
     negative
     nextafter
     polygamma
+    positive
     pow
     rad2deg
     real
@@ -409,6 +421,7 @@ Comparison Ops
     greater
     isclose
     isfinite
+    isin
     isinf
     isposinf
     isneginf
@@ -501,6 +514,7 @@ Other Operations
     vander
     view_as_real
     view_as_complex
+    resolve_conj
 
 
 BLAS and LAPACK Operations

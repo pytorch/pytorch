@@ -152,7 +152,11 @@ class TORCH_CUDA_CPP_API FilterDescriptor : public Descriptor<
                                                &cudnnCreateFilterDescriptor,
                                                &cudnnDestroyFilterDescriptor> {
  public:
-  void set(const at::Tensor &t, int64_t pad = 0, bool force_nhwc = false);
+  void set(const at::Tensor &t, int64_t pad = 0) {
+    set(t, at::MemoryFormat::Contiguous, pad);
+  }
+
+  void set(const at::Tensor &t, const at::MemoryFormat memory_format, int64_t pad = 0);
 
   void print();
 private:

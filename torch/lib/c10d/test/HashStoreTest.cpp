@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <c10d/test/StoreTestCommon.hpp>
 
 #include <unistd.h>
@@ -23,8 +24,7 @@ void testGetSet(std::string prefix = "") {
     c10d::test::check(store, "key2", "value2");
 
     // Check compareSet, does not check return value
-    c10d::test::compareSet(
-        store, "key0", "wrongCurrentValue", "newValue");
+    c10d::test::compareSet(store, "key0", "wrongExpectedValue", "newValue");
     c10d::test::check(store, "key0", "value0");
     c10d::test::compareSet(store, "key0", "value0", "newValue");
     c10d::test::check(store, "key0", "newValue");
@@ -62,11 +62,11 @@ void stressTestStore(std::string prefix = "") {
   auto hashStore = c10::make_intrusive<c10d::HashStore>();
   c10d::PrefixStore store(prefix, hashStore);
 
-  for (auto i = 0; i < numThreads; i++) {
+  for (const auto i : c10::irange(numThreads)) {
     threads.push_back(std::thread([&] {
       sem1.post();
       sem2.wait();
-      for (auto j = 0; j < numIterations; j++) {
+      for (const auto j : c10::irange(numIterations)) {
         store.add("counter", 1);
       }
     }));

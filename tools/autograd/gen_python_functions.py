@@ -39,20 +39,26 @@ from .gen_trace_type import should_trace
 
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.api import cpp
-from tools.codegen.api.types import *
-from tools.codegen.api.python import *
+from tools.codegen.api.types import CppSignatureGroup
+from tools.codegen.api.python import (PythonArgument, PythonSignature,
+                                      PythonSignatureDeprecated,
+                                      PythonSignatureGroup,
+                                      PythonSignatureNativeFunctionPair,
+                                      arg_parser_output_exprs,
+                                      argument_type_str, cpp_dispatch_exprs,
+                                      cpp_dispatch_target,
+                                      dispatch_lambda_args,
+                                      dispatch_lambda_exprs,
+                                      dispatch_lambda_return_str,
+                                      has_tensor_options,
+                                      namedtuple_fieldnames, signature)
 from tools.codegen.gen import cpp_string, parse_native_yaml, FileManager
 from tools.codegen.context import with_native_function
-from tools.codegen.model import *
-from tools.codegen.utils import *
+from tools.codegen.model import (Argument, BaseOperatorName, NativeFunction,
+                                 Type, Variant)
+from tools.codegen.utils import split_name_params, YamlLoader
 
 from typing import Dict, Optional, List, Tuple, Set, Sequence, Callable
-
-try:
-    # use faster C loader if available
-    from yaml import CSafeLoader as Loader
-except ImportError:
-    from yaml import SafeLoader as Loader  # type: ignore
 
 #
 # declarations blocklist
@@ -63,11 +69,12 @@ except ImportError:
 #
 
 # These functions require manual Python bindings or are not exposed to Python
-SKIP_PYTHON_BINDINGS = [
-    'alias', 'contiguous', 'is_cuda', 'is_sparse', 'size', 'stride',
+_SKIP_PYTHON_BINDINGS = [
+    'alias', 'contiguous', 'is_cuda', 'is_sparse', 'is_sparse_csr', 'size', 'stride',
     '.*_backward', '.*_backward_(out|input|weight|bias)', '.*_forward',
     '.*_forward_out', '_unsafe_view', 'tensor', '_?sparse_coo_tensor.*',
-    '_arange.*', '_range.*', '_linspace.*', '_logspace.*',
+    '_?sparse_csr_tensor.*',
+    '_arange.*', '_range.*', 'linspace.*', 'logspace.*',
     '_sparse_add_out', '_sparse_div.*', '_sparse_mul.*', '_sparse_sub.*', '_sparse_dense_add_out',
     'index', 'unique_dim_consecutive',
     '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*',
@@ -82,32 +89,36 @@ SKIP_PYTHON_BINDINGS = [
     'nonzero(_(out|numpy))?',
     'set_data',
     '.*_overrideable',  # overrideable functions for backend extension
-    'data', 'is_leaf', 'output_nr', '_version', 'requires_grad_', 'retain_grad', 'set_',
+    'data', 'is_leaf', 'output_nr', '_version', 'requires_grad_', 'retains_grad', 'set_',
     '_fw_primal', 'fake_quantize_per_tensor_affine_cachemask',
     'fake_quantize_per_channel_affine_cachemask',
 ]
 
+SKIP_PYTHON_BINDINGS = list(map(lambda pattern: re.compile(rf'^{pattern}$'), _SKIP_PYTHON_BINDINGS))
+
 # These function signatures are not exposed to Python. Note that this signature
 # list does not support regex.
 SKIP_PYTHON_BINDINGS_SIGNATURES = [
-    'add(Tensor, Scalar, Scalar)', 'add_(Tensor, Scalar, Scalar)',
-    'sub(Tensor, Scalar, Scalar)', 'sub_(Tensor, Scalar, Scalar)',
-    'mul(Tensor, Scalar)', 'mul_(Tensor, Scalar)',
-    'div(Tensor, Scalar)', 'div_(Tensor, Scalar)',
+    'add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor',
+    'add_.Scalar(Tensor(a!) self, Scalar other, Scalar alpha=1) -> Tensor(a!)',
+    'sub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor',
+    'sub_.Scalar(Tensor(a!) self, Scalar other, Scalar alpha=1) -> Tensor(a!)',
+    'mul.Scalar(Tensor self, Scalar other) -> Tensor',
+    'mul_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)',
+    'div.Scalar(Tensor self, Scalar other) -> Tensor',
+    'div_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)',
 ]
 
 @with_native_function
 def should_generate_py_binding(f: NativeFunction) -> bool:
     name = cpp.name(f.func)
-    for pattern in SKIP_PYTHON_BINDINGS:
-        if re.match('^' + pattern + '$', name):
+    for skip_regex in SKIP_PYTHON_BINDINGS:
+        if skip_regex.match(name):
             return False
 
-    args = ', '.join(argument_type_str(arg.type)
-                     for arg in signature(f).arguments())
-    sig = f'{name}({args})'
+    signature = str(f.func)
     for pattern in SKIP_PYTHON_BINDINGS_SIGNATURES:
-        if pattern == sig:
+        if pattern == signature:
             return False
 
     return True
@@ -144,12 +155,14 @@ def is_py_special_function(f: NativeFunction) -> bool:
 
 def gen(out: str, native_yaml_path: str, deprecated_yaml_path: str, template_path: str) -> None:
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
+    native_functions = parse_native_yaml(native_yaml_path).native_functions
+    native_functions = list(filter(should_generate_py_binding, native_functions))
 
-    methods = load_signatures(native_yaml_path, deprecated_yaml_path, method=True)
+    methods = load_signatures(native_functions, deprecated_yaml_path, method=True)
     create_python_bindings(
         fm, methods, is_py_variable_method, None, 'python_variable_methods.cpp', method=True)
 
-    functions = load_signatures(native_yaml_path, deprecated_yaml_path, method=False)
+    functions = load_signatures(native_functions, deprecated_yaml_path, method=False)
     create_python_bindings(
         fm, functions, is_py_torch_function, 'torch', 'python_torch_functions.cpp', method=False)
 
@@ -198,14 +211,13 @@ def create_python_bindings(
     })
 
 def load_signatures(
-    native_yaml_path: str,
+    native_functions: List[NativeFunction],
     deprecated_yaml_path: str,
     *,
     method: bool,
     skip_deprecated: bool = False,
     pyi: bool = False,
 ) -> Sequence[PythonSignatureNativeFunctionPair]:
-    native_functions = list(filter(should_generate_py_binding, parse_native_yaml(native_yaml_path)))
 
     @with_native_function
     def gen_signature_pairs(f: NativeFunction) -> PythonSignatureNativeFunctionPair:
@@ -268,7 +280,7 @@ def load_deprecated_signatures(
     results: List[PythonSignatureNativeFunctionPair] = []
 
     with open(deprecated_yaml_path, 'r') as f:
-        deprecated_defs = yaml.load(f, Loader=Loader)
+        deprecated_defs = yaml.load(f, Loader=YamlLoader)
 
     for deprecated in deprecated_defs:
         _, params = split_name_params(deprecated['name'])
@@ -472,7 +484,7 @@ def method_impl(
     method_header = ['HANDLE_TH_ERRORS']
     method_header += namedtuple_inits
     method_header += [
-        "Tensor& self = reinterpret_cast<THPVariable*>(self_)->cdata;"
+        "const Tensor& self = THPVariable_Unpack(self_);"
     ] if method else []
 
     method_footer = ([] if noarg else ['Py_RETURN_NONE;']) + ['END_HANDLE_TH_ERRORS']
@@ -747,7 +759,14 @@ def sort_overloads(
 
     def is_arg_smaller(t1: Type, t2: Type) -> bool:
         return (str(t1) == 'Scalar' and str(t2) == 'Tensor' or
-                'Dimname' in str(t1) and 'Dimname' not in str(t2))
+                'Dimname' in str(t1) and 'Dimname' not in str(t2) or
+                # In the discussion https://github.com/pytorch/pytorch/issues/54555 it has been
+                # discussed why it is important to prioritize int/int? over int[]
+                str(t1) == 'int[]' and (str(t2) == 'int' or str(t2) == 'int?') or
+                # TensorList currently throws an error during argument parsing, that's why it needs to be
+                # last in signature ordering. See discussion: https://github.com/pytorch/pytorch/issues/58087
+                str(t1) == 'Tensor[]' and str(t2).find("[]") != -1)
+
 
     def is_smaller(s1: PythonSignature, s2: PythonSignature) -> bool:
         """Returns True if s1 < s2 in the partial order."""

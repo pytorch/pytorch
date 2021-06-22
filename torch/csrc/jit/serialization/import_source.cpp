@@ -69,6 +69,7 @@ struct ConstantTableValue : public SugaredValue {
       Function& m,
       const std::string& field) override {
     const char* field_s = field.c_str();
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     char* end;
     int64_t offset = strtoll(field_s + 1, &end, 10);
     if (field.size() < 2 || *end != 0)

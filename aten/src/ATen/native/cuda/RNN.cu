@@ -501,7 +501,8 @@ std::tuple<Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_cuda(
       const Tensor& input_gates, const Tensor& hidden_gates,
       const Tensor& cx, const c10::optional<Tensor>& input_bias_opt, const c10::optional<Tensor>& hidden_bias_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& input_bias = c10::value_or_else(input_bias_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> input_bias_maybe_owned = at::borrow_from_optional_tensor(input_bias_opt);
+  const Tensor& input_bias = *input_bias_maybe_owned;
   const Tensor& hidden_bias = c10::value_or_else(hidden_bias_opt, [] {return Tensor();});
 
   checkSizes("_thnn_fused_lstm_cell_cuda",
@@ -545,7 +546,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backwar
       const Tensor& cx, const Tensor& cy,
       const Tensor& workspace, bool has_bias) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& grad_hy = c10::value_or_else(grad_hy_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> grad_hy_maybe_owned = at::borrow_from_optional_tensor(grad_hy_opt);
+  const Tensor& grad_hy = *grad_hy_maybe_owned;
   const Tensor& grad_cy = c10::value_or_else(grad_cy_opt, [] {return Tensor();});
 
   if (!grad_hy.defined() && !grad_cy.defined()) {
@@ -575,7 +577,8 @@ std::tuple<Tensor, Tensor> _thnn_fused_gru_cell_cuda(
       const Tensor& input_gates, const Tensor& hidden_gates,
       const Tensor& hx, const c10::optional<Tensor>& input_bias_opt, const c10::optional<Tensor>& hidden_bias_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& input_bias = c10::value_or_else(input_bias_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> input_bias_maybe_owned = at::borrow_from_optional_tensor(input_bias_opt);
+  const Tensor& input_bias = *input_bias_maybe_owned;
   const Tensor& hidden_bias = c10::value_or_else(hidden_bias_opt, [] {return Tensor();});
 
   checkSizes("_thnn_fused_gru_cell_cuda",

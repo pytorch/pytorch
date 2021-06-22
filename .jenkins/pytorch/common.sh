@@ -29,7 +29,10 @@ fi
 # system; to find out more, grep for this string in ossci-job-dsl.
 echo "ENTERED_USER_LAND"
 
-export IS_PYTORCH_CI=1
+# Previously IN_CI is only set in .circleci/scripts/setup_ci_environment.sh,
+# this means other CI system doesn't actually have this flag properly set.
+# Now we explicitly export IN_CI environment variable here.
+export IN_CI=1
 
 # compositional trap taken from https://stackoverflow.com/a/7287873/23845
 
@@ -70,9 +73,18 @@ trap_add cleanup EXIT
 if [[ "$BUILD_ENVIRONMENT" != *pytorch-win-* ]]; then
   if which sccache > /dev/null; then
     # Save sccache logs to file
-    sccache --stop-server || true
+    sccache --stop-server > /dev/null  2>&1 || true
     rm ~/sccache_error.log || true
-    if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
+    if [[ -n "${SKIP_SCCACHE_INITIALIZATION:-}" ]]; then
+      # sccache --start-server seems to hang forever on self hosted runners for GHA
+      # so let's just go ahead and skip the --start-server altogether since it seems
+      # as though sccache still gets used even when the sscache server isn't started
+      # explicitly
+      echo "Skipping sccache server initialization, setting environment variables"
+      export SCCACHE_IDLE_TIMEOUT=1200
+      export SCCACHE_ERROR_LOG=~/sccache_error.log
+      export RUST_LOG=sccache::server=error
+    elif [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
       SCCACHE_ERROR_LOG=~/sccache_error.log SCCACHE_IDLE_TIMEOUT=0 sccache --start-server
     else
       # increasing SCCACHE_IDLE_TIMEOUT so that extension_backend_test.cpp can build after this PR:

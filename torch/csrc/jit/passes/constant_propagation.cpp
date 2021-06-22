@@ -86,7 +86,7 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
 
   for (const IValue& v : stack) {
     if (v.isTensor()) {
-      at::Tensor t = v.toTensor();
+      const at::Tensor& t = v.toTensor();
       if (t.defined() && t.requires_grad()) {
         // requires grad tensors cannot be constants
         return c10::nullopt;
@@ -104,6 +104,7 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
 
 namespace {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::unordered_set<Symbol> skip_list = {
     prim::If,
     prim::Loop,
@@ -334,6 +335,7 @@ struct ConstantPropagator {
   }
 
   bool supportedNode(Node* n) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     bool no_mutation;
     if (aliasing_types_) {
       no_mutation = !getOrCreateAliasDb()->hasWriters(n);

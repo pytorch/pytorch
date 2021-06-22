@@ -12,12 +12,14 @@
   ASSERT_EQ(tensor.dtype(), (type_));                                      \
   ASSERT_TRUE(tensor.layout() == (layout_))
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorTest, AllocatesTensorOnTheCorrectDevice_MultiCUDA) {
   auto tensor = at::tensor({1, 2, 3}, at::device({at::kCUDA, 1}));
   ASSERT_EQ(tensor.device().type(), at::Device::Type::CUDA);
   ASSERT_EQ(tensor.device().index(), 1);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorTest, ToDevice_MultiCUDA) {
   auto tensor = at::empty({3, 4});
   REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kFloat, at::kStrided);
@@ -59,6 +61,7 @@ TEST(TensorTest, ToDevice_MultiCUDA) {
   REQUIRE_TENSOR_OPTIONS(at::kCUDA, 0, at::kInt, at::kStrided);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorTest, ToTensorAndTensorAttributes_MultiCUDA) {
   auto tensor = at::empty({3, 4});
   REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kFloat, at::kStrided);
@@ -83,6 +86,7 @@ TEST(TensorTest, ToTensorAndTensorAttributes_MultiCUDA) {
 }
 
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorTest, ToDoesNotCopyWhenOptionsAreAllTheSame_CUDA) {
   auto tensor = at::empty({3, 4}, at::TensorOptions(at::kFloat).device(at::Device("cuda")));
   auto hopefully_not_copy = tensor.to(tensor.options());
@@ -97,6 +101,7 @@ TEST(TensorTest, ToDoesNotCopyWhenOptionsAreAllTheSame_CUDA) {
   ASSERT_EQ(hopefully_not_copy.data_ptr<float>(), tensor.data_ptr<float>());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorTest, ToDeviceAndDtype_MultiCUDA) {
   auto tensor = at::empty({3, 4});
   REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kFloat, at::kStrided);
@@ -114,8 +119,10 @@ TEST(TensorTest, ToDeviceAndDtype_MultiCUDA) {
   REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kInt, at::kStrided);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorTest, MagmaInitializesCorrectly_CUDA) {
   // Any tensor will work here as long as it's invertible
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   float data[] = { 1, 1, 1, 0,
                    0, 3, 1, 2,
                    2, 3, 1, 0,

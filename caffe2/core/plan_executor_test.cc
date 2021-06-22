@@ -7,6 +7,7 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PlanExecutorTest, EmptyPlan) {
   PlanDef plan_def;
   Workspace ws;
@@ -14,7 +15,9 @@ TEST(PlanExecutorTest, EmptyPlan) {
 }
 
 namespace {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<int> cancelCount{0};
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<bool> stuckRun{false};
 } // namespace
 
@@ -44,7 +47,9 @@ class StuckBlockingOp final : public Operator<CPUContext> {
   std::atomic<bool> cancelled_{false};
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(StuckBlocking, StuckBlockingOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(StuckBlocking).NumInputs(0).NumOutputs(0);
 
 class NoopOp final : public Operator<CPUContext> {
@@ -59,7 +64,9 @@ class NoopOp final : public Operator<CPUContext> {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Noop, NoopOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Noop).NumInputs(0).NumOutputs(0);
 
 
@@ -85,7 +92,9 @@ class StuckAsyncOp final : public Operator<CPUContext> {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(StuckAsync, StuckAsyncOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(StuckAsync).NumInputs(0).NumOutputs(0);
 
 class TestError : public std::exception {
@@ -109,9 +118,12 @@ class ErrorOp final : public Operator<CPUContext> {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Error, ErrorOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Error).NumInputs(0).NumOutputs(0);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<int> blockingErrorRuns{0};
 class BlockingErrorOp final : public Operator<CPUContext> {
  public:
@@ -132,7 +144,9 @@ class BlockingErrorOp final : public Operator<CPUContext> {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(BlockingError, BlockingErrorOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(BlockingError).NumInputs(0).NumOutputs(0);
 
 PlanDef parallelErrorPlan() {
@@ -260,6 +274,7 @@ struct HandleExecutorThreadExceptionsGuard {
   void globalInit(std::vector<std::string> args) {
     std::vector<char*> args_ptrs;
     for (auto& arg : args) {
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast,performance-inefficient-vector-operation)
       args_ptrs.push_back(const_cast<char*>(arg.data()));
     }
     char** new_argv = args_ptrs.data();
@@ -268,18 +283,21 @@ struct HandleExecutorThreadExceptionsGuard {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PlanExecutorTest, ErrorAsyncPlan) {
   HandleExecutorThreadExceptionsGuard guard;
 
   cancelCount = 0;
   PlanDef plan_def = parallelErrorPlan();
   Workspace ws;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(ws.RunPlan(plan_def), TestError);
   ASSERT_EQ(cancelCount, 1);
 }
 
 // death tests not supported on mobile
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PlanExecutorTest, BlockingErrorPlan) {
   // TSAN doesn't play nicely with death tests
 #if defined(__has_feature)
@@ -288,6 +306,7 @@ TEST(PlanExecutorTest, BlockingErrorPlan) {
 #endif
 #endif
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_DEATH(
       [] {
         HandleExecutorThreadExceptionsGuard guard(/*timeout=*/1);
@@ -320,6 +339,7 @@ TEST(PlanExecutorTest, BlockingErrorPlan) {
 }
 #endif
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PlanExecutorTest, ErrorPlanWithCancellableStuckNet) {
   HandleExecutorThreadExceptionsGuard guard;
 
@@ -327,10 +347,12 @@ TEST(PlanExecutorTest, ErrorPlanWithCancellableStuckNet) {
   PlanDef plan_def = parallelErrorPlanWithCancellableStuckNet();
   Workspace ws;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(ws.RunPlan(plan_def), TestError);
   ASSERT_EQ(cancelCount, 1);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PlanExecutorTest, ReporterErrorPlanWithCancellableStuckNet) {
   HandleExecutorThreadExceptionsGuard guard;
 
@@ -338,6 +360,7 @@ TEST(PlanExecutorTest, ReporterErrorPlanWithCancellableStuckNet) {
   PlanDef plan_def = reporterErrorPlanWithCancellableStuckNet();
   Workspace ws;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(ws.RunPlan(plan_def), TestError);
   ASSERT_EQ(cancelCount, 1);
 }
@@ -384,6 +407,7 @@ PlanDef shouldStopWithCancelPlan() {
   return plan_def;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PlanExecutorTest, ShouldStopWithCancel) {
   HandleExecutorThreadExceptionsGuard guard;
 
@@ -397,6 +421,7 @@ TEST(PlanExecutorTest, ShouldStopWithCancel) {
   tensor->Resize(shape);
   tensor->mutable_data<bool>()[0] = false;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(ws.RunPlan(plan_def), TestError);
   ASSERT_TRUE(stuckRun);
 }

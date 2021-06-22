@@ -220,23 +220,31 @@ static inline double zeta(double x, double q) {
   return s;
 }
 
-static inline double polevl(double x, double *A, size_t len) {
-  double result = 0;
+/*
+ * This function is derived from the implementation of the digamma function in the Cephes Math Library.
+ * See note [3-Clause BSD License for the Cephes Math Library].
+ *
+ * Evaluates polynomial of degree N:
+ *
+ *                     2          N
+ * y  =  C  + C x + C x  +...+ C x
+ *        0    1     2          N
+ *
+ * Coefficients are stored in reverse order:
+ *
+ * coef[0] = C  , ..., coef[N] = C  .
+ *            N                   0
+ */
+template <typename T>
+C10_HOST_DEVICE static inline T polevl(const T x, const T A[], size_t len) {
+  T result = 0;
   for (size_t i = 0; i <= len; i++) {
     result = result * x + A[i];
   }
   return result;
 }
 
-static inline float polevlf(float x, float *A, size_t len) {
-  float result = 0;
-  for (size_t i = 0; i <= len; i++) {
-    result = result * x + A[i];
-  }
-  return result;
-}
-
-static inline double trigamma(double x) {
+static inline double trigamma(double x) __ubsan_ignore_float_divide_by_zero__ {
   double sign = +1;
   double result = 0;
   if (x < 0.5) {
@@ -254,7 +262,7 @@ static inline double trigamma(double x) {
   return sign * result;
 }
 
-static inline float trigamma(float x) {
+static inline float trigamma(float x) __ubsan_ignore_float_divide_by_zero__ {
   float sign = +1;
   float result = 0;
   if (x < 0.5f) {
@@ -292,7 +300,13 @@ static inline double calc_digamma(double x) {
       // If the argument is a negative integer, NaN is returned
       return std::numeric_limits<double>::quiet_NaN();
     }
-    return calc_digamma(1 - x) - c10::pi<double> / tan(c10::pi<double> * x);
+    // Extracts the fractional part of x as r, since tan(pi * r) is more numerically
+    // accurate than tan(pi * x). While these operations are mathematically equivalent
+    // since both x and r are in radians and tan() has a periodicity of pi, in practice
+    // the computation of pi * x is a source of error (when |x| > 1).
+    double q, r;
+    r = std::modf(x, &q);
+    return calc_digamma(1 - x) - c10::pi<double> / tan(c10::pi<double> * r);
   }
 
   // Push x to be >= 10
@@ -306,7 +320,7 @@ static inline double calc_digamma(double x) {
   }
 
   // Compute asymptotic digamma
-  static double A[] = {
+  static const double A[] = {
       8.33333333333333333333E-2,
       -2.10927960927960927961E-2,
       7.57575757575757575758E-3,
@@ -344,9 +358,13 @@ static inline float calc_digamma(float x) {
     // If the argument is a negative integer, NaN is returned
       return std::numeric_limits<float>::quiet_NaN();
     }
-    // Avoid rounding errors for `tan`'s input.
-    // Those make a big difference at extreme values.
-    float pi_over_tan_pi_x = (float)(c10::pi<double> / tan(c10::pi<double> * (double)x));
+    // Extracts the fractional part of x as r, since tan(pi * r) is more numerically
+    // accurate than tan(pi * x). While these operations are mathematically equivalent
+    // since both x and r are in radians and tan() has a periodicity of pi, in practice
+    // the computation of pi * x is a source of error (when |x| > 1).
+    double q, r;
+    r = std::modf(x, &q);
+    float pi_over_tan_pi_x = (float)(c10::pi<double> / tan(c10::pi<double> * r));
     return calc_digamma(1 - x) - pi_over_tan_pi_x;
   }
 
@@ -361,7 +379,7 @@ static inline float calc_digamma(float x) {
   }
 
   // Compute asymptotic digamma
-  static float A[] = {
+  static const float A[] = {
       8.33333333333333333333E-2f,
       -2.10927960927960927961E-2f,
       7.57575757575757575758E-3f,
@@ -374,7 +392,7 @@ static inline float calc_digamma(float x) {
   float y = 0;
   if (x < 1.0e17f) {
     float z = 1 / (x * x);
-    y = z * polevlf(z, A, 6);
+    y = z * polevl(z, A, 6);
   }
   return result + logf(x) - (0.5f / x) - y;
 }
@@ -1161,13 +1179,13 @@ calc_gcd(T a, T b) {
  */
 template <typename T>
 static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
- chbevl(T x, T array[], size_t len) {
+chbevl(const T x, const T array[], size_t len) {
   T b0, b1, b2;
 
   b0 = array[0];
   b1 = static_cast<T>(0.0);
 
-  for (size_t i = 1; i < len; ++i)  {
+  for (size_t i = 1; i < len; ++i) {
     b2 = b1;
     b1 = b0;
     b0 = x * b1 - b2 + array[i];
@@ -1186,87 +1204,400 @@ static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
  * of all inputs to convert them into the domain of the approximation.
  */
 template <typename T>
-static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
-calc_i0(T _x) {
-  T x = std::abs(_x);
+static inline std::tuple<const T*, size_t> chebyshev_coefficients_i0e_A() {
   /* Chebyshev coefficients for exp(-x) I0(x)
    * in the interval [0,8].
    *
    * lim(x->0){ exp(-x) I0(x) } = 1.
    */
-  static T A[] = {
-    -4.41534164647933937950E-18,
-    3.33079451882223809783E-17,
-    -2.43127984654795469359E-16,
-    1.71539128555513303061E-15,
-    -1.16853328779934516808E-14,
-    7.67618549860493561688E-14,
-    -4.85644678311192946090E-13,
-    2.95505266312963983461E-12,
-    -1.72682629144155570723E-11,
-    9.67580903537323691224E-11,
-    -5.18979560163526290666E-10,
-    2.65982372468238665035E-9,
-    -1.30002500998624804212E-8,
-    6.04699502254191894932E-8,
-    -2.67079385394061173391E-7,
-    1.11738753912010371815E-6,
-    -4.41673835845875056359E-6,
-    1.64484480707288970893E-5,
-    -5.75419501008210370398E-5,
-    1.88502885095841655729E-4,
-    -5.76375574538582365885E-4,
-    1.63947561694133579842E-3,
-    -4.32430999505057594430E-3,
-    1.05464603945949983183E-2,
-    -2.37374148058994688156E-2,
-    4.93052842396707084878E-2,
-    -9.49010970480476444210E-2,
-    1.71620901522208775349E-1,
-    -3.04682672343198398683E-1,
-    6.76795274409476084995E-1
-  };
+  static const T coeff[] = {
+      -4.41534164647933937950E-18, 3.33079451882223809783E-17,
+      -2.43127984654795469359E-16, 1.71539128555513303061E-15,
+      -1.16853328779934516808E-14, 7.67618549860493561688E-14,
+      -4.85644678311192946090E-13, 2.95505266312963983461E-12,
+      -1.72682629144155570723E-11, 9.67580903537323691224E-11,
+      -5.18979560163526290666E-10, 2.65982372468238665035E-9,
+      -1.30002500998624804212E-8,  6.04699502254191894932E-8,
+      -2.67079385394061173391E-7,  1.11738753912010371815E-6,
+      -4.41673835845875056359E-6,  1.64484480707288970893E-5,
+      -5.75419501008210370398E-5,  1.88502885095841655729E-4,
+      -5.76375574538582365885E-4,  1.63947561694133579842E-3,
+      -4.32430999505057594430E-3,  1.05464603945949983183E-2,
+      -2.37374148058994688156E-2,  4.93052842396707084878E-2,
+      -9.49010970480476444210E-2,  1.71620901522208775349E-1,
+      -3.04682672343198398683E-1,  6.76795274409476084995E-1};
+  return std::make_tuple(coeff, 30);
+};
 
+template <typename T>
+static inline std::tuple<const T*, size_t> chebyshev_coefficients_i0e_B() {
   /* Chebyshev coefficients for exp(-x) sqrt(x) I0(x)
    * in the inverted interval [8,infinity].
    *
    * lim(x->inf){ exp(-x) sqrt(x) I0(x) } = 1/sqrt(2pi).
    */
-  static T B[] = {
-    -7.23318048787475395456E-18,
-    -4.83050448594418207126E-18,
-    4.46562142029675999901E-17,
-    3.46122286769746109310E-17,
-    -2.82762398051658348494E-16,
-    -3.42548561967721913462E-16,
-    1.77256013305652638360E-15,
-    3.81168066935262242075E-15,
-    -9.55484669882830764870E-15,
-    -4.15056934728722208663E-14,
-    1.54008621752140982691E-14,
-    3.85277838274214270114E-13,
-    7.18012445138366623367E-13,
-    -1.79417853150680611778E-12,
-    -1.32158118404477131188E-11,
-    -3.14991652796324136454E-11,
-    1.18891471078464383424E-11,
-    4.94060238822496958910E-10,
-    3.39623202570838634515E-9,
-    2.26666899049817806459E-8,
-    2.04891858946906374183E-7,
-    2.89137052083475648297E-6,
-    6.88975834691682398426E-5,
-    3.36911647825569408990E-3,
-    8.04490411014108831608E-1
-  };
+  static const T coeff[] = {
+      -7.23318048787475395456E-18, -4.83050448594418207126E-18,
+      4.46562142029675999901E-17,  3.46122286769746109310E-17,
+      -2.82762398051658348494E-16, -3.42548561967721913462E-16,
+      1.77256013305652638360E-15,  3.81168066935262242075E-15,
+      -9.55484669882830764870E-15, -4.15056934728722208663E-14,
+      1.54008621752140982691E-14,  3.85277838274214270114E-13,
+      7.18012445138366623367E-13,  -1.79417853150680611778E-12,
+      -1.32158118404477131188E-11, -3.14991652796324136454E-11,
+      1.18891471078464383424E-11,  4.94060238822496958910E-10,
+      3.39623202570838634515E-9,   2.26666899049817806459E-8,
+      2.04891858946906374183E-7,   2.89137052083475648297E-6,
+      6.88975834691682398426E-5,   3.36911647825569408990E-3,
+      8.04490411014108831608E-1};
+
+  return std::make_tuple(coeff, 25);
+};
+
+template <typename T>
+static inline typename std::enable_if<std::is_same<double, T>::value, std::tuple<const T*, size_t>>::type
+chebyshev_coefficients_i1e_A() {
+  /* Chebyshev coefficients for exp(-x) I1(x)
+   * in the interval [0,8].
+   *
+   * lim(x->0){ exp(-x) I1(x) / x } = 1/2.
+   */
+  static const T coeff[] = {
+      2.77791411276104639959E-18, -2.11142121435816608115E-17,
+      1.55363195773620046921E-16, -1.10559694773538630805E-15,
+      7.60068429473540693410E-15, -5.04218550472791168711E-14,
+      3.22379336594557470981E-13, -1.98397439776494371520E-12,
+      1.17361862988909016308E-11, -6.66348972350202774223E-11,
+      3.62559028155211703701E-10, -1.88724975172282928790E-9,
+      9.38153738649577178388E-9,  -4.44505912879632808065E-8,
+      2.00329475355213526229E-7,  -8.56872026469545474066E-7,
+      3.47025130813767847674E-6,  -1.32731636560394358279E-5,
+      4.78156510755005422638E-5,  -1.61760815825896745588E-4,
+      5.12285956168575772895E-4,  -1.51357245063125314899E-3,
+      4.15642294431288815669E-3,  -1.05640848946261981558E-2,
+      2.47264490306265168283E-2,  -5.29459812080949914269E-2,
+      1.02643658689847095384E-1,  -1.76416518357834055153E-1,
+      2.52587186443633654823E-1};
+  return std::make_tuple(coeff, 29);
+};
+
+template <typename T>
+static inline typename std::enable_if<std::is_same<float, T>::value, std::tuple<const T*, size_t>>::type
+chebyshev_coefficients_i1e_A() {
+  /* Chebyshev coefficients for exp(-x) I1(x)
+   * in the interval [0,8].
+   *
+   * lim(x->0){ exp(-x) I1(x) / x } = 1/2.
+   */
+  static const T coeff[] = {
+      9.38153738649577178388E-9f,
+      -4.44505912879632808065E-8f,
+      2.00329475355213526229E-7f,
+      -8.56872026469545474066E-7f,
+      3.47025130813767847674E-6f,
+      -1.32731636560394358279E-5f,
+      4.78156510755005422638E-5f,
+      -1.61760815825896745588E-4f,
+      5.12285956168575772895E-4f,
+      -1.51357245063125314899E-3f,
+      4.15642294431288815669E-3f,
+      -1.05640848946261981558E-2f,
+      2.47264490306265168283E-2f,
+      -5.29459812080949914269E-2f,
+      1.02643658689847095384E-1f,
+      -1.76416518357834055153E-1f,
+      2.52587186443633654823E-1f};
+  return std::make_tuple(coeff, 17);
+};
+
+template <typename T>
+static inline typename std::enable_if<std::is_same<double, T>::value, std::tuple<const T*, size_t>>::type
+chebyshev_coefficients_i1e_B() {
+  /* Chebyshev coefficients for exp(-x) sqrt(x) I1(x)
+   * in the inverted interval [8,infinity].
+   *
+   * lim(x->inf){ exp(-x) sqrt(x) I1(x) } = 1/sqrt(2pi).
+   */
+  static const T coeff[] = {
+      7.51729631084210481353E-18,  4.41434832307170791151E-18,
+      -4.65030536848935832153E-17, -3.20952592199342395980E-17,
+      2.96262899764595013876E-16,  3.30820231092092828324E-16,
+      -1.88035477551078244854E-15, -3.81440307243700780478E-15,
+      1.04202769841288027642E-14,  4.27244001671195135429E-14,
+      -2.10154184277266431302E-14, -4.08355111109219731823E-13,
+      -7.19855177624590851209E-13, 2.03562854414708950722E-12,
+      1.41258074366137813316E-11,  3.25260358301548823856E-11,
+      -1.89749581235054123450E-11, -5.58974346219658380687E-10,
+      -3.83538038596423702205E-9,  -2.63146884688951950684E-8,
+      -2.51223623787020892529E-7,  -3.88256480887769039346E-6,
+      -1.10588938762623716291E-4,  -9.76109749136146840777E-3,
+      7.78576235018280120474E-1};
+
+  return std::make_tuple(coeff, 25);
+};
+
+template <typename T>
+static inline typename std::enable_if<std::is_same<float, T>::value, std::tuple<const T*, size_t>>::type
+chebyshev_coefficients_i1e_B() {
+  /* Chebyshev coefficients for exp(-x) sqrt(x) I1(x)
+   * in the inverted interval [8,infinity].
+   *
+   * lim(x->inf){ exp(-x) sqrt(x) I1(x) } = 1/sqrt(2pi).
+   */
+  static const T coeff[] = {
+      -3.83538038596423702205E-9f,
+      -2.63146884688951950684E-8f,
+      -2.51223623787020892529E-7f,
+      -3.88256480887769039346E-6f,
+      -1.10588938762623716291E-4f,
+      -9.76109749136146840777E-3f,
+      7.78576235018280120474E-1f};
+
+  return std::make_tuple(coeff, 7);
+};
+
+template <typename T>
+static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
+calc_i0(T _x) {
+  T x = std::abs(_x);
 
   if (x <= 8.0) {
+    auto coeff_pair = chebyshev_coefficients_i0e_A<T>();
+    auto A = std::get<0>(coeff_pair);
+    auto len = std::get<1>(coeff_pair);
     T y = (x / 2.0) - 2.0;
-    return static_cast<T>(std::exp(x) * chbevl(y, A, 30));
+    return static_cast<T>(std::exp(x) * chbevl(y, A, len));
   }
-
-  return static_cast<T>(std::exp(x) * chbevl(static_cast<T>(32.0 / x - 2.0), B, 25) / std::sqrt(x));
+  auto coeff_pair = chebyshev_coefficients_i0e_B<T>();
+  auto B = std::get<0>(coeff_pair);
+  auto len = std::get<1>(coeff_pair);
+  return static_cast<T>(
+      std::exp(x) * chbevl(static_cast<T>(32.0 / x - 2.0), B, len) / std::sqrt(x));
 }
 
 // Upcast bfloat16 input to float for numerical accuracy purposes
-inline c10::BFloat16 calc_i0(c10::BFloat16 a) { return calc_i0(static_cast<float>(a)); }
+static inline c10::BFloat16 calc_i0(c10::BFloat16 a) { return calc_i0(static_cast<float>(a)); }
+
+/*
+ * This function is derived from the implementation of the i0e function in the Cephes Math Library.
+ * See note [3-Clause BSD License for the Cephes Math Library].
+ *
+ * Computes an approximation of the exponentially scaled zeroth order modified Bessel function of the first kind.
+ * The approximation is actually two (sub)approximations, both using a Chebyshev polynomial expansion.
+ * One approximates the function over [0, 8], and the other over (8, infinity). This function takes the absolute value
+ * of all inputs to convert them into the domain of the approximation.
+ */
+template <typename T>
+static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
+calc_i0e(T _x) {
+  T x = std::abs(_x);
+
+  if (x <= 8.0) {
+    auto coeff_pair = chebyshev_coefficients_i0e_A<T>();
+    auto A = std::get<0>(coeff_pair);
+    auto len = std::get<1>(coeff_pair);
+    T y = (x / 2.0) - 2.0;
+    return static_cast<T>(chbevl(y, A, len));
+  }
+
+  auto coeff_pair = chebyshev_coefficients_i0e_B<T>();
+  auto B = std::get<0>(coeff_pair);
+  auto len = std::get<1>(coeff_pair);
+  return static_cast<T>(
+      chbevl(static_cast<T>(32.0 / x - 2.0), B, len) / std::sqrt(x));
+}
+
+// Upcast bfloat16 input to float for numerical accuracy purposes
+static inline c10::BFloat16 calc_i0e(c10::BFloat16 a) { return calc_i0e(static_cast<float>(a)); }
+
+/*
+ * This function is derived from the implementation of the i1 function in the Cephes Math Library.
+ * See note [3-Clause BSD License for the Cephes Math Library].
+ *
+ * Computes an approximation of the first order modified Bessel function of the first kind.
+ * The approximation is actually two (sub)approximations, both using a Chebyshev polynomial expansion.
+ * One approximates the function over [0, 8], and the other over (8, infinity). This function takes the absolute value
+ * of all inputs to convert them into the domain of the approximation.
+ */
+template <typename T>
+static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
+calc_i1(T _x) {
+  T x = std::abs(_x);
+
+  if (x <= 8.0) {
+    auto coeff_pair = chebyshev_coefficients_i1e_A<T>();
+    auto A = std::get<0>(coeff_pair);
+    auto len = std::get<1>(coeff_pair);
+    T y = (x / 2.0) - 2.0;
+    const T out = static_cast<T>(std::exp(x) * x * chbevl(y, A, len));
+    return (_x < 0.0) ? -out : out;
+  }
+  auto coeff_pair = chebyshev_coefficients_i1e_B<T>();
+  auto B = std::get<0>(coeff_pair);
+  auto len = std::get<1>(coeff_pair);
+  const auto out = static_cast<T>(
+      (std::exp(x) * chbevl(static_cast<T>(32.0 / x - 2.0), B, len)) / std::sqrt(x));
+  return (_x < 0.0) ? -out : out;
+}
+
+/*
+ * This function is derived from the implementation of the i1e function in the Cephes Math Library.
+ * See note [3-Clause BSD License for the Cephes Math Library].
+ *
+ * Computes an approximation of the exponentially scaled first order modified Bessel function of the first kind.
+ * The approximation is actually two (sub)approximations, both using a Chebyshev polynomial expansion.
+ * One approximates the function over [0, 8], and the other over (8, infinity). This function takes the absolute value
+ * of all inputs to convert them into the domain of the approximation.
+ */
+template <typename T>
+static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
+calc_i1e(T _x) {
+  T x = std::abs(_x);
+
+  if (x <= 8.0) {
+    auto coeff_pair = chebyshev_coefficients_i1e_A<T>();
+    auto A = std::get<0>(coeff_pair);
+    auto len = std::get<1>(coeff_pair);
+    T y = (x / 2.0) - 2.0;
+    const auto out = static_cast<T>(chbevl(y, A, len) * x);
+    return (_x < 0.0) ? -out : out;
+  }
+  auto coeff_pair = chebyshev_coefficients_i1e_B<T>();
+  auto B = std::get<0>(coeff_pair);
+  auto len = std::get<1>(coeff_pair);
+  const auto out =
+      static_cast<T>(chbevl(static_cast<T>(32.0 / x - 2.0), B, len) / std::sqrt(x));
+  return (_x < 0.0) ? -out : out;
+}
+
+/*
+ * This function is derived from the implementation of the i1e function in the Cephes Math Library.
+ * See note [3-Clause BSD License for the Cephes Math Library].
+ *
+ * Computes the argument, x, for which the area under the Gaussian probability density function
+ * (integrated from minus infinity to x) is equal to y.
+ */
+template <typename T>
+static inline C10_HOST_DEVICE T calc_ndtri(T y0) {
+
+  /* sqrt(2pi) */
+  constexpr T s2pi = 2.50662827463100050242E0;
+  constexpr T one = 1;
+  constexpr T zero = 0;
+
+  /* approximation for 0 <= |y - 0.5| <= 3/8 */
+  static const T P0[5] = {
+      -5.99633501014107895267E1,
+      9.80010754185999661536E1,
+      -5.66762857469070293439E1,
+      1.39312609387279679503E1,
+      -1.23916583867381258016E0,
+  };
+
+  static const T Q0[9] = {
+      1.00000000000000000000E0,
+      1.95448858338141759834E0,
+      4.67627912898881538453E0,
+      8.63602421390890590575E1,
+      -2.25462687854119370527E2,
+      2.00260212380060660359E2,
+      -8.20372256168333339912E1,
+      1.59056225126211695515E1,
+      -1.18331621121330003142E0,
+  };
+
+  /* Approximation for interval z = sqrt(-2 log y ) between 2 and 8
+  * i.e., y between exp(-2) = .135 and exp(-32) = 1.27e-14.
+  */
+  static const T P1[9] = {
+      4.05544892305962419923E0,
+      3.15251094599893866154E1,
+      5.71628192246421288162E1,
+      4.40805073893200834700E1,
+      1.46849561928858024014E1,
+      2.18663306850790267539E0,
+      -1.40256079171354495875E-1,
+      -3.50424626827848203418E-2,
+      -8.57456785154685413611E-4,
+  };
+
+  static const T Q1[9] = {
+      1.00000000000000000000E0,
+      1.57799883256466749731E1,
+      4.53907635128879210584E1,
+      4.13172038254672030440E1,
+      1.50425385692907503408E1,
+      2.50464946208309415979E0,
+      -1.42182922854787788574E-1,
+      -3.80806407691578277194E-2,
+      -9.33259480895457427372E-4,
+  };
+
+  /* Approximation for interval z = sqrt(-2 log y ) between 8 and 64
+  * i.e., y between exp(-32) = 1.27e-14 and exp(-2048) = 3.67e-890.
+  */
+
+  static const T P2[9] = {
+      3.23774891776946035970E0,
+      6.91522889068984211695E0,
+      3.93881025292474443415E0,
+      1.33303460815807542389E0,
+      2.01485389549179081538E-1,
+      1.23716634817820021358E-2,
+      3.01581553508235416007E-4,
+      2.65806974686737550832E-6,
+      6.23974539184983293730E-9,
+  };
+
+  static const T Q2[9] = {
+      1.00000000000000000000E0,
+      6.02427039364742014255E0,
+      3.67983563856160859403E0,
+      1.37702099489081330271E0,
+      2.16236993594496635890E-1,
+      1.34204006088543189037E-2,
+      3.28014464682127739104E-4,
+      2.89247864745380683936E-6,
+      6.79019408009981274425E-9,
+  };
+
+  if (y0 == zero) {
+    return -std::numeric_limits<T>::infinity();
+  }
+  if (y0 == one) {
+    return std::numeric_limits<T>::infinity();
+  }
+  if (y0 < zero || y0 > one) {
+    return std::numeric_limits<T>::quiet_NaN();
+  }
+  bool code = true;
+  T y = y0;
+  if (y > one - T{0.13533528323661269189}) { /* 0.135... = exp(-2) */
+    y = one - y;
+    code = false;
+  }
+
+  if (y > T{0.13533528323661269189}) {
+    y = y - T{0.5};
+    const T y2 = y * y;
+    T x = y + y * (y2 * polevl(y2, P0, 4) / polevl(y2, Q0, 8));
+    return (x * s2pi);
+  }
+
+  T x = ::sqrt(T{-2.0} * ::log(y));
+  const T x0 = x - ::log(x) / x;
+
+  const T z = one / x;
+  T x1;
+  if (x < T{8.0}) /* y > exp(-32) = 1.2664165549e-14 */
+  {
+    x1 = z * polevl(z, P1, 8) / polevl(z, Q1, 8);
+  } else {
+    x1 = z * polevl(z, P2, 8) / polevl(z, Q2, 8);
+  }
+  x = x0 - x1;
+  if (code) {
+    x = -x;
+  }
+  return x;
+}

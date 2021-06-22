@@ -91,7 +91,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
         return self
 
     def _forward(self, input):
-        assert isinstance(self.bn.running_var, torch.Tensor)
+        assert self.bn.running_var is not None
         running_std = torch.sqrt(self.bn.running_var + self.bn.eps)
         scale_factor = self.bn.weight / running_std
         weight_shape = [1] * len(self.weight.shape)
@@ -191,8 +191,10 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
             Args: `mod` a float module, either produced by torch.quantization utilities
             or directly from user
         """
+        # The ignore is because _FLOAT_MODULE is a TypeVar here where the bound
+        # has no __name__ (code is fine though)
         assert type(mod) == cls._FLOAT_MODULE, 'qat.' + cls.__name__ + '.from_float only works for ' + \
-            cls._FLOAT_MODULE.__name__
+            cls._FLOAT_MODULE.__name__  # type: ignore[attr-defined]
         assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
         assert mod.qconfig, 'Input float module must have a valid qconfig'
         qconfig = mod.qconfig

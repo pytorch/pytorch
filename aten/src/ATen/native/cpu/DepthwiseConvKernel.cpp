@@ -299,6 +299,7 @@ Tensor _convolution_depthwise3x3_winograd(
 
 }  // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(convolution_depthwise3x3_winograd_stub, &_convolution_depthwise3x3_winograd);
 
 }  // namespace native

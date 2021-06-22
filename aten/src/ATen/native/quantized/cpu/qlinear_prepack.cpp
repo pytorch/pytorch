@@ -29,8 +29,10 @@ void calc_col_offsets_transpose(
     int32_t* B_zero_point,
     int32_t* col_offsets,
     c10::QScheme qtype) {
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (size_t i = 0; i < N; ++i) {
     int32_t sum = 0;
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (size_t j = 0; j < K; ++j) {
       sum += Bint8[i * K + j];
     }
@@ -198,7 +200,8 @@ namespace at {
 namespace native {
 
 at::Tensor _saturate_weight_to_fp16(const Tensor& weight) {
-  float* weight_contig_ptr = weight.contiguous().data_ptr<float>();
+  Tensor weight_contig = weight.contiguous();
+  float* weight_contig_ptr = weight_contig.data_ptr<float>();
   quant_utils::HandleWeightsSaturation(weight.size(0) * weight.size(1), weight_contig_ptr);
   return weight;
 }

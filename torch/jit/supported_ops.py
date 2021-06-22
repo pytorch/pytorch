@@ -89,7 +89,7 @@ def _get_nn_functional_ops():
             scripted = torch.jit.script(attr)
             schema = scripted.schema
             functions.append(_emit_schema(name, elem, schema))
-        except:  # noqa
+        except:  # noqa: B001,E722
             # Skip interpolate / boolean dispatched things
             pass
 

@@ -16,6 +16,7 @@ bool Log1pGradientFunctor<CPUContext>::Forward(
     T* dX,
     CPUContext* /* context */) const {
   const int size = std::accumulate(
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       X_dims.cbegin(), X_dims.cend(), 1, std::multiplies<int>());
   ConstEigenVectorArrayMap<T> dY_arr(dY, size);
   ConstEigenVectorArrayMap<T> X_arr(X, size);
@@ -23,9 +24,11 @@ bool Log1pGradientFunctor<CPUContext>::Forward(
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     Log1p,
     UnaryElementwiseOp<TensorTypes<float>, CPUContext, Log1pFunctor<CPUContext>>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     Log1pGradient,
     BinaryElementwiseOp<
@@ -33,6 +36,7 @@ REGISTER_CPU_OPERATOR(
         CPUContext,
         Log1pGradientFunctor<CPUContext>>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Log1p)
     .NumInputs(1)
     .NumOutputs(1)
@@ -49,6 +53,7 @@ Github Link:
     .Output(0, "output", "Output data blob with same shape as input")
     .InheritOnnxSchema();
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Log1pGradient)
     .NumInputs(2)
     .NumOutputs(1)
@@ -69,6 +74,7 @@ class GetLog1pGradient : public GradientMakerBase {
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Log1p, GetLog1pGradient);
 
 } // namespace caffe2

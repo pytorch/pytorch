@@ -20,6 +20,7 @@ struct InternedStringsTable {
   ska::flat_hash_map<PyObject*,at::Dimname> py_interned_string_to_dimname_;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 InternedStringsTable kPyInternedStringToDimname;
 
 InternedStringsTable::~InternedStringsTable() {
@@ -61,7 +62,8 @@ bool THPUtils_checkDimnameList(PyObject* obj) {
   if (!tuple && !PyList_Check(obj)) {
     return false;
   }
-  auto size = tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
+  // NOLINTNEXTLINE(bugprone-branch-clone)
+  const auto size = tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
   if (size == 0) {
     return true;
   }

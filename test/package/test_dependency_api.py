@@ -1,21 +1,18 @@
+import importlib
 from io import BytesIO
 from sys import version_info
 from textwrap import dedent
 from unittest import skipIf
 
-from torch.package import (
-    DeniedModuleError,
-    EmptyMatchError,
-    PackageExporter,
-    PackageImporter,
-)
-from torch.testing._internal.common_utils import run_tests
+from torch.package import EmptyMatchError, Importer, PackageExporter, PackageImporter
+from torch.package.package_exporter import PackagingError
+from torch.testing._internal.common_utils import IS_WINDOWS, run_tests
 
 try:
     from .common import PackageTestCase
 except ImportError:
     # Support the case where we run this file directly.
-    from common import PackageTestCase  # type: ignore
+    from common import PackageTestCase
 
 
 class TestDependencyAPI(PackageTestCase):
@@ -29,9 +26,7 @@ class TestDependencyAPI(PackageTestCase):
         buffer = BytesIO()
         with PackageExporter(buffer, verbose=False) as he:
             he.extern(["package_a.subpackage", "module_a"])
-            he.require_module("package_a.subpackage")
-            he.require_module("module_a")
-            he.save_module("package_a")
+            he.save_source_string("foo", "import package_a.subpackage; import module_a")
         buffer.seek(0)
         hi = PackageImporter(buffer)
         import module_a
@@ -77,11 +72,13 @@ class TestDependencyAPI(PackageTestCase):
         Test that an error is thrown when a extern glob is specified with allow_empty=True
         and no matching module is required during packaging.
         """
+        import package_a.subpackage  # noqa: F401
+
         buffer = BytesIO()
         with self.assertRaisesRegex(EmptyMatchError, r"did not match any modules"):
             with PackageExporter(buffer, verbose=False) as exporter:
-                exporter.extern(include=["package_a.*"], allow_empty=False)
-                exporter.save_module("package_b.subpackage")
+                exporter.extern(include=["package_b.*"], allow_empty=False)
+                exporter.save_module("package_a.subpackage")
 
     def test_deny(self):
         """
@@ -89,23 +86,17 @@ class TestDependencyAPI(PackageTestCase):
         """
         buffer = BytesIO()
 
-        with self.assertRaisesRegex(
-            DeniedModuleError,
-            "required during packaging but has been explicitly blocklisted",
-        ):
+        with self.assertRaisesRegex(PackagingError, "denied"):
             with PackageExporter(buffer, verbose=False) as exporter:
                 exporter.deny(["package_a.subpackage", "module_a"])
-                exporter.require_module("package_a.subpackage")
+                exporter.save_source_string("foo", "import package_a.subpackage")
 
     def test_deny_glob(self):
         """
         Test marking packages as "deny" using globs instead of package names.
         """
         buffer = BytesIO()
-        with self.assertRaisesRegex(
-            DeniedModuleError,
-            "required during packaging but has been explicitly blocklisted",
-        ):
+        with self.assertRaises(PackagingError):
             with PackageExporter(buffer, verbose=False) as exporter:
                 exporter.deny(["package_a.*", "module_*"])
                 exporter.save_source_string(
@@ -123,9 +114,8 @@ class TestDependencyAPI(PackageTestCase):
         buffer = BytesIO()
         with PackageExporter(buffer, verbose=False) as he:
             he.mock(["package_a.subpackage", "module_a"])
-            he.save_module("package_a")
-            he.require_module("package_a.subpackage")
-            he.require_module("module_a")
+            # Import something that dependso n package_a.subpackage
+            he.save_source_string("foo", "import package_a.subpackage")
         buffer.seek(0)
         hi = PackageImporter(buffer)
         import package_a.subpackage
@@ -174,46 +164,13 @@ class TestDependencyAPI(PackageTestCase):
         Test that an error is thrown when a mock glob is specified with allow_empty=True
         and no matching module is required during packaging.
         """
+        import package_a.subpackage  # noqa: F401
+
         buffer = BytesIO()
         with self.assertRaisesRegex(EmptyMatchError, r"did not match any modules"):
             with PackageExporter(buffer, verbose=False) as exporter:
-                exporter.mock(include=["package_a.*"], allow_empty=False)
-                exporter.save_module("package_b.subpackage")
-
-    def test_module_glob(self):
-        from torch.package.package_exporter import _GlobGroup
-
-        def check(include, exclude, should_match, should_not_match):
-            x = _GlobGroup(include, exclude)
-            for e in should_match:
-                self.assertTrue(x.matches(e))
-            for e in should_not_match:
-                self.assertFalse(x.matches(e))
-
-        check(
-            "torch.*",
-            [],
-            ["torch.foo", "torch.bar"],
-            ["tor.foo", "torch.foo.bar", "torch"],
-        )
-        check(
-            "torch.**",
-            [],
-            ["torch.foo", "torch.bar", "torch.foo.bar", "torch"],
-            ["what.torch", "torchvision"],
-        )
-        check("torch.*.foo", [], ["torch.w.foo"], ["torch.hi.bar.baz"])
-        check(
-            "torch.**.foo", [], ["torch.w.foo", "torch.hi.bar.foo"], ["torch.f.foo.z"]
-        )
-        check("torch*", [], ["torch", "torchvision"], ["torch.f"])
-        check(
-            "torch.**",
-            ["torch.**.foo"],
-            ["torch", "torch.bar", "torch.barfoo"],
-            ["torch.foo", "torch.some.foo"],
-        )
-        check("**.torch", [], ["torch", "bar.torch"], ["visiontorch"])
+                exporter.mock(include=["package_b.*"], allow_empty=False)
+                exporter.save_module("package_a.subpackage")
 
     @skipIf(version_info < (3, 7), "mock uses __getattr__ a 3.7 feature")
     def test_pickle_mocked(self):
@@ -225,6 +182,7 @@ class TestDependencyAPI(PackageTestCase):
         buffer = BytesIO()
         with PackageExporter(buffer, verbose=False) as he:
             he.mock(include="package_a.subpackage")
+            he.intern("**")
             he.save_pickle("obj", "obj.pkl", obj2)
 
         buffer.seek(0)
@@ -232,6 +190,122 @@ class TestDependencyAPI(PackageTestCase):
         hi = PackageImporter(buffer)
         with self.assertRaises(NotImplementedError):
             hi.load_pickle("obj", "obj.pkl")
+
+    def test_allow_empty_with_error(self):
+        """If an error occurs during packaging, it should not be shadowed by the allow_empty error."""
+        buffer = BytesIO()
+        with self.assertRaises(ModuleNotFoundError):
+            with PackageExporter(buffer, verbose=False) as pe:
+                # Even though we did not extern a module that matches this
+                # pattern, we want to show the save_module error, not the allow_empty error.
+
+                pe.extern("foo", allow_empty=False)
+                pe.save_module("aodoifjodisfj")  # will error
+
+                # we never get here, so technically the allow_empty check
+                # should raise an error. However, the error above is more
+                # informative to what's actually going wrong with packaging.
+                pe.save_source_string("bar", "import foo\n")
+
+    def test_implicit_intern(self):
+        """The save_module APIs should implicitly intern the module being saved."""
+        import package_a  # noqa: F401
+
+        buffer = BytesIO()
+        with PackageExporter(buffer, verbose=False) as he:
+            he.save_module("package_a")
+
+    def test_intern_error(self):
+        """Failure to handle all dependencies should lead to an error."""
+        import package_a.subpackage
+
+        obj = package_a.subpackage.PackageASubpackageObject()
+        obj2 = package_a.PackageAObject(obj)
+
+        buffer = BytesIO()
+
+        with self.assertRaises(PackagingError) as e:
+            with PackageExporter(buffer, verbose=False) as he:
+                he.save_pickle("obj", "obj.pkl", obj2)
+
+        self.assertEqual(
+            str(e.exception),
+            dedent(
+                """
+                * Module did not match against any action pattern. Extern, mock, or intern it.
+                    package_a
+                    package_a.subpackage
+                """
+            ),
+        )
+
+        # Interning all dependencies should work
+        with PackageExporter(buffer, verbose=False) as he:
+            he.intern(["package_a", "package_a.subpackage"])
+            he.save_pickle("obj", "obj.pkl", obj2)
+
+    @skipIf(IS_WINDOWS, "extension modules have a different file extension on windows")
+    def test_broken_dependency(self):
+        """A unpackageable dependency should raise a PackagingError."""
+
+        def create_module(name):
+            spec = importlib.machinery.ModuleSpec(name, self, is_package=False)  # type: ignore[arg-type]
+            module = importlib.util.module_from_spec(spec)
+            ns = module.__dict__
+            ns["__spec__"] = spec
+            ns["__loader__"] = self
+            ns["__file__"] = f"{name}.so"
+            ns["__cached__"] = None
+            return module
+
+        class BrokenImporter(Importer):
+            def __init__(self):
+                self.modules = {
+                    "foo": create_module("foo"),
+                    "bar": create_module("bar"),
+                }
+
+            def import_module(self, module_name):
+                return self.modules[module_name]
+
+        buffer = BytesIO()
+
+        with self.assertRaises(PackagingError) as e:
+            with PackageExporter(
+                buffer, verbose=False, importer=BrokenImporter()
+            ) as exporter:
+                exporter.intern(["foo", "bar"])
+                exporter.save_source_string("my_module", "import foo; import bar")
+
+        self.assertEqual(
+            str(e.exception),
+            dedent(
+                """
+                * Module is a C extension module. torch.package supports Python modules only.
+                    foo
+                    bar
+                """
+            ),
+        )
+
+    def test_invalid_import(self):
+        """An incorrectly-formed import should raise a PackagingError."""
+        buffer = BytesIO()
+        with self.assertRaises(PackagingError) as e:
+            with PackageExporter(buffer, verbose=False) as exporter:
+                # This import will fail to load.
+                exporter.save_source_string("foo", "from ........ import lol")
+
+        self.assertEqual(
+            str(e.exception),
+            dedent(
+                """
+                * Dependency resolution failed.
+                    foo
+                      Context: attempted relative import beyond top-level package
+                """
+            ),
+        )
 
 
 if __name__ == "__main__":

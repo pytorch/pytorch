@@ -10,7 +10,9 @@
 namespace at {
 namespace native {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qbatch_norm_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qbatch_norm_relu_stub);
 
 namespace {
@@ -31,10 +33,13 @@ void compute_fused_params(
   //         + bias(c)
   // We factor out inv_sigma(c) = 1 / sqrt(var(c) + eps).
   for (int64_t c = 0; c < channels; c++) {
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     float inv_sigma = 1.0 / std::sqrt(var_data[c] + static_cast<float>(eps));
     float weight_v = weight_data ? weight_data[c] : 1;
     float bias_v = bias_data ? bias_data[c] : 0;
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     alpha_data[c] = inv_sigma * weight_v * (input_scale / output_scale);
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     beta_data[c] = (bias_v - mean_data[c] * inv_sigma * weight_v) / output_scale;
   }
 }
@@ -140,7 +145,11 @@ Tensor q_batch_norm1d_impl(
   // Remove the fake dimension, and go back to contiguous format
   // (since there is no 4th channel). Note, this has a performance
   // cost.
-  return qy.contiguous(MemoryFormat::Contiguous).squeeze(-1);
+  Tensor result = qy.contiguous(MemoryFormat::Contiguous).squeeze(-1);
+  if (ndim == 2) {
+    result = result.squeeze(-1);
+  }
+  return result;
 }
 
 template <bool ReluFused>
@@ -371,7 +380,8 @@ Tensor quantized_batch_norm(
     double output_scale,
     int64_t output_zero_point) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
 
   Tensor qy;

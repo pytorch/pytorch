@@ -26,7 +26,7 @@ void ambiguous_autogradother_kernel(OperatorKernel*, const OperatorHandle& op, D
     "(see Note [Ambiguity in AutogradOther kernel]). "
     "If you want to override CompositeImplicitAutograd, please open an issue to request a dedicated "
     "Autograd dispatch key for the backend.\n",
-    "If you only want to run inference instead of training, add `at::AutoNonVariableTypeMode guard(true);` "
+    "If you only want to run inference instead of training, add `c10::InferenceMode mode;` "
     "before model.forward(). Note this guard is only available in C++ but not Python at present.",
     "\nCanonical state\n~~~~~~~~~~~\n", op.dumpState(), "\n\n");
 }

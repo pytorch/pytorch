@@ -394,6 +394,7 @@ at::Tensor PackedConvWeight<kSpatialDim>::apply_impl(
                                  output_padding_w},
           transpose());
 
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   const float act_scale = act.q_scale();
   const int32_t act_zero_point = act.q_zero_point();
 
@@ -592,10 +593,12 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
   const at::Tensor act_nhwc = act.contiguous(c10::MemoryFormat::ChannelsLast);
 
   auto output_min = kReluFused
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       ? activationLimits(output_scale, output_zero_point, Activation::RELU)
             .first
       : std::numeric_limits<uint8_t>::min();
   auto output_max = kReluFused
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       ? activationLimits(output_scale, output_zero_point, Activation::RELU)
             .second
       : std::numeric_limits<uint8_t>::max();
@@ -620,6 +623,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
     // We calculate requant scale here as the vector holding the requant scale
     // is owned by this module. The pointer is then passed to qnnpack backend.
     generate_requantization_scales(
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         w_scales, act_input_scale, output_scale, requantization_scales);
 
     // TODO Kimish, we are allocating affine_quantized regardless of per channel or not.
@@ -708,6 +712,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
       output_zero_point,
       c10::MemoryFormat::ChannelsLast);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   pytorch_qnnp_status run_status;
   if (transpose()) {
     run_status = qnnpack::qnnpackDeConv(

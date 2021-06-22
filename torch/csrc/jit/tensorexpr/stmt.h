@@ -16,7 +16,7 @@ class Placeholder;
 // The common base between all statement node.
 class TORCH_API Stmt : public KernelScopedObject {
  public:
-  Stmt() {}
+  Stmt() = default;
   virtual void accept(IRVisitor* visitor) const = 0;
   virtual Stmt* accept_mutator(IRMutator* mutator) = 0;
 
@@ -50,11 +50,12 @@ class StmtNode : public Stmt {
     visitor->visit(static_cast<const Op*>(this));
   }
   Stmt* accept_mutator(IRMutator* mutator) override;
-  StmtNode() {}
+  StmtNode() = default;
 };
 
 template <class Op>
 Stmt* StmtNode<Op>::accept_mutator(IRMutator* mutator) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   StmtNode* this_mutable = const_cast<StmtNode*>(this);
   return mutator->mutate(static_cast<Op*>(this_mutable));
 }
@@ -147,6 +148,32 @@ class TORCH_API Block : public StmtNode<Block> {
     set_parent(old_stmt, nullptr);
     set_parent(new_stmt, this);
     return true;
+  }
+
+  // Creates a new block by cloning `this` block and replacing the given
+  // statement with a new statement. Note that `old_stmt` refers to a statement
+  // in `this` block. If the `old_stmt` is not found, it will return `nullptr`.
+  Block* clone_and_replace(Stmt* old_stmt, Stmt* new_stmt) {
+    if (new_stmt->get_parent()) {
+      throw malformed_input(
+          "Block replace Stmt with existing parent", new_stmt);
+    }
+
+    std::vector<Stmt*> stmts(stmts_.begin(), stmts_.end());
+    std::vector<Stmt*> cloned_stmts(stmts.size());
+    bool found = false;
+    for (int i = 0; i < static_cast<int>(stmts.size()); ++i) {
+      if (stmts[i] == old_stmt) {
+        found = true;
+        cloned_stmts[i] = new_stmt;
+      } else {
+        cloned_stmts[i] = Stmt::clone(stmts[i]);
+      }
+    }
+    if (!found) {
+      return nullptr;
+    }
+    return new Block(cloned_stmts);
   }
 
   bool remove_stmt(Stmt* stmt) {
@@ -282,9 +309,6 @@ class TORCH_API Store : public StmtNode<Store> {
   const Expr* value() const {
     return value_;
   }
-  const Expr* mask() const {
-    return mask_;
-  }
   const Buf* buf() const {
     return buf_;
   }
@@ -292,25 +316,18 @@ class TORCH_API Store : public StmtNode<Store> {
   static Store* make(
       const BufHandle& buf,
       const std::vector<ExprHandle>& indices,
-      const ExprHandle& value,
-      const ExprHandle& mask);
-
-  static Store* make(
-      const BufHandle& buf,
-      const std::vector<ExprHandle>& indices,
       const ExprHandle& value);
 
-  Store(
-      const Buf* buf,
-      std::vector<const Expr*> indices,
-      const Expr* value,
-      const Expr* mask);
+  Store(const Buf* buf, std::vector<const Expr*> indices, const Expr* value);
+
+  void set_indices(std::vector<const Expr*> indices) {
+    indices_ = indices;
+  };
 
  private:
   const Buf* buf_;
   std::vector<const Expr*> indices_;
   const Expr* value_;
-  const Expr* mask_;
 };
 
 // Allocate a buffer of given shapes and dtypes and bind it with the given
@@ -472,6 +489,7 @@ class TORCH_API LoopOptions {
       throw malformed_input("Has no GPU block index");
     }
 
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     static const char* kBlockIndexNames[] = {
         "blockIdx.x",
         "blockIdx.y",
@@ -514,6 +532,7 @@ class TORCH_API LoopOptions {
       throw malformed_input("has no GPU thread index");
     }
 
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     static const char* kThreadIndexNames[] = {
         "threadIdx.x", "threadIdx.y", "threadIdx.z", "threadIdx.w"};
 
@@ -631,8 +650,11 @@ class TORCH_API For : public StmtNode<For> {
       const Expr* start,
       const Expr* stop,
       Stmt* body,
-      const LoopOptions& loop_options)
-      : var_(var), start_(start), stop_(stop), loop_options_(loop_options) {
+      LoopOptions loop_options)
+      : var_(var),
+        start_(start),
+        stop_(stop),
+        loop_options_(std::move(loop_options)) {
     if (!var) {
       throw malformed_input("invalid Var in For loop", var);
     } else if (!start) {
@@ -675,6 +697,38 @@ class TORCH_API For : public StmtNode<For> {
     return new For(var_, start_, stop_, body, loop_options_);
   }
 
+  Block* removeBody() {
+    auto res = body_;
+    set_parent(res, nullptr);
+    body_ = nullptr;
+    return res;
+  }
+
+  Block* setBody(Stmt* body) {
+    Block* b = dynamic_cast<Block*>(body);
+    if (!b) {
+      b = new Block({body});
+    }
+    body_ = b;
+    set_parent(body_, this);
+    return body_;
+  }
+
+  const Expr* setStart(const Expr* start) {
+    start_ = start;
+    return start_;
+  }
+
+  const Expr* setStop(const Expr* stop) {
+    stop_ = stop;
+    return stop_;
+  }
+
+  const Var* setVar(const Var* var) {
+    var_ = var;
+    return var_;
+  }
+
  private:
   const Var* var_;
   const Expr* start_;
@@ -689,11 +743,8 @@ class TORCH_API For : public StmtNode<For> {
 // TODO: make IR nodes extensible.
 class TORCH_API AtomicAdd : public StmtNode<AtomicAdd> {
  public:
-  AtomicAdd(
-      const Buf* buf,
-      const std::vector<const Expr*>& indices,
-      const Expr* value)
-      : buf_(buf), indices_(indices), value_(value) {}
+  AtomicAdd(const Buf* buf, std::vector<const Expr*> indices, const Expr* value)
+      : buf_(buf), indices_(std::move(indices)), value_(value) {}
 
   const Var* base_handle() const {
     return buf_->base_handle();
@@ -724,7 +775,7 @@ class TORCH_API AtomicAdd : public StmtNode<AtomicAdd> {
 
 class TORCH_API SyncThreads : public StmtNode<SyncThreads> {
  public:
-  SyncThreads() {}
+  SyncThreads() = default;
 };
 
 /*
@@ -772,10 +823,13 @@ class TORCH_API ExternalCall : public StmtNode<ExternalCall> {
 
   ExternalCall(
       const Buf* buf,
-      const std::string& func_name,
-      const std::vector<const Buf*>& buf_args,
-      const std::vector<const Expr*>& args)
-      : buf_(buf), func_name_(func_name), buf_args_(buf_args), args_(args) {}
+      std::string func_name,
+      std::vector<const Buf*> buf_args,
+      std::vector<const Expr*> args)
+      : buf_(buf),
+        func_name_(std::move(func_name)),
+        buf_args_(std::move(buf_args)),
+        args_(std::move(args)) {}
 
  private:
   const Buf* buf_;

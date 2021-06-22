@@ -14,6 +14,7 @@ namespace caffe2 {
 CAFFE_KNOWN_TYPE(Tensor);
 
 TensorPrinter::TensorPrinter(
+    // NOLINTNEXTLINE(modernize-pass-by-value)
     const std::string& tensor_name,
     const std::string& file_name,
     int limit)
@@ -23,6 +24,7 @@ TensorPrinter::TensorPrinter(
   if (to_file_) {
     // We will output to file instead of printing on screen.
     // We will write each individual tensor to its individual file.
+    // NOLINTNEXTLINE(modernize-make-unique)
     log_file_.reset(new std::ofstream(
         file_name, std::ofstream::out | std::ofstream::trunc));
     CAFFE_ENFORCE(
@@ -34,6 +36,7 @@ TensorPrinter::TensorPrinter(
   }
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 TensorPrinter::~TensorPrinter() {
   if (log_file_.get()) {
     log_file_->close();
@@ -71,6 +74,7 @@ TypeMeta GetInt8TensorType(const void* c) {
 }
 
 // TODO(jerryzh): Remove
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static CaffeMap<TypeIdentifier, TypeCall> type_call_registry_{
     {TypeMeta::Id<Tensor>(), GetTensorType},
     {TypeMeta::Id<int8::Int8TensorCPU>(), GetInt8TensorType},
@@ -95,6 +99,7 @@ GetTensorInfo(const void* c, size_t* capacity, DeviceOption* device) {
   CHECK(capacity);
   const Tensor* tc = static_cast<const Tensor*>(c);
   CHECK(tc);
+  // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
   CHECK(tc->unsafeGetTensorImpl());
   CHECK(tc->unsafeGetTensorImpl()->storage().unsafeGetStorageImpl());
   *capacity = tc->storage().nbytes();
@@ -110,6 +115,7 @@ GetInt8TensorInfo(const void* c, size_t* capacity, DeviceOption* device) {
 }
 
 // since we only have one tensor, probably need to remove this at some point?
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static CaffeMap<TypeIdentifier, TensorInfoCall> tensor_info_call_registry_{
     {TypeMeta::Id<Tensor>(), GetTensorInfo},
     {TypeMeta::Id<int8::Int8TensorCPU>(), GetInt8TensorInfo},
@@ -323,6 +329,7 @@ struct TensorStatGetter : BlobStatGetter {
     return nbytes;
   }
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_STAT_GETTER(Tensor, TensorStatGetter);
 } // namespace
 

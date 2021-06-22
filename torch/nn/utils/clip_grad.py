@@ -8,7 +8,7 @@ _tensor_or_tensors = Union[torch.Tensor, Iterable[torch.Tensor]]
 
 def clip_grad_norm_(
         parameters: _tensor_or_tensors, max_norm: float, norm_type: float = 2.0,
-        error_if_nonfinite: bool = True) -> torch.Tensor:
+        error_if_nonfinite: bool = False) -> torch.Tensor:
     r"""Clips gradient norm of an iterable of parameters.
 
     The norm is computed over all gradients together, as if they were
@@ -22,7 +22,7 @@ def clip_grad_norm_(
             infinity norm.
         error_if_nonfinite (bool): if True, an error is thrown if the total
             norm of the gradients from :attr:``parameters`` is ``nan``,
-            ``inf``, or ``-inf``. Default: True
+            ``inf``, or ``-inf``. Default: False (will switch to True in the future)
 
     Returns:
         Total norm of the parameters (viewed as a single vector).
@@ -40,12 +40,19 @@ def clip_grad_norm_(
         total_norm = norms[0] if len(norms) == 1 else torch.max(torch.stack(norms))
     else:
         total_norm = torch.norm(torch.stack([torch.norm(p.grad.detach(), norm_type).to(device) for p in parameters]), norm_type)
-    if error_if_nonfinite and (total_norm.isnan() or total_norm.isinf()):
-        raise RuntimeError(
-            f'The total norm of order {norm_type} for gradients from '
-            '`parameters` is non-finite, so it cannot be clipped. To disable '
-            'this error and scale the gradients by the non-finite norm anyway, '
-            'set `error_if_nonfinite=False`')
+    if total_norm.isnan() or total_norm.isinf():
+        if error_if_nonfinite:
+            raise RuntimeError(
+                f'The total norm of order {norm_type} for gradients from '
+                '`parameters` is non-finite, so it cannot be clipped. To disable '
+                'this error and scale the gradients by the non-finite norm anyway, '
+                'set `error_if_nonfinite=False`')
+        else:
+            warnings.warn("Non-finite norm encountered in torch.nn.utils.clip_grad_norm_; continuing anyway. "
+                          "Note that the default behavior will change in a future release to error out "
+                          "if a non-finite total norm is encountered. At that point, setting "
+                          "error_if_nonfinite=false will be required to retain the old behavior.",
+                          FutureWarning, stacklevel=2)
     clip_coef = max_norm / (total_norm + 1e-6)
     if clip_coef < 1:
         for p in parameters:
@@ -55,7 +62,7 @@ def clip_grad_norm_(
 
 def clip_grad_norm(
         parameters: _tensor_or_tensors, max_norm: float, norm_type: float = 2.,
-        error_if_nonfinite: bool = True) -> torch.Tensor:
+        error_if_nonfinite: bool = False) -> torch.Tensor:
     r"""Clips gradient norm of an iterable of parameters.
 
     .. warning::

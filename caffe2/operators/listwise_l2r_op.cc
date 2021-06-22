@@ -156,6 +156,7 @@ float LambdaRankNdcgOp<float, CPUContext>::LambdaRankNdcgSession(
            .sum();
   if (use_ndcg_as_loss_) {
     // DCG loss function
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     loss = (idcg - dcg);
   } else {
     loss = -(lambda_mat *
@@ -232,17 +233,21 @@ bool LambdaRankNdcgGradientOp<float, CPUContext>::RunOnDevice() {
 
 namespace {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(LambdaRankNdcg, LambdaRankNdcgOp<float, CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     LambdaRankNdcgGradient,
     LambdaRankNdcgGradientOp<float, CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(LambdaRankNdcg).NumInputs(3).NumOutputs(2).SetDoc(R"DOC(
 It implements the LambdaRank as appeared in Wu, Qiang, et al. "Adapting boosting
 for information retrieval measures." Information Retrieval 13.3 (2010): 254-270.
 
 This method heuristically optimizes the NDCG.
 )DOC");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(LambdaRankNdcgGradient).NumInputs(4).NumOutputs(1);
 
 class GetLambdaRankNdcgGradient : public GradientMakerBase {
@@ -256,6 +261,7 @@ class GetLambdaRankNdcgGradient : public GradientMakerBase {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(LambdaRankNdcg, GetLambdaRankNdcgGradient);
 
 } // namespace

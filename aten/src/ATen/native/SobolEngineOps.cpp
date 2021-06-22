@@ -63,6 +63,7 @@ Tensor& _sobol_engine_ff_(Tensor& quasi, int64_t n, const Tensor& sobolstate,
            "quasi needs to be of type ", at::kLong);
 
   // We deal with `data` and `strides` due to performance issues.
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t l;
   int64_t* quasi_data = quasi.data_ptr<int64_t>();
   int64_t* sobolstate_data = sobolstate.data_ptr<int64_t>();

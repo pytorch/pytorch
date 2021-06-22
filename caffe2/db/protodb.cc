@@ -11,6 +11,7 @@ class ProtoDBCursor : public Cursor {
  public:
   explicit ProtoDBCursor(const TensorProtos* proto)
     : proto_(proto), iter_(0) {}
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~ProtoDBCursor() override {}
 
   void Seek(const string& /*str*/) override {
@@ -40,6 +41,7 @@ class ProtoDBTransaction : public Transaction {
     }
   }
   ~ProtoDBTransaction() override {
+    // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
     Commit();
   }
   void Put(const string& key, const string& value) override {
@@ -80,6 +82,7 @@ class ProtoDB : public DB {
     LOG(INFO) << "Opened protodb " << source;
   }
   ~ProtoDB() override {
+    // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
     Close();
   }
 
@@ -101,8 +104,10 @@ class ProtoDB : public DB {
   string source_;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CAFFE2_DB(ProtoDB, ProtoDB);
 // For lazy-minded, one can also call with lower-case name.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CAFFE2_DB(protodb, ProtoDB);
 
 }  // namespace db

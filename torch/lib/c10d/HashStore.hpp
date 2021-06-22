@@ -10,7 +10,7 @@
 
 namespace c10d {
 
-class HashStore : public Store {
+class TORCH_API HashStore : public Store {
  public:
   ~HashStore() override {}
 
@@ -18,8 +18,8 @@ class HashStore : public Store {
 
   std::vector<uint8_t> compareSet(
       const std::string& key,
-      const std::vector<uint8_t>& currentValue,
-      const std::vector<uint8_t>& newValue) override;
+      const std::vector<uint8_t>& expectedValue,
+      const std::vector<uint8_t>& desiredValue) override;
 
   std::vector<uint8_t> get(const std::string& key) override;
 

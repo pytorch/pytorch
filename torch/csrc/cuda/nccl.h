@@ -2,7 +2,6 @@
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <THC/THC.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/Optional.h>
 
@@ -21,6 +20,7 @@ typedef void* ncclComm_t;
 
 /** redefine nccl unique ID in torch scope. this should be identical to native nccl impp. */
 #define NCCL_UNIQUE_ID_BYTES 128
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 typedef struct { char internal[NCCL_UNIQUE_ID_BYTES]; } ncclUniqueId;
 
 /* Error type */

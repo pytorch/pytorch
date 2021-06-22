@@ -196,7 +196,9 @@ class BasicModuleUnavailableTest(JitBackendTestCase):
         input = torch.randn(5)
 
         # Test exception is thrown.
-        with self.assertRaisesRegex(Exception, r"Backend is not available."):
+        with self.assertRaisesRegexWithHighlight(Exception,
+                                                 r"Backend is not available.",
+                                                 "raise Exception(\"Backend is not available.\""):
             backend_method = self.lowered_module.__getattr__("forward")
             backend_output = backend_method(*(input, input))
 
@@ -206,7 +208,9 @@ class BasicModuleUnavailableTest(JitBackendTestCase):
         buffer = io.BytesIO()
         torch.jit.save(self.lowered_module, buffer)
         buffer.seek(0)
-        with self.assertRaisesRegex(Exception, r"Backend is not available."):
+        with self.assertRaisesRegexWithHighlight(Exception,
+                                                 r"Backend is not available.",
+                                                 "raise Exception(\"Backend is not available.\""):
             imported = torch.jit.load(buffer)
 
 
@@ -400,21 +404,23 @@ class SelectiveLoweringTest(JitBackendTestCase):
         Check errors associated with selective lowering.
         """
         # Check error messages thrown when attempting to lower something that is not a ScriptModule.
-        with self.assertRaisesRegex(RuntimeError, r"Object .* is not a ScriptModule"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, r"Object .* is not a ScriptModule", ""):
             to_test_backend_selective(torch.nn.ReLU(), {"forward": ""}, ["submodule"])
 
         MiddleModule = SelectiveLoweringTest.MiddleModule
         mod = MiddleModule(BasicModule())
         mod.new_attr = 3
 
-        with self.assertRaisesRegex(RuntimeError, r"Attribute named new_attr is not a Module"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, r"Attribute named new_attr is not a Module", ""):
             to_test_backend_selective(torch.jit.script(mod), {"forward": ""}, ["new_attr"])
 
         # Check error message thrown when module hierarchy doesn't have unique types.
         OuterModule = SelectiveLoweringTest.OuterModule
         mod = OuterModule(MiddleModule(BasicModule()), MiddleModule(BasicModule()), MiddleModule(BasicModule()))
 
-        with self.assertRaisesRegex(RuntimeError, r"Selective lowering is only supported for module hierarchies with unique types"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError,
+                                                 r"Selective lowering is only supported for module hierarchies with unique types",
+                                                 ""):
             to_test_backend_selective(torch.jit.script(mod), {"forward": ""}, ["sub1.submodule"])
 
 

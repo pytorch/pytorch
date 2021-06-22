@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef USE_C10D_NCCL
+
 #include <chrono>
 #include <iostream>
 #include <list>
@@ -13,11 +15,10 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAEvent.h>
-#include <ATen/cuda/CUDAFuture.h>
-#include <ATen/cuda/CUDAMultiStreamGuard.h>
 #include <c10/core/Stream.h>
 #include <c10/core/StreamGuard.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 
 #include <torch/custom_class.h>
@@ -69,7 +70,7 @@ constexpr const char* NCCL_BACKEND_NAME = "nccl";
 //   work->wait()
 //
 //   // Now continue on other work in the current stream.
-class ProcessGroupNCCL : public ProcessGroup {
+class TORCH_API ProcessGroupNCCL : public ProcessGroup {
  public:
   class WorkNCCL : public ProcessGroup::Work,
     public std::enable_shared_from_this<WorkNCCL> {
@@ -112,7 +113,6 @@ class ProcessGroupNCCL : public ProcessGroup {
     bool finishedGPUExecution();
 
     // Get a Future object that will be marked as completed internally.
-    // It actually returns a CUDAFuture object which is a sub class of Future.
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
 
     // Helper function that sets an exception_ptr on the WorkNCCL object.
@@ -177,7 +177,7 @@ class ProcessGroupNCCL : public ProcessGroup {
     std::shared_ptr<std::vector<at::Tensor>> outputs_;
 
     // The future returned by getFuture.
-    c10::intrusive_ptr<at::cuda::CUDAFuture> future_;
+    c10::intrusive_ptr<at::ivalue::Future> future_;
 
     friend class ProcessGroupNCCL;
   };
@@ -186,14 +186,12 @@ class ProcessGroupNCCL : public ProcessGroup {
     // NOTE: timeout in ProcessGroupNCCL::Options denote the timeout for
     // operations. This is only used when blockingWait_ is enabled.
     explicit Options(
-        std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout,
         bool is_high_priority_stream = false);
 
     // return intrusive_ptr of the object
     static c10::intrusive_ptr<Options> create(
-        std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout,
         bool is_high_priority_stream = false) {
-      return c10::make_intrusive<Options>(timeout, is_high_priority_stream);
+      return c10::make_intrusive<Options>(is_high_priority_stream);
     }
 
     // Schedule NCCL operations on high priority CUDA streams
@@ -263,7 +261,7 @@ class ProcessGroupNCCL : public ProcessGroup {
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> allgather_base(
+  c10::intrusive_ptr<ProcessGroup::Work> _allgather_base(
       at::Tensor& outputbuffer,
       at::Tensor& inputbuffer,
       const AllgatherOptions& opts = AllgatherOptions()) override;
@@ -276,6 +274,11 @@ class ProcessGroupNCCL : public ProcessGroup {
   c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter(
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
+
+  c10::intrusive_ptr<ProcessGroup::Work> _reduce_scatter_base(
+      at::Tensor& outputTensor,
+      at::Tensor& inputTensor,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
 
   c10::intrusive_ptr<ProcessGroup::Work> barrier(
@@ -321,6 +324,15 @@ class ProcessGroupNCCL : public ProcessGroup {
   c10::intrusive_ptr<ProcessGroup::Work> recvAnysource(
       std::vector<at::Tensor>& tensors,
       int tag) override;
+
+   // Agrees on an initial sequence number for the whole group by having rank 0
+  // create it and broadcast it to other ranks using the store.
+  void setSequenceNumberForGroup() override;
+
+  // Retrieves the current sequence number for the whole group, which should be
+  // in sync. If the returned number is not consistent across the group, it
+  // may indicate that there is some sort of collective desynchronization.
+  uint64_t getSequenceNumberForGroup() override;
 
  protected:
   // Helper that broadcasts nccl unique ID to all ranks through the store
@@ -382,7 +394,8 @@ class ProcessGroupNCCL : public ProcessGroup {
       std::vector<at::Tensor>& tensor,
       Fn fn,
       int peer,
-      OpType opType);
+      OpType opType,
+      const char* profilingTitle = nullptr);
   template <typename Fn, typename PreProcess, typename PostProcess>
   c10::intrusive_ptr<ProcessGroup::Work> pointToPoint(
       std::vector<at::Tensor>& tensor,
@@ -390,7 +403,8 @@ class ProcessGroupNCCL : public ProcessGroup {
       int peer,
       OpType opType,
       PreProcess pre,
-      PostProcess post);
+      PostProcess post,
+      const char* profilingTitle);
 
   // Checks for NCCL errors on each of the communicators and returns an
   // appropriate exception_ptr (nullptr if no errors).
@@ -548,3 +562,5 @@ class ProcessGroupNCCL : public ProcessGroup {
 };
 
 } // namespace c10d
+
+#endif // USE_C10D_NCCL
