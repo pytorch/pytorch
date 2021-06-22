@@ -1071,9 +1071,11 @@ class Tensor(torch._C._TensorBase):
             -1 . If stream is -1 , the value may be used by the consumer to
             signal "producer must not perform any synchronization. Optional.
         """
+        if has_torch_function_unary(self):
+            return handle_torch_function(Tensor.__dlpack__, (self,), self, stream)
         if stream is not None and type(stream) is not int:
             # Stream pointers in CUDA/ROCm are uniquely numbered and can
-            # be retrieved from their integer value. 
+            # be retrieved from their integer value.
             raise TypeError('stream must be ``int`` or ``none``')
         elif stream is not None and stream != -1:
             if self.device.type == 'cuda':
@@ -1083,10 +1085,10 @@ class Tensor(torch._C._TensorBase):
                     event = torch.cuda.Event()
                     event.record(stream)
                     torch.cuda.current_stream().wait_event(event)
-        return torch.utils.dlpack.to_dlpack(self)
+        return torch.to_dlpack(self)
 
     def __dlpack_device__(self) -> Tuple[enum.IntEnum, int]:
-        class DLPackIds(enum.IntEnum): 
+        class DLPackIds(enum.IntEnum):
             cpu = 1
             cpu_pinned = 3
             cuda = 2
@@ -1094,12 +1096,16 @@ class Tensor(torch._C._TensorBase):
             vulkan = 7
             rocm = 10
 
+        if has_torch_function_unary(self):
+            return handle_torch_function(Tensor.__dlpack_device__, (self,), self)
         idx = self.device.index if self.device.index is not None else 0
         device_type = self.device.type
         if device_type == 'cuda' and torch.version.hip is not None:
             device_type = 'rocm'
         elif device_type == 'cpu' and self.is_pinned():
             device_type = 'cpu_pinned'
+        if device_type not in DLPackIds:
+            raise ValueError('Unknown device type {} for Dlpack'.format(device_type))
         return (DLPackIds[device_type], idx)
 
     __module__ = 'torch'

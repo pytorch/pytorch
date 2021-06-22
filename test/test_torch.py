@@ -7101,6 +7101,8 @@ else:
         # It does it through uint8 type
         if dtype is torch.bool:
             return
+        if device == 'xla':
+            return
         x = make_tensor((5,), device, dtype, low=-9, high=9)
         z = from_dlpack(to_dlpack(x))
         self.assertEqual(z, x)
@@ -7112,6 +7114,8 @@ else:
         # It does it through uint8 type
         if dtype is torch.bool:
             return
+        if device == 'xla':
+            return
         x = make_tensor((5,), device, dtype, low=-9, high=9)
         z = from_dlpack(x)
         self.assertEqual(z, x)
@@ -7122,6 +7126,8 @@ else:
         # DLpack does not explicitly support bool
         # It does it through uint8 type
         if dtype is torch.bool:
+            return
+        if device == 'xla':
             return
         # Create a stream where the tensor will reside
         if device == 'cuda':
@@ -7140,6 +7146,8 @@ else:
         # DLpack does not explicitly support bool
         # It does it through uint8 type
         if dtype is torch.bool:
+            return
+        if device == 'xla':
             return
         if device == 'cuda':
             from torch._C import _from_dlpack
@@ -7164,6 +7172,8 @@ else:
         # DLpack does not explicitly support bool
         # It does it through uint8 type
         if dtype is torch.bool:
+            return
+        if device == 'xla':
             return
         with self.assertRaises(TypeError):
             x = make_tensor((5,), device, dtype, low=-9, high=9)
