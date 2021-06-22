@@ -35,7 +35,7 @@ void launch_cross_kernel(const TensorIteratorBase& iter, int64_t ostride,
                          int64_t x1stride, int64_t x2stride) {
   const auto N = iter.numel();
   auto offset_calculator = make_element_offset_calculator<3>(iter);
-  TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(N > 0 && N <= std::numeric_limits<int32_t>::max());
   int64_t grid = (N + NUM_THREADS - 1) / NUM_THREADS;
   auto stream = at::cuda::getCurrentCUDAStream();
 
