@@ -157,18 +157,7 @@ CUDA_MISMATCH_MESSAGE = '''
 The detected CUDA version ({0}) mismatches the version that was used to compile
 PyTorch ({1}). Please make sure to use the same CUDA versions.
 '''
-CUDA_MISMATCH_WARN = '''
-
-                               !! WARNING !!
-
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-The detected CUDA version ({0}) mismatches the version that was used to compile
-PyTorch ({1}). Please make sure to use the same CUDA versions, otherwise some
-errors may appear during compilation/runtime.
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-                              !! WARNING !!
-'''
+CUDA_MISMATCH_WARN = "The detected CUDA version ({0}) mismatches the minor version that was used to compile PyTorch ({1}). Most likely this shouldn't be a problem."
 CUDA_NOT_FOUND_MESSAGE = '''
 CUDA was not found on the system, please set the CUDA_HOME or the CUDA_PATH
 environment variable or add NVCC to your system PATH. The extension compilation will fail.
