@@ -87,8 +87,6 @@ static void warnFallback(const c10::FunctionSchema& schema, bool is_inplace) {
 //   the operator, and then pop the results off the stack.
 void batchedTensorInplaceForLoopFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   const auto& schema = op.schema();
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
-  const auto num_returns = schema.returns().size();
   warnFallback(schema, /*in_place*/true);
 
   const auto num_arguments = schema.arguments().size();

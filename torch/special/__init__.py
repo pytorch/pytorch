@@ -35,6 +35,41 @@ Example::
     tensor([  -inf, 0.0000, 0.3466])
 """)
 
+psi = _add_docstr(_special.special_psi,
+                  r"""
+psi(input, *, out=None) -> Tensor
+
+Alias for :func:`torch.special.digamma`.
+""")
+
+digamma = _add_docstr(_special.special_digamma,
+                      r"""
+digamma(input, *, out=None) -> Tensor
+
+Computes the logarithmic derivative of the gamma function on `input`.
+
+.. math::
+    \digamma(x) = \frac{d}{dx} \ln\left(\Gamma\left(x\right)\right) = \frac{\Gamma'(x)}{\Gamma(x)}
+""" + r"""
+Args:
+    input (Tensor): the tensor to compute the digamma function on
+
+Keyword args:
+    {out}
+
+.. note::  This function is similar to SciPy's `scipy.special.digamma`.
+
+.. note::  From PyTorch 1.8 onwards, the digamma function returns `-Inf` for `0`.
+           Previously it returned `NaN` for `0`.
+
+Example::
+
+    >>> a = torch.tensor([1, 0.5])
+    >>> torch.special.digamma(a)
+    tensor([-0.5772, -1.9635])
+
+""".format(**common_args))
+
 gammaln = _add_docstr(_special.special_gammaln,
                       r"""
 gammaln(input, *, out=None) -> Tensor
@@ -99,6 +134,30 @@ Example::
 
     >>> torch.special.erfc(torch.tensor([0, -1., 10.]))
     tensor([ 1.0000, 1.8427,  0.0000])
+""".format(**common_args))
+
+erfcx = _add_docstr(_special.special_erfcx,
+                    r"""
+erfcx(input, *, out=None) -> Tensor
+
+Computes the scaled complementary error function for each element of :attr:`input`.
+The scaled complementary error function is defined as follows:
+
+.. math::
+    \mathrm{erfcx}(x) = e^{x^2} \mathrm{erfc}(x)
+""" + r"""
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> torch.special.erfcx(torch.tensor([0, -1., 10.]))
+    tensor([ 1.0000, 5.0090, 0.0561])
 """.format(**common_args))
 
 erfinv = _add_docstr(_special.special_erfinv,
@@ -307,8 +366,10 @@ for each element of :attr:`input`.
 """ + r"""
 Args:
     {input}
+
 Keyword args:
     {out}
+
 Example::
     >>> torch.special.i0e(torch.arange(5, dtype=torch.float32))
     tensor([1.0000, 0.4658, 0.3085, 0.2430, 0.2070])
@@ -326,8 +387,10 @@ for each element of :attr:`input`.
 """ + r"""
 Args:
     {input}
+
 Keyword args:
     {out}
+
 Example::
     >>> torch.special.i1(torch.arange(5, dtype=torch.float32))
     tensor([0.0000, 0.5652, 1.5906, 3.9534, 9.7595])
@@ -346,8 +409,10 @@ for each element of :attr:`input`.
 """ + r"""
 Args:
     {input}
+
 Keyword args:
     {out}
+
 Example::
     >>> torch.special.i1e(torch.arange(5, dtype=torch.float32))
     tensor([0.0000, 0.2079, 0.2153, 0.1968, 0.1788])
@@ -373,3 +438,69 @@ Example::
     >>> torch.special.ndtr(torch.tensor([-3., -2, -1, 0, 1, 2, 3]))
     tensor([0.0013, 0.0228, 0.1587, 0.5000, 0.8413, 0.9772, 0.9987])
 """.format(**common_args))
+
+ndtri = _add_docstr(_special.special_ndtri,
+                    r"""
+ndtri(input, *, out=None) -> Tensor
+Computes the argument, x, for which the area under the Gaussian probability density function
+(integrated from minus infinity to x) is equal to :attr:`input`, elementwise.
+
+.. math::
+    \text{ndtri}(p) = \sqrt{2}\text{erf}^{-1}(2p - 1)
+
+.. note::
+    Also known as quantile function for Normal Distribution.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+
+Example::
+    >>> torch.special.ndtri(torch.tensor([0, 0.25, 0.5, 0.75, 1]))
+    tensor([   -inf, -0.6745,  0.0000,  0.6745,     inf])
+""".format(**common_args))
+
+log1p = _add_docstr(_special.special_log1p,
+                    r"""
+log1p(input, *, out=None) -> Tensor
+
+Alias for :func:`torch.log1p`.
+""")
+
+sinc = _add_docstr(_special.special_sinc,
+                   r"""
+sinc(input, *, out=None) -> Tensor
+
+Computes the normalized sinc of :attr:`input.`
+
+.. math::
+    \text{out}_{i} =
+    \begin{cases}
+      1, & \text{if}\ \text{input}_{i}=0 \\
+      \sin(\pi \text{input}_{i}) / (\pi \text{input}_{i}), & \text{otherwise}
+    \end{cases}
+""" + r"""
+
+Args:
+    {input}
+
+Keyword args:
+    {out}
+
+Example::
+    >>> t = torch.randn(4)
+    >>> t
+    tensor([ 0.2252, -0.2948,  1.0267, -1.1566])
+    >>> torch.special.sinc(t)
+    tensor([ 0.9186,  0.8631, -0.0259, -0.1300])
+""".format(**common_args))
+
+round = _add_docstr(_special.special_round,
+                    r"""
+round(input, *, out=None) -> Tensor
+
+Alias for :func:`torch.round`.
+""")

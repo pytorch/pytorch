@@ -405,6 +405,7 @@ def use_deterministic_algorithms(mode):
 
         * :class:`torch.nn.ReflectionPad1d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReflectionPad2d` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.ReflectionPad3d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReplicationPad1d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReplicationPad2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReplicationPad3d` when attempting to differentiate a CUDA tensor
@@ -510,6 +511,15 @@ def is_warn_always_enabled():
     :func:`torch.set_warn_always` documentation for more details.
     """
     return _C._get_warnAlways()
+
+################################################################################
+# Define numeric constants
+################################################################################
+
+# For Python Array API (https://data-apis.org/array-api/latest/API_specification/constants.html) and
+# NumPy consistency (https://numpy.org/devdocs/reference/constants.html)
+from math import e , nan , inf , pi
+__all__.extend(['e', 'pi', 'nan', 'inf'])
 
 ################################################################################
 # Define Storage and Tensor classes
@@ -671,7 +681,6 @@ def _assert(condition, message):
 # Use the redundant form so that type checkers know that these are a part of
 # the public API. The "regular" import lines are there solely for the runtime
 # side effect of adding to the imported module's members for other users.
-
 from torch import cuda as cuda
 from torch import cpu as cpu
 from torch import autograd as autograd
@@ -687,6 +696,8 @@ from torch import nn as nn
 import torch.nn.intrinsic
 import torch.nn.quantizable
 import torch.nn.quantized
+# AO depends on nn, as well as quantized stuff -- so should be after those.
+from torch import ao as ao
 from torch import optim as optim
 import torch.optim._multi_tensor
 from torch import multiprocessing as multiprocessing

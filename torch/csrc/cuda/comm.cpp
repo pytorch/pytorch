@@ -190,11 +190,9 @@ tensor_list2d broadcast_coalesced(
         auto& device_outputs = outputs[i];
         auto& inds = broadcast_indices[i];
         auto& vals = broadcast_values[i];
-        for (auto& t :
+        for (const auto& var :
              utils::unflatten_sparse_tensors(inds, vals, chunk.tensors)) {
           // See NOTE [ Version Counter in comm.*_coalesced ]
-          // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-          Variable var = t;
           device_outputs.push_back(make_variable(var.tensor_data(), false));
         }
       }
@@ -204,11 +202,9 @@ tensor_list2d broadcast_coalesced(
       for (size_t i = 1, num_devices = devices.size(); i < num_devices; ++i) {
         device_guard.set_index(devices[i]);
         auto& device_outputs = outputs[i];
-        for (auto& t :
+        for (auto& var :
              utils::unflatten_dense_tensors(results[i], chunk.tensors)) {
           // See NOTE [ Version Counter in comm.*_coalesced ]
-          // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-          Variable var = t;
           device_outputs.push_back(make_variable(var.tensor_data(), false));
         }
       }
@@ -332,7 +328,7 @@ std::vector<at::Tensor> scatter(
       ? tensor.split_with_sizes(/*split_sizes=*/*chunk_sizes, /*dim=*/dim)
       : tensor.chunk(/*chunks=*/devices.size(), /*dim=*/dim);
   at::cuda::OptionalCUDAStreamGuard cuda_guard;
-  for (size_t i = 0; i < chunks.size(); ++i) {
+  for (const auto i : c10::irange(chunks.size())) {
     const auto device_index = static_cast<int16_t>(devices[i]);
     if (device_index != tensor.get_device()) {
       if (i < (streams ? streams->size() : 0U) && (*streams)[i]) {
@@ -417,7 +413,7 @@ at::Tensor& gather_out(
         expected_size.size(),
         ")");
     expected_size[dim] = tensor.size(dim);
-    for (size_t dimension = 0; dimension < expected_size.size(); ++dimension) {
+    for (const auto dimension : c10::irange(expected_size.size())) {
       TORCH_CHECK(
           expected_size[dimension] == tensor.size(dimension),
           "Input tensor at index ",
@@ -471,7 +467,7 @@ at::Tensor gather(
         expected_size.size(),
         ")");
     expected_size[dim] = tensor.size(dim);
-    for (size_t dimension = 0; dimension < expected_size.size(); ++dimension) {
+    for (const auto dimension : c10::irange(expected_size.size())) {
       TORCH_CHECK(
           expected_size[dimension] == tensor.size(dimension),
           "Input tensor at index ",

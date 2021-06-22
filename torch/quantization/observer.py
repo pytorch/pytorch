@@ -7,6 +7,21 @@ from typing import Any, List, Tuple, Optional, Dict, Union
 
 import torch
 import torch.nn as nn
+from .utils import check_min_max_valid
+
+
+class _PartialWrapper(object):
+    def __init__(self, p):
+        self.p = p
+
+    def __call__(self, *args, **keywords):
+        return self.p(*args, **keywords)
+
+    def __repr__(self):
+        return self.p.__repr__()
+
+    def with_args(self, **kwargs):
+        return _with_args(self, **kwargs)
 
 
 def _with_args(cls_or_self, **kwargs):
@@ -24,19 +39,6 @@ def _with_args(cls_or_self, **kwargs):
         >>> id(foo_instance1) == id(foo_instance2)
         False
     """
-
-    class _PartialWrapper(object):
-        def __init__(self, p):
-            self.p = p
-
-        def __call__(self, *args, **keywords):
-            return self.p(*args, **keywords)
-
-        def __repr__(self):
-            return self.p.__repr__()
-
-        with_args = _with_args
-
     r = _PartialWrapper(partial(cls_or_self, **kwargs))
     return r
 
@@ -270,28 +272,8 @@ class _ObserverBase(ObserverBase):
             scales: Scales tensor of shape (#channels,)
             zero_points: Zero points tensor of shape (#channels,)
         """
-        if min_val.numel() == 0 or max_val.numel() == 0:
-            warnings.warn(
-                "must run observer before calling calculate_qparams.\
-                                    Returning default scale and zero point "
-            )
+        if not check_min_max_valid(min_val, max_val):
             return torch.tensor([1.0]), torch.tensor([0])
-
-        if min_val.dim() == 0 or max_val.dim() == 0:
-            if min_val == float("inf") and max_val == float("-inf"):
-                warnings.warn(
-                    "must run observer before calling calculate_qparams.\
-                                        Returning default scale and zero point "
-                )
-                return torch.tensor([1.0]), torch.tensor([0])
-
-            assert min_val <= max_val, "min {} should be less than max {}".format(
-                min_val, max_val
-            )
-        else:
-            assert torch.all(
-                min_val <= max_val
-            ), "min {} should be less than max {}".format(min_val, max_val)
 
         quant_min, quant_max = self._calculate_qmin_qmax()
         min_val_neg = torch.min(min_val, torch.zeros_like(min_val))

@@ -228,7 +228,7 @@ Graph Manipulation Examples
 -  `Replace one
    op <https://github.com/pytorch/examples/blob/master/fx/replace_op.py>`__
 -  `Conv/Batch Norm
-   fusion <https://github.com/pytorch/pytorch/blob/master/torch/fx/experimental/fuser.py>`__
+   fusion <https://github.com/pytorch/pytorch/blob/40cbf342d3c000712da92cfafeaca651b3e0bd3e/torch/fx/experimental/optimization.py#L50>`__
 -  `replace_pattern: Basic usage <https://github.com/pytorch/examples/blob/master/fx/subgraph_rewriter_basic_use.py>`__
 -  `Quantization <https://pytorch.org/docs/master/quantization.html#prototype-fx-graph-mode-quantization>`__
 -  `Invert Transformation <https://github.com/pytorch/examples/blob/master/fx/invert.py>`__
