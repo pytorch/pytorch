@@ -517,6 +517,9 @@
 - name: erfc(Tensor self) -> Tensor
   self: -2.0 / sqrt(M_PI) * exp(-(self.pow(2))) * grad
 
+- name: special_erfcx(Tensor self) -> Tensor
+  self: (2.0 * self * result - 2.0 / sqrt(M_PI)) * grad
+
 - name: erfinv(Tensor self) -> Tensor
   self: 0.5 * sqrt(M_PI) * exp(self.erfinv().pow(2)) * grad
 
