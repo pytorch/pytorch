@@ -991,10 +991,12 @@ def set_warn_always_context(new_val: bool):
 
 class TestCase(expecttest.TestCase):
     # NOTE: "precision" lets classes and generated tests set minimum
-    # atol values when comparing tensors. Used by @precisionOverride, for
+    # atol values when comparing tensors. Used by @precisionOverride and @toleranceOverride, for
     # example.
-    # TODO: provide a better mechanism for generated tests to set rtol/atol.
+    # NOTE: "rel_tol" lets classes and generated tests set minimum
+    # rtol values when comparing tensors. Used by @toleranceOverride, for example.
     _precision: float = 0
+    _rel_tol: float = 0
 
     # checker to early terminate test suite if unrecoverable failure occurs.
     def _should_stop_test_suite(self):
@@ -1016,6 +1018,14 @@ class TestCase(expecttest.TestCase):
     @precision.setter
     def precision(self, prec: float) -> None:
         self._precision = prec
+
+    @property
+    def rel_tol(self) -> float:
+        return self._rel_tol
+
+    @rel_tol.setter
+    def rel_tol(self, prec: float) -> None:
+        self._rel_tol = prec
 
     _do_cuda_memory_leak_check = False
     _do_cuda_non_default_stream = False
@@ -1263,6 +1273,7 @@ class TestCase(expecttest.TestCase):
             rtol, atol = self._getDefaultRtolAndAtol(a.dtype, b.dtype)
 
         atol = max(atol, self.precision)
+        rtol = max(rtol, self.rel_tol)
 
         # Converts to comparison dtype
         dtype = get_comparison_dtype(a, b)
@@ -1290,6 +1301,7 @@ class TestCase(expecttest.TestCase):
         atol = cast(float, atol)
         assert atol is not None
         atol = max(atol, self.precision)
+        rtol = max(rtol, self.rel_tol)
 
         return _compare_scalars_internal(a, b, rtol=rtol, atol=atol, equal_nan=equal_nan)
 
