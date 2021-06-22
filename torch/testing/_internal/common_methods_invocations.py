@@ -2289,8 +2289,6 @@ class SpectralFuncInfo(OpInfo):
         decorators += [
             skipCPUIfNoMkl,
             skipCUDAIfRocm,
-            # gradgrad is quite slow
-            # DecorateInfo(slowTest, 'TestGradients', 'test_fn_gradgrad'),
         ]
 
         super().__init__(name=name,
