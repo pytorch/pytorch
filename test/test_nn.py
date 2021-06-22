@@ -5652,7 +5652,7 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @repeat_test_for_types(ALL_TENSORTYPES)
-    @tf32_on_and_off(0.001)
+    @tf32_on_and_off(0.005)
     def test_Conv3d_depthwise_naive_groups_cuda(self, dtype=torch.float):
         for depth_multiplier in [1, 2]:
             m = nn.Conv3d(2, 2 * depth_multiplier, kernel_size=3, groups=2).to("cuda", dtype)
@@ -5761,7 +5761,6 @@ class TestNN(NNTestCase):
                      nn.RNNCell(*cell_shared_param, nonlinearity="tanh"),
                      nn.GRUCell(*cell_shared_param)):
             self.assertRaises(Exception, lambda: cell(input, hx))
-
 
     def _test_loss_equal_input_target_shape(self, cast):
         # Tests losses whose inputs should have the same size.
@@ -12550,6 +12549,36 @@ class TestNNDeviceType(NNTestCase):
                 self._test_module_empty_input(mod, inp)
 
     @onlyOnCPUAndCUDA
+    def test_GroupNorm_numeric(self, device):
+        def group_norm_ref(X, gamma, beta, groups, channels, eps):
+            batch_size = X.size()[0]
+            X_view = X.view(batch_size, groups, -1)
+            mean = X_view.mean(dim=-1, keepdim=True)
+            var = X_view.var(dim=-1, unbiased=False, keepdim=True)
+            Y = ((X_view - mean) / torch.sqrt(var + eps)).view(
+                batch_size, channels, -1)
+            Y = Y * gamma.view(channels, 1) + beta.view(channels, 1)
+            return Y.view(*X.size())
+
+        batch_size = 1
+        groups = 4
+        channels = 32
+        group_norm = nn.GroupNorm(groups, channels).float().to(device)
+        X = torch.rand(batch_size, channels, 256, 256, 72,
+                       dtype=torch.float32, device=device)
+
+        Y = group_norm(X)
+        Y_ref = group_norm_ref(
+            X, group_norm.weight.data, group_norm.bias.data, groups,
+            channels, group_norm.eps)
+        self.assertEqual(Y, Y_ref, rtol=0, atol=1e-5)
+
+        if self.device_type == 'cuda':
+            group_norm.cpu()
+            Y_cpu = group_norm(X.cpu())
+            self.assertEqual(Y_cpu, Y, rtol=0, atol=1e-5)
+
+    @onlyOnCPUAndCUDA
     @dtypes(torch.float64, torch.complex128)
     def test_pad(self, device, dtype):
         inputs = torch.randn(1, 3, 4, 4, device=device, dtype=dtype, requires_grad=True)
@@ -12720,7 +12749,8 @@ class TestNNDeviceType(NNTestCase):
     def test_ReflectionPad_empty(self, device, dtype):
         for mod, inp in [
                 (torch.nn.ReflectionPad1d(2), torch.randn(0, 3, 10, device=device, dtype=dtype)),
-                (torch.nn.ReflectionPad2d(2), torch.randn(0, 3, 10, 10, device=device, dtype=dtype))]:
+                (torch.nn.ReflectionPad2d(2), torch.randn(0, 3, 10, 10, device=device, dtype=dtype)),
+                (torch.nn.ReflectionPad3d(3), torch.randn(0, 3, 10, 10, 10, device=device, dtype=dtype))]:
             self._test_module_empty_input(mod, inp, check_size=False)
 
         with self.assertRaisesRegex(RuntimeError, '2D or 3D'):
@@ -12731,6 +12761,11 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, '3D or 4D'):
             mod = torch.nn.ReflectionPad2d(2)
             inp = torch.randn(3, 0, 10, 10, device=device, dtype=dtype)
+            mod(inp)
+
+        with self.assertRaisesRegex(RuntimeError, '4D or 5D'):
+            mod = torch.nn.ReflectionPad3d(3)
+            inp = torch.randn(3, 0, 10, 10, 10, device=device, dtype=dtype)
             mod(inp)
 
     @onlyCUDA   # Test if CPU and GPU results match
@@ -12754,6 +12789,26 @@ class TestNNDeviceType(NNTestCase):
 
             self.assertEqual(x.grad, ref_x.grad)
 
+    @onlyCUDA   # Test if CPU and GPU results match
+    def test_ReflectionPad3d_large(self, device):
+        shapes = ([2, 1000, 7, 7, 7], [1000, 2, 7, 7, 7])
+        pad = (1, 2, 3, 4, 5, 6)
+        for shape in shapes:
+            x = torch.randn(shape, device=device, requires_grad=True)
+            ref_x = x.detach().cpu().requires_grad_()
+
+            out = F.pad(x, pad, mode='reflect')
+            ref_out = F.pad(ref_x, pad, mode='reflect')
+
+            self.assertEqual(out, ref_out)
+
+            g = torch.randn_like(out)
+            ref_g = g.cpu()
+
+            out.backward(g)
+            ref_out.backward(ref_g)
+
+            self.assertEqual(x.grad, ref_x.grad)
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.float, torch.double)
