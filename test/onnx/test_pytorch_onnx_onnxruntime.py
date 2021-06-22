@@ -9240,6 +9240,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.ones(12)
         self.run_test(M(), (x,))
 
+        x = torch.ones(2, 0, 3)
         self.run_test(M(), (x,))
 
         x = torch.ones(0)
