@@ -35,11 +35,6 @@ struct CudaIPCGlobalEntities {
   CudaIPCGlobalEntities() { alive = true; }
   ~CudaIPCGlobalEntities() {
     CudaIPCSentDataLimbo_.collect();
-    // Clear shared blocks to avoid releasing shared blocks after
-    // ~CudaIPCGlobalEntities is done since circular references causes the
-    // destructor of ~CudaIPCSentData to access the cuda_ipc_global_entities
-    // again.
-    CudaIPCSentDataLimbo_.clear_shared_blocks();
     safe_clean_current_file();
     if (next_available_ref_counters_file_) {
       warnProducerTerminatedBeforeSharedTensorsReleased();
