@@ -157,6 +157,18 @@ CUDA_MISMATCH_MESSAGE = '''
 The detected CUDA version ({0}) mismatches the version that was used to compile
 PyTorch ({1}). Please make sure to use the same CUDA versions.
 '''
+CUDA_MISMATCH_WARN = '''
+
+                               !! WARNING !!
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+The detected CUDA version ({0}) mismatches the version that was used to compile
+PyTorch ({1}). Please make sure to use the same CUDA versions, otherwise some
+errors may appear during compilation/runtime.
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+                              !! WARNING !!
+'''
 CUDA_NOT_FOUND_MESSAGE = '''
 CUDA was not found on the system, please set the CUDA_HOME or the CUDA_PATH
 environment variable. The extension compilation will fail.
@@ -774,6 +786,9 @@ class BuildExtension(build_ext, object):
                 torch_cuda_version = parse_version(torch.version.cuda)
                 if cuda_version.major != torch_cuda_version.major:
                     raise RuntimeError(CUDA_MISMATCH_MESSAGE.format(
+                        cuda_str_version, torch.version.cuda))
+                elif cuda_version.minor != torch_cuda_version.minor:
+                    warnings.warn(CUDA_MISMATCH_WARN.format(
                         cuda_str_version, torch.version.cuda))
         else:
             raise RuntimeError(CUDA_NOT_FOUND_MESSAGE)
