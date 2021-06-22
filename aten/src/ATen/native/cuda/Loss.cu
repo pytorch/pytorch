@@ -240,7 +240,6 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_2d(
   __syncthreads();
 
   if (threadIdx.x == 0) {
-    *output = *total_weight = static_cast<scalar_t>(0);
     accscalar_t output_acc = 0;
     accscalar_t total_weight_acc = 0;
     for (int i = 0; i < NLL_LOSS_THREADS; ++i) {
@@ -248,14 +247,11 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_2d(
       total_weight_acc += acc_weight[i];
     }
     *total_weight = static_cast<scalar_t>(total_weight_acc);
-    if (size_average) {
-      if (nframe == 0) {
-        // Mean reduction on empty tensors produces NaN
-        *output = std::numeric_limits<double>::quiet_NaN();
-      }
-      if (total_weight_acc != 0) {
-        *output = static_cast<scalar_t>(output_acc / total_weight_acc);
-      }
+    if (size_average && nframe == 0) {
+      // Mean reduction on empty tensors produces NaN
+      *output = std::numeric_limits<double>::quiet_NaN();
+    } else if (size_average && total_weight_acc != 0) {
+      *output = static_cast<scalar_t>(output_acc / total_weight_acc);
     } else {
       *output = static_cast<scalar_t>(output_acc);
     }

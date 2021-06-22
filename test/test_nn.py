@@ -15936,13 +15936,13 @@ class TestNNDeviceType(NNTestCase):
             F.nll_loss(x, t, ignore_index=255, reduction=reduction).sum().backward()
 
     def test_nll_loss_invalid_target_dim(self, device):
-        x = torch.randn((10, 3), requires_grad=True, device=device)
+        x = torch.randn((10, 3), device=device)
         t = torch.zeros((10, 2), dtype=torch.int64, device=device),
         with self.assertRaisesRegex(RuntimeError, "1D target tensor expected"):
             F.nll_loss(x, t)
 
     def test_nll_loss_invalid_weights(self, device):
-        x = torch.randn((10, 3), requires_grad=True, device=device)
+        x = torch.randn((10, 3), device=device)
         t = torch.empty(10, dtype=torch.int64, device=device).random_(0, 3)
         invalid_weights = [
             torch.randn(4, device=device),
@@ -15952,6 +15952,14 @@ class TestNNDeviceType(NNTestCase):
         for weight in invalid_weights:
             with self.assertRaisesRegex(RuntimeError, msg):
                 F.nll_loss(x, t, weight=weight)
+
+    def test_nll_loss_zero_weights(self, device):
+        x = torch.randn((10, 3), device=device)
+        t = torch.empty(10, dtype=torch.int64, device=device).random_(0, 3)
+        weight = torch.zeros(3, device=device)
+        for reduction in ['mean', 'sum']:
+            result = F.nll_loss(x, t, weight=weight, reduction=reduction)
+            self.assertAlmostEqual(result, 0.0)
 
     def _nll_loss_helper(self, input_size, reduction, expected, device):
         input = torch.rand(input_size, requires_grad=True, device=device)
