@@ -124,7 +124,7 @@ Tensor qcat_nhwc_kernel(
             constexpr int64_t VLEN = Vec::size();
             int64_t c = 0;
 
-            // Vectorizedd loop
+            // Vectorized loop
             if (c + VLEN <= curr_C) {
               auto curr_scale_vec = Vectorized<float>(curr_scale);
               auto curr_zero_pt_vec = Vectorized<float>((float)curr_zero_pt);
