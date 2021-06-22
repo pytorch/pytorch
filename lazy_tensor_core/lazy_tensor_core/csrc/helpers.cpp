@@ -130,13 +130,13 @@ Helpers::MinMax Helpers::MinMaxValues(lazy_tensors::PrimitiveType type) {
   }
 }
 
-absl::optional<Helpers::DynamicReshapeInfo> Helpers::GetDynamicReshapeInfo(
+c10::optional<Helpers::DynamicReshapeInfo> Helpers::GetDynamicReshapeInfo(
     const lazy_tensors::Shape& input_shape,
     lazy_tensors::Span<const lazy_tensors::int64> output_sizes) {
   lazy_tensors::int64 input_dynamic_dimension =
       GetDynamicDimension(input_shape);
   if (input_dynamic_dimension < 0) {
-    return absl::nullopt;
+    return c10::nullopt;
   }
   DynamicReshapeInfo info;
   info.output_shape = lazy_tensors::ShapeUtil::MakeShape(

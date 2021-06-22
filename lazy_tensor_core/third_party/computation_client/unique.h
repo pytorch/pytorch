@@ -1,10 +1,11 @@
 #ifndef COMPUTATION_CLIENT_UNIQUE_H_
 #define COMPUTATION_CLIENT_UNIQUE_H_
 
+#include <c10/util/Optional.h>
+
 #include <functional>
 #include <set>
 
-#include "absl/types/optional.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
 
 namespace lazy_tensors {
@@ -39,7 +40,7 @@ class Unique {
   }
 
  private:
-  absl::optional<T> value_;
+  c10::optional<T> value_;
 };
 
 }  // namespace util

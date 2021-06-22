@@ -1,8 +1,9 @@
 #pragma once
 
+#include <c10/util/Optional.h>
+
 #include <vector>
 
-#include "absl/types/optional.h"
 #include "lazy_tensors/computation_client/types.h"
 #include "lazy_tensors/span.h"
 

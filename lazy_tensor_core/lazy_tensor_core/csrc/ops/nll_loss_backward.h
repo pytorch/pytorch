@@ -1,6 +1,7 @@
 #pragma once
 
-#include "absl/types/optional.h"
+#include <c10/util/Optional.h>
+
 #include "lazy_tensor_core/csrc/ir.h"
 #include "lazy_tensor_core/csrc/reduction.h"
 
@@ -11,8 +12,8 @@ namespace ops {
 class NllLossBackward : public Node {
  public:
   NllLossBackward(const Value& grad_output, const Value& logits,
-                  const Value& labels, const absl::optional<Value>& weight,
-                  const absl::optional<Value>& total_weight,
+                  const Value& labels, const c10::optional<Value>& weight,
+                  const c10::optional<Value>& total_weight,
                   ReductionMode reduction, int ignore_index);
 
   std::string ToString() const override;

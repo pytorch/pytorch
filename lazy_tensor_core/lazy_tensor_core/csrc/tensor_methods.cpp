@@ -291,8 +291,8 @@ ir::Value GetFloatingIrValue(const LazyTensor& input,
   return input_value;
 }
 
-absl::optional<ir::Value> GetOptionalIrValue(const LazyTensor& tensor) {
-  absl::optional<ir::Value> value;
+c10::optional<ir::Value> GetOptionalIrValue(const LazyTensor& tensor) {
+  c10::optional<ir::Value> value;
   if (!tensor.is_null()) {
     value = tensor.GetIrValue();
   }
