@@ -981,31 +981,6 @@ inline int64_t get_device(const Tensor& self) {
   return self.get_device();
 }
 
-#define DEFINE_CAST(T, name)                                        \
-  template <>                                                       \
-  TORCH_API inline T* Tensor::data_ptr() const {                    \
-    TORCH_CHECK(                                                    \
-        scalar_type() == ScalarType::name,                          \
-        "expected scalar type "                                     \
-        #name                                                       \
-        " but found ",                                              \
-        scalar_type());                                             \
-    return this->unsafeGetTensorImpl()->data_ptr_impl<T>();         \
-  }
-
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_CAST)
-AT_FORALL_QINT_TYPES(DEFINE_CAST)
-#undef DEFINE_CAST
-
-#define DEFINE_ITEM(T, name)                \
-  template <>                               \
-  TORCH_API inline T Tensor::item() const { \
-    return item().to##name();               \
-  }
-
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_ITEM)
-#undef DEFINE_ITEM
-
 template <typename T>
 auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_void_t<T> {
   // Return the grad argument in case of a hook with void return type to have an

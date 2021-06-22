@@ -254,7 +254,11 @@ struct TORCH_API {name} {{
   static {sig.defn(name=redispatch_method_name, is_redispatching_fn=True)};
 }};"""
         elif self.target is Target.DEFINITION:
-            defns = ''
+            defns = f"""
+STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, name, "aten::{str(f.func.name)}")
+STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, overload_name, "{f.func.name.overload_name}")
+STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, schema_str, {cpp_string(str(f.func))})"""
+
             for is_redispatching_fn in [False, True]:
                 if is_redispatching_fn:
                     dispatcher_exprs_str = ', '.join(['dispatchKeySet'] + [a.name for a in sig.arguments()])
@@ -274,11 +278,6 @@ struct TORCH_API {name} {{
     return op.{dispatcher_call}({dispatcher_exprs_str});
 }}
 """
-                defns += f"""
-STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, name, "aten::{str(f.func.name)}")
-STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, overload_name, "{f.func.name.overload_name}")
-STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, schema_str, {cpp_string(str(f.func))})"""
-
             return defns
         else:
             assert_never(self.target)
@@ -1118,6 +1117,8 @@ def main() -> None:
             static_dispatch_backend_index=static_dispatch_idx), native_functions)),
     })
 
+    cpu_fm.write('Functions.cpp', lambda: {})
+
     core_fm.write('TensorBody.h', lambda: {
         'static_dispatch_extra_headers': static_dispatch_extra_headers(static_dispatch_idx, skip_tensor_include=True),
         'tensor_method_declarations': list(mapMaybe(ComputeTensorMethod(
@@ -1125,6 +1126,8 @@ def main() -> None:
         'tensor_method_definitions': list(mapMaybe(ComputeTensorMethod(
             target=Target.DEFINITION, static_dispatch_backend_index=static_dispatch_idx), native_functions)),
     })
+
+    cpu_fm.write('TensorMethods.cpp', lambda: {})
 
     cpu_fm.write('RedispatchFunctions.h', lambda: {
         'function_redispatch_definitions': list(mapMaybe(ComputeRedispatchFunction(), native_functions)),
