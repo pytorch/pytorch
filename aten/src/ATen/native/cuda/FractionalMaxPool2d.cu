@@ -134,12 +134,10 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_out_cuda) (
   int planeDim = 0;
   int dimh = 1;
   int dimw = 2;
-  int numBatch = 1;
 
   int ndims = input.ndimension();
 
   if (ndims == 4) {
-    numBatch = input.size(0);
     planeDim++;
     dimh++;
     dimw++;
