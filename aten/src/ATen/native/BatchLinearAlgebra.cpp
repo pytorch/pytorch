@@ -3788,6 +3788,14 @@ Tensor _det_lu_based_helper_backward_helper(
     // triangular_solve_stub performs operations in-place.
     // Tensor d will contain the result
     condition_diagonal(u);
+
+    // Solve u^h x = d
+    // note that d = c I for some scalar c, hence
+    // d u_h^{-1} = c I u_h^{-1} = u_h^{-1} c I = u_h^{-1} d.
+    // NOTE: u is contigious and upper-triangular,
+    // but from the Fortran respective it is lower-triangular and already transposed.
+    // Since u is conjugated in-place in the code above, it is sufficient
+    // to just run triangular_solve with upper=false.
     triangular_solve_stub(
       self.device().type(), u, d, infos,
       /*upper=*/false,
@@ -3795,9 +3803,8 @@ Tensor _det_lu_based_helper_backward_helper(
       /*conjugate_transpose=*/false,
       /*unitriangular=*/false);
 
-    // note that d = c I for some scalar c, hence
-    // d u_h^{-1} = c I u_h^{-1} = u_h^{-1} c I = u_h^{-1} d.
     // After this operation d will contain a row-wise permuted grad wrt to self
+    // The same notes as for the system involving u apply here.
     triangular_solve_stub(
       self.device().type(), l, d, infos,
       /*upper=*/true,
