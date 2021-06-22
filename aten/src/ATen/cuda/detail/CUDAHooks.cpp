@@ -182,6 +182,10 @@ bool hasPrimaryContext(int64_t device_index) {
   return ctx_is_active == 1;
 }
 
+bool CUDAHooks::hasPrimaryContext(int64_t device_index) const {
+  return hasPrimaryContext(device_index);
+}
+
 c10::optional<int64_t> getDeviceIndexWithPrimaryContext() {
   // check current device first
   int64_t current_device_index = current_device();

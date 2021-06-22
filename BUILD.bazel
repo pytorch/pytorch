@@ -527,10 +527,13 @@ header_template_rule(
         "@AT_FFTW_ENABLED@": "0",
         "@AT_NNPACK_ENABLED@": "0",
         "@CAFFE2_STATIC_LINK_CUDA_INT@": "0",
-        "@USE_BLAS@": "1",
+        "@AT_BUILD_WITH_BLAS@": "1",
+        "@AT_BUILD_WITH_LAPACK@": "1",
         "@AT_PARALLEL_OPENMP@": "0",
         "@AT_PARALLEL_NATIVE@": "1",
         "@AT_PARALLEL_NATIVE_TBB@": "0",
+        "@AT_BLAS_F2C@": "0",
+        "@AT_BLAS_USE_CBLAS_DOT@": "1",
     },
 )
 
@@ -1728,7 +1731,7 @@ cc_library(
         ],
         [
             ":aten",
-            "@tensorpipe",
+            "@tensorpipe//:tensorpipe_cpu",
         ],
     ),
     alwayslink = True,

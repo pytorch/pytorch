@@ -109,6 +109,10 @@ struct TORCH_API CUDAHooksInterface {
     TORCH_CHECK(false, "NVRTC requires CUDA. ", CUDA_HELP);
   }
 
+  virtual bool hasPrimaryContext(int64_t device_index) const {
+    TORCH_CHECK(false, "Cannot call hasPrimaryContext(", device_index, ") without ATen_cuda library. ", CUDA_HELP);
+  }
+
   virtual int64_t current_device() const {
     return -1;
   }
