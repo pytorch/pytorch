@@ -9,11 +9,11 @@ class gradual_type_test(unittest.TestCase):
         """
         Test the consistency relation.
         """
-        self.assertTrue(consistency(Tensor_Type((1,2,3)), Tensor_Type((1,Dyn,3))))
+        self.assertTrue(consistency(Tensor_Type((1, 2, 3)), Tensor_Type((1, Dyn, 3))))
         self.assertTrue(consistency(int, Dyn))
         self.assertTrue(consistency(int, int))
-        self.assertFalse(consistency(Tensor_Type((1,2,3)), Tensor_Type((1,2,3, 5))))
-        self.assertFalse(consistency(Tensor_Type((1,2,3)), int))
+        self.assertFalse(consistency(Tensor_Type((1, 2, 3)), Tensor_Type((1, 2, 3, 5))))
+        self.assertFalse(consistency(Tensor_Type((1, 2, 3)), int))
 
     def test_annotations(self):
         """
@@ -22,7 +22,7 @@ class gradual_type_test(unittest.TestCase):
         where n is the corresoinding node in the resulting graph.
         """
         class M(torch.nn.Module):
-            def forward(self, x:Tensor_Type((1,2,3, Dyn)), y:Dyn):
+            def forward(self, x: Tensor_Type((1, 2, 3, Dyn)), y: Dyn):
                 return torch.add(x, y)
 
         module = M()
@@ -30,7 +30,7 @@ class gradual_type_test(unittest.TestCase):
 
         for n in symbolic_traced.graph.nodes:
             if n.name == 'x':
-                assert n.type == Tensor_Type((1,2,3, Dyn))
+                assert n.type == Tensor_Type((1, 2, 3, Dyn))
             if n.name == 'y':
                 assert n.type == Dyn
 
