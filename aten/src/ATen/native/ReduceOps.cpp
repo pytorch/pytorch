@@ -32,7 +32,6 @@ namespace at {
 namespace meta {
 
 TORCH_META_FUNC2(all, dim)(const Tensor& self, int64_t dim, bool keepdim) {
-  dim = at::maybe_wrap_dim(dim, self.dim());
   // Refer [all, any : uint8 compatibility]
   TORCH_CHECK(
       self.layout() == Layout::Strided,
@@ -58,6 +57,7 @@ TORCH_META_FUNC2(all, dim)(const Tensor& self, int64_t dim, bool keepdim) {
     }
   }
 
+  dim = maybe_wrap_dim(dim, self.dim());
   auto shape = get_reduction_shape(self, dim, keepdim);
   set_output(shape, self.options().dtype(out_dtype));
   namedinference::propagate_names_for_reduction(result, self, dim, keepdim);
@@ -1198,6 +1198,7 @@ Tensor all(const Tensor& self) {
 
 TORCH_IMPL_FUNC(all_out)
 (const Tensor& self, int64_t dim, bool keepdim, const Tensor& result) {
+  dim = maybe_wrap_dim(dim, self.dim());
   auto iter = get_reduction_iter(self, result, dim, keepdim);
   auto mut_result = const_cast<Tensor&>(result);
   if (!_dimreduce_return_trivial(mut_result, self, 1, dim, keepdim)) {
