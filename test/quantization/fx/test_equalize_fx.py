@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.nn.quantized as nnq
 from torch.quantization import default_qconfig
 from torch.quantization.observer import MinMaxObserver, PerChannelMinMaxObserver
 from torch.quantization.quantize_fx import prepare_fx, convert_fx
@@ -28,12 +29,13 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 
-# Test with two connected linear layers
-class Linear2FP32Module(nn.Module):
+# Test where we have a nn.Linear layer followed by a fp32 operation (add layer
+# without a qconfig) followed by another nn.Linear layer
+class LinearAddModule(nn.Module):
     def __init__(self):
         super().__init__()
-        self.linear1 = nn.Linear(5, 5)
-        self.linear2 = nn.Linear(5, 5)
+        self.linear1 = nn.Linear(5, 8)
+        self.linear2 = nn.Linear(8, 5)
 
     def forward(self, x):
         x = self.linear1(x)
@@ -72,9 +74,9 @@ class FunctionalLinear2Module(torch.nn.Module):
         x = self.linear2(x)
         return x
 
-# Test where we have a Linear layer followed by a fp32 operation
-# (conv layer) without a qconfig
-class FunctionalLinear2FP32Module(torch.nn.Module):
+# Test where we have a F.Linear layer followed by a fp32 operation (add layer
+# without a qconfig) followed by another F.linear layer
+class FunctionalLinearAddModule(torch.nn.Module):
     def __init__(self):
         super().__init__()
         self.linear1 = Linear()
@@ -227,7 +229,7 @@ class TestEqualizeFx(QuantizationTestCase):
             ns.call_module(MinMaxObserver): 5,
         }
 
-        functionalLinear2FP32_node_occurrence = {
+        functionalLinear2Add_node_occurrence = {
             ns.call_module(_InputEqualizationObserver): 2,
             ns.call_module(_WeightEqualizationObserver): 2,
             ns.call_module(MinMaxObserver): 6,
@@ -236,7 +238,7 @@ class TestEqualizeFx(QuantizationTestCase):
         tests = [(SingleLayerLinearModel, linear_node_occurrence),
                  (TwoLayerLinearModel, linear2_node_occurrence),
                  (FunctionalLinear2Module, functionalLinear_node_occurrence),
-                 (FunctionalLinear2FP32Module, functionalLinear2FP32_node_occurrence)]
+                 (FunctionalLinearAddModule, functionalLinear2Add_node_occurrence)]
 
         for (M, node_occurrence) in tests:
             m = M().eval()
@@ -248,8 +250,8 @@ class TestEqualizeFx(QuantizationTestCase):
         returns the same output as the original model
         """
 
-        tests = [SingleLayerLinearModel, Linear2FP32Module, TwoLayerLinearModel,
-                 FunctionalLinearModule, FunctionalLinear2FP32Module, FunctionalLinear2Module]
+        tests = [SingleLayerLinearModel, LinearAddModule, TwoLayerLinearModel,
+                 FunctionalLinearModule, FunctionalLinearAddModule, FunctionalLinear2Module]
 
         x = torch.rand((5, 5))
         for M in tests:
@@ -476,12 +478,70 @@ class TestEqualizeFx(QuantizationTestCase):
         quantization).
         """
 
-        tests = [SingleLayerLinearModel, Linear2FP32Module, TwoLayerLinearModel,
-                 FunctionalLinearModule, FunctionalLinear2FP32Module, FunctionalLinear2Module]
+        linear_node_list = [
+            ns.call_function(torch.mul),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_module(nnq.Linear),
+            ns.call_method('dequantize')
+        ]
+
+        linearAdd_node_list = [
+            ns.call_function(torch.mul),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_module(nnq.Linear),
+            ns.call_method('dequantize'),
+            ns.call_function(torch.add),
+            ns.call_function(torch.mul),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_module(nnq.Linear),
+            ns.call_method('dequantize')
+        ]
+
+        linear2_node_list = [
+            ns.call_function(torch.mul),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_module(nnq.Linear),
+            ns.call_module(nnq.Linear),
+            ns.call_method('dequantize')
+        ]
+
+        functionalLinear_node_list = [
+            ns.call_function(torch.mul),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_function(torch.ops.quantized.linear),
+            ns.call_method('dequantize')
+        ]
+
+        functionalLinearAdd_node_list = [
+            ns.call_function(torch.mul),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_function(torch.ops.quantized.linear),
+            ns.call_method('dequantize'),
+            ns.call_function(torch.add),
+            ns.call_function(torch.mul),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_function(torch.ops.quantized.linear),
+            ns.call_method('dequantize')
+        ]
+
+        functionalLinear2_node_list = [
+            ns.call_function(torch.mul),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_function(torch.ops.quantized.linear),
+            ns.call_function(torch.ops.quantized.linear),
+            ns.call_method('dequantize')
+        ]
+
+        tests = [(SingleLayerLinearModel, linear_node_list),
+                 (LinearAddModule, linearAdd_node_list),
+                 (TwoLayerLinearModel, linear2_node_list),
+                 (FunctionalLinearModule, functionalLinear_node_list),
+                 (FunctionalLinearAddModule, functionalLinearAdd_node_list),
+                 (FunctionalLinear2Module, functionalLinear2_node_list)]
 
         torch.manual_seed(0)
         x = torch.rand((5, 5))
-        for M in tests:
+        for (M, node_list) in tests:
             # No equalization
             m = M().eval()
             prepared = prepare_fx(copy.deepcopy(m), qconfig_dict)
@@ -503,3 +563,6 @@ class TestEqualizeFx(QuantizationTestCase):
 
             # Check that the graph after quantization is pretty much the same
             self.assertTrue(self.check_orig_and_eq_graphs(quantized_model, equalized_quantized_model))
+
+            # Check the order of nodes in the graph
+            self.checkGraphModuleNodes(equalized_quantized_model, expected_node_list=node_list)
