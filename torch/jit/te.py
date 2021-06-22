@@ -23,6 +23,10 @@ def _one():
     return _int(1)
 
 
+def _num_args(fn):
+    return len(inspect.signature(fn).parameters)
+
+
 def _combine_dtype(a, b):
     if a == b:
         return a
@@ -78,6 +82,16 @@ class PointwiseCompiler(object):
         assert all(shape_type in _SHAPE_TYPES for shape_type in itertools.chain(*self.shapes))
         assert all(stride_type in _STRIDE_TYPES for stride_type in itertools.chain(*self.strides))
 
+    def make_backwards(self, index: int):
+        """
+        Compute the derivative of self.pointwise_fn with respect to input number index
+        """
+        # TODO(jansel): implement this without sympy
+        from sympy import symbols, diff
+        vars = symbols([f"v{i}" for i in range(1 + _num_args(self.pointwise_fn))])
+        backwards_expr = diff(self.pointwise_fn(*vars[:-1]), vars[index]) * vars[-1]  # chain rule
+        return _source_to_pointwise_operator(f"lambda {','.join(map(str, vars))}: {backwards_expr}")
+
     def handle_autograd(self):
         cnt = sum(int(x.requires_grad) for x in self.spec)
         if cnt == 0:
@@ -91,9 +105,7 @@ class PointwiseCompiler(object):
                 for d in range(self.ndim):
                     shape_types = {shape[d] for shape in self.shapes}
                     assert len(shape_types) == 1, "TODO: support backwards for broadcasting"
-
-                # TODO: compute actual backward
-                self.result.set_backwards(i, pointwise_operator(lambda a, b, c: a * c))
+                self.result.set_backwards(i, self.make_backwards(i))
 
     def compute_broadcasts_and_size_checks(self):
         ndim = self.ndim
@@ -248,6 +260,12 @@ class PointwiseCompiler(object):
         self.compute_code()
 
 
+@functools.lru_cache(None)
+def _source_to_pointwise_operator(fn_str):
+    """ Used when creating backwards() methods """
+    return pointwise_operator(eval(fn_str))
+
+
 def pointwise_operator(fn):
     """
     Decorator to create a new pointwise operator.  The operator will be
@@ -257,6 +275,5 @@ def pointwise_operator(fn):
         def add(a, b):
             return a + b
     """
-    num_args = len(inspect.signature(fn).parameters)
     return _te.CompileCache(lambda spec, result: PointwiseCompiler(fn, spec, result),
-                            num_args)
+                            _num_args(fn))

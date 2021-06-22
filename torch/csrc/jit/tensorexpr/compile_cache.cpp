@@ -30,33 +30,25 @@ namespace {
 using namespace torch::jit::tensorexpr;
 
 class CompileCache;
+typedef torch::autograd::variable_list variable_list;
+typedef std::tuple<int, CompileCache*> CompileCacheBackwards;
 
 class CCNode : public torch::autograd::Node {
-  typedef torch::autograd::variable_list variable_list;
-
  public:
-  variable_list apply(variable_list&& inputs) override {
-    // TODO(jansel): we likely need to copy some error checking from eager to here
-
-    //variable_list args;
-    //args.reserve()
-
-    //variable_list result;
-    //result.reserve(backwards_functions.size());
-    return {at::empty_like(inputs[0]).fill_(-99.0)};
-  }
-  // void release_variables() override { _inputs.clear(); }
+  variable_list apply(variable_list&& new_inputs) override;
 
   CCNode(at::Tensor* args, size_t len) {
-    _inputs.reserve(len);
-    for(int i=0; i<len; ++i){
-        _inputs.emplace_back(args[i].detach());
+    inputs_.reserve(len);
+    for (int i = 0; i < len; ++i) {
+      inputs_.emplace_back(args[i].detach());
     }
   }
 
-    std::vector<CompileCache*> backwards_functions;
+  // void release_variables() override { inputs_.clear(); }
+  std::vector<CompileCacheBackwards> backwards_functions;
+
  private:
-    std::vector<at::Tensor> _inputs;
+  std::vector<at::Tensor> inputs_;
 };
 
 static py::object python_specialization_key() {
@@ -352,7 +344,7 @@ class CompileCache3 {
         node->backwards_functions.reserve(backwards_functions_.size());
         torch::autograd::edge_list next_edges;
         for (auto& item : backwards_functions_) {
-          node->backwards_functions.push_back(item.second);
+          node->backwards_functions.push_back(item);
           next_edges.emplace_back(
               torch::autograd::impl::gradient_edge(args[item.first]));
         }
@@ -385,6 +377,7 @@ class CompileCache3 {
     } else {
       KernelScope scope(&arena_);
       auto cr = new CompileResultImpl();
+      py::gil_scoped_acquire guard;
       std::vector<py::object> spec;
       for (int i = 0; i < key.size(); ++i) {
         spec.push_back(key[i].to_python(args[i]));
@@ -531,9 +524,11 @@ class CompileCacheImpl : public CompileCache {
       new (tensor_args + NARGS)
           at::Tensor(std::move(kwargs["out"].cast<at::Tensor>()));
       Cleanup call_dtors = {tensor_args, NARGS + 1};
+      // py::gil_scoped_release release;
       return cache_out.call(tensor_args, true);
     } else {
       Cleanup call_dtors = {tensor_args, NARGS};
+      // py::gil_scoped_release release;
       return cache.call(tensor_args, false);
     }
   }
@@ -567,6 +562,27 @@ CompileCache* create_compile_cache(const py::object& compile_fn, int num_args) {
     default:
       throw std::runtime_error("TODO: support other arg counts");
   }
+}
+
+variable_list CCNode::apply(variable_list&& new_inputs) {
+  // TODO(jansel): we likely need to copy some error checking from eager to here
+  // TODO(jansel): possible optimization: horizontal fusion of each backwards fn
+  // TODO(jansel): possible optimization: remember the SpecializationKey from
+  // forwards
+  // TODO(jansel): possible optimization: dont save all the inputs_
+  ASSERT(new_inputs.size() == 1);
+
+  variable_list args;
+  args.reserve(inputs_.size() + 1);
+  std::copy(inputs_.begin(), inputs_.end(), std::back_inserter(args));
+  args.emplace_back(new_inputs[0]);
+
+  variable_list result;
+  result.reserve(backwards_functions.size());
+  for (auto& bk : backwards_functions) {
+    result.emplace_back(std::get<1>(bk)->call(args));
+  }
+  return result;
 }
 
 } // namespace

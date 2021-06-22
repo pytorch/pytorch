@@ -2,17 +2,17 @@ import torch.jit.te
 
 @torch.jit.te.pointwise_operator
 def mul(a, b):
-    return a+b
+    return a*b
 
 
 def test(fn):
     torch.random.manual_seed(99)
-    x = torch.randn(8)
-    y = torch.randn(8, requires_grad=True)
+    x = torch.randn(4, requires_grad=True)
+    y = torch.randn(4, requires_grad=True)
 
-    fn(x, y).sum().backward()
+    fn(x, fn(x, y)).sum().backward()
 
-    print(y.grad)
+    print(x.grad, y.grad)
 
 test(torch.mul)
 test(torch.mul)
