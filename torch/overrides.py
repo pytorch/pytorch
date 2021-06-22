@@ -882,6 +882,10 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.special.i1: lambda input: -1,
         torch.special.i1e: lambda input: -1,
         torch.special.logit: lambda input: -1,
+        torch.special.log1p: lambda input: -1,
+        torch.special.round: lambda input: -1,
+        torch.special.sinc: lambda input: -1,
+        torch.special.ndtri: lambda input: -1,
         torch.special.ndtr: lambda input: -1,
         torch.special.xlog1py: lambda input, other, out=None: -1,
         torch.t: lambda input: -1,
@@ -1377,8 +1381,14 @@ def get_overridable_functions() -> Dict[Any, List[Callable]]:
                 continue
 
             if not callable(func) and hasattr(func, "__get__"):
-                overridable_funcs[func].append(func.__get__)
-                continue
+                if func.__get__ in get_ignored_functions():
+                    msg = ("{}.{} is in the tuple returned by torch._overrides.get_ignored_functions "
+                           "but still has an explicit override")
+                    assert func.__get__ not in get_testing_overrides(), msg.format(namespace, func.__name__)
+                    continue
+                else:
+                    overridable_funcs[func].append(func.__get__)
+                    continue
 
             if not callable(func):
                 continue
