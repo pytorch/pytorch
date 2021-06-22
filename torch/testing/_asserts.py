@@ -9,7 +9,7 @@ from torch import Tensor
 
 from ._core import _unravel_index
 
-__all__ = ["assert_equal", "assert_close"]
+__all__ = ["assert_close"]
 
 
 # The UsageError should be raised in case the test function is not used correctly. With this the user is able to
@@ -66,19 +66,17 @@ def _check_complex_components_individually(
     """
 
     @functools.wraps(check_tensors)
-    def wrapper(actual: Tensor, expected: Tensor, **kwargs: Any) -> Optional[_TestingErrorMeta]:
-        if "equal_nan" in kwargs:
-            if kwargs["equal_nan"] == "relaxed":
-                relaxed_complex_nan = True
-                kwargs["equal_nan"] = True
-            else:
-                relaxed_complex_nan = False
-                kwargs["equal_nan"] = bool(kwargs["equal_nan"])
+    def wrapper(
+        actual: Tensor, expected: Tensor, *, equal_nan: Union[str, bool], **kwargs: Any
+    ) -> Optional[_TestingErrorMeta]:
+        if equal_nan == "relaxed":
+            relaxed_complex_nan = True
+            equal_nan = True
         else:
             relaxed_complex_nan = False
 
         if actual.dtype not in (torch.complex32, torch.complex64, torch.complex128):
-            return check_tensors(actual, expected, **kwargs)  # type: ignore[call-arg]
+            return check_tensors(actual, expected, equal_nan=equal_nan, **kwargs)  # type: ignore[call-arg]
 
         if relaxed_complex_nan:
             actual, expected = [
@@ -88,11 +86,11 @@ def _check_complex_components_individually(
                 for t in (actual, expected)
             ]
 
-        error_meta = check_tensors(actual.real, expected.real, **kwargs)  # type: ignore[call-arg]
+        error_meta = check_tensors(actual.real, expected.real, equal_nan=equal_nan, **kwargs)  # type: ignore[call-arg]
         if error_meta:
             return error_meta.amend_msg(postfix="\n\nThe failure occurred for the real part.")
 
-        error_meta = check_tensors(actual.imag, expected.imag, **kwargs)  # type: ignore[call-arg]
+        error_meta = check_tensors(actual.imag, expected.imag, equal_nan=equal_nan, **kwargs)  # type: ignore[call-arg]
         if error_meta:
             return error_meta.amend_msg(postfix="\n\nThe failure occurred for the imaginary part.")
 
@@ -243,43 +241,6 @@ def _trace_mismatches(actual: Tensor, expected: Tensor, mismatches: Tensor) -> D
 
 
 @_check_complex_components_individually
-def _check_values_equal(
-    actual: Tensor,
-    expected: Tensor,
-    *,
-    msg: Optional[Union[str, Callable[[Tensor, Tensor, SimpleNamespace], str]]] = None,
-) -> Optional[_TestingErrorMeta]:
-    """Checks if the values of two tensors are bitwise equal.
-
-    Args:
-        actual (Tensor): Actual tensor.
-        expected (Tensor): Expected tensor.
-        msg (Optional[Union[str, Callable[[Tensor, Tensor, SimpleNamespace], str]]]): Optional error message. Can be
-            passed as callable in which case it will be called with the inputs and the result of
-            :func:`_trace_mismatches`.
-
-    Returns:
-        (Optional[AssertionError]): If check did not pass.
-    """
-    mismatches = torch.ne(actual, expected)
-    if not torch.any(mismatches):
-        return None
-
-    trace = _trace_mismatches(actual, expected, mismatches)
-
-    if msg is None:
-        msg = (
-            f"Tensors are not equal!\n\n"
-            f"Mismatched elements: {trace.total_mismatches} / {trace.number_of_elements} ({trace.mismatch_ratio:.1%})\n"
-            f"Greatest absolute difference: {trace.max_abs_diff} at {trace.max_abs_diff_idx}\n"
-            f"Greatest relative difference: {trace.max_rel_diff} at {trace.max_rel_diff_idx}"
-        )
-    elif callable(msg):
-        msg = msg(actual, expected, trace)
-    return _TestingErrorMeta(AssertionError, msg)
-
-
-@_check_complex_components_individually
 def _check_values_close(
     actual: Tensor,
     expected: Tensor,
@@ -320,39 +281,6 @@ def _check_values_close(
     elif callable(msg):
         msg = msg(actual, expected, trace)
     return _TestingErrorMeta(AssertionError, msg)
-
-
-def _check_tensors_equal(
-    actual: Tensor,
-    expected: Tensor,
-    *,
-    check_device: bool = True,
-    check_dtype: bool = True,
-    check_stride: bool = True,
-    msg: Optional[Union[str, Callable[[Tensor, Tensor, SimpleNamespace], str]]] = None,
-) -> Optional[_TestingErrorMeta]:
-    """Checks that the values of two tensors are bitwise equal.
-
-    For complex tensors the check is performed on the real and imaginary component separately. Optionally, checks that
-    some attributes of tensor pairs are equal.
-
-    For a description of the parameters see :func:`assert_equal`.
-
-    Returns:
-        Optional[_TestingErrorMeta]: If checks did not pass.
-    """
-    error_meta = _check_attributes_equal(
-        actual, expected, check_device=check_device, check_dtype=check_dtype, check_stride=check_stride
-    )
-    if error_meta:
-        return error_meta
-    actual, expected = _equalize_attributes(actual, expected)
-
-    error_meta = _check_values_equal(actual, expected, msg=msg)
-    if error_meta:
-        return error_meta
-
-    return None
 
 
 def _check_tensors_close(
@@ -402,10 +330,7 @@ def _check_tensors_close(
         return error_meta
     actual, expected = _equalize_attributes(actual, expected)
 
-    if (rtol == 0.0) and (atol == 0.0):
-        error_meta = _check_values_equal(actual, expected, msg=msg)
-    else:
-        error_meta = _check_values_close(actual, expected, rtol=rtol, atol=atol, equal_nan=equal_nan, msg=msg)
+    error_meta = _check_values_close(actual, expected, rtol=rtol, atol=atol, equal_nan=equal_nan, msg=msg)
     if error_meta:
         return error_meta
 
@@ -421,9 +346,9 @@ _SEQUENCE_MSG_FMTSTR = "The failure occurred at index {} of the sequences."
 _MAPPING_MSG_FMTSTR = "The failure occurred for key '{}' of the mappings."
 
 
-def _check_pair(
+def _check_pair_close(
     pair: Union[_TensorPair, List, Dict],
-    check_tensors: Callable[[Any, Any], Optional[_TestingErrorMeta]],
+    **kwargs: Any,
 ) -> Optional[_TestingErrorMeta]:
     """Checks input pairs.
 
@@ -432,27 +357,27 @@ def _check_pair(
 
     Args:
         pair (Union[_TensorPair, List, Dict]): Input pair.
-        check_tensors (Callable[[Any, Any], Optional[Exception]]): Callable used to check if a tensor pair matches.
+        **kwargs (Any): Keyword arguments passed to :func:`__check_tensors_close`.
 
     Returns:
         (Optional[_TestingErrorMeta]): Return value of :attr:`check_tensors`.
     """
     if isinstance(pair, list):
         for idx, pair_item in enumerate(pair):
-            error_meta = _check_pair(pair_item, check_tensors)
+            error_meta = _check_pair_close(pair_item, **kwargs)
             if error_meta:
                 return error_meta.amend_msg(postfix=f"\n\n{_SEQUENCE_MSG_FMTSTR.format(idx)}")
         else:
             return None
     elif isinstance(pair, dict):
         for key, pair_item in pair.items():
-            error_meta = _check_pair(pair_item, check_tensors)
+            error_meta = _check_pair_close(pair_item, **kwargs)
             if error_meta:
                 return error_meta.amend_msg(postfix=f"\n\n{_MAPPING_MSG_FMTSTR.format(key)}")
         else:
             return None
     else:  # isinstance(pair, TensorPair)
-        return check_tensors(pair.actual, pair.expected)
+        return _check_tensors_close(pair.actual, pair.expected, **kwargs)
 
 
 def _to_tensor(array_or_scalar_like: Any) -> Tuple[Optional[_TestingErrorMeta], Optional[Tensor]]:
@@ -603,94 +528,6 @@ def _parse_inputs(
         return _to_tensor_pair(actual, expected)
 
 
-def assert_equal(
-    actual: Any,
-    expected: Any,
-    *,
-    check_device: bool = True,
-    check_dtype: bool = True,
-    check_stride: bool = True,
-    msg: Optional[Union[str, Callable[[Tensor, Tensor, SimpleNamespace], str]]] = None,
-) -> None:
-    """Asserts that the values of tensor pairs are bitwise equal.
-
-    For complex tensors the check is performed on the real and imaginary component separately. Optionally, checks that
-    some attributes of tensor pairs are equal.
-
-    Also supports array-or-scalar-like inputs from which a :class:`torch.Tensor` can be constructed with
-    :func:`torch.as_tensor`. Still, requires type equality, i.e. comparing a :class:`torch.Tensor` and a
-    :class:`numpy.ndarray` is not supported.
-
-    In case both inputs are :class:`~collections.abc.Sequence`'s or :class:`~collections.abc.Mapping`'s the checks are
-    performed elementwise.
-
-    Args:
-        actual (Any): Actual input.
-        expected (Any): Expected input.
-        check_device (bool): If ``True`` (default), asserts that each tensor pair is on the same
-            :attr:`~torch.Tensor.device` memory. If this check is disabled **and** it is not on the same
-            :attr:`~torch.Tensor.device` memory, it is moved CPU memory before the values are compared.
-        check_dtype (bool): If ``True`` (default), asserts that each tensor pair has the same
-            :attr:`~torch.Tensor.dtype`. If this check is disabled it does not have the same
-            :attr:`~torch.Tensor.dtype`, it is copied to the :class:`~torch.dtype` returned by
-            :func:`torch.promote_types` before the values are compared.
-        check_stride (bool): If ``True`` (default), asserts that each tensor pair has the same stride.
-        msg (Optional[Union[str, Callable[[Tensor, Tensor, SimpleNamespace], str]]]): Optional error message to use if
-            the values of a tensor pair mismatch. Can be passed as callable in which case it will be called with the
-            tensor pair and a namespace of diagnostic info about the mismatches. See below for details.
-
-    Raises:
-        UsageError: If an array-or-scalar-like pair has different types.
-        UsageError: If a :class:`torch.Tensor` can't be constructed from an array-or-scalar-like.
-        UsageError: If any tensor is quantized or sparse. This is a temporary restriction and will be relaxed in the
-            future.
-        AssertionError: If the inputs are :class:`~collections.abc.Sequence`'s, but their length does not match.
-        AssertionError: If the inputs are :class:`~collections.abc.Mapping`'s, but their set of keys do not match.
-        AssertionError: If a tensor pair does not have the same :attr:`~torch.Tensor.shape`.
-        AssertionError: If :attr:`check_device`, but a tensor pair is not on the same :attr:`~torch.Tensor.device`
-            memory.
-        AssertionError: If :attr:`check_dtype`, but a tensor pair does not have the same :attr:`~torch.Tensor.dtype`.
-        AssertionError: If :attr:`check_stride`, but a tensor pair does not have the same stride.
-        AssertionError: If the values of a tensor pair are not bitwise equal.
-
-    The namespace that will be passed to :attr:`msg` if its a callable comprises the following attributes:
-
-    - total_elements (int): Total number of values.
-    - total_mismatches (int): Total number of mismatches.
-    - mismatch_ratio (float): Quotient of total mismatches and total elements.
-    - max_abs_diff (Union[int, float]): Greatest absolute difference of the inputs.
-    - max_abs_diff_idx (Union[int, Tuple[int, ...]]): Index of greatest absolute difference.
-    - max_rel_diff (Union[int, float]): Greatest relative difference of the inputs.
-    - max_rel_diff_idx (Union[int, Tuple[int, ...]]): Index of greatest relative difference.
-
-    For ``max_abs_diff`` and ``max_rel_diff`` the type depends on the :attr:`~torch.Tensor.dtype` of the inputs.
-
-    .. seealso::
-
-        To assert that the values of a tensor pair are close but are not required to be bitwise equal, use
-        :func:`assert_close` instead.
-    """
-    # Hide this function from `pytest`'s traceback
-    __tracebackhide__ = True
-
-    error_meta, pair = _parse_inputs(actual, expected)
-    if error_meta:
-        raise error_meta.to_error()
-    else:
-        pair = cast(Union[_TensorPair, List, Dict], pair)
-
-    check_tensors = functools.partial(
-        _check_tensors_equal,
-        check_device=check_device,
-        check_dtype=check_dtype,
-        check_stride=check_stride,
-        msg=msg,
-    )
-    error_meta = _check_pair(pair, check_tensors)
-    if error_meta:
-        raise error_meta.to_error()
-
-
 def assert_close(
     actual: Any,
     expected: Any,
@@ -796,6 +633,22 @@ def assert_close(
 
     For ``max_abs_diff`` and ``max_rel_diff`` the type depends on the :attr:`~torch.Tensor.dtype` of the inputs.
 
+    .. note::
+
+        :func:`~torch.testing.assert_close` is highly configurable with strict default settings. Users are encouraged
+        to :func:`~functools.partial` it to fit their use case. For example, if an equality check is needed, one might
+        define an ``assert_equal`` that uses zero tolrances for every ``dtype`` by default:
+
+        >>> import functools
+        >>> import torch
+        >>> assert_equal = functools.partial(torch.testing.assert_close, rtol=0, atol=0)
+        >>> assert_equal(1e-9, 1e-10)
+        AssertionError: Tensors are not close!
+        <BLANKLINE>
+        Mismatched elements: 1 / 1 (100.0%)
+        Greatest absolute difference: 8.999999703829253e-10 at 0 (up to 0 allowed)
+        Greatest relative difference: 8.999999583666371 at 0 (up to 0 allowed)
+
     Examples:
         >>> # tensor to tensor comparison
         >>> expected = torch.tensor([1e0, 1e-1, 1e-2])
@@ -883,8 +736,8 @@ def assert_close(
     else:
         pair = cast(Union[_TensorPair, List, Dict], pair)
 
-    check_tensors = functools.partial(
-        _check_tensors_close,
+    error_meta = _check_pair_close(
+        pair,
         rtol=rtol,
         atol=atol,
         equal_nan=equal_nan,
@@ -893,6 +746,5 @@ def assert_close(
         check_stride=check_stride,
         msg=msg,
     )
-    error_meta = _check_pair(pair, check_tensors)
     if error_meta:
         raise error_meta.to_error()
