@@ -213,13 +213,13 @@ def is_equalization_observer(observer: nn.Module) -> bool:
     return (isinstance(observer, _InputEqualizationObserver) or
             isinstance(observer, _WeightEqualizationObserver))
 
-def get_weight_eq_obs(
+def get_op_node_and_weight_eq_obs(
     input_eq_obs_node: Node,
     model: GraphModule,
     modules: Dict[str, nn.Module]
 ) -> Tuple[Optional[Node], Optional[_WeightEqualizationObserver]]:
     """ Gets the following weight equalization observer. There should always
-    exsist a weight equalization observer after an input equalization observer.
+    exist a weight equalization observer after an input equalization observer.
 
     Returns the node containing the weight equalization observer, and the weight
     equalization observer if it has been newly created
@@ -232,11 +232,9 @@ def get_weight_eq_obs(
             op_node = user
             break
 
-    if op_node is None:
-        return None, None
-
-    elif op_node.op == 'call_module':
-        # If the next op_node is a nn.Linear layer, then it must have a
+    assert(op_node is not None)
+    if op_node.op == 'call_module':
+        # If the op_node is a nn.Linear layer, then it must have a
         # WeightEqualizationObserver configuration
         equalization_qconfig_map: Dict[str, Any] = model._equalization_qconfig_map  # type: ignore[assignment]
         assert(equalization_qconfig_map.get(op_node.name, None) is not None)
@@ -264,8 +262,7 @@ def maybe_get_next_input_eq_obs(node: Node, modules: Dict[str, nn.Module]) -> Op
     Then we want to return None.
     """
 
-    assert((node.op == 'call_module' and isinstance(modules[str(node.target)], nn.Linear)) or
-           (node.op == 'call_function' and node.target == nn.functional.linear))
+    assert(node_supports_equalization(node, modules))
 
     # Locate the following output observer if it exists
     maybe_obs_node = maybe_get_next_module(node, modules, ObserverBase)
@@ -289,7 +286,7 @@ def maybe_get_next_equalization_scale(node: Node, modules: Dict[str, nn.Module])
     In this case, the node given is linear1 and we want to locate the InputEqObs.
     """
     next_inp_eq_obs = maybe_get_next_input_eq_obs(node, modules)
-    if isinstance(next_inp_eq_obs, _InputEqualizationObserver):
+    if next_inp_eq_obs:
         return next_inp_eq_obs.equalization_scale
     return None
 
@@ -356,27 +353,27 @@ def update_obs_for_equalization(model: GraphModule, modules: Dict[str, nn.Module
     WeightEqualizationObserver, create it, and calculate the equalization scale
     based on the two observers.
 
-    We will then return a dictionary mapping node names to the newly created
-    WeightEqualizationObserver.
+    We will then return a dictionary mapping operation node names to
+    the corresponding WeightEqualizationObservers for that operation.
     """
     weight_eq_obs_dict = {}
     for node in model.graph.nodes:
         if node.op == 'call_module' and isinstance(modules[node.target], _InputEqualizationObserver):
             input_eq_obs = modules[node.target]
             assert(isinstance(input_eq_obs, _InputEqualizationObserver))
-            next_node, weight_eq_obs = get_weight_eq_obs(node, model, modules)
+            op_node, weight_eq_obs = get_op_node_and_weight_eq_obs(node, model, modules)
 
-            if next_node is None or weight_eq_obs is None:
+            if op_node is None or weight_eq_obs is None:
                 continue
 
-            weight_eq_obs(modules[str(next_node.target)].weight)
+            weight_eq_obs(modules[str(op_node.target)].weight)
 
             # Calculate and set the equalization scale values
             equalization_scale = calculate_equalization_scale(input_eq_obs, weight_eq_obs)
             input_eq_obs.set_equalization_scale(equalization_scale)
             weight_eq_obs.set_equalization_scale(equalization_scale)
 
-            weight_eq_obs_dict[next_node.name] = weight_eq_obs
+            weight_eq_obs_dict[op_node.name] = weight_eq_obs
 
     return weight_eq_obs_dict
 
@@ -385,13 +382,17 @@ def convert_eq_obs(
     modules: Dict[str, nn.Module],
     weight_eq_obs_dict: Dict[str, _WeightEqualizationObserver],
 ) -> None:
-    """ Removes the input equalization observers and replaces them with mul
-    operators whenever applicable. Updates the input quantization observers with
-    the scaled input min/max values. Scales the weights by the current and next
-    equalization scales, and removes the weight equalization observer node if it
-    exists.
+    """ Converts the equalization operations and updates the other nodes in the
+    following way:
+        - Removes the input equalization observers and inserts a mul operator
+          along with an equalization scale node wherever applicable (we do not
+          want to insert a mul operator between connecting linear layers).
+        - Updates the input quantization observers with the scaled input min/max
+          values. 
+        - Scales the weights by the current and next equalization scales.
+        - Removes the weight equalization observer node if it exists.
 
-    Before:
+    Before (after prepare):
                                     weight values
                                           |
                                     WeightQuantObs
@@ -400,12 +401,32 @@ def convert_eq_obs(
                                           |
         x -> InpQuantObs -> InpEqObs -> linear -> OutQuantObs
 
-    After:
+    After this function:
                                               scaled weight values
                                                       |
        equalization scale                       WeightQuantObs
               |                                       |
         x -> mul -> InpQuantObs (scaled min/max) -> linear -> OutQuantObs
+
+    After convert:
+       equalization scale                 scaled weight values
+              |                                    |
+        x -> mul -> quantize_per_tensor -> quantized::linear
+
+    Note that although the equalization observer appeared after the quantization
+    observer after prepare_fx, the mul node appears before the quantization node
+    after convert_fx. This is because placing the equalization observer after
+    the quantization observer in prepare_fx would allow us to keep the invariant
+    that the graph before the current node inserts its observers is not
+    modified.
+
+    Having the equalization observer before the quantization observer would also
+    cause some inconsistences between the ordering of the quantization and
+    equalization observers.
+    For example, a single linear layer would look like:
+        x -> InpEqObs1 -> InpQuantObs1 -> linear1 -> OutQuantObs1
+    But between two connected linear layers, it would look like:
+        linear1 -> OutQuantObs1 -> InpEqObs2 -> linear2 -> OutQuantObs2
     """
     for node in model.graph.nodes:
         if node.op == 'call_module' and isinstance(modules[node.target], _InputEqualizationObserver):
