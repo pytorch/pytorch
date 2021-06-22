@@ -14,9 +14,6 @@
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/reduction.h>
 
-// TODO(jansel): figure out how to get this in normal build
-#include <torch/csrc/jit/tensorexpr/compile_cache.cpp>
-
 namespace torch {
 namespace jit {
 using namespace torch::jit::tensorexpr;
