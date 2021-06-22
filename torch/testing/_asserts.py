@@ -677,6 +677,9 @@ def assert_equal(
         To assert that the values of a tensor pair are close but are not required to be bitwise equal, use
         :func:`assert_close` instead.
     """
+    # Hide this function from `pytest`'s traceback
+    __tracebackhide__ = True
+
     exc, pair = _parse_inputs(actual, expected)
     if exc:
         raise exc
@@ -878,6 +881,9 @@ def assert_close(
         >>> torch.testing.assert_close(actual, expected, msg=custom_msg)
         AssertionError: Argh, we found 2 mismatches! That is 66.7%!
     """
+    # Hide this function from `pytest`'s traceback
+    __tracebackhide__ = True
+
     exc, pair = _parse_inputs(actual, expected)
     if exc:
         raise exc
