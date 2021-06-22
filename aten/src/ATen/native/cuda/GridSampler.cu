@@ -458,7 +458,7 @@ namespace {
 
         for (index_t c = 0; c < C; ++c, gOut_ptr_NCHW += gOut_sC, NC_offset += gInp_sC, inp_ptr_NC+= inp_sC) {
           scalar_t gOut = *gOut_ptr_NCHW;
-          
+
           #pragma unroll 4
           for (index_t i = 0; i < 4; ++i) {
             #pragma unroll 4
