@@ -335,7 +335,9 @@ class DeviceTypeTestBase(TestCase):
                 guard_rel_tol = self.rel_tol
                 try:
                     if 'dtype' in param_kwargs:
-                        self.precision, self.rel_tol = self._get_tolerance_override(test, param_kwargs['dtype'])
+                        dtype = param_kwargs['dtype']
+                        self.precision = self._get_precision_override(test, dtype)
+                        self.precision, self.rel_tol = self._get_tolerance_override(test, dtype)
                     param_kwargs = {} if param_kwargs is None else param_kwargs
                     result = test(self, device=device_arg, **param_kwargs)
                 except RuntimeError as rte:
@@ -354,8 +356,8 @@ class DeviceTypeTestBase(TestCase):
 
         # Handles tests that need parameterization (e.g. those that run across a set of
         # ops / modules using the @ops or @modules decorators).
-        if hasattr(test, 'parameterize_fn'):
-            for (test, test_name, param_kwargs) in test.parameterize_fn(test, generic_cls, cls):
+        if hasattr(test, 'parametrize_fn'):
+            for (test, test_name, param_kwargs) in test.parametrize_fn(test, generic_cls, cls):
                 instantiate_test_helper(cls=cls, name=test_name, test=test, param_kwargs=param_kwargs)
         else:
             dtypes = cls._get_dtypes(test)
@@ -598,27 +600,27 @@ class OpDTypes(Enum):
     none = 5  # Instantiate no dtype variants (no dtype kwarg needed)
 
 
-class _TestParameterizer(object):
+class _TestParametrizer(object):
     """
     Decorator class for parameterizing a test function, yielding a set of new tests spawned
     from the original generic test, each specialized for a specific set of test inputs. For
     example, parameterizing a test across the set of ops will result in a test function per op.
 
-    The decision of how to parameterize / what to parameterize over is intended to be implemented
+    The decision of how to parametrize / what to parametrize over is intended to be implemented
     by each derived class.
 
-    In the details, the decorator adds a 'parameterize_fn' property to the test function that is called
+    In the details, the decorator adds a 'parametrize_fn' property to the test function that is called
     during device-specific test instantiation performed in instantiate_device_type_tests(). Because of this,
-    there is no need to parameterize over device type, as that is already handled separately.
+    there is no need to parametrize over device type, as that is already handled separately.
     """
-    def _parameterize_test(self, test, generic_cls, device_cls):
+    def _parametrize_test(self, test, generic_cls, device_cls):
         """
         Parameterizes the given test function across whatever dimension is specified by the derived class.
-        Tests can be parameterized over any arbitrary dimension or combination of dimensions, such as all
+        Tests can be parametrized over any arbitrary dimension or combination of dimensions, such as all
         ops, all modules, or all ops + their associated dtypes.
 
         Args:
-            test (fn): Test function to parameterize over; must support least a device arg
+            test (fn): Test function to parametrize over; must support least a device arg
             generic_cls (class): Generic test class object containing tests (e.g. TestFoo)
             device_cls (class): Device-specialized test class object (e.g. TestFooCPU)
 
@@ -631,7 +633,7 @@ class _TestParameterizer(object):
         raise NotImplementedError
 
     def __call__(self, fn):
-        fn.parameterize_fn = self._parameterize_test
+        fn.parametrize_fn = self._parametrize_test
         return fn
 
 
@@ -673,14 +675,14 @@ class _TestParameterizer(object):
 #   they're instantiated for. Finally, the @dtypes decorator composes with the
 #   @ops decorator, and works the same as the "dtypes" argument to @ops.
 
-class ops(_TestParameterizer):
+class ops(_TestParametrizer):
     def __init__(self, op_list, *, dtypes: OpDTypes = OpDTypes.basic,
                  allowed_dtypes: Optional[Sequence[torch.dtype]] = None):
         self.op_list = op_list
         self.opinfo_dtypes = dtypes
         self.allowed_dtypes = set(allowed_dtypes) if allowed_dtypes is not None else None
 
-    def _parameterize_test(self, test, generic_cls, device_cls):
+    def _parametrize_test(self, test, generic_cls, device_cls):
         """ Parameterizes the given test function across each op and its associated dtypes. """
         for op in self.op_list:
             # Acquires dtypes, using the op data if unspecified
