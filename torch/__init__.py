@@ -513,6 +513,15 @@ def is_warn_always_enabled():
     return _C._get_warnAlways()
 
 ################################################################################
+# Define numeric constants
+################################################################################
+
+# For Python Array API (https://data-apis.org/array-api/latest/API_specification/constants.html) and
+# NumPy consistency (https://numpy.org/devdocs/reference/constants.html)
+from math import e , nan , inf , pi
+__all__.extend(['e', 'pi', 'nan', 'inf'])
+
+################################################################################
 # Define Storage and Tensor classes
 ################################################################################
 
