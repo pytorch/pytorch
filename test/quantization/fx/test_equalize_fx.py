@@ -18,6 +18,10 @@ from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     SingleLayerLinearModel,
     TwoLayerLinearModel,
+    LinearAddModel,
+    SingleLayerFunctionalLinearModel,
+    TwoLayerFunctionalLinearModel,
+    FunctionalLinearAddModel,
 )
 
 # Standard Libraries
@@ -28,65 +32,6 @@ import numpy as np
 from hypothesis import given
 from hypothesis import strategies as st
 
-
-# Test where we have a nn.Linear layer followed by a fp32 operation (add layer
-# without a qconfig) followed by another nn.Linear layer
-class LinearAddModule(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.linear1 = nn.Linear(5, 8)
-        self.linear2 = nn.Linear(8, 5)
-
-    def forward(self, x):
-        x = self.linear1(x)
-        x = torch.add(x, 5)
-        x = self.linear2(x)
-        return x
-
-class Linear(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.weight = torch.rand((5, 5))
-        self.bias = torch.zeros(5)
-
-    def forward(self, x):
-        return F.linear(x, self.weight, self.bias)
-
-# Test where we have one functional linear layer
-class FunctionalLinearModule(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.linear1 = Linear()
-
-    def forward(self, x):
-        x = self.linear1(x)
-        return x
-
-# Test where we have two connected functional linear layers
-class FunctionalLinear2Module(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.linear1 = Linear()
-        self.linear2 = Linear()
-
-    def forward(self, x):
-        x = self.linear1(x)
-        x = self.linear2(x)
-        return x
-
-# Test where we have a F.Linear layer followed by a fp32 operation (add layer
-# without a qconfig) followed by another F.linear layer
-class FunctionalLinearAddModule(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.linear1 = Linear()
-        self.linear2 = Linear()
-
-    def forward(self, x):
-        x = self.linear1(x)
-        x = torch.add(x, 5)
-        x = self.linear2(x)
-        return x
 
 qconfig_dict = {"": None,
                 "object_type": [(nn.Linear, default_qconfig),
@@ -237,8 +182,8 @@ class TestEqualizeFx(QuantizationTestCase):
 
         tests = [(SingleLayerLinearModel, linear_node_occurrence),
                  (TwoLayerLinearModel, linear2_node_occurrence),
-                 (FunctionalLinear2Module, functionalLinear_node_occurrence),
-                 (FunctionalLinearAddModule, functionalLinear2Add_node_occurrence)]
+                 (TwoLayerFunctionalLinearModel, functionalLinear_node_occurrence),
+                 (FunctionalLinearAddModel, functionalLinear2Add_node_occurrence)]
 
         for (M, node_occurrence) in tests:
             m = M().eval()
@@ -250,8 +195,8 @@ class TestEqualizeFx(QuantizationTestCase):
         returns the same output as the original model
         """
 
-        tests = [SingleLayerLinearModel, LinearAddModule, TwoLayerLinearModel,
-                 FunctionalLinearModule, FunctionalLinearAddModule, FunctionalLinear2Module]
+        tests = [SingleLayerLinearModel, LinearAddModel, TwoLayerLinearModel,
+                 SingleLayerFunctionalLinearModel, FunctionalLinearAddModel, TwoLayerFunctionalLinearModel]
 
         x = torch.rand((5, 5))
         for M in tests:
@@ -302,7 +247,8 @@ class TestEqualizeFx(QuantizationTestCase):
         scales are the expected values
         """
 
-        tests = [SingleLayerLinearModel, TwoLayerLinearModel, FunctionalLinearModule, FunctionalLinear2Module]
+        tests = [SingleLayerLinearModel, TwoLayerLinearModel,
+                 SingleLayerFunctionalLinearModel, TwoLayerFunctionalLinearModel]
 
         x = torch.rand((5, 5))
         for M in tests:
@@ -349,7 +295,8 @@ class TestEqualizeFx(QuantizationTestCase):
         biases are as expected
         """
 
-        tests = [SingleLayerLinearModel, TwoLayerLinearModel, FunctionalLinearModule, FunctionalLinear2Module]
+        tests = [SingleLayerLinearModel, TwoLayerLinearModel,
+                 SingleLayerFunctionalLinearModel, TwoLayerFunctionalLinearModel]
 
         x = torch.rand((5, 5))
         for M in tests:
@@ -402,7 +349,8 @@ class TestEqualizeFx(QuantizationTestCase):
         min/max values are as expected
         """
 
-        tests = [SingleLayerLinearModel, TwoLayerLinearModel, FunctionalLinearModule, FunctionalLinear2Module]
+        tests = [SingleLayerLinearModel, TwoLayerLinearModel,
+                 SingleLayerFunctionalLinearModel, TwoLayerFunctionalLinearModel]
 
         x = torch.rand((5, 5))
         for M in tests:
@@ -536,36 +484,19 @@ class TestEqualizeFx(QuantizationTestCase):
         ]
 
         tests = [(SingleLayerLinearModel, linear_node_list),
-                 (LinearAddModule, linearAdd_node_list),
+                 (LinearAddModel, linearAdd_node_list),
                  (TwoLayerLinearModel, linear2_node_list),
-                 (FunctionalLinearModule, functionalLinear_node_list),
-                 (FunctionalLinearAddModule, functionalLinearAdd_node_list),
-                 (FunctionalLinear2Module, functionalLinear2_node_list)]
+                 (SingleLayerFunctionalLinearModel, functionalLinear_node_list),
+                 (FunctionalLinearAddModel, functionalLinearAdd_node_list),
+                 (TwoLayerFunctionalLinearModel, functionalLinear2_node_list)]
 
         torch.manual_seed(0)
         x = torch.rand((5, 5))
         for (M, node_list) in tests:
-            # No equalization
             m = M().eval()
-            prepared = prepare_fx(copy.deepcopy(m), qconfig_dict)
-            prepared_model = copy.deepcopy(prepared)
-            prepared(x)
-            quantized_model = convert_fx(prepared)
-
-            # Equalization
-            prepared = prepare_fx(copy.deepcopy(m), qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
-            prepared(x)
-            equalized_model = _convert_equalization_ref(prepared)
-
-            # Check that the graph before quantization is pretty much the same
-            self.assertTrue(self.check_orig_and_eq_graphs(prepared_model, equalized_model))
-
             prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
             prepared(x)
             equalized_quantized_model = convert_fx(prepared)
-
-            # Check that the graph after quantization is pretty much the same
-            self.assertTrue(self.check_orig_and_eq_graphs(quantized_model, equalized_quantized_model))
 
             # Check the order of nodes in the graph
             self.checkGraphModuleNodes(equalized_quantized_model, expected_node_list=node_list)
