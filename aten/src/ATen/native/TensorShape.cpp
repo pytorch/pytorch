@@ -623,7 +623,6 @@ std::vector<Tensor> unsafe_chunk(const Tensor& self, int64_t chunks, int64_t dim
   TORCH_CHECK(chunks > 0,
            "chunk expects `chunks` to be greater than 0, got: ", chunks);
 
-  std::vector<Tensor> result;
   const auto dim_size = self.size(dim);
   int64_t split_size = (dim_size + chunks - 1) / chunks;
 

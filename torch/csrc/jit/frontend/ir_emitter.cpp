@@ -1344,8 +1344,15 @@ struct to_ir {
       }
 
       ListTypePtr lt = list_value->type()->expect<ListType>();
+
+      const TypePtr element_type_hint =
+          type_hint ? type_hint->expect<ListType>()->getElementType() : nullptr;
+
       auto unified = unifyTypes(
-          lt->getElementType(), out->type(), /*default_to_any=*/true);
+          lt->getElementType(),
+          out->type(),
+          /*default_to_any=*/true,
+          element_type_hint);
 
       if (lt->getElementType() != AnyType::get() &&
           *unified == AnyType::get()) {
@@ -1461,10 +1468,14 @@ struct to_ir {
 
       DictTypePtr dt = dict_value->type()->expect<DictType>();
 
+      const TypePtr value_type_hint =
+          type_hint ? type_hint->expect<DictType>()->getKeyType() : nullptr;
+
       c10::optional<TypePtr> unified = unifyTypes(
           dt->getValueType(),
           v->type(),
-          /*default_to_any=*/true);
+          /*default_to_any=*/true,
+          value_type_hint);
 
       // Warn the user if we inferred the type of the values to be `Any`
       // even though the annotation was something else
@@ -3678,8 +3689,12 @@ struct to_ir {
       auto types = fmap(values, [](const Value* v) { return v->type(); });
 
       std::stringstream nowhere; // never used
-      c10::optional<TypePtr> unified =
-          unifyTypeList(types, nowhere, /*default_to_any=*/true);
+
+      const TypePtr element_type_hint =
+          type_hint ? type_hint->expect<ListType>()->getElementType() : nullptr;
+
+      c10::optional<TypePtr> unified = unifyTypeList(
+          types, nowhere, /*default_to_any=*/true, element_type_hint);
 
       if (!type_hint && *unified == AnyType::get()) {
         TORCH_WARN(
@@ -3843,8 +3858,15 @@ struct to_ir {
           auto types = fmap(values, [](const Value* v) { return v->type(); });
 
           std::stringstream nowhere; // never used
+
+          const TypePtr value_type_hint =
+              type_hint ? type_hint->expect<DictType>()->getKeyType() : nullptr;
+
           c10::optional<TypePtr> unified = unifyTypeList(
-              types, /*why_not=*/nowhere, /*default_to_any=*/true);
+              types,
+              /*why_not=*/nowhere,
+              /*default_to_any=*/true,
+              value_type_hint);
 
           if (!type_hint && *unified == AnyType::get()) {
             TORCH_WARN(

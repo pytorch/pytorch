@@ -571,6 +571,16 @@ class TestClassType(JitTestCase):
 
         make_global(Foo, Bar, OneTwo, OneTwoThree, OneTwoWrong, NotMember, NotMember2)
 
+        def use_them(x):
+            a = Foo()
+            b = Bar()
+            c = torch.jit.annotate(List[OneTwo], [a, b])
+            for i in range(len(c)):
+                x = c[i].one(x, x)
+                x = c[i].two(x)
+            return x
+        self.checkScript(use_them, (torch.rand(3, 4),))
+
         @torch.jit.script
         def as_interface(x: OneTwo) -> OneTwo:
             return x
