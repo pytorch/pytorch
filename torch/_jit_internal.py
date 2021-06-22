@@ -23,6 +23,7 @@ import functools
 # Otherwise, "AttributeError: module 'torch' has no attribute 'distributed'" is raised.
 import torch.distributed.rpc
 from torch._utils_internal import get_source_lines_and_file
+from torch._C import Future as CFuture
 from torch.futures import Future
 import torch.package._mangling as package_mangling
 from typing import Any, Callable, Dict, Generic, List, Optional, Tuple, Type, TypeVar, Union  # noqa: F401
@@ -1174,14 +1175,14 @@ class _TensorExtractor(pickle.Pickler):
         # Since we just want to extract tensors, we don't mind if an object is
         # unpicklable if it doesn't contain tensors, as we can just ignore/skip
         # it. To play it safe, we only do so for common objects that we're sure
-        # don't contain tensors. Feel free to add new types gere. Note also that
+        # don't contain tensors. Feel free to add new types here. Note also that
         # even if a type isn't listed here this won't block users, since thet
         # can just add a __getstate__ or __reduce__ method to their class.
         if isinstance(obj, LockType):
             return ""
-        # RRefs (and in fact Futures too) don't technically contain a value,
-        # they just contain the means to access a value.
-        if is_rref_instance(obj):
+        # Futures and RRefs don't technically contain a value, they just offer
+        # the means to access a value.
+        if isinstance(obj, CFuture) or is_rref_instance(obj):
             return ""
         return None
 

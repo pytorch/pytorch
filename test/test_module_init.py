@@ -129,6 +129,7 @@ def build_constructor_arg_db():
         torch.nn.ReLU: ((), {}),
         torch.nn.ReflectionPad1d: ((2,), {}),
         torch.nn.ReflectionPad2d: ((2,), {}),
+        torch.nn.ReflectionPad3d: ((2,), {}),
         torch.nn.ReplicationPad1d: ((2,), {}),
         torch.nn.ReplicationPad2d: ((2,), {}),
         torch.nn.ReplicationPad3d: ((2,), {}),
