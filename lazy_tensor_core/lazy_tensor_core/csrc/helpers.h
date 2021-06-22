@@ -7,7 +7,6 @@
 #include <tuple>
 #include <vector>
 
-#include "absl/types/optional.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/core/lib/bfloat16/bfloat16.h"
@@ -92,7 +91,7 @@ class Helpers {
     return lazy_tensors::util::Iota<lazy_tensors::int64>(shape.rank());
   }
 
-  static absl::optional<DynamicReshapeInfo> GetDynamicReshapeInfo(
+  static c10::optional<DynamicReshapeInfo> GetDynamicReshapeInfo(
       const lazy_tensors::Shape& input_shape,
       lazy_tensors::Span<const lazy_tensors::int64> output_sizes);
 

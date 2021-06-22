@@ -1,13 +1,14 @@
 #ifndef COMPUTATION_CLIENT_ASYNC_TASK_H_
 #define COMPUTATION_CLIENT_ASYNC_TASK_H_
 
+#include <c10/util/Optional.h>
+
 #include <condition_variable>
 #include <exception>
 #include <functional>
 #include <memory>
 #include <mutex>
 
-#include "absl/types/optional.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/thread_pool.h"
 
@@ -24,7 +25,7 @@ class AsyncTask {
     std::condition_variable cv;
     bool scheduled = false;
     bool completed = false;
-    absl::optional<T> result;
+    c10::optional<T> result;
     std::exception_ptr exptr;
   };
 
@@ -44,7 +45,7 @@ class AsyncTask {
 
   AsyncTask& Schedule() {
     auto completer = [data = data_]() {
-      absl::optional<T> result;
+      c10::optional<T> result;
       std::exception_ptr exptr;
       try {
         result = data->taskfn();

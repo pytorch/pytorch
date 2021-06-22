@@ -9,7 +9,7 @@ namespace ir {
 namespace ops {
 
 BinaryCrossEntropy::BinaryCrossEntropy(const Value& logits, const Value& labels,
-                                       const absl::optional<Value>& weight,
+                                       const c10::optional<Value>& weight,
                                        ReductionMode reduction)
     : Node(ir::OpKind(at::aten::binary_cross_entropy),
            lazy_tensors::util::GetValuesVector<Value>({logits, labels},
@@ -23,7 +23,7 @@ BinaryCrossEntropy::BinaryCrossEntropy(const Value& logits, const Value& labels,
 }
 
 NodePtr BinaryCrossEntropy::Clone(OpList operands) const {
-  absl::optional<Value> weight;
+  c10::optional<Value> weight;
   if (operands.size() > 2) {
     weight = operands.at(2);
   }

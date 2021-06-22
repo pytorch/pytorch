@@ -1,11 +1,12 @@
 #ifndef COMPUTATION_CLIENT_TYPES_H_
 #define COMPUTATION_CLIENT_TYPES_H_
 
+#include <c10/util/Optional.h>
+
 #include <cmath>
 #include <vector>
 
 #include "absl/numeric/int128.h"
-#include "absl/types/optional.h"
 #include "lazy_tensors/types.h"
 
 namespace lazy_tensors {
@@ -37,8 +38,8 @@ struct Percentile {
 };
 
 struct Metric {
-  absl::optional<Percentile> percentile;
-  absl::optional<int64> int64_value;
+  c10::optional<Percentile> percentile;
+  c10::optional<int64> int64_value;
 };
 
 }  // namespace lazy_tensors

@@ -1,6 +1,7 @@
 #pragma once
 
-#include "absl/types/optional.h"
+#include <c10/util/Optional.h>
+
 #include "lazy_tensor_core/csrc/ir.h"
 #include "lazy_tensor_core/csrc/reduction.h"
 
@@ -12,7 +13,7 @@ class BinaryCrossEntropyBackward : public Node {
  public:
   BinaryCrossEntropyBackward(const Value& grad_output, const Value& logits,
                              const Value& labels,
-                             const absl::optional<Value>& weight,
+                             const c10::optional<Value>& weight,
                              ReductionMode reduction);
 
   std::string ToString() const override;

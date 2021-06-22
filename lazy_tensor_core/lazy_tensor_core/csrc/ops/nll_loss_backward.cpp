@@ -10,8 +10,8 @@ namespace ops {
 
 NllLossBackward::NllLossBackward(const Value& grad_output, const Value& logits,
                                  const Value& labels,
-                                 const absl::optional<Value>& weight,
-                                 const absl::optional<Value>& total_weight,
+                                 const c10::optional<Value>& weight,
+                                 const c10::optional<Value>& total_weight,
                                  ReductionMode reduction, int ignore_index)
     : Node(ir::OpKind(at::aten::nll_loss_backward),
            lazy_tensors::util::GetValuesVector<Value>(
@@ -26,8 +26,8 @@ NllLossBackward::NllLossBackward(const Value& grad_output, const Value& logits,
 }
 
 NodePtr NllLossBackward::Clone(OpList operands) const {
-  absl::optional<Value> weight;
-  absl::optional<Value> total_weight;
+  c10::optional<Value> weight;
+  c10::optional<Value> total_weight;
   if (operands.size() > 3) {
     weight = operands.at(3);
     total_weight = operands.at(4);
