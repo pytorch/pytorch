@@ -155,11 +155,7 @@ std::array<scalar_t, nrows> multi_row_sum(
 template <typename scalar_t>
 scalar_t row_sum(const char * C10_RESTRICT in_data,
                  const int64_t in_stride, const int64_t size) {
-#ifdef CPU_CAPABILITY_AVX512
-  constexpr int64_t ilp_factor = 2;
-#else
   constexpr int64_t ilp_factor = 4;
-#endif
   // Interpret row as a (-1, ilp_factor) shaped array to find partial sums
   const int64_t size_ilp = size / ilp_factor;
   auto partial_sums = multi_row_sum<scalar_t, ilp_factor>(
@@ -345,7 +341,18 @@ void sum_kernel_impl(TensorIterator &iter) {
 
 }  // namespace (anonymous)
 
+// sum on Float16 has poor accuracy with AVX2, and more so with AVX512.
+// So until it's fixed, it won't be dispatched with AVX512. GH issue 59489.
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_DISPATCH(sum_stub, &sum_kernel_impl);
+#ifdef CPU_CAPABILITY_DEFAULT
+REGISTER_ARCH_DISPATCH(sum_stub, DEFAULT, &sum_kernel_impl);
+#elif defined(CPU_CAPABILITY_AVX2)
+REGISTER_AVX2_DISPATCH(sum_stub, &sum_kernel_impl);
+#elif defined(CPU_CAPABILITY_VSX)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_VSX_DISPATCH(sum_stub, &sum_kernel_impl);
+#elif defined(CPU_CAPABILITY_AVX512)
+REGISTER_AVX512_DISPATCH(sum_stub, static_cast<reduce_fn>(nullptr));
+#endif
 
 }}  // namespace at::native

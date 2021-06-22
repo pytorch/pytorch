@@ -1,4 +1,5 @@
 import torch
+import unittest
 import torch.nn as nn
 import torch.nn.quantized as nnq
 from torch.quantization import (
@@ -29,6 +30,7 @@ from torch.testing._internal.common_quantization import (
     test_only_eval_fn,
 )
 from torch.testing._internal.common_quantized import override_qengines
+from torch.testing._internal.common_utils import IS_WINDOWS
 
 
 class SubModule(torch.nn.Module):
@@ -355,6 +357,7 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
             )
 
     @override_qengines
+    @unittest.skipIf(IS_WINDOWS, "This test fails on Windows with ATEN_CPU_CAPABILITY=avx512")
     def test_compare_model_outputs_conv_static(self):
         r"""Compare the output of conv layer in stataic quantized model and corresponding
         output of conv layer in float model

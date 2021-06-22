@@ -322,17 +322,8 @@ def is_cascade_lake():
     else:
         return False
 
-IS_CASCADE_LAKE = is_cascade_lake()
-
-def is_aten_cpu_capability_avx512():
-    if not IS_WINDOWS and not IS_MACOS:
-        info_cpu = re.sub(r'\s+', ' ', (subprocess.check_output("lscpu", shell=True).strip()).decode())
-        if ("avx512vl" in info_cpu) and ("avx512f" in info_cpu) and ("avx512bw" in info_cpu):
-            return True
-    else:
-        return False
-
-IS_ATEN_CPU_CAPABILITY_AVX512 = is_aten_cpu_capability_avx512()
+# Currently, the only CI machines with AVX512_VNNI support are Intel Cascade Lake machines
+IS_AVX512_VNNI_SUPPORTED = is_cascade_lake()
 
 if IS_WINDOWS:
     @contextmanager
