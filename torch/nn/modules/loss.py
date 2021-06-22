@@ -1130,18 +1130,19 @@ class CrossEntropyLossWithSoftLabels(_Loss):
     one single class. It is useful when training a classification problem with `C` classes when
     "soft labels" are required, such as when utilizing label smoothing or blended labels.
 
-    The `input` is expected to contain raw, unnormalized scores for each class and the `target`
+    The ``input`` is expected to contain raw, unnormalized scores for each class and the ``target``
     should match the `input` shape and contain the target distribution over the classes.
 
-    The loss can be described as:
+    With input :math:`x` and target :math:`y`, the unreduced (i.e. with ``reduction`` set
+    to ``none``) loss :math:`L` can be described as:
 
     .. math::
-        L = l_{n,c} = y_{n,c} \cdot \left( \log y_{n,c} - \\
-        \log\left(\frac{\exp(x_{n,c})}{\sum_{i=1}^C \exp(x_{n,i})} \right) \right)
+        L = \{l_1,\dots,l_N\}, \quad
+        l_n = y_n \cdot \left( \log y_n - \log\left(\frac{\exp(x_n)}{\sum_{i} \exp(x_i)} \right) \right)
 
-    where :math:`x_{n,c}` represents each element of ``input``, :math:`y_{n,c}` represents each element of
-    ``target``, and :math:`L` has the same shape as ``input`` and ``target``.  If :attr:`reduction` is not
-    ``'none'`` (default ``'mean'``), then:
+    where the index :math:`N` spans all dimensions of ``input`` and :math:`L` has the same shape as
+    ``input`` and ``target``. If :attr:`reduction` is not ``'none'`` (default ``'mean'``), then the
+    scalar loss output :math:`\ell` is defined as:
 
     .. math::
         \ell(x, y) = \begin{cases}
@@ -1169,9 +1170,10 @@ class CrossEntropyLossWithSoftLabels(_Loss):
             ``'sum'``: the output will be summed. Default: ``'mean'``
 
     Shape:
-        - Input: :math:`(N, C)` where `N = minibatch size` and `C = number of classes`
-        - Target: :math:`(N, C)`, same shape as the input
-        - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(N, C)`
+        - Input: :math:`(*, C)` where :math:`*` represents any number of dimensions (including none) and
+          `C = number of classes`
+        - Target: :math:`(*, C)`, same shape as the input
+        - Output: If :attr:`reduction` is ``'none'``, then :math:`(*, C)`, otherwise scalar.
 
     Examples::
 
