@@ -7,6 +7,7 @@ set(TENSOREXPR_TEST_SRCS
   ${TENSOREXPR_TEST_ROOT}/test_cpp_codegen.cpp
   ${TENSOREXPR_TEST_ROOT}/test_expr.cpp
   ${TENSOREXPR_TEST_ROOT}/test_external_calls.cpp
+  ${TENSOREXPR_TEST_ROOT}/test_graph_opt.cpp
   ${TENSOREXPR_TEST_ROOT}/test_ir_printer.cpp
   ${TENSOREXPR_TEST_ROOT}/test_ir_verifier.cpp
   ${TENSOREXPR_TEST_ROOT}/test_kernel.cpp
