@@ -8,8 +8,9 @@ import warnings
 from collections import OrderedDict
 from typing import Any, List, Optional
 
-
-class _ContextMethodMixin(object):
+# Formerly known as: _ContextMethodMixin
+# Any class subclassing Function will
+class Ctx(object):
 
     def save_for_backward(self, *tensors: torch.Tensor):
         r"""Saves given tensors for a future call to :func:`~Function.backward`.
@@ -18,7 +19,7 @@ class _ContextMethodMixin(object):
         :func:`forward` **method. This should only be called with input or
         output tensors**
 
-        Later, saved tensors can be accessed through the :attr:`saved_tensors`
+        In :func:`backward`, saved tensors can be accessed through the :attr:`saved_tensors`
         attribute. Before returning them to the user, a check is made to ensure
         they weren't used in any in-place operation that modified their content.
 
@@ -31,10 +32,10 @@ class _ContextMethodMixin(object):
             >>>     @staticmethod
             >>>     def forward(ctx, x, y, z):
             >>>         w = x * y * z
-            >>>         out = x*y + y*z + w
-            >>>         ctx.save_for_backward(x, y, out)  # x, y, out are input or output tensors
-            >>>         ctx.z = z  # z is an input but not a tensor
-            >>>         ctx.w = w  # w is tensor but neither input nor output
+            >>>         out = x * y + y * z + w
+            >>>         ctx.save_for_backward(x, y, out)
+            >>>         ctx.z = z  # z is not a tensor
+            >>>         ctx.w = w  # w is neither input nor output
             >>>         return out
             >>>
             >>>     @staticmethod
@@ -182,7 +183,7 @@ class _HookMixin(object):
         return backward_hooks, handle
 
 
-class BackwardCFunction(_C._FunctionBase, _ContextMethodMixin, _HookMixin):
+class BackwardCFunction(_C._FunctionBase, Ctx, _HookMixin):
     def apply(self, *args):
         # _forward_cls is defined by derived class
         return self._forward_cls.backward(self, *args)  # type: ignore[attr-defined]
@@ -204,7 +205,7 @@ class FunctionMeta(type):
 
 
 # mypy doesn't understand `with_metaclass` from torch._six
-class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixin, _HookMixin)):  # type: ignore[misc]
+class Function(with_metaclass(FunctionMeta, _C._FunctionBase, Ctx, _HookMixin)):  # type: ignore[misc]
     r"""Base class to create custom `autograd.Function`
 
     To create a custom `autograd.Function`, subclass this class and implement
@@ -321,7 +322,7 @@ def once_differentiable(fn):
             outputs = (outputs,)
 
         err_fn = _functions.DelayedError(
-            b"trying to differentiate twice a function that was marked"
+            b"trying to differentiate twice a function that was marked "
             b"with @once_differentiable", len(outputs))
 
         # Create aliases of each output that has requires_grad=True. We need
