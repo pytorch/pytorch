@@ -92,12 +92,11 @@ def _stft_reference(x, hop_length, window):
         X[:, m] = torch.fft.fft(slc * window)
     return X
 
-# rocFFT requires/assumes that the input to the irfft transform
-# is of the form that is a valid output from the rfft transform
+# rocFFT requires/assumes that the input to hipfftExecC2R or hipfftExecZ2D
+# is of the form that is a valid output from a real to complext transform
 # (i.e. it cannot be a set of random numbers)
-# So for ROCm, call rfft and use its output as the input for testing irfft
-
-
+# So for ROCm, call np.fft.rfftn and use its output as the input 
+# for testing ops that call hipfftExecC2R
 def _generate_valid_rocfft_input(input, op):
     # check if op can invoke hipfftExecC2R or hipfftExecZ2D
     if type(op) == SpectralFuncInfo:
