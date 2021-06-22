@@ -63,6 +63,7 @@ FILE_SCHEMA = "file://"
 if sys.platform == 'win32':
     FILE_SCHEMA = "file:///"
 
+# Environment variable `IN_CI` is set in `.jenkins/common.sh`.
 IS_IN_CI = os.getenv('IN_CI') == '1'
 IS_SANDCASTLE = os.getenv('SANDCASTLE') == '1' or os.getenv('TW_JOB_USER') == 'sandcastle'
 IS_FBCODE = os.getenv('PYTORCH_TEST_FBCODE') == '1'
@@ -189,6 +190,9 @@ if not expecttest.ACCEPT:
 UNITTEST_ARGS = [sys.argv[0]] + remaining
 torch.manual_seed(SEED)
 
+# CI Prefix path used only on CI environment
+CI_TEST_PREFIX = str(pathlib.Path(os.getcwd()))
+
 def wait_for_process(p):
     try:
         return p.wait()
@@ -235,9 +239,6 @@ def repeat_test_for_types(dtypes):
         return call_helper
     return repeat_helper
 
-# Environment variable `IS_PYTORCH_CI` is set in `.jenkins/common.sh`.
-IS_PYTORCH_CI = bool(os.environ.get('IS_PYTORCH_CI'))
-
 
 def discover_test_cases_recursively(suite_or_case):
     if isinstance(suite_or_case, unittest.TestCase):
@@ -255,6 +256,9 @@ def chunk_list(lst, nchunks):
 
 # sanitize filename e.g., distributed/pipeline/sync/skip/test_api.py -> distributed.pipeline.sync.skip.test_api
 def sanitize_test_filename(filename):
+    # inspect.getfile returns absolute path in some CI jobs, converting it to relative path if needed
+    if filename.startswith(CI_TEST_PREFIX):
+        filename = filename[len(CI_TEST_PREFIX) + 1:]
     strip_py = re.sub(r'.py$', '', filename)
     return re.sub('/', r'.', strip_py)
 
@@ -832,8 +836,7 @@ try:
             verbosity=hypothesis.Verbosity.verbose))
 
     hypothesis.settings.load_profile(
-        "pytorch_ci" if IS_PYTORCH_CI else os.getenv('PYTORCH_HYPOTHESIS_PROFILE',
-                                                     'dev')
+        "pytorch_ci" if IS_IN_CI else os.getenv('PYTORCH_HYPOTHESIS_PROFILE', 'dev')
     )
 except ImportError:
     print('Fail to import hypothesis in common_utils, tests are not derandomized')
@@ -959,6 +962,17 @@ class AssertRaisesContextIgnoreNotImplementedError(unittest.case._AssertRaisesCo
         if exc_type is not None and issubclass(exc_type, NotImplementedError):
             self.test_case.skipTest(f"not_implemented: {exc_value}")  # type: ignore[attr-defined]
         return super().__exit__(exc_type, exc_value, tb)
+
+
+@contextmanager
+def set_warn_always_context(new_val: bool):
+    old_val = torch.is_warn_always_enabled()
+    torch.set_warn_always(new_val)
+    try:
+        yield
+    finally:
+        torch.set_warn_always(old_val)
+
 
 class TestCase(expecttest.TestCase):
     # NOTE: "precision" lets classes and generated tests set minimum
@@ -1440,7 +1454,7 @@ class TestCase(expecttest.TestCase):
             super().assertEqual(x, y, msg=msg)
 
     def assertNotEqual(self, x, y, msg: Optional[str] = None, *,                                       # type: ignore[override]
-                       atol: Optional[float] = None, rtol: Optional[float] = None, **kwargs) -> None:  # type: ignore[override]
+                       atol: Optional[float] = None, rtol: Optional[float] = None, **kwargs) -> None:
         with self.assertRaises(AssertionError, msg=msg):
             self.assertEqual(x, y, msg, atol=atol, rtol=rtol, **kwargs)
 
@@ -1502,7 +1516,8 @@ class TestCase(expecttest.TestCase):
         """
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
-            callable()
+            with set_warn_always_context(True):
+                callable()
             self.assertTrue(len(ws) == 0, msg)
 
     @contextmanager
@@ -1516,12 +1531,8 @@ class TestCase(expecttest.TestCase):
         pattern = re.compile(regex)
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
-            prev = torch.is_warn_always_enabled()
-            torch.set_warn_always(True)
-            try:
+            with set_warn_always_context(True):
                 yield
-            finally:
-                torch.set_warn_always(prev)
             if len(ws) == 0:
                 self.fail('no warning caught')
             self.assertTrue(any([type(w.message) is category for w in ws]))
