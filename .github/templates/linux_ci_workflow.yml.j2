@@ -311,7 +311,7 @@ jobs:
         run: |
           # Remove any previous test reports if they exist
           rm -f test-reports-*.zip
-          zip -r "test-reports-${TEST_CONFIG}.zip" test/test-reports
+          zip -r "test-reports-${TEST_CONFIG}.zip" test/**/*.xml
       - uses: actions/upload-artifact@v2
         name: Store PyTorch Test Reports
         if: always()
