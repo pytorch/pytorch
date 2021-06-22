@@ -2911,7 +2911,6 @@ static void lu_solve_dispatch(const Tensor& b, const Tensor& lu, const Tensor& p
 
 REGISTER_DISPATCH(lu_solve_stub, &lu_solve_dispatch);
 
-
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lstsq ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>

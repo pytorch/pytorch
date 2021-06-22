@@ -3613,7 +3613,7 @@ Tensor _lu_solve_trans(const Tensor& self, const Tensor& LU_data, const Tensor& 
 }
 
 Tensor lu_solve(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivots) {
-  return at::_lu_solve_trans(self, LU_data, LU_pivots, "N");
+  return at::native::_lu_solve_trans(self, LU_data, LU_pivots, "N");
 }
 
 Tensor& lu_solve_out(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivots, Tensor& result) {

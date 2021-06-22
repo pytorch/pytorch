@@ -6591,11 +6591,6 @@
   dispatch:
     CompositeExplicitAutograd: lu_solve
 
-- func: _lu_solve_trans(Tensor self, Tensor LU_data, Tensor LU_pivots, str trans="N") -> Tensor
-  variants: function
-  dispatch:
-    CPU, CUDA: _lu_solve_trans
-
 - func: lu_unpack(Tensor LU_data, Tensor LU_pivots, bool unpack_data=True, bool unpack_pivots=True) -> (Tensor P, Tensor L, Tensor U)
   variants: function
   dispatch:
