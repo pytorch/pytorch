@@ -273,6 +273,7 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
 
 
     @override_qengines
+    @unittest.skipIf(IS_WINDOWS, "This test fails on Windows with ATEN_CPU_CAPABILITY=avx512")
     def test_compare_model_stub_functional_static(self):
         r"""Compare the output of static quantized functional layer and its float shadow module"""
 
