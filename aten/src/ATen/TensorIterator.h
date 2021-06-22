@@ -350,6 +350,7 @@ public:
   TORCH_DISALLOW_TEMPORARIES(build_borrowing_binary_op)
   void build_unary_float_op(const Tensor& out, const Tensor& a);
   void build_unary_op(const Tensor& out, const Tensor& a);
+  void build_comparison_op(const Tensor& out, const Tensor& a, const Tensor& b);
 
 #undef TORCH_DISALLOW_TEMPORARIES
 protected:
@@ -478,7 +479,7 @@ struct TORCH_API TensorIterator final : public TensorIteratorBase {
   static TensorIterator binary_op(Tensor& out, const Tensor& a, const Tensor& b);
   static TensorIterator borrowing_binary_op(const Tensor& out, const Tensor& a, const Tensor& b);
   TORCH_DISALLOW_TEMPORARIES(borrowing_binary_op)
-  static TensorIterator comparison_op(const Tensor& out, const Tensor& a, const Tensor& b);
+  static TensorIterator comparison_op(Tensor& out, const Tensor& a, const Tensor& b);
   static TensorIterator unary_op(Tensor& out, const Tensor& a);
   static TensorIterator unary_float_op(Tensor& out, const Tensor& a);
   static TensorIterator nullary_op(Tensor& out);

@@ -146,7 +146,7 @@ TORCH_META_FUNC(fmin) (const Tensor& self, const Tensor& other) {
     build_binary_op(maybe_get_output(), self, other);
 }
 
-void comparison_op_check_for_meta(impl::MetaBase& meta, const Tensor& self, const Tensor& other) {
+void comparison_op_check(const Tensor& self, const Tensor& other) {
   // Validate that is possible to convert zero-dim tensor's dtype to other dtype
   // without overflow
   if (self.scalar_type() != other.scalar_type()) {
@@ -156,20 +156,17 @@ void comparison_op_check_for_meta(impl::MetaBase& meta, const Tensor& self, cons
       native::check_convert(self.item(), other.scalar_type());
     }
   }
-
-  const auto& result = meta.maybe_get_output();
-  if (!result.defined()) {
-    meta.set_output({0}, self.options().dtype(kBool));
-  }
 }
 
 TORCH_META_FUNC2(eq, Tensor)(const Tensor& self, const Tensor& other) {
-  comparison_op_check_for_meta(*this, self, other);
+  comparison_op_check(self, other);
+  build_comparison_op(maybe_get_output(), self, other);
 }
 
 TORCH_META_FUNC2(eq, Scalar)(const Tensor& self, const Scalar& other) {
   auto other_tensor = native::wrapped_scalar_tensor_and_check_convert(other, self);
-  comparison_op_check_for_meta(*this, self, other_tensor);
+  comparison_op_check(self, other_tensor);
+  build_comparison_op(maybe_get_output(), self, other_tensor);
 }
 
 } // namespace meta
@@ -303,24 +300,24 @@ TORCH_IMPL_FUNC(special_xlog1py_out) (const Tensor& self, const Tensor& other, c
   xlog1py_stub(device_type(), *this);
 }
 
-#define CREATE_BINARY_TORCH_IMPL_FUNC(func)                                                    \
-TORCH_IMPL_FUNC(func##_out) (const Tensor& self, const Tensor& other, const Tensor& result) {  \
-  func##_stub(device_type(), *this);                                                           \
+#define CREATE_BINARY_TORCH_IMPL_FUNC(func_out, func_stub)                                                    \
+TORCH_IMPL_FUNC(func_out) (const Tensor& self, const Tensor& other, const Tensor& result) {  \
+  func_stub(device_type(), *this);                                                           \
 }
 
-CREATE_BINARY_TORCH_IMPL_FUNC(maximum);
-CREATE_BINARY_TORCH_IMPL_FUNC(minimum);
-CREATE_BINARY_TORCH_IMPL_FUNC(fmax);
-CREATE_BINARY_TORCH_IMPL_FUNC(fmin);
-CREATE_BINARY_TORCH_IMPL_FUNC(logaddexp);
-CREATE_BINARY_TORCH_IMPL_FUNC(logaddexp2);
-CREATE_BINARY_TORCH_IMPL_FUNC(gcd);
-CREATE_BINARY_TORCH_IMPL_FUNC(lcm);
-CREATE_BINARY_TORCH_IMPL_FUNC(hypot);
-CREATE_BINARY_TORCH_IMPL_FUNC(igamma);
-CREATE_BINARY_TORCH_IMPL_FUNC(igammac);
-CREATE_BINARY_TORCH_IMPL_FUNC(nextafter);
-CREATE_BINARY_TORCH_IMPL_FUNC(remainder);
+CREATE_BINARY_TORCH_IMPL_FUNC(maximum_out, maximum_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(minimum_out, minimum_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(fmax_out, fmax_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(fmin_out, fmin_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(logaddexp_out, logaddexp_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(logaddexp2_out, logaddexp2_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(gcd_out, gcd_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(lcm_out, lcm_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(hypot_out, hypot_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(igamma_out, igamma_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(igammac_out, igammac_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(nextafter_out, nextafter_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(remainder_out, remainder_stub);
 
 Tensor special_xlog1py(const Scalar& x, const Tensor& y) {
   return at::special_xlog1py(wrapped_scalar_tensor(x), y);
@@ -982,15 +979,12 @@ Tensor& greater_equal_(Tensor& self, const Scalar& other) { return self.ge_(othe
 
 TORCH_IMPL_FUNC(eq_Tensor_out)
 (const Tensor& self, const Tensor& other, const Tensor& result) {
-  auto iter = TensorIterator::comparison_op(result, self, other);
-  eq_stub(iter.device_type(), iter);
+  eq_stub(device_type(), *this);
 }
 
 TORCH_IMPL_FUNC(eq_Scalar_out)
 (const Tensor& self, const Scalar& other, const Tensor& result) {
-  auto other_tensor = wrapped_scalar_tensor_and_check_convert(other, self);
-  auto iter = TensorIterator::comparison_op(result, self, other_tensor);
-  eq_stub(iter.device_type(), iter);
+  eq_stub(device_type(), *this);
 }
 
 Tensor& eq_out(const Tensor& self, const Tensor& other, Tensor& result) { return comparison_op_out(result, self, other, eq_stub); }
