@@ -96,7 +96,6 @@ namespace {
     TYPED_TEST_CASE(BitwiseFloatsAdditional, RealFloatTestedTypes);
     TYPED_TEST_CASE(BitwiseFloatsAdditional2, FloatTestedTypes);
     TYPED_TEST_CASE(QuantizationTests, QuantTestedTypes);
-    TYPED_TEST_CASE(FunctionalTests, RealFloatIntTestedTypes);
     TYPED_TEST_CASE(FunctionalBF16Tests, BFloatTestedTypes);
     TYPED_TEST_CASE(FunctionalTests, RealFloatIntTestedTypes);
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
