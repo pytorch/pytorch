@@ -357,7 +357,6 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
             )
 
     @override_qengines
-    @unittest.skipIf(IS_WINDOWS, "This test fails on Windows with ATEN_CPU_CAPABILITY=avx512")
     def test_compare_model_outputs_conv_static(self):
         r"""Compare the output of conv layer in stataic quantized model and corresponding
         output of conv layer in float model
@@ -407,6 +406,7 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
             compare_and_validate_results(model, q_model, linear_data)
 
     @override_qengines
+    @unittest.skipIf(IS_WINDOWS, "This test fails on Windows with ATEN_CPU_CAPABILITY=avx512")
     def test_compare_model_outputs_functional_static(self):
         r"""Compare the output of functional layer in static quantized model and corresponding
         output of conv layer in float model
