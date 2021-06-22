@@ -2,7 +2,6 @@
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/LegacyTHFunctionsCPU.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/WrapDimUtils.h>
 
@@ -453,6 +452,18 @@ Tensor special_digamma(const Tensor& self) { return self.digamma(); }
 // special_i0, alias for i0
 Tensor& special_i0_out(const Tensor& self, Tensor& result) { return at::i0_out(result, self); }
 Tensor special_i0(const Tensor& self) { return self.i0(); }
+
+// special_log1p, alias for log1p
+Tensor& special_log1p_out(const Tensor& self, Tensor& result) { return at::log1p_out(result, self); }
+Tensor special_log1p(const Tensor& self) { return self.log1p(); }
+
+// special_round, alias for round
+Tensor& special_round_out(const Tensor& self, Tensor& result) { return at::round_out(result, self); }
+Tensor special_round(const Tensor& self) { return self.round(); }
+
+// special_sinc, alias for sinc
+Tensor& special_sinc_out(const Tensor& self, Tensor& result) { return at::sinc_out(result, self); }
+Tensor special_sinc(const Tensor& self) { return self.sinc(); }
 
 namespace {
 
