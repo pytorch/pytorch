@@ -78,7 +78,7 @@ void filterEngineConfigs(
     if (deterministic) {
       if (cudnn_frontend::hasNumericalNote<CUDNN_NUMERICAL_NOTE_NONDETERMINISTIC>(c)) return true;
     }
-    if (scalar_type == kFloat || !allow_tf32) {
+    if (scalar_type == kFloat && !allow_tf32) {
       if (cudnn_frontend::hasNumericalNote<CUDNN_NUMERICAL_NOTE_DOWN_CONVERT_INPUTS>(c)) return true;
       if (cudnn_frontend::hasNumericalNote<CUDNN_NUMERICAL_NOTE_TENSOR_CORE>(c)) return true;
     }
@@ -158,9 +158,9 @@ auto build_opgraph(const cudnnHandle_t handle, const cudnnBackendDescriptorType_
   return opGraph;
 }
 
-const auto get_generator_sources(const cudnn_frontend::OperationGraph &opGraph, const cudnnBackendDescriptorType_t& desc, const Tensor& x, const bool& deterministic, const bool& allow_tf32) {
+const auto get_generator_sources(const cudnnBackendDescriptorType_t& desc, const Tensor& x, const bool deterministic, const bool allow_tf32) {
    // Method for engine config generator based on heuristics
-  auto heurgen_method = [&](cudnn_frontend::OperationGraph &opGraph) -> cudnn_frontend::EngineConfigList {
+  auto heurgen_method = [&desc, &x, deterministic, allow_tf32](cudnn_frontend::OperationGraph &opGraph) -> cudnn_frontend::EngineConfigList {
       auto heuristics = cudnn_frontend::EngineHeuristicsBuilder()
                             .setOperationGraph(opGraph)
                             .setHeurMode(CUDNN_HEUR_MODE_INSTANT)
@@ -171,7 +171,7 @@ const auto get_generator_sources(const cudnn_frontend::OperationGraph &opGraph, 
       return filtered_configs;
   };
   // Method for engine config generator based on fallback list
-  auto fallback_method = [&](cudnn_frontend::OperationGraph &opGraph) -> cudnn_frontend::EngineConfigList {
+  auto fallback_method = [&desc, &x, deterministic, allow_tf32](cudnn_frontend::OperationGraph &opGraph) -> cudnn_frontend::EngineConfigList {
     auto fallback = cudnn_frontend::EngineFallbackListBuilder()
                         .setOperationGraph(opGraph)
                         .setOperation(desc)
@@ -205,7 +205,7 @@ auto get_plans_from_find(const cudnnHandle_t handle, const cudnnBackendDescripto
   void *data_ptrs[] = {x.data_ptr(), y.data_ptr(), w.data_ptr()};
   int64_t uids[] = {'x', 'y', 'w'};
 
-  auto sources = get_generator_sources(opGraph, desc, x, deterministic, allow_tf32);
+  auto sources = get_generator_sources(desc, x, deterministic, allow_tf32);
   auto initial_predicate_function = [&](cudnn_frontend::ExecutionPlan const& plan) -> bool {
     return false;
   };
@@ -262,7 +262,7 @@ auto get_plans_from_heuristics(const cudnnHandle_t handle, const cudnnBackendDes
     return plan.getWorkspaceSize() > workspace_size;
   };
 
-  auto sources = get_generator_sources(opGraph, desc, x, deterministic, allow_tf32);
+  auto sources = get_generator_sources(desc, x, deterministic, allow_tf32);
 
   cudnn_frontend::EngineConfigGenerator generator(sources.size(), sources.data());
   auto plans = generator.cudnnGetPlan(handle, std::move(opGraph), predicate_function);
