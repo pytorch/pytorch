@@ -8814,6 +8814,28 @@
     CPU: reflection_pad2d_backward_cpu
     CUDA: reflection_pad2d_backward_cuda
 
+- func: reflection_pad3d.out(Tensor self, int[6] padding, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: nn
+  structured: True
+  dispatch:
+    CPU: reflection_pad3d_out_cpu
+    CUDA: reflection_pad3d_out_cuda
+
+- func: reflection_pad3d(Tensor self, int[6] padding) -> Tensor
+  python_module: nn
+  structured_delegate: reflection_pad3d.out
+
+- func: reflection_pad3d_backward.grad_input(Tensor grad_output, Tensor self, int[6] padding, *, Tensor(a!) grad_input) -> Tensor(a!)
+  python_module: nn
+  structured: True
+  dispatch:
+    CPU: reflection_pad3d_backward_out_cpu
+    CUDA: reflection_pad3d_backward_out_cuda
+
+- func: reflection_pad3d_backward(Tensor grad_output, Tensor self, int[6] padding) -> Tensor
+  python_module: nn
+  structured_delegate: reflection_pad3d_backward.grad_input
+
 - func: replication_pad1d.out(Tensor self, int[2] padding, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   structured: True
@@ -9627,6 +9649,30 @@
   variants: function
 
 - func: special_expit.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+
+- func: special_sinc(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+
+- func: special_sinc.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+
+- func: special_round(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+
+- func: special_round.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+
+- func: special_log1p(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+
+- func: special_log1p.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: special
   variants: function
 
