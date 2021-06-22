@@ -3891,6 +3891,18 @@ else:
 
         backward_func(self, device)
 
+    def test_nondeterministic_alert_ReflectionPad3d(self, device):
+        module = torch.nn.ReflectionPad3d((1, 2, 3, 4, 5, 6))
+        input = torch.randn(2, 3, 8, 8, 8, device=device, requires_grad=True)
+        res = module(input)
+        grad = torch.ones_like(res)
+
+        @expectedAlertNondeterministic('reflection_pad3d_backward_out_cuda', 'cuda')
+        def backward_func(slf, device):
+            res.backward(grad)
+
+        backward_func(self, device)
+
     def test_nondeterministic_alert_ReplicationPad1d(self, device):
         module = torch.nn.ReplicationPad1d((1, 2))
         input = torch.randn(2, 3, 4, device=device, requires_grad=True)
