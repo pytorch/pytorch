@@ -74,9 +74,14 @@ RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({
     'tensor_split', 'swapdims', 'swapaxes'
 })
 
-# These are not included above, but shares storage regardless
-OTHER_VIEW_FUNCTIONS = {
-    '_unsafe_view',
+# These are the functions we consider views for the purposes of validating
+# StorageImpl and TensorImpl in gen_variable_type.
+# `_unsafe_view` is not included in VIEW_FUNCTIONS above because it is not a
+# view for the purposes of ADInplaceOrView kernel, we do not want to call as_view
+# See NOTE [Unsafe View] for more info.
+ALL_VIEW_FUNCTIONS = {
+    **VIEW_FUNCTIONS,
+    '_unsafe_view': 'self',
 }
 
 ARRAYREF_TO_VEC = CodeTemplate("""\

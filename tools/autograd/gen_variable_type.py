@@ -30,7 +30,7 @@ from .gen_trace_type import (
 from .gen_inplace_or_view_type import (
     get_view_info, is_tensor_type, is_tensor_list_type, unpack_args, get_base_name,
     use_derived, modifies_arguments, WRAPPER_REGISTRATION, TMP_VAR, METHOD_DEFINITION,
-    ASSIGN_RETURN_VALUE, gen_formals, VIEW_FUNCTIONS, OTHER_VIEW_FUNCTIONS, unpacked_name
+    ASSIGN_RETURN_VALUE, gen_formals, ALL_VIEW_FUNCTIONS, unpacked_name
 )
 
 from tools.codegen.api.types import (Binding, DispatcherSignature, BaseCType, intArrayRefT,
@@ -222,6 +222,7 @@ DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE = {
 }
 DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
     # These functions return tensors with use_count > 1
+    # https://github.com/pytorch/pytorch/issues/60426
     'native_batch_norm', 'native_batch_norm_backward', '_embedding_bag',
 }
 # END CHECKS FOR [ TensorImpl and Storage Pointer Sanity Checks ]
@@ -677,7 +678,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                                                rhs_value=rhs_value)
         return call
 
-    def enforce_same_tensorimpl_and_storage(call: str, unpacked_bindings: List[Binding]) -> str:
+    def check_tensorimpl_and_storage(call: str, unpacked_bindings: List[Binding]) -> str:
         # See NOTE [ TensorImpl and Storage Pointer Sanity Checks ]
         stmts_before_call: List[str] = []
         stmts_after_call: List[str] = []
@@ -710,7 +711,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         # Check properties of outputs (enforce (2), (3))
         if not f.func.kind() in (SchemaKind.inplace, SchemaKind.out):
             base_name = f.func.name.name.base  # TODO: should be str(f.func.name.name)?
-            aliased_arg_name = VIEW_FUNCTIONS.get(base_name, None)
+            aliased_arg_name = ALL_VIEW_FUNCTIONS.get(base_name, None)
             if aliased_arg_name is not None:
                 aliased_arg_name = unpacked_name(aliased_arg_name)
             for i, (ret, ret_name) in enumerate(zip(f.func.returns, cpp.return_names(f))):
@@ -720,7 +721,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                         assert i == 0, "Expect non-CompositeImplicitAutograd view function {base} to return single output"
                         stmts_after_call += [ENFORCE_SAME_TENSOR_STORAGE.substitute(tensor_name=aliased_arg_name,
                                                                                     out_tensor_name=ret_name)]
-                    elif base_name not in OTHER_VIEW_FUNCTIONS:
+                    else:
                         stmts_after_call += [ENFORCE_TENSOR_STORAGE_USE_COUNT_EQUALS_ONE.substitute(tensor_name=ret_name)]
 
                     if base_name not in DONT_ENFORCE_TENSOR_IMPL_USE_COUNT:
@@ -761,7 +762,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         else:
             call = DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES.substitute(
                 base_type_call=base_type_call, guard=guard)
-        call = enforce_same_tensorimpl_and_storage(call, unpacked_bindings)
+        call = check_tensorimpl_and_storage(call, unpacked_bindings)
         return call
 
     def emit_history() -> str:
