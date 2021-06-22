@@ -553,10 +553,14 @@ class VariadicCatUpdater {
     std::vector<Value*> inputs = list->inputs().vec();
     inputs.push_back(cat->input(1));
     auto var_cat = cat->owningGraph()->create(prim::Concat, inputs);
+    GRAPH_UPDATE("Adding\n", *var_cat);
     var_cat->insertBefore(list);
+    GRAPH_UPDATE("Replacing\n", *cat, "with\n", *var_cat);
     cat->output()->replaceAllUsesWith(var_cat->output());
+    GRAPH_UPDATE("Deleting\n", *cat);
     cat->destroy();
     TORCH_INTERNAL_ASSERT(!list->hasUses());
+    GRAPH_UPDATE("Deleting\n", *list);
     list->destroy();
     return true;
   }
