@@ -8,7 +8,7 @@ from torch.testing import \
     (FileCheck, floating_and_complex_types_and, get_all_dtypes)
 from torch.testing._internal.common_utils import \
     (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor,
-     gradcheck, gradgradcheck, IS_PYTORCH_CI)
+     gradcheck, gradgradcheck, IS_IN_CI)
 from torch.testing._internal.common_methods_invocations import \
     (op_db,)
 from torch.testing._internal.common_device_type import \
@@ -35,7 +35,7 @@ class TestCommon(TestCase):
     def tearDownClass(cls):
         super().tearDownClass()
 
-        if IS_PYTORCH_CI:
+        if IS_IN_CI:
             err_msg = ("The operator(s) below is(are) using dynamic_dtypes in the OpInfo entries."
                        "This is OK for testing, but be sure to set the dtypes manually before landing your PR!")
             # Assure no opinfo entry has dynamic_dtypes
