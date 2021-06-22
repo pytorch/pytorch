@@ -282,7 +282,8 @@ class TestEqualizeFx(QuantizationTestCase):
 
     def get_expected_eq_scales(self, model, x):
         """ For each module in the graph, we want to calculate the equalization
-        scale at that point
+        scale at that point. This only works for models containing single or
+        connected linear layers.
         """
         exp_eq_scales = []
         for _, module in model.named_children():
@@ -321,7 +322,8 @@ class TestEqualizeFx(QuantizationTestCase):
 
     def get_expected_weights_bias(self, model, x, exp_eq_scales):
         """ For each module in the graph, we want to calculate the expected
-        scaled weight and bias values
+        scaled weight and bias values. This only works for models containing
+        single or connected linear layers.
         """
         exp_weights = []
         exp_bias = []
@@ -370,7 +372,8 @@ class TestEqualizeFx(QuantizationTestCase):
 
     def get_expected_inp_act_vals(self, model, x, exp_eq_scales, exp_weights, exp_bias):
         """ For each module in the graph, we want to calculate the expected
-        min/max values for every input activation node
+        min/max values for every input activation node. This only works for
+        models containing only single or connected linear layers.
         """
         x = x * exp_eq_scales[0]
 
