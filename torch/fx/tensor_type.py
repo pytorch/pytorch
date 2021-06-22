@@ -17,7 +17,7 @@ class Tensor_Type:
 
     def __eq__(self, other):
         if isinstance(other, self.__class__):
-            return list(self.__args__) == list(other.__args__)
+            return self.__args__ == other.__args__
         else:
             return False
 
