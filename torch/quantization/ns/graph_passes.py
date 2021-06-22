@@ -233,7 +233,8 @@ def _insert_dtype_cast_after_node(
     ):
         # int8 shadows fp32, the dtype cast needs to quantize to int8
         # with the right qparams.
-        node_a_input_qparams = get_node_input_qparams(node_a, gm_a)
+        node_a_input_qparams = get_node_input_qparams(
+            node_a, gm_a, node_type_to_io_type_map)
         if node_a_input_qparams is not None:
             dtype_cast_op = torch.quantize_per_tensor  # type: ignore[assignment]
             dtype_cast_scale, dtype_cast_zero_point = node_a_input_qparams
@@ -596,7 +597,7 @@ def create_a_shadows_b(
                 node_input_type_b == NodeInputOrOutputType.FP32
             ):
                 node_a_input_qparams = get_node_input_qparams(
-                    subgraph_a.start_node, gm_a)
+                    subgraph_a.start_node, gm_a, node_type_to_io_type_map)
                 if not node_a_input_qparams:
                     print(
                         f'skipping shadow loggers for node_b: {get_target_type_str(node_b, gm_b)}' +

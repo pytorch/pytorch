@@ -1581,7 +1581,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
 
     @skipIfNoFBGEMM
     def test_int8_shadows_fp32_simple(self):
-        m = nn.Sequential(nn.Conv2d(1, 1, 1), nn.Conv2d(1, 1, 1)).eval()
+        m = nn.Sequential(nn.Conv2d(1, 1, 1), nn.Conv2d(1, 1, 1), nn.ReLU()).eval()
         qconfig_dict = {'': torch.quantization.default_qconfig}
         mp = torch.quantization.quantize_fx.prepare_fx(m, qconfig_dict)
         mp(torch.randn(1, 1, 1, 1))
@@ -1616,6 +1616,38 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         self.assertTrue(len(act_compare_dict) == 2)
         self.assert_ns_compare_dict_valid(act_compare_dict)
 
+    @skipIfNoFBGEMM
+    def test_int8_shadows_fp32_coverage(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.adaptive_avg_pool = nn.AdaptiveAvgPool2d(1)
+                self.conv = nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.adaptive_avg_pool(x)
+                # input qparams of conv will be input qparams of adaptive_avg_pool
+                x = self.conv(x)
+                x = torch.mul(x, x)
+                x = self.conv(x)
+                x = torch.add(x, x)
+                x = F.relu(x)
+                x = self.conv(x)
+                return x
+
+        m = M().eval()
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        mp = torch.quantization.quantize_fx.prepare_fx(m, qconfig_dict)
+        mp(torch.randn(1, 1, 1, 1))
+        mq = torch.quantization.quantize_fx.convert_fx(copy.deepcopy(mp))
+        mq_ref = torch.quantization.quantize_fx.convert_fx(copy.deepcopy(mp))
+        mp_shadows_mq = add_shadow_loggers(
+            'int8', mq, 'fp32', mp, OutputLogger)
+        mp_shadows_mq(torch.randn(1, 1, 1, 1))
+        act_compare_dict = extract_shadow_logger_info(
+            mp_shadows_mq, OutputLogger, 'fp32')
+        self.assertTrue(len(act_compare_dict) == 4)
+        self.assert_ns_compare_dict_valid(act_compare_dict)
 
 class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
     """
