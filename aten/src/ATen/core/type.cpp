@@ -567,7 +567,7 @@ bool Type::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const {
     return std::any_of(union_rhs->containedTypes().begin(),
                        union_rhs->containedTypes().end(),
                        [&](TypePtr inner) {
-                         return this->isSubtypeOf(inner);
+                         return this->isSubtypeOfExt(inner, why_not);
                        });
   }
   return false;
@@ -782,12 +782,12 @@ bool NoneType::isSubtypeOfExt(const TypePtr& rhs, std::ostream *why_not) const {
 // flattening. At the end of `flattenUnion`, `types` may have
 // duplicates, but it will not have nested Optionals/Unions
 void flattenUnion(TypePtr& type, std::vector<TypePtr>& types) {
-  if (type->kind() == UnionType::Kind) {
-    for (auto inner : type->expect<UnionType>()->containedTypes()) {
+  if (auto union_type = type->cast<UnionType>()) {
+    for (auto inner : union_type->containedTypes()) {
       flattenUnion(inner, types);
     }
-  } else if (type->kind() == OptionalType::Kind) {
-    auto inner = type->expect<OptionalType>()->getElementType();
+  } else if (auto opt_type = type->cast<OptionalType>()) {
+    auto inner = opt_type->getElementType();
     flattenUnion(inner, types);
     types.emplace_back(NoneType::get());
   } else if (type->kind() == NumberType::Kind) {
@@ -899,6 +899,21 @@ UnionTypePtr UnionType::create(std::vector<TypePtr> types) {
 }
 
 bool UnionType::operator==(const Type& rhs) const {
+  auto can_hold_numbertype = [&]() {
+    std::vector<TypePtr> number_types{IntType::get(), FloatType::get(), ComplexType::get()};
+
+    int numbertype_ct = 0;
+    for (const TypePtr& lhs_type : this->types_) {
+      if (std::any_of(number_types.begin(), number_types.end(),
+                      [&](TypePtr rhs_type) {
+                        return *lhs_type == *rhs_type;
+                      })) {
+        ++numbertype_ct;
+      }
+    }
+    return numbertype_ct == 3;
+  };
+
   if (auto union_rhs = rhs.cast<UnionType>()) {
     // We can't compare the type vectors for equality using `operator=`,
     // because the vectors hold `TypePtr`s and we want to compare `Type`
@@ -909,22 +924,27 @@ bool UnionType::operator==(const Type& rhs) const {
     // Check that all the types in `this->types_` are also in
     // `union_rhs->types_`
     return std::all_of(this->types_.begin(), this->types_.end(),
-                       [&](TypePtr t) {
-                         return union_rhs->canHoldType(t);
+                       [&](TypePtr lhs_type) {
+                         return std::any_of(union_rhs->types_.begin(),
+                                            union_rhs->types_.end(),
+                                            [&](TypePtr rhs_type) {
+                                              return *lhs_type == *rhs_type;
+                                            });
                        });
   } else if (auto optional_rhs = rhs.cast<OptionalType>()) {
     if (optional_rhs->getElementType() == NumberType::get()) {
       return this->types_.size() == 4
-             && this->canHoldType(NoneType::get())
-             && this->canHoldType(NumberType::get());
+             && this->can_hold_none_
+             && can_hold_numbertype();
     }
     auto optional_lhs = this->toOptional();
     if (optional_lhs) {
-      return *optional_rhs == *((optional_lhs.value())->cast<OptionalType>());
+      return *optional_rhs == *((optional_lhs.value())->expect<OptionalType>());
+    } else {
+      return false;
     }
-    return false;
-  } else if (auto number_rhs = rhs.cast<NumberType>()) {
-    return this->canHoldType(NumberType::get());
+  } else if (rhs.kind() == NumberType::Kind) {
+    return can_hold_numbertype();
   }
   return false;
 }
@@ -1004,23 +1024,25 @@ c10::optional<TypePtr> UnionType::toOptional() const {
   }
   filterDuplicateSubtypes(test_types);
 
-  auto get_index_if_exists = [&](TypePtr lhs) -> c10::optional<decltype (test_types.begin())> {
+  auto get_type_iterator = [&](TypePtr lhs) -> c10::optional<decltype (test_types.begin())> {
     for (auto rhs = test_types.begin(); rhs < test_types.end(); ++rhs) {
+      // Compare pointed-to Type (`*lhs`) with dereferenced iterator's
+      // pointed-to Type (`**rhs`)
       if (*lhs == **rhs) {
-        return c10::optional<decltype (test_types.begin())>{rhs};
+        return {rhs};
       }
     }
     return c10::nullopt;
   };
 
-  auto int_idx = get_index_if_exists(IntType::get());
-  auto float_idx = get_index_if_exists(FloatType::get());
-  auto complex_idx = get_index_if_exists(ComplexType::get());
+  auto int_it = get_type_iterator(IntType::get());
+  auto float_it = get_type_iterator(FloatType::get());
+  auto complex_it = get_type_iterator(ComplexType::get());
 
-  if (int_idx && float_idx && complex_idx) {
-    test_types.erase(*int_idx);
-    test_types.erase(*float_idx);
-    test_types.erase(*complex_idx);
+  if (int_it && float_it && complex_it) {
+    test_types.erase(*int_it);
+    test_types.erase(*float_it);
+    test_types.erase(*complex_it);
     test_types.push_back(NumberType::get());
   }
 
@@ -1035,13 +1057,17 @@ c10::optional<TypePtr> UnionType::toOptional() const {
 c10::optional<TypePtr> UnionType::subtractTypeSet(std::vector<TypePtr>& to_subtract) const {
   std::vector<TypePtr> types;
 
-  auto should_subtract = [&](TypePtr t) -> bool {
+  // Given a TypePtr `lhs`, this function says whether or not `lhs` (or
+  // one of its parent types) is in the `to_subtract` vector
+  auto should_subtract = [&](TypePtr lhs) -> bool {
     return std::none_of(to_subtract.begin(), to_subtract.end(),
-                        [&](TypePtr s) {
-                          return t->isSubtypeOf(s);
-    });
+                        [&](TypePtr rhs) {
+                          return lhs->isSubtypeOf(rhs);
+                        });
   };
 
+  // Copy all the elements that should NOT be subtracted to the `types`
+  // vector
   std::copy_if(types_.begin(), types_.end(),
               std::back_inserter(types),
               [&](const TypePtr t) {
@@ -1049,7 +1075,7 @@ c10::optional<TypePtr> UnionType::subtractTypeSet(std::vector<TypePtr>& to_subtr
               });
 
   if (types.size() == 0) {
-    return c10::optional<TypePtr>{};
+    return c10::nullopt;
   } else if (types.size() == 1) {
     return types[0];
   } else {
@@ -1059,14 +1085,11 @@ c10::optional<TypePtr> UnionType::subtractTypeSet(std::vector<TypePtr>& to_subtr
 
 OptionalType::OptionalType(TypePtr contained)
                            : UnionType({contained, NoneType::get()}, TypeKind::OptionalType) {
-  TORCH_INTERNAL_ASSERT(contained, "OptionalType requires a valid TypePtr");
-
   if (UnionType::containedTypes().size() == 2) {
     contained_ = UnionType::containedTypes()[0]->kind()!= NoneType::Kind
                  ? UnionType::containedTypes()[0]
                  : UnionType::containedTypes()[1];
-  }
-  else {
+  } else {
     std::vector<TypePtr> tmp = UnionType::containedTypes().vec();
     tmp.erase(std::remove(tmp.begin(), tmp.end(), NoneType::get()), tmp.end());
     contained_ = UnionType::create(tmp);
@@ -1074,23 +1097,34 @@ OptionalType::OptionalType(TypePtr contained)
   has_free_variables_ = contained_->hasFreeVariables();
 }
 
-  bool OptionalType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const {
-    if (OptionalTypePtr optional_rhs = rhs->cast<OptionalType>()) {
-      return getElementType()->isSubtypeOfExt(optional_rhs->getElementType(), why_not);
-    }
-    if (UnionTypePtr union_rhs = rhs->cast<UnionType>()) {
-      return union_rhs->canHoldType(NoneType::get()) && union_rhs->canHoldType(this->getElementType());
-    }
-    if (Type::isSubtypeOfExt(rhs, why_not)) {
+bool OptionalType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const {
+  if (OptionalTypePtr optional_rhs = rhs->cast<OptionalType>()) {
+    return getElementType()->isSubtypeOfExt(optional_rhs->getElementType(), why_not);
+  }
+  if (UnionTypePtr union_rhs = rhs->cast<UnionType>()) {
+    if (!union_rhs->canHoldType(NoneType::get())) {
+      if (why_not) {
+        *why_not << rhs->repr_str() << " cannot hold None";
+      }
+      return false;
+    } else if (!union_rhs->canHoldType(this->getElementType())) {
+      if (why_not) {
+        *why_not << rhs->repr_str() << " cannot hold " << this->getElementType();
+      }
+      return false;
+    } else {
       return true;
     }
-    return false;
   }
+  if (Type::isSubtypeOfExt(rhs, why_not)) {
+    return true;
+  }
+  return false;
+}
 
 bool NumberType::operator==(const Type& rhs) const {
-  if (rhs.kind() == UnionType::Kind) {
+  if (auto union_rhs = rhs.cast<UnionType>()) {
     auto union_lhs = UnionType::create({NumberType::get()});
-    auto union_rhs = rhs.expect<UnionType>();
     return *union_lhs == *union_rhs;
   }
   return rhs.kind() == kind();

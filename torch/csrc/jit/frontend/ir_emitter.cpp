@@ -1032,14 +1032,14 @@ struct to_ir {
     }
 
     Value* actual_return = emitExpr(stmt.expr(), type_hint);
-    TypePtr actual_return_type = actual_return->type();
+
     // result type is annotated, every return must convert to that type
     if (declared_return_type) {
       // this guard skips implicit conversion from None -> Tensor for the return
       // type. otherwise forgetting a return a function returning a tensor will
       // cause a None to be converted to a tensor.
-      if (!(declared_return_type->isSubtypeOf(TensorType::get()) &&
-            actual_return_type->isSubtypeOf(NoneType::get()))) {
+      if (!(actual_return->type()->isSubtypeOf(TensorType::get()) &&
+            actual_return->type()->isSubtypeOf(NoneType::get()))) {
         actual_return = tryConvertToType(
             stmt.range(),
             *graph,
@@ -1047,33 +1047,29 @@ struct to_ir {
             actual_return,
             /*allow_conversions=*/true);
       }
-      if (!actual_return_type->isSubtypeOf(declared_return_type)) {
+      if (!actual_return->type()->isSubtypeOf(declared_return_type)) {
         throw ErrorReport(stmt.range())
             << "Return value was annotated as having type "
             << declared_return_type->repr_str() << " but is actually of type "
-            << actual_return_type->repr_str();
+            << actual_return->type()->repr_str();
       }
     } else {
       declared_return_type = def_stack_.back().merged_return_type_;
       if (!declared_return_type) {
-        declared_return_type = actual_return_type;
+        declared_return_type = actual_return->type();
       }
       auto merged_return_type =
-          unifyTypes(declared_return_type, actual_return_type);
+          unifyTypes(declared_return_type, actual_return->type());
       if (!merged_return_type) {
         throw ErrorReport(stmt.range())
             << "Previous return statement returned a value of type "
             << declared_return_type->repr_str()
             << " but this return statement returns a value of type "
-            << actual_return_type->repr_str();
+            << actual_return->type()->repr_str();
       }
       declared_return_type = merged_return_type.value();
     }
     AT_ASSERT(declared_return_type);
-
-    if (declared_return_type->kind() == UnionType::Kind) {
-      declared_return_type = actual_return_type;
-    }
 
     def_stack_.back().merged_return_type_ = declared_return_type;
 
@@ -1082,7 +1078,7 @@ struct to_ir {
     // statements on different code paths (e.g. different branches of an if,
     // body and containing scope of a loop).
     if (declared_return_type == AnyType::get() &&
-        actual_return_type != AnyType::get()) {
+        actual_return->type() != AnyType::get()) {
       actual_return =
           graph->insertUncheckedCast(actual_return, declared_return_type);
     }
