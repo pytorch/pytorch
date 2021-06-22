@@ -310,15 +310,16 @@ jobs:
               --native-functions-path aten/src/ATen/native/native_functions.yaml \
               --nn-path aten/src
           fi
-      - name: Run clang-tidy
+      - name: Fetch diff
         env:
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           cd "${GITHUB_WORKSPACE}"
-          set -eux
-
           wget -O pr.diff "https://patch-diff.githubusercontent.com/raw/pytorch/pytorch/pull/$PR_NUMBER.diff"
+      - name: Run clang-tidy
+        run: |
+          cd "${GITHUB_WORKSPACE}"
+          set -eux
 
           # Run Clang-Tidy
           # The negative filters below are to exclude files that include onnx_pb.h or
@@ -350,8 +351,13 @@ jobs:
             -g"-torch/csrc/deploy/interpreter/test_main.cpp" \
             "$@" >"${GITHUB_WORKSPACE}"/clang-tidy-output.txt
 
-
           cat "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
+      - name: Add annotations
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          cd "${GITHUB_WORKSPACE}"
+          set -eux
 
           tools/translate_annotations.py \
             --file=clang-tidy-output.txt \
