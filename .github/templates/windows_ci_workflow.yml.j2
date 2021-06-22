@@ -18,7 +18,6 @@ env:
   CUDA_VERSION: "!{{ cuda_version }}"
   IN_CI: 1
   INSTALL_WINDOWS_SDK: 1
-  JOB_BASE_NAME: test
   PYTHON_VERSION: "3.8"
   SCCACHE_BUCKET: "ossci-compiler-cache"
   VC_PRODUCT: "BuildTools"
@@ -36,6 +35,8 @@ concurrency:
 jobs:
   build:
     runs-on: "windows.4xlarge"
+    env:
+      JOB_BASE_NAME: !{{ build_environment }}-build
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
@@ -83,12 +84,45 @@ jobs:
           name: ${{ env.BUILD_ENVIRONMENT }}
           path: C:\w\build-results
 
+  generate-test-matrix:
+{%- if only_build_on_pull_request %}
+    if: ${{ github.repository_owner == 'pytorch' && github.event_name == 'push' }}
+{%- else %}
+    if: ${{ github.repository_owner == 'pytorch' }}
+{%- endif %}
+    runs-on: ubuntu-18.04
+    env:
+      NUM_TEST_SHARDS: !{{ num_test_shards }}
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    container:
+      image: python:3.9
+    steps:
+      - name: Clone pytorch/pytorch
+        uses: actions/checkout@v2
+      - name: Generating test matrix
+        id: set-matrix
+        run: |
+          # outputting for debugging purposes
+          MATRIX=$(python .github/scripts/generate_pytorch_test_matrix.py)
+          echo "${MATRIX}"
+          echo "::set-output name=matrix::${MATRIX}"
+
   test:
+{%- if only_build_on_pull_request %}
+    if: ${{ github.event_name == 'push' }}
+{%- endif %}
     runs-on: !{{ test_runner_type }}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-test
+      NUM_TEST_SHARDS: !{{ num_test_shards }}
+      TEST_CONFIG: ${{ matrix.test_config }}
     needs:
       - build
+      - generate-test-matrix
+    strategy:
+      matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
+      fail-fast: false
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
@@ -131,6 +165,11 @@ jobs:
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
         run: |
+            if [[ $NUM_TEST_SHARDS -eq 2 ]]; then
+              export SHARD_NUMBER=$TEST_CONFIG
+            else
+              export SHARD_NUMBER=0
+            fi
             .jenkins/pytorch/win-test.sh
       - uses: actions/upload-artifact@v2
         name: Store PyTorch Test Reports
@@ -148,7 +187,11 @@ jobs:
   # logs (like test); we can always move it back to the other one, but it
   # doesn't create the best experience
   render_test_results:
+{%- if only_build_on_pull_request %}
+    if:  ${{ github.event_name == 'push' && always() }}
+{%- else %}
     if: always()
+{%- endif %}
     needs:
       - test
     runs-on: ubuntu-18.04
@@ -190,7 +233,7 @@ jobs:
           CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
           CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
-          CIRCLE_WORKFLOW_ID: ${{ github.run_id }} # dunno if this corresponds
+          CIRCLE_WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         run: |
           export PYTHONPATH=$PWD
           python tools/print_test_stats.py --upload-to-s3 --compare-with-s3 test
