@@ -171,6 +171,13 @@ jobs:
               export SHARD_NUMBER=0
             fi
             .jenkins/pytorch/win-test.sh
+      - name: Zip test reports for upload
+        shell: bash
+        if: always()
+        run: |
+          # Remove any previous test reports if they exist
+          rm -f test-reports-*.zip
+          zip -r "test-reports-${SHARD_NUMBER}.zip" test/test-reports
       - uses: actions/upload-artifact@v2
         name: Store PyTorch Test Reports
         if: always()
@@ -179,7 +186,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            test/**/*.xml
+            test-reports-*.zip
 
   # this is a separate step from test because the log files from test are too
   # long: basically, GitHub tries to render all of the log files when you click
@@ -206,7 +213,11 @@ jobs:
         name: Download PyTorch Test Reports
         with:
           name: test-reports
-          path: test/test-reports
+          path: .
+      - name: Unzip test reports
+        run: |
+          # Should preserve paths so reports should still be in test/test-reports
+          unzip -o test-reports-*.zip
       - uses: actions/setup-python@v2
         with:
           python-version: 3.9
