@@ -14,7 +14,7 @@ class TORCH_API SerializationStorageContext {
 
   uint64_t getOrAddStorage(c10::Storage storage) {
     if (!hasStorage(storage)) {
-      storage_id_map_[storage] = storage_id_map_.size();;
+      storage_id_map_[storage] = storage_id_map_.size();
     }
     return storage_id_map_[storage];
   }
@@ -34,11 +34,11 @@ class TORCH_API SerializationStorageContext {
   };
 
   class StorageSerializationHash {
-    public:
-      size_t operator()(const c10::Storage& storage) const {
-          return reinterpret_cast<size_t>(storage.unsafeGetStorageImpl());
-      }
-    };
+   public:
+    size_t operator()(const c10::Storage& storage) const {
+      return reinterpret_cast<size_t>(storage.unsafeGetStorageImpl());
+    }
+  };
 
   std::unordered_map<c10::Storage, uint64_t, StorageSerializationHash>
       storage_id_map_;
