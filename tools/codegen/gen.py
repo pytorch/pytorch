@@ -246,9 +246,13 @@ class ComputeOperators:
 struct TORCH_API {name} {{
   using schema = {sig.type()};
   using ptr_schema = schema*;
-  STATIC_CONSTEXPR_EXCEPT_WIN_CUDA const char* name = "aten::{str(f.func.name.name)}";
-  STATIC_CONSTEXPR_EXCEPT_WIN_CUDA const char* overload_name = "{f.func.name.overload_name}";
-  STATIC_CONSTEXPR_EXCEPT_WIN_CUDA const char* schema_str = {cpp_string(str(f.func))};
+  // See Note [static constexpr char* members for windows NVCC]
+  STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(name, "aten::{str(f.func.name.name)}")
+  STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(overload_name, "{f.func.name.overload_name}")
+  STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(schema_str, {cpp_string(str(f.func))})
+  STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, name, "aten::{str(f.func.name)}")
+  STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, overload_name, "{f.func.name.overload_name}")
+  STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, schema_str, {cpp_string(str(f.func))})
   static {sig.defn(name=call_method_name, is_redispatching_fn=False)};
   static {sig.defn(name=redispatch_method_name, is_redispatching_fn=True)};
 }};"""
@@ -267,13 +271,13 @@ struct TORCH_API {name} {{
                 defns += f"""
 // aten::{f.func}
 {sig.defn(name=method_name, is_redispatching_fn=is_redispatching_fn)} {{
-    static auto op_metadata = at::_ops::{f.func.name.unambiguous_name()}();
     static auto op = c10::Dispatcher::singleton()
-        .findSchemaOrThrow(STATIC_ACCESSOR_EXCEPT_WIN_CUDA(at::_ops::{f.func.name.unambiguous_name()}, op_metadata, name), STATIC_ACCESSOR_EXCEPT_WIN_CUDA(at::_ops::{f.func.name.unambiguous_name()}, op_metadata, overload_name))
-        .typed<schema>();
+        .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
+        .typed<{sig.type()}>();
     return op.{dispatcher_call}({dispatcher_exprs_str});
 }}
 """
+
             return defns
         else:
             assert_never(self.target)
@@ -508,8 +512,8 @@ C10_ALWAYS_INLINE
 {sig.defn(name)} {{
   static auto op_metadata = at::_ops::{f.func.name.unambiguous_name()}();
   static auto op = c10::Dispatcher::singleton()
-    .findSchemaOrThrow(STATIC_ACCESSOR_EXCEPT_WIN_CUDA(at::_ops::{f.func.name.unambiguous_name()}, op_metadata, name), STATIC_ACCESSOR_EXCEPT_WIN_CUDA(at::_ops::{f.func.name.unambiguous_name()}, op_metadata, overload_name))
-    .typed<at::_ops::{f.func.name.unambiguous_name()}::schema>();
+    .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
+    .typed<{dispatcher_sig.type()}>();
   {compute_dk}
   return op.redispatch(_dk, {', '.join(a.expr for a in dispatcher_exprs)});
 }}
