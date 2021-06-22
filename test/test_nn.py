@@ -16016,24 +16016,19 @@ class TestNNDeviceType(NNTestCase):
     @onlyCPU
     def test_nll_loss_byte_target_matches_long(self, device):
         N, C = 10, 4
-        data = torch.randn(N, C, device=device, requires_grad=True)
+        input = torch.randn(N, C, device=device, requires_grad=True)
         target = torch.empty(N, dtype=torch.long, device=device).random_(0, C)
-        gradient = torch.randn(N, device=device)
 
         def compute_result_and_gradient(reduction, target_dtype):
-            data_clone = data.detach()
-            data_clone.requires_grad_()
+            input_ = input.detach()
+            input_.requires_grad_()
 
-            prob = F.log_softmax(data_clone, dim=-1)
+            prob = F.log_softmax(input_, dim=-1)
             loss = nn.NLLLoss(reduction=reduction)
-            result = loss(prob, target.type(target_dtype))
+            result = loss(prob, target.to(target_dtype))
+            result.sum().backward()
 
-            if reduction == "none":
-                result.backward(gradient)
-            else:
-                result.backward(gradient[0])
-
-            return result, data_clone.grad
+            return result, input_.grad
 
         for reduction in ["none", "mean", "sum"]:
             result_long, grad_long = compute_result_and_gradient(reduction, torch.long)
