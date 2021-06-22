@@ -8091,13 +8091,13 @@
   python_module: nn
   dispatch:
     CPU: nll_loss_backward_out_cpu
-    CUDA: legacy::cuda::_thnn_nll_loss_backward_out
+    CUDA: nll_loss_backward_out_cuda
 
 - func: nll_loss_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, Tensor total_weight) -> Tensor
   python_module: nn
   dispatch:
     CPU: nll_loss_backward_cpu
-    CUDA: legacy::cuda::_thnn_nll_loss_backward
+    CUDA: nll_loss_backward_cuda
 
 - func: nll_loss2d.out(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
