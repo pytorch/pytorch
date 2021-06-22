@@ -1,18 +1,12 @@
-from torch import randn
-import torch.jit.te
-import copy
-import functools
+from functools import partial
 import numpy as np
 import pandas as pd
 import timeit
-
-torch.set_num_threads(1)  # TODO(jansel): add parallel support
-torch._C._jit_override_can_fuse_on_cpu(True)
+import torch.jit.te
 
 SIZES = [2 ** n for n in range(0, 13, 4)]
 NUMBER = [1000, 100, 10, 1]
 REPEAT = 10
-randi = functools.partial(torch.randint, 0, 100)
 
 
 @torch.jit.te.pointwise_operator
@@ -40,61 +34,6 @@ ts_addnorm = torch.jit.script(eager_addnorm)
 ts_ip_addnorm = torch.jit.script(inplace_addnorm)
 
 
-def make_setup(make_args, nnc=nnc_add, aten=torch.add, inplace=False, out=False, backwards=False):
-    def setup(n):
-        args = make_args(n)
-        result_aten = aten(*args)
-        result_nnc = nnc(*args)
-        assert result_nnc.dtype == result_aten.dtype
-        assert result_nnc.size() == result_aten.size()
-        assert result_nnc.stride() == result_aten.stride()
-        torch.testing.assert_allclose(result_aten, result_nnc)
-        return (lambda: nnc(*args),
-                lambda: aten(*args))
-
-    def out_setup(n):
-        args = make_args(n)
-        result_aten = out(n)
-        result_nnc = out(n)
-        aten(*args, out=result_aten)
-        nnc(*args, out=result_nnc)
-        torch.testing.assert_allclose(result_aten, result_nnc)
-        result = out(n)
-        return (lambda: nnc(*args, out=result),
-                lambda: aten(*args, out=result))
-
-    def inplace_setup(n):
-        a, b = make_args(n)
-        result_aten = torch.clone(a)
-        result_nnc = torch.clone(a)
-        nnc(result_nnc, b, out=result_nnc)
-        aten(result_aten, b, out=result_aten)
-        torch.testing.assert_allclose(result_aten, result_nnc)
-        return (lambda: nnc(a, b, out=a),
-                lambda: aten(a, b, out=a))
-
-    def backwards_setup(n):
-        args = make_args(n)
-        grad_var, = [a for a in args if a.requires_grad]
-        aten(*args).sum().backward()
-        v0 = grad_var.grad.clone()
-        grad_var.grad.zero_()
-        nnc(*args).sum().backward()
-        v1 = grad_var.grad.clone()
-        torch.testing.assert_allclose(v0, v1)
-        return (lambda: nnc(*args).sum().backward(),
-                lambda: aten(*args).sum().backward())
-
-    if inplace:
-        return inplace_setup
-    elif out:
-        return out_setup
-    elif backwards:
-        return backwards_setup
-    else:
-        return setup
-
-
 def benchmark_loop(setup):
     result = np.zeros((REPEAT, len(SIZES), 2), dtype=np.float64)
     for s, n in enumerate(SIZES):
@@ -111,67 +50,128 @@ def benchmark_loop(setup):
     return result
 
 
-def benchmark(*args, **kwargs):
-    return benchmark_loop(make_setup(*args, **kwargs))
+def test(make_args, nnc=nnc_add, aten=torch.add):
+    def setup(n):
+        args = make_args(n)
+        result_aten = aten(*args)
+        result_nnc = nnc(*args)
+        assert result_nnc.dtype == result_aten.dtype
+        assert result_nnc.size() == result_aten.size()
+        assert result_nnc.stride() == result_aten.stride()
+        torch.testing.assert_allclose(result_aten, result_nnc)
+        return (lambda: nnc(*args),
+                lambda: aten(*args))
+
+    return benchmark_loop(setup)
 
 
-def main():
+def test_inplace(make_args, nnc=nnc_add, aten=torch.add):
+    def inplace_setup(n):
+        a, b = make_args(n)
+        result_aten = torch.clone(a)
+        result_nnc = torch.clone(a)
+        nnc(result_nnc, b, out=result_nnc)
+        aten(result_aten, b, out=result_aten)
+        torch.testing.assert_allclose(result_aten, result_nnc)
+        return (lambda: nnc(a, b, out=a),
+                lambda: aten(a, b, out=a))
+
+    return benchmark_loop(inplace_setup)
+
+
+def test_out(make_args, out, nnc=nnc_add, aten=torch.add):
+    def out_setup(n):
+        args = make_args(n)
+        result_aten = out(n)
+        result_nnc = out(n)
+        aten(*args, out=result_aten)
+        nnc(*args, out=result_nnc)
+        torch.testing.assert_allclose(result_aten, result_nnc)
+        result = out(n)
+        return (lambda: nnc(*args, out=result),
+                lambda: aten(*args, out=result))
+
+    return benchmark_loop(out_setup)
+
+
+def test_backwards(make_args, nnc=nnc_add, aten=torch.add):
+    def backwards_setup(n):
+        args = make_args(n)
+        grad_var, = [a for a in args if a.requires_grad]
+        aten(*args).sum().backward()
+        correct = grad_var.grad.clone()
+        grad_var.grad.zero_()
+        nnc(*args).sum().backward()
+        torch.testing.assert_allclose(correct, grad_var.grad)
+        return (lambda: nnc(*args).sum().backward(),
+                lambda: aten(*args).sum().backward())
+
+    return benchmark_loop(backwards_setup)
+
+
+def main(device="cpu"):
+    torch.set_num_threads(1)  # TODO(jansel): add parallel support
+    torch._C._jit_override_can_fuse_on_cpu(True)
+    I = partial(torch.randint, 0, 100, device=device)
+    R = partial(torch.randn, device=device)
+
     results = [
-        ("(n)+(n)", benchmark(lambda n: (randn(n), randn(n)))),
-        ("(n,1)+(1,n)", benchmark(lambda n: (randn(n, 1), randn(1, n)))),
-        ("(n,n)+(1)", benchmark(lambda n: (randn(n, n), randn(1)))),
-        ("(n,n)+=(1)", benchmark(lambda n: (randn(n, n), randn(1)), inplace=True)),
-        ("(n,n)+(n,1)", benchmark(lambda n: (randn(n, n), randn(n, 1)))),
-        ("(n,n)+=(n,1)", benchmark(lambda n: (randn(n, n), randn(n, 1)), inplace=True)),
-        ("(n,n)+(n,n)", benchmark(lambda n: (randn(n, n), randn(n, n)))),
-        ("(n,n)+=(n,n)", benchmark(lambda n: (randn(n, n), randn(n, n)), inplace=True)),
-        ("out= (n,n)", benchmark(lambda n: (randn(n, n), randn(n, n)), out=lambda n: randn(n, n))),
-        ("transposed1 (n,n)", benchmark(lambda n: (randn(n, n),
-                                                   randn(n, n).transpose(0, 1)))),
-        ("transposed2 (n,n)", benchmark(lambda n: (randn(n, n).transpose(0, 1),
-                                                   randn(n, n).transpose(0, 1)))),
-        ("slice1 (n,n)", benchmark(lambda n: (randn(n + 10, n + 10, 32)[:n, :n, 0],
-                                              randn(n, n)))),
-        ("slice2 (n,n)", benchmark(lambda n: (randn(n, n, 32)[:, :, 0],
-                                              randn(n, n, 32)[:, :, 0]))),
-        ("strided out (n,n)", benchmark(lambda n: (randn(n, n), randn(n, n)),
-                                        out=lambda n: randn(n + 8, n + 8, 2)[:n, :n, 0], )),
-        ("out convert (n,n)", benchmark(lambda n: (randn(n, n),
-                                                   randn(n, n)),
-                                        out=lambda n: randn(n, n, dtype=torch.float64))),
-        ("issue 57611 (n,32,32,2)", benchmark(lambda n: (randn(1, 32, 32, 2), randn(n, 1, 1, 2)))),
-        ("float+double (n,n)", benchmark(lambda n: (randn(n, n), randn(n, n, dtype=torch.float64)))),
-        ("int+long (n,n)", benchmark(lambda n: (randi([n, n], dtype=torch.int32),
-                                                randi([n, n], dtype=torch.int64)))),
-        ("int+short (n,n)", benchmark(lambda n: (randi([n, n], dtype=torch.int32),
-                                                 randi([n, n], dtype=torch.int16)))),
-        ("float+int (n,n)", benchmark(lambda n: (randn([n, n], dtype=torch.float32),
-                                                 randi([n, n], dtype=torch.int32)))),
-        ("double+long (n,n)", benchmark(lambda n: (randn([n, n], dtype=torch.float64),
-                                                   randi([n, n], dtype=torch.int64)))),
-        ("fused addnorm", benchmark(lambda n: (randn(n, n), randn(n, n), randn(n, n), randn(n, n)),
-                                               nnc=nnc_addnorm, aten=eager_addnorm)),
-        ("fused addnorm (vs TS)", benchmark(lambda n: (randn(n, n), randn(n, n), randn(n, n), randn(n, n)),
-                                            nnc=nnc_addnorm, aten=ts_addnorm)),
-        ("fused addnorm out=", benchmark(lambda n: (randn(n, n), randn(n, n), randn(n, n), randn(n, n)),
-                                                  nnc=nnc_addnorm, aten=inplace_addnorm, out=lambda n: randn(n, n))),
-        ("fused addnorm out= (vs TS)", benchmark(lambda n: (randn(n, n), randn(n, n), randn(n, n), randn(n, n)),
-                                               nnc=nnc_addnorm, aten=ts_ip_addnorm, out=lambda n: randn(n, n))),
+        ("add", test(lambda n: (R(n, n), R(n, n)))),
+        ("broadcast1", test(lambda n: (R(n, n), R(1)))),
+        ("broadcast2", test(lambda n: (R(n, n), R(n, 1)))),
+        ("broadcast3", test(lambda n: (R(n, 1), R(1, n)))),
+        ("inplace", test_inplace(lambda n: (R(n, n), R(n, 1)))),
+        ("out=", test_out(lambda n: (R(n, n), R(n, n)), out=lambda n: R(n, n))),
+        ("transposed1", test(lambda n: (R(n, n),
+                                        R(n, n).transpose(0, 1)))),
+        ("transposed2", test(lambda n: (R(n, n).transpose(0, 1),
+                                        R(n, n).transpose(0, 1)))),
+        ("slice1", test(lambda n: (R(n + 10, n + 10, 32)[:n, :n, 0],
+                                   R(n, n)))),
+        ("slice2", test(lambda n: (R(n, n, 32)[:, :, 0],
+                                   R(n, n, 32)[:, :, 0]))),
+        ("strided out", test_out(lambda n: (R(n, n), R(n, n)),
+                                 out=lambda n: R(n + 8, n + 8, 2)[:n, :n, 0], )),
+        ("out convert", test_out(lambda n: (R(n, n),
+                                            R(n, n)),
+                                 out=lambda n: R(n, n, dtype=torch.float64))),
+        ("issue #57611 (n,32,32,2)", test(lambda n: (R(1, 32, 32, 2), R(n, 1, 1, 2)))),
+        ("float+double", test(lambda n: (R(n, n), R(n, n, dtype=torch.float64)))),
+        ("int+long", test(lambda n: (I([n, n], dtype=torch.int32),
+                                     I([n, n], dtype=torch.int64)))),
+        ("int+short", test(lambda n: (I([n, n], dtype=torch.int32),
+                                      I([n, n], dtype=torch.int16)))),
+        ("float+int", test(lambda n: (R([n, n], dtype=torch.float32),
+                                      I([n, n], dtype=torch.int32)))),
+        ("double+long", test(lambda n: (R([n, n], dtype=torch.float64),
+                                        I([n, n], dtype=torch.int64)))),
+        ("fused addnorm", test(lambda n: (R(n, n), R(n, n), R(n, n), R(n, n)),
+                               nnc=nnc_addnorm, aten=eager_addnorm)),
+        ("fused addnorm (vs TS)", test(lambda n: (R(n, n), R(n, n), R(n, n), R(n, n)),
+                                       nnc=nnc_addnorm, aten=ts_addnorm)),
+        ("fused addnorm out=", test_out(lambda n: (R(n, n), R(n, n), R(n, n), R(n, n)),
+                                        nnc=nnc_addnorm, aten=inplace_addnorm, out=lambda n: R(n, n))),
+        ("fused addnorm out= (vs TS)", test_out(lambda n: (R(n, n), R(n, n), R(n, n), R(n, n)),
+                                                nnc=nnc_addnorm, aten=ts_ip_addnorm, out=lambda n: R(n, n))),
         ("fused addnorm backward",
-         benchmark(lambda n: (randn(n, n), randn(n, n, requires_grad=True), randn(n, n), randn(n, n)),
-                   nnc=nnc_addnorm, aten=eager_addnorm, backwards=True)),
+         test_backwards(lambda n: (R(n, n), R(n, n, requires_grad=True), R(n, n), R(n, n)),
+                        nnc=nnc_addnorm, aten=eager_addnorm)),
         ("fused addnorm backward (vs TS)",
-         benchmark(lambda n: (randn(n, n), randn(n, n, requires_grad=True), randn(n, n), randn(n, n)),
-                   nnc=nnc_addnorm, aten=ts_addnorm, backwards=True)),
+         test_backwards(lambda n: (R(n, n), R(n, n, requires_grad=True), R(n, n), R(n, n)),
+                        nnc=nnc_addnorm, aten=ts_addnorm)),
     ]
-    # TODO(jansel): implement int support
+    df = pd.DataFrame(np.stack([r for n, r in results]),
+                      columns=[f"{n}x{n}".rjust(9) for n in SIZES],
+                      index=[n for n, r in results])
+    df.to_csv("../operator_authoring_results.csv")
+    print("wrote ../operator_authoring_results.csv")
+
     print()
     print("Speedups over aten")
-    pd.options.display.float_format = ' {:.2f}x'.format
-    print(pd.DataFrame(np.stack([r for n, r in results]),
-                       columns=[f"n={n}" for n in SIZES],
-                       index=[n for n, r in results]))
+    pd.options.display.float_format = "{:.2f}x".format
+    print(df)
 
 
 if __name__ == '__main__':
-    main()
+    main(device="cpu")
+    # main(device="cuda")
