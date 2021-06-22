@@ -244,6 +244,8 @@ struct RegisterHIPDispatch {
 // #define REGISTER_DISPATCH(name, fn) REGISTER_HIP_DISPATCH(name, fn)
 #elif defined(CPU_CAPABILITY)
 #define REGISTER_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, fn)
+#define REGISTER_NO_AVX512_DISPATCH(name, fn_type)                             \
+  REGISTER_AVX512_DISPATCH(name, static_cast<fn_type>(nullptr))
 #endif
 
 
