@@ -296,7 +296,6 @@ _(aten, diagonal) \
 _(aten, fill_diagonal_) \
 _(aten, diff) \
 _(aten, frexp) \
-_(aten, digamma) \
 _(aten, dim) \
 _(aten, dist) \
 _(aten, dot) \
@@ -432,7 +431,6 @@ _(aten, linear) \
 _(aten, linspace) \
 _(aten, log) \
 _(aten, log10) \
-_(aten, log1p) \
 _(aten, log2) \
 _(aten, log_normal) \
 _(aten, log_sigmoid) \
@@ -534,6 +532,7 @@ _(aten, native_tensor) \
 _(aten, native_zero) \
 _(aten, special_ndtr) \
 _(aten, nextafter) \
+_(aten, special_ndtri) \
 _(aten, bitwise_and) \
 _(aten, bitwise_not) \
 _(aten, bitwise_or) \
@@ -593,6 +592,9 @@ _(aten, reflection_pad1d_forward) \
 _(aten, reflection_pad2d) \
 _(aten, reflection_pad2d_backward) \
 _(aten, reflection_pad2d_forward) \
+_(aten, reflection_pad3d) \
+_(aten, reflection_pad3d_backward) \
+_(aten, reflection_pad3d_forward) \
 _(aten, relu) \
 _(aten, remainder) \
 _(aten, renorm) \
@@ -618,7 +620,6 @@ _(aten, rnn_relu_cell) \
 _(aten, rnn_tanh) \
 _(aten, rnn_tanh_cell) \
 _(aten, rot90) \
-_(aten, round) \
 _(aten, rrelu) \
 _(aten, rrelu_with_noise) \
 _(aten, rrelu_with_noise_backward) \
@@ -635,7 +636,6 @@ _(aten, signbit) \
 _(aten, silu) \
 _(aten, sgn) \
 _(aten, sin) \
-_(aten, sinc) \
 _(aten, sinh) \
 _(aten, size) \
 _(aten, sizes) \

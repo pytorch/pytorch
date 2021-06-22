@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/irparser.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/canonicalize_graph_fuser_ops.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
@@ -639,6 +640,14 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_get_inline_everything_mode",
           []() { return getInlineEverythingMode(); })
+      .def(
+          "_jit_get_logging_option",
+          []() { return ::torch::jit::get_jit_logging_levels(); })
+      .def(
+          "_jit_set_logging_option",
+          [](std::string loggingOption) -> void {
+            ::torch::jit::set_jit_logging_levels(loggingOption);
+          })
       .def(
           "_jit_try_infer_type",
           [](py::object obj) -> InferredType {

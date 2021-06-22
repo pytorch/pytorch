@@ -67,6 +67,7 @@ enum class DispatchKey : uint8_t {
   Metal,
   XPU, // For out of tree Intel's heterogeneous computing plug-in
   HPU, // For out of tree & closed source integration of HPU / Habana
+  VE, // For out of tree & closed source integration of SX-Aurora / NEC
 
   // A meta tensor is a tensor without any data associated with it.  (They
   // have also colloquially been referred to as tensors on the "null" device).
@@ -103,6 +104,7 @@ enum class DispatchKey : uint8_t {
   SparseHIP, // TODO: I think this is not actually used, due to Note
   // [Masquerading as CUDA]
   SparseXPU, // For out of tree Intel's heterogeneous computing plug-in
+  SparseVE, // For out of tree & closed source integration of SX-Aurora / NEC
 
   SparseCsrCPU,
   SparseCsrCUDA,
