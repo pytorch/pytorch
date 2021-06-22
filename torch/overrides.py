@@ -871,6 +871,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.special.entr: lambda input: -1,
         torch.special.erf: lambda input: -1,
         torch.special.erfc: lambda input: -1,
+        torch.special.erfcx: lambda input: -1,
         torch.special.erfinv: lambda input: -1,
         torch.special.exp2: lambda input: -1,
         torch.special.expm1: lambda input: -1,
