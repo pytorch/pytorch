@@ -197,19 +197,19 @@ public:
     }
     return b;
   }
-  Vectorized<BFloat16> map(const __m256 (*vop)(__m256)) const {
+  Vectorized<BFloat16> map(const __m256 (*const vop)(__m256)) const {
     __m256 lo, hi;
     cvtbf16_fp32(values, lo, hi);
-    auto o1 = vop(lo);
-    auto o2 = vop(hi);
+    const auto o1 = vop(lo);
+    const auto o2 = vop(hi);
     return cvtfp32_bf16(o1, o2);
   }
   Vectorized<BFloat16> abs() const {
     __m256 lo, hi;
     cvtbf16_fp32(values, lo, hi);
-    auto mask = _mm256_set1_ps(-0.f);
-    auto o1 = _mm256_andnot_ps(mask, lo);
-    auto o2 = _mm256_andnot_ps(mask, hi);
+    const auto mask = _mm256_set1_ps(-0.f);
+    const auto o1 = _mm256_andnot_ps(mask, lo);
+    const auto o2 = _mm256_andnot_ps(mask, hi);
     return cvtfp32_bf16(o1, o2);
   }
   Vectorized<BFloat16> angle() const {
@@ -328,17 +328,17 @@ public:
   Vectorized<BFloat16> i0e() const {
     __m256 lo, hi;
     cvtbf16_fp32(values, lo, hi);
-    auto sz = size();
+    constexpr auto sz = size();
     __at_align32__ float tmp1[sz / 2], tmp2[sz / 2];
     _mm256_storeu_ps(reinterpret_cast<float*>(tmp1), lo);
     _mm256_storeu_ps(reinterpret_cast<float*>(tmp2), hi);
 
-    for (decltype(sz) i = 0; i < sz / 2; i++) {
+    for (auto i = decltype(sz){0}; i < sz / 2; i++) {
       tmp1[i] = calc_i0e(tmp1[i]);
       tmp2[i] = calc_i0e(tmp2[i]);
     }
-    auto o1 = _mm256_loadu_ps(tmp1);
-    auto o2 = _mm256_loadu_ps(tmp2);
+    const auto o1 = _mm256_loadu_ps(tmp1);
+    const auto o2 = _mm256_loadu_ps(tmp2);
     return cvtfp32_bf16(o1, o2);
   }
   Vectorized<BFloat16> igamma(const Vectorized<BFloat16> &x) const {
