@@ -35,9 +35,8 @@ void check_all_any(
     impl::MetaBase& meta,
     const char* name,
     const Tensor& self,
-    int64_t raw_dim,
+    int64_t dim,
     bool keepdim) {
-  auto dim = at::maybe_wrap_dim(raw_dim, self.dim());
   // Refer [all, any : uint8 compatibility]
   TORCH_CHECK(
       self.layout() == Layout::Strided,
@@ -63,6 +62,7 @@ void check_all_any(
     }
   }
 
+  dim = maybe_wrap_dim(dim, self.dim());
   auto shape = get_reduction_shape(self, dim, keepdim);
   meta.set_output(shape, self.options().dtype(out_dtype));
   namedinference::propagate_names_for_reduction(result, self, dim, keepdim);
@@ -1211,6 +1211,7 @@ Tensor all(const Tensor& self) {
 
 TORCH_IMPL_FUNC(all_out)
 (const Tensor& self, int64_t dim, bool keepdim, const Tensor& result) {
+  dim = maybe_wrap_dim(dim, self.dim());
   auto iter = get_reduction_iter(self, result, dim, keepdim);
   auto mut_result = const_cast<Tensor&>(result);
   if (!_dimreduce_return_trivial(mut_result, self, 1, dim, keepdim)) {
@@ -1261,6 +1262,7 @@ Tensor any(const Tensor& self) {
 
 TORCH_IMPL_FUNC(any_out)
 (const Tensor& self, int64_t dim, bool keepdim, const Tensor& result) {
+  dim = maybe_wrap_dim(dim, self.dim());
   auto iter = get_reduction_iter(self, result, dim, keepdim);
   auto mut_result = const_cast<Tensor&>(result);
   if (!_dimreduce_return_trivial(mut_result, self, 0, dim, keepdim)) {
