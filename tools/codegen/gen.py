@@ -1127,7 +1127,7 @@ def main() -> None:
             target=Target.DEFINITION, static_dispatch_backend_index=static_dispatch_idx), native_functions)),
     })
 
-    cpu_fm.write('TensorMethods.cpp', lambda: {})
+    core_fm.write('TensorMethods.cpp', lambda: {})
 
     cpu_fm.write('RedispatchFunctions.h', lambda: {
         'function_redispatch_definitions': list(mapMaybe(ComputeRedispatchFunction(), native_functions)),
