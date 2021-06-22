@@ -35,7 +35,6 @@ ScalarType check_allany_and_get_output_dtype(
     const char* name,
     const Tensor& self,
     const Tensor& result,
-    IntArrayRef dims,
     bool keepdim) {
   // Refer [all, any : uint8 compatibility]
   TORCH_CHECK(
@@ -72,7 +71,7 @@ void check_allany_for_meta(
     bool keepdim) {
   dim = maybe_wrap_dim(dim, self.dim());
   const auto& result = meta.maybe_get_output();
-  auto out_dtype = check_allany_and_get_output_dtype(name, self, result, dim, keepdim);
+  auto out_dtype = check_allany_and_get_output_dtype(name, self, result, keepdim);
   auto shape = get_reduction_shape(self, dim, keepdim);
   meta.set_output(shape, self.options().dtype(out_dtype));
   namedinference::propagate_names_for_reduction(result, self, dim, keepdim);
@@ -95,8 +94,9 @@ void check_argmax_argmin(
   DimVector shape;
 
   if (dim.has_value()) {
-    native::zero_numel_check_dims(self, dim.value(), name);
-    shape = get_reduction_shape(self, dim.value(), keepdim);
+    auto _dim = maybe_wrap_dim(dim.value(), self.dim());
+    native::zero_numel_check_dims(self, _dim, name);
+    shape = get_reduction_shape(self, _dim, keepdim);
   } else {
     TORCH_CHECK_INDEX(
         self.numel() != 0,
@@ -1226,7 +1226,7 @@ Tensor all(const Tensor& self) {
   Tensor result;
 
   auto out_dtype =
-      meta::check_allany_and_get_output_dtype("all", self, result, {}, false);
+      meta::check_allany_and_get_output_dtype("all", self, result, false);
   auto shape = meta::get_reduction_shape(self, {}, false);
 
   result = at::empty(shape, self.options().dtype(out_dtype));
@@ -1237,6 +1237,7 @@ Tensor all(const Tensor& self) {
 
 TORCH_IMPL_FUNC(all_out)
 (const Tensor& self, int64_t dim, bool keepdim, const Tensor& result) {
+  dim = maybe_wrap_dim(dim, self.dim());
   auto iter = get_allany_iter(self, result, dim, keepdim);
   auto mut_result = const_cast<Tensor&>(result);
   if (!_dimreduce_return_trivial(mut_result, self, 1, dim, keepdim)) {
@@ -1258,7 +1259,7 @@ Tensor any(const Tensor& self) {
   Tensor result;
 
   auto out_dtype =
-      meta::check_allany_and_get_output_dtype("any", self, result, {}, false);
+      meta::check_allany_and_get_output_dtype("any", self, result, false);
   auto shape = meta::get_reduction_shape(self, {}, false);
 
   result = at::empty(shape, self.options().dtype(out_dtype));
@@ -1269,6 +1270,7 @@ Tensor any(const Tensor& self) {
 
 TORCH_IMPL_FUNC(any_out)
 (const Tensor& self, int64_t dim, bool keepdim, const Tensor& result) {
+  dim = maybe_wrap_dim(dim, self.dim());
   auto iter = get_allany_iter(self, result, dim, keepdim);
   auto mut_result = const_cast<Tensor&>(result);
   if (!_dimreduce_return_trivial(mut_result, self, 0, dim, keepdim)) {
@@ -1323,18 +1325,18 @@ void argmax_argmin_impl(
     Stub& stub) {
   c10::MaybeOwned<Tensor> in;
   DimVector dims;
-  int64_t wrapped_dim = 0;
+  int64_t _dim = 0;
 
   if (dim.has_value()) {
-    wrapped_dim = maybe_wrap_dim(dim.value(), self.dim());
+    _dim = maybe_wrap_dim(dim.value(), self.dim());
     auto sizes = self.sizes();
 
-    if (sizes[wrapped_dim] == 1) {
+    if (sizes[_dim] == 1) {
       result.fill_(0);
       return;
     }
 
-    dims = IntArrayRef(wrapped_dim);
+    dims = IntArrayRef(_dim);
     in = c10::MaybeOwned<Tensor>::borrowed(self);
   } else {
     in = c10::MaybeOwned<Tensor>::owned(self.reshape({-1}));
