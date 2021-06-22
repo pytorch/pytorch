@@ -232,7 +232,7 @@ size_t HashNode::operator()(const Node* k) const {
       constant_hash);
 };
 
-// Checks that two nodes have the same imputs, output types
+// Checks that two nodes have the same inputs, output types
 // and node attributes.
 bool EqualNode::operator()(const Node* lhs, const Node* rhs) const {
   if (lhs == nullptr && rhs == nullptr)

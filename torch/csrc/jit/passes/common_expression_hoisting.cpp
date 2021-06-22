@@ -18,14 +18,14 @@ struct CommonExpressionHoister {
       : graph_(std::move(graph)) {}
 
   bool run() {
-    return HoistCommonExpression(graph_->block());
+    HoistCommonExpression(graph_->block());
+    return changed_;
   }
 
-  bool HoistFromIfNode(Node* if_node) {
+  void HoistFromIfNode(Node* if_node) {
     Block* true_block = if_node->blocks()[0];
     Block* false_block = if_node->blocks()[1];
     // find common statements in the two subblocks
-    bool block_modified = false;
 
     auto true_block_nodes = std::unordered_set<Node*, HashNode, EqualNode>(
         true_block->nodes().begin(), true_block->nodes().end());
@@ -59,7 +59,10 @@ struct CommonExpressionHoister {
       std::unordered_set<Node*> true_b_uses;
       for (Value* true_out : true_b_node->outputs()) {
         for (Use true_use : true_out->uses()) {
-          true_b_uses.insert(true_use.user);
+          if (true_use.user->owningBlock() == true_block){
+            // Make sure we are not accidentally adding stuff from subblocks
+            true_b_uses.insert(true_use.user);
+          }
         }
       }
       for (Node* uses_node : true_b_uses) {
@@ -67,7 +70,7 @@ struct CommonExpressionHoister {
       }
 
       // Now hoist the statement out of the block
-      block_modified = true;
+      changed_ = true;
       false_b_node->moveBefore(if_node);
 
       true_b_node->replaceAllUsesWith(false_b_node);
@@ -76,6 +79,11 @@ struct CommonExpressionHoister {
       true_block_nodes.insert(true_b_uses.cbegin(), true_b_uses.cend());
       true_b_node->destroy();
     }
+  }
+
+  void EliminateUnnecessaryIfOutputs(Node* if_node){
+    Block* true_block = if_node->blocks()[0];
+    Block* false_block = if_node->blocks()[1];
 
     // fix up the if block outputs
     for (size_t i = 0; i < true_block->outputs().size();) {
@@ -92,31 +100,29 @@ struct CommonExpressionHoister {
       if_node->eraseOutput(i);
       true_block->eraseOutput(i);
       false_block->eraseOutput(i);
-      block_modified = true;
+      changed_ = true;
     }
 
     // No need to test here if the IF block should be eliminated.
     // The DCE pass will determine that for us.
-    return block_modified;
   }
 
-  bool HoistCommonExpression(Block* block) {
-    bool var_hoisted = false;
+  void HoistCommonExpression(Block* block) {
     for (auto it = block->nodes().begin(); it != block->nodes().end();) {
       Node* node = *it;
       ++it;
 
       for (auto sub_block : node->blocks()) {
-        var_hoisted |= HoistCommonExpression(sub_block);
+        HoistCommonExpression(sub_block);
       }
 
-      if (node->kind() != prim::If) {
-        continue;
+      if (node->kind() == prim::If) {
+        HoistFromIfNode(node);
+        EliminateUnnecessaryIfOutputs(node);
       }
-      var_hoisted |= HoistFromIfNode(node);
     }
-    return var_hoisted;
   }
+
   AliasDb& getOrCreateAliasDb() {
     if (!alias_db_) {
       alias_db_ = std::make_unique<AliasDb>(graph_);
@@ -128,6 +134,7 @@ struct CommonExpressionHoister {
  private:
   std::unique_ptr<AliasDb> alias_db_;
   std::shared_ptr<Graph> graph_;
+  bool changed_ = false;
 };
 } // anonymous namespace
 bool HoistCommonExpression(const std::shared_ptr<Graph>& graph) {
@@ -136,7 +143,9 @@ bool HoistCommonExpression(const std::shared_ptr<Graph>& graph) {
 
   GRAPH_DUMP("Before CSE", graph);
   CommonExpressionHoister ceh(graph);
-  return ceh.run();
+  bool changed =  ceh.run();
+  GRAPH_DUMP("After CSE", graph);
+  return changed;
 }
 } // namespace jit
 } // namespace torch

@@ -920,10 +920,7 @@ void runOptimization(
       "After EliminateDeadCode, before EliminateCommonSubexpression\n", *graph);
   EliminateCommonSubexpression(graph);
   GRAPH_DEBUG(
-      "After EliminateCommonSubexpression, before HoistCommonExpression\n",
-      *graph);
-  HoistCommonExpression(graph);
-  GRAPH_DEBUG("After HoistCommonExpression, before PeepholeOptimize\n", *graph);
+      "After EliminateCommonSubexpression , before PeepholeOptimize\n", *graph);
 
   PeepholeOptimize(graph);
   GRAPH_DEBUG("After PeepholeOptimize, before ConstantPropagation\n", *graph);
