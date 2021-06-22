@@ -388,7 +388,7 @@ def convert_eq_obs(
           along with an equalization scale node wherever applicable (we do not
           want to insert a mul operator between connecting linear layers).
         - Updates the input quantization observers with the scaled input min/max
-          values. 
+          values.
         - Scales the weights by the current and next equalization scales.
         - Removes the weight equalization observer node if it exists.
 
