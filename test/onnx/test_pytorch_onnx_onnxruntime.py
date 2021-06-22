@@ -9314,6 +9314,10 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, x, y):
                 return torch.distributions.Uniform(x, y).sample().size(0), x , y
 
+        self.run_test(M(), (torch.tensor([0.0]), torch.tensor([10.0])))
+        self.run_test(M(), (torch.tensor([[0.0], [6.0]]), torch.tensor([[1.0], [7.0]])))
+        self.run_test(M(), (torch.tensor([1.0]), torch.tensor([[10.0], [7.0], [9.0], [20.0]])))
+
     @disableScriptTest()
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_dist_uniform_correctness(self):
