@@ -568,7 +568,6 @@ void nll_loss_backward_out_cuda_template(
         });
   }
 }
-
 } // namespace
 
 std::tuple<Tensor&, Tensor&> nll_loss_forward_out_cuda(
@@ -640,4 +639,5 @@ Tensor nll_loss_backward_cuda(
       ignore_index);
   return grad_input;
 }
+
 }}  // namespace at::native
