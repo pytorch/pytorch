@@ -13,6 +13,11 @@ import fnmatch
 import shlex
 import configparser
 
+try:
+    import docker
+except ImportError:
+    docker = None
+
 from typing import List, Dict, Any, Optional, Union, NamedTuple, Set
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -289,6 +294,92 @@ class ShellCheck(Check):
         )
 
 
+class ClangTidy(Check):
+    name = "Run clang-tidy"
+    docker_client = None
+    docker_image_name = "ghcr.io/pytorch/cilint-clang-tidy"
+    docker_image_tag = "7f0b4616100071a4813318bfdbd5b06ae36c5272"
+    docker_image_repr = f"{docker_image_name}:{docker_image_tag}"
+    docker_mount_path = "/pytorch"
+
+    def setup(self) -> Dict[str, Any]:
+        env = os.environ.copy();
+
+        if shutil.which("docker") is None:
+            raise RuntimeError("docker is required to run this check locally")
+
+        self.docker_client = docker.from_env()
+
+        env["GITHUB_WORKSPACE"] = self.docker_mount_path
+
+        # Pull the docker image if not present
+        self.docker_client.images.pull(self.docker_image_repr)
+
+        return env
+
+    def docker_run(self, cmd):
+        logs = self.docker_client.containers.run(
+            self.docker_image_repr,
+            command = cmd,
+            working_dir=self.docker_mount_path,
+            volumes={ REPO_ROOT: { 'bind': self.docker_mount_path, 'mode': 'rw' } },
+            stdout=True,
+            stderr=True
+        )
+        return logs
+
+    async def quick(self, files: List[str]) -> CommandResult:
+        raise NotImplementedError
+
+    async def full(self) -> CommandResult:
+        env = self.setup()
+
+        # Generate patch and save to pr.diff
+        # To keep it simple, only generate diff against committed files
+        result = await shell_cmd(
+            [
+                "git",
+                "diff",
+                "HEAD~1",
+            ],
+        )
+
+        if not result.passed:
+            return result
+
+        with open("pr.diff", "w") as f:
+            f.write(result.stdout)
+
+        steps = [
+            "Generate build files",
+            "Run clang-tidy",
+        ]
+
+        logs = []
+
+        for step in steps:
+            try:
+                log = self.docker_run(
+                    [
+                        sys.executable,
+                        "tools/actions_local_runner.py",
+                        "--job",
+                        "clang-tidy",
+                        "--file",
+                        ".github/workflows/lint.yml",
+                        "--step",
+                        step,
+                    ]
+                )
+                logs.append(log.decode('utf-8'))
+            except docker.errors.ContainerError as e:
+                return CommandResult(False, "", str(e))
+            except Exception as e:
+                return CommandResult(False, "", str(e))
+
+        return CommandResult(True, "\n".join(logs), "")
+
+
 class YamlStep(Check):
     def __init__(self, step: Dict[str, Any], job_name: str, quiet: bool):
         super().__init__(files=None, quiet=quiet)
@@ -405,6 +496,7 @@ ad_hoc_steps = {
     "mypy": Mypy,
     "flake8-py3": Flake8,
     "shellcheck": ShellCheck,
+    "clang-tidy": ClangTidy,
 }
 
 if __name__ == "__main__":
