@@ -279,8 +279,8 @@ class TestEqualizeFx(QuantizationTestCase):
         class Linear2Module(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.linear1 = nn.Linear(2, 2)
-                self.linear2 = nn.Linear(2, 2)
+                self.linear1 = nn.Linear(2, 5)
+                self.linear2 = nn.Linear(5, 2)
 
             def forward(self, x):
                 x = self.linear1(x)
