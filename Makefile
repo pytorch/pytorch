@@ -104,8 +104,8 @@ cmakelint:
 		--step 'Run cmakelint'
 
 clang_tidy:
-	echo "clang-tidy local lint is not yet implemented"
-	exit 1
+	@$(PYTHON) tools/actions_local_runner.py \
+	    --job 'clang-tidy'
 
 toc:
 	@$(PYTHON) tools/actions_local_runner.py \
