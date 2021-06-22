@@ -660,6 +660,11 @@ class TestAutograd(TestCase):
         y = x ** 2
         torch.autograd.grad(y, x)  # this should succeed now
 
+    def test_grad_empty_inputs(self):
+        x = torch.tensor([1.0], requires_grad=True)
+        with self.assertRaisesRegex(ValueError, "grad requires non-empty inputs."):
+            torch.autograd.grad(2 * x, [], grad_outputs=torch.tensor([1.0]))
+
     def test_grad_fn_badcalls(self):
         error_regex = 'expected .* arguments, got .* instead'
         x = torch.ones(1, requires_grad=True)
