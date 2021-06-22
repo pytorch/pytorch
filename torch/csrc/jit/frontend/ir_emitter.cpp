@@ -1039,15 +1039,14 @@ struct to_ir {
     }
 
     Value* actual_return = emitExpr(stmt.expr(), type_hint);
-    TypePtr actual_return_type = actual_return->type();
 
     // result type is annotated, every return must convert to that type
     if (declared_return_type) {
       // this guard skips implicit conversion from None -> Tensor for the return
       // type. otherwise forgetting a return a function returning a tensor will
       // cause a None to be converted to a tensor.
-      if (!(declared_return_type->isSubtypeOf(TensorType::get()) &&
-            actual_return_type->isSubtypeOf(NoneType::get()))) {
+      if (!(actual_return->type()->isSubtypeOf(TensorType::get()) &&
+            actual_return->type()->isSubtypeOf(NoneType::get()))) {
         actual_return = tryConvertToType(
             stmt.range(),
             *graph,
@@ -1055,33 +1054,29 @@ struct to_ir {
             actual_return,
             /*allow_conversions=*/true);
       }
-      if (!actual_return_type->isSubtypeOf(declared_return_type)) {
+      if (!actual_return->type()->isSubtypeOf(declared_return_type)) {
         throw ErrorReport(stmt.range())
             << "Return value was annotated as having type "
             << declared_return_type->repr_str() << " but is actually of type "
-            << actual_return_type->repr_str();
+            << actual_return->type()->repr_str();
       }
     } else {
       declared_return_type = def_stack_.back().merged_return_type_;
       if (!declared_return_type) {
-        declared_return_type = actual_return_type;
+        declared_return_type = actual_return->type();
       }
       auto merged_return_type =
-          unifyTypes(declared_return_type, actual_return_type);
+          unifyTypes(declared_return_type, actual_return->type());
       if (!merged_return_type) {
         throw ErrorReport(stmt.range())
             << "Previous return statement returned a value of type "
             << declared_return_type->repr_str()
             << " but this return statement returns a value of type "
-            << actual_return_type->repr_str();
+            << actual_return->type()->repr_str();
       }
       declared_return_type = merged_return_type.value();
     }
     AT_ASSERT(declared_return_type);
-
-    if (declared_return_type->kind() == UnionType::Kind) {
-      declared_return_type = actual_return_type;
-    }
 
     def_stack_.back().merged_return_type_ = declared_return_type;
 
@@ -1090,7 +1085,7 @@ struct to_ir {
     // statements on different code paths (e.g. different branches of an if,
     // body and containing scope of a loop).
     if (declared_return_type == AnyType::get() &&
-        actual_return_type != AnyType::get()) {
+        actual_return->type() != AnyType::get()) {
       actual_return =
           graph->insertUncheckedCast(actual_return, declared_return_type);
     }
@@ -1652,7 +1647,7 @@ struct to_ir {
     }
 
     // Register outputs in each block
-    for (const std::string& x : mutated_variables) {
+    for (const auto& x : mutated_variables) {
       Value* tv;
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       Value* fv;
@@ -1811,10 +1806,12 @@ struct to_ir {
             }
             return t1->str() < t2->str();
           });
+
       auto new_end = std::unique(
           types.begin(),
           types.end(),
           [&](const TypePtr& t1, const TypePtr& t2) { return *t1 == *t2; });
+
       types.erase(new_end, types.end());
     };
 
@@ -1886,10 +1883,6 @@ struct to_ir {
       refinement = RefinementSet(true_refinements, false_refinements);
     }
 
-    TypePtr single_rhs = rhs_types.empty()
-        ? nullptr
-        : *unifyTypeList(rhs_types, nowhere, /*defult_to_union=*/true);
-
     bool is_statically_true =
         std::all_of(lhs_types.begin(), lhs_types.end(), [&](TypePtr lhs_type) {
           return std::any_of(
@@ -1921,12 +1914,10 @@ struct to_ir {
           return true;
         });
 
-    // if (gathered.staticallyTrue(lhs_val->type())) {
     if (is_statically_true) {
       return CondValue(*graph, obj.range(), true, std::move(refinement));
     }
 
-    // if (gathered.staticallyFalse(lhs_val->type())) {
     if (is_statically_false) {
       return CondValue(*graph, obj.range(), false, std::move(refinement));
     }

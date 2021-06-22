@@ -1013,7 +1013,7 @@ bool Node::mustBeNone() const {
       (outputs().size() == 1 && output()->type() == NoneType::get()) ||
       // It's a constant optional with no value in the attributes.
       (kind_ == prim::Constant && !this->hasAttributes() &&
-       output()->type()->kind() == OptionalType::Kind);
+       output()->type()->cast<OptionalType>());
 }
 
 void Node::dump() const {

@@ -67,6 +67,7 @@ TypePtr ScriptTypeParser::subscriptToType(
 
   } else if (typeName == "Union") {
     std::vector<TypePtr> subscript_expr_types;
+    subscript_expr_types.reserve(subscript.subscript_exprs().size());
     for (auto expr : subscript.subscript_exprs()) {
       subscript_expr_types.emplace_back(parseTypeFromExprImpl(expr));
     }
