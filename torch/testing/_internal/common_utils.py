@@ -63,6 +63,7 @@ FILE_SCHEMA = "file://"
 if sys.platform == 'win32':
     FILE_SCHEMA = "file:///"
 
+# Environment variable `IN_CI` is set in `.jenkins/common.sh`.
 IS_IN_CI = os.getenv('IN_CI') == '1'
 IS_SANDCASTLE = os.getenv('SANDCASTLE') == '1' or os.getenv('TW_JOB_USER') == 'sandcastle'
 IS_FBCODE = os.getenv('PYTORCH_TEST_FBCODE') == '1'
@@ -189,6 +190,9 @@ if not expecttest.ACCEPT:
 UNITTEST_ARGS = [sys.argv[0]] + remaining
 torch.manual_seed(SEED)
 
+# CI Prefix path used only on CI environment
+CI_TEST_PREFIX = str(pathlib.Path(os.getcwd()))
+
 def wait_for_process(p):
     try:
         return p.wait()
@@ -235,9 +239,6 @@ def repeat_test_for_types(dtypes):
         return call_helper
     return repeat_helper
 
-# Environment variable `IS_PYTORCH_CI` is set in `.jenkins/common.sh`.
-IS_PYTORCH_CI = bool(os.environ.get('IS_PYTORCH_CI'))
-
 
 def discover_test_cases_recursively(suite_or_case):
     if isinstance(suite_or_case, unittest.TestCase):
@@ -255,6 +256,9 @@ def chunk_list(lst, nchunks):
 
 # sanitize filename e.g., distributed/pipeline/sync/skip/test_api.py -> distributed.pipeline.sync.skip.test_api
 def sanitize_test_filename(filename):
+    # inspect.getfile returns absolute path in some CI jobs, converting it to relative path if needed
+    if filename.startswith(CI_TEST_PREFIX):
+        filename = filename[len(CI_TEST_PREFIX) + 1:]
     strip_py = re.sub(r'.py$', '', filename)
     return re.sub('/', r'.', strip_py)
 
@@ -390,6 +394,12 @@ TEST_SKIP_FAST = os.getenv('PYTORCH_TEST_SKIP_FAST', '0') == '1'
 # disable them for local runs because you still want to run them
 # (unlike slow tests!)
 TEST_SKIP_NOARCH = os.getenv('PYTORCH_TEST_SKIP_NOARCH', '0') == '1'
+
+# Determine whether to enable cuda memory leak check.
+# CUDA mem leak check is expensive and thus we don't want to execute it on every
+# test case / configuration.
+# See: https://github.com/pytorch/pytorch/pull/59402#issuecomment-858811135
+TEST_SKIP_CUDA_MEM_LEAK_CHECK = os.getenv('PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK', '0') == '1'
 
 # Disables tests for when on Github Actions
 ON_GHA = os.getenv('GITHUB_ACTIONS', '0') == '1'
@@ -826,8 +836,7 @@ try:
             verbosity=hypothesis.Verbosity.verbose))
 
     hypothesis.settings.load_profile(
-        "pytorch_ci" if IS_PYTORCH_CI else os.getenv('PYTORCH_HYPOTHESIS_PROFILE',
-                                                     'dev')
+        "pytorch_ci" if IS_IN_CI else os.getenv('PYTORCH_HYPOTHESIS_PROFILE', 'dev')
     )
 except ImportError:
     print('Fail to import hypothesis in common_utils, tests are not derandomized')
@@ -954,6 +963,17 @@ class AssertRaisesContextIgnoreNotImplementedError(unittest.case._AssertRaisesCo
             self.test_case.skipTest(f"not_implemented: {exc_value}")  # type: ignore[attr-defined]
         return super().__exit__(exc_type, exc_value, tb)
 
+
+@contextmanager
+def set_warn_always_context(new_val: bool):
+    old_val = torch.is_warn_always_enabled()
+    torch.set_warn_always(new_val)
+    try:
+        yield
+    finally:
+        torch.set_warn_always(old_val)
+
+
 class TestCase(expecttest.TestCase):
     # NOTE: "precision" lets classes and generated tests set minimum
     # atol values when comparing tensors. Used by @precisionOverride, for
@@ -995,10 +1015,11 @@ class TestCase(expecttest.TestCase):
         test_method = getattr(self, method_name, None)
         if test_method is not None:
             # Wraps the tested method if we should do CUDA memory check.
-            self._do_cuda_memory_leak_check &= getattr(test_method, '_do_cuda_memory_leak_check', True)
-            # FIXME: figure out the flaky -1024 anti-leaks on windows. See #8044
-            if self._do_cuda_memory_leak_check and not IS_WINDOWS:
-                self.wrap_with_cuda_policy(method_name, self.assertLeaksNoCudaTensors)
+            if not TEST_SKIP_CUDA_MEM_LEAK_CHECK:
+                self._do_cuda_memory_leak_check &= getattr(test_method, '_do_cuda_memory_leak_check', True)
+                # FIXME: figure out the flaky -1024 anti-leaks on windows. See #8044
+                if self._do_cuda_memory_leak_check and not IS_WINDOWS:
+                    self.wrap_with_cuda_policy(method_name, self.assertLeaksNoCudaTensors)
 
             # Wraps the tested method if we should enforce non default CUDA stream.
             self._do_cuda_non_default_stream &= getattr(test_method, '_do_cuda_non_default_stream', True)
@@ -1433,7 +1454,7 @@ class TestCase(expecttest.TestCase):
             super().assertEqual(x, y, msg=msg)
 
     def assertNotEqual(self, x, y, msg: Optional[str] = None, *,                                       # type: ignore[override]
-                       atol: Optional[float] = None, rtol: Optional[float] = None, **kwargs) -> None:  # type: ignore[override]
+                       atol: Optional[float] = None, rtol: Optional[float] = None, **kwargs) -> None:
         with self.assertRaises(AssertionError, msg=msg):
             self.assertEqual(x, y, msg, atol=atol, rtol=rtol, **kwargs)
 
@@ -1495,7 +1516,8 @@ class TestCase(expecttest.TestCase):
         """
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
-            callable()
+            with set_warn_always_context(True):
+                callable()
             self.assertTrue(len(ws) == 0, msg)
 
     @contextmanager
@@ -1509,12 +1531,8 @@ class TestCase(expecttest.TestCase):
         pattern = re.compile(regex)
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
-            prev = torch.is_warn_always_enabled()
-            torch.set_warn_always(True)
-            try:
+            with set_warn_always_context(True):
                 yield
-            finally:
-                torch.set_warn_always(prev)
             if len(ws) == 0:
                 self.fail('no warning caught')
             self.assertTrue(any([type(w.message) is category for w in ws]))

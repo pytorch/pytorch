@@ -309,7 +309,7 @@ class ShardedTensor(object):
 
     def _parse_and_validate_remote_device(self, device):
 
-        on, local_device = _parse_remote_device(device)  # type: ignore[arg-type]
+        on, local_device = _parse_remote_device(device)
 
         # Validate rank.
         if isinstance(on, int) and (on < 0 or on >= dist.get_world_size(self._process_group)):

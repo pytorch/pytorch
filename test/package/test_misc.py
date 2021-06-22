@@ -197,6 +197,24 @@ class TestMisc(PackageTestCase):
         self.assertTrue(imported_mod.is_from_package())
         self.assertFalse(mod.is_from_package())
 
+    def test_os_path_edge_case(self):
+        """
+        Both 'os' and 'os.path' should be able to be imported into a package.
+        """
+        import package_a.os_imports
+
+        buffer = BytesIO()
+        mod = package_a.os_imports.Module()
+
+        with PackageExporter(buffer, verbose=False) as pe:
+            pe.intern("**")
+            pe.save_pickle("obj", "obj.pkl", mod)
+
+        buffer.seek(0)
+        pi = PackageImporter(buffer)
+        mod = pi.load_pickle("obj", "obj.pkl")
+        mod()
+
 
 if __name__ == "__main__":
     run_tests()

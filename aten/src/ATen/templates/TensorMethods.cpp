@@ -32,6 +32,10 @@ Tensor Tensor::hip() const {
   return to(options().device(DeviceType::HIP), /*non_blocking*/ false, /*copy*/ false);
 }
 
+Tensor Tensor::ve() const {
+  return to(options().device(DeviceType::VE), /*non_blocking*/ false, /*copy*/ false);
+}
+
 Tensor Tensor::vulkan() const {
   return to(options().device(DeviceType::Vulkan), /*non_blocking*/ false, /*copy*/ false);
 }
