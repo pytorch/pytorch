@@ -168,9 +168,9 @@ LINUX_WORKFLOWS = [
     #     test_runner_type=LINUX_CPU_TEST_RUNNER,
     # ),
     PyTorchLinuxWorkflow(
-         build_environment="pytorch-linux-bionic-py3.8-gcc9-coverage",
-         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-py3.8-gcc9",
-         test_runner_type=LINUX_CPU_TEST_RUNNER,
+        build_environment="pytorch-linux-bionic-py3.8-gcc9-coverage",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-py3.8-gcc9",
+        test_runner_type=LINUX_CPU_TEST_RUNNER,
     ),
     # PyTorchLinuxWorkflow(
     #     build_environment="pytorch-linux-bionic-rocm3.9-py3.6",
