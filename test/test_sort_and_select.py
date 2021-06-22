@@ -602,9 +602,8 @@ class TestSortAndSelect(TestCase):
 
     @onlyCUDA
     @dtypes(torch.bfloat16)
+    @skipCUDAIfRocm
     def test_topk_bfloat16(self, device, dtype):
-        if TEST_WITH_ROCM and dtype == torch.bfloat16:
-            return
 
         small = 10
         large = 8192
