@@ -44,6 +44,28 @@ class AST_Rewriter(ast.NodeTransformer):
         # Return the correct FunctionType object
         return fn_compiled
 
+    def visit_AnnAssign(self, node):
+        """
+        Swap out Python's AnnAssign with an Assign note where the annotation function is called.
+        Example:
+             Original:
+             y: Tensor_Type(1,2,3, Dyn) = f2(x)
+            Output:
+             y = annotate(f2(x),Tensor_Type((1,2,3,Dyn)))
+        """
+        arg1 = node.value
+
+        if isinstance(node.annotation, ast.Call):
+            arg2 = ast.Call(func = ast.Name(id = node.annotation.func.id, ctx=ast.Load()),
+                args = [ast.Tuple(node.annotation.args, ctx=ast.Load())], keywords = [])
+        else:
+            arg2 = node.annotation
+
+        return ast.Assign(targets = [node.target], value = ast.Call(
+            func=ast.Name(id='annotate', ctx=ast.Load()),
+            args=[arg1, arg2],
+            keywords=[]))
+
     def visit_Assert(self, node):
         """
         Swap out the Assert node (Python's `assert`) with a callsite to the
