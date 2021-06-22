@@ -1740,7 +1740,7 @@ graph(%Ra, %Rb):
             self.assertEqual(fn(*args), jitted(*args))
 
         def equation_format(x, y):
-            return torch.einsum('i,j->ij', [x, y])
+            return torch.einsum('i,j->ij', (x, y))
 
         def equation_format_varargs(x, y):
             return torch.einsum('i,j->ij', x, y)
