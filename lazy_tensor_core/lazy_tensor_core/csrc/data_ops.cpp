@@ -4,7 +4,6 @@
 #include <functional>
 #include <numeric>
 
-#include "absl/strings/str_join.h"
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/reduction.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
@@ -12,6 +11,7 @@
 #include "lazy_tensors/computation_client/sys_util.h"
 #include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/shape_util.h"
+#include "lazy_tensors/str_join.h"
 #include "lazy_tensors/util.h"
 
 namespace torch_lazy_tensors {
@@ -38,17 +38,17 @@ std::vector<lazy_tensors::int64> GetCompleteShape(
     LTC_CHECK_EQ(
         total_element_count,
         lazy_tensors::util::Multiply<lazy_tensors::int64>(output_sizes))
-        << "(" << absl::StrJoin(output_sizes, ", ") << ") vs. ("
-        << absl::StrJoin(input_sizes, ", ") << ")";
+        << "(" << lazy_tensors::StrJoin(output_sizes, ", ") << ") vs. ("
+        << lazy_tensors::StrJoin(input_sizes, ", ") << ")";
     return lazy_tensors::util::ToVector<lazy_tensors::int64>(output_sizes);
   }
   LTC_CHECK_GT(incomplete_element_count, 0)
       << "Cannot reshape tensor of 0 elements into shape "
-      << "(" << absl::StrJoin(output_sizes, ", ")
+      << "(" << lazy_tensors::StrJoin(output_sizes, ", ")
       << ") because the unspecified dimension size -1 can be any value";
   LTC_CHECK_EQ(total_element_count % incomplete_element_count, 0)
-      << "(" << absl::StrJoin(output_sizes, ", ") << ") vs. ("
-      << absl::StrJoin(input_sizes, ", ") << ")";
+      << "(" << lazy_tensors::StrJoin(output_sizes, ", ") << ") vs. ("
+      << lazy_tensors::StrJoin(input_sizes, ", ") << ")";
   std::vector<lazy_tensors::int64> complete_output_sizes =
       lazy_tensors::util::ToVector<lazy_tensors::int64>(output_sizes);
   complete_output_sizes[*incomplete_dim] =

@@ -1,8 +1,8 @@
 #include "lazy_tensor_core/csrc/ops/expand.h"
 
-#include "absl/strings/str_join.h"
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
 #include "lazy_tensors/computation_client/util.h"
+#include "lazy_tensors/str_join.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -25,7 +25,7 @@ NodePtr Expand::Clone(OpList operands) const {
 
 std::string Expand::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", size=(" << absl::StrJoin(size_, ", ")
+  ss << Node::ToString() << ", size=(" << lazy_tensors::StrJoin(size_, ", ")
      << "), is_scalar_expand=" << is_scalar_expand_;
   return ss.str();
 }

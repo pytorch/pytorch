@@ -17,7 +17,8 @@ NodePtr Flip::Clone(OpList operands) const {
 
 std::string Flip::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", dims=(" << absl::StrJoin(dims_, ", ") << ")";
+  ss << Node::ToString() << ", dims=(" << lazy_tensors::StrJoin(dims_, ", ")
+     << ")";
   return ss.str();
 }
 

@@ -1,11 +1,11 @@
 #include "lazy_tensor_core/csrc/ops/get_dimensions_size.h"
 
-#include "absl/strings/str_join.h"
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
 #include "lazy_tensor_core/csrc/ops/ltc_ops.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/shape_util.h"
+#include "lazy_tensors/str_join.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -25,8 +25,8 @@ NodePtr GetDimensionsSize::Clone(OpList operands) const {
 
 std::string GetDimensionsSize::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", dimensions=(" << absl::StrJoin(dimensions_, ", ")
-     << ")";
+  ss << Node::ToString() << ", dimensions=("
+     << lazy_tensors::StrJoin(dimensions_, ", ") << ")";
   return ss.str();
 }
 
