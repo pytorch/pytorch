@@ -5001,6 +5001,8 @@ op_db: List[OpInfo] = [
                    supports_inplace_autograd=False,
                    supports_forward_ad=True,
                    skips=(
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal',
+                                device_type='cpu', dtypes=[torch.cfloat]),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
