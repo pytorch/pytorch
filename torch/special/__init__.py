@@ -136,6 +136,30 @@ Example::
     tensor([ 1.0000, 1.8427,  0.0000])
 """.format(**common_args))
 
+erfcx = _add_docstr(_special.special_erfcx,
+                    r"""
+erfcx(input, *, out=None) -> Tensor
+
+Computes the scaled complementary error function for each element of :attr:`input`.
+The scaled complementary error function is defined as follows:
+
+.. math::
+    \mathrm{erfcx}(x) = e^{x^2} \mathrm{erfc}(x)
+""" + r"""
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> torch.special.erfcx(torch.tensor([0, -1., 10.]))
+    tensor([ 1.0000, 5.0090, 0.0561])
+""".format(**common_args))
+
 erfinv = _add_docstr(_special.special_erfinv,
                      r"""
 erfinv(input, *, out=None) -> Tensor
