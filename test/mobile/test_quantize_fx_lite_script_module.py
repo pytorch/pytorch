@@ -1,5 +1,3 @@
-import io
-
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
@@ -11,58 +9,14 @@ from torch.quantization.quantize_fx import (
     convert_fx,
 )
 from torch.testing._internal.common_quantization import NodeSpec as ns
-from torch.testing._internal.common_quantization import (
-    QuantizationTestCase,
-)
-from torch.testing._internal.common_quantized import (
-    override_quantized_engine,
-)
+from torch.testing._internal.common_quantization import QuantizationLiteTestCase
 from torch.quantization import (
     default_qconfig,
     float_qparams_weight_only_qconfig,
 )
-from torch.jit.mobile import _load_for_lite_interpreter
 
 
-class TestFuseFx(QuantizationTestCase):
-    def _compare_script_and_mobile(self, model: torch.nn.Module, input: torch.Tensor):
-        qengine = "qnnpack"
-        with override_quantized_engine(qengine):
-            script_module = torch.jit.script(model)
-            script_module_result = script_module(input)
-
-            max_retry = 5
-            for retry in range(1, max_retry + 1):
-                # retires `max_retry` times; breaks iff succeeds else throws exception
-                try:
-                    buffer = io.BytesIO(
-                        script_module._save_to_buffer_for_lite_interpreter()
-                    )
-                    buffer.seek(0)
-                    mobile_module = _load_for_lite_interpreter(buffer)
-
-                    mobile_module_result = mobile_module(input)
-
-                    torch.testing.assert_allclose(
-                        script_module_result, mobile_module_result
-                    )
-                    mobile_module_forward_result = mobile_module.forward(input)
-                    torch.testing.assert_allclose(
-                        script_module_result, mobile_module_forward_result
-                    )
-
-                    mobile_module_run_method_result = mobile_module.run_method(
-                        "forward", input
-                    )
-                    torch.testing.assert_allclose(
-                        script_module_result, mobile_module_run_method_result
-                    )
-                except AssertionError as e:
-                    if retry == max_retry:
-                        raise e
-                    else:
-                        continue
-                break
+class TestFuseFx(QuantizationLiteTestCase):
 
     def test_embedding(self):
         class M(torch.nn.Module):
