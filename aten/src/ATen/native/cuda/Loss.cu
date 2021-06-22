@@ -241,15 +241,15 @@ void nll_loss_backward_out_cuda_template(
     const c10::optional<Tensor>& weight_opt,
     int64_t reduction,
     int64_t ignore_index) {
-  c10::MaybeOwned<Tensor> weight_maybe_owned =
-      at::borrow_from_optional_tensor(weight_opt);
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
 
   TORCH_CHECK(
       target.dim() == 1,
       "1D target tensor expected, multi-target not supported");
   int64_t n_dims = input.dim();
-  TORCH_CHECK(n_dims > 0 && n_dims <= 2, "input tensor should be 1D or 2D");
+  TORCH_CHECK(
+      n_dims > 0 && n_dims <= 2, "input tensor should be 1D or 2D");
 
   int64_t n_classes = input.size(-1);
   int64_t batch_size = n_dims == 1 ? 1 : input.size(0);
@@ -272,8 +272,7 @@ void nll_loss_backward_out_cuda_template(
   if (reduction == at::Reduction::None && n_dims == 2) {
     check_dim_size(grad_output, 1, 0, batch_size);
     if (batch_size == 0) {
-      // This guards from unnecessary operations and launching CUDA kernel with
-      // 0 blocks.
+      // This guards from unnecessary operations and launching CUDA kernel with 0 blocks.
       return;
     }
     AT_DISPATCH_FLOATING_TYPES_AND2(
@@ -312,14 +311,15 @@ void nll_loss_backward_out_cuda_template(
         [&] {
           nll_loss_backward_reduce_cuda_kernel_1d<scalar_t>
               <<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
-                  grad_input.data_ptr<scalar_t>(),
-                  grad_output.data_ptr<scalar_t>(),
-                  weight.defined() ? weight_.data_ptr<scalar_t>() : nullptr,
-                  target.data_ptr<int64_t>(),
-                  total_weight.data_ptr<scalar_t>(),
-                  reduction == at::Reduction::Mean,
-                  n_classes,
-                  ignore_index);
+                   grad_input.data_ptr<scalar_t>(),
+                   grad_output.data_ptr<scalar_t>(),
+                   weight.defined() ? weight_.data_ptr<scalar_t>() : nullptr,
+                   target.data_ptr<int64_t>(),
+                   total_weight.data_ptr<scalar_t>(),
+                   reduction == at::Reduction::Mean,
+                   n_classes,
+                   ignore_index
+              );
           C10_CUDA_KERNEL_LAUNCH_CHECK();
         });
   } else {
