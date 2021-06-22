@@ -5648,6 +5648,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_isin),
     OpInfo('kthvalue',
            dtypes=all_types(),
+           dtypesIfCPU=all_types_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.float16),
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_kthvalue),
@@ -6010,12 +6011,14 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_max_min_reduction_no_dim,),
     OpInfo('median',
            dtypes=all_types(),
+           dtypesIfCPU=all_types_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.float16),
            # TODO: some signatures of median do support out
            supports_out=False,
            sample_inputs_func=sample_inputs_reduction_wrapper(False)),
     OpInfo('nanmedian',
            dtypes=all_types(),
+           dtypesIfCPU=all_types_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.float16),
            # TODO: some signatures of nanmedian do support out
            supports_out=False,
