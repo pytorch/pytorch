@@ -41,11 +41,11 @@ bool allContiguous(at::TensorList tensors) {
                      [](const at::Tensor& t) { return !t.defined() || t.is_contiguous(); });
 }
 
-void getLaunchConfig(dim3* block, dim3* grid, int64_t numel) {
+void getLaunchConfig(dim3* block, dim3* grid, int64_t numel, int max_threads_per_block=512) {
   int curDevice = -1;
   cudaGetDevice(&curDevice);
-  *block = cuda::getApplyBlock();
-  TORCH_INTERNAL_ASSERT(cuda::getApplyGrid(numel, *grid, curDevice),
+  *block = cuda::getApplyBlock(max_threads_per_block);
+  TORCH_INTERNAL_ASSERT(cuda::getApplyGrid(numel, *grid, curDevice, max_threads_per_block),
                         "Could not get grid size for pointwise apply.");
 }
 
@@ -82,7 +82,7 @@ namespace kernel {
 
 template <typename scalar_t, typename accscalar_t, typename index_type, int indexing_kind>
 #if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS_2(512, 4)
+C10_LAUNCH_BOUNDS_2(128, 4)
 #endif
 __global__ void lstm_cell_forward(
             TensorInfo<scalar_t, index_type> input,
@@ -169,7 +169,7 @@ __global__ void lstm_cell_forward(
 
 template <typename scalar_t, typename accscalar_t, typename index_type, int indexing_kind>
 #if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS_2(512, 4)
+C10_LAUNCH_BOUNDS_2(256, 4)
 #endif
 __global__ void lstm_cell_backward(
               TensorInfo<scalar_t, index_type> storage,
@@ -362,7 +362,7 @@ void lstm_forward_impl(const Tensor& input_gates, const Tensor& hidden_gates,
 
   dim3 block, grid;
   int64_t numel = cx.numel();
-  getLaunchConfig(&block, &grid, numel);
+  getLaunchConfig(&block, &grid, numel, 128);
 
   auto input_gatesI = getTensorInfo<scalar_t, index_type>(input_gates);
   auto hidden_gatesI = getTensorInfo<scalar_t, index_type>(hidden_gates);
@@ -398,7 +398,7 @@ void lstm_backward_impl(const Tensor& grad_hy, const Tensor& grad_cy,
 
   dim3 block, grid;
   int64_t numel = cx.numel();
-  getLaunchConfig(&block, &grid, numel);
+  getLaunchConfig(&block, &grid, numel, 256);
 
   auto grad_hyI = tryGetTensorInfo<scalar_t, index_type>(grad_hy);
   auto grad_cyI = tryGetTensorInfo<scalar_t, index_type>(grad_cy);
