@@ -988,9 +988,7 @@ void initJitScriptBindings(PyObject* module) {
             pyIValueDeepcopy(IValue(self._ivalue()), memo).toObject());
       });
 
-  // Used by torch.package to save ScriptModule objects in unified format and
-  // to coordinate sharing of storages between eager and ScriptModules with
-  // ScriptModuleSerializer's inner SerializationStorageContext.
+  // Used by torch.package to save ScriptModule objects in unified format.
   py::class_<ScriptModuleSerializer>(m, "ScriptModuleSerializer")
       .def(py::init<caffe2::serialize::PyTorchStreamWriter&>())
       .def("serialize", &ScriptModuleSerializer::serialize_unified_format)
@@ -998,21 +996,17 @@ void initJitScriptBindings(PyObject* module) {
           "write_files",
           &ScriptModuleSerializer::writeFiles,
           py::arg("code_dir") = ".data/ts_code/code/")
-      .def(
-          "has_storage",
-          [](ScriptModuleSerializer& m, c10::Storage& storage) {
-            return m.storage_context().hasStorage(storage);
-          })
-      .def(
-          "get_id",
-          [](ScriptModuleSerializer& m, c10::Storage& storage) {
-            return m.storage_context().getId(storage);
-          })
-      .def(
-          "add_storage",
-          [](ScriptModuleSerializer& m, const c10::Storage& storage) {
-            return m.storage_context().addStorage(storage);
-          });
+      .def("storage_context", &ScriptModuleSerializer::storage_context);
+
+  // Used by torch.package to coordinate sharing of storages between eager
+  // and ScriptModules.
+  py::class_<
+      SerializationStorageContext,
+      std::shared_ptr<SerializationStorageContext>>(
+      m, "SerializationStorageContext")
+      .def(py::init<SerializationStorageContext&>())
+      .def("has_storage", &SerializationStorageContext::hasStorage)
+      .def("get_or_add_storage", &SerializationStorageContext::getOrAddStorage);
 
   // torch.jit.ScriptModule is a subclass of this C++ object.
   // Methods here are prefixed with _ since they should not be

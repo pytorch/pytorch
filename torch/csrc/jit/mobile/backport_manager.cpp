@@ -230,7 +230,7 @@ void writeArchiveV5(
               std::to_string(reinterpret_cast<std::intptr_t>(
                   tensor.storage().unsafeGetStorageImpl()));
           tensor_names.push_back(string_id + ".storage");
-          storage_context.addStorage(tensor.storage());
+          storage_context.getOrAddStorage(tensor.storage());
         } else {
           tensor_names.push_back(std::to_string(tensor_names.size()));
         }

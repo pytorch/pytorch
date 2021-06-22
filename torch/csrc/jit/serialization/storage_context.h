@@ -10,22 +10,17 @@ namespace jit {
 // naming for storages.
 class TORCH_API SerializationStorageContext {
  public:
-  explicit SerializationStorageContext() : unique_id(0) {}
+  explicit SerializationStorageContext() = default;
 
-  uint64_t addStorage(c10::Storage storage) {
-    TORCH_INTERNAL_ASSERT(!hasStorage(storage));
-    uint64_t id = unique_id++;
-    storage_id_map_.insert({storage, id});
-    return id;
+  uint64_t getOrAddStorage(c10::Storage storage) {
+    if (!hasStorage(storage)) {
+      storage_id_map_[storage] = storage_id_map_.size();;
+    }
+    return storage_id_map_[storage];
   }
 
   bool hasStorage(c10::Storage storage) {
     return storage_id_map_.find(storage) != storage_id_map_.end();
-  }
-
-  uint64_t getId(c10::Storage storage) {
-    TORCH_INTERNAL_ASSERT(hasStorage(storage));
-    return storage_id_map_.find(storage)->second;
   }
 
   ~SerializationStorageContext() = default;
@@ -34,12 +29,18 @@ class TORCH_API SerializationStorageContext {
   class StorageSerializationComparator {
    public:
     bool operator()(const c10::Storage& lhs, const c10::Storage& rhs) const {
-      return rhs.unsafeGetStorageImpl() < lhs.unsafeGetStorageImpl();
+      return lhs.unsafeGetStorageImpl() < rhs.unsafeGetStorageImpl();
     }
   };
 
-  uint64_t unique_id;
-  std::map<c10::Storage, uint64_t, StorageSerializationComparator>
+  class StorageSerializationHash {
+    public:
+      size_t operator()(const c10::Storage& storage) const {
+          return reinterpret_cast<size_t>(storage.unsafeGetStorageImpl());
+      }
+    };
+
+  std::unordered_map<c10::Storage, uint64_t, StorageSerializationHash>
       storage_id_map_;
 };
 
@@ -65,7 +66,7 @@ class TORCH_API DeserializationStorageContext {
   ~DeserializationStorageContext() = default;
 
  private:
-  std::map<std::string, c10::Storage> name_storage_map_;
+  std::unordered_map<std::string, c10::Storage> name_storage_map_;
 };
 
 } // namespace jit

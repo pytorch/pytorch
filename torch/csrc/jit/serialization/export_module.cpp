@@ -475,16 +475,14 @@ void ScriptModuleSerializer::writeArchive(
       [&](const at::Tensor& tensor) {
         // returns a string to use in picker.cpp as storage obj key
         if (use_storage_context) {
-          uint64_t id = 0;
-          if (storage_context_.hasStorage(tensor.storage())) {
+          bool already_serialized = storage_context_.hasStorage(tensor.storage());
+          std::string tensor_name = std::to_string(storage_context_.getOrAddStorage(tensor.storage())) + ".storage";
+          if (already_serialized) {
             // this case is hit when storage has been serialized already
             // from a torch.package context
-            id = storage_context_.getId(tensor.storage());
-            serialized_tensors.insert(std::to_string(id) + ".storage");
-          } else {
-            id = storage_context_.addStorage(tensor.storage());
+            serialized_tensors.insert(tensor_name);
           }
-          tensor_names.push_back(std::to_string(id) + ".storage");
+          tensor_names.push_back(tensor_name);
         } else {
           tensor_names.push_back(std::to_string(tensor_names.size()));
         }

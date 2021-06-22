@@ -200,6 +200,7 @@ class PackageExporter:
         self.dependency_graph = DiGraph()
         self.verbose = verbose
         self.script_module_serializer = torch._C.ScriptModuleSerializer(self.zip_file)
+        self.storage_context = self.script_module_serializer.storage_context()
 
         # These are OrderedDicts for compatibility with RemovableHandle.
         # Generic OrderedDict type annotations are not present until 3.7.
@@ -777,16 +778,15 @@ node [shape=box];
             location = location_tag(obj)
 
             # serialize storage if not already written
-            if not self.script_module_serializer.has_storage(obj):
+            storage_present = self.storage_context.has_storage(obj)
+            storage_id = self.storage_context.get_or_add_storage(obj)
+            if not storage_present:
                 if obj.device.type != "cpu":
                     obj = obj.cpu()
                 num_bytes = obj.size() * obj.element_size()
-                storage_id = self.script_module_serializer.add_storage(obj)
                 self.zip_file.write_record(
                     f".data/{storage_id}.storage", obj.data_ptr(), num_bytes
                 )
-            else:
-                storage_id = self.script_module_serializer.get_id(obj)
             return ("storage", storage_type, storage_id, location, obj.size())
 
         if hasattr(obj, "__reduce_package__"):
