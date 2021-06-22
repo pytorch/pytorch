@@ -222,8 +222,10 @@ def _is_scalar_list(x):
     Besides checking the type is ListType, we also check if the data type is
     a valid ONNX data type.
     """
+    element_type = str(x.type().getElementType())
     return isinstance(x.type(), torch._C.ListType) and \
-        (scalar_name_to_pytorch[str(x.type().getElementType())] in cast_pytorch_to_onnx.keys())
+        element_type in scalar_name_to_pytorch.keys() and \
+        (scalar_name_to_pytorch[element_type] in cast_pytorch_to_onnx.keys())
 
 def _get_tensor_rank(x):
     if not _is_tensor(x) or x.type() is None:
