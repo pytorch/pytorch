@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
+#include <torch/csrc/jit/tensorexpr/graph_opt.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
@@ -2999,6 +3000,7 @@ void TensorExprKernel::compile() {
   GRAPH_DUMP("TensorExprKernel graph:", graph_);
 
   device_ = *pickDeviceType(graph_);
+  OptimizeCat(graph_);
 
   // Block to collect the Stmts corresponding to all tensors.
   auto block = new Block({});

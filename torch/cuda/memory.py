@@ -164,6 +164,17 @@ def memory_stats(device: Union[Device, int] = None) -> Dict[str, Any]:
       result in a cache flush and retry.
     - ``"num_ooms"``: number of out-of-memory errors thrown.
 
+    The caching allocator can be configured via ENV to not split blocks larger than a
+    defined size (see Memory Management section of the Cuda Semantics documentation).
+    This helps avoid memory framentation but may have a performance
+    penalty. Additional outputs to assist with tuning and evaluating impact:
+
+    - ``"max_split_size"``: blocks above this size will not be split.
+    - ``"oversize_allocations.{current,peak,allocated,freed}"``:
+      number of over-size allocation requests received by the memory allocator.
+    - ``"oversize_segments.{current,peak,allocated,freed}"``:
+      number of over-size reserved segments from ``cudaMalloc()``.
+
     Args:
         device (torch.device or int, optional): selected device. Returns
             statistics for the current device, given by :func:`~torch.cuda.current_device`,
@@ -489,6 +500,29 @@ def memory_summary(device: Union[Device, int] = None, abbreviated: bool = False)
                 formatter(allocated, allocated_prefval),
                 formatter(freed, freed_prefval)),
             )
+
+    metrics_to_display = [
+        ("oversize_allocations", "Oversize allocations", _format_count),
+        ("oversize_segments", "Oversize GPU segments", _format_count),
+    ]
+
+    for metric_key, metric_name, formatter in metrics_to_display:
+        lines.append("-" * 75)
+
+        prefix = metric_key + "."
+
+        current = stats[prefix + "current"]
+        peak = stats[prefix + "peak"]
+        allocated = stats[prefix + "allocated"]
+        freed = stats[prefix + "freed"]
+
+        lines.append(" {:<21} | {} | {} | {} | {} ".format(
+            metric_name,
+            formatter(current, current),
+            formatter(peak, peak),
+            formatter(allocated, allocated),
+            formatter(freed, freed)),
+        )
 
     lines.append("=" * 75)
 

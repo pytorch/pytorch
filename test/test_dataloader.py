@@ -18,7 +18,7 @@ from torch.utils.data._utils import MP_STATUS_CHECK_INTERVAL
 from torch.utils.data.dataset import random_split
 from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS,
-                                                  IS_PYTORCH_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
+                                                  IS_IN_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
                                                   load_tests, TEST_WITH_TSAN, IS_SANDCASTLE)
 
 try:
@@ -28,7 +28,7 @@ except ImportError:
     HAS_PSUTIL = False
     err_msg = ("psutil not found. Some critical data loader tests relying on it "
                "(e.g., TestDataLoader.test_proper_exit) will not run.")
-    if IS_PYTORCH_CI:
+    if IS_IN_CI:
         raise ImportError(err_msg) from None
     else:
         warnings.warn(err_msg)
