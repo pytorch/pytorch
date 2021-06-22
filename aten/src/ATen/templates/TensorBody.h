@@ -445,6 +445,12 @@ class TORCH_API Tensor {
     return impl_->is_hip();
   }
 
+  /// Returns if a `Tensor` has VE backend.
+  bool is_ve() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->is_ve();
+  }
+
   /// Returns if a `Tensor` has sparse backend.
   bool is_sparse() const {
     // NB: this is not a native function to avoid dispatching overhead.
@@ -632,6 +638,10 @@ class TORCH_API Tensor {
 
   Tensor hip() const {
     return to(options().device(DeviceType::HIP), /*non_blocking*/ false, /*copy*/ false);
+  }
+
+  Tensor ve() const {
+    return to(options().device(DeviceType::VE), /*non_blocking*/ false, /*copy*/ false);
   }
 
   Tensor vulkan() const {

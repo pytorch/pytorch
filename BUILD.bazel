@@ -1730,7 +1730,7 @@ cc_library(
         ],
         [
             ":aten",
-            "@tensorpipe",
+            "@tensorpipe//:tensorpipe_cpu",
         ],
     ),
     alwayslink = True,
