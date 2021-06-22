@@ -17,11 +17,11 @@ from torch.testing import \
     (make_non_contiguous, floating_types, floating_types_and, complex_types,
      floating_and_complex_types, floating_and_complex_types_and,
      all_types_and_complex_and, all_types_and, all_types_and_complex,
-     integral_types_and, all_types)
+     integral_types_and, all_types, empty_types)
 from .._core import _dispatch_dtypes
 from torch.testing._internal.common_device_type import \
     (skipIf, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
-     skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfRocm, precisionOverride,)
+     skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfRocm, precisionOverride, toleranceOverride, tol)
 from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater
 from torch.testing._internal.common_utils import \
     (is_iterable_of_tensors,
@@ -1859,6 +1859,25 @@ def sample_inputs_diff(op_info, device, dtype, requires_grad, **kwargs):
         sample_inputs.append(SampleInput(args[0], args=args[1:]))
 
     return tuple(sample_inputs)
+
+def sample_inputs_histogram(op_info, device, dtype, requires_grad):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    sizes = ((), (S,), (S, S), (S, S, S), (S, 1, S), (S, 0, S))
+
+    sample_inputs = []
+    for size, bin_ct, weighted, density in product(sizes, range(1, 5), [False, True], [False, True]):
+        input_tensor = make_arg(size)
+        weight_tensor = make_arg(size) if weighted else None
+
+        sample_inputs.append(SampleInput(input_tensor, args=(bin_ct,),
+                                         kwargs=dict(weight=weight_tensor, density=density)))
+
+        bins_tensor = make_arg((bin_ct + 1,))
+        sample_inputs.append(SampleInput(input_tensor, args=(bins_tensor,),
+                                         kwargs=dict(weight=weight_tensor, density=density)))
+
+    return sample_inputs
 
 def sample_inputs_gradient(op_info, device, dtype, requires_grad):
     sample_inputs = []
@@ -5614,6 +5633,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_isin),
     OpInfo('kthvalue',
            dtypes=all_types(),
+           dtypesIfCPU=all_types_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.float16),
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_kthvalue),
@@ -5976,12 +5996,14 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_max_min_reduction_no_dim,),
     OpInfo('median',
            dtypes=all_types(),
+           dtypesIfCPU=all_types_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.float16),
            # TODO: some signatures of median do support out
            supports_out=False,
            sample_inputs_func=sample_inputs_reduction_wrapper(False)),
     OpInfo('nanmedian',
            dtypes=all_types(),
+           dtypesIfCPU=all_types_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.float16),
            # TODO: some signatures of nanmedian do support out
            supports_out=False,
@@ -7062,6 +7084,15 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_hypot,
            ),
+    OpInfo('histogram',
+           dtypes=_dispatch_dtypes(),  # histogram is only implemented on CPU
+           dtypesIfCPU=floating_types(),
+           sample_inputs_func=sample_inputs_histogram,
+           supports_autograd=False,
+           skips=(
+               # JIT tests don't work with Tensor keyword arguments
+               # https://github.com/pytorch/pytorch/issues/58507
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),),),
     OpInfo('vstack',
            aliases=('row_stack',),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -7317,9 +7348,6 @@ op_db: List[OpInfo] = [
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble])),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                   # sigmoid doesn't support complex autograd, https://github.com/pytorch/pytorch/issues/48552
-                   backward_dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
-                   backward_dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    safe_casts_outputs=True,
                    assert_autodiffed=True),
     UnaryUfuncInfo('digamma',
@@ -7526,6 +7554,13 @@ op_db: List[OpInfo] = [
            supports_out=False,
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            assert_autodiffed=True,),
+    UnaryUfuncInfo('special.erfcx',
+                   ref=scipy.special.erfcx if TEST_SCIPY else _NOTHING,
+                   aten_name='special_erfcx',
+                   decorators=(toleranceOverride({torch.float32: tol(atol=0, rtol=3.9e-6), }),),
+                   dtypes=all_types_and(torch.bool),
+                   dtypesIfCUDA=empty_types(),
+                   safe_casts_outputs=True),
 ]
 
 # Common operator groupings
