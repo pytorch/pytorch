@@ -5,17 +5,6 @@
 #include <ATen/core/Reduction.h>
 #include <ATen/Generator.h>
 
-TORCH_CUDA_CU_API void THNN_(ClassNLLCriterion_updateGradInput)(
-    THCState* state,
-    THCTensor* input,
-    THCIndexTensor* target,
-    THCTensor* gradOutput,
-    THCTensor* gradInput,
-    int64_t reduction,
-    THCTensor* weights, // [OPTIONAL]
-    THCTensor* total_weight,
-    int64_t ignore_index);
-
 TORCH_CUDA_CU_API void THNN_(GatedLinear_updateOutput)(
     THCState* state,
     THCTensor* input,
