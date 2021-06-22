@@ -368,14 +368,14 @@ Tensor ConvertConvWeightsToChannelLastTensor<3>(
         "quantized", "Conv" + c10::to_string(kSpatialDim) + "dPackedParamsBase")
     .def_pickle(
         [](const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& params)
-        -> typeof(serialize_conv<kSpatialDim>(params)) { // __getstate__
+        -> ConvParamsSerializationType { // __getstate__
           return serialize_conv<kSpatialDim>(params);
         },
         // __setstate__ takes c10::IValue because we support parsing historical
         // serialization versions.
         [](c10::IValue v)
         -> c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> { // __setstate__
-          auto state = parse_conv_serialized_state<kSpatialDim>(v);
+          ConvParamsSerializationType state = parse_conv_serialized_state<kSpatialDim>(v);
           return deserialize_conv<kSpatialDim>(state);
         })
     .def("weight", [](const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& self) {

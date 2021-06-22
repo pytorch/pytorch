@@ -2,11 +2,6 @@
 
 torch.package
 =============
-
-.. warning::
-
-    This module is experimental and has not yet been publicly released.
-
 ``torch.package`` adds support for creating hermetic packages containing arbitrary
 PyTorch code. These packages can be saved, shared, used to load and execute models
 at a later date or on a different machine, and can even be deployed to production using
@@ -14,6 +9,16 @@ at a later date or on a different machine, and can even be deployed to productio
 
 This document contains tutorials, how-to guides, explanations, and an API reference that
 will help you learn more about ``torch.package`` and how to use it.
+
+
+.. warning::
+
+    This module depends on the ``pickle`` module which is is not secure. Only unpackage data you trust.
+
+    It is possible to construct malicious pickle data which will **execute arbitrary code during unpickling**.
+    Never unpackage data that could have come from an untrusted source, or that could have been tampered with.
+
+    For more information, review the `documentation <https://docs.python.org/3/library/pickle.html>`_ for the ``pickle`` module.
 
 
 .. contents:: :local:
@@ -25,7 +30,7 @@ Tutorials
 Packaging your first model
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 A tutorial that guides you through packaging and unpackaging a simple model is available
-`on Colab <https://colab.research.google.com/drive/1dWATcDir22kgRQqBg2X_Lsh5UPfC7UTK?usp=sharing>`_.
+`on Colab <https://colab.research.google.com/drive/1lFZkLyViGfXxB-m3jqlyTQuYToo3XLo->`_.
 After completing this exercise, you will be familiar with the basic API for creating and using
 Torch packages.
 
