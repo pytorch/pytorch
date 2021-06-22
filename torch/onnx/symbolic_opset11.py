@@ -7,7 +7,7 @@ import warnings
 import numpy
 
 from torch.onnx.symbolic_helper import parse_args, _unimplemented, _is_tensor_list
-from torch.onnx.symbolic_opset9 import expand, unused
+from torch.onnx.symbolic_opset9 import expand, unused, expand_as, mul, sqrt, zeros_like
 from torch.nn.modules.utils import _single, _pair, _triple
 from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_block
 
@@ -994,3 +994,30 @@ def repeat_interleave(g, self, repeats, dim=None, output_size=None):
     # along the dimension provided, some post-processing is required
     loop_out = g.op("Transpose", loop_out, perm_i=perm_i)
     return reshape(g, loop_out, g.op("Constant", value_t=torch.LongTensor(output_sizes)))
+
+
+def broadcast_tensors(g, self):
+    all_tensors = sym_help._unpack_list(self)
+    final_result = zeros_like(g, all_tensors[0])
+
+    for t in all_tensors:
+        final_result = add(g, final_result, t)
+
+    outputs = g.op("SequenceEmpty", dtype_i=sym_help.cast_pytorch_to_onnx["Float"])
+    for t in all_tensors:
+        outputs = g.op("SequenceInsert", outputs, expand_as(g, t, final_result))
+
+    return outputs
+
+
+def normal(g, loc, scale, seed):
+    # If you can sample from a given distribution with mean 0 and variance 1, then you can easily sample from a
+    # scale-location transformation of that distribution, which has mean μ and variance, σ's square. If x is a sample
+    # from a mean 0 and variance 1 distribution then
+    #       σx+μ
+    # is a sample with mean μ and variance σ's square.
+    result = zeros_like(g, loc)
+    normal_base = add(g, result, g.op("RandomNormal", shape_i=[1]))
+    result = sqrt(g, scale)
+    result = mul(g, result, normal_base)
+    return add(g, result, loc)
