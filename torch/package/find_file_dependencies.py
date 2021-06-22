@@ -57,6 +57,10 @@ class _ExtractModuleReferences(ast.NodeVisitor):
     def visit_Call(self, node):
         # __import__ calls aren't routed to the visit_Import/From nodes
         if hasattr(node.func, "id") and node.func.id == "__import__":
+            if type(node.args[0]) not in [ast.Constant, ast.Str]:
+                # We don't want to parse dynamic uses of __import__
+                return
+
             name = self._grab_node_str(node.args[0])
             fromlist = []
             level = 0

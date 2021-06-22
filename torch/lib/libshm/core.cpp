@@ -37,6 +37,12 @@ void start_manager() {
     SYSCHECK_ERR_RETURN_NEG1(dup2(pipe_ends[1], 1)); // Replace stdout
     SYSCHECK_ERR_RETURN_NEG1(close(pipe_ends[1]));
     execl(manager_executable_path.c_str(), "torch_shm_manager", NULL);
+
+    std::string msg("ERROR: execl failed: ");
+    msg += std::strerror(errno);
+    msg += '\n';
+    write(1, msg.c_str(), msg.size());
+
     exit(1);
   }
   SYSCHECK_ERR_RETURN_NEG1(close(pipe_ends[1]));
@@ -55,15 +61,20 @@ void start_manager() {
   }
   SYSCHECK_ERR_RETURN_NEG1(close(pipe_ends[0]));
   if (handle.length() == 0) {
-    std::string msg("error executing torch_shm_manager at \"");
+    std::string msg("no response from torch_shm_manager at \"");
     msg += manager_executable_path;
     msg += "\"";
     throw std::runtime_error(msg);
   }
 
   handle.pop_back(); // remove \n
-  if (handle == "ERROR")
-    throw std::exception();
+  if (handle.rfind("ERROR: ", 0) == 0) {
+    std::string msg("torch_shm_manager at \"");
+    msg += manager_executable_path;
+    msg += "\": ";
+    msg += handle.substr(7);  // remove "ERROR: "
+    throw std::runtime_error(msg);
+  }
 
   ClientSocket manager {handle};
   managers.emplace(std::move(handle), std::move(manager));

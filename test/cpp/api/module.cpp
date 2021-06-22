@@ -33,7 +33,6 @@ TEST_F(ModuleTest, CanEnableAndDisableTrainingMode) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, ZeroGrad) {
   Linear module(3, 4);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto weight = torch::ones({8, 3}, torch::requires_grad());
   auto loss = module(weight).sum();
   loss.backward();
@@ -56,9 +55,7 @@ TEST_F(ModuleTest, ZeroGrad) {
 TEST_F(ModuleTest, ZeroGradWithUndefined) {
   struct TestModule : torch::nn::Module {
     TestModule() {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       x = register_parameter("x", torch::ones(5, torch::requires_grad()));
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       y = register_parameter("y", torch::ones(5, torch::requires_grad()));
     }
     torch::Tensor x, y;
@@ -117,7 +114,6 @@ TEST_F(ModuleTest, ReplaceModule) {
     }
   };
   auto model = std::make_shared<TestModel>();
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   model->l1 = model->replace_module("l1", torch::nn::Linear(5, 6));
   ASSERT_EQ(model->named_parameters()["l1.weight"].size(0), 6);
   ASSERT_EQ(model->l1.get(), model->named_modules()["l1"]->as<Linear>());
@@ -150,7 +146,6 @@ TEST_F(ModuleTest, RegisterParameterThrowsForEmptyOrDottedName) {
 TEST_F(ModuleTest, RegisterParameterThrowsForDuplicateModuleName) {
   struct TestModel : public torch::nn::Module {};
   TestModel model;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   model.register_parameter("p", torch::ones(5));
   ASSERT_THROWS_WITH(
       model.register_parameter("p", torch::ones(5)),
@@ -196,7 +191,6 @@ TEST_F(ModuleTest, RegisterBufferThrowsForEmptyOrDottedName) {
 TEST_F(ModuleTest, RegisterBufferThrowsForDuplicateModuleName) {
   struct TestModel : public torch::nn::Module {};
   TestModel model;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   model.register_buffer("p", torch::ones(5));
   ASSERT_THROWS_WITH(
       model.register_buffer("p", torch::ones(5)), "Buffer 'p' already defined");
@@ -247,7 +241,6 @@ void test_DeviceOrDtypeConversionSkipsUndefinedTensor(
   torch::Device to_device, torch::Dtype to_dtype) {
   {
     // Case 1: Undefined tensors as parameters
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     Linear module(LinearOptions(10, 20).bias(false));
     ASSERT_TRUE(module->weight.defined());
     ASSERT_FALSE(module->bias.defined());
@@ -264,7 +257,6 @@ void test_DeviceOrDtypeConversionSkipsUndefinedTensor(
   }
   {
     // Case 2: Undefined tensors as buffers
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     BatchNorm1d module(BatchNorm1dOptions(5).track_running_stats(false).affine(true));
     ASSERT_TRUE(module->weight.defined());
     ASSERT_FALSE(module->running_mean.defined());
@@ -294,7 +286,6 @@ TEST_F(ModuleTest, DeviceOrDtypeConversionSkipsUndefinedTensor_CUDA) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, ParametersAndBuffersAccessorSkipsUndefinedTensor) {
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     Linear module(LinearOptions(10, 20).bias(false));
 
     auto params = module->parameters();
@@ -306,7 +297,6 @@ TEST_F(ModuleTest, ParametersAndBuffersAccessorSkipsUndefinedTensor) {
     ASSERT_TRUE(pointer_equal(named_params["weight"], module->weight));
   }
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     BatchNorm1d module(BatchNorm1dOptions(5).track_running_stats(false).affine(false));
 
     auto buffers = module->buffers();
@@ -315,7 +305,6 @@ TEST_F(ModuleTest, ParametersAndBuffersAccessorSkipsUndefinedTensor) {
     ASSERT_EQ(named_buffers.size(), 0);
   }
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     BatchNorm1d module(BatchNorm1dOptions(5).track_running_stats(true).affine(false));
 
     auto buffers = module->buffers();
@@ -334,7 +323,6 @@ TEST_F(ModuleTest, ParametersAndBuffersAccessorSkipsUndefinedTensor) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleTest, Conversion_MultiCUDA) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Linear module(128, 64);
   for (auto& parameter : module->parameters()) {
     ASSERT_EQ(parameter.device(), torch::Device(torch::kCPU));
@@ -411,11 +399,8 @@ struct TestDistinctParametersModule
     reset();
   }
   void reset() override {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     l1 = register_module("l1", Linear(10, 3));
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     l2 = register_module("l2", Linear(3, 5));
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     l3 = register_module("l3", Linear(5, 100));
     buffer = register_buffer("buf", torch::ones({2, 2}));
   }
@@ -557,7 +542,6 @@ TEST_F(ModuleTest, CloneCopiesTheValuesOfVariablesOfSubmodules) {
   {
     torch::NoGradGuard no_grad;
     a->module->weight += 1;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     a->module->value = 123;
   }
 
@@ -581,11 +565,8 @@ TEST_F(ModuleTest, CloneToDevicePreservesTheDeviceOfParameters_CUDA) {
       reset();
     }
     void reset() override {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       l1 = register_module("l1", Linear(10, 3));
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       l2 = register_module("l2", Linear(3, 5));
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       l3 = register_module("l3", Linear(5, 100));
       buffer = register_buffer("buf", torch::ones({2, 2}));
     }
@@ -621,11 +602,8 @@ TEST_F(
       reset();
     }
     void reset() override {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       l1 = register_module("l1", Linear(10, 3));
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       l2 = register_module("l2", Linear(3, 5));
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       l3 = register_module("l3", Linear(5, 100));
       buffer = register_buffer("buf", torch::ones({2, 2}));
     }
@@ -701,7 +679,6 @@ TEST_F(ModuleTest, ContainsBuffersWithTheCorrectName) {
 }
 
 struct AImpl : torch::nn::Module {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   AImpl() : x_(123) {}
   AImpl(int x) : x_(x) {}
   int x_;
@@ -722,7 +699,6 @@ TEST_F(
 TEST_F(
     ModuleTest,
     ValueConstructorOfModuleHolderCallsCorrectConstructorInImpl) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   A a(5);
   ASSERT_TRUE(a);
   ASSERT_FALSE(a.is_empty());
@@ -906,11 +882,8 @@ std::shared_ptr<TestContainer> make_deeply_nested_test_container() {
       {TestContainer(1, {TestContainer(2), TestContainer(3)}),
        TestContainer(4),
        TestContainer(
-           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            5,
-           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            {TestContainer(6),
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             TestContainer(7, {TestContainer(8), TestContainer(9)})})}));
 }
 
@@ -921,15 +894,10 @@ make_key_value_pairs_for_deeply_nested_container() {
           {"test_prefix.0.0", 2},
           {"test_prefix.0.1", 3},
           {"test_prefix.1", 4},
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {"test_prefix.2", 5},
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {"test_prefix.2.0", 6},
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {"test_prefix.2.1", 7},
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {"test_prefix.2.1.0", 8},
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {"test_prefix.2.1.1", 9}};
 }
 

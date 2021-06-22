@@ -64,10 +64,14 @@ Developer tools which you might find useful:
   trailing newline, exit with status 1 if no output printed or 0 if some
   filenames were printed.
 * [translate_annotations.py](translate_annotations.py) - Read [Flake8][] or
-   [clang-tidy][] warnings (according to a `--regex`) from a `--file`, convert
-   to the JSON format accepted by [pytorch/add-annotations-github-action], and
-   translate line numbers from `HEAD` back in time to the given `--commit` by
-   running `git diff-index --unified=0` appropriately.
+  [clang-tidy][] warnings (according to a `--regex`) from a `--file`, convert to
+  the JSON format accepted by [pytorch/add-annotations-github-action], and
+  translate line numbers from `HEAD` back in time to the given `--commit` by
+  running `git diff-index --unified=0` appropriately.
+* [vscode_settings.py](vscode_settings.py) - Merge
+  `.vscode/settings_recommended.json` into your workspace-local
+  `.vscode/settings.json`, preferring the former in case of conflicts but
+  otherwise preserving the latter as much as possible.
 
 Important if you want to run on AMD GPU:
 

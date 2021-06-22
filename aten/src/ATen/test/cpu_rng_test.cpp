@@ -12,6 +12,7 @@
 
 using namespace at;
 
+#ifndef ATEN_CPU_STATIC_DISPATCH
 namespace {
 
 constexpr auto kCustomRNG = DispatchKey::CustomRNGKeyId;
@@ -207,7 +208,6 @@ TEST_F(RNGTest, Normal) {
   const auto std = 67.89;
   auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto actual = torch::empty({10});
   actual.normal_(mean, std, gen);
 
@@ -223,9 +223,7 @@ TEST_F(RNGTest, Normal_float_Tensor_out) {
   const auto std = 67.89;
   auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto actual = torch::empty({10});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::normal_out(actual, mean, torch::full({10}, std), gen);
 
   auto expected = torch::empty_like(actual);
@@ -240,9 +238,7 @@ TEST_F(RNGTest, Normal_Tensor_float_out) {
   const auto std = 67.89;
   auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto actual = torch::empty({10});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::normal_out(actual, torch::full({10}, mean), std, gen);
 
   auto expected = torch::empty_like(actual);
@@ -257,9 +253,7 @@ TEST_F(RNGTest, Normal_Tensor_Tensor_out) {
   const auto std = 67.89;
   auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto actual = torch::empty({10});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::normal_out(actual, torch::full({10}, mean), torch::full({10}, std), gen);
 
   auto expected = torch::empty_like(actual);
@@ -274,7 +268,6 @@ TEST_F(RNGTest, Normal_float_Tensor) {
   const auto std = 67.89;
   auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto actual = at::normal(mean, torch::full({10}, std), gen);
 
   auto expected = torch::empty_like(actual);
@@ -289,7 +282,6 @@ TEST_F(RNGTest, Normal_Tensor_float) {
   const auto std = 67.89;
   auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto actual = at::normal(torch::full({10}, mean), std, gen);
 
   auto expected = torch::empty_like(actual);
@@ -304,7 +296,6 @@ TEST_F(RNGTest, Normal_Tensor_Tensor) {
   const auto std = 67.89;
   auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto actual = at::normal(torch::full({10}, mean), torch::full({10}, std), gen);
 
   auto expected = torch::empty_like(actual);
@@ -357,7 +348,6 @@ TEST_F(RNGTest, LogNormal) {
   const auto std = 6.789;
   auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto actual = torch::empty({10});
   actual.log_normal_(mean, std, gen);
 
@@ -498,3 +488,4 @@ TEST_F(RNGTest, Bernoulli_out) {
   ASSERT_TRUE(torch::allclose(actual, expected));
 }
 }
+#endif // ATEN_CPU_STATIC_DISPATCH

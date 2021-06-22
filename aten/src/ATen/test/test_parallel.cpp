@@ -13,7 +13,6 @@ using namespace at;
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestParallel, TestParallel) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   manual_seed(123);
   set_num_threads(1);
 
@@ -30,11 +29,9 @@ TEST(TestParallel, TestParallel) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestParallel, NestedParallel) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor a = ones({1024, 1024});
   auto expected = a.sum();
   // check that calling sum() from within a parallel block computes the same result
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::parallel_for(0, 10, 1, [&](int64_t begin, int64_t end) {
     if (begin == 0) {
       ASSERT_TRUE(a.sum().equal(expected));

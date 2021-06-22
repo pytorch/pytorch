@@ -212,7 +212,7 @@ if (prop) {
 """
 
 GETTER_BODY_STRING = """\
-return PyUnicode_FromString(prop.c_str());
+return PyUnicode_FromStringAndSize(prop.data(), prop.size());
 """
 
 GETTER_BODY_SCALAR = """\
@@ -240,7 +240,6 @@ MISC_GETTER_DEFS = {
     BaseCType(doubleT): (GETTER_DEFINITION, GETTER_BODY_DOUBLE),
     OptionalCType(BaseCType(doubleT)): (GETTER_DEFINITION_OPT, GETTER_BODY_DOUBLE),
     BaseCType(boolT): (GETTER_DEFINITION, GETTER_BODY_BOOL),
-    BaseCType(stringT): (GETTER_DEFINITION, GETTER_BODY_STRING),
     BaseCType(scalarT): (GETTER_DEFINITION, GETTER_BODY_SCALAR),
     OptionalCType(BaseCType(scalarT)): (GETTER_DEFINITION_OPT, GETTER_BODY_SCALAR),
 }
@@ -325,7 +324,6 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
                 (type == BaseCType(scalarT) and is_output):
             saved_variables.append(f'SavedVariable {name}_;')
             release_variables.append(f'{name}_.reset_data();')
-            release_variables.append(f'{name}_.reset_grad_function();')
             ptr = 'shared_from_this()' if is_output else ''
             unpack.append(f'auto {name} = {name}_.unpack({ptr});')
             getter_definitions.append(GETTER_DEFINITION_SAVEDVAR.substitute(
@@ -368,6 +366,14 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             saved_variables.append(f'{type.cpp_type()} {name} = 0;')
             getter_definitions.append(GETTER_DEFINITION.substitute(
                 op=info.op, name=name, body=GETTER_BODY_INT64_T))
+        elif type == BaseCType(stringT):
+            saved_variables.append(f'std::string {name};')
+            getter_definitions.append(GETTER_DEFINITION.substitute(
+                op=info.op, name=name, body=GETTER_BODY_STRING))
+        elif type == OptionalCType(BaseCType(stringT)):
+            saved_variables.append(f'c10::optional<std::string> {name};')
+            getter_definitions.append(GETTER_DEFINITION_OPT.substitute(
+                op=info.op, name=name, body=GETTER_BODY_STRING))
         else:
             saved_variables.append(f'{type.cpp_type()} {name};')
 
@@ -420,7 +426,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
                 if len(matching_args) == 1:
                     # We can add undefined grad support if the input variable is a Tensor
                     arg = matching_args[0]
-                    if isinstance(arg.argument, Argument) and str(arg.argument.type) == 'Tensor':
+                    if isinstance(arg.argument, Argument) and str(arg.argument.type) in ('Tensor', 'Tensor?'):
                         formula = 'any_grad_defined ? (' + formula + ') : Tensor()'
                         checks_any_grad_defined = True
             return (checks_any_grad_defined,

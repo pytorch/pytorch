@@ -2,14 +2,15 @@
 
 #include <string>
 #include <vector>
+#include <c10/macros/Macros.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
 #include <ATen/core/ivalue.h>
 
 namespace torch {
 
-extern const std::string kParamCommsCallName;
+extern TORCH_API const std::string kParamCommsCallName;
 
-class ParamCommsDebugInfo
+class TORCH_API ParamCommsDebugInfo
     : public c10::DebugInfoBase {
 
  public:
@@ -20,8 +21,8 @@ class ParamCommsDebugInfo
     int inSize,
     int outSize,
     at::ScalarType dType,
-    std::vector<int64_t>&& inSplitSizes,
-    std::vector<int64_t>&& outSplitSizes);
+    std::vector<int64_t> inSplitSizes,
+    std::vector<int64_t> outSplitSizes);
 
   ~ParamCommsDebugInfo() override = default;
 
@@ -63,18 +64,16 @@ class ParamCommsDebugInfo
   std::vector<int64_t> outputSplitSizes_;
 };
 
-// TODO(jchae): handle non empty in/out split sizes
+
 #define RECORD_PARAM_COMMS(rank, colName, inSize, outSize, dType, inSplitSizes, outSplitSizes) \
-  std::vector<int64_t> iss; \
-  std::vector<int64_t> oss; \
   auto paramCommsInfo = std::make_shared<torch::ParamCommsDebugInfo>( \
     rank, \
     colName, \
     inSize, \
     outSize, \
     dType, \
-    std::move(iss), \
-    std::move(oss)); \
+    inSplitSizes, \
+    outSplitSizes); \
   c10::DebugInfoGuard g(c10::DebugInfoKind::PARAM_COMMS_INFO, paramCommsInfo); \
   RECORD_FUNCTION(torch::kParamCommsCallName, std::vector<c10::IValue>());
 

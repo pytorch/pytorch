@@ -12,7 +12,7 @@ namespace jit {
 namespace tensorexpr {
 
 // Returns true if the TE fuser supports this conv2d.
-bool conv2dIsSupported(const Node* node);
+bool conv2dIsSupportedJit(const Node* node);
 // Returns true if the TE fuser supports this matmul.
 bool matmulIsSupported(const Node* node);
 template <typename T>
@@ -23,16 +23,6 @@ inline std::vector<int64_t> bufferSizes(const T& t) {
   }
   return sizes;
 }
-using ArgNone = c10::monostate;
-using BufList = std::vector<tensorexpr::BufHandle>;
-using ArgValue = c10::variant<
-    tensorexpr::BufHandle,
-    tensorexpr::VarHandle,
-    BufList,
-    double,
-    int64_t,
-    bool,
-    ArgNone>;
 
 enum ElementType {
   kAllTypes = 0,
@@ -44,11 +34,95 @@ enum ElementType {
   kNonComplexOrQintTypes = kIntegralTypes | kBoolType | kFloatingPointTypes,
 };
 
+using ArgNone = c10::monostate;
+using BufList = std::vector<tensorexpr::BufHandle>;
+using IntList = std::vector<int64_t>;
+using ArgValue = c10::variant<
+    tensorexpr::BufHandle,
+    tensorexpr::VarHandle,
+    double,
+    int64_t,
+    bool,
+    BufList,
+    IntList,
+    ArgNone>;
+
+// Get the dimensions of a value.
+std::vector<ExprHandle> valueShape(const ArgValue& v);
+
+// If v is a tensor, broadcast it to match the shape of axes, or return
+// directly if v is a constant.
+ExprHandle tensorOrConstant(
+    const ArgValue& v,
+    const std::vector<ExprHandle>& axes);
+
+size_t normalizeAndCheckIndex(int64_t idx, int64_t list_size);
+
+ExprHandle broadcast(BufHandle b, const std::vector<ExprHandle>& axes);
+
+ExprHandle constant(const ArgValue& v);
+
+std::vector<ExprHandle> computeIndicesToBroadcast(
+    const std::vector<ExprHandle>& outputAxes,
+    const std::vector<ExprHandle>& inputSizes);
+
+void promoteInputs(
+    std::vector<ExprHandle>& inputs,
+    const int typeConstraints = kAllTypes);
+
+ExprHandle demoteOutput(
+    const ExprHandle& e,
+    const c10::optional<ScalarType> type);
+
+inline std::string getArgValueName(const ArgValue& a) {
+  if (c10::get_if<tensorexpr::BufHandle>(&a)) {
+    return "BufHandle";
+  } else if (c10::get_if<tensorexpr::VarHandle>(&a)) {
+    return "VarHandle";
+  } else if (c10::get_if<double>(&a)) {
+    return "double";
+  } else if (c10::get_if<int64_t>(&a)) {
+    return "int64_t";
+  } else if (c10::get_if<bool>(&a)) {
+    return "bool";
+  } else if (c10::get_if<BufList>(&a)) {
+    return "BufList";
+  } else if (c10::get_if<IntList>(&a)) {
+    return "IntList";
+  } else if (c10::get_if<ArgNone>(&a)) {
+    return "None";
+  } else {
+    throw std::runtime_error("ArgValue type not handled in string conversion");
+  }
+}
+
+template <class T>
+std::vector<T> convertVecArgValue(const std::vector<ArgValue>& v) {
+  std::vector<T> res;
+  for (const auto& x : v) {
+    auto val = c10::get_if<T>(&x);
+    if (val) {
+      res.push_back(*val);
+    } else {
+      throw std::runtime_error(
+          "vector type not homogeneous - found " + getArgValueName(x) +
+          ", expected " + getArgValueName(v[0]));
+    }
+  }
+  return res;
+}
+
+struct TensorInfo {
+  std::vector<int64_t> dims;
+  c10::ScalarType dtype;
+};
+
 TORCH_API Tensor* computeOperandValue(
     c10::Symbol op,
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
-    const c10::optional<ScalarType>& outputType);
+    const c10::optional<ScalarType>& outputType,
+    at::Device = at::kCPU);
 
 class TORCH_API TensorExprKernel {
   struct ConstantDescr {
@@ -60,6 +134,9 @@ class TORCH_API TensorExprKernel {
   explicit TensorExprKernel(const std::shared_ptr<Graph>& subgraph);
 
   void run(Stack& stack);
+  void runFast(
+      const std::vector<void*>& inputs,
+      const std::vector<void*>& outputs);
 
   void fallback(Stack& stack) {
     InterpreterState(code_).run(stack);
@@ -75,6 +152,14 @@ class TORCH_API TensorExprKernel {
     return graph_;
   }
 
+  const std::vector<ConstantDescr>& getConstantDescriptors() const {
+    return constants_;
+  }
+
+  const std::vector<CodeGen::BufferArg>& getBufferArgs() const {
+    return bufferArgs_;
+  }
+
  private:
   enum BackendType {
     kUninitialized,
@@ -86,7 +171,6 @@ class TORCH_API TensorExprKernel {
 
   void compile();
   void genInputDebugNames();
-
   void runKernel(Stack& stack);
 
   std::vector<DimArg> dimsFromSizes(const std::vector<ExprHandle>& sizes);
@@ -116,14 +200,6 @@ class TORCH_API TensorExprKernel {
       const torch::jit::Value* v,
       const std::vector<ExprHandle>& axes);
 
-  Tensor* computeSum(const torch::jit::Value* v);
-
-  Tensor* computeSoftmax(const torch::jit::Value* v, bool log_softmax);
-
-  Tensor* computeCatWoConditionals(const torch::jit::Value* v);
-
-  Tensor* computeConv2d(const torch::jit::Value* v);
-
   Tensor* computeValue(const torch::jit::Value* v);
 
   void bindConstant(const torch::jit::Value* v);
@@ -149,12 +225,6 @@ class TORCH_API TensorExprKernel {
     bool keepdim;
     c10::optional<Dtype> dtype;
   };
-
-  // Get the reduction info for the given node, based on properties and inputs.
-  ReductionInfo getReductionInfo(const torch::jit::Node* node);
-
-  // Get the reduction axes for the given node, based on properties and inputs.
-  std::vector<int64_t> getReductionAxes(const torch::jit::Node* node);
 
  private:
   struct UnpackedTensorOptions {
@@ -203,9 +273,16 @@ TORCH_API bool& getTEMustUseLLVMOnCPU();
 TORCH_API bool fallbackAllowed();
 TORCH_API bool setFallbackAllowed(bool value);
 TORCH_API bool& getCatWoConditionals();
+TORCH_API bool& getOptConditionals();
 
 TORCH_API c10::optional<at::Device> pickDeviceType(
     const at::ArrayRef<torch::jit::Value*>& inputs);
+
+TORCH_API void annotateInputShapes(
+    const std::shared_ptr<Graph>& graph,
+    const std::vector<c10::optional<at::Tensor>>& example_inputs);
+TORCH_API std::shared_ptr<Graph> removeUnusedSelfArgument(
+    const std::shared_ptr<Graph>& graph);
 
 } // namespace tensorexpr
 } // namespace jit

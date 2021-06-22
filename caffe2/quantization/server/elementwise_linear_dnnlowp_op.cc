@@ -66,7 +66,6 @@ bool ElementwiseLinearDNNLowPOp<T>::RunOnDevice() {
         b_data[i],
         0,
         in_qparams_[0].scale * in_qparams_[1].scale,
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         32,
         true /* signed */);
   }

@@ -590,7 +590,7 @@ def argument_type_str(t: Type, *, simple_type: bool = False) -> str:
         elif t.name == BaseTy.float:
             return 'double'
         elif t.name == BaseTy.str:
-            return 'std::string'
+            return 'c10::string_view'
         elif t.name in [BaseTy.bool, BaseTy.QScheme, BaseTy.Scalar,
                         BaseTy.ScalarType, BaseTy.Generator, BaseTy.Storage,
                         BaseTy.Layout, BaseTy.Device, BaseTy.MemoryFormat,
@@ -798,7 +798,7 @@ def argument_type_str_pyi(t: Type) -> str:
         elif t.name == BaseTy.Dimname:
             ret = 'Union[str, ellipsis, None]'
         elif t.name in [BaseTy.Tensor, BaseTy.Generator,
-                        BaseTy.Storage, BaseTy.Stream, BaseTy.str]:
+                        BaseTy.Storage, BaseTy.Stream]:
             # These python schema type names line up with their function schema names
             ret = t.name.name
 
@@ -1016,7 +1016,7 @@ def arg_parser_unpack_method(t: Type, has_default: bool) -> str:
         elif t.name == BaseTy.float:
             return 'toDouble'
         elif t.name == BaseTy.str:
-            return 'string'
+            return 'stringView'
 
     elif isinstance(t, OptionalType):
         if str(t.elem) == 'Tensor':

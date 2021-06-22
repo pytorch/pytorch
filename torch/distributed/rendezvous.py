@@ -60,8 +60,7 @@ def rendezvous(url: str, rank: int = -1, world_size: int = -1, **kwargs):
     result = urlparse(url)
     if rank != -1 or world_size != -1:
         query_dict: Dict[str, Union[int, str]] = dict(
-            # mypy doesn't allow dict() to accept List of values (#257)
-            pair.split("=") for pair in filter(None, result.query.split("&"))  # type: ignore[arg-type, misc]
+            pair.split("=") for pair in filter(None, result.query.split("&"))
         )
         assert (
             "rank" not in query_dict and "world_size" not in query_dict
@@ -95,7 +94,11 @@ def _file_rendezvous_handler(url: str, **kwargs):
     path = result.path
     if sys.platform == 'win32':
         import urllib.request
-        path = urllib.request.url2pathname(result.path)
+        full_path = result.netloc + result.path
+        path = urllib.request.url2pathname(full_path)
+        if path:
+            # Normalizing an empty string produces ".", which is not expected.
+            path = os.path.normpath(path)
 
     if not path:
         raise _error("path missing")
@@ -135,7 +138,9 @@ def _tcp_rendezvous_handler(url: str, timeout: timedelta = default_pg_timeout, *
     world_size = int(query["world_size"])
     start_daemon = rank == 0
     assert result.hostname is not None
-    store = TCPStore(result.hostname, result.port, world_size, start_daemon, timeout)
+    store = TCPStore(  # type: ignore[call-arg]
+        result.hostname, result.port, world_size, start_daemon, timeout, multi_tenant=True
+    )
     yield (store, rank, world_size)
 
     # If this configuration is invalidated, there is nothing we can do about it
@@ -192,7 +197,9 @@ def _env_rendezvous_handler(url: str, timeout: timedelta = default_pg_timeout, *
     else:
         # Start the TCP store daemon on the rank 0
         start_daemon = rank == 0
-        store = TCPStore(master_addr, master_port, world_size, start_daemon, timeout)
+        store = TCPStore(  # type: ignore[call-arg]
+            master_addr, master_port, world_size, start_daemon, timeout, multi_tenant=True
+        )
         # Each if-else condition returns due to: https://github.com/python/mypy/issues/1191
         yield (store, rank, world_size)
 

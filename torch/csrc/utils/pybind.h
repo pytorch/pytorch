@@ -3,9 +3,11 @@
 #include <torch/csrc/python_headers.h>
 
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/utils/python_tuples.h>
@@ -77,9 +79,9 @@ public:
     auto tuple = PyTuple_Check(source);
     if (tuple || PyList_Check(source)) {
       // NOLINTNEXTLINE(bugprone-branch-clone)
-      auto size = tuple ? PyTuple_GET_SIZE(source) : PyList_GET_SIZE(source);
+      const auto size = tuple ? PyTuple_GET_SIZE(source) : PyList_GET_SIZE(source);
       v_value.resize(size);
-      for (int idx = 0; idx < size; idx++) {
+      for(const auto idx : c10::irange(size)) {
         PyObject* obj = tuple ? PyTuple_GET_ITEM(source, idx) : PyList_GET_ITEM(source, idx);
         if (THPVariable_Check(obj)) {
           v_value[idx] = THPVariable_Unpack(obj).item<int64_t>();
@@ -100,6 +102,33 @@ public:
   }
 private:
   std::vector<int64_t> v_value;
+};
+
+template <>
+struct type_caster<at::Device> {
+ public:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  PYBIND11_TYPE_CASTER(at::Device, _("at::Device"));
+
+  // PYBIND11_TYPE_CASTER defines a member field called value. Since at::Device
+  // cannot be default-initialized, we provide this constructor to explicitly
+  // initialize that field. The value doesn't matter as it will be overwritten
+  // after a successful call to load.
+  type_caster() : value(c10::kCPU) {}
+
+  bool load(handle src, bool) {
+    PyObject* obj = src.ptr();
+    if (THPDevice_Check(obj)) {
+      value = reinterpret_cast<THPDevice*>(obj)->device;
+      return true;
+    }
+    return false;
+  }
+
+  static handle
+  cast(const at::Device& src, return_value_policy /* policy */, handle /* parent */) {
+    return handle(THPDevice_New(src));
+  }
 };
 
 // Pybind11 bindings for our optional type.

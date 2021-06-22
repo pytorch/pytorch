@@ -15,6 +15,7 @@
 #include <ATen/core/Vitals.h>
 #include <TH/TH.h>
 #include <c10/util/Logging.h>
+#include <c10/util/irange.h>
 #include <cstdlib>
 #include <libshm.h>
 #include <pybind11/pybind11.h>
@@ -232,10 +233,8 @@ PyObject *THPModule_addDocStr(PyObject *_unused, PyObject *args)
 {
   // adds a __doc__ string to a function, similar to numpy's arr_add_docstring
   static std::vector<std::string> all_docs;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  PyObject *obj;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  PyObject *doc_obj;
+  PyObject *obj = nullptr;
+  PyObject *doc_obj = nullptr;
   if (!PyArg_ParseTuple(args, "OO", &obj, &doc_obj)) {
     return nullptr;
   }
@@ -399,6 +398,9 @@ PyObject *THPModule_fromDLPack(PyObject *_unused, PyObject *data)
   // out of scope. When the destructor is called, the dlMTensor is destructed too.
   auto atensor = at::fromDLPack(dlMTensor);
 
+  // Make sure this capsule will never be used again.
+  PyCapsule_SetName(data, "used_dltensor");
+
   // It is possible that the call to at::fromDLPack is the very first
   // call to create a Tensor in PyTorch. If so, then _lazy_init has
   // not been called, and the attempt to call createPyObject will fail
@@ -408,8 +410,6 @@ PyObject *THPModule_fromDLPack(PyObject *_unused, PyObject *data)
   if(atensor.is_cuda()) {
     py::module::import("torch.cuda").attr("init")();
   }
-  // Make sure this capsule will never be used again.
-  PyCapsule_SetName(data, "used_dltensor");
   return THPVariable_Wrap(std::move(atensor));
   END_HANDLE_TH_ERRORS
 }
@@ -574,9 +574,11 @@ PyObject *THPModule_setQEngine(PyObject */* unused */, PyObject *arg)
 {
   THPUtils_assert(THPUtils_checkLong(arg), "set_qengine expects an int, "
           "but got %s", THPUtils_typename(arg));
+  HANDLE_TH_ERRORS
   auto qengine = static_cast<int>(THPUtils_unpackLong(arg));
   at::globalContext().setQEngine(static_cast<at::QEngine>(qengine));
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject *THPModule_qEngine(PyObject *_unused, PyObject *noargs)
@@ -588,7 +590,7 @@ PyObject *THPModule_supportedQEngines(PyObject *_unused, PyObject *noargs)
 {
   auto qengines = at::globalContext().supportedQEngines();
   auto list = THPObjectPtr(PyList_New(qengines.size()));
-  for (size_t i = 0; i < qengines.size(); ++i) {
+  for (const auto i : c10::irange(qengines.size())) {
     PyObject *i64 = THPUtils_packInt64(static_cast<int>(qengines[i]));
     if (!i64) {
       throw python_error();
@@ -932,7 +934,7 @@ PyObject* initModule() {
 
   // Automatically translate errors thrown from pybind11 functions
   py::register_exception_translator([](std::exception_ptr e) { // NOLINT
-    if (torch::crash_handler::is_enabled()) {
+    if (torch::crash_handler::is_enabled_on_exceptions()) {
       torch::crash_handler::write_minidump();
     }
 

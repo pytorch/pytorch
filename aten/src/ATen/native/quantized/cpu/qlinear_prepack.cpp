@@ -200,7 +200,8 @@ namespace at {
 namespace native {
 
 at::Tensor _saturate_weight_to_fp16(const Tensor& weight) {
-  float* weight_contig_ptr = weight.contiguous().data_ptr<float>();
+  Tensor weight_contig = weight.contiguous();
+  float* weight_contig_ptr = weight_contig.data_ptr<float>();
   quant_utils::HandleWeightsSaturation(weight.size(0) * weight.size(1), weight_contig_ptr);
   return weight;
 }

@@ -9,6 +9,7 @@ from torch.utils import set_module
 from torch._jit_internal import (
     Final,
     Future,
+    _IgnoreContextManager,
     _overload,
     _overload_method,
     ignore,
@@ -28,6 +29,7 @@ from torch.jit._script import (
     interface,
     CompilationUnit,
     ScriptFunction,
+    _ScriptProfile,
     _unwrap_optional,
 )
 from torch.jit._trace import (
@@ -48,7 +50,7 @@ from torch.jit._async import fork, wait
 from torch.jit._serialization import save, load
 from torch.jit._fuser import optimized_execution, fuser, last_executed_optimized_graph
 
-from torch.jit._freeze import freeze, optimize_frozen_module
+from torch.jit._freeze import freeze, optimize_for_inference, run_frozen_optimizations
 
 # For backwards compatibility
 _fork = fork
@@ -79,7 +81,7 @@ def annotate(the_type, the_value):
     compiler the type of `the_value`. It is a no-op when running outside of TorchScript.
 
     Though TorchScript can infer correct type for most Python expressions, there are some cases where
-    type infernece can be wrong, including:
+    type inference can be wrong, including:
     - Empty containers like `[]` and `{}`, which TorchScript assumes to be container of `Tensor`s
     - Optional types like `Optional[T]` but assigned a valid value of type `T`, TorchScript would assume
     it is type `T` rather than `Optional[T]`

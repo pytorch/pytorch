@@ -46,7 +46,6 @@ Tensor pixel_shuffle(const Tensor& self, int64_t upscale_factor) {
   std::vector<int64_t> permutation(self.sizes().begin(), self_sizes_batch_end);
   // std::iota is used to maintain the batch dims within the permutation.
   std::iota(permutation.begin(), permutation.end(), 0);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   permutation.insert(permutation.end(), {-5 /* oc */, -2 /* h */, -4 /* 1st upscale_factor */, -1 /* w */,
                                          -3 /* 2nd upscale_factor */});
   const auto input_permuted = input_reshaped.permute(permutation);
@@ -98,7 +97,6 @@ Tensor pixel_unshuffle(const Tensor& self, int64_t downscale_factor) {
   std::vector<int64_t> permutation(self.sizes().begin(), self_sizes_batch_end);
   // std::iota is used to maintain the batch dims within the permutation.
   std::iota(permutation.begin(), permutation.end(), 0);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   permutation.insert(permutation.end(), {-5 /* c */, -3 /* 1st downscale_factor */, -1 /*2nd downscale_factor */,
                                          -4 /* oh */, -2 /* ow */});
   const auto input_permuted = input_reshaped.permute(permutation);

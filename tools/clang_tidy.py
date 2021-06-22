@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """
 A driver script to run clang-tidy on changes detected via git.
 
@@ -21,7 +21,6 @@ import json
 import os
 import os.path
 import re
-import shlex
 import shutil
 import subprocess
 import sys
@@ -32,7 +31,7 @@ try:
 except ImportError:
     from pipes import quote
 
-from typing import Any, Dict, Iterable, List, Set, Union
+from typing import Any, Dict, Iterable, List, Set, Tuple
 
 Patterns = collections.namedtuple("Patterns", "positive, negative")
 
@@ -40,10 +39,8 @@ Patterns = collections.namedtuple("Patterns", "positive, negative")
 # NOTE: Clang-tidy cannot lint headers directly, because headers are not
 # compiled -- translation units are, of which there is one per implementation
 # (c/cc/cpp) file.
-DEFAULT_FILE_PATTERN = re.compile(r".*\.c(c|pp)?")
+DEFAULT_FILE_PATTERN = re.compile(r"^.*\.c(c|pp)?$")
 
-# @@ -start,count +start,count @@
-CHUNK_PATTERN = r"^@@\s+-\d+(?:,\d+)?\s+\+(\d+)(?:,(\d+))?\s+@@"
 CLANG_WARNING_PATTERN = re.compile(r"([^:]+):(\d+):\d+:\s+warning:.*\[([^\]]+)\]")
 
 
@@ -125,35 +122,34 @@ def filter_files(files: Iterable[str], file_patterns: Patterns) -> Iterable[str]
             print("{} omitted due to file filters".format(file))
 
 
-def get_changed_files(revision: str, paths: List[str]) -> List[str]:
-    """Runs git diff to get the paths of all changed files."""
-    # --diff-filter AMU gets us files that are (A)dded, (M)odified or (U)nmerged (in the working copy).
-    # --name-only makes git diff return only the file paths, without any of the source changes.
-    command = "git diff-index --diff-filter=AMU --ignore-all-space --name-only"
-    output = run_shell_command(shlex.split(command) + [revision] + paths)
-    return output.split("\n")
-
-
 def get_all_files(paths: List[str]) -> List[str]:
     """Returns all files that are tracked by git in the given paths."""
     output = run_shell_command(["git", "ls-files"] + paths)
     return output.split("\n")
 
 
-def get_changed_lines(revision: str, filename: str) -> Dict[str, Union[str, List[List[int]]]]:
-    """Runs git diff to get the line ranges of all file changes."""
-    command = shlex.split("git diff-index --unified=0") + [revision, filename]
-    output = run_shell_command(command)
-    changed_lines = []
-    for chunk in re.finditer(CHUNK_PATTERN, output, re.MULTILINE):
-        start = int(chunk.group(1))
-        count = int(chunk.group(2) or 1)
-        # If count == 0, a chunk was removed and can be ignored.
-        if count == 0:
-            continue
-        changed_lines.append([start, start + count])
+def find_changed_lines(diff: str) -> Dict[str, List[Tuple[int, int]]]:
+    # Delay import since this isn't required unless using the --diff-file
+    # argument, which for local runs people don't care about
+    try:
+        import unidiff  # type: ignore[import]
+    except ImportError as e:
+        e.msg += ", run 'pip install unidiff'"  # type: ignore[attr-defined]
+        raise e
 
-    return {"name": filename, "lines": changed_lines}
+    files = collections.defaultdict(list)
+
+    for file in unidiff.PatchSet(diff):
+        for hunk in file:
+            start = hunk[0].target_line_no
+            if start is None:
+                start = 1
+            end = hunk[-1].target_line_no
+
+        files[file.path].append((start, end))
+
+    return dict(files)
+
 
 ninja_template = """
 rule do_cmd
@@ -180,7 +176,7 @@ def run_shell_commands_in_parallel(commands: Iterable[List[str]]) -> str:
         return run_shell_command(['ninja', '-f', f.name])
 
 
-def run_clang_tidy(options: Any, line_filters: Any, files: Iterable[str]) -> str:
+def run_clang_tidy(options: Any, line_filters: List[Dict[str, Any]], files: Iterable[str]) -> str:
     """Executes the actual clang-tidy command in the shell."""
     command = [options.clang_tidy_exe, "-p", options.compile_commands_dir]
     if not options.config_file and os.path.exists(".clang-tidy"):
@@ -283,7 +279,7 @@ def parse_options() -> Any:
         help="Path to the folder containing compile_commands.json",
     )
     parser.add_argument(
-        "-d", "--diff", help="Git revision to diff against to get changes"
+        "--diff-file", help="File containing diff to use for determining files to lint and line filters"
     )
     parser.add_argument(
         "-p",
@@ -333,9 +329,20 @@ def main() -> None:
 
     # Normalize the paths first.
     paths = [path.rstrip("/") for path in options.paths]
-    if options.diff:
-        files = get_changed_files(options.diff, paths)
+    if options.diff_file:
+        with open(options.diff_file, "r") as f:
+            changed_files = find_changed_lines(f.read())
+            changed_files = {
+                filename: v
+                for filename, v in changed_files.items()
+                if any(filename.startswith(path) for path in options.paths)
+            }
+            line_filters = [
+                {"name": name, "lines": lines} for name, lines, in changed_files.items()
+            ]
+            files = list(changed_files.keys())
     else:
+        line_filters = []
         files = get_all_files(paths)
     file_patterns = get_file_patterns(options.glob, options.regex)
     files = list(filter_files(files, file_patterns))
@@ -344,10 +351,6 @@ def main() -> None:
     if not files:
         print("No files detected.")
         sys.exit()
-
-    line_filters = []
-    if options.diff:
-        line_filters = [get_changed_lines(options.diff, f) for f in files]
 
     clang_tidy_output = run_clang_tidy(options, line_filters, files)
     if options.suppress_diagnostics:

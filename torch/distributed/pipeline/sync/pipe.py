@@ -6,7 +6,7 @@
 # LICENSE file in the root directory of this source tree.
 """The Pipe interface."""
 from collections import OrderedDict
-from typing import TYPE_CHECKING, Any, Iterable, List, Optional, Tuple, Union, cast, Sequence
+from typing import TYPE_CHECKING, Any, Iterable, List, Optional, Union, Sequence, Tuple, cast
 
 import torch
 from torch import Tensor, nn
@@ -117,20 +117,54 @@ def _retrieve_device(module: nn.Module) -> torch.device:
 
     return device if device is not None else torch.device("cpu")
 
+
+class PipeSequential(nn.Sequential):
+    """
+    Pipe variant of ``nn.Sequential`` which supports multiple inputs.
+    """
+
+    def forward(self, *inputs):
+        for module in self:
+            if isinstance(inputs, Tuple):  # type: ignore[arg-type]
+                inputs = module(*inputs)
+            else:
+                # Don't expand single variables (ex: lists/Tensor)
+                inputs = module(inputs)
+        return inputs
+
+
+def _assemble_partition(modules: List[nn.Module]):
+    modules_list: List[nn.Module] = []
+    for module in modules:
+        if isinstance(module, nn.Sequential):
+            modules_list.extend(module.children())
+        else:
+            modules_list.append(module)
+    return PipeSequential(*modules_list)
+
 def _split_module(modules: nn.Sequential) -> Tuple[List[nn.Sequential], List[torch.device]]:
     partitions = []
     devices = []
+
+    current_partition = []
+    current_device = None
     for name, module in modules.named_children():
-        devices.append(_retrieve_device(module))
-        if isinstance(module, nn.Sequential):
-            partition = module
-        else:
-            partition = nn.Sequential(OrderedDict([(name, module)]))
-        partitions.append(partition)
+        device = _retrieve_device(module)
+        if current_device is not None and (current_device != device or device.type == 'cpu'):
+            partitions.append(_assemble_partition(current_partition))
+            devices.append(current_device)
+            current_partition = []
+        current_device = device
+        current_partition.append(module)
+
+    if current_device is not None:
+        partitions.append(_assemble_partition(current_partition))
+        devices.append(current_device)
 
     partitions = cast(List[nn.Sequential], nn.ModuleList(partitions))
 
     return partitions, devices
+
 
 MOVING_DENIED = TypeError("denied to move parameters and buffers, " "because Pipe should manage device placement")
 
@@ -335,7 +369,7 @@ class Pipe(Module):
 
         return self._copy_streams
 
-    def forward(self, input) -> RRef:
+    def forward(self, *inputs) -> RRef:
         """
         Processes a single input mini-batch through the pipe and returns an
         :class:`~torch.distributed.rpc.RRef` pointing to the output.
@@ -345,6 +379,12 @@ class Pipe(Module):
         :class:`~torch.Tensor` or a sequence of tensors. This restriction is
         applied at partition boundaries too.
 
+        The sequence of inputs are fed into the first stage of the pipeline as
+        ``*inputs``. As a result the positional args for this function should
+        match the positional args for the first stage of the pipeline. The same
+        condition applies for output of one stage of the pipeline which is the
+        input for the next stage.
+
         The input tensor is split into multiple micro-batches based on the
         ``chunks`` parameter used to initialize :class:`Pipe`. The batch size
         is assumed to be the first dimension of the tensor and if the batch
@@ -352,7 +392,7 @@ class Pipe(Module):
         the batch size.
 
         Args:
-            input (torch.Tensor or sequence of :class:`~torch.Tensor`): input mini-batch
+            inputs (torch.Tensor or sequence of :class:`~torch.Tensor`): input mini-batch
 
         Returns:
             :class:`~torch.distributed.rpc.RRef` to the output of the mini-batch
@@ -361,14 +401,14 @@ class Pipe(Module):
             TypeError: input is not a tensor or sequence of tensors.
 
         """
-        microbatch.check(input)
+        microbatch.check(*inputs)
 
         if not self.devices:
             # Empty sequential module is not illegal.
-            return RRef(input)
+            return RRef(*inputs)
 
         # Divide a mini-batch into micro-batches.
-        batches = microbatch.scatter(input, self.chunks)
+        batches = microbatch.scatter(*inputs, chunks=self.chunks)
 
         # Run pipeline parallelism.
         self.pipeline.run(batches)

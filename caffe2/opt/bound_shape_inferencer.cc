@@ -475,7 +475,6 @@ void BoundShapeInferencer::InferSparseLengthsSum(const OperatorDef& op) {
       op.type() == "SparseLengthsWeightedSumFused8BitRowwise" ||
       op.type() == "SparseLengthsSum8BitRowwiseSparse" ||
       op.type() == "SparseLengthsWeightedSum8BitRowwiseSparse") {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     output_dim1 -= 8;
   }
   // If the op is SparseLengthsSumFused4BitRowwise, we need to extract 2 bytes

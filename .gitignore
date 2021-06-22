@@ -15,8 +15,8 @@ coverage.xml
 .hypothesis
 .mypy_cache
 /.extracted_scripts/
-**/.pytorch-test-times
-**/.pytorch-slow-tests
+**/.pytorch-test-times.json
+**/.pytorch-slow-tests.json
 */*.pyc
 */*.so*
 */**/__pycache__
@@ -257,8 +257,10 @@ cmake-build-debug
 # Below files are not deleted by "setup.py clean".
 
 # Visual Studio Code files
-.vscode
 .vs
+/.vscode/*
+!/.vscode/extensions.json
+!/.vscode/settings_recommended.json
 
 # YouCompleteMe config file
 .ycm_extra_conf.py

@@ -10,7 +10,7 @@ PythonCall::PythonCall(SerializedPyObj&& serializedPyObj, bool isAsyncExecution)
     : serializedPyObj_(std::move(serializedPyObj)),
       isAsyncExecution_(isAsyncExecution) {}
 
-Message PythonCall::toMessageImpl() && {
+c10::intrusive_ptr<Message> PythonCall::toMessageImpl() && {
   std::vector<char> payload;
   payload.reserve(serializedPyObj_.payload_.length() + 1);
   payload.push_back(isAsyncExecution_ ? 1 : 0);
@@ -19,7 +19,7 @@ Message PythonCall::toMessageImpl() && {
       serializedPyObj_.payload_.begin(),
       serializedPyObj_.payload_.end());
 
-  return Message(
+  return c10::make_intrusive<Message>(
       std::move(payload),
       std::move(serializedPyObj_.tensors_),
       MessageType::PYTHON_CALL);

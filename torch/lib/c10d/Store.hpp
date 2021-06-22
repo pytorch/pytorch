@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include <c10/macros/Macros.h>
 #include <torch/custom_class.h>
 
 namespace c10d {
@@ -15,7 +16,7 @@ namespace c10d {
 using WatchKeyCallback =
     std::function<void(c10::optional<std::string>, c10::optional<std::string>)>;
 
-class Store : public torch::CustomClassHolder {
+class TORCH_API Store : public torch::CustomClassHolder {
  public:
   static constexpr std::chrono::milliseconds kDefaultTimeout =
       std::chrono::seconds(300);
@@ -37,7 +38,7 @@ class Store : public torch::CustomClassHolder {
       const std::string& key,
       const std::vector<uint8_t>& currentValue,
       const std::vector<uint8_t>& newValue) {
-    TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
+    TORCH_INTERNAL_ASSERT(false, "Not implemented.");
   }
 
   virtual std::vector<uint8_t> get(const std::string& key) = 0;

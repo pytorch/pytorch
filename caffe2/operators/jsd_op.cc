@@ -5,7 +5,6 @@ namespace caffe2 {
 namespace {
 
 static constexpr float kLOG_THRESHOLD() {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return 1e-20;
 }
 
@@ -40,9 +39,7 @@ bool BernoulliJSDOp<float, CPUContext>::RunOnDevice() {
   for (int i = 0; i < N; i++) {
     auto p_mdl = x_data[i];
     auto p_emp = t_data[i];
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto p_avg = (p_mdl + p_emp) / 2.;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto jsd = entropy(p_avg) - (entropy(p_mdl) + entropy(p_emp)) / 2.;
     l_data[i] = jsd;
   }
@@ -64,9 +61,7 @@ bool BernoulliJSDGradientOp<float, CPUContext>::RunOnDevice() {
   for (int i = 0; i < N; i++) {
     auto p_mdl = x_data[i];
     auto p_emp = t_data[i];
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto p_avg = (p_mdl + p_emp) / 2.;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto g_jsd = (logit(p_mdl) - logit(p_avg)) / 2.;
     gi_data[i] = go_data[i] * g_jsd;
   }
