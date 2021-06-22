@@ -76,8 +76,7 @@ def _check_complex_components_individually(
             relaxed_complex_nan = False
 
         if actual.dtype not in (torch.complex32, torch.complex64, torch.complex128):
-            return check_tensors(actual, expected, equal_nan=equal_nan, **kwargs)  # type: ignore[call-arg]
-
+            return check_tensors(actual, expected, equal_nan=equal_nan, **kwargs)
         if relaxed_complex_nan:
             actual, expected = [
                 t.clone().masked_fill(
@@ -86,11 +85,11 @@ def _check_complex_components_individually(
                 for t in (actual, expected)
             ]
 
-        error_meta = check_tensors(actual.real, expected.real, equal_nan=equal_nan, **kwargs)  # type: ignore[call-arg]
+        error_meta = check_tensors(actual.real, expected.real, equal_nan=equal_nan, **kwargs)
         if error_meta:
             return error_meta.amend_msg(postfix="\n\nThe failure occurred for the real part.")
 
-        error_meta = check_tensors(actual.imag, expected.imag, equal_nan=equal_nan, **kwargs)  # type: ignore[call-arg]
+        error_meta = check_tensors(actual.imag, expected.imag, equal_nan=equal_nan, **kwargs)
         if error_meta:
             return error_meta.amend_msg(postfix="\n\nThe failure occurred for the imaginary part.")
 
