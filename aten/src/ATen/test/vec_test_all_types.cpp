@@ -58,9 +58,9 @@ namespace {
     template <typename T>
     class QuantizationTests : public ::testing::Test {};
     template <typename T>
-    class FunctionalBF16Tests : public ::testing::Test {};
-    template <typename T>
     class FunctionalTests : public ::testing::Test {};
+    template <typename T>
+    class FunctionalBF16Tests : public ::testing::Test {};
     using RealFloatTestedTypes = ::testing::Types<vfloat, vdouble>;
     using FloatTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl>;
     using ALLTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vlong, vint, vshort, vqint8, vquint8, vqint>;
@@ -96,6 +96,7 @@ namespace {
     TYPED_TEST_CASE(BitwiseFloatsAdditional, RealFloatTestedTypes);
     TYPED_TEST_CASE(BitwiseFloatsAdditional2, FloatTestedTypes);
     TYPED_TEST_CASE(QuantizationTests, QuantTestedTypes);
+    TYPED_TEST_CASE(FunctionalTests, RealFloatIntTestedTypes);
     TYPED_TEST_CASE(FunctionalBF16Tests, BFloatTestedTypes);
     TYPED_TEST_CASE(FunctionalTests, RealFloatIntTestedTypes);
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -1309,6 +1310,47 @@ namespace {
             test_case);
     }
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+    TYPED_TEST(FunctionalTests, Map) {
+        using vec = TypeParam;
+        using VT = ValueType<TypeParam>;
+        constexpr auto R = 2LL; // residual
+        constexpr auto N = vec::size() + R;
+        CACHE_ALIGN VT x1[N];
+        CACHE_ALIGN VT x2[N];
+        CACHE_ALIGN VT x3[N];
+        CACHE_ALIGN VT x4[N];
+        CACHE_ALIGN VT y[N];
+        CACHE_ALIGN VT ref_y[N];
+        auto seed = TestSeed();
+        ValueGen<VT> generator(VT(-100), VT(100), seed);
+        for (int64_t i = 0; i < N; i++) {
+          x1[i] = generator.get();
+          x2[i] = generator.get();
+          x3[i] = generator.get();
+          x4[i] = generator.get();
+        }
+        auto cmp = [&](VT* y, VT* ref_y) {
+          AssertVectorized<vec>(NAME_INFO(Map), vec::loadu(y), vec::loadu(ref_y)).check(true);
+          AssertVectorized<vec>(NAME_INFO(Map), vec::loadu(y + vec::size(), R), vec::loadu(ref_y + vec::size(), R)).check(true);
+        };
+        // test map: y = x1
+        at::vec::map<VT>([](vec x) { return x; }, y, x1, N);
+        for (int64_t i = 0; i < N; i++) { ref_y[i] = x1[i]; }
+        cmp(y, ref_y);
+        // test map2: y = x1 + x2
+        at::vec::map2<VT>([](vec x1, vec x2) { return x1 + x2; }, y, x1, x2, N);
+        for (int64_t i = 0; i < N; i++) { ref_y[i] = x1[i] + x2[i]; }
+        cmp(y, ref_y);
+        // test map3: y = x1 + x2 + x3
+        at::vec::map3<VT>([](vec x1, vec x2, vec x3) { return x1 + x2 + x3; }, y, x1, x2, x3, N);
+        for (int64_t i = 0; i < N; i++) { ref_y[i] = x1[i] + x2[i] + x3[i]; }
+        cmp(y, ref_y);
+        // test map4: y = x1 + x2 + x3 + x4
+        at::vec::map4<VT>([](vec x1, vec x2, vec x3, vec x4) { return x1 + x2 + x3 + x4; }, y, x1, x2, x3, x4, N);
+        for (int64_t i = 0; i < N; i++) { ref_y[i] = x1[i] + x2[i] + x3[i] + x4[i]; }
+        cmp(y, ref_y);
+    }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
       TYPED_TEST(FunctionalBF16Tests, Reduce) {
       using vec = TypeParam;
       // Can't use ValueType<TypeParam> here:
@@ -1385,9 +1427,11 @@ namespace {
       CACHE_ALIGN RT x_f1[N];
       CACHE_ALIGN RT x_f2[N];
       CACHE_ALIGN RT x_f3[N];
+      CACHE_ALIGN RT x_f4[N];
       CACHE_ALIGN VT x_b1[N];
       CACHE_ALIGN VT x_b2[N];
       CACHE_ALIGN VT x_b3[N];
+      CACHE_ALIGN VT x_b4[N];
       CACHE_ALIGN RT y_f[N];
       CACHE_ALIGN VT y_b[N];
       auto seed = TestSeed();
@@ -1396,9 +1440,11 @@ namespace {
         x_f1[i] = generator.get();
         x_f2[i] = generator.get();
         x_f3[i] = generator.get();
+        x_f4[i] = generator.get();
         x_b1[i] = VT(x_f1[i]);
         x_b2[i] = VT(x_f2[i]);
         x_b3[i] = VT(x_f3[i]);
+        x_b4[i] = VT(x_f4[i]);
       }
       float atol = 0.01f;
       float rtol = 0.01f;
@@ -1430,47 +1476,15 @@ namespace {
               << "\nmap3, Length: " << len << "; index: " << i << "; fp32 reference: " << y_f[i] << "; bf16 value: " << RT(y_b[i]);
         }
       }
-    }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-    TYPED_TEST(FunctionalTests, Map) {
-        using vec = TypeParam;
-        using VT = ValueType<TypeParam>;
-        constexpr auto R = 2LL; // residual
-        constexpr auto N = vec::size() + R;
-        CACHE_ALIGN VT x1[N];
-        CACHE_ALIGN VT x2[N];
-        CACHE_ALIGN VT x3[N];
-        CACHE_ALIGN VT x4[N];
-        CACHE_ALIGN VT y[N];
-        CACHE_ALIGN VT ref_y[N];
-        auto seed = TestSeed();
-        ValueGen<VT> generator(VT(-100), VT(100), seed);
-        for (int64_t i = 0; i < N; i++) {
-          x1[i] = generator.get();
-          x2[i] = generator.get();
-          x3[i] = generator.get();
-          x4[i] = generator.get();
-        }
-        auto cmp = [&](VT* y, VT* ref_y) {
-          AssertVectorized<vec>(NAME_INFO(Map), vec::loadu(y), vec::loadu(ref_y)).check(true);
-          AssertVectorized<vec>(NAME_INFO(Map), vec::loadu(y + vec::size(), R), vec::loadu(ref_y + vec::size(), R)).check(true);
-        };
-        // test map: y = x1
-        at::vec::map<VT>([](vec x) { return x; }, y, x1, N);
-        for (int64_t i = 0; i < N; i++) { ref_y[i] = x1[i]; }
-        cmp(y, ref_y);
-        // test map2: y = x1 + x2
-        at::vec::map2<VT>([](vec x1, vec x2) { return x1 + x2; }, y, x1, x2, N);
-        for (int64_t i = 0; i < N; i++) { ref_y[i] = x1[i] + x2[i]; }
-        cmp(y, ref_y);
-        // test map3: y = x1 + x2 + x3
-        at::vec::map3<VT>([](vec x1, vec x2, vec x3) { return x1 + x2 + x3; }, y, x1, x2, x3, N);
-        for (int64_t i = 0; i < N; i++) { ref_y[i] = x1[i] + x2[i] + x3[i]; }
-        cmp(y, ref_y);
-        // test map3: y = x1 + x2 + x3 + x4
-        at::vec::map4<VT>([](vec x1, vec x2, vec x3, vec x4) { return x1 + x2 + x3 + x4; }, y, x1, x2, x3, x4, N);
-        for (int64_t i = 0; i < N; i++) { ref_y[i] = x1[i] + x2[i] + x3[i] + x4[i]; }
-        cmp(y, ref_y);
+      // Map4
+      for (int64_t len = 1; len <= N; len++) {
+         at::vec::map4<RT>([](auto x, auto y, auto z, auto w) { return x + y * z - w; }, y_f, x_f1, x_f2, x_f3, x_f4, len);
+         at::vec::map4<VT>([](auto x, auto y, auto z, auto w) { return x + y * z - w; }, y_b, x_b1, x_b2, x_b3, x_b4, len);
+         for (int64_t i = 0; i < len; i++) {
+           ASSERT_TRUE(cmp(y_f[i], y_b[i])) << "Failure Details:\nTest Seed to reproduce: " << seed
+               << "\nmap4, Length: " << len << "; index: " << i << "; fp32 reference: " << y_f[i] << "; bf16 value: " << RT(y_b[i]);
+         }
+      }
     }
 
 #else
