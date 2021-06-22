@@ -10,8 +10,8 @@
 #include "lazy_tensor_core/csrc/ts_backend/XLANativeFunctions.h"
 #include "lazy_tensor_core/csrc/ts_backend/aten_autograd_ops_ts.h"
 #include "lazy_tensor_core/csrc/ts_backend/aten_xla_type_default.h"
+#include "lazy_tensor_core/csrc/ts_backend/ts_computation_client.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
-#include "lazy_tensors/computation_client/nnc_computation_client.h"
 
 namespace torch_lazy_tensors {
 namespace {
@@ -252,7 +252,7 @@ convolution_backward_overrideable(
   const auto kernel_size = weight.sizes().slice(2);
   LTC_CHECK(kernel_size.size() == 2 || kernel_size.size() == 3);
   const at::DeviceType device_type =
-      lazy_tensors::NNCComputationClient::HardwareDeviceType();
+      lazy_tensors::compiler::TSComputationClient::HardwareDeviceType();
   if (transposed) {
     at::TensorOptions options = at::TensorOptions().device(device_type);
     auto&& x_result =
@@ -331,7 +331,7 @@ at::Tensor convolution_overrideable(
   const auto kernel_size = weight.sizes().slice(2);
   LTC_CHECK(kernel_size.size() == 2 || kernel_size.size() == 3);
   const at::DeviceType device_type =
-      lazy_tensors::NNCComputationClient::HardwareDeviceType();
+      lazy_tensors::compiler::TSComputationClient::HardwareDeviceType();
   if (transposed) {
     auto&& x_result =
         kernel_size.size() == 2
@@ -472,7 +472,7 @@ at::Tensor empty(at::IntArrayRef size, c10::optional<at::ScalarType> dtype,
                  c10::optional<bool> pin_memory,
                  c10::optional<at::MemoryFormat> memory_format) {
   const auto device_type =
-      lazy_tensors::NNCComputationClient::HardwareDeviceType();
+      lazy_tensors::compiler::TSComputationClient::HardwareDeviceType();
   at::TensorOptions options = at::TensorOptions()
                                   .device(c10::Device(device_type))
                                   .layout(layout)

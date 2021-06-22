@@ -27,11 +27,11 @@
 #include "lazy_tensor_core/csrc/ops/view.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensor_core/csrc/torch_util.h"
+#include "lazy_tensor_core/csrc/ts_backend/ts_computation_client.h"
 #include "lazy_tensors/computation_client/cache.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/ltc_util.h"
 #include "lazy_tensors/computation_client/metrics.h"
-#include "lazy_tensors/computation_client/nnc_computation_client.h"
 #include "lazy_tensors/computation_client/sys_util.h"
 #include "lazy_tensors/computation_client/thread_pool.h"
 #include "lazy_tensors/computation_client/unique.h"
@@ -1317,11 +1317,6 @@ std::shared_ptr<LazyTensor::Async> LazyTensor::ScheduleSyncTensorsGraph(
       std::move(cached_computation));
 
   auto syncfn = [async, hash = coll->hash]() {
-    if (lazy_tensors::NNCComputationClient::HardwareDeviceType() == at::kCUDA) {
-      // Initialize CUDA on this thread, at::scalar_tensor constructor triggers
-      // everything we need.
-      at::scalar_tensor(0, at::TensorOptions().device(at::kCUDA));
-    }
     lazy_tensors::ComputationClient::ExecuteComputationOptions options;
     try {
       LTC_VLOG(3) << "Executing IR graph hash "

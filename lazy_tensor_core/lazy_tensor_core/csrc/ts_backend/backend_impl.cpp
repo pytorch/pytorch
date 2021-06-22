@@ -3,7 +3,6 @@
 #include "lazy_tensor_core/csrc/ts_backend/ts_computation_client.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_lowering_context.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_node_lowering.h"
-#include "lazy_tensors/computation_client/nnc_computation_client.h"
 
 namespace torch_lazy_tensors {
 namespace compiler {
@@ -57,7 +56,7 @@ class TSBackendImpl : public BackendImplInterface {
       const at::Tensor& tensor, const lazy_tensors::Shape& shape,
       const std::string& device) const override {
     at::TensorOptions options = tensor.options().device(
-        lazy_tensors::NNCComputationClient::HardwareDeviceType());
+        lazy_tensors::compiler::TSComputationClient::HardwareDeviceType());
     return std::make_shared<
         lazy_tensors::compiler::TSComputationClient::TSData>(
         tensor.to(options), lazy_tensors::ToShapeData(shape), device);

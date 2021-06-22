@@ -1,5 +1,5 @@
 diff --git a/aten/src/ATen/templates/aten_xla_type_default.cpp b/aten/src/ATen/templates/aten_xla_type_default.cpp
-index 040a752156..e8712d5644 100644
+index 040a752156..657caa3dac 100644
 --- a/aten/src/ATen/templates/aten_xla_type_default.cpp
 +++ b/aten/src/ATen/templates/aten_xla_type_default.cpp
 @@ -1,16 +1,17 @@
@@ -20,9 +20,9 @@ index 040a752156..e8712d5644 100644
 +#include <lazy_tensors/computation_client/debug_macros.h>
 +#include <lazy_tensors/computation_client/ltc_logging.h>
 +#include <lazy_tensors/computation_client/metrics.h>
-+#include <lazy_tensors/computation_client/nnc_computation_client.h>
 +#include <lazy_tensor_core/csrc/aten_ltc_bridge.h>
 +#include <lazy_tensor_core/csrc/ts_backend/XLANativeFunctions.h>
++#include <lazy_tensor_core/csrc/ts_backend/ts_computation_client.h>
 +#include <lazy_tensor_core/csrc/function_call_tracker.h>
  
  namespace ${cpp_namespace} {
@@ -34,7 +34,7 @@ index 040a752156..e8712d5644 100644
 +namespace {
 +
 +std::vector<at::Tensor> _to_eager(at::TensorList tensors) {
-+    if (lazy_tensors::NNCComputationClient::HardwareDeviceType() == at::kCUDA) {
++    if (lazy_tensors::compiler::TSComputationClient::HardwareDeviceType() == at::kCUDA) {
 +        std::vector<at::Tensor> cuda_tensors;
 +        for (const auto& t : tensors) {
 +            cuda_tensors.push_back(t.cuda());

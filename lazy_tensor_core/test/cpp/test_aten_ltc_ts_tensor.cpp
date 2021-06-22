@@ -8,9 +8,8 @@
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/torch_util.h"
 #include "lazy_tensor_core/csrc/ts_backend/backend_impl.h"
-#include "lazy_tensors/computation_client/computation_client.h"
+#include "lazy_tensor_core/csrc/ts_backend/ts_computation_client.h"
 #include "lazy_tensors/computation_client/metrics.h"
-#include "lazy_tensors/computation_client/nnc_computation_client.h"
 #include "lazy_tensors/permutation_util.h"
 #include "torch_ltc_ts_test.h"
 
@@ -21,7 +20,8 @@ namespace {
 class AtenLtcTsTensorTest : public AtenLtcTsTensorTestBase {};
 
 bool IsCuda() {
-  return lazy_tensors::NNCComputationClient::HardwareDeviceType() == at::kCUDA;
+  return lazy_tensors::compiler::TSComputationClient::HardwareDeviceType() ==
+         at::kCUDA;
 }
 
 compiler::BackendRegistrar g_registrar(compiler::GetTSBackendImpl());

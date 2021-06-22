@@ -2,7 +2,6 @@
 
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_lowering_context.h"
-#include "lazy_tensors/computation_client/nnc_computation_client.h"
 #include "torch/csrc/jit/runtime/graph_executor.h"
 
 namespace lazy_tensors {
@@ -53,9 +52,10 @@ std::vector<ComputationClient::DataPtr> TSComputationClient::ExecuteComputation(
   for (auto argument : arguments) {
     const auto ts_data =
         std::static_pointer_cast<TSComputationClient::TSData>(argument);
-    LTC_CHECK(lazy_tensors::NNCComputationClient::HardwareDeviceType() !=
-                  at::kCUDA ||
-              ts_data->data_.device().type() == at::kCUDA);
+    LTC_CHECK(
+        lazy_tensors::compiler::TSComputationClient::HardwareDeviceType() !=
+            at::kCUDA ||
+        ts_data->data_.device().type() == at::kCUDA);
     stack.emplace_back(ts_data->data_);
   }
   interp.run(stack);
@@ -80,7 +80,7 @@ std::string TSComputationClient::GetResourceDomain(
 }
 
 std::string TSComputationClient::GetDefaultDevice() const {
-  switch (lazy_tensors::NNCComputationClient::HardwareDeviceType()) {
+  switch (lazy_tensors::compiler::TSComputationClient::HardwareDeviceType()) {
     case at::kCPU: {
       return "CPU:0";
     }
@@ -110,6 +110,19 @@ TSComputationClient::GetReplicationDevices() {
 }
 
 void TSComputationClient::PrepareToExit() {}
+
+at::DeviceType TSComputationClient::HardwareDeviceType() {
+  static auto device_type =
+      sys_util::GetEnvBool("LTC_TS_CUDA", false) ? at::kCUDA : at::kCPU;
+  // The first CUDA usage could happen via lazy tensors. Initialize CUDA here to
+  // account for that, at::scalar_tensor constructor triggers everything we
+  // need.
+  static c10::optional<at::Tensor> init_cuda =
+      device_type == at::kCUDA ? c10::optional<at::Tensor>(at::scalar_tensor(
+                                     0, at::TensorOptions().device(at::kCUDA)))
+                               : c10::nullopt;
+  return device_type;
+}
 
 lazy_tensors::ComputationClient* TSClientGet() {
   std::call_once(g_computation_client_once,
