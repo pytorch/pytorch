@@ -1173,7 +1173,7 @@ class CrossEntropyLossWithSoftLabels(_Loss):
         - Input: :math:`(*, C)` where :math:`*` represents any number of dimensions (including none) and
           `C = number of classes`
         - Target: :math:`(*, C)`, same shape as the input
-        - Output: If :attr:`reduction` is ``'none'``, then :math:`(*, C)`, otherwise scalar.
+        - Output: If :attr:`reduction` is ``'none'``, then :math:`(*, C)`, otherwise scalar
 
     Examples::
 
