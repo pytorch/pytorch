@@ -56,13 +56,17 @@ CudaIPCGlobalEntities cuda_ipc_global_entities;
 
 CudaIPCSentDataLimbo::~CudaIPCSentDataLimbo() {
   collect();
-  if (shared_blocks_.size() > 0) {
+  if (size() > 0) {
     warnProducerTerminatedBeforeSharedTensorsReleased();
   }
 }
 
 void CudaIPCSentDataLimbo::clear_shared_blocks() {
-  shared_blocks_.clear();
+  std::vector<std::unique_ptr<CudaIPCSentData>> tmp_blocks;
+  {
+    std::lock_guard<std::mutex> lock(limbo_mutex_);
+    tmp_blocks = std::move(shared_blocks_);
+  }
 }
 
 bool CudaIPCSentDataLimbo::collect() {
@@ -101,6 +105,11 @@ void CudaIPCSentDataLimbo::add(std::unique_ptr<CudaIPCSentData> shared_block) {
     warned = true;
   }
   shared_blocks_.push_back(std::move(shared_block));
+}
+
+uint64_t CudaIPCSentDataLimbo::size() {
+  std::lock_guard<std::mutex> lock(limbo_mutex_);
+  return shared_blocks_.size();
 }
 
 void CudaIPCSentDataDelete(void* ptr) {
