@@ -154,27 +154,12 @@ with compiling PyTorch from source.
                               !! WARNING !!
 '''
 CUDA_MISMATCH_MESSAGE = '''
-
-                               !! WARNING !!
-
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 The detected CUDA version ({0}) mismatches the version that was used to compile
-PyTorch ({1}). Please make sure to use the same CUDA versions, otherwise some
-errors may appear during compilation/runtime.
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-                              !! WARNING !!
+PyTorch ({1}). Please make sure to use the same CUDA versions.
 '''
 CUDA_NOT_FOUND_MESSAGE = '''
-
-                               !! WARNING !!
-
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 CUDA was not found on the system, please set the CUDA_HOME or the CUDA_PATH
 environment variable. The extension compilation will fail.
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-                              !! WARNING !!
 '''
 ROCM_HOME = _find_rocm_home()
 MIOPEN_HOME = _join_rocm_home('miopen') if ROCM_HOME else None
@@ -784,12 +769,14 @@ class BuildExtension(build_ext, object):
             cuda_version_str = subprocess.check_output([nvcc, '--version']).strip().decode()
             cuda_version = re.search(r'release (\d+[.]\d+)', cuda_version_str)
             if cuda_version is not None:
-                cuda_version = parse_version(cuda_version.group(1))
+                cuda_str_version = cuda_version.group(1)
+                cuda_version = parse_version(cuda_str_version)
                 torch_cuda_version = parse_version(torch.version.cuda)
                 if cuda_version.major != torch_cuda_version.major:
-                    warnings.warn(CUDA_MISMATCH_MESSAGE.format(cuda_version, torch.version.cuda))
+                    raise RuntimeError(CUDA_MISMATCH_MESSAGE.format(
+                        cuda_str_version, torch.version.cuda))
         else:
-            warnings.warn(CUDA_NOT_FOUND_MESSAGE)
+            raise RuntimeError(CUDA_NOT_FOUND_MESSAGE)
 
     def _add_compile_flag(self, extension, flag):
         extension.extra_compile_args = copy.deepcopy(extension.extra_compile_args)
