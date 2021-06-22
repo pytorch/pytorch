@@ -1,7 +1,7 @@
 import collections.abc
 import functools
 import numbers
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, TypeVar, Union, cast
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Type, Union, cast
 from types import SimpleNamespace
 
 import torch
@@ -17,6 +17,20 @@ __all__ = ["assert_equal", "assert_close"]
 # test).
 class UsageError(Exception):
     pass
+
+
+_TestingError = Union[AssertionError, UsageError]
+
+
+class _TestingErrorMeta(NamedTuple):
+    type: Type[_TestingError]
+    msg: str
+
+    def amend_msg(self, prefix: str = "", postfix: str = "") -> "_TestingErrorMeta":
+        return self._replace(msg=f"{prefix}{self.msg}{postfix}")
+
+    def to_error(self) -> _TestingError:
+        return self.type(self.msg)
 
 
 # This is copy-pasted from torch.testing._internal.common_utils.TestCase.dtype_precisions. With this we avoid a
@@ -40,21 +54,19 @@ def _get_default_rtol_and_atol(actual: Tensor, expected: Tensor) -> Tuple[float,
 
 
 def _check_complex_components_individually(
-    check_tensor_values: Callable[..., Optional[Exception]]
-) -> Callable[..., Optional[Exception]]:
-    """Decorates real-valued tensor values check functions to handle complex components individually.
+    check_tensors: Callable[..., Optional[_TestingErrorMeta]]
+) -> Callable[..., Optional[_TestingErrorMeta]]:
+    """Decorates real-valued tensor check functions to handle complex components individually.
 
     If the inputs are not complex, this decorator is a no-op.
 
     Args:
-        check_tensor_values (Callable[..., Optional[Exception]]): Tensor check function for real-valued tensors.
-
-    Returns:
-        Optional[Exception]: Return value of :attr:`check_tensors`.
+        check_tensors (Callable[[Tensor, Tensor], Optional[_TestingErrorMeta]]): Tensor check function for real-valued
+        tensors.
     """
 
-    @functools.wraps(check_tensor_values)
-    def wrapper(actual: Tensor, expected: Tensor, **kwargs: Any) -> Optional[Exception]:
+    @functools.wraps(check_tensors)
+    def wrapper(actual: Tensor, expected: Tensor, **kwargs: Any) -> Optional[_TestingErrorMeta]:
         if "equal_nan" in kwargs:
             if kwargs["equal_nan"] == "relaxed":
                 relaxed_complex_nan = True
@@ -66,42 +78,41 @@ def _check_complex_components_individually(
             relaxed_complex_nan = False
 
         if actual.dtype not in (torch.complex32, torch.complex64, torch.complex128):
-            return check_tensor_values(actual, expected, **kwargs,)
+            return check_tensors(actual, expected, **kwargs)  # type: ignore[call-arg]
 
         if relaxed_complex_nan:
             actual, expected = [
                 t.clone().masked_fill(
-                    t.real.isnan() | t.imag.isnan(),
-                    complex(float("NaN"), float("NaN")),  # type: ignore[call-overload]
+                    t.real.isnan() | t.imag.isnan(), complex(float("NaN"), float("NaN"))  # type: ignore[call-overload]
                 )
                 for t in (actual, expected)
             ]
 
-        exc = check_tensor_values(actual.real, expected.real, **kwargs)
-        if exc:
-            return _amend_error_message(exc, "{}\n\nThe failure occurred for the real part.")
+        error_meta = check_tensors(actual.real, expected.real, **kwargs)  # type: ignore[call-arg]
+        if error_meta:
+            return error_meta.amend_msg(postfix="\n\nThe failure occurred for the real part.")
 
-        exc = check_tensor_values(actual.imag, expected.imag, **kwargs)
-        if exc:
-            return _amend_error_message(exc, "{}\n\nThe failure occurred for the imaginary part.")
+        error_meta = check_tensors(actual.imag, expected.imag, **kwargs)  # type: ignore[call-arg]
+        if error_meta:
+            return error_meta.amend_msg(postfix="\n\nThe failure occurred for the imaginary part.")
 
         return None
 
     return wrapper
 
 
-def _check_supported_tensor(input: Tensor) -> Optional[UsageError]:
+def _check_supported_tensor(input: Tensor) -> Optional[_TestingErrorMeta]:
     """Checks if the tensors are supported by the current infrastructure.
 
     All checks are temporary and will be relaxed in the future.
 
     Returns:
-        (Optional[UsageError]): If check did not pass.
+        (Optional[_TestingErrorMeta]): If check did not pass.
     """
     if input.is_quantized:
-        return UsageError("Comparison for quantized tensors is not supported yet.")
+        return _TestingErrorMeta(UsageError, "Comparison for quantized tensors is not supported yet.")
     if input.is_sparse:
-        return UsageError("Comparison for sparse tensors is not supported yet.")
+        return _TestingErrorMeta(UsageError, "Comparison for sparse tensors is not supported yet.")
 
     return None
 
@@ -113,7 +124,7 @@ def _check_attributes_equal(
     check_device: bool = True,
     check_dtype: bool = True,
     check_stride: bool = True,
-) -> Optional[AssertionError]:
+) -> Optional[_TestingErrorMeta]:
     """Checks if the attributes of two tensors match.
 
     Always checks the :attr:`~torch.Tensor.shape`. Checks for :attr:`~torch.Tensor.device`,
@@ -130,21 +141,21 @@ def _check_attributes_equal(
             stride.
 
     Returns:
-        (Optional[AssertionError]): If checks did not pass.
+        (Optional[_TestingErrorMeta]): If checks did not pass.
     """
     msg_fmtstr = "The values for attribute '{}' do not match: {} != {}."
 
     if actual.shape != expected.shape:
-        return AssertionError(msg_fmtstr.format("shape", actual.shape, expected.shape))
+        return _TestingErrorMeta(AssertionError, msg_fmtstr.format("shape", actual.shape, expected.shape))
 
     if check_device and actual.device != expected.device:
-        return AssertionError(msg_fmtstr.format("device", actual.device, expected.device))
+        return _TestingErrorMeta(AssertionError, msg_fmtstr.format("device", actual.device, expected.device))
 
     if check_dtype and actual.dtype != expected.dtype:
-        return AssertionError(msg_fmtstr.format("dtype", actual.dtype, expected.dtype))
+        return _TestingErrorMeta(AssertionError, msg_fmtstr.format("dtype", actual.dtype, expected.dtype))
 
     if check_stride and actual.stride() != expected.stride():
-        return AssertionError(msg_fmtstr.format("stride()", actual.stride(), expected.stride()))
+        return _TestingErrorMeta(AssertionError, msg_fmtstr.format("stride()", actual.stride(), expected.stride()))
 
     return None
 
@@ -237,7 +248,7 @@ def _check_values_equal(
     expected: Tensor,
     *,
     msg: Optional[Union[str, Callable[[Tensor, Tensor, SimpleNamespace], str]]] = None,
-) -> Optional[AssertionError]:
+) -> Optional[_TestingErrorMeta]:
     """Checks if the values of two tensors are bitwise equal.
 
     Args:
@@ -265,7 +276,7 @@ def _check_values_equal(
         )
     elif callable(msg):
         msg = msg(actual, expected, trace)
-    return AssertionError(msg)
+    return _TestingErrorMeta(AssertionError, msg)
 
 
 @_check_complex_components_individually
@@ -277,7 +288,7 @@ def _check_values_close(
     atol: float,
     equal_nan: bool,
     msg: Optional[Union[str, Callable[[Tensor, Tensor, SimpleNamespace], str]]],
-) -> Optional[AssertionError]:
+) -> Optional[_TestingErrorMeta]:
     """Checks if the values of two tensors are close up to a desired tolerance.
 
     Args:
@@ -308,7 +319,7 @@ def _check_values_close(
         )
     elif callable(msg):
         msg = msg(actual, expected, trace)
-    return AssertionError(msg)
+    return _TestingErrorMeta(AssertionError, msg)
 
 
 def _check_tensors_equal(
@@ -319,7 +330,7 @@ def _check_tensors_equal(
     check_dtype: bool = True,
     check_stride: bool = True,
     msg: Optional[Union[str, Callable[[Tensor, Tensor, SimpleNamespace], str]]] = None,
-) -> Optional[Exception]:
+) -> Optional[_TestingErrorMeta]:
     """Checks that the values of two tensors are bitwise equal.
 
     For complex tensors the check is performed on the real and imaginary component separately. Optionally, checks that
@@ -328,18 +339,18 @@ def _check_tensors_equal(
     For a description of the parameters see :func:`assert_equal`.
 
     Returns:
-        Optional[Exception]: If checks did not pass.
+        Optional[_TestingErrorMeta]: If checks did not pass.
     """
-    exc: Optional[Exception] = _check_attributes_equal(
+    error_meta = _check_attributes_equal(
         actual, expected, check_device=check_device, check_dtype=check_dtype, check_stride=check_stride
     )
-    if exc:
-        return exc
+    if error_meta:
+        return error_meta
     actual, expected = _equalize_attributes(actual, expected)
 
-    exc = _check_values_equal(actual, expected, msg=msg)
-    if exc:
-        return exc
+    error_meta = _check_values_equal(actual, expected, msg=msg)
+    if error_meta:
+        return error_meta
 
     return None
 
@@ -355,7 +366,7 @@ def _check_tensors_close(
     check_dtype: bool = True,
     check_stride: bool = True,
     msg: Optional[Union[str, Callable[[Tensor, Tensor, SimpleNamespace], str]]] = None,
-) -> Optional[Exception]:
+) -> Optional[_TestingErrorMeta]:
     r"""Checks that the values of :attr:`actual` and :attr:`expected` are close.
 
     If :attr:`actual` and :attr:`expected` are real-valued and finite, they are considered close if
@@ -372,48 +383,33 @@ def _check_tensors_close(
     For a description of the parameters see :func:`assert_equal`.
 
     Returns:
-        Optional[Exception]: If checks did not pass.
+        Optional[_TestingErrorMeta]: If checks did not pass.
     """
     if (rtol is None) ^ (atol is None):
         # We require both tolerance to be omitted or specified, because specifying only one might lead to surprising
         # results. Imagine setting atol=0.0 and the tensors still match because rtol>0.0.
-        return UsageError(
-            f"Both 'rtol' and 'atol' must be omitted or specified, but got rtol={rtol} and atol={atol} instead."
+        return _TestingErrorMeta(
+            UsageError,
+            f"Both 'rtol' and 'atol' must be either specified or omitted, but got rtol={rtol} and atol={atol} instead.",
         )
     elif rtol is None or atol is None:
         rtol, atol = _get_default_rtol_and_atol(actual, expected)
 
-    exc: Optional[Exception] = _check_attributes_equal(
+    error_meta = _check_attributes_equal(
         actual, expected, check_device=check_device, check_dtype=check_dtype, check_stride=check_stride
     )
-    if exc:
-        return exc
+    if error_meta:
+        return error_meta
     actual, expected = _equalize_attributes(actual, expected)
 
     if (rtol == 0.0) and (atol == 0.0):
-        exc = _check_values_equal(actual, expected, msg=msg)
+        error_meta = _check_values_equal(actual, expected, msg=msg)
     else:
-        exc = _check_values_close(actual, expected, rtol=rtol, atol=atol, equal_nan=equal_nan, msg=msg)
-    if exc:
-        return exc
+        error_meta = _check_values_close(actual, expected, rtol=rtol, atol=atol, equal_nan=equal_nan, msg=msg)
+    if error_meta:
+        return error_meta
 
     return None
-
-
-E = TypeVar("E", bound=Exception)
-
-
-def _amend_error_message(exc: E, msg_fmtstr: str) -> E:
-    """Amends an exception message.
-
-    Args:
-        exc (E): Exception.
-        msg_fmtstr: Format string for the amended message.
-
-    Returns:
-        (E): New exception with amended error message.
-    """
-    return type(exc)(msg_fmtstr.format(str(exc)))
 
 
 class _TensorPair(NamedTuple):
@@ -427,8 +423,8 @@ _MAPPING_MSG_FMTSTR = "The failure occurred for key '{}' of the mappings."
 
 def _check_pair(
     pair: Union[_TensorPair, List, Dict],
-    check_tensors: Callable[[Any, Any], Optional[Exception]],
-) -> Optional[Exception]:
+    check_tensors: Callable[[Any, Any], Optional[_TestingErrorMeta]],
+) -> Optional[_TestingErrorMeta]:
     """Checks input pairs.
 
     :class:`list`'s or :class:`dict`'s are checked elementwise. Checking is performed recursively and thus nested
@@ -437,40 +433,40 @@ def _check_pair(
     Args:
         pair (Union[_TensorPair, List, Dict]): Input pair.
         check_tensors (Callable[[Any, Any], Optional[Exception]]): Callable used to check if a tensor pair matches.
-            In case it mismatches should return an :class:`Exception` with an expressive error message.
 
     Returns:
-        (Optional[Exception]): Return value of :attr:`check_tensors`.
+        (Optional[_TestingErrorMeta]): Return value of :attr:`check_tensors`.
     """
     if isinstance(pair, list):
         for idx, pair_item in enumerate(pair):
-            exc = _check_pair(pair_item, check_tensors)
-            if exc:
-                return _amend_error_message(exc, f"{{}}\n\n{_SEQUENCE_MSG_FMTSTR.format(idx)}")
+            error_meta = _check_pair(pair_item, check_tensors)
+            if error_meta:
+                return error_meta.amend_msg(postfix=f"\n\n{_SEQUENCE_MSG_FMTSTR.format(idx)}")
         else:
             return None
     elif isinstance(pair, dict):
         for key, pair_item in pair.items():
-            exc = _check_pair(pair_item, check_tensors)
-            if exc:
-                return _amend_error_message(exc, f"{{}}\n\n{_MAPPING_MSG_FMTSTR.format(key)}")
+            error_meta = _check_pair(pair_item, check_tensors)
+            if error_meta:
+                return error_meta.amend_msg(postfix=f"\n\n{_MAPPING_MSG_FMTSTR.format(key)}")
         else:
             return None
     else:  # isinstance(pair, TensorPair)
         return check_tensors(pair.actual, pair.expected)
 
 
-def _to_tensor(array_or_scalar_like: Any) -> Tuple[Optional[Exception], Optional[Tensor]]:
+def _to_tensor(array_or_scalar_like: Any) -> Tuple[Optional[_TestingErrorMeta], Optional[Tensor]]:
     """Converts a scalar-or-array-like to a :class:`~torch.Tensor`.
     Args:
         array_or_scalar_like (Any): Scalar-or-array-like.
     Returns:
-        (Tuple[Optional[Exception], Optional[Tensor]]): The two elements are orthogonal, i.e. if the first ``is None``
-            the second will be valid and vice versa. Returns a :class:`UsageError` if no tensor can be constructed from
-            :attr:`actual` or :attr:`expected`. Additionally, returns any exception from
+
+        (Tuple[Optional[_TestingErrorMeta], Optional[Tensor]]): The two elements are orthogonal, i.e. if the first is
+            ``None`` the second will be valid and vice versa. Returns :class:`_TestingErrorMeta` if no tensor can be
+            constructed from :attr:`actual` or :attr:`expected`. Additionally, returns any error meta from
             :func:`_check_supported_tensor`.
     """
-    exc: Optional[Exception]
+    error_meta: Optional[_TestingErrorMeta]
 
     if isinstance(array_or_scalar_like, Tensor):
         tensor = array_or_scalar_like
@@ -478,29 +474,32 @@ def _to_tensor(array_or_scalar_like: Any) -> Tuple[Optional[Exception], Optional
         try:
             tensor = torch.as_tensor(array_or_scalar_like)
         except Exception:
-            exc = UsageError(f"No tensor can be constructed from type {type(array_or_scalar_like)}.")
-            return exc, None
+            error_meta = _TestingErrorMeta(
+                UsageError, f"No tensor can be constructed from type {type(array_or_scalar_like)}."
+            )
+            return error_meta, None
 
-    exc = _check_supported_tensor(tensor)
-    if exc:
-        return exc, None
+    error_meta = _check_supported_tensor(tensor)
+    if error_meta:
+        return error_meta, None
 
     return None, tensor
 
 
-def _to_tensor_pair(actual: Any, expected: Any) -> Tuple[Optional[Exception], Optional[_TensorPair]]:
+def _to_tensor_pair(actual: Any, expected: Any) -> Tuple[Optional[_TestingErrorMeta], Optional[_TensorPair]]:
     """Converts a scalar-or-array-like pair to a :class:`_TensorPair`.
 
     Args:
         actual (Any): Actual array-or-scalar-like.
         expected (Any): Expected array-or-scalar-like.
 
-    (Optional[Exception], Optional[_TensorPair]): The two elements are orthogonal, i.e. if the first ``is None``
-            the second will not and vice versa. Returns a :class:`AssertionError` if :attr:`actual` and
-            :attr:`expected` are not scalars and do not have the same type. Additionally, returns any exception from
+    Returns:
+        (Optional[_TestingErrorMeta], Optional[_TensorPair]): The two elements are orthogonal, i.e. if the first is
+            ``None`` the second will not and vice versa. Returns :class:`_TestingErrorMeta` if :attr:`actual` and
+            :attr:`expected` are not scalars and do not have the same type. Additionally, returns any error meta from
             :func:`_to_tensor`.
     """
-    exc: Optional[Exception]
+    error_meta: Optional[_TestingErrorMeta]
 
     # We exclude numbers here, since numbers of different type, e.g. int vs. float, should be treated the same as
     # tensors with different dtypes. Without user input, passing numbers of different types will still fail, but this
@@ -508,24 +507,28 @@ def _to_tensor_pair(actual: Any, expected: Any) -> Tuple[Optional[Exception], Op
     if type(actual) is not type(expected) and not (
         isinstance(actual, numbers.Number) and isinstance(expected, numbers.Number)
     ):
-        exc = AssertionError(
-            f"Except for scalars, type equality is required, but got {type(actual)} and {type(expected)} instead."
+        error_meta = _TestingErrorMeta(
+            AssertionError,
+            f"Except for scalars, type equality is required, but got {type(actual)} and {type(expected)} instead.",
         )
-        return exc, None
+        return error_meta, None
 
-    exc, actual = _to_tensor(actual)
-    if exc:
-        return exc, None
+    error_meta, actual = _to_tensor(actual)
+    if error_meta:
+        return error_meta, None
 
-    exc, expected = _to_tensor(expected)
-    if exc:
-        return exc, None
+    error_meta, expected = _to_tensor(expected)
+    if error_meta:
+        return error_meta, None
 
     return None, _TensorPair(actual, expected)
 
 
-def _parse_inputs(actual: Any, expected: Any) -> Tuple[Optional[Exception], Optional[Union[_TensorPair, List, Dict]]]:
-    """Parses the positional inputs by constructing :class:`_TensorPairs` from corresponding array-or-scalar-likes.
+def _parse_inputs(
+    actual: Any, expected: Any
+) -> Tuple[Optional[_TestingErrorMeta], Optional[Union[_TensorPair, List, Dict]]]:
+    """Parses the positional inputs by constructing :class:`_TensorPair`'s from corresponding array-or-scalar-likes.
+
 
     :class:`~collections.abc.Sequence`'s or :class:`~collections.abc.Mapping`'s are parsed elementwise. Parsing is
     performed recursively and thus nested containers are supported. The hierarchy of the containers is preserved, but
@@ -536,12 +539,13 @@ def _parse_inputs(actual: Any, expected: Any) -> Tuple[Optional[Exception], Opti
         expected (Any): Expected input.
 
     Returns:
-        (Tuple[Optional[Exception], Optional[Union[_TensorPair, List, Dict]]]): The two elements are orthogonal, i.e.
-            if the first ``is None`` the second will be valid and vice versa. Returns an :class:`AssertionError` if the
-            length of two sequences or the keys of two mappings do not match. Additionally, returns any exception from
-            :func:`_to_tensor_pair`.
+        (Tuple[Optional[_TestingErrorMeta], Optional[Union[_TensorPair, List, Dict]]]): The two elements are
+            orthogonal, i.e. if the first is ``None`` the second will be valid and vice versa. Returns
+            :class:`_TestingErrorMeta` if the length of two sequences or the keys of two mappings do not match.
+            Additionally, returns any error meta from :func:`_to_tensor_pair`.
+
     """
-    exc: Optional[Exception]
+    error_meta: Optional[_TestingErrorMeta]
 
     # We explicitly exclude str's here since they are self-referential and would cause an infinite recursion loop:
     # "a" == "a"[0][0]...
@@ -554,15 +558,17 @@ def _parse_inputs(actual: Any, expected: Any) -> Tuple[Optional[Exception], Opti
         actual_len = len(actual)
         expected_len = len(expected)
         if actual_len != expected_len:
-            exc = AssertionError(f"The length of the sequences mismatch: {actual_len} != {expected_len}")
-            return exc, None
+            error_meta = _TestingErrorMeta(
+                AssertionError, f"The length of the sequences mismatch: {actual_len} != {expected_len}"
+            )
+            return error_meta, None
 
         pair_list = []
         for idx in range(actual_len):
-            exc, pair = _parse_inputs(actual[idx], expected[idx])
-            if exc:
-                exc = _amend_error_message(exc, f"{{}}\n\n{_SEQUENCE_MSG_FMTSTR.format(idx)}")
-                return exc, None
+            error_meta, pair = _parse_inputs(actual[idx], expected[idx])
+            if error_meta:
+                error_meta = error_meta.amend_msg(postfix=f"\n\n{_SEQUENCE_MSG_FMTSTR.format(idx)}")
+                return error_meta, None
 
             pair_list.append(pair)
         else:
@@ -574,19 +580,20 @@ def _parse_inputs(actual: Any, expected: Any) -> Tuple[Optional[Exception], Opti
         if actual_keys != expected_keys:
             missing_keys = expected_keys - actual_keys
             additional_keys = actual_keys - expected_keys
-            exc = AssertionError(
+            error_meta = _TestingErrorMeta(
+                AssertionError,
                 f"The keys of the mappings do not match:\n"
                 f"Missing keys in the actual mapping: {sorted(missing_keys)}\n"
-                f"Additional keys in the actual mapping: {sorted(additional_keys)}"
+                f"Additional keys in the actual mapping: {sorted(additional_keys)}",
             )
-            return exc, None
+            return error_meta, None
 
         pair_dict = {}
         for key in sorted(actual_keys):
-            exc, pair = _parse_inputs(actual[key], expected[key])
-            if exc:
-                exc = _amend_error_message(exc, f"{{}}\n\n{_MAPPING_MSG_FMTSTR.format(key)}")
-                return exc, None
+            error_meta, pair = _parse_inputs(actual[key], expected[key])
+            if error_meta:
+                error_meta = error_meta.amend_msg(postfix=f"\n\n{_MAPPING_MSG_FMTSTR.format(key)}")
+                return error_meta, None
 
             pair_dict[key] = pair
         else:
@@ -666,9 +673,9 @@ def assert_equal(
     # Hide this function from `pytest`'s traceback
     __tracebackhide__ = True
 
-    exc, pair = _parse_inputs(actual, expected)
-    if exc:
-        raise exc
+    error_meta, pair = _parse_inputs(actual, expected)
+    if error_meta:
+        raise error_meta.to_error()
     else:
         pair = cast(Union[_TensorPair, List, Dict], pair)
 
@@ -679,9 +686,9 @@ def assert_equal(
         check_stride=check_stride,
         msg=msg,
     )
-    exc = _check_pair(pair, check_tensors)
-    if exc:
-        raise exc
+    error_meta = _check_pair(pair, check_tensors)
+    if error_meta:
+        raise error_meta.to_error()
 
 
 def assert_close(
@@ -870,9 +877,9 @@ def assert_close(
     # Hide this function from `pytest`'s traceback
     __tracebackhide__ = True
 
-    exc, pair = _parse_inputs(actual, expected)
-    if exc:
-        raise exc
+    error_meta, pair = _parse_inputs(actual, expected)
+    if error_meta:
+        raise error_meta.to_error()
     else:
         pair = cast(Union[_TensorPair, List, Dict], pair)
 
@@ -886,6 +893,6 @@ def assert_close(
         check_stride=check_stride,
         msg=msg,
     )
-    exc = _check_pair(pair, check_tensors)
-    if exc:
-        raise exc
+    error_meta = _check_pair(pair, check_tensors)
+    if error_meta:
+        raise error_meta.to_error()
