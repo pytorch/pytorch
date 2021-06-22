@@ -287,7 +287,21 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
         ob_dict = compare_model_stub(
             model, q_model, module_swap_list, self.img_data_2d[0][0]
         )
+        print("LENGTH OF obj_dict")
+        print(len(obj_dict))
         self.assertEqual(len(ob_dict), 6)
+        print("isinstance(q_model.mycat, Shadow)")
+        print(isinstance(q_model.mycat, Shadow))
+        print("isinstance(q_model.myadd, Shadow)")
+        print(isinstance(q_model.myadd, Shadow))
+        print("isinstance(q_model.mymul, Shadow)")
+        print(isinstance(q_model.mymul, Shadow))
+        print("isinstance(q_model.myadd_relu, Shadow)")
+        print(isinstance(q_model.myadd_relu, Shadow))
+        print("isinstance(q_model.my_scalar_add, Shadow)")
+        print(isinstance(q_model.my_scalar_add, Shadow))
+        print("isinstance(q_model.my_scalar_mul, Shadow)")
+        print(isinstance(q_model.my_scalar_mul, Shadow))
         self.assertTrue(isinstance(q_model.mycat, Shadow))
         self.assertTrue(isinstance(q_model.myadd, Shadow))
         self.assertTrue(isinstance(q_model.mymul, Shadow))
@@ -295,8 +309,16 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
         self.assertTrue(isinstance(q_model.my_scalar_add, Shadow))
         self.assertTrue(isinstance(q_model.my_scalar_mul, Shadow))
         for k, v in ob_dict.items():
+            print("len(v['float']")
+            print(len(v['float']))
+            print("len(v['quantized']")
+            print(len(v['quantized']))
             self.assertTrue(len(v["float"]) == len(v["quantized"]))
             for i, val in enumerate(v["quantized"]):
+                print("v['float'][i].shape")
+                print(v['float'][i].shape)
+                print("v['quantized'][i].shape")
+                print(v['quantized'][i].shape)
                 self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
 
     @override_qengines
