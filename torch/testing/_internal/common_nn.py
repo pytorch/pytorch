@@ -4267,11 +4267,6 @@ criterion_tests = [
         desc='weights',
     ),
     dict(
-        module_name='CrossEntropyLossWithSoftLabels',
-        input_size=(15, 10),
-        target_fn=lambda: torch.empty(15, 10).uniform_(),
-    ),
-    dict(
         module_name='HingeEmbeddingLoss',
         input_size=(10,),
         target_fn=lambda: torch.randn(10).gt(0).double().mul_(2).sub(1),
@@ -4571,7 +4566,6 @@ criterion_tests = [
         reference_fn=lambda i, t, m:
             loss_reference_fns['CrossEntropyLossWithSoftLabels'](i, t, reduction=get_reduction(m)),
         check_sum_reduction=True,
-        desc='2d',
         check_bfloat16=False,
     ),
     dict(

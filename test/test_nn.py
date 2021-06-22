@@ -13077,7 +13077,8 @@ class TestNNDeviceType(NNTestCase):
         for input_shape in [(5, 6), ()]:
             for reduction in ['none', 'mean', 'sum']:
                 for module in [torch.nn.BCELoss, torch.nn.L1Loss, torch.nn.MSELoss,
-                               torch.nn.SmoothL1Loss, torch.nn.SoftMarginLoss]:
+                               torch.nn.SmoothL1Loss, torch.nn.SoftMarginLoss,
+                               torch.nn.CrossEntropyLossWithSoftLabels]:
                     input = torch.randn(input_shape, device=device, requires_grad=True)
                     target = torch.empty(input_shape, device=device).random_(2)
                     sigmoid = nn.Sigmoid()
@@ -13104,6 +13105,7 @@ class TestNNDeviceType(NNTestCase):
 
             v(lambda: F.nll_loss(input, target, reduction=reduction))
             v(lambda: F.cross_entropy(input, target, reduction=reduction))
+            v(lambda: F.cross_entropy_with_soft_labels(input, F.one_hot(target, 5), reduction=reduction))
             v(lambda: F.multi_margin_loss(input, target, reduction=reduction))
 
             v(lambda: F.kl_div(input, input, reduction=reduction))
@@ -16386,6 +16388,50 @@ class TestNNDeviceType(NNTestCase):
             traced = traced_loss_op(anchor, positive, negative)
             self.assertEqual(functional, modular, atol=1e-6, rtol=1e-6)
             self.assertEqual(traced, modular, atol=1e-6, rtol=1e-6)
+
+    @onlyOnCPUAndCUDA
+    def test_cross_entropy_loss_with_soft_labels(self, device):
+        N, C = 5, 3
+        input = torch.randn(N, C)
+        target = torch.tensor([1, 2, 0, 1, 2], dtype=torch.long)
+        target_one_hot = F.one_hot(target, num_classes=C)
+        for reduction in ('none', 'mean', 'sum'):
+            soft_loss = nn.CrossEntropyLossWithSoftLabels(reduction=reduction)(
+                input, target_one_hot)
+            hard_loss = nn.CrossEntropyLoss(reduction=reduction)(input, target)
+            reference_loss = loss_reference_fns['CrossEntropyLossWithSoftLabels'](
+                input, target_one_hot, reduction=reduction)
+            self.assertTrue(torch.allclose(soft_loss, reference_loss))
+            if reduction == 'none':
+                # When reduction='none', the nonzero entries of soft loss
+                # should correspond with the entries of the hard loss.
+                self.assertEqual(soft_loss.shape, (N, C))
+                self.assertEqual(hard_loss.shape, (N,))
+                soft_loss_nonzero = soft_loss[soft_loss.nonzero(as_tuple=True)]
+                self.assertTrue(torch.allclose(soft_loss_nonzero, hard_loss))
+            elif reduction == 'mean':
+                # When reduction='mean', soft cross entropy loss should be smaller
+                # by a factor of C since it reduces over 0s as well.
+                self.assertTrue(torch.allclose(soft_loss, hard_loss / C))
+            else:
+                self.assertTrue(torch.allclose(soft_loss, hard_loss))
+
+    @onlyOnCPUAndCUDA
+    def test_cross_entropy_loss_with_soft_labels_input_target_shapes(self, device):
+        criterion = nn.CrossEntropyLossWithSoftLabels()
+        shapes = [torch.arange(2, i+3).tolist() for i in range(5)]
+        for input_shape, target_shape in itertools.product(shapes, shapes):
+            input = torch.randn(input_shape, device=device)
+            target = torch.randn(target_shape, device=device)
+            if input_shape == target_shape:
+                try:
+                    criterion(input, target)
+                except RuntimeError:
+                    self.fail('Expected no error for input shape {} and target shape {}'.format(
+                        input.shape, target.shape))
+            else:
+                with self.assertRaisesRegex(RuntimeError, 'input and target to be the same shape'):
+                    criterion(input, target)
 
     def test_to_complex(self, device):
         m = nn.Linear(3, 5).to(device)

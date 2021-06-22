@@ -707,8 +707,8 @@ TORCH_MODULE(NLLLoss);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CrossEntropyLoss ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-/// Creates a criterion that combines :func:`nn.LogSoftmax` and
-/// :func:`nn.NLLLoss` in one single class.
+/// Creates a criterion that combines `torch::nn::LogSoftmax` and
+/// `torch::nn::NLLLoss` in one single class.
 /// See https://pytorch.org/docs/master/nn.html#torch.nn.CrossEntropyLoss to learn
 /// about the exact behavior of this module.
 ///
@@ -749,8 +749,8 @@ TORCH_MODULE(CrossEntropyLoss);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CrossEntropyLossWithSoftLabels ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-/// Creates a criterion that combines :func:`nn.LogSoftmax` and
-/// :func:`nn.KLDivLoss` in one single class.
+/// Creates a criterion that combines `torch::nn::LogSoftmax` and
+/// `torch::nn::KLDivLoss` in one single class.
 /// See https://pytorch.org/docs/master/nn.html#torch.nn.CrossEntropyLossWithSoftLabels to learn
 /// about the exact behavior of this module.
 ///

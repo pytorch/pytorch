@@ -223,6 +223,7 @@ F::binary_cross_entropy_with_logits|Yes|No
 F::poisson_nll_loss|Yes|No
 F::cosine_embedding_loss|Yes|No
 F::cross_entropy|Yes|No
+F::cross_entropy_with_soft_labels|Yes|No
 F::ctc_loss|Yes|No
 F::hinge_embedding_loss|Yes|No
 F::kl_div|Yes|No

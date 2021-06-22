@@ -127,12 +127,11 @@ Tensor cross_entropy_loss_with_soft_labels(
     const Tensor& self,
     const Tensor& target,
     int64_t reduction) {
-  TORCH_CHECK(self.dim() == 2, "Expected 2D input; got shape: ", self.sizes());
-  TORCH_CHECK(self.sizes() == target.sizes(), "Expected input and target to be the same shape; got: ",
+  TORCH_CHECK(self.sizes() == target.sizes(),
+      "cross_entropy_loss_with_soft_labels expects input and target to be the same shape; got: ",
       self.sizes(), " and ", target.sizes());
   return at::kl_div(
-      at::log_softmax(
-          self, 1, optTypeMetaToScalarType(self.options().dtype_opt())),
+      at::log_softmax(self, -1),
       target,
       reduction,
       /*log_target=*/ false);

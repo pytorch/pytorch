@@ -851,7 +851,8 @@ TEST_F(FunctionalTest, CrossEntropyWithSoftLabels) {
       input, target, F::CrossEntropyWithSoftLabelsFuncOptions().reduction(torch::kMean));
   // Using one-hot labels should be equivalent to cross entropy loss except
   // smaller by a factor of num classes (2 in this case) for the mean reduction.
-  auto expected = torch::tensor(0.6931 / 2., torch::kFloat);
+  auto ce_target = torch::tensor({0, 1}, torch::kLong);
+  auto expected = F::cross_entropy(input, ce_target, F::CrossEntropyFuncOptions().reduction(torch::kMean)) / 2.;
 
   ASSERT_TRUE(output.allclose(expected, 1e-04));
   ASSERT_TRUE(F::cross_entropy_with_soft_labels(input, target).allclose(expected, 1e-04));

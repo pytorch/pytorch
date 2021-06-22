@@ -2436,7 +2436,9 @@ TEST_F(ModulesTest, CrossEntropyLossWithSoftLabels) {
   auto output = loss->forward(input, target);
   // Using one-hot labels should be equivalent to cross entropy loss except
   // smaller by a factor of num classes (2 in this case) for the mean reduction.
-  auto expected = torch::tensor(0.6931 / 2., torch::kFloat);
+  CrossEntropyLoss ce_loss;
+  auto ce_target = torch::tensor({0, 1}, torch::kLong);
+  auto expected = ce_loss->forward(input, ce_target) / 2.;
   auto s = output.sum();
   s.backward();
 
@@ -4932,13 +4934,13 @@ TEST_F(ModulesTest, PrettyPrintNLLLoss) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST_F(ModulesTest, PrettyPrinCrossEntropyLoss) {
+TEST_F(ModulesTest, PrettyPrintCrossEntropyLoss) {
   ASSERT_EQ(
       c10::str(CrossEntropyLoss()), "torch::nn::CrossEntropyLoss()");
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST_F(ModulesTest, PrettyPrinCrossEntropyLossWithSoftLabels) {
+TEST_F(ModulesTest, PrettyPrintCrossEntropyLossWithSoftLabels) {
   ASSERT_EQ(
       c10::str(CrossEntropyLossWithSoftLabels()), "torch::nn::CrossEntropyLossWithSoftLabels()");
 }
