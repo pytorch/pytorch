@@ -270,9 +270,11 @@ TEST(ExternalCall, Prepacked_Linear_float) {
                      .layout(at::kStrided)
                      .device(at::kCPU)
                      .requires_grad(false);
-  at::Tensor input = at::ones({100, 200}, options) * 5.f;
-  at::Tensor weight = at::ones({300, 200}, options) * 6.f;
-  at::Tensor bias = at::ones({300}, options) * 11.f;
+  at::Tensor input = at::linspace(-10.0, 10.0, 100 * 200, options)
+      .resize_({100, 200});
+  at::Tensor weight = at::linspace(-10.0, 10.0, 300 * 200, options)
+      .resize_({300, 200});
+  at::Tensor bias = at::linspace(-10.0, 10.0, 300, options);
   at::Tensor ref = at::linear(input, weight, bias);
 
   // Create prepacked xnnpack context object.
@@ -300,7 +302,8 @@ TEST(ExternalCall, Prepacked_Linear_float) {
   l.simplify();
 
   at::Tensor nnc_result;
-  std::vector<float> input_buf(100 * 200, 5.f);
+  std::vector<float> input_buf(
+      input.data_ptr<float>(), input.data_ptr<float>() + 100 * 200);
   std::vector<float> result_buf(100 * 300, -1.f);
 
 #ifdef TORCH_ENABLE_LLVM
@@ -339,9 +342,11 @@ TEST(ExternalCall, Prepacked_Conv2d_float) {
                      .layout(at::kStrided)
                      .device(at::kCPU)
                      .requires_grad(false);
-  at::Tensor input = at::ones({1, 3, 224, 224}, options) * 5.f;
-  at::Tensor weight = at::ones({16, 3, 3, 3}, options) * 6.f;
-  at::Tensor bias = at::ones({16}, options) * 11.f;
+  at::Tensor input = at::linspace(-10.0, 10.0, 1 * 3 * 224 * 224, options)
+      .resize_({1, 3, 224, 224});
+  at::Tensor weight = at::linspace(-10.0, 10.0, 16 * 3 * 3 * 3, options)
+      .resize_({16, 3, 3, 3});
+  at::Tensor bias = at::linspace(-10.0, 10.0, 16, options);
   at::Tensor ref = at::conv2d(
       input,
       weight,
@@ -387,7 +392,8 @@ TEST(ExternalCall, Prepacked_Conv2d_float) {
   l.simplify();
 
   at::Tensor nnc_result;
-  std::vector<float> input_buf(1 * 3 * 224 * 224, 5.f);
+  std::vector<float> input_buf(
+      input.data_ptr<float>(), input.data_ptr<float>() + 1 * 3 * 224 * 224);
   std::vector<float> result_buf(1 * 16 * 112 * 112, -1.f);
 
 #ifdef TORCH_ENABLE_LLVM
@@ -395,14 +401,14 @@ TEST(ExternalCall, Prepacked_Conv2d_float) {
 
   llvm_codegen.call({input_buf, prepacked.get(), result_buf});
   nnc_result = at::from_blob(result_buf.data(), {1, 16, 112, 112}, options);
-  ASSERT_TRUE(at::allclose(nnc_result, ref));
+  ASSERT_TRUE(at::allclose(nnc_result, ref, 1e-03, 1e-03));
 #endif
 
   SimpleIREvaluator ir_eval(l.root_stmt(), {Input, DummyPrepacked, Result});
 
   ir_eval.call({input_buf, prepacked.get(), result_buf});
   nnc_result = at::from_blob(result_buf.data(), {1, 16, 112, 112}, options);
-  ASSERT_TRUE(at::allclose(nnc_result, ref));
+  ASSERT_TRUE(at::allclose(nnc_result, ref, 1e-03, 1e-03));
 }
 
 #endif // USE_XNNPACK
