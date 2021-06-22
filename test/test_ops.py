@@ -826,7 +826,8 @@ class TestJit(JitCommonTestCase):
         # Below we prepare strings of args/kwargs with and without type annotations.
         # These strings are inserted into function template strings which is then torch scripted.
         # - args string is ["t0"] corresponding to the "input" tensor required by the op
-        # - args_kw is the value of args and strings of kwargs used to call the op (without type annotations)
+        # - args_kw is the value of args and strings of kwargs used to call the op (without type annotations), for example,
+        # ["to", "1.0", "(1,)", "True", "tensor(1.0)"] -> def fn(t0): return variant(t0, 1.0, (1,), True, tensor(1.0))
         args = ["t0"]
 
         def quote_strs(v):
