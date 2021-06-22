@@ -1,5 +1,5 @@
 # Parametrizations
-from .sparsifier.parametrization import PruningParametrization
+from .pruner.parametrization import PruningParametrization
 
 # Pruner
-from .sparsifier.base_pruner import BasePruner
+from .pruner.base_pruner import BasePruner
