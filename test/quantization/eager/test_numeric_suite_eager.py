@@ -419,6 +419,8 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
         q_model(self.img_data_2d[0][0])
         q_model = convert(q_model)
         act_compare_dict = compare_model_outputs(model, q_model, self.img_data_2d[0][0])
+        print("LENGTH OF act_compare_dict")
+        print(len(act_compare_dict))
         self.assertEqual(len(act_compare_dict), 7)
         expected_act_compare_dict_keys = {
             "mycat.stats",
@@ -431,8 +433,16 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
         }
         self.assertTrue(act_compare_dict.keys() == expected_act_compare_dict_keys)
         for k, v in act_compare_dict.items():
+            print("length of v['float']")
+            print(len(v["float"]))
+            print("length of v['quantized']")
+            print(len(v["quantized"]))
             self.assertTrue(len(v["float"]) == len(v["quantized"]))
             for i, val in enumerate(v["quantized"]):
+                print("value of v['float'][i].shape")
+                print(v["float"][i].shape)
+                print("value of v['quantized'][i].shape")
+                print(v["quantized"][i].shape)
                 self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
 
     @override_qengines

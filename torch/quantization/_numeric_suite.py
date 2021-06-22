@@ -483,4 +483,6 @@ def compare_model_outputs(
     float_model(*data)
     q_model(*data)
     act_compare_dict = get_matching_activations(float_model, q_model)
+    print("act_compare_dict")
+    print(act_compare_dict)
     return act_compare_dict
