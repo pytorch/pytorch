@@ -15937,7 +15937,7 @@ class TestNNDeviceType(NNTestCase):
 
     def test_nll_loss_invalid_target_dim(self, device):
         x = torch.randn((10, 3), device=device)
-        t = torch.zeros((10, 2), dtype=torch.int64, device=device),
+        t = torch.zeros((10, 2), dtype=torch.int64, device=device)
         with self.assertRaisesRegex(RuntimeError, "1D target tensor expected"):
             F.nll_loss(x, t)
 
