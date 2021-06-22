@@ -12,7 +12,6 @@
 #include <unordered_set>
 
 #include "absl/memory/memory.h"
-#include "absl/strings/str_join.h"
 #include "lazy_tensor_core/csrc/debug_util.h"
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/ir_dump_util.h"
@@ -37,6 +36,7 @@
 #include "lazy_tensors/computation_client/unique.h"
 #include "lazy_tensors/literal_util.h"
 #include "lazy_tensors/shape_util.h"
+#include "lazy_tensors/str_join.h"
 #include "torch/csrc/autograd/variable.h"
 
 namespace torch_lazy_tensors {
@@ -1394,7 +1394,7 @@ void LazyTensor::SyncLiveTensorsGraph(
     bool wait) {
   auto tensors = GetLiveTensors(device);
   LTC_VLOG(4) << tensors.size() << " live tensors: devices=("
-              << absl::StrJoin(devices, ",") << ")";
+              << lazy_tensors::StrJoin(devices, ",") << ")";
   SyncTensorsGraph(&tensors, devices, wait, /*sync_ltc_data=*/true);
 }
 

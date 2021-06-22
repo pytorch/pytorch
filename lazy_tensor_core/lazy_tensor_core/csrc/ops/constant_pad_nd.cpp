@@ -1,11 +1,11 @@
 #include "lazy_tensor_core/csrc/ops/constant_pad_nd.h"
 
-#include "absl/strings/str_join.h"
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/ops/scalar.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/util.h"
+#include "lazy_tensors/str_join.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -29,7 +29,8 @@ NodePtr ConstantPadNd::Clone(OpList operands) const {
 
 std::string ConstantPadNd::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", pad=(" << absl::StrJoin(pad_, ", ") << ")"
+  ss << Node::ToString() << ", pad=(" << lazy_tensors::StrJoin(pad_, ", ")
+     << ")"
      << ", value=" << value_;
   return ss.str();
 }

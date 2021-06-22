@@ -24,7 +24,7 @@ NodePtr AdaptiveAvgPool3d::Clone(OpList operands) const {
 std::string AdaptiveAvgPool3d::ToString() const {
   std::stringstream ss;
   ss << Node::ToString() << ", output_size=("
-     << absl::StrJoin(output_size_, ", ") << ")";
+     << lazy_tensors::StrJoin(output_size_, ", ") << ")";
   return ss.str();
 }
 

@@ -1,10 +1,10 @@
 #include "lazy_tensor_core/csrc/ops/view.h"
 
-#include "absl/strings/str_join.h"
 #include "lazy_tensor_core/csrc/data_ops.h"
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/shape_util.h"
+#include "lazy_tensors/str_join.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -36,7 +36,7 @@ View::View(const Value& input, std::vector<lazy_tensors::int64> output_size)
 std::string View::ToString() const {
   std::stringstream ss;
   ss << Node::ToString() << ", output_size=("
-     << absl::StrJoin(output_size_, ", ") << ")";
+     << lazy_tensors::StrJoin(output_size_, ", ") << ")";
   return ss.str();
 }
 

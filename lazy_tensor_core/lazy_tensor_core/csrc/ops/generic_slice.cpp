@@ -1,9 +1,9 @@
 #include "lazy_tensor_core/csrc/ops/generic_slice.h"
 
-#include "absl/strings/str_join.h"
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
 #include "lazy_tensor_core/csrc/ops/ltc_ops.h"
 #include "lazy_tensors/computation_client/util.h"
+#include "lazy_tensors/str_join.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -28,8 +28,8 @@ NodePtr GenericSlice::Clone(OpList operands) const {
 std::string GenericSlice::ToString() const {
   std::stringstream ss;
   ss << Node::ToString() << ", base_indices=("
-     << absl::StrJoin(base_indices_, ", ") << "), sizes=("
-     << absl::StrJoin(sizes_, ", ") << ")";
+     << lazy_tensors::StrJoin(base_indices_, ", ") << "), sizes=("
+     << lazy_tensors::StrJoin(sizes_, ", ") << ")";
   return ss.str();
 }
 

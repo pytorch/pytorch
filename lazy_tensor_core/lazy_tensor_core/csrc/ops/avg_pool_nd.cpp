@@ -1,9 +1,9 @@
 #include "lazy_tensor_core/csrc/ops/avg_pool_nd.h"
 
-#include "absl/strings/str_join.h"
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/util.h"
+#include "lazy_tensors/str_join.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -53,9 +53,9 @@ NodePtr AvgPoolNd::Clone(OpList operands) const {
 std::string AvgPoolNd::ToString() const {
   std::stringstream ss;
   ss << Node::ToString() << ", spatial_dim_count=" << spatial_dim_count_
-     << ", kernel_size=(" << absl::StrJoin(kernel_size_, ", ") << "), stride=("
-     << absl::StrJoin(stride_, ", ") << "), padding=("
-     << absl::StrJoin(padding_, ", ")
+     << ", kernel_size=(" << lazy_tensors::StrJoin(kernel_size_, ", ")
+     << "), stride=(" << lazy_tensors::StrJoin(stride_, ", ") << "), padding=("
+     << lazy_tensors::StrJoin(padding_, ", ")
      << "), count_include_pad=" << count_include_pad_;
   return ss.str();
 }

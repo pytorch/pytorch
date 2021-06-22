@@ -1,12 +1,12 @@
 #include "lazy_tensor_core/csrc/ops/var.h"
 
-#include "absl/strings/str_join.h"
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/reduction.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensor_core/csrc/torch_util.h"
 #include "lazy_tensors/computation_client/util.h"
+#include "lazy_tensors/str_join.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -32,7 +32,8 @@ NodePtr Var::Clone(OpList operands) const {
 
 std::string Var::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", dimensions=(" << absl::StrJoin(dimensions_, ", ")
+  ss << Node::ToString() << ", dimensions=("
+     << lazy_tensors::StrJoin(dimensions_, ", ")
      << "), correction=" << correction_
      << ", keep_reduced_dimensions=" << keep_reduced_dimensions_;
   return ss.str();

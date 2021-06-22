@@ -10,6 +10,7 @@
 #include "lazy_tensors/layout.h"
 #include "lazy_tensors/primitive_util.h"
 #include "lazy_tensors/span.h"
+#include "lazy_tensors/str_join.h"
 #include "lazy_tensors/types.h"
 
 namespace lazy_tensors {
@@ -41,7 +42,7 @@ class Shape {
 
   std::string ToString(bool print_layout = false) const {
     return absl::StrCat(PrimitiveTypeName(element_type_), "[",
-                        absl::StrJoin(dimensions_, ","), "]");
+                        lazy_tensors::StrJoin(dimensions_, ","), "]");
   }
 
   int64 rank() const { return dimensions_.size(); }

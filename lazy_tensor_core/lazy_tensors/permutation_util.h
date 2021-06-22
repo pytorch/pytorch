@@ -2,8 +2,8 @@
 
 #include <vector>
 
-#include "absl/strings/str_join.h"
 #include "lazy_tensors/span.h"
+#include "lazy_tensors/str_join.h"
 #include "lazy_tensors/types.h"
 
 namespace lazy_tensors {
