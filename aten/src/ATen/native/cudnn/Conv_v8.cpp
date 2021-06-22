@@ -21,6 +21,7 @@
 
 #include <THC/THC.h>
 
+#include <mutex>
 #include <unordered_map>
 
 namespace at { namespace native {
@@ -36,11 +37,11 @@ uint8_t getAlignment(const Tensor &t) {
   // alignment are in bytes
   uint8_t alignment = 1;
   uintptr_t address = reinterpret_cast<uintptr_t>(t.data_ptr());
-  while (address % alignment == 0 && alignment < 16) alignment *= 2;
+  while (address % alignment == 0 && alignment < 64) alignment *= 2;
   return alignment;
 }
 
-cudnn_frontend::Tensor getTensorDescriptor(const Tensor &t, int64_t id, uint8_t alignment) {
+cudnn_frontend::Tensor getTensorDescriptor(const Tensor &t, const int64_t id, const uint8_t alignment) {
   auto shape = t.sizes();
   auto strides = t.strides();
   return cudnn_frontend::TensorBuilder()
@@ -94,11 +95,31 @@ struct CacheKey {
   uint8_t y_alignment;
 };
 
-// FIXME: make this thread-safe by reusing the benchmark cache in Conv_v7.cpp
+template <typename T>
+struct BenchmarkCache {
+std::mutex mutex;
 std::unordered_map<CacheKey, cudnn_frontend::ExecutionPlan, ParamsHash<CacheKey>, ParamsEqual<CacheKey>> engine_cache;
 
+cudnn_frontend::ExecutionPlan* find(const CacheKey& key) {
+  std::lock_guard<std::mutex> guard(mutex);
+  auto it = engine_cache.find(key);
+  if (it == engine_cache.end()) {
+    return NULL;
+  }
+  // TODO: probably want ExecutionPlan copy constructor or better way to return
+  return &(it->second);
 }
 
+void emplace(const CacheKey& key, T& results) {
+  std::lock_guard<std::mutex> guard(mutex);
+  engine_cache.emplace(key, std::move(results));
+}
+
+};
+
+BenchmarkCache<cudnn_frontend::ExecutionPlan> benchmark_cache;
+
+} // namespace
 void get_cachekey(CacheKey& key, const cudnnBackendDescriptorType_t operation, const Tensor& y, const Tensor& x, const Tensor& w, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, int64_t groups, bool deterministic, bool allow_tf32) {
    memset(&key, 0, sizeof(key));
    setConvolutionParams(&key.params, x, w, padding, stride, dilation, groups, deterministic, allow_tf32);
@@ -137,7 +158,7 @@ auto build_opgraph(const cudnnHandle_t handle, const cudnnBackendDescriptorType_
   return opGraph;
 }
 
-const auto get_generator_sources(const cudnn_frontend::OperationGraph &opGraph, const cudnnBackendDescriptorType_t& desc, const Tensor& x, const bool deterministic, const bool allow_tf32) {
+const auto get_generator_sources(const cudnn_frontend::OperationGraph &opGraph, const cudnnBackendDescriptorType_t& desc, const Tensor& x, const bool& deterministic, const bool& allow_tf32) {
    // Method for engine config generator based on heuristics
   auto heurgen_method = [&](cudnn_frontend::OperationGraph &opGraph) -> cudnn_frontend::EngineConfigList {
       auto heuristics = cudnn_frontend::EngineHeuristicsBuilder()
@@ -252,7 +273,8 @@ void try_plans(cudnn_frontend::executionPlans_t& plans, const CacheKey& key, con
   for (auto & plan : plans) {
     try {
       run_conv_plan(handle, x, y, w, plan);
-      engine_cache.emplace(key, std::move(plan));
+      benchmark_cache.emplace(key, plan);
+      // engine_cache.emplace(key, std::move(plan));
       return;
     } catch (cudnn_frontend::cudnnException &e) {} catch(CuDNNError &e) {}
   }
@@ -267,9 +289,9 @@ void run_single_conv(const cudnnBackendDescriptorType_t operation,
 
   CacheKey key;
   get_cachekey(key, operation, y, x, w, padding, stride, dilation, groups, deterministic, allow_tf32);
-  auto search = engine_cache.find(key);
-  if (search != engine_cache.end()) {
-    run_conv_plan(handle, x, y, w, search->second);
+  auto search = benchmark_cache.find(key);
+  if (search) {
+    run_conv_plan(handle, x, y, w, *search);
     return;
   }
 
