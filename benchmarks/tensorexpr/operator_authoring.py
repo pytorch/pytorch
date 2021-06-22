@@ -1,9 +1,10 @@
+from torch import randn
 import torch.jit.te
+import copy
+import functools
 import numpy as np
 import pandas as pd
-from torch import randn
 import timeit
-import functools
 
 torch.set_num_threads(1)  # TODO(jansel): add parallel support
 torch._C._jit_override_can_fuse_on_cpu(True)
@@ -39,7 +40,7 @@ ts_addnorm = torch.jit.script(eager_addnorm)
 ts_ip_addnorm = torch.jit.script(inplace_addnorm)
 
 
-def make_setup(make_args, nnc=nnc_add, aten=torch.add, inplace=False, out=False):
+def make_setup(make_args, nnc=nnc_add, aten=torch.add, inplace=False, out=False, backwards=False):
     def setup(n):
         args = make_args(n)
         result_aten = aten(*args)
@@ -72,10 +73,24 @@ def make_setup(make_args, nnc=nnc_add, aten=torch.add, inplace=False, out=False)
         return (lambda: nnc(a, b, out=a),
                 lambda: aten(a, b, out=a))
 
+    def backwards_setup(n):
+        args = make_args(n)
+        grad_var, = [a for a in args if a.requires_grad]
+        aten(*args).sum().backward()
+        v0 = grad_var.grad.clone()
+        grad_var.grad.zero_()
+        nnc(*args).sum().backward()
+        v1 = grad_var.grad.clone()
+        torch.testing.assert_allclose(v0, v1)
+        return (lambda: nnc(*args).sum().backward(),
+                lambda: aten(*args).sum().backward())
+
     if inplace:
         return inplace_setup
     elif out:
         return out_setup
+    elif backwards:
+        return backwards_setup
     else:
         return setup
 
@@ -134,14 +149,20 @@ def main():
                                                  randi([n, n], dtype=torch.int32)))),
         ("double+long (n,n)", benchmark(lambda n: (randn([n, n], dtype=torch.float64),
                                                    randi([n, n], dtype=torch.int64)))),
-        ("fused addnorm (vs eager)", benchmark(lambda n: (randn(n, n), randn(n, n), randn(n, n), randn(n, n)),
+        ("fused addnorm", benchmark(lambda n: (randn(n, n), randn(n, n), randn(n, n), randn(n, n)),
                                                nnc=nnc_addnorm, aten=eager_addnorm)),
         ("fused addnorm (vs TS)", benchmark(lambda n: (randn(n, n), randn(n, n), randn(n, n), randn(n, n)),
                                             nnc=nnc_addnorm, aten=ts_addnorm)),
-        ("fused addnorm (out=, eager)", benchmark(lambda n: (randn(n, n), randn(n, n), randn(n, n), randn(n, n)),
+        ("fused addnorm out=", benchmark(lambda n: (randn(n, n), randn(n, n), randn(n, n), randn(n, n)),
                                                   nnc=nnc_addnorm, aten=inplace_addnorm, out=lambda n: randn(n, n))),
-        ("fused addnorm (out=, TS)", benchmark(lambda n: (randn(n, n), randn(n, n), randn(n, n), randn(n, n)),
+        ("fused addnorm out= (vs TS)", benchmark(lambda n: (randn(n, n), randn(n, n), randn(n, n), randn(n, n)),
                                                nnc=nnc_addnorm, aten=ts_ip_addnorm, out=lambda n: randn(n, n))),
+        ("fused addnorm backward",
+         benchmark(lambda n: (randn(n, n), randn(n, n, requires_grad=True), randn(n, n), randn(n, n)),
+                   nnc=nnc_addnorm, aten=eager_addnorm, backwards=True)),
+        ("fused addnorm backward (vs TS)",
+         benchmark(lambda n: (randn(n, n), randn(n, n, requires_grad=True), randn(n, n), randn(n, n)),
+                   nnc=nnc_addnorm, aten=ts_addnorm, backwards=True)),
     ]
     # TODO(jansel): implement int support
     print()

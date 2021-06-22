@@ -44,7 +44,9 @@ class CCNode : public torch::autograd::Node {
     }
   }
 
-  // void release_variables() override { inputs_.clear(); }
+  void release_variables() override {
+    inputs_.clear();
+  }
   std::vector<CompileCacheBackwards> backwards_functions;
 
  private:
@@ -567,9 +569,9 @@ CompileCache* create_compile_cache(const py::object& compile_fn, int num_args) {
 variable_list CCNode::apply(variable_list&& new_inputs) {
   // TODO(jansel): we likely need to copy some error checking from eager to here
   // TODO(jansel): possible optimization: horizontal fusion of each backwards fn
-  // TODO(jansel): possible optimization: remember the SpecializationKey from
-  // forwards
+  // TODO(jansel): possible optimization: reuse the forwards SpecializationKey
   // TODO(jansel): possible optimization: dont save all the inputs_
+  // TODO(jansel): possible optimization: precompute in forwards
   ASSERT(new_inputs.size() == 1);
 
   variable_list args;
