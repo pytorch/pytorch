@@ -102,6 +102,8 @@ class TSComputationClient : public ComputationClient {
   }
 
   void PrepareToExit() override;
+
+  static at::DeviceType HardwareDeviceType();
 };
 
 lazy_tensors::ComputationClient* TSClientGet();

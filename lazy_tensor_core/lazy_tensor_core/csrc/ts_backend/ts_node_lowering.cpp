@@ -36,7 +36,6 @@
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_computation_client.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_lowering_context.h"
-#include "lazy_tensors/computation_client/nnc_computation_client.h"
 #include "lazy_tensors/permutation_util.h"
 
 namespace torch_lazy_tensors {
@@ -532,7 +531,8 @@ class TSNodeLowering : public NodeLowering {
 
   TSOpVector LowerConstant(const ir::ops::Constant* node) {
     at::Tensor value = node->value().value();
-    if (lazy_tensors::NNCComputationClient::HardwareDeviceType() == at::kCUDA) {
+    if (lazy_tensors::compiler::TSComputationClient::HardwareDeviceType() ==
+        at::kCUDA) {
       value = value.cuda();
     }
     return {loctx()->graph()->insertConstant(value)};
@@ -616,7 +616,8 @@ class TSNodeLowering : public NodeLowering {
     const lazy_tensors::Shape& shape = node->shape();
     auto options =
         at::TensorOptions()
-            .device(lazy_tensors::NNCComputationClient::HardwareDeviceType())
+            .device(lazy_tensors::compiler::TSComputationClient::
+                        HardwareDeviceType())
             .dtype(lazy_tensors::PrimitiveToScalarType(shape.element_type()));
     return {
         loctx()->graph()->insertConstant(at::scalar_tensor(value, options))};
