@@ -465,3 +465,126 @@ class TestBackends(JitTestCase):
     @skipIfRocm
     def test_errors(self):
         self.selective_lowering_test.test_errors()
+
+
+# Unit Tests for backend with compiler
+class BasicModuleAdd(torch.nn.Module):
+    """
+    A simple add Module used to test to_backend lowering machinery.
+    """
+
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x, h):
+        return x + h
+
+# This is ignored in IS_WINDOWS or IS_MACOS cases. Hence we need the one in TestBackends.
+@unittest.skipIf(TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE,
+                 "Non-portable load_library call used in test")
+class JitBackendTestCaseWithCompiler(JitTestCase):
+    """
+    A common base class for JIT backend tests with compilers that contains common utility
+    functions for output comparison and serialization/deserialization.
+    """
+
+    def setUp(self):
+        super().setUp()
+        torch_root = Path(__file__).resolve().parent.parent.parent
+        p = torch_root / 'build' / 'lib' / 'libbackend_with_compiler.so'
+        torch.ops.load_library(str(p))
+        # torch.ops.load_library("//caffe2/test/cpp/jit:test_backend_compiler")
+        # Subclasses are expected to set up three variables in their setUp methods:
+        # module - a regular, Python version of the module being tested
+        # scripted_module - a scripted version of module
+        # lowered_modle - a version of module lowered to a backend
+
+    def check_function(self, function_name, input):
+        """
+        Check that the function named 'function_name' produces the same output using
+        Python, regular JIT and the backend for the given 'input'.
+        """
+        # Get handles for Python, JIT and backend methods.
+        python_method = self.module.__getattribute__(function_name)
+        jit_method = self.scripted_module.__getattr__(function_name)
+        backend_method = self.lowered_module.__getattr__(function_name)
+
+        # Run methods.
+        python_output = python_method(*input)
+        jit_output = jit_method(*input)
+        backend_output = backend_method(*input)
+
+        # The answers returned by Python, JIT and to_backend should all match.
+        self.assertEqual(python_output, backend_output)
+        self.assertEqual(jit_output, backend_output)
+
+    def save_load(self):
+        """
+        Save and load the lowered module.
+        """
+        self.lowered_module = self.getExportImportCopy(self.lowered_module)
+
+    def test_execution(self):
+        """
+        Stub for correctness tests.
+        """
+        pass
+
+    def test_save_load(self):
+        """
+        Stub for serialization tests.
+        """
+        pass
+
+    def test_errors(self):
+        """
+        Stub for testing error checking.
+        """
+        pass
+
+class BasicModuleTestWithCompiler(JitBackendTestCaseWithCompiler):
+    """
+    Tests for BasicModuleAdd.
+    """
+
+    def setUp(self):
+        super().setUp()
+        # Create Python, JIT and backend versions of BasicModuleAdd.
+        self.module = BasicModuleAdd()
+        self.scripted_module = torch.jit.script(BasicModuleAdd())
+        compile_spec = {
+            "forward": {
+                "input_shapes": "((1, 1, 320, 240), (1, 3))",
+                "some_other_option": "True",
+            },
+        }
+        self.lowered_module = torch._C._jit_to_backend(
+            "backend_with_compiler_demo", self.scripted_module, compile_spec)
+
+    def test_execution(self):
+        # Test execution with backend against Python and JIT.
+        input = torch.randn(5)
+        self.check_function("forward", (input, input))
+
+
+# This is needed for IS_WINDOWS or IS_MACOS to skip the tests.
+@unittest.skipIf(TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE,
+                 "Non-portable load_library call used in test")
+class TestBackendsWithCompiler(JitTestCase):
+    """
+    This class wraps and invokes all subclasses of JitBackendTestCaseWithCompiler
+    so that each one does not have to be individually imported in test_jit.py.
+    """
+
+    def __init__(self, name):
+        super().__init__(name)
+        self.basic_module_compiler_test = BasicModuleTestWithCompiler(name)
+
+    def setUp(self):
+        super().setUp()
+        if not TEST_WITH_ROCM:
+            self.basic_module_compiler_test.setUp()
+
+    @skipIfRocm
+    def test_execution(self):
+        self.basic_module_compiler_test.test_execution()
