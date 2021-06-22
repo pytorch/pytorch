@@ -405,6 +405,7 @@ def use_deterministic_algorithms(mode):
 
         * :class:`torch.nn.ReflectionPad1d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReflectionPad2d` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.ReflectionPad3d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReplicationPad1d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReplicationPad2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReplicationPad3d` when attempting to differentiate a CUDA tensor
@@ -510,6 +511,15 @@ def is_warn_always_enabled():
     :func:`torch.set_warn_always` documentation for more details.
     """
     return _C._get_warnAlways()
+
+################################################################################
+# Define numeric constants
+################################################################################
+
+# For Python Array API (https://data-apis.org/array-api/latest/API_specification/constants.html) and
+# NumPy consistency (https://numpy.org/devdocs/reference/constants.html)
+from math import e , nan , inf , pi
+__all__.extend(['e', 'pi', 'nan', 'inf'])
 
 ################################################################################
 # Define Storage and Tensor classes
