@@ -554,7 +554,8 @@ def make_module(mod, _module_class, _compilation_unit):
         return torch.jit._recursive.create_script_module(
             mod,
             infer_methods_stubs_fn,
-            share_types=False
+            share_types=False,
+            is_tracing=True
         )
     else:
         if _module_class is None:
@@ -1063,7 +1064,7 @@ class TracedModule(ScriptModule):
             )
 
         script_module = torch.jit._recursive.create_script_module(
-            tmp_module, lambda module: (), share_types=False
+            tmp_module, lambda module: (), share_types=False, is_tracing=True
         )
 
         self.__dict__["_name"] = type(orig).__name__
