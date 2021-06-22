@@ -2169,9 +2169,9 @@ static void check_str_ord_valid(const c10::string_view str_ord, optional<IntArra
 // Performs second dimension reduction for matrix norms
 static Tensor _norm_min_max(Tensor& self, double ord, int64_t dim, bool keepdim) {
   if (ord > 0) {
-    return std::get<0>(self.max(dim, keepdim));
+    return self.amax(dim, keepdim);
   } else {
-    return std::get<0>(self.min(dim, keepdim));
+    return self.amin(dim, keepdim);
   }
 }
 
@@ -2213,8 +2213,7 @@ static Tensor& _linalg_norm_matrix_out(Tensor& result, const Tensor &self, const
     result_ = _norm_min_max(result_, ord, result_.dim() - 1, keepdim);
 
     if (keepdim) {
-      result_.unsqueeze_(-1);
-      result_ = result_.permute(permutation_reverse);
+      result_ = result_.unsqueeze(-1).permute(permutation_reverse);
     }
   } else {
     // abs(p) == infinity and abs(p) == 1 will perform identical reductions, except
