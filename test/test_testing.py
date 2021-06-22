@@ -764,17 +764,8 @@ if __name__ == '__main__':
         self.assertNotIn('OK', stderr.decode('ascii'))
 
 
-def assert_fns() -> List[Callable]:
-    """Gets assert functions to be tested.
-
-    Returns:
-        List(Callable): Top-level assert functions from :mod:`torch.testing`.
-    """
-    return [torch.testing.assert_equal, torch.testing.assert_close]
-
-
-def make_assert_inputs(actual: Any, expected: Any) -> List[Tuple[Any, Any]]:
-    """Makes inputs for assert functions based on two examples.
+def make_assert_close_inputs(actual: Any, expected: Any) -> List[Tuple[Any, Any]]:
+    """Makes inputs for :func:`torch.testing.assert_close` functions based on two examples.
 
     Args:
         actual (Any): Actual input.
@@ -807,33 +798,32 @@ def make_assert_inputs(actual: Any, expected: Any) -> List[Tuple[Any, Any]]:
     ]
 
 
-def assert_fns_with_inputs(actual: Any, expected: Any) -> Iterator[Callable]:
-    """Yields assert functions with included positional inputs based on two examples.
+def assert_close_with_inputs(actual: Any, expected: Any) -> Iterator[Callable]:
+    """Yields :func:`torch.testing.assert_close` with predefined positional inputs based on two examples.
 
     .. note::
 
-        This is a valid product of combinations from :meth:`assert_fns` and :meth:`make_inputs`. Every test
-        that does not test for anything specific should iterate over this to maximize the coverage.
+        Every test that does not test for a specific input should iterate over this to maximize the coverage.
 
     Args:
         actual (Any): Actual input.
         expected (Any): Expected input.
 
     Yields:
-        List[Callable]: Assert functions with predefined positional inputs.
+        Callable: :func:`torch.testing.assert_close` with predefined positional inputs.
     """
-    for assert_fn, inputs in itertools.product(assert_fns(), make_assert_inputs(actual, expected)):
-        yield functools.partial(assert_fn, *inputs)
+    for inputs in make_assert_close_inputs(actual, expected):
+        yield functools.partial(torch.testing.assert_close, *inputs)
 
 
-class TestAsserts(TestCase):
+class TestAssertClose(TestCase):
     def test_quantized_support(self):
         val = 1
         actual = torch.tensor([val], dtype=torch.int32)
         expected = torch._empty_affine_quantized(actual.shape, scale=1, zero_point=0, dtype=torch.qint32)
         expected.fill_(val)
 
-        for fn in assert_fns_with_inputs(actual, expected):
+        for fn in assert_close_with_inputs(actual, expected):
             with self.assertRaises(UsageError):
                 fn()
 
@@ -842,15 +832,31 @@ class TestAsserts(TestCase):
         actual = torch.empty((2, 2))
         expected = actual.to_mkldnn()
 
-        for fn in assert_fns_with_inputs(actual, expected):
+        for fn in assert_close_with_inputs(actual, expected):
             with self.assertRaises(UsageError):
+                fn()
+
+    def test_type_inequality(self):
+        actual = torch.empty(2)
+        expected = actual.tolist()
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, str(type(expected))):
+                fn()
+
+    def test_unknown_type(self):
+        actual = "0"
+        expected = "0"
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(UsageError, str(type(actual))):
                 fn()
 
     def test_mismatching_shape(self):
         actual = torch.empty(())
         expected = actual.clone().reshape((1,))
 
-        for fn in assert_fns_with_inputs(actual, expected):
+        for fn in assert_close_with_inputs(actual, expected):
             with self.assertRaisesRegex(AssertionError, "shape"):
                 fn()
 
@@ -860,7 +866,7 @@ class TestAsserts(TestCase):
         sparse_csr = strided.to_sparse_csr()
 
         for actual, expected in itertools.combinations((strided, sparse_coo, sparse_csr), 2):
-            for fn in assert_fns_with_inputs(actual, expected):
+            for fn in assert_close_with_inputs(actual, expected):
                 with self.assertRaisesRegex(AssertionError, "layout"):
                     fn()
 
@@ -868,7 +874,7 @@ class TestAsserts(TestCase):
         actual = torch.empty((), dtype=torch.float)
         expected = actual.clone().to(torch.int)
 
-        for fn in assert_fns_with_inputs(actual, expected):
+        for fn in assert_close_with_inputs(actual, expected):
             with self.assertRaisesRegex(AssertionError, "dtype"):
                 fn()
 
@@ -876,251 +882,108 @@ class TestAsserts(TestCase):
         actual = torch.ones((), dtype=torch.float)
         expected = actual.clone().to(torch.int)
 
-        for fn in assert_fns_with_inputs(actual, expected):
+        for fn in assert_close_with_inputs(actual, expected):
             fn(check_dtype=False)
 
     def test_mismatching_stride(self):
         actual = torch.empty((2, 2))
         expected = torch.as_strided(actual.clone().t().contiguous(), actual.shape, actual.stride()[::-1])
 
-        for fn in assert_fns_with_inputs(actual, expected):
+        for fn in assert_close_with_inputs(actual, expected):
             with self.assertRaisesRegex(AssertionError, "stride"):
                 fn()
 
     def test_mismatching_stride_no_check(self):
         actual = torch.rand((2, 2))
         expected = torch.as_strided(actual.clone().t().contiguous(), actual.shape, actual.stride()[::-1])
-        for fn in assert_fns_with_inputs(actual, expected):
+        for fn in assert_close_with_inputs(actual, expected):
             fn(check_stride=False)
+
+    def test_only_rtol(self):
+        actual = torch.empty(())
+        expected = actual.clone()
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaises(UsageError):
+                fn(rtol=0.0)
+
+    def test_only_atol(self):
+        actual = torch.empty(())
+        expected = actual.clone()
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaises(UsageError):
+                fn(atol=0.0)
 
     def test_mismatching_values(self):
         actual = torch.tensor(1)
         expected = torch.tensor(2)
 
-        for fn in assert_fns_with_inputs(actual, expected):
+        for fn in assert_close_with_inputs(actual, expected):
             with self.assertRaises(AssertionError):
                 fn()
 
-    def test_assert_equal(self):
-        actual = torch.tensor(1)
-        expected = actual.clone()
+    def test_mismatching_values_rtol(self):
+        eps = 1e-3
+        actual = torch.tensor(1.0)
+        expected = torch.tensor(1.0 + eps)
 
-        torch.testing.assert_equal(actual, expected)
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaises(AssertionError):
+                fn(rtol=eps / 2, atol=0.0)
 
-    def test_assert_close(self):
+    def test_mismatching_values_atol(self):
+        eps = 1e-3
+        actual = torch.tensor(0.0)
+        expected = torch.tensor(eps)
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaises(AssertionError):
+                fn(rtol=0.0, atol=eps / 2)
+
+    def test_matching(self):
         actual = torch.tensor(1.0)
         expected = actual.clone()
 
         torch.testing.assert_close(actual, expected)
 
-    def test_assert_close_only_rtol(self):
-        actual = torch.empty(())
-        expected = actual.clone()
-
-        with self.assertRaises(UsageError):
-            torch.testing.assert_close(actual, expected, rtol=0.0)
-
-    def test_assert_close_only_atol(self):
-        actual = torch.empty(())
-        expected = actual.clone()
-
-        with self.assertRaises(UsageError):
-            torch.testing.assert_close(actual, expected, atol=0.0)
-
-    def test_assert_close_mismatching_values_rtol(self):
+    def test_matching_rtol(self):
         eps = 1e-3
         actual = torch.tensor(1.0)
         expected = torch.tensor(1.0 + eps)
 
-        with self.assertRaises(AssertionError):
-            torch.testing.assert_close(actual, expected, rtol=eps / 2, atol=0.0)
+        for fn in assert_close_with_inputs(actual, expected):
+            fn(rtol=eps * 2, atol=0.0)
 
-    def test_assert_close_matching_values_rtol(self):
-        eps = 1e-3
-        actual = torch.tensor(1.0)
-        expected = torch.tensor(1.0 + eps)
-
-        torch.testing.assert_close(actual, expected, rtol=eps * 2, atol=0.0)
-
-    def test_assert_close_mismatching_values_atol(self):
+    def test_matching_atol(self):
         eps = 1e-3
         actual = torch.tensor(0.0)
         expected = torch.tensor(eps)
 
-        with self.assertRaises(AssertionError):
-            torch.testing.assert_close(actual, expected, rtol=0.0, atol=eps / 2)
+        for fn in assert_close_with_inputs(actual, expected):
+            fn(rtol=0.0, atol=eps * 2)
 
-    def test_assert_close_matching_values_atol(self):
-        eps = 1e-3
-        actual = torch.tensor(0.0)
-        expected = torch.tensor(eps)
+    def test_matching_nan(self):
+        actual = torch.tensor(float("NaN"))
+        expected = actual.clone()
 
-        torch.testing.assert_close(actual, expected, rtol=0.0, atol=eps * 2)
-
-    def test_assert_close_nan(self):
-        a = torch.tensor(float("NaN"))
-        b = torch.tensor(float("NaN"))
-
-        for inputs in make_assert_inputs(a, b):
+        for fn in assert_close_with_inputs(actual, expected):
             with self.assertRaises(AssertionError):
-                torch.testing.assert_close(*inputs)
-
-    def test_assert_close_equal_nan(self):
-        a = torch.tensor(float("NaN"))
-        b = torch.tensor(float("NaN"))
-
-        for inputs in make_assert_inputs(a, b):
-            torch.testing.assert_close(*inputs, equal_nan=True)
-
-    def test_assert_close_equal_nan_complex(self):
-        a = torch.tensor(complex(1, float("NaN")))
-        b = torch.tensor(complex(float("NaN"), 1))
-
-        for inputs in make_assert_inputs(a, b):
-            with self.assertRaises(AssertionError):
-                torch.testing.assert_close(*inputs, equal_nan=True)
-
-    def test_assert_close_equal_nan_complex_relaxed(self):
-        a = torch.tensor(complex(1, float("NaN")))
-        b = torch.tensor(complex(float("NaN"), 1))
-
-        for inputs in make_assert_inputs(a, b):
-            torch.testing.assert_close(*inputs, equal_nan="relaxed")
-
-    def test_mismatching_values_msg_mismatches(self):
-        actual = torch.tensor([1, 2, 3, 4])
-        expected = torch.tensor([1, 2, 5, 6])
-
-        for fn in assert_fns_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, re.escape("Mismatched elements: 2 / 4 (50.0%)")):
                 fn()
 
-    def test_mismatching_values_msg_abs_diff(self):
-        actual = torch.tensor([[1, 2], [3, 4]])
-        expected = torch.tensor([[1, 2], [5, 4]])
+    def test_matching_nan_with_equal_nan(self):
+        actual = torch.tensor(float("NaN"))
+        expected = actual.clone()
 
-        for fn in assert_fns_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, re.escape("Greatest absolute difference: 2 at (1, 0)")):
-                fn()
-
-    def test_mismatching_values_msg_rel_diff(self):
-        actual = torch.tensor([[1, 2], [3, 4]])
-        expected = torch.tensor([[1, 4], [3, 4]])
-
-        for fn in assert_fns_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, re.escape("Greatest relative difference: 0.5 at (0, 1)")):
-                fn()
-
-    def test_mismatching_values_zero_div_zero(self):
-        actual = torch.tensor([1.0, 0.0])
-        expected = torch.tensor([2.0, 0.0])
-
-        for fn in assert_fns_with_inputs(actual, expected):
-            # Although it looks complicated, this regex just makes sure that the word 'nan' is not part of the error
-            # message. That would happen if the 0 / 0 is used for the mismatch computation although it matches.
-            with self.assertRaisesRegex(AssertionError, "((?!nan).)*"):
-                fn()
-
-    def test_mismatching_values_msg_complex_real(self):
-        actual = torch.tensor(complex(0, 1))
-        expected = torch.tensor(complex(1, 1))
-
-        for fn in assert_fns_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the real part")):
-                fn()
-
-    def test_mismatching_values_msg_complex_imag(self):
-        actual = torch.tensor(complex(1, 0))
-        expected = torch.tensor(complex(1, 1))
-
-        for fn in assert_fns_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the imaginary part")):
-                fn()
-
-    def test_assert_close_mismatching_values_msg_rtol(self):
-        rtol = 1e-3
-
-        actual = torch.tensor(1)
-        expected = torch.tensor(2)
-
-        for inputs in make_assert_inputs(actual, expected):
-            with self.assertRaisesRegex(
-                AssertionError, re.escape(f"Greatest relative difference: 0.5 at 0 (up to {rtol} allowed)")
-            ):
-                torch.testing.assert_close(*inputs, rtol=rtol, atol=0.0)
-
-    def test_assert_close_mismatching_values_msg_atol(self):
-        atol = 1e-3
-
-        actual = torch.tensor(1)
-        expected = torch.tensor(2)
-
-        for inputs in make_assert_inputs(actual, expected):
-            with self.assertRaisesRegex(
-                AssertionError, re.escape(f"Greatest absolute difference: 1 at 0 (up to {atol} allowed)")
-            ):
-                torch.testing.assert_close(*inputs, rtol=0.0, atol=atol)
-
-    def test_sequence_mismatching_len(self):
-        actual = (torch.empty(()),)
-        expected = ()
-
-        for fn in assert_fns():
-            with self.assertRaises(AssertionError):
-                fn(actual, expected)
-
-    def test_sequence_mismatching_values_msg(self):
-        t1 = torch.tensor(1)
-        t2 = torch.tensor(2)
-
-        actual = (t1, t1)
-        expected = (t1, t2)
-
-        for fn in assert_fns():
-            with self.assertRaisesRegex(AssertionError, r"index\s+1"):
-                fn(actual, expected)
-
-    def test_mapping_mismatching_keys(self):
-        actual = {"a": torch.empty(())}
-        expected = {}
-
-        for fn in assert_fns():
-            with self.assertRaises(AssertionError):
-                fn(actual, expected)
-
-    def test_mapping_mismatching_values_msg(self):
-        t1 = torch.tensor(1)
-        t2 = torch.tensor(2)
-
-        actual = {"a": t1, "b": t1}
-        expected = {"a": t1, "b": t2}
-
-        for fn in assert_fns():
-            with self.assertRaisesRegex(AssertionError, r"key\s+'b'"):
-                fn(actual, expected)
-
-    def test_type_inequality(self):
-        actual = torch.empty(2)
-        expected = actual.tolist()
-
-        for fn in assert_fns_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, str(type(expected))):
-                fn()
-
-    def test_unknown_type(self):
-        actual = "0"
-        expected = "0"
-
-        for fn in assert_fns_with_inputs(actual, expected):
-            with self.assertRaisesRegex(UsageError, str(type(actual))):
-                fn()
+        for fn in assert_close_with_inputs(actual, expected):
+            fn(equal_nan=True)
 
     def test_numpy(self):
         tensor = torch.rand(2, 2, dtype=torch.float32)
         actual = tensor.numpy()
         expected = actual.copy()
 
-        for fn in assert_fns_with_inputs(actual, expected):
+        for fn in assert_close_with_inputs(actual, expected):
             fn()
 
     def test_scalar(self):
@@ -1128,8 +991,90 @@ class TestAsserts(TestCase):
         for actual, expected in itertools.product((int(number), float(number), complex(number)), repeat=2):
             check_dtype = type(actual) is type(expected)
 
-            for fn in assert_fns_with_inputs(actual, expected):
+            for fn in assert_close_with_inputs(actual, expected):
                 fn(check_dtype=check_dtype)
+
+
+class TestAssertCloseMultiDevice(TestCase):
+    @deviceCountAtLeast(1)
+    def test_mismatching_device(self, devices):
+        for actual_device, expected_device in itertools.permutations(("cpu", *devices), 2):
+            actual = torch.empty((), device=actual_device)
+            expected = actual.clone().to(expected_device)
+            for fn in assert_close_with_inputs(actual, expected):
+                with self.assertRaisesRegex(AssertionError, "device"):
+                    fn()
+
+    @deviceCountAtLeast(1)
+    def test_mismatching_device_no_check(self, devices):
+        for actual_device, expected_device in itertools.permutations(("cpu", *devices), 2):
+            actual = torch.rand((), device=actual_device)
+            expected = actual.clone().to(expected_device)
+            for fn in assert_close_with_inputs(actual, expected):
+                fn(check_device=False)
+
+
+instantiate_device_type_tests(TestAssertCloseMultiDevice, globals(), only_for="cuda")
+
+
+class TestAssertCloseErrorMessage(TestCase):
+    def test_mismatched_elements(self):
+        actual = torch.tensor([1, 2, 3, 4])
+        expected = torch.tensor([1, 2, 5, 6])
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Mismatched elements: 2 / 4 (50.0%)")):
+                fn()
+
+    def test_abs_diff(self):
+        actual = torch.tensor([[1, 2], [3, 4]])
+        expected = torch.tensor([[1, 2], [5, 4]])
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Greatest absolute difference: 2 at (1, 0)")):
+                fn()
+
+    def test_rel_diff(self):
+        actual = torch.tensor([[1, 2], [3, 4]])
+        expected = torch.tensor([[1, 4], [3, 4]])
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Greatest relative difference: 0.5 at (0, 1)")):
+                fn()
+
+    def test_zero_div_zero(self):
+        actual = torch.tensor([1.0, 0.0])
+        expected = torch.tensor([2.0, 0.0])
+
+        for fn in assert_close_with_inputs(actual, expected):
+            # Although it looks complicated, this regex just makes sure that the word 'nan' is not part of the error
+            # message. That would happen if the 0 / 0 is used for the mismatch computation although it matches.
+            with self.assertRaisesRegex(AssertionError, "((?!nan).)*"):
+                fn()
+
+    def test_rtol(self):
+        rtol = 1e-3
+
+        actual = torch.tensor(1)
+        expected = torch.tensor(2)
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(
+                AssertionError, re.escape(f"Greatest relative difference: 0.5 at 0 (up to {rtol} allowed)")
+            ):
+                fn(rtol=rtol, atol=0.0)
+
+    def test_atol(self):
+        atol = 1e-3
+
+        actual = torch.tensor(1)
+        expected = torch.tensor(2)
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(
+                AssertionError, re.escape(f"Greatest absolute difference: 1 at 0 (up to {atol} allowed)")
+            ):
+                fn(rtol=0.0, atol=atol)
 
     def test_msg_str(self):
         msg = "Custom error message!"
@@ -1137,7 +1082,7 @@ class TestAsserts(TestCase):
         actual = torch.tensor(1)
         expected = torch.tensor(2)
 
-        for fn in assert_fns_with_inputs(actual, expected):
+        for fn in assert_close_with_inputs(actual, expected):
             with self.assertRaisesRegex(AssertionError, msg):
                 fn(msg=msg)
 
@@ -1150,34 +1095,81 @@ class TestAsserts(TestCase):
         actual = torch.tensor(1)
         expected = torch.tensor(2)
 
-        for fn in assert_fns_with_inputs(actual, expected):
+        for fn in assert_close_with_inputs(actual, expected):
             with self.assertRaisesRegex(AssertionError, msg):
                 fn(msg=make_msg)
 
 
-class TestAssertsMultiDevice(TestCase):
-    @deviceCountAtLeast(1)
-    def test_mismatching_device(self, devices):
-        for actual_device, expected_device in itertools.permutations(("cpu", *devices), 2):
-            actual = torch.empty((), device=actual_device)
-            expected = actual.clone().to(expected_device)
-            for fn in assert_fns_with_inputs(actual, expected):
-                with self.assertRaisesRegex(AssertionError, "device"):
-                    fn()
+class TestAssertCloseContainer(TestCase):
+    def test_sequence_mismatching_len(self):
+        actual = (torch.empty(()),)
+        expected = ()
 
-    @deviceCountAtLeast(1)
-    def test_mismatching_device_no_check(self, devices):
-        for actual_device, expected_device in itertools.permutations(("cpu", *devices), 2):
-            actual = torch.rand((), device=actual_device)
-            expected = actual.clone().to(expected_device)
-            for fn in assert_fns_with_inputs(actual, expected):
-                fn(check_device=False)
+        with self.assertRaises(AssertionError):
+            torch.testing.assert_close(actual, expected)
+
+    def test_sequence_mismatching_values_msg(self):
+        t1 = torch.tensor(1)
+        t2 = torch.tensor(2)
+
+        actual = (t1, t1)
+        expected = (t1, t2)
+
+        with self.assertRaisesRegex(AssertionError, r"index\s+1"):
+            torch.testing.assert_close(actual, expected)
+
+    def test_mapping_mismatching_keys(self):
+        actual = {"a": torch.empty(())}
+        expected = {}
+
+        with self.assertRaises(AssertionError):
+            torch.testing.assert_close(actual, expected)
+
+    def test_mapping_mismatching_values_msg(self):
+        t1 = torch.tensor(1)
+        t2 = torch.tensor(2)
+
+        actual = {"a": t1, "b": t1}
+        expected = {"a": t1, "b": t2}
+
+        with self.assertRaisesRegex(AssertionError, r"key\s+'b'"):
+            torch.testing.assert_close(actual, expected)
 
 
-instantiate_device_type_tests(TestAssertsMultiDevice, globals(), only_for="cuda")
+class TestAssertCloseComplex(TestCase):
+    def test_mismatching_nan_with_equal_nan(self):
+        actual = torch.tensor(complex(1, float("NaN")))
+        expected = torch.tensor(complex(float("NaN"), 1))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaises(AssertionError):
+                fn(equal_nan=True)
+
+    def test_mismatching_nan_with_equal_nan_relaxed(self):
+        actual = torch.tensor(complex(1, float("NaN")))
+        expected = torch.tensor(complex(float("NaN"), 1))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn(equal_nan="relaxed")
+
+    def test_mismatching_values_msg_real(self):
+        actual = torch.tensor(complex(0, 1))
+        expected = torch.tensor(complex(1, 1))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the real part")):
+                fn()
+
+    def test_mismatching_values_msg_imag(self):
+        actual = torch.tensor(complex(1, 0))
+        expected = torch.tensor(complex(1, 1))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the imaginary part")):
+                fn()
 
 
-class TestAssertsSparseCOO(TestCase):
+class TestAssertCloseSparseCOO(TestCase):
     def test_matching_coalesced(self):
         indices = (
             (0, 1),
@@ -1187,7 +1179,7 @@ class TestAssertsSparseCOO(TestCase):
         actual = torch.sparse_coo_tensor(indices, values, size=(2, 2)).coalesce()
         expected = actual.clone()
 
-        for fn in assert_fns_with_inputs(actual, expected):
+        for fn in assert_close_with_inputs(actual, expected):
             fn()
 
     def test_matching_uncoalesced(self):
@@ -1199,7 +1191,7 @@ class TestAssertsSparseCOO(TestCase):
         actual = torch.sparse_coo_tensor(indices, values, size=(2, 2))
         expected = actual.clone()
 
-        for fn in assert_fns_with_inputs(actual, expected):
+        for fn in assert_close_with_inputs(actual, expected):
             fn()
 
     def test_mismatching_is_coalesced(self):
@@ -1211,7 +1203,7 @@ class TestAssertsSparseCOO(TestCase):
         actual = torch.sparse_coo_tensor(indices, values, size=(2, 2))
         expected = actual.clone().coalesce()
 
-        for fn in assert_fns_with_inputs(actual, expected):
+        for fn in assert_close_with_inputs(actual, expected):
             with self.assertRaisesRegex(AssertionError, "is_coalesced"):
                 fn()
 
@@ -1230,7 +1222,7 @@ class TestAssertsSparseCOO(TestCase):
         expected_values = (1, 1, 1)
         expected = torch.sparse_coo_tensor(expected_indices, expected_values, size=(2, 2))
 
-        for fn in assert_fns_with_inputs(actual, expected):
+        for fn in assert_close_with_inputs(actual, expected):
             fn(check_is_coalesced=False)
 
     def test_mismatching_nnz(self):
@@ -1248,7 +1240,7 @@ class TestAssertsSparseCOO(TestCase):
         expected_values = (1, 1, 1)
         expected = torch.sparse_coo_tensor(expected_indices, expected_values, size=(2, 2))
 
-        for fn in assert_fns_with_inputs(actual, expected):
+        for fn in assert_close_with_inputs(actual, expected):
             with self.assertRaisesRegex(AssertionError, re.escape("number of specified values")):
                 fn()
 
@@ -1267,7 +1259,7 @@ class TestAssertsSparseCOO(TestCase):
         expected_values = (1, 2)
         expected = torch.sparse_coo_tensor(expected_indices, expected_values, size=(2, 2))
 
-        for fn in assert_fns_with_inputs(actual, expected):
+        for fn in assert_close_with_inputs(actual, expected):
             with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the indices")):
                 fn()
 
@@ -1286,13 +1278,13 @@ class TestAssertsSparseCOO(TestCase):
         expected_values = (1, 3)
         expected = torch.sparse_coo_tensor(expected_indices, expected_values, size=(2, 2))
 
-        for fn in assert_fns_with_inputs(actual, expected):
+        for fn in assert_close_with_inputs(actual, expected):
             with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the values")):
                 fn()
 
 
 @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Not all sandcastle jobs support CSR testing")
-class TestAssertsSparseCSR(TestCase):
+class TestAssertCloseSparseCSR(TestCase):
     def test_matching(self):
         crow_indices = (0, 1, 2)
         col_indices = (1, 0)
@@ -1303,7 +1295,7 @@ class TestAssertsSparseCSR(TestCase):
             actual.crow_indices(), actual.col_indices(), actual.values(), size=actual.size(), device=actual.device
         )
 
-        for fn in assert_fns_with_inputs(actual, expected):
+        for fn in assert_close_with_inputs(actual, expected):
             fn()
 
     def test_mismatching_crow_indices_msg(self):
@@ -1317,7 +1309,7 @@ class TestAssertsSparseCSR(TestCase):
         expected_values = actual_values
         expected = torch.sparse_csr_tensor(expected_crow_indices, expected_col_indices, expected_values, size=(2, 2))
 
-        for fn in assert_fns_with_inputs(actual, expected):
+        for fn in assert_close_with_inputs(actual, expected):
             with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the crow_indices")):
                 fn()
 
@@ -1332,7 +1324,7 @@ class TestAssertsSparseCSR(TestCase):
         expected_values = actual_values
         expected = torch.sparse_csr_tensor(expected_crow_indices, expected_col_indices, expected_values, size=(2, 2))
 
-        for fn in assert_fns_with_inputs(actual, expected):
+        for fn in assert_close_with_inputs(actual, expected):
             with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the col_indices")):
                 fn()
 
@@ -1347,7 +1339,7 @@ class TestAssertsSparseCSR(TestCase):
         expected_values = (1, 3)
         expected = torch.sparse_csr_tensor(expected_crow_indices, expected_col_indices, expected_values, size=(2, 2))
 
-        for fn in assert_fns_with_inputs(actual, expected):
+        for fn in assert_close_with_inputs(actual, expected):
             with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the values")):
                 fn()
 
