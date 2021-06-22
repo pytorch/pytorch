@@ -163,10 +163,10 @@ class Measurement:
     def _lazy_init(self) -> None:
         if self.raw_times and not self._sorted_times:
             self._sorted_times = tuple(sorted(self.times))
-            self._median = float(np.median(self._sorted_times))  # type: ignore[no-untyped-call]
+            self._median = float(np.median(self._sorted_times))
             self._mean = float(np.mean(self._sorted_times))
-            self._p25 = float(np.percentile(self._sorted_times, 25))  # type: ignore[no-untyped-call]
-            self._p75 = float(np.percentile(self._sorted_times, 75))  # type: ignore[no-untyped-call]
+            self._p25 = float(np.percentile(self._sorted_times, 25))
+            self._p75 = float(np.percentile(self._sorted_times, 75))
 
             def add_warning(msg: str) -> None:
                 rel_iqr = self.iqr / self.median * 100
@@ -278,7 +278,7 @@ def trim_sigfig(x: float, n: int) -> float:
     assert n == int(n)
     magnitude = int(np.ceil(np.log10(np.abs(x))))
     scale = 10 ** (magnitude - n)
-    return float(np.round(x / scale) * scale)  # type: ignore[no-untyped-call]
+    return float(np.round(x / scale) * scale)
 
 
 def ordered_unique(elements: Iterable[Any]) -> List[Any]:

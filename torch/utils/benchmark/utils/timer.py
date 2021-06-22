@@ -301,7 +301,7 @@ class Timer(object):
         with common.set_torch_threads(self._task_spec.num_threads):
             # Estimate the block size needed for measurement to be negligible
             # compared to the inner loop. This also serves as a warmup.
-            overhead = np.median([self._timer.timeit(0) for _ in range(5)])  # type: ignore[no-untyped-call]
+            overhead = np.median([self._timer.timeit(0) for _ in range(5)])
             number = 1
             while True:
                 time_taken = self._timer.timeit(number)
