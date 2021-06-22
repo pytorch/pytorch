@@ -510,7 +510,6 @@ DispatchKeySet _dk_set = c10::DispatchKeySet({dispatch_key}) | c10::detail::mult
 // aten::{f.func}
 C10_ALWAYS_INLINE
 {sig.defn(name)} {{
-  static auto op_metadata = at::_ops::{f.func.name.unambiguous_name()}();
   static auto op = c10::Dispatcher::singleton()
     .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
     .typed<{dispatcher_sig.type()}>();
