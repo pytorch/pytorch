@@ -59,4 +59,4 @@ def consistency(t1, t2):
 
     if isinstance(t1, Tensor_Type) and isinstance(t2, Tensor_Type):
         return len(t1.__args__) == len(t2.__args__) and \
-            all([consistency(elem1, elem2) for elem1, elem2 in zip(t1.__args__, t2.__args__)])
+               all([consistency(elem1, elem2) for elem1, elem2 in zip(t1.__args__, t2.__args__)])
