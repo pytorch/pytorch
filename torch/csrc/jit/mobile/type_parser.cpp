@@ -43,10 +43,7 @@ class TypeParser {
     } else if (token == "List") {
       return CreateSingleElementType<ListType>();
     } else if (token == "Optional") {
-      expect("[");
-      auto result = OptionalType::create(parse());
-      expect("]");
-      return result;
+      return CreateSingleElementType<OptionalType>();
     } else if (token == "Future") {
       return CreateSingleElementType<FutureType>();
     } else if (token == "Dict") {

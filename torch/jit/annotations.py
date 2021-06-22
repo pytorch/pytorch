@@ -280,7 +280,6 @@ def get_enum_value_type(e: Type[enum.Enum], loc):
     return torch._C.unify_type_list(ir_types)
 
 def is_tensor(ann):
-
     if issubclass(ann, torch.Tensor):
         return True
 
@@ -331,7 +330,17 @@ def try_ann_to_type(ann, loc):
         assert valid_type, msg.format(repr(ann), repr(contained))
         return OptionalType(valid_type)
     if is_union(ann):
-        return UnionType([try_ann_to_type(a, loc) for a in ann.__args__])
+        inner = []
+        # We need these extra checks because both `None` and invalid
+        # values will return `None`
+        # TODO: Determine if the other cases need to be fixed as well
+        for a in ann.__args__:
+            if a is None:
+                inner.append(NoneType.get())
+            maybe_type = try_ann_to_type(a, loc)
+            if maybe_type is not None:
+                inner.append(maybe_type)
+        return UnionType(inner)
     if torch.distributed.rpc.is_available() and is_rref(ann):
         return RRefType(try_ann_to_type(ann.__args__[0], loc))
     if is_future(ann):
