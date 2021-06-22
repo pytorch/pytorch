@@ -40,7 +40,7 @@ import json
 from urllib.request import urlopen
 import __main__  # type: ignore[import]
 import errno
-from typing import cast, Any, Dict, Iterable, Iterator, Optional
+from typing import cast, Any, Dict, Iterable, Iterator, Optional, Union
 
 import numpy as np
 
@@ -190,6 +190,9 @@ if not expecttest.ACCEPT:
 UNITTEST_ARGS = [sys.argv[0]] + remaining
 torch.manual_seed(SEED)
 
+# CI Prefix path used only on CI environment
+CI_TEST_PREFIX = str(pathlib.Path(os.getcwd()))
+
 def wait_for_process(p):
     try:
         return p.wait()
@@ -253,6 +256,9 @@ def chunk_list(lst, nchunks):
 
 # sanitize filename e.g., distributed/pipeline/sync/skip/test_api.py -> distributed.pipeline.sync.skip.test_api
 def sanitize_test_filename(filename):
+    # inspect.getfile returns absolute path in some CI jobs, converting it to relative path if needed
+    if filename.startswith(CI_TEST_PREFIX):
+        filename = filename[len(CI_TEST_PREFIX) + 1:]
     strip_py = re.sub(r'.py$', '', filename)
     return re.sub('/', r'.', strip_py)
 
@@ -957,12 +963,25 @@ class AssertRaisesContextIgnoreNotImplementedError(unittest.case._AssertRaisesCo
             self.test_case.skipTest(f"not_implemented: {exc_value}")  # type: ignore[attr-defined]
         return super().__exit__(exc_type, exc_value, tb)
 
+
+@contextmanager
+def set_warn_always_context(new_val: bool):
+    old_val = torch.is_warn_always_enabled()
+    torch.set_warn_always(new_val)
+    try:
+        yield
+    finally:
+        torch.set_warn_always(old_val)
+
+
 class TestCase(expecttest.TestCase):
     # NOTE: "precision" lets classes and generated tests set minimum
-    # atol values when comparing tensors. Used by @precisionOverride, for
+    # atol values when comparing tensors. Used by @precisionOverride and @toleranceOverride, for
     # example.
-    # TODO: provide a better mechanism for generated tests to set rtol/atol.
+    # NOTE: "rel_tol" lets classes and generated tests set minimum
+    # rtol values when comparing tensors. Used by @toleranceOverride, for example.
     _precision: float = 0
+    _rel_tol: float = 0
 
     # checker to early terminate test suite if unrecoverable failure occurs.
     def _should_stop_test_suite(self):
@@ -984,6 +1003,14 @@ class TestCase(expecttest.TestCase):
     @precision.setter
     def precision(self, prec: float) -> None:
         self._precision = prec
+
+    @property
+    def rel_tol(self) -> float:
+        return self._rel_tol
+
+    @rel_tol.setter
+    def rel_tol(self, prec: float) -> None:
+        self._rel_tol = prec
 
     _do_cuda_memory_leak_check = False
     _do_cuda_non_default_stream = False
@@ -1231,6 +1258,7 @@ class TestCase(expecttest.TestCase):
             rtol, atol = self._getDefaultRtolAndAtol(a.dtype, b.dtype)
 
         atol = max(atol, self.precision)
+        rtol = max(rtol, self.rel_tol)
 
         # Converts to comparison dtype
         dtype = get_comparison_dtype(a, b)
@@ -1258,6 +1286,7 @@ class TestCase(expecttest.TestCase):
         atol = cast(float, atol)
         assert atol is not None
         atol = max(atol, self.precision)
+        rtol = max(rtol, self.rel_tol)
 
         return _compare_scalars_internal(a, b, rtol=rtol, atol=atol, equal_nan=equal_nan)
 
@@ -1376,6 +1405,41 @@ class TestCase(expecttest.TestCase):
                     assert debug_msg_generic is not None
                     debug_msg = "Tensors failed to compare as equal!" + debug_msg_generic
                 super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
+        elif isinstance(x, (np.ndarray, torch.Tensor)) or isinstance(y, (np.ndarray, torch.Tensor)):
+            def maybe_to_tensor(a: Union[np.ndarray, torch.Tensor]) -> Union[np.ndarray, torch.Tensor]:
+                if not isinstance(a, np.ndarray):
+                    return a
+
+                try:
+                    return torch.from_numpy(a)
+                except TypeError:
+                    # This happens if the dtype is non-numeric or not supported by torch
+                    return a
+
+            def maybe_to_list(a: Any) -> Any:
+                if not isinstance(a, (np.ndarray, torch.Tensor)):
+                    return a
+
+                return a.tolist()
+
+            x = maybe_to_tensor(x)
+            y = maybe_to_tensor(y)
+
+            if isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
+                self.assertEqual(
+                    x, y, atol=atol, rtol=rtol, msg=msg, exact_dtype=exact_dtype, exact_device=exact_device
+                )
+            else:
+                # In case we can't convert the array to a tensor, we fall back to comparing x and y as iterables
+                self.assertEqual(
+                    maybe_to_list(x),
+                    maybe_to_list(y),
+                    atol=atol,
+                    rtol=rtol,
+                    msg=msg,
+                    exact_dtype=exact_dtype,
+                    exact_device=exact_device
+                )
         elif isinstance(x, string_classes) and isinstance(y, string_classes):
             debug_msg = ("Attempted to compare [string] types: "
                          f"Expected: {repr(x)}; Actual: {repr(y)}.")
@@ -1421,18 +1485,6 @@ class TestCase(expecttest.TestCase):
                 assert debug_msg_scalars is not None
                 debug_msg = "Scalars failed to compare as equal! " + debug_msg_scalars
             super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
-        # Tensor x Numpy array
-        elif isinstance(x, torch.Tensor) and isinstance(y, np.ndarray):
-            self.assertEqual(x, torch.from_numpy(y), atol=atol, rtol=rtol, msg=msg,
-                             exact_dtype=exact_dtype, exact_device=exact_device)
-        # Numpy array x Tensor
-        elif isinstance(x, np.ndarray) and isinstance(y, torch.Tensor):
-            self.assertEqual(torch.from_numpy(x), y, atol=atol, rtol=rtol, msg=msg,
-                             exact_dtype=exact_dtype, exact_device=exact_device)
-        # Numpy array x Numpy array
-        elif isinstance(x, np.ndarray) and isinstance(y, np.ndarray):
-            self.assertEqual(torch.from_numpy(x), torch.from_numpy(y), atol=atol, rtol=rtol, msg=msg,
-                             exact_dtype=exact_dtype, exact_device=exact_device)
         else:
             super().assertEqual(x, y, msg=msg)
 
@@ -1499,7 +1551,8 @@ class TestCase(expecttest.TestCase):
         """
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
-            callable()
+            with set_warn_always_context(True):
+                callable()
             self.assertTrue(len(ws) == 0, msg)
 
     @contextmanager
@@ -1513,12 +1566,8 @@ class TestCase(expecttest.TestCase):
         pattern = re.compile(regex)
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
-            prev = torch.is_warn_always_enabled()
-            torch.set_warn_always(True)
-            try:
+            with set_warn_always_context(True):
                 yield
-            finally:
-                torch.set_warn_always(prev)
             if len(ws) == 0:
                 self.fail('no warning caught')
             self.assertTrue(any([type(w.message) is category for w in ws]))

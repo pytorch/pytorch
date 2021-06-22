@@ -864,6 +864,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/FillKernel.cpp",
     "aten/src/ATen/native/cpu/FunctionOfAMatrixUtilsKernel.cpp",
     "aten/src/ATen/native/cpu/GridSamplerKernel.cpp",
+    "aten/src/ATen/native/cpu/HistogramKernel.cpp",
     "aten/src/ATen/native/cpu/IndexKernel.cpp",
     "aten/src/ATen/native/cpu/LerpKernel.cpp",
     "aten/src/ATen/native/cpu/LinearAlgebraKernel.cpp",
@@ -990,6 +991,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/FunctionOfAMatrixUtils.cpp",
     "aten/src/ATen/native/GatedLinearUnit.cpp",
     "aten/src/ATen/native/GridSampler.cpp",
+    "aten/src/ATen/native/Histogram.cpp",
     "aten/src/ATen/native/Im2Col.cpp",
     "aten/src/ATen/native/IndexingUtils.cpp",
     "aten/src/ATen/native/Integration.cpp",
@@ -1095,7 +1097,6 @@ aten_native_source_non_codegen_list = [
     # Files not in native, but depends on native symbols
     # "aten/src/ATen/TensorIndexing.cpp",
     "aten/src/ATen/TensorIterator.cpp",
-    "aten/src/ATen/LegacyTHFunctionsCPU.cpp",
     "aten/src/ATen/nnapi/nnapi_bind.cpp",
     "aten/src/ATen/nnapi/nnapi_wrapper.cpp",
     "aten/src/ATen/nnapi/nnapi_model_loader.cpp",
