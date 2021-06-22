@@ -200,15 +200,4 @@ TORCH_CUDA_CU_API void THNN_(SpatialDepthwiseConvolution_accGradParameters)(
     int padH,
     int dilationW,
     int dilationH);
-
-TORCH_CUDA_CU_API void THNN_(RReLU_updateOutput)(
-    THCState* state,
-    THCTensor* input,
-    THCTensor* output,
-    THCTensor* noise,
-    double lower,
-    double upper,
-    bool train,
-    bool inplace,
-    c10::optional<at::Generator> generator);
 #endif

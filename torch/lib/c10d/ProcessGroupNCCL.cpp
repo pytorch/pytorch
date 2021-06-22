@@ -90,16 +90,16 @@ ncclRedOp_t getNcclReduceOp(const ReduceOp reduceOp, at::Tensor& input) {
   } catch (const std::out_of_range& e) {
     switch (reduceOp) {
       case ReduceOp::BAND:
-        throw std::runtime_error("Cannot use ReduceOp.BAND with NCCL");
+        TORCH_CHECK(false, "Cannot use ReduceOp.BAND with NCCL");
         break;
       case ReduceOp::BOR:
-        throw std::runtime_error("Cannot use ReduceOp.BOR with NCCL");
+        TORCH_CHECK(false, "Cannot use ReduceOp.BOR with NCCL");
         break;
       case ReduceOp::BXOR:
-        throw std::runtime_error("Cannot use ReduceOp.BXOR with NCCL");
+        TORCH_CHECK(false, "Cannot use ReduceOp.BXOR with NCCL");
         break;
       default:
-        throw std::runtime_error("Unhandled ReduceOp");
+        TORCH_CHECK(false, "Unhandled ReduceOp");
         break;
     }
   }
@@ -249,7 +249,6 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
       blockingWait_(w.blockingWait_),
       opTimeout_(w.opTimeout_),
       workStartTime_(w.workStartTime_) {
-  completed_ = w.completed_;
   exception_ = w.exception_;
 }
 
@@ -319,7 +318,6 @@ void ProcessGroupNCCL::WorkNCCL::checkAndThrowException() {
 
 void ProcessGroupNCCL::WorkNCCL::handleNCCLGuard() {
   std::lock_guard<std::mutex> lock(mutex_);
-  completed_ = true;
   if (exception_) {
     auto exceptionMsg = c10::str(
         "Some NCCL operations have failed or timed out. Due to the ",
@@ -396,7 +394,7 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
             " ran for ",
             timeElapsed.count(),
             " milliseconds before timing out.");
-        throw std::runtime_error(exceptionMsg);
+        TORCH_CHECK(false, exceptionMsg);
       }
       // Check for errors and throw appropriate exception.
       checkAndThrowException();
@@ -819,7 +817,7 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
     bool isSendRecvSelf) {
   // Sanity check
   if (devicesKey.empty()) {
-    throw std::runtime_error(
+    TORCH_CHECK(false,
         "Not able to create/get the NCCL Communicator since "
         "the GPU devices are not known");
   }
@@ -945,10 +943,10 @@ namespace {
 // Check validity of tensor
 void check_gpu_single_tensor(const at::Tensor& tensor) {
   if (!tensor.is_cuda() || tensor.is_sparse()) {
-    throw std::runtime_error("Tensors must be CUDA and dense");
+    TORCH_CHECK(false, "Tensors must be CUDA and dense");
   }
   if (!tensor.is_contiguous()) {
-    throw std::runtime_error("Tensors must be contiguous");
+    TORCH_CHECK(false, "Tensors must be contiguous");
   }
 }
 
@@ -956,10 +954,10 @@ void check_gpu_single_tensor(const at::Tensor& tensor) {
 // across distinct GPUs.
 void check_gpu_tensors(const std::vector<at::Tensor>& tensors) {
   if (tensors.size() == 0) {
-    throw std::runtime_error("Tensor list must be nonempty");
+    TORCH_CHECK(false, "Tensor list must be nonempty");
   }
   if (tensors.size() > static_cast<size_t>(at::cuda::getNumGPUs())) {
-    throw std::runtime_error(
+    TORCH_CHECK(false,
         "Tensor list mustn't be larger than the number of available GPUs");
   }
 
@@ -971,23 +969,23 @@ void check_gpu_tensors(const std::vector<at::Tensor>& tensors) {
 
   for (const auto& t : tensors) {
     if (!t.is_cuda() || t.is_sparse()) {
-      throw std::runtime_error("Tensors must be CUDA and dense");
+      TORCH_CHECK(false, "Tensors must be CUDA and dense");
     }
     if (t.scalar_type() != first.scalar_type()) {
-      throw std::runtime_error("Tensors must have identical type");
+      TORCH_CHECK(false, "Tensors must have identical type");
     }
     if (t.sizes() != first.sizes()) {
-      throw std::runtime_error("Tensors must have identical size");
+      TORCH_CHECK(false, "Tensors must have identical size");
     }
     if (t.strides() != first.strides()) {
-      throw std::runtime_error("Tensors must have identical strides");
+      TORCH_CHECK(false, "Tensors must have identical strides");
     }
     if (!t.is_non_overlapping_and_dense()) {
-      throw std::runtime_error("Tensors must be non-overlapping and dense");
+      TORCH_CHECK(false, "Tensors must be non-overlapping and dense");
     }
     const auto inserted = usedDevices.insert(t.get_device()).second;
     if (!inserted) {
-      throw std::runtime_error("Tensors must be on distinct GPU devices");
+      TORCH_CHECK(false, "Tensors must be on distinct GPU devices");
     }
   }
 }
@@ -999,7 +997,7 @@ std::vector<at::Tensor> flatten_for_scatter_gather(
     std::vector<at::Tensor>& other,
     size_t world_size) {
   if (tensor_lists.size() != other.size()) {
-    throw std::runtime_error(
+    TORCH_CHECK(false,
         "Tensor list operands to scatter/gather must have the same length");
   }
   const auto num_devices = tensor_lists.size();
@@ -1009,7 +1007,7 @@ std::vector<at::Tensor> flatten_for_scatter_gather(
 
   for (auto i = size_t{}; i < num_devices; ++i) {
     if (tensor_lists[i].size() != world_size * num_devices) {
-      throw std::runtime_error(
+      TORCH_CHECK(false,
           "Tensor list input to scatter/gather must match number of collective"
           " participants");
     }
@@ -1017,14 +1015,14 @@ std::vector<at::Tensor> flatten_for_scatter_gather(
     // Only check device match for the first tensor in the list; the call to
     // newLikeFlat() below will check the rest.
     if (tensor_lists[i].front().get_device() != other[i].get_device()) {
-      throw std::runtime_error(
+      TORCH_CHECK(false,
           "Corresponding input/output tensors to scatter/gather must all reside"
           " on the same device");
     }
 
     for (const auto& t : tensor_lists[i]) {
       if (t.numel() != other[i].numel()) {
-        throw std::runtime_error(
+        TORCH_CHECK(false,
             "All tensor operands to scatter/gather must have the same number of elements");
       }
     }
@@ -1343,7 +1341,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce_coalesced(
     std::vector<at::Tensor>& tensors,
     const AllreduceCoalescedOptions& opts) {
-  throw std::runtime_error(
+  TORCH_CHECK(false,
       "allreduce_coalesced is currently not supported with NCCL");
 }
 
@@ -1481,7 +1479,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather_coalesced(
     std::vector<std::vector<at::Tensor>>& /* unused */,
     std::vector<at::Tensor>& /* unused */,
     const AllgatherOptions& /* unused */) {
-  throw std::runtime_error(
+  TORCH_CHECK(false,
       "ProcessGroupNCCL does not support allgather_coalesced");
 }
 
@@ -1549,11 +1547,11 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::_reduce_scatter_base(
     const ReduceScatterOptions& opts) {
 
   if (inputTensor.dtype() != outputTensor.dtype()) {
-    throw std::runtime_error("input tensor must be the same type as the outut tensor.");
+    TORCH_CHECK(false, "input tensor must be the same type as the outut tensor.");
   }
 
   if (inputTensor.numel() != outputTensor.numel() * size_) {
-    throw std::runtime_error("input tensor must be the same size as output size times world size");
+    TORCH_CHECK(false, "input tensor must be the same size as output size times world size");
   }
 
   // @lint-ignore CLANGTIDY
@@ -1821,7 +1819,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
     std::vector<int64_t>& /* unused */,
     std::vector<int64_t>& /* unused */,
     const AllToAllOptions& /* unused */) {
-  throw std::runtime_error(
+  TORCH_CHECK(false,
       "ProcessGroupNCCL only supports alltoall* for NCCL lib version >= 2.7.0");
 }
 
@@ -1829,7 +1827,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall(
     std::vector<at::Tensor>& /* unused */,
     std::vector<at::Tensor>& /* unused */,
     const AllToAllOptions& /* unused */) {
-  throw std::runtime_error(
+  TORCH_CHECK(false,
       "ProcessGroupNCCL only supports alltoall* for NCCL lib version >= 2.7.0");
 }
 
@@ -1837,7 +1835,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::send(
     std::vector<at::Tensor>& /* unused */,
     int /* unused */,
     int /* unused */) {
-  throw std::runtime_error(
+  TORCH_CHECK(false,
       "ProcessGroupNCCL only supports send for NCCL lib version >= 2.7.0");
 }
 
@@ -1845,7 +1843,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::recv(
     std::vector<at::Tensor>& /* unused */,
     int /* unused */,
     int /* unused */) {
-  throw std::runtime_error(
+  TORCH_CHECK(false,
       "ProcessGroupNCCL only supports recv for NCCL lib version >= 2.7.0");
 }
 #endif
@@ -1868,20 +1866,20 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::gather(
     std::vector<std::vector<at::Tensor>>& /* unused */,
     std::vector<at::Tensor>& /* unused */,
     const GatherOptions& /* unused */) {
-  throw std::runtime_error("ProcessGroupNCCL does not support gather");
+  TORCH_CHECK(false, "ProcessGroupNCCL does not support gather");
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::scatter(
     std::vector<at::Tensor>& /* unused */,
     std::vector<std::vector<at::Tensor>>& /* unused */,
     const ScatterOptions& /* unused */) {
-  throw std::runtime_error("ProcessGroupNCCL does not support scatter");
+  TORCH_CHECK(false, "ProcessGroupNCCL does not support scatter");
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::recvAnysource(
     std::vector<at::Tensor>& /* unused */,
     int /* unused */) {
-  throw std::runtime_error("ProcessGroupNCCL does not support recvAnysource");
+  TORCH_CHECK(false, "ProcessGroupNCCL does not support recvAnysource");
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::_allgather_base(
@@ -1892,11 +1890,11 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::_allgather_base(
   check_gpu_single_tensor(output_tensor);
 
   if (input_tensor.dtype() != output_tensor.dtype()) {
-    throw std::runtime_error("output tensor must have the same type as input tensor");
+    TORCH_CHECK(false, "output tensor must have the same type as input tensor");
   }
 
   if (input_tensor.numel() * size_ != output_tensor.numel()) {
-    throw std::runtime_error("output tensor size must be equal to world_size times input tensor size");
+    TORCH_CHECK(false, "output tensor size must be equal to world_size times input tensor size");
   }
 
   // just a wrapper to fit the collective interface

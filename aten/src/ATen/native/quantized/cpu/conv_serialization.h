@@ -193,6 +193,8 @@ ConvParamsSerializationTypeV3 parse_conv_serialized_state(c10::IValue v) {
 #define QCONV_SERIALIZATION_VERSION 2
 
 #if QCONV_SERIALIZATION_VERSION == 2
+using ConvParamsSerializationType = ConvParamsSerializationTypeV2;
+
 template <uint32_t kSpatialDim>
 ConvParamsSerializationTypeV2 serialize_conv(
     const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& params) {
@@ -232,7 +234,10 @@ ConvParamsSerializationTypeV2 serialize_conv(
 
   return std::tie(version, non_optional, optional);
 }
+
 #elif QCONV_SERIALIZATION_VERSION == 3
+using ConvParamsSerializationType = ConvParamsSerializationTypeV3;
+
 template <uint32_t kSpatialDim>
 ConvParamsSerializationTypeV3 serialize_conv(
     const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& params) {
@@ -262,6 +267,7 @@ ConvParamsSerializationTypeV3 serialize_conv(
   int64_t version = 3;
   return std::tie(version, config_vals, tensors);
 }
+
 #else
 #error "Invalid qconv serialization version."
 #endif

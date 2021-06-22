@@ -37,7 +37,7 @@ Tensor toNonOptFwGrad(const c10::optional<Tensor>& t);
 Tensor toNonOptPrimal(const c10::optional<Tensor>& t);
 Tensor toNonOptTensor(const c10::optional<Tensor>& t);
 
-bool any_variable_defined(variable_list& variables);
+bool any_variable_defined(const variable_list& variables);
 void copy_range(variable_list& out, IndexRange range, const at::Tensor & t);
 void copy_range(variable_list& out, IndexRange range, at::ArrayRef<at::Tensor> t);
 at::Tensor copysign_tensor_self_backward(const Tensor & grad, const Tensor & self, const Tensor & result);
