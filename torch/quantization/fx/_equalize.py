@@ -251,20 +251,12 @@ def get_weight_eq_obs(
         return op_node, weight_eq_obs
 
     elif op_node.op == 'call_function':
-        assert(isinstance(op_node.args[1], Node))
-        weight_observer_nodes = collect_producer_nodes(op_node.args[1])
-        if weight_observer_nodes is None:
-            return None, None
+        weight_node = maybe_get_weight_eq_obs_node(op_node, modules)
+        if weight_node is not None:
+            weight_eq_obs = modules[str(weight_node.target)]
+            assert(isinstance(weight_eq_obs, _WeightEqualizationObserver))
+            return op_node, weight_eq_obs
 
-        for weight_node in weight_observer_nodes:
-            if weight_node.op == 'call_module' and \
-               isinstance(modules[str(weight_node.target)], _WeightEqualizationObserver):
-
-                weight_eq_obs = modules[str(weight_node.target)]
-                assert(isinstance(weight_eq_obs, _WeightEqualizationObserver))
-                return op_node, weight_eq_obs
-
-        return None, None
     return None, None
 
 def maybe_get_weight_eq_obs_node(op_node: Node, modules: Dict[str, nn.Module]) -> Optional[Node]:
