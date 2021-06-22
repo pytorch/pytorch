@@ -171,7 +171,7 @@ errors may appear during compilation/runtime.
 '''
 CUDA_NOT_FOUND_MESSAGE = '''
 CUDA was not found on the system, please set the CUDA_HOME or the CUDA_PATH
-environment variable. The extension compilation will fail.
+environment variable or add NVCC to your system PATH. The extension compilation will fail.
 '''
 ROCM_HOME = _find_rocm_home()
 MIOPEN_HOME = _join_rocm_home('miopen') if ROCM_HOME else None
