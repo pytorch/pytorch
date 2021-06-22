@@ -827,7 +827,7 @@ class TestStandaloneCPPJIT(TestCase):
 
 class DummyXPUModule(object):
     @staticmethod
-    def is_avaliable():
+    def is_available():
         return True
 
 
@@ -842,11 +842,11 @@ class TestExtensionUtils(TestCase):
             torch._register_device_module('dummmy', DummyXPUModule)
 
         with self.assertRaises(AttributeError):
-            torch.xpu.is_avaliable()  # type: ignore[attr-defined]
+            torch.xpu.is_available()  # type: ignore[attr-defined]
 
         torch._register_device_module('xpu', DummyXPUModule)
 
-        torch.xpu.is_avaliable()  # type: ignore[attr-defined]
+        torch.xpu.is_available()  # type: ignore[attr-defined]
 
         # No supporting for override
         with self.assertRaisesRegex(RuntimeError, "The runtime module of"):
