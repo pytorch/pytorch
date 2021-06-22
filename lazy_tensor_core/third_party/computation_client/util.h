@@ -1,6 +1,8 @@
 #ifndef COMPUTATION_CLIENT_UTIL_H_
 #define COMPUTATION_CLIENT_UTIL_H_
 
+#include <c10/util/Optional.h>
+
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
@@ -13,7 +15,6 @@
 #include <type_traits>
 #include <vector>
 
-#include "absl/types/optional.h"
 #include "lazy_tensors/computation_client/types.h"
 #include "lazy_tensors/span.h"
 #include "lazy_tensors/status.h"
@@ -99,7 +100,7 @@ class MaybeRef {
   bool is_stored() const { return storage_.has_value(); }
 
  private:
-  absl::optional<T> storage_;
+  c10::optional<T> storage_;
   const T& ref_;
 };
 
@@ -125,7 +126,7 @@ class MaybePtr {
 
  private:
   T* ptr_ = nullptr;
-  absl::optional<T> storage_;
+  c10::optional<T> storage_;
 };
 
 template <typename C>
@@ -194,7 +195,7 @@ std::vector<T> ToVector(const S& input) {
 template <typename T>
 std::vector<T> GetValuesVector(
     lazy_tensors::Span<const T> values,
-    lazy_tensors::Span<const absl::optional<T>* const> opt_values) {
+    lazy_tensors::Span<const c10::optional<T>* const> opt_values) {
   std::vector<T> result(values.begin(), values.end());
   for (auto opt : opt_values) {
     if (*opt) {

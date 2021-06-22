@@ -18,13 +18,13 @@
 namespace torch_lazy_tensors {
 namespace {
 
-absl::optional<size_t> GetOutputIndex(bool is_device_data, size_t index) {
+c10::optional<size_t> GetOutputIndex(bool is_device_data, size_t index) {
   // The output of every result of an op-by-op computation is wrapped into a
   // tuple, so we need to use the index to extract it. Device data instead is
   // already unwrapped, so we need to pass an empty index so that TF/XRT code
   // uses the result buffer directly.
   if (is_device_data) {
-    return absl::nullopt;
+    return c10::nullopt;
   }
   return index;
 }

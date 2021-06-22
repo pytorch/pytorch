@@ -1,15 +1,16 @@
 #include "lazy_tensor_core/csrc/device.h"
 
+#include <c10/util/Optional.h>
+
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_split.h"
-#include "absl/types/optional.h"
 #include "lazy_tensors/computation_client/computation_client.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
 
 namespace torch_lazy_tensors {
 namespace {
 
-thread_local absl::optional<Device> g_current_device;
+thread_local c10::optional<Device> g_current_device;
 
 std::string DeviceTypeToString(DeviceType hw_type) {
   switch (hw_type) {

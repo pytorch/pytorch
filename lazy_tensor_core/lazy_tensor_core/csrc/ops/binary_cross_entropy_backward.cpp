@@ -10,7 +10,7 @@ namespace ops {
 
 BinaryCrossEntropyBackward::BinaryCrossEntropyBackward(
     const Value& grad_output, const Value& logits, const Value& labels,
-    const absl::optional<Value>& weight, ReductionMode reduction)
+    const c10::optional<Value>& weight, ReductionMode reduction)
     : Node(ir::OpKind(at::aten::binary_cross_entropy_backward),
            lazy_tensors::util::GetValuesVector<Value>(
                {grad_output, logits, labels}, {&weight}),
@@ -23,7 +23,7 @@ BinaryCrossEntropyBackward::BinaryCrossEntropyBackward(
 }
 
 NodePtr BinaryCrossEntropyBackward::Clone(OpList operands) const {
-  absl::optional<Value> weight;
+  c10::optional<Value> weight;
   if (operands.size() > 3) {
     weight = operands.at(3);
   }

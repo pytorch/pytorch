@@ -1,9 +1,10 @@
 #pragma once
 
+#include <c10/util/Optional.h>
+
 #include <memory>
 #include <vector>
 
-#include "absl/types/optional.h"
 #include "lazy_tensor_core/csrc/ir.h"
 #include "lazy_tensors/shape.h"
 #include "lazy_tensors/types.h"
@@ -85,11 +86,11 @@ struct ViewInfo {
   // The permutation to be used. If empty, this is not a permute operation.
   std::vector<lazy_tensors::int64> permutation;
   // Information used for sliced views.
-  absl::optional<SelectInfo> select;
+  c10::optional<SelectInfo> select;
   // Information used for as_strided views.
-  absl::optional<AsStridedInfo> as_strided;
+  c10::optional<AsStridedInfo> as_strided;
   // Information used for diagonal views.
-  absl::optional<DiagonalInfo> diagonal;
+  c10::optional<DiagonalInfo> diagonal;
 };
 
 // When a "view" (capture by reference) is taken on a node, an Alias object is

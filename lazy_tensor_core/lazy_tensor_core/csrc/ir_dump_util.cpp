@@ -1,10 +1,11 @@
 #include "lazy_tensor_core/csrc/ir_dump_util.h"
 
+#include <c10/util/Optional.h>
+
 #include <regex>
 #include <sstream>
 #include <unordered_map>
 
-#include "absl/types/optional.h"
 #include "lazy_tensor_core/csrc/compiler/backend_impl_interface.h"
 #include "lazy_tensor_core/csrc/ir_util.h"
 #include "lazy_tensor_core/csrc/lowering_context.h"
@@ -28,13 +29,13 @@ std::string::size_type SkipTagSeparator(const std::string& node_string,
   return node_string.compare(pos, 2, ", ") == 0 ? pos + 2 : pos;
 }
 
-absl::optional<AttrTag> ParseAttrTag(const std::string& node_string,
-                                     std::string::size_type pos) {
+c10::optional<AttrTag> ParseAttrTag(const std::string& node_string,
+                                    std::string::size_type pos) {
   const std::regex tag_regex("^([a-zA-Z0-9_]+)=");
   std::smatch match;
   if (!std::regex_search(node_string.begin() + pos, node_string.end(), match,
                          tag_regex)) {
-    return absl::nullopt;
+    return c10::nullopt;
   }
 
   std::string::size_type vpos = match[1].second - node_string.begin() + 1;
@@ -94,12 +95,12 @@ std::unordered_map<const Node*, size_t> GetRootsIds(
   return roots_ids;
 }
 
-absl::optional<size_t> GetRootNodeId(
+c10::optional<size_t> GetRootNodeId(
     const Node* node,
     const std::unordered_map<const Node*, size_t>& roots_ids) {
   auto it = roots_ids.find(node);
   if (it == roots_ids.end()) {
-    return absl::nullopt;
+    return c10::nullopt;
   }
   return it->second;
 }

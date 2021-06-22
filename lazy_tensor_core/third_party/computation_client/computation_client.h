@@ -1,6 +1,8 @@
 #ifndef COMPUTATION_CLIENT_COMPUTATION_CLIENT_H_
 #define COMPUTATION_CLIENT_COMPUTATION_CLIENT_H_
 
+#include <c10/util/Optional.h>
+
 #include <algorithm>
 #include <cmath>
 #include <map>
@@ -8,7 +10,6 @@
 #include <string>
 #include <vector>
 
-#include "absl/types/optional.h"
 #include "lazy_tensors/computation_client/client_data.h"
 #include "lazy_tensors/computation_client/metrics.h"
 #include "lazy_tensors/computation_client/types.h"
@@ -95,11 +96,11 @@ class ComputationClient {
   struct ExecuteChainedOp {
     struct Input {
       size_t op_index;
-      absl::optional<size_t> output_index;
+      c10::optional<size_t> output_index;
     };
     struct Output {
       size_t result_index;
-      absl::optional<size_t> output_index;
+      c10::optional<size_t> output_index;
     };
 
     DataPtr device_data;

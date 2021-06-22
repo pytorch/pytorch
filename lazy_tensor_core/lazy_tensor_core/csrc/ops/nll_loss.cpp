@@ -9,7 +9,7 @@ namespace ir {
 namespace ops {
 
 NllLoss::NllLoss(const Value& logits, const Value& labels,
-                 const absl::optional<Value>& weight, ReductionMode reduction,
+                 const c10::optional<Value>& weight, ReductionMode reduction,
                  int ignore_index)
     : Node(ir::OpKind(at::aten::nll_loss),
            lazy_tensors::util::GetValuesVector<Value>({logits, labels},
@@ -24,7 +24,7 @@ NllLoss::NllLoss(const Value& logits, const Value& labels,
 }
 
 NodePtr NllLoss::Clone(OpList operands) const {
-  absl::optional<Value> weight;
+  c10::optional<Value> weight;
   if (operands.size() > 2) {
     weight = operands.at(2);
   }
