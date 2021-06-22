@@ -82,7 +82,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: ubuntu-18.04
     env:
-      NUM_TEST_SHARDS: 1
+      NUM_TEST_SHARDS: 2
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     container:
@@ -102,7 +102,7 @@ jobs:
     runs-on: windows.8xlarge.nvidia.gpu
     env:
       JOB_BASE_NAME: pytorch-win-vs2019-cuda11-cudnn8-py3-test
-      NUM_TEST_SHARDS: 1
+      NUM_TEST_SHARDS: 2
       TEST_CONFIG: ${{ matrix.test_config }}
     needs:
       - build
@@ -214,7 +214,7 @@ jobs:
           CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
           CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
-          CIRCLE_WORKFLOW_ID: ${{ github.run_id }} # dunno if this corresponds
+          CIRCLE_WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         run: |
           export PYTHONPATH=$PWD
           python tools/print_test_stats.py --upload-to-s3 --compare-with-s3 test
