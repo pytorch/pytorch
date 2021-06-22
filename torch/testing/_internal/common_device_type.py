@@ -253,7 +253,7 @@ except ImportError:
 
 
 def _dtype_name(dtype):
-    """ Returns the pretty form of the dtype (e.g. torch.int64 -> int64). """
+    """ Returns the pretty name of the dtype (e.g. torch.int64 -> int64). """
     return str(dtype).split('.')[1]
 
 
@@ -361,8 +361,11 @@ class DeviceTypeTestBase(TestCase):
             dtypes = cls._get_dtypes(test)
             dtypes = tuple(dtypes) if dtypes is not None else (None,)
             for dtype in dtypes:
-                test_name = '{}_{}_{}'.format(name, cls.device_type, _dtype_name(dtype))
-                instantiate_test_helper(cls=cls, name=test_name, test=test, param_kwargs={'dtype': dtype})
+                test_name = '{}_{}{}'.format(name,
+                                             cls.device_type,
+                                             '_' + _dtype_name(dtype) if dtype else '')
+                param_kwargs = {'dtype': dtype} if dtype else {}
+                instantiate_test_helper(cls=cls, name=test_name, test=test, param_kwargs=param_kwargs)
 
     def run(self, result=None):
         super().run(result=result)
@@ -705,15 +708,16 @@ class ops(_TestParameterizer):
                 assert self.opinfo_dtypes == OpDTypes.basic, "ops(dtypes=...) and the dtypes decorator are incompatible"
 
             for dtype in dtypes:
-                # Construct the test name and parameter kwargs to pass to the test.
-                test_name = '{}_{}'.format(test.__name__, op.name.replace('.', '_'))
-                if op.variant_test_name:
-                    test_name += '_' + op.variant_test_name
-                test_name += '_{}'.format(device_cls.device_type)
-                param_kwargs = {'op': op}
+                # Construct the test name.
+                test_name = '{}_{}{}_{}{}'.format(test.__name__,
+                                                  op.name.replace('.', '_'),
+                                                  '_' + op.variant_test_name if op.variant_test_name else '',
+                                                  device_cls.device_type,
+                                                  '_' + _dtype_name(dtype) if dtype else '')
 
+                # Construct parameter kwargs to pass to the test.
+                param_kwargs = {'op': op}
                 if dtype is not None:
-                    test_name += '_{}'.format(_dtype_name(dtype))
                     param_kwargs['dtype'] = dtype
 
                 # Wraps instantiated test with op decorators
