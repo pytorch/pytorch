@@ -42,8 +42,8 @@
  * Version 3
  *
  * - Fields:
- *  0. version (int)
- *  1. list of integer configuration values
+ *  0. version (int64_t)
+ *  1. list of int64_t configuration values
  *    - kSpatialDim
  *    - stride x kSpatialDim
  *    - padding x kSpatialDim

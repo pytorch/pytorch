@@ -199,7 +199,8 @@ void unpackQuantizedWeightsHelper(
         auto tensors = elements[2].to<std::vector<c10::optional<at::Tensor>>>();
 
         c10::optional<at::Tensor> weight = tensors[1];
-        TORCH_INTERNAL_ASSERT(weight, "Weight should always be present in serialized qconv.");
+        TORCH_INTERNAL_ASSERT(
+            weight, "Weight should always be present in serialized qconv.");
         unpacked_weight = *weight;
         bias = tensors[2];
 
@@ -227,7 +228,8 @@ void unpackQuantizedWeightsHelper(
         idx++;
         int64_t flags = config_vals.at(idx);
         idx++;
-        TORCH_INTERNAL_ASSERT(idx == config_vals.size(),
+        TORCH_INTERNAL_ASSERT(
+            idx == config_vals.size(),
             "Unexpected length of config_vals, expected ",
             idx,
             " got ",
@@ -243,7 +245,8 @@ void unpackQuantizedWeightsHelper(
         dilation = dilation_int;
         groups = groups_int;
         transpose = transpose_int;
-      } else if (params_type == QuantizedParamsType::CONV &&
+      } else if (
+          params_type == QuantizedParamsType::CONV &&
           ser_tup->elements()[0].isString()) {
         auto elements = ser_tup->elements();
         auto version = elements[0].toStringRef();
