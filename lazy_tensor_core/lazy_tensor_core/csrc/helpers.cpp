@@ -2,7 +2,6 @@
 
 #include <limits>
 
-#include "absl/strings/str_join.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/ltc_logging.h"
@@ -10,6 +9,7 @@
 #include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/primitive_util.h"
 #include "lazy_tensors/shape_util.h"
+#include "lazy_tensors/str_join.h"
 
 namespace torch_lazy_tensors {
 
@@ -152,7 +152,8 @@ c10::optional<Helpers::DynamicReshapeInfo> Helpers::GetDynamicReshapeInfo(
       LTC_CHECK_LE(out_size, size_at_dyndim / input_shape.dimensions(
                                                   input_dynamic_dimension))
           << "Unable to map dynamic dimension of shape " << input_shape
-          << " to output sizes (" << absl::StrJoin(output_sizes, ", ") << ")";
+          << " to output sizes (" << lazy_tensors::StrJoin(output_sizes, ", ")
+          << ")";
       out_size *= output_sizes[i];
       if (out_size >= size_at_dyndim) {
         dynamic_dimension = i;
@@ -161,7 +162,8 @@ c10::optional<Helpers::DynamicReshapeInfo> Helpers::GetDynamicReshapeInfo(
     }
     LTC_CHECK(dynamic_dimension >= 0)
         << "Unable to map dynamic dimension of shape " << input_shape
-        << " to output sizes (" << absl::StrJoin(output_sizes, ", ") << ")";
+        << " to output sizes (" << lazy_tensors::StrJoin(output_sizes, ", ")
+        << ")";
     info.dynamic_dimension = dynamic_dimension;
     info.output_shape.set_dynamic_dimension(info.dynamic_dimension, true);
   }
@@ -266,8 +268,8 @@ std::vector<lazy_tensors::int64> Helpers::GetPromotedShape(
     lazy_tensors::int64 dim1 = shape1_dims[shape1_dims.size() - min_size + i];
     lazy_tensors::int64 dim2 = shape2_dims[shape2_dims.size() - min_size + i];
     LTC_CHECK(dim1 == dim2 || dim1 == 1 || dim2 == 1)
-        << "(" << absl::StrJoin(shape1_dims, ", ") << ") and ("
-        << absl::StrJoin(shape1_dims, ", ") << ")";
+        << "(" << lazy_tensors::StrJoin(shape1_dims, ", ") << ") and ("
+        << lazy_tensors::StrJoin(shape1_dims, ", ") << ")";
     if (dim1 == 0 || dim2 == 0) {
       dimensions.push_back(0);
     } else {

@@ -1,9 +1,9 @@
 #include "lazy_tensor_core/csrc/ops/upsample_nearest2d_backward.h"
 
-#include "absl/strings/str_join.h"
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/util.h"
+#include "lazy_tensors/str_join.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -29,8 +29,8 @@ NodePtr UpsampleNearestBackward::Clone(OpList operands) const {
 std::string UpsampleNearestBackward::ToString() const {
   std::stringstream ss;
   ss << Node::ToString() << ", output_size=("
-     << absl::StrJoin(output_size_, ", ") << "), input_size=("
-     << absl::StrJoin(input_size_, ", ") << ")";
+     << lazy_tensors::StrJoin(output_size_, ", ") << "), input_size=("
+     << lazy_tensors::StrJoin(input_size_, ", ") << ")";
   return ss.str();
 }
 

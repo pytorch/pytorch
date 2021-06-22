@@ -1,9 +1,9 @@
 #include "lazy_tensor_core/csrc/ops/convolution_backward_overrideable.h"
 
-#include "absl/strings/str_join.h"
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/util.h"
+#include "lazy_tensors/str_join.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -38,11 +38,11 @@ NodePtr ConvolutionBackwardOverrideable::Clone(OpList operands) const {
 
 std::string ConvolutionBackwardOverrideable::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", stride=(" << absl::StrJoin(stride_, ", ")
-     << "), padding=(" << absl::StrJoin(padding_, ", ") << "), dilation=("
-     << absl::StrJoin(dilation_, ", ") << "), transpose=" << transposed_
-     << ", output_padding=(" << absl::StrJoin(output_padding_, ", ")
-     << "), groups=" << groups_;
+  ss << Node::ToString() << ", stride=(" << lazy_tensors::StrJoin(stride_, ", ")
+     << "), padding=(" << lazy_tensors::StrJoin(padding_, ", ")
+     << "), dilation=(" << lazy_tensors::StrJoin(dilation_, ", ")
+     << "), transpose=" << transposed_ << ", output_padding=("
+     << lazy_tensors::StrJoin(output_padding_, ", ") << "), groups=" << groups_;
   return ss.str();
 }
 

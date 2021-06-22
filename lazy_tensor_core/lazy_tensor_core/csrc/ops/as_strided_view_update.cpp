@@ -28,8 +28,8 @@ AsStridedViewUpdate::AsStridedViewUpdate(
 
 std::string AsStridedViewUpdate::ToString() const {
   std::stringstream ss;
-  ss << Node::ToString() << ", size=(" << absl::StrJoin(size_, ", ")
-     << "), stride=(" << absl::StrJoin(stride_, ", ")
+  ss << Node::ToString() << ", size=(" << lazy_tensors::StrJoin(size_, ", ")
+     << "), stride=(" << lazy_tensors::StrJoin(stride_, ", ")
      << "), storage_offset=" << storage_offset_;
   return ss.str();
 }

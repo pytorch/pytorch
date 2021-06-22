@@ -1,8 +1,8 @@
 #include "lazy_tensor_core/csrc/ops/upsample_bilinear2d.h"
 
-#include "absl/strings/str_join.h"
 #include "lazy_tensor_core/csrc/compiler/node_lowering.h"
 #include "lazy_tensors/computation_client/util.h"
+#include "lazy_tensors/str_join.h"
 #include "lazy_tensors/util.h"
 
 namespace torch_lazy_tensors {
@@ -29,7 +29,7 @@ NodePtr UpsampleBilinear::Clone(OpList operands) const {
 std::string UpsampleBilinear::ToString() const {
   std::stringstream ss;
   ss << Node::ToString() << ", output_size=("
-     << absl::StrJoin(output_size_, ", ")
+     << lazy_tensors::StrJoin(output_size_, ", ")
      << "), align_corners=" << align_corners_;
   return ss.str();
 }
