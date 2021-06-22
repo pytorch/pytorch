@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/autograd/profiler_kineto.h>
 
 #include <torch/csrc/jit/frontend/tracer.h>
@@ -8,6 +9,7 @@
 
 #ifdef USE_KINETO
 #include <libkineto.h>
+#include <time_since_epoch.h>
 
 #ifndef _MSC_VER
 // TODO: TO be removed, once this properly works from libkineto
@@ -31,8 +33,7 @@ uint64_t next_correlation_id() {
 }
 
 inline int64_t getTimeUs() {
-  using namespace std::chrono;
-  return duration_cast<microseconds>(high_resolution_clock::now().time_since_epoch()).count();
+  return libkineto::timeSinceEpoch(std::chrono::system_clock::now());
 }
 
 std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes);
@@ -331,7 +332,7 @@ void pushProfilingCallbacks() {
 std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes) {
   std::ostringstream oss;
   oss << "[";
-  for (size_t t_idx = 0; t_idx < shapes.size(); ++t_idx) {
+  for (const auto t_idx : c10::irange(shapes.size())) {
     if (t_idx > 0) {
       oss << ", ";
     }
@@ -384,6 +385,7 @@ void prepareProfiler(
 
   std::set<libkineto::ActivityType> cpuTypes = {
     libkineto::ActivityType::CPU_OP,
+    libkineto::ActivityType::CPU_INSTANT_EVENT,
 #ifdef USE_KINETO_UPDATED
     libkineto::ActivityType::USER_ANNOTATION,
 #endif

@@ -1,6 +1,7 @@
 import itertools
 import numpy as np
 import os
+import os.path
 import pickle
 import random
 import sys
@@ -9,10 +10,16 @@ import tempfile
 import warnings
 import zipfile
 
+import unittest
 from unittest import skipIf
 from typing import (
     Any, Awaitable, Dict, Generic, Iterator, List, NamedTuple, Optional, Tuple,
     Type, TypeVar, Set, Union)
+import http.server
+import socketserver
+import threading
+import time
+from functools import partial
 
 import torch
 import torch.nn as nn
@@ -67,6 +74,7 @@ def create_temp_dir_and_files():
 
     return [(temp_dir, temp_file1_name, temp_file2_name, temp_file3_name),
             (temp_sub_dir, temp_sub_file1_name, temp_sub_file2_name)]
+
 
 class TestIterableDataPipeBasic(TestCase):
 
@@ -248,6 +256,139 @@ class TestIterableDataPipeBasic(TestCase):
         self.assertEqual(count, 8)
 
 
+class FileLoggerSimpleHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
+    def __init__(self, *args, logfile=None, **kwargs):
+        self.__loggerHandle = None
+        if logfile is not None:
+            self.__loggerHandle = open(logfile, 'a+')
+        super().__init__(*args, **kwargs)
+
+    def log_message(self, format, *args):
+        if self.__loggerHandle is not None:
+            self.__loggerHandle.write("%s - - [%s] %s\n" %
+                                      (self.address_string(),
+                                       self.log_date_time_string(),
+                                       format % args))
+        return
+
+    def finish(self):
+        if self.__loggerHandle is not None:
+            self.__loggerHandle.close()
+        super().finish()
+
+
+def setUpLocalServerInThread():
+    try:
+        Handler = partial(FileLoggerSimpleHTTPRequestHandler, logfile=None)
+        socketserver.TCPServer.allow_reuse_address = True
+
+        server = socketserver.TCPServer(("", 0), Handler)
+        server_addr = "{host}:{port}".format(host=server.server_address[0], port=server.server_address[1])
+        server_thread = threading.Thread(target=server.serve_forever)
+        server_thread.start()
+
+        # Wait a bit for the server to come up
+        time.sleep(3)
+
+        return (server_thread, server_addr, server)
+    except Exception:
+        raise
+
+
+def create_temp_files_for_serving(tmp_dir, file_count, file_size,
+                                  file_url_template):
+    furl_local_file = os.path.join(tmp_dir, "urls_list")
+    with open(furl_local_file, 'w') as fsum:
+        for i in range(0, file_count):
+            f = os.path.join(tmp_dir, "webfile_test_{num}.data".format(num=i))
+
+            write_chunk = 1024 * 1024 * 16
+            rmn_size = file_size
+            while rmn_size > 0:
+                with open(f, 'ab+') as fout:
+                    fout.write(os.urandom(min(rmn_size, write_chunk)))
+                rmn_size = rmn_size - min(rmn_size, write_chunk)
+
+            fsum.write(file_url_template.format(num=i))
+
+
+class TestIterableDataPipeHttp(TestCase):
+    __server_thread: threading.Thread
+    __server_addr: str
+    __server: socketserver.TCPServer
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            (cls.__server_thread, cls.__server_addr,
+             cls.__server) = setUpLocalServerInThread()
+        except Exception as e:
+            warnings.warn("TestIterableDataPipeHttp could\
+                          not set up due to {0}".format(str(e)))
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            cls.__server.shutdown()
+            cls.__server_thread.join(timeout=15)
+        except Exception as e:
+            warnings.warn("TestIterableDataPipeHttp could\
+                           not tear down (clean up temp directory or terminate\
+                           local server) due to {0}".format(str(e)))
+
+    def _http_test_base(self, test_file_size, test_file_count, timeout=None,
+                        chunk=None):
+
+        def _get_data_from_tuple_fn(data, *args, **kwargs):
+            return data[args[0]]
+
+        with tempfile.TemporaryDirectory(dir=os.getcwd()) as tmpdir:
+            # create tmp dir and files for test
+            base_tmp_dir = os.path.basename(os.path.normpath(tmpdir))
+            file_url_template = ("http://{server_addr}/{tmp_dir}/"
+                                 "/webfile_test_{num}.data\n")\
+                .format(server_addr=self.__server_addr, tmp_dir=base_tmp_dir,
+                        num='{num}')
+            create_temp_files_for_serving(tmpdir, test_file_count,
+                                          test_file_size, file_url_template)
+
+            datapipe_dir_f = dp.iter.ListDirFiles(tmpdir, '*_list')
+            datapipe_f_lines = dp.iter.ReadLinesFromFile(datapipe_dir_f)
+            datapipe_line_url: IterDataPipe[str] = \
+                dp.iter.Map(datapipe_f_lines, _get_data_from_tuple_fn, (1,))
+            datapipe_http = dp.iter.HttpReader(datapipe_line_url,
+                                               timeout=timeout)
+            datapipe_tob = dp.iter.ToBytes(datapipe_http, chunk=chunk)
+
+            for (url, data) in datapipe_tob:
+                self.assertGreater(len(url), 0)
+                self.assertRegex(url, r'^http://.+\d+.data$')
+                if chunk is not None:
+                    self.assertEqual(len(data), chunk)
+                else:
+                    self.assertEqual(len(data), test_file_size)
+
+    @unittest.skip("Stress test on large amount of files skipped\
+                    due to the CI timing constraint.")
+    def test_stress_http_reader_iterable_datapipes(self):
+        test_file_size = 10
+        #   STATS: It takes about 5 hours to stress test 16 * 1024 * 1024
+        #          files locally
+        test_file_count = 1024
+        self._http_test_base(test_file_size, test_file_count)
+
+    @unittest.skip("Test on the very large file skipped\
+                due to the CI timing constraint.")
+    def test_large_files_http_reader_iterable_datapipes(self):
+        #   STATS: It takes about 11 mins to test a large file of 64GB locally
+        test_file_size = 1024 * 1024 * 128
+        test_file_count = 1
+        timeout = 30
+        chunk = 1024 * 1024 * 8
+        self._http_test_base(test_file_size, test_file_count, timeout=timeout,
+                             chunk=chunk)
+
+
 class IDP_NoLen(IterDataPipe):
     def __init__(self, input_dp):
         super().__init__()
@@ -288,8 +429,10 @@ class MDP(MapDataPipe):
 def _fake_fn(data, *args, **kwargs):
     return data
 
+
 def _fake_filter_fn(data, *args, **kwargs):
     return data >= 5
+
 
 def _worker_init_fn(worker_id):
     random.seed(123)
@@ -377,6 +520,43 @@ class TestFunctionalIterDataPipe(TestCase):
         for x, y in zip(map_dp_nl, input_dp_nl):
             self.assertEqual(x, torch.tensor(y, dtype=torch.float))
 
+    def test_map_datapipe_nested_level(self):
+
+        input_dp = IDP([list(range(10)) for _ in range(3)])
+
+        def fn(item, dtype=torch.float, *, sum=False):
+            data = torch.tensor(item, dtype=dtype)
+            return data if not sum else data.sum()
+
+        with warnings.catch_warnings(record=True) as wa:
+            map_dp = input_dp.map(lambda ls: ls * 2, nesting_level=0)
+            self.assertEqual(len(wa), 1)
+            self.assertRegex(str(wa[0].message), r"^Lambda function is not supported for pickle")
+        self.assertEqual(len(input_dp), len(map_dp))
+        for x, y in zip(map_dp, input_dp):
+            self.assertEqual(x, y * 2)
+
+        map_dp = input_dp.map(fn, nesting_level=1)
+        self.assertEqual(len(input_dp), len(map_dp))
+        for x, y in zip(map_dp, input_dp):
+            self.assertEqual(len(x), len(y))
+            for a, b in zip(x, y):
+                self.assertEqual(a, torch.tensor(b, dtype=torch.float))
+
+        map_dp = input_dp.map(fn, nesting_level=-1)
+        self.assertEqual(len(input_dp), len(map_dp))
+        for x, y in zip(map_dp, input_dp):
+            self.assertEqual(len(x), len(y))
+            for a, b in zip(x, y):
+                self.assertEqual(a, torch.tensor(b, dtype=torch.float))
+
+        map_dp = input_dp.map(fn, nesting_level=4)
+        with self.assertRaises(IndexError):
+            list(map_dp)
+
+        with self.assertRaises(ValueError):
+            input_dp.map(fn, nesting_level=-2)
+
     def test_collate_datapipe(self):
         arrs = [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
         input_dp = IDP(arrs)
@@ -422,6 +602,54 @@ class TestFunctionalIterDataPipe(TestCase):
         batch_dp_nl = input_dp_nl.batch(batch_size=2)
         with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
             len(batch_dp_nl)
+
+    def test_unbatch_datapipe(self):
+
+        target_length = 6
+        prebatch_dp = IDP(range(target_length))
+
+        input_dp = prebatch_dp.batch(3)
+        unbatch_dp = input_dp.unbatch()
+        self.assertEqual(len(list(unbatch_dp)), target_length)
+        for i, res in zip(prebatch_dp, unbatch_dp):
+            self.assertEqual(i, res)
+
+        input_dp = IDP([[0, 1, 2], [3, 4, 5]])
+        unbatch_dp = input_dp.unbatch()
+        self.assertEqual(len(list(unbatch_dp)), target_length)
+        for i, res in zip(prebatch_dp, unbatch_dp):
+            self.assertEqual(i, res)
+
+        input_dp = IDP([[[0, 1], [2, 3]], [[4, 5], [6, 7]]])
+
+        unbatch_dp = input_dp.unbatch()
+        expected_dp = [[0, 1], [2, 3], [4, 5], [6, 7]]
+        self.assertEqual(len(list(unbatch_dp)), 4)
+        for i, res in zip(expected_dp, unbatch_dp):
+            self.assertEqual(i, res)
+
+        unbatch_dp = input_dp.unbatch(unbatch_level=2)
+        expected_dp2 = [0, 1, 2, 3, 4, 5, 6, 7]
+        self.assertEqual(len(list(unbatch_dp)), 8)
+        for i, res in zip(expected_dp2, unbatch_dp):
+            self.assertEqual(i, res)
+
+        unbatch_dp = input_dp.unbatch(unbatch_level=-1)
+        self.assertEqual(len(list(unbatch_dp)), 8)
+        for i, res in zip(expected_dp2, unbatch_dp):
+            self.assertEqual(i, res)
+
+        input_dp = IDP([[0, 1, 2], [3, 4, 5]])
+        with self.assertRaises(ValueError):
+            unbatch_dp = input_dp.unbatch(unbatch_level=-2)
+            for i in unbatch_dp:
+                print(i)
+
+        with self.assertRaises(IndexError):
+            unbatch_dp = input_dp.unbatch(unbatch_level=5)
+            for i in unbatch_dp:
+                print(i)
+
 
     def test_bucket_batch_datapipe(self):
         input_dp = IDP(range(20))
@@ -498,6 +726,59 @@ class TestFunctionalIterDataPipe(TestCase):
         filter_dp = input_ds.filter(filter_fn=_non_bool_fn)
         with self.assertRaises(ValueError):
             temp = list(filter_dp)
+
+    def test_filter_datapipe_nested_list(self):
+
+        input_ds = IDP(range(10)).batch(5)
+
+        def _filter_fn(data, val):
+            return data >= val
+
+        filter_dp = input_ds.filter(nesting_level=-1, filter_fn=_filter_fn, fn_kwargs={'val': 5})
+        expected_dp1 = [[5, 6, 7, 8, 9]]
+        self.assertEqual(len(list(filter_dp)), len(expected_dp1))
+        for data, exp in zip(filter_dp, expected_dp1):
+            self.assertEqual(data, exp)
+
+        filter_dp = input_ds.filter(nesting_level=-1, drop_empty_batches=False, filter_fn=_filter_fn, fn_kwargs={'val': 5})
+        expected_dp2: List[List[int]] = [[], [5, 6, 7, 8, 9]]
+        self.assertEqual(len(list(filter_dp)), len(expected_dp2))
+        for data, exp in zip(filter_dp, expected_dp2):
+            self.assertEqual(data, exp)
+
+        with self.assertRaises(IndexError):
+            filter_dp = input_ds.filter(nesting_level=5, filter_fn=_filter_fn, fn_kwargs={'val': 5})
+            temp = list(filter_dp)
+
+        input_ds = IDP(range(10)).batch(3)
+
+        filter_dp = input_ds.filter(lambda ls: len(ls) >= 3)
+        expected_dp3: List[List[int]] = [[0, 1, 2], [3, 4, 5], [6, 7, 8]]
+        self.assertEqual(len(list(filter_dp)), len(expected_dp3))
+        for data, exp in zip(filter_dp, expected_dp3):
+            self.assertEqual(data, exp)
+
+        input_ds = IDP([[[0, 1, 2], [3, 4, 5]], [[6, 7, 8], [1, 2, 3]]])
+        filter_dp = input_ds.filter(lambda x: x > 3, nesting_level=-1)
+        expected_dp4 = [[[4, 5]], [[6, 7, 8]]]
+        self.assertEqual(len(list(filter_dp)), len(expected_dp4))
+        for data2, exp2 in zip(filter_dp, expected_dp4):
+            self.assertEqual(data2, exp2)
+
+        input_ds = IDP([[[0, 1, 2], [3, 4, 5]], [[6, 7, 8], [1, 2, 3]]])
+        filter_dp = input_ds.filter(lambda x: x > 7, nesting_level=-1)
+        expected_dp5 = [[[8]]]
+        self.assertEqual(len(list(filter_dp)), len(expected_dp5))
+        for data2, exp2 in zip(filter_dp, expected_dp5):
+            self.assertEqual(data2, exp2)
+
+        input_ds = IDP([[[0, 1], [3, 4]], [[6, 7, 8], [1, 2, 3]]])
+        filter_dp = input_ds.filter(lambda ls: len(ls) >= 3, nesting_level=1)
+        expected_dp6 = [[[6, 7, 8], [1, 2, 3]]]
+        self.assertEqual(len(list(filter_dp)), len(expected_dp6))
+        for data2, exp2 in zip(filter_dp, expected_dp6):
+            self.assertEqual(data2, exp2)
+
 
     def test_sampler_datapipe(self):
         input_dp = IDP(range(10))
@@ -913,7 +1194,7 @@ class TestTyping(TestCase):
                [1, '1', 2, '2'])
         for ds in dss:
             dp = DP(ds)
-            with self.assertRaisesRegex(RuntimeError, r"Expected an instance of subtype"):
+            with self.assertRaisesRegex(RuntimeError, r"Expected an instance as subtype"):
                 list(dp)
 
             with runtime_validation_disabled():
@@ -921,8 +1202,45 @@ class TestTyping(TestCase):
                 with runtime_validation_disabled():
                     self.assertEqual(list(dp), ds)
 
-            with self.assertRaisesRegex(RuntimeError, r"Expected an instance of subtype"):
+            with self.assertRaisesRegex(RuntimeError, r"Expected an instance as subtype"):
                 list(dp)
+
+
+    def test_reinforce(self):
+        T = TypeVar('T', int, str)
+
+
+        class DP(IterDataPipe[T]):
+            def __init__(self, ds):
+                self.ds = ds
+
+            @runtime_validation
+            def __iter__(self) -> Iterator[T]:
+                for d in self.ds:
+                    yield d
+
+        ds = list(range(10))
+        # Valid type reinforcement
+        dp = DP(ds).reinforce_type(int)
+        self.assertTrue(dp.type, int)
+        self.assertEqual(list(dp), ds)
+
+        # Invalid type
+        with self.assertRaisesRegex(TypeError, r"'expected_type' must be a type"):
+            dp = DP(ds).reinforce_type(1)
+
+        # Type is not subtype
+        with self.assertRaisesRegex(TypeError, r"Expected 'expected_type' as subtype of"):
+            dp = DP(ds).reinforce_type(float)
+
+        # Invalid data at runtime
+        dp = DP(ds).reinforce_type(str)
+        with self.assertRaisesRegex(RuntimeError, r"Expected an instance as subtype"):
+            list(dp)
+
+        # Context Manager to disable the runtime validation
+        with runtime_validation_disabled():
+            self.assertEqual(list(d for d in dp), ds)
 
 
 if __name__ == '__main__':

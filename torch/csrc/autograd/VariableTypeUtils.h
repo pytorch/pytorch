@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/irange.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
 
 #include <torch/csrc/autograd/variable.h>
@@ -84,8 +85,7 @@ inline void throw_error_for_complex_autograd(const Tensor& tensor, const char* n
 }
 
 inline void throw_error_for_complex_autograd(const TensorList& tensorlist, const char* name) {
-  // NOLINTNEXTLINE(performance-for-range-copy)
-  for (auto tensor: tensorlist) {
+  for (const auto& tensor: tensorlist) {
     throw_error_for_complex_autograd(tensor, name);
   }
 }
@@ -341,7 +341,7 @@ inline std::vector<SavedVariable> make_saved_variable_list(const c10::List<c10::
 
 inline std::vector<std::vector<int64_t>> to_args_sizes(TensorList tensors) {
   std::vector<std::vector<int64_t>> args_sizes(tensors.size());
-  for (size_t i = 0; i < tensors.size(); ++i) {
+  for (const auto i : c10::irange(tensors.size())) {
     args_sizes[i] = tensors[i].sizes().vec();
   }
   return args_sizes;
@@ -349,7 +349,7 @@ inline std::vector<std::vector<int64_t>> to_args_sizes(TensorList tensors) {
 
 inline std::vector<ScalarType> to_args_scalartypes(TensorList tensors) {
   std::vector<ScalarType> args_scalartypes(tensors.size());
-  for (size_t i = 0; i < tensors.size(); ++i) {
+  for (const auto i : c10::irange(tensors.size())) {
     args_scalartypes[i] = tensors[i].scalar_type();
   }
   return args_scalartypes;
