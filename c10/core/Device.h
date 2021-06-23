@@ -86,6 +86,11 @@ struct C10_API Device final {
     return type_ == DeviceType::HIP;
   }
 
+  /// Return true if the device is of VE type.
+  bool is_ve() const noexcept {
+    return type_ == DeviceType::VE;
+  }
+
   /// Return true if the device is of XPU type.
   bool is_xpu() const noexcept {
     return type_ == DeviceType::XPU;
