@@ -254,9 +254,11 @@ static void sanityCheckStack(const c10::OperatorHandle& op, torch::jit::Stack* s
 
 void dynamicLayerFrontFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   auto& dynamicLayerStack = dynamicLayerStackAccessor();
-  // if (c10::show_dispatch_trace_enabled()) {
-  // std::cout << "DLS size: " << dynamicLayerStack.size() << std::endl;
-  // }
+#ifdef HAS_TORCH_SHOW_DISPATCH_TRACE
+  if (c10::show_dispatch_trace_enabled()) {
+    std::cout << "DLS size: " << dynamicLayerStack.size() << std::endl;
+  }
+#endif
   if (dynamicLayerStack.size() == 0) {
     sanityCheckStack(op, stack);
     c10::impl::ExcludeDispatchKeyGuard guard(all_dynlayer_keyset);
