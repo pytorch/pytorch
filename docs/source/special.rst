@@ -21,6 +21,7 @@ Functions
 .. autofunction:: entr
 .. autofunction:: erf
 .. autofunction:: erfc
+.. autofunction:: erfcx
 .. autofunction:: erfinv
 .. autofunction:: expit
 .. autofunction:: expm1
@@ -33,5 +34,9 @@ Functions
 .. autofunction:: i1
 .. autofunction:: i1e
 .. autofunction:: logit
+.. autofunction:: log1p
 .. autofunction:: ndtr
+.. autofunction:: ndtri
+.. autofunction:: round
+.. autofunction:: sinc
 .. autofunction:: xlog1py
