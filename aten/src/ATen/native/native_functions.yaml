@@ -3231,6 +3231,7 @@
   variants: method
   dispatch:
     CUDA: is_pinned_cuda
+    CompositeExplicitAutograd: is_pinned_default
 
 - func: pin_memory(Tensor(a) self, Device? device=None) -> Tensor(a)
   variants: method
