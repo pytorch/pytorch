@@ -35,7 +35,7 @@ from torch.testing._internal.common_utils import (
     NO_MULTIPROCESSING_SPAWN,
     TEST_WITH_ASAN,
     TEST_WITH_TSAN,
-    IS_PYTORCH_CI,
+    IS_IN_CI,
     IS_WINDOWS,
     IS_MACOS,
 )
@@ -593,7 +593,7 @@ class StartProcessesListTest(StartProcessesTest):
 
 
 @unittest.skipIf(
-    TEST_WITH_ASAN or TEST_WITH_TSAN or IS_WINDOWS or IS_MACOS or IS_PYTORCH_CI,
+    TEST_WITH_ASAN or TEST_WITH_TSAN or IS_WINDOWS or IS_MACOS or IS_IN_CI,
     "tests incompatible with tsan or asan, the redirect functionality does not work on macos or windows",
 )
 class StartProcessesNotCITest(StartProcessesTest):
@@ -627,38 +627,6 @@ class StartProcessesNotCITest(StartProcessesTest):
             if stderr_redir:
                 self.assert_in_file(["hello stderr from 0"], stderr_log)
             worker_finished_event_mock.wait.assert_called_once()
-
-    def test_function_failure_signal(self):
-        """
-        run 2x copies of echo3, induce a segfault on first
-        """
-        SEGFAULT = True
-        for start_method, redirs in product(self._start_methods, redirects_all()):
-            with self.subTest(start_method=start_method):
-                log_dir = self.log_dir()
-                pc = start_processes(
-                    name="echo",
-                    entrypoint=echo3,
-                    args={0: ("hello", SEGFAULT), 1: ("world",)},
-                    envs={0: {}, 1: {}},
-                    log_dir=log_dir,
-                    start_method=start_method,
-                    redirects=redirs,
-                )
-
-                results = pc.wait(period=0.1)
-
-                self.assert_pids_noexist(pc.pids())
-                self.assertEqual(1, len(results.failures))
-                self.assertFalse(results.return_values)
-
-                failure = results.failures[0]
-                error_file = failure.error_file
-
-                self.assertEqual(-signal.SIGSEGV, failure.exitcode)
-                self.assertEqual("SIGSEGV", failure.signal_name())
-                self.assertEqual(pc.pids()[0], failure.pid)
-                self.assertEqual(os.path.join(log_dir, "0", "error.json"), error_file)
 
     def test_binary_signal(self):
         pc = start_processes(

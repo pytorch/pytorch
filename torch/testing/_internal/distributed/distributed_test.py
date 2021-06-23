@@ -976,10 +976,9 @@ class DistributedTest:
                 for p in model.parameters():
                     self.assertEqual(p.data, torch.ones_like(p.data) * 0.5)
             else:
-                # Every element on device not in the subgroup should be -rank,
-                # because `get_world_size()` returns -1.
+                # Every element on device not in the subgroup should remain the same.
                 for p in model.parameters():
-                    self.assertEqual(p.data, torch.ones_like(p.data) * -rank)
+                    self.assertEqual(p.data, torch.ones_like(p.data) * rank)
 
         # NCCL Batch SEND RECV
         @skip_if_no_gpu
@@ -6985,10 +6984,58 @@ class DistributedTest:
             # certain parameters.
             self._test_ddp_multiple_nested_unused_params_error(ignore_sparse=True)
 
-        @unittest.skipIf(
-            BACKEND != "nccl" and BACKEND != "gloo",
-            "Only Nccl & Gloo backend support DistributedDataParallel",
-        )
+        @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                         "Only Nccl & Gloo backend support DistributedDataParallel")
+        @skip_if_lt_x_gpu(2)
+        def test_ddp_inference(self):
+            # tests that DDP module can be run on a single node with no_grad
+            # or eval setting and there is no hang.
+            rank = self.rank
+            torch.cuda.set_device(rank)
+            model = Net().cuda()
+            local_model = copy.deepcopy(model)
+            model = torch.nn.parallel.DistributedDataParallel(
+                model,
+                device_ids=[rank],
+            )
+            syncbn_model = nn.SyncBatchNorm(
+                2, momentum=0.99, track_running_stats=False
+            ).cuda()
+            local_syncbn_model = copy.deepcopy(model)
+            syncbn_model = torch.nn.parallel.DistributedDataParallel(
+                model,
+                device_ids=[rank]
+            )
+            inp = torch.randn(10, 2, device=rank)
+            inp_syncbn = torch.randn(10, 2, 4, 4, device=rank)
+            tests = [
+                (model, local_model, inp),
+                (syncbn_model, local_syncbn_model, inp_syncbn),
+            ]
+            for test in tests:
+                test_model, test_local_model, test_inp = test
+                if self.rank == 0:
+                    with torch.no_grad():
+                        for _ in range(6):
+                            self.assertEqual(
+                                test_model(test_inp),
+                                test_local_model(test_inp)
+                            )
+
+                    model.eval()
+                    for _ in range(6):
+                        self.assertEqual(
+                            test_model(test_inp),
+                            test_local_model(test_inp)
+                        )
+
+            # Barrier since only rank 0 runs inference. Test should be
+            # much faster than 30s, but this is to avoid flakiness.
+            self._barrier(timeout=30)
+
+
+        @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                         "Only Nccl & Gloo backend support DistributedDataParallel")
         @skip_if_lt_x_gpu(2)
         def test_ddp_sync_bn_training_vs_eval(self):
             rank = self.rank
