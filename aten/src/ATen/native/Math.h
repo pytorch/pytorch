@@ -6,6 +6,7 @@
 #include <cfloat>
 #include <limits>
 #include <type_traits>
+#include <ATen/NumericUtils.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
 #include <c10/util/MathConstants.h>
