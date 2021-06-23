@@ -404,6 +404,8 @@ class TestFFT(TestCase):
 
                 if torch.version.hip is not None:
                     valid_input = _generate_valid_rocfft_input(input, torch_fn)
+                else:
+                    valid_input = input
 
                 # Once with dim defaulted
                 input_np = valid_input.cpu().numpy()
