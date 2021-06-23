@@ -176,7 +176,7 @@ class ZeroRedundancyOptimizer(Optimizer):
 
         # Set the current device if using NCCL backend
         if dist.get_backend(self.group) == dist.Backend.NCCL and \
-            self._default_device.type == "cuda":
+                self._default_device.type == "cuda":
             torch.cuda.set_device(self._default_device)
 
         self.initialized = True
