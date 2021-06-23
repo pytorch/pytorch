@@ -4,6 +4,8 @@ import math
 from contextlib import contextmanager
 from itertools import product
 import itertools
+import doctest
+import inspect
 
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA, TEST_MKL)
@@ -1239,7 +1241,55 @@ class TestFFT(TestCase):
             torch.istft(x.to(device), n_fft=100, window=window)
 
 
+class FFTDocTestFinder:
+    '''The default doctest finder doesn't like that function.__module__ doesn't
+    match torch.fft. It assumes the functions are leaked imports.
+    '''
+    def __init__(self):
+        self.parser = doctest.DocTestParser()
+
+    def find(self, obj, name=None, module=None, globs=None, extraglobs=None):
+        doctests = []
+
+        modname = name if name is not None else obj.__name__
+        globs = dict() if globs is None else globs
+
+        for fname in obj.__all__:
+            func = getattr(obj, fname)
+            if inspect.isroutine(func):
+                qualname = modname + '.' + fname
+                docstring = inspect.getdoc(func)
+                if docstring is None:
+                    continue
+
+                examples = self.parser.get_doctest(
+                    docstring, globs=globs, name=fname, filename=None, lineno=None)
+                doctests.append(examples)
+
+        return doctests
+
+
+class TestFFTDocExamples(TestCase):
+    pass
+
+def generate_doc_test(doc_test):
+    def test(self, device):
+        self.assertEqual(device, 'cpu')
+        runner = doctest.DocTestRunner()
+        runner.run(doc_test)
+
+        if runner.failures != 0:
+            runner.summarize()
+            self.fail('Doctest failed')
+
+    setattr(TestFFTDocExamples, 'test_' + doc_test.name, skipCPUIfNoMkl(test))
+
+for doc_test in FFTDocTestFinder().find(torch.fft, globs=dict(torch=torch)):
+    generate_doc_test(doc_test)
+
+
 instantiate_device_type_tests(TestFFT, globals())
+instantiate_device_type_tests(TestFFTDocExamples, globals(), only_for='cpu')
 
 if __name__ == '__main__':
     run_tests()
