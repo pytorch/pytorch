@@ -24,22 +24,37 @@
 namespace torch {
 namespace jit {
 
+namespace {
+
 // Constants relating to maintaining the topological index of nodes.
 //
 // Lower and upper bounds of the index. Inclusive range.
-static constexpr topo_position_t kLowerBound = INT64_MIN;
-static constexpr topo_position_t kUpperBound = INT64_MAX;
-static constexpr topo_position_t kMidPoint = 0;
+constexpr topo_position_t kLowerBound = INT64_MIN;
+constexpr topo_position_t kUpperBound = INT64_MAX;
+constexpr topo_position_t kMidPoint = 0;
 
 // How far away to space nodes that are appended to the graph.
 // should be 2^n, where:
 //   - n is the maximum number of repeated insertions without a re-index
 //   - 2^(64-n) is the maximum number of appends to the end without reindex
-static constexpr topo_position_t kAppendInterval = 1099511627776ULL /* 2^40 */;
+constexpr topo_position_t kAppendInterval = 1099511627776ULL /* 2^40 */;
 
-static void printValueRef(std::ostream& out, const Value* n) {
+void printValueRef(std::ostream& out, const Value* n) {
   out << "%" << n->debugName();
 }
+
+bool isNumber(c10::string_view str) {
+  return str.find_first_not_of("0123456789") == std::string::npos;
+}
+
+std::string normalizeAttrName(c10::string_view field) {
+  if (isNumber(field)) {
+    return "_" + std::string{field};
+  }
+  return std::string{field};
+}
+
+} // namespace
 
 // NB: This overload will become ambiguous with the one Caffe2 provides in its
 // logging, if they ever intersect.
@@ -771,7 +786,7 @@ bool Value::isValidName(const std::string& name) {
   }
 
   // Numbers are not legal
-  if (name.find_first_not_of("0123456789") == std::string::npos) {
+  if (isNumber(name)) {
     return false;
   }
 
@@ -1796,6 +1811,7 @@ Node* Graph::createGetAttr(Value* obj, const std::string& field) {
 
   const auto outputType = classType->getAttribute(field);
   n->output()->setType(outputType);
+  n->output()->setDebugName(normalizeAttrName(field));
   return n;
 }
 

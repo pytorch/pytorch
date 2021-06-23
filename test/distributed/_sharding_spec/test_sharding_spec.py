@@ -57,7 +57,7 @@ class TestShardingSpec(TestCase):
         with self.assertRaisesRegex(ValueError, "not a valid device"):
             ChunkShardingSpec(0, ["rank:0/cuda:foo", "cuda:1"])
 
-    def test_generic_sharding_spec(self):
+    def test_enumerable_sharding_spec(self):
         # test valid specs
 
         # test row-wise sharding
@@ -73,7 +73,7 @@ class TestShardingSpec(TestCase):
                 placement="cuda:1",
             )
         ])
-        spec.check_tensor(torch.rand(10, 5))
+        spec.check_tensor(torch.rand(10, 5).size())
 
         # test row and column sharding
         spec = EnumerableShardingSpec([
@@ -98,7 +98,7 @@ class TestShardingSpec(TestCase):
                 placement="cuda:3",
             ),
         ])
-        spec.check_tensor(torch.rand(6, 6))
+        spec.check_tensor(torch.rand(6, 6).size())
 
         # test uneven shard sizes.
         spec = EnumerableShardingSpec([
@@ -123,7 +123,7 @@ class TestShardingSpec(TestCase):
                 placement="cuda:3",
             ),
         ])
-        spec.check_tensor(torch.rand(6, 6))
+        spec.check_tensor(torch.rand(6, 6).size())
 
         # test invalid sharding
         with self.assertRaisesRegex(ValueError, 'not a valid device'):
@@ -183,7 +183,7 @@ class TestShardingSpec(TestCase):
         ])
 
         with self.assertRaisesRegex(ValueError, 'Rank of tensor is.*but shards rank'):
-            spec.check_tensor(torch.rand(10, 10, 10))
+            spec.check_tensor(torch.rand(10, 10, 10).size())
 
         spec = EnumerableShardingSpec([
             ShardMetadata(
@@ -199,7 +199,7 @@ class TestShardingSpec(TestCase):
         ])
 
         with self.assertRaisesRegex(ValueError, 'exceeds tensor dim'):
-            spec.check_tensor(torch.rand(10, 3))
+            spec.check_tensor(torch.rand(10, 3).size())
 
         spec = EnumerableShardingSpec([
             ShardMetadata(
@@ -215,4 +215,4 @@ class TestShardingSpec(TestCase):
         ])
 
         with self.assertRaisesRegex(ValueError, 'does not match tensor volume'):
-            spec.check_tensor(torch.rand(10, 10))
+            spec.check_tensor(torch.rand(10, 10).size())

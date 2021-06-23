@@ -13,3 +13,5 @@ labels_to_circle_params:
       - run_build
   ci/master:
     parameter: run_master_build
+  ci/slow-gradcheck:
+    parameter: run_slow_gradcheck_build

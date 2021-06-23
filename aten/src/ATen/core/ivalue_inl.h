@@ -1031,12 +1031,12 @@ inline const ivalue::Object& IValue::toObjectRef() const {
 // toX method to IValue. These named methods are much more discoverable
 // than the to templated function.
 
-#define DEFINE_TO(T, method_name)          \
-  template <>                              \
-  inline T IValue::to<T>()&& {             \
-    return std::move(*this).method_name(); \
-  }                                        \
-  template <>                              \
+#define DEFINE_TO(T, method_name)                          \
+  template <>                                              \
+  inline T IValue::to<T>()&& {                             \
+    return static_cast<T>(std::move(*this).method_name()); \
+  }                                                        \
+  template <>                                              \
   inline c10::detail::ivalue_to_const_ref_overload_return<T>::type IValue::to<T>() const& { \
     return this->method_name();            \
   }

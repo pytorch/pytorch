@@ -529,7 +529,6 @@ class TestTensorExprFuser(BaseTestClass):
         )
         self.assertLastGraphAllFused()
 
-    @unittest.skip("temporarily disable")
     def test_min_max_reduction(self):
         def test(x):
             return torch.min(x) + torch.max(x)
@@ -539,7 +538,6 @@ class TestTensorExprFuser(BaseTestClass):
         np.testing.assert_allclose(warmup_and_run_forward(traced, a), np.amin(a.numpy()) + np.amax(a.numpy()))
         self.assertLastGraphAllFused()
 
-    @unittest.skip("temporarily disable")
     def test_min_max_reduction2(self):
         def test(x):
             return x.min() + x.max()
@@ -559,14 +557,13 @@ class TestTensorExprFuser(BaseTestClass):
             a.numpy(), axis=1) + np.amax(a.numpy(), axis=1))
         self.assertLastGraphAllFused()
 
-    @unittest.skip("temporarily disable")
     def test_min_max_reduction_dim1_2(self):
         def test(x):
-            return torch.min(x, 1)
+            return torch.min(x * x, 1)
 
         traced = torch.jit.trace(test, (torch.zeros(16, 16)))
         a = 8.0 * torch.rand(16, 16)
-        np.testing.assert_allclose(warmup_and_run_forward(traced, a)[0], np.amin(a.numpy(), axis=1))
+        np.testing.assert_allclose(warmup_and_run_forward(traced, a)[0], np.amin((a * a).numpy(), axis=1))
         self.assertLastGraphAllFused()
 
     def test_clamp(self):

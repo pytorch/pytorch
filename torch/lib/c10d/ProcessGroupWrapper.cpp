@@ -1,11 +1,15 @@
+#include <c10d/ProcessGroupWrapper.hpp>
+
+#ifdef USE_C10D_GLOO
+
 #include <c10/core/ScalarType.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
+#include <c10/util/irange.h>
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/ProcessGroupGloo.hpp>
-#include <c10d/ProcessGroupWrapper.hpp>
 #include <stdexcept>
 
 namespace c10d {
@@ -69,7 +73,7 @@ struct CollectiveFingerPrint {
     // Allgather tensor shapes.
     pg->allgather(output_tensors, shape_tensors)->wait();
     // Verify equivalence
-    for (int i = 0; i < output_tensors.size(); ++i) {
+    for (const auto i : c10::irange(output_tensors.size())) {
       auto world_tensor_shapes = output_tensors[i];
       auto reference_shape_tensor = shape_tensors[i];
       for (const auto& rank_tensor_shape : world_tensor_shapes) {
@@ -320,3 +324,5 @@ void ProcessGroupWrapper::runCollectiveChecks(
 }
 
 } // namespace c10d
+
+#endif // USE_C10D_GLOO

@@ -3,8 +3,6 @@ import random
 import sys
 import tempfile
 import time
-import traceback
-import unittest
 from datetime import timedelta
 from sys import platform
 
@@ -16,11 +14,9 @@ if not dist.is_available():
     print("torch.distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
-import torch.multiprocessing as mp
 import torch.testing._internal.common_utils as common
 from torch._six import string_classes
 from torch.testing._internal.common_distributed import (
-    MultiProcessTestCase,
     skip_if_win32,
     create_tcp_store
 )
@@ -31,7 +27,6 @@ from torch.testing._internal.common_utils import (
     retry_on_connect_failures,
     ADDRESS_IN_USE,
     CONNECT_TIMEOUT,
-    IS_WINDOWS,
 )
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -246,50 +241,27 @@ class TCPStoreTest(TestCase, StoreTestBase):
     def test_numkeys_delkeys(self):
         self._test_numkeys_delkeys(self._create_store())
 
-    def _create_client(self, index, addr, port, world_size, messages):
-        try:
-            client_store = dist.TCPStore(addr, port, world_size, timeout=timedelta(seconds=10))
-            self.assertEqual("value".encode(), client_store.get("key"))
-            client_store.set(f"new_key{index}", f"new_value{index}")
-            self.assertEqual(f"next_value{index}".encode(),
-                             client_store.compare_set(f"new_key{index}", f"new_value{index}", f"next_value{index}"))
-        except Exception:
-            messages.put('Caught exception: \n{}exiting process with exit code: {}'
-                         .format(traceback.format_exc(), MultiProcessTestCase.TEST_ERROR_EXIT_CODE))
-            sys.exit(MultiProcessTestCase.TEST_ERROR_EXIT_CODE)
+    def _create_client(self, index, addr, port, world_size):
+        client_store = dist.TCPStore(addr, port, world_size, timeout=timedelta(seconds=10))
+        self.assertEqual("value".encode(), client_store.get("key"))
+        client_store.set(f"new_key{index}", f"new_value{index}")
+        self.assertEqual(f"next_value{index}".encode(),
+                         client_store.compare_set(f"new_key{index}", f"new_value{index}", f"next_value{index}"))
 
     def _multi_worker_helper(self, world_size):
         addr = DEFAULT_HOSTNAME
         server_store = create_tcp_store(addr, world_size, wait_for_workers=False)
         server_store.set("key", "value")
         port = server_store.port
-        messages = mp.Queue()
-        processes = []
-        num_proccesses = random.randint(3, 5) if world_size == -1 else world_size
-        for i in range(num_proccesses):
-            p = mp.Process(target=self._create_client, args=(i, addr, port, world_size, messages))
-            processes.append(p)
-            p.start()
-        for p in processes:
-            p.join()
-        error_message = ""
-        while not messages.empty():
-            error_message += messages.get() + "\n"
-        if any([p.exitcode != 0 for p in processes]):
-            raise RuntimeError(error_message)
+        world_size = random.randint(5, 10) if world_size == -1 else world_size
+        for i in range(world_size):
+            self._create_client(i, addr, port, world_size)
 
-    @unittest.skipIf(
-        IS_WINDOWS, "Skip test for windows due to multiprocessing library error when using windows spawn"
-    )
     def test_multi_worker_with_fixed_world_size(self):
         self._multi_worker_helper(5)
 
-    @unittest.skipIf(
-        IS_WINDOWS, "Skip test for windows due to multiprocessing library error when using windows spawn"
-    )
     def test_multi_worker_with_nonfixed_world_size(self):
         self._multi_worker_helper(-1)
-
 
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
     def setUp(self):

@@ -1649,6 +1649,17 @@ new_module_tests = [
     ),
     dict(
         module_name='GroupNorm',
+        constructor_args=(3, 51, 1e-5, False),
+        cpp_constructor_args='torch::nn::GroupNormOptions(3, 51).eps(1e-5).affine(false)',
+        input_size=(2, 51, 28, 28),
+        cudnn=True,
+        check_eval=True,
+        check_bfloat16=True,
+        desc='2d_no_affine_large_feature',
+        test_cpu=False,
+    ),
+    dict(
+        module_name='GroupNorm',
         constructor_args=(3, 3, 1e-3, False),
         cpp_constructor_args='torch::nn::GroupNormOptions(3, 3).eps(1e-3).affine(false)',
         input_size=(4, 3, 2, 3),
@@ -1851,6 +1862,7 @@ new_module_tests = [
         cudnn=True,
         check_with_long_tensor=True,
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         module_name='Conv2d',
@@ -1914,6 +1926,7 @@ new_module_tests = [
         cudnn=True,
         check_with_long_tensor=True,
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         fullname='Conv2d_groups_thnn',
@@ -1922,6 +1935,7 @@ new_module_tests = [
         input_size=(2, 4, 6, 5),
         check_with_long_tensor=True,
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         fullname='Conv2d_pad_valid',
@@ -1939,7 +1953,7 @@ new_module_tests = [
         input_size=(2, 2, 6, 5),
         cudnn=True,
         with_tf32=True,
-        tf32_precision=0.005,
+        tf32_precision=0.01,
     ),
     dict(
         fullname='Conv2d_pad_same_dilated',
@@ -2188,6 +2202,20 @@ new_module_tests = [
         constructor_args=((1, 2, 3, 4),),
         cpp_constructor_args='torch::nn::ReflectionPad2dOptions({1, 2, 3, 4})',
         input_fn=lambda: torch.rand(2, 3, 8, 8, dtype=torch.complex128, requires_grad=True),
+        skip_half=True,
+        desc='complex'
+    ),
+    dict(
+        module_name='ReflectionPad3d',
+        constructor_args=((1, 2, 0, 2, 1, 2),),
+        cpp_constructor_args='torch::nn::ReflectionPad3dOptions({1, 2, 0, 2, 1, 2})',
+        input_size=(2, 3, 8, 8, 8),
+    ),
+    dict(
+        module_name='ReflectionPad3d',
+        constructor_args=((1, 2, 0, 2, 1, 2),),
+        cpp_constructor_args='torch::nn::ReflectionPad3dOptions({1, 2, 0, 2, 1, 2})',
+        input_fn=lambda: torch.rand(2, 3, 8, 8, 8, dtype=torch.complex128, requires_grad=True),
         skip_half=True,
         desc='complex'
     ),
