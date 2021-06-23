@@ -1,6 +1,5 @@
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests
-from torch._C import _disabled_torch_function_impl
 from torch.utils._pytree import tree_map
 
 from typing import Iterator, List
@@ -41,8 +40,6 @@ class LoggingTensor(torch.Tensor):
 
     def __repr__(self):
         return f"LoggingTensor({self.elem})"
-
-    __torch_function__ = _disabled_torch_function_impl
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
