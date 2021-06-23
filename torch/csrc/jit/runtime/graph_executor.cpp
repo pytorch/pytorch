@@ -277,7 +277,19 @@ struct DifferentiableGraphBackward : public autograd::Node {
           produceOutput(output_index++, std::move(tensor), outputs);
         }
       } else if (v.isTensor()) {
-        produceOutput(output_index++, std::move(v).toTensor(), outputs);
+        if (!v.toTensor().defined()) {
+          // this undefined gradient actually corresponds to a tensor list
+          if (input_tensor_lists_.count(output_index) != 0) {
+            size_t list_size = input_tensor_lists_[output_index];
+            for (size_t i = 0; i < list_size; i++) {
+              produceOutput(output_index++, {}, outputs);
+            }
+          } else {
+            produceOutput(output_index++, {}, outputs);
+          }
+        } else {
+          produceOutput(output_index++, std::move(v).toTensor(), outputs);
+        }
       } else {
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(v.isNone());
         output_index++;
@@ -301,14 +313,18 @@ struct DifferentiableGraphBackward : public autograd::Node {
   }
   void addOutputForIValue(const IValue& value) {
     if (value.isTensorList()) {
+      input_tensor_lists_.insert({index_, value.toTensorList().size()});
       for (const at::Tensor tensor : value.toTensorList()) {
         addOutputForTensor(tensor);
+        index_++;
       }
     } else if (value.isTensor()) {
       addOutputForTensor(value.toTensor());
+      index_++;
     } else {
       // We could have None passed here via `Optional[Tensor]`
       add_next_edge(autograd::Edge{});
+      index_++;
     }
   }
 
@@ -362,6 +378,14 @@ struct DifferentiableGraphBackward : public autograd::Node {
   GraphExecutor executor;
   CaptureList captures_;
   UnpackInstructions input_instructions_;
+  // we need to track input lists to fwd graph
+  // since in backward graphs these will become
+  // an undefined tensors if gradients are zeros
+  // we will need to convert an undefined tensor
+  // back to a list
+  // TODO: switch to using UnpackInstructions
+  size_t index_ = 0;
+  std::map<size_t, size_t> input_tensor_lists_;
 };
 
 // an optimized way of executing the subgraph computed directly on
