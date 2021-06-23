@@ -75,7 +75,8 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
            operator_export_type=None, opset_version=None, _retain_param_name=True,
            do_constant_folding=True, example_outputs=None, strip_doc_string=True,
            dynamic_axes=None, keep_initializers_as_inputs=None, custom_opsets=None,
-           enable_onnx_checker=True, use_external_data_format=False):
+           enable_onnx_checker=True, use_external_data_format=False,
+           onnx_shape_inference=True):
     if aten:
         assert operator_export_type is None
         operator_export_type = OperatorExportTypes.ONNX_ATEN
@@ -90,7 +91,8 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
             example_outputs=example_outputs, strip_doc_string=strip_doc_string,
             dynamic_axes=dynamic_axes, keep_initializers_as_inputs=keep_initializers_as_inputs,
             custom_opsets=custom_opsets, enable_onnx_checker=enable_onnx_checker,
-            use_external_data_format=use_external_data_format)
+            use_external_data_format=use_external_data_format,
+            onnx_shape_inference=onnx_shape_inference)
 
 
 def _is_constant_tensor_list(node):
