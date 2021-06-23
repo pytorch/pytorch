@@ -263,14 +263,13 @@ THMapAllocator::THMapAllocator(WithFd, std::string filename, int fd, int flags, 
     }
 
     if (size > 0) {
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      if (size > file_stat.st_size) {
+      if (static_cast<int64_t>(size) > file_stat.st_size) {
         if (flags_) {
           if (ftruncate(fd, size) == -1) {
             AT_ERROR("unable to resize file <", filename_, "> to the right size");
           }
           // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-          if (fstat(fd, &file_stat) == -1 || file_stat.st_size < size) {
+          if (fstat(fd, &file_stat) == -1 || file_stat.st_size < static_cast<int64_t>(size)) {
             ::close(fd);
             AT_ERROR("unable to stretch file <", filename_, "> to the right size");
           }
