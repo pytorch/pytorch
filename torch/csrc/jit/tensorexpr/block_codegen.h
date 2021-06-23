@@ -120,8 +120,7 @@ class TORCH_API BlockCodeGen : public CodeGen {
   ~BlockCodeGen() override;
 
   void call(const std::vector<CallArg>& args) override;
-  void call_raw(void* const* args, size_t size) override;
-  using CodeGen::call_raw; // (const std::vector<void*>&) version
+  void call_raw(const std::vector<void*>& args) override;
 
   void Initialize();
 

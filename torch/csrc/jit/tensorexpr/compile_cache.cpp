@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
 #include <torch/csrc/jit/tensorexpr/compile_cache.h>
+#include <torch/csrc/jit/tensorexpr/cuda_codegen.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
@@ -16,13 +17,6 @@
 #include <map>
 #include <mutex>
 #include <vector>
-
-#define STRINGIFY(x) #x
-#define TOSTRING(x) STRINGIFY(x)
-#define AT __FILE__ ":" TOSTRING(__LINE__)
-#define ASSERT(test) \
-  if (!(test))       \
-  throw std::runtime_error("assert failed " AT)
 
 namespace torch {
 namespace jit {
@@ -306,10 +300,12 @@ class CompileCache3 {
         }
       }
 
+      size_t numel = 1;
       int64_t shapes[MAX_DIMS];
       int ndims = std::min<int>(shape_from_.size(), MAX_DIMS);
       for (int i = 0; i < ndims; ++i) {
         shapes[i] = args[shape_from_[i].first].size(shape_from_[i].second);
+        numel *= shapes[i];
         call_args[shape_args_offset_ + i] = &shapes[i];
       }
 
@@ -335,7 +331,7 @@ class CompileCache3 {
         output = args[NARGS - 1];
       }
 
-      cg_->call_raw(call_args, num_args_);
+      ((CudaCodeGen*)cg_)->call_fast(call_args, numel);
 
       if (backwards_functions_.size() > 0) {
         std::shared_ptr<CCNode> node(
@@ -352,7 +348,7 @@ class CompileCache3 {
         }
         node->set_next_edges(std::move(next_edges));
 
-        // node inputs
+        // node inputs (grad of forward output)
         torch::autograd::create_gradient_edge(output, node);
       }
 
@@ -377,7 +373,6 @@ class CompileCache3 {
     if (item != cache_.end()) {
       return item->second;
     } else {
-      KernelScope scope(&arena_);
       auto cr = new CompileResultImpl();
       py::gil_scoped_acquire guard;
       std::vector<py::object> spec;
@@ -444,6 +439,7 @@ class CompileCache3 {
   at::Tensor call(at::Tensor* args, bool has_out) {
     void* call_args[NARGS + (!has_out) + NARGS * MAX_DIMS + MAX_DIMS];
     auto key = compute_cache_key(args, has_out, call_args + NARGS + (!has_out));
+    KernelScope scope(&arena_);
     return cached_compile(key, args)->call(args, call_args);
   }
 
@@ -572,8 +568,6 @@ variable_list CCNode::apply(variable_list&& new_inputs) {
   // TODO(jansel): possible optimization: reuse the forwards SpecializationKey
   // TODO(jansel): possible optimization: dont save all the inputs_
   // TODO(jansel): possible optimization: precompute in forwards
-  ASSERT(new_inputs.size() == 1);
-
   variable_list args;
   args.reserve(inputs_.size() + 1);
   std::copy(inputs_.begin(), inputs_.end(), std::back_inserter(args));

@@ -313,8 +313,8 @@ LLVMCodeGen::LLVMCodeGen(
       impl_(std::make_unique<
             LLVMCodeGenImpl>(stmt, args, device, dtype, triple, cpu, attrs)) {}
 
-void LLVMCodeGen::call_raw(void* const* args, size_t size) {
-  value<float>(const_cast<void**>(args));
+void LLVMCodeGen::call_raw(const std::vector<void*>& args) {
+  value<float>(const_cast<void**>(args.data()));
   USE_TRIGGER(llvm_codegen_executed);
 }
 

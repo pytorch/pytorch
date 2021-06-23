@@ -984,11 +984,11 @@ void SimpleIREvaluator::call(const std::vector<CallArg>& args) {
   call_raw(raw_args);
 }
 
-void SimpleIREvaluator::call_raw(void* const* args, size_t size) {
-  if (size != buffer_args().size()) {
+void SimpleIREvaluator::call_raw(const std::vector<void*>& args) {
+  if (args.size() != buffer_args().size()) {
     throw malformed_input("bad args in IREvaluator call");
   }
-  for (const auto i : c10::irange(size)) {
+  for (const auto i : c10::irange(args.size())) {
     bindArg(buffer_args()[i], args[i]);
   }
   stmt()->accept(&*impl_);

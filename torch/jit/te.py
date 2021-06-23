@@ -1,9 +1,9 @@
-import inspect
-
-import torch
-import itertools
-import functools
 from torch._C import _te
+import copy
+import functools
+import inspect
+import itertools
+import torch
 
 FOLD_ALIASES = True
 _SHAPE_TYPES = {"one", "other"}
@@ -44,6 +44,8 @@ class PointwiseCompiler(object):
         self.ndim = max(x.ndim for x in spec)
         self.shapes = [["one"] * (self.ndim - x.ndim) + x.shape for x in spec]
         self.strides = [["zero"] * (self.ndim - x.ndim) + x.stride for x in spec]
+        self.shape_flags = copy.deepcopy(self.shapes)
+        self.stride_flags = copy.deepcopy(self.strides)
         self.shape_args = [_te.VarHandle(torch.int32) for _ in range(self.ndim)]
         self.shape_vars = list(self.shape_args)
         self.iter_vars = [_te.VarHandle(torch.int32) for _ in range(self.ndim)]
@@ -231,8 +233,6 @@ class PointwiseCompiler(object):
         out = _te.Block([buf.store(self.indexing(stride), val)
                          for buf, stride in zip(output_bufs, output_strides)])
 
-        # TODO(jansel): flatten output vars when contiguous
-
         loops = []
         for i in self.output_order:
             var = self.iter_vars[i]
@@ -242,24 +242,15 @@ class PointwiseCompiler(object):
 
         loopnest = _te.LoopNest(_te.Block([out]), output_bufs)
 
-        print("before")
-        print(loopnest.root_stmt())
-
         if self.device == "cuda" and loops:
-            loops[0].set_gpu_block_index(0)
-            loops[1].set_gpu_thread_index(0)
-           # flattened = _te.LoopNest.flatten(loops)
-           # assert flattened
-           # inner = _te.LoopNest.split_with_mask(flattened, 128)
-           # assert inner
-           # flattened.set_gpu_block_index(0)
-           # inner.set_gpu_thread_index(0)
-
-        print("after")
-        print(loopnest.root_stmt())
+            flattened = _te.LoopNest.flatten(loops)
+            assert flattened
+            inner = _te.LoopNest.split_with_mask(flattened, 512)
+            assert inner
+            flattened.set_gpu_block_index(0)
+            inner.set_gpu_thread_index(0)
 
         loopnest.prepare_for_codegen()
-
         cg = _te.construct_codegen(
             self.compile_mode,
             loopnest.simplify(),
