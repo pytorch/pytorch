@@ -63,17 +63,19 @@ size_t StdHashCombine(uintmax_t a, uintmax_t b) {
 }
 
 hash_t HashCombine(const hash_t& a, const hash_t& b) {
-  static const hash_t kb = absl::MakeUint128(101, 0x27d4eb2f165667c5);
+  static const hash_t kb = lazy_tensors::MakeUint128(101, 0x27d4eb2f165667c5);
   return a ^ (b * kb + 0x9e3779b97f4a7c15 + (a << 6) + (a >> 2));
 }
 
 size_t HashReduce(const hash_t& a) {
-  return StdHashCombine(absl::Uint128Low64(a), absl::Uint128High64(a));
+  return StdHashCombine(lazy_tensors::Uint128Low64(a),
+                        lazy_tensors::Uint128High64(a));
 }
 
 std::string HexHash(const hash_t& a) {
   std::stringstream ss;
-  ss << std::hex << a;
+  ss << std::hex << lazy_tensors::Uint128High64(a) << std::setfill('0')
+     << std::setw(16) << lazy_tensors::Uint128Low64(a);
   return ss.str();
 }
 
