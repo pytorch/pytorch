@@ -59,7 +59,7 @@ struct CommonExpressionHoister {
       std::unordered_set<Node*> true_b_uses;
       for (Value* true_out : true_b_node->outputs()) {
         for (Use true_use : true_out->uses()) {
-          if (true_use.user->owningBlock() == true_block){
+          if (true_use.user->owningBlock() == true_block) {
             // Make sure we are not accidentally adding stuff from subblocks
             true_b_uses.insert(true_use.user);
           }
@@ -81,7 +81,7 @@ struct CommonExpressionHoister {
     }
   }
 
-  void EliminateUnnecessaryIfOutputs(Node* if_node){
+  void EliminateUnnecessaryIfOutputs(Node* if_node) {
     Block* true_block = if_node->blocks()[0];
     Block* false_block = if_node->blocks()[1];
 
@@ -143,7 +143,7 @@ bool HoistCommonExpression(const std::shared_ptr<Graph>& graph) {
 
   GRAPH_DUMP("Before CSE", graph);
   CommonExpressionHoister ceh(graph);
-  bool changed =  ceh.run();
+  bool changed = ceh.run();
   GRAPH_DUMP("After CSE", graph);
   return changed;
 }
