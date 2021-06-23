@@ -5,7 +5,6 @@
 #include <sstream>
 #include <unordered_set>
 
-#include "absl/memory/memory.h"
 #include "lazy_tensor_core/csrc/device.h"
 #include "lazy_tensor_core/csrc/ir.h"
 #include "lazy_tensor_core/csrc/ir_dump_util.h"
@@ -34,7 +33,7 @@ DebugUtil::GraphFormat DefaultGraphFormat() {
 
 std::unordered_set<std::string>* LoadExperiments() {
   std::unique_ptr<std::unordered_set<std::string>> xset =
-      absl::make_unique<std::unordered_set<std::string>>();
+      std::make_unique<std::unordered_set<std::string>>();
   std::string experiments =
       lazy_tensors::sys_util::GetEnvString("LTC_EXPERIMENTAL", "");
   std::vector<std::string> experiment_list =
