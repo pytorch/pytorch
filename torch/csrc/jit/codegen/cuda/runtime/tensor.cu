@@ -1,6 +1,6 @@
 template <typename T, int N>
 struct Tensor {
-  __device__ T& operator[](int64_t ind) {
+  __device__ T& operator[](nvfuser_index_t ind) {
     return data[ind];
   };
 
@@ -13,7 +13,7 @@ struct Tensor {
 // They will be an error as well since zero-length arrays are not allowed.
 template <typename T>
 struct Tensor<T, 0> {
-  __device__ T& operator[](int64_t) {
+  __device__ T& operator[](nvfuser_index_t) {
     return *data;
   };
 
