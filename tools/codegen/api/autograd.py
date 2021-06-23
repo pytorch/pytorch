@@ -67,6 +67,10 @@ class ForwardDerivative:
     # Inputs for which the primal is required for this formula
     required_inputs_primal: Optional[Tuple[str, ...]]
 
+    # Flag to specify if this formula requires the original value of self
+    # This is only used by inplace operations
+    required_original_self_value: bool
+
 # Represents differentiability info for a NativeFunction.
 @dataclass(frozen=True)
 class DifferentiabilityInfo:
@@ -259,19 +263,39 @@ def match_differentiability_info(
             if f.func.kind() == SchemaKind.inplace:
                 assert len(info.forward_derivatives) == 1  # Only single output inplace should exist
                 fw_info = info.forward_derivatives[0]
+                formula = fw_info.formula
 
-                if re.search(IDENT_REGEX.format("self"), fw_info.formula):
-                    raise RuntimeError(f'The formula for "{f.func.name}" is using the original value of self that is being '
-                                       'modified inplace. This would lead to wrong forward gradients. Please use "result" in '
-                                       'the formula only.')
+                if re.search(IDENT_REGEX.format("self_p"), formula):
+                    if is_exact_match:
+                        # For manually defined formulas, don't allow the original value to be used
+                        raise RuntimeError(f'The formula for "{f.func.name}" is using the original value of self '
+                                           'that is being modified inplace. This would lead to wrong forward gradients. '
+                                           'Please use "result" in the formula only.')
+                    else:
+                        # When the original formula is out of place, we save a clone of the primal
+                        # value to be able to access this value if needed
+                        # replace "self_p" from the formula by "original_self_p"
+                        def repl(m: Match[str]) -> str:
+                            return f'{m.group(1)}original_self_p{m.group(2)}'
+                        formula = re.sub(IDENT_REGEX.format("self_p"), repl, formula)
 
-                # replace "result" from the formula by self
+                if re.search(IDENT_REGEX.format("original_self_p"), formula):
+                    required_original_self_value = True
+                else:
+                    required_original_self_value = False
+
+                # replace "result" from the formula by "self_p"
                 def repl(m: Match[str]) -> str:
-                    return f'{m.group(1)}self{m.group(2)}'
-                formula = re.sub(IDENT_REGEX.format("result"), repl, fw_info.formula)
+                    return f'{m.group(1)}self_p{m.group(2)}'
+                formula = re.sub(IDENT_REGEX.format("result"), repl, formula)
+
+                required_primals = fw_info.required_inputs_primal
+                if re.search(IDENT_REGEX.format("self_p"), formula):
+                    required_primals = required_primals + ("self",)
 
                 if not is_exact_match:
-                    # Make sure that the forward grad is modified inplace
+                    # Make sure that the forward grad is modified inplace when the original formula
+                    # is out of place
                     formula = f"self_t_raw.defined() ? self_t_raw.copy_({formula}) : {formula}"
 
                 forward_derivatives = [ForwardDerivative(
@@ -279,7 +303,8 @@ def match_differentiability_info(
                     var_name="self",
                     var_type=fw_info.var_type,
                     required_inputs_fw_grad=fw_info.required_inputs_fw_grad,
-                    required_inputs_primal=fw_info.required_inputs_primal,), ]
+                    required_inputs_primal=required_primals,
+                    required_original_self_value=required_original_self_value), ]
         else:
             forward_derivatives = []
 

@@ -128,7 +128,8 @@ def create_forward_derivative(f: NativeFunction, formula: str, names: Tuple[str,
         var_name=var_name,
         var_type=var_type,
         required_inputs_fw_grad=None,
-        required_inputs_primal=None)
+        required_inputs_primal=None,
+        required_original_self_value=False)
 
 def postprocess_forward_derivatives(
     f: NativeFunction,
@@ -238,7 +239,6 @@ def postprocess_forward_derivatives(
             if Variant.function in f.variants:
                 fw_formula = "at::{}({})".format(defn_name, ", ".join(new_args))
             else:
-                assert f.func.kind() is not SchemaKind.inplace
                 assert Variant.method in f.variants
                 fw_formula = "{}.{}({})".format(new_args[0], defn_name, ", ".join(new_args[1:]))
 
@@ -257,7 +257,8 @@ def postprocess_forward_derivatives(
             var_name=defn.var_name,
             var_type=defn.var_type,
             required_inputs_fw_grad=required_inputs_tangent,
-            required_inputs_primal=required_inputs_primal))
+            required_inputs_primal=required_inputs_primal,
+            required_original_self_value=False))
 
     return updated_derivatives
 
