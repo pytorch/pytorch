@@ -718,8 +718,7 @@ std::pair<IterDomain*, IterDomain*> IterDomain::split(
 // simple validation of vectorize as it's inputs are right most and contiguous.
 void IterDomain::parallelize(ParallelType t) {
   parallel_type_ = t;
-  if (t == ParallelType::Unroll || t == ParallelType::Unswitch ||
-      isParallelTypeVectorize(t)) {
+  if (t == ParallelType::Unroll || isParallelTypeVectorize(t)) {
     TORCH_CHECK(
         start()->isZeroInt() && extent()->isConstScalar(),
         "Vectorization, unrolling, and unswitching are only supported with start = 0 and extent as a const int, but got ",

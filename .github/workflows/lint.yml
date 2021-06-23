@@ -318,7 +318,7 @@ jobs:
           cd "${GITHUB_WORKSPACE}"
           set -eux
 
-          wget -O pr.diff "https://patch-diff.githubusercontent.com/raw/pytorch/pytorch/pull/$PR_NUMBER.diff"
+          wget -O pr.diff "https://patch-diff.githubusercontent.com/raw/csarofeen/pytorch/pull/$PR_NUMBER.diff"
 
           # Run Clang-Tidy
           # The negative filters below are to exclude files that include onnx_pb.h or
@@ -400,6 +400,7 @@ jobs:
         run: |
           set -eux
           pip install -r requirements.txt
+          pip install numpy==1.20 # https://github.com/pytorch/pytorch/pull/60472
           pip install mypy==0.812
           # Needed to check tools/render_junit.py
           pip install junitparser rich
@@ -412,7 +413,16 @@ jobs:
       - name: Run mypy
         run: |
           set -eux
-          for CONFIG in mypy*.ini; do mypy --config="$CONFIG"; done
+          STATUS=
+          for CONFIG in mypy*.ini; do
+            if ! mypy --config="$CONFIG"; then
+              STATUS=fail
+            fi
+          done
+          if [ -n "$STATUS" ]; then
+            echo 'Please fix the above mypy warnings.'
+            false
+          fi
 
 concurrency:
   group: lint-${{ github.event.pull_request.number || github.sha }}
