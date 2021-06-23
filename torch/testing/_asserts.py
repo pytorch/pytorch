@@ -101,10 +101,10 @@ def _check_quantization(
     If the inputs are not quantized, this decorator is a no-op.
 
     Args:
-        check_tensor_values (Callable[..., Optional[Exception]]): Tensor check function for continuous tensors.
+        check_tensor_values (Callable[..., Optional[_TestingErrorMeta]]): Tensor check function for continuous tensors.
 
     Returns:
-        Optional[Exception]: Return value of :attr:`check_tensors`.
+        Optional[_TestingErrorMeta]: Return value of :attr:`check_tensors`.
     """
 
     @functools.wraps(check_tensor_values)
