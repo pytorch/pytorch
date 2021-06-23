@@ -1326,9 +1326,9 @@ class TestCase(expecttest.TestCase):
 
         # Tensor x Number and Number x Tensor comparisons
         if isinstance(x, torch.Tensor) and isinstance(y, Number):
-            assert_close_(x.item(), y)
+            assert_close_(x, torch.as_tensor(y, dtype=x.dtype))
         elif isinstance(y, torch.Tensor) and isinstance(x, Number):
-            assert_close_(x, y.item())
+            assert_close_(torch.as_tensor(x, dtype=y.dtype), y)
         # Tensor x np.bool
         elif isinstance(x, torch.Tensor) and isinstance(y, np.bool_):
             self.assertEqual(x.item(), y, atol=atol, rtol=rtol, msg=msg,
