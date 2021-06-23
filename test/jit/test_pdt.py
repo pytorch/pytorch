@@ -3,11 +3,7 @@ import sys
 import torch
 from torch.testing._internal.jit_utils import JitTestCase, make_global
 from torch.jit._monkeytype_config import _IS_MONKEYTYPE_INSTALLED
-<<<<<<< HEAD
 from typing import List, Dict, Tuple, Any, Optional, NamedTuple  # noqa: F401
-=======
-from typing import List, Dict, Tuple, Any, Optional  # noqa: F401
->>>>>>> f43ddae364 (Annotate  NoneType as Optional[torch.Tensor])
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -441,7 +437,7 @@ class TestPDT(JitTestCase):
         scripted_fn = torch.jit._script_pdt(pdt_model, example_inputs={pdt_model: [([10, 20, ], ), ], })
         self.assertEqual(scripted_fn([20]), pdt_model([20]))
 
-    def test_nonetype_as_optional_of_tensor(self):
+    def test_nonetype_as_optional_of_type(self):
         def test_none(a) -> Any:
             if a is None:
                 return 0
@@ -450,7 +446,13 @@ class TestPDT(JitTestCase):
 
         make_global(test_none)
 
-        scripted_fn = torch.jit._script_pdt(test_none, example_inputs=[(None, )])
+        scripted_fn = torch.jit._script_pdt(test_none, example_inputs=[(None, ), (10.6, )])
+        self.assertEqual(scripted_fn(30.9, ), test_none(30.9, ))
+
+        scripted_fn = torch.jit._script_pdt(test_none, example_inputs=[(None, ), (10, )])
+        self.assertEqual(scripted_fn(2, ), test_none(2, ))
+
+        scripted_fn = torch.jit._script_pdt(test_none, example_inputs=[(None, ), (torch.Tensor(1), )])
         self.assertEqual(scripted_fn(torch.ones(1), ), test_none(torch.ones(1), ))
 
         class TestForwardWithNoneType(torch.nn.Module):
@@ -464,25 +466,32 @@ class TestPDT(JitTestCase):
         make_global(TestForwardWithNoneType)
         pdt_model = TestForwardWithNoneType()
 
-        # Test List[NoneType] as input
-        scripted_model = torch.jit._script_pdt(pdt_model, example_inputs=[([None, ], )])
-        self.assertEqual(scripted_model([torch.ones(1), torch.ones(1), None]),
-                         pdt_model([torch.ones(1), torch.ones(1), None]))
+        # Test List[Optional[float]] as input
+        scripted_model = torch.jit._script_pdt(pdt_model, example_inputs=[([None, ], ), ([2.9, ], )])
+        self.assertEqual(scripted_model([2.8, 6.7, 3.8, None, ]), pdt_model([2.8, 6.7, 3.8, None, ]))
 
-        # Test Tuple[NoneType] as input
-        scripted_model = torch.jit._script_pdt(pdt_model, example_inputs=[((None, ), )])
+        # Test Tuple[Optional[int]] as input
+        scripted_model = torch.jit._script_pdt(pdt_model, example_inputs=[((5.1, ), ), ((None, ), ), ])
+        self.assertEqual(scripted_model((6.2, None, 10.6, 80.1, None, )), pdt_model((6.2, None, 10.6, 80.1, None, )))
+
+        # Test List[Optional[int]] as input
+        scripted_model = torch.jit._script_pdt(pdt_model, example_inputs=[([None, ], ), ([2, ], )])
+        self.assertEqual(scripted_model([2, None, 6, 8, ]), pdt_model([2, None, 6, 8, ]))
+
+        # Test Tuple[Optional[int]] as input
+        scripted_model = torch.jit._script_pdt(pdt_model, example_inputs=[((None, ), ), ((5, ), )])
+        self.assertEqual(scripted_model((2, None, 6, 8)), pdt_model((2, None, 6, 8, )))
+
+        # Test Tuple[Optional[float]] as input
+        scripted_model = torch.jit._script_pdt(pdt_model, example_inputs=[((None, ), ), ((5, ), )])
+        self.assertEqual(scripted_model((2, None, 6, 8)), pdt_model((2, None, 6, 8, )))
+
+        # Test Tuple[Optional[torch.Tensor]] as input
+        scripted_model = torch.jit._script_pdt(pdt_model, example_inputs=[(((torch.ones(1), ), (None, ), ), )])
         self.assertEqual(scripted_model((torch.ones(1), torch.ones(1), None)),
                          pdt_model((torch.ones(1), torch.ones(1), None)))
-        def test_none_for_list(a) -> List:
-            for i, val in enumerate(a):
-                if val is None:
-                    a[i] = torch.ones(1)
-                else:
-                    a[i] += torch.ones(1)
-            return a
 
-        make_global(test_none_for_list)
-
-        scripted_fn = torch.jit._script_pdt(test_none_for_list, example_inputs=[([None, ], )])
-        self.assertEqual(scripted_fn([torch.ones(1), torch.ones(1), None]),
-                         test_none_for_list([torch.ones(1), torch.ones(1), None]))
+        # Test List[Optional[torch.Tensor]] as input
+        scripted_model = torch.jit._script_pdt(pdt_model, example_inputs=[([None, ], ), ([torch.ones(1), ], )])
+        self.assertEqual(scripted_model([torch.ones(1), torch.ones(1), None]),
+                         pdt_model([torch.ones(1), torch.ones(1), None]))

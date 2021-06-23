@@ -16,6 +16,25 @@ try:
 except ImportError:
     _IS_MONKEYTYPE_INSTALLED = False
 
+def get_element_type(types: str):
+    """
+    Helper function to extract the type of the element to be annotated to Optional
+    from the list of consolidated types.
+    """
+    elements = types.split(",")
+    elem_type = elements[0] if 'NoneType' in elements[1] else elements[1]
+
+    # If the type is from typing module, then extract the element type
+    start = elem_type.find("[")
+    end = elem_type.rfind("]")
+    if start != -1 and end != -1:
+        return elem_type[:start + 1] + 'Optional[' + elem_type[start + 1: end] + ']]'
+
+    # Else return Optional[element type]
+    if elem_type == 'Tensor':
+        elem_type = 'torch.Tensor'
+    return 'Optional[' + elem_type + ']'
+
 def get_qualified_name(func):
     return func.__qualname__
 
@@ -84,7 +103,9 @@ if _IS_MONKEYTYPE_INSTALLED:
                         _all_type += _type.__name__ + ','
                 _all_type = _all_type.lstrip(" ")  # Remove any trailing spaces
 
-                if len(types) > 1:
+                if len(types) == 2 and 'NoneType' in _all_type:
+                    all_args[arg] = {get_element_type(_all_type)}
+                elif len(types) > 1:
                     all_args[arg] = {'Any'}
                 else:
                     if 'NoneType' in _all_type:
