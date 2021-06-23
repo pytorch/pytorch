@@ -1405,6 +1405,11 @@ class TestCase(expecttest.TestCase):
                     assert debug_msg_compare is not None
                     debug_msg = "Quantized representations failed to compare as equal! " + debug_msg_compare
                 super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
+            elif x.dtype == torch.bool and y.dtype == torch.bool:
+                result, msg = self._compareTensors(
+                    x, y, atol=atol, rtol=rtol, exact_dtype=exact_dtype, exact_device=exact_device
+                )
+                self.assertTrue(result, msg=msg)
             else:
                 assert_close_(x, y)
         elif isinstance(x, (np.ndarray, torch.Tensor)) or isinstance(y, (np.ndarray, torch.Tensor)):
