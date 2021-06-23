@@ -8010,6 +8010,20 @@ class TestNN(NNTestCase):
                     self.assertEqual(hy.data[0][0][0], 10)
                     self.assertEqual(hy.data[1][0][0], output_val)
 
+    def test_error_RNN_seq_len_zero(self):
+        # checking error message when RNN has seq_len = 0
+        for module in (nn.RNN, nn.LSTM, nn.GRU):
+            for bidirectional in [True, False]:
+                for device in torch.testing.get_all_device_types():
+                    input = torch.ones(0, 10, 5)
+                    rnn = module(5, 6, bidirectional=bidirectional)
+                    if device == 'cuda':
+                        rnn.cuda()
+                        input = input.cuda()
+
+                    with self.assertRaisesRegex(RuntimeError, "Expected sequence length to be larger than 0 in RNN"):
+                        rnn(input)
+
     @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
     def test_RNN_dropout_state(self):
         for p in (0, 0.1234):
@@ -15926,6 +15940,19 @@ class TestNNDeviceType(NNTestCase):
         self.assertTrue(o.is_contiguous(memory_format=torch.channels_last))
         o.sum().backward()
 
+    # Test that faster algorithms used for inference produce the same results
+    # Validates depthwise3x3 bug reported in https://github.com/pytorch/pytorch/issues/60176
+    @onlyCPU
+    @dtypes(torch.float)
+    def test_conv2d_no_grad(self, device, dtype):
+        for batch in [1, 2, 3]:
+            for groups in [1, 2, 4]:
+                input = torch.rand(batch, groups, 8, 8, dtype=dtype, device=device)
+                m = nn.Conv2d(groups, 8, kernel_size=(3, 3), groups=groups, dtype=dtype, device=device)
+                with torch.no_grad():
+                    output_ng = m(input)
+                output = m(input)
+                self.assertEqual(output, output_ng, rtol=1e-2, atol=1e-5)
 
     @onlyCUDA
     @skipCUDAIfRocm
@@ -16011,6 +16038,30 @@ class TestNNDeviceType(NNTestCase):
         helper([2, 3])
         helper([2, 3, 5, 7])
         helper([2, 3, 5, 7, 9])
+
+    # TODO: Remove onlyCPU when cuda is supported
+    @onlyCPU
+    def test_nll_loss_byte_target_matches_long(self, device):
+        N, C = 10, 4
+        input = torch.randn(N, C, device=device, requires_grad=True)
+        target = torch.empty(N, dtype=torch.long, device=device).random_(0, C)
+
+        def compute_result_and_gradient(reduction, target_dtype):
+            input_ = input.detach()
+            input_.requires_grad_()
+
+            prob = F.log_softmax(input_, dim=-1)
+            loss = nn.NLLLoss(reduction=reduction)
+            result = loss(prob, target.to(target_dtype))
+            result.sum().backward()
+
+            return result, input_.grad
+
+        for reduction in ["none", "mean", "sum"]:
+            result_long, grad_long = compute_result_and_gradient(reduction, torch.long)
+            result_byte, grad_byte = compute_result_and_gradient(reduction, torch.uint8)
+            self.assertEqual(result_long, result_byte)
+            self.assertEqual(grad_long, grad_byte)
 
     def test_softshrink_negative(self, device):
         input = torch.randn(5, device=device, requires_grad=True)

@@ -66,9 +66,12 @@ run_tests() {
 
     if [[ ( -z "${JOB_BASE_NAME}" || "${JOB_BASE_NAME}" == *-test ) && $NUM_TEST_SHARDS -eq 1 ]]; then
         "$SCRIPT_HELPERS_DIR"/test_python.bat "$DETERMINE_FROM"
-        "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat
-        "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
-        "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
+
+        if [[ -z ${RUN_SMOKE_TESTS_ONLY} ]]; then
+          "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat
+          "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
+          "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
+        fi
     else
         if [[ "${BUILD_ENVIRONMENT}" == "pytorch-win-vs2019-cpu-py3" ]]; then
           export PYTORCH_COLLECT_COVERAGE=1
@@ -76,14 +79,21 @@ run_tests() {
         fi
         if [[ "${JOB_BASE_NAME}" == *-test1 || "${SHARD_NUMBER}" == 1 ]]; then
             "$SCRIPT_HELPERS_DIR"/test_python_first_shard.bat "$DETERMINE_FROM"
-            "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
-            if [[ "${USE_CUDA}" == "1" ]]; then
-              "$SCRIPT_HELPERS_DIR"/test_python_jit_legacy.bat "$DETERMINE_FROM"
+
+            if [[ -z ${RUN_SMOKE_TESTS_ONLY} ]]; then
+              "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
+              if [[ "${USE_CUDA}" == "1" ]]; then
+                "$SCRIPT_HELPERS_DIR"/test_python_jit_legacy.bat "$DETERMINE_FROM"
+              fi
             fi
+
         elif [[ "${JOB_BASE_NAME}" == *-test2 || "${SHARD_NUMBER}" == 2 ]]; then
             "$SCRIPT_HELPERS_DIR"/test_python_second_shard.bat "$DETERMINE_FROM"
-            "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
-            "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat
+
+            if [[ -z ${RUN_SMOKE_TESTS_ONLY} ]]; then
+              "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
+              "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat
+            fi
         fi
     fi
 }
