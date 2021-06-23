@@ -35,9 +35,10 @@ class TestCalculateShards(unittest.TestCase):
     }
 
     def assert_shards_equal(
-        self, 
-        expected_shards: List[Tuple[float, List[str]]], 
-        actual_shards: List[Tuple[float, List[str]]]) -> None:
+        self,
+        expected_shards: List[Tuple[float, List[str]]],
+        actual_shards: List[Tuple[float, List[str]]]
+    ) -> None:
         for expected, actual in zip(expected_shards, actual_shards):
             self.assertAlmostEqual(expected[0], actual[0])
             self.assertListEqual(expected[1], actual[1])
