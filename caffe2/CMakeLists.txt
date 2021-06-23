@@ -1183,11 +1183,21 @@ if(BUILD_LITE_INTERPRETER)
   endif()
 endif()
 
+# Needed to support the inclusion of c10d/Foo.hpp headers.
+target_include_directories(torch_cpu PRIVATE $<BUILD_INTERFACE:${TORCH_SRC_DIR}/lib>)
+if(USE_ROCM)
+  target_include_directories(torch_hip PRIVATE $<BUILD_INTERFACE:${TORCH_SRC_DIR}/lib>)
+else()
+  if(BUILD_SPLIT_CUDA)
+    target_include_directories(torch_cuda_cpp PRIVATE $<BUILD_INTERFACE:${TORCH_SRC_DIR}/lib>)
+  else()
+    target_include_directories(torch_cuda PRIVATE $<BUILD_INTERFACE:${TORCH_SRC_DIR}/lib>)
+  endif()
+endif()
+
 # Pass USE_DISTRIBUTED to torch_cpu, as some codes in jit/pickler.cpp and
 # jit/unpickler.cpp need to be compiled only when USE_DISTRIBUTED is set
 if(USE_DISTRIBUTED)
-  # Needed to support the inclusion of c10d/Foo.hpp headers.
-  target_include_directories(torch_cpu PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../torch/lib>)
   target_compile_definitions(torch_cpu PUBLIC USE_DISTRIBUTED)
   if(USE_GLOO AND USE_C10D_GLOO)
     target_compile_definitions(torch_cpu PUBLIC USE_C10D_GLOO)
