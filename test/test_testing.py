@@ -1157,6 +1157,13 @@ class TestAssertCloseComplex(TestCase):
             with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the imaginary part")):
                 fn()
 
+    def test_matching_conjugate_bit(self):
+        actual = torch.tensor(complex(1, 1)).conj()
+        expected = torch.tensor(complex(1, -1))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn()
+
 
 if __name__ == '__main__':
     run_tests()
