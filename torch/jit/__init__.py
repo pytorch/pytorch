@@ -83,7 +83,7 @@ def annotate(the_type, the_value):
     Though TorchScript can infer correct type for most Python expressions, there are some cases where
     type inference can be wrong, including:
 
-    - Empty containers like `[]` and `{}`, which TorchScript assumes to be container of `Tensor`\ s
+    - Empty containers like `[]` and `{}`, which TorchScript assumes to be container of `Tensor`
     - Optional types like `Optional[T]` but assigned a valid value of type `T`, TorchScript would assume
       it is type `T` rather than `Optional[T]`
 
