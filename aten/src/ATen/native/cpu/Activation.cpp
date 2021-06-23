@@ -270,6 +270,26 @@ void GeluKernelImpl(TensorIteratorBase& it) {
       GeluMKLKernelImpl<scalar_t>(&it);
     });
   } else {
+    auto grain_size = at::internal::GRAIN_SIZE;
+    // Numbers based on benchmarking.
+    // Benchmark: benchmarks/operator_benchmarks/pt/gelu_test.py
+#ifdef C10_MOBILE
+    // Benchmarked on S8 US phone.
+    // Internal benchmarking that converts operator benchmark into
+    // a torchscript module and run that on mobile.
+    // Same benchmark as server side.
+    constexpr int64_t GELU_MIN_ELEMENTS_FOR_MULTI_THREADING{6144};
+#else
+    // Benchmarked on i9 8 core 16 thread machine.
+    // 1 thread: cd benchmark/operator_benchmarks;
+    //           python -m pt.gelu_test --tag_filter long --omp_num_threads 1
+    // 2 threads: cd benchmark/operator_benchmarks;
+    //           python -m pt.gelu_test --tag_filter long --omp_num_threads 1
+    constexpr int64_t GELU_MIN_ELEMENTS_FOR_MULTI_THREADING{16384};
+#endif
+    if (it.numel() > GELU_MIN_ELEMENTS_FOR_MULTI_THREADING) {
+      grain_size = it.numel() / at::get_num_threads();
+    }
     AT_DISPATCH_FLOATING_TYPES(it.dtype(), "GeluKernelImpl", [&]() {
       using Vec = vec::Vectorized<scalar_t>;
       const Vec kAlphaVec(M_SQRT1_2);
@@ -284,7 +304,8 @@ void GeluKernelImpl(TensorIteratorBase& it) {
           [&](Vec x_vec) {
             return x_vec * kPointFiveVec *
                 (kOneVec + (x_vec * kAlphaVec).erf());
-          });
+          },
+          grain_size);
     });
   }
 }

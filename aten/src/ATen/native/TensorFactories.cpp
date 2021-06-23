@@ -517,25 +517,20 @@ namespace {
 TensorOptions linspace_logspace_infer_options(
     const Scalar& start,
     const Scalar& end,
-    const TensorOptions& options) {
-  auto result_options = options;
+    const TensorOptions& options,
+    const char* fn_name) {
   if (start.isComplex() || end.isComplex()) {
-    // Since result_options.has_dtype() returns true (dtype is default type),
-    // even if the user hasn't specified the dtype.
-    // We just check to see if either `start` or `end` is complex,
-    // and if the `result_dtype` is not complex (be it default float type or
-    // user provided), we cast it to default complex dtype with a Warning!.
-    auto result_dtype = c10::typeMetaToScalarType(options.dtype());
-    if (!at::isComplexType(result_dtype)) {
-      TORCH_WARN(
-          "As either `start` or `stop` is complex, return type will be the complex dtype corresponding to default dtype.",
-          "In future, this may throw an error when a non-complex dtype arg is passed as input along ",
-          "with complex valued start or end value.");
-      result_options = result_options.dtype(c10::get_default_complex_dtype());
+    const auto default_complex_dtype = c10::get_default_complex_dtype();
+    if (options.has_dtype()) {
+      auto dtype = c10::typeMetaToScalarType(options.dtype());
+      TORCH_CHECK(at::isComplexType(dtype),
+          fn_name, ": inferred dtype ", default_complex_dtype, " can't be safely cast to passed dtype ", dtype);
+    } else {
+      return options.dtype(default_complex_dtype);
     }
   }
 
-  return result_options;
+  return options.has_dtype() ? options : options.dtype(c10::get_default_dtype());
 }
 } // anonymous namespace
 
@@ -554,7 +549,7 @@ Tensor linspace(
 
   const auto steps_ = steps.value_or(100);
   TORCH_CHECK(steps_ >= 0, "number of steps must be non-negative");
-  auto result_options = linspace_logspace_infer_options(start, end, options);
+  auto result_options = linspace_logspace_infer_options(start, end, options, "torch.linspace()");
   Tensor result = at::empty({steps_}, result_options);
   return at::linspace_out(result, start, end, steps);
 }
@@ -575,7 +570,7 @@ Tensor logspace(
 
   const auto steps_ = steps.value_or(100);
   TORCH_CHECK(steps_ >= 0, "number of steps must be non-negative");
-  auto result_options = linspace_logspace_infer_options(start, end, options);
+  auto result_options = linspace_logspace_infer_options(start, end, options, "torch.logspace()");
   Tensor result = at::empty({steps_}, result_options);
   return at::logspace_out(result, start, end, steps, base);
 }
@@ -1463,8 +1458,6 @@ Tensor ones(
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   return native::full(
       size, /*fill_value=*/1., names, dtype, layout, device, pin_memory);
