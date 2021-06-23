@@ -5212,15 +5212,14 @@ op_db: List[OpInfo] = [
                    )),
     OpInfo('cross',
            dtypes=all_types_and_complex(),
-           dtypesIfCUDA=all_types_and(torch.half),
+           dtypesIfCUDA=all_types_and_complex_and(torch.half),
            sample_inputs_func=sample_inputs_cross,
            supports_forward_ad=True,
            skips=(
                # AssertionError: UserWarning not triggered :
                # Resized a non-empty tensor but did not warn about it.
                SkipInfo('TestCommon', 'test_out'),
-               # CUDA illegal memory access on Windows
-               SkipInfo(device_type='cuda', active_if=IS_WINDOWS))),
+           )),
     OpInfo('cumsum',
            dtypesIfCPU=all_types_and_complex(),
            dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
