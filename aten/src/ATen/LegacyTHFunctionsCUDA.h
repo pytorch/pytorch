@@ -18,10 +18,6 @@ namespace native {
 namespace legacy {
 namespace cuda {
 
-Tensor & _th_masked_fill_(Tensor & self, const Tensor & mask, const Scalar& value);
-Tensor & _th_masked_fill_bool_(Tensor & self, const Tensor & mask, const Scalar& value);
-Tensor & _th_cross_kernel_out(Tensor & result, const Tensor & self, const Tensor & other, int64_t dim);
-Tensor _th_cross_kernel(const Tensor & self, const Tensor & other, int64_t dim);
 std::tuple<Tensor &,Tensor &> _th_gels_out(const Tensor & self, const Tensor & A, Tensor & res1, Tensor & res2);
 std::tuple<Tensor,Tensor> _th_gels(const Tensor & self, const Tensor & A);
 Tensor & _th_potri_out(Tensor & output, const Tensor & self, bool upper);

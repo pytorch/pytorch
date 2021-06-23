@@ -68,23 +68,23 @@ struct CollectiveFingerPrint {
     }
     // Serialize data into tensor
     int64_t data_size = data->size();
-    auto options = at::TensorOptions().dtype(at::kLong);
-    at::DataPtr data_ptr((void*)std::move(data->data()), c10::Device(c10::kCPU));
-    c10::Storage storage(
-        c10::Storage::use_byte_size_t(),
-        data_size * c10::elementSize(at::kLong),
-        std::move(data_ptr));
-    auto serialized_tensor =
-        at::empty({data_size}, options).set_(storage).clone();
-    // at::Tensor serialized_tensor =
-    //     at::for_blob(data->data(), {data_size})
-    //         .context(
-    //             data.release(),
-    //             [](void* ctx) {
-    //               delete static_cast<std::vector<int64_t>*>(ctx);
-    //             })
-    //         .options(at::TensorOptions().dtype(at::kLong))
-    //         .make_tensor();
+   // auto options = at::TensorOptions().dtype(at::kLong);
+   // at::DataPtr data_ptr((void*)std::move(data->data()), c10::Device(c10::kCPU));
+   // c10::Storage storage(
+   //     c10::Storage::use_byte_size_t(),
+   //     data_size * c10::elementSize(at::kLong),
+   //     std::move(data_ptr));
+    // auto serialized_tensor =
+    //     at::empty({data_size}, options).set_(storage).clone();
+    at::Tensor serialized_tensor =
+        at::for_blob(data->data(), {data_size})
+            .context(
+                data.release(),
+                [](void* ctx) {
+                  delete static_cast<std::vector<int64_t>*>(ctx);
+                })
+            .options(at::TensorOptions().dtype(at::kLong))
+            .make_tensor();
     return serialized_tensor;
   }
 
