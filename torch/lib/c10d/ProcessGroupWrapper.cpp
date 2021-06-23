@@ -1,10 +1,9 @@
 #include <c10d/ProcessGroupWrapper.hpp>
-#include "c10/core/DeviceType.h"
 
 #ifdef USE_C10D_GLOO
 
 #include <c10/core/Allocator.h>
-#include <c10/core/Device.h>
+#include <c10/core/DeviceType.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/Exception.h>
