@@ -433,8 +433,9 @@ at::Tensor PackedLinearWeightsMkldnn::apply_impl(
   TORCH_CHECK(input.scalar_type() == c10::ScalarType::QUInt8,
       "qlinear (MKLDNN): data type of input should be QUint8.");
 
+  auto input_contig = input.contiguous();
   auto input_reshaped =
-      dim == 2 ? input : input.reshape({-1, input.size(input.dim() - 1)});
+      dim == 2 ? input_contig : input_contig.reshape({-1, input.size(input.dim() - 1)});
 
   auto input_dims = input_reshaped.sizes().vec();
   auto input_data_type = dnnl::memory::data_type::u8;

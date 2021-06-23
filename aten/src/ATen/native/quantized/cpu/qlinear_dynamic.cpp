@@ -428,6 +428,7 @@ at::Tensor PackedLinearWeightsMkldnn::apply_dynamic_impl(at::Tensor input, bool 
       "qlinear_dynamic (MKLDNN): data type of input should be float.");
 
   // Input -> uint8
+  auto input_contig = input.contiguous();
   const int64_t dim = input.dim();
   auto input_reshaped =
       dim == 2 ? input : input.reshape({-1, input.size(input.dim() - 1)});
@@ -436,7 +437,7 @@ at::Tensor PackedLinearWeightsMkldnn::apply_dynamic_impl(at::Tensor input, bool 
   auto input_desc = ideep::tensor::desc(input_dims, input_data_type);
   ideep::attr_t op_attr = ReluFused ? ideep::attr_t::fuse_relu() : ideep::attr_t();
   ideep::tensor x;
-  x.init(input_desc, input.data_ptr());
+  x.init(input_desc, input_contig.data_ptr());
   float x_max, x_min;
   const int precision = 8;
   find_min_max(input_reshaped.data_ptr<float>(), &x_min, &x_max, input.numel());

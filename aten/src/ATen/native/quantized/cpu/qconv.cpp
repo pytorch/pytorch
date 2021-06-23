@@ -820,11 +820,12 @@ at::Tensor PackedConvWeightsMkldnn<kSpatialDim>::apply_impl(
       func_name, " (MKLDNN): data type of input should be QUint8.");
 
   // src
-  auto src_dims = act.sizes().vec();
+  auto act_contig = act.contiguous();
+  auto src_dims = act_contig.sizes().vec();
   auto src_data_type = dnnl::memory::data_type::u8;
   auto src_desc = ideep::tensor::desc(src_dims, src_data_type);
   ideep::tensor src;
-  src.init(src_desc, act.data_ptr());
+  src.init(src_desc, act_contig.data_ptr());
   src.set_scale(ideep::scale_t(1, 1.0/act.q_scale())); // Scales of MKLDNN and PyTorch are reciprocal
   src.set_zero_point(std::vector<int32_t>(1, act.q_zero_point()));
   // weights & bias
