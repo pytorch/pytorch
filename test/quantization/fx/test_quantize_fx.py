@@ -1034,7 +1034,6 @@ class TestQuantizeFx(QuantizationTestCase):
         m(torch.rand(5, 5))
         m = convert_fx(m)
         m(torch.rand(5, 5))
-        # first conv is quantized, second conv is not quantized
         node_list = [
             ns.call_function(torch.quantize_per_tensor),
             ns.call_module(nnq.Linear),
