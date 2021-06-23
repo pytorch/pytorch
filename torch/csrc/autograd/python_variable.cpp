@@ -172,7 +172,14 @@ PyObject * THPVariable_Wrap(Variable var)
     // to the Python object are removed.
     status = c10::impl::PyInterpreterStatus::TAGGED_BY_US;
   } else {
-    status = c10::impl::PyInterpreterStatus::MAYBE_UNINITIALIZED;
+    // Assumption: if a Tensor has been shared across threads, this induces
+    // a refcount bump.  Therefore, if the use count 1, we are the sole thread
+    // with access to this tensor and no race is possible.
+    if (var.use_count() <= 1) {
+      status = c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED;
+    } else {
+      status = c10::impl::PyInterpreterStatus::MAYBE_UNINITIALIZED;
+    }
   }
   return THPVariable_NewWithVar(
       (PyTypeObject*)THPVariableClass, std::move(var), status);
