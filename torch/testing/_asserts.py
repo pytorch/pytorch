@@ -96,7 +96,7 @@ def _check_complex_components_individually(
 def _check_quantization(
     check_tensor_values: Callable[..., Optional[_TestingErrorMeta]]
 ) -> Callable[..., Optional[_TestingErrorMeta]]:
-    """Decorates continuous tensor check functions to handle quantized tensors.
+    """Decorates non-quantized tensor check functions to handle quantized tensors.
 
     If the inputs are not quantized, this decorator is a no-op.
 
@@ -567,7 +567,7 @@ def assert_close(
 ) -> None:
     r"""Asserts that :attr:`actual` and :attr:`expected` are close.
 
-    If :attr:`actual` and :attr:`expected` are real-valued and finite, they are considered close if
+    If :attr:`actual` and :attr:`expected` are non-quantized, real-valued, and finite, they are considered close if
 
     .. math::
 
@@ -580,6 +580,10 @@ def assert_close(
 
     If :attr:`actual` and :attr:`expected` are complex-valued, they are considered close if both their real and
     imaginary components are considered close according to the definition above.
+
+    If :attr:`actual` and :attr:`expected` are quantized, they are considered close if they have the same
+    :meth:`~torch.Tensor.qscheme` and the result of :meth:`~torch.Tensor.dequantize` is close according to the
+    definition above.
 
     :attr:`actual` and :attr:`expected` can be :class:`~torch.Tensor`'s or any array-or-scalar-like of the same type,
     from which :class:`torch.Tensor`'s can be constructed with :func:`torch.as_tensor`. In addition, :attr:`actual` and
@@ -615,6 +619,7 @@ def assert_close(
         AssertionError: If the inputs are :class:`~collections.abc.Sequence`'s, but their length does not match.
         AssertionError: If the inputs are :class:`~collections.abc.Mapping`'s, but their set of keys do not match.
         AssertionError: If corresponding tensors do not have the same :attr:`~torch.Tensor.shape`.
+        AssertionError: If corresponding tensors are quantized, but have different :meth:`~torch.Tensor.qscheme`'s.
         AssertionError: If :attr:`check_device`, but corresponding tensors are not on the same
             :attr:`~torch.Tensor.device`.
         AssertionError: If :attr:`check_dtype`, but corresponding tensors do not have the same ``dtype``.
