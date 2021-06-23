@@ -143,7 +143,6 @@ def get_standalone_module_configs(
     sm_prepare_config_dict = {} if config[1] is None else config[1]
     return sm_qconfig_dict, sm_prepare_config_dict
 
-
 def qat_swap_modules(
         root: torch.nn.Module,
         additional_qat_module_mapping: Dict[Callable, Callable]) -> None:
