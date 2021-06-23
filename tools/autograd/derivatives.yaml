@@ -396,6 +396,7 @@
 
 - name: conj_physical_(Tensor(a!) self) -> Tensor(a!)
   self: grad.conj_physical()
+  result: self_t.conj_physical_()
 
 - name: copysign.Tensor(Tensor self, Tensor other) -> Tensor
   self: copysign_tensor_self_backward(grad, self, result)
@@ -516,6 +517,9 @@
 
 - name: erfc(Tensor self) -> Tensor
   self: -2.0 / sqrt(M_PI) * exp(-(self.pow(2))) * grad
+
+- name: special_erfcx(Tensor self) -> Tensor
+  self: (2.0 * self * result - 2.0 / sqrt(M_PI)) * grad
 
 - name: erfinv(Tensor self) -> Tensor
   self: 0.5 * sqrt(M_PI) * exp(self.erfinv().pow(2)) * grad
@@ -745,7 +749,7 @@
 
 - name: polygamma_(Tensor(a!) self, int n) -> Tensor(a!)
   self: grad * polygamma(n + 1, self)
-  result: auto_element_wise
+  result: self_t.mul_(polygamma(n + 1, original_self_p))
 
 - name: log(Tensor self) -> Tensor
   self: grad.div(self.conj())
@@ -1108,6 +1112,9 @@
 - name: special_entr(Tensor self) -> Tensor
   self: grad * (-(1 + self.log()))
 
+- name: special_ndtri(Tensor self) -> Tensor
+  self: grad * std::sqrt(2 * M_PI) * (result.square() / 2).exp()
+
 # DO NOT define a backward for reshape!
 # reshape is special in that it sometimes returns a view, and sometimes not.
 # Defining a backward will make codegen spit out the forward call as
@@ -1160,7 +1167,7 @@
 - name: sinh(Tensor self) -> Tensor
   self: grad * self.cosh().conj()
 
-- name: slice.Tensor(Tensor(a) self, int dim=0, int? start=0, int? end=9223372036854775807, int step=1) -> Tensor(a)
+- name: slice.Tensor(Tensor(a) self, int dim=0, int? start=None, int? end=None, int step=1) -> Tensor(a)
   self: slice_backward_wrapper(grad, self.sizes(), dim, start, end, step)
   result: auto_linear
 
@@ -1603,6 +1610,9 @@
 - name: reflection_pad2d(Tensor self, int[4] padding) -> Tensor
   self: reflection_pad2d_backward(grad, self, padding)
 
+- name: reflection_pad3d(Tensor self, int[6] padding) -> Tensor
+  self: reflection_pad3d_backward(grad, self, padding)
+
 - name: replication_pad1d(Tensor self, int[2] padding) -> Tensor
   self: replication_pad1d_backward(grad, self, padding)
 
@@ -1872,6 +1882,10 @@
   grad_output: reflection_pad2d(grad, padding)
   self: zeros_like(self)
 
+- name: reflection_pad3d_backward(Tensor grad_output, Tensor self, int[6] padding) -> Tensor
+  grad_output: reflection_pad3d(grad, padding)
+  self: zeros_like(self)
+
 - name: replication_pad1d_backward(Tensor grad_output, Tensor self, int[2] padding) -> Tensor
   grad_output: replication_pad1d(grad, padding)
   self: zeros_like(self)
@@ -1957,8 +1971,8 @@
   grad_output: upsample_nearest3d(grad, output_size, scale_factors)
 
 - name: sigmoid_backward(Tensor grad_output, Tensor output) -> Tensor
-  grad_output: sigmoid_backward(grad, output)
-  output: grad * grad_output * (-2 * output + 1)
+  grad_output: sigmoid_backward(grad, output.conj())
+  output: grad.conj() * grad_output * (-2 * output.conj() + 1)
 
 - name: tanh_backward(Tensor grad_output, Tensor output) -> Tensor
   grad_output: tanh_backward(grad, output.conj())

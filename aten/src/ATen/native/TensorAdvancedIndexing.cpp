@@ -1568,7 +1568,10 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
   const auto self_sizes = self.sizes();
   const auto total_nonzero = thread_count_nonzero.back();
   const int64_t ndim = self_sizes.size();
-  resize_output(result, {total_nonzero, ndim});
+  if (resize_output(result, {total_nonzero, ndim})) {
+    // Default to fortran-contiguous output (see gh-46224)
+    result.as_strided_({total_nonzero, ndim}, {1, total_nonzero});
+  }
 
   if (result.numel() == 0) {
     return result;

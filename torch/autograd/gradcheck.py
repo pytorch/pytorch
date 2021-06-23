@@ -1085,7 +1085,7 @@ def _run_slow_mode_and_get_error(func, tupled_inputs, outputs, input_idx, output
         def new_fn(inp):
             new_inputs = list(tupled_inputs)
             new_inputs[input_idx] = inp
-            return func(*new_inputs)[output_idx]
+            return _as_tuple(func(*new_inputs))[output_idx]
         slow_analytical = _get_analytical_jacobian_forward_ad(new_fn, (tupled_inputs[input_idx],), (outputs[output_idx],))[0][0]
     else:
         slow_analytical = _get_analytical_jacobian(tupled_inputs, outputs, input_idx, output_idx)
@@ -1379,7 +1379,8 @@ def gradgradcheck(
         input_args = args[:-num_outputs]
         grad_outputs = args[-num_outputs:]
         outputs = _differentiable_outputs(func(*input_args))
-        input_args = tuple(x for x in input_args if isinstance(x, torch.Tensor) and x.requires_grad)
+        input_args = tuple(x for x in input_args
+                           if is_tensor_like(x) and x.requires_grad)
         grad_inputs = torch.autograd.grad(outputs, input_args, grad_outputs, create_graph=True,
                                           allow_unused=True)
         grad_inputs = tuple(g for g in grad_inputs if g is not None)
