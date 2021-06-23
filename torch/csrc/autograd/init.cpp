@@ -10,6 +10,7 @@
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/saved_variable.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/autograd/utils/python_arg_parsing.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
@@ -253,6 +254,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
 
   py::class_<c10::InferenceMode>(_C_m, "_InferenceMode")
       .def(py::init<bool>());
+
+  py::class_<torch::autograd::SavedVariable>(m, "SavedVariable")
+    .def(py::init());
 
   Py_RETURN_TRUE;
 }

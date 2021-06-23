@@ -743,6 +743,25 @@ PyObject *THPFunction_saved_variables(THPFunction *self, void *_unused)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject *THPFunction_raw_saved_tensors(THPFunction *self, void *_unused)
+{
+  HANDLE_TH_ERRORS
+  auto& saved_variables = self->saved_variables;
+  if (saved_variables.empty())
+    return PyTuple_New(0);
+  int num_saved = saved_variables.size();
+  THPObjectPtr saved(PyTuple_New(num_saved));
+  if (!saved)
+    return nullptr;
+  for(const auto i : c10::irange(num_saved)) {
+    py::object obj = py::cast(saved_variables[i], py::return_value_policy::reference);
+    PyTuple_SET_ITEM(saved.get(), i, obj.release().ptr());
+  }
+  return saved.release();
+  END_HANDLE_TH_ERRORS
+}
+
+
 PyObject *THPFunction_next_functions(THPFunction *self, void *_unused)
 {
   HANDLE_TH_ERRORS
@@ -845,6 +864,7 @@ PyObject* getRequiresGrad(PyObject* obj, void* _unused) {
 static struct PyGetSetDef THPFunction_properties[] = {
   {"saved_tensors", (getter)THPFunction_saved_tensors, nullptr, nullptr, nullptr},
   {"saved_variables", (getter)THPFunction_saved_variables, nullptr, nullptr, nullptr},
+  {"raw_saved_tensors", (getter)THPFunction_raw_saved_tensors, nullptr, nullptr, nullptr},
   {"next_functions", (getter)THPFunction_next_functions, nullptr, nullptr, nullptr},
   {"to_save", &getObject<&THPFunction::to_save>, &setObject<&THPFunction::to_save>, nullptr, nullptr},
   {"non_differentiable", &getObject<&THPFunction::non_differentiable>, &setObject<&THPFunction::non_differentiable>, nullptr, nullptr},
