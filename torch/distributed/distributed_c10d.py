@@ -36,9 +36,6 @@ _MPI_AVAILABLE = True
 _NCCL_AVAILABLE = True
 _GLOO_AVAILABLE = True
 
-_pickler = pickle.Pickler
-_unpickler = pickle.Unpickler
-
 try:
     from torch._C._distributed_c10d import ProcessGroupMPI
 except ImportError:
@@ -1494,16 +1491,16 @@ def all_gather_multigpu(
 
 def _object_to_tensor(obj):
     f = io.BytesIO()
-    _pickler(f).dump(obj)
+    torch.save(obj, f)
     byte_storage = torch.ByteStorage.from_buffer(f.getvalue())  # type: ignore[attr-defined]
     byte_tensor = torch.tensor(byte_storage, dtype=torch.uint8)
     local_size = torch.tensor([byte_tensor.numel()], dtype=torch.long)
     return byte_tensor, local_size
 
 
-def _tensor_to_object(tensor, tensor_size):
+def _tensor_to_object(tensor, tensor_size, device=None):
     buf = tensor.numpy().tobytes()[:tensor_size]
-    return _unpickler(io.BytesIO(buf)).load()
+    return torch.load(io.BytesIO(buf), map_location=device)
 
 
 def all_gather_object(object_list, obj, group=None):
@@ -1700,7 +1697,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
         object_gather_list[i] = _tensor_to_object(tensor, tensor_size)
 
 
-def broadcast_object_list(object_list, src=0, group=None):
+def broadcast_object_list(object_list, src=0, group=None, device=None):
     """
     Broadcasts picklable objects in ``object_list`` to the whole group. Similar
     to :func:`broadcast`, but Python objects can be passed in.
@@ -1712,8 +1709,12 @@ def broadcast_object_list(object_list, src=0, group=None):
             Each object must be picklable. Only objects on the ``src`` rank will
             be broadcast, but each rank must provide lists of equal sizes.
         src (int): Source rank from which to broadcast ``object_list``.
-        group: (ProcessGroup, optional): The process group to work on. If None,
-            the default process group will be used. Default is ``None``.
+        group (ProcessGroup, optional): The process group to work on. If
+            ``None``, the default process group will be used. Default is
+            ``None``.
+        device (torch.device): Device to load tensors contained in the received
+            object. If ``None``, tensors are loaded to their source device.
+            Default is ``None``.
 
     Returns:
         ``None``. If rank is part of the group, ``object_list`` will contain the
@@ -1768,7 +1769,6 @@ def broadcast_object_list(object_list, src=0, group=None):
         # true.
         current_device = torch.device("cuda", torch.cuda.current_device())
         object_sizes_tensor = object_sizes_tensor.to(current_device)
-        object_sizes_tensor = object_sizes_tensor.to(current_device)
 
     # Broadcast object sizes
     broadcast(object_sizes_tensor, src=src, group=group)
@@ -1794,7 +1794,7 @@ def broadcast_object_list(object_list, src=0, group=None):
             if obj_view.device != torch.device("cpu"):
                 obj_view = obj_view.cpu()
             offset += obj_size
-            object_list[i] = _tensor_to_object(obj_view, obj_size)
+            object_list[i] = _tensor_to_object(obj_view, obj_size, device=device)
 
 
 def scatter_object_list(
