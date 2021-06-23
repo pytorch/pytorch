@@ -1185,6 +1185,9 @@ endif()
 
 # Needed to support the inclusion of c10d/Foo.hpp headers.
 target_include_directories(torch_cpu PRIVATE $<BUILD_INTERFACE:${TORCH_SRC_DIR}/lib>)
+if(BUILD_PYTHON)
+  target_include_directories(torch_python PRIVATE $<BUILD_INTERFACE:${TORCH_SRC_DIR}/lib>)
+endif()
 if(USE_ROCM)
   target_include_directories(torch_hip PRIVATE $<BUILD_INTERFACE:${TORCH_SRC_DIR}/lib>)
 else()
