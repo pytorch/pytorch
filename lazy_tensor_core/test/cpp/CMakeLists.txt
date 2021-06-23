@@ -77,7 +77,6 @@ target_include_directories(
   PRIVATE
   "${PTLTC_DIR}"
   "${PTLTC_DIR}/torch_ltc/csrc"
-  "${PTLTC_DIR}/third_party/abseil-cpp"
 )
 target_include_directories(
   test_ptltc
