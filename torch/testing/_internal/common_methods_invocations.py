@@ -1315,12 +1315,12 @@ def sample_inputs_addmv(op_info, device, dtype, requires_grad, **kwargs):
     return tuple(sample_inputs)
 
 def sample_inputs_addbmm(op_info, device, dtype, requires_grad, **kwargs):
-    test_cases = [((S, M), (S, S, S), (S, S, M), 1, 1),
-                  ((1,), (S, S, S), (S, S, M), 1, 1),
-                  ((S, M), (S, S, S), (S, S, M), 0.6, 0.2),
-                  ((1,), (S, S, S), (S, S, M), 0.6, 0.2),
-                  ((), (S, S, S), (S, S, M), 1, 1),
-                  ((), (S, S, S), (S, S, M), 0.6, 0.2),
+    test_cases = [((S, M), (S, S, S), (S, S, M), 1, 1, False),
+                  ((1,), (S, S, S), (S, S, M), 1, 1, True),
+                  ((S, M), (S, S, S), (S, S, M), 0.6, 0.2, False),
+                  ((1,), (S, S, S), (S, S, M), 0.6, 0.2, True),
+                  ((), (S, S, S), (S, S, M), 1, 1, True),
+                  ((), (S, S, S), (S, S, M), 0.6, 0.2, True),
                   ]
     sample_inputs = []
     for input_args in test_cases:
@@ -1334,10 +1334,12 @@ def sample_inputs_addbmm(op_info, device, dtype, requires_grad, **kwargs):
                             low=None, high=None,
                             requires_grad=requires_grad))
         alpha, beta = input_args[3], input_args[4]
-        sample_inputs.append(SampleInput(args[0], args=(args[1], args[2]), kwargs=dict(beta=beta, alpha=alpha)))
+        sample_inputs.append(SampleInput(args[0], args=(args[1], args[2]), kwargs=dict(beta=beta, alpha=alpha),
+                                         broadcasts_input=input_args[5]))
         if dtype.is_complex:
             sample_inputs.append(SampleInput(args[0], args=(args[1], args[2]),
-                                             kwargs=dict(beta=beta * (1 + 2j), alpha=alpha * (2 + 3j))))
+                                             kwargs=dict(beta=beta * (1 + 2j), alpha=alpha * (2 + 3j)),
+                                             broadcasts_input=input_args[5]))
 
     return tuple(sample_inputs)
 

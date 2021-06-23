@@ -396,6 +396,7 @@
 
 - name: conj_physical_(Tensor(a!) self) -> Tensor(a!)
   self: grad.conj_physical()
+  result: self_t.conj_physical_()
 
 - name: copysign.Tensor(Tensor self, Tensor other) -> Tensor
   self: copysign_tensor_self_backward(grad, self, result)
@@ -748,7 +749,7 @@
 
 - name: polygamma_(Tensor(a!) self, int n) -> Tensor(a!)
   self: grad * polygamma(n + 1, self)
-  result: auto_element_wise
+  result: self_t.mul_(polygamma(n + 1, original_self_p))
 
 - name: log(Tensor self) -> Tensor
   self: grad.div(self.conj())

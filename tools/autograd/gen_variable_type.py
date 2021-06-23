@@ -304,6 +304,11 @@ for (auto i=0; i<${out_arg}.size(); ++i) {
 }
 """)
 
+FW_DERIVATIVE_BOOLEAN_TEMPLATE = CodeTemplate("""\
+auto ${boolean_var_name} = ${cond};
+(void)${boolean_var_name};
+""")
+
 FW_DERIVATIVE_TEMPLATE = CodeTemplate("""\
 if (${requires_fw_grad}) {
     ${unpacked_arguments}
@@ -583,6 +588,23 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
             body.append(f'check_no_requires_grad({name}, "{name}");')
         return body
 
+    def emit_orignal_self_definition():
+        body: List[str] = []
+        if inplace:
+            body.append('c10::optional<at::Tensor> original_self;')
+
+            all_forward_grad_cond = []
+            for derivative in fw_derivatives:
+                if derivative.required_original_self_value:
+                    all_forward_grad_cond.append(get_any_has_forward_grad_name(derivative.var_name))
+
+            if all_forward_grad_cond:
+                body.append(f'if ({" || ".join(all_forward_grad_cond)}) {{')
+                body.append(f'  original_self = self.clone();')
+                body.append(f'}}')
+
+        return body
+
     def save_variables(
         saved_variables: Sequence[SavedAttribute],
         is_output: bool,
@@ -594,12 +616,14 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
             name = arg.nctype.name.name if isinstance(arg.nctype.name, SpecialArgName) else arg.nctype.name
             type = arg.nctype.type
             expr = arg.expr
+            stmts_prepend = None
             if type == BaseCType(tensorT) or type == OptionalCType(BaseCType(tensorT)) or \
                     type == MutRefCType(OptionalCType(BaseCType(tensorT))) or (is_output and type == BaseCType(scalarT)):
                 var = name
                 name += '_'
                 if var == 'self' and inplace:
-                    var = 'self.clone()'
+                    stmts_prepend = 'if (!original_self.has_value()) original_self = self.clone()'
+                    var = 'original_self.value()'
                     assert not is_output
                 if inplace and is_output:
                     var = 'self'
@@ -618,9 +642,13 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                 expr = f'{expr}.has_value() ? c10::optional<std::string>(std::string({expr}.value())) : c10::nullopt'
             guard = guard_for(arg)
             if guard is None:
+                if stmts_prepend:
+                    stmts.append(f'{stmts_prepend};')
                 stmts.append(f'grad_fn->{name} = {expr};')
             else:
                 stmts.append(f'if ({guard}) {{')
+                if stmts_prepend:
+                    stmts.append(f'  {stmts_prepend};')
                 stmts.append(f'  grad_fn->{name} = {expr};')
                 stmts.append('}')
         return stmts
@@ -734,6 +762,31 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         return [SETUP_ANY_REQUIRES_GRAD.substitute(
             args_with_derivatives=[arg.name for arg in args_with_derivatives]), ]
 
+    def get_any_has_forward_grad_name(var_name: str) -> str:
+        return f'_any_has_forward_grad_{var_name}'
+
+    def emit_any_has_forward_grad() -> List[str]:
+        content: List[str] = []
+        for derivative in fw_derivatives:
+            assert derivative.required_inputs_fw_grad is not None
+            requires_fw_grad = " || ".join([FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp=inp.name)
+                                           for inp in differentiable_inputs if inp.name in derivative.required_inputs_fw_grad])
+            if not requires_fw_grad:
+                # Handle functions like stack
+                # For these, we don't unpack anything and always call the user function
+                if not (len(differentiable_inputs) == 1 and is_tensor_list_type(differentiable_inputs[0].type)):
+                    raise RuntimeError(f'No differentiable input to "{name}" is a differentiable Tensor (as the provided'
+                                       'forward AD formula does not use any input tangent) even though a forward gradient '
+                                       'formula has been defined for it. This case should only happen for function that '
+                                       'take a single TensorList as input. All other cases are not supported right now.')
+                requires_fw_grad = "true"
+
+            content.append(FW_DERIVATIVE_BOOLEAN_TEMPLATE.substitute(
+                boolean_var_name=get_any_has_forward_grad_name(derivative.var_name),
+                cond=requires_fw_grad))
+
+        return content
+
     def emit_check_inplace() -> List[str]:
         if not inplace:
             return []
@@ -748,23 +801,15 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                 res = "self"
 
             assert derivative.required_inputs_fw_grad is not None
-            requires_fw_grad = " || ".join([FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp=inp.name)
-                                           for inp in differentiable_inputs if inp.name in derivative.required_inputs_fw_grad])
-            if not requires_fw_grad:
-                # Handle functions like stack
-                # For these, we don't unpack anything and always call the user function
-                if not (len(differentiable_inputs) == 1 and is_tensor_list_type(differentiable_inputs[0].type)):
-                    raise RuntimeError(f'No differentiable input to "{name}" is a differentiable Tensor (as the provided'
-                                       'forward AD formula does not use any input tangent) even though a forward gradient '
-                                       'formula has been defined for it. This case should only happen for function that '
-                                       'take a single TensorList as input. All other cases are not supported right now.')
-                requires_fw_grad = "true"
+
             unpacked_arguments = ""
             for inp in differentiable_inputs:
                 if inp.name in derivative.required_inputs_fw_grad:
                     unpacked_arguments += FW_DERIVATIVE_DEFINED_GRAD_TEMPLATE.substitute(inp=inp.name)
                 if inp.name in (derivative.required_inputs_primal or []):
                     unpacked_arguments += FW_DERIVATIVE_DEFINED_PRIMAL_TEMPLATE.substitute(inp=inp.name)
+            if derivative.required_original_self_value:
+                unpacked_arguments += FW_DERIVATIVE_DEFINED_PRIMAL_TEMPLATE.substitute(inp="original_self")
 
             if inplace:
                 is_inplace_str = "true"
@@ -779,7 +824,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                 raise RuntimeError("Unsupported output type for forward derivative")
             # View ops create fw_grad that already is a view of the base's fw_grad so just use that
             content.append(FW_DERIVATIVE_TEMPLATE.substitute(
-                requires_fw_grad=requires_fw_grad, formula=derivative.formula, out_arg=res,
+                requires_fw_grad=get_any_has_forward_grad_name(derivative.var_name), formula=derivative.formula, out_arg=res,
                 unpacked_arguments=unpacked_arguments, fw_grad_setter=fw_grad_setter))
         return content
 
@@ -812,7 +857,9 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
     body.extend(unpack_args_stats)
     if requires_derivative:
         body.extend(emit_any_requires_grad())
+        body.extend(emit_any_has_forward_grad())
         body.extend(emit_check_inplace())
+        body.extend(emit_orignal_self_definition())
         body.extend(setup_derivative(differentiable_inputs))
     body.append(declare_returned_variables(f))
 
