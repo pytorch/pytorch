@@ -11,7 +11,6 @@ import statistics
 import subprocess
 import time
 from collections import defaultdict
-from glob import glob
 from pathlib import Path
 from typing import (Any, DefaultDict, Dict, Iterable, Iterator, List, Optional,
                     Set, Tuple, cast)
@@ -662,10 +661,23 @@ def parse_report(path: str) -> Iterator[TestCase]:
         yield TestCase(test_case)
 
 
+def get_recursive_files(folder: str, extension: str) -> Iterable[str]:
+    """
+    Get recursive list of files with given extension even.
+
+    Use it instead of glob(os.path.join(folder, '**', f'*{extension}'))
+    if folder/file names can start with `.`, which makes it hidden on Unix platforms
+    """
+    assert extension.startswith(".")
+    for root, _, files in os.walk(folder):
+        for fname in files:
+            if os.path.splitext(fname)[1] == extension:
+                yield os.path.join(root, fname)
+
+
 def parse_reports(folder: str) -> Dict[str, TestFile]:
-    reports = glob(os.path.join(folder, '**', '*.xml'), recursive=True)
     tests_by_file = dict()
-    for report in reports:
+    for report in get_recursive_files(folder, ".xml"):
         report_path = Path(report)
         # basename of the directory of test-report is the test filename
         test_filename = re.sub(r'\.', '/', report_path.parent.name)
@@ -677,6 +689,7 @@ def parse_reports(folder: str) -> Dict[str, TestFile]:
         for test_case in parse_report(report):
             tests_by_file[test_filename].append(test_case, test_type)
     return tests_by_file
+
 
 def build_info() -> ReportMetaMeta:
     return {

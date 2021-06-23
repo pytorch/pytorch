@@ -366,13 +366,13 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
   /**
    * Explicitly mark the future as completed with the output value. Optionally,
-   * the storage pointers for all tensors in IValue can be passed as well. These
-   * DataPtrs are used to synchronize CUDA streams. If data_ptrs isn't given we
-   * will attempt to extract it from the value, if we need to (this happens if a
-   * non-empty set of devices was given to the constructor). Thus one only needs
-   * to provide data_ptrs when 1) DataPtrs cannot be extracted through IValue's
-   * getSubValues() or through pickling in case of Python object; or when 2)
-   * customized DataPtrs extraction is more efficient.
+   * the storages for all tensors in IValue can be passed as well. The DataPtrs
+   * of these storages are used to synchronize CUDA streams. If storages isn't
+   * given we will attempt to extract it from the value, if we need to (this
+   * happens if a non-empty set of devices was given to the constructor). Thus
+   * one only needs to provide storages when 1) they cannot be extracted through
+   * IValue::getSubValues() or through pickling in case of Python object; or
+   * when 2) customized storage extraction is more efficient.
    */
   void markCompleted(
       IValue value,
