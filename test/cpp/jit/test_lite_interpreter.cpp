@@ -610,7 +610,8 @@ TEST(LiteInterpreterTest, TwoSubmodulesModuleInfo) {
 TEST(LiteInterpreterTest, GetRuntimeByteCodeVersion) {
   auto runtime_bytecode_version = _get_runtime_bytecode_version();
   AT_ASSERT(
-      runtime_bytecode_version == caffe2::serialize::kProducedBytecodeVersion);
+      runtime_bytecode_version ==
+      caffe2::serialize::kMaxSupportedBytecodeVersion);
 }
 
 TEST(LiteInterpreterTest, GetByteCodeVersion) {

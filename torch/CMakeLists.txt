@@ -261,11 +261,9 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
 endif()
 
 if(USE_DISTRIBUTED)
-    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_DISTRIBUTED)
     if(WIN32)
       append_filelist("libtorch_python_distributed_core_sources" TORCH_PYTHON_SRCS)
     else()
-      list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_RPC)
       append_filelist("libtorch_python_distributed_sources" TORCH_PYTHON_SRCS)
     endif()
     # Disable certain warnings for GCC-9.X
@@ -274,11 +272,17 @@ if(USE_DISTRIBUTED)
       set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/rpc/testing/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
       set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/c10d/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
     endif()
-    if(USE_TENSORPIPE)
-      list(APPEND TORCH_PYTHON_LINK_LIBRARIES tensorpipe)
-      list(APPEND TORCH_PYTHON_PUBLIC_COMPILE_DEFINITIONS USE_TENSORPIPE)
+    # NCCL is a private dependency of libtorch, but libtorch_python includes
+    # some private headers of libtorch, which in turn include NCCL. As a hacky
+    # alternative to making NCCL a public dependency of libtorch, we make it
+    # a private dependency of libtorch_python as well.
+    if(USE_NCCL)
+      list(APPEND TORCH_PYTHON_LINK_LIBRARIES __caffe2_nccl)
     endif()
-    list(APPEND TORCH_PYTHON_LINK_LIBRARIES c10d)
+    # Same for MPI.
+    if(USE_MPI)
+      list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${MPI_CXX_LIBRARIES})
+    endif()
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D)
 endif()
 

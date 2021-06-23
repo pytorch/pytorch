@@ -8,6 +8,7 @@
 #include <vector>
 
 #include <c10/util/Logging.h>
+#include <c10/util/irange.h>
 #include <c10/util/string_utils.h>
 
 #include <ATen/core/functional.h>
@@ -21,6 +22,11 @@
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/ir_verifier.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
+
+#include <stdexcept>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 namespace torch {
 namespace jit {
@@ -416,10 +422,10 @@ class Vectorizer : public IRMutator {
   const Expr* start_ = nullptr;
 };
 
-void LoopNest::vectorize(For* f) {
+bool LoopNest::vectorize(For* f) {
   Block* b = dynamic_cast<Block*>(f->get_parent());
   if (!b) {
-    return;
+    return false;
   }
 
   // Can't vectorize reduction axes.
@@ -427,22 +433,31 @@ void LoopNest::vectorize(For* f) {
   for (auto* r : reductions) {
     if (std::find(r->reduce_args().begin(), r->reduce_args().end(), f->var()) !=
         r->reduce_args().end()) {
-      throw std::logic_error("Cannot vectorize reduction axis - rfactor first");
+      return false;
     }
   }
 
   Vectorizer v;
-  Stmt* old_f = Stmt::clone(f);
   Stmt* new_f = nullptr;
   try {
-    new_f = FlattenIndexes(f);
+    new_f = Stmt::clone(f);
+    normalize(dynamic_cast<For*>(new_f));
+    new_f = FlattenIndexes(new_f);
     new_f = v.vectorize(dynamic_cast<For*>(new_f));
   } catch (std::runtime_error& e) {
-    // Partial vectorization may have corrupted f
-    new_f = old_f;
+    // We clone f before vectorizing. So, any partial vectorization will
+    // have modified the clone. In case of an exception, we can continue
+    // using f.
+    new_f = f;
   }
 
-  b->replace_stmt(f, IRSimplifier::simplify(new_f));
+  if (new_f != f) {
+    b->replace_stmt(f, IRSimplifier::simplify(new_f));
+    return true;
+  }
+
+  // Vectorization was not successful.
+  return false;
 }
 
 void LoopNest::initialize(
@@ -501,7 +516,7 @@ class FunctionInliner : public IRMutator {
   const Expr* mutate_loads(const Buf* buf, std::vector<const Expr*> dims) {
     std::vector<const Var*> index_vars;
     TORCH_INTERNAL_ASSERT(buf->ndim() == producer_index_vars_.size());
-    for (size_t i = 0; i < buf->ndim(); i++) {
+    for (const auto i : c10::irange(buf->ndim())) {
       const Var* func_callee_arg = producer_index_vars_.at(i);
       const Expr* func_caller_param = dims.at(i);
       if (func_callee_arg == nullptr) {
@@ -1984,8 +1999,8 @@ bool LoopNest::normalize(For* f) {
   auto for_body_normalized = Substitute(
       f->body(),
       {{f->var(), (VarHandle(f->var()) + ExprHandle(f->start())).node()}});
-  f->setBody(for_body_normalized);
-  f->setStop(new Sub(f->stop(), f->start()));
+  f->setBody(IRSimplifier::simplify(for_body_normalized));
+  f->setStop(IRSimplifier::simplify(new Sub(f->stop(), f->start())));
   f->setStart(new IntImm(0));
   return true;
 }
@@ -2078,10 +2093,6 @@ bool LoopNest::flatten(const std::vector<For*>& loops) {
 }
 
 void LoopNest::compressBuffer(Buf* buf, Stmt* stmt) {
-  if (buf->initializer()) {
-    throw malformed_input("Can't compress buffer whose initializer is set");
-  }
-
   // Loop iterations in NNC IR do not follow sequential semantics by default.
   // In other words, the iterations of the loops could be executed in any
   // random order without affecting correctness. This constraint in turn
@@ -2226,20 +2237,6 @@ std::vector<For*> LoopNest::getLoopStmtsFor(Stmt* s) const {
   return result;
 }
 
-void LoopNest::setGPUBlockIndex(For* f, int block_index) {
-  f->set_gpu_block_index(block_index);
-}
-
-void LoopNest::setGPUThreadIndex(For* f, int thread_index) {
-  f->set_gpu_thread_index(thread_index);
-}
-
-void LoopNest::setBufferMap(
-    For* f,
-    const std::unordered_map<std::string, const Buf*>& map) {
-  f->set_buffer_map(map);
-}
-
 Stmt* LoopNest::getLoopBodyFor(Tensor* t) const {
   return getLoopBodyFor(t->buf());
 }
@@ -2348,7 +2345,7 @@ class LoopComputeAtRewriter : public IRMutator {
       return v;
     }
     std::vector<const Expr*> new_indices(v->indices().size());
-    for (size_t i = 0; i < v->indices().size(); i++) {
+    for (const auto i : c10::irange(v->indices().size())) {
       new_indices[i] =
           IRSimplifier::simplify(new Sub(v->indices()[i], offsets_[i]));
     }
@@ -2514,10 +2511,25 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
     consumer_block->replace_stmt(consumer, new_consumer);
   }
 
-  // If there's a reduction we can't just write the result straight back to the
-  // original buffer, since after parallelism the writes will race. Instead we
-  // need to create a new ReduceOp.
+  // If there's a reduction and we are operating on the reduce axis, we need to
+  // initialize the cache with 0s. Also, we can't just write the result straight
+  // back to the original buffer, since after parallelism the writes will race.
+  // Instead we need to create a new ReduceOp.
+  bool on_reduce_axis = false;
   if (reduceOp) {
+    std::set<const Var*> reduce_args(
+        reduceOp->reduce_args().begin(), reduceOp->reduce_args().end());
+    std::set<const Var*> enclosing_vars;
+    for (auto enclosing_for_stmt : NodeFinder<For>::find(consumer)) {
+      enclosing_vars.insert(enclosing_for_stmt->var());
+    }
+    for (auto reduce_arg : reduce_args) {
+      if (enclosing_vars.find(reduce_arg) == enclosing_vars.end()) {
+        on_reduce_axis = true;
+      }
+    }
+  }
+  if (reduceOp && on_reduce_axis) {
     // reduceOp means we had both loads and stores.
 
     // Init cache to 0.
@@ -2713,7 +2725,7 @@ void LoopNest::computeAt(Stmt* s, For* f) {
 
   // Generate index variables for 'temp'
   std::vector<const Expr*> temp_indices(dims.size());
-  for (size_t i = 0; i < dims.size(); i++) {
+  for (const auto i : c10::irange(dims.size())) {
     // TODO: Use name-hint of the producer indices instead of 'idx'
     temp_indices[i] = new Var(std::string("idx") + c10::to_string(i), kInt);
   }
@@ -2729,7 +2741,7 @@ void LoopNest::computeAt(Stmt* s, For* f) {
   std::vector<std::pair<const Var*, const Expr*>> rewrite_indices_map;
   std::vector<const Expr*> offsets;
   for (const TensorAccessBoundsInfo& p : bounds_it->second) {
-    for (size_t i = 0; i < p.start.size(); i++) {
+    for (const auto i : c10::irange(p.start.size())) {
       if (offsets.size() <= i) {
         offsets.push_back(p.start[i]);
       } else {
@@ -2739,7 +2751,7 @@ void LoopNest::computeAt(Stmt* s, For* f) {
     }
   }
 
-  for (size_t i = 0; i < prod_indices.size(); i++) {
+  for (const auto i : c10::irange(prod_indices.size())) {
     rewrite_indices_map.push_back(
         {prod_indices[i], new Add(temp_indices[i], offsets[i])});
   }
@@ -2749,7 +2761,7 @@ void LoopNest::computeAt(Stmt* s, For* f) {
       temp_buf, temp_indices, Substitute(st->value(), rewrite_indices_map));
 
   // Construct the loop nest for the temp computation
-  for (size_t i = 0; i < dims.size(); i++) {
+  for (const auto i : c10::irange(dims.size())) {
     // We're creating loops from innermost to outermost, so we need to access
     // dimensions in reversed order.
     size_t dim_idx = dims.size() - 1 - i;

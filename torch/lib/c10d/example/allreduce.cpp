@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroupGloo.hpp>
 
@@ -12,7 +13,7 @@ int main(int argc, char** argv) {
   // Create some tensors
   const auto ntensors = 10;
   std::vector<at::Tensor> tensors;
-  for (auto i = 0; i < ntensors; i++) {
+  for (const auto i : c10::irange(ntensors)) {
     auto x =
         at::ones({1000, 16 * (i + 1)}, at::TensorOptions(at::CPU(at::kFloat)));
     tensors.push_back(x);
@@ -20,7 +21,7 @@ int main(int argc, char** argv) {
 
   // Kick off work
   std::vector<c10::intrusive_ptr<ProcessGroup::Work>> pending;
-  for (auto i = 0; i < ntensors; i++) {
+  for (const auto i : c10::irange(ntensors)) {
     std::vector<at::Tensor> tmp = {tensors[i]};
     pending.push_back(pg.allreduce(tmp));
   }

@@ -874,6 +874,8 @@ class Caffe2Backend(Backend):
             onnx_model = onnx.utils.polish_model(onnx_model)
         except RuntimeError:
             warnings.warn("ShapeInferenceWarning: Inferred shape and existing shape differ in rank")
+        except AttributeError:
+            warnings.warn("ShapeInferenceWarning: utils module not found in ONNX version {}".format(onnx.__version__))
 
         # Optimizer module has been removed in ONNX-1.9 or later, warn caller if that is the case
         try:
