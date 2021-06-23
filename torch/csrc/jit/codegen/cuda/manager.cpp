@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
+#include <torch/csrc/jit/codegen/cuda/manager.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler.h>
 #include <torch/csrc/jit/codegen/cuda/shape_inference.h>
@@ -11,12 +12,11 @@
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 
-#include <unordered_map>
-
 #include <ATen/DimVector.h>
 #include <c10/core/DeviceType.h>
+#include <c10/util/irange.h>
 
-#include <torch/csrc/jit/codegen/cuda/manager.h>
+#include <unordered_map>
 
 namespace torch {
 namespace jit {
@@ -133,7 +133,7 @@ class CudaFusionManager {
   at::DimVector restorePermutation(at::DimVector permuted) {
     int rank = static_cast<int>(permuted.size());
     at::DimVector permutation(rank, -1);
-    for (int i = 0; i < rank; i++) {
+    for (const auto i : c10::irange(rank)) {
       permutation[permuted[i]] = i;
     }
     return permutation;
@@ -156,7 +156,7 @@ class CudaFusionManager {
     std::set<int> ordered_axes;
 
     // TODO: this does not support broadcast yet;
-    for (int i = 0; i < rank; i++) {
+    for (const auto i : c10::irange(rank)) {
       if ((*stride_properties)[i].has_value() &&
           (*stride_properties)[i]->stride_index_.has_value()) {
         ordered_axes.insert((*stride_properties)[i]->stride_index_.value());

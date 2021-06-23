@@ -2,6 +2,8 @@
 
 #include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
 
+#include <c10/util/irange.h>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -559,7 +561,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     int lanes = v->lanes();
 
     std::vector<int> values(lanes);
-    for (int i = 0; i < lanes; i++) {
+    for (const auto i : c10::irange(lanes)) {
       values[i] = base + i * stride;
     }
 
@@ -726,7 +728,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
   template <typename TReturn, typename TInput>
   void visit_intrinsics_helper(const Intrinsics* v) {
     std::vector<Value> values(v->nparams());
-    for (int i = 0; i < v->nparams(); i++) {
+    for (const auto i : c10::irange(v->nparams())) {
       v->param(i)->accept(this);
       values[i] = this->value();
     }
@@ -792,8 +794,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       dim->accept(this);
       total_byte_size *= value_.as<int>();
     }
-    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-    int int_count = (total_byte_size + sizeof(int) - 1) / sizeof(int);
+    const auto int_count = (total_byte_size + sizeof(int) - 1) / sizeof(int);
     std::unique_ptr<std::vector<int>> buffer(new std::vector<int>(int_count));
     auto iter = buffer_mapping_.find(b);
     if (iter != buffer_mapping_.end() && iter->second != nullptr) {
