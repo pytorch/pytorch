@@ -127,7 +127,7 @@ bool EqualValuesNoElementTypeCheck(at::Tensor tensor1, at::Tensor tensor2) {
   return equal;
 }
 
-void ForEachDevice(absl::Span<const DeviceType> device_types,
+void ForEachDevice(lazy_tensors::Span<const DeviceType> device_types,
                    const std::function<void(const Device&)>& devfn) {
   const Device* device = GetDefaultDevice();
   if (device_types.empty() ||
@@ -140,7 +140,7 @@ void ForEachDevice(absl::Span<const DeviceType> device_types,
   }
 }
 
-void ForEachDevice(absl::Span<const DeviceType> device_types,
+void ForEachDevice(lazy_tensors::Span<const DeviceType> device_types,
                    const std::function<void(const torch::Device&)>& devfn) {
   const Device* device = GetDefaultDevice();
   if (device_types.empty() ||
@@ -183,7 +183,7 @@ bool CloseValues(at::Tensor tensor1, at::Tensor tensor2, double rtol,
 }
 
 void WithAllDevices(
-    absl::Span<const DeviceType> device_types,
+    lazy_tensors::Span<const DeviceType> device_types,
     const std::function<void(const std::vector<Device>&,
                              const std::vector<Device>&)>& devfn) {
   for (auto device_type : device_types) {
