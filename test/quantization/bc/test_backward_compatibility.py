@@ -48,7 +48,7 @@ class TestSerialization(TestCase):
     """
     # Copy and modified from TestCase.assertExpected
     def _test_op(self, qmodule, subname=None, input_size=None, input_quantized=True,
-                 generate=False, prec=None, new_zipfile_serialization=False):
+                 generate=False, prec=None):
         r""" Test quantized modules serialized previously can be loaded
         with current code, make sure we don't break backward compatibility for the
         serialization of quantized modules
@@ -62,8 +62,7 @@ class TestSerialization(TestCase):
             if input_quantized:
                 input_tensor = torch.quantize_per_tensor(input_tensor, 0.5, 2, torch.quint8)
             torch.save(input_tensor, input_file)
-            # Temporary fix to use _use_new_zipfile_serialization until #38379 lands.
-            torch.save(qmodule.state_dict(), state_dict_file, _use_new_zipfile_serialization=new_zipfile_serialization)
+            torch.save(qmodule.state_dict(), state_dict_file)
             torch.jit.save(torch.jit.script(qmodule), scripted_module_file)
             torch.jit.save(torch.jit.trace(qmodule, input_tensor), traced_module_file)
             torch.save(qmodule(input_tensor), expected_file)
@@ -78,7 +77,7 @@ class TestSerialization(TestCase):
         self.assertEqual(qmodule_traced(input_tensor), expected, atol=prec)
 
     def _test_op_graph(self, qmodule, subname=None, input_size=None, input_quantized=True,
-                       generate=False, prec=None, new_zipfile_serialization=False):
+                       generate=False, prec=None):
         r"""
         Input: a floating point module
 
@@ -227,4 +226,4 @@ class TestSerialization(TestCase):
                 return x
         if qengine_is_fbgemm():
             mod = LSTMModule()
-            self._test_op(mod, input_size=[4, 4, 3], input_quantized=False, generate=False, new_zipfile_serialization=True)
+            self._test_op(mod, input_size=[4, 4, 3], input_quantized=False, generate=False)
