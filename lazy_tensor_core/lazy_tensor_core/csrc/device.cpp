@@ -2,10 +2,10 @@
 
 #include <c10/util/Optional.h>
 
-#include "absl/strings/str_split.h"
 #include "lazy_tensors/computation_client/computation_client.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/str_cat.h"
+#include "lazy_tensors/str_split.h"
 
 namespace torch_lazy_tensors {
 namespace {
@@ -39,7 +39,8 @@ void ParseDevice(const std::string& device_spec, Device* device) {
     return ParseDevice(default_device_spec.substr(0, pos) + device_spec,
                        device);
   }
-  std::vector<std::string> device_spec_parts = absl::StrSplit(device_spec, ':');
+  std::vector<std::string> device_spec_parts =
+      lazy_tensors::StrSplit(device_spec, ':');
   LTC_CHECK_EQ(device_spec_parts.size(), 2)
       << "Invalid device specification: " << device_spec;
 

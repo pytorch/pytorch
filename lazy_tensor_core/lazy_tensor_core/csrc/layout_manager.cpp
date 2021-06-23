@@ -8,12 +8,12 @@
 #include <string>
 #include <unordered_map>
 
-#include "absl/strings/str_split.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/ltc_logging.h"
 #include "lazy_tensors/computation_client/sys_util.h"
 #include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/shape_util.h"
+#include "lazy_tensors/str_split.h"
 
 namespace torch_lazy_tensors {
 namespace {
@@ -64,9 +64,11 @@ class LayoutManager {
     std::string layouts_env =
         lazy_tensors::sys_util::GetEnvString("LTC_LAYOUTS", "");
     if (!layouts_env.empty()) {
-      std::vector<std::string> layouts = absl::StrSplit(layouts_env, ';');
+      std::vector<std::string> layouts =
+          lazy_tensors::StrSplit(layouts_env, ';');
       for (const auto& layout_str : layouts) {
-        std::vector<std::string> parts = absl::StrSplit(layout_str, '=');
+        std::vector<std::string> parts =
+            lazy_tensors::StrSplit(layout_str, '=');
         LTC_CHECK_EQ(parts.size(), 2) << layout_str;
 
         auto entry = std::make_shared<LayoutEntry>();
@@ -82,7 +84,7 @@ class LayoutManager {
 
   static std::vector<lazy_tensors::int64> ParseIntList(
       const std::string& list_str) {
-    std::vector<std::string> parts = absl::StrSplit(list_str, ',');
+    std::vector<std::string> parts = lazy_tensors::StrSplit(list_str, ',');
     std::vector<lazy_tensors::int64> ints;
     for (const auto& int_str : parts) {
       ints.push_back(std::stol(int_str));

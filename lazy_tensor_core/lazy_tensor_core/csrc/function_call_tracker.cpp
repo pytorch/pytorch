@@ -7,10 +7,10 @@
 #include <thread>
 #include <unordered_set>
 
-#include "absl/strings/str_split.h"
 #include "lazy_tensor_core/csrc/python_util.h"
 #include "lazy_tensors/computation_client/sys_util.h"
 #include "lazy_tensors/core/platform/stacktrace.h"
+#include "lazy_tensors/str_split.h"
 
 namespace torch_lazy_tensors {
 namespace fn_tracker {
@@ -38,7 +38,7 @@ TrackerContext* LoadTrackerContext() {
 
     std::string fn_list =
         lazy_tensors::sys_util::GetEnvString("LTC_FNTRACKER_LIST", "");
-    for (auto& fn : absl::StrSplit(fn_list, ':')) {
+    for (auto& fn : lazy_tensors::StrSplit(fn_list, ':')) {
       if (!fn.empty()) {
         tctx->tags.insert(std::string(fn));
       }
