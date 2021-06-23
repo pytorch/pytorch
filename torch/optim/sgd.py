@@ -54,7 +54,7 @@ class SGD(Optimizer):
     """
 
     def __init__(self, params, lr=required, momentum=0, dampening=0,
-                 weight_decay=0, nesterov=False):
+                 weight_decay=0, nesterov=False, differentiable=False):
         if lr is not required and lr < 0.0:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if momentum < 0.0:
@@ -63,7 +63,7 @@ class SGD(Optimizer):
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
 
         defaults = dict(lr=lr, momentum=momentum, dampening=dampening,
-                        weight_decay=weight_decay, nesterov=nesterov)
+                        weight_decay=weight_decay, nesterov=nesterov, differentiable=differentiable)
         if nesterov and (momentum <= 0 or dampening != 0):
             raise ValueError("Nesterov momentum requires a momentum and zero dampening")
         super(SGD, self).__init__(params, defaults)
@@ -73,7 +73,6 @@ class SGD(Optimizer):
         for group in self.param_groups:
             group.setdefault('nesterov', False)
 
-    @torch.no_grad()
     def step(self, closure=None):
         """Performs a single optimization step.
 
@@ -95,6 +94,7 @@ class SGD(Optimizer):
             dampening = group['dampening']
             nesterov = group['nesterov']
             lr = group['lr']
+            differentiable = group['differentiable']
 
             for p in group['params']:
                 if p.grad is not None:
@@ -114,7 +114,8 @@ class SGD(Optimizer):
                   momentum=momentum,
                   lr=lr,
                   dampening=dampening,
-                  nesterov=nesterov)
+                  nesterov=nesterov,
+                  differentiable=differentiable)
 
             # update momentum_buffers in state
             for p, momentum_buffer in zip(params_with_grad, momentum_buffer_list):

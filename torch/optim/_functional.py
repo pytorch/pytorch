@@ -151,33 +151,39 @@ def sgd(params: List[Tensor],
         momentum: float,
         lr: float,
         dampening: float,
-        nesterov: bool):
+        nesterov: bool,
+        differentiable: bool):
     r"""Functional API that performs SGD algorithm computation.
 
     See :class:`~torch.optim.SGD` for details.
     """
 
     for i, param in enumerate(params):
+        with torch.set_grad_enabled(differentiable):
+            d_p = d_p_list[i]
+            if weight_decay != 0:
+                d_p = d_p.add(param, alpha=weight_decay)
 
-        d_p = d_p_list[i]
-        if weight_decay != 0:
-            d_p = d_p.add(param, alpha=weight_decay)
+            if momentum != 0:
+                buf = momentum_buffer_list[i]
 
-        if momentum != 0:
-            buf = momentum_buffer_list[i]
+                if buf is None:
+                    buf = torch.clone(d_p).detach()
+                    momentum_buffer_list[i] = buf
+                elif differentiable:
+                    buf = buf.mul(momentum).add(d_p, alpha=1 - dampening)
+                else:
+                    buf.mul_(momentum).add_(d_p, alpha=1 - dampening)
 
-            if buf is None:
-                buf = torch.clone(d_p).detach()
-                momentum_buffer_list[i] = buf
+                if nesterov:
+                    d_p = d_p.add(buf, alpha=momentum)
+                else:
+                    d_p = buf
+
+            if differentiable:
+                params[i] = params[i].add(d_p, alpha=-lr)
             else:
-                buf.mul_(momentum).add_(d_p, alpha=1 - dampening)
-
-            if nesterov:
-                d_p = d_p.add(buf, alpha=momentum)
-            else:
-                d_p = buf
-
-        param.add_(d_p, alpha=-lr)
+                param.add_(d_p, alpha=-lr)
 
 
 def adadelta(params: List[Tensor],
