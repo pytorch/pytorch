@@ -8,8 +8,8 @@
 #include <string>
 #include <vector>
 
-#include "absl/strings/str_cat.h"
 #include "lazy_tensors/computation_client/sys_util.h"
+#include "lazy_tensors/str_cat.h"
 #include "lazy_tensors/types.h"
 
 namespace lazy_tensors {
@@ -176,7 +176,8 @@ class Counter {
     __counter->AddValue(value);                          \
   } while (0)
 
-#define LTC_FN_COUNTER(ns) LTC_COUNTER(absl::StrCat(ns, __FUNCTION__), 1)
+#define LTC_FN_COUNTER(ns) \
+  LTC_COUNTER(lazy_tensors::StrCat(ns, __FUNCTION__), 1)
 
 #define LTC_VALUE_METRIC(name, value)                      \
   do {                                                     \

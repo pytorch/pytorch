@@ -4,12 +4,12 @@
 #include <string>
 #include <vector>
 
-#include "absl/strings/str_cat.h"
 #include "lazy_tensor_core/csrc/device.h"
 #include "lazy_tensor_core/csrc/tensor_impl.h"
 #include "lazy_tensor_core/csrc/torch_util.h"
 #include "lazy_tensors/computation_client/computation_client.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
+#include "lazy_tensors/str_cat.h"
 
 namespace torch_lazy_tensors {
 namespace bridge {
@@ -263,7 +263,7 @@ c10::Device LtcDeviceToAtenDevice(const Device& device) {
 }
 
 std::string ToLtcString(const c10::Device& device) {
-  return absl::StrCat("xla:", device.index());
+  return lazy_tensors::StrCat("xla:", device.index());
 }
 
 c10::Device AtenDefaultDevice() {

@@ -8,6 +8,7 @@
 #include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/sys_util.h"
 #include "lazy_tensors/computation_client/util.h"
+#include "lazy_tensors/str_cat.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -32,7 +33,7 @@ thread_local ScopeContext g_scope_context;
 void PushScope(const std::string& name) {
   size_t id = g_scope_context.next_id;
   g_scope_context.scopes.push_back(
-      {absl::StrCat(name, ".", id), g_scope_context.next_id + 1});
+      {lazy_tensors::StrCat(name, ".", id), g_scope_context.next_id + 1});
   g_scope_context.next_id = 1;
 }
 
