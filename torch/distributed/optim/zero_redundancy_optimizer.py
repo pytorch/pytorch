@@ -5,7 +5,6 @@
 
 import collections
 import copy
-import io
 from itertools import chain
 from typing import Any, Callable, Dict, List, Optional, Type
 
@@ -262,7 +261,12 @@ class ZeroRedundancyOptimizer(Optimizer):
                 else:
                     # Receive the optimizer state from the source rank
                     local_state_dict_list = [None]
-                    dist.broadcast_object_list(local_state_dict_list, src=global_rank, group=self.group, device=self._default_device)
+                    dist.broadcast_object_list(
+                        local_state_dict_list,
+                        src=global_rank,
+                        group=self.group,
+                        device=self._default_device
+                    )
                     local_state_dict = local_state_dict_list[0]
                     self._all_state_dicts.append(
                         _recursive_copy_to_device(local_state_dict, non_blocking=True, device=torch.device("cpu"))
@@ -270,11 +274,20 @@ class ZeroRedundancyOptimizer(Optimizer):
             else:
                 if rank == self.rank:
                     # Send the optimizer state to the target rank
-                    dist.broadcast_object_list([self.optim.state_dict()], src=self.global_rank, group=self.group)
+                    dist.broadcast_object_list(
+                        [self.optim.state_dict()],
+                        src=self.global_rank,
+                        group=self.group
+                    )
                 elif rank != to:
                     # Discard the received object; `broadcast()` is used for
                     # compatibility reasons
-                    dist.broadcast_object_list([None], src=global_rank, group=self.group, device=self._default_device)
+                    dist.broadcast_object_list(
+                        [None],
+                        src=global_rank,
+                        group=self.group,
+                        device=self._default_device
+                    )
 
     def _partition_parameters(self) -> List[List[Dict]]:
         r"""
