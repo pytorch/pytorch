@@ -1,4 +1,4 @@
-class Tensor_Type:
+class TensorType:
     """
     Tensor_Type defines a type for tensors, which consists of a list of dimensions.
 
@@ -9,7 +9,7 @@ class Tensor_Type:
     """
 
     def __init__(self, dim):
-        self.__origin__ = Tensor_Type
+        self.__origin__ = TensorType
         self.__args__ = dim
 
     def __repr__(self):
@@ -24,22 +24,24 @@ class Tensor_Type:
     @staticmethod
     def __class_getitem__(*args):
         assert isinstance(args[0], tuple)
-        return Tensor_Type(args[0])
+        return TensorType(args[0])
 
-class Dyn_Type:
+
+class _DynType:
     """
-    Dyn_Type defines a type which stands for the absence of type information.
+    _DynType defines a type which stands for the absence of type information.
     """
     def __init__(self):
-        self.__name__ = 'Dyn_Type'
+        self.__name__ = '_DynType'
 
     def __eq__(self, other):
         return isinstance(other, self.__class__)
 
-Dyn = Dyn_Type()
+
+Dyn = _DynType()
 
 
-def consistency(t1, t2):
+def is_consistent(t1, t2):
     """
     A binary relation denoted by ~ that determines if t1 is consistent with t2.
     The relation is reflexive, semmetric but not transitive.
@@ -54,9 +56,9 @@ def consistency(t1, t2):
     if t1 == t2:
         return True
 
-    if isinstance(t1, Dyn_Type) or isinstance(t2, Dyn_Type):
+    if isinstance(t1, _DynType) or isinstance(t2, _DynType):
         return True
 
-    if isinstance(t1, Tensor_Type) and isinstance(t2, Tensor_Type):
+    if isinstance(t1, TensorType) and isinstance(t2, TensorType):
         return len(t1.__args__) == len(t2.__args__) and \
-               all([consistency(elem1, elem2) for elem1, elem2 in zip(t1.__args__, t2.__args__)])
+               all([is_consistent(elem1, elem2) for elem1, elem2 in zip(t1.__args__, t2.__args__)])

@@ -10,3 +10,5 @@ def annotate(val, type):
         else:
             val.node.type = type
         return val
+    else:
+        return val
