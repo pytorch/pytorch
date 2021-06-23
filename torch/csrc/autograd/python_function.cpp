@@ -746,6 +746,8 @@ PyObject *THPFunction_saved_variables(THPFunction *self, void *_unused)
 PyObject *THPFunction_raw_saved_tensors(THPFunction *self, void *_unused)
 {
   HANDLE_TH_ERRORS
+  // User tries to access saved variables after they have been freed
+  THPUtils_assert(!self->has_freed_buffers, ERR_BACKWARD_TWICE);
   auto& saved_variables = self->saved_variables;
   if (saved_variables.empty())
     return PyTuple_New(0);
