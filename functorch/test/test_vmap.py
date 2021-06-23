@@ -23,6 +23,7 @@ from common_utils import (
 )
 import types
 
+import functorch
 from functorch import vmap, functional_init_with_buffers
 from functorch._C import reshape_dim_into, reshape_dim_outof
 
@@ -1447,6 +1448,19 @@ class TestVmapOperators(Namespace.TestVmapBase):
              (torch.rand(B1, 2), torch.rand(B0, 3)), in_dims=(None, 0))
         test(vmap(get_op(0), in_dims=(0, 0)),
              (torch.rand(B1, 2), torch.rand(B0, B1, 3)), in_dims=(None, 0))
+
+    def test_unsafe_view(self):
+        # Unsafe view isn't exposed, so we get at it via
+        # vmap(grad(matmul))
+        test = functools.partial(self._vmap_test, check_propagates_grad=False)
+        B = 2
+        x = torch.randn(B, 2, 3, 3)
+        y = torch.randn(B, 3, 3)
+
+        def baz(x, y):
+            return (x @ y).sum()
+
+        test(functorch.grad(baz), (x, y))
 
     def test_conj(self):
         op = torch.conj
