@@ -1378,7 +1378,7 @@ class Module:
 
         Note:
             If a parameter or buffer is registered as ``None`` and its corresponding key
-            exists :attr:`state_dict`, :meth:`load_state_dict` will raise a
+            exists in :attr:`state_dict`, :meth:`load_state_dict` will raise a
             ``RuntimeError``.
         """
         missing_keys: List[str] = []
