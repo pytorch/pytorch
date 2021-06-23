@@ -125,6 +125,7 @@ def _extract_weights_one_model(
     nodes_and_names_to_instrument: List[Tuple[Node, str]],
     results: NSResultsType,
 ) -> None:
+    torch._C._log_api_usage_once("quantization_api._numeric_suite_fx._extract_weights_one_model")
     base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
     type_a_related_to_b = \
         get_type_a_related_to_b(base_name_to_sets_of_related_ops)
@@ -147,6 +148,7 @@ def _extract_weights_impl(
     base_name_to_sets_of_related_ops: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
     unmatchable_types_map: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
 ) -> NSResultsType:
+    torch._C._log_api_usage_once("quantization_api._numeric_suite_fx._extract_weights_impl")
     matched_subgraph_pairs = get_matching_subgraph_pairs(
         gm_a, gm_b, base_name_to_sets_of_related_ops,
         unmatchable_types_map)
@@ -180,6 +182,7 @@ def extract_weights(
     base_name_to_sets_of_related_ops: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
     unmatchable_types_map: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
 ) -> NSResultsType:
+    torch._C._log_api_usage_once("quantization_api._numeric_suite_fx.extract_weights")
     base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
     type_a_related_to_b = \
         get_type_a_related_to_b(base_name_to_sets_of_related_ops)
@@ -203,6 +206,7 @@ def _add_loggers_one_model(
     nodes_and_names_to_instrument_outputs: List[Tuple[Node, str]],
     logger_cls: Callable,
 ) -> nn.Module:
+    torch._C._log_api_usage_once("quantization_api._numeric_suite_fx._add_loggers_one_model")
 
     # TODO(future PR): do not observe nodes we do not care
     #   about (both fp32, denylist, etc)
@@ -229,6 +233,7 @@ def _add_loggers_impl(
     base_name_to_sets_of_related_ops: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
     unmatchable_types_map: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
 ) -> Tuple[nn.Module, nn.Module]:
+    torch._C._log_api_usage_once("quantization_api._numeric_suite_fx._add_loggers_impl")
     matched_subgraph_pairs = get_matching_subgraph_pairs(
         gm_a, gm_b,
         base_name_to_sets_of_related_ops, unmatchable_types_map)
@@ -266,6 +271,7 @@ def add_loggers(
     base_name_to_sets_of_related_ops: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
     unmatchable_types_map: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
 ) -> Tuple[nn.Module, nn.Module]:
+    torch._C._log_api_usage_once("quantization_api._numeric_suite_fx.add_loggers")
     # TODO(future PR): expose these
     skipped_module_names: List[str] = []
     skipped_module_classes: List[Callable] = []
@@ -285,6 +291,7 @@ def _extract_logger_info_one_model(
     results: NSResultsType,
     logger_cls: Callable,
 ) -> None:
+    torch._C._log_api_usage_once("quantization_api._numeric_suite_fx._extract_logger_info_one_model")
     for gm_name, mod in model.named_modules():
         # TODO(future PR): better check when scripted
         is_logger = (
@@ -339,6 +346,7 @@ def extract_logger_info(
 
     Output format: NSResultsType
     """
+    torch._C._log_api_usage_once("quantization_api._numeric_suite_fx.extract_logger_info")
     results: NSResultsType = {}
     for model in (model_a, model_b):
         _extract_logger_info_one_model(model, results, logger_cls)
@@ -359,6 +367,7 @@ def _add_shadow_loggers_impl(
     node_type_to_io_type_map: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
     unmatchable_types_map: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
 ) -> nn.Module:
+    torch._C._log_api_usage_once("quantization_api._numeric_suite_fx._add_shadow_loggers_impl")
     matched_subgraph_pairs = get_matching_subgraph_pairs(
         gm_a, gm_b, base_name_to_sets_of_related_ops,
         unmatchable_types_map)
@@ -384,6 +393,7 @@ def add_shadow_loggers(
     Same thing as add_loggers, but for an `a_shadows_b` model.
     TODO(future PR): real docblock
     """
+    torch._C._log_api_usage_once("quantization_api._numeric_suite_fx.add_shadow_loggers")
     # TODO(future PR): expose these
     skipped_module_names: List[str] = []
     skipped_module_classes: List[Callable] = []
@@ -408,6 +418,7 @@ def extract_shadow_logger_info(
     Same thing as extract_logger_info, but for an `a_shadows_b` model.
     TODO(future PR): real docblock
     """
+    torch._C._log_api_usage_once("quantization_api._numeric_suite_fx.extract_shadow_logger_info")
     results: NSResultsType = collections.defaultdict(dict)
     _extract_logger_info_one_model(model_a_shadows_b, results, logger_cls)
     # rekey on the name of model b

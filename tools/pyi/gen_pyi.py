@@ -126,7 +126,10 @@ binary_ops = ('add', 'sub', 'mul', 'div', 'pow', 'lshift', 'rshift', 'mod', 'tru
               'iadd', 'iand', 'idiv', 'ilshift', 'imul',
               'ior', 'irshift', 'isub', 'ixor', 'ifloordiv', 'imod',  # inplace ops
               )
-comparison_ops = ('eq', 'ne', 'ge', 'gt', 'lt', 'le')
+symmetric_comparison_ops = ('eq', 'ne')
+asymmetric_comparison_ops = ('ge', 'gt', 'lt', 'le')
+comparison_ops = symmetric_comparison_ops + asymmetric_comparison_ops
+
 unary_ops = ('neg', 'abs', 'invert')
 to_py_type_ops = ('bool', 'float', 'complex', 'long', 'index', 'int', 'nonzero')
 all_ops = binary_ops + comparison_ops + unary_ops + to_py_type_ops
@@ -145,8 +148,11 @@ def sig_for_ops(opname: str) -> List[str]:
     if name in binary_ops:
         return ['def {}(self, other: Any) -> Tensor: ...'.format(opname)]
     elif name in comparison_ops:
-        # unsafe override https://github.com/python/mypy/issues/5704
-        return ['def {}(self, other: Any) -> Tensor: ...  # type: ignore[override]'.format(opname)]
+        sig = 'def {}(self, other: Any) -> Tensor: ...'.format(opname)
+        if name in symmetric_comparison_ops:
+            # unsafe override https://github.com/python/mypy/issues/5704
+            sig += '  # type: ignore[override]'
+        return [sig]
     elif name in unary_ops:
         return ['def {}(self) -> Tensor: ...'.format(opname)]
     elif name in to_py_type_ops:
