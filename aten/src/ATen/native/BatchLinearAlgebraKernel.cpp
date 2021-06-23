@@ -1,12 +1,11 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Parallel.h>
 #include <ATen/native/BatchLinearAlgebra.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cpu/zmath.h>
 
 #include <c10/util/irange.h>
-
-#include <TH/TH.h>  // for USE_LAPACK
 
 namespace at { namespace native {
 
@@ -27,7 +26,7 @@ namespace {
 */
 template <typename scalar_t>
 void apply_cholesky(const Tensor& input, const Tensor& info, bool upper) {
-#ifndef USE_LAPACK
+#if !AT_BUILD_WITH_LAPACK()
   TORCH_CHECK(
       false,
       "Calling torch.linalg.cholesky on a CPU tensor requires compiling ",
@@ -96,7 +95,7 @@ For more information see LAPACK's documentation for POTRI routine.
 */
 template <typename scalar_t>
 void apply_cholesky_inverse(Tensor& input, Tensor& infos, bool upper) {
-#ifndef USE_LAPACK
+#if !AT_BUILD_WITH_LAPACK()
   TORCH_CHECK(false, "cholesky_inverse: LAPACK library not found in compilation");
 #else
   char uplo = upper ? 'U' : 'L';
@@ -131,7 +130,7 @@ Tensor& cholesky_inverse_kernel_impl(Tensor& result, Tensor& infos, bool upper) 
 
 template <typename scalar_t>
 void apply_eig(const Tensor& self, bool eigenvectors, Tensor& vals_, Tensor& vecs_, int64_t* info_ptr) {
-#ifndef USE_LAPACK
+#if !AT_BUILD_WITH_LAPACK()
   TORCH_CHECK(false, "Calling torch.eig on a CPU tensor requires compiling ",
     "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
 #else
@@ -219,7 +218,7 @@ std::tuple<Tensor, Tensor> eig_kernel_impl(const Tensor& self, bool& eigenvector
 */
 template <typename scalar_t>
 void apply_linalg_eig(Tensor& values, Tensor& vectors, Tensor& input, Tensor& infos, bool compute_eigenvectors) {
-#ifndef USE_LAPACK
+#if !AT_BUILD_WITH_LAPACK()
   TORCH_CHECK(false, "Calling torch.linalg.eig on a CPU tensor requires compiling ",
     "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
 #else
@@ -295,7 +294,7 @@ void linalg_eig_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos,
 */
 template <typename scalar_t>
 void apply_lapack_eigh(Tensor& values, Tensor& vectors, Tensor& infos, bool upper, bool compute_eigenvectors) {
-#ifndef USE_LAPACK
+#if !AT_BUILD_WITH_LAPACK()
   TORCH_CHECK(
       false,
       "Calling torch.linalg.eigh or eigvalsh on a CPU tensor requires compiling ",
@@ -398,7 +397,7 @@ void linalg_eigh_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos
 */
 template <typename scalar_t>
 static void apply_geqrf(const Tensor& input, const Tensor& tau) {
-#ifndef USE_LAPACK
+#if !AT_BUILD_WITH_LAPACK()
   TORCH_CHECK(
       false,
       "Calling torch.geqrf on a CPU tensor requires compiling ",
@@ -464,7 +463,7 @@ void geqrf_kernel(const Tensor& input, const Tensor& tau) {
 */
 template <typename scalar_t>
 inline void apply_orgqr(Tensor& self, const Tensor& tau) {
-#ifndef USE_LAPACK
+#if !AT_BUILD_WITH_LAPACK()
   TORCH_CHECK(false, "Calling torch.orgqr on a CPU tensor requires compiling ",
     "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
 #else
@@ -553,7 +552,7 @@ struct LapackLstsqDriverTypeHash {
 */
 template <typename scalar_t>
 void apply_lstsq(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singular_values, Tensor& infos, double rcond, LapackLstsqDriverType driver_type) {
-#ifndef USE_LAPACK
+#if !AT_BUILD_WITH_LAPACK()
   TORCH_CHECK(
       false,
       "Calling torch.linalg.lstsq on a CPU tensor requires compiling ",
@@ -724,7 +723,7 @@ void lstsq_kernel(const Tensor& a, Tensor& b, Tensor& rank, Tensor& singular_val
 */
 template <typename scalar_t>
 void apply_ormqr(const Tensor& input, const Tensor& tau, const Tensor& other, bool left, bool transpose) {
-#ifndef USE_LAPACK
+#if !AT_BUILD_WITH_LAPACK()
   TORCH_CHECK(false, "Calling torch.ormqr on a CPU tensor requires compiling ",
     "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
 #else
@@ -800,7 +799,7 @@ For more information see LAPACK's documentation for TRTRS routine.
 */
 template<typename scalar_t>
 void apply_triangular_solve(Tensor& A, Tensor& B, Tensor& infos, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular) {
-#ifndef USE_LAPACK
+#if !AT_BUILD_WITH_LAPACK()
   TORCH_CHECK(
       false,
       "Calling torch.triangular_solve on a CPU tensor requires compiling ",
@@ -857,7 +856,7 @@ void triangular_solve_kernel(Tensor& A, Tensor& B, Tensor& infos, bool upper, bo
 */
 template <typename scalar_t>
 void apply_lu(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
-#ifndef USE_LAPACK
+#if !AT_BUILD_WITH_LAPACK()
   TORCH_CHECK(
       false,
       "Calling torch.lu on a CPU tensor requires compiling ",
@@ -906,7 +905,7 @@ void lu_kernel(const Tensor& input, const Tensor& pivots, const Tensor& infos, b
 */
 template <typename scalar_t>
 void apply_lu_solve(const Tensor& b, const Tensor& lu, const Tensor& pivots, char trans = 'N') {
-#ifndef USE_LAPACK
+#if !AT_BUILD_WITH_LAPACK()
   TORCH_CHECK(
       false,
       "Calling torch.lu_solve on a CPU tensor requires compiling ",

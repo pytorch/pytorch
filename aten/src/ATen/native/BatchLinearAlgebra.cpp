@@ -12,14 +12,12 @@
 
 #include <c10/util/irange.h>
 
-#include <TH/TH.h>  // for USE_LAPACK
-
 #include <vector>
 
 // First the required LAPACK implementations are registered here.
 // A comment above the registered LAPACK routine suggest which batched
 // linear algebra function uses that routine
-#ifdef USE_LAPACK
+#if AT_BUILD_WITH_LAPACK()
 
 // gesv
 extern "C" void zgesv_(int *n, int *nrhs, std::complex<double> *a, int *lda, int *ipiv, std::complex<double> *b, int *ldb, int *info);
@@ -205,7 +203,7 @@ extern "C" void sgelss_(int *m, int *n, int *nrhs,
 namespace at {
 namespace native {
 
-#ifdef USE_LAPACK
+#if AT_BUILD_WITH_LAPACK()
 // Define the per-batch functions to be used in the main implementation of the batched
 // linear algebra operations
 template<class scalar_t>
@@ -706,7 +704,7 @@ For more information see LAPACK's documentation for GESV routine.
 */
 template<typename scalar_t>
 static void apply_solve(Tensor& b, Tensor& A, Tensor& infos) {
-#ifndef USE_LAPACK
+#if !AT_BUILD_WITH_LAPACK()
   AT_ERROR("solve: LAPACK library not found in compilation");
 #else
   auto A_data = A.data_ptr<scalar_t>();
@@ -948,7 +946,7 @@ For more information see LAPACK's documentation for GETRI and GETRF routines.
 */
 template <typename scalar_t>
 static void apply_inverse(Tensor& self, Tensor& infos_lu, Tensor& infos_getri) {
-#ifndef USE_LAPACK
+#if !AT_BUILD_WITH_LAPACK()
   AT_ERROR("inverse: LAPACK library not found in compilation");
 #else
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
@@ -1198,7 +1196,7 @@ std::tuple<Tensor, Tensor> linalg_inv_ex(const Tensor& input, bool check_errors)
 
 template<typename scalar_t>
 static void apply_cholesky_solve(Tensor& b, Tensor& A, bool upper, std::vector<int64_t>& infos) {
-#ifndef USE_LAPACK
+#if !AT_BUILD_WITH_LAPACK()
   AT_ERROR("cholesky_solve: LAPACK library not found in compilation");
 #else
   char uplo = upper ? 'U' : 'L';
@@ -2399,7 +2397,7 @@ Tensor& linalg_eigvalsh_out(const Tensor& input, c10::string_view uplo, Tensor& 
 
 template <typename scalar_t>
 static void apply_symeig(Tensor& self, Tensor& eigvals, bool eigenvectors, bool upper, std::vector<int64_t>& infos) {
-#ifndef USE_LAPACK
+#if !AT_BUILD_WITH_LAPACK()
   AT_ERROR("symeig: LAPACK library not found in compilation");
 #else
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
@@ -2936,7 +2934,7 @@ std::tuple<Tensor,Tensor> eig(const Tensor& self, bool eigenvectors) {
 template <typename scalar_t>
 static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
                       char jobz, std::vector<int64_t>& infos) {
-#ifndef USE_LAPACK
+#if !AT_BUILD_WITH_LAPACK()
   AT_ERROR("svd: LAPACK library not found in compilation");
 #else
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
@@ -3634,7 +3632,7 @@ Tensor& lu_solve_out(const Tensor& self, const Tensor& LU_data, const Tensor& LU
 //          B is overwritten with the solution vectors
 template <typename scalar_t>
 static void apply_lstsq(const Tensor& B, const Tensor& A) {
-#ifndef USE_LAPACK
+#if !AT_BUILD_WITH_LAPACK()
   TORCH_INTERNAL_ASSERT(false, "lstsq: LAPACK library not found in compilation");
 #else
 
