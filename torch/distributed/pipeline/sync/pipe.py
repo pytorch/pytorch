@@ -400,6 +400,10 @@ class Pipe(Module):
         All the input tensors need to be on the same device as the first
         partition of the pipeline.
 
+        If a tensor is wrapped with the :class:`NoChunk` wrapper, the tensor
+        is not split across micro-batches and is replicated as-is similar to
+        non-tensors.
+
         Args:
             inputs: input mini-batch
 
