@@ -1157,19 +1157,6 @@ class TestAssertCloseQuantized(TestCase):
             with self.assertRaisesRegex(AssertionError, "is_quantized"):
                 fn()
 
-    def test_mismatching_qscheme(self):
-        input = torch.tensor((1.0,))
-        scale = 1.0
-        zero_point = 0
-        dtype = torch.qint32
-        actual = torch.quantize_per_tensor(input, scale=scale, zero_point=zero_point, dtype=dtype)
-        expected = torch.quantize_per_channel(
-            input, scales=torch.tensor((scale,)), zero_points=torch.tensor((zero_point,)), axis=0, dtype=dtype
-        )
-        for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, "qscheme"):
-                fn()
-
     def test_matching_per_tensor(self):
         actual = torch.quantize_per_tensor(torch.tensor(1.0), scale=1.0, zero_point=0, dtype=torch.qint32)
         expected = actual.clone()
@@ -1189,80 +1176,6 @@ class TestAssertCloseQuantized(TestCase):
 
         for fn in assert_close_with_inputs(actual, expected):
             fn()
-
-    def test_mismatching_q_scale(self):
-        actual = torch.quantize_per_tensor(torch.tensor(1.0), scale=1.0, zero_point=0, dtype=torch.qint32)
-        expected = torch.quantize_per_tensor(torch.tensor(1.0), scale=2.0, zero_point=0, dtype=torch.qint32)
-
-        for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the quantization scale")):
-                fn()
-
-    def test_mismatching_q_zero_point(self):
-        actual = torch.quantize_per_tensor(torch.tensor(1.0), scale=1.0, zero_point=0, dtype=torch.qint32)
-        expected = torch.quantize_per_tensor(torch.tensor(1.0), scale=1.0, zero_point=1, dtype=torch.qint32)
-
-        for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(
-                AssertionError, re.escape("The failure occurred for the quantization zero point")
-            ):
-                fn()
-
-    def test_mismatching_q_per_channel_scales(self):
-        actual = torch.quantize_per_channel(
-            torch.tensor((1.0,)),
-            scales=torch.tensor((1.0,)),
-            zero_points=torch.tensor((0,)),
-            axis=0,
-            dtype=torch.qint32,
-        )
-        expected = torch.quantize_per_channel(
-            torch.tensor((1.0,)),
-            scales=torch.tensor((2.0,)),
-            zero_points=torch.tensor((0,)),
-            axis=0,
-            dtype=torch.qint32,
-        )
-
-        for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the quantization scales")):
-                fn()
-
-    def test_mismatching_q_per_channel_zero_points(self):
-        actual = torch.quantize_per_channel(
-            torch.tensor((1.0,)),
-            scales=torch.tensor((1.0,)),
-            zero_points=torch.tensor((0,)),
-            axis=0,
-            dtype=torch.qint32,
-        )
-        expected = torch.quantize_per_channel(
-            torch.tensor((1.0,)),
-            scales=torch.tensor((1.0,)),
-            zero_points=torch.tensor((1,)),
-            axis=0,
-            dtype=torch.qint32,
-        )
-
-        for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(
-                AssertionError, re.escape("The failure occurred for the quantization zero points")
-            ):
-                fn()
-
-    def test_mismatching_q_per_channel_axis(self):
-        actual = torch.quantize_per_channel(
-            torch.ones(1, 1), scales=torch.tensor((1.0,)), zero_points=torch.tensor((0,)), axis=0, dtype=torch.qint32
-        )
-        expected = torch.quantize_per_channel(
-            torch.ones(1, 1), scales=torch.tensor((1.0,)), zero_points=torch.tensor((0,)), axis=1, dtype=torch.qint32
-        )
-
-        for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(
-                AssertionError, re.escape("The failure occurred for the quantization per-channel axis")
-            ):
-                fn()
 
 
 if __name__ == "__main__":

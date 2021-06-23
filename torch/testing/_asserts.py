@@ -112,44 +112,7 @@ def _check_quantization(
         if not actual.is_quantized:
             return check_tensor_values(actual, expected, **kwargs)
 
-        if actual.qscheme() == torch.per_tensor_affine:
-            error_meta = check_tensor_values(
-                torch.as_tensor(actual.q_scale()), torch.as_tensor(expected.q_scale()), **kwargs
-            )
-            if error_meta:
-                return error_meta.amend_msg(postfix="\n\nThe failure occurred for the quantization scale.")
-
-            error_meta = check_tensor_values(
-                torch.as_tensor(actual.q_zero_point()), torch.as_tensor(expected.q_zero_point()), **kwargs
-            )
-            if error_meta:
-                return error_meta.amend_msg(postfix="\n\nThe failure occurred for the quantization zero point.")
-        elif actual.qscheme() == torch.per_channel_affine:
-            error_meta = check_tensor_values(actual.q_per_channel_scales(), expected.q_per_channel_scales(), **kwargs)
-            if error_meta:
-                return error_meta.amend_msg(postfix="\n\nThe failure occurred for the quantization scales.")
-
-            error_meta = check_tensor_values(
-                actual.q_per_channel_zero_points(), expected.q_per_channel_zero_points(), **kwargs
-            )
-            if error_meta:
-                return error_meta.amend_msg(postfix="\n\nThe failure occurred for the quantization zero points.")
-
-            error_meta = check_tensor_values(
-                torch.as_tensor(actual.q_per_channel_axis()), torch.as_tensor(expected.q_per_channel_axis()), **kwargs
-            )
-            if error_meta:
-                return error_meta.amend_msg(postfix="\n\nThe failure occurred for the quantization per-channel axis.")
-        elif actual.qscheme() == torch.per_tensor_symmetric:
-            # TODO add meta data checking
-            pass
-        elif actual.qscheme() == torch.per_channel_symmetric:
-            # TODO add meta data checking
-            pass
-        else:
-            raise UsageError(f"Unknown quantization scheme {actual.qscheme()}.")
-
-        return check_tensor_values(actual.int_repr().to(torch.int32), expected.int_repr().to(torch.int32), **kwargs)
+        return check_tensor_values(actual.dequantize(), expected.dequantize(), **kwargs)
 
     return wrapper
 
