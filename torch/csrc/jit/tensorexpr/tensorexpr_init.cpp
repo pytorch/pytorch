@@ -44,7 +44,15 @@ ArgValue convertPyToArgValue(py::handle inp) {
       throw std::runtime_error("vector conversion failed");
     }
   } else {
-    throw std::runtime_error("nyi");
+    throw std::runtime_error("conversion not yet implemented");
+  }
+}
+
+Dtype parsePythonDtype(py::handle obj) {
+  if (py::isinstance(obj, py::module_::import("torch").attr("dtype"))) {
+    return Dtype(reinterpret_cast<THPDtype*>(obj.ptr())->scalar_type);
+  } else {
+    throw std::runtime_error("expected a torch.dtype instance");
   }
 }
 
@@ -55,7 +63,9 @@ void initTensorExprBindings(PyObject* module) {
   auto te = m.def_submodule("_te");
   py::class_<KernelScope>(te, "KernelScope").def(py::init<>());
 
-  auto dtype_class = py::class_<Dtype>(te, "Dtype");
+  auto dtype_class =
+      py::class_<Dtype>(te, "Dtype").def(py::init(&parsePythonDtype));
+  py::implicitly_convertible<py::object, Dtype>();
 
 #define DTYPE_SINGLETON_ACCESSOR(ctype, name) \
   dtype_class.def_property_readonly_static(   \
@@ -139,21 +149,31 @@ void initTensorExprBindings(PyObject* module) {
 #undef EXPRHANDLE_CTOR
 
   py::class_<VarHandle, ExprHandle>(te, "VarHandle")
+      .def(py::init<Dtype>())
       .def(py::init<const std::string&, Dtype>());
   py::class_<BufHandle, ExprHandle>( // NOLINT
       te,
       "BufHandle")
       .def(
           py::init<const std::string&, const std::vector<ExprHandle>&, Dtype>())
-      .def("load", [](BufHandle& self, const std::vector<ExprHandle>& v) {
-        return Load::make(self, v);
+      .def(py::init<const std::vector<ExprHandle>&, Dtype>())
+      .def(py::init<Dtype>())
+      .def(
+          "load",
+          [](BufHandle& self, const std::vector<ExprHandle>& v) {
+            return Load::make(self, v);
+          })
+      .def("load", [](BufHandle& self, const ExprHandle& v) {
+        return Load::make(self, {v});
       });
 
   py::class_<Placeholder>(te, "Placeholder")
       .def(py::init<
            const std::string&,
            const Dtype&,
-           std::vector<ExprHandle>&>())
+           const std::vector<ExprHandle>&>())
+      .def(py::init<const std::vector<ExprHandle>&, const Dtype&>())
+      .def(py::init<const std::vector<ExprHandle>&>())
       .def(
           "load",
           [](Placeholder& self, const std::vector<ExprHandle>& v) {
@@ -183,6 +203,7 @@ void initTensorExprBindings(PyObject* module) {
   py::class_<DimArg>(te, "DimArg")
       .def(py::init<const ExprHandle&>())
       .def(py::init<const ExprHandle&, const std::string&>());
+  py::implicitly_convertible<ExprHandle, DimArg>();
 
   te.def(
       "Compute",

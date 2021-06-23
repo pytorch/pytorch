@@ -421,7 +421,6 @@ filegroup(
         "aten/src/THCUNN/LogSigmoid.cu.cc",
         "aten/src/THCUNN/MultiLabelMarginCriterion.cu.cc",
         "aten/src/THCUNN/MultiMarginCriterion.cu.cc",
-        "aten/src/THCUNN/RReLU.cu.cc",
         "aten/src/THCUNN/SoftMarginCriterion.cu.cc",
         "aten/src/THCUNN/SoftPlus.cu.cc",
         "aten/src/THCUNN/SoftShrink.cu.cc",
@@ -528,10 +527,13 @@ header_template_rule(
         "@AT_FFTW_ENABLED@": "0",
         "@AT_NNPACK_ENABLED@": "0",
         "@CAFFE2_STATIC_LINK_CUDA_INT@": "0",
-        "@USE_BLAS@": "1",
+        "@AT_BUILD_WITH_BLAS@": "1",
+        "@AT_BUILD_WITH_LAPACK@": "1",
         "@AT_PARALLEL_OPENMP@": "0",
         "@AT_PARALLEL_NATIVE@": "1",
         "@AT_PARALLEL_NATIVE_TBB@": "0",
+        "@AT_BLAS_F2C@": "0",
+        "@AT_BLAS_USE_CBLAS_DOT@": "1",
     },
 )
 
