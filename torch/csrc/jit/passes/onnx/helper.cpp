@@ -159,5 +159,28 @@ Node* createONNXUnsqueeze(
   return unsqueeze_node;
 }
 
+bool isValidToTransformToONNXConcatNode(Node* lc_node) {
+  return !lc_node->inputs().empty();
+}
+
+Node* transformToONNXConcatNode(Graph* g, Node* lc_node, int opset_version) {
+  // ListConstruct Int[] output case, we need to transform to ONNX
+  // Concat to ensure the output is a single tensor(dynamic) type in
+  // order to be consumed as inputs
+  std::vector<Value*> unsqueezed;
+  for (auto* input : lc_node->inputs()) {
+    Node* unsqueezed_node =
+        createONNXUnsqueeze(g, lc_node, input, 0, opset_version);
+    unsqueezed.emplace_back(unsqueezed_node->output());
+  }
+  Node* concat_node = g->create(onnx::Concat, 1);
+  concat_node->i_(attr::axis, 0);
+  for (auto v : unsqueezed) {
+    concat_node->addInput(v);
+  }
+  concat_node->insertBefore(lc_node);
+  return concat_node;
+}
+
 } // namespace jit
 } // namespace torch
