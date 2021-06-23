@@ -610,7 +610,6 @@ static void eraseListConstruct(Node* n, int opset_version) {
       auto* lc_node = input->node();
       TypePtr elem =
           lc_node->output()->type()->castRaw<ListType>()->getElementType();
-
       if (elem->cast<IntType>() &&
           isValidToTransformToONNXConcatNode(lc_node)) {
         auto concat_node = transformToONNXConcatNode(
