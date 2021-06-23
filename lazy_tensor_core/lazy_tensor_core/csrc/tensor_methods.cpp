@@ -3,8 +3,6 @@
 #include <algorithm>
 #include <functional>
 
-#include "absl/strings/str_cat.h"
-#include "absl/strings/str_split.h"
 #include "lazy_tensor_core/csrc/aten_ltc_bridge.h"
 #include "lazy_tensor_core/csrc/data_ops.h"
 #include "lazy_tensor_core/csrc/helpers.h"

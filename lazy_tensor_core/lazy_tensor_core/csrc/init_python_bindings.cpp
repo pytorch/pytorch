@@ -7,7 +7,6 @@
 #include <thread>
 #include <vector>
 
-#include "absl/strings/str_cat.h"
 #include "lazy_tensor_core/csrc/aten_ltc_bridge.h"
 #include "lazy_tensor_core/csrc/compiler/backend_impl_interface.h"
 #include "lazy_tensor_core/csrc/device.h"
