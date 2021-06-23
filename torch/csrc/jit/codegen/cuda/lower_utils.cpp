@@ -127,6 +127,8 @@ kir::TensorView* getTVOutput(const kir::Expr* expr) {
   for (auto out : expr->outputs()) {
     if (auto tv = dynamic_cast<kir::TensorView*>(out)) {
       return tv;
+    } else if (auto ti = dynamic_cast<kir::TensorIndex*>(out)) {
+      return ti->view();
     }
   }
   return nullptr;

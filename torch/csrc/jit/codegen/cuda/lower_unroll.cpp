@@ -65,20 +65,6 @@ bool isReductionInitExpr(const kir::Expr* expr) {
 
 } // namespace
 
-kir::Bool* UnrollPass::getThreadPredicate(const kir::TensorView* tv) {
-  const auto& pred_map = GpuLower::current()->threadPredMap();
-  // No thread predicate is needed predicate when tv is output of a
-  // parallel broadcast expression.
-  if (auto bop = dynamic_cast<kir::BroadcastOp*>(tv->definition())) {
-    TORCH_INTERNAL_ASSERT(bop->out()->isA<kir::TensorView>());
-    const auto out = bop->out()->as<kir::TensorView>()->fuserTv();
-    if (pred_map.getParallelBroadcastDomains(out).any()) {
-      return kir::IrBuilder(GpuLower::current()->kernel()).trueVal();
-    }
-  }
-  return pred_map.getExpr(tv->fuserTv());
-}
-
 void UnrollPass::handle(kir::Expr* expr) {
   if (ir_utils::isTVOp(expr)) {
     // If tv op, predicate it
@@ -93,7 +79,7 @@ void UnrollPass::handle(kir::Expr* expr) {
     kir::IrBuilder ir_builder(GpuLower::current()->kernel());
     const auto thread_pred = isReductionInitExpr(expr)
         ? ir_builder.trueVal()
-        : getThreadPredicate(out_tv);
+        : GpuLower::current()->threadPredMap().getPredicate(out_tv->fuserTv());
 
     // When a predicate needs to account for ShiftOp, it is currently
     // taken care by its own function.
@@ -105,10 +91,8 @@ void UnrollPass::handle(kir::Expr* expr) {
     // For expr calling a device func with block sync, don't create
     // if-then-else but pass the predicate to the device func
     if (ir_utils::hasBlockSync(expr, GpuLower::current()->threadPredMap())) {
-      // All threads should join blockBroadcast
-      auto thread_pred = expr->isA<kir::BroadcastOp>()
-          ? ir_builder.trueVal()
-          : GpuLower::current()->threadPredMap().getExpr(out_tv->fuserTv());
+      auto thread_pred =
+          GpuLower::current()->threadPredMap().getPredicate(out_tv->fuserTv());
       const auto pred = ir_builder.create<kir::Predicate>(
           PredicateType::Inline, expr, thread_pred);
       expr->setPredicate(pred);

@@ -62,9 +62,6 @@ class TORCH_CUDA_CU_API UnrollPass {
   // Generate the for Expr replacement map
   UnrollPass(const std::vector<kir::Expr*>& exprs);
 
-  // Wrapper to access thread_predicates_ based on an output TV
-  kir::Bool* getThreadPredicate(const kir::TensorView*);
-
   const std::unordered_map<kir::Expr*, kir::Expr*>& replacementMap() const {
     return expr_replacement_map_;
   }

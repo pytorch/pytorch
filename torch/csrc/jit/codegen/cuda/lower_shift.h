@@ -130,8 +130,8 @@ class HaloInfo {
   //! When yes, the expression needs two predications: one for
   //! interior and another for padding. Predicate insertion is done in
   //! the ShiftPredicateInserter class below.
-  bool needsShiftPredicate(Expr* expr);
-  bool needsShiftPredicate(kir::Expr* expr);
+  bool needsShiftPredicate(Expr* expr) const;
+  bool needsShiftPredicate(kir::Expr* expr) const;
 
   std::string toString() const;
 

@@ -35,7 +35,7 @@ kir::Val* getPredicatePerParallelType(
   }
 }
 
-kir::Bool* getPredicate(
+kir::Bool* getPredicateFromParallelTypes(
     const ParallelTypeBitmap& bits,
     const ThreadPredicateMap::SourceMap& source_map) {
   kir::IrBuilder ir_builder(GpuLower::current()->kernel());
@@ -268,10 +268,18 @@ void ThreadPredicateMap::insert(
   thread_predicates_.insert({tv, pred_and_src});
 }
 
-kir::Bool* ThreadPredicateMap::getExpr(const TensorView* out_tv) const {
-  TORCH_INTERNAL_ASSERT(find(out_tv) != end(), "Couldn't find ", out_tv);
-  const auto& pred_and_src = at(out_tv);
-  return getPredicate(pred_and_src.pred, pred_and_src.source_map);
+kir::Bool* ThreadPredicateMap::getPredicate(const TensorView* tv) const {
+  // No thread predicate is needed when tv is an output of a
+  // parallel broadcast expression.
+  if (auto bop = dynamic_cast<BroadcastOp*>(tv->definition())) {
+    if (getParallelBroadcastDomains(tv).any()) {
+      return kir::IrBuilder(GpuLower::current()->kernel()).trueVal();
+    }
+  }
+  TORCH_INTERNAL_ASSERT(find(tv) != end(), "Couldn't find ", tv);
+  const auto& pred_and_src = at(tv);
+  return getPredicateFromParallelTypes(
+      pred_and_src.pred, pred_and_src.source_map);
 }
 
 ParallelTypeBitmap ThreadPredicateMap::getParallelBroadcastDomains(

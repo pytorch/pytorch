@@ -51,8 +51,8 @@ class TORCH_CUDA_CU_API ThreadPredicateMap {
   const PredAndSource& at(const TensorView* tv) const;
   PredAndSource& at(const TensorView* tv);
 
-  // Returns a Bool predicate expression for a given output TensorView.
-  kir::Bool* getExpr(const TensorView* out_tv) const;
+  // Returns a Bool predicate for a given TensorView.
+  kir::Bool* getPredicate(const TensorView* tv) const;
 
   //! Returns a ParallelTypeBitmap representing which domain needs
   //! blockBroadcast.

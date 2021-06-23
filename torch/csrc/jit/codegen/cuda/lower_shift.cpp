@@ -755,7 +755,7 @@ std::string HaloInfo::toString() const {
   return ss.str();
 }
 
-bool HaloInfo::needsShiftPredicate(Expr* expr) {
+bool HaloInfo::needsShiftPredicate(Expr* expr) const {
   auto consumer_td = ir_utils::getTVOutput(expr)->domain();
   auto shift_expr = dynamic_cast<ShiftOp*>(expr);
   for (size_t i = 0; i < consumer_td->getRootDomain().size(); ++i) {
@@ -770,7 +770,7 @@ bool HaloInfo::needsShiftPredicate(Expr* expr) {
   return false;
 }
 
-bool HaloInfo::needsShiftPredicate(kir::Expr* expr) {
+bool HaloInfo::needsShiftPredicate(kir::Expr* expr) const {
   const auto out_tv = expr->outputs()[0]->as<kir::TensorView>();
   auto fuser_expr = out_tv->fuserTv()->definition();
   TORCH_INTERNAL_ASSERT(fuser_expr != nullptr);

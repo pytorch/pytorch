@@ -98,11 +98,11 @@ auto shift(at::Tensor tensor, const std::vector<int>& offsets) {
     }
     t = t.roll(offsets[i], i);
     std::vector<at::indexing::TensorIndex> indices(
-        tensor.ndimension(), Slice(0, None));
+        tensor.ndimension(), at::indexing::Slice(0, at::indexing::None));
     if (offset > 0) {
-      indices[i] = Slice(0, offset);
+      indices[i] = at::indexing::Slice(0, offset);
     } else {
-      indices[i] = Slice(offset, None);
+      indices[i] = at::indexing::Slice(offset, at::indexing::None);
     }
     t.index(indices) = 0;
   }
