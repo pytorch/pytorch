@@ -136,6 +136,30 @@ Example::
     tensor([ 1.0000, 1.8427,  0.0000])
 """.format(**common_args))
 
+erfcx = _add_docstr(_special.special_erfcx,
+                    r"""
+erfcx(input, *, out=None) -> Tensor
+
+Computes the scaled complementary error function for each element of :attr:`input`.
+The scaled complementary error function is defined as follows:
+
+.. math::
+    \mathrm{erfcx}(x) = e^{x^2} \mathrm{erfc}(x)
+""" + r"""
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> torch.special.erfcx(torch.tensor([0, -1., 10.]))
+    tensor([ 1.0000, 5.0090, 0.0561])
+""".format(**common_args))
+
 erfinv = _add_docstr(_special.special_erfinv,
                      r"""
 erfinv(input, *, out=None) -> Tensor
@@ -438,3 +462,45 @@ Example::
     >>> torch.special.ndtri(torch.tensor([0, 0.25, 0.5, 0.75, 1]))
     tensor([   -inf, -0.6745,  0.0000,  0.6745,     inf])
 """.format(**common_args))
+
+log1p = _add_docstr(_special.special_log1p,
+                    r"""
+log1p(input, *, out=None) -> Tensor
+
+Alias for :func:`torch.log1p`.
+""")
+
+sinc = _add_docstr(_special.special_sinc,
+                   r"""
+sinc(input, *, out=None) -> Tensor
+
+Computes the normalized sinc of :attr:`input.`
+
+.. math::
+    \text{out}_{i} =
+    \begin{cases}
+      1, & \text{if}\ \text{input}_{i}=0 \\
+      \sin(\pi \text{input}_{i}) / (\pi \text{input}_{i}), & \text{otherwise}
+    \end{cases}
+""" + r"""
+
+Args:
+    {input}
+
+Keyword args:
+    {out}
+
+Example::
+    >>> t = torch.randn(4)
+    >>> t
+    tensor([ 0.2252, -0.2948,  1.0267, -1.1566])
+    >>> torch.special.sinc(t)
+    tensor([ 0.9186,  0.8631, -0.0259, -0.1300])
+""".format(**common_args))
+
+round = _add_docstr(_special.special_round,
+                    r"""
+round(input, *, out=None) -> Tensor
+
+Alias for :func:`torch.round`.
+""")
