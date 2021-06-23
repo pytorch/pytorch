@@ -1018,6 +1018,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 self.mods1 = torch.nn.Sequential(
                     torch.nn.Linear(5, 5),
                 )
+
             def forward(self, x):
                 x = self.mods1(x)
                 return x
@@ -1025,11 +1026,11 @@ class TestQuantizeFx(QuantizationTestCase):
         model = M().train()
 
         qconfig_dict = {
-                    "": None,
-                    "object_type": [
-                        (torch.nn.Linear, default_qat_qconfig),
-                    ],
-                }
+            "": None,
+            "object_type": [
+                (torch.nn.Linear, default_qat_qconfig),
+            ],
+        }
         m = prepare_qat_fx(model, qconfig_dict)
         m(torch.rand(5, 5))
         m = convert_fx(m)

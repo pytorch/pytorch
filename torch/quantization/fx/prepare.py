@@ -150,6 +150,22 @@ def qat_swap_modules(
         get_default_qat_module_mappings(), additional_qat_module_mapping)
     convert(root, mapping=all_mappings, inplace=True, remove_qconfig=False)
 
+def update_qconfig_for_qat(
+    qconfig_dict: Any,
+    additional_qat_module_mapping: Dict[Callable, Callable]
+) -> Any:
+    """
+    Update the qconfig_dict to account for module swaps during QAT.
+    During QAT we perform a module swap on the nn.Module types to the corresponding nn.qat.modules types.
+    """
+    all_qat_mappings = get_combined_dict(
+        get_default_qat_module_mappings(), additional_qat_module_mapping)
+    object_type_dict = qconfig_dict.get("object_type", None)
+    for k, v in object_type_dict.items():
+        if k in all_qat_mappings:
+            object_type_dict[all_qat_mappings[k]] = v
+    return qconfig_dict
+
 def insert_observer(
     node: Node,
     observer: torch.quantization.ObserverBase,
@@ -1029,6 +1045,12 @@ def prepare(
     # TODO: support regex as well
     propagate_qconfig_(model, flattened_qconfig_dict)
 
+    if model.training:
+        additional_qat_module_mapping = prepare_custom_config_dict.get(
+            "additional_qat_module_mapping", {})
+        qat_swap_modules(model, additional_qat_module_mapping)
+        qconfig_dict = update_qconfig_for_qat(qconfig_dict, additional_qat_module_mapping)
+
     # mapping from fully qualified module name to module instance
     # for example,
     # {
@@ -1037,11 +1059,6 @@ def prepare(
     #   'linear.weight_fake_quant': PerChannelMinMaxObserver(...),
     # }
     modules = dict(model.named_modules())
-
-    if model.training:
-        additional_qat_module_mapping = prepare_custom_config_dict.get(
-            "additional_qat_module_mapping", {})
-        qat_swap_modules(model, additional_qat_module_mapping)
 
     # fill qconfig_map, a map from node name to qconfig, used in find_matches
     equalization_qconfig_map = generate_qconfig_map(model, modules, model.graph, equalization_qconfig_dict, node_name_to_scope)
