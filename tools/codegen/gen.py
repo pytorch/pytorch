@@ -27,18 +27,12 @@ import tools.codegen.api.meta as meta
 import tools.codegen.api.structured as structured
 from tools.codegen.api.translate import translate
 from tools.codegen.selective_build.selector import SelectiveBuilder
-from tools.codegen.utils import Target, concatMap, context, mapMaybe
+from tools.codegen.utils import Target, concatMap, context, mapMaybe, YamlDumper, YamlLoader
 from tools.codegen.context import (method_with_native_function,
                                    native_function_manager,
                                    with_native_function_and_indices,
                                    with_native_function)
 import tools.codegen.dest as dest
-
-try:
-    # use faster C loader if available
-    from yaml import CSafeLoader as Loader
-except ImportError:
-    from yaml import SafeLoader as Loader  # type: ignore[misc]
 
 # Welcome to the ATen code generator v2!  The ATen code generator is
 # responsible for parsing native_functions.yaml and then generating
@@ -70,37 +64,43 @@ except ImportError:
 
 # A custom loader for YAML to let us also keep track of line numbers
 # of each entry in the YAML file
-class LineLoader(Loader):
+class LineLoader(YamlLoader):
     def construct_mapping(self, node, deep=False):  # type: ignore[no-untyped-def]
         mapping = super().construct_mapping(node, deep=deep)  # type: ignore[no-untyped-call]
         # Add 1 so line numbering starts at 1
         mapping['__line__'] = node.start_mark.line + 1
         return mapping
 
+_GLOBAL_PARSE_NATIVE_YAML_CACHE = {}
+
 # Parse native_functions.yaml into a sequence of NativeFunctions and Backend Indices.
 ParsedYaml = namedtuple('ParsedYaml', ['native_functions', 'backend_indices'])
 def parse_native_yaml(path: str) -> ParsedYaml:
-    with open(path, 'r') as f:
-        es = yaml.load(f, Loader=LineLoader)
-    assert isinstance(es, list)
-    rs: List[NativeFunction] = []
-    bs: Dict[DispatchKey, Dict[OperatorName, BackendMetadata]] = defaultdict(dict)
-    for e in es:
-        assert isinstance(e.get('__line__'), int), e
-        loc = Location(path, e['__line__'])
-        funcs = e.get('func')
-        with context(f'in {loc}:\n  {funcs}'):
-            func, m = NativeFunction.from_yaml(e, loc)
-            rs.append(func)
-            BackendIndex.grow_index(bs, m)
-    error_check_native_functions(rs)
-    # Default dict is to prevent the codegen from barfing when we have a dispatch key that has no kernels yet.
-    indices: Dict[DispatchKey, BackendIndex] = defaultdict(lambda: BackendIndex(
-        dispatch_key=DispatchKey.Undefined, use_out_as_primary=True, external=False, index={}))
-    for k, v in bs.items():
-        # All structured in-tree operators are implemented in terms of their out operator.
-        indices[k] = BackendIndex(dispatch_key=k, use_out_as_primary=True, external=False, index=v)
-    return ParsedYaml(rs, indices)
+    global _GLOBAL_PARSE_NATIVE_YAML_CACHE
+    if path not in _GLOBAL_PARSE_NATIVE_YAML_CACHE:
+        with open(path, 'r') as f:
+            es = yaml.load(f, Loader=LineLoader)
+        assert isinstance(es, list)
+        rs: List[NativeFunction] = []
+        bs: Dict[DispatchKey, Dict[OperatorName, BackendMetadata]] = defaultdict(dict)
+        for e in es:
+            assert isinstance(e.get('__line__'), int), e
+            loc = Location(path, e['__line__'])
+            funcs = e.get('func')
+            with context(lambda: f'in {loc}:\n  {funcs}'):
+                func, m = NativeFunction.from_yaml(e, loc)
+                rs.append(func)
+                BackendIndex.grow_index(bs, m)
+        error_check_native_functions(rs)
+        # Default dict is to prevent the codegen from barfing when we have a dispatch key that has no kernels yet.
+        indices: Dict[DispatchKey, BackendIndex] = defaultdict(lambda: BackendIndex(
+            dispatch_key=DispatchKey.Undefined, use_out_as_primary=True, external=False, index={}))
+        for k, v in bs.items():
+            # All structured in-tree operators are implemented in terms of their out operator.
+            indices[k] = BackendIndex(dispatch_key=k, use_out_as_primary=True, external=False, index=v)
+        _GLOBAL_PARSE_NATIVE_YAML_CACHE[path] = ParsedYaml(rs, indices)
+
+    return _GLOBAL_PARSE_NATIVE_YAML_CACHE[path]
 
 # Some assertions are already performed during parsing, but those are only within a single NativeFunction.
 # Assertions here are meant to be performed across NativeFunctions.
@@ -187,7 +187,90 @@ class RegisterSchema:
     def __call__(self, f: NativeFunction) -> Optional[str]:
         if not self.selector.is_native_function_selected(f):
             return None
-        return f'm.def({cpp_string(str(f.func))});\n'
+        schema_str = cpp_string(str(f.func))
+        schema_str = '"' + "aten::" + schema_str[1:]
+        return f'm.def({schema_str});\n'
+
+
+def _num_leading_spaces(line: str) -> int:
+    return len(line) - len(line.lstrip())
+
+
+# Unindents all lines in code. Each line gets unindented the same amount;
+# that amount is equal to the smallest number of leading spaces across all lines
+def deindent(code: str) -> str:
+    lines = code.split('\n')
+    min_leading_spaces = min(map(_num_leading_spaces, lines))
+    lines = [line[min_leading_spaces:] for line in lines]
+    return '\n'.join(lines)
+
+
+# Generates Operators.h and Operators.cpp.
+# These provide macros that, given an operator and overload name, allow users
+# to access an "un-overloaded" function version of the operator. This
+# is useful for extension writers who want to (1) want to decltype the operator
+# and (2) don't want to worry about method-only operators.
+@dataclass(frozen=True)
+class ComputeOperators:
+    target: Union[
+        Literal[Target.DECLARATION],
+        Literal[Target.DEFINITION]
+    ]
+
+    @method_with_native_function
+    def __call__(self, f: NativeFunction) -> Optional[str]:
+        # NB: requires_grad is the only exception to the rule because
+        # its const correctness is questionable.
+        if str(f.func.name) in set(['requires_grad_']):
+            return None
+
+        if self.target is Target.DECLARATION:
+            return self.gen_declaration(f)
+        if self.target is Target.DEFINITION:
+            return self.gen_definition(f)
+        else:
+            assert_never(self.target)
+
+    # NB: This must be synchronized with the naming scheme in
+    # aten/src/ATen/templates/Operators.h
+    # Given a function schema "aten::op.overload(...)",
+    # If there is no overload name, this returns f"{op}"
+    # If there is an overload name, this returns f"{op}_{overload}"
+    def unambiguous_function_name(self, f: NativeFunction) -> str:
+        base_name = str(f.func.name.name)
+        overload_name = f.func.name.overload_name
+        if overload_name:
+            return f'{base_name}_{overload_name}'
+        return base_name
+
+    def gen_declaration(self, f: NativeFunction) -> str:
+        unambiguous_name = self.unambiguous_function_name(f)
+        sig = DispatcherSignature.from_schema(f.func)
+        return f"TORCH_API {sig.decl(unambiguous_name)};"
+
+    def most_faithful_name(self, f: NativeFunction) -> str:
+        sig_group = CppSignatureGroup.from_native_function(f, method=False)
+        sig = sig_group.most_faithful_signature()
+        return sig.name()
+
+    def invocation(self, f: NativeFunction) -> str:
+        faithful_op_name = self.most_faithful_name(f)
+        args = tuple(arg.name for arg in dispatcher.arguments(f.func))
+        # Method only
+        if Variant.function not in f.variants:
+            return f"{args[0]}.{faithful_op_name}({', '.join(args[1:])})"
+        return f"at::{faithful_op_name}({', '.join(args)})"
+
+    def gen_definition(self, f: NativeFunction) -> str:
+        unambiguous_name = self.unambiguous_function_name(f)
+        args = dispatcher.arguments(f.func)
+        sig = DispatcherSignature.from_schema(f.func)
+
+        return deindent(f"""\
+            {sig.defn(unambiguous_name)} {{
+              return {self.invocation(f)};
+            }}\
+        """)
 
 
 # Generates Function.cpp and Function.h.  These files provide the
@@ -358,7 +441,7 @@ def compute_meta_function_declaration(g: NativeFunctionsGroup) -> Optional[str]:
         if parent_class is None:
             parent_class = "at::impl::MetaBase"
         return f"""\
-struct TORCH_API {name} : public {parent_class} {{
+struct TORCH_API structured_{name} : public {parent_class} {{
     void meta({args_str});
 }};
 """
@@ -373,6 +456,10 @@ class ComputeBackendSelect:
         Literal[Target.REGISTRATION]
     ]
 
+    # Selector object to determine which operators to generate
+    # registration code for.
+    selector: SelectiveBuilder
+
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> Optional[str]:
         if str(f.func.name.name).endswith('_like') or str(f.func.name.name).startswith('new_'):
@@ -382,6 +469,9 @@ class ComputeBackendSelect:
         native_sig = NativeSignature(f.func)
 
         if not any(isinstance(a.argument, TensorOptionsArguments) for a in native_sig.arguments()):
+            return None
+
+        if not self.selector.is_native_function_selected(f):
             return None
 
         native_tensor_args = [
@@ -431,18 +521,18 @@ C10_ALWAYS_INLINE
 #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
-def dict_representer(dumper: Any, data: Any) -> Any:
-    return dumper.represent_dict(data.items())
-
 def format_yaml(data: object) -> str:
-    noalias_dumper = yaml.dumper.SafeDumper
-    noalias_dumper.ignore_aliases = lambda self, data: True  # type: ignore[assignment]
+    # Ignore alias in Dumper
+    YamlDumper.ignore_aliases = lambda self, data: True  # type: ignore[assignment]
+
     # Support serializing OrderedDict
-    noalias_dumper.add_representer(OrderedDict, dict_representer)  # type: ignore[no-untyped-call]
+    def dict_representer(dumper: Any, data: Any) -> Any:
+        return dumper.represent_dict(data.items())
+    YamlDumper.add_representer(OrderedDict, dict_representer)  # type: ignore[no-untyped-call]
     # Some yaml parsers (e.g. Haskell's) don't understand line breaks.
-    # width=float('Inf') turns off optional line breaks and improves
+    # width=1e9 turns off optional line breaks and improves
     # the portability of the outputted yaml.
-    return yaml.dump(data, default_flow_style=False, Dumper=noalias_dumper, width=float('Inf'))  # type: ignore[no-any-return]
+    return yaml.dump(data, default_flow_style=False, Dumper=YamlDumper, width=1e9)  # type: ignore[no-any-return]
 
 # For some reason, some defaults we write to YAML are written as native
 # YAML objects, rather than doing them uniformly as strings.  This
@@ -908,6 +998,7 @@ def main() -> None:
         DispatchKey.CUDA,
         DispatchKey.CompositeImplicitAutograd,
         DispatchKey.CompositeExplicitAutograd,
+        DispatchKey.Meta,
     }
     if options.backend_whitelist:
         dispatch_keys = [k for k in dispatch_keys if is_generic_dispatch_key(k) or str(k) in options.backend_whitelist]
@@ -922,10 +1013,10 @@ def main() -> None:
         fm.write_with_template(f'Register{dispatch_key}.cpp', 'RegisterDispatchKey.cpp', lambda: {
             'extra_cuda_headers': extra_cuda_headers if is_cuda_dispatch_key(dispatch_key) else '',
             'legacy_th_headers':
-                '#include <ATen/LegacyTHFunctionsCPU.h>' if dispatch_key == DispatchKey.CPU else
                 '#include <ATen/LegacyTHFunctionsCUDA.h>' if dispatch_key == DispatchKey.CUDA else
                 '',
             'external_backend_headers': '',
+            'namespaced_headers': f'#include <ATen/{dispatch_key}Functions.h>' if dispatch_key in functions_keys else '',
             'DispatchKey': dispatch_key,
             'dispatch_namespace': dispatch_key.lower(),
             'dispatch_namespaced_definitions': list(concatMap(
@@ -976,12 +1067,12 @@ def main() -> None:
     # BackendSelect is generated specially
     cpu_fm.write('RegisterBackendSelect.cpp', lambda: {
         'backend_select_method_definitions':
-            list(mapMaybe(ComputeBackendSelect(Target.DEFINITION), native_functions)),
+            list(mapMaybe(ComputeBackendSelect(Target.DEFINITION, selector), native_functions)),
         'backend_select_function_registrations':
-            list(mapMaybe(ComputeBackendSelect(Target.REGISTRATION), native_functions)),
+            list(mapMaybe(ComputeBackendSelect(Target.REGISTRATION, selector), native_functions)),
     })
 
-    cpu_fm.write('MetaFunctions.h', lambda: {
+    cpu_fm.write('NativeMetaFunctions.h', lambda: {
         'declarations': list(mapMaybe(compute_meta_function_declaration, structured_native_functions)),
     })
 
@@ -990,6 +1081,15 @@ def main() -> None:
         schema_selector = SelectiveBuilder.get_nop_selector()
     cpu_fm.write('RegisterSchema.cpp', lambda: {
         'schema_registrations': list(mapMaybe(RegisterSchema(schema_selector), native_functions)),
+    })
+
+    cpu_fm.write('Operators.cpp', lambda: {
+        'definitions': list(mapMaybe(ComputeOperators(
+            Target.DEFINITION), native_functions)),
+    })
+    cpu_fm.write('Operators.h', lambda: {
+        'declarations': list(mapMaybe(ComputeOperators(
+            Target.DECLARATION), native_functions)),
     })
 
     cpu_fm.write('Functions.h', lambda: {
@@ -1026,7 +1126,7 @@ def main() -> None:
         'native_function_declarations': list(concatMap(
             # Convert to a set first to remove duplicate kernel names.
             # Backends are allowed to repeat kernel names; only generate the declaration once!
-            lambda f: list(set(concatMap(
+            lambda f: list(OrderedDict.fromkeys(concatMap(
                 lambda backend_idx:
                     dest.compute_native_function_declaration(f, backend_idx),
                 backend_indices.values()))),

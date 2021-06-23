@@ -9,8 +9,7 @@ from tools.codegen.utils import Target, mapMaybe
 from tools.codegen.model import (DispatchKey, NativeFunction,
                                  NativeFunctionsGroup, SchemaKind,
                                  TensorOptionsArguments,
-                                 DeviceCheckType, Argument,
-                                 assert_never, BaseType, BaseTy,
+                                 DeviceCheckType, Argument, assert_never,
                                  is_cuda_dispatch_key, BackendIndex,
                                  gets_generated_out_inplace_wrapper)
 from tools.codegen.api.types import (BaseCType, Binding, ConstRefCType,
@@ -20,7 +19,6 @@ from tools.codegen.api.types import (BaseCType, Binding, ConstRefCType,
                                      DispatcherSignature)
 import tools.codegen.api.meta as meta
 import tools.codegen.api.cpp as cpp
-import tools.codegen.api.dispatcher as dispatcher
 import tools.codegen.api.structured as structured
 from tools.codegen.api.translate import translate
 from tools.codegen.selective_build.selector import SelectiveBuilder
@@ -69,7 +67,8 @@ class RegisterDispatchKey:
         if type == DeviceCheckType.NoCheck:
             return '  // No device check\n'
 
-        device_check = 'c10::optional<Device> common_device = nullopt;'
+        device_check = 'c10::optional<Device> common_device = nullopt;\n'
+        device_check += '(void)common_device; // Suppress unused variable warning\n'
         for arg in args:
             # Only tensor like arguments are eligible
             if arg.type.is_tensor_like():
@@ -111,11 +110,6 @@ class RegisterDispatchKey:
         sig = self.wrapper_kernel_sig(f)
         name = sig.name()
 
-        # See Note [External Backends Follow Dispatcher convention]
-        jit_args = dispatcher.jit_arguments(f.func)
-        tensors = [a for a in jit_args if isinstance(a, Argument) and a.type == BaseType(BaseTy.Tensor)]
-        print_args_str = ''.join([f' << " {a.name}=" << {a.name}.toString()' for a in tensors])
-
         func_res = f'{name}_tmp'
         return_names = cpp.return_names(f)
         if len(return_names) > 1:
@@ -132,8 +126,6 @@ class RegisterDispatchKey:
 
         return f"""\
 {sig.defn()} {{
-  XLA_FN_TRACK(3);
-  TF_VLOG(3) << "XLA {name} :"{print_args_str};
   auto {func_res} = {functional_sig.name()}({", ".join(e.expr for e in translate(sig.arguments(), functional_sig.arguments()))});
   {updates}
   return {returns};
@@ -235,11 +227,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 metadata = self.backend_index.get_kernel(f)
                 if metadata is None:
                     return None
-                # TODO: remove this difference and merge the two cases when we remove xla-specific logic
-                if self.backend_index.external:
-                    impl_name = f"{self.cpp_namespace}::AtenXlaType::{metadata.kernel}"
-                else:
-                    impl_name = f"{self.cpp_namespace}::{metadata.kernel}"
+                impl_name = f"{self.cpp_namespace}::{metadata.kernel}"
 
                 args_exprs_str = ', '.join(a.name for a in args)
 
@@ -514,11 +502,11 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
             # operator; feeding it the output argument(s) if it is known
             if self.backend_index.dispatch_key is DispatchKey.Meta:
                 class_name = f"structured_{meta.name(self.g)}_meta_{k.name}"
-                parent_class = f"at::meta::{meta.name(self.g)}"
+                parent_class = f"at::meta::structured_{meta.name(self.g)}"
             elif self.backend_index.dispatch_key is DispatchKey.CompositeExplicitAutograd:
                 # TODO: dedup this branch
                 class_name = f"structured_{meta.name(self.g)}_default_backend_{k.name}"
-                parent_class = f"at::meta::{meta.name(self.g)}"
+                parent_class = f"at::meta::structured_{meta.name(self.g)}"
             else:
                 metadata = self.backend_index.get_kernel(self.g)
                 assert metadata is not None

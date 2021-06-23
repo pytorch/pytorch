@@ -31,8 +31,8 @@ Tensor int_repr_quantized_cpu(const Tensor& self) {
           self.suggest_memory_format());
       auto iter = TensorIteratorConfig()
         .check_all_same_dtype(false)
-        .add_borrowed_output(dst)
-        .add_borrowed_input(self)
+        .add_output(dst)
+        .add_input(self)
         .build();
       cpu_kernel(iter, [](scalar_t value) -> underlying_t { return value.val_; });
       }

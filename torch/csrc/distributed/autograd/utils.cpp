@@ -77,8 +77,8 @@ ContextPtr addRecvRpcBackward(
   return autogradContext;
 }
 
-Message getMessageWithProfiling(
-    torch::distributed::rpc::Message&& wrappedRpcMessage,
+c10::intrusive_ptr<Message> getMessageWithProfiling(
+    c10::intrusive_ptr<torch::distributed::rpc::Message> wrappedRpcMessage,
     MessageType msgType,
     torch::autograd::profiler::ProfilerConfig&& profilerConfig) {
   auto& remoteProfilerManager =
@@ -100,9 +100,9 @@ Message getMessageWithProfiling(
   return std::move(wrappedProfilingMsg).toMessage();
 }
 
-Message getMessageWithAutograd(
+c10::intrusive_ptr<Message> getMessageWithAutograd(
     const rpc::worker_id_t dstId,
-    torch::distributed::rpc::Message&& wrappedRpcMsg,
+    c10::intrusive_ptr<torch::distributed::rpc::Message> wrappedRpcMsg,
     MessageType msgType,
     bool forceGradRecording,
     const std::unordered_map<c10::Device, c10::Device>& deviceMap) {
@@ -112,10 +112,10 @@ Message getMessageWithAutograd(
   // rpc message. otherwise, attach grad info and grad functions and send
   // rpcWithAutograd message.
   auto tensorsRequireGrad =
-      torch::autograd::compute_requires_grad(wrappedRpcMsg.tensors());
+      torch::autograd::compute_requires_grad(wrappedRpcMsg->tensors());
   if (!autogradContainer.hasValidContext() ||
       (!forceGradRecording && !tensorsRequireGrad)) {
-    return std::move(wrappedRpcMsg);
+    return wrappedRpcMsg;
   }
 
   // Retrieve the appropriate context to modify.
@@ -145,7 +145,7 @@ Message getMessageWithAutograd(
 c10::intrusive_ptr<JitFuture> sendMessageWithAutograd(
     RpcAgent& agent,
     const WorkerInfo& dst,
-    torch::distributed::rpc::Message&& wrappedRpcMsg,
+    c10::intrusive_ptr<torch::distributed::rpc::Message> wrappedRpcMsg,
     bool forceGradRecording,
     const float rpcTimeoutSeconds,
     bool forceDisableProfiling) {

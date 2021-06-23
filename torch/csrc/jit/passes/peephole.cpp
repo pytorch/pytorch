@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/passes/peephole.h>
 
 #include <ATen/core/jit_type.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -158,6 +159,25 @@ struct PeepholeOptimizeImpl {
             node->output()->replaceAllUsesWith(const_sizes_val);
             changed = true;
           }
+        }
+      } else if (
+          node->matches("aten::len.t(t[] a) -> int") &&
+          node->input()->node()->matches("aten::size(Tensor self) -> int[]") &&
+          shape_peepholes_) {
+        auto ptt = node->input()->node()->input()->type()->expect<TensorType>();
+        // only handle one use case for now to avoid modifying mutated lists
+        // TODO: canonicalize as aten::dim ?
+        if (ptt->sizes().size() && node->input()->uses().size() == 1) {
+          WithInsertPoint guard(node);
+          auto output = node->owningGraph()->insertConstant(
+              static_cast<int64_t>(*ptt->sizes().size()));
+          GRAPH_UPDATE(
+              "Replacing ",
+              getHeader(node),
+              " with a \"dim\" constant ",
+              output->debugName());
+          node->output()->replaceAllUsesWith(output);
+          changed = true;
         }
       } else if (
           node->matches("aten::size(Tensor self, int dim) -> int") &&
@@ -356,7 +376,7 @@ bool FuseAddMM(Block* block) {
       // == 0 for it).
       if (node->get<at::Scalar>(attr::alpha).value().toDouble() == 1.) {
         // Look for mm from both sides of the add
-        for (size_t mm_side = 0; mm_side < 2; mm_side++) {
+        for (const auto mm_side : c10::irange(2)) {
           // Add will accept tensors of mismatched scalar types, as long as
           // one of them is a scalar. Addmm will throw in that case, so we can
           // only perform this fusion if we're sure that it is correct, and

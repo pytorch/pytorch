@@ -1,7 +1,8 @@
 #include <ATen/ATen.h>
+#include <ATen/native/cuda/SortingCommon.cuh>
 
-#include <THC/THCTensorSort.cuh>
 #include <THC/THCThrustAllocator.cuh>
+#include <thrust/device_ptr.h>
 #include <thrust/execution_policy.h>
 #include <thrust/sort.h>
 
@@ -26,7 +27,7 @@ void index_put_with_sort_kernel_thrust_helper(Tensor &linearIndex, Tensor &orig_
   // Sort; a stable sort is not required
   // NB - not passing comparator causes thrust to use radix sort, and it hurts perf A LOT, at least for medium (few K) sized indices
   auto sorted_data = device_ptr(sorted_indices.data_ptr<int64_t>());
-  thrust::sort_by_key(policy, sorted_data, sorted_data + num_indices, orig_data, ThrustLTOp<int64_t>());
+  thrust::sort_by_key(policy, sorted_data, sorted_data + num_indices, orig_data, LTOp<int64_t>());
 }
 
 }}

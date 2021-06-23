@@ -9,7 +9,7 @@
 #include <tensorflow/compiler/xla/xla_client/metrics.h>
 #include <tensorflow/compiler/xla/xla_client/tf_logging.h>
 #include <torch_xla/csrc/aten_xla_bridge.h>
-#include <torch_xla/csrc/aten_xla_type.h>
+#include <torch_xla/csrc/XLANativeFunctions.h>
 #include <torch_xla/csrc/function_call_tracker.h>
 
 namespace ${cpp_namespace} {

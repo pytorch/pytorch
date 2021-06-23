@@ -4,7 +4,7 @@ import logging
 import subprocess
 from collections import defaultdict
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Union, Any, cast
+from typing import Dict, List, Optional, Tuple, Union, Any, cast
 from typing_extensions import Literal, TypedDict
 
 try:
@@ -44,6 +44,7 @@ class ReportMetaMeta(TypedDict):
     build_pr: str
     build_tag: str
     build_sha1: Commit
+    build_base_commit: Commit
     build_branch: str
     build_job: str
     build_workflow_id: str
@@ -142,9 +143,10 @@ def get_cases(
     return cases
 
 
-def _parse_s3_summaries(summaries: Any, jobs: List[str]) -> Dict[str, List[Report]]:
+def _parse_master_summaries(summaries: Any, jobs: List[str]) -> Dict[str, List[Report]]:
     summary_dict = defaultdict(list)
     for summary in summaries:
+        # master summary format: "test_time/{sha}/{job}/file"
         summary_job = summary.key.split('/')[2]
         if summary_job in jobs or len(jobs) == 0:
             binary = summary.get()["Body"].read()
@@ -152,19 +154,37 @@ def _parse_s3_summaries(summaries: Any, jobs: List[str]) -> Dict[str, List[Repor
             summary_dict[summary_job].append(json.loads(string))
     return summary_dict
 
+def _parse_pr_summaries(summaries: Any, job_prefix: str) -> Dict[str, List[Tuple[Report, str]]]:
+    summary_dict = defaultdict(list)
+    for summary in summaries:
+        # PR summary format: "pr_test_time/{pr}/{sha}/{job}/file"
+        summary_job = summary.key.split('/')[3]
+        summary_timestamp = summary.key.split('/')[4][:len("YYYY-MM-ddTHH:mm:ss")]
+        if not job_prefix or len(job_prefix) == 0 or summary_job.startswith(job_prefix):
+            binary = summary.get()["Body"].read()
+            string = bz2.decompress(binary).decode("utf-8")
+            summary_dict[summary_job].append((json.loads(string), summary_timestamp))
+    return summary_dict
+
+
 # Collect and decompress S3 test stats summaries into JSON.
 # data stored on S3 buckets are pathed by {sha}/{job} so we also allow
 # optional jobs filter
 def get_test_stats_summaries(*, sha: str, jobs: Optional[List[str]] = None) -> Dict[str, List[Report]]:
     bucket = get_S3_bucket_readonly(OSSCI_METRICS_BUCKET)
     summaries = bucket.objects.filter(Prefix=f"test_time/{sha}")
-    return _parse_s3_summaries(summaries, jobs=list(jobs or []))
+    return _parse_master_summaries(summaries, jobs=list(jobs or []))
 
 
 def get_test_stats_summaries_for_job(*, sha: str, job_prefix: str) -> Dict[str, List[Report]]:
     bucket = get_S3_bucket_readonly(OSSCI_METRICS_BUCKET)
     summaries = bucket.objects.filter(Prefix=f"test_time/{sha}/{job_prefix}")
-    return _parse_s3_summaries(summaries, jobs=list())
+    return _parse_master_summaries(summaries, jobs=list())
+
+def get_test_stats_summaries_for_pr(*, pr: str, job_prefix: str) -> Dict[str, List[Tuple[Report, str]]]:
+    bucket = get_S3_bucket_readonly(OSSCI_METRICS_BUCKET)
+    summaries = bucket.objects.filter(Prefix=f"pr_test_time/{pr}/")
+    return _parse_pr_summaries(summaries, job_prefix=job_prefix)
 
 
 # This function returns a list of S3 test time reports. This function can run into errors if HAVE_BOTO3 = False
@@ -193,4 +213,15 @@ def get_previous_reports_for_branch(branch: str, ci_job_prefix: str = "") -> Lis
             if len(summary) > 1:
                 logger.warning(f'WARNING: Multiple summary objects found for {commit}/{job_name}')
         commit_index += 1
+    return reports
+
+
+def get_previous_reports_for_pr(pr: str, ci_job_prefix: str = "") -> List[Tuple[Report, str]]:
+    reports: List[Tuple[Report, str]] = []
+    logger.info(f'Grabbing reports from PR: {[pr]}')
+    summaries = get_test_stats_summaries_for_pr(pr=pr, job_prefix=ci_job_prefix)
+    for _, summary in summaries.items():
+        reports.extend(summary)
+    # sort by summary_timestamp
+    reports.sort(reverse=True, key=lambda s: s[1])
     return reports

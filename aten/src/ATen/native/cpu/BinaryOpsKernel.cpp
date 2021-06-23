@@ -210,7 +210,7 @@ void div_floor_kernel(TensorIteratorBase& iter) {
   }
 }
 
-void remainder_kernel(TensorIterator& iter) {
+void remainder_kernel(TensorIteratorBase& iter) {
   if (isIntegralType(iter.common_dtype(), /*includeBool*/ false)) {
     AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "remainder_cpu", [&]() {
       cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
@@ -672,16 +672,32 @@ void huber_kernel(TensorIterator& iter, double delta) {
 }
 
 void sigmoid_backward_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "sigmoid_backward_cpu", [&]() {
-    auto one_vec = Vectorized<scalar_t>((scalar_t)(1));
-    cpu_kernel_vec(iter,
-      [=](scalar_t a, scalar_t b) -> scalar_t {
-        return a * (scalar_t(1) - b) * b;
-      },
-      [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
-        return a * (one_vec - b) * b;
-      });
-  });
+  if (isComplexType(iter.dtype())) {
+    AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "sigmoid_backward_cpu", [&]() {
+      auto one_vec = Vectorized<scalar_t>(scalar_t{1});
+      cpu_kernel_vec(
+        iter,
+        [=](scalar_t a, scalar_t b) -> scalar_t {
+          return a * std::conj((scalar_t(1) - b) * b);
+        },
+        [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
+          return a * ((one_vec - b) * b).conj();
+        });
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        kBFloat16, kHalf, iter.dtype(), "sigmoid_backward_cpu", [&]() {
+          auto one_vec = Vectorized<scalar_t>((scalar_t)(1));
+          cpu_kernel_vec(
+              iter,
+              [=](scalar_t a, scalar_t b) -> scalar_t {
+                return a * (scalar_t(1) - b) * b;
+              },
+              [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
+                return a * (one_vec - b) * b;
+              });
+        });
+  }
 }
 
 void logit_backward_kernel(TensorIterator& iter, const Scalar& eps_scalar) {

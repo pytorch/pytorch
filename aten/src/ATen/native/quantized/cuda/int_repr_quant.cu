@@ -13,8 +13,8 @@ Tensor int_repr_quantized_cuda(const Tensor& self) {
         self.suggest_memory_format());
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
-      .add_borrowed_output(dst)
-      .add_borrowed_input(self)
+      .add_output(dst)
+      .add_input(self)
       .build();
     gpu_kernel(iter, [] GPU_LAMBDA(scalar_t value) -> underlying_t {
       return value.val_;

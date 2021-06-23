@@ -49,8 +49,6 @@ TORCH_IMPL_FUNC(pow_Tensor_Tensor_out) (const Tensor& base, const Tensor& exp, c
 }
 
 TORCH_IMPL_FUNC(pow_Tensor_Scalar_out) (const Tensor& base, const Scalar& exp, const Tensor& out) {
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
-  auto common_dtype = at::result_type(base, exp);
   if (exp.equal(0.0)) {
     out.fill_(1);
   } else if (exp.equal(1.0)) {

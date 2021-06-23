@@ -2181,15 +2181,18 @@ Example::
     tensor([(0.0000+1.0000j), (-1.4142-1.4142j)], dtype=torch.complex128)
 """)
 
-add_docstr(torch.conj,
+add_docstr(torch.conj_physical,
            r"""
-conj(input, *, out=None) -> Tensor
+conj_physical(input, *, out=None) -> Tensor
 
-Computes the element-wise conjugate of the given :attr:`input` tensor. If :attr:`input` has a non-complex dtype,
-this function just returns :attr:`input`.
+Computes the element-wise conjugate of the given :attr:`input` tensor.
+If :attr:`input` has a non-complex dtype, this function just returns :attr:`input`.
 
-.. warning:: In the future, :func:`torch.conj` may return a non-writeable view for an :attr:`input` of
-             non-complex dtype. It's recommended that programs not modify the tensor returned by :func:`torch.conj`
+.. note::
+   This performs the conjugate operation regardless of the fact conjugate bit is set or not.
+
+.. warning:: In the future, :func:`torch.conj_physical` may return a non-writeable view for an :attr:`input` of
+             non-complex dtype. It's recommended that programs not modify the tensor returned by :func:`torch.conj_physical`
              when :attr:`input` is of non-complex dtype to be compatible with this change.
 
 .. math::
@@ -2203,9 +2206,62 @@ Keyword args:
 
 Example::
 
-    >>> torch.conj(torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j]))
+    >>> torch.conj_physical(torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j]))
     tensor([-1 - 1j, -2 - 2j, 3 + 3j])
 """.format(**common_args))
+
+add_docstr(torch.conj,
+           r"""
+conj(input) -> Tensor
+
+Returns a view of :attr:`input` with a flipped conjugate bit. If :attr:`input` has a non-complex dtype,
+this function just returns :attr:`input`.
+
+.. note::
+    :func:`torch.conj` performs a lazy conjugation, but the actual conjugated tensor can be materialized
+    at any time using :func:`torch.resolve_conj`.
+
+.. warning:: In the future, :func:`torch.conj` may return a non-writeable view for an :attr:`input` of
+             non-complex dtype. It's recommended that programs not modify the tensor returned by :func:`torch.conj_physical`
+             when :attr:`input` is of non-complex dtype to be compatible with this change.
+
+Args:
+    {input}
+
+Example::
+
+    >>> x = torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j])
+    >>> x.is_conj()
+    False
+    >>> y = torch.conj(x)
+    >>> y.is_conj()
+    True
+
+""")
+
+add_docstr(torch.resolve_conj,
+           r"""
+resolve_conj(input) -> Tensor
+
+Returns a new tensor with materialized conjugation if :attr:`input`'s conjugate bit is set to `True`,
+else returns :attr:`input`. The output tensor will always have its conjugate bit set to `False`.
+
+Args:
+    {input}
+
+Example::
+
+    >>> x = torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j])
+    >>> y = x.conj()
+    >>> y.is_conj()
+    True
+    >>> z = y.resolve_conj()
+    >>> z
+    tensor([-1 - 1j, -2 - 2j, 3 + 3j])
+    >>> z.is_conj()
+    False
+
+""")
 
 add_docstr(torch.copysign,
            r"""
@@ -2818,29 +2874,8 @@ Example::
 add_docstr(torch.digamma, r"""
 digamma(input, *, out=None) -> Tensor
 
-Computes the logarithmic derivative of the gamma function on `input`.
-
-.. math::
-    \psi(x) = \frac{d}{dx} \ln\left(\Gamma\left(x\right)\right) = \frac{\Gamma'(x)}{\Gamma(x)}
-""" + r"""
-Args:
-    input (Tensor): the tensor to compute the digamma function on
-
-Keyword args:
-    {out}
-
-.. note::  This function is similar to SciPy's `scipy.special.digamma`.
-
-.. note::  From PyTorch 1.8 onwards, the digamma function returns `-Inf` for `0`.
-           Previously it returned `NaN` for `0`.
-
-Example::
-
-    >>> a = torch.tensor([1, 0.5])
-    >>> torch.digamma(a)
-    tensor([-0.5772, -1.9635])
-""".format(**common_args))
-
+Alias for :func:`torch.special.digamma`.
+""")
 
 add_docstr(torch.dist,
            r"""
@@ -3274,10 +3309,10 @@ add_docstr(torch.fmod,
            r"""
 fmod(input, other, *, out=None) -> Tensor
 
-Computes the element-wise remainder of division.
-
-The dividend and divisor may contain both for integer and floating point
-numbers. The remainder has the same sign as the dividend :attr:`input`.
+Applies C++'s `std::fmod <https://en.cppreference.com/w/cpp/numeric/math/fmod>`_
+for floating point tensors, and the modulus operation for integer tensors. The result
+has the same sign as the dividend :attr:`input` and its absolute value
+is less than that of :attr:`other`.
 
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 :ref:`type promotion <type-promotion-doc>`, and integer and float inputs.
@@ -3287,6 +3322,11 @@ Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
     When the divisor is zero, returns ``NaN`` for floating point dtypes
     on both CPU and GPU; raises ``RuntimeError`` for integer division by
     zero on CPU; Integer division by zero on GPU may return any value.
+
+.. note::
+
+   Complex inputs are not supported. In some cases, it is not mathematically
+   possible to satisfy the definition of a modulo operation with complex numbers.
 
 Args:
     input (Tensor): the dividend
@@ -3299,9 +3339,14 @@ Example::
 
     >>> torch.fmod(torch.tensor([-3., -2, -1, 1, 2, 3]), 2)
     tensor([-1., -0., -1.,  1.,  0.,  1.])
-    >>> torch.fmod(torch.tensor([1, 2, 3, 4, 5]), 1.5)
+    >>> torch.fmod(torch.tensor([1, 2, 3, 4, 5]), -1.5)
     tensor([1.0000, 0.5000, 0.0000, 1.0000, 0.5000])
 
+.. seealso::
+
+    :func:`torch.remainder` which is similar to :func:`torch.fmod` except that if the sign
+    of the modulus is different than the sign of the divisor :attr:`other` then the divisor
+    is added to the modulus.
 """.format(**common_args))
 
 add_docstr(torch.frac,
@@ -3826,6 +3871,49 @@ Example::
     tensor([ 0.,  2.,  1.,  0.])
 """.format(**common_args))
 
+add_docstr(torch.histogram,
+           r"""
+histogram(input, bins, *, range=None, weight=None, density=False, out=None) -> (Tensor, Tensor)
+
+Computes a histogram of the values in a tensor.
+
+:attr:`bins` can be an integer or a 1D tensor.
+
+If :attr:`bins` is an int, it specifies the number of equal-width bins.
+By default, the lower and upper range of the bins is determined by the
+minimum and maximum elements of the input tensor. The :attr:`range`
+argument can be provided to specify a range for the bins.
+
+If :attr:`bins` is a 1D tensor, it specifies the sequence of bin edges
+including the rightmost edge. It should contain at least 2 elements
+and its elements should be increasing.
+
+Args:
+    {input}
+    bins: int or 1D Tensor. If int, defines the number of equal-width bins. If tensor,
+          defines the sequence of bin edges including the rightmost edge.
+
+Keyword args:
+    range (tuple of float): Defines the range of the bins.
+    weight (Tensor): If provided, weight should have the same shape as input. Each value in
+                     input contributes its associated weight towards its bin's result.
+    density (bool): If False, the result will contain the count (or total weight) in each bin.
+                    If True, the result is the value of the probability density function over the bins,
+                    normalized such that the integral over the range of the bins is 1.
+    {out} (tuple, optional): The result tuple of two output tensors (hist, bin_edges).
+
+Returns:
+    hist (Tensor): 1D Tensor containing the values of the histogram.
+    bin_edges(Tensor): 1D Tensor containing the edges of the histogram bins.
+
+Example::
+
+    >>> torch.histogram(torch.tensor([1., 2, 1]), bins=4, range=(0., 3.), weight=torch.tensor([1., 2., 4.]))
+    (tensor([ 0.,  5.,  2.,  0.]), tensor([0., 0.75, 1.5, 2.25, 3.]))
+    >>> torch.histogram(torch.tensor([1., 2, 1]), bins=4, range=(0., 3.), weight=torch.tensor([1., 2., 4.]), density=True)
+    (tensor([ 0.,  0.9524,  0.3810,  0.]), tensor([0., 0.75, 1.5, 2.25, 3.]))
+""".format(**common_args))
+
 add_docstr(torch.hypot,
            r"""
 hypot(input, other, *, out=None) -> Tensor
@@ -3856,24 +3944,8 @@ add_docstr(torch.i0,
            r"""
 i0(input, *, out=None) -> Tensor
 
-Computes the zeroth order modified Bessel function of the first kind for each element of :attr:`input`.
-
-.. math::
-    \text{out}_{i} = I_0(\text{input}_{i}) = \sum_{k=0}^{\infty} \frac{(\text{input}_{i}^2/4)^k}{(k!)^2}
-
-""" + r"""
-Args:
-    input (Tensor): the input tensor
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> torch.i0(torch.arange(5, dtype=torch.float32))
-    tensor([ 1.0000,  1.2661,  2.2796,  4.8808, 11.3019])
-
-""".format(**common_args))
+Alias for :func:`torch.special.i0`.
+""")
 
 add_docstr(torch.igamma,
            r"""
@@ -4012,6 +4084,35 @@ inverse(input, *, out=None) -> Tensor
 
 Alias for :func:`torch.linalg.inv`
 """.format(**common_args))
+
+add_docstr(torch.isin, r"""
+isin(elements, test_elements, *, assume_unique=False, invert=False) -> Tensor
+
+Tests if each element of :attr:`elements` is in :attr:`test_elements`. Returns
+a boolean tensor of the same shape as :attr:`elements` that is True for elements
+in :attr:`test_elements` and False otherwise.
+
+.. note::
+    One of :attr:`elements` or :attr:`test_elements` can be a scalar, but not both.
+
+Args:
+    elements (Tensor or Scalar): Input elements
+    test_elements (Tensor or Scalar): Values against which to test for each input element
+    assume_unique (bool, optional): If True, assumes both :attr:`elements` and
+        :attr:`test_elements` contain unique elements, which can speed up the
+        calculation. Default: False
+    invert (bool, optional): If True, inverts the boolean return tensor, resulting in True
+        values for elements *not* in :attr:`test_elements`. Default: False
+
+Returns:
+    A boolean tensor of the same shape as :attr:`elements` that is True for elements in
+    :attr:`test_elements` and False otherwise
+
+Example:
+    >>> torch.isin(torch.tensor([[1, 2], [3, 4]]), torch.tensor([2, 3]))
+    tensor([[False,  True],
+            [ True, False]])
+""")
 
 add_docstr(torch.isinf, r"""
 isinf(input) -> Tensor
@@ -4174,6 +4275,43 @@ is_complex(input) -> (bool)
 
 Returns True if the data type of :attr:`input` is a complex data type i.e.,
 one of ``torch.complex64``, and ``torch.complex128``.
+
+Args:
+    {input}
+""".format(**common_args))
+
+add_docstr(torch.is_grad_enabled, r"""
+is_grad_enabled() -> (bool)
+
+Returns True if grad mode is currently enabled.
+""".format(**common_args))
+
+add_docstr(torch.is_inference_mode_enabled, r"""
+is_inference_mode_enabled() -> (bool)
+
+Returns True if inference mode is currently enabled.
+""".format(**common_args))
+
+add_docstr(torch.is_inference, r"""
+is_inference(input) -> (bool)
+
+Returns True if :attr:`input` is an inference tensor.
+
+A non-view tensor is an inference tensor if and only if it was
+allocated during inference mode. A view tensor is an inference
+tensor if and only if the tensor it is a view of is an inference tensor.
+
+For details on inference mode please see
+`Inference Mode <https://pytorch.org/cppdocs/notes/inference_mode.html>`_.
+
+Args:
+    {input}
+""".format(**common_args))
+
+add_docstr(torch.is_conj, r"""
+is_conj(input) -> (bool)
+
+Returns True if the :attr:`input` is a conjugated tensor, i.e. its conjugate bit is set to `True`.
 
 Args:
     {input}
@@ -7627,10 +7765,10 @@ add_docstr(torch.remainder,
            r"""
 remainder(input, other, *, out=None) -> Tensor
 
-Computes the element-wise remainder of division.
-
-The dividend and divisor may contain both for integer and floating point
-numbers. The remainder has the same sign as the divisor :attr:`other`.
+Like :func:`torch.fmod` this applies C++'s `std::fmod <https://en.cppreference.com/w/cpp/numeric/math/fmod>`_
+for floating point tensors and the modulus operation for integer tensors.
+Unlike :func:`torch.fmod`, however, if the sign of the modulus is different
+than the sign of the divisor :attr:`other` then the divisor is added to the modulus.
 
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 :ref:`type promotion <type-promotion-doc>`, and integer and float inputs.
@@ -7641,7 +7779,7 @@ Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
     See :func:`torch.fmod` for how division by zero is handled.
 
 Args:
-    input (Tensor): the dividend
+    input (Tensor or Scalar): the dividend
     other (Tensor or Scalar): the divisor
 
 Keyword args:
@@ -7651,13 +7789,14 @@ Example::
 
     >>> torch.remainder(torch.tensor([-3., -2, -1, 1, 2, 3]), 2)
     tensor([ 1.,  0.,  1.,  1.,  0.,  1.])
-    >>> torch.remainder(torch.tensor([1, 2, 3, 4, 5]), 1.5)
-    tensor([ 1.0000,  0.5000,  0.0000,  1.0000,  0.5000])
+    >>> torch.remainder(torch.tensor([1, 2, 3, 4, 5]), -1.5)
+    tensor([ -0.5000, -1.0000,  0.0000, -0.5000, -1.0000 ])
 
 .. seealso::
 
-        :func:`torch.fmod`, which computes the element-wise remainder of
-        division equivalently to the C library function ``fmod()``.
+    :func:`torch.fmod` which just computes the modulus for integer inputs and
+    applies C++'s `std::fmod <https://en.cppreference.com/w/cpp/numeric/math/fmod>`_
+    for floating point inputs.
 """.format(**common_args))
 
 add_docstr(torch.renorm,
@@ -7976,29 +8115,8 @@ add_docstr(torch.sinc,
            r"""
 sinc(input, *, out=None) -> Tensor
 
-Computes the normalized sinc of :attr:`input.`
-
-.. math::
-    \text{out}_{i} =
-    \begin{cases}
-      1, & \text{if}\ \text{input}_{i}=0 \\
-      \sin(\pi \text{input}_{i}) / (\pi \text{input}_{i}), & \text{otherwise}
-    \end{cases}
-""" + r"""
-Args:
-    {input}
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> a = torch.randn(4)
-    >>> a
-    tensor([ 0.2252, -0.2948,  1.0267, -1.1566])
-    >>> torch.sinc(a)
-    tensor([ 0.9186,  0.8631, -0.0259, -0.1300])
-""".format(**common_args))
+Alias for :func:`torch.special.sinc`.
+""")
 
 add_docstr(torch.sinh,
            r"""
@@ -10456,21 +10574,21 @@ If the `repeats` is `tensor([n1, n2, n3, ...])`, then the output will be
 """.format(**common_args))
 
 add_docstr(torch.tile, r"""
-tile(input, reps) -> Tensor
+tile(input, dims) -> Tensor
 
 Constructs a tensor by repeating the elements of :attr:`input`.
-The :attr:`reps` argument specifies the number of repetitions
+The :attr:`dims` argument specifies the number of repetitions
 in each dimension.
 
-If :attr:`reps` specifies fewer dimensions than :attr:`input` has, then
-ones are prepended to :attr:`reps` until all dimensions are specified.
-For example, if :attr:`input` has shape (8, 6, 4, 2) and :attr:`reps`
-is (2, 2), then :attr:`reps` is treated as (1, 1, 2, 2).
+If :attr:`dims` specifies fewer dimensions than :attr:`input` has, then
+ones are prepended to :attr:`dims` until all dimensions are specified.
+For example, if :attr:`input` has shape (8, 6, 4, 2) and :attr:`dims`
+is (2, 2), then :attr:`dims` is treated as (1, 1, 2, 2).
 
-Analogously, if :attr:`input` has fewer dimensions than :attr:`reps`
+Analogously, if :attr:`input` has fewer dimensions than :attr:`dims`
 specifies, then :attr:`input` is treated as if it were unsqueezed at
-dimension zero until it has as many dimensions as :attr:`reps` specifies.
-For example, if :attr:`input` has shape (4, 2) and :attr:`reps`
+dimension zero until it has as many dimensions as :attr:`dims` specifies.
+For example, if :attr:`input` has shape (4, 2) and :attr:`dims`
 is (3, 3, 2, 2), then :attr:`input` is treated as if it had the
 shape (1, 1, 4, 2).
 
@@ -10480,7 +10598,7 @@ shape (1, 1, 4, 2).
 
 Args:
     input (Tensor): the tensor whose elements to repeat.
-    reps (tuple): the number of repetitions per dimension.
+    dims (tuple): the number of repetitions per dimension.
 
 Example::
 

@@ -1,7 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/LegacyTHFunctionsCPU.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
@@ -33,7 +32,7 @@ TORCH_META_FUNC(addmm)(const Tensor& self, const Tensor& mat1, const Tensor& mat
 
   auto names = at::namedinference::propagate_names_for_addmm(mat1, mat2, self);
   set_output(0, {mat1.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
-  auto result = maybe_get_output(0);
+  const auto& result = maybe_get_output(0);
   //this check can fire for inplace op only, for all other versions result is guaranteed to be correct size
   TORCH_CHECK(((result.dim() == 2) && (result.sizes()[0] == mat1.sizes()[0]) && (result.sizes()[1] == mat2.sizes()[1])),
   "The input tensor must be a matrix with size ", mat1.sizes()[0], "x", mat2.sizes()[1], ", but got a ", result.dim(),
@@ -46,7 +45,7 @@ TORCH_META_FUNC(mm)(const Tensor & self, const Tensor & mat2) {
 
   auto names = at::namedinference::compute_matmul_outnames(self, mat2);
   set_output(0, {self.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
-  auto result = maybe_get_output(0);
+  const auto& result = maybe_get_output(0);
   //this check can fire for inplace op only, for all other versions result is guaranteed to be correct size
   TORCH_CHECK(((result.dim() == 2) && (result.sizes()[0] == self.sizes()[0]) && (result.sizes()[1] == mat2.sizes()[1])),
   "The input tensor must be a matrix with size ", self.sizes()[0], "x", mat2.sizes()[1], ", but got a ", result.dim(),
@@ -562,7 +561,7 @@ Tensor multi_dot_impl(TensorList _tensors, c10::optional<Tensor> _out) {
     TORCH_CHECK(
         false,
         "multi_dot(): the last tensor must be 1D or 2D but got ",
-        _tensors[0].dim(),
+        _tensors[n - 1].dim(),
         "D");
   }
 
@@ -573,7 +572,7 @@ Tensor multi_dot_impl(TensorList _tensors, c10::optional<Tensor> _out) {
         "multi_dot(): tensor ",
         i,
         " must be 2D but got ",
-        _tensors[0].dim(),
+        _tensors[i].dim(),
         "D");
     tensors[i] = _tensors[i];
   }
@@ -780,10 +779,10 @@ static TensorIterator build_addr_iter(Tensor& result,
 
   auto iter = TensorIteratorConfig()
     .set_check_mem_overlap(true)
-    .add_borrowed_output(result)
-    .add_input(*self_)
-    .add_input(vec1.reshape({vec1_size0, 1}))
-    .add_borrowed_input(vec2)
+    .add_output(result)
+    .add_owned_input(*self_)
+    .add_owned_input(vec1.reshape({vec1_size0, 1}))
+    .add_input(vec2)
     .allow_cpu_scalars(true)
     .promote_inputs_to_common_dtype(true)
     .cast_common_dtype_to_outputs(true)
@@ -1256,14 +1255,64 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
             && self_or_result.is_contiguous()) {
     at::native::_baddbmm_mkl_(self_or_result, batch1, batch2, beta, alpha);
   } else { // split along batch dimension
+#ifdef C10_MOBILE
+    /*
+     * We only do multithreading when Inference mode is enabled because various
+     * thread local state is not appropriately propagated through
+     * at::parallel_for. e.g. RecordFunction related state, dispatchKeySet Big
+     * concern with this is that if we use at::parallel_for where state is not
+     * propagated then dispatch machinery may work differently on main thread
+     * vs. other threads, leading to undefined behavior.
+     * Thus it is recommended to not use at::parallel_for where lambdas do
+     * ops that go through dispatcher.
+     * For now we circument this by InferenceMode guard in order to unlock
+     * performance.
+     * Longer term we probably want a separate API that explicitly calls out
+     * the TLS that it propagates.
+     * Also note that this is enabled for mobile only because blas
+     * implementation for non-mobile build is already multithreaded.
+     */
+    // Benchmarking was done as follows:
+    // bmm_test: operator benchmark under
+    // benchmarks/operator_benchmarks/pt/bmm_test.py Ran this benchmark for
+    // various matrix sizes on Samsung S8U
+    const bool enable_multithreaded_bmm = c10::InferenceMode::is_enabled() &&
+        bs >= 4 && res_rows >= 4 && res_cols >= 16 && contraction_size >= 16;
+#else
+    const bool enable_multithreaded_bmm{false};
+#endif
     if (is_bmm_out) {
-      for (int64_t b = 0; b < bs; b++) {
-        auto r = self_or_result.select(0, b);
-        addmm_impl_cpu_(r, r, batch1.select(0, b), batch2.select(0, b), 0, 1);
+      if (enable_multithreaded_bmm) {
+        auto bmm_out_fn = [&](uint64_t start, uint64_t end) {
+          c10::InferenceMode guard;
+          for (int64_t b = start; b < end; b++) {
+            auto r = self_or_result.select(0, b);
+            addmm_impl_cpu_(
+                r, r, batch1.select(0, b), batch2.select(0, b), 0, 1);
+          }
+        };
+        at::parallel_for(0, bs, 1, bmm_out_fn);
+      } else {
+        for (int64_t b = 0; b < bs; b++) {
+          auto r = self_or_result.select(0, b);
+          addmm_impl_cpu_(r, r, batch1.select(0, b), batch2.select(0, b), 0, 1);
+        }
       }
     } else {
-      for (int64_t b = 0; b < bs; b++) {
-        self_or_result.select(0, b).addmm_(batch1.select(0, b), batch2.select(0, b), beta, alpha);
+      if (enable_multithreaded_bmm) {
+        auto bmm_fn = [&](uint64_t start, uint64_t end) {
+          c10::InferenceMode guard;
+          for (int64_t b = start; b < end; b++) {
+            self_or_result.select(0, b).addmm_(
+                batch1.select(0, b), batch2.select(0, b), beta, alpha);
+          }
+        };
+        at::parallel_for(0, bs, 1, bmm_fn);
+      } else {
+        for (int64_t b = 0; b < bs; b++) {
+          self_or_result.select(0, b).addmm_(
+              batch1.select(0, b), batch2.select(0, b), beta, alpha);
+        }
       }
     }
   }
@@ -1389,7 +1438,7 @@ Tensor matmul(
     }
 
     // fold the batch into the first dimension
-    Tensor t1 = tensor1.contiguous().view({-1, size1[size1.size() - 1]});
+    Tensor t1 = tensor1.expect_contiguous()->view({-1, size1[size1.size() - 1]});
     Tensor output = has_out ? at::_unsafe_view(at::mm_out(out, t1, t2), output_size)
                             : at::_unsafe_view(t1.mm(t2), output_size);
     return has_out ? out.set_(output) : output;
@@ -2325,7 +2374,11 @@ static Tensor& linalg_vector_norm_impl(const Tensor& self, const Scalar& scalar_
   TORCH_CHECK(!result.defined() || out_dtype == result.scalar_type(),
     "linalg.vector_norm expected out tensor dtype ", out_dtype,
     " but got: ", result.scalar_type());
-  auto iter = make_reduction("vector_norm", result, self_, dim, keepdim, in_dtype, out_dtype);
+  // omit in_dtype in the following call, to avoid make_reduction explicitly casting input to out_dtype
+  auto iter = isComplexType(self.scalar_type()) ?
+      make_reduction("vector_norm", result, self_, dim, keepdim, in_dtype, out_dtype) :
+      make_reduction("vector_norm", result, self_, dim, keepdim, out_dtype);
+
   linalg_vector_norm_stub(iter.device_type(), iter, ord);
   return result;
 }
@@ -2780,8 +2833,8 @@ std::tuple<Tensor, Tensor, Tensor> lu_unpack(
     .check_all_same_dtype(false)
     .resize_outputs(false)
     .declare_static_shape(LU_pivots.sizes(), /*squash_dim=*/LU_pivots.dim() - 1)
-    .add_borrowed_output(unpacked_pivots)
-    .add_borrowed_input(LU_pivots_zero_idx)
+    .add_output(unpacked_pivots)
+    .add_input(LU_pivots_zero_idx)
     .build();
   // }
 

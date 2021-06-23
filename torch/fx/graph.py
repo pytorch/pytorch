@@ -122,6 +122,7 @@ class _Namespace:
 
         # delete all characters that are illegal in a Python identifier
         candidate = self._illegal_char_regex.sub('_', candidate)
+
         if candidate[0].isdigit():
             candidate = f'_{candidate}'
 
@@ -826,6 +827,7 @@ class Graph:
 
             # normalize the name hint to get a proper identifier
             global_name = namespace.create_name(name_hint, obj)
+
             if global_name in globals_:
                 assert globals_[global_name] is obj
                 return global_name
@@ -837,6 +839,10 @@ class Graph:
             add_global(name, obj)
 
         def type_repr(o : Any):
+            if o == ():
+                # Empty tuple is used for empty tuple type annotation Tuple[()]
+                return '()'
+
             typename = _type_repr(o)
 
             # This is a generic type, e.g. typing.List[torch.Tensor]
@@ -846,6 +852,7 @@ class Graph:
 
                 # Assign global names for each of the inner type variables.
                 args = [type_repr(arg) for arg in o.__args__]
+
                 return f'{origin_typename}[{",".join(args)}]'
 
             # Common case: this is a regular module name like 'foo.bar.baz'

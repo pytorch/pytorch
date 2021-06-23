@@ -133,14 +133,14 @@ struct functor_name {                                                \
 #define OP_CUSTOM_FUNCTOR(function, op_name, functor_name)                \
 std::vector<Tensor> foreach_tensor_##op_name##_cuda(TensorList tensors) { \
     check_foreach_api_restrictions(tensors);                              \
-    if (!can_use_fast_route(tensors)) {                                   \
+    if (!can_use_fast_route(tensors) || has_integral_tensor(tensors, /* includeBool */ true)) { \
         return at::native::foreach_tensor_##op_name##_slow(tensors);      \
     }                                                                     \
     return function<functor_name>(tensors);                               \
 }                                                                         \
 void foreach_tensor_##op_name##_cuda_(TensorList tensors) {               \
     check_foreach_api_restrictions(tensors);                              \
-    if (!can_use_fast_route(tensors)) {                                   \
+    if (!can_use_fast_route(tensors) || has_integral_tensor(tensors, /* includeBool */ true)) { \
         return at::native::foreach_tensor_##op_name##_slow_(tensors);     \
     }                                                                     \
                                                                           \
@@ -209,31 +209,32 @@ OP_CUSTOM_FUNCTOR(floating_half_bfloat16, round, Round)
 OP_CUSTOM_FUNCTOR(floating_half_bfloat16, frac, Trunc)
 OP_CUSTOM_FUNCTOR(floating_complex_half_bfloat16, reciprocal, Reciprocal)
 
+// note(mkozuki): tensor dtype checks of `neg` kernels.
+// Since `check_foreach_api_restrictions` don't require all the tensors to have the same dtype,
+// I think it safer to check every single tensor's dtype inside negation kernels.
 std::vector<Tensor> foreach_tensor_neg_cuda(TensorList tensors) {
     check_foreach_api_restrictions(tensors);
-    TORCH_CHECK(tensors[0].scalar_type() != kBool,
-                "_foreach_neg: There is a bool tensor in the passed-in TensorList. "
-                "Negation on a bool tensor is not supported. If you are trying to invert a mask, please use the `~`"
-                "or `logical_not()` operator on the individual tensors instead.");
 
     if (!can_use_fast_route(tensors)) {
         return at::native::foreach_tensor_neg_slow(tensors);
     }
 
+    TORCH_CHECK(tensors[0].scalar_type() != kBool,
+                "Negation, the `-` operator, on a bool tensor is not supported. "
+                "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
     return all_types_half_complex_bfloat16<std::negate>(tensors);
 }
 
 void foreach_tensor_neg_cuda_(TensorList tensors) {
     check_foreach_api_restrictions(tensors);
-    TORCH_CHECK(tensors[0].scalar_type() != kBool,
-                "_foreach_neg: There is a bool tensor in the passed-in TensorList. "
-                "Negation on a bool tensor is not supported. If you are trying to invert a mask, please use the `~`"
-                "or `logical_not()` operator on the individual tensors instead.");
 
     if (!can_use_fast_route(tensors)) {
         return at::native::foreach_tensor_neg_slow_(tensors);
     }
 
+    TORCH_CHECK(tensors[0].scalar_type() != kBool,
+                "Negation, the `-` operator, on a bool tensor is not supported. "
+                "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
     all_types_half_complex_bfloat16_<std::negate>(tensors);
 }
 
@@ -247,13 +248,9 @@ struct Abs {
 
 std::vector<Tensor> foreach_tensor_abs_cuda(TensorList tensors) {
     check_foreach_api_restrictions(tensors);
-    bool has_complex = false;
-    for (auto t : tensors) {
-        if (at::isComplexType(t.scalar_type())) {
-            has_complex = true;
-        }
-    }
-
+    const bool has_complex = std::any_of(
+        tensors.begin(), tensors.end(),
+        [](const auto & t) { return at::isComplexType(t.scalar_type()); });
     if (!can_use_fast_route(tensors) || has_complex) {
         return at::native::foreach_tensor_abs_slow(tensors);
     }
@@ -263,13 +260,9 @@ std::vector<Tensor> foreach_tensor_abs_cuda(TensorList tensors) {
 
 void foreach_tensor_abs_cuda_(TensorList tensors) {
     check_foreach_api_restrictions(tensors);
-    bool has_complex = false;
-    for (auto t : tensors) {
-        if (at::isComplexType(t.scalar_type())) {
-            has_complex = true;
-        }
-    }
-
+    const bool has_complex = std::any_of(
+        tensors.begin(), tensors.end(),
+        [](const auto & t) { return at::isComplexType(t.scalar_type()); });
     if (!can_use_fast_route(tensors) || has_complex) {
         return at::native::foreach_tensor_abs_slow_(tensors);
     }

@@ -73,7 +73,7 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
             nnqat.Linear,
             nnqd.Linear,
             nniqat.LinearReLU,
-            nn.modules.linear._LinearWithBias,
+            nn.modules.linear.NonDynamicallyQuantizableLinear,
         ]),
         # linear functionals
         set([
@@ -271,6 +271,11 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
             nn.SiLU,
             F.silu,
         ]),
+        # F.mish
+        set([
+            nn.Mish,
+            F.mish,
+        ]),
         # F.tanh
         set([
             nn.Tanh,
@@ -409,6 +414,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         F.layer_norm,
         F.leaky_relu,
         F.silu,
+        F.mish,
         # TODO(future PR): implement shadowing for binary ops and
         # uncomment below
         # operator.add,
@@ -479,7 +485,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nn.Linear,
         nnqat.Linear,
         nnqd.Linear,
-        torch.nn.modules.linear._LinearWithBias,
+        torch.nn.modules.linear.NonDynamicallyQuantizableLinear,
         nn.Conv1d,
         nn.Conv2d,
         nn.Conv3d,
@@ -503,6 +509,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nn.LeakyReLU,
         nn.ReLU6,
         nn.SiLU,
+        nn.Mish,
         nni.BNReLU2d,
         nni.BNReLU3d,
         nni.ConvReLU1d,

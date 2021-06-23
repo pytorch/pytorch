@@ -29,6 +29,7 @@ from torch.jit._script import (
     interface,
     CompilationUnit,
     ScriptFunction,
+    _ScriptProfile,
     _unwrap_optional,
 )
 from torch.jit._trace import (
@@ -80,7 +81,7 @@ def annotate(the_type, the_value):
     compiler the type of `the_value`. It is a no-op when running outside of TorchScript.
 
     Though TorchScript can infer correct type for most Python expressions, there are some cases where
-    type infernece can be wrong, including:
+    type inference can be wrong, including:
     - Empty containers like `[]` and `{}`, which TorchScript assumes to be container of `Tensor`s
     - Optional types like `Optional[T]` but assigned a valid value of type `T`, TorchScript would assume
     it is type `T` rather than `Optional[T]`

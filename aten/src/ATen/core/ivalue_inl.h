@@ -518,20 +518,36 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    */
   template <typename T>
   c10::intrusive_ptr<Future> then(T callback, TypePtr type) {
+    using IValueWithDataPtrs = std::
+        tuple<IValue, std::vector<std::reference_wrapper<const at::DataPtr>>>;
 #if __cpp_lib_is_invocable >= 201703
     static_assert(
-        std::is_invocable_r<IValue, T, Future&>::value,
-        "The callback must have signature IValue(Future&)");
+        guts::disjunction<
+            std::is_invocable_r<IValue, T, Future&>,
+            std::is_invocable_r<IValueWithDataPtrs, T, Future&>>::value,
+        "The callback must have signature IValue(Future&) or "
+        "std::tuple<IValue, std::vector<std::reference_wrapper<const DataPtr>>>(Future&)");
 #endif
     auto childFut = createInstance(std::move(type));
-    addCallback(
-        [childFut, cb = std::move(callback)](Future& parentFut) mutable {
-          try {
-            childFut->markCompleted(cb(parentFut));
-          } catch (std::exception&) {
-            childFut->setError(std::current_exception());
-          }
-        });
+    addCallback([childFut,
+                 cb = std::move(callback)](Future& parentFut) mutable {
+      try {
+        guts::if_constexpr<std::is_convertible<
+            typename std::result_of<T && (Future&)>::type,
+            IValueWithDataPtrs>::value>(
+            [&](auto identity) {
+              IValue value;
+              std::vector<std::reference_wrapper<const at::DataPtr>> dataPtrs;
+              std::tie(value, dataPtrs) = identity(cb)(parentFut);
+              childFut->markCompleted(std::move(value), std::move(dataPtrs));
+            },
+            [&](auto identity) {
+              childFut->markCompleted(identity(cb)(parentFut));
+            });
+      } catch (std::exception&) {
+        childFut->setError(std::current_exception());
+      }
+    });
     return childFut;
   }
 
@@ -1015,12 +1031,12 @@ inline const ivalue::Object& IValue::toObjectRef() const {
 // toX method to IValue. These named methods are much more discoverable
 // than the to templated function.
 
-#define DEFINE_TO(T, method_name)          \
-  template <>                              \
-  inline T IValue::to<T>()&& {             \
-    return std::move(*this).method_name(); \
-  }                                        \
-  template <>                              \
+#define DEFINE_TO(T, method_name)                          \
+  template <>                                              \
+  inline T IValue::to<T>()&& {                             \
+    return static_cast<T>(std::move(*this).method_name()); \
+  }                                                        \
+  template <>                                              \
   inline c10::detail::ivalue_to_const_ref_overload_return<T>::type IValue::to<T>() const& { \
     return this->method_name();            \
   }

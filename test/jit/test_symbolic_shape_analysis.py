@@ -1,5 +1,6 @@
 import torch
 from torch.testing._internal.jit_utils import JitTestCase
+import operator
 
 from torch.testing import FileCheck
 from typing import List
@@ -12,34 +13,18 @@ if __name__ == '__main__':
 
 # XXX: still in prototype
 class TestSymbolicShapeAnalysis(JitTestCase):
+    def setUp(self):
+        self.prev_symbolic_shapes_test_enabled = torch._C._jit_symbolic_shapes_test_mode_enabled()
+        torch._C._jit_set_symbolic_shapes_test_mode(True)
+
+    def tearDown(self):
+        torch._C._jit_set_symbolic_shapes_test_mode(self.prev_symbolic_shapes_test_enabled)
+
     def test_shape_analysis(self):
-        @torch.jit.script
-        def broadcast(a: List[int], b: List[int]):
-            dimsA = len(a)
-            dimsB = len(b)
-            ndim = max(dimsA, dimsB)
-            expandedSizes : List[int] = []
-
-            for i in range(ndim):
-                offset = ndim - 1 - i
-                dimA = dimsA - 1 - offset
-                dimB = dimsB - 1 - offset
-                sizeA = a[dimA] if (dimA >= 0) else 1
-                sizeB = b[dimB] if (dimB >= 0) else 1
-
-                if sizeA != sizeB and sizeA != 1 and sizeB != 1:
-                    raise Exception("The size of tensor a {} must match the size of tensor b ("
-                                    "{}) at non-singleton dimension {}".format(sizeA, sizeB, i))
-
-                expandedSizes.append(sizeB if sizeA == 1 else sizeA)
-
-            return expandedSizes
-
         @torch.jit.script
         def foo(x, y):
             return x * y
 
-        torch._C._jit_register_operator_shape_function(foo.graph.findNode("aten::mul"), broadcast.graph)
         inputs = list(foo.graph.inputs())
 
         def prop_shapes_on_graph(inp0, inp1):
@@ -76,20 +61,58 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         self.assertEqual(output_shape[2], sym3)
 
     def test_sharing_of_list_len(self):
-        # testing generic sharing of logic, a la _convolution and conv2s
-        @torch.jit.script
-        def adaptive_avg_pool2d(self, out: List[int]):
-            assert len(out) == 2
-            out2 : List[int] = []
-            for elem in out:
-                out2.append(elem)
-            return out2
-
         @torch.jit.script
         def foo(x, out: List[int]):
             return torch.nn.functional.adaptive_avg_pool2d(x, out)
 
         self.run_pass("inline", foo.graph)
-        torch._C._jit_register_operator_shape_function(foo.graph.findNode("aten::adaptive_avg_pool2d"), adaptive_avg_pool2d.graph)
         torch._C._jit_pass_propagate_shapes_on_graph(foo.graph)
         FileCheck().check("Tensor(*, *)").check_same("adaptive_avg_pool2d").run(foo.graph)
+
+    def test_shared_shape_graph(self):
+        @torch.jit.script
+        def foo(x, y):
+            return x * y, x / y
+
+        mul_node = foo.graph.findNode("aten::mul")
+        div_node = foo.graph.findNode("aten::div")
+
+        mul_graph = torch._C._jit_shape_compute_graph_for_node(mul_node)
+        div_graph = torch._C._jit_shape_compute_graph_for_node(div_node)
+        self.assertIsNotNone(mul_graph)
+        self.assertIs(mul_graph, div_graph)
+
+    def test_unary_shape_functions(self):
+        def apply(fn):
+            return lambda x: fn(x)
+
+        unary_ops = [
+            torch.nn.functional.hardtanh,
+        ]
+        for fn in unary_ops:
+            t = torch.jit.trace(fn, (torch.rand([4, 4])))
+            ten_input = next(t.graph.inputs())
+            ten_input.setType(ten_input.type().with_sizes([2, 2]))
+            torch._C._jit_pass_propagate_shapes_on_graph(t.graph)
+            self.assertEqual(next(t.graph.outputs()).type().symbolic_sizes(), [2, 2])
+
+    def test_binary_shape_functions(self):
+        def apply(fn):
+            return lambda x, y: fn(x, y)
+
+        binary_ops = [
+            operator.__mul__,
+            operator.__truediv__,
+            operator.__gt__,
+            operator.__add__,
+        ]
+
+        for fn in binary_ops:
+            size_1 = [1, 4, 8]
+            size_2 = [4, 1, 8]
+            t = torch.jit.trace(fn, (torch.rand([4]), torch.rand([4])))
+            inputs = list(t.graph.inputs())
+            inputs[0].setType(inputs[0].type().with_sizes(size_1))
+            inputs[1].setType(inputs[1].type().with_sizes(size_2))
+            torch._C._jit_pass_propagate_shapes_on_graph(t.graph)
+            self.assertEqual(next(t.graph.outputs()).type().symbolic_sizes(), [4, 4, 8])

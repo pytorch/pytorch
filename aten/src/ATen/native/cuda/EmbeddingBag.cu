@@ -7,7 +7,6 @@
 
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCTensorMathReduce.cuh>
-#include <THC/THCTensorSort.cuh>
 #include <THC/THCThrustAllocator.cuh>
 #include <THC/THCAtomics.cuh>
 
@@ -16,6 +15,7 @@
 #include <thrust/iterator/constant_iterator.h>
 #include <thrust/device_vector.h>
 
+#include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/EmbeddingBackwardKernel.cuh>
 
 #include <c10/macros/Macros.h>
@@ -197,7 +197,7 @@ Tensor embedding_bag_backward_cuda_sum_avg(
       // Sort; a stable sort is not required
       auto sorted_data = device_ptr(sorted_indices.data_ptr<index_t>());
       thrust::sort_by_key(policy, sorted_data, sorted_data + numel, orig_data,
-                          ThrustLTOp<index_t>());
+                          LTOp<index_t>());
     }
 
     if (scale_grad_by_freq) {

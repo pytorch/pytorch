@@ -79,7 +79,7 @@ struct ListLenRefiner {
           if (!ival) {
             continue;
           }
-          auto li_len = n->input(const_index - 1);
+          auto li_len = n->input(1 - const_index);
           if (!li_len->node()->matches("aten::len.t(t[] a) -> int") ||
               !lists_to_refine_.count(li_len->node()->input())) {
             continue;

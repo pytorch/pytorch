@@ -210,9 +210,9 @@ static TensorIterator make_reduction(
   // efficiency.
   // not generalize this to common mismatched input/output types to avoid cross
   // product of templated kernel launches.
-  const bool gpu_f16_to_f32 = (
-    self.is_cuda() && self.scalar_type() == kHalf && out_dtype == kFloat);
-  auto in_dtype = gpu_f16_to_f32 ? self.scalar_type() : out_dtype;
+  const bool gpu_lowp_to_f32 = (
+    self.is_cuda() && (self.scalar_type() == kHalf || self.scalar_type() == kBFloat16) && out_dtype == kFloat);
+  auto in_dtype = gpu_lowp_to_f32 ? self.scalar_type() : out_dtype;
   return make_reduction(name, result, self, dim, keepdim, in_dtype, out_dtype);
 }
 

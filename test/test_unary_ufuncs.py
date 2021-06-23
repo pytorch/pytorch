@@ -1018,6 +1018,35 @@ class TestUnaryUfuncs(TestCase):
             input_noncontig, inplace=True), expected_output_noncontig,
             atol=atol, rtol=rtol)
 
+    @skipIfNoSciPy
+    @dtypes(torch.float, torch.double)
+    def test_mish(self, device, dtype):
+        input_np = np.random.randn(5, 8)
+        special_input = [[-1000, -1, -0.1, 0, 0.5, 1, 2, 1000]]
+        input_np = np.concatenate((input_np, special_input), axis=0).astype(
+            torch_to_numpy_dtype_dict[dtype])
+        expected_output_np = input_np * np.tanh(np.log1p(np.exp(input_np)))
+
+        expected_output = torch.from_numpy(expected_output_np).to(device)
+        expected_output_noncontig = expected_output.transpose(0, 1)
+
+        atol = 1e-6
+        rtol = 1e-6
+
+        input = torch.from_numpy(input_np).clone().contiguous().to(device)
+        self.assertEqual(torch.nn.functional.mish(input), expected_output,
+                         atol=atol, rtol=rtol)
+        self.assertEqual(torch.nn.functional.mish(input, inplace=True),
+                         expected_output, atol=atol, rtol=rtol)
+
+        input = torch.from_numpy(input_np).clone().to(device)
+        input_noncontig = input.transpose(0, 1)
+        self.assertEqual(torch.nn.functional.mish(input_noncontig),
+                         expected_output_noncontig, atol=atol, rtol=rtol)
+        self.assertEqual(torch.nn.functional.mish(
+            input_noncontig, inplace=True), expected_output_noncontig,
+            atol=atol, rtol=rtol)
+
     # do ops like threshold need a test_unary(_nonufunc) test suite?
     @onlyCPU
     @dtypes(*torch.testing.get_all_math_dtypes('cpu'))
@@ -1190,13 +1219,13 @@ class TestUnaryUfuncs(TestCase):
     @dtypesIfCUDA(*torch.testing.get_all_fp_dtypes())
     @dtypes(torch.bfloat16, torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
-    def test_special_i0e_vs_scipy(self, device, dtype):
-        def check_equal(t):
+    def test_special_i0_i1_vs_scipy(self, device, dtype):
+        def check_equal(t, torch_fn, scipy_fn):
             # Test by comparing to scipy
-            actual = torch.special.i0e(t)
+            actual = torch_fn(t)
             if dtype is torch.bfloat16:
                 t = t.to(torch.float32)
-            expected = scipy.special.i0e(t.cpu().numpy())
+            expected = scipy_fn(t.cpu().numpy())
 
             # Casting down for dtype float16 is required since scipy upcasts to float32
             if dtype is torch.bfloat16 or dtype is torch.float16:
@@ -1204,11 +1233,43 @@ class TestUnaryUfuncs(TestCase):
             self.assertEqual(actual, expected)
 
         t = torch.tensor([], device=device, dtype=dtype)
-        check_equal(t)
+        check_equal(t, torch.i0, scipy.special.i0)
+        check_equal(t, torch.special.i0e, scipy.special.i0e)
+        if dtype not in [torch.half, torch.bfloat16]:
+            check_equal(t, torch.special.i1, scipy.special.i1)
+            check_equal(t, torch.special.i1e, scipy.special.i1e)
 
         range = (-1e7, 1e7)
         if dtype == torch.half:
             range = (-65000, 65000)
+
+        t = torch.linspace(*range, int(1e4), device=device, dtype=dtype)
+        check_equal(t, torch.i0, scipy.special.i0)
+        check_equal(t, torch.special.i0e, scipy.special.i0e)
+        if dtype not in [torch.half, torch.bfloat16]:
+            check_equal(t, torch.special.i1, scipy.special.i1)
+            check_equal(t, torch.special.i1e, scipy.special.i1e)
+
+        # NaN, inf, -inf are tested in reference_numerics tests.
+        info = torch.finfo(dtype)
+        min, max, eps, tiny = info.min, info.max, info.eps, info.tiny
+        t = torch.tensor([min, max, eps, tiny], dtype=dtype, device=device)
+        check_equal(t, torch.i0, scipy.special.i0)
+        check_equal(t, torch.special.i0e, scipy.special.i0e)
+        if dtype not in [torch.half, torch.bfloat16]:
+            check_equal(t, torch.special.i1, scipy.special.i1)
+            check_equal(t, torch.special.i1e, scipy.special.i1e)
+
+    @dtypes(torch.float32, torch.float64)
+    @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
+    def test_special_ndtr_vs_scipy(self, device, dtype):
+        def check_equal(t):
+            # Test by comparing to scipy
+            actual = torch.special.ndtr(t)
+            expected = scipy.special.ndtr(t.cpu().numpy())
+            self.assertEqual(actual, expected)
+
+        range = (-10, 10)
 
         t = torch.linspace(*range, int(1e4), device=device, dtype=dtype)
         check_equal(t)
@@ -1409,6 +1470,34 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(1, len(z))
         self.assertEqual(torch.empty(0, dtype=torch.long), z[0])
 
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_nonzero_noncontiguous(self, device, dtype):
+        x = make_tensor((10, 10, 10), dtype=dtype, device=device,
+                        low=1, noncontiguous=False)
+        mask = make_tensor((10, 10, 10), dtype=torch.bool, device=device)
+        x[mask] = 0
+
+        def permute_storage(tensor, dims):
+            dest_dims = tuple(range(len(dims)))
+            return tensor.permute(dims).contiguous().movedim(dims, dest_dims)
+
+        # Assume contiguous case is correct
+        expect = x.nonzero()
+
+        # Dense, permuted
+        self.assertEqual(permute_storage(x, [0, 2, 1]).nonzero(), expect)
+        self.assertEqual(permute_storage(x, [2, 1, 0]).nonzero(), expect)
+
+        # Non-dense
+        nondense = torch.empty((40, 10, 20), dtype=dtype, device=device)[::4, :, ::2]
+        nondense[:] = x
+        self.assertEqual(nondense.nonzero(), expect)
+
+        # Non-dense, permuted
+        nondense = nondense.permute([0, 2, 1])
+        nondense[:] = x
+        self.assertEqual(nondense.nonzero(), expect)
+
     # TODO: rationalize with exp OpInfo
     @dtypes(*(torch.testing.get_all_fp_dtypes(include_half=False) +
               torch.testing.get_all_complex_dtypes()))
@@ -1418,9 +1507,8 @@ class TestUnaryUfuncs(TestCase):
         for v in (2, -2) + ((1j, 1 + 1j) if dtype.is_complex else ()):
             a = torch.tensor(v, dtype=dtype, device=device) * torch.arange(18, device=device) / 3 * math.pi
             a = a.to(dtype)
+            # bfloat16 overflows
             if dtype == torch.bfloat16:
-                with self.assertRaises(TypeError):  # compare_with_numpy doesn't support bfloat16
-                    self.compare_with_numpy(torch.exp, np.exp, a)
                 return
             self.compare_with_numpy(torch.exp, np.exp, a)
 
