@@ -11,7 +11,7 @@ from torch._namedtensor_internals import (
     unzip_namedshape, single_ellipsis_index, is_ellipsis)
 from torch.overrides import (
     has_torch_function, has_torch_function_unary, has_torch_function_variadic,
-    handle_torch_function)
+    handle_torch_function, get_default_nowrap_functions)
 import torch.utils.hooks as hooks
 
 
@@ -1007,7 +1007,10 @@ class Tensor(torch._C._TensorBase):
 
         with _C.DisableTorchFunction():
             ret = func(*args, **kwargs)
-            return _convert(ret, cls)
+            if func in get_default_nowrap_functions():
+                return ret
+            else:
+                return _convert(ret, cls)
 
     __module__ = 'torch'
 

@@ -425,7 +425,7 @@ def maybe_insert_input_observers_for_node(
 
     # assign the new args and kwargs to the node, inplace
     node.args = tuple(new_args)
-    node.kwargs = new_kwargs  # type: ignore[assignment]
+    node.kwargs = new_kwargs
 
 def maybe_insert_input_equalization_observers_for_node(
     node: Node,
@@ -946,7 +946,7 @@ def run_prepare_fx_on_standalone_modules(
             get_standalone_module_configs(
                 root_node, modules, prepare_custom_config_dict, qconfig)
 
-        standalone_module = modules[root_node.target]  # type: ignore[index]
+        standalone_module = modules[root_node.target]
         prepare = \
             torch.quantization.quantize_fx._prepare_standalone_module_fx  # type: ignore[attr-defined]
         observed_standalone_module = \
@@ -959,7 +959,7 @@ def run_prepare_fx_on_standalone_modules(
         parent_name, name = _parent_name(root_node.target)
         setattr(modules[parent_name], name,
                 observed_standalone_module)
-        modules[root_node.target] = observed_standalone_module  # type: ignore[index]
+        modules[root_node.target] = observed_standalone_module
 
 def save_state(
     observed: GraphModule,
