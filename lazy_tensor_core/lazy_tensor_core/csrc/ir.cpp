@@ -3,7 +3,6 @@
 #include <functional>
 #include <sstream>
 
-#include "absl/strings/str_cat.h"
 #include "lazy_tensors/computation_client/cache.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/sys_util.h"
@@ -52,9 +51,9 @@ std::string GetCurrentScope() {
   std::string scope;
   for (auto& scope_entry : g_scope_context.scopes) {
     if (scope.empty()) {
-      absl::StrAppend(&scope, scope_entry.name);
+      lazy_tensors::StrAppend(&scope, scope_entry.name);
     } else {
-      absl::StrAppend(&scope, "/", scope_entry.name);
+      lazy_tensors::StrAppend(&scope, "/", scope_entry.name);
     }
   }
   return scope;
