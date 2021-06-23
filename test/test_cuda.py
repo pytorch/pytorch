@@ -2307,7 +2307,7 @@ torch.cuda.synchronize()
                 self.assertTrue(scaler.get_scale() == 1.0)
 
             for c, s in zip(mod_control.parameters(), mod_scaling.parameters()):
-                self.assertTrue(torch.allclose(c, s, atol=atol))
+                self.assertEqual(c, s, atol=atol, rtol=1e-05)
 
     # Compares no scaling + no autocasting against scaling + autocasting.
     def test_grad_scaling_autocast(self):
@@ -2359,7 +2359,7 @@ torch.cuda.synchronize()
                     if (not scaler.is_enabled()) or (i != skip_iter):
                         optimizer.step()
 
-        self._run_scaling_case(run, unskipped=3, skipped=1)
+        self._run_scaling_case(run, unskipped=3, skipped=1, atol=1e-5)
 
     def test_grad_scaling_clipping_separate_unscale(self):
         def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
