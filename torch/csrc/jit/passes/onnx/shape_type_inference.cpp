@@ -224,8 +224,8 @@ Value* CloneValueFromListConstruct(
   if (elem->cast<IntType>()) {
     scalar_type = at::kLong;
     if (isValidToTransformToONNXConcatNode(v->node())) {
-      auto concat_node = transformToONNXConcatNode(
-          n_graph.get(), v->node(), opset_version);
+      auto concat_node =
+          transformToONNXConcatNode(n_graph.get(), v->node(), opset_version);
       return concat_node->output();
     }
   } else if (elem->cast<FloatType>()) {

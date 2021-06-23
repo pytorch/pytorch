@@ -610,13 +610,15 @@ static void eraseListConstruct(Node* n, int opset_version) {
       auto* lc_node = input->node();
       TypePtr elem =
           lc_node->output()->type()->castRaw<ListType>()->getElementType();
-      if (elem->cast<IntType>() && isValidToTransformToONNXConcatNode(lc_node)) {
+
+      if (elem->cast<IntType>() &&
+          isValidToTransformToONNXConcatNode(lc_node)) {
         auto concat_node = transformToONNXConcatNode(
-                        block->owningGraph(), input->node(), opset_version);
+            block->owningGraph(), input->node(), opset_version);
         // make concat node output as new input, then ListConstruct should
         // become dead
         replacements.emplace_back(
-              i, std::vector<Value*>({concat_node->output()}));
+            i, std::vector<Value*>({concat_node->output()}));
       } else {
         if (opset_version >= OPSET_VERSION_11) {
           c10::Symbol seq_node_kind = lc_node->inputs().size() > 0

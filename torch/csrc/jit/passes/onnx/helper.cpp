@@ -163,11 +163,7 @@ bool isValidToTransformToONNXConcatNode(Node* lc_node) {
   return !lc_node->inputs().empty();
 }
 
-Node* transformToONNXConcatNode(
-    Graph* g,
-    Node* lc_node,
-    int opset_version) {
-
+Node* transformToONNXConcatNode(Graph* g, Node* lc_node, int opset_version) {
   // ListConstruct Int[] output case, we need to transform to ONNX
   // Concat to ensure the output is a single tensor(dynamic) type in
   // order to be consumed as inputs
