@@ -202,9 +202,7 @@ jobs:
           path: .
       - name: Unzip test reports
         run: |
-          mkdir -p test/test-reports
-          # Compress-Archive doesn't actually preserve paths so everything will be in the your cwd when unzipping
-          cd test/test-reports && unzip -o '../../test-reports-*.zip'
+          unzip -o 'test-reports-*.zip'
       - uses: actions/setup-python@v2
         with:
           python-version: 3.9
