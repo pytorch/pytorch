@@ -3,8 +3,8 @@
 #include <c10/util/irange.h>
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroupNCCL.hpp>
-#include <c10d/test/CUDATest.hpp>
-#include <c10d/test/TestUtils.hpp>
+#include "CUDATest.hpp"
+#include "TestUtils.hpp"
 #include <torch/csrc/cuda/nccl.h>
 
 #include <gtest/gtest.h>

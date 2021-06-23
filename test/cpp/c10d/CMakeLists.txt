@@ -53,3 +53,9 @@ if(USE_MPI AND USE_C10D_MPI)
   # a private dependency of the tests as well.
   c10d_add_test(ProcessGroupMPITest.cpp torch_cpu ${MPI_CXX_LIBRARIES})
 endif()
+
+add_executable(example_allreduce example/allreduce.cpp)
+target_link_libraries(example_allreduce pthread torch_cpu)
+if(USE_CUDA)
+  target_link_libraries(example_allreduce torch_cuda)
+endif()

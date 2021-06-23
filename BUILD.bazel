@@ -1873,8 +1873,8 @@ cc_library(
         [
             "torch/*.h",
             "torch/csrc/**/*.h",
+            "torch/csrc/distributed/c10d/*.hpp",
             "torch/lib/libshm/*.h",
-            "torch/lib/c10d/*.hpp",
         ],
         exclude = [
             "torch/csrc/autograd/generated/VariableType.h",
@@ -1886,6 +1886,7 @@ cc_library(
     includes = [
         "torch/csrc",
         "torch/csrc/api/include",
+        "torch/csrc/distributed",
         "torch/lib",
         "torch/lib/libshm",
     ],
@@ -1955,6 +1956,7 @@ cc_library(
     includes = [
         ".",
         "torch/csrc/api/include",
+        "torch/csrc/distributed",
         "torch/lib",
         "torch/lib/libshm",
     ],
