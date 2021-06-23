@@ -214,13 +214,16 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
 
     std::string prefix = "tensor(";
     int64_t indent = prefix.length();
-    bool isFloatingDtype =  tensor_.is_floating_point();
-    Formatter formatter(tensor, isFloatingDtype);
-
+    std::string tensorStr;
+    if (tensor.numel() == 0) {
+        tensorStr = "[]";
+    } else{
+        bool isFloatingDtype =  tensor_.is_floating_point();
+        Formatter formatter(tensor, isFloatingDtype);
+        tensorStr = __tensorString(tensor, formatter, indent);
+    }
     // Print the formatted values
-    stream << prefix;
-    std::string tensorStr = __tensorString(tensor, formatter, indent);
-    stream << tensorStr << ")" << std::endl;
+    stream << prefix << tensorStr << ")" << std::endl;
 
     // Print the tensor type and dimensions
     stream << "[ " << tensor_.toString() << "{";
