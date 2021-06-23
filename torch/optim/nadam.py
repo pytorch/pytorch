@@ -3,9 +3,11 @@ from . import _functional as F
 from .optimizer import Optimizer
 
 
-class RAdam(Optimizer):
-    r"""Implements RAdam algorithm.
-    It has been proposed in `On the variance of the adaptive learning rate and beyond`_.
+class NAdam(Optimizer):
+    r"""Implements NAdam algorithm.
+
+    It has been proposed in `Incorporating Nesterov Momentum into Adam`_.
+
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
@@ -15,12 +17,14 @@ class RAdam(Optimizer):
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
-    .. _On the variance of the adaptive learning rate and beyond:
-        https://arxiv.org/pdf/1908.03265.pdf
+        momentum_decay (float, optional): momentum momentum_decay (default: 4e-3)
+
+    .. _Incorporating Nesterov Momentum into Adam:
+        https://openreview.net/forum?id=OM0jvwB8jIp57ZJjtNEZ
     """
 
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
-                 weight_decay=0):
+    def __init__(self, params, lr=2e-3, betas=(0.9, 0.999), eps=1e-8,
+                 weight_decay=0, momentum_decay=4e-3):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -31,12 +35,16 @@ class RAdam(Optimizer):
             raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
         if not 0.0 <= weight_decay:
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
-        defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay)
-        super(RAdam, self).__init__(params, defaults)
+        if not 0.0 <= momentum_decay:
+            raise ValueError("Invalid momentum_decay value: {}".format(momentum_decay))
+        defaults = dict(lr=lr, betas=betas, eps=eps,
+                        weight_decay=weight_decay, momentum_decay=momentum_decay)
+        super(NAdam, self).__init__(params, defaults)
 
     @torch.no_grad()
     def step(self, closure=None):
         """Performs a single optimization step.
+
         Args:
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
@@ -51,7 +59,7 @@ class RAdam(Optimizer):
             grads = []
             exp_avgs = []
             exp_avg_sqs = []
-            max_exp_avg_sqs = []
+            mu_products = []
             state_steps = []
             beta1, beta2 = group['betas']
 
@@ -59,13 +67,14 @@ class RAdam(Optimizer):
                 if p.grad is not None:
                     params_with_grad.append(p)
                     if p.grad.is_sparse:
-                        raise RuntimeError('RAdam does not support sparse gradients')
+                        raise RuntimeError('NAdam does not support sparse gradients')
                     grads.append(p.grad)
 
                     state = self.state[p]
                     # Lazy state initialization
                     if len(state) == 0:
                         state['step'] = 0
+                        state['mu_product'] = 1.
                         # Exponential moving average of gradient values
                         state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                         # Exponential moving average of squared gradient values
@@ -73,20 +82,30 @@ class RAdam(Optimizer):
 
                     exp_avgs.append(state['exp_avg'])
                     exp_avg_sqs.append(state['exp_avg_sq'])
+                    mu_products.append(state['mu_product'])
 
                     # update the steps for each param group update
                     state['step'] += 1
                     # record the step after step update
                     state_steps.append(state['step'])
 
-            F.radam(params_with_grad,
+            F.nadam(params_with_grad,
                     grads,
                     exp_avgs,
                     exp_avg_sqs,
+                    mu_products,
                     state_steps,
                     beta1=beta1,
                     beta2=beta2,
                     lr=group['lr'],
                     weight_decay=group['weight_decay'],
+                    momentum_decay=group['momentum_decay'],
                     eps=group['eps'])
+
+            # update mu_product
+            for p, mu_product in zip(params_with_grad, mu_products):
+                state = self.state[p]
+                state['mu_product'] = state['mu_product'] * beta1 * \
+                    (1. - 0.5 * (0.96 ** (state['step'] * group['momentum_decay'])))
+
         return loss

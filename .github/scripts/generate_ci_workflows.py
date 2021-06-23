@@ -88,7 +88,6 @@ WINDOWS_WORKFLOWS = [
         cuda_version="10.1",
         test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
         on_pull_request=True,
-        only_build_on_pull_request=True,
         num_test_shards=2,
     ),
     PyTorchWindowsWorkflow(
