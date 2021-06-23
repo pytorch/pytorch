@@ -26,21 +26,26 @@ class TORCH_API SerializationStorageContext {
   ~SerializationStorageContext() = default;
 
  private:
-  class StorageSerializationComparator {
-   public:
-    bool operator()(const c10::Storage& lhs, const c10::Storage& rhs) const {
-      return lhs.unsafeGetStorageImpl() < rhs.unsafeGetStorageImpl();
-    }
-  };
-
   class StorageSerializationHash {
    public:
     size_t operator()(const c10::Storage& storage) const {
-      return reinterpret_cast<size_t>(storage.unsafeGetStorageImpl());
+      return std::hash<void*>()(
+          reinterpret_cast<void*>(storage.unsafeGetStorageImpl()));
     }
   };
 
-  std::unordered_map<c10::Storage, uint64_t, StorageSerializationHash>
+  class StorageSerializationEqual {
+   public:
+    bool operator()(const c10::Storage& lhs, const c10::Storage& rhs) const {
+      return lhs.unsafeGetStorageImpl() == rhs.unsafeGetStorageImpl();
+    };
+  };
+
+  std::unordered_map<
+      c10::Storage,
+      uint64_t,
+      StorageSerializationHash,
+      StorageSerializationEqual>
       storage_id_map_;
 };
 
