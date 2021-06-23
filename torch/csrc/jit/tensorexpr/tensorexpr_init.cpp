@@ -334,9 +334,9 @@ void initTensorExprBindings(PyObject* module) {
       .def_static(
           "make",
           [](const BufHandle& buf,
-             std::vector<ExprHandle>& indicies,
+             std::vector<ExprHandle>& indices,
              const ExprHandle& value) {
-            return Store::make(buf, indicies, value);
+            return Store::make(buf, indices, value);
           },
           py::return_value_policy::reference);
 
@@ -441,6 +441,12 @@ void initTensorExprBindings(PyObject* module) {
           "get_writes_for",
           [](const LoopNest& self, const BufHandle& b) {
             return self.getAllWritesToBuf(b.node());
+          },
+          py::return_value_policy::reference)
+      .def(
+          "get_loop_at",
+          [](const LoopNest& self, For* root, const std::vector<int>& indices) {
+            return self.getLoopAt(root, indices);
           },
           py::return_value_policy::reference)
       .def(

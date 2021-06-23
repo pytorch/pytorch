@@ -50,6 +50,26 @@ class TORCH_API LoopNest {
   Stmt* getLoopBodyFor(Tensor*) const;
   Stmt* getLoopBodyFor(const Buf*) const;
 
+  // Returns the For stmt indexed by 'indices' in the 'root' For stmt.
+  //'indices' indicates the path to the returned loop from 'root' in AST, e.g.,
+  //
+  // root: for(int i...){
+  // j_loop: for (int j...){
+  // k1_loop:  for (int k1...){
+  //            A[i, j, k1] = ....
+  //          }
+  //          B[i, j] = ...
+  // k2_loop:  for (int k2...){
+  //            A[i, j, k2] = ...
+  //          }
+  //        }
+  //      }
+  //
+  // the path from 'root' to 'j_loop' is [0]
+  // the path from 'root' to 'k1_loop' is [0, 0]
+  // the path from 'root' to 'k2_loop' is [0, 2]
+  For* getLoopAt(For* root, const std::vector<int>& indices) const;
+
   // Returns the For stmt that is immediately enclosing the given stmt.
   static For* getParentLoop(const Stmt* st);
 
