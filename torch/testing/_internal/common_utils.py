@@ -1225,7 +1225,7 @@ class TestCase(expecttest.TestCase):
     #  and acquires the appropriate device, dtype, rtol and atol to compare
     #  them with. It then calls _compare_tensors_internal.
     def _compareTensors(self, a, b, *, rtol: Optional[float] = None, atol=None, equal_nan=True,
-                        exact_dtype=True, exact_device=False) -> _compare_return_type:
+                        exact_dtype=True, exact_device=False, exact_stride=False) -> _compare_return_type:
         assert (atol is None) == (rtol is None)
         if not isinstance(a, torch.Tensor):
             return (False, "argument a, {0}, to _compareTensors is not a tensor!".format(a))
@@ -1252,6 +1252,11 @@ class TestCase(expecttest.TestCase):
         if exact_dtype and a.dtype is not b.dtype:
             return (False, ("Attempted to compare equality of tensors with "
                             "different dtypes. Got dtypes {0} and {1}.").format(a.dtype, b.dtype))
+
+        # Checks stride (if exact_stride)
+        if exact_stride and a.stride() != b.stride():
+            return (False, ("Attempted to compare equality of tensors with "
+                            "different strides. Got strides {0} and {1}.").format(a.stride(), b.stride()))
 
         # Acquires rtol and atol
         if rtol is None:
@@ -1332,10 +1337,10 @@ class TestCase(expecttest.TestCase):
         # Tensor x np.bool
         elif isinstance(x, torch.Tensor) and isinstance(y, np.bool_):
             self.assertEqual(x.item(), y, atol=atol, rtol=rtol, msg=msg,
-                             exact_dtype=exact_dtype, exact_device=exact_device)
+                             exact_dtype=exact_dtype, exact_device=exact_device, exact_stride=exact_stride)
         elif isinstance(y, torch.Tensor) and isinstance(x, np.bool_):
             self.assertEqual(x, y.item(), atol=atol, rtol=rtol, msg=msg,
-                             exact_dtype=exact_dtype, exact_device=exact_device)
+                             exact_dtype=exact_dtype, exact_device=exact_device, exact_stride=exact_stride)
 
         # Tensor x Tensor
         elif isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
@@ -1358,7 +1363,8 @@ class TestCase(expecttest.TestCase):
                 indices_result, debug_msg_indices = self._compareTensors(x._indices(), y._indices(),
                                                                          rtol=rtol, atol=atol,
                                                                          equal_nan=equal_nan, exact_dtype=exact_dtype,
-                                                                         exact_device=exact_device)
+                                                                         exact_device=exact_device,
+                                                                         exact_stride=exact_stride)
 
                 if not indices_result:
                     assert debug_msg_indices is not None
@@ -1368,7 +1374,8 @@ class TestCase(expecttest.TestCase):
                 values_result, debug_msg_values = self._compareTensors(x._values(), y._values(),
                                                                        rtol=rtol, atol=atol,
                                                                        equal_nan=equal_nan, exact_dtype=exact_dtype,
-                                                                       exact_device=exact_device)
+                                                                       exact_device=exact_device,
+                                                                       exact_stride=exact_stride)
 
                 if not values_result:
                     assert debug_msg_values is not None
@@ -1379,31 +1386,32 @@ class TestCase(expecttest.TestCase):
                 #  when https://github.com/pytorch/pytorch/pull/58926 has landed
                 self.assertEqual(x.qscheme(), y.qscheme(), atol=atol, rtol=rtol,
                                  msg=msg, exact_dtype=exact_dtype,
-                                 exact_device=exact_device)
+                                 exact_device=exact_device, exact_stride=exact_stride)
 
                 if x.qscheme() == torch.per_tensor_affine:
                     self.assertEqual(x.q_scale(), y.q_scale(), atol=atol, rtol=rtol,
                                      msg=msg, exact_dtype=exact_dtype,
-                                     exact_device=exact_device)
+                                     exact_device=exact_device, exact_stride=exact_stride)
                     self.assertEqual(x.q_zero_point(), y.q_zero_point(),
                                      atol=atol, rtol=rtol, msg=msg,
-                                     exact_dtype=exact_dtype, exact_device=exact_device)
+                                     exact_dtype=exact_dtype, exact_device=exact_device, exact_stride=exact_stride)
                 elif x.qscheme() == torch.per_channel_affine:
                     self.assertEqual(x.q_per_channel_scales(), y.q_per_channel_scales(), atol=atol, rtol=rtol,
                                      msg=msg, exact_dtype=exact_dtype,
-                                     exact_device=exact_device)
+                                     exact_device=exact_device, exact_stride=exact_stride)
                     self.assertEqual(x.q_per_channel_zero_points(), y.q_per_channel_zero_points(),
                                      atol=atol, rtol=rtol, msg=msg,
-                                     exact_dtype=exact_dtype, exact_device=exact_device)
+                                     exact_dtype=exact_dtype, exact_device=exact_device, exact_stride=exact_stride)
                     self.assertEqual(x.q_per_channel_axis(), y.q_per_channel_axis(),
                                      atol=atol, rtol=rtol, msg=msg,
-                                     exact_dtype=exact_dtype, exact_device=exact_device)
+                                     exact_dtype=exact_dtype, exact_device=exact_device, exact_stride=exact_stride)
 
                 result, debug_msg_compare = self._compareTensors(x.int_repr().to(torch.int32),
                                                                  y.int_repr().to(torch.int32),
                                                                  atol=atol, rtol=rtol,
                                                                  exact_dtype=exact_dtype,
-                                                                 exact_device=exact_device)
+                                                                 exact_device=exact_device,
+                                                                 exact_stride=exact_stride)
 
                 if not result:
                     assert debug_msg_compare is not None
@@ -1412,7 +1420,13 @@ class TestCase(expecttest.TestCase):
             elif x.dtype == torch.bool and y.dtype == torch.bool:
                 # TODO: torch.bool should be supported by torch.testing.assert_close
                 result, msg = self._compareTensors(
-                    x, y, atol=atol, rtol=rtol, exact_dtype=exact_dtype, exact_device=exact_device
+                    x,
+                    y,
+                    atol=atol,
+                    rtol=rtol,
+                    exact_dtype=exact_dtype,
+                    exact_device=exact_device,
+                    exact_stride=exact_stride,
                 )
                 self.assertTrue(result, msg=msg)
             else:
@@ -1443,7 +1457,14 @@ class TestCase(expecttest.TestCase):
                 y = maybe_to_list(y)
 
             self.assertEqual(
-                x, y, atol=atol, rtol=rtol, msg=msg, exact_dtype=exact_dtype, exact_device=exact_device
+                x,
+                y,
+                atol=atol,
+                rtol=rtol,
+                msg=msg,
+                exact_dtype=exact_dtype,
+                exact_device=exact_device,
+                exact_stride=exact_stride,
             )
         elif isinstance(x, string_classes) and isinstance(y, string_classes):
             debug_msg = ("Attempted to compare [string] types: "
@@ -1457,16 +1478,16 @@ class TestCase(expecttest.TestCase):
             if isinstance(x, OrderedDict) and isinstance(y, OrderedDict):
                 self.assertEqual(x.items(), y.items(), atol=atol, rtol=rtol,
                                  msg=msg, exact_dtype=exact_dtype,
-                                 exact_device=exact_device)
+                                 exact_device=exact_device, exact_stride=exact_stride)
             else:
                 self.assertEqual(set(x.keys()), set(y.keys()), atol=atol, rtol=rtol,
                                  msg=msg, exact_dtype=exact_dtype,
-                                 exact_device=exact_device)
+                                 exact_device=exact_device, exact_stride=exact_stride)
                 key_list = list(x.keys())
                 self.assertEqual([x[k] for k in key_list],
                                  [y[k] for k in key_list],
                                  atol=atol, rtol=rtol, msg=msg,
-                                 exact_dtype=exact_dtype, exact_device=exact_device)
+                                 exact_dtype=exact_dtype, exact_device=exact_device, exact_stride=exact_stride)
         elif isinstance(x, type) and isinstance(y, type):
             # See TestTorch.test_assert_equal_generic_meta
             debug_msg = ("Attempted to compare [type] types: "
@@ -1478,7 +1499,7 @@ class TestCase(expecttest.TestCase):
             super().assertEqual(len(x), len(y), msg=self._get_assert_msg(msg, debug_msg=debug_msg))
             for x_, y_ in zip(x, y):
                 self.assertEqual(x_, y_, atol=atol, rtol=rtol, msg=msg,
-                                 exact_dtype=exact_dtype, exact_device=exact_device)
+                                 exact_dtype=exact_dtype, exact_device=exact_device, exact_stride=exact_stride)
         elif isinstance(x, bool) and isinstance(y, bool):
             super().assertTrue(x == y, msg=msg)
 
