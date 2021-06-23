@@ -1936,8 +1936,10 @@ For* LoopNest::tile(For* x, For* y, int x_factor, int y_factor) {
   }
 
   // Split x, y axes by x_factor and y_factor
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For *yi, *ytail;
   splitWithTail(y, y_factor, &yi, &ytail);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For *xi, *xtail;
   splitWithTail(x, x_factor, &xi, &xtail);
 
