@@ -47,7 +47,7 @@ from torch._classes import classes
 
 type_trace_db = JitTypeTraceStore()  # DB to hold all call traces from MonkeyType
 
-torch._C.ScriptMethod.graph_for = _script_method_graph_for # type: ignore[attr-defined]
+torch._C.ScriptMethod.graph_for = _script_method_graph_for  # type: ignore[attr-defined]
 torch._C.ScriptFunction.graph_for = _graph_for  # type: ignore[attr-defined]
 ScriptFunction = torch._C.ScriptFunction
 ScriptFunction.__doc__ = """
