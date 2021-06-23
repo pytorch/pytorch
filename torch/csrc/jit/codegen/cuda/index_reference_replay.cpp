@@ -86,6 +86,7 @@ void IndexReferenceReplay::handle(Merge* m) {
 }
 
 TensorDomain* IndexReferenceReplay::computeReplay() {
+  auto gpu_lower = GpuLower::current();
   // Throw an error when two loops are mapped with each other, which
   // violates an assumption that unique mappings between concrete
   // IterDomains and the IterDomains of the loop structure must be
@@ -102,7 +103,7 @@ TensorDomain* IndexReferenceReplay::computeReplay() {
        ++it_i) {
     for (auto it_j = it_i + 1; it_j != loop_structure_.end(); ++it_j) {
       TORCH_INTERNAL_ASSERT(
-          !GpuLower::current()->caIndexMap().areMapped(
+          !gpu_lower->caIndexMap().areMapped(
               (*it_i)->iter_domain(), (*it_j)->iter_domain()),
           "Unsupported loop structure. Two loops are mapped together.");
     }
@@ -116,8 +117,7 @@ TensorDomain* IndexReferenceReplay::computeReplay() {
       loop_structure_.end(),
       std::back_inserter(fusion_loop_structure),
       [&](kir::ForLoop* fl) {
-        auto fid =
-            GpuLower::current()->caIndexMap().toFusion(fl->iter_domain());
+        auto fid = gpu_lower->caIndexMap().toFusion(fl->iter_domain());
         return fid;
       });
 
@@ -162,10 +162,9 @@ TensorDomain* IndexReferenceReplay::computeReplay() {
 
   // Produce a non repetitive set of inputs. Remove "duplicate" IterDomains that
   // map to eachother.
-  std::unordered_set<IterDomain*> root_axes;
+  std::vector<IterDomain*> root_axes;
   for (auto root_id : sorted_inputs) {
-    auto concrete_id =
-        GpuLower::current()->caIndexMap().getConcreteMappedID(root_id);
+    auto concrete_id = gpu_lower->caIndexMap().getConcreteMappedID(root_id);
     if (concrete_to_id_.find(concrete_id) != concrete_to_id_.end()) {
       continue;
     }
@@ -179,7 +178,7 @@ TensorDomain* IndexReferenceReplay::computeReplay() {
         root_id->start(), root_id->extent(), root_id->getParallelType());
 
     // Initialize root axes, concrete map, and leaf map for replay.
-    root_axes.emplace(root_id_copy);
+    root_axes.push_back(root_id_copy);
     concrete_to_id_[concrete_id] = root_id_copy;
     leaf_ids_.emplace(root_id_copy);
   }
@@ -218,7 +217,7 @@ TensorDomain* IndexReferenceReplay::computeReplay() {
           // map, so we need to manually check that things are mapped in the
           // loop map. Cannot simply look up concrete IDs to match them as index
           // map and loop map do not have the same concrete id mapping.
-          if (GpuLower::current()->caLoopMap().areMapped(id, loop_id)) {
+          if (gpu_lower->caLoopMap().areMapped(id, loop_id)) {
             concrete_leaf_ids.erase(id);
             auto replayed_id = concrete_to_id_.at(id);
             if (loop_id->getParallelType() == ParallelType::Vectorize) {
@@ -248,12 +247,7 @@ TensorDomain* IndexReferenceReplay::computeReplay() {
         loops_replayed_domain);
     return domain;
   } else {
-    auto domain = new TensorDomain(
-        // Order doesn't matter for root axes, only for current domain since we
-        // don't index to a physical buffer directly associated with the
-        // reference.
-        std::vector<IterDomain*>(root_axes.begin(), root_axes.end()),
-        loops_replayed_domain);
+    auto domain = new TensorDomain(root_axes, loops_replayed_domain);
     return domain;
   }
 }
@@ -288,11 +282,12 @@ IndexCompute getReferenceIndexing(
     const std::vector<kir::ForLoop*>& loop_structure,
     TensorDomain* reference_tensor,
     std::unordered_map<kir::IterDomain*, kir::Val*> index_map,
-    std::unordered_set<IterDomain*> preferred_paths) {
+    std::unordered_set<IterDomain*> preferred_paths,
+    std::unordered_map<kir::IterDomain*, kir::Val*> halo_extent_map) {
   auto gpu_lower = GpuLower::current();
 
   // I thought this might be necesasry, but turns out it's not. I think it's
-  // because of the root ordering above, however leaving it in incase we find
+  // because of the root ordering above, however leaving it in case we find
   // out it is necessary in some cases. At the time of commiting, cuda-memcheck
   // passed without this.
   //
@@ -335,7 +330,8 @@ IndexCompute getReferenceIndexing(
       {},
       std::unordered_set<kir::IterDomain*>(),
       reference_tensor->contiguity(),
-      kir_preferred_path);
+      kir_preferred_path,
+      halo_extent_map);
 
   compute.run();
 

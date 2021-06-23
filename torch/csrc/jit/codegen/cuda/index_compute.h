@@ -140,16 +140,6 @@ class IndexCompute : public BackwardVisitor {
           reference_halo_extent_map = {});
 
   virtual void run();
-
-  // Map producer contiguity information to consumer, if entries don't match
-  // mark as false
-  static std::vector<bool> contiguityPasC(
-      kir::TensorView* producer,
-      kir::TensorView* consumer);
-
-  static std::vector<bool> contiguityAnd(
-      const std::vector<bool>& contig1,
-      const std::vector<bool>& contig2);
 };
 
 //! Apply swizzle and update root indices accordingly
@@ -241,6 +231,32 @@ class Index {
       const kir::TensorView* consumer,
       const std::vector<kir::ForLoop*>& loops,
       const std::vector<bool>& root_contiguity,
+      bool unswitch = false);
+
+  //! Take a consumer tensorview and loop nest and generates predicates
+  //! associated with the concrete roots of the loop nest. Returns a list of
+  //! predicates, and a list of concrete roots they're associated with. It is
+  //! assumed that no predicate is required if index[i] is an index directly
+  //! from a for loop. This will not catch all cases if we actually have static
+  //! size information for example:
+  //!
+  //! TV[I].split(4)
+  //! would produce the code:
+  //! for(i : I/4)
+  //!   for(j : 4)
+  //!     if( i * 4 + j < TV.size(0))
+  //!       TV[i * 4 + j]...
+  //!
+  //! However if we had TV.size[0] = 16 at "compile time" then we wouldn't need
+  //! the predicate. This will be caught by canOmitPredicate in the predicate
+  //! lowering
+  // TODO: Replace pair of vectors with vector of
+  static std::pair<
+      std::vector<kir::Bool*>,
+      std::vector<std::unordered_set<IterDomain*>>>
+  getReferenceRootPredicates(
+      const kir::TensorView* kir_consumer_tv,
+      const std::vector<kir::ForLoop*>& loops,
       bool unswitch = false);
 };
 

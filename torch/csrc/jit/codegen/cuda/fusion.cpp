@@ -315,7 +315,7 @@ std::vector<Expr*> Fusion::exprs() {
   return ExprSort::getExprs(this);
 }
 
-std::unordered_set<Val*> Fusion::inputsOf(Val* val) {
+std::vector<Val*> Fusion::inputsOf(Val* val) {
   return InputsOf::output(this, val);
 }
 
@@ -501,7 +501,8 @@ std::vector<Val*> Fusion::usedMathVals() {
   // anything from inputs. See, for example, tv0 in the
   // FusionOuterSplit test.
   const auto inputs = InputsOf::outputs(this, outputs());
-  auto used_math_vals = DependencyCheck::getAllValsBetween(inputs, outputs());
+  auto used_math_vals = DependencyCheck::getAllValsBetween(
+      {inputs.begin(), inputs.end()}, outputs());
   // When an expre has multiple outputs and only some of them are
   // used, the rest aren't included in used_math_vals as they are not
   // used. However, we want them to be included as they must show up

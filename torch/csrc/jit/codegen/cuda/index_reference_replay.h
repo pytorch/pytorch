@@ -60,7 +60,8 @@ IndexCompute getReferenceIndexing(
     const std::vector<kir::ForLoop*>& loop_structure,
     TensorDomain* reference_domain,
     std::unordered_map<kir::IterDomain*, kir::Val*> index_map,
-    std::unordered_set<IterDomain*> preferred_path);
+    std::unordered_set<IterDomain*> preferred_path,
+    std::unordered_map<kir::IterDomain*, kir::Val*> halo_extent_map = {});
 
 // Short cut for global TVs. Index into the reference based on all loop indicies
 // in the loop structure.

@@ -711,20 +711,22 @@ std::vector<Expr*> ExprSort::getExprs(
 
 void InputsOf::handle(Val* v) {
   if (v->definition() == nullptr) {
-    inputs.emplace(v);
+    if (grabbed_inputs.emplace(v).second) {
+      ordered_inputs.push_back(v);
+    }
   }
 }
 
-std::unordered_set<Val*> InputsOf::output(Fusion* fusion, Val* output_) {
+std::vector<Val*> InputsOf::output(Fusion* fusion, Val* output_) {
   return outputs(fusion, {output_});
 }
 
-std::unordered_set<Val*> InputsOf::outputs(
+std::vector<Val*> InputsOf::outputs(
     Fusion* fusion,
     const std::vector<Val*>& outputs_) {
   InputsOf io;
   io.traverseFrom(fusion, outputs_, false);
-  return io.inputs;
+  return io.ordered_inputs;
 }
 
 } // namespace cuda

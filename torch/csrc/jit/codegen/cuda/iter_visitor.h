@@ -257,13 +257,14 @@ class ExprSort : public IterVisitor {
 
 class InputsOf : public IterVisitor {
  private:
-  std::unordered_set<Val*> inputs;
+  std::unordered_set<Val*> grabbed_inputs;
+  std::vector<Val*> ordered_inputs;
 
   void handle(Val* v) final;
 
  public:
-  static std::unordered_set<Val*> output(Fusion* fusion, Val* output_);
-  static std::unordered_set<Val*> outputs(
+  static std::vector<Val*> output(Fusion* fusion, Val* output_);
+  static std::vector<Val*> outputs(
       Fusion* fusion,
       const std::vector<Val*>& outputs_);
 };

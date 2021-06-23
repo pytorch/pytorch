@@ -48,7 +48,8 @@ kir::ForLoop* openForHelper(kir::ForLoop* scope, IterDomain* id) {
     // Use the extent that's extended by halo
     new_scope = ir_builder.create<kir::ForLoop>(
         kir_id,
-        ir_builder.create<kir::Int>(c10::nullopt),
+        id->isBroadcast() ? ir_builder.zeroVal()
+                          : ir_builder.create<kir::Int>(c10::nullopt),
         nullptr,
         extent_with_halo,
         nullptr,

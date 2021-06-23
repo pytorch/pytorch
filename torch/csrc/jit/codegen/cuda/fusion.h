@@ -164,7 +164,7 @@ class TORCH_CUDA_CU_API Fusion final {
   std::vector<Expr*> exprs();
 
   //! Return a vector of fusion inputs that feed this Val
-  std::unordered_set<Val*> inputsOf(Val* val);
+  std::vector<Val*> inputsOf(Val* val);
 
   //! Return the set of Vals registered with this fusion
   const std::unordered_set<Val*>& vals() const noexcept;

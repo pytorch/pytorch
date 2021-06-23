@@ -1245,14 +1245,14 @@ TEST(NVFuserTest, FusionOuterSplit_CUDA) {
   fusion.addOutput(tv2);
 
   //[I0, I1, I2]
-  tv2 = tv2->split(-1, 4, false);
+  tv2->split(-1, 4, false);
   //[I0, I1, I2o{4}, I2i]
-  tv2 = tv2->merge(0);
-  tv2 = tv2->merge(0);
+  tv2->merge(0);
+  tv2->merge(0);
   //[I0*I1*I2o{4}, I2i]
-  tv2 = tv2->split(0, 2);
+  tv2->split(0, 2);
   //[I0*I1*I2o{4}o, I0*I1*I2o{4}i{2}, I2i]
-  tv2 = tv2->reorder({{0, 1}, {1, 0}});
+  tv2->reorder({{0, 1}, {1, 0}});
   // I0*I1*I2o{4}i{2}, [I0*I1*I2o{4}o, I2i]
 
   tv0->computeAt(tv2, -1);
@@ -10616,21 +10616,32 @@ TEST(NVFuserTest, FusionSmemIndexing_CUDA) {
 
   // Make a 3D tile, mix of symbolic and constant, do in reverse order because
   // dims are inserted
+  // [M, rK, N]
   tv5->split(2, n_smem_tile);
+  // [M, rK, No, Ni{32}]
   tv5->split(1, symbolic_block_k_tile_dim);
+  // [M, rKo, rKi{i2}, No, Ni{32}]
   tv5->split(1, symbolic_split_k_tile_dim);
+  // [M, rKoo, rKoi{i1}, rKi{i2}, No, Ni{32}]
   tv5->split(0, symbolic_m_tile_dim);
+  // [Mo, Mi{i0}, rKoo, rKoi{i1}, rKi{i2}, No, Ni{32}]
 
   // Reorder so all outer tiles are in the leftmost 3 positions
+  // [Mo, Mi{i0}, rKoo, rKoi{i1}, rKi{i2},     No, Ni{32}]
+  // [Mo,     No, rKoo, rKoi{i1}, rKi{i2}, Mi{i0}, Ni{32}]
   tv5->reorder({{1, 5}, {5, 1}});
 
   // Factor out the outer reduction IterDomain, then run the inter-cta
   // reduction, and intra-cta reduction
+  // [Mo, No, rKoo,  Koi{i1},  Ki{i2}, Mi{i0}, Ni{32}]
+  // [Mo, No,       rKoi{i1}, rKi{i2}, Mi{i0}, Ni{32}]
   auto tv6 = tv5->rFactor({2});
 
   // Scope computations
   tv6->computeAt(tv5, 2);
 
+  // [Mo, No, rKoo, Koi{i1},  Ki{i2}, Mi{i0}, Ni{32}]
+  // [Mo, No, Ki{i2}, Mi{i0}, Ni{32}, rKoo, Koi{i1}]
   tv6->reorder({
       {2, -2},
       {3, -1},

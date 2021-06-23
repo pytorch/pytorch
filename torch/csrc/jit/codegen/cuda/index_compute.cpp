@@ -66,8 +66,9 @@ class ContigIDs : public OptInDispatch {
     // If either input is non-contiguous so is output.
     const auto inner = merge->inner();
     const auto outer = merge->outer();
-    if (!isContig(gpu_lower->lowerValue(inner)->as<kir::IterDomain>()) ||
-        !isContig(gpu_lower->lowerValue(outer)->as<kir::IterDomain>())) {
+
+    if ((!isContig(gpu_lower->lowerValue(inner)->as<kir::IterDomain>()) ||
+         !isContig(gpu_lower->lowerValue(outer)->as<kir::IterDomain>()))) {
       return;
     }
 
@@ -170,7 +171,9 @@ class ContigIDs : public OptInDispatch {
 
   // Check through thie history of ids whose inputs map to root_domain with
   // contiguity root_contiguity. Return unordered_set of all merges that are
-  // contiguous.
+  // contiguous. Ignore root order is primarily used for predicate generation.
+  // In this case we can linearize indexing of any ID that only consists of
+  // merge operations.
   ContigIDs(
       const std::vector<IterDomain*>& ids,
       const std::vector<IterDomain*>& root_domain,
@@ -196,8 +199,10 @@ class ContigIDs : public OptInDispatch {
         contig_ids.emplace(kir_root_domain_i);
         within_contig_ids[kir_root_domain_i] =
             std::unordered_set<kir::IterDomain*>();
+        is_contig_root[root_domain_[i]] = true;
+      } else {
+        is_contig_root[root_domain_[i]] = false;
       }
-      is_contig_root[root_domain_[i]] = root_contiguity_[i];
     }
 
     auto exprs = ExprSort::getExprs(ids[0]->fusion(), {ids.begin(), ids.end()});
@@ -421,11 +426,8 @@ void IndexCompute::handle(Split* split) {
   } else {
     index_map_[in_id] = ir_builder.addExpr(
         ir_builder.mulExpr(outer_ind, getExtent(inner_id)), inner_ind);
-    if (extent_map_.find(outer_id) != extent_map_.end() ||
-        extent_map_.find(inner_id) != extent_map_.end()) {
-      extent_map_[in_id] =
-          ir_builder.mulExpr(getExtent(outer_id), getExtent(inner_id));
-    }
+    extent_map_[in_id] =
+        ir_builder.mulExpr(getExtent(outer_id), getExtent(inner_id));
   }
 }
 
@@ -650,68 +652,6 @@ IndexCompute IndexCompute::updateIndexCompute(
   updated_index_compute.run();
 
   return updated_index_compute;
-}
-
-std::vector<bool> IndexCompute::contiguityAnd(
-    const std::vector<bool>& contig1,
-    const std::vector<bool>& contig2) {
-  TORCH_INTERNAL_ASSERT(
-      contig1.size() == contig2.size(),
-      "Called contiguityAnd with mismatched vectors.");
-
-  std::vector<bool> contig_result;
-  std::transform(
-      contig1.begin(),
-      contig1.end(),
-      contig2.begin(),
-      std::back_inserter(contig_result),
-      std::logical_and<>());
-  return contig_result;
-}
-
-// TODO: How does contiguity and rfactor interact?
-std::vector<bool> IndexCompute::contiguityPasC(
-    kir::TensorView* producer,
-    kir::TensorView* consumer) {
-  FUSER_PERF_SCOPE("contiguityPasC");
-
-  auto producer_tv = producer->fuserTv();
-  auto consumer_tv = consumer->fuserTv();
-
-  const std::vector<bool>& producer_contiguity =
-      producer_tv->domain()->contiguity();
-  std::vector<bool> as_consumer_contiguity(
-      consumer_tv->getRootDomain().size(), false);
-
-  auto pairwiseMap = PairwiseRootDomainMap(producer_tv, consumer_tv);
-  auto p2c_root_map = pairwiseMap.mapProducerToConsumer(
-      producer_tv->domain(), consumer_tv->domain());
-
-  for (size_t p_root_i = 0; p_root_i < producer_tv->getRootDomain().size();
-       p_root_i++) {
-    auto p_root_id = producer_tv->getRootDomain()[p_root_i];
-    auto c_root_it = p2c_root_map.find(p_root_id);
-    if (c_root_it == p2c_root_map.end()) {
-      continue;
-    }
-    auto c_root_id = c_root_it->second;
-    auto c_root_i = std::distance(
-        consumer_tv->getRootDomain().begin(),
-        std::find(
-            consumer_tv->getRootDomain().begin(),
-            consumer_tv->getRootDomain().end(),
-            c_root_id));
-
-    if (p_root_id->isReduction() ||
-        (c_root_id->isBroadcast() &&
-         p_root_id->getIterType() != c_root_id->getIterType())) {
-      continue;
-    } else {
-      as_consumer_contiguity[c_root_i] = producer_contiguity[p_root_i];
-    }
-  }
-
-  return as_consumer_contiguity;
 }
 
 namespace {
@@ -1822,7 +1762,7 @@ std::pair<std::vector<kir::Val*>, bool> Index::getConsumerRootPredIndices(
   kir::IrBuilder ir_builder(gpu_lower->kernel());
 
   // Get a reference tensor replayed as existing loop structure
-  auto reference = IndexReferenceReplay::getReference(loops);
+  ReferenceTensor reference = IndexReferenceReplay::getReference(loops);
   auto reference_domain = reference.domain;
   auto reference_id_map = reference.concrete_to_id;
 
@@ -1938,6 +1878,274 @@ std::pair<std::vector<kir::Val*>, bool> Index::getConsumerRootPredIndices(
   }
 
   return {root_inds, buffer_init};
+}
+
+namespace {
+struct PredicateContigInfo {
+ public:
+  // Iteration domain that is only comprised of merge transformations
+  IterDomain* contig_id;
+  // The set of root iteration domains that make up the contig_id
+  std::unordered_set<IterDomain*> root_ids;
+};
+
+// Find iteration domains in the history of reference comprised only of
+// merge operations. Only return iteration domains that are subsequently fed
+// into a split, or are in the provided domain. In other words, we don't want to
+// return every IterDomain that's contiguous, just the one closest to the
+// leaves. Predicates are not associated with physical memory so we can treat
+// all of them as contiguous merges.
+std::vector<PredicateContigInfo> getPredicateContigIds(
+    std::vector<IterDomain*> reference_domain) {
+  auto root_vals = IterVisitor::getInputsTo(
+      {reference_domain.begin(), reference_domain.end()});
+  auto root_ids = ir_utils::filterByType<IterDomain>(root_vals);
+
+  // Mark all roots as being originally "contiguous"
+  std::vector<IterDomain*> contiguous_ids(root_ids.begin(), root_ids.end());
+
+  // Dereference root_vals.begin below, so make sure there's at least one entry
+  if (root_vals.empty()) {
+    return std::vector<PredicateContigInfo>();
+  }
+
+  // Run through iteration domain history
+  auto exprs = ExprSort::getExprs(
+      (*root_vals.begin())->fusion(),
+      {reference_domain.begin(), reference_domain.end()});
+
+  for (auto expr : exprs) {
+    // If not a merge, output is not contiguous
+    if (expr->isA<Merge>()) {
+      auto merge = expr->as<Merge>();
+      auto inner_contig_it = std::find(
+          contiguous_ids.begin(), contiguous_ids.end(), merge->inner());
+      auto outer_contig_it = std::find(
+          contiguous_ids.begin(), contiguous_ids.end(), merge->outer());
+
+      if (inner_contig_it != contiguous_ids.end() &&
+          outer_contig_it != contiguous_ids.end()) {
+        // If inner and outer are contiguous, out must be contiguous. Remove
+        // inner and outer, and add out.
+        contiguous_ids.erase(outer_contig_it);
+        contiguous_ids.erase(std::find(
+            contiguous_ids.begin(), contiguous_ids.end(), merge->inner()));
+        contiguous_ids.emplace_back(merge->out());
+      }
+    }
+  }
+
+  std::vector<PredicateContigInfo> contig_id_infos;
+
+  // Create entries and return them
+  for (auto contig_id : contiguous_ids) {
+    auto contig_root_vals = IterVisitor::getInputsTo({contig_id});
+    auto contig_root_ids = ir_utils::filterByType<IterDomain>(contig_root_vals);
+    PredicateContigInfo contig_id_info;
+    contig_id_info.contig_id = contig_id;
+    contig_id_info.root_ids = std::unordered_set<IterDomain*>(
+        contig_root_ids.begin(), contig_root_ids.end());
+    contig_id_infos.push_back(contig_id_info);
+  }
+  return contig_id_infos;
+}
+
+} // namespace
+
+// Returns predicates and the concrete (by loop map) root domains they cover
+std::pair<std::vector<kir::Bool*>, std::vector<std::unordered_set<IterDomain*>>>
+Index::getReferenceRootPredicates(
+    const kir::TensorView* kir_consumer_tv,
+    const std::vector<kir::ForLoop*>& loops,
+    bool unswitch) {
+  FUSER_PERF_SCOPE("Index::getReferenceRootPredicates");
+
+  const auto gpu_lower = GpuLower::current();
+  kir::IrBuilder ir_builder(gpu_lower->kernel());
+
+  // Get a reference tensor replayed as existing loop structure
+  ReferenceTensor reference = IndexReferenceReplay::getReference(loops);
+  auto reference_domain = reference.domain;
+  auto reference_id_map = reference.concrete_to_id;
+
+  std::unordered_map<kir::ForLoop*, kir::Val*> loop_to_ind_map;
+
+  std::transform(
+      loops.begin(),
+      loops.end(),
+      std::inserter(loop_to_ind_map, loop_to_ind_map.begin()),
+      [&ir_builder](kir::ForLoop* fl) {
+        return std::make_pair(fl, fl->index());
+      });
+
+  // If unswitch don't directly use indices from for loop, use for loop extent
+  // minus 1
+  if (unswitch) {
+    bool within_unswitch = false;
+    const auto one = ir_builder.create<kir::Int>(1);
+    for (auto loop : loops) {
+      if (loop->iter_domain()->parallelType() == ParallelType::Unroll ||
+          loop->iter_domain()->parallelType() == ParallelType::Unswitch ||
+          loop->iter_domain()->parallelType() == ParallelType::Vectorize) {
+        within_unswitch = true;
+      }
+
+      if (within_unswitch) {
+        if (loop->iter_domain()->isBroadcast()) {
+          // Start with a thread binding but still on a broadcast can send
+          // indices through to predicates even if they're not needed below.
+          // Just don't bind anything to the broadcast dim.
+          continue;
+        } else if (loop->iter_domain()->isThread()) {
+          loop_to_ind_map[loop] = loop->start();
+        } else {
+          loop_to_ind_map[loop] = ir_builder.subExpr(loop->stop(), one);
+        }
+      }
+    }
+  }
+
+  std::unordered_map<kir::IterDomain*, kir::Val*> ref_id_to_ind_map;
+  // Due to rfactor/initialization reference_domain may be bigger than loop nest
+  // structure
+  TORCH_INTERNAL_ASSERT(loops.size() <= reference_domain->nDims());
+  for (size_t loop_i = 0; loop_i < loops.size(); loop_i++) {
+    auto ref_axis = gpu_lower->lowerValue(reference_domain->axis(loop_i))
+                        ->as<kir::IterDomain>();
+    ref_id_to_ind_map[ref_axis] = loop_to_ind_map[loops[loop_i]];
+  }
+
+  auto consumer_tv = kir_consumer_tv->fuserTv();
+
+  // Map reference tensor to consumer
+  std::unordered_map<IterDomain*, IterDomain*> root_ref_to_consumer;
+  for (auto c_root : consumer_tv->getMaybeRFactorDomain()) {
+    auto concrete_id = gpu_lower->caIndexMap().getConcreteMappedID(c_root);
+    auto ref_id_it = reference_id_map.find(concrete_id);
+    if (ref_id_it != reference_id_map.end()) {
+      root_ref_to_consumer[ref_id_it->second] = c_root;
+    }
+  }
+
+  BestEffortReplay replay_consumer_as_ref(
+      consumer_tv->domain()->domain(),
+      reference_domain->domain(),
+      root_ref_to_consumer);
+
+  const auto& ref_2_consumer = replay_consumer_as_ref.getReplay();
+
+  // Halo information is not currently used as lower_shift will take care of the
+  // predicate generation and is still using the older function:
+  // getConsumerRootPredIndices
+
+  // Generate halo information for reference.
+  updateHaloInfoForReference(reference, consumer_tv);
+
+  std::unordered_map<kir::IterDomain*, kir::Val*> reference_halo_extent_map;
+
+  const auto& halo_info = gpu_lower->haloInfo();
+
+  // Generate map from reference iter domains to halo extents
+  for (auto entry : ref_2_consumer) {
+    auto ref_id = entry.first;
+    auto extent = halo_info.getExtent(ref_id);
+    if (extent != nullptr) {
+      reference_halo_extent_map[gpu_lower->lowerValue(ref_id)
+                                    ->as<kir::IterDomain>()] =
+          gpu_lower->lowerValue(extent);
+    }
+  }
+
+  // Index into the reference tensor
+  auto ref_indexing = getReferenceIndexing(
+      loops,
+      reference_domain,
+      ref_id_to_ind_map,
+      {},
+      reference_halo_extent_map);
+
+  // If we are initializing a reduction buffer and the tensor has a
+  // rfactor root, the predicate should be based on the rfactor root.
+  const auto root_domain = reference_domain->getRootDomain();
+
+  // Get the contiguous ids we need to generate predicates for
+  auto contig_id_infos = getPredicateContigIds(reference_domain->domain());
+
+  // Roots in contiguous processing is based on reference roots, want to convert
+  // these to concrete roots, flip reference's concrete_to_id map as reference
+  // ids are not part of compute at maps.
+  decltype(reference_id_map) ref_id_to_concrete;
+  std::transform(
+      reference_id_map.begin(),
+      reference_id_map.end(),
+      std::inserter(ref_id_to_concrete, ref_id_to_concrete.begin()),
+      [](auto entry) { return std::make_pair(entry.second, entry.first); });
+
+  // Track which roots have been handled by the generated predicates
+  std::vector<std::unordered_set<IterDomain*>> handeled_roots;
+
+  std::vector<kir::Bool*> predicates;
+
+  for (auto contig_id_entry : contig_id_infos) {
+    auto contig_id = contig_id_entry.contig_id;
+    // No predicates needed for braodcasted indices.
+    if (contig_id->isBroadcast() ||
+        gpu_lower->trivialReductionInfo().isDerived(contig_id)) {
+      continue;
+    }
+
+    auto root_ids = contig_id_entry.root_ids;
+    auto kir_contig_id =
+        gpu_lower->lowerValue(contig_id)->as<kir::IterDomain>();
+
+    const auto it = ref_indexing.indexMap().find(kir_contig_id);
+
+    // First condition below is due to broadcasts in consumers of consumer that
+    // are not in consumer there can be unresolved indexing in the reference
+    // tensor. This can happen when we have something like: TV3[i1o*i2, i1i] and
+    // TV1[i2] where tv3 and tv1 share their outer dimension. i1 will be part of
+    // reference tensors root domain, but when indexing into TV1 there aren't
+    // enough indices to resolve it.
+    //
+    // Second condition is simply to avoid predication on broadcasting axes as
+    // it's not required.
+    if (it == ref_indexing.indexMap().end() || it->second->isZeroInt()) {
+      continue;
+    }
+
+    // Use the iteration domains extent unless there's a halo extent
+    auto extent = kir_contig_id->extent();
+
+    auto halo_extent_it = reference_halo_extent_map.find(kir_contig_id);
+    if (halo_extent_it != reference_halo_extent_map.end()) {
+      extent = halo_extent_it->second;
+    }
+
+    // If the index definition is "simple" and the extent is "simple" then our
+    // for loop goes exactly across the iteration domain extent so no predicate
+    // needed.
+    if (it->second->definition() == nullptr &&
+        extent->definition() == nullptr) {
+      continue;
+    }
+
+    predicates.push_back(
+        ir_builder.ltExpr(it->second, extent)->as<kir::Bool>());
+
+    // Transform roots from reference to concrete roots (based on loop compute
+    // at map)
+    std::unordered_set<IterDomain*> concrete_root_ids;
+    std::transform(
+        contig_id_entry.root_ids.begin(),
+        contig_id_entry.root_ids.end(),
+        std::inserter(concrete_root_ids, concrete_root_ids.begin()),
+        [&ref_id_to_concrete](IterDomain* root_id) {
+          return ref_id_to_concrete.at(root_id);
+        });
+    handeled_roots.push_back(concrete_root_ids);
+  }
+
+  return {predicates, handeled_roots};
 }
 
 } // namespace cuda

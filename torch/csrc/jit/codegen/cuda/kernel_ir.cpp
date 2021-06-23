@@ -494,8 +494,10 @@ ForLoop::ForLoop(Passkey passkey, IterDomain* iter_domain)
     : ForLoop(
           passkey,
           iter_domain,
-          IrBuilder(GpuLower::current()->kernel())
-              .create<kir::Int>(c10::nullopt),
+          iter_domain->isBroadcast()
+              ? IrBuilder(GpuLower::current()->kernel()).zeroVal()
+              : IrBuilder(GpuLower::current()->kernel())
+                    .create<kir::Int>(c10::nullopt),
           nullptr,
           nullptr,
           nullptr,
