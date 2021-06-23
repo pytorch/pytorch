@@ -75,6 +75,7 @@ void set_num_threads(int nthreads) {
 // consistent size of parallel region in different threads
 int get_num_threads() {
 #ifdef _OPENMP
+  at::internal::lazy_init_num_threads();
   return omp_get_max_threads();
 #else
   return 1;
