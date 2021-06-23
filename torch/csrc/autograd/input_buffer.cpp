@@ -1,5 +1,9 @@
 #include <torch/csrc/autograd/input_buffer.h>
 
+#include <ATen/BatchedTensorImpl.h>
+#include <ATen/SparseCsrTensorUtils.h>
+#include <ATen/SparseTensorUtils.h>
+
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/StreamGuard.h>
 #include <c10/core/Event.h>
@@ -10,6 +14,49 @@
 #include <vector>
 
 namespace torch { namespace autograd {
+
+namespace {
+  // look what you made me do >.<
+  // Divergent paths for per-Impl stream recording that leak implementation
+  // details of the impls should not be needed here.
+  // See https://github.com/pytorch/pytorch/issues/60306
+  // TODO: clean this up when https://github.com/pytorch/pytorch/issues/60306 is improved
+  void record_stream_any_impl(Variable& var, c10::Stream& stream) {
+    const auto guard = c10::impl::VirtualGuardImpl(c10::DeviceType::CUDA);
+
+    if (C10_UNLIKELY(at::isBatchedTensor(var))) {
+      auto* impl = at::maybeGetBatchedImpl(var);
+      if (impl) {
+        guard.recordDataPtrOnStream(impl->value().storage().data_ptr(), stream);
+      } else {
+        TORCH_INTERNAL_ASSERT(false, "Expected batched tensor");
+      }
+    } else {
+      switch (var.layout()) {
+        case c10::kSparseCsr:
+          {
+            auto* impl = at::sparse_csr::get_sparse_csr_impl(var);
+            guard.recordDataPtrOnStream(impl->values().storage().data_ptr(), stream);
+            guard.recordDataPtrOnStream(impl->crow_indices().storage().data_ptr(), stream);
+            guard.recordDataPtrOnStream(impl->col_indices().storage().data_ptr(), stream);
+            break;
+          }
+        case c10::kSparse:
+          {
+            auto* impl = at::sparse::get_sparse_impl(var);
+            guard.recordDataPtrOnStream(impl->values().storage().data_ptr(), stream);
+            guard.recordDataPtrOnStream(impl->indices().storage().data_ptr(), stream);
+            break;
+          }
+        case c10::kStrided:
+          guard.recordDataPtrOnStream(var.storage().data_ptr(), stream);
+          break;
+        default:
+          TORCH_INTERNAL_ASSERT(false, "Unknown layout in record_stream_any_impl");
+      }
+    }
+  }
+}  // anonymous namespace
 
   static void accumulate(std::vector<Variable>& buffer,
                          const size_t pos,
@@ -69,6 +116,7 @@ namespace torch { namespace autograd {
                         && device_of(var) == opt_producer_stream->device();
     const auto on_consumer = opt_consumer_stream
                         && device_of(var) == opt_consumer_stream->device();
+
     if (on_producer && on_consumer) {
       // (2a)
       opt_accumulate_stream = opt_consumer_stream;
@@ -77,6 +125,7 @@ namespace torch { namespace autograd {
         auto event = c10::Event{c10::DeviceType::CUDA};
         event.record(*opt_producer_stream);
         opt_accumulate_stream->wait(event);
+        record_stream_any_impl(var, *opt_accumulate_stream);
       }
     } else {
       c10::optional<c10::Stream> opt_sync_stream = c10::nullopt;
@@ -99,6 +148,8 @@ namespace torch { namespace autograd {
         auto event = c10::Event{c10::DeviceType::CUDA};
         event.record(*opt_sync_stream);
         opt_accumulate_stream->wait(event);
+        const auto guard = c10::impl::VirtualGuardImpl(c10::DeviceType::CUDA);
+        record_stream_any_impl(var, *opt_accumulate_stream);
       }
     }
   }
