@@ -514,7 +514,7 @@ operations separately is slower, and numerically unstable. This function
 uses an alternative formulation to compute the output and gradient correctly.
 
 .. math::
-    \text{log_softmax}(x_{i}) = \log\left(\frac{\exp(x_i) }{ \sum_j \exp(x_j)} \right)
+    \text{log\_softmax}(x_{i}) = \log\left(\frac{\exp(x_i) }{ \sum_j \exp(x_j)} \right)
 """ + r"""
 
 Args:
