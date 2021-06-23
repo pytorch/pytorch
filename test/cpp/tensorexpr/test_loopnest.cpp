@@ -662,6 +662,57 @@ TEST(LoopNest, ExprSplitWithMaskRepeatedNoMask) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(LoopNest, getLoopAt) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //  for (int i = 0; i < 100; i++) {
+  //    for (int j = 0; j < 100; j++) {
+  //      A[i, j] = sin(i * j);
+  //      for (int k1 = 0; k1 < 200; k1++) {
+  //        B[i, j, k1] = (A[i, j]) / (k1 + 1);
+  //      }
+  //      for (int k2 = 0; k2 < 300; k2++) {
+  //        C[i, j, k2] = (A[i, j]) * (k2 + 1);
+  //      }
+  //    }
+  //  }
+  Buf* A = new Buf("A", {new IntImm(100), new IntImm(100)}, kInt);
+  Buf* B =
+      new Buf("B", {new IntImm(100), new IntImm(100), new IntImm(200)}, kInt);
+  Buf* C =
+      new Buf("C", {new IntImm(100), new IntImm(100), new IntImm(300)}, kInt);
+  BufHandle a_buf(A);
+  BufHandle b_buf(B);
+  BufHandle c_buf(C);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle k1("k1", kInt);
+  VarHandle k2("k2", kInt);
+  auto store1 = Store::make(a_buf, {i, j}, sin(i * j));
+  auto store2 = Store::make(
+      b_buf, {i, j, k1}, Div::make(Load::make(a_buf, {i, j}), (k1 + 1)));
+  auto store3 = Store::make(
+      c_buf, {i, j, k2}, Mul::make(Load::make(a_buf, {i, j}), (k2 + 1)));
+  auto for_k2 = For::make(k2, 0, 300, Block::make({store3}));
+  auto for_k1 = For::make(k1, 0, 200, Block::make({store2}));
+  auto for_j = For::make(j, 0, 100, Block::make({store1, for_k1, for_k2}));
+  auto for_i = For::make(i, 0, 100, for_j);
+  LoopNest l(Block::make({for_i}), {B, C});
+  auto ret_k2 = l.getLoopAt(for_i, {0, 2});
+  TORCH_CHECK(ret_k2 == for_k2);
+
+  std::ostringstream oss;
+  oss << *ret_k2;
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int k2
+# CHECK-NEXT: C[i, j, k2] =
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, TileSimple) {
   KernelScope kernel_scope;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
