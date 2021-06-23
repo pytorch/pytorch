@@ -958,6 +958,8 @@ class AdagradOptimizer(Optimizer):
                     ), "weight decay is not implemented for {} yet".format(op)
                     input_args += [mask_blob, mask_changed_blob]
                 else:
+                    if self.counter_halflife > 0:
+                        input_args += [update_counter]
                     op = "RowWiseSparseAdagrad"
             else:
                 if self.use_mask is True:
@@ -974,13 +976,22 @@ class AdagradOptimizer(Optimizer):
                 input_args += [lr_iteration, last_mask_updated_iter]
                 output_args += [mask_blob, last_mask_updated_iter]
 
-            if weight_decay > 0:
+            if weight_decay > 0 and self.counter_halflife == -1:
                 net.__getattr__(op)(
                     input_args,
                     output_args,
                     epsilon=self.epsilon,
                     weight_decay=weight_decay,
                     engine=self.engine,
+                )
+            elif weight_decay > 0 and self.counter_halflife != -1:
+                net.__getattr__(op)(
+                    input_args,
+                    output_args,
+                    epsilon=self.epsilon,
+                    weight_decay=weight_decay,
+                    engine=self.engine,
+                    counter_halflife=self.counter_halflife,
                 )
             else:
                 net.__getattr__(op)(
