@@ -291,7 +291,7 @@ def match_differentiability_info(
 
                 required_primals = fw_info.required_inputs_primal
                 if re.search(IDENT_REGEX.format("self_p"), formula):
-                    required_primals = required_primals + ("self",)
+                    required_primals = required_primals + ("self",) if required_primals else ("self",)
 
                 if not is_exact_match:
                     # Make sure that the forward grad is modified inplace when the original formula

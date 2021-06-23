@@ -588,7 +588,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
             body.append(f'check_no_requires_grad({name}, "{name}");')
         return body
 
-    def emit_orignal_self_definition():
+    def emit_orignal_self_definition() -> List[str]:
         body: List[str] = []
         if inplace:
             body.append('c10::optional<at::Tensor> original_self;')
@@ -600,8 +600,8 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
 
             if all_forward_grad_cond:
                 body.append(f'if ({" || ".join(all_forward_grad_cond)}) {{')
-                body.append(f'  original_self = self.clone();')
-                body.append(f'}}')
+                body.append('  original_self = self.clone();')
+                body.append('}')
 
         return body
 
