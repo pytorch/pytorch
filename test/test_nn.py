@@ -7495,7 +7495,7 @@ class TestNN(NNTestCase):
             weight = all_vars[4]
             weight_data = weight.data.clone()
             with torch.no_grad():
-                weight.copy_(weight_data)
+                weight.set_(weight_data)
 
             for _ in range(2):
                 with warnings.catch_warnings(record=True) as w:
