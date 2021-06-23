@@ -134,13 +134,13 @@ void CUDAGraph::capture_end() {
   c10::cuda::CUDACachingAllocator::notifyCaptureEnd(capture_dev_, id_);
 
   AT_CUDA_CHECK(cudaStreamEndCapture(capture_stream_, &graph_));
-  TORCH_CHECK(graph_ != NULL, "Invalid capture.");
+  TORCH_CHECK(graph_ != nullptr, "Invalid capture.");
   has_graph_ = true;
 
-  // Trailing NULL, NULL, 0 arguments were recommended by Cuda driver people,
+  // Trailing nullptr, nullptr, 0 arguments were recommended by Cuda driver people,
   // who prefer not to report error message through these arguments moving forward
   // (they prefer return value, or errors on api calls internal to the capture)
-  AT_CUDA_CHECK(cudaGraphInstantiate(&graph_exec_, graph_, NULL, NULL, 0));
+  AT_CUDA_CHECK(cudaGraphInstantiate(&graph_exec_, graph_, nullptr, nullptr, 0));
   has_graph_exec_ = true;
 
   auto* gen = get_generator_or_default<CUDAGeneratorImpl>(

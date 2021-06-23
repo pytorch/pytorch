@@ -126,7 +126,7 @@ BenchmarkCache<cudnnConvolutionBwdFilterAlgoPerf_t> bwd_filter_algos;
 // TODO: Stop manually allocating CUDA memory; allocate an ATen byte
 // tensor instead.
 struct Workspace {
-  Workspace(size_t size) : size(size), data(NULL) {
+  Workspace(size_t size) : size(size), data(nullptr) {
     // Sometimes cuDNN returns a workspace size > 2^63, this could makes the allocation of
     // workspace fail with some 64bit indexing error instead of an OOM error. In such case,
     // we manually fail with OOM.

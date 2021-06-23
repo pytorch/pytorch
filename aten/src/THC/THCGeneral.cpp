@@ -199,7 +199,7 @@ void __THCublasCheck(cublasStatus_t status, const char *file, const int line)
 {
   if(status != CUBLAS_STATUS_SUCCESS)
   {
-    const char* errmsg = NULL;
+    const char* errmsg = nullptr;
 
     switch(status)
     {
@@ -246,7 +246,7 @@ void __THCusparseCheck(cusparseStatus_t status, const char *file, const int line
 {
   if(status != CUSPARSE_STATUS_SUCCESS)
   {
-    const char* errmsg = NULL;
+    const char* errmsg = nullptr;
 
     switch(status)
     {

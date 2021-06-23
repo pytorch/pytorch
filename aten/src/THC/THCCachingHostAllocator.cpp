@@ -21,7 +21,7 @@ struct BlockSize
   size_t  size; // allocation size
   void*   ptr;  // host memory pointer
 
-  BlockSize(size_t size, void* ptr=NULL) : size(size), ptr(ptr) {}
+  BlockSize(size_t size, void* ptr = nullptr) : size(size), ptr(ptr) {}
 };
 
 struct Block : public BlockSize
@@ -95,7 +95,7 @@ struct HostAllocator
     }
 
     // note that cudaHostAlloc may not touch pointer if size is 0
-    *ptr = 0;
+    *ptr = nullptr;
 
     // allocate a new block if no cached allocation is found
     err = cudaHostAlloc(ptr, size, cudaHostAllocDefault);

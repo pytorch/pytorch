@@ -111,7 +111,8 @@ void THCTensor_resizeAs(THCState *state, THCTensor *self, THCTensor *src) {
   }
 
   if(!isSame)
-    THCTensor_resizeNd(state, self, src->dim(), THTensor_getSizePtr(src), NULL);
+    THCTensor_resizeNd(
+        state, self, src->dim(), THTensor_getSizePtr(src), nullptr);
 }
 
 void THCTensor_resizeNd(THCState *state, THCTensor *self, int nDimension, const int64_t *size, const int64_t *stride)
