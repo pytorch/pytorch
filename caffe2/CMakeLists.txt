@@ -1191,7 +1191,7 @@ endfunction()
 
 include_torch_lib_dir(torch_cpu)
 if(USE_ROCM)
-  include_torch_lib_dir(torch_rocm)
+  include_torch_lib_dir(torch_hip)
 elseif(USE_CUDA)
   if(BUILD_SPLIT_CUDA)
     include_torch_lib_dir(torch_cuda_cpp)
