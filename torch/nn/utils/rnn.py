@@ -320,8 +320,8 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0, total_le
     return padded_output, lengths
 
 
-def pad_sequence(sequences, batch_first=False, padding_value=0.0):
-    # type: (List[Tensor], bool, float) -> Tensor
+def pad_sequence(sequences, batch_first=False, padding_value=0.0, pad_from_front=False):
+    # type: (List[Tensor], bool, float, bool) -> Tensor
     r"""Pad a list of variable length Tensors with ``padding_value``
 
     ``pad_sequence`` stacks a list of Tensors along a new dimension,
@@ -352,6 +352,8 @@ def pad_sequence(sequences, batch_first=False, padding_value=0.0):
         batch_first (bool, optional): output will be in ``B x T x *`` if True, or in
             ``T x B x *`` otherwise
         padding_value (float, optional): value for padded elements. Default: 0.
+        pad_from_front (bool, optional): if True, padding will be applied before the
+            input tensors. Default: False.
 
     Returns:
         Tensor of size ``T x B x *`` if :attr:`batch_first` is ``False``.
@@ -360,7 +362,7 @@ def pad_sequence(sequences, batch_first=False, padding_value=0.0):
 
     # assuming trailing dimensions and type of all the Tensors
     # in sequences are same and fetching those from sequences[0]
-    return torch._C._nn.pad_sequence(sequences, batch_first, padding_value)
+    return torch._C._nn.pad_sequence(sequences, batch_first, padding_value, pad_from_front)
 
 
 def pack_sequence(sequences, enforce_sorted=True):

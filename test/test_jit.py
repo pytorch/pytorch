@@ -9576,9 +9576,9 @@ dedent """
     def test_script_pad_sequence_pack_sequence(self):
         from torch.nn.utils.rnn import pad_sequence, pack_sequence, pad_packed_sequence
 
-        def pad_sequence_func(tensor_list, batch_first=False, padding_value=0.0):
-            # type: (List[Tensor], bool, float) -> Tensor
-            return pad_sequence(tensor_list, batch_first, padding_value)
+        def pad_sequence_func(tensor_list, batch_first=False, padding_value=0.0, pad_from_front=False):
+            # type: (List[Tensor], bool, float, bool) -> Tensor
+            return pad_sequence(tensor_list, batch_first, padding_value, pad_from_front)
 
         def pack_sequence_func(tensor_list, enforce_sorted=True):
             # type: (List[Tensor], bool) -> Tensor
@@ -9596,7 +9596,21 @@ dedent """
             self.checkScript(pad_sequence_func,
                              ([ones3, ones4, ones5], True))
             self.checkScript(pad_sequence_func,
-                             ([ones3, ones4, ones5], True, 2.5))
+                             ([ones3, ones4, ones5], False, 0.0, True))
+            self.checkScript(pad_sequence_func,
+                             ([ones3, ones4, ones5], False, 0.0, True))
+            self.checkScript(pad_sequence_func,
+                             ([ones3, ones4, ones5], True, 0.0, True))
+            self.checkScript(pad_sequence_func,
+                             ([ones3, ones4, ones5], True, 0.0, True))
+            self.checkScript(pad_sequence_func,
+                             ([ones3, ones4, ones5], False, 2.5, True))
+            self.checkScript(pad_sequence_func,
+                             ([ones3, ones4, ones5], False, 2.5, True))
+            self.checkScript(pad_sequence_func,
+                             ([ones3, ones4, ones5], True, 2.5, True))
+            self.checkScript(pad_sequence_func,
+                             ([ones3, ones4, ones5], True, 2.5, True))
             self.checkScript(pack_sequence_func,
                              ([tensor1, tensor2, tensor3],))
             self.checkScript(pack_sequence_func,

@@ -184,7 +184,7 @@ std::tuple<Tensor, Tensor> _pad_packed_sequence(const Tensor& data, const Tensor
   return std::make_tuple(output, lengths_t);
 }
 
-Tensor pad_sequence(TensorList sequences, bool batch_first, double padding_value) {
+Tensor pad_sequence(TensorList sequences, bool batch_first, double padding_value, bool pad_from_front) {
   const int64_t sequences_size = sequences.size();
   TORCH_CHECK(sequences_size > 0, "received an empty list of sequences");
   IntArrayRef max_size = sequences[0].sizes();
@@ -209,11 +209,12 @@ Tensor pad_sequence(TensorList sequences, bool batch_first, double padding_value
   for (int64_t i = 0; i < sequences_size; i++) {
     const Tensor currseq = sequences[i];
     const int64_t length_i = currseq.size(0);
+    const int64_t start = pad_from_front ? max_len - length_i : 0;
     // use index notation to prevent duplicate references to the tensor
     if (batch_first) {
-      out.select(0, i).narrow(0, 0, length_i).copy_(currseq);
+      out.select(0, i).narrow(0, start, length_i).copy_(currseq);
     } else {
-      out.narrow(0, 0, length_i).select(1, i).copy_(currseq);
+      out.narrow(0, start, length_i).select(1, i).copy_(currseq);
     }
   }
   return out;

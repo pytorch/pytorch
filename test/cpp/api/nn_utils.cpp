@@ -8,6 +8,7 @@
 #include <random>
 #include <string>
 #include <sstream>
+#include <iostream>
 
 using namespace torch::nn;
 
@@ -760,6 +761,15 @@ TEST_F(NNUtilsTest, PadSequence) {
   padded = rnn_utils::pad_sequence({b, a, c});
   ASSERT_TRUE(padded.allclose(expected.transpose(0, 1)));
 
+  // pad_from_front = true, batch_first = true
+  expected = torch::tensor({{0, 4, 5}, {1, 2, 3}, {0, 0, 6}});
+  padded = rnn_utils::pad_sequence({b, a, c}, true, 0, true);
+  ASSERT_TRUE(padded.allclose(expected));
+
+  // pad_from_front = true, batch_first = false
+  padded = rnn_utils::pad_sequence({b, a, c}, false, 0, true);
+  ASSERT_TRUE(padded.allclose(expected.transpose(0, 1)));
+
   // pad with non-zero value
   expected = torch::tensor({{4, 5, 1}, {1, 2, 3}, {6, 1, 1}});
   padded = rnn_utils::pad_sequence({b, a, c}, true, 1);
@@ -802,5 +812,20 @@ TEST_F(NNUtilsTest, PadSequence) {
     // batch first = false
     padded = rnn_utils::pad_sequence(sequences);
     ASSERT_TRUE(padded.allclose(expected.transpose(0, 1)));
-  }
+
+    // reset expected_tensors for pad_from_front
+    expected_tensors.clear();
+    for (const torch::Tensor& seq : sequences) {
+      // NOLINTNEXTLINE(performance-inefficient-vector-operation)
+      expected_tensors.emplace_back(torch::flip(pad(torch::flip(seq, {0}), maxlen * maxlen), {0}));
+    }
+    expected = torch::stack(expected_tensors);
+    // pad_from_front = true, batch_first = true
+    padded = rnn_utils::pad_sequence(sequences, true, 0, true);
+    ASSERT_TRUE(padded.allclose(expected));
+
+    // pad_from_front = true, batch_first = false
+    padded = rnn_utils::pad_sequence(sequences, false, 0, true);
+    ASSERT_TRUE(padded.allclose(expected.transpose(0, 1)));
+ }
 }

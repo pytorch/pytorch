@@ -10353,7 +10353,7 @@
   dispatch:
     CPU, CUDA: _segment_reduce_backward_kernel
 
-- func: pad_sequence(Tensor[] sequences, bool batch_first=False, float padding_value=0.0) -> Tensor
+- func: pad_sequence(Tensor[] sequences, bool batch_first=False, float padding_value=0.0, bool pad_from_front=False) -> Tensor
   python_module: nn
   variants: function
 

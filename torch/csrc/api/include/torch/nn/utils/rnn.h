@@ -272,6 +272,8 @@ inline std::tuple<Tensor, Tensor> pad_packed_sequence(
 ///     batch_first (bool, optional): output will be in ``B x T x *`` if true, or in
 ///         ``T x B x *`` otherwise
 ///     padding_value (double, optional): value for padded elements. Default: 0.
+///     pad_from_front (bool, optional): if true, padding will be applied before the
+///         input tensors. Default: false.
 ///
 /// Returns:
 ///     Tensor of size ``T x B x *`` if `batch_first` is ``false``.
@@ -279,8 +281,9 @@ inline std::tuple<Tensor, Tensor> pad_packed_sequence(
 inline Tensor pad_sequence(
     ArrayRef<Tensor> sequences,
     bool batch_first = false,
-    double padding_value = 0) {
-  return at::pad_sequence(sequences, batch_first, padding_value);
+    double padding_value = 0,
+    bool pad_from_front = false) {
+  return at::pad_sequence(sequences, batch_first, padding_value, pad_from_front);
 }
 
 /// Packs a list of variable length Tensors
