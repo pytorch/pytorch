@@ -1486,9 +1486,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         results = _extract_weights_impl(
             'a', m1, 'b', m2,
             base_name_to_sets_of_related_ops=base_name_to_sets_of_related_ops)
-        self.assertTrue(len(results) == 2)
-        # TODO(future PR): don't store empty dictionaries for nodes
-        #   without weights.
+        self.assertTrue(len(results) == 0)
 
         # test unshadowed activations
 
@@ -1529,7 +1527,11 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
 
     @skipIfNoFBGEMM
     def test_layer_names(self):
-        m = nn.Sequential(nn.Conv2d(1, 1, 1), nn.Conv2d(1, 1, 1)).eval()
+        m = nn.Sequential(
+            nn.Conv2d(1, 1, 1),
+            nn.Conv2d(1, 1, 1),
+            nn.Sigmoid(),
+        ).eval()
         qconfig_dict = {'': torch.quantization.default_qconfig}
         mp = torch.quantization.quantize_fx.prepare_fx(m, qconfig_dict)
         mq = torch.quantization.quantize_fx.convert_fx(copy.deepcopy(mp))
