@@ -828,16 +828,16 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                 unpacked_arguments=unpacked_arguments, fw_grad_setter=fw_grad_setter))
         return content
 
-    def emit_forbid_fw_derivatives(is_inplace: bool = False) -> str:
+    def emit_forbid_fw_derivatives(is_out_fn: bool = False) -> str:
         def get_msg() -> str:
-            if is_inplace:
-                msg = name + " (because it is inplace)"
+            if is_out_fn:
+                msg = name + " (because it is an out= function)"
             else:
                 msg = name
             return msg
         res = ""
         to_check: List[str] = []
-        for inp in differentiable_inputs:
+        for inp in list(mapMaybe(gen_differentiable_input, f.func.arguments.non_out + list(f.func.arguments.out))):
             if is_tensor_type(inp.type):
                 to_check.append(FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp=inp.name))
             elif is_tensor_list_type(inp.type):
@@ -871,7 +871,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         body.extend(emit_check_if_in_complex_autograd_allowlist())
 
     if is_out_fn:
-        body.append(emit_forbid_fw_derivatives(is_inplace=True))
+        body.append(emit_forbid_fw_derivatives(is_out_fn=True))
     else:
         if requires_fw_derivatives:
             body.extend(emit_fw_derivatives())
