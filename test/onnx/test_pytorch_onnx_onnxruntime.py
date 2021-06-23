@@ -39,11 +39,16 @@ from torch.nn.utils.rnn import PackedSequence
 from torch.onnx import register_custom_op_symbolic, unregister_custom_op_symbolic
 from torch.onnx.utils import ONNXCheckerError
 
-def to_numpy(tensor):
-    if tensor.requires_grad:
-        return tensor.detach().cpu().numpy()
+
+def to_numpy(elem):
+    if isinstance(elem, torch.Tensor):
+        if elem.requires_grad:
+            return elem.detach().cpu().numpy()
+        else:
+            return elem.cpu().numpy()
     else:
-        return tensor.cpu().numpy()
+        return elem
+
 
 def convert_to_onnx(model, input=None, opset_version=9, example_outputs=None,
                     do_constant_folding=True, keep_initializers_as_inputs=True,
@@ -76,7 +81,6 @@ def inline_flatten_list(inputs, res_list):
 
 def run_ort(ort_sess, input):
     input_copy = copy.deepcopy(input)
-    input, _ = torch.jit._flatten(input_copy)
     inputs = [to_numpy(inp) for inp in input]
 
     ort_inputs = dict((ort_sess.get_inputs()[i].name, input) for i, input in enumerate(inputs))
@@ -6213,7 +6217,6 @@ class TestONNXRuntime(unittest.TestCase):
 
     # Dynamic padding is added in opset 11
     @skipIfUnsupportedMinOpsetVersion(11)
-    @disableScriptTest()  # Functional module not scriptable
     def test_pad_types(self):
         # Test for different pad integer types
         class Pad(torch.nn.Module):
