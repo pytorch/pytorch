@@ -135,9 +135,7 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor, bool force/*=false*/) {
                 "Use tensor.resolve_neg().numpy() instead.");
   }
 
-  auto prepared_tensor = tensor.is_conj() ? tensor.resolve_conj() : tensor;
-  prepared_tensor = prepared_tensor.is_neg() ? prepared_tensor.resolve_neg() : prepared_tensor;
-  prepared_tensor = prepared_tensor.cpu().detach();
+  auto prepared_tensor = prepared_tensor.detach().cpu().resolve_conj().resolve_neg();
 
   auto dtype = aten_to_numpy_dtype(prepared_tensor.scalar_type());
   auto sizes = to_numpy_shape(prepared_tensor.sizes());
