@@ -782,6 +782,18 @@ void Engine::evaluate_function(
     Node* func,
     InputBuffer& inputs,
     const std::shared_ptr<ReadyQueue>& cpu_ready_queue) {
+  // Set the ThreadLocalState before calling the function.
+  // NB: The ThreadLocalStateGuard doesn't set the grad_mode because GraphTask
+  // always saves ThreadLocalState without grad_mode.
+  at::ThreadLocalStateGuard tls_guard(graph_task->thread_locals_);
+
+  // The InputBuffer::adds that supplied incoming grads took pains to
+  // ensure they're safe to consume in the context of the present
+  // func's stream (if applicable). So we guard onto that stream
+  // before working with the grads in any capacity.
+  const auto opt_parent_stream = (*func).stream(c10::DeviceType::CUDA);
+  c10::OptionalStreamGuard parent_stream_guard{opt_parent_stream};
+
   // If exec_info_ is not empty, we have to instrument the execution
   auto& exec_info_ = graph_task->exec_info_;
   if (!exec_info_.empty()) {
@@ -795,6 +807,10 @@ void Engine::evaluate_function(
         for (auto& hook : capture.hooks_) {
           captured_grad = (*hook)(captured_grad);
         }
+        if (opt_parent_stream) {
+          // No need to take graph_task->mutex_ here, we already hold it
+          graph_task->leaf_streams.emplace(*opt_parent_stream);
+        }
       }
     }
     if (!fn_info.needed_) {
@@ -802,15 +818,6 @@ void Engine::evaluate_function(
       return;
     }
   }
-
-  // Set the ThreadLocalState before calling the function.
-  // NB: The ThreadLocalStateGuard doesn't set the grad_mode because GraphTask
-  // always saves ThreadLocalState without grad_mode.
-  at::ThreadLocalStateGuard tls_guard(graph_task->thread_locals_);
-
-  // Switches to a function's CUDA stream (if applicable) before calling it
-  const auto opt_parent_stream = (*func).stream(c10::DeviceType::CUDA);
-  c10::OptionalStreamGuard parent_stream_guard{opt_parent_stream};
 
   auto outputs = call_function(graph_task, func, inputs);
 
