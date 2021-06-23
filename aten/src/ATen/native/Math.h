@@ -2080,7 +2080,7 @@ template <typename T>
 C10_HOST_DEVICE static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
 calc_erfcx(T x)
 {
-  if (std::isnan(x)) {
+  if (at::_isnan(x)) {
     return x;
   }
 
