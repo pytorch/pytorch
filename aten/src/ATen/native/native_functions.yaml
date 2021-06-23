@@ -5431,6 +5431,15 @@
 - func: item(Tensor self) -> Scalar
   variants: method
 
+- func: result_type.TensorList(Tensor[] tensors) -> ScalarType
+  variants: function
+
+- func: _result_type_scalars(Scalar[] scalars) -> ScalarType
+  variants: function
+
+- func: _result_type_dtypes(ScalarType[] dtypes) -> ScalarType
+  variants: function
+
 - func: result_type.Tensor(Tensor tensor, Tensor other) -> ScalarType
   variants: function
 

@@ -406,7 +406,7 @@ void parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
 } // namespace
 
 Tensor cat_cuda(TensorList inputs, int64_t dimension) {
-  ScalarType high_type = result_type(inputs);
+  ScalarType high_type = at::result_type(inputs);
   Tensor out = at::empty({0}, inputs.front().options().dtype(high_type));
   at::native::cat_out_cuda(inputs, dimension, out);
   return out;
@@ -447,7 +447,7 @@ Tensor& cat_out_cuda(TensorList inputs, int64_t dimension, Tensor& out) {
   int nDims = 0;
 
   // Check for type promotion
-  TORCH_CHECK(canCast(result_type(inputs), out.scalar_type()), "torch.cat(): input types ",
+  TORCH_CHECK(canCast(at::result_type(inputs), out.scalar_type()), "torch.cat(): input types ",
                       " can't be cast to the desired output type ",
                       out.scalar_type());
 

@@ -125,6 +125,12 @@ ResultTypeState update_result_type_state(const Scalar& scalar, const ResultTypeS
   return new_state;
 }
 
+ResultTypeState update_result_type_state(const ScalarType& dtype, const ResultTypeState& in_state) {
+  ResultTypeState new_state = in_state;
+  new_state.dimResult = promote_skip_undefined(in_state.dimResult, dtype);
+  return new_state;
+}
+
 ScalarType result_type(const ResultTypeState& in_state) {
   return combine_categories(in_state.dimResult, combine_categories(in_state.zeroResult, in_state.wrappedResult));
 }
@@ -133,6 +139,22 @@ ScalarType result_type(TensorList tensors) {
   ResultTypeState state = {};
   for (const Tensor& tensor : tensors) {
     state = update_result_type_state(tensor, state);
+  }
+  return result_type(state);
+}
+
+ScalarType _result_type_scalars(ScalarList scalars) {
+  ResultTypeState state = {};
+  for (const Scalar& scalar : scalars) {
+    state = update_result_type_state(scalar, state);
+  }
+  return result_type(state);
+}
+
+ScalarType _result_type_dtypes(ArrayRef<ScalarType> dtypes) {
+  ResultTypeState state = {};
+  for (const ScalarType& dtype : dtypes) {
+    state = update_result_type_state(dtype, state);
   }
   return result_type(state);
 }
@@ -151,7 +173,7 @@ ScalarType result_type(const Tensor &tensor, const Scalar& other) {
 }
 
 ScalarType result_type(const Scalar& scalar, const Tensor &tensor) {
-  return at::result_type(tensor, scalar);
+  return native::result_type(tensor, scalar);
 }
 
 ScalarType result_type(const Scalar& scalar1, const Scalar& scalar2) {

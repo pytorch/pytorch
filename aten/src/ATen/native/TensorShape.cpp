@@ -253,7 +253,7 @@ Tensor & _cat_out_cpu(TensorList tensors, int64_t dim, Tensor& result) {
 }
 
 Tensor _cat_cpu(TensorList tensors, int64_t dim) {
-  ScalarType high_type = result_type(tensors);
+  ScalarType high_type = at::result_type(tensors);
   Tensor result = at::empty({0}, tensors[0].options().dtype(high_type));
   return native::_cat_out_cpu(tensors, dim, result);
 }
@@ -1517,14 +1517,14 @@ bool inline maybe_native_stack(Tensor& result, TensorList tensors, int64_t dim) 
 
 Tensor _stack(TensorList tensors, int64_t dim) {
   dim = maybe_wrap_dim(dim, tensors[0].dim() + 1);
-  ScalarType high_type = result_type(tensors);
+  ScalarType high_type = at::result_type(tensors);
   Tensor result = at::empty({0}, tensors[0].options().dtype(high_type));
   return at::native::_stack_out(get_stack_inputs(tensors, dim), dim, result);
 }
 
 Tensor _stack_cpu(TensorList tensors, int64_t dim) {
   dim = maybe_wrap_dim(dim, tensors[0].dim() + 1);
-  ScalarType high_type = result_type(tensors);
+  ScalarType high_type = at::result_type(tensors);
   Tensor result = at::empty({0}, tensors[0].options().dtype(high_type));
   return at::native::_stack_out_cpu(tensors, dim, result);
 }
