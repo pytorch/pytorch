@@ -15,8 +15,32 @@ namespace {
 
 ${backend_select_method_definitions}
 
+bool is_pinned(const Tensor& self, c10::optional<at::Device> device) {
+  // Only CPU tensors can be pinned
+  if (!self.is_cpu()) {
+    return false;
+  }
+  static auto op = c10::Dispatcher::singleton()
+    .findSchemaOrThrow("aten::is_pinned", "")
+    .typed<bool (const Tensor&, c10::optional<at::Device>)>();
+  // TODO: fetch scalar type from Tensor? But it doesn't really matter...
+  DispatchKeySet _dk = c10::DispatchKeySet(c10::computeDispatchKey(c10::nullopt, self.layout(), device.value_or(at::kCUDA)));
+  return op.redispatch(_dk, self, device);
+}
+
+at::Tensor pin_memory(const Tensor& self, c10::optional<at::Device> device) {
+  TORCH_CHECK(self.device().is_cpu(), "cannot pin '", self.toString(), "' only dense CPU tensors can be pinned");
+  static auto op = c10::Dispatcher::singleton()
+    .findSchemaOrThrow("aten::pin_memory", "")
+    .typed<Tensor (const Tensor&, c10::optional<at::Device>)>();
+  DispatchKeySet _dk = c10::DispatchKeySet(c10::computeDispatchKey(c10::nullopt, self.layout(), device.value_or(at::kCUDA)));
+  return op.redispatch(_dk, self, device);
+}
+
 TORCH_LIBRARY_IMPL(aten, BackendSelect, m) {
   ${backend_select_function_registrations};
+  m.impl("is_pinned", is_pinned);
+  m.impl("pin_memory", pin_memory);
 }
 
 } // namespace

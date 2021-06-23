@@ -3229,9 +3229,13 @@
 
 - func: is_pinned(Tensor self, Device? device=None) -> bool
   variants: method
+  dispatch:
+    CUDA: is_pinned_cuda
 
 - func: pin_memory(Tensor(a) self, Device? device=None) -> Tensor(a)
   variants: method
+  dispatch:
+    CUDA: pin_memory_cuda
 
 - func: pinverse(Tensor self, float rcond=1e-15) -> Tensor
   variants: function, method
