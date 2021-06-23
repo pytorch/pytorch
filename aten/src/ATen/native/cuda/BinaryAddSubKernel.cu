@@ -20,12 +20,12 @@ struct AddFunctor {
     accscalar_t alpha;
 };
 
-template<typename scalar_t, typename accscalar_t>
+template<typename scalar_t, typename accscalar_t, int SCALAR_ARG>
 struct AddScalarFunctor {
+  static_assert(SCALAR_ARG == 1 || SCALAR_ARG == 2, "SCALAR_ARG must be either 1 or 2");
   AddScalarFunctor(accscalar_t alpha, accscalar_t b): alpha(alpha), b(b) {}
   __device__ __forceinline__ scalar_t operator() (const scalar_t a) const {
-
-    return static_cast<scalar_t>(static_cast<accscalar_t>(a) + alpha * b);
+    return static_cast<scalar_t>(SCALAR_ARG == 1 ? b + alpha * a : a + alpha * b);
   }
   private:
     accscalar_t alpha;
@@ -42,8 +42,13 @@ void add_kernel_cuda(TensorIteratorBase& iter, const Scalar& alpha_scalar) {
       auto b = iter.scalar_value<accscalar_t>(scalar_arg);
       iter.remove_operand(scalar_arg);
       const cuda::OptionalCUDAGuard device_guard(device_of(iter.tensor(1)));
-      AddScalarFunctor<scalar_t, decltype(b)> f(alpha_scalar.to<accscalar_t>(), b);
-      gpu_kernel(iter, f);
+      if (scalar_arg == 1) {
+        AddScalarFunctor<scalar_t, decltype(b), 1> f(alpha_scalar.to<accscalar_t>(), b);
+        gpu_kernel(iter, f);
+      } else {
+        AddScalarFunctor<scalar_t, decltype(b), 2> f(alpha_scalar.to<accscalar_t>(), b);
+        gpu_kernel(iter, f);
+      }
     });
   } else {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBool, kBFloat16, iter.common_dtype(), "add_cuda/sub_cuda", [&]() {
