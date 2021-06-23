@@ -8010,6 +8010,20 @@ class TestNN(NNTestCase):
                     self.assertEqual(hy.data[0][0][0], 10)
                     self.assertEqual(hy.data[1][0][0], output_val)
 
+    def test_error_RNN_seq_len_zero(self):
+        # checking error message when RNN has seq_len = 0
+        for module in (nn.RNN, nn.LSTM, nn.GRU):
+            for bidirectional in [True, False]:
+                for device in torch.testing.get_all_device_types():
+                    input = torch.ones(0, 10, 5)
+                    rnn = module(5, 6, bidirectional=bidirectional)
+                    if device == 'cuda':
+                        rnn.cuda()
+                        input = input.cuda()
+
+                    with self.assertRaisesRegex(RuntimeError, "Expected sequence length to be larger than 0 in RNN"):
+                        rnn(input)
+
     @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
     def test_RNN_dropout_state(self):
         for p in (0, 0.1234):
@@ -8215,7 +8229,7 @@ class TestNN(NNTestCase):
         test_pixel_shuffle_unshuffle_4D()
         test_pixel_shuffle_unshuffle_5D()
 
-    def test_elu_inplace_view(self):
+    def test_elu_inplace_on_view(self):
         v = torch.tensor([1.0, -1.0, 1.0, -1.0], requires_grad=True)
 
         def func(root):
@@ -8228,7 +8242,7 @@ class TestNN(NNTestCase):
         gradcheck(func, [v])
         gradgradcheck(func, [v])
 
-    def test_relu_inplace_view(self):
+    def test_relu_inplace_on_view(self):
         v = torch.tensor([1.0, -1.0, 1.0, -1.0], requires_grad=True)
 
         def func(root):
@@ -8269,7 +8283,7 @@ class TestNN(NNTestCase):
                     X = torch.rand(n, m, dtype=dtype, requires_grad=True, device=d)[:, ::2]
                 res = F.gelu(X)
                 ref = _gelu_ref(X.to(numpy_dtype).cpu().detach().numpy())
-                self.assertEqual(res, ref, rtol=rtol, atol=atol)
+                self.assertEqual(res, ref, rtol=rtol, atol=atol, exact_dtype=False)
                 if dtype == torch.float64:
                     gradcheck(F.gelu, [X], eps=1e-4)
 
@@ -12135,7 +12149,7 @@ class TestNNDeviceType(NNTestCase):
             for r in range(affine_tensor.size(1)):
                 for c in range(affine_tensor.size(2)):
                     grid_out = np.dot(grid_ary, [r, c, 1])
-                    self.assertEqual(affine_tensor[0, r, c], grid_out[:2])
+                    self.assertEqual(affine_tensor[0, r, c], grid_out[:2], exact_dtype=False)
 
             self.assertEqual(scipy_ary, gridsample_ary.reshape_as(scipy_ary))
 
@@ -12190,7 +12204,7 @@ class TestNNDeviceType(NNTestCase):
                 for r in range(affine_tensor.size(2)):
                     for c in range(affine_tensor.size(3)):
                         grid_out = np.dot(grid_ary, [i, r, c, 1])
-                        self.assertEqual(affine_tensor[0, i, r, c], grid_out[:3])
+                        self.assertEqual(affine_tensor[0, i, r, c], grid_out[:3], exact_dtype=False)
 
             self.assertEqual(scipy_ary, gridsample_ary.reshape_as(scipy_ary))
 
