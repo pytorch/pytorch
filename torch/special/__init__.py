@@ -505,8 +505,8 @@ round(input, *, out=None) -> Tensor
 Alias for :func:`torch.round`.
 """)
 
-log_softmax = _add_docstr(_special.special_log_softmax, 
-r"""
+log_softmax = _add_docstr(_special.special_log_softmax,
+                          r"""
 Computes softmax followed by a logarithm.
 
 While mathematically equivalent to log(softmax(x)), doing these two
