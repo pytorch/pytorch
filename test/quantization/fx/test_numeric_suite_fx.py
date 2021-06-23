@@ -1785,3 +1785,14 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
                 sparse_nn, (idx, offsets, x),
                 results_len=4,
                 should_log_inputs=should_log_inputs)
+
+    @skip_if_no_torchvision
+    def test_resnet18(self):
+        import torchvision
+        m = torchvision.models.quantization.resnet18(pretrained=True, quantize=False).eval()
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        self._test_match_shadow_activations(
+            m, (torch.randn(1, 3, 224, 224),),
+            qconfig_dict=qconfig_dict,
+            results_len=24,
+            should_log_inputs=False)
