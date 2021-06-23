@@ -983,6 +983,14 @@ class TestAssertClose(TestCase):
             for fn in assert_close_with_inputs(actual, expected):
                 fn(check_dtype=check_dtype)
 
+    def test_bool(self):
+        actual = torch.tensor([True, False])
+        expected = actual.clone()
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn()
+
+
 
 class TestAssertCloseMultiDevice(TestCase):
     @deviceCountAtLeast(1)
