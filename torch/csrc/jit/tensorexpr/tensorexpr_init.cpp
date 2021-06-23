@@ -494,6 +494,12 @@ void initTensorExprBindings(PyObject* module) {
             return f;
           },
           py::return_value_policy::reference)
+      .def(
+          "tile",
+          [](LoopNest& self, For* x, For* y, int x_factor, int y_factor) {
+            return self.tile(x, y, x_factor, y_factor);
+          },
+          py::return_value_policy::reference)
       .def_static(
           "distribute_loop",
           [](For* f) { return LoopNest::distributeLoop(f); },

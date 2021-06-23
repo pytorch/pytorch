@@ -662,6 +662,163 @@ TEST(LoopNest, ExprSplitWithMaskRepeatedNoMask) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(LoopNest, TileSimple) {
+  KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  const int M = 64, N = 64;
+  Placeholder a_buf("a", kFloat, {M, N});
+  Placeholder b_buf("b", kFloat, {M, N});
+  Tensor* tensor = Compute(
+      "f", {{M, "m"}, {N, "n"}}, [&](const ExprHandle& m, const ExprHandle& n) {
+        return a_buf.load({m, n}) + b_buf.load({m, n}) + 1.0f;
+      });
+
+  LoopNest l({tensor});
+  std::vector<For*> loops = l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  l.tile(loops[0], loops[1], 4, 8);
+
+  // IR check
+  Stmt* stmt = IRSimplifier::simplify(l.root_stmt());
+  checkIR(stmt, R"IR(
+# CHECK: for (int m_outer
+# CHECK:   for (int n_outer
+# CHECK:     for (int m_inner
+# CHECK:       for (int n_inner
+# CHECK:         f[
+# CHECK-NOT:     for (int n_tail
+# CHECK-NOT: for (int m_tail)IR");
+
+  // Correctness check
+  PaddedBuffer<float> a_v(M, N, "a");
+  PaddedBuffer<float> b_v(M, N, "b");
+  PaddedBuffer<float> c_v(M, N, "c");
+  PaddedBuffer<float> c_ref(M, N, "c_ref");
+  for (int m = 0; m < M; m++) {
+    for (int n = 0; n < N; n++) {
+      a_v(m, n) = 2 * m;
+      b_v(m, n) = 3 * n;
+      c_ref(m, n) = a_v(m, n) + b_v(m, n) + 1.0f;
+    }
+  }
+
+  SimpleIREvaluator(stmt, {a_buf, b_buf, tensor})(a_v, b_v, c_v);
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  ExpectAllNear(c_v, c_ref, 1e-5);
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(LoopNest, TileWithTails) {
+  KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  const int M = 64, N = 64;
+  Placeholder a_buf("a", kFloat, {M, N});
+  Placeholder b_buf("b", kFloat, {M, N});
+  Tensor* tensor = Compute(
+      "f", {{M, "m"}, {N, "n"}}, [&](const ExprHandle& m, const ExprHandle& n) {
+        return a_buf.load({m, n}) + b_buf.load({m, n}) + 1.0f;
+      });
+
+  LoopNest l({tensor});
+  std::vector<For*> loops = l.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  l.tile(loops[0], loops[1], 5, 9);
+
+  // IR check
+  Stmt* stmt = IRSimplifier::simplify(l.root_stmt());
+  checkIR(stmt, R"IR(
+# CHECK: for (int m_outer
+# CHECK:   for (int n_outer
+# CHECK:     for (int m_inner
+# CHECK:       for (int n_inner
+# CHECK:         f[
+# CHECK:   for (int m_inner
+# CHECK:     f[
+# CHECK: for (int m_tail)IR");
+
+  // Correctness check
+  PaddedBuffer<float> a_v(M, N, "a");
+  PaddedBuffer<float> b_v(M, N, "b");
+  PaddedBuffer<float> c_v(M, N, "c");
+  PaddedBuffer<float> c_ref(M, N, "c_ref");
+  for (int m = 0; m < M; m++) {
+    for (int n = 0; n < N; n++) {
+      a_v(m, n) = 2 * m;
+      b_v(m, n) = 3 * n;
+      c_ref(m, n) = a_v(m, n) + b_v(m, n) + 1.0f;
+    }
+  }
+
+  SimpleIREvaluator(stmt, {a_buf, b_buf, tensor})(a_v, b_v, c_v);
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  ExpectAllNear(c_v, c_ref, 1e-5);
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(LoopNest, TileInMiddle) {
+  KernelScope kernel_scope;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  const int M = 8, N = 8, L = 8, K = 8;
+  Placeholder a_buf("a", kFloat, {M, N, L, K});
+  Placeholder b_buf("b", kFloat, {M, N, L, K});
+  Tensor* tensor = Compute(
+      "f",
+      {{M, "m"}, {N, "n"}, {L, "l"}, {K, "k"}},
+      [&](const ExprHandle& m,
+          const ExprHandle& n,
+          const ExprHandle& l,
+          const ExprHandle& k) {
+        return a_buf.load({m, n, l, k}) + b_buf.load({m, n, l, k}) + 1.0f;
+      });
+
+  LoopNest nest({tensor});
+  std::vector<For*> loops =
+      nest.getAllLoopNestsWritingToBuf(tensor->buf()).at(0);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  nest.tile(loops[1], loops[2], 3, 3);
+
+  // IR check
+  Stmt* stmt = IRSimplifier::simplify(nest.root_stmt());
+  checkIR(stmt, R"IR(
+# CHECK: for (int m
+# CHECK:   for (int n_outer
+# CHECK:     for (int l_outer
+# CHECK:       for (int n_inner
+# CHECK:         for (int l_inner
+# CHECK:           for (int k
+# CHECK:             f[
+# CHECK:     for (int l_tail
+# CHECK:       for (int n_inner
+# CHECK:         for (int k
+# CHECK:           f[
+# CHECK:   for (int n_tail)IR");
+
+  // Correctness check
+  PaddedBuffer<float> a_v(M, N, L, K, "a");
+  PaddedBuffer<float> b_v(M, N, L, K, "b");
+  PaddedBuffer<float> c_v(M, N, L, K, "c");
+  PaddedBuffer<float> c_ref(M, N, L, K, "c_ref");
+  for (int m = 0; m < M; m++) {
+    for (int n = 0; n < N; n++) {
+      for (int l = 0; l < L; l++) {
+        for (int k = 0; k < K; k++) {
+          a_v(m, n, l, k) = 2 * (m + l);
+          b_v(m, n, l, k) = 3 * (n + k);
+          c_ref(m, n, l, k) = a_v(m, n, l, k) + b_v(m, n, l, k) + 1.0f;
+        }
+      }
+    }
+  }
+
+  SimpleIREvaluator(stmt, {a_buf, b_buf, tensor})(a_v, b_v, c_v);
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  ExpectAllNear(c_v, c_ref, 1e-5);
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, SplitWithTailWithLoopOptions) {
   KernelScope kernel_scope;
   const int M = 21;
