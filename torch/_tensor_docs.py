@@ -2852,7 +2852,7 @@ If tensors storage is not CPU, or if :attr:`requires_grad` is ``True`` and
 :attr:`GradMode` is ``True``, or tensor is sparse, or :attr:`is_conj()`
 is ``True``, it throws exception.
 
-If :attr:`force` is ``True``, it tries to resolve issues, that would otherwise throw an exception.
+If :attr:`force` is ``True`` it tries to resolve issues that would otherwise throw an exception.
 It calls :func:`torch.Tensor.detach`, :func:`torch.Tensor.cpu` and :func:`torch.Tensor.resolve_conj`.
 If tensor is sparse, it still throws an exception. Since it makes a copy in some scenarios,
 tensor :attr:`self` and the returned :class:`ndarray` can have separate
