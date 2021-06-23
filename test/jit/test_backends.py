@@ -7,6 +7,7 @@ import unittest
 import torch
 import torch._C
 from torch.testing import FileCheck
+from torch.jit.mobile import _load_for_lite_interpreter #remove this: if no serialize with lite interpreter
 from pathlib import Path
 
 from torch.testing._internal.common_utils import (
@@ -466,8 +467,13 @@ class TestBackends(JitTestCase):
     def test_errors(self):
         self.selective_lowering_test.test_errors()
 
-
-# Unit Tests for backend with compiler
+"""
+Unit Tests for backend with compiler
+This test case and the existing TestBackends are separate because they cover different aspects.
+The actual backend implementation in this test is different.
+It has a simple demo compiler to test the end-to-end flow.
+However, this test cannot cover the selective_lowering for now, which is covered in TestBackends.
+"""
 class BasicModuleAdd(torch.nn.Module):
     """
     A simple add Module used to test to_backend lowering machinery.
@@ -485,7 +491,7 @@ class BasicModuleAdd(torch.nn.Module):
 class JitBackendTestCaseWithCompiler(JitTestCase):
     """
     A common base class for JIT backend tests with compilers that contains common utility
-    functions for output comparison and serialization/deserialization.
+    functions for output comparison.
     """
 
     def setUp(self):
@@ -493,46 +499,32 @@ class JitBackendTestCaseWithCompiler(JitTestCase):
         torch_root = Path(__file__).resolve().parent.parent.parent
         p = torch_root / 'build' / 'lib' / 'libbackend_with_compiler.so'
         torch.ops.load_library(str(p))
-        # torch.ops.load_library("//caffe2/test/cpp/jit:test_backend_compiler")
-        # Subclasses are expected to set up three variables in their setUp methods:
+        # Subclasses are expected to set up four variables in their setUp methods:
         # module - a regular, Python version of the module being tested
         # scripted_module - a scripted version of module
         # lowered_modle - a version of module lowered to a backend
+        # mobile_module - a module with a format that Pytorch Mobile can execute
 
-    def check_function(self, function_name, input):
+    def check_forward(self, input):
         """
-        Check that the function named 'function_name' produces the same output using
-        Python, regular JIT and the backend for the given 'input'.
+        Check that the forward function produces the same output using
+        Python, regular JIT, the backend, and mobile for the given 'input'.
         """
-        # Get handles for Python, JIT and backend methods.
-        python_method = self.module.__getattribute__(function_name)
-        jit_method = self.scripted_module.__getattr__(function_name)
-        backend_method = self.lowered_module.__getattr__(function_name)
 
-        # Run methods.
-        python_output = python_method(*input)
-        jit_output = jit_method(*input)
-        backend_output = backend_method(*input)
+        # Get outputs from forward.
+        python_output = self.module.forward(*input)
+        jit_output = self.scripted_module.forward(*input)
+        backend_output = self.lowered_module(*input)
+        mobile_output = self.mobile_module(*input)
 
-        # The answers returned by Python, JIT and to_backend should all match.
+        # The answers returned by Python, JIT, to_backend, and mobile should all match.
         self.assertEqual(python_output, backend_output)
         self.assertEqual(jit_output, backend_output)
-
-    def save_load(self):
-        """
-        Save and load the lowered module.
-        """
-        self.lowered_module = self.getExportImportCopy(self.lowered_module)
+        self.assertEqual(mobile_output, backend_output)
 
     def test_execution(self):
         """
         Stub for correctness tests.
-        """
-        pass
-
-    def test_save_load(self):
-        """
-        Stub for serialization tests.
         """
         pass
 
@@ -560,11 +552,15 @@ class BasicModuleTestWithCompiler(JitBackendTestCaseWithCompiler):
         }
         self.lowered_module = torch._C._jit_to_backend(
             "backend_with_compiler_demo", self.scripted_module, compile_spec)
+        # Create mobile version of BasicModuleAdd
+        buffer = io.BytesIO(self.lowered_module._save_to_buffer_for_lite_interpreter())
+        buffer.seek(0)
+        self.mobile_module = _load_for_lite_interpreter(buffer)
 
     def test_execution(self):
         # Test execution with backend against Python and JIT.
         input = torch.randn(5)
-        self.check_function("forward", (input, input))
+        self.check_forward((input, input))
 
 
 # This is needed for IS_WINDOWS or IS_MACOS to skip the tests.
