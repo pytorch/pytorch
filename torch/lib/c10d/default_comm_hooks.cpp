@@ -1,7 +1,7 @@
 #include <c10d/default_comm_hooks.hpp>
 
-#include <c10d/comm.hpp>
 #include <c10d/ProcessGroup.hpp>
+#include <c10d/comm.hpp>
 #include <torch/torch.h>
 
 namespace c10d {
@@ -9,17 +9,9 @@ namespace c10d {
 c10::intrusive_ptr<c10::ivalue::Future> AllReduceCommHook::runHook(
     GradBucket& bucket) {
   std::vector<at::Tensor> tensors = {bucket.getTensorRef()};
-  auto allreduce_fut = state_->allreduce(tensors)->getFuture();
-  auto div_by_process_group_size = [size = state_->getSize()](
-        c10::ivalue::Future& allreduce_fut) {
-    auto result = allreduce_fut.value();
-    TORCH_INTERNAL_ASSERT(result.isTensorList(),
-        "ProcessGroup::allreduce should return TensorList");
-    auto tensor = result.toTensorVector()[0] / size;
-    return c10::IValue(tensor);
-  };
-
-  return allreduce_fut->then(div_by_process_group_size, allreduce_fut->elementType());
+  // Apply the division first to avoid overflow, especially for FP16.
+  tensors[0] /= state_->getSize();
+  return state_->allreduce(tensors)->getFuture();
 }
 
 c10::intrusive_ptr<c10::ivalue::Future> FP16CompressCommHook::runHook(
@@ -27,19 +19,29 @@ c10::intrusive_ptr<c10::ivalue::Future> FP16CompressCommHook::runHook(
   auto& tensor = bucket.getTensorRef();
   tensor.copy_(tensor.to(torch::kFloat16));
   std::vector<at::Tensor> tensors = {tensor};
-  auto allreduce_fut = state_->allreduce(tensors)->getFuture();
-  auto decompress_and_div_by_process_group_size =
-      [size = state_->getSize()](c10::ivalue::Future& allreduce_fut) {
-        auto result = allreduce_fut.value();
-        TORCH_INTERNAL_ASSERT(result.isTensorList(),
-            "ProcessGroup::allreduce should return TensorList");
-        auto reduce_tensor = result.toTensorVector()[0];
-        reduce_tensor.copy_(reduce_tensor.to(torch::kFloat) / size);
-        return c10::IValue(reduce_tensor);
-      };
+  // Apply the division first to avoid overflow.
+  tensors[0] /= state_->getSize();
 
-  return allreduce_fut->then(
-      decompress_and_div_by_process_group_size, allreduce_fut->elementType());
+  auto allreduce_fut = state_->allreduce(tensors)->getFuture();
+  auto decompress = [](c10::ivalue::Future& allreduce_fut) {
+    auto result = allreduce_fut.value();
+    TORCH_INTERNAL_ASSERT(
+        result.isTensorList(),
+        "ProcessGroup::allreduce should return TensorList");
+    auto reduce_tensor = result.toTensorVector()[0];
+    reduce_tensor.copy_(reduce_tensor.to(torch::kFloat));
+    return c10::IValue(reduce_tensor);
+  };
+
+  return allreduce_fut->then(decompress, allreduce_fut->elementType());
+}
+
+c10::intrusive_ptr<c10::ivalue::Future> _AllReduceCommHookWithDivFactor::
+    runHook(GradBucket& bucket) {
+  std::vector<at::Tensor> tensors = {bucket.getTensorRef()};
+  // Apply the division first to avoid overflow, especially for FP16.
+  tensors[0] /= state_.div_factor;
+  return state_.pg->allreduce(tensors)->getFuture();
 }
 
 } // namespace c10d

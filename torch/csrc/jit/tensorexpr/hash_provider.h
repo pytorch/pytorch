@@ -233,8 +233,7 @@ class TORCH_API HashProvider : public IRVisitor {
   size_t te_hash(std::string val) {
     size_t hash{0};
     int64_t intval{0};
-    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-    int s = val.size() - 1;
+    int64_t s = val.size() - 1;
     while (s >= 0) {
       for (unsigned int i = 0; i < 8; ++i) {
         if (s < 0)

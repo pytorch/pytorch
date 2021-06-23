@@ -148,7 +148,7 @@ def export(test_list: TestList, platform_type: TestPlatform) -> None:
                 binary_file = ""
                 shared_library_list = []
                 if platform_type == TestPlatform.FBCODE:
-                    from caffe2.fb.code_coverage.tool.package.fbcode.utils import (
+                    from caffe2.fb.code_coverage.tool.package.fbcode.utils import (  # type: ignore[import]
                         get_fbcode_binary_folder,
                     )
 

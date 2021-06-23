@@ -17,12 +17,15 @@ __all__ = [
     "all_types_and",
     "all_types_and_complex",
     "all_types_and_complex_and",
+    "all_types_and_half",
     "assert_allclose",
     "complex_types",
+    "empty_types",
     "floating_and_complex_types",
     "floating_and_complex_types_and",
     "floating_types",
     "floating_types_and",
+    "floating_types_and_half",
     "get_all_complex_dtypes",
     "get_all_dtypes",
     "get_all_device_types",
@@ -312,6 +315,10 @@ class _dispatch_dtypes(tuple):
     def __add__(self, other):
         assert isinstance(other, tuple)
         return _dispatch_dtypes(tuple.__add__(self, other))
+
+_empty_types = _dispatch_dtypes(())
+def empty_types():
+    return _empty_types
 
 _floating_types = _dispatch_dtypes((torch.float32, torch.float64))
 def floating_types():

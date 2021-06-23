@@ -279,6 +279,7 @@ Tensor class reference
     Tensor.conj_physical
     Tensor.conj_physical_
     Tensor.resolve_conj
+    Tensor.resolve_neg
     Tensor.copysign
     Tensor.copysign_
     Tensor.cos
@@ -382,6 +383,7 @@ Tensor class reference
     Tensor.hardshrink
     Tensor.heaviside
     Tensor.histc
+    Tensor.histogram
     Tensor.hsplit
     Tensor.hypot
     Tensor.hypot_
@@ -564,6 +566,7 @@ Tensor class reference
     Tensor.resize_
     Tensor.resize_as_
     Tensor.retain_grad
+    Tensor.retains_grad
     Tensor.roll
     Tensor.rot90
     Tensor.round

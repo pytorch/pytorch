@@ -134,7 +134,7 @@ class ProcessFailure:
     def _get_error_data(self, error_file_data: Dict[str, Any]) -> Tuple[str, int]:
         message = error_file_data["message"]
         if isinstance(message, str):
-            timestamp = error_file_data.get("timestamp", 0)
+            timestamp = int(error_file_data.get("timestamp", 0))
         else:
             timestamp = int(message["extraInfo"]["timestamp"])
         return (message, timestamp)

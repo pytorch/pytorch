@@ -104,7 +104,7 @@ static PyObject *wrap_variables(const variable_list& c_variables)
   size_t num_vars = c_variables.size();
   THPObjectPtr tuple(PyTuple_New(num_vars));
   if (!tuple) throw python_error();
-  for (size_t i = 0; i < num_vars; ++i) {
+  for (const auto i : c10::irange(num_vars)) {
     THPObjectPtr var(THPVariable_Wrap(c_variables[i]));
     if (!var) throw python_error();
     PyTuple_SET_ITEM(tuple.get(), i, var.release());
@@ -148,7 +148,7 @@ static void check_result(PyObject* prev, PyObject* result, PyObject* hook) {
     throw std::runtime_error(ss.str());
   }
 
-  for (auto i = 0; i < prev_size; i++) {
+  for (const auto i : c10::irange(prev_size)) {
     check_single_result(PyTuple_GET_ITEM(prev, i), PyTuple_GET_ITEM(result, i), hook);
   }
 }

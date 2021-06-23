@@ -28,6 +28,10 @@ TORCH_LIBRARY_IMPL(_, Negative, m) {
 }
 
 TORCH_LIBRARY_IMPL(aten, Negative, m) {
+  m.impl("requires_grad_", torch::CppFunction::makeFallthrough());
+  m.impl("set_.source_Storage_storage_offset", torch::CppFunction::makeFallthrough());
+  m.impl("set_.source_Tensor", torch::CppFunction::makeFallthrough());
+  m.impl("set_", torch::CppFunction::makeFallthrough());
   m.impl("copy_", torch::CppFunction::makeFallthrough());
   m.impl("clone", torch::CppFunction::makeFallthrough());
   m.impl("conj", torch::CppFunction::makeFallthrough());
@@ -35,22 +39,22 @@ TORCH_LIBRARY_IMPL(aten, Negative, m) {
   m.impl("neg_", torch::CppFunction::makeFallthrough());
   m.impl("resolve_neg", torch::CppFunction::makeFallthrough());
   m.impl("empty_like", torch::CppFunction::makeFallthrough());
+  m.impl("empty.memory_format", torch::CppFunction::makeFallthrough());
   m.impl("empty.out", torch::CppFunction::makeFallthrough());
   m.impl("empty_strided", torch::CppFunction::makeFallthrough());
+  m.impl("full_like", torch::CppFunction::makeFallthrough());
   m.impl("stride.int", torch::CppFunction::makeFallthrough());
   m.impl("stride.Dimname", torch::CppFunction::makeFallthrough());
   m.impl("size.int", torch::CppFunction::makeFallthrough());
   m.impl("size.Dimname", torch::CppFunction::makeFallthrough());
   m.impl("is_complex", torch::CppFunction::makeFallthrough());
   m.impl("is_floating_point", torch::CppFunction::makeFallthrough());
-  m.impl("view_as_real_physical", torch::CppFunction::makeFallthrough());
   m.impl("view_as_real", torch::CppFunction::makeFallthrough());
   m.impl("imag", torch::CppFunction::makeFallthrough());
   m.impl("real", torch::CppFunction::makeFallthrough());
   m.impl("view", torch::CppFunction::makeFallthrough());
   m.impl("reshape", torch::CppFunction::makeFallthrough());
   m.impl("select", torch::CppFunction::makeFallthrough());
-  // TODO: need to hit the view functions
 }
 
 } // namespace at

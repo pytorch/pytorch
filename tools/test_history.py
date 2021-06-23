@@ -4,6 +4,7 @@ import argparse
 import subprocess
 import sys
 from datetime import datetime, timezone
+from signal import SIG_DFL, SIGPIPE, signal
 from typing import Dict, Iterator, List, Optional, Set, Tuple
 
 from tools.stats_utils.s3_stat_parser import (Report, get_cases,
@@ -337,10 +338,11 @@ def run(raw: List[str]) -> Iterator[str]:
 
 def main() -> None:
     for line in run(sys.argv[1:]):
-        print(line)
+        print(line, flush=True)
 
 
 if __name__ == "__main__":
+    signal(SIGPIPE, SIG_DFL)  # https://stackoverflow.com/a/30091579
     try:
         main()
     except KeyboardInterrupt:

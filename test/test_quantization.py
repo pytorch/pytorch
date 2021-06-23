@@ -79,9 +79,14 @@ try:
 except ImportError:
     pass
 
+# Equalization for FX mode
+try:
+    from quantization.fx.test_equalize_fx import TestEqualizeFx  # noqa: F401
+except ImportError:
+    pass
+
 # Backward Compatibility. Tests serialization and BC for quantized modules.
 from quantization.bc.test_backward_compatibility import TestSerialization  # noqa: F401
-
 
 # JIT Graph Mode Quantization
 from quantization.jit.test_quantize_jit import TestQuantizeJit  # noqa: F401
