@@ -4,12 +4,12 @@
 #include <ostream>
 #include <vector>
 
-#include "absl/strings/str_join.h"
 #include "lazy_tensors/computation_client/client_data.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/layout.h"
 #include "lazy_tensors/primitive_util.h"
 #include "lazy_tensors/span.h"
+#include "lazy_tensors/str_cat.h"
 #include "lazy_tensors/str_join.h"
 #include "lazy_tensors/types.h"
 
@@ -41,8 +41,8 @@ class Shape {
   }
 
   std::string ToString(bool print_layout = false) const {
-    return absl::StrCat(PrimitiveTypeName(element_type_), "[",
-                        lazy_tensors::StrJoin(dimensions_, ","), "]");
+    return lazy_tensors::StrCat(PrimitiveTypeName(element_type_), "[",
+                                lazy_tensors::StrJoin(dimensions_, ","), "]");
   }
 
   int64 rank() const { return dimensions_.size(); }

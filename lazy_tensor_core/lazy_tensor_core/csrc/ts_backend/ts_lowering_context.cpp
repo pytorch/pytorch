@@ -68,7 +68,7 @@ torch::jit::Value* TSLoweringContext::GetParameter(
   auto it = parameters_map_.find(handle);
   if (it == parameters_map_.end()) {
     torch::jit::Value* param =
-        graph_->addInput(absl::StrCat("p", parameters_.size()));
+        graph_->addInput(lazy_tensors::StrCat("p", parameters_.size()));
     it = parameters_map_.emplace(handle, Parameter{param, parameters_.size()})
              .first;
     parameters_.push_back(data);
