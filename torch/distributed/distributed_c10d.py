@@ -749,16 +749,11 @@ def destroy_process_group(group=None):
     if group == GroupMember.NON_GROUP_MEMBER:
         return
 
-    if group is None:
-        pg = GroupMember.WORLD
-    else:
-        pg = group
-
-    assert pg is not None
+    pg = group or GroupMember.WORLD
     if _pg_map.get(pg, None) is None:
         raise RuntimeError("Invalid process group specified")
 
-    if group is None or group == GroupMember.WORLD:
+    if pg == GroupMember.WORLD:
         _update_default_pg(None)
         _default_pg_init_method = None
         _pg_map.clear()
