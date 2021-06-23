@@ -111,6 +111,12 @@ The following API is used to control thread settings:
 For the intra-op parallelism settings, ``at::set_num_threads``, ``torch.set_num_threads`` always take precedence
 over environment variables, ``MKL_NUM_THREADS`` variable takes precedence over ``OMP_NUM_THREADS``.
 
+One caveat here is that unlike ``OMP_SET_DYNAMIC``, which is False by default, ``MKL_SET_DYNAMIC`` is True by default.
+If the requested number of threads via ``OMP_NUM_THREADS`` or ``MKL_NUM_THREADS`` is more than the number of physical cores,
+then MKL scales down the number of OpenMP threads to the number of physical cores. To prevent this from happening,
+i.e. to use the intended number of OpenMP threads, ``MKL_SET_DYNAMIC=FALSE`` should be used in conjunction with
+``OMP_NUM_THREADS`` or ``MKL_NUM_THREADS``.
+
 Tuning the number of threads
 ----------------------------
 
