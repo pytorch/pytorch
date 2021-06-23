@@ -6,12 +6,12 @@
 #include <cmath>
 #include <vector>
 
-#include "absl/numeric/int128.h"
+#include "lazy_tensors/int128.h"
 #include "lazy_tensors/types.h"
 
 namespace lazy_tensors {
 
-using hash_t = absl::uint128;
+using hash_t = uint128;
 
 struct Percentile {
   enum class UnitOfMeaure {
