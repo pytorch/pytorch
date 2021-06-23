@@ -90,7 +90,7 @@ class _SpectralNorm(Module):
             # This power iteration produces approximations of `u` and `v`.
             self._u = F.normalize(torch.mv(weight_mat, self._v),      # type: ignore[has-type]
                                   dim=0, eps=self.eps, out=self._u)   # type: ignore[has-type]
-            self._v = F.normalize(torch.mv(weight_mat.t(), self._u),  # type: ignore[has-type]
+            self._v = F.normalize(torch.mv(weight_mat.t(), self._u),
                                   dim=0, eps=self.eps, out=self._v)   # type: ignore[has-type]
         # See above on why we need to clone
         self._u = self._u.clone(memory_format=torch.contiguous_format)

@@ -17,11 +17,11 @@ from torch.testing import \
     (make_non_contiguous, floating_types, floating_types_and, complex_types,
      floating_and_complex_types, floating_and_complex_types_and,
      all_types_and_complex_and, all_types_and, all_types_and_complex,
-     integral_types_and, all_types)
+     integral_types_and, all_types, empty_types)
 from .._core import _dispatch_dtypes
 from torch.testing._internal.common_device_type import \
     (skipIf, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
-     skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfRocm, precisionOverride,)
+     skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfRocm, precisionOverride, toleranceOverride, tol)
 from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater
 from torch.testing._internal.common_utils import \
     (is_iterable_of_tensors,
@@ -178,6 +178,232 @@ def _getattr_qual(obj, name, default=_NOTHING):
             return default
         else:
             raise
+
+# Note [OpInfos]
+# ~~~~~~~~~~~~~~
+#
+# This note was written shortly after the PyTorch 1.9 release.
+# If you notice it's out-of-date or think it could be improved then please
+# file an issue.
+#
+# See also: the OpInfo tracker (https://github.com/pytorch/pytorch/issues/54261)
+# See also: "Writing Test Templates" in common_device_type.py to learn how to
+#   parametrize a test template using OpInfos.
+#
+# An OpInfo is a collection of metadata related to a PyTorch operator. This
+#   metadata is used to generate tests that validate properties of the operator,
+#   like if it implements the correct gradient formula.
+#
+# WHY OPINFOS?
+# ~~~~~~~~~~~~
+#
+# OpInfos are principally intended to do two things:
+#
+#   1) to simplify testing an operator
+#   2) to allow systems (like autograd, torchscript, fx, nnc...) to test
+#        against every PyTorch operator
+#
+# Both these goals are still a work in progress. Not every operator has an
+#   OpInfo, and some operator tests still have to be written manually.
+#
+# The utility of OpInfos can also be motivated from a different perspective.
+#   PyTorch is a complicated framework with many interrelated systems, too
+#   many for any one person to keep track of. An OpInfo can be thought of as the
+#   interface between an operator implementer and those other systems. Instead of
+#   requiring the implementer of torch.foo understand how to test its forward
+#   mode AD or NNC support that's typically handled automatically just by
+#   defining an OpInfo. This is a helpful perspective to have, because it's often
+#   surprising to OpInfo writers that just implementing an OpInfo typically can't
+#   verify an operator is actually implemented correctly. "If an OpInfo doesn't
+#   validate my op works as expected, what's the point of it?" But the point of
+#   it is that it lets engineers focus on testing their operator logic instead
+#   of having to write tests for how the operator interacts with each of
+#   PyTorch's many systems. And, OK, sometimes it validates your op works
+#   the way you want and all you have to do is write an OpInfo and you're done
+#   testing... more on that below.
+#
+# WHAT'S AN OPINFO?
+# ~~~~~~~~~~~~~~~~~
+#
+# So what is an OpInfo? It's a Python class that describes an operator's properties,
+#   like which dtypes it supports on the CPU and whether it has any aliases.
+#   These properties can be divided into three categories:
+#
+#   1) Metadata describing the operator, like the operator's name and if it
+#     "supports" the out kwarg.
+#   2) Test directives, like "skips" that tell the test suite to skip some
+#     tests.
+#   3) A "sample inputs" function that generates valid inputs for the operator.
+#
+# OpInfo attributes are described in more detail below.
+#
+# THE SAMPLE INPUTS FUNCTION
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~
+#
+# The "sample inputs" function merits special elaboration. This function is
+#   crucial to testing with OpInfos. A typical OpInfo test has to treat the operator
+#   as a black box. There's no structure for the test to understand or exploit.
+#   Without "sample inputs" it wouldn't even know how to call the OpInfo's
+#   operator. The sample input function saves the day by providing different
+#   "SampleInputs" that can be used to call the operator. A sample input
+#   function should have the following signature:
+#
+#   def sample_inputs_foo(op_info, device, dtype, requires_grad, **kwargs):
+#
+#   And should return a list of SampleInputs (see the class description above).
+#   Each SampleInput defines an "input", "args", "kwargs",
+#   an "output_process_fn_grad" function, the "broadcasts_input" bool and
+#   a "name".
+#
+# The "input" is the first argument to the operator, or the tensor that
+#   the method or inplace variants of the operator should be called on, and
+#   should be on the requested device, of the requested dtype, and its
+#   requires_grad attribute should be set to the requires_grad argument.
+#
+# "args" should contain positional arguments, and "kwargs" keyword arguments.
+#
+# "output_process_fn_grad" has an interesting name. It's a function that maps
+#   the operator's output (when given the input, args, and kwargs) to the
+#   portion of the output to gradcheck. For example, consider an operator
+#   like torch.linalg.slogdet
+#   (https://pytorch.org/docs/master/generated/torch.linalg.slogdet.html).
+#   This operator returns a tuple of two tensors, but the first tensor
+#   cannot be backwarded through. Its "output_process_fn_grad" filters
+#   this output tuple to just the second argument, which we can call backward
+#   on. Functions that produce a single tensor can ignore this argument.
+#
+# "broadcasts_input" is a bool indicated if the SampleInput causes the operator
+#   to broadcast the "input" argument. This is important for tests to understand
+#   because inplace variants of operations throw a runtime error if they
+#   would broadcast their input arguments, so tests that work with inplace
+#   variants filter SampleInputs that broadcast their input.
+#
+# "name" is a string that's just used for debugging. It appears when printing
+#   the SampleInput.
+#
+# OPINFO FILE ORGANIZATION
+# ~~~~~~~~~~~~~~~~~~~~~~~~
+#
+# All OpInfos are currently defined in this file. Most OpInfo tests are defined
+#   in test_ops.py, but some system-specific tests are defined in those
+#   systems' test files, and subclass-specific tests are defined in the test
+#   file that corresponds to that subclass (see the below).
+#   Expect a reorganization in the future.
+#
+# WHAT'S TESTED?
+# ~~~~~~~~~~~~~~
+#
+# Every OpInfo in the op_db sequence has the following properties validated in
+# test_ops.py:
+#
+#   - that its supported dtypes are specified correctly
+#   - that it supports the out= argument properly (if it allows out=),
+#       see https://github.com/pytorch/pytorch/wiki/Developer-FAQ#how-does-out-work-in-pytorch
+#   - that it works with the conjugate view bit properly
+#   - that its function, method, and inplace variants perform the same operation
+#       (that is, that torch.add, torch.Tensor.add, and torch.Tensor.add_ all
+#       do the same thing).
+#   - that its inplace variant preserves the input's storage
+#   - that its gradient formula is implemented correctly, and that it supports
+#       gradgrad and complex grad and gradgrad and forward mode AD properly for
+#       the op's function and inplace variants (method variants are skipped
+#       to reduce test time).
+#   - that the operation performs the same operation when traced or scripted
+#       using the jit
+#   - that the operation is autodifferentiated by the jit as expected
+#   - that the operator's aliases, if any, perform the same operation and that
+#       the jit understands the alias
+#
+# Additional OpInfo tests are in test_jit_fuser_te.py, test_fx_experimental.py,
+#   and test_fx.py. These tests validate that operators work with NNC and FX
+#   as expected.
+#
+# For performance, some of the above tests may only run on the first
+#   SampleInput returned by an OpInfo's sample input function.
+#
+# In addition to these tests, some subclasses (discussed in the next section)
+#   define additional tests.
+#
+# Critically, as mentioned above, what's not tested is that the operator
+#   works as expected. When implementing an OpInfo an engineer must still
+#   typically write one or more tests validating the operator's behavior.
+#
+# OPINFO (SUB)CLASSES
+# ~~~~~~~~~~~~~~~~~~~
+#
+# In addition to the OpInfo base class there are several specialized OpInfo
+#   subclasses. For example, the UnaryUfuncInfo subclass is used for
+#   unary elementwise operations. These operations have a common structure
+#   that test_unary_ufuncs.py exploits with additional automated testing.
+#   The automated testing in test_unary_ufuncs.py is so thorough, comparing
+#   the operator to a NumPy reference function on a plethora of values, that
+#   just implementing an OpInfo for a unary elementwise operation is often
+#   sufficient testing.
+#
+# The ForeachFuncInfo is another OpInfo subclass that is hyper-specialized to a
+#   very unique class of operations. These OpInfos aren't included in the
+#   op_db sequence and have their own tests.
+#
+# Other OpInfo subclasses, like SpectralFuncInfo, are just for convenience
+# when writing OpInfos.
+#
+# TESTING A NEW OPERATOR
+# ~~~~~~~~~~~~~~~~~~~~~~
+#
+# If you're adding a new operator to the torch, torch.fft, torch.linalg,
+#   or torch.special namespaces then you should add an OpInfo for it. As
+#   mentioned a couple times above, implementing an OpInfo is not usually
+#   sufficient testing (unless the operator is a unary elementwise operator).
+#   The OpInfo will only test the properties described in the "WHAT'S TESTED"
+#   section. It DOES NOT verify that the operator is implemented correctly.
+#
+# We are currently reviewing if operators in the torch.nn.functional namespace
+#   will be added as OpInfos, but you are encouraged to add an OpInfo for
+#   such operators, too.
+#
+# TIPS FOR WRITING AN OPINFO AND OPINFO TESTS
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#
+# Writing an OpInfo can be a little daunting. Since the point of an OpInfo is to
+#   be consumed by a variety of systems it can be hard to understand how to
+#   deal with test failures or how to set the OpInfo metadata properly.
+#
+# Before adding an OpInfo it helps to look at other OpInfos. A sample inputs
+#   function must be defined, and the operator's dtypes must be specified.
+#   Once that's done you should run the operator's tests in test_ops.py
+#   (these can be filtered using the "-k" argument in pytest). Tests that
+#   fail should provide an error message that describes what to change about
+#   your OpInfo. You don't need to worry about changing an OpInfo's default
+#   values unless a test yells at you.
+#
+# Similarly, if you're writing a test that consumes OpInfos then it's critical
+#   your test provides a clear error message describing what to do when it
+#   fails. You should not assume the OpInfo implementer is familiar with your
+#   system.
+#
+# If you see a confusing error message while developing an OpInfo then please
+#   file an issue describing what happened.
+#
+# This trial-and-error approach can be frustrating to writing an OpInfo can
+#   be frustrating, but it's probably necessary as long as OpInfos don't require
+#   learning about all the systems that consume them. One thing that can help
+#   is the get_supported_dtypes() function defined in opinfo_helper.py. This
+#   function can be used to programmatically specify the dtypes an operator
+#   supports, and is especially useful if writing an OpInfo on a machine
+#   without a CUDA device. See its documentation for more details.
+#
+# THE FUTURE OF OPINFOS AND OPINFO TESTING
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#
+# In the future we expect OpInfo coverage to improve, particularly for the
+#   torch, torch.fft, torch.linalg, and torch.special namespaces, and possibly
+#   for the torch.nn.functional namespace, too. In addition an analogous class,
+#   ModuleInfo, will be developed to improve module testing.
+#
+# We also expect at least two new OpInfo subclasses: BinaryUfuncInfo and
+#   ReductionInfo. Both will have new automated tests for correctness, too,
+#   which might make testing binary elementwise operations and reductions as
+#   simple as testing unary elementwise operations today.
 
 # Classes and methods for the operator database
 class OpInfo(object):
@@ -1635,31 +1861,50 @@ def sample_inputs_diff(op_info, device, dtype, requires_grad, **kwargs):
 
     return tuple(sample_inputs)
 
+def sample_inputs_histogram(op_info, device, dtype, requires_grad):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    sizes = ((), (S,), (S, S), (S, S, S), (S, 1, S), (S, 0, S))
+
+    sample_inputs = []
+    for size, bin_ct, weighted, density in product(sizes, range(1, 5), [False, True], [False, True]):
+        input_tensor = make_arg(size)
+        weight_tensor = make_arg(size) if weighted else None
+
+        sample_inputs.append(SampleInput(input_tensor, args=(bin_ct,),
+                                         kwargs=dict(weight=weight_tensor, density=density)))
+
+        bins_tensor = make_arg((bin_ct + 1,))
+        sample_inputs.append(SampleInput(input_tensor, args=(bins_tensor,),
+                                         kwargs=dict(weight=weight_tensor, density=density)))
+
+    return sample_inputs
+
 def sample_inputs_gradient(op_info, device, dtype, requires_grad):
     sample_inputs = []
     test_cases_float = (
-        ((S,), None, None),
-        ((S,), 2., None),
-        ((S, S), None, None),
-        ((S, S), [2.0, 2.1], None),
-        ((S, S), [2.0, 2.1], (0, 1)),
-        ((4, 4, 4), [2., 1.], (0, 1)),
+        ((S,), None, None, 1),
+        ((S,), 2., None, 1),
+        ((S, S), None, None, 2),
+        ((S, S), [2.0, 2.1], None, 1),
+        ((S, S), [2.0, 2.1], (0, 1), 1),
+        ((4, 4, 4), [2., 1.], (0, 1), 2),
     )
-    for size, spacing, dim in test_cases_float:
+    for size, spacing, dim, edge_order in test_cases_float:
         t = make_tensor(size, device, dtype, low=None, high=None, requires_grad=requires_grad)
-        sample_inputs.append(SampleInput(t, kwargs=dict(dim=dim, spacing=spacing)))
+        sample_inputs.append(SampleInput(t, kwargs=dict(dim=dim, spacing=spacing, edge_order=edge_order)))
 
     test_cases_tensor = (
-        ((3, 3, 3), ((1.1, 2.0, 3.5), (4.0, 2, 6.0)), (0, -1)),
-        ((3, 3, 3), ((1.0, 3.0, 2.0), (8.0, 6.0, 1.0)), (0, 1)),
+        ((3, 3, 3), ((1.1, 2.0, 3.5), (4.0, 2, 6.0)), (0, -1), 1),
+        ((3, 3, 3), ((1.0, 3.0, 2.0), (8.0, 6.0, 1.0)), (0, 1), 2),
     )
-    for size, coordinates, dim in test_cases_tensor:
+    for size, coordinates, dim, edge_order in test_cases_tensor:
         t = make_tensor(size, device, dtype, low=None, high=None, requires_grad=requires_grad)
         coordinates_tensor_list = []
         for coords in coordinates:
             a = torch.tensor(coords, dtype=dtype, device=device)
             coordinates_tensor_list.append(a)
-        sample_inputs.append(SampleInput(t, kwargs=dict(dim=dim, spacing=coordinates_tensor_list)))
+        sample_inputs.append(SampleInput(t, kwargs=dict(dim=dim, spacing=coordinates_tensor_list, edge_order=edge_order)))
 
     return tuple(sample_inputs)
 
@@ -3067,24 +3312,24 @@ def sample_inputs_fmod_remainder(op_info, device, dtype, requires_grad, *, autod
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
     if autodiffed:
-        samples = (  # type: ignore[assignment]
+        samples = (
             ((S, S, S), 1.5, False),
             ((), 1.5, False),
         )
     else:
-        cases = (  # type: ignore[assignment]
+        cases = (
             ((S, S, S), (), False),
             ((S, S, S), (S, S, S), False),
             ((S, S, S), (S,), False),
         )
 
         # Sample inputs with scalars as torch tensors
-        cases_with_tensor_scalar = (  # type: ignore[assignment]
+        cases_with_tensor_scalar = (
             ((), torch.tensor(1, dtype=dtype, device=device, requires_grad=False), False),
         )
 
         # Sample inputs with broadcasting
-        cases_with_broadcasting = (  # type: ignore[assignment]
+        cases_with_broadcasting = (
             ((S,), (S, S, S), True),
             ((S, 1, S), (S, S, S), True),
             ((), (S, S, S), True),
@@ -3765,7 +4010,7 @@ def sample_inputs_split(op_info, device, dtype, requires_grad, *, list_args=Fals
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     if list_args:
-        cases = (  # type: ignore[assignment]
+        cases = (
             ((S, S, S), ([int(S / 3), S - int(S / 3) * 2, int(S / 3)],)),
             ((S, S, S), ([int(S / 2), S - int(S / 2) * 2, int(S / 2)], 2),),
             ((S, S, S), ([int(S / 2), S - int(S / 2) * 2, int(S / 2)], -2),)
@@ -4586,6 +4831,9 @@ op_db: List[OpInfo] = [
            backward_dtypesIfROCM=floating_types_and(torch.half),
            supports_forward_ad=True,
            skips=(
+               # FIXME: bfloat16 backward support likely depends on CUDA11+
+               #   and SM53+
+               SkipInfo('TestCommon', 'test_dtypes', active_if=IS_WINDOWS),
                # addbmm does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),
                # https://github.com/pytorch/pytorch/issues/55907
@@ -4602,6 +4850,9 @@ op_db: List[OpInfo] = [
                                                     torch.complex64, torch.complex128),
            supports_forward_ad=True,
            skips=(
+               # FIXME: bfloat16 backward support likely depends on CUDA11+
+               #   and SM53+
+               SkipInfo('TestCommon', 'test_dtypes', active_if=IS_WINDOWS),
                # baddbmm does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),
            ),
@@ -4626,6 +4877,9 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            supports_forward_ad=True,
            skips=(
+               # FIXME: bfloat16 backward support likely depends on CUDA11+
+               #   and SM53+
+               SkipInfo('TestCommon', 'test_dtypes', active_if=IS_WINDOWS),
                # bmm does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),
            ),
@@ -4779,9 +5033,11 @@ op_db: List[OpInfo] = [
                    supports_inplace_autograd=False,
                    supports_forward_ad=True,
                    skips=(
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal',
+                                device_type='cpu', dtypes=[torch.cfloat]),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal',
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                 device_type='cuda', dtypes=[torch.cfloat, torch.cdouble],
@@ -4971,15 +5227,14 @@ op_db: List[OpInfo] = [
                    )),
     OpInfo('cross',
            dtypes=all_types_and_complex(),
-           dtypesIfCUDA=all_types_and(torch.half),
+           dtypesIfCUDA=all_types_and_complex_and(torch.half),
            sample_inputs_func=sample_inputs_cross,
            supports_forward_ad=True,
            skips=(
                # AssertionError: UserWarning not triggered :
                # Resized a non-empty tensor but did not warn about it.
                SkipInfo('TestCommon', 'test_out'),
-               # CUDA illegal memory access on Windows
-               SkipInfo(device_type='cuda', active_if=IS_WINDOWS))),
+           )),
     OpInfo('cumsum',
            dtypesIfCPU=all_types_and_complex(),
            dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
@@ -5392,6 +5647,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_isin),
     OpInfo('kthvalue',
            dtypes=all_types(),
+           dtypesIfCPU=all_types_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.float16),
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_kthvalue),
@@ -5597,6 +5853,7 @@ op_db: List[OpInfo] = [
                    )),
     UnaryUfuncInfo('log1p',
                    ref=np.log1p,
+                   aliases=('special.log1p',),
                    domain=(-1, float('inf')),
                    dtypes=all_types_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
@@ -5721,6 +5978,9 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_matmul,
            skips=(
+               # FIXME: bfloat16 backward support likely depends on CUDA11+
+               #   and SM53+
+               SkipInfo('TestCommon', 'test_dtypes', active_if=IS_WINDOWS),
                # matmul does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),
                SkipInfo('TestCommon', 'test_conj_view', device_type='cpu'),
@@ -5750,12 +6010,14 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_max_min_reduction_no_dim,),
     OpInfo('median',
            dtypes=all_types(),
+           dtypesIfCPU=all_types_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.float16),
            # TODO: some signatures of median do support out
            supports_out=False,
            sample_inputs_func=sample_inputs_reduction_wrapper(False)),
     OpInfo('nanmedian',
            dtypes=all_types(),
+           dtypesIfCPU=all_types_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.float16),
            # TODO: some signatures of nanmedian do support out
            supports_out=False,
@@ -6065,6 +6327,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_rot90),
     UnaryUfuncInfo('round',
                    ref=np.round,
+                   aliases=('special.round',),
                    dtypes=floating_types_and(torch.bfloat16),
                    dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
                    assert_autodiffed=True,),
@@ -6079,6 +6342,7 @@ op_db: List[OpInfo] = [
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),)),
     UnaryUfuncInfo('sinc',
                    ref=np_sinc_with_fp16_as_fp32,
+                   aliases=('special.sinc',),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    handles_large_floats=False,
@@ -6186,6 +6450,9 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_matmul,
            supports_out=False,
            skips=(
+               # FIXME: bfloat16 backward support likely depends on CUDA11+
+               #   and SM53+
+               SkipInfo('TestCommon', 'test_dtypes', active_if=IS_WINDOWS),
                SkipInfo('TestJit', 'test_variant_consistency_jit',),
            )),
     OpInfo('__rmod__',
@@ -6540,6 +6807,9 @@ op_db: List[OpInfo] = [
            supports_out=False,
            sample_inputs_func=sample_inputs_einsum,
            skips=(
+               # FIXME: bfloat16 backward support likely depends on CUDA11+
+               #   and SM53+
+               SkipInfo('TestCommon', 'test_dtypes', active_if=IS_WINDOWS),
                # test does not work with passing lambda for op
                # there's a test `test_einsum` in `test_jit.py` to handle this case
                SkipInfo('TestJit', 'test_variant_consistency_jit'),
@@ -6828,6 +7098,15 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_hypot,
            ),
+    OpInfo('histogram',
+           dtypes=_dispatch_dtypes(),  # histogram is only implemented on CPU
+           dtypesIfCPU=floating_types(),
+           sample_inputs_func=sample_inputs_histogram,
+           supports_autograd=False,
+           skips=(
+               # JIT tests don't work with Tensor keyword arguments
+               # https://github.com/pytorch/pytorch/issues/58507
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),),),
     OpInfo('vstack',
            aliases=('row_stack',),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -7102,9 +7381,6 @@ op_db: List[OpInfo] = [
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble])),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                   # sigmoid doesn't support complex autograd, https://github.com/pytorch/pytorch/issues/48552
-                   backward_dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
-                   backward_dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    safe_casts_outputs=True,
                    assert_autodiffed=True),
     UnaryUfuncInfo('digamma',
@@ -7129,6 +7405,12 @@ op_db: List[OpInfo] = [
                    supports_inplace_autograd=False,
                    safe_casts_outputs=True,
                    sample_inputs_func=sample_inputs_entr),
+    UnaryUfuncInfo('special.ndtri',
+                   ref=scipy.special.ndtri if TEST_SCIPY else _NOTHING,
+                   domain=(0, 1),
+                   aten_name='special_ndtri',
+                   dtypes=all_types_and(torch.bool),
+                   safe_casts_outputs=True),
     UnaryUfuncInfo('erf',
                    ref=scipy.special.erf if TEST_SCIPY else _NOTHING,
                    aliases=('special.erf', ),
@@ -7305,6 +7587,13 @@ op_db: List[OpInfo] = [
            supports_out=False,
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            assert_autodiffed=True,),
+    UnaryUfuncInfo('special.erfcx',
+                   ref=scipy.special.erfcx if TEST_SCIPY else _NOTHING,
+                   aten_name='special_erfcx',
+                   decorators=(toleranceOverride({torch.float32: tol(atol=0, rtol=3.9e-6), }),),
+                   dtypes=all_types_and(torch.bool),
+                   dtypesIfCUDA=empty_types(),
+                   safe_casts_outputs=True),
 ]
 
 # Common operator groupings

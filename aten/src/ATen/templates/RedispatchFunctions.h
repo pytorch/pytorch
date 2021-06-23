@@ -18,7 +18,7 @@
 namespace at {
 
 namespace redispatch {
-    ${function_redispatch_definitions}
+    ${function_redispatch_declarations}
 } // namespace redispatch
 
 }
