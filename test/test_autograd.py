@@ -4671,12 +4671,15 @@ for shape in [(1,), ()]:
         out = torch.stack([a, b], dim=0)
         self.assertEqual(out.grad_fn._saved_tensors, (a, b))              # TensorList -> Tuple[Tensor]
         self.assertIsInstance(out.grad_fn._saved_tensors[0], torch.Tensor)
+        self.assertIsInstance(out.grad_fn._raw_saved_tensors[0], torch._C._autograd.SavedVariable)
         self.assertEqual(out.grad_fn._saved_dim, 0)                       # int64_t -> int
         self.assertIsInstance(out.grad_fn._saved_dim, int)
 
         out.sum().backward()
         with self.assertRaisesRegex(RuntimeError, "after they have already been freed"):
             out.grad_fn._saved_tensors
+        with self.assertRaisesRegex(RuntimeError, "after they have already been freed"):
+            out.grad_fn._raw_saved_tensors
         self.assertEqual(out.grad_fn._saved_dim, 0)
 
         a = torch.ones(2, 2, requires_grad=True)
@@ -4684,6 +4687,7 @@ for shape in [(1,), ()]:
         out = a[:, indices]
         self.assertEqual(out.grad_fn._saved_indices, (None, indices))     # c10::List<c10::optional<Tensor>> -> Tuple[Tensor?]
         self.assertIsInstance(out.grad_fn._saved_indices[1], torch.Tensor)
+        self.assertIsInstance(out.grad_fn._raw_saved_indices[1], torch._C._autograd.SavedVariable)
         self.assertEqual(out.grad_fn._saved_self_sizes, a.shape)          # IntArrayRef -> Tuple[int]
         self.assertIsInstance(out.grad_fn._saved_self_sizes[0], int)
 
