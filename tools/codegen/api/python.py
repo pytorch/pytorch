@@ -1065,6 +1065,8 @@ def arg_parser_unpack_method(t: Type, has_default: bool) -> str:
             return 'doublelist'
         elif str(t) == 'Scalar[]':
             return 'scalarlist'
+        elif str(t) == 'ScalarType[]':
+            return 'scalartypelist'
     raise RuntimeError(f'type \'{t}\' is not supported by PythonArgParser')
 
 # Return RHS expression for python argument using PythonArgParser output.

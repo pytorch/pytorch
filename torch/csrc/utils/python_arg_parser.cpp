@@ -43,6 +43,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"Dimname", ParameterType::DIMNAME},
   {"DimnameList", ParameterType::DIMNAME_LIST},
   {"ScalarList", ParameterType::SCALAR_LIST},
+  {"ArrayRef<ScalarType>", ParameterType::SCALARTYPE_LIST},
 };
 
 // Default arg name translations for compatibility with NumPy.
@@ -392,6 +393,22 @@ bool is_scalar_list(PyObject* obj) {
   return true;
 }
 
+bool is_scalartype_list(PyObject* obj) {
+  auto tuple = six::isTuple(obj);
+  if (!(tuple || PyList_Check(obj))) {
+    return false;
+  }
+  // NOLINTNEXTLINE(bugprone-branch-clone)
+  const auto size = tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
+  for (const auto idx : c10::irange(size)) {
+    PyObject* iobj = tuple ? PyTuple_GET_ITEM(obj, idx) : PyList_GET_ITEM(obj, idx);
+    if (!(THPDtype_Check(iobj) || THPPythonScalarType_Check(iobj))) {
+      return false;
+    }
+  }
+  return true;
+}
+
 bool is_tensor_list_and_append_overloaded(PyObject* obj, std::vector<py::handle>* overloaded_args, int argnum, bool throw_error) {
   auto tuple = six::isTuple(obj);
   if (!(tuple || PyList_Check(obj))) {
@@ -511,6 +528,9 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
     case ParameterType::SCALAR_LIST: {
       return is_scalar_list(obj);
     }
+    case ParameterType::SCALARTYPE_LIST: {
+      return is_scalartype_list(obj);
+    }
   }
 }
 
@@ -537,6 +557,7 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::DIMNAME: return "name";
     case ParameterType::DIMNAME_LIST: return "tuple of names";
     case ParameterType::SCALAR_LIST: return "tuple of Scalars";
+    case ParameterType::SCALARTYPE_LIST: return "tuple of torch.dtype";
     default: throw std::runtime_error("unknown parameter type");
   }
 }
@@ -1141,6 +1162,19 @@ at::Scalar PythonArgs::scalar_slow(PyObject* arg) {
     return at::Scalar(THPUtils_unpackComplexDouble(arg));
   }
   return at::Scalar(THPUtils_unpackDouble(arg));
+}
+
+at::ScalarType PythonArgs::scalartype_slow(PyObject* arg) {
+  if (arg == (PyObject*)&PyFloat_Type) {
+    return at::ScalarType::Double;
+  }
+  if (arg == (PyObject*)&PyBool_Type) {
+    return at::ScalarType::Bool;
+  }
+  if (arg == (PyObject*)&PyLong_Type) {
+    return at::ScalarType::Long;
+  }
+  return reinterpret_cast<THPDtype*>(arg)->scalar_type;
 }
 
 } // namespace torch

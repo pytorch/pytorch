@@ -80,7 +80,7 @@ namespace torch {
 enum class ParameterType {
   TENSOR, SCALAR, INT64, DOUBLE, COMPLEX, TENSOR_LIST, INT_LIST, GENERATOR,
   BOOL, STORAGE, PYOBJECT, SCALARTYPE, LAYOUT, MEMORY_FORMAT, DEVICE, STREAM, STRING,
-  DIMNAME, DIMNAME_LIST, QSCHEME, FLOAT_LIST, SCALAR_LIST
+  DIMNAME, DIMNAME_LIST, QSCHEME, FLOAT_LIST, SCALAR_LIST, SCALARTYPE_LIST
 };
 
 struct FunctionParameter;
@@ -174,6 +174,7 @@ struct PythonArgs {
   inline at::Storage storage(int i);
   inline c10::Stream stream(int i);
   inline at::ScalarType scalartype(int i);
+  inline std::vector<at::ScalarType> scalartypelist(int i);
   inline at::ScalarType scalartypeWithDefault(int i, at::ScalarType default_scalartype);
   inline c10::optional<at::ScalarType> scalartypeOptional(int i);
   inline c10::optional<at::Scalar> scalarOptional(int i);
@@ -216,6 +217,7 @@ private:
   at::Tensor tensor_slow(int i);
   at::Scalar scalar_slow(int i);
   at::Scalar scalar_slow(PyObject* arg);
+  at::ScalarType scalartype_slow(PyObject* arg);
 };
 
 struct FunctionParameter {
@@ -324,6 +326,20 @@ inline at::Scalar PythonArgs::scalarWithDefault(int i, const at::Scalar& default
 inline c10::optional<at::Scalar> PythonArgs::scalarOptional(int i) {
   if (!args[i]) return c10::nullopt;
   return scalar_slow(i);
+}
+
+inline std::vector<at::ScalarType> PythonArgs::scalartypelist(int i) {
+  if (!args[i]) return std::vector<at::ScalarType>();
+  auto tuple = six::isTuple(args[i]);
+  THPObjectPtr arg = six::maybeAsTuple(args[i]);
+  // NOLINTNEXTLINE(bugprone-branch-clone)
+  auto size = tuple ? PyTuple_GET_SIZE(arg.get()) : PyList_GET_SIZE(arg.get());
+  std::vector<at::ScalarType> res(size);
+  for(const auto idx : c10::irange(size)) {
+    PyObject* obj = tuple ? PyTuple_GET_ITEM(arg.get(), idx) : PyList_GET_ITEM(arg.get(), idx);
+    res[idx] = scalartype_slow(obj);
+  }
+  return res;
 }
 
 inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) {
@@ -472,17 +488,7 @@ inline at::ScalarType PythonArgs::scalartype(int i) {
     return (scalartype == at::ScalarType::Undefined) ?
             torch::tensors::get_default_scalar_type() : scalartype;
   }
-  PyObject *obj = args[i];
-  if (obj == (PyObject*)&PyFloat_Type) {
-    return at::ScalarType::Double;
-  }
-  if (obj == (PyObject*)&PyBool_Type) {
-    return at::ScalarType::Bool;
-  }
-  if (obj == (PyObject*)&PyLong_Type) {
-    return at::ScalarType::Long;
-  }
-  return reinterpret_cast<THPDtype*>(obj)->scalar_type;
+  return scalartype_slow(args[i]);
 }
 
 inline c10::optional<at::ScalarType> PythonArgs::scalartypeOptional(int i) {
