@@ -223,26 +223,9 @@ Value* CloneValueFromListConstruct(
   c10::optional<at::ScalarType> scalar_type = c10::nullopt;
   if (elem->cast<IntType>()) {
     scalar_type = at::kLong;
-
-    if (!v->node()->inputs().empty()) {
-      auto lc_node = v->node();
-      // ListConstruct Int[] output case, we need to transform to ONNX
-      // Concat to ensure the output is a single tensor(dynamic) type in
-      // order to be consumed as inputs
-      std::vector<Value*> unsqueezed;
-      for (auto* input : lc_node->inputs()) {
-        auto new_input = n_graph->addInput();
-        new_input->copyMetadata(input);
-        Node* unsqueezed_node = createONNXUnsqueeze(
-            n_graph.get(), n_graph->return_node(), new_input, 0, opset_version);
-        unsqueezed.emplace_back(unsqueezed_node->output());
-      }
-      Node* concat_node =
-          n_graph->insertNode(n_graph->create(::c10::onnx::Concat, 1));
-      concat_node->i_(attr::axis, 0);
-      for (auto v : unsqueezed) {
-        concat_node->addInput(v);
-      }
+    if (isValidToTransformToONNXConcatNode(v->node())) {
+      auto concat_node = transformToONNXConcatNode(
+          n_graph.get(), v->node(), opset_version);
       return concat_node->output();
     }
   } else if (elem->cast<FloatType>()) {
