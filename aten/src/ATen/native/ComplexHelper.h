@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 
 // WARNING: this header contains non-inline functions and should be only
 // included from ONE cpp file
@@ -57,7 +58,7 @@ inline DimVector computeStrideForViewAsComplex(IntArrayRef oldstride) {
   TORCH_CHECK(oldstride[dim-1] == 1, "Tensor must have a last dimension with stride 1");
 
   DimVector res(dim - 1);
-  for (int64_t i = 0; i < res.size(); i++) {
+  for (const auto i : c10::irange(res.size())) {
     TORCH_CHECK(oldstride[i] % 2 == 0, "Tensor must have a stride divisible by 2 for all but last dimension");
     res[i] = oldstride[i] / 2;
   }
