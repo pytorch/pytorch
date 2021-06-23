@@ -96,7 +96,7 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
         # Simulate mismatch: allreduce vs reduce.
         # Error including info about inconsistent collective, rank, tensor
         # shape, device, and dtype should be raised.
-        with self.assertRaisesRegex(RuntimeError, "..") as cm:
+        with self.assertRaisesRegex(RuntimeError, ".*") as cm:
             if self.rank == 0:
                 wrapper_pg.allreduce([tensor])
             else:
@@ -108,7 +108,7 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
             tensor=tensor,
         )
 
-        with self.assertRaisesRegex(RuntimeError, "..") as cm:
+        with self.assertRaisesRegex(RuntimeError, ".*") as cm:
             if self.rank == 0:
                 wrapper_pg.reduce([tensor])
             else:
@@ -120,7 +120,7 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
             tensor=tensor,
         )
 
-        with self.assertRaisesRegex(RuntimeError, "..") as cm:
+        with self.assertRaisesRegex(RuntimeError, ".*") as cm:
             scatter_result = [torch.ones(4) * i for i in range(self.world_size)]
             scattered_tensor = torch.empty(4)
             if self.rank == 0:
@@ -134,7 +134,7 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
             tensor=scattered_tensor,
         )
 
-        with self.assertRaisesRegex(RuntimeError, "..") as cm:
+        with self.assertRaisesRegex(RuntimeError, ".*") as cm:
             if self.rank == 0:
                 wrapper_pg.broadcast(tensor, 0)
             else:
@@ -155,7 +155,7 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
         tensor = torch.randn(20, dim)
         if use_cuda:
             tensor = tensor.to(self.rank)
-        with self.assertRaisesRegex(RuntimeError, "..") as cm:
+        with self.assertRaisesRegex(RuntimeError, ".*") as cm:
             wrapper_pg.allreduce([tensor])
         self._validate_error(
             exception=cm.exception,
@@ -168,7 +168,7 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
         tensor = torch.randn(20, 10, 2) if self.rank == 0 else torch.randn(20, 10)
         if use_cuda:
             tensor = tensor.to(self.rank)
-        with self.assertRaisesRegex(RuntimeError, "..") as cm:
+        with self.assertRaisesRegex(RuntimeError, ".*") as cm:
             wrapper_pg.allreduce([tensor])
         self._validate_error(
             exception=cm.exception,
@@ -195,7 +195,7 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
         root_rank = 0
         opts = c10d.ScatterOptions()
         opts.rootRank = root_rank
-        with self.assertRaisesRegex(RuntimeError, "..") as cm:
+        with self.assertRaisesRegex(RuntimeError, ".*") as cm:
             if self.rank == root_rank:
                 wrapper_pg.scatter([outputs[self.rank]], [input], opts).wait()
             else:
