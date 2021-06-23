@@ -212,8 +212,22 @@ def _is_constant(value):
 def _is_tensor(x):
     return x.type().isSubtypeOf(torch._C.TensorType.get())
 
+def _is_list(x):
+    return isinstance(x.type(), torch._C.ListType)
+
 def _is_tensor_list(x):
-    return isinstance(x.type(), torch._C.ListType) and isinstance(x.type().getElementType(), torch._C.TensorType)
+    return _is_list(x) and isinstance(x.type().getElementType(), torch._C.TensorType)
+
+def _is_scalar_list(x):
+    """
+    Check if x is a scalar list, for example: List[float], List[int].
+    Besides checking the type is ListType, we also check if the data type is
+    a valid ONNX data type.
+    """
+    element_type = str(x.type().getElementType())
+    return _is_list(x) and \
+        element_type in scalar_name_to_pytorch.keys() and \
+        (scalar_name_to_pytorch[element_type] in cast_pytorch_to_onnx.keys())
 
 def _get_tensor_rank(x):
     if not _is_tensor(x) or x.type() is None:

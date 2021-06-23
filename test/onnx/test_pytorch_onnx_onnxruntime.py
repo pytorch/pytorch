@@ -9246,6 +9246,36 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.ones(0)
         self.run_test(M(), (x,))
 
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_sequence_to_int(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                result = torch.tensor([2 for i in range(x.size()[0])], dtype=torch.int)
+                return x, result
+
+        x = torch.randn(10, 5)
+        self.run_test(M(), (x,))
+
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_sequence_to_float(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                result = torch.tensor([1.1 for i in range(x.size()[0])], dtype=torch.float)
+                return x, result
+
+        x = torch.randn(10, 5)
+        self.run_test(M(), (x,))
+
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_sequence_to_bool(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                result = torch.tensor([False for i in range(x.size()[0])], dtype=torch.bool)
+                return x, result
+
+        x = torch.randn(10, 5)
+        self.run_test(M(), (x,))
+
 
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout, script_test_min_opset_version,
