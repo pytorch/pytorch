@@ -11,7 +11,6 @@
 #include <stdexcept>
 #include <unordered_set>
 
-#include "absl/memory/memory.h"
 #include "lazy_tensor_core/csrc/debug_util.h"
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/ir_dump_util.h"

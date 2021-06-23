@@ -4,7 +4,6 @@
 #include <cmath>
 #include <sstream>
 
-#include "absl/memory/memory.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/core/platform/macros.h"
@@ -20,7 +19,7 @@ const std::vector<double>* ReadEnvPercentiles() {
   std::vector<std::string> percentiles_list =
       lazy_tensors::StrSplit(percentiles, ':');
   std::unique_ptr<std::vector<double>> metrics_percentiles =
-      absl::make_unique<std::vector<double>>();
+      std::make_unique<std::vector<double>>();
   for (auto& pct_str : percentiles_list) {
     double pct = std::stod(pct_str);
     LTC_CHECK(pct > 0.0 && pct < 1.0) << pct;
