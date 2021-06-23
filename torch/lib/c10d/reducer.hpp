@@ -83,9 +83,9 @@ class TORCH_API Reducer {
   // a call to this function can simply be omitted.
   void prepare_for_backward(const std::vector<at::Tensor>& outputs);
 
-  // Called at the begginning of forward() inside DistributedDataParallel,
+  // Called at the beginning of forward() inside DistributedDataParallel,
   // right now it caputures the starting time of forward in each iteration.
-  void prepare_for_forward();
+  void prepare_for_forward(bool will_run_grad_reduction = true);
 
   // Returns the relative time in nanoseconds when gradients were ready,
   // with respect to the time `prepare_for_backward` was called. The outer
@@ -157,6 +157,12 @@ class TORCH_API Reducer {
   // Delay all reduce to be after all gradients' calculation is complete.
   void delay_all_reduce();
 
+  bool static_graph_first_bwd();
+
+  // Resets various counters Reducer uses to manager internal state such as
+  // buckets that need to be reduced across workers.
+  void reset_variable_counting();
+
   // Weak reference to associated DDP logger. The reference is weak to avoid
   // refcycle between reducer and logger.
   void set_logger(std::weak_ptr<c10d::Logger> logger);
@@ -178,6 +184,8 @@ class TORCH_API Reducer {
   std::vector<std::pair<uintptr_t, std::shared_ptr<torch::autograd::Node>>>
       hooks_;
 
+  // Whether we need to run autograd hooks (only false if user runs with
+  // no_grad or no_sync context manager)
   bool expect_autograd_hooks_;
   bool require_finalize_;
   size_t next_bucket_;
@@ -365,7 +373,13 @@ class TORCH_API Reducer {
   std::vector<VariableLocator> variable_locators_;
 
   // track the number of iterations to synchronize grads in training so far.
+  // This is the number of calls to the forward pass, not necessarily equal to
+  // number of calls to backward pass.
   long num_iterations_;
+  // Number of times backward() has been called. This is mainly used for static
+  // graph training to know when to populate the map of how many times grad
+  // hooks have been triggered.
+  long num_backward_calls_;
   // track the number of buckets that have been ready for
   // communication calls like allReduce or communication hooks.
   int num_buckets_ready_;
@@ -392,7 +406,13 @@ class TORCH_API Reducer {
   bool is_multi_device_module_ = false;
 
   // Following variables are to help build dynamic bucket order
+  // Whether the process of rebuilding buckets has occured.
   bool has_rebuilt_bucket_;
+  // Flag indicating all rebuilt param indices have been pushed. This is needed
+  // because there can be multiple calls to backward with retain_graph=True
+  // without a forward that actually rebuilds the buckets. In this case, we use
+  // this flag to avoid pushing parameters multiple times.
+  bool all_rebuilt_params_pushed_{false};
   std::vector<at::Tensor> rebuilt_params_;
   std::vector<int64_t> rebuilt_param_indices_;
   const int64_t bucket_bytes_cap_;
@@ -457,8 +477,7 @@ class TORCH_API Reducer {
   // get current cuda stream
   const c10::Stream get_current_stream();
   bool dynamic_graph_find_unused();
-  bool static_graph_first_iteration();
-  bool static_graph_after_first_iteration();
+  bool static_graph_after_first_bwd();
 
   // comm_hook_ is used to access the DDP communication hook if registered.
   std::unique_ptr<CommHookInterface> comm_hook_;
