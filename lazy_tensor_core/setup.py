@@ -216,25 +216,13 @@ client_files = [
     'third_party/computation_client/util.cc',
 ]
 
-absl_files = list(
-    set(glob2.glob('third_party/abseil-cpp/absl/**/*.cc')) -
-    set(glob2.glob('third_party/abseil-cpp/absl/**/*_test.cc')) -
-    set(glob2.glob('third_party/abseil-cpp/absl/**/*_testing.cc')) -
-    set(glob2.glob('third_party/abseil-cpp/absl/**/benchmarks.cc')) -
-    set(glob2.glob('third_party/abseil-cpp/absl/**/*_benchmark.cc')) -
-    set(glob2.glob('third_party/abseil-cpp/absl/**/*_benchmarks.cc')) -
-    set(glob2.glob('third_party/abseil-cpp/absl/**/spinlock_test_common.cc')) -
-    set(glob2.glob('third_party/abseil-cpp/absl/flags/**/*.cc')) -
-    set(glob2.glob('third_party/abseil-cpp/absl/**/mutex_nonprod.cc')) -
-    set(glob2.glob('third_party/abseil-cpp/absl/**/gaussian_distribution_gentables.cc')))
-
 # Fetch the sources to be built.
 torch_ltc_sources = (
     glob.glob('lazy_tensor_core/csrc/*.cpp') + glob.glob('lazy_tensor_core/csrc/ops/*.cpp') +
     glob.glob('lazy_tensor_core/csrc/compiler/*.cpp') + glob.glob('lazy_tensor_core/csrc/ts_backend/*.cpp') +
     glob.glob('lazy_tensors/client/*.cc') + glob.glob('lazy_tensors/*.cc') +
     glob.glob('lazy_tensors/client/lib/*.cc') + glob.glob('lazy_tensors/core/platform/*.cc') +
-    client_files + absl_files)
+    client_files)
 
 # Constant known variables used throughout this file.
 lib_path = os.path.join(base_dir, 'lazy_tensor_core/lib')
@@ -244,18 +232,6 @@ pytorch_source_path = os.getenv('PYTORCH_SOURCE_PATH',
 # Setup include directories folders.
 include_dirs = [
     base_dir,
-]
-for ipath in [
-    'tensorflow/bazel-tensorflow',
-    'tensorflow/bazel-bin',
-    'tensorflow/bazel-tensorflow/external/protobuf_archive/src',
-    'tensorflow/bazel-tensorflow/external/com_google_protobuf/src',
-    'tensorflow/bazel-tensorflow/external/eigen_archive',
-    'tensorflow/bazel-tensorflow/external/com_google_absl',
-    'abseil-cpp',
-]:
-  include_dirs.append(os.path.join(third_party_path, ipath))
-include_dirs += [
     pytorch_source_path,
     os.path.join(pytorch_source_path, 'torch/csrc'),
     os.path.join(pytorch_source_path, 'torch/lib/tmp_install/include'),
