@@ -478,6 +478,27 @@ class TestOptim(TestCase):
             with self.assertRaisesRegex(ValueError, "Invalid rho value: 1.1"):
                 optimizer(None, lr=1e-2, rho=1.1)
 
+    def test_nadam(self):
+        self._test_basic_cases(
+            lambda weight, bias: optim.NAdam([weight, bias], lr=1e-3)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.NAdam(
+                self._build_params_dict(weight, bias, lr=1e-2),
+                lr=1e-3)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.NAdam([weight, bias], lr=1e-3, weight_decay=0.1, momentum_decay=6e-3)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.NAdam([weight, bias], lr=1e-3, weight_decay=0.1, momentum_decay=6e-3),
+            [lambda opt: ExponentialLR(opt, gamma=0.9)]
+        )
+        with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
+            optim.NAdam(None, lr=1e-2, betas=(1.0, 0.0))
+        with self.assertRaisesRegex(ValueError, "Invalid momentum_decay value: -0.2"):
+            optim.NAdam(None, lr=1e-2, momentum_decay=-0.2)
+
     def test_adagrad(self):
         self._test_basic_cases(
             lambda weight, bias: optim.Adagrad([weight, bias], lr=1e-1)

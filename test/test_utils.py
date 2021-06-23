@@ -825,5 +825,33 @@ class TestStandaloneCPPJIT(TestCase):
             shutil.rmtree(build_dir)
 
 
+class DummyXPUModule(object):
+    @staticmethod
+    def is_available():
+        return True
+
+
+class TestExtensionUtils(TestCase):
+    def test_external_module_register(self):
+        # Built-in module
+        with self.assertRaisesRegex(RuntimeError, "The runtime module of"):
+            torch._register_device_module('cuda', torch.cuda)
+
+        # Wrong device type
+        with self.assertRaisesRegex(RuntimeError, "Expected one of cpu"):
+            torch._register_device_module('dummmy', DummyXPUModule)
+
+        with self.assertRaises(AttributeError):
+            torch.xpu.is_available()  # type: ignore[attr-defined]
+
+        torch._register_device_module('xpu', DummyXPUModule)
+
+        torch.xpu.is_available()  # type: ignore[attr-defined]
+
+        # No supporting for override
+        with self.assertRaisesRegex(RuntimeError, "The runtime module of"):
+            torch._register_device_module('xpu', DummyXPUModule)
+
+
 if __name__ == '__main__':
     run_tests()

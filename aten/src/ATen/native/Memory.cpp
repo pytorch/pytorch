@@ -9,16 +9,16 @@
 namespace at {
 namespace native {
 
-bool is_pinned(const Tensor& self, Device device) {
-  TORCH_CHECK(device.is_cuda(), device, " doesn't have a concept of is_pinned");
+bool is_pinned(const Tensor& self, c10::optional<Device> device) {
+  TORCH_CHECK(!device.has_value() || device->is_cuda(), "non-cuda device doesn't have a concept of is_pinned");
   return detail::getCUDAHooks().isPinnedPtr(self.storage().data());
 }
 
-Tensor pin_memory(const Tensor& self, Device device) {
+Tensor pin_memory(const Tensor& self, c10::optional<Device> device) {
   if (!self.device().is_cpu()) {
     AT_ERROR("cannot pin '", self.toString(), "' only dense CPU tensors can be pinned");
   }
-  TORCH_CHECK(device.is_cuda(), device, " doesn't have a concept of pinned memory");
+  TORCH_CHECK(!device.has_value() || device->is_cuda(), "non-cuda device doesn't have a concept of pinned memory");
   if (self.is_pinned()) {
     return self;
   }
