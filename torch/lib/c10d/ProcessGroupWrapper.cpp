@@ -1,10 +1,9 @@
 #include <c10d/ProcessGroupWrapper.hpp>
-#include "c10/core/Allocator.h"
-#include "c10/core/Device.h"
 
 #ifdef USE_C10D_GLOO
 
 #include <c10/core/Allocator.h>
+#include <c10/core/Device.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/Exception.h>
@@ -27,7 +26,7 @@ struct CollectiveFingerPrint {
   // checked across processes to ensure valid input into the collective.
   const std::vector<at::Tensor>& input_tensors_;
   // input tensor data types
-  std::vector<int> tensor_dtypes_;
+  std::vector<int8_t> tensor_dtypes_;
   // input tensor device types
   std::vector<int8_t> tensor_device_types_;
   explicit CollectiveFingerPrint(
@@ -48,42 +47,44 @@ struct CollectiveFingerPrint {
       const CollectiveFingerPrint& collective_fingerprint);
 
   at::Tensor serialize_fingerprint() {
-    std::vector<int64_t> data;
+    auto data = std::make_unique<std::vector<int64_t>>();
+    // std::vector<int64_t> data;
     // OpType
-    data.push_back(static_cast<int64_t>(op_type_));
+    data->push_back(static_cast<int64_t>(op_type_));
     // Shapes
     for (const auto& tensor : input_tensors_) {
       auto sizes = tensor.sizes().vec();
       for (const auto& s : sizes) {
-        data.push_back(s);
+        data->push_back(s);
       }
     }
     // tensor dtypes
     for (const auto& type : tensor_dtypes_) {
-      data.push_back(type);
+      data->push_back(type);
     }
     // device types
     for (const auto& d : tensor_device_types_) {
-      data.push_back(d);
+      data->push_back(d);
     }
     // Serialize data into tensor
-    int64_t data_size = data.size();
-    at::DataPtr data_ptr((void*)std::move(data.data()), c10::Device(c10::kCPU));
-    c10::Storage storage(
-        c10::Storage::use_byte_size_t(),
-        data_size * c10::elementSize(at::kLong),
-        std::move(data_ptr));
-
+    int64_t data_size = data->size();
     auto options = at::TensorOptions().dtype(at::kLong);
-    // Need to clone here otherwise the data memory is not copied and would be
-    // released after this function returns.
-    auto serialized_tensor =
-        at::empty({data_size}, options).set_(storage).clone();
-    // at::Tensor serialized_tensor =
-    //     at::from_blob(
-    //         data.data(), {data_size}, at::TensorOptions().dtype(at::kLong))
-    //         .clone();
-    LOG(INFO) << "Retrurning fom serialize: " << serialized_tensor;
+    // at::DataPtr data_ptr((void*)std::move(data->data()), c10::Device(c10::kCPU));
+    // c10::Storage storage(
+    //     c10::Storage::use_byte_size_t(),
+    //     data_size * c10::elementSize(at::kLong),
+    //     std::move(data_ptr));
+    // auto serialized_tensor =
+    //     at::empty({data_size}, options).set_(storage).clone();
+    at::Tensor serialized_tensor =
+        at::for_blob(data->data(), {data_size})
+            .context(
+                data.release(),
+                [](void* ctx) {
+                  delete static_cast<std::vector<int64_t>*>(ctx);
+                })
+            .options(at::TensorOptions().dtype(at::kLong))
+            .make_tensor();
     return serialized_tensor;
   }
 
@@ -109,9 +110,6 @@ struct CollectiveFingerPrint {
       const at::Tensor reference_tensor = tensors_to_verify[i];
       for (const auto& rank_tensor : gathered_tensors) {
         if (!rank_tensor.equal(reference_tensor)) {
-          LOG(INFO) << "Rank: " << pg->getRank()
-                    << " tensors not equal: " << rank_tensor << " vs "
-                    << reference_tensor;
           std::stringstream ss;
           ss << "Detected mismatch between collectives on ranks. Rank "
              << pg->getRank()
@@ -125,15 +123,14 @@ struct CollectiveFingerPrint {
   // Executes and verifies the collective fingerprint.
   void verify(c10::intrusive_ptr<ProcessGroup> pg) {
     at::Tensor serialized_tensor = serialize_fingerprint();
-    LOG(INFO) << "Rank " << pg->getRank()
-              << " got back tensor: " << serialized_tensor;
     std::vector<at::Tensor> inp{serialized_tensor};
     // First verify tensor shapes. This is needed because if e.g. tensor dim
     // does not match across processes, directly verifying tensors will result
     // in a crash during allgather, but we'd actually like to report a
-    // description about the inconsistency.
+    // description about the inconsistency. Since the input is just a 1D tensor
+    // the shape will be a single int k_i and we need to make sure k_i is
+    // consistent across the whole world.
     std::vector<at::Tensor> sp = c10d::getTensorShapes(inp);
-    LOG(INFO) << "Tensor shape is: " << sp[0];
     verify_tensors(sp, pg);
     // Now verify consistency for the actual tensor.
     verify_tensors(inp, pg);

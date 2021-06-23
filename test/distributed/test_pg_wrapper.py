@@ -10,6 +10,7 @@ if not c10d.is_available():
     print("c10d not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
+from test_c10d_common import LOOPBACK
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     requires_nccl,
@@ -22,7 +23,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_TSAN,
 )
-from test_c10d_common import LOOPBACK
 
 
 class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
@@ -45,10 +45,16 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
                 f"{list(tensor.shape)}" in err,
                 f"Did not find shapes {list(tensor.shape)} in error {err}",
             )
-            self.assertTrue(
-                str(tensor.device) in err,
-                f"Did not find tensor device {str(tensor.device)} in error {err}",
-            )
+            # For CUDA, only assert on device type, not index
+            if "cuda" in str(tensor.device):
+                self.assertTrue(
+                    "cuda" in err, f"Did not find cuda device in error {err}"
+                )
+            else:
+                self.assertTrue(
+                    str(tensor.device) in err,
+                    f"Did not find tensor device {str(tensor.device)} in error {err}",
+                )
             # C++ and python type strings are not exactly the same.
             if "float" in str(tensor.dtype):
                 self.assertTrue("Float" in err, "Expected Float type")
@@ -95,24 +101,24 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
                 wrapper_pg.allreduce([tensor])
             else:
                 wrapper_pg.reduce([tensor])
-            self._validate_error(
-                exception=cm.exception,
-                op_type="ALLREDUCE" if self.rank == 0 else "REDUCE",
-                rank=self.rank,
-                tensor=tensor,
-            )
+        self._validate_error(
+            exception=cm.exception,
+            op_type="ALLREDUCE" if self.rank == 0 else "REDUCE",
+            rank=self.rank,
+            tensor=tensor,
+        )
 
         with self.assertRaisesRegex(RuntimeError, "..") as cm:
             if self.rank == 0:
                 wrapper_pg.reduce([tensor])
             else:
                 wrapper_pg.barrier()
-            self._validate_error(
-                exception=cm.exception,
-                op_type="REDUCE" if self.rank == 0 else "BARRIER",
-                rank=self.rank,
-                tensor=tensor,
-            )
+        self._validate_error(
+            exception=cm.exception,
+            op_type="REDUCE" if self.rank == 0 else "BARRIER",
+            rank=self.rank,
+            tensor=tensor,
+        )
 
         with self.assertRaisesRegex(RuntimeError, "..") as cm:
             scatter_result = [torch.ones(4) * i for i in range(self.world_size)]
@@ -121,12 +127,12 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
                 wrapper_pg.scatter(scattered_tensor, scatter_result, 0)
             else:
                 wrapper_pg.reduce_scatter(scattered_tensor, scatter_result)
-            self._validate_error(
-                exception=cm.exception,
-                op_type="SCATTER" if self.rank == 0 else "REDUCE_SCATTER",
-                rank=self.rank,
-                tensor=scattered_tensor,
-            )
+        self._validate_error(
+            exception=cm.exception,
+            op_type="SCATTER" if self.rank == 0 else "REDUCE_SCATTER",
+            rank=self.rank,
+            tensor=scattered_tensor,
+        )
 
         with self.assertRaisesRegex(RuntimeError, "..") as cm:
             if self.rank == 0:
@@ -136,12 +142,12 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
                     torch.zeros_like(tensor) for _ in range(self.world_size)
                 ]
                 wrapper_pg.allgather([output_tensors], [tensor])
-            self._validate_error(
-                exception=cm.exception,
-                op_type="BROADCAST" if self.rank == 0 else "ALLGATHER",
-                rank=self.rank,
-                tensor=tensor,
-            )
+        self._validate_error(
+            exception=cm.exception,
+            op_type="BROADCAST" if self.rank == 0 else "ALLGATHER",
+            rank=self.rank,
+            tensor=tensor,
+        )
 
     def _test_collective_shape_mismatch(self, wrapper_pg, use_cuda=False):
         wrapper_pg.barrier()
@@ -151,13 +157,12 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
             tensor = tensor.to(self.rank)
         with self.assertRaisesRegex(RuntimeError, "..") as cm:
             wrapper_pg.allreduce([tensor])
-            err = str(e)
-            self._validate_error(
-                exception=cm.exception,
-                op_type="ALLREDUCE",
-                rank=self.rank,
-                tensor=tensor,
-            )
+        self._validate_error(
+            exception=cm.exception,
+            op_type="ALLREDUCE",
+            rank=self.rank,
+            tensor=tensor,
+        )
 
         # Check errors are raised when dimensionality of shapes is different
         tensor = torch.randn(20, 10, 2) if self.rank == 0 else torch.randn(20, 10)
@@ -165,13 +170,12 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
             tensor = tensor.to(self.rank)
         with self.assertRaisesRegex(RuntimeError, "..") as cm:
             wrapper_pg.allreduce([tensor])
-            err = str(e)
-            self._validate_error(
-                exception=cm.exception,
-                op_type="ALLREDUCE",
-                rank=self.rank,
-                tensor=tensor,
-            )
+        self._validate_error(
+            exception=cm.exception,
+            op_type="ALLREDUCE",
+            rank=self.rank,
+            tensor=tensor,
+        )
 
         # Check shape errors with scatter
         input = [
@@ -196,13 +200,12 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
                 wrapper_pg.scatter([outputs[self.rank]], [input], opts).wait()
             else:
                 wrapper_pg.scatter([outputs[self.rank]], [], opts).wait()
-            err = str(e)
-            self._validate_error(
-                exception=cm.exception,
-                op_type="SCATTER",
-                rank=self.rank,
-                tensor=outputs[self.rank],
-            )
+        self._validate_error(
+            exception=cm.exception,
+            op_type="SCATTER",
+            rank=self.rank,
+            tensor=outputs[self.rank],
+        )
 
 
 @requires_gloo()

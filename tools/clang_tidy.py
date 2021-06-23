@@ -41,13 +41,6 @@ Patterns = collections.namedtuple("Patterns", "positive, negative")
 # (c/cc/cpp) file.
 DEFAULT_FILE_PATTERN = re.compile(r"^.*\.c(c|pp)?$")
 
-# Search for:
-#    diff --git ...
-#    index ...
-#    --- ...
-#    +++ ...
-CHUNK_HEADER_RE = r"diff --git .*?\nindex.*?\n---.*?\n\+\+\+ b/(.*?)\n@@ -(\d+,\d+) \+(\d+,\d+) @@"
-
 CLANG_WARNING_PATTERN = re.compile(r"([^:]+):(\d+):\d+:\s+warning:.*\[([^\]]+)\]")
 
 
@@ -136,14 +129,24 @@ def get_all_files(paths: List[str]) -> List[str]:
 
 
 def find_changed_lines(diff: str) -> Dict[str, List[Tuple[int, int]]]:
+    # Delay import since this isn't required unless using the --diff-file
+    # argument, which for local runs people don't care about
+    try:
+        import unidiff  # type: ignore[import]
+    except ImportError as e:
+        e.msg += ", run 'pip install unidiff'"  # type: ignore[attr-defined]
+        raise e
+
     files = collections.defaultdict(list)
 
-    matches = re.findall(CHUNK_HEADER_RE, diff, re.MULTILINE)
-    for file, start, end in matches:
-        start_line, _ = start.split(",")
-        end_line, _ = end.split(",")
+    for file in unidiff.PatchSet(diff):
+        for hunk in file:
+            start = hunk[0].target_line_no
+            if start is None:
+                start = 1
+            end = hunk[-1].target_line_no
 
-        files[file].append((start_line, end_line))
+        files[file.path].append((start, end))
 
     return dict(files)
 
