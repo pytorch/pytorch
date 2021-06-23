@@ -48,7 +48,7 @@ class Transformer(Module):
     def __init__(self, d_model: int = 512, nhead: int = 8, num_encoder_layers: int = 6,
                  num_decoder_layers: int = 6, dim_feedforward: int = 2048, dropout: float = 0.1,
                  activation: str = "relu", custom_encoder: Optional[Any] = None, custom_decoder: Optional[Any] = None,
-                 layer_norm_eps: float = 1e-5, batch_first: bool = False,
+                 layer_norm_eps: float = 1e-5, batch_first: bool = False, norm_first: bool = False,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
         super(Transformer, self).__init__()
@@ -57,18 +57,18 @@ class Transformer(Module):
             self.encoder = custom_encoder
         else:
             encoder_layer = TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout,
-                                                    activation, layer_norm_eps, batch_first,
+                                                    activation, layer_norm_eps, batch_first, norm_first,
                                                     **factory_kwargs)
-            encoder_norm = LayerNorm(d_model, eps=layer_norm_eps, **factory_kwargs)
+            encoder_norm = LayerNorm(d_model, eps=layer_norm_eps, **factory_kwargs) if norm_first else None
             self.encoder = TransformerEncoder(encoder_layer, num_encoder_layers, encoder_norm)
 
         if custom_decoder is not None:
             self.decoder = custom_decoder
         else:
             decoder_layer = TransformerDecoderLayer(d_model, nhead, dim_feedforward, dropout,
-                                                    activation, layer_norm_eps, batch_first,
+                                                    activation, layer_norm_eps, batch_first, norm_first,
                                                     **factory_kwargs)
-            decoder_norm = LayerNorm(d_model, eps=layer_norm_eps, **factory_kwargs)
+            decoder_norm = LayerNorm(d_model, eps=layer_norm_eps, **factory_kwargs) if norm_first else None
             self.decoder = TransformerDecoder(decoder_layer, num_decoder_layers, decoder_norm)
 
         self._reset_parameters()
@@ -269,6 +269,8 @@ class TransformerEncoderLayer(Module):
         layer_norm_eps: the eps value in layer normalization components (default=1e-5).
         batch_first: If ``True``, then the input and output tensors are provided
             as (batch, seq, feature). Default: ``False``.
+        norm_first: if ``True``, layer norm is done prior to attention and feedforward
+            operations, respectivaly. Otherwise it's done after. Default: ``False`` (after).
 
     Examples::
         >>> encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8)
@@ -280,10 +282,10 @@ class TransformerEncoderLayer(Module):
         >>> src = torch.rand(32, 10, 512)
         >>> out = encoder_layer(src)
     """
-    __constants__ = ['batch_first']
+    __constants__ = ['batch_first', 'norm_first']
 
     def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1, activation="relu",
-                 layer_norm_eps=1e-5, batch_first=False,
+                 layer_norm_eps=1e-5, batch_first=False, norm_first=False,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
         super(TransformerEncoderLayer, self).__init__()
@@ -294,6 +296,7 @@ class TransformerEncoderLayer(Module):
         self.dropout = Dropout(dropout)
         self.linear2 = Linear(dim_feedforward, d_model, **factory_kwargs)
 
+        self.norm_first = norm_first
         self.norm1 = LayerNorm(d_model, eps=layer_norm_eps, **factory_kwargs)
         self.norm2 = LayerNorm(d_model, eps=layer_norm_eps, **factory_kwargs)
         self.dropout1 = Dropout(dropout)
@@ -317,8 +320,19 @@ class TransformerEncoderLayer(Module):
         Shape:
             see the docs in Transformer class.
         """
+        if self.norm_first:
+            src = self.norm1(src)
+            src2 = self.self_attn(src, src, src, attn_mask=src_mask,
+                                key_padding_mask=src_key_padding_mask)[0]
+            src = src + self.dropout1(src2)
+            src = self.norm2(src)
+            src2 = self.linear2(self.dropout(self.activation(self.linear1(src))))
+            src = src + self.dropout2(src2)
+            return src
+
+        # norm last
         src2 = self.self_attn(src, src, src, attn_mask=src_mask,
-                              key_padding_mask=src_key_padding_mask)[0]
+                            key_padding_mask=src_key_padding_mask)[0]
         src = src + self.dropout1(src2)
         src = self.norm1(src)
         src2 = self.linear2(self.dropout(self.activation(self.linear1(src))))
@@ -344,6 +358,9 @@ class TransformerDecoderLayer(Module):
         layer_norm_eps: the eps value in layer normalization components (default=1e-5).
         batch_first: If ``True``, then the input and output tensors are provided
             as (batch, seq, feature). Default: ``False``.
+        norm_first: if ``True``, layer norm is done prior to self attention, multihead
+            attention and feedforward operations, respectivaly. Otherwise it's done after.
+            Default: ``False`` (after).
 
     Examples::
         >>> decoder_layer = nn.TransformerDecoderLayer(d_model=512, nhead=8)
@@ -357,10 +374,11 @@ class TransformerDecoderLayer(Module):
         >>> tgt = torch.rand(32, 20, 512)
         >>> out = decoder_layer(tgt, memory)
     """
-    __constants__ = ['batch_first']
+    __constants__ = ['batch_first', 'norm_first']
 
     def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1, activation="relu",
-                 layer_norm_eps=1e-5, batch_first=False, device=None, dtype=None) -> None:
+                 layer_norm_eps=1e-5, batch_first=False, norm_first=False,
+                 device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
         super(TransformerDecoderLayer, self).__init__()
         self.self_attn = MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=batch_first,
@@ -372,6 +390,7 @@ class TransformerDecoderLayer(Module):
         self.dropout = Dropout(dropout)
         self.linear2 = Linear(dim_feedforward, d_model, **factory_kwargs)
 
+        self.norm_first = norm_first
         self.norm1 = LayerNorm(d_model, eps=layer_norm_eps, **factory_kwargs)
         self.norm2 = LayerNorm(d_model, eps=layer_norm_eps, **factory_kwargs)
         self.norm3 = LayerNorm(d_model, eps=layer_norm_eps, **factory_kwargs)
@@ -401,12 +420,27 @@ class TransformerDecoderLayer(Module):
         Shape:
             see the docs in Transformer class.
         """
+        if self.norm_first:
+            tgt = self.norm1(tgt)
+            tgt2 = self.self_attn(tgt, tgt, tgt, attn_mask=tgt_mask,
+                                key_padding_mask=tgt_key_padding_mask)[0]
+            tgt = tgt + self.dropout1(tgt2)
+            tgt = self.norm2(tgt)
+            tgt2 = self.multihead_attn(tgt, memory, memory, attn_mask=memory_mask,
+                                    key_padding_mask=memory_key_padding_mask)[0]
+            tgt = tgt + self.dropout2(tgt2)
+            tgt = self.norm3(tgt)
+            tgt2 = self.linear2(self.dropout(self.activation(self.linear1(tgt))))
+            tgt = tgt + self.dropout3(tgt2)
+            return tgt
+
+        # norm last
         tgt2 = self.self_attn(tgt, tgt, tgt, attn_mask=tgt_mask,
-                              key_padding_mask=tgt_key_padding_mask)[0]
+                            key_padding_mask=tgt_key_padding_mask)[0]
         tgt = tgt + self.dropout1(tgt2)
         tgt = self.norm1(tgt)
         tgt2 = self.multihead_attn(tgt, memory, memory, attn_mask=memory_mask,
-                                   key_padding_mask=memory_key_padding_mask)[0]
+                                key_padding_mask=memory_key_padding_mask)[0]
         tgt = tgt + self.dropout2(tgt2)
         tgt = self.norm2(tgt)
         tgt2 = self.linear2(self.dropout(self.activation(self.linear1(tgt))))
