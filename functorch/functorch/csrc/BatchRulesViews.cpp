@@ -139,12 +139,25 @@ std::tuple<Tensor,optional<int64_t>> diag_batch_rule(
   }
 }
 
+std::tuple<Tensor,optional<int64_t>> _unsafe_view_batch_rule(
+    const Tensor& self,
+    optional<int64_t> self_bdim,
+    IntArrayRef size) {
+  if (!self_bdim) {
+    return std::make_tuple(at::_unsafe_view(self, size), nullopt);
+  }
+  VmapDimVector view_size(size);
+  view_size.insert(view_size.begin() + *self_bdim, self.size(*self_bdim));
+
+  return std::make_tuple(at::_unsafe_view(self, view_size), self_bdim);
+}
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("flatten.using_ints", flatten_batch_rule);
   VMAP_SUPPORT("unsqueeze", unsqueeze_batch_rule);
   VMAP_SUPPORT("repeat", repeat_batch_rule);
   VMAP_SUPPORT("diag", diag_batch_rule);
+  VMAP_SUPPORT("_unsafe_view", _unsafe_view_batch_rule);
 }
 
 }}
