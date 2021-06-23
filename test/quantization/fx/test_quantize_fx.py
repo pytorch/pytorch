@@ -4659,3 +4659,50 @@ class TestQuantizeFxModels(QuantizationTestCase):
         model = models.__dict__[name](pretrained=True).eval().float()
         self._test_model_impl(
             'ddp', 'resnet18', model, eager_quantizable_model)
+
+    def test_reference_resnet18_to_trt(self):
+        # from torchvision import models
+        # model = models.__dict__["resnet18"](pretrained=True).eval().float()
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                x = x + y
+                # x = x + y
+                # x = torch.nn.functional.relu(x)
+                return x
+
+        model = M().eval()
+        model = prepare_fx(model, {"": default_qconfig})
+        print("prepared:", model)
+        import copy
+        model_copy = copy.deepcopy(model)
+        model_reference = convert_fx(model, is_reference=True)
+
+        model = convert_fx(model_copy)
+        data = torch.rand(1, 3, 224, 224)
+        out = model(data, data)
+        out_reference = model(data, data)
+        print("converted:", model_reference)
+        print(torch.sum(out - out_reference))
+
+        from torch.fx.experimental.fx2trt.fx2trt import TRTInterpreter, InputTensorSpec, TRTModule
+        from typing import Tuple
+        import tensorrt as trt
+        TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
+
+
+        def lower_mod_to_trt(mod: torch.fx.GraphModule, inputs: Tuple[torch.Tensor]):
+            """
+            Helper function that given a GraphModule `mod` and its `inputs`, build a
+            TRTModule that runs the original `mod` on TensorRT.
+            """
+            interp = TRTInterpreter(mod, InputTensorSpec.from_tensors(inputs))
+            engine, input_names, output_names = interp.run(int8_mode=True)
+            serialized_engine = engine.serialize()
+            print("serailized engine:", serialized_engine)
+            return TRTModule(engine, input_names, output_names)
+
+        model_trt = lower_mod_to_trt(model_reference, (data,data))
+        print("trt model:", model_trt)
+        out_trt = model_trt(data, data)
+        print("out trt:", out_trt.cpu())

@@ -2,7 +2,8 @@ import torch
 import tensorrt as trt
 from torch.fx.experimental.fx2trt.fx2trt import tensorrt_converter
 
-from .helper_functions import get_dyn_range, get_inputs_from_args_and_kwargs
+from .helper_functions import get_dyn_range, get_inputs_from_args_and_kwargs, to_numpy
+import numpy as np
 
 
 quantize_per_tensor_inputs = ["input", "scale", "zero_point", "dtype"]
@@ -18,7 +19,10 @@ def dequantize(network, submod, args, kwargs, layer_name):
         raise RuntimeError(f'Dequantize received input {input_val} that is not part '
                            'of the TensorRT region!')
 
-    return input_val
+    scale = network.add_constant((1,), trt.Weights(np.ascontiguousarray([1], dtype=np.float32))).get_output(0)
+    layer = network.add_dequantize(input=input_val, scale=scale)
+    layer.axis = 0
+    return layer.get_output(0)
 
 
 @tensorrt_converter(torch.quantize_per_tensor)
@@ -40,8 +44,14 @@ def quantize(network, submod, args, kwargs, layer_name):
     if dtype != torch.quint8:
         raise RuntimeError(f"Only support torch.quint8 quantized type for activation, get {dtype}.")
 
-    input_val.dynamic_range = get_dyn_range(scale, zero_point, dtype)
-    return input_val
+    # input_val.dynamic_range = get_dyn_range(scale, zero_point, dtype)
+    scale = network.add_constant((1,), trt.Weights(np.ascontiguousarray([1], dtype=np.float32))).get_output(0)
+    print(dir(scale))
+    layer = network.add_quantize(input=input_val, scale=scale)
+    layer.axis = 0
+    print("type(layer):", type(layer))
+    print("dir layer:", dir(layer))
+    return layer.get_output(0)
 
 
 @tensorrt_converter(torch.nn.modules.linear.Identity)
