@@ -148,8 +148,8 @@ jobs:
         run: |
           # Remove any previous test reports if they exist
           Remove-Item -Force test-reports-*.zip
-          # Compress-Archive doesn't actually preserve paths so everything will be in the root directory when unzipping
-          Get-ChildItem -Path test -Recurse -Filter "*.xml" | Compress-Archive -DestinationPath "test-reports-$Env:TEST_CONFIG.zip"
+          # -ir => recursive include all files in pattern
+          7z a "test-reports-$Env:TEST_CONFIG.zip" -ir!test\*.xml
       - uses: actions/upload-artifact@v2
         name: Store PyTorch Test Reports
         if: always()
