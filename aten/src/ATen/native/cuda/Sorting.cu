@@ -136,7 +136,7 @@ __global__ void gatherMedian(
   }
   __syncthreads();
   if (nan_count > 0) {
-    atomicAdd(&num_nan, nan_count);
+    atomicAddNoReturn(&num_nan, nan_count);
   }
   __syncthreads();
 

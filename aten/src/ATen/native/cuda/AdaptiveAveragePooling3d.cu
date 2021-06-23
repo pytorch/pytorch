@@ -291,7 +291,7 @@ __global__ void atomicadaptiveaveragegradinput(
       for (it = 0; it < kT; ++it) {
         for (ih = 0; ih < kH; ++ih) {
           for (iw = 0; iw < kW; ++iw) {
-            gpuAtomicAdd(&(ptr_gradInput[ih*isizeW + iw]), grad_delta);
+            gpuAtomicAddNoReturn(&(ptr_gradInput[ih*isizeW + iw]), grad_delta);
           }
         }
         ptr_gradInput += isizeH*isizeW; // next input frame
