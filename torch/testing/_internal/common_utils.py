@@ -1418,7 +1418,8 @@ class TestCase(expecttest.TestCase):
                     debug_msg = "Quantized representations failed to compare as equal! " + debug_msg_compare
                 super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
             elif x.dtype == torch.bool and y.dtype == torch.bool:
-                # TODO: torch.bool should be supported by torch.testing.assert_close
+                # TODO: remove this special case in favor of calling torch.testing.assert_close directly
+                #  when https://github.com/pytorch/pytorch/pull/60536 has landed
                 result, msg = self._compareTensors(
                     x,
                     y,
