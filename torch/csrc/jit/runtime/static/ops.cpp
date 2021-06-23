@@ -1234,9 +1234,9 @@ std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
     };
   } else if (n->kind() == c10::Symbol::fromQualString("aten::to")) {
     if (!n->matches(torch::schema(
-            "aten::to.other(Tensor self, Tensor other, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor")) &&
+            "aten::to.other(Tensor(a) self, Tensor other, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)")) &&
         !n->matches(torch::schema(
-            "aten::to.dtype(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor"))) {
+            "aten::to.dtype(Tensor(a) self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)"))) {
       LogAndDumpSchema(n);
       return nullptr;
     }
@@ -1246,13 +1246,13 @@ std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
       const auto in3_i = p_node->Input(3).toBool();
       const auto in4_o = p_node->Input(4).toOptional<at::MemoryFormat>();
       if (p_node->Input(1).isTensor()) {
-        // to.other(Tensor self, Tensor other, bool non_blocking=False, bool
-        // copy=False, MemoryFormat? memory_format=None) -> Tensor
+        // to.other(Tensor(a) self, Tensor other, bool non_blocking=False, bool
+        // copy=False, MemoryFormat? memory_format=None) -> Tensor(a)
         const auto in1_t = p_node->Input(1).toTensor();
         p_node->Output(0) = at::native::to(in0_t, in1_t, in2_i, in3_i, in4_o);
       } else {
-        // to.dtype(Tensor self, ScalarType dtype, bool non_blocking=False, bool
-        // copy=False, MemoryFormat? memory_format=None) -> Tensor
+        // to.dtype(Tensor(a) self, ScalarType dtype, bool non_blocking=False,
+        // bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)
         const auto in1_i = p_node->Input(1).toScalarType();
         p_node->Output(0) = at::native::to(in0_t, in1_i, in2_i, in3_i, in4_o);
       }
@@ -1662,8 +1662,8 @@ REGISTER_OPERATOR_FUNCTOR(aten::full_like, aten_full_like, [](Node* n) -> SROper
   }
   return [](ProcessedNode* p_node) {
     const auto in1_s = p_node->Input(1).toScalar();
+    const auto& in0_t = p_node->Input(0).toTensor();
     if (p_node->Output(0).isNone()) {
-      const auto& in0_t = p_node->Input(0).toTensor();
       const auto dtype = p_node->Input(2).toOptional<c10::ScalarType>();
       const auto layout = p_node->Input(3).toOptional<c10::Layout>();
       const auto device = p_node->Input(4).toOptional<c10::Device>();
@@ -1675,6 +1675,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::full_like, aten_full_like, [](Node* n) -> SROper
           in0_t, dtype, layout, device, pin_memory, memory_format);
     }
     auto& out_t = p_node->Output(0).toTensor();
+    at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
     at::native::fill_out(out_t, in1_s);
   };
 });
