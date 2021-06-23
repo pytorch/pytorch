@@ -15940,6 +15940,19 @@ class TestNNDeviceType(NNTestCase):
         self.assertTrue(o.is_contiguous(memory_format=torch.channels_last))
         o.sum().backward()
 
+    # Test that faster algorithms used for inference produce the same results
+    # Validates depthwise3x3 bug reported in https://github.com/pytorch/pytorch/issues/60176
+    @onlyCPU
+    @dtypes(torch.float)
+    def test_conv2d_no_grad(self, device, dtype):
+        for batch in [1, 2, 3]:
+            for groups in [1, 2, 4]:
+                input = torch.rand(batch, groups, 8, 8, dtype=dtype, device=device)
+                m = nn.Conv2d(groups, 8, kernel_size=(3, 3), groups=groups, dtype=dtype, device=device)
+                with torch.no_grad():
+                    output_ng = m(input)
+                output = m(input)
+                self.assertEqual(output, output_ng, rtol=1e-2, atol=1e-5)
 
     @onlyCUDA
     @skipCUDAIfRocm
