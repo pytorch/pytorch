@@ -529,8 +529,8 @@ class MSELoss(_Loss):
 
 
 class BCELoss(_WeightedLoss):
-    r"""Function that measures the Binary Cross Entropy between the target and input
-    probabilities:
+    r"""Creates a criterion that measures the Binary Cross Entropy between the target and
+    the input probabilities:
 
     The unreduced (i.e. with :attr:`reduction` set to ``'none'``) loss can be described as:
 
