@@ -111,10 +111,6 @@ if _IS_MONKEYTYPE_INSTALLED:
                 elif len(types) > 1:
                     all_args[arg] = {'Any'}
                 else:
-                    if 'NoneType' in _all_type:
-                        # Handle all Nonetype as Optional[torch.Tensor]
-                        # TODO: Handle Optional for other data types
-                        _all_type = _all_type.replace('NoneType', 'Optional[torch.Tensor]')
                     all_args[arg] = {_all_type[:-1]}
             return all_args
 
