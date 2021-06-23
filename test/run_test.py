@@ -411,7 +411,7 @@ def print_to_stderr(message):
 
 # Convert something like pytorch_windows_vs2019_py36_cuda10.1_build to pytorch_windows_vs2019_py36_cuda10.1
 def get_stripped_CI_job() -> str:
-    job = os.environ.get("JOB_BASE_NAME", os.environ.get("CIRCLE_JOB", "")).rstrip('0123456789')
+    job = os.environ.get("JOB_BASE_NAME", "").rstrip('0123456789')
     if job.endswith('_slow_test'):
         job = job[:len(job) - len('_slow_test')]
     elif job.endswith('_test') or job.endswith('-test'):
@@ -470,7 +470,7 @@ def get_past_job_times() -> Dict[str, float]:
         curr_commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], encoding="ascii").strip()
         file_commit = test_times_json.get('commit', '')
         curr_ci_job = get_stripped_CI_job()
-        file_ci_job = test_times_json.get('CIRCLE_JOB', 'N/A')
+        file_ci_job = test_times_json.get('JOB_BASE_NAME', 'N/A')
         if curr_commit != file_commit:
             print(f'Current test times file is from different commit {file_commit}.')
         elif curr_ci_job != file_ci_job:
@@ -497,7 +497,7 @@ class JobTimeJSON(TypedDict):
 def get_job_times_json(job_times: Dict[str, float]) -> JobTimeJSON:
     return {
         'commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], encoding="ascii").strip(),
-        'CIRCLE_JOB': get_stripped_CI_job(),
+        'JOB_BASE_NAME': get_stripped_CI_job(),
         'job_times': job_times,
     }
 
