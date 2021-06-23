@@ -9,6 +9,7 @@ FOLD_ALIASES = True
 _SHAPE_TYPES = {"one", "other"}
 _STRIDE_TYPES = {"zero", "one", "contiguous", "transposed_contiguous", "as_arg"}
 _int = _te.ExprHandle.int
+scope = _te.KernelScope()
 
 
 def _argmax(x):
@@ -50,8 +51,8 @@ class PointwiseCompiler(object):
         self.broadcasts = []
         self.output_order = None
 
-        device, = list(set(x.device.type for x in spec))
-        self.compile_mode = {"cpu": "llvm", "cuda": "cuda"}[device]
+        self.device, = list(set(x.device.type for x in spec))
+        self.compile_mode = {"cpu": "llvm", "cuda": "cuda"}[self.device]
 
         if spec[-1].out:
             self.dtype = spec[-1].dtype
@@ -232,15 +233,32 @@ class PointwiseCompiler(object):
 
         # TODO(jansel): flatten output vars when contiguous
 
+        loops = []
         for i in self.output_order:
             var = self.iter_vars[i]
             size = self.shape_vars[i]
             out = _te.For.make(var, _zero(), size, out)
+            loops.insert(0, out)
 
-        loopnest = _te.LoopNest(out, output_bufs)
+        loopnest = _te.LoopNest(_te.Block([out]), output_bufs)
+
+        print("before")
+        print(loopnest.root_stmt())
+
+        if self.device == "cuda" and loops:
+            loops[0].set_gpu_block_index(0)
+            loops[1].set_gpu_thread_index(0)
+           # flattened = _te.LoopNest.flatten(loops)
+           # assert flattened
+           # inner = _te.LoopNest.split_with_mask(flattened, 128)
+           # assert inner
+           # flattened.set_gpu_block_index(0)
+           # inner.set_gpu_thread_index(0)
+
+        print("after")
+        print(loopnest.root_stmt())
+
         loopnest.prepare_for_codegen()
-
-        # TODO(jansel): use some sort of schedule here?
 
         cg = _te.construct_codegen(
             self.compile_mode,
