@@ -3,6 +3,7 @@
 #include <torch/jit.h>
 
 #include "lazy_tensor_core/csrc/lowering_context.h"
+#include "lazy_tensors/span.h"
 
 namespace torch_lazy_tensors {
 namespace compiler {
@@ -43,7 +44,7 @@ class TSLoweringContext : public ir::LoweringContext {
   TSLoweringContext(const std::string& name, Device device);
 
   TSLoweringContext(const std::string& name, Device device,
-                    absl::Span<const ir::Node* const> post_order,
+                    lazy_tensors::Span<const ir::Node* const> post_order,
                     ir::Util::EmissionMap emit_status);
 
   lazy_tensors::Shape GetResultShape(size_t index) const override;

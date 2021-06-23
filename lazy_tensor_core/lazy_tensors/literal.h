@@ -24,8 +24,8 @@ class Literal {
   lazy_tensors::Span<const NativeT> data(
       const ShapeIndex& shape_index = {}) const {
     LTC_CHECK(shape_index.empty()) << "Sub-literals not supported yet";
-    return absl::MakeConstSpan(static_cast<const NativeT*>(value_.data_ptr()),
-                               value_.numel());
+    return MakeConstSpan(static_cast<const NativeT*>(value_.data_ptr()),
+                         value_.numel());
   }
 
   template <typename NativeT>

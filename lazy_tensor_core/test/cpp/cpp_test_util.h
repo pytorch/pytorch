@@ -8,11 +8,11 @@
 #include <string>
 #include <unordered_set>
 
-#include "absl/types/span.h"
 #include "lazy_tensor_core/csrc/debug_util.h"
 #include "lazy_tensor_core/csrc/device.h"
 #include "lazy_tensor_core/csrc/ir.h"
 #include "lazy_tensor_core/csrc/tensor.h"
+#include "lazy_tensors/span.h"
 
 #define XLA_CPP_TEST_ENABLED(name)                          \
   do {                                                      \
@@ -59,10 +59,10 @@ static inline void AllEqual(at::Tensor tensor, at::Tensor xla_tensor) {
   EXPECT_TRUE(EqualValues(tensor, xla_tensor));
 }
 
-void ForEachDevice(absl::Span<const DeviceType> device_types,
+void ForEachDevice(lazy_tensors::Span<const DeviceType> device_types,
                    const std::function<void(const Device&)>& devfn);
 
-void ForEachDevice(absl::Span<const DeviceType> device_types,
+void ForEachDevice(lazy_tensors::Span<const DeviceType> device_types,
                    const std::function<void(const torch::Device&)>& devfn);
 
 void ForEachDevice(const std::function<void(const Device&)>& devfn);
@@ -70,7 +70,7 @@ void ForEachDevice(const std::function<void(const Device&)>& devfn);
 void ForEachDevice(const std::function<void(const torch::Device&)>& devfn);
 
 void WithAllDevices(
-    absl::Span<const DeviceType> device_types,
+    lazy_tensors::Span<const DeviceType> device_types,
     const std::function<void(const std::vector<Device>&,
                              const std::vector<Device>&)>& devfn);
 
@@ -87,4 +87,4 @@ void TestBackward(
     double rtol = 1e-5, double atol = 1e-8, int derivative_level = 1);
 
 }  // namespace cpp_test
-}  // namespace torch_xla
+}  // namespace torch_lazy_tensors
