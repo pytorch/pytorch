@@ -110,7 +110,7 @@ Module codegen_backend_module(
 
   // Generate LoweredModule.
   Module loweredModule(
-      "torch.jit." + backend_name + "_" + module_name + "_LoweredModule",
+      "torch.jit." + backend_name + "LoweredModule." + module_name,
       std::make_shared<CompilationUnit>(),
       /*shouldMangle=*/true);
 
