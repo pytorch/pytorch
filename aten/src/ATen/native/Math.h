@@ -1666,7 +1666,7 @@ static inline C10_HOST_DEVICE T calc_ndtri(T y0) {
 
 
 template <typename T>
-static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
+C10_HOST_DEVICE  static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
 erfcx_y100(T y100)
 {
   switch (static_cast<int>(y100)) {
@@ -2077,7 +2077,7 @@ return 0.97771701335885035464e0 + (0.22000938572830479551e-1 + (0.27951610702682
 }
 
 template <typename T>
-static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
+C10_HOST_DEVICE static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
 calc_erfcx(T x)
 {
   if (std::isnan(x)) {
