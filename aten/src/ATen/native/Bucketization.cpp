@@ -89,14 +89,21 @@ void dispatch(Tensor& result, const Tensor& input, const Tensor& boundaries, boo
 
 Tensor& searchsorted_out_cpu(const Tensor& sorted_sequence, const Tensor& self, bool out_int32, bool right, Tensor& result) {
   searchsorted_pre_check(sorted_sequence, self, result, out_int32);
+  Tensor out = result;
   if (result.numel() == 0) {
     result.resize_(self.sizes());
+  }
+  if (!result.is_contiguous()) {
+    out = result.contiguous();
   }
   if (self.numel() == 0) {
     return result;
   }
   if (sorted_sequence.is_contiguous() && self.is_contiguous() && sorted_sequence.dtype() == self.dtype()) {
-    dispatch(result, self, sorted_sequence, out_int32, right);
+    dispatch(out, self, sorted_sequence, out_int32, right);
+    if (!result.is_contiguous()) {
+      result.copy_(out);
+    }
     return result;
   }
 
@@ -105,7 +112,10 @@ Tensor& searchsorted_out_cpu(const Tensor& sorted_sequence, const Tensor& self, 
   searchsorted_maybe_trim_input_tensors(trimmed_input, trimmed_boundaries, self, sorted_sequence);
   const Tensor& final_input = trimmed_input.defined() ? trimmed_input : self;
   const Tensor& final_boundaries = trimmed_boundaries.defined() ? trimmed_boundaries : sorted_sequence;
-  dispatch(result, final_input, final_boundaries, out_int32, right);
+  dispatch(out, final_input, final_boundaries, out_int32, right);
+  if (!out.is_contiguous()) {
+    result.copy_(out);
+  }
   return result;
 }
 
