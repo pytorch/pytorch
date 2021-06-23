@@ -132,11 +132,11 @@ def _extract_weights_one_model(
 
     for node, ref_name in nodes_and_names_to_instrument:
         res_type = NSSingleResultValuesType.WEIGHT.value
-        if ref_name not in results:
-            results[ref_name] = {res_type: {}}
         extracted_weight = \
             extract_weight_from_node(node, model, type_a_related_to_b)
         if extracted_weight:
+            if ref_name not in results:
+                results[ref_name] = {res_type: {}}
             results[ref_name][res_type][model_name] = [extracted_weight]
 
 
