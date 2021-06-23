@@ -18,6 +18,9 @@ from torch.quantization import (
 
 class TestFuseFx(QuantizationLiteTestCase):
 
+    # Tests from:
+    # ./caffe2/test/quantization/fx/test_quantize_fx.py
+
     def test_embedding(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -28,7 +31,7 @@ class TestFuseFx(QuantizationLiteTestCase):
                 return self.emb(indices)
 
         model = M().eval()
-        indices = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8, 3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3])
+        indices = torch.randint(low=0, high=10, size=(20,))
 
         quantized_node = ns.call_module(nnq.Embedding)
         configs = [
@@ -50,6 +53,36 @@ class TestFuseFx(QuantizationLiteTestCase):
             self.checkGraphModuleNodes(m, expected_node=node)
             # make sure it runs
             self._compare_script_and_mobile(m, input=indices)
+
+    def test_conv2d(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv1 = nn.Conv2d(1, 1, 1)
+                self.conv2 = nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = self.conv2(x)
+                return x
+
+        m = M().eval()
+        qconfig_dict = {"object_type": [(torch.nn.Conv2d, default_qconfig)]}
+        m = prepare_fx(m, qconfig_dict)
+        data = torch.randn(1, 1, 1, 1)
+        m(data)
+        m = convert_fx(m)
+        m(data)
+        # first conv is quantized, second conv is not quantized
+        node_list = [
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_module(nnq.Conv2d),
+            ns.call_module(nnq.Conv2d),
+            ns.call_method("dequantize"),
+        ]
+        self.checkGraphModuleNodes(m, expected_node_list=node_list)
+
+        self._compare_script_and_mobile(m, input=data)
 
 
 if __name__ == "__main__":
