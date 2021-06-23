@@ -94,36 +94,36 @@ def _stft_reference(x, hop_length, window):
         X[:, m] = torch.fft.fft(slc * window)
     return X
 
-# rocFFT requires/assumes that the input to hipfftExecC2R or hipfftExecZ2D
-# is of the form that is a valid output from a real to complext transform
-# (i.e. it cannot be a set of random numbers)
-# So for ROCm, call np.fft.rfftn and use its output as the input
-# for testing ops that call hipfftExecC2R
-def _generate_valid_rocfft_input(input, op):
-    # check if op can invoke hipfftExecC2R or hipfftExecZ2D
-    if type(op) == SpectralFuncInfo:
-        supported_ops = op.supported_dtypes("")
-        if (torch.cfloat not in supported_ops) or (torch.cdouble not in supported_ops):
-            return input
-    else:
-        if op.__name__ in ["fft_rfft2"]:
-            return input
-
-
-    # if input is complex use the real part
-    if torch.is_complex(input):
-        np_input_real = input.real.cpu().numpy()
-    else:
-        np_input_real = input.cpu().numpy()
-
-    # generate Hermitian symmetric input using rfftn
-    rfft_output = np.fft.rfftn(np_input_real)
-
-    return torch.from_numpy(rfft_output)
-
 # Tests of functions related to Fourier analysis in the torch.fft namespace
 class TestFFT(TestCase):
     exact_dtype = True
+
+    # rocFFT requires/assumes that the input to hipfftExecC2R or hipfftExecZ2D
+    # is of the form that is a valid output from a real to complext transform
+    # (i.e. it cannot be a set of random numbers)
+    # So for ROCm, call np.fft.rfftn and use its output as the input
+    # for testing ops that call hipfftExecC2R
+    def _generate_valid_rocfft_input(self, input, op):
+        # check if op can invoke hipfftExecC2R or hipfftExecZ2D
+        if type(op) == SpectralFuncInfo:
+            supported_ops = op.supported_dtypes("")
+            if (torch.cfloat not in supported_ops) or (torch.cdouble not in supported_ops):
+                return input
+        else:
+            if op.__name__ in ["fft_rfft2"]:
+                return input
+
+
+        # if input is complex use the real part
+        if torch.is_complex(input):
+            np_input_real = input.real.cpu().numpy()
+        else:
+            np_input_real = input.cpu().numpy()
+
+        # generate Hermitian symmetric input using rfftn
+        rfft_output = np.fft.rfftn(np_input_real)
+
+        return torch.from_numpy(rfft_output)
 
     @onlyOnCPUAndCUDA
     @ops([op for op in spectral_funcs if not op.ndimensional])
@@ -160,7 +160,7 @@ class TestFFT(TestCase):
             args = args[1:]
 
             if torch.version.hip is not None:
-                input = _generate_valid_rocfft_input(input, op)
+                input = self._generate_valid_rocfft_input(input, op)
 
             expected = op.ref(input.cpu().numpy(), *args)
             exact_dtype = dtype in (torch.double, torch.complex128)
@@ -302,7 +302,7 @@ class TestFFT(TestCase):
             input = torch.randn(*shape, device=device, dtype=dtype)
 
             if torch.version.hip is not None:
-                input = _generate_valid_rocfft_input(input, op)
+                input = self._generate_valid_rocfft_input(input, op)
 
             for norm in norm_modes:
                 expected = op.ref(input.cpu().numpy(), s, dim, norm)
@@ -405,7 +405,7 @@ class TestFFT(TestCase):
                 torch_fns = (torch_fn, torch.jit.script(fn))
 
                 if torch.version.hip is not None:
-                    valid_input = _generate_valid_rocfft_input(input, torch_fn)
+                    valid_input = self._generate_valid_rocfft_input(input, torch_fn)
                 else:
                     valid_input = input
 
