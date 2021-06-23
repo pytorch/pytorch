@@ -7,37 +7,47 @@
 
 namespace at {
 
+// This fallback should only be used for operations that are self inverse and have a corresponding tensor
+// bit (internally implemented using DispatchKey) to maintain the state on tensor using tensor bit.
+// Currently there are two tensor bits that trigger this fallback: conjugate bit and negative bit.
+// Conjugate bit is set on a tensor when `.conj()` is called and neg bit is set on a tensor when `.conj().imag` is called.
+
 struct MathOpFallback {
   MathOpFallback(DispatchKey key_, string op_name_) : key(key_), op_name(op_name_) {}
   virtual bool is_bit_set(const Tensor&) = 0;
   virtual void _set_bit(const Tensor&, bool) = 0;
+  // materializes the bit, i.e., returns a new tensor tensor containing the true output
+  // (after performing the math operation corresponding to the tensor bit) if the bit is set to 1
+  // else returns self.
   virtual Tensor resolve_bit(const Tensor&) = 0;
+  // in-place operation corresponding to the math op represented by the bit. Im the future if this class
+  // is generalized for ops that are not self inverse, then this must be replaced by op_inverse_inplace
   virtual Tensor& math_op_(Tensor&) = 0;
   void fallback_impl(const c10::OperatorHandle& op, DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
-    // This fallback can be used for lazy math operations for which tensors maintain a corresponding dispatch key.
-    // At the time of writing, there are two bits that can be set on a tensor: conj and neg. The explanation below uses
-    // tensors with conj bit set as an example, but this is also applicable for tensors with neg bit.
     // Situations to handle:
-    //  1. Purely functional situation.  Easy: materialize all inputs and
+    //  1. Out-of-place operation.  Easy: materialize all inputs and
     //     call it a day.
     //  2. Inplace operation.  Desugar x.add_(2) into x.conj_().add_(2).conj_().
     //     Materialize other inputs as in (1).
-    //  3. Out-of-place operation.  Desugar add(x, 2, out=y) into y.copy_(add(x, 2))
+    //  3. out= operation.  Desugar add(x, 2, out=y) into y.copy_(add(x, 2))
     //  Materialize other inputs as in (1).
     //
     //  It is important to be able to tell if we READ from an argument and if we
     //  WRITE from an argument.  Conservative approach is to assume that we always
     //  READ from an argument, but in out-of-place operations you can skip
-    //  negating inputs on entry that never get used.  In current schema we
+    //  conjugating inputs on entry that never get used.  In current schema we
     //  can't easily tell if inplace situation has happened, so don't do it.
 
-    //  std::cerr << "conj fallback " << op.schema().name() << "\n";
     const auto& arguments = op.schema().arguments();
     const auto num_arguments = arguments.size();
     const auto stack_start = stack->size() - num_arguments;
 
     c10::optional<bool> is_write;
     for (int64_t i = 0; i < num_arguments; ++i) {
+      // Three possible states:
+      // 1. alias_info has no value --> out-of-place operation
+      // 2. alias_info does have a value, alias_info->is_write=True --> in-place or out= operation
+      // 3. alias_info does have a value, alias_info->is_write=False --> view operation
       const auto& alias_info = arguments[i].alias_info();
       if (alias_info.has_value()) {
         if (is_write.has_value()) {
@@ -66,7 +76,7 @@ struct MathOpFallback {
 
     for (int64_t i = 0; i < num_arguments; ++i) {
       auto& ivalue = (*stack)[stack_start + i];
-      if (!ivalue.isTensor()) {
+      if (!(ivalue.isTensor() || ivalue.isTensorList())) {
         continue;
       }
       const auto& argument = arguments[i];

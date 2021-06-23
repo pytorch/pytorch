@@ -6,6 +6,7 @@ import torch.fx
 import pydot
 from typing import Dict, Any
 from torch.fx.node import _get_qualified_name
+from torch.fx.passes.shape_prop import TensorMetadata
 
 _COLOR_MAP = {
     "placeholder": '"AliceBlue"',
@@ -130,20 +131,49 @@ class FxGraphDrawer:
             label += "|" + self._typename(node.target) + r"\l"
 
         tensor_meta = node.meta.get('tensor_meta')
-        if tensor_meta is not None:
-            label += "|" + "dtype" + "=" + str(tensor_meta.dtype) + r"\l"
-            label += "|" + "shape" + "=" + str(tuple(tensor_meta.shape)) + r"\l"
-            label += "|" + "stride" + "=" + str(tensor_meta.stride) + r"\l"
-            if tensor_meta.is_quantized:
-                if tensor_meta.qscheme in {
-                        torch.per_tensor_affine,
-                        torch.per_tensor_symmetric,
-                }:
-                    label += "|" + "q_scale" + "=" + str(tensor_meta.q_scale) + r"\l"
-                    label += "|" + "q_zero_point" + "=" + str(tensor_meta.q_zero_point) + r"\l"
-                label += "|" + "qscheme" + "=" + str(tensor_meta.qscheme) + r"\l"
+        label += self._tensor_meta_to_label(tensor_meta)
 
         return label + "}"
+
+    def _tensor_meta_to_label(self, tm) -> str:
+        if tm is None:
+            return ""
+        elif isinstance(tm, TensorMetadata):
+            return self._stringify_tensor_meta(tm)
+        elif isinstance(tm, list):
+            result = ""
+            for item in tm:
+                result += self._tensor_meta_to_label(item)
+            return result
+        elif isinstance(tm, dict):
+            result = ""
+            for k, v in tm.items():
+                result += self._tensor_meta_to_label(v)
+            return result
+        elif isinstance(tm, tuple):
+            result = ""
+            for item in tm:
+                result += self._tensor_meta_to_label(item)
+            return result
+        else:
+            raise RuntimeError(f"Unsupported tensor meta type {type(tm)}")
+
+    def _stringify_tensor_meta(self, tm: TensorMetadata) -> str:
+        result = ""
+        if not hasattr(tm, "dtype"):
+            print("tm", tm)
+        result += "|" + "dtype" + "=" + str(tm.dtype) + r"\l"
+        result += "|" + "shape" + "=" + str(tuple(tm.shape)) + r"\l"
+        result += "|" + "stride" + "=" + str(tm.stride) + r"\l"
+        if tm.is_quantized:
+            if tm.qscheme in {
+                    torch.per_tensor_affine,
+                    torch.per_tensor_symmetric,
+            }:
+                result += "|" + "q_scale" + "=" + str(tm.q_scale) + r"\l"
+                result += "|" + "q_zero_point" + "=" + str(tm.q_zero_point) + r"\l"
+            result += "|" + "qscheme" + "=" + str(tm.qscheme) + r"\l"
+        return result
 
     def _get_tensor_label(self, t: torch.Tensor) -> str:
         return str(t.dtype) + str(list(t.shape)) + r"\l"

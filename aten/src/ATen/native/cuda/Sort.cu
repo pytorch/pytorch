@@ -374,7 +374,7 @@ std::tuple<Tensor,Tensor> sort_stable_cuda(const Tensor & self, c10::optional<bo
   return sort_out_stable_cuda(self, stable, dim, descending, values, indices);
 }
 
-std::tuple<Tensor,Tensor> sort_cuda(const Tensor & self, int64_t dim, bool descending) {  int64_t threshold;
+std::tuple<Tensor,Tensor> sort_cuda(const Tensor & self, int64_t dim, bool descending) {
   return sort_stable_cuda(self, /*stable=*/false, dim, descending);
 }
 

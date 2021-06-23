@@ -4921,6 +4921,11 @@ class MyConvNetForMNIST(nn.Module):
             torch.cuda._sleep(10 * FIFTY_MIL_CYCLES)
             return self.net(x)
 
+    def __getstate__(self):
+        # return an empty dict to avoid inspecting the model contents on the
+        # owner
+        return {}
+
 
 class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
 
