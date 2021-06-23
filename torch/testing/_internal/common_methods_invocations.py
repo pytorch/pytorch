@@ -7450,6 +7450,7 @@ op_db: List[OpInfo] = [
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
     OpInfo(
         'log_softmax',
+        aliases=('special.log_softmax',),
         supports_out=False,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),

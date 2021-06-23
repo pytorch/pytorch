@@ -35,6 +35,7 @@ Functions
 .. autofunction:: i1e
 .. autofunction:: logit
 .. autofunction:: log1p
+.. autofunction:: log_softmax
 .. autofunction:: ndtr
 .. autofunction:: ndtri
 .. autofunction:: round
