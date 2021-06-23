@@ -294,7 +294,7 @@ class CompileCache3 {
       for (const auto& ck : shape_checks_) {
         if (args[std::get<0>(ck)].size(std::get<1>(ck)) !=
             args[std::get<2>(ck)].size(std::get<3>(ck))) {
-          // TODO(jansel): make this error message match eager
+          // TODO(jansel): make this error message match aten
           throw std::runtime_error(
               "The size of tensor A must match the size of tensor B at non-singleton dimension X");
         }
@@ -369,10 +369,12 @@ class CompileCache3 {
 
   CompileResultImpl* cached_compile(const Key& key, at::Tensor* args) {
     std::lock_guard<std::mutex> guard(mutex_);
+    // TODO(jansel): optimization: make this lock-free in the cache-hit case
     auto item = cache_.find(key);
     if (item != cache_.end()) {
       return item->second;
     } else {
+      KernelScope scope(&arena_);
       auto cr = new CompileResultImpl();
       py::gil_scoped_acquire guard;
       std::vector<py::object> spec;
@@ -386,12 +388,16 @@ class CompileCache3 {
   }
 
   int8_t aliasing_check(const at::Tensor& a, const at::Tensor& b) {
+    // 0 means a/b don't alias
+    // 1 means a/b alias and are the same
+    // -1 means a/b have crazy aliasing overlaps
     if (a.is_alias_of(b)) {
       if (a.is_set_to(b)) {
         return 1;
       } else {
-        // TODO: check for non-overlapping and return 0
-        //       likely we could lift some logic from tensoriterator
+        // TODO(jansel): check for non-overlapping and return 0 in cases where
+        // we can prove no aliasing. Possibly could take some logic from
+        // tensoriterator.
         return -1;
       }
     } else {
@@ -439,7 +445,6 @@ class CompileCache3 {
   at::Tensor call(at::Tensor* args, bool has_out) {
     void* call_args[NARGS + (!has_out) + NARGS * MAX_DIMS + MAX_DIMS];
     auto key = compute_cache_key(args, has_out, call_args + NARGS + (!has_out));
-    KernelScope scope(&arena_);
     return cached_compile(key, args)->call(args, call_args);
   }
 
@@ -486,15 +491,13 @@ class CompileCache {
 
 template <int NARGS>
 class CompileCacheImpl : public CompileCache {
-  constexpr static int MAX_ARGS = 5;
-
   struct Cleanup {
-    at::Tensor* tensors;
+    at::Tensor* ptr;
     int count;
 
     inline ~Cleanup() {
       for (int i : c10::irange(count)) {
-        tensors[i].~Tensor();
+        ptr[i].~Tensor();
       }
     }
   };
@@ -504,7 +507,6 @@ class CompileCacheImpl : public CompileCache {
       : cache(compile_fn), cache_out(compile_fn) {}
 
   at::Tensor py_call(py::args args, py::kwargs kwargs) override {
-    // fan out an specialize on arg counts
     int num_args = py::len(args);
     int num_kwargs = py::len(kwargs);
     if (C10_UNLIKELY(num_kwargs > 1 || num_args != NARGS)) {
@@ -512,22 +514,24 @@ class CompileCacheImpl : public CompileCache {
     }
 
     char tensor_args_buffer[sizeof(at::Tensor) * (NARGS + 1)];
-    at::Tensor* tensor_args = reinterpret_cast<at::Tensor*>(tensor_args_buffer);
+    Cleanup tensor_args = {
+        reinterpret_cast<at::Tensor*>(tensor_args_buffer), 0};
 
     for (int i = 0; i < NARGS; ++i) {
-      new (tensor_args + i) at::Tensor(std::move(args[i].cast<at::Tensor>()));
+      new (tensor_args.ptr + i)
+          at::Tensor(std::move(args[i].cast<at::Tensor>()));
+      tensor_args.count++;
     }
 
     if (num_kwargs == 1) {
-      new (tensor_args + NARGS)
+      new (tensor_args.ptr + NARGS)
           at::Tensor(std::move(kwargs["out"].cast<at::Tensor>()));
-      Cleanup call_dtors = {tensor_args, NARGS + 1};
+      tensor_args.count++;
       // py::gil_scoped_release release;
-      return cache_out.call(tensor_args, true);
+      return cache_out.call(tensor_args.ptr, true);
     } else {
-      Cleanup call_dtors = {tensor_args, NARGS};
       // py::gil_scoped_release release;
-      return cache.call(tensor_args, false);
+      return cache.call(tensor_args.ptr, false);
     }
   }
 
@@ -540,7 +544,7 @@ class CompileCacheImpl : public CompileCache {
 
  private:
   CompileCache2<NARGS> cache;
-  CompileCache2<NARGS + 1> cache_out; // out variant
+  CompileCache2<NARGS + 1> cache_out; // out=... variant
 };
 
 CompileCache* create_compile_cache(const py::object& compile_fn, int num_args) {
