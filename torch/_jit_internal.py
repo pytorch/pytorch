@@ -15,6 +15,7 @@ from textwrap import dedent
 import torch
 import sys
 import builtins
+import typing
 import io
 import pickle
 import functools
@@ -222,6 +223,8 @@ def createResolutionCallbackFromClosure(fn):
         def __getattr__(self, key):
             if key in closure:
                 return closure[key]
+            elif hasattr(typing, key):
+                return getattr(typing, key)
             elif hasattr(builtins, key):
                 return getattr(builtins, key)
             return None
@@ -661,6 +664,10 @@ def module_has_exports(mod):
                     return True
     return False
 
+
+# WARNING: should_drop is currently being used by our JIT code coverage plug-in to mark JIT'd code as covered. If you
+# rename this function, please update references in tools/coverage_plugins_package/src/coverage_plugins/jit_plugin.py to
+# allow JIT'd code to still be covered.
 def should_drop(fn) -> bool:
     attr = get_torchscript_modifier(fn)
     if attr is None:

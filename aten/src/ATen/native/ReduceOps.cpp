@@ -3,7 +3,6 @@
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/LegacyTHFunctionsCPU.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
@@ -16,6 +15,7 @@
 #include <ATen/core/grad_mode.h>
 
 #include <c10/util/irange.h>
+#include <c10/util/SmallBuffer.h>
 
 #include <algorithm>
 #include <functional>
@@ -619,13 +619,15 @@ void pre_check_gradient(const Tensor& self, c10::optional<int64_t> spacing_size,
   // Helper for gradient function to make sure input data satisfies prerequisites
   TORCH_CHECK(self.scalar_type() != ScalarType::Byte, "torch.gradient does not support uint8 input.");
   if (spacing_size.has_value() && !dim.has_value()) {
-    TORCH_CHECK(spacing_size.value() == 1 || spacing_size.value() == self.dim(), "torch.gradient expected spacing to be unspecified, a scalar or a list of length ", self.dim(), "but got a list of length ", spacing_size.value());
+    TORCH_CHECK(spacing_size.value() == 1 || spacing_size.value() == self.dim(), "torch.gradient expected spacing to be unspecified, a scalar or a list of length ", self.dim(), " but got a list of length ", spacing_size.value());
   }
   if (spacing_size.has_value() && dim.has_value()) {
     TORCH_CHECK(spacing_size.value() == dim.value().size(), "torch.gradient expected spacing to be unspecified, a scalar or it's spacing and dim arguments to have the same length, but got a spacing argument of length ", spacing_size.value(), " and a dim argument of length ", dim.value().size(), "." );
   }
-  // See discussion : https://github.com/pytorch/pytorch/issues/56036
-  TORCH_CHECK(edge_order == 1, "torch.gradient only supports edge_order=1 currently. To request support for more edge_orders please file an issue here : https://github.com/pytorch/pytorch/issues/new?assignees=&labels=&template=feature-request.md");
+  TORCH_CHECK(edge_order == 1 || edge_order == 2, "torch.gradient only supports edge_order=1 and edge_order=2.");
+  for (const auto i : c10::irange(self.dim())) {
+    TORCH_CHECK(self.size(i) >= edge_order + 1, "torch.gradient expected each dimension size to be at least edge_order+1");
+  }
   if (dim.has_value()) {
     // The following function get called to check whether dim argument satisfies prerequisites.
     // The output of the function is not used for the computation of gradient.
@@ -642,6 +644,7 @@ std::vector<Tensor> gradient_helper(const Tensor& self, TensorList coordinates, 
   for (const auto i : c10::irange(dim.size())) {
     TORCH_CHECK( coordinates[i].dim() == 1, "torch.gradient expected each element of spacing to have one dimension, but got an element with ", coordinates[i].dim(), " dimensions!");
     int64_t direction = maybe_wrap_dim(dim[i], self.dim());
+    Tensor prepend, append;
     std::vector<int64_t> shape(self.dim(),1);
     shape[ direction ] = -1;
 
@@ -652,9 +655,22 @@ std::vector<Tensor> gradient_helper(const Tensor& self, TensorList coordinates, 
     auto b = ( (dx2-dx1) / (dx1*dx2)       ).reshape(shape);
     auto c = (    dx1    / (dx2*(dx1+dx2)) ).reshape(shape);
 
-    auto center  = a*at::slice(self, direction, 0, -2) + b*at::slice(self, direction , 1, -1) + c*at::slice(self, direction ,2);
-    auto prepend = (at::slice(self, direction, 1, 2  ) - at::slice(self, direction, 0, 1   )) / ax_dx[0]  ;
-    auto append  = (at::slice(self, direction, -1    ) - at::slice(self, direction, -2, -1 )) / ax_dx[-1] ;
+    auto center = a * at::slice(self, direction, 0, -2) + b * at::slice(self, direction , 1, -1) + c * at::slice(self, direction, 2);
+    if (edge_order == 1) {
+     prepend = (at::slice(self, direction, 1, 2  ) - at::slice(self, direction, 0, 1   )) / ax_dx[0]  ;
+     append  = (at::slice(self, direction, -1    ) - at::slice(self, direction, -2, -1 )) / ax_dx[-1] ;
+    } else if (edge_order == 2) {
+     a =-(2.0 * ax_dx[0] + ax_dx[1]) / (ax_dx[0] * (ax_dx[0] + ax_dx[1])) ;
+     b = (      ax_dx[0] + ax_dx[1]) / (ax_dx[0] * ax_dx[1])       ;
+     c = (     -ax_dx[0]           ) / (ax_dx[1] * (ax_dx[0] + ax_dx[1]));
+     prepend = a * at::slice(self, direction, 0, 1) + b * at::slice(self, direction, 1, 2) + c * at::slice(self, direction, 2, 3);
+
+     a = (    ax_dx[-1]            ) / (ax_dx[-2] * (ax_dx[-1] + ax_dx[-2]));
+     b =-(    ax_dx[-1] + ax_dx[-2]) / (ax_dx[-1] * ax_dx[-2]);
+     c = (2 * ax_dx[-1] + ax_dx[-2]) / (ax_dx[-1] * (ax_dx[-1] + ax_dx[-2]));
+     append = a * at::slice(self, direction, -3, -2) + b * at::slice(self, direction, -2, -1) + c * at::slice(self, direction, -1);
+    }
+
     result.emplace_back(prepend_append_on_dim(center, prepend, append, direction));
   }
   return result;
@@ -665,9 +681,16 @@ std::vector<Tensor> gradient_helper_float(const Tensor& self, ArrayRef<Scalar> s
   for (const auto i : c10::irange(dim.size())) {
       int64_t direction = maybe_wrap_dim(dim[i], self.dim());
       auto ax_dx = spacing[i];
+      Tensor prepend, append;
       auto center  = (at::slice(self,direction, 2   ) - at::slice(self, direction, 0, -2 ) ) / ax_dx;
-      auto prepend = (at::slice(self,direction, 1, 2) - at::slice(self, direction, 0, 1  ) ) / ax_dx  ;
-      auto append  = (at::slice(self,direction, -1  ) - at::slice(self, direction, -2, -1) ) / ax_dx ;
+      if (edge_order==1) {
+        prepend = (at::slice(self,direction, 1, 2) - at::slice(self, direction, 0, 1  ) ) / ax_dx;
+        append  = (at::slice(self,direction, -1  ) - at::slice(self, direction, -2, -1) ) / ax_dx ;
+      } else if (edge_order==2) {
+        prepend = (-1.5 * at::slice(self, direction, 0, 1) + 2 * at::slice(self, direction, 1, 2)   - 0.5 * at::slice(self, direction, 2, 3))/ ax_dx;
+        append = (0.5 * at::slice(self, direction, -3, -2) - 2 * at::slice(self, direction, -2, -1) + 1.5 * at::slice(self, direction, -1))  / ax_dx;
+      }
+
       result.emplace_back(prepend_append_on_dim(center/2, prepend, append, direction));
   }
   return result;
@@ -1380,6 +1403,56 @@ Tensor argmin(const Tensor& self, c10::optional<int64_t> dim, bool keepdims) {
   return at::native::argmin_out(self, dim, keepdims, result);
 }
 
+static double std_var_all_cpu(const Tensor& self, int64_t correction, bool take_sqrt) {
+  const auto dtype = self.scalar_type();
+  TORCH_CHECK(dtype == kDouble || dtype == kFloat,
+              "std_var_all: Unsupported dtype ", dtype);
+
+  auto mean = self.mean().item<double>();
+  auto iter = TensorIteratorConfig()
+      .add_input(self)
+      .build();
+
+  auto reduction = [&](int64_t begin, int64_t end, double thread_sum) {
+    AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "std_var_all_cpu", [&] {
+      iter.serial_for_each([&] (char** data, const int64_t* strides, int64_t size0, int64_t size1) {
+        const double local_mean = mean;
+        const int64_t inner_stride = strides[0];
+        const int64_t outer_stride = strides[1];
+
+        double local_sum = 0.0;
+        for (int64_t i = 0; i < size1; ++i) {
+          const char* row_ptr = data[0] + outer_stride * i;
+          for (int64_t j = 0; j < size0; ++j) {
+            const auto ptr = reinterpret_cast<const scalar_t*>(row_ptr + inner_stride * j);
+            auto dx = (static_cast<double>(*ptr) - local_mean);
+            local_sum += dx * dx;
+          }
+        }
+        thread_sum += local_sum;
+      }, {begin, end});
+    });
+
+    return thread_sum;
+  };
+
+  // ((x - mean)**2).sum()
+  const double sum_dx2 = at::parallel_reduce(
+      0, iter.numel(), at::internal::GRAIN_SIZE, 0.0, reduction, std::plus<>{});
+
+  const auto var = [&] () __ubsan_ignore_float_divide_by_zero__ {
+    return sum_dx2 / std::max(int64_t{0}, self.numel() - correction);
+  }();
+  const auto result = take_sqrt ? std::sqrt(var) : var;
+
+  if (dtype == kFloat) {
+    // Convert to infinity if out of range for a float.
+    // Doing it now prevents checked_convert failing later
+    return static_cast<float>(result);
+  }
+  return result;
+}
+
 static Tensor& std_var_out(
     const char* fname, Tensor& result, const Tensor& self,
     c10::optional<IntArrayRef> dim, c10::optional<int64_t> correction_opt,
@@ -1439,9 +1512,9 @@ static Tensor& std_var_out(
       iter.common_dtype() != kBFloat16 && iter.common_dtype() != kHalf) {
     // NOTE: CPU performance significantly regressed when attempting to port to
     // ATen,
-    //   so all-reduce is still implemented in TH.
+    //   so all-reduce has a custom implementation.
     //   See https://github.com/pytorch/pytorch/pull/43858.
-    result.fill_(legacy::cpu::_th_std_var(self, correction, take_sqrt));
+    result.fill_(std_var_all_cpu(self, correction, take_sqrt));
   } else {
     std_var_stub(iter.device_type(), iter, correction, take_sqrt);
   }
@@ -1747,19 +1820,6 @@ std::tuple<Tensor&, Tensor&> cummin_out(const Tensor& self, Dimname dim, Tensor&
 
 Tensor dist(const Tensor &self, const Tensor& other, const Scalar& p){
   return at::norm(self - other, p);
-}
-
-Tensor count_nonzero(const Tensor& self, IntArrayRef dims){
-  auto mask = (self != 0);
-  return mask.sum(dims);
-}
-
-Tensor count_nonzero(const Tensor& self, c10::optional<int64_t> dim){
-  if (dim){
-    auto wrap_dim = maybe_wrap_dim(dim.value(), self.dim());
-    return at::count_nonzero(self, IntArrayRef{wrap_dim});
-  }
-  return at::count_nonzero(self, IntArrayRef{});
 }
 
 bool cpu_equal(const Tensor& self, const Tensor& other) {

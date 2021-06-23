@@ -893,6 +893,27 @@ conj() -> Tensor
 See :func:`torch.conj`
 """)
 
+add_docstr_all('conj_physical',
+               r"""
+conj_physical() -> Tensor
+
+See :func:`torch.conj_physical`
+""")
+
+add_docstr_all('conj_physical_',
+               r"""
+conj_physical_() -> Tensor
+
+In-place version of :meth:`~Tensor.conj_physical`
+""")
+
+add_docstr_all('resolve_conj',
+               r"""
+resolve_conj() -> Tensor
+
+See :func:`torch.resolve_conj`
+""")
+
 add_docstr_all('copysign',
                r"""
 copysign(other) -> Tensor
@@ -1691,6 +1712,13 @@ histc(bins=100, min=0, max=0) -> Tensor
 See :func:`torch.histc`
 """)
 
+add_docstr_all('histogram',
+               r"""
+histogram(input, bins, *, range=None, weight=None, density=False) -> (Tensor, Tensor)
+
+See :func:`torch.histogram`
+""")
+
 add_docstr_all('index_add_',
                r"""
 index_add_(dim, index, tensor, *, alpha=1) -> Tensor
@@ -1812,10 +1840,9 @@ Args:
 
 add_docstr_all('index_put',
                r"""
-index_put(tensor1, indices, values, accumulate=False) -> Tensor
+index_put(indices, values, accumulate=False) -> Tensor
 
 Out-place version of :meth:`~Tensor.index_put_`.
-`tensor1` corresponds to `self` in :meth:`torch.Tensor.index_put_`.
 """)
 
 add_docstr_all('index_select',
@@ -1968,6 +1995,20 @@ add_docstr_all('is_complex',
 is_complex() -> bool
 
 Returns True if the data type of :attr:`self` is a complex data type.
+""")
+
+add_docstr_all('is_inference',
+               r"""
+is_inference() -> bool
+
+See :func:`torch.is_inference`
+""")
+
+add_docstr_all('is_conj',
+               r"""
+is_conj() -> bool
+
+Returns True if the conjugate bit of :attr:`self` is set to true.
 """)
 
 add_docstr_all('is_signed',
@@ -4547,26 +4588,23 @@ See :func:`torch.pinverse`
 
 add_docstr_all('index_add',
                r"""
-index_add(tensor1, dim, index, tensor2) -> Tensor
+index_add(dim, index, tensor2) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.index_add_`.
-`tensor1` corresponds to `self` in :meth:`torch.Tensor.index_add_`.
 """)
 
 add_docstr_all('index_copy',
                r"""
-index_copy(tensor1, dim, index, tensor2) -> Tensor
+index_copy(dim, index, tensor2) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.index_copy_`.
-`tensor1` corresponds to `self` in :meth:`torch.Tensor.index_copy_`.
 """)
 
 add_docstr_all('index_fill',
                r"""
-index_fill(tensor1, dim, index, value) -> Tensor
+index_fill(dim, index, value) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.index_fill_`.
-`tensor1` corresponds to `self` in :meth:`torch.Tensor.index_fill_`.
 """)
 
 add_docstr_all('scatter',
@@ -4609,6 +4647,20 @@ add_docstr_all('masked_fill',
 masked_fill(mask, value) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.masked_fill_`
+""")
+
+add_docstr_all('retain_grad',
+               r"""
+retain_grad() -> None
+
+Enables this Tensor to have their :attr:`grad` populated during
+:func:`backward`. This is a no-op for leaf tensors.
+""")
+
+add_docstr_all('retains_grad',
+               r"""
+Is ``True`` if this Tensor is non-leaf and its :attr:`grad` is enabled to be
+populated during :func:`backward`, ``False`` otherwise.
 """)
 
 add_docstr_all('requires_grad',
