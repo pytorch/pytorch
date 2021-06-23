@@ -89,7 +89,7 @@ class Shape {
     if (dynamic_mode_.load()) {
       throw std::runtime_error("Exact shape not known");
     }
-    return absl::MakeSpan(dimensions_);
+    return MakeSpan(dimensions_);
   }
 
   int tuple_shapes_size() const { return element_shapes_.size(); }
