@@ -84,7 +84,8 @@ void castTensorInputs(Node* node, Symbol cast_op) {
 
   std::unordered_set<Value*> casted_inputs;
   for (auto input : node->inputs()) {
-    if (input->type()->kind() == TensorType::Kind) {
+    if (input->type()->kind() == TensorType::Kind &&
+        input->node()->kind() != cast_op) {
       casted_inputs.insert(input);
     }
   }
