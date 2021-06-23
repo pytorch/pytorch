@@ -6,6 +6,7 @@
 
 namespace lazy_tensors {
 
+// `AlphaNum` acts as the main parameter type for `StrCat()` and `StrAppend()`,
 class AlphaNum {
  public:
   // No bool ctor -- bools convert to an integral type.
@@ -44,6 +45,8 @@ class AlphaNum {
   AlphaNum(T e)
       : AlphaNum(static_cast<typename std::underlying_type<T>::type>(e)) {}
 
+  c10::string_view::size_type size() const { return piece_.size(); }
+  const char* data() const { return piece_.data(); }
   c10::string_view Piece() const { return piece_; }
 
   // vector<bool>::reference and const_reference require special help to
@@ -62,6 +65,8 @@ class AlphaNum {
   c10::string_view piece_;
 };
 
+// Merges given strings or numbers, using no delimiter(s), returning the merged
+// result as a string.
 inline std::string StrCat() { return std::string(); }
 
 template <typename... AV>
@@ -71,6 +76,17 @@ inline std::string StrCat(const AV&... args) {
     result.append(arg.begin(), arg.end());
   }
   return result;
+}
+
+// Appends a string or set of strings to an existing string, in a similar
+// fashion to `StrCat()`.
+inline void StrAppend(std::string*) {}
+
+template <typename... AV>
+inline void StrAppend(std::string* dest, const AV&... args) {
+  for (const auto& arg : {static_cast<const AlphaNum&>(args).Piece()...}) {
+    dest->append(arg.data(), arg.size());
+  }
 }
 
 }  // namespace lazy_tensors
