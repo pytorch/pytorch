@@ -257,6 +257,27 @@ def _dtype_name(dtype):
     return str(dtype).split('.')[1]
 
 
+def _dtype_test_suffix(dtypes):
+    """ Returns the test suffix for a dtype, sequence of dtypes, or None. """
+    if isinstance(dtypes, list) or isinstance(dtypes, tuple):
+        if len(dtypes) == 0:
+            return ''
+        return '_' + '_'.join((_dtype_name(d) for d in dtypes))
+    elif dtypes:
+        return '_{}'.format(_dtype_name(dtypes))
+    else:
+        return ''
+
+
+def _update_param_kwargs(param_kwargs, name, value):
+    """ Adds a kwarg with the specified name and value to the param_kwargs dict. """
+    if isinstance(value, list) or isinstance(value, tuple):
+        # Make name plural
+        param_kwargs['{}s'.format(name)] = value
+    elif value:
+        param_kwargs[name] = value
+
+
 class DeviceTypeTestBase(TestCase):
     device_type: str = 'generic_device_type'
 
@@ -317,6 +338,13 @@ class DeviceTypeTestBase(TestCase):
             return self.precision, self.rel_tol
         return test.tolerance_overrides.get(dtype, tol(self.precision, self.rel_tol))
 
+    def _apply_precision_override_for_test(self, test, param_kwargs):
+        dtype = param_kwargs['dtype'] if 'dtype' in param_kwargs else None
+        dtype = param_kwargs['dtypes'] if 'dtypes' in param_kwargs else dtype
+        if dtype:
+            self.precision = self._get_precision_override(test, dtype)
+            self.precision, self.rel_tol = self._get_tolerance_override(test, dtype)
+
     # Creates device-specific tests.
     @classmethod
     def instantiate_test(cls, name, test, *, generic_cls=None):
@@ -325,21 +353,19 @@ class DeviceTypeTestBase(TestCase):
             # Constructs the test
             @wraps(test)
             def instantiated_test(self, param_kwargs=param_kwargs):
+                param_kwargs = {} if param_kwargs is None else param_kwargs
                 device_arg: str = cls.get_primary_device()
                 if hasattr(test, 'num_required_devices'):
                     device_arg = cls.get_all_devices()
+                _update_param_kwargs(param_kwargs, 'device', device_arg)
 
                 # Sets precision and runs test
                 # Note: precision is reset after the test is run
                 guard_precision = self.precision
                 guard_rel_tol = self.rel_tol
                 try:
-                    if 'dtype' in param_kwargs:
-                        dtype = param_kwargs['dtype']
-                        self.precision = self._get_precision_override(test, dtype)
-                        self.precision, self.rel_tol = self._get_tolerance_override(test, dtype)
-                    param_kwargs = {} if param_kwargs is None else param_kwargs
-                    result = test(self, device=device_arg, **param_kwargs)
+                    self._apply_precision_override_for_test(test, param_kwargs)
+                    result = test(self, **param_kwargs)
                 except RuntimeError as rte:
                     # check if rte should stop entire test suite.
                     self._stop_test_suite = self._should_stop_test_suite()
@@ -363,10 +389,9 @@ class DeviceTypeTestBase(TestCase):
             dtypes = cls._get_dtypes(test)
             dtypes = tuple(dtypes) if dtypes is not None else (None,)
             for dtype in dtypes:
-                test_name = '{}_{}{}'.format(name,
-                                             cls.device_type,
-                                             '_' + _dtype_name(dtype) if dtype else '')
-                param_kwargs = {'dtype': dtype} if dtype else {}
+                param_kwargs = {}
+                _update_param_kwargs(param_kwargs, 'dtype', dtype)
+                test_name = '{}_{}{}'.format(name, cls.device_type, _dtype_test_suffix(dtype))
                 instantiate_test_helper(cls=cls, name=test_name, test=test, param_kwargs=param_kwargs)
 
     def run(self, result=None):
@@ -715,12 +740,11 @@ class ops(_TestParametrizer):
                                                   op.name.replace('.', '_'),
                                                   '_' + op.variant_test_name if op.variant_test_name else '',
                                                   device_cls.device_type,
-                                                  '_' + _dtype_name(dtype) if dtype else '')
+                                                  _dtype_test_suffix(dtype))
 
                 # Construct parameter kwargs to pass to the test.
                 param_kwargs = {'op': op}
-                if dtype is not None:
-                    param_kwargs['dtype'] = dtype
+                _update_param_kwargs(param_kwargs, 'dtype', dtype)
 
                 # Wraps instantiated test with op decorators
                 # NOTE: test_wrapper exists because we don't want to apply
