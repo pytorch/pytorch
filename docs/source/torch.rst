@@ -497,6 +497,7 @@ Other Operations
     rot90
     gcd
     histc
+    histogram
     meshgrid
     lcm
     logcumsumexp
