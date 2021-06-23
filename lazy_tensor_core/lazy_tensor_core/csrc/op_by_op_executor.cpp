@@ -3,7 +3,6 @@
 #include <list>
 #include <unordered_map>
 
-#include "absl/strings/str_cat.h"
 #include "lazy_tensor_core/csrc/device.h"
 #include "lazy_tensor_core/csrc/ir_util.h"
 #include "lazy_tensor_core/csrc/lowering_context.h"
@@ -14,6 +13,7 @@
 #include "lazy_tensors/computation_client/metrics.h"
 #include "lazy_tensors/computation_client/sys_util.h"
 #include "lazy_tensors/computation_client/util.h"
+#include "lazy_tensors/str_cat.h"
 
 namespace torch_lazy_tensors {
 namespace {
@@ -63,7 +63,8 @@ std::shared_ptr<lazy_tensors::GenericComputation> BuildNodeComputation(
   auto loctx = ir::LoweringContext::Create("BuildNodeComputation", device);
   const auto& operands = node->operands();
   for (size_t i = 0; i < operands.size(); ++i) {
-    loctx->AddParameter(operands[i], i, *input_shapes[i], absl::StrCat("p", i));
+    loctx->AddParameter(operands[i], i, *input_shapes[i],
+                        lazy_tensors::StrCat("p", i));
   }
   loctx->LowerNodeToResult(node);
   return ConsumeValue(loctx->Build());

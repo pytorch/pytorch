@@ -4,7 +4,7 @@
 #include <cstdlib>
 #include <cstring>
 
-#include "absl/strings/str_cat.h"
+#include "lazy_tensors/str_cat.h"
 
 namespace lazy_tensors {
 namespace sys_util {
@@ -20,7 +20,7 @@ std::string GetEnvOrdinalPath(const char* name, const std::string& defval,
   if (!path.empty()) {
     int64 ordinal = GetEnvInt(ordinal_env, -1);
     if (ordinal >= 0) {
-      path = absl::StrCat(path, ".", ordinal);
+      path = lazy_tensors::StrCat(path, ".", ordinal);
     }
   }
   return path;
