@@ -1346,6 +1346,8 @@ class TestCase(expecttest.TestCase):
                          f"Expected: {x.is_quantized}; Actual: {y.is_quantized}.")
             super().assertEqual(x.is_quantized, y.is_quantized, msg=self._get_assert_msg(msg=msg, debug_msg=debug_msg))
             if x.is_sparse:
+                # TODO: remove this special case in favor of calling torch.testing.assert_close directly
+                #  when https://github.com/pytorch/pytorch/pull/58844 has landed
                 if x.size() != y.size():
                     debug_msg_sparse = ("Attempted to compare equality of tensors with different sizes: "
                                         f"Expected: {x.size()}; Actual: {y.size()}.")
@@ -1373,6 +1375,8 @@ class TestCase(expecttest.TestCase):
                     debug_msg = "Sparse tensor values failed to compare as equal! " + debug_msg_values
                 super().assertTrue(values_result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
             elif x.is_quantized and y.is_quantized:
+                # TODO: remove this special case in favor of calling torch.testing.assert_close directly
+                #  when https://github.com/pytorch/pytorch/pull/58926 has landed
                 self.assertEqual(x.qscheme(), y.qscheme(), atol=atol, rtol=rtol,
                                  msg=msg, exact_dtype=exact_dtype,
                                  exact_device=exact_device)
@@ -1406,6 +1410,7 @@ class TestCase(expecttest.TestCase):
                     debug_msg = "Quantized representations failed to compare as equal! " + debug_msg_compare
                 super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
             elif x.dtype == torch.bool and y.dtype == torch.bool:
+                # TODO: torch.bool should be supported by torch.testing.assert_close
                 result, msg = self._compareTensors(
                     x, y, atol=atol, rtol=rtol, exact_dtype=exact_dtype, exact_device=exact_device
                 )
