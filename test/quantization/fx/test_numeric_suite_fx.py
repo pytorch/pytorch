@@ -1796,3 +1796,14 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
             qconfig_dict=qconfig_dict,
             results_len=24,
             should_log_inputs=False)
+
+    @skip_if_no_torchvision
+    def test_mobilenet_v2(self):
+        import torchvision
+        m = torchvision.models.quantization.mobilenet_v2(pretrained=True, quantize=False).eval()
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        self._test_match_shadow_activations(
+            m, (torch.randn(1, 3, 224, 224),),
+            qconfig_dict=qconfig_dict,
+            results_len=56,
+            should_log_inputs=False)
