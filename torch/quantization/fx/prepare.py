@@ -143,6 +143,7 @@ def get_standalone_module_configs(
     sm_prepare_config_dict = {} if config[1] is None else config[1]
     return sm_qconfig_dict, sm_prepare_config_dict
 
+
 def qat_swap_modules(
         root: torch.nn.Module,
         additional_qat_module_mapping: Dict[Callable, Callable]) -> None:
@@ -1028,10 +1029,6 @@ def prepare(
     flattened_qconfig_dict = get_flattened_qconfig_dict(qconfig_dict)
     # TODO: support regex as well
     propagate_qconfig_(model, flattened_qconfig_dict)
-    if model.training:
-        additional_qat_module_mapping = prepare_custom_config_dict.get(
-            "additional_qat_module_mapping", {})
-        qat_swap_modules(model, additional_qat_module_mapping)
 
     # mapping from fully qualified module name to module instance
     # for example,
@@ -1041,6 +1038,11 @@ def prepare(
     #   'linear.weight_fake_quant': PerChannelMinMaxObserver(...),
     # }
     modules = dict(model.named_modules())
+
+    if model.training:
+        additional_qat_module_mapping = prepare_custom_config_dict.get(
+            "additional_qat_module_mapping", {})
+        qat_swap_modules(model, additional_qat_module_mapping)
 
     # fill qconfig_map, a map from node name to qconfig, used in find_matches
     equalization_qconfig_map = generate_qconfig_map(model, modules, model.graph, equalization_qconfig_dict, node_name_to_scope)
