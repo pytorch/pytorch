@@ -200,7 +200,7 @@ jobs:
       - name: Unzip test reports
         run: |
           # Should preserve paths so reports should still be in test/test-reports
-          unzip -o test-reports-*.zip
+          unzip -o 'test-reports-*.zip'
       - uses: actions/setup-python@v2
         with:
           python-version: 3.9
