@@ -632,6 +632,9 @@ def _test_cpp_extensions_aot(test_module, test_directory, options, use_ninja):
 
     # "install" the test modules and run tests
     python_path = os.environ.get('PYTHONPATH', '')
+    from shutil import copyfile
+    test_module = 'test_cpp_extensions_aot' + ('_ninja' if use_ninja else '_no_ninja')
+    copyfile(test_directory + '/test_cpp_extensions_aot.py', test_directory + '/' + test_module + '.py')
     try:
         cpp_extensions = os.path.join(test_directory, 'cpp_extensions')
         install_directory = ''
@@ -646,6 +649,8 @@ def _test_cpp_extensions_aot(test_module, test_directory, options, use_ninja):
         return run_test(test_module, test_directory, options)
     finally:
         os.environ['PYTHONPATH'] = python_path
+        if os.path.exists(test_directory + '/' + test_module + '.py'):
+            os.remove(test_directory + '/' + test_module + '.py')
 
 
 def test_cpp_extensions_aot_ninja(test_module, test_directory, options):
