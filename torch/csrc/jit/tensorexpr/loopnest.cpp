@@ -1543,9 +1543,60 @@ bool areEqual(
   return true;
 }
 
+namespace {
+
+void getLoopVarBoundsIn(
+    For* loop,
+    VarMapping& loop_var_starts,
+    VarMapping& loop_var_stops) {
+  loop_var_starts.emplace_back(std::make_pair(loop->var(), loop->start()));
+  loop_var_stops.emplace_back(std::make_pair(loop->var(), loop->stop()));
+  for (auto st : *loop->body()) {
+    auto nested_loop = dynamic_cast<For*>(st);
+    if (nested_loop) {
+      getLoopVarBoundsIn(nested_loop, loop_var_starts, loop_var_stops);
+    }
+  }
+}
+
+bool areEquivalent(
+    const Expr* expr1,
+    const Expr* expr2,
+    VarMapping& loop_var_starts,
+    VarMapping& loop_var_stops) {
+  auto expr1_start = Substitute(expr1, loop_var_starts);
+  auto expr2_start = Substitute(expr2, loop_var_starts);
+  auto expr1_stop = Substitute(expr1, loop_var_stops);
+  auto expr2_stop = Substitute(expr2, loop_var_stops);
+  return areEqual(expr1_start, expr2_start) && areEqual(expr1_stop, expr2_stop);
+}
+
+bool areEquivalent(
+    const std::vector<const Expr*>& expr_list1,
+    const std::vector<const Expr*>& expr_list2,
+    VarMapping& loop_var_starts,
+    VarMapping& loop_var_stops) {
+  if (expr_list1.size() != expr_list2.size()) {
+    return false;
+  }
+  for (size_t i = 0; i < expr_list1.size(); ++i) {
+    if (!areEquivalent(
+            expr_list1[i], expr_list2[i], loop_var_starts, loop_var_stops)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+} // namespace
+
 bool LoopNest::hasLoopCarriedDependence(For* loop) {
   analysis::MemDependencyChecker analyzer;
   loop->accept(&analyzer);
+
+  VarMapping loop_var_starts, loop_var_stops;
+  getLoopVarBoundsIn(loop, loop_var_starts, loop_var_stops);
+
   // High-level algorithm to check if two accesses to a buffer, A and B, one of
   // which is a Store, result in a loop-carried dependence:
   //   1. If the index expressions are equal in A and B, then that is a
@@ -1579,8 +1630,14 @@ bool LoopNest::hasLoopCarriedDependence(For* loop) {
         for (auto& bLoad : bLoads) {
           if (aStore->buf() == bLoad->buf()) {
             if (!areEqual(aStore->indices(), bLoad->indices())) {
-              if (isOverlapping(analyzer, aStore, bLoad)) {
-                return true;
+              if (!areEquivalent(
+                      aStore->indices(),
+                      bLoad->indices(),
+                      loop_var_starts,
+                      loop_var_stops)) {
+                if (isOverlapping(analyzer, aStore, bLoad)) {
+                  return true;
+                }
               }
             }
           }
@@ -1591,8 +1648,14 @@ bool LoopNest::hasLoopCarriedDependence(For* loop) {
         for (auto& aLoad : aLoads) {
           if (bStore->buf() == aLoad->buf()) {
             if (!areEqual(bStore->indices(), aLoad->indices())) {
-              if (isOverlapping(analyzer, bStore, aLoad)) {
-                return true;
+              if (!areEquivalent(
+                      bStore->indices(),
+                      aLoad->indices(),
+                      loop_var_starts,
+                      loop_var_stops)) {
+                if (isOverlapping(analyzer, bStore, aLoad)) {
+                  return true;
+                }
               }
             }
           }
@@ -1603,8 +1666,14 @@ bool LoopNest::hasLoopCarriedDependence(For* loop) {
         for (auto& bStore : bStores) {
           if (aStore->buf() == bStore->buf()) {
             if (!areEqual(aStore->indices(), bStore->indices())) {
-              if (isOverlapping(analyzer, aStore, bStore)) {
-                return true;
+              if (!areEquivalent(
+                      aStore->indices(),
+                      bStore->indices(),
+                      loop_var_starts,
+                      loop_var_stops)) {
+                if (isOverlapping(analyzer, aStore, bStore)) {
+                  return true;
+                }
               }
             }
           }
