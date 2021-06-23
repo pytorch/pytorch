@@ -6,7 +6,6 @@
 #include <unordered_set>
 
 #include "absl/memory/memory.h"
-#include "absl/strings/str_split.h"
 #include "lazy_tensor_core/csrc/device.h"
 #include "lazy_tensor_core/csrc/ir.h"
 #include "lazy_tensor_core/csrc/ir_dump_util.h"
@@ -15,6 +14,7 @@
 #include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/sys_util.h"
 #include "lazy_tensors/computation_client/unique.h"
+#include "lazy_tensors/str_split.h"
 
 namespace torch_lazy_tensors {
 namespace {
@@ -37,7 +37,8 @@ std::unordered_set<std::string>* LoadExperiments() {
       absl::make_unique<std::unordered_set<std::string>>();
   std::string experiments =
       lazy_tensors::sys_util::GetEnvString("LTC_EXPERIMENTAL", "");
-  std::vector<std::string> experiment_list = absl::StrSplit(experiments, ':');
+  std::vector<std::string> experiment_list =
+      lazy_tensors::StrSplit(experiments, ':');
   for (auto& name : experiment_list) {
     xset->insert(name);
   }

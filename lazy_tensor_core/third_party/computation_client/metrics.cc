@@ -5,10 +5,10 @@
 #include <sstream>
 
 #include "absl/memory/memory.h"
-#include "absl/strings/str_split.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
 #include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/core/platform/macros.h"
+#include "lazy_tensors/str_split.h"
 
 namespace lazy_tensors {
 namespace metrics {
@@ -17,7 +17,8 @@ namespace {
 const std::vector<double>* ReadEnvPercentiles() {
   std::string percentiles = sys_util::GetEnvString(
       "LTC_METRICS_PERCENTILES", "0.01:0.05:0.1:0.2:0.5:0.8:0.9:0.95:0.99");
-  std::vector<std::string> percentiles_list = absl::StrSplit(percentiles, ':');
+  std::vector<std::string> percentiles_list =
+      lazy_tensors::StrSplit(percentiles, ':');
   std::unique_ptr<std::vector<double>> metrics_percentiles =
       absl::make_unique<std::vector<double>>();
   for (auto& pct_str : percentiles_list) {
