@@ -16,7 +16,7 @@ from tools.codegen.api.types import (Binding, CppSignatureGroup, NamedCType, Bas
 from tools.codegen.api import cpp
 from tools.codegen.gen import parse_native_yaml
 from tools.codegen.context import with_native_function
-from tools.codegen.model import FunctionSchema, NativeFunction, Variant, Type, SchemaKind
+from tools.codegen.model import FunctionSchema, NativeFunction, Variant, Type
 from tools.codegen.utils import IDENT_REGEX, split_name_params, YamlLoader
 
 _GLOBAL_LOAD_DERIVATIVE_CACHE = {}
