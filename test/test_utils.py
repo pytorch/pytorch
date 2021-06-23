@@ -743,7 +743,7 @@ class TestAssert(TestCase):
         # data can be passed without errors
         x = torch.randn(4, 4).fill_(1.0)
         ms(x)
-        with self.assertRaisesRegex(torch.jit.Error, "foo"):  # type: ignore[type-var]
+        with self.assertRaisesRegex(torch.jit.Error, "foo"):
             ms(torch.tensor([False], dtype=torch.bool))
 
 
@@ -823,6 +823,34 @@ class TestStandaloneCPPJIT(TestCase):
 
         finally:
             shutil.rmtree(build_dir)
+
+
+class DummyXPUModule(object):
+    @staticmethod
+    def is_available():
+        return True
+
+
+class TestExtensionUtils(TestCase):
+    def test_external_module_register(self):
+        # Built-in module
+        with self.assertRaisesRegex(RuntimeError, "The runtime module of"):
+            torch._register_device_module('cuda', torch.cuda)
+
+        # Wrong device type
+        with self.assertRaisesRegex(RuntimeError, "Expected one of cpu"):
+            torch._register_device_module('dummmy', DummyXPUModule)
+
+        with self.assertRaises(AttributeError):
+            torch.xpu.is_available()  # type: ignore[attr-defined]
+
+        torch._register_device_module('xpu', DummyXPUModule)
+
+        torch.xpu.is_available()  # type: ignore[attr-defined]
+
+        # No supporting for override
+        with self.assertRaisesRegex(RuntimeError, "The runtime module of"):
+            torch._register_device_module('xpu', DummyXPUModule)
 
 
 if __name__ == '__main__':
