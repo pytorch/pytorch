@@ -21,6 +21,7 @@ void clear_computation_cache();
 namespace {
 // Number of threads set by the user
 std::atomic<int> num_threads{-1};
+thread_local int this_thread_id{0};
 
 } // namespace
 
@@ -81,11 +82,13 @@ int get_num_threads() {
 }
 
 int get_thread_num() {
-#ifdef _OPENMP
-  return omp_get_thread_num();
-#else
-  return 0;
-#endif
+  return this_thread_id;
+}
+
+namespace internal {
+void set_thread_num(int id) {
+  this_thread_id = id;
+}
 }
 
 bool in_parallel_region() {

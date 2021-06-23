@@ -29,6 +29,7 @@ inline void parallel_for(
     numiter > grain_size && numiter > 1 &&
     omp_get_max_threads() > 1 && !omp_in_parallel());
   if (!use_parallel) {
+    internal::ThreadIdGuard tid_guard(0);
     f(begin, end);
     return;
   }
@@ -54,6 +55,7 @@ inline void parallel_for(
     int64_t begin_tid = begin + tid * chunk_size;
     if (begin_tid < end) {
       try {
+        internal::ThreadIdGuard tid_guard(tid);
         f(begin_tid, std::min(end, chunk_size + begin_tid));
       } catch (...) {
         if (!err_flag.test_and_set()) {
@@ -66,6 +68,7 @@ inline void parallel_for(
     std::rethrow_exception(eptr);
   }
 #else
+  internal::ThreadIdGuard tid_guard(0);
   f(begin, end);
 #endif
 }
@@ -84,6 +87,7 @@ inline scalar_t parallel_reduce(
     return ident;
   } else if ((end - begin) <= grain_size || in_parallel_region() ||
              get_num_threads() == 1) {
+    internal::ThreadIdGuard tid_guard(0);
     return f(begin, end, ident);
   } else {
     const int64_t num_results = divup((end - begin), grain_size);
@@ -95,6 +99,9 @@ inline scalar_t parallel_reduce(
     for (int64_t id = 0; id < num_results; id++) {
       int64_t i = begin + id * grain_size;
       try {
+        #ifdef _OPENMP
+        internal::ThreadIdGuard tid_guard(omp_get_thread_num());
+        #endif
         results_data[id] = f(i, i + std::min(end - i, grain_size), ident);
       } catch (...) {
         if (!err_flag.test_and_set()) {
