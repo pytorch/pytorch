@@ -186,7 +186,7 @@ def run_shell_commands_in_parallel(commands: Iterable[List[str]]) -> str:
         coros = [run_command(cmd) for cmd in commands]
         return await gather_with_concurrency(multiprocessing.cpu_count(), coros)
 
-    loop = asyncio.get_event_loop();
+    loop = asyncio.get_event_loop()
     results = loop.run_until_complete(helper())
     return "\n".join(results)
 
