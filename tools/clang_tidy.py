@@ -24,12 +24,9 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
-
-try:
-    from shlex import quote
-except ImportError:
-    from pipes import quote
+import asyncio
+import shlex
+import multiprocessing
 
 from typing import Any, Dict, Iterable, List, Set, Tuple
 
@@ -40,13 +37,6 @@ Patterns = collections.namedtuple("Patterns", "positive, negative")
 # compiled -- translation units are, of which there is one per implementation
 # (c/cc/cpp) file.
 DEFAULT_FILE_PATTERN = re.compile(r"^.*\.c(c|pp)?$")
-
-# Search for:
-#    diff --git ...
-#    index ...
-#    --- ...
-#    +++ ...
-CHUNK_HEADER_RE = r"diff --git .*?\nindex.*?\n---.*?\n\+\+\+ b/(.*?)\n@@ -(\d+,\d+) \+(\d+,\d+) @@"
 
 CLANG_WARNING_PATTERN = re.compile(r"([^:]+):(\d+):\d+:\s+warning:.*\[([^\]]+)\]")
 
@@ -136,14 +126,24 @@ def get_all_files(paths: List[str]) -> List[str]:
 
 
 def find_changed_lines(diff: str) -> Dict[str, List[Tuple[int, int]]]:
+    # Delay import since this isn't required unless using the --diff-file
+    # argument, which for local runs people don't care about
+    try:
+        import unidiff  # type: ignore[import]
+    except ImportError as e:
+        e.msg += ", run 'pip install unidiff'"  # type: ignore[attr-defined]
+        raise e
+
     files = collections.defaultdict(list)
 
-    matches = re.findall(CHUNK_HEADER_RE, diff, re.MULTILINE)
-    for file, start, end in matches:
-        start_line, _ = start.split(",")
-        end_line, _ = end.split(",")
+    for file in unidiff.PatchSet(diff):
+        for hunk in file:
+            start = hunk[0].target_line_no
+            if start is None:
+                start = 1
+            end = hunk[-1].target_line_no
 
-        files[file].append((start_line, end_line))
+        files[file.path].append((start, end))
 
     return dict(files)
 
@@ -164,13 +164,30 @@ build {i}: do_cmd
 
 def run_shell_commands_in_parallel(commands: Iterable[List[str]]) -> str:
     """runs all the commands in parallel with ninja, commands is a List[List[str]]"""
-    build_entries = [build_template.format(i=i, cmd=' '.join([quote(s) for s in command]))
-                     for i, command in enumerate(commands)]
+    async def run_command(cmd: List[str]) -> str:
+        proc = await asyncio.create_subprocess_shell(
+            shlex.join(cmd),  # type: ignore[attr-defined]
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, _ = await proc.communicate()
+        return stdout.decode()
 
-    file_contents = ninja_template.format(build_rules='\n'.join(build_entries)).encode()
-    with tempfile.NamedTemporaryFile(delete=False) as f:
-        f.write(file_contents)
-        return run_shell_command(['ninja', '-f', f.name])
+    async def gather_with_concurrency(n: int, tasks: List[Any]) -> Any:
+        semaphore = asyncio.Semaphore(n)
+
+        async def sem_task(task: Any) -> Any:
+            async with semaphore:
+                return await task
+
+        return await asyncio.gather(*(sem_task(task) for task in tasks), return_exceptions=True)
+
+    async def helper() -> Any:
+        coros = [run_command(cmd) for cmd in commands]
+        return await gather_with_concurrency(multiprocessing.cpu_count(), coros)
+
+    results = asyncio.run(helper())  # type: ignore[attr-defined]
+    return "\n".join(results)
 
 
 def run_clang_tidy(options: Any, line_filters: List[Dict[str, Any]], files: Iterable[str]) -> str:
