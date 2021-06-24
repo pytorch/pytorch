@@ -106,7 +106,9 @@ class TestImporter(PackageTestCase):
 
         dummy_importer_foo = DummyImporter("foo")
         dummy_importer_bar = DummyImporter("bar")
-        dummy_importer_not_found = DummyImporter("__main__")  # __main__ is used as a proxy for "not found" by CPython
+        dummy_importer_not_found = DummyImporter(
+            "__main__"
+        )  # __main__ is used as a proxy for "not found" by CPython
 
         foo_then_bar = OrderedImporter(dummy_importer_foo, dummy_importer_bar)
         self.assertEqual(foo_then_bar.whichmodule(DummyClass(), ""), "foo")
@@ -114,7 +116,9 @@ class TestImporter(PackageTestCase):
         bar_then_foo = OrderedImporter(dummy_importer_bar, dummy_importer_foo)
         self.assertEqual(bar_then_foo.whichmodule(DummyClass(), ""), "bar")
 
-        notfound_then_foo = OrderedImporter(dummy_importer_not_found, dummy_importer_foo)
+        notfound_then_foo = OrderedImporter(
+            dummy_importer_not_found, dummy_importer_foo
+        )
         self.assertEqual(notfound_then_foo.whichmodule(DummyClass(), ""), "foo")
 
     def test_package_importer_whichmodule_no_dunder_module(self):

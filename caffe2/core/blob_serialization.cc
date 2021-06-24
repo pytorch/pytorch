@@ -36,7 +36,7 @@ C10_DEFINE_bool(
 C10_DEFINE_bool(
     caffe2_serialize_using_bytes_as_holder,
     false,
-    "Serialize BOOL, UINT8, INT8, UINT16, INT16, INT64, FLOAT16 tensors using byte_data field instead of int32");
+    "Serialize BOOL, UINT8, INT8, UINT16, INT16, FLOAT16 tensors using byte_data field instead of int32");
 
 namespace caffe2 {
 namespace {

@@ -659,6 +659,8 @@ inline DispatchKey computeDispatchKey(
               ", it shouldn't ever convert to a DispatchKey.  File a bug describing what you were doing if you think this is in error.");
         case DeviceType::HIP:
           return DispatchKey::HIP;
+        case DeviceType::VE:
+          return DispatchKey::VE;
         case DeviceType::FPGA:
           return DispatchKey::FPGA;
         case DeviceType::MSNPU:
@@ -673,6 +675,8 @@ inline DispatchKey computeDispatchKey(
           return DispatchKey::Metal;
         case DeviceType::Meta:
           return DispatchKey::Meta;
+        case DeviceType::HPU:
+          return DispatchKey::HPU;
         default:
           TORCH_CHECK_NOT_IMPLEMENTED(
               false,
@@ -688,6 +692,8 @@ inline DispatchKey computeDispatchKey(
           return DispatchKey::SparseCUDA;
         case DeviceType::HIP:
           return DispatchKey::SparseHIP;
+        case DeviceType::VE:
+          return DispatchKey::SparseVE;
         case DeviceType::XPU:
           return DispatchKey::SparseXPU;
         default:
@@ -727,6 +733,7 @@ inline Layout dispatchKeyToLayout(DispatchKey dispatch_key) {
     case DispatchKey::SparseCPU:
     case DispatchKey::SparseCUDA:
     case DispatchKey::SparseHIP:
+    case DispatchKey::SparseVE:
     case DispatchKey::SparseXPU:
     case DispatchKey::SparseCsrCPU:
     case DispatchKey::SparseCsrCUDA:
@@ -755,6 +762,9 @@ inline DeviceType dispatchKeyToDeviceType(DispatchKey dispatch_key) {
     case DispatchKey::HIP:
     case DispatchKey::SparseHIP:
       return DeviceType::HIP;
+    case DispatchKey::VE:
+    case DispatchKey::SparseVE:
+      return DeviceType::VE;
     case DispatchKey::XLA:
     case DispatchKey::AutogradXLA:
       return DeviceType::XLA;
@@ -772,6 +782,9 @@ inline DeviceType dispatchKeyToDeviceType(DispatchKey dispatch_key) {
     case DispatchKey::MLC:
     case DispatchKey::AutogradMLC:
       return DeviceType::MLC;
+    case DispatchKey::HPU:
+    case DispatchKey::AutogradHPU:
+      return DeviceType::HPU;
 
     // stuff that isn't real
     case DispatchKey::MSNPU:

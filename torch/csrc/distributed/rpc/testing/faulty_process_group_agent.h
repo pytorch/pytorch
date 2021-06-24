@@ -7,7 +7,7 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-struct FaultyProcessGroupRpcBackendOptions
+struct TORCH_API FaultyProcessGroupRpcBackendOptions
     : public ProcessGroupRpcBackendOptions {
   FaultyProcessGroupRpcBackendOptions(
       int num_send_recv_threads,
@@ -31,7 +31,7 @@ struct FaultyProcessGroupRpcBackendOptions
   int numFailSends;
 };
 
-class FaultyProcessGroupAgent : public ProcessGroupAgent {
+class TORCH_API FaultyProcessGroupAgent : public ProcessGroupAgent {
  public:
   FaultyProcessGroupAgent(
       const c10::intrusive_ptr<::c10d::Store>& store,
@@ -39,6 +39,7 @@ class FaultyProcessGroupAgent : public ProcessGroupAgent {
       c10::intrusive_ptr<c10d::ProcessGroup> pg,
       int numSendRecvThreads,
       std::chrono::milliseconds rpcTimeout,
+      std::unique_ptr<RequestCallback> cb,
       const std::vector<std::string>& messagesToFail,
       const std::unordered_map<std::string, float>& messageTypesToDelay,
       int failNumSends = 0);
@@ -46,7 +47,7 @@ class FaultyProcessGroupAgent : public ProcessGroupAgent {
   // Faulty send function for this class.
   c10::intrusive_ptr<JitFuture> send(
       const WorkerInfo& to,
-      Message&& message,
+      c10::intrusive_ptr<Message> message,
       const float rpcTimeoutSeconds = torch::distributed::rpc::kUnsetRpcTimeout,
       const std::unordered_map<c10::Device, c10::Device>& deviceMap = {})
       override;
@@ -60,7 +61,7 @@ class FaultyProcessGroupAgent : public ProcessGroupAgent {
   // Overrides ProcessGroupAgent's enqueueSend to inject delays.
   void enqueueSend(SendWork work) override;
   // Override ProcessGroupAgent's sendToSelf to inject delays.
-  void sendToSelf(Message&& message) override;
+  void sendToSelf(c10::intrusive_ptr<Message> message) override;
   // This function parses the list of strings passed in by the python tests and
   // resolves the Message Types that must use the faulty send.
   std::vector<MessageType> parseMessagesToFailInput(
