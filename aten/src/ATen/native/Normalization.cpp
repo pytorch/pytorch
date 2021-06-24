@@ -290,24 +290,32 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
       .resize_outputs(false)
       .declare_static_shape(input.sizes(), /*squash_dims=*/1)
       .build();
-  auto unary_iter = TensorIteratorConfig()
-      .add_output(grad_input)
-      .add_input(train ? input : grad_out_)
-      .resize_outputs(false)
-      .declare_static_shape(input.sizes(), /*squash_dims=*/1)
-      .build();
-  auto binary_iter = TensorIteratorConfig()
-      .add_output(grad_input)
-      .add_input(grad_input)
-      .add_input(grad_out_)
-      .resize_outputs(false)
-      .declare_static_shape(input.sizes(), /*squash_dims=*/1)
-      .build();
+
+  TensorIterator unary_iter;
+  TensorIterator binary_iter;
+  if (grad_input_mask[0]) {
+    unary_iter.build(
+        TensorIteratorConfig()
+        .add_output(grad_input)
+        .add_input(train ? input : grad_out_)
+        .resize_outputs(false)
+        .declare_static_shape(input.sizes(), /*squash_dims=*/1));
+
+    if (train) {
+      binary_iter.build(
+          TensorIteratorConfig()
+          .add_output(grad_input)
+          .add_input(grad_input)
+          .add_input(grad_out_)
+          .resize_outputs(false)
+          .declare_static_shape(input.sizes(), /*squash_dims=*/1));
+    }
+  }
 
   auto in_channel_stride = input.strides()[1];
   auto in_data = input.data_ptr<scalar_t>();
-  auto grad_in_channel_stride = grad_input.strides()[1];
-  auto grad_in_data = grad_input.data_ptr<scalar_t>();
+  auto grad_in_channel_stride = grad_input_mask[0] ? grad_input.strides()[1] : 0;
+  auto grad_in_data = grad_input_mask[0] ? grad_input.data_ptr<scalar_t>() : nullptr;
   auto grad_out_channel_stride = grad_out_.strides()[1];
   auto grad_out_data = grad_out_.data_ptr<scalar_t>();
 
