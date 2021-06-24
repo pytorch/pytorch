@@ -2404,6 +2404,92 @@ Stmt* TermExpander::mutate(const Block* v) {
   return fuseSyncThreads(new_block);
 }
 
+// SimplifierUnderContext
+
+Stmt* SimplifierUnderContext::mutate(const For* v) {
+  const Expr* var = v->var();
+  const Expr* start = v->start();
+  const Expr* stop = v->stop();
+  Stmt* body = v->body();
+  LoopOptions loop_options = v->loop_options();
+  const Expr* var_new_expr = var->accept_mutator(this);
+  const Var* var_new = dynamic_cast<const Var*>(var_new_expr);
+  const Expr* start_new = start->accept_mutator(this);
+  const Expr* stop_new = stop->accept_mutator(this);
+  Stmt* body_new = body;
+
+  // save bounds info before this for-stmt
+  bool has_bounds = false;
+  std::pair<const Expr*, const Expr*> bound_old;
+  const Var* var_key = dynamic_cast<const Var*>(var);
+  auto got = var_bound_info_.find(var_key);
+  if (got != var_bound_info_.end()) {
+    has_bounds = true;
+    bound_old = got->second;
+  }
+  // set bounds info for index var
+  const std::pair<const Expr*, const Expr*> bound_new =
+      std::make_pair(start_new, stop_new);
+  var_bound_info_[var_key] = bound_new;
+
+  const Expr* loops = new Sub(stop_new, start_new);
+  loops = loops->accept_mutator(this);
+  if (loop_options.isDefault() && loops->isConstant()) {
+    if (immediateEquals(loops, 0)) {
+      return new Block({});
+    } else if (immediateEquals(loops, 1)) {
+      body_new = Substitute(body, {{var_new, start_new}});
+      body_new = body_new->accept_mutator(this);
+
+      // erase index var bounds info or restore old bounds info
+      if (has_bounds) {
+        var_bound_info_[var_key] = bound_old;
+      } else {
+        var_bound_info_.erase(var_key);
+      }
+
+      return body_new;
+    }
+  }
+
+  body_new = body_new->accept_mutator(this);
+
+  // erase index var bounds info or restore old bounds info
+  if (has_bounds) {
+    var_bound_info_[var_key] = bound_old;
+  } else {
+    var_bound_info_.erase(var_key);
+  }
+
+  if (!body_new) {
+    return new Block({});
+  }
+
+  if (auto* block = dynamic_cast<Block*>(body_new)) {
+    if (block->nstmts() == 0) {
+      return new Block({});
+    }
+
+    if (block->nstmts() == 1) {
+      if (auto* cond = dynamic_cast<Cond*>(block->front())) {
+        Stmt* reordered = handleForCondReordering(v, cond);
+        if (reordered) {
+          return reordered->accept_mutator(this);
+        }
+      }
+    }
+  }
+
+  if (var == var_new && start == start_new && stop == stop_new &&
+      body == body_new) {
+    return (Stmt*)v;
+  }
+  if (body_new == body) {
+    body_new = Stmt::clone(body);
+  }
+  return new For(var_new, start_new, stop_new, body_new, loop_options);
+}
+
 bool exprEquals(const Expr* A, const Expr* B) {
   try {
     // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)

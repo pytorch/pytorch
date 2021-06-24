@@ -403,6 +403,21 @@ class MinTerm : public ExprNode<MinTerm> {
   void uniquefy();
 };
 
+// Context-sensitive IR simplification
+using VarBoundInfo =
+    std::unordered_map<const Var*, std::pair<const Expr*, const Expr*>>;
+class TORCH_API SimplifierUnderContext : public IRMutator {
+ public:
+  ~SimplifierUnderContext() override = default;
+  // Add boundary info for index variables in for-loops
+  Stmt* mutate(const For* v) override;
+
+ protected:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  HashProvider hasher_;
+  VarBoundInfo var_bound_info_;
+};
+
 // Stmt simplification should occur in both modes.
 class TORCH_API PolynomialBase : public IRMutator {
  public:
@@ -575,6 +590,9 @@ class TORCH_API TermExpander : public PolynomialBase {
 class TORCH_API IRSimplifier {
  public:
   static const Expr* simplify(const Expr* e) {
+    SimplifierUnderContext ctxsimplifier;
+    e = e->accept_mutator(&ctxsimplifier);
+
     PolynomialTransformer simplifier;
     e = e->accept_mutator(&simplifier);
 
@@ -594,6 +612,9 @@ class TORCH_API IRSimplifier {
   }
 
   static Stmt* simplify(Stmt* s) {
+    SimplifierUnderContext ctxsimplifier;
+    s = s->accept_mutator(&ctxsimplifier);
+
     PolynomialTransformer simplifier;
     s = s->accept_mutator(&simplifier);
     if (s == nullptr) {
