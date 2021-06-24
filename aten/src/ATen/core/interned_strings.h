@@ -352,6 +352,9 @@ namespace c10 {
   _(aten, special_i0e)               \
   _(aten, special_i1)                \
   _(aten, special_i1e)               \
+  _(aten, xlogy)                     \
+  _(aten, special_xlogy)             \
+  _(aten, special_xlog1py)           \
   _(aten, special_zeta)              \
   _(aten, has_torch_function)        \
   _(aten, hardswish)                 \

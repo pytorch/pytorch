@@ -1196,5 +1196,29 @@ Tensor& xlogy_(Tensor& x, const Scalar& y) {
   return at::xlogy_out(x, x, wrapped_scalar_tensor(y));
 }
 
+Tensor& special_xlogy_out(const Tensor& self, const Tensor& other, Tensor& result) {
+  return at::xlogy_out(result, self, other);
+}
+
+Tensor& special_xlogy_out(const Scalar& self, const Tensor& other, Tensor& result) {
+  return at::xlogy_out(result, self, other);
+}
+
+Tensor& special_xlogy_out(const Tensor& self, const Scalar& other, Tensor& result) {
+  return at::xlogy_out(result, self, other);
+}
+
+Tensor special_xlogy(const Tensor& x, const Tensor& y) {
+  return at::xlogy(x, y);
+}
+
+Tensor special_xlogy(const Scalar& x, const Tensor& y) {
+  return at::xlogy(x, y);
+}
+
+Tensor special_xlogy(const Tensor& x, const Scalar& y) {
+  return at::xlogy(x, y);
+}
+
 } // namespace native
 } // namespace at

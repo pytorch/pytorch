@@ -444,8 +444,6 @@ _(aten, logcumsumexp) \
 _(aten, logdet) \
 _(aten, logspace) \
 _(aten, logsumexp) \
-_(aten, xlogy) \
-_(aten, special_xlog1py) \
 _(aten, lstm) \
 _(aten, lstm_cell) \
 _(aten, lstsq) \

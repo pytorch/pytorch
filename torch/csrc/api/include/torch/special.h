@@ -205,6 +205,39 @@ inline Tensor& expm1_out(Tensor& result, const Tensor& self) {
   return torch::special_expm1_out(result, self);
 }
 
+/// Computes x * log(y) for inputs, elementwise
+/// See https://pytorch.org/docs/master/special.html#torch.special.xlogy.
+///
+/// Example:
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+/// auto y = torch::randn(128, dtype=kDouble);
+/// torch::special::xlogy(x, y);
+/// ```
+inline Tensor xlogy(const Tensor& self, const Tensor& other) {
+  return torch::special_xlogy(self, other);
+}
+
+inline Tensor xlogy(const Scalar& self, const Tensor& other) {
+  return torch::special_xlogy(self, other);
+}
+
+inline Tensor xlogy(const Tensor& self, const Scalar& other) {
+  return torch::special_xlogy(self, other);
+}
+
+inline Tensor& xlogy_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  return torch::special_xlogy_out(result, self, other);
+}
+
+inline Tensor& xlogy_out(Tensor& result, const Scalar& self, const Tensor& other) {
+  return torch::special_xlogy_out(result, self, other);
+}
+
+inline Tensor& xlogy_out(Tensor& result, const Tensor& self, const Scalar& other) {
+  return torch::special_xlogy_out(result, self, other);
+}
+
 /// Computes x * log1p(y) for inputs, elementwise
 /// See https://pytorch.org/docs/master/special.html#torch.special.xlog1py.
 ///

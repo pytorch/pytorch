@@ -4965,43 +4965,8 @@ add_docstr(torch.xlogy,
            r"""
 xlogy(input, other, *, out=None) -> Tensor
 
-Computes ``input * log(other)`` with the following cases.
-
-.. math::
-    \text{out}_{i} = \begin{cases}
-        \text{NaN} & \text{if } \text{other}_{i} = \text{NaN} \\
-        0 & \text{if } \text{input}_{i} = 0.0 \\
-        \text{input}_{i} * \log{(\text{other}_{i})} & \text{otherwise}
-    \end{cases}
-
-Similar to SciPy's `scipy.special.xlogy`.
-
-""" + r"""
-
-Args:
-    input (Number or Tensor) : Multiplier
-    other (Number or Tensor) : Argument
-
-.. note:: At least one of :attr:`input` or :attr:`other` must be a tensor.
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> x = torch.zeros(5,)
-    >>> y = torch.tensor([-1, 0, 1, float('inf'), float('nan')])
-    >>> torch.xlogy(x, y)
-    tensor([0., 0., 0., 0., nan])
-    >>> x = torch.tensor([1, 2, 3])
-    >>> y = torch.tensor([3, 2, 1])
-    >>> torch.xlogy(x, y)
-    tensor([1.0986, 1.3863, 0.0000])
-    >>> torch.xlogy(x, 4)
-    tensor([1.3863, 2.7726, 4.1589])
-    >>> torch.xlogy(2, y)
-    tensor([2.1972, 1.3863, 0.0000])
-""".format(**common_args))
+Alias for :func:`torch.special.xlogy`.
+""")
 
 add_docstr(torch.logical_and,
            r"""
