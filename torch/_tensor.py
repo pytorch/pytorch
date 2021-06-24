@@ -561,6 +561,14 @@ class Tensor(torch._C._TensorBase):
         return torch.floor_divide(other, self)
 
     @_wrap_type_error_to_not_implemented
+    def __rlshift__(self, other):
+        return torch.bitwise_left_shift(other, self)
+
+    @_wrap_type_error_to_not_implemented
+    def __rrshift__(self, other):
+        return torch.bitwise_right_shift(other, self)
+
+    @_wrap_type_error_to_not_implemented
     def __rmatmul__(self, other):
         if has_torch_function_variadic(self, other):
             return handle_torch_function(Tensor.__rmatmul__, (self, other), self, other)

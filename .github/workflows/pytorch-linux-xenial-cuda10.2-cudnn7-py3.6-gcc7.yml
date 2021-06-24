@@ -143,7 +143,7 @@ jobs:
             sh -c 'sudo chown -R jenkins . && .jenkins/pytorch/build.sh'
       - name: Display and upload binary build size statistics (Click Me)
         # temporary hack: set CIRCLE_* vars, until we update
-        # tools/print_test_stats.py to natively support GitHub Actions
+        # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
@@ -335,7 +335,7 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
-          # deep clone, to allow tools/print_test_stats.py to use Git commands
+          # deep clone, to allow tools/stats/print_test_stats.py to use Git commands
           fetch-depth: 0
       - uses: actions/download-artifact@v2
         name: Download PyTorch Test Reports
@@ -358,7 +358,7 @@ jobs:
         run: .github/scripts/parse_ref.py
       - name: Display and upload test statistics (Click Me)
         # temporary hack: set CIRCLE_* vars, until we update
-        # tools/print_test_stats.py to natively support GitHub Actions
+        # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_ACCESS_KEY_ID }}
@@ -371,4 +371,4 @@ jobs:
           CIRCLE_WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         run: |
           export PYTHONPATH=$PWD
-          python tools/print_test_stats.py --upload-to-s3 --compare-with-s3 test
+          python tools/stats/print_test_stats.py --upload-to-s3 --compare-with-s3 test
