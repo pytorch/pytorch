@@ -28,6 +28,11 @@ using avg_pool2d_fn = void(*)(const Tensor& output, const Tensor& input, int kW,
 DECLARE_DISPATCH(avg_pool2d_fn, avg_pool2d_kernel);
 DECLARE_DISPATCH(avg_pool2d_fn, avg_pool2d_backward_kernel);
 
+using avg_pool3d_fn = void(*)(const Tensor& output, const Tensor& input, int kW, int kH, int kD,
+    int dW, int dH, int dD, int padW, int padH, int padD, bool count_include_pad, c10::optional<int64_t> divisor_override);
+DECLARE_DISPATCH(avg_pool3d_fn, avg_pool3d_kernel);
+DECLARE_DISPATCH(avg_pool3d_fn, avg_pool3d_backward_kernel);
+
 namespace {
 
 template <typename dest_t, typename src_t>
