@@ -380,7 +380,7 @@ class DeviceTypeTestBase(TestCase):
             assert not hasattr(cls, test_name), "Redefinition of test {0}".format(test_name)
             setattr(cls, test_name, instantiated_test)
 
-        # Handles tests that need parameterization (e.g. those that run across a set of
+        # Handles tests that need parametrization (e.g. those that run across a set of
         # ops / modules using the @ops or @modules decorators).
         if hasattr(test, 'parametrize_fn'):
             for (test, test_name, param_kwargs) in test.parametrize_fn(test, generic_cls, cls):
@@ -627,9 +627,9 @@ class OpDTypes(Enum):
 
 class _TestParametrizer(object):
     """
-    Decorator class for parameterizing a test function, yielding a set of new tests spawned
+    Decorator class for parametrizing a test function, yielding a set of new tests spawned
     from the original generic test, each specialized for a specific set of test inputs. For
-    example, parameterizing a test across the set of ops will result in a test function per op.
+    example, parametrizing a test across the set of ops will result in a test function per op.
 
     The decision of how to parametrize / what to parametrize over is intended to be implemented
     by each derived class.
@@ -640,7 +640,7 @@ class _TestParametrizer(object):
     """
     def _parametrize_test(self, test, generic_cls, device_cls):
         """
-        Parameterizes the given test function across whatever dimension is specified by the derived class.
+        Parametrizes the given test function across whatever dimension is specified by the derived class.
         Tests can be parametrized over any arbitrary dimension or combination of dimensions, such as all
         ops, all modules, or all ops + their associated dtypes.
 
@@ -651,8 +651,8 @@ class _TestParametrizer(object):
 
         Returns:
             Generator object returning 3-tuples of:
-                test (fn): Parameterized test function; must support a device arg and args for any params
-                test_name (str): Parameterized name of the test (e.g. test_bar_opname_int64)
+                test (fn): Parametrized test function; must support a device arg and args for any params
+                test_name (str): Parametrized name of the test (e.g. test_bar_opname_int64)
                 param_kwargs (dict): Param kwargs to pass to the test (e.g. {'op': 'add', 'dtype': torch.int64})
         """
         raise NotImplementedError
