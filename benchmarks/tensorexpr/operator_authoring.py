@@ -6,7 +6,7 @@ import torch.jit.te
 
 CUDA = False
 SIZES = [1, 512, 8192]
-NUMBER = [100, 10, 1]
+NUMBER = [100, 10, 1, 1]
 REPEAT = 10
 
 
@@ -126,11 +126,10 @@ def test_backwards(make_args, nnc=nnc_add, aten=torch.add):
     return benchmark_loop(backwards_setup)
 
 
-def main():
+def main(device="cpu"):
     torch.set_num_threads(1)  # TODO(jansel): add parallel support
     torch._C._jit_override_can_fuse_on_cpu(True)
 
-    device = "cuda" if CUDA else "cpu"
     I = partial(torch.randint, 0, 100, device=device)
     R = partial(torch.randn, device=device)
 
@@ -166,18 +165,18 @@ def main():
                                         I([n, n], dtype=torch.int64)))),
         ("fused addnorm", test(lambda n: (R(n, n), R(n, n), R(n, n), R(n, n)),
                                nnc=nnc_addnorm, aten=eager_addnorm)),
+        ("fused addnorm (vs TS)", test(lambda n: (R(n, n), R(n, n), R(n, n), R(n, n)),
+                                       nnc=nnc_addnorm, aten=ts_addnorm)),
         ("fused addnorm out=", test_out(lambda n: (R(n, n), R(n, n), R(n, n), R(n, n)),
                                         nnc=nnc_addnorm, aten=inplace_addnorm, out=lambda n: R(n, n))),
+        ("fused addnorm out= (vs TS)", test_out(lambda n: (R(n, n), R(n, n), R(n, n), R(n, n)),
+                                                nnc=nnc_addnorm, aten=ts_ip_addnorm, out=lambda n: R(n, n))),
         ("fused addnorm backward",
          test_backwards(lambda n: (R(n, n), R(n, n, requires_grad=True), R(n, n), R(n, n)),
                         nnc=nnc_addnorm, aten=eager_addnorm)),
-        ("fused addnorm (TS baseline)", test(lambda n: (R(n, n), R(n, n), R(n, n), R(n, n)),
-                                             nnc=ts_addnorm, aten=eager_addnorm)),
-        ("fused addnorm out= (TS baseline)", test_out(lambda n: (R(n, n), R(n, n), R(n, n), R(n, n)),
-                                                      nnc=ts_ip_addnorm, aten=inplace_addnorm, out=lambda n: R(n, n))),
-        ("fused addnorm backward (TS baseline)",
+        ("fused addnorm backward (vs TS)",
          test_backwards(lambda n: (R(n, n), R(n, n, requires_grad=True), R(n, n), R(n, n)),
-                        nnc=ts_addnorm, aten=eager_addnorm)),
+                        nnc=nnc_addnorm, aten=ts_addnorm)),
     ]
 
     df = pd.DataFrame(np.stack([r for n, r in results]),
@@ -193,4 +192,7 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    if CUDA:
+        main(device="cuda")
+    else:
+        main(device="cpu")
