@@ -1104,9 +1104,10 @@ class Tensor(torch._C._TensorBase):
             device_type = 'rocm'
         elif device_type == 'cpu' and self.is_pinned():
             device_type = 'cpu_pinned'
-        if device_type not in DLPackIds:
+        try:
+            return (DLPackIds[device_type], idx)
+        except AttributeError:
             raise ValueError('Unknown device type {} for Dlpack'.format(device_type))
-        return (DLPackIds[device_type], idx)
 
     __module__ = 'torch'
 
