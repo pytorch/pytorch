@@ -35,7 +35,7 @@ from torch.testing._internal.common_utils import (
     NO_MULTIPROCESSING_SPAWN,
     TEST_WITH_ASAN,
     TEST_WITH_TSAN,
-    IS_PYTORCH_CI,
+    IS_IN_CI,
     IS_WINDOWS,
     IS_MACOS,
 )
@@ -593,7 +593,7 @@ class StartProcessesListTest(StartProcessesTest):
 
 
 @unittest.skipIf(
-    TEST_WITH_ASAN or TEST_WITH_TSAN or IS_WINDOWS or IS_MACOS or IS_PYTORCH_CI,
+    TEST_WITH_ASAN or TEST_WITH_TSAN or IS_WINDOWS or IS_MACOS or IS_IN_CI,
     "tests incompatible with tsan or asan, the redirect functionality does not work on macos or windows",
 )
 class StartProcessesNotCITest(StartProcessesTest):

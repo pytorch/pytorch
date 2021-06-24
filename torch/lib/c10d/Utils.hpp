@@ -45,12 +45,12 @@ extern const char* kDistDebugDetailLogLevel;
 extern const char* kDistDebugInfoLogLevel;
 extern const char* kDistDebugOffLogLevel;
 
-std::string parse_env(const char* env_var_name);
+TORCH_API std::string parse_env(const char* env_var_name);
 
-DistributedDebugLevel parseDistDebugLevel();
+TORCH_API DistributedDebugLevel parseDistDebugLevel();
 
 // Retrieve tensor shapes from a given tensor.
-std::vector<at::Tensor> getTensorShapes(const std::vector<at::Tensor>& tensors);
+TORCH_API std::vector<at::Tensor> getTensorShapes(const std::vector<at::Tensor>& tensors);
 
 // Turns at::IntArrayRef into "(1, 2, 3, 4)".
 inline std::string toString(at::IntArrayRef l) {
@@ -92,7 +92,7 @@ inline bool parseEnvVarFlag(const char* envVarName) {
     try {
       val = std::stoi(stringValue);
     } catch (std::exception& e) {
-      throw std::runtime_error(
+      TORCH_CHECK(false,
           "Invalid value for environment variable: " + std::string(envVarName));
     }
     if (val == 1) {
@@ -100,7 +100,7 @@ inline bool parseEnvVarFlag(const char* envVarName) {
     } else if (val == 0) {
       return false;
     } else {
-      throw std::runtime_error(
+      TORCH_CHECK(false,
           "Invalid value for environment variable: " + std::string(envVarName));
     }
   }
@@ -340,16 +340,16 @@ inline at::Tensor newLikeFlat(
     std::vector<std::vector<at::Tensor>>& tensors,
     size_t deviceIdx) {
   if (tensors.size() == 0 || tensors[0].size() == 0) {
-    throw std::runtime_error("Received an empty list");
+    TORCH_CHECK(false, "Received an empty list");
   }
   if (deviceIdx >= tensors.size()) {
-    throw std::runtime_error("Invalid device index");
+    TORCH_CHECK(false, "Invalid device index");
   }
   auto& t = tensors[deviceIdx][0];
   auto device = t.device();
   for (size_t i = 1; i < tensors[deviceIdx].size(); ++i) {
     if (tensors[deviceIdx][i].device() != device) {
-      throw std::runtime_error("Expecting all tensors on the same device");
+      TORCH_CHECK(false, "Expecting all tensors on the same device");
     }
   }
   at::DeviceGuard gpuGuard(device);
@@ -363,7 +363,7 @@ inline at::Tensor newLikeFlat(
 
 inline at::Tensor newLikeFlat(std::vector<at::Tensor>& tensors) {
   if (tensors.size() == 0) {
-    throw std::runtime_error("Received an empty list");
+    TORCH_CHECK(false, "Received an empty list");
   }
   auto& t = tensors[0];
   at::DeviceGuard gpuGuard(t.device());
@@ -504,7 +504,7 @@ using SizeType = uint64_t;
         continue;                                                         \
       } else if (                                                         \
           errno_local == WSAETIMEDOUT || errno_local == WSAEWOULDBLOCK) { \
-        throw std::runtime_error("Socket Timeout");                       \
+        TORCH_CHECK(false, "Socket Timeout");                       \
       } else {                                                            \
         throw std::system_error(errno_local, std::system_category());     \
       }                                                                   \
@@ -521,7 +521,7 @@ using SizeType = uint64_t;
       if (errno == EINTR) {                                     \
         continue;                                               \
       } else if (errno == EAGAIN || errno == EWOULDBLOCK) {     \
-        throw std::runtime_error("Socket Timeout");             \
+        TORCH_CHECK(false, "Socket Timeout");             \
       } else {                                                  \
         throw std::system_error(errno, std::system_category()); \
       }                                                         \
