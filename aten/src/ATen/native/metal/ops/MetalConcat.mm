@@ -2,8 +2,8 @@
 #import <ATen/native/metal/MetalCommandBuffer.h>
 #import <ATen/native/metal/MetalTensorImpl.h>
 #import <ATen/native/metal/MetalTensorImplStorage.h>
-#import <ATen/native/metal/MetalUtils.h>
-#import <ATen/native/metal/mpscnn/MPSCNNContext.h>
+#import <ATen/native/metal/MetalTensorUtils.h>
+#import <ATen/native/metal/MetalContext.h>
 #import <ATen/native/metal/mpscnn/MPSCNNUtils.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
 #import <ATen/native/metal/mpscnn/MPSImageUtils.h>
@@ -18,22 +18,22 @@ namespace metal {
 
 Tensor cat_batch(const TensorList tensors, MetalTensorImplStorage& mt) {
   at::Tensor tensor = tensors[0];
-  MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(tensor);
+  MetalCommandBuffer* commandBuffer = getCommandBuffer(tensor);
   MPSImage* Y = mt.texture()->image();
   ushort cat_dim4_pointer = 0;
   for (int i = 0; i < tensors.size(); ++i) {
     const auto& t = tensors[i];
     MPSImage* X = imageFromTensor(t);
-    MetalCommandBuffer* Xcb = getCommandBufferFromTensor(t);
+    MetalCommandBuffer* Xcb = getCommandBuffer(t);
     TORCH_CHECK(
         [commandBuffer isEqual:Xcb],
         @"inputs have different Metal command buffers");
     id<MTLComputeCommandEncoder> encoder =
         [commandBuffer.buffer computeCommandEncoder];
-    id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
+    id<MTLComputePipelineState> state = [[MetalContext sharedInstance]
         pipelineState:mpscnn::kernelFor(
-                          X, @"copy_offset", @"copy_offset_nonarray")];
-    id<MTLBuffer> offsetBuffer = [[MPSCNNContext sharedInstance].device
+                          X, "copy_offset", "copy_offset_nonarray")];
+    id<MTLBuffer> offsetBuffer = [[MetalContext sharedInstance].device
         newBufferWithLength:1 * sizeof(ushort)
                     options:MTLResourceOptionCPUCacheModeWriteCombined];
     ushort* offsetBufferPtr = (ushort*)[offsetBuffer contents];
@@ -49,7 +49,6 @@ Tensor cat_batch(const TensorList tensors, MetalTensorImplStorage& mt) {
     [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
             threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
     [encoder endEncoding];
-    [X markRead];
     cat_dim4_pointer += t.size(0) * ((t.size(1) + 3) / 4);
   }
   auto output = makeTensor(std::move(mt), tensor.options());
@@ -58,35 +57,35 @@ Tensor cat_batch(const TensorList tensors, MetalTensorImplStorage& mt) {
 
 Tensor cat_feature(const TensorList tensors, MetalTensorImplStorage& mt) {
   at::Tensor tensor = tensors[0];
-  MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(tensor);
+  MetalCommandBuffer* commandBuffer = getCommandBuffer(tensor);
   MPSImage* Y = mt.texture()->image();
   ushort channel_offset = 0;
   for (int i = 0; i < tensors.size(); ++i) {
     const auto& t = tensors[i];
     MPSImage* X = imageFromTensor(t);
-    MetalCommandBuffer* Xcb = getCommandBufferFromTensor(t);
+    MetalCommandBuffer* Xcb = getCommandBuffer(t);
     TORCH_CHECK(
         [commandBuffer isEqual:Xcb],
         @"inputs have different Metal command buffers");
     id<MTLComputeCommandEncoder> encoder =
         [commandBuffer.buffer computeCommandEncoder];
     auto kernelString = metal::mpscnn::kernelFor(
-        X, @"append_features_off0", @"append_features_off0_nonarray");
+        X, "append_features_off0", "append_features_off0_nonarray");
     ushort tex_offset = channel_offset % 4;
     if (tex_offset == 1) {
       kernelString = metal::mpscnn::kernelFor(
-          X, @"append_features_off1", @"append_features_off1_nonarray");
+          X, "append_features_off1", "append_features_off1_nonarray");
     } else if (tex_offset == 2) {
       kernelString = metal::mpscnn::kernelFor(
-          X, @"append_features_off2", @"append_features_off2_nonarray");
+          X, "append_features_off2", "append_features_off2_nonarray");
     } else if (tex_offset == 3) {
       kernelString = metal::mpscnn::kernelFor(
-          X, @"append_features_off3", @"append_features_off3_nonarray");
+          X, "append_features_off3", "append_features_off3_nonarray");
     }
 
     id<MTLComputePipelineState> state =
-        [[MPSCNNContext sharedInstance] pipelineState:kernelString];
-    id<MTLBuffer> offsetBuffer = [[MPSCNNContext sharedInstance].device
+        [[MetalContext sharedInstance] pipelineState:kernelString];
+    id<MTLBuffer> offsetBuffer = [[MetalContext sharedInstance].device
         newBufferWithLength:5 * sizeof(ushort)
                     options:MTLResourceOptionCPUCacheModeWriteCombined];
     ushort* offsetBufferPtr = (ushort*)[offsetBuffer contents];
@@ -111,7 +110,6 @@ Tensor cat_feature(const TensorList tensors, MetalTensorImplStorage& mt) {
     [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
             threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
     [encoder endEncoding];
-    [X markRead];
     channel_offset += X.featureChannels;
   }
   auto output = makeTensor(std::move(mt), tensor.options());
@@ -124,7 +122,7 @@ Tensor cat(const TensorList tensors, int64_t dim) {
       "Metal cat is implemented only for batch dimension");
   int64_t cat_dim_size = 0;
   at::Tensor tensor = tensors[0];
-  MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(tensor);
+  MetalCommandBuffer* commandBuffer = getCommandBuffer(tensor);
   for (int i = 0; i < tensors.size(); ++i) {
     const auto& t = tensors[i];
     TORCH_CHECK(t.dim() == 4, "Metal cat expects 4 dimensional inputs");

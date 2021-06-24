@@ -184,7 +184,7 @@ def checkpoint(function, *args, **kwargs):
         gradient in the model. To circumvent this, detach the tensors outside of
         the `checkpoint` function.
 
-    .. warning:
+    .. warning::
         At least one of the inputs needs to have :code:`requires_grad=True` if
         grads are needed for model inputs, otherwise the checkpointed part of the
         model won't have gradients. At least one of the outputs needs to have

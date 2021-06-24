@@ -251,6 +251,14 @@ def spectral_norm(module: T_module,
     Returns:
         The original module with the spectral norm hook
 
+    .. note::
+        This function has been reimplemented as
+        :func:`torch.nn.utils.parametrizations.spectral_norm` using the new
+        parametrization functionality in
+        :func:`torch.nn.utils.parametrize.register_parametrization`. Please use
+        the newer version. This function will be deprecated in a future version
+        of PyTorch.
+
     Example::
 
         >>> m = spectral_norm(nn.Linear(20, 40))

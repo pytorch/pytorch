@@ -29,12 +29,12 @@ jobs:
           # only run clang-format on allowlisted files
           echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
           echo "| clang-format failures found! Run: "
-          echo "|    tools/clang_format_ci.sh ${BASE_SHA} "
+          echo "|    tools/linter/clang_format_ci.sh ${BASE_SHA} "
           echo "| to fix this error. "
           echo "| For more info, see: https://github.com/pytorch/pytorch/wiki/clang-format "
           echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 
-          tools/clang_format_ci.sh "${BASE_SHA}"
+          tools/linter/clang_format_ci.sh "${BASE_SHA}"
 
           GIT_DIFF=$(git diff)
           if [[ -z $GIT_DIFF ]]; then
@@ -42,3 +42,7 @@ jobs:
           fi
           echo "$GIT_DIFF"
           exit 1
+
+concurrency:
+  group: clang-format-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
