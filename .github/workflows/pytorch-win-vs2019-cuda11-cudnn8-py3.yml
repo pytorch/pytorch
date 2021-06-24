@@ -82,7 +82,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: ubuntu-18.04
     env:
-      NUM_TEST_SHARDS: 1
+      NUM_TEST_SHARDS: 2
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     container:
@@ -102,7 +102,7 @@ jobs:
     runs-on: windows.8xlarge.nvidia.gpu
     env:
       JOB_BASE_NAME: pytorch-win-vs2019-cuda11-cudnn8-py3-test
-      NUM_TEST_SHARDS: 1
+      NUM_TEST_SHARDS: 2
       TEST_CONFIG: ${{ matrix.test_config }}
     needs:
       - build
@@ -154,6 +154,9 @@ jobs:
               export SHARD_NUMBER=$TEST_CONFIG
             else
               export SHARD_NUMBER=0
+            fi
+            if [[ -n $GITHUB_HEAD_REF && "$USE_CUDA" == 1 ]]; then
+              export RUN_SMOKE_TESTS_ONLY=1
             fi
             .jenkins/pytorch/win-test.sh
       - uses: actions/upload-artifact@v2
@@ -210,11 +213,11 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_SECRET_ACCESS_KEY }}
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          CIRCLE_JOB: pytorch-win-vs2019-cuda11-cudnn8-py3
+          JOB_BASE_NAME: pytorch-win-vs2019-cuda11-cudnn8-py3-test
           CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
           CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
-          CIRCLE_WORKFLOW_ID: ${{ github.run_id }} # dunno if this corresponds
+          CIRCLE_WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         run: |
           export PYTHONPATH=$PWD
           python tools/print_test_stats.py --upload-to-s3 --compare-with-s3 test
