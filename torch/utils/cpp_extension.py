@@ -1601,7 +1601,8 @@ def _get_build_directory(name: str, verbose: bool) -> str:
     root_extensions_directory = os.environ.get('TORCH_EXTENSIONS_DIR')
     if root_extensions_directory is None:
         root_extensions_directory = get_default_build_root()
-        cu_str = 'cpu' if not torch.version.cuda else f'cu{torch.version.cuda.replace(".", "")}'
+        cu_str = ('cpu' if not torch.version.cuda else
+                  f'cu{torch.version.cuda.replace(".", "")}')  # type: ignore[attr-defined]
         python_version = f'py{sys.version_info.major}{sys.version_info.minor}'
         build_folder = f'{python_version}_{cu_str}'
 
