@@ -1106,7 +1106,7 @@ class Tensor(torch._C._TensorBase):
             device_type = 'cpu_pinned'
         try:
             return (DLPackIds[device_type], idx)
-        except AttributeError:
+        except KeyError:
             raise ValueError('Unknown device type {} for Dlpack'.format(device_type))
 
     __module__ = 'torch'
