@@ -2012,6 +2012,43 @@ class TestBinaryUfuncs(TestCase):
                          torch.bitwise_xor(torch.tensor([True, True, False], device=device),
                                            torch.tensor([False, True, False], device=device)))
 
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
+    def test_bitwise_shift(self, device, dtype):
+        ops = [
+            (torch.bitwise_left_shift, np.left_shift),
+            (operator.lshift, operator.lshift),
+            (torch.bitwise_right_shift, np.right_shift),
+            (operator.rshift, operator.rshift),
+        ]
+        for torch_op, numpy_op in ops:
+            a = torch.tensor([19, -20, -21, 22], dtype=dtype, device=device)
+            b = torch.tensor([2, 1, 3, 1], dtype=dtype, device=device)
+            a_np = a.cpu().numpy()
+            b_np = b.cpu().numpy()
+
+            # Tensor x Tensor
+            self.assertEqual(torch_op(a, b), torch.tensor(numpy_op(a_np, b_np), device=device))
+            # Tensor x int scalar
+            self.assertEqual(torch_op(a, 2), torch.tensor(numpy_op(a_np, 2), device=device))
+
+    def test_bitwise_shift_float(self, device):
+        ops = [
+            (torch.bitwise_left_shift, lambda x, y: x * 2. ** y),
+            (operator.lshift, lambda x, y: x * 2. ** y),
+            (torch.bitwise_right_shift, lambda x, y: x / 2. ** y),
+            (operator.rshift, lambda x, y: x / 2. ** y),
+        ]
+        for torch_op, expected_op in ops:
+            # int tensor x float
+            a = torch.tensor([19, -20, -21, 22], dtype=torch.int64, device=device)
+            self.assertEqual(torch_op(a, 1.8), torch.floor(expected_op(a, 1)).to(a.dtype))
+            # float tensor x int scalar
+            a = torch.tensor([19.1, -20.2, -21.3, 22.4], dtype=torch.float32, device=device)
+            self.assertEqual(torch_op(a, 2), expected_op(a, 2))
+            # float tensor x float scalar
+            a = torch.tensor([19.1, -20.2, -21.3, 22.4], dtype=torch.float32, device=device)
+            self.assertEqual(torch_op(a, 2.2), expected_op(a, 2.2))
+
     @onlyOnCPUAndCUDA
     @dtypes(*list(product(torch.testing.get_all_dtypes(include_complex=False),
                           torch.testing.get_all_dtypes(include_complex=False))))
@@ -2357,11 +2394,16 @@ class TestBinaryUfuncs(TestCase):
                                lambda: torch.add(m1, m1, out=m2))
 
     @onlyCUDA
-    def test_add_half_tensor_with_alpha(self, device):
+    def test_addsub_half_tensor(self, device):
         x = torch.tensor([60000.0], dtype=torch.half, device=device)
-        y = torch.tensor([-60000.0], dtype=torch.half, device=device)
-        actual = torch.add(x, y, alpha=2)
-        self.assertTrue(not (actual.isnan() or actual.isinf()))
+        for op, y, alpha in (
+            (torch.add, torch.tensor([-60000.0], dtype=torch.half, device=device), 2),
+            (torch.sub, torch.tensor([60000.0], dtype=torch.half, device=device), 2),
+            (torch.add, -70000.0, 1),
+            (torch.sub, 70000.0, 1),
+        ):
+            actual = op(x, y, alpha=alpha)
+            self.assertTrue(not (actual.isnan() or actual.isinf()))
 
     def test_sub_typing(self, device):
         m1 = torch.tensor([True, False, False, True, False, False], dtype=torch.bool, device=device)
@@ -2768,6 +2810,60 @@ class TestBinaryUfuncs(TestCase):
         _compare_helper(t, zeros, *xlog1py_fns)
         _compare_helper(t, 0., *xlog1py_fns)
 
+    @dtypes(*product(torch.testing.get_all_dtypes(include_complex=False,
+                                                  include_half=False, include_bfloat16=False),
+                     torch.testing.get_all_dtypes(include_complex=False,
+                                                  include_half=False, include_bfloat16=False)))
+    @skipIf(not TEST_SCIPY, "Scipy required for the test.")
+    def test_zeta(self, device, dtypes):
+        x_dtype, q_dtype = dtypes
+
+        def test_helper(x, q):
+            x_np = x if isinstance(x, float) else x.cpu().numpy()
+            q_np = q if isinstance(q, float) else q.cpu().numpy()
+            expected = torch.from_numpy(scipy.special.zeta(x_np, q_np))
+            actual = torch.special.zeta(x, q)
+
+            rtol, atol = None, None
+            if self.device_type == 'cpu':
+                rtol, atol = 1e-6, 1e-6
+            self.assertEqual(expected, actual, rtol=rtol, atol=atol, exact_dtype=False)
+
+        # x tensor - q tensor same size
+        x = make_tensor((2, 3, 4), device, x_dtype)
+        q = make_tensor((2, 3, 4), device, q_dtype)
+        test_helper(x, q)
+
+        # x tensor - q tensor broadcast lhs
+        x = make_tensor((2, 1, 4), device, x_dtype)
+        q = make_tensor((2, 3, 4), device, q_dtype)
+        test_helper(x, q)
+
+        # x tensor - q tensor broadcast rhs
+        x = make_tensor((2, 3, 4), device, x_dtype)
+        q = make_tensor((2, 1, 4), device, q_dtype)
+        test_helper(x, q)
+
+        # x tensor - q tensor broadcast all
+        x = make_tensor((2, 3, 1), device, x_dtype)
+        q = make_tensor((2, 1, 4), device, q_dtype)
+        test_helper(x, q)
+
+        # x scalar - q tensor
+        for x in np.linspace(-5, 5, num=10).tolist():
+            if not q_dtype.is_floating_point:
+                q_dtype = torch.get_default_dtype()
+            q = make_tensor((2, 3, 4), device, q_dtype)
+            test_helper(x, q)
+
+        # x tensor - q scalar
+        for q in np.linspace(-5, 5, num=10).tolist():
+            if not x_dtype.is_floating_point:
+                x_dtype = torch.get_default_dtype()
+            x = make_tensor((2, 3, 4), device, x_dtype)
+            test_helper(x, q)
+
+
 tensor_binary_ops = [
     '__lt__', '__le__',
     '__gt__', '__ge__',
@@ -2781,8 +2877,8 @@ tensor_binary_ops = [
     '__floordiv__', '__rfloordiv__', '__ifloordiv__',
     '__mod__', '__rmod__', '__imod__',
     '__pow__', '__rpow__', '__ipow__',
-    '__lshift__', '__ilshift__',
-    '__rshift__', '__irshift__',
+    '__lshift__', '__rlshift__', '__ilshift__',
+    '__rshift__', '__rrshift__', '__irshift__',
     '__and__', '__iand__',
     '__xor__', '__ixor__',
     '__or__', '__ior__',
@@ -2790,7 +2886,7 @@ tensor_binary_ops = [
     # Unsupported operators
     # '__imatmul__',
     # '__divmod__', '__rdivmod__', '__idivmod__',
-    # '__rand__', '__ror__', '__rxor__', '__rlshift__', '__rrshift__',
+    # '__rand__', '__ror__', '__rxor__',
 ]
 
 # Test that binary math operations return NotImplemented for unknown types.
