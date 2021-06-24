@@ -738,7 +738,7 @@ class TestSparse(TestCase):
         self.assertEqual(None, x1.grad)
 
     @onlyCUDA
-    def test_cuda_empty(self, _):
+    def test_cuda_empty(self, device):
         def test_tensor(x):
             y = x.cuda(0)
             self.assertEqual(x.sparse_dim(), y.sparse_dim())
@@ -2210,7 +2210,7 @@ class TestSparse(TestCase):
         self.assertFalse(z._indices().numel() != 2 and z.is_coalesced())
 
     @onlyCUDA
-    def test_storage_not_null(self, _):
+    def test_storage_not_null(self, device):
         x = torch.cuda.sparse.FloatTensor(2)
         self.assertNotEqual(x.get_device(), -1)
 
@@ -2219,7 +2219,7 @@ class TestSparse(TestCase):
 
     @onlyCUDA
     @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
-    def test_same_gpu(self, _):
+    def test_same_gpu(self, device):
         def check_device(x, device_id):
             self.assertEqual(x.get_device(), device_id)
             self.assertEqual(x._values().get_device(), device_id)
@@ -2261,7 +2261,7 @@ class TestSparse(TestCase):
         self.assertEqual(x2.get_device(), device)
 
     @onlyCUDA
-    def test_new_device_single_gpu(self, _):
+    def test_new_device_single_gpu(self, device):
         self._test_new_device((), 0)
         self._test_new_device((30, 20), 0)
         self._test_new_device((30, 20, 10), 0)
@@ -2269,7 +2269,7 @@ class TestSparse(TestCase):
 
     @onlyCUDA
     @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
-    def test_new_device_multi_gpu(self, _):
+    def test_new_device_multi_gpu(self, device):
         self._test_new_device((), 1)
         self._test_new_device((30, 20), 1)
         self._test_new_device((30, 20, 10), 1)
