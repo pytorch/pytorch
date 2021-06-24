@@ -56,6 +56,7 @@ if(USE_MPI AND USE_C10D_MPI)
 endif()
 
 add_executable(example_allreduce example/allreduce.cpp)
+target_include_directories(example_allreduce PRIVATE $<BUILD_INTERFACE:${TORCH_SRC_DIR}/csrc/distributed>)
 target_link_libraries(example_allreduce pthread torch_cpu)
 if(USE_CUDA)
   target_link_libraries(example_allreduce torch_cuda)
