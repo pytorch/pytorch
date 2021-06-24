@@ -158,8 +158,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
                 assert(output_ref[1][0].requires_grad == output[1][0].requires_grad)
                 assert(output_ref[1][1].requires_grad == output[1][1].requires_grad)
 
-    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
-                     "Requires fusion optimization pass to be effective")
+    @unittest.skip("disable until we property handle tensor lists with undefined gradients")
     def test_differentiable_graph_ops_requires_grad(self):
         x = torch.randn(8, 2, dtype=torch.float).requires_grad_()
         y = torch.randn(8, 2, dtype=torch.float)
