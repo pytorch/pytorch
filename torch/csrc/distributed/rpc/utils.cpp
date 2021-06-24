@@ -302,7 +302,7 @@ parseWireSections(const void* data, size_t data_size) {
     ++ptr; // past the '\n'
   }
   if (!ok) {
-    throw std::runtime_error("failed parse");
+    TORCH_CHECK(false, "failed parse");
   }
 
   std::unordered_map<std::string, std::pair<const char*, size_t>> out;
@@ -311,7 +311,7 @@ parseWireSections(const void* data, size_t data_size) {
     ptr += headerEnt.second;
   }
   if (ptr != endp) {
-    throw std::runtime_error("failed bounds");
+    TORCH_CHECK(false, "failed bounds");
   }
   return out;
 }
@@ -445,7 +445,7 @@ std::pair<std::vector<char>, std::vector<at::Tensor>> wireDeserialize(
     auto sectionReadFunc = [&](const std::string& ename) -> at::DataPtr {
       auto it = sections.find(ename);
       if (it == sections.end()) {
-        throw std::runtime_error("Couldn't find entity " + ename);
+        TORCH_CHECK(false, "Couldn't find entity " + ename);
       }
       const auto& idat = it->second;
       auto dptr = at::getCPUAllocator()->allocate(idat.second);

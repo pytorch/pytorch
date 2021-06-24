@@ -30,7 +30,7 @@ def _export(*args, **kwargs):
 
 
 def export(model, args, f, export_params=True, verbose=False, training=TrainingMode.EVAL,
-           input_names=None, output_names=None, aten=False, export_raw_ir=False,
+           input_names=None, output_names=None, aten=False,
            operator_export_type=None, opset_version=None, _retain_param_name=True,
            do_constant_folding=True, example_outputs=None, strip_doc_string=True,
            dynamic_axes=None, keep_initializers_as_inputs=None, custom_opsets=None,
@@ -118,8 +118,6 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
         aten (bool, default False): [DEPRECATED. use operator_export_type] export the
             model in aten mode. If using aten mode, all the ops original exported
             by the functions in symbolic_opset<version>.py are exported as ATen ops.
-        export_raw_ir (bool, default False): [DEPRECATED. use operator_export_type]
-            export the internal IR directly instead of converting it to ONNX ops.
         operator_export_type (enum, default OperatorExportTypes.ONNX):
             OperatorExportTypes.ONNX: All ops are exported as regular ONNX ops
             (with ONNX namespace).
@@ -146,7 +144,6 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
 
             In the above example, aten::triu is not supported in ONNX, hence
             exporter falls back on this op.
-            OperatorExportTypes.RAW: Export raw ir.
             OperatorExportTypes.ONNX_FALLTHROUGH: If an op is not supported
             in ONNX, fall through and export the operator as is, as a custom
             ONNX op. Using this mode, the op can be exported and implemented by
@@ -273,7 +270,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
 
     from torch.onnx import utils
     return utils.export(model, args, f, export_params, verbose, training,
-                        input_names, output_names, aten, export_raw_ir,
+                        input_names, output_names, aten,
                         operator_export_type, opset_version, _retain_param_name,
                         do_constant_folding, example_outputs,
                         strip_doc_string, dynamic_axes, keep_initializers_as_inputs,
