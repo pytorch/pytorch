@@ -17,6 +17,7 @@ import torch
 import torch.cuda
 import torch.distributed as dist
 import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
+import torch.distributed.algorithms.model_averaging.averagers as averagers
 import torch.distributed.algorithms.model_averaging.utils as model_averaging_utils
 import torch.nn as nn
 import torch.nn.functional as F
@@ -979,6 +980,32 @@ class DistributedTest:
                 # Every element on device not in the subgroup should remain the same.
                 for p in model.parameters():
                     self.assertEqual(p.data, torch.ones_like(p.data) * rank)
+
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "MPI backend does not support creating subgroups on CUDA devices",
+        )
+        @skip_if_lt_x_gpu(2)
+        def test_periodic_model_averager(self):
+            rank = dist.get_rank()
+            rank_to_GPU = self._init_multigpu_helper()
+            device_id = rank_to_GPU[rank][0]
+            world_size = dist.get_world_size()
+
+            model = nn.Linear(1, 5, bias=False).cuda(device_id)
+            param = next(model.parameters())
+            tensor = torch.ones_like(param.data) * rank
+            expected_avg_tensor = torch.ones_like(param.data) * sum(range(world_size)) / world_size
+            averager = averagers.PeriodicModelAverager(model, warmup_steps=10, period=4)
+            for step in range(0, 20):
+                # Reset the parameters at every step.
+                param.data = copy.deepcopy(tensor)
+                averager.average_parameters(step)
+                if step < 10 or step % 4 == 0:
+                    self.assertEqual(param.data, expected_avg_tensor)
+                else:
+                    # No model averaging, so the parameters are not updated.
+                    self.assertEqual(param.data, tensor)
 
         # NCCL Batch SEND RECV
         @skip_if_no_gpu
