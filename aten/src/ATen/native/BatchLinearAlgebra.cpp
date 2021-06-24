@@ -12,14 +12,12 @@
 
 #include <c10/util/irange.h>
 
-#include <TH/TH.h>  // for USE_LAPACK
-
 #include <vector>
 
 // First the required LAPACK implementations are registered here.
 // A comment above the registered LAPACK routine suggest which batched
 // linear algebra function uses that routine
-#ifdef USE_LAPACK
+#if AT_BUILD_WITH_LAPACK()
 
 // gesv
 extern "C" void zgesv_(int *n, int *nrhs, std::complex<double> *a, int *lda, int *ipiv, std::complex<double> *b, int *ldb, int *info);
@@ -205,7 +203,7 @@ extern "C" void sgelss_(int *m, int *n, int *nrhs,
 namespace at {
 namespace native {
 
-#ifdef USE_LAPACK
+#if AT_BUILD_WITH_LAPACK()
 // Define the per-batch functions to be used in the main implementation of the batched
 // linear algebra operations
 template<class scalar_t>
@@ -706,7 +704,7 @@ For more information see LAPACK's documentation for GESV routine.
 */
 template<typename scalar_t>
 static void apply_solve(Tensor& b, Tensor& A, Tensor& infos) {
-#ifndef USE_LAPACK
+#if !AT_BUILD_WITH_LAPACK()
   AT_ERROR("solve: LAPACK library not found in compilation");
 #else
   auto A_data = A.data_ptr<scalar_t>();
@@ -790,19 +788,6 @@ std::tuple<Tensor&,Tensor&> solve_out(const Tensor& self, const Tensor& A, Tenso
   solution.copy_(solution_tmp);
   lu.copy_(lu_tmp);
   return std::tuple<Tensor&, Tensor&>(solution, lu);
-}
-
-
-// This is a type dispatching helper function for 'apply_solve'
-Tensor& _linalg_solve_out_helper_cpu(Tensor& result, Tensor& input, Tensor& infos) {
-  // 'result' and 'input' should be in column major order (it should be checked before calling this function)
-  // the content of 'result', 'input' and 'infos' is overwritten by 'apply_solve'
-  // 'result' should contain data of 'other' tensor (right-hand-side of the linear system of equations)
-  // 'input' should contain data of original 'input' tensor (left-hand-side of the linear system of equations)
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "linalg_solve_out_cpu", [&]{
-    apply_solve<scalar_t>(result, input, infos);
-  });
-  return result;
 }
 
 // Solves a system of linear equations matmul(input, x) = other in-place
@@ -896,7 +881,7 @@ static Tensor& linalg_solve_out_info(Tensor& result, Tensor& infos, const Tensor
     result = result.unsqueeze_(-1);
   }
 
-  // _linalg_solve_out_helper_ (apply_solve) performs calculations in-place and result must be a copy of other_broadcasted
+  // lu_stub+lu_solve_stub perform calculations in-place and 'result' must be a copy of 'other_broadcasted'
   result.copy_(other_broadcasted);
 
   auto input_working_copy = cloneBatchedColumnMajor(input_broadcasted);
@@ -909,7 +894,14 @@ static Tensor& linalg_solve_out_info(Tensor& result, Tensor& infos, const Tensor
     infos.fill_(0);
   }
 
-  result = at::_linalg_solve_out_helper_(result, input_working_copy, infos);
+  // compute the LU factorization of 'input_working_copy'
+  auto pivots_shape = IntArrayRef(input_broadcasted.sizes().data(), input_broadcasted.dim() - 2).vec(); // input_broadcasted.shape[:-2]
+  pivots_shape.push_back(std::min(input.size(-2), input.size(-1)));
+  Tensor pivots = at::empty(pivots_shape, input.options().dtype(kInt));
+  lu_stub(input.device().type(), input_working_copy, pivots, infos, /*compute_pivots=*/true);
+
+  // solve the linear system using the LU factorization
+  lu_solve_stub(input.device().type(), result, input_working_copy, pivots);
 
   // for 1-dimensional 'other', we need to squeeze the result after "apply_solve"
   if (vector_case) {
@@ -954,7 +946,7 @@ For more information see LAPACK's documentation for GETRI and GETRF routines.
 */
 template <typename scalar_t>
 static void apply_inverse(Tensor& self, Tensor& infos_lu, Tensor& infos_getri) {
-#ifndef USE_LAPACK
+#if !AT_BUILD_WITH_LAPACK()
   AT_ERROR("inverse: LAPACK library not found in compilation");
 #else
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
@@ -1204,7 +1196,7 @@ std::tuple<Tensor, Tensor> linalg_inv_ex(const Tensor& input, bool check_errors)
 
 template<typename scalar_t>
 static void apply_cholesky_solve(Tensor& b, Tensor& A, bool upper, std::vector<int64_t>& infos) {
-#ifndef USE_LAPACK
+#if !AT_BUILD_WITH_LAPACK()
   AT_ERROR("cholesky_solve: LAPACK library not found in compilation");
 #else
   char uplo = upper ? 'U' : 'L';
@@ -2405,7 +2397,7 @@ Tensor& linalg_eigvalsh_out(const Tensor& input, c10::string_view uplo, Tensor& 
 
 template <typename scalar_t>
 static void apply_symeig(Tensor& self, Tensor& eigvals, bool eigenvectors, bool upper, std::vector<int64_t>& infos) {
-#ifndef USE_LAPACK
+#if !AT_BUILD_WITH_LAPACK()
   AT_ERROR("symeig: LAPACK library not found in compilation");
 #else
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
@@ -2942,7 +2934,7 @@ std::tuple<Tensor,Tensor> eig(const Tensor& self, bool eigenvectors) {
 template <typename scalar_t>
 static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
                       char jobz, std::vector<int64_t>& infos) {
-#ifndef USE_LAPACK
+#if !AT_BUILD_WITH_LAPACK()
   AT_ERROR("svd: LAPACK library not found in compilation");
 #else
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
@@ -3625,7 +3617,7 @@ Tensor& lu_solve_out(const Tensor& self, const Tensor& LU_data, const Tensor& LU
 //          B is overwritten with the solution vectors
 template <typename scalar_t>
 static void apply_lstsq(const Tensor& B, const Tensor& A) {
-#ifndef USE_LAPACK
+#if !AT_BUILD_WITH_LAPACK()
   TORCH_INTERNAL_ASSERT(false, "lstsq: LAPACK library not found in compilation");
 #else
 

@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 import torch.nn as nn
 import torch.nn.quantized as nnq
+import torch.nn.quantized._reference as nnqr
 import torch.nn.quantized.dynamic as nnqd
 import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
@@ -312,12 +313,12 @@ class TestQuantizeFx(QuantizationTestCase):
             if n.op == 'call_module' and type(modules[n.target]) == nn.ReLU:
                 self.assertTrue(is_match(modules, n, pattern))
 
-    def _get_conv_linear_test_cases(self):
+    def _get_conv_linear_test_cases(self, is_reference):
         """ Returns a list of test cases, with format:
         is_dynamic, ModuleClass, module_constructor_inputs,
         inputs, quantized_node, weight_prepack_op
         """
-        class Conv1d(torch.nn.Module):
+        class FunctionalConv1d(torch.nn.Module):
             def __init__(self, weight):
                 super().__init__()
                 self.weight = torch.nn.Parameter(weight)
@@ -329,10 +330,20 @@ class TestQuantizeFx(QuantizationTestCase):
             def forward(self, x):
                 return F.conv1d(x, self.weight, None, self.stride, self.padding, self.dilation, self.groups)
 
+
+        class Conv1d(torch.nn.Module):
+            def __init__(self, *args):
+                super().__init__()
+                self.conv = torch.nn.Conv1d(*args)
+
+            def forward(self, x):
+                return self.conv(x)
+
         conv1d_input = torch.rand(1, 3, 224)
         conv1d_weight = torch.rand(3, 3, 3)
+        conv1d_module_args = (3, 3, 3)
 
-        class Conv2d(torch.nn.Module):
+        class FunctionalConv2d(torch.nn.Module):
             def __init__(self, weight):
                 super().__init__()
                 self.weight = torch.nn.Parameter(weight)
@@ -344,10 +355,19 @@ class TestQuantizeFx(QuantizationTestCase):
             def forward(self, x):
                 return F.conv2d(x, self.weight, None, self.stride, self.padding, self.dilation, self.groups)
 
+        class Conv2d(torch.nn.Module):
+            def __init__(self, *args):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(*args)
+
+            def forward(self, x):
+                return self.conv(x)
+
         conv2d_input = torch.rand(1, 3, 224, 224)
         conv2d_weight = torch.rand(3, 3, 3, 3)
+        conv2d_module_args = (3, 3, 3)
 
-        class Conv3d(torch.nn.Module):
+        class FunctionalConv3d(torch.nn.Module):
             def __init__(self, weight):
                 super().__init__()
                 self.weight = torch.nn.Parameter(weight)
@@ -367,8 +387,17 @@ class TestQuantizeFx(QuantizationTestCase):
                     self.groups,
                 )
 
+        class Conv3d(torch.nn.Module):
+            def __init__(self, *args):
+                super().__init__()
+                self.conv = torch.nn.Conv3d(*args)
+
+            def forward(self, x):
+                return self.conv(x)
+
         conv3d_input = torch.rand(1, 3, 32, 224, 224)
         conv3d_weight = torch.rand(3, 3, 3, 3, 3)
+        conv3d_module_args = (3, 3, 3)
 
         class Linear(torch.nn.Module):
             def __init__(self, weight):
@@ -391,37 +420,63 @@ class TestQuantizeFx(QuantizationTestCase):
 
         linear_module_input = torch.rand(8, 5)
 
+        # is_dynamic, ModuleClass, module_constructor_inputs,
+        # inputs, quantized_node, weight_prepack_node
         tests = [
             (
                 False,
-                Conv1d,
+                FunctionalConv1d,
                 (conv1d_weight,),
                 (conv1d_input,),
-                ns.call_function(torch.ops.quantized.conv1d),
+                ns.call_function(torch.nn.functional.conv1d if is_reference else torch.ops.quantized.conv1d) ,
                 ns.call_function(torch.ops.quantized.conv1d_prepack),
             ),
             (
                 False,
-                Conv2d,
+                FunctionalConv2d,
                 (conv2d_weight,),
                 (conv2d_input,),
-                ns.call_function(torch.ops.quantized.conv2d),
+                ns.call_function(torch.nn.functional.conv2d if is_reference else torch.ops.quantized.conv2d),
                 ns.call_function(torch.ops.quantized.conv2d_prepack),
             ),
             (
                 False,
-                Conv3d,
+                FunctionalConv3d,
                 (conv3d_weight,),
                 (conv3d_input,),
-                ns.call_function(torch.ops.quantized.conv3d),
+                ns.call_function(torch.nn.functional.conv3d if is_reference else torch.ops.quantized.conv3d),
                 ns.call_function(torch.ops.quantized.conv3d_prepack),
+            ),
+            (
+                False,
+                Conv1d,
+                conv1d_module_args,
+                (conv1d_input,),
+                ns.call_module(nnqr.Conv1d if is_reference else nnq.Conv1d),
+                None
+            ),
+            (
+                False,
+                Conv2d,
+                conv2d_module_args,
+                (conv2d_input,),
+                ns.call_module(nnqr.Conv2d if is_reference else nnq.Conv2d),
+                None
+            ),
+            (
+                False,
+                Conv3d,
+                conv3d_module_args,
+                (conv3d_input,),
+                ns.call_module(nnqr.Conv3d if is_reference else nnq.Conv3d),
+                None
             ),
             (
                 True,
                 Linear,
                 (linear_weight,),
                 (linear_input,),
-                ns.call_function(torch.ops.quantized.linear_dynamic),
+                None if is_reference else ns.call_function(torch.ops.quantized.linear_dynamic),
                 ns.call_function(torch.ops.quantized.linear_prepack),
             ),
             (
@@ -429,7 +484,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 Linear,
                 (linear_weight,),
                 (linear_input,),
-                ns.call_function(torch.ops.quantized.linear),
+                ns.call_function(torch.nn.functional.linear if is_reference else torch.ops.quantized.linear),
                 ns.call_function(torch.ops.quantized.linear_prepack),
             ),
             (
@@ -445,7 +500,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 LinearModule,
                 (),
                 (linear_module_input,),
-                ns.call_module(nnq.Linear),
+                ns.call_module(nnqr.Linear if is_reference else nnq.Linear),
                 None,
             ),
         ]
@@ -458,7 +513,7 @@ class TestQuantizeFx(QuantizationTestCase):
     def test_functional_not_reference(self):
         """ Test quantizing functional conv and linear
         """
-        tests = self._get_conv_linear_test_cases()
+        tests = self._get_conv_linear_test_cases(is_reference=False)
         for (is_dynamic, ModuleClass, module_constructor_inputs,
              inputs, quantized_node, weight_prepack_node) in tests:
             quant_type = QuantType.DYNAMIC if is_dynamic else QuantType.STATIC
@@ -476,17 +531,17 @@ class TestQuantizeFx(QuantizationTestCase):
     def test_functional_reference(self):
         """ Test quantizing functional conv and linear with reference option
         """
-        tests = self._get_conv_linear_test_cases()
+        tests = self._get_conv_linear_test_cases(is_reference=True)
         for (is_dynamic, ModuleClass, module_constructor_inputs,
              inputs, quantized_node, weight_prepack_node) in tests:
             quant_type = QuantType.DYNAMIC if is_dynamic else QuantType.STATIC
             node_occurrence = dict()
             if weight_prepack_node:
                 node_occurrence[weight_prepack_node] = 0
-                node_occurrence[quantized_node] = 0
             self.checkGraphModeFxOp(
                 ModuleClass(*module_constructor_inputs),
                 inputs, quant_type,
+                expected_node=quantized_node,
                 expected_node_occurrence=node_occurrence,
                 is_reference=True)
 
@@ -942,6 +997,47 @@ class TestQuantizeFx(QuantizationTestCase):
             ns.call_function(torch.quantize_per_tensor),
             ns.call_module(nnq.Conv2d),
             ns.call_module(nnq.Conv2d),
+            ns.call_method("dequantize"),
+        ]
+        self.checkGraphModuleNodes(m, expected_node_list=node_list)
+
+    def test_qconfig_qat_module_type(self):
+        class Linear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.ones(5, 5)
+                self.b = torch.zeros(5)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.w, self.b)
+
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mods1 = torch.nn.Sequential(
+                    torch.nn.Linear(5, 5),
+                )
+
+            def forward(self, x):
+                x = self.mods1(x)
+                return x
+
+        model = M().train()
+
+        qconfig_dict = {
+            "": None,
+            "object_type": [
+                (torch.nn.Linear, default_qat_qconfig),
+            ],
+        }
+        m = prepare_qat_fx(model, qconfig_dict)
+        m(torch.rand(5, 5))
+        m = convert_fx(m)
+        m(torch.rand(5, 5))
+        node_list = [
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_module(nnq.Linear),
             ns.call_method("dequantize"),
         ]
         self.checkGraphModuleNodes(m, expected_node_list=node_list)
@@ -2511,6 +2607,21 @@ class TestQuantizeFx(QuantizationTestCase):
         }
         self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
 
+    def test_trace_quantize_per_tensor(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv(x)
+                return x
+
+        m = M().eval()
+        m = prepare_fx(m, {"": default_qconfig})
+        m = convert_fx(m)
+        # Make sure this runs without error
+        m = torch.fx.Transformer(m).transform()
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
@@ -3403,6 +3514,43 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 module, F.instance_norm, [4], data,
                 quantized_module, torch.ops.quantized.instance_norm,
                 skip_op_arg_for_functional=True)
+
+    def test_norm_weight_bias(self):
+        class Linear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.ones(5, 5)
+                self.b = torch.zeros(5)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.w, self.b)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mods1 = Linear()
+                self.scale = torch.randn(5, 5)
+                self.bias = torch.randn(5, 5)
+
+            def forward(self, x):
+                x1 = self.mods1(x)
+                y = F.layer_norm(x1, [5, 5], weight=self.scale, bias=self.bias)
+                return y
+
+        model = M()
+        expected_occurrence = {
+            ns.call_function(torch.quantize_per_tensor): 1,
+            ns.call_function(torch.ops.quantized.linear): 1,
+            ns.call_function(torch.ops.quantized.layer_norm): 1,
+            ns.call_method("dequantize"): 1,
+        }
+
+        self.checkGraphModeFxOp(
+            model,
+            (torch.rand(5, 5),),
+            QuantType.STATIC,
+            expected_node_occurrence=expected_occurrence
+        )
 
     def _test_default_node_quant_handler_ops(
             self, module, functional, qconfig, is_reference=True, node_list=None, additional_quant_pattern_dict=None

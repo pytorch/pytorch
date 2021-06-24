@@ -395,10 +395,10 @@ class _RemoteModule(nn.Module):
     ):
         _raise_not_supported(self.named_modules.__name__)
 
-    def train(self: T, mode: bool = True) -> T:  # type: ignore[return]
+    def train(self: T, mode: bool = True) -> T:
         return self.module_rref.rpc_sync().train()  # type: ignore[operator, union-attr]
 
-    def eval(self: T) -> T:  # type: ignore[return]
+    def eval(self: T) -> T:
         return self.module_rref.rpc_sync().eval()  # type: ignore[operator, union-attr]
 
     def requires_grad_(self: T, requires_grad: bool = True) -> T:  # type: ignore[return]
@@ -413,7 +413,7 @@ class _RemoteModule(nn.Module):
     def extra_repr(self) -> str:  # type: ignore[return]
         _raise_not_supported(self.extra_repr.__name__)
 
-    def _prepare_init(self, remote_device: str) -> bool:  # type: ignore[return]
+    def _prepare_init(self, remote_device: str) -> bool:
         """
         Prepares the initializaiton and returns whether to enable automatically moving CPU tensors to CUDA devices.
         """
@@ -639,7 +639,7 @@ class RemoteModule(_RemoteModule):
         args: Tuple = None,
         kwargs: Dict[str, Any] = None,
     ):
-        super().__init__(remote_device, module_cls, args, kwargs)  # type: ignore[arg-type]
+        super().__init__(remote_device, module_cls, args, kwargs)
 
 
 def _remote_module_receiver(
@@ -651,7 +651,7 @@ def _remote_module_receiver(
     serialized_remote_module = _SerializedRemoteModule._make(
         remote_module_pickled_attrs
     )
-    m = object.__new__(RemoteModule)  # type: ignore[attr-defined]
+    m = object.__new__(RemoteModule)
     m.__dict__.update(serialized_remote_module._asdict())
 
     # Unpickling the attribute `module_rref` must invoke RRef's `_deserialize()` method.
@@ -675,10 +675,10 @@ def _remote_module_reducer(remote_module):
         # Pickling the attribute `module_rref` must invoke RRef's `_serialize()` method.
         if k == "module_rref":
             pickled_attrs[k] = v._serialize()
-        elif k in _REMOTE_MODULE_PICKLED_ATTRIBUTES:  # type: ignore[attr-defined]
+        elif k in _REMOTE_MODULE_PICKLED_ATTRIBUTES:
             pickled_attrs[k] = v
         # Check if unpickled attributes are all in _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING.
-        elif k not in _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING:  # type: ignore[attr-defined]
+        elif k not in _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING:
             print(
                 "The new attribute ``{}`` of RemoteModule is ignored during RPC pickling. "
                 "To pickle this attribute, please add it to ``_REMOTE_MODULE_PICKLED_ATTRIBUTES``. "
