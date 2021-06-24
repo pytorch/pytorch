@@ -353,11 +353,14 @@ class DeviceTypeTestBase(TestCase):
             # Constructs the test
             @wraps(test)
             def instantiated_test(self, param_kwargs=param_kwargs):
+                # Add the device param kwarg if the test needs device or devices.
                 param_kwargs = {} if param_kwargs is None else param_kwargs
-                device_arg: str = cls.get_primary_device()
-                if hasattr(test, 'num_required_devices'):
-                    device_arg = cls.get_all_devices()
-                _update_param_kwargs(param_kwargs, 'device', device_arg)
+                test_sig_params = inspect.signature(test).parameters
+                if 'device' in test_sig_params or 'devices' in test_sig_params:
+                    device_arg: str = cls.get_primary_device()
+                    if hasattr(test, 'num_required_devices'):
+                        device_arg = cls.get_all_devices()
+                    _update_param_kwargs(param_kwargs, 'device', device_arg)
 
                 # Sets precision and runs test
                 # Note: precision is reset after the test is run
