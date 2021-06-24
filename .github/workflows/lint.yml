@@ -424,6 +424,38 @@ jobs:
             false
           fi
 
+  pip-compile:
+    runs-on: ubuntu-18.04
+    env:
+      PIP_COMPILE_CMD: pip-compile --output-file=.circleci/docker/requirements.txt requirements-dev.in
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+          architecture: x64
+      - name: Fetch PyTorch
+        uses: actions/checkout@v2
+      - name: Install pip-tools
+        run: pip3 install pip-tools==6.2.0
+      - name: Regenerate .circleci/docker/requirements.txt
+        run: eval "$PIP_COMPILE_CMD"
+      - name: |
+          if ! .github/scripts/report_git_status.sh .; then
+            echo
+            echo 'As shown by the above diff, the committed requirements.txt'
+            echo 'file in .circleci/docker is not up to date with the'
+            echo 'requirements-dev.in and requirements*.txt files in the repo'
+            echo 'root. You can either apply that Git diff directly to correct'
+            echo 'the requirements.txt file, or if you have pip-tools'
+            echo 'installed, you can run the following command to regenerate it'
+            echo 'yourself locally:'
+            echo
+            echo "    $PIP_COMPILE_CMD"
+
+            false
+          fi
+
 concurrency:
   group: lint-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
