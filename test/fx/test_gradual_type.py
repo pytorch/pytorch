@@ -61,6 +61,7 @@ class AnnotationsTest(unittest.TestCase):
         self.assertFalse(is_more_precise(TensorType((1, 2, 3)), TensorType((1, 2, 3, 5))))
         self.assertFalse(is_more_precise(TensorType((1, 2, 3)), int))
 
+
 class TypeCheckerTest(unittest.TestCase):
 
     def test_type_check_add_false(self):
