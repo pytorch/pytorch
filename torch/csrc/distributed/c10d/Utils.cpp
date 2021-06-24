@@ -1,7 +1,7 @@
 #ifdef _WIN32
-#include <c10d/WinSockUtils.hpp>
+#include <torch/csrc/distributed/c10d/WinSockUtils.hpp>
 #else
-#include <c10d/UnixSockUtils.hpp>
+#include <torch/csrc/distributed/c10d/UnixSockUtils.hpp>
 #include <netdb.h>
 #include <sys/poll.h>
 #include <arpa/inet.h>

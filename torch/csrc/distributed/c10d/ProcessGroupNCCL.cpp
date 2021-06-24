@@ -1,4 +1,4 @@
-#include <c10d/ProcessGroupNCCL.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 
 #ifdef USE_C10D_NCCL
 
@@ -15,10 +15,10 @@
 #include <c10/util/irange.h>
 #include <c10/util/Logging.h>
 #include <c10/util/Optional.h>
-#include <c10d/ParamCommsUtils.hpp>
+#include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
 #include <torch/csrc/cuda/nccl.h>
 
-#include <c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/Utils.hpp>
 namespace c10d {
 
 constexpr const char* const kNCCLAbortedCommStoreKey = "NCCLABORTEDCOMM";

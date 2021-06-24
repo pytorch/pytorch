@@ -9,9 +9,9 @@
 #include <thread>
 #include <unordered_map>
 
-#include <c10d/NCCLUtils.hpp>
-#include <c10d/ProcessGroup.hpp>
-#include <c10d/Store.hpp>
+#include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/Store.hpp>
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAEvent.h>

@@ -1019,6 +1019,8 @@ endif()
   install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
     DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
     FILES_MATCHING PATTERN "*.h")
+  # c10d used to be a standalone library and its public headers were included as
+  # c10d/Foo.hpp. We need to install them in that path to avoid breaking BC.
   install(DIRECTORY "${TORCH_SRC_DIR}/csrc/distributed/c10d"
     DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}
     FILES_MATCHING PATTERN "*.hpp")
@@ -1179,26 +1181,6 @@ if(BUILD_LITE_INTERPRETER)
   if(SELECTED_OP_LIST)
     target_compile_definitions(torch_cpu PRIVATE TEMPLATE_SELECTIVE_BUILD)
   endif()
-endif()
-
-
-# For torch/csrc/distributed/c10d
-function(include_torch_lib_dir target)
-  target_include_directories(${target} PRIVATE $<BUILD_INTERFACE:${TORCH_SRC_DIR}/csrc/distributed>)
-endfunction()
-
-include_torch_lib_dir(torch_cpu)
-if(USE_ROCM)
-  include_torch_lib_dir(torch_hip)
-elseif(USE_CUDA)
-  if(BUILD_SPLIT_CUDA)
-    include_torch_lib_dir(torch_cuda_cpp)
-  else()
-    include_torch_lib_dir(torch_cuda)
-  endif()
-endif()
-if(BUILD_PYTHON)
-    include_torch_lib_dir(torch_python)
 endif()
 
 # Pass USE_DISTRIBUTED to torch_cpu, as some codes in jit/pickler.cpp and

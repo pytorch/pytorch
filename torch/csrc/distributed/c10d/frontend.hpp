@@ -2,9 +2,9 @@
 
 #include <ATen/ATen.h>
 #include <c10/util/Optional.h>
-#include <c10d/ProcessGroup.hpp>
-#include <c10d/Store.hpp>
-#include <c10d/Types.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/Store.hpp>
+#include <torch/csrc/distributed/c10d/Types.hpp>
 
 #include <chrono>
 #include <memory>

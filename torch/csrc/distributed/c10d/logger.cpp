@@ -1,5 +1,5 @@
-#include <c10d/Utils.hpp>
-#include <c10d/logger.hpp>
+#include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/logger.hpp>
 #include <fmt/format.h>
 #include <string>
 

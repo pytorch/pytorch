@@ -1,7 +1,7 @@
-#include <c10d/default_comm_hooks.hpp>
+#include <torch/csrc/distributed/c10d/default_comm_hooks.hpp>
 
-#include <c10d/ProcessGroup.hpp>
-#include <c10d/comm.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/comm.hpp>
 #include <torch/torch.h>
 
 namespace c10d {

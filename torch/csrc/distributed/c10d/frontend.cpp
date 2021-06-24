@@ -1,12 +1,12 @@
-#include <c10d/frontend.hpp>
+#include <torch/csrc/distributed/c10d/frontend.hpp>
 
 #include <ATen/core/Tensor.h>
 #include <ATen/Functions.h>
 #include <c10/util/Exception.h>
-#include <c10d/PrefixStore.hpp>
-#include <c10d/FileStore.hpp>
-#include <c10d/TCPStore.hpp>
-#include <c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/PrefixStore.hpp>
+#include <torch/csrc/distributed/c10d/FileStore.hpp>
+#include <torch/csrc/distributed/c10d/TCPStore.hpp>
+#include <torch/csrc/distributed/c10d/Utils.hpp>
 
 #include <chrono>
 #include <sstream>
@@ -14,15 +14,15 @@
 #include <unordered_set>
 
 #ifdef USE_C10D_GLOO
-#include <c10d/ProcessGroupGloo.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
 #endif
 
 #ifdef USE_C10D_NCCL
-#include <c10d/ProcessGroupNCCL.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #endif
 
 #ifdef USE_C10D_MPI
-#include <c10d/ProcessGroupMPI.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupMPI.hpp>
 #endif
 
 namespace c10d {

@@ -1,4 +1,4 @@
-#include <c10d/reducer.hpp>
+#include <torch/csrc/distributed/c10d/reducer.hpp>
 
 #include <c10/core/DeviceGuard.h>
 #include <ATen/cuda/CUDAEvent.h>

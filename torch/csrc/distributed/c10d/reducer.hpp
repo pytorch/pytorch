@@ -11,10 +11,10 @@
 #include <ATen/ThreadLocalState.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/intrusive_ptr.h>
-#include <c10d/ProcessGroup.hpp>
-#include <c10d/Utils.hpp>
-#include <c10d/comm.hpp>
-#include <c10d/default_comm_hooks.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/comm.hpp>
+#include <torch/csrc/distributed/c10d/default_comm_hooks.hpp>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
 #ifndef _WIN32

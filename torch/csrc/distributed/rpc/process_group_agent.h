@@ -1,8 +1,8 @@
 #pragma once
 
 #include <c10/core/thread_pool.h>
-#include <c10d/PrefixStore.hpp>
-#include <c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/PrefixStore.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/rpc/request_callback.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 

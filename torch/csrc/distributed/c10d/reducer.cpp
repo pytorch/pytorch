@@ -1,5 +1,5 @@
-#include <c10d/default_comm_hooks.hpp>
-#include <c10d/reducer.hpp>
+#include <torch/csrc/distributed/c10d/default_comm_hooks.hpp>
+#include <torch/csrc/distributed/c10d/reducer.hpp>
 
 #include <functional>
 
@@ -8,8 +8,8 @@
 #include <c10/util/Exception.h>
 #include <c10/util/hash.h>
 #include <c10/util/irange.h>
-#include <c10d/comm.hpp>
-#include <c10d/logger.hpp>
+#include <torch/csrc/distributed/c10d/comm.hpp>
+#include <torch/csrc/distributed/c10d/logger.hpp>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function_hook.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>

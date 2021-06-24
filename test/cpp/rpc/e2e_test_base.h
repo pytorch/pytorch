@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <c10d/TCPStore.hpp>
+#include <torch/csrc/distributed/c10d/TCPStore.hpp>
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/context/context.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
