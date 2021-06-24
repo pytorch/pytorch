@@ -41,6 +41,9 @@ from torch.quantization.ns.graph_matcher import (
     get_matching_subgraph_pairs,
     GraphMatchingException,
 )
+from torch.quantization.ns.utils import (
+    compute_sqnr,
+)
 from torch.quantization.ns.mappings import (
     get_node_type_to_io_type_map,
     get_unmatchable_types_map,
@@ -58,6 +61,7 @@ from torch.quantization._numeric_suite_fx import (
     _add_shadow_loggers_impl,
     extract_logger_info,
     extract_shadow_logger_info,
+    extend_logger_results_with_comparison,
 )
 
 
@@ -1560,6 +1564,22 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         mq_node_names = [node.name for node in mp_shadows_mq.graph.nodes]
         for layer_name in results.keys():
             self.assertTrue(layer_name in mq_node_names)
+
+    @skipIfNoFBGEMM
+    def test_extend_logger_results_with_comparison(self):
+        m = nn.Sequential(nn.Conv2d(1, 1, 1), nn.Conv2d(1, 1, 1)).eval()
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        mp = torch.quantization.quantize_fx.prepare_fx(m, qconfig_dict)
+        mq = torch.quantization.quantize_fx.convert_fx(copy.deepcopy(mp))
+
+        # extract weights
+        results = extract_weights('fp32', mp, 'int8', mq)
+        extend_logger_results_with_comparison(
+            results, 'fp32', 'int8', compute_sqnr, 'sqnr_int8_vs_fp32')
+
+        for layer_name, layer_results in results.items():
+            assert 'sqnr_int8_vs_fp32' in \
+                layer_results['weight']['int8'][0].keys()
 
 
 class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
