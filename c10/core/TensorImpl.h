@@ -673,6 +673,15 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   /**
+   * Return the underlying storage, unsafely assuming this is a basic strided
+   * tensor. In cases where `storage` access would throw, this returns a
+   * default-constructed Storage.
+   */
+  inline const Storage& unsafe_storage() const {
+    return storage_;
+  }
+
+  /**
    * The number of elements in a tensor.
    *
    * WARNING: Previously, if you were using the Caffe2 API, you could
@@ -905,7 +914,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * It can be expanded as needed in the future, e.g sparse Tensor.
    */
   inline bool support_as_strided() const {
-    return device().type() != at::kXLA;
+    return device().supports_as_strided();
   }
 
   // ~~~~~ Autograd API ~~~~~
