@@ -65,7 +65,9 @@ class ShuffleIterDataPipe(IterDataPipe[T_co]):
 
     args:
         datapipe: The IterDataPipe being shuffled
-        buffer_size: The buffer size for shuffling
+        buffer_size: The buffer size for shuffling (default to 10000)
+        unbatch_level: Specifies if it necessary to unbatch source data before 
+            applying the shuffle
     """
     datapipe: IterDataPipe[T_co]
     buffer_size: int
@@ -99,13 +101,10 @@ class ShuffleIterDataPipe(IterDataPipe[T_co]):
                 yield self.buffer_replace(x)
             else:
                 self._buffer.append(x)
-
         random.shuffle(self._buffer)
-  
         while self._buffer:
             yield self._buffer.pop()
 
-    
     def __len__(self) -> int:
         if isinstance(self.datapipe, Sized):
             return len(self.datapipe)
