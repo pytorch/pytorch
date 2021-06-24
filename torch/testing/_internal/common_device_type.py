@@ -933,12 +933,12 @@ class deviceCountAtLeast(object):
         fn.num_required_devices = self.num_required_devices
 
         @wraps(fn)
-        def multi_fn(slf, *args, **kwargs):
+        def multi_fn(slf, devices, *args, **kwargs):
             if len(devices) < self.num_required_devices:
                 reason = "fewer than {0} devices detected".format(self.num_required_devices)
                 raise unittest.SkipTest(reason)
 
-            return fn(slf, *args, **kwargs)
+            return fn(slf, devices, *args, **kwargs)
 
         return multi_fn
 
