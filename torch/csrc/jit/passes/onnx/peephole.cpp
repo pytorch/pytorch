@@ -613,7 +613,7 @@ static void eraseListConstruct(Node* n, int opset_version) {
       if (elem->cast<IntType>() &&
           isValidToTransformToONNXConcatNode(lc_node)) {
         auto concat_node = transformToONNXConcatNode(
-            block->owningGraph(), input->node(), opset_version);
+            block->owningGraph(), input->node(), false, opset_version);
         // make concat node output as new input, then ListConstruct should
         // become dead
         replacements.emplace_back(
