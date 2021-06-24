@@ -958,7 +958,7 @@ Tensor tensor_frombuffer(PyObject* buffer, ScalarType dtype, int64_t count, int6
   if (PyObject_GetBuffer(buffer, &view, PyBUF_WRITABLE) < 0) {
     TORCH_CHECK(
         PyObject_GetBuffer(buffer, &view, PyBUF_SIMPLE) >= 0,
-        "frombuffer(): could not retrieve buffer from object");
+        "could not retrieve buffer from object");
     TORCH_WARN_ONCE(
         "The given buffer is not writable, and PyTorch does "
         "not support non-writable tensors. This means you can write to the "
