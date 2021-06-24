@@ -153,13 +153,21 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   return var;
 }
 
-void SavedVariable::register_hook(std::unique_ptr<SavedVariableHooks>&& hooks) {
+// void register_hooks(std::unique_ptr<SavedVariableHooks>&& hooks);
+void SavedVariable::register_hooks() {
   if (!data_.defined()) {
-    TORCH_CHECK(was_default_constructed_, ERR_BACKWARD_TWICE);
-    TORCH_CHECK(!was_default_constructed_,
-        "Calling register_hook on default constructed saved tensor forbidden");
+    if (!was_default_constructed_) {
+    TORCH_CHECK(false,
+        "Calling register_hook on a saved tensor after it has been freed. "
+        "Saved intermediate values "
+        "of the graph are freed when you call .backward() or autograd.grad(). Specify "
+        "retain_graph=True if you need to backward through the graph a second time or "
+        "if you need to access saved variables after calling backward.");
+    } else {
+    TORCH_CHECK(false, "Calling register_hook on a tensor with value None is forbidden");
+    }
   }
-  hooks_ = std::move(hooks);
+  // hooks_ = std::move(hooks);
   // data_ = hooks_->call_unpack_hook(hooks_->call_pack_hook(data_));
 }
 

@@ -260,10 +260,11 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
     .def(py::init([]()->torch::autograd::SavedVariable {
       TORCH_CHECK(false, "Trying to create a SavedTensor object from Python is forbidden.");
     }))
-    // .def("register_hooks", [](torch::autograd::SavedVariable &s, py::function &pack_hook, py::function &unpack_hook) {
+    .def("register_hooks", [](torch::autograd::SavedVariable &s, py::function &pack_hook, py::function &unpack_hook) {
+        s.register_hooks();
         // s.register_hook(std::make_unique<torch::autograd::PySavedVariableHooks>(pack_hook, unpack_hook));
-    // });
-    ;
+        // s.register_hook(std::make_unique<torch::autograd::PySavedVariableHooks>(pack_hook.release().ptr(), unpack_hook.release().ptr()));
+    });
 
   Py_RETURN_TRUE;
 }

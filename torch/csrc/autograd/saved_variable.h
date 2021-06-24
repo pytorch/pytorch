@@ -38,7 +38,9 @@ class TORCH_API SavedVariable {
   /// circular reference.
   Variable unpack(std::shared_ptr<Node> saved_for = nullptr) const;
 
-  void register_hook(std::unique_ptr<SavedVariableHooks>&& hooks);
+  void register_hooks();
+
+  // void register_hooks(std::unique_ptr<SavedVariableHooks>&& hooks);
 
   void reset_data() {
     return data_.reset();
