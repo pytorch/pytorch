@@ -388,18 +388,18 @@ static inline C10_HOST_DEVICE scalar_t calc_i0(scalar_t _x) {
   // Needed for accurate results if input is bfloat16 or float16
   accscalar_t x = ::abs(static_cast<accscalar_t>(_x));
 
-  if (x <= 8.0) {
+  if (x <= accscalar_t{8.0}) {
     auto coeff_pair = chebyshev_coefficients_i0e_A<accscalar_t>();
     auto A = std::get<0>(coeff_pair);
     auto len = std::get<1>(coeff_pair);
-    accscalar_t y = static_cast<accscalar_t>((x / 2.0) - 2.0);
+    accscalar_t y = (x / accscalar_t{2.0}) - accscalar_t{2.0};
     return static_cast<scalar_t>(::exp(x) * chbevl(y, A, len));
   }
 
   auto coeff_pair = chebyshev_coefficients_i0e_B<accscalar_t>();
   auto B = std::get<0>(coeff_pair);
   auto len = std::get<1>(coeff_pair);
-  return static_cast<scalar_t>(::exp(x) * chbevl(static_cast<accscalar_t>(32.0 / x - 2.0), B, len) / ::sqrt(x));
+  return static_cast<scalar_t>(::exp(x) * chbevl(accscalar_t{32.0} / x - accscalar_t{2.0}, B, len) / ::sqrt(x));
 }
 
 template <typename scalar_t>
@@ -410,58 +410,56 @@ static inline C10_HOST_DEVICE scalar_t calc_i0e(scalar_t _x) {
   // Needed for accurate results if input is bfloat16 or float16
   accscalar_t x = ::abs(static_cast<accscalar_t>(_x));
 
-  if (x <= 8.0) {
+  if (x <= accscalar_t{8.0}) {
     auto coeff_pair = chebyshev_coefficients_i0e_A<accscalar_t>();
     auto A = std::get<0>(coeff_pair);
     auto len = std::get<1>(coeff_pair);
-    accscalar_t y = static_cast<accscalar_t>((x / 2.0) - 2.0);
+    accscalar_t y = (x / accscalar_t{2.0}) - accscalar_t{2.0};
     return static_cast<scalar_t>(chbevl(y, A, len));
   }
 
   auto coeff_pair = chebyshev_coefficients_i0e_B<accscalar_t>();
   auto B = std::get<0>(coeff_pair);
   auto len = std::get<1>(coeff_pair);
-  return static_cast<scalar_t>(chbevl(static_cast<accscalar_t>(32.0 / x - 2.0), B, len) / ::sqrt(x));
+  return static_cast<scalar_t>(chbevl(accscalar_t{32.0} / x - accscalar_t{2.0}, B, len) / ::sqrt(x));
 }
 
 template <typename scalar_t>
 static inline C10_HOST_DEVICE scalar_t calc_i1(scalar_t _x) {
   const auto x = ::abs(_x);
-  if (x <= 8.0) {
+  if (x <= scalar_t{8.0}) {
     auto coeff_pair = chebyshev_coefficients_i1e_A<scalar_t>();
     auto A = std::get<0>(coeff_pair);
     auto len = std::get<1>(coeff_pair);
-    auto y = static_cast<scalar_t>((x / 2.0) - 2.0);
-    const auto out = static_cast<scalar_t>(::exp(x) * x * chbevl(y, A, len));
-    return (_x < 0.0) ? -out : out;
+    scalar_t y = x / scalar_t{2.0} - scalar_t{2.0};
+    const scalar_t out = ::exp(x) * x * chbevl(y, A, len);
+    return (_x < scalar_t{0.0}) ? -out : out;
   }
 
   auto coeff_pair = chebyshev_coefficients_i1e_B<scalar_t>();
   auto B = std::get<0>(coeff_pair);
   auto len = std::get<1>(coeff_pair);
-  const auto out = static_cast<scalar_t>(
-      (::exp(x) * chbevl(static_cast<scalar_t>(32.0 / x - 2.0), B, len)) / ::sqrt(x));
-  return (_x < 0.0) ? -out : out;
+  const scalar_t out = (::exp(x) * chbevl(scalar_t{32.0} / x - scalar_t{2.0}, B, len)) / ::sqrt(x);
+  return (_x < scalar_t{0.0}) ? -out : out;
 }
 
 template <typename scalar_t>
 static inline C10_HOST_DEVICE scalar_t calc_i1e(scalar_t _x) {
   const auto x = ::abs(_x);
-  if (x <= 8.0) {
+  if (x <= scalar_t{8.0}) {
     auto coeff_pair = chebyshev_coefficients_i1e_A<scalar_t>();
     auto A = std::get<0>(coeff_pair);
     auto len = std::get<1>(coeff_pair);
-    const auto y = static_cast<scalar_t>((x / 2.0) - 2.0);
-    const auto out = static_cast<scalar_t>(chbevl(y, A, len) * x);
-    return (_x < 0.0) ? -out : out;
+    const scalar_t y = x / scalar_t{2.0} - scalar_t{2.0};
+    const scalar_t out = chbevl(y, A, len) * x;
+    return (_x < scalar_t{0.0}) ? -out : out;
   }
 
   auto coeff_pair = chebyshev_coefficients_i1e_B<scalar_t>();
   auto B = std::get<0>(coeff_pair);
   auto len = std::get<1>(coeff_pair);
-  const auto out = static_cast<scalar_t>(
-      chbevl(static_cast<scalar_t>(32.0 / x - 2.0), B, len) / ::sqrt(x));
-  return (_x < 0.0) ? -out : out;
+  const scalar_t out = chbevl(scalar_t{32.0} / x - scalar_t{2.0}, B, len) / ::sqrt(x);
+  return (_x < scalar_t{0.0}) ? -out : out;
 }
 
 } // namespace native
