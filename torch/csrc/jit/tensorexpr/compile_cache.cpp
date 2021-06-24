@@ -88,10 +88,7 @@ class SpecializationKey {
   }
 
   template <typename T>
-  inline void init_dimflags(
-      const T& sizes,
-      const T& strides,
-      int64_t ndims) {
+  inline void init_dimflags(const T& sizes, const T& strides, int64_t ndims) {
     // pack all the properties for each dimension into a uint8
     int out_idx = 0;
     for (int dim = 0; dim < ndims; ++dim) {
@@ -121,10 +118,7 @@ class SpecializationKey {
  public:
   SpecializationKey() {}
 
-  SpecializationKey(
-      const at::Tensor& v,
-      int8_t alias_group,
-      bool is_out)
+  SpecializationKey(const at::Tensor& v, int8_t alias_group, bool is_out)
       : flags_(pack_flags(v, is_out)), alias_group_(alias_group) {
     init_dimflags(v.sizes(), v.strides(), v.ndimension());
   }
@@ -137,9 +131,8 @@ class SpecializationKey {
   }
 
   void clear() {
-    memset(&flags_,
-           0,
-           sizeof(flags_) + sizeof(alias_group_) + sizeof(dimflags_));
+    memset(
+        &flags_, 0, sizeof(flags_) + sizeof(alias_group_) + sizeof(dimflags_));
   }
 
   std::vector<std::string> shape() const {
@@ -206,7 +199,7 @@ class CompileResultBase : public KernelScopedObject {
   virtual void set_shape_from(
       const std::vector<std::pair<int, int>>& indices) = 0;
   virtual void set_stride_args_from(
-             const std::vector<std::pair<int, int>>& indices) = 0;
+      const std::vector<std::pair<int, int>>& indices) = 0;
   virtual void add_allocated_output(
       int options_from,
       const std::vector<int>& storage_order) = 0;
@@ -255,10 +248,10 @@ class CompileCache3 {
       shape_from_ = indices;
     }
 
-    void set_stride_args_from(const std::vector<std::pair<int, int>>& indices){
+    void set_stride_args_from(const std::vector<std::pair<int, int>>& indices) {
       assert(indices.shape() <= MAX_DIMS * NARGS);
       stride_args_from_ = indices;
-     }
+    }
 
     void add_allocated_output(
         int options_from,
@@ -290,20 +283,19 @@ class CompileCache3 {
         }
       }
 
-      void* call_args[NARGS +
-                      allocated_outputs_.size() +
-                      stride_args_from_.size() +
-                      shape_from_.size()];
+      void* call_args
+          [NARGS + allocated_outputs_.size() + stride_args_from_.size() +
+           shape_from_.size()];
       for (int i = 0; i < NARGS; ++i) {
         call_args[i] = args[i].data_ptr();
       }
       // we might insert the output pointer at call_args[NARGS] below
 
       int stride_args_offset = NARGS + allocated_outputs_.size();
-      for(int i : c10::irange(stride_args_from_.size())) {
+      for (int i : c10::irange(stride_args_from_.size())) {
         auto& item = stride_args_from_[i];
-        call_args[stride_args_offset + i] = const_cast<int64_t*>(
-            &args[item.first].strides()[item.second]);
+        call_args[stride_args_offset + i] =
+            const_cast<int64_t*>(&args[item.first].strides()[item.second]);
       }
 
       int shape_args_offset = stride_args_offset + stride_args_from_.size();
