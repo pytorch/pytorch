@@ -142,7 +142,8 @@ class Transformer(Module):
                               memory_key_padding_mask=memory_key_padding_mask)
         return output
 
-    def generate_square_subsequent_mask(self, sz: int) -> Tensor:
+    @staticmethod
+    def generate_square_subsequent_mask(sz: int) -> Tensor:
         r"""Generate a square mask for the sequence. The masked positions are filled with float('-inf').
             Unmasked positions are filled with float(0.0).
         """
