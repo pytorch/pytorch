@@ -1001,6 +1001,14 @@ class TestAssertClose(TestCase):
         for fn in assert_close_with_inputs(actual, expected):
             fn()
 
+    def test_default_tolerance_selection_mismatching_dtypes(self):
+        # If the default tolerances where selected based on the promoted dtype, i.e. float64,
+        # these tensors wouldn't be considered close.
+        actual = torch.tensor(0.99, dtype=torch.bfloat16)
+        expected = torch.tensor(1.0, dtype=torch.float64)
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn(check_dtype=False)
 
 
 class TestAssertCloseMultiDevice(TestCase):
