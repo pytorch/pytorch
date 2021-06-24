@@ -694,6 +694,34 @@ bitwise_xor_() -> Tensor
 In-place version of :meth:`~Tensor.bitwise_xor`
 """)
 
+add_docstr_all('bitwise_left_shift',
+               r"""
+bitwise_left_shift(other) -> Tensor
+
+See :func:`torch.bitwise_left_shift`
+""")
+
+add_docstr_all('bitwise_left_shift_',
+               r"""
+bitwise_left_shift_(other) -> Tensor
+
+In-place version of :meth:`~Tensor.bitwise_left_shift`
+""")
+
+add_docstr_all('bitwise_right_shift',
+               r"""
+bitwise_right_shift(other) -> Tensor
+
+See :func:`torch.bitwise_right_shift`
+""")
+
+add_docstr_all('bitwise_right_shift_',
+               r"""
+bitwise_right_shift_(other) -> Tensor
+
+In-place version of :meth:`~Tensor.bitwise_right_shift`
+""")
+
 add_docstr_all('broadcast_to',
                r"""
 broadcast_to(shape) -> Tensor
@@ -1723,7 +1751,7 @@ add_docstr_all('index_add_',
                r"""
 index_add_(dim, index, tensor, *, alpha=1) -> Tensor
 
-Accumulate the elements of attr:`alpha` times :attr:`tensor` into the :attr:`self`
+Accumulate the elements of :attr:`alpha` times :attr:`tensor` into the :attr:`self`
 tensor by adding to the indices in the order given in :attr:`index`. For example,
 if ``dim == 0``, ``index[i] == j``, and ``alpha=-1``, then the ``i``\ th row of
 :attr:`tensor` is subtracted from the ``j``\ th row of :attr:`self`.
