@@ -91,8 +91,7 @@ class SpecializationKey {
   inline void init_dimflags(
       const T& sizes,
       const T& strides,
-      int64_t ndims,
-      void**& call_args_out) {
+      int64_t ndims) {
     // pack all the properties for each dimension into a uint8
     int out_idx = 0;
     for (int dim = 0; dim < ndims; ++dim) {
@@ -111,7 +110,6 @@ class SpecializationKey {
         flag |= STRIDE_TRANSPOSED_CONTIGUOUS;
       } else {
         flag |= STRIDE_AS_ARG;
-        *call_args_out++ = const_cast<int64_t*>(&strides[dim]);
       }
       dimflags_[out_idx++] = flag;
     }
@@ -126,10 +124,9 @@ class SpecializationKey {
   SpecializationKey(
       const at::Tensor& v,
       int8_t alias_group,
-      bool is_out,
-      void**& call_args_out)
+      bool is_out)
       : flags_(pack_flags(v, is_out)), alias_group_(alias_group) {
-    init_dimflags(v.sizes(), v.strides(), v.ndimension(), call_args_out);
+    init_dimflags(v.sizes(), v.strides(), v.ndimension());
   }
 
   int cmp(const SpecializationKey<MAX_DIMS>& other) const {
@@ -137,6 +134,12 @@ class SpecializationKey {
         &flags_,
         &other.flags_,
         sizeof(flags_) + sizeof(alias_group_) + sizeof(dimflags_));
+  }
+
+  void clear() {
+    memset(&flags_,
+           0,
+           sizeof(flags_) + sizeof(alias_group_) + sizeof(dimflags_));
   }
 
   std::vector<std::string> shape() const {
@@ -202,15 +205,13 @@ class CompileResultBase : public KernelScopedObject {
   virtual void set_code(const py::object& cg) = 0;
   virtual void set_shape_from(
       const std::vector<std::pair<int, int>>& indices) = 0;
+  virtual void set_stride_args_from(
+             const std::vector<std::pair<int, int>>& indices) = 0;
   virtual void add_allocated_output(
       int options_from,
       const std::vector<int>& storage_order) = 0;
   virtual void add_shape_check(
       const std::tuple<int, int, int, int>& indices) = 0;
-  virtual void set_num_args(
-      int buffer_args,
-      int stride_args,
-      int shape_args) = 0;
   virtual void set_backwards(int index, py::object backward_compiler) = 0;
 };
 
@@ -247,11 +248,17 @@ class CompileCache3 {
       objects_.push_back(cg);
       cg_ = cg.cast<CodeGen*>();
     }
+
     void set_shape_from(
         const std::vector<std::pair<int, int>>& indices) override {
       assert(indices.shape() <= MAX_DIMS);
       shape_from_ = indices;
     }
+
+    void set_stride_args_from(const std::vector<std::pair<int, int>>& indices){
+      assert(indices.shape() <= MAX_DIMS * NARGS);
+      stride_args_from_ = indices;
+     }
 
     void add_allocated_output(
         int options_from,
@@ -267,19 +274,13 @@ class CompileCache3 {
       shape_checks_.push_back(indices);
     }
 
-    void set_num_args(int buffer_args, int stride_args, int shape_args)
-        override {
-      shape_args_offset_ = buffer_args + stride_args;
-      num_args_ = buffer_args + stride_args + shape_args;
-    }
-
     void set_backwards(int index, py::object backward_compiler) {
       objects_.push_back(backward_compiler);
       backwards_functions_.emplace_back(
           std::make_pair(index, backward_compiler.cast<CompileCache*>()));
     }
 
-    at::Tensor call(at::Tensor* args, void** __restrict__ call_args) {
+    at::Tensor call(at::Tensor* args) {
       for (const auto& ck : shape_checks_) {
         if (args[std::get<0>(ck)].size(std::get<1>(ck)) !=
             args[std::get<2>(ck)].size(std::get<3>(ck))) {
@@ -289,18 +290,32 @@ class CompileCache3 {
         }
       }
 
-      size_t numel = 1;
-      int64_t shapes[MAX_DIMS];
-      int ndims = std::min<int>(shape_from_.size(), MAX_DIMS);
-      for (int i = 0; i < ndims; ++i) {
-        shapes[i] = args[shape_from_[i].first].size(shape_from_[i].second);
-        numel *= shapes[i];
-        call_args[shape_args_offset_ + i] = &shapes[i];
-      }
-
+      void* call_args[NARGS +
+                      allocated_outputs_.size() +
+                      stride_args_from_.size() +
+                      shape_from_.size()];
       for (int i = 0; i < NARGS; ++i) {
         call_args[i] = args[i].data_ptr();
       }
+      // we might insert the output pointer at call_args[NARGS] below
+
+      int stride_args_offset = NARGS + allocated_outputs_.size();
+      for(int i : c10::irange(stride_args_from_.size())) {
+        auto& item = stride_args_from_[i];
+        call_args[stride_args_offset + i] = const_cast<int64_t*>(
+            &args[item.first].strides()[item.second]);
+      }
+
+      int shape_args_offset = stride_args_offset + stride_args_from_.size();
+      size_t numel = 1;
+      int64_t shapes[MAX_DIMS];
+      int ndims = shape_from_.size();
+      for (int i = 0; i < ndims; ++i) {
+        shapes[i] = args[shape_from_[i].first].size(shape_from_[i].second);
+        numel *= shapes[i];
+        call_args[shape_args_offset + i] = &shapes[i];
+      }
+
       at::Tensor output;
       if (allocated_outputs_.size() > 0) {
         int options_from = allocated_outputs_[0].first;
@@ -347,9 +362,8 @@ class CompileCache3 {
 
    private:
     CodeGen* cg_ = nullptr;
-    int shape_args_offset_ = 0;
-    int num_args_ = 0;
     std::vector<std::pair<int, int>> shape_from_;
+    std::vector<std::pair<int, int>> stride_args_from_;
     std::vector<std::tuple<int, int, int, int>> shape_checks_;
     std::vector<std::pair<int, std::vector<int>>> allocated_outputs_;
     std::vector<std::pair<int, CompileCache*>> backwards_functions_;
@@ -417,15 +431,15 @@ class CompileCache3 {
     return alias_groups;
   }
 
-  Key compute_cache_key(at::Tensor* args, bool has_out, void** call_args_out) {
+  Key compute_cache_key(at::Tensor* args, bool has_out) {
     AliasGroups alias_groups = compute_alias_groups(args);
     Key key;
     int i = 0;
     for (; i < NARGS - 1; ++i) {
-      key[i] = ArgKey(args[i], alias_groups[i], false, call_args_out);
+      key[i] = ArgKey(args[i], alias_groups[i], false);
     }
     if (NARGS != 0) {
-      key[i] = ArgKey(args[i], alias_groups[i], has_out, call_args_out);
+      key[i] = ArgKey(args[i], alias_groups[i], has_out);
     }
     return key;
   }
@@ -433,9 +447,8 @@ class CompileCache3 {
   CompileCache3(const py::object& compile_fn) : compile_fn_(compile_fn) {}
 
   at::Tensor call(at::Tensor* args, bool has_out) {
-    void* call_args[NARGS + (!has_out) + NARGS * MAX_DIMS + MAX_DIMS];
-    auto key = compute_cache_key(args, has_out, call_args + NARGS + (!has_out));
-    return cached_compile(key, args)->call(args, call_args);
+    auto key = compute_cache_key(args, has_out);
+    return cached_compile(key, args)->call(args);
   }
 
  public:
@@ -603,12 +616,10 @@ void initTensorExprCompileCacheBindings(PyObject* te_obj) {
             self.res->set_shape_from(indices);
           })
       .def(
-          "set_num_args",
+          "set_stride_args_from",
           [](CompileResultProxy& self,
-             int buffer_args,
-             int stride_args,
-             int shape_args) {
-            self.res->set_num_args(buffer_args, stride_args, shape_args);
+             const std::vector<std::pair<int, int>>& indices) {
+            self.res->set_stride_args_from(indices);
           })
       .def(
           "add_allocated_output",

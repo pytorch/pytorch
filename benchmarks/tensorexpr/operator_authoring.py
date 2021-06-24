@@ -4,11 +4,10 @@ import pandas as pd
 import timeit
 import torch.jit.te
 
-CUDA = True
+CUDA = False
 SIZES = [1, 512, 8192]
-# SIZES = [512]
 NUMBER = [100, 10, 1, 1]
-REPEAT = 100
+REPEAT = 10
 
 
 @torch.jit.te.pointwise_operator

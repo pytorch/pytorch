@@ -75,6 +75,7 @@ class PointwiseCompiler(object):
         self.shape_vars = list(self.shape_args)
         self.iter_vars = [_te.VarHandle(torch.int32) for _ in range(self.ndim)]
         self.stride_args = []
+        self.strides_from = []
         self.broadcasts = []
         self.output_order = None
 
@@ -90,9 +91,10 @@ class PointwiseCompiler(object):
 
         self.run()
 
-    def add_stride_arg(self):
+    def add_stride_arg(self, a , d):
         var = _te.VarHandle(torch.int32)
         self.stride_args.append(var)
+        self.strides_from.append((a,d))
         return var
 
     def replace_shape(self, a, d, expected, replacement):
@@ -198,7 +200,9 @@ class PointwiseCompiler(object):
                 self.replace_shape(a, d, "other", lambda: self.shape_args[d])
                 self.replace_stride(a, d, "zero", _zero)
                 self.replace_stride(a, d, "one", _one)
-                self.replace_stride(a, d, "as_arg", self.add_stride_arg)
+                if strides[a][d] == "as_arg":
+                    strides[a][d] = self.add_stride_arg(a, d)
+
             # next the dependent ones
             while any(isinstance(x, str) for x in strides[a]):
                 for d in reversed(range(ndim)):
@@ -212,6 +216,8 @@ class PointwiseCompiler(object):
 
         for a, d in self.broadcasts:
             strides[a][d] = _zero()
+
+        self.result.set_stride_args_from(self.strides_from)
 
     def indexing(self, stride):
         result = _zero()
@@ -275,6 +281,8 @@ class PointwiseCompiler(object):
             assert inner
             flattened.set_gpu_block_index(0)
             inner.set_gpu_thread_index(0)
+        elif self.dtype == "llvm" and loops:
+            pass  # TODO(jansel): need a parallel CPU schedule
 
         loopnest.prepare_for_codegen()
         cg = _te.construct_codegen(
@@ -282,9 +290,6 @@ class PointwiseCompiler(object):
             loopnest.simplify(),
             bufs_args + self.stride_args + self.shape_args)
         self.result.set_code(cg)
-        self.result.set_num_args(len(bufs_args),
-                                 len(self.stride_args),
-                                 len(self.shape_args))
 
     def run(self):
         self.error_checks()
