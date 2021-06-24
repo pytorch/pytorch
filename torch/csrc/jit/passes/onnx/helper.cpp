@@ -175,7 +175,7 @@ Node* transformToONNXConcatNode(
   auto new_node = need_new_input ? g->return_node() : lc_node;
 
   for (auto* input : lc_node->inputs()) {
-    auto new_input = 
+    auto new_input =
         need_new_input ? g->addInput()->copyMetadata(input) : input;
 
     Node* unsqueezed_node =
