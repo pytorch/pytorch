@@ -1053,7 +1053,8 @@ class DummyTypeSerializer : public BlobSerializerBase {
     const auto& container = *static_cast<const DummyType*>(pointer);
     for (int k = 0; k < container.n_chunks; ++k) {
       std::string serialized_chunk = container.serialize(name, k);
-      acceptor(c10::str(name, kChunkIdSeparator, k), serialized_chunk);
+      acceptor(
+          c10::str(name, kChunkIdSeparator, k), std::move(serialized_chunk));
     }
   }
 };
