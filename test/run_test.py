@@ -65,7 +65,6 @@ TESTS = [
     'distributions/test_constraints',
     'distributions/test_distributions',
     'test_dispatch',
-    'test_expecttest',
     'test_foreach',
     'test_indexing',
     'test_jit',
@@ -247,7 +246,6 @@ ROCM_BLOCKLIST = [
 
 RUN_PARALLEL_BLOCKLIST = [
     'test_cpp_extensions_jit',
-    'test_expecttest',
     'test_jit_disabled',
     'test_mobile_optimizer',
     'test_multiprocessing',
