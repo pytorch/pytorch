@@ -435,7 +435,7 @@ def _insert_copy_of_node_a_after_input_node_c(
 
     # generically handle all args and kwargs except for the input
     # Note: this hasn't been tested with many ops, logic may change.
-    new_args = []
+    new_args: List[Any] = []
     # assumes that the first arg is the input
     num_non_param_args = 1 if input_node_c_2 is None else 2
     for node_a_arg in node_a.args[num_non_param_args:]:
@@ -443,6 +443,13 @@ def _insert_copy_of_node_a_after_input_node_c(
             arg_a = return_first_non_observer_node(node_a_arg, gm_a)
             node_a_arg_copy = _copy_node_from_a_to_c(arg_a, gm_a, gm_b, graph_c)
             new_args.append(node_a_arg_copy)
+        elif isinstance(node_a_arg, (int, float)):
+            new_args.append(node_a_arg)
+        elif isinstance(node_a_arg, (list, tuple)):
+            for el in node_a_arg:
+                assert not isinstance(el, Node), \
+                    "handling of Node inside list is not implemented"
+            new_args.append(node_a_arg)
         else:
             raise AssertionError(
                 f"handling for arg of type {type(node_a_arg)} is not implemented")
