@@ -2,8 +2,8 @@
 
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroupNCCL.hpp>
-#include <c10d/test/CUDATest.hpp>
-#include <c10d/test/TestUtils.hpp>
+#include "CUDATest.hpp"
+#include "TestUtils.hpp"
 
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>

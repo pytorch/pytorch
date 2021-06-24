@@ -4,8 +4,8 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroupGloo.hpp>
-#include <c10d/test/CUDATest.hpp>
-#include <c10d/test/TestUtils.hpp>
+#include "CUDATest.hpp"
+#include "TestUtils.hpp"
 #include <gtest/gtest.h>
 
 using namespace c10d::test;

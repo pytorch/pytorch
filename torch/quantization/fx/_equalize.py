@@ -170,6 +170,8 @@ def calculate_equalization_scale(input_obs: _InputEqualizationObserver,
         )
 
     equalization_scale = torch.sqrt((max_weights - min_weights) / (max_inputs - min_inputs))
+    # Replace all 'inf's with 1s to prevent 'nan's when taking the reciprocal 
+    equalization_scale[equalization_scale == float('inf')] = 1
     return equalization_scale
 
 
@@ -212,9 +214,11 @@ def node_supports_equalization(node: Node, modules) -> bool:
     Currently we only support nn.Linear and F.Linear layers
     """
     if node.op == 'call_module':
-        return isinstance(modules[node.target], nn.Linear) or isinstance(modules[node.target], nni.LinearReLU)
+        return (isinstance(modules[node.target], nn.Linear) or
+                isinstance(modules[node.target], nni.LinearReLU) or
+                isinstance(modules[node.target], nn.ReLU))
     elif node.op == 'call_function':
-        return node.target == F.linear
+        return node.target == F.linear or node.target == F.relu
     return False
 
 def is_equalization_observer(observer: nn.Module) -> bool:
@@ -311,12 +315,30 @@ def maybe_get_next_input_eq_obs(node: Node, modules: Dict[str, nn.Module]) -> Op
     However, if there are no connecting layers:
         x -> inp_obs1 -> eq_obs1 -> linear1 -> out_obs1 -> add
     Then we want to return None.
+
+    In the case of an unfused linear-relu layer with a connecting linear layer:
+        linear1 -> relu -> out_obs1 -> eq_obs2 -> linear2 -> out_obs2
+    Since it is unfused, we want to skip over the relu layer and return eq_obs2,
+    the following equalization observer for linear2.
     """
 
     assert(node_supports_equalization(node, modules))
 
-    # Locate the following output observer if it exists
-    maybe_obs_node = maybe_get_next_module(node, modules, ObserverBase)
+    # Locate the following nn.ReLU or F.relu node if it exists
+    maybe_relu_node = maybe_get_next_module(node, modules, nn.ReLU)
+    if maybe_relu_node is None:
+        for user, _ in node.users.items():
+            if user.op == 'call_function' and user.target == F.relu:
+                maybe_relu_node = user
+                break
+
+    # Locate the following output observer if it exists. 
+    # We will skip the relu node if it exists.
+    maybe_obs_node = (
+        maybe_get_next_module(node, modules, ObserverBase) 
+        if maybe_relu_node is None 
+        else maybe_get_next_module(maybe_relu_node, modules, ObserverBase)
+    )
     if maybe_obs_node is None:
         return None
 
