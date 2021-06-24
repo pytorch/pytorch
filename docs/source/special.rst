@@ -41,3 +41,4 @@ Functions
 .. autofunction:: round
 .. autofunction:: sinc
 .. autofunction:: xlog1py
+.. autofunction:: zeta

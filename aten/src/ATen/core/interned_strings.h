@@ -26,6 +26,7 @@ namespace c10 {
   _(prim, BroadcastingChunk)         \
   _(prim, BroadcastSizes)            \
   _(prim, ReductionSizes)            \
+  _(prim, Concat)                    \
   _(prim, Constant)                  \
   _(prim, ChunkSizes)                \
   _(prim, ConstantMKLDNNTensor)      \
@@ -353,6 +354,7 @@ namespace c10 {
   _(aten, special_i1e)               \
   _(aten, log_softmax)               \
   _(aten, special_log_softmax)       \
+  _(aten, special_zeta)              \
   _(aten, has_torch_function)        \
   _(aten, hardswish)                 \
   _(aten, hardswish_)                \
