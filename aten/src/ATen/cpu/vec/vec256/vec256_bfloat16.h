@@ -713,6 +713,7 @@ inline Vectorized<BFloat16> convert_float_bfloat16(const Vectorized<float>& a, c
  return cvtfp32_bf16(__m256(a), __m256(b));
 }
 
+
 #else // defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 
 inline std::tuple<Vectorized<float>, Vectorized<float>> convert_bfloat16_float(const Vectorized<BFloat16>& a) {

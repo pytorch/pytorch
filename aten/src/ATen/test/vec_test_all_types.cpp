@@ -98,6 +98,7 @@ namespace {
     TYPED_TEST_CASE(QuantizationTests, QuantTestedTypes);
     TYPED_TEST_CASE(FunctionalBF16Tests, BFloatTestedTypes);
     TYPED_TEST_CASE(FunctionalTests, RealFloatIntTestedTypes);
+    TYPED_TEST_CASE(FunctionalBF16Tests, BFloatTestedTypes);
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(Memory, UnAlignedLoadStore) {
         using vec = TypeParam;
@@ -1416,7 +1417,6 @@ namespace {
             << "\nmap3_reduce_all, Length: " << len << "; fp32: " << y1 << "; bf16: " << RT(y2);
       }
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(FunctionalBF16Tests, Map) {
       using vec = TypeParam;
       using VT = c10::BFloat16;

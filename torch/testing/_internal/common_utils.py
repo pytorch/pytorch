@@ -314,20 +314,14 @@ IS_WINDOWS = sys.platform == "win32"
 IS_MACOS = sys.platform == "darwin"
 IS_PPC = platform.machine() == "ppc64le"
 
-# Intel Cascade Lake has CPU Family 6, Model 85, and Stepping between 5 to 7
-def is_cascade_lake():
-    if not IS_WINDOWS and not IS_MACOS:
-        info_cpu = re.sub(r'\s+', ' ', (subprocess.check_output("lscpu", shell=True).strip()).decode())
-        cpu_family_6 = "family: 6" in info_cpu
-        cpu_model_85 = "Model: 85" in info_cpu
-        cpu_stepping = ("Stepping: 5" in info_cpu) or ("Stepping: 6" in info_cpu) or ("Stepping: 7" in info_cpu)
-        if cpu_family_6 and cpu_model_85 and cpu_stepping:
-            return True
-    else:
-        return False
+def is_avx512_vnni_supported():
+    if sys.platform != 'linux':
+            return False
+    with open("/proc/cpuinfo", encoding="ascii") as f:
+        lines = f.read()
+    return all(word in lines for word in ["avx512vnni"])
 
-# Currently, the only CI machines with AVX512_VNNI support are Intel Cascade Lake machines
-IS_AVX512_VNNI_SUPPORTED = is_cascade_lake()
+IS_AVX512_VNNI_SUPPORTED = is_avx512_vnni_supported()
 
 if IS_WINDOWS:
     @contextmanager
@@ -1166,6 +1160,17 @@ class TestCase(expecttest.TestCase):
 
     def safeToDense(self, t):
         return t.coalesce().to_dense()
+
+    # Compares torch function with reference function for given sample input (object of SampleInput)
+    # Note: only values are compared, type comparison is not done here
+    def compare_with_reference(self, torch_fn, ref_fn, sample_input, **kwargs):
+        n_inp, n_args, n_kwargs = sample_input.numpy()
+        t_inp, t_args, t_kwargs = sample_input.input, sample_input.args, sample_input.kwargs
+
+        actual = torch_fn(t_inp, *t_args, **t_kwargs)
+        expected = ref_fn(n_inp, *n_args, **n_kwargs)
+
+        self.assertEqual(actual, expected, exact_device=False)
 
     # Compares the given Torch and NumPy functions on the given tensor-like object.
     # NOTE: both torch_fn and np_fn should be functions that take a single

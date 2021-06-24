@@ -216,7 +216,7 @@ class TestSerialization(TestCase):
             # TODO: graph mode quantized conv3d module
 
     @override_qengines
-    @unittest.skipIf(IS_AVX512_VNNI_SUPPORTED, "This test fails on Intel Cascade Lake CI machines. Ref: GH Issue 59098")
+    @unittest.skipIf(IS_AVX512_VNNI_SUPPORTED, "This test fails on machines with AVX512_VNNI support. Ref: GH Issue 59098")
     def test_lstm(self):
         class LSTMModule(torch.nn.Module):
             def __init__(self):
