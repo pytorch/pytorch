@@ -250,24 +250,24 @@ TORCH_IMPL_FUNC(special_xlog1py_out) (const Tensor& self, const Tensor& other, c
   xlog1py_stub(device_type(), *this);
 }
 
-#define CREATE_BINARY_TORCH_IMPL_FUNC(func)                                                    \
-TORCH_IMPL_FUNC(func##_out) (const Tensor& self, const Tensor& other, const Tensor& result) {  \
-  func##_stub(device_type(), *this);                                                           \
+#define CREATE_BINARY_TORCH_IMPL_FUNC(func_out, func_stub)                                                    \
+TORCH_IMPL_FUNC(func_out) (const Tensor& self, const Tensor& other, const Tensor& result) {  \
+  func_stub(device_type(), *this);                                                           \
 }
 
-CREATE_BINARY_TORCH_IMPL_FUNC(maximum);
-CREATE_BINARY_TORCH_IMPL_FUNC(minimum);
-CREATE_BINARY_TORCH_IMPL_FUNC(fmax);
-CREATE_BINARY_TORCH_IMPL_FUNC(fmin);
-CREATE_BINARY_TORCH_IMPL_FUNC(logaddexp);
-CREATE_BINARY_TORCH_IMPL_FUNC(logaddexp2);
-CREATE_BINARY_TORCH_IMPL_FUNC(gcd);
-CREATE_BINARY_TORCH_IMPL_FUNC(lcm);
-CREATE_BINARY_TORCH_IMPL_FUNC(hypot);
-CREATE_BINARY_TORCH_IMPL_FUNC(igamma);
-CREATE_BINARY_TORCH_IMPL_FUNC(igammac);
-CREATE_BINARY_TORCH_IMPL_FUNC(nextafter);
-CREATE_BINARY_TORCH_IMPL_FUNC(remainder);
+CREATE_BINARY_TORCH_IMPL_FUNC(maximum_out, maximum_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(minimum_out, minimum_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(fmax_out, fmax_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(fmin_out, fmin_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(logaddexp_out, logaddexp_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(logaddexp2_out, logaddexp2_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(gcd_out, gcd_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(lcm_out, lcm_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(hypot_out, hypot_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(igamma_out, igamma_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(igammac_out, igammac_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(nextafter_out, nextafter_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(remainder_out, remainder_stub);
 
 Tensor special_xlog1py(const Scalar& x, const Tensor& y) {
   return at::special_xlog1py(wrapped_scalar_tensor(x), y);
