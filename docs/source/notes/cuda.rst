@@ -271,7 +271,7 @@ the default stream with all backward ops, so the following pattern::
 
 was safe as long as ``use grads`` happened on the default stream.
 In present Pytorch, that pattern is no longer safe. If ``backward()``
-and ``use grads`` are in different stream contexts, you must sync the streams:
+and ``use grads`` are in different stream contexts, you must sync the streams::
 
     with torch.cuda.stream(s):
         loss.backward()
