@@ -58,6 +58,7 @@ class NormalizeArgs(Transformer):
             out = super().run_node(n)
         if n.op != "output":
             self.node_map[out] = n
+            out.node.meta = n.meta
         return out
 
     def call_function(
