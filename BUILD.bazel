@@ -464,6 +464,7 @@ filegroup(
         "aten/src/ATen/native/cuda/LossCTC.cu.cc",
         "aten/src/ATen/native/cuda/MaxUnpooling.cu.cc",
         "aten/src/ATen/native/cuda/MultinomialKernel.cu.cc",
+        "aten/src/ATen/native/cuda/MultiLabelMarginCriterion.cu.cc",
         "aten/src/ATen/native/cuda/NaiveConvolutionTranspose2d.cu.cc",
         "aten/src/ATen/native/cuda/NaiveConvolutionTranspose3d.cu.cc",
         "aten/src/ATen/native/cuda/NaiveDilatedConvolution.cu.cc",

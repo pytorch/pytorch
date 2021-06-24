@@ -8046,25 +8046,25 @@
   python_module: nn
   dispatch:
     CPU: multilabel_margin_loss_forward_out_cpu
-    CUDA: legacy::cuda::_thnn_multilabel_margin_loss_forward_out
+    CUDA: multilabel_margin_loss_forward_out_cuda
 
 - func: multilabel_margin_loss_forward(Tensor self, Tensor target, int reduction) -> (Tensor output, Tensor is_target)
   python_module: nn
   dispatch:
     CPU: multilabel_margin_loss_forward_cpu
-    CUDA: legacy::cuda::_thnn_multilabel_margin_loss_forward
+    CUDA: multilabel_margin_loss_forward_cuda
 
 - func: multilabel_margin_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, int reduction, Tensor is_target, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
     CPU: multilabel_margin_loss_backward_cpu_out
-    CUDA: legacy::cuda::_thnn_multilabel_margin_loss_backward_out
+    CUDA: multilabel_margin_loss_backward_cuda_out
 
 - func: multilabel_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, Tensor is_target) -> Tensor
   python_module: nn
   dispatch:
     CPU: multilabel_margin_loss_backward_cpu
-    CUDA: legacy::cuda::_thnn_multilabel_margin_loss_backward
+    CUDA: multilabel_margin_loss_backward_cuda
 
 - func: nll_loss.out(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
