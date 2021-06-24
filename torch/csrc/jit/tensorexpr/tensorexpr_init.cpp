@@ -762,7 +762,7 @@ void initTensorExprBindings(PyObject* module) {
   te.def("annotate_input_shapes", &tensorexpr::annotateInputShapes);
   te.def("remove_unused_self_argument", &tensorexpr::removeUnusedSelfArgument);
 
-  initTensorExprAuthoringBindings(te.ptr());
+  initTensorExprCompileCacheBindings(te.ptr());
 }
 } // namespace jit
 } // namespace torch

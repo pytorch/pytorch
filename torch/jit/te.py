@@ -1,4 +1,7 @@
+import numpy as np
+
 from torch._C import _te
+from torch import fx
 import copy
 import functools
 import inspect
@@ -9,7 +12,6 @@ FOLD_ALIASES = True
 _SHAPE_TYPES = {"one", "other"}
 _STRIDE_TYPES = {"zero", "one", "contiguous", "transposed_contiguous", "as_arg"}
 _int = _te.ExprHandle.int
-scope = _te.KernelScope()
 
 
 def _argmax(x):
@@ -24,16 +26,39 @@ def _one():
     return _int(1)
 
 
-def _num_args(fn):
+def _num_args(fn: callable):
     return len(inspect.signature(fn).parameters)
 
 
-def _combine_dtype(a, b):
+def _combine_dtype(a: torch.dtype, b: torch.dtype):
     if a == b:
         return a
     # TODO(jansel): find a cleaner way to implement this
     return (torch.zeros(1, dtype=a, device="cpu") +
             torch.zeros(1, dtype=b, device="cpu")).dtype
+
+
+def _fx_replace_constants(fn: callable, dtype: torch.dtype):
+    """Convert the constants in the user function to TensorExpr constants"""
+
+    def apply(arg):
+        if isinstance(arg, (int, float)):
+            return gm.graph.create_node("call_function", _create_constant, (arg, dtype))
+        return arg
+
+    gm: fx.GraphModule = fx.symbolic_trace(fn)
+    for node in list(gm.graph.nodes):
+        with gm.graph.inserting_before(node):
+            node.args = tuple(apply(a) for a in node.args)
+    gm.recompile()
+    return gm
+
+
+def _create_constant(value, dtype):
+    return _te.Cast.make(dtype, {
+        int: _te.ExprHandle.int,
+        float: _te.ExprHandle.double
+    }[type(value)](value))
 
 
 class PointwiseCompiler(object):
@@ -54,6 +79,7 @@ class PointwiseCompiler(object):
         self.output_order = None
 
         self.device, = list(set(x.device.type for x in spec))
+        # TODO(jansel): support meta tensors
         self.compile_mode = {"cpu": "llvm", "cuda": "cuda"}[self.device]
 
         if spec[-1].out:
@@ -229,7 +255,7 @@ class PointwiseCompiler(object):
         inputs = [_te.Cast.make(self.dtype,
                                 buf.load(self.indexing(stride)))
                   for buf, stride in zip(input_bufs, input_strides)]
-        val = self.pointwise_fn(*inputs)
+        val = _fx_replace_constants(self.pointwise_fn, self.dtype)(*inputs)
         out = _te.Block([buf.store(self.indexing(stride), val)
                          for buf, stride in zip(output_bufs, output_strides)])
 

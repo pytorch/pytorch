@@ -1,22 +1,11 @@
-#include <pybind11/functional.h>
-#include <pybind11/operators.h>
-#include <pybind11/stl.h>
 #include <torch/csrc/autograd/custom_function.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
 #include <torch/csrc/jit/tensorexpr/compile_cache.h>
 #include <torch/csrc/jit/tensorexpr/cuda_codegen.h>
-#include <torch/csrc/jit/tensorexpr/ir_printer.h>
-#include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
-#include <torch/csrc/jit/tensorexpr/kernel.h>
-#include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
-#include <torch/csrc/jit/tensorexpr/loopnest.h>
-#include <torch/csrc/jit/tensorexpr/reduction.h>
 #include <array>
-#include <cassert>
 #include <map>
 #include <mutex>
-#include <vector>
 
 namespace torch {
 namespace jit {
@@ -27,11 +16,11 @@ class CompileCache;
 typedef torch::autograd::variable_list variable_list;
 typedef std::tuple<int, CompileCache*> CompileCacheBackwards;
 
-class CCNode : public torch::autograd::Node {
+class CompiledAutoGradNode : public torch::autograd::Node {
  public:
   variable_list apply(variable_list&& new_inputs) override;
 
-  CCNode(at::Tensor* args, size_t len) {
+  CompiledAutoGradNode(at::Tensor* args, size_t len) {
     inputs_.reserve(len);
     for (int i = 0; i < len; ++i) {
       inputs_.emplace_back(args[i].detach());
@@ -48,6 +37,7 @@ class CCNode : public torch::autograd::Node {
 };
 
 static py::object python_specialization_key() {
+  // namedtuple() we map SpecializationKey to
   static py::object* rtype = nullptr;
   if (rtype == nullptr) {
     py::object namedtuple =
@@ -74,13 +64,12 @@ class SpecializationKey {
     STRIDE_TRANSPOSED_CONTIGUOUS = 1 << 6, // stride[i-1] * sizes[i-1]
     STRIDE_AS_ARG = 1 << 7,
   };
-  static constexpr int MASK = (1 << 5) - 1;
 
   static inline uint16_t pack_flags(const at::Tensor& v, bool is_out) {
     // pack all the tensor properties into a uint16 for fast hash/compare
     constexpr uint16_t S0 = 1;
-    constexpr uint16_t S1 = S0 * 2;
-    constexpr uint16_t S2 = S1 * 2;
+    constexpr uint16_t S1 = S0 * 2; // bool is_out
+    constexpr uint16_t S2 = S1 * 2; // bool requires_grad
     constexpr uint16_t S3 = S2 * static_cast<int>(at::ScalarType::NumOptions);
     constexpr uint16_t S4 = S3 * static_cast<int>(at::Layout::NumOptions);
     constexpr uint16_t S5 =
@@ -194,7 +183,7 @@ class SpecializationKey {
         ex.attr("device"),
         ex.attr("layout"),
         ex.attr("requires_grad"),
-        py::bool_(flags_ % 2),
+        py::bool_(flags_ % 2), // out
         shape(),
         stride());
   }
@@ -331,11 +320,12 @@ class CompileCache3 {
         output = args[NARGS - 1];
       }
 
-      ((CudaCodeGen*)cg_)->call_fast(call_args, numel);
+      cg_->call_fast(call_args, numel);
 
       if (backwards_functions_.size() > 0) {
-        std::shared_ptr<CCNode> node(
-            new CCNode(args, NARGS - (allocated_outputs_.size() == 0)),
+        std::shared_ptr<CompiledAutoGradNode> node(
+            new CompiledAutoGradNode(
+                args, NARGS - (allocated_outputs_.size() == 0)),
             torch::autograd::deleteNode);
 
         // node outputs
@@ -566,7 +556,7 @@ CompileCache* create_compile_cache(const py::object& compile_fn, int num_args) {
   }
 }
 
-variable_list CCNode::apply(variable_list&& new_inputs) {
+variable_list CompiledAutoGradNode::apply(variable_list&& new_inputs) {
   // TODO(jansel): we likely need to copy some error checking from eager to here
   // TODO(jansel): possible optimization: horizontal fusion of each backwards fn
   // TODO(jansel): possible optimization: reuse the forwards SpecializationKey
@@ -587,7 +577,7 @@ variable_list CCNode::apply(variable_list&& new_inputs) {
 
 } // namespace
 
-void initTensorExprAuthoringBindings(PyObject* te_obj) {
+void initTensorExprCompileCacheBindings(PyObject* te_obj) {
   py::handle te(te_obj);
 
   py::class_<CompileCache>(te, "CompileCache")

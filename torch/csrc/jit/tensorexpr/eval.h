@@ -110,6 +110,7 @@ class TORCH_API SimpleIREvaluator : public CodeGen {
 
   void call(const std::vector<CallArg>& args) override;
   void call_raw(const std::vector<void*>& args) override;
+  void call_fast(void* const* args, size_t output_num_elements) override;
 
   template <typename... Ts>
   void operator()(const Ts&... ts) {

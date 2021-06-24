@@ -318,6 +318,10 @@ void LLVMCodeGen::call_raw(const std::vector<void*>& args) {
   USE_TRIGGER(llvm_codegen_executed);
 }
 
+void LLVMCodeGen::call_fast(void* const* args, size_t) {
+  value<float>(const_cast<void**>(args));
+}
+
 void LLVMCodeGen::call(const std::vector<CallArg>& args) {
   const auto& buf_args = buffer_args();
   if (args.size() != buf_args.size()) {

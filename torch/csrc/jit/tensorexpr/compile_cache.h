@@ -5,6 +5,6 @@
 
 namespace torch {
 namespace jit {
-void initTensorExprAuthoringBindings(PyObject* module);
+void initTensorExprCompileCacheBindings(PyObject* module);
 } // namespace jit
 } // namespace torch
