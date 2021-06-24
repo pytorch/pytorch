@@ -2357,11 +2357,16 @@ class TestBinaryUfuncs(TestCase):
                                lambda: torch.add(m1, m1, out=m2))
 
     @onlyCUDA
-    def test_add_half_tensor_with_alpha(self, device):
+    def test_addsub_half_tensor(self, device):
         x = torch.tensor([60000.0], dtype=torch.half, device=device)
-        y = torch.tensor([-60000.0], dtype=torch.half, device=device)
-        actual = torch.add(x, y, alpha=2)
-        self.assertTrue(not (actual.isnan() or actual.isinf()))
+        for op, y, alpha in (
+            (torch.add, torch.tensor([-60000.0], dtype=torch.half, device=device), 2),
+            (torch.sub, torch.tensor([60000.0], dtype=torch.half, device=device), 2),
+            (torch.add, -70000.0, 1),
+            (torch.sub, 70000.0, 1),
+        ):
+            actual = op(x, y, alpha=alpha)
+            self.assertTrue(not (actual.isnan() or actual.isinf()))
 
     def test_sub_typing(self, device):
         m1 = torch.tensor([True, False, False, True, False, False], dtype=torch.bool, device=device)
