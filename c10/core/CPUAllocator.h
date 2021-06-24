@@ -49,6 +49,7 @@ class C10_API ProfiledCPUMemoryReporter {
   std::mutex mutex_;
   std::unordered_map<void*, size_t> size_table_;
   size_t allocated_ = 0;
+  size_t log_cnt_ = 0;
 };
 
 C10_API ProfiledCPUMemoryReporter& profiledCPUMemoryReporter();
@@ -64,5 +65,12 @@ C10_API at::Allocator* GetDefaultCPUAllocator();
 
 // Get the Default Mobile CPU Allocator
 C10_API at::Allocator* GetDefaultMobileCPUAllocator();
+
+// The CPUCachingAllocator is experimental and might disappear in the future.
+// The only place that uses it is in StaticRuntime.
+// Set the CPU Caching Allocator
+C10_API void SetCPUCachingAllocator(Allocator* alloc, uint8_t priority = 0);
+// Get the CPU Caching Allocator
+C10_API Allocator* GetCPUCachingAllocator();
 
 } // namespace c10

@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Functions.h>
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <torch/library.h>
 
@@ -17,6 +18,7 @@ namespace {
 // but this could be used as a starting point to do more interesting things.
 
 // Global counter for ease of testing
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static int64_t override_call_count = 0;
 
 // Mode implementation
@@ -79,6 +81,8 @@ void generic_wrapper_fallback(const c10::OperatorHandle& op, torch::jit::Stack* 
   }
 }
 
+#ifndef ATEN_CPU_STATIC_DISPATCH
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BackendFallbackTest, TestBackendFallbackWithMode) {
   auto m = MAKE_TORCH_LIBRARY_IMPL(_, TESTING_ONLY_GenericMode);
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&generic_mode_fallback>());
@@ -91,6 +95,7 @@ TEST(BackendFallbackTest, TestBackendFallbackWithMode) {
   ASSERT_EQ(override_call_count, 2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BackendFallbackTest, TestBackendFallbackWithWrapper) {
   auto m = MAKE_TORCH_LIBRARY_IMPL(_, TESTING_ONLY_GenericWrapper);
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&generic_wrapper_fallback>());
@@ -101,6 +106,7 @@ TEST(BackendFallbackTest, TestBackendFallbackWithWrapper) {
   ASSERT_EQ(override_call_count, 1);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BackendFallbackTest, TestFallthroughBackendFallback) {
   auto m = MAKE_TORCH_LIBRARY_IMPL(aten, TESTING_ONLY_GenericMode);
   m.impl("mul.Tensor", torch::CppFunction::makeFromBoxedFunction<&generic_mode_fallback>());
@@ -118,5 +124,6 @@ TEST(BackendFallbackTest, TestFallthroughBackendFallback) {
   Tensor b = mul(a, a);
   ASSERT_EQ(override_call_count, 1);
 }
+#endif // ATEN_CPU_STATIC_DISPATCH
 
 }

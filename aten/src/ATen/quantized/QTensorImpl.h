@@ -13,13 +13,22 @@ namespace at {
  *
  * We'll use QTensor in code or documentation to refer to a Tensor with QTensorImpl.
  */
-struct CAFFE2_API QTensorImpl : public c10::TensorImpl {
+struct TORCH_API QTensorImpl : public c10::TensorImpl {
  public:
   QTensorImpl(
       Storage&& storage,
       DispatchKeySet key_set,
       const caffe2::TypeMeta data_type,
       QuantizerPtr quantizer);
+
+  // See Note [Enum ImplType]
+  QTensorImpl(
+      ImplType type,
+      Storage&& storage,
+      DispatchKeySet key_set,
+      const caffe2::TypeMeta data_type,
+      QuantizerPtr quantizer);
+
 
   // TODO: Expose in PyTorch Frontend
   QuantizerPtr quantizer() {
@@ -52,6 +61,27 @@ struct CAFFE2_API QTensorImpl : public c10::TensorImpl {
   }
 
   /**
+   * Return a TensorImpl that is a shallow-copy of this TensorImpl.
+   *
+   * For usage of `version_counter` and `allow_tensor_metadata_change`,
+   * see NOTE [ TensorImpl Shallow-Copying ].
+   */
+  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
+      c10::VariableVersion&& version_counter,
+      bool allow_tensor_metadata_change) const override {
+    auto impl = c10::make_intrusive<QTensorImpl>(
+        Storage(storage()), key_set(), data_type_, quantizer_);
+    copy_tensor_metadata(
+      /*src_impl=*/this,
+      /*dest_impl=*/impl.get(),
+      /*version_counter=*/std::move(version_counter),
+      /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
+    impl->refresh_numel();
+    impl->refresh_contiguous();
+    return impl;
+  }
+
+  /**
    * Shallow-copies data from another TensorImpl into this TensorImpl.
    *
    * For why this function doesn't check this TensorImpl's `allow_tensor_metadata_change_`,
@@ -71,6 +101,8 @@ struct CAFFE2_API QTensorImpl : public c10::TensorImpl {
 
  private:
   QuantizerPtr quantizer_;
+
+  const char* tensorimpl_type_name() const override;
 
   /**
    * Copy the tensor metadata fields (e.g. sizes / strides / storage pointer / storage_offset)

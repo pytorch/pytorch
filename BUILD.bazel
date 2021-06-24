@@ -33,7 +33,6 @@ header_template_rule(
     out = "c10/macros/cmake_macros.h",
     substitutions = {
         "cmakedefine": "define",
-        "#define FEATURE_TORCH_MOBILE": "/* #undef FEATURE_TORCH_MOBILE */",
         "#define C10_USE_NUMA": "/* #undef C10_USE_NUMA */",
     },
 )
@@ -84,6 +83,7 @@ cc_library(
     copts = ["-DCAFFE2_BUILD_MAIN_LIB"],
     deps = [
         ":c10_headers",
+        "@fmt",
     ] + if_cuda(
         ["@cuda"],
         [],
@@ -125,15 +125,29 @@ genrule(
     ] + glob(["aten/src/ATen/templates/**"]),
     outs = [
         "aten/src/ATen/Declarations.yaml",
-        "aten/src/ATen/BackendSelectRegister.cpp",
-        "aten/src/ATen/CPUType.cpp",
+        "aten/src/ATen/RegisterBackendSelect.cpp",
+        "aten/src/ATen/RegisterCPU.cpp",
+        "aten/src/ATen/RegisterMkldnnCPU.cpp",
+        "aten/src/ATen/RegisterQuantizedCPU.cpp",
+        "aten/src/ATen/RegisterSparseCPU.cpp",
+        "aten/src/ATen/RegisterSparseCsrCPU.cpp",
+        "aten/src/ATen/RegisterCompositeImplicitAutograd.cpp",
+        "aten/src/ATen/RegisterCompositeExplicitAutograd.cpp",
+        "aten/src/ATen/RegisterMeta.cpp",
+        "aten/src/ATen/RegisterSchema.cpp",
+        "aten/src/ATen/CPUFunctions.h",
+        "aten/src/ATen/CUDAFunctions.h",
+        "aten/src/ATen/CompositeExplicitAutogradFunctions.h",
+        "aten/src/ATen/CompositeImplicitAutogradFunctions.h",
         "aten/src/ATen/Functions.h",
         "aten/src/ATen/Functions.cpp",
+        "aten/src/ATen/RedispatchFunctions.h",
+        "aten/src/ATen/RedispatchFunctions.cpp",
+        "aten/src/ATen/Operators.h",
+        "aten/src/ATen/Operators.cpp",
         "aten/src/ATen/NativeFunctions.h",
-        "aten/src/ATen/MkldnnCPUType.cpp",
-        "aten/src/ATen/QuantizedCPUType.cpp",
-        "aten/src/ATen/SparseCPUType.cpp",
-        "aten/src/ATen/TypeDefault.cpp",
+        "aten/src/ATen/MetaFunctions.h",
+        "aten/src/ATen/NativeMetaFunctions.h",
         "aten/src/ATen/core/TensorBody.h",
         "aten/src/ATen/core/TensorMethods.cpp",
         "aten/src/ATen/core/ATenOpList.cpp",
@@ -186,12 +200,12 @@ libtorch_cpp_generated_sources = [
         "torch/csrc/autograd/generated/TraceType_3.cpp",
         "torch/csrc/autograd/generated/TraceType_4.cpp",
         # "torch/csrc/autograd/generated/TraceTypeEverything.cpp",
+        "torch/csrc/autograd/generated/ADInplaceOrViewType_0.cpp",
+        "torch/csrc/autograd/generated/ADInplaceOrViewType_1.cpp",
+        # "torch/csrc/autograd/generated/ADInplaceOrViewTypeEverything.cpp",
         "torch/csrc/autograd/generated/Functions.h",
         "torch/csrc/autograd/generated/Functions.cpp",
         "torch/csrc/autograd/generated/variable_factories.h",
-        "torch/csrc/jit/generated/generated_unboxing_wrappers_0.cpp",
-        "torch/csrc/jit/generated/generated_unboxing_wrappers_1.cpp",
-        "torch/csrc/jit/generated/generated_unboxing_wrappers_2.cpp",
 ]
 
 libtorch_python_generated_sources = [
@@ -202,6 +216,7 @@ libtorch_python_generated_sources = [
         "torch/csrc/autograd/generated/python_nn_functions.cpp",
         "torch/csrc/autograd/generated/python_fft_functions.cpp",
         "torch/csrc/autograd/generated/python_linalg_functions.cpp",
+        "torch/csrc/autograd/generated/python_special_functions.cpp",
 ]
 
 genrule(
@@ -316,16 +331,9 @@ filegroup(
         "aten/src/TH/THAllocator.cpp",
         "aten/src/TH/THBlas.cpp",
         "aten/src/TH/THGeneral.cpp",
-        "aten/src/TH/THLapack.cpp",
         "aten/src/TH/THStorageFunctions.cpp",
         "aten/src/TH/THTensor.cpp",
-        "aten/src/TH/THTensorEvenMoreMath.cpp",
-        "aten/src/TH/THTensorLapack.cpp",
-        "aten/src/TH/THTensorMath.cpp",
         "aten/src/TH/THTensorMoreMath.cpp",
-        "aten/src/TH/THTensorRandom.cpp",
-        "aten/src/TH/THVector.cpp",
-        "aten/src/TH/vector/AVX.cpp",
     ],
 )
 
@@ -335,7 +343,8 @@ filegroup(
         "aten/src/ATen/cuda/CUDABlas.cpp",
         "aten/src/ATen/cuda/CUDASolver.cpp",
         "aten/src/ATen/cuda/CUDAContext.cpp",
-        "aten/src/ATen/cuda/CUDAGenerator.cpp",
+        "aten/src/ATen/cuda/CUDAGeneratorImpl.cpp",
+        "aten/src/ATen/cuda/CUDAGraph.cpp",
         "aten/src/ATen/cuda/CuSparseHandlePool.cpp",
         "aten/src/ATen/cuda/CublasHandlePool.cpp",
         "aten/src/ATen/cuda/CusolverDnHandlePool.cpp",
@@ -346,7 +355,6 @@ filegroup(
         "aten/src/ATen/cudnn/Handle.cpp",
         "aten/src/ATen/cudnn/Types.cpp",
         "aten/src/ATen/native/cuda/CUDAUnaryOps.cpp",
-        "aten/src/ATen/native/cuda/LegacyDefinitions.cpp",
         "aten/src/ATen/native/cuda/TensorShapeCUDA.cpp",
         "aten/src/ATen/native/cudnn/AffineGridGenerator.cpp",
         "aten/src/ATen/native/cudnn/BatchNorm.cpp",
@@ -368,7 +376,6 @@ filegroup(
 filegroup(
     name = "thc_srcs_cu",
     srcs = [
-        "aten/src/THC/THCBlas.cu.cc",
         "aten/src/THC/THCReduceApplyUtils.cu.cc",
         "aten/src/THC/THCSleep.cu.cc",
         "aten/src/THC/THCSortUtils.cu.cc",
@@ -376,47 +383,12 @@ filegroup(
         "aten/src/THC/THCStorageCopy.cu.cc",
         "aten/src/THC/THCTensor.cu.cc",
         "aten/src/THC/THCTensorCopy.cu.cc",
-        "aten/src/THC/THCTensorIndex.cu.cc",
         "aten/src/THC/THCTensorMath.cu.cc",
-        "aten/src/THC/THCTensorMathBlas.cu.cc",
         "aten/src/THC/THCTensorMathMagma.cu.cc",
         "aten/src/THC/THCTensorMathPairwise.cu.cc",
-        "aten/src/THC/THCTensorMathReduce.cu.cc",
         "aten/src/THC/THCTensorMathScan.cu.cc",
-        "aten/src/THC/THCTensorMode.cu.cc",
-        "aten/src/THC/THCTensorRandom.cu.cc",
         "aten/src/THC/THCTensorScatterGather.cu.cc",
         "aten/src/THC/THCTensorSort.cu.cc",
-        "aten/src/THC/THCTensorTopK.cu.cc",
-        "aten/src/THC/generated/THCTensorMaskedBFloat16.cu.cc",
-        "aten/src/THC/generated/THCTensorMaskedBool.cu.cc",
-        "aten/src/THC/generated/THCTensorMaskedByte.cu.cc",
-        "aten/src/THC/generated/THCTensorMaskedChar.cu.cc",
-        "aten/src/THC/generated/THCTensorMaskedDouble.cu.cc",
-        "aten/src/THC/generated/THCTensorMaskedFloat.cu.cc",
-        "aten/src/THC/generated/THCTensorMaskedHalf.cu.cc",
-        "aten/src/THC/generated/THCTensorMaskedInt.cu.cc",
-        "aten/src/THC/generated/THCTensorMaskedLong.cu.cc",
-        "aten/src/THC/generated/THCTensorMaskedShort.cu.cc",
-        "aten/src/THC/generated/THCTensorMathPointwiseBool.cu.cc",
-        "aten/src/THC/generated/THCTensorMathPointwiseByte.cu.cc",
-        "aten/src/THC/generated/THCTensorMathPointwiseChar.cu.cc",
-        "aten/src/THC/generated/THCTensorMathPointwiseDouble.cu.cc",
-        "aten/src/THC/generated/THCTensorMathPointwiseFloat.cu.cc",
-        "aten/src/THC/generated/THCTensorMathPointwiseHalf.cu.cc",
-        "aten/src/THC/generated/THCTensorMathPointwiseInt.cu.cc",
-        "aten/src/THC/generated/THCTensorMathPointwiseLong.cu.cc",
-        "aten/src/THC/generated/THCTensorMathPointwiseShort.cu.cc",
-        "aten/src/THC/generated/THCTensorMathReduceBFloat16.cu.cc",
-        "aten/src/THC/generated/THCTensorMathReduceBool.cu.cc",
-        "aten/src/THC/generated/THCTensorMathReduceByte.cu.cc",
-        "aten/src/THC/generated/THCTensorMathReduceChar.cu.cc",
-        "aten/src/THC/generated/THCTensorMathReduceDouble.cu.cc",
-        "aten/src/THC/generated/THCTensorMathReduceFloat.cu.cc",
-        "aten/src/THC/generated/THCTensorMathReduceHalf.cu.cc",
-        "aten/src/THC/generated/THCTensorMathReduceInt.cu.cc",
-        "aten/src/THC/generated/THCTensorMathReduceLong.cu.cc",
-        "aten/src/THC/generated/THCTensorMathReduceShort.cu.cc",
         "aten/src/THC/generated/THCTensorSortByte.cu.cc",
         "aten/src/THC/generated/THCTensorSortChar.cu.cc",
         "aten/src/THC/generated/THCTensorSortDouble.cu.cc",
@@ -432,7 +404,6 @@ filegroup(
     name = "thcunn_srcs_cu",
     srcs = [
         "aten/src/THCUNN/BCECriterion.cu.cc",
-        "aten/src/THCUNN/ClassNLLCriterion.cu.cc",
         "aten/src/THCUNN/ELU.cu.cc",
         "aten/src/THCUNN/GatedLinearUnit.cu.cc",
         "aten/src/THCUNN/HardTanh.cu.cc",
@@ -440,7 +411,6 @@ filegroup(
         "aten/src/THCUNN/LogSigmoid.cu.cc",
         "aten/src/THCUNN/MultiLabelMarginCriterion.cu.cc",
         "aten/src/THCUNN/MultiMarginCriterion.cu.cc",
-        "aten/src/THCUNN/RReLU.cu.cc",
         "aten/src/THCUNN/SoftMarginCriterion.cu.cc",
         "aten/src/THCUNN/SoftPlus.cu.cc",
         "aten/src/THCUNN/SoftShrink.cu.cc",
@@ -455,6 +425,7 @@ filegroup(
     name = "aten_srcs_cu",
     srcs = [
         "aten/src/ATen/cuda/detail/IndexUtils.cu.cc",
+        "aten/src/ATen/cuda/detail/CUDAGraphsUtils.cu.cc",
         "aten/src/ATen/native/cuda/Activation.cu.cc",
         "aten/src/ATen/native/cuda/AdaptiveAveragePooling.cu.cc",
         "aten/src/ATen/native/cuda/AdaptiveAveragePooling3d.cu.cc",
@@ -506,6 +477,7 @@ filegroup(
         "aten/src/ATen/native/cuda/Repeat.cu.cc",
         "aten/src/ATen/native/cuda/ReplicationPadding.cu.cc",
         "aten/src/ATen/native/cuda/Resize.cu.cc",
+        "aten/src/ATen/native/cuda/SegmentReduce.cu.cc",
         "aten/src/ATen/native/cuda/SoftMax.cu.cc",
         "aten/src/ATen/native/cuda/SortingKthValue.cu.cc",
         "aten/src/ATen/native/cuda/SparseMM.cu.cc",
@@ -513,9 +485,11 @@ filegroup(
         "aten/src/ATen/native/cuda/SummaryOps.cu.cc",
         "aten/src/ATen/native/cuda/TensorCompare.cu.cc",
         "aten/src/ATen/native/cuda/TensorFactories.cu.cc",
+        "aten/src/ATen/native/cuda/TensorTopK.cu.cc",
         "aten/src/ATen/native/cuda/TensorTransformations.cu.cc",
         "aten/src/ATen/native/cuda/TriangularOps.cu.cc",
         "aten/src/ATen/native/cuda/UnaryOpsKernel.cu.cc",
+        "aten/src/ATen/native/cuda/UnarySpecialOpsKernel.cu.cc",
         "aten/src/ATen/native/cuda/Unique.cu.cc",
         "aten/src/ATen/native/cuda/UpSampleBicubic2d.cu.cc",
         "aten/src/ATen/native/cuda/UpSampleBilinear2d.cu.cc",
@@ -540,12 +514,16 @@ header_template_rule(
     substitutions = {
         "@AT_MKLDNN_ENABLED@": "1",
         "@AT_MKL_ENABLED@": "0",
+        "@AT_FFTW_ENABLED@": "0",
         "@AT_NNPACK_ENABLED@": "0",
         "@CAFFE2_STATIC_LINK_CUDA_INT@": "0",
-        "@USE_BLAS@": "1",
+        "@AT_BUILD_WITH_BLAS@": "1",
+        "@AT_BUILD_WITH_LAPACK@": "1",
         "@AT_PARALLEL_OPENMP@": "0",
         "@AT_PARALLEL_NATIVE@": "1",
         "@AT_PARALLEL_NATIVE_TBB@": "0",
+        "@AT_BLAS_F2C@": "0",
+        "@AT_BLAS_USE_CBLAS_DOT@": "1",
     },
 )
 
@@ -1360,6 +1338,7 @@ filegroup(
         "caffe2/utils/threadpool/ThreadPool.cc",
         "caffe2/utils/threadpool/pthreadpool.cc",
         "caffe2/utils/threadpool/pthreadpool_impl.cc",
+        "caffe2/utils/threadpool/thread_pool_guard.cpp",
     ],
 )
 
@@ -1742,7 +1721,7 @@ cc_library(
         ],
         [
             ":aten",
-            "@tensorpipe",
+            "@tensorpipe//:tensorpipe_cpu",
         ],
     ),
     alwayslink = True,
@@ -1865,6 +1844,19 @@ cc_library(
 )
 
 # torch
+py_binary(
+    name = "gen_version_header",
+    srcs = ["tools/setup_helpers/gen_version_header.py"],
+)
+
+genrule(
+    name = "version_h",
+    srcs = ["torch/csrc/api/include/torch/version.h.in", "version.txt"],
+    outs = ["torch/csrc/api/include/torch/version.h"],
+    cmd = "$(location :gen_version_header) --template-path $(location torch/csrc/api/include/torch/version.h.in) --version-path $(location version.txt) --output-path $@",
+    tools = [':gen_version_header']
+)
+
 torch_cuda_headers = glob(["torch/csrc/cuda/*.h"])
 cc_library(
     name = "torch_headers",
@@ -1878,14 +1870,12 @@ cc_library(
             "torch/lib/c10d/*.hpp",
         ],
         exclude = [
-            "torch/lib/c10d/ProcessGroupMPI.hpp",
-            "torch/lib/c10d/ProcessGroupNCCL.hpp",
             "torch/csrc/autograd/generated/VariableType.h",
             "torch/csrc/autograd/generated/RegistrationDeclarations.h",
             "torch/csrc/autograd/generated/variable_factories.h",
             "torch/csrc/autograd/generated/Functions.h",
         ] + torch_cuda_headers,
-    ) + [":cpp_generated_code"],
+    ) + [":cpp_generated_code", ":version_h"],
     includes = [
         "torch/csrc",
         "torch/csrc/api/include",

@@ -10,19 +10,26 @@ source "${DIR}/common_utils.sh"
 PACKAGE_NAME=${PACKAGE_NAME:-torch}
 
 pytorch_version="$(get_pytorch_version)"
+# Refers to the specific package we'd like to promote
+# i.e. VERSION_SUFFIX='%2Bcu102'
+#      torch-1.8.0+cu102 -> torch-1.8.0
+VERSION_SUFFIX=${VERSION_SUFFIX:-}
+# Refers to the specific platofmr we'd like to promote
+# i.e. PLATFORM=linux_x86_64
+# For domains like torchaudio / torchtext this is to be left blank
+PLATFORM=${PLATFORM:-}
 
-# This assumes you have already promoted the wheels to stable S3
 pkgs_to_promote=$(\
     curl -fsSL https://download.pytorch.org/whl/torch_stable.html \
-        | grep "${PACKAGE_NAME}-${pytorch_version}" \
-        | grep -v "%2B" \
-        | grep -v "win_amd64" \
+        | grep "${PACKAGE_NAME}-${pytorch_version}${VERSION_SUFFIX}-" \
+        | grep "${PLATFORM}" \
         | cut -d '"' -f2
 )
 
 tmp_dir="$(mktemp -d)"
-trap 'rm -rf ${tmp_dir}' EXIT
-pushd "${tmp_dir}"
+output_tmp_dir="$(mktemp -d)"
+trap 'rm -rf ${tmp_dir} ${output_tmp_dir}' EXIT
+pushd "${output_tmp_dir}"
 
 # Dry run by default
 DRY_RUN=${DRY_RUN:-enabled}
@@ -34,13 +41,25 @@ fi
 
 for pkg in ${pkgs_to_promote}; do
     pkg_basename="$(basename "${pkg//linux/manylinux1}")"
+    orig_pkg="${tmp_dir}/${pkg_basename}"
     (
         set -x
         # Download package, sub out linux for manylinux1
-        curl -fsSL -o "${pkg_basename}" "https://download.pytorch.org/whl/${pkg}"
+        curl -fsSL -o "${orig_pkg}" "https://download.pytorch.org/whl/${pkg}"
+    )
+
+    if [[ -n "${VERSION_SUFFIX}" ]]; then
+        OUTPUT_DIR="${output_tmp_dir}" ${DIR}/prep_binary_for_pypi.sh "${orig_pkg}"
+    else
+        mv "${orig_pkg}" "${output_tmp_dir}/"
+    fi
+
+    (
+        set -x
         ${TWINE_UPLOAD} \
             --disable-progress-bar \
             --non-interactive \
-            "${pkg_basename}"
+            ./*.whl
+        rm -rf ./*.whl
     )
 done

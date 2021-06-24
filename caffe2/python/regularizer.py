@@ -281,19 +281,28 @@ class ElasticNetL1NormTrimmed(Regularizer):
 
 
 class MaxNorm(Regularizer):
-    def __init__(self, norm=1.0):
+    def __init__(self, norm=1.0, dtype=None):
         super(MaxNorm, self).__init__()
         self.norm = norm
+        self.dtype = dtype
 
     def _run_after_optimizer(self, net, param_init_net, param, grad):
         assert self.norm > 0, "norm should be bigger than 0."
         if isinstance(grad, core.GradientSlice):
-            net.SparseNormalize(
-                [param, grad.indices],
-                [param],
-                use_max_norm=True,
-                norm=self.norm,
-            )
+            if self.dtype and self.dtype == 'fp16':
+                net.Float16SparseNormalize(
+                    [param, grad.indices],
+                    [param],
+                    use_max_norm=True,
+                    norm=self.norm,
+                )
+            else:
+                net.SparseNormalize(
+                    [param, grad.indices],
+                    [param],
+                    use_max_norm=True,
+                    norm=self.norm,
+                )
         else:
             raise NotImplementedError("MaxNorm is not supported for dense parameters")
 

@@ -20,6 +20,7 @@ namespace dataset_ops {
 namespace {
 
 const char kDatasetFieldSeparator = ':';
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char* kDatasetLengthField = "lengths";
 
 // how much percent to grow the dataset when needed
@@ -139,6 +140,7 @@ TreeWalker::TreeWalker(const vector<const Blob*>& inputs, TreeCursor& cursor)
     cursor.offsets.assign(cursor.it.numOffsetFields(), 0);
   }
 
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (int fieldId = 0; fieldId < cursor_.it.fields().size(); ++fieldId) {
     fields_.emplace_back(*this, fieldId);
   }
@@ -171,6 +173,7 @@ void* TreeWalker::fieldPtr(int fieldId) const {
 void TreeWalker::gatherLengthData() {
   static const TLength lenZero = 0;
   lengths_.resize(cursor_.it.numLengthFields());
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (int i = 0; i < lengths_.size(); ++i) {
     auto& in = input(cursor_.it.lengthField(i).id);
     if (in.numel() > 0) {
@@ -183,6 +186,7 @@ void TreeWalker::gatherLengthData() {
 
 void TreeWalker::gatherSizeLimits() {
   limits_.assign(sizes_.size(), std::numeric_limits<TOffset>::max());
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (auto fieldId = 0; fieldId < cursor_.it.fields().size(); ++fieldId) {
     auto lengthFieldIdx = lengthIdx(fieldId);
     limits_[lengthFieldIdx] =
@@ -201,6 +205,7 @@ class CreateTreeCursorOp : public Operator<CPUContext> {
 
   bool RunOnDevice() override {
     *OperatorBase::Output<std::unique_ptr<TreeCursor>>(0) =
+        // NOLINTNEXTLINE(modernize-make-unique)
         std::unique_ptr<TreeCursor>(new TreeCursor(TreeIterator(fields_)));
     return true;
   }
@@ -253,6 +258,7 @@ class CheckDatasetConsistencyOp : public Operator<CPUContext> {
     std::vector<TOffset> sizes;
     std::vector<TOffset> offsets;
     CAFFE_ENFORCE(
+        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
         InputSize() == iterator_.fields().size(),
         "Invalid number of fields. Expected ",
         iterator_.fields().size(),
@@ -385,6 +391,7 @@ class UnPackRecordsOp : public Operator<CPUContext> {
       data_ptr->reserve(numRows);
 
       const auto* inputs = Input(0).template data<SharedTensorVectorPtr>();
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int i = 0; i < numRows; i++) {
         data_ptr->emplace_back(*inputs[i]);
       }
@@ -422,7 +429,9 @@ class UnPackRecordsOp : public Operator<CPUContext> {
 
     // inputs contains a single shared_ptr of vector<vector<caffe2::TensorCPU>>
     auto& tensors = *data_ptr;
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < numRows; ++i) {
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int j = 0; j < tensors[i].size(); ++j) {
         const auto& input = tensors[i][j];
 
@@ -445,6 +454,7 @@ class UnPackRecordsOp : public Operator<CPUContext> {
       destinations[i] = Output(i)->raw_mutable_data(metas[i]);
     }
 
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < numRows; ++i) {
       for (int j = 0; j < numTensors; ++j) {
         const auto& input = tensors[i][j];
@@ -476,6 +486,7 @@ class UnPackRecordsOp : public Operator<CPUContext> {
     CAFFE_ENFORCE_EQ(numTensors, fields_.size());
     CAFFE_ENFORCE_EQ(numTensors, OutputSize());
 
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < numTensors; ++i) {
       outputDims[i] = inputZero[i].sizes().vec();
       outputDims[i][0] = 0;
@@ -489,6 +500,7 @@ class UnPackRecordsOp : public Operator<CPUContext> {
     const auto numTensors = fields_.size();
     CAFFE_ENFORCE_EQ(numTensors, InputSize() - 1);
     CAFFE_ENFORCE_EQ(numTensors, OutputSize());
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < numTensors; ++i) {
       const auto& input = Input(i + 1);
       outputDims[i] = input.sizes().vec();
@@ -512,6 +524,7 @@ class ReadNextBatchOp : public Operator<CPUContext> {
 
   bool RunOnDevice() override {
     auto& cursor = OperatorBase::Input<std::unique_ptr<TreeCursor>>(0);
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     CAFFE_ENFORCE(InputSize() == cursor->it.fields().size() + 1);
     std::vector<const TLength*> lengths;
     std::vector<TOffset> limits;
@@ -521,6 +534,7 @@ class ReadNextBatchOp : public Operator<CPUContext> {
     sizes.resize(cursor->it.numOffsetFields());
     // gather length data
     lengths.resize(cursor->it.numLengthFields());
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < lengths.size(); ++i) {
       auto& a = Input(cursor->it.lengthField(i).id + 1);
       if (a.numel() > 0) {
@@ -531,6 +545,7 @@ class ReadNextBatchOp : public Operator<CPUContext> {
     }
     // gather size limits
     limits.assign(sizes.size(), std::numeric_limits<TOffset>::max());
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < cursor->it.fields().size(); ++i) {
       int lengthFieldIdx = cursor->it.fields()[i].lengthFieldId + 1;
       limits[lengthFieldIdx] =
@@ -553,6 +568,7 @@ class ReadNextBatchOp : public Operator<CPUContext> {
     }
     // gather data
     std::vector<int64_t> outDim;
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < cursor->it.fields().size(); ++i) {
       auto lengthIdx = cursor->it.fields()[i].lengthFieldId + 1;
       auto size = sizes[lengthIdx];
@@ -585,6 +601,7 @@ class ComputeOffsetOp : public Operator<CPUContext> {
 
   bool RunOnDevice() override {
     auto& cursor = OperatorBase::Input<std::unique_ptr<TreeCursor>>(0);
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     CAFFE_ENFORCE(InputSize() == cursor->it.fields().size() + 1);
     auto* out = Output(0);
     std::vector<const TLength*> lengths;
@@ -595,6 +612,7 @@ class ComputeOffsetOp : public Operator<CPUContext> {
     sizes.resize(cursor->it.numOffsetFields());
     // gather length data
     lengths.resize(cursor->it.numLengthFields());
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < lengths.size(); ++i) {
       auto& a = Input(cursor->it.lengthField(i).id + 1);
       if (a.numel() > 0) {
@@ -605,6 +623,7 @@ class ComputeOffsetOp : public Operator<CPUContext> {
     }
     // gather size limits
     limits.assign(sizes.size(), std::numeric_limits<TOffset>::max());
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < cursor->it.fields().size(); ++i) {
       int lengthFieldIdx = cursor->it.fields()[i].lengthFieldId + 1;
       limits[lengthFieldIdx] =
@@ -640,9 +659,11 @@ class SortAndShuffleOp : public Operator<CPUContext> {
 
   bool RunOnDevice() override {
     auto& cursor = OperatorBase::Input<std::unique_ptr<TreeCursor>>(0);
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     CAFFE_ENFORCE(InputSize() == cursor->it.fields().size() + 1);
     CAFFE_ENFORCE(-1 <= sort_by_field_idx_);
     CAFFE_ENFORCE(cursor->it.fields().size() - sort_by_field_idx_ > 0);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int size;
     if (sort_by_field_idx_ != -1) {
       size = Input(sort_by_field_idx_ + 1).sizes()[0];
@@ -726,11 +747,13 @@ class ReadRandomBatchOp : public Operator<CPUContext> {
     auto& cursor = OperatorBase::Input<std::unique_ptr<TreeCursor>>(0);
     auto& idxblob = Input(1);
     auto& offsetsmat = Input(2);
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     CAFFE_ENFORCE(InputSize() == cursor->it.fields().size() + 3);
     auto idxvec = idxblob.template data<int64_t>();
     auto offsetdim = offsetsmat.sizes();
     // gather data
     std::vector<int64_t> outDim;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t idx;
     {
       std::lock_guard<std::mutex> lock(cursor->mutex_);
@@ -748,6 +771,7 @@ class ReadRandomBatchOp : public Operator<CPUContext> {
       cursor->offsets.at(0) += batchSize_;
     }
 
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < cursor->it.fields().size(); ++i) {
       auto lengthIdx = cursor->it.fields()[i].lengthFieldId + 1;
       auto& in = Input(i + 3);
@@ -775,6 +799,7 @@ class ReadRandomBatchOp : public Operator<CPUContext> {
         continue;
       }
       auto dst = static_cast<char*>(out->raw_mutable_data(in.dtype()));
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       int block_size = in.numel() / in.size(0);
       auto block_bytesize = in.size_from_dim(1) * in.dtype().itemsize();
       CAFFE_ENFORCE(
@@ -941,6 +966,7 @@ class ConcatTensorVectorOp final : public Operator<Context> {
 
     vector<int64_t> outputDims(tensorVector->at(0).sizes().vec());
     CAFFE_ENFORCE(outputDims.size() > 0);
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 1; i < tensorVector->size(); i++) {
       // the tensor shapes are the same except for the first dimension
       for (int j = 1; j < tensorVector->at(i).dim(); j++) {
@@ -969,6 +995,7 @@ class ConcatTensorVectorOp final : public Operator<Context> {
 };
 
 template <class Context>
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class CollectTensorOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -1002,6 +1029,7 @@ class CollectTensorOp final : public Operator<Context> {
 
       if (numVisited_ >= numToCollect_) {
         CAFFE_ENFORCE(
+            // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
             tensorVector->size() == numToCollect_,
             "TensorVecotor size = ",
             tensorVector->size(),
@@ -1014,6 +1042,7 @@ class CollectTensorOp final : public Operator<Context> {
       if (pos < 0) {
         // discard
         CAFFE_ENFORCE(numVisited_ >= numToCollect_);
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       } else if (pos >= tensorVector->size()) {
         // append
         tensorVector->emplace_back();
@@ -1052,6 +1081,7 @@ class TrimDatasetOp : public Operator<CPUContext> {
     TreeCursor cursor(iterator_);
     TreeWalker walker(Inputs(), cursor);
 
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     int trimmedSize = (walker.size() / multiple_of_) * multiple_of_;
     if (trimmedSize == walker.size()) {
       // we already satisfy the condition
@@ -1062,6 +1092,7 @@ class TrimDatasetOp : public Operator<CPUContext> {
       walker.advance();
     }
     // trim each column to the offset
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int col = 0; col < walker.fields().size(); ++col) {
       auto newOuterSize = walker.fields().at(col).offset();
       Output(col)->ShrinkTo(newOuterSize);
@@ -1074,24 +1105,42 @@ class TrimDatasetOp : public Operator<CPUContext> {
   int multiple_of_;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(CreateTreeCursor, CreateTreeCursorOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ResetCursor, ResetCursorOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ReadNextBatch, ReadNextBatchOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(GetCursorOffset, GetCursorOffsetOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ComputeOffset, ComputeOffsetOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SortAndShuffle, SortAndShuffleOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ReadRandomBatch, ReadRandomBatchOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(CheckDatasetConsistency, CheckDatasetConsistencyOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Append, AppendOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(AtomicAppend, AtomicAppendOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(CreateTensorVector, CreateTensorVectorOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(TensorVectorSize, TensorVectorSizeOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ConcatTensorVector, ConcatTensorVectorOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(CollectTensor, CollectTensorOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(PackRecords, PackRecordsOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(UnPackRecords, UnPackRecordsOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(TrimDataset, TrimDatasetOp);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CreateTreeCursor)
     .NumInputs(0)
     .NumOutputs(1)
@@ -1168,6 +1217,7 @@ to pass a list of blobs containing the data to read for each one of the fields.
         "fields",
         "A list of strings each one representing a field of the dataset.");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ResetCursor)
     .NumInputs(1)
     .NumOutputs(0)
@@ -1176,6 +1226,7 @@ Resets the offsets for the given TreeCursor. This operation is thread safe.
 )DOC")
     .Input(0, "cursor", "A blob containing a pointer to the cursor.");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ReadNextBatch)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1, INT_MAX)
@@ -1193,6 +1244,7 @@ ReadNextBatch is thread safe.
     .Output(0, "field_0", "Tensor containing the next batch for field 0.")
     .Arg("batch_size", "Number of top-level entries to read.");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(GetCursorOffset)
     .NumInputs(1)
     .NumOutputs(1)
@@ -1200,6 +1252,7 @@ OPERATOR_SCHEMA(GetCursorOffset)
     .Input(0, "cursor", "A blob containing a pointer to the cursor.")
     .Output(0, "offsets", "Tensor containing the offsets for the cursor.");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ComputeOffset)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1)
@@ -1217,6 +1270,7 @@ ComputeOffset is thread safe.
     .Input(1, "dataset_field_0", "First dataset field")
     .Output(0, "field_0", "Tensor containing offset info for this chunk.");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SortAndShuffle)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1)
@@ -1247,6 +1301,7 @@ SortAndShuffle is thread safe.
     .Input(1, "dataset_field_0", "First dataset field")
     .Output(0, "indices", "Tensor containing sorted indices.");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ReadRandomBatch)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1, INT_MAX)
@@ -1270,6 +1325,7 @@ ReadRandomBatch is thread safe.
     .Arg("batch_size", "Number of top-level entries to read.")
     .Arg("loop_over", "(bool) Repeat the dataset indefinitely");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CheckDatasetConsistency)
     .NumInputs(1, INT_MAX)
     .NumOutputs(0)
@@ -1285,6 +1341,7 @@ appended to an existing dataset, keeping it consistent.
         "List of strings representing the string names in the format"
         "specified in the doc for CreateTreeCursor.");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Append)
     .NumInputs(2)
     .NumOutputs(1)
@@ -1371,16 +1428,19 @@ A:
         "A",
         "(*Tensor*): output tensor of shape $(N+M, d_1, d_2, ..., d_n)$");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(AtomicAppend)
     .NumInputs(3, INT_MAX)
     .NumOutputs(1, INT_MAX)
     .AllowInplace([](int in, int out) { return in == out + 1; });
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CreateTensorVector)
     .NumInputs(0)
     .NumOutputs(1)
     .SetDoc("Create a std::unique_ptr<std::vector<Tensor> >");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(TensorVectorSize)
     .NumInputs(1)
     .NumOutputs(1)
@@ -1388,6 +1448,7 @@ OPERATOR_SCHEMA(TensorVectorSize)
     .Input(0, "tensor vector", "std::unique_ptr<std::vector<Tensor> >")
     .Output(0, "size", "int32_t size");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ConcatTensorVector)
     .NumInputs(1)
     .NumOutputs(1)
@@ -1398,6 +1459,7 @@ along the first dimension.
     .Input(0, "vector of Tensor", "std::unique_ptr<std::vector<Tensor> >")
     .Output(0, "tensor", "tensor after concatenating");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CollectTensor)
     .NumInputs([](int n) { return n > 0 && n % 2 == 0; })
     .NumOutputs(1, INT_MAX)
@@ -1414,6 +1476,7 @@ output vectors.
 )DOC")
     .Arg("num_to_collect", "The max number of tensors to collect");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(PackRecords)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1)
@@ -1434,6 +1497,7 @@ operators.
         " In order to reverse it back to the original input it has to be "
         "inserted into UnPackRecordsOp.");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(TrimDataset)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1, INT_MAX)
@@ -1448,6 +1512,7 @@ of records that is a multiple of the 'multiple_of' argument.
         "List of strings representing the string names in the format"
         "specified in the doc for CreateTreeCursor.");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(UnPackRecords)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1, INT_MAX)
@@ -1467,24 +1532,40 @@ process.
         "specified in the doc for CreateTreeCursor.")
     .Input(0, "packed_tensor", "The tensor to be unpacked");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(CreateTreeCursor);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(ResetCursor);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(ReadNextBatch);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(ComputeOffset);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(ReadRandomBatch);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(CheckDatasetConsistency);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(Append);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(AtomicAppend);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(CreateTensorVector);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(TensorVectorSize);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(ConcatTensorVector);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(CollectTensor);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(UnPackRecords);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(PackRecords);
 
 class TreeCursorSerializer : public BlobSerializerBase {
  public:
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   TreeCursorSerializer() {}
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~TreeCursorSerializer() override {}
 
   void Serialize(
@@ -1542,6 +1623,7 @@ class TreeCursorDeserializer : public BlobDeserializerBase {
 
     auto* base = blob->template GetMutable<std::unique_ptr<TreeCursor>>();
     CAFFE_ENFORCE(base != nullptr, "TreeCursor doesn't exist.");
+    // NOLINTNEXTLINE(modernize-make-unique)
     (*base).reset(new TreeCursor(it));
 
     // Deserialize the offset vector when it is not empty. The proto.tensor()
@@ -1559,9 +1641,11 @@ class TreeCursorDeserializer : public BlobDeserializerBase {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_SERIALIZER(
     (TypeMeta::Id<std::unique_ptr<TreeCursor>>()),
     TreeCursorSerializer);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_DESERIALIZER(std::unique_ptr<TreeCursor>, TreeCursorDeserializer);
 
 } // namespace
@@ -1593,10 +1677,12 @@ void SharedTensorVectorPtrDeserializer::Deserialize(
   blob->GetMutable<std::shared_ptr<std::vector<TensorCPU>>>();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_SERIALIZER(
     (TypeMeta::Id<std::shared_ptr<std::vector<TensorCPU>>>()),
     SharedTensorVectorPtrSerializer);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_DESERIALIZER(
     std::shared_ptr<std::vector<TensorCPU>>,
     SharedTensorVectorPtrDeserializer);

@@ -35,8 +35,9 @@ bool areEqualScalars(Val* v1, Val* v2);
  *   3) Reduction across a dimension i.e. val.sum(axis=2)
  *   4) split/merge
  */
-class TORCH_CUDA_API UnaryOp : public Expr {
+class TORCH_CUDA_CU_API UnaryOp : public Expr {
  public:
+  // NOLINTNEXTLINE(modernize-use-override)
   ~UnaryOp() = default;
   UnaryOp(UnaryOpType _type, Val* _out, Val* _in);
 
@@ -73,8 +74,9 @@ class TORCH_CUDA_API UnaryOp : public Expr {
  *  1) Add/mul/div/mod/sub (A * B)
  *  2) LT (A < B)
  */
-class TORCH_CUDA_API BinaryOp : public Expr {
+class TORCH_CUDA_CU_API BinaryOp : public Expr {
  public:
+  // NOLINTNEXTLINE(modernize-use-override)
   ~BinaryOp() = default;
   BinaryOp(BinaryOpType _type, Val* _out, Val* _lhs, Val* _rhs);
 
@@ -113,8 +115,9 @@ class TORCH_CUDA_API BinaryOp : public Expr {
  * Broadcast _in to match _out. broadcast_dims are relative to out. Where
  * broadcast_dims.size() + _in->nDims() == _out->nDims().
  */
-class TORCH_CUDA_API BroadcastOp : public Expr {
+class TORCH_CUDA_CU_API BroadcastOp : public Expr {
  public:
+  // NOLINTNEXTLINE(modernize-use-override)
   ~BroadcastOp() = default;
   BroadcastOp(Val* _out, Val* _in);
 
@@ -147,8 +150,9 @@ class TORCH_CUDA_API BroadcastOp : public Expr {
  * tensor. The output tensors size will be the size of all
  * non-reduction/non-broadcast dimensions.
  */
-class TORCH_CUDA_API ReductionOp : public Expr {
+class TORCH_CUDA_CU_API ReductionOp : public Expr {
  public:
+  // NOLINTNEXTLINE(modernize-use-override)
   ~ReductionOp() = default;
   ReductionOp(BinaryOpType _reduction_op_type, Val* _init, Val* _out, Val* _in);
 
@@ -183,8 +187,9 @@ class TORCH_CUDA_API ReductionOp : public Expr {
   Val* const in_ = nullptr;
 };
 
-class TORCH_CUDA_API TernaryOp : public Expr {
+class TORCH_CUDA_CU_API TernaryOp : public Expr {
  public:
+  // NOLINTNEXTLINE(modernize-use-override)
   ~TernaryOp() = default;
   TernaryOp(TernaryOpType _type, Val* _out, Val* _in1, Val* _in2, Val* _in3);
 
@@ -228,7 +233,7 @@ class TORCH_CUDA_API TernaryOp : public Expr {
 // TensorDomains which represent how to iterate over a tensor is made up of
 // IterDomains to form an ND iterable. We directly set parallization strategies
 // on IterDomains.
-class TORCH_CUDA_API IterDomain : public Val {
+class TORCH_CUDA_CU_API IterDomain : public Val {
  public:
   IterDomain(
       Val* _start,
@@ -363,9 +368,10 @@ class TORCH_CUDA_API IterDomain : public Val {
  * operations that take in a TensorDomain, applies a transformation and outputs
  * a tensor domain.
  */
-class TORCH_CUDA_API TensorDomain : public Val {
+class TORCH_CUDA_CU_API TensorDomain : public Val {
  public:
   TensorDomain() = delete;
+  // NOLINTNEXTLINE(modernize-use-override)
   ~TensorDomain() = default;
 
   TensorDomain(const TensorDomain& other) = delete;
@@ -556,8 +562,9 @@ class TORCH_CUDA_API TensorDomain : public Val {
  * Representation a split on an IterDomain by "factor"
  * TODO: Implement split by nparts
  */
-class TORCH_CUDA_API Split : public Expr {
+class TORCH_CUDA_CU_API Split : public Expr {
  public:
+  // NOLINTNEXTLINE(modernize-use-override)
   ~Split() = default;
 
   Split(const Split& other) = delete;
@@ -598,8 +605,9 @@ class TORCH_CUDA_API Split : public Expr {
  * if there is one.
  * TODO: Should this be a unary op type?
  */
-class TORCH_CUDA_API Merge : public Expr {
+class TORCH_CUDA_CU_API Merge : public Expr {
  public:
+  // NOLINTNEXTLINE(modernize-use-override)
   ~Merge() = default;
   Merge(IterDomain* _out, IterDomain* _outer, IterDomain* _inner);
 
@@ -636,11 +644,13 @@ class TORCH_CUDA_API Merge : public Expr {
  * - blockDim.z
  * - T3.stride[2]
  */
-class TORCH_CUDA_API NamedScalar : public Val {
+class TORCH_CUDA_CU_API NamedScalar : public Val {
  public:
+  // NOLINTNEXTLINE(modernize-use-override)
   ~NamedScalar() = default;
   NamedScalar() = delete;
 
+  // NOLINTNEXTLINE(modernize-pass-by-value)
   NamedScalar(std::string _name, DataType dtype)
       : Val(ValType::NamedScalar, dtype), name_(_name) {}
 

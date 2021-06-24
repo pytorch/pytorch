@@ -14,6 +14,7 @@
 #include <c10/core/DeviceGuard.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAStream.h>
+#include <c10/util/irange.h>
 
 #include <cstdlib>
 
@@ -28,8 +29,10 @@ std::string FusionExecutor::getStructuredCode(const std::string& kernel) {
   // generating cuda code;
   std::string code = "";
 #ifdef __HIP_PLATFORM_HCC__
+#if ROCM_VERSION < 40200
   code += std::string("#include <hip/hip_runtime.h>\n") +
       std::string("#include <hip/hip_fp16.h>\n");
+#endif
 #endif
   code += std::string("namespace ") + FusionExecutor::kernelNamespace() +
       " {\n" + executor_utils::kernelPreamble() + kernel + "}\n";
@@ -175,17 +178,18 @@ at::Tensor inferAndAlloc(
   }
 
   auto at_type = data_type_to_aten(tv->getDataType().value());
-  auto tensor_options =
-      at::TensorOptions().dtype(at_type).device(options.device);
 
   if (zero_init) {
+    auto tensor_options =
+        at::TensorOptions().dtype(at_type).device(options.device);
     c10::IntArrayRef isizes(sizes);
     return at::zeros(isizes, tensor_options);
   } else {
     c10::IntArrayRef isizes(sizes);
     // Non Variable type guard for empty_cuda call
-    at::AutoNonVariableTypeMode non_variable_type_mode;
-    return at::native::empty_cuda(isizes, tensor_options);
+    at::AutoDispatchBelowADInplaceOrView non_variable_type_mode;
+    return at::native::empty_cuda(
+        isizes, at_type, c10::nullopt, options.device, c10::nullopt);
   }
 }
 
@@ -407,25 +411,28 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
   if (executor_entry && executor_entry->init) {
     {
       // context manager to disable auto grad for `empty_cuda` calls later;
-      at::AutoNonVariableTypeMode non_variable_type_mode;
+      at::AutoDispatchBelowADInplaceOrView non_variable_type_mode;
       // take the short-cut for launch if we see a recorded input set again;
       launch_params = executor_entry->launch_params;
-      for (size_t i = 0; i < executor_entry->output_sizes.size(); i++) {
-        auto tensor_options = at::TensorOptions()
-                                  .dtype(executor_entry->output_types[i])
-                                  .device(options_.device);
+      for (const auto i : c10::irange(executor_entry->output_sizes.size())) {
         alloced_outputs.push_back(at::native::empty_cuda(
-            executor_entry->output_sizes[i], tensor_options));
+            executor_entry->output_sizes[i],
+            executor_entry->output_types[i],
+            c10::nullopt,
+            options_.device,
+            c10::nullopt));
       }
-      for (size_t i = 0; i < executor_entry->empty_buffer_sizes.size(); i++) {
-        auto tensor_options = at::TensorOptions()
-                                  .dtype(executor_entry->empty_buffer_types[i])
-                                  .device(options_.device);
+      for (const auto i :
+           c10::irange(executor_entry->empty_buffer_sizes.size())) {
         global_buffers.empty_buffers.push_back(at::native::empty_cuda(
-            executor_entry->empty_buffer_sizes[i], tensor_options));
+            executor_entry->empty_buffer_sizes[i],
+            executor_entry->empty_buffer_types[i],
+            c10::nullopt,
+            options_.device,
+            c10::nullopt));
       }
     }
-    for (size_t i = 0; i < executor_entry->zero_buffer_sizes.size(); i++) {
+    for (const auto i : c10::irange(executor_entry->zero_buffer_sizes.size())) {
       auto tensor_options = at::TensorOptions()
                                 .dtype(executor_entry->zero_buffer_types[i])
                                 .device(options_.device);

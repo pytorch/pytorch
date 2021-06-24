@@ -35,6 +35,7 @@ static void stateful_conv1d(benchmark::State& state) {
   std::vector<std::vector<torch::jit::IValue>> inputs;
   for (int i = 0; i < 10; ++i) {
     std::vector<torch::jit::IValue> input;
+    // NOLINTNEXTLINE(modernize-use-emplace)
     input.push_back(torch::rand({batch_size, input_channels, width}));
     inputs.push_back(input);
   }
@@ -81,5 +82,6 @@ static void GenerateSizes(benchmark::internal::Benchmark* b) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 BENCHMARK(stateful_conv1d)->Apply(GenerateSizes);
 BENCHMARK_MAIN();

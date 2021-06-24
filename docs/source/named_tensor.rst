@@ -5,9 +5,9 @@
 Named Tensors
 =============
 
-Named Tensors allow users to give explicit names to tensor dimensions. 
-In most cases, operations that take dimension parameters will accept 
-dimension names, avoiding the need to track dimensions by position. 
+Named Tensors allow users to give explicit names to tensor dimensions.
+In most cases, operations that take dimension parameters will accept
+dimension names, avoiding the need to track dimensions by position.
 In addition, named tensors use names to automatically check that APIs
 are being used correctly at runtime, providing extra safety. Names can
 also be used to rearrange dimensions, for example, to support

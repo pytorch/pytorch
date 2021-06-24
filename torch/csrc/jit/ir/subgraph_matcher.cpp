@@ -1,5 +1,7 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/jit_log.h>
+
 #include <regex>
 #include <stack>
 
@@ -40,6 +42,9 @@ class SubgraphMatcher {
   bool matchNodes(const Node* n1, Node* n2);
   bool matchAttributes(const Node* n1, Node* n2);
 
+  static bool isInput(const Value* v);
+  static bool isOutput(const Value* v);
+
   std::unordered_map<const Node*, Node*> nodes_map_;
   std::unordered_map<const Value*, Value*> values_map_;
 
@@ -59,14 +64,21 @@ bool patternGraphIsValid(const Graph& pattern) {
     }
   }
 
-  // Verify that pattern graph returns only one value.
-  const Node* bottom_node = *(pattern.nodes().end());
-  if (bottom_node->inputs().size() != 1) {
-    return false;
-  }
-
   // TODO: Verify that nodes in the pattern don't alias.
   return true;
+}
+
+bool SubgraphMatcher::isInput(const Value* v) {
+  return v->node()->kind() == prim::Param;
+}
+
+bool SubgraphMatcher::isOutput(const Value* v) {
+  for (const Value* output : v->owningGraph()->outputs()) {
+    if (v == output) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -98,8 +110,7 @@ bool SubgraphMatcher::matchValues(const Value* v1, Value* v2) {
   // When V2 is ANCHOR, we're comparing exiting values, and when V1->node is
   // PARAM, we're comparing entering values - in these two cases the number of
   // uses don't need to be the same.
-  if (v1->uses().size() != v2->uses().size() && v2->node() != anchor_ &&
-      v1->node()->kind() != prim::Param) {
+  if (v1->uses().size() != v2->uses().size() && !isOutput(v1) && !isInput(v1)) {
     GRAPH_DEBUG(
         "Values %",
         v1->debugName(),
@@ -142,6 +153,21 @@ bool SubgraphMatcher::matchAttributes(const Node* n1, Node* n2) {
               n1->s(attr_name),
               " != ",
               n2->s(attr_name),
+              " \n",
+              *n1,
+              *n2);
+          return false;
+        }
+        break;
+      case AttributeKind::c:
+        if (n1->c(attr_name) != n2->c(attr_name)) {
+          GRAPH_DEBUG(
+              "Nodes did not match because attribute '",
+              attr_name.toQualString(),
+              "' did not match:",
+              n1->c(attr_name),
+              " != ",
+              n2->c(attr_name),
               " \n",
               *n1,
               *n2);
@@ -271,12 +297,12 @@ bool SubgraphMatcher::matchNodes(const Node* n1, Node* n2) {
   // Add nodes to the map before calling matchValues to avoid infinite
   // recursion.
   nodes_map_[n1] = n2;
-  for (size_t i = 0; i < n1->outputs().size(); i++) {
+  for (const auto i : c10::irange(n1->outputs().size())) {
     if (!matchValues(n1->outputs()[i], n2->outputs()[i])) {
       return false;
     }
   }
-  for (size_t i = 0; i < n1->inputs().size(); i++) {
+  for (const auto i : c10::irange(n1->inputs().size())) {
     if (!matchValues(n1->inputs()[i], n2->inputs()[i])) {
       return false;
     }
@@ -297,11 +323,14 @@ bool SubgraphMatcher::matchesSubgraphFromAnchorNode(Node* anchor) {
   anchor_ = anchor;
 
   const Node* bottom_node = *(pattern_.nodes().end());
-  AT_ASSERT(bottom_node->inputs().size() == 1);
-  bottom_node = bottom_node->input()->node();
+  bottom_node = bottom_node->input(0)->node();
 
   if (!matchNodes(bottom_node, anchor)) {
     return false;
+  }
+
+  for (const Value* output : pattern_.outputs()) {
+    AT_ASSERT(values_map_.count(output));
   }
 
   GRAPH_UPDATE("Pattern matched!\n");

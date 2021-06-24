@@ -9,12 +9,26 @@ struct ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
       const std::shared_ptr<Graph>& graph,
       std::string function_name);
 
-  ExecutionPlan getPlanFor(Stack& stack, size_t remaining_bailout_depth)
+  const ExecutionPlan& getPlanFor(Stack& stack, size_t remaining_bailout_depth)
       override;
   GraphExecutorState getDebugState() override;
   ~ProfilingGraphExecutorImpl() override = default;
 
+  void debugFlushCompilationCache() {
+    std::lock_guard<std::mutex> lock(compile_mutex);
+    pr_.reset();
+    fallback_plan_.reset();
+    profiling_plan_.reset();
+    optimized_plan_.reset();
+    // prevent memory leaks
+    fallback_functions_.clear();
+    remaining_bailout_depth_.reset();
+  }
+
  private:
+  const ExecutionPlan& getOptimizedPlanFor(
+      Stack& stack,
+      size_t remaining_bailout_depth);
   void runProfilingInsensitiveOptimizations(std::shared_ptr<Graph>& graph);
   void runProfilingOptimizations(std::shared_ptr<Graph>& graph);
   void replaceFallbackGraphWithFallbackFunction(Block* b);

@@ -18,6 +18,27 @@ void HashStore::set(const std::string& key, const std::vector<uint8_t>& data) {
   cv_.notify_all();
 }
 
+std::vector<uint8_t> HashStore::compareSet(
+    const std::string& key,
+    const std::vector<uint8_t>& expectedValue,
+    const std::vector<uint8_t>& desiredValue) {
+  std::unique_lock<std::mutex> lock(m_);
+  auto it = map_.find(key);
+  if ((it == map_.end() && expectedValue.empty()) ||
+      (it != map_.end() && it->second == expectedValue)) {
+    // if the key does not exist and currentValue arg is empty or
+    // the key does exist and current value is what is expected, then set it
+    map_[key] = desiredValue;
+    cv_.notify_all();
+    return desiredValue;
+  } else if (it == map_.end()) {
+    // if the key does not exist
+    return expectedValue;
+  }
+  // key exists but current value is not expected
+  return it->second;
+}
+
 std::vector<uint8_t> HashStore::get(const std::string& key) {
   std::unique_lock<std::mutex> lock(m_);
   auto it = map_.find(key);

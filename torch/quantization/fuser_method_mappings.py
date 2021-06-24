@@ -3,6 +3,8 @@ import torch.nn.intrinsic as nni
 
 from typing import Union, Callable, Tuple, Dict, Optional, Type
 
+from .utils import get_combined_dict
+
 def fuse_conv_bn(conv, bn):
     r"""Given the conv and bn modules, fuses them and returns the fused module
 
@@ -48,7 +50,8 @@ def fuse_conv_bn_relu(conv, bn, relu):
 
         >>> m1 = nn.Conv2d(10, 20, 3)
         >>> b1 = nn.BatchNorm2d(20)
-        >>> m2 = fuse_conv_bn(m1, b1)
+        >>> r1 = nn.ReLU(inplace=False)
+        >>> m2 = fuse_conv_bn_relu(m1, b1, r1)
     """
     assert(conv.training == bn.training == relu.training),\
         "Conv and BN both must be in the same mode (train or eval)."
@@ -80,6 +83,27 @@ def fuse_conv_bn_relu(conv, bn, relu):
         else:
             raise NotImplementedError("Cannot fuse eval modules: {}".format((conv, bn, relu)))
 
+def fuse_linear_bn(linear, bn):
+    r"""Given the linear and bn modules, fuses them and returns the fused module
+
+    Args:
+        linear: Module instance of type Linear
+        bn: BatchNorm1d instance that needs to be fused with the linear layer
+
+    Examples::
+
+        >>> m1 = nn.Linear(20, 10)
+        >>> b1 = nn.BatchNorm1d(10)
+        >>> m2 = fuse_linear_bn(m1, b1)
+    """
+    assert(linear.training == bn.training),\
+        "Linear and BN both must be in the same mode (train or eval)."
+
+    if linear.training:
+        raise Exception("Fusing Linear+BatchNorm not yet supported in training.")
+    else:
+        return nn.utils.fusion.fuse_linear_bn_eval(linear, bn)
+
 DEFAULT_OP_LIST_TO_FUSER_METHOD : Dict[Tuple, Union[nn.Sequential, Callable]] = {
     (nn.Conv1d, nn.BatchNorm1d): fuse_conv_bn,
     (nn.Conv1d, nn.BatchNorm1d, nn.ReLU): fuse_conv_bn_relu,
@@ -90,6 +114,7 @@ DEFAULT_OP_LIST_TO_FUSER_METHOD : Dict[Tuple, Union[nn.Sequential, Callable]] = 
     (nn.Conv1d, nn.ReLU): nni.ConvReLU1d,
     (nn.Conv2d, nn.ReLU): nni.ConvReLU2d,
     (nn.Conv3d, nn.ReLU): nni.ConvReLU3d,
+    (nn.Linear, nn.BatchNorm1d): fuse_linear_bn,
     (nn.Linear, nn.ReLU): nni.LinearReLU,
     (nn.BatchNorm2d, nn.ReLU): nni.BNReLU2d,
     (nn.BatchNorm3d, nn.ReLU): nni.BNReLU3d,
@@ -100,10 +125,9 @@ def get_fuser_method(op_list, additional_fuser_method_mapping=None):
     return None if fuser method does not exist
     '''
     if additional_fuser_method_mapping is None:
-        additional_fuser_method_mapping = {}
-    all_mappings = DEFAULT_OP_LIST_TO_FUSER_METHOD.copy()
-    for k, v in additional_fuser_method_mapping:
-        all_mappings[k] = v
+        additional_fuser_method_mapping = dict()
+    all_mappings = get_combined_dict(DEFAULT_OP_LIST_TO_FUSER_METHOD,
+                                     additional_fuser_method_mapping)
     fuser_method = all_mappings.get(op_list, None)
     assert fuser_method is not None, "did not find fuser method for: {} ".format(op_list)
     return fuser_method

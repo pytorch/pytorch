@@ -7,6 +7,7 @@ namespace {
 const float* getTensorDataPtr(const Tensor& tensor, int t, int n) {
   const auto dims = tensor.sizes();
   CAFFE_ENFORCE_EQ(dims.size(), 3);
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   int offset = (t * dims[1] + n) * dims[2];
   CAFFE_ENFORCE_LT(offset, tensor.numel());
   return tensor.template data<float>() + offset;
@@ -43,6 +44,7 @@ bool CTCBeamSearchDecoderOp<CPUContext>::RunOnDevice() {
   for (int32_t i = 0; i < batch_size; ++i) {
     const int32_t activation_length =
         (seq_len_data) ? seq_len_data[i] : max_activation_length;
+    // NOLINTNEXTLINE(modernize-use-transparent-functors)
     std::multimap<float, vector<int32_t>, std::greater<float>> A_next_inv;
     // For a given time step, Pb maps prefixes to the probability of all
     // candidate sequences that end in a blank and Pnb maps prefixes to the
@@ -136,6 +138,7 @@ bool CTCBeamSearchDecoderOp<CPUContext>::RunOnDevice() {
   auto* values =
       Output(VALUES, vector<int64_t>{values_cache_size}, at::dtype<int>());
   int* values_data = values->mutable_data<int>();
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (int i = 0; i < values_cache.size(); ++i) {
     values_data[i] = values_cache.at(i);
   }
@@ -144,7 +147,9 @@ bool CTCBeamSearchDecoderOp<CPUContext>::RunOnDevice() {
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(CTCBeamSearchDecoder, CTCBeamSearchDecoderOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CTCBeamSearchDecoder)
     .NumInputs(1, 2)
     .NumOutputs(2, 3)
@@ -183,6 +188,7 @@ OPERATOR_SCHEMA(CTCBeamSearchDecoder)
         "Probability vector, size (total_decoded_outputs). "
         "Each index stores final output probability of its corresponding batch item.")
     .InheritOnnxSchema();
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(CTCBeamSearchDecoder);
 
 } // namespace caffe2

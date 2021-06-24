@@ -3,6 +3,7 @@
 namespace caffe2 {
 namespace {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(GatherRangesToDense)
     .NumInputs(2, 3)
     .NumOutputs(1, INT_MAX)
@@ -91,6 +92,7 @@ are sorted by the corresponding KEY.
       }
       CAFFE_ENFORCE_GT(lengths.size(), 0, "lengths should be non-empty.");
       std::vector<TensorShape> out(lengths.size());
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int i = 0; i < lengths.size(); ++i) {
         out[i].set_data_type(in[0].data_type());
         out[i].add_dims(in[1].dims(0));
@@ -99,7 +101,9 @@ are sorted by the corresponding KEY.
       return out;
     });
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(GatherRangesToDense, GatherRangesToDenseOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(GatherRangesToDense);
 
 } // namespace

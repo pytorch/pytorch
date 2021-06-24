@@ -14,7 +14,7 @@ endif()
 ##############################################################################
 
 ##############################################################################
-# (1) MSVC - unsupported 
+# (1) MSVC - unsupported
 ##############################################################################
 
 if(MSVC)
@@ -27,7 +27,7 @@ endif()
 # (2) Anything but x86, x86-64, ARM, ARM64 - unsupported
 ##############################################################################
 if(CMAKE_SYSTEM_PROCESSOR)
-  if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(i686|x86_64|armv5te|armv7-a|armv7l|aarch64)$")
+  if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(i686|x86_64|armv5te|armv7-a|armv7l|arm64|aarch64)$")
     message(WARNING "NNPACK is not supported on ${CMAKE_SYSTEM_PROCESSOR} processors. "
       "The only supported architectures are x86, x86-64, ARM, and ARM64. "
       "Turn this warning off by USE_NNPACK=OFF.")

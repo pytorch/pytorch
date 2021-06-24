@@ -21,10 +21,10 @@ TH_API c10::Allocator* getTHDefaultAllocator(void);
 // the non-file descriptor constructor
 enum WithFd { WITH_FD };
 
-class CAFFE2_API THMapAllocator {
+class TORCH_API THMapAllocator {
  public:
-  THMapAllocator(const char *filename, int flags, size_t size);
-  THMapAllocator(WithFd, const char *filename, int fd, int flags, size_t size);
+  THMapAllocator(std::string filename, int flags, size_t size);
+  THMapAllocator(WithFd, std::string filename, int fd, int flags, size_t size);
   THMapAllocator(const THMapAllocator&) = delete;
   THMapAllocator& operator=(const THMapAllocator&) = delete;
   THMapAllocator(THMapAllocator&&) = delete;
@@ -45,7 +45,7 @@ class CAFFE2_API THMapAllocator {
   virtual void* data() const { return base_ptr_; }
 
   static THMapAllocator* fromDataPtr(const at::DataPtr&);
-  static at::DataPtr makeDataPtr(const char *filename, int flags, size_t size, size_t* actual_size_out);
+  static at::DataPtr makeDataPtr(std::string filename, int flags, size_t size, size_t* actual_size_out);
   static at::DataPtr makeDataPtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out);
 
   // Closes the data.  Helps us avoid destructor shenanigans
@@ -71,11 +71,11 @@ protected:
 };
 
 // Base-from-member idiom
-struct CAFFE2_API THRefcountedMapAllocatorArgCheck {
+struct TORCH_API THRefcountedMapAllocatorArgCheck {
   THRefcountedMapAllocatorArgCheck(int flags);
 };
 
-class CAFFE2_API THRefcountedMapAllocator
+class TORCH_API THRefcountedMapAllocator
     : private THRefcountedMapAllocatorArgCheck,
       public THMapAllocator {
  public:

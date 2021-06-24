@@ -48,6 +48,8 @@ bool FindOp<CUDAContext>::DoRunWithType() {
       needles_data,
       res_data,
       missing_value_);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 

@@ -47,7 +47,7 @@ template <>
 bool AccuracyOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(PREDICTION);
   auto& label = Input(LABEL);
-  
+
   CAFFE_ENFORCE_EQ(X.dim(), 2);
   int N = X.dim32(0);
   int D = X.dim32(1);
@@ -62,10 +62,14 @@ bool AccuracyOp<float, CUDAContext>::RunOnDevice() {
       0,
       context_.cuda_stream()>>>(
       N, D, top_k_, X.data<float>(), label.data<int>(), Ydata);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   // This is going to be executed only in one single kernel. Not very beautiful,
   // but probably we have to do this?
   AccuracyDivideKernel<<<1, 1, 0, context_.cuda_stream()>>>(
       N, Ydata);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 

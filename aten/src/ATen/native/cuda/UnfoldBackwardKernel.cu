@@ -45,7 +45,7 @@ static void _launch_unfold_backward_kernel(int total_n_elems, func_t f) {
   auto stream = at::cuda::getCurrentCUDAStream();
   _unfold_backward_elementwise_kernel<n_threads, n_elems_per_thread, func_t>
     <<<grid, block, 0, stream>>>(total_n_elems, f);
-  TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <typename scalar_t>

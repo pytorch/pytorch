@@ -1,7 +1,9 @@
 #include <torch/csrc/jit/serialization/python_print.h>
+
 #include <ATen/core/qualified_name.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/versioned_symbols.h>
@@ -9,6 +11,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/resource_guard.h>
+#include <torch/csrc/jit/runtime/calculate_necessary_args.h>
 
 #include <algorithm>
 
@@ -44,6 +47,8 @@ const static std::unordered_set<std::string> reserved_names = {
     "getattr",
     "inf",
     "nan",
+    "infj",
+    "nanj",
     "ops",
     "__torch__",
     // the python keywords
@@ -309,12 +314,12 @@ struct PythonPrintImpl {
     // because it doesn't hash any information about the tensors.
     // We will probably need to optimize this at some point using hashing.
     if (val.isTensor()) {
-      auto t = val.toTensor();
+      auto& t = val.toTensor();
       for (size_t i = 0; i < constant_table_.size(); ++i) {
         if (!constant_table_[i].isTensor()) {
           continue;
         }
-        auto t2 = constant_table_[i].toTensor();
+        auto& t2 = constant_table_[i].toTensor();
         if (t.options().type_equal(t2.options()) && t.equal(t2)) {
           return i;
         }
@@ -352,6 +357,7 @@ struct PythonPrintImpl {
       std::unordered_set<std::string>& used) {
     std::string name = candidate;
     while (used.count(name) || reserved_names.count(name)) {
+      // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
       name = candidate + c10::to_string(next_id[name]++);
     }
     used.insert(name);
@@ -404,8 +410,9 @@ struct PythonPrintImpl {
     }
     TORCH_INTERNAL_ASSERT(
         false,
-        "Value was not present in either expressions"
-        " table or ident refs table");
+        "Value (debug name: \"",
+        v->debugName(),
+        "\") was not present in either expressions table or ident refs table");
   }
   void assignValue(Value* v, const std::string& s) {
     ident_refs_[v] = s;
@@ -599,6 +606,7 @@ struct PythonPrintImpl {
   }
 
   bool isLongLine(const std::string& str) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     return str.size() + level * 2 >= 40;
   }
 
@@ -822,14 +830,14 @@ struct PythonPrintImpl {
         body_ << "):\n";
         printBody(graph->block());
       } break;
-      case prim::ModuleDictIndex: {
-        const auto dict = node->inputs().at(0);
+      case prim::ModuleContainerIndex: {
+        const auto container = node->inputs().at(0);
         const auto key = node->inputs().at(1);
         const auto out = node->outputs().at(0);
         assignValuesToTheirUniqueNames(out);
         indent();
         body_ << useOf(out) << " : " << out->type()->annotation_str() << " = "
-              << useOf(dict) << "[" << useOf(key) << "]\n";
+              << useOf(container) << "[" << useOf(key) << "]\n";
       } break;
       default:
         auto ss = std::make_shared<TaggedStringStream>(&source_range_stack_);
@@ -858,6 +866,7 @@ struct PythonPrintImpl {
       if (val.isString()) {
         const auto maxASCII = 0x7fu;
         for (auto& c : val.toStringRef()) {
+          // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
           if (c > maxASCII) {
             hasNonASCII = true;
             return true;
@@ -873,15 +882,16 @@ struct PythonPrintImpl {
 
   void printConstant(TaggedStringStream& stmt, const IValue& v) {
     const auto customFormatter = [&](std::ostream& ss, const IValue& v) {
-      if (v.isTensor() || containsNonASCIIString(v)) {
+      if (v.isTensor() || containsNonASCIIString(v) || v.isObject()) {
+        TORCH_INTERNAL_ASSERT(!v.type()->is_module());
         ss << "CONSTANTS.c" << getOrAddConstant(v);
         return true;
       }
 
-      if (v.isTuple() && v.type()->expect<TupleType>()->schema()) {
+      if (v.isTuple() && v.type()->expectRef<TupleType>().schema()) {
         // print the namedtuple constructor and let rest of tuple printing
         // continue
-        ss << v.type()->expect<TupleType>()->annotation_str(type_printer_);
+        ss << v.type()->expectRef<TupleType>().annotation_str(type_printer_);
       }
       return false;
     };
@@ -979,7 +989,7 @@ struct PythonPrintImpl {
       } break;
       case prim::TupleConstruct: {
         if (auto qualname =
-                node->output()->type()->expect<TupleType>()->name()) {
+                node->output()->type()->expectRef<TupleType>().name()) {
           stmt << node->output()->type()->annotation_str(type_printer_);
         }
         printValueList(
@@ -1149,10 +1159,14 @@ struct PythonPrintImpl {
         printOpName(stmt, node->kind());
         const FunctionSchema& schema = node->schema();
         stmt << "(";
-        for (size_t i = 0; i < node->inputs().size(); ++i) {
-          if (i > 0) {
+        // calculate how many args are specified.
+        // see (https://github.com/pytorch/pytorch/pull/56079) for more
+        // details.
+        size_t necessary_args =
+            CalculateNecessaryArgs(schema.arguments(), node->inputs());
+        for (size_t i = 0; i < necessary_args; ++i) {
+          if (i > 0)
             stmt << ", ";
-          }
           auto v = useOf(node->inputs().at(i));
           // print the kwarg name if it is a kwarg only argument.
           if (i < schema.arguments().size()) {
@@ -1255,6 +1269,7 @@ struct PythonPrintImpl {
     body_ << "def " << func.name() << "(";
     auto param_it = graph.inputs().begin();
     for (const Argument& arg : schema.arguments()) {
+      registerClassDependencies(arg.type());
       std::string arg_name = genName(arg.name());
       if (param_it == graph.inputs().begin()) {
         // the first argument may omit its type when it is implied by context
@@ -1273,9 +1288,10 @@ struct PythonPrintImpl {
       assignValue(*param_it++, arg_name);
     }
 
-    body_ << ") -> "
-          << schema.returns().at(0).type()->annotation_str(type_printer_)
-          << ":\n";
+    const auto& returnType = schema.returns().at(0).type();
+    body_ << ") -> " << returnType->annotation_str(type_printer_) << ":\n";
+    registerClassDependencies(returnType);
+
     printBody(graph.block());
   }
 
@@ -1322,7 +1338,7 @@ struct PythonPrintImpl {
         std::vector<std::string> buffers;
         // Populate the __parameters__ field. This tells the importer which
         // attributes are parameters.
-        for (size_t i = 0; i < numAttrs; i++) {
+        for (const auto i : c10::irange(numAttrs)) {
           if (classType->is_parameter(i)) {
             params.push_back(classType->getAttributeName(i));
           }
@@ -1336,18 +1352,35 @@ struct PythonPrintImpl {
           body_ << "\"" << param << "\", ";
         }
         body_ << "]\n";
-#ifndef FBCODE_CAFFE2
-        // Note: Forward compat gated. TODO: @voznesenskym to remove when ready.
+
         indent();
         body_ << "__buffers__ = [";
         for (const auto& buffer : buffers) {
           body_ << "\"" << buffer << "\", ";
         }
         body_ << "]\n";
-#endif
+        auto forwardPreHooks = classType->getForwardPreHooks();
+        if (forwardPreHooks.size() > 0) {
+          indent();
+          body_ << "__forward_pre_hooks__ = [";
+          for (const auto& pre_hook : forwardPreHooks) {
+            body_ << "\"" << pre_hook->name() << "\", ";
+          }
+          body_ << "]\n";
+        }
+
+        auto forwardHooks = classType->getForwardHooks();
+        if (forwardHooks.size() > 0) {
+          indent();
+          body_ << "__forward_hooks__ = [";
+          for (const auto& hook : forwardHooks) {
+            body_ << "\"" << hook->name() << "\", ";
+          }
+          body_ << "]\n";
+        }
       }
 
-      for (size_t i = 0; i < numAttrs; i++) {
+      for (const auto i : c10::irange(numAttrs)) {
         const auto& name = classType->getAttributeName(i);
         const auto& type = classType->getAttribute(i);
         registerClassDependencies(type);
@@ -1375,7 +1408,7 @@ struct PythonPrintImpl {
       }
 
       size_t numConstants = classType->numConstants();
-      for (size_t i = 0; i < numConstants; i++) {
+      for (const auto i : c10::irange(numConstants)) {
         const auto& name = classType->getConstantName(i);
         IValue v = classType->getConstant(i);
 
@@ -1390,6 +1423,19 @@ struct PythonPrintImpl {
       // TODO fields
       for (auto& method : classType->methods()) {
         printFunction(*method);
+      }
+      std::set<std::string> already_printed;
+      for (auto& hook : classType->getForwardHooks()) {
+        if (already_printed.count(hook->name()) == 0) {
+          already_printed.insert(hook->name());
+          printFunction(*hook);
+        }
+      }
+      for (auto& pre_hook : classType->getForwardPreHooks()) {
+        if (already_printed.count(pre_hook->name()) == 0) {
+          already_printed.insert(pre_hook->name());
+          printFunction(*pre_hook);
+        }
       }
     }
   }
@@ -1429,10 +1475,10 @@ struct PythonPrintImpl {
               method.arguments().at(0).name() == "self");
           for (const Argument& arg :
                at::ArrayRef<Argument>(method.arguments()).slice(1)) {
-            auto type = arg.type();
-            registerClassDependencies(type);
+            const auto& arg_type = arg.type();
+            registerClassDependencies(arg_type);
             body_ << ", " << arg.name() << ": "
-                  << type->annotation_str(type_printer_);
+                  << arg_type->annotation_str(type_printer_);
           }
           auto return_type = method.returns().at(0).type();
           registerClassDependencies(return_type);
@@ -1463,7 +1509,7 @@ struct PythonPrintImpl {
     }
   }
 
-  ~PythonPrintImpl() {}
+  ~PythonPrintImpl() = default;
 
   TaggedStringStream body_;
   // When printing this node, is it safe to write it inline (i.e. without

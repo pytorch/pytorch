@@ -7,6 +7,7 @@ namespace caffe2 {
 
 // Input: X, rois, dY (aka "gradOutput");
 // Output: dX (aka "gradInput")
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RoIAlignRotatedGradient)
     .NumInputs(3)
     .NumOutputs(1)
@@ -30,6 +31,7 @@ class GetRoIAlignRotatedGradient : public GradientMakerBase {
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(RoIAlignRotated, GetRoIAlignRotatedGradient);
 
 } // namespace caffe2

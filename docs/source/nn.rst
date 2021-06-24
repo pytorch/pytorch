@@ -4,7 +4,7 @@
 torch.nn
 ===================================
 
-These are the basic building block for graphs
+These are the basic building blocks for graphs:
 
 .. contents:: torch.nn
     :depth: 2
@@ -22,6 +22,7 @@ These are the basic building block for graphs
 
     ~parameter.Parameter
     ~parameter.UninitializedParameter
+    ~parameter.UninitializedBuffer
 
 Containers
 ----------------------------------
@@ -37,6 +38,18 @@ Containers
     ModuleDict
     ParameterList
     ParameterDict
+
+Global Hooks For Module
+
+.. currentmodule:: torch.nn.modules.module
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    register_module_forward_pre_hook
+    register_module_forward_hook
+    register_module_backward_hook
+    register_module_full_backward_hook
 
 .. currentmodule:: torch
 
@@ -54,6 +67,12 @@ Convolution Layers
     nn.ConvTranspose1d
     nn.ConvTranspose2d
     nn.ConvTranspose3d
+    nn.LazyConv1d
+    nn.LazyConv2d
+    nn.LazyConv3d
+    nn.LazyConvTranspose1d
+    nn.LazyConvTranspose2d
+    nn.LazyConvTranspose3d
     nn.Unfold
     nn.Fold
 
@@ -75,6 +94,7 @@ Pooling layers
     nn.AvgPool2d
     nn.AvgPool3d
     nn.FractionalMaxPool2d
+    nn.FractionalMaxPool3d
     nn.LPPool1d
     nn.LPPool2d
     nn.AdaptiveMaxPool1d
@@ -94,6 +114,7 @@ Padding Layers
 
     nn.ReflectionPad1d
     nn.ReflectionPad2d
+    nn.ReflectionPad3d
     nn.ReplicationPad1d
     nn.ReplicationPad2d
     nn.ReplicationPad3d
@@ -127,6 +148,7 @@ Non-linear Activations (weighted sum, nonlinearity)
     nn.GELU
     nn.Sigmoid
     nn.SiLU
+    nn.Mish
     nn.Softplus
     nn.Softshrink
     nn.Softsign
@@ -159,6 +181,9 @@ Normalization Layers
     nn.BatchNorm1d
     nn.BatchNorm2d
     nn.BatchNorm3d
+    nn.LazyBatchNorm1d
+    nn.LazyBatchNorm2d
+    nn.LazyBatchNorm3d
     nn.GroupNorm
     nn.SyncBatchNorm
     nn.InstanceNorm1d
@@ -259,12 +284,14 @@ Loss Functions
     nn.CTCLoss
     nn.NLLLoss
     nn.PoissonNLLLoss
+    nn.GaussianNLLLoss
     nn.KLDivLoss
     nn.BCELoss
     nn.BCEWithLogitsLoss
     nn.MarginRankingLoss
     nn.HingeEmbeddingLoss
     nn.MultiLabelMarginLoss
+    nn.HuberLoss
     nn.SmoothL1Loss
     nn.SoftMarginLoss
     nn.MultiLabelSoftMarginLoss
@@ -282,6 +309,7 @@ Vision Layers
     :template: classtemplate.rst
 
     nn.PixelShuffle
+    nn.PixelUnshuffle
     nn.Upsample
     nn.UpsamplingNearest2d
     nn.UpsamplingBilinear2d
@@ -321,12 +349,6 @@ From the ``torch.nn.utils`` module
     clip_grad_value_
     parameters_to_vector
     vector_to_parameters
-
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-    :template: classtemplate.rst
-
     prune.BasePruningMethod
 
 .. autosummary::
@@ -353,6 +375,40 @@ From the ``torch.nn.utils`` module
     remove_weight_norm
     spectral_norm
     remove_spectral_norm
+    skip_init
+
+Parametrizations implemented using the new parametrization functionality
+in :func:`torch.nn.utils.parameterize.register_parametrization`.
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    parametrizations.spectral_norm
+
+Utility functions to parametrize Tensors on existing Modules.
+Note that these functions can be used to parametrize a given Parameter
+or Buffer given a specific function that maps from an input space to the
+parametrized space. They are not parameterizations that would transform
+an object into a parameter. See the
+`Parametrizations <https://pytorch.org/tutorials/advanced/torch_script_custom_ops.html>`__ tutorial
+for more information on how to implement your own parametrizations.
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    parametrize.register_parametrization
+    parametrize.remove_parametrizations
+    parametrize.cached
+    parametrize.is_parametrized
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    parametrize.ParametrizationList
 
 Utility functions in other modules
 
@@ -366,6 +422,11 @@ Utility functions in other modules
     nn.utils.rnn.pad_packed_sequence
     nn.utils.rnn.pad_sequence
     nn.utils.rnn.pack_sequence
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
 
     nn.Flatten
     nn.Unflatten

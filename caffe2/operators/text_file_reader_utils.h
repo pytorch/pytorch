@@ -9,13 +9,13 @@
 
 namespace caffe2 {
 
-struct CAFFE2_API Token {
+struct TORCH_API Token {
   int startDelimId;
   const char* start;
   const char* end;
 };
 
-class CAFFE2_API TokenizedString {
+class TORCH_API TokenizedString {
   // holder for strings that have been modified
   std::vector<std::shared_ptr<std::string>> modifiedStrings_;
   std::vector<Token> tokens_;
@@ -31,7 +31,7 @@ class CAFFE2_API TokenizedString {
   friend class Tokenizer;
 };
 
-class CAFFE2_API Tokenizer {
+class TORCH_API Tokenizer {
  private:
   int startDelimId_;
   // state of the tokenizer
@@ -48,18 +48,18 @@ class CAFFE2_API Tokenizer {
   void next(char* start, char* end, TokenizedString& tokenized);
 };
 
-struct CAFFE2_API CharRange {
+struct TORCH_API CharRange {
   char* start;
   char* end;
 };
 
-struct CAFFE2_API StringProvider {
+struct TORCH_API StringProvider {
   virtual void operator()(CharRange&) = 0;
   virtual void reset() = 0;
   virtual ~StringProvider() {}
 };
 
-class CAFFE2_API BufferedTokenizer {
+class TORCH_API BufferedTokenizer {
  public:
   BufferedTokenizer(const Tokenizer& t, StringProvider* p, int numPasses = 1)
       : provider_(p), tokenizer_(t), tokenIndex_(0), numPasses_(numPasses) {}
@@ -104,7 +104,7 @@ class CAFFE2_API BufferedTokenizer {
   int pass_{0};
 };
 
-class CAFFE2_API FileReader : public StringProvider {
+class TORCH_API FileReader : public StringProvider {
  public:
   explicit FileReader(const std::string& path, size_t bufferSize = 65536);
   ~FileReader();

@@ -33,7 +33,7 @@ class HasRand : public IRVisitor {
 template <typename Node>
 class NodeFinder : public IRVisitor {
  public:
-  virtual void visit(const Node* v) override {
+  void visit(const Node* v) override {
     nodes.push_back((Node*)v);
     IRVisitor::visit(v);
   }
@@ -55,7 +55,7 @@ class NodeFinder : public IRVisitor {
 
 class VarFinder : public IRVisitor {
  public:
-  virtual void visit(const Var* v) override {
+  void visit(const Var* v) override {
     vars_.insert(v);
     IRVisitor::visit(v);
   }
@@ -110,6 +110,59 @@ class WritesToBuf : public IRVisitor {
 
   const Buf* target_;
   std::vector<const Stmt*> writes_;
+};
+
+class StmtsReadingBuf : public IRVisitor {
+ public:
+  StmtsReadingBuf(const Buf* target) : target_(target) {}
+
+  std::vector<const Stmt*> reads() {
+    return reads_;
+  }
+
+  static std::vector<const Stmt*> find(Stmt* s, const Buf* b) {
+    StmtsReadingBuf finder(b);
+    s->accept(&finder);
+    return finder.reads();
+  }
+
+ private:
+  bool readsBuffer(const Stmt* s) {
+    auto loads = NodeFinder<Load>::find(s);
+    for (auto l : loads) {
+      if (l->buf() == target_) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  void visit(const Store* v) override {
+    if (readsBuffer(v)) {
+      reads_.push_back(v);
+    }
+  }
+
+  void visit(const Let* v) override {
+    if (readsBuffer(v)) {
+      reads_.push_back(v);
+    }
+  }
+
+  void visit(const Cond* v) override {
+    if (readsBuffer(v)) {
+      reads_.push_back(v);
+    }
+  }
+
+  void visit(const AtomicAdd* v) override {
+    if (readsBuffer(v)) {
+      reads_.push_back(v);
+    }
+  }
+
+  const Buf* target_;
+  std::vector<const Stmt*> reads_;
 };
 
 // Traverses the IR to determine if a particular Var is modified within it.
@@ -175,20 +228,21 @@ class CreateBufferMap : public IRVisitor {
  private:
   void visit(const Store* v) override {
     auto load_node = dynamic_cast<const Load*>(v->value());
-    auto call_node = dynamic_cast<const FunctionCall*>(v->value());
-    if (load_node || call_node) {
-      TORCH_INTERNAL_ASSERT(!(load_node && call_node));
-      auto t_buf = load_node ? load_node->buf() : call_node->tensor()->buf();
-      if (load_node) {
-        map_input_to_tensor_bufs_.emplace(t_buf->name_hint(), v->buf());
-      } else {
-        map_input_to_tensor_bufs_.emplace(v->buf()->name_hint(), t_buf);
-      }
+    if (load_node) {
+      auto t_buf = load_node->buf();
+      map_input_to_tensor_bufs_.emplace(t_buf->name_hint(), v->buf());
+    } else {
+      auto add_node = dynamic_cast<const Add*>(v->value());
+      auto mul_node = dynamic_cast<const Mul*>(v->value());
+      // This means for now, v->value() can be Add or Mul
+      TORCH_INTERNAL_ASSERT((add_node || mul_node));
+      map_input_to_tensor_bufs_.emplace(v->buf()->name_hint(), v->buf());
     }
     v->value()->accept(this);
   }
   std::unordered_map<std::string, const Buf*> map_input_to_tensor_bufs_;
 };
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

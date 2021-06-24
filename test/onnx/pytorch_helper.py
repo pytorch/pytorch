@@ -23,7 +23,7 @@ def PyTorchModule(helper, model, sample_arguments, caffe2_inputs, prefix_name=No
     """
     Embed an ONNX-exportable PyTorch Model into a Caffe2 model being built.
 
-    Arguments:
+    Args:
         helper (caffe2.python.core.ModelHelder): the model helper where
             this imported network should be inserted
         model (torch.nn.Module): the model to be exported
@@ -48,7 +48,7 @@ def PyTorchModule(helper, model, sample_arguments, caffe2_inputs, prefix_name=No
     """
     if prefix_name is None:
         global _next_idx
-        prefix_name = 'pytorch_import_' + str(_next_idx) + '/'
+        prefix_name = "pytorch_import_" + str(_next_idx) + "/"
         _next_idx += 1
 
     # TODO: handle the case where model cannot be exported
@@ -65,7 +65,7 @@ def PyTorchModule(helper, model, sample_arguments, caffe2_inputs, prefix_name=No
         onnx_model.graph.input) if x.name not in initialized}
 
     if(len(uninitialized_inputs) != len(caffe2_inputs)):
-        raise ValueError('Expected {} inputs but found {}'.format(
+        raise ValueError("Expected {} inputs but found {}".format(
             len(uninitialized_inputs), len(caffe2_inputs)))
 
     def remap_blob_name(name):
@@ -74,10 +74,10 @@ def PyTorchModule(helper, model, sample_arguments, caffe2_inputs, prefix_name=No
             return str(caffe2_inputs[idx])
         return prefix_name + name
 
-    predict_net = Net(predict_net).Clone('anon', _FakeDict(remap_blob_name))
+    predict_net = Net(predict_net).Clone("anon", _FakeDict(remap_blob_name))
     helper.net.AppendNet(predict_net)
 
-    init_net = Net(init_net).Clone('anon', _FakeDict(remap_blob_name))
+    init_net = Net(init_net).Clone("anon", _FakeDict(remap_blob_name))
     helper.param_init_net.AppendNet(init_net)
 
     results = tuple([BlobReference(remap_blob_name(x.name), helper.net)
