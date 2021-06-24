@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.nn.intrinsic as nni
 from torch.fx import GraphModule
 from torch.fx.graph import Node
 
@@ -205,12 +206,13 @@ weight_equalization_observer = _WeightEqualizationObserver.with_args(
 default_equalization_qconfig = EqualizationQConfig(input_activation=input_equalization_observer,
                                                    weight=weight_equalization_observer)
 
+
 def node_supports_equalization(node: Node, modules) -> bool:
     """ Checks if the current node supports equalization
     Currently we only support nn.Linear and F.Linear layers
     """
     if node.op == 'call_module':
-        return isinstance(modules[node.target], nn.Linear)
+        return isinstance(modules[node.target], nn.Linear) or isinstance(modules[node.target], nni.LinearReLU)
     elif node.op == 'call_function':
         return node.target == F.linear
     return False
@@ -373,17 +375,22 @@ def scale_weight_node(
         next_equalization_scale: Next node's calculated equalization scale if
            the following node needs to be equalized, 1 otherwise
     """
-    assert(isinstance(node.target, str))
+    if isinstance(modules[str(node.target)], nni.LinearReLU):
+        op_module = modules[str(node.target)][0]    # type: ignore[index]
+        assert(isinstance(op_module, nn.Linear))
+    else:
+        op_module = modules[str(node.target)]
+        assert(isinstance(modules[str(node.target)], nn.Linear))
 
     # Scale the weights for input-weight equalization
     # If the following layer needs to be equalized then we will multiply its scale
-    weight = modules[node.target].weight
+    weight = op_module.weight
     assert(isinstance(weight, torch.Tensor))
 
     scaled_weight = torch.mul(weight, torch.reciprocal(equalization_scale))
 
     if next_equalization_scale is None:
-        modules[node.target].weight = nn.Parameter(scaled_weight)
+        op_module.weight = nn.Parameter(scaled_weight)
         return
 
     # Multiply the weights row wise by the next equalization scale
@@ -391,14 +398,14 @@ def scale_weight_node(
     new_shape[0] = weight.size(0)
     scaled_weight = torch.mul(scaled_weight, next_equalization_scale.view(new_shape))
 
-    modules[node.target].weight = nn.Parameter(scaled_weight)
+    op_module.weight = nn.Parameter(scaled_weight)
 
     # Multiply the bias element wise by the next equalization scale
-    bias = modules[node.target].bias
+    bias = op_module.bias
     assert(isinstance(bias, torch.Tensor))
 
     scaled_bias = torch.mul(bias, next_equalization_scale)
-    modules[node.target].bias = nn.Parameter(scaled_bias)
+    op_module.bias = nn.Parameter(scaled_bias)
 
 def scale_weight_functional(
     op_node: Node,
@@ -499,7 +506,12 @@ def update_obs_for_equalization(model: GraphModule, modules: Dict[str, nn.Module
             if op_node.op == 'call_module':
                 # Calibrate the weight equalization observer since it has just
                 # been created
-                weight_eq_obs(modules[str(op_node.target)].weight)
+                if isinstance(modules[str(op_node.target)], nni.LinearReLU):
+                    linear_node = modules[str(op_node.target)][0]   # type: ignore[index]
+                    assert(isinstance(linear_node, nn.Linear))
+                    weight_eq_obs(linear_node.weight)
+                else:
+                    weight_eq_obs(modules[str(op_node.target)].weight)
 
             # Calculate and set the equalization scale values
             equalization_scale = calculate_equalization_scale(input_eq_obs, weight_eq_obs)

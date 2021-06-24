@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.nn.intrinsic as nni
+import torch.nn.intrinsic.quantized as nniq
 import torch.nn.quantized as nnq
 from torch.quantization import default_qconfig
 from torch.quantization.observer import MinMaxObserver, PerChannelMinMaxObserver
@@ -23,6 +25,7 @@ from torch.testing._internal.common_quantization import (
     TwoLayerFunctionalLinearModel,
     FunctionalLinearAddModel,
     skipIfNoFBGEMM,
+    LinearReluModel,
 )
 
 # Standard Libraries
@@ -36,12 +39,14 @@ from hypothesis import strategies as st
 
 qconfig_dict = {"": None,
                 "object_type": [(nn.Linear, default_qconfig),
-                                (F.linear, default_qconfig)]}
+                                (F.linear, default_qconfig),
+                                (nni.LinearReLU, default_qconfig)]}
 
 default_equalization_qconfig_dict = {
     "": None,
     "object_type": [(nn.Linear, default_equalization_qconfig),
-                    (F.linear, default_equalization_qconfig)]
+                    (F.linear, default_equalization_qconfig),
+                    (nni.LinearReLU, default_equalization_qconfig)]
 }
 
 
@@ -184,7 +189,8 @@ class TestEqualizeFx(QuantizationTestCase):
         tests = [(SingleLayerLinearModel, linear_node_occurrence),
                  (TwoLayerLinearModel, linear2_node_occurrence),
                  (TwoLayerFunctionalLinearModel, functionalLinear_node_occurrence),
-                 (FunctionalLinearAddModel, functionalLinear2Add_node_occurrence)]
+                 (FunctionalLinearAddModel, functionalLinear2Add_node_occurrence),
+                 (LinearReluModel, linear_node_occurrence)]
 
         for (M, node_occurrence) in tests:
             m = M().eval()
@@ -198,7 +204,8 @@ class TestEqualizeFx(QuantizationTestCase):
         """
 
         tests = [SingleLayerLinearModel, LinearAddModel, TwoLayerLinearModel,
-                 SingleLayerFunctionalLinearModel, FunctionalLinearAddModel, TwoLayerFunctionalLinearModel]
+                 SingleLayerFunctionalLinearModel, FunctionalLinearAddModel, TwoLayerFunctionalLinearModel,
+                 LinearReluModel]
 
         x = torch.rand((5, 5))
         for M in tests:
@@ -486,12 +493,20 @@ class TestEqualizeFx(QuantizationTestCase):
             ns.call_method('dequantize')
         ]
 
+        linearRelu_node_list = [
+            ns.call_function(torch.mul),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_module(nniq.LinearReLU),
+            ns.call_method('dequantize')
+        ]
+
         tests = [(SingleLayerLinearModel, linear_node_list),
                  (LinearAddModel, linearAdd_node_list),
                  (TwoLayerLinearModel, linear2_node_list),
                  (SingleLayerFunctionalLinearModel, functionalLinear_node_list),
                  (FunctionalLinearAddModel, functionalLinearAdd_node_list),
-                 (TwoLayerFunctionalLinearModel, functionalLinear2_node_list)]
+                 (TwoLayerFunctionalLinearModel, functionalLinear2_node_list),
+                 (LinearReluModel, linearRelu_node_list)]
 
         torch.manual_seed(0)
         x = torch.rand((5, 5))
