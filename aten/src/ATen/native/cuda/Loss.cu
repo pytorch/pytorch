@@ -547,11 +547,6 @@ void nll_loss_backward_out_cuda_template(
         input.scalar_type(),
         "nll_loss_backward_reduce_cuda_kernel_2d",
         [&] {
-          scalar_t* weight_data = nullptr;
-          if (weight.defined()) {
-            auto weight_ = weight.contiguous();
-            weight_data = weight_.data_ptr<scalar_t>();
-          }
           nll_loss_backward_reduce_cuda_kernel_2d<scalar_t>
               <<<1, NLL_LOSS_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
                   grad_input.data_ptr<scalar_t>(),
