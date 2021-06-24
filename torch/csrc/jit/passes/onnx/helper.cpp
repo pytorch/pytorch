@@ -168,6 +168,7 @@ Node* transformToONNXConcatNode(
     Node* lc_node,
     bool need_new_input,
     int opset_version) {
+
   // ListConstruct Int[] output case, we need to transform to ONNX
   // Concat to ensure the output is a single tensor(dynamic) type in
   // order to be consumed as inputs
@@ -186,7 +187,6 @@ Node* transformToONNXConcatNode(
   Node* concat_node = need_new_input
       ? g->insertNode(g->create(onnx::Concat, 1))
       : g->create(onnx::Concat, 1)->insertBefore(lc_node);
-
   concat_node->i_(attr::axis, 0);
   for (auto v : unsqueezed) {
     concat_node->addInput(v);
