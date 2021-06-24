@@ -883,13 +883,45 @@ const std::vector<std::string> functions = {
 
             return result, backward
 
+        def relu6(self):
+            result = torch.relu6(self)
+            def backward(grad_output):
+                return grad_output * ((result > 0) & (result < 6.0))
+
+            return result, backward
+
+        def leaky_relu(self, negative_slope: number):
+            result = torch.leaky_relu(self, negative_slope)
+            def backward(grad_output):
+                return grad_output * torch.where(self > 0, 1.0, negative_slope).type_as(result), None
+            return result, backward
+
+        def gelu(self):
+            result = torch.gelu(self)
+            def backward(grad_output):
+                m_2_sqrtpi = 1.12837916709551257390
+                m_sqrt1_2 = 0.707106781186547524401
+                alpha = m_sqrt1_2
+                beta = m_2_sqrtpi * m_sqrt1_2 * 0.5
+                cdf = (torch.erf(self * m_sqrt1_2) + 1.0) * 0.5
+                pdf = beta * torch.exp(self * self * -0.5)
+                return grad_output * (cdf + self * pdf)
+            return result, backward
+
         def hardswish(self):
             result = torch.hardswish(self)
             def backward(grad_output):
-                m = (result > 3.).type_as(result)
-                m = torch.where((result >= -3.) & (result <= 3.),  result / 3. + .5, m)
+                m = (self > 3.).type_as(result)
+                m = torch.where((self >= -3.) & (self <= 3.),  self / 3. + .5, m)
                 return grad_output * m
+            return result, backward
 
+        def hardsigmoid(self):
+            result = torch.hardsigmoid(self)
+            def backward(grad_output):
+                m = (self > -3.) & (self < 3.)
+                lhs = grad_output * (1.0 / 6.0)
+                return torch.where(m, lhs, m.type_as(self))
             return result, backward
 
         def erfc(self):
@@ -1440,6 +1472,18 @@ const std::vector<std::string> functions = {
                 return None, None
             return torch.ne(self, other), backward
 
+        def hardshrink(self, lambd: number):
+          def backward(grad_output):
+            mask = ((self > lambd) | (self < -lambd))
+            return grad_output * mask, None
+          return torch.hardshrink(self, lambd=lambd), backward
+
+        def hardtanh(self, min_val: number, max_val: number):
+          def backward(grad_output):
+            mask = ((self >= min_val) * (self <= max_val))
+            return grad_output * mask, None, None
+          return torch.hardtanh(self, min_val=min_val, max_val=max_val), backward
+
         def clamp_1(self,
                     min: Optional[number],
                     max: Optional[number]):
@@ -1608,7 +1652,6 @@ c10::optional<GradientPair> gradientInfoForSchema(
     auto schema_str = canonicalSchemaString(schema);
     // For debugging AD change:
     // std::cout << "Looking for " << schema_str << std::endl;
-
     auto sym_script_it = schema_to_graphs.find(schema_str);
 
     if (sym_script_it != schema_to_graphs.end()) {

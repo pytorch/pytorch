@@ -44,7 +44,8 @@ static void avg_pool2d_out_frame(
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t xx, yy;
       /* For all output pixels... */
-      auto input_data = input.contiguous().data_ptr<scalar_t>();
+      Tensor input_contig = input.contiguous();
+      auto input_data = input_contig.data_ptr<scalar_t>();
       auto output_data = output.data_ptr<scalar_t>();
       scalar_t* ptr_output = output_data +
           b * nInputPlane * outputWidth * outputHeight +

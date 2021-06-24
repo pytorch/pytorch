@@ -313,8 +313,6 @@ int main(int argc, char* argv[]) {
     // instance.
     std::vector<For*> loops = loopnest.getLoopStmtsFor(Y);
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    For* j_outer;
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     For* j_inner;
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     For* j_tail;
@@ -322,9 +320,9 @@ int main(int argc, char* argv[]) {
     loopnest.splitWithTail(
         loops[1], // loops[0] is the outer loop, loops[1] is inner
         split_factor,
-        &j_outer, // These are handles that we would be using for
         &j_inner, // further transformations
         &j_tail);
+    // loops[1] will become the outer loop, j_outer, after splitWithTail.
     std::cout << *loopnest.root_stmt() << std::endl;
     // Prints:
     // {

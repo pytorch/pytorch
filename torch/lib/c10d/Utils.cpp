@@ -71,6 +71,21 @@ namespace c10d {
   return it->second;
 }
 
+std::vector<at::Tensor> getTensorShapes(const std::vector<at::Tensor>& tensors) {
+  std::vector<at::Tensor> shapeTensors;
+  shapeTensors.reserve(tensors.size());
+  for (const auto& tensor : tensors) {
+    auto shapesVec = tensor.sizes().vec();
+    int64_t shapes_size = shapesVec.size();
+    // Need to clone here otherwise the shapesVec.data() memory is not copied
+    // and can be released under the hood.
+    at::Tensor shapesTensor = at::from_blob(
+        shapesVec.data(), {shapes_size}, at::TensorOptions().dtype(at::kLong)).clone();
+    shapeTensors.emplace_back(std::move(shapesTensor));
+  }
+  return shapeTensors;
+}
+
 
 namespace tcputil {
 
@@ -103,7 +118,7 @@ PortType getSocketPort(int fd) {
     listenPort = ntohs(addr->sin6_port);
 
   } else {
-    throw std::runtime_error("unsupported protocol");
+    TORCH_CHECK(false, "unsupported protocol");
   }
   return listenPort;
 }
@@ -125,7 +140,7 @@ std::string sockaddrToString(struct ::sockaddr* addr) {
         __output != nullptr)
     address[INET6_ADDRSTRLEN] = '\0';
   } else {
-    throw std::runtime_error("unsupported protocol");
+    TORCH_CHECK(false, "unsupported protocol");
   }
   return address;
 }
@@ -214,7 +229,7 @@ void handleConnectException(
     if (timeout != kNoTimeout) {
       const auto elapsed = std::chrono::high_resolution_clock::now() - start;
       if (elapsed > timeout) {
-        throw std::runtime_error(kConnectTimeoutMsg);
+        TORCH_CHECK(false, kConnectTimeoutMsg);
       }
     }
     std::this_thread::sleep_for(std::chrono::seconds(1));
@@ -331,7 +346,7 @@ std::tuple<int, std::string> accept(
   while (true) {
     int res = tcputil::poll(events.get(), 1, timeout.count());
     if (res == 0) {
-      throw std::runtime_error(
+      TORCH_CHECK(false,
           "waiting for processes to "
           "connect has timed out");
     } else if (res == -1) {

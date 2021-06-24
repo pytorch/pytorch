@@ -194,6 +194,12 @@ cmake_dependent_option(
 cmake_dependent_option(
     USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
     "USE_CUDNN" OFF)
+cmake_dependent_option(
+  USE_WHOLE_CUDNN "Use whole-library linking for cuDNN" OFF
+    "USE_STATIC_CUDNN" OFF)
+cmake_dependent_option(
+    USE_EXPERIMENTAL_CUDNN_V8_API "Use experimental cuDNN v8 API" OFF
+    "USE_CUDNN" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
 option(USE_KINETO "Use Kineto profiling library" ON)
 option(USE_CUPTI_SO "Use CUPTI as a shared library" OFF)
@@ -266,6 +272,9 @@ option(USE_ZSTD "Use ZSTD" OFF)
 cmake_dependent_option(
   USE_MKLDNN "Use MKLDNN. Only available on x86, x86_64, and AArch64." "${CPU_INTEL}"
   "CPU_INTEL OR CPU_AARCH64" OFF)
+cmake_dependent_option(
+  USE_MKLDNN_ACL "Use Compute Library for the Arm architecture." OFF
+  "USE_MKLDNN AND CPU_AARCH64" OFF)
 set(MKLDNN_ENABLE_CONCURRENT_EXEC ${USE_MKLDNN})
 cmake_dependent_option(
     USE_MKLDNN_CBLAS "Use CBLAS in MKLDNN" OFF
@@ -280,6 +289,12 @@ cmake_dependent_option(
 cmake_dependent_option(
     USE_GLOO_WITH_OPENSSL "Use Gloo with OpenSSL. Only available if USE_GLOO is on." OFF
     "USE_GLOO AND LINUX AND NOT INTERN_BUILD_MOBILE" OFF)
+cmake_dependent_option(
+    USE_C10D_GLOO "USE C10D GLOO" ON "USE_DISTRIBUTED;USE_GLOO" OFF)
+cmake_dependent_option(
+    USE_C10D_NCCL "USE C10D NCCL" ON "USE_DISTRIBUTED;USE_NCCL" OFF)
+cmake_dependent_option(
+    USE_C10D_MPI "USE C10D MPI" ON "USE_DISTRIBUTED;USE_MPI" OFF)
 cmake_dependent_option(
     USE_TENSORPIPE "Use TensorPipe. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
@@ -345,6 +360,7 @@ option(USE_SYSTEM_CPUINFO "Use system-provided cpuinfo." OFF)
 option(USE_SYSTEM_SLEEF "Use system-provided sleef." OFF)
 option(USE_SYSTEM_GLOO "Use system-provided gloo." OFF)
 option(USE_SYSTEM_FP16 "Use system-provided fp16." OFF)
+option(USE_SYSTEM_PYBIND11 "Use system-provided PyBind11." OFF)
 option(USE_SYSTEM_PTHREADPOOL "Use system-provided pthreadpool." OFF)
 option(USE_SYSTEM_PSIMD "Use system-provided psimd." OFF)
 option(USE_SYSTEM_FXDIV "Use system-provided fxdiv." OFF)
@@ -365,6 +381,7 @@ if(USE_SYSTEM_LIBS)
   set(USE_SYSTEM_BENCHMARK ON)
   set(USE_SYSTEM_ONNX ON)
   set(USE_SYSTEM_XNNPACK ON)
+  set(USE_SYSTEM_PYBIND11 ON)
 endif()
 
 # Used when building Caffe2 through setup.py

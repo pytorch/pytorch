@@ -1,8 +1,3 @@
-#include <array>
-#include <unordered_map>
-#include <thread>
-#include <chrono>
-#include <sstream>
 #include <TH/TH.h>
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -12,6 +7,7 @@
 #ifdef USE_NCCL
 #include <torch/csrc/cuda/python_nccl.h>
 #endif
+#include <c10/util/irange.h>
 
 #include <torch/csrc/cuda/THCP.h>
 #include <torch/csrc/CudaIPCTypes.h>
@@ -22,6 +18,12 @@
 #include <torch/csrc/cuda/python_comm.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/python_headers.h>
+
+#include <array>
+#include <unordered_map>
+#include <thread>
+#include <chrono>
+#include <sstream>
 
 #ifndef WIN32
 #include <pthread.h>
@@ -347,7 +349,7 @@ PyObject * THCPModule_memoryStats(PyObject *_unused, PyObject *arg)
       "all", "small_pool", "large_pool"
     };
     py::dict dict;
-    for (size_t i = 0; i < statTypeNames.size(); ++i) {
+    for (const auto i : c10::irange(statTypeNames.size())) {
       dict[statTypeNames[i]] = statToDict(statArray[i]);
     }
     return dict;
@@ -358,6 +360,7 @@ PyObject * THCPModule_memoryStats(PyObject *_unused, PyObject *arg)
   py::dict result;
   result["num_alloc_retries"] = stats.num_alloc_retries;
   result["num_ooms"] = stats.num_ooms;
+  result["max_split_size"] = stats.max_split_size;
   result["allocation"] = statArrayToDict(stats.allocation);
   result["segment"] = statArrayToDict(stats.segment);
   result["active"] = statArrayToDict(stats.active);
@@ -366,6 +369,8 @@ PyObject * THCPModule_memoryStats(PyObject *_unused, PyObject *arg)
   result["reserved_bytes"] = statArrayToDict(stats.reserved_bytes);
   result["active_bytes"] = statArrayToDict(stats.active_bytes);
   result["inactive_split_bytes"] = statArrayToDict(stats.inactive_split_bytes);
+  result["oversize_allocations"] = statToDict(stats.oversize_allocations);
+  result["oversize_segments"] = statToDict(stats.oversize_segments);
 
   return result.release().ptr();
   END_HANDLE_TH_ERRORS
@@ -512,7 +517,7 @@ static PyObject * THCPModule_initExtension(PyObject *self, PyObject *noargs)
 
   auto num_gpus = c10::cuda::device_count();
   auto default_cuda_generators = PyTuple_New(static_cast<Py_ssize_t>(num_gpus));
-  for(int i = 0; i < num_gpus; i++) {
+  for(const auto i : c10::irange(num_gpus)) {
     // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto gen = at::cuda::detail::getDefaultCUDAGenerator(i);
     auto cast_gen = (THPGenerator*)THPGenerator_initDefaultGenerator(gen);

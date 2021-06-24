@@ -189,6 +189,15 @@ bool get_warnAlways() noexcept(true) {
   return warn_always;
 }
 
+WarnAlways::WarnAlways(bool setting /*=true*/)
+    : prev_setting(get_warnAlways()) {
+  set_warnAlways(setting);
+}
+
+WarnAlways::~WarnAlways() {
+  set_warnAlways(prev_setting);
+}
+
 } // namespace Warning
 
 void WarningHandler::process(
