@@ -276,7 +276,8 @@ class TestSparseCSR(TestCase):
         self.assertEqual(torch.tensor([0, 1, 2] * 3, dtype=torch.int64), sparse.col_indices())
         self.assertEqual(torch.tensor([2] * 9, dtype=dtype), sparse.values())
 
-    def run_test_sparse_csr_to_dense(self, device, dtype):
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_sparse_csr_to_dense(self, device, dtype):
         mn = [5, 2, 0]
         for (m, n) in itertools.product(mn, mn):
             size = (m, n)
@@ -291,23 +292,6 @@ class TestSparseCSR(TestCase):
                                       values, dtype=dtype, device=device)
         dense = torch.tensor([[1, 2, 1], [3, 4, 0]], dtype=dtype, device=device)
         self.assertEqual(csr.to_dense(), dense)
-
-    @dtypes(*torch.testing.get_all_dtypes())
-    def test_sparse_csr_to_dense(self, device, dtype):
-        if dtype in [torch.bool, torch.half, torch.bfloat16] or dtype.is_complex:
-            err_msg = "\"add_out_op2_sparse_csr\" not implemented"
-            if dtype == torch.float16 and self.device_type == 'cpu':
-                err_msg = r"to_dense\(\) not supported for float16 on CPU"
-            with self.assertRaisesRegex(RuntimeError, err_msg):
-                self.run_test_sparse_csr_to_dense(device, dtype)
-        else:
-            self.run_test_sparse_csr_to_dense(device, dtype)
-
-    # TODO: https://github.com/pytorch/pytorch/issues/60648
-    @dtypes(torch.bool, torch.half, torch.bfloat16, torch.complex64, torch.complex128)
-    @unittest.expectedFailure
-    def test_sparse_csr_to_dense_xfail(self, device, dtype):
-        _run_test_sparse_csr_to_dense(device, dtype)
 
     @coalescedonoff
     @dtypes(torch.double)

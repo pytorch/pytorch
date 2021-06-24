@@ -155,7 +155,8 @@ Tensor& add_out_dense_sparse_csr_cuda(
   } else if (!is_same_tensor(output, dense)) {
     resultBuffer.copy_(dense);
   }
-  AT_DISPATCH_ALL_TYPES(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+      kHalf, kBool, kBFloat16,
       commonDtype,
       "add_out_op2_sparse_csr",
       [&valuesBuffer, &resultBuffer, &alpha, &src_crow_indices, &src_col_indices]() {

@@ -501,10 +501,6 @@ Tensor sparse_to_dense(
     c10::optional<ScalarType> dtype) {
   TORCH_CHECK(
       !dtype.has_value(), "dtype argument is not supported by sparse_to_dense");
-  if (self.scalar_type() == ScalarType::Half &&
-      self.options().device().is_cpu()) {
-    TORCH_CHECK(false, "to_dense() not supported for float16 on CPU");
-  }
   Tensor dst = at::zeros(self.sizes(), self.options().layout(kStrided));
   return dst.add_(self);
 }
