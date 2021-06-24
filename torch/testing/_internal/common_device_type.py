@@ -797,12 +797,12 @@ class skipIf(object):
     def __call__(self, fn):
 
         @wraps(fn)
-        def dep_fn(slf, device, *args, **kwargs):
+        def dep_fn(slf, *args, **kwargs):
             if self.device_type is None or self.device_type == slf.device_type:
                 if (isinstance(self.dep, str) and getattr(slf, self.dep, True)) or (isinstance(self.dep, bool) and self.dep):
                     raise unittest.SkipTest(self.reason)
 
-            return fn(slf, device, *args, **kwargs)
+            return fn(slf, *args, **kwargs)
         return dep_fn
 
 
@@ -888,16 +888,16 @@ class expectedFailure(object):
     def __call__(self, fn):
 
         @wraps(fn)
-        def efail_fn(slf, device, *args, **kwargs):
+        def efail_fn(slf, *args, **kwargs):
             if self.device_type is None or self.device_type == slf.device_type:
                 try:
-                    fn(slf, device, *args, **kwargs)
+                    fn(slf, *args, **kwargs)
                 except Exception:
                     return
                 else:
                     slf.fail('expected test to fail, but it passed')
 
-            return fn(slf, device, *args, **kwargs)
+            return fn(slf, *args, **kwargs)
         return efail_fn
 
 
@@ -909,12 +909,12 @@ class onlyOn(object):
     def __call__(self, fn):
 
         @wraps(fn)
-        def only_fn(slf, device, *args, **kwargs):
+        def only_fn(slf, *args, **kwargs):
             if self.device_type != slf.device_type:
                 reason = "Only runs on {0}".format(self.device_type)
                 raise unittest.SkipTest(reason)
 
-            return fn(slf, device, *args, **kwargs)
+            return fn(slf, *args, **kwargs)
 
         return only_fn
 
@@ -933,24 +933,24 @@ class deviceCountAtLeast(object):
         fn.num_required_devices = self.num_required_devices
 
         @wraps(fn)
-        def multi_fn(slf, devices, *args, **kwargs):
+        def multi_fn(slf, *args, **kwargs):
             if len(devices) < self.num_required_devices:
                 reason = "fewer than {0} devices detected".format(self.num_required_devices)
                 raise unittest.SkipTest(reason)
 
-            return fn(slf, devices, *args, **kwargs)
+            return fn(slf, *args, **kwargs)
 
         return multi_fn
 
 # Only runs the test on the CPU and CUDA (the native device types)
 def onlyOnCPUAndCUDA(fn):
     @wraps(fn)
-    def only_fn(self, device, *args, **kwargs):
+    def only_fn(self, *args, **kwargs):
         if self.device_type != 'cpu' and self.device_type != 'cuda':
             reason = "onlyOnCPUAndCUDA: doesn't run on {0}".format(self.device_type)
             raise unittest.SkipTest(reason)
 
-        return fn(self, device, *args, **kwargs)
+        return fn(self, *args, **kwargs)
 
     return only_fn
 
@@ -1187,7 +1187,7 @@ def skipCUDAIfCudnnVersionLessThan(version=0):
 
     def dec_fn(fn):
         @wraps(fn)
-        def wrap_fn(self, device, *args, **kwargs):
+        def wrap_fn(self, *args, **kwargs):
             if self.device_type == 'cuda':
                 if self.no_cudnn:
                     reason = "cuDNN not available"
@@ -1196,7 +1196,7 @@ def skipCUDAIfCudnnVersionLessThan(version=0):
                     reason = "cuDNN version {0} is available but {1} required".format(self.cudnn_version, version)
                     raise unittest.SkipTest(reason)
 
-            return fn(self, device, *args, **kwargs)
+            return fn(self, *args, **kwargs)
 
         return wrap_fn
     return dec_fn
