@@ -16419,7 +16419,7 @@ class TestNNDeviceType(NNTestCase):
     @onlyOnCPUAndCUDA
     def test_cross_entropy_loss_with_soft_labels_input_target_shapes(self, device):
         criterion = nn.CrossEntropyLossWithSoftLabels()
-        shapes = [torch.arange(2, i+3).tolist() for i in range(5)]
+        shapes = [torch.arange(2, i + 3).tolist() for i in range(5)]
         for input_shape, target_shape in itertools.product(shapes, shapes):
             input = torch.randn(input_shape, device=device)
             target = torch.randn(target_shape, device=device)
