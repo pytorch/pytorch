@@ -68,7 +68,6 @@ struct CollectiveFingerPrint {
     }
     // Serialize data into tensor
     int64_t data_size = data->size();
-    auto options = at::TensorOptions().dtype(at::kLong);
     // Need to release here and get the ptr due to C++ parameter evaluation
     // order.
     auto d = data.release();
