@@ -631,7 +631,7 @@ def _test_cpp_extensions_aot(test_module, test_directory, options, use_ninja):
             return return_code
 
     # "install" the test modules and run tests
-    python_path = os.environ.get('PYTHONPATH', '')
+    shell_env = os.environ.copy()
     try:
         cpp_extensions = os.path.join(test_directory, 'cpp_extensions')
         install_directory = ''
@@ -642,10 +642,11 @@ def _test_cpp_extensions_aot(test_module, test_directory, options, use_ninja):
                     install_directory = os.path.join(root, directory)
 
         assert install_directory, 'install_directory must not be empty'
-        os.environ['PYTHONPATH'] = os.pathsep.join([install_directory, python_path])
+        os.environ['PYTHONPATH'] = os.pathsep.join([install_directory, shell_env.get('PYTHONPATH', '')])
+        os.environ['USE_NINJA'] = str(1 if use_ninja else 0)
         return run_test(test_module, test_directory, options)
     finally:
-        os.environ['PYTHONPATH'] = python_path
+        os.environ = shell_env
 
 
 def test_cpp_extensions_aot_ninja(test_module, test_directory, options):

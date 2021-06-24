@@ -207,4 +207,12 @@ class TestTorchLibrary(common.TestCase):
 
 
 if __name__ == "__main__":
+    if os.getenv("USE_NINJA") == "1":
+        import sys
+        module = sys.modules[__name__]
+        test_classes = [getattr(module, name) for name in dir(module) if name.startswith('Test')]
+        for cls in test_classes:
+            cls.__qualname__ += "Ninja"
+            cls.__name__ += "Ninja"
+
     common.run_tests()
