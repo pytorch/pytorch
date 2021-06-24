@@ -7,7 +7,7 @@ import torch
 import warnings
 from .._jit_internal import List, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
     is_optional, _qualified_name, Any, Future, is_future, is_ignored_fn, Union, is_union
-from .._jit_internal import BroadcastingList1, BroadcastingList2, BroadcastingList3  # type: ignore
+from .._jit_internal import BroadcastingList1, BroadcastingList2, BroadcastingList3  # type: ignore[attr-defined]
 from ._state import _get_script_class
 
 from torch._C import TensorType, TupleType, FloatType, IntType, ComplexType, \
