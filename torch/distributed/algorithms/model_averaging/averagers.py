@@ -86,7 +86,7 @@ class PeriodicModelAverager:
         r"""
         Averages parameters if ``step`` is less than ``warmup_steps``,
         or it can be divided by ``period``, where ``step`` is increased by 1
-        as at each iteration in the training loop.
+        at each iteration in the training loop.
         """
         if self.step < self.warmup_steps or self.step % self.period == 0:
             utils.average_parameters(self.module, self.process_group)
