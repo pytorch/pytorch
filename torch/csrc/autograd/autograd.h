@@ -35,7 +35,9 @@ namespace autograd {
 /// \param inputs Inputs w.r.t. which the gradient will be accumulated into
 ///     `at::Tensor::grad`. All other Tensors will be ignored. If not provided, the gradient
 ///     is accumulated into all the leaf Tensors that were used to compute param `tensors`.
-///     All the provided inputs must be leaf Tensors.
+///     For a non-leaf provided input, its grad_fn will be evaluated and
+//      the behavior would be unexpected so user should not rely on it.
+//      Reference: https://github.com/pytorch/pytorch/pull/60521#issuecomment-867061780
 TORCH_API void backward(
     const variable_list& tensors,
     const variable_list& grad_tensors = {},

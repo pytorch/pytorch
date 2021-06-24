@@ -121,8 +121,10 @@ def backward(
         inputs (Sequence[Tensor] or Tensor, optional): Inputs w.r.t. which the gradient
             be will accumulated into ``.grad``. All other Tensors will be ignored. If
             not provided, the gradient is accumulated into all the leaf Tensors that
-            were used to compute the attr::tensors. All the provided inputs must be leaf
-            Tensors.
+            were used to compute the attr::tensors.
+            For a non-leaf provided input, its grad_fn will be evaluated and
+            the behavior would be unexpected so user should not rely on it.
+            Reference: https://github.com/pytorch/pytorch/pull/60521#issuecomment-867061780
     """
     if grad_variables is not None:
         warnings.warn("'grad_variables' is deprecated. Use 'grad_tensors' instead.")
