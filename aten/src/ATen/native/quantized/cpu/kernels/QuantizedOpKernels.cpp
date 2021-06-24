@@ -7,6 +7,7 @@
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/quantized/affine_quantizer.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
+#include <c10/util/irange.h>
 
 #include <cmath>
 #ifdef USE_FBGEMM
@@ -106,8 +107,7 @@ Tensor qcat_nhwc_kernel(
       for (int64_t row = 0; row < H; ++row) {
         for (int64_t col = 0; col < W; ++col) {
           // loop over input tensors
-          // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-          for (int64_t tidx = 0; tidx < Cs_in.size(); ++tidx) {
+          for (const auto tidx : c10::irange(Cs_in.size())) {
             scalar_t::underlying* optr =
                 reinterpret_cast<scalar_t::underlying*>(output.data_ptr()) +
                 batch * H * W * C_out + row * W * C_out + col * C_out +
@@ -493,12 +493,10 @@ static void leaky_qrelu_out_kernel(Tensor& out, const Tensor& qx,
            */
           auto dx_vec_vec = qx_vec.dequantize(i_scale_vec, i_zp_vec,
                                               i_scale_zp_neg_premul_vec);
-          // NOLINTNEXTLINE(clang-diagnostic-sign-compare,modernize-loop-convert)
-          for (int idx = 0; idx < dx_vec_vec.size(); ++idx) {
-            const auto dx_vec = dx_vec_vec[idx];
+          for (auto& dx_vec: dx_vec_vec) {
             const auto multiplicand = Vec::blendv(negval_vec, one_vec,
                                                   dx_vec > zero_vec);
-            dx_vec_vec[idx] = dx_vec * multiplicand;
+            dx_vec = dx_vec * multiplicand;
           }
           return qVec::quantize(dx_vec_vec, o_scale, o_zp, o_inv_scale);
         });
@@ -539,12 +537,11 @@ void qsigmoid_kernel(
         [&](Vec value_qx) -> Vec {
           auto value_dx = value_qx.dequantize(
               scale_vec, zero_point_vec, scale_neg_zp_premul_vec);
-          // NOLINTNEXTLINE(clang-diagnostic-sign-compare,modernize-loop-convert)
-          for (int idx = 0; idx < value_dx.size(); ++idx) {
-            value_dx[idx] = value_dx[idx].neg();
-            value_dx[idx] = value_dx[idx].exp();
-            value_dx[idx] = Vectorized<float>(1.0f) + value_dx[idx];
-            value_dx[idx] = value_dx[idx].reciprocal();
+          for (auto& value: value_dx) {
+            value = value.neg();
+            value = value.exp();
+            value = Vectorized<float>(1.0f) + value;
+            value = value.reciprocal();
           }
           return Vec::quantize(
               value_dx, output_scale, output_zero_point, inv_output_scale);
@@ -604,11 +601,10 @@ void qhardsigmoid_kernel(const Tensor& qx, Tensor& qy) {
         [&](qVec value_qx) -> qVec {
           auto value_dx = value_qx.dequantize(
               scale_vec, zero_point_vec, scale_neg_zp_premul_vec);
-          // NOLINTNEXTLINE(clang-diagnostic-sign-compare,modernize-loop-convert)
-          for (int idx = 0; idx < value_dx.size(); ++idx) {
-            value_dx[idx] =
+          for (auto& value : value_dx) {
+            value =
                 vec::minimum(
-                    vec::maximum(value_dx[idx] + kThreeVec, kZeroVec),
+                    vec::maximum(value + kThreeVec, kZeroVec),
                     kSixVec) /
                 kSixVec;
           }
@@ -765,15 +761,14 @@ void qthreshold_kernel(
           // dequantize
           auto dx_vec = value_qx.dequantize(
             input_scale_vec, input_zero_point_vec, input_scale_neg_zp_premul_vec);
-          // NOLINTNEXTLINE(clang-diagnostic-sign-compare,modernize-loop-convert)
-          for (int idx = 0; idx < dx_vec.size(); ++idx) {
+          for (auto& value : dx_vec) {
             // check if any elements are below threshold
-            auto cmp_to_threshold = dx_vec[idx] > threshold_vec;
+            const auto cmp_to_threshold = value > threshold_vec;
             if (cmp_to_threshold.zero_mask()) {
               // blend
-              dx_vec[idx] = Vec::blendv(value_vec, dx_vec[idx], cmp_to_threshold);
-              }
+              value = Vec::blendv(value_vec, value, cmp_to_threshold);
             }
+          }
           // quantize
           return qVec::quantize(dx_vec, output_scale, output_zero_point, inv_output_scale);
         });
@@ -812,10 +807,9 @@ void qhardswish_kernel(const Tensor& qx, Tensor& qy) {
         [&](qVec value) -> qVec {
           auto value_dx = value.dequantize(i_scale_vec, i_zero_point_vec,
                                            i_scale_neg_zp_premul_vec);
-          // NOLINTNEXTLINE(clang-diagnostic-sign-compare,modernize-loop-convert)
-          for (int idx = 0; idx < value_dx.size(); idx++) {
-            value_dx[idx] = value_dx[idx] * vec::minimum(
-              vec::maximum(value_dx[idx] + three_vec, zero_vec),
+          for (auto& value: value_dx) {
+            value = value * vec::minimum(
+              vec::maximum(value + three_vec, zero_vec),
               six_vec
             ) / six_vec;
           }
@@ -869,7 +863,7 @@ void qtanh_kernel(const Tensor& qx, Tensor& qy) {
           const auto value_dx = value_qx.dequantize(
               scale_vec, zero_point_vec, scale_neg_zp_premul_vec);
           Vec::float_vec_return_type retvals;
-          for (int idx = 0; idx < Vec::float_num_vecs(); ++idx) {
+          for (const auto idx : c10::irange(Vec::float_num_vecs())) {
             retvals[idx] = value_dx[idx].tanh();
           }
           return Vec::quantize(
@@ -940,26 +934,23 @@ void qelu_kernel(
         // dequantize
         auto dx_vec_vec = value_qx.dequantize(i_scale_vec, i_zero_point_vec,
                                             i_scale_neg_zp_premul_vec);
-        // NOLINTNEXTLINE(clang-diagnostic-sign-compare,modernize-loop-convert)
-        for (int idx = 0; idx < dx_vec_vec.size(); idx++) {
-
+        for (auto& value : dx_vec_vec) {
           // quickly check if any elements are below zero
-          auto cmp_to_zero = dx_vec_vec[idx] > zero_vec;
+          const auto cmp_to_zero = value > zero_vec;
 
           if (cmp_to_zero.zero_mask()) {
-
-            Vec dx_vec_copy_neg_elu = dx_vec_vec[idx] * one_vec;
+            Vec dx_vec_copy_neg_elu = value * one_vec;
             // calculate the negative part of ELU on the copy
             dx_vec_copy_neg_elu = dx_vec_copy_neg_elu * input_scale_coef_vec;
             dx_vec_copy_neg_elu = dx_vec_copy_neg_elu.exp();
             dx_vec_copy_neg_elu = dx_vec_copy_neg_elu - one_vec;
             dx_vec_copy_neg_elu = dx_vec_copy_neg_elu * alpha_vec;
             // blend
-            dx_vec_vec[idx] = Vec::blendv(dx_vec_copy_neg_elu, dx_vec_vec[idx],
-                                        dx_vec_vec[idx] > zero_vec);
+            value = Vec::blendv(dx_vec_copy_neg_elu, value,
+                                        value > zero_vec);
           }
 
-          dx_vec_vec[idx] = dx_vec_vec[idx] * scale_coef_vec;
+          value = value * scale_coef_vec;
         }
         // quantize
         return qVec::quantize(dx_vec_vec, o_scale, o_zp, inv_o_scale);
@@ -1007,7 +998,7 @@ void qadd_scalar_kernel(Tensor& out, const Tensor& self, const Scalar& other) {
           Vec::int_vec_return_type a_sub_z =
               a.widening_subtract(Vec(static_cast<scalar_t>(self_zero_point)));
           Vec::int_vec_return_type c;
-          for (int i = 0; i < Vec::int_num_vecs(); ++i) {
+          for (const auto i : c10::irange(Vec::int_num_vecs())) {
             c[i] = a_sub_z[i] + other_vec;
           }
           Vec rv = Vec::requantize_from_int(c, multiplier, zero_point);
@@ -1068,7 +1059,7 @@ void qadd_kernel(Tensor& out, const Tensor& self, const Tensor& other) {
           const auto db = b.dequantize(
               other_scale_vec, other_zero_point_vec, other_scale_zp_premul_vec);
           Vec::float_vec_return_type retvals;
-          for (int i = 0; i < Vec::float_num_vecs(); ++i) {
+          for (const auto i : c10::irange(Vec::float_num_vecs())) {
             auto c = da[i] + db[i];
             if (ReLUFused) {
               c = vec::maximum(c, Vectorized<float>(0.0f));
@@ -1130,7 +1121,7 @@ void qmul_kernel(Tensor& out, const Tensor& self, const Tensor& other) {
           Vec::int_vec_return_type b_sub_zp =
               b.widening_subtract(Vec(static_cast<scalar_t>(other_zero_point)));
           Vec::int_vec_return_type c;
-          for (int i = 0; i < Vec::int_num_vecs(); ++i) {
+          for (const auto i : c10::irange(Vec::int_num_vecs())) {
             c[i] = a_sub_zp[i] * b_sub_zp[i];
           }
           Vec rv = Vec::requantize_from_int(c, multiplier, zero_point);
@@ -1962,8 +1953,7 @@ inline void do_bn_compute(
   auto vals_q = Vec::loadu(X_ptr);
   // Fake scale of 1.0 here, should not affect performance (FMA in place of sub)
   auto vals_dq = vals_q.dequantize(fake_scale, in_zp_vec, scale_neg_zp_premul);
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (size_t idx = 0; idx < vec_num; ++idx) {
+  for (const auto idx : c10::irange(vec_num)) {
     auto alpha_v = Vectorized<float>::loadu(alpha + idx * kVLen);
     auto beta_v = Vectorized<float>::loadu(beta + idx * kVLen);
     vals_dq[idx] = vec::fmadd(alpha_v, vals_dq[idx], beta_v);
@@ -2006,13 +1996,12 @@ void q_batch_norm_kernel(
     auto fake_scale = Vectorized<float>(1.0f);
     auto scale_neg_zp_premul = fake_scale * in_zp_vec.neg();
     auto out_zero_point_v = Vec(scalar_t(out_zero_point));
-    size_t lanes = Vec::float_num_vecs() * kVLen;
-    for (int64_t i = 0; i < outer_size; ++i) {
+    const auto lanes = static_cast<int64_t>(Vec::float_num_vecs() * kVLen);
+    for (const auto i : c10::irange(outer_size)) {
       auto* X_ptr = reinterpret_cast<typename scalar_t::underlying*>(X + i * C);
       auto* Y_ptr = reinterpret_cast<typename scalar_t::underlying*>(Y + i * C);
       int64_t ch = 0;
 
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for(; ch + lanes <= C; ch += lanes ) {
         do_bn_compute<scalar_t>(
           X_ptr + ch,
@@ -2330,10 +2319,9 @@ void quantized_normalize_kernel(
               auto qXVec = qVec::loadu(X_ptr + vecStartIdx);
               auto dqXVec = qXVec.dequantize(x_fake_scale_vec, x_zp_vec,
                   x_fake_scale_zp_neg_premul_vec);
-              // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-              for (int dqXVecIdx = 0; dqXVecIdx < dqXVec.size(); dqXVecIdx++) {
-                dqXVec[dqXVecIdx] =
-                  (dqXVec[dqXVecIdx] - layer_mean_div_scale_xVec) *
+              for (auto &dq : dqXVec) {
+                dq =
+                  (dq - layer_mean_div_scale_xVec) *
                     gamma_p_vec + beta_vec;
                 qVec::quantize(dqXVec, y_scale, y_zp, y_inv_scale)
                   .store(Y_ptr + vecStartIdx);
@@ -2357,8 +2345,7 @@ void quantized_normalize_kernel(
             auto qXVec = qVec::loadu(X_ptr + vecStartIdx);
             auto dqXVec = qXVec.dequantize(x_fake_scale_vec, x_zp_vec,
                 x_fake_scale_zp_neg_premul_vec);
-            // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-            for (int dqXVecIdx = 0; dqXVecIdx < dqXVec.size(); dqXVecIdx++) {
+            for (const auto dqXVecIdx : c10::irange(dqXVec.size())) {
               int64_t vecVecStartIdx = vecStartIdx + dqXVecIdx * kFloatVLen;
               auto gammaVec = gamma_null
                 ? one_vec
