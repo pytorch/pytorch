@@ -2409,7 +2409,7 @@ new_module_tests = [
         input_size=(2, 3, 6, 5, 4),
         cudnn=True,
         with_tf32=True,
-        tf32_precision=0.005,
+        tf32_precision=0.05,
     ),
     dict(
         fullname='Conv3d_pad_same',
@@ -2418,7 +2418,7 @@ new_module_tests = [
         input_size=(2, 3, 6, 5, 4),
         cudnn=True,
         with_tf32=True,
-        tf32_precision=0.005,
+        tf32_precision=0.05,
     ),
     dict(
         fullname='Conv3d_pad_same_dilated',
@@ -2427,7 +2427,7 @@ new_module_tests = [
         input_size=(2, 3, 6, 5, 4),
         cudnn=True,
         with_tf32=True,
-        tf32_precision=0.005,
+        tf32_precision=0.05,
     ),
     dict(
         module_name='ConvTranspose3d',
