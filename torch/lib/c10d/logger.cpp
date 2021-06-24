@@ -9,12 +9,6 @@ namespace c10d {
 // stats.
 const int LoggingIterations[] = {10, 20, 100, 1000};
 
-namespace {
-
-const int kMilliSecondToNanosSecond = 1000000;
-
-} // anonymous namespace
-
 std::ostream& operator<<(std::ostream& output, const Logger& logger) {
   auto& ddp_logging_data = (*logger.ddp_logging_data_);
 
@@ -176,48 +170,21 @@ void Logger::set_construction_data_and_log(
   at::LogPyTorchDDPUsage(*ddp_logging_data_);
 }
 
-void Logger::calculate_avg_cpu_time(
+void Logger::calculate_avg_time(
     int64_t& avg_time,
     int64_t& time_duration,
-    int64_t cpu_start_time,
-    int64_t cpu_end_time) {
-  // If cpu_end_time is not recorded in this iteration,
-  // avg_time will return invalid value.
-  // For some cases like DDP runs on non-sync mode, backward compute
-  // end time can not be recorded in this iteration and thus can not
-  // calculate the valid avg_time.
-  // In this case, skip calculating the avg_time and return.
+    Timer& timer,
+    Timer::Event start_event,
+    Timer::Event end_event) {
   TORCH_CHECK(num_iterations_stats_recorded_ > 0);
-  if (cpu_end_time < cpu_start_time) {
+  c10::optional<int64_t> maybe_time_duration = timer.measureDifference(start_event, end_event);
+  if (!maybe_time_duration.has_value()) {
     return;
   }
-  time_duration = cpu_end_time - cpu_start_time;
+  time_duration = maybe_time_duration.value();
   avg_time = (time_duration + avg_time * (num_iterations_stats_recorded_ - 1)) /
       num_iterations_stats_recorded_;
 }
-
-#ifdef USE_CUDA
-void Logger::calculate_avg_gpu_time(
-    int64_t& avg_time,
-    int64_t& time_duration,
-    at::cuda::CUDAEvent& gpu_start,
-    at::cuda::CUDAEvent& gpu_end) {
-  TORCH_CHECK(num_iterations_stats_recorded_ > 0);
-  float milliseconds = gpu_start.elapsed_time(gpu_end);
-  // If gpu_end is not recorded in this iteration,
-  // milliseconds will have invalid value.
-  // For some cases like DDP runs on non-sync mode,
-  // gpu_end can not be recorded in this iteration and thus can not
-  // calculate the valid avg_time.
-  // In this case, skip calculating the avg_time and return.
-  if (milliseconds < 0) {
-    return;
-  }
-  time_duration = int64_t(milliseconds * kMilliSecondToNanosSecond);
-  avg_time = (time_duration + avg_time * (num_iterations_stats_recorded_ - 1)) /
-      num_iterations_stats_recorded_;
-}
-#endif
 
 void Logger::reset_performance_stats() {
   ddp_logging_data_->ints_map["forward_compute_time"] = 0;
@@ -260,85 +227,39 @@ void Logger::set_runtime_stats_and_log() {
 
   reset_performance_stats();
 
-  if (reducer_->replicas_[0][0].is_cuda()) {
-#ifdef USE_CUDA
-    // Cuda time stats are only collected for single device modules.
-    if (reducer_->is_multi_device_module_) {
-      TORCH_WARN_ONCE(
-        "Cuda time stats are not collected for multi-device modules."
-      );
-      return;
-    }
-    // Check events on the replicas_[0][0].device().
-    at::DeviceGuard g(reducer_->replicas_[0][0].device());
-    // It is possible users did not call backward or run codes in
-    // no-sync mode, in this case, some cudaEvents like "backward_compute_end"
-    // or "backward_comm_start" or "backward_comm_end" will not be recorded.
-    // cudaEvent is created when it is first time to be recorded.
-    // If it is never recorded/created, skip synchronize and calculation.
-    // Otherwise it will throw cuda errors.
-    if (!reducer_->gpu_timer_.forward_start.isCreated() ||
-        !reducer_->gpu_timer_.backward_compute_start.isCreated() ||
-        !reducer_->gpu_timer_.backward_compute_end.isCreated() ||
-        !reducer_->gpu_timer_.backward_comm_start.isCreated() ||
-        !reducer_->gpu_timer_.backward_comm_end.isCreated()) {
-      return;
-    }
-
-    // set_runtime_stats_and_log is called at the beginning of forward call,
-    // when it is cheap to synchronize the cuda events of previous iteration,
-    // as mostly all cuda operations are finished in previous iteration.
-    reducer_->gpu_timer_.forward_start.synchronize();
-    reducer_->gpu_timer_.backward_compute_start.synchronize();
-    reducer_->gpu_timer_.backward_compute_end.synchronize();
-    reducer_->gpu_timer_.backward_comm_start.synchronize();
-    reducer_->gpu_timer_.backward_comm_end.synchronize();
-    calculate_avg_gpu_time(
-        ddp_logging_data_->ints_map["avg_forward_compute_time"],
-        ddp_logging_data_->ints_map["forward_compute_time"],
-        reducer_->gpu_timer_.forward_start,
-        reducer_->gpu_timer_.backward_compute_start);
-    calculate_avg_gpu_time(
-        ddp_logging_data_->ints_map["avg_backward_compute_time"],
-        ddp_logging_data_->ints_map["backward_compute_time"],
-        reducer_->gpu_timer_.backward_compute_start,
-        reducer_->gpu_timer_.backward_compute_end);
-    calculate_avg_gpu_time(
-        ddp_logging_data_->ints_map["avg_backward_comm_time"],
-        ddp_logging_data_->ints_map["backward_comm_time"],
-        reducer_->gpu_timer_.backward_comm_start,
-        reducer_->gpu_timer_.backward_comm_end);
-    calculate_avg_gpu_time(
-        ddp_logging_data_->ints_map["avg_backward_compute_comm_overlap_time"],
-        ddp_logging_data_->ints_map["backward_compute_comm_overlap_time"],
-        reducer_->gpu_timer_.backward_comm_start,
-        reducer_->gpu_timer_.backward_compute_end);
-#endif
-  } else {
-    calculate_avg_cpu_time(
-        ddp_logging_data_->ints_map["avg_forward_compute_time"],
-        ddp_logging_data_->ints_map["forward_compute_time"],
-        reducer_->cpu_timer_.forward_start_time,
-        reducer_->cpu_timer_.backward_compute_start_time);
-
-    calculate_avg_cpu_time(
-        ddp_logging_data_->ints_map["avg_backward_compute_time"],
-        ddp_logging_data_->ints_map["backward_compute_time"],
-        reducer_->cpu_timer_.backward_compute_start_time,
-        reducer_->cpu_timer_.backward_compute_end_time);
-
-    calculate_avg_cpu_time(
-        ddp_logging_data_->ints_map["avg_backward_comm_time"],
-        ddp_logging_data_->ints_map["backward_comm_time"],
-        reducer_->cpu_timer_.backward_comm_start_time,
-        reducer_->cpu_timer_.backward_comm_end_time);
-
-    calculate_avg_cpu_time(
-        ddp_logging_data_->ints_map["avg_backward_compute_comm_overlap_time"],
-        ddp_logging_data_->ints_map["backward_compute_comm_overlap_time"],
-        reducer_->cpu_timer_.backward_comm_start_time,
-        reducer_->cpu_timer_.backward_compute_end_time);
+  // Cuda time stats are only collected for single device modules.
+  if (reducer_->replicas_[0][0].is_cuda() && reducer_->is_multi_device_module_) {
+    TORCH_WARN_ONCE(
+      "Cuda time stats are not collected for multi-device modules."
+    );
+    return;
   }
+  TORCH_INTERNAL_ASSERT(reducer_->timer_);
+  calculate_avg_time(
+      ddp_logging_data_->ints_map["avg_forward_compute_time"],
+      ddp_logging_data_->ints_map["forward_compute_time"],
+      *reducer_->timer_,
+      Timer::Event::kForwardStart,
+      Timer::Event::kBackwardComputeStart);
+  calculate_avg_time(
+      ddp_logging_data_->ints_map["avg_backward_compute_time"],
+      ddp_logging_data_->ints_map["backward_compute_time"],
+      *reducer_->timer_,
+      Timer::Event::kBackwardComputeStart,
+      Timer::Event::kBackwardComputeEnd);
+  calculate_avg_time(
+      ddp_logging_data_->ints_map["avg_backward_comm_time"],
+      ddp_logging_data_->ints_map["backward_comm_time"],
+      *reducer_->timer_,
+      Timer::Event::kBackwardCommStart,
+      Timer::Event::kBackwardCommEnd);
+  calculate_avg_time(
+      ddp_logging_data_->ints_map["avg_backward_compute_comm_overlap_time"],
+      ddp_logging_data_->ints_map["backward_compute_comm_overlap_time"],
+      *reducer_->timer_,
+      Timer::Event::kBackwardCommStart,
+      Timer::Event::kBackwardComputeEnd);
+
   // Log runtime stats to stderr if TORCH_DISTRIBUTED_DEBUG=DETAIL is enabled.
   if (parseDistDebugLevel() == DistributedDebugLevel::DETAIL) {
     LOG(INFO) << *this;

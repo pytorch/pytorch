@@ -1,7 +1,7 @@
 if(USE_CUDA)
   cuda_add_library(c10d_cuda_test CUDATest.cu)
-  target_link_libraries(c10d_cuda_test c10d)
-  add_dependencies(c10d_cuda_test c10d)
+  target_link_libraries(c10d_cuda_test torch_cuda)
+  add_dependencies(c10d_cuda_test torch_cuda)
 endif()
 
 function(c10d_add_test test_src)
@@ -16,29 +16,40 @@ function(c10d_add_test test_src)
   add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
 endfunction()
 
-c10d_add_test(FileStoreTest.cpp c10d gtest_main)
-c10d_add_test(TCPStoreTest.cpp c10d gtest_main)
+c10d_add_test(FileStoreTest.cpp torch_cpu gtest_main)
+c10d_add_test(TCPStoreTest.cpp torch_cpu gtest_main)
 if(NOT WIN32)
-  c10d_add_test(HashStoreTest.cpp c10d gtest_main)
+  c10d_add_test(HashStoreTest.cpp torch_cpu gtest_main)
 endif()
 
 if(USE_CUDA)
-  if(USE_C10D_GLOO)
-    c10d_add_test(ProcessGroupGlooTest.cpp c10d c10d_cuda_test gtest_main)
-    c10d_add_test(ProcessGroupGlooAsyncTest.cpp c10d c10d_cuda_test gtest_main)
+  if(USE_GLOO AND USE_C10D_GLOO)
+    c10d_add_test(ProcessGroupGlooTest.cpp torch_cpu c10d_cuda_test gtest_main)
+    c10d_add_test(ProcessGroupGlooAsyncTest.cpp torch_cpu c10d_cuda_test gtest_main)
   endif()
-  if(USE_C10D_NCCL)
-    c10d_add_test(ProcessGroupNCCLTest.cpp c10d c10d_cuda_test gtest_main)
-    c10d_add_test(ProcessGroupNCCLErrorsTest.cpp c10d c10d_cuda_test
-        gtest_main)
+  if(USE_NCCL AND USE_C10D_NCCL)
+    # NCCL is a private dependency of libtorch, but the tests include some
+    # private headers of libtorch, which in turn include NCCL. As a hacky
+    # alternative to making NCCL a public dependency of libtorch, we make it
+    # a private dependency of the tests as well.
+    c10d_add_test(
+      ProcessGroupNCCLTest.cpp
+      torch_cpu c10d_cuda_test gtest_main __caffe2_nccl)
+    c10d_add_test(
+      ProcessGroupNCCLErrorsTest.cpp
+      torch_cpu c10d_cuda_test gtest_main __caffe2_nccl)
   endif()
 else()
-  if(USE_C10D_GLOO)
-    c10d_add_test(ProcessGroupGlooTest.cpp c10d gtest_main)
+  if(USE_GLOO AND USE_C10D_GLOO)
+    c10d_add_test(ProcessGroupGlooTest.cpp torch_cpu gtest_main)
   endif()
 endif()
 
-if(USE_C10D_MPI)
+if(USE_MPI AND USE_C10D_MPI)
   add_definitions(-DMPIEXEC=${MPIEXEC})
-  c10d_add_test(ProcessGroupMPITest.cpp c10d)
+  # MPI is a private dependency of libtorch, but the tests include some
+  # private headers of libtorch, which in turn include MPI. As a hacky
+  # alternative to making MPI a public dependency of libtorch, we make it
+  # a private dependency of the tests as well.
+  c10d_add_test(ProcessGroupMPITest.cpp torch_cpu ${MPI_CXX_LIBRARIES})
 endif()

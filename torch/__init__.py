@@ -405,6 +405,7 @@ def use_deterministic_algorithms(mode):
 
         * :class:`torch.nn.ReflectionPad1d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReflectionPad2d` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.ReflectionPad3d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReplicationPad1d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReplicationPad2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReplicationPad3d` when attempting to differentiate a CUDA tensor
