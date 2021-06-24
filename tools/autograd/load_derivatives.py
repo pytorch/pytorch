@@ -129,7 +129,8 @@ def create_forward_derivative(f: NativeFunction, formula: str, names: Tuple[str,
         var_type=var_type,
         required_inputs_fw_grad=None,
         required_inputs_primal=None,
-        required_original_self_value=False)
+        required_original_self_value=False,
+        is_exact_match=True)
 
 def postprocess_forward_derivatives(
     f: NativeFunction,
@@ -259,7 +260,8 @@ def postprocess_forward_derivatives(
             var_type=defn.var_type,
             required_inputs_fw_grad=required_inputs_tangent,
             required_inputs_primal=required_inputs_primal,
-            required_original_self_value=False))
+            required_original_self_value=False,
+            is_exact_match=True))
 
     return updated_derivatives
 
