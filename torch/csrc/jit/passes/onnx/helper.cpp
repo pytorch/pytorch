@@ -163,7 +163,11 @@ bool isValidToTransformToONNXConcatNode(Node* lc_node) {
   return !lc_node->inputs().empty();
 }
 
-Node* transformToONNXConcatNode(Graph* g, Node* lc_node, bool need_new_input, int opset_version) {
+Node* transformToONNXConcatNode(
+    Graph* g,
+    Node* lc_node,
+    bool need_new_input,
+    int opset_version) {
   // ListConstruct Int[] output case, we need to transform to ONNX
   // Concat to ensure the output is a single tensor(dynamic) type in
   // order to be consumed as inputs
@@ -171,9 +175,8 @@ Node* transformToONNXConcatNode(Graph* g, Node* lc_node, bool need_new_input, in
   auto new_node = need_new_input ? g->return_node() : lc_node;
 
   for (auto* input : lc_node->inputs()) {
-    auto new_input = need_new_input
-                     ? g->addInput()->copyMetadata(input)
-                     : input;
+    auto new_input = 
+        need_new_input ? g->addInput()->copyMetadata(input) : input;
 
     Node* unsqueezed_node =
         createONNXUnsqueeze(g, new_node, new_input, 0, opset_version);
@@ -181,8 +184,8 @@ Node* transformToONNXConcatNode(Graph* g, Node* lc_node, bool need_new_input, in
   }
 
   Node* concat_node = need_new_input
-                      ? g->insertNode(g->create(onnx::Concat, 1))
-                      : g->create(onnx::Concat, 1)->insertBefore(lc_node);
+      ? g->insertNode(g->create(onnx::Concat, 1))
+      : g->create(onnx::Concat, 1)->insertBefore(lc_node);
 
   concat_node->i_(attr::axis, 0);
   for (auto v : unsqueezed) {
