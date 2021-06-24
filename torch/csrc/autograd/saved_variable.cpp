@@ -153,6 +153,11 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   return var;
 }
 
+void SavedVariable::register_hook(std::unique_ptr<SavedVariableHooks>&& hooks) {
+  hooks_ = std::move(hooks);
+  // data_ = hooks_->call_unpack_hook(hooks_->call_pack_hook(data_));
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char* ERR_BACKWARD_TWICE =
     "Trying to backward through the graph a second time (or directly access saved "
