@@ -369,7 +369,7 @@ def _make_mismatch_msg(
         tolerance=diagnostics.rtol,
     )
 
-    return msg
+    return msg.strip()
 
 
 @_check_sparse_coo_members_individually
@@ -791,6 +791,8 @@ def assert_close(
         >>> import functools
         >>> assert_equal = functools.partial(torch.testing.assert_close, rtol=0, atol=0)
         >>> assert_equal(1e-9, 1e-10)
+        Traceback (most recent call last):
+        ...
         AssertionError: Scalars are not equal!
         <BLANKLINE>
         Absolute difference: 8.999999703829253e-10
@@ -838,6 +840,8 @@ def assert_close(
         >>> expected = torch.tensor([1.0, 2.0, 3.0])
         >>> actual = expected.numpy()
         >>> torch.testing.assert_close(actual, expected)
+        Traceback (most recent call last):
+        ...
         AssertionError: Except for scalars, type equality is required, but got
         <class 'numpy.ndarray'> and <class 'torch.Tensor'> instead.
         >>> # Scalars of different types are an exception and can be compared with
@@ -848,6 +852,8 @@ def assert_close(
         >>> expected = torch.tensor(float("Nan"))
         >>> actual = expected.clone()
         >>> torch.testing.assert_close(actual, expected)
+        Traceback (most recent call last):
+        ...
         AssertionError: Scalars are not close!
         <BLANKLINE>
         Absolute difference: nan (up to 1e-05 allowed)
@@ -858,6 +864,8 @@ def assert_close(
         >>> expected = torch.tensor(complex(float("NaN"), 0))
         >>> actual = torch.tensor(complex(0, float("NaN")))
         >>> torch.testing.assert_close(actual, expected, equal_nan=True)
+        Traceback (most recent call last):
+        ...
         AssertionError: Scalars are not close!
         <BLANKLINE>
         Absolute difference: nan (up to 1e-05 allowed)
@@ -870,6 +878,8 @@ def assert_close(
         >>> actual = torch.tensor([1.0, 4.0, 5.0])
         >>> # The default mismatch message can be overwritten.
         >>> torch.testing.assert_close(actual, expected, msg="Argh, the tensors are not close!")
+        Traceback (most recent call last):
+        ...
         AssertionError: Argh, the tensors are not close!
         >>> # The error message can also created at runtime by passing a callable.
         >>> def custom_msg(actual, expected, diagnostics):
@@ -879,6 +889,8 @@ def assert_close(
         ...         f"That is {ratio:.1%}!"
         ...     )
         >>> torch.testing.assert_close(actual, expected, msg=custom_msg)
+        Traceback (most recent call last):
+        ...
         AssertionError: Argh, we found 2 mismatches! That is 66.7%!
     """
     # Hide this function from `pytest`'s traceback
