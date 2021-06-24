@@ -807,7 +807,8 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
         mq_ns(*data)
 
         # check activation result correctness
-        act_compare_dict = extract_logger_info(mp_ns, mq_ns, OutputLogger)
+        act_compare_dict = extract_logger_info(
+            mp_ns, mq_ns, OutputLogger, 'int8')
         self.assertTrue(
             len(act_compare_dict) == results_len,
             f"expected len {results_len}, got len {len(act_compare_dict)}")
@@ -848,7 +849,7 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
 
         # check activation result correctness
         act_compare_dict = extract_shadow_logger_info(
-            mp_shadows_mq, OutputLogger)
+            mp_shadows_mq, OutputLogger, 'int8')
         self.assertTrue(
             len(act_compare_dict) == results_len,
             f"expected len {results_len}, got len {len(act_compare_dict)}")
@@ -1155,7 +1156,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             'a', mq1, 'b', mq2, OutputLogger, should_log_inputs=False)
         mq1_shadows_mq2(torch.randn(4, 4))
         act_compare_dict = extract_shadow_logger_info(
-            mq1_shadows_mq2, OutputLogger)
+            mq1_shadows_mq2, OutputLogger, 'b')
         self.assertTrue(len(act_compare_dict) == 1)
         self.assert_ns_compare_dict_valid(act_compare_dict)
 
@@ -1193,7 +1194,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         mq1_shadows_mq2 = add_shadow_loggers('a', mq1, 'b', mq2, OutputLogger)
         mq1_shadows_mq2(torch.randn(4, 1, 4, 4))
         act_compare_dict = extract_shadow_logger_info(
-            mq1_shadows_mq2, OutputLogger)
+            mq1_shadows_mq2, OutputLogger, 'b')
         self.assertTrue(len(act_compare_dict) == 1)
         self.assert_ns_compare_dict_valid(act_compare_dict)
 
@@ -1481,9 +1482,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         results = _extract_weights_impl(
             'a', m1, 'b', m2,
             base_name_to_sets_of_related_ops=base_name_to_sets_of_related_ops)
-        self.assertTrue(len(results) == 2)
-        # TODO(future PR): don't store empty dictionaries for nodes
-        #   without weights.
+        self.assertTrue(len(results) == 0)
 
         # test unshadowed activations
 
@@ -1497,7 +1496,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         m2_ns(data)
 
         # check activation result correctness
-        act_compare_dict = extract_logger_info(m1_ns, m2_ns, OutputLogger)
+        act_compare_dict = extract_logger_info(m1_ns, m2_ns, OutputLogger, 'b')
         self.assertTrue(len(act_compare_dict) == 2)
         self.assert_ns_compare_dict_valid(act_compare_dict)
 
@@ -1517,9 +1516,50 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         m2_shadows_m1_ns(data)
 
         # check activation result correctness
-        act_compare_dict = extract_shadow_logger_info(m2_shadows_m1_ns, OutputLogger)
+        act_compare_dict = extract_shadow_logger_info(
+            m2_shadows_m1_ns, OutputLogger, 'b')
         self.assertTrue(len(act_compare_dict) == 2)
         self.assert_ns_compare_dict_valid(act_compare_dict)
+
+    @skipIfNoFBGEMM
+    def test_layer_names(self):
+        m = nn.Sequential(
+            nn.Conv2d(1, 1, 1),
+            nn.Conv2d(1, 1, 1),
+            nn.Sigmoid(),
+        ).eval()
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        mp = torch.quantization.quantize_fx.prepare_fx(m, qconfig_dict)
+        mq = torch.quantization.quantize_fx.convert_fx(copy.deepcopy(mp))
+
+        # extract weights
+        results = extract_weights('fp32', mp, 'int8', mq)
+        mq_node_names = [node.name for node in mq.graph.nodes]
+        for layer_name in results.keys():
+            self.assertTrue(layer_name in mq_node_names)
+
+        # match activations
+        mq = torch.quantization.quantize_fx.convert_fx(copy.deepcopy(mp))
+        mp_ns, mq_ns = add_loggers(
+            'fp32', copy.deepcopy(mp), 'int8', mq, OutputLogger)
+        data = torch.randn(1, 1, 1, 1)
+        mp_ns(data)
+        mq_ns(data)
+        results = extract_logger_info(mp_ns, mq_ns, OutputLogger, 'int8')
+        mq_node_names = [node.name for node in mq_ns.graph.nodes]
+        for layer_name in results.keys():
+            self.assertTrue(layer_name in mq_node_names)
+
+        # match shadow activations
+        mq = torch.quantization.quantize_fx.convert_fx(copy.deepcopy(mp))
+        mp_shadows_mq = add_shadow_loggers(
+            'fp32', mp, 'int8', mq, OutputLogger)
+        mp_shadows_mq(data)
+        results = extract_shadow_logger_info(
+            mp_shadows_mq, OutputLogger, 'int8')
+        mq_node_names = [node.name for node in mp_shadows_mq.graph.nodes]
+        for layer_name in results.keys():
+            self.assertTrue(layer_name in mq_node_names)
 
 
 class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
