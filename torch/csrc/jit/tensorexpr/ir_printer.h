@@ -60,6 +60,10 @@ class TORCH_API IRPrinter : public IRVisitor {
   void visit(const Free* v) override;
   void visit(const Let* v) override;
 
+  // A child class may have a difference rule for generating dtype
+  // string, e.g. CUDA needs int64_t to be generated as long long.
+  virtual std::string dtypeToCppString(const Dtype& dtype);
+
   std::ostream& os() {
     return printer_os_;
   }
