@@ -196,7 +196,7 @@ def main(args: List[str]) -> None:
           "python.linting.mypyPath":
             "${env:HOME}/miniconda3/envs/pytorch/bin/python",
           "python.linting.mypyArgs": [
-            "${workspaceFolder}/tools/mypy_wrapper.py"
+            "${workspaceFolder}/tools/linter/mypy_wrapper.py"
           ]
         }
 
