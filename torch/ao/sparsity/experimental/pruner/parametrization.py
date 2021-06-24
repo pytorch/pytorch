@@ -20,14 +20,7 @@ class ActivationReconstruction:
     def __call__(self, module, input, output):
         max_outputs = self.param.original_outputs
         pruned_outputs = self.param.pruned_outputs
-        original_out = output.shape[1] + len(pruned_outputs)
-        zeros = torch.zeros((output.shape[0], 1))
-        cols = []
-        jdx = 0
-        for idx in range(original_out):
-            if idx in pruned_outputs:
-                cols.append(zeros)
-            else:
-                cols.append(output[:, jdx].reshape((-1, 1)))
-                jdx += 1
-        return torch.hstack(cols)
+        reconstructed_tensor = torch.zeros((output.shape[0], len(max_outputs)))
+        valid_columns = list(max_outputs - pruned_outputs)
+        reconstructed_tensor[:, valid_columns] = output
+        return reconstructed_tensor
