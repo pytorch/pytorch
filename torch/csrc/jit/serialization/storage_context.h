@@ -39,7 +39,7 @@ class TORCH_API SerializationStorageContext {
    public:
     bool operator()(const c10::Storage& lhs, const c10::Storage& rhs) const {
       return lhs.unsafeGetStorageImpl() == rhs.unsafeGetStorageImpl();
-    };
+    }
   };
 
   std::unordered_map<
