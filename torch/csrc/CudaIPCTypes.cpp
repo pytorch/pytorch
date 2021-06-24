@@ -132,8 +132,7 @@ void ReturnRefCounter(const std::string& handle, uint64_t offset /* unused */) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 CudaIPCSentData::CudaIPCSentData(
-    // NOLINTNEXTLINE(modernize-pass-by-value)
-    std::string handle,
+    const std::string& handle,
     int64_t offset,
     int64_t* counter_ptr,
     at::Device device)

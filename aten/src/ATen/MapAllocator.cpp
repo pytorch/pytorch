@@ -23,9 +23,7 @@
 
 namespace at {
 
-namespace {
-constexpr int64_t map_alloc_alignment = 64;
-}  // namespace (anonymous)
+static constexpr int64_t map_alloc_alignment = 64;
 
 #if defined(_WIN32) || defined(HAVE_MMAP)
 

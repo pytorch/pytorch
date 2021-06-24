@@ -191,7 +191,7 @@ class Vectorized<double> {
   void dump() const {
       std::cout << _vec0[0] << "," << _vec0[1] << "," << _vec1[0] << "," << _vec1[1] << std::endl;
   }
-  Vectorized<double> map(double (*f)(double)) const {
+  Vectorized<double> map(double (*const f)(double)) const {
     Vectorized<double> ret;
     for (int i = 0; i < size()/2; i++) {
         ret._vec0[i] = f(_vec0[i]);
@@ -202,7 +202,7 @@ class Vectorized<double> {
     return ret;
   }
 
-  Vectorized<double> mapbi(double (*f)(double, double), const Vectorized<double>& other)
+  Vectorized<double> mapbi(double (*const f)(double, double), const Vectorized<double>& other)
       const {
     Vectorized<double> ret;
     for (int i = 0; i < size()/2; i++) {
