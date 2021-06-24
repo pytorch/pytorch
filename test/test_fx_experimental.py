@@ -1471,6 +1471,7 @@ class TestNormalizeOperators(JitTestCase):
             "reshape_as",
             "resize_",
             "resize_as_",
+            "special.zeta",
             "to_sparse",
             "view",
             "view_as",
