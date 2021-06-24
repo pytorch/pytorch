@@ -158,10 +158,14 @@ void makeStreamsWaitOnOthers(
 } // namespace
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-C10_DEFINE_REGISTRY(TensorPipeTransportRegistry, TransportRegistration);
+C10_DEFINE_REGISTRY_WITHOUT_WARNING(
+    TensorPipeTransportRegistry,
+    TransportRegistration);
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-C10_DEFINE_REGISTRY(TensorPipeChannelRegistry, ChannelRegistration);
+C10_DEFINE_REGISTRY_WITHOUT_WARNING(
+    TensorPipeChannelRegistry,
+    ChannelRegistration);
 
 const std::string& TensorPipeAgent::guessAddress() {
   static const std::string uvAddress = []() {
@@ -1245,10 +1249,9 @@ void TensorPipeAgent::markFutureAsComplete(
                      message{std::move(message)},
                      streams{std::move(streams)}]() mutable {
       c10::MultiStreamGuard guard(streams);
-      std::vector<std::reference_wrapper<const at::DataPtr>> data_ptrs =
-          message->getDataPtrs();
+      std::vector<c10::Storage> storages = message->getStorages();
       atomicFuture->jitFuture->markCompleted(
-          std::move(message), std::move(data_ptrs));
+          std::move(message), std::move(storages));
       // The future's callbacks may schedule further RPCs, increasing the count.
       // Thus we must decrease it after completing the future, otherwise it may
       // briefly dip to zero and trick join into thinking all work is done.
