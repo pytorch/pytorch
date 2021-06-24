@@ -820,7 +820,7 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
         return act_compare_dict
 
     def _test_match_shadow_activations(
-        self, m, data, prepared_expected_node_occurrence=None, results_len=0,
+        self, m, data, prepared_expected_node_occurrence=None, results_len=None,
         should_log_inputs=False, qconfig_dict=None, skip_scripting=False,
         prepare_fn=prepare_fx,
     ):
@@ -854,9 +854,10 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
         # check activation result correctness
         act_compare_dict = extract_shadow_logger_info(
             mp_shadows_mq, OutputLogger, 'int8')
-        self.assertTrue(
-            len(act_compare_dict) == results_len,
-            f"expected len {results_len}, got len {len(act_compare_dict)}")
+        if results_len is not None:
+            self.assertTrue(
+                len(act_compare_dict) == results_len,
+                f"expected len {results_len}, got len {len(act_compare_dict)}")
         self.assert_ns_compare_dict_valid(act_compare_dict)
         return act_compare_dict
 
@@ -1716,3 +1717,25 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
                 sparse_nn, (idx, offsets, x),
                 results_len=4,
                 should_log_inputs=should_log_inputs)
+
+    @skip_if_no_torchvision
+    @skipIfNoFBGEMM
+    def test_resnet18(self):
+        import torchvision
+        m = torchvision.models.quantization.resnet18(pretrained=True, quantize=False).eval()
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        self._test_match_shadow_activations(
+            m, (torch.randn(1, 3, 224, 224),),
+            qconfig_dict=qconfig_dict,
+            should_log_inputs=False)
+
+    @skip_if_no_torchvision
+    @skipIfNoFBGEMM
+    def test_mobilenet_v2(self):
+        import torchvision
+        m = torchvision.models.quantization.mobilenet_v2(pretrained=True, quantize=False).eval()
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        self._test_match_shadow_activations(
+            m, (torch.randn(1, 3, 224, 224),),
+            qconfig_dict=qconfig_dict,
+            should_log_inputs=False)
