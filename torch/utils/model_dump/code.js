@@ -88,11 +88,11 @@ function ModelSizeSection({model: {file_size, zip_files}}) {
     </pre><//>`;
 }
 
-function ModelStructureSection({model: {model_data}}) {
+function StructuredDataSection({name, data, shown}) {
   return html`
-    <${Hider} name="Model Structure" shown=true>
+    <${Hider} name=${name} shown=${shown}>
     <div style="font-family:monospace;">
-      <${ModelData} data=${model_data} indent="" prefix=""/>
+      <${ModelData} data=${data} indent="" prefix=""/>
     </div><//>`;
 }
 
@@ -639,7 +639,8 @@ class App extends Component {
         <h1>TorchScript Model (version ${model.version}): ${model.title}</h1>
         <button onClick=${() => console.log(model)}>Log Raw Model Info</button>
         <${ModelSizeSection} model=${model}/>
-        <${ModelStructureSection} model=${model}/>
+        <${StructuredDataSection} name="Model Data" data=${model.model_data} shown=true/>
+        <${StructuredDataSection} name="Constants" data=${model.constants} shown=false/>
         <${ZipContentsSection} model=${model}/>
         <${CodeSection} model=${model}/>
         <${ExtraJsonSection} files=${model.extra_files_jsons}/>

@@ -221,9 +221,13 @@ def get_model_info(
         assert path_prefix is not None
         version = zf.read(path_prefix + "/version").decode("utf-8").strip()
 
-        with zf.open(path_prefix + "/data.pkl") as handle:
-            raw_model_data = torch.utils.show_pickle.DumpUnpickler(handle, catch_invalid_utf8=True).load()
-            model_data = hierarchical_pickle(raw_model_data)
+        def get_pickle(name):
+            with zf.open(path_prefix + f"/{name}.pkl") as handle:
+                raw = torch.utils.show_pickle.DumpUnpickler(handle, catch_invalid_utf8=True).load()
+                return hierarchical_pickle(raw)
+
+        model_data = get_pickle("data")
+        constants = get_pickle("constants")
 
         # Intern strings that are likely to be re-used.
         # Pickle automatically detects shared structure,
@@ -318,6 +322,7 @@ def get_model_info(
         interned_strings=list(interned_strings),
         code_files=code_files,
         model_data=model_data,
+        constants=constants,
         extra_files_jsons=extra_files_jsons,
         extra_pickles=extra_pickles,
     )}
