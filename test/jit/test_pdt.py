@@ -3,7 +3,7 @@ import sys
 import torch
 from torch.testing._internal.jit_utils import JitTestCase, make_global
 from torch.jit._monkeytype_config import _IS_MONKEYTYPE_INSTALLED
-from typing import List, Dict, Tuple, Any  # noqa: F401
+from typing import List, Dict, Tuple, Any, NamedTuple  # noqa: F401
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -422,3 +422,17 @@ class TestPDT(JitTestCase):
         pdt_model = TestNNParameter()
         scripted_fn = torch.jit._script_pdt(pdt_model, example_inputs={pdt_model: [(10, ), ], })
         self.assertEqual(scripted_fn(20), pdt_model(20))
+
+    def test_fx_tracing_with_typing(self):
+        class FXModelOutput(NamedTuple):
+            result: List[int]
+
+        class FXModel(torch.nn.Module):
+            def forward(self, a) -> FXModelOutput:
+                result = FXModelOutput(result=a)
+                return result
+
+        make_global(FXModel, FXModelOutput)
+        pdt_model = FXModel()
+        scripted_fn = torch.jit._script_pdt(pdt_model, example_inputs={pdt_model: [([10, 20, ], ), ], })
+        self.assertEqual(scripted_fn([20]), pdt_model([20]))
