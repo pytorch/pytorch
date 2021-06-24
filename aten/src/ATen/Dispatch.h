@@ -106,6 +106,9 @@ inline constexpr bool should_include_kernel_dtype(
     int bit_width = bitwidth;                                                     \
     int64_t quant_min = qmin;                                                     \
     int64_t quant_max = qmax;                                                     \
+    (void)bit_width; /* Suppress unused variable warning */                       \
+    (void)quant_min; /* Suppress unused variable warning */                       \
+    (void)quant_max; /* Suppress unused variable warning */                       \
     return __VA_ARGS__();                                                         \
   }
 

@@ -66,6 +66,8 @@ enum class DispatchKey : uint8_t {
   Vulkan,
   Metal,
   XPU, // For out of tree Intel's heterogeneous computing plug-in
+  HPU, // For out of tree & closed source integration of HPU / Habana
+  VE, // For out of tree & closed source integration of SX-Aurora / NEC
 
   // A meta tensor is a tensor without any data associated with it.  (They
   // have also colloquially been referred to as tensors on the "null" device).
@@ -102,6 +104,7 @@ enum class DispatchKey : uint8_t {
   SparseHIP, // TODO: I think this is not actually used, due to Note
   // [Masquerading as CUDA]
   SparseXPU, // For out of tree Intel's heterogeneous computing plug-in
+  SparseVE, // For out of tree & closed source integration of SX-Aurora / NEC
 
   SparseCsrCPU,
   SparseCsrCUDA,
@@ -140,6 +143,11 @@ enum class DispatchKey : uint8_t {
   // has named dimension propagation that doesn't match that of its
   // constituent parts.
   Named,
+
+  // The Conjugate dispatch key is set for any tensors that need to perform
+  // conjugation
+  // This is implemented at a dispatch level right before any backends run
+  Conjugate,
 
   // See Note [Out-of-tree vmap+grad prototype]. The purpose of this key
   // is to insert code after the "autograd subsystem" runs, so this key should
@@ -214,6 +222,7 @@ enum class DispatchKey : uint8_t {
   AutogradXLA,
   AutogradXPU,
   AutogradMLC,
+  AutogradHPU,
   AutogradNestedTensor, // lives out of tree at
   // https://github.com/pytorch/nestedtensor
   // Here are some reserved pre-autograd keys for user-defined backends, see
@@ -226,7 +235,7 @@ enum class DispatchKey : uint8_t {
 
   // Autocasting precedes VariableTypeId, to ensure casts are autograd-exposed
   // and inputs are saved for backward in the post-autocast type.
-  // AutocastCPU,
+  AutocastCPU,
   AutocastCUDA,
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ WRAPPERS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
