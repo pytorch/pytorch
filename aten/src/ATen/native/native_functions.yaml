@@ -5796,6 +5796,47 @@
   dispatch:
     CPU, CUDA: __ilshift__
 
+- func: bitwise_left_shift.Tensor(Tensor self, Tensor other) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  variants: function, method
+  structured_delegate: bitwise_left_shift.Tensor_out
+
+- func: bitwise_left_shift_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  variants: method
+  structured_delegate: bitwise_left_shift.Tensor_out
+
+- func: bitwise_left_shift.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
+  dispatch:
+    CPU, CUDA: bitwise_left_shift_out
+
+- func: bitwise_left_shift.Tensor_Scalar(Tensor self, Scalar other) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  variants: method, function
+  dispatch:
+    CPU, CUDA: bitwise_left_shift
+
+- func: bitwise_left_shift_.Tensor_Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  variants: method
+  dispatch:
+    CPU, CUDA: bitwise_left_shift_
+
+- func: bitwise_left_shift.Tensor_Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  variants: function
+  dispatch:
+    CPU, CUDA: bitwise_left_shift_out
+
+- func: bitwise_left_shift.Scalar_Tensor(Scalar self, Tensor other) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  variants: function
+  dispatch:
+    CPU, CUDA: bitwise_left_shift
+
 - func: __rshift__.Scalar(Tensor self, Scalar other) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: method, function
@@ -5819,6 +5860,47 @@
   variants: method
   dispatch:
     CPU, CUDA: __irshift__
+
+- func: bitwise_right_shift.Tensor(Tensor self, Tensor other) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  variants: function, method
+  structured_delegate: bitwise_right_shift.Tensor_out
+
+- func: bitwise_right_shift_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  variants: method
+  structured_delegate: bitwise_right_shift.Tensor_out
+
+- func: bitwise_right_shift.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
+  dispatch:
+    CPU, CUDA: bitwise_right_shift_out
+
+- func: bitwise_right_shift.Tensor_Scalar(Tensor self, Scalar other) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  variants: method, function
+  dispatch:
+    CPU, CUDA: bitwise_right_shift
+
+- func: bitwise_right_shift_.Tensor_Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  variants: method
+  dispatch:
+    CPU, CUDA: bitwise_right_shift_
+
+- func: bitwise_right_shift.Tensor_Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  variants: function
+  dispatch:
+    CPU, CUDA: bitwise_right_shift_out
+
+- func: bitwise_right_shift.Scalar_Tensor(Scalar self, Tensor other) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  variants: function
+  dispatch:
+    CPU, CUDA: bitwise_right_shift
 
 - func: tril_(Tensor(a!) self, int diagonal=0) -> Tensor(a!)
   variants: method
@@ -9622,6 +9704,51 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: special_xlog1py_out
+
+- func: special_zeta(Tensor self, Tensor other) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  python_module: special
+  variants: function
+  structured_delegate: special_zeta.out
+  dispatch:
+    CompositeExplicitAutograd: special_zeta
+
+- func: special_zeta.self_scalar(Scalar self, Tensor other) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_zeta
+
+- func: special_zeta.other_scalar(Tensor self, Scalar other) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_zeta
+
+- func: special_zeta.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
+  python_module: special
+  variants: function
+  dispatch:
+    CPU, CUDA: special_zeta_out
+
+- func: special_zeta.self_scalar_out(Scalar self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_zeta_out
+
+- func: special_zeta.other_scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_zeta_out
 
 - func: special_i0(Tensor self) -> Tensor
   python_module: special
