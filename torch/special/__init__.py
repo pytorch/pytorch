@@ -136,6 +136,30 @@ Example::
     tensor([ 1.0000, 1.8427,  0.0000])
 """.format(**common_args))
 
+erfcx = _add_docstr(_special.special_erfcx,
+                    r"""
+erfcx(input, *, out=None) -> Tensor
+
+Computes the scaled complementary error function for each element of :attr:`input`.
+The scaled complementary error function is defined as follows:
+
+.. math::
+    \mathrm{erfcx}(x) = e^{x^2} \mathrm{erfc}(x)
+""" + r"""
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> torch.special.erfcx(torch.tensor([0, -1., 10.]))
+    tensor([ 1.0000, 5.0090, 0.0561])
+""".format(**common_args))
+
 erfinv = _add_docstr(_special.special_erfinv,
                      r"""
 erfinv(input, *, out=None) -> Tensor
@@ -487,3 +511,33 @@ round(input, *, out=None) -> Tensor
 
 Alias for :func:`torch.round`.
 """)
+
+zeta = _add_docstr(_special.special_zeta,
+                   r"""
+zeta(input, other, *, out=None) -> Tensor
+
+Computes the Hurwitz zeta function, elementwise.
+
+.. math::
+    \zeta(x, q) = \sum_{k=0}^{\infty} \frac{1}{(k + q)^x}
+
+""" + r"""
+Args:
+    input (Tensor): the input tensor corresponding to `x`.
+    other (Tensor): the input tensor corresponding to `q`.
+
+.. note::
+    The Riemann zeta function corresponds to the case when `q = 1`
+
+Keyword args:
+    {out}
+
+Example::
+    >>> x = torch.tensor([2., 4.])
+    >>> torch.special.zeta(x, 1)
+    tensor([1.6449, 1.0823])
+    >>> torch.special.zeta(x, torch.tensor([1., 2.]))
+    tensor([1.6449, 0.0823])
+    >>> torch.special.zeta(2, torch.tensor([1., 2.]))
+    tensor([1.6449, 0.6449])
+""".format(**common_args))

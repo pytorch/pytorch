@@ -234,6 +234,32 @@ def get_ignored_functions() -> Set[Callable]:
 
 
 @functools.lru_cache(None)
+def get_default_nowrap_functions() -> Set[Callable]:
+    """
+    Return public functions that do not wrap in a subclass when invoked by
+    the default ``Tensor.__torch_function__`` that preserves subclasses.  Typically,
+    these functions represent field accesses (i.e., retrieving a Tensor that
+    is stored somewhere on the Tensor) as opposed to computation.  Users of
+    these functions expect object identity to be preserved over multiple accesses
+    (e.g., ``a.grad is a.grad``) which cannot be upheld if we're wrapping on
+    the fly every time (furthermore, the tensor stored here might already be
+    the subclass, in which case wrapping really ought not to happen).
+
+    Not ALL property accessors have this property; for example ``Tensor.T`` actually
+    just creates a new transposed tensor on the fly, and so we SHOULD interpose on
+    these calls (you need to check the implementation of the function to see if
+    this is the case or not).  Additionally, if a property accessor doesn't return a Tensor,
+    it doesn't have to be on this list (though it is harmless if it is).
+    """
+    Tensor = torch.Tensor
+    return {
+        Tensor._base.__get__,
+        Tensor.grad.__get__,
+        Tensor._grad.__get__,
+    }
+
+
+@functools.lru_cache(None)
 def get_testing_overrides() -> Dict[Callable, Callable]:
     """Return a dict containing dummy overrides for all overridable functions
 
@@ -320,6 +346,8 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.bitwise_not: lambda input, out=None: -1,
         torch.bitwise_or: lambda input, other, out=None: -1,
         torch.bitwise_xor: lambda input, other, out=None: -1,
+        torch.bitwise_left_shift: lambda input, other, out=None: -1,
+        torch.bitwise_right_shift: lambda input, other, out=None: -1,
         torch.block_diag: lambda *tensors: -1,
         torch.bmm: lambda input, mat2, out=None: -1,
         torch.broadcast_tensors: lambda *tensors: -1,
@@ -479,6 +507,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.heaviside: lambda input, values, out=None: -1,
         torch.hinge_embedding_loss: lambda input, target, margin=1.0, size_average=None, reduce=None, reduction='mean': -1,
         torch.histc: lambda input, bins=100, min=0, max=0, out=None: -1,
+        torch.histogram: lambda input, bins=100, min=None, max=None, weight=None, density=False, out=None: -1,
         torch.linalg.householder_product: lambda input, tau: -1,
         torch.hspmm: lambda mat1, mat2, out=None: -1,
         torch.hsplit: lambda input, indices_or_sections: -1,
@@ -870,6 +899,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.special.entr: lambda input: -1,
         torch.special.erf: lambda input: -1,
         torch.special.erfc: lambda input: -1,
+        torch.special.erfcx: lambda input: -1,
         torch.special.erfinv: lambda input: -1,
         torch.special.exp2: lambda input: -1,
         torch.special.expm1: lambda input: -1,
@@ -889,6 +919,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.special.ndtri: lambda input: -1,
         torch.special.ndtr: lambda input: -1,
         torch.special.xlog1py: lambda input, other, out=None: -1,
+        torch.special.zeta: lambda self, other, out=None: -1,
         torch.t: lambda input: -1,
         torch.take: lambda input, index: -1,
         torch.take_along_dim: lambda input, indices, dim=None, out=None: -1,
@@ -932,8 +963,10 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.__rtruediv__: lambda self, other: -1,
         Tensor.__itruediv__: lambda self, other: -1,
         Tensor.__lshift__: lambda self, other: -1,
+        Tensor.__rlshift__: lambda self, other: -1,
         Tensor.__ilshift__: lambda self, other: -1,
         Tensor.__rshift__: lambda self, other: -1,
+        Tensor.__rrshift__: lambda self, other: -1,
         Tensor.__irshift__: lambda self, other: -1,
         Tensor.__float__: lambda self: -1,
         Tensor.__complex__: lambda self: -1,

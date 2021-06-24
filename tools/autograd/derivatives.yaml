@@ -517,6 +517,9 @@
 - name: erfc(Tensor self) -> Tensor
   self: -2.0 / sqrt(M_PI) * exp(-(self.pow(2))) * grad
 
+- name: special_erfcx(Tensor self) -> Tensor
+  self: (2.0 * self * result - 2.0 / sqrt(M_PI)) * grad
+
 - name: erfinv(Tensor self) -> Tensor
   self: 0.5 * sqrt(M_PI) * exp(self.erfinv().pow(2)) * grad
 
@@ -798,6 +801,16 @@
 - name: special_xlog1py.other_scalar(Tensor self, Scalar other) -> Tensor
   self: grad * log1p(other.toDouble())
   result: auto_element_wise
+
+- name: special_zeta(Tensor self, Tensor other) -> Tensor
+  self: not_implemented("zeta")
+  other:  grad * -self * special_zeta(self + 1., other)
+
+- name: special_zeta.self_scalar(Scalar self, Tensor other) -> Tensor
+  other:  grad * -self * special_zeta(self.toDouble() + 1., other)
+
+- name: special_zeta.other_scalar(Tensor self, Scalar other) -> Tensor
+  self: not_implemented("zeta")
 
 - name: logdet(Tensor self) -> Tensor
   self: logdet_backward(grad, self, result)
@@ -1163,7 +1176,7 @@
 - name: sinh(Tensor self) -> Tensor
   self: grad * self.cosh().conj()
 
-- name: slice.Tensor(Tensor(a) self, int dim=0, int? start=0, int? end=9223372036854775807, int step=1) -> Tensor(a)
+- name: slice.Tensor(Tensor(a) self, int dim=0, int? start=None, int? end=None, int step=1) -> Tensor(a)
   self: slice_backward_wrapper(grad, self.sizes(), dim, start, end, step)
   result: auto_linear
 
@@ -1967,8 +1980,8 @@
   grad_output: upsample_nearest3d(grad, output_size, scale_factors)
 
 - name: sigmoid_backward(Tensor grad_output, Tensor output) -> Tensor
-  grad_output: sigmoid_backward(grad, output)
-  output: grad * grad_output * (-2 * output + 1)
+  grad_output: sigmoid_backward(grad, output.conj())
+  output: grad.conj() * grad_output * (-2 * output.conj() + 1)
 
 - name: tanh_backward(Tensor grad_output, Tensor output) -> Tensor
   grad_output: tanh_backward(grad, output.conj())

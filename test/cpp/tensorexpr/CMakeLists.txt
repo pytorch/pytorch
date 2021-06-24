@@ -43,6 +43,12 @@ add_executable(tutorial_tensorexpr ${TENSOREXPR_TEST_ROOT}/tutorial.cpp)
 target_link_libraries(tutorial_tensorexpr PRIVATE torch)
 target_include_directories(tutorial_tensorexpr PRIVATE ${ATen_CPU_INCLUDE})
 
+# The test case depends on the xnnpack header which in turn depends on the
+# pthreadpool header. For some build environment we need add the dependency
+# explicitly.
+if(USE_PTHREADPOOL)
+  target_link_libraries(test_tensorexpr PRIVATE pthreadpool_interface)
+endif()
 if(USE_CUDA)
   target_link_libraries(test_tensorexpr PRIVATE
     ${CUDA_LIBRARIES}
