@@ -1355,44 +1355,10 @@ class TestCase(expecttest.TestCase):
 
         # Tensor x Tensor
         elif isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
-            debug_msg = ("Attempted to compare with different is_sparse settings: "
-                         f"Expected: {x.is_sparse}; Actual: {y.is_sparse}.")
-            super().assertEqual(x.is_sparse, y.is_sparse, msg=self._get_assert_msg(msg=msg, debug_msg=debug_msg))
             debug_msg = ("Attempted to compare with different is_quantized settings: "
                          f"Expected: {x.is_quantized}; Actual: {y.is_quantized}.")
             super().assertEqual(x.is_quantized, y.is_quantized, msg=self._get_assert_msg(msg=msg, debug_msg=debug_msg))
-            if x.is_sparse:
-                # TODO: remove this special case in favor of calling torch.testing.assert_close directly
-                #  when https://github.com/pytorch/pytorch/pull/58844 has landed
-                if x.size() != y.size():
-                    debug_msg_sparse = ("Attempted to compare equality of tensors with different sizes: "
-                                        f"Expected: {x.size()}; Actual: {y.size()}.")
-                    super().assertTrue(False, msg=self._get_assert_msg(msg=msg, debug_msg=debug_msg_sparse))
-
-                x = x.coalesce()
-                y = y.coalesce()
-                indices_result, debug_msg_indices = self._compareTensors(x._indices(), y._indices(),
-                                                                         rtol=rtol, atol=atol,
-                                                                         equal_nan=equal_nan, exact_dtype=exact_dtype,
-                                                                         exact_device=exact_device,
-                                                                         exact_stride=exact_stride)
-
-                if not indices_result:
-                    assert debug_msg_indices is not None
-                    debug_msg = "Sparse tensor indices failed to compare as equal! " + debug_msg_indices
-                super().assertTrue(indices_result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
-
-                values_result, debug_msg_values = self._compareTensors(x._values(), y._values(),
-                                                                       rtol=rtol, atol=atol,
-                                                                       equal_nan=equal_nan, exact_dtype=exact_dtype,
-                                                                       exact_device=exact_device,
-                                                                       exact_stride=exact_stride)
-
-                if not values_result:
-                    assert debug_msg_values is not None
-                    debug_msg = "Sparse tensor values failed to compare as equal! " + debug_msg_values
-                super().assertTrue(values_result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
-            elif x.is_quantized and y.is_quantized:
+            if x.is_quantized and y.is_quantized:
                 # TODO: remove this special case in favor of calling torch.testing.assert_close directly
                 #  when https://github.com/pytorch/pytorch/pull/58926 has landed
                 self.assertEqual(x.qscheme(), y.qscheme(), atol=atol, rtol=rtol,
