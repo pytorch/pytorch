@@ -536,8 +536,7 @@ Tensor logcumsumexp_backward(Tensor grad, const Tensor & self, Tensor result, in
 Tensor unbind_backward(const variable_list& grads, int64_t dim) {
   IntArrayRef sizes;
   at::TensorOptions o;
-  // NOLINTNEXTLINE(performance-for-range-copy)
-  for (auto v : grads) {
+  for (const auto& v : grads) {
     if (v.defined()) {
       sizes = v.sizes();
       o = static_cast<Tensor>(v).options();
@@ -917,6 +916,13 @@ Tensor evenly_distribute_backward(Tensor grad, const Tensor & input, const Tenso
   }
 }
 
+Tensor evenly_read_jvp(const Tensor& fw_grad, const Tensor & input, const Tensor & value) {
+  auto mask = (input == value);
+  auto count = mask.sum();
+  auto grad_output = fw_grad / count;
+  return at::sum(mask * grad_output);
+}
+
 static Tensor var_backward(const Tensor & grad, const Tensor & self, int64_t correction) {
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions)
   return (2.0 / (self.numel() - correction)) * grad * (self - self.mean());
@@ -1209,10 +1215,8 @@ Tensor log_sigmoid_double_backward(const Tensor & grad, const Tensor & input) {
 }
 
 Tensor softmax_double_backward(const Tensor & grad, const Tensor & grad_output, int dim, const Tensor & output) {
-  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-  auto gO = grad_output;
-  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-  auto ggI = grad;
+  const auto& gO = grad_output;
+  const auto& ggI = grad;
 
   auto ggI_output = ggI * output;
   auto ggI_out_sum = ggI_output.sum(dim, true);
@@ -2194,8 +2198,7 @@ Tensor eig_backward(const std::vector<torch::autograd::Variable> &grads, const T
 
   // variable names correspond to the ones in the reference document
   auto D = eigenvalues;
-  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-  auto U = eigenvectors;
+  const auto& U = eigenvectors;
   auto D_grad = grads[0];
   auto U_grad = grads[1];
 
@@ -3309,9 +3312,8 @@ Tensor _cudnn_ctc_loss_backward(const Tensor& grad_out, const Tensor& loss, cons
   }
 }
 
-bool any_variable_defined(variable_list& variables) {
-  // NOLINTNEXTLINE(performance-for-range-copy)
-  for (auto variable : variables) {
+bool any_variable_defined(const variable_list& variables) {
+  for (const auto& variable : variables) {
     if (variable.defined()) {
       return true;
     }
@@ -3376,9 +3378,9 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
 
   auto start_j = tau.size(-1) - 1;
   for (int64_t j = start_j; j >= 0; j--) {
-    auto v = input_.index({"...", Slice(), j});
-    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-    auto v1 = v, v2 = v;
+    const auto v = input_.index({"...", Slice(), j});
+    const auto& v1 = v;
+    const auto& v2 = v;
 
     // we need to recompute input[j] * at::outer(v, v)
     auto tau_unsqueezed = tau.index({"...", j}).unsqueeze(-1);  // tau[..., j][:, None]
@@ -3564,6 +3566,18 @@ Tensor cumprod_jvp(Tensor self_t, Tensor self_p, Tensor result, int dim) {
   }
 }
 
+Tensor gather_with_keepdimed_indices(const Tensor& input, int64_t dim, const Tensor& indices, bool keepdim) {
+  auto full_indices = indices;
+  if (!keepdim) {
+    full_indices = indices.unsqueeze(dim);
+  }
+  auto out_fw_grad = at::gather(input, dim, full_indices);
+  if (!keepdim) {
+    out_fw_grad = out_fw_grad.squeeze(dim);
+  }
+
+  return out_fw_grad;
+}
 
 } // namespace details
 } // namespace generated

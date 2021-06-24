@@ -25,7 +25,7 @@ def native_function_manager(g: Union[NativeFunctionsGroup, NativeFunction]) -> I
         f = g.out
     else:
         f = g
-    with context(f'in native_functions.yaml line {f.loc}:\n  {f.func}'):
+    with context(lambda: f'in native_functions.yaml line {f.loc}:\n  {f.func}'):
         with local.parametrize(use_const_ref_for_mutable_tensors=f.use_const_ref_for_mutable_tensors):
             yield
 

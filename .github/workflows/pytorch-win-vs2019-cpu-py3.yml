@@ -17,10 +17,8 @@ env:
   CUDA_VERSION: "cpu"
   IN_CI: 1
   INSTALL_WINDOWS_SDK: 1
-  JOB_BASE_NAME: test
-  PYTHON_VERSION: "3.6"
+  PYTHON_VERSION: "3.8"
   SCCACHE_BUCKET: "ossci-compiler-cache"
-  TORCH_CUDA_ARCH_LIST: "5.2;7.5"
   VC_PRODUCT: "BuildTools"
   VC_VERSION: ""
   VC_YEAR: "2019"
@@ -32,11 +30,17 @@ concurrency:
 jobs:
   build:
     runs-on: "windows.4xlarge"
+    env:
+      JOB_BASE_NAME: pytorch-win-vs2019-cpu-py3-build
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
           submodules: recursive
+      - name: Clean workspace (including things in .gitignore)
+        shell: bash
+        run: |
+          git clean -xdf
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
@@ -65,17 +69,47 @@ jobs:
           name: ${{ env.BUILD_ENVIRONMENT }}
           path: C:\w\build-results
 
+  generate-test-matrix:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    runs-on: ubuntu-18.04
+    env:
+      NUM_TEST_SHARDS: 2
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    container:
+      image: python:3.9
+    steps:
+      - name: Clone pytorch/pytorch
+        uses: actions/checkout@v2
+      - name: Generating test matrix
+        id: set-matrix
+        run: |
+          # outputting for debugging purposes
+          MATRIX=$(python .github/scripts/generate_pytorch_test_matrix.py)
+          echo "${MATRIX}"
+          echo "::set-output name=matrix::${MATRIX}"
+
   test:
     runs-on: windows.4xlarge
     env:
       JOB_BASE_NAME: pytorch-win-vs2019-cpu-py3-test
+      NUM_TEST_SHARDS: 2
+      TEST_CONFIG: ${{ matrix.test_config }}
     needs:
       - build
+      - generate-test-matrix
+    strategy:
+      matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
+      fail-fast: false
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
           submodules: recursive
+      - name: Clean workspace (including things in .gitignore)
+        shell: bash
+        run: |
+          git clean -xdf
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
@@ -99,6 +133,11 @@ jobs:
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
         run: |
+            if [[ $NUM_TEST_SHARDS -eq 2 ]]; then
+              export SHARD_NUMBER=$TEST_CONFIG
+            else
+              export SHARD_NUMBER=0
+            fi
             .jenkins/pytorch/win-test.sh
       - uses: actions/upload-artifact@v2
         name: Store PyTorch Test Reports
@@ -158,7 +197,7 @@ jobs:
           CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
           CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
-          CIRCLE_WORKFLOW_ID: ${{ github.run_id }} # dunno if this corresponds
+          CIRCLE_WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         run: |
           export PYTHONPATH=$PWD
           python tools/print_test_stats.py --upload-to-s3 --compare-with-s3 test

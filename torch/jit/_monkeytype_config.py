@@ -1,5 +1,6 @@
 import inspect
 import typing
+import torch
 from typing import Optional, Iterable, List, Dict
 from collections import defaultdict
 
@@ -52,7 +53,7 @@ if _IS_MONKEYTYPE_INSTALLED:
             # and create a dictionary of all the types
             # for arguments.
             records = self.trace_records[qualified_name]
-            all_args = defaultdict(set)  # type:  ignore[var-annotated]
+            all_args = defaultdict(set)
             for record in records:
                 for arg, arg_type in record.arg_types.items():
                     all_args[arg].add(arg_type)
@@ -72,6 +73,11 @@ if _IS_MONKEYTYPE_INSTALLED:
                     if inspect.getmodule(_type) == typing:
                         _type_to_string = str(_type)
                         _all_type += _type_to_string.replace('typing.', '') + ','
+                    elif _type is torch.nn.parameter.Parameter:
+                        # Check if the type is torch.nn.parameter.Parameter,
+                        # use the entire quaalified name `torch.nn.parameter.Parameter`
+                        # for type
+                        _all_type += 'torch.nn.parameter.Parameter' + ','
                     else:
                         _all_type += _type.__name__ + ','
                 _all_type = _all_type.lstrip(" ")  # Remove any trailing spaces
@@ -117,4 +123,4 @@ else:
         def __init__(self):
             pass
 
-    monkeytype_trace = None  # type:  ignore[assignment]  # noqa: F811
+    monkeytype_trace = None  # noqa: F811

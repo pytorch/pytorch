@@ -7,14 +7,14 @@
 namespace c10d {
 
 // Broadcast many tensors to all processes in the process group.
-void broadcast_coalesced(
+TORCH_API void broadcast_coalesced(
     c10::intrusive_ptr<c10d::ProcessGroup> process_group,
     at::TensorList tensors,
     size_t buffer_size,
     int rank = 0);
 
 // This class passes bucket contents tensor to DDP communication hook.
-class GradBucket {
+class TORCH_API GradBucket {
  public:
   explicit GradBucket(
       size_t index,
