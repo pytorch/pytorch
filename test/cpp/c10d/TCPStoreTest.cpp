@@ -1,5 +1,5 @@
 #include <c10/util/irange.h>
-#include <c10d/test/StoreTestCommon.hpp>
+#include "StoreTestCommon.hpp"
 
 #include <cstdlib>
 #include <future>

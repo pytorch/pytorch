@@ -16,18 +16,18 @@ import tempfile
 import torch
 from torch.utils import cpp_extension
 from torch.testing._internal.common_utils import FILE_SCHEMA, IS_IN_CI, TEST_WITH_ROCM, shell, set_cwd
-from torch.testing._internal.framework_utils import calculate_shards
 import torch.distributed as dist
 from typing import Dict, Optional, Tuple, List, Any
 from typing_extensions import TypedDict
 
 try:
     sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-    from tools.stats_utils.s3_stat_parser import (
+    from tools.stats.s3_stat_parser import (
         get_previous_reports_for_branch,
         get_previous_reports_for_pr,
         Report,
         HAVE_BOTO3)
+    from tools.testing.test_selections import calculate_shards
 except ImportError:
     print("Unable to import s3_stat_parser from tools. Running without S3 stats...")
     HAVE_BOTO3 = False
@@ -436,6 +436,8 @@ def calculate_job_times(reports: List["Report"]) -> Dict[str, float]:
                 new_avg = (curr_avg * curr_count + test_file['total_seconds']) / new_count
                 jobs_to_times[name] = (new_avg, new_count)
 
+    # This is no longer needed after https://github.com/pytorch/pytorch/pull/60604,
+    # TODO remove this once viable/strict move pass the merged commit.
     # if there's 'test_cpp_extensions_aot' entry in jobs_to_times, add 'test_cpp_extensions_aot_ninja'
     # and 'test_cpp_extensions_aot_no_ninja' duplicate entries to ease future computation since
     # test_cpp_extensions_aot_no_ninja and test_cpp_extensions_aot_ninja are Python test jobs that
@@ -602,7 +604,7 @@ def test_cuda_primary_ctx(test_module, test_directory, options):
     return run_test(test_module, test_directory, options, extra_unittest_args=['--subprocess'])
 
 
-def _test_cpp_extensions_aot(test_module, test_directory, options, use_ninja):
+def _test_cpp_extensions_aot(test_directory, options, use_ninja):
     if use_ninja:
         try:
             cpp_extension.verify_ninja_availability()
@@ -632,6 +634,9 @@ def _test_cpp_extensions_aot(test_module, test_directory, options, use_ninja):
 
     # "install" the test modules and run tests
     python_path = os.environ.get('PYTHONPATH', '')
+    from shutil import copyfile
+    test_module = 'test_cpp_extensions_aot' + ('_ninja' if use_ninja else '_no_ninja')
+    copyfile(test_directory + '/test_cpp_extensions_aot.py', test_directory + '/' + test_module + '.py')
     try:
         cpp_extensions = os.path.join(test_directory, 'cpp_extensions')
         install_directory = ''
@@ -646,16 +651,16 @@ def _test_cpp_extensions_aot(test_module, test_directory, options, use_ninja):
         return run_test(test_module, test_directory, options)
     finally:
         os.environ['PYTHONPATH'] = python_path
+        if os.path.exists(test_directory + '/' + test_module + '.py'):
+            os.remove(test_directory + '/' + test_module + '.py')
 
 
 def test_cpp_extensions_aot_ninja(test_module, test_directory, options):
-    return _test_cpp_extensions_aot('test_cpp_extensions_aot', test_directory,
-                                    options, use_ninja=True)
+    return _test_cpp_extensions_aot(test_directory, options, use_ninja=True)
 
 
 def test_cpp_extensions_aot_no_ninja(test_module, test_directory, options):
-    return _test_cpp_extensions_aot('test_cpp_extensions_aot',
-                                    test_directory, options, use_ninja=False)
+    return _test_cpp_extensions_aot(test_directory, options, use_ninja=False)
 
 
 def test_distributed(test_module, test_directory, options):

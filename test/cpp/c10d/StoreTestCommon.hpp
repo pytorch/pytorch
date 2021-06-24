@@ -1,7 +1,7 @@
 #pragma once
 
 #include <c10d/Store.hpp>
-#include <c10d/test/TestUtils.hpp>
+#include "TestUtils.hpp"
 
 #include <gtest/gtest.h>
 

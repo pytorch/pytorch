@@ -68,6 +68,7 @@ using vshort = VecType<int16_t>;
 using vqint8 = VecType<c10::qint8>;
 using vquint8 = VecType<c10::quint8>;
 using vqint = VecType<c10::qint32>;
+using vBFloat16 = VecType<c10::BFloat16>;
 
 template <typename T>
 using ValueType = typename T::value_type;
