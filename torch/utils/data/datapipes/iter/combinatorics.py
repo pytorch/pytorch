@@ -74,25 +74,38 @@ class ShuffleIterDataPipe(IterDataPipe[T_co]):
     def __init__(self,
                  datapipe: IterDataPipe[T_co],
                  *,
-                 buffer_size: int) -> None:
+                 buffer_size: int = 10000,
+                 unbatch_level: int = 0
+                 ) -> None:
         super().__init__()
         assert buffer_size > 0, "buffer_size should be larger than 0"
-        self.datapipe = datapipe
+        if unbatch_level == 0:
+            self.datapipe = datapipe
+        else:
+            self.datapipe = datapipe.unbatch(unbatch_level=unbatch_level)
         self.buffer_size = buffer_size
         self._buffer = []
+                
+    def buffer_replace(self, x):
+        idx = random.randint(0, self.buffer_size - 1)
+        val = self._buffer[idx]
+        self._buffer[idx] = x
+        return val
 
     def __iter__(self) -> Iterator[T_co]:
+        # TODO: Buffer is global, should be per __iter__ !!!
         for x in self.datapipe:
             if len(self._buffer) == self.buffer_size:
-                idx = random.randint(0, self.buffer_size - 1)
-                yield self._buffer[idx]
-                self._buffer[idx] = x
+                yield self.buffer_replace(x)
             else:
                 self._buffer.append(x)
+
         random.shuffle(self._buffer)
+  
         while self._buffer:
             yield self._buffer.pop()
 
+    
     def __len__(self) -> int:
         if isinstance(self.datapipe, Sized):
             return len(self.datapipe)
