@@ -5,7 +5,7 @@ import json
 import os
 import statistics
 from collections import defaultdict
-from tools.stats_utils.s3_stat_parser import get_previous_reports_for_branch, Report, Version2Report
+from tools.stats.s3_stat_parser import get_previous_reports_for_branch, Report, Version2Report
 from typing import cast, DefaultDict, Dict, List, Any
 from urllib.request import urlopen
 
