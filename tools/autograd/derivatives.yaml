@@ -7,6 +7,8 @@
 # An 'input gradient' is the gradient of an input to a forward function.
 # Input gradients are the outputs of backward functions, corresponding to the
 # input names included in the derivative formulas defined in this file.
+# Also, every time we talk computing "gradient" we actually mean computing
+# the vector jacobian product using the given 'output gradient' as the vector.
 #
 # Each entry consists of:
 #   - A 'name', which specifies the ATen name of the function you
@@ -17,14 +19,6 @@
 #     formula for multiple input names, by specifying a key
 #     "input1, input2" (see atan2 for an example).
 #   - An argument can be flagged as 'non_differentiable'.
-#     In general there are 3 possibilities:
-#       1. An argument has an entry with a specified gradient
-#       2. An argument has an entry specified as not differentiable
-#       3. An argument has no entry
-#     Using the flag 'non_differentiable' resolves to the second case.
-#     The second case was introduced in support for arguments of
-#     type e.g. IndexTensor for 'embedding', that are not differentiable.
-#     TODO: Determine whether case 3 and case 2 can be replaced by one concept.
 #   - Optional entry with key 'output_differentiability' and value a list of the
 #     same length as the number of outputs from the forward function. The list
 #     should contain only booleans, specifying whether each of the output Tensor
@@ -35,10 +29,24 @@
 #     If None of the output is differentiable, you can also add the function
 #     name to `gen_variable_type.py`'s `DONT_REQUIRE_DERIVATIVE` list.
 #
+# There are two cases for Tensor and TensorList arguments here:
+#   - If that argument is differentiable, in the sense that a gradient with respect
+#     to that argument could exist. You should either:
+#       - Specify the formula for that gradient
+#       - Specify not_implemented("function_name") as a formula to say that this is not
+#         implement yet (but might be in the future and the user can request that on an issue)
+#   - If that argument is not differentiable, because it is not a floating point dtype or the
+#     function is not differentiable with respect to that argument  for
+#     example. You should either:
+#       - Do not specify any formula for this argument
+#       - Specify explicitely that this argument is "non_differentiable". Note that in this case,
+#         we trust you that this argument will never have requires_grad=True and it will be silently
+#         ignored if it does.
+#
 # If a function has out-of-place and in-place variants, then the derivative
 # definition for the in-place variant is optional. It will default to the
-# definition for the out-of-place variant. Similarly, _out variants will
-# default to the derivative for the non _out variant.
+# definition for the out-of-place variant. Note that _out variants are never
+# differentiable.
 #
 # Gradient expressions are standard C++ expressions operating on ATen
 # variables.  In a gradient expression, the following variables are in
