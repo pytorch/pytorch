@@ -1,5 +1,6 @@
 import os
 import re
+import regex
 import sys
 
 __all__ = [
@@ -9,32 +10,29 @@ __all__ = [
 
 
 # Regular expression identifies a kernel launch indicator by
-# finding something approximating the pattern ">>>(arguments);"
+# finding something approximating the pattern
+# `<<<launch_args>>>(arguments);`
 # It then requires that `C10_CUDA_KERNEL_LAUNCH_CHECK` be
 # the next command.
-# It allows a single backslash `\` between the end of the launch
-# command and the beginning of the kernel check. This handles
-# cases where the kernel launch is in a multiline preprocessor
-# definition.
 #
-# There are various ways this can fail:
-# * If the semicolon is in a string for some reason
-# * If there's a triply-nested template
-# But this should be sufficient to detect and fix most problem
-# instances and can be refined before the test is made binding
-kernel_launch_regex = re.compile(r"""
-    ^.*>>>        # Identifies kernel launch
-    \s*           # Maybe some whitespace (includes newlines)
-    \([^;]+\);    # And then arguments in parens and semi-colon
-    (?!           # Negative lookahead: we trigger if we don't find the launch guard
-        \s*                                  # Maybe some whitespace (includes newlines)
-        \\?                                  # 0 or 1 backslashes (for launches in preprocessor macros)
-        \s*                                  # Maybe some whitespace (includes newlines)
-        (?:[0-9]+: )?                        # Detects and ignores a line numbering, if present
-        \s*                                  # Maybe some whitespace (includes newlines)
+# Some characters are allowed between the end of the kernel
+# launch and the check. At the moment, this includes everything
+# except `;` and `}`. A `;` would indicate an intervening
+# statement and a `}` would indicate leaving a clause.
+# In actuality, only whitespace, line numbers, and `\` for
+# continuing macros should be present.
+#
+# This should be sufficient to detect and fix most problem
+# instances and can be refined.
+kernel_launch_regex = regex.compile(r"""(
+    ^.*<<<[^>]+>>>         # Identifies kernel launch. We use `^.*` to get more context for fixing the issue
+    \s*                    # Maybe some whitespace (includes newlines)
+    (\(([^)(]+|(?2))*+\)); # Recursive regex that finds matching end paren followed by semi-colon
+    (?!                    # Negative lookahead: we trigger if we don't find the launch guard
+        [^;}]*             # Match any character that wouldn't indicate we've ended a statement/clause
         C10_CUDA_KERNEL_LAUNCH_CHECK\(\);  # Kernel launch guard!
     )             # End negative lookahead
-""", flags=re.MULTILINE | re.VERBOSE)
+)""", flags=re.MULTILINE | re.VERBOSE)
 
 
 def check_code_for_cuda_kernel_launches(code, filename=None):
@@ -57,9 +55,9 @@ def check_code_for_cuda_kernel_launches(code, filename=None):
     code = [f"{lineno}: {linecode}" for lineno, linecode in code]  # Number the lines
     code = '\n'.join(code)                                         # Put it back together
 
-    results = kernel_launch_regex.findall(code)               # Search for bad launches
+    results = kernel_launch_regex.findall(code)                    # Search for bad launches
     for r in results:
-        print(f"Missing C10_CUDA_KERNEL_LAUNCH_CHECK in '{filename}'. Context:\n{r}", file=sys.stderr)
+        print(f"Missing C10_CUDA_KERNEL_LAUNCH_CHECK in '{filename}'. Context:\n{r[0]}", file=sys.stderr)
     return len(results)
 
 

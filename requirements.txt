@@ -1,11 +1,12 @@
 # Python dependencies required for development
 astunparse
+dataclasses; python_version<"3.7"
 future
 numpy
 psutil
 pyyaml
+regex
 requests
 setuptools
 six
 typing_extensions
-dataclasses; python_version<"3.7"
