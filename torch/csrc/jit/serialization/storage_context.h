@@ -14,7 +14,8 @@ class TORCH_API SerializationStorageContext {
 
   uint64_t getOrAddStorage(c10::Storage storage) {
     if (!hasStorage(storage)) {
-      storage_id_map_[storage] = storage_id_map_.size();
+      uint64_t size = storage_id_map_.size();
+      storage_id_map_[storage] = size;
     }
     return storage_id_map_[storage];
   }
