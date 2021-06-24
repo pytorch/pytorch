@@ -46,7 +46,7 @@ inline void waitSocketConnected(
               std::chrono::high_resolution_clock::now() - startTime;
           if (elapsed > timeout) {
             errno = 0;
-            throw std::runtime_error(kConnectTimeoutMsg);
+            TORCH_CHECK(false, kConnectTimeoutMsg);
           }
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(10));

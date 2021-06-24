@@ -1,7 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/LegacyTHFunctionsCPU.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
@@ -562,7 +561,7 @@ Tensor multi_dot_impl(TensorList _tensors, c10::optional<Tensor> _out) {
     TORCH_CHECK(
         false,
         "multi_dot(): the last tensor must be 1D or 2D but got ",
-        _tensors[0].dim(),
+        _tensors[n - 1].dim(),
         "D");
   }
 
@@ -573,7 +572,7 @@ Tensor multi_dot_impl(TensorList _tensors, c10::optional<Tensor> _out) {
         "multi_dot(): tensor ",
         i,
         " must be 2D but got ",
-        _tensors[0].dim(),
+        _tensors[i].dim(),
         "D");
     tensors[i] = _tensors[i];
   }

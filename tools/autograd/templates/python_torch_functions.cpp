@@ -489,8 +489,17 @@ static PyObject * THPVariable_frombuffer(PyObject* self_, PyObject* args, PyObje
     size_t actual_count = 0;
     Py_buffer view;
 
-    if (PyObject_GetBuffer(buffer, &view, PyBUF_SIMPLE) < 0) {
-      return nullptr;
+    if (PyObject_GetBuffer(buffer, &view, PyBUF_WRITABLE) < 0) {
+      TORCH_CHECK(
+          PyObject_GetBuffer(buffer, &view, PyBUF_SIMPLE) >= 0,
+          "could not retrieve buffer from object");
+      TORCH_WARN_ONCE(
+          "The given buffer is not writable, and PyTorch does "
+          "not support non-writable tensors. This means you can write to the "
+          "underlying (supposedly non-writable) buffer using the tensor. "
+          "You may want to copy the buffer to protect its data or make it writable "
+          "before converting it to a tensor. This type of warning will be "
+          "suppressed for the rest of this program.");
     }
 
     Py_INCREF(view.obj);

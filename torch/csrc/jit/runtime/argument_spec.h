@@ -344,7 +344,9 @@ struct CompleteArgumentInfo {
     return pod(i).requires_grad;
   }
   at::Device device() const {
-    return at::Device(DeviceType(pod(i).dev_type), pod(i).device);
+    return at::Device(
+        DeviceType(pod(i).dev_type),
+        static_cast<c10::DeviceIndex>(pod(i).device));
   }
   int ndimension() const {
     // See [valid range], it is always valid to ask for offset for (i + 1)

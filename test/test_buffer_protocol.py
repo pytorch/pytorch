@@ -164,6 +164,19 @@ class TestBufferProtocol(common.TestCase):
                 self.assertSequenceEqual(arr[first:last], tensor)
                 self.assertTrue((tensor == 5).all().item())
 
+    @onlyCPU
+    @dtypes(*all_types())
+    def test_not_a_buffer(self, device, dtype):
+        with self.assertRaisesRegex(RuntimeError,
+                                    r"could not retrieve buffer from object"):
+            self._run_test(dtype, self.INPUT)
+
+    @onlyCPU
+    @dtypes(*all_types())
+    def test_non_writable_buffer(self, device, dtype):
+        with self.assertWarnsOnceRegex(UserWarning,
+                                       r"The given buffer is not writable."):
+            self._run_test(dtype, b"\x01\x02\x03\x04\x05\x06\x07\x08")
 
 instantiate_device_type_tests(TestBufferProtocol, globals())
 
