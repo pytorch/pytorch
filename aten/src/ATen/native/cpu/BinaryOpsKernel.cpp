@@ -305,7 +305,7 @@ void bitwise_xor_kernel(TensorIterator& iter) {
   }
 }
 
-void lshift_kernel(TensorIterator& iter) {
+void lshift_kernel(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Float || iter.dtype() == ScalarType::Double) {
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "lshift_cpu", [&]() {
       auto base_vec = Vectorized<scalar_t>((scalar_t)(2));
@@ -385,7 +385,7 @@ void logical_xor_kernel(TensorIterator& iter) {
   }
 }
 
-void rshift_kernel(TensorIterator& iter) {
+void rshift_kernel(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Float || iter.dtype() == ScalarType::Double) {
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "rshift_cpu", [&]() {
       auto base_vec = Vectorized<scalar_t>((scalar_t)(2));
