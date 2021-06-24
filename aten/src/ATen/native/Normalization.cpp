@@ -75,7 +75,8 @@ struct Var {
 };
 
 static inline bool is_contiguous(const Tensor& t) {
-  return t.is_contiguous() || t.is_contiguous(at::MemoryFormat::ChannelsLast);
+  return t.is_contiguous() || t.is_contiguous(at::MemoryFormat::ChannelsLast)
+      || t.is_contiguous(at::MemoryFormat::ChannelsLast3d);
 }
 
 template<typename scalar_t>
