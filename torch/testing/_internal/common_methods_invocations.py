@@ -1643,6 +1643,23 @@ def sample_inputs_broadcast_to(op_info, device, dtype, requires_grad, **kwargs):
             make_tensor(size, device, dtype, low=None, high=None, requires_grad=requires_grad),
             args=(shape,)) for size, shape in test_cases)
 
+def sample_inputs_bitwise_shift(op_info, device, dtype, requires_grad, **kwargs):
+    test_cases = (
+        (S, S, S),
+        (S,),
+        (),
+    )
+
+    sample_inputs = []
+    for size in test_cases:
+        tensor1 = make_tensor(size, device, dtype, low=-32, high=32, requires_grad=requires_grad)
+        tensor2 = make_tensor(size, device, dtype, low=0, high=5, requires_grad=requires_grad)
+        sample_inputs.append(SampleInput(tensor1, args=(tensor2,)))
+        sample_inputs.append(SampleInput(tensor1, args=(2,)))
+
+    return tuple(sample_inputs)
+
+
 def sample_inputs_cdist(op_info, device, dtype, requires_grad, **kwargs):
     small_S = 2
     test_cases = (
@@ -5073,6 +5090,18 @@ op_db: List[OpInfo] = [
                    ref=np.bitwise_not,
                    dtypes=integral_types_and(torch.bool),
                    supports_autograd=False),
+    OpInfo('bitwise_left_shift',
+           op=torch.bitwise_left_shift,
+           dtypesIfCPU=all_types(),
+           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_bitwise_shift),
+    OpInfo('bitwise_right_shift',
+           op=torch.bitwise_right_shift,
+           dtypesIfCPU=all_types(),
+           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_bitwise_shift),
     OpInfo('cdist',
            dtypes=floating_types(),
            supports_out=False,
