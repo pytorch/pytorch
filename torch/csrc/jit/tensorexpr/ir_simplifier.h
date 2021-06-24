@@ -404,9 +404,9 @@ class MinTerm : public ExprNode<MinTerm> {
 };
 
 // Stmt simplification should occur in both modes.
-class TORCH_API IRSimplifierBase : public IRMutator {
+class TORCH_API PolynomialBase : public IRMutator {
  public:
-  ~IRSimplifierBase() override = default;
+  ~PolynomialBase() override = default;
 
   Stmt* mutate(const Block* v) override;
 
@@ -427,9 +427,9 @@ class TORCH_API IRSimplifierBase : public IRMutator {
 };
 
 // Simplify the IR by combining arithmetic expressions over common terms.
-class TORCH_API PolynomialTransformer : public IRSimplifierBase {
+class TORCH_API PolynomialTransformer : public PolynomialBase {
  public:
-  using IRSimplifierBase::mutate;
+  using PolynomialBase::mutate;
   // Inserts term into the provided map, in the case of a hash collision
   // combines the term with the existing and updates the map.
   void addOrUpdateTerm(
@@ -536,12 +536,12 @@ class TORCH_API PolynomialTransformer : public IRSimplifierBase {
 
 // Expands Terms and Polynomial expressions into primitive operations.
 // Does some simple factorization and reordering.
-class TORCH_API TermExpander : public IRSimplifierBase {
+class TORCH_API TermExpander : public PolynomialBase {
   PolynomialTransformer* simplifier_;
   std::set<const Var*> eliminated_allocations_;
 
  public:
-  using IRSimplifierBase::mutate;
+  using PolynomialBase::mutate;
   TermExpander(PolynomialTransformer* simplifier) : simplifier_(simplifier) {}
   bool check_safe() {
     return eliminated_allocations_.empty();

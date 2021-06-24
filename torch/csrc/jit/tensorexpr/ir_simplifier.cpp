@@ -1467,7 +1467,7 @@ const Expr* PolynomialTransformer::mutate(const IfThenElse* v) {
   return new IfThenElse(condition_new, true_value_new, false_value_new);
 }
 
-Stmt* IRSimplifierBase::mutate(const Cond* v) {
+Stmt* PolynomialBase::mutate(const Cond* v) {
   const Expr* cond_old = v->condition();
   Stmt* true_old = v->true_stmt();
   Stmt* false_old = v->false_stmt();
@@ -1534,7 +1534,7 @@ Stmt* handleForCondReordering(const For* loop, Cond* cond) {
   return cond->cloneWithNewBody(new_f);
 }
 
-Stmt* IRSimplifierBase::mutate(const For* v) {
+Stmt* PolynomialBase::mutate(const For* v) {
   const Expr* var = v->var();
   const Expr* start = v->start();
   const Expr* stop = v->stop();
@@ -1588,7 +1588,7 @@ Stmt* IRSimplifierBase::mutate(const For* v) {
   return new For(var_new, start_new, stop_new, body_new, loop_options);
 }
 
-Stmt* IRSimplifierBase::mutate(const Block* v) {
+Stmt* PolynomialBase::mutate(const Block* v) {
   std::vector<Stmt*> stmts;
   // Flatten sub-blocks:
   for (Stmt* stmt : *v) {
@@ -2031,7 +2031,7 @@ const Expr* simplifyRoundModPattern(const Polynomial* poly) {
 }
 
 // Trivially factorize terms by GCD of scalar components.
-const Term* IRSimplifierBase::factorizePolynomial(const Polynomial* poly) {
+const Term* PolynomialBase::factorizePolynomial(const Polynomial* poly) {
   const Expr* scalar = poly->scalar();
   const std::vector<const Term*>& variables = poly->variables();
 
@@ -2392,7 +2392,7 @@ Stmt* TermExpander::fuseSyncThreads(Block* block) {
 }
 
 Stmt* TermExpander::mutate(const Block* v) {
-  Stmt* new_stmt = IRSimplifierBase::mutate(v);
+  Stmt* new_stmt = PolynomialBase::mutate(v);
   Block* new_block = dynamic_cast<Block*>(new_stmt);
   if (!new_block) {
     return new_stmt;
