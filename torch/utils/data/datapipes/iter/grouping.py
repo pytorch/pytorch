@@ -19,6 +19,8 @@ class BatchIterDataPipe(IterDataPipe[List[T_co]]):
         datapipe: Iterable DataPipe being batched
         batch_size: The size of each batch
         drop_last: Option to drop the last batch if it's not full
+        unbatch_level: Specifies if it necessary to unbatch source data before 
+            applying new batching rule
     """
     datapipe: IterDataPipe[T_co]
     batch_size: int
