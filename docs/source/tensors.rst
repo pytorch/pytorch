@@ -256,6 +256,10 @@ Tensor class reference
     Tensor.bitwise_or_
     Tensor.bitwise_xor
     Tensor.bitwise_xor_
+    Tensor.bitwise_left_shift
+    Tensor.bitwise_left_shift_
+    Tensor.bitwise_right_shift
+    Tensor.bitwise_right_shift_
     Tensor.bmm
     Tensor.bool
     Tensor.byte

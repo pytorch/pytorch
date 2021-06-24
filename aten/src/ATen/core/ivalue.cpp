@@ -944,18 +944,18 @@ getClassConverter() {
 }
 
 // Needs to be in this .cpp file to access the full definition of PyObjectHolder
-std::vector<std::reference_wrapper<const at::DataPtr>> ivalue::Future::extractDataPtrs(
+std::vector<c10::Storage> ivalue::Future::extractStorages(
     const at::IValue& value) {
-  std::vector<std::reference_wrapper<const at::DataPtr>> data_ptrs;
+  std::vector<c10::Storage> storages;
   // getSubValues works poorly on Python objects: it only works if they can be
   // converted to a "regular" IValue type hence, for example, it doesn't support
   // custom subclasses. Thus, instead, we extract the tensors through pickling.
   if (value.isPyObject()) {
     std::vector<at::Tensor> tensors =
         value.toPyObjectHolder()->extractTensors();
-    data_ptrs.reserve(tensors.size());
+    storages.reserve(tensors.size());
     for (const at::Tensor& tensor : tensors) {
-      data_ptrs.emplace_back(tensor.storage().data_ptr());
+      storages.push_back(tensor.storage());
     }
   } else {
     at::IValue::HashAliasedIValues sub_values;
@@ -964,11 +964,11 @@ std::vector<std::reference_wrapper<const at::DataPtr>> ivalue::Future::extractDa
     value.getSubValues(sub_values);
     for (const at::IValue& sub_value : sub_values) {
       if (sub_value.isTensor()) {
-        data_ptrs.emplace_back(sub_value.toTensor().storage().data_ptr());
+        storages.push_back(sub_value.toTensor().storage());
       }
     }
   }
-  return data_ptrs;
+  return storages;
 }
 
 TORCH_API intrusive_ptr<ivalue::Future> collectAll(
@@ -1070,7 +1070,7 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAny(
       if (src.hasError()) {
         dst->setError(src.exception_ptr());
       } else {
-        dst->markCompleted(src.constValue(), src.dataPtrs());
+        dst->markCompleted(src.constValue(), src.storages());
       }
     }
   };
