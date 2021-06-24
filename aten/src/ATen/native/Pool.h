@@ -15,6 +15,13 @@ using max_pool2d_backward_fn = void(*)(const Tensor& grad_input, const Tensor& g
 DECLARE_DISPATCH(max_pool2d_fn, max_pool2d_kernel);
 DECLARE_DISPATCH(max_pool2d_backward_fn, max_pool2d_backward_kernel);
 
+using max_pool3d_fn = void(*)(const Tensor& output, const Tensor& indices, const Tensor& input,
+    int kW, int kH, int kD, int dW, int dH, int dD, int pW, int pH, int pD, int dilationW, int dilationH, int dilationD);
+using max_pool3d_backward_fn = void(*)(const Tensor& grad_input, const Tensor& grad_output, const Tensor& indices);
+
+DECLARE_DISPATCH(max_pool3d_fn, max_pool3d_kernel);
+DECLARE_DISPATCH(max_pool3d_backward_fn, max_pool3d_backward_kernel);
+
 // averge pooling has same signature for forward and backward
 using avg_pool2d_fn = void(*)(const Tensor& output, const Tensor& input, int kW, int kH,
     int dW, int dH, int padW, int padH, bool count_include_pad, c10::optional<int64_t> divisor_override);
