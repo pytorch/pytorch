@@ -315,17 +315,6 @@ def collect_producer_nodes(node: Node) -> Optional[List[Node]]:
                 frontier.append(arg)
     return nodes
 
-def maybe_get_weight_observer_nodes(node: Node) -> Optional[List[Node]]:
-    r""" Given a node representing a function layer, return the weight observer
-    nodes going into that node
-    """
-    assert(node.op == 'call_function' and node.target in WEIGHT_INDEX_DICT)
-    for i, node_arg in enumerate(node.args):
-        if i in WEIGHT_INDEX_DICT[node.target]:
-            # node_arg is weight
-            return collect_producer_nodes(node_arg)
-    return None
-
 def graph_module_from_producer_nodes(
         root: GraphModule, producer_nodes: List[Node]) -> GraphModule:
     r''' Construct a graph module from extracted producer nodes

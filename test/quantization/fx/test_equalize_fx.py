@@ -22,6 +22,7 @@ from torch.testing._internal.common_quantization import (
     SingleLayerFunctionalLinearModel,
     TwoLayerFunctionalLinearModel,
     FunctionalLinearAddModel,
+    skipIfNoFBGEMM,
 )
 
 # Standard Libraries
@@ -190,6 +191,7 @@ class TestEqualizeFx(QuantizationTestCase):
             prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
             self.checkGraphModuleNodes(prepared, expected_node_occurrence=node_occurrence)
 
+    @skipIfNoFBGEMM
     def test_input_weight_equalization_convert(self):
         """ Tests that the modified model for equalization (before quantization)
         returns the same output as the original model
@@ -423,6 +425,7 @@ class TestEqualizeFx(QuantizationTestCase):
 
         return True
 
+    @skipIfNoFBGEMM
     def test_input_weight_equalization_graphs(self):
         """ Tests that the modified model for equalization has the same graph
         structure as the model without equalization (before and after
@@ -500,3 +503,29 @@ class TestEqualizeFx(QuantizationTestCase):
 
             # Check the order of nodes in the graph
             self.checkGraphModuleNodes(equalized_quantized_model, expected_node_list=node_list)
+
+    @skipIfNoFBGEMM
+    def test_input_weight_equalization_results(self):
+        """ Tests that for small models, the results of quantized models that
+        have been equalized are very close to models that have not been equalized.
+        """
+
+        tests = [SingleLayerLinearModel, TwoLayerLinearModel, LinearAddModel,
+                 SingleLayerFunctionalLinearModel, TwoLayerFunctionalLinearModel]
+
+        x = torch.rand((5, 5))
+        for M in tests:
+            m = M().eval()
+
+            # No equalization
+            prepared = prepare_fx(copy.deepcopy(m), qconfig_dict, equalization_qconfig_dict={})
+            prepared(x)
+            quantized = convert_fx(prepared)  # Check if compile
+            quantized_output = quantized(x)
+
+            # With equalization
+            prepared = prepare_fx(copy.deepcopy(m), qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
+            prepared(x)
+            equalized_and_quantized = convert_fx(prepared)  # Check if compile
+            equalized_and_quantized_output = equalized_and_quantized(x)
+            self.assertTrue(torch.allclose(quantized_output, equalized_and_quantized_output, atol=0.1))
