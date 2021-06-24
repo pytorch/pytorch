@@ -39,7 +39,7 @@
 #     function is not differentiable with respect to that argument  for
 #     example. You should either:
 #       - Do not specify any formula for this argument
-#       - Specify explicitely that this argument is "non_differentiable". Note that in this case,
+#       - Specify explicitly that this argument is "non_differentiable". Note that in this case,
 #         we trust you that this argument will never have requires_grad=True and it will be silently
 #         ignored if it does.
 #
