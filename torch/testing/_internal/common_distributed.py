@@ -513,34 +513,30 @@ class MultiProcessTestCase(TestCase):
         # exit to avoid run teardown() for fork processes
         sys.exit(0)
 
-    def run_test(self, test_name: str, parent_pipe, signal_pipe = None, event_listener_thread = None) -> None:
+    def run_test(self, test_name: str, parent_pipe, signal_pipe=None, event_listener_thread=None) -> None:
         if sys.platform != 'win32' and sys.platform != 'darwin':
             # Register signal handler to dump stack traces on FATALs.
             # Windows and MacOS do not support the signal handlers.
-            torch._C._set_print_stack_traces_on_fatal_signal(True)  # type: ignore[attr-defined]
+            torch._C._set_print_stack_traces_on_fatal_signal(True)
 
         # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
         # We're retrieving a corresponding test and executing it.
         try:
             getattr(self, test_name)()
-            # Close pipe after done with test.
-            if signal_pipe is not None:
-                signal_pipe.send(None)
-            if event_listener_thread is not None:
-                event_listener_thread.join()
-            parent_pipe.close()
         except Exception as e:
             logger.error(
                 f'Caught exception: \n{traceback.format_exc()} exiting '
                 'process with exit code: {MultiProcessTestCase.TEST_ERROR_EXIT_CODE}')
             # Send error to parent process.
+            parent_pipe.send(traceback.format_exc())
+            sys.exit(MultiProcessTestCase.TEST_ERROR_EXIT_CODE)
+        finally:
             if signal_pipe is not None:
                 signal_pipe.send(None)
             if event_listener_thread is not None:
                 event_listener_thread.join()
-            parent_pipe.send(traceback.format_exc())
+            # Close pipe after done with test.
             parent_pipe.close()
-            sys.exit(MultiProcessTestCase.TEST_ERROR_EXIT_CODE)
 
     def _get_timedout_process_traceback(self) -> None:
         pipes = []

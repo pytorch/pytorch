@@ -124,8 +124,6 @@ TESTS = [
     "distributed/test_launcher",
     'distributed/nn/jit/test_instantiator',
     'distributed/rpc/test_faulty_agent',
-    'distributed/rpc/test_process_group_agent',
-    'distributed/rpc/cuda/test_process_group_agent',
     'distributed/rpc/test_tensorpipe_agent',
     'distributed/rpc/cuda/test_tensorpipe_agent',
     'test_determination',
@@ -205,8 +203,6 @@ USE_PYTEST_LIST = [
 WINDOWS_BLOCKLIST = [
     'distributed/nn/jit/test_instantiator',
     'distributed/rpc/test_faulty_agent',
-    'distributed/rpc/test_process_group_agent',
-    'distributed/rpc/cuda/test_process_group_agent',
     'distributed/rpc/test_tensorpipe_agent',
     'distributed/rpc/cuda/test_tensorpipe_agent',
     'distributed/test_distributed_fork',
@@ -240,8 +236,6 @@ WINDOWS_BLOCKLIST = [
 ROCM_BLOCKLIST = [
     'distributed/nn/jit/test_instantiator',
     'distributed/rpc/test_faulty_agent',
-    'distributed/rpc/test_process_group_agent',
-    'distributed/rpc/cuda/test_process_group_agent',
     'distributed/rpc/test_tensorpipe_agent',
     'distributed/rpc/cuda/test_tensorpipe_agent',
     'test_determination',
@@ -294,8 +288,6 @@ TARGET_DET_LIST = [
     'test_view_ops',
     'distributed/nn/jit/test_instantiator',
     'distributed/test_distributed_fork',
-    'distributed/rpc/test_process_group_agent',
-    'distributed/rpc/cuda/test_process_group_agent',
     'distributed/rpc/test_tensorpipe_agent',
     'distributed/rpc/cuda/test_tensorpipe_agent',
     'distributed/algorithms/ddp_comm_hooks/test_ddp_hooks',
@@ -419,12 +411,12 @@ def print_to_stderr(message):
 
 # Convert something like pytorch_windows_vs2019_py36_cuda10.1_build to pytorch_windows_vs2019_py36_cuda10.1
 def get_stripped_CI_job() -> str:
-    job = os.environ.get("CIRCLE_JOB", "").rstrip('0123456789')
+    job = os.environ.get("JOB_BASE_NAME", "").rstrip('0123456789')
     if job.endswith('_slow_test'):
         job = job[:len(job) - len('_slow_test')]
-    elif job.endswith('_test'):
+    elif job.endswith('_test') or job.endswith('-test'):
         job = job[:len(job) - len('_test')]
-    elif job.endswith('_build'):
+    elif job.endswith('_build') or job.endswith('-build'):
         job = job[:len(job) - len('_build')]
     return job
 
@@ -478,7 +470,7 @@ def get_past_job_times() -> Dict[str, float]:
         curr_commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], encoding="ascii").strip()
         file_commit = test_times_json.get('commit', '')
         curr_ci_job = get_stripped_CI_job()
-        file_ci_job = test_times_json.get('CIRCLE_JOB', 'N/A')
+        file_ci_job = test_times_json.get('JOB_BASE_NAME', 'N/A')
         if curr_commit != file_commit:
             print(f'Current test times file is from different commit {file_commit}.')
         elif curr_ci_job != file_ci_job:
@@ -505,7 +497,7 @@ class JobTimeJSON(TypedDict):
 def get_job_times_json(job_times: Dict[str, float]) -> JobTimeJSON:
     return {
         'commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], encoding="ascii").strip(),
-        'CIRCLE_JOB': get_stripped_CI_job(),
+        'JOB_BASE_NAME': get_stripped_CI_job(),
         'job_times': job_times,
     }
 
@@ -964,7 +956,7 @@ def get_selected_tests(options):
         assert len(options.shard) == 2, "Unexpected shard format"
         assert min(options.shard) > 0, "Shards must be positive numbers"
         which_shard, num_shards = options.shard
-        assert which_shard <= num_shards, "Selected shard must be less or equal that total number of shards"
+        assert which_shard <= num_shards, "Selected shard must be less than or equal to total number of shards"
         assert num_shards <= len(selected_tests), f"Number of shards must be less than {len(selected_tests)}"
         selected_tests = get_shard(which_shard, num_shards, selected_tests)
 
