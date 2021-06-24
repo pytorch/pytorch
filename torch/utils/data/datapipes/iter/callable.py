@@ -49,10 +49,6 @@ class MapIterDataPipe(IterDataPipe[T_co]):
                  fn: Callable = default_fn,
                  fn_args: Optional[Tuple] = None,
                  fn_kwargs: Optional[Dict] = None,
-<<<<<<< HEAD
-=======
-                 batch_level: bool = False,
->>>>>>> [WIP] Make `map` DataPipe sensitive to batch_level argument
                  nesting_level: int = 0,
                  ) -> None:
         super().__init__()
@@ -64,7 +60,6 @@ class MapIterDataPipe(IterDataPipe[T_co]):
         self.fn = fn  # type: ignore[assignment]
         self.args = () if fn_args is None else fn_args
         self.kwargs = {} if fn_kwargs is None else fn_kwargs
-<<<<<<< HEAD
         if nesting_level < -1:
             raise ValueError("nesting_level must be -1 or >= 0")
         self.nesting_level = nesting_level
@@ -87,27 +82,6 @@ class MapIterDataPipe(IterDataPipe[T_co]):
     def __iter__(self) -> Iterator[T_co]:
         for data in self.datapipe:
             yield self._apply(data, self.nesting_level)
-=======
-        self.batch_level = batch_level
-        self.nesting_level = nesting_level
-
-    def _apply(self, data, nesting_level, fn, args, kwargs):
-        if nesting_level == 0:
-            return fn(data, *args, **kwargs)
-        elif nesting_level > 0:
-            result = [self._apply(i, nesting_level - 1, fn, args, kwargs) for i in data]
-            return result
-        else:
-            if isinstance(data, list):
-                result = [self._apply(i, nesting_level, fn, args, kwargs) for i in data]
-                return result
-            else:
-                return fn(data, *args, **kwargs)
-
-    def __iter__(self) -> Iterator[T_co]:
-        for data in self.datapipe:
-            yield self._apply(data, self.nesting_level, self.fn, self.args, self.kwargs)
->>>>>>> [WIP] Make `map` DataPipe sensitive to batch_level argument
 
     def __len__(self) -> int:
         if isinstance(self.datapipe, Sized):
