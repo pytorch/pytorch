@@ -34,6 +34,8 @@ class Transformer(Module):
         layer_norm_eps: the eps value in layer normalization components (default=1e-5).
         batch_first: If ``True``, then the input and output tensors are provided
             as (batch, seq, feature). Default: ``False`` (seq, batch, feature).
+        norm_first: if ``True``, encoder and decoder layers will perform LayerNorms before
+            other attention and feedforward operations, otherwise after. Default: ``False`` (after).
 
     Examples::
         >>> transformer_model = nn.Transformer(nhead=16, num_encoder_layers=12)
@@ -59,7 +61,7 @@ class Transformer(Module):
             encoder_layer = TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout,
                                                     activation, layer_norm_eps, batch_first, norm_first,
                                                     **factory_kwargs)
-            encoder_norm = LayerNorm(d_model, eps=layer_norm_eps, **factory_kwargs) if norm_first else None
+            encoder_norm = LayerNorm(d_model, eps=layer_norm_eps, **factory_kwargs)
             self.encoder = TransformerEncoder(encoder_layer, num_encoder_layers, encoder_norm)
 
         if custom_decoder is not None:
@@ -68,7 +70,7 @@ class Transformer(Module):
             decoder_layer = TransformerDecoderLayer(d_model, nhead, dim_feedforward, dropout,
                                                     activation, layer_norm_eps, batch_first, norm_first,
                                                     **factory_kwargs)
-            decoder_norm = LayerNorm(d_model, eps=layer_norm_eps, **factory_kwargs) if norm_first else None
+            decoder_norm = LayerNorm(d_model, eps=layer_norm_eps, **factory_kwargs)
             self.decoder = TransformerDecoder(decoder_layer, num_decoder_layers, decoder_norm)
 
         self._reset_parameters()
