@@ -96,6 +96,11 @@ struct C10_API Device final {
     return type_ == DeviceType::CPU;
   }
 
+  /// Return true if the device supports arbirtary strides.
+  bool supports_as_strided() const noexcept {
+    return type_ != DeviceType::XLA;
+  }
+
   /// Same string as returned from operator<<.
   std::string str() const;
 

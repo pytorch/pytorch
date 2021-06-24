@@ -242,8 +242,7 @@ inline std::tuple<Tensor, Tensor> pad_packed_sequence(
   Tensor padded_output, lengths;
   std::tie(padded_output, lengths) = torch::_pad_packed_sequence(
     sequence.data(), sequence.batch_sizes(), batch_first, padding_value, max_seq_length);
-  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-  Tensor unsorted_indices = sequence.unsorted_indices();
+  const Tensor& unsorted_indices = sequence.unsorted_indices();
   if (unsorted_indices.defined()) {
     int64_t batch_dim = batch_first ? 0 : 1;
     return std::make_tuple(padded_output.index_select(batch_dim, unsorted_indices), lengths.index({unsorted_indices}));

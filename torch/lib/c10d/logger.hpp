@@ -3,7 +3,7 @@
 
 namespace c10d {
 
-class Logger {
+class TORCH_API Logger {
  public:
   explicit Logger(std::shared_ptr<c10d::Reducer> reducer);
   // Set logging data that can be got during DistributedDataParallel
@@ -41,18 +41,12 @@ class Logger {
 
   // Calculate avg stats using cpu timer and gpu timer
   // that has been recorded in reducer.
-  void calculate_avg_cpu_time(
+  void calculate_avg_time(
       int64_t& avg_time,
       int64_t& time_duration,
-      int64_t cpu_start_time,
-      int64_t cpu_end_time);
-#ifdef USE_CUDA
-  void calculate_avg_gpu_time(
-      int64_t& avg_time,
-      int64_t& time_duration,
-      at::cuda::CUDAEvent& gpu_start,
-      at::cuda::CUDAEvent& gpu_end);
-#endif
+      Timer& timer,
+      Timer::Event start_event,
+      Timer::Event end_event);
   // Set stats that can be collected only during
   // training loop. It is called at the beginning of forward call
   // to record the run time stats of sampled iterations that previouly ran.

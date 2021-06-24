@@ -1,7 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/UpSample.h>
-#include <ATen/MetaFunctions.h>
 
 namespace at {
 namespace meta {
