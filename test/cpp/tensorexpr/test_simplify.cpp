@@ -1292,6 +1292,30 @@ TEST(Simplify, SimplifyDivWithLoopContext2) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Simplify, SimplifyModWithLoopContext0) {
+  KernelScope kernel_scope;
+  // Stmt to simplify:
+  // for (int i = 0; i < 100; i++) {
+  //  A[i] = i % 100;
+  //}
+  VarHandle i("i", kInt);
+  BufHandle a_buf("A", {100}, kInt);
+  auto forstmt = For::make(
+      i, 0, 100, Store::make(a_buf, {i}, (i % ExprHandle(100))));
+
+  const Stmt* simplified = IRSimplifier::simplify(forstmt);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT:   A[i] = i;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyModWithLoopContext1) {
   KernelScope kernel_scope;
   // Stmt to simplify:
