@@ -330,7 +330,7 @@ def try_ann_to_type(ann, loc):
         assert valid_type, msg.format(repr(ann), repr(contained))
         return OptionalType(valid_type)
     if is_union(ann):
-        inner = []
+        inner: List = []
         # We need these extra checks because both `None` and invalid
         # values will return `None`
         # TODO: Determine if the other cases need to be fixed as well
@@ -341,7 +341,7 @@ def try_ann_to_type(ann, loc):
             msg = "Unsupported annotation {} could not be resolved because {} could not be resolved."
             assert maybe_type, msg.format(repr(ann), repr(maybe_type))
             inner.append(maybe_type)
-        return UnionType(inner)
+        return UnionType(inner)    # type: ignore[arg-type]
     if torch.distributed.rpc.is_available() and is_rref(ann):
         return RRefType(try_ann_to_type(ann.__args__[0], loc))
     if is_future(ann):
