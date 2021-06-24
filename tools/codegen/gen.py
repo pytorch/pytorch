@@ -441,7 +441,7 @@ def compute_meta_function_declaration(g: NativeFunctionsGroup) -> Optional[str]:
         if parent_class is None:
             parent_class = "at::impl::MetaBase"
         return f"""\
-struct TORCH_API {name} : public {parent_class} {{
+struct TORCH_API structured_{name} : public {parent_class} {{
     void meta({args_str});
 }};
 """
@@ -998,6 +998,7 @@ def main() -> None:
         DispatchKey.CUDA,
         DispatchKey.CompositeImplicitAutograd,
         DispatchKey.CompositeExplicitAutograd,
+        DispatchKey.Meta,
     }
     if options.backend_whitelist:
         dispatch_keys = [k for k in dispatch_keys if is_generic_dispatch_key(k) or str(k) in options.backend_whitelist]
@@ -1012,10 +1013,10 @@ def main() -> None:
         fm.write_with_template(f'Register{dispatch_key}.cpp', 'RegisterDispatchKey.cpp', lambda: {
             'extra_cuda_headers': extra_cuda_headers if is_cuda_dispatch_key(dispatch_key) else '',
             'legacy_th_headers':
-                '#include <ATen/LegacyTHFunctionsCPU.h>' if dispatch_key == DispatchKey.CPU else
                 '#include <ATen/LegacyTHFunctionsCUDA.h>' if dispatch_key == DispatchKey.CUDA else
                 '',
             'external_backend_headers': '',
+            'namespaced_headers': f'#include <ATen/{dispatch_key}Functions.h>' if dispatch_key in functions_keys else '',
             'DispatchKey': dispatch_key,
             'dispatch_namespace': dispatch_key.lower(),
             'dispatch_namespaced_definitions': list(concatMap(
@@ -1071,7 +1072,7 @@ def main() -> None:
             list(mapMaybe(ComputeBackendSelect(Target.REGISTRATION, selector), native_functions)),
     })
 
-    cpu_fm.write('MetaFunctions.h', lambda: {
+    cpu_fm.write('NativeMetaFunctions.h', lambda: {
         'declarations': list(mapMaybe(compute_meta_function_declaration, structured_native_functions)),
     })
 

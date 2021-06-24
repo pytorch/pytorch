@@ -70,6 +70,38 @@ void geqrf_batched_cublas(const Tensor& input, const Tensor& tau) {
 }
 
 template <typename scalar_t>
+static void apply_lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
+#ifndef CUDART_VERSION
+  TORCH_CHECK(false, "lu_solve: cuBLAS backend for lu_solve is not available.")
+#else
+  cublasOperation_t trans = CUBLAS_OP_N;
+
+  auto pivots_data = pivots.data_ptr<int>();
+  auto batch_size = cuda_int_cast(batchCount(lu), "batch_size");;
+  auto m = cuda_int_cast(lu.size(-2), "m");
+  auto nrhs = cuda_int_cast(b.size(-1), "nrhs");
+  auto lda = cuda_int_cast(std::max<int>(1, m), "lda");
+  int info = 0;
+
+  Tensor lu_ptr_array = get_device_pointers<scalar_t>(lu);
+  Tensor b_ptr_array = get_device_pointers<scalar_t>(b);
+  auto lu_ptr_array_data = reinterpret_cast<scalar_t**>(lu_ptr_array.data_ptr());
+  auto b_ptr_array_data = reinterpret_cast<scalar_t**>(b_ptr_array.data_ptr());
+
+  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  at::cuda::blas::getrsBatched(handle, trans, m, nrhs, lu_ptr_array_data,
+    lda, pivots_data, b_ptr_array_data, lda, &info, batch_size);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info == 0);
+#endif
+}
+
+void lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(lu.scalar_type(), "lu_solve_cublas", [&]{
+    apply_lu_solve_batched_cublas<scalar_t>(b, lu, pivots);
+  });
+}
+
+template <typename scalar_t>
 static void apply_triangular_solve(Tensor& A, Tensor& B, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular) {
   cublasFillMode_t uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
   cublasOperation_t trans = transpose ? CUBLAS_OP_T : CUBLAS_OP_N;
@@ -1226,7 +1258,7 @@ void linalg_eigh_cusolver(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& inf
 // The 'apply_' word is used for templated by dtype functions that call an API routine
 // underneath. Since the cusolver API has a slightly different structure we do not prepend
 // apply_ to this function.
-void lu_cusolver_looped(const Tensor& self, const Tensor& pivots, const Tensor& infos, bool get_pivots) {
+void lu_looped_cusolver(const Tensor& self, const Tensor& pivots, const Tensor& infos, bool get_pivots) {
   // Fill the pivots tensor with indices using 1-based (Fortran) indexing. This
   // is needed for maintaining the same results with MAGMA.
   auto k = std::min(self.size(-2), self.size(-1));
@@ -1280,6 +1312,40 @@ void lu_cusolver_looped(const Tensor& self, const Tensor& pivots, const Tensor& 
       -std::numeric_limits<double>::infinity());
   }
 }
+
+void lu_solve_looped_cusolver(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(b.scalar_type(), "lu_solve_cusolver", [&] {
+    int n = cuda_int_cast(lu.size(-2), "n");
+    int nrhs = cuda_int_cast(b.size(-1), "nrhs");
+    auto batch_size = batchCount(lu);
+    auto info = at::zeros({1}, lu.options().dtype(kInt));
+    auto info_data = info.data_ptr<int>();
+    auto b_data = b.data_ptr<scalar_t>();
+    auto lu_data = lu.data_ptr<scalar_t>();
+    auto pivots_data = pivots.data_ptr<int>();
+    auto pivots_stride = pivots.size(-1);
+    auto lu_stride = matrixStride(lu);
+    auto b_stride = matrixStride(b);
+    int leading_dimension = cuda_int_cast(std::max<int>(1, n), "leading_dimension");
+
+    auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+    for (auto batch = decltype(batch_size){0}; batch < batch_size; ++batch) {
+      at::cuda::solver::getrs<scalar_t>(
+        handle,
+        n,
+        nrhs,
+        lu_data + batch * lu_stride,
+        leading_dimension,
+        pivots_data + batch * pivots_stride,
+        b_data + batch * b_stride,
+        leading_dimension,
+        info_data);
+
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info.item().toInt() == 0);
+    }
+  });
+}
+
 #endif  // USE_CUSOLVER
 
 }} // namespace at::native
