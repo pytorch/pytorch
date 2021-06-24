@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import sys
 import io
+import tempfile
 import unittest
 
 import torch
@@ -56,8 +57,12 @@ class ModelWithLists(torch.nn.Module):
 
 
 class TestModelDump(TestCase):
-    @unittest.skipIf(sys.version_info < (3, 7), "importlib.resources was new in 3.7")
+    def needs_resources(self):
+        if sys.version_info < (3, 7):
+            self.skipTest("importlib.resources was new in 3.7")
+
     def test_inline_skeleton(self):
+        self.needs_resources()
         skel = torch.utils.model_dump.get_inline_skeleton()
         assert "unpkg.org" not in skel
         assert "src=" not in skel
@@ -76,6 +81,34 @@ class TestModelDump(TestCase):
     def test_traced_model(self):
         model = torch.jit.trace(SimpleModel(), torch.zeros(2, 16))
         self.do_dump_model(model)
+
+    def test_main(self):
+        self.needs_resources()
+
+        with tempfile.NamedTemporaryFile() as tf:
+            torch.jit.save(torch.jit.script(SimpleModel()), tf)
+
+            stdout = io.StringIO()
+            torch.utils.model_dump.main(
+                    [
+                        None,
+                        "--style=json",
+                        tf.name,
+                    ],
+                    stdout=stdout)
+            self.assertRegex(stdout.getvalue(), r'\A{.*SimpleModel')
+
+            stdout = io.StringIO()
+            torch.utils.model_dump.main(
+                    [
+                        None,
+                        "--style=html",
+                        tf.name,
+                    ],
+                    stdout=stdout)
+            self.assertRegex(
+                    stdout.getvalue().replace("\n", " "),
+                    r'\A<!DOCTYPE.*SimpleModel.*componentDidMount')
 
     def get_quant_model(self):
         fmodel = QuantModel().eval()

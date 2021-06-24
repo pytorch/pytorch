@@ -361,7 +361,7 @@ def burn_in_info(skeleton, info):
         "BURNED_IN_MODEL_INFO = " + json.dumps(info).replace("/", "\\/"))
 
 
-def main(argv, stdout=None):
+def main(argv, *, stdout=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--style", choices=["json", "html"])
     parser.add_argument("--title")
