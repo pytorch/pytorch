@@ -51,6 +51,26 @@ TORCH_META_FUNC(mm)(const Tensor & self, const Tensor & mat2) {
   "The input tensor must be a matrix with size ", self.sizes()[0], "x", mat2.sizes()[1], ", but got a ", result.dim(),
   "-D tensor with size ", result.sizes()[0], "x", result.sizes()[1]);
 }
+
+TORCH_META_FUNC(addbmm)(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
+  TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
+  TORCH_CHECK(batch2.dim() == 3, "batch2 must be a 3D tensor");
+  TORCH_CHECK(batch1.size(0) == batch2.size(0),
+      "batch1 and batch2 must have same number of batches, got ",
+      batch1.size(0), " and ", batch2.size(0));
+  TORCH_CHECK(batch1.size(2) == batch2.size(1),
+      "Incompatible matrix sizes for bmm (",
+      batch1.size(1), "x", batch1.size(2), " and ",
+      batch2.size(1), "x", batch2.size(2), ")");
+
+  auto names = at::namedinference::propagate_names_for_addmm(batch1, batch2, self);
+  set_output(0, {batch1.size(1), batch2.size(2)}, {}, self.options(), names);
+  const auto& result = maybe_get_output(0);
+
+  TORCH_CHECK(result.dim() == 2 && result.size(0) == batch1.size(1) && result.size(1) == batch2.size(2),
+  "The input tensor must be a matrix with size ", batch1.size(1), "x", batch2.size(2), ", but got a ", result.dim(),
+  "-D tensor with size ", result.sizes()[0], "x", result.sizes()[1]);
+}
 } // namespace meta
 namespace native {
 
@@ -1053,22 +1073,6 @@ static void addmm_impl_cpu_(
 
 static void addbmm_impl_(
     Tensor &result, const Tensor &self, const Tensor &batch1, const Tensor &batch2, const Scalar& beta, const Scalar& alpha) {
-  TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
-  TORCH_CHECK(batch2.dim() == 3, "batch2 must be a 3D tensor");
-  TORCH_CHECK(batch1.size(0) == batch2.size(0),
-      "batch1 and batch2 must have same number of batches, got ",
-      batch1.size(0), " and ", batch2.size(0));
-  TORCH_CHECK(batch1.size(2) == batch2.size(1),
-      "Incompatible matrix sizes for bmm (",
-      batch1.size(1), "x", batch1.size(2), " and ",
-      batch2.size(1), "x", batch2.size(2), ")");
-
-  const int64_t dim1 = batch1.size(1);
-  const int64_t dim2 = batch2.size(2);
-  TORCH_CHECK(self.size(0) == dim1 && self.size(1) == dim2,
-      "self tensor does not match matmul output shape");
-
-  result.resize_as_(self);
 
   if (beta.to<c10::complex<double>>() != 0.0 && !self.is_same(result)) {
     result.copy_(self);
@@ -1092,24 +1096,12 @@ static void addbmm_impl_(
   }
 }
 
-Tensor& addbmm_out(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, Tensor& result) {
+TORCH_IMPL_FUNC(addbmm_out)(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, const Tensor& result) {
   auto b_self = expand_size(self, {batch1.size(1), batch2.size(2)}, "addbmm_out");
   {
     at::NoNamesGuard guard;
-    addbmm_impl_(result, *b_self, batch1, batch2, beta, alpha);
+    addbmm_impl_(const_cast<Tensor&>(result), *b_self, batch1, batch2, beta, alpha);
   }
-  auto names = at::namedinference::propagate_names_for_addmm(batch1, batch2, self);
-  at::namedinference::propagate_names_if_nonempty(result, names);
-  return result;
-}
-
-Tensor &addbmm_(Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
-  return native::addbmm_out(self, batch1, batch2, beta, alpha, self);
-}
-
-Tensor addbmm(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
-  Tensor result = at::empty({0}, self.options());
-  return native::addbmm_out(self, batch1, batch2, beta, alpha, result);
 }
 
 TORCH_IMPL_FUNC(addmm_out_cpu)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, const Tensor &result) {
