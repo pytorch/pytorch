@@ -409,7 +409,6 @@ filegroup(
         "aten/src/THCUNN/HardTanh.cu.cc",
         "aten/src/THCUNN/LeakyReLU.cu.cc",
         "aten/src/THCUNN/LogSigmoid.cu.cc",
-        "aten/src/THCUNN/MultiLabelMarginCriterion.cu.cc",
         "aten/src/THCUNN/MultiMarginCriterion.cu.cc",
         "aten/src/THCUNN/SoftMarginCriterion.cu.cc",
         "aten/src/THCUNN/SoftPlus.cu.cc",
