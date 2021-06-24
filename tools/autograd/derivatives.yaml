@@ -803,6 +803,16 @@
   self: grad * log1p(other.toDouble())
   result: auto_element_wise
 
+- name: special_zeta(Tensor self, Tensor other) -> Tensor
+  self: not_implemented("zeta")
+  other:  grad * -self * special_zeta(self + 1., other)
+
+- name: special_zeta.self_scalar(Scalar self, Tensor other) -> Tensor
+  other:  grad * -self * special_zeta(self.toDouble() + 1., other)
+
+- name: special_zeta.other_scalar(Tensor self, Scalar other) -> Tensor
+  self: not_implemented("zeta")
+
 - name: logdet(Tensor self) -> Tensor
   self: logdet_backward(grad, self, result)
 
