@@ -487,7 +487,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
     }
 
     std::stringstream cast;
-    cast << "(" << (lhs->isA<TensorView>() ? rhs_t : lhs_t) << ") ";
+    cast << "(" << (lhs->isA<kir::TensorIndex>() ? lhs_t : rhs_t) << ") ";
     return cast.str();
   }
 
@@ -553,8 +553,18 @@ class CudaKernelGenerator : private kir::IrVisitor {
       code_ << " = ";
     }
 
-    code_ << node->operation() << "(" << gen(node->in1()) << ", "
-          << gen(node->in2()) << ", " << gen(node->in3()) << ")";
+    code_ << node->operation() << "(" << gen(node->in1()) << ", ";
+
+    // Make sure the two operands of where has the same
+    // type. Note that compiling "where(0.0f, 0.0)" fails because of
+    // the overloading ambiguity.
+    if (node->operation() == TernaryOpType::Where) {
+      auto cast = scalarCast(node->in2(), node->in3());
+      code_ << (node->in2()->isScalar() ? cast : "") << gen(node->in2()) << ", "
+            << (node->in3()->isScalar() ? cast : "") << gen(node->in3()) << ")";
+    } else {
+      code_ << gen(node->in2()) << ", " << gen(node->in3()) << ")";
+    }
 
     if (!print_inline_) {
       code_ << ";\n";
