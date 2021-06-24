@@ -445,6 +445,13 @@ class OnePickleSection extends Component {
   }
 }
 
+function assertStorageAreEqual(key, lhs, rhs) {
+  if (lhs.length !== rhs.length ||
+    !lhs.every((val, idx) => val === rhs[idx])) {
+    throw new Error("Storage mismatch for key '" + key + "'");
+  }
+}
+
 function computeTensorMemory(numel, dtype) {
   const sizes = {
     "Byte": 1,
@@ -473,60 +480,74 @@ function computeTensorMemory(numel, dtype) {
 
 // TODO: Maybe track by dtype as well.
 // TODO: Maybe distinguish between visible size and storage size.
-// TODO: Maybe don't double-count if the model has
-// multiple references to the same submodule or tensor.
-function getTensorMemoryByDevice(data) {
+function getTensorStorages(data) {
   if (data === null) {
-    return {};
+    return new Map();
   }
   if (typeof(data) == "boolean") {
-    return {};
+    return new Map();
   }
   if (typeof(data) == "number") {
-    return {};
+    return new Map();
   }
   if (typeof(data) == "string") {
-    return {};
+    return new Map();
   }
   if (typeof(data) != "object") {
     throw new Error("Not an object");
   }
   if (Array.isArray(data)) {
-    let result = {};
+    let result = new Map();
     for (const item of data) {
-      const sizes = getTensorMemoryByDevice(item);
-      for (const [device, size] of Object.entries(sizes)) {
-        result[device] = (result[device] || 0) + size;
+      const tensors = getTensorStorages(item);
+      for (const [key, storage] of tensors.entries()) {
+        if (!result.has(key)) {
+          result.set(key, storage);
+        } else {
+          const old_storage = result.get(key);
+          assertStorageAreEqual(key, old_storage, storage);
+        }
       }
     }
     return result;
   }
   if (data.__tuple_values__) {
-    return getTensorMemoryByDevice(data.__tuple_values__);
+    return getTensorStorages(data.__tuple_values__);
   }
   if (data.__is_dict__) {
-    return getTensorMemoryByDevice(data.values);
+    return getTensorStorages(data.values);
   }
   if (data.__module_type__) {
-    return getTensorMemoryByDevice(data.state);
+    return getTensorStorages(data.state);
   }
   if (data.__tensor_v2__) {
     const [storage, offset, size, stride, grad] = data.__tensor_v2__;
     const [dtype, key, device, numel] = storage;
-    return {[device]: computeTensorMemory(numel, dtype)};
+    return new Map([[key, storage]]);
   }
   if (data.__qtensor__) {
     const [storage, offset, size, stride, quantizer, grad] = data.__qtensor__;
     const [dtype, key, device, numel] = storage;
-    return {[device]: computeTensorMemory(numel, dtype)};
+    return new Map([[key, storage]]);
   }
   throw new Error("Can't handle data type.", data);
 }
 
+function getTensorMemoryByDevice(data) {
+  const tensors = getTensorStorages(data);
+  let result = {};
+  for (const storage of tensors.values()) {
+    const [dtype, key, device, numel] = storage;
+    const size = computeTensorMemory(numel, dtype);
+    result[device] = (result[device] || 0) + size;
+  }
+  return result;
+}
+
 // Make this a separate component so it is rendered lazily.
 class OpenTensorMemorySection extends Component {
-  render({model_data}) {
-    let sizes = getTensorMemoryByDevice(model_data);
+  render({model: {model_data, constants}}) {
+    let sizes = getTensorMemoryByDevice([model_data, constants]);
     return html`
       <table>
         <thead>
@@ -547,10 +568,10 @@ class OpenTensorMemorySection extends Component {
   }
 }
 
-function TensorMemorySection({model: {model_data}}) {
+function TensorMemorySection({model}) {
   return html`
     <${Hider} name="Tensor Memory" shown=false>
-    <${OpenTensorMemorySection} model_data=${model_data} /><//>`;
+    <${OpenTensorMemorySection} model=${model} /><//>`;
 }
 
 class AuxContentPane extends Component {
