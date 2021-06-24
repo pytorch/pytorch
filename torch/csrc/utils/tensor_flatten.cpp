@@ -94,8 +94,8 @@ at::Tensor get_values(const at::Tensor& t) {
 }
 
 std::pair<at::Tensor, at::Tensor> flatten_sparse_tensors(at::TensorList tensors) {
-  auto flat_indices = flatten_dense_tensors(fmap(tensors, &get_indices));
-  auto flat_values = flatten_dense_tensors(fmap(tensors, &get_values));
+  auto flat_indices = utils::flatten_dense_tensors(fmap(tensors, &get_indices));
+  auto flat_values = utils::flatten_dense_tensors(fmap(tensors, &get_values));
   return std::make_pair(flat_indices, flat_values);
 }
 
@@ -104,8 +104,8 @@ std::vector<at::Tensor> unflatten_sparse_tensors(
         at::TensorList tensors) {
   if (tensors.size() == 0) return {};
 
-  auto indices = unflatten_dense_tensors(flat_indices, fmap(tensors, &get_indices));
-  auto values = unflatten_dense_tensors(flat_values, fmap(tensors, &get_values));
+  auto indices = utils::unflatten_dense_tensors(flat_indices, fmap(tensors, &get_indices));
+  auto values = utils::unflatten_dense_tensors(flat_values, fmap(tensors, &get_values));
 
   std::vector<at::Tensor> outputs;
   outputs.reserve(tensors.size());

@@ -1,12 +1,14 @@
 #include <torch/csrc/jit/passes/peephole.h>
 
 #include <ATen/core/jit_type.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/peephole_alias_sensitive.h>
 #include <torch/csrc/jit/passes/peephole_list_idioms.h>
+#include <torch/csrc/jit/passes/peephole_non_tensor.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/utils/memory.h>
 
@@ -31,6 +33,7 @@ struct PeepholeOptimizeImpl {
     bool changed = optimizeBlock(graph_->block());
     changed |= PeepholeOptimizeListIdioms(graph_);
     changed |= PeepholeOptimizeAliasSensitive(graph_);
+    changed |= PeepholeOptimizeNonTensor(graph_);
     return changed;
   }
 
@@ -52,18 +55,6 @@ struct PeepholeOptimizeImpl {
         changed |= optimizeBlock(sub_block);
       }
 
-      if (node->kind() != prim::Constant) {
-        WithInsertPoint guard(node);
-        // Any Value whose type is None should be replaced with a Constant
-        // This can occur if a module has an optional attribute, and it is
-        // initialized as None.
-        for (Value* output : node->outputs()) {
-          if (output->type()->cast<NoneType>()) {
-            output->replaceAllUsesWith(graph_->insertConstant(IValue()));
-            changed = true;
-          }
-        }
-      }
       // XXX: remember that if you want to simplify an expression by combining
       // multiple nodes into a different one, then you need to check that they
       // all belong to the given block
@@ -170,6 +161,25 @@ struct PeepholeOptimizeImpl {
           }
         }
       } else if (
+          node->matches("aten::len.t(t[] a) -> int") &&
+          node->input()->node()->matches("aten::size(Tensor self) -> int[]") &&
+          shape_peepholes_) {
+        auto ptt = node->input()->node()->input()->type()->expect<TensorType>();
+        // only handle one use case for now to avoid modifying mutated lists
+        // TODO: canonicalize as aten::dim ?
+        if (ptt->sizes().size() && node->input()->uses().size() == 1) {
+          WithInsertPoint guard(node);
+          auto output = node->owningGraph()->insertConstant(
+              static_cast<int64_t>(*ptt->sizes().size()));
+          GRAPH_UPDATE(
+              "Replacing ",
+              getHeader(node),
+              " with a \"dim\" constant ",
+              output->debugName());
+          node->output()->replaceAllUsesWith(output);
+          changed = true;
+        }
+      } else if (
           node->matches("aten::size(Tensor self, int dim) -> int") &&
           shape_peepholes_) {
         if (auto ptt = node->inputs().at(0)->type()->cast<TensorType>()) {
@@ -213,79 +223,6 @@ struct PeepholeOptimizeImpl {
           IValue ival(at::isComplexType(dtype));
           auto new_constant = node->owningGraph()->insertConstant(ival);
           node->output()->replaceAllUsesWith(new_constant);
-        }
-      } else if (node->kind() == prim::If) {
-        IfView n(node);
-        // this handles redundant short circuits like "x and True" or "x or
-        // False"
-        for (size_t i = 0; i < n.outputs().size(); ++i) {
-          if (n.outputs().at(i)->type() != BoolType::get()) {
-            continue;
-          }
-          bool true_val =
-              constant_as<bool>(n.thenOutputs().at(i)).value_or(false);
-          bool false_val =
-              constant_as<bool>(n.elseOutputs().at(i)).value_or(true);
-          // if an if node's output equals its condition replace output with
-          // condition
-          if (true_val && !false_val) {
-            GRAPH_UPDATE(
-                "Replacing ",
-                n.outputs().at(i)->debugName(),
-                " (True or False) with ",
-                n.cond()->debugName());
-            n.outputs().at(i)->replaceAllUsesWith(n.cond());
-            changed = true;
-          }
-        }
-      } else if (
-          node->kind() == aten::__is__ || node->kind() == aten::__isnot__) {
-        // if we are comparing a None value with a value that can't be None
-        // replace the output with true if node is __isnot__ or false if node is
-        // __is__
-        AT_ASSERT(node->inputs().size() == 2);
-        for (size_t check_none_index : {0, 1}) {
-          bool input_must_be_none =
-              node->inputs().at(check_none_index)->mustBeNone();
-          bool other_must_not_be_none =
-              node->inputs().at(1 - check_none_index)->mustNotBeNone();
-          if (input_must_be_none && other_must_not_be_none) {
-            WithInsertPoint guard(node);
-            auto output = node->owningGraph()->insertConstant(
-                node->kind() == aten::__isnot__);
-            GRAPH_UPDATE(
-                "Folding ", getHeader(node), " to ", output->debugName());
-            node->output()->replaceAllUsesWith(output);
-            changed = true;
-          }
-        }
-      } else if (
-          node->kind() == prim::unchecked_unwrap_optional ||
-          node->kind() == aten::_unwrap_optional) {
-        // we are unwrapping an input that can't be None, remove the unwrap
-        auto input = node->input();
-        if (input->mustNotBeNone()) {
-          GRAPH_UPDATE(
-              "Unwrapping ",
-              getHeader(node),
-              " as ",
-              node->input(),
-              " can't be optional");
-          node->output()->replaceAllUsesWith(node->input());
-          changed = true;
-        }
-      } else if (node->kind() == prim::unchecked_cast) {
-        // unchecked_cast is not generated for tensor properties, so we are not
-        // losing anything by calling unshapedType here
-        auto input_type = unshapedType(node->input()->type());
-        auto output_type = unshapedType(node->output()->type());
-        if (input_type->isSubtypeOf(output_type)) {
-          GRAPH_UPDATE(
-              "Removing ",
-              getHeader(node),
-              " as input type subtypes output type");
-          node->output()->replaceAllUsesWith(node->input());
-          changed = true;
         }
       } else if (
           node->matches("prim::dtype(Tensor a) -> int") && shape_peepholes_) {
@@ -439,7 +376,7 @@ bool FuseAddMM(Block* block) {
       // == 0 for it).
       if (node->get<at::Scalar>(attr::alpha).value().toDouble() == 1.) {
         // Look for mm from both sides of the add
-        for (size_t mm_side = 0; mm_side < 2; mm_side++) {
+        for (const auto mm_side : c10::irange(2)) {
           // Add will accept tensors of mismatched scalar types, as long as
           // one of them is a scalar. Addmm will throw in that case, so we can
           // only perform this fusion if we're sure that it is correct, and

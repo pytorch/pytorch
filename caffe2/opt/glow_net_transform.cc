@@ -66,6 +66,13 @@ C10_DEFINE_string(
     "A list of net positions whose corresponding op's inputs and outputs will be"
     " observed. ");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+C10_DEFINE_bool(
+    use_onnxifi_batch_size,
+    true,
+    "If true then instead of nominal batch blob for determining current batch "
+    "size we would use batch size provided as part of Glow request data.");
+
 namespace caffe2 {
 namespace glow {
 
@@ -158,6 +165,7 @@ void onnxifi(
   opts.predictor_net_ssa_rewritten = predictor_net_ssa_rewritten;
   opts.timeout = FLAGS_onnxifi_timeout_ms;
   opts.shape_hints_per_bs = shape_hints_per_bs;
+  opts.use_onnxifi_batch_size = FLAGS_use_onnxifi_batch_size;
 
   ShapeInfoMap more_shape_hints = shape_hints_max_bs;
   if (!FLAGS_onnxifi_shape_hints.empty()) {

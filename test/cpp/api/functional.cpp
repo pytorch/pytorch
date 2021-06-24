@@ -1750,6 +1750,15 @@ TEST_F(FunctionalTest, Softsign) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST_F(FunctionalTest, Mish) {
+  auto x = torch::randn(100) * 10;
+  auto y_exp = x * x.exp().log1p().tanh();
+  auto y = F::mish(x);
+
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(FunctionalTest, Tanhshrink) {
   auto x = torch::randn(100) * 10;
   auto y_exp = x - x.tanh();
@@ -2321,6 +2330,36 @@ TEST_F(FunctionalTest, Pad) {
            { 9.,  9., 10., 11., 11., 11.},
            { 9.,  9., 10., 11., 11., 11.}}}}}, torch::kDouble);
     ASSERT_EQ(output.sizes(), std::vector<int64_t>({1, 1, 5, 5, 6}));
+    ASSERT_TRUE(output.allclose(expected, 1e-04));
+  }
+  {
+    auto input = torch::arange(18, torch::kDouble).reshape({1, 1, 3, 2, 3});
+    auto output = F::pad(input, F::PadFuncOptions({0, 2, 1, 0, 1, 2}).mode(torch::kReflect));
+    auto expected = torch::tensor(
+       {{{{{ 9.,  10.,  11.,  10.,  9.},
+           { 6.,   7.,   8.,   7.,  6.},
+           { 9.,  10.,  11.,  10.,  9.}},
+
+          {{ 3.,  4.,  5.,  4.,  3.},
+           { 0.,  1.,  2.,  1.,  0.},
+           { 3.,  4.,  5.,  4.,  3.}},
+
+          {{ 9.,  10.,  11.,  10.,  9.},
+           { 6.,   7.,   8.,   7.,  6.},
+           { 9.,  10.,  11.,  10.,  9.}},
+
+          {{ 15.,  16.,  17.,  16.,  15.},
+           { 12.,  13.,  14.,  13.,  12.},
+           { 15.,  16.,  17.,  16.,  15.}},
+
+          {{ 9.,  10.,  11.,  10.,  9.},
+           { 6.,   7.,   8.,   7.,  6.},
+           { 9.,  10.,  11.,  10.,  9.}},
+
+          {{ 3.,  4.,  5.,  4.,  3.},
+           { 0.,  1.,  2.,  1.,  0.},
+           { 3.,  4.,  5.,  4.,  3.}}}}}, torch::kDouble);
+    ASSERT_EQ(output.sizes(), std::vector<int64_t>({1, 1, 6, 3, 5}));
     ASSERT_TRUE(output.allclose(expected, 1e-04));
   }
   {

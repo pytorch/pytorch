@@ -12,11 +12,17 @@ class FilterIterDataPipe(MapIterDataPipe):
 
     Iterable DataPipe to filter elements from datapipe according to filter_fn.
     args:
-        datapipe: Iterable DataPipe being filterd
+        datapipe: Iterable DataPipe being filtered
         filter_fn: Customized function mapping an element to a boolean.
         fn_args: Positional arguments for `filter_fn`
         fn_kwargs: Keyword arguments for `filter_fn`
+        drop_empty_batches: By default, drops batch if it is empty after filtering instead of keeping an empty list
+        nesting_level: Determines which level the fn gets applied to, by default it applies to the top level (= 0).
+        This also accepts -1 as input to apply filtering to the lowest nesting level. It currently doesn't support
+        argument < -1.
     """
+    drop_empty_batches: bool
+
     def __init__(self,
                  datapipe: IterDataPipe[T_co],
                  filter_fn: Callable[..., bool],
@@ -60,4 +66,4 @@ class FilterIterDataPipe(MapIterDataPipe):
             
 
     def __len__(self):
-        raise(NotImplementedError)
+        raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
