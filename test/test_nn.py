@@ -13282,6 +13282,39 @@ class TestNNDeviceType(NNTestCase):
         c = out.size(1)
         self.assertEqual(out.stride(), [c, 1, 1, 1, 1])
 
+    @onlyCPU
+    @dtypes(torch.float, torch.double)
+    def test_adaptive_avg_pool3d_ndhwc(self, device, dtype):
+        def helper(n, c, d, h, w, output_depth, output_height, output_width, contig):
+            input = torch.randint(1, 10, (n, c, d, h, w), device=device, dtype=dtype)
+            input = input.contiguous(memory_format=torch.channels_last_3d)
+            grad = torch.randint(1, 10, (4, 8, output_depth, output_height, output_width), device=device, dtype=dtype)
+            grad = grad.contiguous(memory_format=torch.channels_last_3d)
+            if not contig:
+                input = input[:, ::2, :, :, :]
+                grad = grad[:, ::2, :, :, :]
+            input.requires_grad_(True)
+            pool = torch.nn.AdaptiveAvgPool3d((output_depth, output_height, output_width)).to(device)
+
+            ref_input = input.detach().clone().contiguous().requires_grad_(True)
+            ref_grad = grad.detach().clone().contiguous()
+            ref_pool = torch.nn.AdaptiveAvgPool3d((output_depth, output_height, output_width)).to(device)
+
+            out = pool(input)
+            out.backward(grad)
+            ref_out = ref_pool(ref_input)
+            ref_out.backward(ref_grad)
+
+            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last_3d))
+            self.assertTrue(ref_out.is_contiguous())
+            self.assertEqual(out, ref_out)
+            self.assertEqual(input.grad, ref_input.grad)
+
+        for contig in [True, False]:
+            helper(4, 8, 10, 10, 10, 2, 7, 7, contig)
+            helper(4, 8, 18, 9, 14, 3, 5, 8, contig)
+            # test fast path when {OD, OH, OW} == {1, 1, 1}
+            helper(4, 8, 11, 11, 11, 1, 1, 1, contig)
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.uint8, torch.int8, torch.short, torch.int, torch.long)
