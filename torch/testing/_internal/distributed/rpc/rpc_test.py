@@ -6180,3 +6180,34 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
             self.assertTrue(torch.eq(fut.wait(), 3).all().item())
 
         rpc.shutdown()
+
+    @skip_if_lt_x_gpu(1)
+    def test_cuda_future_modify_tensor_inplace(self):
+        tensor = torch.zeros((100,), device="cuda:0")
+        future = Future(devices=["cuda:0"])
+        future.set_result(tensor)
+        # It's weird to modify the value of a future once it's complete, but
+        # technically possible. Currently this is considered undefined behavior
+        # (in practice the future will ignore the modification and still
+        # synchronize with the original value). We could one day add logic to
+        # detect and warn or throw in such cases, but for now we just check that
+        # this doesn't crash.
+        tensor.fill_(1)
+        future.wait()
+
+    @skip_if_lt_x_gpu(1)
+    def test_cuda_future_replace_tensor(self):
+        tensor_list = [torch.zeros((100,), device="cuda:0")]
+        future = Future(devices=["cuda:0"])
+        future.set_result(tensor_list)
+        # It's weird to modify the value of a future once it's complete, but
+        # technically possible. Currently this is considered undefined behavior
+        # (in practice the future will ignore the modification and still
+        # synchronize with the original value). We could one day add logic to
+        # detect and warn or throw in such cases, but for now we just check that
+        # this doesn't crash.
+        # We set things up so that the original tensor contained in the list
+        # gets deleted once we replace it with the other one. This will
+        # invalidate any cached information held by the future.
+        tensor_list[0] = torch.ones((100,), device="cuda:0")
+        future.wait()
