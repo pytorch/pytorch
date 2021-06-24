@@ -149,7 +149,7 @@ class CollateIterDataPipe(MapIterDataPipe):
                  fn_args: Optional[Tuple] = None,
                  fn_kwargs: Optional[Dict] = None,
                  ) -> None:
-        super().__init__(datapipe, fn=collate_fn, fn_args=fn_args, fn_kwargs=fn_kwargs, batch_level=True)
+        super().__init__(datapipe, fn=collate_fn, fn_args=fn_args, fn_kwargs=fn_kwargs)
 
 
 @functional_datapipe('legacy_transforms')
@@ -162,7 +162,6 @@ class TransformsIterDataPipe(MapIterDataPipe):
         datapipe: Iterable DataPipe being transformed
         transforms: A transform or a sequence of transforms from torchvision or torchaudio.
     """
-
     def __init__(self,
                  datapipe: IterDataPipe,
                  transforms: Callable,
