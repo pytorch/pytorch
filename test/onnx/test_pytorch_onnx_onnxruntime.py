@@ -9327,6 +9327,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         expected_min = 5.0
         expected_max = 10.0
+        expected_mean = (expected_min + expected_max) / 2
 
         model_export = M()
         dummy_input = (torch.tensor([expected_min]), torch.tensor([expected_max]))
@@ -9334,14 +9335,17 @@ class TestONNXRuntime(unittest.TestCase):
                                    training=torch.onnx.TrainingMode.EVAL)
 
         ort_out = []
-        for i in range(500):
+        for i in range(1000):
             ort_out.append(run_ort(ort_sess, input=dummy_input))
 
         actual_min = min(ort_out)
         actual_max = max(ort_out)
+        actual_mean = (actual_min[0] + actual_max[0]) / 2
 
         assert actual_min[0] >= expected_min, "the minimum value of ort outputs is out of scope."
         assert actual_max[0] <= expected_max, "the maximum value of ort outputs is out of scope."
+        assert abs(actual_mean - expected_mean) <= expected_mean * 0.05, \
+               "the mean value of ort outputs is out of scope."
 
 
 def make_test(name, base, layer, bidirectional, initial_state,
