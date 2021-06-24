@@ -56,8 +56,9 @@ class Hider extends Component {
 
   render({name, children}, {shown}) {
     let my_caret = html`<span class=caret onClick=${() => this.click()} >${caret(shown)}</span>`;
-    return html`<h2>${my_caret} ${name}</h2>
-      ${shown ? this.props.children : []}`;
+    return html`<div data-hider-title=${name} data-shown=${shown}>
+      <h2>${my_caret} ${name}</h2>
+      <div>${shown ? this.props.children : []}</div></div>`;
   }
 
   click() {
