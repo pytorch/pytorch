@@ -971,10 +971,8 @@ TYPED_TEST(TypedTensorTest, BigTensorSerialization) {
     }
     StringMap data;
     std::mutex mutex;
-    /*auto db = CreateDB("minidb", db_source, WRITE);*/
     auto acceptor = [&](const std::string& key, const std::string& value) {
       std::lock_guard<std::mutex> guard(mutex);
-      /*db->NewTransaction()->Put(key, value);*/
       data.emplace_back(key, value);
     };
     SerializeBlob(blob, "test", acceptor);
