@@ -9,13 +9,6 @@ and users can easily apply any of these hooks to optimize communication.
 Besides, the hook interface can also support user-defined communication
 strategies for more advanced use cases.
 
-.. warning ::
-    DDP communication hook is experimental and subject to change.
-
-.. warning ::
-    DDP communication hooks can only support single process single device mode
-    on NCCL backend.
-
 How to Use a Communication Hook?
 --------------------------------
 

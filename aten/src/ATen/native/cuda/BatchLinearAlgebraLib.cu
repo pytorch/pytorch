@@ -3,8 +3,6 @@
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
-#include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/CUDASolver.h>
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/CUDAEvent.h>
@@ -68,6 +66,38 @@ void apply_geqrf_batched(const Tensor& input, const Tensor& tau) {
 void geqrf_batched_cublas(const Tensor& input, const Tensor& tau) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "geqrf_batched_cuda", [&]{
     apply_geqrf_batched<scalar_t>(input, tau);
+  });
+}
+
+template <typename scalar_t>
+static void apply_lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
+#ifndef CUDART_VERSION
+  TORCH_CHECK(false, "lu_solve: cuBLAS backend for lu_solve is not available.")
+#else
+  cublasOperation_t trans = CUBLAS_OP_N;
+
+  auto pivots_data = pivots.data_ptr<int>();
+  auto batch_size = cuda_int_cast(batchCount(lu), "batch_size");;
+  auto m = cuda_int_cast(lu.size(-2), "m");
+  auto nrhs = cuda_int_cast(b.size(-1), "nrhs");
+  auto lda = cuda_int_cast(std::max<int>(1, m), "lda");
+  int info = 0;
+
+  Tensor lu_ptr_array = get_device_pointers<scalar_t>(lu);
+  Tensor b_ptr_array = get_device_pointers<scalar_t>(b);
+  auto lu_ptr_array_data = reinterpret_cast<scalar_t**>(lu_ptr_array.data_ptr());
+  auto b_ptr_array_data = reinterpret_cast<scalar_t**>(b_ptr_array.data_ptr());
+
+  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  at::cuda::blas::getrsBatched(handle, trans, m, nrhs, lu_ptr_array_data,
+    lda, pivots_data, b_ptr_array_data, lda, &info, batch_size);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info == 0);
+#endif
+}
+
+void lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(lu.scalar_type(), "lu_solve_cublas", [&]{
+    apply_lu_solve_batched_cublas<scalar_t>(b, lu, pivots);
   });
 }
 
@@ -492,12 +522,9 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool
 }
 
 
-// Todo: cusolverDnXpotrfBatched has some numerical issue and is not used here.
-//     A loop of cusolverDnXpotrf is used in case MAGMA is not linked in the pytorch build.
-//     We will switch to cusolverDnXpotrfBatched after the issue is fixed.
-//     See https://github.com/pytorch/pytorch/issues/53879.
+// Implementation of Cholesky decomposition using looped cusolverDn<T>potrf or cusolverDnXpotrf (64-bit)
 template<typename scalar_t>
-inline static void apply_cholesky_cusolver(const Tensor& self_working_copy, bool upper, const Tensor& infos) {
+inline static void apply_cholesky_cusolver_potrf_looped(const Tensor& self_working_copy, bool upper, const Tensor& infos) {
   auto handle = at::cuda::getCurrentCUDASolverDnHandle();
   const auto uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
   const int64_t n = self_working_copy.size(-1);
@@ -562,10 +589,41 @@ inline static void apply_cholesky_cusolver(const Tensor& self_working_copy, bool
 #endif // USE_CUSOLVER_64_BIT
 }
 
+// Implementation of Cholesky decomposition using batched cusolverDn<T>potrfBatched
+// Warning: cusolverDn<T>potrfBatched doesn't work quite well when matrix size or batch size is zero.
+// If you write your own C++ extension and use this function, make sure you do a zero numel check for the input.
+template<typename scalar_t>
+inline static void apply_cholesky_cusolver_potrfBatched(const Tensor& self_working_copy, bool upper, const Tensor& infos) {
+  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+  const auto uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
+  const int n = cuda_int_cast(self_working_copy.size(-1), "n");
+  const int lda = std::max<int>(1, n);
+
+  const int batch_size = cuda_int_cast(batchCount(self_working_copy), "batch_size");
+
+  // cusolver batched kernels require input be "device array of device pointers"
+  Tensor self_working_copy_array = get_device_pointers<scalar_t>(self_working_copy);
+
+  at::cuda::solver::potrfBatched<scalar_t>(
+    handle, uplo, n,
+    reinterpret_cast<scalar_t**>(self_working_copy_array.data_ptr()),
+    lda, infos.data_ptr<int>(), batch_size);
+}
+
 void cholesky_helper_cusolver(const Tensor& input, bool upper, const Tensor& info) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "cholesky_cusolver", [&] {
-    apply_cholesky_cusolver<scalar_t>(input, upper, info);
-  });
+  if (input.numel() == 0) {
+    return;
+  }
+
+  if (use_cusolver_potrf_batched_ && batchCount(input) > 1) {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "cholesky_cusolver", [&] {
+      apply_cholesky_cusolver_potrfBatched<scalar_t>(input, upper, info);
+    });
+  } else {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "cholesky_cusolver", [&] {
+      apply_cholesky_cusolver_potrf_looped<scalar_t>(input, upper, info);
+    });
+  }
 }
 
 
@@ -1195,6 +1253,39 @@ void linalg_eigh_cusolver(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& inf
   } else {
     return linalg_eigh_cusolver_syevd(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
   }
+}
+
+void lu_solve_looped_cusolver(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(b.scalar_type(), "lu_solve_cusolver", [&] {
+    int n = cuda_int_cast(lu.size(-2), "n");
+    int nrhs = cuda_int_cast(b.size(-1), "nrhs");
+    auto batch_size = batchCount(lu);
+    auto info = at::zeros({1}, lu.options().dtype(kInt));
+    auto info_data = info.data_ptr<int>();
+    auto b_data = b.data_ptr<scalar_t>();
+    auto lu_data = lu.data_ptr<scalar_t>();
+    auto pivots_data = pivots.data_ptr<int>();
+    auto pivots_stride = pivots.size(-1);
+    auto lu_stride = matrixStride(lu);
+    auto b_stride = matrixStride(b);
+    int leading_dimension = cuda_int_cast(std::max<int>(1, n), "leading_dimension");
+
+    auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+    for (auto batch = decltype(batch_size){0}; batch < batch_size; ++batch) {
+      at::cuda::solver::getrs<scalar_t>(
+        handle,
+        n,
+        nrhs,
+        lu_data + batch * lu_stride,
+        leading_dimension,
+        pivots_data + batch * pivots_stride,
+        b_data + batch * b_stride,
+        leading_dimension,
+        info_data);
+
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info.item().toInt() == 0);
+    }
+  });
 }
 
 #endif  // USE_CUSOLVER

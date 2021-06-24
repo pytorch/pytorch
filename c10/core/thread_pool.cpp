@@ -43,6 +43,7 @@ size_t ThreadPool::size() const {
 }
 
 size_t ThreadPool::numAvailable() const {
+  std::unique_lock<std::mutex> lock(mutex_);
   return available_;
 }
 

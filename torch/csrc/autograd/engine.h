@@ -112,6 +112,14 @@ struct GraphTask: std::enable_shared_from_this<GraphTask> {
 
   std::unordered_set<c10::Stream> leaf_streams;
 
+  // Per-device current and default streams of the execute() that called this GraphTask.
+  // These will be synced with leaf_streams in exec_post_processing.
+  std::vector<c10::optional<c10::Stream>> caller_current_streams_;
+  std::vector<c10::optional<c10::Stream>> caller_default_streams_;
+
+  // Collects caller_current_streams_ and caller_default_streams_
+  void stash_current_streams();
+
   void init_to_execute(Node& graph_root, const edge_list& outputs, bool accumulate_grad, uint64_t min_topo_nr);
 
   // The value of worker_device in the thread that created this task.
@@ -154,7 +162,7 @@ struct GraphTask: std::enable_shared_from_this<GraphTask> {
 
   // Future representing the completion of the graph task. Notified when all
   // tasks are done.
-  std::shared_ptr<at::ivalue::Future> future_result_;
+  c10::intrusive_ptr<at::ivalue::Future> future_result_;
 
   // Final callbacks installed during execution of this GraphTask
   std::vector<std::function<void()>> final_callbacks_;
@@ -174,7 +182,7 @@ struct GraphTask: std::enable_shared_from_this<GraphTask> {
         reentrant_depth_(reentrant_depth),
         exit_on_error_(exit_on_error),
         cpu_ready_queue_(std::move(cpu_ready_queue)),
-        future_result_(std::make_shared<at::ivalue::Future>(c10::ListType::create(c10::TensorType::get()))) {}
+        future_result_(c10::make_intrusive<at::ivalue::Future>(c10::ListType::create(c10::TensorType::get()))) {}
  private:
   // run GraphTask post processing
   void exec_post_processing();
@@ -294,7 +302,7 @@ struct TORCH_API Engine {
   //
   // NB: This API should only be used by internal autograd specific
   // machinery and shouldn't be exposed to users in anyway.
-  virtual std::shared_ptr<at::ivalue::Future> execute_with_graph_task(
+  virtual c10::intrusive_ptr<at::ivalue::Future> execute_with_graph_task(
       const std::shared_ptr<GraphTask>& graph_task,
       std::shared_ptr<Node> graph_root,
       InputBuffer&& input_buffer);

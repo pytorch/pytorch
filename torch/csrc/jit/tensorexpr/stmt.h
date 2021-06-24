@@ -150,6 +150,32 @@ class TORCH_API Block : public StmtNode<Block> {
     return true;
   }
 
+  // Creates a new block by cloning `this` block and replacing the given
+  // statement with a new statement. Note that `old_stmt` refers to a statement
+  // in `this` block. If the `old_stmt` is not found, it will return `nullptr`.
+  Block* clone_and_replace(Stmt* old_stmt, Stmt* new_stmt) {
+    if (new_stmt->get_parent()) {
+      throw malformed_input(
+          "Block replace Stmt with existing parent", new_stmt);
+    }
+
+    std::vector<Stmt*> stmts(stmts_.begin(), stmts_.end());
+    std::vector<Stmt*> cloned_stmts(stmts.size());
+    bool found = false;
+    for (int i = 0; i < static_cast<int>(stmts.size()); ++i) {
+      if (stmts[i] == old_stmt) {
+        found = true;
+        cloned_stmts[i] = new_stmt;
+      } else {
+        cloned_stmts[i] = Stmt::clone(stmts[i]);
+      }
+    }
+    if (!found) {
+      return nullptr;
+    }
+    return new Block(cloned_stmts);
+  }
+
   bool remove_stmt(Stmt* stmt) {
     auto pos = std::find(stmts_.begin(), stmts_.end(), stmt);
     if (pos == stmts_.end()) {
