@@ -172,12 +172,12 @@ bool SaveOpImpl::RunOnDevice() {
   }
 
   BlobSerializerBase::SerializationAcceptor acceptor =
-      [&](const std::string& blobName, const std::string& data) {
+      [&](const std::string& blobName, std::string&& data) {
         // transaction should take care of locking
         VLOG(2) << "Sending " << blobName << " blob's data of size "
                 << data.size() << " to db";
         auto transaction = out_db->NewTransaction();
-        transaction->Put(blobName, data);
+        transaction->Put(blobName, std::move(data));
         transaction->Commit();
       };
 

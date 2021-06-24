@@ -11,7 +11,6 @@ import statistics
 import subprocess
 import time
 from collections import defaultdict
-from glob import glob
 from pathlib import Path
 from typing import (Any, DefaultDict, Dict, Iterable, Iterator, List, Optional,
                     Set, Tuple, cast)
@@ -19,9 +18,9 @@ from xml.dom import minidom
 
 import requests
 from typing_extensions import TypedDict
-from tools.stats_utils.s3_stat_parser import (newify_case, get_S3_object_from_bucket, get_test_stats_summaries_for_job,
-                                              Report, Status, Commit, HAVE_BOTO3, Version2Case, VersionedReport,
-                                              Version1Report, Version2Report, ReportMetaMeta)
+from tools.stats.s3_stat_parser import (newify_case, get_S3_object_from_bucket, get_test_stats_summaries_for_job,
+                                        Report, Status, Commit, HAVE_BOTO3, Version2Case, VersionedReport,
+                                        Version1Report, Version2Report, ReportMetaMeta)
 
 
 
@@ -51,7 +50,7 @@ class SuiteDiff(TypedDict):
 
 
 # TODO: consolidate this with the get_cases function from
-# tools/test_history.py
+# tools/stats/test_history.py
 
 # Here we translate to a three-layer format (file -> suite -> case)
 # rather than a two-layer format (suite -> case) because as mentioned in
@@ -662,10 +661,23 @@ def parse_report(path: str) -> Iterator[TestCase]:
         yield TestCase(test_case)
 
 
+def get_recursive_files(folder: str, extension: str) -> Iterable[str]:
+    """
+    Get recursive list of files with given extension even.
+
+    Use it instead of glob(os.path.join(folder, '**', f'*{extension}'))
+    if folder/file names can start with `.`, which makes it hidden on Unix platforms
+    """
+    assert extension.startswith(".")
+    for root, _, files in os.walk(folder):
+        for fname in files:
+            if os.path.splitext(fname)[1] == extension:
+                yield os.path.join(root, fname)
+
+
 def parse_reports(folder: str) -> Dict[str, TestFile]:
-    reports = glob(os.path.join(folder, '**', '*.xml'), recursive=True)
     tests_by_file = dict()
-    for report in reports:
+    for report in get_recursive_files(folder, ".xml"):
         report_path = Path(report)
         # basename of the directory of test-report is the test filename
         test_filename = re.sub(r'\.', '/', report_path.parent.name)
@@ -678,6 +690,7 @@ def parse_reports(folder: str) -> Dict[str, TestFile]:
             tests_by_file[test_filename].append(test_case, test_type)
     return tests_by_file
 
+
 def build_info() -> ReportMetaMeta:
     return {
         "build_pr": os.environ.get("CIRCLE_PR_NUMBER", ""),
@@ -685,7 +698,7 @@ def build_info() -> ReportMetaMeta:
         "build_sha1": os.environ.get("CIRCLE_SHA1", ""),
         "build_base_commit": get_base_commit(os.environ.get("CIRCLE_SHA1", "HEAD")),
         "build_branch": os.environ.get("CIRCLE_BRANCH", ""),
-        "build_job": os.environ.get("CIRCLE_JOB", ""),
+        "build_job": os.environ.get("JOB_BASE_NAME", ""),
         "build_workflow_id": os.environ.get("CIRCLE_WORKFLOW_ID", ""),
     }
 
@@ -778,7 +791,7 @@ def assemble_s3_object(
 
 
 def send_report_to_s3(head_report: Version2Report) -> None:
-    job = os.environ.get('CIRCLE_JOB')
+    job = os.environ.get('JOB_BASE_NAME')
     sha1 = os.environ.get('CIRCLE_SHA1')
     branch = os.environ.get('CIRCLE_BRANCH', '')
     now = datetime.datetime.utcnow().isoformat()
@@ -824,7 +837,7 @@ def print_regressions(head_report: Report, *, num_prev_commits: int) -> None:
     else:
         commits = commits[:-1]
 
-    job = os.environ.get("CIRCLE_JOB", "")
+    job = os.environ.get("JOB_BASE_NAME", "")
     objects: Dict[Commit, List[Report]] = defaultdict(list)
 
     for commit in commits:
