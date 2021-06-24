@@ -69,20 +69,6 @@ class TestForeach(TestCase):
             RegularFuncWrapper(op.ref_inplace),
         )
 
-    # note(mkozuki): Input/Output type casting for add/sub.
-    # For BFloat16/Float16 I/O with add/sub,
-    # foreach implementations cast inputs to float32 and downcast the result
-    # to original dtype, while regular implementations don't.
-    def _requires_cast(self, op, dtype, is_fastpath, inputs):
-        second_arg = inputs[1] if isinstance(inputs[1], list) else [inputs[1] for _ in range(len(inputs[0]))]
-        return (
-            op.func in (torch._foreach_add, torch._foreach_sub, torch._foreach_add_, torch._foreach_sub_) and
-            dtype in (torch.bfloat16, torch.float16) and
-            self.is_cuda and
-            is_fastpath and
-            not any(isinstance(a, complex) for a in second_arg)
-        )
-
     # todo(mkozuki): remove this method once `TestForeach` is refactored with `@op` decorator.
     def _get_test_data(self, device, dtype, N):
         if dtype in [torch.bfloat16, torch.bool, torch.float16]:
@@ -96,10 +82,7 @@ class TestForeach(TestCase):
         return tensors
 
     def _binary_test(self, dtype, op, ref, inputs, is_fastpath, is_inplace, *, alpha=None):
-        requires_cast = self._requires_cast(op, dtype, is_fastpath, inputs)
         ref_inputs = [[t.clone().detach() for t in inputs[0]], inputs[1]] if is_inplace else inputs
-        if requires_cast:
-            ref_inputs = [[t.to(torch.float32) for t in ref_inputs[0]], ref_inputs[1]]
         try:
             actual = op(inputs, self.is_cuda, is_fastpath)
         except RuntimeError as e:
@@ -107,14 +90,10 @@ class TestForeach(TestCase):
                 ref(ref_inputs)
         else:
             expected = ref(ref_inputs)
-            if requires_cast:
-                expected = [t.to(dtype) for t in expected]
             self.assertEqual(actual, expected)
         if alpha is not None:
             kwargs = {'alpha': alpha}
             ref_inputs = inputs
-            if requires_cast:
-                ref_inputs = [[t.to(torch.float32) for t in tensors] for tensors in ref_inputs]
             try:
                 actual = op(inputs, self.is_cuda, is_fastpath, **kwargs)
             except RuntimeError as e:
@@ -122,8 +101,6 @@ class TestForeach(TestCase):
                     ref(ref_inputs, **kwargs)
             else:
                 expected = ref(ref_inputs, **kwargs)
-                if requires_cast:
-                    expected = [t.to(dtype) for t in expected]
                 if dtype in (torch.float16, torch.bfloat16) and TEST_WITH_ROCM:
                     self.assertEqual(expected, actual, atol=1.e-3, rtol=self.dtype_precisions[dtype][0])
                 else:
