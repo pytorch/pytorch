@@ -15,7 +15,7 @@ class _Loss(Module):
     def __init__(self, size_average=None, reduce=None, reduction: str = 'mean') -> None:
         super(_Loss, self).__init__()
         if size_average is not None or reduce is not None:
-            self.reduction = _Reduction.legacy_get_string(size_average, reduce)
+            self.reduction: str = _Reduction.legacy_get_string(size_average, reduce)
         else:
             self.reduction = reduction
 
@@ -24,6 +24,7 @@ class _WeightedLoss(_Loss):
     def __init__(self, weight: Optional[Tensor] = None, size_average=None, reduce=None, reduction: str = 'mean') -> None:
         super(_WeightedLoss, self).__init__(size_average, reduce, reduction)
         self.register_buffer('weight', weight)
+        self.weight: Optional[Tensor]
 
 
 class L1Loss(_Loss):
@@ -212,7 +213,6 @@ class NLLLoss(_WeightedLoss):
         self.ignore_index = ignore_index
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
-        assert self.weight is None or isinstance(self.weight, Tensor)
         return F.nll_loss(input, target, weight=self.weight, ignore_index=self.ignore_index, reduction=self.reduction)
 
 
@@ -529,8 +529,8 @@ class MSELoss(_Loss):
 
 
 class BCELoss(_WeightedLoss):
-    r"""Creates a criterion that measures the Binary Cross Entropy
-    between the target and the output:
+    r"""Creates a criterion that measures the Binary Cross Entropy between the target and
+    the input probabilities:
 
     The unreduced (i.e. with :attr:`reduction` set to ``'none'``) loss can be described as:
 
@@ -609,7 +609,6 @@ class BCELoss(_WeightedLoss):
         super(BCELoss, self).__init__(weight, size_average, reduce, reduction)
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
-        assert self.weight is None or isinstance(self.weight, Tensor)
         return F.binary_cross_entropy(input, target, weight=self.weight, reduction=self.reduction)
 
 
@@ -707,10 +706,10 @@ class BCEWithLogitsLoss(_Loss):
         super(BCEWithLogitsLoss, self).__init__(size_average, reduce, reduction)
         self.register_buffer('weight', weight)
         self.register_buffer('pos_weight', pos_weight)
+        self.weight: Optional[Tensor]
+        self.pos_weight: Optional[Tensor]
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
-        assert self.weight is None or isinstance(self.weight, Tensor)
-        assert self.pos_weight is None or isinstance(self.pos_weight, Tensor)
         return F.binary_cross_entropy_with_logits(input, target,
                                                   self.weight,
                                                   pos_weight=self.pos_weight,
@@ -1118,7 +1117,6 @@ class CrossEntropyLoss(_WeightedLoss):
         self.ignore_index = ignore_index
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
-        assert self.weight is None or isinstance(self.weight, Tensor)
         return F.cross_entropy(input, target, weight=self.weight,
                                ignore_index=self.ignore_index, reduction=self.reduction)
 
@@ -1167,7 +1165,6 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
         super(MultiLabelSoftMarginLoss, self).__init__(weight, size_average, reduce, reduction)
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
-        assert self.weight is None or isinstance(self.weight, Tensor)
         return F.multilabel_soft_margin_loss(input, target, weight=self.weight, reduction=self.reduction)
 
 
@@ -1206,6 +1203,12 @@ class CosineEmbeddingLoss(_Loss):
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
+
+    Shape:
+        - Input1: :math:`(N, D)`, where `N` is the batch size and `D` is the embedding dimension.
+        - Input2: :math:`(N, D)`, same shape as Input1.
+        - Target: :math:`(N)`.
+        - Output: If :attr:`reduction` is ``'none'``, then :math:`(N)`, otherwise scalar.
     """
     __constants__ = ['margin', 'reduction']
     margin: float
@@ -1285,7 +1288,7 @@ class MultiMarginLoss(_WeightedLoss):
     output :math:`y` is:
 
     .. math::
-        \text{loss}(x, y) = \frac{\sum_i \max(0, \text{margin} - x[y] + x[i]))^p}{\text{x.size}(0)}
+        \text{loss}(x, y) = \frac{\sum_i \max(0, \text{margin} - x[y] + x[i])^p}{\text{x.size}(0)}
 
     where :math:`x \in \left\{0, \; \cdots , \; \text{x.size}(0) - 1\right\}`
     and :math:`i \neq y`.
@@ -1335,7 +1338,6 @@ class MultiMarginLoss(_WeightedLoss):
         self.margin = margin
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
-        assert self.weight is None or isinstance(self.weight, Tensor)
         return F.multi_margin_loss(input, target, p=self.p, margin=self.margin,
                                    weight=self.weight, reduction=self.reduction)
 

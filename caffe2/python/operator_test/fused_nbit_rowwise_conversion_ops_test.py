@@ -205,7 +205,7 @@ def ErrorThresholdRow(X, bit_rate):
 
 class TestNBitFakeFused(hu.HypothesisTestCase):
     @given(bit_rate=st.sampled_from([2, 4]))
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def testNBit(self, bit_rate):
         # uncomment for debugging
         # np.random.seed(0)

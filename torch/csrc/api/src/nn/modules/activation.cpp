@@ -308,6 +308,18 @@ void SiLUImpl::pretty_print(std::ostream& stream) const {
 
 // ============================================================================
 
+Tensor MishImpl::forward(const Tensor& input) {
+  return F::mish(input);
+}
+
+void MishImpl::reset() {}
+
+void MishImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::Mish()";
+}
+
+// ============================================================================
+
 Tensor SigmoidImpl::forward(const Tensor& input) {
   return torch::sigmoid(input);
 }

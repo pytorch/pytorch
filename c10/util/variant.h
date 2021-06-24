@@ -677,8 +677,8 @@ inline constexpr auto invoke(F&& f, Args&&... args) MPARK_RETURN(
       void_t<decltype(lib::invoke(std::declval<F>(), std::declval<Args>()...))>,
       F,
       Args...>
-      : identity<decltype(
-            lib::invoke(std::declval<F>(), std::declval<Args>()...))> {};
+      : identity<decltype(lib::invoke(
+            std::declval<F>(), std::declval<Args>()...))> {};
 
 } // namespace detail_
 

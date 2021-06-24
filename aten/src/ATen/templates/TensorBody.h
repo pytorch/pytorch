@@ -136,6 +136,17 @@ class TORCH_API Tensor {
     }
   }
 
+  Tensor conj() const {
+    if (!this->is_complex()) {
+      return *this;
+    } else {
+      if (this->is_sparse()) {
+        return this->conj_physical();
+      }
+      return this->_conj();
+    }
+  }
+
   /// Should be used if *this can reasonably be expected to be contiguous and
   /// performance is important.
   /// Compared to contiguous, it saves a reference count
@@ -363,6 +374,18 @@ class TORCH_API Tensor {
     return !at::impl::variable_excluded_from_dispatch();
   }
 
+  inline bool is_conj() const {
+    return impl_->is_conj();
+  }
+
+  // sets the conjugate bit of a tensor.
+  // NOTE: Conjugate bit is supposed to be a read-only field. Only change this, if you are extremely sure
+  // that's what you want. Changing this might lead to incorrect behavior since conjugation is
+  // a lazy operation and we rely on this bit to determine if a conjugation needs to be materialized.
+  inline void _set_conj(bool conjugate) const {
+    impl_->_set_conj(conjugate);
+  }
+
   /// Returns a `Tensor`'s layout.
   Layout layout() const noexcept {
     return impl_->layout();
@@ -414,6 +437,12 @@ class TORCH_API Tensor {
     return impl_->is_hip();
   }
 
+  /// Returns if a `Tensor` has VE backend.
+  bool is_ve() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->is_ve();
+  }
+
   /// Returns if a `Tensor` has sparse backend.
   bool is_sparse() const {
     // NB: this is not a native function to avoid dispatching overhead.
@@ -460,6 +489,11 @@ class TORCH_API Tensor {
   /// also have other designations.
   bool is_meta() const {
     return impl_->is_meta();
+  }
+
+  /// Returns if a `Tensor` is an inference tensor.
+  bool is_inference() const {
+    return impl_->is_inference();
   }
 
   /// If a tensor is a quantized tensor, returns its quantizer
@@ -584,6 +618,7 @@ class TORCH_API Tensor {
   Tensor cpu() const;
   Tensor cuda() const;
   Tensor hip() const;
+  Tensor ve() const;
   Tensor vulkan() const;
   Tensor metal() const;
 
@@ -683,7 +718,13 @@ class TORCH_API Tensor {
 
   /// \fn void retain_grad() const;
   ///
-  /// Enables .grad() for non-leaf Tensors.
+  /// Enables this Tensor to have their :attr:`grad` populated during
+  /// :func:`backward`. This is a no-op for leaf tensors.
+
+  /// \fn bool retains_grad() const;
+  ///
+  /// Is ``true`` if this Tensor is non-leaf and its :attr:`grad` is enabled to be
+  /// populated during :func:`backward`, ``false`` otherwise.
 
   const Tensor& set_requires_grad(bool requires_grad) const {
     impl_->set_requires_grad(requires_grad);
@@ -706,7 +747,16 @@ class TORCH_API Tensor {
   /// The attribute will then contain the gradients computed and future calls
   /// to `backward()` will accumulate (add) gradients into it.
   const Tensor& grad() const {
-    return impl_->grad();
+    const Tensor& maybe_grad = impl_->grad();
+    if (!is_leaf() && !retains_grad() && !maybe_grad.defined()) {
+      TORCH_WARN(
+        "The .grad attribute of a Tensor that is not a leaf Tensor is being accessed. Its .grad "
+        "attribute won't be populated during autograd.backward(). If you indeed want the .grad "
+        "field to be populated for a non-leaf Tensor, use .retain_grad() on the non-leaf Tensor. "
+        "If you access the non-leaf Tensor by mistake, make sure you access the leaf Tensor "
+        "instead. See github.com/pytorch/pytorch/pull/30531 for more informations.");
+    }
+    return maybe_grad;
   }
 
   // The Forward AD API functions below are low level and are not to be used by end
@@ -863,6 +913,8 @@ public:
 
   void retain_grad() const;
 
+  bool retains_grad() const;
+
   void _backward(TensorList inputs, const c10::optional<Tensor>& gradient, c10::optional<bool> keep_graph, bool create_graph) const;
 
   const Tensor& requires_grad_(bool _requires_grad=true) const;
@@ -974,6 +1026,60 @@ struct MaybeOwnedTraits<at::Tensor> {
 
   static bool debugBorrowIsValid(const borrow_type& borrow) {
     return true;
+  }
+};
+
+template <>
+struct ExclusivelyOwnedTraits<at::Tensor> {
+  using repr_type = at::Tensor;
+  using pointer_type = at::Tensor*;
+  using const_pointer_type = const at::Tensor*;
+
+  static repr_type nullRepr() {
+    return at::Tensor();
+  }
+
+  template <class... Args>
+  static repr_type createInPlace(Args&&... args) {
+    return at::Tensor(std::forward<Args>(args)...);
+  }
+
+  static repr_type moveToRepr(at::Tensor&& x) {
+    return std::move(x);
+  }
+
+  static void destroyOwned(at::Tensor& x) {
+    TensorImpl*const toDestroy = x.unsafeReleaseTensorImpl();
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(toDestroy != nullptr, "Tensor somehow got null TensorImpl?");
+    // May be 0 because UndefinedTensorImpl doesn't get its refcount
+    // incremented.
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        toDestroy->refcount_ == 1 || (toDestroy->refcount_ == 0 && toDestroy == UndefinedTensorImpl::singleton()),
+        "ExclusivelyOwned<Tensor> destroyed with refcount ", toDestroy->refcount_, ", expected 1!");
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        toDestroy->weakcount_ == 1 || (toDestroy->weakcount_ == 0 && toDestroy == UndefinedTensorImpl::singleton()),
+        "ExclusivelyOwned<Tensor> destroyed with weakcount ", toDestroy->weakcount_, ", expected 1!");
+    if (toDestroy != UndefinedTensorImpl::singleton()) {
+#ifndef NDEBUG
+      // Needed to pass the debug assertions in ~intrusive_ptr_target.
+      toDestroy->refcount_ = 0;
+      toDestroy->weakcount_ = 0;
+#endif
+      toDestroy->release_resources();
+      delete toDestroy;
+    }
+  }
+
+  static at::Tensor take(at::Tensor& x) {
+    return std::move(x);
+  }
+
+  static pointer_type getImpl(repr_type& x) {
+    return &x;
+  }
+
+  static const_pointer_type getImpl(const repr_type& x) {
+    return &x;
   }
 };
 } // namespace c10

@@ -11,7 +11,7 @@ from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_versi
 from numbers import Number
 from typing import Dict, Any
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, dtypes, onlyCPU, onlyCUDA)
+    (instantiate_device_type_tests, ops, dtypes, dtypesIfCPU, onlyCPU, onlyCUDA)
 from torch.testing._internal.common_methods_invocations import \
     (sparse_unary_ufuncs)
 
@@ -245,6 +245,20 @@ class TestSparse(TestCase):
 
         ref = test_sparse_sum()
         self.assertTrue(ref.expired())
+
+    @dtypes(torch.double)
+    def test_ctor_large_sizes(self, device, dtype):
+        # Test that integer overflow is detected when computing numel
+        # of a sparse tensor with large dimensions (gh-57416). Notice
+        # that numel is computed internally when constructing a
+        # tensor, hence the overflow may appear during the tensor
+        # construction step.
+        N = 100000
+        indices = torch.tensor([[N, N - 1]] * 4, dtype=torch.int64, device=device)
+        values = torch.tensor([1, 2], dtype=dtype, device=device)
+        self.assertRaises(RuntimeError,
+                          lambda: torch.sparse_coo_tensor(
+                              indices, values, (N + 1,) * 4, device=device))
 
     @dtypes(torch.double, torch.cdouble)
     def test_ctor_size_checks(self, device, dtype):
@@ -1198,9 +1212,13 @@ class TestSparse(TestCase):
         # Test code from issue https://github.com/pytorch/pytorch/issues/45113
         batch_size, input_size, hidden_size = 5, 3, 7
 
-        # Create coalesced sparse tensor as in the issue
+        # Create coalesced sparse tensor with non-contiguous indices
         weight = torch.randn(hidden_size, input_size, dtype=dtype, device=device).to_sparse()
         self.assertTrue(weight.is_coalesced())
+        non_contig_indices = weight.indices().transpose(-1, -2).contiguous().transpose(-1, -2)
+        weight = torch.sparse_coo_tensor(
+            indices=non_contig_indices, values=weight.values(), size=weight.shape)
+        weight._coalesced_(True)
         self.assertFalse(weight._indices().is_contiguous())
         # Create un/coalesced sparse tensor
         bias = torch.randn((hidden_size, 1), dtype=dtype, device=device).to_sparse()
@@ -3193,6 +3211,7 @@ class TestSparse(TestCase):
     @skipIfRocm
     @coalescedonoff
     @dtypes(torch.double)
+    @dtypesIfCPU(torch.double, torch.cdouble)
     def test_sparse_matmul(self, device, dtype, coalesced):
         """
         This function test `torch.sparse.mm` when both the mat1 and mat2 are sparse tensors.
@@ -3411,7 +3430,7 @@ class TestSparseUnaryUfuncs(TestCase):
 
     @ops(sparse_unary_ufuncs)
     def test_sparse_consistency(self, device, dtype, op):
-        unsupportedTypes = [torch.bfloat16, torch.cfloat, torch.cdouble]
+        unsupportedTypes = [torch.bfloat16, torch.float16]
         if dtype in unsupportedTypes:
             self.skipTest('Skipped! Unsupported dtypes for Sparse')
 
@@ -3429,6 +3448,21 @@ class TestSparseUnaryUfuncs(TestCase):
         output = op(sample.input.to_sparse())
         assert torch.is_tensor(output)
         self.assertEqual(output.to_dense(), expected)
+
+    @ops(sparse_unary_ufuncs)
+    def test_sparse_zero_dims(self, device, dtype, op):
+        # test 0x0 sparse_coo_tensor
+
+        unsupportedTypes = [torch.bfloat16, torch.float16]
+        if dtype in unsupportedTypes:
+            self.skipTest('Skipped! Unsupported dtypes for Sparse')
+
+        indices = torch.empty(2, 0, dtype=torch.int64)
+        values = torch.empty(0, dtype=dtype)
+        sparse_0x0 = torch.sparse_coo_tensor(indices, values, (0, 0))
+        expected = torch.sparse_coo_tensor(indices, op(values), (0, 0))
+        actual = op(sparse_0x0)
+        self.assertEqual(expected, actual)
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
 instantiate_device_type_tests(TestSparseUnaryUfuncs, globals())
