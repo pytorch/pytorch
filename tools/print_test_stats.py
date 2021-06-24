@@ -698,7 +698,7 @@ def build_info() -> ReportMetaMeta:
         "build_sha1": os.environ.get("CIRCLE_SHA1", ""),
         "build_base_commit": get_base_commit(os.environ.get("CIRCLE_SHA1", "HEAD")),
         "build_branch": os.environ.get("CIRCLE_BRANCH", ""),
-        "build_job": os.environ.get("CIRCLE_JOB", ""),
+        "build_job": os.environ.get("JOB_BASE_NAME", ""),
         "build_workflow_id": os.environ.get("CIRCLE_WORKFLOW_ID", ""),
     }
 
@@ -791,7 +791,7 @@ def assemble_s3_object(
 
 
 def send_report_to_s3(head_report: Version2Report) -> None:
-    job = os.environ.get('CIRCLE_JOB')
+    job = os.environ.get('JOB_BASE_NAME')
     sha1 = os.environ.get('CIRCLE_SHA1')
     branch = os.environ.get('CIRCLE_BRANCH', '')
     now = datetime.datetime.utcnow().isoformat()
@@ -837,7 +837,7 @@ def print_regressions(head_report: Report, *, num_prev_commits: int) -> None:
     else:
         commits = commits[:-1]
 
-    job = os.environ.get("CIRCLE_JOB", "")
+    job = os.environ.get("JOB_BASE_NAME", "")
     objects: Dict[Commit, List[Report]] = defaultdict(list)
 
     for commit in commits:

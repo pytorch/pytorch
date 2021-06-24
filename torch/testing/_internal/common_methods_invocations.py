@@ -5,6 +5,7 @@ import collections
 import copy
 import operator
 import random
+import numbers
 
 import torch
 import numpy as np
@@ -147,6 +148,30 @@ class SampleInput(object):
 
         return self._repr_helper(formatter)
 
+    # Returns the NumPy version of the sample input object in the form of a tuple: (input, args, kwargs)
+    def numpy(self):
+        # Converts tensors to ndarrays by calling .detach().cpu().numpy() on them
+        # Numbers, strings, and bool are preserved as is
+        # Lists, tuples and dicts are handled by calling this function recursively
+        def to_numpy(x):
+            def _np(t):
+                return t.detach().cpu().numpy()
+
+            if isinstance(x, torch.Tensor):
+                return _np(x)
+            elif isinstance(x, list):
+                return list(map(to_numpy, x))
+            elif isinstance(x, tuple):
+                return tuple(map(to_numpy, x))
+            elif isinstance(x, dict):
+                return {k: to_numpy(v) for k, v in x.items()}
+            elif isinstance(x, (numbers.Number, bool, str)):
+                return x
+
+            raise ValueError("Unknown type {0}!".format(type(x)))
+
+        sample_np_input, np_args, np_kwargs = to_numpy(self.input), to_numpy(self.args), to_numpy(self.kwargs)
+        return (sample_np_input, np_args, np_kwargs)
 
 class AliasInfo(object):
     """Class holds alias information. For example, torch.abs ->
@@ -412,6 +437,8 @@ class OpInfo(object):
     def __init__(self,
                  name,  # the string name of the function
                  *,
+                 ref=None,  # An optional reference function that accepts ndarrays (AKA "NumPy arrays").
+                            # If given, the op will be compared with its reference on each of its sample inputs.
                  # the following metadata describes the operator, its variants,
                  #   and its aliases, if any
                  aliases=None,  # iterable of aliases, e.g. ("absolute",) for torch.abs
@@ -499,6 +526,7 @@ class OpInfo(object):
             assert isinstance(dtype_list, (_dispatch_dtypes, type(None)))
 
         self.name = name
+        self.ref = ref
         self.aten_name = aten_name if aten_name is not None else name
         self.variant_test_name = variant_test_name
 
@@ -1790,20 +1818,21 @@ def sample_inputs_take_along_dim(op_info, device, dtype, requires_grad, **kwargs
             )
 
 def sample_inputs_amax_amin(op_info, device, dtype, requires_grad, **kwargs):
-    test_cases = (
-        ((S, S, S), ()),
-        ((S, S, S), (1,)),
-        ((S, S, S), ((1, 2,),)),
-        ((S, S, S), (1, True,)),
-        ((), (0,)),
-        ((), ()),
-        ((), (0, True,)),
+    # Ordered as (shape, positional args, kwargs)
+    test_cases: Tuple[tuple, tuple, dict] = (  # type: ignore[assignment]
+        ((S, S, S), (), {}),
+        ((S, S, S), (1,), {}),
+        ((S, S, S), ((1, 2,),), {}),
+        ((S, S, S), (1,), {'keepdim': True}),
+        ((), (0,), {}),
+        ((), (), {}),
+        ((), (0,), {'keepdim': True}),
     )
     return tuple(SampleInput((make_tensor(size, device, dtype,
                                           low=None, high=None,
                                           requires_grad=requires_grad)),
-                             args=args)
-                 for size, args in test_cases)
+                             args=args, kwargs=kwargs)
+                 for size, args, kwargs in test_cases)
 
 def sample_inputs_argmax_argmin(op_info, device, dtype, requires_grad, **kwargs):
     test_cases = (
@@ -1882,28 +1911,28 @@ def sample_inputs_histogram(op_info, device, dtype, requires_grad):
 def sample_inputs_gradient(op_info, device, dtype, requires_grad):
     sample_inputs = []
     test_cases_float = (
-        ((S,), None, None),
-        ((S,), 2., None),
-        ((S, S), None, None),
-        ((S, S), [2.0, 2.1], None),
-        ((S, S), [2.0, 2.1], (0, 1)),
-        ((4, 4, 4), [2., 1.], (0, 1)),
+        ((S,), None, None, 1),
+        ((S,), 2., None, 1),
+        ((S, S), None, None, 2),
+        ((S, S), [2.0, 2.1], None, 1),
+        ((S, S), [2.0, 2.1], (0, 1), 1),
+        ((4, 4, 4), [2., 1.], (0, 1), 2),
     )
-    for size, spacing, dim in test_cases_float:
+    for size, spacing, dim, edge_order in test_cases_float:
         t = make_tensor(size, device, dtype, low=None, high=None, requires_grad=requires_grad)
-        sample_inputs.append(SampleInput(t, kwargs=dict(dim=dim, spacing=spacing)))
+        sample_inputs.append(SampleInput(t, kwargs=dict(dim=dim, spacing=spacing, edge_order=edge_order)))
 
     test_cases_tensor = (
-        ((3, 3, 3), ((1.1, 2.0, 3.5), (4.0, 2, 6.0)), (0, -1)),
-        ((3, 3, 3), ((1.0, 3.0, 2.0), (8.0, 6.0, 1.0)), (0, 1)),
+        ((3, 3, 3), ((1.1, 2.0, 3.5), (4.0, 2, 6.0)), (0, -1), 1),
+        ((3, 3, 3), ((1.0, 3.0, 2.0), (8.0, 6.0, 1.0)), (0, 1), 2),
     )
-    for size, coordinates, dim in test_cases_tensor:
+    for size, coordinates, dim, edge_order in test_cases_tensor:
         t = make_tensor(size, device, dtype, low=None, high=None, requires_grad=requires_grad)
         coordinates_tensor_list = []
         for coords in coordinates:
             a = torch.tensor(coords, dtype=dtype, device=device)
             coordinates_tensor_list.append(a)
-        sample_inputs.append(SampleInput(t, kwargs=dict(dim=dim, spacing=coordinates_tensor_list)))
+        sample_inputs.append(SampleInput(t, kwargs=dict(dim=dim, spacing=coordinates_tensor_list, edge_order=edge_order)))
 
     return tuple(sample_inputs)
 
@@ -4913,9 +4942,11 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_variant_consistency_eager'),),
            sample_inputs_func=sample_inputs_addcmul_addcdiv),
     OpInfo('amax',
+           ref=lambda a, dim=None, keepdim=False, **kwargs: np.amax(a, axis=dim, keepdims=keepdim, **kwargs),
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_amax_amin,),
     OpInfo('amin',
+           ref=lambda a, dim=None, keepdim=False, **kwargs: np.amin(a, axis=dim, keepdims=keepdim, **kwargs),
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_amax_amin),
     OpInfo('argmax',
@@ -5020,9 +5051,11 @@ op_db: List[OpInfo] = [
                    supports_inplace_autograd=False,
                    supports_forward_ad=True,
                    skips=(
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal',
+                                device_type='cpu', dtypes=[torch.cfloat]),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal',
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                 device_type='cuda', dtypes=[torch.cfloat, torch.cdouble],
@@ -5212,15 +5245,14 @@ op_db: List[OpInfo] = [
                    )),
     OpInfo('cross',
            dtypes=all_types_and_complex(),
-           dtypesIfCUDA=all_types_and(torch.half),
+           dtypesIfCUDA=all_types_and_complex_and(torch.half),
            sample_inputs_func=sample_inputs_cross,
            supports_forward_ad=True,
            skips=(
                # AssertionError: UserWarning not triggered :
                # Resized a non-empty tensor but did not warn about it.
                SkipInfo('TestCommon', 'test_out'),
-               # CUDA illegal memory access on Windows
-               SkipInfo(device_type='cuda', active_if=IS_WINDOWS))),
+           )),
     OpInfo('cumsum',
            dtypesIfCPU=all_types_and_complex(),
            dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
@@ -6304,6 +6336,7 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestUnaryUfuncs', 'test_out_arg_all_dtypes'),
                    )),
     OpInfo('roll',
+           ref=np.roll,
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
            supports_out=False,
            sample_inputs_func=sample_inputs_roll),
