@@ -331,7 +331,6 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
 
   variable_list results;
   results.reserve(num_outputs);
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (const auto i : c10::irange(num_outputs)) {
     if (!is_variable_input_[i]) {
       if (outputs[i].defined()) {

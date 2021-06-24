@@ -67,7 +67,6 @@ class TestZeroRedundancyOptimizer(common_distributed.MultiProcessTestCase):
         return dist.init_process_group(backend=BACKEND, store=store, rank=rank, world_size=world_size)
 
 
-
 class TestZeroRedundancyOptimizerSingleRank(TestZeroRedundancyOptimizer):
     def test_state_dict(self):
         """Check that the ZeroRedundancyOptimizer exposes the expected state dict interface,
@@ -203,6 +202,65 @@ class TestZeroRedundancyOptimizerSingleRank(TestZeroRedundancyOptimizer):
         o.zero_grad()
         self.assertFalse(m.weight.grad)
         self.assertFalse(m.bias.grad)
+
+    def test_constructor(self):
+        """Check the robustness of the ZeroRedundancyOptimizer constructor by
+        passing different values for `params`"""
+        self.dist_init(self.rank)
+
+        m = torch.nn.Linear(1, 1)
+        # (input, expected error)
+        inputs = [
+            ([], ValueError),                           # empty parameter list
+            (torch.randn(1), TypeError),                # non-iterable: `torch.Tensor`
+            (1.2, TypeError),                           # non-iterable: `float`
+            ([{"params": m.parameters()}], TypeError),  # iterable of dict
+            (list(m.parameters()) + [42], TypeError),   # iterable containing non-`torch.Tensor`
+            (m.parameters(), None),                     # `params` as a generator
+            (list(m.parameters()), None)                # `params` as a list
+        ]
+
+        for input, error in inputs:
+            if (error):
+                with self.assertRaises(error):
+                    ZeroRedundancyOptimizer(input, optimizer_class=SGD, lr=0.1)
+            else:
+                ZeroRedundancyOptimizer(input, optimizer_class=SGD, lr=0.1)
+
+    def test_same_dense_param_type(self):
+        """Check that ZeroRedundancyOptimizer raises an exception if the input
+        parameters include sparse tensors or different dense types.
+
+        NOTE: This test should be removed once support for sparse parameters
+        and varying parameter types is added.
+        """
+        self.dist_init(self.rank)
+
+        inputs = [
+            [torch.sparse_coo_tensor(size=(2, 3))],
+            [torch.FloatTensor(1), torch.DoubleTensor(1)],
+            [torch.FloatTensor(1), torch.FloatTensor(1),
+                torch.sparse_coo_tensor(size=(2, 3))]
+        ]
+        for input in inputs:
+            with self.assertRaises(ValueError):
+                ZeroRedundancyOptimizer(input, optimizer_class=SGD, lr=0.1)
+
+    def test_same_param_device(self):
+        """Check that ZeroRedundancyOptimizer raises an exception if the input
+        parameters are sharded on multiple devices.
+
+        NOTE: This test should be removed once support for sharding a rank's
+        model parameters across multiple devices is added.
+        """
+        if not torch.cuda.is_available() or torch.cuda.device_count() < 2:
+            return
+        self.dist_init(self.rank)
+
+        # Move the parameters to cuda:0 and cuda:1 respectively
+        params = [torch.Tensor(1).to(0), torch.Tensor(1).to(1)]
+        with self.assertRaises(ValueError):
+            ZeroRedundancyOptimizer(params, optimizer_class=SGD, lr=0.1)
 
 
 class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
@@ -499,7 +557,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             check(optimizer)
 
     @common_distributed.skip_if_no_gpu
-    def test_pytorch_parity(self):
+    def test_local_optimizer_parity(self):
         """When combined with DDP, check that ZeroRedundancyOptimizer(optimizer) and the same monolithic optimizer
         give the exact same results
         """
