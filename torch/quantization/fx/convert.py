@@ -27,7 +27,6 @@ from .quantization_patterns import (
 from ._equalize import update_obs_for_equalization, convert_eq_obs
 from .utils import (
     is_get_tensor_info_node,
-    maybe_get_weight_observer_nodes,
     node_return_type_is_int,
     quantize_node,
     get_new_attr_name_with_prefix,
@@ -63,13 +62,16 @@ def run_weight_observers(observed: GraphModule) -> None:
     '''
     for node in observed.graph.nodes:
         if node.op == 'call_function' and node.target in WEIGHT_INDEX_DICT:
-            weight_observer_nodes = maybe_get_weight_observer_nodes(node)
-            if weight_observer_nodes is not None:
-                weight_observer_module = \
-                    graph_module_from_producer_nodes(
-                        observed, weight_observer_nodes)
-                # run the weight observer
-                weight_observer_module()
+            for i, node_arg in enumerate(node.args):
+                if i in WEIGHT_INDEX_DICT[node.target]:
+                    # node_arg is weight
+                    weight_observer_nodes = collect_producer_nodes(node_arg)
+                    if weight_observer_nodes is not None:
+                        weight_observer_module = \
+                            graph_module_from_producer_nodes(
+                                observed, weight_observer_nodes)
+                        # run the weight observer
+                        weight_observer_module()
 
 def fold_weight(
         quantized: QuantizedGraphModule,
