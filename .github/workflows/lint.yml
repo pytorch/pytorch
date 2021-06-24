@@ -440,7 +440,8 @@ jobs:
         run: pip3 install pip-tools==6.2.0
       - name: Regenerate .circleci/docker/requirements.txt
         run: eval "$PIP_COMPILE_CMD"
-      - name: |
+      - name: Check that it was up to date
+        run: |
           if ! .github/scripts/report_git_status.sh .; then
             echo
             echo 'As shown by the above diff, the committed requirements.txt'
