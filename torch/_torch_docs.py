@@ -3871,6 +3871,49 @@ Example::
     tensor([ 0.,  2.,  1.,  0.])
 """.format(**common_args))
 
+add_docstr(torch.histogram,
+           r"""
+histogram(input, bins, *, range=None, weight=None, density=False, out=None) -> (Tensor, Tensor)
+
+Computes a histogram of the values in a tensor.
+
+:attr:`bins` can be an integer or a 1D tensor.
+
+If :attr:`bins` is an int, it specifies the number of equal-width bins.
+By default, the lower and upper range of the bins is determined by the
+minimum and maximum elements of the input tensor. The :attr:`range`
+argument can be provided to specify a range for the bins.
+
+If :attr:`bins` is a 1D tensor, it specifies the sequence of bin edges
+including the rightmost edge. It should contain at least 2 elements
+and its elements should be increasing.
+
+Args:
+    {input}
+    bins: int or 1D Tensor. If int, defines the number of equal-width bins. If tensor,
+          defines the sequence of bin edges including the rightmost edge.
+
+Keyword args:
+    range (tuple of float): Defines the range of the bins.
+    weight (Tensor): If provided, weight should have the same shape as input. Each value in
+                     input contributes its associated weight towards its bin's result.
+    density (bool): If False, the result will contain the count (or total weight) in each bin.
+                    If True, the result is the value of the probability density function over the bins,
+                    normalized such that the integral over the range of the bins is 1.
+    {out} (tuple, optional): The result tuple of two output tensors (hist, bin_edges).
+
+Returns:
+    hist (Tensor): 1D Tensor containing the values of the histogram.
+    bin_edges(Tensor): 1D Tensor containing the edges of the histogram bins.
+
+Example::
+
+    >>> torch.histogram(torch.tensor([1., 2, 1]), bins=4, range=(0., 3.), weight=torch.tensor([1., 2., 4.]))
+    (tensor([ 0.,  5.,  2.,  0.]), tensor([0., 0.75, 1.5, 2.25, 3.]))
+    >>> torch.histogram(torch.tensor([1., 2, 1]), bins=4, range=(0., 3.), weight=torch.tensor([1., 2., 4.]), density=True)
+    (tensor([ 0.,  0.9524,  0.3810,  0.]), tensor([0., 0.75, 1.5, 2.25, 3.]))
+""".format(**common_args))
+
 add_docstr(torch.hypot,
            r"""
 hypot(input, other, *, out=None) -> Tensor
