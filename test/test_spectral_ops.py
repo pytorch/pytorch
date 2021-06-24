@@ -99,7 +99,7 @@ class TestFFT(TestCase):
     exact_dtype = True
 
     # rocFFT requires/assumes that the input to hipfftExecC2R or hipfftExecZ2D
-    # is of the form that is a valid output from a real to complext transform
+    # is of the form that is a valid output from a real to complex transform
     # (i.e. it cannot be a set of random numbers)
     # So for ROCm, call np.fft.rfftn and use its output as the input
     # for testing ops that call hipfftExecC2R
@@ -107,7 +107,7 @@ class TestFFT(TestCase):
         # check if op can invoke hipfftExecC2R or hipfftExecZ2D
         if type(op) == SpectralFuncInfo:
             supported_ops = op.supported_dtypes("")
-            if (torch.cfloat not in supported_ops) or (torch.cdouble not in supported_ops):
+            if not all(ctype in supported_ops for ctype in [torch.cfloat, torch.double]):
                 return input
         else:
             if op.__name__ in ["fft_rfft2"]:
