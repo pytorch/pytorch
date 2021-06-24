@@ -1106,23 +1106,71 @@ class TestCase(expecttest.TestCase):
         order. Otherwise, the column counts of rows are defined by the
         used sampling method.
 
-        For description of the sampling method, see https://pearu.github.io/csr_sampling.html
+        Sampling method
+        ---------------
+
+        The used sampling method was introduced in
+        https://pearu.github.io/csr_sampling.html, and here we give
+        only an overall description of the method.
+
+        Notice that crow_indices can be defined as cumsum(counts)
+        where counts is a sequence of non-negative integers satisfying
+        the following conditions:
+
+          len(counts) == n_rows + 1
+          counts.max() <= n_cols
+
+        while counts[i + 1] is interpreted as the number of specified
+        elements in the i-th row.
+
+        The used sampling method aims at increasing the diversity of
+        CSR samples, that is, a CSR sample should contain (i) rows
+        that are all filled, (ii) rows with no elements at all, and
+        (iii) rows that are partially filled. At the same time and for
+        the given total number of specified elements (nnz), there
+        should be minimal preference to rows with a given number of
+        elements.  To achieve this, the sampling method is built-up on
+        using a sawteeth model for counts. In the simplest case, we
+        would have
+
+          counts = arange(n_rows + 1) % (n_cols + 1)
+
+        that has equal number of all possible column counts per row.
+        This formula can be used only for specific input values of
+        n_rows, n_cols, and nnz. To generalize this model to any
+        combinations of inputs, the counts model above is extended
+        with an incomplete sawtooth, and the right and lower
+        rectangular parts that will guarantee that
+
+          counts.sum() == nnz
+
+        for any combination of n_rows, n_cols, and nnz. Basically,
+        we'll find a maximal window in (n_rows + 1, n_cols + 1)-grid
+        that is able to hold a sequence of sawteeth and so-called
+        final correction, while the external part of the window is
+        filled with counts to meet the nnz contraint exactly.
         """
-        assert 0 <= nnz << n_rows * n_cols
+        assert 0 <= nnz <= n_rows * n_cols
 
         def sawteeth(n, m):
-            # return the total number of counts in the sequence of sawteeth
+            # return the total number of counts in the sequence of
+            # sawteeth where n and m define a window in (n_rows+1,
+            # n_cols+1) rectangle where the sequence of sawteeth
+            # perfectly fit.
             M = (n_cols - m) * (n_cols - m + 1) // 2
             K = (n_rows - n) % (n_cols - m + 1)
             return M * ((n_rows - n) // (n_cols - m + 1)) + K * (K - 1) // 2
 
-        # Different from the method description, here counts has
-        # leading extra element with value 0 required by crow_indices:
+        # Different from the original method description, here counts
+        # has leading 0 required by crow_indices:
         counts = torch.zeros(n_rows + 1, dtype=dtype, device=torch.device('cpu'))
 
         n = m = 0
         N = sawteeth(n, m)
         if N and nnz >= max(N, n_cols):
+            # determine the width of the sawteeth window. We use bisection to solve
+            #   N(n, 0) == 0 or nnz - n * n_cols < max(N(n, 0), n_cols)
+            # for n
             n_left = n
             n_right = n_rows - 1
             N_right = sawteeth(n_right, m)
@@ -1134,11 +1182,14 @@ class TestCase(expecttest.TestCase):
                 else:
                     n_left = n_middle
             n, N = n_right, N_right
-            # right rectangle:
+            # fill the right rectangle with counts:
             assert n
             counts[-n:].fill_(n_cols)
 
         if N and nnz - n * n_cols >= max(N, n_rows - n):
+            # determine the height of the sawteeth window. We use bisection to solve
+            #   N(n, m) == 0 or nnz - n * n_cols - m * (n_rows - n) < max(N(n, m), n_rows - n)
+            # for m.
             m_left = m
             m_right = n_cols - 1
             N_right = sawteeth(n, m_right)
@@ -1150,11 +1201,12 @@ class TestCase(expecttest.TestCase):
                 else:
                     m_left = m_middle
             m, N = m_right, N_right
-            # bottom rectangle:
+            # fill the bottom rectangle with counts:
             assert m
             counts[1:n_rows - n + 1].fill_(m)
 
         if N:
+            # fill the sawteeth window with counts
             q, r = divmod(nnz - n * n_cols - m * (n_rows - n),
                           (n_cols - m) * (n_cols - m + 1) // 2)
             p = 1 + q * (n_cols - m + 1)
@@ -1175,16 +1227,21 @@ class TestCase(expecttest.TestCase):
             counts[1:p] = torch.arange(p - 1, dtype=dtype, device=counts.device) % (n_cols - m + 1)
             # incomplete sawtooth:
             counts[p:p + k + 1] += torch.arange(k + 1, dtype=dtype, device=counts.device)
-            # correction:
-            counts[p] += corr
         else:
-            # correction:
-            counts[1] = nnz - n * n_cols - m * (n_rows - n)
+            # given input does not support sawteeth
+            p = 1
+            corr = nnz - n * n_cols - m * (n_rows - n)
+
+        # correction that will guarantee counts.sum() == nnz:
+        counts[p] += corr
 
         if random:
+            # randomize crow_indices by shuffling the sawteeth
+            # sequence:
             perm = torch.randperm(n_rows, device=counts.device)
             counts[1:] = counts[1:][perm]
 
+        # compute crow_indices:
         crow_indices = counts
         crow_indices.cumsum_(dim=0)
         return crow_indices.to(device=device)
@@ -1197,11 +1254,10 @@ class TestCase(expecttest.TestCase):
         def random_sparse_csr(n_rows, n_cols, nnz):
             crow_indices = self._make_crow_indices(n_rows, n_cols, nnz, device=device, dtype=index_dtype)
             col_indices = torch.zeros(nnz, dtype=index_dtype, device=device)
-            n = 0
             for i in range(n_rows):
                 count = crow_indices[i + 1] - crow_indices[i]
-                col_indices[n:n + count], _ = torch.sort(torch.randperm(n_cols, dtype=index_dtype, device=device)[:count])
-                n += count
+                col_indices[crow_indices[i]:crow_indices[i + 1]], _ = torch.sort(
+                    torch.randperm(n_cols, dtype=index_dtype, device=device)[:count])
             values = make_tensor([nnz], device=device, dtype=dtype, low=-1, high=1)
             return values, crow_indices, col_indices
 
