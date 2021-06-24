@@ -97,17 +97,16 @@ ForwardNormResult layer_norm(
   }
 
   // Main algorithm
-  auto x_sum = sum(x, inner_reduction_axes);
-  auto x_sum_bcast = broadcast(x_sum, inner_broadcast_mask);
-  auto mean = div(x_sum_bcast, num_features);
-  auto x_mean_sub = sub(x, mean);
-  auto x_mean_sub_pow = mul(x_mean_sub, x_mean_sub);
-  auto var_sum = sum(x_mean_sub_pow, inner_reduction_axes);
-  auto var_sum_bcast = broadcast(var_sum, inner_broadcast_mask);
+  auto welford_out = Welford(x, inner_reduction_axes);
+  auto mean_bcast = broadcast(welford_out.avg, inner_broadcast_mask);
+  auto x_sub_mean = sub(x, mean_bcast);
+
+  auto var_sum_bcast = broadcast(welford_out.var_sum, inner_broadcast_mask);
   auto var = div(var_sum_bcast, num_features);
   auto var_eps = add(var, eps);
   auto invstd = unaryOp(UnaryOpType::Rsqrt, var_eps);
-  auto y = mul(x_mean_sub, invstd);
+
+  auto y = mul(x_sub_mean, invstd);
 
   // Optional: norm * weight
   if (weight != nullptr) {
@@ -120,7 +119,8 @@ ForwardNormResult layer_norm(
     auto bias_bcast = broadcast(bias, outer_broadcast_mask);
     y = add(y, bias_bcast);
   }
-  return {y, mean, invstd};
+
+  return {y, mean_bcast, invstd};
 }
 
 BackwardNormResult layer_norm_backward(
@@ -277,7 +277,7 @@ ForwardNormResult batch_norm(
   } else {
     // This is inference mode with running stats
     auto r_mean_bcasted = broadcast(running_mean, broadcast_mask);
-    auto x_mean_sub = sub(x, r_mean_bcasted);
+    auto x_sub_mean = sub(x, r_mean_bcasted);
 
     auto var_eps = add(running_var, eps);
     auto unbiased_invstd = unaryOp(UnaryOpType::Rsqrt, var_eps);
@@ -286,7 +286,7 @@ ForwardNormResult batch_norm(
     // During inference, mean/invstd output are empty tensors
     mean = TensorViewBuilder().shape({0}).build();
     invstd = TensorViewBuilder().shape({0}).build();
-    y = mul(x_mean_sub, invstd_bcast);
+    y = mul(x_sub_mean, invstd_bcast);
   }
 
   // Optional: norm * weight

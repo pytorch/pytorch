@@ -33,6 +33,20 @@ TORCH_CUDA_CU_API TensorView* dropout_backward(
 
 TORCH_CUDA_CU_API Val* softplus(Val* x, Val* beta, Val* threshold);
 
+struct LstmResult {
+  TensorView* cell = nullptr;
+  TensorView* hidden = nullptr;
+};
+
+TORCH_CUDA_CU_API LstmResult lstm(
+    TensorView* prev_cell,
+    TensorView* in_x,
+    TensorView* forget_x,
+    TensorView* cell_x,
+    TensorView* out_x);
+
+TORCH_CUDA_CU_API Val* gelu_backward(Val* dy, Val* x);
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

@@ -59,6 +59,51 @@ Val* softplus(Val* x, Val* beta, Val* threshold) {
   return y;
 }
 
+LstmResult lstm(
+    TensorView* prev_cell,
+    TensorView* in_x,
+    TensorView* forget_x,
+    TensorView* cell_x,
+    TensorView* out_x) {
+  TORCH_INTERNAL_ASSERT(
+      prev_cell != nullptr, "Previous cell state is invalid.");
+  TORCH_INTERNAL_ASSERT(in_x != nullptr, "In-gate input is invalid");
+  TORCH_INTERNAL_ASSERT(forget_x != nullptr, "Forget-gate input is invalid");
+  TORCH_INTERNAL_ASSERT(cell_x != nullptr, "Cell-gate input is invalid");
+  TORCH_INTERNAL_ASSERT(out_x != nullptr, "Out-gate input is invalid");
+
+  const auto in_gate = unaryOp(UnaryOpType::Sigmoid, in_x);
+  const auto forget_gate = unaryOp(UnaryOpType::Sigmoid, forget_x);
+  const auto cell_gate = unaryOp(UnaryOpType::Tanh, cell_x);
+  const auto out_gate = unaryOp(UnaryOpType::Sigmoid, out_x);
+
+  const auto cell = add(mul(forget_gate, prev_cell), mul(in_gate, cell_gate));
+  const auto hidden = mul(out_gate, unaryOp(UnaryOpType::Tanh, cell));
+
+  return {cell, hidden};
+}
+
+Val* gelu_backward(Val* dy, Val* x) {
+  TORCH_INTERNAL_ASSERT(dy != nullptr, "Grad Output is invalid.");
+  TORCH_INTERNAL_ASSERT(x != nullptr, "Mask is invalid");
+
+  constexpr double kAlpha = M_2_SQRTPI * M_SQRT1_2 * 0.5;
+  const double kHalf = 0.5;
+
+  auto cdf_1 = mul(x, new Double(M_SQRT1_2));
+  auto cdf_2 = unaryOp(UnaryOpType::Erf, cdf_1);
+  auto cdf_3 = add(cdf_2, new Double(1.));
+  auto cdf_4 = mul(cdf_3, new Double(kHalf));
+
+  auto pdf_1 = mul(x, x);
+  auto pdf_2 = mul(pdf_1, new Double(-kHalf));
+  auto pdf_3 = unaryOp(UnaryOpType::Exp, pdf_2);
+
+  auto out = addcmul(cdf_4, x, pdf_3, new Double(kAlpha));
+  auto dx = mul(out, dy);
+  return dx;
+}
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

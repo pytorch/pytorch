@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
+#include <torch/csrc/jit/codegen/cuda/ops/all_ops.h>
 #include <torch/csrc/jit/codegen/cuda/executor.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
@@ -21,31 +22,21 @@ static void setupFusion(Fusion* fusion) {
     fusion->addInput(tvs[i]);
   }
 
-  const auto ingate = unaryOp(
-      UnaryOpType::Sigmoid, add(add(add(tvs[0], tvs[1]), tvs[2]), tvs[3]));
-
-  const auto forgetgate = unaryOp(
-      UnaryOpType::Sigmoid, add(add(add(tvs[4], tvs[5]), tvs[6]), tvs[7]));
-
-  const auto cellgate = unaryOp(
-      UnaryOpType::Tanh, add(add(add(tvs[8], tvs[9]), tvs[10]), tvs[11]));
-
-  const auto outgate = unaryOp(
-      UnaryOpType::Sigmoid, add(add(add(tvs[12], tvs[13]), tvs[14]), tvs[15]));
-
   const auto cx = TensorViewBuilder()
                       .ndims(2)
                       .dtype(DataType::Float)
                       .contiguity(std::vector<bool>(2, true))
                       .build();
-
-  const auto cy = add(mul(forgetgate, cx), mul(ingate, cellgate));
-
-  const auto hy = mul(outgate, unaryOp(UnaryOpType::Tanh, cy));
-
   fusion->addInput(cx);
-  fusion->addOutput(cy);
-  fusion->addOutput(hy);
+
+  const auto in_x = add(add(add(tvs[0], tvs[1]), tvs[2]), tvs[3]);
+  const auto forget_x = add(add(add(tvs[4], tvs[5]), tvs[6]), tvs[7]);
+  const auto cell_x = add(add(add(tvs[8], tvs[9]), tvs[10]), tvs[11]);
+  const auto out_x = add(add(add(tvs[12], tvs[13]), tvs[14]), tvs[15]);
+  auto lstm_result = lstm(cx, in_x, forget_x, cell_x, out_x);
+
+  fusion->addOutput(lstm_result.cell);
+  fusion->addOutput(lstm_result.hidden);
 }
 
 static std::vector<c10::IValue> setupInputs(

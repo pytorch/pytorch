@@ -1374,26 +1374,10 @@ class IrParser {
       REGISTER_PARSE_RULE(
           ptr_op,
           {
-            auto grad = value_map[node->inputs()[0]->unique()];
+            auto grad_out = value_map[node->inputs()[0]->unique()];
             auto self = value_map[node->inputs()[1]->unique()];
-            // TODO: add gelu backward function to composite operations
-
-            constexpr double kAlpha = M_2_SQRTPI * M_SQRT1_2 * 0.5;
-            const double kHalf = 0.5;
-
-            auto cdf_1 = mul(self, new Double(M_SQRT1_2));
-            auto cdf_2 = unaryOp(UnaryOpType::Erf, cdf_1);
-            auto cdf_3 = add(cdf_2, new Double(1.));
-            auto cdf_4 = mul(cdf_3, new Double(kHalf));
-
-            auto pdf_1 = mul(self, self);
-            auto pdf_2 = mul(pdf_1, new Double(-kHalf));
-            auto pdf_3 = unaryOp(UnaryOpType::Exp, pdf_2);
-
-            auto out_1 = addcmul(cdf_4, self, pdf_3, new Double(kAlpha));
-            auto out_2 = mul(out_1, grad);
-
-            value_map.emplace(node->output()->unique(), out_2);
+            auto grad_in = gelu_backward(grad_out, self);
+            value_map.emplace(node->output()->unique(), grad_in);
           },
           nullptr,
           nullptr);
