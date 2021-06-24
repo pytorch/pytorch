@@ -66,17 +66,21 @@ class ParametrizationList(ModuleList):
     Args:
         modules (iterable): an iterable of modules representing the parametrizations
         original (Parameter or Tensor): parameter or buffer that is parametrized
+        allow_resize (bool): a boolean flag that denotes whether the parametrized tensor can be resized,
+            Warning: the current Module might not work anymore, enable this flag at your own risk.
     """
     original: Tensor
+    allow_resize: bool
 
     def __init__(
-        self, modules: Iterable[Module], original: Union[Tensor, Parameter]
+        self, modules: Iterable[Module], original: Union[Tensor, Parameter], allow_resize: bool = False
     ) -> None:
         super().__init__(modules)
         if isinstance(original, Parameter):
             self.register_parameter("original", original)
         else:
             self.register_buffer("original", original)
+        self.allow_resize = allow_resize
 
     def set_original_(self, value: Tensor) -> None:
         r"""This method is called when assigning to a parametrized tensor.
@@ -108,7 +112,7 @@ class ParametrizationList(ModuleList):
         x = self.original
         for module in self:
             x = module(x)
-        if x.size() != self.original.size():
+        if not self.allow_resize and x.size() != self.original.size():
             raise RuntimeError(
                 "The parametrization may not change the size of the parametrized tensor. "
                 "Size of original tensor: {} "
@@ -184,7 +188,7 @@ def _inject_property(module: Module, tensor_name: str) -> None:
 
 
 def register_parametrization(
-    module: Module, tensor_name: str, parametrization: Module
+    module: Module, tensor_name: str, parametrization: Module, *, allow_resize: bool = False,
 ) -> Module:
     r"""Adds a parametrization to a tensor in a module.
 
@@ -231,6 +235,8 @@ def register_parametrization(
         tensor_name (str): name of the parameter or buffer on which to register
             the parametrization
         parametrization (nn.Module): the parametrization to register
+        allow_resize (bool): a boolean flag that denotes whether the parametrized tensor can be resized,
+            Warning: the current Module might not work anymore, enable this flag at your own risk.
 
     Returns:
         Module: module
@@ -263,6 +269,8 @@ def register_parametrization(
     if is_parametrized(module, tensor_name):
         # Just add the new parametrization to the parametrization list
         module.parametrizations[tensor_name].append(parametrization)  # type: ignore[index, union-attr]
+        # If allow_resize was True in previous parametrization, keep it enabled
+        module.parametrizations[tensor_name].allow_resize |= allow_resize  # type: ignore[index, union-attr]
     elif tensor_name in module._buffers or tensor_name in module._parameters:
         # Set the parametrization mechanism
         # Fetch the original buffer or parameter
@@ -280,7 +288,7 @@ def register_parametrization(
         _inject_property(module, tensor_name)
         # Add a ParametrizationList
         module.parametrizations[tensor_name] = ParametrizationList(  # type: ignore[assignment, index, operator]
-            [parametrization], original
+            [parametrization], original, allow_resize=allow_resize
         )
     else:
         raise ValueError(

@@ -2157,6 +2157,14 @@ class TestNN(NNTestCase):
                 Id = torch.eye(X.size(0), device=X.device)
                 return torch.linalg.solve(Id + X, Id - X)
 
+        class Resize(nn.Module):
+            def forward(self, X):
+                return X[[0]]
+
+        class NoResize(nn.Module):
+            def forward(self, X):
+                return X
+
         # Define a couple vector parametrizations
         class FirstZero(nn.Module):
             def forward(self, x):
@@ -2170,6 +2178,59 @@ class TestNN(NNTestCase):
         initial_weight_id = id(model.weight)
         initial_bias_id = id(model.bias)
         initial_model = deepcopy(model)
+
+        # Test allow_resize flag
+        with self.assertRaisesRegex(RuntimeError, "The parametrization may not change the size of the parametrized tensor. "):
+            parametrize.register_parametrization(model, "weight", Resize())  # default allow_resize = False
+            model(torch.ones(8, 8))
+
+        # One parametrization with allow_resize=True
+        parametrize.register_parametrization(model, "weight", Resize(), allow_resize=True)
+        self.assertTrue(hasattr(model, "parametrizations"))
+        self.assertTrue(parametrize.is_parametrized(model))
+        self.assertTrue(parametrize.is_parametrized(model, "weight"))
+        self.assertFalse(parametrize.is_parametrized(model, "bias"))
+        self.assertNotIn("weight", model._parameters)
+        A = model.weight
+        self.assertTrue(A.shape[0] == 1)
+        parametrize.remove_parametrizations(model, "weight", leave_parametrized=False)
+        self.assertFalse(hasattr(model, "parametrizations"))
+        self.assertEqual(model.weight, initial_model.weight)
+        self.assertEqual(id(model.weight), initial_weight_id)
+        self.assertEqual(model.__class__, nn.Linear)
+
+        # Two parametrizations with allow_resize=True
+        parametrize.register_parametrization(model, "weight", Resize(), allow_resize=True)
+        parametrize.register_parametrization(model, "weight", NoResize(), allow_resize=False)
+        self.assertTrue(hasattr(model, "parametrizations"))
+        self.assertTrue(parametrize.is_parametrized(model))
+        self.assertTrue(parametrize.is_parametrized(model, "weight"))
+        self.assertFalse(parametrize.is_parametrized(model, "bias"))
+        self.assertNotIn("weight", model._parameters)
+        A = model.weight
+        self.assertTrue(A.shape[0] == 1)
+        parametrize.remove_parametrizations(model, "weight", leave_parametrized=False)
+        self.assertFalse(hasattr(model, "parametrizations"))
+        self.assertEqual(model.weight, initial_model.weight)
+        self.assertEqual(id(model.weight), initial_weight_id)
+        self.assertEqual(model.__class__, nn.Linear)
+
+        # Test allow_resize flag doesn't change expected behavior
+        parametrize.register_parametrization(model, "weight", Skew(), allow_resize=True)
+        self.assertTrue(hasattr(model, "parametrizations"))
+        self.assertTrue(parametrize.is_parametrized(model))
+        self.assertTrue(parametrize.is_parametrized(model, "weight"))
+        self.assertFalse(parametrize.is_parametrized(model, "bias"))
+        self.assertNotIn("weight", model._parameters)
+        # Result should be skew-symmetric
+        A = model.weight
+        self.assertTrue(torch.allclose(A, -A.T))
+        # Remove and check consistency
+        parametrize.remove_parametrizations(model, "weight", leave_parametrized=False)
+        self.assertFalse(hasattr(model, "parametrizations"))
+        self.assertEqual(model.weight, initial_model.weight)
+        self.assertEqual(id(model.weight), initial_weight_id)
+        self.assertEqual(model.__class__, nn.Linear)
 
         # Test one parametrization
         parametrize.register_parametrization(model, "weight", Skew())
