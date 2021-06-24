@@ -8,13 +8,15 @@ using namespace torch::jit::tensorexpr;
 
 using Tensors = std::vector<Tensor*>;
 using Args = std::vector<CodeGen::BufferArg>;
-SimpleIREvaluator compile(const Args& inputs, const Tensors& outputs) {
+std::unique_ptr<SimpleIREvaluator> compile(
+    const Args& inputs,
+    const Tensors& outputs) {
   LoopNest nest({outputs});
   nest.prepareForCodegen();
   nest.simplify();
   auto join = inputs;
   join.insert(join.end(), outputs.begin(), outputs.end());
-  return SimpleIREvaluator{nest.root_stmt(), join};
+  return std::make_unique<SimpleIREvaluator>(nest.root_stmt(), join);
 }
 
 TEST(Ops, Sum) {
@@ -33,7 +35,7 @@ TEST(Ops, Sum) {
     auto ref = at::sum(at, dims);
     auto bt = at::empty_like(ref);
 
-    cg.call({at.data_ptr<float>(), bt.data_ptr<float>()});
+    cg->call({at.data_ptr<float>(), bt.data_ptr<float>()});
 
     ASSERT_TRUE(at::allclose(bt, ref));
   }
