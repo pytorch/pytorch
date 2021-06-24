@@ -532,8 +532,8 @@ class VariadicCatUpdater {
       if (node->kind() == aten::cat) {
         cat_nodes_.push_back(node);
       }
-      for (Block* block : node->blocks()) {
-        collectCatNodes(block);
+      for (Block* b : node->blocks()) {
+        collectCatNodes(b);
       }
     }
   }
