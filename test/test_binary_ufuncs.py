@@ -2355,6 +2355,12 @@ class TestBinaryUfuncs(TestCase):
         self.assertRaisesRegex(RuntimeError, r"result type ComplexFloat can't be cast to the desired output type Double",
                                lambda: torch.add(m1, m1, out=m2))
 
+    @onlyCUDA
+    def test_add_half_tensor_with_alpha(self, device):
+        x = torch.tensor([60000.0], dtype=torch.half, device=device)
+        y = torch.tensor([-60000.0], dtype=torch.half, device=device)
+        actual = torch.add(x, y, alpha=2)
+        self.assertTrue(not (actual.isnan() or actual.isinf()))
 
     def test_sub_typing(self, device):
         m1 = torch.tensor([True, False, False, True, False, False], dtype=torch.bool, device=device)

@@ -272,18 +272,16 @@ FileStore::FileStore(const std::string& path, int numWorkers)
       numWorkers_(numWorkers),
       cleanupKey_("cleanup/"),
       regularPrefix_("/") {
-  if (numWorkers_ < 1) {
-    throw std::runtime_error(
-        "Number of workers for FileStore should be greater than zero");
-  }
 }
 
 FileStore::~FileStore() {
   // cleanup key will be different from all rest keys since all rest keys will
   // have a regular prefix.
   auto numFinishedWorker = addHelper(cleanupKey_, 1);
-  // The last worker cleans up the file
-  if (numFinishedWorker == numWorkers_) {
+  // The last worker cleans up the file. If numWorkers was not initialized to
+  // a specific postive value (i.e. meaning that there was not a fixed number
+  // of workers), we don't attempt to clean.
+  if (numWorkers_ >= 0 && numFinishedWorker == numWorkers_) {
     // Best effort removal without checking the return
     std::remove(path_.c_str());
   }
@@ -341,7 +339,7 @@ std::vector<uint8_t> FileStore::get(const std::string& key) {
       const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
           std::chrono::steady_clock::now() - start);
       if (timeout_ != kNoTimeout && elapsed > timeout_) {
-        throw std::runtime_error("Timeout waiting for key: " + key);
+        TORCH_CHECK(false, "Timeout waiting for key: " + key);
       }
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
       continue;
@@ -424,7 +422,7 @@ void FileStore::wait(
     const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
         std::chrono::steady_clock::now() - start);
     if (timeout != kNoTimeout && elapsed > timeout) {
-      throw std::runtime_error("Wait timeout");
+      TORCH_CHECK(false, "Wait timeout");
     }
 
     /* sleep override */

@@ -27,18 +27,12 @@ import tools.codegen.api.meta as meta
 import tools.codegen.api.structured as structured
 from tools.codegen.api.translate import translate
 from tools.codegen.selective_build.selector import SelectiveBuilder
-from tools.codegen.utils import Target, concatMap, context, mapMaybe
+from tools.codegen.utils import Target, concatMap, context, mapMaybe, YamlDumper, YamlLoader
 from tools.codegen.context import (method_with_native_function,
                                    native_function_manager,
                                    with_native_function_and_indices,
                                    with_native_function)
 import tools.codegen.dest as dest
-
-try:
-    # use faster C loader if available
-    from yaml import CSafeLoader as Loader
-except ImportError:
-    from yaml import SafeLoader as Loader  # type: ignore[misc]
 
 # Welcome to the ATen code generator v2!  The ATen code generator is
 # responsible for parsing native_functions.yaml and then generating
@@ -70,37 +64,43 @@ except ImportError:
 
 # A custom loader for YAML to let us also keep track of line numbers
 # of each entry in the YAML file
-class LineLoader(Loader):
+class LineLoader(YamlLoader):
     def construct_mapping(self, node, deep=False):  # type: ignore[no-untyped-def]
         mapping = super().construct_mapping(node, deep=deep)  # type: ignore[no-untyped-call]
         # Add 1 so line numbering starts at 1
         mapping['__line__'] = node.start_mark.line + 1
         return mapping
 
+_GLOBAL_PARSE_NATIVE_YAML_CACHE = {}
+
 # Parse native_functions.yaml into a sequence of NativeFunctions and Backend Indices.
 ParsedYaml = namedtuple('ParsedYaml', ['native_functions', 'backend_indices'])
 def parse_native_yaml(path: str) -> ParsedYaml:
-    with open(path, 'r') as f:
-        es = yaml.load(f, Loader=LineLoader)
-    assert isinstance(es, list)
-    rs: List[NativeFunction] = []
-    bs: Dict[DispatchKey, Dict[OperatorName, BackendMetadata]] = defaultdict(dict)
-    for e in es:
-        assert isinstance(e.get('__line__'), int), e
-        loc = Location(path, e['__line__'])
-        funcs = e.get('func')
-        with context(f'in {loc}:\n  {funcs}'):
-            func, m = NativeFunction.from_yaml(e, loc)
-            rs.append(func)
-            BackendIndex.grow_index(bs, m)
-    error_check_native_functions(rs)
-    # Default dict is to prevent the codegen from barfing when we have a dispatch key that has no kernels yet.
-    indices: Dict[DispatchKey, BackendIndex] = defaultdict(lambda: BackendIndex(
-        dispatch_key=DispatchKey.Undefined, use_out_as_primary=True, external=False, index={}))
-    for k, v in bs.items():
-        # All structured in-tree operators are implemented in terms of their out operator.
-        indices[k] = BackendIndex(dispatch_key=k, use_out_as_primary=True, external=False, index=v)
-    return ParsedYaml(rs, indices)
+    global _GLOBAL_PARSE_NATIVE_YAML_CACHE
+    if path not in _GLOBAL_PARSE_NATIVE_YAML_CACHE:
+        with open(path, 'r') as f:
+            es = yaml.load(f, Loader=LineLoader)
+        assert isinstance(es, list)
+        rs: List[NativeFunction] = []
+        bs: Dict[DispatchKey, Dict[OperatorName, BackendMetadata]] = defaultdict(dict)
+        for e in es:
+            assert isinstance(e.get('__line__'), int), e
+            loc = Location(path, e['__line__'])
+            funcs = e.get('func')
+            with context(lambda: f'in {loc}:\n  {funcs}'):
+                func, m = NativeFunction.from_yaml(e, loc)
+                rs.append(func)
+                BackendIndex.grow_index(bs, m)
+        error_check_native_functions(rs)
+        # Default dict is to prevent the codegen from barfing when we have a dispatch key that has no kernels yet.
+        indices: Dict[DispatchKey, BackendIndex] = defaultdict(lambda: BackendIndex(
+            dispatch_key=DispatchKey.Undefined, use_out_as_primary=True, external=False, index={}))
+        for k, v in bs.items():
+            # All structured in-tree operators are implemented in terms of their out operator.
+            indices[k] = BackendIndex(dispatch_key=k, use_out_as_primary=True, external=False, index=v)
+        _GLOBAL_PARSE_NATIVE_YAML_CACHE[path] = ParsedYaml(rs, indices)
+
+    return _GLOBAL_PARSE_NATIVE_YAML_CACHE[path]
 
 # Some assertions are already performed during parsing, but those are only within a single NativeFunction.
 # Assertions here are meant to be performed across NativeFunctions.
@@ -441,7 +441,7 @@ def compute_meta_function_declaration(g: NativeFunctionsGroup) -> Optional[str]:
         if parent_class is None:
             parent_class = "at::impl::MetaBase"
         return f"""\
-struct TORCH_API {name} : public {parent_class} {{
+struct TORCH_API structured_{name} : public {parent_class} {{
     void meta({args_str});
 }};
 """
@@ -521,18 +521,18 @@ C10_ALWAYS_INLINE
 #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
-def dict_representer(dumper: Any, data: Any) -> Any:
-    return dumper.represent_dict(data.items())
-
 def format_yaml(data: object) -> str:
-    noalias_dumper = yaml.dumper.SafeDumper
-    noalias_dumper.ignore_aliases = lambda self, data: True  # type: ignore[assignment]
+    # Ignore alias in Dumper
+    YamlDumper.ignore_aliases = lambda self, data: True  # type: ignore[assignment]
+
     # Support serializing OrderedDict
-    noalias_dumper.add_representer(OrderedDict, dict_representer)  # type: ignore[no-untyped-call]
+    def dict_representer(dumper: Any, data: Any) -> Any:
+        return dumper.represent_dict(data.items())
+    YamlDumper.add_representer(OrderedDict, dict_representer)  # type: ignore[no-untyped-call]
     # Some yaml parsers (e.g. Haskell's) don't understand line breaks.
-    # width=float('Inf') turns off optional line breaks and improves
+    # width=1e9 turns off optional line breaks and improves
     # the portability of the outputted yaml.
-    return yaml.dump(data, default_flow_style=False, Dumper=noalias_dumper, width=float('Inf'))  # type: ignore[no-any-return]
+    return yaml.dump(data, default_flow_style=False, Dumper=YamlDumper, width=1e9)  # type: ignore[no-any-return]
 
 # For some reason, some defaults we write to YAML are written as native
 # YAML objects, rather than doing them uniformly as strings.  This
@@ -998,6 +998,7 @@ def main() -> None:
         DispatchKey.CUDA,
         DispatchKey.CompositeImplicitAutograd,
         DispatchKey.CompositeExplicitAutograd,
+        DispatchKey.Meta,
     }
     if options.backend_whitelist:
         dispatch_keys = [k for k in dispatch_keys if is_generic_dispatch_key(k) or str(k) in options.backend_whitelist]
@@ -1016,6 +1017,7 @@ def main() -> None:
                 '#include <ATen/LegacyTHFunctionsCUDA.h>' if dispatch_key == DispatchKey.CUDA else
                 '',
             'external_backend_headers': '',
+            'namespaced_headers': f'#include <ATen/{dispatch_key}Functions.h>' if dispatch_key in functions_keys else '',
             'DispatchKey': dispatch_key,
             'dispatch_namespace': dispatch_key.lower(),
             'dispatch_namespaced_definitions': list(concatMap(
@@ -1071,7 +1073,7 @@ def main() -> None:
             list(mapMaybe(ComputeBackendSelect(Target.REGISTRATION, selector), native_functions)),
     })
 
-    cpu_fm.write('MetaFunctions.h', lambda: {
+    cpu_fm.write('NativeMetaFunctions.h', lambda: {
         'declarations': list(mapMaybe(compute_meta_function_declaration, structured_native_functions)),
     })
 
