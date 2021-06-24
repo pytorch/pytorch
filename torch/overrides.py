@@ -918,6 +918,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.special.ndtri: lambda input: -1,
         torch.special.ndtr: lambda input: -1,
         torch.special.xlog1py: lambda input, other, out=None: -1,
+        torch.special.zeta: lambda self, other, out=None: -1,
         torch.t: lambda input: -1,
         torch.take: lambda input, index: -1,
         torch.take_along_dim: lambda input, indices, dim=None, out=None: -1,
