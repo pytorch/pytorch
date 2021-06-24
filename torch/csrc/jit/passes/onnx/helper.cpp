@@ -169,8 +169,10 @@ Node* transformToONNXConcatNode(Graph* g, Node* lc_node, int opset_version) {
   // order to be consumed as inputs
   std::vector<Value*> unsqueezed;
   for (auto* input : lc_node->inputs()) {
+    auto new_input = g->addInput();
+    new_input->copyMetadata(input);
     Node* unsqueezed_node =
-        createONNXUnsqueeze(g, lc_node, input, 0, opset_version);
+        createONNXUnsqueeze(g, lc_node, new_input, 0, opset_version);
     unsqueezed.emplace_back(unsqueezed_node->output());
   }
   Node* concat_node = g->create(onnx::Concat, 1);
