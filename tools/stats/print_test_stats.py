@@ -18,9 +18,9 @@ from xml.dom import minidom
 
 import requests
 from typing_extensions import TypedDict
-from tools.stats_utils.s3_stat_parser import (newify_case, get_S3_object_from_bucket, get_test_stats_summaries_for_job,
-                                              Report, Status, Commit, HAVE_BOTO3, Version2Case, VersionedReport,
-                                              Version1Report, Version2Report, ReportMetaMeta)
+from tools.stats.s3_stat_parser import (newify_case, get_S3_object_from_bucket, get_test_stats_summaries_for_job,
+                                        Report, Status, Commit, HAVE_BOTO3, Version2Case, VersionedReport,
+                                        Version1Report, Version2Report, ReportMetaMeta)
 
 
 
@@ -50,7 +50,7 @@ class SuiteDiff(TypedDict):
 
 
 # TODO: consolidate this with the get_cases function from
-# tools/test_history.py
+# tools/stats/test_history.py
 
 # Here we translate to a three-layer format (file -> suite -> case)
 # rather than a two-layer format (suite -> case) because as mentioned in
