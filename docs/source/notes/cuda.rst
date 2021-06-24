@@ -263,7 +263,7 @@ BC note: Using grads on the default stream
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 In prior versions of Pytorch (1.9 and earlier), the autograd engine always synced
-the default stream with all backward ops, so the following pattern:
+the default stream with all backward ops, so the following pattern::
 
     with torch.cuda.stream(s):
         loss.backward()
