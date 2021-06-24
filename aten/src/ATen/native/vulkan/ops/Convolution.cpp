@@ -461,37 +461,43 @@ vTensor pack_biases(
   api::Context* const context = api::context();
   api::Command::Buffer& command_buffer = context->command().pool.stream();
 
+  const int64_t src_w = weight.size(Layout::Filter::output);
+  const int64_t packed_w = div_up(src_w, INT64_C(4));
   vTensor v_bias{
     context,
     &pool,
     {
-      // 1D
-      weight.size(Layout::Filter::output),
+      4,
+      1,
+      packed_w,
     },
     weight.options(),
   };
 
-  {
-      using Future = vTensor::Future<void, vTensor::Access::Write>;
-      Future v_bias_future = v_bias.host<void, vTensor::Access::Write>(command_buffer);
-      Future::Payload v_bias_payload = v_bias_future.wait();
+  using Future = vTensor::Future<float, vTensor::Access::Write>;
+  Future v_bias_future = v_bias.host<float, vTensor::Access::Write>(command_buffer);
+  Future::Payload v_bias_payload = v_bias_future.wait();
 
-      if (bias) {
-        memcpy(
-            v_bias_payload.get(),
-            bias->contiguous().data_ptr<float>(),
-            std::min(bias->nbytes(), v_bias.nbytes()));
-      }
-      else {
-        memset(
-            v_bias_payload.get(),
-            // 2's complement integers and IEEE-754 floating point numbers both
-            // have identical bit representations for 0, so can use memset which
-            // only accepts uint8_t parameter.
-            0,
-            v_bias.nbytes());
-      }
+  if (bias) {
+    const float* const src_bias_ptr = bias->contiguous().data_ptr<float>();
+    float* const dst_bias_ptr = v_bias_payload.get();
+
+    memset(dst_bias_ptr, 0, v_bias.nbytes());
+    for (int64_t i = 0; i < src_w; ++i) {
+      const int64_t c = i % 4;
+      const int64_t x = i / 4;
+      dst_bias_ptr[c * packed_w + x] = src_bias_ptr[i];
     }
+  }
+  else {
+    memset(
+        v_bias_payload.get(),
+        // 2's complement integers and IEEE-754 floating point numbers both
+        // have identical bit representations for 0, so can use memset which
+        // only accepts uint8_t parameter.
+        0,
+        v_bias.nbytes());
+  }
 
   return v_bias;
 }
@@ -650,7 +656,7 @@ void conv2d_dw(
           VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
           VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
         },
         VK_KERNEL(conv2d_dw),
@@ -674,7 +680,7 @@ void conv2d_dw(
             vTensor::Stage::Compute),
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
-        v_bias.buffer(
+        v_bias.image(
             command_buffer,
             vTensor::Stage::Compute),
         // Object lifetime is managed by the resource pool.
@@ -732,7 +738,7 @@ void conv2d_pw(
           VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
           VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
         },
         VK_KERNEL(conv2d_pw),
@@ -756,7 +762,7 @@ void conv2d_pw(
             vTensor::Stage::Compute),
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
-        v_bias.buffer(
+        v_bias.image(
             command_buffer,
             vTensor::Stage::Compute),
         // Object lifetime is managed by the resource pool.
@@ -832,7 +838,7 @@ void conv2d(
           VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
           VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
         },
         VK_KERNEL(conv2d),
@@ -856,7 +862,7 @@ void conv2d(
             vTensor::Stage::Compute),
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
-        v_bias.buffer(
+        v_bias.image(
             command_buffer,
             vTensor::Stage::Compute),
         // Object lifetime is managed by the resource pool.
@@ -959,7 +965,7 @@ void conv2d_winograd_2_3(
           VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
           VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
         },
         VK_KERNEL(conv2d_winograd_2_3),
@@ -1047,7 +1053,7 @@ void conv2d_old(
           VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
           VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
         },
         VK_KERNEL(conv2d_nogroup_clamp),
