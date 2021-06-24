@@ -2498,14 +2498,14 @@ Stmt* SimplifierUnderContext::mutate(const For* v) {
 // contained in [0, 6) + the start value of j is not less than 0
 //    -> j
 const Expr* distributeDiv(
-    const Expr* lhs_new,
-    const Expr* rhs_new,
+    const Expr* lhs,
+    const Expr* rhs,
     VarBoundInfo var_bound_info) {
-  if (!lhs_new || !rhs_new) {
+  if (!lhs || !rhs) {
     return nullptr;
   }
-  auto* lhsAdd = dynamic_cast<const Add*>(lhs_new);
-  const Expr* rhsScalar = rhs_new->isConstant() ? rhs_new : nullptr;
+  auto* lhsAdd = dynamic_cast<const Add*>(lhs);
+  const Expr* rhsScalar = rhs->isConstant() ? rhs : nullptr;
 
   if (!lhsAdd || !rhsScalar) {
     return nullptr;
@@ -2570,14 +2570,14 @@ const Expr* distributeDiv(
 // contained in [0, 6) + the start value of j is not less than 0
 //    -> i
 const Expr* distributeMod(
-    const Expr* lhs_new,
-    const Expr* rhs_new,
+    const Expr* lhs,
+    const Expr* rhs,
     VarBoundInfo var_bound_info) {
-  if (!lhs_new || !rhs_new) {
+  if (!lhs || !rhs) {
     return nullptr;
   }
-  auto* lhsAdd = dynamic_cast<const Add*>(lhs_new);
-  const Expr* rhsScalar = rhs_new->isConstant() ? rhs_new : nullptr;
+  auto* lhsAdd = dynamic_cast<const Add*>(lhs);
+  const Expr* rhsScalar = rhs->isConstant() ? rhs : nullptr;
 
   if (!lhsAdd || !rhsScalar) {
     return nullptr;
