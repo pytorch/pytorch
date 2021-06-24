@@ -236,6 +236,7 @@ test_libtorch() {
     wait
     OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api --gtest_output=xml:$TEST_REPORTS_DIR/test_api.xml
     build/bin/test_tensorexpr --gtest_output=xml:$TEST_REPORTS_DIR/test_tensorexpr.xml
+    build/bin/test_mobile_nnc --gtest_output=xml:$TEST_REPORTS_DIR/test_mobile_nnc.xml
     assert_git_not_dirty
   fi
 }
@@ -258,18 +259,18 @@ test_distributed() {
     # test reporting process (in print_test_stats.py) to function as expected.
     TEST_REPORTS_DIR=test/test-reports/cpp-distributed/test_distributed
     mkdir -p $TEST_REPORTS_DIR
-    build/bin/FileStoreTest --gtest_output=xml:$TEST_REPORTS_DIR/FileStoreTest.xml
-    build/bin/HashStoreTest --gtest_output=xml:$TEST_REPORTS_DIR/HashStoreTest.xml
-    build/bin/TCPStoreTest --gtest_output=xml:$TEST_REPORTS_DIR/TCPStoreTest.xml
+    build/bin/test_cpp_c10d/FileStoreTest --gtest_output=xml:$TEST_REPORTS_DIR/FileStoreTest.xml
+    build/bin/test_cpp_c10d/HashStoreTest --gtest_output=xml:$TEST_REPORTS_DIR/HashStoreTest.xml
+    build/bin/test_cpp_c10d/TCPStoreTest --gtest_output=xml:$TEST_REPORTS_DIR/TCPStoreTest.xml
 
     MPIEXEC=$(command -v mpiexec)
     if [[ -n "$MPIEXEC" ]]; then
-      MPICMD="${MPIEXEC} -np 2 build/bin/ProcessGroupMPITest"
+      MPICMD="${MPIEXEC} -np 2 build/bin/test_cpp_c10d/ProcessGroupMPITest"
       eval "$MPICMD"
     fi
-    build/bin/ProcessGroupGlooTest --gtest_output=xml:$TEST_REPORTS_DIR/ProcessGroupGlooTest.xml
-    build/bin/ProcessGroupNCCLTest --gtest_output=xml:$TEST_REPORTS_DIR/ProcessGroupNCCLTest.xml
-    build/bin/ProcessGroupNCCLErrorsTest --gtest_output=xml:$TEST_REPORTS_DIR/ProcessGroupNCCLErrorsTest.xml
+    build/bin/test_cpp_c10d/ProcessGroupGlooTest --gtest_output=xml:$TEST_REPORTS_DIR/ProcessGroupGlooTest.xml
+    build/bin/test_cpp_c10d/ProcessGroupNCCLTest --gtest_output=xml:$TEST_REPORTS_DIR/ProcessGroupNCCLTest.xml
+    build/bin/test_cpp_c10d/ProcessGroupNCCLErrorsTest --gtest_output=xml:$TEST_REPORTS_DIR/ProcessGroupNCCLErrorsTest.xml
   fi
 }
 
@@ -443,7 +444,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *jit_legacy-test || "${JOB_BASE_NAME}" == *jit
 elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
-elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${SHARD_NUMBER}" == 1 ]]; then
+elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 || "${SHARD_NUMBER}" == 1 ]]; then
   if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7-test1 ]]; then
     test_torch_deploy
   fi
@@ -451,7 +452,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${SHARD_NUMBER}" == 1 ]]; then
   install_torchvision
   test_python_shard1
   test_aten
-elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${SHARD_NUMBER}" == 2 ]]; then
+elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 || "${SHARD_NUMBER}" == 2 ]]; then
   install_torchvision
   test_python_shard2
   test_libtorch

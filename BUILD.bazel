@@ -389,15 +389,6 @@ filegroup(
         "aten/src/THC/THCTensorMathScan.cu.cc",
         "aten/src/THC/THCTensorScatterGather.cu.cc",
         "aten/src/THC/THCTensorSort.cu.cc",
-        "aten/src/THC/generated/THCTensorMathPointwiseBool.cu.cc",
-        "aten/src/THC/generated/THCTensorMathPointwiseByte.cu.cc",
-        "aten/src/THC/generated/THCTensorMathPointwiseChar.cu.cc",
-        "aten/src/THC/generated/THCTensorMathPointwiseDouble.cu.cc",
-        "aten/src/THC/generated/THCTensorMathPointwiseFloat.cu.cc",
-        "aten/src/THC/generated/THCTensorMathPointwiseHalf.cu.cc",
-        "aten/src/THC/generated/THCTensorMathPointwiseInt.cu.cc",
-        "aten/src/THC/generated/THCTensorMathPointwiseLong.cu.cc",
-        "aten/src/THC/generated/THCTensorMathPointwiseShort.cu.cc",
         "aten/src/THC/generated/THCTensorSortByte.cu.cc",
         "aten/src/THC/generated/THCTensorSortChar.cu.cc",
         "aten/src/THC/generated/THCTensorSortDouble.cu.cc",
@@ -413,7 +404,6 @@ filegroup(
     name = "thcunn_srcs_cu",
     srcs = [
         "aten/src/THCUNN/BCECriterion.cu.cc",
-        "aten/src/THCUNN/ClassNLLCriterion.cu.cc",
         "aten/src/THCUNN/ELU.cu.cc",
         "aten/src/THCUNN/GatedLinearUnit.cu.cc",
         "aten/src/THCUNN/HardTanh.cu.cc",
@@ -527,10 +517,13 @@ header_template_rule(
         "@AT_FFTW_ENABLED@": "0",
         "@AT_NNPACK_ENABLED@": "0",
         "@CAFFE2_STATIC_LINK_CUDA_INT@": "0",
-        "@USE_BLAS@": "1",
+        "@AT_BUILD_WITH_BLAS@": "1",
+        "@AT_BUILD_WITH_LAPACK@": "1",
         "@AT_PARALLEL_OPENMP@": "0",
         "@AT_PARALLEL_NATIVE@": "1",
         "@AT_PARALLEL_NATIVE_TBB@": "0",
+        "@AT_BLAS_F2C@": "0",
+        "@AT_BLAS_USE_CBLAS_DOT@": "1",
     },
 )
 
@@ -1728,7 +1721,7 @@ cc_library(
         ],
         [
             ":aten",
-            "@tensorpipe",
+            "@tensorpipe//:tensorpipe_cpu",
         ],
     ),
     alwayslink = True,
@@ -1873,8 +1866,8 @@ cc_library(
         [
             "torch/*.h",
             "torch/csrc/**/*.h",
+            "torch/csrc/distributed/c10d/*.hpp",
             "torch/lib/libshm/*.h",
-            "torch/lib/c10d/*.hpp",
         ],
         exclude = [
             "torch/csrc/autograd/generated/VariableType.h",
@@ -1886,6 +1879,7 @@ cc_library(
     includes = [
         "torch/csrc",
         "torch/csrc/api/include",
+        "torch/csrc/distributed",
         "torch/lib",
         "torch/lib/libshm",
     ],
@@ -1955,6 +1949,7 @@ cc_library(
     includes = [
         ".",
         "torch/csrc/api/include",
+        "torch/csrc/distributed",
         "torch/lib",
         "torch/lib/libshm",
     ],
