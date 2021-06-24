@@ -112,15 +112,14 @@ struct csrMatrixRef {
       int* csr_pointers,
       scalar_t* csr_values,
       int nnz,
-      const std::vector<int>& size,
-      const at::ScalarType& scalar_type)
+      const std::vector<int>& size)
       : csr_indices_{csr_indices},
         csr_pointers_{csr_pointers},
         csr_values_{csr_values},
         nnz_{nnz},
         size_{size} {
     #if IS_CUSPARSE11_AVAILABLE()
-      cudaDataType cuda_data_type = at::cuda::toCudaDataType(scalar_type);
+      cudaDataType cuda_data_type = at::cuda::getCudaDataType<scalar_t>();
       TORCH_CUDASPARSE_CHECK(cusparseCreateCsr(
         &description_,
         this->size(0),
@@ -231,8 +230,7 @@ struct CusparseMatrixMultiplyOp {
       nullptr,
       nullptr,
       /*nnz*/0,
-      {A_num_rows, B_num_cols},
-      output_values.scalar_type()
+      {A_num_rows, B_num_cols}
     );
 
     //--------------------------------------------------------------------------
@@ -246,7 +244,7 @@ struct CusparseMatrixMultiplyOp {
     cusparseSpMatDescr_t matC = C.description_;
     //--------------------------------------------------------------------------
 
-    cudaDataType computeType = at::cuda::toCudaDataType(output_values.scalar_type());
+    cudaDataType computeType = at::cuda::getCudaDataType<scalar_t>();
 
     // If a specific GPU model does not provide native support for a given data type,
     // the routine returns CUSPARSE_STATUS_ARCH_MISMATCH error
@@ -704,16 +702,14 @@ void sparse_sparse_matmul_cuda_kernel(
       mat1_indptr.data_ptr<int>(),
       mat1_values.data_ptr<scalar_t>(),
       (int)mat1._nnz(),
-      {(int)mat1.size(0), (int)mat1.size(1)},
-      mat1.scalar_type());
+      {(int)mat1.size(0), (int)mat1.size(1)});
 
   csrMatrixRef<scalar_t> csr_mat2(
       mat2_indices.data_ptr<int>(),
       mat2_indptr.data_ptr<int>(),
       mat2_values.data_ptr<scalar_t>(),
       (int)mat2._nnz(),
-      {(int)mat2.size(0), (int)mat2.size(1)},
-      mat2.scalar_type());
+      {(int)mat2.size(0), (int)mat2.size(1)});
 
   // Sparse matrix multiplication
   CusparseMatrixMultiplyOp<scalar_t> op;
