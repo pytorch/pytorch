@@ -201,35 +201,65 @@ ensure proper synchronization.
 Stream semantics of backward passes
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Internally, each backward CUDA op runs on the same stream that was used for its corresponding forward op.
+A. Each backward CUDA op runs on the same stream that was used for its corresponding forward op.
 
-When manually supplying CUDA tensor(s) as a backward pass's initial gradient(s) (e.g.,
+B. The stream semantics of a backward call with respect to surrounding ops are the same
+as for any other call. More concretely, when calling
+:func:`autograd.backward<torch.autograd.backward>`,
+:func:`autograd.grad<torch.autograd.grad>`, or
+:meth:`tensor.backward<torch.Tensor.backward>`,
+and optionally supplying CUDA tensor(s) as the  initial gradient(s) (e.g.,
 :func:`autograd.backward(..., grad_tensors=initial_grads)<torch.autograd.backward>`,
 :func:`autograd.grad(..., grad_outputs=initial_grads)<torch.autograd.grad>`, or
 :meth:`tensor.backward(..., gradient=initial_grad)<torch.Tensor.backward>`),
 the acts of
 
-1. populating the initial gradient(s) and
-2. invoking the backward pass
+1. optionally populating initial gradient(s),
+2. invoking the backward pass, and
+3. using the gradients
 
-have the same stream-semantics relationship as any pair of ops::
+have the same stream-semantics relationship as any group of ops::
 
-    # Safe, populating initial_grad and invoking backward are in the same stream context
-    with torch.cuda.stream(strm):
+    s = torch.cuda.Stream()
+
+    # Safe, grads are used in the same stream context as backward()
+    with torch.cuda.stream(s):
+        loss.backward()
+        use grads
+
+    # Unsafe
+    with torch.cuda.stream(s):
+        loss.backward()
+    use grads
+
+    # Safe, with synchronization
+    with torch.cuda.stream(s):
+        loss.backward()
+    torch.cuda.current_stream().wait_stream(s)
+    use grads
+
+    # Safe, populating initial grad and invoking backward are in the same stream context
+    with torch.cuda.stream(s):
         loss.backward(gradient=torch.ones_like(loss))
 
     # Unsafe, populating initial_grad and invoking backward are in different stream contexts,
     # without synchronization
     initial_grad = torch.ones_like(loss)
-    with torch.cuda.stream(strm):
+    with torch.cuda.stream(s):
         loss.backward(gradient=initial_grad)
 
     # Safe, with synchronization
     initial_grad = torch.ones_like(loss)
-    strm.wait_stream(torch.cuda.current_stream())
-    with torch.cuda.stream(strm):
-        initial_grad.record_stream(strm)
+    s.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(s):
+        initial_grad.record_stream(s)
         loss.backward(gradient=initial_grad)
+
+If your forward pass runs some independent ops in parallel on different streams,
+A. helps the backward pass exploit that same parallelism.
+
+The backward call inserts internal syncs as needed to ensure B. holds true even if A.
+makes some backward ops run on assorted side streams.
 
 .. _CUDA stream: https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#streams
 
@@ -259,6 +289,21 @@ underlying allocation patterns produced by your code.
 Use of a caching allocator can interfere with memory checking tools such as
 ``cuda-memcheck``.  To debug memory errors using ``cuda-memcheck``, set
 ``PYTORCH_NO_CUDA_MEMORY_CACHING=1`` in your environment to disable caching.
+
+The behavior of caching allocator can be controlled via environment variable
+``PYTORCH_CUDA_ALLOC_CONF``.
+The format is ``PYTORCH_CUDA_ALLOC_CONF=<option>:<value>,<option2><value2>...``
+Available options:
+
+* ``max_split_size_mb`` prevents the allocator from splitting blocks larger
+  than this size (in MB). This can help prevent fragmentation and may allow
+  some borderline workloads to complete without running out of memory.
+  Performance cost can range from 'zero' to 'substatial' depending on
+  allocation patterns.  Default value is unlimited, i.e. all blocks can be
+  split. The :meth:`~torch.cuda.memory_stats` and
+  :meth:`~torch.cuda.memory_summary` methods are useful for tuning.  This
+  option should be used as a last resort for a workload that is aborting
+  due to 'out of memory' and showing a large amount of inactive split blocks.
 
 .. _cufft-plan-cache:
 

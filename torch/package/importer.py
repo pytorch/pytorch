@@ -40,6 +40,7 @@ class Importer(ABC):
         obj2 = getattr(module, obj_name)
         assert obj1 is obj2
     """
+
     modules: Dict[str, ModuleType]
 
     @abstractmethod

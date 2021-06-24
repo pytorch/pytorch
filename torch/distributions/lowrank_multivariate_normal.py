@@ -16,7 +16,7 @@ def _batch_capacitance_tril(W, D):
     Wt_Dinv = W.transpose(-1, -2) / D.unsqueeze(-2)
     K = torch.matmul(Wt_Dinv, W).contiguous()
     K.view(-1, m * m)[:, ::m + 1] += 1  # add identity matrix to K
-    return torch.cholesky(K)
+    return torch.linalg.cholesky(K)
 
 
 def _batch_lowrank_logdet(W, D, capacitance_tril):
@@ -146,7 +146,7 @@ class LowRankMultivariateNormal(Distribution):
         Dinvsqrt_W = self._unbroadcasted_cov_factor / cov_diag_sqrt_unsqueeze
         K = torch.matmul(Dinvsqrt_W, Dinvsqrt_W.transpose(-1, -2)).contiguous()
         K.view(-1, n * n)[:, ::n + 1] += 1  # add identity matrix to K
-        scale_tril = cov_diag_sqrt_unsqueeze * torch.cholesky(K)
+        scale_tril = cov_diag_sqrt_unsqueeze * torch.linalg.cholesky(K)
         return scale_tril.expand(self._batch_shape + self._event_shape + self._event_shape)
 
     @lazy_property
