@@ -953,30 +953,28 @@ std::vector<c10::Storage> ivalue::Future::extractStorages(
   if (value.isPyObject()) {
     std::vector<at::Tensor> tensors =
         value.toPyObjectHolder()->extractTensors();
-    size_t num_data_ptrs = 0;
+    size_t num_storages = 0;
     for (const at::Tensor& tensor : tensors) {
       if (tensor.is_sparse()) {
         // Sparse tensor is indices and values. Both are tensors
-        // and contain storage. Therefore num_data_ptrs needs to be
+        // and contain storage. Therefore num_storages needs to be
         // incremented by 2.
-        num_data_ptrs += 2;
+        num_storages += 2;
       } else {
         // A dense/strided tensor contains 1 storage.
-        num_data_ptrs += 1;
+        num_storages += 1;
       }
     }
-    data_ptrs.reserve(num_data_ptrs);
+    storages.reserve(num_storages);
     for (const at::Tensor& tensor : tensors) {
       if (tensor.is_sparse()) {
         // Sparse tensor is indices and values. Both are tensors
-        // and contain storage. Therefore both data_ptr need to be emplaced
-        // in data_ptrs.
-        data_ptrs.emplace_back(tensor.indices().storage().data_ptr());
-        data_ptrs.emplace_back(tensor.values().storage().data_ptr());
+        // and contain storage.
+        storages.push_back(tensor.indices().storage());
+        storages.push_back(tensor.values().storage());
       } else {
-        // A dense/strided tensor contains 1 data_ptr that needs to emplaced
-        // in data_ptrs.
-        data_ptrs.emplace_back(tensor.storage().data_ptr());
+        // A dense/strided tensor contains 1 storage
+        storages.push_back(tensor.storage());
       }
     }
   } else {
