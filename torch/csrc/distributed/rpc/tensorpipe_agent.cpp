@@ -158,10 +158,14 @@ void makeStreamsWaitOnOthers(
 } // namespace
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-C10_DEFINE_REGISTRY(TensorPipeTransportRegistry, TransportRegistration);
+C10_DEFINE_REGISTRY_WITHOUT_WARNING(
+    TensorPipeTransportRegistry,
+    TransportRegistration);
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-C10_DEFINE_REGISTRY(TensorPipeChannelRegistry, ChannelRegistration);
+C10_DEFINE_REGISTRY_WITHOUT_WARNING(
+    TensorPipeChannelRegistry,
+    ChannelRegistration);
 
 const std::string& TensorPipeAgent::guessAddress() {
   static const std::string uvAddress = []() {
