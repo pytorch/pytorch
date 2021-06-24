@@ -1,4 +1,5 @@
 import collections
+import doctest
 import functools
 import itertools
 import math
@@ -1015,6 +1016,16 @@ class TestAssertClose(TestCase):
 
         for fn in assert_close_with_inputs(actual, expected):
             fn()
+
+    def test_docstring_examples(self):
+        finder = doctest.DocTestFinder(verbose=False)
+        runner = doctest.DocTestRunner(verbose=False, optionflags=doctest.NORMALIZE_WHITESPACE)
+        globs = dict(torch=torch)
+        doctests = finder.find(torch.testing.assert_close, globs=globs)[0]
+        failures = []
+        runner.run(doctests, out=lambda report: failures.append(report))
+        if failures:
+            raise AssertionError(f"Doctest found {len(failures)} failures:\n\n" + "\n".join(failures))
 
     def test_default_tolerance_selection_mismatching_dtypes(self):
         # If the default tolerances where selected based on the promoted dtype, i.e. float64,
