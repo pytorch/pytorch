@@ -338,8 +338,9 @@ def try_ann_to_type(ann, loc):
             if a is None:
                 inner.append(NoneType.get())
             maybe_type = try_ann_to_type(a, loc)
-            if maybe_type is not None:
-                inner.append(maybe_type)
+            msg = "Unsupported annotation {} could not be resolved because {} could not be resolved."
+            assert maybe_type, msg.format(repr(ann), repr(maybe_type))
+            inner.append(maybe_type)
         return UnionType(inner)
     if torch.distributed.rpc.is_available() and is_rref(ann):
         return RRefType(try_ann_to_type(ann.__args__[0], loc))

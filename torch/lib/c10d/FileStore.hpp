@@ -9,7 +9,7 @@
 
 namespace c10d {
 
-class FileStore : public Store {
+class TORCH_API FileStore : public Store {
  public:
   explicit FileStore(const std::string& path, int numWorkers);
 
@@ -37,6 +37,11 @@ class FileStore : public Store {
   void wait(
       const std::vector<std::string>& keys,
       const std::chrono::milliseconds& timeout) override;
+
+  // Returns the path used by the FileStore.
+  const std::string& getPath() const noexcept {
+    return path_;
+  }
 
  protected:
   int64_t addHelper(const std::string& key, int64_t i);

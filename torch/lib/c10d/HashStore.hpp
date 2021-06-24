@@ -10,7 +10,7 @@
 
 namespace c10d {
 
-class HashStore : public Store {
+class TORCH_API HashStore : public Store {
  public:
   ~HashStore() override {}
 

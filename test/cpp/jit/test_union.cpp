@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 
 #include <test/cpp/jit/test_utils.h>
-#include "aten/src/ATen/core/type.cpp"
-#include "torch/csrc/jit/ir/ir.h"
+#include <aten/src/ATen/core/type.cpp>
+#include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {
 namespace jit {
