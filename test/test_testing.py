@@ -891,13 +891,13 @@ class TestAssertClose(TestCase):
 
         for fn in assert_close_with_inputs(actual, expected):
             with self.assertRaisesRegex(AssertionError, "stride"):
-                fn()
+                fn(check_stride=True)
 
     def test_mismatching_stride_no_check(self):
         actual = torch.rand((2, 2))
         expected = torch.as_strided(actual.clone().t().contiguous(), actual.shape, actual.stride()[::-1])
         for fn in assert_close_with_inputs(actual, expected):
-            fn(check_stride=False)
+            fn()
 
     def test_only_rtol(self):
         actual = torch.empty(())

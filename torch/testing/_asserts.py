@@ -667,7 +667,7 @@ def assert_close(
     equal_nan: Union[bool, str] = False,
     check_device: bool = True,
     check_dtype: bool = True,
-    check_stride: bool = True,
+    check_stride: bool = False,
     check_is_coalesced: bool = True,
     msg: Optional[Union[str, Callable[[Tensor, Tensor, Diagnostics], str]]] = None,
 ) -> None:
@@ -714,8 +714,7 @@ def assert_close(
         check_dtype (bool): If ``True`` (default), asserts that corresponding tensors have the same ``dtype``. If this
             check is disabled, tensors with different ``dtype``'s are promoted  to a common ``dtype`` (according to
             :func:`torch.promote_types`) before being compared.
-        check_stride (bool): If ``True`` (default) and corresponding tensors are strided, asserts that they have the
-            same stride.
+        check_stride (bool): If ``True`` and corresponding tensors are strided, asserts that they have the same stride.
         check_is_coalesced (bool): If ``True`` (default) and corresponding tensors are sparse COO, checks that both
             :attr:`actual` and :attr:`expected` are either coalesced or uncoalesced. If this check is disabled,
             tensors are :meth:`~torch.Tensor.coalesce`'ed before being compared.
