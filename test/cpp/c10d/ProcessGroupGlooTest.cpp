@@ -19,7 +19,7 @@
 #include <c10/util/irange.h>
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroupGloo.hpp>
-#include <c10d/test/TestUtils.hpp>
+#include "TestUtils.hpp"
 
 using namespace c10d::test;
 using namespace torch::autograd::profiler;
