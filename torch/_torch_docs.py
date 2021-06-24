@@ -1242,6 +1242,56 @@ Example:
     tensor([ True, False, False])
 """.format(**common_args))
 
+add_docstr(torch.bitwise_left_shift,
+           r"""
+bitwise_left_shift(input, other, *, out=None) -> Tensor
+
+Computes the left arithmetic shift of :attr:`input` by :attr:`other` bits.
+The result will have the same dtype as :attr:`input`.
+
+The operation applied is:
+
+.. math::
+    \text{{out}}_i = \text{{input}}_i \times 2 ^ {{\text{{other}}_i}}
+
+Args:
+    input (Tensor or Scalar): the first input tensor
+    other (Tensor or Scalar): the second input tensor
+
+Keyword args:
+    {out}
+
+Example:
+
+    >>> torch.bitwise_left_shift(torch.tensor([-1, -2, 3], dtype=torch.int8), torch.tensor([1, 0, 3], dtype=torch.int8))
+    tensor([-2, -2, 24], dtype=torch.int8)
+""".format(**common_args))
+
+add_docstr(torch.bitwise_right_shift,
+           r"""
+bitwise_right_shift(input, other, *, out=None) -> Tensor
+
+Computes the right arithmetic shift of :attr:`input` by :attr:`other` bits.
+The result will have the same dtype as :attr:`input`.
+
+The operation applied is:
+
+.. math::
+    \text{{out}}_i = \text{{input}}_i / 2 ^ {{\text{{other}}_i}}
+
+Args:
+    input (Tensor or Scalar): the first input tensor
+    other (Tensor or Scalar): the second input tensor
+
+Keyword args:
+    {out}
+
+Example:
+
+    >>> torch.bitwise_right_shift(torch.tensor([-2, -7, 31], dtype=torch.int8), torch.tensor([1, 0, 3], dtype=torch.int8))
+    tensor([-1, -7,  3], dtype=torch.int8)
+""".format(**common_args))
+
 add_docstr(torch.broadcast_to,
            r"""
 broadcast_to(input, shape) -> Tensor
