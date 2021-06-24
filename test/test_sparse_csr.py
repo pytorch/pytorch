@@ -477,10 +477,7 @@ class TestSparseCSR(TestCase):
         _test_spadd_shape(10, [100, 1])
         _test_spadd_shape(10, [1, 100])
 
-    # TODO: enable all dtypes when csr_sparse.to_dense() works
-    # See: https://github.com/pytorch/pytorch/issues/60648
-    @dtypes(*torch.testing.get_all_dtypes(include_bool=False, include_half=False,
-                                          include_bfloat16=False, include_complex=False))
+    @dtypes(*torch.testing.get_all_dtypes())
     def test_coo_csr_conversion(self, device, dtype):
         for m, n in itertools.product([5, 2, 0], [5, 2, 0]):
             size = (m, n)
