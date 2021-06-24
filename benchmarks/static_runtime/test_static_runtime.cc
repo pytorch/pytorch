@@ -94,7 +94,7 @@ void testStaticRuntime(
 
   auto expect = module.forward(args);
 
-  torch::jit::StaticModule smodule(module);
+  torch::jit::StaticModule smodule(module, {true, true, true});
   auto actual = smodule(args, {});
   smodule.runtime().check_for_memory_leak();
   // first run
@@ -446,23 +446,39 @@ TEST(StaticRuntime, IndividualOps_pow) {
   testStaticRuntime(pow_script_sca_ten, args2, {3, d});
 }
 
-// TODO: fix aten::to tests
 TEST(StaticRuntime, IndividualOps_to) {
   auto test_to = [](at::ScalarType b, bool c, bool d, c10::MemoryFormat e) {
-    auto a = at::randn({2, 3});
-    auto other = at::randn({2, 3}, b);
+    auto a = at::randn({4, 3, 1, 2});
+    auto other = at::randn({4, 3, 1, 2}, b);
+    auto a2 = at::randn({3, 2, 2, 4});
+    auto a2_other = at::randn({3, 2, 2, 4}, b);
+
     std::vector<IValue> args0{a, b, c, d, e};
     std::vector<IValue> args1{a, b, c, d};
     std::vector<IValue> args2{a, other, c, d, e};
-    testStaticRuntime(to_script_0, args0);
-    testStaticRuntime(to_script_1, args1);
-    testStaticRuntime(to_script_2, args2);
-  };
 
-  test_to(at::ScalarType::Float, true, true, c10::MemoryFormat::Contiguous);
+    testStaticRuntime(to_script_0, args0); // to.dtype
+    testStaticRuntime(to_script_1, args0); // to.dtype, strided
+    testStaticRuntime(to_script_2, args1); // to.prim_dtype
+    testStaticRuntime(to_script_3, args2); // to.other
+    testStaticRuntime(to_script_4, {a}); // alias
+
+    // dynamic shapes
+    testStaticRuntime(to_script_0, args0, {a2, b, c, d, e}); // to.dtype
+    testStaticRuntime(to_script_1, args0, {a2, b, c, d, e}); // to.dtype
+    testStaticRuntime(to_script_2, args1, {a2, b, c, d}); // to.prim_dtype
+    testStaticRuntime(to_script_3, args2, {a2, a2_other, c, d, e}); // to.other
+    testStaticRuntime(to_script_4, {a}, {a2});
+  };
+  // float->float, NCHW->NHWC
+  test_to(at::ScalarType::Float, true, true, c10::MemoryFormat::ChannelsLast);
+  // float->half
   test_to(at::ScalarType::Half, true, false, c10::MemoryFormat::Preserve);
+  // float->float
   test_to(at::ScalarType::Float, false, false, c10::MemoryFormat::Contiguous);
-  test_to(at::ScalarType::Half, false, true, c10::MemoryFormat::Preserve);
+  // TODO: check if fbgemm is enabled properly in this case
+  // half->float, NCHW->NHWC
+  test_to(at::ScalarType::Half, false, true, c10::MemoryFormat::ChannelsLast);
 }
 
 TEST(StaticRuntime, IndividualOps_FullLike) {
