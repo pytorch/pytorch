@@ -516,9 +516,6 @@ class OpInfo(object):
                  # the following metadata relates to sparse support and is used in test_sparse.py
                  supports_sparse=False,  # whether the op supports sparse inputs
 
-                 # the following metadata relates to CSR layout support and is used in test_sparse_csr.py
-                 supports_sparse_csr=False,  # whether the op supports sparse_csr inputs
-
                  # the following metadata relates to complex support and is checked in test_ops.py
                  test_conjugated_samples=True,
                  ):
@@ -7664,7 +7661,6 @@ op_db: List[OpInfo] = [
 unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo)]
 spectral_funcs = [op for op in op_db if isinstance(op, SpectralFuncInfo)]
 sparse_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse is True]
-sparse_csr_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse_csr is True]
 shape_funcs = [op for op in op_db if isinstance(op, ShapeFuncInfo)]
 
 # TODO: review porting these to make_tensor
