@@ -178,16 +178,18 @@ class CMake:
 
         if rerun and os.path.isfile(self._cmake_cache_file):
             os.remove(self._cmake_cache_file)
-        ninja_build_file = os.path.join(self.build_dir, 'build.ninja')
-        if os.path.exists(self._cmake_cache_file) and not (
-                USE_NINJA and not os.path.exists(ninja_build_file)):
-            # Everything's in place. Do not rerun.
-            return
+
         ninja_deps_file = os.path.join(self.build_dir, '.ninja_deps')
         if IS_WINDOWS and USE_NINJA and os.path.exists(ninja_deps_file):
             # Cannot rerun ninja on Windows due to a ninja bug.
             # The workaround is to remove `.ninja_deps`.
             os.remove(ninja_deps_file)
+
+        ninja_build_file = os.path.join(self.build_dir, 'build.ninja')
+        if os.path.exists(self._cmake_cache_file) and not (
+                USE_NINJA and not os.path.exists(ninja_build_file)):
+            # Everything's in place. Do not rerun.
+            return
 
         args = []
         if USE_NINJA:
