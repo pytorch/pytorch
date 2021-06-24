@@ -102,18 +102,87 @@ def _check_complex_components_individually(
     return wrapper
 
 
-def _check_supported_tensor(input: Tensor) -> Optional[_TestingErrorMeta]:
-    """Checks if the tensors are supported by the current infrastructure.
+def _check_sparse_coo_members_individually(
+    check_tensors: Callable[..., Optional[_TestingErrorMeta]]
+) -> Callable[..., Optional[_TestingErrorMeta]]:
+    """Decorates strided tensor check functions to individually handle sparse COO members.
 
-    All checks are temporary and will be relaxed in the future.
+    If the inputs are not sparse COO, this decorator is a no-op.
+
+    Args:
+        check_tensors (Callable[[Tensor, Tensor], Optional[Exception]]): Tensor check function for strided tensors.
+    """
+
+    @functools.wraps(check_tensors)
+    def wrapper(actual: Tensor, expected: Tensor, **kwargs: Any) -> Optional[_TestingErrorMeta]:
+        if not actual.is_sparse:
+            return check_tensors(actual, expected, **kwargs)
+
+        if actual._nnz() != expected._nnz():
+            return _TestingErrorMeta(
+                AssertionError, f"The number of specified values does not match: {actual._nnz()} != {expected._nnz()}"
+            )
+
+        kwargs_equal = dict(kwargs, rtol=0, atol=0)
+        error_meta = check_tensors(actual._indices(), expected._indices(), **kwargs_equal)
+        if error_meta:
+            return error_meta.amend_msg(postfix="\n\nThe failure occurred for the indices.")
+
+        error_meta = check_tensors(actual._values(), expected._values(), **kwargs)
+        if error_meta:
+            return error_meta.amend_msg(postfix="\n\nThe failure occurred for the values.")
+
+        return None
+
+    return wrapper
+
+
+def _check_sparse_csr_members_individually(
+    check_tensors: Callable[..., Optional[_TestingErrorMeta]]
+) -> Callable[..., Optional[_TestingErrorMeta]]:
+    """Decorates strided tensor check functions to individually handle sparse CSR members.
+
+    If the inputs are not sparse CSR, this decorator is a no-op.
+
+    Args:
+        check_tensors (Callable[[Tensor, Tensor], Optional[Exception]]): Tensor check function for strided
+        tensors.
+    """
+
+    @functools.wraps(check_tensors)
+    def wrapper(actual: Tensor, expected: Tensor, **kwargs: Any) -> Optional[_TestingErrorMeta]:
+        if not actual.is_sparse_csr:
+            return check_tensors(actual, expected, **kwargs)
+
+        kwargs_equal = dict(kwargs, rtol=0, atol=0)
+        error_meta = check_tensors(actual.crow_indices(), expected.crow_indices(), **kwargs_equal)
+        if error_meta:
+            return error_meta.amend_msg(postfix="\n\nThe failure occurred for the crow_indices.")
+
+        error_meta = check_tensors(actual.col_indices(), expected.col_indices(), **kwargs_equal)
+        if error_meta:
+            return error_meta.amend_msg(postfix="\n\nThe failure occurred for the col_indices.")
+
+        error_meta = check_tensors(actual.values(), expected.values(), **kwargs)
+        if error_meta:
+            return error_meta.amend_msg(postfix="\n\nThe failure occurred for the values.")
+
+        return None
+
+    return wrapper
+
+
+def _check_supported_tensor(input: Tensor) -> Optional[_TestingErrorMeta]:
+    """Checks if the tensor is supported by the current infrastructure.
 
     Returns:
         (Optional[_TestingErrorMeta]): If check did not pass.
     """
     if input.is_quantized:
         return _TestingErrorMeta(UsageError, "Comparison for quantized tensors is not supported yet.")
-    if input.is_sparse:
-        return _TestingErrorMeta(UsageError, "Comparison for sparse tensors is not supported yet.")
+
+    if input.layout not in {torch.strided, torch.sparse_coo, torch.sparse_csr}:  # type: ignore[attr-defined]
+        return _TestingErrorMeta(UsageError, f"Unsupported tensor layout {input.layout}")
 
     return None
 
@@ -125,11 +194,13 @@ def _check_attributes_equal(
     check_device: bool = True,
     check_dtype: bool = True,
     check_stride: bool = True,
+    check_is_coalesced: bool = True,
 ) -> Optional[_TestingErrorMeta]:
     """Checks if the attributes of two tensors match.
 
-    Always checks the :attr:`~torch.Tensor.shape`. Checks for :attr:`~torch.Tensor.device`,
-    :attr:`~torch.Tensor.dtype`, and :meth:`~torch.Tensor.stride` are optional and can be disabled.
+    Always checks the :attr:`~torch.Tensor.shape` and :attr:`~torch.Tensor.layout`. Checks for
+    :attr:`~torch.Tensor.device`, :attr:`~torch.Tensor.dtype`, :meth:`~torch.Tensor.stride` if the tensors are strided,
+    and :meth:`~torch.tensor.is_coalesced` if the tensors are sparse COO are optional and can be disabled.
 
     Args:
         actual (Tensor): Actual tensor.
@@ -138,8 +209,10 @@ def _check_attributes_equal(
             same :attr:`~torch.Tensor.device`.
         check_dtype (bool): If ``True`` (default), checks that both :attr:`actual` and :attr:`expected` have the same
             ``dtype``.
-        check_stride (bool): If ``True`` (default), checks that both :attr:`actual` and :attr:`expected` have the same
-            stride.
+        check_stride (bool): If ``True`` (default) and the tensors are strided, checks that both :attr:`actual` and
+            :attr:`expected` have the same stride.
+        check_is_coalesced (bool): If ``True`` (default) and the tensors are sparse COO, checks that both
+            :attr:`actual` and :attr:`expected` are either coalesced or uncoalesced.
 
     Returns:
         (Optional[_TestingErrorMeta]): If checks did not pass.
@@ -149,14 +222,20 @@ def _check_attributes_equal(
     if actual.shape != expected.shape:
         return _TestingErrorMeta(AssertionError, msg_fmtstr.format("shape", actual.shape, expected.shape))
 
+    if actual.layout != expected.layout:
+        return _TestingErrorMeta(AssertionError, msg_fmtstr.format("layout", actual.layout, expected.layout))
+    elif actual.layout == torch.strided and check_stride and actual.stride() != expected.stride():
+        return _TestingErrorMeta(AssertionError, msg_fmtstr.format("stride()", actual.stride(), expected.stride()))
+    elif actual.layout == torch.sparse_coo and check_is_coalesced and actual.is_coalesced() != expected.is_coalesced():
+        return _TestingErrorMeta(
+            AssertionError, msg_fmtstr.format("is_coalesced()", actual.is_coalesced(), expected.is_coalesced())
+        )
+
     if check_device and actual.device != expected.device:
         return _TestingErrorMeta(AssertionError, msg_fmtstr.format("device", actual.device, expected.device))
 
     if check_dtype and actual.dtype != expected.dtype:
         return _TestingErrorMeta(AssertionError, msg_fmtstr.format("dtype", actual.dtype, expected.dtype))
-
-    if check_stride and actual.stride() != expected.stride():
-        return _TestingErrorMeta(AssertionError, msg_fmtstr.format("stride()", actual.stride(), expected.stride()))
 
     return None
 
@@ -184,6 +263,10 @@ def _equalize_attributes(actual: Tensor, expected: Tensor) -> Tuple[Tensor, Tens
         dtype = torch.promote_types(actual.dtype, expected.dtype)
         actual = actual.to(dtype)
         expected = expected.to(dtype)
+
+    if actual.is_sparse and actual.is_coalesced() != expected.is_coalesced():
+        actual = actual.coalesce()
+        expected = expected.coalesce()
 
     return actual, expected
 
@@ -243,6 +326,8 @@ def _trace_mismatches(actual: Tensor, expected: Tensor, mismatches: Tensor) -> D
     )
 
 
+@_check_sparse_coo_members_individually
+@_check_sparse_csr_members_individually
 @_check_complex_components_individually
 def _check_values_close(
     actual: Tensor,
@@ -296,6 +381,7 @@ def _check_tensors_close(
     check_device: bool = True,
     check_dtype: bool = True,
     check_stride: bool = True,
+    check_is_coalesced: bool = True,
     msg: Optional[Union[str, Callable[[Tensor, Tensor, SimpleNamespace], str]]] = None,
 ) -> Optional[_TestingErrorMeta]:
     r"""Checks that the values of :attr:`actual` and :attr:`expected` are close.
@@ -327,7 +413,12 @@ def _check_tensors_close(
         rtol, atol = _get_default_rtol_and_atol(actual, expected)
 
     error_meta = _check_attributes_equal(
-        actual, expected, check_device=check_device, check_dtype=check_dtype, check_stride=check_stride
+        actual,
+        expected,
+        check_device=check_device,
+        check_dtype=check_dtype,
+        check_stride=check_stride,
+        check_is_coalesced=check_is_coalesced,
     )
     if error_meta:
         return error_meta
@@ -541,11 +632,12 @@ def assert_close(
     check_device: bool = True,
     check_dtype: bool = True,
     check_stride: bool = True,
+    check_is_coalesced: bool = True,
     msg: Optional[Union[str, Callable[[Tensor, Tensor, SimpleNamespace], str]]] = None,
 ) -> None:
     r"""Asserts that :attr:`actual` and :attr:`expected` are close.
 
-    If :attr:`actual` and :attr:`expected` are real-valued and finite, they are considered close if
+    If :attr:`actual` and :attr:`expected` are strided, real-valued, and finite, they are considered close if
 
     .. math::
 
@@ -558,6 +650,12 @@ def assert_close(
 
     If :attr:`actual` and :attr:`expected` are complex-valued, they are considered close if both their real and
     imaginary components are considered close according to the definition above.
+
+    If :attr:`actual` and :attr:`expected` are sparse (either having COO or CSR layout), their strided members are
+    checked individually. Indices, namely ``indices`` for COO or ``crow_indices``  and ``col_indices`` for CSR layout,
+    are always checked for equality whereas the values are checked for closeness according to the definition above.
+    Sparse COO tensors are only considered close if both are either coalesced or uncoalesced (if
+    :attr:`check_is_coalesced` is ``True``).
 
     :attr:`actual` and :attr:`expected` can be :class:`~torch.Tensor`'s or any array-or-scalar-like of the same type,
     from which :class:`torch.Tensor`'s can be constructed with :func:`torch.as_tensor`. In addition, :attr:`actual` and
@@ -580,24 +678,30 @@ def assert_close(
         check_dtype (bool): If ``True`` (default), asserts that corresponding tensors have the same ``dtype``. If this
             check is disabled, tensors with different ``dtype``'s are promoted  to a common ``dtype`` (according to
             :func:`torch.promote_types`) before being compared.
-        check_stride (bool): If ``True`` (default), asserts that corresponding tensors have the same stride.
+        check_stride (bool): If ``True`` (default) and corresponding tensors are strided, asserts that they have the
+            same stride.
+        check_is_coalesced (bool): If ``True`` (default) and corresponding tensors are sparse COO, checks that both
+            :attr:`actual` and :attr:`expected` are either coalesced or uncoalesced. If this check is disabled,
+            tensors are :meth:`~torch.Tensor.coalesce`'ed before being compared.
         msg (Optional[Union[str, Callable[[Tensor, Tensor, DiagnosticInfo], str]]]): Optional error message to use if
             the values of corresponding tensors mismatch. Can be passed as callable in which case it will be called
             with the mismatching tensors and a namespace of diagnostic info about the mismatches. See below for details.
 
     Raises:
         UsageError: If a :class:`torch.Tensor` can't be constructed from an array-or-scalar-like.
-        UsageError: If any tensor is quantized or sparse. This is a temporary restriction and will be relaxed in the
-            future.
+        UsageError: If any tensor is quantized. This is a temporary restriction and will be relaxed in the future.
         UsageError: If only :attr:`rtol` or :attr:`atol` is specified.
         AssertionError: If corresponding array-likes have different types.
         AssertionError: If the inputs are :class:`~collections.abc.Sequence`'s, but their length does not match.
         AssertionError: If the inputs are :class:`~collections.abc.Mapping`'s, but their set of keys do not match.
         AssertionError: If corresponding tensors do not have the same :attr:`~torch.Tensor.shape`.
+        AssertionError: If corresponding tensors do not have the same :attr:`~torch.Tensor.layout`.
         AssertionError: If :attr:`check_device`, but corresponding tensors are not on the same
             :attr:`~torch.Tensor.device`.
         AssertionError: If :attr:`check_dtype`, but corresponding tensors do not have the same ``dtype``.
-        AssertionError: If :attr:`check_stride`, but corresponding tensors do not have the same stride.
+        AssertionError: If :attr:`check_stride`, but corresponding strided tensors do not have the same stride.
+        AssertionError: If :attr:`check_is_coalesced`, but corresponding sparse COO tensors are not both either
+            coalesced or uncoalesced.
         AssertionError: If the values of corresponding tensors are not close.
 
     The following table displays the default ``rtol`` and ``atol`` for different ``dtype``'s. Note that the ``dtype``
@@ -747,6 +851,7 @@ def assert_close(
         check_device=check_device,
         check_dtype=check_dtype,
         check_stride=check_stride,
+        check_is_coalesced=check_is_coalesced,
         msg=msg,
     )
     if error_meta:
