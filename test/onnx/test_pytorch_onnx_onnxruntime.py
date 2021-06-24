@@ -6545,6 +6545,25 @@ class TestONNXRuntime(unittest.TestCase):
                         return [y]
                 return [y]
 
+        x = torch.ones((3, 4), dtype=torch.int)
+        y = torch.ones((6, 7), dtype=torch.int)
+        self.run_test(UninitializedModel(), x, test_with_inputs=[y],
+                      input_names=["input_1"],
+                      dynamic_axes={"input_1": [0, 1]})
+
+    # Sequence type as loop-carried dependencies only supported for ONNX opset >= 13
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_sequance_loopcarried(self):
+        class SequanceLoopModel(torch.nn.Module):
+            def forward(self, x):
+                outputs = []
+                for i in range(3):
+                    outputs += [x]
+                return torch.stack(outputs).transpose(0, 1)
+
+        x = torch.ones((3, 4), dtype=torch.int)
+        self.run_test(torch.jit.script(SequanceLoopModel()), x)
+
     def test_reflection_pad(self):
         model = torch.nn.ReflectionPad1d(2)
         x = torch.randn(2, 4, 4)

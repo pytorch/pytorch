@@ -275,7 +275,6 @@ void InferShapeTypeForUninitializedOutput(
       auto size = output_type->sizes().concrete_sizes().value();
       const_node->t_(attr::value, at::zeros(size, elem_type));
       const_node->output()->setType(other_output->type());
-      const_node->output()->copyMetadata(other_output);
     } else {
       const_node->t_(attr::value, at::zeros({}, elem_type));
       const_node->output()->setType(
@@ -290,7 +289,6 @@ void InferShapeTypeForUninitializedOutput(
       auto onnx_type = ATenTypeToOnnxType(scalar_type);
       const_node->i_(attr::dtype, onnx_type);
       const_node->output()->setType(ListType::create(elem->cast<TensorType>()));
-      const_node->output()->copyMetadata(other_output);
     } else {
       const_node->output()->setType(other_output->type());
     }
