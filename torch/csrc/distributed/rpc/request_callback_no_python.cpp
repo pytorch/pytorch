@@ -354,7 +354,10 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
 }
 
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
-    processBackwardAutogradReq(RpcCommandBase& rpc) const {
+    processBackwardAutogradReq(
+        RpcCommandBase& rpc,
+        std::vector<c10::Stream> streams) const {
+  c10::MultiStreamGuard guard(streams);
   auto& gradientsCall = static_cast<PropagateGradientsReq&>(rpc);
   const auto& autogradMetadata = gradientsCall.getAutogradMetadata();
 
@@ -527,7 +530,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processRpc(
       return processForwardAutogradReq(rpc, std::move(streams));
     }
     case MessageType::BACKWARD_AUTOGRAD_REQ: {
-      return processBackwardAutogradReq(rpc);
+      return processBackwardAutogradReq(rpc, std::move(streams));
     };
     case MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ: {
       return processCleanupAutogradContextReq(rpc);
