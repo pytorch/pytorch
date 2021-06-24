@@ -168,7 +168,6 @@ Node* transformToONNXConcatNode(
     Node* lc_node,
     bool need_new_input,
     int opset_version) {
-
   // ListConstruct Int[] output case, we need to transform to ONNX
   // Concat to ensure the output is a single tensor(dynamic) type in
   // order to be consumed as inputs
