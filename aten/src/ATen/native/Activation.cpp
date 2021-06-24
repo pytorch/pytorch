@@ -189,7 +189,9 @@ DEFINE_DISPATCH(softplus_backward_stub);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log_sigmoid_cpu_stub);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-DEFINE_DISPATCH(log_sigmoid_backward_cpu_stub);
+DEFINE_DISPATCH(log_sigmoid_cuda_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(log_sigmoid_backward_stub);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(threshold_stub);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -220,6 +222,9 @@ DEFINE_DISPATCH(silu_backward_stub);
 DEFINE_DISPATCH(mish_stub);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(mish_backward_stub);
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_NO_CPU_DISPATCH(log_sigmoid_cuda_stub, activation_fn);
 
 TORCH_IMPL_FUNC(elu_out) (
   const Tensor& self, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale, const Tensor& result
@@ -853,6 +858,23 @@ std::tuple<Tensor&, Tensor&> log_sigmoid_forward_out_cpu(const Tensor& input, Te
   return std::forward_as_tuple(result, buffer);
 }
 
+std::tuple<Tensor&, Tensor&> log_sigmoid_forward_out_cuda(const Tensor& input, Tensor& result, Tensor& buffer) {
+  // NOTE: buffer is only used by CPU dispatch, we just ignore it here
+  auto iter = TensorIteratorConfig()
+      .add_output(result)
+      .add_input(input)
+      .build();
+  log_sigmoid_cuda_stub(kCUDA, iter);
+  return std::forward_as_tuple(result, buffer);
+}
+
+std::tuple<Tensor, Tensor> log_sigmoid_forward_cuda(const Tensor& input) {
+  auto result = at::empty_like(input);
+  auto buffer = at::empty({0}, input.options());
+  log_sigmoid_forward_out_cuda(input, result, buffer);
+  return std::forward_as_tuple(result, buffer);
+}
+
 Tensor & log_sigmoid_out(const Tensor & self, Tensor & output) {
   Tensor buffer = at::empty({0}, self.options());
   return std::get<0>(at::log_sigmoid_forward_out(output, buffer, self));
@@ -862,29 +884,52 @@ Tensor log_sigmoid(const Tensor & self) {
   return std::get<0>(at::log_sigmoid_forward(self));
 }
 
-Tensor log_sigmoid_backward_cpu(const Tensor& grad_output, const Tensor& input, const Tensor& buffer) {
-  Tensor grad_input;
+Tensor log_sigmoid_backward_cuda(const Tensor& grad_output, const Tensor& input, const Tensor& buffer) {
+  auto grad_input = at::empty_like(grad_output);
+  // NOTE: buffer is only used by CPU dispatch, we just ignore it here
   auto iter = at::TensorIteratorConfig()
-    .add_output(grad_input)
-    .add_input(input)
-    .add_input(buffer)
-    .add_input(grad_output)
-    .build();
-  log_sigmoid_backward_cpu_stub(kCPU, iter);
+      .add_output(grad_input)
+      .add_input(input)
+      .add_input(grad_output)
+      .build();
+  log_sigmoid_backward_stub(kCUDA, iter);
   return iter.output();
 }
 
-Tensor& log_sigmoid_backward_out_cpu(const Tensor& grad_output,
+Tensor log_sigmoid_backward_cpu(const Tensor& grad_output, const Tensor& input, const Tensor& buffer) {
+  auto grad_input = at::empty_like(grad_output);
+  auto iter = at::TensorIteratorConfig()
+      .add_output(grad_input)
+      .add_input(input)
+      .add_input(buffer)
+      .add_input(grad_output)
+      .build();
+  log_sigmoid_backward_stub(kCPU, iter);
+  return iter.output();
+}
+
+Tensor& log_sigmoid_backward_cuda_out(const Tensor& grad_output, const Tensor& input,
+                                      const Tensor& buffer, Tensor& grad_input) {
+  auto iter = TensorIteratorConfig()
+      .add_output(grad_input)
+      .add_input(input)
+      .add_input(grad_output)
+      .build();
+  log_sigmoid_backward_stub(kCUDA, iter);
+  return grad_input;
+}
+
+Tensor& log_sigmoid_backward_cpu_out(const Tensor& grad_output,
     const Tensor& input,
     const Tensor& buffer,
     Tensor& grad_input) {
   auto iter = TensorIteratorConfig()
-    .add_output(grad_input)
-    .add_input(input)
-    .add_input(buffer)
-    .add_input(grad_output)
-    .build();
-  log_sigmoid_backward_cpu_stub(kCPU, iter);
+      .add_output(grad_input)
+      .add_input(input)
+      .add_input(buffer)
+      .add_input(grad_output)
+      .build();
+  log_sigmoid_backward_stub(kCPU, iter);
   return grad_input;
 }
 

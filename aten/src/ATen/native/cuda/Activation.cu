@@ -153,6 +153,47 @@ Tensor glu_backward_cuda(const Tensor& grad_output, const Tensor& input, int64_t
 }
 
 // -----------------------------------
+// log_sigmoid forward
+// -----------------------------------
+
+void log_sigmoid_forward_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND(kHalf, iter.common_dtype(),
+                                 "log_sigmoid_forward_cuda", [&] {
+    using acc_t = acc_type<scalar_t, true>;
+    gpu_kernel(iter,
+        [] GPU_LAMBDA (scalar_t in_) -> scalar_t {
+          const acc_t in = in_;
+          const auto max = std::max(acc_t(0), -in);
+          const auto z = std::exp(-max) + std::exp(-in - max);
+          return -(max + std::log(z));
+        });
+  });
+}
+
+// -----------------------------------
+// log_sigmoid backward
+// -----------------------------------
+
+void log_sigmoid_backward_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND(kHalf, iter.common_dtype(),
+                                 "log_sigmoid_backward_cuda", [&] {
+    using acc_t = acc_type<scalar_t, true>;
+    gpu_kernel(iter,
+        [] GPU_LAMBDA (scalar_t in_, scalar_t grad_out_) -> scalar_t {
+          const acc_t in = in_;
+          const acc_t grad_out = grad_out_;
+          const auto max = std::max(acc_t(0), -in);
+          const auto z = std::exp(-max) + std::exp(-in - max);
+
+          auto in_negative = in < acc_t(0);
+          auto max_deriv = in_negative ? acc_t(1) : acc_t(0);
+          auto sign = in_negative ? acc_t(1) : -acc_t(1);
+          return grad_out * (max_deriv - sign * (acc_t(1) - acc_t(1) / z));
+        });
+  });
+}
+
+// -----------------------------------
 // prelu forward
 // -----------------------------------
 template <typename scalar_t>
@@ -856,6 +897,8 @@ TORCH_IMPL_FUNC(gelu_backward_out_cuda) (
 
 REGISTER_DISPATCH(hardtanh_backward_stub, &hardtanh_backward_kernel);
 REGISTER_DISPATCH(hardshrink_stub, &hardshrink_kernel);
+REGISTER_DISPATCH(log_sigmoid_cuda_stub, &log_sigmoid_forward_kernel);
+REGISTER_DISPATCH(log_sigmoid_backward_stub, &log_sigmoid_backward_kernel);
 REGISTER_DISPATCH(softshrink_stub, &softshrink_kernel);
 REGISTER_DISPATCH(shrink_backward_stub, &shrink_backward_kernel);
 REGISTER_DISPATCH(elu_stub, &elu_kernel);
