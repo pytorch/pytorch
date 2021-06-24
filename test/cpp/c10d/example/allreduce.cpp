@@ -7,7 +7,7 @@ using namespace ::c10d;
 int main(int argc, char** argv) {
   int rank = atoi(getenv("RANK"));
   int size = atoi(getenv("SIZE"));
-  auto store = std::make_shared<FileStore>("/tmp/c10d_example", size);
+  auto store = c10::make_intrusive<FileStore>("/tmp/c10d_example", size);
   ProcessGroupGloo pg(store, rank, size);
 
   // Create some tensors
