@@ -71,6 +71,10 @@ class ForwardDerivative:
     # This is only used by inplace operations
     required_original_self_value: bool
 
+    # If this formula is specified by the user or if we are re-using the
+    # out of place formula for inplace
+    is_exact_match: bool
+
 # Represents differentiability info for a NativeFunction.
 @dataclass(frozen=True)
 class DifferentiabilityInfo:
@@ -265,6 +269,11 @@ def match_differentiability_info(
                 fw_info = info.forward_derivatives[0]
                 formula = fw_info.formula
 
+                def update_for_original(formula, postfix):
+                    def repl(m: Match[str]) -> str:
+                        return f'{m.group(1)}original_self{postfix}{m.group(2)}'
+                    return re.sub(IDENT_REGEX.format(f'self{postfix}'), repl, formula)
+
                 if re.search(IDENT_REGEX.format("self_p"), formula):
                     if is_exact_match:
                         # For manually defined formulas, don't allow the original value to be used
@@ -274,10 +283,9 @@ def match_differentiability_info(
                     else:
                         # When the original formula is out of place, we save a clone of the primal
                         # value to be able to access this value if needed
-                        # replace "self_p" from the formula by "original_self_p"
-                        def repl(m: Match[str]) -> str:
-                            return f'{m.group(1)}original_self_p{m.group(2)}'
-                        formula = re.sub(IDENT_REGEX.format("self_p"), repl, formula)
+                        # replace "self_p"/"self_t" from the formula by "original_self_p"/"original_self_t"
+                        formula = update_for_original(formula, "_p")
+                        formula = update_for_original(formula, "_t")
 
                 if re.search(IDENT_REGEX.format("original_self_p"), formula):
                     required_original_self_value = True
@@ -304,7 +312,8 @@ def match_differentiability_info(
                     var_type=fw_info.var_type,
                     required_inputs_fw_grad=fw_info.required_inputs_fw_grad,
                     required_inputs_primal=required_primals,
-                    required_original_self_value=required_original_self_value), ]
+                    required_original_self_value=required_original_self_value,
+                    is_exact_match=is_exact_match), ]
         else:
             forward_derivatives = []
 
