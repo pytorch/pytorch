@@ -10,4 +10,4 @@ find . -type f \
   -path './torch/csrc/jit/*' -or \
   -path './test/cpp/jit/*' -or \
   -path './test/cpp/tensorexpr/*' \
-  | xargs tools/git-clang-format --verbose "$1" --
+  | xargs tools/linter/git-clang-format --verbose "$1" --
