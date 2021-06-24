@@ -646,7 +646,8 @@ def _test_cpp_extensions_aot(test_module, test_directory, options, use_ninja):
         os.environ['USE_NINJA'] = str(1 if use_ninja else 0)
         return run_test(test_module, test_directory, options)
     finally:
-        os.environ = shell_env
+        os.environ.clear()
+        os.environ.update(shell_env)
 
 
 def test_cpp_extensions_aot_ninja(test_module, test_directory, options):
