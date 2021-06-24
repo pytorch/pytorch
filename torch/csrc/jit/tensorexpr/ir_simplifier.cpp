@@ -2490,6 +2490,185 @@ Stmt* SimplifierUnderContext::mutate(const For* v) {
   return new For(var_new, start_new, stop_new, body_new, loop_options);
 }
 
+// Simplify division using distributive laws for the following cases:
+// 1) (i + 24) / 6, i is the index var of a for-stmt and the range of i is
+// contained in [0, 6)
+//    -> 4
+// 2) (i + j*6) / 6, i, j are index vars of for-stmts and the range of i is
+// contained in [0, 6) + the start value of j is not less than 0
+//    -> j
+const Expr* distributeDiv(
+    const Expr* lhs_new,
+    const Expr* rhs_new,
+    VarBoundInfo var_bound_info) {
+  if (!lhs_new || !rhs_new) {
+    return nullptr;
+  }
+  auto* lhsAdd = dynamic_cast<const Add*>(lhs_new);
+  const Expr* rhsScalar = rhs_new->isConstant() ? rhs_new : nullptr;
+
+  if (!lhsAdd || !rhsScalar) {
+    return nullptr;
+  }
+  const Expr* lhsAdd1 = lhsAdd->lhs();
+  const Expr* lhsAdd2 = lhsAdd->rhs();
+
+  // identify index var 'i'
+  const Var* var_key = dynamic_cast<const Var*>(lhsAdd1);
+  const Expr* main = lhsAdd2;
+  if (var_key == nullptr) {
+    var_key = dynamic_cast<const Var*>(lhsAdd2);
+    main = lhsAdd1;
+  }
+
+  if (var_key != nullptr) {
+    auto got = var_bound_info.find(var_key);
+    if (got == var_bound_info.end()) {
+      return nullptr;
+    }
+
+    // check the bounds of 'i'
+    auto start = got->second.first;
+    auto end = got->second.second;
+    const Expr* check_start =
+        IRSimplifier::simplify(new CompareSelect(start, new IntImm(0), kGE));
+    const Expr* check_end =
+        IRSimplifier::simplify(new CompareSelect(end, rhsScalar, kLE));
+    if (check_start->isConstant() && check_end->isConstant() &&
+        immediateEquals(check_start, 1) && immediateEquals(check_end, 1)) {
+      const Expr* ret = IRSimplifier::simplify(new Div(main, rhsScalar));
+
+      // simplify type 1 exprs: '(i+24)/6'
+      const Expr* mod_check = IRSimplifier::simplify(new Mod(main, rhsScalar));
+      if (mod_check->isConstant() && immediateEquals(mod_check, 0)) {
+        return ret;
+      }
+
+      // simplify type 2 exprs: '(i+j*6)/6'
+      auto ret_var = dynamic_cast<const Var*>(ret);
+      if (ret_var) {
+        auto got = var_bound_info.find(ret_var);
+        if (got == var_bound_info.end()) {
+          return nullptr;
+        }
+        check_start = IRSimplifier::simplify(
+            new CompareSelect(start, new IntImm(0), kGE));
+        if (check_start->isConstant() && immediateEquals(check_start, 1)) {
+          return ret_var;
+        }
+      }
+    }
+  }
+  return nullptr;
+}
+
+// Simplify mod using distributive laws for the following cases:
+// 1) (i + 24) % 6, i is the index var of a for-stmt and the range of i is
+// contained in [0, 6)
+//    -> i
+// 2) (i + j*6) % 6, i, j are index vars of for-stmts and the range of i is
+// contained in [0, 6) + the start value of j is not less than 0
+//    -> i
+const Expr* distributeMod(
+    const Expr* lhs_new,
+    const Expr* rhs_new,
+    VarBoundInfo var_bound_info) {
+  if (!lhs_new || !rhs_new) {
+    return nullptr;
+  }
+  auto* lhsAdd = dynamic_cast<const Add*>(lhs_new);
+  const Expr* rhsScalar = rhs_new->isConstant() ? rhs_new : nullptr;
+
+  if (!lhsAdd || !rhsScalar) {
+    return nullptr;
+  }
+  const Expr* lhsAdd1 = lhsAdd->lhs();
+  const Expr* lhsAdd2 = lhsAdd->rhs();
+
+  // identify index var 'i'
+  const Var* var_key = dynamic_cast<const Var*>(lhsAdd1);
+  const Expr* main = lhsAdd2;
+  if (var_key == nullptr) {
+    var_key = dynamic_cast<const Var*>(lhsAdd2);
+    main = lhsAdd1;
+  }
+
+  if (var_key != nullptr) {
+    auto got = var_bound_info.find(var_key);
+    if (got == var_bound_info.end()) {
+      return nullptr;
+    }
+
+    // check the bounds of 'i'
+    auto start = got->second.first;
+    auto end = got->second.second;
+    const Expr* check_start =
+        IRSimplifier::simplify(new CompareSelect(start, new IntImm(0), kGE));
+    const Expr* check_end =
+        IRSimplifier::simplify(new CompareSelect(end, rhsScalar, kLE));
+    if (check_start->isConstant() && check_end->isConstant() &&
+        immediateEquals(check_start, 1) && immediateEquals(check_end, 1)) {
+      const Expr* ret = IRSimplifier::simplify(new Div(main, rhsScalar));
+
+      // simplify type 1 exprs: '(i+24)%6'
+      const Expr* mod_check = IRSimplifier::simplify(new Mod(main, rhsScalar));
+      if (mod_check->isConstant() && immediateEquals(mod_check, 0)) {
+        return var_key;
+      }
+
+      // simplify type 2 exprs: '(i+j*6)%6'
+      auto ret_var = dynamic_cast<const Var*>(ret);
+      if (ret_var) {
+        auto got = var_bound_info.find(ret_var);
+        if (got == var_bound_info.end()) {
+          return nullptr;
+        }
+        check_start = IRSimplifier::simplify(
+            new CompareSelect(start, new IntImm(0), kGE));
+        if (check_start->isConstant() && immediateEquals(check_start, 1)) {
+          return var_key;
+        }
+      }
+    }
+  }
+
+  return nullptr;
+}
+
+const Expr* SimplifierUnderContext::mutate(const Div* v) {
+  const Expr* lhs = v->lhs();
+  const Expr* rhs = v->rhs();
+
+  if (auto ret = distributeDiv(lhs, rhs, var_bound_info_)) {
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
+    return ret->accept_mutator(this);
+  }
+
+  const Expr* lhs_new = lhs->accept_mutator(this);
+  const Expr* rhs_new = rhs->accept_mutator(this);
+  if (lhs == lhs_new && rhs == rhs_new) {
+    return v;
+  }
+  return new Div(lhs_new, rhs_new);
+}
+
+const Expr* SimplifierUnderContext::mutate(const Mod* v) {
+  const Expr* lhs = v->lhs();
+  const Expr* rhs = v->rhs();
+
+  if (auto ret = distributeMod(lhs, rhs, var_bound_info_)) {
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
+    return ret->accept_mutator(this);
+  }
+
+  const Expr* lhs_new = lhs->accept_mutator(this);
+  const Expr* rhs_new = rhs->accept_mutator(this);
+  if (lhs == lhs_new && rhs == rhs_new) {
+    return v;
+  }
+  return new Mod(lhs_new, rhs_new);
+}
+
 bool exprEquals(const Expr* A, const Expr* B) {
   try {
     // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)

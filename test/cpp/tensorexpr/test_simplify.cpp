@@ -1236,6 +1236,118 @@ TEST(Simplify, SimplifyDiv) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Simplify, SimplifyDivWithLoopContext1) {
+  KernelScope kernel_scope;
+  // Stmt to simplify:
+  // for (int i = 0; i < 5; i++) {
+  //  A[i] = (i + 24) / 6;
+  //}
+  VarHandle i("i", kInt);
+  BufHandle a_buf("A", {5}, kInt);
+  auto forstmt = For::make(
+      i, 0, 5, Store::make(a_buf, {i}, (i + ExprHandle(24)) / ExprHandle(6)));
+
+  const Stmt* simplified = IRSimplifier::simplify(forstmt);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT:   A[i] = 4;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Simplify, SimplifyDivWithLoopContext2) {
+  KernelScope kernel_scope;
+  // Stmt to simplify:
+  // for (int i = 0; i < 5; i++) {
+  //  for (int j = 0; j < 5; j++) {
+  //    A[i, j] = (i + 6*j) / 6;
+  //  }
+  //}
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  BufHandle a_buf("A", {5, 5}, kInt);
+  auto for_j = For::make(
+      j,
+      0,
+      5,
+      Store::make(a_buf, {i, j}, (i + ExprHandle(6) * j) / ExprHandle(6)));
+  auto for_i = For::make(i, 0, 5, for_j);
+
+  const Stmt* simplified = IRSimplifier::simplify(for_i);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK:   for (int j
+# CHECK-NEXT:   A[i, j] = j;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Simplify, SimplifyModWithLoopContext1) {
+  KernelScope kernel_scope;
+  // Stmt to simplify:
+  // for (int i = 0; i < 5; i++) {
+  //  A[i] = (i + 24) % 6;
+  //}
+  VarHandle i("i", kInt);
+  BufHandle a_buf("A", {5}, kInt);
+  auto forstmt = For::make(
+      i, 0, 5, Store::make(a_buf, {i}, (i + ExprHandle(24)) % ExprHandle(6)));
+
+  const Stmt* simplified = IRSimplifier::simplify(forstmt);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT:   A[i] = i;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Simplify, SimplifyModWithLoopContext2) {
+  KernelScope kernel_scope;
+  // Stmt to simplify:
+  // for (int i = 0; i < 5; i++) {
+  //  for (int j = 0; j < 5; j++) {
+  //    A[i, j] = (i + 6*j) % 6;
+  //  }
+  //}
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  BufHandle a_buf("A", {5, 5}, kInt);
+  auto for_j = For::make(
+      j,
+      0,
+      5,
+      Store::make(a_buf, {i, j}, (i + ExprHandle(6) * j) % ExprHandle(6)));
+  auto for_i = For::make(i, 0, 5, for_j);
+
+  const Stmt* simplified = IRSimplifier::simplify(for_i);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK:   for (int j
+# CHECK-NEXT:   A[i, j] = i;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyMod) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
