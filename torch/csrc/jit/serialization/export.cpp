@@ -537,15 +537,6 @@ void EncoderBase::EncodeBlock(
       AddAttribute(
           p_n, node, attr_name, use_external_data_format, onnx_file_path);
     }
-    if (is_raw_export && node->blocks().size() > 0) {
-      auto blocks = p_n->add_attribute();
-      blocks->set_name("_blocks");
-      blocks->set_type(onnx::AttributeProto_AttributeType_GRAPHS);
-      for (auto block : node->blocks()) {
-        auto graph = blocks->add_graphs();
-        EncodeBlock(graph, block, initializers);
-      }
-    }
     if (node->kind() == ::c10::onnx::Loop) {
       AT_ASSERT(node->blocks().size() == 1);
 
