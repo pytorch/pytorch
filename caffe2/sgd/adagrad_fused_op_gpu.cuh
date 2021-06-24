@@ -126,7 +126,7 @@ static inline __device__ void gpuAtomicAdd(c10::Half* address, c10::Half val) {
     old = atomicCAS(address_as_ui, assumed, old);
   } while (assumed != old);
 #else
-  gpu_atomic_add(reinterpret_cast<__half*>(address), val);
+  atomicAdd(reinterpret_cast<__half*>(address), val);
 #endif
 }
 
