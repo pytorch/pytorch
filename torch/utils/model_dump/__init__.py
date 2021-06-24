@@ -41,7 +41,8 @@ run "python -m http.server", then load http://localhost:8000/skeleton.html
 in the browser.  In another terminal, run
 "python -m torch.utils.model_dump --style=json FILE > \
     torch/utils/model_dump/model_info.json"
-every time you update the Python code.  When you update JS, just refresh.
+every time you update the Python code or model.
+When you update JS, just refresh.
 
 Possible improvements:
     - Fix various TODO comments in this file and the JS.
