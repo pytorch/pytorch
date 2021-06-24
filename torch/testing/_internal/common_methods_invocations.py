@@ -4283,7 +4283,11 @@ def sample_inputs_view_reshape(op_info, device, dtype, requires_grad, **kwargs):
     def generator():
         for case in cases:
             shape, args = case
-            yield(SampleInput(make_arg(shape), args=(args, )))
+            inp = make_arg(shape, requires_grad=requires_grad)
+            yield(SampleInput(inp, args=(args, )))
+
+            if op_info.name != "view" and len(shape) >= 2:
+                yield(SampleInput(inp.transpose(0, 1), args=(args, )))
 
     return list(generator())
 
@@ -4299,8 +4303,11 @@ def sample_inputs_view_as_reshape_as(op_info, device, dtype, requires_grad, **kw
     def generator():
         for case in cases:
             shape, shape_other = case
-            yield(SampleInput(make_arg(shape, requires_grad=requires_grad),
-                              args=(make_arg(shape_other, requires_grad=False), )))
+            inp = make_arg(shape, requires_grad=requires_grad)
+            yield(SampleInput(inp, args=(make_arg(shape_other, requires_grad=False),)))
+
+            if op_info.name != "view_as" and len(shape) >= 2:
+                yield(SampleInput(inp.transpose(0, 1), args=(make_arg(shape_other, requires_grad=False),)))
 
     return list(generator())
 
@@ -7336,6 +7343,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            supports_inplace_autograd=False,
+           supports_forward_ad=True,
            sample_inputs_func=sample_inputs_kron),
     OpInfo('inner',
            dtypes=floating_and_complex_types_and(torch.half),
@@ -7351,6 +7359,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            dtypesIfROCM=floating_and_complex_types_and(torch.half, torch.bfloat16),
            safe_casts_outputs=True,
+           supports_forward_ad=True,
            sample_inputs_func=sample_inputs_tensordot,
            skips=(
                # Currently failing due to an INTERNAL_ASSERT_FAILED error.

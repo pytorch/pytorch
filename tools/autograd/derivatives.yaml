@@ -1111,7 +1111,7 @@
 - name: remainder.Tensor(Tensor self, Tensor other) -> Tensor
   self: grad
   # Use addition with zeros to get the proper broadcasting behavior
-  result: self_t + at::zeros_like(other)
+  result: self_t.expand_as(result)
 
 - name: renorm(Tensor self, Scalar p, int dim, Scalar maxnorm) -> Tensor
   self: renorm_backward(grad, self, p, dim, maxnorm)
@@ -1407,6 +1407,7 @@
 
 - name: _unsafe_view(Tensor self, int[] size) -> Tensor
   self: grad.reshape(self.sizes())
+  result: auto_linear
 
 - name: unsqueeze(Tensor(a) self, int dim) -> Tensor(a)
   self: grad.squeeze(dim)
@@ -1612,7 +1613,7 @@
 
 - name: leaky_relu_(Tensor(a!) self, Scalar negative_slope=0.01) -> Tensor(a!)
   self: leaky_relu_backward(grad, result, negative_slope, true)
-  result: leaky_relu_backward(self_t, result, negative_slope, true)
+  result: auto_element_wise
 
 - name: log_sigmoid_forward(Tensor self) -> (Tensor output, Tensor buffer)
   self: log_sigmoid_backward(grad, self, buffer)
