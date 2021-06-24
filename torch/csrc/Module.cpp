@@ -48,6 +48,7 @@
 #include <torch/csrc/utils/tensor_layouts.h>
 #include <torch/csrc/utils/tensor_memoryformats.h>
 #include <torch/csrc/utils/tensor_qschemes.h>
+#include <torch/csrc/utils/tensor_new.h>
 #include <torch/csrc/utils/tensor_numpy.h>
 #include <torch/csrc/utils/python_dispatch.h>
 #include <torch/csrc/utils/crash_handler.h>
@@ -389,28 +390,8 @@ PyObject *THPModule_fromDLPack(PyObject *_unused, PyObject *data)
 {
   using namespace torch::autograd;
   HANDLE_TH_ERRORS
-  DLManagedTensor * dlMTensor = (DLManagedTensor *)PyCapsule_GetPointer(data, "dltensor");
-  THPUtils_assert(dlMTensor, "from_dlpack received an invalid capsule. "
-    "Note that DLTensor capsules can be consumed only once, "
-    "so you might have already constructed a tensor from it once.")
-  // atensor steals the ownership of the underlying storage. It also passes a
-  // destructor function that will be called when the underlying storage goes
-  // out of scope. When the destructor is called, the dlMTensor is destructed too.
-  auto atensor = at::fromDLPack(dlMTensor);
-
-  // Make sure this capsule will never be used again.
-  PyCapsule_SetName(data, "used_dltensor");
-
-  // It is possible that the call to at::fromDLPack is the very first
-  // call to create a Tensor in PyTorch. If so, then _lazy_init has
-  // not been called, and the attempt to call createPyObject will fail
-  // because cuda ATen types have not been registered in Python yet.
-  // so if we have a cuda tensor, then we need to make sure
-  // we have called _lazy_init here
-  if(atensor.is_cuda()) {
-    py::module::import("torch.cuda").attr("init")();
-  }
-  return THPVariable_Wrap(std::move(atensor));
+  auto tensor = torch::utils::tensor_fromDLPack(data);
+  return THPVariable_Wrap(tensor);
   END_HANDLE_TH_ERRORS
 }
 

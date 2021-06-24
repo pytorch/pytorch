@@ -485,68 +485,36 @@ static PyObject * THPVariable_frombuffer(PyObject* self_, PyObject* args, PyObje
     auto offset = r.toInt64(3);
     auto requires_grad = r.toBool(4);
 
-    auto elsize = at::elementSize(dtype);
-    size_t actual_count = 0;
-    Py_buffer view;
-
-    if (PyObject_GetBuffer(buffer, &view, PyBUF_WRITABLE) < 0) {
-      TORCH_CHECK(
-          PyObject_GetBuffer(buffer, &view, PyBUF_SIMPLE) >= 0,
-          "could not retrieve buffer from object");
-      TORCH_WARN_ONCE(
-          "The given buffer is not writable, and PyTorch does "
-          "not support non-writable tensors. This means you can write to the "
-          "underlying (supposedly non-writable) buffer using the tensor. "
-          "You may want to copy the buffer to protect its data or make it writable "
-          "before converting it to a tensor. This type of warning will be "
-          "suppressed for the rest of this program.");
+    if (PyObject_CheckBuffer(buffer) != 0) {
+      ret = wrap(torch::utils::tensor_frombuffer(
+          buffer, dtype, count, offset, requires_grad));
     }
+  }
 
-    Py_INCREF(view.obj);
-    THPObjectPtr obj(view.obj);
+  return ret;
 
-    auto len = view.len;
-    auto buf = view.buf;
-    PyBuffer_Release(&view);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
 
-    TORCH_CHECK_VALUE(
-        len > 0 && count != 0,
-        "both buffer length (", len, ") and count (", count, ") must not be 0");
-    TORCH_CHECK_VALUE(
-        offset >= 0 && offset < len,
-        "offset (", offset, " bytes) must be non-negative and no greater than "
-        "buffer length (", len, " bytes) minus 1");
-    TORCH_CHECK_VALUE(
-        count > 0 || (len - offset) % elsize == 0,
-        "buffer length (", len - offset, " bytes) after offset (", offset, " bytes) "
-        "must be a multiple of element size (", elsize, ")");
+static PyObject * THPVariable_asarray(PyObject* self_, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "asarray(PyObject* obj, *, ScalarType? dtype=None, Device? device=None, bool? copy=None, bool requires_grad=False)",
+  }, /*traceable=*/false);
 
-    if (count < 0) {
-      actual_count = (len - offset) / elsize;
-    } else {
-      actual_count = static_cast<size_t>(count);
-    }
+  PyObject* ret = nullptr;
+  ParsedArgs<5> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
 
-    TORCH_CHECK_VALUE(
-        static_cast<size_t>(offset) + actual_count * elsize <= len,
-        "requested buffer length (", actual_count, " * ", elsize, " bytes) "
-        "after offset (", offset, " bytes) must not be greater than actual "
-        "buffer length (", len, " bytes)");
-
-    auto offset_buf = static_cast<char*>(buf) + offset;
-    auto options = TensorOptions()
-        .dtype(dtype)
-        .device(c10::kCPU);
-
-    auto tensor = at::for_blob(offset_buf, static_cast<int64_t>(actual_count))
-                      .options(options)
-                      .deleter([obj = obj.release()](void*) {
-                        pybind11::gil_scoped_acquire gil;
-                        Py_DECREF(obj);
-                      })
-                      .make_tensor();
-    tensor.requires_grad_(requires_grad);
-    ret = wrap(tensor);
+  if (r.idx == 0) {
+    auto obj = r.pyobject(0);
+    auto dtype = r.scalartypeOptional(1);
+    auto device = r.device(2);
+    auto copy = r.toBoolOptional(3);
+    auto requires_grad = r.toBool(4);
+    ret = wrap(torch::utils::asarray(obj, dtype, device, copy, requires_grad));
   }
 
   return ret;
@@ -676,6 +644,7 @@ static PyObject * TypeError_to_NotImplemented_(PyObject* self, PyObject* args, P
 static PyMethodDef torch_functions[] = {
   {"arange", castPyCFunctionWithKeywords(THPVariable_arange),
     METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"asarray", castPyCFunctionWithKeywords(THPVariable_asarray), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"as_tensor", castPyCFunctionWithKeywords(THPVariable_as_tensor),
     METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"dsmm", castPyCFunctionWithKeywords(THPVariable_mm), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},

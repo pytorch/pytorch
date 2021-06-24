@@ -16,6 +16,8 @@
 #include <torch/csrc/autograd/generated/variable_factories.h>
 
 #include <ATen/ATen.h>
+#include <ATen/DLConvertor.h>
+#include <ATen/dlpack.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/TracerMode.h>
@@ -946,6 +948,137 @@ Tensor new_tensor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyO
     return new_tensor;
   }
   throw std::runtime_error("new_tensor(): invalid arguments");
+}
+
+Tensor tensor_frombuffer(PyObject* buffer, ScalarType dtype, int64_t count, int64_t offset, bool requires_grad) {
+  auto elsize = at::elementSize(dtype);
+  size_t actual_count = 0;
+
+  Py_buffer view;
+  if (PyObject_GetBuffer(buffer, &view, PyBUF_WRITABLE) < 0) {
+    TORCH_CHECK(
+        PyObject_GetBuffer(buffer, &view, PyBUF_SIMPLE) >= 0,
+        "frombuffer(): could not retrieve buffer from object");
+    TORCH_WARN_ONCE(
+        "The given buffer is not writable, and PyTorch does "
+        "not support non-writable tensors. This means you can write to the "
+        "underlying (supposedly non-writable) buffer using the tensor. "
+        "You may want to copy the buffer to protect its data or make it writable "
+        "before converting it to a tensor. This type of warning will be "
+        "suppressed for the rest of this program.");
+  }
+
+  Py_INCREF(view.obj);
+  THPObjectPtr obj(view.obj);
+
+  auto len = view.len;
+  auto buf = view.buf;
+  PyBuffer_Release(&view);
+
+  TORCH_CHECK_VALUE(
+      len > 0 && count != 0,
+      "both buffer length (", len, ") and count (", count, ") must not be 0");
+  TORCH_CHECK_VALUE(
+      offset >= 0 && offset < len,
+      "offset (", offset, " bytes) must be non-negative and no greater than "
+      "buffer length (", len, " bytes) minus 1");
+  TORCH_CHECK_VALUE(
+      count > 0 || (len - offset) % elsize == 0,
+      "buffer length (", len - offset, " bytes) after offset (", offset, " bytes) "
+      "must be a multiple of element size (", elsize, ")");
+
+  if (count < 0) {
+    actual_count = (len - offset) / elsize;
+  } else {
+    actual_count = static_cast<size_t>(count);
+  }
+
+  TORCH_CHECK_VALUE(
+      static_cast<size_t>(offset) + actual_count * elsize <= len,
+      "requested buffer length (", actual_count, " * ", elsize, " bytes) "
+      "after offset (", offset, " bytes) must not be greater than actual "
+      "buffer length (", len, " bytes)");
+
+  auto offset_buf = static_cast<char*>(buf) + offset;
+  auto options = TensorOptions().dtype(dtype).device(c10::kCPU);
+
+  auto tensor = at::for_blob(offset_buf, static_cast<int64_t>(actual_count))
+                    .options(options)
+                    .deleter([obj = obj.release()](void*) {
+                      pybind11::gil_scoped_acquire gil;
+                      Py_DECREF(obj);
+                    })
+                    .make_tensor();
+  tensor.requires_grad_(requires_grad);
+  return tensor;
+}
+
+Tensor tensor_fromDLPack(PyObject *data) {
+  DLManagedTensor * dlMTensor = (DLManagedTensor *)PyCapsule_GetPointer(data, "dltensor");
+  TORCH_CHECK(dlMTensor,
+    "from_dlpack received an invalid capsule. "
+    "Note that DLTensor capsules can be consumed only once, "
+    "so you might have already constructed a tensor from it once.");
+
+  // atensor steals the ownership of the underlying storage. It also passes a
+  // destructor function that will be called when the underlying storage goes
+  // out of scope. When the destructor is called, the dlMTensor is destructed too.
+  auto atensor = at::fromDLPack(dlMTensor);
+
+  // Make sure this capsule will never be used again.
+  PyCapsule_SetName(data, "used_dltensor");
+
+  // It is possible that the call to at::fromDLPack is the very first
+  // call to create a Tensor in PyTorch. If so, then _lazy_init has
+  // not been called, and the attempt to call createPyObject will fail
+  // because cuda ATen types have not been registered in Python yet.
+  // so if we have a cuda tensor, then we need to make sure
+  // we have called _lazy_init here
+  if(atensor.is_cuda()) {
+    py::module::import("torch.cuda").attr("init")();
+  }
+  return atensor;
+}
+
+Tensor asarray(
+    PyObject* obj,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Device> device,
+    c10::optional<bool> copy,
+    bool requires_grad) {
+  Tensor tensor;
+
+  bool force_copy = copy.has_value() && copy.value();
+  bool force_alias = copy.has_value() && !copy.value();
+
+  auto dtype_unwrapped =
+      dtype.value_or(torch::tensors::get_default_scalar_type());
+
+  if (PyCapsule_IsValid(obj, "dltensor") != 0) {
+      tensor = tensor_fromDLPack(obj);
+  }
+
+  Py_buffer view;
+  if (!tensor.defined() && PyObject_GetBuffer(obj, &view, PyBUF_SIMPLE) >= 0) {
+    tensor = tensor_frombuffer(view, dtype_unwrapped, -1, 0, requires_grad);
+  }
+
+  if (tensor.defined() && force_copy) {
+    tensor = tensor.clone();
+  } else if (!tensor.defined()) {
+    TORCH_CHECK_VALUE(
+        !force_alias, "Can't alias arbitrary sequence into a tensor.");
+    auto tensor = internal_new_from_data(
+        TensorOptions(),
+        dtype_unwrapped,
+        device,
+        obj,
+        true,
+        true,
+        !dtype.has_value());
+  }
+
+  return tensor;
 }
 
 }} // namespace torch::utils
