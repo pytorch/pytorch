@@ -51,7 +51,7 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
 
             # Gloo can sometimes throw the following error if a rank exits early
             # before rank 0 calls into the allreduce.
-            err += "|Connection closed by peer"
+            err += "|Connection closed by peer|Connection reset by peer"
             with self.assertRaisesRegex(RuntimeError, err):
                 wrapper_pg.allreduce([tensor])
 
