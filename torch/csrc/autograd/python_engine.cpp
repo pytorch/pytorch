@@ -239,30 +239,7 @@ PyObject *THPEngine_run_backward(PyObject *self, PyObject *args, PyObject *kwarg
         grad_fn = torch::autograd::impl::try_get_grad_accumulator(tensor);
       }
       if (accumulate_grad) {
-        if (!tensor.is_leaf() && !torch::autograd::impl::get_autograd_meta(tensor)->retains_grad_) {
-          c10::weak_intrusive_ptr<c10::TensorImpl> weak_tensor(tensor.getIntrusivePtr());
-
-          // register an hook to support non-leaf inputs
-          std::function<void(at::Tensor)> non_leaf_backward_input_hook([weak_tensor](const at::Tensor& grad) {
-              if (weak_tensor.expired()) {
-                return;
-              } else {
-                auto var = weak_tensor.lock();
-                if (!var->grad().defined()) {
-                  if (grad.is_sparse()) {
-                    var->mutable_grad() = grad.clone();
-                  } else {
-                    var->mutable_grad() = grad.clone(at::MemoryFormat::Contiguous);
-                  }
-                } else {
-                  var->mutable_grad() = var->grad() + grad;
-                }
-              }
-          });
-
-          tensor.register_hook(non_leaf_backward_input_hook);
-          torch::autograd::impl::get_autograd_meta(tensor)->retains_grad_ = true;
-        }
+        tensor.retain_grad();
       }
       THPUtils_assert(tensor.requires_grad(),
           "One of the differentiated Tensors does not require grad");
