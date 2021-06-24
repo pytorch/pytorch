@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 import torch._C._te as te
+from torch.jit.te import pointwise_operator
 
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase
@@ -361,6 +362,74 @@ graph(%a : Float(1, 3, 1, strides=[3, 1, 1], requires_grad=0, device=cpu)):
 
     def test_forgot_kernel_arena(self):
         self.assertRaises(RuntimeError, lambda: torch._C._te.VarHandle("n", torch._C._te.Dtype.Int))
+
+
+def add1(a, b):
+    return a + b + 1
+
+
+def check(self, *args):
+    result_nnc = self.nnc_op(*args)
+    result_aten = self.op(*args)
+    assert result_nnc.dtype == result_aten.dtype
+    assert result_nnc.size() == result_aten.size()
+    assert result_nnc.stride() == result_aten.stride()
+    torch.testing.assert_allclose(result_aten, result_nnc)
+
+
+class TestOperatorAuthoringCPU(JitTestCase):
+    device = "cpu"
+    op = staticmethod(add1)
+    nnc_op = pointwise_operator(add1)
+
+    def I(self, *args, **kwargs):
+        return torch.randint(0, 100, *args, device=self.device, **kwargs)
+
+    def R(self, *args, **kwargs):
+        return torch.randn(*args, device=self.device, **kwargs)
+
+    check = unittest.skipIf(not LLVM_ENABLED, "requires LLVM")(check)
+
+    def test_broadcast1(self):
+        self.check(self.R(8, 16), self.R(1))
+
+    def test_broadcast2(self):
+        self.check(self.R(8, 1), self.R(1, 8))
+
+    def test_transposed1(self):
+        self.check(self.R(7, 3), self.R(3, 7).transpose(0, 1))
+
+    def test_transposed2(self):
+        self.check(self.R(8, 16).transpose(0, 1), self.R(8, 16).transpose(0, 1))
+
+    def test_slice1(self):
+        self.check(self.R(8 + 1, 16 + 1, 2)[:8, :16, 0], self.R(8, 16))
+
+    def test_slice2(self):
+        self.check(self.R(8, 16, 2)[:, :, 0], self.R(8, 16, 2)[:, :, 0])
+
+    def test_issue57611(self):
+        self.check(self.R(1, 32, 32, 2), self.R(2, 1, 1, 2))
+
+    def test_float_double(self):
+        self.check(self.R(8, 16), self.R(8, 16, dtype=torch.float64))
+
+    def test_int_long(self):
+        self.check(self.I([8, 16], dtype=torch.int32), self.I([1, 1], dtype=torch.int64))
+
+    def test_int_short(self):
+        self.check(self.I([8, 16], dtype=torch.int32), self.I([8, 1], dtype=torch.int16))
+
+    def test_float_int(self):
+        self.check(self.R([8, 16], dtype=torch.float32), self.I([8, 16], dtype=torch.int32))
+
+    def test_double_long(self):
+        self.check(self.R([8, 16], dtype=torch.float64), self.I([16], dtype=torch.int64))
+
+
+class TestOperatorAuthoringGPU(TestOperatorAuthoringCPU):
+    device = "cuda"
+    check = unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")(check)
 
 
 if __name__ == '__main__':

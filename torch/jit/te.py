@@ -1,5 +1,3 @@
-import numpy as np
-
 from torch._C import _te
 from torch import fx
 import copy
