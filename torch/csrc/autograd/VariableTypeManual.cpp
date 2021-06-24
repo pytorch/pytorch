@@ -71,7 +71,7 @@ Tensor unpack_opt(const Tensor & t, const char * name, int pos) {
 
 std::vector<at::Tensor> unpack(at::TensorList tl, const char *name, int pos) {
   std::vector<at::Tensor> ret(tl.size());
-  for (size_t i = 0; i < tl.size(); ++i) {
+  for (const auto i : c10::irange(tl.size())) {
     const auto &t = tl[i];
     if (!t.defined()) {
       continue;
@@ -211,25 +211,14 @@ Tensor detach(c10::DispatchKeySet ks, const Tensor & self) {
 Tensor & detach_(c10::DispatchKeySet ks, Tensor & self) {
   RECORD_FUNCTION("detach_", std::vector<c10::IValue>({self}));
   if (self.is_view()) {
-    // NB: is_view() ==> get_autograd_meta()
-    auto diff_view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(self));
     // See NOTE [ View + Inplace detection ]
-    if (diff_view_meta->get_creation_meta() == CreationMeta::MULTI_OUTPUT_SAFE) {
-        TORCH_WARN("This view is an output of a function that "
-                   "returns multiple views. Detaching such views inplace "
-                   "is being deprecated and will be forbidden "
-                   "starting from version 1.8. Consider using detach() instead "
-                   "of detach_(). Alternatively, create this view with an "
-                   "`unsafe_` version of the function that produced it.");
-    } else {
-      AT_ERROR("Can't detach views in-place. Use detach() instead. "
-               "If you are using DistributedDataParallel (DDP) for training, "
-               "and gradient_as_bucket_view is set as True, gradients are "
-               "views of DDP buckets, and hence detach_() cannot be called "
-               "on these gradients. To fix this error, please refer to the "
-               "Optimizer.zero_grad() function in torch/optim/optimizer.py "
-               "as the solution.");
-    }
+    AT_ERROR("Can't detach views in-place. Use detach() instead. "
+              "If you are using DistributedDataParallel (DDP) for training, "
+              "and gradient_as_bucket_view is set as True, gradients are "
+              "views of DDP buckets, and hence detach_() cannot be called "
+              "on these gradients. To fix this error, please refer to the "
+              "Optimizer.zero_grad() function in torch/optim/optimizer.py "
+              "as the solution.");
   }
   // I think the choice here is conservative.  In principle, doing
   // an in-place detach should give us the ability to just clear

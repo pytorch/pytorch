@@ -321,12 +321,11 @@ void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
   cublasOperation_t opa = _cublasOpFromChar(transa);
   cublasOperation_t opb = _cublasOpFromChar(transb);
-  float falpha = alpha;
-  float fbeta = beta;
+  const float falpha = alpha;
+  const float fbeta = beta;
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
 
   #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
-    cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
     TORCH_CUDABLAS_CHECK(cublasGemmStridedBatchedExFix(handle,
                                     opa, opb, (int)m, (int)n, (int)k,
                                     (void*)&falpha, a, CUDA_R_16BF, (int)lda, stridea,
@@ -867,6 +866,35 @@ void dot<at::Half>(CUDABLAS_DOT_ARGTYPES(at::Half)) {
 }
 
 template <>
+void dot<at::BFloat16>(CUDABLAS_DOT_ARGTYPES(at::BFloat16)) {
+#if CUDA_VERSION >= 11000
+  TORCH_CUDABLAS_CHECK(cublasDotEx(
+      handle,
+      n,
+      x,
+      CUDA_R_16BF,
+      incx,
+      y,
+      CUDA_R_16BF,
+      incy,
+      result,
+      CUDA_R_16BF,
+      CUDA_R_32F));
+#elif HIP_VERSION >= 210
+  TORCH_CUDABLAS_CHECK(rocblas_bfdot(
+      handle,
+      n,
+      reinterpret_cast<const rocblas_bfloat16*>(x),
+      incx,
+      reinterpret_cast<const rocblas_bfloat16*>(y),
+      incy,
+      reinterpret_cast<rocblas_bfloat16*>(result)));
+#else
+  AT_ERROR("Cublas_bfdot requires CUDA 11.0+");
+#endif
+}
+
+template <>
 void vdot<c10::complex<float>>(CUDABLAS_DOT_ARGTYPES(c10::complex<float>)) {
   TORCH_CUDABLAS_CHECK(cublasCdotc(handle, n, reinterpret_cast<const cuComplex*>(x),
                                    incx, reinterpret_cast<const cuComplex*>(y), incy,
@@ -880,8 +908,72 @@ void vdot<c10::complex<double>>(CUDABLAS_DOT_ARGTYPES(c10::complex<double>)) {
                                    reinterpret_cast<cuDoubleComplex*>(result)));
 }
 
-// This guards blocks use of geqrfBatched, getrfBatched, getriBatched on platforms other than cuda
+// This guards blocks use of getrsBatched, geqrfBatched, getrfBatched, getriBatched on platforms other than cuda
 #ifdef CUDART_VERSION
+
+template <>
+void getrsBatched<float>(CUDABLAS_GETRS_ARGTYPES(float)) {
+  TORCH_CUDABLAS_CHECK(cublasSgetrsBatched(
+      handle,
+      trans,
+      n,
+      nrhs,
+      dA_array,
+      lda,
+      ipiv_array,
+      dB_array,
+      ldb,
+      info_array,
+      batchsize));
+}
+
+template <>
+void getrsBatched<double>(CUDABLAS_GETRS_ARGTYPES(double)) {
+  TORCH_CUDABLAS_CHECK(cublasDgetrsBatched(
+      handle,
+      trans,
+      n,
+      nrhs,
+      dA_array,
+      lda,
+      ipiv_array,
+      dB_array,
+      ldb,
+      info_array,
+      batchsize));
+}
+
+template <>
+void getrsBatched<c10::complex<float>>(CUDABLAS_GETRS_ARGTYPES(c10::complex<float>)) {
+  TORCH_CUDABLAS_CHECK(cublasCgetrsBatched(
+      handle,
+      trans,
+      n,
+      nrhs,
+      reinterpret_cast<cuComplex**>(dA_array),
+      lda,
+      ipiv_array,
+      reinterpret_cast<cuComplex**>(dB_array),
+      ldb,
+      info_array,
+      batchsize));
+}
+
+template <>
+void getrsBatched<c10::complex<double>>(CUDABLAS_GETRS_ARGTYPES(c10::complex<double>)) {
+  TORCH_CUDABLAS_CHECK(cublasZgetrsBatched(
+      handle,
+      trans,
+      n,
+      nrhs,
+      reinterpret_cast<cuDoubleComplex**>(dA_array),
+      lda,
+      ipiv_array,
+      reinterpret_cast<cuDoubleComplex**>(dB_array),
+      ldb,
+      info_array,
+      batchsize));
+}
 
 template <>
 void geqrfBatched<float>(CUDABLAS_GEQRF_BATCHED_ARGTYPES(float)) {

@@ -7,7 +7,8 @@
 #include <ATen/ATen.h>
 #include <ATen/CPUApplyUtils.h>
 #include <ATen/Dispatch.h>
-#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec/vec.h>
+#include <ATen/native/cpu/moments_utils.h>
 
 namespace at {
 namespace native {
@@ -38,47 +39,33 @@ void GroupNormKernelImplInternal(
   T* Y_data = Y.data_ptr<T>();
   T* mean_data = mean.data_ptr<T>();
   T* rstd_data = rstd.data_ptr<T>();
-  const T s = T(1) / static_cast<T>(D * HxW);
   const bool gamma_null = (gamma_data == nullptr);
   const bool beta_null = beta_data == nullptr;
+  const int64_t inner_size = D * HxW;
 
   at::parallel_for(0, N * G, 1, [&](int64_t start, int64_t end) {
-    constexpr int64_t K = vec256::Vec256<T>::size();
-    const int64_t inner_size = D * HxW / K * K;
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-    std::array<T, K> mean_arr;
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-    std::array<T, K> rstd_arr;
     for (int64_t i = start; i < end; ++i) {
-      const T* X_ptr = X_data + i * D * HxW;
-      vec256::Vec256<T> mean_vec(0);
-      vec256::Vec256<T> rstd_vec(0);
-      for (int64_t j = 0; j < inner_size; j += K) {
-        const vec256::Vec256<T> x_vec = vec256::Vec256<T>::loadu(X_ptr + j);
-        mean_vec = mean_vec + x_vec;
-        rstd_vec = rstd_vec + x_vec * x_vec;
-      }
-      mean_vec.store(mean_arr.data());
-      rstd_vec.store(rstd_arr.data());
-      T mean_val = std::accumulate(mean_arr.cbegin(), mean_arr.cend(), T(0));
-      T rstd_val = std::accumulate(rstd_arr.cbegin(), rstd_arr.cend(), T(0));
-      for (int64_t j = inner_size; j < D * HxW; ++j) {
-        mean_val += X_ptr[j];
-        rstd_val += X_ptr[j] * X_ptr[j];
-      }
-      mean_val *= s;
-      rstd_val = std::max(rstd_val * s - mean_val * mean_val, T(0));
-      rstd_val = T(1) / std::sqrt(rstd_val + eps);
-
-      const int64_t g = i % G;
-      for (int64_t j = 0; j < D; ++j) {
-        const int64_t c = g * D + j;
-        const T scale = rstd_val * (gamma_null ? T(1) : gamma_data[c]);
-        const T bias = -scale * mean_val + (beta_null ? T(0) : beta_data[c]);
-        X_ptr = X_data + (i * D + j) * HxW;
-        T* Y_ptr = Y_data + (i * D + j) * HxW;
-        for (int64_t k = 0; k < HxW; ++k) {
-          Y_ptr[k] = scale * X_ptr[k] + bias;
+      const T* X_ptr = X_data + i * inner_size;
+      T mean_val;
+      T rstd_val;
+      std::tie(mean_val, rstd_val) = utils::RowwiseMoments(X_ptr, inner_size);
+      rstd_val = T(1) / std::sqrt(std::max(rstd_val, T(0)) + eps);
+      if (gamma_null && beta_null) {
+        T* Y_ptr = Y_data + i * inner_size;
+        for (int j = 0; j < inner_size; ++j) {
+          Y_ptr[j] = (X_ptr[j] - mean_val) * rstd_val;
+        }
+      } else {
+        const int64_t g = i % G;
+        for (int64_t j = 0; j < D; ++j) {
+          const int64_t c = g * D + j;
+          const T scale = rstd_val * (gamma_null ? T(1) : gamma_data[c]);
+          const T bias = -scale * mean_val + (beta_null ? T(0) : beta_data[c]);
+          X_ptr = X_data + (i * D + j) * HxW;
+          T* Y_ptr = Y_data + (i * D + j) * HxW;
+          for (int64_t k = 0; k < HxW; ++k) {
+            Y_ptr[k] = scale * X_ptr[k] + bias;
+          }
         }
       }
       mean_data[i] = mean_val;
@@ -125,7 +112,7 @@ void ComputeInternalGradients(
     T* ds,
     T* db) {
   at::parallel_for(0, N * C, 1, [=](int64_t start, int64_t end) {
-    constexpr int64_t K = vec256::Vec256<T>::size();
+    constexpr int64_t K = vec::Vectorized<T>::size();
     const int64_t inner_size = HxW / K * K;
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     std::array<T, K> ds_arr;
@@ -134,11 +121,11 @@ void ComputeInternalGradients(
     for (int64_t i = start; i < end; ++i) {
       const T* dY_ptr = dY + i * HxW;
       const T* X_ptr = X + i * HxW;
-      vec256::Vec256<T> ds_vec(0);
-      vec256::Vec256<T> db_vec(0);
+      vec::Vectorized<T> ds_vec(0);
+      vec::Vectorized<T> db_vec(0);
       for (int64_t j = 0; j < inner_size; j += K) {
-        const vec256::Vec256<T> dy_vec = vec256::Vec256<T>::loadu(dY_ptr + j);
-        const vec256::Vec256<T> x_vec = vec256::Vec256<T>::loadu(X_ptr + j);
+        const vec::Vectorized<T> dy_vec = vec::Vectorized<T>::loadu(dY_ptr + j);
+        const vec::Vectorized<T> x_vec = vec::Vectorized<T>::loadu(X_ptr + j);
         ds_vec = ds_vec + dy_vec * x_vec;
         db_vec = db_vec + dy_vec;
       }
@@ -175,7 +162,7 @@ void GroupNormInputBackward(
   const T s = T(1) / static_cast<T>(D * HxW);
   const bool gamma_null = (gamma == nullptr);
   at::parallel_for(0, N * G, 1, [=](int64_t start, int64_t end) {
-    constexpr int64_t K = vec256::Vec256<T>::size();
+    constexpr int64_t K = vec::Vectorized<T>::size();
     const int64_t d = D / K * K;
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     std::array<T, K> ds_arr;
@@ -185,14 +172,14 @@ void GroupNormInputBackward(
       const int64_t g = i % G;
       const T* ds_ptr = ds + i * D;
       const T* db_ptr = db + i * D;
-      vec256::Vec256<T> ds_vec(0);
-      vec256::Vec256<T> db_vec(0);
+      vec::Vectorized<T> ds_vec(0);
+      vec::Vectorized<T> db_vec(0);
       for (int64_t j = 0; j < d; j += K) {
-        const vec256::Vec256<T> gamma_vec = gamma_null
-            ? vec256::Vec256<T>(1)
-            : vec256::Vec256<T>::loadu(gamma + g * D + j);
-        ds_vec = ds_vec + vec256::Vec256<T>::loadu(ds_ptr + j) * gamma_vec;
-        db_vec = db_vec + vec256::Vec256<T>::loadu(db_ptr + j) * gamma_vec;
+        const vec::Vectorized<T> gamma_vec = gamma_null
+            ? vec::Vectorized<T>(1)
+            : vec::Vectorized<T>::loadu(gamma + g * D + j);
+        ds_vec = ds_vec + vec::Vectorized<T>::loadu(ds_ptr + j) * gamma_vec;
+        db_vec = db_vec + vec::Vectorized<T>::loadu(db_ptr + j) * gamma_vec;
       }
       ds_vec.store(ds_arr.data());
       db_vec.store(db_arr.data());
@@ -232,7 +219,7 @@ void GammaBackward(
     T* dgamma) {
   const int64_t G = group;
   const int64_t D = C / G;
-  constexpr int64_t K = vec256::Vec256<T>::size();
+  constexpr int64_t K = vec::Vectorized<T>::size();
   at::parallel_for(0, D, K, [=](int64_t start, int64_t end) {
     for (int64_t i = 0; i < G; ++i) {
       std::memset(dgamma + i * D + start, 0, (end - start) * sizeof(T));
@@ -251,7 +238,7 @@ void GammaBackward(
 
 template <typename T>
 void BetaBackward(int64_t N, int64_t C, const T* db, T* dbeta) {
-  constexpr int64_t K = vec256::Vec256<T>::size();
+  constexpr int64_t K = vec::Vectorized<T>::size();
   at::parallel_for(0, C, K, [=](int64_t start, int64_t end) {
     std::memset(dbeta + start, 0, (end - start) * sizeof(T));
     for (int64_t i = 0; i < N; ++i) {

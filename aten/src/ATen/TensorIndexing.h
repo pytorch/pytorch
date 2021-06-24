@@ -274,13 +274,8 @@ static inline void recordTensorIndex(const Tensor& tensor, std::vector<Tensor>& 
 static inline c10::List<c10::optional<Tensor>> typeConvertIndices(const Tensor& self, std::vector<Tensor>&& indices) {
   c10::List<c10::optional<Tensor>> converted_inds;
   converted_inds.reserve(indices.size());
-  for (size_t i = 0; i < indices.size(); ++i) {
-    const auto &ind = indices[i];
-    if (ind.defined()) {
-      converted_inds.push_back(ind.to(ind.options().device(self.device())));
-    } else {
-      converted_inds.push_back(std::move(indices[i]));
-    }
+  for (const auto &i: indices){
+    converted_inds.push_back(std::move(i));
   }
   return converted_inds;
 }

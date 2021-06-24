@@ -1,13 +1,14 @@
 #include <torch/csrc/autograd/python_hook.h>
 
-#include <sstream>
-
+#include <c10/util/irange.h>
 #include <pybind11/pybind11.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/Exceptions.h>
+
+#include <sstream>
 
 using torch::autograd::variable_list;
 using torch::autograd::Variable;
@@ -103,7 +104,7 @@ static PyObject *wrap_variables(const variable_list& c_variables)
   size_t num_vars = c_variables.size();
   THPObjectPtr tuple(PyTuple_New(num_vars));
   if (!tuple) throw python_error();
-  for (size_t i = 0; i < num_vars; ++i) {
+  for (const auto i : c10::irange(num_vars)) {
     THPObjectPtr var(THPVariable_Wrap(c_variables[i]));
     if (!var) throw python_error();
     PyTuple_SET_ITEM(tuple.get(), i, var.release());
@@ -113,7 +114,7 @@ static PyObject *wrap_variables(const variable_list& c_variables)
 
 static variable_list unwrap_variables(PyObject* py_variables)  {
   variable_list results(PyTuple_GET_SIZE(py_variables));
-  for (size_t i = 0; i < results.size(); i++) {
+  for(const auto i : c10::irange(results.size())) {
     PyObject* item = PyTuple_GET_ITEM(py_variables, i);
     if (item == Py_None) {
       continue;
@@ -147,7 +148,7 @@ static void check_result(PyObject* prev, PyObject* result, PyObject* hook) {
     throw std::runtime_error(ss.str());
   }
 
-  for (auto i = 0; i < prev_size; i++) {
+  for (const auto i : c10::irange(prev_size)) {
     check_single_result(PyTuple_GET_ITEM(prev, i), PyTuple_GET_ITEM(result, i), hook);
   }
 }

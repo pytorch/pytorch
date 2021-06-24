@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef USE_C10D_GLOO
+
 #include <string>
 
 #include <c10/util/Registry.h>
@@ -8,7 +10,7 @@
 
 namespace c10d {
 
-class GlooDeviceFactory {
+class TORCH_API GlooDeviceFactory {
  public:
   // Create new device instance for specific interface.
   static std::shared_ptr<::gloo::transport::Device> makeDeviceForInterface(
@@ -26,3 +28,5 @@ C10_DECLARE_SHARED_REGISTRY(
     const std::string& /* hostname */);
 
 } // namespace c10d
+
+#endif // USE_C10D_GLOO
