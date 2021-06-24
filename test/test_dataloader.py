@@ -1292,7 +1292,7 @@ except RuntimeError as e:
                 self.assertEqual(len(fetched), len(expected))
                 for e, d in zip(expected, fetched):
                     self.assertIsInstance(d, torch.Tensor)
-                    self.assertEqual(e, d)
+                    self.assertEqual(e, d.item())
 
         with self.assertRaisesRegex(AssertionError, "ChainDataset only supports IterableDataset"):
             list(iter(dataset1 + self.dataset))

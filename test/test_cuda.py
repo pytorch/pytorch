@@ -2065,9 +2065,9 @@ torch.cuda.synchronize()
             found_inf.zero_()
             torch._amp_foreach_non_finite_check_and_unscale_(grads, found_inf, inv_scale)
             if has_inf:
-                self.assertEqual(found_inf, 1.0)
+                self.assertEqual(found_inf.item(), 1.0)
             else:
-                self.assertEqual(found_inf, 0.0)
+                self.assertEqual(found_inf.item(), 0.0)
                 for grad in grads:
                     self.assertTrue(torch.allclose(grad, torch.ones_like(grad), atol=1e-7))
 
@@ -2132,17 +2132,17 @@ torch.cuda.synchronize()
 
         # Simulates 2 consecutive unskipped iterations
         torch._amp_update_scale_(scale, growth_tracker, found_inf, growth, backoff, growth_interval)
-        self.assertEqual(growth_tracker, 1)
-        self.assertEqual(scale, 4.0)
+        self.assertEqual(growth_tracker.item(), 1)
+        self.assertEqual(scale.item(), 4.0)
         torch._amp_update_scale_(scale, growth_tracker, found_inf, growth, backoff, growth_interval)
-        self.assertEqual(growth_tracker, 0)
-        self.assertEqual(scale, 8.0)
+        self.assertEqual(growth_tracker.item(), 0)
+        self.assertEqual(scale.item(), 8.0)
 
         # Simulates a skipped iteration
         found_inf.fill_(1.0)
         torch._amp_update_scale_(scale, growth_tracker, found_inf, growth, backoff, growth_interval)
-        self.assertEqual(growth_tracker, 0)
-        self.assertEqual(scale, 2.0)
+        self.assertEqual(growth_tracker.item(), 0)
+        self.assertEqual(scale.item(), 2.0)
 
     def test_grad_scaling_unscale_sparse(self, device="cuda", dtype=torch.float):
         scaler = torch.cuda.amp.GradScaler()
@@ -2168,20 +2168,20 @@ torch.cuda.synchronize()
         p.grad = s.clone()
         found_inf.zero_()
         found_inf = scaler._unscale_grads_(opt, inv_scale, found_inf, False)[cur]
-        self.assertEqual(found_inf, 0.0)
+        self.assertEqual(found_inf.item(), 0.0)
         self.assertTrue(torch.allclose(p.grad.to_dense(), (s / 4).to_dense()))
 
         v = torch.FloatTensor([16., 32., float('inf')])
         p.grad = torch.sparse_coo_tensor(i, v, torch.Size([2, 3]), device="cuda", dtype=dtype)
         found_inf.zero_()
         found_inf = scaler._unscale_grads_(opt, inv_scale, found_inf, False)[cur]
-        self.assertEqual(found_inf, 1.0)
+        self.assertEqual(found_inf.item(), 1.0)
 
         v = torch.FloatTensor([16., 32., float('nan')])
         p.grad = torch.sparse_coo_tensor(i, v, torch.Size([2, 3]), device="cuda", dtype=dtype)
         found_inf.zero_()
         found_inf = scaler._unscale_grads_(opt, inv_scale, found_inf, False)[cur]
-        self.assertEqual(found_inf, 1.0)
+        self.assertEqual(found_inf.item(), 1.0)
 
         p = s.clone().half()
         assert p.is_sparse
@@ -2190,7 +2190,7 @@ torch.cuda.synchronize()
         p.grad = s.clone().half()
         found_inf.zero_()
         found_inf = scaler._unscale_grads_(opt, inv_scale, found_inf, True)[cur]
-        self.assertEqual(found_inf, 0.0)
+        self.assertEqual(found_inf.item(), 0.0)
         self.assertTrue(torch.allclose(p.grad.to_dense(), (s.half() / 4).to_dense()))
 
         # Creates fp16 sparse tensor with duplicated indices (uncoalesced).  The uncoalesced representation
@@ -2202,7 +2202,7 @@ torch.cuda.synchronize()
         p.grad = torch.sparse_coo_tensor(i, v, torch.Size([2, 3]), device="cuda", dtype=torch.float16)
         found_inf.zero_()
         found_inf = scaler._unscale_grads_(opt, inv_scale, found_inf, True)[cur]
-        self.assertEqual(found_inf, 1.0)
+        self.assertEqual(found_inf.item(), 1.0)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_grad_scaling_device_as_key(self):
@@ -3708,8 +3708,8 @@ torch.cuda.synchronize()
             self.assertEqual(weight.grad, torch.full_like(weight.grad, grad_val))
             scaler.step(opt)
             scaler.update()
-            self.assertEqual(scaler._scale, scale)
-            self.assertEqual(scaler._growth_tracker, growth_tracker)
+            self.assertEqual(scaler._scale.item(), scale)
+            self.assertEqual(scaler._growth_tracker.item(), growth_tracker)
 
     def test_batch_norm_gather_stats(self):
         input = torch.randn(1, 3, 3, 3, device='cuda')

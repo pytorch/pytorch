@@ -1668,7 +1668,7 @@ class TestDict(JitTestCase):
         def fn(my_dict: Dict[str, int], keys: List[str]) -> List[int]:
             return python_lookup(my_dict, keys)
 
-        a_dict = {'a': torch.ones(1), 'b': torch.ones(1) + 1, 'c': torch.ones(1) + 2}
+        a_dict = {'a': torch.tensor(1), 'b': torch.tensor(1) + 1, 'c': torch.tensor(1) + 2}
         self.checkScript(fn, (a_dict, ('a', 'c')))
 
     def test_ordered_dict(self):

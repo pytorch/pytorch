@@ -1999,8 +1999,8 @@ class TestMixTracingScripting(JitTestCase):
         # test we propagated shapes through the function
         self.assertTrue("Dynamic" not in str(use.graph))
 
-        self.assertEqual(3, use(torch.ones(1, dtype=torch.float)))
-        self.assertEqual(2, use(torch.zeros(1, dtype=torch.float)))
+        self.assertEqual(3, use(torch.ones(1, dtype=torch.float)).item())
+        self.assertEqual(2, use(torch.zeros(1, dtype=torch.float)).item())
 
     def test_trace_with_size(self):
         @_trace(torch.zeros(1, 1))

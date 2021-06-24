@@ -176,7 +176,7 @@ class TestWith(JitTestCase):
         self.checkScript(test_early_return, (test_input, test_context))
         self.checkScript(test_break, (test_input, test_context, test_list))
         self.checkScript(test_continue, (test_input, test_context, test_list))
-        self.assertEqual(test_context.count, 2)
+        self.assertEqual(test_context.count.item(), 2)
         self.checkScript(test_serial, (test_input,))
         self.checkScript(test_nested, (test_input,))
         self.checkScript(test_combined, (test_input,))
@@ -332,7 +332,7 @@ class TestWith(JitTestCase):
         self.checkScript(test_early_return, (test_input, test_context))
         self.checkScript(test_break, (test_input, test_context, test_list))
         self.checkScript(test_continue, (test_input, test_context, test_list))
-        self.assertEqual(test_context.count, 2)
+        self.assertEqual(test_context.count.item(), 2)
         self.checkScript(test_serial, (test_input,))
         self.checkScript(test_nested, (test_input,))
         self.checkScript(test_combined, (test_input,))
@@ -415,15 +415,15 @@ class TestWith(JitTestCase):
         # is one).
         with self.assertRaisesRegexWithHighlight(Exception, r"raised exception", "raise Exception(\""):
             test_exception(torch.randn(2), c)
-        self.assertEqual(c.count, 1)
+        self.assertEqual(c.count.item(), 1)
 
         with self.assertRaisesRegexWithHighlight(Exception, r"raised exception", "raise Exception(\""):
             test_exception_nested(torch.randn(2), c)
-        self.assertEqual(c.count, 1)
+        self.assertEqual(c.count.item(), 1)
 
         with self.assertRaisesRegexWithHighlight(Exception, r"raised exception", "raise Exception(\""):
             test_exception_fn_call(torch.randn(2), c)
-        self.assertEqual(c.count, 1)
+        self.assertEqual(c.count.item(), 1)
 
     def test_with_errors(self):
         """
