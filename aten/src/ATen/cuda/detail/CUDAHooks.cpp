@@ -155,7 +155,7 @@ const at::cuda::NVRTC& nvrtc() {
 }
 
 const at::cuda::NVRTC& CUDAHooks::nvrtc() const {
-  return nvrtc();
+  return at::cuda::detail::nvrtc();
 }
 
 int64_t current_device() {
@@ -168,7 +168,7 @@ int64_t current_device() {
 }
 
 int64_t CUDAHooks::current_device() const {
-  return current_device();
+  return at::cuda::detail::current_device();
 }
 
 bool hasPrimaryContext(int64_t device_index) {
@@ -183,7 +183,7 @@ bool hasPrimaryContext(int64_t device_index) {
 }
 
 bool CUDAHooks::hasPrimaryContext(int64_t device_index) const {
-  return hasPrimaryContext(device_index);
+  return at::cuda::detail::hasPrimaryContext(device_index);
 }
 
 c10::optional<int64_t> getDeviceIndexWithPrimaryContext() {
