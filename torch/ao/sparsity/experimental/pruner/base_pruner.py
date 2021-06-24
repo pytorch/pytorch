@@ -6,7 +6,7 @@ import torch
 from torch import nn
 from torch.nn.utils import parametrize
 
-from .parametrization import PruningParametrization
+from .parametrization import PruningParametrization, ActivationReconstruction
 
 SUPPORTED_MODULES = {
     nn.Linear
@@ -122,7 +122,11 @@ class BasePruner(abc.ABC):
                 module.register_buffer('mask', torch.tensor(module.weight.shape[0]))
             param = config.get('parametrization', PruningParametrization)
             parametrize.register_parametrization(module, 'weight',
-                                                 param(module.mask))
+                                                 param(module.mask),
+                                                 allow_resize=True)
+            module.register_forward_hook(
+                ActivationReconstruction(module.parametrizations.weight[0])
+            )
 
     def convert(self, use_path=False, *args, **kwargs):
         for config in self.module_groups:
