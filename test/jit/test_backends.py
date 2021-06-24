@@ -356,7 +356,6 @@ class SelectiveLoweringTest(JitBackendTestCase):
             .check("MiddleModule") \
             .check_not("__torch__.torch.classes.__backends__.test_backend") \
             .check("test_backendLoweredModule") \
-            .check_not("BasicModule") \
             .run(self.lowered_module.sub1.graph)
 
         FileCheck() \
@@ -368,7 +367,6 @@ class SelectiveLoweringTest(JitBackendTestCase):
             .check("MiddleModule") \
             .check_not("__torch__.torch.classes.__backends__.test_backend") \
             .check("test_backendLoweredModule") \
-            .check_not("BasicModule") \
             .run(self.lowered_module.sub2.graph)
 
         # Check that self.lowered_module.sub1/sub2.submodule were lowered. Its graph should mention
@@ -376,13 +374,11 @@ class SelectiveLoweringTest(JitBackendTestCase):
         # on the test JIT backend.
         FileCheck() \
             .check("test_backendLoweredModule") \
-            .check_not("BasicModule") \
             .check("__torch__.torch.classes.__backends__.test_backend") \
             .run(self.lowered_module.sub1.submodule.graph)
 
         FileCheck() \
             .check("test_backendLoweredModule") \
-            .check_not("BasicModule") \
             .check("__torch__.torch.classes.__backends__.test_backend") \
             .run(self.lowered_module.sub2.submodule.graph)
 
