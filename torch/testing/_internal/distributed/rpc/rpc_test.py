@@ -531,6 +531,14 @@ class TensorWrapper:
         # Add one non-picklable field, to ensure it's ignored/skipped.
         self.lock = Lock()
 
+    def increase(self, v):
+        with self.lock:
+            self.tensor += v
+
+    def sum(self):
+        with self.lock:
+            return self.tensor.sum()
+
 
 # Copied from test/test_cuda.py.
 _cycles_per_ms = None
@@ -6180,5 +6188,26 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
         another_stream = torch.cuda.Stream("cuda:0")
         with torch.cuda.stream(another_stream):
             self.assertTrue(torch.eq(fut.wait(), 3).all().item())
+
+        rpc.shutdown()
+
+    @skip_if_lt_x_gpu(1)
+    def test_rref_with_unpickleable_attributes(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        options = self.rpc_backend_options
+        options.set_device_map(dst, {"cuda:0": "cuda:0"})
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=options,
+        )
+
+        rref = rpc.remote(dst, TensorWrapper, args=(torch.zeros(42, device="cuda:0"),))
+        rref.rpc_sync().increase(1)
+        ret = rref.rpc_sync().sum()
+        self.assertEqual(ret, 42)
 
         rpc.shutdown()
