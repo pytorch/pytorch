@@ -14,10 +14,11 @@ namespace at { namespace functorch {
 
 // Does not support batch_group_count (needed for convolution backwards)
 std::tuple<Tensor,optional<int64_t>>
-conv2d_batching_rule(const Tensor& lhs, optional<int64_t> lhs_bdim, const Tensor& rhs, optional<int64_t> rhs_bdim, const optional<Tensor>& bias, optional<int64_t> bias_bdim, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
-  std::vector<int64_t> lhs_spec = {0,1,2,3};
-  std::vector<int64_t> rhs_spec = {0,1,2,3};
-  std::vector<int64_t> out_spec = {0,1,2,3};
+convolution_batching_rule(const Tensor& lhs, optional<int64_t> lhs_bdim, const Tensor& rhs, optional<int64_t> rhs_bdim, const optional<Tensor>& bias, optional<int64_t> bias_bdim, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, bool transposed, IntArrayRef output_padding, int64_t groups) {
+  std::vector<int64_t> lhs_spec(stride.size() + 2);
+  std::iota(lhs_spec.begin(), lhs_spec.end(), 0);
+  std::vector<int64_t> rhs_spec = lhs_spec;
+  std::vector<int64_t> out_spec = lhs_spec;
 
   // If we have a batched bias or weight, we need to perform the computation separately.
   optional<Tensor> unbatched_bias;
@@ -33,20 +34,20 @@ conv2d_batching_rule(const Tensor& lhs, optional<int64_t> lhs_bdim, const Tensor
   std::tuple<Tensor, optional<int64_t>> result;
   if (lhs_bdim && !rhs_bdim) {
     auto new_x = reshape_dim_into(*lhs_bdim, lhs_spec[0], lhs);
-    auto out = at::conv2d(new_x, rhs, unbatched_bias, stride, padding, dilation, groups);
+    auto out = at::convolution(new_x, rhs, unbatched_bias, stride, padding, dilation, transposed, output_padding, groups);
     out = reshape_dim_outof(out_spec[0], lhs.sizes()[*lhs_bdim], out);
     result = std::make_tuple(out, out_spec[0]);
   } else if (!lhs_bdim && rhs_bdim) {
     if (groups == 1) {
       auto new_w = reshape_dim_into(*rhs_bdim, rhs_spec[0], rhs);
-      auto out = at::conv2d(lhs, new_w, unbatched_bias, stride, padding, dilation, groups);
+      auto out = at::convolution(lhs, new_w, unbatched_bias, stride, padding, dilation, transposed, output_padding, groups);
       out = reshape_dim_outof(out_spec[1], rhs.sizes()[*rhs_bdim], out);
       result = std::make_tuple(out, out_spec[1]);
     } else {
       auto new_w = reshape_dim_outof(rhs_spec[0] + (*rhs_bdim <= rhs_spec[0]), groups, rhs);
       new_w = reshape_dim_into(*rhs_bdim + (rhs_spec[0] < rhs_bdim), rhs_spec[0] + 1, new_w);
       new_w = reshape_dim_into(rhs_spec[0], rhs_spec[0], new_w);
-      auto out = at::conv2d(lhs, new_w, unbatched_bias, stride, padding, dilation, groups);
+      auto out = at::convolution(lhs, new_w, unbatched_bias, stride, padding, dilation, transposed, output_padding, groups);
       out = reshape_dim_outof(out_spec[1], groups, out);
       out = reshape_dim_outof(out_spec[1] + 1, rhs.sizes()[*rhs_bdim], out);
       out = reshape_dim_into(out_spec[1], out_spec[1] + 1, out);
@@ -56,11 +57,11 @@ conv2d_batching_rule(const Tensor& lhs, optional<int64_t> lhs_bdim, const Tensor
     auto new_x = reshape_dim_into(*lhs_bdim, lhs_spec[1], lhs);
     groups *= lhs.sizes()[*lhs_bdim];
     auto new_w = reshape_dim_into(*rhs_bdim, rhs_spec[0], rhs);
-    auto out = at::conv2d(new_x, new_w, unbatched_bias, stride, padding, dilation, groups);
+    auto out = at::convolution(new_x, new_w, unbatched_bias, stride, padding, dilation, transposed, output_padding, groups);
     out = reshape_dim_outof(out_spec[1], lhs.sizes()[*lhs_bdim], out);
     result = std::make_tuple(out, out_spec[1]);
   } else {
-    result = std::make_tuple(at::conv2d(lhs, rhs, unbatched_bias, stride, padding, dilation, groups), nullopt);
+    result = std::make_tuple(at::convolution(lhs, rhs, unbatched_bias, stride, padding, dilation, transposed, output_padding, groups), nullopt);
   }
   if (separate_bias) {
     auto A = std::get<0>(result);
@@ -79,6 +80,17 @@ conv2d_batching_rule(const Tensor& lhs, optional<int64_t> lhs_bdim, const Tensor
     return result;
   }
 }
+Tensor convNd_decomp(const Tensor &self, const Tensor &weight, const optional<Tensor>& bias, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
+  std::vector<int64_t> t(self.dim() - 2, 0);
+  IntArrayRef out_padding(t);
+  return at::convolution(self, weight, bias, stride, padding, dilation, false, out_padding, groups);
+}
+
+// Tensor convNd_transpose_decomp(const Tensor &self, const Tensor &weight, const optional<Tensor>& bias, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
+//   std::vector<int64_t> t(self.dim() - 2, 0);
+//   IntArrayRef out_padding(t);
+//   return at::convolution(self, weight, bias, stride, padding, dilation, true, out_padding, groups);
+// }
 
 Tensor mkldnn_convolution_decomp(const Tensor &self, const Tensor &weight, const optional<Tensor>& bias, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups) {
   std::vector<int64_t> t(self.dim() - 2, 0);
@@ -189,7 +201,11 @@ std::tuple<Tensor,Tensor> cudnn_convolution_backward_plumbing(const Tensor & sel
 }
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
-  VMAP_SUPPORT("conv2d", conv2d_batching_rule);
+  VMAP_SUPPORT("convolution", convolution_batching_rule);
+  m.impl("conv1d", convNd_decomp);
+  m.impl("conv2d", convNd_decomp);
+  m.impl("conv3d", convNd_decomp);
+  // m.impl("conv_transpose2d", convNd_transpose_decomp);
   m.impl("mkldnn_convolution", mkldnn_convolution_decomp);
   m.impl("cudnn_convolution_backward", cudnn_convolution_backward_plumbing);
   m.impl("cudnn_convolution", cudnn_convolution_plumbing);
