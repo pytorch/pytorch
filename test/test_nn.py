@@ -16915,6 +16915,76 @@ class TestModuleGlobalHooks(TestCase):
         expected_grad = -sig_x * (1 - sig_x) * 2 * mask
         self.assertEqual(input.grad, expected_grad)
 
+    def test_module_forward_preforward_hook_removable(self):
+        """
+        This test is to test when multiple pre-forward hook functions can be
+        registered successfully and used correctly, if the handle can be removable
+        during the pre-forward hook function call.
+        """
+        module = nn.Sigmoid()
+
+        def removable_hook(m, input):
+            nonlocal handle
+            handle.remove()
+            return input
+
+        def removable_hook_2(m, input):
+            nonlocal handle_2
+            handle_2.remove()
+            return input
+
+        handle = module.register_forward_pre_hook(removable_hook)
+        handle_2 = module.register_forward_pre_hook(removable_hook_2)
+
+        # make sure hook register is successful
+        self.assertEqual(len(handle.hooks_dict_ref()), 2)
+        self.assertEqual(len(handle_2.hooks_dict_ref()), 2)
+
+        input = torch.randn(2, 2)
+        output = module(input)
+        self.assertTrue(torch.allclose(torch.sigmoid(input), output))
+
+        # make sure hook removal is successful
+        self.assertFalse(handle.id in handle.hooks_dict_ref())
+        self.assertFalse(handle_2.id in handle.hooks_dict_ref())
+        self.assertEqual(len(handle.hooks_dict_ref()), 0)
+        self.assertEqual(len(handle_2.hooks_dict_ref()), 0)
+
+    def test_module_forward_forward_hook_removable(self):
+        """
+        This test is to test when multiple forward hook functions can be registered
+        successfully and used correctly, if the handle can be removable during the
+        forward hook function call.
+        """
+        module = nn.Sigmoid()
+
+        def removable_hook(m, input, output):
+            nonlocal handle
+            handle.remove()
+            return output
+
+        def removable_hook_2(m, input, output):
+            nonlocal handle_2
+            handle_2.remove()
+            return output
+
+        handle = module.register_forward_hook(removable_hook)
+        handle_2 = module.register_forward_hook(removable_hook_2)
+
+        # make sure hook register is successful
+        self.assertEqual(len(handle.hooks_dict_ref()), 2)
+        self.assertEqual(len(handle_2.hooks_dict_ref()), 2)
+
+        input = torch.randn(2, 2)
+        output = module(input)
+        self.assertTrue(torch.allclose(torch.sigmoid(input), output))
+
+        # make sure hook removal is successful
+        self.assertFalse(handle.id in handle.hooks_dict_ref())
+        self.assertFalse(handle_2.id in handle.hooks_dict_ref())
+        self.assertEqual(len(handle.hooks_dict_ref()), 0)
+        self.assertEqual(len(handle_2.hooks_dict_ref()), 0)
+
     def test_global_and_local_hooks_order(self):
         module = nn.Sigmoid()
 
@@ -17178,6 +17248,53 @@ class TestLazyModules(TestCase):
         lazy_module = gen_lazy_module()
         with self.assertRaisesRegex(RuntimeError, 'shape of an uninitialized'):
             module.load_state_dict(lazy_module.state_dict())
+
+
+    def test_lazy_pre_forward_hook(self):
+        """
+        This test is to test whether lazymodule can register other pre-forward hook
+        functions successfully.
+        """
+        class TestModule(torch.nn.modules.lazy.LazyModuleMixin, torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def initialize_parameters(self, input):
+                return None
+
+            def forward(self, input):
+                return input
+
+        def hook_function(module, input):
+            return input[0] + 1
+
+        module = TestModule()
+        module.register_forward_pre_hook(hook_function)
+        output = module(torch.zeros(2, 2))
+        self.assertTrue(torch.allclose(output, torch.ones(2, 2)))
+
+    def test_lazy_forward_hook(self):
+        """
+        This test is to test whether lazymodule can register other forward hook
+        functions successfully.
+        """
+        class TestModule(torch.nn.modules.lazy.LazyModuleMixin, torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def initialize_parameters(self, input):
+                return None
+
+            def forward(self, input):
+                return input
+
+        def hook_function(module, input, output):
+            return input[0] + 1
+
+        module = TestModule()
+        module.register_forward_hook(hook_function)
+        output = module(torch.zeros(2, 2))
+        self.assertTrue(torch.allclose(output, torch.ones(2, 2)))
 
     @suppress_warnings
     def test_lazy_conv1d(self):
