@@ -270,6 +270,7 @@ class TestFuseFx(QuantizationTestCase):
         ]
         self.checkGraphModuleNodes(m, expected_node_list=expected_nodes)
 
+    @skipIfNoFBGEMM
     def test_qconfig_fused_module(self):
         qconfig_dict = {
             "": None,
