@@ -103,6 +103,13 @@ def backward(
         in a user-specified CUDA stream context, see
         :ref:`Stream semantics of backward passes<bwd-cuda-stream-semantics>`.
 
+    .. note::
+
+        When ``inputs`` are provided and a given input is not a leaf,
+        the current implementation will call its grad_fn (even though it is not strictly needed to get this gradients).
+        It is an implementation detail on which the user should not rely.
+        See https://github.com/pytorch/pytorch/pull/60521#issuecomment-867061780 for more details.
+
     Args:
         tensors (Sequence[Tensor] or Tensor): Tensors of which the derivative will be
             computed.
@@ -122,9 +129,6 @@ def backward(
             be will accumulated into ``.grad``. All other Tensors will be ignored. If
             not provided, the gradient is accumulated into all the leaf Tensors that
             were used to compute the attr::tensors.
-            For a non-leaf provided input, its grad_fn will be evaluated and
-            the behavior would be unexpected so user should not rely on it.
-            Reference: https://github.com/pytorch/pytorch/pull/60521#issuecomment-867061780
     """
     if grad_variables is not None:
         warnings.warn("'grad_variables' is deprecated. Use 'grad_tensors' instead.")

@@ -692,9 +692,10 @@ class TORCH_API Tensor {
   ///     ``at::Tensor::grad``. All other Tensors will be ignored. If not
   ///     provided, the gradient is accumulated into all the leaf Tensors
   ///     that were used to compute the current tensor.
-  ///     For a non-leaf provided input, its grad_fn will be evaluated and
-  ///     the behavior would be unexpected so user should not rely on it.
-  ///     Reference: https://github.com/pytorch/pytorch/pull/60521#issuecomment-867061780
+  ///     When inputs are provided and a given input is not a leaf,
+  ///     the current implementation will call its grad_fn (even though it is not strictly needed to get this gradients).
+  ///     It is an implementation detail on which the user should not rely.
+  ///     See https://github.com/pytorch/pytorch/pull/60521#issuecomment-867061780 for more details.
   void backward(const Tensor & gradient={}, c10::optional<bool> retain_graph=c10::nullopt, bool create_graph=false, c10::optional<TensorList> inputs=c10::nullopt) const {
     // NB: Adding this wrapper to _backward here because we'd like our
     // 'backwards' api to accept the 'inputs' argument optionally. Since code gen
