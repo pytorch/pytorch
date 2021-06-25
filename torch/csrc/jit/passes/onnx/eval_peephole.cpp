@@ -40,10 +40,10 @@ std::vector<at::Tensor> getValues(
 // scale, bias, mean and var are all tensors of same shape (C) and
 // if the size of the first dimension (dim 0) is the same between Conv
 // input weight and Batchnorm input scale
-static void fuseConvBatchNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
+static void fuseConvBatchNorm(Block* b, std::vector<std::string>& inputNames, ValueToParamPairMap& valsToParamsMap) {
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     for (auto* child_block : it->blocks()) {
-      fuseConvBatchNorm(child_block, valsToParamsMap);
+      fuseConvBatchNorm(child_block, inputNames, valsToParamsMap);
     }
     if (it->kind() == onnx::Conv) {
       if (it->output()->uses().size() != 1) {
@@ -53,6 +53,21 @@ static void fuseConvBatchNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
       if (bnNode->kind() != onnx::BatchNormalization) {
         continue;
       }
+      // Let's see if any of inputs of Conv node is in graph's inputs, then
+      // skip to fuse it.
+      bool has_graph_input = false;
+      for (auto input : it->inputs()) {
+        if (std::find(inputNames.begin(), inputNames.end(), input->debugName()) != inputNames.end()) {
+          printf("=== is graph input: %s \n", input->debugName().c_str());
+          has_graph_input = true;
+          break;
+        }
+      }
+
+      if (has_graph_input) {
+        continue;
+      }
+
       auto origconvNode = *it;
       auto epsilon = bnNode->f(attr::epsilon);
       auto w_conv_value = getValues(origconvNode, valsToParamsMap);
@@ -134,11 +149,20 @@ static void fuseConvBatchNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
       it.destroyCurrent();
     }
   }
+
+  auto block_inputs = b->owningGraph()->inputs();
+  printf("In the end, print block's inputs.\n");
+  for (auto b_input : block_inputs) {
+    // b_input->node()->dump();
+    printf("=== input name: %s \n", b_input->debugNameBase().c_str());
+  }
+  printf("Finish print block's inputs.\n");
+
 }
 
-void EvalPeepholeONNX(Block* b, ParamMap& paramsDict) {
+void EvalPeepholeONNX(Block* b, std::vector<std::string>& inputNames, ParamMap& paramsDict) {
   auto valsToParamsMap = buildValueToParamsMap(b, paramsDict);
-  fuseConvBatchNorm(b, valsToParamsMap);
+  fuseConvBatchNorm(b, inputNames, valsToParamsMap);
   buildParamsMapFromValueToParamsMap(valsToParamsMap, paramsDict);
   return;
 }

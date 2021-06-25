@@ -202,8 +202,9 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_onnx_eval_peephole",
           [](std::shared_ptr<Graph>& graph,
+             std::vector<std::string>& inputNames,
              std::map<std::string, IValue>& paramsDict) {
-            EvalPeepholeONNX(graph->block(), paramsDict);
+            EvalPeepholeONNX(graph->block(), inputNames, paramsDict);
             return paramsDict;
           },
           pybind11::return_value_policy::move)

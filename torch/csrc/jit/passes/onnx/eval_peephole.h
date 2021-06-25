@@ -5,7 +5,7 @@
 namespace torch {
 namespace jit {
 
-void EvalPeepholeONNX(Block* b, std::map<std::string, IValue>& paramDict);
+void EvalPeepholeONNX(Block* b, std::vector<std::string>& inputNames, std::map<std::string, IValue>& paramDict);
 
 } // namespace jit
 
