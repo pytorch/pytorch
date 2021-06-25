@@ -27,7 +27,6 @@ from torch.quantization import (
     QuantStub,
     DeQuantStub,
     QuantWrapper,
-    qconfig,
     quant_type_to_str,
     default_qconfig,
     default_dynamic_qconfig,
