@@ -1,7 +1,5 @@
 from typing import Optional
 
-from torch.ao.nn.sparse.linear import Linear as SparseLinear
-
 import torch
 from torch.nn.quantized.modules.utils import _quantize_weight, hide_packed_params_repr
 
@@ -83,7 +81,7 @@ class Linear(torch.nn.Module):
     A quantized sparse linear module with quantized tensor as inputs and outputs.
     """
     _version = 1
-    _FLOAT_MODULE = (torch.nn.Linear, SparseLinear)
+    _FLOAT_MODULE = torch.nn.Linear
 
     def __init__(self, in_features, out_features, row_block_size, col_block_size, bias=True, dtype=torch.qint8):
         super().__init__()
@@ -166,9 +164,8 @@ class Linear(torch.nn.Module):
 
         TODO: Need to figure out how to store the block shapes in the mod
         """
-        assert type(mod) in cls._FLOAT_MODULE, cls._get_name() + \
-            '.from_float only works for ' + \
-            str([n.__name__ for n in cls._FLOAT_MODULE])
+        assert type(mod) == cls._FLOAT_MODULE, cls._get_name() + \
+            '.from_float only works for ' + cls._FLOAT_MODULE.__name__
         # TODO: Need to add options to qconfig to avoid the calibration.
         # TODO: Add calibration for the sparsity
         assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'

@@ -19,6 +19,9 @@ class Model(nn.Module):
 
 
 class ImplementedSparsifier(BaseSparsifier):
+    def __init__(self, **kwargs):
+        super().__init__(defaults=kwargs)
+
     def step(self):
         pass
 
@@ -30,11 +33,13 @@ class TestBaseSparsifier(TestCase):
                                BaseSparsifier)
         # Can instantiate the model with no configs
         model = Model()
-        sparsifier = ImplementedSparsifier(model, None, None)
+        sparsifier = ImplementedSparsifier(test=3)
+        sparsifier.prepare(model, config=None)
         assert len(sparsifier.module_groups) == 2
         sparsifier.step()
         # Can instantiate the model with configs
-        sparsifier = ImplementedSparsifier(model, [model.linear], {'test': 3})
+        sparsifier = ImplementedSparsifier(test=3)
+        sparsifier.prepare(model, [model.linear])
         assert len(sparsifier.module_groups) == 1
         assert sparsifier.module_groups[0]['path'] == 'linear'
         assert 'test' in sparsifier.module_groups[0]
@@ -42,9 +47,11 @@ class TestBaseSparsifier(TestCase):
 
     def test_state_dict(self):
         model = Model()
-        sparsifier0 = ImplementedSparsifier(model, [model.linear], {'test': 3})
+        sparsifier0 = ImplementedSparsifier(test=3)
+        sparsifier0.prepare(model, [model.linear])
         state_dict = sparsifier0.state_dict()
-        sparsifier1 = ImplementedSparsifier(model, None, None)
+        sparsifier1 = ImplementedSparsifier()
+        sparsifier1.prepare(model, None)
         assert sparsifier0.module_groups != sparsifier1.module_groups
         sparsifier1.load_state_dict(state_dict)
         assert sparsifier0.module_groups == sparsifier1.module_groups
