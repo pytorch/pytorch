@@ -238,6 +238,39 @@ inline Tensor& xlog1py_out(Tensor& result, const Tensor& self, const Scalar& oth
   return torch::special_xlog1py_out(result, self, other);
 }
 
+/// Computes Hurwitz Zeta function for inputs, elementwise
+/// See https://pytorch.org/docs/master/special.html#torch.special.zeta.
+///
+/// Example:
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+/// auto y = torch::randn(128, dtype=kDouble);
+/// torch::special::zeta(x, y);
+/// ```
+inline Tensor zeta(const Tensor& self, const Tensor& other) {
+  return torch::special_zeta(self, other);
+}
+
+inline Tensor zeta(const Scalar& self, const Tensor& other) {
+  return torch::special_zeta(self, other);
+}
+
+inline Tensor zeta(const Tensor& self, const Scalar& other) {
+  return torch::special_zeta(self, other);
+}
+
+inline Tensor& zeta_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  return torch::special_zeta_out(result, self, other);
+}
+
+inline Tensor& zeta_out(Tensor& result, const Scalar& self, const Tensor& other) {
+  return torch::special_zeta_out(result, self, other);
+}
+
+inline Tensor& zeta_out(Tensor& result, const Tensor& self, const Scalar& other) {
+  return torch::special_zeta_out(result, self, other);
+}
+
 /// Computes the zeroth order modified Bessel function of the first kind of input, elementwise
 /// See https://pytorch.org/docs/master/special.html#torch.special.i0
 ///
