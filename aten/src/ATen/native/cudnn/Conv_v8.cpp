@@ -158,12 +158,12 @@ auto build_opgraph(const cudnnHandle_t handle, const cudnnBackendDescriptorType_
   return opGraph;
 }
 
-const auto get_generator_sources(const cudnnBackendDescriptorType_t& desc, const Tensor& x, const bool deterministic, const bool allow_tf32) {
+const auto get_generator_sources(const cudnnBackendDescriptorType_t& desc, const Tensor& x, const bool deterministic, const bool allow_tf32, const cudnnBackendHeurMode_t heur_mode) {
    // Method for engine config generator based on heuristics
-  auto heurgen_method = [&desc, &x, deterministic, allow_tf32](cudnn_frontend::OperationGraph &opGraph) -> cudnn_frontend::EngineConfigList {
+  auto heurgen_method = [&desc, &x, deterministic, allow_tf32, heur_mode](cudnn_frontend::OperationGraph &opGraph) -> cudnn_frontend::EngineConfigList {
       auto heuristics = cudnn_frontend::EngineHeuristicsBuilder()
                             .setOperationGraph(opGraph)
-                            .setHeurMode(CUDNN_HEUR_MODE_INSTANT)
+                            .setHeurMode(heur_mode)
                             .build();
       auto &engine_configs = heuristics.getEngineConfig(heuristics.getEngineConfigCount());
       cudnn_frontend::EngineConfigList filtered_configs;
@@ -214,7 +214,7 @@ auto get_plans_from_find(const cudnnHandle_t handle, const cudnnBackendDescripto
   void *data_ptrs[] = {x.data_ptr(), y.data_ptr(), w.data_ptr()};
   int64_t uids[] = {'x', 'y', 'w'};
 
-  auto sources = get_generator_sources(desc, x, deterministic, allow_tf32);
+  auto sources = get_generator_sources(desc, x, deterministic, allow_tf32, CUDNN_HEUR_MODE_INSTANT);
   auto initial_predicate_function = [&](cudnn_frontend::ExecutionPlan const& plan) -> bool {
     return false;
   };
@@ -257,7 +257,7 @@ auto get_configs_from_heuristics(const cudnnHandle_t handle, const cudnnBackendD
     return plan.getWorkspaceSize() > workspace_size;
   };
 
-  auto sources = get_generator_sources(desc, x, deterministic, allow_tf32);
+  auto sources = get_generator_sources(desc, x, deterministic, allow_tf32, CUDNN_HEUR_MODE_B);
 
   cudnn_frontend::EngineConfigGenerator generator(sources.size(), sources.data());
   auto configs = generator.generate_engine_config(opGraph);
