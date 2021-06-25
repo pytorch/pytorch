@@ -1897,6 +1897,28 @@ class TestTEFuser(JitTestCase):
                 correct_val = f(x)
                 self.assertEqual(kernel.run((x,)), correct_val)
 
+    def test_unrolled_cat(self):
+        with inline_fusion_groups():
+            def eager(x):
+                ret = torch.empty(0)
+                for i in range(x.shape[0]):
+                    ret = torch.cat([ret, x[i].relu()])
+                return ret
+            script = torch.jit.script(eager)
+
+            # Warm up with size=1 tensor; since the loop iterates once the
+            # profile data will be "burned in" assuming size=1, and then
+            # unrolled.
+            x = torch.ones(1, 1)
+            for _ in range(3):
+                script(x)
+
+            torch.testing.assert_allclose(eager(x), script(x))
+
+            # Now when an input hits the unrolled path, it will produce an
+            # incorrectly-sized tensor, since size=1 has been burned in.
+            x = torch.ones((8, 1))
+            torch.testing.assert_allclose(eager(x), script(x))
 
 works_list = [
     '__radd__',
