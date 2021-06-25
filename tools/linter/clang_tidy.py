@@ -201,6 +201,9 @@ def run_clang_tidy(options: Any, line_filters: List[Dict[str, Any]], files: Iter
         with open(options.config_file) as config:
             # Here we convert the YAML config file to a JSON blob.
             command += ["-config", json.dumps(yaml.load(config, Loader=yaml.SafeLoader))]
+    if options.print_include_paths:
+        command += ["--extra-arg", "-v"]
+
     command += options.extra_args
 
     if line_filters:
@@ -324,6 +327,11 @@ def parse_options() -> Any:
         "--parallel",
         action="store_true",
         help="Run clang tidy in parallel per-file (requires ninja to be installed).",
+    )
+    parser.add_argument(
+        "--print-include-paths",
+        action="store_true",
+        help="Print the search paths used for include directives"
     )
     parser.add_argument("-s", "--suppress-diagnostics", action="store_true",
                         help="Add NOLINT to suppress clang-tidy violations")
