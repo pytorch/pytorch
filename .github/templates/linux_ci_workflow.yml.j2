@@ -388,7 +388,7 @@ jobs:
 
   pytorch_python_doc_build:
     runs-on: linux.2xlarge
-    needs:
+    {# needs: #}
       {# - calculate-docker-image #}
       {# - build #}
     {# env:
