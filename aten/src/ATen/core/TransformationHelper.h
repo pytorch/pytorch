@@ -102,6 +102,8 @@ C10_HOST_DEVICE inline T normal(T val, T mean, T std) {
 template <typename T>
 C10_HOST_DEVICE inline T cauchy(T val, T median, T sigma) {
   // https://en.wikipedia.org/wiki/Cauchy_distribution#Cumulative_distribution_function
+  // __tanf overflows and returns `inf/-inf` when (val >= 1 - eps) or (val <= 0 + eps),
+  // thus we clip those values.
   constexpr T eps = std::numeric_limits<T>::epsilon();
   constexpr T one_minus_eps = 1 - eps;
   constexpr T zero_plus_eps = 0 + eps;
