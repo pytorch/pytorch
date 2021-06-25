@@ -132,8 +132,7 @@ void get_cachekey(CacheKey& key, const cudnnBackendDescriptorType_t operation, c
 
 void run_conv_plan(cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w, const cudnn_frontend::ExecutionPlan& plan) {
     auto workspace_size = plan.getWorkspaceSize();
-    Tensor workspace;
-    workspace = at::empty({workspace_size}, x.options().dtype(kByte));
+    Tensor workspace = at::empty({workspace_size}, x.options().dtype(kByte));
     void *data_ptrs[] = {x.data_ptr(), y.data_ptr(), w.data_ptr()};
     int64_t uids[] = {'x', 'y', 'w'};
     auto variantPack = cudnn_frontend::VariantPackBuilder()
@@ -234,8 +233,7 @@ auto get_plans_from_find(const cudnnHandle_t handle, const cudnnBackendDescripto
     }
   });
   TORCH_CHECK_WITH(CUDAOutOfMemoryError, max_workspace_size < 1_TiB, "Not enough memory for workspace!");
-  Tensor workspace;
-  workspace = at::empty({max_workspace_size}, x.options().dtype(kByte));
+  Tensor workspace = at::empty({max_workspace_size}, x.options().dtype(kByte));
   auto variantPack  = cudnn_frontend::VariantPackBuilder()
       .setDataPointers(3, data_ptrs)
       .setWorkspacePointer(workspace.data_ptr())
