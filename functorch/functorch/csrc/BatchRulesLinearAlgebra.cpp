@@ -114,6 +114,24 @@ static std::tuple<Tensor, optional<int64_t>> mm_batch_rule(
   return std::make_tuple( at::matmul(self_, other_), 0 );
 }
 
+static std::tuple<Tensor, optional<int64_t>> bmm_batch_rule(
+    const Tensor& self, optional<int64_t> self_bdim,
+    const Tensor& other, optional<int64_t> other_bdim) {
+  if (!self_bdim && !other_bdim) {
+    return std::make_tuple( at::bmm(self, other), nullopt );
+  }
+  auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
+  auto other_logical_rank = rankWithoutBatchDim(other, other_bdim);
+  TORCH_CHECK(self_logical_rank == 3 && other_logical_rank == 3,
+      "Shape mismatch: Got incorrect dims for bmm(a, b). "
+      "a has dim ", self_logical_rank,
+      "and b has dim ", other_logical_rank,
+      "but expected them to have dim 3 and dim 3");
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  auto other_ = moveBatchDimToFront(other, other_bdim);
+  return std::make_tuple( at::matmul(self_, other_), 0 );
+}
+
 Tensor linear_decomp(
     const Tensor& input, const Tensor& weight,
     const c10::optional<Tensor>& bias_opt) {
@@ -138,11 +156,12 @@ std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>> linalg_eigh_batch_
 }
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
-  VMAP_SUPPORT("slogdet", slogdet_batch_rule);
+  VMAP_SUPPORT("bmm", bmm_batch_rule);
   VMAP_SUPPORT("dot", dot_batch_rule);
   VMAP_SUPPORT("mv", mv_batch_rule);
   VMAP_SUPPORT("mm", mm_batch_rule);
   VMAP_SUPPORT("linalg_eigh", linalg_eigh_batch_rule);
+  VMAP_SUPPORT("slogdet", slogdet_batch_rule);
 
   m.impl("linear", linear_decomp);
 }
