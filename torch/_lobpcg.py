@@ -345,7 +345,7 @@ def lobpcg(A: Tensor,
            tol: Optional[float] = None,
            largest: Optional[bool] = None,
            method: Optional[str] = None,
-           tracker: None= None,
+           tracker: None = None,
            ortho_iparams: Optional[Dict[str, int]] = None,
            ortho_fparams: Optional[Dict[str, float]] = None,
            ortho_bparams: Optional[Dict[str, bool]] = None
