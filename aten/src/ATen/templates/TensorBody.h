@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/Operators.h>
 #include <c10/core/Device.h>
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
@@ -366,8 +367,15 @@ class TORCH_API Tensor {
   bool is_alias_of(const at::Tensor& other) const{
     return impl_->storage().is_alias_of(other.storage());
   }
-  Tensor toType(ScalarType t) const;
-  Tensor toBackend(Backend b) const;
+
+  Tensor toType(ScalarType t) const {
+    return to(options().dtype(t), /*non_blocking*/ false, /*copy*/ false);
+  }
+
+  // TODO: Deprecate me
+  Tensor toBackend(Backend b) const {
+    return to(options().device(backendToDeviceType(b)).layout(layout_from_backend(b)), /*non_blocking*/ false, /*copy*/ false);
+  }
 
   C10_DEPRECATED_MESSAGE("Tensor.is_variable() is deprecated; everything is a variable now. (If you want to assert that variable has been appropriately handled already, use at::impl::variable_excluded_from_dispatch())")
   bool is_variable() const noexcept {
@@ -435,6 +443,12 @@ class TORCH_API Tensor {
   bool is_hip() const {
     // NB: this is not a native function to avoid dispatching overhead.
     return impl_->is_hip();
+  }
+
+  /// Returns if a `Tensor` has VE backend.
+  bool is_ve() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->is_ve();
   }
 
   /// Returns if a `Tensor` has sparse backend.
@@ -515,7 +529,11 @@ class TORCH_API Tensor {
 
   /// Returns the `TensorOptions` corresponding to this `Tensor`. Defined in
   /// TensorOptions.h.
-  TensorOptions options() const;
+  TensorOptions options() const {
+    return TensorOptions().dtype(dtype())
+                          .device(device())
+                          .layout(layout());
+  }
 
   void* data_ptr() const {
     return this->unsafeGetTensorImpl()->data();
@@ -609,11 +627,30 @@ class TORCH_API Tensor {
   Tensor & index_put_(std::initializer_list<at::indexing::TensorIndex> indices, Tensor const & rhs);
   Tensor & index_put_(std::initializer_list<at::indexing::TensorIndex> indices, const Scalar& v);
 
-  Tensor cpu() const;
-  Tensor cuda() const;
-  Tensor hip() const;
-  Tensor vulkan() const;
-  Tensor metal() const;
+  Tensor cpu() const {
+    return to(options().device(DeviceType::CPU), /*non_blocking*/ false, /*copy*/ false);
+  }
+
+  // TODO: The Python version also accepts arguments
+  Tensor cuda() const {
+    return to(options().device(DeviceType::CUDA), /*non_blocking*/ false, /*copy*/ false);
+  }
+
+  Tensor hip() const {
+    return to(options().device(DeviceType::HIP), /*non_blocking*/ false, /*copy*/ false);
+  }
+
+  Tensor ve() const {
+    return to(options().device(DeviceType::VE), /*non_blocking*/ false, /*copy*/ false);
+  }
+
+  Tensor vulkan() const {
+    return to(options().device(DeviceType::Vulkan), /*non_blocking*/ false, /*copy*/ false);
+  }
+
+  Tensor metal() const {
+    return to(options().device(DeviceType::Metal), /*non_blocking*/ false, /*copy*/ false);
+  }
 
   // ~~~~~ Autograd API ~~~~~
 
@@ -977,6 +1014,13 @@ static inline DispatchKey legacyExtractDispatchKey(const Tensor& t) {
 }
 
 } // namespace at
+
+// See Note [Avoiding Include Cycles In Static Dispatch]
+${static_dispatch_extra_headers}
+namespace at {
+${tensor_method_definitions}
+} // namespace at
+
 
 namespace c10 {
 template <>
