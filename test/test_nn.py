@@ -13087,8 +13087,7 @@ class TestNNDeviceType(NNTestCase):
     def test_ReflectionPad_empty(self, device, dtype):
         for mod, inp in [
                 (torch.nn.ReflectionPad1d(2), torch.randn(0, 3, 10, device=device, dtype=dtype)),
-                (torch.nn.ReflectionPad2d(2), torch.randn(0, 3, 10, 10, device=device, dtype=dtype)),
-                (torch.nn.ReflectionPad3d(3), torch.randn(0, 3, 10, 10, 10, device=device, dtype=dtype))]:
+                (torch.nn.ReflectionPad2d(2), torch.randn(0, 3, 10, 10, device=device, dtype=dtype))]:
             self._test_module_empty_input(mod, inp, check_size=False)
 
         with self.assertRaisesRegex(RuntimeError, '2D or 3D'):
@@ -13099,11 +13098,6 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, '3D or 4D'):
             mod = torch.nn.ReflectionPad2d(2)
             inp = torch.randn(3, 0, 10, 10, device=device, dtype=dtype)
-            mod(inp)
-
-        with self.assertRaisesRegex(RuntimeError, '4D or 5D'):
-            mod = torch.nn.ReflectionPad3d(3)
-            inp = torch.randn(3, 0, 10, 10, 10, device=device, dtype=dtype)
             mod(inp)
 
     @onlyCUDA   # Test if CPU and GPU results match
@@ -13127,26 +13121,6 @@ class TestNNDeviceType(NNTestCase):
 
             self.assertEqual(x.grad, ref_x.grad)
 
-    @onlyCUDA   # Test if CPU and GPU results match
-    def test_ReflectionPad3d_large(self, device):
-        shapes = ([2, 1000, 7, 7, 7], [1000, 2, 7, 7, 7])
-        pad = (1, 2, 3, 4, 5, 6)
-        for shape in shapes:
-            x = torch.randn(shape, device=device, requires_grad=True)
-            ref_x = x.detach().cpu().requires_grad_()
-
-            out = F.pad(x, pad, mode='reflect')
-            ref_out = F.pad(ref_x, pad, mode='reflect')
-
-            self.assertEqual(out, ref_out)
-
-            g = torch.randn_like(out)
-            ref_g = g.cpu()
-
-            out.backward(g)
-            ref_out.backward(ref_g)
-
-            self.assertEqual(x.grad, ref_x.grad)
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.float, torch.double)

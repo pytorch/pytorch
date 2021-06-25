@@ -1627,9 +1627,6 @@
 - name: reflection_pad2d(Tensor self, int[4] padding) -> Tensor
   self: reflection_pad2d_backward(grad, self, padding)
 
-- name: reflection_pad3d(Tensor self, int[6] padding) -> Tensor
-  self: reflection_pad3d_backward(grad, self, padding)
-
 - name: replication_pad1d(Tensor self, int[2] padding) -> Tensor
   self: replication_pad1d_backward(grad, self, padding)
 
@@ -1897,10 +1894,6 @@
 
 - name: reflection_pad2d_backward(Tensor grad_output, Tensor self, int[4] padding) -> Tensor
   grad_output: reflection_pad2d(grad, padding)
-  self: zeros_like(self)
-
-- name: reflection_pad3d_backward(Tensor grad_output, Tensor self, int[6] padding) -> Tensor
-  grad_output: reflection_pad3d(grad, padding)
   self: zeros_like(self)
 
 - name: replication_pad1d_backward(Tensor grad_output, Tensor self, int[2] padding) -> Tensor

@@ -114,7 +114,6 @@ Padding Layers
 
     nn.ReflectionPad1d
     nn.ReflectionPad2d
-    nn.ReflectionPad3d
     nn.ReplicationPad1d
     nn.ReplicationPad2d
     nn.ReplicationPad3d

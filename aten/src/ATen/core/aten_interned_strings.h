@@ -593,9 +593,6 @@ _(aten, reflection_pad1d_forward) \
 _(aten, reflection_pad2d) \
 _(aten, reflection_pad2d_backward) \
 _(aten, reflection_pad2d_forward) \
-_(aten, reflection_pad3d) \
-_(aten, reflection_pad3d_backward) \
-_(aten, reflection_pad3d_forward) \
 _(aten, relu) \
 _(aten, remainder) \
 _(aten, renorm) \

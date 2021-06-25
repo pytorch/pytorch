@@ -1171,7 +1171,6 @@ class ShapePropagator {
             "aten::max_unpool3d(Tensor self, Tensor indices, int[] output_size, int[] stride, int[] padding) -> Tensor",
             "aten::reflection_pad1d(Tensor self, int[] padding) -> Tensor",
             "aten::reflection_pad2d(Tensor self, int[] padding) -> Tensor",
-            "aten::reflection_pad3d(Tensor self, int[] padding) -> Tensor",
             "aten::replication_pad1d(Tensor self, int[] padding) -> Tensor",
             "aten::replication_pad2d(Tensor self, int[] padding) -> Tensor",
             "aten::replication_pad3d(Tensor self, int[] padding) -> Tensor",
