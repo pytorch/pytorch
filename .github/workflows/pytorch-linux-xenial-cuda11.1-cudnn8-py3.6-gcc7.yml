@@ -304,6 +304,12 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Zip test reports for upload
+        if: always()
+        run: |
+          # Remove any previous test reports if they exist
+          rm -f test-reports-*.zip
+          zip -r "test-reports-${TEST_CONFIG}.zip" test -i '*.xml'
       - uses: actions/upload-artifact@v2
         name: Store PyTorch Test Reports
         if: always()
@@ -312,7 +318,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            test/**/*.xml
+            test-reports-*.zip
       - name: Clean up docker images
         if: always()
         run: |
@@ -341,7 +347,11 @@ jobs:
         name: Download PyTorch Test Reports
         with:
           name: test-reports
-          path: test/test-reports
+          path: .
+      - name: Unzip test reports
+        run: |
+          # Should preserve paths so reports should still be in test/test-reports
+          unzip -o 'test-reports-*.zip'
       - uses: actions/setup-python@v2
         with:
           python-version: 3.9
