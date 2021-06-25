@@ -4,6 +4,54 @@ import torch
 from torch import Tensor
 from typing import List, Dict
 
+def adam(params: List[Tensor],
+         grads: List[Tensor],
+         exp_avg: List[Tensor],
+         exp_avg_sq: List[Tensor],
+         max_exp_avg_sq: List[Tensor],
+         states: List[Dict],
+         *,
+         amsgrad: bool,
+         beta1: float,
+         beta2: float,
+         lr: float,
+         weight_decay: float,
+         eps: float):
+    r"""Functional API that performs Adam algorithm computation.
+
+    See :class:`~torch.optim.Adam` for details.
+    """
+
+    bias_correction1 = [1 - beta1 ** state['step'] for state in states]
+    bias_correction2 = [1 - beta2 ** state['step'] for state in states]
+    if weight_decay != 0:
+        torch._foreach_add_(grads, params, alpha=weight_decay)
+
+    torch._foreach_mul_(exp_avg, beta1)
+    torch._foreach_add_(exp_avg, grads, alpha=1 - beta1)
+
+    torch._foreach_mul_(exp_avg_sq, beta2)
+    torch._foreach_addcmul_(exp_avg_sq, grads, grads, 1 - beta2)
+
+    if amsgrad:
+        # Maintains the maximum of all 2nd moment running avg. till now
+        max_exp_avg_sq = torch._foreach_maximum(max_exp_avg_sq, exp_avg_sq) # type: ignore
+
+        # Use the max. for normalizing running avg. of gradient
+        max_exp_avg_sq_sqrt = torch._foreach_sqrt(max_exp_avg_sq)
+        bias_correction_sqrt = [math.sqrt(bc) for bc in bias_correction2]
+        torch._foreach_div_(max_exp_avg_sq_sqrt, bias_correction_sqrt)
+        denom = torch._foreach_add(max_exp_avg_sq_sqrt, eps)
+    else:
+        exp_avg_sq_sqrt = torch._foreach_sqrt(exp_avg_sq)
+        bias_correction_sqrt = [math.sqrt(bc) for bc in bias_correction2]
+        torch._foreach_div_(exp_avg_sq_sqrt, bias_correction_sqrt)
+        denom = torch._foreach_add(exp_avg_sq_sqrt, eps)
+
+    step_size = [(lr / bc) * -1 for bc in bias_correction1]
+    torch._foreach_addcdiv_(params, exp_avg, denom, step_size)
+
+
 def adamax(params: List[Tensor],
            grads: List[Tensor],
            exp_avgs: List[Tensor],
@@ -40,6 +88,110 @@ def adamax(params: List[Tensor],
     bias_corrections = [1 - beta1 ** state['step'] for state in states]
     clr = [-1 * (lr / bias_correction) for bias_correction in bias_corrections]
     torch._foreach_addcdiv_(params, exp_avgs, exp_infs, clr)
+
+
+def adamw(params: List[Tensor],
+          grads: List[Tensor],
+          exp_avg: List[Tensor],
+          exp_avg_sq: List[Tensor],
+          max_exp_avg_sq: List[Tensor],
+          states: List[Dict],
+          *,
+          amsgrad: bool,
+          beta1: float,
+          beta2: float,
+          lr: float,
+          eps: float):
+    r"""Functional API that performs Adamw algorithm computation.
+
+    See :class:`~torch.optim.Adamw` for details.
+    """
+
+    bias_correction1 = [1 - beta1 ** state['step'] for state in states]
+    bias_correction2 = [1 - beta2 ** state['step'] for state in states]
+
+    #
+    # Decay the first and second moment running average coefficient
+    #
+    torch._foreach_mul_(exp_avg, beta1)
+    torch._foreach_add_(exp_avg, grads, alpha=1 - beta1)
+
+    torch._foreach_mul_(exp_avg_sq, beta2)
+    torch._foreach_addcmul_(exp_avg_sq, grads, grads, 1 - beta2)
+
+    if amsgrad:
+        # Maintains the maximum of all 2nd moment running avg. till now
+        max_exp_avg_sq = torch._foreach_maximum(max_exp_avg_sq, exp_avg_sq) # type: ignore
+
+        # Use the max. for normalizing running avg. of gradient
+        max_exp_avg_sq_sqrt = torch._foreach_sqrt(max_exp_avg_sq)
+        bias_correction_sqrt = [math.sqrt(bc) for bc in bias_correction2]
+        torch._foreach_div_(max_exp_avg_sq_sqrt, bias_correction_sqrt)
+        denom = torch._foreach_add(max_exp_avg_sq_sqrt, eps)
+    else:
+        exp_avg_sq_sqrt = torch._foreach_sqrt(exp_avg_sq)
+        bias_correction_sqrt = [math.sqrt(bc) for bc in bias_correction2]
+        torch._foreach_div_(exp_avg_sq_sqrt, bias_correction_sqrt)
+        denom = torch._foreach_add(exp_avg_sq_sqrt, eps)
+
+    step_size = [-1 * (lr / bc) for bc in bias_correction1]
+    torch._foreach_addcdiv_(params, exp_avg, denom, step_size)
+
+
+def sgd(params: List[Tensor],
+        grads: List[Tensor],
+        states: List[Dict],
+        *,
+        momentum : float,
+        has_sparse_grad: bool,
+        dampening: float,
+        nesterov: bool,
+        weight_decay: float,
+        lr: float):
+    r"""Functional API that performs SGD algorithm computation.
+
+    See :class:`~torch.optim.SGD` for details.
+    """
+
+    if weight_decay != 0:
+        grads = torch._foreach_add(grads, params, alpha=weight_decay) # type: ignore
+
+    if momentum != 0:
+        bufs = []
+
+        all_states_with_momentum_buffer = True
+        for i in range(len(states)):
+            if 'momentum_buffer' not in states[i]:
+                all_states_with_momentum_buffer = False
+                break
+            else:
+                bufs.append(states[i]['momentum_buffer'])
+
+        if all_states_with_momentum_buffer:
+            torch._foreach_mul_(bufs, momentum)
+            torch._foreach_add_(bufs, grads, alpha=1 - dampening)
+        else:
+            bufs = []
+            for i in range(len(states)):
+                if 'momentum_buffer' not in states[i]:
+                    buf = states[i]['momentum_buffer'] = torch.clone(grads[i]).detach()
+                else:
+                    buf = states[i]['momentum_buffer']
+                    buf.mul_(momentum).add_(grads[i], alpha=1 - dampening)
+
+                bufs.append(buf)
+
+        if nesterov:
+            torch._foreach_add_(grads, bufs, alpha=momentum)
+        else:
+            grads = bufs
+
+    if not has_sparse_grad:
+        torch._foreach_add_(params, grads, alpha=-lr)
+    else:
+        # foreach APIs dont support sparse
+        for i in range(len(params)):
+            params[i].add_(grads[i], alpha=-lr)
 
 
 def adadelta(params: List[Tensor],
@@ -85,6 +237,7 @@ def asgd(params: List[Tensor],
          alpha: float,
          weight_decay: float):
     r"""Functional API that performs ASGD algorithm computation.
+
     See :class:`~torch.optim.ASGD` for details.
     """
 
