@@ -410,16 +410,15 @@ jobs:
           submodules: recursive
       - name: create site zip
         run: |
-          echo hi > index.html
-          zip site.zip index.html
+          mkdir site
+          echo hi > site/index.html
       - uses: driazati/upload-artifact-s3@6df6e653e294f8da10d7630280444620705ab9ea
         name: Store PyTorch Build Artifacts on S3
         with:
           name: deploy
           retention-days: 14
           if-no-files-found: error
-          path:
-            site.zip
+          folder_path: site
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"
