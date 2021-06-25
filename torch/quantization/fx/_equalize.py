@@ -381,17 +381,25 @@ def scale_weight_functional(
     """ Scales the weight value for functional layers
     """
 
-    # Get the get_attr(weight) node
+    # From the given op_node, the path looks like:
+    #   get_attr(weight) -> weight_quant_obs -> weight_eq_obs -> op_node
+    # So we want to trace back from the op_node to get the equalization observer
+    # node, then the quantization observer node, and then finally the weight
+    # node which contains the weight values.
+
+    # Get the equalization observer node
     weight_eq_obs_node = maybe_get_weight_eq_obs_node(op_node, modules)
     if weight_eq_obs_node is None:
         return
 
+    # Get the quantization observer node
     weight_quant_obs_node = weight_eq_obs_node.args[0]
     if weight_quant_obs_node is None:
         return
     assert(isinstance(weight_quant_obs_node, Node) and
            isinstance(modules[str(weight_quant_obs_node.target)], ObserverBase))
 
+    # Get the get_attr(weight) node
     weight_node = weight_quant_obs_node.args[0]
     if weight_node is None:
         return
