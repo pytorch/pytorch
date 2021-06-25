@@ -22,5 +22,8 @@ TORCH_API void OptimizeConcat(const std::shared_ptr<Graph>& graph);
 // Returns true if the graph is modified.
 TORCH_API bool UseVariadicCat(const std::shared_ptr<Graph>& graph);
 
+TORCH_API bool RemoveListMutationAndUseVariadicCat(
+    const std::shared_ptr<Graph>& graph);
+
 } // namespace jit
 } // namespace torch

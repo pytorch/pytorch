@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/remove_mutation.h>
 
 namespace torch {
 namespace jit {
@@ -599,6 +600,17 @@ bool UseVariadicCat(const std::shared_ptr<Graph>& graph) {
   bool changed = VariadicCatUpdater(graph).run();
   if (changed) {
     GRAPH_DUMP("After VariadicCat", graph);
+  }
+  return changed;
+}
+
+bool RemoveListMutationAndUseVariadicCat(const std::shared_ptr<Graph>& graph) {
+  bool changed_in_last_iter = true;
+  bool changed = false;
+  while (changed_in_last_iter) {
+    changed_in_last_iter = RemoveListMutation(graph);
+    changed_in_last_iter = changed_in_last_iter || UseVariadicCat(graph);
+    changed = changed || changed_in_last_iter;
   }
   return changed;
 }

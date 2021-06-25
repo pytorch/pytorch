@@ -696,7 +696,7 @@ TEST(OptimizeConcatTest, UseVariadicCatWithListMutationAfterCat) {
               %2: Float(32, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu)):
           %10 : int = prim::Constant[value=0]()
           %input : Tensor[] = prim::ListConstruct(%0, %1)
-          %concat : Float(256, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu) = aten::cat(%input, %10)
+          %concat : Float(96, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu) = aten::cat(%input, %10)
           %11 : Tensor = aten::append(%input, %2)
           return (%concat, %input)
       )IR";
@@ -742,7 +742,7 @@ TEST(OptimizeConcatTest, UseVariadicCatWithListMutationBeforeCat) {
           %10 : int = prim::Constant[value=0]()
           %input : Tensor[] = prim::ListConstruct(%0, %1)
           %11 : Tensor = aten::append(%input, %2)
-          %concat : Float(256, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu) = aten::cat(%input, %10)
+          %concat : Float(128, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu) = aten::cat(%input, %10)
           return (%concat)
       )IR";
   parseIR(input, graph.get());
@@ -752,17 +752,99 @@ TEST(OptimizeConcatTest, UseVariadicCatWithListMutationBeforeCat) {
       at::rand({32, 56, 56}, at::kCPU)};
   auto orig_outputs = runGraph(graph, inputs);
 
-  ASSERT_FALSE(UseVariadicCat(graph));
+  {
+    ASSERT_FALSE(UseVariadicCat(graph));
+    graph->lint();
+    auto opt_outputs = runGraph(graph, inputs);
+    checkOutputs(orig_outputs, opt_outputs);
+
+    // No transformation should have happened since the `prim::ListConstruct` is
+    // mutated before `aten::cat`.
+    testing::FileCheck()
+        .check_count("= prim::ListConstruct(", 1, /*exactly*/ true)
+        ->check_count("= aten::cat(", 1, /*exactly*/ true)
+        ->check_count("= prim::Concat(", 0, /*exactly*/ true)
+        ->run(*graph);
+  }
+
+  {
+    ASSERT_TRUE(RemoveListMutationAndUseVariadicCat(graph));
+    graph->lint();
+    auto opt_outputs = runGraph(graph, inputs);
+    checkOutputs(orig_outputs, opt_outputs);
+
+    // The mutation of the list must be removed and the `aten::cat` op must
+    // be replaced with the `prim::Concat` op in the graph. The transformed
+    // graph should look like the following:
+    //
+    //  graph(%0 : ...,
+    //        %1 : ...,
+    //        %2 : ...):
+    //    %3 : int = prim:Constant[value=0]()
+    //    %7 : Tensor = prim::Concat(%0, %1, %2, %3)
+    //    return (%7)
+    testing::FileCheck()
+        .check_count("= prim::Concat(", 1, /*exactly*/ true)
+        ->check_count("= prim::ListConstruct(", 0, /*exactly*/ true)
+        ->check_count("= aten::cat(", 0, /*exactly*/ true)
+        ->run(*graph);
+  }
+}
+
+TEST(OptimizeConcatTest, UseVariadicCatWithMultipleListMutations) {
+  auto graph = std::make_shared<Graph>();
+
+  const std::string input =
+      R"IR(
+        graph(%0: Float(64, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu),
+              %1: Float(32, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu),
+              %2: Float(32, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu),
+              %3: Float(32, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu),
+              %4: Float(32, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu)):
+          %10 : int = prim::Constant[value=0]()
+          %input : Tensor[] = prim::ListConstruct(%0, %1)
+          %concat.1 : Float(96, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu) = aten::cat(%input, %10)
+          %11 : Tensor = aten::append(%input, %2)
+          %concat.2 : Float(128, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu) = aten::cat(%input, %10)
+          %12 : Tensor = aten::append(%input, %3)
+          %concat.3 : Float(160, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu) = aten::cat(%input, %10)
+          %13 : Tensor = aten::append(%input, %4)
+          %concat.4 : Float(192, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu) = aten::cat(%input, %10)
+          return (%concat.1, %concat.2, %concat.3, %concat.4)
+      )IR";
+  parseIR(input, graph.get());
+  std::vector<at::Tensor> inputs = {
+      at::rand({64, 56, 56}, at::kCPU),
+      at::rand({32, 56, 56}, at::kCPU),
+      at::rand({32, 56, 56}, at::kCPU),
+      at::rand({32, 56, 56}, at::kCPU),
+      at::rand({32, 56, 56}, at::kCPU)};
+  auto orig_outputs = runGraph(graph, inputs);
+
+  ASSERT_TRUE(RemoveListMutationAndUseVariadicCat(graph));
   graph->lint();
   auto opt_outputs = runGraph(graph, inputs);
   checkOutputs(orig_outputs, opt_outputs);
 
-  // No transformation should have happened since the `prim::ListConstruct` is
-  // mutated before `aten::cat`.
+  // All the mutations of the list must be removed and the `aten::cat` ops must
+  // be replaced with `prim::Concat` ops in the graph. The transformed graph
+  // should look like the following:
+  //
+  //  graph(%0 : ...,
+  //        %1 : ...,
+  //        %2 : ...,
+  //        %3 : ...,
+  //        %4 : ...):
+  //    %10 : int = prim:Constant[value=0]()
+  //    %5 : Tensor = prim::Concat(%0, %1, %10)
+  //    %6 : Tensor = prim::Concat(%0, %1, %2, %10)
+  //    %7 : Tensor = prim::Concat(%0, %1, %2, %3, %10)
+  //    %8 : Tensor = prim::Concat(%0, %1, %2, %3, %4, %10)
+  //    return (%5, %6, %7, %8)
   testing::FileCheck()
-      .check_count("= prim::ListConstruct(", 1, /*exactly*/ true)
-      ->check_count("= aten::cat(", 1, /*exactly*/ true)
-      ->check_count("= prim::Concat(", 0, /*exactly*/ true)
+      .check_count("= prim::Concat(", 4, /*exactly*/ true)
+      ->check_count("= prim::ListConstruct(", 0, /*exactly*/ true)
+      ->check_count("= aten::cat(", 0, /*exactly*/ true)
       ->run(*graph);
 }
 
