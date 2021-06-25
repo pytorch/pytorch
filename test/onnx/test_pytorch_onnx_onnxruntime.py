@@ -2836,33 +2836,6 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.tensor([2, 3, 5], dtype=torch.float64)
         self.run_test(ModModule(), (x, y))
 
-    @unittest.skip("Gemm operator only support float/double in ONNX")
-    @skipIfUnsupportedMaxOpsetVersion(13)
-    def test_gemm_with_low_precision(self):
-        class GemmModule(torch.nn.Module):
-            def forward(self, x, y):
-                return torch.mm(x, y).to(dtype=torch.long)
-
-            mat1 = torch.randn(2, 3).to(dtype=torch.uint8)
-            mat2 = torch.randn(3, 2).to(dtype=torch.uint8)
-            self.run_test(GemmModule(), (mat1, mat2))
-
-            mat1 = torch.randn(2, 3).to(dtype=torch.int8)
-            mat2 = torch.randn(3, 2).to(dtype=torch.int8)
-            self.run_test(GemmModule(), (mat1, mat2))
-
-            mat1 = torch.randn(2, 3).to(dtype=torch.int16)
-            mat2 = torch.randn(3, 2).to(dtype=torch.int16)
-            self.run_test(GemmModule(), (mat1, mat2))
-
-            mat1 = torch.randn(2, 3).to(dtype=torch.uint8)
-            mat2 = torch.randn(3, 2).to(dtype=torch.int32)
-            self.run_test(GemmModule(), (mat1, mat2))
-
-            mat1 = torch.randn(2, 3).to(dtype=torch.uint8)
-            mat2 = torch.randn(3, 2).to(dtype=torch.float64)
-            self.run_test(GemmModule(), (mat1, mat2))
-
     def test_std(self):
         class StandardDeviation(torch.nn.Module):
             def forward(self, input):
