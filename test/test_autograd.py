@@ -5494,6 +5494,21 @@ for shape in [(1,), ()]:
         # a is left untouched
         self.assertEqual(a, a_orig)
 
+    def test_saved_variable_version_counter(self):
+        a = torch.rand(2, requires_grad=True)
+
+        b = torch.exp(a)
+
+        b_unpacked = b.grad_fn._saved_result
+        self.assertEqual(b, b_unpacked)
+        self.assertEqual(b._version, b_unpacked._version)
+
+        with torch.no_grad():
+            b += 1
+
+        self.assertEqual(b, b_unpacked)
+        self.assertEqual(b._version, b_unpacked._version)
+
 
 def index_perm_variable(shape, max_indices):
     if not isinstance(shape, tuple):

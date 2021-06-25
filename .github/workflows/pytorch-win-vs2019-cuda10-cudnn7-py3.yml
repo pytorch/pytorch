@@ -4,6 +4,7 @@
 name: Windows CI (pytorch-win-vs2019-cuda10-cudnn7-py3)
 
 on:
+  pull_request:
   push:
     branches:
       - master
@@ -16,7 +17,6 @@ env:
   CUDA_VERSION: "10.1"
   IN_CI: 1
   INSTALL_WINDOWS_SDK: 1
-  JOB_BASE_NAME: test
   PYTHON_VERSION: "3.8"
   SCCACHE_BUCKET: "ossci-compiler-cache"
   VC_PRODUCT: "BuildTools"
@@ -32,6 +32,8 @@ concurrency:
 jobs:
   build:
     runs-on: "windows.4xlarge"
+    env:
+      JOB_BASE_NAME: pytorch-win-vs2019-cuda10-cudnn7-py3-build
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
@@ -77,12 +79,39 @@ jobs:
           name: ${{ env.BUILD_ENVIRONMENT }}
           path: C:\w\build-results
 
+  generate-test-matrix:
+    if: ${{ github.repository_owner == 'pytorch' && github.event_name == 'push' }}
+    runs-on: ubuntu-18.04
+    env:
+      NUM_TEST_SHARDS: 1
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    container:
+      image: python:3.9
+    steps:
+      - name: Clone pytorch/pytorch
+        uses: actions/checkout@v2
+      - name: Generating test matrix
+        id: set-matrix
+        run: |
+          # outputting for debugging purposes
+          MATRIX=$(python .github/scripts/generate_pytorch_test_matrix.py)
+          echo "${MATRIX}"
+          echo "::set-output name=matrix::${MATRIX}"
+
   test:
+    if: ${{ github.event_name == 'push' }}
     runs-on: windows.8xlarge.nvidia.gpu
     env:
       JOB_BASE_NAME: pytorch-win-vs2019-cuda10-cudnn7-py3-test
+      NUM_TEST_SHARDS: 1
+      TEST_CONFIG: ${{ matrix.test_config }}
     needs:
       - build
+      - generate-test-matrix
+    strategy:
+      matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
+      fail-fast: false
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
@@ -123,6 +152,11 @@ jobs:
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
         run: |
+            if [[ $NUM_TEST_SHARDS -eq 2 ]]; then
+              export SHARD_NUMBER=$TEST_CONFIG
+            else
+              export SHARD_NUMBER=0
+            fi
             .jenkins/pytorch/win-test.sh
       - uses: actions/upload-artifact@v2
         name: Store PyTorch Test Reports
@@ -140,7 +174,7 @@ jobs:
   # logs (like test); we can always move it back to the other one, but it
   # doesn't create the best experience
   render_test_results:
-    if: always()
+    if:  ${{ github.event_name == 'push' && always() }}
     needs:
       - test
     runs-on: ubuntu-18.04

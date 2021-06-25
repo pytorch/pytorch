@@ -39,7 +39,7 @@ Patterns = collections.namedtuple("Patterns", "positive, negative")
 # NOTE: Clang-tidy cannot lint headers directly, because headers are not
 # compiled -- translation units are, of which there is one per implementation
 # (c/cc/cpp) file.
-DEFAULT_FILE_PATTERN = re.compile(r".*\.c(c|pp)?")
+DEFAULT_FILE_PATTERN = re.compile(r"^.*\.c(c|pp)?$")
 
 # Search for:
 #    diff --git ...
@@ -142,7 +142,6 @@ def find_changed_lines(diff: str) -> Dict[str, List[Tuple[int, int]]]:
     for file, start, end in matches:
         start_line, _ = start.split(",")
         end_line, _ = end.split(",")
-        print(file, start_line, end_line)
 
         files[file].append((start_line, end_line))
 
@@ -330,6 +329,11 @@ def main() -> None:
     if options.diff_file:
         with open(options.diff_file, "r") as f:
             changed_files = find_changed_lines(f.read())
+            changed_files = {
+                filename: v
+                for filename, v in changed_files.items()
+                if any(filename.startswith(path) for path in options.paths)
+            }
             line_filters = [
                 {"name": name, "lines": lines} for name, lines, in changed_files.items()
             ]

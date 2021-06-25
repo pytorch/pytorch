@@ -468,12 +468,12 @@
 
 - func: all.dim(Tensor self, int dim, bool keepdim=False) -> Tensor
   device_check: NoCheck   # TensorIterator
-  structured_delegate: all.out
   variants: function, method
+  dispatch:
+    CPU, CUDA: all
 
 - func: all.out(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
-  structured: True
   dispatch:
     CPU, CUDA: all_out
 
@@ -489,12 +489,12 @@
 
 - func: any.dim(Tensor self, int dim, bool keepdim=False) -> Tensor
   device_check: NoCheck   # TensorIterator
-  structured_delegate: any.out
   variants: function, method
+  dispatch:
+    CPU, CUDA: any
 
 - func: any.out(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
-  structured: True
   dispatch:
     CPU, CUDA: any_out
 
@@ -526,22 +526,22 @@
 - func: _dim_arange(Tensor like, int dim) -> Tensor
 
 - func: argmax(Tensor self, int? dim=None, bool keepdim=False) -> Tensor
-  structured_delegate: argmax.out
   device_check: NoCheck   # TensorIterator
   variants: function, method
+  dispatch:
+    CPU, CUDA: argmax
 
 - func: argmax.out(Tensor self, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-  structured: True
   dispatch:
     CPU, CUDA: argmax_out
 
 - func: argmin(Tensor self, int? dim=None, bool keepdim=False) -> Tensor
-  structured_delegate: argmin.out
   device_check: NoCheck   # TensorIterator
   variants: function, method
+  dispatch:
+    CPU, CUDA: argmin
 
 - func: argmin.out(Tensor self, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-  structured: True
   dispatch:
     CPU, CUDA: argmin_out
 
@@ -9445,6 +9445,19 @@
   dispatch:
     CPU, CUDA: special_entr_out
 
+- func: special_ndtri(Tensor self) -> Tensor
+  structured_delegate: special_ndtri.out
+  python_module: special
+  variants: function
+
+- func: special_ndtri.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
+  python_module: special
+  variants: function
+  dispatch:
+    CPU, CUDA: special_ndtri_out
+
 - func: special_expm1(Tensor self) -> Tensor
   python_module: special
   variants: function
@@ -10006,22 +10019,16 @@
   python_module: linalg
   variants: function
 
-- func: _linalg_solve_out_helper_(Tensor(a!) self, Tensor(b!) other, Tensor(c!) infos) -> Tensor(a!)
-  variants: function
-  dispatch:
-    CPU: _linalg_solve_out_helper_cpu
-    CUDA: _linalg_solve_out_helper_cuda
-
 - func: linalg_solve(Tensor input, Tensor other) -> Tensor
   python_module: linalg
   variants: function
   dispatch:
-    CompositeExplicitAutograd: linalg_solve
+    CPU, CUDA: linalg_solve
 
 - func: linalg_solve.out(Tensor input, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   dispatch:
-    CompositeExplicitAutograd: linalg_solve_out
+    CPU, CUDA: linalg_solve_out
 
 - func: linalg_tensorinv(Tensor self, int ind=2) -> Tensor
   python_module: linalg
@@ -10125,7 +10132,7 @@
   dispatch:
     CPU, CUDA: segment_reduce_kernel
 
-- func: _segment_reduce_backward(Tensor grad, Tensor output, Tensor data, str reduce, *, Tensor? lengths=None) -> Tensor
+- func: _segment_reduce_backward(Tensor grad, Tensor output, Tensor data, str reduce, *, Tensor? lengths=None, int axis=0) -> Tensor
   variants: function
   dispatch:
     CPU, CUDA: _segment_reduce_backward_kernel

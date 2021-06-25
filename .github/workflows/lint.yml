@@ -266,7 +266,9 @@ jobs:
           fi
 
   clang-tidy:
-    if: github.event_name == 'pull_request'
+    # if: github.event_name == 'pull_request'
+    # TODO: Fix clang-tidy, see https://github.com/pytorch/pytorch/issues/60192
+    if: ${{ false }}
     runs-on: ubuntu-18.04
     container:
       # ubuntu18.04-cuda10.2-py3.6-tidy11
