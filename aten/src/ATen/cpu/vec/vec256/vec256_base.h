@@ -213,14 +213,14 @@ public:
     }
     return vec;
   }
-  Vectorized<T> map(T (*f)(T)) const {
+  Vectorized<T> map(T (*const f)(T)) const {
     Vectorized<T> ret;
     for (int64_t i = 0; i != size(); i++) {
       ret[i] = f(values[i]);
     }
     return ret;
   }
-  Vectorized<T> map(T (*f)(const T &)) const {
+  Vectorized<T> map(T (*const f)(const T &)) const {
     Vectorized<T> ret;
     for (int64_t i = 0; i != size(); i++) {
       ret[i] = f(values[i]);
