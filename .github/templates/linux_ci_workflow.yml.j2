@@ -211,7 +211,7 @@ jobs:
           echo "${MATRIX}"
           echo "::set-output name=matrix::${MATRIX}"
 
-  {# test:
+  test:
     runs-on: !{{ test_runner_type }}
     needs:
       - calculate-docker-image
@@ -383,16 +383,16 @@ jobs:
           CIRCLE_WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         run: |
           export PYTHONPATH=$PWD
-          python tools/stats/print_test_stats.py --upload-to-s3 --compare-with-s3 test #}
+          python tools/stats/print_test_stats.py --upload-to-s3 --compare-with-s3 test
   {%- if enable_doc_jobs %}
 
   pytorch_python_doc_build:
     runs-on: linux.2xlarge
-    {# needs: #}
-      {# - calculate-docker-image #}
-      {# - build #}
-    {# env:
-      DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }} #}
+    needs:
+      - calculate-docker-image
+      - build
+    env:
+      DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
     steps:
       - name: Log in to ECR
         run: |
@@ -403,12 +403,12 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      {# - name: Checkout PyTorch
+      - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
           fetch-depth: 0 # deep clone, to allow sharding to use git rev-list
-          submodules: recursive #}
-      - name: create site zip
+          submodules: recursive
+      {# - name: create site zip
         run: |
           mkdir site
           echo alright > site/other.html
@@ -419,7 +419,7 @@ jobs:
           name: deploy
           retention-days: 14
           if-no-files-found: error
-          path: site
+          path: site #}
       - name: Pull docker image
         run: |
           exit 1
@@ -461,6 +461,15 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: show the stuff
+        run: find ${GITHUB_WORKSPACE}/pytorch.github.io/
+      - uses: driazati/upload-artifact-s3@f0a4a423c1e8743cf07460a483f26f230e6a2d68
+        name: Upload docs preview
+        with:
+          name: deploy
+          retention-days: 14
+          if-no-files-found: error
+          path: ${GITHUB_WORKSPACE}/pytorch.github.io/docs/master
       - name: Archive artifacts into zip
         run: |
           zip -r pytorch_github_io.zip "${GITHUB_WORKSPACE}/pytorch.github.io"
