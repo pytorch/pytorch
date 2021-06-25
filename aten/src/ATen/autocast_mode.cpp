@@ -59,6 +59,9 @@ thread_local int nesting = 0;
 
 // autocast_cpu_dtype is the lower_precision_fp used by AutocastCPU.
 thread_local at::ScalarType autocast_cpu_dtype = at::kBFloat16;
+
+at::ScalarType autocast_gpu_dtype = at::kHalf;
+
 }
 
 void clear_cache() {
@@ -73,6 +76,10 @@ int decrement_nesting() {
   return --nesting;
 }
 
+at::ScalarType get_autocast_gpu_dtype() {
+  return autocast_gpu_dtype;
+}
+
 at::ScalarType get_autocast_cpu_dtype() {
   return autocast_cpu_dtype;
 }
@@ -84,6 +91,9 @@ void set_autocast_cpu_dtype(at::ScalarType dtype) {
   autocast_cpu_dtype = dtype;
 }
 
+void set_autocast_gpu_dtype(at::ScalarType dtype) {
+  autocast_gpu_dtype = dtype;
+}
 // Overload to catch Tensor args
 // TODO (possible optimization):
 // Move cast_cache to an inline function in a header with cached_casts declared as
