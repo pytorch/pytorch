@@ -138,7 +138,7 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   // they still share the same storage. This works only because we never call
   // in-place functions on unpacked variables.
   Variable var = make_variable(data_, Edge(std::move(grad_fn), output_nr_));
-  impl::set_version_counter(var, saved_version_);
+  impl::set_version_counter(var, version_counter_);
 
   // NB: var here is never a view so there is no need to make anything special
   // for the case where the saved Tensor was a view. This whole argument relies
