@@ -455,7 +455,7 @@ jobs:
           name: deploy
           retention-days: 14
           if-no-files-found: error
-          path: pytorch.github.io/docs/master
+          path: pytorch.github.io/docs/merge
       - name: Show Docs Preview URL (Click Me)
         if: github.event_name == 'pull_request'
         env:
