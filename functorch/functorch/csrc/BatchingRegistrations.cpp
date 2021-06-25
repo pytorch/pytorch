@@ -995,30 +995,6 @@ Tensor unwrap_and_call_method(const Tensor& input, ExtraArgs... extra_args) {
   return makeBatched(output_physical, BatchDims(old_bdims.begin(), old_bdims.end()));
 }
 
-// Tensor ones_like_batching_rule(const Tensor& self, optional<MemoryFormat> memory_format) {
-//   if (!participatesInCurrentLevel(self)) {
-//     c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-//     return at::ones_like(self, memory_format);
-//   }
-//
-//   TORCH_CHECK(!memory_format.has_value() || memory_format == MemoryFormat::Preserve
-//       || memory_format == MemoryFormat::Contiguous,
-//       "NYI: Tensor.clone(memory_format) inside vmap is only supported with ",
-//       "memory_format torch.preserve_format or torch.contiguous_format (got ",
-//       *memory_format, ")");
-//
-//   if (memory_format == MemoryFormat::Contiguous) {
-//     auto physical_view = MultiBatchVmapTransform::logicalToPhysical(self);
-//     auto output_physical = at::clone(physical_view.tensor(), memory_format);
-//     return physical_view.getPhysicalToLogicalMap().apply(output_physical);
-//   }
-//
-//   TORCH_INTERNAL_ASSERT(!memory_format.has_value() || memory_format == MemoryFormat::Preserve);
-//   auto* self_batched = unsafeGetBatchedImpl(self);
-//   auto output_physical = at::clone(self_batched->value(), memory_format);
-//   auto old_bdims = self_batched->bdims();
-//   return makeBatched(output_physical, BatchDims(old_bdims.begin(), old_bdims.end()));
-// }
 
 Tensor clone_batching_rule(const Tensor& self, optional<MemoryFormat> memory_format) {
   if (!participatesInCurrentLevel(self)) {
@@ -1160,24 +1136,6 @@ Tensor new_empty_batching_rule(
 Tensor addmm_batching_rule(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
   // Decomposition that is probably not very fast...
   return at::add(self * beta, at::mm(mat1, mat2), alpha);
-}
-
-Tensor ones_like_batching_rule(
-    const Tensor& self,
-    optional<ScalarType> dtype,
-    optional<Layout> layout,
-    optional<Device> device,
-    optional<bool> pin_memory,
-    optional<MemoryFormat> memory_format) {
-  if (!participatesInCurrentLevel(self)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-    auto options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
-    return at::ones_like(self, options, memory_format);
-  }
-  auto physical_view = MultiBatchVmapTransform::logicalToPhysical(self);
-  auto options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
-  auto result = at::ones_like(physical_view.tensor(), options, memory_format);
-  return physical_view.getPhysicalToLogicalMap().apply(result);
 }
 
 Tensor new_empty_strided_batching_rule(
@@ -1376,7 +1334,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
 
   // m.impl("mean.dim", mean_int_batching_rule);
   // m.impl("sum.dim_IntList", sum_batching_rule);
-  m.impl("log_softmax.int", log_softmax_batching_rule);
+  // m.impl("log_softmax.int", log_softmax_batching_rule);
   m.impl("_log_softmax", _log_softmax_batching_rule);
   m.impl("is_complex", native::is_complex);
   m.impl("conj", native::conj);
@@ -1445,7 +1403,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("to.dtype_layout", to_dtype_layout_batching_rule);
 #undef TO_BATCHING_RULE
   m.impl("clone", clone_batching_rule);
-  // m.impl("ones_like", ones_like_batching_rule);
 
 //   m.impl("sigmoid_backward", binary_pointwise_batching_rule<TensorTensorType, at::sigmoid_backward>);
 //   m.impl(
