@@ -12,6 +12,10 @@ class SchedulerRuntimeInfo;
 
 namespace scheduler_utils {
 
+constexpr int64_t registerFileSize() {
+  return 256 * 1024;
+}
+
 // Merge all reduction to the right side and returns total number of***
 // reduction axes
 size_t mergeReduction(TensorView* tv);
@@ -107,9 +111,13 @@ void computeAtBetween(
     int pos,
     ComputeAtMode mode);
 
-bool registerPersistentBufferCheck(
+// Compute the amount of register space would be needed to perform this kernel
+// persistently, only based on buffers that must be persistent, and based on the
+// maximum of all minimum size requirement. i.e. if must be persistent, only
+// hold persistent dimension.
+int64_t persistentBufferSize(
     Fusion* fusion,
-    SchedulerRuntimeInfo& runtime_info);
+    torch::jit::fuser::cuda::ExpressionEvaluator& expr_eval);
 
 } // namespace scheduler_utils
 } // namespace cuda

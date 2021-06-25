@@ -725,7 +725,10 @@ class NormalizationScheduler : public SchedulerEntry {
       }
     }
 
-    if (!scheduler_utils::registerPersistentBufferCheck(fusion, runtime_info)) {
+    if (scheduler_utils::persistentBufferSize(
+            fusion, runtime_info.expressionEvaluator()) *
+            4 >
+        scheduler_utils::registerFileSize() * 3) {
       return false;
     }
 

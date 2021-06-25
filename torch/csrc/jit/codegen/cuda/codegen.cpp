@@ -959,14 +959,14 @@ class CudaKernelGenerator : private kir::IrVisitor {
     const auto gen_stop = genInline(node->stop());
     const auto gen_step = genInline(node->step());
 
-    if (!node->unroll()) {
-      indent() << "#pragma unroll 1\n";
-    }
     std::stringstream step_code;
     if (node->step()->isOneInt()) {
       step_code << "++" << gen_index;
     } else {
       step_code << gen_index << " += " << gen_step;
+    }
+    if (node->isUnrollable()) {
+      indent() << "#pragma unroll\n";
     }
     indent() << "for(nvfuser_index_t " << gen_index << " = " << gen_start
              << "; " << gen_index << " < " << gen_stop << "; "
@@ -1065,6 +1065,14 @@ class CudaKernelGenerator : private kir::IrVisitor {
     } else {
       indent() << "__barrier_sync(0);\n";
     }
+  }
+
+  void visit(const kir::InitMagicZero* node) {
+    indent() << "DEFINE_MAGIC_ZERO\n";
+  }
+
+  void visit(const kir::UpdateMagicZero* node) {
+    indent() << "UPDATE_MAGIC_ZERO\n";
   }
 
  private:

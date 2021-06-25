@@ -2005,14 +2005,28 @@ Index::getReferenceRootPredicates(
     }
   }
 
+  // Add magic zero to a loop pretty far inside in indexing
+  kir::IterDomain* magic_zero_loop = nullptr;
   std::unordered_map<kir::IterDomain*, kir::Val*> ref_id_to_ind_map;
   // Due to rfactor/initialization reference_domain may be bigger than loop nest
   // structure
   TORCH_INTERNAL_ASSERT(loops.size() <= reference_domain->nDims());
   for (size_t loop_i = 0; loop_i < loops.size(); loop_i++) {
-    auto ref_axis = gpu_lower->lowerValue(reference_domain->axis(loop_i))
-                        ->as<kir::IterDomain>();
-    ref_id_to_ind_map[ref_axis] = loop_to_ind_map[loops[loop_i]];
+    auto loop = loops[loop_i];
+    auto ind = loop_to_ind_map[loops[loop_i]];
+    auto ref_axis = reference_domain->axis(loop_i);
+    auto kir_ref_axis = gpu_lower->lowerValue(ref_axis)->as<kir::IterDomain>();
+
+    if (Index::protectWithMagicZero(loop, ref_axis, ind)) {
+      magic_zero_loop = kir_ref_axis;
+    }
+
+    ref_id_to_ind_map[kir_ref_axis] = loop_to_ind_map[loop];
+  }
+
+  if (ref_id_to_ind_map.count(magic_zero_loop)) {
+    ref_id_to_ind_map[magic_zero_loop] = ir_builder.addExpr(
+        ref_id_to_ind_map[magic_zero_loop], ir_builder.magicZeroVal());
   }
 
   auto consumer_tv = kir_consumer_tv->fuserTv();
@@ -2146,6 +2160,19 @@ Index::getReferenceRootPredicates(
   }
 
   return {predicates, handeled_roots};
+}
+
+bool Index::protectWithMagicZero(
+    kir::ForLoop* loop,
+    IterDomain* reference_domain,
+    kir::Val* ind) {
+  bool ref_dom_simple =
+      (reference_domain == nullptr ? true
+                                   : reference_domain->definition() != nullptr);
+  bool ind_simple =
+      (ind == nullptr ? true
+                      : ind->definition() != nullptr && !ind->isZeroInt());
+  return loop->isUnrollable() && (!ref_dom_simple || !ind_simple);
 }
 
 } // namespace cuda

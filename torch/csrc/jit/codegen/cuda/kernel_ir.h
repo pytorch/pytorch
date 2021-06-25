@@ -53,6 +53,8 @@ class BroadcastOp;
 // Statements
 class Allocate;
 class Sync;
+class InitMagicZero;
+class UpdateMagicZero;
 class ForLoop;
 class IfThenElse;
 class GridReduction;
@@ -144,6 +146,12 @@ class TORCH_CUDA_CU_API IrVisitor : public PolymorphicBase {
   virtual void visit(const Sync* node) {
     unhandled(node);
   }
+  virtual void visit(const InitMagicZero* node) {
+    unhandled(node);
+  }
+  virtual void visit(const UpdateMagicZero* node) {
+    unhandled(node);
+  }
   virtual void visit(const ForLoop* node) {
     unhandled(node);
   }
@@ -221,6 +229,12 @@ class TORCH_CUDA_CU_API MutableIrVisitor : public PolymorphicBase {
   virtual void visit(Sync* node) {
     unhandled(node);
   }
+  virtual void visit(InitMagicZero* node) {
+    unhandled(node);
+  }
+  virtual void visit(UpdateMagicZero* node) {
+    unhandled(node);
+  }
   virtual void visit(ForLoop* node) {
     unhandled(node);
   }
@@ -286,6 +300,8 @@ class TORCH_CUDA_CU_API Val : public Node {
   virtual bool isScalar() const {
     return false;
   }
+
+  bool isConstScalar() const;
 
   virtual bool isConst() const {
     return false;
@@ -1254,6 +1270,36 @@ class TORCH_CUDA_CU_API Sync final : public Expr {
   bool war_sync_ = false;
 };
 
+// Simply prints "DEFINE_MAGIC_ZERO" in the code in accordance with magic_zero
+// in helpers.cu
+class TORCH_CUDA_CU_API InitMagicZero final : public Expr {
+ public:
+  explicit InitMagicZero(Passkey passkey);
+
+  void accept(IrVisitor* visitor) const override {
+    visitor->visit(this);
+  }
+
+  void accept(MutableIrVisitor* visitor) override {
+    visitor->visit(this);
+  }
+};
+
+// Simply prints "UPDATE_MAGIC_ZERO" in the code in accordance with magic_zero
+// in helpers.cu
+class TORCH_CUDA_CU_API UpdateMagicZero final : public Expr {
+ public:
+  explicit UpdateMagicZero(Passkey passkey);
+
+  void accept(IrVisitor* visitor) const override {
+    visitor->visit(this);
+  }
+
+  void accept(MutableIrVisitor* visitor) override {
+    visitor->visit(this);
+  }
+};
+
 // TODO(kir): promote to IR node
 class TORCH_CUDA_CU_API Scope {
  public:
@@ -1392,6 +1438,15 @@ class TORCH_CUDA_CU_API ForLoop final : public Expr {
 
   bool vectorize() const {
     return vectorize_;
+  }
+
+  // Returns if a loop could be unrolled. Start and stop must be constant, it
+  // must not be a broadcast dimension, cannot be bound to a parallel dimension,
+  // and returns false if start is 0 and stop is 1.
+  bool isUnrollable() const {
+    return start()->isConstScalar() && stop()->isConstScalar() &&
+        !iter_domain()->isThread() && !iter_domain()->isBroadcast() &&
+        !(start()->isZeroInt() && stop()->isOneInt());
   }
 
  private:

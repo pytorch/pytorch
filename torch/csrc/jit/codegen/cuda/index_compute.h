@@ -258,6 +258,18 @@ class Index {
       const kir::TensorView* kir_consumer_tv,
       const std::vector<kir::ForLoop*>& loops,
       bool unswitch = false);
+
+  // Determine if we may run into over reuse of predicates or registers in the
+  // compiler. If the loop can be unrolled and the index and domain are not
+  // "simple" we likely want the loop protected.
+  //
+  // Magic zero protection should only be done for global memory and predicates.
+  // We should avoid use on registers. Shared memory does not require it, but
+  // likely wouldn't hurt.
+  static bool protectWithMagicZero(
+      kir::ForLoop* loop,
+      IterDomain* reference_domain = nullptr,
+      kir::Val* ind = nullptr);
 };
 
 } // namespace cuda

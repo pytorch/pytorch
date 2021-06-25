@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 
 namespace torch {
@@ -263,13 +264,30 @@ IndexCompute getReferenceIndexing(
   std::unordered_map<kir::IterDomain*, kir::Val*> initial_index_map;
 
   TORCH_INTERNAL_ASSERT(loop_structure.size() <= reference_tensor->nDims());
+  int magic_zero_loop = -1;
   for (size_t loop_i = 0; loop_i < loop_structure.size(); loop_i++) {
-    auto lowered_id = gpu_lower->lowerValue(reference_tensor->axis(loop_i))
-                          ->as<kir::IterDomain>();
-    initial_index_map[lowered_id] = loop_structure[loop_i]->index();
-    if (loop_structure[loop_i]->vectorize()) {
-      initial_index_map[lowered_id] = ir_builder.create<kir::Int>(0);
+    auto ref_axis = reference_tensor->axis(loop_i);
+    auto kir_ref_axis = gpu_lower->lowerValue(ref_axis)->as<kir::IterDomain>();
+    auto loop = loop_structure[loop_i];
+    auto ind = loop->index();
+    ;
+
+    initial_index_map[kir_ref_axis] = ind;
+    if (loop->vectorize()) {
+      initial_index_map[kir_ref_axis] = ir_builder.create<kir::Int>(0);
     }
+
+    if (Index::protectWithMagicZero(loop, ref_axis, ind)) {
+      magic_zero_loop = (int)loop_i;
+    }
+  }
+
+  // Add magic zero to a fairly inner most index
+  if (magic_zero_loop >= 0) {
+    auto ref_id = gpu_lower->lowerValue(reference_tensor->axis(magic_zero_loop))
+                      ->as<kir::IterDomain>();
+    initial_index_map[ref_id] = ir_builder.addExpr(
+        initial_index_map[ref_id], ir_builder.magicZeroVal());
   }
 
   // Send to the other version of reference indexing that directly takes the

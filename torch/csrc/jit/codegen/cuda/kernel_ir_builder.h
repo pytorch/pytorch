@@ -77,6 +77,8 @@ class TORCH_CUDA_CU_API IrBuilder {
   Bool* falseVal();
   Bool* trueVal();
 
+  NamedScalar* magicZeroVal();
+
  private:
   Val* newResult(DataType dtype);
   Val* newArithmeticExpr(BinaryOpType op_type, Val* lhs, Val* rhs);
@@ -90,6 +92,9 @@ class TORCH_CUDA_CU_API IrBuilder {
   Int* one_ = nullptr;
   Bool* false_ = nullptr;
   Bool* true_ = nullptr;
+
+  // Magic zero corresponds to runtime/helpers.cu magic_zero
+  NamedScalar* magic_zero_ = nullptr;
 };
 
 } // namespace kir

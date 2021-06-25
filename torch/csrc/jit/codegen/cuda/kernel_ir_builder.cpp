@@ -135,6 +135,13 @@ Bool* IrBuilder::trueVal() {
   return true_;
 }
 
+NamedScalar* IrBuilder::magicZeroVal() {
+  if (magic_zero_ == nullptr) {
+    magic_zero_ = create<kir::NamedScalar>("nvfuser_zero", DataType::Int);
+  }
+  return magic_zero_;
+}
+
 } // namespace kir
 } // namespace cuda
 } // namespace fuser

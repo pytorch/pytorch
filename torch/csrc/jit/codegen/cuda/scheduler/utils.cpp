@@ -321,11 +321,10 @@ void computeAtBetween(
   }
 }
 
-bool registerPersistentBufferCheck(
+int64_t persistentBufferSize(
     Fusion* fusion,
-    SchedulerRuntimeInfo& runtime_info) {
+    torch::jit::fuser::cuda::ExpressionEvaluator& expr_eval) {
   auto persistent_buffers = scheduler_utils::persistentBuffers(fusion);
-  bool fits_register_persistence = true;
 
   if (persistent_buffers.buffers.empty()) {
     return true;
@@ -348,7 +347,7 @@ bool registerPersistentBufferCheck(
         continue;
       }
 
-      auto id_size = runtime_info.expressionEvaluator().evaluate(id->extent());
+      auto id_size = expr_eval.evaluate(id->extent());
       TORCH_INTERNAL_ASSERT(
           id_size.has_value(),
           "Cannot generate heuristics if we don't have input information.");
@@ -399,13 +398,7 @@ bool registerPersistentBufferCheck(
         std::max(max_persistence_size, persistent_entry.second);
   }
 
-  constexpr int64_t register_file_size = 256 * 1024;
-  // Don't use more than 75% of register file for persistent buffers
-  if (max_persistence_size * 4 > register_file_size * 3) {
-    fits_register_persistence = false;
-  }
-
-  return fits_register_persistence;
+  return max_persistence_size;
 }
 
 } // namespace scheduler_utils

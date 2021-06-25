@@ -416,6 +416,14 @@ void IrPrinter::visit(const kir::Sync* node) {
            << ")\n";
 }
 
+void IrPrinter::visit(const kir::InitMagicZero* node) {
+  indent() << "DEFINE_MAGIC_ZERO\n";
+}
+
+void IrPrinter::visit(const kir::UpdateMagicZero* node) {
+  indent() << "UPDATE_MAGIC_ZERO\n";
+}
+
 std::string toString(const kir::Node* stmt, bool implicit_definitions) {
   std::stringstream ss;
   IrPrinter ir_printer(ss, implicit_definitions);

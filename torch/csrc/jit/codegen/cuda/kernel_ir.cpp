@@ -26,6 +26,63 @@ Val::Val(Passkey passkey, DataType dtype) : Node(passkey), dtype_(dtype) {
   id_ = passkey.kernel->newValueId(passkey);
 }
 
+namespace {
+
+// Traverse definition of all values involved in constructing the provided val.
+// Check if all values involved are constant values, meaning the provided
+// val is also a constant value.
+class ConstCheck : IrVisitor {
+ private:
+  bool is_const_ = true;
+
+  using IrVisitor::visit;
+
+  void visit(const Bool* b) {
+    is_const_ = is_const_ && b->isConst();
+  }
+
+  void visit(const Double* d) {
+    is_const_ = is_const_ && d->isConst();
+  }
+
+  void visit(const Int* i) {
+    is_const_ = is_const_ && i->isConst();
+  }
+
+  void visit(const NamedScalar* ns) {
+    is_const_ = is_const_ && false;
+  }
+
+  void visit(const Expr* expr) {
+    for (auto inp : expr->inputs()) {
+      visit(inp);
+    }
+  }
+
+  void visit(const Val* val) {
+    if (val->definition() != nullptr) {
+      visit(val->definition());
+    } else {
+      val->accept(this);
+    }
+  }
+
+ public:
+  static bool isConst(const Val* val) {
+    ConstCheck cc;
+    cc.visit(val);
+    return cc.is_const_;
+  }
+};
+
+} // namespace
+
+bool Val::isConstScalar() const {
+  if (!isScalar())
+    return false;
+  return ConstCheck::isConst(this);
+}
+
 Expr* Expr::parentScope() const {
   if (scope()) {
     return scope()->owner();
@@ -382,6 +439,10 @@ TensorIndex::TensorIndex(
 
 Sync::Sync(Passkey passkey, bool war_sync)
     : Expr(passkey), war_sync_(war_sync) {}
+
+InitMagicZero::InitMagicZero(Passkey passkey) : Expr(passkey) {}
+
+UpdateMagicZero::UpdateMagicZero(Passkey passkey) : Expr(passkey) {}
 
 void Scope::insert(std::vector<Expr*>::const_iterator pos, Expr* expr) {
   exprs_.insert(pos, expr);

@@ -39,9 +39,9 @@ ReductionParams innerNormalizationHeuristic(
     const int64_t num_outputs_for_reduction,
     const int64_t n_tensor_inputs,
     const int64_t max_input_dtype_size,
-    bool persistence_required) {
+    bool persistence_required,
+    const int64_t max_persistent_buffer_size) {
   // Set some targets for parallelization
-
   const int64_t n_elems = num_elems_in_reduction * num_outputs_for_reduction;
 
   // WARNING: Current device for codegen may not be the target device
@@ -122,6 +122,14 @@ ReductionParams innerNormalizationHeuristic(
         ceilDiv(device_max_threads_per_multiprocessor, (int64_t)4));
   }
 
+  // Compute maximum number of reductions we could do in the same kernel based
+  // on persistent buffer size
+  const int64_t max_multi_reduction_factor = std::max(
+      (persistence_required ? (scheduler_utils::registerFileSize() * 3) /
+               (max_persistent_buffer_size * 4)
+                            : std::numeric_limits<int64_t>::max()),
+      (int64_t)1);
+
   // To get to target threads:
   // Prioritize
   // (1) x dim in reduction
@@ -149,7 +157,9 @@ ReductionParams innerNormalizationHeuristic(
   // Grab what we can out of reduction domain, but don't go over a warp size yet
   bdimx = std::min(num_elems_in_reduction, (int64_t)warp_size);
   // Put everything else in bdimy for now
-  bdimy = std::max(max_threads_in_block / bdimx, (int64_t)1);
+  bdimy = std::min(
+      std::max(max_threads_in_block / bdimx, (int64_t)1),
+      max_multi_reduction_factor);
 
   int64_t remainder_in_reduction = ceilDiv(num_elems_in_reduction, bdimx);
   int64_t remainder_in_output = ceilDiv(num_outputs_for_reduction, bdimy);
@@ -169,7 +179,9 @@ ReductionParams innerNormalizationHeuristic(
         max_threads_in_block);
 
     // Don't exceed target.
-    bdimy = std::max(max_threads_in_block / bdimx, (int64_t)1);
+    bdimy = std::min(
+        std::max(max_threads_in_block / bdimx, (int64_t)1),
+        max_multi_reduction_factor);
     remainder_in_output = ceilDiv(num_outputs_for_reduction, bdimy);
 
     remainder_in_reduction = ceilDiv(num_elems_in_reduction, bdimx);
@@ -255,7 +267,8 @@ ReductionParams OuterNormalizationHeuristic(
     const int64_t num_outputs_for_reduction,
     const int64_t n_tensor_inputs,
     const int64_t max_input_dtype_size,
-    bool persistence_required) {
+    bool persistence_required,
+    const int64_t max_persistent_buffer_size) {
   // Set some targets for parallelization
 
   const int64_t n_elems = num_elems_in_reduction * num_outputs_for_reduction;
@@ -305,6 +318,15 @@ ReductionParams OuterNormalizationHeuristic(
         ceilDiv(device_max_threads_per_multiprocessor, (int64_t)4));
   }
 
+  // Compute maximum number of reductions we could do in the same kernel based
+  // on persistent buffer size
+
+  const int64_t max_multi_reduction_factor = std::max(
+      (persistence_required ? (scheduler_utils::registerFileSize() * 3) /
+               (max_persistent_buffer_size * 4)
+                            : std::numeric_limits<int64_t>::max()),
+      (int64_t)1);
+
   // To get to target threads:
   // Prioritize
   // (1) x dim in iter domain
@@ -344,7 +366,7 @@ ReductionParams OuterNormalizationHeuristic(
     const int64_t cache_sector_bytes = 32;
     int64_t min_outputs_per_block =
         std::max(cache_sector_bytes / max_input_dtype_size, (int64_t)1);
-    bdimx =
+    bdimx = std::min(
         std::min(
             std::max(
                 ceilDiv(
@@ -352,12 +374,13 @@ ReductionParams OuterNormalizationHeuristic(
                     min_outputs_per_block,
                 (int64_t)1),
             (int64_t)1) *
-        min_outputs_per_block;
+            min_outputs_per_block,
+        max_multi_reduction_factor);
   } else {
     bdimx = std::min(
         max_threads_in_block,
         ceilDiv(num_outputs_for_reduction, target_blocks));
-    bdimx = std::max(bdimx, warp_size);
+    bdimx = std::min(std::max(bdimx, warp_size), max_multi_reduction_factor);
   }
 
   bdimy = std::min(
@@ -372,7 +395,7 @@ ReductionParams OuterNormalizationHeuristic(
       device_multiprocessor_count * max_threads_in_block) {
     // If we easily saturate the GPU, don't use block dim y and unroll output
     // dimension, this could be a more gentle transition starting earlier
-    bdimx = max_threads_in_block;
+    bdimx = std::min(max_threads_in_block, max_multi_reduction_factor);
     remainder_in_output = ceilDiv(num_outputs_for_reduction, bdimx);
 
     bdimy = 1;
@@ -473,21 +496,24 @@ ReductionParams NormalizationHeuristic(
     bool fastest_dim_reduction,
     size_t n_tensor_inputs,
     size_t max_input_dtype_size,
-    bool persistence_required) {
+    bool persistence_required,
+    const int64_t max_persistent_buffer_size) {
   if (fastest_dim_reduction) {
     return innerNormalizationHeuristic(
         num_elems_in_reduction,
         num_outputs_for_reduction,
         n_tensor_inputs,
         max_input_dtype_size,
-        persistence_required);
+        persistence_required,
+        max_persistent_buffer_size);
   } else {
     return OuterNormalizationHeuristic(
         num_elems_in_reduction,
         num_outputs_for_reduction,
         n_tensor_inputs,
         max_input_dtype_size,
-        persistence_required);
+        persistence_required,
+        max_persistent_buffer_size);
   }
 }
 
@@ -543,13 +569,17 @@ TORCH_CUDA_CU_API c10::optional<ReductionParams> getNormalizationHeuristics(
   auto properties =
       scheduler_utils::getProperties(fusion, evaluator, first_red_tv);
 
+  auto max_persistent_size =
+      scheduler_utils::persistentBufferSize(fusion, evaluator);
+
   return NormalizationHeuristic(
       properties.reduction_numel,
       properties.iteration_numel,
       properties.fastest_dim_reduction,
       n_tensor_inputs,
       max_dtype_size,
-      requires_persistence);
+      requires_persistence,
+      max_persistent_size);
 }
 
 TORCH_CUDA_CU_API c10::optional<ReductionParams> getNormalizationHeuristics(

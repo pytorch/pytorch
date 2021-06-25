@@ -79,6 +79,8 @@ class TORCH_CUDA_CU_API IrPrinter : private kir::IrVisitor {
   void visit(const kir::IfThenElse*) final;
   void visit(const kir::Allocate*) final;
   void visit(const kir::Sync*) final;
+  void visit(const kir::InitMagicZero*) final;
+  void visit(const kir::UpdateMagicZero*) final;
 
  private:
   std::ostream& os_;
