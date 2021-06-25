@@ -244,7 +244,7 @@ def _store_based_barrier(rank, store, timeout):
                 )
             )
 
-    logger.info(f"Rank {rank}: Completed store-based barrier for {world_size} nodes.")
+    logger.info(f"Rank {rank}: Completed store-based barrier for key:{store_key} with {world_size} nodes.")
 
 
 def _rank_not_in_group(group: ProcessGroup):
@@ -1591,7 +1591,7 @@ def all_gather_object(object_list, obj, group=None):
     all_gather(output_tensors, input_tensor, group=group)
     # Deserialize outputs back to object.
     for i, tensor in enumerate(output_tensors):
-        tensor = tensor.type(torch.uint8)  # type:ignore[call-overload]
+        tensor = tensor.type(torch.uint8)
         if tensor.device != torch.device("cpu"):
             tensor = tensor.cpu()
         tensor_size = object_size_list[i]
@@ -1695,7 +1695,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
     if my_rank != dst:
         return
     for i, tensor in enumerate(output_tensors):
-        tensor = tensor.type(torch.uint8)  # type: ignore[call-overload]
+        tensor = tensor.type(torch.uint8)
         tensor_size = object_size_list[i]
         object_gather_list[i] = _tensor_to_object(tensor, tensor_size)
 
@@ -1790,7 +1790,7 @@ def broadcast_object_list(object_list, src=0, group=None):
     if my_rank != src:
         for i, obj_size in enumerate(object_sizes_tensor):
             obj_view = object_tensor[offset : offset + obj_size]
-            obj_view = obj_view.type(torch.uint8)  # type: ignore[call-overload]
+            obj_view = obj_view.type(torch.uint8)
             if obj_view.device != torch.device("cpu"):
                 obj_view = obj_view.cpu()
             offset += obj_size
