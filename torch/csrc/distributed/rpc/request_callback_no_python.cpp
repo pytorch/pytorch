@@ -111,7 +111,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processMessage(
           c10::intrusive_ptr<Message> message =
               future.value().toCustomClass<Message>();
           message->setId(id);
-          return withDataPtrs(message);
+          return withStorages(message);
         },
         c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 
@@ -146,7 +146,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processScriptCall(
 
   return future->then(
       [](JitFuture& future) {
-        return withDataPtrs(ScriptResp(future.value()).toMessage());
+        return withStorages(ScriptResp(future.value()).toMessage());
       },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }
@@ -196,7 +196,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::assignOwnerRRef(
         } else {
           ownerRRef->setValue(future.value());
         }
-        return withDataPtrs(RemoteRet(rrefId, forkId).toMessage());
+        return withStorages(RemoteRet(rrefId, forkId).toMessage());
       },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }
@@ -242,7 +242,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
 
   return future->then(
       [](JitFuture& future) {
-        return withDataPtrs(ScriptRRefFetchRet({future.value()}).toMessage());
+        return withStorages(ScriptRRefFetchRet({future.value()}).toMessage());
       },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
 }
@@ -345,7 +345,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
               fromWorkerId,
               wrappedRpcResponseFuture.value().toCustomClass<Message>(),
               MessageType::FORWARD_AUTOGRAD_RESP);
-          return withDataPtrs(std::move(msg));
+          return withStorages(std::move(msg));
         }
       },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
@@ -382,7 +382,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
         if (execFuture.hasError()) {
           std::rethrow_exception(execFuture.exception_ptr());
         } else {
-          return withDataPtrs(PropagateGradientsResp().toMessage());
+          return withStorages(PropagateGradientsResp().toMessage());
         }
       },
       c10::getCustomClassType<c10::intrusive_ptr<Message>>());
@@ -472,7 +472,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
                 wrappedRpcResponseFuture.value().toCustomClass<Message>(),
                 profiledEvents,
                 profilingKeyId);
-            return withDataPtrs(std::move(*rpcWithProfilingResp).toMessage());
+            return withStorages(std::move(*rpcWithProfilingResp).toMessage());
           }
         }),
         c10::getCustomClassType<c10::intrusive_ptr<Message>>());
@@ -605,9 +605,8 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::asFuture(
   auto future = c10::make_intrusive<JitFuture>(
       at::getCustomClassType<c10::intrusive_ptr<Message>>(),
       RpcAgent::getCurrentRpcAgent()->getDevices());
-  std::vector<std::reference_wrapper<const at::DataPtr>> dataPtrs =
-      message->getDataPtrs();
-  future->markCompleted(std::move(message), std::move(dataPtrs));
+  std::vector<c10::Storage> storages = message->getStorages();
+  future->markCompleted(std::move(message), std::move(storages));
   return future;
 }
 

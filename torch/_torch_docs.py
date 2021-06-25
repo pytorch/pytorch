@@ -4642,7 +4642,7 @@ Multiplies :attr:`input` by 2**:attr:`other`.
 
 Typically this function is used to construct floating point numbers by multiplying
 mantissas in :attr:`input` with integral powers of two created from the exponents
-in :attr:'other'.
+in :attr:`other`.
 
 Args:
     {input}
@@ -5207,7 +5207,7 @@ remaining :math:`m - n` rows of that column.
     last `m - n` columns in the case `m > n`. In :func:`torch.linalg.lstsq`, the residuals
     are in the field 'residuals' of the returned named tuple.
 
-    Unpacking the solution as``X = torch.lstsq(B, A).solution[:A.size(1)]`` should be replaced with
+    Unpacking the solution as ``X = torch.lstsq(B, A).solution[:A.size(1)]`` should be replaced with
 
     .. code:: python
 
@@ -5636,10 +5636,7 @@ dimension(s) :attr:`dim`.
           while ``max(dim)``/``min(dim)`` propagates gradient only to a single
           index in the source tensor.
 
-If :attr:`keepdim is ``True``, the output tensors are of the same size
-as :attr:`input` except in the dimension(s) :attr:`dim` where they are of size 1.
-Otherwise, :attr:`dim`s are squeezed (see :func:`torch.squeeze`), resulting
-in the output tensors having fewer dimension than :attr:`input`.
+{keepdim_details}
 
 Args:
     {input}
@@ -6097,10 +6094,7 @@ dimension(s) :attr:`dim`.
           while ``max(dim)``/``min(dim)`` propagates gradient only to a single
           index in the source tensor.
 
-If :attr:`keepdim` is ``True``, the output tensors are of the same size as
-:attr:`input` except in the dimension(s) :attr:`dim` where they are of size 1.
-Otherwise, :attr:`dim`s are squeezed (see :func:`torch.squeeze`), resulting in
-the output tensors having fewer dimensions than :attr:`input`.
+{keepdim_details}
 
 Args:
     {input}
@@ -6642,7 +6636,7 @@ add_docstr(torch.narrow,
 narrow(input, dim, start, length) -> Tensor
 
 Returns a new tensor that is a narrowed version of :attr:`input` tensor. The
-dimension :attr:`dim` is input from :attr:`start` to :attr:`start + length`. The
+dimension :attr:`dim` is input from :attr:`start` to ``start + length``. The
 returned tensor and :attr:`input` tensor share the same underlying storage.
 
 Args:
@@ -6669,7 +6663,7 @@ nan_to_num(input, nan=0.0, posinf=None, neginf=None, *, out=None) -> Tensor
 
 Replaces :literal:`NaN`, positive infinity, and negative infinity values in :attr:`input`
 with the values specified by :attr:`nan`, :attr:`posinf`, and :attr:`neginf`, respectively.
-By default, :literal:`NaN`s are replaced with zero, positive infinity is replaced with the
+By default, :literal:`NaN`\ s are replaced with zero, positive infinity is replaced with the
 greatest finite value representable by :attr:`input`'s dtype, and negative infinity
 is replaced with the least finite value representable by :attr:`input`'s dtype.
 
@@ -6802,7 +6796,7 @@ nonzero(input, *, out=None, as_tuple=False) -> LongTensor or tuple of LongTensor
     When :attr:`input` is on CUDA, :func:`torch.nonzero() <torch.nonzero>` causes
     host-device synchronization.
 
-**When** :attr:`as_tuple` **is ``False`` (default)**:
+**When** :attr:`as_tuple` **is** ``False`` **(default)**:
 
 Returns a tensor containing the indices of all non-zero elements of
 :attr:`input`.  Each row in the result contains the indices of a non-zero
@@ -6813,7 +6807,7 @@ If :attr:`input` has :math:`n` dimensions, then the resulting indices tensor
 :attr:`out` is of size :math:`(z \times n)`, where :math:`z` is the total number of
 non-zero elements in the :attr:`input` tensor.
 
-**When** :attr:`as_tuple` **is ``True``**:
+**When** :attr:`as_tuple` **is** ``True``:
 
 Returns a tuple of 1-D tensors, one for each dimension in :attr:`input`,
 each containing the indices (in that dimension) of all non-zero elements of
@@ -10170,9 +10164,9 @@ The operation is defined as:
 
 Arguments:
     condition (BoolTensor): When True (nonzero), yield x, otherwise yield y
-    x (Tensor or Scalar): value (if :attr:x is a scalar) or values selected at indices
+    x (Tensor or Scalar): value (if :attr:`x` is a scalar) or values selected at indices
                           where :attr:`condition` is ``True``
-    y (Tensor or Scalar): value (if :attr:x is a scalar) or values selected at indices
+    y (Tensor or Scalar): value (if :attr:`y` is a scalar) or values selected at indices
                           where :attr:`condition` is ``False``
 
 Returns:
