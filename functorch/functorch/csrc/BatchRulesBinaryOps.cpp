@@ -142,6 +142,8 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("threshold_backward", SINGLE_ARG(
         binary_pointwise_batch_rule<decltype(&at::threshold_backward), &at::threshold_backward, const Scalar&>));
 
+  VMAP_SUPPORT("atan2", SINGLE_ARG(binary_pointwise_batch_rule<TensorTensorType, &at::atan2>));
+
   // at::pow has three out-of-place overloads
   VMAP_SUPPORT("pow.Tensor_Tensor", SINGLE_ARG(binary_pointwise_batch_rule<TensorTensorType, &at::pow>));
   VMAP_SUPPORT("pow.Tensor_Scalar", SINGLE_ARG(basic_unary_batch_rule<TensorScalarType, &at::pow, const Scalar&>));
