@@ -2,8 +2,10 @@
 
 import logging
 
+import torch
 from torch import nn
 from torch.ao.sparsity import BaseSparsifier, WeightNormSparsifier
+from torch.nn.utils.parametrize import is_parametrized
 
 from torch.testing._internal.common_utils import TestCase
 
@@ -27,8 +29,8 @@ class ImplementedSparsifier(BaseSparsifier):
     def __init__(self, **kwargs):
         super().__init__(defaults=kwargs)
 
-    def update_mask(self):
-        pass
+    def update_mask(self, layer, **kwargs):
+        layer.mask[0] = 0
 
 
 class TestBaseSparsifier(TestCase):
@@ -50,6 +52,14 @@ class TestBaseSparsifier(TestCase):
         assert 'test' in sparsifier.module_groups[0]
         assert sparsifier.module_groups[0]['test'] == 3
 
+    def test_step(self):
+        model = Model()
+        sparsifier = ImplementedSparsifier(test=3)
+        sparsifier.enable_mask_update = True
+        sparsifier.prepare(model, [model.linear])
+        sparsifier.step()
+        assert torch.all(model.linear.mask[0] == 0)
+
     def test_state_dict(self):
         model = Model()
         sparsifier0 = ImplementedSparsifier(test=3)
@@ -60,6 +70,21 @@ class TestBaseSparsifier(TestCase):
         assert sparsifier0.module_groups != sparsifier1.module_groups
         sparsifier1.load_state_dict(state_dict)
         assert sparsifier0.module_groups == sparsifier1.module_groups
+
+    def test_mask_squash(self):
+        model = Model()
+        sparsifier = ImplementedSparsifier(test=3)
+        sparsifier.prepare(model, [model.linear])
+        assert hasattr(model.linear, 'mask')
+        assert is_parametrized(model.linear, 'weight')
+        assert not hasattr(model.seq[0], 'mask')
+        assert not is_parametrized(model.seq[0], 'weight')
+
+        sparsifier.squash_mask()
+        assert not hasattr(model.seq[0], 'mask')
+        assert not is_parametrized(model.seq[0], 'weight')
+        assert not hasattr(model.linear, 'mask')
+        assert not is_parametrized(model.linear, 'weight')
 
 
 class TestWeightNormSparsifier(TestCase):
