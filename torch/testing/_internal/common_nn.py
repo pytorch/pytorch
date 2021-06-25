@@ -3236,6 +3236,13 @@ new_module_tests = [
         desc='tuple_none',
     ),
     dict(
+        module_name='AdaptiveAvgPool3d',
+        constructor_args=((3, 2, 2),),
+        cpp_constructor_args='torch::nn::AdaptiveAvgPool3dOptions({3, 2, 2})',
+        input_fn=lambda: torch.rand(1, 1, 3, 2, 6),
+        desc='last_dim',
+    ),
+    dict(
         module_name='SELU',
         input_size=(3, 2, 5),
         check_inplace=True
