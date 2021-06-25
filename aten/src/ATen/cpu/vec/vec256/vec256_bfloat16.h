@@ -5,6 +5,7 @@
 
 #include <ATen/cpu/vec/vec256/intrinsics.h>
 #include <ATen/cpu/vec/vec256/vec256_base.h>
+#include <ATen/cpu/vec/vec256/vec256_float.h>
 #if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 #include <sleef.h>
 #endif
