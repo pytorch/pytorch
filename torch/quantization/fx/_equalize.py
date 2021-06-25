@@ -389,7 +389,7 @@ def scale_weight_functional(
     weight_quant_obs_node = weight_eq_obs_node.args[0]
     if weight_quant_obs_node is None:
         return
-    assert(isinstance(weight_quant_obs_node, Node) and 
+    assert(isinstance(weight_quant_obs_node, Node) and
            isinstance(modules[str(weight_quant_obs_node.target)], ObserverBase))
 
     weight_node = weight_quant_obs_node.args[0]
