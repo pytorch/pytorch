@@ -24,8 +24,7 @@ inline scalar_t* optional_data(const Tensor& source) {
   return source.defined() ? source.data_ptr<scalar_t>() : nullptr;
 }
 
-
-template <typename scalar_t>
+template <typename scalar_t, typename target_t>
 static void nll_loss_out_frame(
     Tensor& output,
     Tensor& total_weight,
@@ -48,7 +47,7 @@ static void nll_loss_out_frame(
     output.resize_({batch_size});
 
     auto input_acc = input.accessor<scalar_t, 2>();
-    auto target_acc = target.accessor<int64_t, 1>();
+    auto target_acc = target.accessor<target_t, 1>();
     auto output_acc = output.accessor<scalar_t, 1>();
 
     at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
@@ -82,7 +81,7 @@ static void nll_loss_out_frame(
   auto target_contiguous = target.contiguous();
 
   const scalar_t* input_data = input_contiguous.data_ptr<scalar_t>();
-  const int64_t* target_data = target_contiguous.data_ptr<int64_t>();
+  const target_t* target_data = target_contiguous.data_ptr<target_t>();
 
   const int64_t ndim = input.dim();
   TORCH_CHECK(ndim <= 2);
@@ -182,7 +181,7 @@ void nll_loss_forward_out_cpu_template(
   const auto n_classes = input.size(-1);
 
   TORCH_CHECK(
-      !weight.defined() || weight.numel() == n_classes,
+      !weight.defined() || (weight.dim() == 1 && weight.numel() == n_classes),
       "weight tensor should be defined either for all ",
       n_classes,
       " classes or no classes"
@@ -193,18 +192,30 @@ void nll_loss_forward_out_cpu_template(
 
   AT_DISPATCH_FLOATING_TYPES_AND(
       ScalarType::BFloat16, input.scalar_type(), "nll_loss_out_frame", [&] {
-        nll_loss_out_frame<scalar_t>(
-            output,
-            total_weight,
-            input,
-            target,
-            weight,
-            reduction,
-            ignore_index);
+        if (target.scalar_type() == kByte) {
+          nll_loss_out_frame<scalar_t, uint8_t>(
+              output,
+              total_weight,
+              input,
+              target,
+              weight,
+              reduction,
+              ignore_index);
+        } else {
+          // assumed to be int64
+          nll_loss_out_frame<scalar_t, int64_t>(
+              output,
+              total_weight,
+              input,
+              target,
+              weight,
+              reduction,
+              ignore_index);
+        }
       });
 }
 
-template <typename scalar_t>
+template <typename scalar_t, typename target_t>
 static void nll_loss_backward_out_frame(
     Tensor& grad_input,
     const Tensor& grad_output,
@@ -217,7 +228,7 @@ static void nll_loss_backward_out_frame(
   const auto n_dims = input.dim();
   const auto n_classes = input.size(-1);
 
-  auto target_acc = target.accessor<int64_t, 1>();
+  auto target_acc = target.accessor<target_t, 1>();
 
   auto weight_contiguous = optional_contiguous(weight);
   const scalar_t* weight_data = optional_data<scalar_t>(weight_contiguous);
@@ -339,15 +350,28 @@ void nll_loss_backward_out_cpu_template(
       input.scalar_type(),
       "nll_loss_backward_out_frame",
       [&] {
-        nll_loss_backward_out_frame<scalar_t>(
-            grad_input,
-            grad_output,
-            input,
-            target,
-            weight,
-            reduction,
-            ignore_index,
-            total_weight);
+        if (target.scalar_type() == kByte) {
+          nll_loss_backward_out_frame<scalar_t, uint8_t>(
+              grad_input,
+              grad_output,
+              input,
+              target,
+              weight,
+              reduction,
+              ignore_index,
+              total_weight);
+        } else {
+          // assumed to be uint64
+          nll_loss_backward_out_frame<scalar_t, int64_t>(
+              grad_input,
+              grad_output,
+              input,
+              target,
+              weight,
+              reduction,
+              ignore_index,
+              total_weight);
+        }
       });
 }
 

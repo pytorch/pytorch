@@ -145,14 +145,14 @@ jobs:
             sh -c 'sudo chown -R jenkins . && .jenkins/pytorch/build.sh'
       - name: Display and upload binary build size statistics (Click Me)
         # temporary hack: set CIRCLE_* vars, until we update
-        # tools/print_test_stats.py to natively support GitHub Actions
+        # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
           CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
           CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
-          CIRCLE_WORKFLOW_ID: ${{ github.run_id }} # dunno if this corresponds
+          CIRCLE_WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         run: |
           export PYTHONPATH=$PWD
           COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
@@ -306,6 +306,12 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Zip test reports for upload
+        if: always()
+        run: |
+          # Remove any previous test reports if they exist
+          rm -f test-reports-*.zip
+          zip -r "test-reports-${TEST_CONFIG}.zip" test -i '*.xml'
       - uses: actions/upload-artifact@v2
         name: Store PyTorch Test Reports
         if: always()
@@ -314,7 +320,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            test/**/*.xml
+            test-reports-*.zip
       - name: Clean up docker images
         if: always()
         run: |
@@ -337,13 +343,17 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
-          # deep clone, to allow tools/print_test_stats.py to use Git commands
+          # deep clone, to allow tools/stats/print_test_stats.py to use Git commands
           fetch-depth: 0
       - uses: actions/download-artifact@v2
         name: Download PyTorch Test Reports
         with:
           name: test-reports
-          path: test/test-reports
+          path: .
+      - name: Unzip test reports
+        run: |
+          # Should preserve paths so reports should still be in test/test-reports
+          unzip -o 'test-reports-*.zip'
       - uses: actions/setup-python@v2
         with:
           python-version: 3.9
@@ -360,20 +370,20 @@ jobs:
         run: .github/scripts/parse_ref.py
       - name: Display and upload test statistics (Click Me)
         # temporary hack: set CIRCLE_* vars, until we update
-        # tools/print_test_stats.py to natively support GitHub Actions
+        # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_SECRET_ACCESS_KEY }}
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          CIRCLE_JOB: !{{ build_environment }}
+          JOB_BASE_NAME: !{{ build_environment }}-test
           CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
           CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
-          CIRCLE_WORKFLOW_ID: ${{ github.run_id }} # dunno if this corresponds
+          CIRCLE_WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         run: |
           export PYTHONPATH=$PWD
-          python tools/print_test_stats.py --upload-to-s3 --compare-with-s3 test
+          python tools/stats/print_test_stats.py --upload-to-s3 --compare-with-s3 test
   {%- if enable_doc_jobs %}
 
   pytorch_python_doc_build:
