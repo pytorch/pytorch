@@ -2,15 +2,18 @@ import pathlib
 import argparse
 import os
 import yaml
-from collections import namedtuple
+import re
+from collections import namedtuple, Counter, defaultdict
 from typing import List, Dict, Union, Sequence, Optional
 from tools.codegen.gen import FileManager, get_grouped_native_functions, parse_native_yaml
 from tools.codegen.model import (BackendIndex, BackendMetadata, DispatchKey,
                                  NativeFunction, NativeFunctionsGroup, OperatorName)
 from tools.codegen.selective_build.selector import SelectiveBuilder
 from tools.codegen.utils import Target, concatMap, context, YamlLoader
+from tools.codegen.context import native_function_manager
 import tools.codegen.dest as dest
 import tools.codegen.api.dispatcher as dispatcher
+from tools.codegen.api.types import DispatcherSignature
 
 
 # Parses the external backend's yaml, and adds a new BackendIndex for the backend's dispatch key.
@@ -112,6 +115,79 @@ autograd key. They cannot be mix and matched. If this is something you need, fee
 
     return ParsedExternalYaml(backend_key, autograd_key, cpp_namespace, backend_indices)
 
+def error_on_missing_kernels(
+        native_functions: Sequence[NativeFunction],
+        backend_indices: Dict[DispatchKey, BackendIndex],
+        backend_key: DispatchKey,
+        autograd_key: DispatchKey,
+        kernel_defn_file_path: str,
+) -> None:
+    try:
+        with open(kernel_defn_file_path, 'r') as f:
+            backend_defns = f.read()
+    except IOError:
+        raise AssertionError(f'Unable to read from the specified impl_path file: {kernel_defn_file_path}')
+
+    class_name: Optional[str] = backend_indices[backend_key].native_function_class_name()
+    assert class_name is not None
+
+    expected_backend_op_names: List[OperatorName] = \
+        list(backend_indices[backend_key].index.keys()) + list(backend_indices[autograd_key].index.keys())
+    expected_backend_native_funcs: List[NativeFunction] = [f for f in native_functions if f.func.name in expected_backend_op_names]
+    expected_backend_kernel_name_counts: Dict[str, List[NativeFunction]] = defaultdict(list)
+    for native_f in expected_backend_native_funcs:
+        expected_backend_kernel_name_counts[dispatcher.name(native_f.func)].append(native_f)
+
+    kernel_defn_regex = rf'{class_name}::([\w\d]*)\([^\)]*\)\s*{{'
+    actual_backend_kernel_name_counts = Counter(re.findall(kernel_defn_regex, backend_defns))
+
+    missing_kernels_count = 0
+    for expected_name, funcs in expected_backend_kernel_name_counts.items():
+        expected_overload_count = len(funcs)
+        actual_overload_count = actual_backend_kernel_name_counts[expected_name]
+        if expected_overload_count != actual_overload_count:
+            def create_decl(f: NativeFunction) -> str:
+                with native_function_manager(f):
+                    return DispatcherSignature.from_schema(f.func).decl()
+            expected_schemas_str = '\n'.join([create_decl(f) for f in funcs])
+            print(f"""
+{class_name} is missing a kernel definition for {expected_name}. We found {actual_overload_count} kernel(s) with that name,
+but expected {expected_overload_count} kernel(s). The expected function schemas for the missing operator are:
+{expected_schemas_str}
+""")
+            missing_kernels_count += 1
+    assert missing_kernels_count == 0, "Found at least one missing kernel override. Check error messages above."
+
+    # Idea: If we strip out all whitespace from the kernel signatures + the the file where kernel definitions are defined,
+    # then we can directly match the file against each signature
+    # This makes regex-ing easier to deal with since clang-format usually spreads the kernel signature over multiple lines.
+    # (And we don't want the codegen to throw an error at you because you have extra whitespace).
+    # backend_defns_no_ws_str: str = ''.join(backend_defns.split())
+
+    # class_name: Optional[str] = backend_indices[backend_key].native_function_class_name()
+    # assert class_name is not None
+
+    # kernel_defn_regex = rf'{class_name}::[\w\d]*\([^{{]*\)'
+    # backend_defns_no_ws = re.findall(kernel_defn_regex, backend_defns_no_ws_str)
+
+    # def create_sig(f: NativeFunction) -> str:
+        # with native_function_manager(f):
+            # prefix = f'{class_name}::'
+            # sig_str = DispatcherSignature.from_schema(f.func, prefix=prefix).decl()
+            # # Trying to regex match the return value before the class name felt too fragile,
+            # # so instead I remove it from the NativeFunction decl.
+            # return prefix + sig_str.split(prefix, 1)[1]
+    # backend_sigs: List[str] = [create_sig(f) for f in backend_native_funcs]
+    # backend_sigs_no_ws: Dict[str, str] = {''.join(sig.split()): sig for sig in backend_sigs}
+
+    # missing_kernels_count = 0
+    # for sig in backend_sigs_no_ws.keys():
+        # if sig not in backend_defns_no_ws:
+            # import pdb; pdb.set_trace()
+            # print(f'{class_name} is missing a function override. Expecting a kernel with signature {backend_sigs_no_ws[sig]}')
+            # missing_kernels_count += 1
+    # assert missing_kernels_count == 0, "Found at least one missing kernel override. Check error messages above."
+
 def main() -> None:
     parser = argparse.ArgumentParser(description='Generate backend stub files')
     parser.add_argument(
@@ -122,11 +198,13 @@ def main() -> None:
         '-o', '--output_dir', help='output directory')
     parser.add_argument(
         '--dry_run', type=bool, default=False, help='output directory')
+    parser.add_argument(
+        '--impl_path', type=str, default=None, help='path to the source C++ file containing kernel definitions')
     options = parser.parse_args()
 
-    run(options.source_yaml, options.output_dir, options.dry_run)
+    run(options.source_yaml, options.output_dir, options.dry_run, options.impl_path)
 
-def run(source_yaml: str, output_dir: str, dry_run: bool) -> None:
+def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[str]) -> None:
 
     # Assumes that this file lives at PYTORCH_ROOT/tools/codegen/gen_backend_stubs.py
     pytorch_root = pathlib.Path(__file__).parent.parent.parent.absolute()
@@ -155,6 +233,10 @@ def run(source_yaml: str, output_dir: str, dry_run: bool) -> None:
         backend_dispatch_key: DispatchKey = backend_key
         autograd_dispatch_key: DispatchKey = autograd_key
         class_name = backend_indices[backend_dispatch_key].native_function_class_name()
+
+        if impl_path is not None:
+            error_on_missing_kernels(native_functions, backend_indices, backend_key, autograd_key, impl_path)
+
         assert class_name is not None
         generated_comment = 'Autogenerated file by gen_backend_stubs.py. Do not edit directly!'
         fm.write_with_template(f'{backend_dispatch_key}NativeFunctions.h', 'DispatchKeyNativeFunctions.h', lambda: {
