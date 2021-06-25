@@ -412,7 +412,7 @@ jobs:
         run: |
           mkdir site
           echo hi > site/index.html
-      - uses: driazati/upload-artifact-s3@6df6e653e294f8da10d7630280444620705ab9ea
+      - uses: driazati/upload-artifact-s3@36d989e53d5e14ff461b02968040e61d6be7b044
         name: Store PyTorch Build Artifacts on S3
         with:
           name: deploy
