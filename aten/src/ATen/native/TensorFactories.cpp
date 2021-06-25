@@ -2,6 +2,7 @@
 #include <ATen/CPUGeneratorImpl.h>
 #include <ATen/Utils.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Parallel.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/TracerMode.h>
 #include <c10/core/ScalarType.h>
