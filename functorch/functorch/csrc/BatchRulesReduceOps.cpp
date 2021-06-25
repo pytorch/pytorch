@@ -249,7 +249,6 @@ _log_softmax_backward_data(
   TORCH_INTERNAL_ASSERT(false);
 }
 
-
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("amax", SINGLE_ARG(reduction_dimarray_batch_rule<decltype(&at::amax), &at::amax, bool>));
   VMAP_SUPPORT("amin", SINGLE_ARG(reduction_dimarray_batch_rule<decltype(&at::amin), &at::amin, bool>));
@@ -266,6 +265,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("mean.dim", mean_dim_batch_rule);
   VMAP_SUPPORT("min", SINGLE_ARG(reduction_no_dim_batch_rule<decltype(&ATEN_FN(min)), &at::min, decltype(&min_dim_batch_rule), &min_dim_batch_rule>));
   VMAP_SUPPORT("min.dim", min_dim_batch_rule);
+  VMAP_SUPPORT("mode", SINGLE_ARG(reduction_dim_ret_pair_batch_rule<decltype(&ATEN_FN(mode)), &at::mode, bool>));
   VMAP_SUPPORT("prod", SINGLE_ARG(reduction_no_dim_batch_rule<decltype(&ATEN_FN(prod)), &at::prod, decltype(&prod_dim_batch_rule), &prod_dim_batch_rule, optional<ScalarType>>));
   VMAP_SUPPORT("prod.dim_int", prod_dim_batch_rule);
   VMAP_SUPPORT("std", std_batch_rule);
