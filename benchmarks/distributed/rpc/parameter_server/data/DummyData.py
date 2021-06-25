@@ -1,6 +1,7 @@
 import random
 
 import numpy as np
+
 import torch
 from torch.utils.data import Dataset
 
@@ -14,6 +15,15 @@ class DummyData(Dataset):
         input_dim: int,
         sparsity_percentage: int
     ):
+        r"""
+        A data class that generates random data.
+        Args:
+            max_val (int): the maximum value for an element
+            input_samples (int): count of training samples
+            input_dim (int): number of elements in a sample
+            sparsity_percentage (int): the percentage of
+                embeddings used by the input data in each iteration
+        """
         self.max_val = max_val
         self.input_samples = input_samples
         self.input_dim = input_dim
@@ -37,7 +47,7 @@ class DummyData(Dataset):
         self.input = generate_input()
         self.target = torch.randint(0, max_val, [input_samples])
         self.start = 0
-        self.end = max_val
+        self.end = input_samples
 
     def __len__(self):
         return len(self.input)

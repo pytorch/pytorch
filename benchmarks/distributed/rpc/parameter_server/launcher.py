@@ -1,8 +1,20 @@
 import argparse
-import copy
 import json
 import os
 from pathlib import Path
+
+from criterion_functions import create_criterion_map
+from data import data_map
+from ddp_model_functions import create_ddp_model_map
+from hooks import ddp_hook_map
+from hookstates import hook_state_map
+from iteration_step_functions import iteration_step_map
+from metrics.ProcessedMetricsPrinter import ProcessedMetricsPrinter
+from models import model_map
+from optimizer_functions import create_optimizer_map
+from preprocess_data_functions import preprocess_data_map
+from servers import server_map
+from trainers import trainer_map
 
 import torch
 import torch.distributed as c10d
@@ -12,14 +24,15 @@ from torch.distributed.rpc import TensorPipeRpcBackendOptions
 from torch.futures import wait_all
 from torch.utils.data import DataLoader
 
-from benchmark_class_helper import (get_benchmark_data_map,
-                                    get_benchmark_model_map,
-                                    get_benchmark_server_map,
-                                    get_benchmark_trainer_map)
-from metrics.ProcessedMetricsPrinter import ProcessedMetricsPrinter
-
 
 def get_name(rank, args):
+    r"""
+    A function that gets the name for the rank
+    argument
+    Args:
+        rank (int): process number in the world
+        args (parser): benchmark configurations
+    """
     t_count = args.ntrainer + args.ncudatrainer
     s_count = args.nserver + args.ncudaserver
     if rank < t_count:
@@ -31,12 +44,26 @@ def get_name(rank, args):
 
 
 def get_server_rank(args, rank):
+    r"""
+    A function that gets the server rank for
+    the rank argument.
+    Args:
+        args (parser): benchmark configurations
+        rank (int): trainer rank
+    """
     s_offset = args.ntrainer + args.ncudatrainer
     tps = args.ntrainer // args.nserver
     return rank // tps + s_offset
 
 
 def get_cuda_server_rank(args, rank):
+    r"""
+    A function that gets the cudaserver rank for
+    the rank argument.
+    Args:
+        args (parser): benchmark configurations
+        rank (int): trainer rank
+    """
     s_offset = args.ntrainer + args.ncudatrainer + args.nserver
     t_index = rank - args.ntrainer
     ctps = args.ncudatrainer // args.ncudaserver
@@ -44,7 +71,14 @@ def get_cuda_server_rank(args, rank):
 
 
 def get_server_rref(server_rank, args, extra_args):
-    server = get_benchmark_server_map()[str(args.server)]
+    r"""
+    A function that creates a RRef to the server.
+    Args:
+        server_rank (int): process number in the world
+        args (parser): benchmark configurations
+        extra_args (dict): configurations added by the user
+    """
+    server = server_map[args.server]
     name = get_name(
         server_rank,
         args
@@ -72,9 +106,19 @@ def get_server_rref(server_rank, args, extra_args):
 
 
 def run_trainer(
-    args, extra_args, model, data, rank, server_rref
+    args, extra_args, data, rank, server_rref
 ):
-    trainer_class = get_benchmark_trainer_map()[str(args.trainer)]
+    r"""
+    A function that runs obtains a trainer instance and calls
+    the train method.
+    Args:
+        args (parser): benchmark configurations
+        extra_args (dict): configurations added by the user
+        data (list): training samples
+        rank (int): process number in the world
+        server_rrefs (dict): a dictionary containing server RRefs
+    """
+    trainer_class = trainer_map[args.trainer]
     if extra_args is not None:
         trainer_args = extra_args.values()
     else:
@@ -89,6 +133,22 @@ def run_trainer(
         process_group = c10d.ProcessGroupNCCL(
             store, rank, trainer_count
         )
+    elif args.backend == "multi":
+        process_group = c10d.ProcessGroupNCCL(
+            store, rank, trainer_count
+        )
+        if c10d.is_initialized() is False:
+            c10d.init_process_group(backend="gloo", rank=rank, world_size=trainer_count)
+
+    model = load_model(args)
+    preprocess_data = preprocess_data_map[args.preprocess_data]
+    create_criterion = create_criterion_map[args.create_criterion]
+    create_ddp_model = create_ddp_model_map[args.create_ddp_model]
+    create_optimizer = create_optimizer_map[args.create_optimizer]
+    iteration_step = iteration_step_map[args.iteration_step]
+    HookState = hook_state_map[args.hook_state]
+    hook = ddp_hook_map[args.ddp_hook]
+    # check if this a cudatrainer
     use_cuda_rpc = rank >= args.ntrainer
     trainer = trainer_class(
         rank,
@@ -98,6 +158,14 @@ def run_trainer(
         server_rref,
         args.backend,
         args.epochs,
+        preprocess_data,
+        create_criterion,
+        create_ddp_model,
+        args.lr,
+        create_optimizer,
+        HookState,
+        hook,
+        iteration_step,
         *trainer_args
     )
     trainer.train(model, data)
@@ -105,7 +173,16 @@ def run_trainer(
     return [rank, metrics]
 
 
-def call_trainers(args, extra_args, model, train_data, server_rrefs):
+def call_trainers(args, extra_args, train_data, server_rrefs):
+    r"""
+    A function that starts the trainers. Each trainer is started
+    using an rpc_async request.
+    Args:
+        args (parser): benchmark configurations
+        extra_args (dict): configurations added by the user
+        train_data (list): training samples
+        server_rrefs (dict): a dictionary containing server RRefs
+    """
     futs = []
     for trainer_rank in range(0, args.ntrainer + args.ncudatrainer):
         trainer_name = get_name(
@@ -125,7 +202,6 @@ def call_trainers(args, extra_args, model, train_data, server_rrefs):
             args=(
                 args,
                 extra_args,
-                copy.deepcopy(model),
                 train_data[trainer_rank],
                 trainer_rank,
                 server_rref,
@@ -137,9 +213,18 @@ def call_trainers(args, extra_args, model, train_data, server_rrefs):
 
 
 def benchmark_warmup(
-    args, extra_args, model, data, server_rrefs
+    args, extra_args, data, server_rrefs
 ):
-    futs = call_trainers(args, extra_args, model, data, server_rrefs)
+    r"""
+    A function that runs the training algorithm. The goal of this
+    function is to warm the rpc. The server states are reset.
+    Args:
+        args (parser): benchmark configurations
+        extra_args (dict): configurations added by the user
+        data (list): training samples
+        server_rrefs (dict): a dictionary containing server RRefs
+    """
+    futs = call_trainers(args, extra_args, data, server_rrefs)
     wait_all(futs)
     for server_rref in server_rrefs.values():
         server_rref.rpc_sync().reset_state(server_rref)
@@ -147,10 +232,22 @@ def benchmark_warmup(
 
 
 def split_list(arr, n):
+    r"""
+    A function that splits a list into n lists
+    Args:
+        arr (list): training samples
+        n (int): number of output lists
+    """
     return [arr[i::n] for i in range(n)]
 
 
 def get_server_metrics(server_rrefs):
+    r"""
+    A function that calls the remote server to obtain metrics
+    collected during the benchmark run.
+    Args:
+        server_rrefs (dict): a dictionary containing server RRefs
+    """
     rank_metrics = []
     for rank, server_rref in server_rrefs.items():
         metrics = server_rref.rpc_sync().get_metrics(server_rref)
@@ -158,7 +255,18 @@ def get_server_metrics(server_rrefs):
     return rank_metrics
 
 
-def run_master(rank, model, data, args, extra_configs, rpc_backend_options):
+def run_master(rank, data, args, extra_configs, rpc_backend_options):
+    r"""
+    A function that runs the master process in the world. This function
+    obtains remote references to initialized servers, splits the data,
+    runs the trainers, and prints metrics.
+    Args:
+        rank (int): process number in the world
+        data (list): training samples
+        args (parser): benchmark configurations
+        extra_configs (dict): configurations added by the user
+        rpc_backend_options (rpc): configurations/options for the rpc TODO: fix
+    """
     world_size = args.ntrainer + args.ncudatrainer + args.nserver + args.ncudaserver + 1
     rpc.init_rpc(
         get_name(
@@ -181,21 +289,30 @@ def run_master(rank, model, data, args, extra_configs, rpc_backend_options):
 
     # warmup run the benchmark
     benchmark_warmup(
-        args, extra_configs["trainer_config"], model, train_data, server_rrefs
+        args, extra_configs["trainer_config"], train_data, server_rrefs
     )
     # run the benchmark
     trainer_futs = call_trainers(
-        args, extra_configs["trainer_config"], model, train_data, server_rrefs
+        args, extra_configs["trainer_config"], train_data, server_rrefs
     )
     # collect metrics and print
     metrics_printer = ProcessedMetricsPrinter()
     rank_metrics_list = wait_all(trainer_futs)
     metrics_printer.print_metrics("trainer", rank_metrics_list)
     rank_metrics_list = get_server_metrics(server_rrefs)
-    metrics_printer.print_metrics("parameter server", rank_metrics_list)
+    metrics_printer.print_metrics("server", rank_metrics_list)
 
 
-def run_benchmark(rank, model, data, args, config):
+def run_benchmark(rank, args, data):
+    r"""
+    A function that runs the benchmark.
+    Args:
+        rank (int): process number in the world
+        args (parser): configuration args
+        data (list): training samples
+    """
+
+    config = load_extra_configs(args)
 
     torch.manual_seed(args.torch_seed)
     torch.cuda.manual_seed_all(args.cuda_seed)
@@ -208,7 +325,7 @@ def run_benchmark(rank, model, data, args, config):
     rpc_backend_options = TensorPipeRpcBackendOptions(rpc_timeout=args.rpc_timeout)
     if rank == world_size - 1:
         # master = [ntrainer + ncudatrainer + nserver + ncudaserver, ntrainer + ncudatrainer + nserver + ncudaserver]
-        run_master(rank, model, data, args, config, rpc_backend_options)
+        run_master(rank, data, args, config, rpc_backend_options)
     elif rank >= args.ntrainer + args.ncudatrainer:
         # parameter_servers = [ntrainer + ncudatrainer, ntrainer + ncudatrainer + nserver + ncudaserver)
         rpc.init_rpc(
@@ -243,13 +360,31 @@ def run_benchmark(rank, model, data, args, config):
 
 
 def get_json_config(file_name, id):
-    with open(os.path.join(Path(__file__).parent, file_name), "r") as f:
-        json_config = json.load(f)[id]
-
+    r"""
+    A function that loads a json configuration from a file.
+    Args:
+        file_name (str): name of configuration file to load
+        id (str): configuration that will be loaded
+    """
+    f = open(
+        os.path.join(
+            Path(__file__).parent, file_name
+        ),
+        "r"
+    )
+    json_config = json.load(f)[id]
+    f.close()
     return json_config
 
 
 def load_extra_configs(args):
+    r"""
+    A function that creates a dictionary that contains any extra configurations
+    set by the user. The dictionary will contain two keys trainer_config and
+    server_config, with default values None.
+    Args:
+        args (parser): launcher configurations
+    """
     trainer_config_file = args.trainer_config_path
     server_config_file = args.server_config_path
     configurations = {
@@ -263,30 +398,36 @@ def load_extra_configs(args):
     return configurations
 
 
-def get_data(data_class, data_config):
-    data_class = get_benchmark_data_map()[data_class]
-    return data_class(**data_config)
-
-
 def load_data(args):
+    r"""
+    A function that creates an instance of the data class.
+    Args:
+        args (parser): launcher configurations
+    """
     data_config_file = args.data_config_path
     data_config = get_json_config(data_config_file, args.data)
-    return get_data(data_config["data_class"], data_config["configurations"])
-
-
-def get_model(model_class, model_config):
-    model_class = get_benchmark_model_map()[model_class]
-    return model_class(**model_config)
+    data_class = data_map[data_config["data_class"]]
+    return data_class(**data_config["configurations"])
 
 
 def load_model(args):
+    r"""
+    A function that creates an instance of the model class.
+    Args:
+        args (parser): launcher configurations
+    """
     model_config_file = args.model_config_path
     model_config = get_json_config(model_config_file, args.model)
-    return get_model(model_config["model_class"], model_config["configurations"])
+    model_class = model_map[model_config["model_class"]]
+    return model_class(**model_config["configurations"])
 
 
 def main(args):
-
+    r"""
+    A function that creates multiple processes to run the benchmark.
+    Args:
+        args (parser): launcher configurations
+    """
     # CPU and RPC trainer checks
     if args.ntrainer > 0 and args.ncudatrainer > 0:
         assert args.nserver > 0 and args.ncudaserver > 0
@@ -297,21 +438,17 @@ def main(args):
         assert args.ncudatrainer > 0
         assert args.ncudatrainer % args.ncudaserver == 0
 
-    extra_configs = load_extra_configs(args)
-    data = load_data(args)
-    model = load_model(args)
-
     world_size = (
         args.ntrainer + args.ncudatrainer + args.nserver + args.ncudaserver + 1
     )
 
+    data = load_data(args)
+
     mp.spawn(
         run_benchmark,
         args=(
-            model,
-            data,
             args,
-            extra_configs,
+            data,
         ),
         nprocs=world_size,
         join=True
@@ -427,6 +564,47 @@ if __name__ == "__main__":
         type=int,
         default=0,
         help="seed for generating random numbers to a random number for the current GPU"
+    )
+    parser.add_argument(
+        "--preprocess_data",
+        type=str,
+        help="this function will be used to preprocess data before training"
+    )
+    parser.add_argument(
+        "--create_criterion",
+        type=str,
+        help="this function will be used to create the criterion used for model loss calculation"
+    )
+    parser.add_argument(
+        "--create_ddp_model",
+        type=str,
+        help="this function will be used to create the ddp model used during training"
+    )
+    parser.add_argument(
+        "--hook_state",
+        type=str,
+        help="this will be the state class used when registering the ddp communication hook"
+    )
+    parser.add_argument(
+        "--lr",
+        type=float,
+        help="this will be the learning rate used by the optimizer during training"
+    )
+    parser.add_argument(
+        "--create_optimizer",
+        type=str,
+        help="this function will be used to create the optimizer used to update gradients during training"
+    )
+    parser.add_argument(
+        "--ddp_hook",
+        type=str,
+        default="allreduce_hook",
+        help="ddp communication hook"
+    )
+    parser.add_argument(
+        "--iteration_step",
+        type=str,
+        help="this will be the function called for each iteration of training"
     )
     args = parser.parse_args()
     print(f"{args}\n")

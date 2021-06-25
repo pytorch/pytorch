@@ -6,7 +6,7 @@ RPC_DENSE = "rpc_dense"
 
 def sparse_tensor_to_rpc_format(sparse_tensor):
     r"""
-    A helper method creates a list containing the indices, values, and size
+    A helper function creates a list containing the indices, values, and size
     of a coalesced sparse tensor.
     Args:
         sparse_tensor (torch.Tensor): sparse_coo_tensor represented as a list
@@ -17,7 +17,7 @@ def sparse_tensor_to_rpc_format(sparse_tensor):
 
 def sparse_rpc_format_to_tensor(sparse_rpc_format):
     r"""
-    A helper method creates a sparse_coo_tensor from indices, values, and size.
+    A helper function creates a sparse_coo_tensor from indices, values, and size.
     Args:
         sparse_rpc_format (list): sparse_coo_tensor represented as a list
     """
@@ -50,14 +50,15 @@ def process_bucket_with_remote_server(state, bucket):
         tensor
     ]
     key = state.get_key(b_index)
-    cref.record_hook_fut_start(
+    cref.record_start(
+        "hook_future_metric",
         key,
         RPC_SPARSE if sparse else RPC_DENSE
     )
     fut = cref.server_rref.rpc_async().average_gradient(*server_args)
 
     def callback(fut):
-        cref.record_hook_fut_end(key)
+        cref.record_end("hook_future_metric", key)
         tensor = fut.wait()
         if type(tensor) is list:
             tensor = sparse_rpc_format_to_tensor(tensor)

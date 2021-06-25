@@ -1,15 +1,14 @@
 import threading
 
+from utils import sparse_rpc_format_to_tensor, sparse_tensor_to_rpc_format
+
 import torch
 import torch.distributed.rpc as rpc
-from utils import sparse_rpc_format_to_tensor, sparse_tensor_to_rpc_format
 
 from .ParameterServerBase import ParameterServerBase
 
 
 class AverageParameterServer(ParameterServerBase):
-
-    lock = threading.Lock()
 
     def __init__(
         self,
@@ -31,6 +30,7 @@ class AverageParameterServer(ParameterServerBase):
         """
         super().__init__(rank)
 
+        self.lock = threading.Lock()
         self.rank = rank
         self.trainer_count = trainer_count
         self.use_cuda_rpc = use_cuda_rpc
