@@ -52,20 +52,61 @@ std::tuple<Tensor,optional<int64_t>> reduction_dimarray_batch_rule(
   return std::make_tuple( result, 0 );
 }
 
+// Taken from https://stackoverflow.com/a/41301717
+template<typename R, typename... A>
+R ret(R(*)(A...));
+
+// Optional implies the weird case with 0-dim tensors i.e. torch.sum(torch.randn(()), 0)
 template <typename F, F Func, typename... ExtraArgs>
-std::tuple<Tensor,optional<int64_t>> reduction_dim_batch_rule(
-    const Tensor& self, optional<int64_t> self_bdim, int64_t dim, ExtraArgs... extra_args) {
+optional<std::tuple<decltype(ret(Func)), optional<int64_t>>> reduction_dim_batch_rule_impl(const Tensor& self, optional<int64_t> self_bdim, int64_t dim, ExtraArgs... extra_args) {
   if (!self_bdim.has_value()) {
-    return std::make_tuple( Func(self, dim, std::forward<ExtraArgs>(extra_args)...), nullopt );
+    return std::make_tuple(Func(self, dim, std::forward<ExtraArgs>(extra_args)...), nullopt);
   }
   auto logical_dim = rankWithoutBatchDim(self, self_bdim);
   if (logical_dim == 0 && is_allowed_dim_on_scalar_tensor(dim)) {
-    return std::make_tuple(self.clone(), 0);
+    return nullopt;
   }
   auto self_ = moveBatchDimToFront(self, self_bdim);
   int64_t new_dim = getPhysicalDim(self, self_bdim.has_value(), dim);
   auto result = Func(self_, new_dim, std::forward<ExtraArgs>(extra_args)...);
   return std::make_tuple( result, 0 );
+}
+
+template <typename F, F Func, typename... ExtraArgs>
+std::tuple<Tensor,optional<int64_t>> reduction_dim_batch_rule(
+    const Tensor& self, optional<int64_t> self_bdim, int64_t dim, ExtraArgs... extra_args) {
+  auto out = reduction_dim_batch_rule_impl<F, Func, ExtraArgs...>(self, self_bdim, dim, std::forward<ExtraArgs>(extra_args)...);
+  if (!out) {
+    return std::make_tuple( self.clone(), 0 );
+  }
+  return *out;
+}
+
+template <typename F, F Func, typename... ExtraArgs>
+std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>> reduction_dim_ret_pair_batch_rule(
+    const Tensor& self, optional<int64_t> self_bdim, int64_t dim, ExtraArgs... extra_args) {
+  auto out = reduction_dim_batch_rule_impl<F, Func, ExtraArgs...>(self, self_bdim, dim, std::forward<ExtraArgs>(extra_args)...);
+  if (!out) {
+    return std::make_tuple(self.clone(), 0, at::zeros({self.size(0)}, {}, self.options().dtype(kLong)), 0);
+  }
+  auto tensors = std::get<0>(*out);
+  auto bdim = std::get<1>(*out);
+  return std::make_tuple(std::get<0>(tensors), bdim, std::get<1>(tensors), bdim);
+}
+
+template <typename F, F Func, typename G, G DimRule, typename... ExtraArgs>
+std::tuple<Tensor,optional<int64_t>> reduction_no_dim_batch_rule(
+    const Tensor& self, optional<int64_t> self_bdim, ExtraArgs... extra_args) {
+  if (!self_bdim.has_value()) {
+    return std::make_tuple(Func(self, std::forward<ExtraArgs>(extra_args)...), nullopt);
+  }
+  if (self.dim() == 1) {
+    return std::make_tuple(self.clone(), 0);
+  }
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  self_ = at::flatten(self_, 1);
+  auto out = DimRule(self_, 0, 0, false, std::forward<ExtraArgs>(extra_args)...);
+  return std::make_tuple(std::get<0>(out), std::get<1>(out));
 }
 
 // For now I'm not macroing these (don't see another way to do it), since I'm
@@ -127,6 +168,15 @@ std::tuple<Tensor,optional<int64_t>> prod_dim_batch_rule(
   return reduction_dim_batch_rule<decltype(&ATEN_FN2(prod, dim_int)), &at::prod, bool, optional<ScalarType>>(self, self_bdim, dim, keepdim, dtype);
 }
 
+std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>> max_dim_batch_rule(
+    const Tensor& self, optional<int64_t> self_bdim, int64_t dim, bool keepdim) {
+  return reduction_dim_ret_pair_batch_rule<decltype(&ATEN_FN2(max, dim)), &at::max, bool>(self, self_bdim, dim, keepdim);
+}
+
+std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>> min_dim_batch_rule(
+    const Tensor& self, optional<int64_t> self_bdim, int64_t dim, bool keepdim) {
+  return reduction_dim_ret_pair_batch_rule<decltype(&ATEN_FN2(min, dim)), &at::min, bool>(self, self_bdim, dim, keepdim);
+}
 
 // Skipping frobenius/nuclear/all/any since they don't have opinfo tests right now :P
 
@@ -203,7 +253,6 @@ _log_softmax_backward_data(
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("amax", SINGLE_ARG(reduction_dimarray_batch_rule<decltype(&at::amax), &at::amax, bool>));
   VMAP_SUPPORT("amin", SINGLE_ARG(reduction_dimarray_batch_rule<decltype(&at::amin), &at::amin, bool>));
-
   VMAP_SUPPORT("argmax", SINGLE_ARG(argx_batch_rule<decltype(&at::argmax), &at::argmax>));
   VMAP_SUPPORT("argmin", SINGLE_ARG(argx_batch_rule<decltype(&at::argmin), &at::argmin>));
   VMAP_SUPPORT("cumprod", SINGLE_ARG(reduction_dim_batch_rule<decltype(&ATEN_FN(cumprod)), &at::cumprod, optional<ScalarType>>));
@@ -211,8 +260,13 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("log_softmax.int", SINGLE_ARG(reduction_dim_batch_rule<decltype(&ATEN_FN2(log_softmax, int)), &at::log_softmax, optional<ScalarType>>));
   VMAP_SUPPORT("nansum", nansum_batch_rule);
   VMAP_SUPPORT("nansum.dim_IntList", nansum_dim_batch_rule);
+  VMAP_SUPPORT("max", SINGLE_ARG(reduction_no_dim_batch_rule<decltype(&ATEN_FN(max)), &at::max, decltype(&max_dim_batch_rule), &max_dim_batch_rule>));
+  VMAP_SUPPORT("max.dim", max_dim_batch_rule);
   VMAP_SUPPORT("mean", mean_batch_rule);
   VMAP_SUPPORT("mean.dim", mean_dim_batch_rule);
+  VMAP_SUPPORT("min", SINGLE_ARG(reduction_no_dim_batch_rule<decltype(&ATEN_FN(min)), &at::min, decltype(&min_dim_batch_rule), &min_dim_batch_rule>));
+  VMAP_SUPPORT("min.dim", min_dim_batch_rule);
+  VMAP_SUPPORT("prod", SINGLE_ARG(reduction_no_dim_batch_rule<decltype(&ATEN_FN(prod)), &at::prod, decltype(&prod_dim_batch_rule), &prod_dim_batch_rule, optional<ScalarType>>));
   VMAP_SUPPORT("prod.dim_int", prod_dim_batch_rule);
   VMAP_SUPPORT("std", std_batch_rule);
   VMAP_SUPPORT("std.dim", std_dim_batch_rule);
