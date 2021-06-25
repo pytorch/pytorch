@@ -5250,6 +5250,13 @@ else:
                 UserWarning, "This overload of addcmul is deprecated"):
             self.assertEqual(actual, torch.addcmul(a, alpha, b, c))
 
+        if self.device_type == 'cuda' and dtype == torch.half:
+            a = torch.tensor([60000.0], device=device, dtype=dtype)
+            b = torch.tensor([60000.0], device=device, dtype=dtype)
+            c = torch.tensor([2.0], device=device, dtype=dtype)
+            out = torch.addcmul(a, b, c, value=-1)
+            self.assertTrue(not (out.isnan() or out.isinf()))
+
     def test_narrow_empty(self, device):
         x = torch.randn(2, 3, 4, device=device)
         for d in range(x.dim()):
@@ -6250,6 +6257,13 @@ else:
                 _test_addcdiv()
         else:
             _test_addcdiv()
+
+        if self.device_type == 'cuda' and dtype == torch.half:
+            a = torch.tensor([60000.0], device=device, dtype=dtype)
+            b = torch.tensor([60000.0], device=device, dtype=dtype)
+            c = torch.tensor([1.0], device=device, dtype=dtype)
+            out = torch.addcmul(a, b, c, value=-2)
+            self.assertTrue(not (out.isnan() or out.isinf()))
 
     def test_nullary_op_mem_overlap(self, device):
         ops = (
