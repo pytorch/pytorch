@@ -6,7 +6,6 @@ from torch.fx import (
 
 from torch.quantization import (
     propagate_qconfig_,
-    qconfig,
 )
 from torch.fx.graph import (
     Graph,
