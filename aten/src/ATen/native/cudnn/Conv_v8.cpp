@@ -30,7 +30,7 @@ namespace {
 
 // TODO: remove duplicate code in Conv_v7.cpp
 constexpr size_t operator "" _TiB(unsigned long long n) {
-  return size_t(n) * 1024 * 1024 * 1024 * 1024;
+  return size_t(n) << 40;
 }
 
 uint8_t getAlignment(const Tensor &t) {
@@ -100,6 +100,7 @@ struct BenchmarkCache {
 std::mutex mutex;
 std::unordered_map<CacheKey, cudnn_frontend::ExecutionPlan, ParamsHash<CacheKey>, ParamsEqual<CacheKey>> engine_cache;
 
+// TODO: is this thread safe if cache is updated? is pointer stale?
 cudnn_frontend::ExecutionPlan* find(const CacheKey& key) {
   std::lock_guard<std::mutex> guard(mutex);
   auto it = engine_cache.find(key);
@@ -280,9 +281,9 @@ void try_configs(cudnn_frontend::EngineConfigList& configs, const CacheKey& key,
   for (auto & config : configs) {
     try {
       auto plan = cudnn_frontend::ExecutionPlanBuilder()
-	            .setHandle(handle)
+                    .setHandle(handle)
                     .setEngineConfig(config)
-		    .build();
+                    .build();
       run_conv_plan(handle, x, y, w, plan);
       benchmark_cache.emplace(key, plan);
       return;
@@ -299,6 +300,7 @@ void run_single_conv(const cudnnBackendDescriptorType_t operation,
 
   CacheKey key;
   get_cachekey(key, operation, y, x, w, padding, stride, dilation, groups, deterministic, allow_tf32);
+  // TODO: is this thread safe if cache is updated? is pointer stale?
   auto search = benchmark_cache.find(key);
   if (search) {
     run_conv_plan(handle, x, y, w, *search);
@@ -307,15 +309,15 @@ void run_single_conv(const cudnnBackendDescriptorType_t operation,
 
   if (!benchmark) {
     cudnn_frontend::EngineConfigList configs = get_configs_from_heuristics(handle, operation,
-		                                                           x, y, w, key,
-									   padding, stride, dilation,
-									   deterministic, allow_tf32);
+                                                                           x, y, w, key,
+                                                                           padding, stride, dilation,
+                                                                           deterministic, allow_tf32);
     try_configs(configs, key, handle, x, y, w);
   } else {
     cudnn_frontend::executionPlans_t plans = get_plans_from_find(handle, operation,
-		                                                 x, y, w, key,
-								 padding, stride, dilation,
-								 deterministic, allow_tf32);
+                                                                 x, y, w, key,
+                                                                 padding, stride, dilation,
+                                                                 deterministic, allow_tf32);
     try_plans(plans, key, handle, x, y, w);
   }
 }
