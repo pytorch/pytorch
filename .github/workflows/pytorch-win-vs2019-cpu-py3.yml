@@ -84,7 +84,7 @@ jobs:
         uses: actions/checkout@v2
       - name: Generating test matrix
         id: set-matrix
-        run: .github/scripts/generate_pytorch_test_matrix.py)
+        run: .github/scripts/generate_pytorch_test_matrix.py
 
   test:
     runs-on: windows.4xlarge
