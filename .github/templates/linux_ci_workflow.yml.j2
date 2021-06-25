@@ -422,7 +422,6 @@ jobs:
           path: site #}
       - name: Pull docker image
         run: |
-          exit 1
           docker pull "${DOCKER_IMAGE}"
       - name: Preserve github env variables for use in docker
         run: |
