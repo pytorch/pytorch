@@ -1,4 +1,6 @@
 from functools import reduce
+from typing import Dict, Union
+
 from torch.fx.tensor_type import Dyn, is_consistent, TensorType, is_more_precise
 
 # here we will collect types for a nodelist
@@ -12,7 +14,7 @@ def type_check(graph):
     populated with a type after type-checking is done
     """
     # here we collect types for variables
-    env = {}
+    env: Dict[any, Union[TensorType, Dyn]] = {}
 
     # populate the type environment with parameter types
     collect_params(graph.nodes, env)

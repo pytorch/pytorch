@@ -75,7 +75,7 @@ class AST_Rewriter(ast.NodeTransformer):
         """
         arg1 = node.value
 
-        if isinstance(node.annotation, ast.Call):
+        if isinstance(node.annotation, ast.Call) and hasattr(node.annotation.func, 'id'):
             arg2 = ast.Call(func=ast.Name(id=node.annotation.func.id, ctx=ast.Load()),
                             args=[ast.Tuple(node.annotation.args, ctx=ast.Load())], keywords=[])
         else:
