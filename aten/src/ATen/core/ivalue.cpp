@@ -953,9 +953,29 @@ std::vector<c10::Storage> ivalue::Future::extractStorages(
   if (value.isPyObject()) {
     std::vector<at::Tensor> tensors =
         value.toPyObjectHolder()->extractTensors();
-    storages.reserve(tensors.size());
+    size_t num_storages = 0;
     for (const at::Tensor& tensor : tensors) {
-      storages.push_back(tensor.storage());
+      if (tensor.is_sparse()) {
+        // Sparse tensor is indices and values. Both are tensors
+        // and contain storage. Therefore num_storages needs to be
+        // incremented by 2.
+        num_storages += 2;
+      } else {
+        // A dense/strided tensor contains 1 storage.
+        num_storages += 1;
+      }
+    }
+    storages.reserve(num_storages);
+    for (const at::Tensor& tensor : tensors) {
+      if (tensor.is_sparse()) {
+        // Sparse tensor is indices and values. Both are tensors
+        // and contain storage.
+        storages.push_back(tensor.indices().storage());
+        storages.push_back(tensor.values().storage());
+      } else {
+        // A dense/strided tensor contains 1 storage
+        storages.push_back(tensor.storage());
+      }
     }
   } else {
     at::IValue::HashAliasedIValues sub_values;
