@@ -1,39 +1,36 @@
 #pragma once
 
-#include <TH/THGeneral.h>
-
 #include <c10/core/Allocator.h>
 
-#define TH_ALLOCATOR_MAPPED_SHARED 1
-#define TH_ALLOCATOR_MAPPED_SHAREDMEM 2
-#define TH_ALLOCATOR_MAPPED_EXCLUSIVE 4
-#define TH_ALLOCATOR_MAPPED_NOCREATE 8
-#define TH_ALLOCATOR_MAPPED_KEEPFD 16
-#define TH_ALLOCATOR_MAPPED_FROMFD 32
-#define TH_ALLOCATOR_MAPPED_UNLINK 64
+namespace at {
 
-/* default malloc/free allocator. malloc and realloc raise an error (using
- * THError) on allocation failure.
- */
-TH_API c10::Allocator* getTHDefaultAllocator(void);
+enum MappedAllocatorModes {
+  ALLOCATOR_MAPPED_SHARED = 1,
+  ALLOCATOR_MAPPED_SHAREDMEM = 2,
+  ALLOCATOR_MAPPED_EXCLUSIVE = 4,
+  ALLOCATOR_MAPPED_NOCREATE = 8,
+  ALLOCATOR_MAPPED_KEEPFD = 16,
+  ALLOCATOR_MAPPED_FROMFD = 32,
+  ALLOCATOR_MAPPED_UNLINK = 64
+};
 
 // Sentinel value/type to help distinguish the file descriptor constructor from
 // the non-file descriptor constructor
 enum WithFd { WITH_FD };
 
-class TORCH_API THMapAllocator {
+class TORCH_API MapAllocator {
  public:
-  THMapAllocator(std::string filename, int flags, size_t size);
-  THMapAllocator(WithFd, std::string filename, int fd, int flags, size_t size);
-  THMapAllocator(const THMapAllocator&) = delete;
-  THMapAllocator& operator=(const THMapAllocator&) = delete;
-  THMapAllocator(THMapAllocator&&) = delete;
-  THMapAllocator& operator=(THMapAllocator&&) = delete;
+  MapAllocator(std::string filename, int flags, size_t size);
+  MapAllocator(WithFd, std::string filename, int fd, int flags, size_t size);
+  MapAllocator(const MapAllocator&) = delete;
+  MapAllocator& operator=(const MapAllocator&) = delete;
+  MapAllocator(MapAllocator&&) = delete;
+  MapAllocator& operator=(MapAllocator&&) = delete;
 
   const char* filename() const { return filename_.c_str(); }
   int fd() const {
 #ifdef _WIN32
-    AT_ERROR("THMapAllocator::fd() is unsupported on Windows");
+    TORCH_CHECK(false, "MapAllocator::fd() is unsupported on Windows");
 #else
     return fd_;
 #endif
@@ -44,7 +41,7 @@ class TORCH_API THMapAllocator {
   // from the base pointer.)
   virtual void* data() const { return base_ptr_; }
 
-  static THMapAllocator* fromDataPtr(const at::DataPtr&);
+  static MapAllocator* fromDataPtr(const at::DataPtr&);
   static at::DataPtr makeDataPtr(std::string filename, int flags, size_t size, size_t* actual_size_out);
   static at::DataPtr makeDataPtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out);
 
@@ -53,7 +50,7 @@ class TORCH_API THMapAllocator {
 
   // This is very dangerous.  You have to redefine this destructor for each
   // subclass
-  virtual ~THMapAllocator();
+  virtual ~MapAllocator();
 
 protected:
   bool closed_ = false;
@@ -71,18 +68,18 @@ protected:
 };
 
 // Base-from-member idiom
-struct TORCH_API THRefcountedMapAllocatorArgCheck {
-  THRefcountedMapAllocatorArgCheck(int flags);
+struct TORCH_API RefcountedMapAllocatorArgCheck {
+  RefcountedMapAllocatorArgCheck(int flags);
 };
 
-class TORCH_API THRefcountedMapAllocator
-    : private THRefcountedMapAllocatorArgCheck,
-      public THMapAllocator {
+class TORCH_API RefcountedMapAllocator
+    : private RefcountedMapAllocatorArgCheck,
+      public MapAllocator {
  public:
-  THRefcountedMapAllocator(const char *filename, int flags, size_t size);
-  THRefcountedMapAllocator(WithFd, const char *filename, int fd, int flags, size_t size);
+  RefcountedMapAllocator(const char *filename, int flags, size_t size);
+  RefcountedMapAllocator(WithFd, const char *filename, int fd, int flags, size_t size);
 
-  static THRefcountedMapAllocator* fromDataPtr(const at::DataPtr&);
+  static RefcountedMapAllocator* fromDataPtr(const at::DataPtr&);
   static at::DataPtr makeDataPtr(const char *filename, int flags, size_t size, size_t* actual_size_out);
   static at::DataPtr makeDataPtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out);
 
@@ -92,9 +89,11 @@ class TORCH_API THRefcountedMapAllocator
   int decref();
   void close() override;
 
-  virtual ~THRefcountedMapAllocator() { close(); }
+  virtual ~RefcountedMapAllocator() { close(); }
 
 protected:
   void checkFlags();
   void initializeAlloc();
 };
+
+}  // namespace at
