@@ -1862,6 +1862,7 @@ new_module_tests = [
         cudnn=True,
         check_with_long_tensor=True,
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         module_name='Conv2d',
@@ -1925,6 +1926,7 @@ new_module_tests = [
         cudnn=True,
         check_with_long_tensor=True,
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         fullname='Conv2d_groups_thnn',
@@ -1933,6 +1935,7 @@ new_module_tests = [
         input_size=(2, 4, 6, 5),
         check_with_long_tensor=True,
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         fullname='Conv2d_pad_valid',
@@ -1950,7 +1953,7 @@ new_module_tests = [
         input_size=(2, 2, 6, 5),
         cudnn=True,
         with_tf32=True,
-        tf32_precision=0.005,
+        tf32_precision=0.01,
     ),
     dict(
         fullname='Conv2d_pad_same_dilated',
@@ -2203,6 +2206,20 @@ new_module_tests = [
         desc='complex'
     ),
     dict(
+        module_name='ReflectionPad3d',
+        constructor_args=((1, 2, 0, 2, 1, 2),),
+        cpp_constructor_args='torch::nn::ReflectionPad3dOptions({1, 2, 0, 2, 1, 2})',
+        input_size=(2, 3, 8, 8, 8),
+    ),
+    dict(
+        module_name='ReflectionPad3d',
+        constructor_args=((1, 2, 0, 2, 1, 2),),
+        cpp_constructor_args='torch::nn::ReflectionPad3dOptions({1, 2, 0, 2, 1, 2})',
+        input_fn=lambda: torch.rand(2, 3, 8, 8, 8, dtype=torch.complex128, requires_grad=True),
+        skip_half=True,
+        desc='complex'
+    ),
+    dict(
         module_name='ReplicationPad1d',
         constructor_args=((1, 2),),
         cpp_constructor_args='torch::nn::ReplicationPad1dOptions({1, 2})',
@@ -2392,7 +2409,7 @@ new_module_tests = [
         input_size=(2, 3, 6, 5, 4),
         cudnn=True,
         with_tf32=True,
-        tf32_precision=0.005,
+        tf32_precision=0.05,
     ),
     dict(
         fullname='Conv3d_pad_same',
@@ -2401,7 +2418,7 @@ new_module_tests = [
         input_size=(2, 3, 6, 5, 4),
         cudnn=True,
         with_tf32=True,
-        tf32_precision=0.005,
+        tf32_precision=0.05,
     ),
     dict(
         fullname='Conv3d_pad_same_dilated',
@@ -2410,7 +2427,7 @@ new_module_tests = [
         input_size=(2, 3, 6, 5, 4),
         cudnn=True,
         with_tf32=True,
-        tf32_precision=0.005,
+        tf32_precision=0.05,
     ),
     dict(
         module_name='ConvTranspose3d',
@@ -3217,6 +3234,13 @@ new_module_tests = [
         cpp_constructor_args='torch::nn::AdaptiveAvgPool3dOptions({c10::nullopt, 4, 5})',
         input_fn=lambda: torch.rand(2, 3, 5, 3, 7),
         desc='tuple_none',
+    ),
+    dict(
+        module_name='AdaptiveAvgPool3d',
+        constructor_args=((3, 2, 2),),
+        cpp_constructor_args='torch::nn::AdaptiveAvgPool3dOptions({3, 2, 2})',
+        input_fn=lambda: torch.rand(1, 1, 3, 2, 6),
+        desc='last_dim',
     ),
     dict(
         module_name='SELU',

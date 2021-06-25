@@ -165,6 +165,51 @@ def get_node_to_partition_mapping(partitions: List[Partition]) -> Dict[Node, int
     return node_to_partition
 
 
+def get_logical_id_to_device(devices: List[Device]) -> Dict[int, Device]:
+    """Get a mapping from device logical ID to Device object."""
+    logical_id_to_device: Dict[int, Device] = {}
+    for d in devices:
+        logical_id_to_device[d.logical_id] = d
+    return logical_id_to_device
+
+
+def get_device_partition_stats(
+    partitions: List[Partition], devices: List[Device]
+) -> Tuple[Dict[Device, List[Partition]], Dict[Device, int], List[Partition]]:
+    """Given a list of partitions and a list of devices, returns:
+    1. A mapping from device to partitions on it;
+    2. A mapping from device to its remaining memory size;
+    3. A list of partitions that do not have a device.
+    """
+    # logical id to device
+    logical_id_to_device = get_logical_id_to_device(devices)
+    # Track partitions on device
+    device_to_partitions: Dict[Device, List[Partition]] = {}
+    # Track device's left mem size
+    device_to_left_mem_bytes: Dict[Device, int] = {}
+    for d in devices:
+        device_to_partitions[d] = []
+        device_to_left_mem_bytes[d] = d.available_mem_bytes
+
+    # Deal with the partitions that already have a device
+    # and also collect all partitions without a device (no_device_partitions)
+    no_device_partitions = []
+    for partition in partitions:
+        if partition.logical_device_ids != []:
+            for logical_id in partition.logical_device_ids:
+                device = logical_id_to_device[logical_id]
+                device_to_partitions[device].append(partition)
+                device_to_left_mem_bytes[device] -= partition.used_mem_bytes
+        else:
+            no_device_partitions.append(partition)
+
+    return (
+        device_to_partitions,
+        device_to_left_mem_bytes,
+        no_device_partitions,
+    )
+
+
 def get_device_to_partitions_mapping(
     partitions: List[Partition], devices: List[Device]
 ):
@@ -204,29 +249,12 @@ def get_device_to_partitions_mapping(
                 return True
         return False
 
-    # logical id to device
-    logical_id_to_device: Dict[int, Device] = {}
-    # Track partitions on device
-    device_to_partitions: Dict[Device, List[Partition]] = {}
-    # Track device's left mem size
-    device_to_left_mem_bytes: Dict[Device, int] = {}
-    for d in devices:
-        logical_id_to_device[d.logical_id] = d
-        device_to_partitions[d] = []
-        device_to_left_mem_bytes[d] = d.available_mem_bytes
-    # Deal with the partitions that already have a device
-    # and also collect all partitions without a device (no_device_partitions)
-    no_device_partitions = []
-    for partition in partitions:
-        if partition.logical_device_ids != []:
-            logical_id = partition.logical_device_ids[0]
-            device = logical_id_to_device[logical_id]
-            device_to_partitions[device] = [partition]
-            device_to_left_mem_bytes[device] = (
-                d.available_mem_bytes - partition.used_mem_bytes
-            )
-        else:
-            no_device_partitions.append(partition)
+    (
+        device_to_partitions,
+        device_to_left_mem_bytes,
+        no_device_partitions,
+    ) = get_device_partition_stats(partitions, devices)
+
     # Find devices for all the partitions without a device
     found_device = True
     for partition in no_device_partitions:
@@ -312,7 +340,9 @@ class Partitioner:
             )
         # Single partition if the whole module can be fit into one device
         elif total_size_of_graph <= device_with_max_mem.available_mem_bytes:
-            self.find_single_partition(total_size_of_graph)
+            self.find_single_partition(
+                total_size_of_graph, logical_device_id=device_with_max_mem.logical_id
+            )
         elif total_size_of_graph > sum([d.available_mem_bytes for d in self.devices]):
             raise RuntimeError("Devices have no enough memory for the module")
         else:
@@ -341,14 +371,23 @@ class Partitioner:
                 )
             else:
                 self.size_based_partition()
+
+        # Saturate host if possible.
+        if partitioner_config.saturate_host:
+            self.saturate_host()
+
+        # Partition the graph module based on the partition assignment.
         module_with_submodules = self.do_partition()
+
         # The DAG contains DAGNodes with info of each partition's input nodes, output nodes
         # and how partitions are connected.
         dag = self.dump_dag(module_with_submodules)
         ret = PartitionResult(dag, module_with_submodules)
         return ret
 
-    def find_single_partition(self, total_size_of_graph) -> None:
+    def find_single_partition(
+        self, total_size_of_graph, logical_device_id: int = 0
+    ) -> None:
         """Fit the whole fx module into one device"""
         partition_0 = self.create_partition()
         for node in self.graph_module.graph.nodes:
@@ -356,7 +395,7 @@ class Partitioner:
                 break
             partition_0.nodes.add(node)
         partition_0.used_mem_bytes = total_size_of_graph
-        partition_0.logical_device_ids = [0]
+        partition_0.logical_device_ids = [logical_device_id]
         # Get the node to partition mapping
         self.node_to_partition = get_node_to_partition_mapping(self.partitions)
         return
@@ -413,7 +452,7 @@ class Partitioner:
                         partition_to_left_mem_bytes[
                             partition
                         ] = device.available_mem_bytes
-                        # Update available mem for the current partitio
+                        # Update available mem for the current partition
                         partition.logical_device_ids.append(device.logical_id)
                     else:
                         # The current partition is not the first partition
@@ -457,6 +496,75 @@ class Partitioner:
             raise RuntimeError("Cannot Get a Valid Partition to Logical Device Mapping")
         return
 
+    def saturate_host(self) -> None:
+        """Saturate host by assigning replicates to unused devices with enough memory.
+        It uses a greedy approach to find a next available set of devices to place all split
+        partitions: For each used device, it searches for an idle device with minimal memory
+        size that can hold all the partition located on that device; If the search is successful
+        for all used devices, it then assigns the new devices' logical ID to the corresponding
+        partition.
+        """
+        (
+            device_to_partitions,
+            device_to_left_mem_bytes,
+            no_device_partitions,
+        ) = get_device_partition_stats(self.partitions, self.devices)
+
+        assert (
+            len(no_device_partitions) == 0
+        ), f"Expect no_device_partitions has 0 device, but get {len(no_device_partitions)}"
+
+        # Devices that hold partitions
+        used_devices = [d for d in self.devices if len(device_to_partitions[d]) > 0]
+        # Track replicates of the assigned devices
+        replicated_device_to_used_device: Dict[Device, Device] = {}
+
+        while len(used_devices) * 2 + len(replicated_device_to_used_device) <= len(
+            self.devices
+        ):
+            # Success flag for this round
+            success = True
+            # Devices that have not been assigned
+            idle_devices = [
+                d
+                for d in self.devices
+                if d not in used_devices and d not in replicated_device_to_used_device
+            ]
+            # Temporary mapping from replicated device to original device
+            temp_replicate_mapping = {}
+
+            # Find a new device to replicate all partitions on an used device
+            for used_device in used_devices:
+                # Idle devices that have enough memory
+                available_devices = [
+                    d
+                    for d in idle_devices
+                    if d.available_mem_bytes
+                    >= used_device.available_mem_bytes
+                    - device_to_left_mem_bytes[used_device]
+                ]
+                if len(available_devices) == 0:
+                    success = False
+                    break
+                new_device = min(available_devices, key=lambda d: d.available_mem_bytes)
+                idle_devices.remove(new_device)
+                temp_replicate_mapping[new_device] = used_device
+
+            if not success:
+                break
+            replicated_device_to_used_device.update(temp_replicate_mapping)
+
+        # Update logical device IDs assigned to the partitions
+        for (
+            replicate_device,
+            original_device,
+        ) in replicated_device_to_used_device.items():
+            logical_id = replicate_device.logical_id
+            for partition in device_to_partitions[original_device]:
+                partition.logical_device_ids.append(logical_id)
+        for p in self.partitions:
+            print(p.logical_device_ids)
+
     def do_partition(self) -> GraphModule:
         """Return a new fx module with submodule nodes (partitions)."""
         module_with_submodules = split_module(
@@ -467,7 +575,7 @@ class Partitioner:
         return module_with_submodules
 
     def dump_dag(self, module_with_submodules: GraphModule) -> DAG:
-        """Return the dag structure and the new fx module with submodules"""
+        """Return the dag structure and the new fx module with submodules."""
         dag = DAG()
         for node in module_with_submodules.graph.nodes:
             if node.op == "output":

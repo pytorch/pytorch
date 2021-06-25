@@ -166,7 +166,7 @@ class TestFXExperimental(JitTestCase):
         partitioner = Partitioner()
         devices = [
             Device("dev_0", 125, 0),
-            Device("dev_1", 125, 1),
+            Device("dev_1", 150, 1),
             Device("dev_2", 125, 2),
         ]
         partitioner_config = PartitionerConfig(devices)
@@ -174,7 +174,7 @@ class TestFXExperimental(JitTestCase):
         module_with_submodules = ret.module_with_submodules
         dag = ret.dag
         self.assertEqual(traced(a, b), module_with_submodules(a, b))
-        assert dag.nodes[0].logical_device_ids == [0]
+        assert dag.nodes[0].logical_device_ids == [1]
 
     def test_lack_of_devices(self):
         class TestModule(torch.nn.Module):
@@ -609,6 +609,47 @@ class TestFXExperimental(JitTestCase):
             )
             assert (input1 * input2) == traced(input1, input2)
 
+    def test_saturate_host(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, a):
+                add_1 = a + torch.rand(4)
+                add_2 = add_1 + torch.rand(4)
+                linear_1 = self.linear(add_1)
+                add_3 = add_2 + linear_1
+                add_4 = add_2 + add_3
+                return add_4
+
+        m = TestModule()
+        traced = symbolic_trace(m)
+        a = torch.rand(4)
+        graph_manipulation.get_size_of_all_nodes(traced, [a])
+        devices = [
+            Device("dev_0", 200, 0),
+            Device("dev_1", 200, 1),
+            Device("dev_2", 100, 2),
+            Device("dev_3", 100, 3),
+            Device("dev_4", 200, 4),
+            Device("dev_5", 100, 5),
+        ]
+        partitioner = Partitioner()
+        # Without host saturation, the model will be split into two partitions.
+        # dev_0 holds partition 0 of 192 bytes and dev_1 holds partition 1 of 48 bytes.
+        partitioner_config = PartitionerConfig(devices, saturate_host=True)
+        ret = partitioner.partition_graph(traced, m, partitioner_config)
+        module_with_submodules = ret.module_with_submodules
+        self.assertEqual(traced(a), module_with_submodules(a))
+
+        partitions = partitioner.partitions
+        self.assertEqual(len(partitions), 2)
+        # With host saturation, partition 1 will be replicated to dev_4, and partition 2
+        # will be replicated to dev_2.
+        self.assertEqual(partitions[0].logical_device_ids, [0, 4])
+        self.assertEqual(partitions[1].logical_device_ids, [1, 2])
+
     @skipIfNoTorchVision
     def test_conv_bn_fusion(self):
         rn18 = resnet18().eval()
@@ -976,6 +1017,36 @@ class {test_classname}(torch.nn.Module):
                     nn_class = getattr(torch.nn, submod_class.__name__)
                     if submod_class == nn_class:
                         self.assertEqual(len(node.args), 0)
+
+    def test_normalize_args_preserve_meta(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, a):
+                return torch.add(a, 3)
+
+        m = MyModule()
+        traced = symbolic_trace(m)
+
+        for node in traced.graph.nodes:
+            if node.op == "call_function" and node.target == torch.add:
+                node.meta["my_key"] = 7
+                break
+        else:
+            self.fail("Didn't find call_function torch.add")
+
+        input = torch.randn(2, 3)
+        ShapeProp(traced).propagate(input)
+        traced = NormalizeArgs(traced).transform()
+
+        for node in traced.graph.nodes:
+            if node.op == "call_function" and node.target == torch.add:
+                self.assertTrue("my_key" in node.meta)
+                self.assertEqual(node.meta["my_key"], 7)
+                break
+        else:
+            self.fail("Didn't find call_function torch.add")
 
     @skipIfNoTorchVision
     def test_annotate_returns_with_schema(self):
@@ -1400,6 +1471,7 @@ class TestNormalizeOperators(JitTestCase):
             "reshape_as",
             "resize_",
             "resize_as_",
+            "special.zeta",
             "to_sparse",
             "view",
             "view_as",
