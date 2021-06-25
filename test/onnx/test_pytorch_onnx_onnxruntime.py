@@ -40,14 +40,37 @@ from torch.onnx import register_custom_op_symbolic, unregister_custom_op_symboli
 from torch.onnx.utils import ONNXCheckerError
 
 
+def flatten_tuples(elem):
+    tup = []
+    for t in elem:
+        if isinstance(t, (tuple)):
+            tup += flatten_tuples(t)
+        else:
+            tup += [t]
+    return tup
+
+
 def to_numpy(elem):
     if isinstance(elem, torch.Tensor):
         if elem.requires_grad:
             return elem.detach().cpu().numpy()
         else:
             return elem.cpu().numpy()
+    elif isinstance(elem, list) or isinstance(elem, tuple):
+        return [to_numpy(inp) for inp in elem]
+    elif isinstance(elem, bool):
+        return np.array(elem, dtype=bool)
+    elif isinstance(elem, int):
+        return np.array(elem, dtype=int)
+    elif isinstance(elem, float):
+        return np.array(elem, dtype=float)
+    elif isinstance(elem, dict):
+        dict_ = []
+        for k in elem:
+            dict_ += [to_numpy(k)] + [to_numpy(elem[k])]
+        return dict_
     else:
-        return elem
+        return RuntimeError("Input has unknown type.")
 
 
 def convert_to_onnx(model, input=None, opset_version=9, example_outputs=None,
@@ -80,10 +103,9 @@ def inline_flatten_list(inputs, res_list):
 
 
 def run_ort(ort_sess, input):
-    input_copy = copy.deepcopy(input)
-    inputs = [to_numpy(inp) for inp in input]
-
-    ort_inputs = dict((ort_sess.get_inputs()[i].name, input) for i, input in enumerate(inputs))
+    input = flatten_tuples(input)
+    input = to_numpy(input)
+    ort_inputs = dict((ort_sess.get_inputs()[i].name, input) for i, input in enumerate(input))
     ort_outs = ort_sess.run(None, ort_inputs)
     return inline_flatten_list(ort_outs, [])
 
@@ -105,7 +127,8 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                    dynamic_axes=None, test_with_inputs=None,
                    input_names=None, output_names=None,
                    fixed_batch_size=False, dict_check=True,
-                   training=None, remained_onnx_input_idx=None):
+                   training=None, remained_onnx_input_idx=None,
+                   flatten=True):
     if training is not None and training == torch.onnx.TrainingMode.TRAINING:
         model.train()
     elif training is None or training == torch.onnx.TrainingMode.EVAL:
@@ -147,7 +170,12 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
             for idx in remained_onnx_input_idx:
                 input_onnx.append(input[idx])
             input = input_onnx
-        ort_outs = run_ort(ort_sess, input)
+
+        input_copy = copy.deepcopy(input)
+        if flatten:
+            input_copy, _ = torch.jit._flatten(input_copy)
+
+        ort_outs = run_ort(ort_sess, input_copy)
         ort_compare_with_pytorch(ort_outs, output, rtol, atol)
 
 
@@ -169,6 +197,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                 ort_outs = run_ort(ort_sess, test_input)
                 ort_compare_with_pytorch(ort_outs, output, rtol, atol)
 
+
 def _init_test_generalized_rcnn_transform():
     min_size = 100
     max_size = 200
@@ -176,6 +205,7 @@ def _init_test_generalized_rcnn_transform():
     image_std = [0.229, 0.224, 0.225]
     transform = GeneralizedRCNNTransform(min_size, max_size, image_mean, image_std)
     return transform
+
 
 def _init_test_rpn():
     anchor_sizes = ((32,), (64,), (128,), (256,), (512,))
@@ -265,14 +295,15 @@ class TestONNXRuntime(unittest.TestCase):
                  batch_size=2, use_gpu=True, dynamic_axes=None, test_with_inputs=None,
                  input_names=None, output_names=None, fixed_batch_size=False, dict_check=True,
                  training=None, remained_onnx_input_idx=None):
-        def _run_test(m, remained_onnx_input_idx):
+        def _run_test(m, remained_onnx_input_idx, flatten=True):
             return run_model_test(self, m, batch_size=batch_size,
                                   input=input, use_gpu=use_gpu, rtol=rtol, atol=atol,
                                   do_constant_folding=do_constant_folding,
                                   dynamic_axes=dynamic_axes, test_with_inputs=test_with_inputs,
                                   input_names=input_names, output_names=output_names,
                                   fixed_batch_size=fixed_batch_size, dict_check=dict_check,
-                                  training=training, remained_onnx_input_idx=remained_onnx_input_idx)
+                                  training=training, remained_onnx_input_idx=remained_onnx_input_idx,
+                                  flatten=flatten)
 
         if isinstance(remained_onnx_input_idx, dict):
             scripting_remained_onnx_input_idx = remained_onnx_input_idx['scripting']
@@ -283,7 +314,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         if self.is_script_test_enabled:
             script_model = torch.jit.script(model)
-            _run_test(script_model, scripting_remained_onnx_input_idx)
+            _run_test(script_model, scripting_remained_onnx_input_idx, flatten=False)
 
         _run_test(model, tracing_remained_onnx_input_idx)
 
@@ -6224,11 +6255,12 @@ class TestONNXRuntime(unittest.TestCase):
                 return torch.nn.functional.pad(x, pad)
 
         x = torch.randn(2, 2, 4, 4)
-        y = pad = (torch.tensor(2, dtype=torch.int32), torch.tensor(4, dtype=torch.int32))
+        y = pad = [2, 4]
         self.run_test(Pad(), (x, y))
 
-        y = pad = (torch.tensor(2, dtype=torch.int64), torch.tensor(4, dtype=torch.int64))
+        y = pad = [torch.tensor(2, dtype=torch.int64), torch.tensor(4, dtype=torch.int64)]
         self.run_test(Pad(), (x, y))
+
 
     @skipIfUnsupportedMaxOpsetVersion(10)
     def test_unsupported_pad(self):
