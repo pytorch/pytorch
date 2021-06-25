@@ -2611,6 +2611,46 @@ graph(%x.1 : Tensor):
   testing::FileCheck().check_not("aten::relu_")->run(*graph);
 }
 
+TEST(TestAutodiff, SneakyBasic) {
+  auto graph_string = R"IR(
+graph(%1 : Tensor,
+      %2 : int[]):
+  %3 : int = prim::Constant[value=0]()
+  %grad_tensors.1 : Tensor[] = prim::GradOf[name="aten::cat"](%1)
+    block0():
+      %grad_tensors.2 : Tensor[] = aten::split_with_sizes(%1, %2, %3) # <string>:155:31
+      -> (%grad_tensors.2)
+  return (%grad_tensors.1))IR";
+  auto g = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, g.get());
+
+  LowerGradOf(*g.get());
+  GRAPH_DUMP("After lower", g);
+
+  {
+    Code code(g, "");
+    InterpreterState interp(code);
+    Stack stack;
+    stack.push_back(at::rand({6}));
+    stack.push_back(std::vector<int64_t>{1, 2, 3});
+    interp.run(stack);
+    ASSERT_TRUE(stack.back().isTensorList());
+  }
+
+  {
+    Code code(g, "");
+    InterpreterState interp(code);
+    Stack stack;
+    // we are push an Undefined tensor to emulate
+    // a fake zero gradient that autograd passes
+    // into backward graphs
+    stack.push_back(at::Tensor{});
+    stack.push_back(std::vector<int64_t>{1, 2, 3});
+    interp.run(stack);
+    ASSERT_TRUE(stack.back().isTensorList());
+  }
+}
+
 TEST(TestFunctionalToInplaceActivation, Basic) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> vmap;
