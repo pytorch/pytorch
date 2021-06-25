@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
-#include <THC/THCAtomics.cuh>
+#include <ATen/native/cuda/KernelUtils.cuh>
 
 namespace at { namespace native {
 
@@ -252,33 +252,47 @@ scalar_t get_value_bounded(
   return static_cast<scalar_t>(0);
 }
 
-template<typename scalar_t>
+template<typename scalar_t, typename index_t>
 static __forceinline__ __device__
 void safe_add_2d(scalar_t *data, int h, int w,
                  int sH, int sW, int H, int W,
-                 scalar_t delta) {
+                 scalar_t delta,
+                 const index_t NC_offset,
+                 const index_t memory_span) {
   if (within_bounds_2d(h, w, H, W)) {
-    gpuAtomicAdd(data + h * sH + w * sW, delta);
+    fastAtomicAdd(data,
+                  NC_offset + h * sH + w * sW,
+                  memory_span,
+                  delta,
+                  true);
   }
 }
 
-template<typename scalar_t>
+template<typename scalar_t, typename index_t>
 static __forceinline__ __device__
 void safe_add_3d(scalar_t *data, int d, int h, int w,
                  int sD, int sH, int sW, int D, int H, int W,
-                 scalar_t delta) {
+                 scalar_t delta,
+                 const index_t NC_offset,
+                 const index_t memory_span) {
   if (within_bounds_3d(d, h, w, D, H, W)) {
-    gpuAtomicAdd(data + d * sD + h * sH + w * sW, delta);
+    fastAtomicAdd(data,
+                  NC_offset + d * sD + h * sH + w * sW,
+                  memory_span,
+                  delta,
+                  true);
   }
 }
 
-template<typename scalar_t>
+template<typename scalar_t, typename index_t>
 static __forceinline__ __device__
 void add_value_bounded(
     scalar_t* data, scalar_t x, scalar_t y, int W, int H, int sW, int sH,
     scalar_t delta,
     GridSamplerPadding padding_mode,
-    bool align_corners) {
+    bool align_corners,
+    const index_t NC_offset,
+    const index_t memory_span) {
 
   x = compute_coordinates(x, W, padding_mode, align_corners);
   y = compute_coordinates(y, H, padding_mode, align_corners);
@@ -286,7 +300,7 @@ void add_value_bounded(
   int ix = static_cast<int>(x);
   int iy = static_cast<int>(y);
 
-  safe_add_2d(data, iy, ix, sH, sW, H, W, delta);
+  safe_add_2d(data, iy, ix, sH, sW, H, W, delta, NC_offset, memory_span);
 }
 
 // Calculate the differential of the cubic convolution, i.e. `d coeff / d x`

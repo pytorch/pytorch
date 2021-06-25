@@ -100,6 +100,50 @@ Tensor* computeSum(
       reductionDims);
 }
 
+Tensor* computeMean(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType) {
+  Dtype dtype = kFloat;
+  if (outputType) {
+    dtype = Dtype(*outputType);
+  }
+  BufHandle ResultBuf("mean", outputShape, dtype);
+  BufHandle InputBuf = c10::get<BufHandle>(inputs[0]);
+  std::vector<ExprHandle> mean_dims_expr;
+  if (auto mean_dims = c10::get_if<IntList>(&inputs[1])) {
+    mean_dims_expr = c10::fmap<ExprHandle>(*mean_dims);
+  } else {
+    // When dims argument is not specified, reduce over all dimensions
+    for (int64_t idx = 0; idx < InputBuf.ndim(); idx++) {
+      mean_dims_expr.push_back(idx);
+    }
+  }
+  return new Tensor(
+      ResultBuf.node(),
+      ExternalCall::make(
+          ResultBuf, "nnc_aten_mean", {InputBuf}, mean_dims_expr));
+}
+
+Tensor* computeAdaptiveAvgPool2d(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType) {
+  Dtype dtype = kFloat;
+  if (outputType) {
+    dtype = Dtype(*outputType);
+  }
+  BufHandle ResultBuf("adaptive_avgpool2d", outputShape, dtype);
+  auto out_size_param = c10::get<IntList>(inputs[1]);
+  return new Tensor(
+      ResultBuf.node(),
+      ExternalCall::make(
+          ResultBuf,
+          "nnc_aten_adaptive_avg_pool2d",
+          {c10::get<BufHandle>(inputs[0])},
+          c10::fmap<ExprHandle>(out_size_param)));
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
