@@ -57,7 +57,7 @@ THStorage* THStorage_new() {
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
                            c10::StorageImpl::use_byte_size_t(),
                            0,
-                           getTHDefaultAllocator(),
+                           c10::GetDefaultCPUAllocator(),
                            true)
                            .release();
   return storage;
