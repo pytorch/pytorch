@@ -524,9 +524,8 @@ class TestFunctionalIterDataPipe(TestCase):
 
         input_dp = IDP([list(range(10)) for _ in range(3)])
 
-        def fn(item, dtype=torch.float, *, sum=False):
-            data = torch.tensor(item, dtype=dtype)
-            return data if not sum else data.sum()
+        def fn(item, *, dtype=torch.float):
+            return torch.tensor(item, dtype=dtype)
 
         with warnings.catch_warnings(record=True) as wa:
             map_dp = input_dp.map(lambda ls: ls * 2, nesting_level=0)

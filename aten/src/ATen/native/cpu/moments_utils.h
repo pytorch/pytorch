@@ -55,7 +55,7 @@ void AddMomentsVec(
 // https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
 // https://en.wikipedia.org/wiki/Pairwise_summation
 template <typename T, int64_t kMaxDepth>
-std::pair<T, T> RowwiseMomentsImpl(const T* X, int64_t N) {
+std::pair<T, T> RowwiseMomentsImpl(const T* X, int64_t N, int64_t ddof = 0) {
   using Vec = vec::Vectorized<T>;
 
   constexpr int64_t kVecSize = Vec::size();
@@ -119,26 +119,26 @@ std::pair<T, T> RowwiseMomentsImpl(const T* X, int64_t N) {
     AddMoments(n, m1_arr[i], m2_arr[i], m0, m1, m2);
   }
 
-  return std::make_pair(m1, m2 / static_cast<T>(N));
+  return std::make_pair(m1, m2 / static_cast<T>(N - ddof));
 }
 
 template <typename T>
-std::pair<T, T> RowwiseMoments(const T* X, int64_t N) {
+std::pair<T, T> RowwiseMoments(const T* X, int64_t N, int64_t ddof = 0) {
   using Vec = vec::Vectorized<T>;
   constexpr int64_t kVecSize = Vec::size();
   const int64_t n = N / kVecSize;
   const int64_t m = divup(n, kChunkSize);
   const int64_t depth = CeilLog2(m);
   if (depth <= 4) {
-    return RowwiseMomentsImpl<T, 4>(X, N);
+    return RowwiseMomentsImpl<T, 4>(X, N, ddof);
   } else if (depth <= 8) {
-    return RowwiseMomentsImpl<T, 8>(X, N);
+    return RowwiseMomentsImpl<T, 8>(X, N, ddof);
   } else if (depth <= 16) {
-    return RowwiseMomentsImpl<T, 16>(X, N);
+    return RowwiseMomentsImpl<T, 16>(X, N, ddof);
   } else if (depth <= 32) {
-    return RowwiseMomentsImpl<T, 32>(X, N);
+    return RowwiseMomentsImpl<T, 32>(X, N, ddof);
   } else {
-    return RowwiseMomentsImpl<T, 64>(X, N);
+    return RowwiseMomentsImpl<T, 64>(X, N, ddof);
   }
 }
 
