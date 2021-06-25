@@ -197,6 +197,26 @@ class TestMisc(PackageTestCase):
         self.assertTrue(imported_mod.is_from_package())
         self.assertFalse(mod.is_from_package())
 
+    def test_std_lib_sys_hackery_checks(self):
+        """
+        The standard library performs sys.module assignment hackery which
+        causes modules who do this hackery to fail on import. See
+        https://github.com/pytorch/pytorch/issues/57490 for more information.
+        """
+        import package_a.std_sys_module_hacks
+
+        buffer = BytesIO()
+        mod = package_a.std_sys_module_hacks.Module()
+
+        with PackageExporter(buffer, verbose=False) as pe:
+            pe.intern("**")
+            pe.save_pickle("obj", "obj.pkl", mod)
+
+        buffer.seek(0)
+        pi = PackageImporter(buffer)
+        mod = pi.load_pickle("obj", "obj.pkl")
+        mod()
+
 
 if __name__ == "__main__":
     run_tests()
