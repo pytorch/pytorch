@@ -27,7 +27,7 @@ bool is_allowed_dim_on_scalar_tensor(int64_t dim) {
 
 
 template <typename F, F Func, typename... ExtraArgs>
-std::tuple<Tensor,optional<int64_t>> reduction_dim_batch_rule(
+std::tuple<Tensor,optional<int64_t>> reduction_dimarray_batch_rule(
     const Tensor& self, optional<int64_t> self_bdim, IntArrayRef dims, ExtraArgs... extra_args) {
   if (!self_bdim.has_value()) {
     return std::make_tuple( Func(self, dims, std::forward<ExtraArgs>(extra_args)...), nullopt );
@@ -52,13 +52,29 @@ std::tuple<Tensor,optional<int64_t>> reduction_dim_batch_rule(
   return std::make_tuple( result, 0 );
 }
 
+template <typename F, F Func, typename... ExtraArgs>
+std::tuple<Tensor,optional<int64_t>> reduction_dim_batch_rule(
+    const Tensor& self, optional<int64_t> self_bdim, int64_t dim, ExtraArgs... extra_args) {
+  if (!self_bdim.has_value()) {
+    return std::make_tuple( Func(self, dim, std::forward<ExtraArgs>(extra_args)...), nullopt );
+  }
+  auto logical_dim = rankWithoutBatchDim(self, self_bdim);
+  if (logical_dim == 0 && is_allowed_dim_on_scalar_tensor(dim)) {
+    return std::make_tuple(self.clone(), 0);
+  }
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  int64_t new_dim = getPhysicalDim(self, self_bdim.has_value(), dim);
+  auto result = Func(self_, new_dim, std::forward<ExtraArgs>(extra_args)...);
+  return std::make_tuple( result, 0 );
+}
+
 // For now I'm not macroing these (don't see another way to do it), since I'm
 // worried about various edge cases popping up that make things more annoying.
 // Will re-evaluate after adding more reduction batching rules
 
 std::tuple<Tensor,optional<int64_t>> sum_dim_batch_rule(
     const Tensor& self, optional<int64_t> self_bdim, IntArrayRef dims, bool keepdim, optional<ScalarType> dtype) {
-  return reduction_dim_batch_rule<decltype(&ATEN_FN2(sum, dim_IntList)), &at::sum, bool, optional<ScalarType>>(self, self_bdim, dims, keepdim, dtype);
+  return reduction_dimarray_batch_rule<decltype(&ATEN_FN2(sum, dim_IntList)), &at::sum, bool, optional<ScalarType>>(self, self_bdim, dims, keepdim, dtype);
 }
 
 std::tuple<Tensor,optional<int64_t>> sum_batch_rule(
@@ -68,7 +84,7 @@ std::tuple<Tensor,optional<int64_t>> sum_batch_rule(
 
 std::tuple<Tensor,optional<int64_t>> var_dim_batch_rule(
     const Tensor& self, optional<int64_t> self_bdim, IntArrayRef dims, bool unbiased, bool keepdim) {
-  return reduction_dim_batch_rule<decltype(&ATEN_FN2(var, dim)), &at::var, bool, bool>(self, self_bdim, dims, unbiased, keepdim);
+  return reduction_dimarray_batch_rule<decltype(&ATEN_FN2(var, dim)), &at::var, bool, bool>(self, self_bdim, dims, unbiased, keepdim);
 }
 
 std::tuple<Tensor,optional<int64_t>> var_batch_rule(
@@ -78,7 +94,7 @@ std::tuple<Tensor,optional<int64_t>> var_batch_rule(
 
 std::tuple<Tensor,optional<int64_t>> mean_dim_batch_rule(
     const Tensor& self, optional<int64_t> self_bdim, IntArrayRef dims, bool keepdim, optional<ScalarType> dtype) {
-  return reduction_dim_batch_rule<decltype(&ATEN_FN2(mean, dim)), &at::mean, bool, optional<ScalarType>>(self, self_bdim, dims, keepdim, dtype);
+  return reduction_dimarray_batch_rule<decltype(&ATEN_FN2(mean, dim)), &at::mean, bool, optional<ScalarType>>(self, self_bdim, dims, keepdim, dtype);
 }
 
 std::tuple<Tensor,optional<int64_t>> mean_batch_rule(
@@ -88,7 +104,7 @@ std::tuple<Tensor,optional<int64_t>> mean_batch_rule(
 
 std::tuple<Tensor,optional<int64_t>> nansum_dim_batch_rule(
     const Tensor& self, optional<int64_t> self_bdim, IntArrayRef dims, bool keepdim, optional<ScalarType> dtype) {
-  return reduction_dim_batch_rule<decltype(&ATEN_FN2(nansum, dim_IntList)), &at::nansum, bool, optional<ScalarType>>(self, self_bdim, dims, keepdim, dtype);
+  return reduction_dimarray_batch_rule<decltype(&ATEN_FN2(nansum, dim_IntList)), &at::nansum, bool, optional<ScalarType>>(self, self_bdim, dims, keepdim, dtype);
 }
 
 std::tuple<Tensor,optional<int64_t>> nansum_batch_rule(
@@ -98,12 +114,17 @@ std::tuple<Tensor,optional<int64_t>> nansum_batch_rule(
 
 std::tuple<Tensor,optional<int64_t>> std_dim_batch_rule(
     const Tensor& self, optional<int64_t> self_bdim, IntArrayRef dims, bool unbiased, bool keepdim) {
-  return reduction_dim_batch_rule<decltype(&ATEN_FN2(std, dim)), &at::std, bool, bool>(self, self_bdim, dims, unbiased, keepdim);
+  return reduction_dimarray_batch_rule<decltype(&ATEN_FN2(std, dim)), &at::std, bool, bool>(self, self_bdim, dims, unbiased, keepdim);
 }
 
 std::tuple<Tensor,optional<int64_t>> std_batch_rule(
     const Tensor& self, optional<int64_t> self_bdim, bool unbiased) {
   return std_dim_batch_rule(self, self_bdim, range(0, self.dim() - 1), unbiased, false);
+}
+
+std::tuple<Tensor,optional<int64_t>> prod_dim_batch_rule(
+    const Tensor& self, optional<int64_t> self_bdim, int64_t dim, bool keepdim, optional<ScalarType> dtype) {
+  return reduction_dim_batch_rule<decltype(&ATEN_FN2(prod, dim_int)), &at::prod, bool, optional<ScalarType>>(self, self_bdim, dim, keepdim, dtype);
 }
 
 
@@ -118,7 +139,7 @@ std::tuple<Tensor,optional<int64_t>> argx_batch_rule(
   auto self_ = moveBatchDimToFront(self, self_bdim);
   if (!dim) {
     // If no dimension is given, then argmax gives you the flattened index of
-    // the maximum element. We need to do this flatten/keepdim setting in order
+    // the maximum element. We need to do this flatten/keepdim shenanigans in order
     // to preserve that behavior.
     dim = 0;
     if (self_.dim() > 1) {
@@ -180,14 +201,19 @@ _log_softmax_backward_data(
 
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
-  VMAP_SUPPORT("amax", SINGLE_ARG(reduction_dim_batch_rule<decltype(&at::amax), &at::amax, bool>));
-  VMAP_SUPPORT("amin", SINGLE_ARG(reduction_dim_batch_rule<decltype(&at::amin), &at::amin, bool>));
+  VMAP_SUPPORT("amax", SINGLE_ARG(reduction_dimarray_batch_rule<decltype(&at::amax), &at::amax, bool>));
+  VMAP_SUPPORT("amin", SINGLE_ARG(reduction_dimarray_batch_rule<decltype(&at::amin), &at::amin, bool>));
+
   VMAP_SUPPORT("argmax", SINGLE_ARG(argx_batch_rule<decltype(&at::argmax), &at::argmax>));
   VMAP_SUPPORT("argmin", SINGLE_ARG(argx_batch_rule<decltype(&at::argmin), &at::argmin>));
+  VMAP_SUPPORT("cumprod", SINGLE_ARG(reduction_dim_batch_rule<decltype(&ATEN_FN(cumprod)), &at::cumprod, optional<ScalarType>>));
+  VMAP_SUPPORT("cumsum", SINGLE_ARG(reduction_dim_batch_rule<decltype(&ATEN_FN(cumsum)), &at::cumsum, optional<ScalarType>>));
+  VMAP_SUPPORT("log_softmax.int", SINGLE_ARG(reduction_dim_batch_rule<decltype(&ATEN_FN2(log_softmax, int)), &at::log_softmax, optional<ScalarType>>));
   VMAP_SUPPORT("nansum", nansum_batch_rule);
   VMAP_SUPPORT("nansum.dim_IntList", nansum_dim_batch_rule);
   VMAP_SUPPORT("mean", mean_batch_rule);
   VMAP_SUPPORT("mean.dim", mean_dim_batch_rule);
+  VMAP_SUPPORT("prod.dim_int", prod_dim_batch_rule);
   VMAP_SUPPORT("std", std_batch_rule);
   VMAP_SUPPORT("std.dim", std_dim_batch_rule);
   VMAP_SUPPORT("sum", sum_batch_rule);
