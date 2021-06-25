@@ -449,13 +449,13 @@ jobs:
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - name: show the stuff
         run: |
-          find ${GITHUB_WORKSPACE}/pytorch.github.io/ | grep -v .git
+          find ${GITHUB_WORKSPACE}/pytorch.github.io/
           echo "wowowmeow"
           echo "wowowmeow"
           echo "wowowmeow"
           echo "wowowmeow"
           echo "wowowmeow"
-          find . | grep -v .git
+          find .
       - uses: driazati/upload-artifact-s3@f0a4a423c1e8743cf07460a483f26f230e6a2d68
         name: Upload docs preview
         with:
