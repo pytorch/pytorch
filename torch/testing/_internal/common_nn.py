@@ -1568,6 +1568,15 @@ new_module_tests = [
     ),
     dict(
         module_name='LayerNorm',
+        constructor_args=([56, 56, 56], 1e-5, False),
+        cpp_constructor_args='torch::nn::LayerNormOptions({56, 56, 56}).eps(1e-5).elementwise_affine(false)',
+        input_size=(4, 56, 56, 56),
+        cudnn=True,
+        check_eval=True,
+        desc='3d_no_affine_large_feature',
+    ),
+    dict(
+        module_name='LayerNorm',
         constructor_args=([5], 1e-3),
         cpp_constructor_args='torch::nn::LayerNormOptions({5}).eps(1e-3)',
         input_size=(0, 5),
