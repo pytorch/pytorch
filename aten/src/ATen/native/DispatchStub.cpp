@@ -120,7 +120,8 @@ void* DispatchStubImpl::choose_cpu_impl(
     // nansum & sum currently don't have AVX512 kernels, as even with AVX2,
     // they have poor accuracy with Float16 (GH issues 59415 & 59489), and
     // even poorer with AVX512. Until their accuracy is improved, they would
-    // be dispatched to AVX2 kernels.
+    // be dispatched to AVX2 kernels. Quantization kernels have also been
+    // disabled on Windows for AVX512 because some of their tests are flaky.
     if C10_UNLIKELY(!AVX512) {
       TORCH_INTERNAL_ASSERT(AVX2, "DispatchStub: missing AVX2 kernel");
       return AVX2;

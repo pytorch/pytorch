@@ -137,7 +137,6 @@ static void logcumsumexp_cpu_kernel(Tensor& result, const Tensor& self, int64_t 
   });
 }
 
-
 // TODO: Implement `nansum` similar to the stable `sum`
 // implementation in cpu/SumKernel.cpp
 static void nansum_kernel_impl(TensorIterator& iter) {
@@ -411,15 +410,10 @@ static void argmin_kernel_impl(TensorIterator &iter) {
 // nansum on Float16 has poor accuracy with AVX2, and more so with AVX512.
 // So until it's fixed, it won't be dispatched with AVX512. GH issue 59415.
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-#ifdef CPU_CAPABILITY_DEFAULT
-REGISTER_ARCH_DISPATCH(nansum_stub, DEFAULT, &nansum_kernel_impl);
-#elif defined(CPU_CAPABILITY_AVX2)
-REGISTER_AVX2_DISPATCH(nansum_stub, &nansum_kernel_impl);
-#elif defined(CPU_CAPABILITY_VSX)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_VSX_DISPATCH(nansum_stub, &nansum_kernel_impl);
-#elif defined(CPU_CAPABILITY_AVX512)
-REGISTER_AVX512_DISPATCH(nansum_stub, static_cast<reduce_fn>(nullptr));
+#ifndef CPU_CAPABILITY_AVX512
+REGISTER_DISPATCH(nansum_stub, &nansum_kernel_impl);
+#else
+REGISTER_NO_AVX512_DISPATCH(nansum_stub, reduce_fn);
 #endif
 REGISTER_DISPATCH(std_var_stub, &std_var_kernel_impl);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
