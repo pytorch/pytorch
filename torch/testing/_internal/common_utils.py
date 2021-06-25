@@ -1325,7 +1325,8 @@ class TestCase(expecttest.TestCase):
     # TODO: default exact_device to True
     def assertEqual(self, x, y, msg: Optional[str] = None, *,
                     atol: Optional[float] = None, rtol: Optional[float] = None,
-                    equal_nan=True, exact_dtype=True, exact_device=False, exact_stride=False) -> None:
+                    equal_nan=True, exact_dtype=True, exact_device=False, exact_stride=False,
+                    exact_is_coalesced=True) -> None:
         assert (atol is None) == (rtol is None), "If one of atol or rtol is specified, then the other must be too"
         debug_msg: Optional[str] = None
 
@@ -1336,6 +1337,7 @@ class TestCase(expecttest.TestCase):
             check_device=exact_device,
             check_dtype=exact_dtype,
             check_stride=exact_stride,
+            check_is_coalesced=exact_is_coalesced,
             equal_nan=equal_nan,
             msg=msg,
         )
@@ -1348,10 +1350,12 @@ class TestCase(expecttest.TestCase):
         # Tensor x np.bool
         elif isinstance(x, torch.Tensor) and isinstance(y, np.bool_):
             self.assertEqual(x.item(), y, atol=atol, rtol=rtol, msg=msg,
-                             exact_dtype=exact_dtype, exact_device=exact_device, exact_stride=exact_stride)
+                             exact_dtype=exact_dtype, exact_device=exact_device, exact_stride=exact_stride,
+                             exact_is_coalesced=exact_is_coalesced)
         elif isinstance(y, torch.Tensor) and isinstance(x, np.bool_):
             self.assertEqual(x, y.item(), atol=atol, rtol=rtol, msg=msg,
-                             exact_dtype=exact_dtype, exact_device=exact_device, exact_stride=exact_stride)
+                             exact_dtype=exact_dtype, exact_device=exact_device, exact_stride=exact_stride,
+                             exact_is_coalesced=exact_is_coalesced)
 
         # Tensor x Tensor
         elif isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
@@ -1363,25 +1367,31 @@ class TestCase(expecttest.TestCase):
                 #  when https://github.com/pytorch/pytorch/pull/58926 has landed
                 self.assertEqual(x.qscheme(), y.qscheme(), atol=atol, rtol=rtol,
                                  msg=msg, exact_dtype=exact_dtype,
-                                 exact_device=exact_device, exact_stride=exact_stride)
+                                 exact_device=exact_device, exact_stride=exact_stride,
+                                 exact_is_coalesced=exact_is_coalesced)
 
                 if x.qscheme() == torch.per_tensor_affine:
                     self.assertEqual(x.q_scale(), y.q_scale(), atol=atol, rtol=rtol,
                                      msg=msg, exact_dtype=exact_dtype,
-                                     exact_device=exact_device, exact_stride=exact_stride)
+                                     exact_device=exact_device, exact_stride=exact_stride,
+                                     exact_is_coalesced=exact_is_coalesced)
                     self.assertEqual(x.q_zero_point(), y.q_zero_point(),
                                      atol=atol, rtol=rtol, msg=msg,
-                                     exact_dtype=exact_dtype, exact_device=exact_device, exact_stride=exact_stride)
+                                     exact_dtype=exact_dtype, exact_device=exact_device, exact_stride=exact_stride,
+                                     exact_is_coalesced=exact_is_coalesced)
                 elif x.qscheme() == torch.per_channel_affine:
                     self.assertEqual(x.q_per_channel_scales(), y.q_per_channel_scales(), atol=atol, rtol=rtol,
                                      msg=msg, exact_dtype=exact_dtype,
-                                     exact_device=exact_device, exact_stride=exact_stride)
+                                     exact_device=exact_device, exact_stride=exact_stride,
+                                     exact_is_coalesced=exact_is_coalesced)
                     self.assertEqual(x.q_per_channel_zero_points(), y.q_per_channel_zero_points(),
                                      atol=atol, rtol=rtol, msg=msg,
-                                     exact_dtype=exact_dtype, exact_device=exact_device, exact_stride=exact_stride)
+                                     exact_dtype=exact_dtype, exact_device=exact_device, exact_stride=exact_stride,
+                                     exact_is_coalesced=exact_is_coalesced)
                     self.assertEqual(x.q_per_channel_axis(), y.q_per_channel_axis(),
                                      atol=atol, rtol=rtol, msg=msg,
-                                     exact_dtype=exact_dtype, exact_device=exact_device, exact_stride=exact_stride)
+                                     exact_dtype=exact_dtype, exact_device=exact_device, exact_stride=exact_stride,
+                                     exact_is_coalesced=exact_is_coalesced)
 
                 result, debug_msg_compare = self._compareTensors(x.int_repr().to(torch.int32),
                                                                  y.int_repr().to(torch.int32),
@@ -1443,6 +1453,7 @@ class TestCase(expecttest.TestCase):
                 exact_dtype=exact_dtype,
                 exact_device=exact_device,
                 exact_stride=exact_stride,
+                exact_is_coalesced=exact_is_coalesced,
             )
         elif isinstance(x, string_classes) and isinstance(y, string_classes):
             debug_msg = ("Attempted to compare [string] types: "
@@ -1456,16 +1467,19 @@ class TestCase(expecttest.TestCase):
             if isinstance(x, OrderedDict) and isinstance(y, OrderedDict):
                 self.assertEqual(x.items(), y.items(), atol=atol, rtol=rtol,
                                  msg=msg, exact_dtype=exact_dtype,
-                                 exact_device=exact_device, exact_stride=exact_stride)
+                                 exact_device=exact_device, exact_stride=exact_stride,
+                                 exact_is_coalesced=exact_is_coalesced)
             else:
                 self.assertEqual(set(x.keys()), set(y.keys()), atol=atol, rtol=rtol,
                                  msg=msg, exact_dtype=exact_dtype,
-                                 exact_device=exact_device, exact_stride=exact_stride)
+                                 exact_device=exact_device, exact_stride=exact_stride,
+                                 exact_is_coalesced=exact_is_coalesced)
                 key_list = list(x.keys())
                 self.assertEqual([x[k] for k in key_list],
                                  [y[k] for k in key_list],
                                  atol=atol, rtol=rtol, msg=msg,
-                                 exact_dtype=exact_dtype, exact_device=exact_device, exact_stride=exact_stride)
+                                 exact_dtype=exact_dtype, exact_device=exact_device, exact_stride=exact_stride,
+                                 exact_is_coalesced=exact_is_coalesced)
         elif isinstance(x, type) and isinstance(y, type):
             # See TestTorch.test_assert_equal_generic_meta
             debug_msg = ("Attempted to compare [type] types: "
@@ -1477,7 +1491,8 @@ class TestCase(expecttest.TestCase):
             super().assertEqual(len(x), len(y), msg=self._get_assert_msg(msg, debug_msg=debug_msg))
             for x_, y_ in zip(x, y):
                 self.assertEqual(x_, y_, atol=atol, rtol=rtol, msg=msg,
-                                 exact_dtype=exact_dtype, exact_device=exact_device, exact_stride=exact_stride)
+                                 exact_dtype=exact_dtype, exact_device=exact_device, exact_stride=exact_stride,
+                                 exact_is_coalesced=exact_is_coalesced)
         elif isinstance(x, bool) and isinstance(y, bool):
             super().assertTrue(x == y, msg=msg)
 
