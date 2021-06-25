@@ -2465,24 +2465,32 @@ class TestVmapOperators(Namespace.TestVmapBase):
                 vmap(op)(*args)
 
     def test_conv2d(self):
-        mod = torch.nn.Conv2d(4, 8, kernel_size=3)
-        arg_values = [torch.randn(2, 4, 15, 20), mod.weight, mod.bias]
-        kwarg_values = {}
-        for loop_out, batched_out in get_fallback_and_vmap_exhaustive(torch.conv2d, arg_values, kwarg_values):
-            self.assertEqual(loop_out, batched_out)
+        conv_setups = [
+            (torch.nn.Conv1d, torch.conv1d, [2, 4, 15]),
+            (torch.nn.Conv2d, torch.conv2d, [2, 4, 15, 20]),
+            (torch.nn.Conv3d, torch.conv3d, [2, 4, 15, 20, 25]),
+            # (torch.nn.ConvTranspose2d, torch.conv_transpose2d, [2, 4, 15, 20])
+        ]
+        for conv_mod, conv_fn, inp_shape in conv_setups:
+            mod = conv_mod(4, 8, kernel_size=3)
+            arg_values = [torch.randn(inp_shape), mod.weight, mod.bias]
+            kwarg_values = {}
+            for loop_out, batched_out in get_fallback_and_vmap_exhaustive(conv_fn, arg_values, kwarg_values):
+                self.assertEqual(loop_out, batched_out)
 
-        arg_values = [torch.randn(2, 4, 15, 20), mod.weight, None]
-        for loop_out, batched_out in get_fallback_and_vmap_exhaustive(torch.conv2d, arg_values, kwarg_values):
-            self.assertEqual(loop_out, batched_out)
+            arg_values = [torch.randn(inp_shape), mod.weight, None]
+            for loop_out, batched_out in get_fallback_and_vmap_exhaustive(conv_fn, arg_values, kwarg_values):
+                self.assertEqual(loop_out, batched_out)
 
-        mod2 = torch.nn.Conv2d(4, 8, kernel_size=3, groups=2, stride=3, padding=1, dilation = 2)
-        arg_values = [torch.randn(2, 4, 15, 20), mod.weight, mod.bias]
-        for loop_out, batched_out in get_fallback_and_vmap_exhaustive(torch.conv2d, arg_values, kwarg_values):
-            self.assertEqual(loop_out, batched_out)
+            mod2 = torch.nn.Conv2d(4, 8, kernel_size=3, groups=2, stride=3, padding=1, dilation = 2)
+            arg_values = [torch.randn(inp_shape), mod.weight, mod.bias]
+            for loop_out, batched_out in get_fallback_and_vmap_exhaustive(conv_fn, arg_values, kwarg_values):
+                self.assertEqual(loop_out, batched_out)
 
-        arg_values = [torch.randn(2, 4, 15, 20), mod.weight, None]
-        for loop_out, batched_out in get_fallback_and_vmap_exhaustive(torch.conv2d, arg_values, kwarg_values):
-            self.assertEqual(loop_out, batched_out)
+            arg_values = [torch.randn(inp_shape), mod.weight, None]
+            for loop_out, batched_out in get_fallback_and_vmap_exhaustive(conv_fn, arg_values, kwarg_values):
+                self.assertEqual(loop_out, batched_out)
+
 
     def test_mode_key(self):
         def vmap_f(x):
