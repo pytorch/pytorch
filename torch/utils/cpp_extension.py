@@ -773,10 +773,10 @@ class BuildExtension(build_ext, object):
                 cuda_str_version = cuda_version.group(1)
                 cuda_ver = parse_version(cuda_str_version)
                 torch_cuda_version = parse_version(torch.version.cuda)  # type: ignore[arg-type]
-                if cuda_ver.major != torch_cuda_version.major:
+                if cuda_ver.major != torch_cuda_version.major:  # type: ignore[attr-defined]
                     raise RuntimeError(CUDA_MISMATCH_MESSAGE.format(
                         cuda_str_version, torch.version.cuda))
-                elif cuda_ver.minor != torch_cuda_version.minor:
+                elif cuda_ver.minor != torch_cuda_version.minor:  # type: ignore[attr-defined]
                     warnings.warn(CUDA_MISMATCH_WARN.format(
                         cuda_str_version, torch.version.cuda))
         else:
