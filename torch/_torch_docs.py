@@ -7619,7 +7619,8 @@ Args:
 Keyword args:
     {generator}
     {out}
-    {dtype}
+    dtype (`torch.dtype`, optional) - the desired data type of returned tensor. Default: if ``None``,
+        this function returns a tensor with dtype ``torch.int64``.
     {layout}
     {device}
     {requires_grad}
