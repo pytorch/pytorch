@@ -100,6 +100,10 @@ def convert(model: nn.Module, mapping: dict = None, config: dict = None) -> nn.M
     if 'sparse' in config:
         raise AttributeError('FP sparse convert is not yet supported')
 
-
-
+    quant_config = config.get('quantized', dict())
+    for mode in config.keys():
+        for fqn, mode_config in config[mode]:
+            module = _path_to_module(model, fqn)
+            torch.quantization.convert(module, mapping=mapping.get(mode, dict()), **mode_config)
+    return model
 
