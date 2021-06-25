@@ -398,7 +398,7 @@ class BuildExtension(build_ext, object):
                     break
             extension = next(extension_iter, None)
 
-        if cuda_ext:
+        if cuda_ext and not IS_HIP_EXTENSION:
             self._check_cuda_version()
 
         for extension in self.extensions:
