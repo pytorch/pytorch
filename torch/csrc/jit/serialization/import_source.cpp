@@ -651,7 +651,7 @@ struct SourceImporterImpl : public Resolver,
       const auto assign = Assign(statement);
 
       auto name = Var(Assign(statement).lhs()).name().name();
-      auto default_val = IValue();
+      c10::optional<IValue> default_val;
       if (assign.rhs().present()) {
         std::vector<IValue> parsed = type_parser.evaluateDefaults(
             assign.rhs().range(), {assign.rhs().get()}, {assign.type().get()});
@@ -663,7 +663,9 @@ struct SourceImporterImpl : public Resolver,
 
       field_names.emplace_back(std::move(name));
       field_types.emplace_back(std::move(type));
-      field_defaults.emplace_back(std::move(default_val));
+      if (default_val) {
+        field_defaults.emplace_back(std::move(*default_val));
+      }
     }
 
     auto tt = TupleType::createNamed(

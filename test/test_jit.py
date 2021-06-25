@@ -13987,6 +13987,33 @@ dedent """
         FileCheck().check(r"NamedTuple(x : int? = None, y : int = 2))")   \
                    .run(m.graph)
 
+    def test_namedtuple_default_values_missing(self):
+
+        class Point(NamedTuple):
+            x: Optional[int]
+            y: int
+            z: int = 3
+
+        make_global(Point)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+
+            def forward(self, point: Point):
+                return point
+
+        p1 = Point(x=3, y=2)
+        p2 = Point(x=3, y=2, z=1)
+
+        self.checkModule(M(), (p1,))
+        self.checkModule(M(), (p2,))
+
+        m = torch.jit.script(M())
+
+        FileCheck().check(r"NamedTuple(x : int?, int, z : int = 3))")   \
+                   .run(m.graph)
+
     def test_namedtuple_default_values_container_type(self):
 
         class Point(NamedTuple):

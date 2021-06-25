@@ -765,21 +765,24 @@ TupleTypePtr TupleType::createNamed(const c10::optional<c10::QualifiedName>& qua
   auto min_default_idx = field_names.size() - field_defaults.size();
   for (size_t i = 0; i < field_names.size(); ++i) {
     if (i < min_default_idx) {
-      arguments.emplace_back(
+      Argument arg{
           /*name=*/field_names[i],
           /*type=*/field_types[i],
-          /*N=*/i);
+          /*N=*/i};
+      arguments.emplace_back(std::move(arg));
     }
     else {
-      TORCH_CHECK(field_defaults[i].tagKind() != "Tensor", "Tensors are "
+      size_t j = i - min_default_idx;
+      TORCH_CHECK(field_defaults[j].tagKind() != "Tensor", "Tensors are "
                   "not supported as default NamedTuple fields. Their "
                   "mutability could lead to potential memory aliasing "
                   "problems");
-      arguments.emplace_back(
+      Argument arg{
           /*name=*/field_names[i],
           /*type=*/field_types[i],
           /*N=*/i,
-          /*default_value=*/field_defaults[i]);
+          /*default_value=*/field_defaults[j]};
+      arguments.emplace_back(std::move(arg));
     }
   }
 

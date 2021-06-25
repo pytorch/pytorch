@@ -13,6 +13,10 @@
 #include <tuple>
 #include <vector>
 
+#include <pybind11/complex.h>
+#include <pybind11/pybind11.h>
+#include <pybind11/pytypes.h>
+
 #include <Python.h>
 
 namespace torch {
@@ -947,9 +951,10 @@ TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
 
   std::vector<IValue> field_defaults;
   auto min_default_idx = field_names.size() - objects.size();
-  for (size_t i = min_default_idx; i < field_names.size(); ++i) {
-    auto type = tryToInferType(objects[i]);
-    IValue ival = toIValue(objects[i], type.type());
+  for (size_t i = min_default_idx, j = 0; i < field_names.size(); ++i, ++j) {
+    py::object o = objects[j];
+    auto type = tryToInferType(objects[j]);
+    IValue ival = toIValue(objects[j], type.type());
     TORCH_CHECK(
         ival.tagKind() != "Tensor",
         "Tensors are"
