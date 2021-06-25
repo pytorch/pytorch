@@ -1,4 +1,3 @@
-from torch.quantization.observer import ObserverBase
 import torch
 import operator
 from torch.fx import (
@@ -7,7 +6,6 @@ from torch.fx import (
 
 from torch.quantization import (
     propagate_qconfig_,
-    qconfig,
 )
 from torch.fx.graph import (
     Graph,
