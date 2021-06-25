@@ -13,3 +13,12 @@ from .scheduler.lambda_scheduler import LambdaSL
 
 # Parametrizations
 from .sparsifier.parametrization import MulBy
+
+# === Experimental ===
+
+# Parametrizations
+from .experimental.pruner.parametrization import PruningParametrization
+
+# Pruner
+from .experimental.pruner.base_pruner import BasePruner
+

@@ -19,7 +19,8 @@ class TestScheduler(TestCase):
         model = nn.Sequential(
             nn.Linear(16, 16)
         )
-        sparsifier = WeightNormSparsifier(model, config=None)
+        sparsifier = WeightNormSparsifier()
+        sparsifier.prepare(model, config=None)
         scheduler = ImplementedScheduler(sparsifier)
 
         assert scheduler.sparsifier is sparsifier
@@ -30,7 +31,8 @@ class TestScheduler(TestCase):
         model = nn.Sequential(
             nn.Linear(16, 16)
         )
-        sparsifier = WeightNormSparsifier(model, config=None)
+        sparsifier = WeightNormSparsifier()
+        sparsifier.prepare(model, config=None)
         assert sparsifier.module_groups[0]['sparsity_level'] == 0.5
         scheduler = ImplementedScheduler(sparsifier)
         assert sparsifier.module_groups[0]['sparsity_level'] == 0.5
@@ -41,7 +43,8 @@ class TestScheduler(TestCase):
         model = nn.Sequential(
             nn.Linear(16, 16)
         )
-        sparsifier = WeightNormSparsifier(model, config=None)
+        sparsifier = WeightNormSparsifier()
+        sparsifier.prepare(model, config=None)
         assert sparsifier.module_groups[0]['sparsity_level'] == 0.5
         scheduler = LambdaSL(sparsifier, lambda epoch: epoch * 10)
         assert sparsifier.module_groups[0]['sparsity_level'] == 0.0  # Epoch 0
