@@ -841,6 +841,7 @@ aten_cpu_source_non_codegen_list = [
 
 aten_cpu_source_codegen_list = [
     "aten/src/ATen/native/cpu/AdaptiveAvgPoolKernel.cpp",
+    "aten/src/ATen/native/cpu/AdaptiveMaxPoolKernel.cpp",
 ]
 
 # When building lite interpreter in OSS, "aten/src/ATen/native/cpu/AdaptiveAvgPoolKernel.cpp" will go through
