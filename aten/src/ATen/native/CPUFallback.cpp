@@ -101,8 +101,9 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   // a NEW tensor that shares the SAME storage as the original tensor.
   // However, the new tensor that we created cannot share the same storage,
   // since it lives on CPU and the original tensor lives on a different device.
-  // Because of that, we explicitly error out if someone attempts to call the
-  // CPU fallback on a view operator.
+  // Because of that, we warn if someone attempts to call the
+  // CPU fallback on a view operator (this is to maintain BC for view ops for XLA
+  // that fall back to CPU).
   const auto& schema_returns = op.schema().returns();
   const auto& num_returns = schema_returns.size();
   auto returns = torch::jit::last(stack, num_returns);
