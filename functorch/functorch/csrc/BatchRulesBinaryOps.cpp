@@ -7,6 +7,7 @@
 #include <functorch/csrc/BatchRulesHelper.h>
 #include <functorch/csrc/PlumbingHelper.h>
 #include <functorch/csrc/InPlacePlumbing.h>
+#include <ATen/Operators.h>
 
 namespace at { namespace functorch {
 
@@ -115,48 +116,43 @@ std::tuple<Tensor,optional<int64_t>> pow_scalar_tensor_batch_rule(
 }
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
-  using TensorTensorScalarType = Tensor (*)(const Tensor&, const Tensor&, const Scalar&);
-  using TensorTensorType = Tensor (*)(const Tensor&, const Tensor&);
-  using TensorScalarType = Tensor (*)(const Tensor&, const Scalar&);
-  using TensorScalarScalarType = Tensor (*)(const Tensor&, const Scalar&, const Scalar&);
-
-#define BINARY_POINTWISE_BATCH_RULE_SCALAR(op) \
-  binary_pointwise_batch_rule<TensorTensorScalarType, &op, const Scalar&>
 #define BINARY_POINTWISE_WITH_SCALAR(op) \
-  VMAP_SUPPORT(#op".Tensor", BINARY_POINTWISE_BATCH_RULE_SCALAR(at::op));
+  VMAP_SUPPORT(#op".Tensor", SINGLE_ARG(binary_pointwise_batch_rule<decltype(&ATEN_FN2(op, Tensor)), &op, const Scalar&>));
 
-#define BINARY_POINTWISE_BATCH_RULE(op) binary_pointwise_batch_rule<TensorTensorType, &op>
-#define BINARY_POINTWISE(op) VMAP_SUPPORT(#op".Tensor", BINARY_POINTWISE_BATCH_RULE(at::op));
+#define BINARY_POINTWISE(op) \
+  VMAP_SUPPORT(#op".Tensor", SINGLE_ARG(binary_pointwise_batch_rule<decltype(&ATEN_FN2(op, Tensor)), &at::op>));
 
   BINARY_POINTWISE_WITH_SCALAR(add);
   BINARY_POINTWISE_WITH_SCALAR(sub);
   BINARY_POINTWISE_WITH_SCALAR(rsub);
   BINARY_POINTWISE(mul);
-  VMAP_SUPPORT("add.Scalar", SINGLE_ARG(basic_unary_batch_rule<TensorScalarScalarType, &at::add, const Scalar&, const Scalar&>));
-  VMAP_SUPPORT("sub.Scalar", SINGLE_ARG(basic_unary_batch_rule<TensorScalarScalarType, &at::sub, const Scalar&, const Scalar&>));
-  VMAP_SUPPORT("rsub.Scalar", SINGLE_ARG(basic_unary_batch_rule<TensorScalarScalarType, &at::rsub, const Scalar&, const Scalar&>));
-  VMAP_SUPPORT("mul.Scalar", SINGLE_ARG(basic_unary_batch_rule<TensorScalarType, &at::mul, const Scalar&>));
-  VMAP_SUPPORT("div.Scalar", SINGLE_ARG(basic_unary_batch_rule<TensorScalarType, &at::div, const Scalar&>));
+  VMAP_SUPPORT("add.Scalar", SINGLE_ARG(basic_unary_batch_rule<decltype(&ATEN_FN2(add, Scalar)), &at::add, const Scalar&, const Scalar&>));
+  VMAP_SUPPORT("sub.Scalar", SINGLE_ARG(basic_unary_batch_rule<decltype(&ATEN_FN2(sub, Scalar)), &at::sub, const Scalar&, const Scalar&>));
+  VMAP_SUPPORT("rsub.Scalar", SINGLE_ARG(basic_unary_batch_rule<decltype(&ATEN_FN2(rsub, Scalar)), &at::rsub, const Scalar&, const Scalar&>));
+  VMAP_SUPPORT("mul.Scalar", SINGLE_ARG(basic_unary_batch_rule<decltype(&ATEN_FN2(mul, Scalar)), &at::mul, const Scalar&>));
+  VMAP_SUPPORT("div.Scalar", SINGLE_ARG(basic_unary_batch_rule<decltype(&ATEN_FN2(div, Scalar)), &at::div, const Scalar&>));
   BINARY_POINTWISE(div);
-  VMAP_SUPPORT("tanh_backward", BINARY_POINTWISE_BATCH_RULE(at::tanh_backward));
+  VMAP_SUPPORT("tanh_backward", SINGLE_ARG(binary_pointwise_batch_rule<decltype(&at::tanh_backward), &at::tanh_backward>));
   VMAP_SUPPORT("threshold_backward", SINGLE_ARG(
         binary_pointwise_batch_rule<decltype(&at::threshold_backward), &at::threshold_backward, const Scalar&>));
+  VMAP_SUPPORT("sigmoid_backward", SINGLE_ARG(
+        binary_pointwise_batch_rule<decltype(&at::sigmoid_backward), &at::sigmoid_backward>));
 
-  VMAP_SUPPORT("atan2", SINGLE_ARG(binary_pointwise_batch_rule<TensorTensorType, &at::atan2>));
+  VMAP_SUPPORT("atan2", SINGLE_ARG(binary_pointwise_batch_rule<decltype(&ATEN_FN(atan2)), &at::atan2>));
 
   // at::pow has three out-of-place overloads
-  VMAP_SUPPORT("pow.Tensor_Tensor", SINGLE_ARG(binary_pointwise_batch_rule<TensorTensorType, &at::pow>));
-  VMAP_SUPPORT("pow.Tensor_Scalar", SINGLE_ARG(basic_unary_batch_rule<TensorScalarType, &at::pow, const Scalar&>));
+  VMAP_SUPPORT("pow.Tensor_Tensor", SINGLE_ARG(binary_pointwise_batch_rule<decltype(&ATEN_FN2(pow, Tensor_Tensor)), &at::pow>));
+  VMAP_SUPPORT("pow.Tensor_Scalar", SINGLE_ARG(basic_unary_batch_rule<decltype(&ATEN_FN2(pow, Tensor_Scalar)), &at::pow, const Scalar&>));
   VMAP_SUPPORT("pow.Scalar", pow_scalar_tensor_batch_rule);
 
   VMAP_SUPPORT("clamp_min.Tensor",
-      SINGLE_ARG(binary_pointwise_batch_rule<TensorTensorType, &at::clamp_min>));
+      SINGLE_ARG(binary_pointwise_batch_rule<decltype(&ATEN_FN2(clamp_min, Tensor)), &at::clamp_min>));
   VMAP_SUPPORT("clamp_min",
-      SINGLE_ARG(basic_unary_batch_rule<TensorScalarType, &at::clamp_min, const Scalar&>));
+      SINGLE_ARG(basic_unary_batch_rule<decltype(&ATEN_FN(clamp_min)), &at::clamp_min, const Scalar&>));
   VMAP_SUPPORT("clamp_max.Tensor",
-      SINGLE_ARG(binary_pointwise_batch_rule<TensorTensorType, &at::clamp_max>));
+      SINGLE_ARG(binary_pointwise_batch_rule<decltype(&ATEN_FN2(clamp_max, Tensor)), &at::clamp_max>));
   VMAP_SUPPORT("clamp_max",
-      SINGLE_ARG(basic_unary_batch_rule<TensorScalarType, &at::clamp_max, const Scalar&>));
+      SINGLE_ARG(basic_unary_batch_rule<decltype(&ATEN_FN(clamp_max)), &at::clamp_max, const Scalar&>));
 
 
   using TensorScalarInplaceT = Tensor& (Tensor::*)(const Tensor&, const Scalar&) const;
@@ -189,9 +185,9 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
 
 #define COMPARISON_POINTWISE(op) \
   VMAP_SUPPORT(#op".Tensor", \
-      SINGLE_ARG(comparison_pointwise_batch_rule<TensorTensorType, &at::op>)); \
+      SINGLE_ARG(comparison_pointwise_batch_rule<decltype(&ATEN_FN2(op, Tensor)), &at::op>)); \
   VMAP_SUPPORT(#op".Scalar", \
-      SINGLE_ARG(basic_unary_batch_rule<TensorScalarType, &at::op, const Scalar&>));
+      SINGLE_ARG(basic_unary_batch_rule<decltype(&ATEN_FN2(op, Scalar)), &at::op, const Scalar&>));
 
   COMPARISON_POINTWISE(eq);
   COMPARISON_POINTWISE(gt);
