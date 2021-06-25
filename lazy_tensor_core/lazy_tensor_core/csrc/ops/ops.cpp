@@ -61,6 +61,7 @@ PTLTC_UNARY_OP(Ceil, at::aten::ceil);
 PTLTC_UNARY_OP(Floor, at::aten::floor);
 PTLTC_UNARY_OP(Round, at::aten::round);
 PTLTC_UNARY_OP(Not, at::aten::bitwise_not);
+PTLTC_UNARY_OP(IsNan, at::aten::isnan);
 
 PTLTC_BINARY_OP(Min, at::aten::min);
 PTLTC_BINARY_OP(Max, at::aten::max);
@@ -458,6 +459,11 @@ NodePtr BaddBmm(const Value& lhs, const Value& rhs, const Value& bias,
   node->SetShapeDeferred(
       [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
   return node;
+}
+
+NodePtr Lerp(const Value& start, const Value& end, const Value& weight) {
+  ScopePusher ir_scope(at::aten::lerp.toQualString());
+  return start + weight * (end - start);
 }
 
 }  // namespace ops

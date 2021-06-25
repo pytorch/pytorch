@@ -39,6 +39,24 @@ bool ShouldUseF16() {
   return use_fp16;
 }
 
+bool ShouldDowncastToBF16() {
+  bool downcast_bf16 =
+      lazy_tensors::sys_util::GetEnvBool("LTC_DOWNCAST_BF16", false);
+  if (downcast_bf16) {
+    LTC_LOG(INFO) << "Downcasting floating point values, F64->F32, F32->BF16";
+  }
+  return downcast_bf16;
+}
+
+bool ShouldDowncastToF16() {
+  bool downcast_fp16 =
+      lazy_tensors::sys_util::GetEnvBool("LTC_DOWNCAST_FP16", false);
+  if (downcast_fp16) {
+    LTC_LOG(INFO) << "Downcasting floating point values, F64->F32, F32->FP16";
+  }
+  return downcast_fp16;
+}
+
 bool ShouldUse32BitLong() {
   bool use_32bit_long =
       lazy_tensors::sys_util::GetEnvBool("LTC_USE_32BIT_LONG", false);
@@ -56,6 +74,16 @@ bool UseBF16() {
 bool UseF16() {
   static bool use_fp16 = ShouldUseF16();
   return use_fp16;
+}
+
+bool DowncastBF16() {
+  static bool downcast_bf16 = ShouldDowncastToBF16();
+  return downcast_bf16;
+}
+
+bool DowncastF16() {
+  static bool downcast_fp16 = ShouldDowncastToF16();
+  return downcast_fp16;
 }
 
 bool Use32BitLong() {
@@ -882,11 +910,14 @@ lazy_tensors::Shape CreateComputationShapeFromTensor(const at::Tensor& tensor,
 at::ScalarType TensorTypeFromLtcType(lazy_tensors::PrimitiveType ltc_type) {
   switch (ltc_type) {
     case lazy_tensors::PrimitiveType::BF16:
-      return UseBF16() ? at::ScalarType::Float : at::ScalarType::BFloat16;
+      return UseBF16() || DowncastBF16() ? at::ScalarType::Float
+                                         : at::ScalarType::BFloat16;
     case lazy_tensors::PrimitiveType::F16:
-      return UseF16() ? at::ScalarType::Float : at::ScalarType::Half;
+      return UseF16() || DowncastF16() ? at::ScalarType::Float
+                                       : at::ScalarType::Half;
     case lazy_tensors::PrimitiveType::F32:
-      return at::ScalarType::Float;
+      return DowncastBF16() || DowncastF16() ? at::ScalarType::Double
+                                             : at::ScalarType::Float;
     case lazy_tensors::PrimitiveType::F64:
       return at::ScalarType::Double;
     case lazy_tensors::PrimitiveType::PRED:
@@ -955,15 +986,18 @@ lazy_tensors::PrimitiveType GetDevicePrimitiveType(
       if (UseBF16()) {
         return lazy_tensors::PrimitiveType::BF16;
       }
+      if (DowncastBF16() || DowncastF16()) {
+        return lazy_tensors::PrimitiveType::F32;
+      }
       return ltc_device.hw_type != DeviceType::TPU
                  ? lazy_tensors::PrimitiveType::F64
                  : lazy_tensors::PrimitiveType::F32;
     case lazy_tensors::PrimitiveType::F32:
-      if (UseF16()) {
+      if (UseF16() || DowncastF16()) {
         return lazy_tensors::PrimitiveType::F16;
       }
-      return UseBF16() ? lazy_tensors::PrimitiveType::BF16
-                       : lazy_tensors::PrimitiveType::F32;
+      return UseBF16() || DowncastBF16() ? lazy_tensors::PrimitiveType::BF16
+                                         : lazy_tensors::PrimitiveType::F32;
     case lazy_tensors::PrimitiveType::U16:
       return ltc_device.hw_type != DeviceType::TPU
                  ? lazy_tensors::PrimitiveType::U16

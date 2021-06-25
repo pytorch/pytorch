@@ -13,6 +13,7 @@ import lazy_tensor_core
 import lazy_tensor_core.core.ltc_env_vars as xenv
 import lazy_tensor_core.debug.metrics_saver as ms
 import lazy_tensor_core.utils.utils as xu
+import lazy_tensor_core.utils.closures as xc
 import lazy_tensor_core.utils.keyd_queue as kq
 
 _DEVICES = xu.LazyProperty(lambda: lazy_tensor_core._LAZYC._ltc_get_devices())
@@ -669,7 +670,7 @@ def collective_permute(value, pairs):
   return result[0]
 
 
-def add_step_closure(closure, args=()):
+def add_step_closure(closure, args=(), run_async=False):
   """Adds a closure to the list of the ones to be run at the end of the step.
 
   Many times during model training there is the need to print/report (print to
@@ -690,17 +691,28 @@ def add_step_closure(closure, args=()):
   Args:
     closure (callable): The function to be called.
     args (tuple): The arguments to be passed to the closure.
+    run_async: If True, run the closure asynchronously.
   """
   devctx = _get_device_context()
-  step_closures = getattr(devctx, 'step_closures', None)
+  closures_type = 'async_step_closures' if run_async else 'step_closures'
+  step_closures = getattr(devctx, closures_type, None)
   if step_closures is None:
     step_closures = []
-    devctx.step_closures = step_closures
+    setattr(devctx, closures_type, step_closures)
   step_closures.append(lambda a=args: closure(*a))
 
 
 def _run_step_closures():
   devctx = _get_device_context()
+  async_step_closures = getattr(devctx, 'async_step_closures', None)
+  if async_step_closures is not None:
+    devctx.async_step_closures = []
+    async_closure_handler = getattr(devctx, 'async_closure_handler', None)
+    if async_closure_handler is None:
+      async_closure_handler = xc.AsyncClosureHandler()
+      devctx.async_closure_handler = async_closure_handler
+    async_closure_handler.run_all(async_step_closures)
+
   step_closures = getattr(devctx, 'step_closures', None)
   if step_closures is not None:
     devctx.step_closures = []

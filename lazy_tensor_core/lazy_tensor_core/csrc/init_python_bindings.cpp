@@ -399,10 +399,6 @@ py::dict GetMemoryInfo(const std::string& device_str) {
 }
 
 void InitLtcModuleBindings(py::module m) {
-  m.def("_initialize_aten_bindings", []() {
-    torch_lazy_tensors::compiler::getBackendRegistrar()
-        ->InitializeAtenBindings();
-  });
   m.def("_prepare_to_exit", []() { PrepareToExit(); });
   m.def("_get_git_revs", []() { return GetRevisions(); });
   m.def("_ltc_nms", [](const at::Tensor& boxes, const at::Tensor& scores,

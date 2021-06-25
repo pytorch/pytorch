@@ -3,7 +3,6 @@ import lazy_tensor_core
 import lazy_tensor_core.debug.metrics as metrics
 
 lazy_tensor_core._LAZYC._ltc_init_ts_backend()
-lazy_tensor_core._LAZYC._initialize_aten_bindings()
 
 torch.manual_seed(42)
 

@@ -3793,6 +3793,30 @@ TEST_F(AtenLtcTsTensorTest, TestScatterScalar) {
   }
 }
 
+TEST_F(AtenLtcTsTensorTest, TestScatterReduceAdd) {
+  torch::Tensor a = torch::rand({3, 5}, torch::TensorOptions(torch::kFloat));
+  torch::Tensor b = torch::rand({3, 5}, torch::TensorOptions(torch::kFloat));
+  torch::Tensor c = torch::empty({3, 5}, torch::TensorOptions(torch::kLong));
+  for (int dim = 0; dim < 2; ++dim) {
+    for (int i = 0; i < 3; i++) {
+      for (int j = 0; j < 5; j++) {
+        c[i][j] = (i + j) % c.sizes()[dim];
+      }
+    }
+    torch::Tensor d = torch::scatter(a, dim, c, b, "add");
+    ForEachDevice([&](const torch::Device& device) {
+      torch::Tensor xla_a = CopyToDevice(a, device);
+      torch::Tensor xla_b = CopyToDevice(b, device);
+      torch::Tensor xla_c = CopyToDevice(c, device);
+      torch::Tensor xla_d = torch::scatter(xla_a, dim, xla_c, xla_b, "add");
+      AllClose(d, xla_d);
+    });
+  }
+
+  ExpectCounterNotChanged("aten::.*", cpp_test::GetIgnoredCounters());
+  ExpectCounterChanged("xla::scatter_out", cpp_test::GetIgnoredCounters());
+}
+
 TEST_F(AtenLtcTsTensorTest, TestScatterAdd) {
   torch::Tensor a = torch::rand({3, 5}, torch::TensorOptions(torch::kFloat));
   torch::Tensor b = torch::rand({3, 5}, torch::TensorOptions(torch::kFloat));
@@ -3895,6 +3919,19 @@ TEST_F(AtenLtcTsTensorTest, TestInverse) {
     torch::Tensor xla_b = torch::inverse(xla_a);
     AllClose(b, xla_b, /*rtol=*/1e-3, /*atol=*/1e-4);
   });
+}
+
+TEST_F(AtenLtcTsTensorTest, TestIsnan) {
+  torch::Tensor a = torch::tensor({1.0, 2.0, std::nan("1"), 4.0},
+                                  torch::TensorOptions(torch::kFloat));
+  torch::Tensor b = torch::isnan(a);
+  ForEachDevice([&](const torch::Device& device) {
+    torch::Tensor xla_a = CopyToDevice(a, device);
+    torch::Tensor xla_b = torch::isnan(xla_a);
+    AllEqual(b, xla_b);
+  });
+  ExpectCounterNotChanged("aten::.*", cpp_test::GetIgnoredCounters());
+  ExpectCounterChanged("xla::isnan", cpp_test::GetIgnoredCounters());
 }
 
 TEST_F(AtenLtcTsTensorTest, TestExpand) {
@@ -9309,6 +9346,10 @@ TEST_F(AtenLtcTsTensorTest, TestEmbeddingBackward) {
 }
 
 TEST_F(AtenLtcTsTensorTest, TestAmpForeachNonFiniteCheckAndUnscale) {
+  DeviceType hw_type = GetDefaultDevice()->hw_type;
+  if (hw_type != DeviceType::GPU && hw_type != DeviceType::CPU) {
+    return;
+  }
   torch::Tensor grads0 =
       torch::tensor({1, 2, 3, 4}, torch::TensorOptions(torch::kFloat));
   torch::Tensor grads1 = torch::tensor({1.0, 2.0, std::nan("1"), 4.0},
@@ -9342,6 +9383,10 @@ TEST_F(AtenLtcTsTensorTest, TestAmpForeachNonFiniteCheckAndUnscale) {
 }
 
 TEST_F(AtenLtcTsTensorTest, TestAmpUpdateScale) {
+  DeviceType hw_type = GetDefaultDevice()->hw_type;
+  if (hw_type != DeviceType::GPU && hw_type != DeviceType::CPU) {
+    return;
+  }
   torch::Tensor growth_tracker =
       torch::scalar_tensor(0, torch::TensorOptions(torch::kInt32));
   torch::Tensor current_scale =
@@ -9432,6 +9477,115 @@ TEST_F(AtenLtcTsTensorTest, TestEarlySyncLiveTensors) {
   }
   ExpectCounterChanged("aten::_local_scalar_dense",
                        cpp_test::GetIgnoredCounters());
+}
+
+TEST_F(AtenLtcTsTensorTest, TestLerp) {
+  torch::Tensor start =
+      torch::rand({3, 4}, torch::TensorOptions(torch::kFloat));
+  torch::Tensor end = torch::rand({3, 4}, torch::TensorOptions(torch::kFloat));
+  torch::Tensor weight =
+      torch::rand({3, 4}, torch::TensorOptions(torch::kFloat));
+  torch::Tensor res = torch::lerp(start, end, weight);
+  ForEachDevice([&](const torch::Device& device) {
+    torch::Tensor xla_start = CopyToDevice(start, device);
+    torch::Tensor xla_end = CopyToDevice(end, device);
+    torch::Tensor xla_weight = CopyToDevice(weight, device);
+    torch::Tensor xla_res = torch::lerp(xla_start, xla_end, xla_weight);
+    AllClose(res, xla_res);
+  });
+  ExpectCounterNotChanged("aten::.*", cpp_test::GetIgnoredCounters());
+  ExpectCounterChanged("xla::lerp", cpp_test::GetIgnoredCounters());
+}
+
+TEST_F(AtenLtcTsTensorTest, TestLerpScalar) {
+  torch::Tensor start =
+      torch::rand({3, 4}, torch::TensorOptions(torch::kFloat));
+  torch::Tensor end = torch::rand({3, 4}, torch::TensorOptions(torch::kFloat));
+  torch::Scalar weight = torch::Scalar(3.0);
+  torch::Tensor res = torch::lerp(start, end, weight);
+  ForEachDevice([&](const torch::Device& device) {
+    torch::Tensor xla_start = CopyToDevice(start, device);
+    torch::Tensor xla_end = CopyToDevice(end, device);
+    torch::Tensor xla_res = torch::lerp(xla_start, xla_end, weight);
+    AllClose(res, xla_res);
+  });
+  ExpectCounterNotChanged("aten::.*", cpp_test::GetIgnoredCounters());
+  ExpectCounterChanged("xla::lerp", cpp_test::GetIgnoredCounters());
+}
+
+TEST_F(AtenLtcTsTensorTest, TestLerpInplace) {
+  torch::Tensor input =
+      torch::rand({3, 4}, torch::TensorOptions(torch::kFloat));
+  torch::Tensor end = torch::rand({3, 4}, torch::TensorOptions(torch::kFloat));
+  torch::Tensor weight =
+      torch::rand({3, 4}, torch::TensorOptions(torch::kFloat));
+  torch::Tensor input_copy = input.clone();
+  input.lerp_(end, weight);
+  ForEachDevice([&](const torch::Device& device) {
+    torch::Tensor xla_input = CopyToDevice(input_copy, device);
+    torch::Tensor xla_end = CopyToDevice(end, device);
+    torch::Tensor xla_weight = CopyToDevice(weight, device);
+    xla_input.lerp_(xla_end, xla_weight);
+    AllClose(xla_input, input);
+  });
+  ExpectCounterNotChanged("aten::.*", cpp_test::GetIgnoredCounters());
+  ExpectCounterChanged("xla::lerp", cpp_test::GetIgnoredCounters());
+}
+
+TEST_F(AtenLtcTsTensorTest, TestLerpScalarInplace) {
+  torch::Tensor input =
+      torch::rand({3, 4}, torch::TensorOptions(torch::kFloat));
+  torch::Tensor end = torch::rand({3, 4}, torch::TensorOptions(torch::kFloat));
+  torch::Scalar weight = torch::Scalar(3.0);
+  torch::Tensor input_copy = input.clone();
+  input.lerp_(end, weight);
+  ForEachDevice([&](const torch::Device& device) {
+    torch::Tensor xla_input = CopyToDevice(input_copy, device);
+    torch::Tensor xla_end = CopyToDevice(end, device);
+    xla_input.lerp_(xla_end, weight);
+    AllClose(xla_input, input);
+  });
+  ExpectCounterNotChanged("aten::.*", cpp_test::GetIgnoredCounters());
+  ExpectCounterChanged("xla::lerp", cpp_test::GetIgnoredCounters());
+}
+
+TEST_F(AtenLtcTsTensorTest, TestLerpOut) {
+  torch::Tensor start =
+      torch::rand({3, 4}, torch::TensorOptions(torch::kFloat));
+  torch::Tensor end = torch::rand({3, 4}, torch::TensorOptions(torch::kFloat));
+  torch::Tensor weight =
+      torch::rand({3, 4}, torch::TensorOptions(torch::kFloat));
+  torch::Tensor res = torch::empty({3, 4}, torch::TensorOptions(torch::kFloat));
+  ;
+  torch::lerp_out(res, start, end, weight);
+  ForEachDevice([&](const torch::Device& device) {
+    torch::Tensor xla_start = CopyToDevice(start, device);
+    torch::Tensor xla_end = CopyToDevice(end, device);
+    torch::Tensor xla_weight = CopyToDevice(weight, device);
+    torch::Tensor xla_res = torch::empty({3, 4}, xla_start.options());
+    torch::lerp_out(xla_res, xla_start, xla_end, xla_weight);
+    AllClose(res, xla_res);
+  });
+  ExpectCounterNotChanged("aten::.*", cpp_test::GetIgnoredCounters());
+  ExpectCounterChanged("xla::lerp", cpp_test::GetIgnoredCounters());
+}
+
+TEST_F(AtenLtcTsTensorTest, TestLerpScalarOut) {
+  torch::Tensor start =
+      torch::rand({3, 4}, torch::TensorOptions(torch::kFloat));
+  torch::Tensor end = torch::rand({3, 4}, torch::TensorOptions(torch::kFloat));
+  torch::Scalar weight = torch::Scalar(3.0);
+  torch::Tensor res = torch::empty({3, 4}, torch::TensorOptions(torch::kFloat));
+  torch::lerp_out(res, start, end, weight);
+  ForEachDevice([&](const torch::Device& device) {
+    torch::Tensor xla_start = CopyToDevice(start, device);
+    torch::Tensor xla_end = CopyToDevice(end, device);
+    torch::Tensor xla_res = torch::empty({3, 4}, xla_start.options());
+    torch::lerp_out(xla_res, xla_start, xla_end, weight);
+    AllClose(res, xla_res);
+  });
+  ExpectCounterNotChanged("aten::.*", cpp_test::GetIgnoredCounters());
+  ExpectCounterChanged("xla::lerp", cpp_test::GetIgnoredCounters());
 }
 
 }  // namespace cpp_test

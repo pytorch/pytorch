@@ -501,24 +501,12 @@ LazyTensor LazyTensor::abs(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::Abs(input.GetIrValue()));
 }
 
-void LazyTensor::abs_(LazyTensor& input) {
-  input.SetInPlaceIrValue(ir::ops::Abs(input.GetIrValue()));
-}
-
 LazyTensor LazyTensor::acos(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::Acos(input.GetIrValue()));
 }
 
-void LazyTensor::acos_(LazyTensor& input) {
-  input.SetInPlaceIrValue(ir::ops::Acos(input.GetIrValue()));
-}
-
 LazyTensor LazyTensor::acosh(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::Acosh(input.GetIrValue()));
-}
-
-void LazyTensor::acosh_(LazyTensor& input) {
-  input.SetInPlaceIrValue(ir::ops::Acosh(input.GetIrValue()));
 }
 
 LazyTensor LazyTensor::add(const LazyTensor& input, const LazyTensor& other,
@@ -530,13 +518,6 @@ LazyTensor LazyTensor::add(const LazyTensor& input, const LazyTensor& other,
                           logical_element_type);
 }
 
-void LazyTensor::add_(LazyTensor& input, const LazyTensor& other,
-                      const at::Scalar& alpha) {
-  ir::Value constant =
-      GetIrValueForScalar(alpha, other.shape(), input.GetDevice());
-  input.SetInPlaceIrValue(input.GetIrValue() + other.GetIrValue() * constant);
-}
-
 LazyTensor LazyTensor::add(const LazyTensor& input, const at::Scalar& other,
                            const at::Scalar& alpha,
                            c10::optional<at::ScalarType> logical_element_type) {
@@ -546,24 +527,6 @@ LazyTensor LazyTensor::add(const LazyTensor& input, const at::Scalar& other,
       alpha, input.shape(), logical_element_type, input.GetDevice());
   return input.CreateFrom(input.GetIrValue() + other_constant * alpha_constant,
                           logical_element_type);
-}
-
-void LazyTensor::add_(LazyTensor& input, const at::Scalar& other,
-                      const at::Scalar& alpha) {
-  ir::Value other_constant =
-      GetIrValueForScalar(other, input.shape(), input.GetDevice());
-  ir::Value alpha_constant =
-      GetIrValueForScalar(alpha, input.shape(), input.GetDevice());
-  input.SetInPlaceIrValue(input.GetIrValue() + other_constant * alpha_constant);
-}
-
-void LazyTensor::addcmul_(LazyTensor& input, const at::Scalar& value,
-                          const LazyTensor& tensor1,
-                          const LazyTensor& tensor2) {
-  ir::Value constant = GetIrValueForScalar(
-      value, tensor1.shape().get().element_type(), input.GetDevice());
-  ir::Value mul = tensor1.GetIrValue() * tensor2.GetIrValue();
-  input.SetInPlaceIrValue(input.GetIrValue() + mul * constant);
 }
 
 LazyTensor LazyTensor::addcdiv(const LazyTensor& input, const at::Scalar& value,
@@ -692,32 +655,16 @@ LazyTensor LazyTensor::asin(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::Asin(input.GetIrValue()));
 }
 
-void LazyTensor::asin_(LazyTensor& input) {
-  input.SetInPlaceIrValue(ir::ops::Asin(input.GetIrValue()));
-}
-
 LazyTensor LazyTensor::asinh(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::Asinh(input.GetIrValue()));
-}
-
-void LazyTensor::asinh_(LazyTensor& input) {
-  input.SetInPlaceIrValue(ir::ops::Asinh(input.GetIrValue()));
 }
 
 LazyTensor LazyTensor::atan(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::Atan(input.GetIrValue()));
 }
 
-void LazyTensor::atan_(LazyTensor& input) {
-  input.SetInPlaceIrValue(ir::ops::Atan(input.GetIrValue()));
-}
-
 LazyTensor LazyTensor::atanh(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::Atanh(input.GetIrValue()));
-}
-
-void LazyTensor::atanh_(LazyTensor& input) {
-  input.SetInPlaceIrValue(ir::ops::Atanh(input.GetIrValue()));
 }
 
 LazyTensor LazyTensor::atan2(
@@ -726,11 +673,6 @@ LazyTensor LazyTensor::atan2(
   return input.CreateFrom(
       ir::ops::Atan2(input.GetIrValue(), other.GetIrValue()),
       logical_element_type);
-}
-
-void LazyTensor::atan2_(LazyTensor& input, const LazyTensor& other) {
-  input.SetInPlaceIrValue(
-      ir::ops::Atan2(input.GetIrValue(), other.GetIrValue()));
 }
 
 LazyTensor LazyTensor::avg_pool_nd(const LazyTensor& input,
@@ -773,19 +715,6 @@ LazyTensor LazyTensor::baddbmm(const LazyTensor& input,
   ir::Value bias_multiplier = LazyTensor::GetIrValueForScalar(
       beta, input.shape().get().element_type(), input.GetDevice());
   return input.CreateFrom(ir::ops::BaddBmm(
-      batch1.GetIrValue(), batch2.GetIrValue(), input.GetIrValue(),
-      product_multiplier, bias_multiplier));
-}
-
-void LazyTensor::baddbmm_(LazyTensor& input, const LazyTensor& batch1,
-                          const LazyTensor& batch2, const at::Scalar& beta,
-                          const at::Scalar& alpha) {
-  CheckBmmDimension(/*tag=*/"baddbmm_", batch1, batch2);
-  ir::Value product_multiplier = LazyTensor::GetIrValueForScalar(
-      alpha, batch1.shape().get().element_type(), batch1.GetDevice());
-  ir::Value bias_multiplier = LazyTensor::GetIrValueForScalar(
-      beta, input.shape().get().element_type(), input.GetDevice());
-  input.SetInPlaceIrValue(ir::ops::BaddBmm(
       batch1.GetIrValue(), batch2.GetIrValue(), input.GetIrValue(),
       product_multiplier, bias_multiplier));
 }
@@ -833,18 +762,19 @@ LazyTensor LazyTensor::binary_cross_entropy_backward(
       GetOptionalIrValue(weight), GetReductionMode(reduction)));
 }
 
-void LazyTensor::bitwise_and_out(LazyTensor& out, const LazyTensor& input,
-                                 const at::Scalar& other) {
+LazyTensor LazyTensor::bitwise_and(const LazyTensor& input,
+                                   const at::Scalar& other) {
   CheckIsIntegralOrPred(input.shape(), "__and__");
   ir::Value constant =
       GetIrValueForScalar(other, input.shape(), input.GetDevice());
-  out.SetIrValue(ir::ops::BitwiseAnd(input.GetIrValue(), constant));
+  return input.CreateFrom(ir::ops::BitwiseAnd(input.GetIrValue(), constant));
 }
 
-void LazyTensor::bitwise_and_out(LazyTensor& out, const LazyTensor& input,
-                                 const LazyTensor& other) {
+LazyTensor LazyTensor::bitwise_and(const LazyTensor& input,
+                                   const LazyTensor& other) {
   CheckIsIntegralOrPred(input.shape(), "__and__");
-  out.SetIrValue(ir::ops::BitwiseAnd(input.GetIrValue(), other.GetIrValue()));
+  return input.CreateFrom(
+      ir::ops::BitwiseAnd(input.GetIrValue(), other.GetIrValue()));
 }
 
 void LazyTensor::bitwise_not_out(LazyTensor& out, const LazyTensor& input) {
@@ -932,10 +862,6 @@ LazyTensor LazyTensor::ceil(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::Ceil(input.GetIrValue()));
 }
 
-void LazyTensor::ceil_(LazyTensor& input) {
-  input.SetInPlaceIrValue(ir::ops::Ceil(input.GetIrValue()));
-}
-
 LazyTensor LazyTensor::cholesky(const LazyTensor& input, bool upper) {
   // Cholesky takes lower instead of upper, hence the negation.
   return input.CreateFrom(
@@ -963,13 +889,6 @@ LazyTensor LazyTensor::clamp(const LazyTensor& input,
     res = ir::ops::Min(res, bridge::GetLtcTensor(*max).GetIrValue());
   }
   return input.CreateFrom(res);
-}
-
-void LazyTensor::clamp_(LazyTensor& input, const c10::optional<at::Scalar>& min,
-                        const c10::optional<at::Scalar>& max) {
-  MinMaxValues min_max = GetMinMaxValues(input, min, max);
-  input.SetInPlaceIrValue(
-      ir::ops::Clamp(input.GetIrValue(), min_max.min, min_max.max));
 }
 
 void LazyTensor::clamp_out(LazyTensor& out, const LazyTensor& input,
@@ -1051,16 +970,8 @@ LazyTensor LazyTensor::cos(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::Cos(input.GetIrValue()));
 }
 
-void LazyTensor::cos_(LazyTensor& input) {
-  input.SetInPlaceIrValue(ir::ops::Cos(input.GetIrValue()));
-}
-
 LazyTensor LazyTensor::cosh(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::Cosh(input.GetIrValue()));
-}
-
-void LazyTensor::cosh_(LazyTensor& input) {
-  input.SetInPlaceIrValue(ir::ops::Cosh(input.GetIrValue()));
 }
 
 LazyTensor LazyTensor::cross(const LazyTensor& input, const LazyTensor& other,
@@ -1137,6 +1048,8 @@ LazyTensor LazyTensor::div(const LazyTensor& input, const LazyTensor& other,
   } else if (!input_is_float && other_is_float) {
     scalar_type = TensorTypeFromLtcType(other_type);
   }
+  // We need to cast both input and other to float to perform true divide, floor
+  // divide and trunc divide.
   ir::Value input_value = GetFloatingIrValue(input, scalar_type);
   ir::Value other_value = GetFloatingIrValue(other, scalar_type);
   ir::Value res = input_value / other_value;
@@ -1155,10 +1068,19 @@ LazyTensor LazyTensor::div(const LazyTensor& input, const LazyTensor& other,
   // Promote the result to the logical_element_type if one of the
   // input and the other is float. If that is not the case logical_element_type
   // will be non-floating-point type, we should only promote the result to that
-  // when rounding_mode is not nullopt
+  // when rounding_mode is not nullopt.
   if (input_is_float || other_is_float || rounding_mode.has_value()) {
+    if (logical_element_type.has_value()) {
+      lazy_tensors::PrimitiveType res_intended_type =
+          MakeLtcPrimitiveType(*logical_element_type, &input.GetDevice());
+      if (res.shape().element_type() != res_intended_type) {
+        res = ir::MakeNode<ir::ops::Cast>(res, res_intended_type);
+      }
+    }
     return input.CreateFrom(res, logical_element_type);
   } else {
+    // We don't need to typecheck the res IR here since we cast both input and
+    // output to the scalar_type. Res type must also be scalar_type here.
     return input.CreateFrom(res, scalar_type);
   }
 }
@@ -1172,54 +1094,12 @@ LazyTensor LazyTensor::div(const LazyTensor& input, const at::Scalar& other) {
   return input.CreateFrom(input_value / other_value, scalar_type);
 }
 
-void LazyTensor::div_(LazyTensor& input, const LazyTensor& other,
-                      const c10::optional<c10::string_view>& rounding_mode) {
-  at::ScalarType scalar_type =
-      at::typeMetaToScalarType(c10::get_default_dtype());
-  ir::Value input_value = GetFloatingIrValue(input, scalar_type);
-  ir::Value other_value = GetFloatingIrValue(other, scalar_type);
-  ir::Value res = input_value / other_value;
-  if (rounding_mode.has_value()) {
-    if (*rounding_mode == "trunc") {
-      res = ir::ops::Trunc(res);
-    } else if (*rounding_mode == "floor") {
-      res = ir::ops::Floor(res);
-    } else {
-      LTC_CHECK(false)
-          << "rounding_mode must be one of None, 'trunc', or 'floor'";
-    }
-  }
-  input.SetInPlaceIrValue(res);
-}
-
-void LazyTensor::div_(LazyTensor& input, const at::Scalar& other) {
-  at::ScalarType scalar_type =
-      at::typeMetaToScalarType(c10::get_default_dtype());
-  ir::Value input_value = GetFloatingIrValue(input, scalar_type);
-  ir::Value other_value = GetIrValueForScalar(
-      other, input_value.shape().element_type(), input.GetDevice());
-  input.SetInPlaceIrValue(input_value / other_value);
-}
-
 LazyTensor LazyTensor::eq(const LazyTensor& input, const at::Scalar& other) {
   return DispatchComparisonOp(at::aten::eq, input, other);
 }
 
-void LazyTensor::eq_(LazyTensor& input, const at::Scalar& other) {
-  ir::NodePtr cmp_result =
-      ir::ops::ComparisonOp(at::aten::eq, input.GetIrValue(),
-                            GetIrValueForScalar(other, input.GetDevice()));
-  input.SetIrValue(ir::MakeNode<ir::ops::Cast>(cmp_result, input.dtype()));
-}
-
 LazyTensor LazyTensor::eq(const LazyTensor& input, const LazyTensor& other) {
   return DispatchComparisonOp(at::aten::eq, input, other);
-}
-
-void LazyTensor::eq_(LazyTensor& input, const LazyTensor& other) {
-  ir::NodePtr cmp_result = ir::ops::ComparisonOp(
-      at::aten::eq, input.GetIrValue(), other.GetIrValue());
-  input.SetIrValue(ir::MakeNode<ir::ops::Cast>(cmp_result, input.dtype()));
 }
 
 LazyTensor LazyTensor::elu(const LazyTensor& input, const at::Scalar& alpha,
@@ -1267,32 +1147,16 @@ LazyTensor LazyTensor::erf(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::Erf(input.GetIrValue()));
 }
 
-void LazyTensor::erf_(LazyTensor& input) {
-  input.SetInPlaceIrValue(ir::ops::Erf(input.GetIrValue()));
-}
-
 LazyTensor LazyTensor::erfc(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::Erfc(input.GetIrValue()));
-}
-
-void LazyTensor::erfc_(LazyTensor& input) {
-  input.SetInPlaceIrValue(ir::ops::Erfc(input.GetIrValue()));
 }
 
 LazyTensor LazyTensor::erfinv(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::Erfinv(input.GetIrValue()));
 }
 
-void LazyTensor::erfinv_(LazyTensor& input) {
-  input.SetInPlaceIrValue(ir::ops::Erfinv(input.GetIrValue()));
-}
-
 LazyTensor LazyTensor::exp(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::Exp(input.GetIrValue()));
-}
-
-void LazyTensor::exp_(LazyTensor& input) {
-  input.SetInPlaceIrValue(ir::ops::Exp(input.GetIrValue()));
 }
 
 LazyTensor LazyTensor::expand(const LazyTensor& input,
@@ -1306,10 +1170,6 @@ LazyTensor LazyTensor::expand(const LazyTensor& input,
 
 LazyTensor LazyTensor::expm1(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::Expm1(input.GetIrValue()));
-}
-
-void LazyTensor::expm1_(LazyTensor& input) {
-  input.SetInPlaceIrValue(ir::ops::Expm1(input.GetIrValue()));
 }
 
 void LazyTensor::exponential_(LazyTensor& input, double lambd) {
@@ -1358,10 +1218,6 @@ LazyTensor LazyTensor::floor(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::Floor(input.GetIrValue()));
 }
 
-void LazyTensor::floor_(LazyTensor& input) {
-  input.SetInPlaceIrValue(ir::ops::Floor(input.GetIrValue()));
-}
-
 LazyTensor LazyTensor::fmod(
     const LazyTensor& input, const LazyTensor& other,
     c10::optional<at::ScalarType> logical_element_type) {
@@ -1378,23 +1234,8 @@ LazyTensor LazyTensor::fmod(
                           logical_element_type);
 }
 
-void LazyTensor::fmod_(LazyTensor& input, const LazyTensor& other) {
-  input.SetInPlaceIrValue(
-      ir::ops::Fmod(input.GetIrValue(), other.GetIrValue()));
-}
-
-void LazyTensor::fmod_(LazyTensor& input, const at::Scalar& other) {
-  ir::Value constant =
-      GetIrValueForScalar(other, input.shape(), input.GetDevice());
-  input.SetInPlaceIrValue(ir::ops::Fmod(input.GetIrValue(), constant));
-}
-
 LazyTensor LazyTensor::frac(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::FracOp(input.GetIrValue()));
-}
-
-void LazyTensor::frac_(LazyTensor& input) {
-  input.SetInPlaceIrValue(ir::ops::FracOp(input.GetIrValue()));
 }
 
 LazyTensor LazyTensor::full(lazy_tensors::Span<const lazy_tensors::int64> size,
@@ -1434,21 +1275,8 @@ LazyTensor LazyTensor::ge(const LazyTensor& input, const at::Scalar& other) {
   return DispatchComparisonOp(at::aten::ge, input, other);
 }
 
-void LazyTensor::ge_(LazyTensor& input, const at::Scalar& other) {
-  ir::NodePtr cmp_result =
-      ir::ops::ComparisonOp(at::aten::ge, input.GetIrValue(),
-                            GetIrValueForScalar(other, input.GetDevice()));
-  input.SetIrValue(ir::MakeNode<ir::ops::Cast>(cmp_result, input.dtype()));
-}
-
 LazyTensor LazyTensor::ge(const LazyTensor& input, const LazyTensor& other) {
   return DispatchComparisonOp(at::aten::ge, input, other);
-}
-
-void LazyTensor::ge_(LazyTensor& input, const LazyTensor& other) {
-  ir::NodePtr cmp_result = ir::ops::ComparisonOp(
-      at::aten::ge, input.GetIrValue(), other.GetIrValue());
-  input.SetIrValue(ir::MakeNode<ir::ops::Cast>(cmp_result, input.dtype()));
 }
 
 LazyTensor LazyTensor::gelu(const LazyTensor& input) {
@@ -1469,21 +1297,8 @@ LazyTensor LazyTensor::gt(const LazyTensor& input, const at::Scalar& other) {
   return DispatchComparisonOp(at::aten::gt, input, other);
 }
 
-void LazyTensor::gt_(LazyTensor& input, const at::Scalar& other) {
-  ir::NodePtr cmp_result =
-      ir::ops::ComparisonOp(at::aten::gt, input.GetIrValue(),
-                            GetIrValueForScalar(other, input.GetDevice()));
-  input.SetIrValue(ir::MakeNode<ir::ops::Cast>(cmp_result, input.dtype()));
-}
-
 LazyTensor LazyTensor::gt(const LazyTensor& input, const LazyTensor& other) {
   return DispatchComparisonOp(at::aten::gt, input, other);
-}
-
-void LazyTensor::gt_(LazyTensor& input, const LazyTensor& other) {
-  ir::NodePtr cmp_result = ir::ops::ComparisonOp(
-      at::aten::gt, input.GetIrValue(), other.GetIrValue());
-  input.SetIrValue(ir::MakeNode<ir::ops::Cast>(cmp_result, input.dtype()));
 }
 
 LazyTensor LazyTensor::index(const LazyTensor& input,
@@ -1588,6 +1403,11 @@ LazyTensor LazyTensor::inverse(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::Inverse(input.GetIrValue()));
 }
 
+LazyTensor LazyTensor::isnan(const LazyTensor& input) {
+  return input.CreateFrom(ir::ops::IsNan(input.GetIrValue()),
+                          at::ScalarType::Bool);
+}
+
 LazyTensor LazyTensor::kl_div_backward(const LazyTensor& grad_output,
                                        const LazyTensor& input,
                                        const LazyTensor& target,
@@ -1630,21 +1450,8 @@ LazyTensor LazyTensor::le(const LazyTensor& input, const at::Scalar& other) {
   return DispatchComparisonOp(at::aten::le, input, other);
 }
 
-void LazyTensor::le_(LazyTensor& input, const at::Scalar& other) {
-  ir::NodePtr cmp_result =
-      ir::ops::ComparisonOp(at::aten::le, input.GetIrValue(),
-                            GetIrValueForScalar(other, input.GetDevice()));
-  input.SetIrValue(ir::MakeNode<ir::ops::Cast>(cmp_result, input.dtype()));
-}
-
 LazyTensor LazyTensor::le(const LazyTensor& input, const LazyTensor& other) {
   return DispatchComparisonOp(at::aten::le, input, other);
-}
-
-void LazyTensor::le_(LazyTensor& input, const LazyTensor& other) {
-  ir::NodePtr cmp_result = ir::ops::ComparisonOp(
-      at::aten::le, input.GetIrValue(), other.GetIrValue());
-  input.SetIrValue(ir::MakeNode<ir::ops::Cast>(cmp_result, input.dtype()));
 }
 
 LazyTensor LazyTensor::hardshrink(const LazyTensor& input,
@@ -1663,10 +1470,6 @@ LazyTensor LazyTensor::hardshrink_backward(const LazyTensor& grad_out,
 
 LazyTensor LazyTensor::hardsigmoid(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::HardSigmoid(input.GetIrValue()));
-}
-
-void LazyTensor::hardsigmoid_(LazyTensor& input) {
-  input.SetIrValue(ir::ops::HardSigmoid(input.GetIrValue()));
 }
 
 LazyTensor LazyTensor::hardsigmoid_backward(const LazyTensor& grad_output,
@@ -1696,27 +1499,27 @@ LazyTensor LazyTensor::leaky_relu_backward(const LazyTensor& grad_output,
       grad_output.GetIrValue(), input.GetIrValue(), negative_slope));
 }
 
-void LazyTensor::leaky_relu_(LazyTensor& input, double negative_slope) {
-  input.SetInPlaceIrValue(
-      ir::MakeNode<ir::ops::LeakyRelu>(input.GetIrValue(), negative_slope));
+LazyTensor LazyTensor::lerp(const LazyTensor& input, const LazyTensor& end,
+                            const LazyTensor& weight) {
+  return input.CreateFrom(
+      ir::ops::Lerp(input.GetIrValue(), end.GetIrValue(), weight.GetIrValue()));
+}
+
+LazyTensor LazyTensor::lerp(const LazyTensor& input, const LazyTensor& end,
+                            const at::Scalar& weight) {
+  ir::Value weight_val = GetIrValueForScalar(
+      weight, input.shape().get().element_type(), input.GetDevice());
+  return input.CreateFrom(
+      ir::ops::Lerp(input.GetIrValue(), end.GetIrValue(), weight_val));
 }
 
 LazyTensor LazyTensor::log(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::Log(input.GetIrValue()));
 }
 
-void LazyTensor::log_(LazyTensor& input) {
-  input.SetInPlaceIrValue(ir::ops::Log(input.GetIrValue()));
-}
-
 LazyTensor LazyTensor::log_base(const LazyTensor& input, ir::OpKind op,
                                 double base) {
   return input.CreateFrom(
-      ir::MakeNode<ir::ops::LogBase>(input.GetIrValue(), op, base));
-}
-
-void LazyTensor::log_base_(LazyTensor& input, ir::OpKind op, double base) {
-  input.SetInPlaceIrValue(
       ir::MakeNode<ir::ops::LogBase>(input.GetIrValue(), op, base));
 }
 
@@ -1785,21 +1588,8 @@ LazyTensor LazyTensor::lt(const LazyTensor& input, const at::Scalar& other) {
   return DispatchComparisonOp(at::aten::lt, input, other);
 }
 
-void LazyTensor::lt_(LazyTensor& input, const at::Scalar& other) {
-  ir::NodePtr cmp_result =
-      ir::ops::ComparisonOp(at::aten::lt, input.GetIrValue(),
-                            GetIrValueForScalar(other, input.GetDevice()));
-  input.SetIrValue(ir::MakeNode<ir::ops::Cast>(cmp_result, input.dtype()));
-}
-
 LazyTensor LazyTensor::lt(const LazyTensor& input, const LazyTensor& other) {
   return DispatchComparisonOp(at::aten::lt, input, other);
-}
-
-void LazyTensor::lt_(LazyTensor& input, const LazyTensor& other) {
-  ir::NodePtr cmp_result = ir::ops::ComparisonOp(
-      at::aten::lt, input.GetIrValue(), other.GetIrValue());
-  input.SetIrValue(ir::MakeNode<ir::ops::Cast>(cmp_result, input.dtype()));
 }
 
 void LazyTensor::masked_fill_(LazyTensor& input, const LazyTensor& mask,
@@ -1991,16 +1781,6 @@ LazyTensor LazyTensor::mul(const LazyTensor& input, const at::Scalar& other,
   return input.CreateFrom(input.GetIrValue() * constant, logical_element_type);
 }
 
-void LazyTensor::mul_(LazyTensor& input, const LazyTensor& other) {
-  input.SetInPlaceIrValue(input.GetIrValue() * other.GetIrValue());
-}
-
-void LazyTensor::mul_(LazyTensor& input, const at::Scalar& other) {
-  ir::Value constant =
-      GetIrValueForScalar(other, input.shape(), input.GetDevice());
-  input.SetInPlaceIrValue(input.GetIrValue() * constant);
-}
-
 LazyTensor LazyTensor::mv(const LazyTensor& input, const LazyTensor& vec) {
   return input.CreateFrom(ir::ops::Dot(input.GetIrValue(), vec.GetIrValue()));
 }
@@ -2142,29 +1922,12 @@ LazyTensor LazyTensor::ne(const LazyTensor& input, const at::Scalar& other) {
   return DispatchComparisonOp(at::aten::ne, input, other);
 }
 
-void LazyTensor::ne_(LazyTensor& input, const at::Scalar& other) {
-  ir::NodePtr cmp_result =
-      ir::ops::ComparisonOp(at::aten::ne, input.GetIrValue(),
-                            GetIrValueForScalar(other, input.GetDevice()));
-  input.SetIrValue(ir::MakeNode<ir::ops::Cast>(cmp_result, input.dtype()));
-}
-
 LazyTensor LazyTensor::ne(const LazyTensor& input, const LazyTensor& other) {
   return DispatchComparisonOp(at::aten::ne, input, other);
 }
 
-void LazyTensor::ne_(LazyTensor& input, const LazyTensor& other) {
-  ir::NodePtr cmp_result = ir::ops::ComparisonOp(
-      at::aten::ne, input.GetIrValue(), other.GetIrValue());
-  input.SetIrValue(ir::MakeNode<ir::ops::Cast>(cmp_result, input.dtype()));
-}
-
 LazyTensor LazyTensor::neg(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::Neg(input.GetIrValue()));
-}
-
-void LazyTensor::neg_(LazyTensor& input) {
-  input.SetInPlaceIrValue(ir::ops::Neg(input.GetIrValue()));
 }
 
 LazyTensor LazyTensor::nll_loss(const LazyTensor& input,
@@ -2307,17 +2070,6 @@ LazyTensor LazyTensor::pow(const at::Scalar& input,
   return exponent.CreateFrom(ir::ops::Pow(input_node, exponent.GetIrValue()));
 }
 
-void LazyTensor::pow_(LazyTensor& input, const at::Scalar& exponent) {
-  ir::Value exponent_node =
-      GetIrValueForScalar(exponent, input.shape(), input.GetDevice());
-  input.SetInPlaceIrValue(ir::ops::Pow(input.GetIrValue(), exponent_node));
-}
-
-void LazyTensor::pow_(LazyTensor& input, const LazyTensor& exponent) {
-  input.SetInPlaceIrValue(
-      ir::ops::Pow(input.GetIrValue(), exponent.GetIrValue()));
-}
-
 LazyTensor LazyTensor::prod(const LazyTensor& input,
                             std::vector<lazy_tensors::int64> dimensions,
                             bool keep_reduced_dimensions,
@@ -2361,10 +2113,6 @@ LazyTensor LazyTensor::reciprocal(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::ReciprocalOp(input.GetIrValue()));
 }
 
-void LazyTensor::reciprocal_(LazyTensor& input) {
-  input.SetInPlaceIrValue(ir::ops::ReciprocalOp(input.GetIrValue()));
-}
-
 LazyTensor LazyTensor::reflection_pad2d(
     const LazyTensor& input, std::vector<lazy_tensors::int64> padding) {
   return input.CreateFrom(ir::MakeNode<ir::ops::ReflectionPad2d>(
@@ -2397,17 +2145,6 @@ LazyTensor LazyTensor::remainder(const LazyTensor& input,
   ir::Value constant =
       GetIrValueForScalar(other, input.shape(), input.GetDevice());
   return input.CreateFrom(ir::ops::Remainder(input.GetIrValue(), constant));
-}
-
-void LazyTensor::remainder_(LazyTensor& input, const LazyTensor& other) {
-  input.SetInPlaceIrValue(
-      ir::ops::Remainder(input.GetIrValue(), other.GetIrValue()));
-}
-
-void LazyTensor::remainder_(LazyTensor& input, const at::Scalar& other) {
-  ir::Value constant =
-      GetIrValueForScalar(other, input.shape(), input.GetDevice());
-  input.SetInPlaceIrValue(ir::ops::Remainder(input.GetIrValue(), constant));
 }
 
 LazyTensor LazyTensor::repeat(const LazyTensor& input,
@@ -2461,10 +2198,6 @@ LazyTensor LazyTensor::round(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::Round(input.GetIrValue()));
 }
 
-void LazyTensor::round_(LazyTensor& input) {
-  input.SetInPlaceIrValue(ir::ops::Round(input.GetIrValue()));
-}
-
 LazyTensor LazyTensor::rrelu_with_noise(const LazyTensor& input,
                                         LazyTensor& noise,
                                         const at::Scalar& lower,
@@ -2490,10 +2223,6 @@ LazyTensor LazyTensor::rrelu_with_noise_backward(const LazyTensor& grad_output,
 
 LazyTensor LazyTensor::rsqrt(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::Rsqrt(input.GetIrValue()));
-}
-
-void LazyTensor::rsqrt_(LazyTensor& input) {
-  input.SetInPlaceIrValue(ir::ops::Rsqrt(input.GetIrValue()));
 }
 
 LazyTensor LazyTensor::rsub(
@@ -2538,18 +2267,20 @@ void LazyTensor::copy_(LazyTensor& input, LazyTensor& src) {
   }
 }
 
-void LazyTensor::scatter_(LazyTensor& input, lazy_tensors::int64 dim,
-                          const LazyTensor& index, const LazyTensor& src) {
-  input.SetIrValue(ir::MakeNode<ir::ops::Scatter>(
+void LazyTensor::scatter_out(LazyTensor& out, const LazyTensor& input,
+                             lazy_tensors::int64 dim, const LazyTensor& index,
+                             const LazyTensor& src) {
+  out.SetIrValue(ir::MakeNode<ir::ops::Scatter>(
       input.GetIrValue(), index.GetIrValue(), src.GetIrValue(),
       Helpers::GetCanonicalDimensionIndex(dim, input.shape().get().rank())));
 }
 
-void LazyTensor::scatter_(LazyTensor& input, lazy_tensors::int64 dim,
-                          const LazyTensor& index, const at::Scalar& value) {
+void LazyTensor::scatter_out(LazyTensor& out, const LazyTensor& input,
+                             lazy_tensors::int64 dim, const LazyTensor& index,
+                             const at::Scalar& value) {
   ir::Value constant =
       GetIrValueForScalar(value, input.shape(), input.GetDevice());
-  input.SetIrValue(ir::MakeNode<ir::ops::Scatter>(
+  out.SetIrValue(ir::MakeNode<ir::ops::Scatter>(
       input.GetIrValue(), index.GetIrValue(), constant,
       Helpers::GetCanonicalDimensionIndex(dim, input.shape().get().rank())));
 }
@@ -2558,6 +2289,26 @@ void LazyTensor::scatter_add_(LazyTensor& input, lazy_tensors::int64 dim,
                               const LazyTensor& index, const LazyTensor& src) {
   input.SetIrValue(ir::MakeNode<ir::ops::ScatterAdd>(
       input.GetIrValue(), index.GetIrValue(), src.GetIrValue(),
+      Helpers::GetCanonicalDimensionIndex(dim, input.shape().get().rank())));
+}
+
+void LazyTensor::scatter_add_out(LazyTensor& out, const LazyTensor& input,
+                                 lazy_tensors::int64 dim,
+                                 const LazyTensor& index,
+                                 const LazyTensor& src) {
+  out.SetIrValue(ir::MakeNode<ir::ops::ScatterAdd>(
+      input.GetIrValue(), index.GetIrValue(), src.GetIrValue(),
+      Helpers::GetCanonicalDimensionIndex(dim, input.shape().get().rank())));
+}
+
+void LazyTensor::scatter_add_out(LazyTensor& out, const LazyTensor& input,
+                                 lazy_tensors::int64 dim,
+                                 const LazyTensor& index,
+                                 const at::Scalar& value) {
+  ir::Value constant =
+      GetIrValueForScalar(value, input.shape(), input.GetDevice());
+  out.SetIrValue(ir::MakeNode<ir::ops::ScatterAdd>(
+      input.GetIrValue(), index.GetIrValue(), constant,
       Helpers::GetCanonicalDimensionIndex(dim, input.shape().get().rank())));
 }
 
@@ -2574,10 +2325,6 @@ LazyTensor LazyTensor::sigmoid(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::Sigmoid(input.GetIrValue()));
 }
 
-void LazyTensor::sigmoid_(LazyTensor& input) {
-  input.SetInPlaceIrValue(ir::ops::Sigmoid(input.GetIrValue()));
-}
-
 LazyTensor LazyTensor::sigmoid_backward(const LazyTensor& grad_output,
                                         const LazyTensor& output) {
   return grad_output.CreateFrom(
@@ -2588,24 +2335,12 @@ LazyTensor LazyTensor::sign(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::SignOp(input.GetIrValue()));
 }
 
-void LazyTensor::sign_(LazyTensor& input) {
-  input.SetInPlaceIrValue(ir::ops::SignOp(input.GetIrValue()));
-}
-
 LazyTensor LazyTensor::sin(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::Sin(input.GetIrValue()));
 }
 
-void LazyTensor::sin_(LazyTensor& input) {
-  input.SetInPlaceIrValue(ir::ops::Sin(input.GetIrValue()));
-}
-
 LazyTensor LazyTensor::sinh(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::Sinh(input.GetIrValue()));
-}
-
-void LazyTensor::sinh_(LazyTensor& input) {
-  input.SetInPlaceIrValue(ir::ops::Sinh(input.GetIrValue()));
 }
 
 LazyTensor LazyTensor::slice(const LazyTensor& input, lazy_tensors::int64 dim,
@@ -2738,10 +2473,6 @@ LazyTensor LazyTensor::sqrt(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::Sqrt(input.GetIrValue()));
 }
 
-void LazyTensor::sqrt_(LazyTensor& input) {
-  input.SetInPlaceIrValue(ir::ops::Sqrt(input.GetIrValue()));
-}
-
 LazyTensor LazyTensor::squeeze(const LazyTensor& input) {
   auto input_shape = input.shape();
   auto output_dimensions = BuildSqueezedDimensions(
@@ -2802,13 +2533,6 @@ LazyTensor LazyTensor::sub(const LazyTensor& input, const LazyTensor& other,
                           logical_element_type);
 }
 
-void LazyTensor::sub_(LazyTensor& input, const LazyTensor& other,
-                      const at::Scalar& alpha) {
-  ir::Value constant =
-      GetIrValueForScalar(alpha, other.shape(), other.GetDevice());
-  input.SetInPlaceIrValue(input.GetIrValue() - other.GetIrValue() * constant);
-}
-
 LazyTensor LazyTensor::sub(const LazyTensor& input, const at::Scalar& other,
                            const at::Scalar& alpha,
                            c10::optional<at::ScalarType> logical_element_type) {
@@ -2818,15 +2542,6 @@ LazyTensor LazyTensor::sub(const LazyTensor& input, const at::Scalar& other,
       alpha, input.shape(), logical_element_type, input.GetDevice());
   return input.CreateFrom(input.GetIrValue() - other_constant * alpha_constant,
                           logical_element_type);
-}
-
-void LazyTensor::sub_(LazyTensor& input, const at::Scalar& other,
-                      const at::Scalar& alpha) {
-  ir::Value other_constant =
-      GetIrValueForScalar(other, input.shape(), input.GetDevice());
-  ir::Value alpha_constant =
-      GetIrValueForScalar(alpha, input.shape(), input.GetDevice());
-  input.SetInPlaceIrValue(input.GetIrValue() - other_constant * alpha_constant);
 }
 
 LazyTensor LazyTensor::sum(const LazyTensor& input,
@@ -2874,16 +2589,8 @@ LazyTensor LazyTensor::tan(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::Tan(input.GetIrValue()));
 }
 
-void LazyTensor::tan_(LazyTensor& input) {
-  input.SetInPlaceIrValue(ir::ops::Tan(input.GetIrValue()));
-}
-
 LazyTensor LazyTensor::tanh(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::Tanh(input.GetIrValue()));
-}
-
-void LazyTensor::tanh_(LazyTensor& input) {
-  input.SetInPlaceIrValue(ir::ops::Tanh(input.GetIrValue()));
 }
 
 LazyTensor LazyTensor::tanh_backward(const LazyTensor& grad_output,
@@ -2895,11 +2602,6 @@ LazyTensor LazyTensor::tanh_backward(const LazyTensor& grad_output,
 LazyTensor LazyTensor::threshold(const LazyTensor& input, float threshold,
                                  float value) {
   return input.CreateFrom(
-      ir::MakeNode<ir::ops::Threshold>(input.GetIrValue(), threshold, value));
-}
-
-void LazyTensor::threshold_(LazyTensor& input, float threshold, float value) {
-  input.SetInPlaceIrValue(
       ir::MakeNode<ir::ops::Threshold>(input.GetIrValue(), threshold, value));
 }
 
@@ -3002,10 +2704,6 @@ void LazyTensor::triu_(LazyTensor& input, lazy_tensors::int64 diagonal) {
 
 LazyTensor LazyTensor::trunc(const LazyTensor& input) {
   return input.CreateFrom(ir::ops::Trunc(input.GetIrValue()));
-}
-
-void LazyTensor::trunc_(LazyTensor& input) {
-  input.SetInPlaceIrValue(ir::ops::Trunc(input.GetIrValue()));
 }
 
 std::vector<LazyTensor> LazyTensor::unbind(const LazyTensor& input,

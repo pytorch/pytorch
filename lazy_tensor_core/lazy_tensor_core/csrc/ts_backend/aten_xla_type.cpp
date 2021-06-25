@@ -60,18 +60,6 @@ at::Tensor DoBinaryOp(const at::Tensor& self, const at::Scalar& other,
   return bridge::AtenFromLtcTensor(result);
 }
 
-void CheckBinaryOpTypePromotion(const at::Tensor& out, const at::Tensor& self,
-                                const at::Tensor& other) {
-  at::ScalarType resultType = at::result_type(self, other);
-  LTC_CHECK(at::canCast(/*from=*/resultType, /*to=*/out.scalar_type()));
-}
-
-void CheckBinaryOpTypePromotion(const at::Tensor& out, const at::Tensor& self,
-                                const at::Scalar& other) {
-  at::ScalarType resultType = at::result_type(self, other);
-  LTC_CHECK(at::canCast(/*from=*/resultType, /*to=*/out.scalar_type()));
-}
-
 at::Tensor subtensor(const at::Tensor& tensor, int dim, int groups, int g) {
   if (!tensor.defined()) {
     return at::Tensor();
@@ -115,15 +103,6 @@ at::Tensor addcmul(const at::Tensor& self, const at::Tensor& tensor1,
   return bridge::AtenFromLtcTensor(LazyTensor::addcmul(
       bridge::GetLtcTensor(self), value, bridge::GetLtcTensor(tensor1),
       bridge::GetLtcTensor(tensor2)));
-}
-
-at::Tensor& addcmul_(at::Tensor& self, const at::Tensor& tensor1,
-                     const at::Tensor& tensor2, const at::Scalar& value) {
-  LTC_FN_COUNTER("xla::");
-  LazyTensor self_tensor = bridge::GetLtcTensor(self);
-  LazyTensor::addcmul_(self_tensor, value, bridge::GetLtcTensor(tensor1),
-                       bridge::GetLtcTensor(tensor2));
-  return self;
 }
 
 at::Tensor addmm(const at::Tensor& self, const at::Tensor& mat1,
@@ -433,29 +412,6 @@ at::Tensor div(const at::Tensor& self, const at::Scalar& other) {
       LazyTensor::div(bridge::GetLtcTensor(self), other));
 }
 
-at::Tensor& div_(at::Tensor& self, const at::Tensor& other) {
-  return div_(self, other, /*rounding_mode=*/c10::nullopt);
-}
-
-at::Tensor& div_(at::Tensor& self, const at::Tensor& other,
-                 c10::optional<c10::string_view> rounding_mode) {
-  LTC_FN_COUNTER("xla::");
-  CheckBinaryOpTypePromotion(self, self, other);
-  LazyTensor self_tensor = bridge::GetLtcTensor(self);
-  LazyTensor::div_(self_tensor,
-                   bridge::GetOrCreateLtcTensor(other, self_tensor.GetDevice()),
-                   rounding_mode);
-  return self;
-}
-
-at::Tensor& div_(at::Tensor& self, const at::Scalar& other) {
-  LTC_FN_COUNTER("xla::");
-  CheckBinaryOpTypePromotion(self, self, other);
-  LazyTensor self_tensor = bridge::GetLtcTensor(self);
-  LazyTensor::div_(self_tensor, other);
-  return self;
-}
-
 at::Tensor embedding_dense_backward(const at::Tensor& grad_output,
                                     const at::Tensor& indices,
                                     int64_t num_weights, int64_t padding_idx,
@@ -504,20 +460,6 @@ at::Tensor eq(const at::Tensor& self, const at::Tensor& other) {
       LazyTensor::eq(bridge::GetLtcTensor(self), bridge::GetLtcTensor(other)));
 }
 
-at::Tensor& eq_(at::Tensor& self, const at::Scalar& other) {
-  LTC_FN_COUNTER("xla::");
-  LazyTensor self_tensor = bridge::GetLtcTensor(self);
-  LazyTensor::eq_(self_tensor, other);
-  return self;
-}
-
-at::Tensor& eq_(at::Tensor& self, const at::Tensor& other) {
-  LTC_FN_COUNTER("xla::");
-  LazyTensor self_tensor = bridge::GetLtcTensor(self);
-  LazyTensor::eq_(self_tensor, bridge::GetLtcTensor(other));
-  return self;
-}
-
 at::Tensor expand(const at::Tensor& self, at::IntArrayRef size, bool implicit) {
   LTC_FN_COUNTER("xla::");
   return bridge::AtenFromLtcTensor(LazyTensor::expand(
@@ -535,20 +477,6 @@ at::Tensor ge(const at::Tensor& self, const at::Tensor& other) {
   LTC_FN_COUNTER("xla::");
   return bridge::AtenFromLtcTensor(
       LazyTensor::ge(bridge::GetLtcTensor(self), bridge::GetLtcTensor(other)));
-}
-
-at::Tensor& ge_(at::Tensor& self, const at::Scalar& other) {
-  LTC_FN_COUNTER("xla::");
-  LazyTensor self_tensor = bridge::GetLtcTensor(self);
-  LazyTensor::ge_(self_tensor, other);
-  return self;
-}
-
-at::Tensor& ge_(at::Tensor& self, const at::Tensor& other) {
-  LTC_FN_COUNTER("xla::");
-  LazyTensor self_tensor = bridge::GetLtcTensor(self);
-  LazyTensor::ge_(self_tensor, bridge::GetLtcTensor(other));
-  return self;
 }
 
 at::Tensor gelu(const at::Tensor& self) {
@@ -575,20 +503,6 @@ at::Tensor gt(const at::Tensor& self, const at::Tensor& other) {
       LazyTensor::gt(bridge::GetLtcTensor(self), bridge::GetLtcTensor(other)));
 }
 
-at::Tensor& gt_(at::Tensor& self, const at::Scalar& other) {
-  LTC_FN_COUNTER("xla::");
-  LazyTensor self_tensor = bridge::GetLtcTensor(self);
-  LazyTensor::gt_(self_tensor, other);
-  return self;
-}
-
-at::Tensor& gt_(at::Tensor& self, const at::Tensor& other) {
-  LTC_FN_COUNTER("xla::");
-  LazyTensor self_tensor = bridge::GetLtcTensor(self);
-  LazyTensor::gt_(self_tensor, bridge::GetLtcTensor(other));
-  return self;
-}
-
 at::Tensor index_select(const at::Tensor& self, int64_t dim,
                         const at::Tensor& index) {
   LTC_FN_COUNTER("xla::");
@@ -608,20 +522,6 @@ at::Tensor le(const at::Tensor& self, const at::Tensor& other) {
       LazyTensor::le(bridge::GetLtcTensor(self), bridge::GetLtcTensor(other)));
 }
 
-at::Tensor& le_(at::Tensor& self, const at::Scalar& other) {
-  LTC_FN_COUNTER("xla::");
-  LazyTensor self_tensor = bridge::GetLtcTensor(self);
-  LazyTensor::le_(self_tensor, other);
-  return self;
-}
-
-at::Tensor& le_(at::Tensor& self, const at::Tensor& other) {
-  LTC_FN_COUNTER("xla::");
-  LazyTensor self_tensor = bridge::GetLtcTensor(self);
-  LazyTensor::le_(self_tensor, bridge::GetLtcTensor(other));
-  return self;
-}
-
 at::Tensor lt(const at::Tensor& self, const at::Scalar& other) {
   LTC_FN_COUNTER("xla::");
   return bridge::AtenFromLtcTensor(
@@ -632,20 +532,6 @@ at::Tensor lt(const at::Tensor& self, const at::Tensor& other) {
   LTC_FN_COUNTER("xla::");
   return bridge::AtenFromLtcTensor(
       LazyTensor::lt(bridge::GetLtcTensor(self), bridge::GetLtcTensor(other)));
-}
-
-at::Tensor& lt_(at::Tensor& self, const at::Scalar& other) {
-  LTC_FN_COUNTER("xla::");
-  LazyTensor self_tensor = bridge::GetLtcTensor(self);
-  LazyTensor::lt_(self_tensor, other);
-  return self;
-}
-
-at::Tensor& lt_(at::Tensor& self, const at::Tensor& other) {
-  LTC_FN_COUNTER("xla::");
-  LazyTensor self_tensor = bridge::GetLtcTensor(self);
-  LazyTensor::lt_(self_tensor, bridge::GetLtcTensor(other));
-  return self;
 }
 
 at::Tensor max_pool2d(const at::Tensor& self, at::IntArrayRef kernel_size,
@@ -690,23 +576,6 @@ at::Tensor mul(const at::Tensor& self, const at::Scalar& other) {
                         at::ScalarType dtype) {
                       return LazyTensor::mul(xself, other, dtype);
                     });
-}
-
-at::Tensor& mul_(at::Tensor& self, const at::Tensor& other) {
-  LTC_FN_COUNTER("xla::");
-  CheckBinaryOpTypePromotion(self, self, other);
-  LazyTensor self_tensor = bridge::GetLtcTensor(self);
-  LazyTensor::mul_(self_tensor, bridge::GetOrCreateLtcTensor(
-                                    other, self_tensor.GetDevice()));
-  return self;
-}
-
-at::Tensor& mul_(at::Tensor& self, const at::Scalar& other) {
-  LTC_FN_COUNTER("xla::");
-  CheckBinaryOpTypePromotion(self, self, other);
-  LazyTensor self_tensor = bridge::GetLtcTensor(self);
-  LazyTensor::mul_(self_tensor, other);
-  return self;
 }
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor> native_batch_norm(
@@ -775,20 +644,6 @@ at::Tensor ne(const at::Tensor& self, const at::Tensor& other) {
   LTC_FN_COUNTER("xla::");
   return bridge::AtenFromLtcTensor(
       LazyTensor::ne(bridge::GetLtcTensor(self), bridge::GetLtcTensor(other)));
-}
-
-at::Tensor& ne_(at::Tensor& self, const at::Scalar& other) {
-  LTC_FN_COUNTER("xla::");
-  LazyTensor self_tensor = bridge::GetLtcTensor(self);
-  LazyTensor::ne_(self_tensor, other);
-  return self;
-}
-
-at::Tensor& ne_(at::Tensor& self, const at::Tensor& other) {
-  LTC_FN_COUNTER("xla::");
-  LazyTensor self_tensor = bridge::GetLtcTensor(self);
-  LazyTensor::ne_(self_tensor, bridge::GetLtcTensor(other));
-  return self;
 }
 
 std::tuple<at::Tensor, at::Tensor> max_pool2d_with_indices(
@@ -909,29 +764,6 @@ at::Tensor sub(const at::Tensor& self, const at::Scalar& other,
                     });
 }
 
-at::Tensor& sub_(at::Tensor& self, const at::Tensor& other,
-                 const at::Scalar& alpha) {
-  LTC_FN_COUNTER("xla::");
-  CheckBinaryOpTypePromotion(self, self, other);
-  at::native::alpha_check(at::result_type(self, other), alpha);
-  CheckSubOperandTypes(self.scalar_type(), other.scalar_type());
-  LazyTensor self_tensor = bridge::GetLtcTensor(self);
-  LazyTensor::sub_(self_tensor,
-                   bridge::GetOrCreateLtcTensor(other, self_tensor.GetDevice()),
-                   alpha);
-  return self;
-}
-
-at::Tensor& sub_(at::Tensor& self, const at::Scalar& other,
-                 const at::Scalar& alpha) {
-  LTC_FN_COUNTER("xla::");
-  CheckBinaryOpTypePromotion(self, self, other);
-  CheckSubOperandTypes(self.scalar_type(), GetScalarType(other));
-  LazyTensor self_tensor = bridge::GetLtcTensor(self);
-  LazyTensor::sub_(self_tensor, other, alpha);
-  return self;
-}
-
 at::Tensor sum(const at::Tensor& self, c10::optional<at::ScalarType> dtype) {
   LTC_FN_COUNTER("xla::");
   LazyTensor self_tensor = bridge::GetLtcTensor(self);
@@ -967,13 +799,6 @@ at::Tensor tanh(const at::Tensor& self) {
   LTC_FN_COUNTER("xla::");
   return bridge::AtenFromLtcTensor(
       LazyTensor::tanh(bridge::GetLtcTensor(self)));
-}
-
-at::Tensor& tanh_(at::Tensor& self) {
-  LTC_FN_COUNTER("xla::");
-  LazyTensor self_tensor = bridge::GetLtcTensor(self);
-  LazyTensor::tanh_(self_tensor);
-  return self;
 }
 
 at::Tensor tanh_backward(const at::Tensor& grad_output,
