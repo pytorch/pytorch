@@ -419,6 +419,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           folder_path: site
+          path: site2
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"
