@@ -467,6 +467,7 @@ def _model_to_graph(model, args, verbose=False,
 
     params_dict = _get_named_param_dict(graph, params)
 
+    all_input_and_param_names = [val.debugName() for val in graph.inputs()]
     graph = _optimize_graph(graph, operator_export_type,
                             _disable_torch_constant_prop=_disable_torch_constant_prop,
                             fixed_batch_size=fixed_batch_size, params_dict=params_dict,
@@ -500,9 +501,14 @@ def _model_to_graph(model, args, verbose=False,
     assert len(params) + len(flatten_args) == sum(1 for _ in graph.inputs())
 
     params_dict = _get_named_param_dict(graph, params)
+    params_names = _unique_state_dict(model).keys()
+    input_names = []
+    for _, input_name in enumerate(all_input_and_param_names):
+        if input_name not in params_names:
+            input_names.append(input_name)
 
     if training is None or training == TrainingMode.EVAL:
-        params_dict = torch._C._jit_pass_onnx_eval_peephole(graph, params_dict)
+        params_dict = torch._C._jit_pass_onnx_eval_peephole(graph, input_names,params_dict)
 
     if do_constant_folding and _export_onnx_opset_version in torch.onnx.constant_folding_opset_versions:
         params_dict = torch._C._jit_pass_onnx_constant_fold(graph, params_dict,

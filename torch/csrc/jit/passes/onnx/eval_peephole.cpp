@@ -44,7 +44,7 @@ std::vector<at::Tensor> getValues(
 static void fuseConvBatchNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     for (auto* child_block : it->blocks()) {
-      fuseConvBatchNorm(child_block, valsToParamsMap);
+      fuseConvBatchNorm(child_block, inputNames, valsToParamsMap);
     }
     if (it->kind() == onnx::Conv) {
       if (it->output()->uses().size() != 1) {
@@ -138,11 +138,20 @@ static void fuseConvBatchNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
       it.destroyCurrent();
     }
   }
+
+  auto block_inputs = b->owningGraph()->inputs();
+  printf("In the end, print block's inputs.\n");
+  for (auto b_input : block_inputs) {
+    // b_input->node()->dump();
+    printf("=== input name: %s \n", b_input->debugNameBase().c_str());
+  }
+  printf("Finish print block's inputs.\n");
+
 }
 
-void EvalPeepholeONNX(Block* b, ParamMap& paramsDict) {
+void EvalPeepholeONNX(Block* b, std::vector<std::string>& inputNames, ParamMap& paramsDict) {
   auto valsToParamsMap = buildValueToParamsMap(b, paramsDict);
-  fuseConvBatchNorm(b, valsToParamsMap);
+  fuseConvBatchNorm(b, inputNames, valsToParamsMap);
   buildParamsMapFromValueToParamsMap(valsToParamsMap, paramsDict);
 }
 
