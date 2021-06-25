@@ -24,10 +24,32 @@ class Model(nn.Module):
         x = self.linear(x)
         return x
 
+class MultipleModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.seq = nn.Sequential(
+            nn.Linear(7, 5, bias=False),
+            nn.ReLU(),
+            nn.Linear(5, 8, bias=False),
+            nn.ReLU(),
+            nn.Linear(8, 6, bias=False)
+        )
+        self.linear = nn.Linear(6, 4, bias=False)
 
-class ImplementedPruner(BasePruner):
+    def forward(self, x):
+        x = self.seq(x)
+        x = self.linear(x)
+        return x
+
+
+class SimplePruner(BasePruner):
     def update_mask(self, layer, **kwargs):
         layer.parametrizations.weight[0].pruned_outputs.add(1)
+
+
+class MultiplePruner(BasePruner):
+    def update_mask(self, layer, **kwargs):
+        layer.parametrizations.weight[0].pruned_outputs.update([1, 2])
 
 
 class TestBasePruner(TestCase):
@@ -37,11 +59,11 @@ class TestBasePruner(TestCase):
                                BasePruner)
         # Can instantiate the model with no configs
         model = Model()
-        pruner = ImplementedPruner(model, None, None)
+        pruner = SimplePruner(model, None, None)
         assert len(pruner.module_groups) == 2
         pruner.step()
         # Can instantiate the model with configs
-        pruner = ImplementedPruner(model, [model.linear], {'test': 3})
+        pruner = SimplePruner(model, [model.linear], {'test': 3})
         assert len(pruner.module_groups) == 1
         assert pruner.module_groups[0]['path'] == 'linear'
         assert 'test' in pruner.module_groups[0]
@@ -49,7 +71,7 @@ class TestBasePruner(TestCase):
 
     def test_prepare(self):
         model = Model()
-        pruner = ImplementedPruner(model, None, None)
+        pruner = SimplePruner(model, None, None)
         pruner.prepare()
         for g in pruner.module_groups:
             module = g['module']
@@ -63,7 +85,7 @@ class TestBasePruner(TestCase):
 
     def test_convert(self):
         model = Model()
-        pruner = ImplementedPruner(model, None, None)
+        pruner = SimplePruner(model, None, None)
         pruner.prepare()
         pruner.convert()
         for g in pruner.module_groups:
@@ -74,7 +96,7 @@ class TestBasePruner(TestCase):
     def test_step(self):
         model = Model()
         x = torch.ones(16, 16)
-        pruner = ImplementedPruner(model, None, None)
+        pruner = SimplePruner(model, None, None)
         pruner.prepare()
         pruner.enable_mask_update = True
         for g in pruner.module_groups:
@@ -87,3 +109,20 @@ class TestBasePruner(TestCase):
             module = g['module']
             assert module.parametrizations.weight[0].pruned_outputs == set({1})
             assert not (False in (model(x)[:, 1] == 0))
+
+        model = MultipleModel()
+        x = torch.ones(7, 7)
+        pruner = MultiplePruner(model, None, None)
+        pruner.prepare()
+        pruner.enable_mask_update = True
+        for g in pruner.module_groups:
+            # Before step
+            module = g['module']
+            assert module.parametrizations.weight[0].pruned_outputs == set()
+        pruner.step()
+        for g in pruner.module_groups:
+            # After step
+            module = g['module']
+            assert module.parametrizations.weight[0].pruned_outputs == set({1, 2})
+            assert not (False in (model(x)[:, 1] == 0))
+            assert not (False in (model(x)[:, 2] == 0))
