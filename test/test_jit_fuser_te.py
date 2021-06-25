@@ -153,6 +153,22 @@ class TestTEFuser(JitTestCase):
         # we would compute the wrong result silently
         self.assertEqual(scripted(a, a), fused_kernel(a, a))
 
+    def test_save_alexnet(self):
+        import torchvision.models as models
+        from torch.testing._internal.common_utils import set_default_dtype
+        with set_default_dtype(torch.float):
+            model = models.alexnet()
+            model = torch.jit.script(model)
+            torch.jit.save(model, "alexnet.pt")
+
+    def test_save_mobilenet(self):
+        import torchvision.models as models
+        from torch.testing._internal.common_utils import set_default_dtype
+        with set_default_dtype(torch.float):
+            model = models.mobilenet_v3_large()
+            model = torch.jit.script(model)
+            torch.jit.save(model, "mobilenet_v3_large.pt")
+
     def test_sum_simple(self):
         def func(x):
             x2 = x * x

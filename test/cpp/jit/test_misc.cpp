@@ -58,6 +58,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
 
+#include <torch/csrc/jit/passes/frozen_graph_optimizations.h>
 #include <algorithm>
 #include <cstddef>
 #include <functional>
@@ -70,6 +71,8 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+#include "torch/csrc/jit/passes/freeze_module.h"
+#include "torch/csrc/jit/passes/tensorexpr_fuser.h"
 
 using namespace torch::autograd::profiler;
 
@@ -1921,6 +1924,83 @@ TEST(InsertBailOutsTest, Basic) {
   for (auto blo : bailouts) {
     ASSERT_EQ(blo->inputs().at(0)->node()->kind(), prim::BailoutTemplate);
   }
+}
+
+std::shared_ptr<Graph> TraceGraph(std::shared_ptr<Graph> graph, Stack& stack) {
+  RegisterProfilingNode([](const Node*) { return true; });
+  auto pr = ProfilingRecord::instrumentGraph(graph);
+  pr->profiling_count_ = 1;
+  GRAPH_DUMP("After Instrumentation: ", pr->profiled_graph_);
+  Code cd(pr->profiled_graph_, "");
+  InterpreterState is{cd};
+  is.run(stack);
+  GRAPH_DUMP("After Profiling: ", pr->profiled_graph_);
+  std::function<void(Block*)> removeProfileNodesAndSpecializeTypesStrict;
+  removeProfileNodesAndSpecializeTypesStrict =
+      [&removeProfileNodesAndSpecializeTypesStrict](Block* b) {
+        for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
+          if (it->kind() == prim::profile) {
+            GRAPH_DEBUG("Removing prim::profile: %", it->output()->debugName());
+            it->output()->replaceAllUsesWith(it->input());
+            auto profiled_type =
+                it->ty(attr::profiled_type)->expect<TensorType>();
+            if (*profiled_type == *TensorType::get()) {
+              it.destroyCurrent();
+              continue;
+            }
+
+            if (*it->input()->type() == *TensorType::get()) {
+              GRAPH_DEBUG(
+                  "Setting a fresh shape for ", getHeader(it->input()->node()));
+              it->input()->setType(it->ty(attr::profiled_type));
+            } else {
+              GRAPH_DEBUG(
+                  "Merging shapes ",
+                  *it->input()->type(),
+                  " and ",
+                  *profiled_type);
+              it->input()->setType(
+                  it->ty(attr::profiled_type)
+                      ->cast<TensorType>()
+                      ->merge(*it->input()->type()->cast<TensorType>().get()));
+            }
+
+            if (it->input()->type()->cast<TensorType>()->isSummarized()) {
+              throw std::string(
+                  "Conflicting types in a graph at " + getHeader(*it));
+            }
+
+            it->input()->setType(it->ty(attr::profiled_type));
+            it.destroyCurrent();
+
+          } else {
+            for (Block* ib : it->blocks()) {
+              removeProfileNodesAndSpecializeTypesStrict(ib);
+            }
+          }
+        }
+      };
+  auto copy = pr->profiled_graph_;
+  ProfilingRecord::removeProfileCounter(copy->block());
+  removeProfileNodesAndSpecializeTypesStrict(copy->block());
+  GRAPH_DUMP("Annotated Graph: ", copy);
+  return copy;
+}
+
+TEST(JitTrace, Basic) {
+  // RegisterProfilingNode
+
+  Module model = torch::jit::load("test/mobilenet_v3_large.pt");
+  model.eval();
+  model = freeze_module(model);
+  auto graph = model.get_method("forward").graph();
+  GRAPH_DUMP("Before OptimizeFrozenGraph:", graph);
+  OptimizeFrozenGraph(graph, true);
+  auto x = at::randn({1, 3, 224, 224}, at::kCPU);
+  Stack stack;
+  push(stack, model._ivalue());
+  push(stack, x);
+  auto traced = TraceGraph(graph, stack);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
