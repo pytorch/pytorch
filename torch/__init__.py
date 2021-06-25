@@ -723,7 +723,6 @@ from torch import __future__ as __future__
 from torch import profiler as profiler
 import torch
 import functools
-import warnings
 import collections
 try:
     import numpy as np
@@ -871,8 +870,8 @@ class autocast(object):
         enabled(bool, optional, default=True):  Whether autocasting should be enabled in the region.
     """
     def __init__(self, enabled=True, fast_dtype=torch.float16, device='cuda'):
-        self.device=device
-        if device=='cpu':
+        self.device = device
+        if device == 'cpu':
             supported_dtype = [torch.bfloat16]
             if fast_dtype not in supported_dtype :
                 warnings.warn("In CPU autocast, but the target dtype is not supported. Disable the autocast.")
@@ -880,10 +879,10 @@ class autocast(object):
                 enabled = False
                 fast_dtype = torch.bfloat16
         self._enabled = enabled
-        self.fast_dtype=fast_dtype
+        self.fast_dtype = fast_dtype
 
     def __enter__(self):
-        if self.device=='cpu':
+        if self.device == 'cpu':
             self.prev = torch.is_autocast_cpu_enabled()
             self.prev_fastdtype = torch.get_autocast_cpu_dtype()
             torch.set_autocast_cpu_enabled(self._enabled)
@@ -898,7 +897,7 @@ class autocast(object):
 
     def __exit__(self, *args):
         # Drop the cache when we exit to a nesting level that's outside any instance of autocast.
-        if self.device=='cpu':
+        if self.device == 'cpu':
             if torch.autocast_decrement_nesting() == 0:
                 torch.clear_autocast_cache()
             torch.set_autocast_cpu_enabled(self.prev)
