@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
 import torch.nn.quantized as nnq
 from torch.quantization import default_qconfig
@@ -44,7 +43,6 @@ from hypothesis import strategies as st
 qconfig_dict = {"": None,
                 "object_type": [(nn.Linear, default_qconfig),
                                 (F.linear, default_qconfig),
-                                (nni.LinearReLU, default_qconfig),
                                 (nn.ReLU, default_qconfig),
                                 (F.relu, default_qconfig)]}
 
@@ -52,7 +50,8 @@ default_equalization_qconfig_dict = {
     "": None,
     "object_type": [(nn.Linear, default_equalization_qconfig),
                     (F.linear, default_equalization_qconfig),
-                    (nni.LinearReLU, default_equalization_qconfig)]}
+                    (nn.ReLU, default_equalization_qconfig),
+                    (F.relu, default_equalization_qconfig)]}
 
 
 class TestEqualizeFx(QuantizationTestCase):
@@ -370,12 +369,11 @@ class TestEqualizeFx(QuantizationTestCase):
         return exp_weight_activation_vals
 
     def test_input_weight_equalization_activation_values(self):
-        """ After applying the equalization functions check if each observer's
-        min/max values are as expected
+        """ After applying the equalization functions check if the input
+        observer's min/max values are as expected
         """
 
-        tests = [SingleLayerLinearModel, TwoLayerLinearModel,
-                 SingleLayerFunctionalLinearModel, TwoLayerFunctionalLinearModel]
+        tests = [SingleLayerLinearModel, SingleLayerFunctionalLinearModel]
 
         x = torch.rand((5, 5))
         for M in tests:

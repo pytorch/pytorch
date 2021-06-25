@@ -170,7 +170,7 @@ def calculate_equalization_scale(input_obs: _InputEqualizationObserver,
         )
 
     equalization_scale = torch.sqrt((max_weights - min_weights) / (max_inputs - min_inputs))
-    # Replace all 'inf's with 1s to prevent 'nan's when taking the reciprocal 
+    # Replace all 'inf's with 1s to prevent 'nan's when taking the reciprocal
     equalization_scale[equalization_scale == float('inf')] = 1
     return equalization_scale
 
@@ -215,10 +215,9 @@ def node_supports_equalization(node: Node, modules) -> bool:
     """
     if node.op == 'call_module':
         return (isinstance(modules[node.target], nn.Linear) or
-                isinstance(modules[node.target], nni.LinearReLU) or
-                isinstance(modules[node.target], nn.ReLU))
+                isinstance(modules[node.target], nni.LinearReLU))
     elif node.op == 'call_function':
-        return node.target == F.linear or node.target == F.relu
+        return node.target == F.linear
     return False
 
 def is_equalization_observer(observer: nn.Module) -> bool:
@@ -256,7 +255,7 @@ def get_op_node_and_weight_eq_obs(
         return op_node, weight_eq_obs
 
     elif op_node.op == 'call_function':
-        weight_node = maybe_get_functional_weight_node(op_node, modules, 'eq_obs')
+        weight_node = maybe_get_weight_eq_obs_node(op_node, modules)
         if weight_node is not None:
             weight_eq_obs = modules[str(weight_node.target)]
             assert(isinstance(weight_eq_obs, _WeightEqualizationObserver))
@@ -264,45 +263,16 @@ def get_op_node_and_weight_eq_obs(
 
     return None, None
 
-def maybe_get_functional_weight_node(op_node: Node, modules: Dict[str, nn.Module], attr: str) -> Optional[Node]:
-    """ Retrieves the weight node with the given attribute that is input into
-    the given op_node.
-
-    The path should look something like: get_attr(weight) -> weight_quant_obs -> weight_eq_obs -> op_node
-    So we can trace back a specific number of steps to find the node with the
-    given attribute.
-
-    Args:
-        op_node: A functional node
-        attr: Can be one of {'eq_obs', 'quant_obs', 'get_attr'}. Specifies the
-              node we are looking for which will be used to find the number of
-              steps to take from the op_node before returning the node
+def maybe_get_weight_eq_obs_node(op_node: Node, modules: Dict[str, nn.Module]) -> Optional[Node]:
+    """ Gets the weight equalization observer node if it exists.
     """
-    WEIGHT_ATTR_INDEX_DICT = {'eq_obs': 1, 'quant_obs': 2, 'get_attr': 3}
-
-    # Get the weight equalization observer
-    node = None
     assert(op_node.op == 'call_function' and op_node.target in WEIGHT_INDEX_DICT)
     for i, node_arg in enumerate(op_node.args):
         if i in WEIGHT_INDEX_DICT[op_node.target]:  # type: ignore[index]
-            node = node_arg
-            break
-    if node is None:
-        raise LookupError('Could not find the equalization observer')
-
-    assert(isinstance(node, Node) and node.op == 'call_module' and
-           isinstance(modules[str(node.target)], _WeightEqualizationObserver))
-
-    # Step back from the weight equalization observer a specific number of steps
-    index = WEIGHT_ATTR_INDEX_DICT.get(attr, 0)
-    for _ in range(index - 1):
-        node = node.args[0]
-        if node is None:
-            raise LookupError(f'Could not find the node {index} steps away from ' +
-                              f'the op node with attr {attr}.')
-        assert(isinstance(node, Node))
-
-    return node
+            assert(isinstance(node_arg, Node) and node_arg.op == 'call_module' and
+                   isinstance(modules[str(node_arg.target)], _WeightEqualizationObserver))
+            return node_arg
+    return None
 
 def maybe_get_next_input_eq_obs(node: Node, modules: Dict[str, nn.Module]) -> Optional[_InputEqualizationObserver]:
     """ Gets the following input equalization observer if it exists.
@@ -332,11 +302,11 @@ def maybe_get_next_input_eq_obs(node: Node, modules: Dict[str, nn.Module]) -> Op
                 maybe_relu_node = user
                 break
 
-    # Locate the following output observer if it exists. 
+    # Locate the following output observer if it exists.
     # We will skip the relu node if it exists.
     maybe_obs_node = (
-        maybe_get_next_module(node, modules, ObserverBase) 
-        if maybe_relu_node is None 
+        maybe_get_next_module(node, modules, ObserverBase)
+        if maybe_relu_node is None
         else maybe_get_next_module(maybe_relu_node, modules, ObserverBase)
     )
     if maybe_obs_node is None:
@@ -440,11 +410,21 @@ def scale_weight_functional(
     """
 
     # Get the get_attr(weight) node
-    weight_node = maybe_get_functional_weight_node(op_node, modules, 'get_attr')
-    if weight_node is None:
+    weight_eq_obs_node = maybe_get_weight_eq_obs_node(op_node, modules)
+    if weight_eq_obs_node is None:
         return
 
-    assert(weight_node.op == 'get_attr')
+    weight_quant_obs_node = weight_eq_obs_node.args[0]
+    if weight_quant_obs_node is None:
+        return
+    assert(isinstance(weight_quant_obs_node, Node) and
+           isinstance(modules[str(weight_quant_obs_node.target)], ObserverBase))
+
+    weight_node = weight_quant_obs_node.args[0]
+    if weight_node is None:
+        return
+    assert(isinstance(weight_node, Node) and weight_node.op == 'get_attr')
+
     weight_parent_name, weight_name = _parent_name(weight_node.target)
     weight = getattr(modules[weight_parent_name], weight_name)
 
@@ -484,9 +464,14 @@ def clear_weight_quant_obs_node(op_node: Node, modules: Dict[str, nn.Module]) ->
     """ Given the operation node, we want find the corresponding quantization
     observer and reset its min/max values
     """
-    weight_quant_obs_node = maybe_get_functional_weight_node(op_node, modules, 'quant_obs')
+    weight_eq_obs_node = maybe_get_weight_eq_obs_node(op_node, modules)
+    if weight_eq_obs_node is None:
+        return
+
+    weight_quant_obs_node = weight_eq_obs_node.args[0]
     if weight_quant_obs_node is None:
         return
+    assert(isinstance(weight_quant_obs_node, Node))
 
     weight_quant_obs = modules[str(weight_quant_obs_node.target)]
     assert(isinstance(modules[str(weight_quant_obs_node.target)], ObserverBase))
@@ -600,9 +585,6 @@ def convert_eq_obs(
             inp_quant_obs_node = node.args[0]
             prev_node = inp_quant_obs_node.args[0]
 
-            # Update the following input quantization observer's min/max values
-            scale_input_observer(node, modules)
-
             # If the previous node is a layer that needs to be equalized, then
             # we will remove the current node because we do not need to add any
             # equalization nodes between two layers that need to be equalized
@@ -612,6 +594,9 @@ def convert_eq_obs(
             if node_supports_equalization(prev_node, modules):
                 remove_node(model, node, inp_quant_obs_node)
                 continue
+
+            # Update the following input quantization observer's min/max values
+            scale_input_observer(node, modules)
 
             # Remove the InputEqualization node and add a mul operator before
             # the quantization observer node that appears before the equalization node
@@ -647,7 +632,7 @@ def convert_eq_obs(
             elif node.op == 'call_function':
                 scale_weight_functional(node, model, modules, equalization_scale, maybe_next_equalization_scale)
 
-                weight_eq_obs_node = maybe_get_functional_weight_node(node, modules, 'eq_obs')
+                weight_eq_obs_node = maybe_get_weight_eq_obs_node(node, modules)
                 if weight_eq_obs_node is None:
                     return
                 assert(isinstance(modules[str(weight_eq_obs_node.target)], _WeightEqualizationObserver))

@@ -27,6 +27,7 @@ from torch.quantization import (
     QuantStub,
     DeQuantStub,
     QuantWrapper,
+    qconfig,
     quant_type_to_str,
     default_qconfig,
     default_dynamic_qconfig,
@@ -51,6 +52,8 @@ from torch.quantization import (
 # test utils
 from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
 from torch.testing._internal.common_quantization import (
+    LinearReluLinearModel,
+    LinearReluModel,
     QuantizationTestCase,
     skipIfNoFBGEMM,
     skip_if_no_torchvision,
@@ -267,6 +270,38 @@ class TestFuseFx(QuantizationTestCase):
             ns.call_module(nni.BNReLU3d),
         ]
         self.checkGraphModuleNodes(m, expected_node_list=expected_nodes)
+
+    def test_qconfig_fused_module(self):
+        qconfig_dict = {
+            "": None,
+            "object_type": [(nn.Linear, default_qconfig), 
+                            (nn.ReLU, default_qconfig), 
+                            (F.relu, default_qconfig)]
+        }
+
+        linearRelu_node_list = [
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_module(nniq.LinearReLU),
+            ns.call_method('dequantize')
+        ]
+
+        linearReluLinear_node_list = [
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_module(nniq.LinearReLU),
+            ns.call_module(nnq.Linear),
+            ns.call_method('dequantize')
+        ]
+
+        tests = [(LinearReluModel, linearRelu_node_list), 
+                 (LinearReluLinearModel, linearReluLinear_node_list)]
+
+        for M, node_list in tests:
+            m = M().eval()
+            prepared = prepare_fx(m, qconfig_dict)
+            prepared(torch.rand(5, 5))
+            quantized = convert_fx(prepared)
+
+            self.checkGraphModuleNodes(quantized, expected_node_list=node_list)
 
     def test_fuse_custom_config_dict_validity(self):
         r"""
