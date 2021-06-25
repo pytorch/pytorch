@@ -246,14 +246,19 @@ class ComputeOperators:
 struct TORCH_API {name} {{
   using schema = {sig.type()};
   using ptr_schema = schema*;
-  static constexpr const char* name = "aten::{str(f.func.name.name)}";
-  static constexpr const char* overload_name = "{f.func.name.overload_name}";
-  static constexpr const char* schema_str = {cpp_string(str(f.func))};
+  // See Note [static constexpr char* members for windows NVCC]
+  STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(name, "aten::{str(f.func.name.name)}")
+  STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(overload_name, "{f.func.name.overload_name}")
+  STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(schema_str, {cpp_string(str(f.func))})
   static {sig.defn(name=call_method_name, is_redispatching_fn=False)};
   static {sig.defn(name=redispatch_method_name, is_redispatching_fn=True)};
 }};"""
         elif self.target is Target.DEFINITION:
-            defns = ''
+            defns = f"""
+STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, name, "aten::{str(f.func.name)}")
+STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, overload_name, "{f.func.name.overload_name}")
+STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, schema_str, {cpp_string(str(f.func))})"""
+
             for is_redispatching_fn in [False, True]:
                 if is_redispatching_fn:
                     dispatcher_exprs_str = ', '.join(['dispatchKeySet'] + [a.name for a in sig.arguments()])
@@ -268,8 +273,8 @@ struct TORCH_API {name} {{
 // aten::{f.func}
 {sig.defn(name=method_name, is_redispatching_fn=is_redispatching_fn)} {{
     static auto op = c10::Dispatcher::singleton()
-        .findSchemaOrThrow(name, overload_name)
-        .typed<schema>();
+        .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
+        .typed<{sig.type()}>();
     return op.{dispatcher_call}({dispatcher_exprs_str});
 }}
 """
@@ -506,8 +511,8 @@ DispatchKeySet _dk_set = c10::DispatchKeySet({dispatch_key}) | c10::detail::mult
 C10_ALWAYS_INLINE
 {sig.defn(name)} {{
   static auto op = c10::Dispatcher::singleton()
-    .findSchemaOrThrow(at::_ops::{f.func.name.unambiguous_name()}::name, at::_ops::{f.func.name.unambiguous_name()}::overload_name)
-    .typed<at::_ops::{f.func.name.unambiguous_name()}::schema>();
+    .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
+    .typed<{dispatcher_sig.type()}>();
   {compute_dk}
   return op.redispatch(_dk, {', '.join(a.expr for a in dispatcher_exprs)});
 }}
@@ -1019,7 +1024,6 @@ def main() -> None:
         fm.write_with_template(f'Register{dispatch_key}.cpp', 'RegisterDispatchKey.cpp', lambda: {
             'extra_cuda_headers': extra_cuda_headers if is_cuda_dispatch_key(dispatch_key) else '',
             'legacy_th_headers':
-                '#include <ATen/LegacyTHFunctionsCPU.h>' if dispatch_key == DispatchKey.CPU else
                 '#include <ATen/LegacyTHFunctionsCUDA.h>' if dispatch_key == DispatchKey.CUDA else
                 '',
             'external_backend_headers': '',
@@ -1032,7 +1036,8 @@ def main() -> None:
                     Target.NAMESPACED_DEFINITION,
                     selector,
                     rocm=options.rocm,
-                    cpp_namespace='at::native'),
+                    cpp_namespace='at::native',
+                    class_method_name=None),
                 grouped_native_functions
             )),
             'dispatch_anonymous_definitions': list(concatMap(
@@ -1041,7 +1046,8 @@ def main() -> None:
                     Target.ANONYMOUS_DEFINITION,
                     selector,
                     rocm=options.rocm,
-                    cpp_namespace='at::native'),
+                    cpp_namespace='at::native',
+                    class_method_name=None),
                 grouped_native_functions
             )),
             'dispatch_registrations': list(concatMap(
@@ -1050,7 +1056,8 @@ def main() -> None:
                     Target.REGISTRATION,
                     selector,
                     rocm=options.rocm,
-                    cpp_namespace='at::native'),
+                    cpp_namespace='at::native',
+                    class_method_name=None),
                 grouped_native_functions
             )),
         })
@@ -1074,7 +1081,8 @@ def main() -> None:
                         Target.NAMESPACED_DECLARATION,
                         selector,
                         rocm=options.rocm,
-                        cpp_namespace='at::native'),
+                        cpp_namespace='at::native',
+                        class_method_name=None),
                     grouped_native_functions
                 )),
             })
@@ -1115,6 +1123,8 @@ def main() -> None:
             static_dispatch_backend_index=static_dispatch_idx), native_functions)),
     })
 
+    cpu_fm.write('Functions.cpp', lambda: {})
+
     core_fm.write('TensorBody.h', lambda: {
         'static_dispatch_extra_headers': static_dispatch_extra_headers(static_dispatch_idx, skip_tensor_include=True),
         'tensor_method_declarations': list(mapMaybe(ComputeTensorMethod(
@@ -1122,6 +1132,8 @@ def main() -> None:
         'tensor_method_definitions': list(mapMaybe(ComputeTensorMethod(
             target=Target.DEFINITION, static_dispatch_backend_index=static_dispatch_idx), native_functions)),
     })
+
+    core_fm.write('TensorMethods.cpp', lambda: {})
 
     cpu_fm.write('RedispatchFunctions.h', lambda: {
         'function_redispatch_definitions': list(mapMaybe(ComputeRedispatchFunction(), native_functions)),

@@ -62,6 +62,14 @@ class RegisterDispatchKey:
     # The namespace that the kernels are written in. This is just `at::native` for in-tree kernels.
     cpp_namespace: str
 
+    # The class that all unstructured native functions live under. This is used to improve
+    # compiler error messages when a kernel writer adds a native function with the wrong signature.
+    # This is only used in unstructured kernels, since structured kernels already live in a class.
+    # Finally, this field is currently Optional because it is only used by external backends.
+    # It would be nice if we can add the same logic to in-tree kernels too, but that requires updating
+    # all of the existing kernel signatures scattered across aten/src/ATen/native.
+    class_method_name: Optional[str]
+
     @staticmethod
     def gen_device_check(type: DeviceCheckType, args: List[Argument], method_name: str) -> str:
         if type == DeviceCheckType.NoCheck:
@@ -123,11 +131,7 @@ class RegisterDispatchKey:
             returns = ret_name
 
         functional_sig = self.wrapper_kernel_sig(g.functional)
-        class_name_opt = self.backend_index.native_function_class_name()
-        if class_name_opt is None:
-            wrapper_name = sig.name()
-        else:
-            wrapper_name = f'{class_name_opt}::{sig.name()}'
+        wrapper_name = sig.name()
 
         return f"""\
 {sig.defn(name=wrapper_name)} {{
@@ -156,6 +160,7 @@ class RegisterDispatchKey:
             self.selector,
             self.rocm,
             self.cpp_namespace,
+            self.class_method_name,
             g
         )
         return list(mapMaybe(structured_gen.gen_one, g.functions()))
@@ -232,11 +237,10 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 metadata = self.backend_index.get_kernel(f)
                 if metadata is None:
                     return None
-                class_name_opt = self.backend_index.native_function_class_name()
-                if class_name_opt is None:
+                if self.class_method_name is None:
                     impl_name = f"{self.cpp_namespace}::{metadata.kernel}"
                 else:
-                    impl_name = f"{self.cpp_namespace}::{class_name_opt}::{metadata.kernel}"
+                    impl_name = f"{self.cpp_namespace}::{self.class_method_name}::{metadata.kernel}"
 
                 args_exprs_str = ', '.join(a.name for a in args)
 
