@@ -82,6 +82,12 @@ class Placeholder {
       const std::vector<ExprHandle>& dims)
       : Placeholder(BufHandle(name, dims, dtype)) {}
 
+  Placeholder(const std::vector<ExprHandle>& dims, const Dtype& dtype)
+      : Placeholder(BufHandle("_", dims, dtype)) {}
+
+  explicit Placeholder(const std::vector<ExprHandle>& dims)
+      : Placeholder(BufHandle("_", dims, kFloat)) {}
+
   const Buf* data() const {
     return data_;
   }
@@ -155,8 +161,11 @@ inline void unpack_dim_args(
   dims->clear();
   vars->clear();
   for (const DimArg& dim_arg : dim_args) {
-    dims->push_back(dim_arg.dim().node());
-    vars->push_back(new Var(dim_arg.name_hint(), kInt));
+    const Expr* expr = dim_arg.dim().node();
+    dims->push_back(expr);
+    vars->push_back(new Var(
+        dim_arg.name_hint(),
+        expr->dtype().scalar_type() == ScalarType::Long ? kLong : kInt));
   }
 }
 

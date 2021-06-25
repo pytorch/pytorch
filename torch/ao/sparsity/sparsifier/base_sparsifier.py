@@ -56,9 +56,8 @@ class BaseSparsifier(abc.ABC):
         >>> # model.layer1 will have `sparsity_level` = 0.7 (getting default)
         >>> sparsifier = BaseSparsifier(config, defaults)
     """
-    def __init__(self, model, config, defaults):
+    def __init__(self, defaults):
         super().__init__()
-        self.config = config
         self.defaults = defaults
         if self.defaults is None:
             self.defaults = dict()
@@ -66,32 +65,6 @@ class BaseSparsifier(abc.ABC):
         self.state = {}
         self.module_groups = []
         self.enable_mask_update = False
-
-        self.model = model
-        # If no config -- try getting all the supported layers
-        if self.config is None:
-            # Add all models to the config
-            self.config = []
-            stack = [model]
-            while stack:
-                module = stack.pop()
-                for name, child in module.named_children():
-                    if type(child) in SUPPORTED_MODULES:
-                        self.config.append(child)
-                    else:
-                        stack.append(child)
-
-        for module_config in self.config:
-            if isinstance(module_config, nn.Module):
-                module_config = {'module': module_config}
-            local_args = copy.deepcopy(self.defaults)
-            local_args.update(module_config)
-            module = local_args['module']
-            module_path = _module_to_path(self.model, module)
-            if module_path and module_path[0] == '.':
-                module_path = module_path[1:]
-            local_args['path'] = module_path
-            self.module_groups.append(local_args)
 
     def __getstate__(self):
         return {
@@ -141,22 +114,55 @@ class BaseSparsifier(abc.ABC):
             group['module'] = layer
         self.__setstate__({'module_groups': module_groups})
 
-    def prepare(self, use_path=False, *args, **kwargs):
+    def prepare(self, model, config):
+        r"""Prepares a model, by adding the parametrizations.
+
+        Note::
+
+            The model is modified inplace. If you need to preserve the original
+            model, use copy.deepcopy.
+        """
+        self.config = config
+        self.model = model
+        # If no config -- try getting all the supported layers
+        if self.config is None:
+            # Add all models to the config
+            self.config = []
+            stack = [model]
+            while stack:
+                module = stack.pop()
+                for name, child in module.named_children():
+                    if type(child) in SUPPORTED_MODULES:
+                        self.config.append(child)
+                    else:
+                        stack.append(child)
+
+        for module_config in self.config:
+            if isinstance(module_config, nn.Module):
+                module_config = {'module': module_config}
+            local_args = copy.deepcopy(self.defaults)
+            local_args.update(module_config)
+            module = local_args['module']
+            module_path = _module_to_path(self.model, module)
+            if module_path and module_path[0] == '.':
+                module_path = module_path[1:]
+            local_args['path'] = module_path
+            self.module_groups.append(local_args)
+
+        self._prepare()
+
+    def _prepare(self, *args, **kwargs):
         r"""Adds mask parametrization to the layer weight
         """
         for config in self.module_groups:
-            if use_path:
-                module = _path_to_module(self.model, config['path'])
-            else:
-                module = config['module']
-
+            module = config['module']
             if getattr(module, 'mask', None) is None:
                 module.register_buffer('mask', torch.ones(module.weight.shape))
             param = config.get('parametrization', MulBy)
             parametrize.register_parametrization(module, 'weight',
                                                  param(module.mask))
 
-    def convert(self, use_path=False, *args, **kwargs):
+    def squash_mask(self, *args, **kwargs):
         for config in self.module_groups:
             if use_path:
                 module = _path_to_module(self.model, config['path'])
@@ -169,6 +175,11 @@ class BaseSparsifier(abc.ABC):
             elif getattr(module._buffers, 'mask', None):
                 del module._buffers['mask']
             delattr(module, 'mask')
+
+    def convert(self):
+        # TODO: Call the torch.ao.utils.convert in here
+        raise NotImplementedError('`convert` is not implemented. '
+            'Please, use `torch.ao.utils.convert` instead.')
 
     def step(self, use_path=True):
         if not self.enable_mask_update:
