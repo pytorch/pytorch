@@ -273,8 +273,8 @@ class TestFuseFx(QuantizationTestCase):
     def test_qconfig_fused_module(self):
         qconfig_dict = {
             "": None,
-            "object_type": [(nn.Linear, default_qconfig), 
-                            (nn.ReLU, default_qconfig), 
+            "object_type": [(nn.Linear, default_qconfig),
+                            (nn.ReLU, default_qconfig),
                             (F.relu, default_qconfig)]
         }
 
@@ -291,7 +291,7 @@ class TestFuseFx(QuantizationTestCase):
             ns.call_method('dequantize')
         ]
 
-        tests = [(LinearReluModel, linearRelu_node_list), 
+        tests = [(LinearReluModel, linearRelu_node_list),
                  (LinearReluLinearModel, linearReluLinear_node_list)]
 
         for M, node_list in tests:
