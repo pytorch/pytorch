@@ -23,8 +23,7 @@ struct RecordFunctionHolder : torch::CustomClassHolder {
     record_function_ = std::make_unique<at::RecordFunction>(at::RecordScope::USER_SCOPE);
   }
   void enter(const std::string& name) {
-    LOG(ERROR) << "bowang enter." ;
-    if (record_function_ == NULL) {
+    if (record_function_ == nullptr) {
       LOG(ERROR) << "record_function_ should never be NULL";
       return;
     }
@@ -32,7 +31,7 @@ struct RecordFunctionHolder : torch::CustomClassHolder {
   }
 
   void exit() {
-    if (record_function_ == NULL) {
+    if (record_function_ == nullptr) {
       LOG(ERROR) << "record_function_ should never be NULL!";
       return;
     }
