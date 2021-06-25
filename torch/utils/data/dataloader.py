@@ -1134,7 +1134,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             if success:
                 return data
             else:
-                raise RuntimeError('DataLoader timed out after {} seconds'.format(self._timeout))
+                raise TimeoutError('DataLoader timed out after {} seconds'.format(self._timeout))
         elif self._pin_memory:
             while self._pin_memory_thread.is_alive():
                 success, data = self._try_get_data()
