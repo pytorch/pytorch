@@ -7,6 +7,10 @@ __all__ = [
     "check_cuda_kernel_launches",
 ]
 
+# Files to exclude (match is done with suffix)
+exclude_files = [
+    "aten/src/ATen/native/cuda/Activation.cu"
+]
 
 # Regular expression identifies a kernel launch indicator by
 # finding something approximating the pattern ">>>(arguments);"
@@ -32,9 +36,16 @@ kernel_launch_regex = re.compile(r"""
         \s*                                  # Maybe some whitespace (includes newlines)
         (?:[0-9]+: )?                        # Detects and ignores a line numbering, if present
         \s*                                  # Maybe some whitespace (includes newlines)
-        C10_CUDA_KERNEL_LAUNCH_CHECK\(\);  # Kernel launch guard!
+        C10_CUDA_KERNEL_LAUNCH_CHECK\(\);    # Kernel launch guard!
     )             # End negative lookahead
 """, flags=re.MULTILINE | re.VERBOSE)
+
+
+def should_exclude_file(filename) -> bool:
+    for exclude_suffix in exclude_files:
+        if filename.endswith(exclude_suffix):
+            return True
+    return False
 
 
 def check_code_for_cuda_kernel_launches(code, filename=None):
@@ -73,6 +84,8 @@ def check_file(filename):
         The number of unsafe kernel launches in the file
     """
     if not (filename.endswith(".cu") or filename.endswith(".cuh")):
+        return 0
+    if should_exclude_file(filename):
         return 0
     fo = open(filename, "r")
     contents = fo.read()
