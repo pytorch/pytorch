@@ -316,7 +316,7 @@ IS_PPC = platform.machine() == "ppc64le"
 
 def is_avx512_vnni_supported():
     if sys.platform != 'linux':
-            return False
+        return False
     with open("/proc/cpuinfo", encoding="ascii") as f:
         lines = f.read()
     return all(word in lines for word in ["avx512vnni"])
