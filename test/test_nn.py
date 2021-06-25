@@ -13374,7 +13374,7 @@ class TestNNDeviceType(NNTestCase):
     @dtypes(torch.float, torch.double)
     def test_avg_pool3d_ndhwc(self, device, dtype):
         def helper(n, c, d, h, w, kernel_size, contig,
-                  count_include_pad=True, divisor_override=None):
+                   count_include_pad=True, divisor_override=None):
             input = torch.randint(1, 10, (n, c, d, h, w), device=device, dtype=dtype)
             input = input.contiguous(memory_format=torch.channels_last_3d)
             if not contig:
@@ -13385,7 +13385,7 @@ class TestNNDeviceType(NNTestCase):
 
             ref_input = input.detach().clone().contiguous().requires_grad_(True)
             ref_pool = torch.nn.AvgPool3d(kernel_size=kernel_size, count_include_pad=count_include_pad,
-                                      divisor_override=divisor_override).to(device)
+                                          divisor_override=divisor_override).to(device)
 
             out = pool(input)
             out.sum().backward()
