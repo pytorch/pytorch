@@ -1001,6 +1001,47 @@ class TestQuantizeFx(QuantizationTestCase):
         ]
         self.checkGraphModuleNodes(m, expected_node_list=node_list)
 
+    def test_qconfig_qat_module_type(self):
+        class Linear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.ones(5, 5)
+                self.b = torch.zeros(5)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.w, self.b)
+
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mods1 = torch.nn.Sequential(
+                    torch.nn.Linear(5, 5),
+                )
+
+            def forward(self, x):
+                x = self.mods1(x)
+                return x
+
+        model = M().train()
+
+        qconfig_dict = {
+            "": None,
+            "object_type": [
+                (torch.nn.Linear, default_qat_qconfig),
+            ],
+        }
+        m = prepare_qat_fx(model, qconfig_dict)
+        m(torch.rand(5, 5))
+        m = convert_fx(m)
+        m(torch.rand(5, 5))
+        node_list = [
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_module(nnq.Linear),
+            ns.call_method("dequantize"),
+        ]
+        self.checkGraphModuleNodes(m, expected_node_list=node_list)
+
     def test_qconfig_function(self):
         class M(torch.nn.Module):
             def __init__(self):
