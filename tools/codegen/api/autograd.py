@@ -269,7 +269,7 @@ def match_differentiability_info(
                 fw_info = info.forward_derivatives[0]
                 formula = fw_info.formula
 
-                def update_for_original(formula, postfix):
+                def update_for_original(formula: str, postfix: str) -> str:
                     def repl(m: Match[str]) -> str:
                         return f'{m.group(1)}original_self{postfix}{m.group(2)}'
                     return re.sub(IDENT_REGEX.format(f'self{postfix}'), repl, formula)

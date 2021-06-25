@@ -813,7 +813,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                 unpacked_arguments += FW_DERIVATIVE_DEFINED_PRIMAL_TEMPLATE.substitute(inp="original_self")
             elif inplace and not derivative.is_exact_match:
                 # The gradient wasn't already cloned, do it if grad mode is enabled
-                unpacked_arguments += f"self_t = GradMode::is_enabled() ? self_t.clone() : self_t;"
+                unpacked_arguments += "self_t = GradMode::is_enabled() ? self_t.clone() : self_t;"
 
             if inplace:
                 is_inplace_str = "true"
