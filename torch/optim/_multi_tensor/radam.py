@@ -1,5 +1,5 @@
-import math
 import torch
+from . import _functional as F
 from ..optimizer import Optimizer
 from collections import defaultdict
 
@@ -56,6 +56,7 @@ class RAdam(Optimizer):
             exp_avg = []
             exp_avg_sq = []
             states = []
+            beta1, beta2 = group['betas']
 
             for p in group['params']:
                 if p.grad is not None:
@@ -81,40 +82,18 @@ class RAdam(Optimizer):
                 state['step'] += 1
                 states.append(state)
 
-            beta1, beta2 = group['betas']
+            F.radam(params_with_grad,
+                    grads,
+                    exp_avg,
+                    exp_avg_sq,
+                    states,
+                    beta1=beta1,
+                    beta2=beta2,
+                    lr=group['lr'],
+                    weight_decay=group['weight_decay'],
+                    eps=group['eps'])
 
-            # maximum length of the approximated SMA
-            rho_inf = 2 / (1 - beta2) - 1
-            # compute the length of the approximated SMA
-            rho_t_list = [rho_inf - 2 * state['step'] * (beta2 ** state['step']) / (1 - beta2 ** state['step']) for state in states]
-
-            bias_correction1 = [1 - beta1 ** state['step'] for state in states]
-            bias_correction2 = [1 - beta2 ** state['step'] for state in states]
-            if group['weight_decay'] != 0:
-                grads = torch._foreach_add(grads, params_with_grad, alpha=group['weight_decay'])
-
-            # Decay the first and second moment running average coefficient
-            torch._foreach_mul_(exp_avg, beta1)
-            torch._foreach_add_(exp_avg, grads, alpha=1 - beta1)
-
-            torch._foreach_mul_(exp_avg_sq, beta2)
-            torch._foreach_addcmul_(exp_avg_sq, grads, grads, 1 - beta2)
-
-            rect = [math.sqrt((rho_t - 4) * (rho_t - 2) * rho_inf / ((rho_inf - 4) * (rho_inf - 2) * rho_t))
-                    if rho_t > 5 else 0 for rho_t in rho_t_list]
-            unrectified = [0 if rect > 0 else 1. for rect in rect]
-
-            exp_avg_sq_sqrt = torch._foreach_sqrt(exp_avg_sq)
-            bias_correction_sqrt = [math.sqrt(bc) for bc in bias_correction2]
-            denom = torch._foreach_div(exp_avg_sq_sqrt, bias_correction_sqrt)
-            step_size = [(group['lr'] * rect / bc) * -1 for rect, bc in zip(rect, bias_correction1)]
-            torch._foreach_addcdiv_(params_with_grad, exp_avg, denom, step_size)
-
-            denom = [torch.ones_like(exp_av, memory_format=torch.preserve_format) for exp_av in exp_avg]
-            step_size = [(group['lr'] * rect / bc) * -1 for rect, bc in zip(unrectified, bias_correction1)]
-            torch._foreach_addcdiv_(params_with_grad, exp_avg, denom, step_size)
-
-        return loss
+            return loss
 
     # TODO: refactor to a base class once foreach ops are in a good shape.
     def zero_grad(self, set_to_none: bool = False):
