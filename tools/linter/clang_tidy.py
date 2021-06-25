@@ -141,9 +141,11 @@ def find_changed_lines(diff: str) -> Dict[str, List[Tuple[int, int]]]:
             start = hunk[0].target_line_no
             if start is None:
                 start = 1
-            end = hunk[-1].target_line_no
+            end = int(hunk[-1].target_line_no or 0)
+            if end == 0:
+                continue
 
-        files[file.path].append((start, end))
+            files[file.path].append((start, end))
 
     return dict(files)
 
