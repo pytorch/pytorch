@@ -11,3 +11,12 @@ from .scheduler.base_scheduler import BaseScheduler
 
 # Parametrizations
 from .sparsifier.parametrization import MulBy
+
+# === Experimental ===
+
+# Parametrizations
+from .experimental.pruner.parametrization import PruningParametrization
+
+# Pruner
+from .experimental.pruner.base_pruner import BasePruner
+

@@ -11,7 +11,7 @@ def _flat_idx_to_2d(idx, shape):
     return rows, cols
 
 class WeightNormSparsifier(BaseSparsifier):
-    def __init__(self, model, config,
+    def __init__(self,
                  sparsity_level=0.5, sparsity_pattern=(1, 4),
                  zeros_per_block=None):
         if zeros_per_block is None:
@@ -21,7 +21,7 @@ class WeightNormSparsifier(BaseSparsifier):
             'sparsity_pattern': sparsity_pattern,
             'zeros_per_block': zeros_per_block
         }
-        super().__init__(model, config, defaults)
+        super().__init__(defaults=defaults)
 
     def update_mask(self, layer, sparsity_level, sparsity_pattern,
                     zeros_per_block, **kwargs):

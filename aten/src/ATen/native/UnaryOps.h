@@ -28,6 +28,7 @@ DECLARE_DISPATCH(unary_fn, cos_stub);
 DECLARE_DISPATCH(unary_fn, cosh_stub);
 DECLARE_DISPATCH(unary_fn, digamma_stub);
 DECLARE_DISPATCH(unary_fn, special_entr_stub);
+DECLARE_DISPATCH(unary_fn, special_erfcx_stub);
 DECLARE_DISPATCH(unary_fn, erf_stub);
 DECLARE_DISPATCH(unary_fn, erfc_stub);
 DECLARE_DISPATCH(unary_fn, erfinv_stub);
@@ -45,6 +46,7 @@ DECLARE_DISPATCH(unary_fn, log_stub);
 DECLARE_DISPATCH(unary_fn, log10_stub);
 DECLARE_DISPATCH(unary_fn, log1p_stub);
 DECLARE_DISPATCH(unary_fn, log2_stub);
+DECLARE_DISPATCH(unary_fn, special_ndtri_stub);
 DECLARE_DISPATCH(unary_fn, neg_stub);
 
 DECLARE_DISPATCH(unary_fn, reciprocal_stub);
