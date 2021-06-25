@@ -14,6 +14,48 @@ namespace torch {
 namespace autograd {
 namespace profiler {
 
+// Holder of RecordFunction, used to store the state of a RecordFunction
+// object to record the enter and exit event for profiler.
+struct RecordFunctionHolder : torch::CustomClassHolder {
+  std::unique_ptr<at::RecordFunction> record_function_;
+
+  RecordFunctionHolder() {
+    record_function_ = std::make_unique<at::RecordFunction>(at::RecordScope::USER_SCOPE);
+  }
+  void enter(const std::string& name) {
+    LOG(ERROR) << "bowang enter." ;
+    if (record_function_ == NULL) {
+      LOG(ERROR) << "record_function_ should never be NULL";
+      return;
+    }
+    record_function_->before(name);
+  }
+
+  void exit() {
+    if (record_function_ == NULL) {
+      LOG(ERROR) << "record_function_ should never be NULL!";
+      return;
+    }
+    record_function_->end();
+  }
+};
+
+// Enters the profiling scope, ended with record_function_exit_new.
+// We will deprecate record_function_enter later once this CL is in
+// mainly in order to separate python usage and JIT usage.
+c10::intrusive_ptr<RecordFunctionHolder> record_function_enter_new(
+  const std::string& name) {
+  auto wrapper = c10::make_intrusive<RecordFunctionHolder>();
+  wrapper->enter(name);
+  return wrapper;
+}
+
+// Ends the profiling scope created with record_function_enter_new.
+// See above for more context.
+void record_function_exit_new(c10::intrusive_ptr<RecordFunctionHolder> holder) {
+  holder->exit();
+}
+
 // Creates a new profiling scope using RecordFunction and invokes its starting
 // callbacks.
 at::Tensor record_function_enter(const std::string& name) {
@@ -65,10 +107,23 @@ c10::intrusive_ptr<c10::ivalue::Future> _call_end_callbacks_on_fut(
   return profiledFut;
 }
 
+// Internal only, ensure Python understands this class. do not use directly.
+TORCH_LIBRARY(profiler, m) {
+  m.class_<RecordFunctionHolder>("_RecordFunctionHolder")
+    .def(torch::init())
+  ;
+}
+
 // Internal only, do not use directly, use Python's record_function()
 TORCH_LIBRARY_FRAGMENT(profiler, m) {
-    m.def("_record_function_enter", &record_function_enter);
-    m.def("_record_function_exit", &record_function_exit);
+    m.def(
+      "_record_function_enter(str x) -> __torch__.torch.classes.profiler._RecordFunctionHolder Y",
+      record_function_enter_new
+    );
+    m.def(
+      "_record_function_exit(__torch__.torch.classes.profiler._RecordFunctionHolder x) -> ()",
+      record_function_exit_new
+    );
 }
 
 // Needed to register JIT operator in operator registry below
