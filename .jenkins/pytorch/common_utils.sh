@@ -88,5 +88,5 @@ function checkout_install_torchvision() {
 }
 
 function clone_pytorch_xla() {
-  git clone --recursive https://github.com/pytorch/xla.git
+  git clone --recursive https://github.com/pytorch/xla.git -b boxed_cpu_fallback
 }
