@@ -389,10 +389,10 @@ jobs:
   pytorch_python_doc_build:
     runs-on: linux.2xlarge
     needs:
-      - calculate-docker-image
+      {# - calculate-docker-image #}
       {# - build #}
-    env:
-      DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
+    {# env:
+      DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }} #}
     steps:
       - name: Log in to ECR
         run: |
@@ -418,6 +418,7 @@ jobs:
           name: ${{ env.BUILD_ENVIRONMENT }}
           retention-days: 14
           if-no-files-found: error
+          name: hello.wow
           path:
             site.zip
       - name: Pull docker image
