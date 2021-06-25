@@ -2,6 +2,7 @@
 
 import logging
 
+import torch
 from torch import nn
 from torch.ao.sparsity import BasePruner, PruningParametrization
 from torch.nn.utils import parametrize
@@ -14,9 +15,9 @@ class Model(nn.Module):
     def __init__(self):
         super().__init__()
         self.seq = nn.Sequential(
-            nn.Linear(16, 16)
+            nn.Linear(16, 16, bias=False)
         )
-        self.linear = nn.Linear(16, 16)
+        self.linear = nn.Linear(16, 16, bias=False)
 
     def forward(self, x):
         x = self.seq(x)
@@ -25,8 +26,8 @@ class Model(nn.Module):
 
 
 class ImplementedPruner(BasePruner):
-    def update_mask(self):
-        pass
+    def update_mask(self, layer, **kwargs):
+        layer.parametrizations.weight[0].pruned_outputs.add(1)
 
 
 class TestBasePruner(TestCase):
@@ -57,6 +58,7 @@ class TestBasePruner(TestCase):
             # Check parametrization exists and is correct
             assert parametrize.is_parametrized(module)
             assert hasattr(module, "parametrizations")
+            # Assume that this is the 1st/only parametrization
             assert type(module.parametrizations.weight[0]) == PruningParametrization
 
     def test_convert(self):
@@ -68,3 +70,20 @@ class TestBasePruner(TestCase):
             module = g['module']
             assert not hasattr(module, "parametrizations")
             assert not hasattr(module, 'mask')
+
+    def test_step(self):
+        model = Model()
+        x = torch.ones(16, 16)
+        pruner = ImplementedPruner(model, None, None)
+        pruner.prepare()
+        pruner.enable_mask_update = True
+        for g in pruner.module_groups:
+            # Before step
+            module = g['module']
+            assert module.parametrizations.weight[0].pruned_outputs == set()
+        pruner.step()
+        for g in pruner.module_groups:
+            # After step
+            module = g['module']
+            assert module.parametrizations.weight[0].pruned_outputs == set({1})
+            assert not (False in (model(x)[:, 1] == 0))
