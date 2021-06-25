@@ -890,11 +890,22 @@ class DistributedDataParallel(Module):
             # features such as: enqueue delay allreduce for static graph, support
             # multiple calls to backwards with retain_graph=True, and support
             # finding all parameters that will not receive gradient.
+            out = [None for _ in range(len(output_tensor_list))]
+            for i, x in enumerate(output_tensor_list):
+                if x.grad_fn is None:
+                    out[i] = x
+
             passthrough_tensor_list = _DDPSink.apply(
                 self.reducer,
                 state_dict,
                 *output_tensor_list,
             )
+            for i in range(len(out)):
+                if out[i] is None:
+                    out[i] = passthrough_tensor_list[i]
+                else:
+                    assert out[i].grad_fn is None
+            passthrough_tensor_list = out
             # Reconstruct output data structure.
             output = _tree_unflatten_with_rref(
                 passthrough_tensor_list, treespec, output_is_rref
