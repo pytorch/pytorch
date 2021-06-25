@@ -23,7 +23,7 @@ namespace at {
 namespace {
 static thread_local tbb::task_scheduler_init tbb_init_(intraop_default_num_threads());
 static thread_local tbb::task_group tg_;
-thread_local thid_thread_id{0};
+thread_local int this_thread_id{0};
 
 std::mutex global_thread_mutex_;
 std::shared_ptr<tbb::global_control> global_thread_limit_ = nullptr;
