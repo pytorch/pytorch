@@ -486,14 +486,11 @@ Tensor solve_backward_A(const Tensor & grad, const Tensor & self, const Tensor &
 }
 
 Tensor cumsum_backward(const Tensor & grad, int64_t dim) {
-  /* Logically implements w.flip(dim).cumsum(dim).flip(dim) without copying. */
   // Trivial case
   if (grad.numel() <= 1 || grad.size(dim) == 1) {
     return grad;
   }
-  const auto grad_cumsum = grad.cumsum(dim);
-  const auto grad_sum = grad_cumsum.narrow(dim, -1, 1);
-  return grad_sum - grad_cumsum + grad;
+  return grad.flip(dim).cumsum(dim).flip(dim);
 }
 
 Tensor logsumexp_backward(Tensor grad, const Tensor & self, Tensor result, IntArrayRef dim, bool keepdim) {
