@@ -1,0 +1,789 @@
+- color: FFCAD4
+  description: ""
+  name: FX-TorchScript Compatibility
+- color: ededed
+  description: ""
+  name: Merged
+- color: e5678d
+  description: ""
+  name: NNC
+- color: 0e8a16
+  description: PR from open source contributors welcome to solve this issue.
+  name: OSS contribution wanted
+- color: ededed
+  description: ""
+  name: ROCm
+- color: ededed
+  description: ""
+  name: Reverted
+- color: ededed
+  description: ""
+  name: Stale
+- color: A2A3EC
+  description: ""
+  name: TSRootCause:BetterEngineering
+- color: A2A3EC
+  description: ""
+  name: TSRootCause:DefaultTypes
+- color: A2A3EC
+  description: ""
+  name: TSRootCause:DynamicBehaviors
+- color: A2A3EC
+  description: ""
+  name: TSRootCause:InvalidCustomClass
+- color: A2A3EC
+  description: ""
+  name: TSRootCause:ModuleInheritance
+- color: A2A3EC
+  description: ""
+  name: TSRootCause:PoorIRVisibility
+- color: A2A3EC
+  description: ""
+  name: TSRootCause:PyTorchParityGap
+- color: A2A3EC
+  description: ""
+  name: TSRootCause:TypeAnnotation
+- color: A2A3EC
+  description: ""
+  name: TSRootCause:TypeChecking
+- color: A2A3EC
+  description: ""
+  name: TSRootCause:TypeRefinement
+- color: A2A3EC
+  description: ""
+  name: TSRootCause:Unclassified
+- color: A2A3EC
+  description: ""
+  name: TSRootCause:UnsupportedConstructs
+- color: D4C5F9
+  description: ""
+  name: TSUsability
+- color: 4ae269
+  description: ""
+  name: actionable
+- color: c0dcf7
+  description: This tag is deprecated while we figure out what to do with it
+  name: awaiting response (this tag is deprecated)
+- color: "142738"
+  description: The base branch for this pull request has been pinned to a specific
+    commit, for determinism in CI.
+  name: base pinned
+- color: 94f76a
+  description: Relatively self-contained tasks for better engineering contributors
+  name: better-engineering
+- color: 210aa8
+  description: ""
+  name: caffe2
+- color: 210aa8
+  description: ""
+  name: caffe2-op
+- color: fbca04
+  description: This PR was cherry-picked onto a release branch from master
+  name: cherry-picked
+- color: 86efb5
+  description: ""
+  name: ci/all
+- color: edf75d
+  description: ""
+  name: ci/binaries
+- color: edf75d
+  description: Enable future CI features on a PR.
+  name: ci/future
+- color: C35863
+  description: Schedules master-only CI tests to be run on the PR
+  name: ci/master
+- color: edf75d
+  description: Don't run the CircleCI build workflow.
+  name: ci/no-build
+- color: C35863
+  description: Schedules slow gradcheck tests to be run on the PR
+  name: ci/slow-gradcheck
+- color: edf75d
+  description: Run extra windows builds
+  name: ci/windows
+- color: ededed
+  description: ""
+  name: cla signed
+- color: abfce4
+  description: ""
+  name: complex_autograd
+- color: f4bffc
+  description: Fix or feature required for torchcsprng
+  name: csprng
+- color: 77f497
+  description: ""
+  name: days
+- color: eacf96
+  description: ""
+  name: distributed-backlog
+- color: FABC39
+  description: ""
+  name: docs-hackathon
+- color: ffc6f4
+  description: Not as big of a feature, but technically not a bug. Should be easy
+    to fix
+  name: enhancement
+- color: a9fc8f
+  description: Stuff ezyang doesn't want to lose
+  name: ezyang's list
+- color: ededed
+  description: ""
+  name: fb-exported
+- color: ffceba
+  description: A request for a proper, new feature.
+  name: feature
+- color: 7d64ea
+  description: ""
+  name: fixathon
+- color: 8bd622
+  description: A request for a new function or the addition of new arguments/modes
+    to an existing function.
+  name: function request
+- color: c17945
+  description: ""
+  name: fx
+- color: 34c182
+  description: ""
+  name: good first issue
+- color: 0e8a16
+  description: ""
+  name: hackamonth
+- color: 44CB06
+  description: ""
+  name: hackathon
+- color: 0f587f
+  description: ""
+  name: has workaround
+- color: F22613
+  description: ""
+  name: high priority
+- color: bfdadc
+  description: This issue has been imported to the internal tasks tool
+  name: imported
+- color: ededed
+  description: ""
+  name: in progress
+- color: 5319e7
+  description: Everything related to InferenceMode guard
+  name: inference mode
+- color: ededed
+  description: ""
+  name: internals
+- color: eacf96
+  description: ""
+  name: jit-backlog
+- color: ef6bca
+  description: We think that this is a pretty chunky piece of work
+  name: large
+- color: 75e545
+  description: Lazy Tensor work items
+  name: lazy
+- color: b2ffe1
+  description: We're unlikely to get around to doing this in the near future
+  name: low priority
+- color: e6a6ea
+  description: ""
+  name: medium
+- color: cccccc
+  description: All issues are considered "medium priority" if they don't have a high
+    or low priority tag
+  name: medium priority (this tag is deprecated)
+- color: 006b75
+  description: Was marked for merge with @pytorchbot merge this please
+  name: merge-this-please
+- color: f7e101
+  description: Problems related to incorrectly using 32-bit integers when 64-bit is
+    needed (e.g., 8G tensors)
+  name: 'module: 64-bit'
+- color: f7e101
+  description: Porting CPU_tensor_apply to TensorIterator
+  name: 'module: CPU_tensor_apply'
+- color: f7e101
+  description: Problems related to NaN and Inf handling in floating point
+  name: 'module: NaNs and Infs'
+- color: f7e101
+  description: Issues specific to the POWER/ppc architecture
+  name: 'module: POWER'
+- color: f7e101
+  description: ""
+  name: 'module: TensorIterator'
+- color: f7e101
+  description: ""
+  name: 'module: __torch_function__'
+- color: f7e101
+  description: libtorch C++ ABI related problems
+  name: 'module: abi'
+- color: f7e101
+  description: Related to x[i] = y, index functions
+  name: 'module: advanced indexing'
+- color: f7e101
+  description: ""
+  name: 'module: amp (automated mixed precision)'
+- color: f7e101
+  description: Related to Android support
+  name: 'module: android'
+- color: f7e101
+  description: ""
+  name: 'module: arm'
+- color: f7e101
+  description: The issue involves an assert failure
+  name: 'module: assert failure'
+- color: f7e101
+  description: Related to torch.autograd, and the autograd engine in general
+  name: 'module: autograd'
+- color: f7e101
+  description: non-standard backend support
+  name: 'module: backend'
+- color: f7e101
+  description: ""
+  name: 'module: batching'
+- color: f7e101
+  description: Related to a BC-breaking change
+  name: 'module: bc-breaking'
+- color: f7e101
+  description: ""
+  name: 'module: bfloat16'
+- color: f7e101
+  description: Anything related to official binaries that we release to users
+  name: 'module: binaries'
+- color: f7e101
+  description: ""
+  name: 'module: boolean tensor'
+- color: f7e101
+  description: We plan to do a full writeup on the issue, and then get someone to
+    do it for onboarding
+  name: 'module: bootcamp'
+- color: f7e101
+  description: Related to torch.utils.bottleneck
+  name: 'module: bottleneck'
+- color: f7e101
+  description: Build system issues
+  name: 'module: build'
+- color: f7e101
+  description: Related to warnings during build process
+  name: 'module: build warnings'
+- color: f7e101
+  description: Issues/PRs related to collective communications and process groups
+  name: 'module: c10d'
+- color: f7e101
+  description: Related to torch.utils.checkpoint
+  name: 'module: checkpoint'
+- color: f7e101
+  description: Related to continuous integration
+  name: 'module: ci'
+- color: f7e101
+  description: Issues related to the codegen for Aten and Autograd
+  name: 'module: codegen'
+- color: f7e101
+  description: Related to collect_env.py, which collects system information about
+    users
+  name: 'module: collect_env.py'
+- color: f7e101
+  description: Related to complex number support in PyTorch
+  name: 'module: complex'
+- color: f7e101
+  description: Problems related to convolutions (THNN, THCUNN, CuDNN)
+  name: 'module: convolution'
+- color: f7e101
+  description: issue that returns an incorrect result silently
+  name: 'module: correctness (silent)'
+- color: f7e101
+  description: Related to C++ API
+  name: 'module: cpp'
+- color: f7e101
+  description: Related to torch.utils.cpp_extension
+  name: 'module: cpp-extensions'
+- color: f7e101
+  description: CPU specific problem (e.g., perf, algorithm)
+  name: 'module: cpu'
+- color: f7e101
+  description: Problem manifests as a hard crash, as opposed to a RuntimeError
+  name: 'module: crash'
+- color: f7e101
+  description: Problem related to cublas support
+  name: 'module: cublas'
+- color: f7e101
+  description: Related to torch.cuda, and CUDA support in general
+  name: 'module: cuda'
+- color: adb0ea
+  description: Ability to capture and then replay streams of CUDA kernels
+  name: 'module: cuda graphs'
+- color: f7e101
+  description: Related to torch.backends.cudnn, and CuDNN support
+  name: 'module: cudnn'
+- color: f7e101
+  description: ""
+  name: 'module: custom-operators'
+- color: edf75d
+  description: torch.utils.data
+  name: 'module: data'
+- color: f7e101
+  description: ""
+  name: 'module: data parallel'
+- color: f7e101
+  description: Related to torch.utils.data.DataLoader and Sampler
+  name: 'module: dataloader'
+- color: f7e101
+  description: Issues/PRs related distributed data parallel training
+  name: 'module: ddp'
+- color: f7e101
+  description: Problems related to deadlocks (hang without exiting)
+  name: 'module: deadlock'
+- color: f7e101
+  description: Problem is not caused by us, but caused by an upstream library we use
+  name: 'module: dependency bug'
+- color: 3050AB
+  description: related to torch deploy torchdeploy
+  name: 'module: deploy'
+- color: f7e101
+  description: ""
+  name: 'module: deprecation'
+- color: f7e101
+  description: Related to derivatives of operators
+  name: 'module: derivatives'
+- color: f7e101
+  description: ""
+  name: 'module: determinism'
+- color: f7e101
+  description: DispatchStub, Type, void pointer table, c10 dispatch
+  name: 'module: dispatch'
+- color: f7e101
+  description: ""
+  name: 'module: distance functions'
+- color: f7e101
+  description: Related to torch.distributions
+  name: 'module: distributions'
+- color: f7e101
+  description: Related to pytorch.org/docs, deployment of, and serving
+  name: 'module: doc infra'
+- color: f7e101
+  description: ""
+  name: 'module: docker'
+- color: f7e101
+  description: Related to our documentation, both in docs/ and docblocks
+  name: 'module: docs'
+- color: f7e101
+  description: Problem is related to double backwards definition on an operator
+  name: 'module: double backwards'
+- color: f7e101
+  description: Related to torch.distributed.elastic
+  name: 'module: elastic'
+- color: f7e101
+  description: ""
+  name: 'module: embedding'
+- color: f7e101
+  description: Bugs related to incorrect/lacking error checking
+  name: 'module: error checking'
+- color: 1d76db
+  description: Expect test related functionality
+  name: 'module: expecttest'
+- color: f7e101
+  description: ""
+  name: 'module: fft'
+- color: f7e101
+  description: Problem is a flaky test in CI
+  name: 'module: flaky-tests'
+- color: 0898C6
+  description: ""
+  name: 'module: functional UX'
+- color: f7e101
+  description: Related to float16 half-precision floats
+  name: 'module: half'
+- color: f7e101
+  description: ""
+  name: 'module: hub'
+- color: f7e101
+  description: ""
+  name: 'module: infra'
+- color: f7e101
+  description: Related to weight initialization on operators
+  name: 'module: initialization'
+- color: 1e167a
+  description: ""
+  name: 'module: intel'
+- color: f7e101
+  description: Related to internal abstractions in c10 and ATen
+  name: 'module: internals'
+- color: f7e101
+  description: ""
+  name: 'module: interpolation'
+- color: f7e101
+  description: Related to iOS support - build, API, Continuous Integration, document
+  name: 'module: ios'
+- color: "035447"
+  description: Related to the Jetson builds by NVIDIA
+  name: 'module: jetson'
+- color: f7e101
+  description: ""
+  name: 'module: known issue'
+- color: f7e101
+  description: support for language bindings, including languages that aren't currently
+    supported
+  name: 'module: language binding'
+- color: f7e101
+  description: Issues related to specialized linear algebra operations in PyTorch
+  name: 'module: linear algebra'
+- color: f7e101
+  description: Issues related to our Python/C++ lint rules (run by Travis)
+  name: 'module: lint'
+- color: f7e101
+  description: Features which make it easier to tell what PyTorch is doing under the
+    hood
+  name: 'module: logging'
+- color: f7e101
+  description: Problem is related to loss function
+  name: 'module: loss'
+- color: f7e101
+  description: Mac OS related issues
+  name: 'module: macos'
+- color: 866A92
+  description: related to magma linear algebra cuda support
+  name: 'module: magma'
+- color: f7e101
+  description: Memory format/layout related issues/changes (channels_last, nhwc)
+  name: 'module: memory format'
+- color: f7e101
+  description: PyTorch is using more memory than it should, or it is leaking memory
+  name: 'module: memory usage'
+- color: EBB71F
+  description: ""
+  name: 'module: meta tensors'
+- color: f7e101
+  description: Related to our MKL support
+  name: 'module: mkl'
+- color: f7e101
+  description: Related to Intel IDEEP/MKL-DNN (mkldnn) integration
+  name: 'module: mkldnn'
+- color: f7e101
+  description: Features which help prevent users from committing common mistakes
+  name: 'module: molly-guard'
+- color: f7e101
+  description: Problems related to MPI support
+  name: 'module: mpi'
+- color: FBCA04
+  description: Issues related to multi-tensor apply kernels and foreach functions
+  name: 'module: mta'
+- color: f7e101
+  description: Problem is related to running on multiple GPUs
+  name: 'module: multi-gpu'
+- color: f7e101
+  description: Related to torch.multiprocessing
+  name: 'module: multiprocessing'
+- color: f7e101
+  description: Related to issues that occur when running on multiple CPU threads
+  name: 'module: multithreading'
+- color: f7e101
+  description: Named tensor support
+  name: 'module: named tensor'
+- color: f7e101
+  description: Problems related to nccl support
+  name: 'module: nccl'
+- color: f7e101
+  description: 'NestedTensor tag see issue #25032'
+  name: 'module: nestedtensor'
+- color: f7e101
+  description: Related to torch.nn
+  name: 'module: nn'
+- color: f7e101
+  description: Related to our NNPack integration
+  name: 'module: nnpack'
+- color: f7e101
+  description: ""
+  name: 'module: norms and normalization'
+- color: f7e101
+  description: ""
+  name: 'module: numba'
+- color: f7e101
+  description: ""
+  name: 'module: numerical-reproducibility'
+- color: f7e101
+  description: Problems related to numerical stability of operations
+  name: 'module: numerical-stability'
+- color: f7e101
+  description: Related to numpy support, and also numpy compatibility of our operators
+  name: 'module: numpy'
+- color: f7e101
+  description: Related to torch.onnx
+  name: 'module: onnx'
+- color: f7e101
+  description: Problem would be solved if we unified Caffe2 and PyTorch implementations
+    of an operator
+  name: 'module: op-unification'
+- color: f7e101
+  description: Related to OpenMP (omp) support in PyTorch
+  name: 'module: openmp'
+- color: f7e101
+  description: Related to torch.optim
+  name: 'module: optimizer'
+- color: f7e101
+  description: ""
+  name: 'module: padding'
+- color: f7e101
+  description: Related to correctly supporting overlapping storages in operations
+  name: 'module: partial aliasing'
+- color: f7e101
+  description: Issues related to performance, either of kernel code or framework glue
+  name: 'module: performance'
+- color: f7e101
+  description: Problems related to pickling of PyTorch objects
+  name: 'module: pickle'
+- color: f7e101
+  description: ""
+  name: 'module: pooling'
+- color: f7e101
+  description: Issues related to porting TH/THNN legacy to ATen native
+  name: 'module: porting'
+- color: f7e101
+  description: Issues related to the printing format of tensors
+  name: 'module: printing'
+- color: f7e101
+  description: ""
+  name: 'module: protobuf'
+- color: f7e101
+  description: ""
+  name: 'module: pruning'
+- color: f7e101
+  description: Related to our Python bindings / interactions with other Python libraries
+  name: 'module: pybind'
+- color: b60205
+  description: Issues related to the Python Array API
+  name: 'module: python array api'
+- color: f7e101
+  description: Graph Mode Quantization
+  name: 'module: quantize script'
+- color: f7e101
+  description: Related to random number generation in PyTorch
+  name: 'module: random'
+- color: f7e101
+  description: ""
+  name: 'module: reductions'
+- color: f7e101
+  description: It used to work, and now it doesn't
+  name: 'module: regression'
+- color: f7e101
+  description: Issues related to RNN support (LSTM, GRU, etc)
+  name: 'module: rnn'
+- color: f7e101
+  description: AMD GPU support for Pytorch
+  name: 'module: rocm'
+- color: f7e101
+  description: Related to RPC, distributed autograd, RRef, and distributed optimizer
+  name: 'module: rpc'
+- color: f7e101
+  description: ""
+  name: 'module: safe resize'
+- color: f7e101
+  description: ""
+  name: 'module: scatter functions'
+- color: e8cb81
+  description: ""
+  name: 'module: selective build'
+- color: f7e101
+  description: Issues related to serialization (e.g., via pickle, or otherwise) of
+    PyTorch objects
+  name: 'module: serialization'
+- color: f7e101
+  description: ""
+  name: 'module: shape checking'
+- color: f7e101
+  description: Related to single-threaded execution
+  name: 'module: single threaded'
+- color: f7e101
+  description: Problems related to SLEEF support
+  name: 'module: sleef'
+- color: f7e101
+  description: ""
+  name: 'module: sorting and selection'
+- color: f7e101
+  description: Related to torch.sparse
+  name: 'module: sparse'
+- color: ffafe2
+  description: Functions with no exact solutions, analogous to those in scipy.special
+  name: 'module: special'
+- color: f7e101
+  description: Related to statically linked libtorch (we dynamically link by default)
+  name: 'module: static linking'
+- color: ffc6f7
+  description: Related to new structured kernels functionality
+  name: 'module: structured kernels'
+- color: f7e101
+  description: ""
+  name: 'module: tbb'
+- color: f7e101
+  description: ""
+  name: 'module: tensor creation'
+- color: f7e101
+  description: ""
+  name: 'module: tensorboard'
+- color: f7e101
+  description: ""
+  name: 'module: tensorflow'
+- color: f7e845
+  description: Related to Tensorpipe RPC Agent
+  name: 'module: tensorpipe'
+- color: fbca04
+  description: ""
+  name: 'module: testing'
+- color: f7e101
+  description: Related to our tests suite in tests/ folder
+  name: 'module: tests'
+- color: f7e101
+  description: Related to tf32 data format
+  name: 'module: tf32'
+- color: f7e101
+  description: ""
+  name: 'module: third_party'
+- color: f7e101
+  description: ""
+  name: 'module: torchbind'
+- color: f7e101
+  description: ""
+  name: 'module: trigonometric functions'
+- color: f7e101
+  description: ""
+  name: 'module: tsan'
+- color: f7e101
+  description: Related to semantics of type promotion
+  name: 'module: type promotion'
+- color: f7e101
+  description: Related to mypy type annotations
+  name: 'module: typing'
+- color: f7e101
+  description: Build issues that manifest as "undefined reference"
+  name: 'module: undefined reference'
+- color: f7e101
+  description: ""
+  name: 'module: ux'
+- color: f7e101
+  description: Related to SIMD vectorization, e.g., Vec256
+  name: 'module: vectorization'
+- color: f7e101
+  description: ""
+  name: 'module: viewing and reshaping'
+- color: f7e101
+  description: ""
+  name: 'module: vision'
+- color: f7e101
+  description: ""
+  name: 'module: vmap'
+- color: C11087
+  description: ""
+  name: 'module: vulkan'
+- color: f7e101
+  description: Windows support for PyTorch
+  name: 'module: windows'
+- color: f7e101
+  description: Related to XLA support
+  name: 'module: xla'
+- color: f7e101
+  description: ""
+  name: 'module: xnnpack'
+- color: b52655
+  description: ""
+  name: months
+- color: ed84e2
+  description: ""
+  name: needs design
+- color: cc9fe0
+  description: Someone else needs to try reproducing the issue given the instructions.
+    No action needed from user
+  name: needs reproduction
+- color: 198be8
+  description: We need to decide whether or not this merits inclusion, based on research
+    world
+  name: needs research
+- color: fef2c0
+  description: ""
+  name: new-layer
+- color: 0052cc
+  description: ""
+  name: newcomer
+- color: f7e101
+  description: Add this issue/PR to distributed oncall triage queue
+  name: 'oncall: distributed'
+- color: e5df29
+  description: ""
+  name: 'oncall: java'
+- color: c5def5
+  description: Add this issue/PR to JIT oncall triage queue
+  name: 'oncall: jit'
+- color: e88b8f
+  description: Related to mobile support, including iOS and Android
+  name: 'oncall: mobile'
+- color: DD7DCF
+  description: Add issue/PR to torch.package TODO board
+  name: 'oncall: package/deploy'
+- color: 79C48B
+  description: profiler-related issues (cpu, gpu, kineto)
+  name: 'oncall: profiler'
+- color: f7e101
+  description: Quantization support in PyTorch
+  name: 'oncall: quantization'
+- color: f7e101
+  description: Issues related to Transformers and MultiheadAttention
+  name: 'oncall: transformer/mha'
+- color: e99695
+  description: Related to visualization in PyTorch, e.g., tensorboard
+  name: 'oncall: visualization'
+- color: 0052cc
+  description: PyTorch/Caffe2 Operator Micro-benchmarks
+  name: op-bench
+- color: ededed
+  description: ""
+  name: open source
+- color: 1d76db
+  description: Issues related to https://pytorch.org/docs/master/pipeline.html
+  name: pipeline parallelism
+- color: 128A0C
+  description: The core team has reviewed the feature request and agreed it would
+    be a useful addition to PyTorch
+  name: proposal accepted
+- color: e99695
+  description: Ramp up tasks for new developers on PT distributed
+  name: pt_distributed_rampup
+- color: 0e8a16
+  description: High-prio issues that have been reviewed by Quansight and are judged
+    to be not actionable.
+  name: quansight-nack
+- color: e5ab24
+  description: ""
+  name: quantization_release_1.3
+- color: b60205
+  description: All PRs are ready for review unless they are draft, WIP, or have undismissed
+    requested changes
+  name: ready for review (this tag is deprecated)
+- color: dfe26f
+  description: In support of CI and Release Engineering (managed by Karl Ostmo)
+  name: releng
+- color: "003399"
+  description: Request the triage shadow to take a second look at your triage and
+    see if they agree or not
+  name: shadow review
+- color: bfdadc
+  description: Denotes a (flaky) test currently skipped in CI.
+  name: skipped
+- color: fbca04
+  description: We think this is a small issue to fix. Consider knocking off high priority
+    small issues
+  name: small
+- color: c2e0c6
+  description: Not as important as medium or high priority tasks, but we will work
+    on these.
+  name: todo
+- color: EBE0CF
+  description: A tracking issue
+  name: tracker
+- color: cc317c
+  description: ""
+  name: triage review
+- color: 006b75
+  description: This issue has been looked at a team member, and triaged and prioritized
+    into an appropriate module
+  name: triaged
+- color: e5808f
+  description: ""
+  name: weeks
+- color: e99695
+  description: ""
+  name: windows-triaged
+
