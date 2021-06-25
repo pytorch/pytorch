@@ -213,6 +213,10 @@ ListTypePtr ListType::ofTensors() {
   static auto value = ListType::create(TensorType::get());
   return value;
 }
+ListTypePtr ListType::ofOptionalTensors() {
+  static auto value = ListType::create(OptionalType::ofTensor());
+  return value;
+}
 ListTypePtr ListType::ofInts() {
   static auto value = ListType::create(IntType::get());
   return value;
