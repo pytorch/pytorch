@@ -164,10 +164,7 @@ class BaseSparsifier(abc.ABC):
 
     def squash_mask(self, *args, **kwargs):
         for config in self.module_groups:
-            if use_path:
-                module = _path_to_module(self.model, config['path'])
-            else:
-                module = config['module']
+            module = config['module']
             parametrize.remove_parametrizations(module, 'weight',
                                                 leave_parametrized=True)
             if getattr(module._parameters, 'mask', None):
@@ -186,10 +183,7 @@ class BaseSparsifier(abc.ABC):
             return
         with torch.no_grad():
             for config in self.module_groups:
-                if use_path:
-                    module = _path_to_module(self.model, config['path'])
-                else:
-                    module = config['module']
+                module = config['module']
                 self.update_mask(module, **config)
 
     @abc.abstractmethod
