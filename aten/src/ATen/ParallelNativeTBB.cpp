@@ -23,6 +23,7 @@ namespace at {
 namespace {
 static thread_local tbb::task_scheduler_init tbb_init_(intraop_default_num_threads());
 static thread_local tbb::task_group tg_;
+thread_local int this_thread_id{0};
 
 std::mutex global_thread_mutex_;
 std::shared_ptr<tbb::global_control> global_thread_limit_ = nullptr;
@@ -70,8 +71,13 @@ int get_num_threads() {
 }
 
 int get_thread_num() {
-  auto tid = tbb::this_task_arena::current_thread_index();
-  return std::max(tid, 0);
+  return this_thread_id;
+}
+
+namespace internal {
+void set_thread_num(int id) {
+  this_thread_id = id;
+}
 }
 
 bool in_parallel_region() {
