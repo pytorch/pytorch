@@ -332,11 +332,9 @@ filegroup(
 filegroup(
     name = "th_srcs",
     srcs = [
-        "aten/src/TH/THBlas.cpp",
         "aten/src/TH/THGeneral.cpp",
         "aten/src/TH/THStorageFunctions.cpp",
         "aten/src/TH/THTensor.cpp",
-        "aten/src/TH/THTensorMoreMath.cpp",
     ],
 )
 
@@ -546,10 +544,6 @@ header_template_rule(
     src = "aten/src/TH/THGeneral.h.in",
     out = "aten/src/TH/THGeneral.h",
     substitutions = {
-        "#cmakedefine USE_BLAS": "#define USE_BLAS",
-        "#cmakedefine USE_LAPACK": "#define USE_LAPACK",
-        "#cmakedefine BLAS_F2C": "/* #undef BLAS_F2C */",
-        "#cmakedefine BLAS_USE_CBLAS_DOT": "#define BLAS_USE_CBLAS_DOT",
     },
 )
 
