@@ -328,7 +328,7 @@ jobs:
           # /torch/csrc/generic/*.cpp is excluded because those files aren't actually built.
           # deploy/interpreter files are excluded due to using macros and other techniquies
           # that are not easily converted to accepted c++
-          python3 tools/clang_tidy.py \
+          LANG=C.UTF-8 python3 tools/clang_tidy.py \
             --verbose \
             --paths torch/csrc/ \
             --diff-file pr.diff \
