@@ -6,7 +6,7 @@ from typing import Tuple
 
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
-from torch.distributed.rpc import _rref_context_get_debug_info  # type: ignore[attr-defined]
+from torch.distributed.rpc import _rref_context_get_debug_info
 from torch.testing._internal.common_utils import FILE_SCHEMA
 
 

@@ -445,6 +445,12 @@ class TORCH_API Tensor {
     return impl_->is_hip();
   }
 
+  /// Returns if a `Tensor` has VE backend.
+  bool is_ve() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->is_ve();
+  }
+
   /// Returns if a `Tensor` has sparse backend.
   bool is_sparse() const {
     // NB: this is not a native function to avoid dispatching overhead.
@@ -632,6 +638,10 @@ class TORCH_API Tensor {
 
   Tensor hip() const {
     return to(options().device(DeviceType::HIP), /*non_blocking*/ false, /*copy*/ false);
+  }
+
+  Tensor ve() const {
+    return to(options().device(DeviceType::VE), /*non_blocking*/ false, /*copy*/ false);
   }
 
   Tensor vulkan() const {
@@ -970,31 +980,6 @@ protected:
 inline int64_t get_device(const Tensor& self) {
   return self.get_device();
 }
-
-#define DEFINE_CAST(T, name)                                        \
-  template <>                                                       \
-  TORCH_API inline T* Tensor::data_ptr() const {                    \
-    TORCH_CHECK(                                                    \
-        scalar_type() == ScalarType::name,                          \
-        "expected scalar type "                                     \
-        #name                                                       \
-        " but found ",                                              \
-        scalar_type());                                             \
-    return this->unsafeGetTensorImpl()->data_ptr_impl<T>();         \
-  }
-
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_CAST)
-AT_FORALL_QINT_TYPES(DEFINE_CAST)
-#undef DEFINE_CAST
-
-#define DEFINE_ITEM(T, name)                \
-  template <>                               \
-  TORCH_API inline T Tensor::item() const { \
-    return item().to##name();               \
-  }
-
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_ITEM)
-#undef DEFINE_ITEM
 
 template <typename T>
 auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_void_t<T> {
