@@ -808,13 +808,13 @@ TEST_F(Kernel, SumOneAxis) {
 TEST_F(Kernel, SumMultipleAxes) {
   // Test lowering of sum on multiple axes.
   const auto graph_template = R"IR(
-      graph(%0 : Float(2, 3, 2, 3, strides=[18, 6, 3, 1], device=cpu)):
+      graph(%0 : Float(2, 3, 2, 3, strides=[18, 6, 3, 1], requires_grad=0, device=cpu)):
         %1 : int = prim::Constant[value=${dim1}]()
         %2 : int = prim::Constant[value=${dim2}]()
         %3 : int[] = prim::ListConstruct(%1, %2)
         %4 : bool = prim::Constant[value=${keepdim}]()
         %5 : ${dtype}
-        %6 : Float(${size}, strides=[${strides}]) = aten::sum(%0, %3, %4, %5)
+        %6 : Float(${size}, strides=[${strides}], requires_grad=0, device=cpu) = aten::sum(%0, %3, %4, %5)
         return (%6))IR";
   auto a = iotaTensor({2, 3, 2, 3}, TensorOptions(kCPU).dtype(at::kFloat));
 
