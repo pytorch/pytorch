@@ -32,15 +32,15 @@ class AnnotationsTest(unittest.TestCase):
         class M(torch.nn.Module):
 
             def forward(self, x):
-                y = annotate(x, TensorType((1, 2, 3, Dyn)))
+                y = annotate(x, TensorType[1, 2, 3, Dyn])
                 return torch.add(x, y)
 
         module = M()
         symbolic_traced : torch.fx.GraphModule = symbolic_trace(module)
         for n in symbolic_traced.graph.nodes:
             if n.op == 'placeholder':
-                assert n.type == TensorType((1, 2, 3, Dyn))
-
+                assert n.type == TensorType[1, 2, 3, Dyn]
+#
     def test_consistency(self):
         """
         Test the consistency relation.

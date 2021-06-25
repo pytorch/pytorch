@@ -86,8 +86,8 @@ def type_check_node(n, env):
             # we check for divisibility
             if isinstance(t1, TensorType) and Dyn in t1.__args__ or -1 in t2:
                 a = [e if e != Dyn else 1 for e in t1.__args__]
-                p1 = reduce(lambda x, y: x*y, a)
-                p2 = reduce(lambda x, y: x*y, t2)
+                p1 = reduce(lambda x, y: x * y, a)
+                p2 = reduce(lambda x, y: x * y, t2)
                 if p1 % p2 == 0 or p2 % p1 == 0:
                     expr_env[n.name] = t2_type
                     n.type = t2_type
@@ -97,8 +97,8 @@ def type_check_node(n, env):
 
             # if all dimensions are known we check the products
             if isinstance(t1, TensorType):
-                p1 = reduce(lambda x, y: x*y, t1.__args__)
-                p2 = reduce(lambda x, y: x*y, t2)
+                p1 = reduce(lambda x, y: x * y, t1.__args__)
+                p2 = reduce(lambda x, y: x * y, t2)
                 if p1 == p2:
                     expr_env[n.name] = t2_type
                     n.type = t2_type

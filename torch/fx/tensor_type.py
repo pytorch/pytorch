@@ -12,7 +12,7 @@ class TensorType:
         self.__args__ = dim
 
     def __repr__(self):
-        return f'Tensor_Type[{self.__args__}]'
+        return f'TensorType({self.__args__})'
 
     def __eq__(self, other):
         if isinstance(other, self.__class__):
@@ -36,6 +36,9 @@ class _DynType:
     def __eq__(self, other):
         return isinstance(other, self.__class__)
 
+    def __str__(self):
+        return "Dyn"
+
 
 Dyn = _DynType()
 
@@ -51,6 +54,7 @@ def is_consistent(t1, t2):
         int ~ int
         Tensor_Type((1,Dyn,3)) ~ Tensor_Type((1,2,3))
     """
+
     if t1 == t2:
         return True
 
@@ -60,6 +64,9 @@ def is_consistent(t1, t2):
     if isinstance(t1, TensorType) and isinstance(t2, TensorType):
         return len(t1.__args__) == len(t2.__args__) and \
             all([is_consistent(elem1, elem2) for elem1, elem2 in zip(t1.__args__, t2.__args__)])
+
+    else:
+        return False
 
 
 def is_more_precise(t1, t2):
@@ -81,7 +88,7 @@ def is_more_precise(t1, t2):
 
     if isinstance(t1, TensorType) and isinstance(t2, TensorType):
         return len(t1.__args__) == len(t2.__args__) and \
-               all([is_more_precise(elem1, elem2) for elem1, elem2 in zip(t1.__args__, t2.__args__)])
+            all([is_more_precise(elem1, elem2) for elem1, elem2 in zip(t1.__args__, t2.__args__)])
 
     else:
         return False
