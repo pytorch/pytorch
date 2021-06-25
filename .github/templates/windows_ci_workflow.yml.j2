@@ -115,8 +115,8 @@ jobs:
     runs-on: !{{ test_runner_type }}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-test
-      NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       SHARD_NUMBER: ${{ matrix.shard }}
+      NUM_TEST_SHARDS: ${{ matrix.num_shards }}
     needs:
       - build
       - generate-test-matrix

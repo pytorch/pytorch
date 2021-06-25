@@ -20,15 +20,15 @@ def main() -> None:
         'include': [
             {
                 'config': 'default',
-                'num_shards': NUM_TEST_SHARDS,
                 'shard': shard,
+                'num_shards': NUM_TEST_SHARDS,
             }
             for shard in range(1, NUM_TEST_SHARDS + 1)
         ] + [
             {
                 'config': config,
-                'num_shards': num_shards,
                 'shard': shard,
+                'num_shards': num_shards,
             }
             for config, num_shards in shards_per_config.items()
             for shard in range(1, num_shards + 1)
