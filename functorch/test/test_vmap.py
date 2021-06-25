@@ -2878,7 +2878,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         for sample_input in sample_inputs_itr:
             arg_values = [sample_input.input] + list(sample_input.args)
             kwarg_values = sample_input.kwargs
-            # print(arg_values, kwarg_values)
             for loop_out, batched_out in get_fallback_and_vmap_exhaustive(op.op, arg_values, kwarg_values):
                 self.assertEqual(loop_out, batched_out)
 
