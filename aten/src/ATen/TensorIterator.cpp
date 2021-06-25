@@ -821,11 +821,11 @@ void TensorIteratorBase::build_comparison_op(const Tensor& out, const Tensor& a,
   // avoid creating a temporary copy of the output.
   // However, note that all kernels using this TensorIterator will need to special-case when
   // the output tensor has bool dtype, and provide a lambda of type (scalar_t, scalar_t -> bool).
-  if (out.scalar_type() == kBool || !out.defined()) {
+  if (out.defined() && out.scalar_type() != kBool) {
     config.cast_common_dtype_to_outputs(true);
   }
 
-  return build(config);
+  build(config);
 }
 
 // This cannot be a function because TensorIteratorConfig is not
