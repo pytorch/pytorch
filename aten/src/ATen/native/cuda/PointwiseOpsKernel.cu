@@ -11,6 +11,8 @@ namespace at { namespace native {
 
 void addcmul_cuda_kernel(TensorIterator& iter, const Scalar& value) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, iter.dtype(), "addcmul_cuda", [&]() {
+    // note(mkozuki): If scalar_t is fp16 or bfloat16, cast scalar to float
+    // and do math in fp32 for better accuracy.
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto alpha = value.to<accscalar_t>();
     gpu_kernel(iter, [alpha]GPU_LAMBDA(scalar_t a, scalar_t b, scalar_t c) -> scalar_t {
@@ -21,6 +23,8 @@ void addcmul_cuda_kernel(TensorIterator& iter, const Scalar& value) {
 
 void addcdiv_cuda_kernel(TensorIterator& iter, const Scalar& value) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, iter.dtype(), "addcdiv_cuda", [&]() {
+    // note(mkozuki): If scalar_t is fp16 or bfloat16, cast scalar to float
+    // and do math in fp32 for better accuracy.
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto alpha = value.to<accscalar_t>();
     gpu_kernel(iter, [alpha]GPU_LAMBDA(scalar_t a, scalar_t b, scalar_t c) -> scalar_t {
