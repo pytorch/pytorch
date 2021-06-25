@@ -235,12 +235,12 @@ jobs:
           submodules: recursive
       - name: create site zip
         run: |
-          echo "hello" > index.html
+          echo hi > index.html
           zip site.zip index.html
-      - uses: seemethere/upload-artifact-s3@9d7ceb0ab39c2c88d93ef7792b27425b27d59162
+      - uses: driazati/upload-artifact-s3@6df6e653e294f8da10d7630280444620705ab9ea
         name: Store PyTorch Build Artifacts on S3
         with:
-          name: wow.zip
+          name: deploy
           retention-days: 14
           if-no-files-found: error
           path:
