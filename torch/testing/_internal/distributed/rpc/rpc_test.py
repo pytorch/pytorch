@@ -213,6 +213,10 @@ def add_rref_to_value(rref, value):
 def run_nested_pickle(pickle_cls_instance, tensor):
     return pickle_cls_instance.t + tensor
 
+def build_sparse_tensor():
+    i = [[0, 1, 1], [2, 0, 2]]
+    v = [3, 4, 5]
+    return torch.sparse_coo_tensor(i, v, (2, 3))
 
 def build_complex_tensors():
     a = torch.ones(3, 3)
@@ -6053,37 +6057,70 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
         ):
             fut = Future(devices=["cpu"])
 
-    def _test_cuda_future_extraction(self, wrapper, unwrapper):
-        # We check proper CUDA stream synchronization by filling the tensor with
-        # the expected value in one stream, and reading it from another stream.
-        tensor = torch.zeros((100,), device="cuda:0")
+    def _test_cuda_future_extraction(self, wrapper, unwrapper, sparse_tensor):
+        # We check proper CUDA stream synchronization by adding to the tensor
+        # in one stream to get the expected value, and reading it from another stream.
         future = Future(devices=["cuda:0"])
         with torch.cuda.device("cuda:0"):
             stream = torch.cuda.Stream()
             another_stream = torch.cuda.Stream()
             with torch.cuda.stream(stream):
+                if sparse_tensor:
+                    tensor = build_sparse_tensor().to("cuda:0")
+                    add_tensor = build_sparse_tensor().to("cuda:0")
+                    expected_tensor = (tensor + add_tensor).coalesce()
+                else:
+                    tensor = torch.zeros((100,), device="cuda:0")
+                    add_tensor = torch.ones((100,), device="cuda:0")
+                    expected_tensor = tensor + add_tensor
                 torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
-                tensor.fill_(1)
+                tensor += add_tensor
+                if sparse_tensor:
+                    tensor = tensor.coalesce()
                 future.set_result(wrapper(tensor))
             with torch.cuda.stream(another_stream):
-                self.assertTrue(torch.eq(unwrapper(future.wait()), 1).all().item())
+                tensor = unwrapper(future.wait())
+                if sparse_tensor:
+                    self.assertTrue(torch.eq(tensor.indices(), expected_tensor.indices()).all().item())
+                    self.assertTrue(torch.eq(tensor.values(), expected_tensor.values()).all().item())
+                    self.assertEqual(tensor.size(), expected_tensor.size())
+                else:
+                    self.assertTrue(torch.eq(tensor, expected_tensor).all().item())
 
     @skip_if_lt_x_gpu(1)
     def test_cuda_future_can_extract_cuda_tensor(self):
         self._test_cuda_future_extraction(
-            wrapper=lambda t: t, unwrapper=lambda v: v
+            wrapper=lambda t: t, unwrapper=lambda v: v, sparse_tensor=False
         )
 
     @skip_if_lt_x_gpu(1)
     def test_cuda_future_can_extract_list_with_cuda_tensor(self):
         self._test_cuda_future_extraction(
-            wrapper=lambda t: [t], unwrapper=lambda v: v[0]
+            wrapper=lambda t: [t], unwrapper=lambda v: v[0], sparse_tensor=False
         )
 
     @skip_if_lt_x_gpu(1)
     def test_cuda_future_can_extract_custom_class_with_cuda_tensor(self):
         self._test_cuda_future_extraction(
-            wrapper=lambda t: TensorWrapper(t), unwrapper=lambda v: v.tensor
+            wrapper=lambda t: TensorWrapper(t), unwrapper=lambda v: v.tensor, sparse_tensor=False
+        )
+
+    @skip_if_lt_x_gpu(1)
+    def test_cuda_future_can_extract_cuda_sparse_tensor(self):
+        self._test_cuda_future_extraction(
+            wrapper=lambda t: t, unwrapper=lambda v: v, sparse_tensor=True
+        )
+
+    @skip_if_lt_x_gpu(1)
+    def test_cuda_future_can_extract_list_with_cuda_sparse_tensor(self):
+        self._test_cuda_future_extraction(
+            wrapper=lambda t: [t], unwrapper=lambda v: v[0], sparse_tensor=True
+        )
+
+    @skip_if_lt_x_gpu(1)
+    def test_cuda_future_can_extract_custom_class_with_cuda_sparse_tensor(self):
+        self._test_cuda_future_extraction(
+            wrapper=lambda t: TensorWrapper(t), unwrapper=lambda v: v.tensor, sparse_tensor=True
         )
 
     @skip_if_lt_x_gpu(2)
