@@ -211,7 +211,7 @@ jobs:
           echo "${MATRIX}"
           echo "::set-output name=matrix::${MATRIX}"
 
-  test:
+  {# test:
     runs-on: !{{ test_runner_type }}
     needs:
       - calculate-docker-image
@@ -383,14 +383,14 @@ jobs:
           CIRCLE_WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         run: |
           export PYTHONPATH=$PWD
-          python tools/stats/print_test_stats.py --upload-to-s3 --compare-with-s3 test
+          python tools/stats/print_test_stats.py --upload-to-s3 --compare-with-s3 test #}
   {%- if enable_doc_jobs %}
 
   pytorch_python_doc_build:
     runs-on: linux.2xlarge
     needs:
       - calculate-docker-image
-      - build
+      {# - build #}
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
     steps:
@@ -408,6 +408,18 @@ jobs:
         with:
           fetch-depth: 0 # deep clone, to allow sharding to use git rev-list
           submodules: recursive
+      - name: create site zip
+        run: |
+          echo "hello" > index.html
+          zip site.zip index.html
+      - uses: seemethere/upload-artifact-s3@9d7ceb0ab39c2c88d93ef7792b27425b27d59162
+        name: Store PyTorch Build Artifacts on S3
+        with:
+          name: ${{ env.BUILD_ENVIRONMENT }}
+          retention-days: 14
+          if-no-files-found: error
+          path:
+            site.zip
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"
@@ -462,4 +474,5 @@ jobs:
         run: |
           # Prune all of the docker images
           docker system prune -af
+
   {%- endif -%}
