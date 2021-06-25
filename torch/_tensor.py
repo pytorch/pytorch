@@ -11,7 +11,7 @@ from torch._namedtensor_internals import (
     unzip_namedshape, single_ellipsis_index, is_ellipsis)
 from torch.overrides import (
     has_torch_function, has_torch_function_unary, has_torch_function_variadic,
-    handle_torch_function)
+    handle_torch_function, get_default_nowrap_functions)
 import torch.utils.hooks as hooks
 
 
@@ -561,6 +561,14 @@ class Tensor(torch._C._TensorBase):
         return torch.floor_divide(other, self)
 
     @_wrap_type_error_to_not_implemented
+    def __rlshift__(self, other):
+        return torch.bitwise_left_shift(other, self)
+
+    @_wrap_type_error_to_not_implemented
+    def __rrshift__(self, other):
+        return torch.bitwise_right_shift(other, self)
+
+    @_wrap_type_error_to_not_implemented
     def __rmatmul__(self, other):
         if has_torch_function_variadic(self, other):
             return handle_torch_function(Tensor.__rmatmul__, (self, other), self, other)
@@ -1007,7 +1015,10 @@ class Tensor(torch._C._TensorBase):
 
         with _C.DisableTorchFunction():
             ret = func(*args, **kwargs)
-            return _convert(ret, cls)
+            if func in get_default_nowrap_functions():
+                return ret
+            else:
+                return _convert(ret, cls)
 
     __module__ = 'torch'
 
@@ -1015,7 +1026,7 @@ def _convert(ret, cls):
     if cls is Tensor:
         return ret
 
-    if isinstance(ret, Tensor):
+    if isinstance(ret, Tensor) and not isinstance(ret, cls):
         ret = ret.as_subclass(cls)
 
     if isinstance(ret, (tuple, list)):
