@@ -552,9 +552,6 @@ def convert_eq_obs(
             inp_quant_obs_node = node.args[0]
             prev_node = inp_quant_obs_node.args[0]
 
-            # Update the following input quantization observer's min/max values
-            scale_input_observer(node, modules)
-
             # If the previous node is a layer that needs to be equalized, then
             # we will remove the current node because we do not need to add any
             # equalization nodes between two layers that need to be equalized
@@ -564,6 +561,9 @@ def convert_eq_obs(
             if node_supports_equalization(prev_node, modules):
                 remove_node(model, node, inp_quant_obs_node)
                 continue
+
+            # Update the following input quantization observer's min/max values
+            scale_input_observer(node, modules)
 
             # Remove the InputEqualization node and add a mul operator before
             # the quantization observer node that appears before the equalization node

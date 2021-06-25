@@ -347,12 +347,11 @@ class TestEqualizeFx(QuantizationTestCase):
         return exp_weight_activation_vals
 
     def test_input_weight_equalization_activation_values(self):
-        """ After applying the equalization functions check if each observer's
-        min/max values are as expected
+        """ After applying the equalization functions check if the input
+        observer's min/max values are as expected
         """
 
-        tests = [SingleLayerLinearModel, TwoLayerLinearModel,
-                 SingleLayerFunctionalLinearModel, TwoLayerFunctionalLinearModel]
+        tests = [SingleLayerLinearModel, SingleLayerFunctionalLinearModel]
 
         x = torch.rand((5, 5))
         for M in tests:
