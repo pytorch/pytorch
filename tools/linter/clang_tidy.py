@@ -166,7 +166,7 @@ def run_shell_commands_in_parallel(commands: Iterable[List[str]]) -> str:
     """runs all the commands in parallel with ninja, commands is a List[List[str]]"""
     async def run_command(cmd: List[str]) -> str:
         proc = await asyncio.create_subprocess_shell(
-            shlex.join(cmd),  # type: ignore[attr-defined]
+            ' '.join(shlex.quote(x) for x in cmd),  # type: ignore[attr-defined]
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
@@ -186,7 +186,8 @@ def run_shell_commands_in_parallel(commands: Iterable[List[str]]) -> str:
         coros = [run_command(cmd) for cmd in commands]
         return await gather_with_concurrency(multiprocessing.cpu_count(), coros)
 
-    results = asyncio.run(helper())  # type: ignore[attr-defined]
+    loop = asyncio.get_event_loop()
+    results = loop.run_until_complete(helper())
     return "\n".join(results)
 
 
@@ -201,6 +202,9 @@ def run_clang_tidy(options: Any, line_filters: List[Dict[str, Any]], files: Iter
         with open(options.config_file) as config:
             # Here we convert the YAML config file to a JSON blob.
             command += ["-config", json.dumps(yaml.load(config, Loader=yaml.SafeLoader))]
+    if options.print_include_paths:
+        command += ["--extra-arg", "-v"]
+
     command += options.extra_args
 
     if line_filters:
@@ -325,6 +329,11 @@ def parse_options() -> Any:
         action="store_true",
         help="Run clang tidy in parallel per-file (requires ninja to be installed).",
     )
+    parser.add_argument(
+        "--print-include-paths",
+        action="store_true",
+        help="Print the search paths used for include directives"
+    )
     parser.add_argument("-s", "--suppress-diagnostics", action="store_true",
                         help="Add NOLINT to suppress clang-tidy violations")
     parser.add_argument(
@@ -377,6 +386,8 @@ def main() -> None:
                 shutil.copyfile(fname, mapped_fname)
 
     pwd = os.getcwd() + "/"
+    if options.dry_run:
+        print(clang_tidy_output)
     for line in clang_tidy_output.splitlines():
         if line.startswith(pwd):
             print(line[len(pwd):])
