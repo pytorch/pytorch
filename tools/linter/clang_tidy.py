@@ -166,7 +166,7 @@ def run_shell_commands_in_parallel(commands: Iterable[List[str]]) -> str:
     """runs all the commands in parallel with ninja, commands is a List[List[str]]"""
     async def run_command(cmd: List[str]) -> str:
         proc = await asyncio.create_subprocess_shell(
-            shlex.join(cmd),  # type: ignore[attr-defined]
+            ' '.join(shlex.quote(x) for x in cmd),  # type: ignore[attr-defined]
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
@@ -186,7 +186,8 @@ def run_shell_commands_in_parallel(commands: Iterable[List[str]]) -> str:
         coros = [run_command(cmd) for cmd in commands]
         return await gather_with_concurrency(multiprocessing.cpu_count(), coros)
 
-    results = asyncio.run(helper())  # type: ignore[attr-defined]
+    loop = asyncio.get_event_loop()
+    results = loop.run_until_complete(helper())
     return "\n".join(results)
 
 
