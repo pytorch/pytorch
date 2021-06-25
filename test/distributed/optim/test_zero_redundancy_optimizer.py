@@ -21,6 +21,7 @@ from torch.distributed.optim.zero_redundancy_optimizer import _broadcast_object
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim import SGD
 from torch.testing._internal import common_utils, common_distributed
+from torch.distributed.algorithms.join import _Join, _JoinHook
 
 BACKEND = dist.Backend.NCCL if torch.cuda.is_available() else dist.Backend.GLOO
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -536,7 +537,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
 
             # With SGD, Momentum is required to get a state to shard
             optimizer = ZeroRedundancyOptimizer(
-                model.parameters(), optimizer_class=SGD, lr=0.1, momentum=0.99, group=process_group
+                model.parameters(), optimizer_class=SGD, lr=0.1, momentum=0.99, process_group=process_group
             )
             check(optimizer)
 
@@ -552,7 +553,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                 optimizer_class=SGD,
                 lr=0.1,
                 momentum=0.99,
-                group=process_group,
+                process_group=process_group,
             )
             check(optimizer)
 
@@ -656,6 +657,453 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             for opt in [torch.optim.SGD, torch.optim.Adam]:
                 check_optimizer_equivalence(opt)
 
+    @common_distributed.skip_if_lt_x_gpu(2)
+    def test_zero_join(self):
+        """Check that the ZeRO join hook allows training with uneven inputs."""
+        NUM_INPUTS = 3
+        NUM_EPOCHS = 2
+        torch.manual_seed(0)
+        torch.cuda.manual_seed(0)
+
+        rank = self.rank
+        world_size = self.world_size
+        self.dist_init(rank, world_size)
+        if BACKEND == dist.Backend.NCCL:
+            torch.cuda.set_device(self.device)
+
+        model = torch.nn.Sequential(
+            torch.nn.Linear(2, 3),
+            torch.nn.Linear(3, 3),
+            torch.nn.Linear(3, 3),
+        )
+        model.to(self.device)
+
+        # DDP ensures correct gradients in data parallel training, so DDP with
+        # local optimizers on uneven inputs should be equivalent to ZeRO on
+        # uneven inputs with gradients being manually set
+        ddp_model = DDP(model, device_ids=[rank])
+        local_optim = torch.optim.Adam(ddp_model.parameters(), lr=0.01)
+        zero_model = copy.deepcopy(model)
+        zero_model.to(self.device)
+        zero_optim = ZeroRedundancyOptimizer(zero_model.parameters(), torch.optim.Adam, lr=0.01)
+        loss_fn = torch.nn.MSELoss()
+
+        # Use uneven inputs: rank i has i extra inputs
+        inputs = [torch.randn(20, 2).to(self.device) for _ in range(NUM_INPUTS + rank)]
+        labels = torch.randn(20, 3).to(self.device)
+
+        # Save the gradients and parameters from DDP as ground truth
+        grads_at_each_iter = []
+        params_at_each_iter = []
+        with ddp_model.join():
+            for _ in range(NUM_EPOCHS):
+                for input in inputs:
+                    output = ddp_model(input)
+                    loss_fn(output, labels).backward()
+                    if rank == world_size - 1:
+                        grads = []
+                        for p in ddp_model.parameters():
+                            grads.append(p.grad.detach().clone().to(self.device))
+                    local_optim.step()
+                    if rank == world_size - 1:
+                        params = []
+                        for p in ddp_model.parameters():
+                            params.append(p.detach().clone().to(self.device))
+                        grads_at_each_iter.append(grads)
+                        params_at_each_iter.append(params)
+
+        # Broadcast the gradients and parameters from the largest rank to all
+        # other ranks
+        grads_and_params = [grads_at_each_iter, params_at_each_iter]
+        dist.broadcast_object_list(grads_and_params, src=world_size - 1, group=dist.group.WORLD)
+
+        grads_at_each_iter = grads_and_params[0]
+        params_at_each_iter = grads_and_params[1]
+
+        # TODO: The below logic can be removed once `broadcast_object_list`
+        # defaults to loading to the target device instead of the source device
+        for iter in range(len(params_at_each_iter)):
+            for p in params_at_each_iter[iter]:
+                p = p.to(self.device)
+        # Ensure that the received parameters are on the rank's device
+        dist.barrier()
+
+        # # A process must still set the remaining gradients after joining, so we
+        # # define a join hook to do this before the ZeRO join hook
+        # class _JoinGradInfo():
+        #     def __init__(self, grads, device):
+        #         self.grads = grads  # remaining gradients to set
+        #         self.index = 0
+        #         self.device = device
+
+        # def set_grads_join_hook(zero_optim, grads, device):
+        #     def pre_hook(zero_optim):
+        #         """Saves information needed for the main hook."""
+        #         zero_optim._join_grad_info = _JoinGradInfo(grads, device)
+
+        #     def main_hook(zero_optim):
+        #         """Sets the gradients manually."""
+        #         grads = zero_optim._join_grad_info.grads[zero_optim._join_grad_info.index]
+        #         zero_optim._join_grad_info.index += 1
+        #         for p, grad in zip(zero_optim._all_params, grads):
+        #             p.grad = grad.detach().clone().to(zero_optim._join_grad_info.device)
+
+        #     return _JoinHook(zero_optim, pre_hook, main_hook, None)
+
+        # num_grads_after_joining = NUM_EPOCHS * (world_size - rank - 1)
+        # grads = grads_at_each_iter[-num_grads_after_joining:]
+        # set_grads_jh = set_grads_join_hook(zero_optim, grads, self.device)
+        # zero_jh = zero_optim._join_hook()
+        # iter = 0
+        # with _Join([set_grads_jh, zero_jh]):
+        #     for _ in range(NUM_EPOCHS):
+        #         for input in inputs:
+        #             # Schedule an all-reduce to indicate not joined
+        #             dist.all_reduce(torch.ones(1, device=self.device), group=dist.group.WORLD)
+
+        #             # Set gradients manually
+        #             for p, grad in zip(zero_model.parameters(), grads_at_each_iter[iter]):
+        #                 p.grad = grad.detach().clone().to(self.device)
+
+        #             # Perform optimizer step and check parity
+        #             zero_optim.step()
+        #             for p, ddp_p in zip(zero_model.parameters(), params_at_each_iter[iter]):
+        #                 ddp_p = ddp_p.to(self.device)
+        #                 assert torch.allclose(p, ddp_p), \
+        #                     "Parameters differ between using ZeRO and local optimizer"
+        #             iter += 1
+
+    @common_distributed.skip_if_lt_x_gpu(2)
+    def test_zero_join2(self):
+        """Check that the ZeRO join hook allows training with uneven inputs."""
+        NUM_INPUTS = 3
+        NUM_EPOCHS = 2
+        torch.manual_seed(0)
+        torch.cuda.manual_seed(0)
+
+        rank = self.rank
+        world_size = self.world_size
+        self.dist_init(rank, world_size)
+        if BACKEND == dist.Backend.NCCL:
+            torch.cuda.set_device(self.device)
+
+        model = torch.nn.Sequential(
+            torch.nn.Linear(2, 3),
+            torch.nn.Linear(3, 3),
+            torch.nn.Linear(3, 3),
+        )
+        model.to(self.device)
+
+        # DDP ensures correct gradients in data parallel training, so DDP with
+        # local optimizers on uneven inputs should be equivalent to ZeRO on
+        # uneven inputs with gradients being manually set
+        ddp_model = DDP(model, device_ids=[rank])
+        local_optim = torch.optim.Adam(ddp_model.parameters(), lr=0.01)
+        zero_model = copy.deepcopy(model)
+        zero_model.to(self.device)
+        zero_optim = ZeroRedundancyOptimizer(zero_model.parameters(), torch.optim.Adam, lr=0.01)
+        loss_fn = torch.nn.MSELoss()
+
+        # Use uneven inputs: rank i has i extra inputs
+        inputs = [torch.randn(20, 2).to(self.device) for _ in range(NUM_INPUTS + rank)]
+        labels = torch.randn(20, 3).to(self.device)
+
+        # Save the gradients and parameters from DDP as ground truth
+        grads_at_each_iter = []
+        params_at_each_iter = []
+        with ddp_model.join():
+            for _ in range(NUM_EPOCHS):
+                for input in inputs:
+                    output = ddp_model(input)
+                    loss_fn(output, labels).backward()
+                    if rank == world_size - 1:
+                        grads = []
+                        for p in ddp_model.parameters():
+                            grads.append(p.grad.detach().clone().to(self.device))
+                    local_optim.step()
+                    if rank == world_size - 1:
+                        params = []
+                        for p in ddp_model.parameters():
+                            params.append(p.detach().clone().to(self.device))
+                        grads_at_each_iter.append(grads)
+                        params_at_each_iter.append(params)
+
+        # Broadcast the gradients and parameters from the largest rank to all
+        # other ranks
+        grads_and_params = [grads_at_each_iter, params_at_each_iter]
+        grads_and_params = _broadcast_object(grads_and_params, src_rank=world_size - 1, group=dist.group.WORLD, device=self.device)
+        grads_at_each_iter = grads_and_params[0]
+        params_at_each_iter = grads_and_params[1]
+
+        # Ensure that the received parameters are on the rank's device
+        dist.barrier(group=dist.group.WORLD)
+
+        # A process must still set the remaining gradients after joining, so we
+        # define a join hook to do this before the ZeRO join hook
+        class _JoinGradInfo():
+            def __init__(self, grads, device):
+                self.grads = grads  # remaining gradients to set
+                self.index = 0
+                self.device = device
+
+        def set_grads_join_hook(zero_optim, grads, device):
+            def pre_hook(zero_optim):
+                """Saves information needed for the main hook."""
+                zero_optim._join_grad_info = _JoinGradInfo(grads, device)
+
+            def main_hook(zero_optim):
+                """Sets the gradients manually."""
+                grads = zero_optim._join_grad_info.grads[zero_optim._join_grad_info.index]
+                zero_optim._join_grad_info.index += 1
+                for p, grad in zip(zero_optim._all_params, grads):
+                    p.grad = grad.detach().clone().to(zero_optim._join_grad_info.device)
+
+            return _JoinHook(zero_optim, pre_hook, main_hook, None)
+
+        num_grads_after_joining = NUM_EPOCHS * (world_size - rank - 1)
+        grads = grads_at_each_iter[-num_grads_after_joining:]
+        set_grads_jh = set_grads_join_hook(zero_optim, grads, self.device)
+        zero_jh = zero_optim._join_hook()
+        iter = 0
+        with _Join([set_grads_jh, zero_jh]):
+            for _ in range(NUM_EPOCHS):
+                for input in inputs:
+                    # Schedule an all-reduce to indicate not joined
+                    dist.all_reduce(torch.ones(1, device=self.device), group=dist.group.WORLD)
+
+                    # Set gradients manually
+                    for p, grad in zip(zero_model.parameters(), grads_at_each_iter[iter]):
+                        p.grad = grad.detach().clone().to(self.device)
+
+                    # Perform optimizer step and check parity
+                    zero_optim.step()
+                    for p, ddp_p in zip(zero_model.parameters(), params_at_each_iter[iter]):
+                        ddp_p = ddp_p.to(self.device)
+                        assert torch.allclose(p, ddp_p), \
+                            "Parameters differ between using ZeRO and local optimizer"
+                    iter += 1
+
+    @common_distributed.skip_if_lt_x_gpu(2)
+    def test_zero_join3(self):
+        """Check that the ZeRO join hook allows training with uneven inputs."""
+        NUM_INPUTS = 3
+        NUM_EPOCHS = 2
+        torch.manual_seed(0)
+        torch.cuda.manual_seed(0)
+
+        rank = self.rank
+        world_size = self.world_size
+        self.dist_init(rank, world_size)
+        if BACKEND == dist.Backend.NCCL:
+            torch.cuda.set_device(self.device)
+
+        model = torch.nn.Sequential(
+            torch.nn.Linear(2, 3),
+            torch.nn.Linear(3, 3),
+            torch.nn.Linear(3, 3),
+        )
+        model.to(self.device)
+
+        # DDP ensures correct gradients in data parallel training, so DDP with
+        # local optimizers on uneven inputs should be equivalent to ZeRO on
+        # uneven inputs with gradients being manually set
+        ddp_model = DDP(model, device_ids=[rank])
+        local_optim = torch.optim.Adam(ddp_model.parameters(), lr=0.01)
+        zero_model = copy.deepcopy(model)
+        zero_model.to(self.device)
+        zero_optim = ZeroRedundancyOptimizer(zero_model.parameters(), torch.optim.Adam, lr=0.01)
+        loss_fn = torch.nn.MSELoss()
+
+        # Use uneven inputs: rank i has i extra inputs
+        inputs = [torch.randn(20, 2).to(self.device) for _ in range(NUM_INPUTS + rank)]
+        labels = torch.randn(20, 3).to(self.device)
+
+        # Save the gradients and parameters from DDP as ground truth
+        grads_at_each_iter = []
+        params_at_each_iter = []
+        with ddp_model.join():
+            for _ in range(NUM_EPOCHS):
+                for input in inputs:
+                    output = ddp_model(input)
+                    loss_fn(output, labels).backward()
+                    if rank == world_size - 1:
+                        grads = []
+                        for p in ddp_model.parameters():
+                            grads.append(p.grad.detach().clone().to(self.device))
+                    local_optim.step()
+                    if rank == world_size - 1:
+                        params = []
+                        for p in ddp_model.parameters():
+                            params.append(p.detach().clone().to(self.device))
+                        grads_at_each_iter.append(grads)
+                        params_at_each_iter.append(params)
+
+        # Broadcast the gradients and parameters from the largest rank to all
+        # other ranks
+        grads_and_params = [grads_at_each_iter, params_at_each_iter]
+        grads_and_params = _broadcast_object(grads_and_params, src_rank=world_size - 1, group=dist.group.WORLD, device=self.device)
+        grads_at_each_iter = grads_and_params[0]
+        params_at_each_iter = grads_and_params[1]
+
+        # Ensure that the received parameters are on the rank's device
+        # dist.barrier(group=dist.group.WORLD)
+
+        # A process must still set the remaining gradients after joining, so we
+        # define a join hook to do this before the ZeRO join hook
+        class _JoinGradInfo():
+            def __init__(self, grads, device):
+                self.grads = grads  # remaining gradients to set
+                self.index = 0
+                self.device = device
+
+        def set_grads_join_hook(zero_optim, grads, device):
+            def pre_hook(zero_optim):
+                """Saves information needed for the main hook."""
+                zero_optim._join_grad_info = _JoinGradInfo(grads, device)
+
+            def main_hook(zero_optim):
+                """Sets the gradients manually."""
+                grads = zero_optim._join_grad_info.grads[zero_optim._join_grad_info.index]
+                zero_optim._join_grad_info.index += 1
+                for p, grad in zip(zero_optim._all_params, grads):
+                    p.grad = grad.detach().clone().to(zero_optim._join_grad_info.device)
+
+            return _JoinHook(zero_optim, pre_hook, main_hook, None)
+
+        num_grads_after_joining = NUM_EPOCHS * (world_size - rank - 1)
+        grads = grads_at_each_iter[-num_grads_after_joining:]
+        set_grads_jh = set_grads_join_hook(zero_optim, grads, self.device)
+        zero_jh = zero_optim._join_hook()
+        iter = 0
+        with _Join([set_grads_jh, zero_jh]):
+            for _ in range(NUM_EPOCHS):
+                for input in inputs:
+                    # Schedule an all-reduce to indicate not joined
+                    dist.all_reduce(torch.ones(1, device=self.device), group=dist.group.WORLD)
+
+                    # Set gradients manually
+                    for p, grad in zip(zero_model.parameters(), grads_at_each_iter[iter]):
+                        p.grad = grad.detach().clone().to(self.device)
+
+                    # Perform optimizer step and check parity
+                    zero_optim.step()
+                    for p, ddp_p in zip(zero_model.parameters(), params_at_each_iter[iter]):
+                        ddp_p = ddp_p.to(self.device)
+                        assert torch.allclose(p, ddp_p), \
+                            "Parameters differ between using ZeRO and local optimizer"
+                    iter += 1
+
+    @common_distributed.skip_if_lt_x_gpu(2)
+    def test_zero_join4(self):
+        """Check that the ZeRO join hook allows training with uneven inputs."""
+        NUM_INPUTS = 3
+        NUM_EPOCHS = 2
+        torch.manual_seed(0)
+        torch.cuda.manual_seed(0)
+
+        rank = self.rank
+        world_size = self.world_size
+        print(f"world_size {world_size}")
+        self.dist_init(rank, world_size)
+        if BACKEND == dist.Backend.NCCL:
+            torch.cuda.set_device(self.device)
+
+        model = torch.nn.Sequential(
+            torch.nn.Linear(2, 3),
+            torch.nn.Linear(3, 3),
+            torch.nn.Linear(3, 3),
+        )
+        model.to(self.device)
+
+        # DDP ensures correct gradients in data parallel training, so DDP with
+        # local optimizers on uneven inputs should be equivalent to ZeRO on
+        # uneven inputs with gradients being manually set
+        ddp_model = DDP(model, device_ids=[rank])
+        local_optim = torch.optim.Adam(ddp_model.parameters(), lr=0.01)
+        zero_model = copy.deepcopy(model)
+        zero_model.to(self.device)
+        zero_optim = ZeroRedundancyOptimizer(zero_model.parameters(), torch.optim.Adam, lr=0.01)
+        loss_fn = torch.nn.MSELoss()
+
+        # Use uneven inputs: rank i has i extra inputs
+        inputs = [torch.randn(20, 2).to(self.device) for _ in range(NUM_INPUTS + rank)]
+        labels = torch.randn(20, 3).to(self.device)
+
+        # Save the gradients and parameters from DDP as ground truth
+        grads_at_each_iter = []
+        params_at_each_iter = []
+        with ddp_model.join():
+            for _ in range(NUM_EPOCHS):
+                for input in inputs:
+                    output = ddp_model(input)
+                    loss_fn(output, labels).backward()
+                    if rank == world_size - 1:
+                        grads = []
+                        for p in ddp_model.parameters():
+                            grads.append(p.grad.detach().clone().to(self.device))
+                    local_optim.step()
+                    if rank == world_size - 1:
+                        params = []
+                        for p in ddp_model.parameters():
+                            params.append(p.detach().clone().to(self.device))
+                        grads_at_each_iter.append(grads)
+                        params_at_each_iter.append(params)
+
+        # Broadcast the gradients and parameters from the largest rank to all
+        # other ranks
+        grads_and_params = [grads_at_each_iter, params_at_each_iter]
+        grads_and_params = _broadcast_object(grads_and_params, src_rank=world_size - 1, group=dist.group.WORLD, device=self.device)
+        grads_at_each_iter = grads_and_params[0]
+        params_at_each_iter = grads_and_params[1]
+
+        # Ensure that the received parameters are on the rank's device
+        # dist.barrier(group=dist.group.WORLD)
+
+        # A process must still set the remaining gradients after joining, so we
+        # define a join hook to do this before the ZeRO join hook
+        class _JoinGradInfo():
+            def __init__(self, grads, device):
+                self.grads = grads  # remaining gradients to set
+                self.index = 0
+                self.device = device
+
+        def set_grads_join_hook(zero_optim, grads, device):
+            def pre_hook(zero_optim):
+                """Saves information needed for the main hook."""
+                zero_optim._join_grad_info = _JoinGradInfo(grads, device)
+
+            def main_hook(zero_optim):
+                """Sets the gradients manually."""
+                grads = zero_optim._join_grad_info.grads[zero_optim._join_grad_info.index]
+                zero_optim._join_grad_info.index += 1
+                for p, grad in zip(zero_optim._all_params, grads):
+                    p.grad = grad.detach().clone().to(zero_optim._join_grad_info.device)
+
+            return _JoinHook(zero_optim, pre_hook, main_hook, None)
+
+        num_grads_after_joining = NUM_EPOCHS * (world_size - rank - 1)
+        grads = grads_at_each_iter[-num_grads_after_joining:]
+        set_grads_jh = set_grads_join_hook(zero_optim, grads, self.device)
+        zero_jh = zero_optim._join_hook()
+        iter = 0
+        with _Join([set_grads_jh, zero_jh]):
+            for _ in range(NUM_EPOCHS):
+                for input in inputs:
+                    # Schedule an all-reduce to indicate not joined
+                    dist.all_reduce(torch.ones(1, device=self.device), group=dist.group.WORLD)
+
+                    # Set gradients manually
+                    for p, grad in zip(zero_model.parameters(), grads_at_each_iter[iter]):
+                        p.grad = grad.detach().clone().to(self.device)
+
+                    # Perform optimizer step and check parity
+                    zero_optim.step()
+                    for p, ddp_p in zip(zero_model.parameters(), params_at_each_iter[iter]):
+                        # ddp_p = ddp_p.to(self.device)
+                        print(f"p {p.device} ddp_p {ddp_p.device}")
+                        assert torch.allclose(p, ddp_p), \
+                            "Parameters differ between using ZeRO and local optimizer"
+                    iter += 1
 
 if __name__ == "__main__":
     # ! unittest should not be used here, else the tests are not properly registered
