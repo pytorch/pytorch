@@ -32,14 +32,14 @@ std::tuple<Tensor,optional<int64_t>> reduction_dim_batch_rule(
   if (!self_bdim.has_value()) {
     return std::make_tuple( Func(self, dims, std::forward<ExtraArgs>(extra_args)...), nullopt );
   }
-  auto self_dim = self.dim();
+  auto logical_dim = rankWithoutBatchDim(self, self_bdim);
 
   // If the dim intlist is empty, that's equivalent to passing in a dim on all dimensions.
   if (dims.size() == 0) {
-    dims = range(0, self_dim);
+    dims = range(0, std::max((int64_t)1, logical_dim));
   }
 
-  if (self_dim == 1 && dims.size() == 1 && is_allowed_dim_on_scalar_tensor(dims[0])) {
+  if (logical_dim == 0 && dims.size() == 1 && is_allowed_dim_on_scalar_tensor(dims[0])) {
     return std::make_tuple( self.clone(), 0 );
   }
   auto self_ = moveBatchDimToFront(self, self_bdim);
@@ -105,6 +105,7 @@ std::tuple<Tensor,optional<int64_t>> std_batch_rule(
     const Tensor& self, optional<int64_t> self_bdim, bool unbiased) {
   return std_dim_batch_rule(self, self_bdim, range(0, self.dim() - 1), unbiased, false);
 }
+
 
 // Skipping frobenius/nuclear/all/any since they don't have opinfo tests right now :P
 
@@ -179,18 +180,20 @@ _log_softmax_backward_data(
 
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
+  VMAP_SUPPORT("amax", SINGLE_ARG(reduction_dim_batch_rule<decltype(&at::amax), &at::amax, bool>));
+  VMAP_SUPPORT("amin", SINGLE_ARG(reduction_dim_batch_rule<decltype(&at::amin), &at::amin, bool>));
+  VMAP_SUPPORT("argmax", SINGLE_ARG(argx_batch_rule<decltype(&at::argmax), &at::argmax>));
+  VMAP_SUPPORT("argmin", SINGLE_ARG(argx_batch_rule<decltype(&at::argmin), &at::argmin>));
+  VMAP_SUPPORT("nansum", nansum_batch_rule);
+  VMAP_SUPPORT("nansum.dim_IntList", nansum_dim_batch_rule);
+  VMAP_SUPPORT("mean", mean_batch_rule);
+  VMAP_SUPPORT("mean.dim", mean_dim_batch_rule);
+  VMAP_SUPPORT("std", std_batch_rule);
+  VMAP_SUPPORT("std.dim", std_dim_batch_rule);
   VMAP_SUPPORT("sum", sum_batch_rule);
   VMAP_SUPPORT("sum.dim_IntList", sum_dim_batch_rule);
   VMAP_SUPPORT("var", var_batch_rule);
   VMAP_SUPPORT("var.dim", var_dim_batch_rule);
-  VMAP_SUPPORT("mean", mean_batch_rule);
-  VMAP_SUPPORT("mean.dim", mean_dim_batch_rule);
-  VMAP_SUPPORT("nansum", nansum_batch_rule);
-  VMAP_SUPPORT("nansum.dim_IntList", nansum_dim_batch_rule);
-  VMAP_SUPPORT("std", std_batch_rule);
-  VMAP_SUPPORT("std.dim", std_dim_batch_rule);
-  VMAP_SUPPORT("argmax", SINGLE_ARG(argx_batch_rule<decltype(&at::argmax), &at::argmax>));
-  VMAP_SUPPORT("argmin", SINGLE_ARG(argx_batch_rule<decltype(&at::argmin), &at::argmin>));
   VMAP_SUPPORT("_log_softmax_backward_data", _log_softmax_backward_data);
 }
 
