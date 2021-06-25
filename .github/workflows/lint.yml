@@ -267,7 +267,7 @@ jobs:
 
   clang-tidy:
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-18.04
+    runs-on: linux.2xlarge
     container:
       # ubuntu18.04-cuda10.2-py3.6-tidy11
       image: ghcr.io/pytorch/cilint-clang-tidy:7f0b4616100071a4813318bfdbd5b06ae36c5272
