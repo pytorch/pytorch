@@ -71,7 +71,7 @@ def webdriver_test(testfunc):
         for driver in [
                 "Firefox",
                 "Chrome",
-                ]:
+        ]:
             with self.subTest(driver=driver):
                 wd = getattr(webdriver, driver)()
                 testfunc(self, wd, *args, **kwds)
@@ -130,25 +130,25 @@ class TestModelDump(TestCase):
 
             stdout = io.StringIO()
             torch.utils.model_dump.main(
-                    [
-                        None,
-                        "--style=json",
-                        tf.name,
-                    ],
-                    stdout=stdout)
+                [
+                    None,
+                    "--style=json",
+                    tf.name,
+                ],
+                stdout=stdout)
             self.assertRegex(stdout.getvalue(), r'\A{.*SimpleModel')
 
             stdout = io.StringIO()
             torch.utils.model_dump.main(
-                    [
-                        None,
-                        "--style=html",
-                        tf.name,
-                    ],
-                    stdout=stdout)
+                [
+                    None,
+                    "--style=html",
+                    tf.name,
+                ],
+                stdout=stdout)
             self.assertRegex(
-                    stdout.getvalue().replace("\n", " "),
-                    r'\A<!DOCTYPE.*SimpleModel.*componentDidMount')
+                stdout.getvalue().replace("\n", " "),
+                r'\A<!DOCTYPE.*SimpleModel.*componentDidMount')
 
     def get_quant_model(self):
         fmodel = QuantModel().eval()
@@ -193,12 +193,12 @@ class TestModelDump(TestCase):
             self.assertEqual(expected, int(memory_usage_str))
 
         simple_model_memory = (
-                # First layer, including bias.
-                64 * (16 + 1) +
-                # Second layer, including bias.
-                8 * (64 + 1)
+            # First layer, including bias.
+            64 * (16 + 1) +
+            # Second layer, including bias.
+            8 * (64 + 1)
             # 32-bit float
-            ) * 4
+        ) * 4
 
         check_memory(torch.jit.script(SimpleModel()), simple_model_memory)
 
