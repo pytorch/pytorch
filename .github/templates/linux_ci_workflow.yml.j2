@@ -403,17 +403,17 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Checkout PyTorch
+      {# - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
           fetch-depth: 0 # deep clone, to allow sharding to use git rev-list
-          submodules: recursive
+          submodules: recursive #}
       - name: create site zip
         run: |
           mkdir site
           echo alright > site/other.html
           echo wow! > site/index.html
-      - uses: driazati/upload-artifact-s3@6c03393e0ab00b519d5fccb0f1e31521a8d6aad8
+      - uses: driazati/upload-artifact-s3@3a55524f74a1d88ef6e74df765c09df05897a9b0
         name: Store PyTorch Build Artifacts on S3
         with:
           name: deploy
@@ -422,6 +422,7 @@ jobs:
           path: site
       - name: Pull docker image
         run: |
+          exit 1
           docker pull "${DOCKER_IMAGE}"
       - name: Preserve github env variables for use in docker
         run: |
