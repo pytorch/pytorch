@@ -243,8 +243,7 @@ jobs:
           name: deploy
           retention-days: 14
           if-no-files-found: error
-          folder_path: site
-          path: site2
+          path: site
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"
