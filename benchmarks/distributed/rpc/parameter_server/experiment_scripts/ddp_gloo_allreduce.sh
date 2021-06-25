@@ -13,11 +13,11 @@ python -u launcher.py \
     --nserver=0 \
     --ncudaserver=0 \
     --rpc_timeout=120 \
-    --backend="nccl" \
+    --backend="gloo" \
     --epochs=1 \
     --batch_size=32 \
     --data="DummyData" \
-    --model="DummyModel" \
+    --model="DummyModelSparse" \
     --data_config_path="configurations/data_configurations.json" \
     --model_config_path="configurations/model_configurations.json" \
     --preprocess_data="preprocess_dummy_data" \

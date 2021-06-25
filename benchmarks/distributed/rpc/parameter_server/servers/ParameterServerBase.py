@@ -5,27 +5,44 @@ from abc import ABC, abstractmethod
 from metrics.MetricsLogger import MetricsLogger
 
 
-class TrainerBase(ABC):
+class ParameterServerBase(ABC):
 
-    BATCH_LEVEL_METRIC = "batch_level_metric"
-    BATCH_ALL = "batch_all"
-    FORWARD_METRIC = "foward_metric"
-    FORWARD_PASS = "forward_pass"
-    BACKWARD_METRIC = "backward_metric"
-    BACKWARD = "backward"
+    PARAMETER_SERVER_BATCH_METRIC = "parameter_server_batch_metric"
+    PARAMETER_SERVER_STRAGGLER_METRIC = "parameter_server_straggler_metric"
+    PARAM_INDEX_STRAGGLER = "param_index_straggler"
+    PARAM_INDEX_BATCH = "param_index_batch"
 
     def __init__(self, rank):
         r"""
-        Inits TrainerBase class.
+        Inits ParameterServerBase class.
         Args:
             rank (int): worker rank
         """
         self.__metrics_logger = MetricsLogger(rank)
 
     @abstractmethod
-    def train(self):
+    def process_gradient(self):
         r"""
-        A method to be implemented by child class that will train a neural network.
+        A method to be implemented by child class that will process a
+        gradient received by a server.
+        """
+        return
+
+    @staticmethod
+    @abstractmethod
+    def average_gradient():
+        r"""
+        A method to be implemented by child class that will average
+        gradients.
+        """
+        return
+
+    @staticmethod
+    @abstractmethod
+    def reset_state():
+        r"""
+        A method to be implemented by child class that will reset
+        the server state.
         """
         return
 
@@ -47,7 +64,7 @@ class TrainerBase(ABC):
 
     def record_end(self, type, key):
         r"""
-        A method that records the end event for a metric.
+        A method that records the end event for a metric
         Args:
             type (str): group id for metric
             key (str): unique id for metric within a group
@@ -57,95 +74,67 @@ class TrainerBase(ABC):
             key
         )
 
-    def record_batch_start(self, key, cuda=True):
+    def record_straggler_start(self, key, cuda=True):
         r"""
-        A helper method that records a batch metric for the
-        given key. A user should call this at the start of an
-        iteration step during training.
+        A helper method that records a straggler metric
+        for the given key. A user should call this when
+        the first gradient for the param location is received.
         Args:
             key (str): unique id for metric within a group
             cuda (bool): indicator to determine if this is a CUDA metric
         """
         self.__metrics_logger.record_start(
-            self.BATCH_LEVEL_METRIC,
+            self.PARAMETER_SERVER_STRAGGLER_METRIC,
             key,
-            self.BATCH_ALL,
+            self.PARAM_INDEX_STRAGGLER,
+            cuda
+        )
+
+    def record_straggler_end(self, key):
+        r"""
+        A helper method that records a straggler metric
+        for the given key. A user should call this when
+        the last gradient for the param location is received.
+        Args:
+            key (str): unique id for metric within a group
+        """
+        self.__metrics_logger.record_end(
+            self.PARAMETER_SERVER_STRAGGLER_METRIC,
+            key
+        )
+
+    def record_batch_start(self, key, cuda=True):
+        r"""
+        A helper method that records a batch metric
+        for the given key. A user should call this when
+        the first gradient for the param location is received.
+        Args:
+            key (str): unique id for metric within a group
+            cuda (bool): indicator to determine if this is a CUDA metric
+        """
+        self.__metrics_logger.record_start(
+            self.PARAMETER_SERVER_BATCH_METRIC,
+            key,
+            self.PARAM_INDEX_BATCH,
             cuda
         )
 
     def record_batch_end(self, key):
         r"""
-        A helper method that records a batch metric for the
-        given key. A user should call this at the end of an
-        iteration step during training.
+        A helper method that records a batch metric
+        for the given key. A user should call this when
+        all futures for a param location have had their
+        result set.
         Args:
             key (str): unique id for metric within a group
         """
         self.__metrics_logger.record_end(
-            self.BATCH_LEVEL_METRIC,
-            key
-        )
-
-    def record_forward_start(self, key, cuda=True):
-        r"""
-        A helper method that records a forward metric
-        for the given key. A user should call this before
-        their neural network forward.
-        Args:
-            key (str): unique id for metric within a group
-            cuda (bool): indicator to determine if this is a CUDA metric
-        """
-        self.__metrics_logger.record_start(
-            self.FORWARD_METRIC,
-            key,
-            self.FORWARD_PASS,
-            cuda
-        )
-
-    def record_forward_end(self, key):
-        r"""
-        A helper method that records a forward metric
-        for the given key. A user should call this after their
-        neural network forward.
-        Args:
-            key (str): unique id for metric within a group
-        """
-        self.__metrics_logger.record_end(
-            self.FORWARD_METRIC,
-            key
-        )
-
-    def record_backward_start(self, key, cuda=True):
-        r"""
-        A helper method that records a backward metric
-        for the given key. A user should call this before
-        their .backward() call.
-        Args:
-            key (str): unique id for metric within a group
-            cuda (bool): indicator to determine if this is a CUDA metric
-        """
-        self.__metrics_logger.record_start(
-            self.BACKWARD_METRIC,
-            key,
-            self.BACKWARD,
-            cuda
-        )
-
-    def record_backward_end(self, key):
-        r"""
-        A helper method that records a backward metric
-        for the given key. A user should call this after
-        .backward().
-        Args:
-            key (str): unique id for metric within a group
-        """
-        self.__metrics_logger.record_end(
-            self.BACKWARD_METRIC,
+            self.PARAMETER_SERVER_BATCH_METRIC,
             key
         )
 
     @staticmethod
-    def methodmetric(name, type="method_metric", cuda=True):
+    def record_method(name, type="method_metric", cuda=True):
         r"""
         A decorator that records a metric for the decorated method.
         Args:
@@ -164,10 +153,14 @@ class TrainerBase(ABC):
             return wrapper
         return decorator
 
-    def get_metrics(self):
+    @staticmethod
+    def get_metrics(server_rref):
         r"""
-        A method that returns metrics captured by the __metrics_logger.
+        A staticmethod that returns metrics captured by the __metrics_logger.
+        Args:
+            server_rref (RRef): remote reference to the server
         """
+        self = server_rref.local_value()
         return self.__metrics_logger.get_processed_metrics()
 
     def clear_metrics(self):
