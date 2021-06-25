@@ -112,6 +112,11 @@ struct TORCH_API UnionType : public Type {
     return types_;
   }
 
+  // For testing purposes only
+  at::ArrayRef<TypePtr> getTypes() const {
+    return types_;
+  }
+
   TypePtr createWithContained(std::vector<TypePtr> contained_types) const override {
     return create(contained_types);
   }
