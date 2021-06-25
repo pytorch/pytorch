@@ -102,8 +102,8 @@ jobs:
     runs-on: windows.8xlarge.nvidia.gpu
     env:
       JOB_BASE_NAME: pytorch-win-vs2019-cuda11-cudnn8-py3-test
-      NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       SHARD_NUMBER: ${{ matrix.shard }}
+      NUM_TEST_SHARDS: ${{ matrix.num_shards }}
     needs:
       - build
       - generate-test-matrix

@@ -224,8 +224,8 @@ jobs:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
       JOB_BASE_NAME: pytorch-linux-xenial-py3.6-gcc5.4-test
       TEST_CONFIG: ${{ matrix.config }}
-      NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       SHARD_NUMBER: ${{ matrix.shard }}
+      NUM_TEST_SHARDS: ${{ matrix.num_shards }}
     steps:
       - name: Log in to ECR
         run: |
