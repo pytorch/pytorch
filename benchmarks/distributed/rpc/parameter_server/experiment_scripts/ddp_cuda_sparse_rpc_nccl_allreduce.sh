@@ -6,17 +6,18 @@ cd ..
 python -u launcher.py \
     --master_addr="localhost" \
     --master_port="29500" \
-    --trainer="DdpTrainer" \
-    --ntrainer=2 \
-    --ncudatrainer=0 \
+    --trainer="DdpSparseRpcTrainer" \
+    --ntrainer=0 \
+    --ncudatrainer=2 \
     --filestore="/tmp/tmpn_k_8so02" \
+    --server="AverageParameterServer" \
     --nserver=0 \
-    --ncudaserver=0 \
+    --ncudaserver=1 \
     --rpc_timeout=30 \
     --backend="nccl" \
     --epochs=10 \
     --batch_size=10 \
     --data="DummyData" \
-    --model="DummyModel" \
+    --model="DummyModelSparse" \
     --data_config_path="configurations/data_configurations.json" \
     --model_config_path="configurations/model_configurations.json"
