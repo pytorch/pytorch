@@ -686,7 +686,7 @@ jobs:
           export CIRCLE_WORKFLOW_ID="$CIRCLE_WORKFLOW_ID"
           cd workspace
           export PYTHONPATH="\${PWD}"
-          python tools/print_test_stats.py --upload-to-s3 --compare-with-s3 test
+          python tools/stats/print_test_stats.py --upload-to-s3 --compare-with-s3 test
           EOL
           echo "(cat docker_commands.sh | docker exec -u jenkins -e LANG=C.UTF-8 -i "$id" bash) 2>&1" > command.sh
           unbuffer bash command.sh | ts
@@ -840,7 +840,7 @@ jobs:
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_WIN_BUILD_V1}
             export PYTHONPATH="$PWD"
             pip install typing_extensions boto3
-            python tools/print_test_stats.py --upload-to-s3 --compare-with-s3 test
+            python tools/stats/print_test_stats.py --upload-to-s3 --compare-with-s3 test
           when: always
       - store_test_results:
           path: test/test-reports
@@ -1455,7 +1455,7 @@ jobs:
             # Using the same IAM user to write stats to our OSS bucket
             export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4}
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4}
-            python tools/print_test_stats.py --upload-to-s3 --compare-with-s3 test
+            python tools/stats/print_test_stats.py --upload-to-s3 --compare-with-s3 test
           when: always
       - store_test_results:
           path: test/test-reports
@@ -7063,6 +7063,7 @@ workflows:
                 - /release\/.*/
           build_environment: "pytorch-libtorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
+          build_only: "1"
       - pytorch_linux_build:
           name: pytorch_linux_xenial_cuda11_1_cudnn8_py3_gcc7_build
           requires:
@@ -7097,6 +7098,7 @@ workflows:
                 - /release\/.*/
           build_environment: "pytorch-libtorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7"
+          build_only: "1"
       - pytorch_linux_build:
           name: pytorch_linux_bionic_py3_6_clang9_noarch_build
           requires:
@@ -7185,6 +7187,7 @@ workflows:
           build_environment: "pytorch-linux-bionic-rocm3.9-py3.6-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-rocm3.9-py3.6"
           resource_class: xlarge
+          build_only: "1"
       - pytorch_macos_10_15_py3_build:
           name: pytorch_macos_10_15_py3_build
       - pytorch_macos_10_13_py3_build:
@@ -9078,12 +9081,14 @@ workflows:
             - "docker-pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
           build_environment: "pytorch-libtorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
+          build_only: "1"
       - pytorch_linux_build:
           name: pytorch_libtorch_linux_xenial_cuda11_1_cudnn8_py3_gcc7_build
           requires:
             - "docker-pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7"
           build_environment: "pytorch-libtorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7"
+          build_only: "1"
       - pytorch_linux_build:
           build_environment: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_32-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c"

@@ -107,10 +107,9 @@ Module codegen_backend_module(
   // functional.
   auto cloned_module = orig_module.clone();
   auto module_name = orig_module.type()->name()->qualifiedName();
-
   // Generate LoweredModule.
   Module loweredModule(
-      "torch.jit." + backend_name + "LoweredModule." + module_name,
+      "torch.jit." + backend_name + ".LoweredModule." + module_name,
       std::make_shared<CompilationUnit>(),
       /*shouldMangle=*/true);
 
