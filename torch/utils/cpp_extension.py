@@ -771,12 +771,12 @@ class BuildExtension(build_ext, object):
             cuda_version = re.search(r'release (\d+[.]\d+)', cuda_version_str)
             if cuda_version is not None:
                 cuda_str_version = cuda_version.group(1)
-                cuda_version = parse_version(cuda_str_version)
-                torch_cuda_version = parse_version(torch.version.cuda)
-                if cuda_version.major != torch_cuda_version.major:
+                cuda_ver = parse_version(cuda_str_version)
+                torch_cuda_version = parse_version(torch.version.cuda)  # type: ignore[arg-type]
+                if cuda_ver.major != torch_cuda_version.major:
                     raise RuntimeError(CUDA_MISMATCH_MESSAGE.format(
                         cuda_str_version, torch.version.cuda))
-                elif cuda_version.minor != torch_cuda_version.minor:
+                elif cuda_ver.minor != torch_cuda_version.minor:
                     warnings.warn(CUDA_MISMATCH_WARN.format(
                         cuda_str_version, torch.version.cuda))
         else:
