@@ -16,7 +16,7 @@ def main() -> None:
     shards_per_config = {}
     if os.getenv('ENABLE_MULTIGPU_TEST'):
         shards_per_config['multigpu'] = 1
-    print(json.dumps({
+    matrix = {
         'include': [
             {
                 'config': 'default',
@@ -33,7 +33,11 @@ def main() -> None:
             for config, num_shards in shards_per_config.items()
             for shard in range(1, num_shards + 1)
         ]
-    }))
+    }
+    render_matrix = {'config': list(dict.fromkeys(x['config'] for x in matrix['include']))}
+    print(json.dumps({'matrix': matrix, 'render-matrix': render_matrix}, indent=2))
+    print(f'::set-output name=matrix::{json.dumps(matrix)}')
+    print(f'::set-output name=render-matrix::{json.dumps(render_matrix)}')
 
 
 if __name__ == "__main__":

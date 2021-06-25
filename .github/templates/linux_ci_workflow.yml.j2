@@ -199,6 +199,7 @@ jobs:
       ENABLE_MULTIGPU_TEST: !{{ enable_multigpu_test }}
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
+      render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
     container:
       image: python:3.9
     steps:
@@ -206,11 +207,7 @@ jobs:
         uses: actions/checkout@v2
       - name: Generating test matrix
         id: set-matrix
-        run: |
-          # outputting for debugging purposes
-          MATRIX=$(python .github/scripts/generate_pytorch_test_matrix.py)
-          echo "${MATRIX}"
-          echo "::set-output name=matrix::${MATRIX}"
+        run: .github/scripts/generate_pytorch_test_matrix.py)
 
   test:
     runs-on: !{{ test_runner_type }}
@@ -321,7 +318,7 @@ jobs:
         name: Store PyTorch Test Reports
         if: always()
         with:
-          name: test-reports
+          name: test-reports-${{ matrix.config }}
           retention-days: 14
           if-no-files-found: error
           path:
@@ -342,8 +339,12 @@ jobs:
   render_test_results:
     if: always()
     needs:
+      - generate-test-matrix
       - test
     runs-on: ubuntu-18.04
+    strategy:
+      matrix: ${{ fromJson(needs.generate-test-matrix.outputs.render-matrix) }}
+      fail-fast: false
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
@@ -353,7 +354,7 @@ jobs:
       - uses: actions/download-artifact@v2
         name: Download PyTorch Test Reports
         with:
-          name: test-reports
+          name: test-reports-${{ matrix.config }}
           path: .
       - name: Unzip test reports
         run: |
