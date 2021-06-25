@@ -90,25 +90,25 @@ class TestModelDump(TestCase):
 
             stdout = io.StringIO()
             torch.utils.model_dump.main(
-                    [
-                        None,
-                        "--style=json",
-                        tf.name,
-                    ],
-                    stdout=stdout)
+                [
+                    None,
+                    "--style=json",
+                    tf.name,
+                ],
+                stdout=stdout)
             self.assertRegex(stdout.getvalue(), r'\A{.*SimpleModel')
 
             stdout = io.StringIO()
             torch.utils.model_dump.main(
-                    [
-                        None,
-                        "--style=html",
-                        tf.name,
-                    ],
-                    stdout=stdout)
+                [
+                    None,
+                    "--style=html",
+                    tf.name,
+                ],
+                stdout=stdout)
             self.assertRegex(
-                    stdout.getvalue().replace("\n", " "),
-                    r'\A<!DOCTYPE.*SimpleModel.*componentDidMount')
+                stdout.getvalue().replace("\n", " "),
+                r'\A<!DOCTYPE.*SimpleModel.*componentDidMount')
 
     def get_quant_model(self):
         fmodel = QuantModel().eval()
