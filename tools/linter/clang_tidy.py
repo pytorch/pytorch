@@ -377,6 +377,8 @@ def main() -> None:
                 shutil.copyfile(fname, mapped_fname)
 
     pwd = os.getcwd() + "/"
+    if options.dry_run:
+        print(clang_tidy_output)
     for line in clang_tidy_output.splitlines():
         if line.startswith(pwd):
             print(line[len(pwd):])
