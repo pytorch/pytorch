@@ -557,6 +557,12 @@ REGISTER_CPU_OPERATOR(SequenceMask, SequenceMaskOp<CPUContext>);
 OPERATOR_SCHEMA(SequenceMask)
     .NumInputs(1, 2)
     .NumOutputs(1)
+    .TensorInferenceFunction([](const OperatorDef& def,
+                                const vector<TensorShape>& in) {
+      vector<TensorShape> out(1, in[0]);
+      out[0].set_data_type(in[0].data_type());
+      return out;
+    })
     .SetDoc(R"DOC(
 Mask op designed for use in attention mechanisms for sequence modeling tasks.
 Supports batching: given batch_dim, collapses dims 0 through batch_dim into a
