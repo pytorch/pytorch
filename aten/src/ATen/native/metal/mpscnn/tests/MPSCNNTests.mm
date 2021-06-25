@@ -817,10 +817,8 @@ bool test_mean_dim3() {
     return TEST(size, __PRETTY_FUNCTION__, ^bool {
       auto X1 = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
       auto Y1 = at::mean(X1, {0,1,2,3});
-      PRINT_TENSOR("Y1", Y1);
       auto X2 = X1.metal();
       auto Y2 = at::mean(X2, {0,1,2,3}).cpu();
-      PRINT_TENSOR("Y2", Y2);
       return almostEqual(Y1, Y2);
     });
 }
