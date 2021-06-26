@@ -3007,7 +3007,7 @@ TensorExprKernel::TensorExprKernel(
     std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings)
     : graph_(subgraph),
       code_(subgraph, ""),
-      custom_lowerings_(custom_lowerings) {
+      custom_lowerings_(std::move(custom_lowerings)) {
   allow_fallback_ = fallbackAllowed();
   if (!allow_fallback_) {
     compile();
