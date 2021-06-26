@@ -50,7 +50,7 @@ fi
 
 find $PYTORCH_ANDROID_DIR -type f -name *aar | xargs ls -lah
 
-if [ "${BUILD_LITE_INTERPRETER}" == 0 ]; then
+if [ "$BUILD_LITE_INTERPRETER" == 0 ]; then
   echo "Running gradle for release and building full jit"
   GRADLE_PROPERTIES_FILE="$PYTORCH_DIR/android/pytorch_android/gradle.properties"
   echo ${GRADLE_PROPERTIES_FILE}
