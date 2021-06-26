@@ -14011,7 +14011,7 @@ dedent """
 
         m = torch.jit.script(M())
 
-        FileCheck().check(r"NamedTuple(x : int?, int, z : int = 3))")   \
+        FileCheck().check(r"NamedTuple(x : int?, y : int, z : int = 3))")   \
                    .run(m.graph)
 
     def test_namedtuple_default_values_container_type(self):

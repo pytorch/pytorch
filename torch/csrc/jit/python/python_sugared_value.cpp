@@ -13,10 +13,6 @@
 #include <tuple>
 #include <vector>
 
-#include <pybind11/complex.h>
-#include <pybind11/pybind11.h>
-#include <pybind11/pytypes.h>
-
 #include <Python.h>
 
 namespace torch {
