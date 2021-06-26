@@ -373,9 +373,10 @@ class TestEqualizeFx(QuantizationTestCase):
         observer's min/max values are as expected
         """
 
-        tests = [SingleLayerLinearModel, SingleLayerFunctionalLinearModel]
+        tests = [SingleLayerLinearModel, TwoLayerLinearModel, SingleLayerFunctionalLinearModel]
 
         x = torch.rand((5, 5))
+        torch.manual_seed(0)
         for M in tests:
             m = M().eval()
             exp_eq_scales = self.get_expected_eq_scales(m, x.detach().numpy())

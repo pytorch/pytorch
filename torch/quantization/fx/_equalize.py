@@ -597,9 +597,9 @@ def convert_eq_obs(
             # we will remove the current node because we do not need to add any
             # equalization nodes between two layers that need to be equalized
 
-            # Before: linear1 (prev_node) -> output_quant_obs1 (inp_quant_obs_node) -> input_eq_obs2 (node) -> linear2
-            # After: linear1 (prev_node) -> output_quant_obs1 (inp_quant_obs_node) -> linear2
-            if node_supports_equalization(prev_node, modules):
+            # Before: linear1/relu (prev_node) -> output_quant_obs1 (inp_quant_obs_node) -> input_eq_obs2 (node) -> linear2
+            # After: linear1/relu (prev_node) -> output_quant_obs1 (inp_quant_obs_node) -> linear2
+            if node_supports_equalization(prev_node, modules) or "relu" in prev_node.name:
                 remove_node(model, node, inp_quant_obs_node)
                 continue
 
