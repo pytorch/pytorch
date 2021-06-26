@@ -40,13 +40,13 @@ Operator createOperatorFromC10_withTracingHandledHere(
         // appropriately; after that, we can get rid of the giant if-else
         // block we will clean this tech debt together in the following PRs
         auto type = args[i].type();
-        if (type->kind() == TypeKind::OptionalType) {
+        if (type->isOptional()) {
           if (iter->isNone()) {
             Value* none = graph->insertNode(graph->createNone())->output();
             node->addInput(none);
             continue;
           } else {
-            type = type->expectRef<OptionalType>().getElementType();
+            type = type->expectRef<UnionType>().getContainedElementIfOptional();
           }
         }
         if (type->isSubtypeOf(TensorType::get())) {
@@ -63,7 +63,7 @@ Operator createOperatorFromC10_withTracingHandledHere(
           tracer::addInputs(node, args[i].name().c_str(), iter->toBool());
         } else if (type->kind() == TypeKind::StringType) {
           AT_ASSERT(iter->isString());
-          tracer::addInputs(node, args[i].name().c_str(), iter->toStringRef());
+          tracer::addInputs(node, args[i].name().c_str(), iter->toStringView());
         } else if (type->kind() == TypeKind::NumberType) {
           tracer::addInputs(node, args[i].name().c_str(), iter->toScalar());
         } else if (type->kind() == TypeKind::ListType) {

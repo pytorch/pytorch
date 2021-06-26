@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/ir/alias_analysis.h>
 
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/operator.h>
@@ -14,7 +15,7 @@ namespace {
 
 // This class determines whether a type is mutable, and, if so, it maps
 // the type to its "mutable equivalent" (see definition in
-// `getMutableType`). It uses a cache of TypePtrs to speed up these
+// `mapTypeToAliasTypeSet`). It uses a cache of TypePtrs to speed up these
 // type lookups
 class MutableTypePtrHelper {
  public:
@@ -23,19 +24,21 @@ class MutableTypePtrHelper {
       : mutable_type_cache_(mutable_type_cache) {}
 
   // Map any mutable type to a type such that all other types which the
-  // mutable type can alias will be mapped to the same type. This
-  // follows a similar logic to `unifyTypes` because any two mutable
-  // types which can be unified can alias each other. For example,
-  // calling this method on `Optional[List[int]]` should be the same as
-  // calling this method on `List[int]`.
+  // mutable type can alias will be mapped to the same type. For
+  // example, calling this method on `Optional[List[int]]` should be
+  // the same as calling this method on `List[int]`.
   //
   // Rules:
-  //   - If the type is not mutable, return `nullopt`.
-  //   - If the type is a container (e.g. `List`, `Dict`, `Tuple`),
-  //     create and return the same container type minus any of the
-  //     original immutable contained types. For example,
+  //   - If the type is not mutable, return `nullopt`
+  //   - If the type is a `Tuple`, that means that it's an immutable
+  //     object that can itself contain mutable objects. We want to make
+  //     sure that the mutable objects are correctly aliased, so we
+  //     remove the immutable objects. (For example,
   //     `Tuple[int, Tensor]` would become `Tuple[Tensor]`, while
-  //     `Tuple[int, str]` would be returned as `nullopt`.
+  //     `Tuple[int, str]` would be returned as `nullopt`.) This is a
+  //     convenience that makes it easy to check if the `Tuple`
+  //     contains only immutable objects, though it's not technically
+  //     necessary
   //   - For any Tensor type (including Tensor types that are part of
   //     a larger container, e.g. `List[Tensor]`), return the
   //     "unshaped" version of that Tensor. An "unshaped" Tensor is a
@@ -43,23 +46,14 @@ class MutableTypePtrHelper {
   //     of dimension 4 would map to the same type as a Tensor of
   //     dimension 1. This allows us to treat all subclasses of Tensor
   //     as a single, homogenous "Tensor" type.
-  //
-  // `getMutableType` is the best reasonably-sized name we have. Still,
-  // it implies that the function does something like "return the
-  // original TypePtr `type` if `type` is mutable, else return
-  // `nullopt`", which isn't quite right. `getMutableType` does that,
-  // but it also returns any container type with an inner mutable type!
-  // The function should really be named something like
-  // `getTypeIfTypeIsMutableOrIfTypeContainsMutableType`...but this
-  // isn't enterprise Java, so we're sticking with the short name.
-  c10::optional<TypePtr> getMutableType(const TypePtr& type) {
+  c10::optional<TypePtr> mapTypeToAliasTypeSet(const TypePtr& type) {
     if (mutable_type_cache_) {
       auto maybe_type_mapping = mutable_type_cache_->find(type);
       if (maybe_type_mapping != mutable_type_cache_->end()) {
         return maybe_type_mapping->second;
       }
     }
-    auto mutable_type = getMutableTypeImpl(type);
+    auto mutable_type = mapTypeToAliasTypeSetImpl(type);
     if (mutable_type_cache_ && mutable_type) {
       mutable_type_cache_->emplace(type, *mutable_type);
     }
@@ -67,40 +61,21 @@ class MutableTypePtrHelper {
   }
 
  private:
-  // This is a helper method for the container types in
-  // `getMutableTypeImpl`. Instead of simply calling `unshapedType`
-  // on the container type, we can save time by seeing if the type
-  // is already in `mutable_type_cache_`. This is kind of tricky
-  // because `List[Optional[T]]` should still be
-  // `List[Optional[Unshaped(T)]]`, while `mutable_type_cache_`
-  // would map `Optional[T]` to `T`
-  TypePtr unshapedContainerTypeWithCache(const TypePtr& type) {
-    if (!mutable_type_cache_) {
-      return unshapedType(type);
-    }
-    return type->withContained(
-        fmap(type->containedTypes(), [&](const TypePtr inner) {
-          auto maybe_type_mapping = mutable_type_cache_->find(inner);
-          if (maybe_type_mapping != mutable_type_cache_->end()) {
-            if (inner->kind() == maybe_type_mapping->first->kind()) {
-              return maybe_type_mapping->first;
-            }
-          }
-          return unshapedType(inner);
-        }));
-  }
-
-  c10::optional<TypePtr> getMutableTypeImpl(const TypePtr& type) {
+  c10::optional<TypePtr> mapTypeToAliasTypeSetImpl(const TypePtr& type) {
     switch (type->kind()) {
       case TypeKind::ListType:
       case TypeKind::DictType:
       case TypeKind::ClassType:
       case TypeKind::TensorType:
-        return c10::optional<TypePtr>(unshapedContainerTypeWithCache(type));
+        // TODO: Look up cached contained types. this is kind of tricky
+        // because a `List[Optional[T]]` should still be
+        // `List[Optional[Unshaped(T)]]`, but
+        // `mapTypeToAliasTypeSet(Optional[T])` should be `T`
+        return unshapedType(type);
       case TypeKind::UnionType: {
         std::vector<TypePtr> mutable_types;
         for (TypePtr inner : type->expect<UnionType>()->containedTypes()) {
-          if (auto maybe_mut_type = getMutableType(inner)) {
+          if (auto maybe_mut_type = mapTypeToAliasTypeSet(inner)) {
             mutable_types.emplace_back(*maybe_mut_type);
           }
         }
@@ -112,15 +87,11 @@ class MutableTypePtrHelper {
         }
         return c10::optional<TypePtr>(UnionType::create(mutable_types));
       }
-      case TypeKind::OptionalType: {
-        auto inner = type->castRaw<OptionalType>()->getElementType();
-        return getMutableType(inner);
-      }
       case TypeKind::AnyType:
         return c10::optional<TypePtr>(type);
       case TypeKind::FutureType: {
-        if (auto maybe_mut_type =
-                getMutableType(type->castRaw<FutureType>()->getElementType())) {
+        if (auto maybe_mut_type = mapTypeToAliasTypeSet(
+                type->castRaw<FutureType>()->getElementType())) {
           return FutureType::create(*maybe_mut_type);
         }
         return c10::nullopt;
@@ -128,7 +99,7 @@ class MutableTypePtrHelper {
       case TypeKind::TupleType: {
         std::vector<TypePtr> mutable_types;
         for (TypePtr inner : type->expectRef<TupleType>().elements()) {
-          if (auto maybe_mut_type = getMutableType(inner)) {
+          if (auto maybe_mut_type = mapTypeToAliasTypeSet(inner)) {
             mutable_types.emplace_back(*maybe_mut_type);
           }
         }
@@ -148,14 +119,14 @@ bool isMutableTypeImpl(
     const TypePtr& type,
     std::unordered_map<TypePtr, TypePtr>* mutable_type_cache) {
   // check common cases to avoid recursively constructing type in
-  // getMutableTypePtrImpl
+  // mapTypeToAliasTypeSetPtrImpl
   auto kind = type->kind();
   if (kind == TypeKind::TensorType || kind == TypeKind::ListType ||
       kind == TypeKind::ClassType || kind == TypeKind::DictType) {
     return true;
   }
   MutableTypePtrHelper helper(mutable_type_cache);
-  return helper.getMutableType(type) != c10::nullopt;
+  return helper.mapTypeToAliasTypeSet(type) != c10::nullopt;
 }
 
 } // namespace
@@ -178,14 +149,15 @@ bool AliasDb::isMutableTypeInternal(const Value* v) const {
   return isMutableTypeInternal(v->type());
 }
 
-c10::optional<TypePtr> AliasDb::getMutableTypePtr(const TypePtr& type) const {
+c10::optional<TypePtr> AliasDb::mapTypeToAliasTypeSetPtr(
+    const TypePtr& type) const {
   MutableTypePtrHelper helper(&mapped_mutable_types_);
-  return helper.getMutableType(type);
+  return helper.mapTypeToAliasTypeSet(type);
 }
 
 bool AliasDb::isContainerType(const TypePtr& type) const {
-  auto mut_type_list = getMutableTypePtr(type);
-  return mut_type_list.has_value();
+  auto mut_type = mapTypeToAliasTypeSetPtr(type);
+  return mut_type.has_value();
 }
 
 AliasDb::~AliasDb() = default;
@@ -680,7 +652,7 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::TypeCheck:
     case prim::RequiresGradCheck: {
       auto num_inputs = node->inputs().size();
-      for (size_t i = 0; i < num_inputs; i++) {
+      for (const auto i : c10::irange(num_inputs)) {
         makePointerTo(node->outputs().at(i), node->inputs().at(i));
       }
       return;
@@ -763,7 +735,7 @@ void AliasDb::analyzeImpl(Node* node) {
   // Bind the schema's "formal" alias annotation to the actual values those
   // schema arguments represent
   std::unordered_map<Symbol, Value*> formalToActual;
-  for (size_t i = 0; i < schema.arguments().size(); i++) {
+  for (const auto i : c10::irange(schema.arguments().size())) {
     const auto& formal = schema.arguments()[i].alias_info();
     const auto& actualValue = node->inputs().at(i);
     // Skip if there's no alias annotation
@@ -814,7 +786,7 @@ void AliasDb::analyzeImpl(Node* node) {
   }
 
   // Use the formal-actual mapping to give aliases to the outputs
-  for (size_t i = 0; i < schema.returns().size(); i++) {
+  for (const auto i : c10::irange(schema.returns().size())) {
     const auto actual = node->outputs().at(i);
     const auto& formal = schema.returns()[i].alias_info();
     if (!formal) {
@@ -891,7 +863,7 @@ void AliasDb::analyzeIf(Node* node) {
   analyze(trueBlock);
   analyze(falseBlock);
 
-  for (size_t i = 0; i < node->outputs().size(); i++) {
+  for (const auto i : c10::irange(node->outputs().size())) {
     const auto nodeOutput = node->outputs()[i];
 
     const auto trueOutput = trueBlock->outputs().at(i);
@@ -940,7 +912,7 @@ void AliasDb::analyzeSubgraph(Node* node) {
   // subgraph block.
   TORCH_INTERNAL_ASSERT(
       subgraphBlock->outputs().size() >= node->outputs().size());
-  for (size_t i = 0; i < node->outputs().size(); i++) {
+  for (const auto i : c10::irange(node->outputs().size())) {
     makePointerTo(node->outputs()[i], subgraphBlock->outputs()[i]);
   }
 }
@@ -1154,7 +1126,7 @@ void AliasDb::makePointerTo(const Value* from, const Value* to) {
     bool expected_kind = false;
     for (auto kind : {from->type()->kind(), to->type()->kind()}) {
       expected_kind = expected_kind ||
-          (kind == TypeKind::OptionalType || kind == TypeKind::FutureType ||
+          (kind == TypeKind::FutureType ||
            kind == TypeKind::TupleType ||
            kind == TypeKind::UnionType) // immutable type containers
           || kind == TypeKind::AnyType;
@@ -1259,7 +1231,7 @@ bool AliasDb::mayContainAlias(
 // Make each value in the `from` list point to its partner in the `to` list
 void AliasDb::mapAliases(at::ArrayRef<Value*> from, at::ArrayRef<Value*> to) {
   TORCH_INTERNAL_ASSERT(to.size() == from.size());
-  for (size_t i = 0; i < to.size(); i++) {
+  for (const auto i : c10::irange(to.size())) {
     makePointerTo(from[i], to[i]);
   }
 }
@@ -1277,7 +1249,7 @@ void AliasDb::createValue(const Value* value) {
 void AliasDb::giveFreshAlias(
     const Value* value,
     bool add_wildcard_to_contained_elems) {
-  auto maybe_mut_type = getMutableTypePtr(value->type());
+  auto maybe_mut_type = mapTypeToAliasTypeSetPtr(value->type());
   if (!maybe_mut_type) {
     return;
   }
@@ -1700,10 +1672,10 @@ bool AliasDb::writesToWildcard(Node* n) const {
 }
 
 bool AliasDb::mayAliasWildcard(const Value* v) const {
-  auto e_list = getWildcard(v->type());
-  if (!e_list.empty()) {
-    for (auto grr : e_list) {
-      if (memoryDAG_->mayAlias(elementMap_.at(v), grr)) {
+  auto elt_list = getWildcard(v->type());
+  if (!elt_list.empty()) {
+    for (auto elt : elt_list) {
+      if (memoryDAG_->mayAlias(elementMap_.at(v), elt)) {
         return true;
       }
     }
@@ -1718,7 +1690,7 @@ bool AliasDb::mayAliasWildcard(const at::ArrayRef<Value*> vs) const {
 }
 
 c10::optional<Element*> AliasDb::tryGetOrCreateWildcard(const TypePtr& type) {
-  auto maybe_mut_type = getMutableTypePtr(type);
+  auto maybe_mut_type = mapTypeToAliasTypeSetPtr(type);
   if (!maybe_mut_type) {
     return c10::nullopt;
   }
@@ -1746,7 +1718,7 @@ void AliasDb::addContainedTypesToFreshElement(
 // Search the wildcard index for an Element that corresponds to the given type.
 // Const version returns nullptr
 std::vector<Element*> AliasDb::getWildcard(const TypePtr& type) const {
-  auto maybe_mut_type = getMutableTypePtr(type);
+  auto maybe_mut_type = mapTypeToAliasTypeSetPtr(type);
   if (!maybe_mut_type) {
     return {};
   }

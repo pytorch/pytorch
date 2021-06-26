@@ -8,16 +8,20 @@ from jit.test_tracer import TestTracer, TestMixTracingScripting  # noqa: F401
 from jit.test_recursive_script import TestRecursiveScript  # noqa: F401
 from jit.test_type_sharing import TestTypeSharing  # noqa: F401
 from jit.test_logging import TestLogging  # noqa: F401
-from jit.test_backends import TestBackends  # noqa: F401
-from jit.test_list_dict import TestList, TestDict, TestNamedTuple  # noqa: F401
+from jit.test_backends import TestBackends, TestBackendsWithCompiler  # noqa: F401
+from jit.test_list_dict import TestList, TestDict, TestNamedTuple, TestScriptDict  # noqa: F401
 from jit.test_async import TestAsync  # noqa: F401
 from jit.test_data_parallel import TestDataParallel  # noqa: F401
 from jit.test_models import TestModels  # noqa: F401
+from jit.test_modules import TestModules  # noqa: F401
 from jit.test_autodiff_subgraph_slicing import TestAutodiffSubgraphSlicing  # noqa: F401
 from jit.test_custom_operators import TestCustomOperators  # noqa: F401
 from jit.test_export_modes import TestExportModes  # noqa: F401
+from jit.test_graph_rewrite_passes import TestGraphRewritePasses  # noqa: F401
 from jit.test_class_type import TestClassType  # noqa: F401
 from jit.test_builtins import TestBuiltins, TestTensorBuiltins  # noqa: F401
+from jit.test_ignore_context_manager import TestIgnoreContextManager  # noqa: F401
+from jit.test_symbolic_shape_analysis import TestSymbolicShapeAnalysis  # noqa: F401
 from jit.test_unsupported_ops import TestUnsupportedOps  # noqa: F401
 from jit.test_freezing import TestFreezing, TestFrozenOptimizations, TestMKLDNNReinplacing  # noqa: F401
 from jit.test_peephole import TestPeephole  # noqa: F401
@@ -51,6 +55,8 @@ from jit.test_misc import TestMisc  # noqa: F401
 from jit.test_pdt import TestPDT  # noqa: F401
 from jit.test_tensor_creation_ops import TestTensorCreationOps  # noqa: F401
 from jit.test_module_apis import TestModuleAPIs  # noqa: F401
+from jit.test_script_profile import TestScriptProfile  # noqa: F401
+from jit.test_convert_activation import TestFunctionalToInplaceActivation, TestInplaceToFunctionalActivation  # noqa: F401
 from jit.test_union import TestUnion  # noqa: F401
 
 # Torch
@@ -61,6 +67,7 @@ from torch.autograd import Variable
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3, Any  # noqa: F401
 from torch.nn.utils.rnn import PackedSequence
 from torch.testing import FileCheck
+from torch.testing._internal.common_utils import make_tensor
 import torch.autograd.profiler
 import torch.cuda
 import torch.jit
@@ -74,21 +81,19 @@ from torch.testing._internal import jit_utils
 from torch.testing._internal.common_jit import check_against_reference
 from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     suppress_warnings, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, \
-    freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName, skipIfCompiledWithoutNumpy, \
+    freeze_rng_state, slowTest, TemporaryFileName, skipIfCompiledWithoutNumpy, \
     enable_profiling_mode_for_profiling_tests, TEST_MKL, set_default_dtype, num_profiled_runs
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
-    _trace, enable_cpu_fuser_if, do_input_map, get_execution_plan, make_global, \
+    _trace, do_input_map, get_execution_plan, make_global, \
     execWrapper, _inline_everything, _tmp_donotuse_dont_inline_everything, \
     RUN_CUDA
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, nn_functional_tests, get_script_args, \
     EXCLUDE_SCRIPT, additional_module_tests, EXCLUDE_SCRIPT_MODULES, \
-    get_nn_module_name_from_kwargs, script_method_template, create_traced_fn, check_alias_annotation
+    get_nn_module_name_from_kwargs, script_method_template
 
 from torch.testing._internal.common_nn import module_tests, new_module_tests, criterion_tests
-from torch.testing._internal.common_methods_invocations import method_tests as autograd_method_tests
-from torch.testing._internal.common_methods_invocations import create_input, unpack_variables, \
-    exclude_tensor_method, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_methods_invocations import (
+    create_input, unpack_variables)
 
 # For testing truediv in python 2
 from torch.testing._internal.test_module.future_div import div_int_future, div_float_future
@@ -893,6 +898,7 @@ class TestJit(JitTestCase):
             (Mod(nn.ConstantPad3d(3, 3.5)), torch.randn(16, 3, 10, 20, 30)),
             (Mod(nn.ReflectionPad1d(2)), torch.arange(8, dtype=torch.float).reshape(1, 2, 4)),
             (Mod(nn.ReflectionPad2d(2)), torch.arange(9, dtype=torch.float).reshape(1, 1, 3, 3)),
+            (Mod(nn.ReflectionPad3d(3)), torch.randn(16, 3, 8, 32, 48)),
             (Mod(nn.ReplicationPad1d(2)), torch.arange(8, dtype=torch.float).reshape(1, 2, 4)),
             (Mod(nn.ReplicationPad2d(2)), torch.arange(9, dtype=torch.float).reshape(1, 1, 3, 3)),
             (Mod(nn.ReplicationPad3d(3)), torch.randn(16, 3, 8, 32, 48)),
@@ -1270,6 +1276,158 @@ graph(%Ra, %Rb):
 
         FileCheck().check("my::matched_conv_bn").run(m._c._get_method("forward").graph)
 
+    def test_pattern_based_rewrite_with_source_range_preserved(self):
+        class TestModule1(torch.nn.Module):
+            def __init__(self):
+                super(TestModule1, self).__init__()
+
+            def forward(self, x, y, z, w):
+                x = x + y
+                x = x * z
+                return w - x
+
+        input_pattern = """
+        graph(%x, %y, %z, %const):
+            %t = aten::add(%x, %y, %const)
+            %o = aten::mul(%t, %z)
+            return (%o)"""
+        replacement_pattern = """
+        graph(%x, %y, %z, %const):
+            %o = my::add_mul(%x, %y, %z, %const)
+            return (%o)"""
+        scripted_model = torch.jit.script(TestModule1())
+        graph = scripted_model.graph
+        value_mappings = [("o", "t")]
+        for node in graph.nodes():
+            if node.kind() == "aten::add":
+                source_range_1 = node.sourceRange()
+        torch._C._jit_pass_custom_pattern_based_rewrite_graph(
+            input_pattern, replacement_pattern, scripted_model.graph, value_name_pairs=value_mappings)
+        graph = scripted_model.graph
+        for node in graph.nodes():
+            if node.kind() == "my::add_mul":
+                source_range_2 = node.sourceRange()
+        self.assertTrue(source_range_1 == source_range_2)
+
+        class TestModule2(torch.nn.Module):
+            def __init__(self):
+                super(TestModule2, self).__init__()
+
+            def forward(self, x, y, z, w):
+                x = x + y
+                x = x + z
+                x = x * z
+                x = x * w
+                return x - 2
+
+        # Check source range preservation for two node transforms add -> my_add
+        input_pattern = """
+        graph(%x, %y, %const):
+            %o = aten::add(%x, %y, %const)
+            return (%o)"""
+        replacement_pattern = """
+        graph(%x, %y, %const):
+            %o = my::add(%x, %y, %const)
+            return (%o)"""
+        scripted_model = copy.deepcopy(torch.jit.script(TestModule2()))
+        graph_copy = scripted_model.graph.copy()
+        value_mappings = [("o", "o")]
+        source_range_add_1 = None
+        for node in graph_copy.nodes():
+            if source_range_add_1 is None and node.kind() == "aten::add":
+                source_range_add_1 = node.sourceRange()
+            if source_range_add_1 is not None and node.kind() == "aten::add":
+                source_range_add_2 = node.sourceRange()
+        torch._C._jit_pass_custom_pattern_based_rewrite_graph(
+            input_pattern, replacement_pattern, graph_copy, value_name_pairs=value_mappings)
+        source_range_my_add_1 = None
+        for node in graph_copy.nodes():
+            if source_range_my_add_1 is None and node.kind() == "my::add":
+                source_range_my_add_1 = node.sourceRange()
+            if source_range_my_add_1 is not None and node.kind() == "my::add":
+                source_range_my_add_2 = node.sourceRange()
+        self.assertTrue(source_range_add_1 == source_range_my_add_1)
+        self.assertTrue(source_range_add_2 == source_range_my_add_2)
+
+        # Check source range preservation for add-add -> double_add transform
+        # fuse nodes
+        input_pattern = """
+        graph(%x, %y, %z, %const):
+            %t = aten::add(%x, %y, %const)
+            %o = aten::add(%t, %z, %const)
+            return (%o)"""
+        replacement_pattern = """
+        graph(%x, %y, %z, %const):
+            %o = my::double_add(%x, %y, %z, %const)
+            return (%o)"""
+        scripted_model = torch.jit.script(TestModule2())
+        graph_copy = scripted_model.graph.copy()
+        value_mappings = [("o", "t")]
+        source_range_1 = None
+        source_range_2 = None
+        for node in graph_copy.nodes():
+            if node.kind() == "aten::add":
+                source_range_1 = node.sourceRange()
+                break
+        torch._C._jit_pass_custom_pattern_based_rewrite_graph(
+            input_pattern, replacement_pattern, graph_copy, value_name_pairs=value_mappings)
+        for node in graph_copy.nodes():
+            if node.kind() == "my::double_add":
+                source_range_2 = node.sourceRange()
+        self.assertTrue(source_range_1 == source_range_2)
+
+        # Check source range preservation for mul -> add + add transform
+        # split node
+        input_pattern = """
+        graph(%x, %y):
+            %t = aten::mul(%x, %y)
+            return (%t)"""
+        replacement_pattern = """
+        graph(%x, %y):
+            %t = my::add(%x, %y)
+            %o = my::add(%t, %y)
+            return (%o)"""
+        scripted_model = torch.jit.script(TestModule2())
+        graph_copy = scripted_model.graph.copy()
+        value_mappings = [("t", "t"), ("o", "t")]
+        source_range_mul_1 = None
+        for node in graph_copy.nodes():
+            if source_range_mul_1 is None and node.kind() == "aten::mul":
+                source_range_mul_1 = node.sourceRange()
+            if source_range_mul_1 is not None and node.kind() == "aten::mul":
+                source_range_mul_2 = node.sourceRange()
+        torch._C._jit_pass_custom_pattern_based_rewrite_graph(
+            input_pattern, replacement_pattern, graph_copy, value_name_pairs=value_mappings)
+        source_range_add_1 = None
+        for node in graph_copy.nodes():
+            if source_range_add_1 is None and node.kind() == "my::add":
+                source_range_add_1 = node.sourceRange()
+            if source_range_add_1 is not None and node.kind() == "my::add":
+                source_range_add_2 = node.sourceRange()
+        self.assertTrue(source_range_mul_1 == source_range_add_1)
+        self.assertTrue(source_range_mul_2 == source_range_add_2)
+
+        # Check lack of source range preservation for mul-mul-> double_mul transform
+        input_pattern = """
+        graph(%x, %y, %z):
+            %t = aten::mul(%x, %y)
+            %o = aten::mul(%t, %z)
+            return (%o)"""
+        replacement_pattern = """
+        graph(%x, %y, %z):
+            %o = my::double_mul(%x, %y, %z)
+            return (%o)"""
+        scripted_model = torch.jit.script(TestModule2())
+        graph_copy = scripted_model.graph.copy()
+        for node in graph_copy.nodes():
+            if node.kind() == "aten::mul":
+                source_range_1 = node.sourceRange()
+        torch._C._jit_pass_custom_pattern_based_rewrite_graph(input_pattern, replacement_pattern, graph_copy)
+        for node in graph_copy.nodes():
+            if node.kind() == "my::double_mul":
+                source_range_2 = node.sourceRange()
+        self.assertFalse(source_range_1 == source_range_2)
+
     def test_expand_quantlint(self):
         pass
 
@@ -1580,15 +1738,27 @@ graph(%Ra, %Rb):
         self.checkScript(fn_out, (real, img, out, ))
 
     def test_einsum(self):
-        def outer(x, y):
+        def check(fn, jitted, *args):
+            self.assertGraphContains(jitted.graph, kind='aten::einsum')
+            self.assertEqual(fn(*args), jitted(*args))
+
+        def equation_format(x, y):
             return torch.einsum('i,j->ij', (x, y))
 
-        traced = torch.jit.trace(outer, (torch.randn(4), torch.randn(5)))
-        script = torch.jit.script(outer)
-        x, y = torch.randn(10), torch.randn(2)
-        for fn in [traced, script]:
-            self.assertGraphContains(fn.graph, kind='aten::einsum')
-            self.assertEqual(fn(x, y), outer(x, y))
+        def sublist_format(x, y):
+            return torch.einsum(x, [0], y, [1], [0, 1])
+
+        # Sublist format cannot be scripted because it is
+        # a NumPy API only feature
+        with self.assertRaises(RuntimeError):
+            torch.jit.script(sublist_format)
+
+        x = make_tensor((5,), 'cpu', torch.float32)
+        y = make_tensor((10,), 'cpu', torch.float32)
+
+        check(equation_format, torch.jit.script(equation_format), x, y)
+        check(equation_format, torch.jit.trace(equation_format, (x, y)), x, y)
+        check(sublist_format, torch.jit.trace(sublist_format, (x, y)), x, y)
 
     def test_python_ivalue(self):
         # Test if pure python object can be hold as IValue and conversion
@@ -3487,10 +3657,6 @@ def foo(x):
                 return a + 2
             torch.jit.script(invalid4)
 
-    def test_is_optional(self):
-        ann = Union[List[int], List[float]]
-        torch._jit_internal.is_optional(ann)
-
     def test_interpreter_fuzz(self):
         import builtins
         # This test generates random tree-like programs to fuzz test
@@ -4599,6 +4765,193 @@ a")
                     test(backward=True)
                     test(backward=True)
                     test(backward=True)
+
+    def test_index(self):
+        def consec(size, start=0):
+            numel = torch.tensor(size).prod().item()
+            return torch.arange(numel).view(size)
+
+        def consec_list(size):
+            return list(range(size))
+
+        def random_string(size):
+            letters = string.ascii_lowercase
+            return "".join(random.choice(letters) for i in range(size))
+
+        def check_indexing(indexing, tensor):
+            template = dedent("""
+            def func(x):
+                return x{}
+            """)
+
+            self._check_code(template.format(indexing), "func", [tensor])
+
+        def check_dynamic_indexing(indexing, tensor, value1, value2):
+            value1 = torch.tensor(value1)
+            value2 = torch.tensor(value2)
+
+            template = dedent("""
+            def func(x, value1, value2):
+                i = int(value1)
+                j = int(value2)
+                return x{}
+            """)
+
+            self._check_code(template.format(indexing), "func", [tensor, value1, value2])
+
+        # Torchscript assumes type Tensor by default, so we need this explicit
+        # declaration.
+        def check_indexing_list_int(indexing, list):
+            template = dedent("""
+            def func(x):
+                # type: (List[int]) -> Any
+                return x{}
+            """)
+
+            self._check_code(template.format(indexing), "func", [list])
+
+        def check_indexing_str(indexing, str):
+            template = dedent("""
+            def func(x):
+                # type: (str) -> Any
+                return x{}
+            """)
+
+            self._check_code(template.format(indexing), "func", [str])
+
+        # basic slices
+        check_indexing('[0]', consec((3, 3)))
+        check_indexing('[1]', consec((3, 3), 10))
+        check_indexing('[2]', consec((3, 3), 19))
+        check_indexing('[2]', consec((3,)))
+        check_indexing('[-1]', consec((3, 3), 19))
+        check_indexing('[0:2]', consec((3, 3, 3)))
+        check_indexing('[1:-1]', consec((3, 3, 3)))
+        check_indexing('[-3:-1]', consec((6, 3)))
+        check_indexing('[1:]', consec((3, 3)))
+        check_indexing('[:1]', consec((3, 3)))
+        check_indexing('[:]', consec((3, 2)))
+
+        # multi-dim: indexes
+        check_indexing('[0, 1]', consec((3, 3)))
+        check_indexing('[0, 1]', consec((3, 3, 2)))
+        check_indexing('[1, 0, 2]', consec((3, 3, 3)))
+        check_indexing('[2, -1]', consec((3, 3)))
+
+        # multi-dim: mixed slicing and indexing
+        check_indexing('[0, 1:2]', consec((3, 3)))
+        check_indexing('[0, :1]', consec((3, 3, 2)))
+        check_indexing('[1, 2:]', consec((3, 3, 3)))
+        check_indexing('[-1, 1:, 0]', consec((3, 3, 3, 3)))
+        check_indexing('[1:, -1, 0]', consec((3, 3, 3, 3)))
+        check_indexing('[-1, 2:, 1:2]', consec((3, 3, 3, 3)))
+        check_indexing('[-1, 1:, 0]', consec((3, 3, 3, 3)))
+        check_indexing('[-1, :, 0, 2]', consec((3, 3, 3, 3)))
+
+        # zero-sized slices
+        check_indexing('[0:0]', consec((2, 2)))
+        check_indexing('[0:0, 1]', consec((3, 3)))
+
+        # trivial expression usage
+        check_indexing('[1+1]', consec((3, 3)))
+        check_indexing('[1:(0 + 2)]', consec((3, 3, 3)))
+
+        # None for new dimensions
+        check_indexing('[None, 0]', consec((3, 3)))
+        check_indexing('[1, None]', consec((3, 3), 10))
+        check_indexing('[None, None, 2]', consec((3, 3), 19))
+        check_indexing('[None, 2, None]', consec((3,)))
+        check_indexing('[0:2, None]', consec((3, 3, 3)))
+        check_indexing('[None, 1:-1]', consec((3, 3, 3)))
+        check_indexing('[None, -3:-1, None]', consec((6, 3)))
+        check_indexing('[-1, None, 2:, None, 1:2]', consec((3, 3, 3, 3)))
+        check_indexing('[None, -1, None, 2:, None, 1:2, None]', consec((3, 3, 3, 3)))
+
+        # dynamic expression usage
+        check_dynamic_indexing("[i + j]", consec((3, 3)), 0, 1)
+        check_dynamic_indexing("[i:j, i]", consec((3, 3, 2)), 0, 2)
+
+        # positive striding
+        check_indexing_list_int('[0]', consec_list(6))
+        check_indexing_list_int('[1]', consec_list(7))
+        check_indexing_list_int('[2]', consec_list(8))
+        check_indexing_list_int('[2]', consec_list(9))
+        check_indexing_list_int('[-1]', consec_list(10))
+        check_indexing_list_int('[0:2]', consec_list(11))
+        check_indexing_list_int('[1:-1]', consec_list(12))
+        check_indexing_list_int('[-3:-1]', consec_list(13))
+        check_indexing_list_int('[1:]', consec_list(15))
+        check_indexing_list_int('[:1]', consec_list(16))
+        check_indexing_list_int('[:]', consec_list(17))
+        check_indexing_list_int('[::]', consec_list(0))
+        check_indexing_list_int('[1000::]', consec_list(0))
+        check_indexing_list_int('[:1000:]', consec_list(0))
+
+        # negative striding
+        check_indexing_list_int('[::-1]', consec_list(7))
+        check_indexing_list_int('[:3:-1]', consec_list(7))
+        check_indexing_list_int('[3::-1]', consec_list(7))
+        check_indexing_list_int('[1000::-1]', consec_list(7))
+        check_indexing_list_int('[3:0:-1]', consec_list(7))
+        check_indexing_list_int('[3:-1000:-1]', consec_list(7))
+        check_indexing_list_int('[0:0:-1]', consec_list(7))
+        check_indexing_list_int('[0:-1000:-1]', consec_list(7))
+
+        # only step is specified
+        check_indexing_list_int('[::-1]', consec_list(0))
+        check_indexing_list_int('[::-1]', consec_list(7))
+        check_indexing_list_int('[::-2]', consec_list(7))
+        check_indexing_list_int('[::2]', consec_list(7))
+        check_indexing_list_int('[::42]', consec_list(7))
+        check_indexing_list_int('[::-42]', consec_list(7))
+        check_indexing_list_int('[::42]', consec_list(0))
+        check_indexing_list_int('[::-42]', consec_list(0))
+        check_indexing_list_int('[::9223372036854775807]', consec_list(42))
+        check_indexing_list_int('[::-9223372036854775807]', consec_list(42))
+        with self.assertRaisesRegex(RuntimeError, "out of bounds"):
+            check_indexing_list_int('[::-9223372036854775808]', consec_list(42))
+        with self.assertRaisesRegex(RuntimeError, "should have non-zero step"):
+            check_indexing_list_int('[::0]', consec_list(42))
+
+        # striding strings
+        check_indexing_str('[0]', random_string(6))
+        check_indexing_str('[1]', random_string(7))
+        check_indexing_str('[2]', random_string(8))
+        check_indexing_str('[2]', random_string(9))
+        check_indexing_str('[-1]', random_string(10))
+        check_indexing_str('[0:2]', random_string(11))
+        check_indexing_str('[1:-1]', random_string(12))
+        check_indexing_str('[-3:-1]', random_string(13))
+        check_indexing_str('[1:]', random_string(15))
+        check_indexing_str('[:1]', random_string(16))
+        check_indexing_str('[:]', random_string(17))
+        check_indexing_str('[::]', random_string(0))
+        check_indexing_str('[1000::]', random_string(0))
+        check_indexing_str('[:1000:]', random_string(0))
+
+        check_indexing_str('[::-1]', random_string(7))
+        check_indexing_str('[:3:-1]', random_string(7))
+        check_indexing_str('[3::-1]', random_string(7))
+        check_indexing_str('[1000::-1]', random_string(7))
+        check_indexing_str('[3:0:-1]', random_string(7))
+        check_indexing_str('[3:-1000:-1]', random_string(7))
+        check_indexing_str('[0:0:-1]', random_string(7))
+        check_indexing_str('[0:-1000:-1]', random_string(7))
+
+        check_indexing_str('[::-1]', random_string(0))
+        check_indexing_str('[::-1]', random_string(7))
+        check_indexing_str('[::-2]', random_string(7))
+        check_indexing_str('[::2]', random_string(7))
+        check_indexing_str('[::42]', random_string(7))
+        check_indexing_str('[::-42]', random_string(7))
+        check_indexing_str('[::42]', random_string(0))
+        check_indexing_str('[::-42]', random_string(0))
+        check_indexing_str('[::9223372036854775807]', random_string(42))
+        check_indexing_str('[::-9223372036854775807]', random_string(42))
+        with self.assertRaisesRegex(RuntimeError, "out of bounds"):
+            check_indexing_str('[::-9223372036854775808]', random_string(42))
+        with self.assertRaisesRegex(RuntimeError, "should have non-zero step"):
+            check_indexing_str('[::0]', random_string(42))
 
     def test_module_copy_with_attributes(self):
         class Vocabulary(torch.jit.ScriptModule):
@@ -9424,7 +9777,7 @@ dedent """
                     c0 = 1.0
                 return c0
 
-        with self.assertRaisesRegex(RuntimeError, "Variable 'c0' previously has type float"):
+        with self.assertRaisesRegex(RuntimeError, "Variable 'c0' previously had type float"):
             @torch.jit.script
             def diff_existing_type(x):
                 c0 = 1.0
@@ -15311,6 +15664,7 @@ EXCLUDE_TRACED = {
 
     # jit doesn't support sparse tensors.
     'test_to_sparse',
+    'test_to_sparse_dim',
 }
 
 EXCLUDE_TYPE_CHECK = {
@@ -15373,10 +15727,6 @@ EXCLUDE_ALIAS = {
 }
 
 
-class TestJitGeneratedAutograd(JitTestCase):
-    pass
-
-
 class TestJitGeneratedModule(JitTestCase):
     pass
 
@@ -15426,151 +15776,6 @@ UBSAN_DISABLED_TESTS = [
 L = 20
 M = 10
 S = 5
-
-
-# Test names in this set are only checked for a single derivative
-nn_functional_single_grad = frozenset('test_nn_' + name for name in [
-    'pdist',
-    'multilabel_margin_loss',
-    'max_unpool3d',
-    'multi_margin_loss',
-    'binary_cross_entropy',
-    'binary_cross_entropy_size_average',
-    'ctc_loss',
-    'grid_sample',
-])
-
-def add_autograd_test(
-        name,
-        self_size,
-        args,
-        variant_name='',
-        check_ad=(),
-        dim_args_idx=(),
-        skipTestIf=(),
-        output_process_fn=lambda x: x,
-        kwargs=None):
-
-    # Disable complex tests
-    # TODO: Add complex support for jit
-    if 'complex' in variant_name or name in ['view_as_complex', 'complex', 'angle']:
-        return
-
-    # Skips aliases, which are tested in test_op_aliases.py
-    if name in EXCLUDE_ALIAS:
-        return
-
-    basic_test_name = 'test_' + name
-    if variant_name != '':
-        basic_test_name += '_' + variant_name
-
-    for dim_perm in product([-1, 1], repeat=len(dim_args_idx)):
-        test_name = basic_test_name
-        new_args = [arg * dim_perm[dim_args_idx.index(i)] if i in dim_args_idx else arg for i, arg in enumerate(args)]
-        test_name = basic_test_name + ''.join('_neg' + str(i) for i, idx in enumerate(dim_perm) if idx < 0)
-        new_args = tuple(new_args)
-
-        # for-loop bodies don't define scopes, so we have to save the variables
-        # we want to close over in some way
-        def do_test(self, device, name=name, self_size=self_size, args=new_args, test_name=test_name,
-                    check_ad=check_ad, output_process_fn=output_process_fn):
-            # TODO: The rest of this function does NOT respect device.  If you want to
-            # enable tests for CUDA, you'll need to update everything here to
-            # handle the CUDA case correctly, including how it generates inputs,
-            # and assumptions about which fuser is used.
-            assert torch.device(device) == torch.device('cpu')
-
-            # We enable the CPU fuser during these checks for more consistent
-            # behavior. Otherwise, we are going to have to analyze the graph to
-            # see if producer values are Dimension
-            @enable_cpu_fuser_if(not IS_SANDCASTLE)
-            def check(name):
-                set_rng_seed(2)
-                is_magic_method = name[:2] == '__' and name[-2:] == '__'
-                is_inplace = name[-1] == "_" and not is_magic_method
-                self_variable = create_input((self_size,))[0][0]
-                # FixMe: run grad checks on inplace self
-                if is_inplace:
-                    self_variable.requires_grad = False
-                # need to record this because methods can change the size (e.g. unsqueeze)
-                args_variable, kwargs_variable = create_input(args, requires_grad=not is_inplace, call_kwargs=kwargs)
-                self_tensor = deepcopy(self_variable.data)
-                args_tensor = deepcopy(unpack_variables(args_variable))
-
-                def fn(*inputs, **kwargs):
-                    attr = getattr(inputs[0], name)
-                    output = attr(*inputs[1:], **kwargs)
-                    return output
-
-                check_types = test_name not in EXCLUDE_TYPE_CHECK
-                # XXX: this test should always run with disable_autodiff_subgraph_inlining(True),
-                #      so that we don't regress on autodiff support.
-                with disable_autodiff_subgraph_inlining():
-                    if not is_inplace and name not in EXCLUDE_GRADCHECK and not exclude_tensor_method(name, test_name):
-                        # Test with disable_autodiff_subgraph_inlining, which forces the graph
-                        # to contain DifferentiableGraph nodes whenever possible. This allows us
-                        # to test autodiff; we assume that autograd is correct and use autodiff for backprop
-                        should_autodiff_node, autodiff_nodes, fusible_nodes = normalize_check_ad(check_ad, name)
-
-                        if test_name not in EXCLUDE_TRACED:
-                            traced_fn = create_traced_fn(self, fn)
-
-                            check_against_reference(self, traced_fn,
-                                                    fn, output_process_fn, (self_variable,) + args_variable, kwargs_variable,
-                                                    check_types=check_types)
-                            if IS_SANDCASTLE:
-                                autodiff_nodes = autodiff_nodes + fusible_nodes
-                                fusible_nodes = []
-
-                            if (doAutodiffCheck(test_name)):
-                                self.assertAutodiffNode(traced_fn.last_graph, should_autodiff_node, autodiff_nodes, fusible_nodes)
-
-                        if not is_magic_method and test_name not in EXCLUDE_SCRIPT:
-                            script_fn = create_script_fn(self, name, 'method')
-                            check_against_reference(self, script_fn,
-                                                    fn, output_process_fn, (self_variable,) + args_variable, kwargs_variable,
-                                                    check_types=check_types)
-
-                            if IS_SANDCASTLE:
-                                autodiff_nodes = autodiff_nodes + fusible_nodes
-                                fusible_nodes = []
-                            if (doAutodiffCheck(test_name)):
-                                self.assertAutodiffNode(script_fn.last_graph,
-                                                        should_autodiff_node and test_name not in EXCLUDE_SCRIPT_AD_CHECK,
-                                                        autodiff_nodes,
-                                                        fusible_nodes)
-
-                    # functional interface tests
-                    if hasattr(torch, name) and name not in EXCLUDE_FUNCTIONAL:
-                        def fn(*inputs, **kwargs):
-                            return getattr(torch, name)(*inputs, **kwargs)
-
-                        f_args_variable = (self_variable,) + args_variable
-                        f_args_tensor = (self_tensor,) + args_tensor
-
-                        if not is_inplace and test_name not in EXCLUDE_TRACED:
-                            check_against_reference(self,
-                                                    create_traced_fn(self, fn), fn, output_process_fn,
-                                                    f_args_variable, kwargs_variable, check_types=check_types)
-
-                        if not is_inplace and test_name not in EXCLUDE_SCRIPT:
-                            check_against_reference(self,
-                                                    create_script_fn(self, name, 'functional'),
-                                                    fn, output_process_fn, f_args_variable, kwargs_variable,
-                                                    check_types=check_types)
-
-                # alias annotation testing
-                if not is_magic_method and test_name not in EXCLUDE_SCRIPT and not exclude_tensor_method(name, test_name):
-                    check_alias_annotation(name, (self_variable,) + args_variable, kwargs_variable, aten_name=name)
-
-            check(name)
-            inplace_name = name + '_'
-            # can't broadcast inplace to left hand side
-            broadcast_skip_inplace = 'broadcast_lhs' in test_name or 'broadcast_all' in test_name
-            if hasattr(torch.ones(1), inplace_name) and not broadcast_skip_inplace:
-                check(inplace_name)
-
-        post_add_test(test_name, skipTestIf, do_test, TestJitGeneratedAutograd)
 
 
 def add_nn_functional_test(name, self_size, args, variant_name='', check_ad=(), skipTestIf=(),
@@ -15730,9 +15935,16 @@ def add_nn_module_test(*args, **kwargs):
         args_variable, kwargs_variable = create_input(input, dtype=dtype)
         f_args_variable = deepcopy(unpack_variables(args_variable))
 
+        # TODO(issue#52052) Neither this nor no_grad should be required
+        # if check_against_reference() is updated to check gradients
+        # w.r.t. weights and then only check w.r.t. inputs if any
+        # inputs require it.
+        any_requires_grad = any(input.requires_grad for input in f_args_variable)
+
         # Check against Python module as reference
         check_against_reference(self, create_script_module, create_nn_module,
-                                lambda x: x, f_args_variable, no_grad=no_grad)
+                                lambda x: x, f_args_variable,
+                                no_grad=no_grad or not any_requires_grad)
 
     if 'slowTest' in kwargs:
         do_test = slowTest(do_test)
@@ -15772,16 +15984,8 @@ class TestProducerVersion(unittest.TestCase):
 
     def test_version(self):
         # issue gh-32561
-        self.assertEqual(torch.onnx.producer_version, torch.__version__[:3])
+        self.assertTrue(torch.__version__.startswith(torch.onnx.producer_version))
 
-
-for test in autograd_method_tests():
-    add_autograd_test(*test)
-
-# NB: There isn't much utility in running these tests for CUDA, as the kernels
-# are exercised in test_autograd.py, and the JIT tests intention is to test the
-# JIT infrastructure around it, not the kernels themselves
-instantiate_device_type_tests(TestJitGeneratedAutograd, globals(), only_for='cpu')
 
 for test in nn_functional_tests:
     add_nn_functional_test(*test)

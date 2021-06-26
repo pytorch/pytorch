@@ -381,8 +381,8 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
   // however, t?(a!) doesn't work with schema parser.
   // so we always use Type(alias)? format
   auto type = arg.type();
-  bool is_opt = type->kind() == OptionalType::Kind;
-  auto unopt_type = is_opt ? type->castRaw<OptionalType>()->getElementType() : type;
+  bool is_opt = type->isOptional();
+  auto unopt_type = is_opt ? type->castRaw<UnionType>()->getContainedElementIfOptional() : type;
 
   if (unopt_type->kind() == ListType::Kind && arg.N()) {
     // sized lists get size N from arg, not type

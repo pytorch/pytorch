@@ -4,6 +4,7 @@
 #include <torch/csrc/autograd/variable.h>
 #include <ATen/core/ivalue.h>
 #include <c10/util/flat_hash_map.h>
+#include <c10/util/irange.h>
 #include <vector>
 
 namespace torch { namespace autograd {
@@ -287,7 +288,7 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
   int num_inputs = inputs.size();
   variable_list backward_inputs;
   backward_inputs.reserve(num_inputs);
-  for (int i = 0 ; i < num_inputs; ++i) {
+  for (const auto i : c10::irange(num_inputs)) {
     if (inputs[i].defined() || !ctx_.materialize_grads_) {
       backward_inputs.emplace_back(inputs[i]);
     } else {
@@ -310,7 +311,7 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
   // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   if (num_outputs > num_forward_inputs) {
     bool all_undef = true;
-    for (size_t i = num_forward_inputs; i < num_outputs; ++i) {
+    for (const auto i : c10::irange(num_forward_inputs, num_outputs)) {
       all_undef &= (!outputs[i].defined());
     }
     if (all_undef) {
@@ -330,8 +331,7 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
 
   variable_list results;
   results.reserve(num_outputs);
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (int i = 0; i < num_outputs; ++i) {
+  for (const auto i : c10::irange(num_outputs)) {
     if (!is_variable_input_[i]) {
       if (outputs[i].defined()) {
         std::string msg("function ");

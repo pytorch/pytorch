@@ -743,7 +743,7 @@ class TestAssert(TestCase):
         # data can be passed without errors
         x = torch.randn(4, 4).fill_(1.0)
         ms(x)
-        with self.assertRaisesRegex(torch.jit.Error, "foo"):  # type: ignore[type-var]
+        with self.assertRaisesRegex(torch.jit.Error, "foo"):
             ms(torch.tensor([False], dtype=torch.bool))
 
 
@@ -751,7 +751,8 @@ class TestCrashHandler(TestCase):
     @unittest.skipIf(not HAS_BREAKPAD, "Crash handler lib was not linked in")
     def test_python_exception_writing(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            torch.utils._crash_handler.enable_minidump_collection(temp_dir)
+            torch.utils._crash_handler.enable_minidumps(temp_dir)
+            torch.utils._crash_handler.enable_minidumps_on_exceptions()
 
             files = os.listdir(temp_dir)
             self.assertEqual(len(files), 0)
@@ -768,7 +769,7 @@ class TestCrashHandler(TestCase):
             files = os.listdir(temp_dir)
             self.assertEqual(len(files), 1)
             self.assertTrue(files[0].endswith(".dmp"))
-            torch.utils._crash_handler.disable_minidump_collection()
+            torch.utils._crash_handler.disable_minidumps()
 
 
 @unittest.skipIf(IS_SANDCASTLE, "cpp_extension is OSS only")
@@ -822,6 +823,34 @@ class TestStandaloneCPPJIT(TestCase):
 
         finally:
             shutil.rmtree(build_dir)
+
+
+class DummyXPUModule(object):
+    @staticmethod
+    def is_available():
+        return True
+
+
+class TestExtensionUtils(TestCase):
+    def test_external_module_register(self):
+        # Built-in module
+        with self.assertRaisesRegex(RuntimeError, "The runtime module of"):
+            torch._register_device_module('cuda', torch.cuda)
+
+        # Wrong device type
+        with self.assertRaisesRegex(RuntimeError, "Expected one of cpu"):
+            torch._register_device_module('dummmy', DummyXPUModule)
+
+        with self.assertRaises(AttributeError):
+            torch.xpu.is_available()  # type: ignore[attr-defined]
+
+        torch._register_device_module('xpu', DummyXPUModule)
+
+        torch.xpu.is_available()  # type: ignore[attr-defined]
+
+        # No supporting for override
+        with self.assertRaisesRegex(RuntimeError, "The runtime module of"):
+            torch._register_device_module('xpu', DummyXPUModule)
 
 
 if __name__ == '__main__':
