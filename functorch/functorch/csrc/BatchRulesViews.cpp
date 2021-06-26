@@ -6,6 +6,8 @@
 
 #include <functorch/csrc/BatchRulesHelper.h>
 #include <iostream>
+#include <ATen/Operators.h>
+
 
 namespace at { namespace functorch {
 
@@ -79,16 +81,6 @@ namespace at { namespace functorch {
 // Note [Writing batch rule for in-place operators]
 // TODO: This is kinda complicated. Saving this for a future date.
 
-std::tuple<Tensor, optional<int64_t>> flatten_batch_rule(
-    const Tensor& self,
-    optional<int64_t> self_bdim,
-    int64_t start_dim, int64_t end_dim) {
-  auto self_ = moveBatchDimToFront(self, self_bdim);
-  start_dim = getPhysicalDim(self_, self_bdim.has_value(), start_dim);
-  end_dim = getPhysicalDim(self_, self_bdim.has_value(), end_dim);
-  return std::make_tuple(at::flatten(self_, start_dim, end_dim), valIfNonempty(self_bdim, 0));
-}
-
 std::tuple<Tensor,optional<int64_t>> unsqueeze_batch_rule(
     const Tensor& self,
     optional<int64_t> self_bdim,
@@ -153,7 +145,7 @@ std::tuple<Tensor,optional<int64_t>> _unsafe_view_batch_rule(
 }
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
-  VMAP_SUPPORT("flatten.using_ints", flatten_batch_rule);
+  m.impl("flatten.using_ints", static_cast<decltype(&ATEN_FN2(flatten, using_ints))>(native::flatten));
   VMAP_SUPPORT("unsqueeze", unsqueeze_batch_rule);
   VMAP_SUPPORT("repeat", repeat_batch_rule);
   VMAP_SUPPORT("diag", diag_batch_rule);

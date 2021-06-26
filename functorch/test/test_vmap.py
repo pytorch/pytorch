@@ -2910,6 +2910,14 @@ class TestVmapOperatorsOpInfo(TestCase):
         x = torch.randn(3)
         test(self, op, ("i->", x), in_dims=(None, 0))
 
+    def test_flatten(self, device):
+        test = functools.partial(_vmap_test, check_propagates_grad=False)
+
+        op = torch.flatten
+
+        x = torch.randn(2, 3, 4, 5)
+        test(self, op, (x, 1, 2), in_dims=(0, None, None))
+
     def test_group_norm(self, device):
         test = functools.partial(_vmap_test, check_propagates_grad=False)
 
