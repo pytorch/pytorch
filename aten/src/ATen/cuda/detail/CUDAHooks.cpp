@@ -4,6 +4,7 @@
 #include <ATen/Context.h>
 #include <ATen/DeviceGuard.h>
 #include <ATen/DynamicLibrary.h>
+#include <ATen/core/Vitals.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/CUDADevice.h>
 #include <ATen/cuda/Exceptions.h>
@@ -51,6 +52,10 @@ std::function<void(void)> THCMagma_init;
 std::unique_ptr<THCState, void (*)(THCState*)> CUDAHooks::initCUDA() const {
   C10_LOG_API_USAGE_ONCE("aten.init.cuda");
   THCState* thc_state = THCState_alloc();
+
+  // Force the update to enable unit testing. This code get executed before unit tests
+  // have a chance to enable vitals.
+  at::vitals::VitalsAPI.setVital("CUDA", "used", "true", /* force = */ true);
 
   THCudaInit(thc_state);
   if (THCMagma_init)
