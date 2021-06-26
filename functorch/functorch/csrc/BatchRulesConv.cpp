@@ -80,11 +80,6 @@ convolution_batching_rule(const Tensor& lhs, optional<int64_t> lhs_bdim, const T
     return result;
   }
 }
-Tensor convNd_decomp(const Tensor &self, const Tensor &weight, const optional<Tensor>& bias, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
-  std::vector<int64_t> t(self.dim() - 2, 0);
-  IntArrayRef out_padding(t);
-  return at::convolution(self, weight, bias, stride, padding, dilation, false, out_padding, groups);
-}
 
 // Tensor convNd_transpose_decomp(const Tensor &self, const Tensor &weight, const optional<Tensor>& bias, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
 //   std::vector<int64_t> t(self.dim() - 2, 0);
@@ -202,9 +197,9 @@ std::tuple<Tensor,Tensor> cudnn_convolution_backward_plumbing(const Tensor & sel
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("convolution", convolution_batching_rule);
-  m.impl("conv1d", convNd_decomp);
-  m.impl("conv2d", convNd_decomp);
-  m.impl("conv3d", convNd_decomp);
+  OP_DECOMPOSE(conv1d);
+  OP_DECOMPOSE(conv2d);
+  OP_DECOMPOSE(conv3d);
   // m.impl("conv_transpose2d", convNd_transpose_decomp);
   m.impl("mkldnn_convolution", mkldnn_convolution_decomp);
   m.impl("cudnn_convolution_backward", cudnn_convolution_backward_plumbing);

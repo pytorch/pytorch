@@ -6,6 +6,7 @@
 
 #include <ATen/native/ResizeCommon.h>
 #include <ATen/ATen.h>
+#include <ATen/Operators.h>
 #include <torch/csrc/autograd/variable.h>
 
 #include <functorch/csrc/DynamicLayer.h>
@@ -38,6 +39,9 @@ std::tuple<Tensor,optional<int64_t>> basic_unary_batch_rule(
 }
 
 #define INVOKE(object,ptrToMember)  ((object).*(ptrToMember))
+#define OP_DECOMPOSE(op)  m.impl(#op, static_cast<decltype(&ATEN_FN(op))>(native::op));
+#define OP_DECOMPOSE2(op, overload)  m.impl(#op"."#overload, static_cast<decltype(&ATEN_FN2(op, overload))>(native::op));
+
 
 template <typename F, F Method, typename... ExtraArgs>
 Tensor& unary_inplace_batch_rule(Tensor& self, optional<int64_t>, ExtraArgs... extra_args) {
