@@ -29,6 +29,8 @@ struct FunctionSchema;
 struct NamedType;
 using OptNameList = c10::optional<std::vector<std::string>>;
 
+void standardizeVectorForUnion(std::vector<TypePtr>* to_flatten);
+
 struct AnyType;
 using AnyTypePtr = std::shared_ptr<AnyType>;
 // Any is the top of the type hierarchy, all other types are subtypes
@@ -112,6 +114,11 @@ struct TORCH_API UnionType : public Type {
     return types_;
   }
 
+  // For testing purposes only
+  at::ArrayRef<TypePtr> getTypes() const {
+    return types_;
+  }
+
   TypePtr createWithContained(std::vector<TypePtr> contained_types) const override {
     return create(contained_types);
   }
@@ -128,23 +135,13 @@ struct TORCH_API UnionType : public Type {
 
  protected:
     UnionType(std::vector<TypePtr> types, TypeKind kind=TypeKind::UnionType);
+    std::string annotation_str_impl(TypePrinter printer) const override;
+    std::string unionStr(TypePrinter printer, bool is_annotation_str) const;
     bool has_free_variables_;
 
  private:
   std::vector<TypePtr> types_;
   bool can_hold_none_;
-
-  std::string annotation_str_impl(TypePrinter printer) const {
-    std::stringstream ss;
-    ss << "Union[";
-    for (size_t i = 0; i < types_.size(); ++i) {
-      if (i > 0)
-        ss << ", ";
-      ss << types_[i]->annotation_str(printer);
-    }
-    ss << "]";
-    return ss.str();
-  }
 
 };
 
@@ -160,7 +157,6 @@ using OptionalTypePtr = std::shared_ptr<OptionalType>;
 //     - Optional[T] == Union[T, None] for all T
 struct TORCH_API OptionalType : public UnionType {
   static OptionalTypePtr create(TypePtr contained) {
-    TORCH_INTERNAL_ASSERT(contained, "OptionalType requires a valid TypePtr");
     return OptionalTypePtr(new OptionalType(std::move(contained)));
   }
 
@@ -168,19 +164,7 @@ struct TORCH_API OptionalType : public UnionType {
 
   friend struct Type;
 
-  bool operator==(const Type& rhs) const override {
-    if (auto union_rhs = rhs.cast<UnionType>()) {
-      auto optional_rhs = union_rhs->toOptional();
-      if (optional_rhs) {
-        return *this == *((optional_rhs.value())->cast<OptionalType>());
-      }
-      return false;
-    }
-    if (auto optional_rhs = rhs.cast<OptionalType>()) {
-      return *this->getElementType() == *optional_rhs->getElementType();
-    }
-    return false;
-  }
+  bool operator==(const Type& rhs) const override;
 
   TypePtr getElementType() const {
     return contained_;

@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 
 #include <test/cpp/jit/test_utils.h>
-#include "aten/src/ATen/core/type.cpp"
-#include "torch/csrc/jit/ir/ir.h"
+#include <aten/src/ATen/core/jit_type.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {
 namespace jit {
@@ -33,8 +33,8 @@ class UnionTypeTest : public ::testing::Test {
 
   bool hasType(UnionTypePtr u, TypePtr t) {
     auto res =
-        std::find(u->containedTypes().begin(), u->containedTypes().end(), t);
-    return res != u->containedTypes().end();
+        std::find(u->getTypes().begin(), u->getTypes().end(), t);
+    return res != u->getTypes().end();
   }
 };
 
@@ -53,7 +53,7 @@ TEST_F(UnionTypeTest, UnionCreate_OptionalT1AndOptionalT2) {
   // Goal: Union[int, float, None]
   const UnionTypePtr u = UnionType::create({opt1, opt2});
 
-  ASSERT_EQ(u->containedTypes().size(), 3);
+  ASSERT_EQ(u->getTypes().size(), 3);
   ASSERT_TRUE(UnionTypeTest::hasType(u, IntType::get()));
   ASSERT_TRUE(UnionTypeTest::hasType(u, FloatType::get()));
   ASSERT_TRUE(UnionTypeTest::hasType(u, NoneType::get()));
@@ -63,7 +63,7 @@ TEST_F(UnionTypeTest, UnionCreate_OptionalTAndT) {
   // Goal: Union[int, None]
   const UnionTypePtr u = UnionType::create({opt1, IntType::get()});
 
-  ASSERT_EQ(u->containedTypes().size(), 2);
+  ASSERT_EQ(u->getTypes().size(), 2);
   ASSERT_TRUE(UnionTypeTest::hasType(u, IntType::get()));
   ASSERT_TRUE(UnionTypeTest::hasType(u, NoneType::get()));
 }
@@ -72,7 +72,7 @@ TEST_F(UnionTypeTest, UnionCreate_TupleWithSubtypingRelationship) {
   // Goal: Union[Tuple[Optional[int], int], str]
   const UnionTypePtr u = UnionType::create({StringType::get(), tup1, tup2});
 
-  ASSERT_EQ(u->containedTypes().size(), 2);
+  ASSERT_EQ(u->getTypes().size(), 2);
   ASSERT_TRUE(UnionTypeTest::hasType(u, StringType::get()));
   ASSERT_TRUE(UnionTypeTest::hasType(u, tup1));
 }
@@ -81,7 +81,7 @@ TEST_F(UnionTypeTest, UnionCreate_ContainerTAndT) {
   // Goal: Union[List[str], str]
   const UnionTypePtr u = UnionType::create({l1, StringType::get()});
 
-  ASSERT_EQ(u->containedTypes().size(), 2);
+  ASSERT_EQ(u->getTypes().size(), 2);
   ASSERT_TRUE(UnionTypeTest::hasType(u, StringType::get()));
   ASSERT_TRUE(UnionTypeTest::hasType(u, ListType::ofStrings()));
 }
@@ -90,7 +90,7 @@ TEST_F(UnionTypeTest, UnionCreate_OptionalContainerTAndContainerTAndT) {
   // Goal: Union[List[str], None, str]
   const UnionTypePtr u = UnionType::create({l1, opt3, StringType::get()});
 
-  ASSERT_EQ(u->containedTypes().size(), 3);
+  ASSERT_EQ(u->getTypes().size(), 3);
   ASSERT_TRUE(UnionTypeTest::hasType(u, StringType::get()));
   ASSERT_TRUE(UnionTypeTest::hasType(u, ListType::ofStrings()));
 }
@@ -112,7 +112,7 @@ TEST_F(UnionTypeTest, Subtyping_NumberType) {
 
   ASSERT_TRUE(num->isSubtypeOf(union2));
   ASSERT_FALSE(union2->isSubtypeOf(num));
-  ASSERT_FALSE(*num == *union1);
+  ASSERT_FALSE(*num == *union2);
 }
 
 TEST_F(UnionTypeTest, Subtyping_OptionalType) {

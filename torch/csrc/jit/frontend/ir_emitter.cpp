@@ -315,13 +315,6 @@ struct Environment {
     type_table[name] = std::move(type);
   }
 
-  c10::optional<TypePtr> getType(const std::string& name) {
-    if (type_table.find(name) != type_table.end()) {
-      return type_table[name];
-    }
-    return c10::nullopt;
-  }
-
   SugaredValuePtr findInAnyFrame(const std::string& name) {
     for (auto runner = this; runner; runner = runner->next.get()) {
       if (auto r = runner->findInThisFrame(name)) {
@@ -1022,23 +1015,7 @@ struct to_ir {
   void emitReturn(const Return& stmt) {
     TypePtr declared_return_type =
         def_stack_.back().declared_return_type_; // nullptr if not annotated
-    TypePtr type_hint = nullptr;
-
-    // If 1) we have a return statement in one or more branches, and 2)
-    // the type of the expression returned is a subtype of the declared
-    // return type for all branches, then we should use the declared
-    // return type as the `type_hint` when we emit each return
-    // statement. If we don't do this, we'll get an error like "x is set
-    // to type T1 in the true branch and type T2 in the false branch"--
-    // even if `unifyTypes(T1, T2)->isSubtypeOf(declared_return_type)`
-    if (declared_return_type &&
-        (declared_return_type == AnyType::get() ||
-         declared_return_type->kind() == UnionType::Kind ||
-         declared_return_type->kind() == OptionalType::Kind)) {
-      type_hint = declared_return_type;
-    }
-
-    Value* actual_return = emitExpr(stmt.expr(), type_hint);
+    Value* actual_return = emitExpr(stmt.expr(), declared_return_type);
 
     // result type is annotated, every return must convert to that type
     if (declared_return_type) {
@@ -1196,14 +1173,15 @@ struct to_ir {
       std::vector<TypePtr> to_subtract{NoneType::get()};
       c10::optional<TypePtr> remaining =
           union_type->subtractTypeSet(to_subtract);
-      std::vector<Refinement> present{};
+      std::vector<Refinement> all_present;
       if (remaining) {
-        present.push_back({name, *remaining});
+        Refinement present{name, *remaining};
+        all_present.push_back(std::move(present));
       }
       if (tok == TK_IS) {
-        return RefinementSet({}, present);
+        return RefinementSet({}, all_present);
       } else { // TK_ISNOT
-        return RefinementSet(present, {});
+        return RefinementSet(all_present, {});
       }
     }
     return RefinementSet();
@@ -1682,31 +1660,19 @@ struct to_ir {
         graph->createStore(x, fv)->insertBefore(false_block->return_node());
       }
 
-      // If we already know that the type is a Union, then we want to
-      // allow heterogeneous types to be unified
-      c10::optional<TypePtr> full_type = environment_stack->getType(x);
-      bool default_to_union =
-          full_type && (*full_type)->kind() == UnionType::Kind;
-      auto unified = unifyTypes(
-          tv->type(), fv->type(), /*default_to_union=*/default_to_union);
-
-      // Special logic for if we have a Union-typed value: check if
-      // the Union we got from unifying the `true` and `false` types
-      // is a subtype of the known type of the value. If so, set
-      // `unified` to be the known type to prevent unintentional
-      // narrowing of the Union type. E.g. `Union[T1, T2, T3]` should
-      // not become `Union[T1, T2]` just because its initial definition
-      // is as "`T1` if cond else `T2`". If the Union we got from type
-      // unification is not a subtype of the known Union type, set
-      // `unified` to `nullptr` to trigger the error-reporting logic
-      // below
-      if (default_to_union) {
-        if ((*unified)->isSubtypeOf(*full_type)) {
-          unified = full_type;
-        } else {
-          unified = nullptr;
+      SugaredValuePtr maybe_sugared_x = environment_stack->findInAnyFrame(x);
+      TypePtr full_type = nullptr;
+      if (maybe_sugared_x) {
+        Value* maybe_simple = asSimple(maybe_sugared_x);
+        if (maybe_simple) {
+          full_type = maybe_simple->type();
         }
       }
+
+      bool default_to_union =
+          full_type && (full_type->kind() == UnionType::Kind || full_type->kind() == OptionalType::Kind || full_type->kind() == NumberType::Kind);
+      auto unified = unifyTypes(
+          tv->type(), fv->type(), /*default_to_union=*/default_to_union);
 
       // attempt to unify the types. we allow variables to be set to different
       // types in each branch as long as that variable is not already in scope,
@@ -1753,73 +1719,26 @@ struct to_ir {
     // For use with `unifyTypeList`
     std::stringstream nowhere;
 
-    Value* lhs_val;
-
-    // Get the types on the right-hand side of the `isinstance`
-    // expression, e.g. `isinstance(x, (float, int))` -> `{float, int}.
-    // While doing this, we also want to decompose any `Union` types,
-    // namely `Union`, `Optional`, and `Number`
-    // NB: We can't use `auto` with this lambda because it contains a
-    // recursive call
-    std::function<void(const Expr&, std::vector<TypePtr>&, bool)> gather_types;
-
-    gather_types =
-        [&](const Expr& expr, std::vector<TypePtr>& types, bool is_lhs) {
-          TypePtr t;
-
-          if (!is_lhs) {
-            if (expr.kind() == TK_TUPLE_LITERAL) {
-              for (Expr e : TupleLiteral(expr).inputs()) {
-                gather_types(e, types, is_lhs);
-              }
-              return;
-            }
-            t = typeParser_.parseTypeFromExpr(expr);
-          } else {
-            lhs_val = emitExpr(expr);
-            t = lhs_val->type();
-          }
-
-          if (t->kind() == UnionType::Kind) {
-            auto inner = t->expect<UnionType>()->containedTypes().vec();
-            types.insert(types.end(), inner.begin(), inner.end());
-          } else if (t->kind() == OptionalType::Kind) {
-            auto inner = t->expect<OptionalType>()->getElementType();
-            types.push_back(inner);
-            types.push_back(NoneType::get());
-          } else if (t->kind() == NumberType::Kind) {
-            types.push_back(IntType::get());
-            types.push_back(FloatType::get());
-            types.push_back(ComplexType::get());
-          } else {
-            types.push_back(t);
-          }
-        };
-
-    auto dedup = [&](std::vector<TypePtr>& types) {
-      std::sort(
-          types.begin(),
-          types.end(),
-          [&](const TypePtr& t1, const TypePtr& t2) {
-            if (t1->kind() != t1->kind()) {
-              return t1->kind() < t2->kind();
-            }
-            return t1->str() < t2->str();
-          });
-
-      auto new_end = std::unique(
-          types.begin(),
-          types.end(),
-          [&](const TypePtr& t1, const TypePtr& t2) { return *t1 == *t2; });
-
-      types.erase(new_end, types.end());
-    };
-
+    Value* lhs_val = emitExpr(obj);
     std::vector<TypePtr> lhs_types;
     std::vector<TypePtr> rhs_types;
 
-    gather_types(obj, lhs_types, /*is_lhs=*/true);
-    gather_types(classinfo, rhs_types, /*is_lhs=*/false);
+    std::function<void(const Expr&)> gather_rhs = [&](const Expr& expr) {
+      if (expr.kind() == TK_TUPLE_LITERAL) {
+        for (Expr e : TupleLiteral(expr).inputs()) {
+          gather_rhs(e);
+        }
+        return;
+      }
+      TypePtr type = typeParser_.parseTypeFromExpr(expr);
+      rhs_types.emplace_back(type);
+    };
+
+    lhs_types.push_back(lhs_val->type());
+    gather_rhs(classinfo);
+
+    standardizeVectorForUnion(&lhs_types);
+    standardizeVectorForUnion(&rhs_types);
 
     RefinementSet refinement;
 
@@ -1862,20 +1781,17 @@ struct to_ir {
       }
 
       // Get a single type for the true and false branches
-      unified_true = isinstance_types.empty() ? nullptr
-                                              : *unifyTypeList(
-                                                    isinstance_types,
-                                                    nowhere,
-                                                    /*default_to_union=*/true);
+      if (!isinstance_types.empty()) {
+        unified_true = *unifyTypeList(isinstance_types, nowhere,/*default_to_union=*/true);
+      }
       if (unified_true) {
         true_refinements = {Refinement(ident, unified_true)};
       }
-      unified_false = not_isinstance_types.empty()
-          ? nullptr
-          : *unifyTypeList(
-                not_isinstance_types,
-                nowhere,
-                /*default_to_union=*/true);
+
+      // Get a single type for the true and false branches
+      if (!not_isinstance_types.empty()) {
+        unified_false = *unifyTypeList(not_isinstance_types, nowhere,/*default_to_union=*/true);
+      }
       if (unified_false) {
         false_refinements = {Refinement(ident, unified_false)};
       }
@@ -1896,7 +1812,7 @@ struct to_ir {
           if (lhs_type == AnyType::get()) {
             return false;
           }
-          for (const auto rhs_type : rhs_types) {
+          for (const auto& rhs_type : rhs_types) {
             if (lhs_type->isSubtypeOf(rhs_type)) {
               return false;
             }
@@ -3935,7 +3851,7 @@ struct to_ir {
       Value* end,
       Value* step) {
     std::vector<NamedValue> args;
-    args.reserve(4);
+    args.reserve(5);
     args.emplace_back(loc, "self", sliceable);
 
     // XXX: If list slicing becomes more complicated or stops using
@@ -3947,11 +3863,10 @@ struct to_ir {
     } else {
       AT_ASSERT(!sliceable->type()->isSubtypeOf(TensorType::get()));
     }
-    // TODO for now let's deal with TupleType first. Ideally all list, tensor,
-    // string, and tuple slicing should be same (tugsbayasgalan)
+
     if (sliceable->type()->cast<TupleType>()) {
       std::vector<at::optional<NamedValue>> tuple_args;
-      // since we are only dealing with tuple slicing for now, we try to keep
+      // since we are only dealing with tuple slicing, we try to keep
       // tuple args seperate for now
       tuple_args.reserve(3);
 
@@ -3965,22 +3880,15 @@ struct to_ir {
       return emitTupleSlice(loc, args[0], tuple_args);
     }
 
-    // TODO this needs to be cleaned for list slicing
-    // Default value for start is 0.
-    if (!start) {
-      start = graph->insertConstant(0, loc);
-    }
-    args.emplace_back(loc, "start", start);
-
-    if (end) {
-      args.emplace_back(loc, "end", end);
-    }
-
+    // handling cases like x[0:2]. x[0:2:] is already handled from python
     if (!step) {
       step = graph->insertConstant(1, loc);
     }
-    NamedValue step_nv = NamedValue(loc, "step", step);
-    return emitBuiltinCall(loc, *graph, aten::slice, args, {step_nv});
+
+    args.emplace_back(loc, "start", start);
+    args.emplace_back(loc, "end", end);
+    args.emplace_back(loc, "step", step);
+    return emitBuiltinCall(loc, *graph, aten::slice, args, {});
   }
 
   // Desugars slice indexing: tensor[begin:end] -> tensor.slice(dim, begin, end,
