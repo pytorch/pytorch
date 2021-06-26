@@ -14,7 +14,7 @@ def type_check(graph):
     populated with a type after type-checking is done
     """
     # here we collect types for variables
-    env: Dict[any, Union[TensorType, Dyn]] = {}
+    env: Dict = {}
 
     # populate the type environment with parameter types
     collect_params(graph.nodes, env)
