@@ -2901,6 +2901,16 @@ class TestVmapOperatorsOpInfo(TestCase):
         x[x > 0] = float('inf')
         test(self, op, (x,), in_dims=(0))
 
+    def test_foo_like(self, device):
+        test = functools.partial(_vmap_test, check_propagates_grad=False)
+
+        B, N, C, H, W = 2, 3, 24, 5, 7
+        for op in [torch.ones_like, torch.zeros_like, torch.randn_like, torch.rand_like]:
+            x = torch.randn(B, N, C, H, W)
+            # todo(chilli): test these better
+            # Not testing correctness, just that they run
+            vmap(op, in_dims=(0,))(x,)
+
     @unittest.expectedFailure
     def test_einsum(self, device):
         test = functools.partial(_vmap_test, check_propagates_grad=False)
