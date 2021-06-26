@@ -177,6 +177,16 @@ std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>> min_dim_batch_rule
     const Tensor& self, optional<int64_t> self_bdim, int64_t dim, bool keepdim) {
   return reduction_dim_ret_pair_batch_rule<decltype(&ATEN_FN2(min, dim)), &at::min, bool>(self, self_bdim, dim, keepdim);
 }
+// Wraps topk so that dim is the first argument after self (makes it work with templates)
+std::tuple<Tensor, Tensor> wrapped_topk(
+    const Tensor& self, int64_t dim, int64_t k, bool largest, bool sorted) {
+  return at::topk(self, k, dim, largest, sorted);
+}
+
+std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>> topk_batch_rule(
+    const Tensor& self, optional<int64_t> self_bdim, int64_t k, int64_t dim, bool largest, bool sorted) {
+  return reduction_dim_ret_pair_batch_rule<decltype(&wrapped_topk), &wrapped_topk, int64_t, bool, bool>(self, self_bdim, dim, k, largest, sorted);
+}
 
 // Skipping frobenius/nuclear/all/any since they don't have opinfo tests right now :P
 
@@ -272,6 +282,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("std.dim", std_dim_batch_rule);
   VMAP_SUPPORT("sum", sum_batch_rule);
   VMAP_SUPPORT("sum.dim_IntList", sum_dim_batch_rule);
+  VMAP_SUPPORT("topk", topk_batch_rule);
   VMAP_SUPPORT("var", var_batch_rule);
   VMAP_SUPPORT("var.dim", var_dim_batch_rule);
   VMAP_SUPPORT("_log_softmax_backward_data", _log_softmax_backward_data);
