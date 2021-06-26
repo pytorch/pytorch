@@ -892,7 +892,7 @@ class DistributedDataParallel(Module):
             # finding all parameters that will not receive gradient.
             out = [None for _ in range(len(output_tensor_list))]
             for i, x in enumerate(output_tensor_list):
-                if x.grad_fn is None:
+                if torch.is_tensor(x) and x.grad_fn is None:
                     out[i] = x
 
             passthrough_tensor_list = _DDPSink.apply(
@@ -904,7 +904,7 @@ class DistributedDataParallel(Module):
                 if out[i] is None:
                     out[i] = passthrough_tensor_list[i]
                 else:
-                    assert out[i].grad_fn is None
+                    assert not torch.is_tensor(out[i]) or out[i].grad_fn is None
             passthrough_tensor_list = out
             # Reconstruct output data structure.
             output = _tree_unflatten_with_rref(
