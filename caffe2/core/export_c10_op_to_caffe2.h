@@ -46,7 +46,7 @@ class C10OperatorWrapper final : public Operator<Context> {
     AT_ASSERT(
         !has_preallocated_outputs_ ||
         op_.schema().arguments().back().type()->isSubtypeOf(
-            OptionalType::create(ListType::ofTensors())));
+            UnionType::createOptionalOf(ListType::ofTensors())));
 
     // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     AT_ASSERT(operator_def.output_size() == op_.schema().returns().size());
@@ -89,7 +89,7 @@ class C10OperatorWrapper final : public Operator<Context> {
 
         AT_ASSERTM(
             argument.type()->isSubtypeOf(
-                OptionalType::create(ListType::ofTensors())),
+                UnionType::createOptionalOf(ListType::ofTensors())),
             "Error in caffe2->c10 wrapper: Operator schema has a parameter named ",
             detail::PREALLOCATED_OUTPUT_ARGNAME,
             ", but it's not of type TensorList?");
@@ -103,7 +103,7 @@ class C10OperatorWrapper final : public Operator<Context> {
             InputSize(),
             "), operator schema expected more.");
         stack_.emplace_back(at::Tensor(Input(input_tensor_index++)));
-      } else if (argument.type()->isSubtypeOf(OptionalType::ofTensor())) {
+      } else if (argument.type()->isSubtypeOf(UnionType::createOptionalOf(TensorType::get()))) {
         if (input_tensor_index < InputSize()) {
           stack_.emplace_back(at::Tensor(Input(input_tensor_index++)));
         } else {

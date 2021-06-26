@@ -1,4 +1,14 @@
 rem remove dot in cuda_version, fox example 11.1 to 111
+
+if not "%USE_CUDA%"=="1" (
+    exit /b 0
+)
+
+if x%CUDA_VERSION:.=%==x%CUDA_VERSION% (
+    echo CUDA version %CUDA_VERSION% format isn't correct, which doesn't contain '.' 
+    exit /b 1
+)
+
 set VERSION_SUFFIX=%CUDA_VERSION:.=%
 set CUDA_SUFFIX=cuda%VERSION_SUFFIX%
 

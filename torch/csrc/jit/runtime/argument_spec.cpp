@@ -32,11 +32,11 @@ void ArgumentSpecCreator::scan(
   if (typ->isSubtypeOf(TensorType::get())) {
     num_tensors_++;
     instructions_.emplace_back(SPECIALIZE_TENSOR);
-  } else if (typ->isSubtypeOf(OptionalType::ofTensor())) {
+  } else if (typ->isSubtypeOf(UnionType::createOptionalOf(TensorType::get()))) {
     num_tensors_++;
     num_optionals_++;
     instructions_.emplace_back(SPECIALIZE_OPTIONAL_TENSOR);
-  } else if (typ->kind() == TypeKind::OptionalType) {
+  } else if (typ->isOptional()) {
     // note that Optional[Tuple] or Optional[Class] will just register
     // as optional (previously they didn't at all, so it's not a regression).
     num_optionals_++;
@@ -230,11 +230,11 @@ void ArgumentSpecCreator::specializeTypes(
       } break;
       case SPECIALIZE_OPTIONAL: {
         auto is_present = spec.isPresent(optional_arg_spec_offset++);
-        auto ot = (*input_stack.back()++)->expect<OptionalType>();
+        auto ot = (*input_stack.back()++)->expect<UnionType>();
         if (!is_present) {
           result_stack.back().emplace_back(ot);
         } else {
-          result_stack.back().emplace_back(ot->getElementType());
+          result_stack.back().emplace_back(ot->getContainedElementIfOptional());
         }
       } break;
       case ENTER_TUPLE: {
@@ -272,7 +272,7 @@ void ArgumentSpecCreator::specializeTypes(
   auto inputs = graph.inputs();
   for (size_t i = 0; i < inputs.size(); ++i) {
     auto t = result_stack.back()[i];
-    if (auto ot = t->cast<OptionalType>()) {
+    if (t->isOptional()) {
       // if an optional input hasn't been specialized above, it is None
       // so we disconnect the input here and replace its uses with
       // a constant

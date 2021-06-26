@@ -17,12 +17,11 @@ namespace c10 {
   _(TensorType)             \
   _(StorageType)            \
   _(TupleType)              \
-  _(UnionType)              \
   _(ListType)               \
   _(DictType)               \
   _(NumberType)             \
   _(FloatType)              \
-  _(ComplexType)      \
+  _(ComplexType)            \
   _(FutureType)             \
   _(RRefType)               \
   _(IntType)                \
@@ -31,7 +30,6 @@ namespace c10 {
   _(GeneratorType)          \
   _(QuantizerType)          \
   _(BoolType)               \
-  _(OptionalType)           \
   _(VarType)                \
   _(DeviceObjType)          \
   _(StreamObjType)          \
@@ -45,7 +43,8 @@ namespace c10 {
   _(ScalarTypeType)         \
   _(AnyListType)            \
   _(AnyTupleType)           \
-  _(AnyClassType)
+  _(AnyClassType)           \
+  _(UnionType)
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -137,6 +136,11 @@ struct TORCH_API Type : std::enable_shared_from_this<Type> {
     return false;
   }
 
+  // `OptionalType` has been deprecated and replaced by `UnionType`.
+  // This is a convenience method so that we don't have to replace
+  // all `== OptionalType::Kind` checks with a cast and another method
+  bool isOptional() const;
+
   // Dynamically cast this object to the subclass indicated by the
   // template variable, returning nullptr if the cast is invalid.
   template <typename T>
@@ -176,6 +180,9 @@ struct TORCH_API Type : std::enable_shared_from_this<Type> {
   template <typename T>
   std::shared_ptr<const T> expect() const {
     auto r = cast<const T>();
+    if (!r) {
+      int x = 5;
+    }
     AT_ASSERT(r);
     return r;
   }

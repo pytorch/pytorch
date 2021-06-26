@@ -18,6 +18,7 @@
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/python/python_custom_class.h>
+#include <torch/csrc/jit/python/python_dict.h>
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/runtime/operator.h>
@@ -607,11 +608,7 @@ inline std::string friendlyTypeName(py::handle obj) {
     ss << "))";
     return ss.str();
   } else {
-    auto match = tryToInferType(obj);
-    if (!match.success()) {
-      return py::str(obj.get_type().attr("__name__"));
-    }
-    return toIValue(obj, match.type()).type()->annotation_str();
+    return py::str(obj.get_type().attr("__name__"));
   }
 }
 
@@ -956,8 +953,8 @@ inline py::object runAndInsertCall(
     auto return_type = callee.getSchema().returns().at(0).type();
     auto graph = tracing_state->graph;
     std::vector<NamedValue> named_values;
+    named_values.reserve(input_values.size());
     for (Value* v : input_values) {
-      // NOLINTNEXTLINE(performance-inefficient-vector-operation)
       named_values.emplace_back(v);
     }
 

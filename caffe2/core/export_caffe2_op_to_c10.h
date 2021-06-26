@@ -57,7 +57,7 @@ inline void _call_caffe2_op_from_c10(
   AT_ASSERT(
       schema.arguments().size() != 0 &&
       schema.arguments().back().type()->isSubtypeOf(
-          OptionalType::create(ListType::ofTensors())));
+          UnionType::createOptionalOf(ListType::ofTensors())));
   IValue preallocated_outputs = torch::jit::pop(*stack);
 
   const size_t num_outputs = schema.returns().size();
@@ -122,7 +122,7 @@ inline FunctionSchema make_function_schema_for_c10(const char* schema_str) {
   std::vector<c10::Argument> arguments = parsed_schema.arguments();
   arguments.emplace_back(
       PREALLOCATED_OUTPUT_ARGNAME,
-      c10::OptionalType::create(c10::ListType::ofTensors()),
+      c10::UnionType::createOptionalOf(c10::ListType::ofTensors()),
       nullopt,
       IValue());
 

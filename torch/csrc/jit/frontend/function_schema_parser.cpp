@@ -19,7 +19,7 @@ using c10::ListType;
 using c10::make_left;
 using c10::make_right;
 using c10::OperatorName;
-using c10::OptionalType;
+using c10::UnionType;
 
 namespace torch {
 namespace jit {
@@ -141,7 +141,7 @@ struct SchemaParser {
       }
       alias_info = std::move(container);
       if (L.nextIf('?')) {
-        type = OptionalType::create(type);
+        type = UnionType::createOptionalOf(type);
       }
     }
     if (is_return) {
@@ -264,7 +264,6 @@ struct SchemaParser {
         return parseTensorDefault(range);
       } break;
       case TypeKind::StringType:
-      case TypeKind::OptionalType:
       case TypeKind::UnionType:
       case TypeKind::NumberType:
       case TypeKind::IntType:

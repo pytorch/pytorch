@@ -463,7 +463,9 @@ void initPythonIRBindings(PyObject* module_) {
       .VS(requires_grad)
       .def(
           "requiresGrad",
-          [](Value& n) { n.type()->expectRef<TensorType>().requiresGrad(); })
+          [](Value& n) {
+            return n.type()->expectRef<TensorType>().requiresGrad();
+          })
       .def("toIValue", [](Value& n) { return toIValue(&n); })
       .def("type", [](Value& v) { return v.type(); });
 #undef VS
@@ -739,6 +741,31 @@ void initPythonIRBindings(PyObject* module_) {
             return py::none();
           })
       .def(
+          "symbolic_sizes",
+          [](Type& t) -> py::object {
+            if (auto ptt = t.expect<TensorType>()) {
+              auto ss = ptt->symbolic_sizes();
+              if (!ss.rank().has_value()) {
+                return py::none();
+              }
+
+              std::vector<int64_t> ss_vals;
+              for (size_t i = 0; i < *ss.rank(); ++i) {
+                ss_vals.push_back(ss.at(i).value());
+              }
+              return py::cast(ss_vals);
+            }
+            return py::none();
+          })
+      .def(
+          "with_sizes",
+          [](Type& t, std::vector<c10::optional<int64_t>> sizes) -> py::object {
+            if (auto ptt = t.expect<TensorType>()) {
+              return py::cast(ptt->withSymbolicShapes(sizes));
+            }
+            return py::none();
+          })
+      .def(
           "varyingSizes",
           [](Type& t) -> py::object {
             if (auto ptt = t.expect<TensorType>()) {
@@ -839,13 +866,9 @@ void initPythonIRBindings(PyObject* module_) {
       });
   py::class_<UnionType, Type, std::shared_ptr<UnionType>>(m, "UnionType")
       .def(py::init(
-          [](const std::vector<TypePtr>& a) { return UnionType::create(a); }))
+          [](std::vector<TypePtr> a) { return UnionType::create(a); }))
       .def("containedTypes", [](UnionType& self) {
-        std::vector<TypePtr> types;
-        for (const auto& type : self.containedTypes()) {
-          types.push_back(type);
-        }
-        return types;
+        return self.containedTypes().vec();
       });
   py::class_<ListType, Type, std::shared_ptr<ListType>>(m, "ListType")
       .def(py::init([](TypePtr a) { return ListType::create(a); }))
@@ -861,16 +884,15 @@ void initPythonIRBindings(PyObject* module_) {
       }))
       .def("getKeyType", &DictType::getKeyType)
       .def("getValueType", &DictType::getValueType);
-  py::class_<OptionalType, Type, std::shared_ptr<OptionalType>>(
-      m, "OptionalType")
-      .def(py::init(
-          [](TypePtr a) { return OptionalType::strictCreateOrThrow(std::move(a)); }))
-      .def_static("ofTensor", &OptionalType::ofTensor)
-      .def("getElementType", &OptionalType::getElementType);
   py::class_<RRefType, Type, std::shared_ptr<RRefType>>(m, "RRefType")
       .def(py::init([](TypePtr a) { return RRefType::create(std::move(a)); }))
       .def("getElementType", &RRefType::getElementType);
-
+  py::class_<Pybind11_OptionalType, UnionType, std::shared_ptr<Pybind11_OptionalType>>(
+      m, "OptionalType")
+      .def(py::init(
+          [](std::vector<TypePtr> a) { return Pybind11_OptionalType::create(std::move(a)); }))
+      .def_static("ofTensor", &Pybind11_OptionalType::legacy_OptionalOfTensor)
+      .def("getElementType", &UnionType::getContainedElementIfOptional);
   py::class_<FutureType, Type, std::shared_ptr<FutureType>>(m, "FutureType")
       .def(py::init([](TypePtr a) { return FutureType::create(std::move(a)); }))
       .def("getElementType", &FutureType::getElementType);

@@ -307,37 +307,41 @@ void PyRRef::backward(int64_t autogradContextId, bool retainGraph) {
   backward(autogradContextId, retainGraph, rref_);
 }
 
+void PyRRef::backwardOwnerRRef(
+    int64_t autogradContextId,
+    bool retainGraph,
+    IValue value) {
+  // If we have a PyObj, retrieve the underlying tensor.
+  if (value.isPyObject()) {
+    py::gil_scoped_acquire gil;
+    py::object obj = torch::jit::toPyObject(value);
+    try {
+      value = torch::jit::toIValue(obj, c10::TensorType::get());
+    } catch (py::cast_error& e) {
+      TORCH_CHECK(false, "RRef should contain a tensor for .backward()");
+    }
+  }
+
+  TORCH_CHECK(value.isTensor(), "RRef should contain a tensor for .backward()");
+  auto root = value.toTensor();
+
+  if (autogradContextId == -1) {
+    torch::autograd::backward({root});
+  } else {
+    torch::distributed::autograd::backward(
+        autogradContextId, {root}, retainGraph);
+  }
+}
+
 void PyRRef::backward(
     int64_t autogradContextId,
     bool retainGraph,
     const c10::intrusive_ptr<RRef>& rref) {
   if (rref->isOwner()) {
-    auto value =
-        c10::static_intrusive_pointer_cast<const OwnerRRef>(rref)->getValue();
-
-    // If we have a PyObj, retrieve the underlying tensor.
-    if (rref->isPyObj()) {
-      py::gil_scoped_acquire gil;
-      py::object obj = torch::jit::toPyObject(value);
-      try {
-        value = torch::jit::toIValue(obj, c10::TensorType::get());
-      } catch (py::cast_error& e) {
-        throw std::runtime_error(
-            "RRef should contain a tensor for .backward()");
-      }
-    }
-
-    TORCH_CHECK(
-        value.isTensor(), "RRef should contain a tensor for .backward()");
-    auto root = value.toTensor();
-
-    if (autogradContextId == -1) {
-      torch::autograd::backward({root});
-    } else {
-      torch::distributed::autograd::backward(
-          autogradContextId, {root}, retainGraph);
-    }
-
+    backwardOwnerRRef(
+        autogradContextId,
+        retainGraph,
+        c10::static_intrusive_pointer_cast<const OwnerRRef>(rref)->getValue());
   } else {
     TORCH_CHECK(
         autogradContextId != -1,
