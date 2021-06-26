@@ -85,9 +85,6 @@ class TestSegmentReductions(TestCase):
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
     def test_simple_1d(self, device, dtype):
         for reduction in ("max", "mean"):
-            # TODO: Remove if once mean reduction for cuda is implemented
-            if reduction == "mean" and device != "cpu":
-                continue
             self._test_simple_1d(reduction, device, dtype, False, 0)
             self._test_simple_1d(reduction, device, dtype, False, -1)
             self._test_simple_1d(reduction, device, dtype, True, 0)

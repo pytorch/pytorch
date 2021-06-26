@@ -49,6 +49,7 @@ TESTS = [
     'distributed/test_c10d_spawn_gloo',
     'distributed/test_c10d_spawn_nccl',
     'distributed/test_store',
+    'distributed/test_pg_wrapper',
     'test_cuda',
     'test_jit_cuda_fuser',
     'test_cuda_primary_ctx',
@@ -311,6 +312,7 @@ TARGET_DET_LIST = [
     'distributed/test_c10d_spawn_gloo',
     'distributed/test_c10d_spawn_nccl',
     'distributed/test_store',
+    'distributed/test_pg_wrapper',
     'test_quantization',
     'test_pruning_op',
     'test_determination',
@@ -913,9 +915,9 @@ def exclude_tests(exclude_list, selected_tests, exclude_message=None):
 
 def get_selected_tests(options):
     if options.run_specified_test_cases:
-        if options.use_specified_test_cases_for == 'include':
+        if options.use_specified_test_cases_by == 'include':
             options.include = list(SPECIFIED_TEST_CASES_DICT.keys())
-        elif options.use_specified_test_cases_for == 'bring-to-front':
+        elif options.use_specified_test_cases_by == 'bring-to-front':
             options.bring_to_front = list(SPECIFIED_TEST_CASES_DICT.keys())
 
     selected_tests = options.include

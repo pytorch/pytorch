@@ -1234,9 +1234,9 @@ std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
     };
   } else if (n->kind() == c10::Symbol::fromQualString("aten::to")) {
     if (!n->matches(torch::schema(
-            "aten::to.other(Tensor self, Tensor other, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor")) &&
+            "aten::to.other(Tensor(a) self, Tensor other, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)")) &&
         !n->matches(torch::schema(
-            "aten::to.dtype(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor"))) {
+            "aten::to.dtype(Tensor(a) self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)"))) {
       LogAndDumpSchema(n);
       return nullptr;
     }
@@ -1246,15 +1246,20 @@ std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
       const auto in3_i = p_node->Input(3).toBool();
       const auto in4_o = p_node->Input(4).toOptional<at::MemoryFormat>();
       if (p_node->Input(1).isTensor()) {
-        // to.other(Tensor self, Tensor other, bool non_blocking=False, bool
-        // copy=False, MemoryFormat? memory_format=None) -> Tensor
+        // to.other(Tensor(a) self, Tensor other, bool non_blocking=False, bool
+        // copy=False, MemoryFormat? memory_format=None) -> Tensor(a)
         const auto in1_t = p_node->Input(1).toTensor();
         p_node->Output(0) = at::native::to(in0_t, in1_t, in2_i, in3_i, in4_o);
       } else {
-        // to.dtype(Tensor self, ScalarType dtype, bool non_blocking=False, bool
-        // copy=False, MemoryFormat? memory_format=None) -> Tensor
+        // to.dtype(Tensor(a) self, ScalarType dtype, bool non_blocking=False,
+        // bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)
         const auto in1_i = p_node->Input(1).toScalarType();
         p_node->Output(0) = at::native::to(in0_t, in1_i, in2_i, in3_i, in4_o);
+      }
+      // in case that Output(0) is an alias of in0_t, copy the tensor.
+      if (p_node->Output(0).toTensor().unsafeGetTensorImpl() ==
+          in0_t.unsafeGetTensorImpl()) {
+        p_node->Output(0) = in0_t.clone();
       }
     };
   }

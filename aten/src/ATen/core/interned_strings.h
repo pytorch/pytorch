@@ -322,6 +322,9 @@ namespace c10 {
   _(aten, moveaxis)                  \
   _(aten, lgamma)                    \
   _(aten, special_gammaln)           \
+  _(aten, digamma)                   \
+  _(aten, special_psi)               \
+  _(aten, special_digamma)           \
   _(aten, erf)                       \
   _(aten, special_erf)               \
   _(aten, erfc)                      \

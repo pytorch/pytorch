@@ -368,7 +368,7 @@ def _reduce_op_symbolic(onnx_op_name, allow_multi_dim_support=True):
         self = _maybe_cast_reduce_op_input(g, self)
         if dim is None:
             # all-reduce path
-            return g.op(onnx_op_name, self, keepdims_i=0)
+            return sym_help._handle_reduce_dim_none(g, self, onnx_op_name)
         else:
             # dim-reduce path
             desc = "is" if allow_multi_dim_support else "i"
@@ -729,6 +729,9 @@ def mish(g, input):
 def relu(g, input):
     return g.op("Relu", input)
 
+def relu6(g, input):
+    relu = g.op("Relu", input)
+    return clamp_max(g, relu, 6)
 
 def ceil(g, input):
     return g.op("Ceil", input)
@@ -1526,8 +1529,9 @@ def type_as(g, self, other):
             # We don't know the type of other, bail by emitting ATen
             return g.op("ATen", self, other, operator_s="type_as")
         else:
-            raise RuntimeError("Unsupported: ONNX export of type_as for tensor "
-                               "of unknown dtype.")
+            raise RuntimeError('Unsupported: ONNX export of type_as for tensor '
+                               'of unknown dtype. Please check if the dtype of the '
+                               'parameter passed to the type_as function is correct.')
 
 
 @parse_args("v", "v", "i", "f")
@@ -2411,7 +2415,21 @@ def rrelu(g, input, lower, upper, training, generator):
     return g.op("PRelu", input, p)
 
 
-@parse_args("v")
+def bernoulli(g, input, generator=None, out=None):
+    if out is not None:
+        _unimplemented("Bernoulli", "out parameter is not supported for bernoulli")
+    if generator is not None and not sym_help._is_none(generator):
+        _unimplemented("Bernoulli", "generator is not supported for bernoulli")
+
+    dtype = sym_help._try_get_scalar_type(input)
+    if dtype is None:
+        return _unimplemented("Bernoulli", "input dtype not accessible")
+    p = g.op('RandomUniformLike', input, high_f=1.0, low_f=0.0, dtype_i=sym_help.cast_pytorch_to_onnx[dtype])
+    output = g.op('Less', p, input)
+    return g.op("Cast", output, to_i=sym_help.cast_pytorch_to_onnx[dtype])
+
+
+@parse_args('v')
 def log_sigmoid(g, input):
     p = g.op("Sigmoid", input)
     return g.op("Log", p)
