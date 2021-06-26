@@ -82,8 +82,8 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   m.impl("random_.to", unsupportedRandomOp_<Tensor&, int64_t, optional<Generator>>);
   m.impl("random_", unsupportedRandomOp_<Tensor&, optional<Generator>>);
 
-  m.impl("rand_like", unsupportedRandomOp<const Tensor&, TENSOROPTIONS, optional<MemoryFormat>>);
-  m.impl("randn_like", unsupportedRandomOp<const Tensor&, TENSOROPTIONS, optional<MemoryFormat>>);
+  // m.impl("rand_like", unsupportedRandomOp<const Tensor&, TENSOROPTIONS, optional<MemoryFormat>>);
+  // m.impl("randn_like", unsupportedRandomOp<const Tensor&, TENSOROPTIONS, optional<MemoryFormat>>);
 
   m.impl("randint_like", unsupportedRandomOp<const Tensor&, int64_t, TENSOROPTIONS, optional<MemoryFormat>>);
   m.impl("randint_like.low_dtype", unsupportedRandomOp<const Tensor&, int64_t, int64_t, TENSOROPTIONS, optional<MemoryFormat>>);
