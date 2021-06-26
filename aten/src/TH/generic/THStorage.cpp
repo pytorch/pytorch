@@ -2,6 +2,9 @@
 #define TH_GENERIC_FILE "TH/generic/THStorage.cpp"
 #else
 
+#include <ATen/MapAllocator.h>
+#include <c10/core/CPUAllocator.h>
+
 #include <new>
 
 scalar_t* THStorage_(data)(const THStorage *self)
@@ -32,7 +35,7 @@ THStorage* THStorage_(newWithSize)(ptrdiff_t size)
 #else
                            size * sizeof(scalar_t),
 #endif
-                           getTHDefaultAllocator(),
+                           c10::GetDefaultCPUAllocator(),
                            true)
                            .release();
   return storage;
@@ -62,7 +65,7 @@ THStorage* THStorage_(newWithMapping)(const char *filename, ptrdiff_t size, int 
       c10::make_intrusive<at::StorageImpl>(
           c10::StorageImpl::use_byte_size_t(),
           size * sizeof(scalar_t),
-          THMapAllocator::makeDataPtr(
+          at::MapAllocator::makeDataPtr(
               filename, flags, size * sizeof(scalar_t), &actual_size),
           /* allocator */ nullptr,
           false)
