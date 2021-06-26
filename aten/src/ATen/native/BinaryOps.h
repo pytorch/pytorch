@@ -57,8 +57,8 @@ DECLARE_DISPATCH(structured_binary_fn, remainder_stub);
 DECLARE_DISPATCH(structured_binary_fn, bitwise_and_stub);
 DECLARE_DISPATCH(structured_binary_fn, bitwise_or_stub);
 DECLARE_DISPATCH(structured_binary_fn, bitwise_xor_stub);
-DECLARE_DISPATCH(binary_fn, lshift_stub);
-DECLARE_DISPATCH(binary_fn, rshift_stub);
+DECLARE_DISPATCH(structured_binary_fn, lshift_stub);
+DECLARE_DISPATCH(structured_binary_fn, rshift_stub);
 DECLARE_DISPATCH(binary_fn, logical_xor_stub);
 DECLARE_DISPATCH(binary_fn, logical_and_stub);
 DECLARE_DISPATCH(binary_fn, logical_or_stub);
@@ -93,5 +93,6 @@ DECLARE_DISPATCH(structured_binary_fn, heaviside_stub);
 DECLARE_DISPATCH(structured_binary_fn, copysign_stub);
 DECLARE_DISPATCH(binary_fn, xlogy_stub);
 DECLARE_DISPATCH(structured_binary_fn, xlog1py_stub);
+DECLARE_DISPATCH(structured_binary_fn, zeta_stub);
 
 }} // namespace at::native
