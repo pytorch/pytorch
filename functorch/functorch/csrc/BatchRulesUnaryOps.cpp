@@ -61,7 +61,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   UNARY_POINTWISE_ALL(floor);
   UNARY_POINTWISE_ALL(frac);
   UNARY_POINTWISE(inverse);
-  m.impl("isinf", native::isinf);
+  OP_DECOMPOSE(isinf);
   UNARY_POINTWISE(isfinite);
   UNARY_POINTWISE(isnan);
   UNARY_POINTWISE_ALL(lgamma);
