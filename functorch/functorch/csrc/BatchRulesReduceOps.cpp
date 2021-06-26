@@ -191,6 +191,16 @@ std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>> topk_batch_rule(
   return reduction_dim_ret_pair_batch_rule<decltype(&wrapped_topk), &wrapped_topk, int64_t, bool, bool>(self, self_bdim, dim, k, largest, sorted);
 }
 
+std::tuple<Tensor, Tensor> wrapped_sort_stable(
+    const Tensor& self, int64_t dim, optional<bool> stable, bool descending) {
+  return at::sort(self, stable, dim, descending);
+}
+
+std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>> sort_stable_batch_rule(
+    const Tensor& self, optional<int64_t> self_bdim, optional<bool> stable, int64_t dim, bool descending) {
+  return reduction_dim_ret_pair_batch_rule<decltype(&wrapped_sort_stable), &wrapped_sort_stable, optional<bool>, bool>(self, self_bdim, dim, stable, descending);
+}
+
 // Skipping frobenius/nuclear/all/any since they don't have opinfo tests right now :P
 
 template<typename F, F Func>
@@ -284,6 +294,8 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE(std);
   OP_DECOMPOSE2(std, dim);
   VMAP_SUPPORT("std.correction", std_correction_batch_rule);
+  VMAP_SUPPORT("sort", SINGLE_ARG(reduction_dim_ret_pair_batch_rule<decltype(&ATEN_FN(sort)), &at::sort, bool>));
+  VMAP_SUPPORT("sort.stable", sort_stable_batch_rule);
   VMAP_SUPPORT("sum", sum_batch_rule);
   VMAP_SUPPORT("sum.dim_IntList", sum_dim_batch_rule);
   VMAP_SUPPORT("topk", topk_batch_rule);
