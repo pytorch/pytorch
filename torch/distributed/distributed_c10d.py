@@ -1918,7 +1918,7 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
     Examples:
         >>> # All tensors below are of torch.int64 dtype.
         >>> # We have 2 process groups, 2 ranks.
-        >>> tensor_list = [torch.zero(2, dtype=torch.int64) for _ in range(2)]
+        >>> tensor_list = [torch.zeros(2, dtype=torch.int64) for _ in range(2)]
         >>> tensor_list
         [tensor([0, 0]), tensor([0, 0])] # Rank 0 and 1
         >>> tensor = torch.arange(2, dtype=torch.int64) + 1 + 2 * rank
@@ -1932,7 +1932,7 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
 
         >>> # All tensors below are of torch.cfloat dtype.
         >>> # We have 2 process groups, 2 ranks.
-        >>> tensor_list = [torch.zero(2, dtype=torch.cfloat) for _ in range(2)]
+        >>> tensor_list = [torch.zeros(2, dtype=torch.cfloat) for _ in range(2)]
         >>> tensor_list
         [tensor([0.+0.j, 0.+0.j]), tensor([0.+0.j, 0.+0.j])] # Rank 0 and 1
         >>> tensor = torch.tensor([1+1j, 2+2j], dtype=torch.cfloat) + 2 * rank * (1+1j)
@@ -1986,7 +1986,7 @@ def _all_gather_base(output_tensor, input_tensor, group=None, async_op=False):
     Examples:
         >>> # All tensors below are of torch.int64 dtype.
         >>> # We have 2 process groups, 2 ranks.
-        >>> output_tensor = torch.zero(2, dtype=torch.int64)
+        >>> output_tensor = torch.zeros(2, dtype=torch.int64)
         >>> output_tensor
         [tensor([0, 0])] # Rank 0 and 1
         >>> tensor = torch.arange(1, dtype=torch.int64) + 1 + rank

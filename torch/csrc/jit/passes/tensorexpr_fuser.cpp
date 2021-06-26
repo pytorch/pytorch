@@ -1121,11 +1121,10 @@ class TensorExprFuser {
     // available to pass arguments, and some implementation dependence. Select a
     // safe limit here.
     constexpr size_t subgraphArgLimit = 128;
-    if ((consumer->inputs().size() + consumer->outputs().size() +
-         producer->inputs().size() + producer->outputs().size()) >
-        subgraphArgLimit) {
-      return false;
-    }
+    auto const nInputs = consumer->inputs().size() +
+        consumer->outputs().size() + producer->inputs().size() +
+        producer->outputs().size();
+    REQ(nInputs <= subgraphArgLimit);
 
     // Device checks
     if (consumer->kind() != aten::cat && producer->kind() != aten::cat) {
@@ -1179,6 +1178,7 @@ class TensorExprFuser {
       for (auto const& input : listConstruct->inputs()) {
         REQ(isFusableOnDevice(input->node()));
       }
+      REQ((nInputs + listConstruct->inputs().size()) <= subgraphArgLimit);
     } else if (consumer->kind() == aten::cat) {
       REQ(consumer->input(0)->node()->kind() == prim::ListConstruct);
       REQ(consumer->input(0)->uses().size() == 1);
@@ -1191,6 +1191,7 @@ class TensorExprFuser {
       auto listconstruct_device =
           tensorexpr::pickDeviceType(listConstruct->inputs());
       REQ(listconstruct_device);
+      REQ((nInputs + listConstruct->inputs().size()) <= subgraphArgLimit);
     } else {
       REQ(isFusableOnDevice(producer));
     }
