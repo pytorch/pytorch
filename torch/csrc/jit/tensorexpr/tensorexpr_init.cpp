@@ -524,7 +524,7 @@ void initTensorExprBindings(PyObject* module) {
           "unsafe_fuse_loops",
           [](const std::vector<For*>& loops) {
             For* fused_loop = nullptr;
-            LoopNest::unsafe_fuseLoops(loops, &fused_loop);
+            LoopNest::unsafeFuseLoops(loops, &fused_loop);
             return fused_loop;
           },
           py::return_value_policy::reference)

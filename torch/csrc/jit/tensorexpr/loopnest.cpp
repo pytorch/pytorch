@@ -1615,38 +1615,7 @@ bool LoopNest::hasLoopCarriedDependence(For* loop) {
   return false;
 }
 
-bool LoopNest::unsafe_fuseLoops(const std::vector<For*>& loops, For** fused) {
-  if (loops.empty()) {
-    return false;
-  }
-  if (loops.size() == 1) {
-    *fused = loops.front();
-    return true;
-  }
-
-  auto first_loop = loops.front();
-  // Fuse the loops by taking all the statements from the second loops
-  // onwards and moving them into the first loop's body.
-  // This way the final fused loop will be the same as the first loop.
-  for (size_t i = 1; i < loops.size(); ++i) {
-    auto body = dynamic_cast<Block*>(Substitute(
-        Stmt::clone(loops[i]->body()), {{loops[i]->var(), first_loop->var()}}));
-    first_loop->body()->splice(first_loop->body()->end(), body);
-    auto parent = loops[i]->get_parent();
-    if (parent != nullptr) {
-      auto parent_block = dynamic_cast<Block*>(parent);
-      if (parent_block == nullptr) {
-        return false;
-      }
-      parent_block->remove_stmt(loops[i]);
-    }
-  }
-
-  *fused = loops.front();
-  return true;
-}
-
-bool LoopNest::fuseLoops(const std::vector<For*>& loops, For** fused) {
+bool LoopNest::unsafeFuseLoops(const std::vector<For*>& loops, For** fused) {
   if (loops.empty()) {
     return false;
   }
@@ -1689,6 +1658,30 @@ bool LoopNest::fuseLoops(const std::vector<For*>& loops, For** fused) {
     ++it;
   }
 
+  auto first_loop = loops.front();
+  // Fuse the loops by taking all the statements from the second loops
+  // onwards and moving them into the first loop's body.
+  // This way the final fused loop will be the same as the first loop.
+  for (size_t i = 1; i < loops.size(); ++i) {
+    auto body = dynamic_cast<Block*>(Substitute(
+        Stmt::clone(loops[i]->body()), {{loops[i]->var(), first_loop->var()}}));
+    first_loop->body()->splice(first_loop->body()->end(), body);
+    root_block->remove_stmt(loops[i]);
+  }
+
+  *fused = loops.front();
+  return true;
+}
+
+bool LoopNest::fuseLoops(const std::vector<For*>& loops, For** fused) {
+  if (loops.empty()) {
+    return false;
+  }
+  if (loops.size() == 1) {
+    *fused = loops.front();
+    return true;
+  }
+
   // Check if bounds are the same for all the loops.
   auto first_loop = loops.front();
   auto first_loop_start = IRSimplifier::simplify(first_loop->start());
@@ -1711,18 +1704,23 @@ bool LoopNest::fuseLoops(const std::vector<For*>& loops, For** fused) {
   // So, we create a clone of all the loops, fuse them and check for this.
   std::vector<For*> loops_copy;
   loops_copy.reserve(loops.size());
+  std::vector<Stmt*> loops_copy2;
+  loops_copy2.reserve(loops.size());
   for (const auto& l : loops) {
-    loops_copy.push_back(dynamic_cast<For*>(Stmt::clone(l)));
+    auto l_copy = Stmt::clone(l);
+    loops_copy.push_back(dynamic_cast<For*>(l_copy));
+    loops_copy2.push_back(l_copy);
   }
+  auto block_dummy = new Block(loops_copy2);
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* fused_copy;
-  bool ret = unsafe_fuseLoops(loops_copy, &fused_copy);
+  bool ret = unsafeFuseLoops(loops_copy, &fused_copy);
   if (!ret || hasLoopCarriedDependence(fused_copy)) {
     return false;
   }
 
   // Now that all conditions are satisfied, we fuse the given loops.
-  return unsafe_fuseLoops(loops, fused);
+  return unsafeFuseLoops(loops, fused);
 }
 
 For* findOuterFor(For* a, For* b) {
