@@ -75,15 +75,18 @@ class AST_Rewriter(ast.NodeTransformer):
         """
         arg1 = node.value
 
-        if isinstance(node.annotation, ast.Call):
-            arg2 = ast.Call(func=ast.Name(id = node.annotation.func.id, ctx=ast.Load()),
-                            args=[ast.Tuple(node.annotation.args, ctx=ast.Load())], keywords=[])
-        else:
-            arg2 = node.annotation
+        # if isinstance(node.annotation, ast.Call):
+        #     # In this case, we have a Tensor Type
+        #     # node.annotation.func.id = TensorType
+        #     print(node.annotation.func.id)
+        #     arg2 = ast.Call(func=ast.Name(id='TensorType', ctx=ast.Load()),
+        #                     args=[ast.Tuple(node.annotation.args, ctx=ast.Load())], keywords=[])
+        # else:
+        #     arg2 = node.annotation
 
         return ast.Assign(targets=[node.target], value=ast.Call(
             func=ast.Name(id='annotate', ctx=ast.Load()),
-            args=[arg1, arg2], keywords=[]))
+            args=[node.value, node.annotation], keywords=[]))
 
 class RewritingTracer(Tracer):
     def trace(self, root: Union[torch.nn.Module, Callable], concrete_args: Optional[Dict[str, Any]] = None) -> Graph:

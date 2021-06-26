@@ -12,7 +12,7 @@ class TensorType:
         self.__args__ = dim
 
     def __repr__(self):
-        return f'Tensor_Type[{self.__args__}]'
+        return f'TensorType[{self.__args__}]'
 
     def __eq__(self, other):
         if isinstance(other, self.__class__):

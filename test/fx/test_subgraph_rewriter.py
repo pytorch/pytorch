@@ -4,6 +4,7 @@ import sys
 import torch
 from torch.fx import symbolic_trace, subgraph_rewriter
 from torch.fx.annotate import annotate
+from torch.fx.tensor_type import TensorType, Dyn
 # Make the helper files in test/ importable
 from torch.fx.experimental.rewriter import RewritingTracer
 
@@ -437,7 +438,31 @@ class TestSubgraphRewriter(JitTestCase):
         submod = traced.get_submodule("submod")
         self.assertEqual(type(submod), torch.nn.ReLU)
 
-    def test_subgraph_rewriter_annotations(self):
+    def test_subgraph_rewriter_annotations_tensor(self):
+
+        class M1(torch.nn.Module):
+            def forward(self, x):
+                y: TensorType((1, 2, Dyn)) = x
+                return torch.add(x, y)
+
+        class M2(torch.nn.Module):
+            def forward(self, x):
+                y = annotate(x, TensorType((1, 2, Dyn)))
+                return torch.add(x, y)
+
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(M1())
+
+        module = M2()
+        symbolic_traced: torch.fx.GraphModule = symbolic_trace(module)
+        for n, m in zip(symbolic_traced.graph.nodes, graph.nodes):
+            if n.op == 'placeholder':
+                print(n.type)
+                print(m.type)
+                assert n.type == TensorType((1, 2, Dyn))
+                assert m.type == TensorType((1, 2, Dyn))
+
+    def test_subgraph_rewriter_annotations_int(self):
 
         class M1(torch.nn.Module):
             def forward(self, x):
@@ -456,5 +481,7 @@ class TestSubgraphRewriter(JitTestCase):
         symbolic_traced: torch.fx.GraphModule = symbolic_trace(module)
         for n, m in zip(symbolic_traced.graph.nodes, graph.nodes):
             if n.op == 'placeholder':
+                print(n.type)
+                print(m.type)
                 assert n.type == int
                 assert m.type == int
