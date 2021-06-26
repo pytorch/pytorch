@@ -18,40 +18,56 @@ typedef std::tuple<int, CompileCache*> CompileCacheBackwards;
 
 class CompiledAutoGradNode : public torch::autograd::Node {
  public:
-  variable_list apply(variable_list&& new_inputs) override;
+  CompiledAutoGradNode() = default;
 
-  CompiledAutoGradNode(at::Tensor* args, size_t len) {
-    inputs_.reserve(len);
-    for (int i = 0; i < len; ++i) {
-      inputs_.emplace_back(args[i].detach());
-    }
-  }
+  variable_list apply(variable_list&& new_inputs) override;
 
   void release_variables() override {
     inputs_.clear();
   }
-  std::vector<CompileCacheBackwards> backwards_functions;
+
+  void setup(
+      std::vector<CompileCacheBackwards>& backwards,
+      at::Tensor* args,
+      size_t len) {
+    inputs_.reserve(len);
+    for (int i = 0; i < len; ++i) {
+      inputs_.emplace_back(args[i].detach());
+    }
+
+    // node outputs
+    backwards_functions_.reserve(backwards.size());
+    torch::autograd::edge_list next_edges;
+    for (auto& item : backwards) {
+      backwards_functions_.emplace_back(item);
+      next_edges.emplace_back(
+          torch::autograd::impl::gradient_edge(args[std::get<0>(item)]));
+    }
+    set_next_edges(std::move(next_edges));
+  }
 
  private:
+  std::vector<CompileCacheBackwards> backwards_functions_;
   std::vector<at::Tensor> inputs_;
 };
 
 static py::object python_specialization_key() {
   // namedtuple() we map SpecializationKey to
-  static py::object* rtype = nullptr;
-  if (rtype == nullptr) {
+  static py::object* rv = nullptr; // NOLINT
+  if (rv == nullptr) {
+    // create it lazily
     py::object namedtuple =
         py::module_::import("collections").attr("namedtuple");
-    rtype = new py::object();
-    *rtype = namedtuple(
+    rv = new py::object();
+    *rv = namedtuple(
         "SpecializationKey",
         "alias_group,ndim,dtype,device,layout,requires_grad,out,shape,stride");
   }
-  return *rtype;
+  return *rv;
 }
 
 template <int MAX_DIMS>
-class SpecializationKey {
+struct SpecializationKey {
  protected:
   enum DimFlags {
     SIZE_MISSING = 1 << 0, // leading dimension implicitly added
@@ -74,7 +90,7 @@ class SpecializationKey {
     constexpr uint16_t S4 = S3 * static_cast<int>(at::Layout::NumOptions);
     constexpr uint16_t S5 =
         S4 * static_cast<int>(at::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES);
-    static_assert(S3 < S4 && S4 < S5); // overflow check
+    static_assert(S3 < S4 && S4 < S5, "overflow");
 
     at::ScalarType dtype = v.dtype().toScalarType();
     at::DeviceType device = v.device().type();
@@ -116,8 +132,9 @@ class SpecializationKey {
   }
 
  public:
-  SpecializationKey() {}
+  SpecializationKey() {} // NOLINT: intentionally not initialized
 
+  // NOLINTNEXTLINE: intentionally not initializing dimflags_
   SpecializationKey(const at::Tensor& v, int8_t alias_group, bool is_out)
       : flags_(pack_flags(v, is_out)), alias_group_(alias_group) {
     init_dimflags(v.sizes(), v.strides(), v.ndimension());
@@ -142,9 +159,9 @@ class SpecializationKey {
         break;
 
       if ((dimflags_[i] & SIZE_ONE) > 0)
-        result.push_back("one");
+        result.emplace_back("one");
       else
-        result.push_back("other");
+        result.emplace_back("other");
     }
     return result;
   }
@@ -155,15 +172,15 @@ class SpecializationKey {
         break;
 
       if ((dimflags_[i] & STRIDE_ZERO) > 0)
-        result.push_back("zero");
+        result.emplace_back("zero");
       else if ((dimflags_[i] & STRIDE_ONE) > 0)
-        result.push_back("one");
+        result.emplace_back("one");
       else if ((dimflags_[i] & STRIDE_CONTIGUOUS) > 0)
-        result.push_back("contiguous");
+        result.emplace_back("contiguous");
       else if ((dimflags_[i] & STRIDE_TRANSPOSED_CONTIGUOUS) > 0)
-        result.push_back("transposed_contiguous");
+        result.emplace_back("transposed_contiguous");
       else if ((dimflags_[i] & STRIDE_AS_ARG) > 0)
-        result.push_back("as_arg");
+        result.emplace_back("as_arg");
       else
         throw std::runtime_error("??");
     }
@@ -189,12 +206,13 @@ class SpecializationKey {
   int8_t alias_group_; // 0 = no aliasing
                        // >0 = same data, strides, and shapes within group
                        // <0 = overlapping storage madness
+  // NOLINTNEXTLINE: C-style arrays
   uint8_t dimflags_[MAX_DIMS];
 } __attribute__((packed));
 
 class CompileResultBase : public KernelScopedObject {
  public:
-  virtual ~CompileResultBase() = default;
+  ~CompileResultBase() override = default;
   virtual void set_code(const py::object& cg) = 0;
   virtual void set_shape_from(
       const std::vector<std::pair<int, int>>& indices) = 0;
@@ -238,7 +256,7 @@ class CompileCache3 {
   class CompileResultImpl : public CompileResultBase {
    public:
     void set_code(const py::object& cg) override {
-      objects_.push_back(cg);
+      objects_.emplace_back(cg);
       cg_ = cg.cast<CodeGen*>();
     }
 
@@ -248,7 +266,8 @@ class CompileCache3 {
       shape_from_ = indices;
     }
 
-    void set_stride_args_from(const std::vector<std::pair<int, int>>& indices) {
+    void set_stride_args_from(
+        const std::vector<std::pair<int, int>>& indices) override {
       assert(indices.shape() <= MAX_DIMS * NARGS);
       stride_args_from_ = indices;
     }
@@ -259,18 +278,19 @@ class CompileCache3 {
       if (allocated_outputs_.size() > 0) {
         throw std::runtime_error("TODO: support more than one output");
       }
-      allocated_outputs_.push_back(std::make_pair(options_from, storage_order));
+      allocated_outputs_.emplace_back(
+          std::make_pair(options_from, storage_order));
     }
 
     void add_shape_check(
         const std::tuple<int, int, int, int>& indices) override {
-      shape_checks_.push_back(indices);
+      shape_checks_.emplace_back(indices);
     }
 
-    void set_backwards(int index, py::object backward_compiler) {
-      objects_.push_back(backward_compiler);
+    void set_backwards(int index, py::object backward_compiler) override {
+      objects_.emplace_back(backward_compiler);
       backwards_functions_.emplace_back(
-          std::make_pair(index, backward_compiler.cast<CompileCache*>()));
+          std::make_tuple(index, backward_compiler.cast<CompileCache*>()));
     }
 
     at::Tensor call(at::Tensor* args) {
@@ -283,6 +303,7 @@ class CompileCache3 {
         }
       }
 
+      // NOLINTNEXTLINE: C-style arrays
       void* call_args
           [NARGS + allocated_outputs_.size() + stride_args_from_.size() +
            shape_from_.size()];
@@ -294,12 +315,13 @@ class CompileCache3 {
       int stride_args_offset = NARGS + allocated_outputs_.size();
       for (int i : c10::irange(stride_args_from_.size())) {
         auto& item = stride_args_from_[i];
-        call_args[stride_args_offset + i] =
-            const_cast<int64_t*>(&args[item.first].strides()[item.second]);
+        call_args[stride_args_offset + i] = const_cast<int64_t*>(
+            &args[item.first].strides()[item.second]); // NOLINT
       }
 
       int shape_args_offset = stride_args_offset + stride_args_from_.size();
       size_t numel = 1;
+      // NOLINTNEXTLINE: C-style arrays
       int64_t shapes[MAX_DIMS];
       int ndims = shape_from_.size();
       for (int i = 0; i < ndims; ++i) {
@@ -312,7 +334,8 @@ class CompileCache3 {
       if (allocated_outputs_.size() > 0) {
         int options_from = allocated_outputs_[0].first;
         auto& output_order = allocated_outputs_[0].second;
-        int64_t strides[MAX_DIMS] = {0};
+        // NOLINTNEXTLINE: C-style arrays
+        int64_t strides[MAX_DIMS];
         int64_t next_stride = 1;
         for (int i : output_order) {
           strides[i] = next_stride;
@@ -331,21 +354,11 @@ class CompileCache3 {
 
       if (backwards_functions_.size() > 0) {
         std::shared_ptr<CompiledAutoGradNode> node(
-            new CompiledAutoGradNode(
-                args, NARGS - (allocated_outputs_.size() == 0)),
-            torch::autograd::deleteNode);
-
-        // node outputs
-        node->backwards_functions.reserve(backwards_functions_.size());
-        torch::autograd::edge_list next_edges;
-        for (auto& item : backwards_functions_) {
-          node->backwards_functions.push_back(item);
-          next_edges.emplace_back(
-              torch::autograd::impl::gradient_edge(args[item.first]));
-        }
-        node->set_next_edges(std::move(next_edges));
-
-        // node inputs (grad of forward output)
+            new CompiledAutoGradNode(), torch::autograd::deleteNode);
+        node->setup(
+            backwards_functions_,
+            args,
+            NARGS - (allocated_outputs_.size() == 0));
         torch::autograd::create_gradient_edge(output, node);
       }
 
@@ -358,7 +371,7 @@ class CompileCache3 {
     std::vector<std::pair<int, int>> stride_args_from_;
     std::vector<std::tuple<int, int, int, int>> shape_checks_;
     std::vector<std::pair<int, std::vector<int>>> allocated_outputs_;
-    std::vector<std::pair<int, CompileCache*>> backwards_functions_;
+    std::vector<CompileCacheBackwards> backwards_functions_;
     std::vector<py::object> objects_; // for ref counting
   };
   typedef std::map<Key, CompileResultImpl*, CmpLess> Map;
@@ -374,8 +387,9 @@ class CompileCache3 {
       auto cr = new CompileResultImpl();
       py::gil_scoped_acquire guard;
       std::vector<py::object> spec;
+      spec.reserve(key.size());
       for (int i = 0; i < key.size(); ++i) {
-        spec.push_back(key[i].to_python(args[i]));
+        spec.emplace_back(key[i].to_python(args[i]));
       }
       compile_fn_(spec, CompileResultProxy(cr));
       cache_.emplace(std::make_pair(key, cr));
@@ -436,7 +450,7 @@ class CompileCache3 {
     return key;
   }
 
-  CompileCache3(const py::object& compile_fn) : compile_fn_(compile_fn) {}
+  CompileCache3(py::object compile_fn) : compile_fn_(std::move(compile_fn)) {}
 
   at::Tensor call(at::Tensor* args, bool has_out) {
     auto key = compute_cache_key(args, has_out);
@@ -508,19 +522,20 @@ class CompileCacheImpl : public CompileCache {
       throw std::runtime_error("wrong number of args");
     }
 
-    char tensor_args_buffer[sizeof(at::Tensor) * (NARGS + 1)];
+    // NOLINTNEXTLINE: C-style arrays
+    char tensor_args_buffer[sizeof(at::Tensor) * (NARGS + 1)]
+        __attribute__((aligned(8)));
     Cleanup tensor_args = {
         reinterpret_cast<at::Tensor*>(tensor_args_buffer), 0};
 
     for (int i = 0; i < NARGS; ++i) {
-      new (tensor_args.ptr + i)
-          at::Tensor(std::move(args[i].cast<at::Tensor>()));
+      new (tensor_args.ptr + i) at::Tensor(args[i].cast<at::Tensor>());
       tensor_args.count++;
     }
 
     if (num_kwargs == 1) {
       new (tensor_args.ptr + NARGS)
-          at::Tensor(std::move(kwargs["out"].cast<at::Tensor>()));
+          at::Tensor(kwargs["out"].cast<at::Tensor>());
       tensor_args.count++;
       // py::gil_scoped_release release;
       return cache_out.call(tensor_args.ptr, true);
@@ -534,7 +549,7 @@ class CompileCacheImpl : public CompileCache {
     if (C10_UNLIKELY(args.size() != NARGS)) {
       throw std::runtime_error("wrong number of args");
     }
-    return cache.call(const_cast<at::Tensor*>(args.data()), false);
+    return cache.call(const_cast<at::Tensor*>(args.data()), false); // NOLINT
   }
 
  private:
@@ -573,8 +588,8 @@ variable_list CompiledAutoGradNode::apply(variable_list&& new_inputs) {
   args.emplace_back(new_inputs[0]);
 
   variable_list result;
-  result.reserve(backwards_functions.size());
-  for (auto& bk : backwards_functions) {
+  result.reserve(backwards_functions_.size());
+  for (auto& bk : backwards_functions_) {
     result.emplace_back(std::get<1>(bk)->call(args));
   }
   return result;

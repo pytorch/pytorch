@@ -126,10 +126,11 @@ def test_backwards(make_args, nnc=nnc_add, aten=torch.add):
     return benchmark_loop(backwards_setup)
 
 
-def main(device="cpu"):
+def main():
     torch.set_num_threads(1)  # TODO(jansel): add parallel support
     torch._C._jit_override_can_fuse_on_cpu(True)
 
+    device = "cuda" if CUDA else "cpu"
     I = partial(torch.randint, 0, 100, device=device)
     R = partial(torch.randn, device=device)
 
@@ -192,7 +193,4 @@ def main(device="cpu"):
 
 
 if __name__ == '__main__':
-    if CUDA:
-        main(device="cuda")
-    else:
-        main(device="cpu")
+    main()

@@ -1076,9 +1076,9 @@ void CudaCodeGen::call_fast(void* const* raw_args, size_t output_num_elements) {
     throw std::runtime_error("call_fast() not supported for this function");
 
   auto const& buffer_args = this->buffer_args();
-  int gpu_block_extents =
+  size_t gpu_block_extents =
       (output_num_elements + thread_block_size_ - 1) / thread_block_size_;
-  int gpu_thread_extents = thread_block_size_;
+  size_t gpu_thread_extents = thread_block_size_;
 
   // In CUDA we need to pass pointers to pointers for buffers, thus we need to
   // go over raw_args and add an extra indirection for such non-scalar
@@ -1087,6 +1087,7 @@ void CudaCodeGen::call_fast(void* const* raw_args, size_t output_num_elements) {
   // https://stackoverflow.com/questions/34388712/cannot-understand-how-jcuda-culaunchkernel-work
   std::vector<void*> ptr_to_args(buffer_args.size());
   for (size_t i = 0; i < buffer_args.size(); i++) {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
     ptr_to_args[i] =
         buffer_args[i].isVar() ? raw_args[i] : const_cast<void**>(&raw_args[i]);
   }

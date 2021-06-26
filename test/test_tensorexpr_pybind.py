@@ -364,25 +364,30 @@ graph(%a : Float(1, 3, 1, strides=[3, 1, 1], requires_grad=0, device=cpu)):
         self.assertRaises(RuntimeError, lambda: torch._C._te.VarHandle("n", torch._C._te.Dtype.Int))
 
 
-def add1(a, b):
-    return a + b + 1
+def has_sympy():
+    try:
+        import sympy
+        return True
+    except ImportError:
+        return False
 
 
-nnc_add1 = pointwise_operator(add1)
+def pointwise_fn(a, b):
+    return (a + b) * 42
+
+
+nnc_pointwise_fn = pointwise_operator(pointwise_fn)
 
 
 class TestOperatorAuthoringCPU(JitTestCase):
     device = "cpu"
 
-    def I(self, *args, **kwargs):
-        return torch.randint(0, 100, *args, device=self.device, **kwargs)
-
-    def R(self, *args, **kwargs):
-        return torch.randn(*args, device=self.device, **kwargs)
+    def rand(self, *args, dtype=torch.float32, **kwargs):
+        return torch.randint(0, 100, args, dtype=dtype, device=self.device, **kwargs)
 
     def check(self, *args):
-        result_aten = add1(*args)
-        result_nnc = nnc_add1(*args)
+        result_aten = pointwise_fn(*args)
+        result_nnc = nnc_pointwise_fn(*args)
         self.assertEqual(result_nnc.dtype, result_aten.dtype)
         self.assertEqual(result_nnc.size(), result_aten.size())
         self.assertEqual(result_nnc.stride(), result_aten.stride())
@@ -390,34 +395,52 @@ class TestOperatorAuthoringCPU(JitTestCase):
         torch.testing.assert_allclose(result_aten, result_nnc)
 
     def test_broadcast1(self):
-        self.check(self.R(8, 16), self.R(1))
+        self.check(self.rand(8, 16), self.rand(1))
 
     def test_broadcast2(self):
-        self.check(self.R(8, 1), self.R(1, 8))
+        self.check(self.rand(8, 1), self.rand(1, 8))
 
     def test_transposed1(self):
-        self.check(self.R(7, 3), self.R(3, 7).transpose(0, 1))
+        self.check(self.rand(7, 3), self.rand(3, 7).transpose(0, 1))
 
     def test_transposed2(self):
-        self.check(self.R(8, 16).transpose(0, 1), self.R(8, 16).transpose(0, 1))
+        self.check(self.rand(8, 16).transpose(0, 1), self.rand(8, 16).transpose(0, 1))
 
     def test_slice1(self):
-        self.check(self.R(20, 20, 2)[:8, :16, 0], self.R(8, 16))
+        self.check(self.rand(20, 20, 2)[:8, :16, 0], self.rand(8, 16))
 
     def test_slice2(self):
-        self.check(self.R(8, 16, 2)[:, :, 0], self.R(8, 16, 2)[:, :, 0])
+        self.check(self.rand(8, 16, 2)[:, :, 0], self.rand(8, 16, 2)[:, :, 0])
 
     def test_issue57611(self):
-        self.check(self.R(1, 32, 32, 2), self.R(2, 1, 1, 2))
+        self.check(self.rand(1, 32, 32, 2), self.rand(2, 1, 1, 2))
 
     def test_float_double(self):
-        self.check(self.R(8, 16), self.R(8, 16, dtype=torch.float64))
+        self.check(self.rand(8, 16), self.rand(8, 16, dtype=torch.float64))
 
     def test_int_long(self):
-        self.check(self.I([8, 16], dtype=torch.int32), self.I([1, 1], dtype=torch.int64))
+        self.check(self.rand(8, 16, dtype=torch.int32), self.rand(1, 1, dtype=torch.int64))
 
     def test_float_int(self):
-        self.check(self.R([8, 16], dtype=torch.float32), self.I([8, 16], dtype=torch.int32))
+        self.check(self.rand(8, 16, dtype=torch.float32), self.rand(8, 16, dtype=torch.int32))
+
+    @unittest.skipIf(not has_sympy(), "currently requires sympy")
+    def test_requires_grad(self):
+        self.check(self.rand(4, 2), self.rand(4, 2, requires_grad=True))
+
+    @unittest.skipIf(not has_sympy(), "currently requires sympy")
+    def test_backwards(self):
+        def grads(fn):
+            a = self.rand(4, 2, requires_grad=True)
+            b = self.rand(4, 2, requires_grad=True)
+            c = self.rand(4, 2)
+            fn(a, fn(b, c)).sum().backward()
+            return a.grad, b.grad
+
+        a1, b1 = grads(pointwise_fn)
+        a2, b2 = grads(nnc_pointwise_fn)
+        torch.testing.assert_allclose(a1, a2)
+        torch.testing.assert_allclose(b1, b2)
 
 
 class TestOperatorAuthoringGPU(TestOperatorAuthoringCPU):
@@ -425,10 +448,10 @@ class TestOperatorAuthoringGPU(TestOperatorAuthoringCPU):
 
 
 if not LLVM_ENABLED:
-    TestOperatorAuthoringCPU = None
+    TestOperatorAuthoringCPU = None  # noqa: F811
 
 if not torch.cuda.is_available():
-    TestOperatorAuthoringGPU = None
+    TestOperatorAuthoringGPU = None  # noqa: F811
 
 if __name__ == '__main__':
     run_tests()

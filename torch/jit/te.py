@@ -92,7 +92,7 @@ class PointwiseCompiler(object):
     def add_stride_arg(self, a , d):
         var = _te.VarHandle(torch.int32)
         self.stride_args.append(var)
-        self.strides_from.append((a,d))
+        self.strides_from.append((a, d))
         return var
 
     def replace_shape(self, a, d, expected, replacement):
