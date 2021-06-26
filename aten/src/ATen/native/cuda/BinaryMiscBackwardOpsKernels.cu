@@ -30,7 +30,7 @@ void sigmoid_backward_kernel_cuda(TensorIteratorBase& iter) {
   }
 }
 
-void logit_backward_kernel_cuda(TensorIterator& iter, const Scalar& eps_scalar) {
+void logit_backward_kernel_cuda(TensorIteratorBase& iter, const Scalar& eps_scalar) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half,
       at::ScalarType::BFloat16,

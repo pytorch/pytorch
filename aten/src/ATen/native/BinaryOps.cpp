@@ -104,6 +104,10 @@ TORCH_META_FUNC2(xlogy, Tensor) (const Tensor& self, const Tensor& other) {
   build_borrowing_binary_float_op(maybe_get_output(), self, other);
 }
 
+TORCH_META_FUNC(logit_backward) (const Tensor& grad_output, const Tensor& input, c10::optional<double> eps) {
+  build_borrowing_binary_op(maybe_get_output(), grad_output, input);
+}
+
 TORCH_META_FUNC(sigmoid_backward) (const Tensor& grad_output, const Tensor& output) {
   build_borrowing_binary_op(maybe_get_output(), grad_output, output);
 }
@@ -276,6 +280,10 @@ TORCH_IMPL_FUNC(div_out_mode) (
 
 TORCH_IMPL_FUNC(special_xlog1py_out) (const Tensor& self, const Tensor& other, const Tensor& result) {
   xlog1py_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(logit_backward_out) (const Tensor& grad_output, const Tensor& input, c10::optional<double> eps, const Tensor& result) {
+  logit_backward_stub(device_type(), *this, Scalar(eps ? eps.value() : -1.0));
 }
 
 TORCH_IMPL_FUNC(sigmoid_backward_out) (const Tensor& grad_output, const Tensor& output, const Tensor& result) {
@@ -575,27 +583,6 @@ Tensor subtract(const Tensor& self, const Scalar& other, const Scalar& alpha) {
 
 Tensor& subtract_(Tensor& self, const Scalar& other, const Scalar& alpha) {
   return self.sub_(other, alpha);
-}
-
-Tensor& logit_backward_out(const Tensor& grad_output,
-    const Tensor& input,
-    c10::optional<double> eps,
-    Tensor& result) {
-  auto iter = TensorIterator::binary_op(result, grad_output, input);
-  logit_backward_stub(
-      iter.device_type(), iter, Scalar(eps ? eps.value() : -1.0));
-  return result;
-}
-
-Tensor logit_backward(
-    const Tensor& grad_output,
-    const Tensor& input,
-    c10::optional<double> eps) {
-  Tensor result;
-  auto iter = TensorIterator::binary_op(result, grad_output, input);
-  logit_backward_stub(
-      iter.device_type(), iter, Scalar(eps ? eps.value() : -1.0));
-  return iter.output();
 }
 
 Tensor rsub(const Tensor& self, const Tensor& other, const Scalar& alpha) {
