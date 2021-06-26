@@ -201,8 +201,8 @@ at::Tensor nll_loss_backward_plumbing(
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("nll_loss_forward", nll_loss_forward_plumbing);
-  m.impl("nll_loss_nd", native::nll_loss_nd);
-  m.impl("nll_loss", native::nll_loss);
+  OP_DECOMPOSE(nll_loss_nd);
+  OP_DECOMPOSE(nll_loss);
   m.impl("nll_loss_backward", nll_loss_backward_plumbing);
 }
 
