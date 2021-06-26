@@ -388,12 +388,17 @@ jobs:
 
   pytorch_python_doc_build:
     runs-on: linux.2xlarge
-    needs:
+    {# needs:
       - calculate-docker-image
-      - build
+      - build #}
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
     steps:
+      - name: invalidate
+        run: |
+          aws cloudfront create-invalidation --distribution-id E1KSP3AYT2BOMS --paths '5678/*'
+      - name: stop
+        run: exit 1
       - name: Log in to ECR
         run: |
           aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
