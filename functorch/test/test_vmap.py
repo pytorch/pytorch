@@ -2888,6 +2888,17 @@ class TestVmapOperatorsOpInfo(TestCase):
         op = torch.isnan
 
         x = torch.randn(B, N, C, H, W)
+        x[x > 0] = float('nan')
+        test(self, op, (x,), in_dims=(0))
+
+    def test_isinf(self, device):
+        test = functools.partial(_vmap_test, check_propagates_grad=False)
+
+        B, N, C, H, W = 2, 3, 24, 5, 7
+        op = torch.isinf
+
+        x = torch.randn(B, N, C, H, W)
+        x[x > 0] = float('inf')
         test(self, op, (x,), in_dims=(0))
 
     @unittest.expectedFailure
