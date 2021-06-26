@@ -292,6 +292,8 @@ Pointwise Ops
     bitwise_and
     bitwise_or
     bitwise_xor
+    bitwise_left_shift
+    bitwise_right_shift
     ceil
     clamp
     clip
@@ -421,6 +423,7 @@ Comparison Ops
     greater
     isclose
     isfinite
+    isin
     isinf
     isposinf
     isneginf
@@ -496,6 +499,7 @@ Other Operations
     rot90
     gcd
     histc
+    histogram
     meshgrid
     lcm
     logcumsumexp

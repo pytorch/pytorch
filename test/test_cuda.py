@@ -1,6 +1,8 @@
 from itertools import repeat, chain, product
 from typing import NamedTuple
 import collections
+import contextlib
+import ctypes
 import gc
 import io
 import pickle
@@ -1312,6 +1314,40 @@ class TestCuda(TestCase):
 
         self.assertNotEqual(try_realloc.data_ptr(), data_ptr)
 
+    @contextlib.contextmanager
+    def _get_external_stream(self, device):
+        cudart = torch.cuda.cudart()
+        stream = ctypes.c_ulonglong(0)
+        stream_p = ctypes.POINTER(ctypes.c_void_p)(stream)
+        stream_p_int = ctypes.cast(stream_p, ctypes.c_void_p).value
+        with device:
+            try:
+                out = cudart.cudaStreamCreate(stream_p_int)
+                self.assertEqual(out, 0)
+                self.assertNotEqual(stream.value, 0)
+                yield stream.value
+            finally:
+                out = cudart.cudaStreamDestroy(stream.value)
+                self.assertEqual(out, 0)
+
+    @skipIfRocm
+    def test_external_streams(self):
+        device = torch.cuda.device(0)
+        with self._get_external_stream(device) as stream_v:
+            ext_stream = torch.cuda.streams.ExternalStream(stream_v)
+            self.assertEqual(stream_v, ext_stream.cuda_stream)
+            self.assertEqual(ext_stream.device.index, device.idx)
+
+    @skipIfRocm
+    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    def test_external_streams_multi_device(self):
+        device = torch.cuda.device(1)
+        with self._get_external_stream(device) as stream_v:
+            ext_stream = torch.cuda.streams.ExternalStream(
+                stream_v, device=device)
+            self.assertEqual(stream_v, ext_stream.cuda_stream)
+            self.assertEqual(ext_stream.device.index, device.idx)
+
     def test_noncontiguous_pinned_memory(self):
         # See issue #3266
         x = torch.arange(0, 10).view((2, 5))
@@ -1727,46 +1763,6 @@ except RuntimeError as e:
 
     # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
     @skipIfRocm
-    def test_streaming_backwards_multiple_streams_legacy(self):
-        # Tests calling backward() under a side stream then using a grad
-        # on the default stream without syncing. Right now, this pattern is safe,
-        # but only for BC. In a future PR, this pattern will become unsafe,
-        # a sync will be required, and this test will be deleted in favor of
-        # test_streaming_backward_multiple_streams below.
-        class StreamModel(torch.nn.Module):
-            def __init__(self):
-                super(StreamModel, self).__init__()
-                self.event = torch.cuda.Event()
-                self.stream0 = torch.cuda.Stream()
-                self.stream1 = torch.cuda.Stream()
-
-            def forward(self, x):
-                x0 = x.clone()
-                torch._C._cuda_setStream(self.stream0._cdata)
-                y0 = x0 * 2
-                self.event.record(stream=torch.cuda.current_stream())
-
-                torch._C._cuda_setStream(self.stream1._cdata)
-                y1 = x * 3
-                self.stream1.wait_event(self.event)
-                return y0 + y1
-
-        stream = torch.cuda.Stream()
-
-        def accum_hook(grad):
-            self.assertEqual(torch.cuda.current_stream(), stream)
-
-        with torch.cuda.stream(stream):
-            x = torch.randn(5, 5, device='cuda', requires_grad=True)
-            x.register_hook(accum_hook)
-            torch.cuda.current_stream().wait_stream(stream)
-            model = StreamModel().cuda()
-            model(x).sum().backward()
-
-        self.assertEqual(x.grad, torch.ones_like(x) * 5)
-
-    # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
-    @skipIfRocm
     def test_streaming_backwards_multiple_streams(self):
         MultiplyInStream = self._make_multiply_in_stream()
 
@@ -1796,17 +1792,26 @@ except RuntimeError as e:
         stream = torch.cuda.Stream()
 
         for x_first_use_on_ambient in (True, False):
-            with torch.cuda.stream(stream):
-                x = torch.randn(5, 5, device='cuda', requires_grad=True)
-                model = StreamModel().cuda()
-                x.register_hook(lambda grad: self.assertEqual(torch.cuda.current_stream(),
-                                                              stream if x_first_use_on_ambient else model.stream0))
-                for i in range(5):
-                    model(x, x_first_use_on_ambient).sum().backward()
-            # See "Stream semantics of backward passes" on https://pytorch.org/docs/stable/notes/cuda.html
-            torch.cuda.current_stream().wait_stream(stream)
+            for out_of_place in (True, False):
+                with torch.cuda.stream(stream):
+                    x = torch.randn(5, 5, device='cuda', requires_grad=True)
+                    model = StreamModel().cuda()
+                    x.register_hook(lambda grad: self.assertEqual(torch.cuda.current_stream(),
+                                                                  stream if x_first_use_on_ambient else model.stream0))
+                    iters = 1 if out_of_place else 5
+                    for i in range(iters):
+                        loss = model(x, x_first_use_on_ambient).sum()
+                        if out_of_place:
+                            x_grad = torch.autograd.grad((loss,), (x,))[0]
+                        else:
+                            loss.backward()
+                # See "Stream semantics of backward passes" on https://pytorch.org/docs/stable/notes/cuda.html
+                torch.cuda.current_stream().wait_stream(stream)
 
-            self.assertEqual(x.grad, torch.ones_like(x) * 5 * 5)
+                if out_of_place:
+                    self.assertEqual(x_grad, torch.ones_like(x) * 5 * iters)
+                else:
+                    self.assertEqual(x.grad, torch.ones_like(x) * 5 * iters)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_streaming_backwards_device_transfer(self):
@@ -2271,7 +2276,7 @@ torch.cuda.synchronize()
                 self.assertTrue(scaler.get_scale() == 1.0)
 
             for c, s in zip(mod_control.parameters(), mod_scaling.parameters()):
-                self.assertTrue(torch.allclose(c, s, atol=atol))
+                self.assertEqual(c, s, atol=atol, rtol=1e-05)
 
     # Compares no scaling + no autocasting against scaling + autocasting.
     def test_grad_scaling_autocast(self):
@@ -2323,7 +2328,7 @@ torch.cuda.synchronize()
                     if (not scaler.is_enabled()) or (i != skip_iter):
                         optimizer.step()
 
-        self._run_scaling_case(run, unskipped=3, skipped=1)
+        self._run_scaling_case(run, unskipped=3, skipped=1, atol=1e-5)
 
     def test_grad_scaling_clipping_separate_unscale(self):
         def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
@@ -3623,6 +3628,8 @@ torch.cuda.synchronize()
                      TEST_WITH_ROCM or
                      int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
     def test_graph_grad_scaling(self):
+        torch.cuda.empty_cache()
+
         scaler = torch.cuda.amp.GradScaler(init_scale=4.)
         g = torch.cuda._Graph()
         s = torch.cuda.Stream()
@@ -3635,15 +3642,13 @@ torch.cuda.synchronize()
         s.wait_stream(torch.cuda.current_stream())
         with torch.cuda.stream(s):
             # warmup
-            weight.grad = (scaler.scale(static_grad) * static_input).half().float()
+            loss = (weight.half() * static_input).sum()
+            scaler.scale(loss).backward()
+            opt.zero_grad(set_to_none=True)
             # capture
             g.capture_begin()
-            weight.grad = (scaler.scale(static_grad) * static_input).half().float()
-            # The above simulates a rudimentary backward pass.
-            # TODO: Once full-backward() capture is enabled (see https://github.com/pytorch/pytorch/pull/54227)
-            # change to
-            # loss = (w.half() * static_input).sum()
-            # scaler.scale(loss).backward()
+            loss = (weight.half() * static_input).sum()
+            scaler.scale(loss).backward()
             g.capture_end()
         torch.cuda.current_stream().wait_stream(s)
 
