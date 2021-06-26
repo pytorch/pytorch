@@ -157,6 +157,16 @@ std::tuple<Tensor,optional<int64_t>> pow_scalar_tensor_batch_rule(
   return std::make_tuple( at::pow(other, tensor), tensor_batch_dim );
 }
 
+std::tuple<Tensor,optional<int64_t>> _s_where_batch_rule(
+    const Tensor& condition, optional<int64_t> condition_bdim,
+    const Tensor& self, optional<int64_t> self_bdim, const Tensor& other, optional<int64_t> other_bdim) {
+  auto condition_ = moveBatchDimToFront(condition, condition_bdim);
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  auto other_ = moveBatchDimToFront(other, other_bdim);
+  auto result_bdim = (condition_bdim || self_bdim || other_bdim) ? optional<int64_t>{0} : nullopt;
+  return std::make_tuple(at::where(condition_, self_, other_), result_bdim);
+}
+
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
 #define BINARY_POINTWISE_WITH_SCALAR(op) \
   VMAP_SUPPORT(#op".Tensor", SINGLE_ARG(binary_pointwise_batch_rule<decltype(&ATEN_FN2(op, Tensor)), &op, const Scalar&>));
@@ -206,6 +216,9 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("tanh_backward", SINGLE_ARG(binary_pointwise_batch_rule<decltype(&at::tanh_backward), &at::tanh_backward>));
   VMAP_SUPPORT("threshold_backward", SINGLE_ARG(
         binary_pointwise_batch_rule<decltype(&at::threshold_backward), &at::threshold_backward, const Scalar&>));
+
+  m.impl("where.self", static_cast<decltype(&ATEN_FN2(where, self))>(native::where));
+  VMAP_SUPPORT("_s_where", _s_where_batch_rule);
 
   using TensorScalarInplaceT = Tensor& (Tensor::*)(const Tensor&, const Scalar&) const;
   using ScalarScalarInplaceT = Tensor& (Tensor::*)(const Scalar&, const Scalar&) const;
