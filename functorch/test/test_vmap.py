@@ -2881,6 +2881,24 @@ class TestVmapOperatorsOpInfo(TestCase):
             for loop_out, batched_out in get_fallback_and_vmap_exhaustive(op.op, arg_values, kwarg_values):
                 self.assertEqual(loop_out, batched_out)
 
+    def test_isnan(self, device):
+        test = functools.partial(_vmap_test, check_propagates_grad=False)
+
+        B, N, C, H, W = 2, 3, 24, 5, 7
+        op = torch.isnan
+
+        x = torch.randn(B, N, C, H, W)
+        test(self, op, (x,), in_dims=(0))
+
+    @unittest.expectedFailure
+    def test_einsum(self, device):
+        test = functools.partial(_vmap_test, check_propagates_grad=False)
+
+        op = torch.einsum
+
+        x = torch.randn(3)
+        test(self, op, ("i->", x), in_dims=(None, 0))
+
     def test_group_norm(self, device):
         test = functools.partial(_vmap_test, check_propagates_grad=False)
 
