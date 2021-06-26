@@ -88,6 +88,10 @@ TORCH_META_FUNC2(fmod, Tensor) (const Tensor& self, const Tensor& other) {
   build_borrowing_binary_op(maybe_get_output(), self, other);
 }
 
+TORCH_META_FUNC2(bitwise_and, Tensor) (const Tensor& self, const Tensor& other) {
+  build_borrowing_binary_op(maybe_get_output(), self, other);
+}
+
 TORCH_META_FUNC2(bitwise_or, Tensor) (const Tensor& self, const Tensor& other) {
   build_borrowing_binary_op(maybe_get_output(), self, other);
 }
@@ -267,6 +271,7 @@ TORCH_IMPL_FUNC(func_out) (const Tensor& self, const Tensor& other, const Tensor
   func_stub(device_type(), *this);                                                           \
 }
 
+CREATE_BINARY_TORCH_IMPL_FUNC(bitwise_and_out, bitwise_and_stub);
 CREATE_BINARY_TORCH_IMPL_FUNC(bitwise_or_out, bitwise_or_stub);
 CREATE_BINARY_TORCH_IMPL_FUNC(bitwise_xor_out, bitwise_xor_stub);
 CREATE_BINARY_TORCH_IMPL_FUNC(maximum_out, maximum_stub);
@@ -652,33 +657,16 @@ Tensor rsub(const Tensor& self, const Scalar& other, const Scalar& alpha) {
   return native::rsub(self, wrapped_scalar_tensor(other), alpha);
 }
 
-Tensor& bitwise_and_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  auto iter = TensorIterator::binary_op(result, self, other);
-  bitwise_and_stub(iter.device_type(), iter);
-  return result;
-}
-
-Tensor bitwise_and(const Tensor& self, const Tensor& other) {
-  Tensor result = at::empty({0}, self.options());
-  at::bitwise_and_out(result, self, other);
-  return result;
-}
-
-Tensor& bitwise_and_(Tensor& self, const Tensor& other) {
-  return at::bitwise_and_out(self, self, other);
-}
-
 Tensor& bitwise_and_out(const Tensor& self, const Scalar& other, Tensor& result) {
   return at::bitwise_and_out(result, self, wrapped_scalar_tensor(other));
 }
 
 Tensor bitwise_and(const Tensor& self, const Scalar& other) {
-  Tensor result = at::empty({0}, self.options());
-  return at::bitwise_and_out(result, self, other);
+  return at::bitwise_and(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& bitwise_and_(Tensor& self, const Scalar& other) {
-  return at::bitwise_and_out(self, self, other);
+  return self.bitwise_and_(wrapped_scalar_tensor(other));
 }
 
 // Legacy and interfaces. They are aliased to bitwise_and* functions

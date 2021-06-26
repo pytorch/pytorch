@@ -240,7 +240,7 @@ void remainder_kernel(TensorIteratorBase& iter) {
   }
 }
 
-void bitwise_and_kernel(TensorIterator& iter) {
+void bitwise_and_kernel(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     cpu_kernel(
         iter,

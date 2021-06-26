@@ -23,7 +23,7 @@ struct BitwiseAndFunctor<bool> {
   }
 };
 
-void bitwise_and_kernel_cuda(TensorIterator& iter) {
+void bitwise_and_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_INTEGRAL_TYPES_AND(kBool, iter.dtype(), "bitwise_and_cuda", [&]() {
     BitwiseAndFunctor<scalar_t> f;
     gpu_kernel_with_scalars(iter, f);
