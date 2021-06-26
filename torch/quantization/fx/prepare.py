@@ -195,7 +195,8 @@ def update_qconfig_for_fusion(
                     # different qconfigs specified in the qconfig_dict
                     for op in ops:
                         if object_type_dict.get(op, None) != fused_qconfig:
-                            raise LookupError(f"Need to specify the same qconfigs for both modules in {module_type}.")
+                            raise LookupError("During fusion, we need to specify the same " +
+                                              f"qconfigs for both modules in {module_type}.")
 
                     if fused_qconfig is not None:
                         object_type_dict[module_type] = fused_qconfig
