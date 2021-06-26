@@ -47,6 +47,7 @@ allow_list = [
     ("aten::_svd_helper", datetime.date(2021, 1, 31)),
     ("aten::_syevd_helper", datetime.date(9999, 1, 1)),
     ("aten::_lu_solve_helper", datetime.date(9999, 1, 1)),
+    ("aten::_linalg_solve_out_helper_", datetime.date(9999, 1, 1)),
     ("aten::_cudnn_rnn_flatten_weight", datetime.date(2020, 12, 31)),
     ("aten::_cudnn_rnn", datetime.date(2020, 12, 31)),
     ("aten::_cudnn_rnn_backward", datetime.date(2020, 12, 31)),
@@ -88,6 +89,15 @@ allow_list = [
     ("aten::_amp_update_scale", datetime.date(2021, 6, 1)),
     ("aten::randperm", datetime.date(9999, 1, 1)),
     ("aten::linalg_vector_norm", datetime.date(2021, 5, 15)),
+    ("aten::repeat_interleave", datetime.date(2021, 6, 26)),
+    ("aten::one_hot", datetime.date(2021, 6, 15)),
+    ("aten::slice", datetime.date(2021, 6, 30)),
+    ("aten::conj", datetime.date(2021, 8, 1)),
+    ("aten::_conj", datetime.date(2021, 8, 1)),
+    ("aten::conj.out", datetime.date(2021, 8, 1)),
+    ("aten::segment_reduce_backward", datetime.date(2021, 6, 15)),
+    ("aten::segment_reduce", datetime.date(2021, 8, 26)),
+    ("aten::_segment_reduce_backward", datetime.date(2021, 8, 26)),
 ]
 
 def allow_listed(schema, allow_list):

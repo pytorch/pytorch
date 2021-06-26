@@ -28,6 +28,7 @@ void CastAllConstantToFloating(Block* block) {
     if (node->kind() == onnx::Constant) {
       auto val = node->t(attr::value);
       at::ScalarType dtype = val.scalar_type();
+      auto val_type = TensorType::create(val);
       if (dtype != at::ScalarType::Double && dtype != at::ScalarType::Float &&
           dtype != at::ScalarType::Half) {
         // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -55,6 +56,7 @@ void CastAllConstantToFloating(Block* block) {
         node->t_(attr::value, val);
         Node* cast_node = graph->create(onnx::Cast, 1);
         cast_node->i_(attr::to, to_type);
+        cast_node->output()->setType(val_type);
         cast_node->insertAfter(node);
         // get input from cast node
         node->outputs().at(0)->replaceAllUsesWith(cast_node->outputs().at(0));

@@ -133,7 +133,7 @@ void nan_to_num_kernel_cuda(
     c10::optional<double> nan,
     c10::optional<double> pos_inf,
     c10::optional<double> neg_inf) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "nan_to_num_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "nan_to_num_cuda", [&]() {
     scalar_t nan_replacement = static_cast<scalar_t>(nan.value_or(0.));
     scalar_t pos_inf_replacement = pos_inf.has_value()
         ? static_cast<scalar_t>(pos_inf.value())

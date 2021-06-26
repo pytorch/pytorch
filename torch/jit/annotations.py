@@ -7,7 +7,7 @@ import torch
 import warnings
 from .._jit_internal import List, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
     is_optional, _qualified_name, Any, Future, is_future, is_ignored_fn, Union, is_union
-from .._jit_internal import BroadcastingList1, BroadcastingList2, BroadcastingList3  # type: ignore
+from .._jit_internal import BroadcastingList1, BroadcastingList2, BroadcastingList3  # type: ignore[attr-defined]
 from ._state import _get_script_class
 
 from torch._C import TensorType, TupleType, FloatType, IntType, ComplexType, \
@@ -280,7 +280,6 @@ def get_enum_value_type(e: Type[enum.Enum], loc):
     return torch._C.unify_type_list(ir_types)
 
 def is_tensor(ann):
-
     if issubclass(ann, torch.Tensor):
         return True
 
@@ -304,6 +303,9 @@ def try_ann_to_type(ann, loc):
     if inspect.isclass(ann) and is_tensor(ann):
         return TensorType.get()
     if is_tuple(ann):
+        # Special case for the empty Tuple type annotation `Tuple[()]`
+        if len(ann.__args__) == 1 and ann.__args__[0] == ():
+            return TupleType([])
         return TupleType([try_ann_to_type(a, loc) for a in ann.__args__])
     if is_list(ann):
         elem_type = try_ann_to_type(ann.__args__[0], loc)
@@ -328,7 +330,18 @@ def try_ann_to_type(ann, loc):
         assert valid_type, msg.format(repr(ann), repr(contained))
         return OptionalType(valid_type)
     if is_union(ann):
-        return UnionType([try_ann_to_type(a, loc) for a in ann.__args__])
+        inner: List = []
+        # We need these extra checks because both `None` and invalid
+        # values will return `None`
+        # TODO: Determine if the other cases need to be fixed as well
+        for a in ann.__args__:
+            if a is None:
+                inner.append(NoneType.get())
+            maybe_type = try_ann_to_type(a, loc)
+            msg = "Unsupported annotation {} could not be resolved because {} could not be resolved."
+            assert maybe_type, msg.format(repr(ann), repr(maybe_type))
+            inner.append(maybe_type)
+        return UnionType(inner)    # type: ignore[arg-type]
     if torch.distributed.rpc.is_available() and is_rref(ann):
         return RRefType(try_ann_to_type(ann.__args__[0], loc))
     if is_future(ann):
