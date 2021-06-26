@@ -797,7 +797,7 @@ void mse_kernel(TensorIterator& iter) {
   });
 }
 
-void fmod_kernel(TensorIterator& iter) {
+void fmod_kernel(TensorIteratorBase& iter) {
   if (isIntegralType(iter.common_dtype(), /*includeBool=*/ false)) {
     AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "fmod_cpu", [&]() {
       cpu_kernel(iter, [=](scalar_t x, scalar_t d) -> scalar_t {
