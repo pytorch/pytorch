@@ -363,6 +363,12 @@ c10::optional<TypePtr> unifyTypeList(
   return ret_type;
 }
 
+c10::optional<TypePtr> unifyTypeList(
+    at::ArrayRef<TypePtr> elements) {
+      std::stringstream nowhere;
+      return unifyTypeList(elements, nowhere);
+}
+
 MatchTypeReturn matchTypeVariables(
     TypePtr formal,
     TypePtr actual,
@@ -1634,10 +1640,9 @@ void ClassType::checkNotExist(const std::string& name, const std::string& what) 
   }
 
   // Check no overlap with existing attributes
-  // NOLINTNEXTLINE(modernize-loop-convert)
-  for (size_t i = 0; i < attributes_.size(); ++i) {
+  for (const auto & attribute : attributes_) {
     TORCH_CHECK(
-        name != attributes_[i].getName(),
+        name != attribute.getName(),
         "attempting to add ",
         what,
         " '",
@@ -1645,7 +1650,7 @@ void ClassType::checkNotExist(const std::string& name, const std::string& what) 
         "' to ",
         repr_str(),
         " but an attribute field of the same name already exists with type ",
-        attributes_[i].getType()->repr_str());
+        attribute.getType()->repr_str());
   }
 }
 
