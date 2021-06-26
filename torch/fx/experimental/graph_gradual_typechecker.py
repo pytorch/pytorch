@@ -53,7 +53,7 @@ def type_check_node(n, env):
             n.type = env[n.name]
             return n.type
         else:
-            raise Exception("free variable")
+            return False  # free variable
 
     if n.op == 'call_function':
         if n.name == 'add':
@@ -63,7 +63,7 @@ def type_check_node(n, env):
 
             if is_consistent(t1, t2):
                 expr_env[n.name] = t1
-                if is_more_precise(t1, t2):
+                if is_more_precise(t1, t2):  # we return the more precise type
                     n.type = t1
                 else:
                     n.type = t2
@@ -120,14 +120,16 @@ def type_check_node(n, env):
                 new_type[dim1], new_type[dim2] = new_type[dim2], new_type[dim1]
                 final = TensorType(new_type)
                 expr_env[n.name] = final
-                n.type = final
+                n.type = finalgit
                 return n.type
             else:
                 return False
+        else:
+            raise NotImplementedError("Method for " + n.name + " not yet implemented")
 
     if n.op == 'output':
         n.type = expr_env[str(n.args[0])]
         return n.type
 
     else:
-        return True
+        raise NotImplementedError("Method for " + n.name + " not yet implemented")
