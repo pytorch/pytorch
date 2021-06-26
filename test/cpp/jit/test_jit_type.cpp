@@ -8,10 +8,24 @@
 namespace torch {
 namespace jit {
 
+TEST(JitTypeTest, IsComplete) {
+  auto tt = c10::TensorType::create(
+      at::kFloat,
+      at::kCPU,
+      c10::SymbolicShape(std::vector<c10::optional<int64_t>>({1, 49})),
+      std::vector<c10::Stride>(
+          {c10::Stride{2, true, 1},
+           c10::Stride{1, true, 1},
+           c10::Stride{0, true, c10::nullopt}}),
+      false);
+  TORCH_INTERNAL_ASSERT(!tt->isComplete());
+  TORCH_INTERNAL_ASSERT(!tt->strides().isComplete());
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(JitTypeTest, UnifyTypes) {
   auto bool_tensor = TensorType::get()->withScalarType(at::kBool);
-  auto opt_bool_tensor = OptionalType::create(bool_tensor);
+  auto opt_bool_tensor = UnionType::createOptionalOf(bool_tensor);
   auto unified_opt_bool = unifyTypes(bool_tensor, opt_bool_tensor);
   TORCH_INTERNAL_ASSERT(opt_bool_tensor->isSubtypeOf(*unified_opt_bool));
 
@@ -19,10 +33,10 @@ TEST(JitTypeTest, UnifyTypes) {
   TORCH_INTERNAL_ASSERT(!tensor->isSubtypeOf(opt_bool_tensor));
   auto unified = unifyTypes(opt_bool_tensor, tensor);
   TORCH_INTERNAL_ASSERT(unified);
-  auto elem = (*unified)->expectRef<OptionalType>().getElementType();
+  auto elem = (*unified)->expectRef<UnionType>().getContainedElementIfOptional();
   TORCH_INTERNAL_ASSERT(elem->isSubtypeOf(TensorType::get()));
 
-  auto opt_tuple_none_int = OptionalType::create(
+  auto opt_tuple_none_int = UnionType::createOptionalOf(
       TupleType::create({NoneType::get(), IntType::get()}));
   auto tuple_int_none = TupleType::create({IntType::get(), NoneType::get()});
   auto out = unifyTypes(opt_tuple_none_int, tuple_int_none);
@@ -39,7 +53,7 @@ TEST(JitTypeTest, UnifyTypes) {
   auto fut_out = unifyTypes(fut_1, fut_2);
   TORCH_INTERNAL_ASSERT(fut_out);
   TORCH_INTERNAL_ASSERT((*fut_out)->isSubtypeOf(
-      FutureType::create(OptionalType::create(IntType::get()))));
+      FutureType::create(UnionType::createOptionalOf(IntType::get()))));
 
   auto dict_1 = DictType::create(IntType::get(), NoneType::get());
   auto dict_2 = DictType::create(IntType::get(), IntType::get());

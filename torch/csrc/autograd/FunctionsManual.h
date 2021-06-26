@@ -37,7 +37,7 @@ Tensor toNonOptFwGrad(const c10::optional<Tensor>& t);
 Tensor toNonOptPrimal(const c10::optional<Tensor>& t);
 Tensor toNonOptTensor(const c10::optional<Tensor>& t);
 
-bool any_variable_defined(variable_list& variables);
+bool any_variable_defined(const variable_list& variables);
 void copy_range(variable_list& out, IndexRange range, const at::Tensor & t);
 void copy_range(variable_list& out, IndexRange range, at::ArrayRef<at::Tensor> t);
 at::Tensor copysign_tensor_self_backward(const Tensor & grad, const Tensor & self, const Tensor & result);
@@ -59,8 +59,8 @@ at::Tensor angle_backward(at::Tensor grad, const at::Tensor& self);
 at::Tensor mul_tensor_backward(Tensor grad, Tensor other, ScalarType self_st);
 at::Tensor div_tensor_self_backward(Tensor grad, Tensor other, ScalarType self_st);
 at::Tensor div_tensor_other_backward(Tensor grad, Tensor self, Tensor other);
-at::Tensor div_tensor_self_backward(Tensor grad, Tensor other, ScalarType self_st, const c10::optional<std::string>& rounding_mode);
-at::Tensor div_tensor_other_backward(Tensor grad, Tensor self, Tensor other, const c10::optional<std::string>& rounding_mode);
+at::Tensor div_tensor_self_backward(Tensor grad, Tensor other, ScalarType self_st, const c10::optional<c10::string_view>& rounding_mode);
+at::Tensor div_tensor_other_backward(Tensor grad, Tensor self, Tensor other, const c10::optional<c10::string_view>& rounding_mode);
 at::Tensor mvlgamma_backward(at::Tensor grad, const at::Tensor & self, int64_t p);
 at::Tensor permute_backwards(const at::Tensor & grad, at::IntArrayRef fwd_dims);
 at::Tensor rad2deg_backward(const at::Tensor& grad);
@@ -110,8 +110,15 @@ at::Tensor max_pool_double_backward(const at::Tensor & grad, const at::Tensor & 
 at::Tensor glu_double_backward(const at::Tensor & grad, const at::Tensor & grad_output, const at::Tensor & input, int64_t dim);
 at::Tensor glu_double_backward_grad_output(const at::Tensor & grad, const at::Tensor & input, int64_t dim);
 at::Tensor infinitely_differentiable_silu_backward(const at::Tensor& grad_output, const at::Tensor& input);
+at::Tensor infinitely_differentiable_mish_backward(const at::Tensor& grad_output, const at::Tensor& input);
 Tensor infinitely_differentiable_logit_backward(const Tensor& grad, const Tensor& self, c10::optional<double> eps);
 at::Tensor kl_div_double_backward_grad_output(const at::Tensor & grad, const at::Tensor & input, const at::Tensor & target, int64_t reduction, bool log_target);
+Tensor binary_cross_entropy_target_backward(
+  const Tensor& grad,
+  const Tensor& self,
+  const Tensor& target,
+  const c10::optional<Tensor>& weight,
+  int64_t reduction);
 at::Tensor binary_cross_entropy_with_logits_target_backward(const at::Tensor& grad_output, const at::Tensor& self, const at::Tensor& target, const c10::optional<at::Tensor>& weight, const c10::optional<at::Tensor>& pos_weight, int64_t reduction);
 at::Tensor log_sigmoid_double_backward(const at::Tensor & grad, const at::Tensor & input);
 at::Tensor softmax_double_backward(const at::Tensor & grad, const at::Tensor & grad_output, int dim, const at::Tensor & output);
@@ -148,8 +155,10 @@ Tensor slice_backward_wrapper(
     c10::optional<int64_t> start,
     c10::optional<int64_t> end,
     int64_t step);
-Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
-                    bool eigenvectors, bool upper, const Tensor& lambda, const Tensor& v);
+Tensor linalg_eig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
+                           const Tensor& L, const Tensor& V);
+Tensor eigh_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
+                    bool eigenvectors, const Tensor& L, const Tensor& V);
 std::tuple<Tensor, Tensor> triangular_solve_backward(
     const Tensor & grad_x, const Tensor & grad_m,
     const Tensor & b, const Tensor & a, const Tensor & x,
@@ -157,9 +166,9 @@ std::tuple<Tensor, Tensor> triangular_solve_backward(
     std::array<bool, 2> output_mask);
 std::tuple<Tensor, Tensor, Tensor> _trilinear_backward(const Tensor& grad_out, const Tensor& i1, const Tensor& i2, const Tensor& i3,
                                                        IntArrayRef expand1, IntArrayRef expand2, IntArrayRef expand3,
-                                                       IntArrayRef sumdim, int64_t unroll_dim, std::array<bool, 3> grad_mask);
+                                                       IntArrayRef sumdim, std::array<bool, 3> grad_mask);
 Tensor linalg_qr_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
-                          std::string mode, const Tensor& Q, const Tensor& R);
+                          c10::string_view mode, const Tensor& Q, const Tensor& R);
 Tensor eig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
                     bool eigenvectors, const Tensor& lambda, const Tensor& v);
 Tensor linalg_det_backward(const Tensor & grad, const Tensor& self, const Tensor& det);
@@ -230,6 +239,24 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
 std::tuple<Tensor, Tensor> polar_backward(
     const Tensor& grad,
     const Tensor& result);
+Tensor i1_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    const Tensor& result);
+Tensor i1e_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    const Tensor& result);
+Tensor lu_unpack_backward(
+  const variable_list& grads,
+  const Tensor& LU_data,
+  bool unpack_data
+);
+
+Tensor cat_jvp(at::TensorList tensors, int64_t dim);
+Tensor cumprod_jvp(Tensor self_t, Tensor self_p, Tensor result, int dim);
+Tensor gather_with_keepdimed_indices(const Tensor& input, int64_t dim, const Tensor& indices, bool keepdim);
+Tensor evenly_read_jvp(const Tensor& fw_grad, const Tensor & input, const Tensor & value);
 
 } // namespace details
 } // namespace generated

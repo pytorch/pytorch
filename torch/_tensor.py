@@ -3,7 +3,6 @@ import functools
 from numbers import Number
 from typing import Any, Dict, Optional, Tuple, Union
 import warnings
-import weakref
 
 import torch
 import torch._C as _C
@@ -12,7 +11,7 @@ from torch._namedtensor_internals import (
     unzip_namedshape, single_ellipsis_index, is_ellipsis)
 from torch.overrides import (
     has_torch_function, has_torch_function_unary, has_torch_function_variadic,
-    handle_torch_function)
+    handle_torch_function, get_default_nowrap_functions)
 import torch.utils.hooks as hooks
 
 
@@ -86,8 +85,10 @@ class Tensor(torch._C._TensorBase):
                         self.requires_grad,
                         self._backward_hooks)
                 else:
-                    new_tensor = self.new()
+                    new_tensor = self.new_empty([])
                     new_tensor.set_(new_storage, self.storage_offset(), self.size(), self.stride())
+                    if self.is_conj():
+                        new_tensor = new_tensor.conj_physical()
                     new_tensor.requires_grad = self.requires_grad
             if self.grad is not None:
                 new_tensor.grad = self.grad.__deepcopy__(memo)
@@ -222,6 +223,13 @@ class Tensor(torch._C._TensorBase):
             in a user-specified CUDA stream context, see
             :ref:`Stream semantics of backward passes<bwd-cuda-stream-semantics>`.
 
+        .. note::
+
+            When ``inputs`` are provided and a given input is not a leaf,
+            the current implementation will call its grad_fn (though it is not strictly needed to get this gradients).
+            It is an implementation detail on which the user should not rely.
+            See https://github.com/pytorch/pytorch/pull/60521#issuecomment-867061780 for more details.
+
         Args:
             gradient (Tensor or None): Gradient w.r.t. the
                 tensor. If it is a tensor, it will be automatically converted
@@ -240,8 +248,7 @@ class Tensor(torch._C._TensorBase):
             inputs (sequence of Tensor): Inputs w.r.t. which the gradient will be
                 accumulated into ``.grad``. All other Tensors will be ignored. If not
                 provided, the gradient is accumulated into all the leaf Tensors that were
-                used to compute the attr::tensors. All the provided inputs must be leaf
-                Tensors.
+                used to compute the attr::tensors.
         """
         if has_torch_function_unary(self):
             return handle_torch_function(
@@ -353,33 +360,6 @@ class Tensor(torch._C._TensorBase):
     This method also affects forward mode AD gradients and the result will never
     have forward mode AD gradients.
     """)
-
-    def retain_grad(self):
-        r"""Enables .grad attribute for non-leaf Tensors."""
-        if has_torch_function_unary(self):
-            return handle_torch_function(Tensor.retain_grad, (self,), self)
-        if not self.requires_grad:
-            raise RuntimeError("can't retain_grad on Tensor that has requires_grad=False")
-        if self.is_leaf:  # no-op for leaves
-            return
-        if hasattr(self, 'retains_grad'):
-            return
-        weak_self = weakref.ref(self)
-
-        def retain_grad_hook(grad):
-            var = weak_self()
-            if var is None:
-                return
-            if var._grad is None:
-                if grad.is_sparse:
-                    var._grad = grad.clone()
-                else:
-                    var._grad = grad.clone(memory_format=torch.contiguous_format)
-            else:
-                var._grad = var._grad + grad
-
-        self.register_hook(retain_grad_hook)
-        self.retains_grad = True
 
     def is_shared(self):
         r"""Checks if tensor is in shared memory.
@@ -538,11 +518,13 @@ class Tensor(torch._C._TensorBase):
             )
         return torch.unique_consecutive(self, return_inverse=return_inverse, return_counts=return_counts, dim=dim)
 
+    @_wrap_type_error_to_not_implemented
     def __rsub__(self, other):
         if has_torch_function_variadic(self, other):
             return handle_torch_function(Tensor.__rsub__, (self, other), self, other)
         return _C._VariableFunctions.rsub(self, other)
 
+    @_wrap_type_error_to_not_implemented
     def __rdiv__(self, other):
         if has_torch_function_variadic(self, other):
             return handle_torch_function(Tensor.__rdiv__, (self, other), self, other)
@@ -551,7 +533,13 @@ class Tensor(torch._C._TensorBase):
     __rtruediv__ = __rdiv__
     __itruediv__ = _C._TensorBase.__idiv__
 
-    __pow__ = _C._TensorBase.pow
+    __pow__ = _wrap_type_error_to_not_implemented(_C._TensorBase.pow)
+
+    @_wrap_type_error_to_not_implemented
+    def __rmod__(self, other):
+        if has_torch_function_variadic(self, other):
+            return handle_torch_function(Tensor.__rmod__, (self, other), self, other)
+        return torch.remainder(other, self)
 
     def __format__(self, format_spec):
         if has_torch_function_unary(self):
@@ -578,6 +566,20 @@ class Tensor(torch._C._TensorBase):
     def __rfloordiv__(self, other):
         return torch.floor_divide(other, self)
 
+    @_wrap_type_error_to_not_implemented
+    def __rlshift__(self, other):
+        return torch.bitwise_left_shift(other, self)
+
+    @_wrap_type_error_to_not_implemented
+    def __rrshift__(self, other):
+        return torch.bitwise_right_shift(other, self)
+
+    @_wrap_type_error_to_not_implemented
+    def __rmatmul__(self, other):
+        if has_torch_function_variadic(self, other):
+            return handle_torch_function(Tensor.__rmatmul__, (self, other), self, other)
+        return torch.matmul(other, self)
+
     __pos__ = _C._TensorBase.positive
     __neg__ = _C._TensorBase.neg
     __abs__ = _C._TensorBase.abs
@@ -587,6 +589,11 @@ class Tensor(torch._C._TensorBase):
             return handle_torch_function(Tensor.__len__, (self,), self)
         if self.dim() == 0:
             raise TypeError("len() of a 0-d tensor")
+        if torch._C._get_tracing_state():
+            warnings.warn('Using len to get tensor shape might cause the trace to be incorrect. '
+                          'Recommended usage would be tensor.shape[0]. '
+                          'Passing a tensor of different shape might lead to errors or silently give '
+                          'incorrect results.', category=torch.jit.TracerWarning, stacklevel=2)
         return self.shape[0]
 
     def __iter__(self):
@@ -940,10 +947,14 @@ class Tensor(torch._C._TensorBase):
                 while i < row_indices.size()[0] and row_indices[i] == irow:
                     i += 1
                 ro.append(i)
-
-            return torch.sparse_csr_tensor(torch.tensor(ro, dtype=row_indices.dtype),
-                                           coalesced_self.indices()[1], coalesced_self.values(),
-                                           size=coalesced_self.shape, dtype=coalesced_self.dtype)
+            device = coalesced_self.values().device
+            crow_indices = torch.tensor(ro, dtype=row_indices.dtype, device=device)
+            return torch.sparse_csr_tensor(crow_indices,
+                                           coalesced_self.indices()[1].contiguous(),
+                                           coalesced_self.values(),
+                                           size=coalesced_self.shape,
+                                           dtype=coalesced_self.dtype,
+                                           device=device)
         elif self.is_sparse_csr:
             return self
         else:
@@ -971,12 +982,6 @@ class Tensor(torch._C._TensorBase):
             # TODO mypy doesn't support @property, see: https://github.com/python/mypy/issues/6185
             return handle_torch_function(Tensor.grad.__get__, (self,), self)  # type: ignore[attr-defined]
 
-        if self.requires_grad and not hasattr(self, "retains_grad") and not self.is_leaf and self._grad is None:
-            warnings.warn("The .grad attribute of a Tensor that is not a leaf Tensor is being accessed. Its .grad "
-                          "attribute won't be populated during autograd.backward(). If you indeed want the gradient "
-                          "for a non-leaf Tensor, use .retain_grad() on the non-leaf Tensor. If you access the "
-                          "non-leaf Tensor by mistake, make sure you access the leaf Tensor instead. See "
-                          "github.com/pytorch/pytorch/pull/30531 for more information.", stacklevel=2)
         return self._grad
 
     @grad.setter
@@ -1016,7 +1021,10 @@ class Tensor(torch._C._TensorBase):
 
         with _C.DisableTorchFunction():
             ret = func(*args, **kwargs)
-            return _convert(ret, cls)
+            if func in get_default_nowrap_functions():
+                return ret
+            else:
+                return _convert(ret, cls)
 
     __module__ = 'torch'
 
@@ -1024,7 +1032,7 @@ def _convert(ret, cls):
     if cls is Tensor:
         return ret
 
-    if isinstance(ret, Tensor):
+    if isinstance(ret, Tensor) and not isinstance(ret, cls):
         ret = ret.as_subclass(cls)
 
     if isinstance(ret, (tuple, list)):

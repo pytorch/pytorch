@@ -6,6 +6,7 @@
 #include <torch/csrc/autograd/variable.h>
 
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 
 #include <cstddef>
 #include <memory>
@@ -55,7 +56,7 @@ CopySlices::CopySlices(
   const auto num_outputs = fn->num_outputs();
   next_edges_.reserve(num_outputs);
   add_next_edge(impl::gradient_edge(base_var));
-  for (size_t i = 1; i < num_outputs; i++) {
+  for (const auto i : c10::irange(1, num_outputs)) {
     add_next_edge(fn->next_edge(i));
   }
 }
@@ -92,7 +93,7 @@ auto CopySlices::apply(variable_list&& inputs) -> variable_list {
   auto res = (*fn)({ grad_slice.clone(at::MemoryFormat::Contiguous) });
 
   variable_list grad_inputs(num_outputs());
-  for (size_t i = 0; i < res.size(); i++) {
+  for(const auto i : c10::irange(res.size())) {
     if (should_compute_output(i)) {
       AT_ASSERT(res[i].defined());
       if (i == 0) {

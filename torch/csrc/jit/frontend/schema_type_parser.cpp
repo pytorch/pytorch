@@ -22,7 +22,6 @@ using c10::IntType;
 using c10::ListType;
 using c10::NoneType;
 using c10::NumberType;
-using c10::OptionalType;
 using c10::QSchemeType;
 using c10::QuantizerType;
 using c10::RRefType;
@@ -32,7 +31,6 @@ using c10::StringType;
 using c10::Symbol;
 using c10::TensorType;
 using c10::TupleType;
-using c10::UnionType;
 using c10::VarType;
 
 namespace torch {
@@ -379,7 +377,7 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
       }
       alias_info = std::move(container);
     } else if (L.nextIf('?')) {
-      value = OptionalType::create(value);
+      value = UnionType::createOptionalOf(value);
     } else {
       break;
     }

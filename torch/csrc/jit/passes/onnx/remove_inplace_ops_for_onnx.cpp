@@ -9,6 +9,8 @@
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/onnx/pattern_conversion/pattern_encapsulation.h>
 
+#include <c10/util/irange.h>
+
 #include <limits>
 
 namespace torch {
@@ -167,8 +169,9 @@ std::pair<Value*, Value*> PrepareCopyForONNX(Node* node) {
   // 3. Apply broadcasting for scripting.
   WithInsertPoint guard(node);
   auto graph = node->owningGraph();
+  TypePtr opt_ten = UnionType::createOptionalOf(TensorType::get());
   auto dummy_list =
-      graph->insertNode(graph->createList(OptionalType::ofTensor(), {}))
+      graph->insertNode(graph->createList(opt_ten, {}))
           ->output();
 
   auto expanded_value =
@@ -270,8 +273,15 @@ static std::pair<Value*, Value*> PrepareListAppendAndInsertForONNX(Node* n) {
   return std::make_pair(n->input(0), n->output());
 }
 
-static std::pair<Value*, Value*> PrepareListSetItemForONNX(Node* n) {
+static std::pair<Value*, Value*> PrepareSetItemForONNX(Node* n) {
   TORCH_INTERNAL_ASSERT(n->kind() == aten::_set_item);
+  // It seems the JIT does not always produce an output for _set_item.
+  // In particular it seems to for list but not for dict.
+  // So we add one if needed.
+  if (n->outputs().size() == 0) {
+    n->addOutput();
+    n->output()->setType(n->inputs().at(0)->type());
+  }
   return std::make_pair(n->input(0), n->output());
 }
 
@@ -736,7 +746,7 @@ void InplaceConverter::replaceAttrWithInplaceOps(
       WithInsertPoint guard(n);
       auto false_val_ = graph_->insertConstant(false);
       auto dummy_list =
-          graph_->insertNode(graph_->createList(OptionalType::ofTensor(), {}))
+          graph_->insertNode(graph_->createList(UnionType::createOptionalOf(TensorType::get()), {}))
               ->output();
 
       auto* index_put_node = graph_->create(aten::index_put_, 1);
@@ -807,7 +817,7 @@ void InplaceConverter::convertInplaceOpsAndTrackAlias(Block* block) {
       } else if (nkind == aten::Delete) {
         std::tie(orig_data, new_out) = PrepareListDeleteForONNX(n);
       } else if (nkind == aten::_set_item) {
-        std::tie(orig_data, new_out) = PrepareListSetItemForONNX(n);
+        std::tie(orig_data, new_out) = PrepareSetItemForONNX(n);
       } else {
         // Not inplace op.
         continue;
