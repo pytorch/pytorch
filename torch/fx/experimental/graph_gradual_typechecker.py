@@ -1,5 +1,5 @@
 from functools import reduce
-from typing import Dict, Union
+from typing import Dict
 
 from torch.fx.tensor_type import Dyn, is_consistent, TensorType, is_more_precise
 
