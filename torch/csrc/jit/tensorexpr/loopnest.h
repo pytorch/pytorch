@@ -50,6 +50,26 @@ class TORCH_API LoopNest {
   Stmt* getLoopBodyFor(Tensor*) const;
   Stmt* getLoopBodyFor(const Buf*) const;
 
+  // Returns the For stmt indexed by 'indices' in the 'root' For stmt.
+  //'indices' indicates the path to the returned loop from 'root' in AST, e.g.,
+  //
+  // root: for(int i...){
+  // j_loop: for (int j...){
+  // k1_loop:  for (int k1...){
+  //            A[i, j, k1] = ....
+  //          }
+  //          B[i, j] = ...
+  // k2_loop:  for (int k2...){
+  //            A[i, j, k2] = ...
+  //          }
+  //        }
+  //      }
+  //
+  // the path from 'root' to 'j_loop' is [0]
+  // the path from 'root' to 'k1_loop' is [0, 0]
+  // the path from 'root' to 'k2_loop' is [0, 2]
+  For* getLoopAt(For* root, const std::vector<int>& indices) const;
+
   // Returns the For stmt that is immediately enclosing the given stmt.
   static For* getParentLoop(const Stmt* st);
 
@@ -286,6 +306,46 @@ class TORCH_API LoopNest {
   static std::vector<For*> reorder(
       const std::vector<For*>& loops,
       const std::vector<size_t>& permutation);
+
+  // Tile takes a 2d domain (x, y) and splits it into small rectangular blocks
+  // each with shape (x_factor, y_factor). The traversal over the domain turns
+  // into an outer iteration over the blocks and an inner traversal over all
+  // points in the block.
+  // Note that if x dim % x_factor or y dim % y_factor does not equal to 0, the
+  // loop body will generate corresponding tailing loops.
+  // The transformation is in-place and returns 'xtail'.
+  //
+  // For example, consider the following code:
+  //   for i: [0, 64)
+  //     for j: [0, 64)
+  //       for k: [0, 32)
+  //         A[i, j] = B[i, k] + C[j, k]
+  //
+  // tile(i, j, 4, 8) will transform "i" for-stmt into the following nested
+  // loop:
+  //   for i_outer: [0, 16)
+  //     for j_outer: [0, 8)
+  //       for i_inner: [0, 4)
+  //         for j_inner: [0, 8)
+  //           for k: [0, 32)
+  //             A[i_outer * 4 + i_inner, j_outer * 8 + j_inner] =
+  //             B[i_outer * 4 + i_inner, k] + C[j_outer * 8 + j_inner, k]
+  //
+  // tile(i, j, 4, 9) will transform "i" for-stmt into the following nested
+  // loop:
+  //   for i_outer: [0, 16)
+  //     for j_outer: [0, 7)
+  //       for i_inner: [0, 4)
+  //         for j_inner: [0, 9)
+  //           for k: (0, 32)
+  //             A[i_outer * 4 + i_inner, j_outer * 9 + j_inner] =
+  //             B[i_outer * 4 + i_inner, k] + C[j_outer * 9 + j_inner, k]
+  //     for j_tail: [0, 1)
+  //       for i_inner: [0, 4)
+  //         for k: (0, 32)
+  //           A[i_outer * 4 + i_inner, 7 * 9 + j_tail] =
+  //           B[i_outer * 4 + i_inner, k] + C[7 * 9 + j_tail, k]
+  For* tile(For* x, For* y, int x_factor, int y_factor);
 
   // Returns true if the given loops are perfectly nested, i.e., every loop
   // (except the innermost) should have exactly one statement in its body
