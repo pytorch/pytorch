@@ -13,7 +13,7 @@ class TORCH_API CleanupAutogradContextReq : public rpc::RpcCommandBase {
  public:
   explicit CleanupAutogradContextReq(int64_t context_id);
   // Serialization and deserialization methods.
-  rpc::Message toMessageImpl() && override;
+  c10::intrusive_ptr<rpc::Message> toMessageImpl() && override;
   static std::unique_ptr<CleanupAutogradContextReq> fromMessage(
       const rpc::Message& message);
 
