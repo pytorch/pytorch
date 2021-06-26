@@ -163,7 +163,7 @@ std::tuple<Tensor,Tensor,Tensor> native_group_norm_plumbing(
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("batch_norm", batch_norm_plumbing);
   m.impl("native_group_norm", native_group_norm_plumbing);
-  m.impl("group_norm", native::group_norm);
+  OP_DECOMPOSE(group_norm);
 }
 
 }}

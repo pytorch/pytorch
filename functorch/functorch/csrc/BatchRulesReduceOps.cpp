@@ -281,14 +281,14 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("mode", SINGLE_ARG(reduction_dim_ret_pair_batch_rule<decltype(&ATEN_FN(mode)), &at::mode, bool>));
   VMAP_SUPPORT("prod", SINGLE_ARG(reduction_no_dim_batch_rule<decltype(&ATEN_FN(prod)), &at::prod, decltype(&prod_dim_batch_rule), &prod_dim_batch_rule, optional<ScalarType>>));
   VMAP_SUPPORT("prod.dim_int", prod_dim_batch_rule);
-  m.impl("std", static_cast<decltype(&ATEN_FN(std))>(native::std));
-  m.impl("std.dim", static_cast<decltype(&ATEN_FN2(std, dim))>(native::std));
+  OP_DECOMPOSE(std);
+  OP_DECOMPOSE2(std, dim);
   VMAP_SUPPORT("std.correction", std_correction_batch_rule);
   VMAP_SUPPORT("sum", sum_batch_rule);
   VMAP_SUPPORT("sum.dim_IntList", sum_dim_batch_rule);
   VMAP_SUPPORT("topk", topk_batch_rule);
-  m.impl("var", static_cast<decltype(&ATEN_FN(var))>(native::var));
-  m.impl("var.dim", static_cast<decltype(&ATEN_FN2(var, dim))>(native::var));
+  OP_DECOMPOSE(var);
+  OP_DECOMPOSE2(var, dim);
   VMAP_SUPPORT("var.correction", var_correction_batch_rule);
   VMAP_SUPPORT("_log_softmax_backward_data", _log_softmax_backward_data);
 }
