@@ -192,6 +192,7 @@ Normalization Layers
     nn.InstanceNorm3d
     nn.LayerNorm
     nn.LocalResponseNorm
+    nn.CrossMapLRN2d
 
 Recurrent Layers
 ----------------
