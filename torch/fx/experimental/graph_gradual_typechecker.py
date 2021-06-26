@@ -120,7 +120,7 @@ def type_check_node(n, env):
                 new_type[dim1], new_type[dim2] = new_type[dim2], new_type[dim1]
                 final = TensorType(new_type)
                 expr_env[n.name] = final
-                n.type = finalgit
+                n.type = final
                 return n.type
             else:
                 return False
