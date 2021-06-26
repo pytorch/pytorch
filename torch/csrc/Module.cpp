@@ -954,6 +954,9 @@ PyObject* initModule() {
   py_module.def("set_vital", [](const std::string &vital, const std::string &attr, const std::string value){
     return at::vitals::VitalsAPI.setVital(vital, attr, value);
   });
+  py_module.def("read_vitals", [](){
+    return at::vitals::VitalsAPI.readVitals();
+  });
 
   py_module.def(
     "init_num_threads",

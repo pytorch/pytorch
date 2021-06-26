@@ -47,15 +47,16 @@ void launch_cross_kernel(const TensorIteratorBase& iter, int64_t ostride,
     if (ostride * 2 > int_max || x1stride * 2 > int_max || x2stride * 2 > int_max) {
       cross_kernel<<<grid, num_threads, 0, stream>>>(
           N, out, x1, x2, offset_calculator, ostride, x1stride, x2stride);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
       cross_kernel<<<grid, num_threads, 0, stream>>>(
           N, out, x1, x2, offset_calculator,
           static_cast<int>(ostride),
           static_cast<int>(x1stride),
           static_cast<int>(x2stride));
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   });
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 void cross_impl(Tensor& result, const Tensor& x1, const Tensor& x2, int64_t dim) {
