@@ -149,6 +149,8 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("unsqueeze", unsqueeze_batch_rule);
   VMAP_SUPPORT("repeat", repeat_batch_rule);
   VMAP_SUPPORT("diag", diag_batch_rule);
+  VMAP_SUPPORT("triu", SINGLE_ARG(variadic_bdims_batch_rule<decltype(&ATEN_FN(triu)), &at::triu, int64_t>));
+  VMAP_SUPPORT("tril", SINGLE_ARG(variadic_bdims_batch_rule<decltype(&ATEN_FN(tril)), &at::tril, int64_t>));
   VMAP_SUPPORT("_unsafe_view", _unsafe_view_batch_rule);
 }
 
