@@ -273,6 +273,34 @@ class Node:
         """
         return list(self._input_nodes.keys())
 
+    def update_arg(self, idx : int, arg : Argument) -> None:
+        """
+        Update an existing positional argument to contain the new value
+        ``arg``. After calling, ``self.args[idx] == arg``.
+
+        Args:
+
+            idx (int): The index into ``self.args`` of the element to update
+            arg (Argument): The new argument value to write into ``args``
+        """
+        args = list(self.args)
+        args[idx] = arg
+        self.args = tuple(args)
+
+    def update_kwarg(self, key : str, arg : Argument) -> None:
+        """
+        Update an existing keyword argument to contain the new value
+        ``arg``. After calling, ``self.kwargs[key] == arg``.
+
+        Args:
+
+            key (str): The key in ``self.kwargs`` of the element to update
+            arg (Argument): The new argument value to write into ``kwargs``
+        """
+        kwargs = dict(self.kwargs)
+        kwargs[key] = arg
+        self.kwargs = kwargs
+
     @property
     def stack_trace(self) -> Optional[str]:
         """
@@ -482,13 +510,13 @@ class Node:
 
     def replace_input_with(self, old_input: 'Node', new_input: 'Node'):
         """
-        Loop through input nodes of ``self``, and if `old_input` is one
-        of those, replace `old_input` node with new input node `new_input`.
+        Loop through input nodes of ``self``, and replace all instances of
+        ``old_input`` with ``new_input``.
 
         Args:
 
             old_input (Node): The old input node to be replaced.
-            new_input (Node): The new input node to replace `old_input`.
+            new_input (Node): The new input node to replace ``old_input``.
 
         """
         def maybe_replace_node(n : Node) -> Node:

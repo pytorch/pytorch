@@ -158,7 +158,6 @@ class TimeoutTest(test_c10d_common.AbstractTimeoutTest, TestCase):
             raise unittest.SkipTest("No GPUs available, skipping test")
         self._test_default_store_timeout("nccl")
 
-
 class ProcessGroupNCCLNoGPUTest(TestCase):
     MAIN_PROCESS_RANK = 0
 
@@ -422,6 +421,30 @@ class ProcessGroupNCCLTest(TestCase):
             allgather_base(output_t, tensor)
 
     @requires_nccl()
+    def test_reduce_scatter_base_basics(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        def reduce_scatter_base(output_t, input_t):
+            work = pg._reduce_scatter_base(output_t, input_t)
+            work.wait()
+
+        device_id = self.rank % self.num_gpus
+        # anticpate an error
+        with self.assertRaisesRegex(RuntimeError, "input tensor must be the same size as output size times world size"):
+            input_t = torch.tensor([self.rank]).cuda(device_id)
+            output_t = torch.empty((self.world_size + 1), dtype=input_t.dtype).cuda(device_id)
+            # fails the check because output_t is not correctly sized
+            reduce_scatter_base(output_t, input_t)
+
+        # anticpate an error
+        with self.assertRaisesRegex(RuntimeError, "input tensor must be the same type as the outut tensor."):
+            tensor = torch.tensor([self.rank], dtype=torch.float).cuda(device_id)
+            output_t = torch.empty((self.world_size + 1), dtype=torch.long).cuda(device_id)
+            # fails the check because the dtype is different
+            reduce_scatter_base(output_t, tensor)
+
+    @requires_nccl()
     def test_reduce_scatter_ops(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
@@ -497,6 +520,26 @@ class ProcessGroupNCCLTest(TestCase):
             expected = torch.tensor([float(math.factorial(virtual_world_size))])
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
             self.assertEqualIgnoreType(expected, output[i])
+
+    @requires_nccl()
+    def test_reduce_scatter_base_ops(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        def reduce_scatter_base(output_t, input_t):
+            work = pg._reduce_scatter_base(output_t, input_t)
+            work.wait()
+
+        device_id = self.rank % self.num_gpus
+        # reduce_scatter_base is GPU number agnostic.
+        # Each rank contribute one tensor regardless of GPU counts
+        output_t = torch.empty([1]).cuda(device_id)
+        tensor = torch.arange(self.world_size, dtype=output_t.dtype).cuda(device_id)
+
+        reduce_scatter_base(output_t, tensor)
+
+        # Verification
+        self.assertEqual(output_t[0], self.rank * self.world_size)
 
     @requires_nccl()
     def test_barrier(self):
@@ -867,43 +910,20 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
             output = fc3(output)
             loss = criterion(output, target)
             loss.backward()
-
-        # First test that finding unused params under these conditions is to
-        # trigger an error when `backward` is called (because fc3 is an unused
-        # parameter and will therefore be marked ready twice).
-        try:
-            test_find_unused_parameters(
-                True, gradient_as_bucket_view=gradient_as_bucket_view
-            )
-        except Exception as ex:
-            self.assertTrue(
-                str(ex).startswith(
-                    "Expected to mark a variable ready only once.",
-                )
-            )
-            unused_index = 2
-            unused_index_str = f"Parameter at index {unused_index}"
-            model = ddp_model.module
-            for module_name, module in model.named_modules():
-                if module == model.fc3:
-                    for parameter_name, _ in module.named_parameters(
-                            recurse=False
-                    ):
-                        unused_fqn = f"{module_name}.{parameter_name}"
-                        # Only one such parameter in model.fc3, since bias=False
-                        break
-
-            if dist._get_debug_mode() != dist._DistributedDebugLevel.OFF:
-                unused_index_str += f" with name {unused_fqn}"
-
-            self.assertTrue(unused_index_str in str(ex))
-        else:
-            self.fail("Expected exception")
+        # First test that finding unused params under these conditions correctly
+        # marks parameter corresponding to fc3 as unused, since it was not used
+        # in DDP forward pass. Note that the above usage is not a recommended
+        # way of using DDP, if a module is wrapped within DDP, it should either
+        # stay unused or be used within DDP module itself.
+        test_find_unused_parameters(
+            True, gradient_as_bucket_view=gradient_as_bucket_view,
+        )
 
         dist.barrier(process_group)
 
-        # Then test that the default behavior can be overridden by setting
-        # `find_unused_parameters=False`.
+        # if find_unused_parameters=False, this would normally result in an
+        # error, but since fc3 does get used in a way DDP does not know about,
+        # autograd hooks are indeed called as expected.
         try:
             test_find_unused_parameters(
                 False, gradient_as_bucket_view=gradient_as_bucket_view
@@ -1004,7 +1024,7 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
         # Compute loss and gradients for both outputs
         output1, output2 = model(input)
         loss1 = criterion(output1, target)
-        loss1.backward()
+        loss1.backward(retain_graph=True)
         loss2 = criterion(output2, target)
         loss2.backward()
 
@@ -1067,9 +1087,8 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
         check_no_grads()
 
     def _test_accumulate_gradients_module(self, gradient_as_bucket_view=False):
-        # This is NOT the recommended way to implement accumulating grads, but
-        # we would like to make sure DDP does not mess up with the underlying
-        # module.
+        # Test gradient accumulation via model.no_sync context manager, which is
+        # the supported way of implementing gradient accumulation.
         int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
         devices = [torch.device("cuda:" + str(i)) for i in int_devices]
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -1098,12 +1117,13 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
             step_model(model, input, target)
 
             if iteration % 2 == 0:
-                # Skip gradients sync without calling prepare_for_backward
-                step_model(
-                    ddp_model.module,
-                    input[self.rank: (self.rank + 1)],
-                    target[self.rank: (self.rank + 1)],
-                )
+                # Skip gradients sync using no_sync context manager.
+                with ddp_model.no_sync():
+                    step_model(
+                        ddp_model,
+                        input[self.rank: (self.rank + 1)],
+                        target[self.rank: (self.rank + 1)],
+                    )
                 for i, j in zip(model.parameters(), ddp_model.parameters()):
                     self.assertNotEqual(i.grad, j.grad)
             else:
@@ -1114,7 +1134,7 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
                 )
                 for i, j in zip(model.parameters(), ddp_model.parameters()):
                     # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                    self.assertEqualIgnoreType(i.grad, j.grad)
+                    self.assertEqualIgnoreType(i.grad, j.grad, rtol=1.3e-06, atol=5e-5)
 
             # Shuffle the input so that DDP input is different
             torch.manual_seed(1337 + iteration)
@@ -1574,6 +1594,7 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
     def test_ddp_comm_hook_allreduce_hook_nccl_grad_is_view(self):
         self._test_ddp_comm_hook_allreduce_hook_nccl(gradient_as_bucket_view=True)
 
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_ddp_comm_hook_allreduce_hook_nccl_static_graph(self):
         self._test_ddp_comm_hook_allreduce_hook_nccl(static_graph=True)
@@ -1745,7 +1766,7 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
         )
         if static_graph:
             ddp_model._set_static_graph()
-        self.assertEqual(ddp_model.get_ddp_logging_data().get("static_graph", 0), static_graph)
+        self.assertEqual(ddp_model._get_ddp_logging_data().get("static_graph", 0), static_graph)
         input, ddp_input, target, ddp_target = self._prepare_dummy_data()
         loss = nn.MSELoss()
         for i in range(5):
@@ -1756,7 +1777,7 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
             for i, j in zip(model.parameters(), ddp_model.parameters()):
                 self.assertTrue(i.grad is not None)
                 self.assertTrue(j.grad is not None)
-                self.assertEqual(i.grad, j.grad)
+                self.assertEqual(i.grad, j.grad, rtol=1.3e-06, atol=5e-5)
 
     # DDP works as expect when layer is checkpointed only once
     @requires_nccl()
@@ -1955,6 +1976,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
     @skip_if_rocm
+    @unittest.skip("Frequently times out see https://github.com/pytorch/pytorch/issues/58920")
     def test_nccl_errors_blocking_abort(self):
         self._test_nccl_errors_blocking(lambda: os.abort())
 

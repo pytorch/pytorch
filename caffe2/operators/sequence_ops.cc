@@ -4,6 +4,31 @@
 
 namespace caffe2 {
 
+vector<TensorShape> TensorInferenceForAddPadding(
+    const OperatorDef& def,
+    const vector<TensorShape>& in) {
+  ArgumentHelper helper(def);
+  const int padding_width = helper.GetSingleArgument<int>("padding_width", 1);
+  const int end_padding_width = helper.GetSingleArgument<int>("end_padding_width", padding_width);
+  CAFFE_ENFORCE_GT(in.size(), 0);
+  CAFFE_ENFORCE_GE(in[0].dims_size(), 1);
+  if (in.size() > 1) {
+    CAFFE_ENFORCE_EQ(in[1].dims_size(), 1);
+  }
+
+  const auto num_paddings = (in.size() == 1 ? 1 : in[1].dims(0));
+  vector<int> out_shape(in[0].dims().begin(), in[0].dims().end());
+  out_shape[0] += (padding_width + end_padding_width) * num_paddings;
+
+  if (def.output_size() == 1) {
+    return vector<TensorShape>{CreateTensorShape(out_shape, in[0].data_type())};
+  } else {
+    return vector<TensorShape>{
+      CreateTensorShape(out_shape, in[0].data_type()),
+      CreateTensorShape(vector<int>(1, num_paddings), TensorProto::INT32)};
+  }
+}
+
 template <>
 template <typename T>
 void GatherPaddingOp<CPUContext>::GatherPadding(
@@ -295,6 +320,8 @@ REGISTER_GRADIENT(RemovePadding, GetRemovePaddingGradient);
 OPERATOR_SCHEMA(AddPadding)
     .NumInputs(1, 4)
     .NumOutputs(1, 2)
+    .TensorInferenceFunction(
+        OpSchema::NeedsAllInputShapes(TensorInferenceForAddPadding))
     .SetDoc(R"DOC(
 Given a partitioned tensor $T<N, D_1, ..., D_n>$, where the partitions are
 defined as ranges on its outer-most (slowest varying) dimension $N$,

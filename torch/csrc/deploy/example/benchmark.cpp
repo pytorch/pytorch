@@ -13,6 +13,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/TypeDefault.h>
+#include <c10/util/irange.h>
 
 #include <torch/script.h>
 
@@ -131,7 +132,7 @@ struct RunJIT {
     if (!cuda) {
       models_.push_back(torch::jit::load(file_to_run + "_jit"));
     } else {
-      for (int i = 0; i < 2; ++i) {
+      for (const auto i : c10::irange(2)) {
         auto d = torch::Device(torch::DeviceType::CUDA, i);
         std::stringstream qualified;
         qualified << file_to_run << "_jit_" << i;
@@ -145,8 +146,7 @@ struct RunJIT {
   }
   void operator()(int i) {
     if (cuda) {
-      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-      int device_id = i % models_.size();
+      const auto device_id = i % models_.size();
       auto d = torch::Device(torch::DeviceType::CUDA, device_id);
       to_device(
           models_[device_id].forward(to_device_vec(eg_, d)),
@@ -208,7 +208,7 @@ struct Benchmark {
 
     std::vector<std::vector<double>> latencies(n_threads_);
 
-    for (size_t i = 0; i < n_threads_; ++i) {
+    for (const auto i : c10::irange(n_threads_)) {
       threads_.emplace_back([this, &latencies, i] {
         torch::NoGradGuard guard;
         // do initial work
@@ -301,7 +301,7 @@ int main(int argc, char* argv[]) {
   }
 
   auto n_threads = {1, 2, 4, 8, 16, 32, 40};
-  for (int i = 4; i < argc; ++i) {
+  for (const auto i : c10::irange(4, argc)) {
     std::string model_file = argv[i];
     for (int n_thread : n_threads) {
       if (n_thread > max_thread) {
