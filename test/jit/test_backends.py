@@ -586,8 +586,8 @@ class ErrorMessagesWithCompiler(JitBackendTestCase):
         scripted_module_n = torch.jit.script(ErrorMessagesWithCompiler.ModuleNotSupported())
         # Test exception is thrown when lowering a module with an unsupported operator
         with self.assertRaisesRegexWithHighlight(RuntimeError,
-                                                # Special escape characters are replaced with '.'
-                                                r"""The node of aten::mul is not supported in this compiler. .*
+                                                 # Special escape characters are replaced with '.'
+                                                 r"""The node of aten::mul is not supported in this compiler. .*
         def forward.self, x, h.:
             return x . h
                    ~~~~~ <--- HERE
