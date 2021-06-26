@@ -434,7 +434,8 @@ class TestOperatorAuthoringCPU(JitTestCase):
             a = self.rand(4, 2, requires_grad=True)
             b = self.rand(4, 2, requires_grad=True)
             c = self.rand(4, 2)
-            fn(a, fn(b, c)).sum().backward()
+            d = self.rand(4, 2)
+            fn(fn(a, fn(b, c)), d).sum().backward()
             return a.grad, b.grad
 
         a1, b1 = grads(pointwise_fn)
