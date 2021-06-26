@@ -961,7 +961,7 @@ void copysign_kernel(TensorIteratorBase& iter) {
   });
 }
 
-void xlogy_kernel(TensorIterator& iter) {
+void xlogy_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "xlogy_cpu", [&]() {
     cpu_kernel(iter, [](scalar_t x, scalar_t y) -> scalar_t {
       if (at::_isnan(y)){
