@@ -123,16 +123,6 @@ std::tuple<Tensor,optional<int64_t>> sum_batch_rule(
   return sum_dim_batch_rule(self, self_bdim, range(0, self.dim() - 1), false, dtype);
 }
 
-std::tuple<Tensor,optional<int64_t>> var_dim_batch_rule(
-    const Tensor& self, optional<int64_t> self_bdim, IntArrayRef dims, bool unbiased, bool keepdim) {
-  return reduction_dimarray_batch_rule<decltype(&ATEN_FN2(var, dim)), &at::var, bool, bool>(self, self_bdim, dims, unbiased, keepdim);
-}
-
-std::tuple<Tensor,optional<int64_t>> var_batch_rule(
-    const Tensor& self, optional<int64_t> self_bdim, bool unbiased) {
-  return var_dim_batch_rule(self, self_bdim, range(0, self.dim() - 1), unbiased, false);
-}
-
 std::tuple<Tensor,optional<int64_t>> mean_dim_batch_rule(
     const Tensor& self, optional<int64_t> self_bdim, IntArrayRef dims, bool keepdim, optional<ScalarType> dtype) {
   return reduction_dimarray_batch_rule<decltype(&ATEN_FN2(mean, dim)), &at::mean, bool, optional<ScalarType>>(self, self_bdim, dims, keepdim, dtype);
@@ -153,14 +143,27 @@ std::tuple<Tensor,optional<int64_t>> nansum_batch_rule(
   return nansum_dim_batch_rule(self, self_bdim, range(0, self.dim() - 1), false, dtype);
 }
 
-std::tuple<Tensor,optional<int64_t>> std_dim_batch_rule(
-    const Tensor& self, optional<int64_t> self_bdim, IntArrayRef dims, bool unbiased, bool keepdim) {
-  return reduction_dimarray_batch_rule<decltype(&ATEN_FN2(std, dim)), &at::std, bool, bool>(self, self_bdim, dims, unbiased, keepdim);
+// Wraps so that dim is always provided
+Tensor std_correction_wrapper(const Tensor& self, IntArrayRef dim, optional<int64_t> correction, bool keepdim) {
+  return at::std(self, dim, correction, keepdim);
+}
+std::tuple<Tensor,optional<int64_t>> std_correction_batch_rule(
+    const Tensor& self, optional<int64_t> self_bdim, optional<IntArrayRef> dim, optional<int64_t> correction, bool keepdim) {
+  if (!dim.has_value()) {
+    dim = range(0, self.dim() - 1);
+  }
+  return reduction_dimarray_batch_rule<decltype(&std_correction_wrapper), &std_correction_wrapper, optional<int64_t>, bool>(self, self_bdim, *dim, correction, keepdim);
 }
 
-std::tuple<Tensor,optional<int64_t>> std_batch_rule(
-    const Tensor& self, optional<int64_t> self_bdim, bool unbiased) {
-  return std_dim_batch_rule(self, self_bdim, range(0, self.dim() - 1), unbiased, false);
+Tensor var_correction_wrapper(const Tensor& self, IntArrayRef dim, optional<int64_t> correction, bool keepdim) {
+  return at::var(self, dim, correction, keepdim);
+}
+std::tuple<Tensor,optional<int64_t>> var_correction_batch_rule(
+    const Tensor& self, optional<int64_t> self_bdim, optional<IntArrayRef> dim, optional<int64_t> correction, bool keepdim) {
+  if (!dim.has_value()) {
+    dim = range(0, self.dim() - 1);
+  }
+  return reduction_dimarray_batch_rule<decltype(&var_correction_wrapper), &var_correction_wrapper, optional<int64_t>, bool>(self, self_bdim, *dim, correction, keepdim);
 }
 
 std::tuple<Tensor,optional<int64_t>> prod_dim_batch_rule(
@@ -278,13 +281,15 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("mode", SINGLE_ARG(reduction_dim_ret_pair_batch_rule<decltype(&ATEN_FN(mode)), &at::mode, bool>));
   VMAP_SUPPORT("prod", SINGLE_ARG(reduction_no_dim_batch_rule<decltype(&ATEN_FN(prod)), &at::prod, decltype(&prod_dim_batch_rule), &prod_dim_batch_rule, optional<ScalarType>>));
   VMAP_SUPPORT("prod.dim_int", prod_dim_batch_rule);
-  VMAP_SUPPORT("std", std_batch_rule);
-  VMAP_SUPPORT("std.dim", std_dim_batch_rule);
+  m.impl("std", static_cast<decltype(&ATEN_FN(std))>(native::std));
+  m.impl("std.dim", static_cast<decltype(&ATEN_FN2(std, dim))>(native::std));
+  VMAP_SUPPORT("std.correction", std_correction_batch_rule);
   VMAP_SUPPORT("sum", sum_batch_rule);
   VMAP_SUPPORT("sum.dim_IntList", sum_dim_batch_rule);
   VMAP_SUPPORT("topk", topk_batch_rule);
-  VMAP_SUPPORT("var", var_batch_rule);
-  VMAP_SUPPORT("var.dim", var_dim_batch_rule);
+  m.impl("var", static_cast<decltype(&ATEN_FN(var))>(native::var));
+  m.impl("var.dim", static_cast<decltype(&ATEN_FN2(var, dim))>(native::var));
+  VMAP_SUPPORT("var.correction", var_correction_batch_rule);
   VMAP_SUPPORT("_log_softmax_backward_data", _log_softmax_backward_data);
 }
 
