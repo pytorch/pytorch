@@ -51,6 +51,11 @@ TORCH_API void SerializeBlob(
     BlobSerializerBase::SerializationAcceptor acceptor,
     const BlobSerializationOptions& options);
 
+TORCH_API size_t EstimateSerializedBlobSize(
+    const Blob& blob,
+    c10::string_view name,
+    const BlobSerializationOptions& options);
+
 /**
  * @brief Convenience function to serialize a blob to a string.
  *
@@ -136,6 +141,12 @@ class TORCH_API TensorSerializer : public BlobSerializerBase {
     BlobSerializationOptions options;
     Serialize(tensor, name, proto, options, chunkBegin, chunkSize);
   }
+
+  size_t EstimateSerializedBlobSize(
+      const void* pointer,
+      TypeMeta typeMeta,
+      c10::string_view name,
+      const BlobSerializationOptions& options) override;
 
  private:
   // A utility function to store the device context detauls.
