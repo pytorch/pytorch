@@ -217,7 +217,11 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("threshold_backward", SINGLE_ARG(
         binary_pointwise_batch_rule<decltype(&at::threshold_backward), &at::threshold_backward, const Scalar&>));
 
-  m.impl("where.self", static_cast<decltype(&ATEN_FN2(where, self))>(native::where));
+  OP_DECOMPOSE2(where, self);
+  OP_DECOMPOSE2(where, ScalarSelf);
+  OP_DECOMPOSE2(where, ScalarOther);
+  OP_DECOMPOSE2(where, Scalar);
+  OP_DECOMPOSE(where);
   VMAP_SUPPORT("_s_where", _s_where_batch_rule);
 
   using TensorScalarInplaceT = Tensor& (Tensor::*)(const Tensor&, const Scalar&) const;
