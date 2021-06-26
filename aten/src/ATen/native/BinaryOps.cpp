@@ -1009,23 +1009,6 @@ Tensor min(const Tensor& self, const Tensor& other) {
   return at::minimum(self, other);
 }
 
-Tensor& fmin_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmin not implemented for complex tensors.");
-
-  auto iter = TensorIterator::binary_op(result, self, other);
-  fmin_stub(iter.device_type(), iter);
-  return result;
-}
-
-Tensor fmin(const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmin not implemented for complex tensors.");
-
-  Tensor result;
-  auto iter = TensorIterator::binary_op(result, self, other);
-  fmin_stub(iter.device_type(), iter);
-  return iter.output();
-}
-
 Tensor floor_divide(const Tensor& self, const Scalar& other) {
   return at::floor_divide(self, wrapped_scalar_tensor(other));
 }
