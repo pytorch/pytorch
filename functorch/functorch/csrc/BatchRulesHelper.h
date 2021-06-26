@@ -38,6 +38,12 @@ std::tuple<Tensor,optional<int64_t>> basic_unary_batch_rule(
   return std::make_tuple(Func(tensor, std::forward<ExtraArgs>(extra_args)...), batch_dim);
 }
 
+template <typename F, F Func, typename... ExtraArgs>
+std::tuple<Tensor,optional<int64_t>> variadic_bdims_batch_rule(const Tensor& self, optional<int64_t> self_bdim, ExtraArgs... extra_args) {
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  return std::make_tuple(Func(self_, std::forward<ExtraArgs>(extra_args)...), self_bdim.has_value() ? optional<int64_t>{0} : nullopt);
+}
+
 #define INVOKE(object,ptrToMember)  ((object).*(ptrToMember))
 #define OP_DECOMPOSE(op)  m.impl(#op, static_cast<decltype(&ATEN_FN(op))>(native::op));
 #define OP_DECOMPOSE2(op, overload)  m.impl(#op"."#overload, static_cast<decltype(&ATEN_FN2(op, overload))>(native::op));
