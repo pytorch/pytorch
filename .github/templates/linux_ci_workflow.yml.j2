@@ -396,7 +396,7 @@ jobs:
     steps:
       - name: invalidate
         run: |
-          aws cloudfront create-invalidation --distribution-id E1KSP3AYT2BOMS --paths '5678/*'
+          aws cloudfront create-invalidation --distribution-id E1KSP3AYT2BOMS --paths '522678/*'
       - name: stop
         run: exit 1
       - name: Log in to ECR
