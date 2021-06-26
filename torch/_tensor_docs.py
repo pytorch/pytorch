@@ -694,6 +694,34 @@ bitwise_xor_() -> Tensor
 In-place version of :meth:`~Tensor.bitwise_xor`
 """)
 
+add_docstr_all('bitwise_left_shift',
+               r"""
+bitwise_left_shift(other) -> Tensor
+
+See :func:`torch.bitwise_left_shift`
+""")
+
+add_docstr_all('bitwise_left_shift_',
+               r"""
+bitwise_left_shift_(other) -> Tensor
+
+In-place version of :meth:`~Tensor.bitwise_left_shift`
+""")
+
+add_docstr_all('bitwise_right_shift',
+               r"""
+bitwise_right_shift(other) -> Tensor
+
+See :func:`torch.bitwise_right_shift`
+""")
+
+add_docstr_all('bitwise_right_shift_',
+               r"""
+bitwise_right_shift_(other) -> Tensor
+
+In-place version of :meth:`~Tensor.bitwise_right_shift`
+""")
+
 add_docstr_all('broadcast_to',
                r"""
 broadcast_to(shape) -> Tensor
@@ -1723,7 +1751,7 @@ add_docstr_all('index_add_',
                r"""
 index_add_(dim, index, tensor, *, alpha=1) -> Tensor
 
-Accumulate the elements of attr:`alpha` times :attr:`tensor` into the :attr:`self`
+Accumulate the elements of :attr:`alpha` times :attr:`tensor` into the :attr:`self`
 tensor by adding to the indices in the order given in :attr:`index`. For example,
 if ``dim == 0``, ``index[i] == j``, and ``alpha=-1``, then the ``i``\ th row of
 :attr:`tensor` is subtracted from the ``j``\ th row of :attr:`self`.
@@ -1840,10 +1868,9 @@ Args:
 
 add_docstr_all('index_put',
                r"""
-index_put(tensor1, indices, values, accumulate=False) -> Tensor
+index_put(indices, values, accumulate=False) -> Tensor
 
 Out-place version of :meth:`~Tensor.index_put_`.
-`tensor1` corresponds to `self` in :meth:`torch.Tensor.index_put_`.
 """)
 
 add_docstr_all('index_select',
@@ -4589,26 +4616,23 @@ See :func:`torch.pinverse`
 
 add_docstr_all('index_add',
                r"""
-index_add(tensor1, dim, index, tensor2) -> Tensor
+index_add(dim, index, tensor2) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.index_add_`.
-`tensor1` corresponds to `self` in :meth:`torch.Tensor.index_add_`.
 """)
 
 add_docstr_all('index_copy',
                r"""
-index_copy(tensor1, dim, index, tensor2) -> Tensor
+index_copy(dim, index, tensor2) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.index_copy_`.
-`tensor1` corresponds to `self` in :meth:`torch.Tensor.index_copy_`.
 """)
 
 add_docstr_all('index_fill',
                r"""
-index_fill(tensor1, dim, index, value) -> Tensor
+index_fill(dim, index, value) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.index_fill_`.
-`tensor1` corresponds to `self` in :meth:`torch.Tensor.index_fill_`.
 """)
 
 add_docstr_all('scatter',
