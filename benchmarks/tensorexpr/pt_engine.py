@@ -18,7 +18,7 @@ class TorchTensorEngine(object):
         return torch.rand_like(v)
 
     def numpy(self, t):
-        return t.cpu().numpy()
+        return t.detach().cpu().numpy()
 
     def mul(self, t1, t2):
         return t1 * t2
