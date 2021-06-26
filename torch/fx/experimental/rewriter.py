@@ -73,8 +73,6 @@ class AST_Rewriter(ast.NodeTransformer):
             Output:
              y = annotate(f2(x),Tensor_Type((1,2,3,Dyn)))
         """
-        arg1 = node.value
-
         # if isinstance(node.annotation, ast.Call):
         #     # In this case, we have a Tensor Type
         #     # node.annotation.func.id = TensorType
@@ -87,6 +85,7 @@ class AST_Rewriter(ast.NodeTransformer):
         return ast.Assign(targets=[node.target], value=ast.Call(
             func=ast.Name(id='annotate', ctx=ast.Load()),
             args=[node.value, node.annotation], keywords=[]))
+
 
 class RewritingTracer(Tracer):
     def trace(self, root: Union[torch.nn.Module, Callable], concrete_args: Optional[Dict[str, Any]] = None) -> Graph:
