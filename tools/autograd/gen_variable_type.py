@@ -223,7 +223,17 @@ DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE = {
 DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
     # These functions return tensors with use_count > 1
     # https://github.com/pytorch/pytorch/issues/60426
-    'native_batch_norm', 'native_batch_norm_backward', '_embedding_bag',
+    'native_batch_norm', 'native_batch_norm_backward', 'native_group_norm_backward',
+    'native_layer_norm_backward', 'slow_conv_transpose2d_backward_output_mask',
+    'thnn_conv2d_backward_output_mask', 'slow_conv3d_backward_output_mask',
+    'slow_conv_transpose2d_backward_output_mask', 'slow_conv_transpose3d_backward_output_mask',
+    '_embedding_bag', '_embedding_bag_forward_only', 'mkldnn_convolution_backward',
+    'q_per_channel_scales'
+}
+DONT_ENFORCE_STORAGE_IMPL_USE_COUNT = {
+    # These 'non-view' functions return tensors with storage use_count > 1
+    'thnn_conv2d_forward', 'slow_conv3d_forward', 'channel_shuffle',
+    'q_per_channel_zero_points'
 }
 # END CHECKS FOR [ TensorImpl and Storage Pointer Sanity Checks ]
 
@@ -722,7 +732,8 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                         stmts_after_call += [ENFORCE_SAME_TENSOR_STORAGE.substitute(tensor_name=aliased_arg_name,
                                                                                     out_tensor_name=ret_name)]
                     else:
-                        stmts_after_call += [ENFORCE_TENSOR_STORAGE_USE_COUNT_EQUALS_ONE.substitute(tensor_name=ret_name)]
+                        if base_name not in DONT_ENFORCE_STORAGE_IMPL_USE_COUNT:
+                            stmts_after_call += [ENFORCE_TENSOR_STORAGE_USE_COUNT_EQUALS_ONE.substitute(tensor_name=ret_name)]
 
                     if base_name not in DONT_ENFORCE_TENSOR_IMPL_USE_COUNT:
                         stmts_after_call += [ENFORCE_TENSOR_IMPL_USE_COUNT_EQUALS_ONE.substitute(tensor_name=ret_name)]

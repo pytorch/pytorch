@@ -28,7 +28,7 @@ Tensor empty_override(IntArrayRef size, c10::optional<ScalarType> dtype, c10::op
 
 Tensor add_override(const Tensor & a, const Tensor & b , const Scalar& c) {
   test_int = 2;
-  return a;
+  return a.clone();
 }
 
 Tensor empty_strided_override(
