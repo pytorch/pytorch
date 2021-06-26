@@ -2843,24 +2843,23 @@ add_docstr_all('numpy',
                r"""
 numpy(*, force=False) -> numpy.ndarray
 
-Returns :attr:`self` tensor as a NumPy :class:`ndarray`.
+Returns the tensor as a NumPy :class:`ndarray`.
 
-If :attr:`force` is ``False``, tensor :attr:`self` and the
-returned :class:`ndarray` share the same underlying storage. Changes to
-:attr:`self` tensor will be reflected in the :class:`ndarray` and vice versa.
-If tensors storage is not CPU, or if :attr:`requires_grad` is ``True`` and
-:attr:`GradMode` is ``True``, or tensor is sparse, or :attr:`is_conj()`
-is ``True``, it throws exception.
+If :attr:`force` is ``False`` (the default), the conversion
+is performed only if the tensor is on the CPU, does not require grad,
+does not have its conjugate bit set, and is a dtype and layout that
+NumPy supports. The returned ndarray and the tensor will share their
+storage, so changes to the tensor will be reflected in the ndarray
+and vice versa.
 
-If :attr:`force` is ``True`` it tries to resolve issues that would otherwise throw an exception.
-It calls :func:`torch.Tensor.detach`, :func:`torch.Tensor.cpu` and :func:`torch.Tensor.resolve_conj`.
-If tensor is sparse, it still throws an exception. Since it makes a copy in some scenarios,
-tensor :attr:`self` and the returned :class:`ndarray` can have separate
-underlying storage and changes to :attr:`self` may not be reflected
-in the :class:`ndarray` and vice versa.
+If :attr:`force` is ``True`` this is equivalent to
+calling ``t.detach().cpu().resolve_conj().numpy()``. If the tensor
+isn't on the CPU or its conjugate bit is set, the tensor won't share
+its storage with the returned ndarray. Setting :attr:`force` to
+``True`` can be a useful shorthand.
 
 Args:
-    force (bool): whether to copy/change :attr:`self` or throw exception
+    force (bool): if ``True``, it allows the ndarray to be a copy of the tensor instead of always sharing its memory, defaults to ``False``.
 """)
 
 add_docstr_all('orgqr',
