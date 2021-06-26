@@ -193,6 +193,8 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
 
   BINARY_POINTWISE(div);
   VMAP_SUPPORT("div.Scalar", SINGLE_ARG(basic_unary_batch_rule<decltype(&ATEN_FN2(div, Scalar)), &at::div, const Scalar&>));
+  VMAP_SUPPORT("div.Scalar_mode", SINGLE_ARG(basic_unary_batch_rule<decltype(&ATEN_FN2(div, Scalar_mode)), &at::div, const Scalar&, c10::optional<string_view>>));
+  VMAP_SUPPORT("div.Tensor_mode", SINGLE_ARG(binary_pointwise_batch_rule<decltype(&ATEN_FN2(div, Tensor_mode)), &at::div, c10::optional<string_view>>));
 
   VMAP_SUPPORT("maximum", SINGLE_ARG(binary_pointwise_batch_rule<decltype(&ATEN_FN(maximum)), &at::maximum>));
   VMAP_SUPPORT("minimum", SINGLE_ARG(binary_pointwise_batch_rule<decltype(&ATEN_FN(minimum)), &at::minimum>));
