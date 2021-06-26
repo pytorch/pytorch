@@ -172,12 +172,12 @@ def get_fallback_and_vmap_exhaustive(op, arg_values, kwarg_values):
     batch_size = 3
     generator = get_exhaustive_batched_inputs(arg_values, kwarg_values, batch_size)
     for batched_args, in_dims, kwarg_values in generator:
-        # print(batched_args)
         loop_out = loop(op, in_dims, out_dim, batch_size, *batched_args, **kwarg_values)
         # Used for debugging the resulting operations
         # from functorch import make_fx
         # def f(a,b,c):
         #     return op(a,b,c)
         # t = make_fx(vmap(f, in_dims=in_dims, out_dims=out_dim))(*batched_args, **kwarg_values)
+        # import pdb; pdb.set_trace()
         batched_out = vmap(op, in_dims=in_dims, out_dims=out_dim)(*batched_args, **kwarg_values)
         yield (loop_out, batched_out)
