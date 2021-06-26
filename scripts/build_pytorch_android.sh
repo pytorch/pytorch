@@ -35,10 +35,10 @@ parse_abis_list "$@"
 build_android
 
 # To set proxy for gradle add following lines to ./gradle/gradle.properties:
-systemProp.http.proxyHost=...
-systemProp.http.proxyPort=8080
-systemProp.https.proxyHost=...
-systemProp.https.proxyPort=8080
+# systemProp.http.proxyHost=...
+# systemProp.http.proxyPort=8080
+# systemProp.https.proxyHost=...
+# systemProp.https.proxyPort=8080
 
 if [ "$CUSTOM_ABIS_LIST" = true ]; then
   # Skipping clean task here as android gradle plugin 3.3.2 exteralNativeBuild has problems
