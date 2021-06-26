@@ -109,6 +109,48 @@ std::tuple<Tensor,optional<int64_t>> comparison_pointwise_batch_rule(
   return std::make_tuple( std::move(result), std::move(result_batch_dim) );
 }
 
+
+std::tuple<Tensor,optional<int64_t>> clamp_tensor_batch_rule(
+    const Tensor& self, optional<int64_t> self_bdim,
+    const optional<Tensor>& min, optional<int64_t> min_bdim, const optional<Tensor>& max, optional<int64_t> max_bdim) {
+  int64_t self_logical_rank = rankWithoutBatchDim(self, self_bdim);
+  int64_t out_logical_rank = self_logical_rank;
+  if (min.has_value()) {
+    out_logical_rank = std::max(out_logical_rank, rankWithoutBatchDim(*min, min_bdim));
+  }
+  if (max.has_value()) {
+    out_logical_rank = std::max(out_logical_rank, rankWithoutBatchDim(*max, max_bdim));
+  }
+
+  c10::optional<Tensor> min_ = nullopt;
+  c10::optional<Tensor> max_ = nullopt;
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  if (min.has_value()) {
+    min_ = moveBatchDimToFront(*min, min_bdim);
+  }
+  if (max.has_value()) {
+    max_ = moveBatchDimToFront(*max, max_bdim);
+  }
+  // todo(chilli): Are there weird type promotion semantics here we need to worry about?
+
+  // If the dimensions aren't aligned, we need to line them up.
+  // Tensor[B, 3] + Tensor[2, 5, 3] -> Tensor[B, 1, 1, 3] + Tensor[2, 5, 3]
+  // Note that only tensors that have a batch dim need to be modified.
+  // Tensor[B, 2, 3, 5] + Tensor[5] -> no changes needed
+  self_ = maybePadToLogicalRank(self_, self_bdim, out_logical_rank);
+  if (min_.has_value()) {
+    min_ = maybePadToLogicalRank(*min_, min_bdim, out_logical_rank);
+  }
+  if (max_.has_value()) {
+    max_ = maybePadToLogicalRank(*max_, max_bdim, out_logical_rank);
+  }
+
+  auto result = at::clamp(self_, min_, max_);
+  auto result_batch_dim = self_bdim.has_value() || min_bdim.has_value() || max_bdim.has_value()
+    ? optional<int64_t>{0} : nullopt;
+  return std::make_tuple( std::move(result), std::move(result_batch_dim) );
+}
+
 std::tuple<Tensor,optional<int64_t>> pow_scalar_tensor_batch_rule(
     const Scalar& other,
     const Tensor& tensor, optional<int64_t> tensor_batch_dim) {
@@ -128,6 +170,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
 
   VMAP_SUPPORT("clamp",
       SINGLE_ARG(basic_unary_batch_rule<decltype(&ATEN_FN(clamp)), &at::clamp, const optional<Scalar>&, const optional<Scalar>&>));
+  VMAP_SUPPORT("clamp.Tensor", clamp_tensor_batch_rule);
   VMAP_SUPPORT("clamp_min.Tensor",
       SINGLE_ARG(binary_pointwise_batch_rule<decltype(&ATEN_FN2(clamp_min, Tensor)), &at::clamp_min>));
   VMAP_SUPPORT("clamp_min",
