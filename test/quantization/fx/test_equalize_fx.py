@@ -11,7 +11,7 @@ from torch.quantization.fx._equalize import (
     _convert_equalization_ref
 )
 
-from torch.testing._internal.common_quantization import NodeSpec as ns
+from torch.testing._internal.common_quantization import NodeSpec as ns, skipIfNoFBGEMM
 from torch.testing._internal.common_quantization import QuantizationTestCase
 
 # Standard Libraries
@@ -240,6 +240,7 @@ class TestEqualizeFx(QuantizationTestCase):
             prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=equalization_qconfig_dict)
             self.checkGraphModuleNodes(prepared, expected_node_occurrence=node_occurrence)
 
+    @skipIfNoFBGEMM
     def test_input_weight_equalization_convert(self):
         """
         """
