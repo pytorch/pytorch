@@ -558,6 +558,66 @@ class BasicModuleTestWithCompiler(JitBackendTestCaseWithCompiler):
         input = torch.randn(5)
         self.check_forward((input, input))
 
+class CompModuleTestWithCompiler(JitBackendTestCase):
+    """
+    Tests for CompModule, which is a module with two lowered submodules
+    """
+
+    class BasicModuleSub(torch.nn.Module):
+        """
+        A simple subtraction Module to be used in CompModule.
+        """
+        def __init__(self):
+            super().__init__()
+
+        def forward(self, x, h):
+            return x - h
+
+    class CompModule(torch.nn.Module):
+        """
+        A module with two lowered submodules.
+        """
+
+        def __init__(self, addmodule, submodule):
+            super().__init__()
+            self.lowered_add = addmodule
+            self.lowered_sub = submodule
+
+        def forward(self, a, b, s):
+            c = self.lowered_add.forward(a, b)
+            d = self.lowered_sub.forward(a, b)
+            y = s * (c * d)
+            return y
+
+    def setUp(self):
+        super().setUp()
+        # Create Python and JIT versions of CompModule with lowered submodules.
+        compile_spec = {
+            "forward": {
+                "input_shapes": "((1, 1, 320, 240), (1, 3))",
+                "some_other_option": "True",
+            },
+        }
+        lowered_add = torch._C._jit_to_backend(
+            "backend_with_compiler_demo", torch.jit.script(BasicModuleAdd()), compile_spec)
+        lowered_sub = torch._C._jit_to_backend(
+            "backend_with_compiler_demo",
+            torch.jit.script(CompModuleTestWithCompiler.BasicModuleSub()),
+            {"forward": {"": ""}}
+        )
+        self.module = CompModuleTestWithCompiler.CompModule(lowered_add, lowered_sub)
+        self.scripted_module = torch.jit.script(CompModuleTestWithCompiler.CompModule(lowered_add, lowered_sub))
+        # No backend and mobile versions of CompModule currently, so this is filler.
+        self.lowered_module = self.scripted_module
+        self.mobile_module = self.scripted_module
+
+    def test_execution(self):
+        # Test execution with backend against Python and JIT.
+        input1 = torch.randn(5)
+        input2 = torch.randn(5)
+
+        # Test forward.
+        self.check_function("forward", (input1, input2, input2))
 
 # This is needed for IS_WINDOWS or IS_MACOS to skip the tests.
 @unittest.skipIf(TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE,
@@ -571,12 +631,15 @@ class TestBackendsWithCompiler(JitTestCase):
     def __init__(self, name):
         super().__init__(name)
         self.basic_module_compiler_test = BasicModuleTestWithCompiler(name)
+        self.comp_module_compiler_test = CompModuleTestWithCompiler(name)
 
     def setUp(self):
         super().setUp()
         if not TEST_WITH_ROCM:
             self.basic_module_compiler_test.setUp()
+            self.comp_module_compiler_test.setUp()
 
     @skipIfRocm
     def test_execution(self):
         self.basic_module_compiler_test.test_execution()
+        self.comp_module_compiler_test.test_execution()
