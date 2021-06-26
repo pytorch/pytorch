@@ -457,8 +457,6 @@ class TestSubgraphRewriter(JitTestCase):
         symbolic_traced: torch.fx.GraphModule = symbolic_trace(module)
         for n, m in zip(symbolic_traced.graph.nodes, graph.nodes):
             if n.op == 'placeholder':
-                print(n.type)
-                print(m.type)
                 assert n.type == TensorType((1, 2, Dyn))
                 assert m.type == TensorType((1, 2, Dyn))
 
