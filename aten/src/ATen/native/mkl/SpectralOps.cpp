@@ -4,6 +4,7 @@
 #include <ATen/native/SpectralOpsUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <c10/util/accumulate.h>
+#include <c10/util/irange.h>
 
 #if !AT_MKL_ENABLED()
 
@@ -177,7 +178,7 @@ static void _fft_fill_with_conjugate_symmetry_cpu_(
   const auto element_size = scalarTypeToTypeMeta(dtype).itemsize();
   const auto ndim = signal_half_sizes.size();
   DimVector in_strides(ndim), out_strides(ndim);
-  for (int64_t i = 0; i < ndim; ++i) {
+  for (const auto i : c10::irange(ndim)) {
     TORCH_INTERNAL_ASSERT(in_strides_bytes[i] % element_size == 0);
     in_strides[i] = in_strides_bytes[i] / element_size;
     TORCH_INTERNAL_ASSERT(out_strides_bytes[i] % element_size == 0);
