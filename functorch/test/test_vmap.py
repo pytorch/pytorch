@@ -2411,8 +2411,8 @@ class TestVmapOperators(Namespace.TestVmapBase):
             (lambda t: torch.normal(t, 1.), (torch.randn(B0, 1),)),
             (lambda t: torch.normal(0., t), (torch.randn(B0, 1),)),
             (torch.poisson, (torch.rand(B0, 1),)),
-            (torch.rand_like, (torch.rand(B0, 1),)),
-            (torch.randn_like, (torch.rand(B0, 1),)),
+            # (torch.rand_like, (torch.rand(B0, 1),)),
+            # (torch.randn_like, (torch.rand(B0, 1),)),
             (lambda t: torch.randint_like(t, 2), (torch.rand(B0, 1),)),
             (lambda t: torch.randint_like(t, 0, 2), (torch.rand(B0, 1),)),
 
@@ -2424,8 +2424,8 @@ class TestVmapOperators(Namespace.TestVmapBase):
             (lambda t: torch.normal(captured, 1.), (torch.randn(B0),)),
             (lambda t: torch.normal(0., captured), (torch.randn(B0),)),
             (lambda t: torch.poisson(captured), (torch.rand(B0),)),
-            (lambda t: torch.rand_like(captured), (torch.rand(B0),)),
-            (lambda t: torch.randn_like(captured) , (torch.rand(B0),)),
+            # (lambda t: torch.rand_like(captured), (torch.rand(B0),)),
+            # (lambda t: torch.randn_like(captured) , (torch.rand(B0),)),
             (lambda t: torch.randint_like(captured, 2), (torch.rand(B0),)),
             (lambda t: torch.randint_like(captured, 0, 2), (torch.rand(B0),)),
 
