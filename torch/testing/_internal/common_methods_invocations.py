@@ -4673,6 +4673,32 @@ foreach_binary_op_db: List[OpInfo] = [
     ),
 ]
 
+foreach_pointwise_op_db: List[ForeachFuncInfo] = [
+    ForeachFuncInfo(
+        "addcmul",
+        dtypesIfCPU=all_types_and_complex(),
+        dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
+    ),
+    ForeachFuncInfo(
+        "addcdiv",
+        dtypesIfCPU=all_types_and_complex(),
+        dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
+    ),
+]
+
+foreach_minmax_op_db: List[ForeachFuncInfo] = [
+    ForeachFuncInfo(
+        "maximum",
+        dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+        dtypesIfCUDA=all_types_and(torch.float16, torch.bool),
+    ),
+    ForeachFuncInfo(
+        "minimum",
+        dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+        dtypesIfCUDA=all_types_and(torch.float16, torch.bool),
+    ),
+]
+
 def reference_sign(x):
     if x.dtype == np.bool_:
         # `np.sign` doesn't support `bool`.
