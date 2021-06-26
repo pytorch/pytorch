@@ -10,6 +10,8 @@ My Cool Docs Change
 
 **Hello from a documentation preview!**
 
+Everything from the master docs is here, but certain links that go outside the docs folder (i.e. everything in the top bar) won't work.h
+
 .. toctree::
    :glob:
    :maxdepth: 1
