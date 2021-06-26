@@ -185,21 +185,6 @@ const auto get_generator_sources(const cudnnBackendDescriptorType_t& desc, const
   return sources;
 }
 
-const auto get_fallback_method(const cudnn_frontend::OperationGraph &opGraph, const cudnnBackendDescriptorType_t& desc, const Tensor& x, const bool deterministic, const bool allow_tf32) {
-  // Method for engine config generator based on fallback list
-  auto fallback_method = [&](cudnn_frontend::OperationGraph &opGraph) -> cudnn_frontend::EngineConfigList {
-    auto fallback = cudnn_frontend::EngineFallbackListBuilder()
-                        .setOperationGraph(opGraph)
-                        .setOperation(desc)
-                        .build();
-    auto &fallback_list = fallback.getFallbackList();
-    cudnn_frontend::EngineConfigList filtered_configs;
-    filterEngineConfigs(fallback_list, filtered_configs, deterministic, allow_tf32, x.scalar_type());
-    return filtered_configs;
-  };
-  return fallback_method;
-}
-
 size_t get_available_workspace() {
   int device;
   THCudaCheck(cudaGetDevice(&device));
