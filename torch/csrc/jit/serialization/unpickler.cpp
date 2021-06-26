@@ -5,6 +5,7 @@
 #endif
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
+#include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 #include <string>
@@ -105,6 +106,18 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
           auto t = w.static_type->expect<OptionalType>();
           Work elem = {t->getElementType(), w.value};
           to_process.emplace_back(std::move(elem));
+        }
+      } break;
+      case UnionType::Kind: {
+        auto t = w.static_type->expect<UnionType>();
+        if (t->containedTypes().size() == 2 && t->canHoldType(NoneType::get())) {
+          if (!w.value.isNone()) {
+            auto inner = t->containedTypes()[0] != NoneType::get()
+                         ? t->containedTypes()[0]
+                         : t->containedTypes()[1];
+            Work elem = {inner, w.value};
+            to_process.emplace_back(std::move(elem));
+          }
         }
       } break;
       case ListType::Kind: {
@@ -402,22 +415,33 @@ PickleOpCode Unpickler::readInstruction() {
           args.at(0).toStringRef());
       at::ScalarType type = args.at(1).toScalarType();
       const std::string& key = args.at(2).toStringRef();
+
       at::Device device(args.at(3).toStringRef());
       if (device_) {
         device = *device_;
       }
-      at::DataPtr storage_ptr = read_record_(key);
-      int64_t numel = args.at(4).toInt();
-      caffe2::TypeMeta dtype = at::CPU(type).typeMeta();
-      at::Storage storage(
-          c10::Storage::use_byte_size_t(),
-          numel * dtype.itemsize(),
-          std::move(storage_ptr),
-          /*allocator=*/nullptr,
-          /*resizable=*/false); // NB: we didn't set any allocator for the
-                                // tensor
-      auto options = at::CPU(type).options();
 
+      at::Storage storage;
+      if (storage_context_ != nullptr && storage_context_->hasStorage(key)) {
+        // for torch.package logic where storage may be loaded already
+        storage = storage_context_->getStorage(key);
+      } else {
+        at::DataPtr storage_ptr = read_record_(key);
+        int64_t numel = args.at(4).toInt();
+        caffe2::TypeMeta dtype = at::CPU(type).typeMeta();
+        storage = at::Storage(
+            c10::Storage::use_byte_size_t(),
+            numel * dtype.itemsize(),
+            std::move(storage_ptr),
+            /*allocator=*/nullptr,
+            /*resizable=*/false); // NB: we didn't set any allocator for the
+                                  // tensor
+        if (storage_context_ != nullptr) {
+          storage_context_->addStorage(key, storage);
+        }
+      }
+
+      auto options = at::CPU(type).options();
       if (use_storage_device_) {
         options = options.device(storage.device());
         device = storage.device();

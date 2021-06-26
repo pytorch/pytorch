@@ -50,7 +50,7 @@ def main(argv: List[str]) -> None:
         version = -1
         print(f"WARNING: Expected {MD5}, got {md5.hexdigest()} instead")
 
-    results = Runner(work_orders).run()
+    results = Runner(work_orders, cadence=30.0).run()
 
     # TODO: Annotate with TypedDict when 3.8 is the minimum supported verson.
     grouped_results: Dict[str, Dict[str, List[Union[float, int]]]] = {

@@ -17,12 +17,11 @@ namespace c10 {
   _(TensorType)             \
   _(StorageType)            \
   _(TupleType)              \
-  _(UnionType)              \
   _(ListType)               \
   _(DictType)               \
   _(NumberType)             \
   _(FloatType)              \
-  _(ComplexType)      \
+  _(ComplexType)            \
   _(FutureType)             \
   _(RRefType)               \
   _(IntType)                \
@@ -45,7 +44,8 @@ namespace c10 {
   _(ScalarTypeType)         \
   _(AnyListType)            \
   _(AnyTupleType)           \
-  _(AnyClassType)
+  _(AnyClassType)           \
+  _(UnionType)
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,

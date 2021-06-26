@@ -2,15 +2,16 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/native/cuda/SortingCommon.cuh>
 
 #include <ATen/AccumulateType.h>
 
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCTensorMathReduce.cuh>
-#include <THC/THCTensorSort.cuh>
 #include <THC/THCThrustAllocator.cuh>
 #include <THC/THCAtomics.cuh>
 
+#include <thrust/device_ptr.h>
 #include <thrust/execution_policy.h>
 #include <thrust/unique.h>
 
@@ -21,8 +22,6 @@ namespace native {
 
 namespace {
 
-// The maximum block size in CUDA
-constexpr int MAX_BLOCK_SIZE = 1024;
 /* This code computes the sum of the weights in two-steps:
   1) Each GPU warp sums `NROWS_PER_THREAD` number of row given by `indeces`
   2) Each partial-sum from 1) are summed and scatter into `grad_weight`

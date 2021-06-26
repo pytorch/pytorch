@@ -3,7 +3,7 @@
 // ${generated_comment}
 
 #include <ATen/Context.h>
-#include <ATen/MetaFunctions.h>
+#include <ATen/NativeMetaFunctions.h>
 #include <ATen/core/Reduction.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/TensorOptions.h>
