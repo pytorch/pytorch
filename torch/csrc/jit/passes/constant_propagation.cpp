@@ -86,8 +86,7 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
 
   for (const IValue& v : stack) {
     if (v.isTensor()) {
-      // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-      at::Tensor t = v.toTensor();
+      const at::Tensor& t = v.toTensor();
       if (t.defined() && t.requires_grad()) {
         // requires grad tensors cannot be constants
         return c10::nullopt;

@@ -70,7 +70,6 @@ void to_ir::checkBreakContinue(
   }
 }
 
-
 /* ============================================================ */
 /*                IR Generation Utility Methods                */
 /*      (These utility methods create and/or add extra Nodes    */
@@ -123,7 +122,6 @@ std::vector<NamedValue> to_ir::emitAttributes(
   });
 }
 
-
 /* ========================================= */
 /*              `Value` Getters              */
 /* ========================================= */
@@ -163,7 +161,6 @@ std::vector<Value*> to_ir::getValues(
   return getValues(trees.tree()->trees(), maybe_unpack);
 }
 
-
 /* =================================================== */
 /*            Environment Stack Manipulation           */
 /* =================================================== */
@@ -183,7 +180,6 @@ std::shared_ptr<Environment> to_ir::popFrame(bool ends_def) {
   }
   return old_frame;
 }
-
 
 /* ====================================== */
 /*               IR Emission              */
@@ -3288,7 +3284,6 @@ std::shared_ptr<SugaredValue> to_ir::emitSubscript(
     }
   }
 }
-
 
 } // namespace jit
 } // namespace torch
