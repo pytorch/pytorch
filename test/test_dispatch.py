@@ -886,6 +886,8 @@ CompositeImplicitAutograd[alias] fn_CompositeImplicitAutograd
                 r"Registration to both CompositeImplicitAutograd and CompositeExplicitAutograd is not allowed"):
             dispatcher.register(["CompositeExplicitAutograd", "CompositeImplicitAutograd"])
 
+    def test_find_dangling_impls(self):
+        self.assertEqual(0, len(C._dispatch_find_dangling_impls()))
 
 if __name__ == '__main__':
     run_tests()
