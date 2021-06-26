@@ -402,7 +402,7 @@ jobs:
           rm /tmp/ecr-login.sh
       - name: Chown workspace
         run: |
-          # Ensure the working directory gets chowned back to the current user
+          # Ensure the wo rking directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - name: Checkout PyTorch
         uses: actions/checkout@v2
