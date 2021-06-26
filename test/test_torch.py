@@ -4963,10 +4963,10 @@ else:
     @dtypes(torch.long, torch.float32, torch.complex64)
     def test_gradient_all(self, device, dtype):
         def create_scalar(shape):
-            return make_tensor((1,), device='cpu', dtype=dtype, low=0.1).item()
+            return make_tensor((1,), device='cpu', dtype=dtype, low=1.).item()
 
         def create_list(shape):
-            return make_tensor((len(shape),), device='cpu', dtype=dtype, low=0.1).tolist()
+            return make_tensor((len(shape),), device='cpu', dtype=dtype, low=1.).tolist()
 
         def create_coordinate_tensors(shape):
             tensor_list = []
@@ -4988,12 +4988,13 @@ else:
             ((4, 4, 4), (2,)),
             ((4, 4, 4), (0, 1)),
             ((4, 4, 4, 3), (0, 2, 3)),
-            ((4, 5, 2, 4, 3), (1, 2)),
+            ((4, 5, 3, 4, 3), (1, 2)),
             ((4, 3, 6, 5, 3), (2, 4)),
-            ((4, 3, 2, 5, 3), (0, 1, 2, 3, 4)),
+            ((4, 3, 3, 5, 3), (0, 1, 2, 3, 4)),
         )
 
-        for case, space_fn, contig in product(test_cases, (create_scalar, create_list, create_coordinate_tensors), [True, False]):
+        for case, contig, edge_order, space_fn in product(test_cases, [True, False], [1, 2],
+                                                          (create_scalar, create_list, create_coordinate_tensors)):
             shape, dims = case
             # filter shape by dims before passing filtered shape to create_* functions
             filtered_shape = filter_shape(shape, dims)
@@ -5002,12 +5003,12 @@ else:
             t = make_tensor(shape, device=device, dtype=dtype, noncontiguous=not contig)
             t_np = t.cpu().numpy()
 
-            actual = torch.gradient(t, spacing=spacing, dim=dims, edge_order=1)
+            actual = torch.gradient(t, spacing=spacing, dim=dims, edge_order=edge_order)
             if space_fn == create_coordinate_tensors and spacing[0].device != 'cpu':
                 spacing = [space.cpu().detach().numpy() for space in spacing]
-            expected = np.gradient(t_np, *self._wrap_to_list(spacing), axis=dims, edge_order=1)
+            expected = np.gradient(t_np, *self._wrap_to_list(spacing), axis=dims, edge_order=edge_order)
             actual, expected = self._inf_nan_preprocess(list(actual), self._wrap_to_list(expected))
-            self.assertEqual(actual, expected, equal_nan="relaxed", exact_dtype=False)
+            self.assertEqual(actual, expected, equal_nan="relaxed", atol=1e-4, rtol=0, exact_dtype=False)
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.long, torch.float32, torch.complex64)
@@ -5025,6 +5026,10 @@ else:
         coordinates = [torch.tensor(coordinates_np, device=device)]
         actual = torch.gradient(t, spacing=coordinates, dim=0, edge_order=1)
         expected = [np.gradient(t_np, coordinates_np, axis=0, edge_order=1)]
+        self.assertEqual(actual, expected, exact_dtype=False)
+
+        actual = torch.gradient(t, spacing=coordinates, dim=0, edge_order=2)
+        expected = [np.gradient(t_np, coordinates_np, axis=0, edge_order=2)]
         self.assertEqual(actual, expected, exact_dtype=False)
 
     @onlyOnCPUAndCUDA
@@ -5050,10 +5055,10 @@ else:
              make_tensor((4,), device=device, dtype=torch.complex64)],
         )
 
-        for input, spacing_or_coord in product(inputs, spacing):
+        for input, spacing_or_coord, edge_order in product(inputs, spacing, [1, 2]):
             input_np = input.cpu().numpy()
             input_np = input.cpu().numpy()
-            actual = torch.gradient(input, spacing=spacing_or_coord, dim=(0, 1), edge_order=1)
+            actual = torch.gradient(input, spacing=spacing_or_coord, dim=(0, 1), edge_order=edge_order)
             spacing_or_coord_wrapped = self._wrap_to_list(spacing_or_coord)
             spacing_or_coord_np = []
             if torch.is_tensor(spacing_or_coord_wrapped[0]) and torch.device(spacing_or_coord_wrapped[0].device).type != 'cpu':
@@ -5061,7 +5066,7 @@ else:
                     spacing_or_coord_np.append(spacing_or_coord_wrapped[i].detach().clone().cpu().numpy())
             else:
                 spacing_or_coord_np = spacing_or_coord_wrapped
-            expected = np.gradient(input_np, *spacing_or_coord_np, axis=(0, 1), edge_order=1)
+            expected = np.gradient(input_np, *spacing_or_coord_np, axis=(0, 1), edge_order=edge_order)
             if actual[0].dtype == torch.complex64 and input.dtype != torch.complex64:
                 for i in range(len(actual)):
                     self.assertEqual(actual[i].real, expected[i].real, exact_dtype=False)
@@ -5081,7 +5086,7 @@ else:
             spacing = [0.1]
             torch.gradient(t, spacing=spacing, dim=dim, edge_order=1)
 
-        with self.assertRaisesRegex(RuntimeError, 'torch.gradient only supports edge_order=1 currently.'):
+        with self.assertRaisesRegex(RuntimeError, 'torch.gradient only supports edge_order=1 and edge_order=2.'):
             torch.gradient(t, edge_order=3)
 
         with self.assertRaisesRegex(RuntimeError, 'dim 1 appears multiple times in the list of dims'):
@@ -5096,6 +5101,12 @@ else:
 
         with self.assertRaises(IndexError):
             torch.gradient(t, dim=3)
+
+        with self.assertRaisesRegex(RuntimeError, 'torch.gradient expected each dimension size to be at least'):
+            torch.gradient(torch.tensor([[1], [2], [3]]), edge_order=1)
+
+        with self.assertRaisesRegex(RuntimeError, 'torch.gradient expected each dimension size to be at least'):
+            torch.gradient(torch.tensor([[1, 2], [3, 4]]), edge_order=2)
 
     def _test_large_cum_fn_helper(self, x, fn):
         x_cpu = x.cpu().float()
@@ -5238,6 +5249,13 @@ else:
         with self.assertWarnsOnceRegex(
                 UserWarning, "This overload of addcmul is deprecated"):
             self.assertEqual(actual, torch.addcmul(a, alpha, b, c))
+
+        if self.device_type == 'cuda' and dtype == torch.half:
+            a = torch.tensor([60000.0], device=device, dtype=dtype)
+            b = torch.tensor([60000.0], device=device, dtype=dtype)
+            c = torch.tensor([2.0], device=device, dtype=dtype)
+            out = torch.addcmul(a, b, c, value=-1)
+            self.assertTrue(not (out.isnan() or out.isinf()))
 
     def test_narrow_empty(self, device):
         x = torch.randn(2, 3, 4, device=device)
@@ -6239,6 +6257,13 @@ else:
                 _test_addcdiv()
         else:
             _test_addcdiv()
+
+        if self.device_type == 'cuda' and dtype == torch.half:
+            a = torch.tensor([60000.0], device=device, dtype=dtype)
+            b = torch.tensor([60000.0], device=device, dtype=dtype)
+            c = torch.tensor([1.0], device=device, dtype=dtype)
+            out = torch.addcmul(a, b, c, value=-2)
+            self.assertTrue(not (out.isnan() or out.isinf()))
 
     def test_nullary_op_mem_overlap(self, device):
         ops = (
