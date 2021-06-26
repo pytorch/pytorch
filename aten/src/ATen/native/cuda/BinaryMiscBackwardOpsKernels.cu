@@ -14,7 +14,7 @@
 namespace at {
 namespace native {
 
-void sigmoid_backward_kernel_cuda(TensorIterator& iter) {
+void sigmoid_backward_kernel_cuda(TensorIteratorBase& iter) {
   if(isComplexType(iter.dtype())) {
     AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "sigmoid_backward_cuda", [&]() {
       gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
