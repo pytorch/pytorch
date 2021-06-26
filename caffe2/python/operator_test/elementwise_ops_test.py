@@ -352,6 +352,43 @@ class TestElementwiseOps(hu.HypothesisTestCase):
             reference=swish_gradient,
         )
 
+    @given(n=st.integers(1, 6), m=st.integers(4, 6),
+           seed=st.integers(0, 1000), **hu.gcs)
+    @settings(deadline=10000)
+    def test_mul_gradient_inplace(self, n, m, gc, dc, seed):
+        np.random.seed(seed)
+
+        def mul_gradient(dC, A, B):
+            return [B * dC, A * dC]
+
+        A = np.random.rand(n, m).astype(np.float32)
+        B = np.random.rand(n, m).astype(np.float32)
+        dC = np.random.rand(n, m).astype(np.float32)
+        op_dA_inplace = core.CreateOperator(
+            "MulGradient",
+            ["dC", "A", "B"],
+            ["dC", "dB"],
+        )
+        op_dB_inplace = core.CreateOperator(
+            "MulGradient",
+            ["dC", "A", "B"],
+            ["dA", "dC"],
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op_dA_inplace,
+            inputs=[dC, A, B],
+            reference=mul_gradient,
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op_dB_inplace,
+            inputs=[dC, A, B],
+            reference=mul_gradient,
+        )
+
     @given(X=hu.tensor(dtype=np.float32), inplace=st.booleans(),
            engine=st.sampled_from(["", "CUDNN"]), **hu.gcs)
     @settings(deadline=10000)

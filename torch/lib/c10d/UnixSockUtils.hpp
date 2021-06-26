@@ -56,7 +56,7 @@ inline void waitSocketConnected(
     throw std::system_error(errno, std::system_category());
   } else if (numReady == 0) {
     errno = 0;
-    throw std::runtime_error(kConnectTimeoutMsg);
+    TORCH_CHECK(false, kConnectTimeoutMsg);
   }
 
   socklen_t errLen = sizeof(errno);

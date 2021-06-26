@@ -406,7 +406,7 @@ class DistributedDataParallel(Module):
         broadcast_buffers=True,
         process_group=None,
         bucket_cap_mb=25,
-        find_unused_parameters=False,
+        find_unused_parameters=True,
         check_reduction=False,
         gradient_as_bucket_view=False,
     ):
