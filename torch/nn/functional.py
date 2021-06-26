@@ -1898,6 +1898,25 @@ def silu(input: Tensor, inplace: bool = False) -> Tensor:
     return torch._C._nn.silu(input)
 
 
+def mish(input: Tensor, inplace: bool = False) -> Tensor:
+    r"""Applies the Mish function, element-wise.
+    Mish: A Self Regularized Non-Monotonic Neural Activation Function.
+
+    .. math::
+        \text{Mish}(x) = x * \text{Tanh}(\text{Softplus}(x))
+
+    .. note::
+        See `Mish: A Self Regularized Non-Monotonic Neural Activation Function <https://arxiv.org/abs/1908.08681>`_
+
+    See :class:`~torch.nn.Mish` for more details.
+    """
+    if has_torch_function_unary(input):
+        return handle_torch_function(mish, (input,), input, inplace=inplace)
+    if inplace:
+        return torch._C._nn.mish_(input)
+    return torch._C._nn.mish(input)
+
+
 def hardswish(input: Tensor, inplace: bool = False) -> Tensor:
     r"""Applies the hardswish function, element-wise, as described in the paper:
 
@@ -2457,7 +2476,7 @@ def nll_loss(
     Args:
         input: :math:`(N, C)` where `C = number of classes` or :math:`(N, C, H, W)`
             in case of 2D Loss, or :math:`(N, C, d_1, d_2, ..., d_K)` where :math:`K \geq 1`
-            in the case of K-dimensional loss.
+            in the case of K-dimensional loss. `input` is expected to be log-probabilities.
         target: :math:`(N)` where each value is :math:`0 \leq \text{targets}[i] \leq C-1`,
             or :math:`(N, d_1, d_2, ..., d_K)` where :math:`K \geq 1` for
             K-dimensional loss.
@@ -2537,7 +2556,7 @@ def poisson_nll_loss(
             is set to ``False``, the losses are instead summed for each minibatch. Ignored
             when reduce is ``False``. Default: ``True``
         eps (float, optional): Small value to avoid evaluation of :math:`\log(0)` when
-            :attr:`log_input`=``False``. Default: 1e-8
+            :attr:`log_input`\ =\ ``False``. Default: 1e-8
         reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
@@ -2672,8 +2691,9 @@ def kl_div(
     See :class:`~torch.nn.KLDivLoss` for details.
 
     Args:
-        input: Tensor of arbitrary shape
-        target: Tensor of the same shape as input
+        input: Tensor of arbitrary shape in log-probabilities.
+        target: Tensor of the same shape as input. See :attr:`log_target` for
+            the target's interpretation.
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
             the losses are averaged over each loss element in the batch. Note that for
             some losses, there multiple elements per sample. If the field :attr:`size_average`
@@ -2700,8 +2720,8 @@ def kl_div(
         and in the meantime, specifying either of those two args will override :attr:`reduction`.
 
     .. note::
-        :attr:``reduction`` = ``'mean'`` doesn't return the true kl divergence value, please use
-        :attr:``reduction`` = ``'batchmean'`` which aligns with KL math definition.
+        :attr:`reduction` = ``'mean'`` doesn't return the true kl divergence value, please use
+        :attr:`reduction` = ``'batchmean'`` which aligns with KL math definition.
         In the next major release, ``'mean'`` will be changed to be the same as 'batchmean'.
     """
     if has_torch_function_variadic(input, target):
@@ -2756,7 +2776,8 @@ def cross_entropy(
     Args:
         input (Tensor) : :math:`(N, C)` where `C = number of classes` or :math:`(N, C, H, W)`
             in case of 2D Loss, or :math:`(N, C, d_1, d_2, ..., d_K)` where :math:`K \geq 1`
-            in the case of K-dimensional loss.
+            in the case of K-dimensional loss. `input` is expected to contain unnormalized scores
+            (often referred to as logits).
         target (Tensor) : :math:`(N)` where each value is :math:`0 \leq \text{targets}[i] \leq C-1`,
             or :math:`(N, d_1, d_2, ..., d_K)` where :math:`K \geq 1` for
             K-dimensional loss.
@@ -2813,14 +2834,14 @@ def binary_cross_entropy(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:
-    r"""Function that measures the Binary Cross Entropy
-    between the target and the output.
+    r"""Function that measures the Binary Cross Entropy between the target and input
+    probabilities.
 
     See :class:`~torch.nn.BCELoss` for details.
 
     Args:
-        input: Tensor of arbitrary shape
-        target: Tensor of the same shape as input
+        input: Tensor of arbitrary shape as probabilities.
+        target: Tensor of the same shape as input with values between 0 and 1.
         weight (Tensor, optional): a manual rescaling weight
                 if provided it's repeated to match input tensor shape
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
@@ -2883,14 +2904,14 @@ def binary_cross_entropy_with_logits(
     reduction: str = "mean",
     pos_weight: Optional[Tensor] = None,
 ) -> Tensor:
-    r"""Function that measures Binary Cross Entropy between target and output
+    r"""Function that measures Binary Cross Entropy between target and input
     logits.
 
     See :class:`~torch.nn.BCEWithLogitsLoss` for details.
 
     Args:
-        input: Tensor of arbitrary shape
-        target: Tensor of the same shape as input
+        input: Tensor of arbitrary shape as unnormalized scores (often referred to as logits).
+        target: Tensor of the same shape as input with values between 0 and 1
         weight (Tensor, optional): a manual rescaling weight
             if provided it's repeated to match input tensor shape
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
@@ -3517,7 +3538,8 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
         input (Tensor): the input tensor
         size (int or Tuple[int] or Tuple[int, int] or Tuple[int, int, int]):
             output spatial size.
-        scale_factor (float or Tuple[float]): multiplier for spatial size. Has to match input size if it is a tuple.
+        scale_factor (float or Tuple[float]): multiplier for spatial size. If `scale_factor` is a tuple,
+            its length has to match `input.dim()`.
         mode (str): algorithm used for upsampling:
             ``'nearest'`` | ``'linear'`` | ``'bilinear'`` | ``'bicubic'`` |
             ``'trilinear'`` | ``'area'``. Default: ``'nearest'``
@@ -3532,14 +3554,13 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
             is ``'linear'``, ``'bilinear'``, ``'bicubic'`` or ``'trilinear'``.
             Default: ``False``
         recompute_scale_factor (bool, optional): recompute the scale_factor for use in the
-            interpolation calculation.  When `scale_factor` is passed as a parameter, it is used
-            to compute the `output_size`.  If `recompute_scale_factor` is ``False`` or not specified,
-            the passed-in `scale_factor` will be used in the interpolation computation.
-            Otherwise, a new `scale_factor` will be computed based on the output and input sizes for
-            use in the interpolation computation (i.e. the computation will be identical to if the computed
-            `output_size` were passed-in explicitly).  Note that when `scale_factor` is floating-point,
-            the recomputed scale_factor may differ from the one passed in due to rounding and precision
-            issues.
+            interpolation calculation. If `recompute_scale_factor` is ``True``, then
+            `scale_factor` must be passed in and `scale_factor` is used to compute the
+            output `size`. The computed output `size` will be used to infer new scales for
+            the interpolation. Note that when `scale_factor` is floating-point, it may differ
+            from the recomputed `scale_factor` due to rounding and precision issues.
+            If `recomputed_scale_factor` is ``False``, then `size` or `scale_factor` will
+            be used directly for interpolation.
 
     .. note::
         With ``mode='bicubic'``, it's possible to cause overshoot, in other words it can produce
@@ -4090,10 +4111,9 @@ def _pad(input: Tensor, pad: List[int], mode: str = "constant", value: float = 0
         See :class:`torch.nn.ConstantPad2d`, :class:`torch.nn.ReflectionPad2d`, and
         :class:`torch.nn.ReplicationPad2d` for concrete examples on how each of the
         padding modes works. Constant padding is implemented for arbitrary dimensions.
-        Replicate padding is implemented for padding the last 3 dimensions of 5D input
-        tensor, or the last 2 dimensions of 4D input tensor, or the last dimension of
-        3D input tensor. Reflect padding is only implemented for padding the last 2
-        dimensions of 4D input tensor, or the last dimension of 3D input tensor.
+        Replicate and reflection padding is implemented for padding the last 3
+        dimensions of 5D input tensor, or the last 2 dimensions of 4D input
+        tensor, or the last dimension of 3D input tensor.
 
     Note:
         When using the CUDA backend, this operation may induce nondeterministic
@@ -4159,7 +4179,7 @@ def _pad(input: Tensor, pad: List[int], mode: str = "constant", value: float = 0
         elif input.dim() == 5:
             assert len(pad) == 6, "5D tensors expect 6 values for padding"
             if mode == "reflect":
-                raise NotImplementedError
+                return torch._C._nn.reflection_pad3d(input, pad)
             elif mode == "replicate":
                 return torch._C._nn.replication_pad3d(input, pad)
             elif mode == "circular":
@@ -4665,7 +4685,7 @@ def _in_projection_packed(
     v: Tensor,
     w: Tensor,
     b: Optional[Tensor] = None,
-) -> List[Tensor]:
+) -> Tuple[Tensor, Tensor, Tensor]:
     r"""
     Performs the in-projection step of the attention operation, using packed weights.
     Output is a triple containing projection tensors for query, key and value.
@@ -4697,7 +4717,8 @@ def _in_projection_packed(
     if k is v:
         if q is k:
             # self-attention
-            return linear(q, w, b).chunk(3, dim=-1)
+            l = linear(q, w, b).chunk(3, dim=-1)
+            return l[0], l[1], l[2]
         else:
             # encoder-decoder attention
             w_q, w_kv = w.split([E, E * 2])
@@ -4705,7 +4726,8 @@ def _in_projection_packed(
                 b_q = b_kv = None
             else:
                 b_q, b_kv = b.split([E, E * 2])
-            return (linear(q, w_q, b_q),) + linear(k, w_kv, b_kv).chunk(2, dim=-1)
+            l = (linear(q, w_q, b_q),) + linear(k, w_kv, b_kv).chunk(2, dim=-1)
+            return l[0], l[1], l[2]
     else:
         w_q, w_k, w_v = w.chunk(3)
         if b is None:

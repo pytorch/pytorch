@@ -1,7 +1,6 @@
 from typing import Optional
 
 import torch
-from torch import nn
 import torch.nn.intrinsic as nni
 from torch.nn.quantized.modules.utils import _quantize_weight, hide_packed_params_repr
 
@@ -83,7 +82,7 @@ class Linear(torch.nn.Module):
     A quantized sparse linear module with quantized tensor as inputs and outputs.
     """
     _version = 1
-    _FLOAT_MODULE = nn.Linear
+    _FLOAT_MODULE = torch.nn.Linear
 
     def __init__(self, in_features, out_features, row_block_size, col_block_size, bias=True, dtype=torch.qint8):
         super().__init__()

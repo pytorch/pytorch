@@ -2959,6 +2959,16 @@ TEST_F(ModulesTest, GELU) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST_F(ModulesTest, Mish) {
+  Mish model;
+  auto x = torch::randn(100) * 10;
+  auto y_exp = x * x.exp().log1p().tanh();
+  auto y = model(x);
+
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Sigmoid) {
   Sigmoid model;
   auto x = torch::randn(100) * 10;
@@ -3977,6 +3987,59 @@ TEST_F(ModulesTest, ReflectionPad2d) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST_F(ModulesTest, ReflectionPad3d) {
+  {
+    ReflectionPad3d m(ReflectionPad3dOptions(1));
+    auto input = torch::arange(8, torch::kFloat).reshape({1, 1, 2, 2, 2});
+    auto output = m(input);
+    auto expected = torch::tensor({{{{{7., 6., 7., 6.},
+                                      {5., 4., 5., 4.},
+                                      {7., 6., 7., 6.},
+                                      {5., 4., 5., 4.}},
+                                     {{3., 2., 3., 2.},
+                                      {1., 0., 1., 0.},
+                                      {3., 2., 3., 2.},
+                                      {1., 0., 1., 0.}},
+                                     {{7., 6., 7., 6.},
+                                      {5., 4., 5., 4.},
+                                      {7., 6., 7., 6.},
+                                      {5., 4., 5., 4.}},
+                                     {{3., 2., 3., 2.},
+                                      {1., 0., 1., 0.},
+                                      {3., 2., 3., 2.},
+                                      {1., 0., 1., 0.}}}}}, torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    ReflectionPad3d m(ReflectionPad3dOptions({0, 1, 1, 0, 1, 2}));
+    auto input = torch::arange(16, torch::kFloat).reshape({1, 1, 4, 2, 2});
+    auto output = m(input);
+    auto expected = torch::tensor({{{{{6., 7., 6.},
+                                      {4., 5., 4.},
+                                      {6., 7., 6.}},
+                                     {{2., 3., 2.},
+                                      {0., 1., 0.},
+                                      {2., 3., 2.}},
+                                     {{6., 7., 6.},
+                                      {4., 5., 4.},
+                                      {6., 7., 6.}},
+                                     {{10., 11., 10.},
+                                      {8., 9., 8.},
+                                      {10., 11., 10.}},
+                                     {{14., 15., 14.},
+                                      {12., 13., 12.},
+                                      {14., 15., 14.}},
+                                     {{10., 11., 10.},
+                                      {8., 9., 8.},
+                                      {10., 11., 10.}},
+                                     {{6., 7., 6.},
+                                      {4., 5., 4.},
+                                      {6., 7., 6.}}}}}, torch::kFloat);
+    ASSERT_EQ(output.sizes(), std::vector<int64_t>({1, 1, 7, 3, 3}));
+    ASSERT_TRUE(output.allclose(expected));
+  }
+}
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, ReplicationPad1d) {
   {

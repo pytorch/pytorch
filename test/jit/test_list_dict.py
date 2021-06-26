@@ -1959,3 +1959,226 @@ class TestNamedTuple(JitTestCase):
 
         for name in ['a', 'b', 'c']:
             self.assertEqual(getattr(out_loaded, name), getattr(out, name))
+
+class TestScriptDict(JitTestCase):
+    """
+    This class contains a suite of tests for torch.jit.script, a
+    function that returns a dictionary-like object that has reference
+    semantics across the Python/TorchScript boundary. That is,
+    it can be passed to a TorchScript function that mutates it
+    and those modifications are visible in the scope of the Python
+    caller of said TorchScript function.
+
+    The vast majority of tests are for making sure that objects returned
+    by torch.jit.script behave like dictionaries do so that they are fungible
+    in almost all cirumstances with regular dictionaries.
+    """
+    def _script_dict_add(self, d: torch._C.ScriptDict, k: int, v: int):
+        """
+        This is a helper function that inserts the pair (k, v) into the
+        dictionary d in TorchScript. It is used for testing reference
+        semantics.
+        """
+        @torch.jit.script
+        def dict_add(d: Dict[int, int], k: int, v: int):
+            d[k] = v
+
+        dict_add(d, k, v)
+
+    def _compare_eager_and_script(self, fn, input_dict, script_input_dict=None):
+        """
+        This is a helper function that facilitates comparing behaviour between
+        Python dictionaries and "scripted" dictionaries.
+
+        Args:
+            fn: The function to test and compare the behaviour of.
+            input_dict: The input dictionary to use for the test (passed to fn).
+            script_input_dict: The scripted input dictionary to use for the tests.
+                                If None, input_dict is scripted with torch.jit.script
+                                and used instead.
+        """
+        # Create ScriptDict version of input_dict if needed.
+        script_input_dict = script_input_dict or torch.jit.script(input_dict)
+
+        # Run fn with both input_dict and scripted_dict.
+        eager_raised, script_raised = False, False
+
+        try:
+            eager_out = fn(input_dict)
+        except Exception as e:
+            eager_exception = e
+            eager_raised = True
+
+        try:
+            script_out = fn(script_input_dict)
+        except Exception as e:
+            script_exception = e
+            script_raised = True
+
+        # Check that both calls raised or none of them raised.
+        self.assertEqual(eager_raised, script_raised)
+
+        if eager_raised:
+            # If fn raised an exception, it should be the same between
+            # regular and scripted dictionaries.
+            self.assertEqual(type(eager_exception), type(script_exception))
+        else:
+            # Otherwise, make sure the outputs match and the dictionaries
+            # match (the latter may not be the same as the output).
+            self.assertEqual(eager_out, script_out)
+            self.assertEqual(input_dict, script_input_dict)
+
+    def test_repr(self):
+        """
+        Test the __repr__ method.
+        """
+        self._compare_eager_and_script(lambda d: repr(d), {1: 2})
+
+    def test_bool(self):
+        """
+        Test the __bool__ method. This should return True
+        if the dictionary is non-empty and False otherwise.
+        """
+        self._compare_eager_and_script(lambda d: bool(d), {1: 2})
+        self._compare_eager_and_script(lambda d: bool(d), {})
+
+    def test_iter(self):
+        """
+        Test iteration over a dictionary's keys.
+        """
+        def sum_keys(input_dict):
+            s = 0
+            for k in input_dict:
+                s += k
+
+            return s
+
+        self._compare_eager_and_script(sum_keys, {1: 2, 3: 4})
+
+    def test_items(self):
+        """
+        Test .items().
+        """
+        def sum_pair_product(input_dict):
+            s = 0
+            for k, v in input_dict.items():
+                s += k * v
+
+            return s
+
+        self._compare_eager_and_script(sum_pair_product, {1: 2, 3: 4})
+
+    def test_getitem(self):
+        """
+        Test accessing dictionary values using the [] operator.
+        """
+        data = {1: 2, 3: 4}
+        self._compare_eager_and_script(lambda d: d[1], data)
+        self._compare_eager_and_script(lambda d: d[4], data)
+        self._compare_eager_and_script(lambda d: d[2], data)
+        self._compare_eager_and_script(lambda d: d["key"], data)
+
+    def test_setitem(self):
+        """
+        Test setting dictionary values using the [] operator.
+        """
+        data = {1: 2, 3: 4}
+
+        def fn(input_dict):
+            input_dict[1] = 10
+            input_dict[3] = 11
+
+        self._compare_eager_and_script(fn, data)
+
+        # Check that using improperly typed keys and values
+        # throws TypeError.
+        # _compare_eager_and_script cannot be used here since
+        # the following uses of __setitem__ are valid in
+        # Python.
+        script_data = torch.jit.script(data)
+
+        with self.assertRaises(TypeError):
+            script_data["str"] = 3
+
+        with self.assertRaises(TypeError):
+            script_data[3] = "str"
+
+    def test_contains(self):
+        """
+        Test membership checks (x in y, x not in y).
+        """
+        data = {1: 2, 3: 4}
+
+        def fn(input_dict):
+            return 1 in input_dict, 2 not in input_dict, 3 in input_dict, 4 not in input_dict
+
+        self._compare_eager_and_script(fn, data)
+
+        # Check that using an improperly typed key
+        # throws KeyError.
+        script_data = torch.jit.script(data)
+
+        with self.assertRaises(KeyError):
+            a = "str" in script_data
+
+    def test_delitem(self):
+        """
+        Test deletion.
+        """
+        data = {1: 2, 3: 4}
+
+        def del_fn(input_dict):
+            del input_dict[1]
+
+        def del_fn_raises(input_dict):
+            del input_dict[10]
+
+        self._compare_eager_and_script(del_fn, data)
+        self._compare_eager_and_script(del_fn_raises, data)
+
+        # Check that using an improperly typed key
+        # throws TypeError.
+        script_data = torch.jit.script(data)
+
+        with self.assertRaises(TypeError):
+            del script_data["str"]
+
+    def test_len(self):
+        """
+        Test len() builtin function.
+        """
+        self._compare_eager_and_script(lambda d: len(d), {1: 2})
+        self._compare_eager_and_script(lambda d: len(d), {})
+
+    @unittest.skip("Cannot pass until all dicts returned from TorchScript are ScriptDicts")
+    def test_nested(self):
+        """
+        Test that reference semantics are honoured when the ScriptDict that is
+        mutated using TorchScript is inside another.
+        """
+        nested = torch.jit.script({1: {1: 2}, 2: {3: 4}}, type_hint=Dict[int, Dict[int, int]])
+
+        one = nested[1]
+        two = nested[2]
+
+        self._script_dict_add(one, 9, 10)
+        self._script_dict_add(two, 11, 12)
+
+        # The mutation should be visible in the original dictionary, nested.
+        self.assertEqual(len(one), 2)
+        self.assertEqual(len(two), 2)
+        self.assertEqual(len(nested[1]), 2)
+        self.assertEqual(len(nested[2]), 2)
+
+    def test_reference_semantics(self):
+        """
+        Test that reference semantics are honoured; that modifications made
+        to a ScriptDict in TorchScript are visible in Python.
+        """
+        data = torch.jit.script({1: 2})
+        self._script_dict_add(data, 3, 4)
+
+        # The mutation should be visible in the original dictionary.
+        self.assertEqual(len(data), 2)
+        self.assertTrue(3 in data)
+        self.assertEqual(data[3], 4)

@@ -48,6 +48,8 @@ class TORCH_API MemoryDAGBuilder {
   friend MemoryDAG;
 
  private:
+  // `MemoryDAGBuilder` builds up `indexToElementMap_`, then uses
+  // the map to construct the `MemoryDAG`
   std::vector<std::unique_ptr<Element>> indexToElementMap_;
 };
 
@@ -122,9 +124,10 @@ class TORCH_API MemoryDAG {
   std::vector<std::unique_ptr<Element>> indexToElementMap_;
 };
 
-// `Element` represents the vertex in the points-to graph. It represents
-// anything that could have an aliasing relationship, mostly IR `Value`s, but
-// also the "inside of a list", or wildcards.
+// `Element` represents a vertex in the points-to graph. It represents
+// anything that could have an aliasing relationship--mostly IR
+// `Value`s, but also wildcards or the type inside a container (e.g. `T`
+// in `List[T]`)
 struct Element {
   Element(const Value* value_, unsigned index_);
   // wildcard constructor
