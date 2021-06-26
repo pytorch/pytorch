@@ -139,6 +139,7 @@ will not pass ``--local_rank`` when you specify this flag.
 """
 
 import logging
+import warnings
 
 from torch.distributed.run import get_args_parser, run
 
@@ -159,11 +160,22 @@ def parse_args(args):
     return parser.parse_args(args)
 
 
+def launch(args):
+    if args.no_python and not args.use_env:
+        raise ValueError(
+            "When using the '--no_python' flag,"
+            " you must also set the '--use_env' flag."
+        )
+    run(args)
+
+
 def main(args=None):
-    logger.warning(
-        "The module torch.distributed.launch is deprecated "
-        "and going to be removed in future."
-        "Migrate to torch.distributed.run"
+    warnings.warn(
+        "The module torch.distributed.launch is deprecated\n"
+        "and will be removed in future. Use torch.distributed.run.\n"
+        "Note that --use_env is set by default in torch.distributed.run.\n"
+        "If your script expects `--local_rank` argument to be set, please\n"
+        "change it to read from `os.environ('LOCAL_RANK')` instead.", FutureWarning
     )
     args = parse_args(args)
     run(args)

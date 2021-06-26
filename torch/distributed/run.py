@@ -322,7 +322,7 @@ def get_args_parser() -> ArgumentParser:
         "--max_restarts",
         action=env,
         type=int,
-        default=3,
+        default=0,
         help="Maximum number of worker group restarts before failing.",
     )
     parser.add_argument(
@@ -570,11 +570,6 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
                 cmd_args.append("-m")
             cmd_args.append(args.training_script)
         else:
-            if not use_env:
-                raise ValueError(
-                    "When using the '--no_python' flag,"
-                    " you must also set the '--use_env' flag."
-                )
             if args.module:
                 raise ValueError(
                     "Don't use both the '--no_python' flag"
@@ -582,10 +577,6 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
                 )
             cmd = args.training_script
     if not use_env:
-        log.warning(
-            "--use_env is deprecated and will be removed in future releases.\n"
-            " Please read local_rank from `os.environ('LOCAL_RANK')` instead."
-        )
         cmd_args.append(f"--local_rank={macros.local_rank}")
     cmd_args.extend(args.training_script_args)
 
