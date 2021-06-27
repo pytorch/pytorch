@@ -1,11 +1,13 @@
-import torch
+import unittest
+
 import numpy as np
 import torch._C._te as te
-from torch.jit.te import pointwise_operator
 
+import torch
+from torch import fx
+from torch.jit.te import pointwise_operator
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase
-import unittest
 
 LLVM_ENABLED = torch._C._llvm_enabled()
 
@@ -379,6 +381,24 @@ def pointwise_fn(a, b):
 nnc_pointwise_fn = pointwise_operator(pointwise_fn)
 
 
+@pointwise_operator
+def custom1(a):
+    return a + 1.0
+
+
+@pointwise_operator
+def custom2(a):
+    return a + 2.0
+
+
+class TorchFunctionExample(object):
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+        assert func in (nnc_pointwise_fn, torch.Tensor.add)
+        assert all(issubclass(t, (torch.Tensor, TorchFunctionExample))
+                   for t in types)
+        return torch.zeros_like(args[0])
+
+
 class TestOperatorAuthoringCPU(JitTestCase):
     device = "cpu"
 
@@ -442,6 +462,18 @@ class TestOperatorAuthoringCPU(JitTestCase):
         a2, b2 = grads(nnc_pointwise_fn)
         torch.testing.assert_allclose(a1, a2)
         torch.testing.assert_allclose(b1, b2)
+
+    def test_torch_function(self):
+        self.check(self.rand(10), TorchFunctionExample())
+
+    def test_fx_trace(self):
+        def example(x):
+            return custom1(custom2(x))
+        graph = fx.symbolic_trace(example)
+        self.assertIn("custom1", graph.code)
+        self.assertIn("custom2", graph.code)
+        x = torch.randn(8, device=self.device)
+        torch.testing.assert_allclose(x + 3, graph(x))
 
 
 class TestOperatorAuthoringGPU(TestOperatorAuthoringCPU):

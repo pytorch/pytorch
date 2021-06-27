@@ -60,8 +60,9 @@ def _create_constant(value, dtype):
 
 
 class PointwiseCompiler(object):
-    def __init__(self, name, pointwise_fn, spec, result):
+    def __init__(self, name, module_name, pointwise_fn, spec, result):
         self.name = name
+        self.module_name = module_name
         self.pointwise_fn = pointwise_fn
         self.spec = spec
         self.result = result
@@ -90,7 +91,7 @@ class PointwiseCompiler(object):
 
         self.run()
 
-    def add_stride_arg(self, a , d):
+    def add_stride_arg(self, a, d):
         var = _te.VarHandle(torch.int32)
         self.stride_args.append(var)
         self.strides_from.append((a, d))
@@ -121,7 +122,8 @@ class PointwiseCompiler(object):
         vars = symbols([f"v{i}" for i in range(1 + _num_args(self.pointwise_fn))])
         backwards_expr = diff(self.pointwise_fn(*vars[:-1]), vars[index]) * vars[-1]  # chain rule
         return _source_to_pointwise_operator(f"lambda {','.join(map(str, vars))}: {backwards_expr}",
-                                             name=f"{self.name}_backwards{index}")
+                                             name=f"{self.name}.backwards{index}",
+                                             module_name=self.module_name)
 
     def handle_autograd(self):
         cnt = sum(int(x.requires_grad) for x in self.spec)
@@ -301,12 +303,12 @@ class PointwiseCompiler(object):
 
 
 @functools.lru_cache(None)
-def _source_to_pointwise_operator(fn_str, name=None):
+def _source_to_pointwise_operator(fn_str, name=None, module_name=None):
     """ Used when creating backwards() methods """
-    return pointwise_operator(eval(fn_str), name=name)
+    return pointwise_operator(eval(fn_str), name=name, module_name=module_name)
 
 
-def pointwise_operator(fn, name=None):
+def pointwise_operator(fn, name=None, module_name=None):
     """
     Decorator to create a new pointwise operator.  The operator will be
     JIT compiled for different dtypes/devices/layouts/etc -- but supports dynamic shapes.
@@ -316,9 +318,22 @@ def pointwise_operator(fn, name=None):
             return a + b
     """
     name = name or fn.__name__
+    module_name = module_name or fn.__module__
     args = [f"Tensor {name}" for name in inspect.signature(fn).parameters.keys()]
     signature = f"{name}({', '.join(args)}, *, Tensor? out=None)"
-    return _te.CompileCache(name,
-                            [signature],
-                            lambda spec, result: PointwiseCompiler(name, fn, spec, result),
-                            _num_args(fn))
+
+    class PointwiseOperator(_te.CompileCache):
+        def __init__(self):
+            super().__init__(
+                name,
+                module_name,
+                [signature],
+                lambda spec, result: PointwiseCompiler(name, module_name, fn, spec, result),
+                _num_args(fn))
+
+    # This items are needed to support FX tracing
+    rv = PointwiseOperator()
+    rv.__name__ = name
+    rv.__qualname__ = name
+    rv.__module__ = module_name
+    return rv

@@ -550,8 +550,9 @@ class CompileCache2 {
 class CompileCache {
  public:
   virtual ~CompileCache() = default;
-  virtual at::Tensor py_call(py::args args, py::kwargs kwargs) = 0;
+  virtual PyObject* py_call(PyObject* args, PyObject* kwargs) = 0;
   virtual at::Tensor call(const std::vector<at::Tensor>& args) = 0;
+  virtual const std::string& get_name() const = 0;
 };
 
 template <int NARGS>
@@ -559,23 +560,36 @@ class CompileCacheImpl : public CompileCache {
  public:
   CompileCacheImpl(
       std::string name,
+      std::string module_name,
       const std::vector<std::string>& signatures,
       const py::object& compile_fn)
       : cache(compile_fn),
         cache_out(compile_fn),
         parser_(signatures),
-        name_(std::move(name)) {
+        name_(std::move(name)),
+        module_name_(std::move(module_name)) {
     if (signatures.size() != 1) {
       throw std::runtime_error("TODO: support overloaded signatures");
     }
   }
 
-  at::Tensor py_call(py::args args, py::kwargs kwargs) override {
+  const std::string& get_name() const override {
+    return name_;
+  }
+
+  PyObject* py_call(PyObject* args, PyObject* kwargs) override {
     ParsedArgs<NARGS + 1> parsed_args;
-    auto r = parser_.parse(args.ptr(), kwargs.ptr(), parsed_args);
+    PythonArgs r = parser_.parse(args, kwargs, parsed_args);
     bool pre_sampled = false;
     if (C10_UNLIKELY(r.has_torch_function())) {
-      throw std::runtime_error("TODO: support __torch_function__");
+      py::object op = py::cast(static_cast<CompileCache*>(this));
+      return handle_torch_function_no_python_arg_parser(
+          r.signature.overloaded_args,
+          args,
+          kwargs,
+          name_.c_str(),
+          op.ptr(),
+          module_name_.c_str());
     } else if (C10_UNLIKELY(
                    at::hasCallbacks() &&
                    at::shouldRunRecordFunction(&pre_sampled))) {
@@ -587,9 +601,9 @@ class CompileCacheImpl : public CompileCache {
       }
       py::gil_scoped_release release;
       if (tensor_args[NARGS].defined()) {
-        return cache_out.call(tensor_args, true);
+        return THPVariable_Wrap(cache_out.call(tensor_args, true));
       } else {
-        return cache.call(tensor_args, false);
+        return THPVariable_Wrap(cache.call(tensor_args, false));
       }
     }
   }
@@ -606,30 +620,32 @@ class CompileCacheImpl : public CompileCache {
   CompileCache2<NARGS + 1> cache_out; // out=... variant
   PythonArgParser parser_;
   std::string name_;
+  std::string module_name_;
 };
 
 CompileCache* create_compile_cache(
     const std::string& name,
+    const std::string& module_name,
     const std::vector<std::string>& sig,
     const py::object& compile_fn,
     int num_args) {
   switch (num_args) {
     case 1:
-      return new CompileCacheImpl<1>(name, sig, compile_fn);
+      return new CompileCacheImpl<1>(name, module_name, sig, compile_fn);
     case 2:
-      return new CompileCacheImpl<2>(name, sig, compile_fn);
+      return new CompileCacheImpl<2>(name, module_name, sig, compile_fn);
     case 3:
-      return new CompileCacheImpl<3>(name, sig, compile_fn);
+      return new CompileCacheImpl<3>(name, module_name, sig, compile_fn);
     case 4:
-      return new CompileCacheImpl<4>(name, sig, compile_fn);
+      return new CompileCacheImpl<4>(name, module_name, sig, compile_fn);
     case 5:
-      return new CompileCacheImpl<5>(name, sig, compile_fn);
+      return new CompileCacheImpl<5>(name, module_name, sig, compile_fn);
     case 6:
-      return new CompileCacheImpl<6>(name, sig, compile_fn);
+      return new CompileCacheImpl<6>(name, module_name, sig, compile_fn);
     case 7:
-      return new CompileCacheImpl<7>(name, sig, compile_fn);
+      return new CompileCacheImpl<7>(name, module_name, sig, compile_fn);
     case 8:
-      return new CompileCacheImpl<8>(name, sig, compile_fn);
+      return new CompileCacheImpl<8>(name, module_name, sig, compile_fn);
     default:
       throw std::runtime_error("TODO: support other arg counts");
   }
@@ -663,7 +679,11 @@ void initTensorExprCompileCacheBindings(PyObject* te_obj) {
 
   py::class_<CompileCache>(te, "CompileCache")
       .def(py::init(&create_compile_cache))
-      .def("__call__", &CompileCache::py_call);
+      .def(
+          "__call__", [](CompileCache& self, py::args args, py::kwargs kwargs) {
+            return py::reinterpret_steal<py::object>(
+                self.py_call(args.ptr(), kwargs.ptr()));
+          });
 
   py::class_<CompileResultProxy>(te, "CompileResult")
       .def(
