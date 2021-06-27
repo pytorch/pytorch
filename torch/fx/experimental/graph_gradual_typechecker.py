@@ -1,6 +1,6 @@
 from functools import reduce
 from typing import Dict
-
+import torch
 from torch.fx.tensor_type import Dyn, is_consistent, TensorType, is_more_precise
 
 # here we will collect types for a nodelist
@@ -56,7 +56,7 @@ def type_check_node(n, env):
             return False  # free variable
 
     if n.op == 'call_function':
-        if n.name == 'add':
+        if n.target == torch.add:
 
             t1 = env[n.args[0].name]
             t2 = env[n.args[1].name]
@@ -72,7 +72,7 @@ def type_check_node(n, env):
             else:
                 return False
 
-        if n.name == 'reshape':
+        if n.target == torch.reshape:
             t1 = env[n.args[0].name]
             t2 = n.args[1]
             t2_type = TensorType([Dyn if elem == -1 else elem for elem in t2])
@@ -111,7 +111,7 @@ def type_check_node(n, env):
             else:
                 return False
 
-        if n.name == 'transpose':
+        if n.target == torch.transpose:
             t = env[n.args[0].name]
             dim1, dim2 = n.args[1], n.args[2]
 
