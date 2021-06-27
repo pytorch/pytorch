@@ -73,15 +73,6 @@ class AST_Rewriter(ast.NodeTransformer):
             Output:
              y = annotate(f2(x),Tensor_Type((1,2,3,Dyn)))
         """
-        # if isinstance(node.annotation, ast.Call):
-        #     # In this case, we have a Tensor Type
-        #     # node.annotation.func.id = TensorType
-        #     print(node.annotation.func.id)
-        #     arg2 = ast.Call(func=ast.Name(id='TensorType', ctx=ast.Load()),
-        #                     args=[ast.Tuple(node.annotation.args, ctx=ast.Load())], keywords=[])
-        # else:
-        #     arg2 = node.annotation
-
         return ast.Assign(targets=[node.target], value=ast.Call(
             func=ast.Name(id='annotate', ctx=ast.Load()),
             args=[node.value, node.annotation], keywords=[]))
