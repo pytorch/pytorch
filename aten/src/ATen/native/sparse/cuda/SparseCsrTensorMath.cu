@@ -16,6 +16,8 @@
 #include <THC/THCThrustAllocator.cuh>
 
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDADataType.h>
+#include <ATen/cuda/CUDASparseDescriptors.h>
 #include <ATen/cuda/CUDAUtils.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 
@@ -33,6 +35,63 @@ namespace native {
 using namespace at::sparse_csr;
 // certain utiliy functions are usable from sparse COO.
 using namespace at::sparse;
+
+namespace {
+
+void addmm_out_sparse_csr_dense_impl_cuda(const Tensor& input, const SparseCsrTensor& mat1, const Tensor& mat2, const Scalar& beta_, const Scalar& alpha_, const Tensor& result) {
+
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, result.scalar_type(), "addmm_out_sparse_csr_dense_impl_cuda", [&] {
+    auto beta = beta_.to<scalar_t>();
+    auto alpha = alpha_.to<scalar_t>();
+
+    if (beta == scalar_t(0)) {
+      result.zero_();
+    } else if (!is_same_tensor(input, result)) {
+      result.copy_(input);
+    }
+
+    cusparseOperation_t opA = CUSPARSE_OPERATION_NON_TRANSPOSE;
+    cusparseOperation_t opB = CUSPARSE_OPERATION_NON_TRANSPOSE;
+
+    auto descA = at::cuda::sparse::CuSparseSpMatCsrDescriptor(mat1);
+    auto descB = at::cuda::sparse::CuSparseDnMatDescriptor(mat2);
+    auto descC = at::cuda::sparse::CuSparseDnMatDescriptor(result);
+
+    cudaDataType compute_type = at::cuda::getCudaDataType<scalar_t>();
+
+    auto handle = at::cuda::getCurrentCUDASparseHandle();
+
+    // cusparseSpMM_bufferSize returns the bufferSize that can be used by cusparseSpMM
+    size_t buffer_size;
+    TORCH_CUDASPARSE_CHECK(cusparseSpMM_bufferSize(
+      handle, opA, opB,
+      &alpha,
+      descA.descriptor(),
+      descB.descriptor(),
+      &beta,
+      descC.descriptor(),
+      compute_type,
+      CUSPARSE_SPMM_CSR_ALG2,
+      &buffer_size // output
+    ));
+
+    auto& allocator = *c10::cuda::CUDACachingAllocator::get();
+    auto work_data = allocator.allocate(buffer_size);
+
+    TORCH_CUDASPARSE_CHECK(cusparseSpMM(
+      handle, opA, opB,
+      &alpha,
+      descA.descriptor(),
+      descB.descriptor(),
+      &beta,
+      descC.descriptor(),
+      compute_type,
+      CUSPARSE_SPMM_CSR_ALG2,
+      work_data.get()
+    ));
+  });
+}
+} // anonymous namespace
 
 Tensor& addmm_out_sparse_csr_dense_cuda(
   const Tensor& self,
@@ -69,7 +128,7 @@ Tensor& addmm_out_sparse_csr_dense_cuda(
       "D tensor");
 
   TORCH_CHECK(
-      r.is_contiguous(),
+      r.is_contiguous() || r.transpose(-2, -1).is_contiguous(),
       "out argument must be contiguous, but got: ",
       r.suggest_memory_format());
 
@@ -94,11 +153,12 @@ Tensor& addmm_out_sparse_csr_dense_cuda(
   }
   // TODO: Check if cusparseSpMM can use 64-bit indices
   // https://docs.nvidia.com/cuda/cusparse/index.html
-  auto col_indices = sparse.col_indices().to(at::kInt);
-  auto crow_indices = sparse.crow_indices().to(at::kInt);
-  auto values = sparse.values();
+  // auto col_indices = sparse.col_indices().to(at::kInt);
+  // auto crow_indices = sparse.crow_indices().to(at::kInt);
+  // auto values = sparse.values();
 
-  s_addmm_out_csr_sparse_dense_cuda_worker(nnz, m, n, k, r, beta, t, alpha, crow_indices, col_indices, values, dense);
+  // s_addmm_out_csr_sparse_dense_cuda_worker(nnz, m, n, k, r, beta, t, alpha, crow_indices, col_indices, values, dense);
+  addmm_out_sparse_csr_dense_impl_cuda(self, sparse, dense, beta, alpha, r);
   return r;
 }
 
