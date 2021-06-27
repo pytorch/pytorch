@@ -3,7 +3,6 @@
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/LegacyTHFunctionsCPU.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
@@ -29,95 +28,6 @@
 #include <type_traits>
 
 namespace at {
-namespace meta {
-
-ScalarType check_allany_and_get_output_dtype(
-    const char* name,
-    const Tensor& self,
-    const Tensor& result,
-    IntArrayRef dims,
-    bool keepdim) {
-  // Refer [all, any : uint8 compatibility]
-  TORCH_CHECK(
-      self.layout() == Layout::Strided,
-      name, " only supports strided layout, got: ",
-      self.layout());
-
-  ScalarType out_dtype;
-
-  if (result.defined()) {
-    // Refer [all, any : uint8 compatibility]
-    TORCH_CHECK(
-        result.scalar_type() == ScalarType::Bool ||
-            result.scalar_type() == ScalarType::Byte,
-        name, " only supports bool tensor for result, got: ",
-        result.scalar_type());
-    out_dtype = result.scalar_type();
-  } else {
-    if (self.scalar_type() == ScalarType::Byte) {
-      out_dtype = self.scalar_type();
-    } else {
-      out_dtype = ScalarType::Bool;
-    }
-  }
-
-  return out_dtype;
-}
-
-void check_allany_for_meta(
-    impl::MetaBase& meta,
-    const char* name,
-    const Tensor& self,
-    int64_t dim,
-    bool keepdim) {
-  dim = maybe_wrap_dim(dim, self.dim());
-  const auto& result = meta.maybe_get_output();
-  auto out_dtype = check_allany_and_get_output_dtype(name, self, result, dim, keepdim);
-  auto shape = get_reduction_shape(self, dim, keepdim);
-  meta.set_output(shape, self.options().dtype(out_dtype));
-  namedinference::propagate_names_for_reduction(result, self, dim, keepdim);
-}
-
-TORCH_META_FUNC2(all, dim)(const Tensor& self, int64_t dim, bool keepdim) {
-  check_allany_for_meta(*this, "all", self, dim, keepdim);
-}
-
-TORCH_META_FUNC2(any, dim)(const Tensor& self, int64_t dim, bool keepdim) {
-  check_allany_for_meta(*this, "any", self, dim, keepdim);
-}
-
-void check_argmax_argmin(
-    impl::MetaBase& meta,
-    const char* name,
-    const Tensor& self,
-    c10::optional<int64_t> dim,
-    bool keepdim) {
-  DimVector shape;
-
-  if (dim.has_value()) {
-    native::zero_numel_check_dims(self, dim.value(), name);
-    shape = get_reduction_shape(self, dim.value(), keepdim);
-  } else {
-    TORCH_CHECK_INDEX(
-        self.numel() != 0,
-        name, ": Expected reduction dim to be specified for input.numel() == 0.");
-  }
-
-  meta.set_output(shape, self.options().dtype(kLong));
-}
-
-TORCH_META_FUNC(argmax)
-(const Tensor& self, c10::optional<int64_t> dim, bool keepdim) {
-  check_argmax_argmin(*this, "argmax", self, dim, keepdim);
-}
-
-TORCH_META_FUNC(argmin)
-(const Tensor& self, c10::optional<int64_t> dim, bool keepdim) {
-  check_argmax_argmin(*this, "argmin", self, dim, keepdim);
-}
-
-} // namespace meta
-
 namespace native {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -1196,7 +1106,7 @@ Tensor norm(const Tensor& self, const Scalar& p) {
 // Tensor of dtype `bool`. However for compatibility reason,
 // for `uint8`, they return Tensor of same dtype `uint8`.
 // Reference: https://github.com/pytorch/pytorch/pull/47878#issuecomment-747108561
-inline const Tensor & _all(const Tensor & result, TensorIterator & iter) {
+inline Tensor & _all(Tensor & result, TensorIterator & iter) {
   if (iter.numel() == 0) {
     result.fill_(1);
   } else {
@@ -1206,45 +1116,79 @@ inline const Tensor & _all(const Tensor & result, TensorIterator & iter) {
   return result;
 }
 
-inline TensorIterator get_allany_iter(
-    const Tensor& self,
-    const Tensor& result,
-    IntArrayRef dims,
-    bool keepdim) {
+Tensor all(const Tensor& self) {
+  TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
+              "all only supports CPU AND CUDA device type, got: ", self.device().type());
+  TORCH_CHECK(self.layout() == Layout::Strided,
+              "all only supports strided layout, got: ", self.layout());
+
+  // Refer [all, any : uint8 compatibility]
+  Tensor result;
+  ScalarType out_dtype;
+  if (self.scalar_type() == ScalarType::Byte){
+    result = at::empty({0}, self.options());
+    out_dtype = self.scalar_type();
+  } else {
+    result = at::empty({0}, self.options().dtype(kBool));
+    out_dtype = ScalarType::Bool;
+  }
+
   if (self.is_cuda()) {
     // As CUDA supports dynamic type casting, we use this overload of
     // `make_reduction`, which doesn't cast input to the result type i.e. kBool.,
     // otherwise we use the overload below which casts the input to kBool (which is
     // an extra operation).
-    return meta::make_reduction(self, result, dims, keepdim, self.scalar_type());
+    auto iter = make_reduction(
+        "all", result, self, {}, false, self.scalar_type(), out_dtype);
+    return _all(result, iter);
   }
-  return meta::make_reduction_from_out_ty(
-      self, result, dims, keepdim, result.scalar_type());
-}
-
-Tensor all(const Tensor& self) {
-  Tensor result;
-
-  auto out_dtype =
-      meta::check_allany_and_get_output_dtype("all", self, result, {}, false);
-  auto shape = meta::get_reduction_shape(self, {}, false);
-
-  result = at::empty(shape, self.options().dtype(out_dtype));
-  auto iter = get_allany_iter(self, result, {}, false);
-
+  auto iter =
+      make_reduction("all", result, self, {}, false, /*out_dtype=*/out_dtype);
   return _all(result, iter);
 }
 
-TORCH_IMPL_FUNC(all_out)
-(const Tensor& self, int64_t dim, bool keepdim, const Tensor& result) {
-  auto iter = get_allany_iter(self, result, dim, keepdim);
-  auto mut_result = const_cast<Tensor&>(result);
-  if (!_dimreduce_return_trivial(mut_result, self, 1, dim, keepdim)) {
-    _all(mut_result, iter);
+Tensor all(const Tensor& self, int64_t dim, bool keepdim) {
+  // Refer [all, any : uint8 compatibility]
+  Tensor result;
+  if (self.scalar_type() == ScalarType::Byte){
+    result = at::empty({0}, self.options());
+  } else {
+    result = at::empty({0}, self.options().dtype(kBool));
+  }
+
+  return at::native::all_out(self, dim, keepdim, result);
+}
+
+Tensor &all_out(const Tensor &self, int64_t dim, bool keepdim, Tensor &result) {
+  TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
+              "all only supports CPU AND CUDA device type, got: ", self.device().type());
+  TORCH_CHECK(self.layout() == Layout::Strided,
+              "all only supports strided layout, got: ", self.layout());
+  // Refer [all, any : uint8 compatibility]
+  TORCH_CHECK(result.scalar_type() == ScalarType::Bool || result.scalar_type() == ScalarType::Byte,
+              "all only supports bool tensor for result, got: ", result.scalar_type());
+
+  auto out_dtype = result.scalar_type();
+  dim = maybe_wrap_dim(dim, self.dim());
+  if (_dimreduce_return_trivial(result, self, 1, dim, keepdim)) {
+    return result;
+  } else {
+    if (self.is_cuda()) {
+      // As CUDA supports dynamic type casting, we use this overload of
+      // `make_reduction`, which doesn't cast input to the result type i.e. kBool.,
+      // otherwise we use the overload below which casts the input to kBool (which is
+      // an extra operation).
+      auto iter = make_reduction(
+          "all", result, self, dim, keepdim, self.scalar_type(), out_dtype);
+      return _all(result, iter);
+    }
+    auto iter =
+        make_reduction("all", result, self, dim, keepdim, /*out_dtype=*/out_dtype);
+    return _all(result, iter);
   }
 }
 
-inline const Tensor & _any(const Tensor & result, TensorIterator & iter) {
+inline Tensor & _any(Tensor & result, TensorIterator & iter) {
   if (iter.numel() == 0) {
     result.fill_(0);
   } else {
@@ -1255,24 +1199,74 @@ inline const Tensor & _any(const Tensor & result, TensorIterator & iter) {
 }
 
 Tensor any(const Tensor& self) {
+  TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
+              "any only supports CPU AND CUDA device type, got: ", self.device().type());
+  TORCH_CHECK(self.layout() == Layout::Strided || self.layout() == Layout::Sparse,
+              "any only supports strided AND sparse layout, got: ", self.layout());
+
+  // Refer [all, any : uint8 compatibility]
   Tensor result;
+  ScalarType out_dtype;
+  if (self.scalar_type() == ScalarType::Byte){
+    result = at::empty({0}, self.options());
+    out_dtype = self.scalar_type();
+  } else {
+    result = at::empty({0}, self.options().dtype(kBool));
+    out_dtype = ScalarType::Bool;
+  }
 
-  auto out_dtype =
-      meta::check_allany_and_get_output_dtype("any", self, result, {}, false);
-  auto shape = meta::get_reduction_shape(self, {}, false);
-
-  result = at::empty(shape, self.options().dtype(out_dtype));
-  auto iter = get_allany_iter(self, result, {}, false);
-
+  if (self.is_cuda()) {
+    // As CUDA supports dynamic type casting, we use this overload of
+    // `make_reduction`, which doesn't cast input to the result type i.e. kBool.,
+    // otherwise we use the overload below which casts the input to kBool (which is
+    // an extra operation).
+    auto iter = make_reduction(
+        "any", result, self, {}, false, self.scalar_type(), out_dtype);
+    return _any(result, iter);
+  }
+  auto iter =
+      make_reduction("any", result, self, {}, false, /*out_dtype=*/out_dtype);
   return _any(result, iter);
 }
 
-TORCH_IMPL_FUNC(any_out)
-(const Tensor& self, int64_t dim, bool keepdim, const Tensor& result) {
-  auto iter = get_allany_iter(self, result, dim, keepdim);
-  auto mut_result = const_cast<Tensor&>(result);
-  if (!_dimreduce_return_trivial(mut_result, self, 0, dim, keepdim)) {
-    _any(mut_result, iter);
+Tensor any(const Tensor& self, int64_t dim, bool keepdim) {
+  // Refer [all, any : uint8 compatibility]
+  Tensor result;
+  if (self.scalar_type() == ScalarType::Byte){
+    result = at::empty({0}, self.options());
+  } else {
+    result = at::empty({0}, self.options().dtype(kBool));
+  }
+
+  return at::native::any_out(self, dim, keepdim, result);
+}
+
+Tensor &any_out(const Tensor &self, int64_t dim, bool keepdim, Tensor &result) {
+  TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
+              "any only supports CPU AND CUDA device type, got: ", self.device().type());
+  TORCH_CHECK(self.layout() == Layout::Strided,
+              "any only supports strided layout, got: ", self.layout());
+  // Refer [all, any : uint8 compatibility]
+  TORCH_CHECK(result.scalar_type() == ScalarType::Bool || result.scalar_type() == ScalarType::Byte,
+              "any only supports bool tensor for result, got: ", result.scalar_type());
+
+  auto out_dtype = result.scalar_type();
+  dim = maybe_wrap_dim(dim, self.dim());
+  if (_dimreduce_return_trivial(result, self, 0, dim, keepdim)) {
+    return result;
+  } else {
+    if (self.is_cuda()) {
+      // As CUDA supports dynamic type casting, we use this overload of
+      // `make_reduction`, which doesn't cast input to the result type i.e. kBool.,
+      // otherwise we use the overload below which casts the input to kBool (which is
+      // an extra operation).
+      auto iter = make_reduction(
+          "any", result, self, dim, keepdim, self.scalar_type(), out_dtype);
+      return _any(result, iter);
+    }
+    auto iter =
+        make_reduction("any", result, self, dim, keepdim, /*out_dtype=*/out_dtype);
+    return _any(result, iter);
   }
 }
 
@@ -1314,55 +1308,76 @@ Tensor amax(const Tensor& self, IntArrayRef dim, bool keepdim) {
   return at::amax_out(result, self, dim, keepdim);
 }
 
-template <class Stub>
-void argmax_argmin_impl(
-    const Tensor& self,
-    c10::optional<int64_t> dim,
-    bool keepdim,
-    const Tensor& result,
-    Stub& stub) {
+Tensor& argmax_out(const Tensor& self, c10::optional<int64_t> dim, bool keepdim, Tensor& result) {
   c10::MaybeOwned<Tensor> in;
-  DimVector dims;
-  int64_t wrapped_dim = 0;
-
-  if (dim.has_value()) {
-    wrapped_dim = maybe_wrap_dim(dim.value(), self.dim());
+  if (dim) {
     auto sizes = self.sizes();
+    zero_numel_check_dims(self, dim.value(), "argmax()");
 
-    if (sizes[wrapped_dim] == 1) {
-      result.fill_(0);
-      return;
+    auto wrap_dim = maybe_wrap_dim(dim.value(), self.dim());
+    if (sizes[wrap_dim] == 1) {
+      if (keepdim) {
+        result = at::zeros(sizes, self.options().dtype(at::kLong));
+      } else {
+        auto sizes_vec = sizes.vec();
+        sizes_vec.erase(sizes_vec.begin() + wrap_dim);
+        result = at::zeros(sizes_vec, self.options().dtype(at::kLong));
+      }
+      return result;
     }
-
-    dims = IntArrayRef(wrapped_dim);
     in = c10::MaybeOwned<Tensor>::borrowed(self);
   } else {
+    TORCH_CHECK_INDEX(self.numel() != 0, "argmax_out(): Expected reduction dim to be specified for input.numel() == 0.");
     in = c10::MaybeOwned<Tensor>::owned(self.reshape({-1}));
     keepdim = false;
   }
-
-  auto iter =
-      meta::make_reduction(*in, result, dims, keepdim, self.scalar_type());
-
-  if (iter.numel() != 0) {
-    stub(iter.device_type(), iter);
+  auto itr = make_reduction("argmax", result, *in, dim.value_or(0), keepdim,
+      self.scalar_type(), at::kLong);
+  if (itr.numel() != 0) {
+    argmax_stub(itr.device_type(), itr);
   }
+  return result;
 }
 
-TORCH_IMPL_FUNC(argmax_out)
-(const Tensor& self,
- c10::optional<int64_t> dim,
- bool keepdim,
- const Tensor& result) {
-  argmax_argmin_impl(self, dim, keepdim, result, argmax_stub);
+Tensor argmax(const Tensor& self, c10::optional<int64_t> dim, bool keepdims) {
+  Tensor result = at::empty({0}, self.options().dtype(at::kLong));
+  return at::native::argmax_out(self, dim, keepdims, result);
 }
 
-TORCH_IMPL_FUNC(argmin_out)
-(const Tensor& self,
- c10::optional<int64_t> dim,
- bool keepdim,
- const Tensor& result) {
-  argmax_argmin_impl(self, dim, keepdim, result, argmin_stub);
+Tensor& argmin_out(const Tensor& self, c10::optional<int64_t> dim, bool keepdim, Tensor& result) {
+  c10::MaybeOwned<Tensor> in;
+  if (dim) {
+    auto sizes = self.sizes();
+    zero_numel_check_dims(self, dim.value(), "argmin()");
+
+    auto wrap_dim = maybe_wrap_dim(dim.value(), self.dim());
+    if (sizes[wrap_dim] == 1) {
+      if (keepdim) {
+        result = at::zeros(sizes, self.options().dtype(at::kLong));
+      } else {
+        auto sizes_vec = sizes.vec();
+        sizes_vec.erase(sizes_vec.begin() + wrap_dim);
+        result = at::zeros(sizes_vec, self.options().dtype(at::kLong));
+      }
+      return result;
+    }
+    in = c10::MaybeOwned<Tensor>::borrowed(self);
+  } else {
+    TORCH_CHECK_INDEX(self.numel() != 0, "argmin_out(): Expected reduction dim to be specified for input.numel() == 0.");
+    in = c10::MaybeOwned<Tensor>::owned(self.reshape({-1}));
+    keepdim = false;
+  }
+  auto itr = make_reduction("argmin", result, *in, dim.value_or(0), keepdim,
+      self.scalar_type(), at::kLong);
+  if (itr.numel() != 0) {
+    argmin_stub(itr.device_type(), itr);
+  }
+  return result;
+}
+
+Tensor argmin(const Tensor& self, c10::optional<int64_t> dim, bool keepdims) {
+  Tensor result = at::empty({0}, self.options().dtype(at::kLong));
+  return at::native::argmin_out(self, dim, keepdims, result);
 }
 
 static double std_var_all_cpu(const Tensor& self, int64_t correction, bool take_sqrt) {
