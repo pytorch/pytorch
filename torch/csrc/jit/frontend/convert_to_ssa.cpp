@@ -172,7 +172,7 @@ struct ControlFlowLoadStores {
 
   std::shared_ptr<TypeEnvironment> popFrame() {
     auto old_frame = environment_stack;
-    environment_stack = environment_stack->next;
+    environment_stack = environment_stack->getNext();
     return old_frame;
   }
 
@@ -236,7 +236,7 @@ struct EraseLoadStores {
 
   std::shared_ptr<ValueEnvironment> popFrame() {
     auto old_frame = environment_stack;
-    environment_stack = environment_stack->next;
+    environment_stack = environment_stack->getNext();
     return old_frame;
   }
 
