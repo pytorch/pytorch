@@ -366,7 +366,7 @@ graph(%a : Float(1, 3, 1, strides=[3, 1, 1], requires_grad=0, device=cpu)):
 
 def has_sympy():
     try:
-        import sympy
+        import sympy  # noqa: F401
         return True
     except ImportError:
         return False

@@ -331,8 +331,9 @@ class CompileCache3 {
       int stride_args_offset = NARGS + allocated_outputs_.size();
       for (int i : c10::irange(stride_args_from_.size())) {
         auto& item = stride_args_from_[i];
-        call_args[stride_args_offset + i] = const_cast<int64_t*>(
-            &args[item.first].strides()[item.second]); // NOLINT
+        // NOLINTNEXTLINE: const_cast
+        call_args[stride_args_offset + i] =
+            const_cast<int64_t*>(&args[item.first].strides()[item.second]);
       }
 
       int shape_args_offset = stride_args_offset + stride_args_from_.size();
@@ -515,7 +516,7 @@ class CompileCache {
   virtual at::Tensor call(const std::vector<at::Tensor>& args) = 0;
 };
 
-class HandleTorchFunction {};
+class HandleTorchFunction : public std::exception {};
 
 template <int NARGS>
 class CompileCacheImpl : public CompileCache {

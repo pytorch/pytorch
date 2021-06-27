@@ -1088,8 +1088,8 @@ void CudaCodeGen::call_fast(void* const* raw_args, size_t output_num_elements) {
   // https://stackoverflow.com/questions/34388712/cannot-understand-how-jcuda-culaunchkernel-work
   std::vector<void*> ptr_to_args(buffer_args.size());
   for (size_t i = 0; i < buffer_args.size(); i++) {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
     ptr_to_args[i] =
+        // NOLINTNEXTLINE: const_cast
         buffer_args[i].isVar() ? raw_args[i] : const_cast<void**>(&raw_args[i]);
   }
 
