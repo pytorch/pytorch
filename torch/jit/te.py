@@ -60,7 +60,8 @@ def _create_constant(value, dtype):
 
 
 class PointwiseCompiler(object):
-    def __init__(self, pointwise_fn, spec, result):
+    def __init__(self, name, pointwise_fn, spec, result):
+        self.name = name
         self.pointwise_fn = pointwise_fn
         self.spec = spec
         self.result = result
@@ -119,7 +120,8 @@ class PointwiseCompiler(object):
         from sympy import symbols, diff
         vars = symbols([f"v{i}" for i in range(1 + _num_args(self.pointwise_fn))])
         backwards_expr = diff(self.pointwise_fn(*vars[:-1]), vars[index]) * vars[-1]  # chain rule
-        return _source_to_pointwise_operator(f"lambda {','.join(map(str, vars))}: {backwards_expr}")
+        return _source_to_pointwise_operator(f"lambda {','.join(map(str, vars))}: {backwards_expr}",
+                                             name=f"{self.name}_backwards{index}")
 
     def handle_autograd(self):
         cnt = sum(int(x.requires_grad) for x in self.spec)
@@ -299,12 +301,12 @@ class PointwiseCompiler(object):
 
 
 @functools.lru_cache(None)
-def _source_to_pointwise_operator(fn_str):
+def _source_to_pointwise_operator(fn_str, name=None):
     """ Used when creating backwards() methods """
-    return pointwise_operator(eval(fn_str))
+    return pointwise_operator(eval(fn_str), name=name)
 
 
-def pointwise_operator(fn):
+def pointwise_operator(fn, name=None):
     """
     Decorator to create a new pointwise operator.  The operator will be
     JIT compiled for different dtypes/devices/layouts/etc -- but supports dynamic shapes.
@@ -313,5 +315,10 @@ def pointwise_operator(fn):
         def add(a, b):
             return a + b
     """
-    return _te.CompileCache(lambda spec, result: PointwiseCompiler(fn, spec, result),
+    name = name or fn.__name__
+    args = [f"Tensor {name}" for name in inspect.signature(fn).parameters.keys()]
+    signature = f"{name}({', '.join(args)}, *, Tensor? out=None)"
+    return _te.CompileCache(name,
+                            [signature],
+                            lambda spec, result: PointwiseCompiler(name, fn, spec, result),
                             _num_args(fn))

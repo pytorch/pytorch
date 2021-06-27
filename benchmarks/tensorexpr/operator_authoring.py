@@ -4,6 +4,7 @@ import pandas as pd
 import timeit
 import torch.jit.te
 
+WRITE_CSV = False
 CUDA = False
 SIZES = [1, 512, 8192]
 NUMBER = [100, 10, 1, 1]
@@ -183,8 +184,10 @@ def main():
     df = pd.DataFrame(np.stack([r for n, r in results]),
                       columns=[f"{n}x{n}".rjust(9) for n in SIZES],
                       index=[n for n, r in results])
-    df.to_csv("../operator_authoring_results.csv")
-    print("wrote ../operator_authoring_results.csv")
+
+    if WRITE_CSV:
+        df.to_csv("../operator_authoring_results.csv")
+        print("wrote ../operator_authoring_results.csv")
 
     print()
     print("Speedups over aten")

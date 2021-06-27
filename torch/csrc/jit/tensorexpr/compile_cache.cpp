@@ -111,28 +111,28 @@ struct SpecializationKey {
   template <typename T>
   inline void init_dimflags(const T& sizes, const T& strides, int64_t ndims) {
     // pack all the properties for each dimension into a uint8
-    int out_idx = 0;
-    for (int dim = 0; dim < ndims; ++dim) {
-      uint8_t flag = (sizes[dim] == 1 ? SIZE_ONE : SIZE_OTHER);
-      if (strides[dim] == 0) {
-        flag |= STRIDE_ZERO;
-      } else if (strides[dim] == 1) {
-        flag |= STRIDE_ONE;
-      } else if (
-          dim + 1 < sizes.size() &&
-          strides[dim] == strides[dim + 1] * sizes[dim + 1]) {
-        flag |= STRIDE_CONTIGUOUS;
-      } else if (
-          dim > 0 && strides[dim] == strides[dim - 1] * sizes[dim - 1] &&
-          (dimflags_[out_idx - 1] & STRIDE_CONTIGUOUS) == 0) {
-        flag |= STRIDE_TRANSPOSED_CONTIGUOUS;
+    for (int dim = 0; dim < MAX_DIMS; ++dim) {
+      if (dim < ndims) {
+        uint8_t flag = (sizes[dim] == 1 ? SIZE_ONE : SIZE_OTHER);
+        if (strides[dim] == 0) {
+          flag |= STRIDE_ZERO;
+        } else if (strides[dim] == 1) {
+          flag |= STRIDE_ONE;
+        } else if (
+            dim + 1 < sizes.size() &&
+            strides[dim] == strides[dim + 1] * sizes[dim + 1]) {
+          flag |= STRIDE_CONTIGUOUS;
+        } else if (
+            dim > 0 && strides[dim] == strides[dim - 1] * sizes[dim - 1] &&
+            (dimflags_[dim - 1] & STRIDE_CONTIGUOUS) == 0) {
+          flag |= STRIDE_TRANSPOSED_CONTIGUOUS;
+        } else {
+          flag |= STRIDE_AS_ARG;
+        }
+        dimflags_[dim] = flag;
       } else {
-        flag |= STRIDE_AS_ARG;
+        dimflags_[dim] = SIZE_MISSING | STRIDE_ZERO;
       }
-      dimflags_[out_idx++] = flag;
-    }
-    while (out_idx < MAX_DIMS) {
-      dimflags_[out_idx++] = SIZE_MISSING | STRIDE_ZERO;
     }
   }
 
@@ -165,6 +165,10 @@ struct SpecializationKey {
         0,
         sizeof(flags_) + sizeof(alias_group_) + sizeof(dispatch_key_) +
             sizeof(dimflags_));
+  }
+
+  DispatchKeySet dispatch_key() const {
+    return DispatchKeySet(DispatchKeySet::RAW, dispatch_key_);
   }
 
   std::vector<std::string> shape() const {
@@ -262,11 +266,9 @@ struct CmpLess {
 };
 
 template <int NARGS, int MAX_DIMS>
-class CompileCache3 {
+class alignas(32) CompileCache3 {
  public:
-  typedef SpecializationKey<MAX_DIMS> ArgKey;
-  typedef std::array<ArgKey, NARGS> Key;
-  typedef std::array<at::Tensor, NARGS> Args;
+  typedef std::array<SpecializationKey<MAX_DIMS>, NARGS> SpecializationKeys;
   typedef std::array<int8_t, NARGS> AliasGroups;
 
   class CompileResultImpl : public CompileResultBase {
@@ -331,8 +333,8 @@ class CompileCache3 {
       int stride_args_offset = NARGS + allocated_outputs_.size();
       for (int i : c10::irange(stride_args_from_.size())) {
         auto& item = stride_args_from_[i];
-        // NOLINTNEXTLINE: const_cast
         call_args[stride_args_offset + i] =
+            // NOLINTNEXTLINE: const_cast
             const_cast<int64_t*>(&args[item.first].strides()[item.second]);
       }
 
@@ -391,24 +393,58 @@ class CompileCache3 {
     std::vector<CompileCacheBackwards> backwards_functions_;
     std::vector<py::object> objects_; // for ref counting
   };
-  typedef std::map<Key, CompileResultImpl*, CmpLess> Map;
+  typedef std::map<SpecializationKeys, CompileResultImpl*, CmpLess> Cache;
 
-  CompileResultImpl* cached_compile(const Key& key, at::Tensor* args) {
-    std::lock_guard<std::mutex> guard(mutex_);
+  void check_dispatch_keys(const SpecializationKeys& key) {
+    DispatchKeySet ks;
+    for (auto& item : key) {
+      ks = ks | item.dispatch_key();
+    }
+    constexpr DispatchKeySet supported = DispatchKeySet({
+        DispatchKey::CPU,
+        DispatchKey::CUDA,
+        DispatchKey::AutogradCPU,
+        DispatchKey::AutogradCUDA,
+        DispatchKey::BackendSelect,
+        DispatchKey::ADInplaceOrView,
+    });
+    ks = ks - supported;
+    if (C10_LIKELY(ks.empty())) {
+      return;
+    }
+    std::stringstream ss;
+    ss << "DispatchKeys not yet supported:";
+    for (DispatchKey k : ks) {
+      ss << " " << k;
+    }
+    throw std::runtime_error(ss.str());
+  }
+
+  CompileResultImpl* compile(const SpecializationKeys& key, at::Tensor* args) {
+    // handle a cache miss by creating a new specialized implementation
+    check_dispatch_keys(key);
+    KernelScope scope(&arena_);
+    auto cr = new CompileResultImpl();
+    py::gil_scoped_acquire guard;
+    std::vector<py::object> spec;
+    spec.reserve(key.size());
+    for (int i = 0; i < key.size(); ++i) {
+      spec.emplace_back(key[i].to_python(args[i]));
+    }
+    compile_fn_(spec, CompileResultProxy(cr));
+    return cr;
+  }
+
+  CompileResultImpl* cached_compile(
+      const SpecializationKeys& key,
+      at::Tensor* args) {
     // TODO(jansel): optimization: make this lock-free in the cache-hit case
+    std::lock_guard<std::mutex> guard(mutex_);
     auto item = cache_.find(key);
-    if (item != cache_.end()) {
+    if (C10_LIKELY(item != cache_.end())) {
       return item->second;
-    } else {
-      KernelScope scope(&arena_);
-      auto cr = new CompileResultImpl();
-      py::gil_scoped_acquire guard;
-      std::vector<py::object> spec;
-      spec.reserve(key.size());
-      for (int i = 0; i < key.size(); ++i) {
-        spec.emplace_back(key[i].to_python(args[i]));
-      }
-      compile_fn_(spec, CompileResultProxy(cr));
+    } else { // cache miss
+      auto cr = compile(key, args);
       cache_.emplace(std::make_pair(key, cr));
       return cr;
     }
@@ -454,16 +490,18 @@ class CompileCache3 {
     return alias_groups;
   }
 
-  Key compute_cache_key(at::Tensor* args, bool has_out) {
+  SpecializationKeys compute_cache_key(at::Tensor* args, bool has_out) {
     LocalState state;
     AliasGroups alias_groups = compute_alias_groups(args);
-    Key key;
+    SpecializationKeys key;
     int i = 0;
     for (; i < NARGS - 1; ++i) {
-      key[i] = ArgKey(state, args[i], alias_groups[i], false);
+      key[i] =
+          SpecializationKey<MAX_DIMS>(state, args[i], alias_groups[i], false);
     }
     if (NARGS != 0) {
-      key[i] = ArgKey(state, args[i], alias_groups[i], has_out);
+      key[i] =
+          SpecializationKey<MAX_DIMS>(state, args[i], alias_groups[i], has_out);
     }
     return key;
   }
@@ -477,7 +515,7 @@ class CompileCache3 {
 
  public:
   std::mutex mutex_;
-  Map cache_;
+  Cache cache_;
   py::object compile_fn_;
   KernelArena arena_;
 };
@@ -516,81 +554,43 @@ class CompileCache {
   virtual at::Tensor call(const std::vector<at::Tensor>& args) = 0;
 };
 
-class HandleTorchFunction : public std::exception {};
-
 template <int NARGS>
 class CompileCacheImpl : public CompileCache {
-  struct Cleanup {
-    at::Tensor* ptr;
-    int count;
-
-    inline ~Cleanup() {
-      for (int i : c10::irange(count)) {
-        ptr[i].~Tensor();
-      }
-    }
-  };
-
-  static at::Tensor to_tensor(PyObject* obj) {
-    if (C10_LIKELY(THPVariable_CheckExact(obj))) {
-      // torch.Tensor instances (not subclasses)
-      return THPVariable_Unpack(obj);
-    }
-
-    if (check_has_torch_function(obj)) {
-      throw HandleTorchFunction();
-    }
-
-    if (THPVariable_Check(obj)) {
-      // torch.Tensor subclasses
-      return THPVariable_Unpack(obj);
-    }
-
-    throw std::runtime_error("TODO: handle non-tensor args");
-  }
-
  public:
-  CompileCacheImpl(const py::object& compile_fn)
+  CompileCacheImpl(
+      std::string name,
+      const std::vector<std::string>& signatures,
+      const py::object& compile_fn)
       : cache(compile_fn),
         cache_out(compile_fn),
-        key_out_(py::cast<py::object>(PyUnicode_InternFromString("out"))) {}
+        parser_(signatures),
+        name_(std::move(name)) {
+    if (signatures.size() != 1) {
+      throw std::runtime_error("TODO: support overloaded signatures");
+    }
+  }
 
   at::Tensor py_call(py::args args, py::kwargs kwargs) override {
-    int num_args = py::len(args);
-    int num_kwargs = py::len(kwargs);
-    if (C10_UNLIKELY(num_kwargs > 1 || num_args != NARGS)) {
-      throw std::runtime_error("wrong number of args");
-    }
+    ParsedArgs<NARGS + 1> parsed_args;
+    auto r = parser_.parse(args.ptr(), kwargs.ptr(), parsed_args);
     bool pre_sampled = false;
-    if (C10_UNLIKELY(
-            at::hasCallbacks() && at::shouldRunRecordFunction(&pre_sampled))) {
+    if (C10_UNLIKELY(r.has_torch_function())) {
+      throw std::runtime_error("TODO: support __torch_function__");
+    } else if (C10_UNLIKELY(
+                   at::hasCallbacks() &&
+                   at::shouldRunRecordFunction(&pre_sampled))) {
       throw std::runtime_error("TODO: implement record function");
-    }
-
-    // NOLINTNEXTLINE: C-style arrays
-    char tensor_args_buffer[sizeof(at::Tensor) * (NARGS + 1)]
-        __attribute__((aligned(8)));
-    Cleanup tensor_args = {
-        reinterpret_cast<at::Tensor*>(tensor_args_buffer), 0};
-
-    try {
-      for (int i = 0; i < NARGS; ++i) {
-        new (tensor_args.ptr + i) at::Tensor(to_tensor(args[i].ptr()));
-        tensor_args.count++;
+    } else {
+      at::Tensor tensor_args[NARGS + 1]; // NOLINT: c-style arrays
+      for (int i = 0; i < NARGS + 1; ++i) {
+        tensor_args[i] = r.tensor(i);
       }
-
-      if (num_kwargs == 1) {
-        new (tensor_args.ptr + NARGS)
-            at::Tensor(to_tensor(kwargs[key_out_].ptr()));
-        tensor_args.count++;
-        py::gil_scoped_release release;
-        return cache_out.call(tensor_args.ptr, true);
+      py::gil_scoped_release release;
+      if (tensor_args[NARGS].defined()) {
+        return cache_out.call(tensor_args, true);
       } else {
-        py::gil_scoped_release release;
-        return cache.call(tensor_args.ptr, false);
+        return cache.call(tensor_args, false);
       }
-    } catch (HandleTorchFunction&) {
-      throw std::runtime_error("TODO: add __torch_function__ support");
     }
   }
 
@@ -604,31 +604,42 @@ class CompileCacheImpl : public CompileCache {
  private:
   CompileCache2<NARGS> cache;
   CompileCache2<NARGS + 1> cache_out; // out=... variant
-  py::object key_out_;
+  PythonArgParser parser_;
+  std::string name_;
 };
 
-CompileCache* create_compile_cache(const py::object& compile_fn, int num_args) {
+CompileCache* create_compile_cache(
+    const std::string& name,
+    const std::vector<std::string>& sig,
+    const py::object& compile_fn,
+    int num_args) {
   switch (num_args) {
     case 1:
-      return new CompileCacheImpl<1>(compile_fn);
+      return new CompileCacheImpl<1>(name, sig, compile_fn);
     case 2:
-      return new CompileCacheImpl<2>(compile_fn);
+      return new CompileCacheImpl<2>(name, sig, compile_fn);
     case 3:
-      return new CompileCacheImpl<3>(compile_fn);
+      return new CompileCacheImpl<3>(name, sig, compile_fn);
     case 4:
-      return new CompileCacheImpl<4>(compile_fn);
+      return new CompileCacheImpl<4>(name, sig, compile_fn);
     case 5:
-      return new CompileCacheImpl<5>(compile_fn);
+      return new CompileCacheImpl<5>(name, sig, compile_fn);
     case 6:
-      return new CompileCacheImpl<6>(compile_fn);
+      return new CompileCacheImpl<6>(name, sig, compile_fn);
+    case 7:
+      return new CompileCacheImpl<7>(name, sig, compile_fn);
+    case 8:
+      return new CompileCacheImpl<8>(name, sig, compile_fn);
     default:
       throw std::runtime_error("TODO: support other arg counts");
   }
 }
 
 variable_list CompiledAutoGradNode::apply(variable_list&& new_inputs) {
-  // TODO(jansel): we likely need to copy some error checking from eager to here
-  // TODO(jansel): possible optimization: horizontal fusion of each backwards fn
+  // TODO(jansel): we likely need to copy some error checking from eager to
+  // here
+  // TODO(jansel): possible optimization: horizontal fusion of each backwards
+  // fn
   // TODO(jansel): possible optimization: reuse the forwards SpecializationKey
   // TODO(jansel): possible optimization: dont save all the inputs_
   // TODO(jansel): possible optimization: precompute in forwards
