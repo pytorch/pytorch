@@ -41,7 +41,7 @@ C10_API void free_cpu(void* data);
 // deallocation status to the profiler
 class C10_API ProfiledCPUMemoryReporter {
  public:
-  ProfiledCPUMemoryReporter() {}
+  ProfiledCPUMemoryReporter() = default;
   void New(void* ptr, size_t nbytes);
   void Delete(void* ptr);
 

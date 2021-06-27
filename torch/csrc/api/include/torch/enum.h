@@ -80,7 +80,7 @@ std::string operator()(const enumtype::k##name& v) const { \
 // Note that we also provide the default constructor `SomeOptions() {}`, so that
 // `SomeOptions options = {}` can work.
 #define TORCH_OPTIONS_CTOR_VARIANT_ARG3(OPTIONS_NAME, ARG_NAME, TYPE1, TYPE2, TYPE3) \
-OPTIONS_NAME() {} \
+OPTIONS_NAME() = default; \
 OPTIONS_NAME(torch::enumtype::TYPE1 ARG_NAME) : ARG_NAME##_(torch::TYPE1) {} \
 OPTIONS_NAME(torch::enumtype::TYPE2 ARG_NAME) : ARG_NAME##_(torch::TYPE2) {} \
 OPTIONS_NAME(torch::enumtype::TYPE3 ARG_NAME) : ARG_NAME##_(torch::TYPE3) {}
