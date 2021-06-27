@@ -15,8 +15,9 @@ struct MiniEnvironment {
   MiniEnvironment(Block* b, std::shared_ptr<MiniEnvironment> next = nullptr)
       : next(std::move(next)) {}
 
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  std::shared_ptr<MiniEnvironment<T>> next;
+  std::shared_ptr<MiniEnvironment<T>> getNext() {
+    return next;
+  };
 
   T findInThisFrame(const std::string& name) {
     auto it = table.find(name);
@@ -47,6 +48,9 @@ struct MiniEnvironment {
     std::sort(result.begin(), result.end());
     return result;
   }
+
+ protected:
+  std::shared_ptr<MiniEnvironment<T>> next;
 
  private:
   std::unordered_map<std::string, T> table;
