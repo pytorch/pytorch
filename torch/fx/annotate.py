@@ -1,4 +1,3 @@
-import torch
 from torch.fx.proxy import Proxy
 
 def annotate(val, type):
