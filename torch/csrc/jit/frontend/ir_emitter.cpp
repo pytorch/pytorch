@@ -174,7 +174,7 @@ void to_ir::pushFrame(Block* b, bool starts_def) {
 }
 std::shared_ptr<Environment> to_ir::popFrame(bool ends_def) {
   auto old_frame = environment_stack;
-  environment_stack = environment_stack->next;
+  environment_stack = environment_stack->getNext();
   if (ends_def) {
     def_stack_.pop_back();
   }
