@@ -93,13 +93,10 @@ class TORCH_CUDA_CPP_API CuSparseDnMatDescriptor
 
     auto batch_count = at::native::cuda_int_cast(at::native::batchCount(input), "batch_count");
     auto batch_stride = rows * leading_dimension;
-    std::cout << "input is " << input << std::endl;
-    std::cout << "batch_stride is " << batch_stride << std::endl;
     TORCH_CUDASPARSE_CHECK(cusparseDnMatSetStridedBatch(
         raw_descriptor, batch_count, batch_stride));
 
     descriptor_.reset(raw_descriptor);
-    std::cout << "CuSparseDnMatDescriptor is OK" << std::endl;
   }
 };
 
@@ -163,7 +160,6 @@ class TORCH_CUDA_CPP_API CuSparseSpMatCsrDescriptor
     }
 
     descriptor_.reset(raw_descriptor);
-    std::cout << "CuSparseDnMatDescriptor is OK" << std::endl;
   }
 };
 
