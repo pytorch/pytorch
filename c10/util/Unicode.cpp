@@ -7,7 +7,7 @@ std::wstring u8u16(const std::string& str) {
     return std::wstring();
   }
   int size_needed = MultiByteToWideChar(
-      CP_UTF8, 0, str.c_str(), static_cast<int>(str.size()), NULL, 0);
+      CP_UTF8, 0, str.c_str(), static_cast<int>(str.size()), nullptr, 0);
   TORCH_CHECK(size_needed > 0, "Error converting the content to Unicode");
   std::wstring wstr(size_needed, 0);
   MultiByteToWideChar(
@@ -28,10 +28,10 @@ std::string u16u8(const std::wstring& wstr) {
       0,
       wstr.c_str(),
       static_cast<int>(wstr.size()),
-      NULL,
+      nullptr,
       0,
-      NULL,
-      NULL);
+      nullptr,
+      nullptr);
   TORCH_CHECK(size_needed > 0, "Error converting the content to UTF8");
   std::string str(size_needed, 0);
   WideCharToMultiByte(
@@ -41,8 +41,8 @@ std::string u16u8(const std::wstring& wstr) {
       static_cast<int>(wstr.size()),
       &str[0],
       size_needed,
-      NULL,
-      NULL);
+      nullptr,
+      nullptr);
   return str;
 }
 #endif

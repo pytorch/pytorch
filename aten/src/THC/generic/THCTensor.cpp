@@ -56,7 +56,7 @@ scalar_t *THCTensor_(data)(THCState *state, const THCTensor *self)
   if(THTensor_getStoragePtr(self))
     return (THCStorage_(data)(state, THTensor_getStoragePtr(self))+self->storage_offset());
   else
-    return NULL;
+    return nullptr;
 }
 
 /**** creation methods ****/
@@ -135,21 +135,21 @@ THCTensor *THCTensor_(newContiguous)(THCState *state, THCTensor *self)
 THCTensor *THCTensor_(newSelect)(THCState *state, THCTensor *tensor, int dimension_, int64_t sliceIndex_)
 {
   THCTensor *self = THCTensor_(newWithTensor)(state, tensor);
-  THCTensor_(select)(state, self, NULL, dimension_, sliceIndex_);
+  THCTensor_(select)(state, self, nullptr, dimension_, sliceIndex_);
   return self;
 }
 
 THCTensor *THCTensor_(newNarrow)(THCState *state, THCTensor *tensor, int dimension_, int64_t firstIndex_, int64_t size_)
 {
   THCTensor *self = THCTensor_(newWithTensor)(state, tensor);
-  THCTensor_(narrow)(state, self, NULL, dimension_, firstIndex_, size_);
+  THCTensor_(narrow)(state, self, nullptr, dimension_, firstIndex_, size_);
   return self;
 }
 
 THCTensor *THCTensor_(newTranspose)(THCState *state, THCTensor *tensor, int dimension1_, int dimension2_)
 {
   THCTensor *self = THCTensor_(newWithTensor)(state, tensor);
-  THCTensor_(transpose)(state, self, NULL, dimension1_, dimension2_);
+  THCTensor_(transpose)(state, self, nullptr, dimension1_, dimension2_);
   return self;
 }
 
@@ -256,7 +256,7 @@ void THCTensor_(select)(THCState *state, THCTensor *self, THCTensor *src, int di
   THArgCheck((sliceIndex >= 0) && (sliceIndex < src->size(dimension)), 4, "out of range");
 
   THCTensor_(set)(state, self, src);
-  THCTensor_(narrow)(state, self, NULL, dimension, sliceIndex, 1);
+  THCTensor_(narrow)(state, self, nullptr, dimension, sliceIndex, 1);
 
   std::vector<int64_t> newSize(self->dim()-1);
   std::vector<int64_t> newStride(self->dim()-1);
@@ -434,7 +434,7 @@ int THCTensor_(checkGPU)(THCState *state, unsigned int nTensors, ...)
   int valid = 1;
   for (unsigned int i = 0; i < nTensors; i++) {
     THCTensor* tensor = va_arg(args, THCTensor*);
-    if (tensor == NULL) {
+    if (tensor == nullptr) {
       continue;
     }
 

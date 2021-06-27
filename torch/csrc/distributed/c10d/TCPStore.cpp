@@ -131,8 +131,8 @@ void BackgroundThread::join() {
 
 #ifdef _WIN32
 void BackgroundThread::initStopSignal() {
-  ghStopEvent_ = CreateEvent(NULL, TRUE, FALSE, NULL);
-  if (ghStopEvent_ == NULL) {
+  ghStopEvent_ = CreateEvent(nullptr, TRUE, FALSE, nullptr);
+  if (ghStopEvent_ == nullptr) {
     TORCH_CHECK(false,
         "Failed to create the control pipe to start the "
         "BackgroundThread run");

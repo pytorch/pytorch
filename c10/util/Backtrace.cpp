@@ -126,7 +126,7 @@ std::string get_module_base_name(void* addr) {
           GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
       (LPCTSTR)addr,
       &h_module);
-  if (h_module != NULL) {
+  if (h_module != nullptr) {
     GetModuleFileNameA(h_module, module, max_name_len);
   }
   char* last_slash_pos = strrchr(module, '\\');
@@ -152,7 +152,7 @@ class SymbolHelper {
     process = GetCurrentProcess();
     DWORD flags = SymGetOptions();
     SymSetOptions(flags | SYMOPT_DEFERRED_LOADS);
-    inited = SymInitialize(process, NULL, TRUE);
+    inited = SymInitialize(process, nullptr, TRUE);
   }
   ~SymbolHelper() {
     if (inited) {
@@ -282,7 +282,7 @@ std::string get_backtrace(
       static_cast<DWORD>(frames_to_skip),
       static_cast<DWORD>(maximum_number_of_frames),
       back_trace.get(),
-      NULL);
+      nullptr);
 
   // Initialize symbols if necessary
   SymbolHelper& sh = SymbolHelper::getInstance();

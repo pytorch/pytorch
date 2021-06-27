@@ -340,7 +340,7 @@ class CachingAllocatorConfig {
 
   void parseArgs() {
     const char* val = getenv("PYTORCH_CUDA_ALLOC_CONF");
-    if (val != NULL) {
+    if (val != nullptr) {
       const std::string config(val);
 
       std::regex exp("[\\s,]+");

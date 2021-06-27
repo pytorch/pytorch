@@ -38,7 +38,7 @@
 int flock_(int fd, int op) {
   HANDLE hdl = (HANDLE)_get_osfhandle(fd);
   DWORD low = 1, high = 0;
-  OVERLAPPED offset = {0, 0, 0, 0, NULL};
+  OVERLAPPED offset = {0, 0, 0, 0, nullptr};
 
   if (hdl < 0)
     return -1;

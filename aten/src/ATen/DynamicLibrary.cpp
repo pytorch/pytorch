@@ -61,12 +61,12 @@ DynamicLibrary::DynamicLibrary(const char* name, const char* alt_name) {
   bool reload = true;
   auto wname = c10::u8u16(name);
   // Check if LOAD_LIBRARY_SEARCH_DEFAULT_DIRS is supported
-  if (GetProcAddress(GetModuleHandleW(L"KERNEL32.DLL"), "AddDllDirectory") != NULL) {
+  if (GetProcAddress(GetModuleHandleW(L"KERNEL32.DLL"), "AddDllDirectory") != nullptr) {
     theModule = LoadLibraryExW(
         wname.c_str(),
-        NULL,
+        nullptr,
         LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
-    if (theModule != NULL || (GetLastError() != ERROR_MOD_NOT_FOUND)) {
+    if (theModule != nullptr || (GetLastError() != ERROR_MOD_NOT_FOUND)) {
       reload = false;
     }
   }
@@ -81,8 +81,8 @@ DynamicLibrary::DynamicLibrary(const char* name, const char* alt_name) {
     char buf[256];
     DWORD dw = GetLastError();
     FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-                  NULL, dw, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-                  buf, (sizeof(buf) / sizeof(char)), NULL);
+                  nullptr, dw, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                  buf, (sizeof(buf) / sizeof(char)), nullptr);
     AT_ERROR("error in LoadLibrary for ", name, ". WinError ", dw, ": ", buf);
   }
 }

@@ -147,7 +147,7 @@ std::string sockaddrToString(struct ::sockaddr* addr) {
 
 // listen, connect and accept
 std::pair<int, PortType> listen(PortType port) {
-  struct ::addrinfo hints, *res = NULL;
+  struct ::addrinfo hints, *res = nullptr;
   std::memset(&hints, 0x00, sizeof(hints));
   hints.ai_flags = AI_PASSIVE | AI_ADDRCONFIG;
   hints.ai_family = AF_SELECTED; // IPv4 on Windows, IPv4/6 on Linux
@@ -268,7 +268,7 @@ int connect(
     PortType port,
     bool wait,
     const std::chrono::milliseconds& timeout) {
-  struct ::addrinfo hints, *res = NULL;
+  struct ::addrinfo hints, *res = nullptr;
   std::memset(&hints, 0x00, sizeof(hints));
   hints.ai_flags = AI_NUMERICSERV; // specifies that port (service) is numeric
   hints.ai_family = AF_SELECTED; // IPv4 on Windows, IPv4/6 on Linux
@@ -366,7 +366,7 @@ std::tuple<int, std::string> accept(
   }
 
   int socket;
-  SYSCHECK_ERR_RETURN_NEG1(socket = ::accept(listenSocket, NULL, NULL))
+  SYSCHECK_ERR_RETURN_NEG1(socket = ::accept(listenSocket, nullptr, nullptr))
 
   // Get address of the connecting process
   struct ::sockaddr_storage addr;

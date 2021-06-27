@@ -25,12 +25,12 @@ using namespace py::literals;
 
 #if (DEBUG == 1)
 #define PYOBJ_ASSERT(obj) \
-  if (NULL == obj) {      \
+  if (nullptr == obj) {   \
     PyErr_Print();        \
   }                       \
-  assert(NULL != obj);
+  assert(nullptr != obj);
 #elif (DEBUG == 0)
-#define PYOBJ_ASSERT(obj) assert(NULL != obj);
+#define PYOBJ_ASSERT(obj) assert(nullptr != obj);
 #endif
 
 #define FOREACH_LIBRARY(_) \

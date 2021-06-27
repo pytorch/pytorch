@@ -187,7 +187,7 @@ MapAllocator::MapAllocator(WithFd, std::string filename, int fd, int flags, size
       if (size > hfilesz.QuadPart) {
         if (flags_) {
           hfilesz.QuadPart = size;
-          if (SetFilePointerEx(hfile, hfilesz, NULL, FILE_BEGIN) == 0) {
+          if (SetFilePointerEx(hfile, hfilesz, nullptr, FILE_BEGIN) == 0) {
             CloseHandle(hfile);
             TORCH_INTERNAL_ASSERT(false, "unable to stretch file <", filename_, "> to the right size; error code: <", GetLastError(), ">", filename_);
           }
@@ -210,11 +210,11 @@ MapAllocator::MapAllocator(WithFd, std::string filename, int fd, int flags, size
 
     /* get map handle */
     if (flags_) {
-      if ( (hmfile = CreateFileMappingW(hfile, NULL, PAGE_READWRITE, hfilesz.HighPart, hfilesz.LowPart, NULL)) == NULL ) {
+      if ( (hmfile = CreateFileMappingW(hfile, nullptr, PAGE_READWRITE, hfilesz.HighPart, hfilesz.LowPart, nullptr)) == nullptr ) {
         TORCH_INTERNAL_ASSERT(false, "could not create a map on file <", filename_, ">; error code: <", GetLastError(), ">");
       }
     } else {
-      if ( (hmfile = CreateFileMappingW(hfile, NULL, PAGE_WRITECOPY, hfilesz.HighPart, hfilesz.LowPart, NULL)) == NULL ) {
+      if ( (hmfile = CreateFileMappingW(hfile, nullptr, PAGE_WRITECOPY, hfilesz.HighPart, hfilesz.LowPart, nullptr)) == nullptr ) {
         TORCH_INTERNAL_ASSERT(false, "could not create a map on file <", filename_, ">; error code: <", GetLastError(), ">");
       }
     }
@@ -319,7 +319,7 @@ MapAllocator::MapAllocator(WithFd, std::string filename, int fd, int flags, size
     }
 
     if (base_ptr_ == MAP_FAILED) {
-      base_ptr_ = nullptr; /* let's be sure it is NULL */
+      base_ptr_ = nullptr; /* let's be sure it is nullptr */
       TORCH_INTERNAL_ASSERT(false, "unable to mmap ", size_, " bytes from file <", filename_, ">: ", strerror(errno), " (", errno, ")");
     }
 
@@ -470,7 +470,7 @@ void RefcountedMapAllocator::initializeAlloc() {
   ReleaseContext* r_ctx = new ReleaseContext;
   r_ctx->handle = handle_;
   r_ctx->event = event_;
-  r_ctx->wait = NULL;
+  r_ctx->wait = nullptr;
   BOOL can_wait = RegisterWaitForSingleObject(&r_ctx->wait, event_, WaitForReleaseHandle, (PVOID)r_ctx, INFINITE, WT_EXECUTEONLYONCE);
   TORCH_INTERNAL_ASSERT(can_wait, "Couldn't register wait on event, error code: <", GetLastError(), ">");
 #endif
