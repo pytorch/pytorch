@@ -66,6 +66,20 @@ static py::object python_specialization_key() {
   return *rv;
 }
 
+struct LocalState {
+  // TLS state that changes operators
+  c10::impl::LocalDispatchKeySet dispatch_modifier;
+  bool grad_mode_enabled;
+
+  at::DispatchKeySet apply(at::DispatchKeySet ks) const {
+    return (ks | dispatch_modifier.included_) - dispatch_modifier.excluded_;
+  }
+
+  LocalState()
+      : dispatch_modifier(c10::impl::tls_local_dispatch_key_set()),
+        grad_mode_enabled(at::GradMode::is_enabled()) {}
+};
+
 template <int MAX_DIMS>
 struct SpecializationKey {
  protected:
@@ -81,26 +95,17 @@ struct SpecializationKey {
     STRIDE_AS_ARG = 1 << 7,
   };
 
-  static inline uint16_t pack_flags(const at::Tensor& v, bool is_out) {
-    // pack all the tensor properties into a uint16 for fast hash/compare
-    constexpr uint16_t S0 = 1;
-    constexpr uint16_t S1 = S0 * 2; // bool is_out
-    constexpr uint16_t S2 = S1 * 2; // bool requires_grad
-    constexpr uint16_t S3 = S2 * static_cast<int>(at::ScalarType::NumOptions);
-    constexpr uint16_t S4 = S3 * static_cast<int>(at::Layout::NumOptions);
-    constexpr uint16_t S5 =
-        S4 * static_cast<int>(at::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES);
-    static_assert(S3 < S4 && S4 < S5, "overflow");
-
+  static inline uint16_t pack_flags(
+      const LocalState& state,
+      const at::Tensor& v,
+      bool is_out) {
+    static_assert(
+        static_cast<int>(at::ScalarType::NumOptions) < 64, "overflow possible");
     at::ScalarType dtype = v.dtype().toScalarType();
-    at::DeviceType device = v.device().type();
-    at::Layout layout = v.layout();
-    bool requires_grad = v.requires_grad() && at::GradMode::is_enabled();
-
-    return S0 * static_cast<uint16_t>(is_out) +
-        S1 * static_cast<uint16_t>(requires_grad) +
-        S2 * static_cast<uint16_t>(dtype) + S3 * static_cast<uint16_t>(layout) +
-        S4 * static_cast<uint16_t>(device);
+    bool requires_grad = state.grad_mode_enabled && v.requires_grad();
+    return static_cast<uint8_t>(is_out) |
+        (static_cast<uint8_t>(requires_grad) << 1) |
+        (static_cast<uint8_t>(dtype) << 2);
   }
 
   template <typename T>
@@ -135,8 +140,14 @@ struct SpecializationKey {
   SpecializationKey() {} // NOLINT: intentionally not initialized
 
   // NOLINTNEXTLINE: intentionally not initializing dimflags_
-  SpecializationKey(const at::Tensor& v, int8_t alias_group, bool is_out)
-      : flags_(pack_flags(v, is_out)), alias_group_(alias_group) {
+  SpecializationKey(
+      const LocalState& state,
+      const at::Tensor& v,
+      int8_t alias_group,
+      bool is_out)
+      : flags_(pack_flags(state, v, is_out)),
+        alias_group_(alias_group),
+        dispatch_key_(state.apply(v.key_set()).raw_repr()) {
     init_dimflags(v.sizes(), v.strides(), v.ndimension());
   }
 
@@ -144,12 +155,16 @@ struct SpecializationKey {
     return memcmp(
         &flags_,
         &other.flags_,
-        sizeof(flags_) + sizeof(alias_group_) + sizeof(dimflags_));
+        sizeof(flags_) + sizeof(alias_group_) + sizeof(dispatch_key_) +
+            sizeof(dimflags_));
   }
 
   void clear() {
     memset(
-        &flags_, 0, sizeof(flags_) + sizeof(alias_group_) + sizeof(dimflags_));
+        &flags_,
+        0,
+        sizeof(flags_) + sizeof(alias_group_) + sizeof(dispatch_key_) +
+            sizeof(dimflags_));
   }
 
   std::vector<std::string> shape() const {
@@ -202,10 +217,11 @@ struct SpecializationKey {
   }
 
  private:
-  uint16_t flags_; // dtype, layout, device, and requires_grad
+  uint8_t flags_; // is_out, requires_grad, and dtype
   int8_t alias_group_; // 0 = no aliasing
                        // >0 = same data, strides, and shapes within group
                        // <0 = overlapping storage madness
+  uint64_t dispatch_key_; // DispatchKeySet includes device/layout
   // NOLINTNEXTLINE: C-style arrays
   uint8_t dimflags_[MAX_DIMS];
 } __attribute__((packed));
@@ -438,14 +454,15 @@ class CompileCache3 {
   }
 
   Key compute_cache_key(at::Tensor* args, bool has_out) {
+    LocalState state;
     AliasGroups alias_groups = compute_alias_groups(args);
     Key key;
     int i = 0;
     for (; i < NARGS - 1; ++i) {
-      key[i] = ArgKey(args[i], alias_groups[i], false);
+      key[i] = ArgKey(state, args[i], alias_groups[i], false);
     }
     if (NARGS != 0) {
-      key[i] = ArgKey(args[i], alias_groups[i], has_out);
+      key[i] = ArgKey(state, args[i], alias_groups[i], has_out);
     }
     return key;
   }
@@ -498,6 +515,8 @@ class CompileCache {
   virtual at::Tensor call(const std::vector<at::Tensor>& args) = 0;
 };
 
+class HandleTorchFunction {};
+
 template <int NARGS>
 class CompileCacheImpl : public CompileCache {
   struct Cleanup {
@@ -511,15 +530,40 @@ class CompileCacheImpl : public CompileCache {
     }
   };
 
+  static at::Tensor to_tensor(PyObject* obj) {
+    if (C10_LIKELY(THPVariable_CheckExact(obj))) {
+      // torch.Tensor instances (not subclasses)
+      return THPVariable_Unpack(obj);
+    }
+
+    if (check_has_torch_function(obj)) {
+      throw HandleTorchFunction();
+    }
+
+    if (THPVariable_Check(obj)) {
+      // torch.Tensor subclasses
+      return THPVariable_Unpack(obj);
+    }
+
+    throw std::runtime_error("TODO: handle non-tensor args");
+  }
+
  public:
   CompileCacheImpl(const py::object& compile_fn)
-      : cache(compile_fn), cache_out(compile_fn) {}
+      : cache(compile_fn),
+        cache_out(compile_fn),
+        key_out_(py::cast<py::object>(PyUnicode_InternFromString("out"))) {}
 
   at::Tensor py_call(py::args args, py::kwargs kwargs) override {
     int num_args = py::len(args);
     int num_kwargs = py::len(kwargs);
     if (C10_UNLIKELY(num_kwargs > 1 || num_args != NARGS)) {
       throw std::runtime_error("wrong number of args");
+    }
+    bool pre_sampled = false;
+    if (C10_UNLIKELY(
+            at::hasCallbacks() && at::shouldRunRecordFunction(&pre_sampled))) {
+      throw std::runtime_error("TODO: implement record function");
     }
 
     // NOLINTNEXTLINE: C-style arrays
@@ -528,20 +572,24 @@ class CompileCacheImpl : public CompileCache {
     Cleanup tensor_args = {
         reinterpret_cast<at::Tensor*>(tensor_args_buffer), 0};
 
-    for (int i = 0; i < NARGS; ++i) {
-      new (tensor_args.ptr + i) at::Tensor(args[i].cast<at::Tensor>());
-      tensor_args.count++;
-    }
+    try {
+      for (int i = 0; i < NARGS; ++i) {
+        new (tensor_args.ptr + i) at::Tensor(to_tensor(args[i].ptr()));
+        tensor_args.count++;
+      }
 
-    if (num_kwargs == 1) {
-      new (tensor_args.ptr + NARGS)
-          at::Tensor(kwargs["out"].cast<at::Tensor>());
-      tensor_args.count++;
-      // py::gil_scoped_release release;
-      return cache_out.call(tensor_args.ptr, true);
-    } else {
-      // py::gil_scoped_release release;
-      return cache.call(tensor_args.ptr, false);
+      if (num_kwargs == 1) {
+        new (tensor_args.ptr + NARGS)
+            at::Tensor(to_tensor(kwargs[key_out_].ptr()));
+        tensor_args.count++;
+        py::gil_scoped_release release;
+        return cache_out.call(tensor_args.ptr, true);
+      } else {
+        py::gil_scoped_release release;
+        return cache.call(tensor_args.ptr, false);
+      }
+    } catch (HandleTorchFunction&) {
+      throw std::runtime_error("TODO: add __torch_function__ support");
     }
   }
 
@@ -555,6 +603,7 @@ class CompileCacheImpl : public CompileCache {
  private:
   CompileCache2<NARGS> cache;
   CompileCache2<NARGS + 1> cache_out; // out=... variant
+  py::object key_out_;
 };
 
 CompileCache* create_compile_cache(const py::object& compile_fn, int num_args) {
