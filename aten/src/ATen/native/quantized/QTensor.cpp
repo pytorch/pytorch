@@ -65,8 +65,8 @@ Tensor dequantize_quantized_cpu(const Tensor& self) {
 
 std::vector<Tensor> dequantize_tensors_quantized_cpu(TensorList tensors) {
   std::vector<Tensor> dequantized_tensors;
-  for (const auto i : c10::irange(tensors.size())) {
-    dequantized_tensors.push_back(tensors[i].dequantize());
+  for (const auto & tensor : tensors) {
+    dequantized_tensors.push_back(tensor.dequantize());
   }
   return dequantized_tensors;
 }
