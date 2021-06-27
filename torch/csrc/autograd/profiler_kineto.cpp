@@ -385,6 +385,7 @@ void prepareProfiler(
 
   std::set<libkineto::ActivityType> cpuTypes = {
     libkineto::ActivityType::CPU_OP,
+    libkineto::ActivityType::CPU_INSTANT_EVENT,
 #ifdef USE_KINETO_UPDATED
     libkineto::ActivityType::USER_ANNOTATION,
 #endif

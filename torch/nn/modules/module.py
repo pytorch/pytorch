@@ -285,7 +285,8 @@ class Module:
             name (string): name of the buffer. The buffer can be accessed
                 from this module using the given name
             tensor (Tensor or None): buffer to be registered. If ``None``, then operations
-                that run on buffers, such as :attr:`cuda`, are ignored.
+                that run on buffers, such as :attr:`cuda`, are ignored. If ``None``,
+                the buffer is **not** included in the module's :attr:`state_dict`.
             persistent (bool): whether the buffer is part of this module's
                 :attr:`state_dict`.
 
@@ -330,7 +331,8 @@ class Module:
                 from this module using the given name
             param (Parameter or None): parameter to be added to the module. If
                 ``None``, then operations that run on parameters, such as :attr:`cuda`,
-                are ignored.
+                are ignored. If ``None``, the parameter is **not** included in the
+                module's :attr:`state_dict`.
         """
         if '_parameters' not in self.__dict__:
             raise AttributeError(

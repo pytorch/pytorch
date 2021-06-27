@@ -2093,10 +2093,6 @@ bool LoopNest::flatten(const std::vector<For*>& loops) {
 }
 
 void LoopNest::compressBuffer(Buf* buf, Stmt* stmt) {
-  if (buf->initializer()) {
-    throw malformed_input("Can't compress buffer whose initializer is set");
-  }
-
   // Loop iterations in NNC IR do not follow sequential semantics by default.
   // In other words, the iterations of the loops could be executed in any
   // random order without affecting correctness. This constraint in turn
