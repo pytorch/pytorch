@@ -31,7 +31,8 @@ class SamplerIterDataPipe(IterDataPipe[T_co]):
         self.sampler_args = () if sampler_args is None else sampler_args
         self.sampler_kwargs = {} if sampler_kwargs is None else sampler_kwargs
         # https://github.com/python/mypy/pull/9629 will solve
-        self.sampler = sampler(data_source=self.datapipe, *self.sampler_args, **self.sampler_kwargs)  # type: ignore[misc]
+        self.sampler = sampler(data_source=self.datapipe, *self.sampler_args,
+                               **self.sampler_kwargs)  # type: ignore[misc]
 
     def __iter__(self) -> Iterator[T_co]:
         return iter(self.sampler)
@@ -66,7 +67,7 @@ class ShuffleIterDataPipe(IterDataPipe[T_co]):
     args:
         datapipe: The IterDataPipe being shuffled
         buffer_size: The buffer size for shuffling (default to 10000)
-        unbatch_level: Specifies if it necessary to unbatch source data before 
+        unbatch_level: Specifies if it necessary to unbatch source data before
             applying the shuffle
     """
     datapipe: IterDataPipe[T_co]
@@ -87,7 +88,7 @@ class ShuffleIterDataPipe(IterDataPipe[T_co]):
             self.datapipe = datapipe.unbatch(unbatch_level=unbatch_level)
         self.buffer_size = buffer_size
         self._buffer = []
-                
+
     def buffer_replace(self, x):
         idx = random.randint(0, self.buffer_size - 1)
         val = self._buffer[idx]
