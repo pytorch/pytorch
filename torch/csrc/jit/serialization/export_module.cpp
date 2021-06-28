@@ -303,17 +303,28 @@ void setstateTuple(
   }
 }
 
+bool isLoweredModule(const Module& m) {
+  c10::QualifiedName type_name;
+  if (m.type()->name()) {
+    type_name = m.type()->name().value();
+  }
+  bool isLoweredModule = false;
+  for (const auto& atom : type_name.atoms()) {
+    if (atom == "LoweredModule") {
+      isLoweredModule = true;
+      break;
+    }
+  }
+  return isLoweredModule;
+}
+
 // Check if the global static map of backend debug info
 // contains debug info for this module and any of its children.
 // If so combine all the maps together and return one.
 void getBackendDebugInfoMap(
     const Module& m,
     BackendDebugInfoMapType& debug_map) {
-  c10::QualifiedName type_name;
-  if (m.type()->name()) {
-    type_name = m.type()->name().value();
-  }
-  if (c10::string_view(type_name.name()).ends_with("LoweredModule")) {
+  if (isLoweredModule(m)) {
     auto backend_debug_info =
         m.attr("__backend_debug_info").toCustomClass<PyTorchBackendDebugInfo>();
     const auto& map = backend_debug_info->getDebugInfoMap();
@@ -328,11 +339,7 @@ void getBackendDebugInfoMap(
 
 SourceRangeRecords getBackendSourceRanges(const Module& m) {
   SourceRangeRecords sr_records;
-  c10::QualifiedName type_name;
-  if (m.type()->name()) {
-    type_name = m.type()->name().value();
-  }
-  if (c10::string_view(type_name.name()).ends_with("LoweredModule")) {
+  if (isLoweredModule(m)) {
     constexpr size_t kSourceRange = 1;
     auto backend_debug_info =
         m.attr("__backend_debug_info").toCustomClass<PyTorchBackendDebugInfo>();

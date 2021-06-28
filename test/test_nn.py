@@ -2155,7 +2155,11 @@ class TestNN(NNTestCase):
                 # Cayley map
                 # If X is skew-symmetric it returns an orthogonal matrix
                 Id = torch.eye(X.size(0), device=X.device)
-                return torch.linalg.solve(Id + X, Id - X)
+                # We call contiguous because solve returns a tensor with strides that are Fortran-contiguous
+                # and autograd raises a performance warning.
+                # This happens when we remove the parametrization with leave_parametrized=True,
+                # which does a set_ with a non-contiguous tensor while the gradient is contiguous
+                return torch.linalg.solve(Id + X, Id - X).contiguous()
 
         # Define a couple vector parametrizations
         class FirstZero(nn.Module):
@@ -2223,10 +2227,16 @@ class TestNN(NNTestCase):
         self.assertEqual(model.bias[-1].item(), 0.)
         self.assertEqual(len(list(model.parameters())), 2)  # Nothing weird has happpened
         # Should not throw
+
+        sgd = torch.optim.SGD(model.parameters(), lr=0.01)
+
+        weight_copy = model.weight.clone()
+        bias_copy = model.bias.clone()
+        sgd.zero_grad()
         (model.weight.T @ model.bias).sum().backward()
-        with torch.no_grad():
-            for p in model.parameters():
-                p.add_(- p.grad, alpha=0.01)
+        sgd.step()
+        self.assertNotEqual(model.weight, weight_copy)
+        self.assertNotEqual(model.bias, bias_copy)
 
         # Remove first parametrization.
         # Check that the model is still parametrized and so is the second parameter
@@ -2240,10 +2250,13 @@ class TestNN(NNTestCase):
         self.assertEqual(id(model.weight), initial_weight_id)           # Keeps the same id
         self.assertEqual(len(list(model.parameters())), 2)              # Nothing weird has happened
         # Should not throw
+        weight_copy = model.weight.clone()
+        bias_copy = model.bias.clone()
+        sgd.zero_grad()
         (model.weight.T @ model.bias).sum().backward()
-        with torch.no_grad():
-            for p in model.parameters():
-                p.add_(- p.grad, alpha=0.01)
+        sgd.step()
+        self.assertNotEqual(model.weight, weight_copy)
+        self.assertNotEqual(model.bias, bias_copy)
 
         # Remove the second parametrization.
         # Check that the module is not parametrized
@@ -2256,22 +2269,33 @@ class TestNN(NNTestCase):
         self.assertFalse(hasattr(model, "parametrizations"))  # Not parametrized the module
         self.assertEqual(model.__class__, nn.Linear)          # Resores the previous class
         self.assertEqual(len(list(model.parameters())), 2)    # Nothing weird has happeed
-        # Should not throw
+
+        # Should not throw things are updated
+        weight_copy = model.weight.clone()
+        bias_copy = model.bias.clone()
+        sgd.zero_grad()
         (model.weight.T @ model.bias).sum().backward()
-        with torch.no_grad():
-            for p in model.parameters():
-                p.add_(- p.grad, alpha=0.01)
+        sgd.step()
+        self.assertNotEqual(model.weight, weight_copy)
+        self.assertNotEqual(model.bias, bias_copy)
 
         # Test leave_parametrized=True
         for _ in range(2):
             parametrize.register_parametrization(model, "weight", Skew())
             parametrize.register_parametrization(model, "weight", Orthogonal())
             parametrize.remove_parametrizations(model, "weight", leave_parametrized=True)
-            # Should not throw
+            # We didn't change the dtype nor had multiple inputs, so the id should be the same
+            self.assertEqual(id(model.weight), initial_weight_id)
+            self.assertEqual(id(model.bias), initial_bias_id)
+
+            # Should not throw. Things are updated
+            weight_copy = model.weight.clone()
+            bias_copy = model.bias.clone()
+            sgd.zero_grad()
             (model.weight.T @ model.bias).sum().backward()
-            with torch.no_grad():
-                for p in model.parameters():
-                    p.add_(- p.grad, alpha=0.01)
+            sgd.step()
+            self.assertNotEqual(model.weight, weight_copy)
+            self.assertNotEqual(model.bias, bias_copy)
 
     def test_register_and_remove_buffer_parametrization(self):
         r"""Test that it is possible to add and remove parametrizations on buffers"""
@@ -2392,8 +2416,12 @@ class TestNN(NNTestCase):
 
         N = 5
         model = nn.Linear(N, N)
-        # Register the skew-symmetric onstraint. The result is now skew-symmetric
-        parametrize.register_parametrization(model, "weight", Skew())
+        # Register the skew-symmetric constraint. The result is now skew-symmetric
+        skew = Skew()
+        # Make the weight skew-symmetric before registering the parametrization
+        with torch.no_grad():
+            model.weight.set_(skew(model.weight))
+        parametrize.register_parametrization(model, "weight", skew)
         X = torch.rand(N, N)
         # X is not skew-symmetric, so it throws an error
         with self.assertRaises(ValueError):
@@ -2416,45 +2444,320 @@ class TestNN(NNTestCase):
         self.assertEqual(model.weight, X)
         self.assertEqual(model.parametrizations.weight.original, torch.zeros_like(X))
 
-    def test_errors_parametrization(self):
-        # A parametrization shall not change the size of the parameter
-        class ChangeSize(nn.Module):
+    def test_errors_unparametrized_tensor_parametrization(self):
+        # Test errors when registering a parametrization on an unparametrized tensor
+        module = nn.Linear(3, 4)
+        weight_init = module.weight.clone()
+
+        class Identity(nn.Module):
+            def forward(self, x):
+                return x
+
+        # Register a parametrization on a non-existing parameter throws
+        with self.assertRaisesRegex(ValueError, "does not have a parameter"):
+            parametrize.register_parametrization(module, "foo", Identity())
+        self.assertFalse(parametrize.is_parametrized(module))
+
+        # Removing parametrizations from an unparametrized tensor throws
+        with self.assertRaisesRegex(ValueError, "does not have a parametrization"):
+            parametrize.remove_parametrizations(module, "bias")
+        self.assertFalse(parametrize.is_parametrized(module))
+
+        # A correct parametrization with several outputs
+        class Sum(nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+            def right_inverse(self, z):
+                return z, torch.zeros_like(z)
+
+        parametrize.register_parametrization(module, "weight", Sum())
+        # Cannot remove a parametrization with several outputs with `leave_parametrized=False`
+        with self.assertRaisesRegex(ValueError, "leave_parametrized=False"):
+            parametrize.remove_parametrizations(module, "weight", leave_parametrized=False)
+        parametrize.remove_parametrizations(module, "weight", leave_parametrized=True)
+
+        # A parametrization with an incorrect number of outputs
+        class WrongNumberParams(nn.Module):
+            def forward(self, x, y, z):
+                return x + y + z
+
+            def right_inverse(self, w):
+                return w, torch.zeros_like(w)
+
+        # Makes param(*param.right_inverse(X)) fail
+        with self.assertRaisesRegex(TypeError, "positional argument"):
+            parametrize.register_parametrization(module, "weight", WrongNumberParams())
+        self.assertFalse(parametrize.is_parametrized(module))
+
+        # A parametrization with a right_inverse that does not return a Tensor or Sequence[Tensor]
+        class WrongRightInverse(Identity):
+            def right_inverse(self, z):
+                return None
+
+        # right_inverse should return a Tensor or a Sequence[Tensor]
+        with self.assertRaisesRegex(ValueError, "Tensor or a Sequence of"):
+            parametrize.register_parametrization(module, "weight", WrongRightInverse())
+        self.assertFalse(parametrize.is_parametrized(module))
+
+        # If it's a sequence, it must to be a sequence of tensors
+        class WrongRightInverseSequence(nn.Module):
+            def forward(self, x, y):
+                return x
+
+            def right_inverse(self, z):
+                return None, z
+
+        with self.assertRaisesRegex(ValueError, "of the sequence with type"):
+            parametrize.register_parametrization(module, "weight", WrongRightInverseSequence())
+        self.assertFalse(parametrize.is_parametrized(module))
+
+        # A parametrization from one tensor to one tensor that changes the dtype
+        class ChangeDtypeInverse(nn.Module):
+            def forward(self, x):
+                return x.float()
+
+            def right_inverse(self, w):
+                return w.bool()
+
+        # For parametrizations that return one tensor, right_inverse may not change the dtype
+        with self.assertRaisesRegex(ValueError, "outputs one tensor, it may not change the dtype"):
+            parametrize.register_parametrization(module, "weight", ChangeDtypeInverse())
+        self.assertFalse(parametrize.is_parametrized(module))
+
+        # Doesn't return a tensor
+        class NotTensor(nn.Module):
+            def forward(self, x):
+                return 2
+
+        # Forward must return a tensor
+        with self.assertRaisesRegex(ValueError, "must return a tensor"):
+            parametrize.register_parametrization(module, "weight", NotTensor())
+        self.assertFalse(parametrize.is_parametrized(module))
+
+        # A parametrization from one tensor to one tensor that changes the dtype
+        class ChangeDtype(nn.Module):
+            def forward(self, x):
+                return x.bool()
+
+        # forward should not change the initial dtype
+        with self.assertRaisesRegex(ValueError, "may not change the dtype"):
+            parametrize.register_parametrization(module, "weight", ChangeDtype())
+        self.assertFalse(parametrize.is_parametrized(module))
+
+        # Change shape
+        class ChangeShape(nn.Module):
             def forward(self, x):
                 return x[:-1]
 
-        # A simple parametrization that does not implement a right_inverse
-        class Double(nn.Module):
+        # forward should not change the original shape
+        with self.assertRaisesRegex(ValueError, "may not change the shape"):
+            parametrize.register_parametrization(module, "weight", ChangeShape())
+        self.assertFalse(parametrize.is_parametrized(module))
+
+        # Many to one that changes dtype
+        class ChangeDtypeMulti(nn.Module):
+            def forward(self, x, y):
+                return (x + y).bool()
+
+            def right_inverse(self, w):
+                return w, w + 1
+
+        # forward should not change the original shape even for parametrizations with many inputs
+        with self.assertRaisesRegex(ValueError, "may not change the dtype"):
+            parametrize.register_parametrization(module, "weight", ChangeDtypeMulti())
+        self.assertFalse(parametrize.is_parametrized(module))
+
+        # Returning a sequence of size one, although weird, it's correct
+        class SequenceLen1(nn.Module):
             def forward(self, x):
-                return 2 * x
+                return x
+
+            def right_inverse(self, w):
+                return (w,)
+
+        parametrize.register_parametrization(module, "weight", SequenceLen1())
+        self.assertTrue(hasattr(module.parametrizations.weight, "original0"))
+        self.assertFalse(hasattr(module.parametrizations.weight, "original1"))
+        _ = module.weight   # Does not throw
+        self.assertTrue(parametrize.is_parametrized(module))
+        parametrize.remove_parametrizations(module, "weight", leave_parametrized=True)
+
+        # None of the operations above should have altered the weight
+        self.assertFalse(parametrize.is_parametrized(module))
+        self.assertEqual(module.weight, weight_init)
+
+    def test_errors_parametrized_tensor_parametrization(self):
+        # Test errors when registering a parametrization on a parametrized tensor
+
+        class Identity(nn.Module):
+            def forward(self, x):
+                return x
 
         module = nn.Linear(3, 4)
-        # This should not throw when registering
-        parametrize.register_parametrization(module, "weight", ChangeSize())
-        # It throws in the forward
-        with self.assertRaisesRegex(RuntimeError, "may not change the size"):
-            module(torch.rand(2))
-        # Undo
-        parametrize.remove_parametrizations(module, "weight", leave_parametrized=False)
-        self.assertFalse(parametrize.is_parametrized(module))
+        parametrize.register_parametrization(module, "weight", Identity())
 
-        # Removing a parametrization from an unparametrized tensor throws
-        with self.assertRaisesRegex(ValueError, "does not have a parametrization"):
-            parametrize.remove_parametrizations(module, "bias")
-        # Nothing odd happens
-        self.assertFalse(parametrize.is_parametrized(module))
+        # Has to return a tensor
+        class WrongReturn(nn.Module):
+            def forward(self, x):
+                return x, x
 
-        # Register a parametrization on a non-existing parameter breaks
-        with self.assertRaisesRegex(ValueError, "does not have a parameter"):
-            parametrize.register_parametrization(module, "foo", ChangeSize())
-        self.assertFalse(parametrize.is_parametrized(module))
+        with self.assertRaisesRegex(ValueError, "must return a tensor"):
+            parametrize.register_parametrization(module, "weight", WrongReturn())
+        self.assertTrue(parametrize.is_parametrized(module))
+        self.assertEqual(len(module.parametrizations.weight), 1)
+        self.assertTrue(isinstance(module.parametrizations.weight[0], Identity))
 
-        # Try to assign to a parametrization that does not implement `right_inverse`
-        parametrize.register_parametrization(module, "weight", Double())
-        with self.assertRaisesRegex(RuntimeError, "right_inverse"):
-            module.weight = torch.rand(4, 3)
-        # Undo
-        parametrize.remove_parametrizations(module, "weight", leave_parametrized=False)
-        self.assertFalse(parametrize.is_parametrized(module))
+        # Cannot change dtype
+        class ChangeDtype(nn.Module):
+            def forward(self, x):
+                return x.bool()
+
+        with self.assertRaisesRegex(ValueError, "may not change the dtype"):
+            parametrize.register_parametrization(module, "weight", ChangeDtype())
+        self.assertTrue(parametrize.is_parametrized(module))
+        self.assertEqual(len(module.parametrizations.weight), 1)
+        self.assertTrue(isinstance(module.parametrizations.weight[0], Identity))
+
+        # Cannot change shape
+        class ChangeShape(nn.Module):
+            def forward(self, x):
+                return x[:-1]
+
+        with self.assertRaisesRegex(ValueError, "may not change the shape"):
+            parametrize.register_parametrization(module, "weight", ChangeShape())
+        self.assertTrue(parametrize.is_parametrized(module))
+        self.assertEqual(len(module.parametrizations.weight), 1)
+        self.assertTrue(isinstance(module.parametrizations.weight[0], Identity))
+
+        # The following checks are mostly due to bugs in the code of the parametrization
+
+        # right_inverse has to return a tensor
+        class WrongReturnInverse(Identity):
+            def right_inverse(self, x):
+                return x, x
+
+        with self.assertRaisesRegex(ValueError, "right_inverse must return a tensor"):
+            parametrize.register_parametrization(module, "weight", WrongReturnInverse())
+        self.assertTrue(parametrize.is_parametrized(module))
+        self.assertEqual(len(module.parametrizations.weight), 1)
+        self.assertTrue(isinstance(module.parametrizations.weight[0], Identity))
+
+        # Cannot change dtype
+        class ChangeDtypeInverse(Identity):
+            def right_inverse(self, x):
+                return x.bool()
+
+        with self.assertRaisesRegex(ValueError, "must have the same dtype"):
+            parametrize.register_parametrization(module, "weight", ChangeDtypeInverse())
+        self.assertTrue(parametrize.is_parametrized(module))
+        self.assertEqual(len(module.parametrizations.weight), 1)
+        self.assertTrue(isinstance(module.parametrizations.weight[0], Identity))
+
+        # Cannot change shape
+        class ChangeShapeInverse(Identity):
+            def right_inverse(self, x):
+                return x[:-1]
+
+        with self.assertRaisesRegex(ValueError, "must have the same shape"):
+            parametrize.register_parametrization(module, "weight", ChangeShapeInverse())
+        self.assertTrue(parametrize.is_parametrized(module))
+        self.assertEqual(len(module.parametrizations.weight), 1)
+        self.assertTrue(isinstance(module.parametrizations.weight[0], Identity))
+
+    def test_multiple_inputs_parametrization(self):
+        # A parametrization with several outputs
+        class RankOne(nn.Module):
+            def forward(self, x, y):
+                # Form a rank-1 matrix from a pair of vectors
+                return x.unsqueeze(-1) @ y.unsqueeze(-2)
+
+            def right_inverse(self, Y):
+                # We project the given matrix onto the rank 1 matrices
+                U, S, Vh = torch.linalg.svd(Y, full_matrices=False)
+                # S is ordered in a decreasing way.
+                s0_sqrt = S[0].sqrt().unsqueeze(-1)
+                return U[..., :, 0] * s0_sqrt, Vh[..., 0, :] * s0_sqrt
+
+        # Simple parametrisation
+        class Double(nn.Module):
+            def forward(self, x):
+                return 2.0 * x
+
+            def right_inverse(self, w):
+                return 0.5 * w
+
+        model = nn.Linear(3, 3)
+        # Test one parametrization
+        parametrize.register_parametrization(model, "weight", RankOne())
+        self.assertTrue(hasattr(model, "parametrizations"))
+        self.assertTrue(parametrize.is_parametrized(model))
+        self.assertTrue(parametrize.is_parametrized(model, "weight"))
+        self.assertTrue(hasattr(model.parametrizations.weight, "original0"))
+        self.assertIn("original0", model.parametrizations.weight._parameters)
+        self.assertTrue(hasattr(model.parametrizations.weight, "original1"))
+        self.assertIn("original1", model.parametrizations.weight._parameters)
+        self.assertFalse(parametrize.is_parametrized(model, "bias"))
+        self.assertNotIn("weight", model._parameters)
+        # Result should be rank 1
+        self.assertEqual(torch.linalg.matrix_rank(model.weight).item(), 1)
+
+        with self.assertRaisesRegex(ValueError, "leave_parametrized=False"):
+            # Cannot remove a parametrization with multiple inputs and not leave it parametrized
+            parametrize.remove_parametrizations(model, "weight", leave_parametrized=False)
+        # Remove parametrization and check consistency
+        parametrize.remove_parametrizations(model, "weight", leave_parametrized=True)
+        self.assertFalse(hasattr(model, "parametrizations"))
+        self.assertEqual(model.__class__, nn.Linear)
+        self.assertFalse(parametrize.is_parametrized(model))
+        self.assertEqual(torch.linalg.matrix_rank(model.weight).item(), 1)
+        self.assertIn("weight", model._parameters)
+
+        # Registering parametrizations with one input on top of one with multiple inputs should work
+        init_weight = model.weight.clone()
+        parametrize.register_parametrization(model, "weight", RankOne())
+        # Projecting a rank 1 matrix onto the matrices of rank one does not change the matrix
+        self.assertTrue(torch.allclose(init_weight, model.weight))
+        parametrize.register_parametrization(model, "weight", Double())
+        # The matrix now is twice the initial matrix
+        self.assertTrue(torch.allclose(2.0 * init_weight, model.weight))
+        # Multiplying by a scalar does not change the rank
+        self.assertEqual(torch.linalg.matrix_rank(model.weight).item(), 1)
+
+        # The model has now three parameters
+        self.assertEqual(len(list(model.parameters())), 3)
+
+        sgd = torch.optim.SGD(model.parameters(), lr=0.1)
+
+        # Test backward. Should not throw
+        for _ in range(2):
+            sgd.zero_grad()
+            loss = (model.weight.T @ model.bias).sum()
+            loss.backward()
+            sgd.step()
+
+        # Same drill as before, removing should work as expected
+        with self.assertRaisesRegex(ValueError, "leave_parametrized=False"):
+            # Cannot remove a parametrization with multiple inputs and not leave it parametrized
+            parametrize.remove_parametrizations(model, "weight", leave_parametrized=False)
+        # Remove parametrization and check consistency
+        parametrize.remove_parametrizations(model, "weight", leave_parametrized=True)
+        self.assertFalse(hasattr(model, "parametrizations"))
+        self.assertEqual(model.__class__, nn.Linear)
+        self.assertFalse(parametrize.is_parametrized(model))
+        self.assertEqual(torch.linalg.matrix_rank(model.weight).item(), 1)
+        self.assertIn("weight", model._parameters)
+
+        # The model has now two parameters
+        self.assertEqual(len(list(model.parameters())), 2)
+
+        # Test backward. Should not throw
+        sgd = torch.optim.SGD(model.parameters(), lr=0.1)
+        for _ in range(2):
+            sgd.zero_grad()
+            loss = (model.weight.T @ model.bias).sum()
+            loss.backward()
+            sgd.step()
 
     def test_caching_parametrization(self):
         r"""Test the caching system of a parametrization"""
@@ -2478,24 +2781,6 @@ class TestNN(NNTestCase):
             X = model.weight
             Y = model.weight
             self.assertEqual(id(X), id(Y))
-
-    def test_dtype_parametrization(self):
-        r"""Test a case that is not allowed when removing a parametrization"""
-        class ChangeType(nn.Module):
-            def forward(self, X):
-                return X.double()
-
-        module = nn.Linear(4, 4).float()
-        input_ = torch.rand(4).double()
-        # It is allowed to register a parametrization that changes the dtype
-        parametrize.register_parametrization(module, "weight", ChangeType())
-        module(input_)
-        # We can remove it leaving the original tensor
-        parametrize.remove_parametrizations(module, "weight", leave_parametrized=False)
-        # But leaving it parametrized breaks
-        parametrize.register_parametrization(module, "weight", ChangeType())
-        with self.assertRaisesRegex(ValueError, "changes the dtype"):
-            parametrize.remove_parametrizations(module, "weight", leave_parametrized=True)
 
     def test_parametrization_same_training_mode(self):
         r"""Test training mode updated on parametrization registration"""
@@ -12556,6 +12841,32 @@ class TestNNDeviceType(NNTestCase):
             self._test_LayerNorm_cuda_half(device)
 
     @onlyOnCPUAndCUDA
+    def test_LayerNorm_numeric(self, device):
+        def layer_norm_ref(X, gamma, beta, normalized_shape, eps):
+            feature_size = np.prod(normalized_shape)
+            X_view = X.view(-1, feature_size)
+            mean = X_view.mean(dim=-1, keepdim=True)
+            var = X_view.var(dim=-1, unbiased=False, keepdim=True)
+            Y = (X_view - mean) / torch.sqrt(var + eps)
+            Y = Y * gamma.view(-1) + beta.view(-1)
+            return Y.view(*X.size())
+
+        normalized_shape = [256, 256, 144]
+        layer_norm = nn.LayerNorm(normalized_shape).float().to(device)
+        X = torch.rand(2, *normalized_shape, dtype=torch.float32,
+                       device=device)
+
+        Y = layer_norm(X)
+        Y_ref = layer_norm_ref(X, layer_norm.weight.data, layer_norm.bias.data,
+                               normalized_shape, layer_norm.eps)
+        self.assertEqual(Y, Y_ref, rtol=0, atol=1e-5)
+
+        if self.device_type == 'cuda':
+            layer_norm.cpu()
+            Y_cpu = layer_norm(X.cpu())
+            self.assertEqual(Y_cpu, Y, rtol=0, atol=1e-5)
+
+    @onlyOnCPUAndCUDA
     def test_GroupNorm_general(self, device):
         self._test_GroupNorm_general(device)
 
@@ -12588,8 +12899,8 @@ class TestNNDeviceType(NNTestCase):
             return Y.view(*X.size())
 
         batch_size = 1
-        groups = 4
-        channels = 32
+        groups = 2
+        channels = 8
         group_norm = nn.GroupNorm(groups, channels).float().to(device)
         X = torch.rand(batch_size, channels, 256, 256, 72,
                        dtype=torch.float32, device=device)
@@ -12817,6 +13128,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(x.grad, ref_x.grad)
 
     @onlyCUDA   # Test if CPU and GPU results match
+    @unittest.skipIf(True, "temporarily disabled")
     def test_ReflectionPad3d_large(self, device):
         shapes = ([2, 1000, 7, 7, 7], [1000, 2, 7, 7, 7])
         pad = (1, 2, 3, 4, 5, 6)
@@ -13508,6 +13820,42 @@ class TestNNDeviceType(NNTestCase):
 
         helper(2, 8, 4, 4, ks=2)
         helper(None, 3, 50, 50, ks=5)
+
+    @onlyCPU
+    @dtypes(torch.float, torch.double)
+    def test_adaptive_pooling_max_nhwc(self, device, dtype):
+        def helper(n, c, h, w, output_height, output_width, contig):
+            input = torch.randint(1, 10, (n, c, h, w), device=device, dtype=dtype)
+            input = input.contiguous(memory_format=torch.channels_last)
+            grad = torch.randint(1, 10, (4, 8, output_height, output_width), device=device, dtype=dtype)
+            grad = grad.contiguous(memory_format=torch.channels_last)
+            if not contig:
+                input = input[:, ::2, :, :]
+                grad = grad[:, ::2, :, :]
+            input.requires_grad_(True)
+            pool = torch.nn.AdaptiveMaxPool2d((output_height, output_width), return_indices=True).to(device)
+
+            ref_input = input.detach().clone().contiguous().requires_grad_(True)
+            ref_grad = grad.detach().clone().contiguous()
+            ref_pool = torch.nn.AdaptiveMaxPool2d((output_height, output_width), return_indices=True).to(device)
+
+            out, ind = pool(input)
+            out.backward(grad)
+            ref_out, ref_ind = ref_pool(ref_input)
+            ref_out.backward(ref_grad)
+
+            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+            self.assertTrue(ref_out.is_contiguous())
+            self.assertTrue(ind.is_contiguous(memory_format=torch.channels_last))
+            self.assertTrue(ref_ind.is_contiguous())
+            self.assertEqual(out, ref_out)
+            self.assertEqual(ind, ref_ind)
+            self.assertEqual(input.grad, ref_input.grad)
+
+        for contig in [True, False]:
+            helper(4, 8, 10, 10, 7, 7, contig)
+            helper(4, 8, 9, 14, 5, 8, contig)
+            helper(4, 8, 11, 11, 1, 1, contig)
 
     def test_embedding_dense_grad(self, device):
         embd = nn.Embedding(20, 20).to(device)
@@ -16070,8 +16418,6 @@ class TestNNDeviceType(NNTestCase):
         helper([2, 3, 5, 7])
         helper([2, 3, 5, 7, 9])
 
-    # TODO: Remove onlyCPU when cuda is supported
-    @onlyCPU
     def test_nll_loss_byte_target_matches_long(self, device):
         N, C = 10, 4
         input = torch.randn(N, C, device=device, requires_grad=True)
@@ -16604,6 +16950,76 @@ class TestModuleGlobalHooks(TestCase):
         expected_grad = -sig_x * (1 - sig_x) * 2 * mask
         self.assertEqual(input.grad, expected_grad)
 
+    def test_module_forward_preforward_hook_removable(self):
+        """
+        This test is to test when multiple pre-forward hook functions can be
+        registered successfully and used correctly, if the handle can be removable
+        during the pre-forward hook function call.
+        """
+        module = nn.Sigmoid()
+
+        def removable_hook(m, input):
+            nonlocal handle
+            handle.remove()
+            return input
+
+        def removable_hook_2(m, input):
+            nonlocal handle_2
+            handle_2.remove()
+            return input
+
+        handle = module.register_forward_pre_hook(removable_hook)
+        handle_2 = module.register_forward_pre_hook(removable_hook_2)
+
+        # make sure hook register is successful
+        self.assertEqual(len(handle.hooks_dict_ref()), 2)
+        self.assertEqual(len(handle_2.hooks_dict_ref()), 2)
+
+        input = torch.randn(2, 2)
+        output = module(input)
+        self.assertTrue(torch.allclose(torch.sigmoid(input), output))
+
+        # make sure hook removal is successful
+        self.assertFalse(handle.id in handle.hooks_dict_ref())
+        self.assertFalse(handle_2.id in handle.hooks_dict_ref())
+        self.assertEqual(len(handle.hooks_dict_ref()), 0)
+        self.assertEqual(len(handle_2.hooks_dict_ref()), 0)
+
+    def test_module_forward_forward_hook_removable(self):
+        """
+        This test is to test when multiple forward hook functions can be registered
+        successfully and used correctly, if the handle can be removable during the
+        forward hook function call.
+        """
+        module = nn.Sigmoid()
+
+        def removable_hook(m, input, output):
+            nonlocal handle
+            handle.remove()
+            return output
+
+        def removable_hook_2(m, input, output):
+            nonlocal handle_2
+            handle_2.remove()
+            return output
+
+        handle = module.register_forward_hook(removable_hook)
+        handle_2 = module.register_forward_hook(removable_hook_2)
+
+        # make sure hook register is successful
+        self.assertEqual(len(handle.hooks_dict_ref()), 2)
+        self.assertEqual(len(handle_2.hooks_dict_ref()), 2)
+
+        input = torch.randn(2, 2)
+        output = module(input)
+        self.assertTrue(torch.allclose(torch.sigmoid(input), output))
+
+        # make sure hook removal is successful
+        self.assertFalse(handle.id in handle.hooks_dict_ref())
+        self.assertFalse(handle_2.id in handle.hooks_dict_ref())
+        self.assertEqual(len(handle.hooks_dict_ref()), 0)
+        self.assertEqual(len(handle_2.hooks_dict_ref()), 0)
+
     def test_global_and_local_hooks_order(self):
         module = nn.Sigmoid()
 
@@ -16867,6 +17283,53 @@ class TestLazyModules(TestCase):
         lazy_module = gen_lazy_module()
         with self.assertRaisesRegex(RuntimeError, 'shape of an uninitialized'):
             module.load_state_dict(lazy_module.state_dict())
+
+
+    def test_lazy_pre_forward_hook(self):
+        """
+        This test is to test whether lazymodule can register other pre-forward hook
+        functions successfully.
+        """
+        class TestModule(torch.nn.modules.lazy.LazyModuleMixin, torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def initialize_parameters(self, input):
+                return None
+
+            def forward(self, input):
+                return input
+
+        def hook_function(module, input):
+            return input[0] + 1
+
+        module = TestModule()
+        module.register_forward_pre_hook(hook_function)
+        output = module(torch.zeros(2, 2))
+        self.assertTrue(torch.allclose(output, torch.ones(2, 2)))
+
+    def test_lazy_forward_hook(self):
+        """
+        This test is to test whether lazymodule can register other forward hook
+        functions successfully.
+        """
+        class TestModule(torch.nn.modules.lazy.LazyModuleMixin, torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def initialize_parameters(self, input):
+                return None
+
+            def forward(self, input):
+                return input
+
+        def hook_function(module, input, output):
+            return input[0] + 1
+
+        module = TestModule()
+        module.register_forward_hook(hook_function)
+        output = module(torch.zeros(2, 2))
+        self.assertTrue(torch.allclose(output, torch.ones(2, 2)))
 
     @suppress_warnings
     def test_lazy_conv1d(self):
