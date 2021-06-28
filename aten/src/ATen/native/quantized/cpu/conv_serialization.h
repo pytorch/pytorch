@@ -313,7 +313,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
   idx++;
   int64_t flags = config_vals.at(idx);
   idx++;
-  TORCH_INTERNAL_ASSERT(idx == config_vals.size(),
+  TORCH_INTERNAL_ASSERT(idx == static_cast<int64_t>(config_vals.size()),
       "Unexpected length of config_vals, expected ",
       idx,
       " got ",
