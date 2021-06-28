@@ -21,3 +21,11 @@ def run_script(script_name):
 
 def test_ddp_nccl_allreduce():
     run_script("ddp_nccl_allreduce.sh")
+
+
+def test_ddp_cpu_sparse_rpc_nccl_allreduce():
+    run_script("ddp_cpu_sparse_rpc_nccl_allreduce.sh")
+
+
+def test_ddp_cuda_sparse_rpc_nccl_allreduce():
+    run_script("ddp_cuda_sparse_rpc_nccl_allreduce.sh")
