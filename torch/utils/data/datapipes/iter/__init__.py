@@ -14,6 +14,8 @@ from torch.utils.data.datapipes.iter.tobytes import \
     ToBytesIterDataPipe as ToBytes
 from torch.utils.data.datapipes.iter.readlinesfromfile import \
     ReadLinesFromFileIterDataPipe as ReadLinesFromFile
+from torch.utils.data.datapipes.iter.dataframes import \
+    DFIterDataPipe as DFIterDataPipe
 
 # Functional DataPipe
 from torch.utils.data.datapipes.iter.callable import \
@@ -29,9 +31,24 @@ from torch.utils.data.datapipes.iter.grouping import \
 from torch.utils.data.datapipes.iter.selecting import \
     (FilterIterDataPipe as Filter)
 
-
-__all__ = ['ListDirFiles', 'LoadFilesFromDisk', 'ReadFilesFromTar',
-           'ReadFilesFromZip', 'RoutedDecoder', 'GroupByKey',
-           'Batch', 'BucketBatch', 'Collate', 'Concat', 'Filter', 'Map',
-           'Sampler', 'Shuffle', 'Transforms', 'Zip',
-           'HttpReader', 'ToBytes', 'ReadLinesFromFile']
+# Please keep this list sorted for better merging
+__all__ = [ 'Batch',
+            'BucketBatch',
+            'Collate',
+            'Concat',
+            'DFIterDataPipe',
+            'Filter',
+            'GroupByKey',
+            'HttpReader',
+            'ListDirFiles',
+            'LoadFilesFromDisk',
+            'Map',
+            'ReadFilesFromTar',
+            'ReadFilesFromZip',
+            'ReadLinesFromFile',
+            'RoutedDecoder',
+            'Sampler',
+            'Shuffle',
+            'ToBytes',
+            'Transforms',
+            'Zip']

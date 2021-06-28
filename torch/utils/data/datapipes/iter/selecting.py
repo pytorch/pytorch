@@ -1,9 +1,14 @@
-from torch.utils.data import IterDataPipe, functional_datapipe
+from torch.utils.data import IterDataPipe, functional_datapipe, DataChunk
 from typing import Callable, TypeVar, Iterator, Optional, Tuple, Dict
 
 from .callable import MapIterDataPipe
 
+import pandas
+
 T_co = TypeVar('T_co', covariant=True)
+
+# Merging just broke here and I need to redo some of the code following 
+# https://github.com/pytorch/pytorch/pull/58597/files#diff-803896af45794b7d469fde5f1e2642ea2462be4c455eced46ba6082f524dd4b9L2
 
 
 @functional_datapipe('filter')

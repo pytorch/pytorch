@@ -2,8 +2,17 @@ from torch.utils.data.sampler import \
     (Sampler, SequentialSampler, RandomSampler,
      SubsetRandomSampler, WeightedRandomSampler, BatchSampler)
 from torch.utils.data.dataset import \
-    (Dataset, IterableDataset, TensorDataset, ConcatDataset, ChainDataset,
-     Subset, random_split, Dataset as MapDataPipe, IterableDataset as IterDataPipe)
+    (Dataset, 
+     IterableDataset,
+     TensorDataset,
+     ConcatDataset, 
+     ChainDataset,
+     Subset,
+     random_split,
+     Dataset as MapDataPipe,
+     IterableDataset as IterDataPipe,
+     DFIterDataPipe as DFIterDataPipe,
+     DataChunk as DataChunk)
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data.dataloader import DataLoader, _DatasetKind, get_worker_info
 from torch.utils.data._decorator import \
