@@ -1374,7 +1374,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("squeeze.dim", squeeze_dim_batching_rule);
   m.impl("squeeze_.dim", squeeze_dim__batching_rule);
   m.impl("t", native::t); // composite wrt autograd
-  m.impl("trace", trace_batching_rule);
+  // m.impl("trace", trace_batching_rule);
   m.impl("transpose.int", transpose_int_batching_rule);
   m.impl("unbind.int", unbind_batching_rule);
   m.impl("unfold", unfold_batching_rule);
