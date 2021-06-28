@@ -40,7 +40,10 @@ std::vector<at::Tensor> getValues(
 // scale, bias, mean and var are all tensors of same shape (C) and
 // if the size of the first dimension (dim 0) is the same between Conv
 // input weight and Batchnorm input scale
-static void fuseConvBatchNorm(Block* b, std::vector<std::string>& inputNames, ValueToParamPairMap& valsToParamsMap) {
+static void fuseConvBatchNorm(
+    Block* b,
+    std::vector<std::string>& inputNames,
+    ValueToParamPairMap& valsToParamsMap) {
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     for (auto* child_block : it->blocks()) {
       fuseConvBatchNorm(child_block, inputNames, valsToParamsMap);
@@ -57,7 +60,9 @@ static void fuseConvBatchNorm(Block* b, std::vector<std::string>& inputNames, Va
       // skip to fuse it.
       bool has_graph_input = false;
       for (auto input : it->inputs()) {
-        if (std::find(inputNames.begin(), inputNames.end(), input->debugName()) != inputNames.end()) {
+        if (std::find(
+                inputNames.begin(), inputNames.end(), input->debugName()) !=
+            inputNames.end()) {
           has_graph_input = true;
           break;
         }
@@ -156,10 +161,12 @@ static void fuseConvBatchNorm(Block* b, std::vector<std::string>& inputNames, Va
     printf("=== input name: %s \n", b_input->debugNameBase().c_str());
   }
   printf("Finish print block's inputs.\n");
-
 }
 
-void EvalPeepholeONNX(Block* b, std::vector<std::string>& inputNames, ParamMap& paramsDict) {
+void EvalPeepholeONNX(
+    Block* b,
+    std::vector<std::string>& inputNames,
+    ParamMap& paramsDict) {
   auto valsToParamsMap = buildValueToParamsMap(b, paramsDict);
   fuseConvBatchNorm(b, inputNames, valsToParamsMap);
   buildParamsMapFromValueToParamsMap(valsToParamsMap, paramsDict);
