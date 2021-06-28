@@ -10,6 +10,7 @@
 #include "lazy_tensor_core/csrc/ops/as_strided.h"
 #include "lazy_tensor_core/csrc/ops/as_strided_view_update.h"
 #include "lazy_tensor_core/csrc/ops/cast.h"
+#include "lazy_tensor_core/csrc/ops/cat.h"
 #include "lazy_tensor_core/csrc/ops/constant.h"
 #include "lazy_tensor_core/csrc/ops/constant_pad_nd.h"
 #include "lazy_tensor_core/csrc/ops/device_data.h"
@@ -93,6 +94,10 @@ class TSNodeLowering : public NodeLowering {
       case at::aten::matmul: {
         // Only used from bmm currently.
         return InferBmm(node);
+      }
+      case at::aten::cat: {
+        return InferCat(
+            ir::NodeCast<ir::ops::Cat>(node, ir::OpKind(at::aten::cat)));
       }
       case at::aten::addmm:
       case at::aten::mm: {
@@ -211,6 +216,10 @@ class TSNodeLowering : public NodeLowering {
       arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
       return LowerBuiltin(node, arguments);
     }
+    if (node->op().op == at::aten::cat) {
+      return LowerCat(
+          ir::NodeCast<ir::ops::Cat>(node, ir::OpKind(at::aten::cat)));
+    }
     if (node->op().op == at::aten::native_batch_norm) {
       return LowerBatchNorm(ir::NodeCast<ir::ops::TSNativeBatchNormForward>(
           node, ir::OpKind(at::aten::native_batch_norm)));
@@ -324,6 +333,18 @@ class TSNodeLowering : public NodeLowering {
     LTC_CHECK_EQ(tensor2_shape.dimensions(1), m1);
     lazy_tensors::int64 p = tensor2_shape.dimensions(2);
     return lazy_tensors::Shape(tensor1_shape.element_type(), {b, n, p});
+  }
+
+  static lazy_tensors::Shape InferCat(const ir::ops::Cat* node) {
+    const auto& operands = node->operands();
+    LTC_CHECK(!operands.empty());
+    lazy_tensors::Shape output_shape = operands[0].shape();
+    size_t cat_dimension_size = 0;
+    for (const ir::Output& operand : operands) {
+      cat_dimension_size += output_shape.dimensions(node->dim());
+    }
+    output_shape.set_dimensions(node->dim(), cat_dimension_size);
+    return output_shape;
   }
 
   static lazy_tensors::Shape InferEmbeddingDenseBackward(
@@ -527,6 +548,23 @@ class TSNodeLowering : public NodeLowering {
     arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
     arguments.emplace_back(node->dtype());
     return LowerBuiltin(at::aten::to, arguments);
+  }
+
+  TSOpVector LowerCat(const ir::ops::Cat* cat) {
+    std::vector<torch::jit::NamedValue> arguments;
+    std::vector<torch::jit::Value*> tensor_list;
+    const auto& operands = cat->operands();
+    LTC_CHECK(!operands.empty());
+    for (const ir::Output& operand : operands) {
+      tensor_list.emplace_back(loctx()->GetOutputOp(operand));
+    }
+    auto graph = function_->graph();
+    arguments.emplace_back(
+        graph
+            ->insertNode(graph->createList(tensor_list[0]->type(), tensor_list))
+            ->output());
+    arguments.emplace_back(cat->dim());
+    return LowerBuiltin(cat, arguments);
   }
 
   TSOpVector LowerConstant(const ir::ops::Constant* node) {

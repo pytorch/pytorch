@@ -1,4 +1,6 @@
+#include <ATen/Operators.h>
 #include <ATen/native/BinaryOps.h>
+#include <ATen/native/CPUFallback.h>
 #include <torch/library.h>
 
 #include "lazy_tensor_core/csrc/aten_ltc_bridge.h"
@@ -9,7 +11,7 @@
 #include "lazy_tensor_core/csrc/torch_util.h"
 #include "lazy_tensor_core/csrc/ts_backend/XLANativeFunctions.h"
 #include "lazy_tensor_core/csrc/ts_backend/aten_autograd_ops_ts.h"
-#include "lazy_tensor_core/csrc/ts_backend/aten_xla_type_default.h"
+#include "lazy_tensor_core/csrc/ts_backend/aten_eager_fallback.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_computation_client.h"
 #include "lazy_tensors/computation_client/debug_macros.h"
 
@@ -114,7 +116,9 @@ at::Tensor addmm(const at::Tensor& self, const at::Tensor& mat1,
       !at::native::is_floating_point(self) ||
       !at::native::is_floating_point(mat1) ||
       !at::native::is_floating_point(mat2)) {
-    return AtenXlaTypeDefault::addmm(self, mat1, mat2, beta, alpha);
+    return at::native::call_fallback_fn<&ltc_eager_fallback,
+                                        ATEN_OP(addmm)>::call(self, mat1, mat2,
+                                                              beta, alpha);
   }
   return bridge::AtenFromLtcTensor(
       LazyTensor::addmm(bridge::GetLtcTensor(mat1),
@@ -136,7 +140,9 @@ at::Tensor as_strided(const at::Tensor& self, at::IntArrayRef size,
   auto xstride = Helpers::I64List(stride);
   if (!ir::ops::AsStrided::StrideIsSupported(
           self_tensor.shape(), xsize, xstride, storage_offset.value_or(0))) {
-    return AtenXlaTypeDefault::as_strided(self, size, stride, storage_offset);
+    return at::native::call_fallback_fn<
+        &ltc_eager_fallback, ATEN_OP(as_strided)>::call(self, size, stride,
+                                                        storage_offset);
   }
   return bridge::AtenFromLtcTensor(
       LazyTensor::as_strided(self_tensor, std::move(xsize), std::move(xstride),
@@ -152,7 +158,9 @@ const at::Tensor& as_strided_(const at::Tensor& self, at::IntArrayRef size,
   auto xstride = Helpers::I64List(stride);
   if (!ir::ops::AsStrided::StrideIsSupported(
           self_tensor.shape(), xsize, xstride, storage_offset.value_or(0))) {
-    return AtenXlaTypeDefault::as_strided_(self, size, stride, storage_offset);
+    return at::native::call_fallback_fn<
+        &ltc_eager_fallback, ATEN_OP(as_strided_)>::call(self, size, stride,
+                                                         storage_offset);
   }
   LazyTensor::as_strided_(self_tensor, std::move(xsize), std::move(xstride),
                           Helpers::I64Optional(storage_offset));
@@ -163,7 +171,9 @@ at::Tensor bernoulli(const at::Tensor& self,
                      c10::optional<at::Generator> generator) {
   LTC_FN_COUNTER("xla::");
   if (generator.has_value() && generator->defined()) {
-    return AtenXlaTypeDefault::bernoulli(self, generator);
+    return at::native::call_fallback_fn<&ltc_eager_fallback,
+                                        ATEN_OP(bernoulli)>::call(self,
+                                                                  generator);
   }
   LazyTensor self_tensor = bridge::GetLtcTensor(self);
   return bridge::AtenFromLtcTensor(LazyTensor::bernoulli(self_tensor));
@@ -173,7 +183,9 @@ at::Tensor& bernoulli_(at::Tensor& self, double p,
                        c10::optional<at::Generator> generator) {
   LTC_FN_COUNTER("xla::");
   if (generator.has_value() && generator->defined()) {
-    return AtenXlaTypeDefault::bernoulli_(self, p, generator);
+    return at::native::call_fallback_fn<
+        &ltc_eager_fallback, ATEN_OP2(bernoulli_, float)>::call(self, p,
+                                                                generator);
   }
   LazyTensor self_tensor = bridge::GetLtcTensor(self);
   LazyTensor::bernoulli_(self_tensor, p);
@@ -185,10 +197,17 @@ at::Tensor bmm(const at::Tensor& self, const at::Tensor& mat2) {
   // xla::dot doesn't support integer types.
   if (!at::native::is_floating_point(self) ||
       !at::native::is_floating_point(mat2)) {
-    return AtenXlaTypeDefault::bmm(self, mat2);
+    return at::native::call_fallback_fn<&ltc_eager_fallback,
+                                        ATEN_OP(bmm)>::call(self, mat2);
   }
   return bridge::AtenFromLtcTensor(
       LazyTensor::bmm(bridge::GetLtcTensor(self), bridge::GetLtcTensor(mat2)));
+}
+
+at::Tensor cat(at::TensorList tensors, int64_t dim) {
+  LTC_FN_COUNTER("xla::");
+  return bridge::AtenFromLtcTensor(
+      LazyTensor::cat(bridge::GetLtcTensors(tensors), dim));
 }
 
 at::Tensor constant_pad_nd(const at::Tensor& self, at::IntArrayRef pad,
@@ -553,7 +572,8 @@ at::Tensor mm(const at::Tensor& self, const at::Tensor& mat2) {
   // xla::dot doesn't support integer types.
   if (!at::native::is_floating_point(self) ||
       !at::native::is_floating_point(mat2)) {
-    return AtenXlaTypeDefault::mm(self, mat2);
+    return at::native::call_fallback_fn<&ltc_eager_fallback, ATEN_OP(mm)>::call(
+        self, mat2);
   }
   return bridge::AtenFromLtcTensor(
       LazyTensor::mm(/*input=*/bridge::GetLtcTensor(self),
@@ -646,11 +666,20 @@ at::Tensor ne(const at::Tensor& self, const at::Tensor& other) {
       LazyTensor::ne(bridge::GetLtcTensor(self), bridge::GetLtcTensor(other)));
 }
 
+// We need to explicitly override max pooling operators and just call the
+// fallback for them because we've customized the autograd function for them
+// (backward needs saved indices from forward).
+
 std::tuple<at::Tensor, at::Tensor> max_pool2d_with_indices(
     const at::Tensor& self, at::IntArrayRef kernel_size, at::IntArrayRef stride,
     at::IntArrayRef padding, at::IntArrayRef dilation, bool ceil_mode) {
-  return AtenXlaTypeDefault::max_pool2d_with_indices(
-      self, kernel_size, stride, padding, dilation, ceil_mode);
+  return at::native::call_fallback_fn<
+      &ltc_eager_fallback, ATEN_OP(max_pool2d_with_indices)>::call(self,
+                                                                   kernel_size,
+                                                                   stride,
+                                                                   padding,
+                                                                   dilation,
+                                                                   ceil_mode);
 }
 
 at::Tensor max_pool2d_with_indices_backward(
@@ -658,16 +687,24 @@ at::Tensor max_pool2d_with_indices_backward(
     at::IntArrayRef kernel_size, at::IntArrayRef stride,
     at::IntArrayRef padding, at::IntArrayRef dilation, bool ceil_mode,
     const at::Tensor& indices) {
-  return AtenXlaTypeDefault::max_pool2d_with_indices_backward(
-      grad_output, self, kernel_size, stride, padding, dilation, ceil_mode,
-      indices);
+  return at::native::call_fallback_fn<
+      &ltc_eager_fallback,
+      ATEN_OP(max_pool2d_with_indices_backward)>::call(grad_output, self,
+                                                       kernel_size, stride,
+                                                       padding, dilation,
+                                                       ceil_mode, indices);
 }
 
 std::tuple<at::Tensor, at::Tensor> max_pool3d_with_indices(
     const at::Tensor& self, at::IntArrayRef kernel_size, at::IntArrayRef stride,
     at::IntArrayRef padding, at::IntArrayRef dilation, bool ceil_mode) {
-  return AtenXlaTypeDefault::max_pool3d_with_indices(
-      self, kernel_size, stride, padding, dilation, ceil_mode);
+  return at::native::call_fallback_fn<
+      &ltc_eager_fallback, ATEN_OP(max_pool3d_with_indices)>::call(self,
+                                                                   kernel_size,
+                                                                   stride,
+                                                                   padding,
+                                                                   dilation,
+                                                                   ceil_mode);
 }
 
 at::Tensor max_pool3d_with_indices_backward(
@@ -675,9 +712,12 @@ at::Tensor max_pool3d_with_indices_backward(
     at::IntArrayRef kernel_size, at::IntArrayRef stride,
     at::IntArrayRef padding, at::IntArrayRef dilation, bool ceil_mode,
     const at::Tensor& indices) {
-  return AtenXlaTypeDefault::max_pool3d_with_indices_backward(
-      grad_output, self, kernel_size, stride, padding, dilation, ceil_mode,
-      indices);
+  return at::native::call_fallback_fn<
+      &ltc_eager_fallback,
+      ATEN_OP(max_pool3d_with_indices_backward)>::call(grad_output, self,
+                                                       kernel_size, stride,
+                                                       padding, dilation,
+                                                       ceil_mode, indices);
 }
 
 at::Tensor permute(const at::Tensor& self, at::IntArrayRef dims) {

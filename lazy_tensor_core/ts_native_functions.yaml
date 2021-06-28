@@ -7,6 +7,7 @@ supported:
   - bernoulli
   - bernoulli_.float
   - bmm
+  - cat
   - constant_pad_nd
   - convolution_overrideable
   - convolution_backward_overrideable
