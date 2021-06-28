@@ -230,6 +230,8 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._fix_weakref,
         Tensor._conj,
         Tensor._conj_physical,
+        torch.get_autocast_gpu_dtype,
+        torch.set_autocast_gpu_dtype,
     }
 
 
@@ -1134,8 +1136,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.view_as: lambda self, other: -1,
         Tensor.zero_: lambda self: -1,
         torch.linalg.lstsq: lambda self, b, cond=None, driver=None: -1,
-        torch.get_autocast_gpu_dtype: lambda: -1,
-        torch.set_autocast_gpu_dtype: lambda dtype: -1,
+
 
     }
 
