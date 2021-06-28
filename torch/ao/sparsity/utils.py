@@ -1,7 +1,4 @@
-import torch
 from torch import nn
-
-from typing import Union
 
 # Parametrizations
 class FakeSparsity(nn.Module):
