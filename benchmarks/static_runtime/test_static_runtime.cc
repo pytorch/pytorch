@@ -62,15 +62,41 @@ void compareTensorLists(
 }
 
 void compareResults(const IValue& expect, const IValue& actual) {
-  if (expect.isTuple()) {
-    compareTensorLists(
-        expect.toTuple()->elements(), actual.toTuple()->elements());
-  } else if (expect.isList()) {
-    compareTensorLists(expect.toTensorVector(), actual.toTensorVector());
-  } else {
+  if (expect.isTensor()) {
     VLOG(2) << "expect " << expect.toTensor() << std::endl;
     VLOG(2) << "output " << actual.toTensor() << std::endl;
+    EXPECT_TRUE(actual.isTensor());
     EXPECT_TRUE(expect.toTensor().equal(actual.toTensor()));
+    return;
+  } else if (expect.isTuple()) {
+    EXPECT_TRUE(actual.isTuple());
+    auto lhs = expect.toTuple()->elements();
+    auto rhs = actual.toTuple()->elements();
+    EXPECT_TRUE(lhs.size() == rhs.size());
+    for (size_t i = 0; i < lhs.size(); i++) {
+      compareResults(lhs[i], rhs[i]);
+    }
+  } else if (expect.isList()) {
+    EXPECT_TRUE(actual.isList());
+    auto lhs = expect.toList();
+    auto rhs = actual.toList();
+    EXPECT_TRUE(lhs.size() == rhs.size());
+    for (size_t i = 0; i < lhs.size(); i++) {
+      compareResults(lhs[i], rhs[i]);
+    }
+  } else if (expect.isGenericDict()) {
+    EXPECT_TRUE(actual.isGenericDict());
+    auto lhs = expect.toGenericDict();
+    auto rhs = actual.toGenericDict();
+    EXPECT_TRUE(lhs.size() == rhs.size());
+    for (auto& lh : lhs) {
+      auto f = rhs.find(lh.key());
+      EXPECT_FALSE(f == rhs.end());
+      compareResults(lh.value(), f->value());
+    }
+  } else {
+    // fall back to the default comparison impl in IValue
+    EXPECT_TRUE(expect == actual);
   }
 }
 
@@ -94,32 +120,35 @@ void testStaticRuntime(
 
   auto expect = module.forward(args);
 
-  torch::jit::StaticModule smodule(module, {true, true, true});
-  auto actual = smodule(args, {});
-  smodule.runtime().check_for_memory_leak();
-  // first run
-  compareResults(expect, actual);
-
-  // args2 is used to check for dynamic shapes
-  // it also exercises the memory planner
-  if (!args2.empty()) {
-    expect = module.forward(args2);
-    actual = smodule(args2, {});
+  for (bool enable_out_variant : {true, false}) {
+    torch::jit::StaticModule smodule(
+        module, {true, enable_out_variant, enable_out_variant});
+    auto actual = smodule(args, {});
     smodule.runtime().check_for_memory_leak();
-    // second run
+    // first run
     compareResults(expect, actual);
 
-    expect = module.forward(args);
-    actual = smodule(args, {});
-    smodule.runtime().check_for_memory_leak();
-    // third run
-    compareResults(expect, actual);
-  } else {
-    // run static runtime again to exercise the memory planner
-    actual = smodule(args, {});
-    smodule.runtime().check_for_memory_leak();
-    // second run
-    compareResults(expect, actual);
+    // args2 is used to check for dynamic shapes
+    // it also exercises the memory planner
+    if (!args2.empty()) {
+      expect = module.forward(args2);
+      actual = smodule(args2, {});
+      smodule.runtime().check_for_memory_leak();
+      // second run
+      compareResults(expect, actual);
+
+      expect = module.forward(args);
+      actual = smodule(args, {});
+      smodule.runtime().check_for_memory_leak();
+      // third run
+      compareResults(expect, actual);
+    } else {
+      // run static runtime again to exercise the memory planner
+      actual = smodule(args, {});
+      smodule.runtime().check_for_memory_leak();
+      // second run
+      compareResults(expect, actual);
+    }
   }
 
   // make sure inputs were not modified
@@ -142,6 +171,29 @@ TEST(StaticRuntime, InPlace) {
   EXPECT_TRUE(testHasInplaceOp(reshape_inplace_script));
   EXPECT_TRUE(testHasInplaceOp(sigmoid_inplace_script));
   EXPECT_FALSE(testHasInplaceOp(sigmoid_out_script));
+}
+
+TEST(StaticRuntime, NestedOutput) {
+  auto run_test = [](std::vector<int64_t> shapes) {
+    auto a = at::randn(shapes);
+    auto b = at::randn(shapes);
+
+    std::vector<IValue> args{a, b};
+    testStaticRuntime(nested_output_script_0, args);
+    testStaticRuntime(nested_output_script_1, args);
+    testStaticRuntime(nested_output_script_2, args);
+    testStaticRuntime(nested_output_script_3, args);
+
+    if (shapes.size() > 0 && shapes[0] != 0) {
+      shapes[0] *= 2;
+      testStaticRuntime(
+          nested_output_script_0, args, {at::randn(shapes), at::randn(shapes)});
+      testStaticRuntime(
+          nested_output_script_1, args, {at::randn(shapes), at::randn(shapes)});
+    }
+  };
+  run_test({2, 3, 1, 4});
+  run_test({2, 3});
 }
 
 TEST(StaticRuntime, UnaryOps) {
