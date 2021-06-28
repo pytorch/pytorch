@@ -1,10 +1,12 @@
-from torch._C import _te
-from torch import fx
 import copy
 import functools
 import inspect
 import itertools
+from typing import Callable, List, Union, Tuple, Optional
+
 import torch
+from torch import fx
+from torch._C import _te  # type: ignore
 
 FOLD_ALIASES = True
 _SHAPE_TYPES = {"one", "other"}
@@ -24,7 +26,7 @@ def _one():
     return _int(1)
 
 
-def _num_args(fn: callable):
+def _num_args(fn: Callable):
     return len(inspect.signature(fn).parameters)
 
 
@@ -36,7 +38,7 @@ def _combine_dtype(a: torch.dtype, b: torch.dtype):
             torch.zeros(1, dtype=b, device="cpu")).dtype
 
 
-def _fx_replace_constants(fn: callable, dtype: torch.dtype):
+def _fx_replace_constants(fn: Callable, dtype: torch.dtype):
     """Convert the constants in the user function to TensorExpr constants"""
 
     def apply(arg):
@@ -52,7 +54,7 @@ def _fx_replace_constants(fn: callable, dtype: torch.dtype):
     return gm
 
 
-def _create_constant(value, dtype):
+def _create_constant(value: Union[int, float], dtype: torch.dtype):
     return _te.Cast.make(dtype, {
         int: _te.ExprHandle.int,
         float: _te.ExprHandle.double
@@ -60,7 +62,8 @@ def _create_constant(value, dtype):
 
 
 class PointwiseCompiler(object):
-    def __init__(self, name, module_name, pointwise_fn, spec, result):
+    def __init__(self, name: str, module_name: str, pointwise_fn: Callable,
+                 spec: List, result: _te.CompileResult):
         self.name = name
         self.module_name = module_name
         self.pointwise_fn = pointwise_fn
@@ -74,10 +77,10 @@ class PointwiseCompiler(object):
         self.shape_args = [_te.VarHandle(torch.int32) for _ in range(self.ndim)]
         self.shape_vars = list(self.shape_args)
         self.iter_vars = [_te.VarHandle(torch.int32) for _ in range(self.ndim)]
-        self.stride_args = []
-        self.strides_from = []
-        self.broadcasts = []
-        self.output_order = None
+        self.stride_args: List[_te.VarHandle] = []
+        self.strides_from: List[Tuple[int, int]] = []
+        self.broadcasts: List[Tuple[int, int]] = []
+        self.output_order: List[int] = []
 
         self.device, = list(set(x.device.type for x in spec))
         # TODO(jansel): support meta tensors
@@ -118,7 +121,7 @@ class PointwiseCompiler(object):
         Compute the derivative of self.pointwise_fn with respect to input number index
         """
         # TODO(jansel): implement this without sympy
-        from sympy import symbols, diff
+        from sympy import symbols, diff  # type: ignore
         vars = symbols([f"v{i}" for i in range(1 + _num_args(self.pointwise_fn))])
         backwards_expr = diff(self.pointwise_fn(*vars[:-1]), vars[index]) * vars[-1]  # chain rule
         return _source_to_pointwise_operator(f"lambda {','.join(map(str, vars))}: {backwards_expr}",
@@ -187,6 +190,8 @@ class PointwiseCompiler(object):
         for d in reversed(range(ndim)):
             output_order.extend(output_order_remaining[d])
             output_order_remaining[d].clear()
+
+        assert not self.output_order
         self.output_order = output_order
         assert sorted(output_order) == list(range(ndim))
 
@@ -267,7 +272,7 @@ class PointwiseCompiler(object):
         out = _te.Block([buf.store(self.indexing(stride), val)
                          for buf, stride in zip(output_bufs, output_strides)])
 
-        loops = []
+        loops: List[_te.For] = []
         for i in self.output_order:
             var = self.iter_vars[i]
             size = self.shape_vars[i]
@@ -302,13 +307,17 @@ class PointwiseCompiler(object):
         self.compute_code()
 
 
+class _CompileCache(_te.CompileCache):
+    pass
+
+
 @functools.lru_cache(None)
-def _source_to_pointwise_operator(fn_str, name=None, module_name=None):
+def _source_to_pointwise_operator(fn_str: str, name: Optional[str] = None, module_name: Optional[str] = None):
     """ Used when creating backwards() methods """
     return pointwise_operator(eval(fn_str), name=name, module_name=module_name)
 
 
-def pointwise_operator(fn, name=None, module_name=None):
+def pointwise_operator(fn: Callable, name: Optional[str] = None, module_name: Optional[str] = None):
     """
     Decorator to create a new pointwise operator.  The operator will be
     JIT compiled for different dtypes/devices/layouts/etc -- but supports dynamic shapes.
@@ -322,17 +331,11 @@ def pointwise_operator(fn, name=None, module_name=None):
     args = [f"Tensor {name}" for name in inspect.signature(fn).parameters.keys()]
     signature = f"{name}({', '.join(args)}, *, Tensor? out=None)"
 
-    class PointwiseOperator(_te.CompileCache):
-        def __init__(self):
-            super().__init__(
-                name,
-                module_name,
-                [signature],
-                lambda spec, result: PointwiseCompiler(name, module_name, fn, spec, result),
-                _num_args(fn))
+    def compile_fn(spec, result):
+        return PointwiseCompiler(str(name), str(module_name), fn, spec, result)
 
     # This items are needed to support FX tracing
-    rv = PointwiseOperator()
+    rv = _CompileCache(name, module_name, [signature], compile_fn, _num_args(fn))
     rv.__name__ = name
     rv.__qualname__ = name
     rv.__module__ = module_name

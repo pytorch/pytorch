@@ -2,7 +2,6 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
 #include <torch/csrc/jit/tensorexpr/compile_cache.h>
-#include <torch/csrc/jit/tensorexpr/cuda_codegen.h>
 #include <array>
 #include <map>
 
