@@ -2283,7 +2283,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
         op = torch.trace
         test = self._vmap_test
         B0, B1, B2 = 7, 11, 13
-
         test(op, (torch.rand(B0, 2, 5),))
         test(op, (torch.rand(2, B0, 5),), in_dims=1)
         test(vmap(op), (torch.rand(B1, 2, B0, 5),), in_dims=2)

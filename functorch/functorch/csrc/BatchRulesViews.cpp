@@ -136,6 +136,10 @@ std::tuple<Tensor,optional<int64_t>> _unsafe_view_batch_rule(
   return std::make_tuple(at::_unsafe_view(self, view_size), self_bdim);
 }
 
+Tensor trace_decomp(const Tensor& self) {
+  return at::sum(at::diagonal(self));
+}
+
 std::tuple<Tensor,optional<int64_t>> flip_batch_rule(const Tensor& self, optional<int64_t> self_bdim, IntArrayRef dims) {
   auto self_ = moveBatchDimToFront(self, self_bdim);
   VmapDimVector new_dims;
@@ -150,6 +154,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("flatten.using_ints", static_cast<decltype(&ATEN_FN2(flatten, using_ints))>(native::flatten));
   VMAP_SUPPORT("flip", flip_batch_rule);
   OP_DECOMPOSE(meshgrid);
+  m.impl("trace", trace_decomp);
   VMAP_SUPPORT("tril", SINGLE_ARG(variadic_bdims_batch_rule<decltype(&ATEN_FN(tril)), &at::tril, int64_t>));
   VMAP_SUPPORT("triu", SINGLE_ARG(variadic_bdims_batch_rule<decltype(&ATEN_FN(triu)), &at::triu, int64_t>));
   VMAP_SUPPORT("repeat", repeat_batch_rule);
