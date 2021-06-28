@@ -1,5 +1,6 @@
 -r requirements.txt
 -r requirements-flake8.txt
+boto3
 cmakelint
 Jinja2
 junitparser

@@ -10,6 +10,12 @@ attrs==21.2.0
     # via
     #   flake8-bugbear
     #   flake8-pyi
+boto3==1.17.101
+    # via -r requirements-dev.in
+botocore==1.20.101
+    # via
+    #   boto3
+    #   s3transfer
 certifi==2021.5.30
     # via requests
 chardet==4.0.0
@@ -46,6 +52,10 @@ idna==2.10
     # via requests
 jinja2==3.0.1
     # via -r requirements-dev.in
+jmespath==0.10.0
+    # via
+    #   boto3
+    #   botocore
 junitparser==2.1.1
     # via -r requirements-dev.in
 markupsafe==2.0.1
@@ -73,6 +83,8 @@ pyflakes==2.2.0
     #   flake8-pyi
 pygments==2.9.0
     # via rich
+python-dateutil==2.8.1
+    # via botocore
 pyyaml==5.4.1
     # via -r requirements.txt
 requests==2.25.1
@@ -83,10 +95,13 @@ ruamel.yaml==0.17.10
     # via -r requirements-dev.in
 ruamel.yaml.clib==0.2.4
     # via ruamel.yaml
+s3transfer==0.4.2
+    # via boto3
 six==1.16.0
     # via
     #   -r requirements.txt
     #   astunparse
+    #   python-dateutil
 typed-ast==1.4.3
     # via mypy
 typing-extensions==3.10.0.0
@@ -94,7 +109,9 @@ typing-extensions==3.10.0.0
     #   -r requirements.txt
     #   mypy
 urllib3==1.26.5
-    # via requests
+    # via
+    #   botocore
+    #   requests
 wheel==0.36.2
     # via astunparse
 

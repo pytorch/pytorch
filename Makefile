@@ -50,14 +50,7 @@ shellcheck:
 		--job 'shellcheck'
 
 setup_lint:
-	$(PYTHON) tools/actions_local_runner.py --file .github/workflows/lint.yml \
-		--job 'flake8-py3' --step 'Install dependencies' --no-quiet
-	$(PYTHON) tools/actions_local_runner.py --file .github/workflows/lint.yml \
-		--job 'cmakelint' --step 'Install dependencies' --no-quiet
-	$(PYTHON) tools/actions_local_runner.py --file .github/workflows/lint.yml \
-		--job 'mypy' --step 'Install dependencies' --no-quiet
-	$(PYTHON) tools/actions_local_runner.py --file .github/workflows/lint.yml \
-		--job 'shellcheck' --step 'Install Jinja2' --no-quiet
+	pip install -r .circleci/docker/requirements.txt
 
 	@if [ "$$(uname)" = "Darwin" ]; then \
 		if [ -z "$$(which brew)" ]; then \
@@ -69,7 +62,6 @@ setup_lint:
 		$(PYTHON) tools/actions_local_runner.py --file .github/workflows/lint.yml \
 		--job 'shellcheck' --step 'Install ShellCheck' --no-quiet; \
 	fi
-	pip install jinja2
 
 quick_checks:
 # TODO: This is broken when 'git config submodule.recurse' is 'true' since the

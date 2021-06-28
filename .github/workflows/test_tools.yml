@@ -20,13 +20,7 @@ jobs:
         with:
           fetch-depth: 0 # deep clone, to allow us to use git log
       - name: Install dependencies
-        # mypy and boto3 versions copied from
-        # .circleci/docker/common/install_conda.sh
-        run: |
-          set -eux
-          pip install -r requirements.txt
-          pip install boto3==1.16.34
-          make setup_lint
+        run: pip install -r .circleci/docker/requirements.txt
       - name: Run tests
         run: python -m unittest discover -vs tools/test -p 'test_*.py'
 
