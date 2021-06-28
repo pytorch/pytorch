@@ -30,7 +30,7 @@ runner_types:
   linux.16xlarge.nvidia.gpu:
     instance_type: g3.16xlarge
     os: linux
-    max_available: 25
+    max_available: 10
     disk_size: 150
   windows.4xlarge:
     instance_type: c5d.4xlarge
