@@ -52,7 +52,7 @@ CONFIG_TREE_DATA = [
                     ("shard_test", [XImportant(True)]),
                     ("libtorch", [
                         (True, [
-                            ('build_only', [X(True)]),
+                            ('build_only', [XImportant(True)]),
                         ]),
                     ]),
                 ]),

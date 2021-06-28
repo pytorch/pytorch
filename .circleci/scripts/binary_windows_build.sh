@@ -24,6 +24,15 @@ export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4:-}
 export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4:-}
 set -x
 
+echo "rm pre-installed VS and CUDA"
+if [[ "$CIRCLECI" == 'true' && -d "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Commnuity" ]]; then
+  rm -rf "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Commnuity"
+fi
+
+if [[ -d "CUDA_PATH" ]]; then
+  rm -rf "CUDA_PATH"
+fi
+
 if [[ "$CIRCLECI" == 'true' && -d "C:\\ProgramData\\Microsoft\\VisualStudio\\Packages\\_Instances" ]]; then
   mv "C:\\ProgramData\\Microsoft\\VisualStudio\\Packages\\_Instances" .
   rm -rf "C:\\ProgramData\\Microsoft\\VisualStudio\\Packages"
