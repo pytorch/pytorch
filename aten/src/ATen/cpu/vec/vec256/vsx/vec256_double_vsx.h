@@ -191,7 +191,7 @@ class Vectorized<double> {
   void dump() const {
       std::cout << _vec0[0] << "," << _vec0[1] << "," << _vec1[0] << "," << _vec1[1] << std::endl;
   }
-  Vectorized<double> map(double (*f)(double)) const {
+  Vectorized<double> map(double (*const f)(double)) const {
     Vectorized<double> ret;
     for (int i = 0; i < size()/2; i++) {
         ret._vec0[i] = f(_vec0[i]);
@@ -202,7 +202,7 @@ class Vectorized<double> {
     return ret;
   }
 
-  Vectorized<double> mapbi(double (*f)(double, double), const Vectorized<double>& other)
+  Vectorized<double> mapbi(double (*const f)(double, double), const Vectorized<double>& other)
       const {
     Vectorized<double> ret;
     for (int i = 0; i < size()/2; i++) {
@@ -254,7 +254,9 @@ class Vectorized<double> {
   }
 
   Vectorized<double> angle() const {
-    return Vectorized<double>{0};
+    auto tmp = blendv(
+      Vectorized<double>(0), Vectorized<double>(c10::pi<double>), *this < Vectorized<double>(0));
+    return blendv(tmp, *this, isnan());
   }
   Vectorized<double> real() const {
     return *this;
@@ -386,8 +388,8 @@ class Vectorized<double> {
   DEFINE_MEMBER_OP(operator-, double, vec_sub)
   DEFINE_MEMBER_OP(operator*, double, vec_mul)
   DEFINE_MEMBER_OP(operator/, double, vec_div)
-  DEFINE_MEMBER_OP(maximum, double, vec_max)
-  DEFINE_MEMBER_OP(minimum, double, vec_min)
+  DEFINE_MEMBER_OP(maximum, double, vec_max_nan2)
+  DEFINE_MEMBER_OP(minimum, double, vec_min_nan2)
   DEFINE_MEMBER_OP(operator&, double, vec_and)
   DEFINE_MEMBER_OP(operator|, double, vec_or)
   DEFINE_MEMBER_OP(operator^, double, vec_xor)

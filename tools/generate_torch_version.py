@@ -2,7 +2,7 @@ import argparse
 import os
 import subprocess
 from pathlib import Path
-from setuptools import distutils
+from setuptools import distutils  # type: ignore[import]
 from typing import Optional, Union
 
 def get_sha(pytorch_root: Union[str, Path]) -> str:
