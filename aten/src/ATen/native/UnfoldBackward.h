@@ -33,7 +33,6 @@ static TensorIterator _make_unfold_backward_iter_over_grad_out(
 ) {
   dim = maybe_wrap_dim(dim, grad_out.dim());
   // last dim stores the folds
-  auto last_dim = maybe_wrap_dim(-1, grad_in.dim());
 
   auto grad_out_dim_size = ensure_nonempty_size(grad_out, dim);
   auto grad_in_dim_size = ensure_nonempty_size(grad_in, dim);

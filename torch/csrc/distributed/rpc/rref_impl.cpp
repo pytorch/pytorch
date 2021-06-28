@@ -28,15 +28,6 @@ std::string getTypeStr(const c10::TypePtr& type) {
   }
 }
 
-void blockCurrentStreams(const std::vector<c10::Event>& events) {
-  for (const c10::Event& event : events) {
-    c10::Device device{event.device_type(), event.device_index()};
-    c10::Stream stream =
-        c10::impl::getDeviceGuardImpl(device.type())->getStream(device);
-    event.block(stream);
-  }
-}
-
 } // namespace
 
 namespace torch {
@@ -256,8 +247,7 @@ OwnerRRef::OwnerRRef(
     c10::optional<IValue> value,
     std::vector<c10::Device> devices)
     : RRef(ownerId, rrefId, type) {
-  future_ = c10::make_intrusive<JitFuture>(
-      at::AnyClassType::get(), std::move(devices));
+  future_ = c10::make_intrusive<JitFuture>(type_, std::move(devices));
 
   if (value.has_value()) {
     future_->markCompleted(value.value());
@@ -269,13 +259,7 @@ const IValue& OwnerRRef::getValue() const {
       !getTimedOut(),
       "RRef creation via rpc.remote() timed out, and it "
       "is possible that the RRef on the owner node does not exist.");
-  future_->wait();
-  if (future_->hasError()) {
-    (void)future_->value(); // Throws the error.
-  }
-  // Before accessing the value in this RRef, current CUDA streams must wait
-  // for pending CUDA operations that create the value.
-  blockCurrentStreams(events_);
+  future_->waitAndThrow();
   return future_->constValue();
 }
 
@@ -293,25 +277,6 @@ void OwnerRRef::setValue(IValue&& value) {
 
 void OwnerRRef::setError(std::exception_ptr eptr) {
   future_->setErrorIfNeeded(std::move(eptr));
-}
-
-void OwnerRRef::recordAllStreams(
-    const std::shared_ptr<LazyStreamContext>& ctx) {
-  if (ctx) {
-    for (auto stream : ctx->getReservedStreams()) {
-      c10::Event event{ctx->deviceType()};
-      event.record(stream);
-      events_.push_back(std::move(event));
-    }
-  }
-}
-
-void OwnerRRef::blockAllStreams(const std::shared_ptr<LazyStreamContext>& ctx) {
-  if (ctx) {
-    for (c10::Event& event : events_) {
-      event.block(ctx->getStream(event.device()));
-    }
-  }
 }
 
 std::ostream& operator<<(std::ostream& os, const RRef& rref) {

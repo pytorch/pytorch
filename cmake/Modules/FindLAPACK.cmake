@@ -128,13 +128,7 @@ if(BLAS_FOUND)
       if(NOT LAPACK_CGESDD_WORKS)
         find_library(GFORTRAN_LIBRARY
           NAMES libgfortran.a gfortran
-          PATHS /usr/lib/gcc/aarch64-linux-gnu/9/
-                /usr/lib/gcc/x86_64-redhat-linux/9/
-                /usr/lib/gcc/aarch64-linux-gnu/8/
-                /usr/lib/gcc/x86_64-redhat-linux/8/
-                /usr/lib/gcc/aarch64-linux-gnu/7/
-                /usr/lib/gcc/x86_64-redhat-linux/7/
-                )
+          PATHS ${CMAKE_C_IMPLICIT_LINK_DIRECTORIES})
        list(APPEND CMAKE_REQUIRED_LIBRARIES "${GFORTRAN_LIBRARY}")
        unset(LAPACK_CGESDD_WORKS CACHE)
        check_function_exists("cgesdd_" LAPACK_CGESDD_WORKS)

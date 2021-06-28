@@ -4,6 +4,7 @@
 #include <ATen/Context.h>
 #include <ATen/DeviceGuard.h>
 #include <ATen/DynamicLibrary.h>
+#include <ATen/core/Vitals.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/CUDADevice.h>
 #include <ATen/cuda/Exceptions.h>
@@ -51,6 +52,10 @@ std::function<void(void)> THCMagma_init;
 std::unique_ptr<THCState, void (*)(THCState*)> CUDAHooks::initCUDA() const {
   C10_LOG_API_USAGE_ONCE("aten.init.cuda");
   THCState* thc_state = THCState_alloc();
+
+  // Force the update to enable unit testing. This code get executed before unit tests
+  // have a chance to enable vitals.
+  at::vitals::VitalsAPI.setVital("CUDA", "used", "true", /* force = */ true);
 
   THCudaInit(thc_state);
   if (THCMagma_init)
@@ -206,7 +211,6 @@ bool CUDAHooks::compiledWithMIOpen() const {
 
 bool CUDAHooks::supportsDilatedConvolutionWithCuDNN() const {
 #if AT_CUDNN_ENABLED()
-  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   // NOTE: extra parenthesis around numbers disable clang warnings about
   // dead code
   return true;
@@ -335,35 +339,19 @@ double CUDAHooks::batchnormMinEpsilonCuDNN() const {
 }
 
 int64_t CUDAHooks::cuFFTGetPlanCacheMaxSize(int64_t device_index) const {
-#ifndef __HIP_PLATFORM_HCC__
   return at::native::detail::cufft_get_plan_cache_max_size_impl(device_index);
-#else
-  AT_ERROR("cuFFT with HIP is not supported");
-#endif
 }
 
 void CUDAHooks::cuFFTSetPlanCacheMaxSize(int64_t device_index, int64_t max_size) const {
-#ifndef __HIP_PLATFORM_HCC__
   at::native::detail::cufft_set_plan_cache_max_size_impl(device_index, max_size);
-#else
-  AT_ERROR("cuFFT with HIP is not supported");
-#endif
 }
 
 int64_t CUDAHooks::cuFFTGetPlanCacheSize(int64_t device_index) const {
-#ifndef __HIP_PLATFORM_HCC__
   return at::native::detail::cufft_get_plan_cache_size_impl(device_index);
-#else
-  AT_ERROR("cuFFT with HIP is not supported");
-#endif
 }
 
 void CUDAHooks::cuFFTClearPlanCache(int64_t device_index) const {
-#ifndef __HIP_PLATFORM_HCC__
   at::native::detail::cufft_clear_plan_cache_impl(device_index);
-#else
-  AT_ERROR("cuFFT with HIP is not supported");
-#endif
 }
 
 int CUDAHooks::getNumGPUs() const {
