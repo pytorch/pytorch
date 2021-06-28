@@ -890,14 +890,28 @@ class DistributedDataParallel(Module):
             # features such as: enqueue delay allreduce for static graph, support
             # multiple calls to backwards with retain_graph=True, and support
             # finding all parameters that will not receive gradient.
+            output_placeholders = [None for _ in range(len(output_tensor_list))]
+            # Do not touch tensors that have no grad_fn, which can cause issues
+            # such as https://github.com/pytorch/pytorch/issues/60733
+            for i, output in enumerate(output_tensor_list):
+                if torch.is_tensor(output) and output.grad_fn is None:
+                    output_placeholders[i] = output
+
             passthrough_tensor_list = _DDPSink.apply(
                 self.reducer,
                 state_dict,
                 *output_tensor_list,
             )
+            for i in range(len(output_placeholders)):
+                if output_placeholders[i] is None:
+                    output_placeholders[i] = passthrough_tensor_list[i]
+                else:
+                    # None elements are not tensors or have None grad fn
+                    assert not torch.is_tensor(output_placeholders[i]) or output_placeholders[i].grad_fn is None
+
             # Reconstruct output data structure.
             output = _tree_unflatten_with_rref(
-                passthrough_tensor_list, treespec, output_is_rref
+                output_placeholders, treespec, output_is_rref
             )
             return output
 
