@@ -42,7 +42,7 @@ import os
 
 import unittest
 import numpy as np
-from torch.testing import FileCheck
+from torch.testing._internal.common_utils import FileCheck
 from typing import Callable, Tuple, Dict, Any, Union
 
 class NodeSpec:
