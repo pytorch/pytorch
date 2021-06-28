@@ -261,10 +261,18 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       TORCH_CHECK(false, "Trying to create a SavedTensor object from Python is forbidden.");
     }))
     .def("register_hooks", [](torch::autograd::SavedVariable &s, py::function &pack_hook, py::function &unpack_hook) {
-        s.register_hooks();
-        // s.register_hook(std::make_unique<torch::autograd::PySavedVariableHooks>(pack_hook, unpack_hook));
-        // s.register_hook(std::make_unique<torch::autograd::PySavedVariableHooks>(pack_hook.release().ptr(), unpack_hook.release().ptr()));
+        auto h = std::make_unique<torch::autograd::PySavedVariableHooks>(pack_hook, unpack_hook);
+        // s.register_hooks();
+        s.register_hooks(std::make_unique<torch::autograd::PySavedVariableHooks>(pack_hook, unpack_hook));
     });
+
+  py::class_<torch::autograd::PySavedVariableHooks>(m, "SavedTensorHooks")
+    .def(py::init<py::function&, py::function&>());
+    // .def(py::init());
+
+  // py::class_<torch::autograd::PySavedVariableHooks>(m, "Dog")
+    // .def(py::init<py::function&, py::function&>());
+    // .def("call_pack_hook", [](torch::autograd::Dog &d) { d.call_pack_hook();});
 
   Py_RETURN_TRUE;
 }

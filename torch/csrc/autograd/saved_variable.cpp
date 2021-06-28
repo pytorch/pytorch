@@ -153,22 +153,23 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   return var;
 }
 
-// void register_hooks(std::unique_ptr<SavedVariableHooks>&& hooks);
-void SavedVariable::register_hooks() {
+void SavedVariable::register_hooks(std::unique_ptr<SavedVariableHooks>&& hooks) {
   if (!data_.defined()) {
     if (!was_default_constructed_) {
-    TORCH_CHECK(false,
-        "Calling register_hook on a saved tensor after it has been freed. "
+      TORCH_CHECK(false,
+        "Calling register_hooks on a saved tensor after it has been freed. "
         "Saved intermediate values "
         "of the graph are freed when you call .backward() or autograd.grad(). Specify "
         "retain_graph=True if you need to backward through the graph a second time or "
         "if you need to access saved variables after calling backward.");
     } else {
-    TORCH_CHECK(false, "Calling register_hook on a tensor with value None is forbidden");
+      TORCH_CHECK(false, "Calling register_hook on a tensor with value None is forbidden");
     }
   }
-  // hooks_ = std::move(hooks);
-  // data_ = hooks_->call_unpack_hook(hooks_->call_pack_hook(data_));
+  TORCH_CHECK(!hooks_,
+    "Calling register_hooks on a saved tensor whose hooks have already been set.");
+  hooks_ = std::move(hooks);
+  data_ = hooks_->call_unpack_hook(hooks_->call_pack_hook(data_));
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)

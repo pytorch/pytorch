@@ -4809,6 +4809,8 @@ for shape in [(1,), ()]:
             saved[1].register_hooks(lambda x: x, lambda x: x)
 
         saved[0].register_hooks(lambda x: x, lambda x: x)
+        with self.assertRaisesRegex(RuntimeError, "already been set"):
+            saved[0].register_hooks(lambda x: x, lambda x: x)
         y.sum().backward()
         with self.assertRaisesRegex(RuntimeError, "after they have already been freed"):
             y.grad_fn.raw_saved_tensors
