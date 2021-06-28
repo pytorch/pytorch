@@ -224,6 +224,7 @@ DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
     # These functions return tensors with use_count > 1
     # https://github.com/pytorch/pytorch/issues/60426
     'native_batch_norm', 'native_batch_norm_backward', 'native_group_norm_backward',
+    'cudnn_batch_norm',
     'native_layer_norm_backward', 'slow_conv_transpose2d_backward_output_mask',
     'thnn_conv2d_backward_output_mask', 'slow_conv3d_backward_output_mask',
     'slow_conv_transpose2d_backward_output_mask', 'slow_conv_transpose3d_backward_output_mask',
@@ -233,7 +234,7 @@ DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
 DONT_ENFORCE_STORAGE_IMPL_USE_COUNT = {
     # These 'non-view' functions return tensors with storage use_count > 1
     'thnn_conv2d_forward', 'slow_conv3d_forward', 'channel_shuffle',
-    'q_per_channel_zero_points'
+    'q_per_channel_zero_points', 'q_per_channel_scales'
 }
 # END CHECKS FOR [ TensorImpl and Storage Pointer Sanity Checks ]
 

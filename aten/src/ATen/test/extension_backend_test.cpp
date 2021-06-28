@@ -28,7 +28,8 @@ Tensor empty_override(IntArrayRef size, c10::optional<ScalarType> dtype, c10::op
 
 Tensor add_override(const Tensor & a, const Tensor & b , const Scalar& c) {
   test_int = 2;
-  return a.clone();
+  // Needs to return a new tensor to pass codegen checks for StorageImpl/TensorImpl use count
+  return empty({5, 5}, at::kMSNPU);
 }
 
 Tensor empty_strided_override(
