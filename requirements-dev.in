@@ -1,9 +1,14 @@
 -r requirements.txt
 -r requirements-flake8.txt
 boto3
+click
 cmakelint
+codecov
 Jinja2
 junitparser
+mock
 mypy==0.812
+networkx==2.0
 rich
 ruamel.yaml
+tabulate

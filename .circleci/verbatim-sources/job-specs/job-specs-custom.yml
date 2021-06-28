@@ -207,7 +207,6 @@
           command: |
             set -ex
             source /Users/distiller/workspace/miniconda3/bin/activate
-            pip install boto3
             export PYTHONPATH="$PWD"
 
             # Using the same IAM user to write stats to our OSS bucket

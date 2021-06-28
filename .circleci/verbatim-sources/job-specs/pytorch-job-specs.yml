@@ -79,7 +79,6 @@ jobs:
         no_output_timeout: "5m"
         command: |
             cd /pytorch && export COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
-            python3 -mpip install requests && \
             SCRIBE_GRAPHQL_ACCESS_TOKEN=${SCRIBE_GRAPHQL_ACCESS_TOKEN} \
             python3 .circleci/scripts/upload_binary_size_to_scuba.py || exit 0
     - store_artifacts:
@@ -180,7 +179,6 @@ jobs:
           if [[ ${BUILD_ENVIRONMENT} == *"multigpu"* ]]; then
             echo ".jenkins/pytorch/multigpu-test.sh" >> docker_commands.sh
           elif [[ ${BUILD_ENVIRONMENT} == *onnx* ]]; then
-            echo "pip install click mock tabulate networkx==2.0" >> docker_commands.sh
             echo "pip -q install --user \"file:///var/lib/jenkins/workspace/third_party/onnx#egg=onnx\"" >> docker_commands.sh
             echo ".jenkins/caffe2/test.sh" >> docker_commands.sh
           else
@@ -197,7 +195,6 @@ jobs:
               echo "Retrieving Python coverage report"
               docker cp $id:/var/lib/jenkins/workspace/test/.coverage ./test
               docker cp $id:/var/lib/jenkins/workspace/test/coverage.xml ./test
-              python3 -mpip install codecov
               python3 -mcodecov
           fi
     - run:
@@ -377,7 +374,6 @@ jobs:
             export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_WIN_BUILD_V1}
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_WIN_BUILD_V1}
             export PYTHONPATH="$PWD"
-            pip install typing_extensions boto3
             python tools/stats/print_test_stats.py --upload-to-s3 --compare-with-s3 test
           when: always
       - store_test_results:

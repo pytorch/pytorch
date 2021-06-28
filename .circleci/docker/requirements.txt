@@ -20,12 +20,20 @@ certifi==2021.5.30
     # via requests
 chardet==4.0.0
     # via requests
+click==8.0.1
+    # via -r requirements-dev.in
 cmakelint==1.4.1
+    # via -r requirements-dev.in
+codecov==2.1.11
     # via -r requirements-dev.in
 colorama==0.4.4
     # via rich
 commonmark==0.9.1
     # via rich
+coverage==5.5
+    # via codecov
+decorator==5.0.9
+    # via networkx
 flake8==3.8.2
     # via
     #   -r requirements-flake8.txt
@@ -64,10 +72,14 @@ mccabe==0.6.1
     # via
     #   -r requirements-flake8.txt
     #   flake8
+mock==4.0.3
+    # via -r requirements-dev.in
 mypy==0.812
     # via -r requirements-dev.in
 mypy-extensions==0.4.3
     # via mypy
+networkx==2.0
+    # via -r requirements-dev.in
 numpy==1.20.3
     # via -r requirements.txt
 psutil==5.8.0
@@ -88,7 +100,9 @@ python-dateutil==2.8.1
 pyyaml==5.4.1
     # via -r requirements.txt
 requests==2.25.1
-    # via -r requirements.txt
+    # via
+    #   -r requirements.txt
+    #   codecov
 rich==10.4.0
     # via -r requirements-dev.in
 ruamel.yaml==0.17.10
@@ -102,6 +116,8 @@ six==1.16.0
     #   -r requirements.txt
     #   astunparse
     #   python-dateutil
+tabulate==0.8.9
+    # via -r requirements-dev.in
 typed-ast==1.4.3
     # via mypy
 typing-extensions==3.10.0.0
