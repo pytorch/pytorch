@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_controlflow.h>
 
 #include <aten/src/ATen/InitialTensorOptions.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
@@ -118,8 +119,6 @@ std::vector<Value*> ConvertSequenceDependencies(Node* node, int opset_version) {
   }
 
   auto* loop_node = node;
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
-  auto* graph = loop_node->owningGraph();
 
   TORCH_INTERNAL_ASSERT(loop_node->blocks().size() == 1);
   auto* sub_block = loop_node->blocks()[0];
@@ -328,7 +327,7 @@ void ONNXFixupUninitializedOutput(Node* node) {
   // Infer shape and type for subblock outputs
   TORCH_INTERNAL_ASSERT(
       then_block->outputs().size() == else_block->outputs().size())
-  for (size_t i = 0; i < else_block->outputs().size(); i++) {
+  for (const auto i : c10::irange(else_block->outputs().size())) {
     Value* then_block_output = then_block->outputs()[i];
     Value* else_block_output = else_block->outputs()[i];
 
@@ -378,8 +377,6 @@ std::vector<Value*> FixupONNXIfNode(Node* node, int opset_version) {
   }
   GRAPH_DUMP("Graph before fixing controlflow: ", node->owningGraph());
   auto* if_node = node;
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
-  auto* graph = if_node->owningGraph();
   FixupONNXSubblockOutputs(node);
   ONNXFixupUninitializedOutput(if_node);
   // Copy type of block output to node output.

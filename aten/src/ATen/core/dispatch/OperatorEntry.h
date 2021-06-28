@@ -217,8 +217,8 @@ private:
   // currently not high-pri.
   ska::flat_hash_map<DispatchKey, std::list<AnnotatedKernel>> kernels_;
 
-  AnnotatedKernel missingKernel_;
-  static const AnnotatedKernel ambiguousAutogradOtherKernel_;
+  const AnnotatedKernel& missingKernel() const;
+  const AnnotatedKernel& ambiguousAutogradOtherKernel() const;
 
   // cpp_signature_ stores function signature if any of
   // the kernels was created in a way that allowed us to know the function

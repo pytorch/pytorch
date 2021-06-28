@@ -11,8 +11,8 @@ class MetalTensorImplStorage final {
 
  public:
   MetalTensorImplStorage(){};
-  explicit MetalTensorImplStorage(const std::vector<int64_t>& sizes);
-  explicit MetalTensorImplStorage(
+  MetalTensorImplStorage(const std::vector<int64_t>& sizes);
+  MetalTensorImplStorage(
       const std::vector<int64_t>& sizes,
       const std::vector<int64_t>& strides);
   ~MetalTensorImplStorage() = default;

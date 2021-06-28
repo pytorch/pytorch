@@ -31,7 +31,7 @@ class ConcatIterDataPipe(IterDataPipe):
     def __len__(self) -> int:
         if self.length is not None:
             if self.length == -1:
-                raise NotImplementedError
+                raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
             return self.length
         if all(isinstance(dp, Sized) for dp in self.datapipes):
             self.length = sum(len(dp) for dp in self.datapipes)
@@ -67,7 +67,7 @@ class ZipIterDataPipe(IterDataPipe[Tuple[T_co]]):
     def __len__(self) -> int:
         if self.length is not None:
             if self.length == -1:
-                raise NotImplementedError
+                raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
             return self.length
         if all(isinstance(dp, Sized) for dp in self.datapipes):
             self.length = min(len(dp) for dp in self.datapipes)
