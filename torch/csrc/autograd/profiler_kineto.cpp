@@ -372,8 +372,10 @@ std::string stacksToStr(const std::vector<std::string>& stacks) {
       stacks.begin(),
       stacks.end(),
       std::ostream_iterator<std::string>(oss, ";"),
-      // replace the windows backstash with forward slash
-      [](std::string s)-> std::string { return std::regex_replace(s, std::regex("\\"), "/"); });
+      // replace the windows backslash with forward slash
+      [](std::string s) -> std::string {
+        return std::regex_replace(s, std::regex("\\"), "/");
+      });
   auto rc = oss.str();
   rc.pop_back();
   return "\"" + rc + "\"";
