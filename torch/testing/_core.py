@@ -249,30 +249,33 @@ def _compare_scalars_internal(a, b, *, rtol: float, atol: float, equal_nan: Unio
 
     return _helper(a, b, " ")
 
-def assert_allclose(actual, expected, rtol=None, atol=None, equal_nan=True, msg='') -> None:
-    if not isinstance(actual, torch.Tensor):
-        actual = torch.tensor(actual)
-    if not isinstance(expected, torch.Tensor):
-        expected = torch.tensor(expected, dtype=actual.dtype)
-    if expected.shape != actual.shape:
-        raise AssertionError("expected tensor shape {0} doesn't match with actual tensor "
-                             "shape {1}!".format(expected.shape, actual.shape))
-    if rtol is None or atol is None:
-        if rtol is not None or atol is not None:
-            raise ValueError("rtol and atol must both be specified or both be unspecified")
-        rtol, atol = _get_default_tolerance(actual, expected)
+from ._asserts import assert_close as assert_allclose
 
-    result, debug_msg = _compare_tensors_internal(actual, expected,
-                                                  rtol=rtol, atol=atol,
-                                                  equal_nan=equal_nan)
 
-    if result:
-        return
-
-    if msg is None or msg == '':
-        msg = debug_msg
-
-    raise AssertionError(msg)
+# def assert_allclose(actual, expected, rtol=None, atol=None, equal_nan=True, msg='') -> None:
+#     if not isinstance(actual, torch.Tensor):
+#         actual = torch.tensor(actual)
+#     if not isinstance(expected, torch.Tensor):
+#         expected = torch.tensor(expected, dtype=actual.dtype)
+#     if expected.shape != actual.shape:
+#         raise AssertionError("expected tensor shape {0} doesn't match with actual tensor "
+#                              "shape {1}!".format(expected.shape, actual.shape))
+#     if rtol is None or atol is None:
+#         if rtol is not None or atol is not None:
+#             raise ValueError("rtol and atol must both be specified or both be unspecified")
+#         rtol, atol = _get_default_tolerance(actual, expected)
+#
+#     result, debug_msg = _compare_tensors_internal(actual, expected,
+#                                                   rtol=rtol, atol=atol,
+#                                                   equal_nan=equal_nan)
+#
+#     if result:
+#         return
+#
+#     if msg is None or msg == '':
+#         msg = debug_msg
+#
+#     raise AssertionError(msg)
 
 def make_non_contiguous(tensor: torch.Tensor) -> torch.Tensor:
     if tensor.numel() <= 1:  # can't make non-contiguous
