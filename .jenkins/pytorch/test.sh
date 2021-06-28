@@ -17,6 +17,12 @@ echo "Testing pytorch"
 
 export LANG=C.UTF-8
 
+# Try to pull value from CIRCLE_PULL_REQUEST first then GITHUB_HEAD_REF second
+# CIRCLE_PULL_REQUEST comes from CircleCI
+# NOTE: file_diff_from_base is currently bugged for GHA due to an issue finding a merge base for ghstack PRs
+#       see https://github.com/pytorch/pytorch/issues/60111
+IN_PULL_REQUEST=${CIRCLE_PULL_REQUEST:-}
+
 if [[ "$BUILD_ENVIRONMENT" == *-slow-* ]]; then
   export PYTORCH_TEST_WITH_SLOW=1
   export PYTORCH_TEST_SKIP_FAST=1
@@ -37,8 +43,6 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   # mainly used so that we're not spending extra cycles testing cpu
   # devices on expensive gpu machines
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="cuda"
-elif [[ "$BUILD_ENVIRONMENT" == *xla* ]]; then
-  export PYTORCH_TESTING_DEVICE_ONLY_FOR="xla"
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
@@ -49,6 +53,13 @@ if [[ "$BUILD_ENVIRONMENT" == *noarch* ]]; then
   export PYTORCH_TEST_SKIP_NOARCH=0
 else
   export PYTORCH_TEST_SKIP_NOARCH=1
+fi
+
+if [[ -n "$IN_PULL_REQUEST" ]] && [[ -z "$CI_MASTER" || "$CI_MASTER" == "false" ]]; then
+  # skip expensive checks when on PR and CI_MASTER flag is not set
+  export PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK=1
+else
+  export PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK=0
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
@@ -124,10 +135,6 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX2-* ]]; then
   export ATEN_CPU_CAPABILITY=avx
 fi
 
-# Try to pull value from CIRCLE_PULL_REQUEST first then GITHUB_HEAD_REF second
-# CIRCLE_PULL_REQUEST comes from CircleCI
-# GITHUB_HEAD_REF comes from Github Actions
-IN_PULL_REQUEST=${CIRCLE_PULL_REQUEST:-}
 if [ -n "$IN_PULL_REQUEST" ] && [[ "$BUILD_ENVIRONMENT" != *coverage* ]]; then
   DETERMINE_FROM=$(mktemp)
   file_diff_from_base "$DETERMINE_FROM"
@@ -230,6 +237,7 @@ test_libtorch() {
     wait
     OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api --gtest_output=xml:$TEST_REPORTS_DIR/test_api.xml
     build/bin/test_tensorexpr --gtest_output=xml:$TEST_REPORTS_DIR/test_tensorexpr.xml
+    build/bin/test_mobile_nnc --gtest_output=xml:$TEST_REPORTS_DIR/test_mobile_nnc.xml
     assert_git_not_dirty
   fi
 }
@@ -339,23 +347,9 @@ test_torch_function_benchmark() {
 }
 
 test_xla() {
-  export XLA_USE_XRT=1 XRT_DEVICE_MAP="CPU:0;/job:localservice/replica:0/task:0/device:XLA_CPU:0"
-  # Issue #30717: randomize the port of XLA/gRPC workers is listening on to reduce flaky tests.
-  XLA_PORT=$(shuf -i 40701-40999 -n 1)
-  export XRT_WORKERS="localservice:0;grpc://localhost:$XLA_PORT"
-  pushd xla
-  echo "Running Python Tests"
-  ./test/run_tests.sh
-
-  # Disabled due to MNIST download issue.
-  # See https://github.com/pytorch/pytorch/issues/53267
-  # echo "Running MNIST Test"
-  # python test/test_train_mnist.py --tidy
-
-  echo "Running C++ Tests"
-  pushd test/cpp
-  CC=clang-9 CXX=clang++-9 ./run_tests.sh
-  popd
+  # shellcheck disable=SC1091
+  source "./xla/.circleci/common.sh"
+  run_torch_xla_tests "$(pwd)" "$(pwd)/xla"
   assert_git_not_dirty
 }
 
@@ -451,7 +445,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *jit_legacy-test || "${JOB_BASE_NAME}" == *jit
 elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
-elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; then
+elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 || "${SHARD_NUMBER}" == 1 ]]; then
   if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7-test1 ]]; then
     test_torch_deploy
   fi
@@ -459,7 +453,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; t
   install_torchvision
   test_python_shard1
   test_aten
-elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; then
+elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 || "${SHARD_NUMBER}" == 2 ]]; then
   install_torchvision
   test_python_shard2
   test_libtorch

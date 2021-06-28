@@ -4,6 +4,8 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
 
+#include <THC/THCReduceApplyUtils.cuh>
+
 namespace at {
 namespace native {
 

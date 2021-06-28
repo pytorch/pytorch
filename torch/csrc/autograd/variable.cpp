@@ -175,8 +175,7 @@ namespace impl {
     std::unique_ptr<FunctionPreHook> hook_ptr(new CppFunctionPreHook(list, self.output_nr()));
     clear_hooks(self);
     add_hook(self, std::make_shared<CppFunctionPreHook>(list, 0));
-    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-    auto fn = self.grad_fn();
+    const auto& fn = self.grad_fn();
     if (fn) {
       fn->add_pre_hook(std::move(hook_ptr));
     }
@@ -347,7 +346,8 @@ struct VariableHooks final : at::impl::VariableHooksInterface {
   void set_data(const Tensor & self, const Tensor & new_data) const override;
   Tensor data(const Tensor & self) const override;
   int64_t _version(const Tensor & self) const override;
-  void retain_grad(const Tensor & self) const override;
+  void retain_grad(const Tensor& self) const override;
+  bool retains_grad(const Tensor& self) const override;
   void _backward(const Tensor& self, at::TensorList inputs,
     const c10::optional<Tensor>& gradient, c10::optional<bool> keep_graph,
     bool create_graph) const override;
@@ -434,7 +434,7 @@ int64_t VariableHooks::_version(const Tensor & self) const {
   return self.unsafeGetTensorImpl()->version_counter().current_version();
 }
 
-void VariableHooks::retain_grad(const Tensor & self) const {
+void VariableHooks::retain_grad(const Tensor& self) const {
   TORCH_CHECK(self.requires_grad(), "can't retain_grad on Tensor that has requires_grad=False");
   if (self.is_leaf()) {  // no-op for leaves
     return;
@@ -463,6 +463,14 @@ void VariableHooks::retain_grad(const Tensor & self) const {
 
   self.register_hook(retain_grad_hook);
   impl::get_autograd_meta(self)->retains_grad_ = true;
+}
+
+bool VariableHooks::retains_grad(const Tensor& self) const {
+  if (impl::get_autograd_meta(self)) {
+    return impl::get_autograd_meta(self)->retains_grad_;
+  } else {
+    return false;
+  }
 }
 
 void VariableHooks::_backward(

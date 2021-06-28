@@ -144,12 +144,27 @@ class TestNNAPI(TestCase):
                 nhwc(torch.randn(4, 2, 1, 1)))
 
     def test_flatten(self):
-        for mod in [
-            torch.nn.Flatten(),
-            torch.nn.Flatten(start_dim=1)
-        ]:
-            self.check(mod, torch.randn(4, 2, 1, 1))
+#        for mod in [
+#            torch.nn.Flatten(),
+#            torch.nn.Flatten(start_dim=2, end_dim=3),
+#            torch.nn.Flatten(start_dim=2, end_dim=4),
+#            torch.nn.Flatten(start_dim=0, end_dim=-2),
+#            torch.nn.Flatten(start_dim=0, end_dim=4)
+#
+#        ]:
+#            self.check(mod, torch.randn(4, 2, 1, 3, 7))
 
+         for mod in [
+             torch.nn.Flatten(),
+#              torch.nn.Flatten(start_dim=2, end_dim=3),
+#              torch.nn.Flatten(start_dim=2, end_dim=4),
+#              torch.nn.Flatten(start_dim=0, end_dim=-2),
+#              torch.nn.Flatten(start_dim=0, end_dim=4)
+
+         ]:
+             self.check(
+                 mod, torch.randn(4, 2, 1, 3, 7),
+                 convert_args=[torch.zeros(4, 2, 0, 0, 7)])
 
     def test_cat(self):
         class CatModule(torch.nn.Module):

@@ -309,6 +309,24 @@ class TestFX(JitTestCase):
         self.assertIs(wrapped_via_decorator, real_wrapped_via_decorator)
         self.assertFalse(hasattr(wrapped_via_decorator, "__fx_already_patched"))
 
+    def test_wrapped_via_decorator_and_transformed(self):
+        self.assertEqual(wrapped_via_decorator(0), 1)
+
+        def to_trace(y):
+            return wrapped_via_decorator(y)
+
+        m = symbolic_trace(to_trace)
+        self.assertIn('wrapped_via_decorator', m.code)
+        self.assertEqual(m(0), 1)
+        self.assertIs(wrapped_via_decorator, real_wrapped_via_decorator)
+        self.assertFalse(hasattr(wrapped_via_decorator, "__fx_already_patched"))
+
+        transformed = torch.fx.Transformer(m).transform()
+        self.assertIn('wrapped_via_decorator', transformed.code)
+        self.assertEqual(transformed(0), 1)
+        self.assertIs(wrapped_via_decorator, real_wrapped_via_decorator)
+        self.assertFalse(hasattr(wrapped_via_decorator, "__fx_already_patched"))
+
     def test_wrap_with_submodule(self):
 
         class M(torch.nn.Module):
@@ -2637,12 +2655,15 @@ class TestOperatorSignatures(JitTestCase):
                            'fill_',
                            'hstack',
                            'linalg.multi_dot',
+                           'norm',
                            'polygamma',
                            'repeat',
                            'reshape_as',
                            'resize_',
                            'resize_as_',
+                           'special.zeta',
                            'stack',
+                           'to_sparse',
                            'view',
                            'view_as',
                            'nn.functional.hardshrink',
@@ -2654,6 +2675,7 @@ class TestOperatorSignatures(JitTestCase):
                            '__rsub__',
                            '__rmul__',
                            '__rdiv__',
+                           '__rmod__',
                            '__rpow__',
                            '__rmatmul__'}
 

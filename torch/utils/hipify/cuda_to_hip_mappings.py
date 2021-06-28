@@ -7962,6 +7962,15 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
             ("hip::getDefaultHIPStreamMasqueradingAsCUDA", API_PYTORCH),
         ),
         (
+            "cuda::getStreamFromExternal",
+            ("hip::getStreamFromExternalMasqueradingAsCUDA", API_PYTORCH),
+        ),
+        ("getStreamFromExternal", ("getStreamFromExternalMasqueradingAsCUDA", API_PYTORCH)),
+        (
+            "cuda::getDefaultCUDAStream",
+            ("hip::getDefaultHIPStreamMasqueradingAsCUDA", API_PYTORCH),
+        ),
+        (
             "getDefaultCUDAStream",
             ("getDefaultHIPStreamMasqueradingAsCUDA", API_PYTORCH),
         ),
