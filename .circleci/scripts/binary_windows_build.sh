@@ -17,7 +17,7 @@ fi
 
 if [[ "${DESIRED_CUDA}" == "cu111" || "${DESIRED_CUDA}" == "cu113" ]]; then
   export BUILD_SPLIT_CUDA="ON"
-  
+
   ls "C:\\Program Files (x86)\\"
   ls "C:\\Program Files\\"
 fi
