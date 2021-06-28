@@ -358,10 +358,7 @@ jobs:
         with:
           python-version: 3.9
       - name: Install dependencies
-        # boto3 version copied from .circleci/docker/common/install_conda.sh
-        run: |
-          pip install -r requirements.txt
-          pip install boto3==1.16.34 junitparser rich
+        run: pip install -r .circleci/docker/requirements.txt
       - name: Output Test Results (Click Me)
         run: |
           python tools/render_junit.py test
