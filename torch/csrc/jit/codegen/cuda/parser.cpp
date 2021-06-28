@@ -925,7 +925,7 @@ class IrParser {
               } else if (
                   node->kind() ==
                   c10::Symbol::fromQualString("aten::layer_norm")) {
-                value_map.emplace(node->output()->unique(), result.invstd);
+                value_map.emplace(node->output()->unique(), result.output);
               }
             },
             // TODO: #ProfileIValue List should update this
