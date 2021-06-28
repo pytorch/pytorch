@@ -458,7 +458,7 @@ jobs:
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          echo "See rendered docs at https://d28slxzaq48q8t.cloudfront.net/$PR_NUMBER/"
+          echo "See rendered docs at https://docs-preview.pytorch.org/$PR_NUMBER/"
       - name: Archive artifacts into zip
         run: |
           zip -r pytorch_github_io.zip "${GITHUB_WORKSPACE}/pytorch.github.io"
