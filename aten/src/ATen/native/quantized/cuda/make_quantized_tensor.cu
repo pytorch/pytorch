@@ -4,6 +4,21 @@
 namespace at {
 namespace native {
 
+static inline void assign_quantized_tensor_cuda(
+  const Tensor& self, Tensor& dst) {
+  AT_DISPATCH_QINT_TYPES(
+      dst.scalar_type(), "assign_quantized_tensor_cuda", [&]() {
+        auto iter = TensorIteratorConfig()
+          .check_all_same_dtype(false)
+          .add_output(dst)
+          .add_input(self)
+          .build();
+        gpu_kernel(iter, [] GPU_LAMBDA(underlying_t value) -> scalar_t {
+          return scalar_t(value);
+        });
+      });
+}
+
 Tensor make_per_tensor_quantized_tensor_cuda(
     const Tensor& self,
     double scale,
@@ -13,7 +28,7 @@ Tensor make_per_tensor_quantized_tensor_cuda(
       self.options().dtype(toQIntType(self.scalar_type())),
       scale,
       zero_point);
-  assign_quantized_tensor_cuda(self, dst)
+  assign_quantized_tensor_cuda(self, dst);
   return dst;
 }
 
@@ -28,23 +43,7 @@ Tensor make_per_channel_quantized_tensor_cuda(
       zero_points,
       axis,
       self.options().dtype(toQIntType(self.scalar_type())));
-  assign_quantized_tensor_cuda(self, dst)
-  return dst;
-}
-
-static inline void assign_quantized_tensor_cuda(
-  const Tensor& self, Tensor& dst) {
-  AT_DISPATCH_QINT_TYPES(
-      dst.scalar_type(), "assign_quantized_tensor_cuda", [&]() {
-        auto iter = TensorIteratorConfig()
-          .check_all_same_dtype(false)
-          .add_output(dst)
-          .add_input(self)
-          .build();
-        gpu_kernel(iter, [] GPU_LAMBDA(underlying_t value) -> scalar_t {
-          return scalar_t(value);
-        });
-      });
+  assign_quantized_tensor_cuda(self, dst);
   return dst;
 }
 

@@ -201,6 +201,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.set_warn_always,
         torch.vitals_enabled,
         torch.set_vital,
+        torch.read_vitals,
         Tensor.__delitem__,
         Tensor.__dir__,
         Tensor.__getattribute__,
@@ -228,8 +229,35 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor.to_sparse_csr,
         Tensor._reduce_ex_internal,
         Tensor._fix_weakref,
+        Tensor._python_dispatch.__get__,
         Tensor._conj,
         Tensor._conj_physical,
+    }
+
+
+@functools.lru_cache(None)
+def get_default_nowrap_functions() -> Set[Callable]:
+    """
+    Return public functions that do not wrap in a subclass when invoked by
+    the default ``Tensor.__torch_function__`` that preserves subclasses.  Typically,
+    these functions represent field accesses (i.e., retrieving a Tensor that
+    is stored somewhere on the Tensor) as opposed to computation.  Users of
+    these functions expect object identity to be preserved over multiple accesses
+    (e.g., ``a.grad is a.grad``) which cannot be upheld if we're wrapping on
+    the fly every time (furthermore, the tensor stored here might already be
+    the subclass, in which case wrapping really ought not to happen).
+
+    Not ALL property accessors have this property; for example ``Tensor.T`` actually
+    just creates a new transposed tensor on the fly, and so we SHOULD interpose on
+    these calls (you need to check the implementation of the function to see if
+    this is the case or not).  Additionally, if a property accessor doesn't return a Tensor,
+    it doesn't have to be on this list (though it is harmless if it is).
+    """
+    Tensor = torch.Tensor
+    return {
+        Tensor._base.__get__,
+        Tensor.grad.__get__,
+        Tensor._grad.__get__,
     }
 
 
@@ -320,6 +348,8 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.bitwise_not: lambda input, out=None: -1,
         torch.bitwise_or: lambda input, other, out=None: -1,
         torch.bitwise_xor: lambda input, other, out=None: -1,
+        torch.bitwise_left_shift: lambda input, other, out=None: -1,
+        torch.bitwise_right_shift: lambda input, other, out=None: -1,
         torch.block_diag: lambda *tensors: -1,
         torch.bmm: lambda input, mat2, out=None: -1,
         torch.broadcast_tensors: lambda *tensors: -1,
@@ -871,6 +901,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.special.entr: lambda input: -1,
         torch.special.erf: lambda input: -1,
         torch.special.erfc: lambda input: -1,
+        torch.special.erfcx: lambda input: -1,
         torch.special.erfinv: lambda input: -1,
         torch.special.exp2: lambda input: -1,
         torch.special.expm1: lambda input: -1,
@@ -889,6 +920,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.special.ndtri: lambda input: -1,
         torch.special.ndtr: lambda input: -1,
         torch.special.xlog1py: lambda input, other, out=None: -1,
+        torch.special.zeta: lambda self, other, out=None: -1,
         torch.t: lambda input: -1,
         torch.take: lambda input, index: -1,
         torch.take_along_dim: lambda input, indices, dim=None, out=None: -1,
@@ -932,8 +964,10 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.__rtruediv__: lambda self, other: -1,
         Tensor.__itruediv__: lambda self, other: -1,
         Tensor.__lshift__: lambda self, other: -1,
+        Tensor.__rlshift__: lambda self, other: -1,
         Tensor.__ilshift__: lambda self, other: -1,
         Tensor.__rshift__: lambda self, other: -1,
+        Tensor.__rrshift__: lambda self, other: -1,
         Tensor.__irshift__: lambda self, other: -1,
         Tensor.__float__: lambda self: -1,
         Tensor.__complex__: lambda self: -1,
