@@ -50,65 +50,60 @@ void cpu_avg_pool(
   int64_t output_height = output.size(-2);
   int64_t output_width = output.size(-1);
 
-  // parallel on dim N, C, {D}, H, W
-  at::parallel_for(0, numel, 0, [&](int64_t begin, int64_t end) {
-    int64_t c = 0;
-    int64_t od = 0;
-    int64_t oh = 0;
-    int64_t ow = 0;
-    data_index_init(begin, c, channels, od, output_depth, oh, output_height, ow, output_width);
-
-    for (int64_t i = begin; i < end; i++) {
-      output_data[i] = static_cast<scalar_t>(0);
-
-      // local pointers
+  // parallel on dim N, C
+  at::parallel_for(0, channels, 0, [&](int64_t begin, int64_t end) {
+    for (int64_t c = begin; c < end; c++) {
       scalar_t* input_ptr = input_data + c * input_depth * input_height * input_width;
+      scalar_t* output_ptr = output_data + c * output_depth * output_height * output_width;
 
-      // compute the mean of the input image...
-      int64_t id0 = od * dD - padD;
-      int64_t ih0 = oh * dH - padH;
-      int64_t iw0 = ow * dW - padW;
-      int64_t id1 = std::min(id0 + kD, input_depth + padD);
-      int64_t ih1 = std::min(ih0 + kH, input_height + padH);
-      int64_t iw1 = std::min(iw0 + kW, input_width + padW);
-      int64_t pool_size = (id1 - id0) * (ih1 - ih0) * (iw1 - iw0);
-      id0 = std::max(id0, (int64_t) 0);
-      ih0 = std::max(ih0, (int64_t) 0);
-      iw0 = std::max(iw0, (int64_t) 0);
-      id1 = std::min(id1, input_depth);
-      ih1 = std::min(ih1, input_height);
-      iw1 = std::min(iw1, input_width);
+      for (int64_t od = 0; od < output_depth; od++) {
+        int64_t id0 = od * dD - padD;
+        int64_t id1 = std::min(id0 + kD, input_depth + padD);
+        int64_t _id0 = std::max(id0, (int64_t) 0);
+        int64_t _id1 = std::min(id1, input_depth);
 
-      if (id0 >= id1 || ih0 >= ih1 || iw0 >= iw1) {
-        // move on to next output index
-        data_index_step(c, channels, od, output_depth, oh, output_height, ow, output_width);
-        continue;
-      }
+        for (int64_t oh = 0; oh < output_height; oh++) {
+          int64_t ih0 = oh * dH - padH;
+          int64_t ih1 = std::min(ih0 + kH, input_height + padH);
+          int64_t _ih0 = std::max(ih0, (int64_t) 0);
+          int64_t _ih1 = std::min(ih1, input_height);
 
-      scalar_t sum = 0;
+          for (int64_t ow = 0; ow < output_width; ow++) {
+            int64_t iw0 = ow * dW - padW;
+            int64_t iw1 = std::min(iw0 + kW, input_width + padW);
+            int64_t _iw0 = std::max(iw0, (int64_t) 0);
+            int64_t _iw1 = std::min(iw1, input_width);
 
-      int64_t divide_factor;
-      if (divisor_override.has_value()) {
-        divide_factor = divisor_override.value();
-      } else {
-        if(count_include_pad) {
-          divide_factor = pool_size;
-        } else {
-          divide_factor = (id1 - id0) * (ih1 - ih0) * (iw1 - iw0);
-        }
-      }
+            int64_t index = od * output_height * output_width + oh * output_width + ow;
+            output_ptr[index] = static_cast<scalar_t>(0);
 
-      for (int64_t id = id0; id < id1; id++) {
-        for (int64_t ih = ih0; ih < ih1; ih++) {
-          for (int64_t iw = iw0; iw < iw1; iw++) {
-            sum += input_ptr[id * input_height * input_width + ih * input_width + iw];
+            if (_id0 >= _id1 || _ih0 >= _ih1 || _iw0 >= _iw1) {
+              continue;
+            }
+
+            int64_t divide_factor;
+            if (divisor_override.has_value()) {
+              divide_factor = divisor_override.value();
+            } else {
+              if(count_include_pad) {
+                divide_factor = (id1 - id0) * (ih1 - ih0) * (iw1 - iw0);
+              } else {
+                divide_factor = (_id1 - _id0) * (_ih1 - _ih0) * (_iw1 - _iw0);
+              }
+            }
+
+            scalar_t sum = 0;
+            for (int64_t id = _id0; id < _id1; id++) {
+              for (int64_t ih = _ih0; ih < _ih1; ih++) {
+                for (int64_t iw = _iw0; iw < _iw1; iw++) {
+                  sum += input_ptr[id * input_height * input_width + ih * input_width + iw];
+                }
+              }
+            }
+            output_ptr[index] = sum / divide_factor;
           }
         }
       }
-      output_data[i] += sum / divide_factor;
-
-      // move on to next output index
-      data_index_step(c, channels, od, output_depth, oh, output_height, ow, output_width);
     }
   });
 
@@ -292,38 +287,39 @@ void cpu_avg_pool_backward(
       scalar_t* grad_output_ptr = grad_output_data + c * output_depth * output_height * output_width;
 
       for (int64_t od = 0; od < output_depth; od++) {
+        int64_t id0 = od * dD - padD;
+        int64_t id1 = std::min(id0 + kD, input_depth + padD);
+        int64_t _id0 = std::max(id0, (int64_t) 0);
+        int64_t _id1 = std::min(id1, input_depth);
+
         for (int64_t oh = 0; oh < output_height; oh++) {
+          int64_t ih0 = oh * dH - padH;
+          int64_t ih1 = std::min(ih0 + kH, input_height + padH);
+          int64_t _ih0 = std::max(ih0, (int64_t) 0);
+          int64_t _ih1 = std::min(ih1, input_height);
+
           for (int64_t ow = 0; ow < output_width; ow++) {
-            int64_t id0 = od * dD - padD;
-            int64_t ih0 = oh * dH - padH;
             int64_t iw0 = ow * dW - padW;
-            int64_t id1 = std::min(id0 + kD, input_depth + padD);
-            int64_t ih1 = std::min(ih0 + kH, input_height + padH);
             int64_t iw1 = std::min(iw0 + kW, input_width + padW);
-            int64_t pool_size = (id1 - id0) * (ih1 - ih0) * (iw1 - iw0);
-            id0 = std::max(id0, (int64_t) 0);
-            ih0 = std::max(ih0, (int64_t) 0);
-            iw0 = std::max(iw0, (int64_t) 0);
-            id1 = std::min(id1, input_depth);
-            ih1 = std::min(ih1, input_height);
-            iw1 = std::min(iw1, input_width);
+            int64_t _iw0 = std::max(iw0, (int64_t) 0);
+            int64_t _iw1 = std::min(iw1, input_width);
 
             int64_t divide_factor;
             if (divisor_override.has_value()) {
               divide_factor = divisor_override.value();
             } else {
               if(count_include_pad) {
-                divide_factor = pool_size;
-              } else {
                 divide_factor = (id1 - id0) * (ih1 - ih0) * (iw1 - iw0);
+              } else {
+                divide_factor = (_id1 - _id0) * (_ih1 - _ih0) * (_iw1 - _iw0);
               }
             }
 
             int64_t output_index = od * output_height * output_width + oh * output_width + ow;
             scalar_t grad_delta = grad_output_ptr[output_index] / divide_factor;
-            for (int64_t id = id0; id < id1; id++) {
-              for (int64_t ih = ih0; ih < ih1; ih++) {
-                for (int64_t iw = iw0; iw < iw1; iw++) {
+            for (int64_t id = _id0; id < _id1; id++) {
+              for (int64_t ih = _ih0; ih < _ih1; ih++) {
+                for (int64_t iw = _iw0; iw < _iw1; iw++) {
                   int64_t input_index = id * input_height * input_width + ih * input_width + iw;
                   grad_input_ptr[input_index] += grad_delta;
                 }
