@@ -9,8 +9,7 @@ from collections import OrderedDict
 from typing import Any, List, Optional
 
 # Formerly known as: _ContextMethodMixin
-# Any class subclassing Function will
-class Ctx(object):
+class FunctionCtx(object):
 
     def save_for_backward(self, *tensors: torch.Tensor):
         r"""Saves given tensors for a future call to :func:`~Function.backward`.
@@ -23,14 +22,14 @@ class Ctx(object):
         attribute. Before returning them to the user, a check is made to ensure
         they weren't used in any in-place operation that modified their content.
 
-        Arguments can also be ``None``.
+        Arguments can also be ``None``. This is a no-op.
 
         See :ref:`extending-autograd` for more details on how to use this method.
 
         Example::
             >>> class Func(Function):
             >>>     @staticmethod
-            >>>     def forward(ctx, x, y, z):
+            >>>     def forward(ctx, x: torch.Tensor, y: torch.Tensor, z: int):
             >>>         w = x * y * z
             >>>         out = x * y + y * z + w
             >>>         ctx.save_for_backward(x, y, out)
@@ -70,12 +69,13 @@ class Ctx(object):
             >>> class Inplace(Function):
             >>>     @staticmethod
             >>>     def forward(ctx, x):
-            >>>         x.add_(1)
+            >>>         x_npy = x.numpy() # x_npy shares storage with x
+            >>>         x_npy += 1
             >>>         ctx.mark_dirty(x)
             >>>         return x
             >>>
             >>>     @staticmethod
-            >>>     @once_differentiable  # grad_input is not a function of input
+            >>>     @once_differentiable
             >>>     def backward(ctx, grad_output):
             >>>         return grad_output
             >>>
@@ -95,11 +95,11 @@ class Ctx(object):
             'Tensors with shared storages are automatically tracked. Note '
             'that calls to `set_()` are not tracked')
 
-    def mark_non_differentiable(self, *args: Any):
+    def mark_non_differentiable(self, *args: torch.Tensor):
         r"""Marks outputs as non-differentiable.
 
         **This should be called at most once, only from inside the**
-        :func:`forward` **method, and all arguments should be outputs.**
+        :func:`forward` **method, and all arguments should be tensor outputs.**
 
         This will mark outputs as not requiring gradients, increasing the
         efficiency of backward computation. You still need to accept a gradient
@@ -113,12 +113,11 @@ class Ctx(object):
             >>>     def forward(ctx, x):
             >>>         sorted, idx = x.sort()
             >>>         ctx.mark_non_differentiable(idx)
-            >>>         ctx.save_for_backward(x, idx)  # x is an input
-            >>>                                        # idx is an output
+            >>>         ctx.save_for_backward(x, idx)
             >>>         return sorted, idx
             >>>
             >>>     @staticmethod
-            >>>     @once_differentiable  # grad_input is not a function of input
+            >>>     @once_differentiable
             >>>     def backward(ctx, g1, g2):  # still need to accept g2
             >>>         x, idx = ctx.saved_tensors
             >>>         grad_input = torch.zeros_like(x)
@@ -143,7 +142,7 @@ class Ctx(object):
             >>>         return x.clone(), x.clone()
             >>>
             >>>     @staticmethod
-            >>>     @once_differentiable  # grad_input is not a function of input
+            >>>     @once_differentiable
             >>>     def backward(ctx, g1, g2):
             >>>         return g1 + g2  # No check for None necessary
             >>>
@@ -156,7 +155,7 @@ class Ctx(object):
             >>>         return x.clone(), x.clone()
             >>>
             >>>     @staticmethod
-            >>>     @once_differentiable  # grad_input is not a function of input
+            >>>     @once_differentiable
             >>>     def backward(ctx, g1, g2):
             >>>         x, = ctx.saved_tensors
             >>>         grad_input = torch.zeros_like(x)
@@ -183,7 +182,7 @@ class _HookMixin(object):
         return backward_hooks, handle
 
 
-class BackwardCFunction(_C._FunctionBase, Ctx, _HookMixin):
+class BackwardCFunction(_C._FunctionBase, FunctionCtx, _HookMixin):
     def apply(self, *args):
         # _forward_cls is defined by derived class
         return self._forward_cls.backward(self, *args)  # type: ignore[attr-defined]
@@ -205,20 +204,19 @@ class FunctionMeta(type):
 
 
 # mypy doesn't understand `with_metaclass` from torch._six
-class Function(with_metaclass(FunctionMeta, _C._FunctionBase, Ctx, _HookMixin)):  # type: ignore[misc]
+class Function(with_metaclass(FunctionMeta, _C._FunctionBase, FunctionCtx, _HookMixin)):  # type: ignore[misc]
     r"""Base class to create custom `autograd.Function`
 
     To create a custom `autograd.Function`, subclass this class and implement
-    the :meth:`forward` and :meth`backward` static methods.
+    the :meth:`forward` and :meth`backward` static methods. Then, to use your custom
+    op in the forward pass, call the class method ``apply``. Do not call
+    :meth:`forward` directly.
 
     To ensure correctness and best performance, make sure you are calling the
     correct methods on ``ctx`` and validating your backward function using
     :func:`torch.autograd.gradcheck`.
 
     See :ref:`extending-autograd` for more details on how to use this class.
-
-    .. note::
-        To use your custom op in your forward pass, call the ``apply`` class method.
 
     Examples::
 
