@@ -127,11 +127,10 @@ std::vector<std::vector<int64_t>> get_pools(const Tensor& indices, const IntArra
         pool_index += stride * indices_row[i];
       }
     }
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    while (pool_index >= pools.size()) {
-      pools.emplace_back();  // create empty pool
+    if(pools.size() <= pool_index){
+      pools.resize(pool_index + 1);
     }
-    pools[pool_index].push_back(i);
+    pools.at(pool_index).push_back(i);
   }
 
   return pools;
