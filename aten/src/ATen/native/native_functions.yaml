@@ -3227,10 +3227,10 @@
     CPU: channel_shuffle
     QuantizedCPU: channel_shuffle_quantized_cpu
 
-- func: is_pinned(Tensor self) -> bool
+- func: is_pinned(Tensor self, Device? device=None) -> bool
   variants: method
 
-- func: pin_memory(Tensor(a) self) -> Tensor(a)
+- func: pin_memory(Tensor(a) self, Device? device=None) -> Tensor(a)
   variants: method
 
 - func: pinverse(Tensor self, float rcond=1e-15) -> Tensor
