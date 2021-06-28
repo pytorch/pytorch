@@ -370,7 +370,7 @@ jobs:
       - name: Install dependencies
         run: |
           set -eux
-          pip install .circleci/docker/requirements.txt
+          pip install -r .circleci/docker/requirements.txt
           cmakelint --version
       - name: Run cmakelint
         run: |
