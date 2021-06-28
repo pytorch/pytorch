@@ -26,7 +26,7 @@ void quantize_tensor_per_tensor_affine_cuda(
             .add_input(rtensor)
             .add_input(qtensor)
             .build();
-            
+
         gpu_kernel(
             iter,
             [=] GPU_LAMBDA(float raw_val, scalar_t quantized_val) -> scalar_t {
