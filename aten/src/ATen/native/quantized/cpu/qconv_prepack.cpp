@@ -87,8 +87,6 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
   if (qtype == c10::kPerTensorAffine) {
     zero_points = {static_cast<int32_t>(weight.q_zero_point())};
   } else if (qtype == c10::kPerChannelAffine) {
-    // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-    int64_t axis = weight.q_per_channel_axis();
     TORCH_CHECK(
         !transpose,
         "Per Channel Quantization is currently disabled for transposed conv");

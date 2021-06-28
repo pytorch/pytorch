@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/backends/backend.h>
+#include <torch/csrc/jit/backends/backend_detail.h>
 #include <torch/csrc/jit/api/module.h>
 
 namespace torch {
@@ -68,7 +69,8 @@ class CustomBackend : public torch::jit::PyTorchBackendInterface {
 
 c10::IValue preprocess(
     const torch::jit::Module& mod,
-    const c10::Dict<c10::IValue, c10::IValue>& method_compile_spec) {
+    const c10::Dict<c10::IValue, c10::IValue>& method_compile_spec,
+    const torch::jit::BackendDebugHandleGenerator& generate_debug_handles) {
   return mod._ivalue();
 }
 

@@ -146,7 +146,7 @@ void MKLExp<double>(int64_t N, const double* X, double* Y) {
 }
 
 template <typename T>
-void GeluMKLKernelImpl(TensorIterator* it) {
+void GeluMKLKernelImpl(TensorIteratorBase* it) {
   if (!it->can_use_32bit_indexing()) {
     for (auto& sub_it : it->with_32bit_indexing()) {
       GeluMKLKernelImpl<T>(&sub_it);
@@ -161,7 +161,7 @@ void GeluMKLKernelImpl(TensorIterator* it) {
 }
 
 template <typename T>
-void GeluBackwardMKLKernelImpl(TensorIterator* it) {
+void GeluBackwardMKLKernelImpl(TensorIteratorBase* it) {
   if (!it->can_use_32bit_indexing()) {
     for (auto& sub_it : it->with_32bit_indexing()) {
       GeluBackwardMKLKernelImpl<T>(&sub_it);
@@ -188,12 +188,12 @@ void GeluBackwardMKLKernelImpl(TensorIterator* it) {
 #else // AT_MKL_ENABLED()
 
 template <typename T>
-void GeluMKLKernelImpl(TensorIterator* /* it */) {
+void GeluMKLKernelImpl(TensorIteratorBase* /* it */) {
   TORCH_CHECK(false, "ATen not compiled with MKL");
 }
 
 template <typename T>
-void GeluBackwardMKLKernelImpl(TensorIterator* /* it */) {
+void GeluBackwardMKLKernelImpl(TensorIteratorBase* /* it */) {
   TORCH_CHECK(false, "ATen not compiled with MKL");
 }
 
@@ -264,12 +264,32 @@ void elu_backward_kernel(TensorIteratorBase& it, const Scalar& alpha, const Scal
 // TODO(yangxm): Add another fast kernel using formula
 // y = 0.5x * (1 + tanh(sqrt(2/Pi) * (x + 0.044715x^3)))
 // and the fast tanh impl from Eigen.
-void GeluKernelImpl(TensorIterator& it) {
+void GeluKernelImpl(TensorIteratorBase& it) {
   if (at::hasMKL() && it.is_contiguous()) {
     AT_DISPATCH_FLOATING_TYPES(it.dtype(), "GeluKernelImpl", [&]() {
       GeluMKLKernelImpl<scalar_t>(&it);
     });
   } else {
+    auto grain_size = at::internal::GRAIN_SIZE;
+    // Numbers based on benchmarking.
+    // Benchmark: benchmarks/operator_benchmarks/pt/gelu_test.py
+#ifdef C10_MOBILE
+    // Benchmarked on S8 US phone.
+    // Internal benchmarking that converts operator benchmark into
+    // a torchscript module and run that on mobile.
+    // Same benchmark as server side.
+    constexpr int64_t GELU_MIN_ELEMENTS_FOR_MULTI_THREADING{6144};
+#else
+    // Benchmarked on i9 8 core 16 thread machine.
+    // 1 thread: cd benchmark/operator_benchmarks;
+    //           python -m pt.gelu_test --tag_filter long --omp_num_threads 1
+    // 2 threads: cd benchmark/operator_benchmarks;
+    //           python -m pt.gelu_test --tag_filter long --omp_num_threads 1
+    constexpr int64_t GELU_MIN_ELEMENTS_FOR_MULTI_THREADING{16384};
+#endif
+    if (it.numel() > GELU_MIN_ELEMENTS_FOR_MULTI_THREADING) {
+      grain_size = it.numel() / at::get_num_threads();
+    }
     AT_DISPATCH_FLOATING_TYPES(it.dtype(), "GeluKernelImpl", [&]() {
       using Vec = vec::Vectorized<scalar_t>;
       const Vec kAlphaVec(M_SQRT1_2);
@@ -284,12 +304,13 @@ void GeluKernelImpl(TensorIterator& it) {
           [&](Vec x_vec) {
             return x_vec * kPointFiveVec *
                 (kOneVec + (x_vec * kAlphaVec).erf());
-          });
+          },
+          grain_size);
     });
   }
 }
 
-void GeluBackwardKernelImpl(TensorIterator& it) {
+void GeluBackwardKernelImpl(TensorIteratorBase& it) {
   if (hasMKL() && it.is_contiguous()) {
     AT_DISPATCH_FLOATING_TYPES(it.dtype(), "GeluBackwardKernelImpl", [&]() {
       GeluBackwardMKLKernelImpl<scalar_t>(&it);
@@ -369,7 +390,7 @@ void hardsigmoid_backward_kernel(TensorIteratorBase& iter) {
   });
 }
 
-void hardshrink_kernel(TensorIterator& iter, const Scalar& lambd) {
+void hardshrink_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardshrink_cpu", [&] {
     auto lambd_val = lambd.to<scalar_t>();
     cpu_kernel_vec(
@@ -393,7 +414,7 @@ void softshrink_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
   });
 }
 
-void shrink_backward_kernel(TensorIterator& iter, const Scalar& lambd) {
+void shrink_backward_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "shrink_backward_cpu", [&] {
     auto lambd_val = lambd.to<scalar_t>();
     cpu_kernel_vec(
