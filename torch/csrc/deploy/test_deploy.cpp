@@ -1,8 +1,11 @@
 #include <ATen/Parallel.h>
 #include <gtest/gtest.h>
+
+#include <c10/util/irange.h>
 #include <torch/csrc/deploy/deploy.h>
 #include <torch/script.h>
 #include <torch/torch.h>
+
 #include <future>
 #include <iostream>
 #include <string>
@@ -42,6 +45,14 @@ const char* path(const char* envname, const char* path) {
   return e ? e : path;
 }
 
+TEST(TorchpyTest, LoadLibrary) {
+  torch::deploy::InterpreterManager m(1);
+  torch::deploy::Package p = m.load_package(
+      path("LOAD_LIBRARY", "torch/csrc/deploy/example/generated/load_library"));
+  auto model = p.load_pickle("fn", "fn.pkl");
+  model({});
+}
+
 TEST(TorchpyTest, SimpleModel) {
   compare_torchpy_jit(path("SIMPLE", simple), path("SIMPLE_JIT", simple_jit));
 }
@@ -74,7 +85,7 @@ TEST(TorchpyTest, MultiSerialSimpleModel) {
   size_t ninterp = 3;
   std::vector<at::Tensor> outputs;
 
-  for (size_t i = 0; i < ninterp; i++) {
+  for (const auto i : c10::irange(ninterp)) {
     outputs.push_back(model({input.alias()}).toTensor());
   }
 
@@ -82,7 +93,7 @@ TEST(TorchpyTest, MultiSerialSimpleModel) {
   auto ref_output = ref_model.forward({input.alias()}).toTensor();
 
   // Compare all to reference
-  for (size_t i = 0; i < ninterp; i++) {
+  for (const auto i : c10::irange(ninterp)) {
     ASSERT_TRUE(ref_output.equal(outputs[i]));
   }
 
@@ -113,17 +124,17 @@ TEST(TorchpyTest, ThreadedSimpleModel) {
   std::vector<at::Tensor> outputs;
 
   std::vector<std::future<at::Tensor>> futures;
-  for (size_t i = 0; i < nthreads; i++) {
+  for (const auto i : c10::irange(nthreads)) {
     futures.push_back(std::async(std::launch::async, [&model]() {
       auto input = torch::ones({10, 20});
-      for (int i = 0; i < 100; ++i) {
+      for (const auto i : c10::irange(100)) {
         model({input.alias()}).toTensor();
       }
       auto result = model({input.alias()}).toTensor();
       return result;
     }));
   }
-  for (size_t i = 0; i < nthreads; i++) {
+  for (const auto i : c10::irange(nthreads)) {
     outputs.push_back(futures[i].get());
   }
 
@@ -131,7 +142,7 @@ TEST(TorchpyTest, ThreadedSimpleModel) {
   auto ref_output = ref_model.forward({input.alias()}).toTensor();
 
   // Compare all to reference
-  for (size_t i = 0; i < nthreads; i++) {
+  for (const auto i : c10::irange(nthreads)) {
     ASSERT_TRUE(ref_output.equal(outputs[i]));
   }
 }
@@ -187,12 +198,12 @@ TEST(TorchpyTest, TaggingRace) {
   constexpr int64_t trials = 4;
   constexpr int64_t nthreads = 16;
   torch::deploy::InterpreterManager m(nthreads);
-  for (int64_t n = 0; n < trials; n++) {
+  for (const auto n : c10::irange(trials)) {
     at::Tensor t = torch::empty(2);
     std::atomic<int64_t> success(0);
     std::atomic<int64_t> failed(0);
     at::parallel_for(0, nthreads, 1, [&](int64_t begin, int64_t end) {
-      for (int64_t i = begin; i < end; i++) {
+      for (const auto i : c10::irange(begin, end)) {
         auto I = m.all_instances()[i].acquire_session();
         try {
           I.from_ivalue(t);
@@ -217,4 +228,13 @@ TEST(TorchpyTest, DisarmHook) {
   torch::deploy::InterpreterManager m(1);
   auto I = m.acquire_one();
   ASSERT_THROW(I.from_ivalue(t), c10::Error); // NOT a segfault
+}
+
+TEST(TorchpyTest, RegisterModule) {
+  torch::deploy::InterpreterManager m(2);
+  m.register_module_source("foomodule", "def add1(x): return x + 1\n");
+  for (const auto& interp : m.all_instances()) {
+    auto I = interp.acquire_session();
+    AT_ASSERT(3 == I.global("foomodule", "add1")({2}).toIValue().toInt());
+  }
 }

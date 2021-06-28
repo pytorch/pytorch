@@ -8,6 +8,7 @@
 #include <ATen/CPUApplyUtils.h>
 #include <ATen/Dispatch.h>
 #include <ATen/cpu/vec/vec.h>
+#include <ATen/native/cpu/moments_utils.h>
 
 namespace at {
 namespace native {
@@ -38,47 +39,33 @@ void GroupNormKernelImplInternal(
   T* Y_data = Y.data_ptr<T>();
   T* mean_data = mean.data_ptr<T>();
   T* rstd_data = rstd.data_ptr<T>();
-  const T s = T(1) / static_cast<T>(D * HxW);
   const bool gamma_null = (gamma_data == nullptr);
   const bool beta_null = beta_data == nullptr;
+  const int64_t inner_size = D * HxW;
 
   at::parallel_for(0, N * G, 1, [&](int64_t start, int64_t end) {
-    constexpr int64_t K = vec::Vectorized<T>::size();
-    const int64_t inner_size = D * HxW / K * K;
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-    std::array<T, K> mean_arr;
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-    std::array<T, K> rstd_arr;
     for (int64_t i = start; i < end; ++i) {
-      const T* X_ptr = X_data + i * D * HxW;
-      vec::Vectorized<T> mean_vec(0);
-      vec::Vectorized<T> rstd_vec(0);
-      for (int64_t j = 0; j < inner_size; j += K) {
-        const vec::Vectorized<T> x_vec = vec::Vectorized<T>::loadu(X_ptr + j);
-        mean_vec = mean_vec + x_vec;
-        rstd_vec = rstd_vec + x_vec * x_vec;
-      }
-      mean_vec.store(mean_arr.data());
-      rstd_vec.store(rstd_arr.data());
-      T mean_val = std::accumulate(mean_arr.cbegin(), mean_arr.cend(), T(0));
-      T rstd_val = std::accumulate(rstd_arr.cbegin(), rstd_arr.cend(), T(0));
-      for (int64_t j = inner_size; j < D * HxW; ++j) {
-        mean_val += X_ptr[j];
-        rstd_val += X_ptr[j] * X_ptr[j];
-      }
-      mean_val *= s;
-      rstd_val = std::max(rstd_val * s - mean_val * mean_val, T(0));
-      rstd_val = T(1) / std::sqrt(rstd_val + eps);
-
-      const int64_t g = i % G;
-      for (int64_t j = 0; j < D; ++j) {
-        const int64_t c = g * D + j;
-        const T scale = rstd_val * (gamma_null ? T(1) : gamma_data[c]);
-        const T bias = -scale * mean_val + (beta_null ? T(0) : beta_data[c]);
-        X_ptr = X_data + (i * D + j) * HxW;
-        T* Y_ptr = Y_data + (i * D + j) * HxW;
-        for (int64_t k = 0; k < HxW; ++k) {
-          Y_ptr[k] = scale * X_ptr[k] + bias;
+      const T* X_ptr = X_data + i * inner_size;
+      T mean_val;
+      T rstd_val;
+      std::tie(mean_val, rstd_val) = utils::RowwiseMoments(X_ptr, inner_size);
+      rstd_val = T(1) / std::sqrt(std::max(rstd_val, T(0)) + eps);
+      if (gamma_null && beta_null) {
+        T* Y_ptr = Y_data + i * inner_size;
+        for (int j = 0; j < inner_size; ++j) {
+          Y_ptr[j] = (X_ptr[j] - mean_val) * rstd_val;
+        }
+      } else {
+        const int64_t g = i % G;
+        for (int64_t j = 0; j < D; ++j) {
+          const int64_t c = g * D + j;
+          const T scale = rstd_val * (gamma_null ? T(1) : gamma_data[c]);
+          const T bias = -scale * mean_val + (beta_null ? T(0) : beta_data[c]);
+          X_ptr = X_data + (i * D + j) * HxW;
+          T* Y_ptr = Y_data + (i * D + j) * HxW;
+          for (int64_t k = 0; k < HxW; ++k) {
+            Y_ptr[k] = scale * X_ptr[k] + bias;
+          }
         }
       }
       mean_data[i] = mean_val;

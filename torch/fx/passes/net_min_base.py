@@ -256,7 +256,7 @@ class _MinimizerBase:
             if node in selected_nodes:
                 node.tag = "minimize"
             elif any(
-                n.tag in {"minimize", "main_1"}  # type: ignore[attr-defined]
+                n.tag in {"minimize", "main_1"}
                 for n in node.all_input_nodes
                 if n.op in CALLABLE_NODE_OPS
             ):
