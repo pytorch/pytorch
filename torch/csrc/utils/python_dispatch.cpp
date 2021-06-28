@@ -186,8 +186,16 @@ void initDispatchBindings(PyObject* module) {
     c10::Dispatcher::singleton().checkInvariants();
   });
 
-  m.def("_dispatch_find_dangling_impls", []() -> std::vector<c10::OperatorHandle> {
-    return c10::Dispatcher::singleton().findDanglingImpls();
+  m.def("_dispatch_find_dangling_impls", []() -> std::vector<std::string> {
+    auto danglingImpls =  c10::Dispatcher::singleton().findDanglingImpls();
+
+    std::vector<std::string> states;
+    states.reserve(danglingImpls.size());
+    for (auto& danglingImpl : danglingImpls) {
+      states.push_back(danglingImpl.dumpState());
+    }
+
+    return states;
   });
 }
 
