@@ -10,7 +10,7 @@ from .sparsifier.weight_norm_sparsifier import WeightNormSparsifier
 from .scheduler.base_scheduler import BaseScheduler
 
 # Parametrizations
-from .sparsifier.parametrization import MulBy
+from .sparsifier.utils import FakeSparsity
 
 # === Experimental ===
 
