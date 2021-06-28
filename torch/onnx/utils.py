@@ -442,7 +442,8 @@ def _model_to_graph(model, args, verbose=False,
                     example_outputs=None,
                     _retain_param_name=False, do_constant_folding=True,
                     _disable_torch_constant_prop=False, fixed_batch_size=False,
-                    training=None, dynamic_axes=None):
+                    training=None, dynamic_axes=None, export_params=True,
+                    keep_initializers_as_inputs=True):
     r"""Converts model into an ONNX graph.
 
     Returns:
@@ -500,15 +501,21 @@ def _model_to_graph(model, args, verbose=False,
     flatten_args, _ = torch._C._jit_flatten(args)
     assert len(params) + len(flatten_args) == sum(1 for _ in graph.inputs())
 
-    params_dict = _get_named_param_dict(graph, params)
-    params_names = _unique_state_dict(model).keys()
-    input_names = []
-    for _, input_name in enumerate(all_input_and_param_names):
-        if input_name not in params_names:
-            input_names.append(input_name)
+    origin_input_names = []
+    if input_names is not None:
+        origin_input_names = input_names
+        # Probably input_names don't include all of inputs.
+    else:
+        params_dict = _get_named_param_dict(graph, params)
+        params_names = _unique_state_dict(model).keys()
 
-    if training is None or training == TrainingMode.EVAL:
-        params_dict = torch._C._jit_pass_onnx_eval_peephole(graph, input_names,params_dict)
+        for _, input_name in enumerate(all_input_and_param_names):
+            if input_name not in params_names:
+                origin_input_names.append(input_name)
+
+    if (export_params or keep_initializers_as_inputs) \
+       and (training is None or training == TrainingMode.EVAL):
+        params_dict = torch._C._jit_pass_onnx_eval_peephole(graph, origin_input_names, params_dict)
 
     if do_constant_folding and _export_onnx_opset_version in torch.onnx.constant_folding_opset_versions:
         params_dict = torch._C._jit_pass_onnx_constant_fold(graph, params_dict,
@@ -701,7 +708,9 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                                 val_do_constant_folding,
                                 fixed_batch_size=fixed_batch_size,
                                 training=training,
-                                dynamic_axes=dynamic_axes)
+                                dynamic_axes=dynamic_axes,
+                                export_params=export_params,
+                                keep_initializers_as_inputs=val_keep_init_as_ip)
 
             # TODO: Don't allocate a in-memory string for the protobuf
             defer_weight_export = export_type is not ExportTypes.PROTOBUF_FILE
