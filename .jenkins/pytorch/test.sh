@@ -55,7 +55,8 @@ else
   export PYTORCH_TEST_SKIP_NOARCH=1
 fi
 
-if [[ -n "$IN_PULL_REQUEST" ]]; then
+if [[ -n "$IN_PULL_REQUEST" ]] && [[ -z "$CI_MASTER" || "$CI_MASTER" == "false" ]]; then
+  # skip expensive checks when on PR and CI_MASTER flag is not set
   export PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK=1
 else
   export PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK=0
