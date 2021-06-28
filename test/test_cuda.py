@@ -3887,7 +3887,7 @@ class TestCudaComm(TestCase):
             self.assertEqual(r, t * 2)
 
         rc_tensors = comm.reduce_add_coalesced(dup_tensors, buffer_size=buffer_size)
-        self.assertEqual(r_tensors, rc_tensors)
+        self.assertEqual(r_tensors, rc_tensors, exact_is_coalesced=False)
         for r, rc in zip(r_tensors, rc_tensors):
             self.assertEqualTypeString(rc, r)
 
