@@ -1,5 +1,5 @@
 # Parametrizations
-from .parametrization import MulBy
+from .utils import FakeSparsity
 
 # === Experimental ===
 # Parametrizations
