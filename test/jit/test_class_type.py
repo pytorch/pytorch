@@ -5,7 +5,6 @@ import unittest
 
 import torch
 import torch.nn as nn
-from torch.testing import FileCheck
 from typing import Any
 
 # Make the helper files in test/ importable
@@ -13,7 +12,7 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase, make_global
 import torch.testing._internal.jit_utils
-from torch.testing._internal.common_utils import IS_SANDCASTLE
+from torch.testing._internal.common_utils import IS_SANDCASTLE, FileCheck
 from typing import List, Tuple, Iterable, Optional, Dict
 
 if __name__ == '__main__':

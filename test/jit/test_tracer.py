@@ -8,14 +8,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable, Function
-from torch.testing import FileCheck
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.common_utils import suppress_warnings, \
     skipIfCompiledWithoutNumpy, enable_profiling_mode_for_profiling_tests, \
-    IS_SANDCASTLE, TemporaryFileName
+    IS_SANDCASTLE, TemporaryFileName, FileCheck
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, \
     _tmp_donotuse_dont_inline_everything, _trace, RUN_CUDA, \
     RUN_CUDA_MULTI_GPU, make_global

@@ -5,10 +5,9 @@ import sys
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.testing import FileCheck
 
 from torch.testing._internal.common_utils import run_tests, IS_SANDCASTLE, ProfilingMode, GRAPH_EXECUTOR, \
-    enable_profiling_mode_for_profiling_tests, IS_WINDOWS, TemporaryDirectoryName, shell
+    enable_profiling_mode_for_profiling_tests, IS_WINDOWS, TemporaryDirectoryName, shell, FileCheck
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, _inline_everything, \
     RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, warmup_backward
 from textwrap import dedent

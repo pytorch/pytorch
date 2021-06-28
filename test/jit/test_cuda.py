@@ -5,9 +5,8 @@ import unittest
 
 import torch
 from typing import NamedTuple
-from torch.testing import FileCheck
 from torch.testing._internal.jit_utils import JitTestCase
-from torch.testing._internal.common_utils import skipIfRocm, skipCUDANonDefaultStreamIf
+from torch.testing._internal.common_utils import skipIfRocm, skipCUDANonDefaultStreamIf, FileCheck
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))

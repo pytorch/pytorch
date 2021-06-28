@@ -5,10 +5,10 @@ import warnings
 import torch
 
 from torch.testing import \
-    (FileCheck, floating_and_complex_types_and, get_all_dtypes)
+    (floating_and_complex_types_and, get_all_dtypes)
 from torch.testing._internal.common_utils import \
     (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor,
-     gradcheck, gradgradcheck, IS_IN_CI, suppress_warnings)
+     gradcheck, gradgradcheck, IS_IN_CI, suppress_warnings, FileCheck)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, _NOTHING, UnaryUfuncInfo, SpectralFuncInfo)
 from torch.testing._internal.common_device_type import \

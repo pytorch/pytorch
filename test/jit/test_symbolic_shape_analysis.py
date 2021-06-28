@@ -2,7 +2,7 @@ import torch
 from torch.testing._internal.jit_utils import JitTestCase
 import operator
 
-from torch.testing import FileCheck
+from torch.testing._internal.common_utils import FileCheck
 from typing import List
 
 

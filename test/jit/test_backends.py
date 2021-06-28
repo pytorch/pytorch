@@ -6,7 +6,6 @@ import unittest
 
 import torch
 import torch._C
-from torch.testing import FileCheck
 from torch.jit.mobile import _load_for_lite_interpreter
 from pathlib import Path
 
@@ -17,6 +16,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     TEST_WITH_ROCM,
     skipIfRocm,
+    FileCheck,
 )
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))

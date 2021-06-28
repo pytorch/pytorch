@@ -2,7 +2,7 @@ import os
 import sys
 
 import torch
-from torch.testing import FileCheck
+from torch.testing._internal.common_utils import FileCheck
 from enum import Enum
 from typing import Any, List
 

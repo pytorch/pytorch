@@ -7,7 +7,7 @@ from typing import List, Dict, Optional, Tuple
 import torch
 import torch.nn as nn
 from torch import Tensor
-from torch.testing import FileCheck
+from torch.testing._internal.common_utils import FileCheck
 from collections import OrderedDict
 
 # Make the helper files in test/ importable

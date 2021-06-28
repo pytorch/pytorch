@@ -4,9 +4,8 @@ import torch
 import torch.backends.xnnpack
 from torch.nn import functional as F
 from torch.utils.mobile_optimizer import optimize_for_mobile
-from torch.testing import FileCheck
 import torch.testing._internal.hypothesis_utils as hu
-from torch.testing._internal.common_utils import TestCase, run_tests, slowTest
+from torch.testing._internal.common_utils import TestCase, run_tests, slowTest, FileCheck
 from hypothesis import given, assume
 from hypothesis import strategies as st
 import io

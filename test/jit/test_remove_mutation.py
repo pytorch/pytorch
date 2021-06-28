@@ -2,7 +2,7 @@ import os
 import sys
 
 import torch
-from torch.testing import FileCheck
+from torch.testing._internal.common_utils import FileCheck
 from typing import List
 
 # Make the helper files in test/ importable

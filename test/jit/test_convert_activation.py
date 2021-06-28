@@ -5,7 +5,7 @@ from itertools import product
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.testing import FileCheck
+from torch.testing._internal.common_utils import FileCheck
 import unittest
 
 try:

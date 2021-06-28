@@ -4,7 +4,6 @@ import contextlib
 import math
 import torch
 import torch.nn.functional as F
-from torch.testing import FileCheck
 from typing import List
 
 # these needs to be set before `common_utils`
@@ -17,7 +16,7 @@ torch._C._jit_set_profiling_executor(True)
 torch._C._jit_set_profiling_mode(True)
 
 from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, \
-    enable_profiling_mode_for_profiling_tests, TestCase
+    enable_profiling_mode_for_profiling_tests, TestCase, FileCheck
 from torch.testing._internal.jit_utils import JitTestCase, \
     RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, warmup_backward, set_fusion_group_inlining
 

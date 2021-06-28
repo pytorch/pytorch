@@ -73,13 +73,11 @@ from torch.testing._internal.common_quantized import (
     override_quantized_engine,
 )
 
-from torch.testing._internal.common_utils import TemporaryFileName
+from torch.testing._internal.common_utils import TemporaryFileName, FileCheck
 
 from torch.testing._internal.common_quantization import NodeSpec as ns
 
 from torch.testing._internal.common_quantization import ConvModel
-
-from torch.testing import FileCheck
 
 import copy
 import itertools

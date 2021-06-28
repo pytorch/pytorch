@@ -5,7 +5,7 @@ import io
 import torch
 import warnings
 from contextlib import redirect_stderr
-from torch.testing import FileCheck
+from torch.testing._internal.common_utils import FileCheck
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))

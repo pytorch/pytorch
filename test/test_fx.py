@@ -16,7 +16,7 @@ import unittest
 from math import sqrt
 from pathlib import Path
 from torch.multiprocessing import Process
-from torch.testing import FileCheck
+from torch.testing._internal.common_utils import FileCheck
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_device_type import ops, onlyCPU, instantiate_device_type_tests
 import torch.utils._pytree as pytree

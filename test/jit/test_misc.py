@@ -1,7 +1,7 @@
 from typing import Any, Dict, List, Optional, Tuple
 
 from torch.testing._internal.jit_utils import JitTestCase, make_global
-from torch.testing import FileCheck
+from torch.testing._internal.common_utils import FileCheck
 from torch import jit
 from jit.test_module_interface import TestModuleInterface  # noqa: F401
 import unittest

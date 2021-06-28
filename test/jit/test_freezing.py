@@ -5,10 +5,9 @@ import unittest
 from torch.testing._internal.jit_utils import JitTestCase
 from torch._C import parse_ir
 
-from torch.testing import FileCheck
 from torch.testing._internal.common_quantized import override_quantized_engine
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM
-from torch.testing._internal.common_utils import set_default_dtype
+from torch.testing._internal.common_utils import set_default_dtype, FileCheck
 from torch.utils import mkldnn as mkldnn_utils
 
 

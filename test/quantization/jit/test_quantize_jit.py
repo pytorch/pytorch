@@ -67,7 +67,7 @@ from torch.testing._internal.common_quantization import (
     AnnotatedConvBnModel,
 )
 
-from torch.testing import FileCheck
+from torch.testing._internal.common_utils import FileCheck
 from torch.testing._internal.jit_utils import attrs_with_prefix
 from torch.testing._internal.jit_utils import get_forward
 from torch.testing._internal.jit_utils import get_forward_graph

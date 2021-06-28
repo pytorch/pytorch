@@ -9,10 +9,9 @@ import cmath
 from typing import cast, List, Optional, Tuple, Union
 import operator
 
-FileCheck = torch._C.FileCheck
+
 
 __all__ = [
-    "FileCheck",
     "all_types",
     "all_types_and",
     "all_types_and_complex",

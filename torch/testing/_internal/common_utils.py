@@ -57,6 +57,8 @@ import torch.backends.cudnn
 import torch.backends.mkl
 from enum import Enum
 
+FileCheck = torch._C.FileCheck
+
 torch.backends.disable_global_flags()
 
 FILE_SCHEMA = "file://"
