@@ -10,7 +10,7 @@ import urllib.error
 HOST_PLATFORM = platform.system()
 
 # PyTorch directory root, derived from the location of this file.
-PYTORCH_ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+PYTORCH_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 
 # This dictionary maps each platform to the S3 object URL for its clang-format binary.
 PLATFORM_TO_CF_URL = {
