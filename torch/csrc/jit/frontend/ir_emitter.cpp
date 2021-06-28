@@ -2753,104 +2753,106 @@ Value* to_ir::emitSimpleExpr(const TreeRef& tree, const TypePtr& type_hint) {
   }
 }
 
-  Value* to_ir::emitConst(const Const& c) {
-    if (c.isFloatingPoint())
-      return materializeConstant(
-          c.asFloatingPoint(), *graph, c.range(), fp_constants);
-    else if (c.isComplex())
-      return materializeConstant(
-          c.asComplex(), *graph, c.range(), complex_constants);
-    else
-      return materializeConstant(
-          c.asIntegral(), *graph, c.range(), integral_constants);
+Value* to_ir::emitConst(const Const& c) {
+  if (c.isFloatingPoint())
+    return materializeConstant(
+        c.asFloatingPoint(), *graph, c.range(), fp_constants);
+  else if (c.isComplex())
+    return materializeConstant(
+        c.asComplex(), *graph, c.range(), complex_constants);
+  else
+    return materializeConstant(
+        c.asIntegral(), *graph, c.range(), integral_constants);
+}
+
+Value* to_ir::emitStringLiteral(const StringLiteral& c) {
+  return insertConstant(*graph, c.text(), c.range());
+}
+
+// Desugars select indexing: tensor[i] -> tensor.select(dim, i)
+Value* to_ir::emitSelect(
+    const SourceRange& loc,
+    Value* input,
+    Value* dim,
+    Value* index) {
+  return emitBuiltinCall(loc, *graph, aten::select, {input, dim, index}, {});
+}
+
+Value* to_ir::emitSliceOp(
+    const SourceRange& loc,
+    Value* sliceable,
+    Value* dim,
+    Value* start,
+    Value* end,
+    Value* step) {
+  std::vector<NamedValue> args;
+  args.reserve(5);
+  args.emplace_back(loc, "self", sliceable);
+
+  // XXX: If list slicing becomes more complicated or stops using
+  // aten::slice, we should separate it from this function.
+  if (dim) {
+    AT_ASSERT(sliceable->type()->isSubtypeOf(TensorType::get()));
+
+    args.emplace_back(dim);
+  } else {
+    AT_ASSERT(!sliceable->type()->isSubtypeOf(TensorType::get()));
   }
 
-  Value* to_ir::emitStringLiteral(const StringLiteral& c) {
-    return insertConstant(*graph, c.text(), c.range());
-  }
+  if (sliceable->type()->cast<TupleType>()) {
+    std::vector<at::optional<NamedValue>> tuple_args;
+    // since we are only dealing with tuple slicing, we try to keep
+    // tuple args seperate for now
+    tuple_args.reserve(3);
 
-  // Desugars select indexing: tensor[i] -> tensor.select(dim, i)
-  Value* to_ir::emitSelect(
-      const SourceRange& loc,
-      Value* input,
-      Value* dim,
-      Value* index) {
-    return emitBuiltinCall(loc, *graph, aten::select, {input, dim, index}, {});
-  }
-
-  Value* to_ir::emitSliceOp(
-      const SourceRange& loc,
-      Value* sliceable,
-      Value* dim,
-      Value* start,
-      Value* end,
-      Value* step) {
-    std::vector<NamedValue> args;
-    args.reserve(5);
-    args.emplace_back(loc, "self", sliceable);
-
-    // XXX: If list slicing becomes more complicated or stops using
-    // aten::slice, we should separate it from this function.
-    if (dim) {
-      AT_ASSERT(sliceable->type()->isSubtypeOf(TensorType::get()));
-
-      args.emplace_back(dim);
-    } else {
-      AT_ASSERT(!sliceable->type()->isSubtypeOf(TensorType::get()));
-    }
-
-    if (sliceable->type()->cast<TupleType>()) {
-      std::vector<at::optional<NamedValue>> tuple_args;
-      // since we are only dealing with tuple slicing, we try to keep
-      // tuple args seperate for now
-      tuple_args.reserve(3);
-
-      start ? tuple_args.emplace_back(start)
-            : tuple_args.emplace_back(c10::nullopt);
-      end ? tuple_args.emplace_back(end)
+    start ? tuple_args.emplace_back(start)
           : tuple_args.emplace_back(c10::nullopt);
-      step ? tuple_args.emplace_back(step)
-           : tuple_args.emplace_back(c10::nullopt);
+    end ? tuple_args.emplace_back(end) : tuple_args.emplace_back(c10::nullopt);
+    step ? tuple_args.emplace_back(step)
+         : tuple_args.emplace_back(c10::nullopt);
 
-      return emitTupleSlice(loc, args[0], tuple_args);
-    }
-
-    // handling cases like x[0:2]. x[0:2:] is already handled from python
-    if (!step) {
-      step = graph->insertConstant(1, loc);
-    }
-
-    args.emplace_back(loc, "start", start);
-    args.emplace_back(loc, "end", end);
-    args.emplace_back(loc, "step", step);
-    return emitBuiltinCall(loc, *graph, aten::slice, args, {});
+    return emitTupleSlice(loc, args[0], tuple_args);
   }
 
-  // Desugars slice indexing: tensor[begin:end] -> tensor.slice(dim, begin, end,
-  // 1)
-  Value* to_ir::emitSlice(
-      const SourceRange& loc,
-      Value* input,
-      Value* dim, // Only used for tensor slicing
-      const SliceExpr& slice) {
-    Value* start = nullptr;
-    Value* end = nullptr;
-    Value* step = nullptr;
-    if (slice.start().present()) {
-      start = emitExpr(Expr(slice.start().get()));
-    }
-    if (slice.end().present()) {
-      end = emitExpr(Expr(slice.end().get()));
-    }
-    if (slice.step().present()) {
-      step = emitExpr(Expr(slice.step().get()));
-    }
-    return emitSliceOp(loc, input, dim, start, end, step);
+  // handling cases like x[0:2]. x[0:2:] is already handled from python
+  if (!step) {
+    step = graph->insertConstant(1, loc);
   }
 
-  Value* to_ir::emitUnsqueeze(const SourceRange& loc, Value* input, Value* dim_val) {
-    return emitBuiltinCall(loc, *graph, aten::unsqueeze, {input, dim_val}, {});
+  args.emplace_back(loc, "start", start);
+  args.emplace_back(loc, "end", end);
+  args.emplace_back(loc, "step", step);
+  return emitBuiltinCall(loc, *graph, aten::slice, args, {});
+}
+
+// Desugars slice indexing: tensor[begin:end] -> tensor.slice(dim, begin, end,
+// 1)
+Value* to_ir::emitSlice(
+    const SourceRange& loc,
+    Value* input,
+    Value* dim, // Only used for tensor slicing
+    const SliceExpr& slice) {
+  Value* start = nullptr;
+  Value* end = nullptr;
+  Value* step = nullptr;
+  if (slice.start().present()) {
+    start = emitExpr(Expr(slice.start().get()));
   }
+  if (slice.end().present()) {
+    end = emitExpr(Expr(slice.end().get()));
+  }
+  if (slice.step().present()) {
+    step = emitExpr(Expr(slice.step().get()));
+  }
+  return emitSliceOp(loc, input, dim, start, end, step);
+}
+
+Value* to_ir::emitUnsqueeze(
+    const SourceRange& loc,
+    Value* input,
+    Value* dim_val) {
+  return emitBuiltinCall(loc, *graph, aten::unsqueeze, {input, dim_val}, {});
+}
 
 Value* to_ir::emitIndex(
     const SourceRange& loc,
