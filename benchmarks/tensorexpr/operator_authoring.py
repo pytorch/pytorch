@@ -8,7 +8,7 @@ WRITE_CSV = False
 CUDA = False
 SIZES = [1, 512, 8192]
 NUMBER = [100, 10, 1, 1]
-REPEAT = 10
+REPEAT = 20
 
 
 @torch.jit.te.pointwise_operator

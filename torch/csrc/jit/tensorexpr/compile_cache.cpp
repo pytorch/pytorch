@@ -5,7 +5,6 @@
 #include <torch/csrc/jit/tensorexpr/cuda_codegen.h>
 #include <array>
 #include <map>
-#include <mutex>
 
 namespace torch {
 namespace jit {
@@ -97,15 +96,14 @@ struct SpecializationKey {
 
   static inline uint16_t pack_flags(
       const LocalState& state,
-      const at::Tensor& v,
-      bool is_out) {
+      const at::Tensor& v) {
     static_assert(
-        static_cast<int>(at::ScalarType::NumOptions) < 64, "overflow possible");
+        static_cast<int>(at::ScalarType::NumOptions) < 128,
+        "overflow possible");
     at::ScalarType dtype = v.dtype().toScalarType();
     bool requires_grad = state.grad_mode_enabled && v.requires_grad();
-    return static_cast<uint8_t>(is_out) |
-        (static_cast<uint8_t>(requires_grad) << 1) |
-        (static_cast<uint8_t>(dtype) << 2);
+    return static_cast<uint8_t>(requires_grad) |
+        (static_cast<uint8_t>(dtype) << 1);
   }
 
   template <typename T>
@@ -143,9 +141,8 @@ struct SpecializationKey {
   SpecializationKey(
       const LocalState& state,
       const at::Tensor& v,
-      int8_t alias_group,
-      bool is_out)
-      : flags_(pack_flags(state, v, is_out)),
+      int8_t alias_group)
+      : flags_(pack_flags(state, v)),
         alias_group_(alias_group),
         dispatch_key_(state.apply(v.key_set()).raw_repr()) {
     init_dimflags(v.sizes(), v.strides(), v.ndimension());
@@ -206,7 +203,7 @@ struct SpecializationKey {
     return result;
   }
 
-  py::object to_python(const at::Tensor& example) const {
+  py::object to_python(const at::Tensor& example, bool is_out) const {
     py::object ex = py::cast(example);
     return python_specialization_key()(
         static_cast<int>(alias_group_),
@@ -215,13 +212,13 @@ struct SpecializationKey {
         ex.attr("device"),
         ex.attr("layout"),
         ex.attr("requires_grad"),
-        py::bool_(flags_ % 2), // out
+        py::bool_(is_out),
         shape(),
         stride());
   }
 
  private:
-  uint8_t flags_; // is_out, requires_grad, and dtype
+  uint8_t flags_; // requires_grad and dtype
   int8_t alias_group_; // 0 = no aliasing
                        // >0 = same data, strides, and shapes within group
                        // <0 = overlapping storage madness
@@ -265,13 +262,25 @@ struct CmpLess {
   }
 };
 
-template <int NARGS, int MAX_DIMS>
-class alignas(32) CompileCache3 {
- public:
-  typedef std::array<SpecializationKey<MAX_DIMS>, NARGS> SpecializationKeys;
-  typedef std::array<int8_t, NARGS> AliasGroups;
+template <int num_in_, int num_out_allocated_, int num_out_given_>
+struct ArgCounts {
+  static constexpr int num_in = num_in_;
+  static constexpr int num_out_allocated = num_out_allocated_;
+  static constexpr int num_out_given = num_out_given_;
+  static constexpr int num_out = num_out_allocated_ + num_out_given_;
+  static constexpr int num_keys = num_in_ + num_out_given_;
+  static constexpr int num_buffers =
+      num_in_ + num_out_given_ + num_out_allocated_;
+};
 
-  class CompileResultImpl : public CompileResultBase {
+template <typename Counts, int MAX_DIMS>
+class alignas(64) CompileCache3 {
+ public:
+  typedef std::array<SpecializationKey<MAX_DIMS>, Counts::num_keys>
+      SpecializationKeys;
+  typedef std::array<int8_t, Counts::num_keys> AliasGroups;
+
+  class alignas(64) CompileResultImpl : public CompileResultBase {
    public:
     void set_code(const py::object& cg) override {
       objects_.emplace_back(cg);
@@ -286,7 +295,6 @@ class alignas(32) CompileCache3 {
 
     void set_stride_args_from(
         const std::vector<std::pair<int, int>>& indices) override {
-      assert(indices.shape() <= MAX_DIMS * NARGS);
       stride_args_from_ = indices;
     }
 
@@ -311,7 +319,7 @@ class alignas(32) CompileCache3 {
           std::make_tuple(index, backward_compiler.cast<CompileCache*>()));
     }
 
-    at::Tensor call(at::Tensor* args) {
+    void call(at::Tensor* args) {
       for (const auto& ck : shape_checks_) {
         if (args[std::get<0>(ck)].size(std::get<1>(ck)) !=
             args[std::get<2>(ck)].size(std::get<3>(ck))) {
@@ -323,14 +331,15 @@ class alignas(32) CompileCache3 {
 
       // NOLINTNEXTLINE: C-style arrays
       void* call_args
-          [NARGS + allocated_outputs_.size() + stride_args_from_.size() +
-           shape_from_.size()];
-      for (int i = 0; i < NARGS; ++i) {
+          [Counts::num_buffers + stride_args_from_.size() + shape_from_.size()];
+      constexpr int allocated_arg_offset =
+          Counts::num_in + Counts::num_out_given;
+      for (int i = 0; i < allocated_arg_offset; ++i) {
         call_args[i] = args[i].data_ptr();
       }
-      // we might insert the output pointer at call_args[NARGS] below
 
-      int stride_args_offset = NARGS + allocated_outputs_.size();
+      constexpr int stride_args_offset =
+          allocated_arg_offset + Counts::num_out_allocated;
       for (int i : c10::irange(stride_args_from_.size())) {
         auto& item = stride_args_from_[i];
         call_args[stride_args_offset + i] =
@@ -349,39 +358,66 @@ class alignas(32) CompileCache3 {
         call_args[shape_args_offset + i] = &shapes[i];
       }
 
-      at::Tensor output;
-      if (allocated_outputs_.size() > 0) {
-        int options_from = allocated_outputs_[0].first;
-        auto& output_order = allocated_outputs_[0].second;
+      for (int i = 0; i < Counts::num_out_allocated; ++i) {
+        int options_from = allocated_outputs_[i].first;
+        auto& output_order = allocated_outputs_[i].second;
         // NOLINTNEXTLINE: C-style arrays
         int64_t strides[MAX_DIMS];
         int64_t next_stride = 1;
-        for (int i : output_order) {
-          strides[i] = next_stride;
-          next_stride *= shapes[i];
+        for (int j : output_order) {
+          strides[j] = next_stride;
+          next_stride *= shapes[j];
         }
-        output = at::empty_strided(
+        args[allocated_arg_offset + i] = at::empty_strided(
             c10::IntArrayRef(shapes, shapes + ndims),
             c10::IntArrayRef(strides, strides + ndims),
             args[options_from].options());
-        call_args[NARGS] = output.data_ptr();
-      } else {
-        output = args[NARGS - 1];
+        call_args[allocated_arg_offset + i] =
+            args[allocated_arg_offset + i].data_ptr();
       }
 
-      cg_->call_fast(call_args, numel);
+      if (numel < 128) {
+        // don't bother releasing GIL for tiny tensors
+        // TODO(jansel): should we also skip this on GPU?
+        cg_->call_fast(call_args, numel);
+      } else {
+        py::gil_scoped_release release;
+        cg_->call_fast(call_args, numel);
+      }
 
       if (backwards_functions_.size() > 0) {
         std::shared_ptr<CompiledAutoGradNode> node(
             new CompiledAutoGradNode(), torch::autograd::deleteNode);
-        node->setup(
-            backwards_functions_,
-            args,
-            NARGS - (allocated_outputs_.size() == 0));
-        torch::autograd::create_gradient_edge(output, node);
+        node->setup(backwards_functions_, args, Counts::num_in);
+        for (int i = 0; i < Counts::num_out; ++i) {
+          torch::autograd::create_gradient_edge(args[Counts::num_in + i], node);
+        }
       }
+    }
 
-      return output;
+    void error_checks() {
+      TORCH_CHECK(cg_ != nullptr);
+      TORCH_CHECK(shape_from_.size() <= MAX_DIMS);
+      TORCH_CHECK(allocated_outputs_.size() == Counts::num_out_allocated);
+      TORCH_CHECK(backwards_functions_.size() <= Counts::num_in);
+      for (auto& item : shape_from_) {
+        TORCH_CHECK(item.first < Counts::num_keys);
+        TORCH_CHECK(item.second < MAX_DIMS);
+      }
+      for (auto& item : stride_args_from_) {
+        TORCH_CHECK(item.first < Counts::num_keys);
+        TORCH_CHECK(item.second < MAX_DIMS);
+      }
+      for (auto& item : shape_checks_) {
+        TORCH_CHECK(std::get<0>(item) < Counts::num_keys);
+        TORCH_CHECK(std::get<1>(item) < MAX_DIMS);
+        TORCH_CHECK(std::get<2>(item) < Counts::num_keys);
+        TORCH_CHECK(std::get<3>(item) < MAX_DIMS);
+      }
+      for (auto& item : allocated_outputs_) {
+        TORCH_CHECK(item.first < Counts::num_keys);
+        TORCH_CHECK(item.second.size() <= MAX_DIMS);
+      }
     }
 
    private:
@@ -425,22 +461,20 @@ class alignas(32) CompileCache3 {
     check_dispatch_keys(key);
     KernelScope scope(&arena_);
     auto cr = new CompileResultImpl();
-    py::gil_scoped_acquire guard;
     std::vector<py::object> spec;
-    spec.reserve(key.size());
-    for (int i = 0; i < key.size(); ++i) {
-      spec.emplace_back(key[i].to_python(args[i]));
+    spec.reserve(Counts::num_keys);
+    for (int i = 0; i < Counts::num_keys; ++i) {
+      spec.emplace_back(key[i].to_python(args[i], i >= Counts::num_in));
     }
     compile_fn_(spec, CompileResultProxy(cr));
+    cr->error_checks();
     return cr;
   }
 
   CompileResultImpl* cached_compile(
       const SpecializationKeys& key,
       at::Tensor* args) {
-    // TODO(jansel): optimization: make this lock-free in the cache-hit case
-    std::lock_guard<std::mutex> guard(mutex_);
-    auto item = cache_.find(key);
+    auto item = cache_.find(key); // protected by GIL
     if (C10_LIKELY(item != cache_.end())) {
       return item->second;
     } else { // cache miss
@@ -471,12 +505,12 @@ class alignas(32) CompileCache3 {
   AliasGroups compute_alias_groups(at::Tensor* args) {
     AliasGroups alias_groups;
     int8_t current_id = 0;
-    for (int i = 0; i < NARGS; ++i) {
+    for (int i = 0; i < Counts::num_keys; ++i) {
       alias_groups[i] = 0;
     }
-    for (int i = 0; i < NARGS; ++i) {
+    for (int i = 0; i < Counts::num_keys; ++i) {
       if (alias_groups[i] == 0) {
-        for (int j = i + 1; j < NARGS; ++j) {
+        for (int j = i + 1; j < Counts::num_keys; ++j) {
           int8_t alias_type = aliasing_check(args[i], args[j]);
           if (alias_type != 0) {
             if (alias_groups[i] == 0)
@@ -490,61 +524,55 @@ class alignas(32) CompileCache3 {
     return alias_groups;
   }
 
-  SpecializationKeys compute_cache_key(at::Tensor* args, bool has_out) {
+  SpecializationKeys compute_cache_key(at::Tensor* args) {
     LocalState state;
     AliasGroups alias_groups = compute_alias_groups(args);
     SpecializationKeys key;
-    int i = 0;
-    for (; i < NARGS - 1; ++i) {
-      key[i] =
-          SpecializationKey<MAX_DIMS>(state, args[i], alias_groups[i], false);
-    }
-    if (NARGS != 0) {
-      key[i] =
-          SpecializationKey<MAX_DIMS>(state, args[i], alias_groups[i], has_out);
+    for (int i = 0; i < Counts::num_keys; ++i) {
+      key[i] = SpecializationKey<MAX_DIMS>(state, args[i], alias_groups[i]);
     }
     return key;
   }
 
   CompileCache3(py::object compile_fn) : compile_fn_(std::move(compile_fn)) {}
 
-  at::Tensor call(at::Tensor* args, bool has_out) {
-    auto key = compute_cache_key(args, has_out);
-    return cached_compile(key, args)->call(args);
+  void call(at::Tensor* args) {
+    cached_compile(compute_cache_key(args), args)->call(args);
   }
 
  public:
-  std::mutex mutex_;
   Cache cache_;
-  py::object compile_fn_;
   KernelArena arena_;
+  py::object compile_fn_;
 };
 
-template <int NARGS>
+template <typename Counts>
 class CompileCache2 {
  public:
   CompileCache2(const py::object& compile_fn)
       : cache2(compile_fn), cache4(compile_fn), cache8(compile_fn) {}
 
-  at::Tensor call(at::Tensor* args, bool has_out) {
+  void call(at::Tensor* args) {
     // fan out and and specialize on number of dimension buckets
     int64_t ndims = 0;
-    for (int i : c10::irange(NARGS)) {
+    for (int i : c10::irange(Counts::num_in + Counts::num_out_given)) {
       ndims = std::max(args[i].dim(), ndims);
     }
-    if (ndims <= 2)
-      return cache2.call(args, has_out);
-    if (ndims <= 4)
-      return cache4.call(args, has_out);
-    if (ndims <= 8)
-      return cache8.call(args, has_out);
-    throw std::runtime_error("TODO: handle more dims");
+    if (ndims <= 2) {
+      cache2.call(args);
+    } else if (ndims <= 4) {
+      cache4.call(args);
+    } else if (ndims <= 8) {
+      cache8.call(args);
+    } else {
+      throw std::runtime_error("TODO: handle more dims");
+    }
   }
 
  private:
-  CompileCache3<NARGS, 2> cache2;
-  CompileCache3<NARGS, 4> cache4;
-  CompileCache3<NARGS, 8> cache8;
+  CompileCache3<Counts, 2> cache2;
+  CompileCache3<Counts, 4> cache4;
+  CompileCache3<Counts, 8> cache8;
 };
 
 class CompileCache {
@@ -555,8 +583,11 @@ class CompileCache {
   virtual const std::string& get_name() const = 0;
 };
 
-template <int NARGS>
+template <int NUM_IN, int NUM_OUT = 1>
 class CompileCacheImpl : public CompileCache {
+  constexpr static int NUM_ARGS = NUM_IN + NUM_OUT;
+  constexpr static int LAST_ARG = NUM_ARGS - 1;
+
  public:
   CompileCacheImpl(
       std::string name,
@@ -578,7 +609,7 @@ class CompileCacheImpl : public CompileCache {
   }
 
   PyObject* py_call(PyObject* args, PyObject* kwargs) override {
-    ParsedArgs<NARGS + 1> parsed_args;
+    ParsedArgs<NUM_ARGS> parsed_args;
     PythonArgs r = parser_.parse(args, kwargs, parsed_args);
     bool pre_sampled = false;
     if (C10_UNLIKELY(r.has_torch_function())) {
@@ -595,29 +626,33 @@ class CompileCacheImpl : public CompileCache {
                    at::shouldRunRecordFunction(&pre_sampled))) {
       throw std::runtime_error("TODO: implement record function");
     } else {
-      at::Tensor tensor_args[NARGS + 1]; // NOLINT: c-style arrays
-      for (int i = 0; i < NARGS + 1; ++i) {
+      at::Tensor tensor_args[NUM_ARGS]; // NOLINT: c-style arrays
+      for (int i = 0; i < NUM_ARGS; ++i) {
         tensor_args[i] = r.tensor(i);
       }
-      py::gil_scoped_release release;
-      if (tensor_args[NARGS].defined()) {
-        return THPVariable_Wrap(cache_out.call(tensor_args, true));
+      if (tensor_args[LAST_ARG].defined()) {
+        cache_out.call(tensor_args);
       } else {
-        return THPVariable_Wrap(cache.call(tensor_args, false));
+        cache.call(tensor_args);
       }
+      return THPVariable_Wrap(tensor_args[LAST_ARG]);
     }
   }
 
   at::Tensor call(const std::vector<at::Tensor>& args) override {
-    if (C10_UNLIKELY(args.size() != NARGS)) {
+    if (C10_UNLIKELY(args.size() != NUM_IN)) {
       throw std::runtime_error("wrong number of args");
     }
-    return cache.call(const_cast<at::Tensor*>(args.data()), false); // NOLINT
+    at::Tensor tensor_args[NUM_ARGS]; // NOLINT: c-style arrays
+    std::copy(args.begin(), args.end(), tensor_args);
+    py::gil_scoped_acquire guard; // we protect our cache w/ GIL
+    cache.call(tensor_args);
+    return tensor_args[LAST_ARG];
   }
 
  private:
-  CompileCache2<NARGS> cache;
-  CompileCache2<NARGS + 1> cache_out; // out=... variant
+  CompileCache2<ArgCounts<NUM_IN, NUM_OUT, 0>> cache;
+  CompileCache2<ArgCounts<NUM_IN, 0, NUM_OUT>> cache_out; // out=... variant
   PythonArgParser parser_;
   std::string name_;
   std::string module_name_;
