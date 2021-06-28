@@ -7,9 +7,9 @@ from .sparsifier import BaseSparsifier
 from .utils import FakeSparsity
 
 # Variables
-from ._variables import get_sparse_mapping
-from ._variables import get_dynamic_sparse_quantized_mapping
-from ._variables import get_static_sparse_quantized_mapping
+from ._mappings import get_sparse_mapping
+from ._mappings import get_dynamic_sparse_quantized_mapping
+from ._mappings import get_static_sparse_quantized_mapping
 
 # === Experimental ===
 
