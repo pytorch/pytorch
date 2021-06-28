@@ -99,7 +99,7 @@ public:
   Vectorized<double> isnan() const {
     return _mm256_cmp_pd(values, _mm256_set1_pd(0.0), _CMP_UNORD_Q);
   }
-  Vectorized<double> map(double (*f)(double)) const {
+  Vectorized<double> map(double (*const f)(double)) const {
     __at_align32__ double tmp[size()];
     store(tmp);
     for (int64_t i = 0; i < size(); i++) {
