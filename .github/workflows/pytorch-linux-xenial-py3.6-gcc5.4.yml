@@ -446,6 +446,20 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - uses: driazati/upload-artifact-s3@21c31d0a7bcb056ca50bd6ce197ba6507c26a1be
+        if: github.event_name == 'pull_request'
+        name: Upload Docs Preview
+        with:
+          name: deploy
+          retention-days: 14
+          if-no-files-found: error
+          path: pytorch.github.io/docs/merge
+      - name: Show Docs Preview URL (Click Me)
+        if: github.event_name == 'pull_request'
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          echo "See rendered docs at https://d28slxzaq48q8t.cloudfront.net/$PR_NUMBER/"
       - name: Archive artifacts into zip
         run: |
           zip -r pytorch_github_io.zip "${GITHUB_WORKSPACE}/pytorch.github.io"
