@@ -18,6 +18,7 @@ inline Layout layout_from_backend(Backend backend) {
     case Backend::SparseCPU:
     case Backend::SparseCUDA:
     case Backend::SparseHIP:
+    case Backend::SparseVE:
     case Backend::SparseXPU:
       return Layout::Sparse;
     case Backend::MkldnnCPU:

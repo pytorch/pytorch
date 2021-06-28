@@ -133,7 +133,6 @@ TORCH_API DimnameList get_names(const TensorImpl* impl);
 // tensor is constructed with names=None.
 TORCH_API c10::optional<DimnameList> get_opt_names(const TensorImpl* impl);
 
-
 } // namespace impl
 
 } // namespace at
