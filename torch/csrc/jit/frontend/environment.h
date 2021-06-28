@@ -46,7 +46,7 @@ struct Environment {
         next(std::move(next)) {}
 
   std::shared_ptr<Environment> getNext() {
-      return next;
+    return next;
   }
 
   // set type error in the lowest environment. if the variable is used after an
