@@ -2208,3 +2208,6 @@
 
 - name: segment_reduce(Tensor data, str reduce, *, Tensor? lengths=None, Tensor? indices=None, int axis=0, bool unsafe=False, Scalar? initial=None) -> Tensor
   data: _segment_reduce_backward(grad, result, data, reduce, lengths)
+
+- name: pin_memory(Tensor(a) self, Device? device=None) -> Tensor(a)
+  self: grad
