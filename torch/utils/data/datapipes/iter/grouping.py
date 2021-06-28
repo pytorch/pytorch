@@ -53,7 +53,6 @@ class BatchIterDataPipe(IterDataPipe[List[T_co]]):
             source_depth = 0
         self._dp_nesting_depth = source_depth + 1
         self.wrapper_class = wrapper_class
-        # print('self._dp_nesting_depth', self._dp_nesting_depth)
 
     def __iter__(self) -> Iterator[List[T_co]]:
         batch: List[T_co] = []

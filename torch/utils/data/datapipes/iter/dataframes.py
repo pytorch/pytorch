@@ -1,6 +1,6 @@
 from torch.utils.data import IterDataPipe, functional_datapipe, DFIterDataPipe, DataChunk
-from typing import Iterator, Optional, Sized, Tuple, TypeVar
 import pandas
+# TODO(VitalyFedyunin): Guard all pandas imports
 import random
 
 # TODO(VitalyFedyunin): Add error when two different traces get combined
@@ -27,44 +27,30 @@ class DataFrameTracedOps(DFIterDataPipe):
 class DataFramesAsTuplesPipe(IterDataPipe):
     def __init__(self, source_datapipe):
         self.source_datapipe = source_datapipe
-    
+
     def __iter__(self):
-         for df in self.source_datapipe:
+        for df in self.source_datapipe:
             for record in df.to_records(index=False):
                 yield record
 
 
-@functional_datapipe('dataframes_per_row', is_df = True)
+@functional_datapipe('dataframes_per_row', is_df=True)
 class ShuffleDataFramesPipe(DFIterDataPipe):
     def __init__(self, source_datapipe):
         self.source_datapipe = source_datapipe
-    
+
     def __iter__(self):
         for df in self.source_datapipe:
             for i in range(len(df.index)):
-                yield df[i:i+1]
-
-# @functional_datapipe('dataframes_groupby', is_df = True)
-# class ShuffleDataFramesPipe(DFIterDataPipe):
-#     def __init__(self, source_datapipe, unbatch_level = 0):
-#         if unbatch_level != 0:
-#             self.source_datapipe = source_datapipe.unbatch(unbatch_level = unbatch_level)
-#         else:
-#             self.source_datapipe = source_datapipe
-#         # self.unbatch_level = unbatch_level
-
-#     def __iter__(self):
-#         for df in self.source_datapipe:
-#             for i in range(len(df.index)):
-#                 yield df[i:i+1]
+                yield df[i:i + 1]
 
 
-@functional_datapipe('dataframes_concat', is_df = True)
+@functional_datapipe('dataframes_concat', is_df=True)
 class ShuffleDataFramesPipe(DFIterDataPipe):
-    def __init__(self, source_datapipe, batch = 3):
+    def __init__(self, source_datapipe, batch=3):
         self.source_datapipe = source_datapipe
         self.batch = batch
-    
+
     def __iter__(self):
         buffer = []
         for df in self.source_datapipe:
@@ -76,12 +62,11 @@ class ShuffleDataFramesPipe(DFIterDataPipe):
             yield pandas.concat(buffer)
 
 
-
-@functional_datapipe('dataframes_shuffle', is_df = True)
+@functional_datapipe('dataframes_shuffle', is_df=True)
 class ShuffleDataFramesPipe(DFIterDataPipe):
     def __init__(self, source_datapipe):
         self.source_datapipe = source_datapipe
-    
+
     def __iter__(self):
         size = None
         all_buffer = []
@@ -89,7 +74,7 @@ class ShuffleDataFramesPipe(DFIterDataPipe):
             if size is None:
                 size = len(df.index)
             for i in range(len(df.index)):
-                all_buffer.append(df[i:i+1])
+                all_buffer.append(df[i:i + 1])
         random.shuffle(all_buffer)
         buffer = []
         for df in all_buffer:
@@ -100,13 +85,13 @@ class ShuffleDataFramesPipe(DFIterDataPipe):
         if len(buffer):
             yield pandas.concat(buffer)
 
-        
-@functional_datapipe('dataframes_filter', is_df = True)
+
+@functional_datapipe('dataframes_filter', is_df=True)
 class ShuffleDataFramesPipe(DFIterDataPipe):
     def __init__(self, source_datapipe, filter_fn):
         self.source_datapipe = source_datapipe
         self.filter_fn = filter_fn
-    
+
     def __iter__(self):
         size = None
         all_buffer = []
@@ -115,17 +100,11 @@ class ShuffleDataFramesPipe(DFIterDataPipe):
             if size is None:
                 size = len(df.index)
             for i in range(len(df.index)):
-                all_buffer.append(df[i:i+1])
+                all_buffer.append(df[i:i + 1])
                 filter_res.append(self.filter_fn(df.iloc[i]))
-        
-        # random.shuffle(all_buffer)
-
-        # print('filter repack as', size)
 
         buffer = []
         for df, res in zip(all_buffer, filter_res):
-            # print(df)
-            # print(res)
             if res:
                 buffer.append(df)
                 if len(buffer) == size:
@@ -135,8 +114,7 @@ class ShuffleDataFramesPipe(DFIterDataPipe):
             yield pandas.concat(buffer)
 
 
-
-@functional_datapipe('to_dataframes_pipe', is_df = True)
+@functional_datapipe('to_dataframes_pipe', is_df=True)
 class ExampleAggregateAsDataFrames(DFIterDataPipe):
     def __init__(self, source_datapipe, dataframe_size=10, columns=None):
         self.source_datapipe = source_datapipe
@@ -159,7 +137,10 @@ class ExampleAggregateAsDataFrames(DFIterDataPipe):
         if len(aggregate) > 0:
             yield pandas.DataFrame(aggregate, columns=self.columns)
 
-DATAPIPES_OPS = ['dataframes_as_tuples','groupby','dataframes_filter','map','to_datapipe','shuffle', 'concat', 'batch', 'dataframes_per_row','dataframes_concat','dataframes_shuffle']
+
+DATAPIPES_OPS = ['dataframes_as_tuples', 'groupby', 'dataframes_filter', 'map', 'to_datapipe',
+                 'shuffle', 'concat', 'batch', 'dataframes_per_row', 'dataframes_concat', 'dataframes_shuffle']
+
 
 class Capture(object):
     # All operations are shared across entire InitialCapture, need to figure out what if we join two captures
@@ -186,9 +167,6 @@ class Capture(object):
             return (self.as_datapipe()).__getattr__(attrname)
         return CaptureGetAttr(self, attrname, ctx=self.ctx)
 
-    # def __setattr__(self, name, value):
-    #   pass
-
     def __getitem__(self, key):
         return CaptureGetItem(self, key, ctx=self.ctx)
 
@@ -196,29 +174,24 @@ class Capture(object):
         self.ctx['operations'].append(
             CaptureSetItem(self, key, value, ctx=self.ctx))
 
-    # def __call__(self, *args, **kwargs):
-    #   pass
-
     def __add__(self, add_val):
         res = CaptureAdd(self, add_val, ctx=self.ctx)
         var = CaptureVariable(res, ctx=self.ctx)
-        #
         self.ctx['operations'].append(
-            CaptureVariableAssign(variable = var, value = res, ctx=self.ctx))
+            CaptureVariableAssign(variable=var, value=res, ctx=self.ctx))
         return var
 
     def __sub__(self, add_val):
         res = CaptureSub(self, add_val, ctx=self.ctx)
         var = CaptureVariable(res, ctx=self.ctx)
         self.ctx['operations'].append(
-            CaptureVariableAssign(variable = var, value = res, ctx=self.ctx))
+            CaptureVariableAssign(variable=var, value=res, ctx=self.ctx))
         return var
 
     def __mul__(self, add_val):
         res = CaptureMul(self, add_val, ctx=self.ctx)
-        # print('captured mul', res)
         var = CaptureVariable(res, ctx=self.ctx)
-        t = CaptureVariableAssign(variable = var, value = res, ctx=self.ctx)
+        t = CaptureVariableAssign(variable=var, value=res, ctx=self.ctx)
         self.ctx['operations'].append(t)
         return var
 
@@ -227,39 +200,36 @@ class Capture(object):
             self.ctx['variables'][0].source_datapipe, self)
 
     def raw_iterator(self):
-        # print('iterator called')
         return self.as_datapipe().__iter__()
 
     def __iter__(self):
-        # print('iterator called')
         return iter(self.dataframes_as_tuples())
 
-    def batch(self, batch_size = 10):
-        # print('batch called', batch_size)
+    def batch(self, batch_size=10):
         dp = self.dataframes_per_row().dataframes_concat(batch_size)
-        dp = dp.as_datapipe().batch(1, wrapper_class = DataChunkDF)
+        dp = dp.as_datapipe().batch(1, wrapper_class=DataChunkDF)
         dp._dp_contains_dataframe = True
         return dp
 
-    def groupby(self, group_key_fn, *, buffer_size = 10000, group_size = None, unbatch_level = 0, guaranteed_group_size = None, drop_remaining = False):
+    def groupby(self, group_key_fn, *, buffer_size=10000, group_size=None, unbatch_level=0, guaranteed_group_size=None, drop_remaining=False):
         if unbatch_level != 0:
             dp = self.unbatch(unbatch_level).dataframes_per_row()
         else:
             dp = self.dataframes_per_row()
-        dp = dp.as_datapipe().groupby(group_key_fn, buffer_size = buffer_size, group_size = group_size, guaranteed_group_size = guaranteed_group_size, drop_remaining = drop_remaining)
+        dp = dp.as_datapipe().groupby(group_key_fn, buffer_size=buffer_size, group_size=group_size,
+                                      guaranteed_group_size=guaranteed_group_size, drop_remaining=drop_remaining)
         dp._dp_contains_dataframe = True
         dp._dp_nesting_depth = 1
         return dp
-        
+
     def shuffle(self, *args, **kwargs):
         return self.dataframes_shuffle(*args, **kwargs)
 
     def filter(self, *args, **kwargs):
         return self.dataframes_filter(*args, **kwargs)
 
-class CaptureF(Capture):
-    # kwargs = {}
 
+class CaptureF(Capture):
     def __init__(self, ctx=None, **kwargs):
         if ctx is None:
             self.ctx = {'operations': [], 'variables': []}
@@ -280,8 +250,6 @@ class CaptureVariableAssign(CaptureF):
         return "{variable} = {value}".format(**self.kwargs)
 
     def execute(self):
-        # print('executing',self)
-        # print('calculating value of', self.kwarg['value'])
         self.kwargs['variable'].calculated_value = self.kwargs['value'].execute()
 
 
@@ -299,7 +267,7 @@ class CaptureVariable(Capture):
         self.ctx['variables'].append(self)
 
     def __str__(self):
-        return self.name 
+        return self.name
 
     def execute(self):
         return self.calculated_value
@@ -307,14 +275,8 @@ class CaptureVariable(Capture):
     def calculate_me(self, dataframe):
         self.ctx['variables'][0].calculated_value = dataframe
         for op in self.ctx['operations']:
-            # print('executing ', str(op))
             op.execute()
         return self.calculated_value
-
-
-
-
-
 
 
 class CaptureInitial(CaptureVariable):
@@ -338,7 +300,6 @@ class CaptureGetItem(Capture):
         return "%s[%s]" % (self.left, get_val(self.key))
 
     def execute(self):
-        # print('getting value of', str(self.left))
         return (self.left.execute())[self.key]
 
 
@@ -414,17 +375,14 @@ class CaptureGetAttr(Capture):
     name = None
 
     def __init__(self, src, name, ctx):
-        
         self.ctx = ctx
         self.src = src
         self.name = name
-        # print('getattr captured',self.name)
 
     def __str__(self):
         return "%s.%s" % (self.src, self.name)
 
     def execute(self):
-        # print('getting attr', self)
         val = get_val(self.src)
         return getattr(val, self.name)
 

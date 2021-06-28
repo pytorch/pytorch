@@ -11,8 +11,7 @@ from torch.utils.data._typing import _DataPipeMeta
 class functional_datapipe(object):
     name: str
 
-    def __init__(self, name: str, is_df = False) -> None:
-        # print('functional_datapipe', name, is_df)
+    def __init__(self, name: str, is_df=False) -> None:
         self.name = name
         self.is_df = is_df
 
@@ -27,9 +26,9 @@ class functional_datapipe(object):
                     not (hasattr(cls, '__self__') and
                          isinstance(cls.__self__, non_deterministic)):
                     raise TypeError('`functional_datapipe` can only decorate IterDataPipe')
-            IterDataPipe.register_datapipe_as_function(self.name, cls, is_df = self.is_df)
+            IterDataPipe.register_datapipe_as_function(self.name, cls, is_df=self.is_df)
         elif issubclass(cls, MapDataPipe):
-            MapDataPipe.register_datapipe_as_function(self.name, cls, is_df = self.is_df)
+            MapDataPipe.register_datapipe_as_function(self.name, cls, is_df=self.is_df)
 
         return cls
 

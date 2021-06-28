@@ -10,10 +10,6 @@ from torch.utils.data._typing import _DataPipeMeta
 from typing import TypeVar, Generic, Iterable, Iterator, Sequence, List, Optional, Tuple, Dict, Callable
 from ... import Tensor, Generator
 
-# from torch.utils.data.datapipes.iter.dataframes import DFIterDataPipe as DFIterDataPipe
-
-# import pandas
-
 
 T_co = TypeVar('T_co', covariant=True)
 T = TypeVar('T')
