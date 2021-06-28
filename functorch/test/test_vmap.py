@@ -932,6 +932,18 @@ class TestVmapAPI(TestCase):
         y = reshape_dim_outof(-1, 6, x)
         self.assertEqual(y, x.reshape(12, 12, 6, 2))
 
+    def test_batch_rule_does_not_need_to_handle_no_batched_input(self):
+        def f(x, y):
+            res = torch.dot(y, torch.ones(2))
+            return x + res
+
+        x = torch.randn(7, 5)
+        y = torch.randn(3, 2)
+        out = vmap(vmap(f, in_dims=(0, None)), in_dims=(None, 0))(x, y)
+        expected = torch.mv(y, torch.ones(2)).view(3, 1, 1) + x
+        self.assertEqual(out, expected)
+
+
 def slice_inputs(inputs, bdims, i):
     result = []
     for inp, bdim in zip(inputs, bdims):

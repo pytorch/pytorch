@@ -40,8 +40,6 @@ std::tuple<Tensor, optional<int64_t>> dot_batch_rule(const Tensor& A, optional<i
   auto B_ = moveBatchDimToFront(B, B_bdim);
   if (A_bdim && B_bdim) {
     return std::make_tuple(at::matmul(A_.unsqueeze(-2), B_.unsqueeze(-1)).squeeze(-1).squeeze(-1), 0);
-  } else if (!A_bdim && !B_bdim) {
-    return std::make_tuple(at::dot(A_, B_), nullopt);
   } else {
     return std::make_tuple(at::matmul(A_, B_.t()), 0);
   }
