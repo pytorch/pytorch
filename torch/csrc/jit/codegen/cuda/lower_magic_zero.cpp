@@ -20,6 +20,11 @@ class MagicZeroInserter : public kir::MutableIrVisitor {
   }
 
  private:
+  struct InsertionInfo {
+    kir::Scope* scope = nullptr;
+    kir::ForLoop* fl = nullptr;
+  };
+
   MagicZeroInserter(const std::vector<kir::Expr*>& exprs)
       : loop_nests_(exprs), ir_builder(GpuLower::current()->kernel()) {
     loop_nests_.insert(
@@ -27,6 +32,7 @@ class MagicZeroInserter : public kir::MutableIrVisitor {
     for (auto expr : exprs) {
       handle(expr);
     }
+    insertAll();
   }
 
   void handle(kir::Expr* expr) {
@@ -52,7 +58,25 @@ class MagicZeroInserter : public kir::MutableIrVisitor {
 
   void handle(kir::ForLoop* fl) {
     if (fl->isUnrollable()) {
-      if (scope_nest_.empty()) {
+      kir::Scope* scope = nullptr;
+      if (!scope_nest_.empty()) {
+        scope = scope_nest_.back();
+      }
+      insertion_list_.push_back({scope, fl});
+    } else {
+      scope_nest_.push_back(&fl->body());
+      for (auto expr : fl->body().exprs()) {
+        handle(expr);
+      }
+      scope_nest_.pop_back();
+    }
+  }
+
+  void insertAll() {
+    for (const auto& info : insertion_list_) {
+      auto fl = info.fl;
+      auto scope = info.scope;
+      if (scope == nullptr) {
         // place in global scope
         auto loop_it = std::find(loop_nests_.begin(), loop_nests_.end(), fl);
         TORCH_INTERNAL_ASSERT(loop_it != loop_nests_.end());
@@ -60,15 +84,8 @@ class MagicZeroInserter : public kir::MutableIrVisitor {
         loop_it++;
         loop_nests_.insert(loop_it, ir_builder.create<kir::UpdateMagicZero>());
       } else {
-        scope_nest_.back()->insert_after(
-            fl, ir_builder.create<kir::UpdateMagicZero>());
+        scope->insert_after(fl, ir_builder.create<kir::UpdateMagicZero>());
       }
-    } else {
-      scope_nest_.push_back(&fl->body());
-      for (auto expr : fl->body().exprs()) {
-        handle(expr);
-      }
-      scope_nest_.pop_back();
     }
   }
 
@@ -79,6 +96,8 @@ class MagicZeroInserter : public kir::MutableIrVisitor {
   std::vector<kir::Expr*> loop_nests_;
 
   kir::IrBuilder ir_builder;
+
+  std::vector<InsertionInfo> insertion_list_;
 };
 
 } // namespace
