@@ -11,7 +11,6 @@ import statistics
 import subprocess
 import time
 from collections import defaultdict
-from glob import glob
 from pathlib import Path
 from typing import (Any, DefaultDict, Dict, Iterable, Iterator, List, Optional,
                     Set, Tuple, cast)
@@ -599,16 +598,13 @@ class TestSuite:
         self.skipped_count += 1 if test_case.skipped else 0
         self.errored_count += 1 if test_case.errored else 0
 
-    def replace(self, test_case: TestCase) -> float:
+    def update(self, test_case: TestCase) -> None:
         name = test_case.name
         assert name in self.test_cases, f'Error: attempting to replace nonexistent test case {name}'
-        old_time = self.test_cases[name].time
-        # We don't replace anything if the old test case was not shorter.
-        if old_time >= test_case.time:
-            return 0.0
-        self.total_time = self.total_time + test_case.time - old_time
-        self.test_cases[name] = test_case
-        return test_case.time - old_time
+        self.test_cases[name].time += test_case.time
+        self.test_cases[name].failed |= test_case.failed
+        self.test_cases[name].errored |= test_case.errored
+        self.test_cases[name].skipped |= test_case.skipped
 
     def print_report(self, num_longest: int = 3) -> None:
         sorted_tests = sorted(self.test_cases.values(), key=lambda x: x.time)
@@ -632,23 +628,22 @@ class TestFile:
         self.total_time = 0.0
         self.test_suites: Dict[str, TestSuite] = dict()
 
-    def append(self, test_case: TestCase) -> None:
-        suite_name = test_case.class_name
+    def append(self, test_case: TestCase, test_type: str) -> None:
+        is_multi_test = self.name == 'test_cpp_extensions_aot' or \
+            self.name == 'distributed/test_distributed_fork' or \
+            self.name == 'distributed/test_distributed_spawn' or \
+            self.name == 'distributed/test_c10d_gloo' or \
+            self.name == 'cpp'  # The caffe2 cpp tests spawn duplicate test cases as well.
+        if is_multi_test:
+            suite_name = test_case.class_name + '__' + test_type
+        else:
+            suite_name = test_case.class_name
         if suite_name not in self.test_suites:
             self.test_suites[suite_name] = TestSuite(suite_name)
         if test_case.name in self.test_suites[suite_name].test_cases:
-            # We expect duplicate tests for test_cpp_extensions_aot, distributed/test_distributed_fork,
-            # and distributed/test_distributed_spawn and test_c10d_gloo.
-            # In these cases, we store the test case that took the longest,
-            # as in these jobs, the duplicate tests are run in parallel.
-            # For other unexpected cases, we should raise a warning.
-            if self.name == 'test_cpp_extensions_aot' or \
-               self.name == 'distributed/test_distributed_fork' or \
-               self.name == 'distributed/test_distributed_spawn' or \
-               self.name == 'distributed/test_c10d_gloo' or \
-               self.name == 'cpp':  # The caffe2 cpp tests spawn duplicate test cases as well.
-                time_difference = self.test_suites[suite_name].replace(test_case)
-                self.total_time += time_difference
+            if is_multi_test:
+                self.test_suites[suite_name].update(test_case)
+                self.total_time += test_case.time
             else:
                 raise RuntimeWarning(f'Duplicate test case {test_case.name} in suite {suite_name} called from {self.name}')
         else:
@@ -666,16 +661,35 @@ def parse_report(path: str) -> Iterator[TestCase]:
         yield TestCase(test_case)
 
 
+def get_recursive_files(folder: str, extension: str) -> Iterable[str]:
+    """
+    Get recursive list of files with given extension even.
+
+    Use it instead of glob(os.path.join(folder, '**', f'*{extension}'))
+    if folder/file names can start with `.`, which makes it hidden on Unix platforms
+    """
+    assert extension.startswith(".")
+    for root, _, files in os.walk(folder):
+        for fname in files:
+            if os.path.splitext(fname)[1] == extension:
+                yield os.path.join(root, fname)
+
+
 def parse_reports(folder: str) -> Dict[str, TestFile]:
-    reports = glob(os.path.join(folder, '**', '*.xml'), recursive=True)
     tests_by_file = dict()
-    for report in reports:
-        test_filename = re.sub(r'\.', '/', os.path.basename(os.path.dirname(report)))
+    for report in get_recursive_files(folder, ".xml"):
+        report_path = Path(report)
+        # basename of the directory of test-report is the test filename
+        test_filename = re.sub(r'\.', '/', report_path.parent.name)
+        # test type is the parent directory (only applies to dist-*)
+        # See: CUSTOM_HANDLERS in test/run_test.py
+        test_type = report_path.parent.parent.name
         if test_filename not in tests_by_file:
             tests_by_file[test_filename] = TestFile(test_filename)
         for test_case in parse_report(report):
-            tests_by_file[test_filename].append(test_case)
+            tests_by_file[test_filename].append(test_case, test_type)
     return tests_by_file
+
 
 def build_info() -> ReportMetaMeta:
     return {
@@ -684,7 +698,7 @@ def build_info() -> ReportMetaMeta:
         "build_sha1": os.environ.get("CIRCLE_SHA1", ""),
         "build_base_commit": get_base_commit(os.environ.get("CIRCLE_SHA1", "HEAD")),
         "build_branch": os.environ.get("CIRCLE_BRANCH", ""),
-        "build_job": os.environ.get("CIRCLE_JOB", ""),
+        "build_job": os.environ.get("JOB_BASE_NAME", ""),
         "build_workflow_id": os.environ.get("CIRCLE_WORKFLOW_ID", ""),
     }
 
@@ -761,9 +775,9 @@ def assemble_s3_object(
                         'cases': {
                             name: {
                                 'seconds': case.time,
-                                'status': 'skipped' if case.skipped else
-                                          'errored' if case.errored else
-                                          'failed' if case.failed else None
+                                'status': 'errored' if case.errored else
+                                          'failed' if case.failed else
+                                          'skipped' if case.skipped else None
                             }
                             for name, case in suite.test_cases.items()
                         },
@@ -777,7 +791,7 @@ def assemble_s3_object(
 
 
 def send_report_to_s3(head_report: Version2Report) -> None:
-    job = os.environ.get('CIRCLE_JOB')
+    job = os.environ.get('JOB_BASE_NAME')
     sha1 = os.environ.get('CIRCLE_SHA1')
     branch = os.environ.get('CIRCLE_BRANCH', '')
     now = datetime.datetime.utcnow().isoformat()
@@ -823,7 +837,7 @@ def print_regressions(head_report: Report, *, num_prev_commits: int) -> None:
     else:
         commits = commits[:-1]
 
-    job = os.environ.get("CIRCLE_JOB", "")
+    job = os.environ.get("JOB_BASE_NAME", "")
     objects: Dict[Commit, List[Report]] = defaultdict(list)
 
     for commit in commits:

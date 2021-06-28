@@ -272,18 +272,16 @@ FileStore::FileStore(const std::string& path, int numWorkers)
       numWorkers_(numWorkers),
       cleanupKey_("cleanup/"),
       regularPrefix_("/") {
-  if (numWorkers_ < 1) {
-    TORCH_CHECK(false,
-        "Number of workers for FileStore should be greater than zero");
-  }
 }
 
 FileStore::~FileStore() {
   // cleanup key will be different from all rest keys since all rest keys will
   // have a regular prefix.
   auto numFinishedWorker = addHelper(cleanupKey_, 1);
-  // The last worker cleans up the file
-  if (numFinishedWorker == numWorkers_) {
+  // The last worker cleans up the file. If numWorkers was not initialized to
+  // a specific postive value (i.e. meaning that there was not a fixed number
+  // of workers), we don't attempt to clean.
+  if (numWorkers_ >= 0 && numFinishedWorker == numWorkers_) {
     // Best effort removal without checking the return
     std::remove(path_.c_str());
   }

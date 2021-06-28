@@ -38,6 +38,11 @@ class TORCH_API FileStore : public Store {
       const std::vector<std::string>& keys,
       const std::chrono::milliseconds& timeout) override;
 
+  // Returns the path used by the FileStore.
+  const std::string& getPath() const noexcept {
+    return path_;
+  }
+
  protected:
   int64_t addHelper(const std::string& key, int64_t i);
 
