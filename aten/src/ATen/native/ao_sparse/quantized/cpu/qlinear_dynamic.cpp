@@ -34,9 +34,8 @@ at::Tensor PackedLinearWeightQnnp::apply_dynamic_impl<false>(
       "quantized_sparse_linear(): Input tensor rank should be >= 2");
 
   const size_t rows_input = c10::multiply_integers(input.sizes().begin(), input.sizes().end() - 1);
-  const size_t cols_input = input.size(input.dim() - 1);
+  const size_t cols_input = static_cast<int64_t>(input.size(input.dim() - 1));
   TORCH_CHECK(
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       cols_input == orig_weight_.size(1),
       "quantized_sparse_lienar: Input tensor's last and weight tensor's"
       " second dimension must match.");
