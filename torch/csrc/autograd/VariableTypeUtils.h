@@ -292,32 +292,27 @@ inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor>& ten
   return tensors;
 }
 
-inline void check_no_requires_grad(const Tensor& tensor, const char* name) {
-  auto& var = static_cast<const Variable&>(tensor);
-  if (var.defined() && var.requires_grad()) {
-    std::string msg = "the derivative for '";
-    msg += name;
-    msg += "' is not implemented";
-    TORCH_CHECK(false, msg);
-  }
+inline void check_no_requires_grad(const Tensor& tensor, const char* name, const char* fn_name="") {
+  TORCH_CHECK(!(tensor.defined() && tensor.requires_grad()), "The function '", fn_name, "' is not differentiable "
+              "with respect to argument '", name, "'. This input cannot have requires_grad True.");
 }
 
-inline void check_no_requires_grad(const c10::optional<Tensor>& tensor, const char* name) {
+inline void check_no_requires_grad(const c10::optional<Tensor>& tensor, const char* name, const char* fn_name="") {
   if (tensor.has_value()) {
-    check_no_requires_grad(*tensor, name);
+    check_no_requires_grad(*tensor, name, fn_name);
   }
 }
 
-inline void check_no_requires_grad(TensorList tensors, const char* name) {
+inline void check_no_requires_grad(TensorList tensors, const char* name, const char* fn_name="") {
   for (auto& tensor : tensors) {
-    check_no_requires_grad(tensor, name);
+    check_no_requires_grad(tensor, name, fn_name);
   }
 }
 
-inline void check_no_requires_grad(const c10::List<c10::optional<Tensor>>& tensors, const char* name) {
+inline void check_no_requires_grad(const c10::List<c10::optional<Tensor>>& tensors, const char* name, const char* fn_name="") {
   for (c10::optional<Tensor> tensor : tensors) {
     if (tensor.has_value()) {
-      check_no_requires_grad(*tensor, name);
+      check_no_requires_grad(*tensor, name, fn_name);
     }
   }
 }
