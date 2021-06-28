@@ -540,6 +540,16 @@ class TestTorchFunctionOverride(TestCase):
         with self.assertRaises(TypeError):
             sn1 + s2
 
+    def test_base(self):
+        # https://github.com/szagoruyko/pytorchviz/issues/65
+        class DummyTensor(torch.Tensor):
+            pass
+
+        a = torch.ones(1)
+        c = DummyTensor(a)
+        self.assertTrue(c._is_view())
+        self.assertTrue(c._base is a)
+
 
 def generate_tensor_like_override_tests(cls):
     from torch.testing._internal.generated.annotated_fn_args import annotated_args

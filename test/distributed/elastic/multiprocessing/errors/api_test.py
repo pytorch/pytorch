@@ -84,6 +84,16 @@ class ApiTest(unittest.TestCase):
         self.assertEqual("test error message", pf.message)
         self.assertEqual(10, pf.timestamp)
 
+    def test_process_mast_error_format(self):
+        error_data = {"message": "test error message", "timestamp": "10"}
+        with open(self.test_error_file, "w") as fp:
+            json.dump(error_data, fp)
+        pf = ProcessFailure(
+            local_rank=0, pid=997, exitcode=1, error_file=self.test_error_file
+        )
+        self.assertEqual("test error message", pf.message)
+        self.assertEqual(10, pf.timestamp)
+
     def test_process_failure(self):
         pf = self.failure_with_error_file(exception=SentinelError("foobar"))
         self.assertEqual(0, pf.local_rank)
