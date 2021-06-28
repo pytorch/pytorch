@@ -19,6 +19,7 @@ Tensors
     is_tensor
     is_storage
     is_complex
+    is_conj
     is_floating_point
     is_nonzero
     set_default_dtype
@@ -86,6 +87,7 @@ Indexing, Slicing, Joining, Mutating Ops
     :nosignatures:
 
     cat
+    conj
     chunk
     dsplit
     column_stack
@@ -99,6 +101,7 @@ Indexing, Slicing, Joining, Mutating Ops
     moveaxis
     narrow
     nonzero
+    permute
     reshape
     row_stack
     scatter
@@ -253,6 +256,9 @@ Examples::
     no_grad
     enable_grad
     set_grad_enabled
+    is_grad_enabled
+    inference_mode
+    is_inference_mode_enabled
 
 Math operations
 ---------------
@@ -287,10 +293,12 @@ Pointwise Ops
     bitwise_and
     bitwise_or
     bitwise_xor
+    bitwise_left_shift
+    bitwise_right_shift
     ceil
     clamp
     clip
-    conj
+    conj_physical
     copysign
     cos
     cosh
@@ -313,6 +321,7 @@ Pointwise Ops
     fmod
     frac
     frexp
+    gradient
     imag
     ldexp
     lerp
@@ -415,6 +424,7 @@ Comparison Ops
     greater
     isclose
     isfinite
+    isin
     isinf
     isposinf
     isneginf
@@ -490,6 +500,7 @@ Other Operations
     rot90
     gcd
     histc
+    histogram
     meshgrid
     lcm
     logcumsumexp
@@ -507,6 +518,7 @@ Other Operations
     vander
     view_as_real
     view_as_complex
+    resolve_conj
 
 
 BLAS and LAPACK Operations

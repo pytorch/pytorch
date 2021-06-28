@@ -50,6 +50,8 @@ class _NormBase(Module):
         if self.track_running_stats:
             self.register_buffer('running_mean', torch.zeros(num_features, **factory_kwargs))
             self.register_buffer('running_var', torch.ones(num_features, **factory_kwargs))
+            self.running_mean: Optional[Tensor]
+            self.running_var: Optional[Tensor]
             self.register_buffer('num_batches_tracked',
                                  torch.tensor(0, dtype=torch.long,
                                               **{k: v for k, v in factory_kwargs.items() if k != 'dtype'}))
@@ -63,9 +65,9 @@ class _NormBase(Module):
         if self.track_running_stats:
             # running_mean/running_var/num_batches... are registered at runtime depending
             # if self.track_running_stats is on
-            self.running_mean.zero_()  # type: ignore[operator]
-            self.running_var.fill_(1)  # type: ignore[operator]
-            self.num_batches_tracked.zero_()  # type: ignore[operator]
+            self.running_mean.zero_()  # type: ignore[union-attr]
+            self.running_var.fill_(1)  # type: ignore[union-attr]
+            self.num_batches_tracked.zero_()  # type: ignore[union-attr,operator]
 
     def reset_parameters(self) -> None:
         self.reset_running_stats()
@@ -162,8 +164,6 @@ class _BatchNorm(_NormBase):
         passed when the update should occur (i.e. in training mode when they are tracked), or when buffer stats are
         used for normalization (i.e. in eval mode when buffers are not None).
         """
-        assert self.running_mean is None or isinstance(self.running_mean, torch.Tensor)
-        assert self.running_var is None or isinstance(self.running_var, torch.Tensor)
         return F.batch_norm(
             input,
             # If buffers are not to be tracked, ensure that they won't be updated
@@ -221,8 +221,8 @@ class _LazyBatchNorm(LazyModuleMixin, _BatchNorm):
                 self.weight.materialize((self.num_features,))
                 self.bias.materialize((self.num_features,))
             if self.track_running_stats:
-                self.running_mean.materialize((self.num_features,))
-                self.running_var.materialize((self.num_features,))
+                self.running_mean.materialize((self.num_features,))  # type:ignore[union-attr]
+                self.running_var.materialize((self.num_features,))  # type:ignore[union-attr]
             self.reset_parameters()
 
 
@@ -715,8 +715,6 @@ class SyncBatchNorm(_BatchNorm):
         used for normalization (i.e. in eval mode when buffers are not None).
         """
         # If buffers are not to be tracked, ensure that they won't be updated
-        assert self.running_mean is None or isinstance(self.running_mean, torch.Tensor)
-        assert self.running_var is None or isinstance(self.running_var, torch.Tensor)
         running_mean = (
             self.running_mean if not self.training or self.track_running_stats else None
         )
@@ -765,7 +763,7 @@ class SyncBatchNorm(_BatchNorm):
         :class:`torch.nn.SyncBatchNorm` layers.
 
         Args:
-            module (nn.Module): module containing one or more attr:`BatchNorm*D` layers
+            module (nn.Module): module containing one or more :attr:`BatchNorm*D` layers
             process_group (optional): process group to scope synchronization,
                 default is the whole world
 

@@ -4,7 +4,6 @@ namespace caffe2 {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RowWiseSparseAdagradFusedWithSparseLengthsSumGradient)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(6)
     .NumOutputs(2)
     .EnforceOneToOneInplace()
@@ -29,7 +28,6 @@ SparseLengthsSumGradient operator.
     .Input(3, "grad", "Gradient computed")
     .Input(4, "lr", "learning rate")
     .Input(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         5,
         "lengths",
         "Non negative vector with sum of elements equal to indices length")
@@ -65,7 +63,6 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
 // RowWiseSparseAdagradFusedWithSparseLengthsSumGradient op
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RowWiseSparseAdagradFusedWithSparseLengthsSumGradientApprox)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(6)
     .NumOutputs(2)
     .EnforceOneToOneInplace()
@@ -90,7 +87,6 @@ SparseLengthsSumGradient operator.
     .Input(3, "grad", "Gradient computed")
     .Input(4, "lr", "learning rate")
     .Input(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         5,
         "lengths",
         "Non negative vector with sum of elements equal to indices length")
@@ -124,7 +120,6 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RowWiseSparseAdagradFusedWithSparseLengthsMeanGradient)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(6)
     .NumOutputs(2)
     .EnforceOneToOneInplace()
@@ -149,7 +144,6 @@ SparseLengthsMeanGradient operator.
     .Input(3, "grad", "Gradient computed")
     .Input(4, "lr", "learning rate")
     .Input(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         5,
         "lengths",
         "Non negative vector with sum of elements equal to indices length")
@@ -182,7 +176,6 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
 // RowWiseSparseAdagradFusedWithSparseLengthsMeanGradient op
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RowWiseSparseAdagradFusedWithSparseLengthsMeanGradientApprox)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(6)
     .NumOutputs(2)
     .EnforceOneToOneInplace()
@@ -207,7 +200,6 @@ SparseLengthsMeanGradient operator.
     .Input(3, "grad", "Gradient computed")
     .Input(4, "lr", "learning rate")
     .Input(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         5,
         "lengths",
         "Non negative vector with sum of elements equal to indices length")
@@ -241,7 +233,6 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradient)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(7)
     .NumOutputs(3)
     .EnforceInplace({{0, 0}, {1, 1}})
@@ -268,10 +259,8 @@ operator.
         "indices",
         "Integer vector containing indices of the first dimension of param for the slices that are being updated")
     .Input(4, "grad", "Gradient computed")
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .Input(5, "lr", "learning rate")
     .Input(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         6,
         "lengths",
         "Non negative vector with sum of elements equal to indices length")
@@ -302,7 +291,6 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(
     RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientApprox)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(7)
     .NumOutputs(3)
     .EnforceInplace({{0, 0}, {1, 1}})
@@ -332,10 +320,8 @@ operator.
         "indices",
         "Integer vector containing indices of the first dimension of param for the slices that are being updated")
     .Input(4, "grad", "Gradient computed")
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .Input(5, "lr", "learning rate")
     .Input(
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         6,
         "lengths",
         "Non negative vector with sum of elements equal to indices length")

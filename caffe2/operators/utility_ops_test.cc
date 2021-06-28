@@ -34,7 +34,6 @@ TEST(UtilityOpTest, testReshapeWithScalar) {
   def.add_output("XNew");
   def.add_output("OldShape");
   def.add_arg()->CopyFrom(MakeArgument("shape", vector<int64_t>{1}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   AddConstInput(vector<int64_t>(), 3.14, "X", &ws);
   // execute the op
   unique_ptr<OperatorBase> op(CreateOperator(def, &ws));

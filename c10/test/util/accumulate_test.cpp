@@ -11,7 +11,6 @@ using namespace ::testing;
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(accumulate_test, vector_test) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> ints = {1, 2, 3, 4, 5};
 
   EXPECT_EQ(c10::sum_integers(ints), 1 + 2 + 3 + 4 + 5);
@@ -33,7 +32,6 @@ TEST(accumulate_test, vector_test) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(accumulate_test, list_test) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::list<int> ints = {1, 2, 3, 4, 5};
 
   EXPECT_EQ(c10::sum_integers(ints), 1 + 2 + 3 + 4 + 5);
@@ -59,7 +57,6 @@ TEST(accumulate_test, base_cases) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(accumulate_test, errors) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> ints = {1, 2, 3, 4, 5};
 
 #ifndef NDEBUG

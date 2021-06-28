@@ -48,9 +48,7 @@ bool MishGradientOp<CPUContext>::DoRunWithType() {
   math::Tanh<T, CPUContext>(N, dX_data, dX_data, &context_);
   dX_arr = dY_arr *
       (dX_arr +
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        X_arr * (T(1) - dX_arr.square()) * T(0.5) *
-           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            ((X_arr * T(0.5)).tanh() + T(1)));
 
   return true;

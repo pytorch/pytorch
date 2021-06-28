@@ -44,13 +44,10 @@ void _THError(const char *file, const int line, const char *fmt, ...)
   /* vasprintf not standard */
   /* vsnprintf: how to handle if does not exists? */
   va_start(args, fmt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int n = vsnprintf(msg, 2048, fmt, args);
   va_end(args);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if(n < 2048) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     snprintf(msg + n, 2048 - n, " at %s:%d", file, line);
   }
 
@@ -66,25 +63,9 @@ void _THAssertionFailed(const char *file, const int line, const char *exp, const
   char msg[1024];
   va_list args;
   va_start(args, fmt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   vsnprintf(msg, 1024, fmt, args);
   va_end(args);
   _THError(file, line, "Assertion `%s' failed. %s", exp, msg);
-}
-
-void THSetErrorHandler(THErrorHandlerFunction new_handler, void *data)
-{
-  threadErrorHandler = new_handler;
-  threadErrorHandlerData = data;
-}
-
-void THSetDefaultErrorHandler(THErrorHandlerFunction new_handler, void *data)
-{
-  if (new_handler)
-    defaultErrorHandler = new_handler;
-  else
-    defaultErrorHandler = defaultErrorHandlerFunction;
-  defaultErrorHandlerData = data;
 }
 
 /* Torch Arg Checking Handling */
@@ -114,13 +95,10 @@ void _THArgCheck(const char *file, int line, int condition, int argNumber, const
     /* vasprintf not standard */
     /* vsnprintf: how to handle if does not exists? */
     va_start(args, fmt);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     int n = vsnprintf(msg, 2048, fmt, args);
     va_end(args);
 
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if(n < 2048) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       snprintf(msg + n, 2048 - n, " at %s:%d", file, line);
     }
 
@@ -132,42 +110,6 @@ void _THArgCheck(const char *file, int line, int condition, int argNumber, const
   }
 }
 
-void THSetArgErrorHandler(THArgErrorHandlerFunction new_handler, void *data)
-{
-  threadArgErrorHandler = new_handler;
-  threadArgErrorHandlerData = data;
-}
-
-void THSetDefaultArgErrorHandler(THArgErrorHandlerFunction new_handler, void *data)
-{
-  if (new_handler)
-    defaultArgErrorHandler = new_handler;
-  else
-    defaultArgErrorHandler = defaultArgErrorHandlerFunction;
-  defaultArgErrorHandlerData = data;
-}
-
-// NOLINTNEXTLINE(modernize-use-nullptr,cppcoreguidelines-avoid-non-const-global-variables)
-static __thread void (*torchGCFunction)(void *data) = NULL;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-static __thread void *torchGCData;
-
-/* Optional hook for integrating with a garbage-collected frontend.
- *
- * If torch is running with a garbage-collected frontend (e.g. Lua),
- * the GC isn't aware of TH-allocated memory so may not know when it
- * needs to run. These hooks trigger the GC to run in two cases:
- *
- * (1) When a memory allocation (malloc, realloc, ...) fails
- * (2) When the total TH-allocated memory hits a dynamically-adjusted
- *     soft maximum.
- */
-void THSetGCHandler( void (*torchGCFunction_)(void *data), void *data )
-{
-  torchGCFunction = torchGCFunction_;
-  torchGCData = data;
-}
-
 void* THAlloc(ptrdiff_t size)
 {
   if(size < 0)
@@ -176,64 +118,7 @@ void* THAlloc(ptrdiff_t size)
   return c10::alloc_cpu(size);
 }
 
-void* THRealloc(void *ptr, ptrdiff_t size)
-{
-  if(!ptr)
-    return(THAlloc(size));
-
-  if(size == 0)
-  {
-    THFree(ptr);
-    // NOLINTNEXTLINE(modernize-use-nullptr)
-    return NULL;
-  }
-
-  if(size < 0)
-    THError("$ Torch: invalid memory size -- maybe an overflow?");
-
-  // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
-  void *newptr = realloc(ptr, size);
-
-  if(!newptr && torchGCFunction) {
-    torchGCFunction(torchGCData);
-    // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
-    newptr = realloc(ptr, size);
-  }
-
-  if(!newptr)
-    THError("$ Torch: not enough memory: you tried to reallocate %dGB. Buy new RAM!", size/1073741824);
-
-  return newptr;
-}
-
 void THFree(void *ptr)
 {
   c10::free_cpu(ptr);
-}
-
-THDescBuff _THSizeDesc(const int64_t *size, const int64_t ndim) {
-  const int L = TH_DESC_BUFF_LEN;
-  THDescBuff buf;
-  char *str = buf.str;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t i;
-  int64_t n = 0;
-  n += snprintf(str, L-n, "[");
-
-  for (i = 0; i < ndim; i++) {
-    if (n >= L) break;
-    n += snprintf(str+n, L-n, "%" PRId64, size[i]);
-    if (i < ndim-1) {
-      n += snprintf(str+n, L-n, " x ");
-    }
-  }
-
-  if (n < L - 2) {
-    snprintf(str+n, L-n, "]");
-  } else {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-    snprintf(str+L-5, 5, "...]");
-  }
-
-  return buf;
 }

@@ -64,7 +64,6 @@ class IDEEPInt8GivenTensorFillOp final : public IDEEPOperator {
           temp_ten.get_nelems(), values_data, data_u8);
 
       // Shift quantized data to s8 per zero point
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       if (zero_point_ == 128) {
         auto* data_s8 = static_cast<int8_t*>(temp_ten.get_data_handle());
         auto nelems = temp_ten.get_nelems();

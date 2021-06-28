@@ -120,6 +120,29 @@ class TestResources(PackageTestCase):
         self.assertEqual(m.t, "my string")
         self.assertEqual(m.b, "my string".encode("utf-8"))
 
+    def test_resource_access_by_path(self):
+        """
+        Tests that packaged code can used importlib.resources.path.
+        """
+        buffer = BytesIO()
+        with PackageExporter(buffer, verbose=False) as he:
+            he.save_binary("string_module", "my_string", "my string".encode("utf-8"))
+            src = dedent(
+                """\
+                import importlib.resources
+                import string_module
+
+                with importlib.resources.path(string_module, 'my_string') as path:
+                    with open(path, mode='r', encoding='utf-8') as f:
+                        s = f.read()
+                """
+            )
+            he.save_source_string("main", src, is_package=True)
+        buffer.seek(0)
+        hi = PackageImporter(buffer)
+        m = hi.import_module("main")
+        self.assertEqual(m.s, "my string")
+
 
 if __name__ == "__main__":
     run_tests()

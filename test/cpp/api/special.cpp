@@ -9,7 +9,6 @@
 //   properly in C++
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SpecialTest, special) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto t = torch::randn(128, torch::kDouble);
     torch::special::gammaln(t);
 }

@@ -238,7 +238,6 @@ struct QuantizedCellParams : public CellParamsBase {
     at::Tensor qw_ih = std::move(tensors[0]), qw_hh = std::move(tensors[1]),
                b_ih = std::move(tensors[2]), b_hh = std::move(tensors[3]),
                col_offsets_ih = std::move(tensors[4]),
-               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                col_offsets_hh = std::move(tensors[5]);
     double scale_ih = doubles[0], scale_hh = doubles[1];
     int64_t zero_point_ih = longs[0], zero_point_hh = longs[1];
@@ -555,7 +554,6 @@ static std::vector<CellParams> gather_params(TensorList params, bool has_biases,
   if (has_biases) {
     if (has_projections) {
       TORCH_CHECK(params.size() % 5 == 0, "got an incorrect number of RNN parameters");
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       for (size_t i = 0; i < params.size(); i += 5) {
         result.emplace_back(params[i], params[i + 1], params[i + 2], params[i + 3], params[i + 4]);
       }
@@ -589,7 +587,6 @@ static c10::List<c10::intrusive_ptr<CellParamsBase>> gather_quantized_params(
   static at::Tensor undefined;
   std::vector<c10::intrusive_ptr<CellParamsBase>> result;
   TORCH_CHECK(params.size() % 12 == 0, "got an incorrect number of quantized RNN parameters");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (size_t i = 0; i < params.size(); i += 12) {
     result.emplace_back(c10::make_intrusive<QuantizedCellParams>(
         static_cast<at::Tensor>(params[i]),
@@ -597,19 +594,12 @@ static c10::List<c10::intrusive_ptr<CellParamsBase>> gather_quantized_params(
         static_cast<at::Tensor>(params[i + 2]),
         static_cast<at::Tensor>(params[i + 3]),
         static_cast<at::Tensor>(params[i + 4]),
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         static_cast<at::Tensor>(params[i + 5]),
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         static_cast<at::Tensor>(params[i + 6]),
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         static_cast<at::Tensor>(params[i + 7]),
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         static_cast<at::Tensor>(params[i + 8]).item(),
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         static_cast<at::Tensor>(params[i + 9]).item(),
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         static_cast<at::Tensor>(params[i + 10]).item(),
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         static_cast<at::Tensor>(params[i + 11]).item()));
   }
   return c10::List<c10::intrusive_ptr<CellParamsBase>>(result);
@@ -896,10 +886,12 @@ struct FullLayer : Layer<Tensor, hidden_type, cell_params> {
       const auto inputs_w = params.linear_ih(inputs);
       auto unstacked_output =
           (*this)(inputs_w.unbind(0), input_hidden, params, true);
+      TORCH_CHECK(unstacked_output.outputs.size()>0, "Expected sequence length to be larger than 0 in RNN");
       return {at::stack(unstacked_output.outputs, 0),
               unstacked_output.final_hidden};
     }
     auto unstacked_output = (*this)(inputs.unbind(0), input_hidden, params);
+    TORCH_CHECK(unstacked_output.outputs.size()>0, "Expected sequence length to be larger than 0 in RNN");
     return {at::stack(unstacked_output.outputs, 0),
             unstacked_output.final_hidden};
   }
@@ -927,6 +919,7 @@ struct FullBidirectionalLayer
       step_inputs = input_w.unbind(0);
       auto fw_result = layer_(
           step_inputs, input_hidden.first, params.first, true);
+      TORCH_CHECK(fw_result.outputs.size() > 0, "Expected sequence length to be larger than 0 in RNN");
       auto fw_output = at::stack(fw_result.outputs, 0);
       input_w = params.second.linear_ih(input);
       step_inputs = input_w.unbind(0);
@@ -941,6 +934,7 @@ struct FullBidirectionalLayer
 
     step_inputs = input.unbind(0);
     auto fw_result = layer_(step_inputs, input_hidden.first, params.first);
+    TORCH_CHECK(fw_result.outputs.size() > 0, "Expected sequence length to be larger than 0 in RNN");
     auto fw_output = at::stack(fw_result.outputs, 0);
     auto rev_step_inputs = reverse(std::move(step_inputs));
     auto rev_result =

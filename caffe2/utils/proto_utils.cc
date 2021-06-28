@@ -7,6 +7,12 @@
 #include <fstream>
 #include <unordered_set>
 
+#if defined(_MSC_VER)
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
+
 #include <google/protobuf/io/coded_stream.h>
 
 #ifndef CAFFE2_USE_LITE_PROTO
@@ -16,7 +22,7 @@
 #include <google/protobuf/io/zero_copy_stream_impl_lite.h>
 #endif // !CAFFE2_USE_LITE_PROTO
 
-#include "caffe2/core/logging.h"
+#include <c10/util/Logging.h>
 
 using ::google::protobuf::MessageLite;
 
@@ -210,7 +216,6 @@ C10_EXPORT bool ParseProtoFromLargeString(const string& str, Message* proto) {
   ::google::protobuf::io::ArrayInputStream input_stream(str.data(), str.size());
   ::google::protobuf::io::CodedInputStream coded_stream(&input_stream);
   // Set PlanDef message size limit to 2G.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   setTotalBytesLimit(coded_stream, 2147483647, 512LL << 20);
   return proto->ParseFromCodedStream(&coded_stream);
 }
@@ -229,7 +234,6 @@ C10_EXPORT void WriteProtoToTextFile(
     const Message& proto,
     const char* filename,
     bool throwIfError) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
   FileOutputStream* output = new FileOutputStream(fd);
   if(!google::protobuf::TextFormat::Print(proto, output)) {
@@ -258,7 +262,6 @@ C10_EXPORT bool ReadProtoFromBinaryFile(
   // A hack to manually allow using very large protocol buffers.
   #if GOOGLE_PROTOBUF_VERSION >= 3011000
     // Only take one parameter since protobuf 3.11
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     coded_input->SetTotalBytesLimit(2147483647);
   #else
     // Total bytes hard limit / warning limit are set to 2GB and 512MB respectively.
@@ -274,7 +277,6 @@ C10_EXPORT bool ReadProtoFromBinaryFile(
 C10_EXPORT void WriteProtoToBinaryFile(
     const MessageLite& proto,
     const char* filename) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
   CAFFE_ENFORCE_NE(
       fd, -1, "File cannot be created: ", filename, " error number: ", errno);
@@ -413,12 +415,12 @@ INSTANTIATE_GET_SINGLE_ARGUMENT(NetDef, n, false)
 #define INSTANTIATE_GET_REPEATED_ARGUMENT(                             \
     T, fieldname, enforce_lossless_conversion)                         \
   template <>                                                          \
-  C10_EXPORT vector<T> ArgumentHelper::GetRepeatedArgument<T>(         \
+  C10_EXPORT std::vector<T> ArgumentHelper::GetRepeatedArgument<T>(         \
       const string& name, const std::vector<T>& default_value) const { \
     if (arg_map_.count(name) == 0) {                                   \
       return default_value;                                            \
     }                                                                  \
-    vector<T> values;                                                  \
+    std::vector<T> values;                                                  \
     for (const auto& v : arg_map_.at(name).fieldname()) {              \
       if (enforce_lossless_conversion) {                               \
         auto supportsConversion =                                      \
@@ -493,7 +495,7 @@ C10_EXPORT Argument MakeArgument(const string& name, const MessageLite& value) {
 #define CAFFE2_MAKE_REPEATED_ARGUMENT(T, fieldname) \
   template <>                                       \
   C10_EXPORT Argument MakeArgument(                 \
-      const string& name, const vector<T>& value) { \
+      const string& name, const std::vector<T>& value) { \
     Argument arg;                                   \
     arg.set_name(name);                             \
     for (const auto& v : value) {                   \

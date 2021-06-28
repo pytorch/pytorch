@@ -31,19 +31,16 @@ void DummyObserver<NetBase>::Start() {
   for (auto& op : operators) {
     op->AttachObserver(std::make_unique<DummyObserver<OperatorBase>>(op));
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   counter.fetch_add(1000);
 }
 
 template <>
 void DummyObserver<OperatorBase>::Start() {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   counter.fetch_add(100);
 }
 
 template <>
 void DummyObserver<NetBase>::Stop() {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   counter.fetch_add(10);
 }
 

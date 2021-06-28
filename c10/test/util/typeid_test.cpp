@@ -75,7 +75,6 @@ TEST(TypeMetaTest, TypeMeta) {
 
 class ClassAllowAssignment {
  public:
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ClassAllowAssignment() : x(42) {}
   // NOLINTNEXTLINE(modernize-use-equals-default)
   ClassAllowAssignment(const ClassAllowAssignment& src) : x(src.x) {}
@@ -85,7 +84,6 @@ class ClassAllowAssignment {
 
 class ClassNoAssignment {
  public:
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ClassNoAssignment() : x(42) {}
   ClassNoAssignment(const ClassNoAssignment& src) = delete;
   ClassNoAssignment& operator=(const ClassNoAssignment& src) = delete;
@@ -110,7 +108,6 @@ TEST(TypeMetaTest, CtorDtorAndCopy) {
   EXPECT_TRUE(meta_a.placementDelete() != nullptr);
   EXPECT_TRUE(meta_a.copy() != nullptr);
   ClassAllowAssignment src;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   src.x = 10;
   ClassAllowAssignment dst;
   EXPECT_EQ(dst.x, 42);

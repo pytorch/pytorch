@@ -5,6 +5,7 @@ import string
 import textwrap
 import doctest
 from typing import Dict, Any
+import traceback
 
 import hypothesis
 from hypothesis.strategies import text, integers, composite, sampled_from, booleans
@@ -38,7 +39,8 @@ class TestExpectTest(TestCase):
         r2 = {r}{quote}placeholder2{quote}
         r3 = {r}{quote}placeholder3{quote}
         """.format(r='r' if raw else '', quote=quote * 3)
-        new_prog = expecttest.replace_string_literal(textwrap.dedent(prog), 2, t)[0]
+        new_prog = expecttest.replace_string_literal(
+            textwrap.dedent(prog), 2, 2, t)[0]
         ns : Dict[str, Any] = {}
         exec(new_prog, ns)
         msg = "program was:\n{}".format(new_prog)
@@ -46,7 +48,7 @@ class TestExpectTest(TestCase):
         self.assertEqual(ns['r2'], expecttest.normalize_nl(t), msg=msg)  # noqa: F821
         self.assertEqual(ns['r3'], 'placeholder3', msg=msg)  # noqa: F821
 
-    def test_sample(self):
+    def test_sample_lineno(self):
         prog = r"""
 single_single('''0''')
 single_multi('''1''')
@@ -63,21 +65,27 @@ multi_multi_same('''\
 multi_multi_more('''\
 6
 ''')
+different_indent(
+    RuntimeError,
+    '''7'''
+)
 """
-        # NB: These are the end of the statements, not beginning
-        # TODO: Test other permutations of these edits
-        edits = [(2, "a"),
-                 (3, "b\n"),
-                 (6, "c"),
-                 (10, "d\n"),
-                 (13, "e\n"),
-                 (16, "f\ng\n")]
+        edits = [(2, 2, "a"),
+                 (3, 3, "b\n"),
+                 (4, 6, "c"),
+                 (7, 10, "d\n"),
+                 (11, 13, "e\n"),
+                 (14, 16, "f\ng\n"),
+                 (17, 20, "h")]
         history = expecttest.EditHistory()
         fn = 'not_a_real_file.py'
-        for lineno, actual in edits:
-            lineno = history.adjust_lineno(fn, lineno)
-            prog, delta = expecttest.replace_string_literal(prog, lineno, actual)
-            history.record_edit(fn, lineno, delta)
+        for start_lineno, end_lineno, actual in edits:
+            start_lineno = history.adjust_lineno(fn, start_lineno)
+            end_lineno = history.adjust_lineno(fn, end_lineno)
+            prog, delta = expecttest.replace_string_literal(
+                prog, start_lineno, end_lineno, actual)
+            # NB: it doesn't really matter start/end you record edit at
+            history.record_edit(fn, start_lineno, delta)
         self.assertExpectedInline(prog, r"""
 single_single('''a''')
 single_multi('''\
@@ -94,7 +102,27 @@ multi_multi_more('''\
 f
 g
 ''')
+different_indent(
+    RuntimeError,
+    '''h'''
+)
 """)
+
+    def test_lineno_assumptions(self):
+        def get_tb(s):
+            return traceback.extract_stack(limit=2)
+
+        tb1 = get_tb("")
+        tb2 = get_tb("""a
+b
+c""")
+
+        if expecttest.LINENO_AT_START:
+            # tb2's stack starts on the next line
+            self.assertEqual(tb1[0].lineno + 1, tb2[0].lineno)
+        else:
+            # starts at the end here
+            self.assertEqual(tb1[0].lineno + 1 + 2, tb2[0].lineno)
 
 
 def load_tests(loader, tests, ignore):

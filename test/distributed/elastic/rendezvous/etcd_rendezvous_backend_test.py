@@ -5,11 +5,11 @@
 # LICENSE file in the root directory of this source tree.
 
 import subprocess
-
-from typing import ClassVar
+from base64 import b64encode
+from typing import ClassVar, cast
 from unittest import TestCase
 
-from etcd import EtcdKeyNotFound
+from etcd import EtcdKeyNotFound  # type: ignore[import]
 
 from torch.distributed.elastic.rendezvous import RendezvousConnectionError, RendezvousParameters
 from torch.distributed.elastic.rendezvous.etcd_rendezvous_backend import (
@@ -17,6 +17,7 @@ from torch.distributed.elastic.rendezvous.etcd_rendezvous_backend import (
     create_backend,
 )
 from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
+from torch.distributed.elastic.rendezvous.etcd_store import EtcdStore
 
 from rendezvous_backend_test import RendezvousBackendTestMixin
 
@@ -71,19 +72,33 @@ class CreateBackendTest(TestCase):
             read_timeout="10",
         )
 
-        self._expected_protocol = "http"
         self._expected_read_timeout = 10
 
     def test_create_backend_returns_backend(self) -> None:
-        backend = create_backend(self._params)
+        backend, store = create_backend(self._params)
 
-        self.assertEqual(backend.name, "etcd-experimental")
-        self.assertEqual(backend.key, "/torch/elastic/rendezvous/" + self._params.run_id)
-        self.assertEqual(backend.ttl, 7200)
-        self.assertEqual(backend.client.host, self._server.get_host())
-        self.assertEqual(backend.client.port, self._server.get_port())
-        self.assertEqual(backend.client.protocol, self._expected_protocol)
-        self.assertEqual(backend.client.read_timeout, self._expected_read_timeout)
+        self.assertEqual(backend.name, "etcd-v2")
+
+        self.assertIsInstance(store, EtcdStore)
+
+        etcd_store = cast(EtcdStore, store)
+
+        self.assertEqual(etcd_store.client.read_timeout, self._expected_read_timeout)  # type: ignore[attr-defined]
+
+        client = self._server.get_client()
+
+        backend.set_state(b"dummy_state")
+
+        result = client.get("/torch/elastic/rendezvous/" + self._params.run_id)
+
+        self.assertEqual(result.value, b64encode(b"dummy_state").decode())
+        self.assertLessEqual(result.ttl, 7200)
+
+        store.set("dummy_key", "dummy_value")
+
+        result = client.get("/torch/elastic/store/" + b64encode(b"dummy_key").decode())
+
+        self.assertEqual(result.value, b64encode(b"dummy_value").decode())
 
     def test_create_backend_returns_backend_if_protocol_is_not_specified(self) -> None:
         del self._params.config["protocol"]

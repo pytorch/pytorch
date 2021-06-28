@@ -13,6 +13,10 @@ using caffe2::serialize::IStreamAdapter;
 using caffe2::serialize::ReadAdapterInterface;
 using ExtraFilesMap = std::unordered_map<std::string, std::string>;
 
+constexpr const char* kArchiveNameBytecode = "bytecode";
+constexpr const char* kArchiveNameConstants = "constants";
+constexpr const char* kArchiveNameVersion = "version";
+
 enum MobileModuleLoadOptions {
   OPERATOR_CHECK = 1,
 };
@@ -71,6 +75,25 @@ void _load_extra_only_for_mobile(
     const std::string& filename,
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files);
+
+// Currently used by both mobile/import.cpp and model_compatibility.cpp.
+// Should be removed after model_compatibility.cpp start using simplified
+// version type_resolver and obj_loader.
+at::TypePtr resolveTypeNameMobile(
+    const c10::QualifiedName& qn,
+    std::shared_ptr<CompilationUnit> compilation_unit);
+c10::StrongTypePtr typeResolverMobile(
+    const c10::QualifiedName& qn,
+    std::shared_ptr<CompilationUnit> compilation_unit);
+c10::intrusive_ptr<c10::ivalue::Object> objLoaderMobile(
+    at::StrongTypePtr type,
+    at::IValue input,
+    std::shared_ptr<mobile::CompilationUnit> mobile_compilation_unit);
+
+// Given a reader, which has access to a model file,
+// return true if there exists tensors in `bytecode` archive
+bool isTensorInBytecodeArchive(
+    caffe2::serialize::PyTorchStreamReader& stream_reader);
 
 namespace mobile {
 

@@ -18,6 +18,7 @@
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/python/python_custom_class.h>
+#include <torch/csrc/jit/python/python_dict.h>
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/runtime/operator.h>
@@ -153,7 +154,8 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
         // callback functions. Hence, if user code does not hold a reference to
         // this PythonFutureWrapper object, there is no guarantee that the
         // PythonFutureWrapper is still valid when running the callback.
-        [pyFut(this->getPtr()), pf(std::move(pf))]() -> IValue {
+        [pyFut(this->getPtr()),
+         pf(std::move(pf))](c10::ivalue::Future& /* unused */) -> IValue {
           try {
             pybind11::gil_scoped_acquire ag;
             return toIValue(pf->func_(pyFut), PyObjectType::get());
@@ -567,7 +569,7 @@ inline IValue createGenericDict(
     const TypePtr& value_type) {
   c10::impl::GenericDict elems(key_type, value_type);
   elems.reserve(py::len(obj));
-  for (auto entry : obj) {
+  for (auto& entry : obj) {
     elems.insert(
         toIValue(entry.first, key_type), toIValue(entry.second, value_type));
   }
@@ -712,18 +714,37 @@ inline py::object toPyObject(IValue ivalue) {
   } else if (ivalue.isTuple()) {
     auto tuple = std::move(ivalue).toTuple();
     const auto& elements = tuple->elements();
+
     py::tuple t{elements.size()};
     for (size_t i = 0; i < elements.size(); ++i) {
       t[i] = toPyObject(IValue{elements.at(i)});
     }
+
+    // If we have a NamedTuple
     if (tuple->type() && tuple->type()->schema() &&
         tuple->type()->schema()->name() != "") {
       auto unqualName = tuple->type()->name()->name();
-      auto fieldNames = fmap(
-          tuple->type()->schema()->arguments(),
-          [](const Argument& arg) { return arg.name(); });
+
+      const std::vector<Argument>& tuple_args =
+          tuple->type()->schema()->arguments();
+
+      std::vector<pybind11::object> defaults;
+      auto it = std::find_if(
+          tuple_args.begin(), tuple_args.end(), [](const Argument& arg) {
+            return arg.default_value().has_value();
+          });
+      std::transform(
+          it,
+          tuple_args.end(),
+          std::back_inserter(defaults),
+          [](const Argument& arg) { return toPyObject(*arg.default_value()); });
+
+      std::vector<std::string> fieldNames =
+          fmap(tuple_args, [](const Argument& arg) { return arg.name(); });
+
       return py::module::import("torch._jit_internal")
-          .attr("_create_named_tuple")(t, unqualName, fieldNames);
+          .attr("_create_named_tuple")(
+              t, unqualName, fieldNames, py::make_tuple(defaults));
     } else {
       return std::move(t);
     }
@@ -951,8 +972,8 @@ inline py::object runAndInsertCall(
     auto return_type = callee.getSchema().returns().at(0).type();
     auto graph = tracing_state->graph;
     std::vector<NamedValue> named_values;
+    named_values.reserve(input_values.size());
     for (Value* v : input_values) {
-      // NOLINTNEXTLINE(performance-inefficient-vector-operation)
       named_values.emplace_back(v);
     }
 

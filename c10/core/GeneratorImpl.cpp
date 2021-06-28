@@ -82,7 +82,6 @@ uint64_t getNonDeterministicRandom(bool is_cuda) {
   } else {
     std::random_device rd;
     // limit to 53 bits to ensure unique representation in double
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     s = ((((uint64_t)rd()) << 32) + rd()) & 0x1FFFFFFFFFFFFF;
   }
   return s;
