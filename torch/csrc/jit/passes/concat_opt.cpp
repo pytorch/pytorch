@@ -50,15 +50,15 @@ class ConcatCommonInputsEliminator {
   explicit ConcatCommonInputsEliminator(std::shared_ptr<Graph> graph)
       : graph_(std::move(graph)) {}
 
-  void run() {
+  bool run() {
     handleBlock(graph_->block());
-    postprocess();
+    return postprocess();
   }
 
  private:
   void handleBlock(Block* block) {
     for (auto node : block->nodes()) {
-      if (node->kind() == aten::cat) {
+      if (node->kind() == prim::Concat) {
         handleCat(node);
       }
       for (Block* block : node->blocks()) {
@@ -70,19 +70,10 @@ class ConcatCommonInputsEliminator {
   void handleCat(Node* node) {
     GRAPH_DEBUG("Considering cat node for CSE opt: ", node);
 
-    // Do not optimize cat nodes whose inputs are mutated in the graph.
-    // TODO: Improve this by checking if it is mutated in the graph region
-    // where this optimization is applied.
-    if (getOrCreateAliasDb()->hasWriters(node->input(0))) {
-      return;
-    }
-
-    // cat ops are of the following form:
-    //   %inputs = prim::ListConstruct(%inp1, %inp2, %inp3)
-    //   %concat = aten::cat(%inputs, %concat_dim)
-
-    auto curr_list = node->input(0)->node();
-    auto curr_inputs = curr_list->inputs();
+    auto curr_all_inputs = node->inputs();
+    auto curr_tensor_inputs =
+        curr_all_inputs.slice(0, curr_all_inputs.size() - 1);
+    auto curr_dim = curr_all_inputs.back();
 
     // Save the input list and the current cat node, so that this can be
     // used for subsequent cat nodes, unless there are writes to this cat
@@ -91,11 +82,13 @@ class ConcatCommonInputsEliminator {
     // not perform such fine-grained analysis. So, if there are any writes to
     // the output, we do not use this cat node for optimization here.
     if (!getOrCreateAliasDb()->hasWriters(node->output())) {
-      concated_lists_[curr_list] = node;
+      concated_outputs_.insert(node);
     }
 
-    if (curr_inputs.size() <= 1) {
-      // No need for CSE
+    if (curr_tensor_inputs.size() <= 2) {
+      // The case when concat has 2 input tensors could only be optimized if
+      // there is another concat of the exact same 2 input tensors. That case
+      // is expected to be handled by the CSE pass.
       return;
     }
 
@@ -103,37 +96,39 @@ class ConcatCommonInputsEliminator {
     // the previous cat ops.
     //
     // Example:
-    //    %10 = prim::ListConstruct(%0, %1)
-    //    %11 = aten::cat(%10, ...)
+    //    %11 = prim::Concat(%0, %1, <dim>)
     //    ...
-    //    %12 = prim::ListConstruct(%0, %1, %2)  // first 2 inputs same as %11
-    //    %13 = aten::cat(%12, ...)
+    //    %13 = prim::Concat(%0, %1, %2, <dim>) // first 2 inputs same as %11
     //    ...
     //        = %13 ... // Use %13
     //
     // After CSE opt:
-    //    %10 = prim::ListConstruct(%0, %1)
-    //    %11 = aten::cat(%10, ...)
+    //    %11 = prim::Concat(%0, %1, <dim>)
     //    ...
-    //    %12 = prim::ListConstruct(%11, %2) // Replace first 2 inputs with %11
-    //    %13 = aten::cat(%12, ...)
+    //    %14 = prim::Concat(%11, %2, <dim>) // Replace first 2 inputs with %11
     //    ...
-    //        = %13 ... // Use %13
-    auto curr_inputs_prefix = curr_inputs.slice(0, curr_inputs.size() - 1);
-    for (const auto& it : concated_lists_) {
-      if (equal(curr_inputs_prefix, it.first->inputs())) {
-        if (!isDominatedBy(curr_list, it.first)) {
-          // We can't use the previous concatenated list if it does not
-          // dominate the current list.
+    //        = %14 ... // Replace use of %13 with %14
+
+    auto curr_tensor_inputs_prefix =
+        curr_tensor_inputs.slice(0, curr_tensor_inputs.size() - 1);
+    for (const auto& prev : concated_outputs_) {
+      auto prev_all_inputs = prev->inputs();
+      auto prev_tensor_inputs =
+          prev_all_inputs.slice(0, prev_all_inputs.size() - 1);
+      auto prev_dim = prev_all_inputs.back();
+      if (equal(curr_tensor_inputs_prefix, prev_tensor_inputs) &&
+          curr_dim == prev_dim) {
+        if (!isDominatedBy(node, prev)) {
+          // We can't use the previous concatenated output if it does not
+          // dominate the current concat node.
           continue;
         }
 
-        std::vector<Value*> new_list_values = {
-            it.second->output(), curr_inputs.back()};
-        auto curr_list_type = curr_list->output()->type()->expect<ListType>();
-        auto new_list_node = node->owningGraph()->createList(
-            curr_list_type->getElementType(), new_list_values);
-        lists_to_replace_[curr_list] = new_list_node;
+        std::vector<Value*> new_inputs = {
+            prev->output(), curr_tensor_inputs.back(), curr_dim};
+        auto new_concat = node->owningGraph()->create(prim::Concat, new_inputs);
+        new_concat->output()->setType(node->output()->type());
+        concats_to_replace_[node] = new_concat;
         return;
       }
     }
@@ -158,20 +153,26 @@ class ConcatCommonInputsEliminator {
     //    %13 = aten::cat(%12, ...)
     //    ...
     //        = %13 ... // Use %13
-    auto curr_inputs_suffix = curr_inputs.slice(1, curr_inputs.size() - 1);
-    for (const auto& it : concated_lists_) {
-      if (equal(curr_inputs_suffix, it.first->inputs())) {
-        if (!isDominatedBy(curr_list, it.first)) {
+    auto curr_tensor_inputs_suffix =
+        curr_tensor_inputs.slice(1, curr_tensor_inputs.size() - 1);
+    for (const auto& prev : concated_outputs_) {
+      auto prev_all_inputs = prev->inputs();
+      auto prev_tensor_inputs =
+          prev_all_inputs.slice(0, prev_all_inputs.size() - 1);
+      auto prev_dim = prev_all_inputs.back();
+      if (equal(curr_tensor_inputs_suffix, prev_tensor_inputs) &&
+          curr_dim == prev_dim) {
+        if (!isDominatedBy(node, prev)) {
           // We can't use the previous concatenated list if it does not
           // dominate the current list.
           continue;
         }
 
-        std::vector<Value*> new_list_values = {
-            curr_inputs.front(), it.second->output()};
-        auto new_list_node =
-            node->owningGraph()->createList(TensorType::get(), new_list_values);
-        lists_to_replace_[curr_list] = new_list_node;
+        std::vector<Value*> new_inputs = {
+            curr_tensor_inputs.front(), prev->output(), curr_dim};
+        auto new_concat = node->owningGraph()->create(prim::Concat, new_inputs);
+        new_concat->output()->setType(node->output()->type());
+        concats_to_replace_[node] = new_concat;
         return;
       }
     }
@@ -181,9 +182,10 @@ class ConcatCommonInputsEliminator {
     // TODO.
   }
 
-  void postprocess() {
+  bool postprocess() {
     // Replace the list nodes that have been marked.
-    for (auto it : lists_to_replace_) {
+    bool changed = false;
+    for (auto it : concats_to_replace_) {
       auto curr_node = it.first;
       auto new_node = it.second;
       GRAPH_UPDATE("Inserting\n", *new_node, "before\n", *curr_node);
@@ -192,15 +194,9 @@ class ConcatCommonInputsEliminator {
       curr_node->output()->replaceAllUsesWith(new_node->output());
       GRAPH_UPDATE("Deleting\n", *curr_node);
       curr_node->destroy();
+      changed = true;
     }
-    // Remove redundant cats.
-    for (auto it : redundant_cats_) {
-      auto curr_node = it.first;
-      auto new_node = it.second;
-      GRAPH_UPDATE("Replacing uses of\n", *curr_node, "with\n", *new_node);
-      curr_node->output()->replaceAllUsesWith(new_node->output());
-      removeCatNodeFromGraph(curr_node);
-    }
+    return changed;
   }
 
   AliasDb* getOrCreateAliasDb() {
@@ -213,10 +209,22 @@ class ConcatCommonInputsEliminator {
   std::shared_ptr<Graph> graph_;
   std::unique_ptr<AliasDb> aliasDb_ = nullptr;
 
-  std::unordered_map<Node*, Node*> concated_lists_;
-  std::unordered_map<Node*, Node*> lists_to_replace_;
-  std::unordered_map<Node*, Node*> redundant_cats_;
+  std::unordered_set<Node*> concated_outputs_;
+  std::unordered_map<Node*, Node*> concats_to_replace_;
 };
+
+} // namespace
+
+bool EliminateConcatCommonInputs(const std::shared_ptr<Graph>& graph) {
+  GRAPH_DUMP("Before eliminating Concat common inputs", graph);
+  bool changed = ConcatCommonInputsEliminator(graph).run();
+  if (changed) {
+    GRAPH_DUMP("After eliminating Concat common inputs", graph);
+  }
+  return changed;
+}
+
+namespace {
 
 class ConcatExpander {
  public:
@@ -492,23 +500,9 @@ class ConcatExpander {
 
 } // namespace
 
-void EliminateConcatCommonInputs(const std::shared_ptr<Graph>& graph) {
-  ConcatCommonInputsEliminator(graph).run();
-  GRAPH_DUMP("After eliminating Concat common inputs", graph);
-}
-
 void ExpandConcatAndEliminateRedundancy(const std::shared_ptr<Graph>& graph) {
   ConcatExpander(graph).run();
   GRAPH_DUMP("After expanding Concat and eliminating redundancy", graph);
-}
-
-void OptimizeConcat(const std::shared_ptr<Graph>& graph) {
-  GRAPH_DUMP("Before ConcatOpt", graph);
-  EliminateConcatCommonInputs(graph);
-  ExpandConcatAndEliminateRedundancy(graph);
-  ConstantPooling(graph);
-  EliminateDeadCode(graph);
-  GRAPH_DUMP("After ConcatOpt", graph);
 }
 
 namespace {
