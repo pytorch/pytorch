@@ -6,7 +6,7 @@ import torch
 from torch import nn
 from torch.nn.utils import parametrize
 
-from .parametrization import MulBy
+from .utils import FakeSparsity
 
 SUPPORTED_MODULES = {
     nn.Linear
@@ -157,7 +157,7 @@ class BaseSparsifier(abc.ABC):
             module = config['module']
             if getattr(module, 'mask', None) is None:
                 module.register_buffer('mask', torch.ones(module.weight.shape))
-            param = config.get('parametrization', MulBy)
+            param = config.get('parametrization', FakeSparsity)
             parametrize.register_parametrization(module, 'weight',
                                                  param(module.mask))
 
