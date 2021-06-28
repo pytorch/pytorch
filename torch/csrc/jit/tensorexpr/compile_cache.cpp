@@ -163,8 +163,8 @@ struct SpecializationKey {
             sizeof(dimflags_));
   }
 
-  DispatchKeySet dispatch_key() const {
-    return DispatchKeySet(DispatchKeySet::RAW, dispatch_key_);
+  at::DispatchKeySet dispatch_key() const {
+    return at::DispatchKeySet(at::DispatchKeySet::RAW, dispatch_key_);
   }
 
   std::vector<std::string> shape() const {
@@ -431,17 +431,17 @@ class alignas(64) CompileCache3 {
   typedef std::map<SpecializationKeys, CompileResultImpl*, CmpLess> Cache;
 
   void check_dispatch_keys(const SpecializationKeys& key) {
-    DispatchKeySet ks;
+    at::DispatchKeySet ks;
     for (auto& item : key) {
       ks = ks | item.dispatch_key();
     }
     constexpr DispatchKeySet supported = DispatchKeySet({
-        DispatchKey::CPU,
-        DispatchKey::CUDA,
-        DispatchKey::AutogradCPU,
-        DispatchKey::AutogradCUDA,
-        DispatchKey::BackendSelect,
-        DispatchKey::ADInplaceOrView,
+        at::DispatchKey::CPU,
+        at::DispatchKey::CUDA,
+        at::DispatchKey::AutogradCPU,
+        at::DispatchKey::AutogradCUDA,
+        at::DispatchKey::BackendSelect,
+        at::DispatchKey::ADInplaceOrView,
     });
     ks = ks - supported;
     if (C10_LIKELY(ks.empty())) {
@@ -449,7 +449,7 @@ class alignas(64) CompileCache3 {
     }
     std::stringstream ss;
     ss << "DispatchKeys not yet supported:";
-    for (DispatchKey k : ks) {
+    for (at::DispatchKey k : ks) {
       ss << " " << k;
     }
     throw std::runtime_error(ss.str());
