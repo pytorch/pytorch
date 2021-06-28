@@ -237,10 +237,6 @@ DONT_ENFORCE_STORAGE_IMPL_USE_COUNT = {
 }
 # END CHECKS FOR [ TensorImpl and Storage Pointer Sanity Checks ]
 
-METHOD_DECLARATION = CodeTemplate("""\
-${return_type} ${type_wrapper_name}(${formals}) ;
-""")
-
 DECLARE_GRAD_FN = CodeTemplate("""\
 std::shared_ptr<${op}> grad_fn;
 """)
@@ -732,10 +728,10 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                         stmts_after_call += [ENFORCE_SAME_TENSOR_STORAGE.substitute(tensor_name=aliased_arg_name,
                                                                                     out_tensor_name=ret_name)]
                     else:
-                        if base_name not in DONT_ENFORCE_STORAGE_IMPL_USE_COUNT:
+                        if type_wrapper_name(f) not in DONT_ENFORCE_STORAGE_IMPL_USE_COUNT:
                             stmts_after_call += [ENFORCE_TENSOR_STORAGE_USE_COUNT_EQUALS_ONE.substitute(tensor_name=ret_name)]
 
-                    if base_name not in DONT_ENFORCE_TENSOR_IMPL_USE_COUNT:
+                    if type_wrapper_name(f) not in DONT_ENFORCE_TENSOR_IMPL_USE_COUNT:
                         stmts_after_call += [ENFORCE_TENSOR_IMPL_USE_COUNT_EQUALS_ONE.substitute(tensor_name=ret_name)]
 
                 # Currently we don't have any functions that return the following types, but
