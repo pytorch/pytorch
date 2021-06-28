@@ -36,9 +36,6 @@ def triu(g, self, diagonal, out=None):
 
 @parse_args("v", "v")
 def reshape(g, self, shape):
-    shape = sym_help._maybe_get_const(shape, "is")
-    if not sym_help._is_value(shape):
-        shape = g.op("Constant", value_t=torch.LongTensor(shape))
     return sym_help._reshape_helper(g, self, shape)
 
 @parse_args("v", "v", "v", "v", "v", "i", "f", "f", "i")
@@ -64,8 +61,9 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
     # If track_running_stats is set to False batch statistics are instead used during evaluation time
     if running_mean is None or sym_help._is_none(running_mean) or running_var is None or sym_help._is_none(running_var):
         assert batch_size is not None and channel_size is not None
-        reshape_in = g.op("Reshape", input,
-                          g.op("Constant", value_t=torch.tensor([batch_size, channel_size, -1], dtype=torch.int64)))
+        reshape_in = sym_help._reshape_helper(g, input,
+                                              g.op("Constant", value_t=torch.tensor([batch_size, channel_size, -1],
+                                                   dtype=torch.int64)))
         trans_in = g.op("Transpose", reshape_in, perm_i=[0, 2, 1])
         running_var, running_mean = _var_mean(g, trans_in,
                                               g.op("Constant", value_t=torch.tensor([0, 1], dtype=torch.int64)),

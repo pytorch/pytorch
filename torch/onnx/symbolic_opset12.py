@@ -123,8 +123,7 @@ def celu(g, self, alpha):
 
 def argmax(g, input, dim, keepdim):
     if sym_help._is_none(dim):
-        from torch.onnx.symbolic_opset9 import reshape
-        flattened = reshape(g, input, g.op("Constant", value_t=torch.tensor([-1])))
+        flattened = sym_help._reshape_helper(g, input, g.op("Constant", value_t=torch.tensor([-1])), allowzero=0)
         return g.op("ArgMax", flattened, axis_i=0, keepdims_i=False, select_last_index_i=False)
     else:
         dim = _parse_arg(dim, "i")
@@ -134,8 +133,7 @@ def argmax(g, input, dim, keepdim):
 
 def argmin(g, input, dim, keepdim):
     if sym_help._is_none(dim):
-        from torch.onnx.symbolic_opset9 import reshape
-        flattened = reshape(g, input, g.op("Constant", value_t=torch.tensor([-1])))
+        flattened = sym_help._reshape_helper(g, input, g.op("Constant", value_t=torch.tensor([-1])), allowzero=0)
         return g.op("ArgMin", flattened, axis_i=0, keepdims_i=False, select_last_index_i=False)
     else:
         dim = _parse_arg(dim, "i")
@@ -237,23 +235,27 @@ def tensordot(g, input_a, input_b, dims_a, dims_b, out=None):
     input_shape = g.op("Shape", new_input_a)
     left_sizes_a = sym_help._slice_helper(g, input_shape, axes=[0], starts=[0], ends=[len(left_dims_a)])
     shape_sizes = [left_sizes_a, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.long))]
-    output_a = _reshape_from_tensor(g, new_input_a, shape_sizes)
+    shape_sizes = g.op("Concat", *shape_sizes, axis_i=0)
+    output_a = sym_help._reshape_helper(g, new_input_a, shape_sizes, allowzero=0)
 
     input_shape = g.op("Shape", output_a)
     slices = sym_help._slice_helper(g, input_shape, axes=[0], starts=[-1], ends=[maxsize])
     shape_sizes = [g.op("Constant", value_t=torch.tensor([-1], dtype=torch.long)), slices]
-    output_a = _reshape_from_tensor(g, new_input_a, shape_sizes)
+    shape_sizes = g.op("Concat", *shape_sizes, axis_i=0)
+    output_a = sym_help._reshape_helper(g, new_input_a, shape_sizes, allowzero=0)
 
     input_shape = g.op("Shape", new_input_b)
     left_sizes_b = sym_help._slice_helper(g, input_shape, axes=[0], starts=[len(dims_b)], ends=[maxsize])
     slices = sym_help._slice_helper(g, input_shape, axes=[0], starts=[0], ends=[len(dims_b)])
     shape_sizes = [slices, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.long))]
-    output_b = _reshape_from_tensor(g, new_input_b, shape_sizes)
+    shape_sizes = g.op("Concat", *shape_sizes, axis_i=0)
+    output_b = sym_help._reshape_helper(g, new_input_b, shape_sizes, allowzero=0)
 
     input_shape = g.op("Shape", output_b)
     slices = sym_help._slice_helper(g, input_shape, axes=[0], starts=[-1], ends=[maxsize])
     shape_sizes = [g.op("Constant", value_t=torch.tensor([-1], dtype=torch.long)), slices]
-    output_b = _reshape_from_tensor(g, new_input_b, shape_sizes)
+    shape_sizes = g.op("Concat", *shape_sizes, axis_i=0)
+    output_b = sym_help._reshape_helper(g, new_input_b, shape_sizes, allowzero=0)
 
     output = einsum(g, "ij,jk->ik", g.op("prim::ListConstruct", *[output_a, output_b]))
 

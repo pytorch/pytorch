@@ -298,7 +298,7 @@ def _select_helper(g, self, dim, index, apply_reshape=True):
     elif index_dim is not None and apply_reshape:
         if index_dim == 0:
             # Index is a scalar. Reshape it to a size 1 tensor.
-            index = g.op("Reshape", index, g.op("Constant", value_t=torch.LongTensor([1])))
+            index = _reshape_helper(g, index, g.op("Constant", value_t=torch.LongTensor([1])))
 
     index_scalar_type = index.type().scalarType()
     if index_scalar_type is None or index_scalar_type not in ["Long", "Int"]:
@@ -375,7 +375,7 @@ def _topk_helper(g, input, k, dim, largest=True, sorted=False, out=None):
     if not _is_value(k):
         k = g.op("Constant", value_t=torch.tensor([k], dtype=torch.int64))
     else:
-        k = g.op("Reshape", k, g.op("Constant", value_t=torch.tensor([1])))
+        k = _reshape_helper(g, k, g.op("Constant", value_t=torch.tensor([1])))
     if _export_onnx_opset_version <= 10:
         if not largest:
             _unimplemented("TopK", "Ascending is not supported")
@@ -712,7 +712,12 @@ def _index_fill_reshape_helper(g, self, dim, index):
     expanded_index = expand(g, unsqueezed_index, expanded_index_shape, None)
     return expanded_index_shape, expanded_index
 
+# When using reshape helper (opset_version >= 14), if reshape has -1,
+# allowzero cannot be set to 1
 def _reshape_helper(g, input, shape, allowzero=1):
+    shape = _maybe_get_const(shape, "is")
+    if not _is_value(shape):
+        shape = g.op("Constant", value_t=torch.LongTensor(shape))
     if _export_onnx_opset_version <= 13:
         return g.op("Reshape", input, shape)
     else:
