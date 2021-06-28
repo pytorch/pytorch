@@ -172,7 +172,8 @@ class Vectorized<int64_t> {
   int64_t& operator[](int idx) = delete;
 
   Vectorized<int64_t> angle() const {
-    return Vectorized<int64_t>{0};
+    return blendv(
+      Vectorized<int64_t>(0), Vectorized<int64_t>(c10::pi<int64_t>), *this < Vectorized<int64_t>(0));
   }
   Vectorized<int64_t> real() const {
     return *this;
