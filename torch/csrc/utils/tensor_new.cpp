@@ -155,7 +155,7 @@ ScalarType infer_scalar_type(PyObject *obj) {
     if (length < 0) throw python_error();
     // match NumPy semantics, except use default tensor type instead of double.
     if (length == 0) return torch::tensors::get_default_scalar_type();
-    for (int i = 0; i < length; ++i) {
+    for (const auto i : c10::irange(length)) {
       THPObjectPtr handle(PySequence_GetItem(obj, i));
       if (!handle) throw python_error();
       auto cur_item = handle.get();

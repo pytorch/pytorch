@@ -8,6 +8,7 @@
 #include <torch/csrc/utils/pybind.h>
 
 #include <aten/src/ATen/Parallel.h>
+#include <c10/util/irange.h>
 
 namespace torch {
 namespace throughput_benchmark {
@@ -37,8 +38,7 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
         "Did you forget to call add_input()? ");
     std::uniform_int_distribution<int> dist(0, inputs_.size() - 1);
 
-    for (int thread_id = 0; thread_id < config.num_calling_threads;
-         ++thread_id) {
+    for (const auto thread_id : c10::irange(config.num_calling_threads)) {
       // Just in case we generate num_iters inputs for each of the threads
       // This was if one thread does all the work we will be fine
       for (int i = 0; i < config.num_iters + config.num_warmup_iters; ++i) {
@@ -58,13 +58,12 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
   std::atomic<int64_t> num_attempted_iters{0};
   std::vector<std::thread> callers;
 
-  for (auto thread_id = 0; thread_id < config.num_calling_threads;
-       ++thread_id) {
-    // NOLINTNEXTLINE(performance-inefficient-vector-operation)
+  callers.reserve(config.num_calling_threads);
+  for (const auto thread_id : c10::irange(config.num_calling_threads)) {
     callers.emplace_back([&, thread_id]() {
       // We use conditional variable as a barrier to make sure each thread
       // performs required warmeup iterations before we start measuring
-      for (auto j = 0; j < config.num_warmup_iters; ++j) {
+      for (const auto j : c10::irange(config.num_warmup_iters)) {
         runOnce(std::move(thread_inputs[thread_id][input_iters[thread_id]]));
         ++input_iters[thread_id];
       }
