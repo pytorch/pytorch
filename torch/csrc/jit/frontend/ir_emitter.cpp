@@ -1325,13 +1325,10 @@ struct to_ir {
 
       // Make sure that any element types are subtypes of the annotated
       // type
-      // TODO: This should REALLY be an error, but we have to leave it
-      // as a warning for now because there are some models with
-      // incorrect type annotations
       std::stringstream ss;
       if (type_hint && !out->type()->isSubtypeOfExt(
               type_hint->expect<ListType>()->getElementType(), &ss)) {
-        TORCH_WARN("List type annotation did not match the types of the"
+        TORCH_INTERNAL_ASSERT(false, "List type annotation did not match the types of the"
                    " actual list items\n", ss.str());
       }
 
