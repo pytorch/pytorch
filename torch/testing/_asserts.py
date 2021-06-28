@@ -9,7 +9,7 @@ from torch import Tensor
 
 from ._core import _unravel_index
 
-__all__ = ["assert_close"]
+__all__ = ["assert_close", "assert_allclose"]
 
 
 # The UsageError should be raised in case the test function is not used correctly. With this the user is able to
@@ -853,3 +853,11 @@ def assert_close(
     )
     if error_meta:
         raise error_meta.to_error()
+
+
+def assert_allclose(actual, expected, **kwargs):
+    # TODO: remove this as soon as https://github.com/pytorch/pytorch/pull/58926 is landed
+    if actual.is_quantized and expected.is_quantized:
+        actual = actual.int_repr().to(torch.int32)
+        expected = expected.int_repr().to(torch.int32)
+    return assert_close(actual, expected, **kwargs)

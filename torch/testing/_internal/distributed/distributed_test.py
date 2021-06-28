@@ -3832,7 +3832,7 @@ class DistributedTest:
                     else torch.testing.assert_allclose
                 )
                 assert_func(
-                    avg_hook[0, 0],
+                    avg_hook[0, 0].item(),
                     expected_grad,
                     msg=f"Expected hook grad of {expected_grad} but got {avg_hook[0, 0]}",
                 )

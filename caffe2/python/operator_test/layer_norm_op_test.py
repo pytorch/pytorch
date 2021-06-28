@@ -353,9 +353,9 @@ class TestLayerNormOp(serial.SerializedTestCase):
                 torch.tensor(X), None, None, axis, eps, elementwise_affine)
 
         torch.testing.assert_allclose(
-            expected_norm, actual_norm, rtol=1e-4, atol=1e-4)
-        torch.testing.assert_allclose(expected_mean, actual_mean)
-        torch.testing.assert_allclose(expected_std, actual_std)
+            torch.from_numpy(expected_norm), actual_norm, rtol=1e-4, atol=1e-4)
+        torch.testing.assert_allclose(torch.from_numpy(expected_mean), actual_mean)
+        torch.testing.assert_allclose(torch.from_numpy(expected_std), actual_std)
 
     @given(X=hu.tensor(min_dim=2), **hu.gcs)
     def test_layer_norm_brew_wrapper(self, X, gc, dc):

@@ -417,7 +417,7 @@ def _check_trace(
                     check_tensor_val = n_check.t("value")
 
                     try:
-                        torch.testing.assert_allclose(mod_tensor_val, check_tensor_val)
+                        torch.testing.assert_close(mod_tensor_val, check_tensor_val, equal_nan=True)
                     except (RuntimeError, AssertionError) as e:
                         if tensor_compare_errors is None:
                             tensor_compare_errors = ""

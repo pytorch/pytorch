@@ -4743,6 +4743,9 @@ class TestJit(TestCase):
                 traced_f = torch.jit.trace(f, values)
             except NotImplementedError:
                 continue
+            except Exception as error:
+                traced_f = torch.jit.trace(f, values)
+                print()
 
             # check on different data
             values, sample = self._perturb(Dist, keys, values, sample)
