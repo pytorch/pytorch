@@ -187,6 +187,12 @@ struct ExtractVariables : IterArgs<ExtractVariables> {
     is_var_.push_back(true);
     list_.emplace_back(x);
   }
+  void operator()(const std::vector<at::Tensor>& x) {
+    for(auto x_ : x){
+      is_var_.push_back(true);
+      list_.emplace_back(x_);
+    }
+  }
   template <typename T>
   void operator()(const T& x) {
     is_var_.push_back(false);
