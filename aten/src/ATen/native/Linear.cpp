@@ -640,11 +640,11 @@ Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, 
       rsizes.emplace_back(t1.size(i));
     }
   }
-  for (const auto i : c10::irange(dims1.size())) {
-    p1.emplace_back(dims1[i]);
+  for (const auto x : dims1) {
+    p1.emplace_back(x);
   }
-  for (const auto i : c10::irange(dims2.size())) {
-    p2.emplace_back(dims2[i]);
+  for (const auto x : dims2) {
+    p2.emplace_back(x);
   }
   for (const auto i : c10::irange(input2.dim())) {
     if (! cdims2[i]) {
