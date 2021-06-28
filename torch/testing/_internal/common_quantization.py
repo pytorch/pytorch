@@ -4,6 +4,7 @@ checking quantization api and properties of resulting modules.
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 from torch.nn.intrinsic import _FusedModule
@@ -940,6 +941,18 @@ class SingleLayerLinearDynamicModel(torch.nn.Module):
         x = self.fc1(x)
         return x
 
+class LinearAddModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc1 = torch.nn.Linear(5, 8).to(dtype=torch.float)
+        self.fc2 = torch.nn.Linear(8, 5).to(dtype=torch.float)
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = torch.add(x, 5)
+        x = self.fc2(x)
+        return x
+
 class RNNDynamicModel(torch.nn.Module):
     def __init__(self, mod_type):
         super().__init__()
@@ -1278,6 +1291,47 @@ class InnerModule(torch.nn.Module):
                     fusable_layers.append([current_name,
                                            named_children[idx + 1][0]])
         torch.quantization.fuse_modules(self, fusable_layers, inplace=True)
+
+class FunctionalLinear(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.weight = torch.rand((5, 5))
+        self.bias = torch.zeros(5)
+
+    def forward(self, x):
+        return F.linear(x, self.weight, self.bias)
+
+class SingleLayerFunctionalLinearModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear1 = FunctionalLinear()
+
+    def forward(self, x):
+        x = self.linear1(x)
+        return x
+
+class TwoLayerFunctionalLinearModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear1 = FunctionalLinear()
+        self.linear2 = FunctionalLinear()
+
+    def forward(self, x):
+        x = self.linear1(x)
+        x = self.linear2(x)
+        return x
+
+class FunctionalLinearAddModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear1 = FunctionalLinear()
+        self.linear2 = FunctionalLinear()
+
+    def forward(self, x):
+        x = self.linear1(x)
+        x = torch.add(x, 5)
+        x = self.linear2(x)
+        return x
 
 class SkipQuantModel(torch.nn.Module):
     r"""We can skip quantization by explicitly
