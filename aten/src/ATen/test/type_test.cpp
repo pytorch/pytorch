@@ -58,7 +58,7 @@ TEST(TypeCustomPrinter, NamedTuples) {
   TypePrinter printer =
       [](const ConstTypePtr& t) -> c10::optional<std::string> {
     if (auto tupleType = t->cast<TupleType>()) {
-      // Rewrite only namedtuples
+      // Rewrite only NamedTuples
       if (tupleType->name()) {
         return "Rewritten";
       }
@@ -68,8 +68,9 @@ TEST(TypeCustomPrinter, NamedTuples) {
   torch::Tensor iv = torch::rand({2, 3});
   const auto type = TensorType::create(iv);
 
+  std::vector<std::string> field_names = {"foo", "bar"};
   const auto namedTupleType = TupleType::createNamed(
-      "my.named.tuple", {"foo", "bar"}, {type, IntType::get()});
+      "my.named.tuple", field_names, {type, IntType::get()});
   EXPECT_EQ(namedTupleType->annotation_str(printer), "Rewritten");
 
   // Put it inside another tuple, should still work

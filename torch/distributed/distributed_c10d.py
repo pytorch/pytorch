@@ -244,7 +244,7 @@ def _store_based_barrier(rank, store, timeout):
                 )
             )
 
-    logger.info(f"Rank {rank}: Completed store-based barrier for {world_size} nodes.")
+    logger.info(f"Rank {rank}: Completed store-based barrier for key:{store_key} with {world_size} nodes.")
 
 
 def _rank_not_in_group(group: ProcessGroup):
@@ -1591,7 +1591,7 @@ def all_gather_object(object_list, obj, group=None):
     all_gather(output_tensors, input_tensor, group=group)
     # Deserialize outputs back to object.
     for i, tensor in enumerate(output_tensors):
-        tensor = tensor.type(torch.uint8)  # type:ignore[call-overload]
+        tensor = tensor.type(torch.uint8)
         if tensor.device != torch.device("cpu"):
             tensor = tensor.cpu()
         tensor_size = object_size_list[i]
@@ -1695,7 +1695,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
     if my_rank != dst:
         return
     for i, tensor in enumerate(output_tensors):
-        tensor = tensor.type(torch.uint8)  # type: ignore[call-overload]
+        tensor = tensor.type(torch.uint8)
         tensor_size = object_size_list[i]
         object_gather_list[i] = _tensor_to_object(tensor, tensor_size)
 
@@ -1790,7 +1790,7 @@ def broadcast_object_list(object_list, src=0, group=None):
     if my_rank != src:
         for i, obj_size in enumerate(object_sizes_tensor):
             obj_view = object_tensor[offset : offset + obj_size]
-            obj_view = obj_view.type(torch.uint8)  # type: ignore[call-overload]
+            obj_view = obj_view.type(torch.uint8)
             if obj_view.device != torch.device("cpu"):
                 obj_view = obj_view.cpu()
             offset += obj_size
@@ -1918,7 +1918,7 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
     Examples:
         >>> # All tensors below are of torch.int64 dtype.
         >>> # We have 2 process groups, 2 ranks.
-        >>> tensor_list = [torch.zero(2, dtype=torch.int64) for _ in range(2)]
+        >>> tensor_list = [torch.zeros(2, dtype=torch.int64) for _ in range(2)]
         >>> tensor_list
         [tensor([0, 0]), tensor([0, 0])] # Rank 0 and 1
         >>> tensor = torch.arange(2, dtype=torch.int64) + 1 + 2 * rank
@@ -1932,7 +1932,7 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
 
         >>> # All tensors below are of torch.cfloat dtype.
         >>> # We have 2 process groups, 2 ranks.
-        >>> tensor_list = [torch.zero(2, dtype=torch.cfloat) for _ in range(2)]
+        >>> tensor_list = [torch.zeros(2, dtype=torch.cfloat) for _ in range(2)]
         >>> tensor_list
         [tensor([0.+0.j, 0.+0.j]), tensor([0.+0.j, 0.+0.j])] # Rank 0 and 1
         >>> tensor = torch.tensor([1+1j, 2+2j], dtype=torch.cfloat) + 2 * rank * (1+1j)
@@ -1986,7 +1986,7 @@ def _all_gather_base(output_tensor, input_tensor, group=None, async_op=False):
     Examples:
         >>> # All tensors below are of torch.int64 dtype.
         >>> # We have 2 process groups, 2 ranks.
-        >>> output_tensor = torch.zero(2, dtype=torch.int64)
+        >>> output_tensor = torch.zeros(2, dtype=torch.int64)
         >>> output_tensor
         [tensor([0, 0])] # Rank 0 and 1
         >>> tensor = torch.arange(1, dtype=torch.int64) + 1 + rank
