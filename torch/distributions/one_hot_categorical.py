@@ -12,11 +12,11 @@ class OneHotCategorical(Distribution):
     Samples are one-hot coded vectors of size ``probs.size(-1)``.
 
     .. note:: The `probs` argument must be non-negative, finite and have a non-zero sum,
-              and it will be normalized to sum to 1 along the last dimension. attr:`probs`
+              and it will be normalized to sum to 1 along the last dimension. :attr:`probs`
               will return this normalized value.
               The `logits` argument will be interpreted as unnormalized log probabilities
               and can therefore be any real number. It will likewise be normalized so that
-              the resulting probabilities sum to 1 along the last dimension. attr:`logits`
+              the resulting probabilities sum to 1 along the last dimension. :attr:`logits`
               will return this normalized value.
 
     See also: :func:`torch.distributions.Categorical` for specifications of
