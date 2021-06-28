@@ -10358,3 +10358,6 @@
 - func: unflatten_dense_tensors(Tensor flat, Tensor[] tensors) -> Tensor[]
   variants: function
   python_module: nn
+
+- func: attn(Tensor q, Tensor k, Tensor v) -> (Tensor output, Tensor attn)
+  variants: function
