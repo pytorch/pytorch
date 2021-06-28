@@ -10361,3 +10361,5 @@
 
 - func: attn(Tensor q, Tensor k, Tensor v) -> (Tensor output, Tensor attn)
   variants: function
+  dispatch:
+    CompositeExplicitAutograd: attn

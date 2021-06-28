@@ -3576,6 +3576,39 @@ Tensor gather_with_keepdimed_indices(const Tensor& input, int64_t dim, const Ten
   return out_fw_grad;
 }
 
+std::tuple<Tensor, Tensor, Tensor> attn_backward(const std::vector<torch::autograd::Variable> &grads,
+        const Tensor& q, const Tensor& k, const Tensor& v) {
+    auto grad_output = grads[0];
+    auto grad_attn = grads[1];
+
+    Tensor grad_q, grad_k, grad_v;
+
+    // computes and stores sech^2(qk')
+    auto partial = 1 / cosh(q.matmul(k.transpose(0, 1))).pow(2);
+
+    // computes grad_output terms
+    if (grad_output.defined()) {
+        auto attn = tanh(q.matmul(k.transpose(0, 1)));
+
+        grad_q = grad_output.matmul(v.transpose(0, 1)).mul(partial).matmul(k);
+        grad_k = grad_output.matmul(v.transpose(0, 1)).mul(partial).transpose(0, 1).matmul(q);
+        grad_v = attn.transpose(0, 1).matmul(grad_output);
+    }
+
+    // adds grad_attn terms
+    if (grad_attn.defined()) {
+        if (grad_output.defined()) {
+            grad_q.add_(grad_attn.mul(partial).matmul(k));
+            grad_k.add_(grad_attn.mul(partial).transpose(0, 1).matmul(q));
+        } else {
+            grad_q = grad_attn.mul(partial).matmul(k);
+            grad_k = grad_attn.mul(partial).transpose(0, 1).matmul(q);
+        }
+    }
+
+    return std::make_tuple(grad_q, grad_k, grad_v);
+}
+
 } // namespace details
 } // namespace generated
 } // namespace autograd
