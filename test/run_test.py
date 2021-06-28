@@ -37,6 +37,7 @@ TESTS = [
     'test_import_time',
     'test_public_bindings',
     'test_type_hints',
+    'test_ao_sparsity',
     'test_autograd',
     'benchmark_utils/test_benchmark_utils',
     'test_binary_ufuncs',
