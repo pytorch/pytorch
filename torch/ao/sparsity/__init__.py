@@ -4,7 +4,7 @@ from . import sparsifier
 from .sparsifier import BaseSparsifier
 
 # Parametrizations
-from .parametrization import MulBy
+from .utils import FakeSparsity
 
 # Variables
 from ._variables import get_sparse_mapping
