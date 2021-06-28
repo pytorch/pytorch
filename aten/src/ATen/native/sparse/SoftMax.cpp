@@ -1,10 +1,12 @@
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/SparseTensorUtils.h>
-#include <ATen/Parallel.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/sparse/ParamUtils.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/Parallel.h>
+#include <ATen/SparseTensorUtils.h>
+#include <c10/util/accumulate.h>
+
 #include <map>
 
 namespace at {
@@ -17,13 +19,7 @@ int64_t get_nvalues(const IntArrayRef& sizes, int64_t sparse_dim) {
      `sizes` is a vector of sparse tensor dimensions.
      `sparse_dim` is the dimension of the sparse part of a sparse tensor.
    */
-  auto dim = sizes.size();
-  int64_t nvalues = 1;
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (auto i=sparse_dim; i<dim; i++) {
-    nvalues *= sizes[i];
-  }
-  return nvalues;
+  return c10::multiply_integers(sizes.begin() + sparse_dim, sizes.end());
 }
 
 std::vector<int64_t> get_offsets(const Tensor& indices, const IntArrayRef& sizes, const int64_t dim) {
