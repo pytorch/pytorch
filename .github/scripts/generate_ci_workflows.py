@@ -24,7 +24,7 @@ def PyTorchWindowsWorkflow(
     build_environment: str,
     test_runner_type: str,
     cuda_version: str,
-    on_pull_request: bool = False,
+    on_pull_request: bool = True,
     only_build_on_pull_request: bool = False,
     num_test_shards: int = 1,
 ) -> PyTorchWorkflow:
