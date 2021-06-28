@@ -435,7 +435,7 @@ class alignas(64) CompileCache3 {
     for (auto& item : key) {
       ks = ks | item.dispatch_key();
     }
-    constexpr DispatchKeySet supported = DispatchKeySet({
+    constexpr at::DispatchKeySet supported = at::DispatchKeySet({
         at::DispatchKey::CPU,
         at::DispatchKey::CUDA,
         at::DispatchKey::AutogradCPU,
