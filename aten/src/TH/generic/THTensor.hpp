@@ -11,6 +11,4 @@
 TH_CPP_API void THTensor_(setStorage)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_,
                                       at::IntArrayRef size_, at::IntArrayRef stride_);
 
-TH_CPP_API void THTensor_(resize)(THTensor *self, at::IntArrayRef size, at::IntArrayRef stride);
-
 #endif
