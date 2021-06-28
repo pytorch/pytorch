@@ -533,8 +533,6 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
             min_val_cur, max_val_cur = torch._aminmax(x)
             min_val = min_val + self.averaging_constant * (min_val_cur - min_val)
             max_val = max_val + self.averaging_constant * (max_val_cur - max_val)
-        self.min_val.resize_(min_val.shape)
-        self.max_val.resize_(max_val.shape)
         self.min_val.copy_(min_val)
         self.max_val.copy_(max_val)
         return x_orig
