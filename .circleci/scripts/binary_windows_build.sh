@@ -17,6 +17,9 @@ fi
 
 if [[ "${DESIRED_CUDA}" == "cu111" || "${DESIRED_CUDA}" == "cu113" ]]; then
   export BUILD_SPLIT_CUDA="ON"
+  
+  ls "C:\\Program Files (x86)\\"
+  ls "C:\\Program Files\\"
 fi
 
 set +x
@@ -27,10 +30,6 @@ set -x
 echo "rm pre-installed VS and CUDA"
 if [[ "$CIRCLECI" == 'true' && -d "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Commnuity" ]]; then
   rm -rf "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Commnuity"
-fi
-
-if [[ -d "$CUDA_PATH" ]]; then
-  rm -rf "$CUDA_PATH"
 fi
 
 if [[ "$CIRCLECI" == 'true' && -d "C:\\ProgramData\\Microsoft\\VisualStudio\\Packages\\_Instances" ]]; then
