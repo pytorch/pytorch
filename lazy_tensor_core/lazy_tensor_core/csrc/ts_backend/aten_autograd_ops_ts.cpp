@@ -1,7 +1,10 @@
 #include "lazy_tensor_core/csrc/ts_backend/aten_autograd_ops_ts.h"
 
+#include <ATen/Operators.h>
+#include <ATen/native/CPUFallback.h>
+
 #include "lazy_tensor_core/csrc/aten_ltc_bridge.h"
-#include "lazy_tensor_core/csrc/ts_backend/aten_xla_type_default.h"  // move to cpp
+#include "lazy_tensor_core/csrc/ts_backend/aten_eager_fallback.h"
 
 namespace torch_lazy_tensors {
 namespace aten_autograd_ops_ts {
@@ -15,8 +18,13 @@ torch::Tensor MaxPool2dAutogradFunctionTS::forward(
   ctx->saved_data["padding"] = padding;
   ctx->saved_data["dilation"] = dilation;
   ctx->saved_data["ceil_mode"] = ceil_mode;
-  auto results = AtenXlaTypeDefault::max_pool2d_with_indices(
-      self, kernel_size, stride, padding, dilation, ceil_mode);
+  auto results = at::native::call_fallback_fn<
+      &ltc_eager_fallback, ATEN_OP(max_pool2d_with_indices)>::call(self,
+                                                                   kernel_size,
+                                                                   stride,
+                                                                   padding,
+                                                                   dilation,
+                                                                   ceil_mode);
   ctx->save_for_backward({self, std::get<1>(results)});
   return std::get<0>(results);
 }
@@ -32,9 +40,12 @@ torch::autograd::variable_list MaxPool2dAutogradFunctionTS::backward(
   auto saved = ctx->get_saved_variables();
   auto self = saved[0];
   auto indices = saved[1];
-  torch::Tensor grad = AtenXlaTypeDefault::max_pool2d_with_indices_backward(
-      grad_output[0], self, kernel_size, stride, padding, dilation, ceil_mode,
-      indices);
+  torch::Tensor grad = at::native::call_fallback_fn<
+      &ltc_eager_fallback,
+      ATEN_OP(max_pool2d_with_indices_backward)>::call(grad_output[0], self,
+                                                       kernel_size, stride,
+                                                       padding, dilation,
+                                                       ceil_mode, indices);
 
   torch::Tensor undef;
   torch::autograd::variable_list grad_inputs = {grad,  undef, undef,
@@ -51,8 +62,13 @@ torch::Tensor MaxPool3dAutogradFunctionTS::forward(
   ctx->saved_data["padding"] = padding;
   ctx->saved_data["dilation"] = dilation;
   ctx->saved_data["ceil_mode"] = ceil_mode;
-  auto results = AtenXlaTypeDefault::max_pool3d_with_indices(
-      self, kernel_size, stride, padding, dilation, ceil_mode);
+  auto results = at::native::call_fallback_fn<
+      &ltc_eager_fallback, ATEN_OP(max_pool3d_with_indices)>::call(self,
+                                                                   kernel_size,
+                                                                   stride,
+                                                                   padding,
+                                                                   dilation,
+                                                                   ceil_mode);
   ctx->save_for_backward({self, std::get<1>(results)});
   return std::get<0>(results);
 }
@@ -69,9 +85,12 @@ torch::autograd::variable_list MaxPool3dAutogradFunctionTS::backward(
   auto self = saved[0];
   torch::Tensor grad;
   auto indices = saved[1];
-  grad = AtenXlaTypeDefault::max_pool3d_with_indices_backward(
-      grad_output[0], self, kernel_size, stride, padding, dilation, ceil_mode,
-      indices);
+  grad = at::native::call_fallback_fn<
+      &ltc_eager_fallback,
+      ATEN_OP(max_pool3d_with_indices_backward)>::call(grad_output[0], self,
+                                                       kernel_size, stride,
+                                                       padding, dilation,
+                                                       ceil_mode, indices);
 
   torch::Tensor undef;
   torch::autograd::variable_list grad_inputs = {grad,  undef, undef,
