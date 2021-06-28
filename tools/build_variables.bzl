@@ -757,6 +757,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/DLConvertor.cpp",
     "aten/src/ATen/ExpandUtils.cpp",
     "aten/src/ATen/MemoryOverlap.cpp",
+    "aten/src/ATen/MapAllocator.cpp",
     "aten/src/ATen/NamedTensorUtils.cpp",
     "aten/src/ATen/ParallelCommon.cpp",
     "aten/src/ATen/ParallelNative.cpp",
@@ -840,6 +841,7 @@ aten_cpu_source_non_codegen_list = [
 
 aten_cpu_source_codegen_list = [
     "aten/src/ATen/native/cpu/AdaptiveAvgPoolKernel.cpp",
+    "aten/src/ATen/native/cpu/AdaptiveMaxPoolKernel.cpp",
 ]
 
 # When building lite interpreter in OSS, "aten/src/ATen/native/cpu/AdaptiveAvgPoolKernel.cpp" will go through
@@ -973,6 +975,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/ConvolutionMM3d.cpp",
     "aten/src/ATen/native/ConvolutionTBC.cpp",
     "aten/src/ATen/native/Copy.cpp",
+    "aten/src/ATen/native/CPUFallback.cpp",
     "aten/src/ATen/native/Cross.cpp",
     "aten/src/ATen/native/DilatedMaxPool2d.cpp",
     "aten/src/ATen/native/DilatedMaxPool3d.cpp",
@@ -1077,12 +1080,9 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/sparse/SparseCsrTensor.cpp",
     "aten/src/ATen/native/sparse/SparseTensorMath.cpp",
     "aten/src/ATen/native/sparse/SparseCsrTensorMath.cpp",
-    "aten/src/TH/THAllocator.cpp",
-    "aten/src/TH/THBlas.cpp",
     "aten/src/TH/THGeneral.cpp",
     "aten/src/TH/THStorageFunctions.cpp",
     "aten/src/TH/THTensor.cpp",
-    "aten/src/TH/THTensorMoreMath.cpp",
     "aten/src/ATen/native/utils/Factory.cpp",
     "aten/src/ATen/native/xnnpack/Activation.cpp",
     "aten/src/ATen/native/xnnpack/ChannelShuffle.cpp",
