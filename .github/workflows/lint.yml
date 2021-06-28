@@ -19,15 +19,13 @@ jobs:
         uses: actions/checkout@v2
       - name: Install requirements
         id: requirements
-        run: pip install -r requirements.txt
+        run: pip install -r .circleci/docker/requirements.txt
       - name: Ensure consistent CircleCI YAML config
         if: always() && steps.requirements.outcome == 'success'
         run: cd .circleci && ./ensure-consistency.py
       - name: Lint native_functions.yaml
         if: always() && steps.requirements.outcome == 'success'
-        run: |
-          pip install ruamel.yaml==0.17.4
-          .github/scripts/lint_native_functions.py
+        run: .github/scripts/lint_native_functions.py
       - name: Ensure correct trailing newlines
         if: always() && steps.requirements.outcome == 'success'
         run: |
@@ -116,11 +114,7 @@ jobs:
         uses: actions/checkout@v2
       - name: Install requirements
         id: requirements
-        run: |
-          pip install -r requirements.txt
-      - name: Install Jinja2
-        run: |
-          pip install Jinja2==3.0.1
+        run: pip install -r .circleci/docker/requirements.txt
       - name: Checkout PyTorch
         uses: actions/checkout@v2
       - name: Regenerate workflows
@@ -233,8 +227,7 @@ jobs:
       - name: Install dependencies
         run: |
           set -eux
-          pip install typing-extensions # for tools/linter/translate_annotations.py
-          pip install -r requirements-flake8.txt
+          pip install -r .circleci/docker/requirements.txt
           flake8 --version
       - name: Run flake8
         run: |
@@ -377,7 +370,7 @@ jobs:
       - name: Install dependencies
         run: |
           set -eux
-          pip install cmakelint
+          pip install .circleci/docker/requirements.txt
           cmakelint --version
       - name: Run cmakelint
         run: |
@@ -397,13 +390,7 @@ jobs:
       - name: Fetch PyTorch
         uses: actions/checkout@v2
       - name: Install dependencies
-        run: |
-          set -eux
-          pip install -r requirements.txt
-          pip install numpy==1.20 # https://github.com/pytorch/pytorch/pull/60472
-          pip install mypy==0.812
-          # Needed to check tools/render_junit.py
-          pip install junitparser rich
+        run: pip install -r .circleci/docker/requirements.txt
       - name: Run autogen
         run: |
           set -eux

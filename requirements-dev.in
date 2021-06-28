@@ -1,2 +1,8 @@
 -r requirements.txt
 -r requirements-flake8.txt
+cmakelint
+Jinja2
+junitparser
+mypy==0.812
+rich
+ruamel.yaml
