@@ -6,7 +6,7 @@ from typing import Callable, List, Union, Tuple, Optional
 
 import torch
 from torch import fx
-from torch._C import _te  # type: ignore
+from torch._C import _te  # type: ignore[attr-defined]
 
 FOLD_ALIASES = True
 _SHAPE_TYPES = {"one", "other"}
@@ -121,7 +121,7 @@ class PointwiseCompiler(object):
         Compute the derivative of self.pointwise_fn with respect to input number index
         """
         # TODO(jansel): implement this without sympy
-        from sympy import symbols, diff  # type: ignore
+        from sympy import symbols, diff  # type: ignore[import]
         vars = symbols([f"v{i}" for i in range(1 + _num_args(self.pointwise_fn))])
         backwards_expr = diff(self.pointwise_fn(*vars[:-1]), vars[index]) * vars[-1]  # chain rule
         return _source_to_pointwise_operator(f"lambda {','.join(map(str, vars))}: {backwards_expr}",
