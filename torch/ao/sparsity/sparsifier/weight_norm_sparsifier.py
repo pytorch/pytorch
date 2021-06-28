@@ -27,10 +27,12 @@ class WeightNormSparsifier(BaseSparsifier):
                     zeros_per_block, **kwargs):
         if zeros_per_block != reduce((lambda x, y: x * y), sparsity_pattern):
             raise NotImplementedError('Partial block sparsity is not yet there')
+        # TODO: Add support for multiple parametrizations for the same weight
+        mask = layer.parametrizations.weight[0].mask
         if sparsity_level <= 0:
-            layer.mask.data = torch.ones(layer.weight.shape, device=layer.weight.device)
+            mask.data = torch.ones(layer.weight.shape, device=layer.weight.device)
         elif sparsity_level >= 1.0:
-            layer.mask.data = torch.zeros(layer.weight.shape, device=layer.weight.device)
+            mask.data = torch.zeros(layer.weight.shape, device=layer.weight.device)
         else:
             ww = layer.weight * layer.weight
             ww_reshaped = ww.reshape(1, *ww.shape)
@@ -48,4 +50,4 @@ class WeightNormSparsifier(BaseSparsifier):
             for row, col in zip(rows, cols):
                 new_mask[row:row + sparsity_pattern[0],
                          col:col + sparsity_pattern[1]] = 0
-            layer.mask *= new_mask
+            mask.data *= new_mask
