@@ -885,7 +885,7 @@ class _NnapiSerializer(object):
         self.add_operation(NNAPI_OperationCode.EXPAND_DIMS, inputs, outputs)
 
     def add_to(self, node):
-        assert node.inputsSize() == 8  # transform for to("cpu") / to("gpu")
+        # Handle to("cpu") / to("gpu") case
         self._identity(node)
 
     def add_reshape(self, node):

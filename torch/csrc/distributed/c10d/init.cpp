@@ -273,18 +273,6 @@ This tensor can be further decomposed into a list of per-parameter tensors withi
 to apply layer-wise operations.
 )")
       .def(
-          py::init<
-              size_t,
-              const Tensor&,
-              const std::vector<size_t>&,
-              const std::vector<size_t>&,
-              const std::vector<c10::IntArrayRef>&>(),
-          py::arg("index"),
-          py::arg("tensor"),
-          py::arg("offsets"),
-          py::arg("lengths"),
-          py::arg("sizes_list"))
-      .def(
           "get_index",
           &::c10d::GradBucket::getIndex,
           py::call_guard<py::gil_scoped_release>(),
@@ -358,12 +346,9 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
               std::unordered_map<size_t, std::string>(),
           py::call_guard<py::gil_scoped_release>())
       .def(
-          "initialize_buckets",
-          &::c10d::Reducer::initialize_buckets,
-          py::call_guard<py::gil_scoped_release>())
-      .def(
           "prepare_for_forward",
           &::c10d::Reducer::prepare_for_forward,
+          py::arg("will_run_grad_reduction") = true,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "prepare_for_backward",
@@ -411,7 +396,19 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
       .def(
           "_delay_all_reduce",
           &::c10d::Reducer::delay_all_reduce,
-          py::call_guard<py::gil_scoped_release>()) ;
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "set_logger",
+          [](::c10d::Reducer& reducer,
+             const std::shared_ptr<::c10d::Logger> logger) {
+            std::weak_ptr<::c10d::Logger> logger_weakref = logger;
+            reducer.set_logger(logger_weakref);
+          })
+       .def(
+           "_static_graph_first_bwd",
+           &::c10d::Reducer::static_graph_first_bwd,
+           py::call_guard<py::gil_scoped_release>()
+       );
 
   shared_ptr_class_<::c10d::Logger>(module, "Logger")
       .def(
@@ -429,6 +426,12 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
       .def(
           "set_runtime_stats_and_log",
           &::c10d::Logger::set_runtime_stats_and_log,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "set_error_and_log",
+          [](::c10d::Logger& logger, const std::string& error) {
+              logger.set_error_and_log(error);
+          },
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_get_ddp_logging_data",
@@ -798,7 +801,7 @@ A store implementation that uses a file to store the underlying key-value pairs.
 
 Arguments:
     file_name (str): path of the file in which to store the key-value pairs
-    world_size (int): The total number of processes using the store
+    world_size (int, optional): The total number of processes using the store. Default is -1 (a negative value indicates a non-fixed number of store users).
 
 Example::
     >>> import torch.distributed as dist
@@ -809,7 +812,13 @@ Example::
     >>> store2.get("first_key")
 
       )")
-      .def(py::init<const std::string&, int>());
+      .def(py::init<const std::string&, int>(),
+           py::arg("file_name"),
+           py::arg("world_size") = -1)
+      .def_property_readonly(
+          "path",
+          &::c10d::FileStore::getPath,
+          R"(Gets the path of the file used by FileStore to store key-value pairs.)");
 
 #ifndef _WIN32
   intrusive_ptr_class_<::c10d::HashStore>(
@@ -845,7 +854,7 @@ the server to establish a connection.
 Arguments:
     host_name (str): The hostname or IP Address the server store should run on.
     port (int): The port on which the server store should listen for incoming requests.
-    world_size (int, optional): The total number of store users (number of clients + 1 for the server). Default is -1 (a negative value indicates an non-fixed number of store users).
+    world_size (int, optional): The total number of store users (number of clients + 1 for the server). Default is -1 (a negative value indicates a non-fixed number of store users).
     is_master (bool, optional): True when initializing the server store and False for client stores. Default is False.
     timeout (timedelta, optional): Timeout used by the store during initialization and for methods such as :meth:`~torch.distributed.store.get` and :meth:`~torch.distributed.store.wait`. Default is timedelta(seconds=300)
     wait_for_worker (bool, optional): Whether to wait for all the workers to connect with the server store. This is only applicable when world_size is a fixed value. Default is True.
@@ -862,13 +871,23 @@ Example::
     >>> client_store.get("first_key")
       )")
       .def(
-          py::init<
-              const std::string&,
-              int,
-              int,
-              bool,
-              std::chrono::milliseconds,
-              bool>(),
+          py::init([](const std::string& host,
+                      ::c10d::PortType port,
+                      int worldSize,
+                      bool isServer,
+                      std::chrono::milliseconds timeout,
+                      bool waitWorkers,
+                      bool multiTenant) {
+            c10::optional<std::size_t> numWorkers = c10::nullopt;
+            if (worldSize > -1) {
+              numWorkers = static_cast<std::size_t>(worldSize);
+            }
+
+            ::c10d::TCPStoreOptions opts{
+                port, isServer, numWorkers, waitWorkers, timeout, multiTenant};
+
+            return c10::make_intrusive<::c10d::TCPStore>(host, opts);
+          }),
           py::arg("host_name"),
           py::arg("port"),
           py::arg("world_size") = -1,
@@ -877,7 +896,8 @@ Example::
           py::arg("is_master").noconvert() = false,
           py::arg("timeout") =
               std::chrono::milliseconds(::c10d::Store::kDefaultTimeout),
-          py::arg("wait_for_workers") = true)
+          py::arg("wait_for_workers") = true,
+          py::arg("multi_tenant") = false)
       .def_property_readonly(
           "host",
           &::c10d::TCPStore::getHost,
@@ -1102,6 +1122,14 @@ Arguments:
               },
               py::arg("output_tensors"),
               py::arg("input_tensor"),
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "_reduce_scatter_base",
+              &::c10d::ProcessGroup::_reduce_scatter_base,
+              py::arg("outputTensor"),
+              py::arg("inputTensor"),
+              py::arg("opts") = ::c10d::ReduceScatterOptions(),
               py::call_guard<py::gil_scoped_release>())
 
           .def(
@@ -1564,19 +1592,19 @@ Example::
         add("key3", 3);
         add("key3", 2);
         if (get("key") != "6") {
-          throw std::runtime_error("assertion failed");
+          TORCH_CHECK(false, "assertion failed");
         }
         if (get("key0") != "value0") {
-          throw std::runtime_error("assertion failed");
+          TORCH_CHECK(false, "assertion failed");
         }
         if (get("key1") != "value1") {
-          throw std::runtime_error("assertion failed");
+          TORCH_CHECK(false, "assertion failed");
         }
         if (get("key2") != "value2") {
-          throw std::runtime_error("assertion failed");
+          TORCH_CHECK(false, "assertion failed");
         }
         if (get("key3") != "15") {
-          throw std::runtime_error("assertion failed");
+          TORCH_CHECK(false, "assertion failed");
         }
       },
       py::call_guard<py::gil_scoped_release>());

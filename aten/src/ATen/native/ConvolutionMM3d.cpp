@@ -564,8 +564,6 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv3d_forward_out_cpu(const Tensor& 
   const Tensor input = self.contiguous();
   const Tensor weight_2d = view_weight_2d(weight);
 
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable,clang-analyzer-deadcode.DeadStores)
-  const int64_t ndim = input.dim();
   const int64_t dim_planes = 1;
   const int64_t dim_depth = 2;
   const int64_t dim_height = 3;
