@@ -1010,16 +1010,14 @@ class TestAutograd(TestCase):
 
         out = x_nonleaf ** 2 + y * x_nonleaf + y ** 2
 
-        out.backward(torch.ones(2, 2, dtype=torch.double), create_graph=True, inputs=[x, y])
+        out.backward(torch.ones(2, 2, dtype=torch.double), create_graph=True, inputs=[x, y, x_nonleaf])
         x_grad_expected = 2 * x + y
         y_grad_expected = x + 2 * y
+        x_non_leaf_expected = 2 * x_nonleaf + y
 
         self.assertEqual(y.grad, y_grad_expected)
         self.assertEqual(x.grad, x_grad_expected)
-
-        self.assertRaisesRegex(RuntimeError, 'not a leaf Tensor',
-                               lambda: out.backward(torch.ones(2, 2, dtype=torch.double),
-                                                    create_graph=True, inputs=[x, y, x_nonleaf]))
+        self.assertEqual(x_nonleaf.grad, x_non_leaf_expected)
 
         # backward doesn't have an allow_unused flag, so the behavior of backward
         # when variable is not part of the graph is as if allow_used were true
