@@ -194,6 +194,8 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                     for idx in remained_onnx_input_idx:
                         test_input_onnx.append(test_input[idx])
                     test_input = test_input_onnx
+                if flatten:
+                    test_input, _ = torch.jit._flatten(test_input)
                 ort_outs = run_ort(ort_sess, test_input)
                 ort_compare_with_pytorch(ort_outs, output, rtol, atol)
 
@@ -554,16 +556,17 @@ class TestONNXRuntime(unittest.TestCase):
         model = torchvision.models.detection.faster_rcnn.fasterrcnn_resnet50_fpn(pretrained=True, min_size=200,
                                                                                  max_size=300)
         model.eval()
-        x = torch.randn(2, 3, 200, 300, requires_grad=True)
-        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
-        self.run_test(model, (x,), input_names=["images_tensors"], output_names=["outputs"],
-                      dynamic_axes={"images_tensors": [0, 1, 2, 3], "outputs": [0, 1, 2, 3]}, rtol=1e-3, atol=1e-5)
+        x1 = torch.randn(3, 200, 300, requires_grad=True)
+        x2 = torch.randn(3, 200, 300, requires_grad=True)
+        self.run_test(model, ([x1, x2],), rtol=1e-3, atol=1e-5)
+        self.run_test(model, ([x1, x2],), input_names=["images_tensors"], output_names=["outputs"],
+                      dynamic_axes={"images_tensors": [0, 1, 2], "outputs": [0, 1, 2]}, rtol=1e-3, atol=1e-5)
         dummy_image = [torch.ones(3, 100, 100) * 0.3]
         images, test_images = self.get_test_images()
-        self.run_test(model, (images,), test_with_inputs=[(images,), (test_images,), (dummy_image,)],
+        self.run_test(model, (images,), test_with_inputs=[(images, ), (test_images, ), (dummy_image, )],
                       input_names=["images_tensors"], output_names=["outputs"],
                       dynamic_axes={"images_tensors": [0, 1, 2], "outputs": [0, 1, 2]}, rtol=1e-3, atol=1e-5)
-        self.run_test(model, (dummy_image,), test_with_inputs=[(dummy_image,), (images,)],
+        self.run_test(model, (dummy_image,), test_with_inputs=[(dummy_image, ), (images, )],
                       input_names=["images_tensors"], output_names=["outputs"],
                       dynamic_axes={"images_tensors": [0, 1, 2], "outputs": [0, 1, 2]}, rtol=1e-3, atol=1e-5)
 
@@ -654,11 +657,11 @@ class TestONNXRuntime(unittest.TestCase):
                       dynamic_axes={"images_tensors": [0, 1, 2]},
                       rtol=1e-3, atol=1e-5)
         dummy_images = [torch.ones(3, 100, 100) * 0.3]
-        self.run_test(model, (images,), test_with_inputs=[(images,), (test_images,), (dummy_images,)],
+        self.run_test(model, (images,), test_with_inputs=[(images, ), (test_images, ), (dummy_images, )],
                       input_names=["images_tensors"], output_names=["outputs1", "outputs2", "outputs3", "outputs4"],
                       dynamic_axes={"images_tensors": [0, 1, 2]},
                       rtol=5e-3, atol=1e-5)
-        self.run_test(model, (dummy_images,), test_with_inputs=[(dummy_images,), (test_images,)],
+        self.run_test(model, (dummy_images,), test_with_inputs=[(dummy_images, ), (test_images, )],
                       input_names=["images_tensors"], output_names=["outputs1", "outputs2", "outputs3", "outputs4"],
                       dynamic_axes={"images_tensors": [0, 1, 2]},
                       rtol=5e-3, atol=1e-5)
