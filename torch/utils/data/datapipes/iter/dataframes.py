@@ -1,6 +1,9 @@
 from torch.utils.data import IterDataPipe, functional_datapipe, DFIterDataPipe, DataChunk
-import pandas
-# TODO(VitalyFedyunin): Guard all pandas imports
+try:
+    import pandas
+    WITH_PANDAS = True
+finally:
+    WITH_PANDAS = False
 import random
 
 # TODO(VitalyFedyunin): Add error when two different traces get combined
@@ -50,6 +53,8 @@ class ShuffleDataFramesPipe(DFIterDataPipe):
     def __init__(self, source_datapipe, batch=3):
         self.source_datapipe = source_datapipe
         self.batch = batch
+        if not WITH_PANDAS:
+            Exception('DataFrames prototype requires pandas to function')
 
     def __iter__(self):
         buffer = []
@@ -66,6 +71,8 @@ class ShuffleDataFramesPipe(DFIterDataPipe):
 class ShuffleDataFramesPipe(DFIterDataPipe):
     def __init__(self, source_datapipe):
         self.source_datapipe = source_datapipe
+        if not WITH_PANDAS:
+            Exception('DataFrames prototype requires pandas to function')
 
     def __iter__(self):
         size = None
@@ -91,6 +98,8 @@ class ShuffleDataFramesPipe(DFIterDataPipe):
     def __init__(self, source_datapipe, filter_fn):
         self.source_datapipe = source_datapipe
         self.filter_fn = filter_fn
+        if not WITH_PANDAS:
+            Exception('DataFrames prototype requires pandas to function')
 
     def __iter__(self):
         size = None
@@ -120,6 +129,8 @@ class ExampleAggregateAsDataFrames(DFIterDataPipe):
         self.source_datapipe = source_datapipe
         self.columns = columns
         self.dataframe_size = dataframe_size
+        if not WITH_PANDAS:
+            Exception('DataFrames prototype requires pandas to function')
 
     def _as_list(self, item):
         try:

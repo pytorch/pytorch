@@ -3,9 +3,14 @@ from typing import Callable, TypeVar, Iterator, Optional, Tuple, Dict
 
 from .callable import MapIterDataPipe
 
-import pandas
+try:
+    import pandas
+    WITH_PANDAS = True
+finally:
+    WITH_PANDAS = False
 
 T_co = TypeVar('T_co', covariant=True)
+
 
 @functional_datapipe('filter')
 class FilterIterDataPipe(MapIterDataPipe):
@@ -59,24 +64,27 @@ class FilterIterDataPipe(MapIterDataPipe):
 
     def _returnIfTrue(self, data):
         condition = self.fn(data, *self.args, **self.kwargs)
-        if isinstance(condition, pandas.core.series.Series):
-            # We are operatring on DataFrames filter here
-            result = []
-            for idx,mask in enumerate(condition):
-                if mask:
-                    result.append(data[idx:idx+1])
-            if len(result):
-                return pandas.concat(result)
-            else: 
-                return None
-        elif not isinstance(condition, bool):
+        if WITH_PANDAS:
+            if isinstance(condition, pandas.core.series.Series):
+                # We are operatring on DataFrames filter here
+                result = []
+                for idx, mask in enumerate(condition):
+                    if mask:
+                        result.append(data[idx:idx + 1])
+                if len(result):
+                    return pandas.concat(result)
+                else:
+                    return None
+
+        if not isinstance(condition, bool):
             raise ValueError("Boolean output is required for `filter_fn` of FilterIterDataPipe", type(condition))
         if condition:
             return data
 
     def _isNonEmpty(self, data):
-        if isinstance(data, pandas.core.frame.DataFrame):
-            return True
+        if WITH_PANDAS:
+            if isinstance(data, pandas.core.frame.DataFrame):
+                return True
         return data is not None and not (len(data) == 0 and self.drop_empty_batches)
 
     def __len__(self):
