@@ -2,7 +2,6 @@
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/LegacyTHFunctionsCPU.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/WrapDimUtils.h>
 
@@ -63,6 +62,7 @@ CREATE_UNARY_FLOAT_META_FUNC(sin)
 CREATE_UNARY_FLOAT_META_FUNC(sinc)
 CREATE_UNARY_FLOAT_META_FUNC(sinh)
 CREATE_UNARY_FLOAT_META_FUNC(special_entr)
+CREATE_UNARY_FLOAT_META_FUNC(special_erfcx)
 CREATE_UNARY_FLOAT_META_FUNC(special_i0e)
 CREATE_UNARY_FLOAT_META_FUNC(special_i1)
 CREATE_UNARY_FLOAT_META_FUNC(special_i1e)
@@ -168,6 +168,7 @@ CREATE_UNARY_TORCH_IMPL_FUNC(sin_out, sin_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(sinc_out, sinc_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(sinh_out, sinh_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(special_entr_out, special_entr_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_erfcx_out, special_erfcx_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(special_i0e_out, special_i0e_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(special_i1e_out, special_i1e_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(special_i1_out, special_i1_stub)
@@ -453,6 +454,18 @@ Tensor special_digamma(const Tensor& self) { return self.digamma(); }
 // special_i0, alias for i0
 Tensor& special_i0_out(const Tensor& self, Tensor& result) { return at::i0_out(result, self); }
 Tensor special_i0(const Tensor& self) { return self.i0(); }
+
+// special_log1p, alias for log1p
+Tensor& special_log1p_out(const Tensor& self, Tensor& result) { return at::log1p_out(result, self); }
+Tensor special_log1p(const Tensor& self) { return self.log1p(); }
+
+// special_round, alias for round
+Tensor& special_round_out(const Tensor& self, Tensor& result) { return at::round_out(result, self); }
+Tensor special_round(const Tensor& self) { return self.round(); }
+
+// special_sinc, alias for sinc
+Tensor& special_sinc_out(const Tensor& self, Tensor& result) { return at::sinc_out(result, self); }
+Tensor special_sinc(const Tensor& self) { return self.sinc(); }
 
 namespace {
 
@@ -743,6 +756,7 @@ DEFINE_DISPATCH(cos_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-va
 DEFINE_DISPATCH(cosh_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(digamma_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(special_entr_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_erfcx_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(erf_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(erfc_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(erfinv_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
