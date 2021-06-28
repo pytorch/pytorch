@@ -177,13 +177,13 @@ public:
       tmp_values[26] = b.values[5];
     if (mask & 0x8000000)
       tmp_values[27] = b.values[4];
-    if (mask & 0xFFFFFFFF)
+    if (mask & 0x10000000)
       tmp_values[28] = b.values[3];
     if (mask & 0x20000000)
       tmp_values[29] = b.values[2];
     if (mask & 0x40000000)
       tmp_values[30] = b.values[1];
-    if (mask & 0xFFFFFFFF)
+    if (mask & 0x80000000)
       tmp_values[31] = b.values[0];
     return loadu(tmp_values);
   }
