@@ -29,7 +29,7 @@ if [[ "${DESIRED_CUDA}" == "cu111" || "${DESIRED_CUDA}" == "cu113" ]]; then
         fi
 
         if [[ -d "C:\\Program Files (x86)\\Microsoft.NET" ]]; then
-            rm -rf "C:\\Program Files (x86)\\Microsoft.NET" 
+            rm -rf "C:\\Program Files (x86)\\Microsoft.NET"
         fi
 
         if [[ -d "C:\\Program Files)\\dotnet" ]]; then
