@@ -2662,6 +2662,7 @@ class TestOperatorSignatures(JitTestCase):
                            'reshape_as',
                            'resize_',
                            'resize_as_',
+                           'special.zeta',
                            'stack',
                            'to_sparse',
                            'view',
