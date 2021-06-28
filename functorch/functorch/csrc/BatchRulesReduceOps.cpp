@@ -32,9 +32,6 @@ R ret(R(*)(A...));
 // Optional implies the weird case with 0-dim tensors i.e. torch.sum(torch.randn(()), 0)
 template <typename F, F Func, typename... ExtraArgs>
 optional<std::tuple<decltype(ret(Func)), optional<int64_t>>> reduction_dimarray_batch_rule_impl(    const Tensor& self, optional<int64_t> self_bdim, IntArrayRef dims, ExtraArgs... extra_args) {
-  if (!self_bdim.has_value()) {
-    return std::make_tuple(Func(self, dims, std::forward<ExtraArgs>(extra_args)...), nullopt);
-  }
   auto logical_dim = rankWithoutBatchDim(self, self_bdim);
 
   // If the dim intlist is empty, that's equivalent to passing in a dim on all dimensions.
@@ -69,9 +66,6 @@ std::tuple<Tensor,optional<int64_t>> reduction_dimarray_batch_rule(
 // Optional implies the weird case with 0-dim tensors i.e. torch.sum(torch.randn(()), 0)
 template <typename F, F Func, typename... ExtraArgs>
 optional<std::tuple<decltype(ret(Func)), optional<int64_t>>> reduction_dim_batch_rule_impl(const Tensor& self, optional<int64_t> self_bdim, int64_t dim, ExtraArgs... extra_args) {
-  if (!self_bdim.has_value()) {
-    return std::make_tuple(Func(self, dim, std::forward<ExtraArgs>(extra_args)...), nullopt);
-  }
   auto logical_dim = rankWithoutBatchDim(self, self_bdim);
   if (logical_dim == 0 && is_allowed_dim_on_scalar_tensor(dim)) {
     return nullopt;
@@ -107,9 +101,6 @@ std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>> reduction_dim_ret_
 template <typename F, F Func, typename G, G DimRule, typename... ExtraArgs>
 std::tuple<Tensor,optional<int64_t>> reduction_no_dim_batch_rule(
     const Tensor& self, optional<int64_t> self_bdim, ExtraArgs... extra_args) {
-  if (!self_bdim.has_value()) {
-    return std::make_tuple(Func(self, std::forward<ExtraArgs>(extra_args)...), nullopt);
-  }
   if (self.dim() == 1) {
     return std::make_tuple(self.clone(), 0);
   }
@@ -235,9 +226,6 @@ std::tuple<Tensor,optional<int64_t>> norm_scalar_batch_rule(
 template<typename F, F Func>
 std::tuple<Tensor,optional<int64_t>> argx_batch_rule(
     const Tensor& self, optional<int64_t> self_bdim, optional<int64_t> dim, bool keepdim) {
-  if (!self_bdim.has_value()) {
-    return std::make_tuple( Func(self, dim, keepdim), nullopt );
-  }
   auto self_ = moveBatchDimToFront(self, self_bdim);
   if (!dim) {
     // If no dimension is given, then argmax gives you the flattened index of
@@ -269,9 +257,6 @@ _log_softmax_backward_data(
     const Tensor& self, optional<int64_t> self_bdim) {
   TORCH_INTERNAL_ASSERT(!(output_bdim.has_value() ^ self_bdim.has_value()),
       "output_bdim and self_bdim must be the same");
-  if (!grad_output_bdim && !self_bdim) {
-    return std::make_tuple( at::_log_softmax_backward_data(grad_output, output, dim, self), nullopt );
-  }
   if (grad_output_bdim && self_bdim) {
     auto grad_output_ = moveBatchDimToFront(grad_output, grad_output_bdim);
     auto output_ = moveBatchDimToFront(output, output_bdim);
