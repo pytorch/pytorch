@@ -4,7 +4,7 @@ import copy
 
 import torch
 from torch import nn
-from torch.ao.utils import _module_to_path, _path_to_module
+from torch.ao.utils import _module_to_fqn, _fqn_to_module
 from torch.nn.utils import parametrize
 
 from .utils import FakeSparsity
@@ -12,6 +12,7 @@ from .utils import FakeSparsity
 SUPPORTED_MODULES = {
     nn.Linear
 }
+
 
 class BaseSparsifier(abc.ABC):
     r"""Base class for all sparsifiers.
@@ -90,7 +91,7 @@ class BaseSparsifier(abc.ABC):
     def load_state_dict(self, state_dict, strict=True):
         module_groups = copy.deepcopy(state_dict['module_groups'])
         for group in module_groups:
-            layer = _path_to_module(self.model, group['path'])
+            layer = _fqn_to_module(self.model, group['path'])
             if strict and layer is None:
                 raise RuntimeError(f'Error loading group["path"] into the model')
             group['module'] = layer
@@ -125,7 +126,7 @@ class BaseSparsifier(abc.ABC):
             local_args = copy.deepcopy(self.defaults)
             local_args.update(module_config)
             module = local_args['module']
-            module_path = _module_to_path(self.model, module)
+            module_path = _module_to_fqn(self.model, module)
             if module_path and module_path[0] == '.':
                 module_path = module_path[1:]
             local_args['path'] = module_path

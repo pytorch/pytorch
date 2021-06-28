@@ -1,17 +1,17 @@
 from torch import nn
 
-def _module_to_path(model, layer, prefix=''):
+def _module_to_fqn(model, layer, prefix=''):
     for name, child in model.named_children():
         new_name = prefix + '.' + name
         if child is layer:
             return new_name
-        child_path = _module_to_path(child, layer, prefix=new_name)
+        child_path = _module_to_fqn(child, layer, prefix=new_name)
         if child_path is not None:
             return child_path
     return None
 
 
-def _path_to_module(model, path):
+def _fqn_to_module(model, path):
     path = path.split('.')
     for name in path:
         model = getattr(model, name, None)
