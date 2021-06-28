@@ -146,10 +146,12 @@ static void fuseConvBatchNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
     printf("=== input name: %s \n", b_input->debugNameBase().c_str());
   }
   printf("Finish print block's inputs.\n");
-
 }
 
-void EvalPeepholeONNX(Block* b, std::vector<std::string>& inputNames, ParamMap& paramsDict) {
+void EvalPeepholeONNX(
+    Block* b,
+    std::vector<std::string>& inputNames,
+    ParamMap& paramsDict) {
   auto valsToParamsMap = buildValueToParamsMap(b, paramsDict);
   fuseConvBatchNorm(b, inputNames, valsToParamsMap);
   buildParamsMapFromValueToParamsMap(valsToParamsMap, paramsDict);
