@@ -1,9 +1,10 @@
+import copy
+import warnings
 from typing import List, NamedTuple, Iterable, Any, Optional
 
 import torch
 import torch.fx
 import tensorrt as trt
-import copy
 from torch.fx.experimental.normalize import NormalizeArgs
 
 
@@ -56,7 +57,7 @@ def torch_device_from_trt(device):
 
 
 class TRTModule(torch.nn.Module):
-    def __init__(self, engine=None, input_names=None, output_names=None):
+    def __init__(self, engine=None, input_names=None, output_names=None, fp16_output=False):
         super(TRTModule, self).__init__()
         self._register_state_dict_hook(TRTModule._on_state_dict)
         self.engine = engine
@@ -65,10 +66,14 @@ class TRTModule(torch.nn.Module):
         self.input_names = input_names
         self.output_names = output_names
 
+        # Indicate output is in fp16
+        self.fp16_output = fp16_output
+
     def _on_state_dict(self, state_dict, prefix, local_metadata):
         state_dict[prefix + "engine"] = bytearray(self.engine.serialize())
         state_dict[prefix + "input_names"] = self.input_names
         state_dict[prefix + "output_names"] = self.output_names
+        state_dict[prefix + "fp16_output"] = self.fp16_output
 
     def _load_from_state_dict(
         self,
@@ -136,6 +141,7 @@ def tensorrt_converter(key):
 class InputTensorSpec(NamedTuple):
     shape : torch.Size
     dtype : torch.dtype
+    has_batch_dim : bool = True
 
     @classmethod
     def from_tensor(cls, tensor: torch.Tensor):
@@ -146,12 +152,8 @@ class InputTensorSpec(NamedTuple):
         return [cls.from_tensor(t) for t in tensors]
 
 
-class TRTInterpreter(torch.fx.Interpreter):
-    def __init__(self, module : torch.fx.GraphModule, input_shapes : List[InputTensorSpec], logger_level=trt.Logger.WARNING):
-        # Preprocess the model
-        module = copy.deepcopy(module)
-        module = module.cpu().float()
-        module = NormalizeArgs(module).transform()
+class BaseTRTInterpreter(torch.fx.Interpreter):
+    def __init__(self, module : torch.fx.GraphModule, input_specs : List[InputTensorSpec], logger_level=trt.Logger.WARNING):
         super().__init__(module)
 
         self.logger = trt.Logger(logger_level)
@@ -163,16 +165,13 @@ class TRTInterpreter(torch.fx.Interpreter):
 
         self.network = self.builder.create_network()
 
-        self.input_shape_itr = iter(input_shapes)
-
+        self.input_specs_iter = iter(input_specs)
         self._cur_node_name: Optional[str] = None
-
         self._input_names: List[str] = []
         self._output_names: List[str] = []
 
     def run(
         self,
-        *args,
         max_batch_size=64,
         max_workspace_size=1 << 25,
         fp16_mode=True,
@@ -182,46 +181,44 @@ class TRTInterpreter(torch.fx.Interpreter):
         # TODO hack, should check contents of args and remove fp16_mode probably
         self.fp16_mode = fp16_mode
 
-        super().run(*args)
+        if int8_mode and not self.builder.platform_has_fast_int8:
+            warnings.warn("Current platform doesn't support fast native int8!")
 
-        if int8_mode:
-            assert self.builder.platform_has_fast_int8, "Current platform doesn't support int8 inference!"
+        if fp16_mode and not self.builder.platform_has_fast_fp16:
+            warnings.warn("Current platform doesn't support fast native fp16!")
 
-        if fp16_mode:
-            assert self.builder.platform_has_fast_fp16, "Current platform doesn't support fp16 inference!"
+        super().run()
 
         self.builder.max_batch_size = max_batch_size
-        self.builder.max_workspace_size = max_workspace_size
-        self.builder.strict_type_constraints = strict_type_constraints
-
         builder_config = self.builder.create_builder_config()
+        builder_config.max_workspace_size = max_workspace_size
         if fp16_mode:
             builder_config.set_flag(trt.BuilderFlag.FP16)
 
         if int8_mode:
             builder_config.set_flag(trt.BuilderFlag.INT8)
 
-        engine = self.builder.build_engine(self.network, builder_config), self._input_names, self._output_names
+        if strict_type_constraints:
+            builder_config.set_flag(trt.BuilderFlag.STRICT_TYPES)
+
+        engine = self.builder.build_engine(self.network, builder_config)
         assert(engine)
-        return engine
+        return engine, self._input_names, self._output_names
 
     def run_node(self, n):
         self._cur_node_name = str(n)
-
-        try:
-            return super().run_node(n)
-        finally:
-            self._cur_node_metadata = None
+        return super().run_node(n)
 
     def placeholder(self, target, args, kwargs):
-        shape, dtype = next(self.input_shape_itr)
         self._input_names.append(target)
-        return self.network.add_input(name=target, shape=tuple(shape[1:]), dtype=torch_dtype_to_trt(dtype))
+        shape, dtype, has_batch_dim = next(self.input_specs_iter)
+        if has_batch_dim:
+            shape = shape[1:]
+        return self.network.add_input(name=target, shape=tuple(shape), dtype=torch_dtype_to_trt(dtype))
 
     def call_module(self, target, args, kwargs):
         assert isinstance(target, str)
         submod = self.fetch_attr(target)
-
         converter = CONVERTERS.get(type(submod))
 
         if not converter:
@@ -239,7 +236,6 @@ class TRTInterpreter(torch.fx.Interpreter):
 
     def call_method(self, target, args, kwargs):
         assert isinstance(target, str)
-
         converter = CONVERTERS.get(target)
 
         if not converter:
@@ -250,16 +246,31 @@ class TRTInterpreter(torch.fx.Interpreter):
     def output(self, target, args, kwargs):
         assert len(args) == 1
         outputs = args[0] if isinstance(args[0], tuple) else (args[0],)
+
         if not all(isinstance(output, trt.tensorrt.ITensor) for output in outputs):
             raise RuntimeError('TensorRT requires all outputs to be Tensor!')
 
         for i, output in enumerate(outputs):
-            # TODO: set location and dtype?
             name = f'output{i}'
             output.name = name
+            self.network.mark_output(output)
             if self.fp16_mode:
                 output.dtype = trt.float16
             else:
                 output.dtype = trt.float32
-            self.network.mark_output(output)
             self._output_names.append(name)
+
+
+class TRTInterpreter(BaseTRTInterpreter):
+    """
+    Use this for general case where there're PyTorch vanilla ops in the FX mdoule.
+    """
+    def __init__(self, module : torch.nn.Module, input_specs : List[InputTensorSpec], logger_level=trt.Logger.WARNING):
+        # Preprocess the model
+        if not isinstance(module, torch.fx.GraphModule):
+            module = torch.fx.symbolic_trace(module)
+        else:
+            module = copy.deepcopy(module)
+        module = module.cpu().float()
+        module = NormalizeArgs(module).transform()
+        super().__init__(module, input_specs, logger_level)
