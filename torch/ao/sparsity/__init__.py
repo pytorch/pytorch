@@ -12,7 +12,7 @@ from .scheduler.base_scheduler import BaseScheduler
 from .scheduler.lambda_scheduler import LambdaSL
 
 # Parametrizations
-from .sparsifier.parametrization import MulBy
+from .sparsifier.utils import FakeSparsity
 
 # === Experimental ===
 
