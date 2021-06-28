@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <torch/csrc/deploy/deploy.h>
+#include <torch/cuda.h>
 #include <torch/script.h>
 #include <torch/torch.h>
 #include <future>
@@ -21,6 +22,9 @@ const char* path(const char* envname, const char* path) {
 }
 
 TEST(TorchDeployGPUTest, SimpleModel) {
+  if (!torch::cuda::is_available()) {
+    GTEST_SKIP();
+  }
   const char* model_filename = path("SIMPLE", simple);
   const char* jit_filename = path("SIMPLE_JIT", simple_jit);
 

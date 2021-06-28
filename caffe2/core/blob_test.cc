@@ -971,10 +971,8 @@ TYPED_TEST(TypedTensorTest, BigTensorSerialization) {
     }
     StringMap data;
     std::mutex mutex;
-    /*auto db = CreateDB("minidb", db_source, WRITE);*/
     auto acceptor = [&](const std::string& key, const std::string& value) {
       std::lock_guard<std::mutex> guard(mutex);
-      /*db->NewTransaction()->Put(key, value);*/
       data.emplace_back(key, value);
     };
     SerializeBlob(blob, "test", acceptor);
@@ -1053,7 +1051,8 @@ class DummyTypeSerializer : public BlobSerializerBase {
     const auto& container = *static_cast<const DummyType*>(pointer);
     for (int k = 0; k < container.n_chunks; ++k) {
       std::string serialized_chunk = container.serialize(name, k);
-      acceptor(c10::str(name, kChunkIdSeparator, k), serialized_chunk);
+      acceptor(
+          c10::str(name, kChunkIdSeparator, k), std::move(serialized_chunk));
     }
   }
 };

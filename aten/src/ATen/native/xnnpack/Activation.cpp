@@ -22,11 +22,10 @@ Tensor& hardswish_impl(Tensor& input, Tensor& output) {
   using namespace internal;
 
   xnn_operator_t hardswish_op{};
-  const auto channels = Layout::ActivationND::channel(input.sizes());
   const xnn_status create_status = xnn_create_hardswish_nc_f32(
-    channels, // channels
-    channels, // input stride
-    channels, // output stride
+    1, // channels
+    1, // input stride
+    1, // output stride
     0, // flags
     &hardswish_op);
 
@@ -38,7 +37,7 @@ Tensor& hardswish_impl(Tensor& input, Tensor& output) {
 
   const xnn_status setup_status = xnn_setup_hardswish_nc_f32(
     hardswish_op,
-    Layout::ActivationND::batch(input.sizes()),  // Batch
+    input.numel(),  // Batch
     input.data_ptr<float>(),
     output.data_ptr<float>(),
     caffe2::pthreadpool_());  // threadpool

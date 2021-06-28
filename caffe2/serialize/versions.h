@@ -71,16 +71,21 @@ constexpr uint64_t kProducedFileFormatVersion = 0x3L;
 //  to the unify format, the root key of tensor storage is updated from {index} to
 //  {the_pointer_value_the_tensor.storage}, for example: `140245072983168.storage`
 //  Forward-compatibility change.
-constexpr uint64_t kProducedBytecodeVersion = 0x5L;
+//  0x6L: Implicit opereator versioning using number of specified argument.
+//  Refer to the summary of https://github.com/pytorch/pytorch/pull/56845
+//  for details.
+constexpr uint64_t kProducedBytecodeVersion = 0x6L;
 
 static_assert(kProducedBytecodeVersion >= kProducedFileFormatVersion,
     "kProducedBytecodeVersion must be higher or equal to kProducedFileFormatVersion.");
 
-// Introduce kMinSupportedBytecodeVersion for limited backward compatibility
-// support of bytecode. If
-// kMinSupportedBytecodeVersion <= model_version <= kProducedBytecodeVersion (in loader),
+// Introduce kMinSupportedBytecodeVersion and kMaxSupportedBytecodeVersion
+// for limited backward/forward compatibility support of bytecode. If
+// kMinSupportedBytecodeVersion <= model_version <= kMaxSupportedBytecodeVersion (in loader),
 // we should support this model_version. For example, we provide a wrapper to
 // handle an updated operator.
 constexpr uint64_t kMinSupportedBytecodeVersion = 0x3L;
+constexpr uint64_t kMaxSupportedBytecodeVersion = 0x6L;
+
 } // namespace serialize
 } // namespace caffe2
