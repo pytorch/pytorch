@@ -109,7 +109,6 @@ float LambdaRankNdcgOp<float, CPUContext>::LambdaRankNdcgSession(
   float loss = 0;
   dy_vec = 0;
   // in case that all docs in a session have zero ratings, no op
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (r_vec.abs().sum() < 1e-6) {
     return 0;
   }
@@ -152,7 +151,6 @@ float LambdaRankNdcgOp<float, CPUContext>::LambdaRankNdcgSession(
   dy_vec =
       -(lambda_mat * CWISE_SIGN(PAIRWISE_DIFF(r_vec, N)) *
         CWISE_SIGM(
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             -CWISE_SIGN(PAIRWISE_DIFF(r_vec, N)) * PAIRWISE_DIFF(y_vec, N)))
            .rowwise()
            .sum();
@@ -163,7 +161,6 @@ float LambdaRankNdcgOp<float, CPUContext>::LambdaRankNdcgSession(
   } else {
     loss = -(lambda_mat *
              CWISE_LOG_SIGM(
-                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                  CWISE_SIGN(PAIRWISE_DIFF(r_vec, N)) * PAIRWISE_DIFF(y_vec, N),
                  100))
                 .sum();
@@ -174,9 +171,7 @@ float LambdaRankNdcgOp<float, CPUContext>::LambdaRankNdcgSession(
   // Note that normalization is mathematically correct if idcg is guaranteed to
   // be positive!
   if (use_idcg_normalization_) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     dy_vec /= std::max(idcg, 1e-5);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     loss /= std::max(idcg, 1e-5);
   }
   return loss;

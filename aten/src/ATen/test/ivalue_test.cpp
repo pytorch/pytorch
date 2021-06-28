@@ -16,7 +16,6 @@ namespace c10 {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IValueTest, Basic) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   c10::List<int64_t> foo({3, 4, 5});
   ASSERT_EQ(foo.use_count(), 1);
   IValue bar{foo};
@@ -28,7 +27,6 @@ TEST(IValueTest, Basic) {
   ASSERT_TRUE(foo2.isIntList());
   // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
   ASSERT_TRUE(bar.isNone());
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   foo2 = IValue(4.0);
   ASSERT_TRUE(foo2.isDouble());
   ASSERT_EQ(foo2.toDouble(), 4.0);
@@ -42,18 +40,15 @@ TEST(IValueTest, Basic) {
   IValue i(4);
   ASSERT_TRUE(i.isInt());
   ASSERT_EQ(i.toInt(), 4);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   IValue dlist(c10::List<double>({3.5}));
   ASSERT_TRUE(dlist.isDoubleList());
   ASSERT_TRUE(dlist.toDoubleVector() == std::vector<double>({3.5}));
   std::move(dlist).toDoubleList();
   // NOLINTNEXTLINE(bugprone-use-after-move)
   ASSERT_TRUE(dlist.isNone());
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   dlist = IValue(c10::List<double>({3.4}));
   ASSERT_TRUE(dlist.toDoubleVector() == std::vector<double>({3.4}));
   IValue the_list(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       at::ivalue::Tuple::create({IValue(3.4), IValue(4), IValue(foo)}));
   ASSERT_EQ(foo.use_count(), 3);
   ASSERT_TRUE(the_list.isTuple());
@@ -70,7 +65,6 @@ TEST(IValueTest, Basic) {
 
   auto elem1 = c10::complex<double>(3, 4);
   auto elem2 = c10::complex<double>(3, -4);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto elem3 = c10::complex<double>(5, 0);
   c10::List<c10::complex<double>> foo1({elem1, elem2, elem3});
   ASSERT_EQ(foo1.use_count(), 1);
@@ -91,7 +85,6 @@ TEST(IValueTest, Basic) {
 
   ASSERT_TRUE(baz1.toComplexDoubleVector() == std::vector<c10::complex<double>>({elem1, elem2, elem3}));
   IValue complex_tuple(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       at::ivalue::Tuple::create({IValue(c10::complex<double>(3.4, 4.7)), IValue(foo1)}));
   ASSERT_TRUE(complex_tuple.isTuple());
   ASSERT_EQ(complex_tuple.toTuple()->elements()[0].toComplexDouble(), c10::complex<double>(3.4, 4.7));
@@ -102,9 +95,7 @@ TEST(IValueTest, Basic) {
 TEST(IValueTest, ComplexDict) {
   typedef c10::complex<double> c_type;
   c10::Dict<c_type, c_type> m;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto num1 = c_type(2.3, -3.5);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto num2 = c_type(0, 5);
   m.insert(num1, 2 * num1);
   m.insert(num2, 2 * num2);
@@ -113,15 +104,11 @@ TEST(IValueTest, ComplexDict) {
   ASSERT_EQ(m_.at(num1), 2 * num1);
   ASSERT_EQ(m_.at(num2), 2 * num2);
 }
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static std::array<IValue, 5> makeSampleIValues() {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return { at::rand({3, 4}), "hello", 42, true, 1.5 };
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static std::array<IValue, 5> makeMoreSampleIValues() {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return { at::rand({3, 4}), "goodbye", 23, false, 0.5 };
 }
 
@@ -211,7 +198,6 @@ TEST(IValueTest, MoveAssign) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IValueTest, Tuple) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::tuple<int64_t, at::Tensor> t = std::make_tuple(123, at::randn({1}));
   auto iv = IValue(t);
   auto t_ = iv.to<std::tuple<int64_t, at::Tensor>>();
@@ -299,7 +285,6 @@ TEST(IValueTest, BasicFuture) {
   auto f1 = c10::make_intrusive<ivalue::Future>(IntType::get());
   ASSERT_FALSE(f1->completed());
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   f1->markCompleted(IValue(42));
   ASSERT_TRUE(f1->completed());
   ASSERT_EQ(42, f1->value().toInt());
@@ -312,19 +297,18 @@ TEST(IValueTest, FutureCallbacks) {
   auto f2 = c10::make_intrusive<ivalue::Future>(IntType::get());
   int calledTimesA = 0;
   int calledTimesB = 0;
-  f2->addCallback([f2, &calledTimesA]() {
-    ASSERT_TRUE(f2->completed());
-    ASSERT_EQ(f2->value().toInt(), 43);
+  f2->addCallback([&calledTimesA](ivalue::Future& f2) {
+    ASSERT_TRUE(f2.completed());
+    ASSERT_EQ(f2.value().toInt(), 43);
     ++calledTimesA;
   });
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   f2->markCompleted(IValue(43));
   ASSERT_EQ(calledTimesA, 1);
   ASSERT_EQ(calledTimesB, 0);
   // Post-markCompleted()
-  f2->addCallback([f2, &calledTimesB]() {
-    ASSERT_TRUE(f2->completed());
-    ASSERT_EQ(f2->value().toInt(), 43);
+  f2->addCallback([&calledTimesB](ivalue::Future& f2) {
+    ASSERT_TRUE(f2.completed());
+    ASSERT_EQ(f2.value().toInt(), 43);
     ++calledTimesB;
   });
   ASSERT_EQ(calledTimesA, 1);
@@ -336,10 +320,10 @@ TEST(IValueTest, FutureCallbacks) {
 TEST(IValueTest, FutureExceptions) {
   auto f3 = c10::make_intrusive<ivalue::Future>(IntType::get());
   int calledTimes = 0;
-  f3->addCallback([f3, &calledTimes]() {
-    ASSERT_TRUE(f3->completed());
+  f3->addCallback([&calledTimes](ivalue::Future& f3) {
+    ASSERT_TRUE(f3.completed());
     try {
-      (void)f3->value();
+      (void)f3.value();
     } catch (const std::exception& e) {
       if (std::string(e.what()) == "My Error") {
         ++calledTimes;
@@ -555,7 +539,6 @@ TEST(IValueTest, EnumEquality) {
 TEST(IValueTest, isPtrType) {
   IValue tensor(at::rand({3, 4}));
   IValue undefinedTensor((at::Tensor()));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   IValue integer(42);
   IValue str("hello");
 
@@ -638,7 +621,6 @@ TEST(IValueTest, IdentityComparisonAndHashing) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IValueTest, getSubValues) {
   // Scalars have no subvalues.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   IValue integer(42), float_(1.5), complex(c10::complex<double>(2, 3));
 
   IValue::HashAliasedIValues subvalues;

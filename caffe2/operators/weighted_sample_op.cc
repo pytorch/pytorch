@@ -46,7 +46,6 @@ bool WeightedSampleOp<float, CPUContext>::RunOnDevice() {
           1, 0.0f, cum_mass_[cum_mass_.size() - 1], &r, &context_);
       // Makes the element in cum_mass_ slightly bigger
       // to compensate inaccuracy introduced due to rounding,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       cum_mass_[cum_mass_.size() - 1] += 0.01f;
       auto lb = lower_bound(cum_mass_.begin(), cum_mass_.end(), r);
       CAFFE_ENFORCE(lb != cum_mass_.end(), "Cannot find ", r, " in cum_mass_.");

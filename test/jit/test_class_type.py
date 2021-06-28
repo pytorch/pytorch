@@ -27,7 +27,6 @@ class TestClassType(JitTestCase):
         Test that modifications made to a class instance in TorchScript
         are visible in eager.
         """
-        @torch.jit.script
         class Foo(object):
             def __init__(self, a: int):
                 self.a = a
@@ -49,8 +48,11 @@ class TestClassType(JitTestCase):
 
         scripted_fn = torch.jit.script(test_fn)
         obj = torch.jit.script(Foo(1))
+        self.assertEqual(obj.get_a(), 1)
+        self.assertEqual(obj.attr, 1)
 
         scripted_fn(obj)
+
         self.assertEqual(obj.get_a(), 2)
         self.assertEqual(obj.attr, 2)
 

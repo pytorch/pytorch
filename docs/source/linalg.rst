@@ -6,10 +6,6 @@ torch.linalg
 
 Common linear algebra operations.
 
-This module is in BETA. New functions are still being added, and some
-functions may change in future PyTorch releases. See the documentation of each
-function for details.
-
 .. automodule:: torch.linalg
 .. currentmodule:: torch.linalg
 
@@ -22,6 +18,7 @@ Matrix Properties
 
     norm
     vector_norm
+    matrix_norm
     det
     slogdet
     cond
@@ -91,3 +88,4 @@ Experimental Functions
     :nosignatures:
 
     cholesky_ex
+    inv_ex

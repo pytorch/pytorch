@@ -156,9 +156,6 @@ static void multilabel_margin_loss_backward_out_frame(
     const Tensor& is_target_contiguous,
     int64_t nframe,
     int64_t dim) {
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-  CheckedFrom c = "multilabel_margin_loss_backward_out_frame";
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto is_target_arg = TensorArg(is_target_contiguous, "is_target", 5);
 
   TORCH_CHECK(
@@ -228,7 +225,6 @@ static void multilabel_margin_loss_backward_out_cpu_template(
   int64_t nframe, dim;
   CheckedFrom c = "multilabel_margin_loss_backward_cpu_template";
   auto target_arg = TensorArg(target, "target", 3);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto is_target_arg = TensorArg(is_target, "is_target", 5);
   const int64_t ndims = input.dim();
 

@@ -37,7 +37,6 @@ TORCH_META_FUNC(upsample_nearest3d_backward) (
       grad_output.dim() == 5,
       "Expected grad_output to be a tensor of dimension 5 but got: dimension ", grad_output.dim());
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 5; ++i) {
     TORCH_CHECK(
         grad_output.size(i) == full_output_size[i],

@@ -26,6 +26,7 @@ namespace c10 {
   _(prim, BroadcastingChunk)         \
   _(prim, BroadcastSizes)            \
   _(prim, ReductionSizes)            \
+  _(prim, Concat)                    \
   _(prim, Constant)                  \
   _(prim, ChunkSizes)                \
   _(prim, ConstantMKLDNNTensor)      \
@@ -34,6 +35,7 @@ namespace c10 {
   _(prim, MKLDNNHardSwish)           \
   _(prim, MKLDNNHardSigmoid)         \
   _(prim, MKLDNNHardTanh)            \
+  _(prim, MKLDNNClamp)               \
   _(prim, Drop)                      \
   _(prim, Eval)                      \
   _(prim, Expand) /* onnx */         \
@@ -97,6 +99,7 @@ namespace c10 {
   _(aten, is_pinned)                 \
   _(aten, Delete)                    \
   _(aten, relu_)                     \
+  _(aten, gelu_)                     \
   _(aten, relu6)                     \
   _(aten, relu6_)                    \
   _(aten, dropout_)                  \
@@ -206,6 +209,7 @@ namespace c10 {
   _(aten, linalg_multi_dot)          \
   _(aten, linalg_norm)               \
   _(aten, linalg_vector_norm)        \
+  _(aten, linalg_matrix_norm)        \
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \
@@ -319,10 +323,14 @@ namespace c10 {
   _(aten, moveaxis)                  \
   _(aten, lgamma)                    \
   _(aten, special_gammaln)           \
+  _(aten, digamma)                   \
+  _(aten, special_psi)               \
+  _(aten, special_digamma)           \
   _(aten, erf)                       \
   _(aten, special_erf)               \
   _(aten, erfc)                      \
   _(aten, special_erfc)              \
+  _(aten, special_erfcx)             \
   _(aten, erfinv)                    \
   _(aten, special_erfinv)            \
   _(aten, logit)                     \
@@ -333,7 +341,18 @@ namespace c10 {
   _(aten, special_expm1)             \
   _(aten, exp2)                      \
   _(aten, special_exp2)              \
+  _(aten, log1p)                     \
+  _(aten, special_log1p)             \
+  _(aten, round)                     \
+  _(aten, special_round)             \
+  _(aten, sinc)                      \
+  _(aten, special_sinc)              \
+  _(aten, i0)                        \
+  _(aten, special_i0)                \
   _(aten, special_i0e)               \
+  _(aten, special_i1)                \
+  _(aten, special_i1e)               \
+  _(aten, special_zeta)              \
   _(aten, has_torch_function)        \
   _(aten, hardswish)                 \
   _(aten, hardswish_)                \

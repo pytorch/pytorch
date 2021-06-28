@@ -5,6 +5,8 @@
 #include <torch/csrc/jit/tensorexpr/reduction.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
+#include <c10/util/irange.h>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -154,7 +156,7 @@ void IRVisitor::visit(const IfThenElse* v) {
 }
 
 void IRVisitor::visit(const Intrinsics* v) {
-  for (int i = 0; i < v->nparams(); i++) {
+  for (const auto i : c10::irange(v->nparams())) {
     v->param(i)->accept(this);
   }
 }

@@ -145,7 +145,6 @@ OPERATOR_SCHEMA(FloatToFused4BitFakeRowwiseQuantized)
                                 const vector<TensorShape>& in) {
       vector<TensorShape> out;
       TensorShape X = in[0];
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       X.set_dims(1, X.dims(1) + 8);
       out.push_back(std::move(X));
       out[0].set_data_type(TensorProto_DataType_UINT8);
@@ -176,7 +175,6 @@ OPERATOR_SCHEMA(HalfToFused4BitFakeRowwiseQuantized)
                                 const vector<TensorShape>& in) {
       vector<TensorShape> out;
       TensorShape X = in[0];
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       X.set_dims(1, X.dims(1) + 8);
       out.push_back(std::move(X));
       out[0].set_data_type(TensorProto_DataType_UINT8);
@@ -227,7 +225,6 @@ OPERATOR_SCHEMA(FloatToFused2BitFakeRowwiseQuantized)
                                 const vector<TensorShape>& in) {
       vector<TensorShape> out;
       TensorShape X = in[0];
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       X.set_dims(1, X.dims(1) + 8);
       out.push_back(std::move(X));
       out[0].set_data_type(TensorProto_DataType_UINT8);
@@ -258,7 +255,6 @@ OPERATOR_SCHEMA(HalfToFused2BitFakeRowwiseQuantized)
                                 const vector<TensorShape>& in) {
       vector<TensorShape> out;
       TensorShape X = in[0];
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       X.set_dims(1, X.dims(1) + 8);
       out.push_back(std::move(X));
       out[0].set_data_type(TensorProto_DataType_UINT8);

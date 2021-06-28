@@ -80,7 +80,6 @@ See: https://arxiv.org/abs/1708.02002 for details.
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SoftmaxFocalLossGradient)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(5)
     .NumOutputs(1)
     .Input(0, "scores", "See SoftmaxFocalLoss.")

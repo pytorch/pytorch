@@ -141,8 +141,9 @@ std::tuple<Tensor, Tensor, Tensor> unique_cuda_template(
       num_inp,
       " is too big to be handled by cub");
   Tensor sorted;
+  Tensor self_c = self.contiguous();
   if (consecutive) {
-    sorted = self;
+    sorted = self_c;
   } else {
     sorted = at::empty({num_inp}, self.options());
   }
@@ -151,14 +152,14 @@ std::tuple<Tensor, Tensor, Tensor> unique_cuda_template(
   Tensor sorted_indices;
   if (!return_inverse) {
     if (!consecutive) {
-      cuda::cub::sort_keys(self.data_ptr<scalar_t>(), sorted_data, num_inp);
+      cuda::cub::sort_keys(self_c.data_ptr<scalar_t>(), sorted_data, num_inp);
     }
   } else {
     if (!consecutive) {
       Tensor range = at::arange(0, num_inp, options);
       sorted_indices = at::empty({num_inp}, options);
       cuda::cub::sort_pairs(
-          self.data_ptr<scalar_t>(),
+          self_c.data_ptr<scalar_t>(),
           sorted_data,
           range.data_ptr<int64_t>(),
           sorted_indices.data_ptr<int64_t>(),

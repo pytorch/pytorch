@@ -301,7 +301,6 @@ TEST(DagUtilTest, Mixed2) {
   DagUtilTestContext t(spec, &ws);
   auto chains = t.computeChains();
   dag_utils::ExecutionChains expected{
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {0, {0}}, {1, {1}}, {3, {3, 6}}, {4, {4, 2, 5}}, {7, {7}}, {8, {8}}};
   EXPECT_EQ(chains, expected);
 }

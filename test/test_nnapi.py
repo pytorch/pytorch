@@ -259,6 +259,7 @@ class TestNNAPI(TestCase):
                     self.check(torch.nn.AdaptiveAvgPool2d((2, 2)), inp)
 
     def test_upsample_nearest2d(self):
+        convert_args = dict(self.float_and_quant_and_nhwc(torch.randn(2, 3, 0, 0), 0.3, 128))
         for (name, inp) in self.float_and_quant_and_nhwc(torch.randn(2, 3, 12, 16), 0.3, 128):
             with self.subTest(name):
                 self.check(torch.nn.UpsamplingNearest2d(size=(16, 20)), inp)
@@ -267,6 +268,15 @@ class TestNNAPI(TestCase):
                 self.check(torch.nn.UpsamplingNearest2d(scale_factor=(1.5, 1.5)), inp)
                 self.check(torch.nn.UpsamplingNearest2d(scale_factor=(2.0, 2.0)), inp)
                 self.check(torch.nn.UpsamplingNearest2d(scale_factor=(3.0, 3.0)), inp)
+
+                self.check(
+                    torch.nn.UpsamplingNearest2d(size=(24, 32)), inp,
+                    convert_args=[convert_args[name]]
+                )
+                self.check(
+                    torch.nn.UpsamplingNearest2d(scale_factor=(2.0, 2.0)), inp,
+                    convert_args=[convert_args[name]]
+                )
 
     def test_linear(self):
         torch.manual_seed(29)
@@ -293,6 +303,9 @@ class TestNNAPI(TestCase):
                     output_size = model(inp).numel()
                     atol_rtol = None
                     limit = None
+                    convert_dims = input_dim[:2] + (0, 0)
+                    convert_arg = torch.zeros(*convert_dims)
+
                     if "quant" in kind:
                         model = torch.nn.Sequential(model)
                         model.eval()
@@ -306,10 +319,20 @@ class TestNNAPI(TestCase):
                         # the output in this test.
                         atol_rtol = (1, 0)
                         limit = output_size * 0.03
+                        convert_arg = qpt(torch.zeros(*convert_dims), 1.0 / 16, 128)
+
                     if "nhwc" in kind:
                         inp = nhwc(inp)
+                        convert_arg = nhwc(convert_arg)
 
                     self.check(model, inp, atol_rtol=atol_rtol, limit=limit)
+                    self.check(
+                        model,
+                        inp,
+                        convert_args=[convert_arg],
+                        atol_rtol=atol_rtol,
+                        limit=limit
+                    )
 
     def test_qadd(self):
         func = torch.nn.quantized.QFunctional()
@@ -332,6 +355,39 @@ class TestNNAPI(TestCase):
                         qpt([1.0, 2.0], 0.25, 128),
                         qpt([3.0, 4.0], 0.25, 128),
                     ])
+                self.check(
+                    mod(),
+                    [
+                        qpt([[1.0, 2.0]], 0.25, 128),
+                        qpt([[3.0, 4.0]], 0.25, 128),
+                    ],
+                    convert_args=[
+                        qpt([[1.0, 2.0]], 0.25, 128),
+                        qpt(torch.zeros((1, 2)), 0.25, 128),
+                    ]
+                )
+                self.check(
+                    mod(),
+                    [
+                        qpt([[1.0, 2.0]], 0.25, 128),
+                        qpt([[3.0, 4.0]], 0.25, 128),
+                    ],
+                    convert_args=[
+                        qpt(torch.zeros((1, 2)), 0.25, 128),
+                        qpt([[3.0, 4.0]], 0.25, 128),
+                    ]
+                )
+                self.check(
+                    mod(),
+                    [
+                        qpt([[1.0, 2.0]], 0.25, 128),
+                        qpt([[3.0, 4.0]], 0.25, 128),
+                    ],
+                    convert_args=[
+                        qpt(torch.zeros((1, 2)), 0.25, 128),
+                        qpt(torch.zeros((1, 2)), 0.25, 128),
+                    ]
+                )
                 # NOTE: NNAPI qadd supports broadcast, but PT does not.
 
     def test_qlinear(self):

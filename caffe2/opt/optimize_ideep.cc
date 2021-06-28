@@ -242,7 +242,6 @@ bool fuseConvBNAndAffCh(repr::NNModule* nn, caffe2::Workspace* ws) {
     }
 
     auto bnOrAffChInputs = repr::nn::getInputs(bnOrAffChNode);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     int numInputs = isBN ? 5 : 3;
     // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     if (bnOrAffChInputs.size() < numInputs) {

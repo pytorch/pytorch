@@ -2,7 +2,7 @@
 #import <ATen/native/metal/MetalCommandBuffer.h>
 #import <ATen/native/metal/MetalTensorImpl.h>
 #import <ATen/native/metal/MetalTensorImplStorage.h>
-#import <ATen/native/metal/MetalUtils.h>
+#import <ATen/native/metal/MetalTensorUtils.h>
 #import <ATen/native/metal/mpscnn/MPSCNNClampOp.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
 #import <ATen/native/metal/mpscnn/MPSImageUtils.h>
@@ -15,7 +15,7 @@ namespace metal {
 Tensor& hardtanh_(Tensor& input, const Scalar& min_val, const Scalar& max_val) {
   TORCH_CHECK(input.is_metal());
   MPSImage* X = imageFromTensor(input);
-  MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
+  MetalCommandBuffer* commandBuffer = getCommandBuffer(input);
   MPSImage* Y = createTemporaryImage(commandBuffer, input.sizes().vec());
   float min = min_val.toFloat();
   float max = max_val.toFloat();
@@ -25,7 +25,7 @@ Tensor& hardtanh_(Tensor& input, const Scalar& min_val, const Scalar& max_val) {
   using MetalTensorImpl = at::MetalTensorImpl<MetalTensorImplStorage>;
   MetalTensorImpl* impl = (MetalTensorImpl*)input.unsafeGetTensorImpl();
   MetalTensorImplStorage& implStorage = impl->unsafe_opaque_handle();
-  implStorage.texture()->setTexture(Y);
+  implStorage.texture()->setImage(Y);
   return input;
 }
 

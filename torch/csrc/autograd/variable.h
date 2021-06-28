@@ -169,9 +169,6 @@ namespace impl {
   /// Retrieves this `Variable`s version counter.
   TORCH_API const c10::VariableVersion& version_counter(const Variable&);
 
-  TORCH_API PyObject* pyobj(const Variable&);
-  TORCH_API void set_pyobj(const Variable&, PyObject* pyobj);
-
   TORCH_API void set_name(const Variable&, const std::string& name);
 
   TORCH_API void add_hook(const Variable&, std::shared_ptr<FunctionPreHook> hook);
@@ -497,15 +494,10 @@ struct TORCH_API ViewInfo {
 /// - NO_GRAD_MODE should be set when a view in created when GradMode is disabled
 /// - MULTI_OUTPUT_NODE should be set when a Node created by codegen code returns
 ///   multiple differentiable views
-/// - MULTI_OUTPUT_SAFE should be set when a view was returned by a function
-///   that returns multiple views, and unsafe_* version of that function
-///   exists. These are note considered as views for now for the view+inplace
-///   logic! The graph won't be rewritten when an inplace is done, only a
-///   warning will be thrown.
 /// - Inference_MODE should be set when a view of normal tensor is created in InferenceMode.
 /// - DEFAULT is for all other cases
 enum class CreationMeta: uint8_t { DEFAULT, IN_CUSTOM_FUNCTION, MULTI_OUTPUT_NODE,
-                                   NO_GRAD_MODE, MULTI_OUTPUT_SAFE, INFERENCE_MODE};
+                                   NO_GRAD_MODE, INFERENCE_MODE};
 
 /// Handles correctly propagating CreationMeta when a new view is created from a previous view.
 /// In general, we don't want the new view to be _less_ restrictive than the previous view

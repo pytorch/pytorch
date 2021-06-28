@@ -210,7 +210,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
         added_names.add(name)
 
     # populate constants_set
-    constants_set = getattr(nn_module, "__constants__", set())
+    constants_set = set(getattr(nn_module, "__constants__", ()))
 
     # Constants annotated via `Final[T]` rather than being added to `__constants__`
     for name, ann in class_annotations.items():
@@ -426,7 +426,7 @@ def create_script_class(obj):
     # Wrap the torch._C.ScriptObject in a RecursiveScriptClass instance.
     return wrap_cpp_class(cpp_object)
 
-def create_script_module(nn_module, stubs_fn, share_types=True):
+def create_script_module(nn_module, stubs_fn, share_types=True, is_tracing=False):
     """
     Creates a new ScriptModule from an nn.Module
 
@@ -437,11 +437,16 @@ def create_script_module(nn_module, stubs_fn, share_types=True):
             NOTE: Only set to False this when we cannot guarantee type sharing will work
                 correctly. This only happens today for traced modules, where the same
                 module can produce different traced methods depending on the inputs.
+        is_tracing: Whether this function is called during tracing or scripting. If tracing,
+                we don't need to do AttributeTypeIsSupportedChecker because all the unsupported
+                attributes will be baked as constant in the tracing graph. In addition,
+                this check significantly slows down the traced modules when the module size is big.
     """
     assert not isinstance(nn_module, torch.jit.RecursiveScriptModule)
     check_module_initialized(nn_module)
     concrete_type = get_module_concrete_type(nn_module, share_types)
-    AttributeTypeIsSupportedChecker().check(nn_module)
+    if not is_tracing:
+        AttributeTypeIsSupportedChecker().check(nn_module)
     return create_script_module_impl(nn_module, concrete_type, stubs_fn)
 
 def create_script_module_impl(nn_module, concrete_type, stubs_fn):

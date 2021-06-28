@@ -199,7 +199,7 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RowWiseSparseAdagrad)
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-    .NumInputs(5)
+    .NumInputs(5, 6)
     .NumOutputs(2)
     .EnforceOneToOneInplace()
     .SetDoc(R"DOC(
@@ -218,11 +218,20 @@ also be a 1D tensor indexing into the rows of param.
     .Input(2, "indices", "Sparse indices")
     .Input(3, "grad", "Gradient computed")
     .Input(4, "lr", "learning rate")
+    .Input(
+        5,
+        "counter",
+        "Optional input when weight_decay is adjusted by frequency ignored "
+        "when counter_halflife == -1")
     .Output(0, "output_param", "Updated parameters")
     .Output(1, "output_moment_1", "Updated moment")
     .Arg("epsilon", "Default 1e-5")
-    .CostInferenceFunction(
-        OpSchema::CostInferenceFunctionType(CostInferenceForRowWiseSparseAdagrad));
+    .Arg("weight_decay", "Default 0")
+    .Arg(
+        "counter_halflife",
+        "Optional arg when weight_decay is adjusted by frequency (default -1)")
+    .CostInferenceFunction(OpSchema::CostInferenceFunctionType(
+        CostInferenceForRowWiseSparseAdagrad));
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(Adagrad);

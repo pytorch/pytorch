@@ -251,18 +251,15 @@ TEST(EitherTest, givenMultiParamMakeLeft) {
   test_with_matrix(
       {
           [](std::function<void(either<pair<int, int>, string>&)> test) {
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             either<pair<int, int>, string> a =
                 make_left<pair<int, int>, string>(5, 6);
             test(a);
           },
           [](std::function<void(either<pair<int, int>, string>&)> test) {
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             auto a = make_left<pair<int, int>, string>(5, 6);
             test(a);
           },
       },
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       EXPECT_IS_LEFT<pair<int, int>, string>(pair<int, int>(5, 6)));
 }
 
@@ -270,16 +267,13 @@ TEST(EitherTest, givenMultiParamMakeLeft) {
 TEST(EitherTest, givenMultiParamMakeRight) {
   test_with_matrix(
       {[](std::function<void(either<int, pair<int, int>>&)> test) {
-         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
          either<int, pair<int, int>> a = make_right<int, pair<int, int>>(5, 6);
          test(a);
        },
        [](std::function<void(either<int, pair<int, int>>&)> test) {
-         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
          auto a = make_right<int, pair<int, int>>(5, 6);
          test(a);
        }},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       EXPECT_IS_RIGHT<int, pair<int, int>>(pair<int, int>(5, 6)));
 }
 
@@ -1029,17 +1023,14 @@ TEST(EitherTest, givenLeft_whenModified_thenValueIsChanged) {
   test_with_matrix(
       {[](std::function<void(either<int, string>&)> test) {
          either<int, string> a(4);
-         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
          a.left() = 5;
          test(a);
        },
        [](std::function<void(either<int, string>&)> test) {
          either<int, string> a(4);
-         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
          a.left() = 5;
          test(a);
        }},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       EXPECT_IS_LEFT<int, string>(5));
 }
 

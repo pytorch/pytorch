@@ -1,4 +1,6 @@
 from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_name
+import torch.utils._pytree as pytree
+from . import _pytree as fx_pytree
 
 from typing import TYPE_CHECKING, Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet
 from dataclasses import dataclass
@@ -13,7 +15,7 @@ import warnings
 
 
 if TYPE_CHECKING:
-    from .graph_module import GraphModule
+    from .graph_module import GraphModule  # noqa: F401
 
 
 # Mapping of builtins to their `typing` equivalent.
@@ -48,6 +50,9 @@ _register_custom_builtin('inf', 'from math import inf', math.inf)
 _register_custom_builtin('nan', 'from math import nan', math.nan)
 _register_custom_builtin('NoneType', 'NoneType = type(None)', type(None))
 _register_custom_builtin('torch', 'import torch', torch)
+_register_custom_builtin('device', 'from torch import device', torch.device)
+_register_custom_builtin('fx_pytree', 'import torch.fx._pytree as fx_pytree', fx_pytree)
+_register_custom_builtin('pytree', 'import torch.utils._pytree as pytree', pytree)
 
 
 def _is_magic(x: str) -> bool:
@@ -117,6 +122,7 @@ class _Namespace:
 
         # delete all characters that are illegal in a Python identifier
         candidate = self._illegal_char_regex.sub('_', candidate)
+
         if candidate[0].isdigit():
             candidate = f'_{candidate}'
 
@@ -225,6 +231,14 @@ class _node_list:
     def __reversed__(self):
         return _node_list(self.graph, '_next' if self.direction == '_prev' else '_prev')
 
+class _PyTreeInfo(NamedTuple):
+    """
+    Contains extra info stored when we're using Pytrees
+    """
+    orig_args: List[str]
+    in_spec: pytree.TreeSpec
+    out_spec: Optional[pytree.TreeSpec]
+
 class Graph:
     """
     ``Graph`` is the main data structure used in the FX Intermediate Representation.
@@ -279,6 +293,7 @@ class Graph:
         self._graph_namespace = _Namespace()
         self._owners = 0
         self._owning_module = owning_module
+        self._pytree_info: Optional[_PyTreeInfo] = None
 
     @property
     def owning_module(self):
@@ -390,6 +405,18 @@ class Graph:
         self._insert(n)
         self._len += 1
         return n
+
+    def flatten_inps(self, *args):
+        flat_args, args_spec = pytree.tree_flatten(args)
+        return flat_args
+
+    def unflatten_outs(self, out):
+        if self._pytree_info is None:
+            return out
+        if not isinstance(out, list):
+            out = [out]
+        assert(self._pytree_info.out_spec is not None)
+        return pytree.tree_unflatten(out, self._pytree_info.out_spec)
 
     def erase_node(self, to_erase : Node) -> None:
         """
@@ -779,6 +806,7 @@ class Graph:
         free_vars: List[str] = []
         body: List[str] = []
         globals_: Dict[str, Any] = {}
+        wrapped_fns: Dict[str, None] = {}
 
         # Wrap string in list to pass by reference
         maybe_return_annotation : List[str] = ['']
@@ -791,7 +819,7 @@ class Graph:
 
             Returns: the global name that should be used to reference 'obj' in generated source.
             """
-            if _is_from_torch(obj):
+            if _is_from_torch(obj) and obj != torch.device:  # to support registering torch.device
                 # HACK: workaround for how torch custom ops are registered. We
                 # can't import them like normal modules so they must retain their
                 # fully qualified name.
@@ -799,10 +827,10 @@ class Graph:
 
             # normalize the name hint to get a proper identifier
             global_name = namespace.create_name(name_hint, obj)
+
             if global_name in globals_:
                 assert globals_[global_name] is obj
                 return global_name
-
             globals_[global_name] = obj
             return global_name
 
@@ -811,6 +839,10 @@ class Graph:
             add_global(name, obj)
 
         def type_repr(o : Any):
+            if o == ():
+                # Empty tuple is used for empty tuple type annotation Tuple[()]
+                return '()'
+
             typename = _type_repr(o)
 
             # This is a generic type, e.g. typing.List[torch.Tensor]
@@ -820,6 +852,7 @@ class Graph:
 
                 # Assign global names for each of the inner type variables.
                 args = [type_repr(arg) for arg in o.__args__]
+
                 return f'{origin_typename}[{",".join(args)}]'
 
             # Common case: this is a regular module name like 'foo.bar.baz'
@@ -894,6 +927,8 @@ class Graph:
                     body.append(f'{repr(node)}{maybe_type_annotation} = {_format_target(repr(node.args[0]), node.args[1])}')
                     return
                 body.append(f'{repr(node)}{maybe_type_annotation} = {global_name}({_format_args(node.args, node.kwargs)})')
+                if node.meta.get('is_wrapped', False):
+                    wrapped_fns.setdefault(global_name)
                 return
             elif node.op == 'call_module':
                 assert isinstance(node.target, str)
@@ -907,7 +942,10 @@ class Graph:
             elif node.op == 'output':
                 if node.type is not None:
                     maybe_return_annotation[0] = f" -> {type_repr(node.type)}"
-                body.append(f'return {repr(node.args[0])}')
+                if self._pytree_info is None:
+                    body.append(f'return {repr(node.args[0])}')
+                else:
+                    body.append(f'return pytree.tree_unflatten({repr(node.args[0])}, self._out_spec)')
                 return
             raise NotImplementedError(f'node: {node.op} {node.target}')
 
@@ -922,15 +960,34 @@ class Graph:
             # have been emitted. To continue to have valid Python code, emit a
             # single pass statement
             body.append('pass\n')
+        if self._pytree_info is not None:
+            orig_args = self._pytree_info.orig_args
+            has_orig_self = (orig_args[0] == 'self')
+            if has_orig_self:
+                free_vars.insert(0, 'self')
+            if len(free_vars) > 0:  # pytree has placeholders in it
+                body.insert(0, f"{', '.join(free_vars)}, = fx_pytree.tree_flatten_spec([{', '.join(orig_args)}], self._in_spec)\n")
+        else:
+            orig_args = free_vars
 
+        if len(wrapped_fns) > 0:
+            wrap_name = add_global('wrap', torch.fx.wrap)
+            wrap_stmts = '\n'.join([f'{wrap_name}("{name}")' for name in wrapped_fns])
+        else:
+            wrap_stmts = ''
+
+        # If the original function didn't have self as its first argument, we
+        # would have added it.
+        if len(orig_args) == 0 or orig_args[0] != 'self':
+            orig_args.insert(0, 'self')
         code = ''.join(body)
         code = '\n'.join('    ' + line for line in code.split('\n'))
         fn_code = f"""
-def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
-{code}"""
+{wrap_stmts}
 
-        return PythonCode(fn_code,
-                          globals_)
+def forward({', '.join(orig_args)}){maybe_return_annotation[0]}:
+{code}"""
+        return PythonCode(fn_code, globals_)
 
     def __str__(self) -> str:
         """
