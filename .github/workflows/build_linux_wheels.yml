@@ -91,7 +91,7 @@ jobs:
           path: /remote/**/*.whl
       - name: Display and upload binary build size statistics (Click Me)
         # temporary hack: set CIRCLE_* vars, until we update
-        # tools/print_test_stats.py to natively support GitHub Actions
+        # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
