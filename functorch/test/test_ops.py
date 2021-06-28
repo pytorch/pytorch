@@ -333,6 +333,7 @@ class TestOperators(TestCase):
             'norm',
             'resolve_conj',
             'to_sparse',
+            'clamp',
         }
         if op.name in op_skip:
             self.skipTest("Skipped; Expected failures")

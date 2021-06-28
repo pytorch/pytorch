@@ -463,6 +463,14 @@ class TestGradTransform(TestCase):
         result = grad(f2)(x)
         self.assertEqual(result, (x <= 0).type_as(x))
 
+    @unittest.expectedFailure
+    def test_tensor_ctor_inside_grad(self, device):
+        def foo(x):
+            return x * torch.tensor(2., device=device)
+
+        x = torch.tensor(3.14, device=device)
+        functorch.grad(foo)(x)
+
 
 class TestVmapOfGrad(TestCase):
     def test_per_sample_grads_inplace_view(self, device):
