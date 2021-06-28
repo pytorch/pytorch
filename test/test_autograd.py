@@ -33,7 +33,6 @@ from torch.testing._internal.common_utils import (TestCase, run_tests, skipIfNoL
 from torch.autograd import Variable, Function, detect_anomaly, kineto_available
 from torch.autograd.function import InplaceFunction
 import torch.autograd.forward_ad as fwAD
-from torch.testing import randn_like
 from torch.testing._internal.common_methods_invocations import (
     unpack_variables,
     mask_not_all_zeros,
@@ -5684,7 +5683,7 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
 
     self_variable = f_args_variable[0]
     if isinstance(output_variable, torch.Tensor) and output_variable.requires_grad and self_variable is not None:
-        output_variable.backward(randn_like(output_variable))
+        output_variable.backward(torch.randn_like(output_variable))
         test_case.assertEqualTypeString(self_variable, self_variable.grad)
         test_case.assertEqual(self_variable.size(), self_variable.grad.size())
 
@@ -8061,7 +8060,7 @@ class TestAutogradDeviceType(TestCase):
     @deviceCountAtLeast(1)
     @dtypes(torch.float, torch.double)
     def test_requires_grad_factory(self, devices, dtype):
-        fns = [torch.ones_like, torch.testing.randn_like]
+        fns = [torch.ones_like, torch.randn_like]
         x = torch.randn(2, 3, dtype=dtype, device=devices[0])
 
         for fn in fns:
