@@ -955,7 +955,8 @@ void initJitScriptBindings(PyObject* module) {
       .def_property_readonly(
           "name", [](const Object::Property& self) { return self.name; })
       .def_property_readonly(
-          "getter", [](const Object::Property& self) { return self.getter_func; })
+          "getter",
+          [](const Object::Property& self) { return self.getter_func; })
       .def_property_readonly("setter", [](const Object::Property& self) {
         return self.setter_func;
       });
