@@ -260,45 +260,22 @@ RUN_PARALLEL_BLOCKLIST = [
 WINDOWS_COVERAGE_BLOCKLIST = [
 ]
 
-
-# These tests are slow enough that it's worth calculating whether the patch
-# touched any related files first. This list was manually generated, but for every
-# run with --determine-from, we use another generated list based on this one and the
-# previous test stats.
-TARGET_DET_LIST = [
-    'distributions/test_distributions',
-    'test_nn',
-    'test_autograd',
-    'test_cpp_extensions_jit',
-    'test_jit_legacy',
-    'test_dataloader',
-    'test_overrides',
-    'test_linalg',
-    'test_jit',
+# the following tests run for a specific jit config.
+JIT_EXECUTOR_TESTS = [
+    'test_jit_cuda_fuser',
     'test_jit_profiling',
-    'test_torch',
-    'test_binary_ufuncs',
-    'test_numpy_interop',
-    'test_reductions',
-    'test_shape_ops',
-    'test_sort_and_select',
-    'test_testing',
-    'test_view_ops',
+    'test_jit_legacy',
+    'test_jit_fuser_legacy',
+]
+
+# the following tests runs for multiple dist-backend configurations.
+DISTRIBUTED_EXECUTOR_TESTS = [
     'distributed/nn/jit/test_instantiator',
     'distributed/test_distributed_fork',
     'distributed/rpc/test_tensorpipe_agent',
     'distributed/rpc/cuda/test_tensorpipe_agent',
     'distributed/algorithms/ddp_comm_hooks/test_ddp_hooks',
     'distributed/test_distributed_spawn',
-    'test_cuda',
-    'test_cuda_primary_ctx',
-    'test_cpp_extensions_aot_ninja',
-    'test_cpp_extensions_aot_no_ninja',
-    'test_serialization',
-    'test_optim',
-    'test_utils',
-    'test_multiprocessing',
-    'test_tensorboard',
     'distributed/test_c10d_common',
     'distributed/test_c10d_gloo',
     'distributed/test_c10d_nccl',
@@ -307,10 +284,6 @@ TARGET_DET_LIST = [
     'distributed/test_c10d_spawn_nccl',
     'distributed/test_store',
     'distributed/test_pg_wrapper',
-    'test_quantization',
-    'test_pruning_op',
-    'test_determination',
-    'test_futures',
     'distributed/pipeline/sync/skip/test_api',
     'distributed/pipeline/sync/skip/test_gpipe',
     'distributed/pipeline/sync/skip/test_inspect_skip_layout',
@@ -333,6 +306,45 @@ TARGET_DET_LIST = [
     'distributed/pipeline/sync/test_stream',
     'distributed/pipeline/sync/test_transparency',
     'distributed/pipeline/sync/test_worker',
+]
+
+
+# These tests are slow enough that it's worth calculating whether the patch
+# touched any related files first. This list was manually generated, but for every
+# run with --determine-from, we use another generated list based on this one and the
+# previous test stats.
+TARGET_DET_LIST = DISTRIBUTED_EXECUTOR_TESTS + [
+    'distributions/test_distributions',
+    'test_nn',
+    'test_autograd',
+    'test_cpp_extensions_jit',
+    'test_jit_legacy',
+    'test_dataloader',
+    'test_overrides',
+    'test_linalg',
+    'test_jit',
+    'test_jit_profiling',
+    'test_torch',
+    'test_binary_ufuncs',
+    'test_numpy_interop',
+    'test_reductions',
+    'test_shape_ops',
+    'test_sort_and_select',
+    'test_testing',
+    'test_view_ops',
+    'test_cuda',
+    'test_cuda_primary_ctx',
+    'test_cpp_extensions_aot_ninja',
+    'test_cpp_extensions_aot_no_ninja',
+    'test_serialization',
+    'test_optim',
+    'test_utils',
+    'test_multiprocessing',
+    'test_tensorboard',
+    'test_quantization',
+    'test_pruning_op',
+    'test_determination',
+    'test_futures',
 ]
 
 # the JSON file to store the S3 test stats
@@ -380,13 +392,6 @@ or `conda install ninja`. Alternatively, disable said tests with
 PYTORCH_COLLECT_COVERAGE = bool(os.environ.get("PYTORCH_COLLECT_COVERAGE"))
 
 ENABLE_PR_HISTORY_REORDERING = bool(os.environ.get("ENABLE_PR_HISTORY_REORDERING", "0") == "1")
-
-JIT_EXECUTOR_TESTS = [
-    'test_jit_cuda_fuser',
-    'test_jit_profiling',
-    'test_jit_legacy',
-    'test_jit_fuser_legacy',
-]
 
 # Dictionary matching test modules (in TESTS) to lists of test cases (within that test_module) that would be run when
 # options.run_specified_test_cases is enabled.
@@ -834,6 +839,16 @@ def parse_args():
         'in the 2nd shard (the first number should not exceed the second)',
     )
     parser.add_argument(
+        '--include-dist-executor',
+        action='store_true',
+        help='include only tests that are run for multiple distributed configs'
+    )
+    parser.add_argument(
+        '--exclude-dist-executor',
+        action='store_true',
+        help='exclude tests that are run for multiple distributed configs'
+    )
+    parser.add_argument(
         '--exclude-jit-executor',
         action='store_true',
         help='exclude tests that are run for a specific jit config'
@@ -921,6 +936,9 @@ def get_selected_tests(options):
         elif options.use_specified_test_cases_by == 'bring-to-front':
             options.bring_to_front = list(SPECIFIED_TEST_CASES_DICT.keys())
 
+    if options.include_dist_executor:
+        options.include.extend(DISTRIBUTED_EXECUTOR_TESTS)
+
     selected_tests = options.include
 
     if options.bring_to_front:
@@ -938,6 +956,9 @@ def get_selected_tests(options):
 
     if options.exclude_jit_executor:
         options.exclude.extend(JIT_EXECUTOR_TESTS)
+
+    if options.exclude_dist_executor:
+        options.exclude.extend(DISTRIBUTED_EXECUTOR_TESTS)
 
     selected_tests = exclude_tests(options.exclude, selected_tests)
 
