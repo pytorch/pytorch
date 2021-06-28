@@ -225,7 +225,7 @@ def _compare_scalars_internal(a, b, *, rtol: float, atol: float, equal_nan: Unio
         msg = None
         if not result:
             if rtol == 0 and atol == 0:
-                msg = ("{0} != {1}").format(a, b);
+                msg = ("{0} != {1}").format(a, b)
             else:
                 msg = ("Comparing" + s + "{0} and {1} gives a "
                        "difference of {2}, but the allowed difference "
