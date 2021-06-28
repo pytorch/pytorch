@@ -1,12 +1,9 @@
 #include <ATen/ATen.h>
+#include <ATen/core/grad_mode.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/Parallel.h>
-#include <ATen/TensorUtils.h>
-#include <ATen/Utils.h>
-#include <ATen/core/grad_mode.h>
+#include <ATen/NamedTensorUtils.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/LinearAlgebra.h>
@@ -15,14 +12,19 @@
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/TensorIterator.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/Parallel.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/Utils.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 #include <c10/util/variant.h>
+
 #include <functional>
 #include <limits>
 #include <numeric>
-#include <ATen/NamedTensorUtils.h>
-#include <ATen/native/TensorIterator.h>
+
 
 namespace at {
 namespace meta {
@@ -1285,7 +1287,7 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
       if (enable_multithreaded_bmm) {
         auto bmm_out_fn = [&](uint64_t start, uint64_t end) {
           c10::InferenceMode guard;
-          for (int64_t b = start; b < end; b++) {
+          for (const auto b : c10::irange(start, end)) {
             auto r = self_or_result.select(0, b);
             addmm_impl_cpu_(
                 r, r, batch1.select(0, b), batch2.select(0, b), 0, 1);
@@ -1293,7 +1295,7 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
         };
         at::parallel_for(0, bs, 1, bmm_out_fn);
       } else {
-        for (int64_t b = 0; b < bs; b++) {
+        for (const auto b : c10::irange(bs)) {
           auto r = self_or_result.select(0, b);
           addmm_impl_cpu_(r, r, batch1.select(0, b), batch2.select(0, b), 0, 1);
         }
@@ -1302,14 +1304,14 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
       if (enable_multithreaded_bmm) {
         auto bmm_fn = [&](uint64_t start, uint64_t end) {
           c10::InferenceMode guard;
-          for (int64_t b = start; b < end; b++) {
+          for (const auto b : c10::irange(start, end)) {
             self_or_result.select(0, b).addmm_(
                 batch1.select(0, b), batch2.select(0, b), beta, alpha);
           }
         };
         at::parallel_for(0, bs, 1, bmm_fn);
       } else {
-        for (int64_t b = 0; b < bs; b++) {
+        for (const auto b : c10::irange(bs)) {
           self_or_result.select(0, b).addmm_(
               batch1.select(0, b), batch2.select(0, b), beta, alpha);
         }
