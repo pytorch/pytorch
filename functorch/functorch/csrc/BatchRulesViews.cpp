@@ -87,11 +87,8 @@ std::tuple<Tensor,optional<int64_t>> unsqueeze_batch_rule(
     int64_t dim) {
   auto self_ = moveBatchDimToFront(self, self_bdim);
   auto rank = rankWithoutBatchDim(self, self_bdim);
-  dim = maybe_wrap_dim(dim, rank + 1);
-  if (self_bdim) {
-    dim += 1;
-  }
-  return std::make_tuple(self_.unsqueeze(dim), valIfNonempty(self_bdim, 0));
+  dim = maybe_wrap_dim(dim, rank + 1) + 1;
+  return std::make_tuple(self_.unsqueeze(dim), 0);
 }
 
 // NB: repeat is not actually a view, but it is in this file
@@ -99,9 +96,6 @@ std::tuple<Tensor,optional<int64_t>> repeat_batch_rule(
     const Tensor& self,
     optional<int64_t> self_bdim,
     IntArrayRef sizes) {
-  if (!self_bdim) {
-    return std::make_tuple(self.repeat(sizes), nullopt);
-  }
 
   VmapDimVector sizes_with_bdim = { sizes.begin(), sizes.end() };
   sizes_with_bdim.insert(sizes_with_bdim.begin(), 1);
@@ -136,9 +130,6 @@ std::tuple<Tensor,optional<int64_t>> _unsafe_view_batch_rule(
     const Tensor& self,
     optional<int64_t> self_bdim,
     IntArrayRef size) {
-  if (!self_bdim) {
-    return std::make_tuple(at::_unsafe_view(self, size), nullopt);
-  }
   VmapDimVector view_size(size);
   view_size.insert(view_size.begin() + *self_bdim, self.size(*self_bdim));
 
@@ -146,9 +137,6 @@ std::tuple<Tensor,optional<int64_t>> _unsafe_view_batch_rule(
 }
 
 std::tuple<Tensor,optional<int64_t>> flip_batch_rule(const Tensor& self, optional<int64_t> self_bdim, IntArrayRef dims) {
-  if (!self_bdim) {
-    return std::make_tuple(at::flip(self, dims), nullopt);
-  }
   auto self_ = moveBatchDimToFront(self, self_bdim);
   VmapDimVector new_dims;
   for (auto i: dims) {
