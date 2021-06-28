@@ -7,6 +7,7 @@
 import itertools
 import torch
 from functorch import vmap
+import torch.utils._pytree as pytree
 
 """
 Usage:
@@ -180,5 +181,21 @@ def get_fallback_and_vmap_exhaustive(op, arg_values, kwarg_values):
         # t = make_fx(vmap(f, in_dims=in_dims, out_dims=out_dim))(*batched_args, **kwarg_values)
         # import pdb; pdb.set_trace()
         batched_out = vmap(op, in_dims=in_dims, out_dims=out_dim)(*batched_args, **kwarg_values)
-        # print(loop_out.shape, batched_out.shape)
+        yield (loop_out, batched_out)
+
+        # Tests case where we dispatch to a batching rule with no bdims
+        # Should now be covered by https://github.com/facebookresearch/functorch/pull/63
+        def f(x, *args, **kwargs):
+            out = op(*args, **kwargs)
+            if isinstance(out, torch.Tensor):
+                return out + x
+            out = list(out)
+            for idx in range(len(out)):
+                out[idx] = out[idx] + x
+            return out
+
+        vmap1_dims = tuple([0] + [None] * len(in_dims))
+        vmap2_dims = tuple([None] + list(in_dims))
+        loop_out = pytree.tree_map(lambda v: torch.ones(3, *v.shape) + v, loop_out)
+        batched_out = vmap(vmap(f, in_dims=vmap1_dims), in_dims=vmap2_dims)(torch.ones(3), *batched_args, **kwarg_values)
         yield (loop_out, batched_out)
