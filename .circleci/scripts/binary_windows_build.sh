@@ -29,8 +29,8 @@ if [[ "$CIRCLECI" == 'true' && -d "C:\\Program Files (x86)\\Microsoft Visual Stu
   rm -rf "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Commnuity"
 fi
 
-if [[ -d "CUDA_PATH" ]]; then
-  rm -rf "CUDA_PATH"
+if [[ -d "$CUDA_PATH" ]]; then
+  rm -rf "$CUDA_PATH"
 fi
 
 if [[ "$CIRCLECI" == 'true' && -d "C:\\ProgramData\\Microsoft\\VisualStudio\\Packages\\_Instances" ]]; then
