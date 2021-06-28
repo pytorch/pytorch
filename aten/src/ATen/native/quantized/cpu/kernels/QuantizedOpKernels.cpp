@@ -2516,6 +2516,7 @@ void quantize_tensor_arm<c10::quint8>(
     (*out++) = at::native::quantize_val_arm(scale, zero_point, (*in++));
   }
 #else
+  #error What!?!?
   const int16x8_t vzero_point = vdupq_n_s16((int16_t)(uint16_t)zero_point);
   for (i = 0; i + 8 < N; i += 8) {
     const float32x4_t vin0123 = vld1q_f32(in);
