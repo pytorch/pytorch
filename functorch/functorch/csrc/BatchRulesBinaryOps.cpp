@@ -52,9 +52,7 @@ std::tuple<Tensor,optional<int64_t>> binary_pointwise_batch_rule(
   other_ = maybePadToLogicalRank(other_, other_batch_dim, max_logical_rank);
 
   auto result = Func(tensor_, other_, std::forward<ExtraArgs>(extra_args)...);
-  auto result_batch_dim = tensor_batch_dim.has_value() || other_batch_dim.has_value()
-    ? optional<int64_t>{0} : nullopt;
-  return std::make_tuple( std::move(result), std::move(result_batch_dim) );
+  return std::make_tuple( std::move(result), 0 );
 }
 
 template <typename M, M Meth, typename... ExtraArgs>
@@ -104,9 +102,7 @@ std::tuple<Tensor,optional<int64_t>> comparison_pointwise_batch_rule(
   other_ = maybePadToLogicalRank(other_, other_batch_dim, max_logical_rank);
 
   auto result = Func(tensor_, other_);
-  auto result_batch_dim = tensor_batch_dim.has_value() || other_batch_dim.has_value()
-    ? optional<int64_t>{0} : nullopt;
-  return std::make_tuple( std::move(result), std::move(result_batch_dim) );
+  return std::make_tuple( std::move(result), 0 );
 }
 
 
@@ -146,9 +142,7 @@ std::tuple<Tensor,optional<int64_t>> clamp_tensor_batch_rule(
   }
 
   auto result = at::clamp(self_, min_, max_);
-  auto result_batch_dim = self_bdim.has_value() || min_bdim.has_value() || max_bdim.has_value()
-    ? optional<int64_t>{0} : nullopt;
-  return std::make_tuple( std::move(result), std::move(result_batch_dim) );
+  return std::make_tuple( std::move(result), 0 );
 }
 
 std::tuple<Tensor,optional<int64_t>> pow_scalar_tensor_batch_rule(
@@ -163,8 +157,7 @@ std::tuple<Tensor,optional<int64_t>> _s_where_batch_rule(
   auto condition_ = moveBatchDimToFront(condition, condition_bdim);
   auto self_ = moveBatchDimToFront(self, self_bdim);
   auto other_ = moveBatchDimToFront(other, other_bdim);
-  auto result_bdim = (condition_bdim || self_bdim || other_bdim) ? optional<int64_t>{0} : nullopt;
-  return std::make_tuple(at::where(condition_, self_, other_), result_bdim);
+  return std::make_tuple(at::where(condition_, self_, other_), 0);
 }
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
