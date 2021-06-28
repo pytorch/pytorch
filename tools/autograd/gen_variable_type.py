@@ -180,11 +180,11 @@ if (${tensor_name}_impl_saved) AT_ASSERT(${tensor_name}_impl_saved == ${tensor_n
 """)
 
 ENFORCE_TENSOR_IMPL_USE_COUNT_EQUALS_ONE = CodeTemplate("""\
-AT_ASSERT(${tensor_name}.use_count() == 1);
+AT_ASSERT(${tensor_name}.use_count() == 1, "${fn_name} tensor usecount");
 """)
 
 ENFORCE_TENSOR_STORAGE_USE_COUNT_EQUALS_ONE = CodeTemplate("""\
-if (${tensor_name}.has_storage()) AT_ASSERT(${tensor_name}.storage().use_count() == 1);
+if (${tensor_name}.has_storage()) AT_ASSERT(${tensor_name}.storage().use_count() == 1, "${fn_name} storage usecount");
 """)
 
 SAVE_TENSORLIST_IMPL = CodeTemplate("""\
@@ -228,7 +228,7 @@ DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
     'thnn_conv2d_backward_output_mask', 'slow_conv3d_backward_output_mask',
     'slow_conv_transpose2d_backward_output_mask', 'slow_conv_transpose3d_backward_output_mask',
     '_embedding_bag', '_embedding_bag_forward_only', 'mkldnn_convolution_backward',
-    'q_per_channel_scales'
+    'q_per_channel_scales', 'q_per_channel_zero_points'
 }
 DONT_ENFORCE_STORAGE_IMPL_USE_COUNT = {
     # These 'non-view' functions return tensors with storage use_count > 1
@@ -729,10 +729,10 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                                                                                     out_tensor_name=ret_name)]
                     else:
                         if type_wrapper_name(f) not in DONT_ENFORCE_STORAGE_IMPL_USE_COUNT:
-                            stmts_after_call += [ENFORCE_TENSOR_STORAGE_USE_COUNT_EQUALS_ONE.substitute(tensor_name=ret_name)]
+                            stmts_after_call += [ENFORCE_TENSOR_STORAGE_USE_COUNT_EQUALS_ONE.substitute(tensor_name=ret_name, fn_name=type_wrapper_name(f))]
 
                     if type_wrapper_name(f) not in DONT_ENFORCE_TENSOR_IMPL_USE_COUNT:
-                        stmts_after_call += [ENFORCE_TENSOR_IMPL_USE_COUNT_EQUALS_ONE.substitute(tensor_name=ret_name)]
+                        stmts_after_call += [ENFORCE_TENSOR_IMPL_USE_COUNT_EQUALS_ONE.substitute(tensor_name=ret_name, fn_name=type_wrapper_name(f))]
 
                 # Currently we don't have any functions that return the following types, but
                 # we should update the checks once we do
