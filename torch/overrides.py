@@ -201,6 +201,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.set_warn_always,
         torch.vitals_enabled,
         torch.set_vital,
+        torch.read_vitals,
         Tensor.__delitem__,
         Tensor.__dir__,
         Tensor.__getattribute__,
@@ -228,6 +229,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor.to_sparse_csr,
         Tensor._reduce_ex_internal,
         Tensor._fix_weakref,
+        Tensor._python_dispatch.__get__,
         Tensor._conj,
         Tensor._conj_physical,
     }
