@@ -1,7 +1,7 @@
 from typing import Optional
 
 from torch.ao.nn.sparse.quantized import linear
-from torch.ao.nn.sparse.quantized.utils import QNNPACKLinearBlockSparsePattern
+from torch.ao.nn.sparse.quantized.utils import LinearBlockSparsePattern
 
 import torch
 import torch.nn.intrinsic as nni
@@ -126,9 +126,7 @@ class Linear(torch.nn.Module):
             assert w_zp == 0, 'Weight zero point must map to 0'
         qweight = _quantize_weight(weight.float(), weight_observer)
 
-        # Use these default values until we figure out how to augment
-        # `mod` to contain sparse config
-        row_block_size, col_block_size = QNNPACKLinearBlockSparsePattern.block_size()
+        row_block_size, col_block_size = LinearBlockSparsePattern.block_size()
         qlinear = cls(mod.in_features,
                       mod.out_features,
                       row_block_size,
