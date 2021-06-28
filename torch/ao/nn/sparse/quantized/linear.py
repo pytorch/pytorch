@@ -1,6 +1,7 @@
 from typing import Optional
 
 import torch
+from torch.ao.nn.sparse.quantized.utils import LinearBlockSparsePattern
 from torch.nn.quantized.modules.utils import _quantize_weight, hide_packed_params_repr
 
 # TODO (zaf): Inherit from `quantized.LinearPackedParams` (T83294430)
@@ -157,7 +158,7 @@ class Linear(torch.nn.Module):
         self._packed_params.set_weight_bias(w, b, row_block_size, col_block_size)
 
     @classmethod
-    def from_float(cls, mod, row_block_size=1, col_block_size=4):
+    def from_float(cls, mod):
         r"""Create a quantized sparse module from a float module.
 
         We only care about the convert at this stage, no need for observers just yet.
@@ -187,8 +188,7 @@ class Linear(torch.nn.Module):
             assert w_zp == 0, 'Weight zero point must map to 0'
         qweight = _quantize_weight(weight.float(), weight_post_process)
 
-        # Use these default values until we figure out how to augment
-        # `mod` to contain sparse config
+        row_block_size, col_block_size = LinearBlockSparsePattern.block_size()
         qlinear = cls(mod.in_features,
                       mod.out_features,
                       row_block_size,

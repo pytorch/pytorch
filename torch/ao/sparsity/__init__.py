@@ -8,7 +8,7 @@ from .sparsifier.base_sparsifier import BaseSparsifier
 from .sparsifier.weight_norm_sparsifier import WeightNormSparsifier
 
 # Parametrizations
-from .sparsifier.parametrization import MulBy
+from .sparsifier.utils import FakeSparsity
 
 # === Experimental ===
 
