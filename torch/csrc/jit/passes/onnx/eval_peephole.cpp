@@ -58,7 +58,6 @@ static void fuseConvBatchNorm(Block* b, std::vector<std::string>& inputNames, Va
       bool has_graph_input = false;
       for (auto input : it->inputs()) {
         if (std::find(inputNames.begin(), inputNames.end(), input->debugName()) != inputNames.end()) {
-          printf("=== is graph input: %s \n", input->debugName().c_str());
           has_graph_input = true;
           break;
         }
