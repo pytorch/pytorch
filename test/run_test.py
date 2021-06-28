@@ -16,14 +16,18 @@ import tempfile
 import torch
 from torch.utils import cpp_extension
 from torch.testing._internal.common_utils import FILE_SCHEMA, IS_IN_CI, TEST_WITH_ROCM, shell, set_cwd
-from torch.testing._internal.framework_utils import calculate_shards
 import torch.distributed as dist
 from typing import Dict, Optional, Tuple, List, Any
 from typing_extensions import TypedDict
 
 try:
     sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-    from tools.stats_utils.s3_stat_parser import (get_previous_reports_for_branch, Report, HAVE_BOTO3)
+    from tools.stats.s3_stat_parser import (
+        get_previous_reports_for_branch,
+        get_previous_reports_for_pr,
+        Report,
+        HAVE_BOTO3)
+    from tools.testing.test_selections import calculate_shards
 except ImportError:
     print("Unable to import s3_stat_parser from tools. Running without S3 stats...")
     HAVE_BOTO3 = False
@@ -120,8 +124,6 @@ TESTS = [
     "distributed/test_launcher",
     'distributed/nn/jit/test_instantiator',
     'distributed/rpc/test_faulty_agent',
-    'distributed/rpc/test_process_group_agent',
-    'distributed/rpc/cuda/test_process_group_agent',
     'distributed/rpc/test_tensorpipe_agent',
     'distributed/rpc/cuda/test_tensorpipe_agent',
     'test_determination',
@@ -201,8 +203,6 @@ USE_PYTEST_LIST = [
 WINDOWS_BLOCKLIST = [
     'distributed/nn/jit/test_instantiator',
     'distributed/rpc/test_faulty_agent',
-    'distributed/rpc/test_process_group_agent',
-    'distributed/rpc/cuda/test_process_group_agent',
     'distributed/rpc/test_tensorpipe_agent',
     'distributed/rpc/cuda/test_tensorpipe_agent',
     'distributed/test_distributed_fork',
@@ -236,8 +236,6 @@ WINDOWS_BLOCKLIST = [
 ROCM_BLOCKLIST = [
     'distributed/nn/jit/test_instantiator',
     'distributed/rpc/test_faulty_agent',
-    'distributed/rpc/test_process_group_agent',
-    'distributed/rpc/cuda/test_process_group_agent',
     'distributed/rpc/test_tensorpipe_agent',
     'distributed/rpc/cuda/test_tensorpipe_agent',
     'test_determination',
@@ -290,8 +288,6 @@ TARGET_DET_LIST = [
     'test_view_ops',
     'distributed/nn/jit/test_instantiator',
     'distributed/test_distributed_fork',
-    'distributed/rpc/test_process_group_agent',
-    'distributed/rpc/cuda/test_process_group_agent',
     'distributed/rpc/test_tensorpipe_agent',
     'distributed/rpc/cuda/test_tensorpipe_agent',
     'distributed/algorithms/ddp_comm_hooks/test_ddp_hooks',
@@ -385,6 +381,8 @@ or `conda install ninja`. Alternatively, disable said tests with
 
 PYTORCH_COLLECT_COVERAGE = bool(os.environ.get("PYTORCH_COLLECT_COVERAGE"))
 
+ENABLE_PR_HISTORY_REORDERING = bool(os.environ.get("ENABLE_PR_HISTORY_REORDERING", "0") == "1")
+
 JIT_EXECUTOR_TESTS = [
     'test_jit_cuda_fuser',
     'test_jit_profiling',
@@ -413,12 +411,12 @@ def print_to_stderr(message):
 
 # Convert something like pytorch_windows_vs2019_py36_cuda10.1_build to pytorch_windows_vs2019_py36_cuda10.1
 def get_stripped_CI_job() -> str:
-    job = os.environ.get("CIRCLE_JOB", "").rstrip('0123456789')
+    job = os.environ.get("JOB_BASE_NAME", "").rstrip('0123456789')
     if job.endswith('_slow_test'):
         job = job[:len(job) - len('_slow_test')]
-    elif job.endswith('_test'):
+    elif job.endswith('_test') or job.endswith('-test'):
         job = job[:len(job) - len('_test')]
-    elif job.endswith('_build'):
+    elif job.endswith('_build') or job.endswith('-build'):
         job = job[:len(job) - len('_build')]
     return job
 
@@ -438,6 +436,8 @@ def calculate_job_times(reports: List["Report"]) -> Dict[str, float]:
                 new_avg = (curr_avg * curr_count + test_file['total_seconds']) / new_count
                 jobs_to_times[name] = (new_avg, new_count)
 
+    # This is no longer needed after https://github.com/pytorch/pytorch/pull/60604,
+    # TODO remove this once viable/strict move pass the merged commit.
     # if there's 'test_cpp_extensions_aot' entry in jobs_to_times, add 'test_cpp_extensions_aot_ninja'
     # and 'test_cpp_extensions_aot_no_ninja' duplicate entries to ease future computation since
     # test_cpp_extensions_aot_no_ninja and test_cpp_extensions_aot_ninja are Python test jobs that
@@ -472,7 +472,7 @@ def get_past_job_times() -> Dict[str, float]:
         curr_commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], encoding="ascii").strip()
         file_commit = test_times_json.get('commit', '')
         curr_ci_job = get_stripped_CI_job()
-        file_ci_job = test_times_json.get('CIRCLE_JOB', 'N/A')
+        file_ci_job = test_times_json.get('JOB_BASE_NAME', 'N/A')
         if curr_commit != file_commit:
             print(f'Current test times file is from different commit {file_commit}.')
         elif curr_ci_job != file_ci_job:
@@ -499,7 +499,7 @@ class JobTimeJSON(TypedDict):
 def get_job_times_json(job_times: Dict[str, float]) -> JobTimeJSON:
     return {
         'commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], encoding="ascii").strip(),
-        'CIRCLE_JOB': get_stripped_CI_job(),
+        'JOB_BASE_NAME': get_stripped_CI_job(),
         'job_times': job_times,
     }
 
@@ -604,7 +604,7 @@ def test_cuda_primary_ctx(test_module, test_directory, options):
     return run_test(test_module, test_directory, options, extra_unittest_args=['--subprocess'])
 
 
-def _test_cpp_extensions_aot(test_module, test_directory, options, use_ninja):
+def _test_cpp_extensions_aot(test_directory, options, use_ninja):
     if use_ninja:
         try:
             cpp_extension.verify_ninja_availability()
@@ -634,6 +634,9 @@ def _test_cpp_extensions_aot(test_module, test_directory, options, use_ninja):
 
     # "install" the test modules and run tests
     python_path = os.environ.get('PYTHONPATH', '')
+    from shutil import copyfile
+    test_module = 'test_cpp_extensions_aot' + ('_ninja' if use_ninja else '_no_ninja')
+    copyfile(test_directory + '/test_cpp_extensions_aot.py', test_directory + '/' + test_module + '.py')
     try:
         cpp_extensions = os.path.join(test_directory, 'cpp_extensions')
         install_directory = ''
@@ -648,16 +651,16 @@ def _test_cpp_extensions_aot(test_module, test_directory, options, use_ninja):
         return run_test(test_module, test_directory, options)
     finally:
         os.environ['PYTHONPATH'] = python_path
+        if os.path.exists(test_directory + '/' + test_module + '.py'):
+            os.remove(test_directory + '/' + test_module + '.py')
 
 
 def test_cpp_extensions_aot_ninja(test_module, test_directory, options):
-    return _test_cpp_extensions_aot('test_cpp_extensions_aot', test_directory,
-                                    options, use_ninja=True)
+    return _test_cpp_extensions_aot(test_directory, options, use_ninja=True)
 
 
 def test_cpp_extensions_aot_no_ninja(test_module, test_directory, options):
-    return _test_cpp_extensions_aot('test_cpp_extensions_aot',
-                                    test_directory, options, use_ninja=False)
+    return _test_cpp_extensions_aot(test_directory, options, use_ninja=False)
 
 
 def test_distributed(test_module, test_directory, options):
@@ -958,7 +961,7 @@ def get_selected_tests(options):
         assert len(options.shard) == 2, "Unexpected shard format"
         assert min(options.shard) > 0, "Shards must be positive numbers"
         which_shard, num_shards = options.shard
-        assert which_shard <= num_shards, "Selected shard must be less or equal that total number of shards"
+        assert which_shard <= num_shards, "Selected shard must be less than or equal to total number of shards"
         assert num_shards <= len(selected_tests), f"Number of shards must be less than {len(selected_tests)}"
         selected_tests = get_shard(which_shard, num_shards, selected_tests)
 
@@ -1163,35 +1166,65 @@ def query_changed_test_files() -> List[str]:
     lines = [line.strip() for line in lines]
     return lines
 
+def query_failure_test_module(reports: List[Tuple["Report", str]]) -> List[str]:
+    test_modules = []
+    if len(reports) == 0 or len(reports[0]) == 0:
+        return test_modules
+    report = reports[0][0]
+    assert report.get('format_version') == 2, "S3 format currently handled is version 2 only"
+    files: Dict[str, Any] = report['files']
+    for fname, file in files.items():
+        contains_failure = any(
+            any(case['status'] == 'errored' or case['status'] == 'failed'
+                for _, case in suite['cases'].items())
+            for _, suite in file['suites'].items())
+        if contains_failure:
+            test_modules.append(fname)
+    return test_modules
+
 
 def reorder_tests(tests: List[str]) -> List[str]:
-    try:
-        changed_files = query_changed_test_files()
-    except Exception:
-        # If unable to get changed files from git, quit without doing any sorting
-        return tests
+    prioritized_tests = []
+    # Try using historic stats from PR.
+    if ENABLE_PR_HISTORY_REORDERING and HAVE_BOTO3:
+        pr_number = os.environ.get("CIRCLE_PR_NUMBER", "")
+        if len(pr_number):
+            ci_job_prefix = get_stripped_CI_job()
+            s3_reports: List[Tuple["Report", str]] = get_previous_reports_for_pr(
+                pr_number, ci_job_prefix)
+            prioritized_tests = query_failure_test_module(s3_reports)
+            print("Prioritized test from previous CI info.")
 
-    prefix = f"test{os.path.sep}"
-    changed_tests = [f for f in changed_files if f.startswith(prefix) and f.endswith(".py")]
-    changed_tests = [f[len(prefix):] for f in changed_tests]
-    changed_tests = [f[:-len(".py")] for f in changed_tests]
+    # Using file changes priority if no stats found from previous PR.
+    if len(prioritized_tests) == 0:
+        try:
+            changed_files = query_changed_test_files()
+        except Exception:
+            # If unable to get changed files from git, quit without doing any sorting
+            return tests
+
+        prefix = f"test{os.path.sep}"
+        prioritized_tests = [f for f in changed_files if f.startswith(prefix) and f.endswith(".py")]
+        prioritized_tests = [f[len(prefix):] for f in prioritized_tests]
+        prioritized_tests = [f[:-len(".py")] for f in prioritized_tests]
+        print("Prioritized test from test file changes.")
 
     bring_to_front = []
     the_rest = []
 
     for test in tests:
-        if test in changed_tests:
+        if test in prioritized_tests:
             bring_to_front.append(test)
         else:
             the_rest.append(test)
-
-    sorted_tests = bring_to_front + the_rest
-
-    if len(sorted_tests) != len(tests):
-        # Something went wrong, bail out without doing any sorting
+    if len(tests) == len(bring_to_front) + len(the_rest):
+        print(f"reordering tests for PR:\n"
+              f"prioritized: {bring_to_front}\nthe rest: {the_rest}\n")
+        return bring_to_front + the_rest
+    else:
+        print(f"Something went wrong in CI reordering, expecting total of {len(tests)}:\n"
+              f"but found prioritized: {len(bring_to_front)}\nthe rest: {len(the_rest)}\n")
         return tests
-
-    return sorted_tests
 
 
 def main():

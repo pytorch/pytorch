@@ -808,13 +808,13 @@ TEST_F(Kernel, SumOneAxis) {
 TEST_F(Kernel, SumMultipleAxes) {
   // Test lowering of sum on multiple axes.
   const auto graph_template = R"IR(
-      graph(%0 : Float(2, 3, 2, 3, strides=[18, 6, 3, 1], device=cpu)):
+      graph(%0 : Float(2, 3, 2, 3, strides=[18, 6, 3, 1], requires_grad=0, device=cpu)):
         %1 : int = prim::Constant[value=${dim1}]()
         %2 : int = prim::Constant[value=${dim2}]()
         %3 : int[] = prim::ListConstruct(%1, %2)
         %4 : bool = prim::Constant[value=${keepdim}]()
         %5 : ${dtype}
-        %6 : Float(${size}, strides=[${strides}]) = aten::sum(%0, %3, %4, %5)
+        %6 : Float(${size}, strides=[${strides}], requires_grad=0, device=cpu) = aten::sum(%0, %3, %4, %5)
         return (%6))IR";
   auto a = iotaTensor({2, 3, 2, 3}, TensorOptions(kCPU).dtype(at::kFloat));
 
@@ -1346,6 +1346,47 @@ TEST_F(Kernel, CodegenInspection) {
   ASSERT_TRUE(
       !buf_args[0].isVar() && !buf_args[1].isVar() && !buf_args[2].isVar());
 #endif
+}
+
+Tensor* lowerNanToNum(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
+  auto input_buf = c10::get<BufHandle>(inputs[0]);
+  auto e = Compute(
+      "custom_nan_to_num",
+      c10::fmap<DimArg>(outputShape),
+      [&](const std::vector<VarHandle>& axes) {
+        std::vector<ExprHandle> indices(axes.begin(), axes.end());
+        auto load = input_buf.load(indices);
+        return IfThenElse::make(Cast::make(kBool, isnan(load)), 0.0f, load);
+      });
+  return e;
+}
+
+TEST_F(Kernel, CustomLowering) {
+  const auto graph_string = R"IR(
+      graph(%x : Float(2, 2, strides=[2, 1], requires_grad=0, device=cpu)):
+          %none : NoneType = prim::Constant()
+          %y : Float(2, 2, strides=[2, 1], requires_grad=0, device=cpu) = aten::nan_to_num(%x, %none, %none, %none)
+          return (%y)
+)IR";
+  KernelScope kernel_scope;
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  std::unordered_map<c10::Symbol, NNCLoweringFunction> lowerings = {
+      {aten::nan_to_num, lowerNanToNum}};
+  TensorExprKernel k(graph, lowerings);
+
+  auto stmt = k.getCodeGenStmt();
+  std::ostringstream oss;
+  oss << *stmt;
+
+  // Check that our custom lowering is actually used
+  torch::jit::testing::FileCheck().check("custom_nan_to_num")->run(oss.str());
+  torch::jit::testing::FileCheck().check("isnan")->run(oss.str());
 }
 
 } // namespace jit

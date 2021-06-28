@@ -2,8 +2,8 @@
 #define THC_GENERAL_INC
 
 #include <TH/THGeneral.h>
-#include <TH/THAllocator.h>
 
+#include <c10/core/Allocator.h>
 #include <c10/cuda/CUDAStream.h>
 
 #include <cuda.h>

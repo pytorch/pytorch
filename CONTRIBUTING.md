@@ -439,12 +439,12 @@ is part of the test suite `ContainerAliasingTest` in the file
 ### Run Specific CI Jobs
 
 You can generate a commit that limits the CI to only run a specific job by using
-`tools/explicit_ci_jobs.py` like so:
+`tools/testing/explicit_ci_jobs.py` like so:
 
 ```bash
 # --job: specify one or more times to filter to a specific job + its dependencies
 # --make-commit: commit CI changes to git with a message explaining the change
-python tools/explicit_ci_jobs.py --job binary_linux_manywheel_3_6m_cpu_devtoolset7_nightly_test --make-commit
+python tools/testing/explicit_ci_jobs.py --job binary_linux_manywheel_3_6m_cpu_devtoolset7_nightly_test --make-commit
 
 # Make your changes
 
@@ -1128,7 +1128,7 @@ have more checks than older versions. In our CI, we run clang-tidy-6.0.
    uncommitted changes). Changes are picked up based on a `git diff` with the
    given revision:
   ```bash
-  python tools/clang_tidy.py -d build -p torch/csrc --diff 'HEAD~1'
+  python tools/linter/clang_tidy.py -d build -p torch/csrc --diff 'HEAD~1'
   ```
 
 Above, it is assumed you are in the PyTorch root folder. `path/to/build` should
