@@ -410,26 +410,6 @@ class TestFakeQuantizeOps(TestCase):
 
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
-                       qparams=hu.qparams(dtypes=torch.quint8)))
-    # https://github.com/pytorch/pytorch/issues/30604
-    @unittest.skip("temporarily disable the test")
-    def test_numerical_consistency_per_tensor(self, device, X):
-        r"""Comparing numerical consistency between CPU quantize/dequantize op and the CPU fake quantize op
-        """
-        np.random.seed(NP_RANDOM_SEED)
-        X, (scale, zero_point, torch_type) = X
-        quant_min = torch.iinfo(torch_type).min
-        quant_max = torch.iinfo(torch_type).max
-
-        X = to_tensor(X, device)
-        # quantize_per_tensor and dequantize are only implemented in CPU
-        Y = torch.dequantize(torch.quantize_per_tensor(X.cpu(), scale, zero_point, torch_type))
-        Y_prime = torch.fake_quantize_per_tensor_affine(
-            X, scale, zero_point, quant_min, quant_max)
-        np.testing.assert_allclose(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
-
-    @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
-           X=hu.tensor(shapes=hu.array_shapes(1, 5,),
                        qparams=hu.qparams(dtypes=[torch.quint8])),
            )
     def test_fq_module_per_tensor(self, device, X):
@@ -840,26 +820,48 @@ class TestFakeQuantizeOps(TestCase):
         self._test_learnable_backward_per_channel(
             X_base, 'cuda', scale_base, zero_point_base, axis)
 
-    @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
-           X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
-           qparams=hu.qparams(dtypes=torch.quint8)))
-    @unittest.skip("temporarily disable the test")
-    def test_numerical_consistency_per_channel(self, device, X):
-        r"""Comparing numerical consistency between CPU quantize/dequantize op and the CPU fake quantize op
-        """
-        np.random.seed(NP_RANDOM_SEED)
-        X, (scale, zero_point, axis, torch_type) = X
-        quant_min = torch.iinfo(torch_type).min
-        quant_max = torch.iinfo(torch_type).max
+    def test_numerical_consistency_per_tensor(self):
+        self._test_numerical_consistency('per_tensor')
 
-        X = to_tensor(X, device)
-        scale = to_tensor(scale, device)
-        zero_point = torch.tensor(zero_point).to(dtype=torch.int64, device=device)
-        # quantize_linear and dequantize are only implemented in CPU
-        Y = torch.dequantize(torch.quantize_per_channel(X.cpu(), scale.cpu(), zero_point.cpu(), axis, torch_type))
-        Y_prime = torch.fake_quantize_per_channel_affine(
-            X, scale, zero_point, axis, quant_min, quant_max)
-        np.testing.assert_allclose(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
+    def test_numerical_consistency_per_channel(self):
+        self._test_numerical_consistency('per_channel')
+
+    def _test_numerical_consistency(self, test_type):
+        r"""Comparing numerical consistency between quantize/dequantize op and the fake quantize op across devices and dtypes
+        """
+        torch.random.manual_seed(NP_RANDOM_SEED)
+        torch_types = [torch.qint8, torch.quint8]
+        float_types = [torch.float, torch.float16, torch.float64]
+        zero_types = [torch.long]
+        devices = [torch.device('cpu'), torch.device('cuda')] if torch.cuda.is_available() else [torch.device('cpu')]
+        axis = 1
+        for i in range(20):
+            for torch_type, float_type, device, zero_type in itertools.product(torch_types, float_types, devices, zero_types):
+                X = torch.randn(3, 3, device=device).to(float_type)
+                scales = (10 * torch.randn(3, device=device)).abs()
+                scale = scales.mean().to(float).item()
+                zeros = (10 * torch.randn(3, device=device)).abs().to(dtype=zero_type)
+                zero = zeros.max().view(1).item()
+                quant_min = torch.iinfo(torch_type).min
+                quant_max = torch.iinfo(torch_type).max
+
+                test_was_run = False
+                if test_type == "per_tensor":
+                    test_was_run = True
+                    Y = torch.dequantize(torch.quantize_per_tensor(X.to('cpu').to(torch.float),
+                                                                   scale, zero, torch_type)).to(device).to(float_type)
+                    Y_prime = torch.fake_quantize_per_tensor_affine(X, scale, zero, quant_min, quant_max)
+                    self.assertEqual(
+                        Y, Y_prime, "Difference found between dequant+quant_per_tensor and fake_quantize_per_tensor")
+
+                if test_type == "per_channel":
+                    test_was_run = True
+                    Y = torch.dequantize(torch.quantize_per_channel(X.to('cpu').to(torch.float), scales.to(
+                        'cpu'), zeros.to('cpu'), axis, torch_type)).to(device).to(float_type)
+                    Y_prime = torch.fake_quantize_per_channel_affine(X, scales, zeros, axis, quant_min, quant_max)
+                    self.assertEqual(
+                        Y, Y_prime, "Difference found between dequant+quant_per_channel and fake_quantize_per_channel")
+                self.assertTrue(test_was_run)
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"

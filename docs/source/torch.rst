@@ -19,6 +19,7 @@ Tensors
     is_tensor
     is_storage
     is_complex
+    is_conj
     is_floating_point
     is_nonzero
     set_default_dtype
@@ -86,6 +87,7 @@ Indexing, Slicing, Joining, Mutating Ops
     :nosignatures:
 
     cat
+    conj
     chunk
     dsplit
     column_stack
@@ -290,10 +292,12 @@ Pointwise Ops
     bitwise_and
     bitwise_or
     bitwise_xor
+    bitwise_left_shift
+    bitwise_right_shift
     ceil
     clamp
     clip
-    conj
+    conj_physical
     copysign
     cos
     cosh
@@ -419,6 +423,7 @@ Comparison Ops
     greater
     isclose
     isfinite
+    isin
     isinf
     isposinf
     isneginf
@@ -494,6 +499,7 @@ Other Operations
     rot90
     gcd
     histc
+    histogram
     meshgrid
     lcm
     logcumsumexp
@@ -511,6 +517,7 @@ Other Operations
     vander
     view_as_real
     view_as_complex
+    resolve_conj
 
 
 BLAS and LAPACK Operations
