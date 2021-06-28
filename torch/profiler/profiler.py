@@ -143,6 +143,9 @@ class profile(object):
 
     .. note::
         Enabling shape and stack tracing results in additional overhead.
+        When record_shapes=True is specified, profiler will temporarily hold references to the tensors;
+        that may further prevent certain optimizations that depend on the reference count and introduce
+        extra tensor copies.
 
     Examples:
 
