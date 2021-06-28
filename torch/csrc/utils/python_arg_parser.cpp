@@ -201,7 +201,7 @@ auto handle_torch_function(PyObject* self, const std::string& func_name, PyObjec
   return ret.release().ptr();
 }
 
-auto handle_torch_function_no_python_arg_parser(const std::vector<py::handle> &overloaded_args, PyObject* args, PyObject* kwargs, const char* func_name, PyObject* torch_api_function, const char* module_name) -> PyObject* {
+auto handle_torch_function_no_python_arg_parser(const std::vector<py::handle> &overloaded_args, PyObject* args, PyObject* kwargs, const char* func_name, PyObject* torch_api_function, const char* module_name, const char* torch_function_name) -> PyObject* {
   // overloaded_args already all have unique types
   std::vector<py::object> overloaded_types;
   overloaded_types.reserve(overloaded_args.size());
@@ -212,7 +212,7 @@ auto handle_torch_function_no_python_arg_parser(const std::vector<py::handle> &o
   py::object ret;
   for (auto &arg : overloaded_args) {
     // NOLINTNEXTLINE(clang-diagnostic-writable-strings)
-    py::object torch_function = PyObject_FastGetAttrString(arg.ptr(), "__torch_function__");
+    py::object torch_function = PyObject_FastGetAttrString(arg.ptr(), torch_function_name);
     ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(torch_function.ptr(), torch_api_function, py_types.ptr(), args, kwargs, NULL));
     if (ret.ptr() != Py_NotImplemented) {
       // Return the reference to the result. This also covers the case where ret
@@ -230,7 +230,7 @@ auto handle_torch_function_no_python_arg_parser(const std::vector<py::handle> &o
     // returned NotImplemented, so we raise a TypeError.
     std::stringstream ss;
     ss << "no implementation found for '" << module_name << "." << func_name
-       << "' on types that implement __torch_function__: [";
+       << "' on types that implement " << torch_function_name << ": [";
     for (auto &arg : overloaded_args) {
       ss << arg.ptr()->ob_type->tp_name;
       if (!arg.is(overloaded_args.back())) {
