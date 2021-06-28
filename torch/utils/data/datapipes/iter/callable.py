@@ -70,11 +70,11 @@ class MapIterDataPipe(IterDataPipe[T_co]):
         elif nesting_level > 0:
             if not isinstance(data, DataChunk):
                 raise IndexError(f"nesting_level {self.nesting_level} out of range (exceeds data pipe depth)")
-            result = data.__class__(([self._apply(i, nesting_level - 1) for i in data])
+            result = data.__class__([self._apply(i, nesting_level - 1) for i in data.raw_iterator()])
             return result
         else:
             if isinstance(data, DataChunk):
-                result = data.__class__([self._apply(i, nesting_level) for i in data])
+                result = data.__class__([self._apply(i, nesting_level) for i in data.raw_iterator()])
                 return result
             else:
                 return self.fn(data, *self.args, **self.kwargs)

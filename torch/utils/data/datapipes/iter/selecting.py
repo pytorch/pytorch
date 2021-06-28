@@ -50,26 +50,38 @@ class FilterIterDataPipe(MapIterDataPipe):
         if nesting_level == 0:
             return self._returnIfTrue(data)
         elif nesting_level > 0:
-            if not isinstance(data, list):
+            if not isinstance(data, DataChunk):
                 raise IndexError(f"nesting_level {self.nesting_level} out of range (exceeds data pipe depth)")
-            result = filter(self._isNonEmpty, [self._applyFilter(i, nesting_level - 1) for i in data])
-            return list(result)
+            result = filter(self._isNonEmpty, [self._applyFilter(i, nesting_level - 1) for i in data.raw_iterator()])
+            return data.__class__(list(result))
         else:  # Handling nesting_level == -1
-            if isinstance(data, list):
-                result = filter(self._isNonEmpty, [self._applyFilter(i, nesting_level) for i in data])
-                return list(result)
+            if isinstance(data, DataChunk):
+                result = filter(self._isNonEmpty, [self._applyFilter(i, nesting_level) for i in data.raw_iterator()])
+                return data.__class__(list(result))
             else:
                 return self._returnIfTrue(data)
 
     def _returnIfTrue(self, data):
         condition = self.fn(data, *self.args, **self.kwargs)
-        if not isinstance(condition, bool):
-            raise ValueError("Boolean output is required for `filter_fn` of FilterIterDataPipe")
+        if isinstance(condition, pandas.core.series.Series):
+            # We are operatring on DataFrames filter here
+            result = []
+            for idx,mask in enumerate(condition):
+                if mask:
+                    result.append(data[idx:idx+1])
+            if len(result):
+                return pandas.concat(result)
+            else: 
+                return None
+        elif not isinstance(condition, bool):
+            raise ValueError("Boolean output is required for `filter_fn` of FilterIterDataPipe", type(condition))
         if condition:
             return data
 
     def _isNonEmpty(self, data):
-        return data is not None and not (data == [] and self.drop_empty_batches)
+        if isinstance(data, pandas.core.frame.DataFrame):
+            return True
+        return data is not None and not (len(data) == 0 and self.drop_empty_batches)
 
     def __len__(self):
         raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
