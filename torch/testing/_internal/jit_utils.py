@@ -14,9 +14,8 @@ import zipfile
 import functools
 
 # Testing utils
-from torch.testing import FileCheck
 from torch.testing._internal.common_utils import IS_WINDOWS, \
-    freeze_rng_state, enable_profiling_mode_for_profiling_tests, ProfilingMode, TEST_BAILOUTS
+    freeze_rng_state, enable_profiling_mode_for_profiling_tests, ProfilingMode, TEST_BAILOUTS, FileCheck
 from torch.testing._internal.common_jit import JitCommonTestCase
 from torch.testing._internal.common_utils import enable_profiling_mode  # noqa: F401
 
