@@ -59,6 +59,7 @@ TESTS = [
     'test_cuda_primary_ctx',
     'test_dataloader',
     'test_datapipe',
+    'test_dummy',
     'distributed/test_data_parallel',
     'distributed/test_distributed_fork',
     'distributed/test_distributed_spawn',
