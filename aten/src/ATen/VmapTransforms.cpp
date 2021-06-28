@@ -286,9 +286,8 @@ Tensor VmapPhysicalToLogicalMap::apply(const Tensor& physical_tensor) const {
 }
 
 void VmapPhysicalToLogicalMap::applyInplace(std::vector<Tensor>& physical_tensors) const {
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare,modernize-loop-convert)
-  for (int64_t idx = 0; idx < physical_tensors.size(); ++idx) {
-    physical_tensors[idx] = apply(physical_tensors[idx]);
+  for (auto & physical_tensor : physical_tensors) {
+    physical_tensor = apply(physical_tensor);
   }
 }
 

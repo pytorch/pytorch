@@ -3,8 +3,8 @@
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/LegacyTHFunctionsCPU.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/Parallel.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/ReduceOpsUtils.h>
@@ -279,10 +279,7 @@ Tensor& cumprod_out(const Tensor& self, int64_t dim, c10::optional<ScalarType> d
 }
 
 Tensor reversed_cumsum(const Tensor& w, int64_t dim) {
-  /* Logically implements w.flip(dim).cumsum(dim).flip(dim) without copying. */
-  const auto w_cumsum = w.cumsum(dim);
-  const auto w_sum = w_cumsum.narrow(dim, -1, 1);
-  return w_sum - w_cumsum + w;
+  return w.flip(dim).cumsum(dim).flip(dim);
 }
 
 Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, const Tensor& output) {
@@ -377,7 +374,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     return grad;
   }
   dim = at::maybe_wrap_dim(dim, input.dim());
-  const int64_t dim_size = input.size(dim);
+  const int64_t dim_size = input.sizes()[dim];
   if (dim_size == 1) {
     return grad;
   }
@@ -709,13 +706,15 @@ void pre_check_gradient(const Tensor& self, c10::optional<int64_t> spacing_size,
   // Helper for gradient function to make sure input data satisfies prerequisites
   TORCH_CHECK(self.scalar_type() != ScalarType::Byte, "torch.gradient does not support uint8 input.");
   if (spacing_size.has_value() && !dim.has_value()) {
-    TORCH_CHECK(spacing_size.value() == 1 || spacing_size.value() == self.dim(), "torch.gradient expected spacing to be unspecified, a scalar or a list of length ", self.dim(), "but got a list of length ", spacing_size.value());
+    TORCH_CHECK(spacing_size.value() == 1 || spacing_size.value() == self.dim(), "torch.gradient expected spacing to be unspecified, a scalar or a list of length ", self.dim(), " but got a list of length ", spacing_size.value());
   }
   if (spacing_size.has_value() && dim.has_value()) {
     TORCH_CHECK(spacing_size.value() == dim.value().size(), "torch.gradient expected spacing to be unspecified, a scalar or it's spacing and dim arguments to have the same length, but got a spacing argument of length ", spacing_size.value(), " and a dim argument of length ", dim.value().size(), "." );
   }
-  // See discussion : https://github.com/pytorch/pytorch/issues/56036
-  TORCH_CHECK(edge_order == 1, "torch.gradient only supports edge_order=1 currently. To request support for more edge_orders please file an issue here : https://github.com/pytorch/pytorch/issues/new?assignees=&labels=&template=feature-request.md");
+  TORCH_CHECK(edge_order == 1 || edge_order == 2, "torch.gradient only supports edge_order=1 and edge_order=2.");
+  for (const auto i : c10::irange(self.dim())) {
+    TORCH_CHECK(self.size(i) >= edge_order + 1, "torch.gradient expected each dimension size to be at least edge_order+1");
+  }
   if (dim.has_value()) {
     // The following function get called to check whether dim argument satisfies prerequisites.
     // The output of the function is not used for the computation of gradient.
@@ -732,6 +731,7 @@ std::vector<Tensor> gradient_helper(const Tensor& self, TensorList coordinates, 
   for (const auto i : c10::irange(dim.size())) {
     TORCH_CHECK( coordinates[i].dim() == 1, "torch.gradient expected each element of spacing to have one dimension, but got an element with ", coordinates[i].dim(), " dimensions!");
     int64_t direction = maybe_wrap_dim(dim[i], self.dim());
+    Tensor prepend, append;
     std::vector<int64_t> shape(self.dim(),1);
     shape[ direction ] = -1;
 
@@ -742,9 +742,22 @@ std::vector<Tensor> gradient_helper(const Tensor& self, TensorList coordinates, 
     auto b = ( (dx2-dx1) / (dx1*dx2)       ).reshape(shape);
     auto c = (    dx1    / (dx2*(dx1+dx2)) ).reshape(shape);
 
-    auto center  = a*at::slice(self, direction, 0, -2) + b*at::slice(self, direction , 1, -1) + c*at::slice(self, direction ,2);
-    auto prepend = (at::slice(self, direction, 1, 2  ) - at::slice(self, direction, 0, 1   )) / ax_dx[0]  ;
-    auto append  = (at::slice(self, direction, -1    ) - at::slice(self, direction, -2, -1 )) / ax_dx[-1] ;
+    auto center = a * at::slice(self, direction, 0, -2) + b * at::slice(self, direction , 1, -1) + c * at::slice(self, direction, 2);
+    if (edge_order == 1) {
+     prepend = (at::slice(self, direction, 1, 2  ) - at::slice(self, direction, 0, 1   )) / ax_dx[0]  ;
+     append  = (at::slice(self, direction, -1    ) - at::slice(self, direction, -2, -1 )) / ax_dx[-1] ;
+    } else if (edge_order == 2) {
+     a =-(2.0 * ax_dx[0] + ax_dx[1]) / (ax_dx[0] * (ax_dx[0] + ax_dx[1])) ;
+     b = (      ax_dx[0] + ax_dx[1]) / (ax_dx[0] * ax_dx[1])       ;
+     c = (     -ax_dx[0]           ) / (ax_dx[1] * (ax_dx[0] + ax_dx[1]));
+     prepend = a * at::slice(self, direction, 0, 1) + b * at::slice(self, direction, 1, 2) + c * at::slice(self, direction, 2, 3);
+
+     a = (    ax_dx[-1]            ) / (ax_dx[-2] * (ax_dx[-1] + ax_dx[-2]));
+     b =-(    ax_dx[-1] + ax_dx[-2]) / (ax_dx[-1] * ax_dx[-2]);
+     c = (2 * ax_dx[-1] + ax_dx[-2]) / (ax_dx[-1] * (ax_dx[-1] + ax_dx[-2]));
+     append = a * at::slice(self, direction, -3, -2) + b * at::slice(self, direction, -2, -1) + c * at::slice(self, direction, -1);
+    }
+
     result.emplace_back(prepend_append_on_dim(center, prepend, append, direction));
   }
   return result;
@@ -755,9 +768,16 @@ std::vector<Tensor> gradient_helper_float(const Tensor& self, ArrayRef<Scalar> s
   for (const auto i : c10::irange(dim.size())) {
       int64_t direction = maybe_wrap_dim(dim[i], self.dim());
       auto ax_dx = spacing[i];
+      Tensor prepend, append;
       auto center  = (at::slice(self,direction, 2   ) - at::slice(self, direction, 0, -2 ) ) / ax_dx;
-      auto prepend = (at::slice(self,direction, 1, 2) - at::slice(self, direction, 0, 1  ) ) / ax_dx  ;
-      auto append  = (at::slice(self,direction, -1  ) - at::slice(self, direction, -2, -1) ) / ax_dx ;
+      if (edge_order==1) {
+        prepend = (at::slice(self,direction, 1, 2) - at::slice(self, direction, 0, 1  ) ) / ax_dx;
+        append  = (at::slice(self,direction, -1  ) - at::slice(self, direction, -2, -1) ) / ax_dx ;
+      } else if (edge_order==2) {
+        prepend = (-1.5 * at::slice(self, direction, 0, 1) + 2 * at::slice(self, direction, 1, 2)   - 0.5 * at::slice(self, direction, 2, 3))/ ax_dx;
+        append = (0.5 * at::slice(self, direction, -3, -2) - 2 * at::slice(self, direction, -2, -1) + 1.5 * at::slice(self, direction, -1))  / ax_dx;
+      }
+
       result.emplace_back(prepend_append_on_dim(center/2, prepend, append, direction));
   }
   return result;
