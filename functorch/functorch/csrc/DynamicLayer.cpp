@@ -230,6 +230,45 @@ static void foreachTensorInplace(std::vector<IValue>& args, int64_t begin, int64
   }
 }
 
+static bool allTensors(
+    ArrayRef<IValue> args,
+    std::function<bool(const Tensor&)> pred) {
+  for (const auto& ivalue : args) {
+    // Tensor?[] translates to a c10::List<IValue> so we need to peek inside List
+    if (ivalue.isList()) {
+      for (const auto& elt : ivalue.toListRef()) {
+        if (elt.isTensor() && !pred(elt.toTensor())) {
+            return false;
+        }
+      }
+      continue;
+    }
+    if (ivalue.isTensorList()) {
+      for (const auto& elt : ivalue.toTensorList()) {
+        if (!pred(elt)) {
+          return false;
+        }
+      }
+      continue;
+    }
+    TORCH_INTERNAL_ASSERT(!ivalue.isGenericDict(), "No operators can accept GenericDict");
+    if (!ivalue.isTensor()) {
+      continue;
+    }
+    if (!pred(ivalue.toTensor())) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static bool anyTensors(
+    ArrayRef<IValue> args,
+    std::function<bool(const Tensor&)> pred) {
+  // Demorgan's law
+  return !allTensors(args, [&](const Tensor& self) { return !pred(self); });
+}
+
 constexpr DispatchKeySet all_dynlayer_keyset = DispatchKeySet({
   kDynamicLayerFrontModeKey,
   kDynamicLayerBackModeKey,
@@ -250,6 +289,19 @@ static void sanityCheckStack(const c10::OperatorHandle& op, torch::jit::Stack* s
         TORCH_INTERNAL_ASSERT(batched == nullptr);
         return tensor;
       });
+}
+
+static bool batchedAtCurrentLevel(const Tensor& tensor) {
+  auto& dynamicLayerStack = dynamicLayerStackAccessor();
+  auto layer = dynamicLayerStack.back();
+  auto level = layer.layerId();
+
+  auto* batched = maybeGetBatchedImpl(tensor);
+  if (!batched) {
+    return false;
+  }
+  auto batched_at_level = batched->bdims().back().level();
+  return batched_at_level == level;
 }
 
 void dynamicLayerFrontFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
@@ -282,10 +334,13 @@ void dynamicLayerFrontFallback(const c10::OperatorHandle& op, torch::jit::Stack*
   if (layer.key() == DispatchKey::Autograd) {
     exclude = exclude - autograd_dispatch_keyset;
     exclude = exclude.remove(DispatchKey::ADInplaceOrView);
-  // } else if (layer.key() == DispatchKey::Batched) {
-  //   exclude = exclude.remove(DispatchKey::Batched);
   } else if (layer.key() == kBatchedKey) {
-    exclude = exclude.remove(kBatchedKey);
+    // Only enable dispatch on kBatchedKey if there are tensors batched
+    // at the current level.
+    const auto args = torch::jit::last(stack, op.schema().arguments().size());
+    if (anyTensors(args, batchedAtCurrentLevel)) {
+      exclude = exclude.remove(kBatchedKey);
+    }
     include = include.add(kVmapModeKey);
   } else {
     TORCH_INTERNAL_ASSERT(false);
