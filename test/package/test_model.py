@@ -1,6 +1,4 @@
 from io import BytesIO, StringIO
-from pathlib import Path
-from tempfile import TemporaryDirectory
 from textwrap import dedent
 from unittest import skipIf
 
@@ -89,17 +87,6 @@ class ModelTest(PackageTestCase):
         i2 = PackageImporter(f2)
         r3 = i2.load_pickle("model", "model.pkl")
         self.assertTrue(torch.allclose(r3(input), ref))
-
-        # test we can load from a directory
-        import zipfile
-
-        zf = zipfile.ZipFile(f1, "r")
-
-        with TemporaryDirectory() as td:
-            zf.extractall(path=td)
-            iz = PackageImporter(str(Path(td) / Path(f1).name))
-            r4 = iz.load_pickle("model", "model.pkl")
-            self.assertTrue(torch.allclose(r4(input), ref))
 
     @skipIfNoTorchVision
     def test_model_save(self):

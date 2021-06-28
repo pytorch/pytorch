@@ -190,6 +190,17 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
     return (err == hipSuccess);
   }
 
+  // Stream-related functions
+  bool queryStream(const Stream& stream) const override {
+    HIPStreamMasqueradingAsCUDA hip_stream{stream};
+    return hip_stream.query();
+  }
+
+  void synchronizeStream(const Stream& stream) const override {
+    HIPStreamMasqueradingAsCUDA hip_stream{stream};
+    hip_stream.synchronize();
+  }
+
   void recordDataPtrOnStream(
     const c10::DataPtr& data_ptr,
     const Stream& stream) const override {

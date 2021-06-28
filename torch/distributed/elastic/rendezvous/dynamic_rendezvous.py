@@ -287,6 +287,18 @@ class _RendezvousState:
         self.last_heartbeats = {}
 
 
+def _remove_participant_epilogue(state: _RendezvousState, settings: RendezvousSettings) -> None:
+    if state.complete:
+        # If we do not have any participants left, move to the next round.
+        if not state.participants:
+            state.complete = False
+
+            state.round += 1
+    else:
+        if len(state.participants) < settings.min_nodes:
+            state.deadline = None
+
+
 class _RendezvousStateHolder(ABC):
     """Holds the shared rendezvous state synced with other nodes."""
 
@@ -406,6 +418,8 @@ class _BackendRendezvousStateHolder(_RendezvousStateHolder):
         return has_set
 
     def _sanitize(self) -> None:
+        state = self._state
+
         expire_time = datetime.utcnow() - (
             self._settings.keep_alive_interval * self._settings.keep_alive_max_attempt
         )
@@ -413,22 +427,31 @@ class _BackendRendezvousStateHolder(_RendezvousStateHolder):
         # Filter out the dead nodes.
         self._dead_nodes = [
             node
-            for node, last_heartbeat in self._state.last_heartbeats.items()
+            for node, last_heartbeat in state.last_heartbeats.items()
             if last_heartbeat < expire_time
         ]
 
+        participant_removed = False
+
         for dead_node in self._dead_nodes:
-            del self._state.last_heartbeats[dead_node]
+            del state.last_heartbeats[dead_node]
 
             try:
-                del self._state.participants[dead_node]
+                del state.participants[dead_node]
+
+                participant_removed = True
             except KeyError:
                 pass
 
             try:
-                self._state.wait_list.remove(dead_node)
+                state.wait_list.remove(dead_node)
             except KeyError:
                 pass
+
+        if participant_removed:
+            # Common epilogue shared with the _remove_from_participants()
+            # function of _DistributedRendezvousOpExecutor.
+            _remove_participant_epilogue(state, self._settings)
 
     def mark_dirty(self) -> None:
         """See base class.
@@ -651,15 +674,9 @@ class _DistributedRendezvousOpExecutor(_RendezvousOpExecutor):
 
         del state.last_heartbeats[self._node]
 
-        if state.complete:
-            # If we do not have any participants left, move to the next round.
-            if not state.participants:
-                state.complete = False
-
-                state.round += 1
-        else:
-            if len(state.participants) < self._settings.min_nodes:
-                state.deadline = None
+        # Common epilogue shared with the sanitizer() function of
+        # _BackendRendezvousStateHolder.
+        _remove_participant_epilogue(state, self._settings)
 
     def _remove_from_wait_list(self) -> None:
         log.debug(
