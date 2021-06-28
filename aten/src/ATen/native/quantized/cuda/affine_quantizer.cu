@@ -26,7 +26,7 @@ void quantize_tensor_per_tensor_affine_cuda(
             .add_input(rtensor)
             .add_input(qtensor)
             .build();
-
+            
         gpu_kernel(
             iter,
             [=] GPU_LAMBDA(float raw_val, scalar_t quantized_val) -> scalar_t {
@@ -79,6 +79,8 @@ void quantize_tensor_per_channel_affine_cuda(
       .add_input(shaped_scales)
       .add_input(shaped_zero_points)
       .build();
+
+
 
   AT_DISPATCH_QINT_TYPES(
     qtensor.scalar_type(), "quantize_tensor_per_channel_affine_cuda_handler", [&]() {
