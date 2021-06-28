@@ -5936,12 +5936,12 @@ TEST(LoopNest, fuseLoopsWithComplexIndices) {
   // Input IR:
   //   for (int i = 0; i < 20; i++) {
   //     for (int j = 0; j < 20; j++) {
-  //       A[i,j*20] = i + j;
+  //       A[i,j*20+j+2] = i + j;
   //     }
   //   }
   //   for (int m = 0; m < 20; m++) {
   //     for (int n = 0; n < 20; n++) {
-  //       B[m,n] = A[m,n*20];  // Both indices of A use m
+  //       B[m,n] = A[m,n*20+n+2];
   //     }
   //   }
   BufHandle a_buf("A", {20, 400}, kInt);
@@ -5950,15 +5950,32 @@ TEST(LoopNest, fuseLoopsWithComplexIndices) {
   VarHandle j("j", kInt);
   VarHandle m("m", kInt);
   VarHandle n("n", kInt);
-  auto writeA = Store::make(a_buf, {i, i * 20 + j}, i + j);
+  auto writeA = Store::make(a_buf, {i, j * 20 + j + 2}, i + j);
   auto forI = For::make(i, 0, 20, For::make(j, 0, 20, writeA));
-  auto storeB = Store::make(b_buf, {m, n}, Load::make(a_buf, {m, m * 20 + n}));
+  auto storeB =
+      Store::make(b_buf, {m, n}, Load::make(a_buf, {m, n * 20 + n + 2}));
   auto forM = For::make(m, 0, 20, For::make(n, 0, 20, storeB));
   auto par = Block::make({forI, forM});
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* fused_loop;
-  ASSERT_FALSE(LoopNest::fuseLoops({forI, forM}, &fused_loop));
+  ASSERT_TRUE(LoopNest::fuseLoops({forI, forM}, &fused_loop));
+
+  std::ostringstream oss;
+  oss << *par;
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT: for (int j
+# CHECK-NEXT: A[i, (j * 20 + j) + 2] = i + j
+# CHECK: for (int n
+# CHECK-NEXT: B[i, n] = A[i, (n * 20 + n) + 2]
+# CHECK-NOT: for (
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  // The fused loop must be the same as the first loop.
+  ASSERT_EQ(fused_loop, forI);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
