@@ -1,12 +1,12 @@
 #include <ATen/VmapTransforms.h>
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 
 namespace at {
 
 // Checks if the batch dims in `bdims` appear at the front of the tensor.
 static bool areBdimsAtFrontInOrder(BatchDimsRef bdims) {
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (int64_t idx = 0; idx < bdims.size(); idx++) {
+  for (const auto idx : c10::irange(bdims.size())) {
     if (bdims[idx].dim() != idx) {
       return false;
     }
@@ -30,8 +30,7 @@ static Tensor permuteBatchDimsToFront(BatchedTensorImpl* batched) {
   for (const auto& bdim : bdims) {
     permutation[idx++] = bdim.dim();
   }
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (int64_t ptr = 0; idx < sizes.size(); ptr++) {
+  for (const auto ptr : c10::irange(sizes.size())) {
     if (is_bdim[ptr]) {
       continue;
     }
@@ -161,8 +160,7 @@ static Tensor alignBatchDimsAtFront(
   // align the bdims
   int64_t level = 0;
   int64_t tensor_dim = 0;
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (int64_t bdim = 0; bdim < requested_levels.count(); bdim++) {
+  for (const auto bdim : c10::irange(requested_levels.count())) {
     // Determine the level of the bdim
     while (!requested_levels[level]) level++;
     if (tensor_levels[level]) {
