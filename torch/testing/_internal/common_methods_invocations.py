@@ -5274,6 +5274,7 @@ op_db: List[OpInfo] = [
            ),
     OpInfo('corrcoef',
            dtypes=all_types_and_complex(),
+           dtypesIfCUDA=all_types_and_complex_and(torch.half, *[torch.bfloat16] if CUDA11OrLater else []),
            sample_inputs_func=sample_inputs_corrcoef,
            supports_out=False),
     UnaryUfuncInfo('cos',
