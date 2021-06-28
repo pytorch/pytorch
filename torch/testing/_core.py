@@ -224,11 +224,14 @@ def _compare_scalars_internal(a, b, *, rtol: float, atol: float, equal_nan: Unio
 
         msg = None
         if not result:
-            msg = ("Comparing" + s + "{0} and {1} gives a "
-                   "difference of {2}, but the allowed difference "
-                   "with rtol={3} and atol={4} is "
-                   "only {5}!").format(a, b, diff,
-                                       rtol, atol, allowed_diff)
+            if rtol == 0 and atol == 0:
+                msg = ("{0} != {1}").format(a, b);
+            else:
+                msg = ("Comparing" + s + "{0} and {1} gives a "
+                       "difference of {2}, but the allowed difference "
+                       "with rtol={3} and atol={4} is "
+                       "only {5}!").format(a, b, diff,
+                                           rtol, atol, allowed_diff)
 
         return result, msg
 
