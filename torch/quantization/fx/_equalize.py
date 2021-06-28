@@ -483,7 +483,7 @@ def clear_weight_quant_obs_node(op_node: Node, modules: Dict[str, nn.Module]) ->
 
     weight_quant_obs = modules[str(weight_quant_obs_node.target)]
     assert(isinstance(modules[str(weight_quant_obs_node.target)], ObserverBase))
-    weight_quant_obs.reset_min_max_vals()
+    weight_quant_obs.reset_min_max_vals()   # type: ignore[operator]
 
 def remove_node(model: GraphModule, node: Node, prev_node: Node):
     """ Removes the given node from the model by replacing all of its users with
