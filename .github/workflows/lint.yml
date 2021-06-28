@@ -329,7 +329,7 @@ jobs:
           # deploy/interpreter files are excluded due to using macros and other techniquies
           # that are not easily converted to accepted c++
           python3 tools/linter/clang_tidy.py \
-            -j \
+            --parallel \
             --verbose \
             --paths torch/csrc/ \
             --diff-file pr.diff \
