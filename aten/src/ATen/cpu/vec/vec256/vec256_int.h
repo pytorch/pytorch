@@ -33,7 +33,7 @@ public:
 
 struct Vectorizedi {};  // dummy definition to make Vectorizedi always defined
 
-#endif // #ifdef CPU_CAPABILITY_AVX2
+#endif // CPU_CAPABILITY_AVX2
 
 #ifdef CPU_CAPABILITY_AVX2
 
