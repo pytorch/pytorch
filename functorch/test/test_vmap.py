@@ -2891,7 +2891,7 @@ class TestVmapOperatorsOpInfo(TestCase):
             arg_values = [sample_input.input] + list(sample_input.args)
             kwarg_values = sample_input.kwargs
             for loop_out, batched_out in get_fallback_and_vmap_exhaustive(op.op, arg_values, kwarg_values):
-                self.assertEqual(loop_out, batched_out)
+                self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
 
     def test_isnan(self, device):
         test = functools.partial(_vmap_test, check_propagates_grad=False)

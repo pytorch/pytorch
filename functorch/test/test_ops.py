@@ -303,7 +303,7 @@ class TestOperators(TestCase):
         for sample in samples:
             fn, args = normalize_op_for_vjp(op, sample)
             for loop_out, batched_out in get_fallback_and_vmap_exhaustive(fn, args, {}):
-                self.assertEqual(loop_out, batched_out)
+                self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
 
     @ops(functorch_lagging_op_db, allowed_dtypes=(torch.float,))
     def test_vjpvmap(self, device, dtype, op):
