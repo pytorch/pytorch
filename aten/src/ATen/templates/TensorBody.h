@@ -445,6 +445,12 @@ class TORCH_API Tensor {
     return impl_->is_hip();
   }
 
+  /// Returns if a `Tensor` has VE backend.
+  bool is_ve() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->is_ve();
+  }
+
   /// Returns if a `Tensor` has sparse backend.
   bool is_sparse() const {
     // NB: this is not a native function to avoid dispatching overhead.
@@ -634,6 +640,10 @@ class TORCH_API Tensor {
     return to(options().device(DeviceType::HIP), /*non_blocking*/ false, /*copy*/ false);
   }
 
+  Tensor ve() const {
+    return to(options().device(DeviceType::VE), /*non_blocking*/ false, /*copy*/ false);
+  }
+
   Tensor vulkan() const {
     return to(options().device(DeviceType::Vulkan), /*non_blocking*/ false, /*copy*/ false);
   }
@@ -711,8 +721,11 @@ class TORCH_API Tensor {
   /// \param inputs Inputs w.r.t. which the gradient will be accumulated into
   ///     ``at::Tensor::grad``. All other Tensors will be ignored. If not
   ///     provided, the gradient is accumulated into all the leaf Tensors
-  ///     that were used to compute the current tensor. All the provided inputs
-  ///     must be leaf Tensors.
+  ///     that were used to compute the current tensor.
+  ///     When inputs are provided and a given input is not a leaf,
+  ///     the current implementation will call its grad_fn (even though it is not strictly needed to get this gradients).
+  ///     It is an implementation detail on which the user should not rely.
+  ///     See https://github.com/pytorch/pytorch/pull/60521#issuecomment-867061780 for more details.
   void backward(const Tensor & gradient={}, c10::optional<bool> retain_graph=c10::nullopt, bool create_graph=false, c10::optional<TensorList> inputs=c10::nullopt) const {
     // NB: Adding this wrapper to _backward here because we'd like our
     // 'backwards' api to accept the 'inputs' argument optionally. Since code gen
@@ -970,31 +983,6 @@ protected:
 inline int64_t get_device(const Tensor& self) {
   return self.get_device();
 }
-
-#define DEFINE_CAST(T, name)                                        \
-  template <>                                                       \
-  TORCH_API inline T* Tensor::data_ptr() const {                    \
-    TORCH_CHECK(                                                    \
-        scalar_type() == ScalarType::name,                          \
-        "expected scalar type "                                     \
-        #name                                                       \
-        " but found ",                                              \
-        scalar_type());                                             \
-    return this->unsafeGetTensorImpl()->data_ptr_impl<T>();         \
-  }
-
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_CAST)
-AT_FORALL_QINT_TYPES(DEFINE_CAST)
-#undef DEFINE_CAST
-
-#define DEFINE_ITEM(T, name)                \
-  template <>                               \
-  TORCH_API inline T Tensor::item() const { \
-    return item().to##name();               \
-  }
-
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_ITEM)
-#undef DEFINE_ITEM
 
 template <typename T>
 auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_void_t<T> {
