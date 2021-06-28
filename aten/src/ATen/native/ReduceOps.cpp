@@ -4,6 +4,7 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/Parallel.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/ReduceOpsUtils.h>
@@ -238,10 +239,7 @@ Tensor& cumprod_out(const Tensor& self, int64_t dim, c10::optional<ScalarType> d
 }
 
 Tensor reversed_cumsum(const Tensor& w, int64_t dim) {
-  /* Logically implements w.flip(dim).cumsum(dim).flip(dim) without copying. */
-  const auto w_cumsum = w.cumsum(dim);
-  const auto w_sum = w_cumsum.narrow(dim, -1, 1);
-  return w_sum - w_cumsum + w;
+  return w.flip(dim).cumsum(dim).flip(dim);
 }
 
 Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, const Tensor& output) {
@@ -336,7 +334,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     return grad;
   }
   dim = at::maybe_wrap_dim(dim, input.dim());
-  const int64_t dim_size = input.size(dim);
+  const int64_t dim_size = input.sizes()[dim];
   if (dim_size == 1) {
     return grad;
   }
