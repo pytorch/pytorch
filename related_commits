@@ -1,4 +1,4 @@
 ubuntu|pytorch|apex|none|
 centos|pytorch|apex|none|
-ubuntu|pytorch|torchvision|master|730c5e1eab130e2900c8e839ea08fa11f024516f
-centos|pytorch|torchvision|master|730c5e1eab130e2900c8e839ea08fa11f024516f
+ubuntu|pytorch|torchvision|master|d1ab583d0d2df73208e2fc9c4d3a84e969c69b70
+centos|pytorch|torchvision|master|d1ab583d0d2df73208e2fc9c4d3a84e969c69b70
