@@ -1,14 +1,23 @@
 -r requirements.txt
 -r requirements-flake8.txt
-boto3
+boto3==1.16.34
+cffi
 click
 cmakelint
 codecov
+coverage==5.5
+hypothesis==4.53.2
 Jinja2
 junitparser
+mkl
+mkl-include
 mock
 mypy==0.812
 networkx==2.0
+pytest
 rich
 ruamel.yaml
+scikit-image
 tabulate
+tb-nightly
+unittest-xml-reporting

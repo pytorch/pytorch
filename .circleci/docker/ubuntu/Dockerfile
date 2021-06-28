@@ -37,7 +37,8 @@ RUN bash ./install_katex.sh && rm install_katex.sh
 ENV PATH /opt/conda/bin:$PATH
 ARG ANACONDA_PYTHON_VERSION
 ADD ./common/install_conda.sh install_conda.sh
-RUN bash ./install_conda.sh && rm install_conda.sh
+ADD ./requirements.txt requirements.txt
+RUN bash ./install_conda.sh $PWD/requirements.txt && rm install_conda.sh requirements.txt
 
 # Install gcc
 ARG GCC_VERSION
