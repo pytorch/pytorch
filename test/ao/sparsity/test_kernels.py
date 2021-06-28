@@ -155,7 +155,6 @@ class TestQuantizedSparseLayers(TestCase):
                 model.qconfig = tq.get_default_qconfig('fbgemm')
                 qmodel = copy.deepcopy(model)
                 sqmodel = copy.deepcopy(model)
-                sqmodel.linear.mask = mask
 
                 tq.prepare(qmodel, inplace=True)
                 tq.prepare(sqmodel, inplace=True)
