@@ -3,7 +3,6 @@
 import logging
 
 from torch import nn
-from torch.ao.sparsity import BasePruner, PruningParametrization
 from torch.ao.sparsity.sparsifier import utils
 from torch.nn.utils import parametrize
 
@@ -63,11 +62,11 @@ class TestFakeSparsity(TestCase):
         assert not hasattr(model.seq[1], 'parametrizations')
 
         parametrize.register_parametrization(model.linear, 'weight',
-            utils.FakeSparsity(model.linear.mask))
+                                             utils.FakeSparsity(model.linear.mask))
         parametrize.register_parametrization(model.seq[0], 'weight',
-            utils.FakeSparsity(model.seq[0].mask))
+                                             utils.FakeSparsity(model.seq[0].mask))
         parametrize.register_parametrization(model.seq[1], 'weight',
-            utils.FakeSparsity(model.seq[1].mask))
+                                             utils.FakeSparsity(model.seq[1].mask))
 
         assert hasattr(model.linear, 'parametrizations')
         assert parametrize.is_parametrized(model.linear, 'weight')
@@ -80,20 +79,20 @@ class TestFakeSparsity(TestCase):
         model_save = ModelUnderTest(bias=False)
 
         parametrize.register_parametrization(model_save.linear, 'weight',
-            utils.FakeSparsity(model_save.linear.mask))
+                                             utils.FakeSparsity(model_save.linear.mask))
         parametrize.register_parametrization(model_save.seq[0], 'weight',
-            utils.FakeSparsity(model_save.seq[0].mask))
+                                             utils.FakeSparsity(model_save.seq[0].mask))
         parametrize.register_parametrization(model_save.seq[1], 'weight',
-            utils.FakeSparsity(model_save.seq[1].mask))
+                                             utils.FakeSparsity(model_save.seq[1].mask))
         state_dict = model_save.state_dict()
 
         model_load = ModelUnderTest(bias=False)
         parametrize.register_parametrization(model_load.linear, 'weight',
-            utils.FakeSparsity(torch.zeros(model_load.linear.weight.shape)))
+                                             utils.FakeSparsity(torch.zeros(model_load.linear.weight.shape)))
         parametrize.register_parametrization(model_load.seq[0], 'weight',
-            utils.FakeSparsity(torch.zeros(model_load.seq[0].weight.shape)))
+                                             utils.FakeSparsity(torch.zeros(model_load.seq[0].weight.shape)))
         parametrize.register_parametrization(model_load.seq[1], 'weight',
-            utils.FakeSparsity(torch.zeros(model_load.seq[1].weight.shape)))
+                                             utils.FakeSparsity(torch.zeros(model_load.seq[1].weight.shape)))
         model_load.load_state_dict(state_dict)
 
         # Check the parametrizations are preserved
@@ -124,11 +123,11 @@ class TestFakeSparsity(TestCase):
         model = ModelUnderTest(bias=False)
 
         parametrize.register_parametrization(model.linear, 'weight',
-            utils.FakeSparsity(model.linear.mask))
+                                             utils.FakeSparsity(model.linear.mask))
         parametrize.register_parametrization(model.seq[0], 'weight',
-            utils.FakeSparsity(model.seq[0].mask))
+                                             utils.FakeSparsity(model.seq[0].mask))
         parametrize.register_parametrization(model.seq[1], 'weight',
-            utils.FakeSparsity(model.seq[1].mask))
+                                             utils.FakeSparsity(model.seq[1].mask))
 
         # Tracing
         example_x = torch.ones(3, 16)
