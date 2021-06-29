@@ -609,10 +609,13 @@ class TORCH_CUDA_CU_API Int final : public Val {
   explicit Int(Passkey passkey, const c10::optional<ScalarType>& value)
       : Val(passkey, DataType::Int), maybe_value_(value) {}
 
-  explicit Int(
-      Passkey passkey,
-      const fuser::cuda::Int* node,
-      bool /*avoid_zero_ambiguity*/)
+  // SFINAE constructor to avoid 0 constant pointer ambiguity
+  template <
+      typename T,
+      typename = typename std::enable_if<
+          std::is_pointer<T>::value &&
+          std::is_convertible<T, const fuser::cuda::Int*>::value>::type>
+  explicit Int(Passkey passkey, T node)
       : Val(passkey, DataType::Int), maybe_value_(node->value()) {
     setName(node->name());
   }
