@@ -367,7 +367,7 @@ namespace {
 // Global mutex to protect LLVM initialization.  TargetRegistry::lookupTarget
 // in particular is not thread-safe.
 static std::mutex llvmInitMutex;
-}
+} // namespace
 
 LLVMCodeGenImpl::LLVMCodeGenImpl(
     Stmt* stmt,
