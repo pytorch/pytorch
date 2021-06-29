@@ -7,7 +7,7 @@
 namespace at {
 namespace native {
 
-enum SegmentReductionType { MAX, MEAN };
+enum SegmentReductionType { MAX, MEAN, MIN, SUM };
 
 using segment_reduce_fn = Tensor (*)(
     SegmentReductionType,
@@ -22,7 +22,8 @@ using segment_reduce_backward_fn = Tensor (*)(
     const Tensor&,
     const Tensor&,
     SegmentReductionType,
-    const Tensor&);
+    const Tensor&,
+    int64_t);
 DECLARE_DISPATCH(segment_reduce_backward_fn, _segment_reduce_backward_stub);
 
 } // namespace native
