@@ -20,6 +20,7 @@ static OpSchema::Cost CostInferenceForAdagrad(
   // +3: updading moments
   // +3: updating effective lr (including 1 sqrt)
   // +2: updating params
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   c.flops = grad_size * 10;
 
   uint64_t bytes_written =
@@ -102,6 +103,7 @@ static OpSchema::Cost CostInferenceForSparseAdagrad(
   // See adagrad_op.h (note that decay is 1 for SparseAdagrad).
   // 2 multiplications, 3 additions, 1 division, and 1 sqrt
   // (optimistically count sqrt as one flop).
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   c.flops = grad_size * 7;
   c.bytes_written =
       grad_size * (sizeof(param.data_type()) + sizeof(moment.data_type()));
@@ -118,6 +120,7 @@ REGISTER_CPU_OPERATOR(SparseAdagrad, SparseAdagradOp);
 REGISTER_CPU_OPERATOR_WITH_ENGINE(SparseAdagrad, SIMD, SparseAdagradOp);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseAdagrad)
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(5)
     .NumOutputs(2)
     .EnforceOneToOneInplace()
@@ -161,6 +164,7 @@ static OpSchema::Cost CostInferenceForRowWiseSparseAdagrad(
       // +2: applying weight decay and add to grads
       // +2: updading moments
       // +5: updating params
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       c.flops = n * 9;
       c.bytes_written =
           n * (sizeof(param.data_type()) + sizeof(moment.data_type()));
@@ -171,6 +175,7 @@ static OpSchema::Cost CostInferenceForRowWiseSparseAdagrad(
     } else {
       // 5 per block (not counting index transforms)
       // 8 for each value of a block
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       c.flops = n * (5 + (block_size * 8));
       c.bytes_written =
           n * sizeof(moment.data_type()) + n * block_size * (param.data_type());
@@ -193,7 +198,8 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
     RowWiseSparseAdagradOp<CPUContext>);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RowWiseSparseAdagrad)
-    .NumInputs(5)
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    .NumInputs(5, 6)
     .NumOutputs(2)
     .EnforceOneToOneInplace()
     .SetDoc(R"DOC(
@@ -212,11 +218,20 @@ also be a 1D tensor indexing into the rows of param.
     .Input(2, "indices", "Sparse indices")
     .Input(3, "grad", "Gradient computed")
     .Input(4, "lr", "learning rate")
+    .Input(
+        5,
+        "counter",
+        "Optional input when weight_decay is adjusted by frequency ignored "
+        "when counter_halflife == -1")
     .Output(0, "output_param", "Updated parameters")
     .Output(1, "output_moment_1", "Updated moment")
     .Arg("epsilon", "Default 1e-5")
-    .CostInferenceFunction(
-        OpSchema::CostInferenceFunctionType(CostInferenceForRowWiseSparseAdagrad));
+    .Arg("weight_decay", "Default 0")
+    .Arg(
+        "counter_halflife",
+        "Optional arg when weight_decay is adjusted by frequency (default -1)")
+    .CostInferenceFunction(OpSchema::CostInferenceFunctionType(
+        CostInferenceForRowWiseSparseAdagrad));
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(Adagrad);

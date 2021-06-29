@@ -26,6 +26,7 @@ namespace c10 {
   _(prim, BroadcastingChunk)         \
   _(prim, BroadcastSizes)            \
   _(prim, ReductionSizes)            \
+  _(prim, Concat)                    \
   _(prim, Constant)                  \
   _(prim, ChunkSizes)                \
   _(prim, ConstantMKLDNNTensor)      \
@@ -329,6 +330,7 @@ namespace c10 {
   _(aten, special_erf)               \
   _(aten, erfc)                      \
   _(aten, special_erfc)              \
+  _(aten, special_erfcx)             \
   _(aten, erfinv)                    \
   _(aten, special_erfinv)            \
   _(aten, logit)                     \
@@ -339,11 +341,18 @@ namespace c10 {
   _(aten, special_expm1)             \
   _(aten, exp2)                      \
   _(aten, special_exp2)              \
+  _(aten, log1p)                     \
+  _(aten, special_log1p)             \
+  _(aten, round)                     \
+  _(aten, special_round)             \
+  _(aten, sinc)                      \
+  _(aten, special_sinc)              \
   _(aten, i0)                        \
   _(aten, special_i0)                \
   _(aten, special_i0e)               \
   _(aten, special_i1)                \
   _(aten, special_i1e)               \
+  _(aten, special_zeta)              \
   _(aten, has_torch_function)        \
   _(aten, hardswish)                 \
   _(aten, hardswish_)                \
