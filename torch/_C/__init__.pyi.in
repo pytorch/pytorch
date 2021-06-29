@@ -615,6 +615,7 @@ has_lapack: _bool
 has_cuda: _bool
 has_mkldnn: _bool
 has_cudnn: _bool
+has_spectral: _bool
 _GLIBCXX_USE_CXX11_ABI: _bool
 default_generator: Generator
 
