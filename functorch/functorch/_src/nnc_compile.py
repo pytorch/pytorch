@@ -198,6 +198,27 @@ def triangular_solve_lower(name, out_shape, inp_shapes, args):
     s = torch._C._te.ExternalCall(C, "nnc_aten_triangular_solve", [A, B], [to_expr(args[2]), to_expr(args[3]), to_expr(args[4])])
     return (C, None), [s]
 
+def binary_cross_entropy_lower(name, out_shape, inp_shapes, args):
+    self_ = args[0]
+    target = args[1]
+    if args[2] != None or args[3] == 2:
+        raise RuntimeError(f"weight={args[2]} and reduction={args[3]} not supported")
+    def f(*idxs):
+        return to_expr(0.0) - (self_.load(idxs).log() * target.load(idxs) + (to_expr(1.0) - target.load(idxs)) * (to_expr(1.0) - self_.load(idxs)).log())
+    val = te.Compute(name, get_dim_args(inp_shapes[0][0]), f)
+    if args[3] == 0:
+        return val.buf(), [val.stmt()]
+    mean_te = te.lower('aten::mean', [val.buf()], get_te_shapes(out_shape), get_nnc_type(inp_shapes[0][1]))
+    return mean_te.buf(), [val.stmt(), mean_te.stmt()]
+
+
+def binary_cross_entropy_with_logits_lower(name, out_shape, inp_shapes, args):
+    pred = te.lower('aten::sigmoid', [args[0]], get_te_shapes(inp_shapes[0][0]), get_nnc_type(inp_shapes[0][1]))
+    loss_buf, loss_stmts = binary_cross_entropy_lower('binary_cross_entropy', out_shape, list(inp_shapes) + [None], [pred, args[1], args[3], args[4]])
+    return loss_buf, [pred.stmt()] + loss_stmts
+
+
+
 lowering_functions[torch.ops.aten.full_like] = full_like_lower
 lowering_functions[torch.ops.aten.zeros_like] = zeros_like_lower
 lowering_functions[torch.ops.aten.ones_like] = ones_like_lower
@@ -209,6 +230,9 @@ lowering_functions[torch.ops.aten.ger] = ger_lower
 lowering_functions[torch.ops.aten.reshape] = reshape_lower
 lowering_functions[torch.ops.aten.view] = reshape_lower
 lowering_functions[torch.ops.aten.triangular_solve] = triangular_solve_lower
+lowering_functions[torch.ops.aten.binary_cross_entropy] = binary_cross_entropy_lower
+lowering_functions[torch.ops.aten.binary_cross_entropy_with_logits] = binary_cross_entropy_with_logits_lower
+
 
 
 func_to_aten = {
