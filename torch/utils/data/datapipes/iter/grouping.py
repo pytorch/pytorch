@@ -9,8 +9,6 @@ from typing import Any, Callable, Dict, Iterator, List, Optional, Sized, Tuple, 
 
 T_co = TypeVar('T_co', covariant=True)
 
-GroupByBuffer = namedtuple('GroupByBuffer', ['elements', 'size'])
-
 
 @functional_datapipe('batch')
 class BatchIterDataPipe(IterDataPipe[List[T_co]]):
@@ -236,7 +234,7 @@ class GroupByIterDataPipe(IterDataPipe):
         self.buffer_size = buffer_size
         self.group_size = group_size
         self.guaranteed_group_size = None
-        if group_size is not None:
+        if group_size is not None and buffer_size is not None:
             assert group_size > 0 and group_size <= buffer_size
             self.guaranteed_group_size = group_size
         if guaranteed_group_size is not None:
@@ -244,45 +242,46 @@ class GroupByIterDataPipe(IterDataPipe):
             self.guaranteed_group_size = guaranteed_group_size
         self.drop_remaining = drop_remaining
 
-    def _remove_biggest_key(self, buffer):
+    def _remove_biggest_key(self, buffer_elements, buffer_size):
         biggest_key = None
         biggest_size = 0
         result_to_yield = None
-        for findkey in buffer.elements.keys():
-            if len(buffer.elements[findkey]) > biggest_size:
-                biggest_size = len(buffer.elements[findkey])
+        for findkey in buffer_elements.keys():
+            if len(buffer_elements[findkey]) > biggest_size:
+                biggest_size = len(buffer_elements[findkey])
                 biggest_key = findkey
 
         if self.guaranteed_group_size is not None and biggest_size < self.guaranteed_group_size and not self.drop_remaining:
             raise RuntimeError('Failed to group items', str(buffer[biggest_key]))
 
         if self.guaranteed_group_size is None or biggest_size >= self.guaranteed_group_size:
-            result_to_yield = buffer.elements[biggest_key]
+            result_to_yield = buffer_elements[biggest_key]
 
-        buffer.size -= biggest_size
-        del buffer.elements[biggest_key]
+        new_buffer_size = buffer_size - biggest_size
+        del buffer_elements[biggest_key]
 
-        return result_to_yield
+        return (result_to_yield, new_buffer_size)
 
     def __iter__(self):
-        buffer = GroupByBuffer(defaultdict(list), 0)
+        buffer_elements = defaultdict(list)
+        buffer_size = 0
         for x in self.datapipe:
             key = self.group_key_fn(x)
-            if buffer.size == self.buffer_size:
-                result_to_yield = self._remove_biggest_key(buffer)
+            if buffer_size == self.buffer_size:
+                (result_to_yield, buffer_size) = self._remove_biggest_key(buffer_elements, buffer_size)
                 if result_to_yield is not None:
                     yield result_to_yield
 
-            buffer.elements[key].append(x)
-            buffer.size += 1
+            buffer_elements[key].append(x)
+            buffer_size += 1
 
-            if self.group_size is not None and self.group_size == len(buffer.elements[key]):
-                yield buffer.elements[key]
-                buffer.size -= len(buffer.elements[key])
-                del buffer.elements[key]
+            if self.group_size is not None and self.group_size == len(buffer_elements[key]):
+                yield buffer_elements[key]
+                buffer_size -= len(buffer_elements[key])
+                del buffer_elements[key]
 
-        while buffer.size:
-            result_to_yield = self._remove_biggest_key(buffer)
+        while buffer_size:
+            (result_to_yield, buffer_size) = self._remove_biggest_key(buffer_elements, buffer_size)
             if result_to_yield is not None:
                 yield result_to_yield
 
