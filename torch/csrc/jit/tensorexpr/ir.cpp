@@ -21,9 +21,16 @@ static Dtype dtypeOfIndices(const std::vector<const Expr*>& indices) {
 }
 
 void castIndicesToInts(std::vector<const Expr*>& indices) {
-  // Cast all indices to Int
-  // TODO: Should we use int64 here?
+  // Cast all indices to either Int or Long
   auto index_dtype = ScalarType::Int;
+  for (auto& index : indices) {
+    if (index->dtype().scalar_type() == ScalarType::Long) {
+      // If any of the indexes is Long, cast all of them to Long
+      index_dtype = ScalarType::Long;
+      break;
+    }
+  }
+
   for (auto& index : indices) {
     const Dtype& dt = index->dtype();
     if (c10::isIntegralType(dt.scalar_type(), true) &&
