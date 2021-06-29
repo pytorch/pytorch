@@ -47,6 +47,12 @@ using ArgValue = c10::variant<
     IntList,
     ArgNone>;
 
+using NNCLoweringFunction = std::function<Tensor*(
+    const std::vector<ArgValue>&,
+    const std::vector<ExprHandle>&,
+    const c10::optional<ScalarType>&,
+    at::Device)>;
+
 // Get the dimensions of a value.
 std::vector<ExprHandle> valueShape(const ArgValue& v);
 
@@ -131,7 +137,10 @@ class TORCH_API TensorExprKernel {
   };
 
  public:
-  explicit TensorExprKernel(const std::shared_ptr<Graph>& subgraph);
+  explicit TensorExprKernel(
+      const std::shared_ptr<Graph>& subgraph,
+      std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings =
+          {});
 
   void run(Stack& stack);
   void runFast(
@@ -226,6 +235,12 @@ class TORCH_API TensorExprKernel {
     c10::optional<Dtype> dtype;
   };
 
+  NNCLoweringFunction getCustomLoweringFor(c10::Symbol op) const;
+  std::unordered_map<c10::Symbol, NNCLoweringFunction> getCustomLowerings()
+      const {
+    return custom_lowerings_;
+  }
+
  private:
   struct UnpackedTensorOptions {
     c10::optional<c10::ScalarType> dtype;
@@ -263,6 +278,8 @@ class TORCH_API TensorExprKernel {
 
   std::vector<at::Tensor> unpacked_constant_tensors_;
   std::vector<ConstantDescr> constants_;
+
+  std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings_;
 };
 
 TORCH_API int& getTECudaPointwiseLoopLevels();
