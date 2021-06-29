@@ -299,3 +299,58 @@ def adamw(params: List[Tensor],
 
     step_size = [-1 * (lr / bc) for bc in bias_correction1]
     torch._foreach_addcdiv_(params, exp_avg, denom, step_size)
+
+
+def sgd(params: List[Tensor],
+        grads: List[Tensor],
+        states: List[Dict],
+        *,
+        momentum : float,
+        has_sparse_grad: bool,
+        dampening: float,
+        nesterov: bool,
+        weight_decay: float,
+        lr: float):
+    r"""Functional API that performs SGD algorithm computation.
+    See :class:`~torch.optim.SGD` for details.
+    """
+
+    if weight_decay != 0:
+        grads = torch._foreach_add(grads, params, alpha=weight_decay)  # type: ignore[assignment]
+
+    if momentum != 0:
+        bufs = []
+
+        all_states_with_momentum_buffer = True
+        for i in range(len(states)):
+            if 'momentum_buffer' not in states[i]:
+                all_states_with_momentum_buffer = False
+                break
+            else:
+                bufs.append(states[i]['momentum_buffer'])
+
+        if all_states_with_momentum_buffer:
+            torch._foreach_mul_(bufs, momentum)
+            torch._foreach_add_(bufs, grads, alpha=1 - dampening)
+        else:
+            bufs = []
+            for i in range(len(states)):
+                if 'momentum_buffer' not in states[i]:
+                    buf = states[i]['momentum_buffer'] = torch.clone(grads[i]).detach()
+                else:
+                    buf = states[i]['momentum_buffer']
+                    buf.mul_(momentum).add_(grads[i], alpha=1 - dampening)
+
+                bufs.append(buf)
+
+        if nesterov:
+            torch._foreach_add_(grads, bufs, alpha=momentum)
+        else:
+            grads = bufs
+
+    if not has_sparse_grad:
+        torch._foreach_add_(params, grads, alpha=-lr)
+    else:
+        # foreach APIs dont support sparse
+        for i in range(len(params)):
+            params[i].add_(grads[i], alpha=-lr)
