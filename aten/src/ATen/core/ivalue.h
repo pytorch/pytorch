@@ -274,8 +274,8 @@ struct TORCH_API IValue final {
    * for consistency, because Python does the same thing. This actually
    * provokes user-visible changes in behavior due to quirks in torch:
    *      [tensor1] == [tensor1] -> True (because container equality will first
-   * compare identity) [tensor1] == [tensor1_copy] -> RuntimeError: bool value
-   * of Tensor is ambiguous
+   * compare identity) [tensor1] == [tensor1_copy] -> RuntimeError:
+   * Boolean value of Tensor with more than one value is ambiguous
    */
   TORCH_API friend bool _fastEqualsForContainer(
       const IValue& lhs,
@@ -522,6 +522,9 @@ struct TORCH_API IValue final {
   }
 
   int64_t toInt() const {
+    if (!isInt()) {
+      int x = 5;
+    }
     AT_ASSERT(isInt());
     return payload.u.as_int;
   }
