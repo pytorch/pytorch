@@ -125,6 +125,10 @@ uint32_t crc32_16bytes_prefetch(const void* data, size_t length, uint32_t previo
     #else
       # error "Unknown Apple platform"
     #endif
+#elif defined(__SGX_ENABLED__)
+  // nothing to do here since the newlibc in the SGX toolchain
+  // sets this flag just fine and the SGX compiler will cause a
+  // compile error when we try to redefine it
 #elif defined(__ARMEB__)
   #define __BYTE_ORDER __BIG_ENDIAN
 #elif defined(__BYTE_ORDER__)
