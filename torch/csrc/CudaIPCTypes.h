@@ -29,7 +29,7 @@ struct CudaIPCSentData final {
   at::Device device_;
 
   CudaIPCSentData(
-      std::string handle,
+      const std::string& handle,
       int64_t offset,
       int64_t* counter_ptr,
       at::Device device);
@@ -78,8 +78,7 @@ struct CudaIPCSentDataLimbo final {
 
 struct CudaIPCRefCountersFile final {
   CudaIPCRefCountersFile(
-      // NOLINTNEXTLINE(modernize-pass-by-value)
-      std::string handle,
+      const std::string& handle,
       uint64_t size,
       at::DataPtr data_ptr)
       : next_offset_(0),
