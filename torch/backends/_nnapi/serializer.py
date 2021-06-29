@@ -930,14 +930,14 @@ class _NnapiSerializer(object):
         assert node.inputsSize() == 3
         assert node.outputsSize() == 1
 
-        in_id, in_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
+        in_id, in_oper = self.get_tensor_operand_by_jitval_fixed_size(node.inputsAt(0))
 
         start_ctype, start_dim = self.get_constant_value(node.inputsAt(1))
         end_ctype, end_dim = self.get_constant_value(node.inputsAt(2))
 
         if in_oper.dim_order != DimOrder.PRESUMED_CONTIGUOUS:
             raise Exception(
-                "Currently, reshape is only supported on NHWC tensors if the target size is [X, -1].")
+                "Currently, reshape is only supported on NHWC tensors")
 
         if start_dim < 0:
             start_dim += len(in_oper.shape)
@@ -950,28 +950,19 @@ class _NnapiSerializer(object):
             in_oper.shape[end_dim + 1:]
         )
 
+        # TODO(axit): To add support for runtime
+        # if any(dim == 0 for dim in in_oper.shape[start_dim: end_dim + 1]):
+        #     raise Exception("Flattened dims can't be flexible")
+        # non_flattened_dims = in_oper.shape[: start_dim] + in_oper.shape[end_dim + 1:]
+        # if non_flattened_dims.count(0) > 1:
+        #     raise Exception("Only 1 dim can be flexible")
+        # out_shape = tuple(
+        #     dim if dim != 0 else -1
+        #     for dim in out_shape
+        # )
+
         out_oper = in_oper._replace(shape=out_shape, dim_order=DimOrder.PRESUMED_CONTIGUOUS)
         out_id = self.add_tensor_operand(node.outputsAt(0), out_oper)
-
-        # Handle flexible input size
-        for i, dim in enumerate(in_oper.shape[: start_dim]):
-            if dim == 0:
-                self.forward_operand_shape(out_id, i, in_id, i)
-
-        mid_shape = "*".join([
-            flex_name(in_id, i) if dim == 0 else str(dim)
-            for i, dim in enumerate(in_oper.shape[start_dim: end_dim + 1], start=start_dim)
-        ])
-
-        if mid_shape:
-            self.compute_operand_shape(out_id, start_dim, mid_shape)
-            next_dim = start_dim + 1
-        else:
-            next_dim = start_dim
-
-        for i, dim in enumerate(in_oper.shape[end_dim + 1:], start=next_dim):
-            if dim == 0:
-                self.forward_operand_shape(out_id, i, in_id, i)
 
         inputs = [None] * 2
         inputs[0] = in_id
@@ -986,7 +977,7 @@ class _NnapiSerializer(object):
         assert node.inputsSize() == 5
         assert node.outputsSize() == 1
 
-        in_id, in_oper = self.get_tensor_operand_by_jitval_fixed_size(node.inputsAt(0))
+        in_id, in_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
         _, dim_value = self.get_constant_value(node.inputsAt(1))
         _, start_value = self.get_constant_value(node.inputsAt(2))
         _, stop_value = self.get_constant_value(node.inputsAt(3))
@@ -997,13 +988,32 @@ class _NnapiSerializer(object):
         elif start_value == sys.maxsize:
             start_value = 0
 
+        if start_value == 0 and stop_value == sys.maxsize:
+            self._identity(node)
+            return
+
+        if in_oper.shape[dim_value] == 0:
+            raise Exception("Unable to slice with flexible shape")
+
         if stop_value < 0:
             stop_value += in_oper.shape[dim_value]
         elif stop_value == sys.maxsize:
             stop_value = in_oper.shape[dim_value]
 
-        out_len = 0 if stop_value <= start_value else ((stop_value - start_value) // step_value)
+        if start_value >= stop_value:
+            raise Exception("Slice start value should be less than stop value")
+
+        out_len = (stop_value - start_value) // step_value
         out_shape = tuple(out_len if i == dim_value else dim for i, dim in enumerate(in_oper.shape))
+        out_id = self.add_tensor_operand(node.outputsAt(0), in_oper._replace(shape=out_shape))
+
+        # flex inputs
+        end_mask = 0
+        for idx, dim in enumerate(out_shape):
+            if dim == 0:
+                self.forward_operand_shape(out_id, idx, in_id, idx)
+                end_mask |= (1 << idx)
+
         inputs = [None] * 7
         inputs[0] = in_id
         inputs[1] = self.add_immediate_int_vector(
@@ -1012,12 +1022,12 @@ class _NnapiSerializer(object):
             [stop_value if i == dim_value else dim for i, dim in enumerate(in_oper.shape)])
         inputs[3] = self.add_immediate_int_vector(
             [step_value if i == dim_value else 1 for i in range(len(in_oper.shape))])
-        inputs[4] = self.add_immediate_int_scalar(0)
-        inputs[5] = self.add_immediate_int_scalar(0)
-        inputs[6] = self.add_immediate_int_scalar(0)
+        inputs[4] = self.add_immediate_int_scalar(0)  # begin mask
+        inputs[5] = self.add_immediate_int_scalar(end_mask)
+        inputs[6] = self.add_immediate_int_scalar(0)  # shrink axis mas
 
         outputs = [None] * 1
-        outputs[0] = self.add_tensor_operand(node.outputsAt(0), in_oper._replace(shape=out_shape))
+        outputs[0] = out_id
 
         self.add_operation(NNAPI_OperationCode.STRIDED_SLICE, inputs, outputs)
 
@@ -1175,13 +1185,18 @@ class _NnapiSerializer(object):
         assert node.inputsSize() == 1
         assert node.outputsSize() == 1
 
-        in_id, in_oper = self.get_tensor_operand_by_jitval_fixed_size(node.inputsAt(0))
+        in_id, in_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
+        out_id = self.add_tensor_operand(node.outputsAt(0), in_oper)
+
+        for idx, dim in enumerate(in_oper.shape):
+            if dim == 0:
+                self.forward_operand_shape(out_id, idx, in_id, idx)
 
         inputs = [None] * 1
         inputs[0] = in_id
 
         outputs = [None] * 1
-        outputs[0] = self.add_tensor_operand(node.outputsAt(0), in_oper)
+        outputs[0] = out_id
 
         self.add_operation(opcode, inputs, outputs)
 

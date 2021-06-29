@@ -45,7 +45,7 @@ from typing import cast, Any, Dict, Iterable, Iterator, Optional, Union
 import numpy as np
 
 from torch.testing import floating_types_and, integral_types, complex_types
-from torch.testing._internal import expecttest
+import expecttest
 from .._core import \
     (_compare_tensors_internal, _compare_scalars_internal, _compare_return_type)
 
