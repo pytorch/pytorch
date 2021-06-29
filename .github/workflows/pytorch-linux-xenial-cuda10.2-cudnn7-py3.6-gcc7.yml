@@ -271,6 +271,8 @@ jobs:
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Test PyTorch
+        env:
+          GITHUB_PR_BODY: ${{ github.event.pull_request.body }}
         run: |
           if [[ $NUM_TEST_SHARDS -eq 2 ]]; then
             export SHARD_NUMBER=$TEST_CONFIG
@@ -318,7 +320,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            test-reports-*.zip
+            test-reports-*.zip3
       - name: Clean up docker images
         if: always()
         run: |

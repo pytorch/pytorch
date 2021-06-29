@@ -49,6 +49,7 @@ def PyTorchLinuxWorkflow(
     test_runner_type: str,
     on_pull_request: bool = False,
     enable_doc_jobs: bool = False,
+    enable_update_public_apis: bool = False,
     num_test_shards: int = 1,
 ) -> PyTorchWorkflow:
     return {
@@ -56,6 +57,7 @@ def PyTorchLinuxWorkflow(
         "docker_image_base": docker_image_base,
         "test_runner_type": test_runner_type,
         "on_pull_request": on_pull_request,
+        "enable_update_public_apis": enable_update_public_apis,
         "enable_doc_jobs": enable_doc_jobs,
         "num_test_shards": num_test_shards,
     }
@@ -104,6 +106,7 @@ LINUX_WORKFLOWS = [
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc5.4",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         on_pull_request=True,
+        enable_update_public_apis=True,
         enable_doc_jobs=True,
         num_test_shards=2,
     ),

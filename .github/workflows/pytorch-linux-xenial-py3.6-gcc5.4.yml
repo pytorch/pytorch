@@ -272,6 +272,8 @@ jobs:
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Test PyTorch
+        env:
+          GITHUB_PR_BODY: ${{ github.event.pull_request.body }}
         run: |
           if [[ $NUM_TEST_SHARDS -eq 2 ]]; then
             export SHARD_NUMBER=$TEST_CONFIG
@@ -319,7 +321,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            test-reports-*.zip
+            test-reports-*.zip3
       - name: Clean up docker images
         if: always()
         run: |
@@ -469,6 +471,79 @@ jobs:
           name: pytorch_github_io
           if-no-files-found: error
           path: pytorch_github_io.zip
+      - name: Clean up docker images
+        if: always()
+        run: |
+          # Prune all of the docker images
+          docker system prune -af
+
+  update_public_apis:
+    runs-on: linux.2xlarge
+    needs:
+      - calculate-docker-image
+      - build
+    env:
+      DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
+    steps:
+      - name: Log in to ECR
+        run: |
+          aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
+          bash /tmp/ecr-login.sh
+          rm /tmp/ecr-login.sh
+      - name: Chown workspace
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Checkout PyTorch
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0 # deep clone, to allow sharding to use git rev-list
+          submodules: recursive
+      - name: Pull docker image
+        run: |
+          docker pull "${DOCKER_IMAGE}"
+      - name: Preserve github env variables for use in docker
+        run: |
+          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
+      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+        name: Download PyTorch Build Artifacts
+        with:
+          name: ${{ env.BUILD_ENVIRONMENT }}
+      - name: Unzip artifacts
+        run: |
+          unzip -o artifacts.zip
+      - name: Generate list of public APIs
+        run: |
+          set -ex
+          time docker pull "${DOCKER_IMAGE}" > /dev/null
+          echo "${GITHUB_REF}"
+          ref=${GITHUB_REF##*/}
+          target=${ref//v}
+          docker run \
+            -e BUILD_ENVIRONMENT \
+            -e IN_CI \
+            --security-opt seccomp=unconfined \
+            --name="$GITHUB_SHA" \
+            --tty \
+            --user jenkins \
+            -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
+            -w /var/lib/jenkins/workspace \
+            "${DOCKER_IMAGE}" \
+            bash -c "sudo chown -R jenkins . && pip install dist/*.whl && python scripts/list_apis.py --module torch --public" > apis.log
+          zip apis.zip apis.log
+      - name: Chown workspace
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - uses: driazati/upload-artifact-s3@50adbe4ef0b6d9221df25c18c5fc528dfcb7c3f8
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        name: Upload public APIs to S3
+        with:
+          name: public_apis
+          retention-days: 14
+          if-no-files-found: error
+          s3-prefix: 'pytorch/pytorch/ci'
+          path: apis.zip
       - name: Clean up docker images
         if: always()
         run: |
