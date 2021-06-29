@@ -363,6 +363,12 @@ llvm::JITTargetAddress LLVMCodeGenImpl::getKernelAddress() const {
   return kernelAddress_;
 }
 
+namespace {
+// Global mutex to protect LLVM initialization.  TargetRegistry::lookupTarget
+// in particular is not thread-safe.
+static std::mutex llvmInitMutex;
+}
+
 LLVMCodeGenImpl::LLVMCodeGenImpl(
     Stmt* stmt,
     const std::vector<CodeGen::BufferArg>& args,
@@ -385,11 +391,14 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   VoidTy_ = llvm::Type::getVoidTy(getContext());
   BoolTy_ = ByteTy_;
 
-  llvm::InitializeAllTargets();
-  llvm::InitializeAllTargetMCs();
-  llvm::InitializeAllAsmPrinters();
+  {
+    std::lock_guard<std::mutex> g(llvmInitMutex);
+    llvm::InitializeAllTargets();
+    llvm::InitializeAllTargetMCs();
+    llvm::InitializeAllAsmPrinters();
+    jit_ = std::make_unique<llvm::orc::PytorchLLVMJIT>(triple, cpu, attrs);
+  }
 
-  jit_ = std::make_unique<llvm::orc::PytorchLLVMJIT>(triple, cpu, attrs);
   module_ = std::make_unique<llvm::Module>("pytorch", getContext());
   module_->setDataLayout(jit_->getDataLayout());
   module_->setTargetTriple(jit_->getTargetMachine().getTargetTriple().str());
