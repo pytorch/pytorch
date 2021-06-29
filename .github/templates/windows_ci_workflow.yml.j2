@@ -92,6 +92,7 @@ jobs:
 {%- endif %}
     runs-on: ubuntu-18.04
     env:
+      TEST_RUNNER_TYPE: !{{ test_runner_type }}
       NUM_TEST_SHARDS: !{{ num_test_shards }}
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
@@ -109,7 +110,6 @@ jobs:
 {%- if only_build_on_pull_request %}
     if: ${{ github.event_name == 'push' }}
 {%- endif %}
-    runs-on: !{{ test_runner_type }}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-test
       SHARD_NUMBER: ${{ matrix.shard }}
@@ -120,6 +120,7 @@ jobs:
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
       fail-fast: false
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2

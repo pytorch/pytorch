@@ -73,6 +73,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: ubuntu-18.04
     env:
+      TEST_RUNNER_TYPE: windows.4xlarge
       NUM_TEST_SHARDS: 2
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
@@ -87,7 +88,6 @@ jobs:
         run: .github/scripts/generate_pytorch_test_matrix.py
 
   test:
-    runs-on: windows.4xlarge
     env:
       JOB_BASE_NAME: pytorch-win-vs2019-cpu-py3-test
       SHARD_NUMBER: ${{ matrix.shard }}
@@ -98,6 +98,7 @@ jobs:
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
       fail-fast: false
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
