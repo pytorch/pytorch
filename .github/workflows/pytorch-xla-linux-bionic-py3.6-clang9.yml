@@ -5,6 +5,7 @@ name: Linux CI (pytorch-xla-linux-bionic-py3.6-clang9)
 
 on:
   # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
+  pull_request:
   push:
     branches:
       - master
