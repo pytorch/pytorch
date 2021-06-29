@@ -2087,7 +2087,7 @@ def sample_inputs_sort(op_info, device, dtype, requires_grad, **kwargs):
     samples.append(SampleInput(scalar, args=(0,)))
     samples.append(SampleInput(scalar, args=(0, True)))
     # no CUDA support for stable sort yet
-    if not device.startswith('cuda'):
+    if torch.device(device).type != 'cuda':
         samples.append(SampleInput(scalar, kwargs=dict(stable=True)))
         samples.append(SampleInput(scalar, kwargs=dict(dim=0, stable=True)))
         samples.append(SampleInput(scalar, kwargs=dict(dim=0, descending=True, stable=True)))
