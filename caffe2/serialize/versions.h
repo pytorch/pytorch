@@ -74,7 +74,7 @@ constexpr uint64_t kProducedFileFormatVersion = 0x3L;
 //  0x6L: Implicit opereator versioning using number of specified argument.
 //  Refer to the summary of https://github.com/pytorch/pytorch/pull/56845
 //  for details.
-constexpr uint64_t kProducedBytecodeVersion = 0x5L;
+constexpr uint64_t kProducedBytecodeVersion = 0x6L;
 
 static_assert(kProducedBytecodeVersion >= kProducedFileFormatVersion,
     "kProducedBytecodeVersion must be higher or equal to kProducedFileFormatVersion.");
