@@ -213,6 +213,10 @@ def add_rref_to_value(rref, value):
 def run_nested_pickle(pickle_cls_instance, tensor):
     return pickle_cls_instance.t + tensor
 
+def build_sparse_tensor():
+    i = [[0, 1, 1], [2, 0, 2]]
+    v = [3, 4, 5]
+    return torch.sparse_coo_tensor(i, v, (2, 3))
 
 def build_complex_tensors():
     a = torch.ones(3, 3)
@@ -524,10 +528,20 @@ def async_cuda_nested_add(to, x, y, z):
 # A custom Python class that contains a tensor, needed to see if we correctly
 # use the Python pickler to extract tensors from non-IValue-convertible types.
 class TensorWrapper:
-    __slots__ = ("tensor",)
+    __slots__ = ("tensor", "lock")
 
     def __init__(self, t):
         self.tensor = t
+        # Add one non-picklable field, to ensure it's ignored/skipped.
+        self.lock = Lock()
+
+    def increase(self, v):
+        with self.lock:
+            self.tensor += v
+
+    def sum(self):
+        with self.lock:
+            return self.tensor.sum()
 
 
 # Copied from test/test_cuda.py.
@@ -4921,6 +4935,11 @@ class MyConvNetForMNIST(nn.Module):
             torch.cuda._sleep(10 * FIFTY_MIL_CYCLES)
             return self.net(x)
 
+    def __getstate__(self):
+        # return an empty dict to avoid inspecting the model contents on the
+        # owner
+        return {}
+
 
 class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
 
@@ -6038,37 +6057,70 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
         ):
             fut = Future(devices=["cpu"])
 
-    def _test_cuda_future_extraction(self, wrapper, unwrapper):
-        # We check proper CUDA stream synchronization by filling the tensor with
-        # the expected value in one stream, and reading it from another stream.
-        tensor = torch.zeros((100,), device="cuda:0")
+    def _test_cuda_future_extraction(self, wrapper, unwrapper, sparse_tensor):
+        # We check proper CUDA stream synchronization by adding to the tensor
+        # in one stream to get the expected value, and reading it from another stream.
         future = Future(devices=["cuda:0"])
         with torch.cuda.device("cuda:0"):
             stream = torch.cuda.Stream()
             another_stream = torch.cuda.Stream()
             with torch.cuda.stream(stream):
+                if sparse_tensor:
+                    tensor = build_sparse_tensor().to("cuda:0")
+                    add_tensor = build_sparse_tensor().to("cuda:0")
+                    expected_tensor = (tensor + add_tensor).coalesce()
+                else:
+                    tensor = torch.zeros((100,), device="cuda:0")
+                    add_tensor = torch.ones((100,), device="cuda:0")
+                    expected_tensor = tensor + add_tensor
                 torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
-                tensor.fill_(1)
+                tensor += add_tensor
+                if sparse_tensor:
+                    tensor = tensor.coalesce()
                 future.set_result(wrapper(tensor))
             with torch.cuda.stream(another_stream):
-                self.assertTrue(torch.eq(unwrapper(future.wait()), 1).all().item())
+                tensor = unwrapper(future.wait())
+                if sparse_tensor:
+                    self.assertTrue(torch.eq(tensor.indices(), expected_tensor.indices()).all().item())
+                    self.assertTrue(torch.eq(tensor.values(), expected_tensor.values()).all().item())
+                    self.assertEqual(tensor.size(), expected_tensor.size())
+                else:
+                    self.assertTrue(torch.eq(tensor, expected_tensor).all().item())
 
     @skip_if_lt_x_gpu(1)
     def test_cuda_future_can_extract_cuda_tensor(self):
         self._test_cuda_future_extraction(
-            wrapper=lambda t: t, unwrapper=lambda v: v
+            wrapper=lambda t: t, unwrapper=lambda v: v, sparse_tensor=False
         )
 
     @skip_if_lt_x_gpu(1)
     def test_cuda_future_can_extract_list_with_cuda_tensor(self):
         self._test_cuda_future_extraction(
-            wrapper=lambda t: [t], unwrapper=lambda v: v[0]
+            wrapper=lambda t: [t], unwrapper=lambda v: v[0], sparse_tensor=False
         )
 
     @skip_if_lt_x_gpu(1)
     def test_cuda_future_can_extract_custom_class_with_cuda_tensor(self):
         self._test_cuda_future_extraction(
-            wrapper=lambda t: TensorWrapper(t), unwrapper=lambda v: v.tensor
+            wrapper=lambda t: TensorWrapper(t), unwrapper=lambda v: v.tensor, sparse_tensor=False
+        )
+
+    @skip_if_lt_x_gpu(1)
+    def test_cuda_future_can_extract_cuda_sparse_tensor(self):
+        self._test_cuda_future_extraction(
+            wrapper=lambda t: t, unwrapper=lambda v: v, sparse_tensor=True
+        )
+
+    @skip_if_lt_x_gpu(1)
+    def test_cuda_future_can_extract_list_with_cuda_sparse_tensor(self):
+        self._test_cuda_future_extraction(
+            wrapper=lambda t: [t], unwrapper=lambda v: v[0], sparse_tensor=True
+        )
+
+    @skip_if_lt_x_gpu(1)
+    def test_cuda_future_can_extract_custom_class_with_cuda_sparse_tensor(self):
+        self._test_cuda_future_extraction(
+            wrapper=lambda t: TensorWrapper(t), unwrapper=lambda v: v.tensor, sparse_tensor=True
         )
 
     @skip_if_lt_x_gpu(2)
@@ -6173,5 +6225,57 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
         another_stream = torch.cuda.Stream("cuda:0")
         with torch.cuda.stream(another_stream):
             self.assertTrue(torch.eq(fut.wait(), 3).all().item())
+
+        rpc.shutdown()
+
+    @skip_if_lt_x_gpu(1)
+    def test_cuda_future_modify_tensor_inplace(self):
+        tensor = torch.zeros((100,), device="cuda:0")
+        future = Future(devices=["cuda:0"])
+        future.set_result(tensor)
+        # It's weird to modify the value of a future once it's complete, but
+        # technically possible. Currently this is considered undefined behavior
+        # (in practice the future will ignore the modification and still
+        # synchronize with the original value). We could one day add logic to
+        # detect and warn or throw in such cases, but for now we just check that
+        # this doesn't crash.
+        tensor.fill_(1)
+        future.wait()
+
+    @skip_if_lt_x_gpu(1)
+    def test_cuda_future_replace_tensor(self):
+        tensor_list = [torch.zeros((100,), device="cuda:0")]
+        future = Future(devices=["cuda:0"])
+        future.set_result(tensor_list)
+        # It's weird to modify the value of a future once it's complete, but
+        # technically possible. Currently this is considered undefined behavior
+        # (in practice the future will ignore the modification and still
+        # synchronize with the original value). We could one day add logic to
+        # detect and warn or throw in such cases, but for now we just check that
+        # this doesn't crash.
+        # We set things up so that the original tensor contained in the list
+        # gets deleted once we replace it with the other one. This will
+        # invalidate any cached information held by the future.
+        tensor_list[0] = torch.ones((100,), device="cuda:0")
+        future.wait()
+
+    @skip_if_lt_x_gpu(1)
+    def test_rref_with_unpickleable_attributes(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        options = self.rpc_backend_options
+        options.set_device_map(dst, {"cuda:0": "cuda:0"})
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=options,
+        )
+
+        rref = rpc.remote(dst, TensorWrapper, args=(torch.zeros(42, device="cuda:0"),))
+        rref.rpc_sync().increase(1)
+        ret = rref.rpc_sync().sum()
+        self.assertEqual(ret, 42)
 
         rpc.shutdown()
