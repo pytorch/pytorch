@@ -4758,6 +4758,10 @@ for shape in [(1,), ()]:
         with self.assertRaisesRegex(RuntimeError, "after they have already been freed"):
             out.grad_fn._saved_weight
 
+    def test_cant_create_saved_tensors(self):
+        with self.assertRaisesRegex(RuntimeError, "Trying to create a SavedTensor object from Python is forbidden"):
+            torch.autograd.SavedTensor()
+
     def test_custom_function_saved_tensors(self):
         def getFn(save_for_backward=None):
             class MyFn(Function):
@@ -4769,7 +4773,7 @@ for shape in [(1,), ()]:
 
                 @staticmethod
                 def backward(ctx, g):
-                    return g, None
+                    return g
 
             return MyFn
 
