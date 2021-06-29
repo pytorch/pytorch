@@ -91,3 +91,13 @@ struct TORCH_API AutoNonVariableTypeMode {
 using AutoDispatchBelowADInplaceOrView = c10::impl::ExcludeDispatchKeyGuard<
   c10::autograd_dispatch_keyset_with_ADInplaceOrView.raw_repr(), /*has_overlap=*/false>;
 } // namespace at
+
+namespace c10 {
+namespace impl {
+// If we do not instatiate the templates MSVC will fail to link.
+template struct ExcludeDispatchKeyGuard<
+  autograd_dispatch_keyset.raw_repr(), /*has_overlap=*/false>;
+
+template struct ExcludeDispatchKeyGuard<
+  autograd_dispatch_keyset_with_ADInplaceOrView.raw_repr(), /*has_overlap=*/false>;
+}} // namespace c10::impl
