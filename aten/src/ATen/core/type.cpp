@@ -113,9 +113,16 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       if(i > 0)
         out << ", ";
       if (tup->schema()) {
-        out << tup->schema()->arguments()[i].name() << " : ";
+        auto arg = tup->schema()->arguments()[i];
+        out << arg.name() << " : ";
+        out << *(tup->elements()[i]);
+        if (arg.default_value()) {
+          out << " = " << *arg.default_value();
+        }
       }
-      out << *(tup->elements()[i]);
+      else {
+        out << *(tup->elements()[i]);
+      }
     }
     out << ")";
   } else if (t.kind() == TypeKind::FunctionType) {
@@ -752,13 +759,41 @@ TupleTypePtr TupleType::createNamed(
     const c10::optional<c10::QualifiedName>& qualName,
     const std::vector<std::string>& field_names,
     const std::vector<TypePtr>& field_types) {
+      std::vector<IValue> empty_defaults;
+      return TupleType::createNamed(qualName, field_names, field_types, empty_defaults);
+    }
+
+
+TupleTypePtr TupleType::createNamed(const c10::optional<c10::QualifiedName>& qualName,
+    const std::vector<std::string>& field_names,
+    const std::vector<TypePtr>& field_types,
+    std::vector<IValue>& field_defaults) {
   TORCH_INTERNAL_ASSERT(field_names.size() == field_types.size());
+
   std::vector<Argument> arguments;
+  arguments.reserve(field_names.size());
+  auto min_default_idx = field_names.size() - field_defaults.size();
   for (size_t i = 0; i < field_names.size(); ++i) {
-    arguments.emplace_back(
-        /*name=*/field_names[i],
-        /*type=*/field_types[i],
-        /*N=*/i);
+    if (i < min_default_idx) {
+      Argument arg{
+          /*name=*/field_names[i],
+          /*type=*/field_types[i],
+          /*N=*/i};
+      arguments.emplace_back(std::move(arg));
+    }
+    else {
+      size_t j = i - min_default_idx;
+      TORCH_CHECK(field_defaults[j].tagKind() != "Tensor", "Tensors are "
+                  "not supported as default NamedTuple fields. Their "
+                  "mutability could lead to potential memory aliasing "
+                  "problems");
+      Argument arg{
+          /*name=*/field_names[i],
+          /*type=*/field_types[i],
+          /*N=*/i,
+          /*default_value=*/field_defaults[j]};
+      arguments.emplace_back(std::move(arg));
+    }
   }
 
   auto schema = std::make_shared<FunctionSchema>(
@@ -781,21 +816,21 @@ bool NoneType::isSubtypeOfExt(const TypePtr& rhs, std::ostream *why_not) const {
 // an Optional. This populates `types` with all the types found during
 // flattening. At the end of `flattenUnion`, `types` may have
 // duplicates, but it will not have nested Optionals/Unions
-void flattenUnion(TypePtr& type, std::vector<TypePtr>& types) {
+void flattenUnion(TypePtr& type, std::vector<TypePtr>* to_fill) {
   if (auto union_type = type->cast<UnionType>()) {
     for (auto inner : union_type->containedTypes()) {
-      flattenUnion(inner, types);
+      flattenUnion(inner, to_fill);
     }
   } else if (auto opt_type = type->cast<OptionalType>()) {
     auto inner = opt_type->getElementType();
-    flattenUnion(inner, types);
-    types.emplace_back(NoneType::get());
+    flattenUnion(inner, to_fill);
+    to_fill->emplace_back(NoneType::get());
   } else if (type->kind() == NumberType::Kind) {
-    types.emplace_back(IntType::get());
-    types.emplace_back(FloatType::get());
-    types.emplace_back(ComplexType::get());
+    to_fill->emplace_back(IntType::get());
+    to_fill->emplace_back(FloatType::get());
+    to_fill->emplace_back(ComplexType::get());
   } else {
-    types.emplace_back(type);
+    to_fill->emplace_back(type);
   }
 }
 
@@ -808,7 +843,10 @@ void flattenUnion(TypePtr& type, std::vector<TypePtr>& types) {
 // this isn't an issue--most types SHOULD be unified even if the parent
 // type wasn't in the original vector. However, later additions to the
 // type system might necessitate reworking `get_supertype`
-void filterDuplicateSubtypes(std::vector<TypePtr>& types) {
+void filterDuplicateSubtypes(std::vector<TypePtr>* types) {
+  if (types->empty()) {
+    return;
+  }
   auto get_supertype = [](const TypePtr t1, const TypePtr t2) -> c10::optional<TypePtr> {
     // We don't want nested Optionals. Also, prematurely unifying to
     // `Optional` could prevent us from coalescing other types
@@ -827,14 +865,14 @@ void filterDuplicateSubtypes(std::vector<TypePtr>& types) {
   // decrement `end`, swap `types[j]` with the unified type, and
   // break. Otherwise, we keep `end` where it is to signify that the
   // new end of the vector hasn't shifted
-  size_t end_idx = types.size()-1;
-  for (size_t i = types.size()-1; i > 0; --i) {
+  size_t end_idx = types->size()-1;
+  for (size_t i = types->size()-1; i > 0; --i) {
     for (size_t j = std::min(i-1, end_idx); ; --j) {
       c10::optional<TypePtr> unified;
-      unified = get_supertype(types[i], types[j]);
+      unified = get_supertype((*types)[i], (*types)[j]);
       if (unified) {
-        types[j] = *unified;
-        types[i] = types[end_idx];
+        (*types)[j] = *unified;
+        (*types)[i] = (*types)[end_idx];
         --end_idx;
         break;
       }
@@ -846,15 +884,16 @@ void filterDuplicateSubtypes(std::vector<TypePtr>& types) {
     }
   }
   // Cut off the vector's tail so that `end` is the real last element
-  types.erase(types.begin() + end_idx + 1, types.end());
+  types->erase(types->begin() + end_idx + 1, types->end());
+
 }
 
-void standardizeUnion(std::vector<TypePtr>& types) {
+void sortUnion(std::vector<TypePtr>* types) {
   // We want the elements to be sorted so we can easily compare two
   // UnionType objects for equality in the future. Note that this order
   // is guaranteed to be stable since we've already coalesced any
   // possible types
-  std::sort(types.begin(), types.end(),
+  std::sort(types->begin(), types->end(),
           [](const TypePtr a, const TypePtr b) -> bool {
             if (a->kind() != b->kind()) {
               return a->kind() < b->kind();
@@ -863,17 +902,25 @@ void standardizeUnion(std::vector<TypePtr>& types) {
           });
 }
 
-UnionType::UnionType(std::vector<TypePtr> types, TypeKind kind) : Type(kind) {
-  TORCH_INTERNAL_ASSERT(types.size() >= 2, "Cannot create a Union of "
-                        "one or fewer types");
-
-  for (auto type : types) {
-    flattenUnion(type, types_);
+void standardizeVectorForUnion(std::vector<TypePtr>& reference, std::vector<TypePtr>* to_fill) {
+  for (auto type : reference) {
+    flattenUnion(type, to_fill);
   }
+  filterDuplicateSubtypes(to_fill);
+  sortUnion(to_fill);
+}
 
-  filterDuplicateSubtypes(types_);
+void standardizeVectorForUnion(std::vector<TypePtr>* to_flatten) {
+  TORCH_INTERNAL_ASSERT(to_flatten, "`standardizeVectorForUnion` was ",
+                        "passed a `nullptr`");
+  std::vector<TypePtr> to_fill;
+  standardizeVectorForUnion(*to_flatten, &to_fill);
+}
 
-  standardizeUnion(types_);
+UnionType::UnionType(std::vector<TypePtr> reference, TypeKind kind) : Type(kind) {
+  TORCH_INTERNAL_ASSERT(!reference.empty(), "Cannot create an empty Union");
+
+  standardizeVectorForUnion(reference, &types_);
 
   // Gate the assert in a regular conditional so that we don't create
   // this long error message unnecessarily
@@ -881,8 +928,8 @@ UnionType::UnionType(std::vector<TypePtr> types, TypeKind kind) : Type(kind) {
     std::stringstream msg;
     msg << "After type unification was performed, the Union with the "
         << "original types {";
-    for (auto i = 0; i < types.size(); ++i) {
-      msg << types[i]->repr_str();
+    for (auto i = 0; i < reference.size(); ++i) {
+      msg << reference[i]->repr_str();
       if (i > 0) {
         msg << ",";
       }
@@ -908,14 +955,46 @@ UnionType::UnionType(std::vector<TypePtr> types, TypeKind kind) : Type(kind) {
 
 }
 
-UnionTypePtr UnionType::create(std::vector<TypePtr> types) {
-  std::stringstream nowhere;
-  if (auto unified = unifyTypeList(types, nowhere, /*default_to_union=*/false)) {
-    if ((*unified)->kind() == OptionalType::Kind) {
-      return (*unified)->expect<OptionalType>();
+UnionTypePtr UnionType::create(std::vector<TypePtr> reference) {
+  auto union_type = new UnionType(std::move(reference));
+
+  // Some very special-cased logic for `Optional`. This will be deleted
+  // in a later PR
+  bool int_found = false;
+  bool float_found = false;
+  bool complex_found = false;
+  bool nonetype_found = false;
+
+  auto update_is_opt_flags = [&](TypePtr t) {
+    if (t == IntType::get()) {
+      int_found = true;
+    } else if (t == FloatType::get()) {
+      float_found  = true;
+    } else if (t == ComplexType::get()) {
+      complex_found = true;
+    } else if (t == NoneType::get()) {
+      nonetype_found = true;
+    }
+  };
+
+  for (const auto& t : union_type->types_) {
+    update_is_opt_flags(t);
+  }
+
+  bool numbertype_found = int_found && float_found && complex_found;
+
+  if (nonetype_found) {
+    if (union_type->types_.size() == 4 && numbertype_found) {
+      return OptionalType::create(NumberType::get());
+    }
+    if (union_type->types_.size() == 2) {
+      auto not_none = union_type->types_[0] != NoneType::get()
+                      ? union_type->types_[0]
+                      : union_type->types_[1];
+      return OptionalType::create(not_none);
     }
   }
-  auto union_type = new UnionType(std::move(types));
+
   return UnionTypePtr(std::move(union_type));
 }
 
@@ -1001,11 +1080,12 @@ std::string UnionType::unionStr(TypePrinter printer, bool is_annotation_str) con
   };
 
   ss << "Union[";
-  for (size_t i = 0; i < types_.size(); ++i) {
-    if (i > 0) {
-      ss << ", ";
-    }
+  size_t i = 0;
+  for (; i < types_.size(); ++i) {
     if (!can_hold_numbertype || !is_numbertype(types_[i])) {
+      if (i > 0) {
+        ss << ", ";
+      }
       if (is_annotation_str) {
         ss << types_[i]->annotation_str(printer);
       } else {
@@ -1014,6 +1094,9 @@ std::string UnionType::unionStr(TypePrinter printer, bool is_annotation_str) con
     }
   }
   if (can_hold_numbertype) {
+    if (i > 0) {
+      ss << ", ";
+    }
     if (is_annotation_str) {
       ss << NumberType::get()->annotation_str(printer);
     } else {
@@ -1049,42 +1132,16 @@ c10::optional<TypePtr> UnionType::toOptional() const {
   if (!canHoldType(NoneType::get())) {
       return c10::nullopt;
   }
-  std::vector<TypePtr> optional_types;
-  for (auto type : types_) {
-    flattenUnion(type, optional_types);
-  }
-  filterDuplicateSubtypes(optional_types);
 
-  auto get_type_iterator = [&](TypePtr lhs) -> c10::optional<decltype (optional_types.begin())> {
-    for (auto rhs = optional_types.begin(); rhs < optional_types.end(); ++rhs) {
-      // Compare pointed-to Type (`*lhs`) with dereferenced iterator's
-      // pointed-to Type (`**rhs`)
-      if (*lhs == **rhs) {
-        return {rhs};
-      }
-    }
+  std::vector<TypePtr> copied_types = this->types_;
+
+  auto maybe_opt = UnionType::create(std::move(copied_types));
+
+  if (maybe_opt->kind() == UnionType::Kind) {
     return c10::nullopt;
-  };
-
-  auto int_it = get_type_iterator(IntType::get());
-  auto float_it = get_type_iterator(FloatType::get());
-  auto complex_it = get_type_iterator(ComplexType::get());
-
-  if (int_it && float_it && complex_it) {
-    optional_types.erase(*int_it);
-    optional_types.erase(*float_it);
-    optional_types.erase(*complex_it);
-    optional_types.push_back(NumberType::get());
+  } else {
+    return maybe_opt;
   }
-
-  if (optional_types.size() != 2) {
-    return c10::nullopt;
-  }
-
-  TypePtr contained = optional_types[0]->kind() != NoneType::Kind ?
-                      optional_types[0] : optional_types[1];
-
-  return OptionalType::create(std::move(contained));
 }
 
 c10::optional<TypePtr> UnionType::subtractTypeSet(std::vector<TypePtr>& to_subtract) const {
@@ -1124,6 +1181,9 @@ OptionalType::OptionalType(TypePtr contained)
                  : UnionType::containedTypes()[1];
   } else if (contained == NumberType::get()) {
     contained_ = NumberType::get();
+    types_.clear();
+    types_.push_back(NumberType::get());
+    types_.push_back(NoneType::get());
   } else {
     std::vector<TypePtr> to_subtract{NoneType::get()};
     auto without_none = this->subtractTypeSet(to_subtract);
