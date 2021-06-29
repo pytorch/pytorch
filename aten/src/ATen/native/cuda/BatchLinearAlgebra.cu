@@ -1,4 +1,5 @@
 #include <ATen/Context.h>
+#include <ATen/DeviceGuard.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
@@ -2396,6 +2397,12 @@ void linalg_eigh_magma(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos,
 }
 
 void linalg_eigh_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos, bool upper, bool compute_eigenvectors) {
+  // This kernel is used also for at::native::linalg_eigvalsh which is registered as CompositeImplicitAutograd in native_functions.yml
+  // so that the derivative rule of linalg_eigh is picked up in autograd mode
+  // CompositeImplicitAutograd functions omit device guards
+  // Guarding here as a workaround
+  const OptionalDeviceGuard device_guard(device_of(eigenvalues));
+
 #if defined(USE_CUSOLVER)
   linalg_eigh_cusolver(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
 #else
