@@ -13420,7 +13420,7 @@ dedent """
 
         def index_str_to_tensor(s):
             # type: (str) -> Tensor
-            return torch.tensor(ord(s))  # noqa T484
+            return torch.tensor(ord(s))  # noqa: T484
 
         s = u'\u00a3'.encode('utf8')[:1]
         self.checkScript(index_str_to_tensor, (s,))
