@@ -102,7 +102,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'eig', 'lerp', 'linalg_vector_norm', 'cumprod', 'prod', 'index_copy', 'lu', 'unfold', 'unfold_backward',
     'index', 'masked_fill', 'cross', 'lu_unpack', 'renorm', '_view_as_real_physical', '_conj_physical',
     'scatter', 'scatter_add', 'sigmoid', 'sigmoid_backward',
-    'conj_physical_'
+    'conj_physical_', 'float_power'
 }
 
 GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {

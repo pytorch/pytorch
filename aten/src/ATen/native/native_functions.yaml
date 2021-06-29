@@ -7290,23 +7290,37 @@
   variants: method
 
 - func: float_power.Tensor_Tensor_out(Tensor self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  dispatch:
+    CPU, CUDA: float_power_Tensor_Tensor_out
 
 - func: float_power.Tensor_Tensor(Tensor self, Tensor exponent) -> Tensor
+  structured_delegate: float_power.Tensor_Tensor_out
   variants: function, method
 
 - func: float_power.Scalar_out(Scalar self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  dispatch:
+    CPU, CUDA: float_power_Scalar_out
 
 - func: float_power.Scalar(Scalar self, Tensor exponent) -> Tensor
+  structured_delegate: float_power.Scalar_out
 
 - func: float_power.Tensor_Scalar_out(Tensor self, Scalar exponent, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  dispatch:
+    CPU, CUDA: float_power_Tensor_Scalar_out
 
 - func: float_power.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor
+  structured_delegate: float_power.Tensor_Scalar_out
   variants: function, method
 
 - func: float_power_.Scalar(Tensor(a!) self, Scalar exponent) -> Tensor(a!)
+  structured_delegate: float_power.Tensor_Scalar_out
   variants: method
 
 - func: float_power_.Tensor(Tensor(a!) self, Tensor exponent) -> Tensor(a!)
+  structured_delegate: float_power.Tensor_Tensor_out
   variants: method
 
 - func: normal_(Tensor(a!) self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor(a!)

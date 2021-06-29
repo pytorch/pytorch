@@ -6372,7 +6372,10 @@ op_db: List[OpInfo] = [
            ),
     OpInfo('float_power',
            dtypes=all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool),
+           backward_dtypes=all_types_and_complex_and(torch.bfloat16, torch.bool),
+           backward_dtypesIfCUDA=all_types_and_complex_and(torch.bfloat16, torch.half),
            sample_inputs_func=sample_inputs_pow,
+           supports_inplace_autograd=False,
            skips=(
                SkipInfo('TestCommon', 'test_conj_view', device_type='cuda'),),),
     OpInfo('prod',
