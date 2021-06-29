@@ -1688,6 +1688,75 @@ Example::
     False
 """)
 
+add_docstr(torch.cov, r"""
+cov(input, *, correction=1, fweights=None, aweights=None) -> Tensor
+
+Estimates the covariance matrix of the variables given by the :attr:`input` matrix, where rows are
+the variables and columns are the observations.
+
+A covariance matrix is a square matrix giving the covariance of each pair of variables. The diagonal contains
+the variance of each variable (covariance of a variable with itself). By definition, if :attr:`input` represents
+a single variable (Scalar or 1D) then its variance is returned.
+
+The unbiased sample covariance of the variables :math:`x` and :math:`y` is given by:
+
+.. math::
+    \text{cov}_w(x,y) = \frac{\sum^{N}_{i = 1}(x_{i} - \bar{x})(y_{i} - \bar{y})}{N~-~1}
+
+where :math:`\bar{x}` and :math:`\bar{y}` are the simple means of the :math:`x` and :math:`y` respectively.
+
+If :attr:`fweights` and/or :attr:`aweights` are provided, the unbiased weighted covariance
+is calculated, which is given by:
+
+.. math::
+    \text{cov}_w(x,y) = \frac{\sum^{N}_{i = 1}w_i(x_{i} - \mu_x^*)(y_{i} - \mu_y^*)}{\sum^{N}_{i = 1}w_i~-~1}
+
+where :math:`w` denotes :attr:`fweights` or :attr:`aweights` based on whichever is provided, or
+:math:`w = fweights \times aweights` if both are provided, and
+:math:`\mu_x^* = \frac{\sum^{N}_{i = 1}w_ix_{i} }{\sum^{N}_{i = 1}w_i}` is the weighted mean of the variable.
+
+Args:
+    input (Tensor): A 2D matrix containing multiple variables and observations, or a
+        Scalar or 1D vector representing a single variable.
+
+Keyword Args:
+    correction (int, optional): difference between the sample size and sample degrees of freedom.
+        Defaults to Bessel's correction, ``correction = 1`` which returns the unbiased estimate,
+        even if both :attr:`fweights` and :attr:`aweights` are specified. ``correction = 0``
+        will return the simple average. Defaults to ``1``.
+    fweights (tensor, optional): A Scalar or 1D tensor of observation vector frequencies representing the number of
+        times each observation should be repeated. Its numel must equal the number of columns of :attr:`input`.
+        Must have integral dtype. Ignored if ``None``. `Defaults to ``None``.
+    aweights (tensor, optional): A Scalar or 1D array of observation vector weights.
+        These relative weights are typically large for observations considered “important” and smaller for
+        observations considered less “important”. Its numel must equal the number of columns of :attr:`input`.
+        Must have floating point dtype. Ignored if ``None``. `Defaults to ``None``.
+
+Returns:
+    (Tensor) The covariance matrix of the variables.
+
+Example::
+    >>> x = torch.tensor([[0, 2], [1, 1], [2, 0]]).T
+    >>> x
+    tensor([[0, 1, 2],
+            [2, 1, 0]])
+    >>> torch.cov(x)
+    tensor([[ 1., -1.],
+            [-1.,  1.]])
+    >>> torch.cov(x, correction=0)
+    tensor([[ 0.6667, -0.6667],
+            [-0.6667,  0.6667]])
+    >>> fw = torch.randint(1, 10, (3,))
+    >>> fw
+    tensor([1, 6, 9])
+    >>> aw = torch.rand(3)
+    >>> aw
+    tensor([0.4282, 0.0255, 0.4144])
+    >>> torch.cov(x, fweights=fw, aweights=aw)
+    tensor([[ 0.4169, -0.4169],
+            [-0.4169,  0.4169]])
+""")
+
 add_docstr(torch.cat,
            r"""
 cat(tensors, dim=0, *, out=None) -> Tensor
@@ -7619,7 +7688,8 @@ Args:
 Keyword args:
     {generator}
     {out}
-    {dtype}
+    dtype (`torch.dtype`, optional) - the desired data type of returned tensor. Default: if ``None``,
+        this function returns a tensor with dtype ``torch.int64``.
     {layout}
     {device}
     {requires_grad}
