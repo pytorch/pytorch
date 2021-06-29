@@ -49,7 +49,6 @@ class TestNNAPI(TestCase):
                 args = arg_or_args
             module.eval()
             traced = torch.jit.trace(module, trace_args or args)
-            breakpoint()
             nnapi_module = convert_model_to_nnapi(traced, convert_args or args)
             if not self.can_run_nnapi:
                 # Only test that the model was converted successfully.
@@ -145,27 +144,28 @@ class TestNNAPI(TestCase):
                 nhwc(torch.randn(4, 2, 1, 1)))
 
     def test_flatten(self):
-#        for mod in [
-#            torch.nn.Flatten(),
-#            torch.nn.Flatten(start_dim=2, end_dim=3),
-#            torch.nn.Flatten(start_dim=2, end_dim=4),
-#            torch.nn.Flatten(start_dim=0, end_dim=-2),
-#            torch.nn.Flatten(start_dim=0, end_dim=4)
-#
-#        ]:
-#            self.check(mod, torch.randn(4, 2, 1, 3, 7))
+        for mod in [
+            torch.nn.Flatten(),
+            torch.nn.Flatten(start_dim=2, end_dim=3),
+            torch.nn.Flatten(start_dim=2, end_dim=4),
+            torch.nn.Flatten(start_dim=0, end_dim=-2),
+            torch.nn.Flatten(start_dim=0, end_dim=4)
 
-         for mod in [
-             torch.nn.Flatten(),
-#              torch.nn.Flatten(start_dim=2, end_dim=3),
-#              torch.nn.Flatten(start_dim=2, end_dim=4),
-#              torch.nn.Flatten(start_dim=0, end_dim=-2),
-#              torch.nn.Flatten(start_dim=0, end_dim=4)
+        ]:
+            self.check(mod, torch.randn(4, 2, 1, 3, 7))
 
-         ]:
-             self.check(
-                 mod, torch.randn(4, 2, 1, 3, 7),
-                 convert_args=[torch.zeros(4, 2, 0, 0, 7)])
+        # TODO(axit): To add support for runtime
+        # self.check(
+        #     torch.nn.Flatten(),
+        #     torch.randn(4, 2, 1, 3, 7),
+        #     convert_args=[torch.zeros(0, 2, 1, 3, 7)]
+        # )
+        # with self.assertRaisesRegex(Exception, "dims can't be flexible"):
+        #     self.check(torch.nn.Flatten(), torch.randn(4, 2, 0, 0, 7))
+        # with self.assertRaisesRegex(Exception, "Only 1 dim"):
+        #     self.check(
+        #         torch.nn.Flatten(start_dim=1, end_dim=-2),
+        #         torch.randn(0, 2, 1, 3, 0))
 
     def test_slice(self):
         class SliceModule(torch.nn.Module):
@@ -190,6 +190,19 @@ class TestNNAPI(TestCase):
             SliceModule2(),
             torch.randn(5)
         )
+
+        # flex inputs
+        self.check(
+            SliceModule(1, 5, 2),
+            torch.randn(4, 6, 2),
+            convert_args=[torch.zeros(4, 6, 0)]
+        )
+        with self.assertRaisesRegex(Exception, "slice with flexible shape"):
+            self.check(
+                SliceModule(1, 5, 2),
+                torch.randn(4, 6, 2),
+                convert_args=[torch.zeros(0, 0, 0)]
+            )
 
     def test_cat(self):
         class CatModule(torch.nn.Module):
@@ -358,14 +371,6 @@ class TestNNAPI(TestCase):
             convert_args=[torch.zeros(1, 2, 0, 0)],
         )
 
-    def test_zeros(self):
-        class Zeros(torch.nn.Module):
-            def forward(self, size):
-                return torch.zeros(*size)
-
-        # self.check(Zeros(), torch.randint(5, size=(2,)))
-        self.check(Zeros(), torch.tensor([2, 3], dtype=torch.int))
-
     def test_detach(self):
         class DetachModule(torch.nn.Module):
             def __init__(self):
@@ -376,6 +381,9 @@ class TestNNAPI(TestCase):
                 return torch.nn.functional.relu(y)
 
         self.check(DetachModule(), torch.randn(1, 2, 3, 3))
+        self.check(
+            DetachModule(), torch.randn(1, 2, 3, 3),
+            convert_args=[torch.zeros(1, 2, 0, 0)])
 
     def test_mean(self):
         class MeanModule(torch.nn.Module):
@@ -515,12 +523,11 @@ class TestNNAPI(TestCase):
     def test_conv2d_transpose(self):
         weight = torch.randn((128, 256, 2, 2))
         input_dim = (30, 128, 7, 7)
-        inp_float = torch.randn(input_dim)
+        inp = torch.randn(input_dim)
 
         convert_dims = input_dim[:2] + (0, 0)
         convert_arg = torch.zeros(*convert_dims)
         convert_args = dict(self.float_and_quant_and_nhwc(convert_arg, 0.03, 128))
-        weights = dict(self.float_and_quant_and_nhwc(weight, 0.03, 128))
 
         class ConvTransposeMod(torch.nn.Module):
             def __init__(self, weight):
@@ -530,18 +537,16 @@ class TestNNAPI(TestCase):
             def forward(self, x):
                 return torch.nn.functional.conv_transpose2d(x, self.weight)
 
-        for kind, inp in self.float_and_quant_and_nhwc(inp_float, 0.03, 128):
-            print(kind, inp.shape, weights[kind].shape)
+        model = ConvTransposeMod(weight)
+        for kind in ["float", "float-nhwc", "quant", "quant-nhwc"]:
             with self.subTest(kind):
-                model = ConvTransposeMod(weights[kind])
+                model = ConvTransposeMod(weight)
                 output_size = model(inp).numel()
-                atol_rtol = (0.0001, 0)
+                atol_rtol = (0.0002, 0)
                 limit = None
 
                 if "quant" in kind:
-                    # FIXME quantized fails with:
-                    # return torch.nn.functional.conv_transpose2d(x, self.weight)
-                    # NotImplementedError: Could not run 'aten::slow_conv_transpose2d' with arguments from the 'QuantizedCPU' backend. This could be because the operator doesn't exist for this backend, or was omitted during the selective/custom build process (if using custom build). If you are a Facebook employee using PyTorch on mobile, please visit https://fburl.com/ptmfixes for possible resolutions. 'aten::slow_conv_transpose2d' is only available for these backends: [CPU, BackendSelect, Named, InplaceOrView, AutogradOther, AutogradCPU, AutogradCUDA, AutogradXLA, UNKNOWN_TENSOR_TYPE_ID, AutogradMLC, AutogradNestedTensor, AutogradPrivateUse1, AutogradPrivateUse2, AutogradPrivateUse3, Tracer, Autocast, Batched, VmapMode].
+                    # FIXME 'aten::slow_conv_transpose2d' with arguments from the 'QuantizedCPU' backend
                     continue
                     model = torch.nn.Sequential(model)
                     model.eval()
@@ -549,11 +554,17 @@ class TestNNAPI(TestCase):
                     model = torch.quantization.prepare(model)
                     model(inp)
                     model = torch.quantization.convert(model)
+                    inp = qpt(inp, 1.0 / 16, 128)
                     # I've seen numerical differences between QNNPACK and NNAPI,
                     # but never more than 1 quantum, and never more than ~1% of
                     # the output in this test.
                     atol_rtol = (1, 0)
                     limit = output_size * 0.03
+                    convert_arg = qpt(torch.zeros(*convert_dims), 1.0 / 16, 128)
+
+                if "nhwc" in kind:
+                    inp = nhwc(inp)
+                    convert_arg = nhwc(convert_arg)
 
                 self.check(model, inp, atol_rtol=atol_rtol, limit=limit)
                 self.check(
