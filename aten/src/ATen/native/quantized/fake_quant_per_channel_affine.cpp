@@ -50,9 +50,6 @@ std::tuple<Tensor, Tensor> fake_quantize_per_channel_affine_cachemask(
     int64_t axis,
     int64_t quant_min,
     int64_t quant_max) {
-  TORCH_CHECK(self.scalar_type() == ScalarType::Float);
-  TORCH_CHECK(scale.scalar_type() == ScalarType::Float,
-              "Scale must be Float, found ", scale.scalar_type());
   TORCH_CHECK(zero_point.scalar_type() == ScalarType::Long,
               "Zero-point must be Long, found ", zero_point.scalar_type());
   TORCH_CHECK(scale.dim() == 1, "scale should be a 1-D tensor");
@@ -88,8 +85,8 @@ std::tuple<Tensor, Tensor> fake_quantize_per_channel_affine_cachemask(
     .check_all_same_dtype(false)
     .add_output(Y)
     .add_input(self)
-    .add_input(native::_unsafe_view(scale, expected_shape))
-    .add_input(native::_unsafe_view(zero_point, expected_shape))
+    .add_owned_input(native::_unsafe_view(scale, expected_shape))
+    .add_owned_input(native::_unsafe_view(zero_point, expected_shape))
     .build();
 
   // TODO(future, optional): read once, write twice.  Not done at the moment
@@ -98,8 +95,8 @@ std::tuple<Tensor, Tensor> fake_quantize_per_channel_affine_cachemask(
     .check_all_same_dtype(false)
     .add_output(mask)
     .add_input(self)
-    .add_input(native::_unsafe_view(scale, expected_shape))
-    .add_input(native::_unsafe_view(zero_point, expected_shape))
+    .add_owned_input(native::_unsafe_view(scale, expected_shape))
+    .add_owned_input(native::_unsafe_view(zero_point, expected_shape))
     .build();
 
   // TODO(future, optional): look into packing the mask further (BoolTensor uses
@@ -120,7 +117,6 @@ Returns:
 Tensor fake_quantize_per_channel_affine_cachemask_backward(
     const Tensor& dY,
     const Tensor& mask) {
-  TORCH_CHECK(dY.scalar_type() == ScalarType::Float);
   TORCH_CHECK(mask.scalar_type() == ScalarType::Bool);
   TORCH_CHECK(mask.numel() == dY.numel(),
       "`mask` and `dY` are not the same size: ",

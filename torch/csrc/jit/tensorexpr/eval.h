@@ -12,7 +12,6 @@
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
 #include <torch/csrc/jit/tensorexpr/exceptions.h>
-#include <torch/csrc/jit/tensorexpr/execution_counter.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
@@ -106,6 +105,7 @@ class TORCH_API SimpleIREvaluator : public CodeGen {
   ~SimpleIREvaluator() override;
 
   void call(const std::vector<CallArg>& args) override;
+  void call_raw(const std::vector<void*>& args) override;
 
   template <typename... Ts>
   void operator()(const Ts&... ts) {
@@ -117,7 +117,7 @@ class TORCH_API SimpleIREvaluator : public CodeGen {
   Value value() const;
 
  private:
-  void bindArg(const BufferArg& buf, const CallArg& data);
+  void bindArg(const BufferArg& buf, void* data);
   void expand_intrinsics() {
     GenericIntrinsicsExpander intrinsics_expander;
     apply_mutator(&intrinsics_expander);
@@ -201,9 +201,32 @@ class ExprEval {
     }
   }
 
+  void call_raw(const std::vector<void*>& args) {
+    std::vector<void*> args_extended = args;
+    switch (dtype_.scalar_type()) {
+#define TYPE_CASE(Type, Name)                    \
+  case ScalarType::Name: {                       \
+    std::vector<Type> ret_val_arg(1);            \
+    args_extended.push_back(ret_val_arg.data()); \
+    codegen_->call_raw(args_extended);           \
+    ret_value_ = Value(ret_val_arg[0]);          \
+  } break;
+      AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+#undef TYPE_CASE
+      case ScalarType::Bool: {
+        std::vector<unsigned char> ret_val_arg(1);
+        args_extended.push_back(ret_val_arg.data());
+        codegen_->call_raw(args_extended);
+        ret_value_ = Value((bool)ret_val_arg[0]);
+      } break;
+      default:
+        throw unsupported_dtype();
+    }
+  }
+
   template <typename T>
-  T value(std::vector<void*>& args) {
-    call(args);
+  T value(const std::vector<void*>& args) {
+    call_raw(args);
     return ret_value_.as<T>();
   }
 

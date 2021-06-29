@@ -4,7 +4,6 @@
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/eval.h>
 #include <torch/csrc/jit/tensorexpr/exceptions.h>
-#include <torch/csrc/jit/tensorexpr/execution_counter.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 
 namespace torch {
@@ -361,6 +360,9 @@ void BlockCodeGen::Initialize() {
 }
 
 void BlockCodeGen::call(const std::vector<CallArg>& args) {
+  throw std::runtime_error("BlockCodeGen: Cannot call Block code ");
+}
+void BlockCodeGen::call_raw(const std::vector<void*>& args) {
   throw std::runtime_error("BlockCodeGen: Cannot call Block code ");
 }
 

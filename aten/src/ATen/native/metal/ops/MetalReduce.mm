@@ -2,8 +2,8 @@
 #import <ATen/native/metal/MetalCommandBuffer.h>
 #import <ATen/native/metal/MetalTensorImpl.h>
 #import <ATen/native/metal/MetalTensorImplStorage.h>
-#import <ATen/native/metal/MetalUtils.h>
-#import <ATen/native/metal/mpscnn/MPSCNNContext.h>
+#import <ATen/native/metal/MetalTensorUtils.h>
+#import <ATen/native/metal/MetalContext.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
 #import <ATen/native/metal/mpscnn/MPSImageUtils.h>
 
@@ -17,7 +17,7 @@ namespace metal {
 
 API_AVAILABLE(ios(11.3), macos(10.13))
 static inline MPSNNReduceUnary* kernelForReducedDim(int dim) {
-  id<MTLDevice> device = [MPSCNNContext sharedInstance].device;
+  id<MTLDevice> device = [MetalContext sharedInstance].device;
   if (dim == 3) {
     return [[MPSNNReduceRowMean alloc] initWithDevice:device];
   } else if (dim == 2) {
@@ -35,27 +35,27 @@ Tensor wrapper_mean_dim(
     c10::optional<ScalarType> dtype) {
   if (@available(iOS 11.3, *)) {
     MPSImage* X = imageFromTensor(input);
-    auto textureSize = input.sizes().vec();
-    TORCH_CHECK(textureSize.size() == 4);
+    auto imageSize = input.sizes().vec();
+    TORCH_CHECK(imageSize.size() == 4);
     // TODO: [T87340633] Support reducing the batch dimension
-    TORCH_CHECK(textureSize[0] == 1);
+    TORCH_CHECK(imageSize[0] == 1);
     auto mask = make_dim_mask(dims, input.dim());
-    MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
+    MetalCommandBuffer* commandBuffer = getCommandBuffer(input);
     MPSImage* Y = nil;
     for (int dim : dims) {
-      textureSize[dim] = 1;
+      imageSize[dim] = 1;
       MPSNNReduceUnary* kernel = kernelForReducedDim(dim);
       if (kernel) {
-        Y = createTemporaryImage(commandBuffer, textureSize);
+        Y = createTemporaryImage(commandBuffer, imageSize);
         [kernel encodeToCommandBuffer:commandBuffer.buffer
                           sourceImage:X
                      destinationImage:Y];
         X = Y;
       }
     }
-    MetalTensorImplStorage mt{textureSize};
+    MetalTensorImplStorage mt{imageSize};
     mt.texture()->setCommandBuffer(commandBuffer);
-    mt.texture()->copyFromTexture(Y);
+    mt.texture()->setImage(Y);
     auto shape = DimVector(input.sizes());
     for (int dim = shape.size() - 1; dim >= 0; dim--) {
       if (mask[dim]) {

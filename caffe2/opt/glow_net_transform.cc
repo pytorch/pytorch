@@ -66,6 +66,13 @@ C10_DEFINE_string(
     "A list of net positions whose corresponding op's inputs and outputs will be"
     " observed. ");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+C10_DEFINE_bool(
+    use_onnxifi_batch_size,
+    true,
+    "If true then instead of nominal batch blob for determining current batch "
+    "size we would use batch size provided as part of Glow request data.");
+
 namespace caffe2 {
 namespace glow {
 
@@ -126,7 +133,8 @@ void onnxifi(
     bool predictor_net_ssa_rewritten,
     const std::unordered_map<int, ShapeInfoMap> &shape_hints_per_bs,
     const c10::optional<std::string> &blacklist_ops,
-    const c10::optional<size_t> &min_ops) {
+    const c10::optional<size_t> &min_ops,
+    const std::unordered_set<std::string> &blocklist_blobs) {
   // Split SparseLengthsSumSparse so that we can lower the SparseLengthsSum part
   splitSparseLengthsSumSparse(net, *ws);
 
@@ -157,6 +165,7 @@ void onnxifi(
   opts.predictor_net_ssa_rewritten = predictor_net_ssa_rewritten;
   opts.timeout = FLAGS_onnxifi_timeout_ms;
   opts.shape_hints_per_bs = shape_hints_per_bs;
+  opts.use_onnxifi_batch_size = FLAGS_use_onnxifi_batch_size;
 
   ShapeInfoMap more_shape_hints = shape_hints_max_bs;
   if (!FLAGS_onnxifi_shape_hints.empty()) {
@@ -180,6 +189,13 @@ void onnxifi(
         ArgumentHelper helper(op);
         more_blocklist.emplace(helper.GetSingleArgument(op, kNetPos, -1));
       }
+    }
+  }
+  // exclude blocklisted blobs, which is supposed to be loaded to NVM selectively.
+  for (const auto& op : net->op()) {
+    if (blocklist_blobs.count(op.input(0))) {
+      ArgumentHelper helper(op);
+      more_blocklist.emplace(helper.GetSingleArgument(op, kNetPos, -1));
     }
   }
 

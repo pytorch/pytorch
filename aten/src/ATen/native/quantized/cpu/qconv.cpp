@@ -138,7 +138,6 @@ at::SmallVector<int64_t, 4> MakeConvOutputShape<2>(
 }
 
 template <>
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 at::SmallVector<int64_t, 5> MakeConvOutputShape<3>(
     int N,
     int M,
@@ -183,7 +182,6 @@ at::SmallVector<int64_t, 4> MakeConvOutputShape<2>(
 }
 
 template <>
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 at::SmallVector<int64_t, 5> MakeConvOutputShape<3>(
     int N, // mini-batch
     int M, // output channels
@@ -642,7 +640,6 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
     auto* qnnp_w_data = qnnp_weight.template data_ptr<c10::quint8>();
     auto wt_numel = weight_contig.numel();
     for (int i = 0; i < wt_numel; ++i) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
     }
     at::Tensor qbias;

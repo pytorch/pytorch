@@ -62,13 +62,11 @@ C10_DEFINE_string(
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_double(
     caffe2_dnnlowp_weight_p99_threshold,
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     0.99,
     "P99 threshold to select out from the full histogram for weights.");
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_double(
     caffe2_dnnlowp_activation_p99_threshold,
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     0.99,
     "P99 threshold to select out from the full histogram for activations.");
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)

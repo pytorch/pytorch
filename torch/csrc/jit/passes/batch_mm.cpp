@@ -103,7 +103,6 @@ bool shape_is_fast_for_reduce(const at::Tensor& lhs, const at::Tensor& rhs) {
   size_t m = lhs.size(1);
   size_t r = rhs.size(1);
   // Numbers obtained by some simple benchmarks of fp32 gemms on a TITAN V
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return m < 512 || ((l < 256 && r < 256) || (l > 256 && r > 256));
 }
 
@@ -313,7 +312,6 @@ void BatchMMTreeReduce(Block* block) {
 
 bool shape_is_fast_for_side(const at::Tensor& other_side_input) {
   // Cutoff chosed by benchmarking on a TITAN V
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return other_side_input.numel() <= 1024 * 2048;
 }
 

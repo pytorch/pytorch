@@ -27,7 +27,7 @@ struct C10_CUDA_API CUDAStreamCaptureModeGuard {
     C10_CUDA_CHECK_WARN(cudaThreadExchangeStreamCaptureMode(&strictness_));
   }
 
-  private:
+ private:
   cudaStreamCaptureMode strictness_;
 };
 #endif
@@ -35,15 +35,18 @@ struct C10_CUDA_API CUDAStreamCaptureModeGuard {
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
 // Protects against enum cudaStreamCaptureStatus implementation changes.
 // Some compilers seem not to like static_assert without the messages.
-static_assert(int(cudaStreamCaptureStatus::cudaStreamCaptureStatusNone) == 0,
-              "unexpected int(cudaStreamCaptureStatusNone) value");
-static_assert(int(cudaStreamCaptureStatus::cudaStreamCaptureStatusActive) == 1,
-              "unexpected int(cudaStreamCaptureStatusActive) value");
-static_assert(int(cudaStreamCaptureStatus::cudaStreamCaptureStatusInvalidated) == 2,
-              "unexpected int(cudaStreamCaptureStatusInvalidated) value");
+static_assert(
+    int(cudaStreamCaptureStatus::cudaStreamCaptureStatusNone) == 0,
+    "unexpected int(cudaStreamCaptureStatusNone) value");
+static_assert(
+    int(cudaStreamCaptureStatus::cudaStreamCaptureStatusActive) == 1,
+    "unexpected int(cudaStreamCaptureStatusActive) value");
+static_assert(
+    int(cudaStreamCaptureStatus::cudaStreamCaptureStatusInvalidated) == 2,
+    "unexpected int(cudaStreamCaptureStatusInvalidated) value");
 #endif
 
-enum class CaptureStatus: int {
+enum class CaptureStatus : int {
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   None = int(cudaStreamCaptureStatus::cudaStreamCaptureStatusNone),
   Active = int(cudaStreamCaptureStatus::cudaStreamCaptureStatusActive),
@@ -54,7 +57,7 @@ enum class CaptureStatus: int {
 };
 
 inline std::ostream& operator<<(std::ostream& os, CaptureStatus status) {
-  switch(status) {
+  switch (status) {
     case CaptureStatus::None:
       os << "cudaStreamCaptureStatusNone";
       break;
@@ -67,9 +70,8 @@ inline std::ostream& operator<<(std::ostream& os, CaptureStatus status) {
       break;
 #endif
     default:
-      TORCH_INTERNAL_ASSERT(false,
-                            "Unknown CUDA graph CaptureStatus",
-                            int(status));
+      TORCH_INTERNAL_ASSERT(
+          false, "Unknown CUDA graph CaptureStatus", int(status));
   }
   return os;
 }
@@ -78,13 +80,13 @@ inline std::ostream& operator<<(std::ostream& os, CaptureStatus status) {
 inline CaptureStatus currentStreamCaptureStatusMayInitCtx() {
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   cudaStreamCaptureStatus is_capturing;
-  C10_CUDA_CHECK(cudaStreamIsCapturing(c10::cuda::getCurrentCUDAStream(),
-                                      &is_capturing));
+  C10_CUDA_CHECK(
+      cudaStreamIsCapturing(c10::cuda::getCurrentCUDAStream(), &is_capturing));
   return CaptureStatus(is_capturing);
 #else
   return CaptureStatus::None;
 #endif
 }
 
-} // namespace c10
 } // namespace cuda
+} // namespace c10

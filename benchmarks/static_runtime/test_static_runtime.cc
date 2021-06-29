@@ -61,11 +61,51 @@ void compareTensorLists(
   }
 }
 
+void compareResults(const IValue& expect, const IValue& actual) {
+  if (expect.isTensor()) {
+    VLOG(2) << "expect " << expect.toTensor() << std::endl;
+    VLOG(2) << "output " << actual.toTensor() << std::endl;
+    EXPECT_TRUE(actual.isTensor());
+    EXPECT_TRUE(expect.toTensor().equal(actual.toTensor()));
+    return;
+  } else if (expect.isTuple()) {
+    EXPECT_TRUE(actual.isTuple());
+    auto lhs = expect.toTuple()->elements();
+    auto rhs = actual.toTuple()->elements();
+    EXPECT_TRUE(lhs.size() == rhs.size());
+    for (size_t i = 0; i < lhs.size(); i++) {
+      compareResults(lhs[i], rhs[i]);
+    }
+  } else if (expect.isList()) {
+    EXPECT_TRUE(actual.isList());
+    auto lhs = expect.toList();
+    auto rhs = actual.toList();
+    EXPECT_TRUE(lhs.size() == rhs.size());
+    for (size_t i = 0; i < lhs.size(); i++) {
+      compareResults(lhs[i], rhs[i]);
+    }
+  } else if (expect.isGenericDict()) {
+    EXPECT_TRUE(actual.isGenericDict());
+    auto lhs = expect.toGenericDict();
+    auto rhs = actual.toGenericDict();
+    EXPECT_TRUE(lhs.size() == rhs.size());
+    for (auto& lh : lhs) {
+      auto f = rhs.find(lh.key());
+      EXPECT_FALSE(f == rhs.end());
+      compareResults(lh.value(), f->value());
+    }
+  } else {
+    // fall back to the default comparison impl in IValue
+    EXPECT_TRUE(expect == actual);
+  }
+}
+
 // Given a model/function in jit script, run the model/function
 // with the jit interpreter and static runtime, and compare the results
 void testStaticRuntime(
     const std::string& jit_script,
-    const std::vector<IValue>& args) {
+    const std::vector<IValue>& args,
+    const std::vector<IValue>& args2 = {}) {
   script::Module module("module");
   module.define(jit_script);
 
@@ -80,18 +120,37 @@ void testStaticRuntime(
 
   auto expect = module.forward(args);
 
-  torch::jit::StaticModule smodule(module);
-  auto actual = smodule(args, {});
-  smodule.runtime().check_for_memory_leak();
+  for (bool enable_out_variant : {true, false}) {
+    torch::jit::StaticModule smodule(
+        module, {true, enable_out_variant, enable_out_variant});
+    auto actual = smodule(args, {});
+    smodule.runtime().check_for_memory_leak();
+    // first run
+    compareResults(expect, actual);
 
-  if (expect.isTuple()) {
-    compareTensorLists(
-        expect.toTuple()->elements(), actual.toTuple()->elements());
-  } else if (expect.isList()) {
-    compareTensorLists(expect.toTensorVector(), actual.toTensorVector());
-  } else {
-    EXPECT_TRUE(expect.toTensor().equal(actual.toTensor()));
+    // args2 is used to check for dynamic shapes
+    // it also exercises the memory planner
+    if (!args2.empty()) {
+      expect = module.forward(args2);
+      actual = smodule(args2, {});
+      smodule.runtime().check_for_memory_leak();
+      // second run
+      compareResults(expect, actual);
+
+      expect = module.forward(args);
+      actual = smodule(args, {});
+      smodule.runtime().check_for_memory_leak();
+      // third run
+      compareResults(expect, actual);
+    } else {
+      // run static runtime again to exercise the memory planner
+      actual = smodule(args, {});
+      smodule.runtime().check_for_memory_leak();
+      // second run
+      compareResults(expect, actual);
+    }
   }
+
   // make sure inputs were not modified
   compareTensorLists(args_tensors, args_copy);
 }
@@ -114,20 +173,107 @@ TEST(StaticRuntime, InPlace) {
   EXPECT_FALSE(testHasInplaceOp(sigmoid_out_script));
 }
 
+TEST(StaticRuntime, NestedOutput) {
+  auto run_test = [](std::vector<int64_t> shapes) {
+    auto a = at::randn(shapes);
+    auto b = at::randn(shapes);
+
+    std::vector<IValue> args{a, b};
+    testStaticRuntime(nested_output_script_0, args);
+    testStaticRuntime(nested_output_script_1, args);
+    testStaticRuntime(nested_output_script_2, args);
+    testStaticRuntime(nested_output_script_3, args);
+
+    if (shapes.size() > 0 && shapes[0] != 0) {
+      shapes[0] *= 2;
+      testStaticRuntime(
+          nested_output_script_0, args, {at::randn(shapes), at::randn(shapes)});
+      testStaticRuntime(
+          nested_output_script_1, args, {at::randn(shapes), at::randn(shapes)});
+    }
+  };
+  run_test({2, 3, 1, 4});
+  run_test({2, 3});
+}
+
 TEST(StaticRuntime, UnaryOps) {
-  auto a = at::ones({2, 3});
+  auto a = at::randn({2, 3});
+  auto b = at::randn({4, 3, 2});
 
-  std::vector<IValue> args{a};
+  std::vector<IValue> args{a}, args2{b};
 
+  // sum
   testStaticRuntime(aten_sum, args);
   testStaticRuntime(aten_sum_0, args);
   testStaticRuntime(aten_sum_1, args);
   testStaticRuntime(aten_sum_0_true, args);
   testStaticRuntime(aten_sum_1_true, args);
+
+  testStaticRuntime(aten_sum, args, args2);
+  testStaticRuntime(aten_sum_0, args, args2);
+  testStaticRuntime(aten_sum_1, args, args2);
+  testStaticRuntime(aten_sum_0_true, args, args2);
+  testStaticRuntime(aten_sum_1_true, args, args2);
 }
 
+TEST(StaticRuntime, Clone) {
+  auto a = at::randn({2, 3});
+  auto b = at::empty_strided({3, 2}, {1, 3});
+  auto c = at::randn({1, 2, 3, 4});
+  auto d = at::randn({1, 0, 3, 4});
+  std::vector<IValue> args_0{b, c10::MemoryFormat::Contiguous};
+  std::vector<IValue> args_1{b, c10::MemoryFormat::Preserve};
+  std::vector<IValue> args_2{c, c10::MemoryFormat::ChannelsLast};
+  std::vector<IValue> args_3{d, c10::MemoryFormat::ChannelsLast};
+
+  testStaticRuntime(clone_script_0, {a});
+  testStaticRuntime(clone_script_0, {a}, {b});
+
+  testStaticRuntime(clone_script_1, args_0);
+  testStaticRuntime(clone_script_1, args_1);
+  testStaticRuntime(clone_script_1, args_2);
+  testStaticRuntime(clone_script_1, args_3);
+  testStaticRuntime(clone_script_1, args_0, args_1);
+  testStaticRuntime(clone_script_1, args_3, args_2);
+}
+
+TEST(StaticRuntime, Clamp) {
+  auto a = at::randn({2, 3});
+  auto max_t = at::full_like(a, 1);
+  auto min_t = at::full_like(a, -1);
+
+  auto b = at::randn({4, 3, 2});
+  auto max_t1 = at::full_like(b, 1);
+  auto min_t1 = at::full_like(b, -1);
+
+  testStaticRuntime(clamp_script_1, {a, -1, 1});
+  testStaticRuntime(clamp_script_2, {a, min_t, max_t});
+
+  testStaticRuntime(clamp_script_1, {a, -1, 1}, {b, -1, 1});
+  testStaticRuntime(clamp_script_2, {a, min_t, max_t}, {b, max_t1, min_t1});
+}
+
+TEST(StaticRuntime, Logit) {
+  auto a = at::ones({2, 3});
+  double b = 1e-6;
+  std::vector<IValue> args_1{a};
+  std::vector<IValue> args_2({a, b});
+
+  auto c = at::ones({4, 3, 2});
+
+  // logit
+  testStaticRuntime(logit_script_1, args_1);
+  testStaticRuntime(logit_script_2, args_1);
+  testStaticRuntime(logit_script_3, args_2);
+
+  testStaticRuntime(logit_script_1, args_1, {c});
+  testStaticRuntime(logit_script_2, args_1, {c});
+  testStaticRuntime(logit_script_3, args_2, {c, b});
+}
+
+// TODO: check for dynamic shapes
 TEST(StaticRuntime, EmbeddingBag) {
-  at::Tensor weight = torch::ones({3, 11}, at::ScalarType::Float);
+  at::Tensor weight = torch::randn({3, 11}, at::ScalarType::Float);
   at::Tensor input = torch::tensor({0, 1, 0, 2});
   at::Tensor offset = torch::tensor({0, 2, 4});
 
@@ -142,17 +288,21 @@ TEST(StaticRuntime, EmbeddingBag) {
 }
 
 TEST(StaticRuntime, LayerNorm) {
+  const auto a = torch::rand({1, 2, 2, 2});
+  const auto b = torch::rand({3, 2, 2, 2});
+  for (int normalized_size : {2, 3}) {
+    std::vector<int64_t> normalized_shape(normalized_size, 2);
+    const auto weight = torch::rand(normalized_shape);
+    const auto bias = torch::rand(normalized_shape);
 
-  const auto input = torch::rand({20, 10, 10, 10});
+    std::vector<IValue> args{a, normalized_shape, weight, bias};
+    std::vector<IValue> args1{b, normalized_shape, weight, bias};
+    testStaticRuntime(layer_norm_with_weights, args);
+    testStaticRuntime(layer_norm_with_weights, args, args1);
 
-  for (int normalized_size: {2, 3}) {
-      std::vector<int64_t> normalized_shape(normalized_size, 10);
-      const auto weight = torch::rand(normalized_shape);
-      const auto bias = torch::rand(normalized_shape);
-      std::vector<IValue> args{input, normalized_shape, weight, bias};
-      testStaticRuntime(layer_norm_with_weights, args);
-      args = {input, normalized_shape};
-      testStaticRuntime(layer_norm_without_weights, args);
+    args = {a, normalized_shape};
+    testStaticRuntime(layer_norm_without_weights, args);
+    testStaticRuntime(layer_norm_without_weights, args, {b, normalized_shape});
   }
 }
 
@@ -160,9 +310,13 @@ TEST(StaticRuntime, IndividualOps_Binary) {
   auto a = at::randn({2, 3});
   auto b = at::ones({2, 3});
 
+  auto c = at::randn({4, 2, 3});
+  auto d = at::ones({4, 2, 3});
+
   std::vector<IValue> args{a, b};
 
   testStaticRuntime(add_script, args);
+  testStaticRuntime(add_script, args, {c, d});
   testStaticRuntime(list_construct_script, args);
   testStaticRuntime(list_construct_script_2, args);
   testStaticRuntime(list_construct_script_3, args);
@@ -172,60 +326,103 @@ TEST(StaticRuntime, IndividualOps_Binary) {
   testStaticRuntime(tuple_construct_script_2, args);
 }
 
+TEST(StaticRuntime, IndividualOps_Binary_MatMul) {
+  // 1-D, 1-D
+  std::vector<IValue> args{at::randn({3}), at::randn({3})};
+  testStaticRuntime(aten_matmul, args);
+  // 2-D, 2-D
+  std::vector<IValue> args1 = {at::randn({3, 2}), at::randn({2, 3})};
+  testStaticRuntime(aten_matmul, args1);
+  // 1-D, 2-D
+  std::vector<IValue> args2 = {at::randn({3}), at::randn({3, 5})};
+  testStaticRuntime(aten_matmul, args2);
+  // 2-D, 1-D
+  std::vector<IValue> args3 = {at::randn({3, 5}), at::randn({5})};
+  testStaticRuntime(aten_matmul, args3);
+  // > 2-D , > 2-D
+  std::vector<IValue> args4 = {at::randn({3, 1, 4, 5}), at::randn({2, 5, 6})};
+  testStaticRuntime(aten_matmul, args4);
+
+  testStaticRuntime(aten_matmul, args3, args4);
+}
+
 TEST(StaticRuntime, IndividualOps_Div) {
   auto a = at::randn({2, 3});
   auto b = at::randn({2, 3});
+  auto c = at::randn({4, 3, 2});
+  auto d = at::randn({4, 3, 2});
 
   std::vector<IValue> args0{a, b};
   testStaticRuntime(div_tensor, args0);
+  testStaticRuntime(div_tensor, args0, {c, d});
 
   std::vector<IValue> args1{a, 3};
   testStaticRuntime(div_scalar, args1);
+  testStaticRuntime(div_scalar, args1, {c, 4});
 
   std::vector<IValue> args2{a, b, "floor"};
   testStaticRuntime(div_tensor_mode, args2);
+  testStaticRuntime(div_tensor_mode, args2, {c, d, "floor"});
 
   std::vector<IValue> args3{a, 2.3, "trunc"};
   testStaticRuntime(div_scalar_mode, args3);
+  testStaticRuntime(div_scalar_mode, args3, {a, 1.5, "trunc"});
 }
 
 TEST(StaticRuntime, IndividualOps_Sub) {
   auto a = at::randn({2, 3});
   auto b = at::randn({2, 3});
+  auto c = at::randn({4, 3, 2});
+  auto d = at::randn({4, 3, 2});
 
   std::vector<IValue> args0{a, b};
   testStaticRuntime(sub_tensor, args0);
+  testStaticRuntime(sub_tensor, args0, {c, d});
 
   std::vector<IValue> args1{a, 3};
   testStaticRuntime(sub_scalar, args1);
+  testStaticRuntime(sub_scalar, args1, {c, 4});
 
   std::vector<IValue> args2{a, b, 2.3};
   testStaticRuntime(sub_tensor_alpha, args2);
+  testStaticRuntime(sub_tensor_alpha, {c, d, 3.1});
 
   std::vector<IValue> args3{a, 2.3, 4};
   testStaticRuntime(sub_scalar_alpha, args3);
+  testStaticRuntime(sub_scalar_alpha, {c, 1.3, 2});
 }
 
 TEST(StaticRuntime, IndividualOps_Norm) {
   auto a = at::randn({2, 3});
+  auto b = at::randn({4, 3, 2});
   auto dim = std::vector<int64_t>({1});
   auto dtype = at::ScalarType::Float;
 
-  std::vector<IValue> args0{a, 2, dtype};
-  testStaticRuntime(norm_3arg, args0);
+  std::vector<IValue> args2{a, 2};
+  testStaticRuntime(norm_2arg, args2);
+  testStaticRuntime(norm_2arg, args2, {b, 2});
 
-  std::vector<IValue> args1{a, 3, dim, false};
-  testStaticRuntime(norm_4arg, args1);
+  std::vector<IValue> args3{a, 2, dtype};
+  testStaticRuntime(norm_3arg, args3);
+  testStaticRuntime(norm_3arg, args3, {b, 2, dtype});
 
-  std::vector<IValue> args2{a, 4, dim, true, dtype};
-  testStaticRuntime(norm_5arg, args2);
+  std::vector<IValue> args4{a, 3, dim, false};
+  testStaticRuntime(norm_4arg, args4);
+  testStaticRuntime(norm_4arg, args4, {b, 3, dim, false});
 
+  std::vector<IValue> args5{a, 4, dim, true, dtype};
+  testStaticRuntime(norm_5arg, args5);
+  testStaticRuntime(norm_5arg, args5, {b, 4, dim, true, dtype});
 }
 
 TEST(StaticRuntime, IndividualOps_Reshape) {
   auto a = at::randn({2, 3});
   auto b = std::vector<int64_t>({3, 2});
   std::vector<IValue> args{a, b};
+
+  auto c = at::randn({4, 2});
+  auto d = std::vector<int64_t>({2, 4});
+  std::vector<IValue> args1{c, d};
 
   testStaticRuntime(reshape_script_1, args);
   testStaticRuntime(reshape_script_2, args);
@@ -234,16 +431,44 @@ TEST(StaticRuntime, IndividualOps_Reshape) {
   testStaticRuntime(reshape_script_5, args);
   testStaticRuntime(reshape_inplace_script, args);
   testStaticRuntime(reshape_incontiguous_script, args);
+
+  testStaticRuntime(reshape_script_1, args, args1);
+  testStaticRuntime(reshape_script_2, args, args1);
+  testStaticRuntime(reshape_script_3, args, args1);
+  testStaticRuntime(reshape_script_4, args, args1);
+  testStaticRuntime(reshape_script_5, args, args1);
+  testStaticRuntime(reshape_inplace_script, args, args1);
+  testStaticRuntime(reshape_incontiguous_script, args, args1);
+}
+
+TEST(StaticRuntime, IndividualOps_Repeat) {
+  auto a = at::randn({2, 3});
+  auto b = at::randn({4, 3});
+  auto c = std::vector<int64_t>({1, 2});
+  auto d = std::vector<int64_t>({2, 3});
+  std::vector<IValue> args1{a, c};
+  std::vector<IValue> args2{b, d};
+
+  testStaticRuntime(repeat, args1);
+  testStaticRuntime(repeat, args2);
+  testStaticRuntime(repeat, args1, args2);
 }
 
 TEST(StaticRuntime, IndividualOps_flatten) {
   auto test_flatten =
       [](std::vector<int64_t> shape, int64_t start_dim, int64_t end_dim) {
+        std::vector<int64_t> shape1(shape);
+        if (shape1.size() > 0) {
+          shape1[0] *= 2;
+        }
         auto a = at::randn(shape);
+        auto b = at::randn(shape1);
         std::vector<IValue> args{a, start_dim, end_dim};
         testStaticRuntime(flatten_script_1, args);
+        testStaticRuntime(flatten_script_1, args, {b, start_dim, end_dim});
         if (shape.size() > 2) {
           testStaticRuntime(flatten_script_2, args);
+          testStaticRuntime(flatten_script_2, args, {b, start_dim, end_dim});
         }
       };
 
@@ -257,33 +482,68 @@ TEST(StaticRuntime, IndividualOps_flatten) {
 TEST(StaticRuntime, IndividualOps_pow) {
   auto a = at::randn({2, 3});
   auto b = at::randn({2, 3});
+  auto c = at::randn({4, 3, 2});
+  auto d = at::randn({4, 3, 2});
 
   std::vector<IValue> args0{a, 4};
   testStaticRuntime(pow_script_ten_sca, args0);
+  testStaticRuntime(pow_script_ten_sca, args0, {c, 4});
 
   std::vector<IValue> args1{at::abs(a), b};
   testStaticRuntime(pow_script_ten_ten, args1);
+  testStaticRuntime(pow_script_ten_ten, args1, {at::abs(c), d});
 
   std::vector<IValue> args2{5, b};
   testStaticRuntime(pow_script_sca_ten, args2);
+  testStaticRuntime(pow_script_sca_ten, args2, {3, d});
 }
 
 TEST(StaticRuntime, IndividualOps_to) {
   auto test_to = [](at::ScalarType b, bool c, bool d, c10::MemoryFormat e) {
-    auto a = at::randn({2, 3});
-    auto other = at::randn({2, 3}, b);
+    auto a = at::randn({4, 3, 1, 2});
+    auto other = at::randn({4, 3, 1, 2}, b);
+    auto a2 = at::randn({3, 2, 2, 4});
+    auto a2_other = at::randn({3, 2, 2, 4}, b);
+
     std::vector<IValue> args0{a, b, c, d, e};
     std::vector<IValue> args1{a, b, c, d};
     std::vector<IValue> args2{a, other, c, d, e};
-    testStaticRuntime(to_script_0, args0);
-    testStaticRuntime(to_script_1, args1);
-    testStaticRuntime(to_script_2, args2);
-  };
 
-  test_to(at::ScalarType::Float, true, true, c10::MemoryFormat::Contiguous);
+    testStaticRuntime(to_script_0, args0); // to.dtype
+    testStaticRuntime(to_script_1, args0); // to.dtype, strided
+    testStaticRuntime(to_script_2, args1); // to.prim_dtype
+    testStaticRuntime(to_script_3, args2); // to.other
+    testStaticRuntime(to_script_4, {a}); // alias
+
+    // dynamic shapes
+    testStaticRuntime(to_script_0, args0, {a2, b, c, d, e}); // to.dtype
+    testStaticRuntime(to_script_1, args0, {a2, b, c, d, e}); // to.dtype
+    testStaticRuntime(to_script_2, args1, {a2, b, c, d}); // to.prim_dtype
+    testStaticRuntime(to_script_3, args2, {a2, a2_other, c, d, e}); // to.other
+    testStaticRuntime(to_script_4, {a}, {a2});
+  };
+  // float->float, NCHW->NHWC
+  test_to(at::ScalarType::Float, true, true, c10::MemoryFormat::ChannelsLast);
+  // float->half
   test_to(at::ScalarType::Half, true, false, c10::MemoryFormat::Preserve);
+  // float->float
   test_to(at::ScalarType::Float, false, false, c10::MemoryFormat::Contiguous);
-  test_to(at::ScalarType::Half, false, true, c10::MemoryFormat::Preserve);
+  // TODO: check if fbgemm is enabled properly in this case
+  // half->float, NCHW->NHWC
+  test_to(at::ScalarType::Half, false, true, c10::MemoryFormat::ChannelsLast);
+}
+
+TEST(StaticRuntime, IndividualOps_FullLike) {
+  auto a = at::randn({2, 3});
+  auto b = at::randn({3, 2, 2});
+  auto dtype = at::ScalarType::Int;
+  auto cpu = at::Device(DeviceType::CPU);
+  std::vector<IValue> args{
+      a, 4, dtype, at::kStrided, cpu, false, c10::MemoryFormat::Contiguous};
+  std::vector<IValue> args2{
+      b, 4, dtype, at::kStrided, cpu, false, c10::MemoryFormat::Contiguous};
+  testStaticRuntime(full_like_script, args);
+  testStaticRuntime(full_like_script, args, args2);
 }
 
 TEST(StaticRuntime, LongModel) {

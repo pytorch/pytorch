@@ -14,11 +14,9 @@ namespace nn {
 /// Dropout model(DropoutOptions().p(0.42).inplace(true));
 /// ```
 struct TORCH_API DropoutOptions {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   /* implicit */ DropoutOptions(double p = 0.5);
 
   /// The probability of an element to be zeroed. Default: 0.5
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, p) = 0.5;
 
   /// can optionally do the operation in-place. Default: False
@@ -68,7 +66,6 @@ namespace functional {
 /// ```
 struct TORCH_API DropoutFuncOptions {
   /// The probability of an element to be zeroed. Default: 0.5
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, p) = 0.5;
 
   TORCH_ARG(bool, training) = true;
@@ -103,7 +100,6 @@ using Dropout3dFuncOptions = DropoutFuncOptions;
 /// F::alpha_dropout(input, F::AlphaDropoutFuncOptions().p(0.5).training(false));
 /// ```
 struct TORCH_API AlphaDropoutFuncOptions {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, p) = 0.5;
 
   TORCH_ARG(bool, training) = false;
@@ -119,7 +115,6 @@ struct TORCH_API AlphaDropoutFuncOptions {
 /// F::feature_alpha_dropout(input, F::FeatureAlphaDropoutFuncOptions().p(0.5).training(false));
 /// ```
 struct TORCH_API FeatureAlphaDropoutFuncOptions {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, p) = 0.5;
 
   TORCH_ARG(bool, training) = false;

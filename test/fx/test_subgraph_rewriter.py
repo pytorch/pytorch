@@ -375,3 +375,62 @@ class TestSubgraphRewriter(JitTestCase):
         ref_outs = comparison_fn(x)
         test_outs = traced.forward(x)
         self.assertEqual(ref_outs, test_outs)
+
+    def test_subgraph_rewriter_replaces_referenced_submodules(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sigmoid = torch.nn.Sigmoid()
+                self.submod = torch.nn.ReLU()
+
+            def forward(self, x):
+                x = x + 1
+                return self.submod(self.sigmoid(x))
+
+        class Pattern(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sigmoid = torch.nn.Sigmoid()
+                self.submod = torch.nn.ReLU()
+
+            def forward(self, x):
+                return self.submod(self.sigmoid(x))
+
+        class Replacement(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.id = torch.nn.Identity()
+                self.submod = torch.nn.ReLU()
+
+            def forward(self, x):
+                return self.submod(self.id(x))
+
+        class Comparison(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.id = torch.nn.Identity()
+                self.submod = torch.nn.ReLU()
+
+            def forward(self, x):
+                x = x + 1
+                return self.submod(self.id(x))
+
+        traced = symbolic_trace(M())
+        comparison = Comparison()
+
+        x = torch.randn(3, 4)
+
+        subgraph_rewriter.replace_pattern(traced, Pattern(), Replacement())
+
+        traced.graph.lint()
+
+        ref_outs = comparison(x)
+        test_outs = traced.forward(x)
+        self.assertEqual(ref_outs, test_outs)
+
+        traced.get_submodule("id")
+        with self.assertRaisesRegex(AttributeError, "has no attribute"):
+            traced.get_submodule("sigmoid")
+
+        submod = traced.get_submodule("submod")
+        self.assertEqual(type(submod), torch.nn.ReLU)

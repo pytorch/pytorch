@@ -32,7 +32,6 @@ TEST(SchemaMatchingTest, VarType) {
         return torch.test_vartype(a, 2.0)
     )");
   auto result = m.run_method("test");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_INTERNAL_ASSERT(result.toDouble() == 2.0);
 
   const std::string error_example = R"JIT(
@@ -73,7 +72,6 @@ TEST(SchemaMatchingTest, VarType2) {
           return torch.test_vartype2(3.0, a)
     )JIT");
   auto result = m.run_method("test");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_INTERNAL_ASSERT(result.toDouble() == 3.0);
 
   static const auto error_exam2 = R"JIT(
