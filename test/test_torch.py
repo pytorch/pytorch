@@ -2919,21 +2919,27 @@ def torch_vital_set(value):
 
 
 # Tests Vital Signs for Torch
-class TestVitalSigns(TestCase):
+class TestBasicVitalSigns(TestCase):
     def test_basic_vitals(self):
         with torch_vital_set(''):
             self.assertFalse(torch.vitals_enabled())
         with torch_vital_set('ON'):
             self.assertTrue(torch.vitals_enabled())
 
-    def test_write_vital(self):
+    def test_basic_vitals_read_write(self):
         with torch_vital_set('ON'):
             self.assertTrue(torch.vitals_enabled())
             # This tests the code path of setting a vital
-            self.assertTrue(torch.set_vital('Dataloader', 'basic_unit_test', 'TEST'))
-            # Ideally we would have a read test for vitals, though because the the C++ design
-            # pattern of loggers we use, we can't know the whole list of vitals until the
-            # global C++ namespace is destructed.
+            self.assertTrue(torch.set_vital('Dataloader', 'basic_unit_test', 'TEST_VALUE_STRING'))
+            self.assertIn('TEST_VALUE_STRING', torch.read_vitals())
+            self.assertIn('CUDA.used', torch.read_vitals())
+
+
+class TestVitalSignsCuda(TestCase):
+    @onlyCUDA
+    def test_cuda_vitals_gpu_only(self, device):
+        with torch_vital_set('ON'):
+            self.assertIn('CUDA.used\t\t true', torch.read_vitals())
 
 
 # Device-generic tests. Instantiated below and not run directly.
@@ -2974,6 +2980,22 @@ class TestTorchDeviceType(TestCase):
             # Calling is_deterministic throws a warning about deprecation once per process
             with self.assertWarnsOnceRegex(UserWarning, "torch.is_deterministic is deprecated"):
                 torch.is_deterministic()
+
+    # Validates that mathematical constants are defined properly, as required by
+    # the Python Array API (https://data-apis.org/array-api/latest/API_specification/constants.html)
+    @onlyCPU
+    def test_constants(self, device):
+        self.assertIsInstance(torch.e, float)
+        self.assertEqual(torch.e, math.e, atol=0, rtol=0)
+
+        self.assertIsInstance(torch.pi, float)
+        self.assertEqual(torch.pi, math.pi, atol=0, rtol=0)
+
+        self.assertIsInstance(torch.nan, float)
+        self.assertEqual(torch.nan, math.nan, equal_nan=True)
+
+        self.assertIsInstance(torch.inf, float)
+        self.assertEqual(torch.inf, math.inf)
 
     @dtypes(torch.float32, torch.complex64)
     def test_storage(self, device, dtype):
@@ -3047,24 +3069,38 @@ class TestTorchDeviceType(TestCase):
             with self.assertRaises(AssertionError):
                 with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
                     _test(op, data[0:sz], data[1:sz + 1])
+        # output is transpose of input:
+        length = int(math.sqrt(sz))
+        input = data[:length**2].view([length, length])
+        out = input.t()
+        if not expected_failure:
+            with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+                _test(op, out, input)
+        else:
+            with self.assertRaises(AssertionError):
+                with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+                    _test(op, out, input)
 
     def ternary_check_input_output_mem_overlap(self, op, device,
                                                expected_failure=False):
-        sz = 3
+        sz = 9
         data = torch.randn(2 * sz, device=device)
         other1 = torch.randn(sz, device=device)
         other2 = torch.randn(sz, device=device)
 
         self.unary_check_input_output_mem_overlap(
-            data, sz, lambda input, out: op(input, other1, other2, out=out),
+            data, sz, lambda input, out:
+                op(input, other1.view(input.shape), other2.view(input.shape), out=out),
             expected_failure=expected_failure)
 
         self.unary_check_input_output_mem_overlap(
-            data, sz, lambda input, out: op(other1, input, other2, out=out),
+            data, sz, lambda input, out:
+                op(other1.view(input.shape), input, other2.view(input.shape), out=out),
             expected_failure=expected_failure)
 
         self.unary_check_input_output_mem_overlap(
-            data, sz, lambda input, out: op(other1, other2, input, out=out),
+            data, sz, lambda input, out:
+                op(other1.view(input.shape), other2.view(input.shape), input, out=out),
             expected_failure=expected_failure)
 
 
@@ -3877,6 +3913,18 @@ else:
 
         backward_func(self, device)
 
+    def test_nondeterministic_alert_ReflectionPad3d(self, device):
+        module = torch.nn.ReflectionPad3d((1, 2, 3, 4, 5, 6))
+        input = torch.randn(2, 3, 8, 8, 8, device=device, requires_grad=True)
+        res = module(input)
+        grad = torch.ones_like(res)
+
+        @expectedAlertNondeterministic('reflection_pad3d_backward_out_cuda', 'cuda')
+        def backward_func(slf, device):
+            res.backward(grad)
+
+        backward_func(self, device)
+
     def test_nondeterministic_alert_ReplicationPad1d(self, device):
         module = torch.nn.ReplicationPad1d((1, 2))
         input = torch.randn(2, 3, 4, device=device, requires_grad=True)
@@ -4397,6 +4445,16 @@ else:
                 t = torch.empty(size, dtype=dtype, device=device).cauchy_(median=median, sigma=sigma)
                 res = stats.kstest(t.cpu().to(torch.double), 'cauchy', args=(median, sigma))
                 self.assertTrue(res.statistic < 0.1)
+
+    @slowTest
+    @onlyCUDA
+    @dtypes(torch.bfloat16, torch.float32)
+    def test_cauchy_no_inf(self, device, dtype):
+        # torch.float16 will have `inf` because of its smaller range.
+        for _ in range((2**16) * 2):
+            x = torch.empty((2**16), dtype=dtype, device=device)
+            x.cauchy_()
+            self.assertFalse(x.isinf().sum())
 
     @skipIfNoSciPy
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
@@ -4935,10 +4993,10 @@ else:
     @dtypes(torch.long, torch.float32, torch.complex64)
     def test_gradient_all(self, device, dtype):
         def create_scalar(shape):
-            return make_tensor((1,), device='cpu', dtype=dtype, low=0.1).item()
+            return make_tensor((1,), device='cpu', dtype=dtype, low=1.).item()
 
         def create_list(shape):
-            return make_tensor((len(shape),), device='cpu', dtype=dtype, low=0.1).tolist()
+            return make_tensor((len(shape),), device='cpu', dtype=dtype, low=1.).tolist()
 
         def create_coordinate_tensors(shape):
             tensor_list = []
@@ -4960,12 +5018,13 @@ else:
             ((4, 4, 4), (2,)),
             ((4, 4, 4), (0, 1)),
             ((4, 4, 4, 3), (0, 2, 3)),
-            ((4, 5, 2, 4, 3), (1, 2)),
+            ((4, 5, 3, 4, 3), (1, 2)),
             ((4, 3, 6, 5, 3), (2, 4)),
-            ((4, 3, 2, 5, 3), (0, 1, 2, 3, 4)),
+            ((4, 3, 3, 5, 3), (0, 1, 2, 3, 4)),
         )
 
-        for case, space_fn, contig in product(test_cases, (create_scalar, create_list, create_coordinate_tensors), [True, False]):
+        for case, contig, edge_order, space_fn in product(test_cases, [True, False], [1, 2],
+                                                          (create_scalar, create_list, create_coordinate_tensors)):
             shape, dims = case
             # filter shape by dims before passing filtered shape to create_* functions
             filtered_shape = filter_shape(shape, dims)
@@ -4974,12 +5033,12 @@ else:
             t = make_tensor(shape, device=device, dtype=dtype, noncontiguous=not contig)
             t_np = t.cpu().numpy()
 
-            actual = torch.gradient(t, spacing=spacing, dim=dims, edge_order=1)
+            actual = torch.gradient(t, spacing=spacing, dim=dims, edge_order=edge_order)
             if space_fn == create_coordinate_tensors and spacing[0].device != 'cpu':
                 spacing = [space.cpu().detach().numpy() for space in spacing]
-            expected = np.gradient(t_np, *self._wrap_to_list(spacing), axis=dims, edge_order=1)
+            expected = np.gradient(t_np, *self._wrap_to_list(spacing), axis=dims, edge_order=edge_order)
             actual, expected = self._inf_nan_preprocess(list(actual), self._wrap_to_list(expected))
-            self.assertEqual(actual, expected, equal_nan="relaxed")
+            self.assertEqual(actual, expected, equal_nan="relaxed", atol=1e-4, rtol=0, exact_dtype=False)
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.long, torch.float32, torch.complex64)
@@ -4987,7 +5046,7 @@ else:
         # Test behaviour for inf and nan values
         actual = torch.gradient(torch.tensor([2, -2, inf, inf, -inf, -inf, inf, 3, -inf, 2, nan, nan, 3, inf, nan]))
         expected = np.gradient(np.array([2, -2, inf, inf, -inf, -inf, inf, 3, -inf, 2, nan, nan, 3, inf, nan]))
-        self.assertEqual(actual, self._wrap_to_list(expected),)
+        self.assertEqual(actual, self._wrap_to_list(expected), exact_dtype=False)
 
         # Test behaviour in very big tensors
         large_size = 100000
@@ -4997,7 +5056,11 @@ else:
         coordinates = [torch.tensor(coordinates_np, device=device)]
         actual = torch.gradient(t, spacing=coordinates, dim=0, edge_order=1)
         expected = [np.gradient(t_np, coordinates_np, axis=0, edge_order=1)]
-        self.assertEqual(actual, expected)
+        self.assertEqual(actual, expected, exact_dtype=False)
+
+        actual = torch.gradient(t, spacing=coordinates, dim=0, edge_order=2)
+        expected = [np.gradient(t_np, coordinates_np, axis=0, edge_order=2)]
+        self.assertEqual(actual, expected, exact_dtype=False)
 
     @onlyOnCPUAndCUDA
     def test_gradient_type_promotion(self, device):
@@ -5022,10 +5085,10 @@ else:
              make_tensor((4,), device=device, dtype=torch.complex64)],
         )
 
-        for input, spacing_or_coord in product(inputs, spacing):
+        for input, spacing_or_coord, edge_order in product(inputs, spacing, [1, 2]):
             input_np = input.cpu().numpy()
             input_np = input.cpu().numpy()
-            actual = torch.gradient(input, spacing=spacing_or_coord, dim=(0, 1), edge_order=1)
+            actual = torch.gradient(input, spacing=spacing_or_coord, dim=(0, 1), edge_order=edge_order)
             spacing_or_coord_wrapped = self._wrap_to_list(spacing_or_coord)
             spacing_or_coord_np = []
             if torch.is_tensor(spacing_or_coord_wrapped[0]) and torch.device(spacing_or_coord_wrapped[0].device).type != 'cpu':
@@ -5033,16 +5096,16 @@ else:
                     spacing_or_coord_np.append(spacing_or_coord_wrapped[i].detach().clone().cpu().numpy())
             else:
                 spacing_or_coord_np = spacing_or_coord_wrapped
-            expected = np.gradient(input_np, *spacing_or_coord_np, axis=(0, 1), edge_order=1)
+            expected = np.gradient(input_np, *spacing_or_coord_np, axis=(0, 1), edge_order=edge_order)
             if actual[0].dtype == torch.complex64 and input.dtype != torch.complex64:
                 for i in range(len(actual)):
-                    self.assertEqual(actual[i].real, expected[i].real)
+                    self.assertEqual(actual[i].real, expected[i].real, exact_dtype=False)
                     # Type promotion fails on Numpy when spacing is given as complex number and input is given as real.
                     # Result is given just as real number and all the imaginary parts to be equal to zero.
-                    self.assertEqual(expected[i].imag, torch.zeros(actual[i].shape))
+                    self.assertEqual(expected[i].imag, torch.zeros(actual[i].shape), exact_dtype=False)
             else:
                 actual, expected = self._inf_nan_preprocess(list(actual), expected)
-                self.assertEqual(actual, expected, equal_nan="relaxed")
+                self.assertEqual(actual, expected, equal_nan="relaxed", exact_dtype=False)
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.long, torch.float32, torch.complex64)
@@ -5053,7 +5116,7 @@ else:
             spacing = [0.1]
             torch.gradient(t, spacing=spacing, dim=dim, edge_order=1)
 
-        with self.assertRaisesRegex(RuntimeError, 'torch.gradient only supports edge_order=1 currently.'):
+        with self.assertRaisesRegex(RuntimeError, 'torch.gradient only supports edge_order=1 and edge_order=2.'):
             torch.gradient(t, edge_order=3)
 
         with self.assertRaisesRegex(RuntimeError, 'dim 1 appears multiple times in the list of dims'):
@@ -5068,6 +5131,12 @@ else:
 
         with self.assertRaises(IndexError):
             torch.gradient(t, dim=3)
+
+        with self.assertRaisesRegex(RuntimeError, 'torch.gradient expected each dimension size to be at least'):
+            torch.gradient(torch.tensor([[1], [2], [3]]), edge_order=1)
+
+        with self.assertRaisesRegex(RuntimeError, 'torch.gradient expected each dimension size to be at least'):
+            torch.gradient(torch.tensor([[1, 2], [3, 4]]), edge_order=2)
 
     def _test_large_cum_fn_helper(self, x, fn):
         x_cpu = x.cpu().float()
@@ -5210,6 +5279,13 @@ else:
         with self.assertWarnsOnceRegex(
                 UserWarning, "This overload of addcmul is deprecated"):
             self.assertEqual(actual, torch.addcmul(a, alpha, b, c))
+
+        if self.device_type == 'cuda' and dtype == torch.half:
+            a = torch.tensor([60000.0], device=device, dtype=dtype)
+            b = torch.tensor([60000.0], device=device, dtype=dtype)
+            c = torch.tensor([2.0], device=device, dtype=dtype)
+            out = torch.addcmul(a, b, c, value=-1)
+            self.assertTrue(not (out.isnan() or out.isinf()))
 
     def test_narrow_empty(self, device):
         x = torch.randn(2, 3, 4, device=device)
@@ -6212,6 +6288,13 @@ else:
         else:
             _test_addcdiv()
 
+        if self.device_type == 'cuda' and dtype == torch.half:
+            a = torch.tensor([60000.0], device=device, dtype=dtype)
+            b = torch.tensor([60000.0], device=device, dtype=dtype)
+            c = torch.tensor([1.0], device=device, dtype=dtype)
+            out = torch.addcmul(a, b, c, value=-2)
+            self.assertTrue(not (out.isnan() or out.isinf()))
+
     def test_nullary_op_mem_overlap(self, device):
         ops = (
             ("random_", ()),
@@ -6256,7 +6339,7 @@ else:
     def test_copy_mem_overlap(self, device, dtype):
         self.check_internal_mem_overlap(
             torch.Tensor.copy_, num_inputs=2, dtype=dtype, device=device)
-        sz = 3
+        sz = 9
         doubles = torch.randn(2 * sz, dtype=dtype, device=device)
         self.unary_check_input_output_mem_overlap(
             doubles, sz, lambda input, out: out.copy_(input))
@@ -8096,6 +8179,7 @@ class TestTensorDeviceOps(TestCase):
 # pytest will fail.
 add_neg_dim_tests()
 instantiate_device_type_tests(TestViewOps, globals())
+instantiate_device_type_tests(TestVitalSignsCuda, globals())
 instantiate_device_type_tests(TestTensorDeviceOps, globals())
 instantiate_device_type_tests(TestTorchDeviceType, globals())
 instantiate_device_type_tests(TestDevicePrecision, globals(), except_for='cpu')
