@@ -905,8 +905,6 @@ class DistributedDataParallel(Module):
             for i in range(len(output_placeholders)):
                 if output_placeholders[i] is None:
                     output_placeholders[i] = passthrough_tensor_list[i]
-                else:
-                    assert not torch.is_tensor(output_placeholders[i]) or output_placeholders[i].grad_fn is None
 
             # Reconstruct output data structure.
             output = _tree_unflatten_with_rref(
