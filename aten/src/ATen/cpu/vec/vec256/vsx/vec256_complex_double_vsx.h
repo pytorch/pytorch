@@ -164,7 +164,7 @@ class Vectorized<ComplexDbl> {
   const ComplexDbl& operator[](int idx) const = delete;
   ComplexDbl& operator[](int idx) = delete;
 
-  Vectorized<ComplexDbl> map(ComplexDbl (*f)(ComplexDbl)) const {
+  Vectorized<ComplexDbl> map(ComplexDbl (*const f)(ComplexDbl)) const {
     __at_align32__ ComplexDbl tmp[size()];
     store(tmp);
     for (int i = 0; i < size(); i++) {
@@ -173,7 +173,7 @@ class Vectorized<ComplexDbl> {
     return loadu(tmp);
   }
 
-  Vectorized<ComplexDbl> map(ComplexDbl (*f)(const ComplexDbl&)) const {
+  Vectorized<ComplexDbl> map(ComplexDbl (*const f)(const ComplexDbl&)) const {
     __at_align32__ ComplexDbl tmp[size()];
     store(tmp);
     for (int i = 0; i < size(); i++) {

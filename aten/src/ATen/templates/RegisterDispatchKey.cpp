@@ -11,7 +11,6 @@
 #include <c10/core/Allocator.h>
 #include <ATen/DeviceGuard.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/MetaFunctions.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/Utils.h>
 #include <ATen/WrapDimUtils.h>
@@ -35,6 +34,7 @@
 $extra_cuda_headers
 $legacy_th_headers
 $external_backend_headers
+$namespaced_headers
 
 namespace at {
 
