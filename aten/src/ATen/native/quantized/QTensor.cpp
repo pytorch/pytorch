@@ -20,6 +20,15 @@ Tensor quantize_per_tensor(
   return quantizer->quantize(self);
 }
 
+Tensor quantize_per_tensor_tensor_qparams(
+    const Tensor& self,
+    const Tensor& scale,
+    const Tensor& zero_point,
+    ScalarType dtype) {
+  auto quantizer = make_per_tensor_affine_quantizer(scale.item().toDouble(), zero_point.item().toLong(), dtype);
+  return quantizer->quantize(self);
+}
+
 std::vector<Tensor> quantize_per_tensor_list_cpu(
     TensorList tensors,
     const Tensor& scales,
@@ -56,8 +65,8 @@ Tensor dequantize_quantized_cpu(const Tensor& self) {
 
 std::vector<Tensor> dequantize_tensors_quantized_cpu(TensorList tensors) {
   std::vector<Tensor> dequantized_tensors;
-  for (const auto i : c10::irange(tensors.size())) {
-    dequantized_tensors.push_back(tensors[i].dequantize());
+  for (const auto & tensor : tensors) {
+    dequantized_tensors.push_back(tensor.dequantize());
   }
   return dequantized_tensors;
 }
