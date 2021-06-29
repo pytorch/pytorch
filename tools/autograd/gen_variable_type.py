@@ -228,7 +228,8 @@ DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
     'native_layer_norm_backward', 'slow_conv_transpose2d_backward_output_mask',
     'thnn_conv2d_backward_output_mask', 'slow_conv3d_backward_output_mask',
     'slow_conv_transpose2d_backward_output_mask', 'slow_conv_transpose3d_backward_output_mask',
-    '_embedding_bag', '_embedding_bag_forward_only', 'mkldnn_convolution_backward',
+    '_embedding_bag', '_embedding_bag_forward_only',
+    'mkldnn_convolution_backward', 'cudnn_convolution_backward',
     'q_per_channel_scales', 'q_per_channel_zero_points'
 }
 DONT_ENFORCE_STORAGE_IMPL_USE_COUNT = {
