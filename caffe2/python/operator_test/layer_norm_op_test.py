@@ -29,7 +29,7 @@ def _layer_norm_ref(axis, epsilon, X):
     Y = np.reshape(Y, X.shape)
     mean = np.reshape(mean, X.shape[:axis] + (1,))
     std = np.reshape(std, X.shape[:axis] + (1,))
-    return (Y, mean, std)
+    return (torch.from_numpy(Y), torch.from_numpy(mean), torch.from_numpy(std))
 
 
 def _layer_norm_with_affine_ref(axis, epsilon, X, gamma, beta):
@@ -353,9 +353,9 @@ class TestLayerNormOp(serial.SerializedTestCase):
                 torch.tensor(X), None, None, axis, eps, elementwise_affine)
 
         torch.testing.assert_allclose(
-            torch.from_numpy(expected_norm), actual_norm, rtol=1e-4, atol=1e-4)
-        torch.testing.assert_allclose(torch.from_numpy(expected_mean), actual_mean)
-        torch.testing.assert_allclose(torch.from_numpy(expected_std), actual_std)
+            expected_norm, actual_norm, rtol=1e-4, atol=1e-4)
+        torch.testing.assert_allclose(expected_mean, actual_mean)
+        torch.testing.assert_allclose(expected_std, actual_std)
 
     @given(X=hu.tensor(min_dim=2), **hu.gcs)
     def test_layer_norm_brew_wrapper(self, X, gc, dc):
