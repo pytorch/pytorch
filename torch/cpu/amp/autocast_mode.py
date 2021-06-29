@@ -3,6 +3,9 @@ import functools
 import warnings
 
 class autocast(object):
+    r"""
+    Partial of torch.autocast, see torch/autocast_mode.py for full documentation.
+    """
     def __init__(self, enabled=True, dtype=torch.bfloat16):
         supported_dtype = [torch.bfloat16]
         if dtype not in supported_dtype :
