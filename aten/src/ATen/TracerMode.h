@@ -125,16 +125,12 @@ static inline void set_dispatch_enabled(bool enabled) {
   c10::impl::tls_set_dispatch_key_included(at::DispatchKey::Tracer, enabled);
 }
 
-using NoTracerDispatchMode = c10::impl::ExcludeSingleDispatchKeyGuard<
-  at::DispatchKey::Tracer, /*has_overlap=*/false>;
+static constexpr at::DispatchKeySet tracer_keyset { at::DispatchKey::Tracer };
+SPECIALIZE_EXCLUDE_GUARD(
+  NoTracerDispatchMode,
+  tracer_keyset,
+  /*has_overlap=*/false);
 
 } // namespace impl
 } // namespace tracer
 } // namespace at
-
-namespace c10 {
-namespace impl {
-// If we do not instatiate the templates MSVC will fail to link.
-template class ExcludeSingleDispatchKeyGuard<
-  DispatchKey::Tracer, /*has_overlap=*/false>;
-}} // namespace c10::impl
