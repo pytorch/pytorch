@@ -407,7 +407,7 @@ if _enabled:
 
         def __getattr__(self, attr):
             if "_initializing" in self.__dict__ and self.__dict__["_initializing"]:
-                return super(RecursiveScriptClass, self).__getattr__(attr)
+                return super(RecursiveScriptClass, self).__getattr__(attr)  # type: ignore[misc]
 
             if attr in self._props:
                 return self._props[attr].fget()
