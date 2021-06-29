@@ -267,7 +267,7 @@ jobs:
 
   clang-tidy:
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-18.04
+    runs-on: linux.2xlarge
     container:
       # ubuntu18.04-cuda10.2-py3.6-tidy11
       image: ghcr.io/pytorch/cilint-clang-tidy:7f0b4616100071a4813318bfdbd5b06ae36c5272
@@ -329,6 +329,7 @@ jobs:
           # deploy/interpreter files are excluded due to using macros and other techniquies
           # that are not easily converted to accepted c++
           python3 tools/linter/clang_tidy.py \
+            --parallel \
             --verbose \
             --paths torch/csrc/ \
             --diff-file pr.diff \
@@ -401,7 +402,7 @@ jobs:
           set -eux
           pip install -r requirements.txt
           pip install numpy==1.20 # https://github.com/pytorch/pytorch/pull/60472
-          pip install mypy==0.812
+          pip install expecttest==0.1.3 mypy==0.812
           # Needed to check tools/render_junit.py
           pip install junitparser rich
       - name: Run autogen

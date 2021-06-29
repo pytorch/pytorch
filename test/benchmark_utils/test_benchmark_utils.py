@@ -10,7 +10,7 @@ import unittest
 import torch
 import torch.utils.benchmark as benchmark_utils
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_SANDCASTLE, IS_WINDOWS, slowTest
-from torch.testing._internal import expecttest
+import expecttest
 import numpy as np
 
 
