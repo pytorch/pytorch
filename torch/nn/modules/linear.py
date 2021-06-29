@@ -49,6 +49,10 @@ class Linear(Module):
         - Output: :math:`(N, *, H_{out})` where all but the last dimension
           are the same shape as the input and :math:`H_{out} = \text{out\_features}`.
 
+    .. note::
+        This module supports no-batch dimension, i.e. batch dimension, :math:`N`,
+        is optional.
+
     Attributes:
         weight: the learnable weights of the module of shape
             :math:`(\text{out\_features}, \text{in\_features})`. The values are
