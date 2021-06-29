@@ -844,7 +844,9 @@ void TensorIteratorBase::build_unary_op(const Tensor& out, const Tensor& a) {
       .check_all_same_dtype(true));
 }
 
-void TensorIteratorBase::build_unary_boolean_op(const Tensor& out, const Tensor& a) {
+// Helper to construct a unary op that forcibly promotes output to boolean.
+// Only be used when the output tensor must have boolean type.
+void TensorIteratorBase::build_unary_force_boolean_op(const Tensor& out, const Tensor& a) {
   build(TensorIteratorConfig()
       .set_check_mem_overlap(true)
       .check_all_same_dtype(false)
@@ -914,9 +916,9 @@ TensorIterator TensorIterator::unary_float_op(Tensor& out, const Tensor& a) {
   return iter;
 }
 
-TensorIterator TensorIterator::unary_boolean_op(const Tensor& out, const Tensor& a) {
+TensorIterator TensorIterator::unary_force_boolean_op(const Tensor& out, const Tensor& a) {
   TensorIterator iter;
-  iter.build_unary_boolean_op(out, a);
+  iter.build_unary_force_boolean_op(out, a);
   return iter;
 }
 

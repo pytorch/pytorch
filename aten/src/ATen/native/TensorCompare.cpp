@@ -50,14 +50,14 @@ TORCH_META_FUNC(isposinf) (const Tensor& self) {
   TORCH_CHECK(!self.is_complex(), "isposinf does not support complex inputs.");
   TORCH_CHECK(maybe_get_output().defined() ? maybe_get_output().dtype() == at::kBool : true,
               "isposinf does not support non-boolean outputs.");
-  build_unary_boolean_op(maybe_get_output(), self);
+  build_unary_force_boolean_op(maybe_get_output(), self);
 }
 
 TORCH_META_FUNC(isneginf) (const Tensor& self) {
   TORCH_CHECK(!self.is_complex(), "isneginf does not support complex inputs.");
   TORCH_CHECK(maybe_get_output().defined() ? maybe_get_output().dtype() == at::kBool : true,
               "isneginf does not support non-boolean outputs.");
-  build_unary_boolean_op(maybe_get_output(), self);
+  build_unary_force_boolean_op(maybe_get_output(), self);
 }
 
 } // namespace meta
