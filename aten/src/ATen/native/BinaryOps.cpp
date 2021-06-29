@@ -174,16 +174,25 @@ void comparison_op_check(const Tensor& self, const Tensor& other) {
   }
 }
 
-TORCH_META_FUNC2(eq, Tensor)(const Tensor& self, const Tensor& other) {
-  comparison_op_check(self, other);
-  build_comparison_op(maybe_get_output(), self, other);
-}
+#define CREATE_COMPARISON_SCALAR_TENSOR_META_FUNC(func)                     \
+  TORCH_META_FUNC2(func, Tensor)(const Tensor& self, const Tensor& other) { \
+    comparison_op_check(self, other);                                       \
+    build_comparison_op(maybe_get_output(), self, other);                   \
+  }                                                                         \
+                                                                            \
+  TORCH_META_FUNC2(func, Scalar)(const Tensor& self, const Scalar& other) { \
+    auto other_tensor =                                                     \
+        native::wrapped_scalar_tensor_and_check_convert(other, self);       \
+    comparison_op_check(self, other_tensor);                                \
+    build_comparison_op(maybe_get_output(), self, other_tensor);            \
+  }
 
-TORCH_META_FUNC2(eq, Scalar)(const Tensor& self, const Scalar& other) {
-  auto other_tensor = native::wrapped_scalar_tensor_and_check_convert(other, self);
-  comparison_op_check(self, other_tensor);
-  build_comparison_op(maybe_get_output(), self, other_tensor);
-}
+CREATE_COMPARISON_SCALAR_TENSOR_META_FUNC(eq);
+CREATE_COMPARISON_SCALAR_TENSOR_META_FUNC(ne);
+CREATE_COMPARISON_SCALAR_TENSOR_META_FUNC(lt);
+CREATE_COMPARISON_SCALAR_TENSOR_META_FUNC(le);
+CREATE_COMPARISON_SCALAR_TENSOR_META_FUNC(gt);
+CREATE_COMPARISON_SCALAR_TENSOR_META_FUNC(ge);
 
 } // namespace meta
 
@@ -1054,22 +1063,23 @@ Tensor& greater_equal_out(const Tensor& self, const Scalar& other, Tensor& resul
 Tensor greater_equal(const Tensor& self, const Scalar& other) { return self.ge(other); }
 Tensor& greater_equal_(Tensor& self, const Scalar& other) { return self.ge_(other); }
 
-TORCH_IMPL_FUNC(eq_Tensor_out)
-(const Tensor& self, const Tensor& other, const Tensor& result) {
-  eq_stub(device_type(), *this);
-}
+#define CREATE_COMPARISON_SCALAR_TENSOR_IMPL_FUNC(func)             \
+  TORCH_IMPL_FUNC(func##_Tensor_out)                                \
+  (const Tensor& self, const Tensor& other, const Tensor& result) { \
+    func##_stub(device_type(), *this);                              \
+  }                                                                 \
+                                                                    \
+  TORCH_IMPL_FUNC(func##_Scalar_out)                                \
+  (const Tensor& self, const Scalar& other, const Tensor& result) { \
+    func##_stub(device_type(), *this);                              \
+  }
 
-TORCH_IMPL_FUNC(eq_Scalar_out)
-(const Tensor& self, const Scalar& other, const Tensor& result) {
-  eq_stub(device_type(), *this);
-}
-
-Tensor& eq_out(const Tensor& self, const Tensor& other, Tensor& result) { return comparison_op_out(result, self, other, eq_stub); }
-Tensor eq(const Tensor& self, const Tensor& other) { return comparison_op(self, other, static_cast<OutFunc>(at::eq_out)); }
-Tensor& eq_(Tensor& self, const Tensor& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::eq_out)); }
-Tensor& eq_out(const Tensor& self, const Scalar& other, Tensor& result) { return comparison_op_out(result, self, other, static_cast<OutFunc>(at::eq_out)); }
-Tensor eq(const Tensor& self, const Scalar& other) { return comparison_op(self, other, static_cast<OutFunc>(at::eq_out)); }
-Tensor& eq_(Tensor& self, const Scalar& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::eq_out)); }
+CREATE_COMPARISON_SCALAR_TENSOR_IMPL_FUNC(eq);
+CREATE_COMPARISON_SCALAR_TENSOR_IMPL_FUNC(ne);
+CREATE_COMPARISON_SCALAR_TENSOR_IMPL_FUNC(gt);
+CREATE_COMPARISON_SCALAR_TENSOR_IMPL_FUNC(ge);
+CREATE_COMPARISON_SCALAR_TENSOR_IMPL_FUNC(lt);
+CREATE_COMPARISON_SCALAR_TENSOR_IMPL_FUNC(le);
 
 Tensor& ne_out(const Tensor& self, const Tensor& other, Tensor& result) { return comparison_op_out(result, self, other, ne_stub); }
 Tensor ne(const Tensor& self, const Tensor& other) { return comparison_op(self, other, static_cast<OutFunc>(at::ne_out)); }
