@@ -189,7 +189,7 @@ class TestCommon(TestCase):
 
             if isinstance(result, torch.Tensor):
                 self.assertTrue(result.device == cuda_device)
-            else: # assumes that result is an iterable of tensors
+            else:  # assumes that result is an iterable of tensors
                 self.assertTrue(all(map(lambda t: t.device == cuda_device, result)))
 
     # Tests that the function and its (ndarray-accepting) reference produce the same
