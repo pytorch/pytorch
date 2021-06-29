@@ -1157,6 +1157,21 @@ class TestAssertCloseQuantized(TestCase):
             with self.assertRaisesRegex(AssertionError, "is_quantized"):
                 fn()
 
+    def test_mismatching_qscheme(self):
+        t = torch.tensor((1.0,))
+        actual = torch.quantize_per_tensor(t, scale=1.0, zero_point=0, dtype=torch.qint32)
+        expected = torch.quantize_per_channel(
+            t,
+            scales=torch.tensor((1.0,)),
+            zero_points=torch.tensor((0,)),
+            axis=0,
+            dtype=torch.qint32,
+        )
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, "qscheme"):
+                fn()
+
     def test_matching_per_tensor(self):
         actual = torch.quantize_per_tensor(torch.tensor(1.0), scale=1.0, zero_point=0, dtype=torch.qint32)
         expected = actual.clone()
