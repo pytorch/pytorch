@@ -48,6 +48,10 @@ fi
 
 gcc --version
 
+# TODO: This should really be a part of environment.yml or the docker image.
+# expecttest isn't on conda so it can't be a part of environment.yml :/
+pip install expecttest
+
 if [ "${CU_VERSION:-}" == cpu ] ; then
     conda install -y pytorch torchvision cpuonly -c pytorch-nightly
     PYTORCH_VERSION="$(python -c "import torch; print(torch.__version__)")" python setup.py develop bdist_wheel -d $WHEELS_FOLDER
