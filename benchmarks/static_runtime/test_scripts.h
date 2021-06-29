@@ -420,3 +420,49 @@ const auto full_like_script = R"JIT(
                           memory_format=memory_format)
       return (b.clone())
 )JIT";
+
+// dict of tuple of list
+const auto nested_output_script_0 = R"JIT(
+  def forward(self, a, b):
+    c = (a + b).relu().half().float()
+    d = a.flatten().half() * b.flatten().half()
+    e = d.float().relu()
+    f = ([c], [d])
+    g = ([e], [f])
+    return ({"prediction":(f, d)})
+)JIT";
+
+// tuple of lists
+const auto nested_output_script_1 = R"JIT(
+  def forward(self, a, b):
+    c = (a + b).relu().half().float()
+    d = a.flatten().half() * b.flatten().half()
+    e = d.float().relu()
+    f = [c]
+    g = [e]
+    return (f, g)
+)JIT";
+
+// list of tuple of dict
+const auto nested_output_script_2 = R"JIT(
+  def forward(self, a, b):
+    c = (a + b).relu().half().float()
+    d = b * c
+    e = a.flatten().half() * b.flatten().half()
+    f = e.float().relu()
+    g = ({"d": d}, {"b": b})
+    h = ({"e": e}, {"f": f})
+    return [g, h]
+)JIT";
+
+// lit of dict
+const auto nested_output_script_3 = R"JIT(
+  def forward(self, a, b):
+    c = (a + b).relu().half().float()
+    d = b * c
+    e = a.flatten().half() * b.flatten().half()
+    f = e.float().relu()
+    g = {"d": d, "b": b}
+    h = {"e": e, "f": f}
+    return [g, h]
+)JIT";
