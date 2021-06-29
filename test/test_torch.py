@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import torch
+import torch.utils.data
 import numpy as np
 
 import contextlib
@@ -2933,6 +2934,14 @@ class TestBasicVitalSigns(TestCase):
             self.assertTrue(torch.set_vital('Dataloader', 'basic_unit_test', 'TEST_VALUE_STRING'))
             self.assertIn('TEST_VALUE_STRING', torch.read_vitals())
             self.assertIn('CUDA.used', torch.read_vitals())
+
+    def test_dataloader_vitals(self):
+        with torch_vital_set('ON'):
+            inps = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
+            tgts = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
+            dataset = torch.utils.data.TensorDataset(inps, tgts)
+            loader = torch.utils.data.DataLoader(dataset, batch_size=2)
+            self.assertIn('Dataloader.enabled\t\t True', torch.read_vitals())
 
 
 class TestVitalSignsCuda(TestCase):
