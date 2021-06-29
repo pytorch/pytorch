@@ -60,7 +60,10 @@ struct TORCH_API InferenceMode {
     DispatchKeySet excluded = enabled
         ? (prev_keyset.excluded_ | c10::autograd_dispatch_keyset)
         : (prev_keyset.excluded_ - c10::autograd_dispatch_keyset);
-    c10::impl::_force_tls_local_dispatch_key_set({ included, excluded });
+    auto cur_keyset = prev_keyset;
+    cur_keyset.included_ = included;
+    cur_keyset.excluded_ = excluded;
+    c10::impl::_force_tls_local_dispatch_key_set(cur_keyset);
   }
 
   ~InferenceMode() {

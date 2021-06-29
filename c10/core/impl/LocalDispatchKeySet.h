@@ -55,12 +55,10 @@ class C10_API LocalDispatchKeySetWrapper {
 };
 
 struct C10_API LocalDispatchKeySet {
-  LocalDispatchKeySet(DispatchKeySet included, DispatchKeySet excluded)
-      : included_(included), excluded_(excluded) {}
   LocalDispatchKeySet(LocalDispatchKeySetWrapper x)
       : included_(x.included()), excluded_(x.excluded()) {}
-  const DispatchKeySet included_;
-  const DispatchKeySet excluded_;
+  DispatchKeySet included_;
+  DispatchKeySet excluded_;
 };
 
 inline C10_API LocalDispatchKeySet snapshot_tls_keyset() {
@@ -157,7 +155,7 @@ class ExcludeSingleDispatchKeyGuard {
 };
 
 #define SPECIALIZE_EXCLUDE_GUARD(guard_name, k, has_overlap)              \
-  class C10_API guard_name                                                        \
+  class C10_API guard_name                                                \
       : c10::impl::ExcludeDispatchKeyGuard<k.raw_repr(), has_overlap> {   \
     using c10::impl::ExcludeDispatchKeyGuard<k.raw_repr(), has_overlap>:: \
         ExcludeDispatchKeyGuard;                                          \
