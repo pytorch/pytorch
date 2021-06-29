@@ -1598,7 +1598,7 @@ class AbstractTestCases:
                     engine.fast_forward(1)
             torch.testing.assert_allclose(
                 ref_sample[[i for i in range(8) if i % 2 == 0]],
-                np.concatenate(even_draws),
+                torch.from_numpy(np.concatenate(even_draws)),
             )
 
         def test_sobolengine_fast_forward_scrambled(self):
