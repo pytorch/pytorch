@@ -83,6 +83,8 @@ class DistributedSampler(Sampler[T_co]):
                 category=PendingDeprecationWarning,
             )
             self.data_source = dataset
+        elif self.data_source is None:
+            raise ValueError('data_source must be provided in DistributedSampler')
         self.num_replicas = num_replicas
         self.rank = rank
         self.epoch = 0
