@@ -99,7 +99,7 @@ class FunctionMeta(type):
         backward_fn = type(name + 'Backward', (BackwardCFunction,), {'_forward_cls': cls})
         cls._backward_cls = backward_fn
 
-        return super(FunctionMeta, cls).__init__(name, bases, attrs)
+        super(FunctionMeta, cls).__init__(name, bases, attrs)
 
 
 # mypy doesn't understand `with_metaclass` from torch._six
