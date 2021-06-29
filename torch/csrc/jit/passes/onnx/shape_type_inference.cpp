@@ -597,47 +597,49 @@ c10::optional<std::vector<int64_t>> GetValueFromListConstructNode(
 }
 
 void ProcessReshapeNode(Node* n) {
-  if (ConstantValueMap::HasValue(n->input(1)->debugName())) {
-    auto shape_temp =
-        ConstantValueMap::GetValueInto1DInt64Vector(n->input(1)->debugName());
-    auto shape_vector_0 =
-        ConstantValueMap::GetShapeInto1DInt64VectorWithOneUnknown(
-            n->input(0)->debugName());
-    if (shape_vector_0.has_value()) {
-      auto final_shape =
-          ComputeShapeFromReshape(shape_vector_0.value(), shape_temp);
-      UpdateShapeFromVector(n->output(), final_shape);
-      return;
+  if ConstantValueMap::HasValue(n->input(0)->debugName()) {
+    if (ConstantValueMap::HasValue(n->input(1)->debugName())) {
+      auto shape_temp =
+          ConstantValueMap::GetValueInto1DInt64Vector(n->input(1)->debugName());
+      auto shape_vector_0 =
+          ConstantValueMap::GetShapeInto1DInt64VectorWithOneUnknown(
+              n->input(0)->debugName());
+      if (shape_vector_0.has_value()) {
+        auto final_shape =
+            ComputeShapeFromReshape(shape_vector_0.value(), shape_temp);
+        UpdateShapeFromVector(n->output(), final_shape);
+        return;
+      }
     }
-  }
 
-  if (ConstantValueMap::HasShape(n->input(1)->debugName())) {
-    auto shape_vector_1 =
-        ConstantValueMap::GetShapeInto1DInt64Vector(n->input(1)->debugName());
-    if (shape_vector_1.has_value()) {
-      TORCH_INTERNAL_ASSERT(shape_vector_1.value().size() == 1);
-      UpdateRank(n->output(), shape_vector_1.value()[0]);
-      return;
+    if ( && ConstantValueMap::HasValue(n->input(1)->debugName())) {
+      auto shape_vector_1 =
+          ConstantValueMap::GetShapeInto1DInt64Vector(n->input(1)->debugName());
+      if (shape_vector_1.has_value()) {
+        TORCH_INTERNAL_ASSERT(shape_vector_1.value().size() == 1);
+        UpdateRank(n->output(), shape_vector_1.value()[0]);
+        return;
+      }
     }
-  }
 
-  // ListConstruct is handled at the beginning of ProcessConstantValueMap, no
-  // further process here.
-  if (TensorTypePtr shape_type = n->input(1)->type()->cast<TensorType>()) {
-    // Set rank to Reshape output if possible.
-    // From shape inference, we have:
-    // %4236 : Float(*, device=cpu) = onnx::Transpose[perm=[0]](%4235)
-    // %4237 : Long(2, strides=[1], device=cpu) = onnx::Concat[axis=0](%4232)
-    // %4238 : FloatTensor(device=cpu) = onnx::Reshape(%4236, %4237)
-    // We can have it as SymbolicShape with known rank:
-    // %4238 : Float(*, *, strides=[2480, 1], requires_grad=0, device=cpu) =
-    // onnx::Reshape(%4236, %4237)
-    auto shape_type_dim = shape_type->dim();
-    if (shape_type_dim.has_value()) {
-      auto shape_type_size = shape_type->sizes()[0];
-      if (shape_type_size.has_value()) {
-        size_t rank = shape_type_size.value();
-        UpdateRank(n->output(), rank);
+    // ListConstruct is handled at the beginning of ProcessConstantValueMap, no
+    // further process here.
+    if (TensorTypePtr shape_type = n->input(1)->type()->cast<TensorType>()) {
+      // Set rank to Reshape output if possible.
+      // From shape inference, we have:
+      // %4236 : Float(*, device=cpu) = onnx::Transpose[perm=[0]](%4235)
+      // %4237 : Long(2, strides=[1], device=cpu) = onnx::Concat[axis=0](%4232)
+      // %4238 : FloatTensor(device=cpu) = onnx::Reshape(%4236, %4237)
+      // We can have it as SymbolicShape with known rank:
+      // %4238 : Float(*, *, strides=[2480, 1], requires_grad=0, device=cpu) =
+      // onnx::Reshape(%4236, %4237)
+      auto shape_type_dim = shape_type->dim();
+      if (shape_type_dim.has_value()) {
+        auto shape_type_size = shape_type->sizes()[0];
+        if (shape_type_size.has_value()) {
+          size_t rank = shape_type_size.value();
+          UpdateRank(n->output(), rank);
+        }
       }
     }
   }
