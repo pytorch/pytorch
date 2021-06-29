@@ -4673,16 +4673,13 @@ for shape in [(1,), ()]:
         self.assertEqual(out.grad_fn._saved_dim, 0)                       # int64_t -> int
         self.assertIsInstance(out.grad_fn._saved_dim, int)
 
-        saved = out.grad_fn._raw_saved_tensors[0]
-        saved.register_hooks(lambda x: x, lambda x: x)
+        out.grad_fn._raw_saved_tensors[0].register_hooks(lambda x: x, lambda x: x)
 
         out.sum().backward()
         with self.assertRaisesRegex(RuntimeError, "after they have already been freed"):
             out.grad_fn._saved_tensors
         with self.assertRaisesRegex(RuntimeError, "after they have already been freed"):
             out.grad_fn._raw_saved_tensors
-        with self.assertRaisesRegex(RuntimeError, "after it has been freed"):
-            saved.register_hooks(lambda x: x, lambda x: x)
         self.assertEqual(out.grad_fn._saved_dim, 0)
 
         a = torch.ones(2, 2, requires_grad=True)
@@ -4694,13 +4691,16 @@ for shape in [(1,), ()]:
         self.assertEqual(out.grad_fn._saved_self_sizes, a.shape)          # IntArrayRef -> Tuple[int]
         self.assertIsInstance(out.grad_fn._saved_self_sizes[0], int)
 
-        saved = out.grad_fn._raw_saved_indices
-        saved[1].register_hooks(lambda x: x, lambda x: x)
+        out.grad_fn._raw_saved_indices[1].register_hooks(lambda x: x, lambda x: x)
         with self.assertRaisesRegex(RuntimeError, "None is forbidden"):
-            saved[0].register_hooks(lambda x: x, lambda x: x)
-        out.sum().backward()
+            out.grad_fn._raw_saved_indices[0].register_hooks(lambda x: x, lambda x: x)
+
+        a = torch.ones(2, 2, requires_grad=True)
+        out = a * a
+        out.grad_fn._raw_saved_self.register_hooks(lambda x: x, lambda x: x)
+        out.backward()
         with self.assertRaisesRegex(RuntimeError, "after it has been freed"):
-            saved[1].register_hooks(lambda x: x, lambda x: x)
+            out.grad_fn._raw_saved_self.register_hooks(lambda x: x, lambda x: x)
 
         a = torch.ones(1, 1, 2, requires_grad=True)
         out = torch.nn.functional.interpolate(a, 4, mode="linear")
@@ -4775,6 +4775,10 @@ for shape in [(1,), ()]:
         with self.assertRaisesRegex(RuntimeError, "after they have already been freed"):
             out.grad_fn._saved_weight
 
+    def test_cant_create_saved_tensors(self):
+        with self.assertRaisesRegex(RuntimeError, "Trying to create a SavedTensor object from Python is forbidden"):
+            torch.autograd.SavedTensor()
+
     def test_custom_function_saved_tensors(self):
         def getFn(save=True):
             class MyFn(Function):
@@ -4786,7 +4790,7 @@ for shape in [(1,), ()]:
 
                 @staticmethod
                 def backward(ctx, g):
-                    return g, None
+                    return g
 
             return MyFn
 
@@ -4810,12 +4814,14 @@ for shape in [(1,), ()]:
         with self.assertRaisesRegex(RuntimeError, "already been set"):
             saved[0].register_hooks(lambda x: x, lambda x: x)
         y.sum().backward()
+
+        # Using a reference to the SavedTensor object after the
+        # saved variables have been released can lead to undefined behavior
+        del saved
         with self.assertRaisesRegex(RuntimeError, "after they have already been freed"):
             y.grad_fn.raw_saved_tensors
         with self.assertRaisesRegex(RuntimeError, "after they have already been freed"):
             y.grad_fn.saved_tensors
-        with self.assertRaisesRegex(RuntimeError, "after it has been freed"):
-            saved[0].register_hooks(lambda x: x, lambda x: x)
 
         y = getFn(False).apply(a)
         self.assertEqual(y.grad_fn.saved_tensors, ())

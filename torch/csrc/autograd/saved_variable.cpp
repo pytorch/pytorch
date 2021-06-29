@@ -158,12 +158,13 @@ void SavedVariable::register_hooks(std::unique_ptr<SavedVariableHooks>&& hooks) 
     if (!was_default_constructed_) {
       TORCH_CHECK(false,
         "Calling register_hooks on a saved tensor after it has been freed. "
-        "Saved intermediate values "
-        "of the graph are freed when you call .backward() or autograd.grad(). Specify "
-        "retain_graph=True if you need to backward through the graph a second time or "
-        "if you need to access saved variables after calling backward.");
+        "Saved intermediate values of the graph are freed when you call "
+        ".backward() or autograd.grad(). Specify retain_graph=True if you "
+        "need to backward through the graph a second time or if you need to "
+        "access saved variables after calling backward.");
     } else {
-      TORCH_CHECK(false, "Calling register_hook on a tensor with value None is forbidden");
+      TORCH_CHECK(false,
+        "Calling register_hooks on a saved tensor with value None is forbidden");
     }
   }
   TORCH_CHECK(!hooks_,
