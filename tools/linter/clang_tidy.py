@@ -170,8 +170,8 @@ def run_shell_commands_in_parallel(commands: Iterable[List[str]]) -> str:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
-        stdout, _ = await proc.communicate()
-        return stdout.decode()
+        stdout, stderr = await proc.communicate()
+        return f">>>\nstdout:\n{stdout.decode()}\nstderr:\n{stderr.decode()}\n<<<"
 
     async def gather_with_concurrency(n: int, tasks: List[Any]) -> Any:
         semaphore = asyncio.Semaphore(n)
