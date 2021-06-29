@@ -132,7 +132,6 @@ class autocast(object):
         elif self.device != 'cuda':
             raise RuntimeError('User specified autocast device_type must be \'cuda\' or \'cpu\'')
         self._enabled = enabled
-        self.fast_dtype = fast_dtype
 
     def __enter__(self):
         if self.device == 'cpu':
