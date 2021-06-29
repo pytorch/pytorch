@@ -10,40 +10,7 @@ except ModuleNotFoundError:
 from torch._six import string_classes
 from .common import amp_definitely_not_available
 
-class autocast(object):
-    r"""
-    Partial of torch.autocast, see torch/autocast_mode.py for full documentation.
-    """
-    def __init__(self, enabled=True, fast_dtype=torch.float16):
-        if enabled and amp_definitely_not_available():
-            warnings.warn("torch.cuda.amp.autocast only affects CUDA ops, but CUDA is not available.  Disabling.")
-            self._enabled = False
-        else:
-            self._enabled = enabled
-        self.fast_dtype = fast_dtype
-
-    def __enter__(self):
-        self.prev = torch.is_autocast_enabled()
-        self.prev_fastdtype = torch.get_autocast_gpu_dtype()
-        torch.set_autocast_gpu_dtype(self.fast_dtype)
-        torch.set_autocast_enabled(self._enabled)
-        torch.autocast_increment_nesting()
-
-    def __exit__(self, *args):
-        # Drop the cache when we exit to a nesting level that's outside any instance of autocast.
-        if torch.autocast_decrement_nesting() == 0:
-            torch.clear_autocast_cache()
-        torch.set_autocast_enabled(self.prev)
-        torch.set_autocast_gpu_dtype(self.prev_fastdtype)
-        return False
-
-    def __call__(self, func):
-        @functools.wraps(func)
-        def decorate_autocast(*args, **kwargs):
-            with self:
-                return func(*args, **kwargs)
-        return decorate_autocast
-
+autocast = functools.partial(torch.autocast,device_type='cuda')
 
 # Casts Tensors and containers of Tensors.  Special-cases passthroughs for strings and np.ndarrays, which
 # may be falsely detected as "Iterables."
