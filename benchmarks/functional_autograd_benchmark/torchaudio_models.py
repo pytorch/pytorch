@@ -343,11 +343,6 @@ class TransformerModel(nn.Module):
 
         self.init_weights()
 
-    def _generate_square_subsequent_mask(self, sz):
-        mask = (torch.triu(torch.ones(sz, sz)) == 1).transpose(0, 1)
-        mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
-        return mask
-
     def init_weights(self):
         initrange = 0.1
         nn.init.uniform_(self.encoder.weight, -initrange, initrange)
@@ -360,7 +355,7 @@ class TransformerModel(nn.Module):
             device = src.device
             # This will be created once during warmup
             if self.src_mask is None or self.src_mask.size(0) != len(src):
-                mask = self._generate_square_subsequent_mask(len(src)).to(device)
+                mask = nn.Transformer.generate_square_subsequent_mask(len(src)).to(device)
                 self.src_mask = mask
         else:
             self.src_mask = None
