@@ -315,13 +315,14 @@ def _inject_property(module: Module, tensor_name: str) -> None:
         if _cache_enabled:
             if torch.jit.is_scripting():
                 # Scripting
-                raise RuntimeError('Caching is not implemented for '
-                    'scripting. Either disable caching or avoid scripting.')
+                raise RuntimeError('Caching is not implemented for scripting. '
+                                   'Either disable caching or avoid scripting.')
             elif torch._C._get_tracing_state() is not None:
                 # Tracing
-                raise RuntimeError('Caching should be disabled while '
-                    'tracing a model. You can run a traced model with caching, '
-                    'but during the tracing process consider disabling caching')
+                raise RuntimeError('Caching should be disabled while tracing a '
+                                   'model. You can run a traced model with '
+                                   'caching, but during the tracing process '
+                                   'consider disabling it.')
             else:
                 return get_cached_parametrization(parametrization)
         else:
