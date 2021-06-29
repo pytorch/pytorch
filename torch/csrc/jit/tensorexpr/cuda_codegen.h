@@ -177,12 +177,16 @@ class CudaPrinter : public IRPrinter {
     return rand_func_;
   }
 
+  std::string dtypeToCppString(const Dtype& dtype) override;
+
   using IRPrinter::name_manager;
   using IRPrinter::visit;
 
  private:
   const Var* rand_func_;
   const CudaAnalysis* cuda_analysis_;
+
+  void print_flat_alloc(const Allocate* alloc);
 };
 
 // Construct Cuda C from the buffer and tensor input, and invoke the kernel
@@ -211,6 +215,7 @@ class TORCH_CUDA_CU_API CudaCodeGen : public CodeGen {
 
   ~CudaCodeGen() override;
 
+  void call_raw(const std::vector<void*>& args) override;
   void call(const std::vector<CallArg>& args) override;
 
   template <typename... Ts>

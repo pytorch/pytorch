@@ -166,7 +166,6 @@ struct WorkspaceIdInjector {
       CAFFE_ENFORCE(
           seq_ < (1 << 16),
           "Integer overflow while calculating GLOBAL_WORKSPACE_ID blob");
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       int32_t global_ws_id = (seq_++) + (static_cast<int32_t>(node_id) << 16);
       Blob* global_ws_id_blob = workspace->CreateLocalBlob(GLOBAL_WORKSPACE_ID);
       TensorCPU* global_ws_id_tensor =
@@ -522,7 +521,6 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
     auto* reportNet = compiledStep->reportNet;
     if (reportNet) {
       VLOG(1) << "Starting reporter net";
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       reporter->start(step.report_interval() * 1000, [reportNet]() {
         if (!reportNet->Run()) {
           LOG(WARNING) << "Error running report_net.";

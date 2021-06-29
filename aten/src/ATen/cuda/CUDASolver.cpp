@@ -715,6 +715,78 @@ void orgqr<c10::complex<double>>(
       devInfo));
 }
 
+template <>
+void ormqr_bufferSize<float>(CUDASOLVER_ORMQR_BUFFERSIZE_ARGTYPES(float)) {
+  TORCH_CUSOLVER_CHECK(
+      cusolverDnSormqr_bufferSize(handle, side, trans, m, n, k, A, lda, tau, C, ldc, lwork));
+}
+
+template <>
+void ormqr_bufferSize<double>(CUDASOLVER_ORMQR_BUFFERSIZE_ARGTYPES(double)) {
+  TORCH_CUSOLVER_CHECK(
+      cusolverDnDormqr_bufferSize(handle, side, trans, m, n, k, A, lda, tau, C, ldc, lwork));
+}
+
+template <>
+void ormqr_bufferSize<c10::complex<float>>(
+    CUDASOLVER_ORMQR_BUFFERSIZE_ARGTYPES(c10::complex<float>)) {
+  TORCH_CUSOLVER_CHECK(cusolverDnCunmqr_bufferSize(
+      handle, side, trans,
+      m, n, k,
+      reinterpret_cast<const cuComplex*>(A), lda,
+      reinterpret_cast<const cuComplex*>(tau),
+      reinterpret_cast<const cuComplex*>(C), ldc,
+      lwork));
+}
+
+template <>
+void ormqr_bufferSize<c10::complex<double>>(
+    CUDASOLVER_ORMQR_BUFFERSIZE_ARGTYPES(c10::complex<double>)) {
+  TORCH_CUSOLVER_CHECK(cusolverDnZunmqr_bufferSize(
+      handle, side, trans,
+      m, n, k,
+      reinterpret_cast<const cuDoubleComplex*>(A), lda,
+      reinterpret_cast<const cuDoubleComplex*>(tau),
+      reinterpret_cast<const cuDoubleComplex*>(C), ldc,
+      lwork));
+}
+
+template <>
+void ormqr<float>(CUDASOLVER_ORMQR_ARGTYPES(float)) {
+  TORCH_CUSOLVER_CHECK(
+      cusolverDnSormqr(handle, side, trans, m, n, k, A, lda, tau, C, ldc, work, lwork, devInfo));
+}
+
+template <>
+void ormqr<double>(CUDASOLVER_ORMQR_ARGTYPES(double)) {
+  TORCH_CUSOLVER_CHECK(
+      cusolverDnDormqr(handle, side, trans, m, n, k, A, lda, tau, C, ldc, work, lwork, devInfo));
+}
+
+template <>
+void ormqr<c10::complex<float>>(CUDASOLVER_ORMQR_ARGTYPES(c10::complex<float>)) {
+  TORCH_CUSOLVER_CHECK(cusolverDnCunmqr(
+      handle, side, trans,
+      m, n, k,
+      reinterpret_cast<const cuComplex*>(A), lda,
+      reinterpret_cast<const cuComplex*>(tau),
+      reinterpret_cast<cuComplex*>(C), ldc,
+      reinterpret_cast<cuComplex*>(work), lwork,
+      devInfo));
+}
+
+template <>
+void ormqr<c10::complex<double>>(CUDASOLVER_ORMQR_ARGTYPES(c10::complex<double>)) {
+  TORCH_CUSOLVER_CHECK(cusolverDnZunmqr(
+      handle, side, trans,
+      m, n, k,
+      reinterpret_cast<const cuDoubleComplex*>(A), lda,
+      reinterpret_cast<const cuDoubleComplex*>(tau),
+      reinterpret_cast<cuDoubleComplex*>(C), ldc,
+      reinterpret_cast<cuDoubleComplex*>(work), lwork,
+      devInfo));
+}
+
 #ifdef USE_CUSOLVER_64_BIT
 
 template<> cudaDataType get_cusolver_datatype<float>() { return CUDA_R_32F; }

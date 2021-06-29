@@ -1,6 +1,6 @@
 import copy
 import glob
-import imp
+import importlib
 import os
 import re
 import shlex
@@ -1601,6 +1601,13 @@ def _get_build_directory(name: str, verbose: bool) -> str:
     root_extensions_directory = os.environ.get('TORCH_EXTENSIONS_DIR')
     if root_extensions_directory is None:
         root_extensions_directory = get_default_build_root()
+        cu_str = ('cpu' if torch.version.cuda is None else
+                  f'cu{torch.version.cuda.replace(".", "")}')  # type: ignore[attr-defined]
+        python_version = f'py{sys.version_info.major}{sys.version_info.minor}'
+        build_folder = f'{python_version}_{cu_str}'
+
+        root_extensions_directory = os.path.join(
+            root_extensions_directory, build_folder)
 
     if verbose:
         print(f'Using {root_extensions_directory} as PyTorch extensions root...')
@@ -1694,14 +1701,16 @@ def _get_exec_path(module_name, path):
 
 
 def _import_module_from_library(module_name, path, is_python_module):
-    # https://stackoverflow.com/questions/67631/how-to-import-a-module-given-the-full-path
-    file, path, description = imp.find_module(module_name, [path])
-    # Close the .so file after load.
-    with file:
-        if is_python_module:
-            return imp.load_module(module_name, file, path, description)  # type: ignore[arg-type]
-        else:
-            torch.ops.load_library(path)
+    filepath = os.path.join(path, f"{module_name}{LIB_EXT}")
+    if is_python_module:
+        # https://stackoverflow.com/questions/67631/how-to-import-a-module-given-the-full-path
+        spec = importlib.util.spec_from_file_location(module_name, filepath)
+        module = importlib.util.module_from_spec(spec)
+        assert isinstance(spec.loader, importlib.abc.Loader)
+        spec.loader.exec_module(module)
+        return module
+    else:
+        torch.ops.load_library(filepath)
 
 
 def _write_ninja_file_to_build_library(path,

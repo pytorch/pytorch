@@ -859,9 +859,7 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
 
   // primitive types
   testArgTypes<double>::test(
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     1.5, [] (const double& v) {EXPECT_EQ(1.5, v);},
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     2.5, [] (const IValue& v) {EXPECT_EQ(2.5, v.toDouble());},
     "(float a) -> float");
   testArgTypes<int64_t>::test(
@@ -888,9 +886,7 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
 
   // optional types (with has_value() == true)
   testArgTypes<c10::optional<double>>::test(
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     c10::optional<double>(1.5), [] (const c10::optional<double>& v) {EXPECT_EQ(1.5, v.value());},
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     c10::optional<double>(2.5), [] (const IValue& v) {EXPECT_EQ(2.5, v.toDouble());},
     "(float? a) -> float?");
   testArgTypes<c10::optional<int64_t>>::test(
@@ -963,9 +959,7 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
 
   // list types (with non-empty list)
   testArgTypes<c10::List<double>>::test(
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     c10::List<double>({1.5, 2.5}), [] (const c10::List<double>& v) {expectListEquals({1.5, 2.5}, v);},
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     c10::List<double>({3.5, 4.5}), [] (const IValue& v) {expectListEquals({3.5, 4.5}, v.to<c10::List<double>>());},
     "(float[] a) -> float[]");
   testArgTypes<c10::List<int64_t>>::test(
@@ -1014,9 +1008,7 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
 
   // list types (with non-empty list)
   testArgTypes<c10::ArrayRef<double>, c10::List<double>>::test(
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     c10::ArrayRef<double>({1.5, 2.5}), [] (c10::ArrayRef<double> v) {expectListEquals({1.5, 2.5}, v);},
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     c10::List<double>({3.5, 4.5}), [] (const IValue& v) {expectListEquals({3.5, 4.5}, v.to<c10::List<double>>());},
     "(float[] a) -> float[]");
   testArgTypes<c10::ArrayRef<int64_t>, c10::List<int64_t>>::test(
@@ -1066,9 +1058,7 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
 
   // std::array list types (with non-empty list)
   testArgTypes<std::array<double, 2>>::test(
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::array<double, 2>({1.5, 2.5}), [] (std::array<double, 2> v) {expectListEquals({1.5, 2.5}, v);},
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::array<double, 2>({3.5, 4.5}), [] (const IValue& v) {expectListEquals({3.5, 4.5}, v.to<std::array<double, 2>>());},
     "(float[2] a) -> float[2]");
   testArgTypes<std::array<int64_t, 2>>::test(
@@ -1119,9 +1109,7 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
 
   // deprecated list types (with non-empty list)
   testArgTypes<std::vector<double>>::test<TestLegacyAPI>(
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::vector<double>({1.5, 2.5}), [] (const std::vector<double>& v) {expectListEquals({1.5, 2.5}, v);},
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::vector<double>({3.5, 4.5}), [] (const IValue& v) {expectListEquals({3.5, 4.5}, v.to<c10::List<double>>());},
     "(float[] a) -> float[]");
   testArgTypes<std::vector<int64_t>>::test<TestLegacyAPI>(

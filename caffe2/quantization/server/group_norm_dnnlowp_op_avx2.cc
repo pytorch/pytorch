@@ -44,7 +44,6 @@ void SegmentMomentsAVX2<uint8_t>(
   int32_t sumsq_arr[8];
   _mm256_storeu_si256(reinterpret_cast<__m256i*>(sum_arr), sum_v);
   _mm256_storeu_si256(reinterpret_cast<__m256i*>(sumsq_arr), sumsq_v);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 8; ++i) {
     *sum += static_cast<int64_t>(sum_arr[i]);
     *sumsq += static_cast<int64_t>(sumsq_arr[i]);

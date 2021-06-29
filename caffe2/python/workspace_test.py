@@ -710,14 +710,10 @@ class MyModule(torch.jit.ScriptModule):
     def forward(self, x):
         return self.mult.mm(x)
 
-    # pyre-fixme[56]: Pyre was not able to infer the type of the decorator
-    #   `torch.jit.script_method`
     @torch.jit.script_method
     def multi_input(self, x: torch.Tensor, y: torch.Tensor, z: int = 2) -> torch.Tensor:
         return x + y + z
 
-    # pyre-fixme[56]: Pyre was not able to infer the type of the decorator
-    #   `torch.jit.script_method`
     @torch.jit.script_method
     def multi_input_tensor_list(self, tensor_list):  # pyre-ignore: PT type annotations
         # type: (List[Tensor]) -> Tensor

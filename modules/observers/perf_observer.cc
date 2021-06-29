@@ -132,7 +132,6 @@ double getWallClockTimeMilliseconds() {
 
   uint64_t now = mach_absolute_time();
   now = now * info.numer / info.denom; // convert to nanoseconds
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return now / 1000000.0;
 #else
   return getClockTimeMilliseconds(CLOCK_MONOTONIC);
@@ -169,13 +168,9 @@ double getCpuTimeMilliseconds() {
     return 0.0;
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return ru.ru_utime.tv_sec * 1000.0
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       + ru.ru_utime.tv_usec / 1000.0
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       + ru.ru_stime.tv_sec * 1000.0
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       + ru.ru_stime.tv_usec / 1000.0;
 #else
   return getClockTimeMilliseconds(CLOCK_PROCESS_CPUTIME_ID);

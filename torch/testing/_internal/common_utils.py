@@ -40,7 +40,7 @@ import json
 from urllib.request import urlopen
 import __main__  # type: ignore[import]
 import errno
-from typing import cast, Any, Dict, Iterable, Iterator, Optional
+from typing import cast, Any, Dict, Iterable, Iterator, Optional, Union
 
 import numpy as np
 
@@ -63,6 +63,8 @@ FILE_SCHEMA = "file://"
 if sys.platform == 'win32':
     FILE_SCHEMA = "file:///"
 
+# Environment variable `IN_CI` is set in `.jenkins/common.sh`.
+IS_IN_CI = os.getenv('IN_CI') == '1'
 IS_SANDCASTLE = os.getenv('SANDCASTLE') == '1' or os.getenv('TW_JOB_USER') == 'sandcastle'
 IS_FBCODE = os.getenv('PYTORCH_TEST_FBCODE') == '1'
 IS_REMOTE_GPU = os.getenv('PYTORCH_TEST_REMOTE_GPU') == '1'
@@ -158,7 +160,7 @@ parser.add_argument('--repeat', type=int, default=1)
 parser.add_argument('--test_bailouts', action='store_true')
 parser.add_argument('--save-xml', nargs='?', type=str,
                     const=_get_test_report_path(),
-                    default=_get_test_report_path() if bool(os.environ.get('IN_CI')) else None)
+                    default=_get_test_report_path() if IS_IN_CI else None)
 parser.add_argument('--discover-tests', action='store_true')
 parser.add_argument('--log-suffix', type=str, default="")
 parser.add_argument('--run-parallel', type=int, default=1)
@@ -187,6 +189,9 @@ if not expecttest.ACCEPT:
     expecttest.ACCEPT = args.accept
 UNITTEST_ARGS = [sys.argv[0]] + remaining
 torch.manual_seed(SEED)
+
+# CI Prefix path used only on CI environment
+CI_TEST_PREFIX = str(pathlib.Path(os.getcwd()))
 
 def wait_for_process(p):
     try:
@@ -234,9 +239,6 @@ def repeat_test_for_types(dtypes):
         return call_helper
     return repeat_helper
 
-# Environment variable `IS_PYTORCH_CI` is set in `.jenkins/common.sh`.
-IS_PYTORCH_CI = bool(os.environ.get('IS_PYTORCH_CI'))
-
 
 def discover_test_cases_recursively(suite_or_case):
     if isinstance(suite_or_case, unittest.TestCase):
@@ -254,6 +256,9 @@ def chunk_list(lst, nchunks):
 
 # sanitize filename e.g., distributed/pipeline/sync/skip/test_api.py -> distributed.pipeline.sync.skip.test_api
 def sanitize_test_filename(filename):
+    # inspect.getfile returns absolute path in some CI jobs, converting it to relative path if needed
+    if filename.startswith(CI_TEST_PREFIX):
+        filename = filename[len(CI_TEST_PREFIX) + 1:]
     strip_py = re.sub(r'.py$', '', filename)
     return re.sub('/', r'.', strip_py)
 
@@ -389,6 +394,15 @@ TEST_SKIP_FAST = os.getenv('PYTORCH_TEST_SKIP_FAST', '0') == '1'
 # disable them for local runs because you still want to run them
 # (unlike slow tests!)
 TEST_SKIP_NOARCH = os.getenv('PYTORCH_TEST_SKIP_NOARCH', '0') == '1'
+
+# Determine whether to enable cuda memory leak check.
+# CUDA mem leak check is expensive and thus we don't want to execute it on every
+# test case / configuration.
+# See: https://github.com/pytorch/pytorch/pull/59402#issuecomment-858811135
+TEST_SKIP_CUDA_MEM_LEAK_CHECK = os.getenv('PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK', '0') == '1'
+
+# Disables tests for when on Github Actions
+ON_GHA = os.getenv('GITHUB_ACTIONS', '0') == '1'
 
 # Dict of NumPy dtype -> torch dtype (when the correspondence exists)
 numpy_to_torch_dtype_dict = {
@@ -569,6 +583,16 @@ def skipIfNoSciPy(fn):
     def wrapper(*args, **kwargs):
         if not TEST_SCIPY:
             raise unittest.SkipTest("test require SciPy, but SciPy not found")
+        else:
+            fn(*args, **kwargs)
+    return wrapper
+
+
+def skipIfOnGHA(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if ON_GHA:
+            raise unittest.SkipTest("Test disabled for GHA")
         else:
             fn(*args, **kwargs)
     return wrapper
@@ -812,8 +836,7 @@ try:
             verbosity=hypothesis.Verbosity.verbose))
 
     hypothesis.settings.load_profile(
-        "pytorch_ci" if IS_PYTORCH_CI else os.getenv('PYTORCH_HYPOTHESIS_PROFILE',
-                                                     'dev')
+        "pytorch_ci" if IS_IN_CI else os.getenv('PYTORCH_HYPOTHESIS_PROFILE', 'dev')
     )
 except ImportError:
     print('Fail to import hypothesis in common_utils, tests are not derandomized')
@@ -856,8 +879,11 @@ slow_tests_dict: Optional[Dict[str, float]] = None
 def check_slow_test_from_stats(test):
     global slow_tests_dict
     if slow_tests_dict is None:
-        url = "https://raw.githubusercontent.com/pytorch/test-infra/master/stats/slow-tests.json"
-        slow_tests_dict = fetch_and_cache(".pytorch-slow-tests", url)
+        if not IS_SANDCASTLE and os.getenv("PYTORCH_RUN_DISABLED_TESTS", "0") != "1":
+            url = "https://raw.githubusercontent.com/pytorch/test-infra/master/stats/slow-tests.json"
+            slow_tests_dict = fetch_and_cache(".pytorch-slow-tests.json", url)
+        else:
+            slow_tests_dict = {}
     test_suite = str(test.__class__).split('\'')[1]
     test_name = f'{test._testMethodName} ({test_suite})'
 
@@ -937,12 +963,25 @@ class AssertRaisesContextIgnoreNotImplementedError(unittest.case._AssertRaisesCo
             self.test_case.skipTest(f"not_implemented: {exc_value}")  # type: ignore[attr-defined]
         return super().__exit__(exc_type, exc_value, tb)
 
+
+@contextmanager
+def set_warn_always_context(new_val: bool):
+    old_val = torch.is_warn_always_enabled()
+    torch.set_warn_always(new_val)
+    try:
+        yield
+    finally:
+        torch.set_warn_always(old_val)
+
+
 class TestCase(expecttest.TestCase):
     # NOTE: "precision" lets classes and generated tests set minimum
-    # atol values when comparing tensors. Used by @precisionOverride, for
+    # atol values when comparing tensors. Used by @precisionOverride and @toleranceOverride, for
     # example.
-    # TODO: provide a better mechanism for generated tests to set rtol/atol.
+    # NOTE: "rel_tol" lets classes and generated tests set minimum
+    # rtol values when comparing tensors. Used by @toleranceOverride, for example.
     _precision: float = 0
+    _rel_tol: float = 0
 
     # checker to early terminate test suite if unrecoverable failure occurs.
     def _should_stop_test_suite(self):
@@ -965,6 +1004,14 @@ class TestCase(expecttest.TestCase):
     def precision(self, prec: float) -> None:
         self._precision = prec
 
+    @property
+    def rel_tol(self) -> float:
+        return self._rel_tol
+
+    @rel_tol.setter
+    def rel_tol(self, prec: float) -> None:
+        self._rel_tol = prec
+
     _do_cuda_memory_leak_check = False
     _do_cuda_non_default_stream = False
 
@@ -978,10 +1025,11 @@ class TestCase(expecttest.TestCase):
         test_method = getattr(self, method_name, None)
         if test_method is not None:
             # Wraps the tested method if we should do CUDA memory check.
-            self._do_cuda_memory_leak_check &= getattr(test_method, '_do_cuda_memory_leak_check', True)
-            # FIXME: figure out the flaky -1024 anti-leaks on windows. See #8044
-            if self._do_cuda_memory_leak_check and not IS_WINDOWS:
-                self.wrap_with_cuda_policy(method_name, self.assertLeaksNoCudaTensors)
+            if not TEST_SKIP_CUDA_MEM_LEAK_CHECK:
+                self._do_cuda_memory_leak_check &= getattr(test_method, '_do_cuda_memory_leak_check', True)
+                # FIXME: figure out the flaky -1024 anti-leaks on windows. See #8044
+                if self._do_cuda_memory_leak_check and not IS_WINDOWS:
+                    self.wrap_with_cuda_policy(method_name, self.assertLeaksNoCudaTensors)
 
             # Wraps the tested method if we should enforce non default CUDA stream.
             self._do_cuda_non_default_stream &= getattr(test_method, '_do_cuda_non_default_stream', True)
@@ -1040,7 +1088,6 @@ class TestCase(expecttest.TestCase):
             result.stop()
 
     def setUp(self):
-
         check_slow_test_from_stats(self)
         if TEST_SKIP_FAST:
             if not getattr(self, self._testMethodName).__dict__.get('slow_test', False):
@@ -1105,6 +1152,17 @@ class TestCase(expecttest.TestCase):
     def safeToDense(self, t):
         return t.coalesce().to_dense()
 
+    # Compares torch function with reference function for given sample input (object of SampleInput)
+    # Note: only values are compared, type comparison is not done here
+    def compare_with_reference(self, torch_fn, ref_fn, sample_input, **kwargs):
+        n_inp, n_args, n_kwargs = sample_input.numpy()
+        t_inp, t_args, t_kwargs = sample_input.input, sample_input.args, sample_input.kwargs
+
+        actual = torch_fn(t_inp, *t_args, **t_kwargs)
+        expected = ref_fn(n_inp, *n_args, **n_kwargs)
+
+        self.assertEqual(actual, expected, exact_device=False)
+
     # Compares the given Torch and NumPy functions on the given tensor-like object.
     # NOTE: both torch_fn and np_fn should be functions that take a single
     #   tensor (array). If the torch and/or NumPy function require additional
@@ -1117,7 +1175,10 @@ class TestCase(expecttest.TestCase):
         if isinstance(tensor_like, torch.Tensor):
             assert device is None
             assert dtype is None
-            a = tensor_like.detach().cpu().numpy()
+            t_cpu = tensor_like.detach().cpu()
+            if t_cpu.dtype is torch.bfloat16:
+                t_cpu = t_cpu.float()
+            a = t_cpu.numpy()
             t = tensor_like
         else:
             d = copy.copy(torch_to_numpy_dtype_dict)
@@ -1136,7 +1197,7 @@ class TestCase(expecttest.TestCase):
                 # NOTE: copying an array before conversion is necessary when,
                 #   for example, the array has negative strides.
                 np_result = torch.from_numpy(np_result.copy())
-            if dtype is torch.bfloat16 and torch_result.dtype is torch.bfloat16 and np_result.dtype is torch.float:
+            if t.dtype is torch.bfloat16 and torch_result.dtype is torch.bfloat16 and np_result.dtype is torch.float:
                 torch_result = torch_result.to(torch.float)
 
         self.assertEqual(np_result, torch_result, **kwargs)
@@ -1208,6 +1269,7 @@ class TestCase(expecttest.TestCase):
             rtol, atol = self._getDefaultRtolAndAtol(a.dtype, b.dtype)
 
         atol = max(atol, self.precision)
+        rtol = max(rtol, self.rel_tol)
 
         # Converts to comparison dtype
         dtype = get_comparison_dtype(a, b)
@@ -1235,6 +1297,7 @@ class TestCase(expecttest.TestCase):
         atol = cast(float, atol)
         assert atol is not None
         atol = max(atol, self.precision)
+        rtol = max(rtol, self.rel_tol)
 
         return _compare_scalars_internal(a, b, rtol=rtol, atol=atol, equal_nan=equal_nan)
 
@@ -1249,6 +1312,9 @@ class TestCase(expecttest.TestCase):
         # If you are seeing this function used, that means test is written wrongly
         # and deserves detailed investigation
         return self.assertEqual(*args, exact_dtype=False, **kwargs)
+
+    def _is_dict(self, obj):
+        return isinstance(obj, (dict, torch._C.ScriptDict))  # type: ignore[attr-defined]
 
     # Compares x and y
     # TODO: default exact_device to True
@@ -1350,6 +1416,41 @@ class TestCase(expecttest.TestCase):
                     assert debug_msg_generic is not None
                     debug_msg = "Tensors failed to compare as equal!" + debug_msg_generic
                 super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
+        elif isinstance(x, (np.ndarray, torch.Tensor)) or isinstance(y, (np.ndarray, torch.Tensor)):
+            def maybe_to_tensor(a: Union[np.ndarray, torch.Tensor]) -> Union[np.ndarray, torch.Tensor]:
+                if not isinstance(a, np.ndarray):
+                    return a
+
+                try:
+                    return torch.from_numpy(a)
+                except TypeError:
+                    # This happens if the dtype is non-numeric or not supported by torch
+                    return a
+
+            def maybe_to_list(a: Any) -> Any:
+                if not isinstance(a, (np.ndarray, torch.Tensor)):
+                    return a
+
+                return a.tolist()
+
+            x = maybe_to_tensor(x)
+            y = maybe_to_tensor(y)
+
+            if isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
+                self.assertEqual(
+                    x, y, atol=atol, rtol=rtol, msg=msg, exact_dtype=exact_dtype, exact_device=exact_device
+                )
+            else:
+                # In case we can't convert the array to a tensor, we fall back to comparing x and y as iterables
+                self.assertEqual(
+                    maybe_to_list(x),
+                    maybe_to_list(y),
+                    atol=atol,
+                    rtol=rtol,
+                    msg=msg,
+                    exact_dtype=exact_dtype,
+                    exact_device=exact_device
+                )
         elif isinstance(x, string_classes) and isinstance(y, string_classes):
             debug_msg = ("Attempted to compare [string] types: "
                          f"Expected: {repr(x)}; Actual: {repr(y)}.")
@@ -1358,7 +1459,7 @@ class TestCase(expecttest.TestCase):
             debug_msg = ("Attempted to compare [set] types: "
                          f"Expected: {x}; Actual: {y}.")
             super().assertEqual(x, y, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
-        elif isinstance(x, dict) and isinstance(y, dict):
+        elif self._is_dict(x) and self._is_dict(y):
             if isinstance(x, OrderedDict) and isinstance(y, OrderedDict):
                 self.assertEqual(x.items(), y.items(), atol=atol, rtol=rtol,
                                  msg=msg, exact_dtype=exact_dtype,
@@ -1395,23 +1496,11 @@ class TestCase(expecttest.TestCase):
                 assert debug_msg_scalars is not None
                 debug_msg = "Scalars failed to compare as equal! " + debug_msg_scalars
             super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
-        # Tensor x Numpy array
-        elif isinstance(x, torch.Tensor) and isinstance(y, np.ndarray):
-            self.assertEqual(x, torch.from_numpy(y), atol=atol, rtol=rtol, msg=msg,
-                             exact_dtype=exact_dtype, exact_device=exact_device)
-        # Numpy array x Tensor
-        elif isinstance(x, np.ndarray) and isinstance(y, torch.Tensor):
-            self.assertEqual(torch.from_numpy(x), y, atol=atol, rtol=rtol, msg=msg,
-                             exact_dtype=exact_dtype, exact_device=exact_device)
-        # Numpy array x Numpy array
-        elif isinstance(x, np.ndarray) and isinstance(y, np.ndarray):
-            self.assertEqual(torch.from_numpy(x), torch.from_numpy(y), atol=atol, rtol=rtol, msg=msg,
-                             exact_dtype=exact_dtype, exact_device=exact_device)
         else:
             super().assertEqual(x, y, msg=msg)
 
     def assertNotEqual(self, x, y, msg: Optional[str] = None, *,                                       # type: ignore[override]
-                       atol: Optional[float] = None, rtol: Optional[float] = None, **kwargs) -> None:  # type: ignore[override]
+                       atol: Optional[float] = None, rtol: Optional[float] = None, **kwargs) -> None:
         with self.assertRaises(AssertionError, msg=msg):
             self.assertEqual(x, y, msg, atol=atol, rtol=rtol, **kwargs)
 
@@ -1473,7 +1562,8 @@ class TestCase(expecttest.TestCase):
         """
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
-            callable()
+            with set_warn_always_context(True):
+                callable()
             self.assertTrue(len(ws) == 0, msg)
 
     @contextmanager
@@ -1487,12 +1577,8 @@ class TestCase(expecttest.TestCase):
         pattern = re.compile(regex)
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
-            prev = torch.is_warn_always_enabled()
-            torch.set_warn_always(True)
-            try:
+            with set_warn_always_context(True):
                 yield
-            finally:
-                torch.set_warn_always(prev)
             if len(ws) == 0:
                 self.fail('no warning caught')
             self.assertTrue(any([type(w.message) is category for w in ws]))
@@ -1720,7 +1806,8 @@ def retry(ExceptionToCheck, tries=3, delay=3, skip_after_retries=False):
 # Methods for matrix and tensor generation
 
 def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, high=None,
-                requires_grad: bool = False, noncontiguous: bool = False) -> torch.Tensor:
+                requires_grad: bool = False, noncontiguous: bool = False,
+                exclude_zero: bool = False) -> torch.Tensor:
     """ Creates a random tensor with the given size, device and dtype.
 
         By default, the tensor's values are in the range [-9, 9] for most dtypes. If low
@@ -1732,6 +1819,10 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         If noncontiguous=True, a noncontiguous tensor with the given size will be returned unless the size
         specifies a tensor with a 1 or 0 elements in which case the noncontiguous parameter is ignored because
         it is not possible to create a noncontiguous Tensor with a single element.
+
+        If exclude_zero is passed with True (default is False), all the matching values (with zero) in
+        created tensor are replaced with an epsilon value if floating type, [`eps + `eps`.j] if
+        complex type and 1 if integer/boolean type.
     """
 
     assert low is None or low < 9, "low value too high!"
@@ -1770,6 +1861,18 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         result = torch.repeat_interleave(result, 2, dim=-1)
         result = result[..., ::2]
 
+    if exclude_zero:
+        if dtype in integral_types() or dtype is torch.bool:
+            replace_with = torch.tensor(1, device=device, dtype=dtype)
+        elif dtype in floating_types_and(torch.half, torch.bfloat16):
+            replace_with = torch.tensor(torch.finfo(dtype).eps, device=device, dtype=dtype)
+        else:
+            assert dtype in complex_types()
+            float_dtype = torch.float if dtype is torch.cfloat else torch.double
+            float_eps = torch.tensor(torch.finfo(float_dtype).eps, device=device, dtype=float_dtype)
+            replace_with = torch.complex(float_eps, float_eps)
+        result[result == 0] = replace_with
+
     if dtype in floating_types_and(torch.half, torch.bfloat16) or\
        dtype in complex_types():
         result.requires_grad = requires_grad
@@ -1779,13 +1882,13 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
 def random_square_matrix_of_rank(l, rank, dtype=torch.double, device='cpu'):
     assert rank <= l
     A = torch.randn(l, l, dtype=dtype, device=device)
-    u, s, v = A.svd()
+    u, s, vh = torch.linalg.svd(A, full_matrices=False)
     for i in range(l):
         if i >= rank:
             s[i] = 0
         elif s[i] == 0:
             s[i] = 1
-    return u.mm(torch.diag(s).to(dtype)).mm(v.transpose(0, 1))
+    return (u * s.to(dtype).unsqueeze(-2)) @ vh
 
 def random_well_conditioned_matrix(*shape, dtype, device, mean=1.0, sigma=0.001):
     """
@@ -1804,10 +1907,10 @@ def random_well_conditioned_matrix(*shape, dtype, device, mean=1.0, sigma=0.001)
     x = torch.rand(shape, dtype=dtype, device=device)
     m = x.size(-2)
     n = x.size(-1)
-    u, _, v = x.svd()
+    u, _, vh = torch.linalg.svd(x, full_matrices=False)
     s = (torch.randn(*(shape[:-2] + (min(m, n),)), dtype=primitive_dtype[dtype], device=device) * sigma + mean) \
         .sort(-1, descending=True).values.to(dtype)
-    return (u * s.unsqueeze(-2)) @ v.transpose(-2, -1).conj()
+    return (u * s.unsqueeze(-2)) @ vh
 
 # TODO: remove this (prefer make_symmetric_matrices below)
 def random_symmetric_matrix(l, *batches, **kwargs):
@@ -1893,10 +1996,10 @@ def random_fullrank_matrix_distinct_singular_value(matrix_size, *batch_dims,
         return torch.ones(matrix_size, matrix_size, dtype=dtype, device=device)
 
     A = torch.randn(batch_dims + (matrix_size, matrix_size), dtype=dtype, device=device)
-    u, _, v = A.svd()
+    u, _, vh = torch.linalg.svd(A, full_matrices=False)
     real_dtype = A.real.dtype if A.dtype.is_complex else A.dtype
-    s = torch.arange(1., matrix_size + 1, dtype=real_dtype, device=device).mul_(1.0 / (matrix_size + 1)).diag()
-    return u.matmul(s.expand(batch_dims + (matrix_size, matrix_size)).to(A.dtype).matmul(v.transpose(-2, -1)))
+    s = torch.arange(1., matrix_size + 1, dtype=real_dtype, device=device).mul_(1.0 / (matrix_size + 1))
+    return (u * s.to(A.dtype)) @ vh
 
 
 # Creates a full rank matrix with distinct signular values or
@@ -1905,12 +2008,11 @@ def random_fullrank_matrix_distinct_singular_value(matrix_size, *batch_dims,
 def make_fullrank_matrices_with_distinct_singular_values(*shape, device, dtype):
     assert shape[-1] == shape[-2]
     t = make_tensor(shape, device=device, dtype=dtype)
-    u, _, v = t.svd()
+    u, _, vh = torch.linalg.svd(t, full_matrices=False)
     # TODO: improve the handling of complex tensors here
     real_dtype = t.real.dtype if t.dtype.is_complex else t.dtype
-    s = torch.arange(1., shape[-1] + 1, dtype=real_dtype, device=device).mul_(1.0 / (shape[-1] + 1)).diag()
-    u.matmul(s.expand(*shape).to(t.dtype).matmul(v.transpose(-2, -1)))
-    return t
+    s = torch.arange(1., shape[-1] + 1, dtype=real_dtype, device=device).mul_(1.0 / (shape[-1] + 1))
+    return (u * s.to(dtype)) @ vh
 
 
 def random_matrix(rows, columns, *batch_dims, **kwargs):
@@ -1929,19 +2031,17 @@ def random_matrix(rows, columns, *batch_dims, **kwargs):
         return torch.ones(rows, columns, dtype=dtype, device=device)
 
     A = torch.randn(batch_dims + (rows, columns), dtype=dtype, device=device)
-    u, _, v = A.svd(some=False)
-    s = torch.zeros(rows, columns, dtype=dtype, device=device)
+    u, _, vh = torch.linalg.svd(A, full_matrices=False)
     k = min(rows, columns)
-    for i in range(k):
-        s[i, i] = float(i + 1) / (k + 1)
+    s = torch.linspace(1 / (k + 1), 1, k, dtype=dtype, device=device)
     if singular:
         # make matrix singular
-        s[k - 1, k - 1] = 0
+        s[k - 1] = 0
         if k > 2:
             # increase the order of singularity so that the pivoting
             # in LU factorization will be non-trivial
-            s[0, 0] = 0
-    return u.matmul(s.expand(batch_dims + (rows, columns)).matmul(v.transpose(-2, -1)))
+            s[0] = 0
+    return (u * s.unsqueeze(-2)) @ vh
 
 
 def random_lowrank_matrix(rank, rows, columns, *batch_dims, **kwargs):
@@ -2264,3 +2364,14 @@ def coalescedonoff(f):
         f(self, *args, **kwargs, coalesced=True)
         f(self, *args, **kwargs, coalesced=False)
     return wrapped
+
+@contextlib.contextmanager
+def disable_gc():
+    if gc.isenabled():
+        try:
+            gc.disable()
+            yield
+        finally:
+            gc.enable()
+    else:
+        yield
