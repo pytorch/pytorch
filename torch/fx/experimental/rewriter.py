@@ -66,7 +66,7 @@ class AST_Rewriter(ast.NodeTransformer):
 
     def visit_AnnAssign(self, node):
         """
-        Swap out Python's AnnAssign with an Assign note where the annotation function is called.
+        Swap out Python's AnnAssign with an Assign node where the annotation function is called.
         Example:
              Original:
              y: Tensor_Type(1,2,3, Dyn) = f2(x)
