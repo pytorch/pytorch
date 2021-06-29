@@ -133,14 +133,17 @@ at::Tensor& flatten_copy_out(
   return reshape_copy_out(out, self, shape, false);
 }
 
-at::Tensor& to_copy_out(Tensor& out, const Tensor& self, bool non_blocking) {
-  if (!out.options().memory_format_opt().has_value()) {
+at::Tensor& to_copy_out(
+    Tensor& out,
+    const Tensor& self,
+    bool non_blocking,
+    bool copy_strides) {
+  if (copy_strides) {
     at::native::resize_impl_cpu_(
         out.unsafeGetTensorImpl(), self.sizes(), self.strides());
-    at::native::copy_(out, self, non_blocking);
-    return out;
+  } else {
+    at::native::resize_(out, self.sizes(), c10::nullopt);
   }
-  at::native::resize_(out, self.sizes(), c10::nullopt);
   at::native::copy_(out, self, non_blocking);
   return out;
 }
@@ -507,6 +510,8 @@ std::shared_ptr<TEWrapper> wrapTECompute(
 #else
 
 struct TEWrapper {
+  tensorexpr::KernelArena ka;
+  tensorexpr::KernelScope ks;
   TEWrapper() = default;
   template <typename... Ts>
   void operator()(const Ts&... ts) {
@@ -916,6 +921,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::pow, aten_pow, [](Node* n) -> SROperator {
   };
 });
 // out variant takes precedence over native
+// NB: This impl doesn't work for cpu->cuda copy/cast or vice versa.
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(
     static_runtime::to_copy,
@@ -926,6 +932,16 @@ REGISTER_OPERATOR_FUNCTOR(
       TORCH_CHECK(n->inputs().size() == 4 || n->inputs().size() == 5);
       return [](ProcessedNode* p_node) {
         const auto& self = p_node->Input(0).toTensor();
+        // ignore input 3 (copy)
+        auto non_blocking = p_node->Input(2).toBool(); // non_blocking
+        // handle memory format
+        bool copy_strides = false;
+        c10::optional<c10::MemoryFormat> memory_format = c10::nullopt;
+        if (p_node->inputs().size() == 5) {
+          memory_format = p_node->Input(4).toOptional<c10::MemoryFormat>();
+        }
+        memory_format = memory_format.value_or(c10::MemoryFormat::Preserve);
+
         if (p_node->Output(0).isNone()) {
           // handle dtype, layout, and device
           at::ScalarType dtype;
@@ -939,29 +955,34 @@ REGISTER_OPERATOR_FUNCTOR(
           } else {
             dtype = p_node->Input(1).toScalarType();
           }
-          // handle memory format
-          c10::optional<c10::MemoryFormat> memory_format = c10::nullopt;
-          if (p_node->inputs().size() == 5) {
-            memory_format = p_node->Input(4).toOptional<c10::MemoryFormat>();
-          }
-          if (memory_format.value_or(c10::MemoryFormat::Preserve) ==
-              c10::MemoryFormat::Preserve) {
+
+          if (memory_format == c10::MemoryFormat::Preserve) {
             if (self.is_non_overlapping_and_dense()) {
               memory_format = c10::nullopt;
+              copy_strides = true;
             } else {
               memory_format = self.suggest_memory_format();
             }
           }
+
           // See Note [Explicit nullopt MemoryFormat argument]
+          // Can't use size {0} if memory_format is ChannelLast
           p_node->Output(0) = at::detail::empty_cpu(
-              {0}, dtype, layout, self.device(), c10::nullopt, memory_format);
+              self.sizes(),
+              dtype,
+              layout,
+              self.device(),
+              c10::nullopt,
+              memory_format);
         }
 
-        // ignore input 3 (copy)
-        auto non_blocking = p_node->Input(2).toBool(); // non_blocking
+        copy_strides = copy_strides ||
+            (memory_format == c10::MemoryFormat::Preserve &&
+             self.is_non_overlapping_and_dense());
+
         auto& out_t = p_node->Output(0).toTensor();
         fastResizeToZero(out_t);
-        at::native::to_copy_out(out_t, self, non_blocking);
+        at::native::to_copy_out(out_t, self, non_blocking, copy_strides);
       };
     });
 
@@ -1662,8 +1683,8 @@ REGISTER_OPERATOR_FUNCTOR(aten::full_like, aten_full_like, [](Node* n) -> SROper
   }
   return [](ProcessedNode* p_node) {
     const auto in1_s = p_node->Input(1).toScalar();
+    const auto& in0_t = p_node->Input(0).toTensor();
     if (p_node->Output(0).isNone()) {
-      const auto& in0_t = p_node->Input(0).toTensor();
       const auto dtype = p_node->Input(2).toOptional<c10::ScalarType>();
       const auto layout = p_node->Input(3).toOptional<c10::Layout>();
       const auto device = p_node->Input(4).toOptional<c10::Device>();
@@ -1675,6 +1696,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::full_like, aten_full_like, [](Node* n) -> SROper
           in0_t, dtype, layout, device, pin_memory, memory_format);
     }
     auto& out_t = p_node->Output(0).toTensor();
+    at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
     at::native::fill_out(out_t, in1_s);
   };
 });
