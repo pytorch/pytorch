@@ -131,3 +131,10 @@ using NoTracerDispatchMode = c10::impl::ExcludeSingleDispatchKeyGuard<
 } // namespace impl
 } // namespace tracer
 } // namespace at
+
+namespace c10 {
+namespace impl {
+// If we do not instatiate the templates MSVC will fail to link.
+template struct ExcludeSingleDispatchKeyGuard<
+  DispatchKey::Tracer, /*has_overlap=*/false>;
+}} // namespace c10::impl
