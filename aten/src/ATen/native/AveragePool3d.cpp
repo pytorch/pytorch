@@ -462,11 +462,6 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_cpu) (
   const int64_t oheight = gradOutput.size(-2);
   const int64_t owidth = gradOutput.size(-1);
 
-  /* XXX shape check behavior from TH */
-  const int64_t otime_for_shape_check = pooling_output_shape<int64_t>(itime, kT, padT, dT, 1, ceil_mode);
-  const int64_t oheight_for_shape_check = pooling_output_shape<int64_t>(iheight, kH, padH, dH, 1, ceil_mode);
-  const int64_t owidth_for_shape_check = pooling_output_shape<int64_t>(iwidth, kW, padW, dW, 1, ceil_mode);
-
   gradInput.zero_();
 
   /* backprop */
