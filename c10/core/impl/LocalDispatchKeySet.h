@@ -155,7 +155,7 @@ class ExcludeSingleDispatchKeyGuard {
 };
 
 #define SPECIALIZE_EXCLUDE_GUARD(guard_name, k, has_overlap)              \
-  class C10_API guard_name                                                \
+  class TORCH_API guard_name                                              \
       : c10::impl::ExcludeDispatchKeyGuard<k.raw_repr(), has_overlap> {   \
     using c10::impl::ExcludeDispatchKeyGuard<k.raw_repr(), has_overlap>:: \
         ExcludeDispatchKeyGuard;                                          \
