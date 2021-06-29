@@ -33,7 +33,9 @@ bool is_pinned_cuda(const Tensor& self, c10::optional<Device> device) {
 Tensor pin_memory_cuda(const Tensor& self, c10::optional<Device> device) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!device.has_value() || device->is_cuda());
   if (is_pinned_cuda(self, device)) {
-    return self;
+    // NB: just want to prevent resizing to catch bugs where people expected
+    // to be able to resize after pin_memory
+    return self.variable_data();
   }
   auto* allocator = at::cuda::getPinnedMemoryAllocator();
   auto storage = Storage(
