@@ -253,7 +253,7 @@ __global__ void avg_pool3d_cuda_update_grad_input_atomic(
       {
         for (int iCol = wstart; iCol < wend; ++iCol)
         {
-          gpuAtomicAdd(&gradInput[slice][iFrame][iRow][iCol], val);
+          gpuAtomicAddNoReturn(&gradInput[slice][iFrame][iRow][iCol], val);
         }
       }
     }
