@@ -1,40 +1,70 @@
 import os
 import re
 import sys
+from typing import List
 
 __all__ = [
     "check_code_for_cuda_kernel_launches",
     "check_cuda_kernel_launches",
 ]
 
+# FILES TO EXCLUDE (match is done with suffix using `endswith`)
+# You wouldn't drive without a seatbelt, though, so why would you
+# launch a kernel without some safety? Use this as a quick workaround
+# for a problem with the checker, fix the checker, then de-exclude
+# the files in question.
+exclude_files: List[str] = []
 
-# Regular expression identifies a kernel launch indicator by
-# finding something approximating the pattern ">>>(arguments);"
-# It then requires that `C10_CUDA_KERNEL_LAUNCH_CHECK` be
-# the next command.
-# It allows a single backslash `\` between the end of the launch
-# command and the beginning of the kernel check. This handles
-# cases where the kernel launch is in a multiline preprocessor
-# definition.
+# Without using a C++ AST we can't 100% detect kernel launches, so we
+# model them as having the pattern "<<<parameters>>>(arguments);"
+# We then require that `C10_CUDA_KERNEL_LAUNCH_CHECK` be
+# the next statement.
 #
-# There are various ways this can fail:
-# * If the semicolon is in a string for some reason
-# * If there's a triply-nested template
-# But this should be sufficient to detect and fix most problem
-# instances and can be refined before the test is made binding
-kernel_launch_regex = re.compile(r"""
-    ^.*>>>        # Identifies kernel launch
-    \s*           # Maybe some whitespace (includes newlines)
-    \([^;]+\);    # And then arguments in parens and semi-colon
-    (?!           # Negative lookahead: we trigger if we don't find the launch guard
-        \s*                                  # Maybe some whitespace (includes newlines)
-        \\?                                  # 0 or 1 backslashes (for launches in preprocessor macros)
-        \s*                                  # Maybe some whitespace (includes newlines)
-        (?:[0-9]+: )?                        # Detects and ignores a line numbering, if present
-        \s*                                  # Maybe some whitespace (includes newlines)
-        C10_CUDA_KERNEL_LAUNCH_CHECK\(\);  # Kernel launch guard!
-    )             # End negative lookahead
-""", flags=re.MULTILINE | re.VERBOSE)
+# We model the next statement as ending at the next `}` or `;`.
+# If we see `}` then a clause ended (bad) if we see a semi-colon then
+# we expect the launch check just before it.
+#
+# Since the kernel launch can include lambda statements, it's important
+# to find the correct end-paren of the kernel launch. Doing this with
+# pure regex requires recursive regex, which aren't part of the Python
+# standard library. To avoid an additional dependency, we build a prefix
+# regex that finds the start of a kernel launch, use a paren-matching
+# algorithm to find the end of the launch, and then another regex to
+# determine if a launch check is present.
+
+# Finds potential starts of kernel launches
+kernel_launch_start = re.compile(
+    r"^.*<<<[^>]+>>>\s*\(", flags=re.MULTILINE
+)
+
+# This pattern should start at the character after the final paren of the
+# kernel launch. It returns a match if the launch check is not the next statement
+has_check = re.compile(
+    r"\s*;(?![^;}]*C10_CUDA_KERNEL_LAUNCH_CHECK\(\);)", flags=re.MULTILINE
+)
+
+def find_matching_paren(s: str, startpos: int) -> int:
+    """Given a string "prefix (unknown number of characters) suffix"
+    and the position of the first `(` returns the index of the character
+    1 past the `)`, accounting for paren nesting
+    """
+    opening = 0
+    for i, c in enumerate(s[startpos:]):
+        if c == '(':
+            opening += 1
+        elif c == ')':
+            opening -= 1
+            if opening == 0:
+                return startpos + i + 1
+
+    raise IndexError("Closing parens not found!")
+
+
+def should_exclude_file(filename) -> bool:
+    for exclude_suffix in exclude_files:
+        if filename.endswith(exclude_suffix):
+            return True
+    return False
 
 
 def check_code_for_cuda_kernel_launches(code, filename=None):
@@ -57,10 +87,15 @@ def check_code_for_cuda_kernel_launches(code, filename=None):
     code = [f"{lineno}: {linecode}" for lineno, linecode in code]  # Number the lines
     code = '\n'.join(code)                                         # Put it back together
 
-    results = kernel_launch_regex.findall(code)               # Search for bad launches
-    for r in results:
-        print(f"Missing C10_CUDA_KERNEL_LAUNCH_CHECK in '{filename}'. Context:\n{r}", file=sys.stderr)
-    return len(results)
+    num_launches_without_checks = 0
+    for m in kernel_launch_start.finditer(code):
+        end_paren = find_matching_paren(code, m.end() - 1)
+        if has_check.match(code, end_paren):
+            num_launches_without_checks += 1
+            context = code[m.start():end_paren + 1]
+            print(f"Missing C10_CUDA_KERNEL_LAUNCH_CHECK in '{filename}'. Context:\n{context}", file=sys.stderr)
+
+    return num_launches_without_checks
 
 
 def check_file(filename):
@@ -73,6 +108,8 @@ def check_file(filename):
         The number of unsafe kernel launches in the file
     """
     if not (filename.endswith(".cu") or filename.endswith(".cuh")):
+        return 0
+    if should_exclude_file(filename):
         return 0
     fo = open(filename, "r")
     contents = fo.read()

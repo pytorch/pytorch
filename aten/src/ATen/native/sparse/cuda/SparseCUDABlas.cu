@@ -5,8 +5,6 @@
 #include <ATen/native/sparse/cuda/SparseCUDABlas.cuh>
 #include <c10/cuda/CUDACachingAllocator.h>
 
-#include <TH/THGeneral.h>
-
 #include <cusparse.h>
 #include <ATen/cuda/CUDASolver.h>
 
