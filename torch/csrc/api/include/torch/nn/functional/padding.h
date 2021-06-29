@@ -69,7 +69,7 @@ inline Tensor pad(const Tensor& input,
     } else if (input.dim() == 5) {
       TORCH_CHECK(pad.size() == 6, "5D tensors expect 6 values for padding");
       if (c10::get_if<enumtype::kReflect>(&mode)) {
-        TORCH_CHECK(false, "NotImplementedError");
+        return torch::reflection_pad3d(input, pad);
       } else if (c10::get_if<enumtype::kReplicate>(&mode)) {
         return torch::replication_pad3d(input, pad);
       } else if (c10::get_if<enumtype::kCircular>(&mode)) {
