@@ -320,6 +320,7 @@ core_sources_full = core_sources_full_mobile + [
 ]
 
 libtorch_core_sources = sorted(core_sources_common + core_sources_full + core_trainer_sources)
+libtorch_core_mobile_sources = sorted(core_sources_common + core_sources_full_mobile + core_trainer_sources)
 
 # These files are the only ones that are supported on Windows.
 libtorch_distributed_base_sources = [
@@ -441,7 +442,7 @@ libtorch_extra_sources = libtorch_core_jit_sources + [
     "torch/csrc/autograd/VariableTypeManual.cpp",
     "torch/csrc/autograd/FunctionsManual.cpp",
     "torch/csrc/jit/api/module_save.cpp",
-    "torch/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp",
+    # "torch/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp",
     "torch/csrc/jit/mobile/backport.cpp",
     "torch/csrc/jit/mobile/backport_manager.cpp",
     # To be included for eager symbolication in lite interpreter
@@ -468,6 +469,15 @@ libtorch_extra_sources = libtorch_core_jit_sources + [
 
 def libtorch_sources(gencode_pattern = ":generate-code[{}]"):
     return libtorch_generated_sources(gencode_pattern) + libtorch_core_sources + libtorch_distributed_sources + libtorch_extra_sources
+
+sgx_sources_to_exclude = [
+    "torch/csrc/jit/tensorexpr/llvm_codegen.cpp",
+    "torch/csrc/jit/tensorexpr/llvm_jit.cpp",
+    "torch/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp",
+]
+
+def libtorch_sgx_sources(gencode_pattern = ":generate-code[{}]"):
+    return libtorch_generated_sources(gencode_pattern) + [i for i in libtorch_core_mobile_sources if i not in sgx_sources_to_exclude] + [i for i in libtorch_extra_sources if i not in sgx_sources_to_exclude]
 
 libtorch_cuda_core_sources = [
     "torch/csrc/CudaIPCTypes.cpp",
