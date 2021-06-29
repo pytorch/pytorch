@@ -71,7 +71,7 @@ struct InnerSumCastLoadPolicy<scalar_t, scalar_t>:
     LoadPolicy<scalar_t> {
 };
 
-#if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX)
+#if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX)) && !defined(_MSC_VER)
 template <>
 struct InnerSumCastLoadPolicy<Vectorized<float>, Vectorized<double>> {
   using vec_t = Vectorized<float>;
@@ -123,7 +123,7 @@ struct OuterSumCastLoadPolicy {
   }
 };
 
-#if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX)
+#if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX)) && !defined(_MSC_VER)
 template <>
 struct OuterSumCastLoadPolicy<Vectorized<float>, Vectorized<double>> {
   using vec_t = Vectorized<float>;
@@ -377,7 +377,6 @@ void vectorized_outer_sum(
   using StorePolicy = CastStoreAccumulate<scalar_t, acc_t>;
 
   constexpr int64_t vec_stride = vacc_t::size() * sizeof(scalar_t);
-  const int64_t vec_size = size0 / vacc_t::size();
   constexpr int64_t nrows = 4;
 
   // Input is contiguous over the second (non-reduced) dimension
