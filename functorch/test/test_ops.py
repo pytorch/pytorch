@@ -136,12 +136,10 @@ def is_inplace(op, variant):
 
 
 vjp_fail = {
-    '__getitem__',
-    '__rpow__',
     'linalg.cholesky',
     'linalg.inv',
-    'linalg.matrix_norm',
     'linalg.matrix_power',
+    'linalg.matrix_norm',
     'linalg.norm',
     'nanquantile',
     'quantile',
@@ -216,7 +214,8 @@ class TestOperators(TestCase):
             result = fn(*primals)
             cotangents = tree_map(lambda x: torch.randn_like(x), result)
 
-            _, vjp_fn = vjp(fn, *primals)
+            out, vjp_fn = vjp(fn, *primals)
+            self.assertEqual(out, result)
             result_vjps = vjp_fn(cotangents)
 
             _, vjp_fn = ref_vjp(fn, *primals)
