@@ -989,6 +989,11 @@ class _NnapiSerializer(object):
         _, stop_value = self.get_constant_value(node.inputsAt(3))
         _, step_value = self.get_constant_value(node.inputsAt(4))
 
+        if start_value is None:
+            start_value = 0
+        if stop_value is None:
+            stop_value = sys.maxsize
+
         if start_value < 0:
             start_value += in_oper.shape[dim_value]
         elif start_value == sys.maxsize:
