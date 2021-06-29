@@ -101,7 +101,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'diag', 'masked_scatter', 'masked_select', 'index_fill', 'trace', 'polar', 'cumsum', 'rsub',
     'eig', 'lerp', 'linalg_vector_norm', 'cumprod', 'prod', 'index_copy', 'lu', 'unfold', 'unfold_backward',
     'index', 'masked_fill', 'cross', 'lu_unpack', 'renorm', '_view_as_real_physical', '_conj_physical',
-    'scatter', 'scatter_add',
+    'scatter', 'scatter_add', 'sigmoid', 'sigmoid_backward',
     'conj_physical_'
 }
 
@@ -573,14 +573,14 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         for arg in tensor_args:
             if arg in args_with_derivatives:
                 continue
-            name = arg.name
-            if info and name in info.non_differentiable_arg_names:
+            arg_name = arg.name
+            if info and arg_name in info.non_differentiable_arg_names:
                 continue
-            if name == 'output':
+            if arg_name == 'output':
                 # Double-backwards definitions sometimes take in 'input' and
                 # 'output', but only define the derivative for input.
                 continue
-            body.append(f'check_no_requires_grad({name}, "{name}");')
+            body.append(f'check_no_requires_grad({arg_name}, "{arg_name}", "{name}");')
         return body
 
     def save_variables(
