@@ -605,7 +605,8 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::asFuture(
   auto future = c10::make_intrusive<JitFuture>(
       at::getCustomClassType<c10::intrusive_ptr<Message>>(),
       RpcAgent::getCurrentRpcAgent()->getDevices());
-  std::vector<c10::Storage> storages = message->getStorages();
+  std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> storages =
+      message->getStorages();
   future->markCompleted(std::move(message), std::move(storages));
   return future;
 }

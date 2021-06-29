@@ -374,14 +374,15 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    * IValue::getSubValues() or through pickling in case of Python object; or
    * when 2) customized storage extraction is more efficient.
    */
+  using WeakStorage = c10::weak_intrusive_ptr<c10::StorageImpl>;
   void markCompleted(
       IValue value,
-      c10::optional<std::vector<c10::Storage>> storages = c10::nullopt) {
+      c10::optional<std::vector<WeakStorage>> storages = c10::nullopt) {
     // Start by performing all steps that can throw, before setting any field.
     // Do this before even acquiring the mutex, because extractStorages might
     // acquire the GIL, which could lead to a lock inversion with our mutex.
     // See https://github.com/pytorch/pytorch/issues/58239.
-    std::vector<c10::Storage> actualStorages;
+    std::vector<WeakStorage> actualStorages;
     std::vector<c10::Device> usedDevices;
     try {
       // FIXME We should always extract DataPtrs, in order to catch the case of
@@ -481,7 +482,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
   // This accessor should only be used if we know that the future is
   // completed() with no error.
-  const std::vector<c10::Storage>& storages() const {
+  const std::vector<WeakStorage>& storages() const {
     std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
     AT_ASSERT(!eptr_);
@@ -517,7 +518,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    */
   template <typename T>
   c10::intrusive_ptr<Future> then(T callback, TypePtr type) {
-    using IValueWithStorages = std::tuple<IValue, std::vector<c10::Storage>>;
+    using IValueWithStorages = std::tuple<IValue, std::vector<WeakStorage>>;
 #if __cpp_lib_is_invocable >= 201703
     static_assert(
         guts::disjunction<
@@ -535,7 +536,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
             IValueWithStorages>::value>(
             [&](auto identity) {
               IValue value;
-              std::vector<c10::Storage> storages;
+              std::vector<WeakStorage> storages;
               std::tie(value, storages) = identity(cb)(parentFut);
               childFut->markCompleted(std::move(value), std::move(storages));
             },
@@ -658,11 +659,14 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       event.block(impl_.getStream(event.device()));
     }
 
-    for (const c10::Storage& storage : storages_) {
-      const at::DataPtr& data_ptr = storage.data_ptr();
-      if (!data_ptr.device().is_cpu()) {
+    for (const WeakStorage& weak_storage : storages_) {
+      c10::intrusive_ptr<c10::StorageImpl> storage = weak_storage.lock();
+      if (!storage) {
+        continue;
+      }
+      if (!storage->device().is_cpu()) {
         impl_.recordDataPtrOnStream(
-            data_ptr, impl_.getStream(data_ptr.device()));
+            storage->data_ptr(), impl_.getStream(storage->device()));
       }
     }
   }
@@ -702,16 +706,20 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   }
 
   // Defined in ivalue.cpp.
-  static std::vector<c10::Storage> extractStorages(
+  static std::vector<WeakStorage> extractStorages(
       const at::IValue& value);
 
   static std::vector<c10::Device> getDevicesOfStorages(
       const c10::impl::VirtualGuardImpl& impl,
-      const std::vector<c10::Storage>& storages) {
+      const std::vector<WeakStorage>& storages) {
     c10::DeviceIndex deviceCount = impl.deviceCount();
     std::vector<bool> isDeviceUsed(deviceCount, false);
-    for (const c10::Storage& storage : storages) {
-      c10::Device device = storage.device();
+    for (const WeakStorage& weak_storage : storages) {
+      c10::intrusive_ptr<c10::StorageImpl> storage = weak_storage.lock();
+      if (!storage) {
+        continue;
+      }
+      c10::Device device = storage->device();
       if (!device.is_cpu()) {
         TORCH_CHECK_VALUE(
             device.type() == impl.type(),
@@ -843,7 +851,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
   // A cached version of the storages extracted from the value when the future
   // is first marked completed.
-  std::vector<c10::Storage> storages_;
+  std::vector<WeakStorage> storages_;
 
   // The bounding set of devices that this future, and any of its children, is
   // allowed to use. This is a superset of the set of devices used by the events
