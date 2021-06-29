@@ -242,7 +242,7 @@ auto get_configs_from_heuristics(const cudnnHandle_t handle, const cudnnBackendD
     return plan.getWorkspaceSize() > workspace_size;
   };
 
-  auto sources = get_generator_sources(desc, x, deterministic, allow_tf32, CUDNN_HEUR_MODE_B);
+  auto sources = get_generator_sources(desc, x, deterministic, allow_tf32, CUDNN_HEUR_MODE_INSTANT);
 
   cudnn_frontend::EngineConfigGenerator generator(sources.size(), sources.data());
   auto configs = generator.generate_engine_config(opGraph);
