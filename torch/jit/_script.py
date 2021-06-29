@@ -298,7 +298,7 @@ class ScriptMeta(type):
                     delattr(self, name)
 
         cls.__init__ = init_then_script  # type: ignore[misc]
-        return super(ScriptMeta, cls).__init__(name, bases, attrs)
+        super(ScriptMeta, cls).__init__(name, bases, attrs)
 
 
 class _CachedForward(object):
