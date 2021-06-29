@@ -16,7 +16,7 @@ from torch.distributed.elastic.utils.distributed import (
     get_free_port,
     get_socket_with_port,
 )
-from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, IS_MACOS
+from torch.testing._internal.common_utils import IS_MACOS, IS_WINDOWS, run_tests
 
 
 def _create_c10d_store_mp(is_server, server_addr, port, world_size):
@@ -101,18 +101,22 @@ class DistributedUtilTest(unittest.TestCase):
             )
 
     def test_port_already_in_use_on_server(self):
-        sock = get_socket_with_port()
-        with closing(sock):
-            # try to create a store on the same port without releasing the socket
-            # should raise a IOError
-            port = sock.getsockname()[1]
-            with self.assertRaises(IOError):
-                create_c10d_store(
-                    is_server=True,
-                    server_addr=socket.gethostname(),
-                    server_port=port,
-                    timeout=1,
-                )
+        # try to create the TCPStore server twice on the same port
+        # the second should fail due to a port conflict
+        # first store binds onto a free port
+        # try creating the second store on the port that the first store binded to
+        server_addr = socket.gethostname()
+        pick_free_port = 0
+        store1 = create_c10d_store(
+            is_server=True,
+            server_addr=server_addr,
+            server_port=pick_free_port,
+            timeout=1,
+        )
+        with self.assertRaises(IOError):
+            create_c10d_store(
+                is_server=True, server_addr=server_addr, server_port=store1.port
+            )
 
     def test_port_already_in_use_on_worker(self):
         sock = get_socket_with_port()
