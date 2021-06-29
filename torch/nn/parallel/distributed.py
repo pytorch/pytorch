@@ -366,21 +366,11 @@ class DistributedDataParallel(Module):
                                wrapped module's ``forward`` function. Parameters
                                that don't receive gradients as part of this
                                graph are preemptively marked as being ready to
-                               be reduced. In addition, when running with
-                               ``find_unused_parameters=True`` as of v1.10,
-                               ``DistributedDataParallel`` will work as expected
-                               when not all outputs derived from module parameters
-                               participate in calculating loss and later gradient
-                               computation. In both cases, unused parameter gradients
-                               are not touched by ``DistributedDataParallel`` if they
-                               were unused across all workers. Prior to v1.10, 
-                               all ``forward`` outputs derived from module 
-                               parameters must participate in  loss calculation, 
-                               otherwise ``DistributedDataParallel``
-                               would crash with an error about unreduced parameters.
-                               In addition, any outputs derived from module
-                               parameters that are unused can be detached from the
-                               autogad graph using ``torch.Tensor.detach``.
+                               be reduced. In addition, parameters that may have
+                               been used in the wrapped module's ``forward``
+                               function but were not part of loss computation and
+                               thus would also not receive gradients are
+                               preemptively marked as ready to be reduced.
                                (default: ``False``)
         check_reduction: This argument is deprecated.
         gradient_as_bucket_view (bool): When set to ``True``, gradients will be views
