@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
+#include <torch/csrc/jit/tensorexpr/graph_opt.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
@@ -182,20 +183,26 @@ c10::optional<at::Device> pickDeviceType(const std::shared_ptr<Graph>& graph) {
 // nullopt.
 c10::optional<TensorInfo> getTensorInfoJit(torch::jit::Value* v) {
   auto const& it = v->type()->cast<TensorType>();
+
+  c10::ScalarType dtype = c10::ScalarType::Float;
+
   if (!it) {
     return c10::nullopt;
   }
   if (!it->isComplete()) {
     return c10::nullopt;
   }
-  if (!it->scalarType()) {
-    return c10::nullopt;
+  if (it->scalarType()) {
+    // TODO: ideally we should be strict here and return nullopt if the dtype is
+    // absent in the JIT IR. We're assuming a default Float dtype for now, until
+    // dtype propagation is implemented.
+    dtype = *it->scalarType();
   }
   auto concrete_sizes = it->sizes().concrete_sizes();
   if (!concrete_sizes) {
     return c10::nullopt;
   }
-  return TensorInfo{*concrete_sizes, *it->scalarType()};
+  return TensorInfo{*concrete_sizes, dtype};
 }
 c10::optional<TensorInfo> getTensorInfo(BufHandle b) {
   std::vector<int64_t> dims;
@@ -641,7 +648,7 @@ std::vector<ExprHandle> TensorExprKernel::sizesForValue(
   // need to infer it.
   if (v->type()->kind() == TypeKind::TensorType) {
     auto tt = v->type()->cast<TensorType>();
-    if (tt->isComplete()) {
+    if (tt->sizes().concrete_sizes()) {
       return sizesFromVaryingShape(tt->sizes());
     }
   }
@@ -2358,6 +2365,15 @@ Tensor* tensorexpr::computeOperandValue(
     case aten::conv2d: {
       return computeConv2d(inputs, outputShape, outputType);
     } break;
+    case aten::addmm: {
+      return computeAddMM(inputs, outputShape, outputType);
+    } break;
+    case aten::mean: {
+      return computeMean(inputs, outputShape, outputType);
+    } break;
+    case aten::adaptive_avg_pool2d: {
+      return computeAdaptiveAvgPool2d(inputs, outputShape, outputType);
+    } break;
     default: {
       std::string msg =
           std::string("Unhandled node kind (in computeOperandValue): ") +
@@ -2379,130 +2395,41 @@ c10::optional<ScalarType> findDtypeForValue(const torch::jit::Value* v) {
 
 Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
   auto inputs = v->node()->inputs();
-  switch (v->node()->kind()) {
-    case aten::rand_like:
-      hasRandom_ = true;
-      // fallthrough
-    case aten::add:
-    case aten::sub:
-    case aten::mul:
-    case aten::div:
-    case aten::__and__:
-    case aten::__or__:
-    case aten::__xor__:
-    case aten::__lshift__:
-    case aten::__rshift__:
-    case aten::eq:
-    case aten::ne:
-    case aten::ge:
-    case aten::gt:
-    case aten::le:
-    case aten::lt:
-    case aten::min:
-    case aten::max:
-    case aten::masked_fill:
-    case aten::clamp:
-    case aten::addcmul:
-    case aten::sigmoid:
-    case aten::reciprocal:
-    case aten::neg:
-    case aten::isnan:
-    case aten::relu:
-    case aten::relu6:
-    case aten::leaky_relu:
-    case aten::hardswish:
-    case aten::hardsigmoid:
-    case aten::gelu:
-    case aten::batch_norm:
-    case aten::log:
-    case aten::log10:
-    case aten::log1p:
-    case aten::log2:
-    case aten::exp:
-    case aten::expm1:
-    case aten::erf:
-    case aten::erfc:
-    case aten::cos:
-    case aten::sin:
-    case aten::tan:
-    case aten::type_as:
-    case aten::pow:
-    case aten::fmod:
-    case aten::lerp:
-    case aten::remainder:
-    case aten::acos:
-    case aten::asin:
-    case aten::cosh:
-    case aten::sinh:
-    case aten::atan:
-    case aten::atan2:
-    case aten::tanh:
-    case aten::hardtanh:
-    case aten::hardshrink:
-    case aten::sqrt:
-    case aten::rsqrt:
-    case aten::abs:
-    case aten::ceil:
-    case aten::floor:
-    case aten::round:
-    case aten::trunc:
-    case aten::_cast_Float:
-    case aten::threshold:
-    case aten::where:
-    case aten::frac:
-    case aten::lgamma:
-    case aten::slice:
-    case aten::unsqueeze:
-    case aten::t:
-    case aten::transpose:
-    case aten::expand:
-    case aten::expand_as:
-    case aten::permute:
-    case aten::mm:
-    case aten::matmul:
-    case aten::cat:
-    case aten::view:
-    case aten::reshape:
-    case aten::sum:
-    case aten::softmax:
-    case aten::log_softmax:
-    case aten::conv2d:
-    case aten::to: {
-      std::vector<ArgValue> argInputs;
-      if (v->node()->kind() != aten::to) {
-        for (auto inp : inputs) {
-          argInputs.push_back(toArg(inp));
-        }
-      } else {
-        argInputs.push_back(toArg(inputs[0]));
-      }
-      auto outputType = findDtypeForValue(v->node()->output());
-      std::vector<ExprHandle> outputShape = sizesForValue(v);
-      return computeOperandValue(
-          v->node()->kind(), argInputs, outputShape, outputType, device_);
-    } break;
+  auto op = v->node()->kind();
 
-    case prim::ConstantChunk: {
-      return Compute(
-          "prim_constantchunk",
-          c10::fmap<DimArg>(sizesForValue(v)),
-          [this, v](const std::vector<VarHandle>& axes) {
-            auto const& n = v->node();
-            int64_t dim = n->i(attr::dim);
-            int64_t chunks = n->i(attr::chunks);
-            std::vector<ExprHandle> indices(axes.begin(), axes.end());
-            return chunk(
-                bufs_.at(n->input(0)), v->offset(), dim, chunks, indices);
-          });
-    } break;
-
-    default: {
-      std::string msg = std::string("Unhandled node kind (in computeValue): ") +
-          v->node()->kind().toQualString();
-      throw malformed_input(msg);
-    }
+  if (op == aten::rand_like) {
+    hasRandom_ = true;
   }
-  return nullptr;
+
+  if (op == prim::ConstantChunk) {
+    return Compute(
+        "prim_constantchunk",
+        c10::fmap<DimArg>(sizesForValue(v)),
+        [this, v](const std::vector<VarHandle>& axes) {
+          auto const& n = v->node();
+          int64_t dim = n->i(attr::dim);
+          int64_t chunks = n->i(attr::chunks);
+          std::vector<ExprHandle> indices(axes.begin(), axes.end());
+          return chunk(
+              bufs_.at(n->input(0)), v->offset(), dim, chunks, indices);
+        });
+  }
+
+  std::vector<ArgValue> argInputs;
+  if (op != aten::to) {
+    for (auto inp : inputs) {
+      argInputs.push_back(toArg(inp));
+    }
+  } else {
+    argInputs.push_back(toArg(inputs[0]));
+  }
+  auto outputType = findDtypeForValue(v->node()->output());
+  std::vector<ExprHandle> outputShape = sizesForValue(v);
+
+  if (NNCLoweringFunction custom_lowering = getCustomLoweringFor(op)) {
+    return custom_lowering(argInputs, outputShape, outputType, device_);
+  }
+  return computeOperandValue(op, argInputs, outputShape, outputType, device_);
 }
 
 // Return the (lower, upper) loop bounds if they are constants, else nullopt.
@@ -2850,6 +2777,13 @@ Tensor* TensorExprKernel::bindInput(const torch::jit::Value* input) {
   return result;
 }
 
+NNCLoweringFunction TensorExprKernel::getCustomLoweringFor(
+    c10::Symbol op) const {
+  if (custom_lowerings_.count(op))
+    return custom_lowerings_.at(op);
+  return nullptr;
+}
+
 template <typename T>
 std::vector<size_t> reverse_sort_indices(const std::vector<T>& v) {
   // initialize original index locations
@@ -2883,6 +2817,9 @@ Tensor* TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
   TORCH_INTERNAL_ASSERT(tt->sizes().concrete_sizes());
   const auto sizes = *tt->sizes().concrete_sizes();
   std::vector<int64_t> default_strides = TensorType::contiguousStridesOf(sizes);
+  if (!tt->strides().concrete_sizes()) {
+    return new Tensor(buf, nullptr);
+  }
   TORCH_INTERNAL_ASSERT(tt->strides().concrete_sizes());
   const std::vector<int64_t> strides = *tt->strides().concrete_sizes();
   // All Tensors in NNC are layed out in default, contiguous layout.
@@ -2978,6 +2915,7 @@ void TensorExprKernel::compile() {
   GRAPH_DUMP("TensorExprKernel graph:", graph_);
 
   device_ = *pickDeviceType(graph_);
+  OptimizeCat(graph_);
 
   // Block to collect the Stmts corresponding to all tensors.
   auto block = new Block({});
@@ -3031,12 +2969,12 @@ void TensorExprKernel::compile() {
     const auto& tt = output->type()->expect<TensorType>();
     auto sizes = *tt->sizes().concrete_sizes();
     tensorOutputSizes_.push_back(sizes);
-    auto strides = *tt->strides().concrete_sizes();
+    auto strides = tt->strides().concrete_sizes();
 
     // If the tensor is not dense or overlaps, we have
     // no way of matching the profiled striding
-    if (denseAndNonOverlapping(sizes, strides)) {
-      tensorOutputStrides_.push_back(*tt->strides().concrete_sizes());
+    if (strides && denseAndNonOverlapping(sizes, *strides)) {
+      tensorOutputStrides_.push_back(*strides);
     } else {
       tensorOutputStrides_.push_back(TensorType::contiguousStridesOf(sizes));
     }
@@ -3064,8 +3002,12 @@ void TensorExprKernel::compile() {
       SubgraphUtils::generateNameForGraph(graph_));
 }
 
-TensorExprKernel::TensorExprKernel(const std::shared_ptr<Graph>& subgraph)
-    : graph_(subgraph), code_(subgraph, "") {
+TensorExprKernel::TensorExprKernel(
+    const std::shared_ptr<Graph>& subgraph,
+    std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings)
+    : graph_(subgraph),
+      code_(subgraph, ""),
+      custom_lowerings_(std::move(custom_lowerings)) {
   allow_fallback_ = fallbackAllowed();
   if (!allow_fallback_) {
     compile();
