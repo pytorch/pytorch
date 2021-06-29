@@ -109,10 +109,10 @@ class autocast(object):
     """
     def __init__(self, enabled=True, **kwargs):
         if not torch.cuda.is_available():
-            self.device='cpu'
+            self.device = 'cpu'
             self.fast_dtype = torch.get_autocast_cpu_dtype()
         else:
-            self.device='cuda'
+            self.device = 'cuda'
             self.fast_dtype = torch.get_autocast_gpu_dtype()
         for key, value in kwargs.items():
             if key == 'fast_dtype':
