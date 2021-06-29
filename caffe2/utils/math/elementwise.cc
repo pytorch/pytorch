@@ -370,6 +370,7 @@ CAFFE2_SPECIALIZED_SCALE(float, double)
         ConstEigenVectorArrayMap<TData>(X, N) * static_cast<TData>(*alpha); \
   }
 CAFFE2_SPECIALIZED_AXPY(float, float)
+CAFFE2_SPECIALIZED_AXPY(float, double)
 #undef CAFFE2_SPECIALIZED_AXPY
 
 #else // CAFFE2_USE_EIGEN_FOR_BLAS
@@ -494,6 +495,7 @@ DELEGATE_SCALE(float, double, cblas_dscal)
     BLASFunc(N, static_cast<TData>(*alpha), X, 1, Y, 1); \
   }
 DELEGATE_AXPY(float, float, cblas_saxpy)
+DELEGATE_AXPY(float, double, cblas_daxpy)
 #undef DELEGATE_AXPY
 
 #endif // CAFFE2_USE_EIGEN_FOR_BLAS
