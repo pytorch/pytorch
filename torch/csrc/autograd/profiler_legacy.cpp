@@ -18,6 +18,7 @@
 #include <ATen/record_function.h>
 #include <c10/core/Allocator.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
+#include <c10/util/irange.h>
 
 #include <iostream>
 
@@ -153,6 +154,10 @@ inline const CUDAStubs*& cuda_stubs() {
 }
 }
 
+const CUDAStubs* cudaStubs() {
+  return cuda_stubs();
+}
+
 // Profiler state
 const ProfilerConfig& ProfilerThreadLocalState::config() const {
   return config_;
@@ -222,7 +227,8 @@ void ProfilerThreadLocalState::pushRange(
         record_cuda,
         fn.handle(),
         std::move(shapes),
-        at::RecordFunction::getDefaultNodeId());
+        at::RecordFunction::getDefaultNodeId(),
+        fn.isAsync());
     evt.setSequenceNr(fn.seqNr());
     evt.setFwdThreadId(fn.forwardThreadId());
     evt.setScope((uint8_t)fn.scope());
@@ -294,7 +300,7 @@ std::string ProfilerThreadLocalState::getNvtxStr(
     const char* msg,
     int64_t sequence_nr,
     const std::vector<std::vector<int64_t>>& shapes) const {
-  if (sequence_nr >= 0 || shapes.size() > 0) {
+  if (sequence_nr >= -1 || shapes.size() > 0) {
     std::stringstream s;
 #ifdef __HIP_PLATFORM_HCC__
     s << name.str();
@@ -305,10 +311,16 @@ std::string ProfilerThreadLocalState::getNvtxStr(
 #else
       s << name.str() << msg << sequence_nr;
 #endif
+    } else if (sequence_nr == -1) {
+#ifdef __HIP_PLATFORM_HCC__
+      s << msg;
+#else
+      s << name.str() << msg;
+#endif
     }
     if (shapes.size() > 0) {
       s << ", sizes = [";
-      for (size_t idx = 0; idx < shapes.size(); ++idx) {
+      for (const auto idx : c10::irange(shapes.size())) {
         if (shapes[idx].size() > 0) {
           s << "[";
           for (size_t dim = 0; dim < shapes[idx].size(); ++dim) {
@@ -458,8 +470,6 @@ void pushProfilingCallbacksLegacy() {
   state_ptr->setCallbackHandle(handle);
 }
 
-const int kCUDAWarmupStart = 5;
-
 } // namespace
 
 void registerCUDAMethods(CUDAStubs* stubs) {
@@ -519,23 +529,6 @@ void enableProfilerLegacy(const ProfilerConfig& new_config) {
 
   pushProfilingCallbacksLegacy();
 
-  if (new_config.state == ProfilerState::CUDA) {
-    // event recording appears to have some startup overhead, so we need to
-    // to generate some dummy events first before recording synchronization events
-    for (int idx = 0; idx < kCUDAWarmupStart; ++idx) {
-      cuda_stubs()->onEachDevice([state](int /* unused */) {
-          state->mark("__cuda_startup");
-          cuda_stubs()->synchronize();
-      });
-    }
-
-    // cuda events must be on the same device, so we need a start event recorded
-    // for each gpu. we then use this event to synchronize time on the GPU
-    // with the CPU clock.
-    cuda_stubs()->onEachDevice([state](int d) {
-        state->mark("__cuda_start_event");
-    });
-  }
   state->mark("__start_profile", false);
 }
 
@@ -562,7 +555,7 @@ thread_event_lists disableProfilerLegacy(c10::optional<ProfilerDisableOptions> p
     return thread_event_lists();
   }
 
-  state_ptr->mark("__stop_profile");
+  state_ptr->mark("__stop_profile", false);
   // Note that this will erase the underlying events.
   return state_ptr->consolidate();
 }
@@ -602,7 +595,7 @@ void LegacyEvent::record(bool record_cuda) {
   auto shapeList = shapeListIValue.toList();
   std::vector<std::vector<int64_t>> shapes;
   shapes.reserve(shapeList.size());
-  for (size_t i = 0 ; i < shapeList.size(); ++i) {
+  for (const auto i : c10::irange(shapeList.size())) {
     std::vector<int64_t> s;
     auto shapeIValue = shapeList.get(i);
     TORCH_INTERNAL_ASSERT(
@@ -610,7 +603,7 @@ void LegacyEvent::record(bool record_cuda) {
         "Expected each profiler shape element to contain shapes of type c10::impl::GenericList.")
     auto curShapesList = shapeIValue.toList();
     s.reserve(curShapesList.size());
-    for (size_t j = 0; j < curShapesList.size(); ++j) {
+    for (const auto j : c10::irange(curShapesList.size())) {
       s.emplace_back(curShapesList.get(j).toInt());
     }
     shapes.emplace_back(s);

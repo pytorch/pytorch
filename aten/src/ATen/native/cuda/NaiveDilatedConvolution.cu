@@ -136,6 +136,7 @@ void col2hvol(
    check tensor data locations
 */
 void slow_conv_dilated_location_check(
+    CheckedFrom c,
     const Tensor& input,
     const Tensor& weight,
     const Tensor& bias,
@@ -143,13 +144,12 @@ void slow_conv_dilated_location_check(
   // checking data locations of user-provided tensor arguments
   TensorArg input_arg{input, "input", 2}, weight_arg{weight, "weight", 3},
       bias_arg{bias, "bias", 4}, grad_output_arg{grad_output, "grad_output", 5};
-  checkAllSameGPU("slow_conv_dilated_all_cuda_template", {input_arg, weight_arg});
+  checkAllSameGPU(c, {input_arg, weight_arg});
   if (bias.defined()) {
-    checkAllSameGPU("slow_conv_dilated_all_cuda_template", {input_arg, bias_arg});
+    checkAllSameGPU(c, {input_arg, bias_arg});
   }
   if (grad_output.defined()) {
-    checkAllSameGPU(
-        "slow_conv_dilated_all_cuda_template", {input_arg, grad_output_arg});
+    checkAllSameGPU(c, {input_arg, grad_output_arg});
   }
   // we are not checking the data locations of other tensor
   // arguments such as output, grad_input, etc because of these are
@@ -178,7 +178,7 @@ void slow_conv_dilated_all_cuda_template(
     IntArrayRef stride_size,
     IntArrayRef pad_size,
     IntArrayRef dilation_size) {
-  slow_conv_dilated_location_check(input, weight, bias, grad_output);
+  slow_conv_dilated_location_check(__func__, input, weight, bias, grad_output);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   auto options = input.options();
   // The rear part of input tensor sizes:
@@ -387,11 +387,14 @@ void slow_conv_dilated_all_cuda_template(
 Tensor slow_conv_dilated2d_cuda(
     const Tensor& input,
     const Tensor& weight,
-    IntArrayRef kernel_size,
-    const Tensor& bias,
+    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride_size,
     IntArrayRef pad_size,
     IntArrayRef dilation_size) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
+
   Tensor undefined;
   internal::slow_conv_dilated_shape_check<2>(
       input,
@@ -490,11 +493,14 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated2d_backward_cuda(
 Tensor slow_conv_dilated3d_cuda(
     const Tensor& input,
     const Tensor& weight,
-    IntArrayRef kernel_size,
-    const Tensor& bias,
+    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride_size,
     IntArrayRef pad_size,
     IntArrayRef dilation_size) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
+
   Tensor undefined;
   internal::slow_conv_dilated_shape_check<3>(
       input,

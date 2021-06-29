@@ -9,14 +9,14 @@
 namespace at {
 namespace native {
 
-Tensor& lerp_cpu_tensor_out(Tensor& result, const Tensor& self,
-                            const Tensor& end, const Tensor& weight) {
+Tensor& lerp_cpu_tensor_out(const Tensor& self,
+                            const Tensor& end, const Tensor& weight, Tensor& result) {
   lerp_kernel_tensor_weight(kCPU, result, self, end, weight);
   return result;
 }
 
-Tensor& lerp_cpu_scalar_out(Tensor& result, const Tensor& self,
-                            const Tensor& end, const Scalar& weight) {
+Tensor& lerp_cpu_scalar_out(const Tensor& self,
+                            const Tensor& end, const Scalar& weight, Tensor& result) {
   lerp_kernel_scalar_weight(kCPU, result, self, end, weight);
   return result;
 }
@@ -43,7 +43,9 @@ Tensor lerp_cpu_scalar(const Tensor& self, const Tensor& end, const Scalar& weig
   return result;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(lerp_kernel_scalar_weight);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(lerp_kernel_tensor_weight);
 
 } // namespace native

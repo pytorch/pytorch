@@ -41,12 +41,19 @@ struct id_int_lt {
 // operations it can't.
 class TORCH_CUDA_CU_API ReplayTransformations : public IterVisitor {
  protected:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const std::vector<IterDomain*>& target_domain_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unordered_map<IterDomain*, IterDomain*> id_map_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unordered_map<IterDomain*, size_t> leaf_ids_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<IterDomain*> leaf_vec_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   size_t counter = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool error_on_failure_ = true;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool ran_replay = false; // Mark if replay has been run
   using IterVisitor::handle;
 

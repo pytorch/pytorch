@@ -1,16 +1,23 @@
+import collections
+import functools
+import itertools
+import math
+import os
+import re
+import unittest
+from typing import Any, Callable, Iterator, List, Tuple
+
 import torch
 
-import math
-from pathlib import PurePosixPath
-import random
-
 from torch.testing._internal.common_utils import \
-    (TestCase, make_tensor, run_tests, slowTest)
-from torch.testing._internal.framework_utils import calculate_shards
+    (IS_FBCODE, IS_SANDCASTLE, IS_WINDOWS, TestCase, make_tensor, run_tests, skipIfRocm, slowTest)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, onlyCUDA, onlyOnCPUAndCUDA, dtypes)
-from torch.testing._internal import mypy_wrapper
-from torch.testing._internal import print_test_stats
+    (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
+     get_device_type_test_bases, instantiate_device_type_tests, onlyCUDA, onlyOnCPUAndCUDA,
+     deviceCountAtLeast)
+from torch.testing._internal.common_methods_invocations import op_db
+import torch.testing._internal.opinfo_helper as opinfo_helper
+from torch.testing._asserts import UsageError
 
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):
@@ -439,9 +446,9 @@ class TestTesting(TestCase):
 
     @dtypes(torch.bool, torch.long, torch.float, torch.cfloat)
     def test_make_tensor(self, device, dtype):
-        def check(size, low, high, requires_grad, discontiguous):
+        def check(size, low, high, requires_grad, noncontiguous):
             t = make_tensor(size, device, dtype, low=low, high=high,
-                            requires_grad=requires_grad, discontiguous=discontiguous)
+                            requires_grad=requires_grad, noncontiguous=noncontiguous)
 
             self.assertEqual(t.shape, size)
             self.assertEqual(t.device, torch.device(device))
@@ -459,7 +466,7 @@ class TestTesting(TestCase):
                 self.assertFalse(t.requires_grad)
 
             if t.numel() > 1:
-                self.assertEqual(t.is_contiguous(), not discontiguous)
+                self.assertEqual(t.is_contiguous(), not noncontiguous)
             else:
                 self.assertTrue(t.is_contiguous())
 
@@ -482,7 +489,7 @@ class TestTesting(TestCase):
     def test_cuda_assert_should_stop_common_utils_test_suite(self, device):
         # test to ensure common_utils.py override has early termination for CUDA.
         stderr = TestCase.runWithPytorchAPIUsageStderr("""\
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import torch
 from torch.testing._internal.common_utils import (TestCase, run_tests, slowTest)
@@ -515,7 +522,7 @@ if __name__ == '__main__':
     def test_cuda_assert_should_stop_common_device_type_test_suite(self, device):
         # test to ensure common_device_type.py override has early termination for CUDA.
         stderr = TestCase.runWithPytorchAPIUsageStderr("""\
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import torch
 from torch.testing._internal.common_utils import (TestCase, run_tests, slowTest)
@@ -555,7 +562,7 @@ if __name__ == '__main__':
     def test_cuda_assert_should_not_stop_common_distributed_test_suite(self, device):
         # test to ensure common_distributed.py override should not early terminate CUDA.
         stderr = TestCase.runWithPytorchAPIUsageStderr("""\
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import torch
 from torch.testing._internal.common_utils import (run_tests, slowTest)
@@ -588,817 +595,660 @@ if __name__ == '__main__':
         # we are currently disabling CUDA early termination for distributed tests.
         self.assertIn('Ran 2 test', stderr)
 
+    @onlyOnCPUAndCUDA
+    def test_get_supported_dtypes(self, device):
+        # Test the `get_supported_dtypes` helper function.
+        # We acquire the dtypes for few Ops dynamically and verify them against
+        # the correct statically described values.
+        ops_to_test = list(filter(lambda op: op.name in ['atan2', 'topk', 'xlogy'], op_db))
+
+        for op in ops_to_test:
+            dynamic_dtypes = opinfo_helper.get_supported_dtypes(op.op, op.sample_inputs_func, self.device_type)
+            dynamic_dispatch = opinfo_helper.dtypes_dispatch_hint(dynamic_dtypes)
+            if self.device_type == 'cpu':
+                dtypes = op.dtypesIfCPU
+            else:  # device_type ='cuda'
+                dtypes = op.dtypesIfCUDA
+
+            self.assertTrue(set(dtypes) == set(dynamic_dtypes))
+            self.assertTrue(set(dtypes) == set(dynamic_dispatch.dispatch_fn()))
 
 instantiate_device_type_tests(TestTesting, globals())
 
 
-class TestMypyWrapper(TestCase):
-    def test_glob(self):
-        # can match individual files
-        self.assertTrue(mypy_wrapper.glob(
-            pattern='test/test_torch.py',
-            filename=PurePosixPath('test/test_torch.py'),
-        ))
-        self.assertFalse(mypy_wrapper.glob(
-            pattern='test/test_torch.py',
-            filename=PurePosixPath('test/test_testing.py'),
-        ))
-
-        # dir matters
-        self.assertFalse(mypy_wrapper.glob(
-            pattern='tools/codegen/utils.py',
-            filename=PurePosixPath('torch/nn/modules.py'),
-        ))
-        self.assertTrue(mypy_wrapper.glob(
-            pattern='setup.py',
-            filename=PurePosixPath('setup.py'),
-        ))
-        self.assertFalse(mypy_wrapper.glob(
-            pattern='setup.py',
-            filename=PurePosixPath('foo/setup.py'),
-        ))
-        self.assertTrue(mypy_wrapper.glob(
-            pattern='foo/setup.py',
-            filename=PurePosixPath('foo/setup.py'),
-        ))
-
-        # can match dirs
-        self.assertTrue(mypy_wrapper.glob(
-            pattern='torch',
-            filename=PurePosixPath('torch/random.py'),
-        ))
-        self.assertTrue(mypy_wrapper.glob(
-            pattern='torch',
-            filename=PurePosixPath('torch/nn/cpp.py'),
-        ))
-        self.assertFalse(mypy_wrapper.glob(
-            pattern='torch',
-            filename=PurePosixPath('tools/fast_nvcc/fast_nvcc.py'),
-        ))
-
-        # can match wildcards
-        self.assertTrue(mypy_wrapper.glob(
-            pattern='tools/autograd/*.py',
-            filename=PurePosixPath('tools/autograd/gen_autograd.py'),
-        ))
-        self.assertFalse(mypy_wrapper.glob(
-            pattern='tools/autograd/*.py',
-            filename=PurePosixPath('tools/autograd/deprecated.yaml'),
-        ))
-
-
-def fakehash(char):
-    return char * 40
-
-
-def dummy_meta_meta() -> print_test_stats.ReportMetaMeta:
-    return {
-        'build_pr': '',
-        'build_tag': '',
-        'build_sha1': '',
-        'build_branch': '',
-        'build_job': '',
-        'build_workflow_id': '',
-    }
-
-
-def makecase(name, seconds, *, errored=False, failed=False, skipped=False):
-    return {
-        'name': name,
-        'seconds': seconds,
-        'errored': errored,
-        'failed': failed,
-        'skipped': skipped,
-    }
-
-
-def make_report_v1(tests) -> print_test_stats.Version1Report:
-    suites = {
-        suite_name: {
-            'total_seconds': sum(case['seconds'] for case in cases),
-            'cases': cases,
-        }
-        for suite_name, cases in tests.items()
-    }
-    return {
-        **dummy_meta_meta(),
-        'total_seconds': sum(s['total_seconds'] for s in suites.values()),
-        'suites': suites,
-    }
-
-
-def make_case_v2(seconds, status=None) -> print_test_stats.Version2Case:
-    return {
-        'seconds': seconds,
-        'status': status,
-    }
-
-
-def make_report_v2(tests) -> print_test_stats.Version2Report:
-    files = {}
-    for file_name, file_suites in tests.items():
-        suites = {
-            suite_name: {
-                'total_seconds': sum(case['seconds'] for case in cases.values()),
-                'cases': cases,
-            }
-            for suite_name, cases in file_suites.items()
-        }
-        files[file_name] = {
-            'suites': suites,
-            'total_seconds': sum(suite['total_seconds'] for suite in suites.values()),
-        }
-    return {
-        **dummy_meta_meta(),
-        'format_version': 2,
-        'total_seconds': sum(s['total_seconds'] for s in files.values()),
-        'files': files,
-    }
-
-
-class TestPrintTestStats(TestCase):
-    maxDiff = None
-
-    version1_report: print_test_stats.Version1Report = make_report_v1({
-        # input ordering of the suites is ignored
-        'Grault': [
-            # not printed: status same and time similar
-            makecase('test_grault0', 4.78, failed=True),
-            # status same, but time increased a lot
-            makecase('test_grault2', 1.473, errored=True),
-        ],
-        # individual tests times changed, not overall suite
-        'Qux': [
-            # input ordering of the test cases is ignored
-            makecase('test_qux1', 0.001, skipped=True),
-            makecase('test_qux6', 0.002, skipped=True),
-            # time in bounds, but status changed
-            makecase('test_qux4', 7.158, failed=True),
-            # not printed because it's the same as before
-            makecase('test_qux7', 0.003, skipped=True),
-            makecase('test_qux5', 11.968),
-            makecase('test_qux3', 23.496),
-        ],
-        # new test suite
-        'Bar': [
-            makecase('test_bar2', 3.742, failed=True),
-            makecase('test_bar1', 50.447),
-        ],
-        # overall suite time changed but no individual tests
-        'Norf': [
-            makecase('test_norf1', 3),
-            makecase('test_norf2', 3),
-            makecase('test_norf3', 3),
-            makecase('test_norf4', 3),
-        ],
-        # suite doesn't show up if it doesn't change enough
-        'Foo': [
-            makecase('test_foo1', 42),
-            makecase('test_foo2', 56),
-        ],
-    })
-
-    version2_report: print_test_stats.Version2Report = make_report_v2(
-        {
-            'test_a': {
-                'Grault': {
-                    'test_grault0': make_case_v2(4.78, 'failed'),
-                    'test_grault2': make_case_v2(1.473, 'errored'),
-                },
-                'Qux': {
-                    'test_qux1': make_case_v2(0.001, 'skipped'),
-                    'test_qux6': make_case_v2(0.002, 'skipped'),
-                    'test_qux4': make_case_v2(7.158, 'failed'),
-                    'test_qux7': make_case_v2(0.003, 'skipped'),
-                    'test_qux8': make_case_v2(11.968),
-                    'test_qux3': make_case_v2(23.496),
-                }
-            },
-            'test_b': {
-                'Bar': {
-                    'test_bar2': make_case_v2(3.742, 'failed'),
-                    'test_bar1': make_case_v2(50.447),
-                },
-                # overall suite time changed but no individual tests
-                'Norf': {
-                    'test_norf1': make_case_v2(3),
-                    'test_norf2': make_case_v2(3),
-                    'test_norf3': make_case_v2(3),
-                    'test_norf4': make_case_v2(3),
-                },
-            },
-            'test_c': {
-                'Foo': {
-                    'test_foo1': make_case_v2(42),
-                    'test_foo2': make_case_v2(56),
-                },
-            }
-        })
-
-    def test_simplify(self):
-        self.assertEqual(
-            {
-                '': {
-                    'Bar': {
-                        'test_bar1': {'seconds': 50.447, 'status': None},
-                        'test_bar2': {'seconds': 3.742, 'status': 'failed'},
-                    },
-                    'Foo': {
-                        'test_foo1': {'seconds': 42, 'status': None},
-                        'test_foo2': {'seconds': 56, 'status': None},
-                    },
-                    'Grault': {
-                        'test_grault0': {'seconds': 4.78, 'status': 'failed'},
-                        'test_grault2': {'seconds': 1.473, 'status': 'errored'},
-                    },
-                    'Norf': {
-                        'test_norf1': {'seconds': 3, 'status': None},
-                        'test_norf3': {'seconds': 3, 'status': None},
-                        'test_norf2': {'seconds': 3, 'status': None},
-                        'test_norf4': {'seconds': 3, 'status': None},
-                    },
-                    'Qux': {
-                        'test_qux1': {'seconds': 0.001, 'status': 'skipped'},
-                        'test_qux3': {'seconds': 23.496, 'status': None},
-                        'test_qux4': {'seconds': 7.158, 'status': 'failed'},
-                        'test_qux5': {'seconds': 11.968, 'status': None},
-                        'test_qux6': {'seconds': 0.002, 'status': 'skipped'},
-                        'test_qux7': {'seconds': 0.003, 'status': 'skipped'},
-                    },
-                },
-            },
-            print_test_stats.simplify(self.version1_report)
-        )
-
-        self.assertEqual(
-            {
-                'test_a': {
-                    'Grault': {
-                        'test_grault0': {'seconds': 4.78, 'status': 'failed'},
-                        'test_grault2': {'seconds': 1.473, 'status': 'errored'},
-                    },
-                    'Qux': {
-                        'test_qux1': {'seconds': 0.001, 'status': 'skipped'},
-                        'test_qux3': {'seconds': 23.496, 'status': None},
-                        'test_qux4': {'seconds': 7.158, 'status': 'failed'},
-                        'test_qux6': {'seconds': 0.002, 'status': 'skipped'},
-                        'test_qux7': {'seconds': 0.003, 'status': 'skipped'},
-                        'test_qux8': {'seconds': 11.968, 'status': None},
-                    },
-                },
-                'test_b': {
-                    'Bar': {
-                        'test_bar1': {'seconds': 50.447, 'status': None},
-                        'test_bar2': {'seconds': 3.742, 'status': 'failed'},
-                    },
-                    'Norf': {
-                        'test_norf1': {'seconds': 3, 'status': None},
-                        'test_norf2': {'seconds': 3, 'status': None},
-                        'test_norf3': {'seconds': 3, 'status': None},
-                        'test_norf4': {'seconds': 3, 'status': None},
-                    },
-                },
-                'test_c': {
-                    'Foo': {
-                        'test_foo1': {'seconds': 42, 'status': None},
-                        'test_foo2': {'seconds': 56, 'status': None},
-                    },
-                },
-            },
-            print_test_stats.simplify(self.version2_report),
-        )
-
-    def test_analysis(self):
-        head_report = self.version1_report
-
-        base_reports = {
-            # bbbb has no reports, so base is cccc instead
-            fakehash('b'): [],
-            fakehash('c'): [
-                make_report_v1({
-                    'Baz': [
-                        makecase('test_baz2', 13.605),
-                        # no recent suites have & skip this test
-                        makecase('test_baz1', 0.004, skipped=True),
-                    ],
-                    'Foo': [
-                        makecase('test_foo1', 43),
-                        # test added since dddd
-                        makecase('test_foo2', 57),
-                    ],
-                    'Grault': [
-                        makecase('test_grault0', 4.88, failed=True),
-                        makecase('test_grault1', 11.967, failed=True),
-                        makecase('test_grault2', 0.395, errored=True),
-                        makecase('test_grault3', 30.460),
-                    ],
-                    'Norf': [
-                        makecase('test_norf1', 2),
-                        makecase('test_norf2', 2),
-                        makecase('test_norf3', 2),
-                        makecase('test_norf4', 2),
-                    ],
-                    'Qux': [
-                        makecase('test_qux3', 4.978, errored=True),
-                        makecase('test_qux7', 0.002, skipped=True),
-                        makecase('test_qux2', 5.618),
-                        makecase('test_qux4', 7.766, errored=True),
-                        makecase('test_qux6', 23.589, failed=True),
-                    ],
-                }),
-            ],
-            fakehash('d'): [
-                make_report_v1({
-                    'Foo': [
-                        makecase('test_foo1', 40),
-                        # removed in cccc
-                        makecase('test_foo3', 17),
-                    ],
-                    'Baz': [
-                        # not skipped, so not included in stdev
-                        makecase('test_baz1', 3.14),
-                    ],
-                    'Qux': [
-                        makecase('test_qux7', 0.004, skipped=True),
-                        makecase('test_qux2', 6.02),
-                        makecase('test_qux4', 20.932),
-                    ],
-                    'Norf': [
-                        makecase('test_norf1', 3),
-                        makecase('test_norf2', 3),
-                        makecase('test_norf3', 3),
-                        makecase('test_norf4', 3),
-                    ],
-                    'Grault': [
-                        makecase('test_grault0', 5, failed=True),
-                        makecase('test_grault1', 14.325, failed=True),
-                        makecase('test_grault2', 0.31, errored=True),
-                    ],
-                }),
-            ],
-            fakehash('e'): [],
-            fakehash('f'): [
-                make_report_v1({
-                    'Foo': [
-                        makecase('test_foo3', 24),
-                        makecase('test_foo1', 43),
-                    ],
-                    'Baz': [
-                        makecase('test_baz2', 16.857),
-                    ],
-                    'Qux': [
-                        makecase('test_qux2', 6.422),
-                        makecase('test_qux4', 6.382, errored=True),
-                    ],
-                    'Norf': [
-                        makecase('test_norf1', 0.9),
-                        makecase('test_norf3', 0.9),
-                        makecase('test_norf2', 0.9),
-                        makecase('test_norf4', 0.9),
-                    ],
-                    'Grault': [
-                        makecase('test_grault0', 4.7, failed=True),
-                        makecase('test_grault1', 13.146, failed=True),
-                        makecase('test_grault2', 0.48, errored=True),
-                    ],
-                }),
-            ],
-        }
-
-        simpler_head = print_test_stats.simplify(head_report)
-        simpler_base = {}
-        for commit, reports in base_reports.items():
-            simpler_base[commit] = [print_test_stats.simplify(r) for r in reports]
-        analysis = print_test_stats.analyze(
-            head_report=simpler_head,
-            base_reports=simpler_base,
-        )
-
-        self.assertEqual(
-            '''\
-
-- class Baz:
--     # was   15.23s ±   2.30s
--
--     def test_baz1: ...
--         # was   0.004s           (skipped)
--
--     def test_baz2: ...
--         # was  15.231s ±  2.300s
-
-
-  class Grault:
-      # was   48.86s ±   1.19s
-      # now    6.25s
-
-    - def test_grault1: ...
-    -     # was  13.146s ±  1.179s (failed)
-
-    - def test_grault3: ...
-    -     # was  30.460s
-
-
-  class Qux:
-      # was   41.66s ±   1.06s
-      # now   42.63s
-
-    - def test_qux2: ...
-    -     # was   6.020s ±  0.402s
-
-    ! def test_qux3: ...
-    !     # was   4.978s           (errored)
-    !     # now  23.496s
-
-    ! def test_qux4: ...
-    !     # was   7.074s ±  0.979s (errored)
-    !     # now   7.158s           (failed)
-
-    ! def test_qux6: ...
-    !     # was  23.589s           (failed)
-    !     # now   0.002s           (skipped)
-
-    + def test_qux1: ...
-    +     # now   0.001s           (skipped)
-
-    + def test_qux5: ...
-    +     # now  11.968s
-
-
-+ class Bar:
-+     # now   54.19s
-+
-+     def test_bar1: ...
-+         # now  50.447s
-+
-+     def test_bar2: ...
-+         # now   3.742s           (failed)
-
-''',
-            print_test_stats.anomalies(analysis),
-        )
-
-    def test_graph(self):
-        # HEAD is on master
-        self.assertEqual(
-            '''\
-Commit graph (base is most recent master ancestor with at least one S3 report):
-
-    : (master)
-    |
-    * aaaaaaaaaa (HEAD)              total time   502.99s
-    * bbbbbbbbbb (base)   1 report,  total time    47.84s
-    * cccccccccc          1 report,  total time   332.50s
-    * dddddddddd          0 reports
-    |
-    :
-''',
-            print_test_stats.graph(
-                head_sha=fakehash('a'),
-                head_seconds=502.99,
-                base_seconds={
-                    fakehash('b'): [47.84],
-                    fakehash('c'): [332.50],
-                    fakehash('d'): [],
-                },
-                on_master=True,
-            )
-        )
-
-        self.assertEqual(
-            '''\
-Commit graph (base is most recent master ancestor with at least one S3 report):
-
-    : (master)
-    |
-    | * aaaaaaaaaa (HEAD)            total time  9988.77s
-    |/
-    * bbbbbbbbbb (base) 121 reports, total time  7654.32s ±   55.55s
-    * cccccccccc         20 reports, total time  5555.55s ±  253.19s
-    * dddddddddd          1 report,  total time  1234.56s
-    |
-    :
-''',
-            print_test_stats.graph(
-                head_sha=fakehash('a'),
-                head_seconds=9988.77,
-                base_seconds={
-                    fakehash('b'): [7598.77] * 60 + [7654.32] + [7709.87] * 60,
-                    fakehash('c'): [5308.77] * 10 + [5802.33] * 10,
-                    fakehash('d'): [1234.56],
-                },
-                on_master=False,
-            )
-        )
-
-        self.assertEqual(
-            '''\
-Commit graph (base is most recent master ancestor with at least one S3 report):
-
-    : (master)
-    |
-    | * aaaaaaaaaa (HEAD)            total time    25.52s
-    | |
-    | : (5 commits)
-    |/
-    * bbbbbbbbbb          0 reports
-    * cccccccccc          0 reports
-    * dddddddddd (base)  15 reports, total time    58.92s ±   25.82s
-    |
-    :
-''',
-            print_test_stats.graph(
-                head_sha=fakehash('a'),
-                head_seconds=25.52,
-                base_seconds={
-                    fakehash('b'): [],
-                    fakehash('c'): [],
-                    fakehash('d'): [52.25] * 14 + [152.26],
-                },
-                on_master=False,
-                ancestry_path=5,
-            )
-        )
-
-        self.assertEqual(
-            '''\
-Commit graph (base is most recent master ancestor with at least one S3 report):
-
-    : (master)
-    |
-    | * aaaaaaaaaa (HEAD)            total time     0.08s
-    |/|
-    | : (1 commit)
-    |
-    * bbbbbbbbbb          0 reports
-    * cccccccccc (base)   1 report,  total time     0.09s
-    * dddddddddd          3 reports, total time     0.10s ±    0.05s
-    |
-    :
-''',
-            print_test_stats.graph(
-                head_sha=fakehash('a'),
-                head_seconds=0.08,
-                base_seconds={
-                    fakehash('b'): [],
-                    fakehash('c'): [0.09],
-                    fakehash('d'): [0.05, 0.10, 0.15],
-                },
-                on_master=False,
-                other_ancestors=1,
-            )
-        )
-
-        self.assertEqual(
-            '''\
-Commit graph (base is most recent master ancestor with at least one S3 report):
-
-    : (master)
-    |
-    | * aaaaaaaaaa (HEAD)            total time     5.98s
-    | |
-    | : (1 commit)
-    |/|
-    | : (7 commits)
-    |
-    * bbbbbbbbbb (base)   2 reports, total time     6.02s ±    1.71s
-    * cccccccccc          0 reports
-    * dddddddddd         10 reports, total time     5.84s ±    0.92s
-    |
-    :
-''',
-            print_test_stats.graph(
-                head_sha=fakehash('a'),
-                head_seconds=5.98,
-                base_seconds={
-                    fakehash('b'): [4.81, 7.23],
-                    fakehash('c'): [],
-                    fakehash('d'): [4.97] * 5 + [6.71] * 5,
-                },
-                on_master=False,
-                ancestry_path=1,
-                other_ancestors=7,
-            )
-        )
-
-    def test_regression_info(self):
-        self.assertEqual(
-            '''\
------ Historic stats comparison result ------
-
-    job: foo_job
-    commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-
-
-  class Foo:
-      # was   42.50s ±   2.12s
-      # now    3.02s
-
-    - def test_bar: ...
-    -     # was   1.000s
-
-    ! def test_foo: ...
-    !     # was  41.500s ±  2.121s
-    !     # now   0.020s           (skipped)
-
-    + def test_baz: ...
-    +     # now   3.000s
-
-
-Commit graph (base is most recent master ancestor with at least one S3 report):
-
-    : (master)
-    |
-    | * aaaaaaaaaa (HEAD)            total time     3.02s
-    |/
-    * bbbbbbbbbb (base)   1 report,  total time    41.00s
-    * cccccccccc          1 report,  total time    43.00s
-    |
-    :
-
-Removed  (across    1 suite)      1 test,  totaling -   1.00s
-Modified (across    1 suite)      1 test,  totaling -  41.48s ±   2.12s
-Added    (across    1 suite)      1 test,  totaling +   3.00s
-''',
-            print_test_stats.regression_info(
-                head_sha=fakehash('a'),
-                head_report=make_report_v1({
-                    'Foo': [
-                        makecase('test_foo', 0.02, skipped=True),
-                        makecase('test_baz', 3),
-                    ]}),
-                base_reports={
-                    fakehash('b'): [
-                        make_report_v1({
-                            'Foo': [
-                                makecase('test_foo', 40),
-                                makecase('test_bar', 1),
-                            ],
-                        }),
-                    ],
-                    fakehash('c'): [
-                        make_report_v1({
-                            'Foo': [
-                                makecase('test_foo', 43),
-                            ],
-                        }),
-                    ],
-                },
-                job_name='foo_job',
-                on_master=False,
-                ancestry_path=0,
-                other_ancestors=0,
-            )
-        )
-
-    def test_regression_info_new_job(self):
-        self.assertEqual(
-            '''\
------ Historic stats comparison result ------
-
-    job: foo_job
-    commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-
-
-+ class Foo:
-+     # now    3.02s
-+
-+     def test_baz: ...
-+         # now   3.000s
-+
-+     def test_foo: ...
-+         # now   0.020s           (skipped)
-
-
-Commit graph (base is most recent master ancestor with at least one S3 report):
-
-    : (master)
-    |
-    | * aaaaaaaaaa (HEAD)            total time     3.02s
-    | |
-    | : (3 commits)
-    |/|
-    | : (2 commits)
-    |
-    * bbbbbbbbbb          0 reports
-    * cccccccccc          0 reports
-    |
-    :
-
-Removed  (across    0 suites)     0 tests, totaling     0.00s
-Modified (across    0 suites)     0 tests, totaling     0.00s
-Added    (across    1 suite)      2 tests, totaling +   3.02s
-''',
-            print_test_stats.regression_info(
-                head_sha=fakehash('a'),
-                head_report=make_report_v1({
-                    'Foo': [
-                        makecase('test_foo', 0.02, skipped=True),
-                        makecase('test_baz', 3),
-                    ]}),
-                base_reports={
-                    fakehash('b'): [],
-                    fakehash('c'): [],
-                },
-                job_name='foo_job',
-                on_master=False,
-                ancestry_path=3,
-                other_ancestors=2,
-            )
-        )
-
-
 class TestFrameworkUtils(TestCase):
-    tests = [
-        'super_long_test',
-        'long_test1',
-        'long_test2',
-        'normal_test1',
-        'normal_test2',
-        'normal_test3',
-        'short_test1',
-        'short_test2',
-        'short_test3',
-        'short_test4',
-        'short_test5',
+
+    @skipIfRocm
+    @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
+    @unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
+    def test_filtering_env_var(self):
+        # Test environment variable selected device type test generator.
+        test_filter_file_template = """\
+#!/usr/bin/env python3
+
+import torch
+from torch.testing._internal.common_utils import (TestCase, run_tests)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+
+class TestEnvironmentVariable(TestCase):
+
+    def test_trivial_passing_test(self, device):
+        x1 = torch.tensor([0., 1.], device=device)
+        x2 = torch.tensor([0., 1.], device='cpu')
+        self.assertEqual(x1, x2)
+
+instantiate_device_type_tests(
+    TestEnvironmentVariable,
+    globals(),
+)
+
+if __name__ == '__main__':
+    run_tests()
+"""
+        test_bases_count = len(get_device_type_test_bases())
+        # Test without setting env var should run everything.
+        env = dict(os.environ)
+        for k in ['IN_CI', PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY]:
+            if k in env.keys():
+                del env[k]
+        _, stderr = TestCase.run_process_no_exception(test_filter_file_template, env=env)
+        self.assertIn(f'Ran {test_bases_count} test', stderr.decode('ascii'))
+
+        # Test with setting only_for should only run 1 test.
+        env[PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY] = 'cpu'
+        _, stderr = TestCase.run_process_no_exception(test_filter_file_template, env=env)
+        self.assertIn('Ran 1 test', stderr.decode('ascii'))
+
+        # Test with setting except_for should run 1 less device type from default.
+        del env[PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY]
+        env[PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY] = 'cpu'
+        _, stderr = TestCase.run_process_no_exception(test_filter_file_template, env=env)
+        self.assertIn(f'Ran {test_bases_count-1} test', stderr.decode('ascii'))
+
+        # Test with setting both should throw exception
+        env[PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY] = 'cpu'
+        _, stderr = TestCase.run_process_no_exception(test_filter_file_template, env=env)
+        self.assertNotIn('OK', stderr.decode('ascii'))
+
+
+def make_assert_close_inputs(actual: Any, expected: Any) -> List[Tuple[Any, Any]]:
+    """Makes inputs for :func:`torch.testing.assert_close` functions based on two examples.
+
+    Args:
+        actual (Any): Actual input.
+        expected (Any): Expected input.
+
+    Returns:
+        List[Tuple[Any, Any]]: Pair of example inputs, as well as the example inputs wrapped in sequences
+        (:class:`tuple`, :class:`list`), and mappings (:class:`dict`, :class:`~collections.OrderedDict`).
+    """
+    return [
+        (actual, expected),
+        # tuple vs. tuple
+        ((actual,), (expected,)),
+        # list vs. list
+        ([actual], [expected]),
+        # tuple vs. list
+        ((actual,), [expected]),
+        # dict vs. dict
+        ({"t": actual}, {"t": expected}),
+        # OrderedDict vs. OrderedDict
+        (collections.OrderedDict([("t", actual)]), collections.OrderedDict([("t", expected)])),
+        # dict vs. OrderedDict
+        ({"t": actual}, collections.OrderedDict([("t", expected)])),
+        # list of tuples vs. tuple of lists
+        ([(actual,)], ([expected],)),
+        # list of dicts vs. tuple of OrderedDicts
+        ([{"t": actual}], (collections.OrderedDict([("t", expected)]),)),
+        # dict of lists vs. OrderedDict of tuples
+        ({"t": [actual]}, collections.OrderedDict([("t", (expected,))])),
     ]
 
-    test_times = {
-        'super_long_test': (55, 1),
-        'long_test1': (22, 2),
-        'long_test2': (18, 2),
-        'normal_test1': (9, 2),
-        'normal_test2': (7, 2),
-        'normal_test3': (5, 2),
-        'short_test1': (1, 2),
-        'short_test2': (0.6, 3),
-        'short_test3': (0.4, 5),
-        'short_test4': (0.3, 1),
-        'short_test5': (0.01, 2),
-    }
 
-    def test_calculate_2_shards_with_complete_test_times(self):
-        expected_shards = [
-            (60, ['super_long_test', 'normal_test3']),
-            (58.31, ['long_test1', 'long_test2', 'normal_test1', 'normal_test2', 'short_test1', 'short_test2',
-                     'short_test3', 'short_test4', 'short_test5'])
-        ]
-        self.assertEqual(expected_shards, calculate_shards(2, self.tests, self.test_times))
+def assert_close_with_inputs(actual: Any, expected: Any) -> Iterator[Callable]:
+    """Yields :func:`torch.testing.assert_close` with predefined positional inputs based on two examples.
+
+    .. note::
+
+        Every test that does not test for a specific input should iterate over this to maximize the coverage.
+
+    Args:
+        actual (Any): Actual input.
+        expected (Any): Expected input.
+
+    Yields:
+        Callable: :func:`torch.testing.assert_close` with predefined positional inputs.
+    """
+    for inputs in make_assert_close_inputs(actual, expected):
+        yield functools.partial(torch.testing.assert_close, *inputs)
 
 
-    def test_calculate_5_shards_with_complete_test_times(self):
-        expected_shards = [
-            (55, ['super_long_test']),
-            (22, ['long_test1', ]),
-            (18, ['long_test2', ]),
-            (11.31, ['normal_test1', 'short_test1', 'short_test2', 'short_test3', 'short_test4', 'short_test5']),
-            (12, ['normal_test2', 'normal_test3']),
-        ]
-        self.assertEqual(expected_shards, calculate_shards(5, self.tests, self.test_times))
+class TestAssertClose(TestCase):
+    def test_quantized_support(self):
+        val = 1
+        actual = torch.tensor([val], dtype=torch.int32)
+        expected = torch._empty_affine_quantized(actual.shape, scale=1, zero_point=0, dtype=torch.qint32)
+        expected.fill_(val)
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaises(UsageError):
+                fn()
+
+    def test_type_inequality(self):
+        actual = torch.empty(2)
+        expected = actual.tolist()
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, str(type(expected))):
+                fn()
+
+    def test_unknown_type(self):
+        actual = "0"
+        expected = "0"
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(UsageError, str(type(actual))):
+                fn()
+
+    def test_mismatching_shape(self):
+        actual = torch.empty(())
+        expected = actual.clone().reshape((1,))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, "shape"):
+                fn()
+
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), reason="MKLDNN is not available.")
+    def test_unknown_layout(self):
+        actual = torch.empty((2, 2))
+        expected = actual.to_mkldnn()
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaises(UsageError):
+                fn()
+
+    def test_mismatching_layout(self):
+        strided = torch.empty((2, 2))
+        sparse_coo = strided.to_sparse()
+        sparse_csr = strided.to_sparse_csr()
+
+        for actual, expected in itertools.combinations((strided, sparse_coo, sparse_csr), 2):
+            for fn in assert_close_with_inputs(actual, expected):
+                with self.assertRaisesRegex(AssertionError, "layout"):
+                    fn()
+
+    def test_mismatching_dtype(self):
+        actual = torch.empty((), dtype=torch.float)
+        expected = actual.clone().to(torch.int)
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, "dtype"):
+                fn()
+
+    def test_mismatching_dtype_no_check(self):
+        actual = torch.ones((), dtype=torch.float)
+        expected = actual.clone().to(torch.int)
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn(check_dtype=False)
+
+    def test_mismatching_stride(self):
+        actual = torch.empty((2, 2))
+        expected = torch.as_strided(actual.clone().t().contiguous(), actual.shape, actual.stride()[::-1])
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, "stride"):
+                fn()
+
+    def test_mismatching_stride_no_check(self):
+        actual = torch.rand((2, 2))
+        expected = torch.as_strided(actual.clone().t().contiguous(), actual.shape, actual.stride()[::-1])
+        for fn in assert_close_with_inputs(actual, expected):
+            fn(check_stride=False)
+
+    def test_only_rtol(self):
+        actual = torch.empty(())
+        expected = actual.clone()
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaises(UsageError):
+                fn(rtol=0.0)
+
+    def test_only_atol(self):
+        actual = torch.empty(())
+        expected = actual.clone()
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaises(UsageError):
+                fn(atol=0.0)
+
+    def test_mismatching_values(self):
+        actual = torch.tensor(1)
+        expected = torch.tensor(2)
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaises(AssertionError):
+                fn()
+
+    def test_mismatching_values_rtol(self):
+        eps = 1e-3
+        actual = torch.tensor(1.0)
+        expected = torch.tensor(1.0 + eps)
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaises(AssertionError):
+                fn(rtol=eps / 2, atol=0.0)
+
+    def test_mismatching_values_atol(self):
+        eps = 1e-3
+        actual = torch.tensor(0.0)
+        expected = torch.tensor(eps)
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaises(AssertionError):
+                fn(rtol=0.0, atol=eps / 2)
+
+    def test_matching(self):
+        actual = torch.tensor(1.0)
+        expected = actual.clone()
+
+        torch.testing.assert_close(actual, expected)
+
+    def test_matching_rtol(self):
+        eps = 1e-3
+        actual = torch.tensor(1.0)
+        expected = torch.tensor(1.0 + eps)
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn(rtol=eps * 2, atol=0.0)
+
+    def test_matching_atol(self):
+        eps = 1e-3
+        actual = torch.tensor(0.0)
+        expected = torch.tensor(eps)
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn(rtol=0.0, atol=eps * 2)
+
+    def test_matching_nan(self):
+        actual = torch.tensor(float("NaN"))
+        expected = actual.clone()
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaises(AssertionError):
+                fn()
+
+    def test_matching_nan_with_equal_nan(self):
+        actual = torch.tensor(float("NaN"))
+        expected = actual.clone()
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn(equal_nan=True)
+
+    def test_numpy(self):
+        tensor = torch.rand(2, 2, dtype=torch.float32)
+        actual = tensor.numpy()
+        expected = actual.copy()
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn()
+
+    def test_scalar(self):
+        number = torch.randint(10, size=()).item()
+        for actual, expected in itertools.product((int(number), float(number), complex(number)), repeat=2):
+            check_dtype = type(actual) is type(expected)
+
+            for fn in assert_close_with_inputs(actual, expected):
+                fn(check_dtype=check_dtype)
 
 
-    def test_calculate_2_shards_with_incomplete_test_times(self):
-        incomplete_test_times = {k: v for k, v in self.test_times.items() if 'test1' in k}
-        expected_shards = [
-            (22, ['long_test1', 'long_test2', 'normal_test3', 'short_test3', 'short_test5']),
-            (10, ['normal_test1', 'short_test1', 'super_long_test', 'normal_test2', 'short_test2', 'short_test4']),
-        ]
-        self.assertEqual(expected_shards, calculate_shards(2, self.tests, incomplete_test_times))
+class TestAssertCloseMultiDevice(TestCase):
+    @deviceCountAtLeast(1)
+    def test_mismatching_device(self, devices):
+        for actual_device, expected_device in itertools.permutations(("cpu", *devices), 2):
+            actual = torch.empty((), device=actual_device)
+            expected = actual.clone().to(expected_device)
+            for fn in assert_close_with_inputs(actual, expected):
+                with self.assertRaisesRegex(AssertionError, "device"):
+                    fn()
+
+    @deviceCountAtLeast(1)
+    def test_mismatching_device_no_check(self, devices):
+        for actual_device, expected_device in itertools.permutations(("cpu", *devices), 2):
+            actual = torch.rand((), device=actual_device)
+            expected = actual.clone().to(expected_device)
+            for fn in assert_close_with_inputs(actual, expected):
+                fn(check_device=False)
 
 
-    def test_calculate_5_shards_with_incomplete_test_times(self):
-        incomplete_test_times = {k: v for k, v in self.test_times.items() if 'test1' in k}
-        expected_shards = [
-            (22, ['long_test1', 'normal_test2', 'short_test5']),
-            (9, ['normal_test1', 'normal_test3']),
-            (1, ['short_test1', 'short_test2']),
-            (0, ['super_long_test', 'short_test3']),
-            (0, ['long_test2', 'short_test4']),
-        ]
-        self.assertEqual(expected_shards, calculate_shards(5, self.tests, incomplete_test_times))
+instantiate_device_type_tests(TestAssertCloseMultiDevice, globals(), only_for="cuda")
 
-    def test_calculate_2_shards_against_optimal_shards(self):
-        for _ in range(100):
-            random.seed(120)
-            random_times = {k: (random.random() * 10, 1) for k in self.tests}
-            # all test times except first two
-            rest_of_tests = [i for (k, (i, _)) in random_times.items() if k != 'super_long_test' and k != 'long_test1']
-            sum_of_rest = sum(rest_of_tests)
-            random_times['super_long_test'] = (max(sum_of_rest / 2, max(rest_of_tests)), 1)
-            random_times['long_test1'] = (sum_of_rest - random_times['super_long_test'][0], 1)
-            # An optimal sharding would look like the below, but we don't need to compute this for the test:
-            # optimal_shards = [
-            #     (sum_of_rest, ['super_long_test', 'long_test1']),
-            #     (sum_of_rest, [i for i in self.tests if i != 'super_long_test' and i != 'long_test1']),
-            # ]
-            calculated_shards = calculate_shards(2, self.tests, random_times)
-            max_shard_time = max(calculated_shards[0][0], calculated_shards[1][0])
-            if sum_of_rest != 0:
-                # The calculated shard should not have a ratio worse than 7/6 for num_shards = 2
-                self.assertGreaterEqual(7.0 / 6.0, max_shard_time / sum_of_rest)
-                sorted_tests = sorted(self.tests)
-                sorted_shard_tests = sorted(calculated_shards[0][1] + calculated_shards[1][1])
-                # All the tests should be represented by some shard
-                self.assertEqual(sorted_tests, sorted_shard_tests)
+
+class TestAssertCloseErrorMessage(TestCase):
+    def test_mismatched_elements(self):
+        actual = torch.tensor([1, 2, 3, 4])
+        expected = torch.tensor([1, 2, 5, 6])
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Mismatched elements: 2 / 4 (50.0%)")):
+                fn()
+
+    def test_abs_diff(self):
+        actual = torch.tensor([[1, 2], [3, 4]])
+        expected = torch.tensor([[1, 2], [5, 4]])
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Greatest absolute difference: 2 at (1, 0)")):
+                fn()
+
+    def test_rel_diff(self):
+        actual = torch.tensor([[1, 2], [3, 4]])
+        expected = torch.tensor([[1, 4], [3, 4]])
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Greatest relative difference: 0.5 at (0, 1)")):
+                fn()
+
+    def test_zero_div_zero(self):
+        actual = torch.tensor([1.0, 0.0])
+        expected = torch.tensor([2.0, 0.0])
+
+        for fn in assert_close_with_inputs(actual, expected):
+            # Although it looks complicated, this regex just makes sure that the word 'nan' is not part of the error
+            # message. That would happen if the 0 / 0 is used for the mismatch computation although it matches.
+            with self.assertRaisesRegex(AssertionError, "((?!nan).)*"):
+                fn()
+
+    def test_rtol(self):
+        rtol = 1e-3
+
+        actual = torch.tensor(1)
+        expected = torch.tensor(2)
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(
+                AssertionError, re.escape(f"Greatest relative difference: 0.5 at 0 (up to {rtol} allowed)")
+            ):
+                fn(rtol=rtol, atol=0.0)
+
+    def test_atol(self):
+        atol = 1e-3
+
+        actual = torch.tensor(1)
+        expected = torch.tensor(2)
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(
+                AssertionError, re.escape(f"Greatest absolute difference: 1 at 0 (up to {atol} allowed)")
+            ):
+                fn(rtol=0.0, atol=atol)
+
+    def test_msg_str(self):
+        msg = "Custom error message!"
+
+        actual = torch.tensor(1)
+        expected = torch.tensor(2)
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, msg):
+                fn(msg=msg)
+
+    def test_msg_callable(self):
+        msg = "Custom error message!"
+
+        def make_msg(actual, expected, trace):
+            return msg
+
+        actual = torch.tensor(1)
+        expected = torch.tensor(2)
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, msg):
+                fn(msg=make_msg)
+
+
+class TestAssertCloseContainer(TestCase):
+    def test_sequence_mismatching_len(self):
+        actual = (torch.empty(()),)
+        expected = ()
+
+        with self.assertRaises(AssertionError):
+            torch.testing.assert_close(actual, expected)
+
+    def test_sequence_mismatching_values_msg(self):
+        t1 = torch.tensor(1)
+        t2 = torch.tensor(2)
+
+        actual = (t1, t1)
+        expected = (t1, t2)
+
+        with self.assertRaisesRegex(AssertionError, r"index\s+1"):
+            torch.testing.assert_close(actual, expected)
+
+    def test_mapping_mismatching_keys(self):
+        actual = {"a": torch.empty(())}
+        expected = {}
+
+        with self.assertRaises(AssertionError):
+            torch.testing.assert_close(actual, expected)
+
+    def test_mapping_mismatching_values_msg(self):
+        t1 = torch.tensor(1)
+        t2 = torch.tensor(2)
+
+        actual = {"a": t1, "b": t1}
+        expected = {"a": t1, "b": t2}
+
+        with self.assertRaisesRegex(AssertionError, r"key\s+'b'"):
+            torch.testing.assert_close(actual, expected)
+
+
+class TestAssertCloseComplex(TestCase):
+    def test_mismatching_nan_with_equal_nan(self):
+        actual = torch.tensor(complex(1, float("NaN")))
+        expected = torch.tensor(complex(float("NaN"), 1))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaises(AssertionError):
+                fn(equal_nan=True)
+
+    def test_mismatching_nan_with_equal_nan_relaxed(self):
+        actual = torch.tensor(complex(1, float("NaN")))
+        expected = torch.tensor(complex(float("NaN"), 1))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn(equal_nan="relaxed")
+
+    def test_mismatching_values_msg_real(self):
+        actual = torch.tensor(complex(0, 1))
+        expected = torch.tensor(complex(1, 1))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the real part")):
+                fn()
+
+    def test_mismatching_values_msg_imag(self):
+        actual = torch.tensor(complex(1, 0))
+        expected = torch.tensor(complex(1, 1))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the imaginary part")):
+                fn()
+
+
+class TestAssertCloseSparseCOO(TestCase):
+    def test_matching_coalesced(self):
+        indices = (
+            (0, 1),
+            (1, 0),
+        )
+        values = (1, 2)
+        actual = torch.sparse_coo_tensor(indices, values, size=(2, 2)).coalesce()
+        expected = actual.clone()
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn()
+
+    def test_matching_uncoalesced(self):
+        indices = (
+            (0, 1),
+            (1, 0),
+        )
+        values = (1, 2)
+        actual = torch.sparse_coo_tensor(indices, values, size=(2, 2))
+        expected = actual.clone()
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn()
+
+    def test_mismatching_is_coalesced(self):
+        indices = (
+            (0, 1),
+            (1, 0),
+        )
+        values = (1, 2)
+        actual = torch.sparse_coo_tensor(indices, values, size=(2, 2))
+        expected = actual.clone().coalesce()
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, "is_coalesced"):
+                fn()
+
+    def test_mismatching_is_coalesced_no_check(self):
+        actual_indices = (
+            (0, 1),
+            (1, 0),
+        )
+        actual_values = (1, 2)
+        actual = torch.sparse_coo_tensor(actual_indices, actual_values, size=(2, 2)).coalesce()
+
+        expected_indices = (
+            (0, 1, 1,),
+            (1, 0, 0,),
+        )
+        expected_values = (1, 1, 1)
+        expected = torch.sparse_coo_tensor(expected_indices, expected_values, size=(2, 2))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn(check_is_coalesced=False)
+
+    def test_mismatching_nnz(self):
+        actual_indices = (
+            (0, 1),
+            (1, 0),
+        )
+        actual_values = (1, 2)
+        actual = torch.sparse_coo_tensor(actual_indices, actual_values, size=(2, 2))
+
+        expected_indices = (
+            (0, 1, 1,),
+            (1, 0, 0,),
+        )
+        expected_values = (1, 1, 1)
+        expected = torch.sparse_coo_tensor(expected_indices, expected_values, size=(2, 2))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("number of specified values")):
+                fn()
+
+    def test_mismatching_indices_msg(self):
+        actual_indices = (
+            (0, 1),
+            (1, 0),
+        )
+        actual_values = (1, 2)
+        actual = torch.sparse_coo_tensor(actual_indices, actual_values, size=(2, 2))
+
+        expected_indices = (
+            (0, 1),
+            (1, 1),
+        )
+        expected_values = (1, 2)
+        expected = torch.sparse_coo_tensor(expected_indices, expected_values, size=(2, 2))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the indices")):
+                fn()
+
+    def test_mismatching_values_msg(self):
+        actual_indices = (
+            (0, 1),
+            (1, 0),
+        )
+        actual_values = (1, 2)
+        actual = torch.sparse_coo_tensor(actual_indices, actual_values, size=(2, 2))
+
+        expected_indices = (
+            (0, 1),
+            (1, 0),
+        )
+        expected_values = (1, 3)
+        expected = torch.sparse_coo_tensor(expected_indices, expected_values, size=(2, 2))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the values")):
+                fn()
+
+
+@unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Not all sandcastle jobs support CSR testing")
+class TestAssertCloseSparseCSR(TestCase):
+    def test_matching(self):
+        crow_indices = (0, 1, 2)
+        col_indices = (1, 0)
+        values = (1, 2)
+        actual = torch.sparse_csr_tensor(crow_indices, col_indices, values, size=(2, 2))
+        # TODO: replace this by actual.clone() after https://github.com/pytorch/pytorch/issues/59285 is fixed
+        expected = torch.sparse_csr_tensor(
+            actual.crow_indices(), actual.col_indices(), actual.values(), size=actual.size(), device=actual.device
+        )
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn()
+
+    def test_mismatching_crow_indices_msg(self):
+        actual_crow_indices = (0, 1, 2)
+        actual_col_indices = (1, 0)
+        actual_values = (1, 2)
+        actual = torch.sparse_csr_tensor(actual_crow_indices, actual_col_indices, actual_values, size=(2, 2))
+
+        expected_crow_indices = (0, 2, 2)
+        expected_col_indices = actual_col_indices
+        expected_values = actual_values
+        expected = torch.sparse_csr_tensor(expected_crow_indices, expected_col_indices, expected_values, size=(2, 2))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the crow_indices")):
+                fn()
+
+    def test_mismatching_col_indices_msg(self):
+        actual_crow_indices = (0, 1, 2)
+        actual_col_indices = (1, 0)
+        actual_values = (1, 2)
+        actual = torch.sparse_csr_tensor(actual_crow_indices, actual_col_indices, actual_values, size=(2, 2))
+
+        expected_crow_indices = actual_crow_indices
+        expected_col_indices = (1, 1)
+        expected_values = actual_values
+        expected = torch.sparse_csr_tensor(expected_crow_indices, expected_col_indices, expected_values, size=(2, 2))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the col_indices")):
+                fn()
+
+    def test_mismatching_values_msg(self):
+        actual_crow_indices = (0, 1, 2)
+        actual_col_indices = (1, 0)
+        actual_values = (1, 2)
+        actual = torch.sparse_csr_tensor(actual_crow_indices, actual_col_indices, actual_values, size=(2, 2))
+
+        expected_crow_indices = actual_crow_indices
+        expected_col_indices = actual_col_indices
+        expected_values = (1, 3)
+        expected = torch.sparse_csr_tensor(expected_crow_indices, expected_col_indices, expected_values, size=(2, 2))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the values")):
+                fn()
 
 
 if __name__ == '__main__':

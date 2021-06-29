@@ -48,7 +48,7 @@ class TORCH_API AccessInfo {
         stmt_(stmt),
         expr_(nullptr),
         var_(var),
-        bounds_(bounds) {}
+        bounds_(std::move(bounds)) {}
 
   AccessInfo(
       size_t id,
@@ -62,7 +62,7 @@ class TORCH_API AccessInfo {
         stmt_(stmt),
         expr_(expr),
         var_(var),
-        bounds_(bounds) {}
+        bounds_(std::move(bounds)) {}
 
   // Id is a unique int representing the order this access occured in the graph.
   size_t id() const {
@@ -182,7 +182,7 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
       const std::vector<BufHandle>& inputs,
       const std::vector<BufHandle>& outputs);
 
-  virtual ~MemDependencyChecker() {}
+  ~MemDependencyChecker() override = default;
 
   // Whether or not to allow loop execution order to influence dependency
   // calculation. If the loop may later be parallelized you don't want this.
@@ -256,7 +256,6 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
   // Node visitors.
   void visit(const Store* v) override;
   void visit(const Load* v) override;
-  void visit(const FunctionCall* v) override;
   void visit(const For* v) override;
   void visit(const Cond* v) override;
   void visit(const IfThenElse* v) override;
@@ -271,7 +270,8 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
 
   // An internal struct holding the accesses found within a scope Block.
   struct Scope {
-    Scope(Block* b, std::shared_ptr<Scope> p) : block(b), parent(p) {}
+    Scope(Block* b, std::shared_ptr<Scope> p)
+        : block(b), parent(std::move(p)) {}
 
     Block* block;
     std::shared_ptr<Scope> parent;
@@ -314,7 +314,6 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
     // Look for and insert accesses belonging to all nodes that act like
     // reads.
     insertAllReads(NodeFinder<Load>::find(v));
-    insertAllReads(NodeFinder<FunctionCall>::find(v));
     insertAllReads(NodeFinder<ReduceOp>::find(v));
 
     return reads;

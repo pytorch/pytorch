@@ -1,5 +1,6 @@
 #!/bin/bash
 
+# shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 # Skip tests in environments where they are not built/applicable
@@ -169,7 +170,7 @@ if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
   # JIT C++ extensions require ninja, so put it into PATH.
   export PATH="/var/lib/jenkins/.local/bin:$PATH"
   if [[ "$BUILD_ENVIRONMENT" == *py3* ]]; then
-    pip install -q --user onnxruntime==1.6.0
+    pip install -q --user onnxruntime==1.7.0
   fi
   "$ROOT_DIR/scripts/onnx/test.sh"
 fi

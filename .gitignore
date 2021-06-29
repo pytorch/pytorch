@@ -14,6 +14,10 @@ coverage.xml
 .gradle
 .hypothesis
 .mypy_cache
+/.extracted_scripts/
+**/.pytorch_specified_test_cases.csv
+**/.pytorch-test-times.json
+**/.pytorch-slow-tests.json
 */*.pyc
 */*.so*
 */**/__pycache__
@@ -52,6 +56,7 @@ test/generated_type_hints_smoketest.py
 test/htmlcov
 test/cpp_extensions/install/
 third_party/build/
+tools/coverage_plugins_package/pip-wheel-metadata/
 tools/shared/_utils_internal.py
 tools/fast_nvcc/wrap_nvcc.sh
 tools/fast_nvcc/tmp/
@@ -173,6 +178,9 @@ docs/source/scripts/activation_images/
 *.swp
 *~
 
+# NFS handle files
+**/.nfs*
+
 # Sublime Text settings
 *.sublime-workspace
 *.sublime-project
@@ -250,8 +258,10 @@ cmake-build-debug
 # Below files are not deleted by "setup.py clean".
 
 # Visual Studio Code files
-.vscode
 .vs
+/.vscode/*
+!/.vscode/extensions.json
+!/.vscode/settings_recommended.json
 
 # YouCompleteMe config file
 .ycm_extra_conf.py
@@ -282,3 +292,16 @@ TAGS
 
 # bazel symlinks
 bazel-*
+
+# direnv, posh-direnv
+.envrc
+.psenvrc
+
+# generated shellcheck directories
+.shellcheck_generated*/
+
+# zip archives
+*.zip
+
+# core dump files
+core.*

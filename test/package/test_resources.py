@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from io import BytesIO
 from sys import version_info
 from textwrap import dedent
@@ -10,7 +11,7 @@ try:
     from .common import PackageTestCase
 except ImportError:
     # Support the case where we run this file directly.
-    from common import PackageTestCase  # type: ignore
+    from common import PackageTestCase
 
 
 @skipIf(version_info < (3, 7), "ResourceReader API introduced in Python 3.7")
@@ -24,15 +25,15 @@ class TestResources(PackageTestCase):
             # Layout looks like:
             #    package
             #    ├── one/
-            #    │   ├── a.txt
-            #    │   ├── b.txt
-            #    │   ├── c.txt
-            #    │   └── three/
-            #    │       ├── d.txt
-            #    │       └── e.txt
+            #    │   ├── a.txt
+            #    │   ├── b.txt
+            #    │   ├── c.txt
+            #    │   └── three/
+            #    │       ├── d.txt
+            #    │       └── e.txt
             #    └── two/
-            #       ├── f.txt
-            #       └── g.txt
+            #       ├── f.txt
+            #       └── g.txt
             pe.save_text("one", "a.txt", "hello, a!")
             pe.save_text("one", "b.txt", "hello, b!")
             pe.save_text("one", "c.txt", "hello, c!")
@@ -99,8 +100,8 @@ class TestResources(PackageTestCase):
         )
 
     def test_importer_access(self):
-        filename = self.temp()
-        with PackageExporter(filename, verbose=False) as he:
+        buffer = BytesIO()
+        with PackageExporter(buffer, verbose=False) as he:
             he.save_text("main", "main", "my string")
             he.save_binary("main", "main_binary", "my string".encode("utf-8"))
             src = dedent(
@@ -113,10 +114,34 @@ class TestResources(PackageTestCase):
                 """
             )
             he.save_source_string("main", src, is_package=True)
-        hi = PackageImporter(filename)
+        buffer.seek(0)
+        hi = PackageImporter(buffer)
         m = hi.import_module("main")
         self.assertEqual(m.t, "my string")
         self.assertEqual(m.b, "my string".encode("utf-8"))
+
+    def test_resource_access_by_path(self):
+        """
+        Tests that packaged code can used importlib.resources.path.
+        """
+        buffer = BytesIO()
+        with PackageExporter(buffer, verbose=False) as he:
+            he.save_binary("string_module", "my_string", "my string".encode("utf-8"))
+            src = dedent(
+                """\
+                import importlib.resources
+                import string_module
+
+                with importlib.resources.path(string_module, 'my_string') as path:
+                    with open(path, mode='r', encoding='utf-8') as f:
+                        s = f.read()
+                """
+            )
+            he.save_source_string("main", src, is_package=True)
+        buffer.seek(0)
+        hi = PackageImporter(buffer)
+        m = hi.import_module("main")
+        self.assertEqual(m.s, "my string")
 
 
 if __name__ == "__main__":

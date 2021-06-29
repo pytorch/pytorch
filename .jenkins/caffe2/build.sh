@@ -2,6 +2,7 @@
 
 set -ex
 
+# shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 # CMAKE_ARGS are only passed to 'cmake' and the -Dfoo=bar does not work with

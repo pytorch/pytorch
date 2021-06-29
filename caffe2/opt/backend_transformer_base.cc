@@ -80,6 +80,7 @@ QTensorProto wrapShapeInfoIntoQTensorProto(
   // precision and is_signed is not used in onnxifi workflow, but it is required
   // field
   t.set_precision(0);
+  // NOLINTNEXTLINE(modernize-use-bool-literals)
   t.set_is_signed(0);
   for (const auto i : shape_info.shape.dims()) {
     t.add_dims(i);
@@ -102,7 +103,7 @@ ShapeInfoMap BackendTransformerBase::ssaRewriteAndMapNames(
   // the parent workspace has the mapped blob names. If the blobs don't exist
   // (usually such blobs are input tensor names), we exclude them from mapping.
   std::vector<std::string> exclude_mapping;
-  for (const auto kv : input_mapping_) {
+  for (const auto& kv : input_mapping_) {
     if (!ws->HasBlob(kv.second)) {
       exclude_mapping.emplace_back(kv.first);
     }

@@ -1,5 +1,6 @@
 #pragma once
 #include <ATen/core/jit_type.h>
+#include <torch/csrc/jit/mobile/debug_info.h>
 #include <torch/csrc/jit/mobile/function.h>
 #include <torch/csrc/jit/mobile/method.h>
 
@@ -52,12 +53,14 @@ class CompilationUnit {
 class TORCH_API Module {
  public:
   Module(
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       c10::intrusive_ptr<c10::ivalue::Object> object,
       std::shared_ptr<CompilationUnit> cu)
       : object_(object),
         metadata_(std::unordered_map<std::string, std::string>()),
         cu_(std::move(cu)) {}
   Module(
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       c10::intrusive_ptr<c10::ivalue::Object> object,
       std::unordered_map<std::string, std::string> metadata,
       std::shared_ptr<CompilationUnit> cu)
@@ -107,10 +110,18 @@ class TORCH_API Module {
     return or_else;
   }
 
+  void setDebugTable(MobileDebugTable&& debug_table) {
+    debug_table_ = std::move(debug_table);
+  }
+  const MobileDebugTable& getDebugTable() const {
+    return debug_table_;
+  }
+
  private:
   c10::intrusive_ptr<c10::ivalue::Object> object_;
   std::unordered_map<std::string, std::string> metadata_;
   std::shared_ptr<CompilationUnit> cu_;
+  MobileDebugTable debug_table_;
 };
 } // namespace mobile
 } // namespace jit

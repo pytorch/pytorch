@@ -9,6 +9,7 @@
 #include <c10/util/accumulate.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #include <algorithm>
 #include <sstream>
@@ -51,7 +52,7 @@ static inline TensorImpl* checked_dense_tensor_unwrap(const Tensor& expr, const 
 static inline std::vector<TensorImpl*> checked_dense_tensor_list_unwrap(ArrayRef<Tensor> tensors, const char * name, int pos, DeviceType device_type, ScalarType scalar_type) {
   std::vector<TensorImpl*> unwrapped;
   unwrapped.reserve(tensors.size());
-  for (unsigned int i = 0; i < tensors.size(); ++i) {
+  for (const auto i : c10::irange(tensors.size())) {
     const auto& expr = tensors[i];
     if (expr.layout() != Layout::Strided) {
       AT_ERROR("Expected dense tensor but got ", expr.layout(),
@@ -122,6 +123,20 @@ namespace detail {
 TORCH_API
 Tensor empty_cpu(IntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt,
                  c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt, c10::optional<c10::MemoryFormat> memory_format_opt);
+
+TORCH_API
+Tensor empty_generic(
+  IntArrayRef size,
+  c10::Allocator* allocator,
+  // technically this can be inferred from the device, but usually the
+  // correct setting is obvious from the call site so just make callers
+  // pass it in
+  c10::DispatchKey dispatch_key,
+  ScalarType dtype,
+  Device device,
+  c10::optional<c10::MemoryFormat> memory_format
+);
+
 
 template <typename T>
 TORCH_API

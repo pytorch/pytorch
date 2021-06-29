@@ -2,6 +2,8 @@
 
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
+#include <c10/util/irange.h>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -19,57 +21,39 @@ static Dtype dtypeOfIndices(const std::vector<const Expr*>& indices) {
 }
 
 void castIndicesToInts(std::vector<const Expr*>& indices) {
-  // Cast all indices to Int
-  // TODO: Should we use int64 here?
+  // Cast all indices to either Int or Long
   auto index_dtype = ScalarType::Int;
   for (auto& index : indices) {
+    if (index->dtype().scalar_type() == ScalarType::Long) {
+      // If any of the indexes is Long, cast all of them to Long
+      index_dtype = ScalarType::Long;
+      break;
+    }
+  }
+
+  for (auto& index : indices) {
     const Dtype& dt = index->dtype();
-    if (is_integral(dt.scalar_type()) && dt.scalar_type() != index_dtype) {
+    if (c10::isIntegralType(dt.scalar_type(), true) &&
+        dt.scalar_type() != index_dtype) {
       index = new Cast(Dtype(index_dtype, dt.lanes()), index);
     }
   }
 }
 
-Load::Load(
-    Dtype dtype,
-    const Buf* buf,
-    const std::vector<const Expr*>& indices,
-    const Expr* mask)
-    : ExprNodeBase(dtype), buf_(buf), indices_(indices), mask_(mask) {
+Load::Load(Dtype dtype, const Buf* buf, std::vector<const Expr*> indices)
+    : ExprNodeBase(dtype), buf_(buf), indices_(std::move(indices)) {
   castIndicesToInts(indices_);
 }
 
-Load::Load(
-    const Buf* buf,
-    const std::vector<const Expr*>& indices,
-    const Expr* mask)
-    : Load(
-          ChooseDtype(buf->dtype(), dtypeOfIndices(indices)),
-          buf,
-          indices,
-          mask) {}
-
-ExprHandle Load::make(
-    Dtype dtype,
-    const BufHandle& buf,
-    const std::vector<ExprHandle>& indices,
-    const ExprHandle& mask) {
-  return ExprHandle(new Load(
-      dtype, buf.node(), ExprHandleVectorToExprVector(indices), mask.node()));
-}
-
-ExprHandle Load::make(
-    const BufHandle& buf,
-    const std::vector<ExprHandle>& indices,
-    const ExprHandle& mask) {
-  return Load::make(buf.dtype(), buf, indices, mask);
-}
+Load::Load(const Buf* buf, const std::vector<const Expr*>& indices)
+    : Load(ChooseDtype(buf->dtype(), dtypeOfIndices(indices)), buf, indices) {}
 
 ExprHandle Load::make(
     Dtype dtype,
     const BufHandle& buf,
     const std::vector<ExprHandle>& indices) {
-  return Load::make(dtype, buf, indices, IntImm::make(1));
+  return ExprHandle(
+      new Load(dtype, buf.node(), ExprHandleVectorToExprVector(indices)));
 }
 
 ExprHandle Load::make(
@@ -81,22 +65,9 @@ ExprHandle Load::make(
 Store::Store(
     const Buf* buf,
     std::vector<const Expr*> indices,
-    const Expr* value,
-    const Expr* mask)
-    : buf_(buf), indices_(std::move(indices)), value_(value), mask_(mask) {
+    const Expr* value)
+    : buf_(buf), indices_(std::move(indices)), value_(value) {
   castIndicesToInts(indices_);
-}
-
-Store* Store::make(
-    const BufHandle& buf,
-    const std::vector<ExprHandle>& indices,
-    const ExprHandle& value,
-    const ExprHandle& mask) {
-  return new Store(
-      buf.node(),
-      ExprHandleVectorToExprVector(indices),
-      value.node(),
-      mask.node());
 }
 
 Store* Store::make(
@@ -104,10 +75,7 @@ Store* Store::make(
     const std::vector<ExprHandle>& indices,
     const ExprHandle& value) {
   return new Store(
-      buf.node(),
-      ExprHandleVectorToExprVector(indices),
-      value.node(),
-      ExprHandle(1).node());
+      buf.node(), ExprHandleVectorToExprVector(indices), value.node());
 }
 
 const Expr* flatten_index(
@@ -134,7 +102,7 @@ const Expr* flatten_index(
   }
 
   const Expr* total_index = new IntImm(0);
-  for (size_t i = 0; i < ndim; i++) {
+  for (const auto i : c10::irange(ndim)) {
     total_index = new Add(total_index, new Mul(indices[i], strides[i]));
   }
   return total_index;
@@ -228,7 +196,7 @@ ExternalCall* ExternalCall::make(
 std::vector<const Expr*> ExprHandleVectorToExprVector(
     const std::vector<ExprHandle>& v) {
   std::vector<const Expr*> result(v.size());
-  for (size_t i = 0; i < v.size(); i++) {
+  for (const auto i : c10::irange(v.size())) {
     result[i] = v[i].node();
   }
   return result;
@@ -237,7 +205,7 @@ std::vector<const Expr*> ExprHandleVectorToExprVector(
 std::vector<ExprHandle> ExprVectorToExprHandleVector(
     const std::vector<const Expr*>& v) {
   std::vector<ExprHandle> result(v.size());
-  for (size_t i = 0; i < v.size(); i++) {
+  for (const auto i : c10::irange(v.size())) {
     result[i] = ExprHandle(v[i]);
   }
   return result;
@@ -246,7 +214,7 @@ std::vector<ExprHandle> ExprVectorToExprHandleVector(
 std::vector<const Var*> VarHandleVectorToVarVector(
     const std::vector<VarHandle>& v) {
   std::vector<const Var*> result(v.size());
-  for (size_t i = 0; i < v.size(); i++) {
+  for (const auto i : c10::irange(v.size())) {
     result[i] = v[i].node();
   }
   return result;
@@ -255,7 +223,7 @@ std::vector<const Var*> VarHandleVectorToVarVector(
 std::vector<VarHandle> VarVectorToVarHandleVector(
     const std::vector<const Var*>& v) {
   std::vector<VarHandle> result(v.size());
-  for (size_t i = 0; i < v.size(); i++) {
+  for (const auto i : c10::irange(v.size())) {
     result[i] = VarHandle(v[i]);
   }
   return result;

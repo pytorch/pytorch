@@ -284,7 +284,9 @@ class Module:
         Args:
             name (string): name of the buffer. The buffer can be accessed
                 from this module using the given name
-            tensor (Tensor): buffer to be registered.
+            tensor (Tensor or None): buffer to be registered. If ``None``, then operations
+                that run on buffers, such as :attr:`cuda`, are ignored. If ``None``,
+                the buffer is **not** included in the module's :attr:`state_dict`.
             persistent (bool): whether the buffer is part of this module's
                 :attr:`state_dict`.
 
@@ -327,7 +329,10 @@ class Module:
         Args:
             name (string): name of the parameter. The parameter can be accessed
                 from this module using the given name
-            param (Parameter): parameter to be added to the module.
+            param (Parameter or None): parameter to be added to the module. If
+                ``None``, then operations that run on parameters, such as :attr:`cuda`,
+                are ignored. If ``None``, the parameter is **not** included in the
+                module's :attr:`state_dict`.
         """
         if '_parameters' not in self.__dict__:
             raise AttributeError(
@@ -624,6 +629,9 @@ class Module:
         it should be called before constructing optimizer if the module will
         live on GPU while being optimized.
 
+        .. note::
+            This method modifies the module in-place.
+
         Args:
             device (int, optional): if specified, all parameters will be
                 copied to that device
@@ -640,6 +648,9 @@ class Module:
         it should be called before constructing optimizer if the module will
         live on XPU while being optimized.
 
+        .. note::
+            This method modifies the module in-place.
+
         Arguments:
             device (int, optional): if specified, all parameters will be
                 copied to that device
@@ -652,6 +663,9 @@ class Module:
     def cpu(self: T) -> T:
         r"""Moves all model parameters and buffers to the CPU.
 
+        .. note::
+            This method modifies the module in-place.
+
         Returns:
             Module: self
         """
@@ -659,6 +673,9 @@ class Module:
 
     def type(self: T, dst_type: Union[dtype, str]) -> T:
         r"""Casts all parameters and buffers to :attr:`dst_type`.
+
+        .. note::
+            This method modifies the module in-place.
 
         Args:
             dst_type (type or string): the desired type
@@ -669,7 +686,10 @@ class Module:
         return self._apply(lambda t: t.type(dst_type))
 
     def float(self: T) -> T:
-        r"""Casts all floating point parameters and buffers to float datatype.
+        r"""Casts all floating point parameters and buffers to ``float`` datatype.
+
+        .. note::
+            This method modifies the module in-place.
 
         Returns:
             Module: self
@@ -679,6 +699,9 @@ class Module:
     def double(self: T) -> T:
         r"""Casts all floating point parameters and buffers to ``double`` datatype.
 
+        .. note::
+            This method modifies the module in-place.
+
         Returns:
             Module: self
         """
@@ -686,6 +709,9 @@ class Module:
 
     def half(self: T) -> T:
         r"""Casts all floating point parameters and buffers to ``half`` datatype.
+
+        .. note::
+            This method modifies the module in-place.
 
         Returns:
             Module: self
@@ -695,10 +721,25 @@ class Module:
     def bfloat16(self: T) -> T:
         r"""Casts all floating point parameters and buffers to ``bfloat16`` datatype.
 
+        .. note::
+            This method modifies the module in-place.
+
         Returns:
             Module: self
         """
         return self._apply(lambda t: t.bfloat16() if t.is_floating_point() else t)
+
+    def to_empty(self: T, *, device: Union[str, device]) -> T:
+        r"""Moves the parameters and buffers to the specified device without copying storage.
+
+        Args:
+            device (:class:`torch.device`): The desired device of the parameters
+                and buffers in this module.
+
+        Returns:
+            Module: self
+        """
+        return self._apply(lambda t: torch.empty_like(t, device=device))
 
     @overload
     def to(self: T, device: Optional[Union[int, device]] = ..., dtype: Optional[Union[dtype, str]] = ...,
@@ -727,7 +768,7 @@ class Module:
         .. function:: to(memory_format=torch.channels_last)
 
         Its signature is similar to :meth:`torch.Tensor.to`, but only accepts
-        floating point or complex :attr:`dtype`s. In addition, this method will
+        floating point or complex :attr:`dtype`\ s. In addition, this method will
         only cast the floating point or complex parameters and buffers to :attr:`dtype`
         (if given). The integral parameters and buffers will be moved
         :attr:`device`, if that is given, but with dtypes unchanged. When
@@ -808,7 +849,7 @@ class Module:
                     "if a complex module does not work as expected.")
 
         def convert(t):
-            if convert_to_format is not None and t.dim() == 4:
+            if convert_to_format is not None and t.dim() in (4, 5):
                 return t.to(device, dtype if t.is_floating_point() or t.is_complex() else None,
                             non_blocking, memory_format=convert_to_format)
             return t.to(device, dtype if t.is_floating_point() or t.is_complex() else None, non_blocking)
@@ -820,7 +861,7 @@ class Module:
     ) -> RemovableHandle:
         r"""Registers a backward hook on the module.
 
-        This function is deprecated in favor of :meth:`nn.Module.register_full_backward_hook` and
+        This function is deprecated in favor of :meth:`~torch.nn.Module.register_full_backward_hook` and
         the behavior of this function will change in future versions.
 
         Returns:
@@ -994,7 +1035,7 @@ class Module:
         if recording_scopes:
             # type ignore was added because at this point one knows that
             # torch.jit._trace._trace_module_map is not Optional and has type Dict[Any, Any]
-            name = torch.jit._trace._trace_module_map[self] if self in torch.jit._trace._trace_module_map else None  # type: ignore
+            name = torch.jit._trace._trace_module_map[self] if self in torch.jit._trace._trace_module_map else None  # type: ignore[index, operator] # noqa: B950
             if name:
                 tracing_state.push_scope(name)
             else:
@@ -1018,9 +1059,7 @@ class Module:
         if self._backward_hooks or _global_backward_hooks:
             full_backward_hooks, non_full_backward_hooks = self._get_backward_hooks()
         if _global_forward_pre_hooks or self._forward_pre_hooks:
-            for hook in itertools.chain(
-                    _global_forward_pre_hooks.values(),
-                    self._forward_pre_hooks.values()):
+            for hook in (*_global_forward_pre_hooks.values(), *self._forward_pre_hooks.values()):
                 result = hook(self, input)
                 if result is not None:
                     if not isinstance(result, tuple):
@@ -1034,9 +1073,7 @@ class Module:
 
         result = forward_call(*input, **kwargs)
         if _global_forward_hooks or self._forward_hooks:
-            for hook in itertools.chain(
-                    _global_forward_hooks.values(),
-                    self._forward_hooks.values()):
+            for hook in (*_global_forward_hooks.values(), *self._forward_hooks.values()):
                 hook_result = hook(self, input, result)
                 if hook_result is not None:
                     result = hook_result
@@ -1191,10 +1228,10 @@ class Module:
     def state_dict(self, destination: T_destination, prefix: str = ..., keep_vars: bool = ...) -> T_destination:
         ...
 
-    # TODO: annotate with OrderedDict not Dict, but there is a problem:
-    # https://docs.python.org/3/library/typing.html#typing.OrderedDict
+    # TODO: Remove string escape once Python-3.6 no longer supported
+    # See https://github.com/python/mypy/issues/6904#issuecomment-496207426
     @overload
-    def state_dict(self, prefix: str = ..., keep_vars: bool = ...) -> Dict[str, Tensor]:
+    def state_dict(self, prefix: str = ..., keep_vars: bool = ...) -> 'OrderedDict[str, Tensor]':
         ...
 
     def state_dict(self, destination=None, prefix='', keep_vars=False):
@@ -1202,6 +1239,7 @@ class Module:
 
         Both parameters and persistent buffers (e.g. running averages) are
         included. Keys are corresponding parameter and buffer names.
+        Parameters and buffers set to ``None`` are not included.
 
         Returns:
             dict:
@@ -1333,6 +1371,11 @@ class Module:
             ``NamedTuple`` with ``missing_keys`` and ``unexpected_keys`` fields:
                 * **missing_keys** is a list of str containing the missing keys
                 * **unexpected_keys** is a list of str containing the unexpected keys
+
+        Note:
+            If a parameter or buffer is registered as ``None`` and its corresponding key
+            exists in :attr:`state_dict`, :meth:`load_state_dict` will raise a
+            ``RuntimeError``.
         """
         missing_keys: List[str] = []
         unexpected_keys: List[str] = []
@@ -1538,9 +1581,15 @@ class Module:
         for _, module in self.named_modules():
             yield module
 
-    def named_modules(self, memo: Optional[Set['Module']] = None, prefix: str = ''):
+    def named_modules(self, memo: Optional[Set['Module']] = None, prefix: str = '', remove_duplicate: bool = True):
         r"""Returns an iterator over all modules in the network, yielding
         both the name of the module as well as the module itself.
+
+        Args:
+            memo: a memo to store the set of modules already added to the result
+            prefix: a prefix that will be added to the name of the module
+            remove_duplicate: whether to remove the duplicated module instances in the result
+            or not
 
         Yields:
             (string, Module): Tuple of name and module
@@ -1567,13 +1616,14 @@ class Module:
         if memo is None:
             memo = set()
         if self not in memo:
-            memo.add(self)
+            if remove_duplicate:
+                memo.add(self)
             yield prefix, self
             for name, module in self._modules.items():
                 if module is None:
                     continue
                 submodule_prefix = prefix + ('.' if prefix else '') + name
-                for m in module.named_modules(memo, submodule_prefix):
+                for m in module.named_modules(memo, submodule_prefix, remove_duplicate):
                     yield m
 
     def train(self: T, mode: bool = True) -> T:
@@ -1591,6 +1641,8 @@ class Module:
         Returns:
             Module: self
         """
+        if not isinstance(mode, bool):
+            raise ValueError("training mode is expected to be boolean")
         self.training = mode
         for module in self.children():
             module.train(mode)
@@ -1606,6 +1658,9 @@ class Module:
 
         This is equivalent with :meth:`self.train(False) <torch.nn.Module.train>`.
 
+        See :ref:`locally-disable-grad-doc` for a comparison between
+        `.eval()` and several similar mechanisms that may be confused with it.
+
         Returns:
             Module: self
         """
@@ -1620,6 +1675,9 @@ class Module:
 
         This method is helpful for freezing part of the module for finetuning
         or training parts of a model individually (e.g., GAN training).
+
+        See :ref:`locally-disable-grad-doc` for a comparison between
+        `.requires_grad_()` and several similar mechanisms that may be confused with it.
 
         Args:
             requires_grad (bool): whether autograd should record operations on

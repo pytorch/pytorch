@@ -255,9 +255,9 @@ uvec3 image_extents(const IntArrayRef sizes) {
   }
 
   return {
-    width,
-    height,
-    div_up(depth, INT64_C(4)),
+    safe_downcast<uint32_t>(width),
+    safe_downcast<uint32_t>(height),
+    safe_downcast<uint32_t>(div_up(depth, INT64_C(4))),
   };
 }
 
@@ -272,7 +272,7 @@ vTensor::Image allocate_image(
   verify(options);
 
   return pool->image({
-      VK_IMAGE_TYPE_3D,
+      extents.depth == 1 ? VK_IMAGE_TYPE_2D : VK_IMAGE_TYPE_3D,
       vk_format(options.dtype()),
       extents,
       // Usage
@@ -287,7 +287,7 @@ vTensor::Image allocate_image(
       },
       // View
       {
-        VK_IMAGE_VIEW_TYPE_3D,
+        extents.depth == 1 ? VK_IMAGE_VIEW_TYPE_2D : VK_IMAGE_VIEW_TYPE_3D,
         vk_format(options.dtype()),
       },
       // Sampler

@@ -53,6 +53,7 @@ class TORCH_CUDA_CU_API InputsIdLookup {
 
  private:
   //! entry stored in `encoding_lookup_` to implement LRU
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   struct EncodingEntry {
     size_t id;
     std::list<std::string>::iterator lru_iter;

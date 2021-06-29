@@ -47,6 +47,7 @@ namespace sobol_utils {
 
 /// All definitions below this point are data. These are constant, and should
 /// not be modified without notice
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 const int64_t poly[21201] = {
     1,
     3,
@@ -21251,6 +21252,7 @@ const int64_t poly[21201] = {
     524263,
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 const int64_t initsobolstate[21201][18] = {
     {1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
     {1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},

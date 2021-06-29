@@ -2,6 +2,12 @@ ir_version: 6
 producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
+  node {
+    input: "0"
+    output: "1"
+    name: "Identity_0"
+    op_type: "Identity"
+  }
   name: "torch-jit-export"
   input {
     name: "0"
@@ -20,7 +26,7 @@ graph {
     }
   }
   output {
-    name: "0"
+    name: "1"
     type {
       tensor_type {
         elem_type: 1

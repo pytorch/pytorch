@@ -137,11 +137,12 @@ py::class_<ModuleType, Extra...> add_module_bindings(
         "_modules", [](ModuleType& module) { return module.named_children(); })
       .def("modules", [](ModuleType& module) { return module.modules(); })
       .def("named_modules",
-          [](ModuleType& module, py::object /* unused */, std::string prefix) {
+           [](ModuleType& module, py::object /* unused */, std::string prefix, bool remove_duplicate /* unused */) {
             return module.named_modules(std::move(prefix));
           },
           py::arg("memo") = py::none(),
-          py::arg("prefix") = std::string())
+          py::arg("prefix") = std::string(),
+          py::arg("remove_duplicate") = true)
       .def("children", [](ModuleType& module) { return module.children(); })
       .def("named_children",
           [](ModuleType& module) { return module.named_children(); })

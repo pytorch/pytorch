@@ -86,11 +86,9 @@ void IRVerifier::visit(const Load* v) {
   if (indices.size() > 1 && index_dtype.lanes() > 1) {
     throw malformed_ir("Multilane is only allowed in a flattened index");
   }
-  if (index_dtype.scalar_type() != ScalarType::Int) {
-    throw malformed_ir("Index scalar dtype is not Int!");
-  }
-  if (index_dtype.lanes() != v->mask()->dtype().lanes()) {
-    throw malformed_ir("lane mismatch in Load mask");
+  if (index_dtype.scalar_type() != ScalarType::Int &&
+      index_dtype.scalar_type() != ScalarType::Long) {
+    throw malformed_ir("Index scalar dtype is not Int or Long!");
   }
 
   IRVisitor::visit(v);
@@ -132,11 +130,9 @@ void IRVerifier::visit(const Store* v) {
   if (indices.size() > 1 && index_dtype.lanes() > 1) {
     throw malformed_ir("Multilane is only allowed in a flattened index");
   }
-  if (index_dtype.scalar_type() != ScalarType::Int) {
-    throw malformed_ir("Index scalar dtype is not Int!");
-  }
-  if (index_dtype.lanes() != v->mask()->dtype().lanes()) {
-    throw malformed_ir("lane mismatch in Store mask");
+  if (index_dtype.scalar_type() != ScalarType::Int &&
+      index_dtype.scalar_type() != ScalarType::Long) {
+    throw malformed_ir("Index scalar dtype is not Int or Long!");
   }
   if (v->buf()->dtype() != v->value()->dtype()) {
     throw malformed_ir("buf and value dtype mismatch in Store");

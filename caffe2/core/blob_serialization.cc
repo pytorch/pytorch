@@ -4,31 +4,39 @@
 #include <sstream>
 #include <utility>
 
+#include <c10/util/irange.h>
 #include <c10/util/string_view.h>
 
 #include "caffe2/core/blob.h"
 #include "caffe2/core/common.h"
 #include "caffe2/utils/proto_utils.h"
+#ifdef USE_FBGEMM
+#include "fbgemm/FbgemmConvert.h"
+#endif
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int(
     caffe2_tensor_chunk_size,
     1000000,
     "Chunk size to split tensor data into");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int(
     caffe2_max_tensor_serializer_threads,
     16,
     "Maximal number of threads that can be used for tensor serialization");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_serialize_fp16_as_bytes,
     false,
     "Serialize FLOAT16 tensors using byte_data field");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_serialize_using_bytes_as_holder,
     false,
-    "Serialize BOOL, UINT8, INT8, UINT16, INT16, INT64, FLOAT16 tensors using byte_data field instead of int32");
+    "Serialize BOOL, UINT8, INT8, UINT16, INT16, FLOAT16 tensors using byte_data field instead of int32");
 
 namespace caffe2 {
 namespace {
@@ -79,6 +87,7 @@ Range<T*> GetMutableTensorDataRange(
     size_t start,
     size_t numElements) {
   CAFFE_ENFORCE(
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       start + numElements <= tensor.numel(),
       "Requested invalid mutable tensor range [",
       start,
@@ -87,6 +96,141 @@ Range<T*> GetMutableTensorDataRange(
       ") with total tensor size ",
       tensor.numel());
   return Range<T*>(tensor.template mutable_data<T>() + start, numElements);
+}
+
+template <typename T>
+c10::ArrayRef<T> GetTensorDataRange(
+    const Tensor& tensor,
+    size_t start,
+    size_t numElements) {
+  CAFFE_ENFORCE(
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+      start + numElements <= tensor.numel(),
+      "Requested invalid tensor range [",
+      start,
+      ", ",
+      start + numElements,
+      ") with total tensor size ",
+      tensor.numel());
+  return c10::ArrayRef<T>(tensor.template data<T>() + start, numElements);
+}
+
+template <typename T>
+bool EnableByteEncoding() {
+  // if typeSize == 1, endianness does not matter. Else check for endianness.
+  if (sizeof(T) > 1 && !kIsLittleEndian) {
+    return false;
+  }
+  return FLAGS_caffe2_serialize_using_bytes_as_holder;
+}
+
+bool EnableByteEncodingFloat16() {
+  if (!kIsLittleEndian) {
+    return false;
+  }
+  // Check if special casing for float is enabled if
+  // caffe2_serialize_using_bytes_as_holder is not enabled.
+  return FLAGS_caffe2_serialize_using_bytes_as_holder ||
+      FLAGS_caffe2_serialize_fp16_as_bytes;
+}
+
+size_t EstimatePerElementSize(
+    const Tensor& tensor,
+    const BlobSerializationOptions& options) {
+  const TensorProto::DataType data_type = TypeMetaToDataType(tensor.dtype());
+  switch (data_type) {
+    case TensorProto_DataType_FLOAT:
+#ifdef USE_FBGEMM
+      if (options.float_format() ==
+          BlobSerializationOptions_FloatFormat_FLOAT_BFLOAT16) {
+        // Each element is serialized as a 2-byte bfloat16
+        return sizeof(uint16_t);
+      }
+#endif
+      return sizeof(float);
+    case TensorProto_DataType_INT32:
+      // protobuf will use varint encoding, so it won't be a fixed field width
+      // per integer, and will use between 1 and 5 bytes.  Just return 4 bytes
+      // as an estimate.  With randomized data the actual value may be higher
+      // than this, since around half the numbers will have the high bit set and
+      // would require 5 bytes to encode.
+      return sizeof(int32_t);
+    case TensorProto_DataType_INT64:
+      // Same varint reasoning as for the INT32 case.
+      return sizeof(int64_t);
+    case TensorProto_DataType_STRING:
+      // We unfortunately cannot estimate the size well for strings, without
+      // knowing the individual element lengths.  Just return 50 bytes per
+      // string as a guess.
+      return 50;
+    case TensorProto_DataType_BOOL:
+      // Depending on EnableByteEncoding() this is either serialized in
+      // byte_data or int32_data, but in either case it takes 1 byte per element
+      // (since bool values will only take 1 byte when varint encoded in
+      // int32_data).
+      return 1;
+    case TensorProto_DataType_UINT8:
+      if (EnableByteEncoding<uint8_t>()) {
+        return 1;
+      } else {
+        // Unfortunately when storing uint8_t values in int32_data any values
+        // over 127 will require 2 bytes to store due to varint encoding.
+        // With random data we would expect around 1.5 bytes per element.  Round
+        // up to 2.
+        return 2;
+      }
+    case TensorProto_DataType_INT8:
+      if (EnableByteEncoding<int8_t>()) {
+        return 1;
+      } else {
+        // Unfortunately when storing int8_t values in int32_data any negative
+        // values will require 2 bytes to store due to varint encoding.  With
+        // random data we would expect around 1.5 bytes per element.  Round up
+        // to 2.
+        return 2;
+      }
+    case TensorProto_DataType_UINT16:
+      if (EnableByteEncoding<uint16_t>()) {
+        return 2;
+      } else {
+        // With random data, varint encoding will end up requiring closer to 3
+        // bytes per element.
+        return 3;
+      }
+    case TensorProto_DataType_INT16:
+      if (EnableByteEncoding<int16_t>()) {
+        return 2;
+      } else {
+        // With random data, varint encoding will end up requiring closer to 3
+        // bytes per element.
+        return 3;
+      }
+    case TensorProto_DataType_FLOAT16:
+      if (EnableByteEncodingFloat16()) {
+        return 2;
+      } else {
+        // The data will be stored as uint16_t values in the int32_data.
+        // Due to varint encoding many values may require 3 bytes.
+        return 3;
+      }
+    case TensorProto_DataType_DOUBLE:
+      return sizeof(double);
+    case TensorProto_DataType_UNDEFINED:
+      return tensor.itemsize();
+    case TensorProto_DataType_BYTE:
+    case TensorProto_DataType_ZERO_COLLISION_HASH:
+    case TensorProto_DataType_REBATCHING_BUFFER:
+      // These data types should never be hit during serialization
+      LOG(ERROR) << "unexpected tensor data type during serialization size "
+                    "estimation: "
+                 << static_cast<int>(data_type);
+      return 0;
+  }
+
+  LOG(ERROR) << "unknown tensor data type during serialization size "
+                "estimation: "
+             << static_cast<int>(data_type);
+  return 0;
 }
 
 } // namespace
@@ -117,6 +261,17 @@ class StringSerializer : public BlobSerializerBase {
     blob_proto.set_type("std::string");
     blob_proto.set_content(*static_cast<const std::string*>(pointer));
     acceptor(name, SerializeBlobProtoAsString_EnforceCheck(blob_proto));
+  }
+
+  size_t EstimateSerializedBlobSize(
+      const void* pointer,
+      TypeMeta,
+      c10::string_view name,
+      const BlobSerializationOptions&) override {
+    auto* str = static_cast<const std::string*>(pointer);
+    // Add 20 for the "std::string" type field plus other overhead for the
+    // BlobProto message serialization.
+    return name.size() + str->size() + 20;
   }
 };
 
@@ -179,6 +334,20 @@ std::string SerializeBlob(const Blob& blob, const string& name) {
   return SerializeBlob(blob.GetRaw(), blob.meta(), name);
 }
 
+size_t EstimateSerializedBlobSize(
+    const Blob& blob,
+    c10::string_view name,
+    const BlobSerializationOptions& options) {
+  std::unique_ptr<BlobSerializerBase> serializer{
+      CreateSerializer(blob.meta().id())};
+  if (!serializer) {
+    LOG(ERROR) << "No known serializer for " << blob.meta().name();
+    return 0;
+  }
+  return serializer->EstimateSerializedBlobSize(
+      blob.GetRaw(), blob.meta(), name, options);
+}
+
 void TensorSerializer::Serialize(
     const void* pointer,
     TypeMeta typeMeta,
@@ -225,6 +394,7 @@ void TensorSerializer::SerializeWithOptions(
   // Poorman's IOBound ThreadPool
   SimpleQueue<size_t> chunkQueue;
   auto task = [&]() {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t chunkStart;
     while (chunkQueue.Pop(&chunkStart)) {
       processChunk(chunkStart);
@@ -233,7 +403,8 @@ void TensorSerializer::SerializeWithOptions(
   std::vector<std::future<void>> futures;
   if (tensor.numel() > chunk_size) {
     futures.reserve(FLAGS_caffe2_max_tensor_serializer_threads);
-    for (int i = 0; i < FLAGS_caffe2_max_tensor_serializer_threads; ++i) {
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
+    for (const auto i : c10::irange(FLAGS_caffe2_max_tensor_serializer_threads)) {
       futures.emplace_back(std::async(std::launch::async, task));
     }
   }
@@ -243,6 +414,7 @@ void TensorSerializer::SerializeWithOptions(
   // Serialize whole vector. If vector is empty, it's shape still needs to be
   // serialized in empty proto
   for (size_t chunkBegin = 0;
+       // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
        chunkBegin < std::max(tensor.numel(), static_cast<int64_t>(1));
        chunkBegin += chunk_size) {
     VLOG(2) << "Starting a chunk at " << chunkBegin;
@@ -267,64 +439,231 @@ void TensorSerializer::SerializeWithOptions(
 #endif
 }
 
-static bool EnableByteEncoding(
-    const TensorProto::DataType& dataType,
-    const size_t& typeSize) {
-  // if typeSize == 1, endianness does not matter. Else check for endianness.
-  bool ret = false;
-  bool safeForEndianness = (typeSize == 1 || kIsLittleEndian);
-  if (safeForEndianness) {
-    ret = FLAGS_caffe2_serialize_using_bytes_as_holder;
-    // Check if special casing for float is enabled if
-    // caffe2_serialize_using_bytes_as_holder is not enabled.
-    if (!ret) {
-      ret =
-          (dataType == TensorProto_DataType_FLOAT16 &&
-           FLAGS_caffe2_serialize_fp16_as_bytes);
-    }
+size_t TensorSerializer::EstimateSerializedBlobSize(
+      const void* pointer,
+      TypeMeta typeMeta,
+      c10::string_view name,
+      const BlobSerializationOptions& options) {
+  CAFFE_ENFORCE(typeMeta.Match<Tensor>());
+  const auto& tensor = *static_cast<const Tensor*>(pointer);
+
+  auto chunk_size = options.chunk_size();
+  if (chunk_size == kNoChunking) {
+    chunk_size = tensor.numel() + 1; // to account for empty tensors
+  } else if (chunk_size == kDefaultChunkSize) {
+    chunk_size = FLAGS_caffe2_tensor_chunk_size;
   }
-  return ret;
+
+  // There is a small amount of fixed overhead per chunk to serialize the
+  // fixed TensorProto message data independent from the chunk contents.
+  // This normally appears to be around 50 bytes.
+  // The blob name is also written out in the BlobProto for each chunk.
+  constexpr size_t protobuf_overhead_per_chunk = 50;
+  size_t num_chunks = (tensor.numel() + (chunk_size - 1)) / chunk_size;
+  size_t overhead = num_chunks * (name.size() + protobuf_overhead_per_chunk);
+
+  return overhead + tensor.numel() * EstimatePerElementSize(tensor, options);
 }
 
+namespace {
+
 template <typename T, typename S = T>
-static void SerializeUsingBytesOrInt32(
-    const Tensor& input,
-    const TensorProto::DataType& dataType,
-    size_t chunkBegin,
-    int32_t chunkSize,
-    BaseContext* context,
+void SerializeUsingBytesOrInt32(
+    bool enableByteEncoding,
+    c10::ArrayRef<S> input,
+    BaseContext& context,
     TensorProto& proto) {
-  const auto typeSize = sizeof(T);
-  if (EnableByteEncoding(dataType, typeSize)) {
-    const auto bufSize = typeSize * chunkSize;
-    auto* byteData =
-        reinterpret_cast<const uint8_t*>(input.template data<S>() + chunkBegin);
+  if (enableByteEncoding) {
+    const auto bufSize = sizeof(T) * input.size();
+    auto* byteData = reinterpret_cast<const uint8_t*>(input.data());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     unique_ptr<uint8_t[]> buffer(new uint8_t[bufSize]);
-    context->template CopyToCPU<uint8_t>(bufSize, byteData, buffer.get());
-    context->FinishDeviceComputation();
+    context.template CopyToCPU<uint8_t>(bufSize, byteData, buffer.get());
+    context.FinishDeviceComputation();
     proto.set_byte_data(buffer.get(), bufSize);
   } else {
     detail::CopyToProtoWithCast(
-        chunkSize,
-        reinterpret_cast<const T*>(input.template data<S>()) + chunkBegin,
+        input.size(),
+        reinterpret_cast<const T*>(input.data()),
         proto.mutable_int32_data(),
-        context);
+        &context);
   }
 }
+
+/**
+ * SerializeParams is just a helper class to consolidate the parameters
+ * required for serializing tensor data so they can be passed around more
+ * easily.
+ *
+ * It also contains some helper functions to perform some operations on the
+ * parameters that are shared by multiple serialization functions.
+ */
+template<typename T>
+struct SerializeParams {
+  SerializeParams(
+      c10::ArrayRef<T> in,
+      TensorProto& proto,
+      BaseContext& ctx,
+      const BlobSerializationOptions& opts)
+      : input{in}, tensor_proto{proto}, context{ctx}, options{opts} {}
+
+  void SetDataFormat(TensorProto::SerializationFormat format) const {
+    tensor_proto.set_data_format(format);
+  }
+
+  void CopyToRepeatedField(google::protobuf::RepeatedField<T>* field) const {
+    detail::CopyToProtoAsIs(input.size(), input.data(), field, &context);
+  }
+
+  c10::ArrayRef<T> input;
+  TensorProto& tensor_proto;
+  BaseContext& context;
+  const BlobSerializationOptions& options;
+};
+
+void SerializeTensorData(const SerializeParams<int64_t>& params) {
+  params.CopyToRepeatedField(params.tensor_proto.mutable_int64_data());
+}
+
+void SerializeTensorData(const SerializeParams<int32_t>& params) {
+  params.CopyToRepeatedField(params.tensor_proto.mutable_int32_data());
+}
+
+template <typename T>
+typename std::enable_if<
+    std::is_same<T, bool>::value || std::is_same<T, uint8_t>::value ||
+        std::is_same<T, int8_t>::value || std::is_same<T, uint16_t>::value ||
+        std::is_same<T, int16_t>::value,
+    void>::type
+SerializeTensorData(const SerializeParams<T>& params) {
+  SerializeUsingBytesOrInt32<T>(
+      EnableByteEncoding<T>(),
+      params.input,
+      params.context,
+      params.tensor_proto);
+}
+
+void SerializeTensorData(const SerializeParams<at::Half>& params) {
+  SerializeUsingBytesOrInt32<uint16_t>(
+      EnableByteEncodingFloat16(),
+      params.input,
+      params.context,
+      params.tensor_proto);
+}
+
+#ifdef USE_FBGEMM
+namespace {
+// Unfortunately we can't include folly/lang/Bits.h here,
+// so provide our own byte-swapping code.
+fbgemm::bfloat16 ByteSwap(fbgemm::bfloat16 n) {
+#ifdef _MSC_VER
+  return _byteswap_ushort(n);
+#else
+  return __builtin_bswap16(n);
+#endif
+}
+
+void ByteSwapArray(
+    const fbgemm::bfloat16* src,
+    fbgemm::bfloat16* dest,
+    size_t num_elements) {
+  // Note that we support src and dest pointing to the same location.
+  // We currently only use this function on big-endian machines, so it isn't
+  // worth trying to build a fancier SIMD version.
+  for (size_t n = 0; n < num_elements; ++n) {
+    dest[n] = ByteSwap(src[n]);
+  }
+}
+} // namespace
+#endif // USE_FBGEMM
+
+void SerializeTensorData(const SerializeParams<float>& params) {
+  // The FLOAT_BFLOAT16 option requests doing a conversion to bfloat16.  This
+  // reduces the serialized data size at the cost of some lost precision.
+  // We currently only support doing this when compiled with fbgemm.
+#ifdef USE_FBGEMM
+  if (params.options.float_format() ==
+      BlobSerializationOptions_FloatFormat_FLOAT_BFLOAT16) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+    std::unique_ptr<float[]> tmp_buffer;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    const float* src;
+    if (params.context.device() == CPU) {
+      src = params.input.data();
+    } else {
+      tmp_buffer.reset(new float[params.input.size()]);
+      params.context.CopyToCPU(
+          params.input.size(), params.input.data(), tmp_buffer.get());
+    }
+
+    params.SetDataFormat(TensorProto_SerializationFormat_FMT_BFLOAT16);
+    // TODO: it would be nice if we could use
+    // folly::resizeWithoutInitialization() here
+    params.tensor_proto.mutable_raw_data()->resize(
+        params.input.size() * sizeof(fbgemm::bfloat16));
+
+    Range<fbgemm::bfloat16*> dest(
+        reinterpret_cast<fbgemm::bfloat16*>(
+            &(*params.tensor_proto.mutable_raw_data())[0]),
+        params.input.size());
+
+    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
+    fbgemm::FloatToBfloat16_simd(src, dest.data(), params.input.size());
+
+    // Note: technically a platform can have different integer from floating
+    // point endianness, and we ideally should check floating point endianness
+    // here.  However, the fbgemm code doesn't appear to make this distinction,
+    // and at least in the Bfloat16ToFloat_ref() code it appears to assume that
+    // floating point and integer endianness are the same.
+    if (!kIsLittleEndian) {
+      ByteSwapArray(dest.data(), dest.data(), dest.size());
+    }
+    return;
+  }
+#endif
+
+  params.SetDataFormat(TensorProto_SerializationFormat_FMT_PROTOBUF);
+  params.CopyToRepeatedField(params.tensor_proto.mutable_float_data());
+}
+
+void SerializeTensorData(const SerializeParams<double>& params) {
+  params.CopyToRepeatedField(params.tensor_proto.mutable_double_data());
+}
+
+void SerializeTensorData(const SerializeParams<std::string>& params) {
+  params.tensor_proto.mutable_string_data()->Reserve(params.input.size());
+  for (const std::string& element : params.input) {
+    params.tensor_proto.add_string_data(element);
+  }
+}
+
+#define SERIALIZE_TYPE_CASE(proto_type, type)                   \
+  case TensorProto_DataType_##proto_type: {                     \
+    SerializeTensorData(SerializeParams<type>(                  \
+        GetTensorDataRange<type>(input, chunkBegin, chunkSize), \
+        proto,                                                  \
+        *context,                                               \
+        options));                                              \
+    return;                                                     \
+  }
+
+} // namespace
 
 void TensorSerializer::Serialize(
     const Tensor& input,
     const string& name,
     TensorProto* proto_ptr,
-    const BlobSerializationOptions& /*options*/,
+    const BlobSerializationOptions& options,
     size_t chunkBegin,
     int32_t chunkSize) {
   CAFFE_ENFORCE(
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       chunkBegin <= input.numel(),
       "Chunk begin is out of tensor: ",
       chunkBegin,
       ' ',
       input.numel());
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   if (chunkBegin + chunkSize > input.numel()) {
     chunkSize = input.numel() - chunkBegin;
   }
@@ -347,107 +686,60 @@ void TensorSerializer::Serialize(
   proto.mutable_segment()->set_begin(chunkBegin);
   proto.mutable_segment()->set_end(chunkBegin + chunkSize);
 
-  for (int i = 0; i < input.dim(); ++i) {
+  for (const auto i : c10::irange(input.dim())) {
     proto.add_dims(input.size(i));
   }
+  StoreDeviceDetail(input, &proto);
+
   const TensorProto::DataType data_type = TypeMetaToDataType(input.dtype());
   proto.set_data_type(data_type);
-  StoreDeviceDetail(input, &proto);
   // TODO: use CUDAGuard here instead of context and employ explicit sync
   // copy
-  auto uniq_ptr = CreateContext(input.GetDevice());
-  // A lot of copypaste is error prone. Should we create a macro for this?
+  auto context = CreateContext(input.GetDevice());
   switch (data_type) {
-    case TensorProto_DataType_FLOAT:
-      detail::CopyToProtoAsIs(
-          chunkSize,
-          input.template data<float>() + chunkBegin,
-          proto.mutable_float_data(),
-          uniq_ptr.get());
-      break;
-    case TensorProto_DataType_INT32:
-      detail::CopyToProtoAsIs(
-          chunkSize,
-          input.template data<int>() + chunkBegin,
-          proto.mutable_int32_data(),
-          uniq_ptr.get());
-      break;
+    SERIALIZE_TYPE_CASE(FLOAT, float)
+    SERIALIZE_TYPE_CASE(INT32, int32_t)
+    SERIALIZE_TYPE_CASE(STRING, std::string)
+    SERIALIZE_TYPE_CASE(BOOL, bool)
+    SERIALIZE_TYPE_CASE(UINT8, uint8_t)
+    SERIALIZE_TYPE_CASE(INT8, int8_t)
+    SERIALIZE_TYPE_CASE(UINT16, uint16_t)
+    SERIALIZE_TYPE_CASE(INT16, int16_t)
+    SERIALIZE_TYPE_CASE(INT64, int64_t)
+    SERIALIZE_TYPE_CASE(FLOAT16, at::Half)
+    SERIALIZE_TYPE_CASE(DOUBLE, double)
     case TensorProto_DataType_BYTE:
       LOG(FATAL) << "This should not happen. When serializing, "
                     "BYTE is deprecated and moved to UINT8.";
-      break;
-    case TensorProto_DataType_STRING: {
-      proto.mutable_string_data()->Reserve(chunkSize);
-      const string* content = input.template data<string>();
-      for (int i = chunkBegin; i < chunkBegin + chunkSize; ++i) {
-        proto.add_string_data(content[i]);
-      }
-      break;
-    }
-    case TensorProto_DataType_BOOL:
-      SerializeUsingBytesOrInt32<bool>(
-          input, data_type, chunkBegin, chunkSize, uniq_ptr.get(), proto);
-      break;
-    case TensorProto_DataType_UINT8:
-      SerializeUsingBytesOrInt32<uint8_t>(
-          input, data_type, chunkBegin, chunkSize, uniq_ptr.get(), proto);
-      break;
-    case TensorProto_DataType_INT8:
-      SerializeUsingBytesOrInt32<int8_t>(
-          input, data_type, chunkBegin, chunkSize, uniq_ptr.get(), proto);
-      break;
-    case TensorProto_DataType_UINT16:
-      SerializeUsingBytesOrInt32<uint16_t>(
-          input, data_type, chunkBegin, chunkSize, uniq_ptr.get(), proto);
-      break;
-    case TensorProto_DataType_INT16:
-      SerializeUsingBytesOrInt32<int16_t>(
-          input, data_type, chunkBegin, chunkSize, uniq_ptr.get(), proto);
-      break;
-    case TensorProto_DataType_INT64:
-      detail::CopyToProtoAsIs(
-          chunkSize,
-          input.template data<int64_t>() + chunkBegin,
-          proto.mutable_int64_data(),
-          uniq_ptr.get());
-      break;
-    case TensorProto_DataType_FLOAT16:
-      SerializeUsingBytesOrInt32<uint16_t, at::Half>(
-          input, data_type, chunkBegin, chunkSize, uniq_ptr.get(), proto);
-      break;
-    case TensorProto_DataType_DOUBLE:
-      detail::CopyToProtoAsIs(
-          chunkSize,
-          input.template data<double>() + chunkBegin,
-          proto.mutable_double_data(),
-          uniq_ptr.get());
-      break;
-    case TensorProto_DataType_UNDEFINED: {
+      return;
+    case TensorProto_DataType_UNDEFINED:
       proto.mutable_string_data()->Reserve(chunkSize);
       if (chunkSize > 0) {
         const char* raw_data = static_cast<const char*>(input.raw_data());
-        for (int i = chunkBegin; i < chunkBegin + chunkSize; ++i) {
+        for (const auto i : c10::irange(chunkBegin, chunkBegin + chunkSize)) {
           proto.add_string_data(SerializeBlob(
               raw_data + i * input.itemsize(), input.dtype(), ""));
         }
       }
-    } break;
-    case TensorProto_DataType_ZERO_COLLISION_HASH: {
+      return;
+    case TensorProto_DataType_ZERO_COLLISION_HASH:
       CAFFE_ENFORCE(
         false,
         "Serialization for zero collision hash type is supported by "
         "specialized serializer ZeroCollisionIdHashSerializer");
-    } break;
-    case TensorProto_DataType_REBATCHING_BUFFER: {
+      return;
+    case TensorProto_DataType_REBATCHING_BUFFER:
       CAFFE_ENFORCE(
         false,
         "Serialization for REBATCHING_BUFFER type is supported by "
         "specialized serializer RebatchingBufferSerialier");
-    } break;
+      return;
 
       // Note: we intentially do not provide "default:" so if any new data types
       // are added, the compiler should warn the user to add the case here.
   }
+
+  CAFFE_ENFORCE(false, "unexpected data type during tensor serialization");
 }
 
 int GetGPUIDForPointer(const void* ptr);
@@ -458,12 +750,14 @@ void TensorSerializer::StoreDeviceDetail(
   ExtractDeviceOption(proto->mutable_device_detail(), input.GetDevice());
 }
 // The actual serialization registry objects.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_TYPED_REGISTRY(
     BlobSerializerRegistry,
     TypeIdentifier,
     BlobSerializerBase,
     std::unique_ptr);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_REGISTRY(BlobDeserializerRegistry, BlobDeserializerBase);
 
 void DeserializeBlob(const string& content, Blob* result) {
@@ -736,6 +1030,52 @@ DESERIALIZE_IMPL(float, FMT_PROTOBUF) {
   params.CopyFromRepeatedField(params.tensor_proto.float_data());
 }
 
+DESERIALIZE_IMPL(float, FMT_BFLOAT16) {
+#ifdef USE_FBGEMM
+  CAFFE_ENFORCE_EQ(
+      params.dest.size() * sizeof(fbgemm::bfloat16),
+      params.tensor_proto.raw_data().size(),
+      "incorrect data size in serialized bfloat16 data");
+  auto raw_src = reinterpret_cast<const fbgemm::bfloat16*>(
+      params.tensor_proto.raw_data().data());
+
+  // If we are on a big-endian machine, byte-swap the serialized data.
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  const fbgemm::bfloat16* src;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+  std::unique_ptr<fbgemm::bfloat16[]> bswap_buffer;
+  if (kIsLittleEndian) {
+    src = raw_src;
+  } else {
+    bswap_buffer.reset(new fbgemm::bfloat16[params.dest.size()]);
+    ByteSwapArray(raw_src, bswap_buffer.get(), params.dest.size());
+    src = bswap_buffer.get();
+  }
+
+  // If we are on a non-CPU device, we need an intermediate CPU buffer for the
+  // bfloat16 to float conversion.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+  std::unique_ptr<float[]> tmp_buffer;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  float* dest;
+  if (params.context.device() == CPU) {
+    dest = params.dest.data();
+  } else {
+    tmp_buffer.reset(new float[params.dest.size()]);
+    dest = tmp_buffer.get();
+  }
+
+  fbgemm::Bfloat16ToFloat_simd(src, dest, params.dest.size());
+  if (params.context.device() != CPU) {
+    params.context.CopyFromCPU(params.dest.size(), dest, params.dest.data());
+  }
+#else
+  // We cannot load serialized bfloat16 data without fbgemm.
+  CAFFE_ENFORCE(
+      false, "cannot perform bfloat16 to float conversion without fbgemm");
+#endif
+}
+
 DESERIALIZE_IMPL(double, FMT_PROTOBUF) {
   params.CopyFromRepeatedField(params.tensor_proto.double_data());
 }
@@ -748,7 +1088,7 @@ DESERIALIZE_IMPL(std::string, FMT_PROTOBUF) {
       params.dest.size(),
       " != ",
       params.tensor_proto.string_data().size());
-  for (int i = 0; i < params.dest.size(); ++i) {
+  for (const auto i : c10::irange(params.dest.size())) {
     params.dest[i] = params.tensor_proto.string_data(i);
   }
 }
@@ -769,6 +1109,7 @@ void DeserializeTensorBody(
   DeserializeParams<T> params(dest, tensor_proto, context);
   switch (format) {
     DESERIALIZE_FORMAT_CASE(FMT_PROTOBUF);
+    DESERIALIZE_FORMAT_CASE(FMT_BFLOAT16);
   }
 
   // This can happen if the blob was serialized by a newer version of the code
@@ -855,7 +1196,7 @@ void DeserializeTensor(
     case TensorProto_DataType_UNDEFINED: {
       Blob temp_blob;
       void* raw_ptr = nullptr;
-      for (int i = 0; i < chunkSize; ++i) {
+      for (const auto i : c10::irange(chunkSize)) {
         DeserializeBlob(tensor_proto.string_data(i), &temp_blob);
         if (i == 0) {
           raw_ptr = tensor->raw_mutable_data(temp_blob.meta());
@@ -933,10 +1274,14 @@ std::string SerializeAsString_EnforceCheck(
 
 namespace {
 // Serialize Tensor
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_SERIALIZER((TypeMeta::Id<Tensor>()), TensorSerializer);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_DESERIALIZER(TensorCPU, TensorDeserializer);
 // Serialize std::string
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_SERIALIZER((TypeMeta::Id<std::string>()), StringSerializer);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_DESERIALIZER(std::string, StringDeserializer);
 } // namespace
 } // namespace caffe2

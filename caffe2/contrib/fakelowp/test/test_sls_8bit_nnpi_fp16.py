@@ -1,4 +1,5 @@
 import unittest
+from typing import Dict, Any
 
 # Must happen before importing caffe2.python.*
 import caffe2.python.fakelowp.init_shared_libs  # noqa
@@ -41,7 +42,7 @@ class SparseLengthsSum8BitFakeNNPIFp16Test(serial.SerializedTestCase):
         fp16_c2_net = core.Net("test_fp16_c2")
         fp16_c2_net.SparseLengthsSumFakeFP16AccFP16(["D", "I", "L"], "fp16_out")
 
-        input_dict = {}
+        input_dict : Dict[Any, Any] = {}
 
         pred_net = caffe2_pb2.NetDef()
         pred_net.name = "pred"
@@ -214,10 +215,10 @@ class SparseLengthsSum8BitFakeNNPIFp16Test(serial.SerializedTestCase):
         data = np.random.rand(num_rows, embedding_dim).astype(np.float32)
         lengths = np.random.choice(np.arange(1, num_rows), batch_size).astype(np.int32)
 
-        indices = []
+        _indices = []
         for length in lengths:
-            indices.extend(np.random.choice(np.arange(1, num_rows), length))
-        indices = np.asarray(indices).astype(np.int64)
+            _indices.extend(np.random.choice(np.arange(1, num_rows), length))
+        indices = np.asarray(_indices).astype(np.int64)
 
         weights = np.random.uniform(
             low=0,

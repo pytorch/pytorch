@@ -1,13 +1,14 @@
 #include <torch/csrc/autograd/python_hook.h>
 
-#include <sstream>
-
+#include <c10/util/irange.h>
 #include <pybind11/pybind11.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/Exceptions.h>
+
+#include <sstream>
 
 using torch::autograd::variable_list;
 using torch::autograd::Variable;
@@ -29,8 +30,11 @@ PyFunctionPreHook::PyFunctionPreHook(PyObject* dict, int value_idx)
 }
 
 PyFunctionPreHook::~PyFunctionPreHook() {
-  pybind11::gil_scoped_acquire gil;
-  Py_DECREF(dict);
+  // If python is already dead, leak the wrapped python objects
+  if (Py_IsInitialized()) {
+    pybind11::gil_scoped_acquire gil;
+    Py_DECREF(dict);
+  }
 }
 
 auto PyFunctionPreHook::operator()(const variable_list& values) -> variable_list
@@ -40,6 +44,7 @@ auto PyFunctionPreHook::operator()(const variable_list& values) -> variable_list
   THPObjectPtr value(THPVariable_Wrap(values.at(value_idx)));
   if (!value) throw python_error();
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   PyObject *key, *hook;
   Py_ssize_t pos = 0;
   while (PyDict_Next(dict, &pos, &key, &hook)) {
@@ -51,7 +56,7 @@ auto PyFunctionPreHook::operator()(const variable_list& values) -> variable_list
   }
 
   variable_list results(values);
-  if (value != Py_None) results[value_idx] = ((THPVariable*)value.get())->cdata;
+  if (value != Py_None) results[value_idx] = THPVariable_Unpack(value.get());
   return results;
 }
 
@@ -60,8 +65,11 @@ PyFunctionPostHook::PyFunctionPostHook(PyObject* dict) : dict(dict) {
 }
 
 PyFunctionPostHook::~PyFunctionPostHook() {
-  pybind11::gil_scoped_acquire gil;
-  Py_DECREF(dict);
+  // If python is already dead, leak the wrapped python objects
+  if (Py_IsInitialized()) {
+    pybind11::gil_scoped_acquire gil;
+    Py_DECREF(dict);
+  }
 }
 
 auto PyFunctionPostHook::operator()(
@@ -73,6 +81,7 @@ auto PyFunctionPostHook::operator()(
   THPObjectPtr outputs(wrap_variables(_outputs));
   THPObjectPtr inputs(wrap_variables(_inputs));
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   PyObject *key, *hook;
   Py_ssize_t pos = 0;
   while (PyDict_Next(dict, &pos, &key, &hook)) {
@@ -95,7 +104,7 @@ static PyObject *wrap_variables(const variable_list& c_variables)
   size_t num_vars = c_variables.size();
   THPObjectPtr tuple(PyTuple_New(num_vars));
   if (!tuple) throw python_error();
-  for (size_t i = 0; i < num_vars; ++i) {
+  for (const auto i : c10::irange(num_vars)) {
     THPObjectPtr var(THPVariable_Wrap(c_variables[i]));
     if (!var) throw python_error();
     PyTuple_SET_ITEM(tuple.get(), i, var.release());
@@ -105,12 +114,12 @@ static PyObject *wrap_variables(const variable_list& c_variables)
 
 static variable_list unwrap_variables(PyObject* py_variables)  {
   variable_list results(PyTuple_GET_SIZE(py_variables));
-  for (size_t i = 0; i < results.size(); i++) {
+  for(const auto i : c10::irange(results.size())) {
     PyObject* item = PyTuple_GET_ITEM(py_variables, i);
     if (item == Py_None) {
       continue;
     } else if (THPVariable_Check(item)) {
-      results[i] = ((THPVariable*)item)->cdata;
+      results[i] = THPVariable_Unpack(item);
     } else {
       // this should never happen, but just in case...
       std::stringstream ss;
@@ -139,7 +148,7 @@ static void check_result(PyObject* prev, PyObject* result, PyObject* hook) {
     throw std::runtime_error(ss.str());
   }
 
-  for (auto i = 0; i < prev_size; i++) {
+  for (const auto i : c10::irange(prev_size)) {
     check_single_result(PyTuple_GET_ITEM(prev, i), PyTuple_GET_ITEM(result, i), hook);
   }
 }
@@ -157,8 +166,8 @@ static void check_single_result(PyObject* _original, PyObject* _result, PyObject
     throw python_error();
   }
 
-  auto& original = ((THPVariable*)_original)->cdata;
-  auto& result = ((THPVariable*)_result)->cdata;
+  const auto& original = THPVariable_Unpack(_original);
+  const auto& result = THPVariable_Unpack(_result);
 
   torch::autograd::check_variable_result(original, result, hook_name(hook));
 }

@@ -5,6 +5,7 @@ namespace at {
 namespace detail {
 
 struct MetalGuardImpl final : public c10::impl::DeviceGuardImplInterface {
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   MetalGuardImpl() {}
 
   explicit MetalGuardImpl(DeviceType t) {
@@ -58,6 +59,7 @@ struct MetalGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       noexcept override {}
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_REGISTER_GUARD_IMPL(Metal, MetalGuardImpl);
 
 } // namespace detail

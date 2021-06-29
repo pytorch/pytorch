@@ -7,6 +7,12 @@
 #include <fstream>
 #include <unordered_set>
 
+#if defined(_MSC_VER)
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
+
 #include <google/protobuf/io/coded_stream.h>
 
 #ifndef CAFFE2_USE_LITE_PROTO
@@ -16,7 +22,7 @@
 #include <google/protobuf/io/zero_copy_stream_impl_lite.h>
 #endif // !CAFFE2_USE_LITE_PROTO
 
-#include "caffe2/core/logging.h"
+#include <c10/util/Logging.h>
 
 using ::google::protobuf::MessageLite;
 
@@ -24,6 +30,15 @@ namespace caffe2 {
 
 C10_EXPORT std::string DeviceTypeName(const int32_t& d) {
   return at::DeviceTypeName(static_cast<at::DeviceType>(d));
+}
+
+void setTotalBytesLimit(::google::protobuf::io::CodedInputStream& stream, int bytes_limit, int warning_threshold) {
+  #if GOOGLE_PROTOBUF_VERSION >= 3011000
+    // Only take one parameter since protobuf 3.11
+    stream.SetTotalBytesLimit(bytes_limit);
+  #else
+    stream.SetTotalBytesLimit(bytes_limit, warning_threshold);
+  #endif
 }
 
 C10_EXPORT int DeviceId(const DeviceOption& option) {
@@ -136,7 +151,7 @@ C10_EXPORT bool ParseProtoFromLargeString(
   ::google::protobuf::io::ArrayInputStream input_stream(str.data(), str.size());
   ::google::protobuf::io::CodedInputStream coded_stream(&input_stream);
   // Set PlanDef message size limit to 2G.
-  coded_stream.SetTotalBytesLimit(2147483647, 512LL << 20);
+  setTotalBytesLimit(coded_stream, 2147483647, 512LL << 20);
   return proto->ParseFromCodedStream(&coded_stream);
 }
 
@@ -149,7 +164,7 @@ C10_EXPORT bool ReadProtoFromBinaryFile(
   // Total bytes hard limit / warning limit are set to 2GB and 512MB
   // respectively.
   ::google::protobuf::io::CodedInputStream coded_stream(&stream);
-  coded_stream.SetTotalBytesLimit(2147483647, 512LL << 20);
+  setTotalBytesLimit(coded_stream, 2147483647, 512LL << 20);
   return proto->ParseFromCodedStream(&coded_stream);
 }
 
@@ -188,6 +203,7 @@ C10_EXPORT bool ParseFromString(const string& spec, Message* proto) {
   }
 
   return ::google::protobuf::TextFormat::ParseFromString(
+      // NOLINTNEXTLINE(performance-move-const-arg)
       std::move(bc_spec), proto);
 }
 } // namespace TextFormat
@@ -200,7 +216,7 @@ C10_EXPORT bool ParseProtoFromLargeString(const string& str, Message* proto) {
   ::google::protobuf::io::ArrayInputStream input_stream(str.data(), str.size());
   ::google::protobuf::io::CodedInputStream coded_stream(&input_stream);
   // Set PlanDef message size limit to 2G.
-  coded_stream.SetTotalBytesLimit(2147483647, 512LL << 20);
+  setTotalBytesLimit(coded_stream, 2147483647, 512LL << 20);
   return proto->ParseFromCodedStream(&coded_stream);
 }
 
@@ -244,7 +260,13 @@ C10_EXPORT bool ReadProtoFromBinaryFile(
   std::unique_ptr<CodedInputStream> coded_input(
       new CodedInputStream(raw_input.get()));
   // A hack to manually allow using very large protocol buffers.
-  coded_input->SetTotalBytesLimit(2147483647, 536870912);
+  #if GOOGLE_PROTOBUF_VERSION >= 3011000
+    // Only take one parameter since protobuf 3.11
+    coded_input->SetTotalBytesLimit(2147483647);
+  #else
+    // Total bytes hard limit / warning limit are set to 2GB and 512MB respectively.
+    coded_input->SetTotalBytesLimit(2147483647, 536870912);
+  #endif
   bool success = proto->ParseFromCodedStream(coded_input.get());
   coded_input.reset();
   raw_input.reset();
@@ -393,12 +415,12 @@ INSTANTIATE_GET_SINGLE_ARGUMENT(NetDef, n, false)
 #define INSTANTIATE_GET_REPEATED_ARGUMENT(                             \
     T, fieldname, enforce_lossless_conversion)                         \
   template <>                                                          \
-  C10_EXPORT vector<T> ArgumentHelper::GetRepeatedArgument<T>(         \
+  C10_EXPORT std::vector<T> ArgumentHelper::GetRepeatedArgument<T>(         \
       const string& name, const std::vector<T>& default_value) const { \
     if (arg_map_.count(name) == 0) {                                   \
       return default_value;                                            \
     }                                                                  \
-    vector<T> values;                                                  \
+    std::vector<T> values;                                                  \
     for (const auto& v : arg_map_.at(name).fieldname()) {              \
       if (enforce_lossless_conversion) {                               \
         auto supportsConversion =                                      \
@@ -444,6 +466,7 @@ INSTANTIATE_GET_REPEATED_ARGUMENT(QTensorProto, qtensors, false)
 CAFFE2_MAKE_SINGULAR_ARGUMENT(bool, i)
 CAFFE2_MAKE_SINGULAR_ARGUMENT(float, f)
 CAFFE2_MAKE_SINGULAR_ARGUMENT(int, i)
+CAFFE2_MAKE_SINGULAR_ARGUMENT(int16_t, i)
 CAFFE2_MAKE_SINGULAR_ARGUMENT(int64_t, i)
 CAFFE2_MAKE_SINGULAR_ARGUMENT(string, s)
 #undef CAFFE2_MAKE_SINGULAR_ARGUMENT
@@ -472,7 +495,7 @@ C10_EXPORT Argument MakeArgument(const string& name, const MessageLite& value) {
 #define CAFFE2_MAKE_REPEATED_ARGUMENT(T, fieldname) \
   template <>                                       \
   C10_EXPORT Argument MakeArgument(                 \
-      const string& name, const vector<T>& value) { \
+      const string& name, const std::vector<T>& value) { \
     Argument arg;                                   \
     arg.set_name(name);                             \
     for (const auto& v : value) {                   \
@@ -575,6 +598,7 @@ C10_EXPORT bool GetFlagArgument(
     bool default_value) {
   int index = GetArgumentIndex(args, name);
   if (index != -1) {
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto arg = args.Get(index);
     CAFFE_ENFORCE(
         arg.has_i(), "Can't parse argument as bool: ", ProtoDebugString(arg));

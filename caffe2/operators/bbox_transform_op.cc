@@ -4,9 +4,11 @@
 namespace caffe2 {
 namespace {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(BBoxTransform, BBoxTransformOp<float, CPUContext>);
 
 // Input: box, delta Output: box
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(BBoxTransform)
     .NumInputs(3)
     .NumOutputs(1, 2)
@@ -77,6 +79,7 @@ Transform proposal bounding boxes to target bounding box using bounding box
         "Tensor of shape (batch_size) with each element denoting the number "
         "of RoIs belonging to the corresponding image in batch");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(BBoxTransform);
 } // namespace
 
@@ -138,8 +141,11 @@ bool BBoxTransformOp<float, CPUContext>::RunOnDevice() {
     const int num_rois = num_rois_per_batch[i];
     const auto& cur_iminfo = iminfo.row(i);
     const float scale_before = cur_iminfo(2);
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     const float scale_after = apply_scale_ ? cur_iminfo(2) : 1.0;
+    // NOLINTNEXTLINE(bugprone-incorrect-roundings,cppcoreguidelines-avoid-magic-numbers)
     int img_h = int(cur_iminfo(0) / scale_before + 0.5);
+    // NOLINTNEXTLINE(bugprone-incorrect-roundings,cppcoreguidelines-avoid-magic-numbers)
     int img_w = int(cur_iminfo(1) / scale_before + 0.5);
 
     EArrXXf cur_boxes =

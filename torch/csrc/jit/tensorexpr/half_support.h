@@ -69,7 +69,7 @@ class HalfRewriter : public IRMutator {
       inserted_half_casts_.insert(new_val);
     }
 
-    return new Store(v->buf(), v->indices(), new_val, v->mask());
+    return new Store(v->buf(), v->indices(), new_val);
   }
 
   const Expr* mutate(const HalfImm* v) override {

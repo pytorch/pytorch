@@ -58,7 +58,7 @@ def do_input_map(fn, input):
 def clear_class_registry():
     torch._C._jit_clear_class_registry()
     torch.jit._recursive.concrete_type_store = torch.jit._recursive.ConcreteTypeStore()
-    torch.jit._state._script_classes.clear()
+    torch.jit._state._clear_class_state()
 
 def get_execution_plan(graph_executor_state):
     execution_plans = list(graph_executor_state.execution_plans.values())
@@ -348,7 +348,7 @@ class JitTestCase(JitCommonTestCase):
 
         torch._C._jit_pass_lint(graph)
         result = getattr(torch._C, '_jit_pass_' + name)(graph)
-        if result is not None:
+        if result is not None and not isinstance(result, bool):
             graph = result
         torch._C._jit_pass_lint(graph)
 
@@ -425,6 +425,10 @@ class JitTestCase(JitCommonTestCase):
                     profiling=ProfilingMode.PROFILING,
                     atol=None,
                     rtol=None):
+        """
+        Checks that a given script generates the same output as the Python
+        version using the given inputs.
+        """
         with torch.jit.optimized_execution(optimize):
             with enable_profiling_mode_for_profiling_tests():
                 extra_profile_runs = any(isinstance(x, torch.Tensor) and x.requires_grad for x in inputs)

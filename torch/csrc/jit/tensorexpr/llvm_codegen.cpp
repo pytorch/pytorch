@@ -2,10 +2,11 @@
 
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 
+#include <aten/src/ATen/Parallel.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
+#include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/llvm_jit.h>
-
-#include <memory>
 
 #include <llvm/Analysis/TargetTransformInfo.h>
 #include <llvm/ExecutionEngine/Orc/JITTargetMachineBuilder.h>
@@ -43,6 +44,8 @@
 
 #include <torch/csrc/jit/jit_log.h>
 
+#include <memory>
+
 using namespace torch::jit::tensorexpr;
 
 C10_DEFINE_bool(
@@ -56,6 +59,7 @@ DEFINE_TRIGGER(llvm_codegen_executed);
 namespace torch {
 namespace jit {
 namespace tensorexpr {
+DEFINE_TRIGGER(llvm_codegen_parallel_dispatched);
 namespace {
 
 llvm::CmpInst::Predicate llvm_comparison_predicate(
@@ -67,17 +71,17 @@ llvm::CmpInst::Predicate llvm_comparison_predicate(
     case CompareSelectOperation::kNE:
       return llvm::ICmpInst::ICMP_NE;
     case CompareSelectOperation::kGT:
-      return is_signed(type) ? llvm::ICmpInst::ICMP_SGT
-                             : llvm::ICmpInst::ICMP_UGT;
+      return c10::isSignedType(type) ? llvm::ICmpInst::ICMP_SGT
+                                     : llvm::ICmpInst::ICMP_UGT;
     case CompareSelectOperation::kGE:
-      return is_signed(type) ? llvm::ICmpInst::ICMP_SGE
-                             : llvm::ICmpInst::ICMP_UGE;
+      return c10::isSignedType(type) ? llvm::ICmpInst::ICMP_SGE
+                                     : llvm::ICmpInst::ICMP_UGE;
     case CompareSelectOperation::kLT:
-      return is_signed(type) ? llvm::ICmpInst::ICMP_SLT
-                             : llvm::ICmpInst::ICMP_ULT;
+      return c10::isSignedType(type) ? llvm::ICmpInst::ICMP_SLT
+                                     : llvm::ICmpInst::ICMP_ULT;
     case CompareSelectOperation::kLE:
-      return is_signed(type) ? llvm::ICmpInst::ICMP_SLE
-                             : llvm::ICmpInst::ICMP_ULE;
+      return c10::isSignedType(type) ? llvm::ICmpInst::ICMP_SLE
+                                     : llvm::ICmpInst::ICMP_ULE;
     default:
       // TODO: change to a proper error report
       throw std::runtime_error("invalid operator type");
@@ -121,6 +125,34 @@ llvm::ElementCount ElementCount(int lanes) {
 }
 #endif
 
+#if LLVM_VERSION_MAJOR >= 9
+
+using FunctionCallee = llvm::FunctionCallee;
+
+#elif LLVM_VERSION_MAJOR == 8 && LLVM_VERSION_PATCH == 20181009
+
+struct FunctionCallee {
+  FunctionCallee() {}
+
+  FunctionCallee(llvm::Constant* fn)
+      : v_(fn), ft_(cast<llvm::Function>(v_)->getFunctionType()) {}
+
+  llvm::FunctionType* getFunctionType() {
+    return ft_;
+  }
+
+  llvm::Value* getCallee() {
+    return v_;
+  }
+
+ private:
+  llvm::Value* v_{nullptr};
+  llvm::FunctionType* ft_{nullptr};
+};
+
+#else
+#error Only LLVM versions 8 and above are supported.
+#endif
 } // namespace
 
 class LLVMCodeGenImpl : public IRVisitor {
@@ -133,20 +165,20 @@ class LLVMCodeGenImpl : public IRVisitor {
   llvm::BasicBlock* bb_;
   llvm::Value* value_{nullptr};
   llvm::JITTargetAddress kernelAddress_;
-  std::unique_ptr<void* []> argv_ { nullptr };
 
 #define LLVM_TYPE_DECLARE(_1, Name) llvm::Type* Name##Ty_;
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, LLVM_TYPE_DECLARE);
 #undef LLVM_TYPE_DECLARE
   llvm::Type* Int8PtrTy_;
+  llvm::Type* VoidTy_;
 
   std::unordered_map<const Var*, int> varToArg_;
   std::unordered_map<const Var*, llvm::Value*> varToVal_;
   std::unordered_map<const Block*, std::vector<const Var*>> scopeToVar_;
   const Block* scope_;
 
-  std::string llvmCode;
-  std::string asmCode;
+  std::string llvmCode_;
+  std::string asmCode_;
 
  private:
   llvm::LLVMContext& getContext();
@@ -168,16 +200,26 @@ class LLVMCodeGenImpl : public IRVisitor {
       Arity arity,
       int lanes);
 
+  llvm::Value* varToValue(const Var* var);
+  void replaceVarMapping(
+      const std::vector<const Var*>& vars,
+      const std::vector<llvm::Value*>& vals);
+  llvm::Value* packFuncArgs(const std::vector<llvm::Value*>& func_args);
+  std::vector<llvm::Value*> unpackFuncArgs(llvm::Value* packed, int arg_count);
+  void processParallelFor(const For* v);
+
  public:
   LLVMCodeGenImpl(
       Stmt* stmt,
       const std::vector<CodeGen::BufferArg>& args,
       at::Device device,
-      Dtype dtype);
+      Dtype dtype,
+      c10::optional<std::string> triple,
+      c10::optional<std::string> cpu,
+      c10::optional<std::string> attrs);
   ~LLVMCodeGenImpl() = default;
 
   llvm::JITTargetAddress getKernelAddress() const;
-  void** getArgvAddress() const;
 
   void visit(const Add* v) override;
   void visit(const Sub* v) override;
@@ -207,9 +249,7 @@ class LLVMCodeGenImpl : public IRVisitor {
   void visit(const Store* v) override;
   void visit(const Broadcast* v) override;
   void visit(const IfThenElse* v) override;
-  void visit(const BaseCallNode* v) override;
   void visit(const Intrinsics* v) override;
-  void visit(const FunctionCall* v) override;
   void visit(const Allocate* v) override;
   void visit(const Free* v) override;
   void visit(const Let* v) override;
@@ -232,12 +272,25 @@ class LLVMCodeGenImpl : public IRVisitor {
 
   void optimize(llvm::Module& M);
   std::string getLLVMCodeText() {
-    return llvmCode;
+    return llvmCode_;
   }
   std::string getASMCodeText() {
-    return asmCode;
+    return asmCode_;
   }
 };
+
+typedef void (*ParallelCallee)(int index, int8_t* packed_data);
+void DispatchParallel(int8_t* func, int start, int stop, int8_t* packed_data) {
+  // TODO: preserve the func type.
+  ParallelCallee callee = reinterpret_cast<ParallelCallee>(func);
+  at::parallel_for(start, stop, 1, [&](int64_t f_begin, int64_t f_end) {
+    for (int index = f_begin; index < f_end; index++) {
+      callee(index, packed_data);
+    }
+  });
+  USE_TRIGGER(llvm_codegen_parallel_dispatched);
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
@@ -252,30 +305,17 @@ LLVMCodeGen::LLVMCodeGen(
     const std::vector<BufferArg>& args,
     at::Device device,
     const std::string& kernel_func_name,
-    Dtype dtype)
+    Dtype dtype,
+    c10::optional<std::string> triple,
+    c10::optional<std::string> cpu,
+    c10::optional<std::string> attrs)
     : CodeGen(stmt, args, device, kernel_func_name),
-      impl_(std::make_unique<LLVMCodeGenImpl>(stmt, args, device, dtype)) {}
+      impl_(std::make_unique<
+            LLVMCodeGenImpl>(stmt, args, device, dtype, triple, cpu, attrs)) {}
 
-static void* argToPtr(
-    const CodeGen::BufferArg& bufferArg,
-    const CodeGen::CallArg& callArg) {
-  if (!bufferArg.isVar()) {
-    return callArg.data();
-  }
-
-  switch (bufferArg.dtype().scalar_type()) {
-#define TYPE_CASE(_1, Name) \
-  case ScalarType::Name:    \
-    return callArg.Name##Ptr();
-    break;
-
-    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
-#undef TYPE_CASE
-
-    default:
-      throw unsupported_dtype();
-  }
-  return nullptr;
+void LLVMCodeGen::call_raw(const std::vector<void*>& args) {
+  value<float>(const_cast<void**>(args.data()));
+  USE_TRIGGER(llvm_codegen_executed);
 }
 
 void LLVMCodeGen::call(const std::vector<CallArg>& args) {
@@ -284,13 +324,15 @@ void LLVMCodeGen::call(const std::vector<CallArg>& args) {
     throw malformed_input("wrong number of args in call");
   }
 
-  void** argv = impl_->getArgvAddress();
+  constexpr unsigned nargs = 8;
+  c10::SmallVector<void*, nargs> argv;
+  argv.resize(buf_args.size());
   for (size_t i = 0, e = buf_args.size(); i < e; i++) {
     auto const& bufferArg = buf_args[i];
     auto const& callArg = args[i];
     argv[i] = argToPtr(bufferArg, callArg);
   }
-  value<float>(argv);
+  value<float>(argv.data());
   USE_TRIGGER(llvm_codegen_executed);
 }
 
@@ -321,15 +363,14 @@ llvm::JITTargetAddress LLVMCodeGenImpl::getKernelAddress() const {
   return kernelAddress_;
 }
 
-void** LLVMCodeGenImpl::getArgvAddress() const {
-  return argv_.get();
-}
-
 LLVMCodeGenImpl::LLVMCodeGenImpl(
     Stmt* stmt,
     const std::vector<CodeGen::BufferArg>& args,
     at::Device device,
-    Dtype dtype)
+    Dtype dtype,
+    c10::optional<std::string> triple,
+    c10::optional<std::string> cpu,
+    c10::optional<std::string> attrs)
     : context_(std::make_unique<llvm::LLVMContext>()), irb_(getContext()) {
   // Manually map types to LLVM types.
   ByteTy_ = llvm::Type::getInt8Ty(getContext());
@@ -341,12 +382,14 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   FloatTy_ = llvm::Type::getFloatTy(getContext());
   DoubleTy_ = llvm::Type::getDoubleTy(getContext());
   Int8PtrTy_ = llvm::Type::getInt8PtrTy(getContext());
+  VoidTy_ = llvm::Type::getVoidTy(getContext());
   BoolTy_ = ByteTy_;
 
-  llvm::InitializeNativeTarget();
-  llvm::InitializeNativeTargetAsmPrinter();
+  llvm::InitializeAllTargets();
+  llvm::InitializeAllTargetMCs();
+  llvm::InitializeAllAsmPrinters();
 
-  jit_ = std::make_unique<llvm::orc::PytorchLLVMJIT>();
+  jit_ = std::make_unique<llvm::orc::PytorchLLVMJIT>(triple, cpu, attrs);
   module_ = std::make_unique<llvm::Module>("pytorch", getContext());
   module_->setDataLayout(jit_->getDataLayout());
   module_->setTargetTriple(jit_->getTargetMachine().getTargetTriple().str());
@@ -359,7 +402,7 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   // Emit prototype and bind argument Vars to parameter indices.
   llvm::Type* retTy = dtypeToLLVM(dtype);
   std::vector<llvm::Type*> params;
-  for (size_t i = 0; i < args.size(); i++) {
+  for (const auto i : c10::irange(args.size())) {
     auto const& arg = args[i];
     if (arg.isVar()) {
       params.push_back(dtypeToLLVM(arg.dtype()));
@@ -374,7 +417,7 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   fn_->addAttribute(
       llvm::AttributeList::AttrIndex::FunctionIndex,
       llvm::Attribute::AlwaysInline);
-  for (size_t i = 0; i < args.size(); i++) {
+  for (const auto i : c10::irange(args.size())) {
     if (!args[i].isVar()) {
       fn_->addParamAttr(i, llvm::Attribute::NoAlias);
     }
@@ -386,7 +429,6 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   jit_->addModule(std::move(module_), std::move(context_));
   auto sym = jit_->findSymbol("wrapper");
   kernelAddress_ = assertSuccess(sym.getAddress());
-  argv_ = std::make_unique<void*[]>(params.size());
 
   USE_TRIGGER(llvm_codegen_created);
 }
@@ -424,7 +466,7 @@ void LLVMCodeGenImpl::emitWrapper(const std::vector<llvm::Type*>& params) {
   auto wrapBB = llvm::BasicBlock::Create(getContext(), "wrapBB", wrapper);
   irb_.SetInsertPoint(wrapBB);
   llvm::SmallVector<llvm::Value*, 6> wrappedArgs;
-  for (size_t i = 0; i < params.size(); i++) {
+  for (const auto i : c10::irange(params.size())) {
     auto argp = irb_.CreateGEP(
         wrapper->arg_begin(), llvm::ConstantInt::getSigned(IntTy_, i));
     if (params[i]->isPointerTy()) {
@@ -503,10 +545,13 @@ void LLVMCodeGenImpl::emitKernel(
 
   optimize(*module_);
 
-  // print graph debug info after optimization
   asmBuffer.set_size(0);
   module_->print(asmStream, nullptr);
-  llvmCode = asmStream.str().str();
+  llvmCode_ = asmStream.str().str();
+  GRAPH_DEBUG(
+      "\nLLVM module after optimizations\n\n", asmStream.str().str(), "\n");
+
+  // print graph debug info after optimization
   asmBuffer.set_size(0);
   llvm::legacy::PassManager PM;
   jit_->getTargetMachine().addPassesToEmitFile(
@@ -519,10 +564,9 @@ void LLVMCodeGenImpl::emitKernel(
       llvm::TargetMachine::CodeGenFileType::CGFT_AssemblyFile);
 #endif
   PM.run(*module_);
-  asmCode = asmStream.str().str();
+  asmCode_ = asmStream.str().str();
 
-  GRAPH_DEBUG(
-      "\nLLVM module after optimizations\n\n", llvmCode, "\n", asmCode, "\n");
+  GRAPH_DEBUG("\nLLVM generated assembly code\n\n", asmCode_, "\n");
 }
 
 // TODO: The binary ops are copypasta.
@@ -754,10 +798,10 @@ void LLVMCodeGenImpl::visit(const CompareSelect* v) {
     llvm::Value* cmp_;
     CompareSelectOperation cmp_op_ = v->compare_select_op();
 
-    if (is_integral(type_used)) {
+    if (c10::isIntegralType(type_used, true)) {
       cmp_ = irb_.CreateICmp(
           llvm_comparison_predicate(cmp_op_, type_used), lhs, rhs);
-    } else if (is_floating_point(type_used)) {
+    } else if (c10::isFloatingType(type_used)) {
       cmp_ = irb_.CreateFCmp(llvm_fp_comparison_predicate(cmp_op_), lhs, rhs);
     } else {
       throw std::runtime_error("invalid type for CompareSelect");
@@ -776,10 +820,10 @@ void LLVMCodeGenImpl::visit(const CompareSelect* v) {
     auto cmp_op = v->compare_select_op();
     llvm::Value* cmp;
 
-    if (is_integral(cmp_type)) {
+    if (c10::isIntegralType(cmp_type, true)) {
       cmp = irb_.CreateICmp(
           llvm_comparison_predicate(cmp_op, cmp_type), lhs, rhs);
-    } else if (is_floating_point(cmp_type)) {
+    } else if (c10::isFloatingType(cmp_type)) {
       cmp = irb_.CreateFCmp(llvm_fp_comparison_predicate(cmp_op), lhs, rhs);
     } else {
       throw std::runtime_error("invalid type for CompareSelect");
@@ -895,9 +939,9 @@ void LLVMCodeGenImpl::visit(const Cast* v) {
       if (v->dtype().scalar_type() == ScalarType::Bool) {
         llvm::Value* zero =
             toVec(llvm::ConstantFP::get(srcType, 0.), v->dtype().lanes());
-        value_ = irb_.CreateFCmp(llvm::FCmpInst::FCMP_UNO, value_, zero);
+        value_ = irb_.CreateFCmp(llvm::FCmpInst::FCMP_UNE, value_, zero);
         value_ = irb_.CreateICmpEQ(
-            value_, llvm::ConstantInt::get(value_->getType(), 0));
+            value_, llvm::ConstantInt::get(value_->getType(), 1));
         value_ = irb_.CreateIntCast(value_, dstType, !destUnsigned);
         return;
       }
@@ -955,12 +999,34 @@ void LLVMCodeGenImpl::visit(const BitCast* v) {
 }
 
 void LLVMCodeGenImpl::visit(const Var* v) {
-  if (varToArg_.count(v)) {
+  value_ = varToValue(v);
+}
+
+llvm::Value* LLVMCodeGenImpl::varToValue(const Var* v) {
+  // It is possible for v to be in both varToVal_ and varToArgs.
+  // In that case, varToVal_ takes precedence.
+  if (varToVal_.count(v)) {
+    return varToVal_.at(v);
+  } else if (varToArg_.count(v)) {
     auto idx = varToArg_.at(v);
     auto arg = fn_->arg_begin() + idx;
-    value_ = arg;
-  } else if (varToVal_.count(v)) {
-    value_ = varToVal_.at(v);
+    return arg;
+  }
+  return nullptr;
+}
+
+void LLVMCodeGenImpl::replaceVarMapping(
+    const std::vector<const Var*>& vars,
+    const std::vector<llvm::Value*>& vals) {
+  TORCH_CHECK(vars.size() == vals.size());
+  for (const auto i : c10::irange(vars.size())) {
+    const Var* var = vars[i];
+    llvm::Value* val = vals[i];
+    if (val) {
+      varToVal_[var] = val;
+    } else {
+      varToVal_.erase(var);
+    }
   }
 }
 
@@ -1047,14 +1113,7 @@ void LLVMCodeGenImpl::visit(const Load* v) {
     v->flat_index()->accept(this);
     auto idx = this->value_;
 
-    auto* maskimm = dynamic_cast<const IntImm*>(v->mask());
-    if (maskimm && maskimm->value() == 1) {
-      value_ = emitUnmaskedLoad(base, idx);
-    } else {
-      v->mask()->accept(this);
-      auto mask = this->value_;
-      value_ = emitMaskedLoad(base, idx, mask);
-    }
+    value_ = emitUnmaskedLoad(base, idx);
     return;
   }
 
@@ -1073,18 +1132,11 @@ void LLVMCodeGenImpl::visit(const Load* v) {
   }
 
   // Detect whether the vector mask is all true
-  bool unmasked_load = false;
-  auto* mask_broadcast = dynamic_cast<const Broadcast*>(v->mask());
-  if (mask_broadcast) {
-    auto* broadcast_imm = dynamic_cast<const IntImm*>(mask_broadcast->value());
-    if (broadcast_imm && broadcast_imm->value() == 1) {
-      unmasked_load = true;
-    }
-  }
+  bool unmasked_load = true;
 
   // Handle the case where the load is contiguous and unmasked efficiently
   auto* idx_ramp = dynamic_cast<const Ramp*>(v->flat_index());
-  if (unmasked_load && idx_ramp) {
+  if (idx_ramp) {
     auto* stride_imm = dynamic_cast<const IntImm*>(idx_ramp->stride());
     if (stride_imm && stride_imm->value() == 1) {
       v->base_handle()->accept(this);
@@ -1109,26 +1161,144 @@ void LLVMCodeGenImpl::visit(const Load* v) {
   auto base = this->value_;
   v->flat_index()->accept(this);
   auto idx = this->value_;
-  v->mask()->accept(this);
-  auto mask = this->value_;
 
   llvm::Value* load = llvm::UndefValue::get(loadType);
   for (int i = 0; i < v->dtype().lanes(); ++i) {
     auto sub_idx = irb_.CreateExtractElement(idx, i);
     llvm::Value* sub_load = nullptr;
-    if (unmasked_load) {
-      sub_load = emitUnmaskedLoad(base, sub_idx);
-    } else {
-      auto sub_mask = irb_.CreateExtractElement(mask, i);
-      sub_load = emitMaskedLoad(base, sub_idx, sub_mask);
-    }
+    sub_load = emitUnmaskedLoad(base, sub_idx);
     load = irb_.CreateInsertElement(load, sub_load, i);
   }
 
   value_ = load;
 }
 
+// Pack the arguments into an aggregate struct for forwarding.
+llvm::Value* LLVMCodeGenImpl::packFuncArgs(
+    const std::vector<llvm::Value*>& func_args) {
+  if (func_args.empty()) {
+    llvm::PointerType* VoidPtrType = llvm::Type::getInt8PtrTy(getContext());
+    llvm::Constant* NullPtr = llvm::ConstantPointerNull::get(VoidPtrType);
+    return NullPtr;
+  }
+  std::vector<llvm::Type*> arg_types(func_args.size());
+  for (const auto i : c10::irange(func_args.size())) {
+    arg_types[i] = func_args[i]->getType();
+  }
+  llvm::StructType* packed_type = llvm::StructType::create(arg_types);
+  llvm::Value* zero = llvm::ConstantInt::get(IntTy_, 0);
+  llvm::Value* one = llvm::ConstantInt::get(IntTy_, 1);
+  llvm::Value* packed = irb_.CreateAlloca(packed_type, one);
+  for (const auto i : c10::irange(func_args.size())) {
+    llvm::Value* dst_ptr = irb_.CreateInBoundsGEP(
+        packed, {zero, llvm::ConstantInt::get(IntTy_, i)});
+    irb_.CreateStore(func_args[i], dst_ptr);
+  }
+  return packed;
+}
+
+// Unpack the aggregate struct into individual arguments.
+std::vector<llvm::Value*> LLVMCodeGenImpl::unpackFuncArgs(
+    llvm::Value* packed,
+    int arg_count) {
+  // TODO: extract arg_count from packed.
+  std::vector<llvm::Value*> func_args(arg_count);
+  llvm::Value* zero = llvm::ConstantInt::get(IntTy_, 0);
+  for (const auto i : c10::irange(arg_count)) {
+    llvm::Value* dst_ptr = irb_.CreateInBoundsGEP(
+        packed, {zero, llvm::ConstantInt::get(IntTy_, i)});
+    func_args[i] = irb_.CreateLoad(dst_ptr);
+  }
+  return func_args;
+}
+
+// Lower the parallel for-loop.
+// * Move the body into its own closure.
+// * Identify var across the boundary into arguments and forward them.
+// * Send the closure and range to the dispatcher for execution.
+void LLVMCodeGenImpl::processParallelFor(const For* v) {
+  // Create "start" and "stop" values.
+  v->start()->accept(this);
+  auto start = this->value_;
+  v->stop()->accept(this);
+  auto stop = this->value_;
+
+  // The Vars that need to be forward in the body closure.
+  std::vector<const Var*> body_arg_vars;
+  // Corresponding Value* that was used in the old body for the caller.
+  std::vector<llvm::Value*> body_caller_vals;
+  // Corresponding Value* that will be used in the new body closure.
+  std::vector<llvm::Value*> body_closure_args;
+
+  // Identify the Var* used in the body, and generated outside.
+  VarFinder var_finder;
+  v->body()->accept(&var_finder);
+  const auto& vars = var_finder.vars();
+  for (auto& var : vars) {
+    if (llvm::Value* value = varToValue(var)) {
+      body_arg_vars.push_back(var);
+      body_caller_vals.push_back(value);
+    }
+  }
+
+  // Pack the arguments in an automatic variable for forwarding.
+  llvm::Value* packed_caller_args = packFuncArgs(body_caller_vals);
+
+  // Remember where we are before moving to the new function.
+  llvm::BasicBlock* old_insert_block = irb_.GetInsertBlock();
+
+  // Create the new body closure code.
+  auto func_type =
+      llvm::FunctionType::get(VoidTy_, {IntTy_, Int8PtrTy_}, false);
+  llvm::Function* func = llvm::Function::Create(
+      func_type, llvm::Function::PrivateLinkage, "func", module_.get());
+  auto func_body = llvm::BasicBlock::Create(getContext(), "func_body", func);
+  irb_.SetInsertPoint(func_body);
+  auto args = func->arg_begin();
+  llvm::Value* index = args++;
+  llvm::Value* packed_func_args_raw = args++;
+  llvm::Value* packed_func_args = irb_.CreatePointerCast(
+      packed_func_args_raw, packed_caller_args->getType());
+
+  // Unpack the arguments from the opaque buffer.
+  body_closure_args = unpackFuncArgs(packed_func_args, body_arg_vars.size());
+  // Set the codegen to the new func.
+  // TODO: this should be replaced by RAII wrappers.
+  varToVal_[v->var()] = index;
+  replaceVarMapping(body_arg_vars, body_closure_args);
+  llvm::Function* old_fn = fn_;
+  fn_ = func;
+  if (v->body()) {
+    v->body()->accept(this);
+  }
+  // Restore back to the previous fn_
+  fn_ = old_fn;
+  irb_.CreateRet(nullptr);
+  replaceVarMapping(body_arg_vars, body_caller_vals);
+  varToVal_.erase(v->var());
+
+  // Points back to the original block and generate the callee code.
+  irb_.SetInsertPoint(old_insert_block);
+  llvm::Value* packed_caller_args_ptr =
+      irb_.CreatePointerCast(packed_caller_args, Int8PtrTy_);
+  llvm::Value* func_value = irb_.CreatePointerCast(func, Int8PtrTy_);
+  llvm::FunctionType* dispatcher_fntype = llvm::FunctionType::get(
+      VoidTy_, {Int8PtrTy_, IntTy_, IntTy_, Int8PtrTy_}, false);
+  FunctionCallee dispatcher_callee =
+      module_->getOrInsertFunction("DispatchParallel", dispatcher_fntype);
+  llvm::Function* dispatcher =
+      llvm::cast<llvm::Function>(dispatcher_callee.getCallee());
+  irb_.CreateCall(
+      dispatcher, {func_value, start, stop, packed_caller_args_ptr});
+  value_ = llvm::ConstantInt::get(IntTy_, 0);
+}
+
 void LLVMCodeGenImpl::visit(const For* v) {
+  if (v->is_parallel()) {
+    processParallelFor(v);
+    return;
+  }
+
   // Create "start" and "stop" values.
   v->start()->accept(this);
   auto start = this->value_;
@@ -1238,28 +1408,10 @@ void LLVMCodeGenImpl::visit(const Store* v) {
     v->value()->accept(this);
     auto val = this->value_;
 
-    auto* maskimm = dynamic_cast<const IntImm*>(v->mask());
-    if (maskimm && maskimm->value() == 1) {
-      emitUnmaskedStore(base, idx, val);
-    } else {
-      v->mask()->accept(this);
-      auto mask = this->value_;
-
-      emitMaskedStore(base, idx, mask, val);
-    }
+    emitUnmaskedStore(base, idx, val);
 
     value_ = llvm::ConstantInt::get(IntTy_, 0);
     return;
-  }
-
-  // Detect whether the vector mask is all true
-  bool unmasked_store = false;
-  auto* mask_broadcast = dynamic_cast<const Broadcast*>(v->mask());
-  if (mask_broadcast) {
-    auto* broadcast_imm = dynamic_cast<const IntImm*>(mask_broadcast->value());
-    if (broadcast_imm && broadcast_imm->value() == 1) {
-      unmasked_store = true;
-    }
   }
 
   v->base_handle()->accept(this);
@@ -1269,7 +1421,7 @@ void LLVMCodeGenImpl::visit(const Store* v) {
 
   // Handle the case where the store is contiguous and unmasked efficiently
   auto* idx_ramp = dynamic_cast<const Ramp*>(v->flat_index());
-  if (unmasked_store && idx_ramp) {
+  if (idx_ramp) {
     auto* stride_imm = dynamic_cast<const IntImm*>(idx_ramp->stride());
     if (stride_imm && stride_imm->value() == 1) {
       idx_ramp->base()->accept(this);
@@ -1291,19 +1443,12 @@ void LLVMCodeGenImpl::visit(const Store* v) {
 
   v->flat_index()->accept(this);
   auto idx = this->value_;
-  v->mask()->accept(this);
-  auto mask = this->value_;
 
   // Fallback to a scalar implementation
   for (int i = 0; i < v->value()->dtype().lanes(); ++i) {
     auto sub_idx = irb_.CreateExtractElement(idx, i);
     auto sub_val = irb_.CreateExtractElement(val, i);
-    if (unmasked_store) {
-      emitUnmaskedStore(base, sub_idx, sub_val);
-    } else {
-      auto sub_mask = irb_.CreateExtractElement(mask, i);
-      emitMaskedStore(base, sub_idx, sub_mask, sub_val);
-    }
+    emitUnmaskedStore(base, sub_idx, sub_val);
   }
 
   value_ = llvm::ConstantInt::get(IntTy_, 0);
@@ -1345,10 +1490,6 @@ void LLVMCodeGenImpl::visit(const IfThenElse* v) {
   value_ = phi;
 }
 
-void LLVMCodeGenImpl::visit(const BaseCallNode* v) {
-  throw unimplemented_lowering(v);
-}
-
 static void applyMathFunctionAttributes(llvm::Function* f) {
   f->addFnAttr(llvm::Attribute::ReadNone);
   f->addFnAttr(llvm::Attribute::NoUnwind);
@@ -1360,38 +1501,6 @@ static void applyMathFunctionAttributes(llvm::Function* f) {
   f->addFnAttr(llvm::Attribute::WillReturn);
 #endif
 }
-
-namespace {
-#if LLVM_VERSION_MAJOR >= 9
-
-using FunctionCallee = llvm::FunctionCallee;
-
-#elif LLVM_VERSION_MAJOR == 8 && LLVM_VERSION_PATCH == 20181009
-
-struct FunctionCallee {
-  FunctionCallee() {}
-
-  FunctionCallee(llvm::Constant* fn)
-      : v_(fn), ft_(cast<llvm::Function>(v_)->getFunctionType()) {}
-
-  llvm::FunctionType* getFunctionType() {
-    return ft_;
-  }
-
-  llvm::Value* getCallee() {
-    return v_;
-  }
-
- private:
-  llvm::Value* v_{nullptr};
-  llvm::FunctionType* ft_{nullptr};
-};
-
-#else
-#error Only LLVM versions 8 and above are supported.
-#endif
-
-} // namespace
 
 llvm::Value* LLVMCodeGenImpl::toVec(llvm::Value* v, int lanes) {
   if (lanes > 1) {
@@ -1664,10 +1773,6 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
   }
 }
 
-void LLVMCodeGenImpl::visit(const FunctionCall* v) {
-  throw unimplemented_lowering(v);
-}
-
 void LLVMCodeGenImpl::visit(const ExternalCall* v) {
   constexpr int max_buffers = 10;
   constexpr int max_dimensions = 40;
@@ -1728,7 +1833,7 @@ void LLVMCodeGenImpl::visit(const ExternalCall* v) {
         llvm::ConstantInt::getSigned(LongTy_, b->dims().size()), gep);
 
     // Store dims of the buf
-    for (int dim = 0; dim < b->dims().size(); dim++) {
+    for (const auto dim : c10::irange(b->dims().size())) {
       gep = irb_.CreateInBoundsGEP(
           buf_dims, {llvm::ConstantInt::getSigned(IntTy_, dim_idx)});
       b->dims()[dim]->accept(this);
@@ -1899,7 +2004,6 @@ void LLVMCodeGenImpl::optimize(llvm::Module& M) {
     FPM.run(FF);
   }
   FPM.doFinalization();
-  PM.run(M);
 }
 
 RegisterCodeGen<LLVMCodeGen> llvm_codegen_reg("llvm_codegen");

@@ -2,7 +2,7 @@ from torch.utils.data import IterDataPipe
 from torch.utils.data.datapipes.utils.common import get_file_pathnames_from_root
 from typing import List, Union, Iterator
 
-class ListDirFilesIterDataPipe(IterDataPipe):
+class ListDirFilesIterDataPipe(IterDataPipe[str]):
     r""" :class:`ListDirFilesIterDataPipe`
 
     Iterable DataPipe to load file pathname(s) (path + filename), yield pathname from given disk root dir.
@@ -33,5 +33,5 @@ class ListDirFilesIterDataPipe(IterDataPipe):
 
     def __len__(self):
         if self.length == -1:
-            raise NotImplementedError
+            raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
         return self.length

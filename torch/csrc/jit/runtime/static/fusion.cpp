@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
+#include <torch/csrc/jit/runtime/static/passes.h>
 
 namespace torch {
 namespace jit {
@@ -19,6 +20,7 @@ void createFusionGroups(Block* block, AliasDb* aliasDb, size_t min_size);
 
 void fuseStaticSubgraphs(std::shared_ptr<Graph> graph, size_t min_size) {
   Inline(*graph);
+  ReplaceWithCopy(graph);
   ConstantPropagation(graph);
   Canonicalize(graph);
   ConstantPropagation(graph);
@@ -54,6 +56,7 @@ Operation createStaticSubgraphRuntime(const Node* node) {
   };
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators StaticSubgraphOps({torch::jit::Operator(
     prim::StaticSubgraph,
     createStaticSubgraphRuntime,
@@ -104,7 +107,7 @@ bool canHandle(Node* node) {
   }
 
   // TODO add "canRunNatively" once memory management is audited
-  return canRunOutOfPlace(node);
+  return getOutOfPlaceOperation(node) != nullptr;
 }
 
 bool canMerge(Node* consumer, Node* producer, AliasDb* aliasDb) {
@@ -154,7 +157,9 @@ value_list sortReverseTopological(ArrayRef<Value*> inputs, Block* b) {
 }
 
 static void debugDumpFusionGroup(const std::string& msg, Node* n) {
+  // NOLINTNEXTLINE(clang-analyzer-core.NonNullParamChecker)
   GRAPH_DEBUG(msg, *n);
+  // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
   if (n->kind() == prim::StaticSubgraph) {
     GRAPH_DEBUG(*n->g(attr::Subgraph));
   }
@@ -263,6 +268,7 @@ void createFusionGroups(Block* block, AliasDb* aliasDb, size_t min_size) {
   while (any_changed) {
     any_changed = false;
     for (auto it = block->nodes().rbegin(); it != block->nodes().rend();) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       bool changed;
       std::tie(it, changed) = scanNode(*it, aliasDb);
       any_changed |= changed;

@@ -20,9 +20,12 @@ USE_IDEEP_DEF_ALIASES();
 class IDeepFetcher;
 class IDeepFeeder;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(Python, IDEEPFallbackOp<PythonOp<CPUContext, false>>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_FETCHER((TypeMeta::Id<itensor>()), IDeepFetcher);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_FEEDER(IDEEP, IDeepFeeder);
 
 class IDeepFetcher : public BlobFetcherBase {
@@ -69,6 +72,7 @@ public:
     std::vector<npy_intp> npy_dims(dims.begin(), dims.end());
 
     result.copied = force_copy || atensor.need_reorder();
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     void *outPtr;
     if (result.copied) {
       result.obj = py::reinterpret_steal<py::object>(
