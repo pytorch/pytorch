@@ -30,8 +30,8 @@ class TestExpectTest(TestCase):
             return len("\n".join(xs))
         self.assertEqual(expecttest.nth_line(t, lineno), nth_line_ref(t, lineno))
 
-    @hypothesis.given(text(string.printable), booleans(), sampled_from(['"', "'"]), booleans())
-    def test_replace_string_literal_roundtrip(self, t, raw, quote, lineno_at_start):
+    @hypothesis.given(text(string.printable), booleans(), sampled_from(['"', "'"]))
+    def test_replace_string_literal_roundtrip(self, t, raw, quote):
         if raw:
             hypothesis.assume(expecttest.ok_for_raw_triple_quoted_string(t, quote=quote))
         prog = """\
@@ -40,7 +40,7 @@ class TestExpectTest(TestCase):
         r3 = {r}{quote}placeholder3{quote}
         """.format(r='r' if raw else '', quote=quote * 3)
         new_prog = expecttest.replace_string_literal(
-            textwrap.dedent(prog), 2, t, lineno_at_start=lineno_at_start)[0]
+            textwrap.dedent(prog), 2, 2, t)[0]
         ns : Dict[str, Any] = {}
         exec(new_prog, ns)
         msg = "program was:\n{}".format(new_prog)
@@ -48,7 +48,7 @@ class TestExpectTest(TestCase):
         self.assertEqual(ns['r2'], expecttest.normalize_nl(t), msg=msg)  # noqa: F821
         self.assertEqual(ns['r3'], 'placeholder3', msg=msg)  # noqa: F821
 
-    def test_sample_lineno_at_end(self):
+    def test_sample_lineno(self):
         prog = r"""
 single_single('''0''')
 single_multi('''1''')
@@ -65,22 +65,27 @@ multi_multi_same('''\
 multi_multi_more('''\
 6
 ''')
+different_indent(
+    RuntimeError,
+    '''7'''
+)
 """
-        # NB: These are the end of the statements, not beginning
-        # TODO: Test other permutations of these edits
-        edits = [(2, "a"),
-                 (3, "b\n"),
-                 (6, "c"),
-                 (10, "d\n"),
-                 (13, "e\n"),
-                 (16, "f\ng\n")]
+        edits = [(2, 2, "a"),
+                 (3, 3, "b\n"),
+                 (4, 6, "c"),
+                 (7, 10, "d\n"),
+                 (11, 13, "e\n"),
+                 (14, 16, "f\ng\n"),
+                 (17, 20, "h")]
         history = expecttest.EditHistory()
         fn = 'not_a_real_file.py'
-        for lineno, actual in edits:
-            lineno = history.adjust_lineno(fn, lineno)
+        for start_lineno, end_lineno, actual in edits:
+            start_lineno = history.adjust_lineno(fn, start_lineno)
+            end_lineno = history.adjust_lineno(fn, end_lineno)
             prog, delta = expecttest.replace_string_literal(
-                prog, lineno, actual, lineno_at_start=False)
-            history.record_edit(fn, lineno, delta)
+                prog, start_lineno, end_lineno, actual)
+            # NB: it doesn't really matter start/end you record edit at
+            history.record_edit(fn, start_lineno, delta)
         self.assertExpectedInline(prog, r"""
 single_single('''a''')
 single_multi('''\
@@ -97,56 +102,10 @@ multi_multi_more('''\
 f
 g
 ''')
-""")
-
-    def test_sample_lineno_at_start(self):
-        prog = r"""
-single_single('''0''')
-single_multi('''1''')
-multi_single('''\
-2
-''')
-multi_multi_less('''\
-3
-4
-''')
-multi_multi_same('''\
-5
-''')
-multi_multi_more('''\
-6
-''')
-"""
-        # NB: These are the beginning of the statements
-        edits = [(2, "a"),
-                 (3, "b\n"),
-                 (4, "c"),
-                 (7, "d\n"),
-                 (11, "e\n"),
-                 (14, "f\ng\n")]
-        history = expecttest.EditHistory()
-        fn = 'not_a_real_file.py'
-        for lineno, actual in edits:
-            lineno = history.adjust_lineno(fn, lineno)
-            prog, delta = expecttest.replace_string_literal(
-                prog, lineno, actual, lineno_at_start=True)
-            history.record_edit(fn, lineno, delta)
-        self.assertExpectedInline(prog, r"""
-single_single('''a''')
-single_multi('''\
-b
-''')
-multi_single('''c''')
-multi_multi_less('''\
-d
-''')
-multi_multi_same('''\
-e
-''')
-multi_multi_more('''\
-f
-g
-''')
+different_indent(
+    RuntimeError,
+    '''h'''
+)
 """)
 
     def test_lineno_assumptions(self):
