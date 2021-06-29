@@ -85,21 +85,35 @@ TORCH_META_FUNC2(any, dim)(const Tensor& self, int64_t dim, bool keepdim) {
   check_allany_for_meta(*this, "any", self, dim, keepdim);
 }
 
-TORCH_META_FUNC(argmax)
-(const Tensor& self, c10::optional<int64_t> dim, bool keepdim) {
+void check_argmax_argmin(
+    impl::MetaBase& meta,
+    const char* name,
+    const Tensor& self,
+    c10::optional<int64_t> dim,
+    bool keepdim) {
   DimVector shape;
 
   if (dim.has_value()) {
     auto _dim = maybe_wrap_dim(dim.value(), self.dim());
-    native::zero_numel_check_dims(self, _dim, "argmax()");
+    native::zero_numel_check_dims(self, _dim, name);
     shape = get_reduction_shape(self, _dim, keepdim);
   } else {
     TORCH_CHECK_INDEX(
         self.numel() != 0,
-        "argmax(): Expected reduction dim to be specified for input.numel() == 0.");
+        name, ": Expected reduction dim to be specified for input.numel() == 0.");
   }
 
-  set_output(shape, self.options().dtype(kLong));
+  meta.set_output(shape, self.options().dtype(kLong));
+}
+
+TORCH_META_FUNC(argmax)
+(const Tensor& self, c10::optional<int64_t> dim, bool keepdim) {
+  check_argmax_argmin(*this, "argmax", self, dim, keepdim);
+}
+
+TORCH_META_FUNC(argmin)
+(const Tensor& self, c10::optional<int64_t> dim, bool keepdim) {
+  check_argmax_argmin(*this, "argmin", self, dim, keepdim);
 }
 
 } // namespace meta
@@ -1322,11 +1336,13 @@ Tensor amax(const Tensor& self, IntArrayRef dim, bool keepdim) {
   return at::amax_out(result, self, dim, keepdim);
 }
 
-TORCH_IMPL_FUNC(argmax_out)
-(const Tensor& self,
- c10::optional<int64_t> dim,
- bool keepdim,
- const Tensor& result) {
+template <class Stub>
+void argmax_argmin_impl(
+    const Tensor& self,
+    c10::optional<int64_t> dim,
+    bool keepdim,
+    const Tensor& result,
+    Stub& stub) {
   c10::MaybeOwned<Tensor> in;
   DimVector dims;
   int64_t _dim = 0;
@@ -1351,44 +1367,24 @@ TORCH_IMPL_FUNC(argmax_out)
       meta::make_reduction(*in, result, dims, keepdim, self.scalar_type());
 
   if (iter.numel() != 0) {
-    argmax_stub(iter.device_type(), iter);
+    stub(iter.device_type(), iter);
   }
 }
 
-Tensor& argmin_out(const Tensor& self, c10::optional<int64_t> dim, bool keepdim, Tensor& result) {
-  c10::MaybeOwned<Tensor> in;
-  if (dim) {
-    auto sizes = self.sizes();
-    zero_numel_check_dims(self, dim.value(), "argmin()");
-
-    auto wrap_dim = maybe_wrap_dim(dim.value(), self.dim());
-    if (sizes[wrap_dim] == 1) {
-      if (keepdim) {
-        result = at::zeros(sizes, self.options().dtype(at::kLong));
-      } else {
-        auto sizes_vec = sizes.vec();
-        sizes_vec.erase(sizes_vec.begin() + wrap_dim);
-        result = at::zeros(sizes_vec, self.options().dtype(at::kLong));
-      }
-      return result;
-    }
-    in = c10::MaybeOwned<Tensor>::borrowed(self);
-  } else {
-    TORCH_CHECK_INDEX(self.numel() != 0, "argmin_out(): Expected reduction dim to be specified for input.numel() == 0.");
-    in = c10::MaybeOwned<Tensor>::owned(self.reshape({-1}));
-    keepdim = false;
-  }
-  auto itr = make_reduction("argmin", result, *in, dim.value_or(0), keepdim,
-      self.scalar_type(), at::kLong);
-  if (itr.numel() != 0) {
-    argmin_stub(itr.device_type(), itr);
-  }
-  return result;
+TORCH_IMPL_FUNC(argmax_out)
+(const Tensor& self,
+ c10::optional<int64_t> dim,
+ bool keepdim,
+ const Tensor& result) {
+  argmax_argmin_impl(self, dim, keepdim, result, argmax_stub);
 }
 
-Tensor argmin(const Tensor& self, c10::optional<int64_t> dim, bool keepdims) {
-  Tensor result = at::empty({0}, self.options().dtype(at::kLong));
-  return at::native::argmin_out(self, dim, keepdims, result);
+TORCH_IMPL_FUNC(argmin_out)
+(const Tensor& self,
+ c10::optional<int64_t> dim,
+ bool keepdim,
+ const Tensor& result) {
+  argmax_argmin_impl(self, dim, keepdim, result, argmin_stub);
 }
 
 static double std_var_all_cpu(const Tensor& self, int64_t correction, bool take_sqrt) {
