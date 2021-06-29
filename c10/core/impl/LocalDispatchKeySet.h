@@ -55,10 +55,12 @@ class C10_API LocalDispatchKeySetWrapper {
 };
 
 struct C10_API LocalDispatchKeySet {
+  LocalDispatchKeySet(DispatchKeySet included, DispatchKeySet excluded)
+      : included_(included), excluded_(excluded) {}
   LocalDispatchKeySet(LocalDispatchKeySetWrapper x)
       : included_(x.included()), excluded_(x.excluded()) {}
-  DispatchKeySet included_;
-  DispatchKeySet excluded_;
+  const DispatchKeySet included_;
+  const DispatchKeySet excluded_;
 };
 
 inline C10_API LocalDispatchKeySet snapshot_tls_keyset() {
@@ -90,7 +92,7 @@ class C10_API IncludeDispatchKeyGuard {
 };
 
 template <uint64_t exclude, bool has_overlap>
-class C10_API ExcludeDispatchKeyGuard {
+class ExcludeDispatchKeyGuard {
  public:
   // If our exclude set does not overlap with c10::default_excluded_set, we can
   // skip some bookkeeping. (And we know at compile time if this is the case.)
@@ -149,19 +151,17 @@ class C10_API ExcludeDispatchKeyGuard {
 };
 
 template <DispatchKey k, bool has_overlap>
-class C10_API ExcludeSingleDispatchKeyGuard {
+class ExcludeSingleDispatchKeyGuard {
   static constexpr auto k_set = DispatchKeySet(k);
   ExcludeDispatchKeyGuard<k_set.raw_repr(), has_overlap> guard_;
 };
 
-// Ideally we would simply define:
-//   `using guard_name = ExcludeDispatchKeyGuard<k.raw_repr(), has_overlap>;`
-// However MSVC will fail to link. So instead we have to subclass the
-// specialization and enable the subclass constructor.
-#define SPECIALIZE_EXCLUDE_GUARD(guard_name, k, has_overlap) \
-class guard_name : c10::impl::ExcludeDispatchKeyGuard<k.raw_repr(), has_overlap> { \
-  using c10::impl::ExcludeDispatchKeyGuard<k.raw_repr(), has_overlap>::ExcludeDispatchKeyGuard; \
-}
+#define SPECIALIZE_EXCLUDE_GUARD(guard_name, k, has_overlap)              \
+  class C10_API guard_name                                                        \
+      : c10::impl::ExcludeDispatchKeyGuard<k.raw_repr(), has_overlap> {   \
+    using c10::impl::ExcludeDispatchKeyGuard<k.raw_repr(), has_overlap>:: \
+        ExcludeDispatchKeyGuard;                                          \
+  }
 
 // Non-RAII API for manipulating the thread-local dispatch state.
 // Please prefer the RAII API.  The non-RAII API may be useful when
