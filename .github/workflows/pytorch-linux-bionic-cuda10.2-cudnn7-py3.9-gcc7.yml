@@ -1,7 +1,7 @@
 # @generated DO NOT EDIT MANUALLY
 # Template is at:    .github/templates/linux_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: Linux CI (pytorch-linux-xenial-cuda10.2-cudnn7-py3.6-gcc7)
+name: Linux CI (pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7)
 
 on:
   # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
@@ -12,8 +12,8 @@ on:
   workflow_dispatch:
 
 env:
-  BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda10.2-cudnn7-py3.6-gcc7
-  DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7
+  BUILD_ENVIRONMENT: pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7
+  DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7
   SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
   TORCH_CUDA_ARCH_LIST: 5.2
   IN_CI: 1
@@ -22,7 +22,7 @@ env:
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
 
 concurrency:
-  group: pytorch-linux-xenial-cuda10.2-cudnn7-py3.6-gcc7-${{ github.event.pull_request.number || github.sha }}
+  group: pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 jobs:
@@ -100,7 +100,7 @@ jobs:
     needs: calculate-docker-image
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
-      JOB_BASE_NAME: pytorch-linux-xenial-cuda10.2-cudnn7-py3.6-gcc7-build
+      JOB_BASE_NAME: pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7-build
     steps:
       - name: Log in to ECR
         run: |
@@ -220,7 +220,7 @@ jobs:
       fail-fast: false
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
-      JOB_BASE_NAME: pytorch-linux-xenial-cuda10.2-cudnn7-py3.6-gcc7-test
+      JOB_BASE_NAME: pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7-test
       NUM_TEST_SHARDS: 2
       TEST_CONFIG: ${{ matrix.test_config }}
     steps:
@@ -374,7 +374,7 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_SECRET_ACCESS_KEY }}
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: pytorch-linux-xenial-cuda10.2-cudnn7-py3.6-gcc7-test
+          JOB_BASE_NAME: pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7-test
           CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
           CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}

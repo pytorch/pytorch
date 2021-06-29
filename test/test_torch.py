@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import torch
+import torch.utils.data
 import numpy as np
 
 import contextlib
@@ -2934,6 +2935,14 @@ class TestBasicVitalSigns(TestCase):
             self.assertIn('TEST_VALUE_STRING', torch.read_vitals())
             self.assertIn('CUDA.used', torch.read_vitals())
 
+    def test_dataloader_vitals(self):
+        with torch_vital_set('ON'):
+            inps = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
+            tgts = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
+            dataset = torch.utils.data.TensorDataset(inps, tgts)
+            loader = torch.utils.data.DataLoader(dataset, batch_size=2)
+            self.assertIn('Dataloader.enabled\t\t True', torch.read_vitals())
+
 
 class TestVitalSignsCuda(TestCase):
     @onlyCUDA
@@ -4485,6 +4494,16 @@ else:
                 t = torch.empty(size, dtype=dtype, device=device).cauchy_(median=median, sigma=sigma)
                 res = stats.kstest(t.cpu().to(torch.double), 'cauchy', args=(median, sigma))
                 self.assertTrue(res.statistic < 0.1)
+
+    @slowTest
+    @onlyCUDA
+    @dtypes(torch.bfloat16, torch.float32)
+    def test_cauchy_no_inf(self, device, dtype):
+        # torch.float16 will have `inf` because of its smaller range.
+        for _ in range((2**16) * 2):
+            x = torch.empty((2**16), dtype=dtype, device=device)
+            x.cauchy_()
+            self.assertFalse(x.isinf().sum())
 
     @skipIfNoSciPy
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
