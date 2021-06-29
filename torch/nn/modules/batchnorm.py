@@ -55,6 +55,7 @@ class _NormBase(Module):
             self.register_buffer('num_batches_tracked',
                                  torch.tensor(0, dtype=torch.long,
                                               **{k: v for k, v in factory_kwargs.items() if k != 'dtype'}))
+            self.num_batches_tracked: Optional[Tensor]
         else:
             self.register_buffer("running_mean", None)
             self.register_buffer("running_var", None)
@@ -763,7 +764,7 @@ class SyncBatchNorm(_BatchNorm):
         :class:`torch.nn.SyncBatchNorm` layers.
 
         Args:
-            module (nn.Module): module containing one or more attr:`BatchNorm*D` layers
+            module (nn.Module): module containing one or more :attr:`BatchNorm*D` layers
             process_group (optional): process group to scope synchronization,
                 default is the whole world
 
