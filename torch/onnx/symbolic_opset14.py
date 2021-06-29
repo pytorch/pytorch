@@ -7,7 +7,6 @@ from torch.onnx.symbolic_opset9 import _var_mean
 
 import torch.onnx.symbolic_helper as sym_help
 from torch.onnx.symbolic_helper import parse_args
-from torch.onnx.symbolic_helper import _block_list_in_opset
 
 # Note [ONNX operators that are added/updated in opset 14]
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

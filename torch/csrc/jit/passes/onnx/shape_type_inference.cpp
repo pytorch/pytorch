@@ -633,8 +633,8 @@ void ProcessReshapeNode(Node* n, int opset_version) {
       allowzero = n->i(attr::allowzero);
     }
     if (shape_vector_0.has_value()) {
-      auto final_shape =
-          ComputeShapeFromReshape(shape_vector_0.value(), shape_temp, allowzero, opset_version);
+      auto final_shape = ComputeShapeFromReshape(
+          shape_vector_0.value(), shape_temp, allowzero, opset_version);
       UpdateShapeFromVector(n->output(), final_shape);
       return;
     }

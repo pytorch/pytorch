@@ -982,7 +982,7 @@ def repeat_interleave(g, self, repeats, dim=None, output_size=None):
                 loop_block.op("Constant", value_t=torch.LongTensor(input_sizes[dim + 1:]))]
     r_concat = loop_block.op("Concat", *r_concat, axis_i=0)
     i_split = expand(loop_block, i_split, r_concat, None)
-    i_split = sym_help._reshape_helper(loop_block, i_split, 
+    i_split = sym_help._reshape_helper(loop_block, i_split,
                                        g.op("Constant", value_t=torch.LongTensor(output_sizes)), allowzero=0)
 
     # Loop outputs
@@ -995,7 +995,7 @@ def repeat_interleave(g, self, repeats, dim=None, output_size=None):
     # the zero'th dimension (by default). In order to avoid this and concatenate
     # along the dimension provided, some post-processing is required
     loop_out = g.op("Transpose", loop_out, perm_i=perm_i)
-    return sym_help._reshape_helper(g, loop_out, 
+    return sym_help._reshape_helper(g, loop_out,
                                     g.op("Constant", value_t=torch.LongTensor(output_sizes)), allowzero=0)
 
 

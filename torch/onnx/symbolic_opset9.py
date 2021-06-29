@@ -2126,7 +2126,7 @@ def pixel_shuffle(g, self, upscale_factor):
     if any([i is None for i in dims[1:]]):
         return _unimplemented("pixel_shuffle", "only support static input shape, except for batch size")
     output_channel = dims[1] // upscale_factor // upscale_factor
-    after_view = sym_help._reshape_helper(g, self, 
+    after_view = sym_help._reshape_helper(g, self,
                                           g.op("Constant", value_t=torch.tensor([-1, output_channel,
                                                                                 upscale_factor, upscale_factor,
                                                                                 dims[2], dims[3]])),
@@ -2280,7 +2280,7 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
             # Transpose, and then combining it with hidden_size
             # with Reshape.
             prev_output = g.op("Transpose", prev_output, perm_i=[0, 2, 1, 3])
-            prev_output = sym_help._reshape_helper(g, prev_output, 
+            prev_output = sym_help._reshape_helper(g, prev_output,
                                                    g.op("Constant", value_t=torch.LongTensor([0, 0, -1])), allowzero=0)
         else:
             prev_output = sym_help._squeeze_helper(g, prev_output, [1])
@@ -2923,7 +2923,7 @@ def baddbmm(g, self, batch1, batch2, beta, alpha):
 
 
 def meshgrid(g, tensor_list):
-    tensors = [sym_help._reshape_helper(g, t, g.op("Constant", value_t=torch.LongTensor([-1])), allowzero=0) \
+    tensors = [sym_help._reshape_helper(g, t, g.op("Constant", value_t=torch.LongTensor([-1])), allowzero=0)
                for t in sym_help._unpack_list(tensor_list)]
     tensors_shape = [g.op("Shape", t) for t in tensors]
     out_shape = g.op("Concat", *tensors_shape, axis_i=0)
@@ -2964,7 +2964,7 @@ def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
         return _unimplemented("group_norm", "unknown input rank")
     # 0 in the shape list keeps dimension value unchanged.
     shape = [0, num_groups, -1]
-    input_reshaped = sym_help._reshape_helper(g, input, 
+    input_reshaped = sym_help._reshape_helper(g, input,
                                               g.op("Constant", value_t=torch.LongTensor(shape)), allowzero=0)
 
     # C is always divisible by num_groups
@@ -2976,7 +2976,7 @@ def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
         "torch." + input.type().scalarType() + "Tensor"))
 
     norm_reshaped = g.op("InstanceNormalization", input_reshaped, weight_, bias_, epsilon_f=eps)
-    self = sym_help._reshape_helper(g, norm_reshaped, g.op("Shape", input))
+    norm = sym_help._reshape_helper(g, norm_reshaped, g.op("Shape", input))
 
     if weight is None or weight.node().mustBeNone():
         weight_value = torch.tensor([1.]).type(
@@ -3094,7 +3094,8 @@ def as_strided(g, self, sizes, strides, offset=None):
             r_size = [1] * rank
             r_size[i] = -1
             size = select(g, sizes, g.op("Constant", value_t=torch.tensor([0])), g.op("Constant", value_t=torch.tensor(i)))
-            tmp_ind = sym_help._reshape_helper(g, arange(g, size, 4, None, None, None), g.op("Constant", value_t=torch.tensor(r_size)), allowzero=0)
+            tmp_ind = sym_help._reshape_helper(g, arange(g, size, 4, None, None, None),
+                                               g.op("Constant", value_t=torch.tensor(r_size)), allowzero=0)
             tmp_ind = g.op("Mul", tmp_ind, g.op("Constant", value_t=torch.tensor([stride])))
             if ind is None:
                 ind = tmp_ind

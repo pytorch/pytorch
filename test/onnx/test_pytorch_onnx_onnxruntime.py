@@ -7642,7 +7642,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(6, 4, 3, 3)
         self.run_test(FakeQuantizePerChannelModel(), (x))
 
-    @skipIfUnsupportedOpsetVersion([14])
+    @skipIfUnsupportedOpsetVersion([7, 8, 9, 10, 14])
     def test_batchnorm_training(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -7766,7 +7766,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         np.testing.assert_allclose(ratio_pytorch, ratio_ort, rtol=0.01, atol=0.01)
 
-    @skipIfUnsupportedOpsetVersion([14])
+    @skipIfUnsupportedOpsetVersion([7, 8, 9, 10, 14])
     def test_conv_bn(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -7803,7 +7803,7 @@ class TestONNXRuntime(unittest.TestCase):
         [np.testing.assert_allclose(ort_out1, ort_out2, atol=1e-7, rtol=0.001) for ort_out1, ort_out2 in
          zip(ort_outs1, ort_outs2)]
 
-    @skipIfUnsupportedOpsetVersion([14])
+    @skipIfUnsupportedOpsetVersion([7, 8, 9, 10, 14])
     def test_multiple_conv_bn(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
