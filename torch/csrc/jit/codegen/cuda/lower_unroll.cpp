@@ -21,7 +21,7 @@ namespace cuda {
 namespace {
 
 // Provide a new for loop matching the one provided
-kir::ForLoop* cloneLoopNest(const kir::ForLoop* for_loop, bool unroll = false) {
+kir::ForLoop* cloneLoopNest(const kir::ForLoop* for_loop) {
   kir::IrBuilder ir_builder(GpuLower::current()->kernel());
   const auto new_loop = ir_builder.create<kir::ForLoop>(
       for_loop->iter_domain(),
@@ -29,12 +29,11 @@ kir::ForLoop* cloneLoopNest(const kir::ForLoop* for_loop, bool unroll = false) {
       for_loop->start(),
       for_loop->stop(),
       for_loop->step(),
-      unroll,
       for_loop->vectorize(),
       for_loop->vectorize_shift());
   for (auto expr : for_loop->body().exprs()) {
     if (auto nested_for_loop = dynamic_cast<kir::ForLoop*>(expr)) {
-      expr = cloneLoopNest(nested_for_loop, unroll);
+      expr = cloneLoopNest(nested_for_loop);
     }
     new_loop->body().push_back(expr);
   }
@@ -169,7 +168,7 @@ void UnrollPass::handle(kir::ForLoop* fl) {
   kir::IfThenElse* unroll_ite = ir_builder.create<kir::IfThenElse>(unroll_pred);
 
   // Get the loop nest for the unrolled path
-  kir::ForLoop* unrolled_loop_nest = cloneLoopNest(fl, true);
+  kir::ForLoop* unrolled_loop_nest = cloneLoopNest(fl);
 
   unroll_ite->thenBody().push_back(unrolled_loop_nest);
   if (fl->iter_domain()->parallelType() == ParallelType::Vectorize) {

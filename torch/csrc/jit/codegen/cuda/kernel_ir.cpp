@@ -517,7 +517,6 @@ ForLoop::ForLoop(
     Val* start,
     Val* stop,
     Val* step,
-    bool unroll,
     bool vectorize,
     Val* vectorize_shift)
     : Expr(passkey),
@@ -526,7 +525,6 @@ ForLoop::ForLoop(
       start_(start),
       stop_(stop),
       step_(step),
-      unroll_(unroll),
       vectorize_(vectorize),
       vectorize_shift_(vectorize_shift),
       body_(this) {
@@ -562,7 +560,6 @@ ForLoop::ForLoop(Passkey passkey, IterDomain* iter_domain)
           nullptr,
           nullptr,
           nullptr,
-          false,
           isParallelTypeVectorize(iter_domain->parallelType()),
           nullptr) {}
 
@@ -574,7 +571,6 @@ ForLoop::ForLoop(Passkey passkey, const ForLoop* other)
           other->start(),
           other->stop(),
           other->step(),
-          other->unroll(),
           other->vectorize(),
           other->vectorize_shift()) {}
 

@@ -394,7 +394,6 @@ class MisalignedVectorizationModifier {
           ir_builder.zeroVal(),
           stop,
           ir_builder.oneVal(),
-          false,
           vectorize && has_vectorize_op,
           vectorize_shift);
 

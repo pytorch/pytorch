@@ -1390,7 +1390,6 @@ class TORCH_CUDA_CU_API ForLoop final : public Expr {
       Val* start,
       Val* stop,
       Val* step,
-      bool unroll,
       bool vectorize,
       Val* vectorize_shift);
 
@@ -1432,10 +1431,6 @@ class TORCH_CUDA_CU_API ForLoop final : public Expr {
     return body_;
   }
 
-  bool unroll() const {
-    return unroll_;
-  }
-
   bool vectorize() const {
     return vectorize_;
   }
@@ -1456,8 +1451,6 @@ class TORCH_CUDA_CU_API ForLoop final : public Expr {
   Val* start_ = nullptr;
   Val* stop_ = nullptr;
   Val* step_ = nullptr;
-
-  bool unroll_ = false;
 
   // vectorize is true when the for-loop contains a vectorize set
   // the flag is used to omit the for-loop from the kernel

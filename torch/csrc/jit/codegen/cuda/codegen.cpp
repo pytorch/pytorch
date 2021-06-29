@@ -967,6 +967,8 @@ class CudaKernelGenerator : private kir::IrVisitor {
     }
     if (node->isUnrollable()) {
       indent() << "#pragma unroll\n";
+    } else {
+      indent() << "#pragma unroll 1\n";
     }
     indent() << "for(nvfuser_index_t " << gen_index << " = " << gen_start
              << "; " << gen_index << " < " << gen_stop << "; "
