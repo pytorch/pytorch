@@ -143,11 +143,28 @@ TensorWrapper::TensorWrapper(
   , is_alive_(std::move(is_alive))
 {
   TORCH_INTERNAL_ASSERT(value_.defined());
-  set_storage_access_should_throw();
 
   // TODO: need to reset sizes/strides on mutation
   TORCH_INTERNAL_ASSERT(use_value_sizes_strides);
   refreshMetadata();
+
+  // Note [TensorWrapper sometimes has storage]
+  // TensorWrapper has storage if it isn't wrapping a BatchedTensor.
+  // If TensorWrapper ultimately wraps a BatchedTensor (directly or
+  // indirectly), then it does not have storage.
+  //
+  // TensorImpl's storage_access_should_throw_ field is private
+  // (TODO: we probably want to make it protected or add an accessor)
+  // so we work around it by trying to figure out if the storage access
+  // will throw or not. A possible alternative is to try-catch .storage().
+  auto* wrapped = maybeGetTensorWrapper(value_);
+  auto* batched = maybeGetBatchedImpl(value_);
+  if (batched || wrapped && wrapped->storage_access_should_throw()) {
+    hacky_storage_access_should_throw_ = true;
+    set_storage_access_should_throw();
+  } else {
+    storage_ = value_.storage();
+  }
 }
 
 // The following are some internal inherited methods that we do not support.
