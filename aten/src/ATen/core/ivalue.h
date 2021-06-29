@@ -522,9 +522,6 @@ struct TORCH_API IValue final {
   }
 
   int64_t toInt() const {
-    if (!isInt()) {
-      int x = 5;
-    }
     AT_ASSERT(isInt());
     return payload.u.as_int;
   }
