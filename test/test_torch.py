@@ -2919,21 +2919,27 @@ def torch_vital_set(value):
 
 
 # Tests Vital Signs for Torch
-class TestVitalSigns(TestCase):
+class TestBasicVitalSigns(TestCase):
     def test_basic_vitals(self):
         with torch_vital_set(''):
             self.assertFalse(torch.vitals_enabled())
         with torch_vital_set('ON'):
             self.assertTrue(torch.vitals_enabled())
 
-    def test_write_vital(self):
+    def test_basic_vitals_read_write(self):
         with torch_vital_set('ON'):
             self.assertTrue(torch.vitals_enabled())
             # This tests the code path of setting a vital
-            self.assertTrue(torch.set_vital('Dataloader', 'basic_unit_test', 'TEST'))
-            # Ideally we would have a read test for vitals, though because the the C++ design
-            # pattern of loggers we use, we can't know the whole list of vitals until the
-            # global C++ namespace is destructed.
+            self.assertTrue(torch.set_vital('Dataloader', 'basic_unit_test', 'TEST_VALUE_STRING'))
+            self.assertIn('TEST_VALUE_STRING', torch.read_vitals())
+            self.assertIn('CUDA.used', torch.read_vitals())
+
+
+class TestVitalSignsCuda(TestCase):
+    @onlyCUDA
+    def test_cuda_vitals_gpu_only(self, device):
+        with torch_vital_set('ON'):
+            self.assertIn('CUDA.used\t\t true', torch.read_vitals())
 
 
 # Device-generic tests. Instantiated below and not run directly.
@@ -4426,6 +4432,16 @@ else:
                 res = stats.kstest(t.cpu().to(torch.double), 'cauchy', args=(median, sigma))
                 self.assertTrue(res.statistic < 0.1)
 
+    @slowTest
+    @onlyCUDA
+    @dtypes(torch.bfloat16, torch.float32)
+    def test_cauchy_no_inf(self, device, dtype):
+        # torch.float16 will have `inf` because of its smaller range.
+        for _ in range((2**16) * 2):
+            x = torch.empty((2**16), dtype=dtype, device=device)
+            x.cauchy_()
+            self.assertFalse(x.isinf().sum())
+
     @skipIfNoSciPy
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
     def test_geometric_kstest(self, device, dtype):
@@ -5249,6 +5265,13 @@ else:
         with self.assertWarnsOnceRegex(
                 UserWarning, "This overload of addcmul is deprecated"):
             self.assertEqual(actual, torch.addcmul(a, alpha, b, c))
+
+        if self.device_type == 'cuda' and dtype == torch.half:
+            a = torch.tensor([60000.0], device=device, dtype=dtype)
+            b = torch.tensor([60000.0], device=device, dtype=dtype)
+            c = torch.tensor([2.0], device=device, dtype=dtype)
+            out = torch.addcmul(a, b, c, value=-1)
+            self.assertTrue(not (out.isnan() or out.isinf()))
 
     def test_narrow_empty(self, device):
         x = torch.randn(2, 3, 4, device=device)
@@ -6250,6 +6273,13 @@ else:
                 _test_addcdiv()
         else:
             _test_addcdiv()
+
+        if self.device_type == 'cuda' and dtype == torch.half:
+            a = torch.tensor([60000.0], device=device, dtype=dtype)
+            b = torch.tensor([60000.0], device=device, dtype=dtype)
+            c = torch.tensor([1.0], device=device, dtype=dtype)
+            out = torch.addcmul(a, b, c, value=-2)
+            self.assertTrue(not (out.isnan() or out.isinf()))
 
     def test_nullary_op_mem_overlap(self, device):
         ops = (
@@ -8135,6 +8165,7 @@ class TestTensorDeviceOps(TestCase):
 # pytest will fail.
 add_neg_dim_tests()
 instantiate_device_type_tests(TestViewOps, globals())
+instantiate_device_type_tests(TestVitalSignsCuda, globals())
 instantiate_device_type_tests(TestTensorDeviceOps, globals())
 instantiate_device_type_tests(TestTorchDeviceType, globals())
 instantiate_device_type_tests(TestDevicePrecision, globals(), except_for='cpu')
