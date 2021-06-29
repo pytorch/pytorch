@@ -58,8 +58,10 @@ namespace at {
  * Users should use `c10::InferenceMode` here so that it'll properly throw an
  * error saying "one of the variables needed for gradient computation has be modified."
  */
-using AutoDispatchBelowAutograd = c10::impl::ExcludeDispatchKeyGuard<
-  c10::autograd_dispatch_keyset.raw_repr(), /*has_overlap=*/false>;
+SPECIALIZE_EXCLUDE_GUARD(
+  AutoDispatchBelowAutograd,
+  c10::autograd_dispatch_keyset,
+  /*has_overlap=*/false);
 
 
 // TODO: AutoNonVariableTypeMode should be removed in release 1.10.
@@ -88,16 +90,9 @@ struct TORCH_API AutoNonVariableTypeMode {
  *   you never go back to a kernel on same dispatch key until
  *   you finish the current op.
  */
-using AutoDispatchBelowADInplaceOrView = c10::impl::ExcludeDispatchKeyGuard<
-  c10::autograd_dispatch_keyset_with_ADInplaceOrView.raw_repr(), /*has_overlap=*/false>;
+SPECIALIZE_EXCLUDE_GUARD(
+  AutoDispatchBelowADInplaceOrView,
+  c10::autograd_dispatch_keyset_with_ADInplaceOrView,
+  /*has_overlap=*/false);
+
 } // namespace at
-
-namespace c10 {
-namespace impl {
-// If we do not instatiate the templates MSVC will fail to link.
-template class ExcludeDispatchKeyGuard<
-  autograd_dispatch_keyset.raw_repr(), /*has_overlap=*/false>;
-
-template class ExcludeDispatchKeyGuard<
-  autograd_dispatch_keyset_with_ADInplaceOrView.raw_repr(), /*has_overlap=*/false>;
-}} // namespace c10::impl

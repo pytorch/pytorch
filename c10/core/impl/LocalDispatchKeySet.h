@@ -154,6 +154,15 @@ class C10_API ExcludeSingleDispatchKeyGuard {
   ExcludeDispatchKeyGuard<k_set.raw_repr(), has_overlap> guard_;
 };
 
+// Ideally we would simply define:
+//   `using guard_name = ExcludeDispatchKeyGuard<k.raw_repr(), has_overlap>;`
+// However MSVC will fail to link. So instead we have to subclass the
+// specialization and enable the subclass constructor.
+#define SPECIALIZE_EXCLUDE_GUARD(guard_name, k, has_overlap) \
+class guard_name : c10::impl::ExcludeDispatchKeyGuard<k.raw_repr(), has_overlap> { \
+  using c10::impl::ExcludeDispatchKeyGuard<k.raw_repr(), has_overlap>::ExcludeDispatchKeyGuard; \
+}
+
 // Non-RAII API for manipulating the thread-local dispatch state.
 // Please prefer the RAII API.  The non-RAII API may be useful when
 // the included/excluded state of a given DispatchKey must span
