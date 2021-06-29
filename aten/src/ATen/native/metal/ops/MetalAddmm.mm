@@ -3,9 +3,9 @@
 #import <ATen/native/metal/MetalPrepackOpContext.h>
 #import <ATen/native/metal/MetalTensorImpl.h>
 #import <ATen/native/metal/MetalTensorImplStorage.h>
-#import <ATen/native/metal/MetalUtils.h>
+#import <ATen/native/metal/MetalTensorUtils.h>
 #import <ATen/native/metal/mpscnn/MPSCNNClampOp.h>
-#import <ATen/native/metal/mpscnn/MPSCNNContext.h>
+#import <ATen/native/metal/MetalContext.h>
 #import <ATen/native/metal/mpscnn/MPSCNNFullyConnectedOp.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
 #import <ATen/native/metal/mpscnn/MPSImageUtils.h>
@@ -45,7 +45,7 @@ Tensor addmm(
   auto packedWeights = weight_.contiguous(c10::MemoryFormat::ChannelsLast);
   MetalTensorImplStorage mt{{params.N, params.OC}};
   SmallVector<int64_t, 4> textureSize = {params.N, params.OC, 1, 1};
-  MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input_);
+  MetalCommandBuffer* commandBuffer = getCommandBuffer(input_);
   mt.texture()->allocateTemporaryStorage(textureSize, commandBuffer);
   MPSImage* Y = mt.texture()->image();
   float* w = packedWeights.data_ptr<float>();
@@ -101,7 +101,7 @@ Tensor linear(const Tensor& input, LinearOpContext& context) {
   }
   MetalTensorImplStorage mt{{params.N, params.OC}};
   SmallVector<int64_t, 4> textureSize = {params.N, params.OC, 1, 1};
-  MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input_);
+  MetalCommandBuffer* commandBuffer = getCommandBuffer(input_);
   mt.texture()->allocateTemporaryStorage(textureSize, commandBuffer);
   MPSImage* Y1 = mt.texture()->image();
   // HACK alert:
