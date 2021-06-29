@@ -8,9 +8,6 @@
 namespace torch {
 namespace jit {
 
-struct CustomMethodProxy;
-struct CustomObjectProxy;
-
 IValue ScriptListIterator::next() {
   if (iter_ == end_) {
     throw py::stop_iteration();

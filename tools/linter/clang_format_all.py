@@ -14,7 +14,7 @@ import os
 import sys
 from typing import List, Set
 
-from clang_format_utils import get_and_check_clang_format, CLANG_FORMAT_PATH
+from .clang_format_utils import get_and_check_clang_format, CLANG_FORMAT_PATH
 
 # Allowlist of directories to check. All files that in that directory
 # (recursively) will be checked.
