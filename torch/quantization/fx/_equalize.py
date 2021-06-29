@@ -170,8 +170,9 @@ def calculate_equalization_scale(input_obs: _InputEqualizationObserver,
         )
 
     equalization_scale = torch.sqrt((max_weights - min_weights) / (max_inputs - min_inputs))
-    # Replace all 'inf's with 1s to prevent 'nan's when taking the reciprocal
-    equalization_scale[equalization_scale == float('inf')] = 1
+    # Replace all 'inf', 'nan', 0's with 1s to prevent errors
+    equalization_scale[equalization_scale == 0.] = 1
+    equalization_scale = torch.nan_to_num(equalization_scale, nan=1, posinf=1, neginf=1)
     return equalization_scale
 
 
@@ -297,10 +298,7 @@ def maybe_get_next_input_eq_obs(node: Node, modules: Dict[str, nn.Module]) -> Op
     # Locate the following nn.ReLU or F.relu node if it exists
     maybe_relu_node = maybe_get_next_module(node, modules, nn.ReLU)
     if maybe_relu_node is None:
-        for user, _ in node.users.items():
-            if user.op == 'call_function' and user.target == F.relu:
-                maybe_relu_node = user
-                break
+        maybe_relu_node = maybe_get_next_module(node, modules, target_functional_type=F.relu)
 
     # Locate the following output observer if it exists.
     # We will skip the relu node if it exists.

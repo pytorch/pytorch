@@ -71,7 +71,7 @@ class ProxyableClassMeta(type):
     """
     def __init__(cls, name, bases, attrs):
         _proxyable_classes.setdefault(cls)
-        return super().__init__(name, bases, attrs)
+        super().__init__(name, bases, attrs)
 
     def __call__(cls, *args, **kwargs):
         instance = cls.__new__(cls)  # type: ignore[call-overload]
