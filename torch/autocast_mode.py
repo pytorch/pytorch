@@ -39,7 +39,7 @@ class autocast(object):
     Tensors of different dtypes may cause type mismatch errors.  If so, cast the Tensor(s)
     produced in the autocast region back to ``float32`` (or other dtype if desired).
     If a Tensor from the autocast region is already ``float32``, the cast is a no-op,
-    and incurs no additional overhead.  
+    and incurs no additional overhead.
     CUDA Example::
         # Creates some tensors in default dtype (here assumed to be float32)
         a_float32 = torch.rand((8, 8), device="cuda")
