@@ -18,7 +18,7 @@ from torch.testing import \
     (make_non_contiguous, floating_types, floating_types_and, complex_types,
      floating_and_complex_types, floating_and_complex_types_and,
      all_types_and_complex_and, all_types_and, all_types_and_complex,
-     integral_types_and, all_types, empty_types)
+     integral_types_and, all_types)
 from .._core import _dispatch_dtypes
 from torch.testing._internal.common_device_type import \
     (skipIf, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
@@ -1507,6 +1507,7 @@ def sample_inputs_zero_(op_info, device, dtype, requires_grad, **kwargs):
 
     return list(generator())
 
+
 def sample_inputs_logsumexp(self, device, dtype, requires_grad):
     inputs = (
         ((), (0,), True),
@@ -1642,6 +1643,23 @@ def sample_inputs_broadcast_to(op_info, device, dtype, requires_grad, **kwargs):
         SampleInput(
             make_tensor(size, device, dtype, low=None, high=None, requires_grad=requires_grad),
             args=(shape,)) for size, shape in test_cases)
+
+def sample_inputs_bitwise_shift(op_info, device, dtype, requires_grad, **kwargs):
+    test_cases = (
+        (S, S, S),
+        (S,),
+        (),
+    )
+
+    sample_inputs = []
+    for size in test_cases:
+        tensor1 = make_tensor(size, device, dtype, low=-32, high=32, requires_grad=requires_grad)
+        tensor2 = make_tensor(size, device, dtype, low=0, high=5, requires_grad=requires_grad)
+        sample_inputs.append(SampleInput(tensor1, args=(tensor2,)))
+        sample_inputs.append(SampleInput(tensor1, args=(2,)))
+
+    return tuple(sample_inputs)
+
 
 def sample_inputs_cdist(op_info, device, dtype, requires_grad, **kwargs):
     small_S = 2
@@ -3840,6 +3858,18 @@ def sample_inputs_entr(op_info, device, dtype, requires_grad, **kwargs):
                                     low=low,
                                     requires_grad=requires_grad)))
 
+
+def sample_inputs_zeta(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    samples = (SampleInput(make_arg((S,), low=1, requires_grad=requires_grad),
+                           args=(make_arg((S,), low=2, requires_grad=False),)),
+               SampleInput(make_arg((S,), low=1, requires_grad=requires_grad),
+                           args=(3.,)),
+               )
+
+    return samples
+
+
 # TODO: Consolidate `i0e` with sample_inputs_unary when `make_tensor`,
 #       supports `exclude` argument.
 #       For more context: https://github.com/pytorch/pytorch/pull/56352#discussion_r633277617
@@ -5073,6 +5103,18 @@ op_db: List[OpInfo] = [
                    ref=np.bitwise_not,
                    dtypes=integral_types_and(torch.bool),
                    supports_autograd=False),
+    OpInfo('bitwise_left_shift',
+           op=torch.bitwise_left_shift,
+           dtypesIfCPU=all_types(),
+           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_bitwise_shift),
+    OpInfo('bitwise_right_shift',
+           op=torch.bitwise_right_shift,
+           dtypesIfCPU=all_types(),
+           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_bitwise_shift),
     OpInfo('cdist',
            dtypes=floating_types(),
            supports_out=False,
@@ -7283,6 +7325,25 @@ op_db: List[OpInfo] = [
            safe_casts_outputs=True,
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_xlog1py),
+    OpInfo('special.zeta',
+           aten_name='special_zeta',
+           dtypes=all_types_and(torch.bool),
+           supports_autograd=False,
+           safe_casts_outputs=True,
+           sample_inputs_func=sample_inputs_binary_pwise),
+    # OpInfo entry to verify the gradient formula of `other`/`q`
+    OpInfo('special.zeta',
+           op=lambda q, x, **kwargs: torch.special.zeta(x, q, **kwargs),
+           aten_name='special_zeta',
+           variant_test_name='grad',
+           dtypes=all_types_and(torch.bool),
+           supports_autograd=True,
+           safe_casts_outputs=True,
+           skips=(
+               # Lambda doesn't work in JIT test
+               SkipInfo("TestJit", "test_variant_consistency_jit"),
+           ),
+           sample_inputs_func=sample_inputs_zeta),
     OpInfo('logsumexp',
            dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.half),
@@ -7590,9 +7651,8 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('special.erfcx',
                    ref=scipy.special.erfcx if TEST_SCIPY else _NOTHING,
                    aten_name='special_erfcx',
-                   decorators=(toleranceOverride({torch.float32: tol(atol=0, rtol=3.9e-6), }),),
+                   decorators=(toleranceOverride({torch.float32: tol(atol=0, rtol=4e-6), }),),
                    dtypes=all_types_and(torch.bool),
-                   dtypesIfCUDA=empty_types(),
                    safe_casts_outputs=True),
 ]
 

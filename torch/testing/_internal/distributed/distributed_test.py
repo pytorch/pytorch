@@ -1000,7 +1000,7 @@ class DistributedTest:
             for step in range(0, 20):
                 # Reset the parameters at every step.
                 param.data = copy.deepcopy(tensor)
-                averager.average_parameters(step)
+                averager.average_parameters()
                 if step < 10 or step % 4 == 0:
                     self.assertEqual(param.data, expected_avg_tensor)
                 else:

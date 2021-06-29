@@ -31,7 +31,7 @@ jobs:
       - name: Ensure correct trailing newlines
         if: always() && steps.requirements.outcome == 'success'
         run: |
-          (! git --no-pager grep -Il '' -- . ':(exclude)**/contrib/**' ':(exclude)third_party' ':(exclude)**.expect' ':(exclude)tools/clang_format_hash' | tools/trailing_newlines.py || (echo "The above files do not have correct trailing newlines; please normalize them"; false))
+          (! git --no-pager grep -Il '' -- . ':(exclude)**/contrib/**' ':(exclude)third_party' ':(exclude)**.expect' ':(exclude)tools/clang_format_hash' | tools/linter/trailing_newlines.py || (echo "The above files do not have correct trailing newlines; please normalize them"; false))
       - name: Ensure no trailing spaces
         if: always()
         run: |
@@ -160,7 +160,7 @@ jobs:
       - name: Run ShellCheck
         if: always() && steps.install_shellcheck.outcome == 'success'
         run: |
-          if ! tools/run_shellcheck.sh .extracted_scripts .jenkins/pytorch; then
+          if ! tools/linter/run_shellcheck.sh .extracted_scripts .jenkins/pytorch; then
             echo
             echo 'ShellCheck gave a nonzero exit code. Please fix the warnings'
             echo 'listed above. Note that if a path in one of the above warning'
@@ -233,7 +233,7 @@ jobs:
       - name: Install dependencies
         run: |
           set -eux
-          pip install typing-extensions # for tools/translate_annotations.py
+          pip install typing-extensions # for tools/linter/translate_annotations.py
           pip install -r requirements-flake8.txt
           flake8 --version
       - name: Run flake8
@@ -245,7 +245,7 @@ jobs:
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          tools/translate_annotations.py \
+          tools/linter/translate_annotations.py \
             --file="${GITHUB_WORKSPACE}"/flake8-output.txt \
             --regex='^(?P<filename>.*?):(?P<lineNumber>\d+):(?P<columnNumber>\d+): (?P<errorCode>\w+\d+) (?P<errorDesc>.*)' \
             --commit="$HEAD_SHA" \
@@ -267,7 +267,7 @@ jobs:
 
   clang-tidy:
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-18.04
+    runs-on: linux.2xlarge
     container:
       # ubuntu18.04-cuda10.2-py3.6-tidy11
       image: ghcr.io/pytorch/cilint-clang-tidy:7f0b4616100071a4813318bfdbd5b06ae36c5272
@@ -275,7 +275,7 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
-          fetch-depth: 0 # to allow tools/clang_tidy.py to do its thing
+          fetch-depth: 0 # to allow tools/linter/clang_tidy.py to do its thing
       - name: Prepare output dir with HEAD commit SHA
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -328,7 +328,8 @@ jobs:
           # /torch/csrc/generic/*.cpp is excluded because those files aren't actually built.
           # deploy/interpreter files are excluded due to using macros and other techniquies
           # that are not easily converted to accepted c++
-          python3 tools/clang_tidy.py \
+          python3 tools/linter/clang_tidy.py \
+            --parallel \
             --verbose \
             --paths torch/csrc/ \
             --diff-file pr.diff \
@@ -353,7 +354,7 @@ jobs:
 
           cat "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
 
-          tools/translate_annotations.py \
+          tools/linter/translate_annotations.py \
             --file=clang-tidy-output.txt \
             --regex='^(?P<filename>.*?):(?P<lineNumber>\d+):(?P<columnNumber>\d+): (?P<errorDesc>.*?) \[(?P<errorCode>.*)\]' \
             --commit="$HEAD_SHA" \
@@ -401,7 +402,7 @@ jobs:
           set -eux
           pip install -r requirements.txt
           pip install numpy==1.20 # https://github.com/pytorch/pytorch/pull/60472
-          pip install mypy==0.812
+          pip install expecttest==0.1.3 mypy==0.812
           # Needed to check tools/render_junit.py
           pip install junitparser rich
       - name: Run autogen

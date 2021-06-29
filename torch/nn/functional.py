@@ -2556,7 +2556,7 @@ def poisson_nll_loss(
             is set to ``False``, the losses are instead summed for each minibatch. Ignored
             when reduce is ``False``. Default: ``True``
         eps (float, optional): Small value to avoid evaluation of :math:`\log(0)` when
-            :attr:`log_input`=``False``. Default: 1e-8
+            :attr:`log_input`\ =\ ``False``. Default: 1e-8
         reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
@@ -4179,7 +4179,7 @@ def _pad(input: Tensor, pad: List[int], mode: str = "constant", value: float = 0
         elif input.dim() == 5:
             assert len(pad) == 6, "5D tensors expect 6 values for padding"
             if mode == "reflect":
-                return torch._C._nn.reflection_pad3d(input, pad)
+                raise NotImplementedError
             elif mode == "replicate":
                 return torch._C._nn.replication_pad3d(input, pad)
             elif mode == "circular":
