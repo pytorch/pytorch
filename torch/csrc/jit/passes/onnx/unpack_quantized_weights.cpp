@@ -239,8 +239,9 @@ void unpackQuantizedWeightsHelper(
             config_vals.size());
 
         bool transpose_int = flags & (1 << 0);
+        bool input_qrange_le_128_int = flags & (1 << 1);
 
-        int64_t other_flags = flags & ~(1 << 0);
+        int64_t other_flags = flags & ~((1 << 0) | (1 << 1));
         TORCH_CHECK(other_flags == 0, "Unexpected flags set in ", flags, ".");
 
         stride = stride_int;
