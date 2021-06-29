@@ -217,8 +217,6 @@ def binary_cross_entropy_with_logits_lower(name, out_shape, inp_shapes, args):
     loss_buf, loss_stmts = binary_cross_entropy_lower('binary_cross_entropy', out_shape, list(inp_shapes) + [None], [pred, args[1], args[3], args[4]])
     return loss_buf, [pred.stmt()] + loss_stmts
 
-
-
 lowering_functions[torch.ops.aten.full_like] = full_like_lower
 lowering_functions[torch.ops.aten.zeros_like] = zeros_like_lower
 lowering_functions[torch.ops.aten.ones_like] = ones_like_lower
@@ -265,6 +263,16 @@ def lower_function(node, op, nnc_args, args):
     else:
         return out[0], out[1]
 
+# This will not work properly in the presence of aliasing/views
+def remove_inplace(fx_model: fx.GraphModule) -> torch.nn.Module:
+    new_map = {}
+    for node in fx_model.graph.nodes:
+        node.args = map_arg(node.args, lambda x: new_map[x] if x in new_map else x)
+        if node.op == 'call_function' and node.target == torch.ops.aten.mul_:
+            node.target = torch.ops.aten.mul
+            new_map[node.args[0]] = node
+    return fx_model
+
 def nnc_compile(fx_model: fx.GraphModule, example_inputs, get_loopnest = False) -> torch.nn.Module:
     """
     nnc_compile(model, example_inputs) returns a function with the same args
@@ -275,6 +283,7 @@ def nnc_compile(fx_model: fx.GraphModule, example_inputs, get_loopnest = False) 
     """
     t = fx_model.graph.flatten_inps(*example_inputs)
     ShapeProp(fx_model).propagate(*fx_model.graph.flatten_inps(*example_inputs))
+    fx_model = remove_inplace(fx_model)
 
     # This env maps from nodes to `te.ExprHandle`, which represent the output
     # of an NNC computation.
