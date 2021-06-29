@@ -354,3 +354,42 @@ def sgd(params: List[Tensor],
         # foreach APIs dont support sparse
         for i in range(len(params)):
             params[i].add_(grads[i], alpha=-lr)
+
+
+def rprop(params: List[Tensor],
+          grads: List[Tensor],
+          states: List[Tensor],
+          step_sizes: List[int],
+          *,
+          step_size_max: float,
+          step_size_min: float,
+          etaminus: float,
+          etaplus: float):
+    r"""Functional API that performs Rprop algorithm computation.
+    See :class:`~torch.optim.Rprop` for details.
+    """
+
+    signs = torch._foreach_mul(grads, [s['prev'] for s in states])  # type: ignore[misc, index]
+    signs = [s.sign() for s in signs]
+    for sign in signs:
+        sign[sign.gt(0)] = etaplus
+        sign[sign.lt(0)] = etaminus
+        sign[sign.eq(0)] = 1
+
+    # update stepsizes with step size updates
+    torch._foreach_mul_(step_sizes, signs)  # type: ignore[arg-type]
+    for step_size in step_sizes:
+        step_size.clamp_(step_size_min, step_size_max)  # type: ignore[attr-defined]
+
+    # for dir<0, dfdx=0
+    # for dir>=0 dfdx=dfdx
+    for i in range(len(grads)):
+        grads[i] = grads[i].clone(memory_format=torch.preserve_format)
+        grads[i][signs[i].eq(etaminus)] = 0
+
+    # update parameters
+    grad_signs = [grad.sign() for grad in grads]
+    torch._foreach_addcmul_(params, grad_signs, step_sizes, value=-1)   # type: ignore[name-defined, arg-type]
+
+    for i in range(len(states)):
+        states[i]['prev'].copy_(grads[i])  # type: ignore[index]
