@@ -16747,6 +16747,28 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(result_long, result_byte)
             self.assertEqual(grad_long, grad_byte)
 
+    def test_nll_loss_one_hot_target(self, device):
+        # Test with k-dimensional loss.
+        for k in range(5):
+            N, C = 5, 4
+            other_dims = [torch.randint(2, 5, size=(1,)).item() for _ in range(k)]
+            input = torch.randn(N, C, *other_dims, device=device, requires_grad=True)
+            target = torch.empty(N, *other_dims, dtype=torch.long, device=device).random_(0, C)
+            weight = torch.randn(C, device=device).abs()
+
+            # Get one-hot representation of the target.
+            target_one_hot = F.one_hot(target, num_classes=C).to(input.dtype)
+            # Need to put the C dim at index 1.
+            target_one_hot = target_one_hot.permute(0, -1, *range(1, target_one_hot.dim() - 1))
+
+            for reduction in ['none', 'mean', 'sum']:
+                # Ensure loss computed with class indices matches loss
+                # computed with one-hot class probs.
+                m = torch.nn.NLLLoss(weight=weight)
+                output = m(input, target)
+                output_one_hot = m(input, target_one_hot)
+                self.assertTrue(torch.allclose(output, output_one_hot))
+
     def test_softshrink_negative(self, device):
         input = torch.randn(5, device=device, requires_grad=True)
         m = torch.nn.Softshrink(-1)
