@@ -17,11 +17,8 @@
 
 #include <set>
 
-struct DisableTorchDispatch {
-  DisableTorchDispatch() : guard_(c10::DispatchKey::Python) {
-  }
-  c10::impl::ExcludeDispatchKeyGuard guard_;
-};
+using DisableTorchDispatch = c10::impl::ExcludeSingleDispatchKeyGuard<
+  c10::DispatchKey::Python, /*has_overlap=*/false>;
 
 PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   using namespace torch::autograd::profiler;
