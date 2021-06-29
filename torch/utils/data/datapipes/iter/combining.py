@@ -56,7 +56,7 @@ class ForkIterDataPipe(IterDataPipe):
 
     def __new__(cls, datapipe, instances):
         result = []
-        buffer = [i for i in datapipe]
+        buffer = list(datapipe)
         return [IterateBuffer(buffer) for i in range(instances)]
 
 
