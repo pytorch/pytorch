@@ -71,6 +71,7 @@ class DeferredBatchNorm(_BatchNorm):
     def _commit(self) -> None:
         """Updates the running statistics of a mini-batch."""
         exponential_average_factor = 0.0
+        assert self.num_batches_tracked is not None
         self.num_batches_tracked += 1
         if self.momentum is None:  # use cumulative moving average
             exponential_average_factor = 1.0 / float(self.num_batches_tracked)
