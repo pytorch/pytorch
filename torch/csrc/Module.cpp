@@ -574,9 +574,11 @@ PyObject *THPModule_setQEngine(PyObject */* unused */, PyObject *arg)
 {
   THPUtils_assert(THPUtils_checkLong(arg), "set_qengine expects an int, "
           "but got %s", THPUtils_typename(arg));
+  HANDLE_TH_ERRORS
   auto qengine = static_cast<int>(THPUtils_unpackLong(arg));
   at::globalContext().setQEngine(static_cast<at::QEngine>(qengine));
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject *THPModule_qEngine(PyObject *_unused, PyObject *noargs)
@@ -951,6 +953,9 @@ PyObject* initModule() {
   py_module.def("vitals_enabled", &at::vitals::torchVitalEnabled);
   py_module.def("set_vital", [](const std::string &vital, const std::string &attr, const std::string value){
     return at::vitals::VitalsAPI.setVital(vital, attr, value);
+  });
+  py_module.def("read_vitals", [](){
+    return at::vitals::VitalsAPI.readVitals();
   });
 
   py_module.def(
