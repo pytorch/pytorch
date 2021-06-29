@@ -13,7 +13,7 @@ from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, onlyOnCPUAndCUDA,
      skipCPUIfNoMkl, skipCUDAIfRocm, deviceCountAtLeast, onlyCUDA, OpDTypes,
      skipIf)
-from torch.testing._internal.common_methods_invocations import spectral_funcs
+from torch.testing._internal.opinfos import spectral_funcs
 
 from setuptools import distutils
 from typing import Optional, List

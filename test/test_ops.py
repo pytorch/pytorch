@@ -9,7 +9,7 @@ from torch.testing import \
 from torch.testing._internal.common_utils import \
     (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor,
      gradcheck, gradgradcheck, IS_IN_CI, suppress_warnings)
-from torch.testing._internal.common_methods_invocations import \
+from torch.testing._internal.opinfos import \
     (op_db, _NOTHING, UnaryUfuncInfo, SpectralFuncInfo)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)

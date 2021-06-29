@@ -39,7 +39,7 @@ from torch.testing._internal.common_device_type import (
     onlyCPU,
     instantiate_device_type_tests,
 )
-from torch.testing._internal.common_methods_invocations import op_db
+from torch.testing._internal.opinfos import op_db
 from torch.testing._internal.common_nn import module_tests, new_module_tests
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase

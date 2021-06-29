@@ -148,7 +148,7 @@ except ImportError:
 #
 # See the documentation for the @ops decorator below for additional details
 #   on how to use it and see the note [OpInfos] in
-#   common_methods_invocations.py for more details on OpInfos.
+#   opinfos/core.py for more details on OpInfos.
 #
 # A test parametrized over the entire "op_db", which contains hundreds of
 #   OpInfos, will likely have hundreds or thousands of instantiations. The

@@ -15,7 +15,7 @@ from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
      get_device_type_test_bases, instantiate_device_type_tests, onlyCUDA, onlyOnCPUAndCUDA,
      deviceCountAtLeast)
-from torch.testing._internal.common_methods_invocations import op_db
+from torch.testing._internal.opinfos import op_db
 import torch.testing._internal.opinfo_helper as opinfo_helper
 from torch.testing._asserts import UsageError
 

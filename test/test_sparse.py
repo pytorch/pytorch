@@ -12,8 +12,7 @@ from numbers import Number
 from typing import Dict, Any
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, dtypesIfCPU, onlyCPU, onlyCUDA)
-from torch.testing._internal.common_methods_invocations import \
-    (sparse_unary_ufuncs)
+from torch.testing._internal.opinfos import sparse_unary_ufuncs
 
 if TEST_SCIPY:
     import scipy.sparse
