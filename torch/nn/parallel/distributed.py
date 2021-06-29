@@ -906,7 +906,6 @@ class DistributedDataParallel(Module):
                 if output_placeholders[i] is None:
                     output_placeholders[i] = passthrough_tensor_list[i]
                 else:
-                    # None elements are not tensors or have None grad fn
                     assert not torch.is_tensor(output_placeholders[i]) or output_placeholders[i].grad_fn is None
 
             # Reconstruct output data structure.

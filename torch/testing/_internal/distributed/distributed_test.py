@@ -7321,6 +7321,11 @@ class DistributedTest:
                 static_graph=True, find_unused_parameters=True
             )
 
+        @skip_if_lt_x_gpu(2)
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
         def test_ddp_new_tensor_in_fwd(self):
             # Test from https://github.com/pytorch/pytorch/issues/60733
             class MyModel(nn.Module):
