@@ -187,6 +187,7 @@ class TORCH_API Reducer {
   // Whether we need to run autograd hooks (only false if user runs with
   // no_grad or no_sync context manager)
   bool expect_autograd_hooks_;
+  bool in_ddp_backwards_{false};
   bool require_finalize_;
   size_t next_bucket_;
 
