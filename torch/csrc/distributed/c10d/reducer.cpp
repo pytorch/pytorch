@@ -581,7 +581,6 @@ void Reducer::autograd_hook(size_t index) {
     return;
   }
 
-
   // See Note [Skip allreducing local_used_maps_dev]
   if (dynamic_graph_find_unused() || static_graph_first_bwd()) {
     // Since it gets here, this param has been used for this iteration. We want
