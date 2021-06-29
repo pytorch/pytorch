@@ -170,8 +170,8 @@ def run_shell_commands_in_parallel(commands: Iterable[List[str]]) -> str:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
-        stdout, _ = await proc.communicate()
-        return stdout.decode()
+        stdout, stderr = await proc.communicate()
+        return f">>>\nstdout:\n{stdout.decode()}\nstderr:\n{stderr.decode()}\n<<<"
 
     async def gather_with_concurrency(n: int, tasks: List[Any]) -> Any:
         semaphore = asyncio.Semaphore(n)
@@ -204,6 +204,9 @@ def run_clang_tidy(options: Any, line_filters: List[Dict[str, Any]], files: Iter
             command += ["-config", json.dumps(yaml.load(config, Loader=yaml.SafeLoader))]
     if options.print_include_paths:
         command += ["--extra-arg", "-v"]
+    if options.include_dir:
+        for dir in options.include_dir:
+            command += ["--extra-arg", f"-I{dir}"]
 
     command += options.extra_args
 
@@ -333,6 +336,12 @@ def parse_options() -> Any:
         "--print-include-paths",
         action="store_true",
         help="Print the search paths used for include directives"
+    )
+    parser.add_argument(
+        "-I",
+        "--include-dir",
+        action="append",
+        help="Add the specified directory to the search path for include files",
     )
     parser.add_argument("-s", "--suppress-diagnostics", action="store_true",
                         help="Add NOLINT to suppress clang-tidy violations")
