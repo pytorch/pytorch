@@ -90,6 +90,8 @@ jobs:
     container:
       image: python:3.9
     steps:
+      - name: Install dependencies
+        run: pip install typing-extensions
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - name: Generating test matrix
