@@ -290,8 +290,6 @@ jobs:
         run: |
           cd "${GITHUB_WORKSPACE}"
           set -eux
-          git remote add upstream https://github.com/pytorch/pytorch
-          git fetch upstream "$GITHUB_BASE_REF"
 
           if [ ! -d build ]; then
             git submodule update --init --recursive
