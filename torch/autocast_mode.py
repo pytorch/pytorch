@@ -1,12 +1,10 @@
 import torch
 import functools
-import collections
 try:
     import numpy as np
     HAS_NUMPY = True
 except ModuleNotFoundError:
     HAS_NUMPY = False
-from torch._six import string_classes
 
 class autocast(object):
     r"""
