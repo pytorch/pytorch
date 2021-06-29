@@ -82,8 +82,7 @@ Tensor AdamW::step(LossClosure closure)  {
       if (!p.grad().defined()) {
         continue;
       }
-      // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-      auto grad = p.grad();
+      const auto& grad = p.grad();
       TORCH_CHECK(!grad.is_sparse(), "AdamW does not support sparse gradients"/*, please consider SparseAdamW instead*/);
       auto param_state = state_.find(c10::guts::to_string(p.unsafeGetTensorImpl()));
       auto& options = static_cast<AdamWOptions&>(group.options());
