@@ -348,7 +348,6 @@ void vectorized_outer_sum(
   using StorePolicy = CastStoreAccumulate<scalar_t, acc_t>;
 
   constexpr int64_t vec_stride = vacc_t::size() * sizeof(scalar_t);
-  const int64_t vec_size = size0 / vacc_t::size();
   constexpr int64_t nrows = 4;
 
   // Input is contiguous over the second (non-reduced) dimension
