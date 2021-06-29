@@ -57,8 +57,8 @@ class Unflatten(Module):
       (tuple of `(name, size)` tuples) for `NamedTensor` input.
 
     Shape:
-        - Input: :math:`(N, *dims)`
-        - Output: :math:`(N, C_{\text{out}}, H_{\text{out}}, W_{\text{out}})`
+        - Input: :math:`(*)`. Input can be any shape.
+        - Output: :math:`(*, *unflattened\_size, *)`.
 
     Args:
         dim (Union[int, str]): Dimension to be unflattened
