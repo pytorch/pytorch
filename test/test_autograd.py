@@ -4797,12 +4797,10 @@ for shape in [(1,), ()]:
         a = torch.randn(5, requires_grad=True)
 
         y = getFn(True).apply(a)
+
         self.assertEqual((a, None), y.grad_fn.saved_tensors)
-
         saved = y.grad_fn.raw_saved_tensors
-
         self.assertIsInstance(saved[0], torch._C._autograd.SavedTensor)
-
         # We can't tell the underlying tensor is None without unpacking it
         self.assertIsInstance(saved[1], torch._C._autograd.SavedTensor)
 
@@ -4817,14 +4815,13 @@ for shape in [(1,), ()]:
         # saved variables have been released can lead to undefined behavior
         del saved
         with self.assertRaisesRegex(RuntimeError, "after they have already been freed"):
-            y.grad_fn.raw_saved_tensors
+            y.grad_fn._raw_saved_tensors
         with self.assertRaisesRegex(RuntimeError, "after they have already been freed"):
             y.grad_fn.saved_tensors
 
         y = getFn(False).apply(a)
         self.assertEqual(y.grad_fn.saved_tensors, ())
-        self.assertEqual(y.grad_fn.raw_saved_tensors, ())
-
+        self.assertEqual(y.grad_fn._raw_saved_tensors, ())
 
     def test_autograd_views_codegen(self):
         # This is not necessarily the absolute correct behavior, but this is the current
