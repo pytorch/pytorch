@@ -74,10 +74,10 @@ def is_more_precise(t1, t2):
     The relation is reflexive and transitive.
     returns True if t1 is more precise than t2 and False otherwise.
     Example:
-        Dyn >= Tensor_Type((1,2,3))
+        Dyn >= TensorType((1,2,3))
         int >= Dyn
         int >= int
-        Tensor_Type((1,Dyn,3)) <= Tensor_Type((1,2,3))
+        TensorType((1,Dyn,3)) <= TensorType((1,2,3))
     """
     if t1 == t2:
         return True

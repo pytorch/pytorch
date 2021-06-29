@@ -3,7 +3,7 @@ import torch
 from torch.fx import symbolic_trace
 from torch.fx.tensor_type import TensorType, Dyn, is_consistent, is_more_precise
 from torch.fx.annotate import annotate
-from torch.fx.experimental.graph_gradual_typechecker import type_check
+from torch.fx.experimental.graph_gradual_typechecker import GraphTypeChecker
 
 
 class AnnotationsTest(unittest.TestCase):
@@ -70,7 +70,8 @@ class TypeCheckerTest(unittest.TestCase):
                 return torch.add(x, y)
         module = M()
         symbolic_traced: torch.fx.GraphModule = symbolic_trace(module)
-        self.assertFalse(type_check(symbolic_traced.graph))
+        tc = GraphTypeChecker({}, symbolic_traced)
+        self.assertFalse(tc.type_check())
 
     def test_type_check_add_true(self):
         class M(torch.nn.Module):
@@ -78,7 +79,8 @@ class TypeCheckerTest(unittest.TestCase):
                 return torch.add(x, y)
         module = M()
         symbolic_traced: torch.fx.GraphModule = symbolic_trace(module)
-        self.assertTrue(type_check(symbolic_traced.graph))
+        tc = GraphTypeChecker({}, symbolic_traced)
+        self.assertTrue(tc.type_check())
 
         expected_ph_types = [TensorType((1, 2, Dyn)), TensorType((1, 2, 3))]
         expected_iter = iter(expected_ph_types)
@@ -96,7 +98,8 @@ class TypeCheckerTest(unittest.TestCase):
 
         module = M()
         symbolic_traced: torch.fx.GraphModule = symbolic_trace(module)
-        self.assertTrue(type_check(symbolic_traced.graph))
+        tc = GraphTypeChecker({}, symbolic_traced)
+        self.assertTrue(tc.type_check())
 
         for n in symbolic_traced.graph.nodes:
             if n.op == 'placeholder':
@@ -115,7 +118,8 @@ class TypeCheckerTest(unittest.TestCase):
 
         module = M()
         symbolic_traced: torch.fx.GraphModule = symbolic_trace(module)
-        self.assertFalse(type_check(symbolic_traced.graph))
+        tc = GraphTypeChecker({}, symbolic_traced)
+        self.assertFalse(tc.type_check())
 
     def test_type_check_reshape_dyn_false(self):
         class M(torch.nn.Module):
@@ -124,7 +128,8 @@ class TypeCheckerTest(unittest.TestCase):
 
         module = M()
         symbolic_traced: torch.fx.GraphModule = symbolic_trace(module)
-        self.assertFalse(type_check(symbolic_traced.graph))
+        tc = GraphTypeChecker({}, symbolic_traced)
+        self.assertFalse(tc.type_check())
 
     def test_type_check_reshape_dyn_true(self):
         class M(torch.nn.Module):
@@ -133,7 +138,8 @@ class TypeCheckerTest(unittest.TestCase):
 
         module = M()
         symbolic_traced: torch.fx.GraphModule = symbolic_trace(module)
-        self.assertTrue(type_check(symbolic_traced.graph))
+        tc = GraphTypeChecker({}, symbolic_traced)
+        self.assertTrue(tc.type_check())
 
     def test_type_check_reshape_dyn_true_param_false(self):
         class M(torch.nn.Module):
@@ -142,7 +148,8 @@ class TypeCheckerTest(unittest.TestCase):
 
         module = M()
         symbolic_traced: torch.fx.GraphModule = symbolic_trace(module)
-        self.assertFalse(type_check(symbolic_traced.graph))
+        tc = GraphTypeChecker({}, symbolic_traced)
+        self.assertFalse(tc.type_check())
 
     def test_type_check_transpose_true(self):
         class M(torch.nn.Module):
@@ -151,7 +158,8 @@ class TypeCheckerTest(unittest.TestCase):
 
         module = M()
         symbolic_traced : torch.fx.GraphModule = symbolic_trace(module)
-        self.assertTrue(type_check(symbolic_traced.graph))
+        tc = GraphTypeChecker({}, symbolic_traced)
+        self.assertTrue(tc.type_check())
 
         for n in symbolic_traced.graph.nodes:
             if n.op == 'callfunction':
@@ -168,7 +176,8 @@ class TypeCheckerTest(unittest.TestCase):
 
         module = M()
         symbolic_traced: torch.fx.GraphModule = symbolic_trace(module)
-        self.assertFalse(type_check(symbolic_traced.graph))
+        tc = GraphTypeChecker({}, symbolic_traced)
+        self.assertFalse(tc.type_check())
 
 
 if __name__ == '__main__':
