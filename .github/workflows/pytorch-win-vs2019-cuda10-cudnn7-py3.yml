@@ -80,10 +80,10 @@ jobs:
           path: C:\w\build-results
 
   generate-test-matrix:
-    if: ${{ github.repository_owner == 'pytorch' && github.event_name == 'push' }}
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: ubuntu-18.04
     env:
-      NUM_TEST_SHARDS: 1
+      NUM_TEST_SHARDS: 2
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     container:
@@ -100,11 +100,10 @@ jobs:
           echo "::set-output name=matrix::${MATRIX}"
 
   test:
-    if: ${{ github.event_name == 'push' }}
     runs-on: windows.8xlarge.nvidia.gpu
     env:
       JOB_BASE_NAME: pytorch-win-vs2019-cuda10-cudnn7-py3-test
-      NUM_TEST_SHARDS: 1
+      NUM_TEST_SHARDS: 2
       TEST_CONFIG: ${{ matrix.test_config }}
     needs:
       - build
@@ -157,7 +156,16 @@ jobs:
             else
               export SHARD_NUMBER=0
             fi
+            if [[ -n $GITHUB_HEAD_REF && "$USE_CUDA" == 1 ]]; then
+              export RUN_SMOKE_TESTS_ONLY=1
+            fi
             .jenkins/pytorch/win-test.sh
+      - name: Zip test reports for upload
+        if: always()
+        shell: powershell
+        run: |
+          # -ir => recursive include all files in pattern
+          7z a "test-reports-$Env:TEST_CONFIG.zip" -ir'!test\*.xml'
       - uses: actions/upload-artifact@v2
         name: Store PyTorch Test Reports
         if: always()
@@ -166,7 +174,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            test/**/*.xml
+            test-reports-*.zip
 
   # this is a separate step from test because the log files from test are too
   # long: basically, GitHub tries to render all of the log files when you click
@@ -174,7 +182,7 @@ jobs:
   # logs (like test); we can always move it back to the other one, but it
   # doesn't create the best experience
   render_test_results:
-    if:  ${{ github.event_name == 'push' && always() }}
+    if: always()
     needs:
       - test
     runs-on: ubuntu-18.04
@@ -183,13 +191,16 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
-          # deep clone, to allow tools/print_test_stats.py to use Git commands
+          # deep clone, to allow tools/stats/print_test_stats.py to use Git commands
           fetch-depth: 0
       - uses: actions/download-artifact@v2
         name: Download PyTorch Test Reports
         with:
           name: test-reports
-          path: test/test-reports
+          path: .
+      - name: Unzip test reports
+        run: |
+          unzip -o 'test-reports-*.zip'
       - uses: actions/setup-python@v2
         with:
           python-version: 3.9
@@ -206,17 +217,17 @@ jobs:
         run: .github/scripts/parse_ref.py
       - name: Display and upload test statistics (Click Me)
         # temporary hack: set CIRCLE_* vars, until we update
-        # tools/print_test_stats.py to natively support GitHub Actions
+        # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_SECRET_ACCESS_KEY }}
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          CIRCLE_JOB: pytorch-win-vs2019-cuda10-cudnn7-py3
+          JOB_BASE_NAME: pytorch-win-vs2019-cuda10-cudnn7-py3-test
           CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
           CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
-          CIRCLE_WORKFLOW_ID: ${{ github.run_id }} # dunno if this corresponds
+          CIRCLE_WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         run: |
           export PYTHONPATH=$PWD
-          python tools/print_test_stats.py --upload-to-s3 --compare-with-s3 test
+          python tools/stats/print_test_stats.py --upload-to-s3 --compare-with-s3 test
