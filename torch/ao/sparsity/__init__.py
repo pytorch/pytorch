@@ -15,6 +15,7 @@ from ._mappings import get_static_sparse_quantized_mapping
 
 # Parametrizations
 from .experimental.pruner.parametrization import PruningParametrization
+from .experimental.pruner.parametrization import ActivationReconstruction
 
 # Pruner
 from .experimental.pruner.base_pruner import BasePruner
