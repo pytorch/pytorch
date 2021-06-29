@@ -402,10 +402,14 @@ class PackageImporter(Importer):
             message = "import of {} halted; " "None in sys.modules".format(name)
             raise ModuleNotFoundError(message, name=name)
 
-        # To handle https://github.com/pytorch/pytorch/issues/57490, where os's
-        # creation of os.path via the hacking of sys.modules is not import friendly
+        # To handle https://github.com/pytorch/pytorch/issues/57490, where std's
+        # creation of fake submodules via the hacking of sys.modules is not import
+        # friendly
         if name == "os":
             self.modules["os.path"] = cast(Any, module).path
+        elif name == "typing":
+            self.modules["typing.io"] = cast(Any, module).io
+            self.modules["typing.re"] = cast(Any, module).re
 
         return module
 
