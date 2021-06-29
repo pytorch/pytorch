@@ -212,23 +212,6 @@ public:
     std::swap(result.sizes_[dim1], result.sizes_[dim2]);
     return result;
   }
-
-  /// Returns a PackedTensorAccessor that is a view of the `SubDim`-dimensional
-  /// slice of this tensor, starting at `at`
-  template <index_t Subdim>
-  C10_HOST GenericPackedTensorAccessor<T, Subdim, PtrTraits, index_t> view(
-      PtrType at) {
-    static_assert(1 <= Subdim && Subdim < N, "Dimensions must be in [1, N)");
-    return GenericPackedTensorAccessor<T, Subdim, PtrTraits, index_t>(
-        at, this->sizes_ + N - Subdim, this->strides_ + N - Subdim);
-  }
-
-  /// Returns a PackedTensorAccessor that is a view of the `SubDim`-dimensional
-  /// slice of this tensor, starting where our data begins
-  template <index_t Subdim>
-  C10_HOST GenericPackedTensorAccessor<T, Subdim, PtrTraits, index_t> view() {
-    return this->view<Subdim>(this->data_);
-  }
 };
 
 template<typename T, template <typename U> class PtrTraits, typename index_t>
@@ -267,9 +250,6 @@ public:
     return GenericPackedTensorAccessor<T, 1, PtrTraits, index_t>(
         this->data_, this->sizes_, this->strides_);
   }
-
-  // view methods are not implemented for 1d PackedTensorAccessor objects
-  // because a 1d object cannot be viewed at a smaller sub-dimension
 };
 
 
