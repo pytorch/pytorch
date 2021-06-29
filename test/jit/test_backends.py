@@ -344,46 +344,42 @@ class SelectiveLoweringTest(JitBackendTestCase):
         FileCheck() \
             .check("OuterModule") \
             .check_not("__torch__.torch.classes.__backends__.test_backend") \
-            .check("test_backendLoweredModule") \
+            .check("test_backend.LoweredModule") \
             .run(self.lowered_module.graph)
 
         # Check that self.lowered_module.sub1/sub2 were not lowered but that BasicModule has been replaced in their graphs.
         FileCheck() \
             .check("MiddleModule") \
             .check("BasicModule") \
-            .check_not("test_backendLoweredModule") \
+            .check_not("test_backend.LoweredModule") \
             .run(self.scripted_module.sub1.graph)
         FileCheck() \
             .check("MiddleModule") \
             .check_not("__torch__.torch.classes.__backends__.test_backend") \
-            .check("test_backendLoweredModule") \
-            .check_not("BasicModule") \
+            .check("test_backend.LoweredModule") \
             .run(self.lowered_module.sub1.graph)
 
         FileCheck() \
             .check("MiddleModule") \
             .check("BasicModule") \
-            .check_not("test_backendLoweredModule") \
+            .check_not("test_backend.LoweredModule") \
             .run(self.scripted_module.sub2.graph)
         FileCheck() \
             .check("MiddleModule") \
             .check_not("__torch__.torch.classes.__backends__.test_backend") \
-            .check("test_backendLoweredModule") \
-            .check_not("BasicModule") \
+            .check("test_backend.LoweredModule") \
             .run(self.lowered_module.sub2.graph)
 
         # Check that self.lowered_module.sub1/sub2.submodule were lowered. Its graph should mention
         # __torch__.torch.classes.__backends__.test_backend, the TorchBind class for executing functions
         # on the test JIT backend.
         FileCheck() \
-            .check("test_backendLoweredModule") \
-            .check_not("BasicModule") \
+            .check("test_backend.LoweredModule") \
             .check("__torch__.torch.classes.__backends__.test_backend") \
             .run(self.lowered_module.sub1.submodule.graph)
 
         FileCheck() \
-            .check("test_backendLoweredModule") \
-            .check_not("BasicModule") \
+            .check("test_backend.LoweredModule") \
             .check("__torch__.torch.classes.__backends__.test_backend") \
             .run(self.lowered_module.sub2.submodule.graph)
 
@@ -392,12 +388,12 @@ class SelectiveLoweringTest(JitBackendTestCase):
             .check("MiddleModule") \
             .check("BasicModule") \
             .check_not("__torch__.torch.classes.__backends__.test_backend") \
-            .check_not("test_backendLoweredModule") \
+            .check_not("test_backend.LoweredModule") \
             .run(self.scripted_module.other.graph)
         FileCheck() \
             .check("BasicModule") \
             .check_not("__torch__.torch.classes.__backends__.test_backend") \
-            .check_not("test_backendLoweredModule") \
+            .check_not("test_backend.LoweredModule") \
             .run(self.scripted_module.other.submodule.graph)
 
     def test_errors(self):
@@ -562,6 +558,39 @@ class BasicModuleTestWithCompiler(JitBackendTestCaseWithCompiler):
         input = torch.randn(5)
         self.check_forward((input, input))
 
+class ErrorMessagesWithCompiler(JitBackendTestCase):
+    """
+    Tests for errors that occur with compiler, specifically:
+        * an operator is not supported by the backend
+    """
+
+    class ModuleNotSupported(torch.nn.Module):
+        """
+        A module with an operator that is not supported.
+        """
+        def __init__(self):
+            super().__init__()
+
+        def forward(self, x, h):
+            return x * h
+            self._loweredmodule.forward()
+
+    def setUp(self):
+        super().setUp()
+
+    def test_errors(self):
+        scripted_module_n = torch.jit.script(ErrorMessagesWithCompiler.ModuleNotSupported())
+        # Test exception is thrown when lowering a module with an unsupported operator
+        with self.assertRaisesRegexWithHighlight(RuntimeError,
+                                                 # Special escape characters are replaced with '.'
+                                                 r"""The node of aten::mul is not supported in this compiler. .*
+        def forward.self, x, h.:
+            return x . h
+                   ~~~~~ <--- HERE
+            self._loweredmodule.forward..
+""", ""):
+            lowered_module_n = torch._C._jit_to_backend("backend_with_compiler_demo", scripted_module_n, {"forward": {"": ""}})
+
 
 # This is needed for IS_WINDOWS or IS_MACOS to skip the tests.
 @unittest.skipIf(TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE,
@@ -575,12 +604,18 @@ class TestBackendsWithCompiler(JitTestCase):
     def __init__(self, name):
         super().__init__(name)
         self.basic_module_compiler_test = BasicModuleTestWithCompiler(name)
+        self.error_module_compiler_test = ErrorMessagesWithCompiler(name)
 
     def setUp(self):
         super().setUp()
         if not TEST_WITH_ROCM:
             self.basic_module_compiler_test.setUp()
+            self.error_module_compiler_test.setUp()
 
     @skipIfRocm
     def test_execution(self):
         self.basic_module_compiler_test.test_execution()
+
+    @skipIfRocm
+    def test_errors(self):
+        self.error_module_compiler_test.test_errors()
