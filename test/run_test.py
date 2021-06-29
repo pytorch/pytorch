@@ -315,7 +315,7 @@ DISTRIBUTED_EXECUTOR_TESTS = [
 # touched any related files first. This list was manually generated, but for every
 # run with --determine-from, we use another generated list based on this one and the
 # previous test stats.
-TARGET_DET_LIST = DISTRIBUTED_EXECUTION_TESTS + [
+TARGET_DET_LIST = DISTRIBUTED_EXECUTOR_TESTS + [
     'distributions/test_distributions',
     'test_nn',
     'test_autograd',
