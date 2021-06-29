@@ -1,10 +1,5 @@
 import torch
 import functools
-try:
-    import numpy as np
-    HAS_NUMPY = True
-except ModuleNotFoundError:
-    HAS_NUMPY = False
 
 class autocast(object):
     r"""
