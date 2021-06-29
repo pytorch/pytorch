@@ -6,7 +6,7 @@ import torch
 from torch import nn
 from torch.nn.utils import parametrize
 
-from .parametrization import PruningParametrization, ActivationReconstruction
+from .parametrization import PruningParametrization, ActivationReconstruction, BiasHook
 
 SUPPORTED_MODULES = {
     nn.Linear
@@ -124,9 +124,18 @@ class BasePruner(abc.ABC):
             parametrize.register_parametrization(module, 'weight',
                                                  param(module.mask),
                                                  unsafe=True)
+
             module.register_forward_hook(
                 ActivationReconstruction(module.parametrizations.weight[0])
             )
+
+            if module.bias is not None:
+                module.register_parameter('_bias', nn.Parameter(module.bias.detach()))
+                module.bias = None
+                module.register_forward_hook(BiasHook(True))
+            else:
+                module.register_forward_hook(BiasHook(False))
+
 
     def convert(self, use_path=False, *args, **kwargs):
         for config in self.module_groups:
