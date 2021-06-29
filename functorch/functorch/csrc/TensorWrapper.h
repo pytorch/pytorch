@@ -46,6 +46,11 @@ struct TORCH_API TensorWrapper : public c10::TensorImpl {
       bool allow_tensor_metadata_change) const override;
   void shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) override;
 
+  // See Note [TensorWrapper sometimes has storage]
+  bool storage_access_should_throw() {
+    return hacky_storage_access_should_throw_;
+  }
+
  private:
   const char* tensorimpl_type_name() const override;
   Tensor value_;
@@ -56,6 +61,9 @@ struct TORCH_API TensorWrapper : public c10::TensorImpl {
   // 1) May still have autograd metadata on them
   // 2) Forward dispatches to the underlying value()
   std::shared_ptr<bool> is_alive_;
+
+  // Note [TensorWrapper sometimes has storage]
+  bool hacky_storage_access_should_throw_ = false;
 };
 
 TORCH_API Tensor makeTensorWrapper(const Tensor& tensor, int64_t level);
