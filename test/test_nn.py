@@ -2782,6 +2782,43 @@ class TestNN(NNTestCase):
             Y = model.weight
             self.assertEqual(id(X), id(Y))
 
+    def test_jit_parametrization(self):
+        r"""Test the jit scripting and tracing of a parametrized model."""
+        # Define some parametrization
+        class Symmetric(nn.Module):
+            def forward(self, X):
+                return X.triu() + X.triu(1).transpose(-1, -2)
+
+        model = nn.Linear(5, 5)
+        parametrize.register_parametrization(model, "weight", Symmetric())
+
+        x = torch.randn(3, 5)
+
+        # Check the tracing works. Because traced functions cannot be called
+        # directly, we run the comparison on the activations.
+        traced_model = torch.jit.trace_module(model, {'forward': x})
+        y = model(x)
+        y_hat = traced_model(x)
+        self.assertEqual(y, y_hat)
+
+        # Check traced model works with caching
+        traced_model = torch.jit.trace_module(model, {'forward': x})
+        with parametrize.cached():
+            y = model(x)
+            y_hat = traced_model(x)
+            self.assertEqual(y, y_hat)
+
+        # Check the tracing throws an error when caching
+        with self.assertRaisesRegex(RuntimeError, 'Caching should be disabled'):
+            with parametrize.cached():
+                traced_model = torch.jit.trace_module(model, {'forward': x})
+
+        # TODO: Need to fix the scripting in parametrizations
+        #       Currently, this is expected to throw a UnsupportedNodeError
+        with self.assertRaises(torch.jit.frontend.UnsupportedNodeError):
+            scripted_model = torch.jit.script(model)
+
+
     def test_parametrization_same_training_mode(self):
         r"""Test training mode updated on parametrization registration"""
         class Identity(nn.Module):
