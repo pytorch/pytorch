@@ -18,27 +18,12 @@ class GraphTypeChecker:
         # here we collect types for variables
         graph = self.traced.graph
 
-        # populate the type environment with parameter types
-        self.collect_params(graph.nodes)
         # type check every node with gradual type rules
         # if any node does not type check return false
         for n in graph.nodes:
             if not self.type_check_node(n):
                 return False
         return True
-
-    def collect_params(self, node_list):
-        """
-        Collect argument types from the type environment.
-        If not present, populate with Dyn
-        """
-        for node in node_list:
-            if node.op == 'placeholder':
-                if node.type:
-                    self.env[node.name] = node.type
-                else:
-                    node.type = Dyn
-                    self.env[node.name] = node.type
 
     def type_check_node(self, n):
         """
@@ -49,11 +34,10 @@ class GraphTypeChecker:
         - Add
         """
         if n.op == 'placeholder':
-            if n.name in self.env.keys():
-                n.type = self.env[n.name]
-                return n.type
+            if n.type is None:
+                n.type = Dyn
             else:
-                return False  # free variable
+                return n.type
 
         if n.op == 'call_function':
             if n.target == torch.add or n.target == operator.add:
@@ -62,7 +46,8 @@ class GraphTypeChecker:
                 t2 = n.args[1].type
 
                 if is_consistent(t1, t2):
-                    if is_more_precise(t1, t2):  # we return the more precise type
+                    # we return the more precise type
+                    if is_more_precise(t1, t2):
                         n.type = t1
                     else:
                         n.type = t2
@@ -107,7 +92,7 @@ class GraphTypeChecker:
                     return False
 
             if n.target == torch.transpose:
-                t = self.env[n.args[0].name]
+                t = n.args[0].type
                 dim1, dim2 = n.args[1], n.args[2]
 
                 if 0 <= dim1 < len(t.__args__) and 0 <= dim2 < len(t.__args__):
@@ -119,11 +104,11 @@ class GraphTypeChecker:
                 else:
                     return False
             else:
-                raise NotImplementedError("Method for " + n.name + " not yet implemented")
+                raise NotImplementedError("Method for " + n.node + " not yet implemented")
 
         if n.op == 'output':
             n.type = n.args[0].type
             return n.type
 
         else:
-            raise NotImplementedError("Method for " + n.name + " not yet implemented")
+            raise NotImplementedError("Method for " + n.node + " not yet implemented")
