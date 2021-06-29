@@ -111,7 +111,7 @@ class autocast(object):
             if key == 'fast_dtype':
                 self.fast_dtype = value
             elif key == 'device_type':
-                if not torch.cuda.is_available() and val=='cuda':
+                if not torch.cuda.is_available() and value == 'cuda':
                     raise RuntimeError('User provided device_type of \'cuda\' but CUDA is not available.')
                 self.device = value
             if not (key == 'fast_dtype' or key == 'device_type'):
