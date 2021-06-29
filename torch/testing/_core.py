@@ -228,12 +228,11 @@ def _compare_scalars_internal(a, b, *, rtol: float, atol: float, equal_nan: Unio
                 msg = f"{a} != {b}"
             else:
                 msg = (
-                    f"Comparing {s} {a} and {b} gives a "
+                    f"Comparing{s}{a} and {b} gives a "
                     f"difference of {diff}, but the allowed difference "
                     f"with rtol={rtol} and atol={atol} is "
                     f"only {allowed_diff}!"
                 )
-
         return result, msg
 
     if isinstance(a, complex) or isinstance(b, complex):
