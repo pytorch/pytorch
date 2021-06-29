@@ -762,6 +762,66 @@ class TestQuantizedTensor(TestCase):
         q3 = q1.resize(*sizes2)
         q4 = q1.contiguous().resize(*sizes2)
 
+    @unittest.skipIf(not torch.cuda.is_available() or TEST_WITH_ROCM, 'CUDA is not available')
+    def test_cuda_cpu_qimplementation_consistency(self):
+        numel, zero_point, scale = 100, 2, 0.02
+        r = torch.rand(numel, dtype=torch.float32, device='cpu') * 25 - 4
+        for dtype in [torch.qint8, torch.quint8, torch.qint32]:
+            qr_cpu = torch.quantize_per_tensor(r, scale, zero_point, dtype=dtype)
+            qr_cuda = torch.quantize_per_tensor(r.cuda(), scale, zero_point, dtype=dtype)
+            # intr repr must be the same
+            np.testing.assert_equal(qr_cpu.int_repr().numpy(), qr_cuda.int_repr().cpu().numpy())
+            # dequantized values must be the same
+            r_cpu, r_cuda = qr_cpu.dequantize().numpy(), qr_cuda.dequantize().cpu().numpy()
+            np.testing.assert_almost_equal(r_cuda, r_cpu, decimal=5)
+
+
+    @unittest.skipIf(not torch.cuda.is_available() or TEST_WITH_ROCM, 'CUDA is not available')
+    def test_qtensor_resize_cuda(self):
+        scale, zero_point, dtype = 1.0, 2, torch.uint8
+        sizes1 = [1, 2, 3, 4]
+        sizes2 = [1 * 2, 3 * 4]
+        sizes3 = [1, 2 * 3, 4]
+        sizes4 = [1 * 2 * 3 * 4]
+        sizes5 = [1, 2, 1, 3, 1, 4]
+
+        q1_int = torch.randint(0, 100, sizes1, dtype=dtype, device='cpu')
+        q1 = torch._make_per_tensor_quantized_tensor(q1_int.cuda(), scale=scale, zero_point=zero_point)
+        q2 = q1.resize(*sizes2)
+        q3 = q2.resize(*sizes3)
+        q4 = q3.resize(*sizes4)
+        q5 = q4.resize(*sizes5)
+
+        self.assertEqual(q1.numel(), q2.numel())
+        self.assertEqual(q1.numel(), q3.numel())
+        self.assertEqual(q1.numel(), q4.numel())
+        self.assertEqual(q1.numel(), q5.numel())
+
+        # Compare original and post-transpose
+        a_int = torch.randint(0, 100, sizes1, dtype=dtype, device='cpu')
+        a = torch._make_per_tensor_quantized_tensor(a_int.cuda(), scale=scale, zero_point=zero_point)
+        b = a.transpose(1, 2)  # swaps 2nd and 3rd dimension
+        c = b.resize(*sizes1)  # Change the sizes back to the original
+
+        self.assertEqual(a.size(), c.size())
+        self.assertEqual(b.q_scale(), c.q_scale())
+        self.assertEqual(b.q_zero_point(), c.q_zero_point())
+        self.assertNotEqual(b.stride(), c.stride())
+        # size is the same but the underlying data is different
+        self.assertNotEqual(b.int_repr(), c.int_repr())
+        self.assertFalse(torch.equal(b, c))
+
+        # Throws an error if numel is wrong
+        q1_int = torch.randint(0, 100, sizes1, dtype=dtype, device='cpu')
+        q1 = torch._make_per_tensor_quantized_tensor(a_int.cuda(), scale=scale, zero_point=zero_point)
+        err_str = "requested resize to*"
+        with self.assertRaisesRegex(RuntimeError, err_str):
+            q2 = q1.resize(*sizes1[:-1])
+        # resize on both contiguous and non-contiguous tensor should be fine
+        q3 = q1.resize(*sizes2)
+        q4 = q1.contiguous().resize(*sizes2)
+
+
     def test_qtensor_reshape(self):
         scale, zero_point, dtype = 1.0, 2, torch.uint8
         for device in get_supported_device_types():
