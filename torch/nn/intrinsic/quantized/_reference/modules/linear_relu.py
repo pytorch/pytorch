@@ -1,8 +1,11 @@
 import torch
+import torch.nn.intrinsic as nni
 import torch.nn.quantized._reference as nnqr
 import torch.nn.functional as F
 
 class LinearReLU(nnqr.Linear):
+    _FLOAT_MODULE = nni.LinearReLU
+
     def __init__(
             self,
             in_features,

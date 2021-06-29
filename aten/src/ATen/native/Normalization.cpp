@@ -1,5 +1,4 @@
 #include <ATen/ATen.h>
-#include <ATen/MetaFunctions.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/CPUApplyUtils.h>
