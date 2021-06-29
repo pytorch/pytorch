@@ -224,7 +224,7 @@ class _ConvNd(nn.Module):
         # the __init__ call used is the one from derived classes and not the one from _ConvNd
         input_qrange_le_128 = \
             _get_input_qrange_le_128_from_obs(activation_post_process)
-        qconv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,  # type: ignore[call-arg]
+        qconv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,
                     mod.stride, mod.padding, mod.dilation, mod.groups,
                     mod.bias is not None, mod.padding_mode, input_qrange_le_128)
         qconv.set_weight_bias(qweight, mod.bias)
