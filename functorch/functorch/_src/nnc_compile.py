@@ -303,6 +303,7 @@ def nnc_compile(fx_model: fx.GraphModule, example_inputs, get_loopnest = False) 
     outs = None
     inputs = []
     module_attrs = []
+    attr_bufs = []
     compute_stmts = []
     for node in fx_model.graph.nodes:
         if node.op == 'placeholder':
@@ -345,7 +346,8 @@ def nnc_compile(fx_model: fx.GraphModule, example_inputs, get_loopnest = False) 
             module_attrs.append(node)
             shapes = get_te_shapes(process_shape(node.meta['tensor_meta'].shape))
             placeholder = te.Placeholder(node.name, get_te_type(node), shapes)
-            env[node.name] = placeholder.data()
+            env[node.name] = placeholder
+            attr_bufs.append(placeholder)
         else:
             print(node.op, node.target)
             raise RuntimeError("not yet implemented")
@@ -371,15 +373,19 @@ def nnc_compile(fx_model: fx.GraphModule, example_inputs, get_loopnest = False) 
     ph_to_inp_map = {}
     for idx, _ in enumerate(outs):
         if isinstance(outs[idx][0], te.Placeholder):
-            ph_to_inp_map[outs[idx][0]] = inputs.index(outs[idx][0])
+            if outs[idx][0] in inputs:
+                ph_to_inp_map[outs[idx][0]] = len(module_attrs) + inputs.index(outs[idx][0])
+            else:
+                ph_to_inp_map[outs[idx][0]] = attr_bufs.index(outs[idx][0])
 
     def get_outs(inps):
         return [inps[ph_to_inp_map[buf]] if isinstance(buf, te.Placeholder) else torch.empty(shape, dtype=dtype) for buf, (shape,dtype) in outs]
 
     def f(*inps):
         inps = fx_model.graph.flatten_inps(*inps)
-        results = get_outs(inps)
-        full_inps = module_stuff + list(inps) + results
+        module_inps = module_stuff + list(inps)
+        results = get_outs(module_inps)
+        full_inps = module_inps + results
         cg.call(full_inps)
         if len(results) == 1:
             results = fx_model.graph.unflatten_outs(results[0])
