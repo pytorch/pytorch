@@ -58,8 +58,8 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
   std::atomic<int64_t> num_attempted_iters{0};
   std::vector<std::thread> callers;
 
+  callers.reserve(config.num_calling_threads);
   for (const auto thread_id : c10::irange(config.num_calling_threads)) {
-    // NOLINTNEXTLINE(performance-inefficient-vector-operation)
     callers.emplace_back([&, thread_id]() {
       // We use conditional variable as a barrier to make sure each thread
       // performs required warmeup iterations before we start measuring
