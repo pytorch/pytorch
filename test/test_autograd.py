@@ -4674,7 +4674,7 @@ for shape in [(1,), ()]:
         self.assertIsInstance(out.grad_fn._saved_dim, int)
 
         saved = out.grad_fn._raw_saved_tensors[0]
-        saved.register_hooks(lambda x: x, lambda x :x)
+        saved.register_hooks(lambda x: x, lambda x: x)
 
         out.sum().backward()
         with self.assertRaisesRegex(RuntimeError, "after they have already been freed"):
