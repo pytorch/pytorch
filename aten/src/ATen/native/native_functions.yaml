@@ -536,12 +536,12 @@
     CPU, CUDA: argmax_out
 
 - func: argmin(Tensor self, int? dim=None, bool keepdim=False) -> Tensor
+  structured_delegate: argmin.out
   device_check: NoCheck   # TensorIterator
   variants: function, method
-  dispatch:
-    CPU, CUDA: argmin
 
 - func: argmin.out(Tensor self, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
   dispatch:
     CPU, CUDA: argmin_out
 
