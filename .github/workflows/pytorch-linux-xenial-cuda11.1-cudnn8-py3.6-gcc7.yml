@@ -193,7 +193,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: ubuntu-18.04
     env:
-      NUM_TEST_SHARDS: 1
+      NUM_TEST_SHARDS: 2
       ENABLE_MULTIGPU_TEST: ''
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
