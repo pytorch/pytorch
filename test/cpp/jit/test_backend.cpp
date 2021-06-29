@@ -146,6 +146,50 @@ TEST(BackendTest, TestCompiler) {
   AT_ASSERT(mres.toTensor().equal(ref.toTensor()));
 }
 
+TEST(BackendTest, TestComposite) {
+  c10::Dict<IValue, IValue> compile_spec(StringType::get(), AnyType::get());
+  c10::Dict<IValue, IValue> fake_dict(StringType::get(), AnyType::get());
+  fake_dict.insert("", "");
+  compile_spec.insert("forward", fake_dict);
+  auto any_dict_ty = DictType::create(StringType::get(), AnyType::get());
+
+  Module m_add("m_add");
+  m_add.define(R"(
+    def forward(self, x, y):
+      return x + y
+  )");
+  auto lm_add = torch::jit::detail::codegen_backend_module(
+      "backend_with_compiler_demo", m_add, compile_spec, any_dict_ty);
+
+  Module m_sub("m_sub");
+  m_sub.define(R"(
+    def forward(self, x, y):
+      return x - y
+  )");
+  auto lm_sub = torch::jit::detail::codegen_backend_module(
+      "backend_with_compiler_demo", m_sub, compile_spec, any_dict_ty);
+
+  Module c("C");
+  c.register_module("Add", lm_add);
+  c.register_module("Sub", lm_sub);
+  c.define(R"(
+    def forward(self, x, y):
+      return self.Add.forward(x, y) * self.Sub.forward(x, y)
+  )");
+
+  std::vector<IValue> inputs;
+  inputs.emplace_back(3.0 * torch::ones({}));
+  inputs.emplace_back(1.0 * torch::ones({}));
+  auto res_jit = c.forward(inputs);
+
+  std::stringstream ss;
+  c._save_for_mobile(ss);
+  auto mc = _load_for_mobile(ss);
+  auto res_mobile = mc.forward(inputs);
+
+  AT_ASSERT(res_jit.toTensor().equal(res_mobile.toTensor()));
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BackendTest, TestCompilerNotSupport) {
   Module m("m");
@@ -190,7 +234,7 @@ TEST(BackendTestDebugInfo, TestCompiler) {
   lm._save_for_mobile(ss, ExtraFilesMap(), true);
   auto mlm = _load_for_mobile(ss);
   std::string error_pattern = R"(
-  Module hierarchy:top(backend_with_compiler_demoLoweredModule).aten::add
+  Module hierarchy:top(m).aten::add
 Traceback of TorchScript (most recent call last):
   File "<string>", line 5, in FunctionName_UNKNOWN
                 typed_inputs: List[Any] = [x, h, ]
@@ -244,7 +288,7 @@ TEST(BackendTestDebugInfo, TestExceptionStackForCompilerWithModuleHierarchy) {
   lm._save_for_mobile(ss, ExtraFilesMap(), true);
   auto mlm = _load_for_mobile(ss);
   std::string error_pattern = R"(
-  Module hierarchy:top(backend_with_compiler_demoLoweredModule).A0(A).aten::add
+  Module hierarchy:top(C).A0(A).aten::add
 Traceback of TorchScript (most recent call last):
   File "<string>", line 5, in FunctionName_UNKNOWN
                 typed_inputs: List[Any] = [x, y, ]
@@ -337,7 +381,7 @@ TEST(
    *
    */
   std::string error_pattern = R"(
-  Module hierarchy:top(backend_with_compiler_demoLoweredModule).B0(B).A0(A).aten::add
+  Module hierarchy:top(C).B0(B).A0(A).aten::add
 Traceback of TorchScript (most recent call last):
   File "<string>", line 5, in FunctionName_UNKNOWN
                 typed_inputs: List[Any] = [x, y, ]
@@ -424,7 +468,7 @@ TEST(BackendTestDebugInfo, TestExceptionStackForCompilerWithLoweredSubModule) {
   c._save_for_mobile(ss, ExtraFilesMap(), true);
   auto c_loaded = _load_for_mobile(ss);
   std::string error_pattern = R"(
-  Module hierarchy:top(C).A0(backend_with_compiler_demoLoweredModule).aten::add
+  Module hierarchy:top(C).A0(A).aten::add
 Traceback of TorchScript (most recent call last):
   File "<string>", line 3, in FunctionName_UNKNOWN
 
@@ -545,7 +589,7 @@ TEST(
    *
    *  */
   std::string error_pattern = R"(
-  Module hierarchy:top(C).A0(backend_with_compiler_demoLoweredModule).AA0(AA).aten::add
+  Module hierarchy:top(C).A0(A).AA0(AA).aten::add
 Traceback of TorchScript (most recent call last):
   File "<string>", line 3, in FunctionName_UNKNOWN
 
