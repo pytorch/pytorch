@@ -45,7 +45,7 @@ def write_version_file():
 requirements = [
     # This represents a nightly version of PyTorch.
     # It can be installed as a binary or from source.
-    "torch>=1.9.0.dev",
+    "torch>=1.10.0.dev",
 ]
 
 
