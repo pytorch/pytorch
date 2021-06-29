@@ -1,9 +1,9 @@
 class TensorType:
     """
-    Tensor_Type defines a type for tensors, which consists of a list of dimensions.
+    TensorType defines a type for tensors, which consists of a list of dimensions.
     Example:
         class M(torch.nn.Module):
-            def forward(self, x:Tensor_Type((1,2,3, Dyn)), y:Tensor_Type((1,2,3, Dyn))):
+            def forward(self, x:TensorType((1,2,3, Dyn)), y:TensorType((1,2,3, Dyn))):
                 return torch.add(x, y)
     """
 
@@ -49,10 +49,10 @@ def is_consistent(t1, t2):
     The relation is reflexive, semmetric but not transitive.
     returns True if t1 and t2 are consistent and False otherwise.
     Example:
-        Dyn ~ Tensor_Type((1,2,3))
+        Dyn ~ TensorType((1,2,3))
         int ~ Dyn
         int ~ int
-        Tensor_Type((1,Dyn,3)) ~ Tensor_Type((1,2,3))
+        TensorType((1,Dyn,3)) ~ TensorType((1,2,3))
     """
 
     if t1 == t2:
