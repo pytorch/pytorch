@@ -4,6 +4,31 @@
 
 namespace caffe2 {
 
+vector<TensorShape> TensorInferenceForAddPadding(
+    const OperatorDef& def,
+    const vector<TensorShape>& in) {
+  ArgumentHelper helper(def);
+  const int padding_width = helper.GetSingleArgument<int>("padding_width", 1);
+  const int end_padding_width = helper.GetSingleArgument<int>("end_padding_width", padding_width);
+  CAFFE_ENFORCE_GT(in.size(), 0);
+  CAFFE_ENFORCE_GE(in[0].dims_size(), 1);
+  if (in.size() > 1) {
+    CAFFE_ENFORCE_EQ(in[1].dims_size(), 1);
+  }
+
+  const auto num_paddings = (in.size() == 1 ? 1 : in[1].dims(0));
+  vector<int> out_shape(in[0].dims().begin(), in[0].dims().end());
+  out_shape[0] += (padding_width + end_padding_width) * num_paddings;
+
+  if (def.output_size() == 1) {
+    return vector<TensorShape>{CreateTensorShape(out_shape, in[0].data_type())};
+  } else {
+    return vector<TensorShape>{
+      CreateTensorShape(out_shape, in[0].data_type()),
+      CreateTensorShape(vector<int>(1, num_paddings), TensorProto::INT32)};
+  }
+}
+
 template <>
 template <typename T>
 void GatherPaddingOp<CPUContext>::GatherPadding(
@@ -54,6 +79,7 @@ bool RemovePaddingOp<CPUContext>::DoRunWithType() {
   CAFFE_ENFORCE_GE(in.dim(), 1);
   const int32_t outer_size = in.sizes()[0];
   const auto block_size = std::accumulate(
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       in.sizes().begin() + 1, in.sizes().end(), 1, std::multiplies<int64_t>());
   const auto pad_width = startPaddingWidth_ + endPaddingWidth_;
 
@@ -224,7 +250,9 @@ bool PadEmptySamplesOp<CPUContext>::RunOnDevice() {
             lengthsPtr[i] * block_size,
             src,
             dst + start_dest * features.dtype().itemsize());
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         start_src += lengthsPtr[i] * block_size;
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         start_dest += lengthsPtr[i] * block_size;
       }
     }
@@ -232,9 +260,13 @@ bool PadEmptySamplesOp<CPUContext>::RunOnDevice() {
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(AddPadding, AddPaddingOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(RemovePadding, RemovePaddingOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(GatherPadding, GatherPaddingOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(PadEmptySamples, PadEmptySamplesOp<CPUContext>);
 
 struct GetAddPaddingGradient : public GradientMakerBase {
@@ -257,6 +289,7 @@ struct GetAddPaddingGradient : public GradientMakerBase {
       if (Def().input_size() == 4) {
         padding_grads.push_back(GI(3));
       }
+      // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
       auto g_inputs2 = g_inputs;
       ops.push_back(
           CreateOperatorDef("GatherPadding", "", g_inputs2, padding_grads));
@@ -264,6 +297,7 @@ struct GetAddPaddingGradient : public GradientMakerBase {
     return ops;
   }
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(AddPadding, GetAddPaddingGradient);
 
 struct GetRemovePaddingGradient : public GradientMakerBase {
@@ -279,11 +313,15 @@ struct GetRemovePaddingGradient : public GradientMakerBase {
     return SingleGradientDef("AddPadding", "", g_inputs, vector<string>{GI(0)});
   }
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(RemovePadding, GetRemovePaddingGradient);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(AddPadding)
     .NumInputs(1, 4)
     .NumOutputs(1, 2)
+    .TensorInferenceFunction(
+        OpSchema::NeedsAllInputShapes(TensorInferenceForAddPadding))
     .SetDoc(R"DOC(
 Given a partitioned tensor $T<N, D_1, ..., D_n>$, where the partitions are
 defined as ranges on its outer-most (slowest varying) dimension $N$,
@@ -392,6 +430,7 @@ lengths_out: [5]
         "lengths_out",
         "*(type: Tensor`<int>`)* [OPTIONAL] Lengths for each padded range.");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RemovePadding)
     .NumInputs(1, 2)
     .NumOutputs(1, 2)
@@ -489,6 +528,7 @@ lengths_out_rm: [3]
         "lengths_out",
         "*(type: Tensor`<int>`)* [OPTIONAL] Lengths for each padded range.");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(GatherPadding)
     .NumInputs(2)
     .NumOutputs(1, 2)
@@ -516,6 +556,7 @@ order to compute the gradients of AddPadding w.r.t the padding tensors.
         "end_padding_sum",
         "T<D1..., Dn> Sum of all end paddings, if provided.");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(PadEmptySamples)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1, INT_MAX)

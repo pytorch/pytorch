@@ -25,22 +25,21 @@ namespace {
 const int UNROLL = 4;
 
 template <
-          typename scalar_t,
-          typename accscalar_t,
-          typename IndexType,
-          int ADims,
-          int VEC>
-#if __CUDA_ARCH__ >= 350
-C10_LAUNCH_BOUNDS_2(256, 4)
-#elif defined (__HIP_PLATFORM_HCC__)
+    typename scalar_t,
+    typename accscalar_t,
+    typename IndexType,
+    int ADims,
+    int VEC>
+#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_2(256, 4)
 #endif
-__global__ void
-fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<scalar_t, IndexType> a,
-                         at::cuda::detail::TensorInfo<scalar_t, IndexType> b,
-                         at::cuda::detail::TensorInfo<uint8_t, IndexType> c,
-                         IndexType totalElements, accscalar_t p,
-                         PhiloxCudaState philox_args) {
+__global__ void fused_dropout_kernel_vec(
+    at::cuda::detail::TensorInfo<scalar_t, IndexType> a,
+    at::cuda::detail::TensorInfo<scalar_t, IndexType> b,
+    at::cuda::detail::TensorInfo<uint8_t, IndexType> c,
+    IndexType totalElements,
+    accscalar_t p,
+    PhiloxCudaState philox_args) {
   // make sure we don't break assumption that we can't have > 4 elements / thread
   static_assert(VEC <= 4, "Value of VEC must be in [2, 4]");
 
@@ -115,22 +114,21 @@ fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<scalar_t, IndexType> a,
 }
 
 template <
-          typename scalar_t,
-          typename accscalar_t,
-          typename IndexType,
-          int ADims,
-          int BDims=ADims>
-#if __CUDA_ARCH__ >= 350
-C10_LAUNCH_BOUNDS_2(256, 4)
-#elif defined (__HIP_PLATFORM_HCC__)
+    typename scalar_t,
+    typename accscalar_t,
+    typename IndexType,
+    int ADims,
+    int BDims = ADims>
+#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_2(256, 4)
 #endif
-__global__ void
-fused_dropout_kernel(cuda::detail::TensorInfo<scalar_t, IndexType> a,
-                     cuda::detail::TensorInfo<scalar_t, IndexType> b,
-                     cuda::detail::TensorInfo<uint8_t, IndexType> c,
-                     IndexType totalElements, accscalar_t p,
-                     PhiloxCudaState philox_args) {
+__global__ void fused_dropout_kernel(
+    cuda::detail::TensorInfo<scalar_t, IndexType> a,
+    cuda::detail::TensorInfo<scalar_t, IndexType> b,
+    cuda::detail::TensorInfo<uint8_t, IndexType> c,
+    IndexType totalElements,
+    accscalar_t p,
+    PhiloxCudaState philox_args) {
   auto seeds = at::cuda::philox::unpack(philox_args);
   IndexType idx = blockIdx.x * blockDim.x + threadIdx.x;
   curandStatePhilox4_32_10_t state;
@@ -177,7 +175,7 @@ fused_dropout_kernel(cuda::detail::TensorInfo<scalar_t, IndexType> a,
 }
 
 template<typename scalar_t, typename accscalar_t>
-void masked_scale_kernel(at::Tensor& ret, const at::Tensor src, const at::Tensor mask, accscalar_t scale){
+void masked_scale_kernel(at::Tensor& ret, const at::Tensor& src, const at::Tensor& mask, accscalar_t scale){
    auto iter = at::TensorIteratorConfig()
      .check_all_same_dtype(false)
      .add_output(ret)

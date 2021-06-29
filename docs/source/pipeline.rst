@@ -62,6 +62,16 @@ and pop Tensors in different layers of the model.
 .. autoclass:: torch.distributed.pipeline.sync.skip.skippable.pop
 .. autofunction:: torch.distributed.pipeline.sync.skip.skippable.verify_skippables
 
+Tutorials
+---------
+
+The following tutorials give a good overview of how to use the
+:class:`~torch.distributed.pipeline.sync.Pipe` API to train your models with the
+rest of the components that PyTorch provides:
+
+- `Training Transformer models using Pipeline Parallelism <https://pytorch.org/tutorials/intermediate/pipeline_tutorial.html>`__
+- `Training Transformer models using Distributed Data Parallel and Pipeline Parallelism <https://pytorch.org/tutorials/advanced/ddp_pipeline.html>`__
+
 Acknowledgements
 ----------------
 

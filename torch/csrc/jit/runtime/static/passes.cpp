@@ -4,10 +4,28 @@
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
+#include <torch/csrc/jit/runtime/static/ops.h>
 
 namespace torch {
 namespace jit {
+namespace {
+bool HasInplaceOp(Block* block, const AliasDb& alias_db) {
+  for (auto* node : block->nodes()) {
+    for (Block* sub_block : node->blocks()) {
+      return HasInplaceOp(sub_block, alias_db);
+    }
+    auto inputs = node->inputs();
+    // check if node modifies inputs (both inplace ops and certain out variants
+    // would qualify). For example: c = torch.sigmoid(b, out=b) is essentially
+    // the same as c = b.sigmoid_()
+    if (inputs.size() > 0 && alias_db.writesToAlias(node, {inputs[0]})) {
+      return true;
+    }
+  }
+  return false;
+}
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 void ConcatAddMulReplaceNaNClip(std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
   std::string pattern = R"IR(
@@ -61,6 +79,7 @@ void ConcatAddMulReplaceNaNClip(std::shared_ptr<torch::jit::Graph>& graph) {
   fuse.runOnGraph(graph);
 }
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 void CastedBatchOneHotLengths(std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
   std::string pattern = R"IR(
@@ -91,6 +110,7 @@ void CastedBatchOneHotLengths(std::shared_ptr<torch::jit::Graph>& graph) {
   fuse.runOnGraph(graph);
 }
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 void ConcatBatchMatMulBatchGather(std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
   std::string pattern = R"IR(
@@ -110,6 +130,7 @@ void ConcatBatchMatMulBatchGather(std::shared_ptr<torch::jit::Graph>& graph) {
   fuse.runOnGraph(graph);
 }
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 void ClipRangesGatherRangesLengthsToOffsets(
     std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
@@ -128,6 +149,7 @@ void ClipRangesGatherRangesLengthsToOffsets(
   fuse.runOnGraph(graph);
 }
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 void ClipRangesGather(std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
   // fuse without lengths-to-offsets
@@ -145,6 +167,7 @@ void ClipRangesGather(std::shared_ptr<torch::jit::Graph>& graph) {
   fuse.runOnGraph(graph);
 }
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 void ClipRangesGatherSigridHash(std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
   std::string pattern_1 = R"IR(
@@ -174,6 +197,7 @@ void ClipRangesGatherSigridHash(std::shared_ptr<torch::jit::Graph>& graph) {
   fuse.runOnGraph(graph);
 }
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 void ClipRangesGatherRangesSigridHash(
     std::shared_ptr<torch::jit::Graph>& graph) {
   std::string pattern_1 = R"IR(
@@ -206,6 +230,7 @@ void ClipRangesGatherRangesSigridHash(
   fuse.runOnGraph(graph);
 }
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 void PrecomputeMultiplierShiftForSigridHash(
     std::shared_ptr<torch::jit::Graph>& graph) {
   std::string pattern = R"IR(
@@ -224,6 +249,7 @@ void PrecomputeMultiplierShiftForSigridHash(
   fuse.runOnGraph(graph);
 }
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 void ClipRangesGatherRangesX2SigridHash(
     std::shared_ptr<torch::jit::Graph>& graph) {
   // Placeholder is a dummy op used to capture the first subgraph
@@ -265,6 +291,7 @@ void ClipRangesGatherRangesX2SigridHash(
   fuse.runOnGraph(graph);
 }
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 void ClipRangesGatherRangesX2SigridHashPrecompute(
     std::shared_ptr<torch::jit::Graph>& graph) {
   // Placeholder is a dummy op used to capture the first subgraph
@@ -306,6 +333,17 @@ void ClipRangesGatherRangesX2SigridHashPrecompute(
   fuse.runOnGraph(graph);
 }
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
+void SplitOutPrecomputeOpsForSparseNN(
+    std::shared_ptr<torch::jit::Graph>& graph) {
+#ifdef FBCODE_CAFFE2
+  PrecomputeMultiplierShiftForSigridHash(graph);
+  ConstantPropagation(graph);
+  ConstantPooling(graph);
+#endif
+}
+} // namespace
+
 void FuseInferenceOpsForSparseNN(std::shared_ptr<torch::jit::Graph>& graph) {
 #ifdef FBCODE_CAFFE2
   SplitOutPrecomputeOpsForSparseNN(graph);
@@ -327,37 +365,25 @@ void FuseInferenceOpsForSparseNN(std::shared_ptr<torch::jit::Graph>& graph) {
 #endif
 }
 
-void SplitOutPrecomputeOpsForSparseNN(
-    std::shared_ptr<torch::jit::Graph>& graph) {
-#ifdef FBCODE_CAFFE2
-  PrecomputeMultiplierShiftForSigridHash(graph);
-  ConstantPropagation(graph);
-  ConstantPooling(graph);
-#endif
-}
-
 TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
   m.def("static_runtime::pure_inputs() -> Tensor", []() -> at::Tensor {
     return at::randn({1});
   });
+  m.def("static_runtime::permute_copy(Tensor self, int[] dims) -> Tensor");
   m.def(
-      "static_runtime::permute_copy(Tensor self, int[] dims) -> Tensor",
-      [](const at::Tensor& self, ArrayRef<int64_t> dims) -> at::Tensor {
-        at::Tensor out = at::empty_like(self);
-        at::native::copy_(out, self);
-        return out.permute(dims);
-      });
+      "static_runtime::reshape_copy(Tensor(a) self, int[] shape) -> Tensor(a)");
   m.def(
-      "static_runtime::to_copy(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor",
-      [](const at::Tensor& self,
-         at::ScalarType dtype,
-         bool non_blocking,
-         bool copy,
-         c10::optional<c10::MemoryFormat> format) -> at::Tensor {
-        at::Tensor out = at::empty_like(self);
-        at::native::copy_(out, self);
-        return out.to(dtype, non_blocking, copy, format);
-      });
+      "static_runtime::flatten_copy.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)");
+  m.def(
+      "static_runtime::to_copy.prim_dtype(Tensor self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor");
+  m.def(
+      "static_runtime::to_copy.dtype(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor");
+  m.def(
+      "static_runtime::to_copy.other(Tensor self, Tensor other, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor");
+}
+
+bool HasInplaceOp(std::shared_ptr<Graph>& graph, const AliasDb& alias_db) {
+  return HasInplaceOp(graph->block(), alias_db);
 }
 
 void ReplaceWithCopy(std::shared_ptr<torch::jit::Graph>& graph) {
@@ -380,26 +406,77 @@ void ReplaceWithCopy(std::shared_ptr<torch::jit::Graph>& graph) {
   fake_input->node()->destroy();
 
   const std::map<c10::Symbol, c10::Symbol> supported = {
+#ifdef FBCODE_CAFFE2
       {c10::Symbol::fromQualString("aten::permute"),
        c10::Symbol::fromQualString("static_runtime::permute_copy")},
+#endif
       {c10::Symbol::fromQualString("aten::narrow"),
        c10::Symbol::fromQualString("aten::narrow_copy")},
-      {c10::Symbol::fromQualString("aten::to"),
+      {c10::Symbol::fromQualString("aten::reshape"),
+       c10::Symbol::fromQualString("static_runtime::reshape_copy")},
+      {c10::Symbol::fromQualString("aten::flatten"),
+       c10::Symbol::fromQualString("static_runtime::flatten_copy")}};
+
+  // for ops that have overloads, match the schema
+  const std::vector<std::pair<c10::FunctionSchema, c10::Symbol>> supported_schema = {
+      {torch::schema(
+           "aten::to.prim_dtype(Tensor(a) self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)"),
+       c10::Symbol::fromQualString("static_runtime::to_copy")},
+      {torch::schema(
+           "aten::to.dtype(Tensor(a) self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)"),
+       c10::Symbol::fromQualString("static_runtime::to_copy")},
+      {torch::schema(
+           "aten::to.other(Tensor(a) self, Tensor other, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)"),
        c10::Symbol::fromQualString("static_runtime::to_copy")}};
+
+  auto match_schema = [&supported_schema](
+                          const Node* node, c10::Symbol& out_matched_symbol) {
+    for (auto& schema : supported_schema) {
+      if (node->matches(schema.first)) {
+        out_matched_symbol = schema.second;
+        return true;
+      }
+    }
+    return false;
+  };
+
+  bool has_inplace_ops = HasInplaceOp(graph, db);
   std::vector<std::pair<Node*, Node*>> replacement;
   for (auto* n : graph->nodes()) {
-    if (!supported.count(n->kind())) {
+    c10::Symbol new_symbol;
+    if (supported.count(n->kind()) && opIsRegistered(supported.at(n->kind()))) {
+      new_symbol = supported.at(n->kind());
+    } else if (!match_schema(n, new_symbol)) {
       continue;
     }
     DCHECK(n->outputs().size() == 1);
-    auto* out = n->output();
-    if (out->uses().size() > 1) {
+
+    // In cases of having in-place ops in the graph, only replace the op with
+    // the copy version for ops with input with number of use == 1. Example:
+    //
+    // def forward(self, inp: Tensor, shape: List[int]):
+    //   a = inp + inp
+    //   b = a.reshape(shape)
+    //   c = b.sigmoid_()
+    //   d = c + c
+    //   e = a + a
+    //   f = b + b
+    //   return (d, e, f)
+    //
+    // b and c are aliases of a, sigmoid_ changes b, c, as well as a. e should
+    // equal to d in this case. If we replace reshape with the copy version, b
+    // and c are no longer aliases of a, the value of e would change as a
+    // result. To keep static runtime consistent with the jit interpreter, here
+    // we choose not to replace reshape with the copy version
+    auto* in = n->input(0);
+    if (has_inplace_ops && in->uses().size() > 1) {
       continue;
     }
+
+    auto* out = n->output();
     if (db.mayContainAlias({out}, graph->outputs())) {
       continue;
     }
-    auto new_symbol = supported.at(n->kind());
     auto* new_node = graph->create(new_symbol, n->outputs().size());
     new_node->insertBefore(n);
     for (auto* input : n->inputs()) {
@@ -413,6 +490,45 @@ void ReplaceWithCopy(std::shared_ptr<torch::jit::Graph>& graph) {
     auto* new_node = p.second;
     old_node->replaceAllUsesWith(new_node);
     old_node->destroy();
+  }
+}
+
+void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
+  auto nodes = graph->nodes();
+  for (auto it = nodes.begin(); it != nodes.end(); ++it) {
+    Node* node = *it;
+    const char* node_qual_string = node->kind().toQualString();
+    if (strcmp(node_qual_string, "fb::sigrid_transforms") == 0 ||
+        strcmp(node_qual_string, "fb::sigrid_transforms_torch_bind") == 0 ||
+        strcmp(node_qual_string, "fb::equally_split") == 0) {
+      const Value* value_out = node->outputs()[0];
+      if (value_out->uses().size() > 1) {
+        continue;
+      }
+
+      Node* list_unpack_node = value_out->uses()[0].user;
+      if (list_unpack_node->kind() != prim::ListUnpack) {
+        continue;
+      }
+
+      auto list_unpack_outputs = list_unpack_node->outputs();
+      if (list_unpack_outputs.empty()) {
+        continue;
+      }
+
+      // handle outputs
+      for (Value* out : list_unpack_outputs) {
+        Value* new_out = node->addOutput();
+        new_out->copyMetadata(out);
+        out->replaceAllUsesWith(new_out);
+      }
+
+      auto it_next = it;
+      ++it_next; // it_next points to list_unpack
+      it_next.destroyCurrent(); // remove list_unpack
+
+      node->eraseOutput(0);
+    }
   }
 }
 

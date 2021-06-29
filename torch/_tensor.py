@@ -3,7 +3,6 @@ import functools
 from numbers import Number
 from typing import Any, Dict, Optional, Tuple, Union
 import warnings
-import weakref
 
 import torch
 import torch._C as _C
@@ -12,7 +11,7 @@ from torch._namedtensor_internals import (
     unzip_namedshape, single_ellipsis_index, is_ellipsis)
 from torch.overrides import (
     has_torch_function, has_torch_function_unary, has_torch_function_variadic,
-    handle_torch_function)
+    handle_torch_function, get_default_nowrap_functions)
 import torch.utils.hooks as hooks
 
 
@@ -57,7 +56,11 @@ class Tensor(torch._C._TensorBase):
         if id(self) in memo:
             return memo[id(self)]
         with torch.no_grad():
-            if self.is_sparse or self.device.type == 'xla' or self.device.type == 'mlc':
+            # TODO: skipping storage copy is wrong for meta, as meta
+            # does accurate alias tracking; however, the code below
+            # doesn't work because of
+            # https://github.com/pytorch/pytorch/issues/47442
+            if self.is_sparse or self.device.type in ['xla', 'mlc', 'meta']:
                 new_tensor = self.clone()
             else:
                 new_storage = self.storage().__deepcopy__(memo)
@@ -82,8 +85,10 @@ class Tensor(torch._C._TensorBase):
                         self.requires_grad,
                         self._backward_hooks)
                 else:
-                    new_tensor = self.new()
+                    new_tensor = self.new_empty([])
                     new_tensor.set_(new_storage, self.storage_offset(), self.size(), self.stride())
+                    if self.is_conj():
+                        new_tensor = new_tensor.conj_physical()
                     new_tensor.requires_grad = self.requires_grad
             if self.grad is not None:
                 new_tensor.grad = self.grad.__deepcopy__(memo)
@@ -218,6 +223,13 @@ class Tensor(torch._C._TensorBase):
             in a user-specified CUDA stream context, see
             :ref:`Stream semantics of backward passes<bwd-cuda-stream-semantics>`.
 
+        .. note::
+
+            When ``inputs`` are provided and a given input is not a leaf,
+            the current implementation will call its grad_fn (though it is not strictly needed to get this gradients).
+            It is an implementation detail on which the user should not rely.
+            See https://github.com/pytorch/pytorch/pull/60521#issuecomment-867061780 for more details.
+
         Args:
             gradient (Tensor or None): Gradient w.r.t. the
                 tensor. If it is a tensor, it will be automatically converted
@@ -236,8 +248,7 @@ class Tensor(torch._C._TensorBase):
             inputs (sequence of Tensor): Inputs w.r.t. which the gradient will be
                 accumulated into ``.grad``. All other Tensors will be ignored. If not
                 provided, the gradient is accumulated into all the leaf Tensors that were
-                used to compute the attr::tensors. All the provided inputs must be leaf
-                Tensors.
+                used to compute the attr::tensors.
         """
         if has_torch_function_unary(self):
             return handle_torch_function(
@@ -324,6 +335,9 @@ class Tensor(torch._C._TensorBase):
 
     The result will never require gradient.
 
+    This method also affects forward mode AD gradients and the result will never
+    have forward mode AD gradients.
+
     .. note::
 
       Returned Tensor shares the same storage with the original one.
@@ -342,34 +356,10 @@ class Tensor(torch._C._TensorBase):
     detach_ = _C._add_docstr(_C._TensorBase.detach_, r"""
     Detaches the Tensor from the graph that created it, making it a leaf.
     Views cannot be detached in-place.
+
+    This method also affects forward mode AD gradients and the result will never
+    have forward mode AD gradients.
     """)
-
-    def retain_grad(self):
-        r"""Enables .grad attribute for non-leaf Tensors."""
-        if has_torch_function_unary(self):
-            return handle_torch_function(Tensor.retain_grad, (self,), self)
-        if not self.requires_grad:
-            raise RuntimeError("can't retain_grad on Tensor that has requires_grad=False")
-        if self.is_leaf:  # no-op for leaves
-            return
-        if hasattr(self, 'retains_grad'):
-            return
-        weak_self = weakref.ref(self)
-
-        def retain_grad_hook(grad):
-            var = weak_self()
-            if var is None:
-                return
-            if var._grad is None:
-                if grad.is_sparse:
-                    var._grad = grad.clone()
-                else:
-                    var._grad = grad.clone(memory_format=torch.contiguous_format)
-            else:
-                var._grad = var._grad + grad
-
-        self.register_hook(retain_grad_hook)
-        self.retains_grad = True
 
     def is_shared(self):
         r"""Checks if tensor is in shared memory.
@@ -414,10 +404,10 @@ class Tensor(torch._C._TensorBase):
 
         if not torch._jit_internal.is_scripting():
             if self.requires_grad:
-                if not (self.size(-2) == self.size(-1) and self.dtype.is_floating_point):
+                if not (self.size(-2) == self.size(-1) and (self.dtype.is_floating_point) or self.is_complex):
                     raise ValueError(
                         'lu.backward works only with batches of squared full-rank matrices'
-                        ' of floating types.'
+                        ' of floating or complex types.'
                     )
 
                 from torch._autograd_functions import _LU
@@ -528,11 +518,13 @@ class Tensor(torch._C._TensorBase):
             )
         return torch.unique_consecutive(self, return_inverse=return_inverse, return_counts=return_counts, dim=dim)
 
+    @_wrap_type_error_to_not_implemented
     def __rsub__(self, other):
         if has_torch_function_variadic(self, other):
             return handle_torch_function(Tensor.__rsub__, (self, other), self, other)
         return _C._VariableFunctions.rsub(self, other)
 
+    @_wrap_type_error_to_not_implemented
     def __rdiv__(self, other):
         if has_torch_function_variadic(self, other):
             return handle_torch_function(Tensor.__rdiv__, (self, other), self, other)
@@ -541,7 +533,13 @@ class Tensor(torch._C._TensorBase):
     __rtruediv__ = __rdiv__
     __itruediv__ = _C._TensorBase.__idiv__
 
-    __pow__ = _C._TensorBase.pow
+    __pow__ = _wrap_type_error_to_not_implemented(_C._TensorBase.pow)
+
+    @_wrap_type_error_to_not_implemented
+    def __rmod__(self, other):
+        if has_torch_function_variadic(self, other):
+            return handle_torch_function(Tensor.__rmod__, (self, other), self, other)
+        return torch.remainder(other, self)
 
     def __format__(self, format_spec):
         if has_torch_function_unary(self):
@@ -568,6 +566,21 @@ class Tensor(torch._C._TensorBase):
     def __rfloordiv__(self, other):
         return torch.floor_divide(other, self)
 
+    @_wrap_type_error_to_not_implemented
+    def __rlshift__(self, other):
+        return torch.bitwise_left_shift(other, self)
+
+    @_wrap_type_error_to_not_implemented
+    def __rrshift__(self, other):
+        return torch.bitwise_right_shift(other, self)
+
+    @_wrap_type_error_to_not_implemented
+    def __rmatmul__(self, other):
+        if has_torch_function_variadic(self, other):
+            return handle_torch_function(Tensor.__rmatmul__, (self, other), self, other)
+        return torch.matmul(other, self)
+
+    __pos__ = _C._TensorBase.positive
     __neg__ = _C._TensorBase.neg
     __abs__ = _C._TensorBase.abs
 
@@ -576,6 +589,11 @@ class Tensor(torch._C._TensorBase):
             return handle_torch_function(Tensor.__len__, (self,), self)
         if self.dim() == 0:
             raise TypeError("len() of a 0-d tensor")
+        if torch._C._get_tracing_state():
+            warnings.warn('Using len to get tensor shape might cause the trace to be incorrect. '
+                          'Recommended usage would be tensor.shape[0]. '
+                          'Passing a tensor of different shape might lead to errors or silently give '
+                          'incorrect results.', category=torch.jit.TracerWarning, stacklevel=2)
         return self.shape[0]
 
     def __iter__(self):
@@ -585,8 +603,8 @@ class Tensor(torch._C._TensorBase):
         # (e.g., if you zip(*hiddens), the eager map will force all the
         # indexes of hiddens[0] before hiddens[1], while the generator
         # map will interleave them.)
-        if has_torch_function_unary(self):
-            return handle_torch_function(Tensor.__iter__, (self,), self)
+        # NB: We have intentionally skipped __torch_function__ dispatch here.
+        # See gh-54457
         if self.dim() == 0:
             raise TypeError('iteration over a 0-d tensor')
         if torch._C._get_tracing_state():
@@ -904,6 +922,44 @@ class Tensor(torch._C._TensorBase):
         # See Note [rename_ / rename API]
         return update_names(self, names, rename_map, inplace=False)
 
+    def to_sparse_csr(self):
+        """ Convert a tensor to compressed row storage format. Only works with 2D tensors.
+
+        Examples::
+
+            >>> dense = torch.randn(5, 5)
+            >>> sparse = dense.to_sparse_csr()
+            >>> sparse._nnz()
+            25
+
+        """
+        shape = self.size()
+        fill_value = 0
+        if len(shape) != 2:
+            raise RuntimeError("Only 2D tensors can be converted to the CSR format but got shape: ", shape)
+
+        if self.is_sparse:
+            coalesced_self = self.coalesce()
+            row_indices = coalesced_self.indices()[0]
+            ro = [0]
+            i = 0
+            for irow in range(self.shape[0]):
+                while i < row_indices.size()[0] and row_indices[i] == irow:
+                    i += 1
+                ro.append(i)
+            device = coalesced_self.values().device
+            crow_indices = torch.tensor(ro, dtype=row_indices.dtype, device=device)
+            return torch.sparse_csr_tensor(crow_indices,
+                                           coalesced_self.indices()[1].contiguous(),
+                                           coalesced_self.values(),
+                                           size=coalesced_self.shape,
+                                           dtype=coalesced_self.dtype,
+                                           device=device)
+        elif self.is_sparse_csr:
+            return self
+        else:
+            return self.to_sparse().to_sparse_csr()
+
     def _update_names(self, names, inplace):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor._update_names, (self,), self, names, inplace)
@@ -926,12 +982,6 @@ class Tensor(torch._C._TensorBase):
             # TODO mypy doesn't support @property, see: https://github.com/python/mypy/issues/6185
             return handle_torch_function(Tensor.grad.__get__, (self,), self)  # type: ignore[attr-defined]
 
-        if self.requires_grad and not hasattr(self, "retains_grad") and not self.is_leaf and self._grad is None:
-            warnings.warn("The .grad attribute of a Tensor that is not a leaf Tensor is being accessed. Its .grad "
-                          "attribute won't be populated during autograd.backward(). If you indeed want the gradient "
-                          "for a non-leaf Tensor, use .retain_grad() on the non-leaf Tensor. If you access the "
-                          "non-leaf Tensor by mistake, make sure you access the leaf Tensor instead. See "
-                          "github.com/pytorch/pytorch/pull/30531 for more information.", stacklevel=2)
         return self._grad
 
     @grad.setter
@@ -971,16 +1021,18 @@ class Tensor(torch._C._TensorBase):
 
         with _C.DisableTorchFunction():
             ret = func(*args, **kwargs)
-            return _convert(ret, cls)
+            if func in get_default_nowrap_functions():
+                return ret
+            else:
+                return _convert(ret, cls)
 
     __module__ = 'torch'
-
 
 def _convert(ret, cls):
     if cls is Tensor:
         return ret
 
-    if isinstance(ret, Tensor):
+    if isinstance(ret, Tensor) and not isinstance(ret, cls):
         ret = ret.as_subclass(cls)
 
     if isinstance(ret, (tuple, list)):

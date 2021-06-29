@@ -11,7 +11,11 @@ void assertTensorEqualsWithType(
     float /* unused */) {
   CAFFE_ENFORCE_EQ(tensor1.sizes(), tensor2.sizes());
   for (auto idx = 0; idx < tensor1.numel(); ++idx) {
-    CAFFE_ENFORCE_EQ(tensor1.data<T>()[idx], tensor2.data<T>()[idx]);
+    CAFFE_ENFORCE_EQ(
+        tensor1.data<T>()[idx],
+        tensor2.data<T>()[idx],
+        "Mismatch at index ",
+        idx);
   }
 }
 

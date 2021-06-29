@@ -15,7 +15,7 @@ from torch.nn import Module
 
 
 ScriptMethodStub = collections.namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
-PropertyStub = collections.namedtuple('Property', ('resolution_callback', 'def_'))
+PropertyStub = collections.namedtuple('PropertyStub', ('resolution_callback', 'def_'))
 
 
 # TODO: there should be a more principled way of doing this.
@@ -198,7 +198,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
         added_names.add(name)
 
     # populate constants_set
-    constants_set = getattr(nn_module, "__constants__", set())
+    constants_set = set(getattr(nn_module, "__constants__", ()))
 
     # Constants annotated via `Final[T]` rather than being added to `__constants__`
     for name, ann in class_annotations.items():
@@ -393,7 +393,7 @@ def get_module_concrete_type(nn_module, share_types=True):
 
     return concrete_type
 
-def create_script_module(nn_module, stubs_fn, share_types=True):
+def create_script_module(nn_module, stubs_fn, share_types=True, is_tracing=False):
     """
     Creates a new ScriptModule from an nn.Module
 
@@ -404,11 +404,16 @@ def create_script_module(nn_module, stubs_fn, share_types=True):
             NOTE: Only set to False this when we cannot guarantee type sharing will work
                 correctly. This only happens today for traced modules, where the same
                 module can produce different traced methods depending on the inputs.
+        is_tracing: Whether this function is called during tracing or scripting. If tracing,
+                we don't need to do AttributeTypeIsSupportedChecker because all the unsupported
+                attributes will be baked as constant in the tracing graph. In addition,
+                this check significantly slows down the traced modules when the module size is big.
     """
     assert not isinstance(nn_module, torch.jit.RecursiveScriptModule)
     check_module_initialized(nn_module)
     concrete_type = get_module_concrete_type(nn_module, share_types)
-    AttributeTypeIsSupportedChecker().check(nn_module)
+    if not is_tracing:
+        AttributeTypeIsSupportedChecker().check(nn_module)
     return create_script_module_impl(nn_module, concrete_type, stubs_fn)
 
 def create_script_module_impl(nn_module, concrete_type, stubs_fn):
@@ -520,7 +525,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         # Wrap the original to propagate docstrings and such.
         # TODO: we don't currently do this functions that are recursively
         # compiled, we should.
-        wrapped_script_method = functools.wraps(method_stub.original_method)(script_method)  # type: ignore
+        wrapped_script_method = functools.wraps(method_stub.original_method)(script_method)
 
         # Add the methods to the script_module directly. This ensures they will
         # be found first when `name` is looked up (as opposed to the stubs or
@@ -535,7 +540,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         # Setter is optional, so it may not exist.
         setter_name = property_stub.def_.setter_name()
         fset = cpp_module._get_method(setter_name.name) if setter_name else None
-        script_module.__dict__[property_name] = property(property_name, fget, fset)  # type: ignore
+        script_module.__dict__[property_name] = property(property_name, fget, fset)  # type: ignore[arg-type]
 
     # copy over python methods to script module if they aren't defined on the script module
     # this is currently an internal api used only on module containers
@@ -847,7 +852,7 @@ def lazy_bind(concrete_type, unbound_method):
         return method(*args)
 
     # make the lazy binding method "look like" the original method
-    lazy_binding_method.original_fn = unbound_method  # type: ignore
+    lazy_binding_method.original_fn = unbound_method  # type: ignore[attr-defined]
     lazy_binding_method.__name__ = unbound_method.__name__
     torch._jit_internal.copy_torchscript_modifier(unbound_method, lazy_binding_method)
 

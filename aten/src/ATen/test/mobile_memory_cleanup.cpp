@@ -7,6 +7,7 @@ using namespace torch::jit;
 
 #ifdef USE_XNNPACK
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemoryCleanUp, NoErrorWithoutRelease) {
   Module m("m");
   m.register_parameter("weight", torch::ones({20, 1, 5, 5}), false);
@@ -18,9 +19,11 @@ TEST(MemoryCleanUp, NoErrorWithoutRelease) {
   m.eval();
   auto m_optimized = optimizeForMobile(m);
   std::stringstream ss;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   EXPECT_NO_THROW(m_optimized.save(ss));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemoryCleanUp, UnpackError) {
   at::globalContext().setReleaseWeightsWhenPrepacking(true);
   Module m("m");
@@ -33,6 +36,7 @@ TEST(MemoryCleanUp, UnpackError) {
   m.eval();
   auto m_optimized = optimizeForMobile(m);
   std::stringstream ss;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   EXPECT_ANY_THROW(m_optimized.save(ss));
 }
 

@@ -74,6 +74,15 @@ void ComputeMulGradient(
     const float* B,
     float* dA,
     float* dB) {
+  if (dA != nullptr) {
+    CAFFE_ENFORCE_NE(dA, dB, "Outputs dA and dB should point to distinct blobs");
+  }
+  if (dC == dA) {
+    // Ensure operation can be performed in-place.
+    // See below comment in `MulFunctor::Backward`.
+    std::swap(A, B);
+    std::swap(dA, dB);
+  }
   for (int i = 0; i < size; ++i) {
     dA[i] = dC[i] * B[i];
     dB[i] = dC[i] * A[i];
@@ -94,8 +103,22 @@ bool MulFunctor<CPUContext>::Backward(
     TGrad* dA,
     TGrad* dB,
     CPUContext* context) const {
+  if (dA != nullptr) {
+    CAFFE_ENFORCE_NE(dA, dB, "Outputs dA and dB should point to distinct blobs");
+  }
   if (A_dims == B_dims) {
     const auto size = c10::multiply_integers(A_dims);
+    if (dC == dA) {
+      // A, B, and dC are inputs (dC is the output of the previous gradient op
+      // in the dag), and dA and dB are outputs. If the op is performed
+      // in-place, either dA or dB could alias dC. In the dC == dA case, we need
+      // to make sure we don't overwrite dC when we write to dA, so swap the
+      // inputs to avoid clobbering dC. Semantically this is equivalent with
+      // writing to dB first. The other case (dC == dB) is already safe because
+      // we are writing to dA first.
+      std::swap(A, B);
+      std::swap(dA, dB);
+    }
     math::Mul(size, dC, B, dA, context);
     math::Mul(size, dC, A, dB, context);
     return true;
@@ -122,6 +145,7 @@ bool MulFunctor<CPUContext>::Backward(
       C_broadcast_dims.cbegin(),
       C_broadcast_dims.cbegin() + ndim,
       1,
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       std::multiplies<int>());
   if (C_size == 0) {
     const auto A_size = c10::multiply_integers(A_dims);
@@ -261,6 +285,7 @@ template bool MulFunctor<CPUContext>::Backward<int64_t, int64_t, int64_t>(
     int64_t* dB,
     CPUContext* context) const;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     MulGradient,
     BinaryElementwiseGradientOp<
@@ -284,6 +309,7 @@ class GetMulGradient final : public GradientMakerBase {
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Mul, GetMulGradient);
 
 } // namespace caffe2

@@ -24,8 +24,10 @@ OpSchema::Cost CostInferenceForSpatialBN(
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SpatialBN, SpatialBNOp<CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SpatialBN)
     .NumInputs({5, 7})
     .NumOutputs({1, 5})
@@ -85,6 +87,7 @@ Github Links:
         "*(type: float; default: 1e-5)* The epsilon value to use to avoid division by zero.")
     .Arg(
         "order",
+        // NOLINTNEXTLINE(modernize-raw-string-literal)
         "*(type: string; default: \"NCHW\")* Specifies the order of the input data blob, where $N$ is batch size, $C$ is number of channels, $H$ is spatial height, and $W$ is spatial width. The only other valid option is \"NHWC\".")
     .Arg(
         "momentum",

@@ -18,4 +18,26 @@ function for details.
 Functions
 -----------------------
 
+.. autofunction:: entr
+.. autofunction:: erf
+.. autofunction:: erfc
+.. autofunction:: erfcx
+.. autofunction:: erfinv
+.. autofunction:: expit
+.. autofunction:: expm1
+.. autofunction:: exp2
 .. autofunction:: gammaln
+.. autofunction:: digamma
+.. autofunction:: psi
+.. autofunction:: i0
+.. autofunction:: i0e
+.. autofunction:: i1
+.. autofunction:: i1e
+.. autofunction:: logit
+.. autofunction:: log1p
+.. autofunction:: ndtr
+.. autofunction:: ndtri
+.. autofunction:: round
+.. autofunction:: sinc
+.. autofunction:: xlog1py
+.. autofunction:: zeta

@@ -146,14 +146,17 @@ void ROIAlignBackwardFeature(
 
     for (int iy = 0; iy < roi_bin_grid_h; iy++) {
       const T y = roi_start_h + ph * bin_size_h +
+          // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
           static_cast<T>(iy + .5f) * bin_size_h /
               static_cast<T>(roi_bin_grid_h); // e.g., 0.5, 1.5
       for (int ix = 0; ix < roi_bin_grid_w; ix++) {
         const T x = roi_start_w + pw * bin_size_w +
+            // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
             static_cast<T>(ix + .5f) * bin_size_w /
                 static_cast<T>(roi_bin_grid_w);
 
         T w1, w2, w3, w4;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         int x_low, x_high, y_low, y_high;
 
         bilinear_interpolate_gradient(
@@ -232,10 +235,12 @@ C10_EXPORT bool RoIAlignGradientOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(RoIAlignGradient, RoIAlignGradientOp<float, CPUContext>);
 
 // Input: X, rois, dY (aka "gradOutput");
 // Output: dX (aka "gradInput")
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RoIAlignGradient)
     .NumInputs(3)
     .NumOutputs(1)
@@ -259,6 +264,7 @@ class GetRoIAlignGradient : public GradientMakerBase {
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(RoIAlign, GetRoIAlignGradient);
 
 template <typename T>

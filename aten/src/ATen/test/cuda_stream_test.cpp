@@ -2,7 +2,6 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAEvent.h>
-#include <ATen/cuda/CUDAMultiStreamGuard.h>
 #include <c10/core/Event.h>
 #include <c10/core/impl/InlineEvent.h>
 #include <c10/cuda/CUDAGuard.h>
@@ -144,14 +143,6 @@ TEST(TestStream, CUDAGuardTest) {
   ASSERT_EQ_CUDA(at::cuda::current_device(), 0);
 
   // -- end setup
-
-  // Test that all original streams are recorded.
-  {
-    at::cuda::CUDAMultiStreamGuard guard;
-    ASSERT_EQ_CUDA(guard.original_streams().size(), at::cuda::getNumGPUs());
-    ASSERT_EQ_CUDA(guard.original_streams()[0], streams0[0]);
-    ASSERT_EQ_CUDA(guard.original_streams()[1], streams1[0]);
-  }
 
   // Setting a stream changes the current device and the stream on that device
   {

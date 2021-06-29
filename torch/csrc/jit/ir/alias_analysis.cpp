@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/ir/alias_analysis.h>
 
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/operator.h>
@@ -207,7 +208,7 @@ AliasDb::AliasDb(std::shared_ptr<Graph> graph, bool isFrozen)
   writeRegistry_ = nullptr;
 
   // initialize the write cache
-  writtenToLocationsIndex_ = buildWrittenToLocationsIndex();
+  buildWrittenToLocationsIndex();
   GRAPH_DEBUG(toString());
 }
 
@@ -435,7 +436,7 @@ std::string AliasDb::toGraphviz() const {
   dot << toString();
   dot << "*/\n";
 
-  dot << "digraph fusion_ir {\n"
+  dot << "digraph alias_db {\n"
       << "  rankdir=LR\n"
       << "  node [shape=rect, color=gray];\n"
       << "  edge [color=black];\n";
@@ -609,7 +610,7 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::TypeCheck:
     case prim::RequiresGradCheck: {
       auto num_inputs = node->inputs().size();
-      for (size_t i = 0; i < num_inputs; i++) {
+      for (const auto i : c10::irange(num_inputs)) {
         makePointerTo(node->outputs().at(i), node->inputs().at(i));
       }
       return;
@@ -692,7 +693,7 @@ void AliasDb::analyzeImpl(Node* node) {
   // Bind the schema's "formal" alias annotation to the actual values those
   // schema arguments represent
   std::unordered_map<Symbol, Value*> formalToActual;
-  for (size_t i = 0; i < schema.arguments().size(); i++) {
+  for (const auto i : c10::irange(schema.arguments().size())) {
     const auto& formal = schema.arguments()[i].alias_info();
     const auto& actualValue = node->inputs().at(i);
     // Skip if there's no alias annotation
@@ -743,7 +744,7 @@ void AliasDb::analyzeImpl(Node* node) {
   }
 
   // Use the formal-actual mapping to give aliases to the outputs
-  for (size_t i = 0; i < schema.returns().size(); i++) {
+  for (const auto i : c10::irange(schema.returns().size())) {
     const auto actual = node->outputs().at(i);
     const auto& formal = schema.returns()[i].alias_info();
     if (!formal) {
@@ -820,7 +821,7 @@ void AliasDb::analyzeIf(Node* node) {
   analyze(trueBlock);
   analyze(falseBlock);
 
-  for (size_t i = 0; i < node->outputs().size(); i++) {
+  for (const auto i : c10::irange(node->outputs().size())) {
     const auto nodeOutput = node->outputs()[i];
 
     const auto trueOutput = trueBlock->outputs().at(i);
@@ -869,7 +870,7 @@ void AliasDb::analyzeSubgraph(Node* node) {
   // subgraph block.
   TORCH_INTERNAL_ASSERT(
       subgraphBlock->outputs().size() >= node->outputs().size());
-  for (size_t i = 0; i < node->outputs().size(); i++) {
+  for (const auto i : c10::irange(node->outputs().size())) {
     makePointerTo(node->outputs()[i], subgraphBlock->outputs()[i]);
   }
 }
@@ -1186,7 +1187,7 @@ bool AliasDb::mayContainAlias(
 // Make each value in the `from` list point to its partner in the `to` list
 void AliasDb::mapAliases(at::ArrayRef<Value*> from, at::ArrayRef<Value*> to) {
   TORCH_INTERNAL_ASSERT(to.size() == from.size());
-  for (size_t i = 0; i < to.size(); i++) {
+  for (const auto i : c10::irange(to.size())) {
     makePointerTo(from[i], to[i]);
   }
 }
@@ -1327,6 +1328,7 @@ class AliasDb::WorkingSet {
   // Add `n` to the working set
   void add(Node* n) {
     nodes_.push_back(n);
+    node_to_index_[n] = nodes_.size() - 1;
     for (const auto user : getUsersSameBlock(n)) {
       users_.insert(user);
     }
@@ -1406,8 +1408,8 @@ class AliasDb::WorkingSet {
     if (mover_ && users.count(mover_)) {
       return true;
     }
-    return std::any_of(nodes_.begin(), nodes_.end(), [&](Node* node) {
-      return users.count(node) != 0;
+    return std::any_of(users.begin(), users.end(), [&](Node* user) {
+      return node_to_index_.find(user) != node_to_index_.end();
     });
   }
 
@@ -1452,6 +1454,10 @@ class AliasDb::WorkingSet {
 
   const AliasDb& aliasDb_;
   std::vector<Node*> nodes_;
+  // Extra data structure for nodes for faster look up
+  // Since the tryMove method is used a lot, we want to
+  // make it as fast as possible.
+  std::unordered_map<Node*, int64_t> node_to_index_;
 
   // Mover dependencies. We track these separately since we may erase the mover
   // from the working set.
@@ -1493,6 +1499,7 @@ bool AliasDb::tryMove(
   // dependencies
   WorkingSet workingSet(toMove, *this);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int direction;
   if (toMove->isAfter(movePoint)) {
     direction = kPrevDirection;
@@ -1689,13 +1696,13 @@ c10::optional<Element*> AliasDb::setWildcard(const Value* v) {
   return *maybe_wildcardElement;
 }
 
-MemoryLocations AliasDb::buildWrittenToLocationsIndex() const {
+void AliasDb::buildWrittenToLocationsIndex() {
   MemoryLocations ret;
   for (const auto& pr : *writeIndex_) {
     const auto& writtenLocs = pr.second;
     ret |= writtenLocs;
   }
-  return ret;
+  writtenToLocationsIndex_ = ret;
 }
 
 void Lint(const AliasDb* db) {

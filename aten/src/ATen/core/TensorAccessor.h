@@ -96,6 +96,7 @@ public:
       const index_t* strides_)
       : TensorAccessorBase<T, 1, PtrTraits, index_t>(data_,sizes_,strides_) {}
   C10_HOST_DEVICE T & operator[](index_t i) {
+    // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
     return this->data_[this->strides_[0]*i];
   }
   C10_HOST_DEVICE const T & operator[](index_t i) const {

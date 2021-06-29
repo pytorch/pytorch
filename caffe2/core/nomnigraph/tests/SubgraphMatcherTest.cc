@@ -19,6 +19,7 @@ using TestMatchPredicate = MatchPredicate<TestGraph>;
 
 // Have just one TestMatchGraph in the tests to make it less verbose to create
 // the match graphs.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TestMatchGraph graph;
 // Call reset before creating a new TestMatchGraph.
 void reset() {
@@ -228,6 +229,7 @@ bool isSubgraphMatch(
 using namespace nom::matcher;
 
 // Simple test cases for node matching criteria.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SubgraphMatcher, IsNodeMatch) {
   TestGraph g;
   auto n1 = g.createNode("Hello");
@@ -241,6 +243,7 @@ TEST(SubgraphMatcher, IsNodeMatch) {
 }
 
 // Test subtree matching with a simple tree graph.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SubgraphMatcher, IsSubtreeMatch) {
   TestGraph graph;
   auto n1 = graph.createNode("1");
@@ -295,6 +298,7 @@ TEST(SubgraphMatcher, IsSubtreeMatch) {
 }
 
 // Test subtree matching in which * (repeated) matching of children is allowed.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SubgraphMatcher, IsSubtreeMatchRepeated) {
   TestGraph graph;
   auto n1 = graph.createNode("1");
@@ -382,6 +386,7 @@ TEST(SubgraphMatcher, IsSubtreeMatchRepeated) {
   // clang-format on
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SubgraphMatcher, DagMatching) {
   reset();
 
@@ -455,6 +460,7 @@ TEST(SubgraphMatcher, DagMatching) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SubgraphMatcher, DagMatchingMultiEdges) {
   reset();
 
@@ -490,6 +496,7 @@ TEST(SubgraphMatcher, DagMatchingMultiEdges) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SubgraphMatcher, DagMatchingRandomLargeGraph) {
   reset();
   // clang-format off
@@ -534,6 +541,7 @@ TEST(SubgraphMatcher, DagMatchingRandomLargeGraph) {
   for (int i = 0; i < numPatterns; i++) {
     std::vector<int> nodeIdx;
     for (int k = 0; k < 5; k++) {
+      // NOLINTNEXTLINE(performance-inefficient-vector-operation)
       nodeIdx.emplace_back(random.nextInt() % numNodes);
     }
     graph.createEdge(nodes[nodeIdx[0]], nodes[nodeIdx[1]]);
@@ -553,6 +561,7 @@ TEST(SubgraphMatcher, DagMatchingRandomLargeGraph) {
   EXPECT_EQ(countMatch, 1072);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SubgraphMatcher, IsSubtreeMatchRealistic) {
   reset();
   auto graph = DataFlowTestGraph();
@@ -566,6 +575,7 @@ TEST(SubgraphMatcher, IsSubtreeMatchRealistic) {
   EXPECT_TRUE(isSubgraphMatch(graph.opG, subtree));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SubgraphMatcher, ReplaceGraphRealistic) {
   reset();
   auto testGraph = DataFlowTestGraph();
@@ -598,8 +608,11 @@ TEST(SubgraphMatcher, ReplaceGraphRealistic) {
 
   // Test that the graph is transformed as expected.
   EXPECT_EQ(nodes.size(), testGraph.numInputs + 4);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   TestGraph::NodeRef opFused;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   TestGraph::NodeRef dataI;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   TestGraph::NodeRef dataOut;
   for (auto node : nodes) {
     if (node->data() == "opFused") {

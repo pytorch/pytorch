@@ -18,7 +18,7 @@ namespace {
 
 // Check if pytorch is compiled with MIOpen.
 bool use_miopen(const at::Tensor& input, const double dropout_state) {
-    bool is_miopen_acceptable = (input.scalar_type() == at::kFloat) &&
+    bool is_miopen_acceptable = ((input.scalar_type() == at::kFloat)|| (input.scalar_type() == at::kHalf)) &&
                                 (detail::getCUDAHooks().compiledWithMIOpen()) &&
                                 (input.is_cuda()) &&
                                 (dropout_state == 0.0) &&
@@ -165,9 +165,13 @@ struct QuantizedCellParams : public CellParamsBase {
         packed_hh(std::move(_packed_hh)),
         col_offsets_ih(std::move(_col_offsets_ih)),
         col_offsets_hh(std::move(_col_offsets_hh)),
+        // NOLINTNEXTLINE(performance-move-const-arg)
         scale_ih(std::move(_scale_ih)),
+        // NOLINTNEXTLINE(performance-move-const-arg)
         scale_hh(std::move(_scale_hh)),
+        // NOLINTNEXTLINE(performance-move-const-arg)
         zero_point_ih(std::move(_zero_point_ih)),
+        // NOLINTNEXTLINE(performance-move-const-arg)
         zero_point_hh(std::move(_zero_point_hh)) {}
 
   const Tensor w_ih;
@@ -212,8 +216,11 @@ struct QuantizedCellParams : public CellParamsBase {
                                                zero_point_hh.toLong()};
     return CellParamsSerializationType(
         "quantized",
+        // NOLINTNEXTLINE(performance-move-const-arg)
         std::move(tensors_to_serialize),
+        // NOLINTNEXTLINE(performance-move-const-arg)
         std::move(doubles_to_serialize),
+        // NOLINTNEXTLINE(performance-move-const-arg)
         std::move(longs_to_serialize),
         {});
   }
@@ -247,9 +254,13 @@ struct QuantizedCellParams : public CellParamsBase {
         /*packed_hh=*/std::move(packed_hh),
         /*col_offsets_ih=*/std::move(col_offsets_ih),
         /*col_offsets_hh=*/std::move(col_offsets_hh),
+        // NOLINTNEXTLINE(performance-move-const-arg)
         /*scale_ih=*/std::move(scale_ih),
+        // NOLINTNEXTLINE(performance-move-const-arg)
         /*scale_hh=*/std::move(scale_hh),
+        // NOLINTNEXTLINE(performance-move-const-arg)
         /*zero_point_ih=*/std::move(zero_point_ih),
+        // NOLINTNEXTLINE(performance-move-const-arg)
         /*zero_point_hh=*/std::move(zero_point_hh));
   }
 };
@@ -284,9 +295,13 @@ c10::intrusive_ptr<CellParamsBase> make_quantized_cell_params(
       /*packed_hh=*/std::move(packed_hh),
       /*col_offsets_ih=*/std::move(col_offsets_ih),
       /*col_offsets_hh=*/std::move(col_offsets_hh),
+      // NOLINTNEXTLINE(performance-move-const-arg)
       /*scale_ih=*/std::move(scale_ih),
+      // NOLINTNEXTLINE(performance-move-const-arg)
       /*scale_hh=*/std::move(scale_hh),
+      // NOLINTNEXTLINE(performance-move-const-arg)
       /*zero_point_ih=*/std::move(zero_point_ih),
+      // NOLINTNEXTLINE(performance-move-const-arg)
       /*zero_point_hh=*/std::move(zero_point_hh));
 }
 
@@ -365,9 +380,11 @@ struct QuantizedCellParamsDynamic : public CellParamsBase {
     // reduce_range parameter is serialized along with the int field values.
     return CellParamsSerializationType(
         "quantized_dynamic",
+        // NOLINTNEXTLINE(performance-move-const-arg)
         std::move(tensors_to_serialize),
         {},
         {reduce_range_},
+        // NOLINTNEXTLINE(performance-move-const-arg)
         std::move(packed_params_to_serialize));
   }
   static c10::intrusive_ptr<CellParamsBase> __setstate__(
@@ -444,6 +461,7 @@ struct QuantizedCellParamsFP16 : public CellParamsBase {
         packed_params_to_serialize{packed_ih, packed_hh};
 
     return CellParamsSerializationType(
+        // NOLINTNEXTLINE(performance-move-const-arg)
         "quantized_fp16", {}, {}, {}, std::move(packed_params_to_serialize));
   }
   static c10::intrusive_ptr<CellParamsBase> __setstate__(
@@ -469,6 +487,7 @@ c10::intrusive_ptr<CellParamsBase> make_quantized_cell_params_fp16(
 static std::unordered_map<
     std::string,
     c10::intrusive_ptr<CellParamsBase> (*)(CellParamsSerializationType)>
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     cell_params_deserializers = {
         {"quantized", &QuantizedCellParams::__setstate__},
         {"quantized_dynamic", &QuantizedCellParamsDynamic::__setstate__},
@@ -710,6 +729,7 @@ struct Cell {
   using hidden_type = hidden_type_tmpl;
   using cell_params = cell_params_tmpl;
 
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   virtual ~Cell() {} // This is really dumb, but enables projects with
                      // -Wnon-virtual-dtor to compile...
 
@@ -826,6 +846,7 @@ template<typename io_type, typename hidden_type, typename param_type>
 struct Layer {
   using output_type = LayerOutput<io_type, hidden_type>;
 
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   virtual ~Layer() {} // This is really dumb, but enables projects with
                       // -Wnon-virtual-dtor to compile...
   virtual output_type operator()(
@@ -865,10 +886,12 @@ struct FullLayer : Layer<Tensor, hidden_type, cell_params> {
       const auto inputs_w = params.linear_ih(inputs);
       auto unstacked_output =
           (*this)(inputs_w.unbind(0), input_hidden, params, true);
+      TORCH_CHECK(unstacked_output.outputs.size()>0, "Expected sequence length to be larger than 0 in RNN");
       return {at::stack(unstacked_output.outputs, 0),
               unstacked_output.final_hidden};
     }
     auto unstacked_output = (*this)(inputs.unbind(0), input_hidden, params);
+    TORCH_CHECK(unstacked_output.outputs.size()>0, "Expected sequence length to be larger than 0 in RNN");
     return {at::stack(unstacked_output.outputs, 0),
             unstacked_output.final_hidden};
   }
@@ -896,6 +919,7 @@ struct FullBidirectionalLayer
       step_inputs = input_w.unbind(0);
       auto fw_result = layer_(
           step_inputs, input_hidden.first, params.first, true);
+      TORCH_CHECK(fw_result.outputs.size() > 0, "Expected sequence length to be larger than 0 in RNN");
       auto fw_output = at::stack(fw_result.outputs, 0);
       input_w = params.second.linear_ih(input);
       step_inputs = input_w.unbind(0);
@@ -910,6 +934,7 @@ struct FullBidirectionalLayer
 
     step_inputs = input.unbind(0);
     auto fw_result = layer_(step_inputs, input_hidden.first, params.first);
+    TORCH_CHECK(fw_result.outputs.size() > 0, "Expected sequence length to be larger than 0 in RNN");
     auto fw_output = at::stack(fw_result.outputs, 0);
     auto rev_step_inputs = reverse(std::move(step_inputs));
     auto rev_result =
@@ -1373,6 +1398,7 @@ bool _use_cudnn_rnn_flatten_weight() {
         std::move(packed_output.data), std::move(std::get<1>(result)));     \
   }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 ONE_HIDDEN_RNN(gru, GRUCell<CellParams>)
 ONE_HIDDEN_QRNN(quantized_gru, GRUCell<QRNNCellParamsWrapper>)
 
@@ -1433,17 +1459,27 @@ std::tuple<Tensor, Tensor> quantized_gru_data_legacy(
 }
 
 using tanf_cell_type = SimpleCell<tanh_f, CellParams>;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 ONE_HIDDEN_RNN(rnn_tanh, tanf_cell_type)
 using relu_cell_type = SimpleCell<relu_f, CellParams>;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 ONE_HIDDEN_RNN(rnn_relu, relu_cell_type);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(lstm_cudnn_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(lstm_packed_cudnn_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(lstm_miopen_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(lstm_packed_miopen_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_NO_CPU_DISPATCH(lstm_cudnn_stub, lstm_fn);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_NO_CPU_DISPATCH(lstm_packed_cudnn_stub, lstm_packed_fn);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_NO_CPU_DISPATCH(lstm_miopen_stub, lstm_fn);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_NO_CPU_DISPATCH(lstm_packed_miopen_stub, lstm_packed_fn);
 
 std::tuple<Tensor, Tensor, Tensor> lstm(
@@ -1460,12 +1496,17 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
   // if cells are of different size, that means projections are used
   bool has_projections = (hx[0].size(2) != hx[1].size(2));
   if (use_miopen(_input, dropout_p)) {
-    TORCH_CHECK(!has_projections, "LSTM with projections is not supported with MIOpen");
-    Tensor output, hy, cy;
-    lstm_miopen_stub(_input.device().type(), output, hy, cy, _input, hx, _params, has_biases,
-              num_layers, dropout_p, train, bidirectional, batch_first);
-    return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
+    if (!has_projections) {
+      Tensor output, hy, cy;
+      lstm_miopen_stub(_input.device().type(), output, hy, cy, _input, hx, _params, has_biases,
+                num_layers, dropout_p, train, bidirectional, batch_first);
+      return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
+    } else {
+      TORCH_WARN_ONCE(
+          "LSTM with projections is not supported with MIOpen. Using default implementation.");
+    }
   }
+
   check_attributes(_input, _params, hx);
   auto input = batch_first ? _input.transpose(0, 1) : _input;
   auto params = gather_params(_params, has_biases, has_projections);
@@ -1491,11 +1532,15 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
   // if cells are of different size, that means projections are used
   bool has_projections = (hx[0].size(2) != hx[1].size(2));
   if (use_miopen(data, dropout_p)) {
-    TORCH_CHECK(!has_projections, "LSTM with projections is not supported with MIOpen");
-    Tensor output, hy, cy;
-    lstm_packed_miopen_stub(data.device().type(), output, hy, cy, data, batch_sizes, hx,
-            _params, has_biases, num_layers, dropout_p, train, bidirectional);
-    return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
+    if (!has_projections) {
+      Tensor output, hy, cy;
+      lstm_packed_miopen_stub(data.device().type(), output, hy, cy, data, batch_sizes, hx,
+              _params, has_biases, num_layers, dropout_p, train, bidirectional);
+      return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
+    } else {
+      TORCH_WARN_ONCE(
+          "LSTM with projections is not supported with MIOpen. Using default implementation.");
+    }
   }
 
   PackedSequence input { data, batch_sizes };
@@ -1510,7 +1555,12 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
 
 std::tuple<Tensor, Tensor> lstm_cell(
     const Tensor& input, TensorList hx,
-    const Tensor& w_ih, const Tensor& w_hh, const Tensor& b_ih, const Tensor& b_hh) {
+    const Tensor& w_ih, const Tensor& w_hh, const c10::optional<Tensor>& b_ih_opt, const c10::optional<Tensor>& b_hh_opt) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> b_ih_maybe_owned = at::borrow_from_optional_tensor(b_ih_opt);
+  const Tensor& b_ih = *b_ih_maybe_owned;
+  const Tensor& b_hh = c10::value_or_else(b_hh_opt, [] {return Tensor();});
+
   TORCH_CHECK(hx.size() == 2, "lstm_cell expects two hidden states");
   check_rnn_cell_forward_input(input, w_ih.size(1));
   auto hidden_size = w_hh.size(1);
@@ -1521,15 +1571,18 @@ std::tuple<Tensor, Tensor> lstm_cell(
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>
-_thnn_differentiable_lstm_cell_backward(
-    const Tensor& grad_hy,
-    const Tensor& grad_cy,
+_thnn_differentiable_lstm_cell_backward( const c10::optional<Tensor>& grad_hy_opt, const c10::optional<Tensor>& grad_cy_opt,
     const Tensor& input_gates,
-    const Tensor& hidden_gates,
-    const Tensor& input_bias,
-    const Tensor& hidden_bias,
+    const Tensor& hidden_gates, const c10::optional<Tensor>& input_bias_opt, const c10::optional<Tensor>& hidden_bias_opt,
     const Tensor& cx,
     const Tensor& cy) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> grad_hy_maybe_owned = at::borrow_from_optional_tensor(grad_hy_opt);
+  const Tensor& grad_hy = *grad_hy_maybe_owned;
+  const Tensor& grad_cy = c10::value_or_else(grad_cy_opt, [] {return Tensor();});
+  const Tensor& input_bias = c10::value_or_else(input_bias_opt, [] {return Tensor();});
+  const Tensor& hidden_bias = c10::value_or_else(hidden_bias_opt, [] {return Tensor();});
+
   if (!grad_hy.defined() && !grad_cy.defined()) {
     return std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>();
   }
@@ -1576,9 +1629,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_differentiable_gru_cell
     const Tensor& grad_hy,
     const Tensor& input_gates,
     const Tensor& hidden_gates,
-    const Tensor& hx,
-    const Tensor& input_bias,
-    const Tensor& hidden_bias){
+    const Tensor& hx, const c10::optional<Tensor>& input_bias_opt, const c10::optional<Tensor>& hidden_bias_opt){
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> input_bias_maybe_owned = at::borrow_from_optional_tensor(input_bias_opt);
+  const Tensor& input_bias = *input_bias_maybe_owned;
+  const Tensor& hidden_bias = c10::value_or_else(hidden_bias_opt, [] {return Tensor();});
+
   Tensor in_g = input_gates;
   Tensor h_g = hidden_gates;
   if (input_bias.defined()){
@@ -1613,7 +1669,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_differentiable_gru_cell
 
 Tensor gru_cell(
     const Tensor& input, const Tensor& hx,
-    const Tensor& w_ih, const Tensor& w_hh, const Tensor& b_ih, const Tensor& b_hh) {
+    const Tensor& w_ih, const Tensor& w_hh, const c10::optional<Tensor>& b_ih_opt, const c10::optional<Tensor>& b_hh_opt) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> b_ih_maybe_owned = at::borrow_from_optional_tensor(b_ih_opt);
+  const Tensor& b_ih = *b_ih_maybe_owned;
+  const Tensor& b_hh = c10::value_or_else(b_hh_opt, [] {return Tensor();});
+
   check_rnn_cell_forward_input(input, w_ih.size(1));
   check_rnn_cell_forward_hidden(input, hx, w_hh.size(1), 0);
   static at::Tensor undefined;
@@ -1622,7 +1683,12 @@ Tensor gru_cell(
 
 Tensor rnn_tanh_cell(
     const Tensor& input, const Tensor& hx,
-    const Tensor& w_ih, const Tensor& w_hh, const Tensor& b_ih, const Tensor& b_hh) {
+    const Tensor& w_ih, const Tensor& w_hh, const c10::optional<Tensor>& b_ih_opt, const c10::optional<Tensor>& b_hh_opt) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> b_ih_maybe_owned = at::borrow_from_optional_tensor(b_ih_opt);
+  const Tensor& b_ih = *b_ih_maybe_owned;
+  const Tensor& b_hh = c10::value_or_else(b_hh_opt, [] {return Tensor();});
+
   static at::Tensor undefined;
   check_rnn_cell_forward_input(input, w_ih.size(1));
   check_rnn_cell_forward_hidden(input, hx, w_hh.size(1), 0);
@@ -1631,7 +1697,12 @@ Tensor rnn_tanh_cell(
 
 Tensor rnn_relu_cell(
     const Tensor& input, const Tensor& hx,
-    const Tensor& w_ih, const Tensor& w_hh, const Tensor& b_ih, const Tensor& b_hh) {
+    const Tensor& w_ih, const Tensor& w_hh, const c10::optional<Tensor>& b_ih_opt, const c10::optional<Tensor>& b_hh_opt) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> b_ih_maybe_owned = at::borrow_from_optional_tensor(b_ih_opt);
+  const Tensor& b_ih = *b_ih_maybe_owned;
+  const Tensor& b_hh = c10::value_or_else(b_hh_opt, [] {return Tensor();});
+
   static at::Tensor undefined;
   check_rnn_cell_forward_input(input, w_ih.size(1));
   check_rnn_cell_forward_hidden(input, hx, w_hh.size(1), 0);
@@ -1674,6 +1745,7 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm_input(
 
   std::tuple<Tensor, Tensor, Tensor> results;
   if (result_dtype == at::kChar || result_dtype == at::kQInt8) {
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (use_dynamic) {
       results = _lstm_impl<FullLayer, FullBidirectionalLayer>(
           input, params, hx[0], hx[1], num_layers,
@@ -1734,6 +1806,7 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm_input_legacy(
       train,
       bidirectional,
       batch_first,
+      // NOLINTNEXTLINE(performance-move-const-arg)
       std::move(dtype),
       use_dynamic);
 }
@@ -1764,6 +1837,7 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm_data(
   PackedSequence input { data, batch_sizes };
   std::tuple<PackedSequence, Tensor, Tensor> results;
   if (result_dtype == at::kChar || result_dtype == at::kQInt8) {
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (use_dynamic) {
       results = _lstm_impl<PackedLayer, PackedBidirectionalLayer>(
           input, params, hx[0], hx[1], num_layers,
@@ -1821,6 +1895,7 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm_data_legacy(
       dropout_p,
       train,
       bidirectional,
+      // NOLINTNEXTLINE(performance-move-const-arg)
       std::move(dtype),
       use_dynamic);
 }
@@ -1920,8 +1995,10 @@ DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(quantized_rnn_tanh_cell_dynamic, simple_hx_typ
 
 namespace {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto ensure_linear_params_registered = register_linear_params();
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto cell_params_base_registry =
     torch::class_<CellParamsBase>("rnn", "CellParamsBase")
         .def_pickle(

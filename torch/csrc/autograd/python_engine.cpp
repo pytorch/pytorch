@@ -11,6 +11,7 @@
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <ATen/BatchedTensorImpl.h>
 #include <ATen/VmapMode.h>
+#include <c10/util/irange.h>
 #include <pybind11/pybind11.h>
 
 #ifndef _WIN32
@@ -26,6 +27,7 @@ struct THPEngine {
     PyObject_HEAD
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool _reinitialize_engine = false;
 
 namespace torch { namespace autograd { namespace python {
@@ -47,6 +49,10 @@ Engine& PythonEngine::get_python_engine() {
     _reinitialize_engine = false;
   }
   return engine;
+}
+
+PythonEngine::~PythonEngine() {
+  Engine::stop();
 }
 
 #if PY_MAJOR_VERSION == 3 && PY_MINOR_VERSION >= 9
@@ -76,7 +82,7 @@ void PythonEngine::thread_init(int device, const std::shared_ptr<ReadyQueue>& re
 
 #ifdef IS_PYTHON_3_9_PLUS
   // Do not call PyEval_RestoreThread, PyThreadState_[Clear|DeleteCurrent] if runtime is finalizing
-  if (_Py_IsFinalizing()) {
+  if (!Py_IsInitialized()) {
     no_gil.disarm();
     // TODO: call disarm rather than leak gil_scoped_acquired once PyThreadState_Clear can safely be called from finalize
     gil.release();
@@ -118,7 +124,7 @@ variable_list PythonEngine::execute(
   }
 }
 
-std::shared_ptr<at::ivalue::Future> PythonEngine::execute_with_graph_task(
+c10::intrusive_ptr<at::ivalue::Future> PythonEngine::execute_with_graph_task(
     const std::shared_ptr<GraphTask>& graph_task,
     std::shared_ptr<Node> graph_root,
     InputBuffer&& input_buffer) {
@@ -135,6 +141,7 @@ std::shared_ptr<at::ivalue::Future> PythonEngine::execute_with_graph_task(
 }
 }}} // namespace torch::autograd::python
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject *THPEngineClass = nullptr;
 
 // Implementation of torch._C._EngineBase.run_backward
@@ -176,11 +183,11 @@ PyObject *THPEngine_run_backward(PyObject *self, PyObject *args, PyObject *kwarg
   roots.reserve(num_tensors);
   variable_list grads;
   grads.reserve(num_tensors);
-  for (int i = 0; i < num_tensors; i++) {
+  for(const auto i : c10::irange(num_tensors)) {
     PyObject *_tensor = PyTuple_GET_ITEM(tensors, i);
     THPUtils_assert(THPVariable_Check(_tensor), "element %d of tensors "
         "tuple is not a Tensor", i);
-    auto& variable = ((THPVariable*)_tensor)->cdata;
+    const auto& variable = THPVariable_Unpack(_tensor);
     TORCH_CHECK(!isBatchedTensor(variable),
         "torch.autograd.grad(outputs, inputs, grad_outputs) called inside ",
         "torch.vmap. We do not support the case where any outputs are ",
@@ -194,7 +201,7 @@ PyObject *THPEngine_run_backward(PyObject *self, PyObject *args, PyObject *kwarg
 
     PyObject *grad = PyTuple_GET_ITEM(grad_tensors, i);
     if (THPVariable_Check(grad)) {
-      const Variable& grad_var = ((THPVariable*)grad)->cdata;
+      const Variable& grad_var = THPVariable_Unpack(grad);
       if (grad_var.has_names()) {
         TORCH_WARN(
             "Autograd was passed a named grad tensor with dims ", grad_var.names(),
@@ -215,27 +222,26 @@ PyObject *THPEngine_run_backward(PyObject *self, PyObject *args, PyObject *kwarg
   if (inputs != nullptr) {
     int num_inputs = PyTuple_GET_SIZE(inputs);
     output_edges.reserve(num_inputs);
-    for (int i = 0; i < num_inputs; ++i) {
+    for (const auto i : c10::irange(num_inputs)) {
       PyObject *input = PyTuple_GET_ITEM(inputs, i);
       THPUtils_assert(THPVariable_Check(input),
           "all inputs have to be Tensors, but got %s", THPUtils_typename(input));
-      THPVariable *input_var = (THPVariable*)input;
-      TORCH_CHECK(!isBatchedTensor(input_var->cdata),
+      const auto& tensor = THPVariable_Unpack(input);
+      TORCH_CHECK(!isBatchedTensor(tensor),
           "torch.autograd.grad(outputs, inputs, grad_outputs) called inside ",
           "torch.vmap. We do not support the case where any inputs are ",
           "vmapped tensors (input ", i, " is being vmapped over). Please "
           "call autograd.grad() outside torch.vmap or file a bug report "
           "with your use case.")
-      const auto output_nr = input_var->cdata.output_nr();
-      auto grad_fn = input_var->cdata.grad_fn();
+      const auto output_nr = tensor.output_nr();
+      auto grad_fn = tensor.grad_fn();
       if (!grad_fn) {
-        grad_fn = torch::autograd::impl::try_get_grad_accumulator(input_var->cdata);
+        grad_fn = torch::autograd::impl::try_get_grad_accumulator(tensor);
       }
       if (accumulate_grad) {
-        THPUtils_assert(input_var->cdata.is_leaf(),
-          "One of the differentiated Tensors given as 'inputs' to backward is not a leaf Tensor");
+        tensor.retain_grad();
       }
-      THPUtils_assert(input_var->cdata.requires_grad(),
+      THPUtils_assert(tensor.requires_grad(),
           "One of the differentiated Tensors does not require grad");
       if (!grad_fn) {
         // NOTE [ Autograd Unreachable Input ]
@@ -261,7 +267,7 @@ PyObject *THPEngine_run_backward(PyObject *self, PyObject *args, PyObject *kwarg
     int num_inputs = PyTuple_GET_SIZE(inputs);
     THPObjectPtr py_outputs {PyTuple_New(num_inputs)};
     if (!py_outputs) return nullptr;
-    for (int i = 0; i < num_inputs; i++) {
+    for(const auto i : c10::irange(num_inputs)) {
       THPUtils_assert(allow_unreachable || outputs[i].defined(), "One of the "
                       "differentiated Tensors appears to not have been used "
                       "in the graph. Set allow_unused=True if this is the "
@@ -305,6 +311,7 @@ PyObject *THPEngine_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
   return type->tp_alloc(type, 0);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyMethodDef THPEngine_methods[] = {
   {(char*)"run_backward",
     castPyCFunctionWithKeywords(THPEngine_run_backward),
@@ -315,12 +322,14 @@ static struct PyMethodDef THPEngine_methods[] = {
 };
 
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyTypeObject THPEngineType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
   "torch._C._EngineBase",                      /* tp_name */
   sizeof(THPEngine),                           /* tp_basicsize */
   0,                                           /* tp_itemsize */
   nullptr,                                     /* tp_dealloc */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                           /* tp_vectorcall_offset */
   nullptr,                                     /* tp_getattr */
   nullptr,                                     /* tp_setattr */

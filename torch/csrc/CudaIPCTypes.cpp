@@ -1,5 +1,5 @@
 #include <torch/csrc/CudaIPCTypes.h>
-#include <TH/THAllocator.h>
+#include <ATen/MapAllocator.h>
 #include <map>
 #include <mutex>
 #include <random>
@@ -31,9 +31,15 @@ struct CudaIPCGlobalEntities {
       ref_counters_files_;
   std::shared_ptr<CudaIPCRefCountersFile> next_available_ref_counters_file_;
   CudaIPCSentDataLimbo CudaIPCSentDataLimbo_;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   CudaIPCGlobalEntities() : ref_counters_files_() {}
   ~CudaIPCGlobalEntities() {
     CudaIPCSentDataLimbo_.collect();
+    // Clear shared blocks to avoid releasing shared blocks after
+    // ~CudaIPCGlobalEntities is done since circular references causes the
+    // destructor of ~CudaIPCSentData to access the cuda_ipc_global_entities
+    // again.
+    CudaIPCSentDataLimbo_.clear_shared_blocks();
     safe_clean_current_file();
     if (next_available_ref_counters_file_) {
       warnProducerTerminatedBeforeSharedTensorsReleased();
@@ -56,6 +62,10 @@ CudaIPCSentDataLimbo::~CudaIPCSentDataLimbo() {
   if (shared_blocks_.size() > 0) {
     warnProducerTerminatedBeforeSharedTensorsReleased();
   }
+}
+
+void CudaIPCSentDataLimbo::clear_shared_blocks() {
+  shared_blocks_.clear();
 }
 
 bool CudaIPCSentDataLimbo::collect() {
@@ -108,18 +118,21 @@ void CudaIPCSentDataDelete(void* ptr) {
 void ReturnRefCounter(const std::string& handle, uint64_t offset /* unused */) {
   std::lock_guard<std::mutex> lock(
       cuda_ipc_global_entities.ref_counters_mutex_);
-  cuda_ipc_global_entities.ref_counters_files_[handle]->return_offset(offset);
-  if (cuda_ipc_global_entities.ref_counters_files_[handle]->offsets_in_use() ==
-          0 &&
-      !cuda_ipc_global_entities.ref_counters_files_[handle]->have_offsets()) {
-    cuda_ipc_global_entities.ref_counters_files_.erase(handle);
+  auto& map = cuda_ipc_global_entities.ref_counters_files_;
+  auto it = map.find(handle);
+  if (it != map.end()) {
+    it->second->return_offset(offset);
+    if (it->second->offsets_in_use() == 0 && !it->second->have_offsets()) {
+      map.erase(handle);
+    }
   }
 }
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 CudaIPCSentData::CudaIPCSentData(
-    std::string handle,
+    const std::string& handle,
     int64_t offset,
     int64_t* counter_ptr,
     at::Device device)
@@ -200,8 +213,8 @@ at::DataPtr GetNewRefCountedSentData(void* data, at::Device device) {
       ref_counter_handle += "_";
       ref_counter_handle += std::to_string(rd());
 
-      int flags = TH_ALLOCATOR_MAPPED_SHAREDMEM | TH_ALLOCATOR_MAPPED_EXCLUSIVE;
-      at::DataPtr sptr = THRefcountedMapAllocator::makeDataPtr(
+      int flags = at::ALLOCATOR_MAPPED_SHAREDMEM | at::ALLOCATOR_MAPPED_EXCLUSIVE;
+      at::DataPtr sptr = at::RefcountedMapAllocator::makeDataPtr(
           ref_counter_handle.c_str(),
           flags,
           sizeof(int64_t) * CUDA_IPC_REF_COUNTER_FILE_SIZE,

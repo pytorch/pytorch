@@ -5,6 +5,7 @@
 #include <ATen/core/functional.h>
 #include <ATen/core/stack.h>
 #include <c10/util/Optional.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/fuser/compiler.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
@@ -213,6 +214,7 @@ void launchFusion(
 
   // Computes map_size, numel from the first input
   at::IntArrayRef map_size;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   uint32_t numel;
   std::vector<int64_t> keep_alive_size;
   if (fusion.chunkDesc()[0].isNoop()) {
@@ -337,7 +339,7 @@ bool runFusion(const int64_t key, Stack& stack, std::string* code_out) {
   std::vector<at::Tensor> inputs;
   inputs.reserve(spec.nTensorInputs());
   // we know that tensor inputs are first
-  for (int64_t i = 0; i < spec.nTensorInputs(); i++) {
+  for (const auto i : c10::irange(spec.nTensorInputs())) {
     inputs.emplace_back(all_inputs[i].toTensor());
   }
 
@@ -361,6 +363,8 @@ bool runFusion(const int64_t key, Stack& stack, std::string* code_out) {
   if (device.is_cuda() && !canFuseOnGPU())
     return false;
   if (device.is_cpu() && !canFuseOnCPU())
+    return false;
+  if (device.is_xpu())
     return false;
 
   // Validates sizes and expands inputs as needed

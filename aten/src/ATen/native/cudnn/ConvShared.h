@@ -17,6 +17,7 @@ namespace at { namespace native {
 // parameters
 struct ConvolutionParams
 {
+  c10::DeviceIndex device_id;
   cudnnDataType_t dataType;
   int input_size[2 + max_dim];
   uint8_t input_dim;
@@ -71,4 +72,18 @@ void raw_cudnn_convolution_backward_weight_out(
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, bool allow_tf32);
 
+void raw_cudnn_convolution_add_relu_out(
+    const Tensor& output,
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& z,
+    float alpha,
+    const Tensor& bias,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    int64_t groups,
+    bool benchmark,
+    bool deterministic,
+    bool allow_tf32);
 }}

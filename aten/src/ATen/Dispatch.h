@@ -10,7 +10,7 @@
 #include <c10/util/complex.h>
 #include <c10/util/string_view.h>
 
-#ifdef XPLAT_MOBILE_BUILD
+#ifdef TEMPLATE_SELECTIVE_BUILD
 #include <ATen/selected_mobile_ops.h>
 #else
 namespace at {
@@ -106,6 +106,9 @@ inline constexpr bool should_include_kernel_dtype(
     int bit_width = bitwidth;                                                     \
     int64_t quant_min = qmin;                                                     \
     int64_t quant_max = qmax;                                                     \
+    (void)bit_width; /* Suppress unused variable warning */                       \
+    (void)quant_min; /* Suppress unused variable warning */                       \
+    (void)quant_max; /* Suppress unused variable warning */                       \
     return __VA_ARGS__();                                                         \
   }
 

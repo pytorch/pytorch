@@ -1,13 +1,25 @@
 #include <ATen/ATen.h>
-#include <ATen/Parallel.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/div_rtn.h>
-#include <tuple>
+#include <ATen/native/DispatchStub.h>
 
 #pragma once
 
 namespace at {
 namespace native {
+
+using max_pool2d_fn = void(*)(const Tensor& output, const Tensor& indices, const Tensor& input,
+    int kW, int kH, int dW, int dH, int padW, int padH, int dilationW, int dilationH);
+using max_pool2d_backward_fn = void(*)(const Tensor& grad_input, const Tensor& grad_output, const Tensor& indices);
+
+DECLARE_DISPATCH(max_pool2d_fn, max_pool2d_kernel);
+DECLARE_DISPATCH(max_pool2d_backward_fn, max_pool2d_backward_kernel);
+
+// averge pooling has same signature for forward and backward
+using avg_pool2d_fn = void(*)(const Tensor& output, const Tensor& input, int kW, int kH,
+    int dW, int dH, int padW, int padH, bool count_include_pad, c10::optional<int64_t> divisor_override);
+DECLARE_DISPATCH(avg_pool2d_fn, avg_pool2d_kernel);
+DECLARE_DISPATCH(avg_pool2d_fn, avg_pool2d_backward_kernel);
 
 namespace {
 
@@ -44,6 +56,24 @@ static inline T pooling_output_shape(
     TORCH_CHECK(stride != 0, "stride should not be zero");
     return pooling_output_shape_pad_lr(
         inputSize, kernelSize, pad, pad, stride, dilation, ceil_mode);
+}
+
+inline std::pair<int64_t, int64_t> pooling_same_mode_padding_lr(
+    int64_t inputSize, int64_t kernelSize, int64_t stride, int64_t dilation) {
+  // NOTE: with strides, the output shape is ceil(inputSize/stride)
+  auto total_padding = dilation * (kernelSize - 1);
+
+  // Prefer symmetric padding if possible
+  if (stride > 2 && (total_padding % 2 == 1)) {
+    // The floor in the output size calculation gives us a little wiggle room
+    auto wiggle_room = inputSize % stride - 1;
+    if (wiggle_room > 0) {
+      --total_padding;
+    }
+  }
+
+  auto left = total_padding / 2;
+  return {left, total_padding - left};
 }
 
 

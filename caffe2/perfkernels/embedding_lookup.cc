@@ -3,6 +3,8 @@
 #include "caffe2/core/types.h"
 #include "caffe2/perfkernels/common.h"
 
+#include <c10/util/irange.h>
+
 namespace caffe2 {
 
 /**
@@ -27,7 +29,7 @@ static bool EmbeddingLookupGenericSlow(
     bool normalize_by_lengths,
     OutType* out) {
   int64_t current = 0;
-  for (int m = 0; m < output_size; ++m) {
+  for (const auto m : c10::irange(output_size)) {
     memset(out, 0, sizeof(OutType) * block_size);
     if (current + lengths[m] > index_size) {
       return false;
@@ -52,15 +54,16 @@ static bool EmbeddingLookupGenericSlow(
         w = w * scale_bias[2 * indices[current]];
       }
 
-      for (int j = 0; j < block_size; ++j) {
+      for (const auto j : c10::irange(block_size)) {
         out[j] += w * input[block_size * indices[current] + j] + b;
       }
 
       ++current;
     }
     if (normalize_by_lengths && lengths[m]) {
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       float scale = 1.f / lengths[m];
-      for (int j = 0; j < block_size; ++j) {
+      for (const auto j : c10::irange(block_size)) {
         out[j] *= scale;
       }
     }

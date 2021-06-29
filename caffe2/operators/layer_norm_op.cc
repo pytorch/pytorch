@@ -59,6 +59,7 @@ void LayerNormOp<CPUContext>::LayerNormForward(
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(LayerNorm, LayerNormOp<CPUContext>);
 
 template <>
@@ -170,8 +171,10 @@ void LayerNormGradientOp<CPUContext>::GammaBetaBackward(
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-avoid-magic-numbers)
 OPERATOR_SCHEMA(LayerNormGradient).NumInputs({5, 6}).NumOutputs({1, 3});
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(LayerNormGradient, LayerNormGradientOp<CPUContext>);
 
 namespace {
@@ -201,8 +204,10 @@ class GetLayerNormGradient : public GradientMakerBase {
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(LayerNorm, GetLayerNormGradient);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(LayerNorm)
     .NumInputs({1, 3})
     .NumOutputs(3)
@@ -289,6 +294,7 @@ C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_EXPORT_C10_OP_TO_CAFFE2_CPU(
     "_caffe2::LayerNorm",
     C10LayerNorm_DontUseThisOpYet);

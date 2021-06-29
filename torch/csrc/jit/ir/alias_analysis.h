@@ -269,7 +269,7 @@ class AliasDb {
   c10::optional<TWriteIndex> writeIndex_;
   // Collection of all memory locations that are written to.
   c10::optional<MemoryLocations> writtenToLocationsIndex_;
-  MemoryLocations buildWrittenToLocationsIndex() const;
+  void buildWrittenToLocationsIndex();
 
   std::unordered_set<const Value*> wildcards_;
 

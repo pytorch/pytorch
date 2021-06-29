@@ -63,7 +63,7 @@ Operator createOperatorFromC10_withTracingHandledHere(
           tracer::addInputs(node, args[i].name().c_str(), iter->toBool());
         } else if (type->kind() == TypeKind::StringType) {
           AT_ASSERT(iter->isString());
-          tracer::addInputs(node, args[i].name().c_str(), iter->toStringRef());
+          tracer::addInputs(node, args[i].name().c_str(), iter->toStringView());
         } else if (type->kind() == TypeKind::NumberType) {
           tracer::addInputs(node, args[i].name().c_str(), iter->toScalar());
         } else if (type->kind() == TypeKind::ListType) {
@@ -207,6 +207,7 @@ Registerer& registerer() {
 }
 
 // global instance to run its constructor on startup
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 Registerer& dummy = registerer();
 
 } // namespace

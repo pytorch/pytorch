@@ -4,6 +4,7 @@ checking quantization api and properties of resulting modules.
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 from torch.nn.intrinsic import _FusedModule
@@ -27,7 +28,7 @@ try:
         prepare_qat_fx,
         convert_fx,
     )
-    from torch.quantization.ns.ns_types import NSSingleResultValuesType
+    from torch.quantization.ns.ns_types import NSSingleResultValuesType, NSSubgraph
     from torch.fx.graph import Node
     from torch.fx import GraphModule
     HAS_FX = True
@@ -43,7 +44,7 @@ import os
 import unittest
 import numpy as np
 from torch.testing import FileCheck
-from typing import Callable, Tuple, Dict, Any
+from typing import Callable, Tuple, Dict, Any, Union
 
 class NodeSpec:
     ''' Used for checking GraphModule Node
@@ -261,6 +262,22 @@ def skipIfNoFBGEMM(fn):
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         if 'fbgemm' not in torch.backends.quantized.supported_engines:
+            raise unittest.SkipTest(reason)
+        else:
+            fn(*args, **kwargs)
+    return wrapper
+
+def skipIfNoQNNPACK(fn):
+    reason = 'Quantized operations require QNNPACK.'
+    if isinstance(fn, type):
+        if 'qnnpack' not in torch.backends.quantized.supported_engines:
+            fn.__unittest_skip__ = True
+            fn.__unittest_skip_why__ = reason
+        return fn
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if 'qnnpack' not in torch.backends.quantized.supported_engines:
             raise unittest.SkipTest(reason)
         else:
             fn(*args, **kwargs)
@@ -543,7 +560,7 @@ class QuantizationTestCase(TestCase):
         """
         nodes_in_graph = dict()
         node_list = []
-        modules = dict(graph_module.named_modules())
+        modules = dict(graph_module.named_modules(remove_duplicate=False))
         for node in graph_module.graph.nodes:
             n = None
             if node.op == 'call_function' or node.op == 'call_method':
@@ -611,7 +628,7 @@ class QuantizationTestCase(TestCase):
 
         def assert_types_for_matched_subgraph_pairs(
             self,
-            matched_subgraph_pairs: Dict[str, Tuple[Tuple[Node, Node], Tuple[Node, Node]]],
+            matched_subgraph_pairs: Dict[str, Tuple[NSSubgraph, NSSubgraph]],
             expected_types: Dict[str, Tuple[Tuple[Callable, Callable], Tuple[Callable, Callable]]],
             gm_a: GraphModule,
             gm_b: GraphModule,
@@ -629,12 +646,14 @@ class QuantizationTestCase(TestCase):
             instance checks.
             """
 
-            def _get_underlying_op_type(node: Node, gm: GraphModule) -> Callable:
+            def _get_underlying_op_type(
+                node: Node, gm: GraphModule
+            ) -> Union[Callable, str]:
                 if node.op == 'call_module':
                     mod = getattr(gm, node.target)
                     return type(mod)
                 else:
-                    assert node.op == 'call_function'
+                    assert node.op in ('call_function', 'call_method')
                     return node.target
 
             self.assertTrue(
@@ -646,14 +665,12 @@ class QuantizationTestCase(TestCase):
                 expected_types_a, expected_types_b = v
                 exp_type_start_a, exp_type_end_a = expected_types_a
                 exp_type_start_b, exp_type_end_b = expected_types_b
-                nodes_a, nodes_b = matched_subgraph_pairs[k]
-                node_start_a, node_end_a = nodes_a
-                node_start_b, node_end_b = nodes_b
+                subgraph_a, subgraph_b = matched_subgraph_pairs[k]
 
-                act_type_start_a = _get_underlying_op_type(node_start_a, gm_a)
-                act_type_start_b = _get_underlying_op_type(node_start_b, gm_b)
-                act_type_end_a = _get_underlying_op_type(node_end_a, gm_a)
-                act_type_end_b = _get_underlying_op_type(node_end_b, gm_b)
+                act_type_start_a = _get_underlying_op_type(subgraph_a.start_node, gm_a)
+                act_type_start_b = _get_underlying_op_type(subgraph_b.start_node, gm_b)
+                act_type_end_a = _get_underlying_op_type(subgraph_a.end_node, gm_a)
+                act_type_end_b = _get_underlying_op_type(subgraph_b.end_node, gm_b)
                 types_match = (exp_type_start_a is act_type_start_a) and \
                     (exp_type_end_a is act_type_end_a) and \
                     (exp_type_start_b is act_type_start_b) and \
@@ -687,15 +704,38 @@ class QuantizationTestCase(TestCase):
                         self.assertTrue(
                             layer_data_0['type'] == layer_data_0['type'],
                             f"Layer {layer_name}, {model_name_0} and {model_name_1} do not have the same type.")
+
                         self.assertTrue(
                             len(layer_data_0['values']) ==
                             len(layer_data_1['values']),
                             f"Layer {layer_name}, {model_name_0} and {model_name_1} do not have the same number of seen Tensors.")
-                        for idx in range(len(layer_data_0['values'])):
-                            self.assertTrue(
-                                layer_data_0['values'][idx].shape ==
-                                layer_data_1['values'][idx].shape,
-                                f"Layer {layer_name}, {model_name_0} and {model_name_1} have a shape mismatch at idx {idx}.")
+
+                        # F.conv1d weight has rank 3, and toq.conv1d unpacked weight
+                        # has rank 4. For now, skip the length check for conv1d only.
+                        is_weight_functional_conv1d = (
+                            result_type == NSSingleResultValuesType.WEIGHT.value and
+                            (
+                                'conv1d' in layer_data_0['prev_node_target_type'] or
+                                'conv1d' in layer_data_1['prev_node_target_type']
+                            )
+                        )
+                        if not is_weight_functional_conv1d:
+                            for idx in range(len(layer_data_0['values'])):
+                                values_0 = layer_data_0['values'][idx]
+                                values_1 = layer_data_1['values'][idx]
+                                if isinstance(values_0, torch.Tensor):
+                                    self.assertTrue(
+                                        values_0.shape == values_1.shape,
+                                        f"Layer {layer_name}, {model_name_0} and {model_name_1} " +
+                                        f"have a shape mismatch at idx {idx}.")
+                                else:
+                                    assert isinstance(values_0, tuple), \
+                                        f"unhandled type {type(values_0)}"
+                                    assert len(values_0) == 2
+                                    assert len(values_0[1]) == 2
+                                    assert values_0[0].shape == values_1[0].shape
+                                    assert values_0[1][0].shape == values_1[1][0].shape
+                                    assert values_0[1][1].shape == values_1[1][1].shape
 
                         # verify that ref_node_name is valid
                         ref_node_name_0 = layer_data_0['ref_node_name']
@@ -899,6 +939,18 @@ class SingleLayerLinearDynamicModel(torch.nn.Module):
 
     def forward(self, x):
         x = self.fc1(x)
+        return x
+
+class LinearAddModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc1 = torch.nn.Linear(5, 8).to(dtype=torch.float)
+        self.fc2 = torch.nn.Linear(8, 5).to(dtype=torch.float)
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = torch.add(x, 5)
+        x = self.fc2(x)
         return x
 
 class RNNDynamicModel(torch.nn.Module):
@@ -1123,7 +1175,7 @@ class NormalizationTestModel(torch.nn.Module):
         x = self.quant(x)
         x = self.fc1(x)
         x = self.layer_norm(x)
-        x = self.group_norm(x.unsqueeze(-1))
+        x = self.group_norm(x.unsqueeze(-1).repeat(1, 1, 3))
         x = self.instance_norm1d(x)
         x = self.instance_norm2d(x.unsqueeze(-1))
         x = self.instance_norm3d(x.unsqueeze(-1))
@@ -1239,6 +1291,47 @@ class InnerModule(torch.nn.Module):
                     fusable_layers.append([current_name,
                                            named_children[idx + 1][0]])
         torch.quantization.fuse_modules(self, fusable_layers, inplace=True)
+
+class FunctionalLinear(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.weight = torch.rand((5, 5))
+        self.bias = torch.zeros(5)
+
+    def forward(self, x):
+        return F.linear(x, self.weight, self.bias)
+
+class SingleLayerFunctionalLinearModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear1 = FunctionalLinear()
+
+    def forward(self, x):
+        x = self.linear1(x)
+        return x
+
+class TwoLayerFunctionalLinearModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear1 = FunctionalLinear()
+        self.linear2 = FunctionalLinear()
+
+    def forward(self, x):
+        x = self.linear1(x)
+        x = self.linear2(x)
+        return x
+
+class FunctionalLinearAddModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear1 = FunctionalLinear()
+        self.linear2 = FunctionalLinear()
+
+    def forward(self, x):
+        x = self.linear1(x)
+        x = torch.add(x, 5)
+        x = self.linear2(x)
+        return x
 
 class SkipQuantModel(torch.nn.Module):
     r"""We can skip quantization by explicitly

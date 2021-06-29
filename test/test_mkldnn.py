@@ -27,14 +27,14 @@ gradgradcheck = functools.partial(gradgradcheck, check_batched_grad=False)
 # For OneDNN bf16 path, OneDNN requires the cpu has intel avx512 with avx512bw,
 # avx512vl, and avx512dq at least. So we will skip the test case if one processor
 # is not meet the requirement.
+@functools.lru_cache(maxsize=None)
 def has_bf16_support():
-    import subprocess
-    try:
-        cmd = "grep avx512bw /proc/cpuinfo | grep avx512vl | grep avx512dq"
-        subprocess.check_output(cmd, shell=True)
-        return True
-    except subprocess.CalledProcessError:
+    import sys
+    if sys.platform != 'linux':
         return False
+    with open("/proc/cpuinfo", encoding="ascii") as f:
+        lines = f.read()
+    return all(word in lines for word in ["avx512bw", "avx512vl", "avx512dq"])
 
 types = [torch.float, torch.bfloat16]
 
@@ -96,6 +96,25 @@ class TestMkldnn(TestCase):
                 self.assertRaisesRegex(RuntimeError,
                                        "Cannot access data pointer of Tensor that doesn't have storage",
                                        lambda: mkldnn_tensor.data_ptr() != 0)
+
+    def test_copy(self):
+        x = torch.randn(4, 5, dtype=torch.float32)
+        mkldnn_x = x.to_mkldnn()
+        mkldnn_y = torch.randn(4, 5, dtype=torch.float32).to_mkldnn()
+        mkldnn_z = torch.randn(4, 10, dtype=torch.float32).to_mkldnn()
+        mkldnn_y.copy_(mkldnn_x)
+        self.assertEqual(x, mkldnn_y.to_dense())
+        self.assertRaisesRegex(RuntimeError,
+                               "copy_mkldnn_: only support same size tensor.",
+                               lambda: mkldnn_z.copy_(mkldnn_x))
+        self.assertRaisesRegex(RuntimeError,
+                               "copy_mkldnn_: between mkldnn layout and dense Tensors is not implemented! "
+                               "Found self type = torch.FloatTensor and src type = Mkldnntorch.FloatTensor",
+                               lambda: x.copy_(mkldnn_x))
+        self.assertRaisesRegex(RuntimeError,
+                               "copy_mkldnn_: between mkldnn layout and dense Tensors is not implemented! "
+                               "Found self type = Mkldnntorch.FloatTensor and src type = torch.FloatTensor",
+                               lambda: mkldnn_x.copy_(x))
 
     def test_unsupported(self):
         # unsupported types and unsupported types with gpu
@@ -951,6 +970,18 @@ class TestMkldnn(TestCase):
         # inplace
         torch.sigmoid_(x)
         torch.sigmoid_(mkldnn_x)
+        self.assertEqual(x, mkldnn_x.to_dense())
+
+    def test_tanh(self):
+        x = torch.randn(4, 5, dtype=torch.float32) * 10
+        mkldnn_x = x.to_mkldnn()
+        self.assertEqual(
+            torch.tanh(x),
+            torch.tanh(mkldnn_x).to_dense(),
+        )
+        # inplace
+        torch.tanh_(x)
+        torch.tanh_(mkldnn_x)
         self.assertEqual(x, mkldnn_x.to_dense())
 
     def _test_serialization(self, module, inputs):

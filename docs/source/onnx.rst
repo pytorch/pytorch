@@ -201,9 +201,9 @@ Now the exported ONNX graph becomes: ::
           %loop_range : Long()):
       %2 : Long() = onnx::Constant[value={1}](), scope: LoopModel2/loop
       %3 : Tensor = onnx::Cast[to=9](%2)
-      %4 : Long(2, 3) = onnx::Loop(%loop_range, %3, %input_data), scope: LoopModel2/loop # custom_loop.py:240:5
+      %4 : Long(2, 3) = onnx::Loop(%loop_range, %3, %input_data), scope: LoopModel2/loop
         block0(%i.1 : Long(), %cond : bool, %x.6 : Long(2, 3)):
-          %8 : Long(2, 3) = onnx::Add(%x.6, %i.1), scope: LoopModel2/loop # custom_loop.py:241:13
+          %8 : Long(2, 3) = onnx::Add(%x.6, %i.1), scope: LoopModel2/loop
           %9 : Tensor = onnx::Cast[to=9](%2)
           -> (%9, %8)
       return (%4)
@@ -249,9 +249,41 @@ E.g.: ::
     out = model(*inputs)
     torch.onnx.export(model, inputs, 'loop_and_list.onnx', opset_version=11, example_outputs=out)
 
+
+Type Annotations
+--------------------------------
+TorchScript only supports a subset of Python types. You can find more details about type annotation
+`here <https://pytorch.org/docs/stable/jit_language_reference.html#id8>`_.
+
+Due to optimization purposes, TorchScript only supports variables with single static types for script functions.
+By default, each variable is assumed to be Tensor. If an argument to a ScriptModule function is not Tensor,
+its type should be specified using MyPy-style annotations.
+
+::
+
+    import torch
+
+    class Module(torch.nn.Module):
+        def forward(self, x, tup):
+            # type: (int, Tuple[Tensor, Tensor]) -> Tensor
+            t0, t1 = tup
+            return t0 + t1 + x
+
+If the type annotation is not specified, TorchScript compiler fails with the runtime error below.
+
+::
+
+  RuntimeError:
+  Tensor (inferred) cannot be used as a tuple:
+    File <filename>
+          def forward(self, x, tup):
+              t0, t1 = tup
+                       ~~~ <--- HERE
+              return t0 + t1 + x
+
+
 Write PyTorch model in Torch way
 --------------------------------
-
 Avoid using numpy
 ~~~~~~~~~~~~~~~~~
 
@@ -398,12 +430,12 @@ Below is the list of supported patterns for RHS indexing. ::
   data[torch.tensor([[1, 2], [2, 3]]), torch.tensor([2, 3])]
   data[torch.tensor([2, 3]), :, torch.tensor([1, 2])]
 
-  # Ellipsis
+  # Ellipsis followed by tensor indexing
   # Not supported in scripting
   # i.e. torch.jit.script(model) will fail if model contains this pattern.
   # Export is supported under tracing
   # i.e. torch.onnx.export(model)
-  data[...]
+  data[..., torch.tensor([2, 1])]
 
   # The combination of above
   data[2, ..., torch.tensor([2, 1, 3]), 2:4, torch.tensor([[1], [2]])]
@@ -460,12 +492,12 @@ Below is the list of supported patterns for LHS indexing. ::
   data[torch.tensor([[1, 2], [2, 3]])] = new_data
   data[torch.tensor([2, 3]), torch.tensor([1, 2])] = new_data
 
-  # Ellipsis
+  # Ellipsis followed by tensor indexing
   # Not supported to export in script modules
   # i.e. torch.onnx.export(torch.jit.script(model)) will fail if model contains this pattern.
   # Export is supported under tracing
   # i.e. torch.onnx.export(model)
-  data[...] = new_data
+  data[..., torch.tensor([2, 1])] = new_data
 
   # The combination of above
   data[2, ..., torch.tensor([2, 1, 3]), 2:4] += update
@@ -585,6 +617,7 @@ The following operators are supported:
 * glu
 * group_norm
 * gt
+* hardsigmoid
 * hardswish
 * hardtanh
 * im2col
@@ -839,6 +872,101 @@ The interface for specifying operator definitions is experimental;
 adventurous users should note that the APIs will probably
 change in a future interface.
 
+Autograd Function
+~~~~~~~~~~~~~~~~~
+
+Autograd functions can be used to compute operation results and gradients and save the history.
+More information on extending the torch.autograd engine can be found on this `page <https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function>`_.
+There are two ways to export a subclass of the torch.autograd.function.
+
+Symbolic Static Method
+^^^^^^^^^^^^^^^^^^^^^^
+
+You can add a symbolic static method to your function class. The symbolic method should contain a set
+of ONNX operators that represent operator's behavior in ONNX. Here's an example for adding symbolic to
+the your autograd function: ::
+
+
+    class MyRelu(torch.autograd.Function):
+        @staticmethod
+        def forward(ctx, input):
+            ctx.save_for_backward(input)
+            return input.clamp(min=0)
+
+        @staticmethod
+        def backward(ctx, grad_output):
+            input, = ctx.saved_tensors
+            grad_input = grad_output.clone()
+            grad_input[input < 0] = 0
+            return grad_input
+
+        @staticmethod
+        def symbolic(g, self):
+            return g.op("Clip", self, g.op('Constant', value_t=torch.tensor(0, dtype=torch.float)))
+
+    class MyModel(torch.nn.Module):
+        def forward(self, x):
+            my_relu = MyRelu.apply
+            return my_relu(x)
+
+    input_tensor = torch.randn(2, 3, 224, 224, requires_grad=True)
+    torch.onnx.export(MyModel(), input_tensor, 'test.onnx', opset_version=12)
+
+Export as Custom Operator
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Alternatively, you can register a custom symbolic function to export the autograd function as custom operator.
+This is designed for more advanced usage, because it gives you access to more info on the export symbolic side.
+Autograd functions are emitted in the IR graph as ``prim::PythonOp`` nodes. The attribute ``name`` identifies the
+original module name. The ``prim::PythonOp`` node object can be accessed by argument ``n``. The example below shows
+how you can access ``requires_grad`` info of the inputs and outputs of the autograd function. ::
+
+    class MyClip(torch.autograd.Function):
+        @staticmethod
+        def forward(ctx, input, scalar):
+            ctx.save_for_backward(input)
+            return input.clamp(min=scalar)
+
+    class MyRelu(torch.autograd.Function):
+        @staticmethod
+        def forward(ctx, input):
+            ctx.save_for_backward(input)
+            return input.clamp(min=0)
+
+    class MyModule(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.clip = MyClip.apply
+            self.relu = MyRelu.apply
+
+        def forward(self, x):
+            h = self.clip(x, 2)
+            h = self.relu(h)
+            return h
+
+    def symbolic_pythonop(g, n, *args, **kwargs):
+        # print information
+        print('original node: ', n)
+        for i, out in enumerate(n.outputs()):
+            print('original output {}: {}, requires grad: {}'.format(i, out, out.requiresGrad()))
+        import torch.onnx.symbolic_helper as sym_helper
+        for i, arg in enumerate(args):
+            print('arg {}: {}, requires grad: {}'.format(i, arg, arg.requiresGrad() if sym_helper._is_value(arg) else False))
+
+        name = kwargs['name']
+        if name == "MyClip":
+            return g.op("Clip", args[0], min_f=args[1])
+        elif name == "MyRelu":
+            return g.op("Relu", args[0])
+        else:
+            return _unimplemented("prim::PythonOp", "unknown node kind: " + name)
+
+    from torch.onnx import register_custom_op_symbolic
+    register_custom_op_symbolic('::prim_PythonOp', symbolic_pythonop, 1)
+
+    input_tensor = torch.randn(2, 3, 224, 224, requires_grad=True)
+    torch.onnx.export(MyModule(), input_tensor, 'test.onnx', opset_version=12)
+
 Custom operators
 ~~~~~~~~~~~~~~~~
 
@@ -1019,6 +1147,11 @@ Q: I have exported my lstm model, but its input size seems to be fixed?
 Q: How to export models with loops in it?
 
   Please checkout `Tracing vs Scripting`_.
+
+Q: How to export models with primitive type inputs?
+
+  Support for primitive type inputs will be added starting from PyTorch 1.9 release.
+  However, exporter does not support conversion of models with String inputs.
 
 Q: Does ONNX support implicit scalar datatype casting?
 

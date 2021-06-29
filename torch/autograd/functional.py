@@ -574,7 +574,7 @@ def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False):
         for i, out in enumerate(outputs):
 
             # mypy complains that expression and variable have different types due to the empty list
-            jac_i: Tuple[List[torch.Tensor]] = tuple([] for _ in range(len(inputs)))  # type: ignore
+            jac_i: Tuple[List[torch.Tensor]] = tuple([] for _ in range(len(inputs)))  # type: ignore[assignment]
             for j in range(out.nelement()):
                 vj = _autograd_grad((out.reshape(-1)[j],), inputs,
                                     retain_graph=True, create_graph=create_graph)

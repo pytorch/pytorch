@@ -11,6 +11,7 @@ struct TORCH_API THPDevice {
   at::Device device;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TORCH_API extern PyTypeObject THPDeviceType;
 
 inline bool THPDevice_Check(PyObject *obj) {

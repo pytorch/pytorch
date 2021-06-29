@@ -29,6 +29,7 @@ struct TORCH_API OpaqueTensorImpl : public TensorImpl {
       : TensorImpl(key_set, data_type, device),
         opaque_handle_(std::move(opaque_handle)) {
     set_storage_access_should_throw();
+    set_has_contiguity_policy(HasContiguityPolicy::ContiguityNotSupported);
     sizes_and_strides_.set_sizes(sizes);
     refresh_numel();
     is_non_overlapping_and_dense_ = is_non_overlapping_and_dense;
@@ -41,12 +42,6 @@ struct TORCH_API OpaqueTensorImpl : public TensorImpl {
 
   IntArrayRef strides() const override {
     AT_ERROR("opaque tensors do not have strides");
-  }
-
-  bool is_contiguous(
-      c10::MemoryFormat memory_format =
-          c10::MemoryFormat::Contiguous) const override {
-    AT_ERROR("opaque tensors do not have is_contiguous");
   }
 
   int64_t stride(int64_t d) const override {

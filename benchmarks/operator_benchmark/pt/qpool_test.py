@@ -6,11 +6,11 @@ import operator_benchmark as op_bench
 qpool2d_long_configs = op_bench.config_list(
     attrs=(
         #  C    H    W   k       s       p
-        (  1,   3,   3, (3, 3), (1, 1), (0, 0)),  # dummy        # noqa
-        (  3,  64,  64, (3, 3), (2, 2), (1, 1)),  # dummy        # noqa
+        (  1,   3,   3, (3, 3), (1, 1), (0, 0)),  # dummy        # noqa: E201,E241
+        (  3,  64,  64, (3, 3), (2, 2), (1, 1)),  # dummy        # noqa: E201,E241
         # VGG16 pools with original input shape: (-1, 3, 224, 224)
-        ( 64, 224, 224, (2, 2), (2, 2), (0, 0)),  # MaxPool2d-4  # noqa
-        (256,  56,  56, (2, 2), (2, 2), (0, 0)),  # MaxPool2d-16 # noqa
+        ( 64, 224, 224, (2, 2), (2, 2), (0, 0)),  # MaxPool2d-4  # noqa: E201
+        (256,  56,  56, (2, 2), (2, 2), (0, 0)),  # MaxPool2d-16 # noqa: E241
     ),
     attr_names=('C', 'H', 'W',   # Input layout
                 'k', 's', 'p'),  # Pooling parameters
@@ -23,7 +23,7 @@ qpool2d_long_configs = op_bench.config_list(
 )
 
 qpool2d_short_configs = op_bench.config_list(
-    attrs=((1, 3, 3, (3, 3), (1, 1), (0, 0)),),  # dummy  # noqa
+    attrs=((1, 3, 3, (3, 3), (1, 1), (0, 0)),),  # dummy
     attr_names=('C', 'H', 'W',        # Input layout
                 'k', 's', 'p'),  # Pooling parameters
     cross_product_configs={
@@ -37,15 +37,15 @@ qpool2d_short_configs = op_bench.config_list(
 qadaptive_avgpool2d_long_configs = op_bench.cross_product_configs(
     input_size=(
         # VGG16 pools with original input shape: (-1, 3, 224, 224)
-        (112, 112),  # MaxPool2d-9  # noqa
+        (112, 112),  # MaxPool2d-9
     ),
     output_size=(
         (448, 448),
         # VGG16 pools with original input shape: (-1, 3, 224, 224)
-        (224, 224),  # MaxPool2d-4  # noqa
-        (112, 112),  # MaxPool2d-9  # noqa
-        ( 56,  56),  # MaxPool2d-16 # noqa
-        ( 14,  14),  # MaxPool2d-30 # noqa
+        (224, 224),  # MaxPool2d-4
+        (112, 112),  # MaxPool2d-9
+        ( 56,  56),  # MaxPool2d-16 # noqa: E201,E241
+        ( 14,  14),  # MaxPool2d-30 # noqa: E201,E241
     ),
     N=(1, 4),
     C=(1, 3, 64, 128),

@@ -228,7 +228,7 @@ def _symeig_backward_partial_eigenspace(D_grad, U_grad, A, D, U, largest):
     #
     # check if `chr_poly_D_at_A_to_U_ortho` is positive-definite or negative-definite
     chr_poly_D_at_A_to_U_ortho_sign = -1 if (largest and (k % 2 == 1)) else +1
-    chr_poly_D_at_A_to_U_ortho_L = torch.cholesky(
+    chr_poly_D_at_A_to_U_ortho_L = torch.linalg.cholesky(
         chr_poly_D_at_A_to_U_ortho_sign * chr_poly_D_at_A_to_U_ortho
     )
 
@@ -273,7 +273,7 @@ class LOBPCGAutogradFunction(torch.autograd.Function):
                 tol: Optional[float] = None,
                 largest: Optional[bool] = None,
                 method: Optional[str] = None,
-                tracker: Optional[None] = None,
+                tracker: None = None,
                 ortho_iparams: Optional[Dict[str, int]] = None,
                 ortho_fparams: Optional[Dict[str, float]] = None,
                 ortho_bparams: Optional[Dict[str, bool]] = None
@@ -345,7 +345,7 @@ def lobpcg(A: Tensor,
            tol: Optional[float] = None,
            largest: Optional[bool] = None,
            method: Optional[str] = None,
-           tracker: Optional[None] = None,
+           tracker: None = None,
            ortho_iparams: Optional[Dict[str, int]] = None,
            ortho_fparams: Optional[Dict[str, float]] = None,
            ortho_bparams: Optional[Dict[str, bool]] = None
@@ -545,7 +545,7 @@ def _lobpcg(A: Tensor,
             tol: Optional[float] = None,
             largest: Optional[bool] = None,
             method: Optional[str] = None,
-            tracker: Optional[None] = None,
+            tracker: None = None,
             ortho_iparams: Optional[Dict[str, int]] = None,
             ortho_fparams: Optional[Dict[str, float]] = None,
             ortho_bparams: Optional[Dict[str, bool]] = None
@@ -606,7 +606,7 @@ def _lobpcg(A: Tensor,
         bparams['ortho_use_drop'] = bparams.get('ortho_use_drop', False)
 
     if not torch.jit.is_scripting():
-        LOBPCG.call_tracker = LOBPCG_call_tracker  # type: ignore
+        LOBPCG.call_tracker = LOBPCG_call_tracker  # type: ignore[assignment]
 
     if len(A.shape) > 2:
         N = int(torch.prod(torch.tensor(A.shape[:-2])))
@@ -628,7 +628,7 @@ def _lobpcg(A: Tensor,
             bXret[i] = worker.X[:, :k]
 
         if not torch.jit.is_scripting():
-            LOBPCG.call_tracker = LOBPCG_call_tracker_orig  # type: ignore
+            LOBPCG.call_tracker = LOBPCG_call_tracker_orig  # type: ignore[assignment]
 
         return bE.reshape(A.shape[:-2] + (k,)), bXret.reshape(A.shape[:-2] + (m, k))
 
@@ -640,7 +640,7 @@ def _lobpcg(A: Tensor,
     worker.run()
 
     if not torch.jit.is_scripting():
-        LOBPCG.call_tracker = LOBPCG_call_tracker_orig  # type: ignore
+        LOBPCG.call_tracker = LOBPCG_call_tracker_orig  # type: ignore[assignment]
 
     return worker.E[:k], worker.X[:, :k]
 
@@ -658,7 +658,7 @@ class LOBPCG(object):
                  fparams,  # type: Dict[str, float]
                  bparams,  # type: Dict[str, bool]
                  method,   # type: str
-                 tracker   # type: Optional[None]
+                 tracker   # type: None
                  ):
         # type: (...) -> None
 
@@ -939,7 +939,8 @@ class LOBPCG(object):
         SBS = _utils.qform(B, S)
         d_row = SBS.diagonal(0, -2, -1) ** -0.5
         d_col = d_row.reshape(d_row.shape[0], 1)
-        R = torch.cholesky((SBS * d_row) * d_col, upper=True)
+        # TODO: Consider reordering the operations to work with lower-triangular matrices
+        R = torch.linalg.cholesky(((SBS * d_row) * d_col).transpose(-2, -1).conj()).transpose(-2, -1).conj()
         # TODO: could use LAPACK ?trtri as R is upper-triangular
         Rinv = torch.inverse(R)
         return Rinv * d_col
@@ -997,7 +998,7 @@ class LOBPCG(object):
         # The original algorithm 4 from [DuerschPhD2015].
         d_col = (d ** -0.5).reshape(d.shape[0], 1)
         DUBUD = (UBU * d_col) * _utils.transpose(d_col)
-        E, Z = _utils.symeig(DUBUD, eigenvectors=True)
+        E, Z = _utils.symeig(DUBUD)
         t = tau * abs(E).max()
         if drop:
             keep = torch.where(E > t)

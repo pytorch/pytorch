@@ -1,11 +1,11 @@
 #pragma once
 
-#include <vector>
-#include <iostream>
-#include <string>
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
+#include <iostream>
+#include <string>
+#include <vector>
 
 namespace c10 {
 
@@ -58,7 +58,7 @@ enum class DispatchKey : uint8_t {
   HIP, // NB: I think this is not actually used, due to Note [Masquerading as
   // CUDA]
   FPGA, // Xilinx support lives out of tree at
-        // https://gitlab.com/pytorch-complex/vitis_kernels
+  // https://gitlab.com/pytorch-complex/vitis_kernels
   MSNPU, // unused externally, but tested at
   // test/cpp_extensions/msnpu_extension.cpp
   XLA, // lives out of tree at https://github.com/pytorch/xla
@@ -66,15 +66,8 @@ enum class DispatchKey : uint8_t {
   Vulkan,
   Metal,
   XPU, // For out of tree Intel's heterogeneous computing plug-in
-
-  // These are Caffe2 device types which we grandfathered into
-  // DispatchKey.
-  // TODO: Caffe2-only DispatchKeys actually should be removed from this enum
-  // and just simply be undispatchable.
-  MKLDNN, // (MKLDNN is treated as another "device" in Caffe2)
-  OpenGL,
-  OpenCL,
-  IDEEP,
+  HPU, // For out of tree & closed source integration of HPU / Habana
+  VE, // For out of tree & closed source integration of SX-Aurora / NEC
 
   // A meta tensor is a tensor without any data associated with it.  (They
   // have also colloquially been referred to as tensors on the "null" device).
@@ -88,12 +81,6 @@ enum class DispatchKey : uint8_t {
   QuantizedCPU, // registered at build/aten/src/ATen/RegisterQuantizedCPU.cpp
   QuantizedCUDA, // registered at build/aten/src/ATen/RegisterQuantizedCUDA.cpp
   QuantizedXPU, // For out of tree Intel's heterogeneous computing plug-in
-  ComplexCPU, // lives out of tree at
-  // https://gitlab.com/pytorch-complex/pytorch-cpu-strided-complex
-  ComplexCUDA, // and
-  // https://gitlab.com/pytorch-complex/pytorch-cuda-strided-complex
-  // tested at test/cpp_extensions/complex_registration_extension.cpp
-  // TODO: Remove Complex dispatch keys when Complex is moved in tree
 
   // This backend is to support custom RNGs; it lets you go
   // to a different kernel if you pass in a generator that is not a
@@ -117,8 +104,13 @@ enum class DispatchKey : uint8_t {
   SparseHIP, // TODO: I think this is not actually used, due to Note
   // [Masquerading as CUDA]
   SparseXPU, // For out of tree Intel's heterogeneous computing plug-in
+  SparseVE, // For out of tree & closed source integration of SX-Aurora / NEC
+
+  SparseCsrCPU,
+  SparseCsrCUDA,
 
   NestedTensor, // lives out of tree at https://github.com/pytorch/nestedtensor
+
   // Here are reserved backends for user-defined backends, see Note [Private use
   // DispatchKey]
   // To see some example about how to use this, check out MSNPU
@@ -128,6 +120,8 @@ enum class DispatchKey : uint8_t {
 
   // Define an alias key to represent end of backend dispatch keys.
   // If you add new backend keys after PrivateUse3, please also update it here.
+  // (But you shouldn't: private use keys should have higher precedence than
+  // all built-in keys)
   EndOfBackendKeys = PrivateUse3,
 
   // In some situations, it is not immediately obvious what the correct
@@ -136,6 +130,9 @@ enum class DispatchKey : uint8_t {
   // can be registered to implement the custom determination of the
   // correct backend.
   BackendSelect,
+
+  Python,
+  FuncTorchPython, // See Note [Out-of-tree vmap+grad prototype]
 
   // The named dispatch key is set for any tensors with named dimensions.
   // Although we have a dispatch key for named tensors, for historical reasons,
@@ -151,8 +148,18 @@ enum class DispatchKey : uint8_t {
   // constituent parts.
   Named,
 
-  // Note [InplaceOrView key]
-  // InplaceOrView key is used by inplace or view ops to register a kernel
+  // The Conjugate dispatch key is set for any tensors that need to perform
+  // conjugation
+  // This is implemented at a dispatch level right before any backends run
+  Conjugate,
+
+  // See Note [Out-of-tree vmap+grad prototype]. The purpose of this key
+  // is to insert code after the "autograd subsystem" runs, so this key should
+  // be directly after ADInplaceOrView and all of the autograd keys.
+  FuncTorchDynamicLayerBackMode,
+
+  // Note [ADInplaceOrView key]
+  // ADInplaceOrView key is used by inplace or view ops to register a kernel
   // that does additional setup for future autograd computation.
   //
   // 1. For inplace ops this kernel does version bump
@@ -170,22 +177,23 @@ enum class DispatchKey : uint8_t {
   // torch::Tensor my_functional_op(...) {
   //   {
   //     // Note for every op in VariableType, you need to go through
-  //     // `AutoDispatchBelowInplaceOrView` guard exactly once to add the
+  //     // `AutoDispatchBelowADInplaceOrView` guard exactly once to add the
   //     // key to TLS excluded set. If you don't go through it at all,
   //     // inplace/view ops called through `at::` inside your backend
-  //     // kernel will dispatch to InplaceOrView kernels and do a lot
+  //     // kernel will dispatch to ADInplaceOrView kernels and do a lot
   //     // of extra work.
-  //     at::AutoDispatchBelowInplaceOrView guard(true);
+  //     at::AutoDispatchBelowADInplaceOrView guard;
   //     at::redispatch::my_functional_op(...);
   //   }
   // }
   // But this work is currently blocked since it adds an extra dispatch
   // for all ops and it's non-trivial overhead at model level(a few percents).
   // Thus our current approach takes advantage of the fact every kernel go
-  // through VariableType kernel first and pulls the `at::AutoDispatchBelowInplaceOrView` guard of functional ops
+  // through VariableType kernel first and pulls the
+  // `at::AutoDispatchBelowADInplaceOrView` guard of functional ops
   // up to the `VariableType` kernel. Thus we only add the extra dispatch
   // to view/inplace ops to minimize its perf impact to real models.
-  InplaceOrView,
+  ADInplaceOrView,
 
   // Note [Alias Dispatch Key : Autograd]
   // All backends are oblivious to autograd; autograd is handled as a
@@ -218,7 +226,9 @@ enum class DispatchKey : uint8_t {
   AutogradXLA,
   AutogradXPU,
   AutogradMLC,
-  AutogradNestedTensor, // lives out of tree at https://github.com/pytorch/nestedtensor
+  AutogradHPU,
+  AutogradNestedTensor, // lives out of tree at
+  // https://github.com/pytorch/nestedtensor
   // Here are some reserved pre-autograd keys for user-defined backends, see
   // Note [Private use DispatchKey]
   AutogradPrivateUse1,
@@ -229,12 +239,16 @@ enum class DispatchKey : uint8_t {
 
   // Autocasting precedes VariableTypeId, to ensure casts are autograd-exposed
   // and inputs are saved for backward in the post-autocast type.
-  Autocast,
+  AutocastCPU,
+  AutocastCUDA,
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ WRAPPERS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // There are a number of alternative modes which may want to handle before
   // autograd; for example, error checking, tracing, profiling or vmap.  They
   // go here.
+
+  FuncTorchBatched, // See Note [Out-of-tree vmap+grad prototype]
+  FuncTorchVmapMode, // See Note [Out-of-tree vmap+grad prototype]
 
   // This is the dispatch key for BatchedTensorImpl, which is used to implement
   // batching rules for vmap.
@@ -243,6 +257,9 @@ enum class DispatchKey : uint8_t {
   // When we are inside a vmap, all tensors dispatch on this key.
   // See Note: [DispatchKey::VmapMode usage] for more details.
   VmapMode,
+
+  FuncTorchGradWrapper, // See Note [Out-of-tree vmap+grad prototype]
+  FuncTorchDynamicLayerFrontMode, // See Note [Out-of-tree vmap+grad prototype]
 
   // TESTING: This is intended to be a generic testing tensor type id.
   // Don't use it for anything real; its only acceptable use is within a single
@@ -276,22 +293,25 @@ enum class DispatchKey : uint8_t {
 
   // See Note [Alias Dispatch Key : Autograd]
   Autograd,
-  Math, // registered at build/aten/src/ATen/RegisterMath.cpp
-  DefaultBackend, // registered at
-                  // build/aten/src/ATen/RegisterDefaultBackend.cpp
+  CompositeImplicitAutograd, // registered at
+  // build/aten/src/ATen/RegisterCompositeImplicitAutograd.cpp
+  CompositeExplicitAutograd, // registered at
+  // build/aten/src/ATen/RegisterCompositeExplicitAutograd.cpp
 
   // Define an alias key to represent end of alias dispatch keys.
   // If you add new alias keys after Autograd, please also update it here.
-  EndOfAliasKeys = DefaultBackend, //
+  EndOfAliasKeys = CompositeExplicitAutograd, //
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~ BC ALIASES ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // The aliases exist for backwards compatibility reasons, they shouldn't
   // be used
   CPUTensorId = CPU,
   CUDATensorId = CUDA,
+  DefaultBackend = CompositeExplicitAutograd,
   PrivateUse1_PreAutograd = AutogradPrivateUse1,
   PrivateUse2_PreAutograd = AutogradPrivateUse2,
   PrivateUse3_PreAutograd = AutogradPrivateUse3,
+  Autocast = AutocastCUDA,
 };
 
 // Note [Private use DispatchKey]
@@ -312,15 +332,15 @@ enum class DispatchKey : uint8_t {
 // We provide two classes of private user tensor id: regular DispatchKeys
 // and Autograd DispatchKeys.  DispatchKeys serve the role of ordinary "backend"
 // DispatchKeys; if you were adding support for a new type of accelerator, you
-// would use a backend DispatchKey, and ideally automatically reuse AutogradOther
-// definitions already defined in PyTorch.  AutogradPrivateUse DispatchKeys serve
-// as "wrapper" DispatchKeys: they are only necessary for tensors that compose
-// multiple internal tensors, and for cases when the built-in autograd formulas
-// for operators are not appropriate.
+// would use a backend DispatchKey, and ideally automatically reuse
+// AutogradOther definitions already defined in PyTorch.  AutogradPrivateUse
+// DispatchKeys serve as "wrapper" DispatchKeys: they are only necessary for
+// tensors that compose multiple internal tensors, and for cases when the
+// built-in autograd formulas for operators are not appropriate.
 
 static_assert(
-  static_cast<uint8_t>(DispatchKey::NumDispatchKeys) < 64,
-  "DispatchKey is used as index into 64-bit bitmask; you must have less than 64 entries");
+    static_cast<uint8_t>(DispatchKey::NumDispatchKeys) < 64,
+    "DispatchKey is used as index into 64-bit bitmask; you must have less than 64 entries");
 
 C10_API const char* toString(DispatchKey);
 C10_API std::ostream& operator<<(std::ostream&, DispatchKey);
@@ -341,10 +361,10 @@ inline bool isAliasDispatchKey(DispatchKey k) {
 } // namespace c10
 
 namespace torch {
-  // Expose the constant, but not the TYPE (DispatchKey is an implementation
-  // detail!)
-  using c10::kAutograd;
-}
+// Expose the constant, but not the TYPE (DispatchKey is an implementation
+// detail!)
+using c10::kAutograd;
+} // namespace torch
 
 // NB: You really shouldn't use this instance; this enum is guaranteed
 // to be pretty small so a regular array should be acceptable.
@@ -358,4 +378,4 @@ struct hash<c10::DispatchKey> {
     return static_cast<size_t>(x);
   }
 };
-}
+} // namespace std

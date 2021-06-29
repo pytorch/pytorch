@@ -229,7 +229,7 @@ def parse(graph, trace, args=None, omit_useless_nodes=True):
             # We don't need classtype nodes; scope will provide this information
             if node.output().type().kind() != CLASSTYPE_KIND:
                 node_py = NodePyOP(node)
-                node_py.scopeName = attr_to_scope[attr_name]  # type: ignore
+                node_py.scopeName = attr_to_scope[attr_name]  # type: ignore[attr-defined]
                 nodes_py.append(node_py)
         else:
             nodes_py.append(NodePyOP(node))

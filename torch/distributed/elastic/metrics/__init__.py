@@ -36,7 +36,7 @@ the job such as the region or stage (dev vs prod).
 
 **Publish Metrics**:
 
-Using torchelastic’s metrics API is similar to using python’s logging
+Using torchelastic's metrics API is similar to using python's logging
 framework. You first have to configure a metrics handler before
 trying to add metric data.
 
@@ -137,7 +137,7 @@ Now all metrics in the group ``my_app`` will be printed to stdout as:
 
 from typing import Optional
 
-from .api import (  # noqa F401
+from .api import (  # noqa: F401
     ConsoleMetricHandler,
     MetricData,
     MetricHandler,
@@ -158,6 +158,6 @@ def initialize_metrics(cfg: Optional[MetricsConfig] = None):
 
 
 try:
-    from torch.distributed.elastic.metrics.static_init import *  # type: ignore # noqa: F401 F403
+    from torch.distributed.elastic.metrics.static_init import *  # type: ignore[import] # noqa: F401 F403
 except ModuleNotFoundError:
     pass
