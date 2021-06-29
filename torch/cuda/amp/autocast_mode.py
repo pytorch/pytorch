@@ -1,6 +1,5 @@
 import torch
 import functools
-import warnings
 import collections
 try:
     import numpy as np
@@ -8,9 +7,8 @@ try:
 except ModuleNotFoundError:
     HAS_NUMPY = False
 from torch._six import string_classes
-from .common import amp_definitely_not_available
 
-autocast = functools.partial(torch.autocast,device_type='cuda')
+autocast = functools.partial(torch.autocast, device_type='cuda')
 
 # Casts Tensors and containers of Tensors.  Special-cases passthroughs for strings and np.ndarrays, which
 # may be falsely detected as "Iterables."
