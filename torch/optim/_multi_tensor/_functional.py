@@ -393,3 +393,45 @@ def rprop(params: List[Tensor],
 
     for i in range(len(states)):
         states[i]['prev'].copy_(grads[i])  # type: ignore[index]
+
+
+def rmsprop(params: List[Tensor],
+            grads: List[Tensor],
+            states: List[Tensor],
+            square_avg: List[Tensor],
+            *,
+            weight_decay: float,
+            centered: float,
+            eps: float,
+            momentum: float,
+            lr: float,
+            alpha: float):
+    r"""Functional API that performs RMSprop algorithm computation.
+
+    See :class:`~torch.optim.RMSprop` for details.
+    """
+
+    if weight_decay != 0:
+        torch._foreach_add_(grads, params, alpha=weight_decay)   # type: ignore[name-defined]
+
+    torch._foreach_mul_(square_avg, alpha)
+    torch._foreach_addcmul_(square_avg, grads, grads, value=1 - alpha)
+
+    if centered:
+        grad_avgs = [s['grad_avg'] for s in states]  # type: ignore[index]
+        torch._foreach_mul_(grad_avgs, alpha)
+        torch._foreach_add_(grad_avgs, grads, alpha=1 - alpha)
+        avg = torch._foreach_addcmul(square_avg, grad_avgs, grad_avgs, value=-1)
+        torch._foreach_sqrt_(avg)
+        torch._foreach_add_(avg, eps)
+    else:
+        avg = torch._foreach_sqrt(square_avg)
+        torch._foreach_add_(avg, eps)
+
+    if momentum > 0:
+        buf = [s['momentum_buffer'] for s in states]  # type: ignore[index]
+        torch._foreach_mul_(buf, momentum)
+        torch._foreach_addcdiv_(buf, grads, avg)
+        torch._foreach_add_(params, buf, alpha=-lr)   # type: ignore[name-defined]
+    else:
+        torch._foreach_addcdiv_(params, grads, avg, value=-lr)  # type: ignore[name-defined]
