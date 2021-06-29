@@ -122,7 +122,7 @@ class autocast(object):
             if not (key == 'fast_dtype' or key == 'device_type'):
                 raise RuntimeError('Unrecognized optional argument supplied to autocast context manager: ' + str(key))
 
-        
+
         if self.device == 'cpu':
             supported_dtype = [torch.bfloat16]
             if self.fast_dtype not in supported_dtype :
