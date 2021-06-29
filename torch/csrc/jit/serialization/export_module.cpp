@@ -71,13 +71,11 @@ std::pair<IValue, IValue> getFunctionTuple(
   Inline(*graph);
 
   std::shared_ptr<MobileCode> code;
-  if (caffe2::serialize::kProducedBytecodeVersion == 6) {
-    code = std::make_shared<MobileCode>(
-        graph, func.name(), false /* emit_default_input_instructions */);
-  } else {
-    code = std::make_shared<MobileCode>(
-        graph, func.name(), true /* emit_default_input_instructions */);
-  }
+  code = std::make_shared<MobileCode>(
+      graph,
+      func.name(),
+      BytecodeEmitDefaultValueForUnspecifiedArgMode::
+          is_enabled() /* emit_default_input_instructions */);
   auto instructions_copy = code->instructions();
 
   // operator names
@@ -173,11 +171,11 @@ std::pair<IValue, IValue> getFunctionTuple(
     if (it != op_to_specified_args.end()) {
       num_args = it->second;
     }
-    if (caffe2::serialize::kProducedBytecodeVersion == 6) {
+    if (BytecodeEmitDefaultValueForUnspecifiedArgMode::is_enabled()) {
+      operators.emplace_back(Tup({opname.name, opname.overload_name}));
+    } else {
       operators.emplace_back(
           Tup({opname.name, opname.overload_name, num_args}));
-    } else {
-      operators.emplace_back(Tup({opname.name, opname.overload_name}));
     }
   }
 
@@ -305,17 +303,28 @@ void setstateTuple(
   }
 }
 
+bool isLoweredModule(const Module& m) {
+  c10::QualifiedName type_name;
+  if (m.type()->name()) {
+    type_name = m.type()->name().value();
+  }
+  bool isLoweredModule = false;
+  for (const auto& atom : type_name.atoms()) {
+    if (atom == "LoweredModule") {
+      isLoweredModule = true;
+      break;
+    }
+  }
+  return isLoweredModule;
+}
+
 // Check if the global static map of backend debug info
 // contains debug info for this module and any of its children.
 // If so combine all the maps together and return one.
 void getBackendDebugInfoMap(
     const Module& m,
     BackendDebugInfoMapType& debug_map) {
-  c10::QualifiedName type_name;
-  if (m.type()->name()) {
-    type_name = m.type()->name().value();
-  }
-  if (c10::string_view(type_name.name()).ends_with("LoweredModule")) {
+  if (isLoweredModule(m)) {
     auto backend_debug_info =
         m.attr("__backend_debug_info").toCustomClass<PyTorchBackendDebugInfo>();
     const auto& map = backend_debug_info->getDebugInfoMap();
@@ -330,11 +339,7 @@ void getBackendDebugInfoMap(
 
 SourceRangeRecords getBackendSourceRanges(const Module& m) {
   SourceRangeRecords sr_records;
-  c10::QualifiedName type_name;
-  if (m.type()->name()) {
-    type_name = m.type()->name().value();
-  }
-  if (c10::string_view(type_name.name()).ends_with("LoweredModule")) {
+  if (isLoweredModule(m)) {
     constexpr size_t kSourceRange = 1;
     auto backend_debug_info =
         m.attr("__backend_debug_info").toCustomClass<PyTorchBackendDebugInfo>();
@@ -630,12 +635,12 @@ void ScriptModuleSerializer::writeByteCode(
     const bool save_mobile_debug_info) {
   std::vector<c10::IValue> elements;
   BackendDebugInfoRecorder debug_info_recorder;
-  elements.emplace_back(
-      static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
+  int64_t version_to_write = caffe2::serialize::kProducedBytecodeVersion;
+
+  elements.emplace_back(static_cast<int64_t>(version_to_write));
   std::vector<c10::IValue> debug_info_elements;
   // Always save debug handles
-  debug_info_elements.emplace_back(
-      static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
+  debug_info_elements.emplace_back(static_cast<int64_t>(version_to_write));
 
   moduleMethodsTuple(
       module, elements, debug_info_elements, debug_info_recorder);
@@ -848,6 +853,18 @@ std::vector<std::string> export_opnames(const script::Module& m) {
   std::set<std::string> names;
   export_opnames(m, names);
   return std::vector<std::string>(names.begin(), names.end());
+}
+
+// Thread local flag (only happens in export, i.e. on server side)
+// to control if instructions for bytecode default inputs are emitted
+// or not. It's the major difference between bytecode v5 and v6.
+thread_local bool emitBytecodeDefaultInputs =
+    caffe2::serialize::kProducedBytecodeVersion <= 5 ? true : false;
+bool BytecodeEmitDefaultValueForUnspecifiedArgMode::is_enabled() {
+  return emitBytecodeDefaultInputs;
+}
+void BytecodeEmitDefaultValueForUnspecifiedArgMode::set_enabled(bool enabled) {
+  emitBytecodeDefaultInputs = enabled;
 }
 
 } // namespace jit
