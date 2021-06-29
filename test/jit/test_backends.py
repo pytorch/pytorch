@@ -558,6 +558,39 @@ class BasicModuleTestWithCompiler(JitBackendTestCaseWithCompiler):
         input = torch.randn(5)
         self.check_forward((input, input))
 
+class ErrorMessagesWithCompiler(JitBackendTestCase):
+    """
+    Tests for errors that occur with compiler, specifically:
+        * an operator is not supported by the backend
+    """
+
+    class ModuleNotSupported(torch.nn.Module):
+        """
+        A module with an operator that is not supported.
+        """
+        def __init__(self):
+            super().__init__()
+
+        def forward(self, x, h):
+            return x * h
+            self._loweredmodule.forward()
+
+    def setUp(self):
+        super().setUp()
+
+    def test_errors(self):
+        scripted_module_n = torch.jit.script(ErrorMessagesWithCompiler.ModuleNotSupported())
+        # Test exception is thrown when lowering a module with an unsupported operator
+        with self.assertRaisesRegexWithHighlight(RuntimeError,
+                                                 # Special escape characters are replaced with '.'
+                                                 r"""The node of aten::mul is not supported in this compiler. .*
+        def forward.self, x, h.:
+            return x . h
+                   ~~~~~ <--- HERE
+            self._loweredmodule.forward..
+""", ""):
+            lowered_module_n = torch._C._jit_to_backend("backend_with_compiler_demo", scripted_module_n, {"forward": {"": ""}})
+
 class CompModuleTestWithCompiler(JitBackendTestCase):
     """
     Tests for CompModule, which is a module with two lowered submodules
@@ -607,9 +640,12 @@ class CompModuleTestWithCompiler(JitBackendTestCase):
         )
         self.module = CompModuleTestWithCompiler.CompModule(lowered_add, lowered_sub)
         self.scripted_module = torch.jit.script(CompModuleTestWithCompiler.CompModule(lowered_add, lowered_sub))
-        # No backend and mobile versions of CompModule currently, so this is filler.
+        # No backend version of CompModule currently, so this is filler.
         self.lowered_module = self.scripted_module
-        self.mobile_module = self.scripted_module
+        # Create a mobile version of CompModule from JIT version
+        buffer = io.BytesIO(self.scripted_module._save_to_buffer_for_lite_interpreter())
+        buffer.seek(0)
+        self.mobile_module = _load_for_lite_interpreter(buffer)
 
     def test_execution(self):
         # Test execution with backend against Python and JIT.
@@ -631,15 +667,21 @@ class TestBackendsWithCompiler(JitTestCase):
     def __init__(self, name):
         super().__init__(name)
         self.basic_module_compiler_test = BasicModuleTestWithCompiler(name)
+        self.error_module_compiler_test = ErrorMessagesWithCompiler(name)
         self.comp_module_compiler_test = CompModuleTestWithCompiler(name)
 
     def setUp(self):
         super().setUp()
         if not TEST_WITH_ROCM:
             self.basic_module_compiler_test.setUp()
+            self.error_module_compiler_test.setUp()
             self.comp_module_compiler_test.setUp()
 
     @skipIfRocm
     def test_execution(self):
         self.basic_module_compiler_test.test_execution()
         self.comp_module_compiler_test.test_execution()
+
+    @skipIfRocm
+    def test_errors(self):
+        self.error_module_compiler_test.test_errors()
