@@ -17627,6 +17627,119 @@ class TestLazyModules(TestCase):
         self._check_lazy_batchnorm_state(nn.BatchNorm3d, nn.LazyBatchNorm3d)
         self._check_lazy_batchnorm_state(nn.BatchNorm3d, nn.LazyBatchNorm3d)
 
+    def _check_lazy_instancenorm(self, cls, lazy_cls, input_shape):
+        for affine in [False, True]:
+            for track_running_stats in [False, True]:
+                lazy_module = lazy_cls(affine=affine, track_running_stats=track_running_stats)
+
+                if affine:
+                    self.assertIsInstance(lazy_module.weight, UninitializedParameter)
+                    self.assertIsInstance(lazy_module.bias, UninitializedParameter)
+                if track_running_stats:
+                    self.assertIsInstance(lazy_module.running_mean, UninitializedBuffer)
+                    self.assertIsInstance(lazy_module.running_var, UninitializedBuffer)
+
+                input = torch.ones(*input_shape)
+                y = lazy_module(input)
+                self.assertIsInstance(lazy_module, cls)
+                self.assertNotIsInstance(lazy_module, lazy_cls)
+
+                num_features = input_shape[1]
+                module = cls(num_features, affine=affine, track_running_stats=track_running_stats)
+                expected = module(input)
+
+                if module.weight is not None:
+                    self.assertEqual(lazy_module.weight.shape, module.weight.shape)
+                    self.assertEqual(lazy_module.weight, module.weight)
+                if module.bias is not None:
+                    self.assertEqual(lazy_module.bias.shape, module.bias.shape)
+                    self.assertEqual(lazy_module.bias, module.bias)
+                if module.running_mean is not None:
+                    self.assertEqual(lazy_module.running_mean.shape, module.running_mean.shape)
+                    self.assertEqual(lazy_module.running_mean, module.running_mean)
+                if module.running_var is not None:
+                    self.assertEqual(lazy_module.running_var.shape, module.running_var.shape)
+                    self.assertEqual(lazy_module.running_var, module.running_var)
+
+    def _check_lazy_instancenorm_pickle(self, cls, lazy_cls, input_shape):
+        for affine in [False, True]:
+            for track_running_stats in [False, True]:
+                module = lazy_cls(affine=affine, track_running_stats=track_running_stats)
+                module = pickle.loads(pickle.dumps(module))
+
+                self.assertIsInstance(module, lazy_cls)
+                if affine:
+                    self.assertIsInstance(module.weight, UninitializedParameter)
+                    self.assertIsInstance(module.bias, UninitializedParameter)
+                if track_running_stats:
+                    self.assertIsInstance(module.running_mean, UninitializedBuffer)
+                    self.assertIsInstance(module.running_var, UninitializedBuffer)
+
+                input = torch.ones(*input_shape)
+                module(input)  # fully materialized
+                module = pickle.loads(pickle.dumps(module))
+
+                self.assertNotIsInstance(module, lazy_cls)
+                self.assertIsInstance(module, cls)
+                if affine:
+                    self.assertNotIsInstance(module.weight, UninitializedParameter)
+                    self.assertNotIsInstance(module.bias, UninitializedParameter)
+                if track_running_stats:
+                    self.assertNotIsInstance(module.running_mean, UninitializedBuffer)
+                    self.assertNotIsInstance(module.running_var, UninitializedBuffer)
+
+    def _check_lazy_instancenorm_state(self, cls, lazy_cls):
+        for affine in [False, True]:
+            for track_running_stats in [False, True]:
+                module = cls(10, affine=affine, track_running_stats=track_running_stats)
+                lazy_module = lazy_cls(affine=affine, track_running_stats=track_running_stats)
+                lazy_module.load_state_dict(module.state_dict())
+                # Parameters have been initialized but the module won't become a full
+                # InstanceNorm one until the first iteration. This is due to
+                # limitations on the state_dict loading logic
+                self.assertFalse(lazy_module.has_uninitialized_params())
+                if affine:
+                    self.assertEqual(lazy_module.weight.shape, (10,))
+                    self.assertEqual(lazy_module.bias.shape, (10,))
+                if track_running_stats:
+                    self.assertEqual(lazy_module.running_mean.shape, (10,))
+                    self.assertEqual(lazy_module.running_var.shape, (10,))
+
+        module = cls(10, affine=True, track_running_stats=True)
+        lazy_module = lazy_cls(affine=True, track_running_stats=True)
+        with self.assertRaisesRegex(RuntimeError, 'shape of an uninitialized'):
+            module.load_state_dict(lazy_module.state_dict())
+
+    def test_lazy_instancenorm1d(self):
+        self._check_lazy_instancenorm(nn.InstanceNorm1d, nn.LazyInstanceNorm1d, (16, 3, 6))
+
+    def test_lazy_instancenorm1d_pickle(self):
+        self._check_lazy_instancenorm_pickle(nn.InstanceNorm1d, nn.LazyInstanceNorm1d, (16, 3, 6))
+
+    def test_lazy_instancenorm1d_state(self):
+        self._check_lazy_instancenorm_state(nn.InstanceNorm1d, nn.LazyInstanceNorm1d)
+        self._check_lazy_instancenorm_state(nn.InstanceNorm1d, nn.LazyInstanceNorm1d)
+
+    def test_lazy_instancenorm2d(self):
+        self._check_lazy_instancenorm(nn.InstanceNorm2d, nn.LazyInstanceNorm2d, (16, 3, 6, 7))
+
+    def test_lazy_instancenorm2d_pickle(self):
+        self._check_lazy_instancenorm_pickle(nn.InstanceNorm2d, nn.LazyInstanceNorm2d, (16, 3, 6, 7))
+
+    def test_lazy_instancenorm2d_state(self):
+        self._check_lazy_instancenorm_state(nn.InstanceNorm2d, nn.LazyInstanceNorm2d)
+        self._check_lazy_instancenorm_state(nn.InstanceNorm2d, nn.LazyInstanceNorm2d)
+
+    def test_lazy_instancenorm3d(self):
+        self._check_lazy_instancenorm(nn.InstanceNorm3d, nn.LazyInstanceNorm3d, (16, 3, 6, 7, 8))
+
+    def test_lazy_instancenorm3d_pickle(self):
+        self._check_lazy_instancenorm_pickle(nn.InstanceNorm3d, nn.LazyInstanceNorm3d, (16, 3, 6, 7, 8))
+
+    def test_lazy_instancenorm3d_state(self):
+        self._check_lazy_instancenorm_state(nn.InstanceNorm3d, nn.LazyInstanceNorm3d)
+        self._check_lazy_instancenorm_state(nn.InstanceNorm3d, nn.LazyInstanceNorm3d)
+
     @suppress_warnings
     def test_materialize_dtype(self):
         module = LazyModule()
