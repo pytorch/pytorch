@@ -85,7 +85,7 @@ class Distribution(object):
                 event_shape = old_param.shape[:old_param.dim() - constraint.event_dim]
                 new_param = old_param.expand(batch_shape + event_shape)
                 setattr(new, name, new_param)
-        Distribution.__init__(batch_shape, self.event_shape, validate_args=False)
+        Distribution.__init__(new, batch_shape, self.event_shape, validate_args=False)
         new._validate_args = self._validate_args
         return new
 
