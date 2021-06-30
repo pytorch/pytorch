@@ -4,7 +4,9 @@ from torch._python_dispatcher import PythonDispatcher
 
 from collections import namedtuple
 import itertools
+import os
 import re
+import torch.utils.cpp_extension
 
 # TODO: Expand the dispatcher API to be a generic API for interfacing with
 # the dispatcher from Python!
@@ -886,6 +888,7 @@ CompositeImplicitAutograd[alias] fn_CompositeImplicitAutograd
                 r"Registration to both CompositeImplicitAutograd and CompositeExplicitAutograd is not allowed"):
             dispatcher.register(["CompositeExplicitAutograd", "CompositeImplicitAutograd"])
 
+    # TODO(jwtan): Use a C++ extension, like msnpu, to introduce a dangling impl and examine the output.
     def test_find_dangling_impls(self):
         self.assertEqual(0, len(C._dispatch_find_dangling_impls()))
 

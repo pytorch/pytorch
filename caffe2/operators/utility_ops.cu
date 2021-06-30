@@ -8,6 +8,7 @@
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/flatten_op.h"
+#include "caffe2/utils/GpuAtomics.cuh"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
@@ -157,7 +158,7 @@ __global__ void AxpySliceKernel(
       float a = *alpha[b];
       const float* x_offset = X[b] + (i * slice_size);
       for (int j = threadIdx.x; j < slice_size; j += blockDim.x) {
-        atomicAdd(&y_offset[j], a * x_offset[j]);
+        gpu_atomic_add(&y_offset[j], a * x_offset[j]);
       }
     }
   }
@@ -182,7 +183,7 @@ __global__ void AxpySliceKernel2(
     T_INDEX idx = Indices[i];
     float* y_offset = Y + (idx * slice_size);
     for (int j = threadIdx.x; j < slice_size; j += blockDim.x) {
-      atomicAdd(&y_offset[j], alpha[0] * X[(i * slice_size) + j]);
+      gpu_atomic_add(&y_offset[j], alpha[0] * X[(i * slice_size) + j]);
     }
   }
 }

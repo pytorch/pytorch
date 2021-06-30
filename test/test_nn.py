@@ -2161,6 +2161,14 @@ class TestNN(NNTestCase):
                 # which does a set_ with a non-contiguous tensor while the gradient is contiguous
                 return torch.linalg.solve(Id + X, Id - X).contiguous()
 
+        class Resize(nn.Module):
+            def forward(self, X):
+                return X[[0]]
+
+        class NoResize(nn.Module):
+            def forward(self, X):
+                return X
+
         # Define a couple vector parametrizations
         class FirstZero(nn.Module):
             def forward(self, x):
@@ -2174,6 +2182,59 @@ class TestNN(NNTestCase):
         initial_weight_id = id(model.weight)
         initial_bias_id = id(model.bias)
         initial_model = deepcopy(model)
+
+        # Test unsafe flag
+        with self.assertRaisesRegex(ValueError, "Registering a parametrization may not change the shape of the tensor"):
+            parametrize.register_parametrization(model, "weight", Resize())  # default unsafe = False
+            model(torch.ones(8, 8))
+
+        # One parametrization with unsafe=True
+        parametrize.register_parametrization(model, "weight", Resize(), unsafe=True)
+        self.assertTrue(hasattr(model, "parametrizations"))
+        self.assertTrue(parametrize.is_parametrized(model))
+        self.assertTrue(parametrize.is_parametrized(model, "weight"))
+        self.assertFalse(parametrize.is_parametrized(model, "bias"))
+        self.assertNotIn("weight", model._parameters)
+        A = model.weight
+        self.assertTrue(A.shape[0] == 1)
+        parametrize.remove_parametrizations(model, "weight", leave_parametrized=False)
+        self.assertFalse(hasattr(model, "parametrizations"))
+        self.assertEqual(model.weight, initial_model.weight)
+        self.assertEqual(id(model.weight), initial_weight_id)
+        self.assertEqual(model.__class__, nn.Linear)
+
+        # Two parametrizations with unsafe=True
+        parametrize.register_parametrization(model, "weight", Resize(), unsafe=True)
+        parametrize.register_parametrization(model, "weight", NoResize(), unsafe=False)
+        self.assertTrue(hasattr(model, "parametrizations"))
+        self.assertTrue(parametrize.is_parametrized(model))
+        self.assertTrue(parametrize.is_parametrized(model, "weight"))
+        self.assertFalse(parametrize.is_parametrized(model, "bias"))
+        self.assertNotIn("weight", model._parameters)
+        A = model.weight
+        self.assertTrue(A.shape[0] == 1)
+        parametrize.remove_parametrizations(model, "weight", leave_parametrized=False)
+        self.assertFalse(hasattr(model, "parametrizations"))
+        self.assertEqual(model.weight, initial_model.weight)
+        self.assertEqual(id(model.weight), initial_weight_id)
+        self.assertEqual(model.__class__, nn.Linear)
+
+        # Test unsafe flag doesn't change expected behavior
+        parametrize.register_parametrization(model, "weight", Skew(), unsafe=True)
+        self.assertTrue(hasattr(model, "parametrizations"))
+        self.assertTrue(parametrize.is_parametrized(model))
+        self.assertTrue(parametrize.is_parametrized(model, "weight"))
+        self.assertFalse(parametrize.is_parametrized(model, "bias"))
+        self.assertNotIn("weight", model._parameters)
+        # Result should be skew-symmetric
+        A = model.weight
+        self.assertTrue(torch.allclose(A, -A.T))
+        # Remove and check consistency
+        parametrize.remove_parametrizations(model, "weight", leave_parametrized=False)
+        self.assertFalse(hasattr(model, "parametrizations"))
+        self.assertEqual(model.weight, initial_model.weight)
+        self.assertEqual(id(model.weight), initial_weight_id)
+        self.assertEqual(model.__class__, nn.Linear)
 
         # Test one parametrization
         parametrize.register_parametrization(model, "weight", Skew())
@@ -10402,6 +10463,31 @@ class TestNN(NNTestCase):
         for g, ge in zip(grads, grads_expected):
             self.assertEqual(g, ge)
 
+    def test_bilinear_non_contiguous(self):
+        module = nn.Bilinear(7, 7, 5)
+        input1 = torch.randn(4, 7, 10, requires_grad=True)
+        input2 = torch.randn(4, 7, 10, requires_grad=True)
+        input1_tp = input1.transpose(1, 2)
+        input2_tp = input2.transpose(1, 2)
+
+        grad_output = torch.randn(4, 10, 5)
+
+        def run(input1_tp, input2_tp):
+            input1.grad = input2.grad = None
+            output = module(input1_tp, input2_tp)
+            output.backward(grad_output)
+
+            return output.data, input1.grad.data, input2.grad.data
+
+        out_nc, g1_nc, g2_nc = run(input1_tp, input2_tp)
+        input1_tp = input1_tp.contiguous()
+        input2_tp = input2_tp.contiguous()
+        out, g1, g2 = run(input1_tp, input2_tp)
+
+        self.assertEqual(out, out_nc)
+        self.assertEqual(g1, g1_nc)
+        self.assertEqual(g2, g2_nc)
+
     def test_bilinear_no_bias(self):
         module = nn.Bilinear(10, 10, 8)
         module_no_bias = nn.Bilinear(10, 10, 8, False)
@@ -13128,6 +13214,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(x.grad, ref_x.grad)
 
     @onlyCUDA   # Test if CPU and GPU results match
+    @unittest.skipIf(True, "temporarily disabled")
     def test_ReflectionPad3d_large(self, device):
         shapes = ([2, 1000, 7, 7, 7], [1000, 2, 7, 7, 7])
         pad = (1, 2, 3, 4, 5, 6)
@@ -13819,6 +13906,42 @@ class TestNNDeviceType(NNTestCase):
 
         helper(2, 8, 4, 4, ks=2)
         helper(None, 3, 50, 50, ks=5)
+
+    @onlyCPU
+    @dtypes(torch.float, torch.double)
+    def test_adaptive_pooling_max_nhwc(self, device, dtype):
+        def helper(n, c, h, w, output_height, output_width, contig):
+            input = torch.randint(1, 10, (n, c, h, w), device=device, dtype=dtype)
+            input = input.contiguous(memory_format=torch.channels_last)
+            grad = torch.randint(1, 10, (4, 8, output_height, output_width), device=device, dtype=dtype)
+            grad = grad.contiguous(memory_format=torch.channels_last)
+            if not contig:
+                input = input[:, ::2, :, :]
+                grad = grad[:, ::2, :, :]
+            input.requires_grad_(True)
+            pool = torch.nn.AdaptiveMaxPool2d((output_height, output_width), return_indices=True).to(device)
+
+            ref_input = input.detach().clone().contiguous().requires_grad_(True)
+            ref_grad = grad.detach().clone().contiguous()
+            ref_pool = torch.nn.AdaptiveMaxPool2d((output_height, output_width), return_indices=True).to(device)
+
+            out, ind = pool(input)
+            out.backward(grad)
+            ref_out, ref_ind = ref_pool(ref_input)
+            ref_out.backward(ref_grad)
+
+            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+            self.assertTrue(ref_out.is_contiguous())
+            self.assertTrue(ind.is_contiguous(memory_format=torch.channels_last))
+            self.assertTrue(ref_ind.is_contiguous())
+            self.assertEqual(out, ref_out)
+            self.assertEqual(ind, ref_ind)
+            self.assertEqual(input.grad, ref_input.grad)
+
+        for contig in [True, False]:
+            helper(4, 8, 10, 10, 7, 7, contig)
+            helper(4, 8, 9, 14, 5, 8, contig)
+            helper(4, 8, 11, 11, 1, 1, contig)
 
     def test_embedding_dense_grad(self, device):
         embd = nn.Embedding(20, 20).to(device)
@@ -16381,8 +16504,6 @@ class TestNNDeviceType(NNTestCase):
         helper([2, 3, 5, 7])
         helper([2, 3, 5, 7, 9])
 
-    # TODO: Remove onlyCPU when cuda is supported
-    @onlyCPU
     def test_nll_loss_byte_target_matches_long(self, device):
         N, C = 10, 4
         input = torch.randn(N, C, device=device, requires_grad=True)
@@ -16915,6 +17036,76 @@ class TestModuleGlobalHooks(TestCase):
         expected_grad = -sig_x * (1 - sig_x) * 2 * mask
         self.assertEqual(input.grad, expected_grad)
 
+    def test_module_forward_preforward_hook_removable(self):
+        """
+        This test is to test when multiple pre-forward hook functions can be
+        registered successfully and used correctly, if the handle can be removable
+        during the pre-forward hook function call.
+        """
+        module = nn.Sigmoid()
+
+        def removable_hook(m, input):
+            nonlocal handle
+            handle.remove()
+            return input
+
+        def removable_hook_2(m, input):
+            nonlocal handle_2
+            handle_2.remove()
+            return input
+
+        handle = module.register_forward_pre_hook(removable_hook)
+        handle_2 = module.register_forward_pre_hook(removable_hook_2)
+
+        # make sure hook register is successful
+        self.assertEqual(len(handle.hooks_dict_ref()), 2)
+        self.assertEqual(len(handle_2.hooks_dict_ref()), 2)
+
+        input = torch.randn(2, 2)
+        output = module(input)
+        self.assertTrue(torch.allclose(torch.sigmoid(input), output))
+
+        # make sure hook removal is successful
+        self.assertFalse(handle.id in handle.hooks_dict_ref())
+        self.assertFalse(handle_2.id in handle.hooks_dict_ref())
+        self.assertEqual(len(handle.hooks_dict_ref()), 0)
+        self.assertEqual(len(handle_2.hooks_dict_ref()), 0)
+
+    def test_module_forward_forward_hook_removable(self):
+        """
+        This test is to test when multiple forward hook functions can be registered
+        successfully and used correctly, if the handle can be removable during the
+        forward hook function call.
+        """
+        module = nn.Sigmoid()
+
+        def removable_hook(m, input, output):
+            nonlocal handle
+            handle.remove()
+            return output
+
+        def removable_hook_2(m, input, output):
+            nonlocal handle_2
+            handle_2.remove()
+            return output
+
+        handle = module.register_forward_hook(removable_hook)
+        handle_2 = module.register_forward_hook(removable_hook_2)
+
+        # make sure hook register is successful
+        self.assertEqual(len(handle.hooks_dict_ref()), 2)
+        self.assertEqual(len(handle_2.hooks_dict_ref()), 2)
+
+        input = torch.randn(2, 2)
+        output = module(input)
+        self.assertTrue(torch.allclose(torch.sigmoid(input), output))
+
+        # make sure hook removal is successful
+        self.assertFalse(handle.id in handle.hooks_dict_ref())
+        self.assertFalse(handle_2.id in handle.hooks_dict_ref())
+        self.assertEqual(len(handle.hooks_dict_ref()), 0)
+        self.assertEqual(len(handle_2.hooks_dict_ref()), 0)
+
     def test_global_and_local_hooks_order(self):
         module = nn.Sigmoid()
 
@@ -17178,6 +17369,53 @@ class TestLazyModules(TestCase):
         lazy_module = gen_lazy_module()
         with self.assertRaisesRegex(RuntimeError, 'shape of an uninitialized'):
             module.load_state_dict(lazy_module.state_dict())
+
+
+    def test_lazy_pre_forward_hook(self):
+        """
+        This test is to test whether lazymodule can register other pre-forward hook
+        functions successfully.
+        """
+        class TestModule(torch.nn.modules.lazy.LazyModuleMixin, torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def initialize_parameters(self, input):
+                return None
+
+            def forward(self, input):
+                return input
+
+        def hook_function(module, input):
+            return input[0] + 1
+
+        module = TestModule()
+        module.register_forward_pre_hook(hook_function)
+        output = module(torch.zeros(2, 2))
+        self.assertTrue(torch.allclose(output, torch.ones(2, 2)))
+
+    def test_lazy_forward_hook(self):
+        """
+        This test is to test whether lazymodule can register other forward hook
+        functions successfully.
+        """
+        class TestModule(torch.nn.modules.lazy.LazyModuleMixin, torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def initialize_parameters(self, input):
+                return None
+
+            def forward(self, input):
+                return input
+
+        def hook_function(module, input, output):
+            return input[0] + 1
+
+        module = TestModule()
+        module.register_forward_hook(hook_function)
+        output = module(torch.zeros(2, 2))
+        self.assertTrue(torch.allclose(output, torch.ones(2, 2)))
 
     @suppress_warnings
     def test_lazy_conv1d(self):
