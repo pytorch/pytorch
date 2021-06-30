@@ -201,6 +201,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.set_warn_always,
         torch.vitals_enabled,
         torch.set_vital,
+        torch.read_vitals,
         Tensor.__delitem__,
         Tensor.__dir__,
         Tensor.__getattribute__,
@@ -228,6 +229,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor.to_sparse_csr,
         Tensor._reduce_ex_internal,
         Tensor._fix_weakref,
+        Tensor._python_dispatch.__get__,
         Tensor._conj,
         Tensor._conj_physical,
     }
@@ -372,6 +374,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.clamp_min: lambda input, min, out=None: -1,
         torch.clamp_max: lambda input, max, out=None: -1,
         torch.column_stack: lambda tensors, out=None: -1,
+        torch.cov: lambda input, correction=1, fweights=None, aweights=None: -1,
         torch.clone: lambda input: -1,
         torch.combinations: lambda input, r=2, with_replacement=False: -1,
         torch.complex: lambda real, imag: -1,
