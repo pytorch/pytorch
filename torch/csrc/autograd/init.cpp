@@ -461,6 +461,8 @@ static PyMethodDef methods[] = { // NOLINT
   {"is_autocast_cpu_enabled", is_autocast_cpu_enabled, METH_NOARGS, nullptr},
   {"set_autocast_cpu_dtype", set_autocast_cpu_dtype, METH_O, nullptr},
   {"get_autocast_cpu_dtype", get_autocast_cpu_dtype, METH_NOARGS, nullptr},
+  {"set_autocast_gpu_dtype", set_autocast_gpu_dtype, METH_O, nullptr},
+  {"get_autocast_gpu_dtype", get_autocast_gpu_dtype, METH_NOARGS, nullptr},
   {"autocast_increment_nesting", autocast_increment_nesting, METH_NOARGS, nullptr},
   {"autocast_decrement_nesting", autocast_decrement_nesting, METH_NOARGS, nullptr},
   {"set_anomaly_enabled", set_anomaly_mode_enabled, METH_O, nullptr},
