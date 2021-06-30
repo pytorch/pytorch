@@ -45,7 +45,7 @@ class Linear(Module):
 
     Shape:
         - Input: :math:`(*, H_{in})` where :math:`*` means any number of
-          additional dimensions including 0 and :math:`H_{in} = \text{in\_features}`.
+          additional dimensions including none and :math:`H_{in} = \text{in\_features}`.
         - Output: :math:`(*, H_{out})` where all but the last dimension
           are the same shape as the input and :math:`H_{out} = \text{out\_features}`.
 
