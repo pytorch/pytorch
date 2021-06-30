@@ -78,6 +78,9 @@ def _check_complex_components_individually(
         if actual.dtype not in (torch.complex32, torch.complex64, torch.complex128):
             return check_tensors(actual, expected, equal_nan=equal_nan, **kwargs)
 
+        actual = actual.resolve_conj()
+        expected = expected.resolve_conj()
+
         if relaxed_complex_nan:
             actual, expected = [
                 t.clone().masked_fill(
