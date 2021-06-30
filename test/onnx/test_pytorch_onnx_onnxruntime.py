@@ -9285,26 +9285,24 @@ class TestONNXRuntime(unittest.TestCase):
     def test_dist_normal_correctness(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
-                return torch.distributions.Normal(x, y).sample()
+                return torch.distributions.Normal(x, y).sample([20000])
 
         expected_mean = 5.0
-        expected_var = 10.0
+        expected_std = 10.0
 
         model_export = M()
-        dummy_input = (torch.tensor([expected_mean]), torch.tensor([expected_var]))
+        dummy_input = (torch.tensor([expected_mean]), torch.tensor([expected_std]))
         ort_sess = convert_to_onnx(model_export, input=dummy_input, opset_version=self.opset_version,
                                    training=torch.onnx.TrainingMode.EVAL)
 
-        ort_out = []
-        for i in range(1500):
-            ort_out.append(run_ort(ort_sess, input=dummy_input))
+        ort_out = run_ort(ort_sess, input=dummy_input)
 
-        actual_var = np.var(ort_out)
+        actual_std = np.std(ort_out)
         actual_mean = np.mean(ort_out)
 
-        assert abs(abs(actual_mean) - expected_mean) <= expected_mean * 0.15, \
+        assert abs(abs(actual_mean) - expected_mean) <= expected_mean * 0.1, \
                "the gap of mean between ort outputs and expected one is unacceptable."
-        assert abs(abs(actual_var) - expected_var) <= expected_var * 0.15, \
+        assert abs(abs(actual_std) - expected_std) <= expected_std * 0.1, \
                "the gap of variance between ort outputs and expected one is unacceptable."
 
     @disableScriptTest()
