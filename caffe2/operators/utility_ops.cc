@@ -58,7 +58,7 @@ REGISTER_CPU_OPERATOR(WeightedSumGradient, WeightedSumGradientOp<CPUContext>);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     ScatterWeightedSum,
-    ScatterWeightedSumOp<float, CPUContext>);
+    ScatterWeightedSumOp<CPUContext>);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ScatterAssign, ScatterAssignOp<CPUContext>);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
