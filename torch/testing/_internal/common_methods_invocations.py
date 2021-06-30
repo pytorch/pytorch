@@ -2155,6 +2155,18 @@ def sample_inputs_max_min_binary(op_info, device, dtype, requires_grad, **kwargs
                   for input_tensor, other_tensor in args_for_binary_op)
     return inputs
 
+def sample_inputs_dropout(self, device, dtype, requires_grad):
+    tensors = []
+    dropout_args = [
+        (0.6, False, False),
+        (1.0, True, True),
+        (0.0, True, False)
+    ]
+    for rank in [1, 3, 5]:
+        for args in dropout_args:
+            tensors.append(SampleInput(make_tensor(list(range(rank)), device=device, dtype=dtype, requires_grad=requires_grad, low=-5, high=5), args=args))
+    return tensors
+
 def sample_inputs_hardswish(self, device, dtype, requires_grad):
     N = 5
     # make sure we are testing -3 -> 3 range. default is -10 -> 10 so maybe unnecessary ?
@@ -6213,6 +6225,16 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_max_min_binary,),
+    OpInfo('nn.functional.dropout',
+           aten_name="dropout",
+           supports_autograd=True,
+           assert_autodiffed=True,
+           sample_inputs_func=sample_inputs_dropout,
+           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+           supports_gradgrad=False,
+           supports_forward_ad=True,
+           supports_out=False,
+           autodiff_nonfusible_nodes=["aten::dropout"]),
     OpInfo('nn.functional.hardswish',
            aten_name="hardswish",
            supports_autograd=True,
