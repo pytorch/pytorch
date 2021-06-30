@@ -167,8 +167,8 @@ class TestBufferProtocol(common.TestCase):
     @onlyCPU
     @dtypes(*all_types())
     def test_not_a_buffer(self, device, dtype):
-        with self.assertRaisesRegex(RuntimeError,
-                                    r"could not retrieve buffer from object"):
+        with self.assertRaisesRegex(ValueError,
+                                    r"object does not implement Python buffer protocol."):
             torch.frombuffer(self.INPUT, dtype=dtype)
 
     @onlyCPU

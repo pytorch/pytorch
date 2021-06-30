@@ -489,6 +489,10 @@ static PyObject * THPVariable_frombuffer(PyObject* self_, PyObject* args, PyObje
     size_t actual_count = 0;
     Py_buffer view;
 
+    TORCH_CHECK_VALUE(
+        PyObject_CheckBuffer(buffer) != 0,
+        "object does not implement Python buffer protocol.");
+
     if (PyObject_GetBuffer(buffer, &view, PyBUF_WRITABLE) < 0) {
       TORCH_CHECK(
           PyObject_GetBuffer(buffer, &view, PyBUF_SIMPLE) >= 0,
@@ -500,6 +504,7 @@ static PyObject * THPVariable_frombuffer(PyObject* self_, PyObject* args, PyObje
           "You may want to copy the buffer to protect its data or make it writable "
           "before converting it to a tensor. This type of warning will be "
           "suppressed for the rest of this program.");
+      PyErr_Clear();
     }
 
     Py_INCREF(view.obj);
