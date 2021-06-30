@@ -364,8 +364,14 @@ def get_json_config(file_name, id):
         file_name (str): name of configuration file to load
         id (str): configuration that will be loaded
     """
-    with open(os.path.join(Path(__file__).parent, file_name), "r") as f:
-        json_config = json.load(f)[id]
+    f = open(
+        os.path.join(
+            Path(__file__).parent, file_name
+        ),
+        "r"
+    )
+    json_config = json.load(f)[id]
+    f.close()
     return json_config
 
 
@@ -512,7 +518,6 @@ if __name__ == "__main__":
     parser.add_argument(
         "--batch_size",
         type=int,
-        default=1,
         help="number of training examples used in one iteration"
     )
     parser.add_argument(
@@ -548,13 +553,11 @@ if __name__ == "__main__":
     parser.add_argument(
         "--torch_seed",
         type=int,
-        default=0,
         help="seed for generating random numbers to a non-deterministic random number"
     )
     parser.add_argument(
         "--cuda_seed",
         type=int,
-        default=0,
         help="seed for generating random numbers to a random number for the current GPU"
     )
     parser.add_argument(

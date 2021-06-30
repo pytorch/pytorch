@@ -46,8 +46,6 @@ class DummyData(Dataset):
 
         self.input = generate_input()
         self.target = torch.randint(0, max_val, [sample_count])
-        self.start = 0
-        self.end = sample_count
 
     def __len__(self):
         return len(self.input)
