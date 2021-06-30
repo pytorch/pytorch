@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 import jinja2
+from typing_extensions import Literal
 
 DOCKER_REGISTRY = "308535385114.dkr.ecr.us-east-1.amazonaws.com"
 
@@ -13,6 +14,8 @@ GITHUB_DIR = Path(__file__).resolve().parent.parent
 # present, but currently Python has no easy way to do that
 # https://github.com/python/mypy/issues/4617
 PyTorchWorkflow = Dict[str, Any]
+
+YamlShellBool = Literal["''", 1]
 
 WINDOWS_CPU_TEST_RUNNER = "windows.4xlarge"
 WINDOWS_CUDA_TEST_RUNNER = "windows.8xlarge.nvidia.gpu"
@@ -48,6 +51,7 @@ def PyTorchLinuxWorkflow(
     test_runner_type: str,
     on_pull_request: bool = False,
     enable_doc_jobs: bool = False,
+    enable_multigpu_test: YamlShellBool = "''",
     num_test_shards: int = 1,
 ) -> PyTorchWorkflow:
     return {
@@ -56,6 +60,7 @@ def PyTorchLinuxWorkflow(
         "test_runner_type": test_runner_type,
         "on_pull_request": on_pull_request,
         "enable_doc_jobs": enable_doc_jobs,
+        "enable_multigpu_test": enable_multigpu_test,
         "num_test_shards": num_test_shards,
     }
 
@@ -146,6 +151,7 @@ LINUX_WORKFLOWS = [
         build_environment="pytorch-linux-xenial-cuda10.2-cudnn7-py3.6-gcc7",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
+        enable_multigpu_test=1,
         num_test_shards=2,
     ),
     PyTorchLinuxWorkflow(
