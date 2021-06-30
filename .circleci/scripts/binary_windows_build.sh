@@ -67,7 +67,7 @@ if [[ "$CIRCLECI" == 'true' && -d "C:\\ProgramData\\Microsoft\\VisualStudio\\Pac
 fi
 
 if [[ "$CIRCLECI" == 'true' && -d "C:\\Microsoft" ]]; then
-  # don't use quota here
+  # don't use quotes here
   rm -rf /c/Microsoft/AndroidNDK*
 fi
 
