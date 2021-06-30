@@ -34,7 +34,7 @@ from torch.testing._internal.opinfos.core import \
     (OpInfo, SkipInfo, DecorateInfo, SampleInput, S, M, L)
 from torch.testing._internal.opinfos.unary import UnaryUfuncInfo
 from torch.testing._internal.opinfos.spectral import SpectralFuncInfo
-
+from torch.testing._internal.opinfos.shape import ShapeFuncInfo
 
 from setuptools import distutils
 
@@ -1819,27 +1819,6 @@ def np_unary_ufunc_integer_promotion_wrapper(fn):
 
     return wrapped_fn
 
-
-class ShapeFuncInfo(OpInfo):
-    """Early version of a specialized OpInfo for Shape manipulating operations like tile and roll"""
-    def __init__(self,
-                 name,  # the string name of the function
-                 *,
-                 ref,  # a reference function
-                 dtypes=floating_types(),
-                 dtypesIfCPU=None,
-                 dtypesIfCUDA=None,
-                 dtypesIfROCM=None,
-                 sample_inputs_func=None,
-                 **kwargs):
-        super(ShapeFuncInfo, self).__init__(name,
-                                            dtypes=dtypes,
-                                            dtypesIfCPU=dtypesIfCPU,
-                                            dtypesIfCUDA=dtypesIfCUDA,
-                                            dtypesIfROCM=dtypesIfROCM,
-                                            sample_inputs_func=sample_inputs_func,
-                                            **kwargs)
-        self.ref = ref
 
 def sample_inputs_foreach(self, device, dtype, N, *, noncontiguous=False):
     tensors = [make_tensor((N - i, N - i), device, dtype, noncontiguous=noncontiguous) for i in range(N)]
