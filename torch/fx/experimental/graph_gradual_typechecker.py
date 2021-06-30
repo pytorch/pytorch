@@ -171,11 +171,15 @@ def reshape_inference_rule(n: Node):
     else:
         raise TypeError(f'Cannot reshape in node {n} from {t1} to {t2_type}')
 
-# todo add broadcasting
 @register_inference_rule(BatchNorm2d)
 def bn2d_inference_rule(n, op_type):
     arg_type = apply_matching(n.args[0].type, 4)
     n.type = apply_matching(n.type, 4)
+
+    (new_arg, new_ntype) = broadcast_types(arg_type, n.type)
+    n.args[0].type = new_arg
+    n.type = new_ntype
+    arg_type = n.args[0].type
 
     # we check the conditions on the incoming argument
     # and any existing annotation
