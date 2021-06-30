@@ -44,9 +44,10 @@ class Linear(Module):
             Default: ``True``
 
     Shape:
-        - Input: :math:`(*, H_{in})` where :math:`*` means any number of
-          additional dimensions including 0 and :math:`H_{in} = \text{in\_features}`.
-        - Output: :math:`(*, H_{out})` where all but the last dimension
+        - Input: :math:`(N, *, H_{in})` where :math:`*` means any number of
+          additional dimensions and :math:`H_{in} = \text{in\_features}`.
+          The 0th dimension is optional.
+        - Output: :math:`(N, *, H_{out})` where all but the last dimension
           are the same shape as the input and :math:`H_{out} = \text{out\_features}`.
 
     Attributes:
