@@ -40,6 +40,25 @@ std::vector<at::Tensor> to_cpu(const at::TensorList& tensors) {
   return cpu_tensors;
 }
 
+c10::optional<c10::Device> compute_target_device(std::vector<at::Tensor>& t_args, std::vector<c10::List<at::Tensor>> tlist_args) {
+  // Decide what device to move the output tensor(s) to.
+  // The current convention is that we use the first tensor arg to pick the device
+  // Barring that, we take the first tensor from a TensorList arg.
+  c10::optional<c10::Device> tgt_device = c10::nullopt;
+  if (t_args.size() > 0) {
+    return t_args[0].device();
+  } else {
+    // We need to loop through all of the (potentially multiple) TensorList arguments
+    // In case, e.g. the first one is empty but the second is not.
+    for (auto& tens_list : tlist_args) {
+      for (const auto i : c10::irange(tens_list.size())) {
+        return tens_list.get(i).device();
+      }
+    }
+  }
+  return c10::nullopt;
+}
+
 
 void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   auto& schema_args = op.schema().arguments();
@@ -51,7 +70,6 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   std::vector<int> tensor_args_indices;
 
   std::vector<c10::List<at::Tensor>> tensorlist_args;
-  std::vector<int> tensorlist_args_indices;
 
   // Step 1: Convert all non-CPU tensor inputs into CPU tensors
   // and put them on the stack at the correct indices.
@@ -67,7 +85,6 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
       auto cpu_ivalue = c10::IValue(c10::List<at::Tensor>(to_cpu(ivalue.toTensorList().vec())));
       (*stack)[arguments_begin + idx] = std::move(cpu_ivalue);
       tensorlist_args.push_back(ivalue.toTensorList());
-      tensorlist_args_indices.push_back(idx);
     }
   }
   // XLA requires all of the tensor arguments to be gathered up and converted to CPU together.
@@ -141,25 +158,7 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
           TORCH_CHECK(found_alias, "The operator ", op.schema().operator_name(), " appears to have invalid alias information. ",
                       "Found a return tensor argument with a mismatched mutable alias: ", schema_returns[idx]);
         } else {
-          // Decide what device to move the output tensor(s) to.
-          // The current convention is that we use the first tensor arg to pick the device
-          // Barring that, we take the first tensor from a TensorList arg.
-          c10::optional<c10::Device> tgt_device = c10::nullopt;
-          if (tensor_args.size() > 0) {
-              tgt_device = tensor_args[0].device();
-          } else {
-            // We need to loop through all of the (potentially multiple) TensorList arguments
-            // In case, e.g. the first one is empty but the second is not.
-            for (auto& tens_list : tensorlist_args) {
-              for (const auto i : c10::irange(tens_list.size())) {
-                tgt_device = tens_list.get(i).device();
-                break;
-              }
-              if (tgt_device) {
-                break;
-              }
-            }
-          }
+          c10::optional<c10::Device> tgt_device = compute_target_device(tensor_args, tensorlist_args);
           if (alias_info.has_value() && !alias_info.value().isWrite()) {
             // immutable alias (view) case: Warn here, since we're copying and not creating a view.
             //If this operator is needed, the backend should provide a kernel for it.
