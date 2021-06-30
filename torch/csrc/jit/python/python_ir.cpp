@@ -594,6 +594,7 @@ void initPythonIRBindings(PyObject* module_) {
             return module_info;
           })
       .NS(addInput)
+      .NS(copyMetadata)
       .NS(replaceInput)
       .NS(replaceInputWith)
       .NS(replaceAllUsesWith)

@@ -304,6 +304,9 @@ void NodeToONNX(
           outputs[i]->node()->setScope(node->scope());
           env[old] = outputs[i];
         }
+        if (old->hasDebugName()) {
+          outputs[i]->setDebugName(old->debugNameBase());
+        }
       } else {
         // Null output means that the ONNX op doesn't have outputs corresponding
         // to certain PyTorch outputs
