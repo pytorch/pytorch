@@ -255,7 +255,10 @@ void try_plans(cudnn_frontend::executionPlans_t& plans, const CacheKey& key, con
       run_conv_plan(handle, x, y, w, plan);
       benchmark_cache.emplace(key, plan);
       return;
-    } catch (cudnn_frontend::cudnnException &e) {} catch(CuDNNError &e) {}
+    } catch (cudnn_frontend::cudnnException &e) {} catch (CuDNNError &e) {}
+      catch (c10::CUDAOutOfMemoryError &e) {
+        cudaGetLastError(); // clear CUDA error
+    }
   }
   TORCH_CHECK(false, "GET was unable to find an engine to execute this computation");
 }
@@ -286,8 +289,12 @@ void run_single_conv(const cudnnBackendDescriptorType_t operation,
   // TODO: is this thread safe if cache is updated? is pointer stale?
   auto search = benchmark_cache.find(key);
   if (search) {
-    run_conv_plan(handle, x, y, w, *search);
-    return;
+    try {
+      run_conv_plan(handle, x, y, w, *search);
+      return;
+    } catch(c10::CUDAOutOfMemoryError &e) {
+      cudaGetLastError(); // clear CUDA error
+    }
   }
 
   if (!benchmark) {
