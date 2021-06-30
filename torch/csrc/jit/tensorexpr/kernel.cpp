@@ -2315,6 +2315,23 @@ Tensor* tensorexpr::computeOperandValue(
             return a * clamp(zero, six, a + three) / six;
           });
     } break;
+    case aten::softshrink: {
+      return computeTwoOperand(
+          "aten_softshrink",
+          inputs,
+          outputShape,
+          outputType,
+          [](const ExprHandle& a, const ExprHandle& lambd) {
+            auto pos_clambd = Cast::make(a.dtype(), lambd);
+            auto neg_clambd =
+                Cast::make(a.dtype(), ExprHandle(-0)) - pos_clambd;
+            auto zero = Cast::make(a.dtype(), 0);
+            auto mm =
+                CompareSelect::make(a, neg_clambd, (a + pos_clambd), zero, kLT);
+            return CompareSelect::make(
+                a, pos_clambd, (a - pos_clambd), mm, kGT);
+          });
+    } break;
     case aten::hardshrink: {
       return computeTwoOperand(
           "aten_hardshrink",
@@ -2751,6 +2768,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::tanh:
     case aten::hardtanh:
     case aten::hardshrink:
+    case aten::softshrink:
     case aten::sqrt:
     case aten::rsqrt:
     case aten::abs:

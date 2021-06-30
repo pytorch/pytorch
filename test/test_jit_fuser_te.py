@@ -1276,6 +1276,7 @@ class TestTEFuser(JitTestCase):
             torch.trunc,
             torch.frac,
             F.hardshrink,
+            F.softshrink,
             F.leaky_relu,
             lambda x: torch.threshold(x, 0, -10),
             lambda x: torch.clamp(x, -10, 10),
