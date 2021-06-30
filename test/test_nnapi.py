@@ -154,7 +154,6 @@ class TestNNAPI(TestCase):
         ]:
             self.check(mod, torch.randn(4, 2, 1, 3, 7))
 
-        # TODO(axit): To add support for runtime
         self.check(
             torch.nn.Flatten(),
             torch.randn(4, 2, 1, 3, 7),
