@@ -1058,9 +1058,8 @@ Tensor asarray(
       tensor = tensor_fromDLPack(obj);
   }
 
-  Py_buffer view;
-  if (!tensor.defined() && PyObject_GetBuffer(obj, &view, PyBUF_SIMPLE) >= 0) {
-    tensor = tensor_frombuffer(view, dtype_unwrapped, -1, 0, requires_grad);
+  if (!tensor.defined() && PyObject_CheckBuffer(obj) != 0) {
+    tensor = tensor_frombuffer(obj, dtype_unwrapped, -1, 0, requires_grad);
   }
 
   if (tensor.defined() && force_copy) {
