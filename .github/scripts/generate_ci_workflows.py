@@ -186,7 +186,6 @@ LINUX_WORKFLOWS = [
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-py3.8-gcc9",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         on_pull_request=True,
-        enable_doc_jobs=True,
         num_test_shards=2,
     ),
     # PyTorchLinuxWorkflow(
