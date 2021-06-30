@@ -122,7 +122,8 @@ void* DispatchStubImpl::choose_cpu_impl(
     // even poorer with AVX512. Until their accuracy is improved, they would
     // be dispatched to AVX2 kernels. Quantization kernels have also been
     // disabled on Windows for AVX512 because some of their tests are flaky.
-    if C10_UNLIKELY(!AVX512) {
+    if (C10_UNLIKELY(!AVX512)) {
+      // dispatch to AVX2, since AVX512 kernel is missing
       TORCH_INTERNAL_ASSERT(AVX2, "DispatchStub: missing AVX2 kernel");
       return AVX2;
     } else {

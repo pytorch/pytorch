@@ -33,7 +33,7 @@
 #include <ATen/native/cpu/Intrinsics.h>
 
 /* The original source of this file has been modified. */
-#if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)
+#if defined(CPU_CAPABILITY_AVX2)
 
 #if defined(__GNUC__)
 # define ALIGN32_BEG __attribute__((aligned(32)))
@@ -519,4 +519,4 @@ inline void sincos256_ps(v8sf x, v8sf *s, v8sf *c) {
   *c = _mm256_xor_ps(xmm2, sign_bit_cos);
 }
 
-#endif // CPU_CAPABILITY_AVX2 or CPU_CAPABILITY_AVX512
+#endif // CPU_CAPABILITY_AVX2

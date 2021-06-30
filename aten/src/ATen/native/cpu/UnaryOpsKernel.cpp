@@ -714,8 +714,15 @@ REGISTER_DISPATCH(exponential_stub, &CPU_CAPABILITY::exponential_kernel);
 REGISTER_DISPATCH(geometric_stub, &CPU_CAPABILITY::geometric_kernel);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(log_normal_stub, &CPU_CAPABILITY::log_normal_kernel);
+#ifdef CPU_CAPABILITY_AVX512
+// normal_stub isn't being dispatched to AVX512 because it exposes
+// flakiness in test_sgd of test/test_optim.py
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_NO_AVX512_DISPATCH(normal_stub, void(*)(Tensor&, const double, const double, c10::optional<Generator>));
+#else
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(normal_stub, &CPU_CAPABILITY::normal_kernel);
+#endif
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(uniform_stub, &CPU_CAPABILITY::uniform_kernel);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
