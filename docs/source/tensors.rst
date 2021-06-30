@@ -256,6 +256,10 @@ Tensor class reference
     Tensor.bitwise_or_
     Tensor.bitwise_xor
     Tensor.bitwise_xor_
+    Tensor.bitwise_left_shift
+    Tensor.bitwise_left_shift_
+    Tensor.bitwise_right_shift
+    Tensor.bitwise_right_shift_
     Tensor.bmm
     Tensor.bool
     Tensor.byte
@@ -285,7 +289,9 @@ Tensor class reference
     Tensor.cos_
     Tensor.cosh
     Tensor.cosh_
+    Tensor.corrcoef
     Tensor.count_nonzero
+    Tensor.cov
     Tensor.acosh
     Tensor.acosh_
     Tensor.arccosh
@@ -382,6 +388,7 @@ Tensor class reference
     Tensor.hardshrink
     Tensor.heaviside
     Tensor.histc
+    Tensor.histogram
     Tensor.hsplit
     Tensor.hypot
     Tensor.hypot_
@@ -564,6 +571,7 @@ Tensor class reference
     Tensor.resize_
     Tensor.resize_as_
     Tensor.retain_grad
+    Tensor.retains_grad
     Tensor.roll
     Tensor.rot90
     Tensor.round

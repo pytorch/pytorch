@@ -11,6 +11,7 @@ sections with user provided statements.
 
 #include <c10/util/irange.h>
 #include <pybind11/pybind11.h>
+#include <c10/util/irange.h>
 #include <torch/extension.h>
 
 // Global setup. (e.g. #includes)

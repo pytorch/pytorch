@@ -67,7 +67,7 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   THPObjectPtr pyInputs(PyTuple_New(num_inputs));
   if (!pyInputs) throw_python_error();
   auto& output_info = py_fn->output_info;
-  for (size_t i = 0; i < num_inputs; ++i) {
+  for (const auto i : c10::irange(num_inputs)) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     PyObject* input;
     if (inputs[i].defined() || !py_fn->materialize_grads) {
@@ -92,7 +92,7 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   // Truncate the result tuple in that case.
   if (num_outputs > num_forward_inputs) {
     bool all_none = true;
-    for (int i = num_forward_inputs; i < num_outputs; i++) {
+    for (const auto i : c10::irange(num_forward_inputs, num_outputs)) {
       all_none &= PyTuple_GET_ITEM(r.get(), i) == Py_None;
     }
     if (all_none) {
@@ -114,8 +114,6 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   // Massage the Python results tuple back into a C++ variable_list
   variable_list results;
   results.reserve(num_outputs);
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-  auto& input_info = py_fn->input_info;
   for (int i = 0; i != num_outputs; ++i) {
     PyObject* output = PyTuple_GET_ITEM(r.get(), i);
     bool was_variable = is_variable_input[i];
@@ -318,7 +316,7 @@ static void _wrap_outputs(const std::shared_ptr<PyNode>& cdata, THPFunction *sel
 
   std::vector<c10::optional<Variable>> raw_output_vars;
   raw_output_vars.reserve(num_outputs);
-  for(int i = 0; i < num_outputs; ++i){
+  for (const auto i : c10::irange(num_outputs)) {
     PyObject* obj = PyTuple_GET_ITEM(raw_output, i);
     // Only process tensors as outputs for autograd purposes.
     if (THPVariable_Check(obj)) {
@@ -497,7 +495,6 @@ static void _trace_post_record(
 
   // Isolate C variable ptrs in a vector
   int num_outputs = PyTuple_GET_SIZE(output_objects);
-  variable_list output_vars(num_outputs);
   auto graph = node->owningGraph();
   node->addOutput();
   auto old_node = node;
@@ -510,7 +507,7 @@ static void _trace_post_record(
     auto unpacked = graph->createTupleUnpack(node->output())->insertAfter(node);
     node = unpacked;
   }
-  for (int i = 0; i < num_outputs; ++i) {
+  for (const auto i : c10::irange(num_outputs)) {
     PyObject* obj = PyTuple_GET_ITEM(output_objects, i);
     if (THPVariable_Check(obj)) {
       Value* value = node->outputs()[i];
@@ -630,7 +627,7 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
   if (!ctx_input_tuple) return nullptr;
   Py_INCREF(ctx);
   PyTuple_SET_ITEM(ctx_input_tuple.get(), 0, (PyObject*)ctx);
-  for (int i = 0; i < num_args; ++i) {
+  for (const auto i : c10::irange(num_args)) {
     PyObject *arg = PyTuple_GET_ITEM(unpacked_input.input_tuple.get(), i);
     Py_INCREF(arg);
     PyTuple_SET_ITEM(ctx_input_tuple.get(), i + 1, arg);
@@ -761,6 +758,27 @@ PyObject *THPFunction_saved_variables(THPFunction *self, void *_unused)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject *THPFunction_raw_saved_tensors(THPFunction *self, void *_unused)
+{
+  HANDLE_TH_ERRORS
+  // User tries to access saved variables after they have been freed
+  THPUtils_assert(!self->has_freed_buffers, ERR_BACKWARD_TWICE);
+  const auto& saved_variables = self->saved_variables;
+  if (saved_variables.empty())
+    return PyTuple_New(0);
+  size_t num_saved = saved_variables.size();
+  THPObjectPtr saved(PyTuple_New(num_saved));
+  if (!saved) {
+    return nullptr;
+  }
+  for(const auto i : c10::irange(num_saved)) {
+    py::object obj = py::cast(saved_variables[i], py::return_value_policy::reference);
+    PyTuple_SET_ITEM(saved.get(), i, obj.release().ptr());
+  }
+  return saved.release();
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject *THPFunction_next_functions(THPFunction *self, void *_unused)
 {
   HANDLE_TH_ERRORS
@@ -775,7 +793,7 @@ PyObject *THPFunction_next_functions(THPFunction *self, void *_unused)
   THPObjectPtr result(PyTuple_New(num_outputs));
   if (!result)
     return nullptr;
-  for (uint32_t i = 0; i < num_outputs; i++) {
+  for (const auto i : c10::irange(num_outputs)) {
     THPObjectPtr fn_tuple(PyTuple_New(2));
     if (!fn_tuple) return nullptr;
     const auto& edge = cdata->next_edge(i);
@@ -863,6 +881,7 @@ PyObject* getRequiresGrad(PyObject* obj, void* _unused) {
 static struct PyGetSetDef THPFunction_properties[] = {
   {"saved_tensors", (getter)THPFunction_saved_tensors, nullptr, nullptr, nullptr},
   {"saved_variables", (getter)THPFunction_saved_variables, nullptr, nullptr, nullptr},
+  {"_raw_saved_tensors", (getter)THPFunction_raw_saved_tensors, nullptr, nullptr, nullptr},
   {"next_functions", (getter)THPFunction_next_functions, nullptr, nullptr, nullptr},
   {"to_save", &getObject<&THPFunction::to_save>, &setObject<&THPFunction::to_save>, nullptr, nullptr},
   {"non_differentiable", &getObject<&THPFunction::non_differentiable>, &setObject<&THPFunction::non_differentiable>, nullptr, nullptr},

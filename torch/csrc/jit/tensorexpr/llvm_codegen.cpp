@@ -4,10 +4,9 @@
 
 #include <aten/src/ATen/Parallel.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/llvm_jit.h>
-
-#include <memory>
 
 #include <llvm/Analysis/TargetTransformInfo.h>
 #include <llvm/ExecutionEngine/Orc/JITTargetMachineBuilder.h>
@@ -34,7 +33,6 @@
 #include <llvm/Support/TypeSize.h>
 #endif
 
-#include <torch/csrc/jit/tensorexpr/execution_counter.h>
 #include <torch/csrc/jit/tensorexpr/expr.h>
 #include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
 #include <torch/csrc/jit/tensorexpr/half_support.h>
@@ -45,6 +43,8 @@
 
 #include <torch/csrc/jit/jit_log.h>
 
+#include <memory>
+
 using namespace torch::jit::tensorexpr;
 
 C10_DEFINE_bool(
@@ -52,13 +52,9 @@ C10_DEFINE_bool(
     false,
     "Use fast (but slightly less accurate) implementations of tanh and sigmoid");
 
-DEFINE_TRIGGER(llvm_codegen_created);
-DEFINE_TRIGGER(llvm_codegen_executed);
-
 namespace torch {
 namespace jit {
 namespace tensorexpr {
-DEFINE_TRIGGER(llvm_codegen_parallel_dispatched);
 namespace {
 
 llvm::CmpInst::Predicate llvm_comparison_predicate(
@@ -287,7 +283,6 @@ void DispatchParallel(int8_t* func, int start, int stop, int8_t* packed_data) {
       callee(index, packed_data);
     }
   });
-  USE_TRIGGER(llvm_codegen_parallel_dispatched);
 }
 
 } // namespace tensorexpr
@@ -314,7 +309,6 @@ LLVMCodeGen::LLVMCodeGen(
 
 void LLVMCodeGen::call_raw(const std::vector<void*>& args) {
   value<float>(const_cast<void**>(args.data()));
-  USE_TRIGGER(llvm_codegen_executed);
 }
 
 void LLVMCodeGen::call(const std::vector<CallArg>& args) {
@@ -332,7 +326,6 @@ void LLVMCodeGen::call(const std::vector<CallArg>& args) {
     argv[i] = argToPtr(bufferArg, callArg);
   }
   value<float>(argv.data());
-  USE_TRIGGER(llvm_codegen_executed);
 }
 
 at::Tensor LLVMCodeGen::empty_strided(
@@ -362,6 +355,12 @@ llvm::JITTargetAddress LLVMCodeGenImpl::getKernelAddress() const {
   return kernelAddress_;
 }
 
+namespace {
+// Global mutex to protect LLVM initialization.  TargetRegistry::lookupTarget
+// in particular is not thread-safe.
+static std::mutex llvmInitMutex;
+} // namespace
+
 LLVMCodeGenImpl::LLVMCodeGenImpl(
     Stmt* stmt,
     const std::vector<CodeGen::BufferArg>& args,
@@ -384,11 +383,14 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   VoidTy_ = llvm::Type::getVoidTy(getContext());
   BoolTy_ = ByteTy_;
 
-  llvm::InitializeAllTargets();
-  llvm::InitializeAllTargetMCs();
-  llvm::InitializeAllAsmPrinters();
+  {
+    std::lock_guard<std::mutex> g(llvmInitMutex);
+    llvm::InitializeAllTargets();
+    llvm::InitializeAllTargetMCs();
+    llvm::InitializeAllAsmPrinters();
+    jit_ = std::make_unique<llvm::orc::PytorchLLVMJIT>(triple, cpu, attrs);
+  }
 
-  jit_ = std::make_unique<llvm::orc::PytorchLLVMJIT>(triple, cpu, attrs);
   module_ = std::make_unique<llvm::Module>("pytorch", getContext());
   module_->setDataLayout(jit_->getDataLayout());
   module_->setTargetTriple(jit_->getTargetMachine().getTargetTriple().str());
@@ -428,8 +430,6 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   jit_->addModule(std::move(module_), std::move(context_));
   auto sym = jit_->findSymbol("wrapper");
   kernelAddress_ = assertSuccess(sym.getAddress());
-
-  USE_TRIGGER(llvm_codegen_created);
 }
 
 llvm::LLVMContext& LLVMCodeGenImpl::getContext() {
@@ -1018,8 +1018,7 @@ void LLVMCodeGenImpl::replaceVarMapping(
     const std::vector<const Var*>& vars,
     const std::vector<llvm::Value*>& vals) {
   TORCH_CHECK(vars.size() == vals.size());
-  int i = 0;
-  for (int i = 0; i < vars.size(); i++) {
+  for (const auto i : c10::irange(vars.size())) {
     const Var* var = vars[i];
     llvm::Value* val = vals[i];
     if (val) {
@@ -1182,14 +1181,14 @@ llvm::Value* LLVMCodeGenImpl::packFuncArgs(
     return NullPtr;
   }
   std::vector<llvm::Type*> arg_types(func_args.size());
-  for (int i = 0; i < func_args.size(); i++) {
+  for (const auto i : c10::irange(func_args.size())) {
     arg_types[i] = func_args[i]->getType();
   }
   llvm::StructType* packed_type = llvm::StructType::create(arg_types);
   llvm::Value* zero = llvm::ConstantInt::get(IntTy_, 0);
   llvm::Value* one = llvm::ConstantInt::get(IntTy_, 1);
   llvm::Value* packed = irb_.CreateAlloca(packed_type, one);
-  for (int i = 0; i < func_args.size(); i++) {
+  for (const auto i : c10::irange(func_args.size())) {
     llvm::Value* dst_ptr = irb_.CreateInBoundsGEP(
         packed, {zero, llvm::ConstantInt::get(IntTy_, i)});
     irb_.CreateStore(func_args[i], dst_ptr);
@@ -1204,7 +1203,7 @@ std::vector<llvm::Value*> LLVMCodeGenImpl::unpackFuncArgs(
   // TODO: extract arg_count from packed.
   std::vector<llvm::Value*> func_args(arg_count);
   llvm::Value* zero = llvm::ConstantInt::get(IntTy_, 0);
-  for (int i = 0; i < arg_count; i++) {
+  for (const auto i : c10::irange(arg_count)) {
     llvm::Value* dst_ptr = irb_.CreateInBoundsGEP(
         packed, {zero, llvm::ConstantInt::get(IntTy_, i)});
     func_args[i] = irb_.CreateLoad(dst_ptr);
@@ -1833,7 +1832,7 @@ void LLVMCodeGenImpl::visit(const ExternalCall* v) {
         llvm::ConstantInt::getSigned(LongTy_, b->dims().size()), gep);
 
     // Store dims of the buf
-    for (int dim = 0; dim < b->dims().size(); dim++) {
+    for (const auto dim : c10::irange(b->dims().size())) {
       gep = irb_.CreateInBoundsGEP(
           buf_dims, {llvm::ConstantInt::getSigned(IntTy_, dim_idx)});
       b->dims()[dim]->accept(this);

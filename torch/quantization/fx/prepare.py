@@ -30,6 +30,11 @@ from .quantization_patterns import (
 
 from .quantization_types import Pattern
 
+from ._equalize import (
+    is_equalization_observer,
+    node_supports_equalization,
+)
+
 from .graph_module import (
     ObservedGraphModule,
     ObservedStandaloneGraphModule,
@@ -52,8 +57,12 @@ from .utils import (
     assert_and_get_unique_device,
     node_bool_tensor_arg_indexes,
     get_new_attr_name_with_prefix,
+    NON_QUANTIZABLE_WEIGHT_OPS,
     WEIGHT_INDEX_DICT,
+    FUNCTIONAL_OPS_WITH_BIAS,
 )
+
+from ..fuser_method_mappings import DEFAULT_OP_LIST_TO_FUSER_METHOD
 
 from ..quantization_mappings import (
     get_default_qat_module_mappings,
@@ -88,6 +97,9 @@ def node_arg_is_weight(node: Node, arg: Any) -> bool:
             if arg is node_arg and i in \
                     WEIGHT_INDEX_DICT[node.target]:  # type: ignore[index]
                 return True
+        for kwarg_name, kwarg_value in node.kwargs.items():
+            if kwarg_name == 'weight' and arg is kwarg_value:
+                return True
     return False
 
 CONV_OPS_WITH_BIAS = {
@@ -103,7 +115,7 @@ def node_arg_is_bias(node: Node, arg: Any) -> bool:
             for i, node_arg in enumerate(node.args):
                 if arg is node_arg and i == CONV_BIAS_ARG_INDEX:
                     return True
-        elif node.target is torch.nn.functional.linear:
+        elif node.target in FUNCTIONAL_OPS_WITH_BIAS:
             for kwarg_name, kwarg_value in node.kwargs.items():
                 if kwarg_name == 'bias' and arg is kwarg_value:
                     return True
@@ -140,6 +152,57 @@ def qat_swap_modules(
         get_default_qat_module_mappings(), additional_qat_module_mapping)
     convert(root, mapping=all_mappings, inplace=True, remove_qconfig=False)
 
+def update_qconfig_for_qat(
+    qconfig_dict: Any,
+    additional_qat_module_mapping: Dict[Callable, Callable]
+) -> Any:
+    """
+    Update the qconfig_dict to account for module swaps during QAT.
+    During QAT we perform a module swap on the nn.Module types to the corresponding nn.qat.modules types.
+    """
+    all_qat_mappings = get_combined_dict(
+        get_default_qat_module_mappings(), additional_qat_module_mapping)
+    object_type_dict = qconfig_dict.get("object_type", None)
+    for k, v in object_type_dict.items():
+        if k in all_qat_mappings:
+            object_type_dict[all_qat_mappings[k]] = v
+    return qconfig_dict
+
+def update_qconfig_for_fusion(
+    model: GraphModule,
+    qconfig_dict: Any,
+) -> Any:
+    """
+    Update the qconfig_dict to account for fused modules such as LinearReLU.
+    """
+    object_type_dict = qconfig_dict.get("object_type", None)
+    if object_type_dict is None:
+        return qconfig_dict
+
+    modules = dict(model.named_modules())
+
+    for node in model.graph.nodes:
+        if node.op == 'call_module':
+            module_type = type(modules[str(node.target)])
+            if module_type not in list(DEFAULT_OP_LIST_TO_FUSER_METHOD.values()):
+                continue
+
+            for ops, fuser in DEFAULT_OP_LIST_TO_FUSER_METHOD.items():
+                if module_type == fuser:
+                    fused_qconfig = object_type_dict.get(ops[0], None)
+
+                    # Raise an error if the modules in the fused module have
+                    # different qconfigs specified in the qconfig_dict
+                    for op in ops:
+                        if object_type_dict.get(op, None) != fused_qconfig:
+                            raise LookupError("During fusion, we need to specify the same " +
+                                              f"qconfigs for both modules in {module_type}.")
+
+                    if fused_qconfig is not None:
+                        object_type_dict[module_type] = fused_qconfig
+
+    return qconfig_dict
+
 def insert_observer(
     node: Node,
     observer: torch.quantization.ObserverBase,
@@ -155,7 +218,10 @@ def insert_observer(
     if model_device:
         observer.to(model_device)
     # add observer module as attribute
-    prefix = node.name + '_activation_post_process_'
+    if is_equalization_observer(observer):
+        prefix = node.name + '_equalization_process_'
+    else:
+        prefix = node.name + '_activation_post_process_'
     get_new_observer_name = get_new_attr_name_with_prefix(prefix)
     observer_name = get_new_observer_name(model)
     setattr(model, observer_name, observer)
@@ -273,11 +339,13 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
         # regular flow for most nodes, except standalone modules
         is_weight = node_arg_is_weight(node, arg)
         assert qconfig is not None
+
         act_post_process_ctr = qconfig.weight if is_weight else \
             qconfig.activation
+
         is_bias = node_arg_is_bias(node, arg)
         is_activation = not (is_weight or is_bias)
-        weight_needs_obs = is_weight and weight_is_quantized(qconfig)
+        weight_needs_obs = is_weight and weight_is_quantized(qconfig) and node.target not in NON_QUANTIZABLE_WEIGHT_OPS
         bias_needs_obs = \
             (is_bias and activation_dtype(qconfig) == torch.float16) and \
             weight_dtype(qconfig) == torch.float16
@@ -410,8 +478,47 @@ def maybe_insert_input_observers_for_node(
 
     # assign the new args and kwargs to the node, inplace
     node.args = tuple(new_args)
-    node.kwargs = new_kwargs  # type: ignore[assignment]
+    node.kwargs = new_kwargs
 
+def maybe_insert_input_equalization_observers_for_node(
+    node: Node,
+    equalization_qconfig: Any,
+    model: torch.nn.Module,
+    modules: Dict[str, torch.nn.Module],
+    graph: Graph,
+    node_name_to_target_dtype: Dict[str, Any],
+) -> None:
+    """
+    If `node` needs to be equalized, find the input/weight observers it needs in
+    `equalization_qconfig`, creates them, and inserts it into `graph`.
+
+    If `node` does not need an equalization observer, returns None.
+    """
+    if equalization_qconfig is None or not node_supports_equalization(node, modules):
+        return
+
+    new_args = []
+    for arg in node.args:
+        if not isinstance(arg, Node) or node_arg_is_bias(node, arg):
+            new_args.append(arg)
+            continue
+
+        is_weight = node_arg_is_weight(node, arg)
+
+        act_eq_process_ctr = equalization_qconfig.weight if is_weight else \
+            equalization_qconfig.input_activation
+
+        new_eq_obs_mod = act_eq_process_ctr()
+        new_eq_obs_node = insert_observer(
+            arg, new_eq_obs_mod, model, modules, graph)
+
+        # set the type, so the next node can read it
+        node_name_to_target_dtype[new_eq_obs_node.name] = node_name_to_target_dtype[arg.name]
+
+        new_args.append(new_eq_obs_node)
+
+    # assign the new args and kwargs to the node, inplace
+    node.args = tuple(new_args)
 
 def maybe_insert_output_observer_for_node(
     node: Node,
@@ -432,58 +539,43 @@ def maybe_insert_output_observer_for_node(
     root_node, matched_nodes, pattern, qhandler, qconfig = matches.get(
         node.name, (None, None, None, None, None))
 
-    if qhandler is not None:
-        assert qconfig is not None
+    if qhandler is None:
+        return None
 
-        is_standalone_module = qhandler is not None and \
-            isinstance(qhandler, StandaloneModuleQuantizeHandler)
+    assert qconfig is not None
+    assert node.op != 'output', 'observer insertion for outputs is handled elsewhere'
 
-        should_insert_observer = \
-            qhandler.should_insert_observer_for_output(
-                qconfig, model.training)
-        # TODO(future PR): move the following logic to
-        # should_insert_observer_for_output
-        should_insert_observer = should_insert_observer and \
-            activation_is_statically_quantized(qconfig)
+    is_standalone_module = qhandler is not None and \
+        isinstance(qhandler, StandaloneModuleQuantizeHandler)
 
-        # we never insert observers to output of standalone module, we assume
-        # if needed, they are inserted inside the standalone module
-        should_insert_observer = should_insert_observer and \
-            (not is_standalone_module)
+    should_insert_observer = \
+        qhandler.should_insert_observer_for_output(
+            qconfig, model.training)
+    # TODO(future PR): move the following logic to
+    # should_insert_observer_for_output
+    should_insert_observer = should_insert_observer and \
+        activation_is_statically_quantized(qconfig)
 
-        if should_insert_observer:
-            act_post_process_ctr = qconfig.activation
-            if activation_is_int8_quantized(qconfig):
-                act_post_process_ctr = \
-                    get_default_output_activation_post_process_map().get(
-                        matched_pattern,
-                        act_post_process_ctr)
-            observer = act_post_process_ctr()
-            new_obs = insert_observer(node, observer, model, modules, graph)
-            # set the type, so the next node can read it
-            node_name_to_target_dtype[new_obs.name] = \
-                node_name_to_target_dtype[node.name]
-            return new_obs
+    # we never insert observers to output of standalone module, we assume
+    # if needed, they are inserted inside the standalone module
+    should_insert_observer = should_insert_observer and \
+        (not is_standalone_module)
 
-    elif node.op == 'output':
-        prev_node = node.args[0]
-        assert isinstance(prev_node, Node)
-        prev_node_dtype = node_name_to_target_dtype[prev_node.name]
-        node_dtype = node_name_to_target_dtype[node.name]
-        should_insert_observer = (
-            prev_node_dtype == torch.float and
-            node_dtype != torch.float
-        )
-        if should_insert_observer:
-            assert qconfig is not None
-            observer = qconfig.activation()
-            new_obs = insert_observer(
-                prev_node, observer, model, modules, graph)
-            # set the type, so the next node can read it
-            node_name_to_target_dtype[new_obs.name] = node_dtype
-            return new_obs
-
-    return None
+    if should_insert_observer:
+        act_post_process_ctr = qconfig.activation
+        if activation_is_int8_quantized(qconfig):
+            act_post_process_ctr = \
+                get_default_output_activation_post_process_map().get(
+                    matched_pattern,
+                    act_post_process_ctr)
+        observer = act_post_process_ctr()
+        new_obs = insert_observer(node, observer, model, modules, graph)
+        # set the type, so the next node can read it
+        node_name_to_target_dtype[new_obs.name] = \
+            node_name_to_target_dtype[node.name]
+        return new_obs
+    else:
+        return None
 
 def maybe_insert_observers_before_graph_output(
     graph_output_node: Node,
@@ -711,6 +803,7 @@ def insert_observers_for_model(
     qconfig_map: Dict[str, QConfigAny],
     graph: Graph,
     prepare_custom_config_dict: Dict[str, Any],
+    equalization_config_map: Dict[str, Any],
     input_quantized_idxs: List[int],
     output_quantized_idxs: List[int],
 ) -> Optional[Node]:
@@ -785,6 +878,7 @@ def insert_observers_for_model(
         # check for matches
         root_node, matched_nodes, pattern, qhandler, qconfig = matches.get(
             node.name, (None, None, None, None, None))
+        equalization_qconfig = equalization_config_map.get(node.name, None)
 
         if node.op == 'placeholder':
             # if a graph input is in fp32, it does not need observation
@@ -813,6 +907,11 @@ def insert_observers_for_model(
                         node, qconfig, model, modules, graph,
                         node_name_to_target_dtype,
                         qhandler, prepare_custom_config_dict)
+
+                    # Insert equalization input observers if needed
+                    maybe_insert_input_equalization_observers_for_node(
+                        node, equalization_qconfig, model, modules, graph,
+                        node_name_to_target_dtype)
 
                     is_last_node_of_pattern = root_node is node
                     is_like_copy_node = \
@@ -900,7 +999,7 @@ def run_prepare_fx_on_standalone_modules(
             get_standalone_module_configs(
                 root_node, modules, prepare_custom_config_dict, qconfig)
 
-        standalone_module = modules[root_node.target]  # type: ignore[index]
+        standalone_module = modules[root_node.target]
         prepare = \
             torch.quantization.quantize_fx._prepare_standalone_module_fx  # type: ignore[attr-defined]
         observed_standalone_module = \
@@ -913,27 +1012,30 @@ def run_prepare_fx_on_standalone_modules(
         parent_name, name = _parent_name(root_node.target)
         setattr(modules[parent_name], name,
                 observed_standalone_module)
-        modules[root_node.target] = observed_standalone_module  # type: ignore[index]
+        modules[root_node.target] = observed_standalone_module
 
 def save_state(
     observed: GraphModule,
     qconfig_map: Dict[str, QConfigAny],
     node_name_to_scope: Dict[str, Tuple[str, type]],
     patterns: Dict[Pattern, QuantizeHandler],
-    prepare_custom_config_dict: Dict[str, Any]
+    prepare_custom_config_dict: Dict[str, Any],
+    equalization_qconfig_map: Dict[str, Any],
 ) -> None:
     observed._patterns = patterns  # type: ignore[assignment]
     observed._qconfig_map = qconfig_map  # type: ignore[assignment]
     observed._prepare_custom_config_dict = \
         prepare_custom_config_dict  # type: ignore[assignment]
     observed._node_name_to_scope = node_name_to_scope  # type: ignore[assignment]
+    observed._equalization_qconfig_map = equalization_qconfig_map  # type: ignore[assignment]
 
-def _prepare(
+def prepare(
         model: GraphModule,
         qconfig_dict: Any,
         node_name_to_scope: Dict[str, Tuple[str, type]],
-        prepare_custom_config_dict: Optional[Dict[str, Any]],
-        is_standalone_module: bool) -> ObservedGraphModule:
+        prepare_custom_config_dict: Optional[Dict[str, Any]] = None,
+        equalization_qconfig_dict: Optional[Dict[str, Any]] = None,
+        is_standalone_module: bool = False) -> ObservedGraphModule:
     """ standalone_module means it a submodule that is not inlined in
     parent module, and will be quantized separately as one unit.
 
@@ -956,6 +1058,8 @@ def _prepare(
     """
     if prepare_custom_config_dict is None:
         prepare_custom_config_dict = {}
+    if equalization_qconfig_dict is None:
+        equalization_qconfig_dict = {}
 
     additional_quant_patterns = \
         prepare_custom_config_dict.get("additional_quant_pattern", {})
@@ -973,13 +1077,19 @@ def _prepare(
         get_default_quant_patterns(), additional_quant_patterns)
 
     convert_dict_to_ordered_dict(qconfig_dict)
+    convert_dict_to_ordered_dict(equalization_qconfig_dict)
     flattened_qconfig_dict = get_flattened_qconfig_dict(qconfig_dict)
     # TODO: support regex as well
     propagate_qconfig_(model, flattened_qconfig_dict)
+
     if model.training:
         additional_qat_module_mapping = prepare_custom_config_dict.get(
             "additional_qat_module_mapping", {})
         qat_swap_modules(model, additional_qat_module_mapping)
+        qconfig_dict = update_qconfig_for_qat(qconfig_dict, additional_qat_module_mapping)
+
+    qconfig_dict = update_qconfig_for_fusion(model, qconfig_dict)
+    equalization_qconfig_dict = update_qconfig_for_fusion(model, equalization_qconfig_dict)
 
     # mapping from fully qualified module name to module instance
     # for example,
@@ -991,6 +1101,7 @@ def _prepare(
     modules = dict(model.named_modules())
 
     # fill qconfig_map, a map from node name to qconfig, used in find_matches
+    equalization_qconfig_map = generate_qconfig_map(model, modules, model.graph, equalization_qconfig_dict, node_name_to_scope)
     qconfig_map = generate_qconfig_map(model, modules, model.graph, qconfig_dict, node_name_to_scope)
 
     # match the patterns that will get quantized
@@ -1018,9 +1129,11 @@ def _prepare(
     result_node = insert_observers_for_model(
         model, modules, matches, qconfig_map,
         model.graph, prepare_custom_config_dict,
+        equalization_qconfig_map,
         input_quantized_idxs, output_quantized_idxs)
 
-    save_state(model, qconfig_map, node_name_to_scope, patterns, prepare_custom_config_dict)
+    save_state(model, qconfig_map, node_name_to_scope, patterns,
+               prepare_custom_config_dict, equalization_qconfig_map)
     preserved_attributes = set(prepare_custom_config_dict.get("preserved_attributes", []))
     model = ObservedGraphModule(model, model.graph, preserved_attributes)
     if is_standalone_module:

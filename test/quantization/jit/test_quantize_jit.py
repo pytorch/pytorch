@@ -3238,11 +3238,11 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
         for x, obs in m2._modules._c.items():
             if x == "res1":
                 graph_params.append(
-                    (obs.getattr("6_scale_0"), obs.getattr("6_zero_point_0"))
+                    (obs.getattr("weight.2_scale_0"), obs.getattr("weight.2_zero_point_0"))
                 )
             elif x == "res2":
                 graph_params.append(
-                    (obs.getattr("10_scale_0"), obs.getattr("10_zero_point_0"))
+                    (obs.getattr("weight.4_scale_0"), obs.getattr("weight.4_zero_point_0"))
                 )
         self.assertEqual(ref_qparams, graph_params)
 
@@ -3271,9 +3271,14 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
             model = quantize_dynamic_jit(model, qconfig_dict, debug=True)
             graph_qparams = []
             for x, obs in model._modules._c.items():
-                graph_qparams.append(
-                    (obs.getattr("3_scale_0"), obs.getattr("3_zero_point_0"))
-                )
+                if x == 'fc' and tracing:
+                    graph_qparams.append(
+                        (obs.getattr("weight.6_scale_0"), obs.getattr("weight.6_zero_point_0"))
+                    )
+                else:
+                    graph_qparams.append(
+                        (obs.getattr("weight.1_scale_0"), obs.getattr("weight.1_zero_point_0"))
+                    )
             self.assertEqual(ref_qparams, graph_qparams)
 
     def test_convert_dynamic_fp16(self):

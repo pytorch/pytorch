@@ -307,8 +307,7 @@ static bool sizes_match_except(IntArrayRef s1, IntArrayRef s2, int64_t dim_excep
   if (s1.size() != s2.size()) {
     return false;
   }
-  for (const auto i : c10::irange(s1.size())) {
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+  for (const auto i : c10::irange(static_cast<int64_t>(s1.size()))) {
     if (i != dim_except && s1[i] != s2[i]) {
       return false;
     }
@@ -623,7 +622,6 @@ std::vector<Tensor> unsafe_chunk(const Tensor& self, int64_t chunks, int64_t dim
   TORCH_CHECK(chunks > 0,
            "chunk expects `chunks` to be greater than 0, got: ", chunks);
 
-  std::vector<Tensor> result;
   const auto dim_size = self.size(dim);
   int64_t split_size = (dim_size + chunks - 1) / chunks;
 
@@ -833,8 +831,7 @@ Tensor& narrow_copy_dense_cpu_out(
   if (dim < 0) {
     dim = at::maybe_wrap_dim(dim, self_sizes.size());
   } else {
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    TORCH_CHECK(dim < self_sizes.size());
+    TORCH_CHECK(dim < static_cast<int64_t>(self_sizes.size()));
   }
 
   // wrap start and do bound check
@@ -2168,6 +2165,12 @@ Tensor view(const Tensor& self, IntArrayRef size) {
 
 Tensor alias(const Tensor& self) {
     return alias_with_sizes_and_strides(self, self.sizes(), self.strides());
+}
+
+Tensor detach(const Tensor& self) {
+  // this just exists to give us a hook in VariableType and an entry in Declarations.yaml
+  //AT_ERROR("detach is not implemented for Tensor");
+  return native::alias(self);
 }
 
 Tensor unfold(const Tensor& self, int64_t dimension, int64_t size, int64_t step) {

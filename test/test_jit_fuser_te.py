@@ -30,8 +30,6 @@ from itertools import product, permutations
 from test_jit import backward_graph, get_lstm_inputs, get_milstm_inputs, \
     LSTMCellC, LSTMCellF, LSTMCellS, MiLSTMCell
 
-from torch.testing._internal.te_utils import CudaCodeGenExecuted
-
 from jit.test_fuser_common import TestFuserCommon  # noqa: F401
 
 FUSION_GROUP = 'prim::TensorExprGroup'
@@ -913,9 +911,7 @@ class TestTEFuser(JitTestCase):
         x = torch.zeros([3, 4, 5], dtype=torch.float, device='cuda')
         m = M()
         out1 = m.create(x)
-        cx = CudaCodeGenExecuted()
         out2 = m.create(x)
-        assert cx.elapsed_value() == 1
         self.assertNotEqual(out1, out2)
         self.assertTrue(torch.all(out1 >= 0))
         self.assertTrue(torch.all(out1 < 1))
@@ -994,12 +990,9 @@ class TestTEFuser(JitTestCase):
         y = torch.randn(4, 4, dtype=torch.float, device='cuda')
         script_f = torch.jit.script(fn_test_diamond)
         warmup_forward(script_f, x, y)
-        cx = CudaCodeGenExecuted()
         out = script_f(x, y)
-        assert cx.elapsed_value() == 1
         self.assertEqual(out, x + y)
 
-    @unittest.skip("Reenable when TE will add support for 0-dim tensors")
     def test_scalar(self):
         def fn(x, y):
             return 2 * x + y
@@ -1872,6 +1865,54 @@ class TestTEFuser(JitTestCase):
 
         script = self.checkScript(eager, (1.0,))
 
+    def test_cat_2k_args(self):
+        with inline_fusion_groups():
+            def eager(x):
+                return torch.relu(torch.cat([x for _ in range(2000)]))
+            x = torch.randn(1)
+            trace = self.checkTrace(eager, (x,))
+            fusion_groups = self.findFusionGroups(trace.graph_for(x))
+            self.assertEqual(len(fusion_groups), 0)
+
+    def test_adaptive_avg_pool2d(self):
+        # TODO: once the adaptive_avg_pool2d is available in OpInfo DB, this
+        # test should be moved there
+        with inline_fusion_groups():
+            def foo1(x):
+                return torch.nn.functional.adaptive_avg_pool2d(x, (2, 2))
+
+            def foo2(x):
+                return torch.nn.functional.adaptive_avg_pool2d(x, (2))
+
+            x = torch.randn(4, 4, 4)
+            for foo in [foo1, foo2]:
+                f = torch.jit.trace(foo, (x,))
+                kernel = torch._C._te.TensorExprKernel(f.graph)
+                correct_val = f(x)
+                self.assertEqual(kernel.run((x,)), correct_val)
+
+    def test_unrolled_cat(self):
+        with inline_fusion_groups():
+            def eager(x):
+                ret = torch.empty(0)
+                for i in range(x.shape[0]):
+                    ret = torch.cat([ret, x[i].relu()])
+                return ret
+            script = torch.jit.script(eager)
+
+            # Warm up with size=1 tensor; since the loop iterates once the
+            # profile data will be "burned in" assuming size=1, and then
+            # unrolled.
+            x = torch.ones(1, 1)
+            for _ in range(3):
+                script(x)
+
+            torch.testing.assert_allclose(eager(x), script(x))
+
+            # Now when an input hits the unrolled path, it will produce an
+            # incorrectly-sized tensor, since size=1 has been burned in.
+            x = torch.ones((8, 1))
+            torch.testing.assert_allclose(eager(x), script(x))
 
 works_list = [
     '__radd__',
@@ -1882,6 +1923,7 @@ works_list = [
     'acos',
     'add',
     'addcmul',
+    'addmm.decomposed',
     'asin',
     'atan',
     'atan2',
@@ -1914,6 +1956,7 @@ works_list = [
     'lt',
     'masked_fill',
     'max.binary',
+    'mean',
     'min.binary',
     'mm',
     'mul',
@@ -1951,9 +1994,9 @@ works_list = [
 ]
 
 known_failures = [
-    'matmul',
-    'frac',
     '__rmatmul__'
+    'frac',
+    'matmul',
 ]
 
 # If your OpInfo test causes this test to fail, add it here
@@ -1977,7 +2020,6 @@ class TestNNCOpInfo(TestCase):
         if op.name in skip_ops:
             return
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
-        is_compiling = False
         for sample_input in sample_inputs_itr:
             arg_values = [sample_input.input] + list(sample_input.args)
             kwarg_values = sample_input.kwargs
@@ -2009,22 +2051,11 @@ def f({', '.join(param_names)}):
             f.__module__ = 'test'
             out = f(*param_values)
 
-            # NNC currently oftens segfault when asked to lower ops with 0-dim tensor outputs
-            if isinstance(out, torch.Tensor) and out.dim() == 0:
-                continue
-            else:
-                is_compiling = True
-
             ts_g = torch.jit.trace(f, param_values)
             kernel = torch._C._te.TensorExprKernel(ts_g.graph)
             correct_val = f(*param_values)
             self.assertEqual(kernel.run(tuple(param_values)), correct_val)
             self.assertEqual(kernel.fallback(tuple(param_values)), correct_val)
-
-        # If all sample inputs have scalar output, we won't have tested it and
-        # we consider the op to be not working
-        if not is_compiling:
-            raise RuntimeError("Skipped all inputs")
 
     @onlyCPU
     @unittest.skipIf(not LLVM_ENABLED, "Compiles with TensorExprKernel")

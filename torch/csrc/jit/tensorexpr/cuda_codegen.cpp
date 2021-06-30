@@ -3,22 +3,19 @@
 
 #include <ATen/CUDAGeneratorImpl.h>
 #include <c10/cuda/CUDAFunctions.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/fuser/cuda/resource_strings.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/cuda_random.h>
 #include <torch/csrc/jit/tensorexpr/eval.h>
 #include <torch/csrc/jit/tensorexpr/exceptions.h>
-#include <torch/csrc/jit/tensorexpr/execution_counter.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/registerizer.h>
 
 namespace torch {
 namespace jit {
 namespace tensorexpr {
-
-DEFINE_TRIGGER(cuda_codegen_created);
-DEFINE_TRIGGER(cuda_codegen_executed);
 
 // A RAII wrapper to manage a variable and name pair in the look-up table.
 // TODO: move this to a more shared place.
@@ -106,7 +103,7 @@ static void codegenOutputQuery(
   compile_to_sass = (major == prop->major) && (minor == prop->minor);
 }
 
-std::string cudaDtypeCppString(const Dtype& dtype) {
+std::string CudaPrinter::dtypeToCppString(const Dtype& dtype) {
   switch (dtype.scalar_type()) {
     case ScalarType::Bool:
       return "bool";
@@ -218,7 +215,7 @@ void CudaAnalysis::visit(const For* v) {
   }
 }
 
-static void print_flat_alloc(std::ostream& os, const Allocate* alloc) {
+void CudaPrinter::print_flat_alloc(const Allocate* alloc) {
   std::vector<const Expr*> dims = alloc->dims();
   // TODO: this should be merged with the storage flattener.
   int64_t flat_size = 1;
@@ -230,8 +227,8 @@ static void print_flat_alloc(std::ostream& os, const Allocate* alloc) {
       throw std::runtime_error("Only IntImm dimensions are supported for now");
     }
   }
-  os << cudaDtypeCppString(alloc->dtype()) << " " << (*alloc->buffer_var())
-     << "[" << flat_size << "];" << std::endl;
+  os() << dtypeToCppString(alloc->dtype()) << " " << (*alloc->buffer_var())
+       << "[" << flat_size << "];" << std::endl;
 }
 
 void CudaPrinter::visit(const Allocate* v) {
@@ -239,13 +236,13 @@ void CudaPrinter::visit(const Allocate* v) {
   if (cuda_analysis_->cross_block_bufs().count(v->buffer_var()) != 0) {
     emitIndent();
     os() << "__shared__ ";
-    print_flat_alloc(os(), v);
+    print_flat_alloc(v);
     return;
   }
 
   if (cuda_analysis_->thread_local_bufs().count(v->buffer_var()) != 0) {
     emitIndent();
-    print_flat_alloc(os(), v);
+    print_flat_alloc(v);
     return;
   }
 
@@ -273,7 +270,7 @@ void CudaPrinter::visit(const Cast* v) {
     return;
   }
 
-  os() << "(" << cudaDtypeCppString(v->dtype()) << ")";
+  os() << "(" << dtypeToCppString(v->dtype()) << ")";
   os() << "(";
   v->src_value()->accept(this);
   os() << ")";
@@ -306,7 +303,7 @@ void CudaPrinter::visit(const Intrinsics* v) {
   }
 
   os() << func_name << "(";
-  for (int i = 0; i < v->nparams(); i++) {
+  for (const auto i : c10::irange(v->nparams())) {
     if (i > 0) {
       os() << ", ";
     }
@@ -362,9 +359,6 @@ class AtomicAddFuser : public IRMutator {
       const std::unordered_set<const Var*>& thread_local_bufs,
       const GPUMetaVarRewriter& metavars)
       : thread_local_bufs_(thread_local_bufs) {
-    // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-    size_t DIMS = 3;
-
     const std::vector<const Expr*>& block_extents =
         metavars.gpu_block_extents();
     const std::vector<const Var*>& block_vars = metavars.gpu_block_vars();
@@ -524,7 +518,7 @@ void CudaPrinter::visit(const Block* v) {
 
 void CudaPrinter::visit(const Let* v) {
   emitIndent();
-  os() << cudaDtypeCppString(v->dtype());
+  os() << dtypeToCppString(v->dtype());
   os() << " " << *v->var() << " = ";
   v->value()->accept(this);
   os() << ";" << std::endl;
@@ -611,9 +605,6 @@ class PrioritizeLoad : public IRMutator {
   }
 
   Stmt* mutate(const Block* v) override {
-    // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-    bool any_change = false;
-
     Block* v1 = const_cast<Block*>(v); // NOLINT
     assert(v1);
     std::list<Stmt*> stmts = v1->stmts();
@@ -976,7 +967,8 @@ void CudaCodeGen::Initialize() {
     const Var* var = buffer_arg.var();
     Dtype dtype = buffer_arg.dtype();
 
-    os() << cudaDtypeCppString(dtype) << (buffer_arg.isVar() ? " " : "* ")
+    os() << printer_->dtypeToCppString(dtype)
+         << (buffer_arg.isVar() ? " " : "* ")
          << name_manager()->get_unique_name(var);
   }
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -1049,7 +1041,6 @@ void CudaCodeGen::Initialize() {
       ")");
 
   CompileToNVRTC(oss_.str(), func_name);
-  USE_TRIGGER(cuda_codegen_created);
 }
 
 void CudaCodeGen::call_raw(const std::vector<void*>& raw_args) {
@@ -1151,7 +1142,6 @@ void CudaCodeGen::call_raw(const std::vector<void*>& raw_args) {
       stream,
       ptr_to_args.data(),
       nullptr));
-  USE_TRIGGER(cuda_codegen_executed);
 
   if (prior_device != this->device().index()) {
     at::cuda::set_device(prior_device);

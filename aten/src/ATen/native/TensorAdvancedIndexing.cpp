@@ -59,6 +59,7 @@
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/Resize.h>
+#include <ATen/native/ScatterGatherChecks.h>
 #include <ATen/Parallel.h>
 
 #include <c10/util/irange.h>
@@ -69,7 +70,83 @@
 #include <numeric>
 #include <vector>
 
-namespace at { namespace native {
+namespace at {
+namespace meta {
+
+native::SCATTER_GATHER_OP get_operator_enum(const c10::string_view reduce) {
+  if (reduce == "add") {
+    return native::SCATTER_GATHER_OP::REDUCE_ADD;
+  } else if (reduce == "multiply") {
+    return native::SCATTER_GATHER_OP::REDUCE_MULTIPLY;
+  } else {
+    TORCH_CHECK(false, "reduce argument must be either add or multiply.");
+  }
+}
+
+template <typename Meta>
+void scatter_meta_impl(
+    Meta& meta,
+    const Tensor& self,
+    int64_t dim,
+    const Tensor& index,
+    const c10::optional<Tensor>& src = nullopt,
+    const c10::optional<c10::string_view> reduce = nullopt) {
+  int64_t wrapped_dim = at::maybe_wrap_dim(dim, self.dim());
+  at::native::scatter_gather_dtype_check("scatter", self, index, src);
+  at::native::scatter_shape_check(self, wrapped_dim, index, src);
+  auto output = meta.maybe_get_output(0);
+
+  if (output.defined()) {
+    at::assert_no_internal_overlap(output);
+    at::assert_no_overlap(output, index);
+    if (src.has_value()) {
+      at::assert_no_overlap(output, src.value());
+    }
+  }
+
+  meta.set_output(self.sizes(), self.options());
+  if (reduce.has_value()) {
+    // Check if we have a valid reduce operator.
+    get_operator_enum(reduce.value());
+  }
+}
+
+TORCH_META_FUNC2(scatter, src)
+(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
+  scatter_meta_impl(*this, self, dim, index, src);
+}
+
+TORCH_META_FUNC2(scatter, value)
+(const Tensor& self, int64_t dim, const Tensor& index, const Scalar& value) {
+  scatter_meta_impl(*this, self, dim, index);
+}
+
+TORCH_META_FUNC2(scatter, reduce)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Tensor& src,
+ const c10::string_view reduce) {
+  scatter_meta_impl(*this, self, dim, index, src, reduce);
+}
+
+TORCH_META_FUNC2(scatter, value_reduce)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Scalar& src,
+ const c10::string_view reduce) {
+  scatter_meta_impl(*this, self, dim, index, nullopt, reduce);
+}
+
+TORCH_META_FUNC(scatter_add)
+(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
+  scatter_meta_impl(*this, self, dim, index, src, "add");
+}
+
+} // namespace meta
+
+namespace native {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(index_stub);
@@ -206,9 +283,8 @@ AdvancedIndex::AdvancedIndex(const Tensor& src, TensorList indices_list)
   // simplify the CUDA kernel.
   if (indices.size() >= 2 && this->src.device().type() == kCUDA) {
     if (!all_strides_match(indices)) {
-      // NOLINTNEXTLINE(modernize-loop-convert)
-      for (size_t i = 0; i < indices.size(); i++) {
-        indices[i] = indices[i].contiguous();
+      for (auto & indice : indices) {
+        indice = indice.contiguous();
       }
     }
   }
@@ -235,10 +311,9 @@ static AdvancedIndex make_info(Tensor self, const torch::List<c10::optional<at::
     std::tie(self, indices) = transposeToFront(self, indices);
   }
   // Ensure indices are on the same device as self
-  // NOLINTNEXTLINE(modernize-loop-convert)
-  for (size_t i = 0; i < indices.size(); i++) {
-    if (indices[i].defined() && indices[i].device() != self.device()) {
-      indices[i] = indices[i].to(self.device());
+  for (auto & indice : indices) {
+    if (indice.defined() && indice.device() != self.device()) {
+      indice = indice.to(self.device());
     }
   }
   return AdvancedIndex(self, indices);
@@ -1003,80 +1078,91 @@ Tensor gather_backward(const Tensor& grad, const Tensor& self, int64_t dim, cons
   return at::zeros(self.sizes(), grad.options()).scatter_add_(dim, index, grad);
 }
 
-Tensor & scatter_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long,
-                    "scatter_(): Expected dtype int64 for index.");
-  at::assert_no_internal_overlap(self);
-  at::assert_no_overlap(self, source);
-  at::assert_no_overlap(self, index);
-  scatter_stub(self.device().type(), self, dim, index, source);
-  return self;
-}
+template <typename T, typename ReduceStub, typename FillStub>
+void scatter_impl(
+    const Tensor& self,
+    int64_t dim,
+    const Tensor& index,
+    const T& src,
+    const Tensor& out,
+    ReduceStub& reduce_stub,
+    FillStub& fill_stub,
+    const c10::optional<c10::string_view> reduce = nullopt) {
+  auto mut_out = const_cast<Tensor&>(out);
 
-Tensor & scatter_fill_(Tensor & self, int64_t dim, const Tensor & index, const Scalar& source) {
-  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long,
-                    "scatter_(): Expected dtype int64 for index.");
-  at::assert_no_internal_overlap(self);
-  at::assert_no_overlap(self, index);
-  scatter_fill_stub(self.device().type(), self, dim, index, source);
-  return self;
-}
+  if (!self.is_same(mut_out)) {
+    mut_out.copy_(self);
+  }
 
-SCATTER_GATHER_OP get_operator_enum(const c10::string_view reduce) {
-  if (reduce == "add") {
-    return SCATTER_GATHER_OP::REDUCE_ADD;
-  }
-  else if (reduce == "multiply") {
-    return SCATTER_GATHER_OP::REDUCE_MULTIPLY;
-  }
-  else {
-    TORCH_CHECK(false,
-                "reduce argument must be either add or multiply.");
+  if (reduce.has_value()) {
+    auto op = meta::get_operator_enum(reduce.value());
+    reduce_stub(self.device().type(), mut_out, dim, index, src, op);
+  } else {
+    fill_stub(self.device().type(), mut_out, dim, index, src);
   }
 }
 
-Tensor& scatter_scalar_reduce_(Tensor& self, const int64_t dim, const Tensor& index,
-                                   const Scalar& value, c10::string_view reduce) {
-  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long,
-                    "scatter_(): Expected dtype int64 for index.");
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
-              "scatter_(): Expected floating or complex type for self.");
-  at::assert_no_internal_overlap(self);
-  at::assert_no_overlap(self, index);
-  SCATTER_GATHER_OP op = get_operator_enum(reduce);
-  scatter_scalar_reduce_stub(self.device().type(), self, dim, index, value, op);
-  return self;
+TORCH_IMPL_FUNC(scatter_src_out)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Tensor& src,
+ const Tensor& out) {
+  scatter_impl(self, dim, index, src, out,
+               scatter_reduce_stub,
+               scatter_stub);
 }
 
-Tensor & scatter_reduce_(Tensor & self, const int64_t dim, const Tensor & index,
-                      const Tensor & src, c10::string_view reduce) {
-  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long,
-                    "scatter_(): Expected dtype int64 for index");
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
-              "scatter_(): Expected floating or complex type for self.");
-  at::assert_no_internal_overlap(self);
-  at::assert_no_overlap(self, index);
-  at::assert_no_overlap(self, src);
-  SCATTER_GATHER_OP op = get_operator_enum(reduce);
-  scatter_reduce_stub(self.device().type(), self, dim, index, src, op);
-  return self;
+TORCH_IMPL_FUNC(scatter_value_out)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Scalar& value,
+ const Tensor& out) {
+  scatter_impl(self, dim, index, value, out,
+               scatter_scalar_reduce_stub,
+               scatter_fill_stub);
 }
 
-Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  return self.clone(at::MemoryFormat::Preserve).scatter_(dim, index, source);
+TORCH_IMPL_FUNC(scatter_reduce_out)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Tensor& src,
+ const c10::string_view reduce,
+ const Tensor& out) {
+  scatter_impl(self, dim, index, src, out,
+               scatter_reduce_stub,
+               scatter_stub,
+               reduce);
 }
 
-Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, const Scalar& source) {
-  return self.clone(at::MemoryFormat::Preserve).scatter_(dim, index, source);
+TORCH_IMPL_FUNC(scatter_value_reduce_out)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Scalar& value,
+ const c10::string_view reduce,
+ const Tensor& out) {
+  scatter_impl(self, dim, index, value, out,
+               scatter_scalar_reduce_stub,
+               scatter_fill_stub,
+               reduce);
 }
 
-Tensor & scatter_add_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & src) {
-  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long,
-                    "scatter_(): Expected dtype int64 for index.");
-  at::assert_no_internal_overlap(self);
-  at::assert_no_overlap(self, index);
-  at::assert_no_overlap(self, src);
-  if (globalContext().deterministicAlgorithms() && self.device().type() == DeviceType::CUDA && self.dim() == 1){
+TORCH_IMPL_FUNC(scatter_add)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Tensor& src,
+ const Tensor& out) {
+  auto mut_out = const_cast<Tensor&>(out);
+
+  if (!self.is_same(mut_out)) {
+    mut_out.copy_(self);
+  }
+
+  if (globalContext().deterministicAlgorithms() && self.device().type() == DeviceType::CUDA && self.dim() == 1) {
     TORCH_CHECK(index.dim() == 1 && src.dim() == 1, "index and src should be 1D tensors when self is a 1D tensor, "
       "but their dims are ", index.dim(), " and ", src.dim(), ", respectively");
     TORCH_CHECK(index.numel() == src.numel(), "index and src should have same number of elements for 1D tensors, "
@@ -1085,14 +1171,10 @@ Tensor & scatter_add_(Tensor & self, int64_t dim, const Tensor & index, const Te
     torch::List<c10::optional<Tensor>> indices;
     indices.reserve(1);
     indices.push_back(index);
-    return self.index_put_(indices, src, true);
+    mut_out.index_put_(indices, src, true);
+  } else {
+    scatter_add_stub(self.device().type(), mut_out, dim, index, src);
   }
-  scatter_add_stub(self.device().type(), self, dim, index, src);
-  return self;
-}
-
-Tensor scatter_add(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  return self.clone(at::MemoryFormat::Preserve).scatter_add_(dim, index, source);
 }
 
 Tensor masked_scatter(const Tensor & self, const Tensor & mask, const Tensor & source) {
@@ -1484,7 +1566,10 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
   const auto self_sizes = self.sizes();
   const auto total_nonzero = thread_count_nonzero.back();
   const int64_t ndim = self_sizes.size();
-  resize_output(result, {total_nonzero, ndim});
+  if (resize_output(result, {total_nonzero, ndim})) {
+    // Default to fortran-contiguous output (see gh-46224)
+    result.as_strided_({total_nonzero, ndim}, {1, total_nonzero});
+  }
 
   if (result.numel() == 0) {
     return result;

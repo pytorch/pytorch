@@ -1921,7 +1921,7 @@ const Expr* simplifyRoundModPattern(const Polynomial* poly) {
   while (!mods.empty() && repeat) {
     repeat = false;
     // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-    for (int i = mods.size() - 1; i >= 0; i--) {
+    for (int64_t i = mods.size() - 1; i >= 0; i--) {
       const Term* m = mods[i];
       const Mod* mod = dynamic_cast<const Mod*>(m->variables()[0]);
       CHECK(mod);
@@ -1929,7 +1929,7 @@ const Expr* simplifyRoundModPattern(const Polynomial* poly) {
       const Expr* mod_rhs = IRSimplifier::simplify(mod->rhs());
       bool merged = false;
       // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-      for (int j = mod_rounds.size() - 1; j >= 0; j--) {
+      for (int64_t j = mod_rounds.size() - 1; j >= 0; j--) {
         const Term* mr = mod_rounds[j];
         auto a = isModRound(mr);
         CHECK(a);
@@ -1968,7 +1968,7 @@ const Expr* simplifyRoundModPattern(const Polynomial* poly) {
       }
 
       // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-      for (int k = rounds.size() - 1; k >= 0; k--) {
+      for (int64_t k = rounds.size() - 1; k >= 0; k--) {
         const Term* r = rounds[k];
         const RoundOff* roundoff =
             dynamic_cast<const RoundOff*>(r->variables()[0]);
@@ -2045,9 +2045,9 @@ const Term* IRSimplifierBase::factorizePolynomial(const Polynomial* poly) {
 
   // Create new struture.
   std::vector<const Term*> newPolyTerms;
+  newPolyTerms.reserve(variables.size());
   for (auto* t : variables) {
     // New term with the scalar divided by the GCD.
-    // NOLINTNEXTLINE(performance-inefficient-vector-operation)
     newPolyTerms.push_back(new Term(
         poly->hasher(), evaluateOp(new Div(t->scalar(), GCD)), t->variables()));
   }

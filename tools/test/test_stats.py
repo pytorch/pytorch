@@ -2,11 +2,11 @@
 import unittest
 from typing import Dict, List
 
-from tools import print_test_stats
-from tools.stats_utils.s3_stat_parser import (Commit, Report, ReportMetaMeta,
-                                              Status, Version1Case,
-                                              Version1Report, Version2Case,
-                                              Version2Report)
+from tools.stats import print_test_stats
+from tools.stats.s3_stat_parser import (Commit, Report, ReportMetaMeta,
+                                        Status, Version1Case,
+                                        Version1Report, Version2Case,
+                                        Version2Report)
 
 
 def fakehash(char: str) -> str:
@@ -18,6 +18,7 @@ def dummy_meta_meta() -> ReportMetaMeta:
         'build_pr': '',
         'build_tag': '',
         'build_sha1': '',
+        'build_base_commit': '',
         'build_branch': '',
         'build_job': '',
         'build_workflow_id': '',

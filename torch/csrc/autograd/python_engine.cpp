@@ -222,7 +222,7 @@ PyObject *THPEngine_run_backward(PyObject *self, PyObject *args, PyObject *kwarg
   if (inputs != nullptr) {
     int num_inputs = PyTuple_GET_SIZE(inputs);
     output_edges.reserve(num_inputs);
-    for (int i = 0; i < num_inputs; ++i) {
+    for (const auto i : c10::irange(num_inputs)) {
       PyObject *input = PyTuple_GET_ITEM(inputs, i);
       THPUtils_assert(THPVariable_Check(input),
           "all inputs have to be Tensors, but got %s", THPUtils_typename(input));
@@ -239,8 +239,7 @@ PyObject *THPEngine_run_backward(PyObject *self, PyObject *args, PyObject *kwarg
         grad_fn = torch::autograd::impl::try_get_grad_accumulator(tensor);
       }
       if (accumulate_grad) {
-        THPUtils_assert(tensor.is_leaf(),
-          "One of the differentiated Tensors given as 'inputs' to backward is not a leaf Tensor");
+        tensor.retain_grad();
       }
       THPUtils_assert(tensor.requires_grad(),
           "One of the differentiated Tensors does not require grad");

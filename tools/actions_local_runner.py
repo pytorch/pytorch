@@ -221,7 +221,7 @@ class Mypy(Check):
 
     async def quick(self, files: List[str]) -> CommandResult:
         return await shell_cmd(
-            [sys.executable, "tools/mypy_wrapper.py"]
+            [sys.executable, "tools/linter/mypy_wrapper.py"]
             + [os.path.join(REPO_ROOT, f) for f in files],
             env=self.env(),
         )
@@ -270,7 +270,7 @@ class ShellCheck(Check):
 
     async def quick(self, files: List[str]) -> CommandResult:
         return await shell_cmd(
-            ["tools/run_shellcheck.sh"] + [os.path.join(REPO_ROOT, f) for f in files],
+            ["tools/linter/run_shellcheck.sh"] + [os.path.join(REPO_ROOT, f) for f in files],
         )
 
     async def full(self) -> None:

@@ -87,20 +87,21 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'sgn', 'asin', 'acos', 'sub', 'div', 'cat', 'view_as_complex',
     'neg', 'complex', 'select', '_s_where', 'as_strided', 'slice', 'constant_pad_nd',
     'unbind', 'split', 'split_with_sizes', 'unsafe_split', 'split_with_sizes_backward',
-    'dot', 'vdot', 'cholesky', 'triangular_solve', 'mm', '_unsafe_view', 'mv', 'ger',
+    'dot', 'vdot', 'cholesky', 'triangular_solve', 'mm', '_unsafe_view', 'mv', 'outer',
     'bmm', 'diagonal', 'alias', 'atan', 'log', 'log10', 'log1p', 'log2', 'reciprocal',
     'tan', 'pow', 'rsqrt', 'tanh', 'tanh_backward', 'asinh', 'acosh', 'atanh', 'take', 'fill_',
     'exp', 'nonzero', 'mean', 'inverse', 'solve', 'linalg_cholesky', 'addcmul', 'addcdiv',
     'matrix_exp', 'linalg_eigh', 'cholesky_solve', 'linalg_qr', '_svd_helper', '_fft_c2c', '_fft_r2c',
     'linalg_solve', 'sqrt', 'stack', 'gather', 'index_select', 'index_add_', 'linalg_inv', 'linalg_inv_ex',
     'l1_loss_backward', 'baddbmm', 'addbmm', 'addmm', 'addmv', 'addr', 'linalg_householder_product',
-    'constant_pad_nd', 'reflection_pad1d', 'reflection_pad2d', 'linalg_cholesky_ex', 'linalg_eig',
-    'reflection_pad1d_backward', 'reflection_pad2d_backward', 'symeig',
+    'constant_pad_nd', 'reflection_pad1d', 'reflection_pad2d', 'reflection_pad3d', 'linalg_cholesky_ex', 'linalg_eig',
+    'reflection_pad1d_backward', 'reflection_pad2d_backward', 'reflection_pad3d_backward', 'symeig', '_sparse_sparse_matmul',
     'replication_pad1d', 'replication_pad2d', 'replication_pad3d', 'take', 'put_',
     'replication_pad1d_backward', 'replication_pad2d_backward', 'replication_pad3d_backward',
     'diag', 'masked_scatter', 'masked_select', 'index_fill', 'trace', 'polar', 'cumsum', 'rsub',
     'eig', 'lerp', 'linalg_vector_norm', 'cumprod', 'prod', 'index_copy', 'lu', 'unfold', 'unfold_backward',
     'index', 'masked_fill', 'cross', 'lu_unpack', 'renorm', '_view_as_real_physical', '_conj_physical',
+    'scatter', 'scatter_add', 'sigmoid', 'sigmoid_backward',
     'conj_physical_'
 }
 
@@ -312,12 +313,12 @@ if (${requires_fw_grad}) {
 """)
 
 FW_DERIVATIVE_FORBID_TEMPLATE = CodeTemplate("""\
-TORCH_CHECK(!(${cond}), "Trying to use forward AD with ${msg} that does not support it.");
+TORCH_CHECK_NOT_IMPLEMENTED(!(${cond}), "Trying to use forward AD with ${msg} that does not support it.");
 """)
 
 FW_DERIVATIVE_FORBID_LIST_TEMPLATE = CodeTemplate("""\
 for (const auto& _t: ${arg}) {
-    TORCH_CHECK(!(${cond}), "Trying to use forward AD with ${msg} that does not support it.");
+    TORCH_CHECK_NOT_IMPLEMENTED(!(${cond}), "Trying to use forward AD with ${msg} that does not support it.");
 }
 """)
 
@@ -572,14 +573,14 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         for arg in tensor_args:
             if arg in args_with_derivatives:
                 continue
-            name = arg.name
-            if info and name in info.non_differentiable_arg_names:
+            arg_name = arg.name
+            if info and arg_name in info.non_differentiable_arg_names:
                 continue
-            if name == 'output':
+            if arg_name == 'output':
                 # Double-backwards definitions sometimes take in 'input' and
                 # 'output', but only define the derivative for input.
                 continue
-            body.append(f'check_no_requires_grad({name}, "{name}");')
+            body.append(f'check_no_requires_grad({arg_name}, "{arg_name}", "{name}");')
         return body
 
     def save_variables(
