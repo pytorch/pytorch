@@ -123,7 +123,7 @@ class TestFFT(TestCase):
         # generate Hermitian symmetric input using rfftn
         rfft_output = np.fft.rfftn(np_input_real)
 
-        return torch.from_numpy(rfft_output)
+        return torch.from_numpy(rfft_output).to('cuda')
 
     @onlyOnCPUAndCUDA
     @ops([op for op in spectral_funcs if not op.ndimensional])
