@@ -1,6 +1,6 @@
 """This module exists since the `torch.testing` exposed a lot of stuff that shouldn't have been public. Although this
 was never documented anywhere, some other internal FB projects as well as downstream OSS projects might use this. Thus,
-they sill go through a deprecation cycle before we internalize them.
+we don't internalize without warning, but still go through a deprecation cycle.
 """
 
 import functools
