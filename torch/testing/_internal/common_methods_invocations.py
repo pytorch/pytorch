@@ -7674,9 +7674,8 @@ op_db: List[OpInfo] = [
     OpInfo('attn',
            dtypes=floating_types_and(torch.bfloat16),
            sample_inputs_func=sample_inputs_attn,
-           skips=(
-               SkipInfo('TestCommon', 'test_out'),
-           )),
+           supports_out=False,
+           ),
 ]
 
 # Common operator groupings
