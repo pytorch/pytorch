@@ -40,6 +40,7 @@ class TestScriptProfile(JitTestCase):
 
     def test_basic(self):
         seq = torch.jit.script(Sequence())
+        raise RuntimeError("another failure")
         p = torch.jit._ScriptProfile()
         p.enable()
         seq(torch.rand((10, 100)))

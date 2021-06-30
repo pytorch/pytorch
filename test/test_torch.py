@@ -8078,6 +8078,7 @@ class TestTorch(AbstractTestCases._TestTorchMixin):
         self.assertTrue(m2[0])
 
     def test_tensor_cycle_via_slots(self):
+        raise RuntimeError("failure")
         m1 = [False]
         m2 = [False]
 
