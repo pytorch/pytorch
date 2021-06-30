@@ -3595,7 +3595,6 @@ def sample_inputs_kthvalue(op_info, device, dtype, requires_grad, **kwargs):
 
     return [SampleInput(tensor, args=args) for tensor, args in test_cases]
 
-
 def reference_sign(x):
     if x.dtype == np.bool_:
         # `np.sign` doesn't support `bool`.
@@ -3676,7 +3675,6 @@ def reference_mvlgamma(x, d):
 
     return scipy.special.multigammaln(x, d)
 
-
 def gradcheck_wrapper_hermitian_input(op, input, *args, **kwargs):
     """Gradcheck wrapper for functions that take Hermitian matrices as input.
 
@@ -3693,7 +3691,6 @@ def gradcheck_wrapper_triangular_input(op, input, *args, upper=False, **kwargs):
     for calculating derivatives does not preserve the triangular property of the input.
     """
     return op(input.triu() if upper else input.tril(), upper)
-
 
 # Operator database (sorted alphabetically)
 op_db: List[OpInfo] = [
@@ -4259,6 +4256,14 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard', device_type='cpu',
                                 dtypes=[torch.cfloat, torch.cdouble], active_if=IS_MACOS),
                    )),
+    OpInfo('cov',
+           dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
+           dtypesIfCUDA=all_types_and_complex_and(torch.half, *[torch.bfloat16] if CUDA11OrLater else []),
+           backward_dtypesIfCUDA=all_types_and_complex_and(torch.half, *[torch.bfloat16] if CUDA11OrLater else []),
+           sample_inputs_func=sample_inputs_cov,
+           supports_out=False,
+           # JIT test not working for tensor kwargs (https://github.com/pytorch/pytorch/issues/58507)
+           skips=(SkipInfo('TestJit', 'test_variant_consistency_jit'),)),
     OpInfo('cross',
            dtypes=all_types_and_complex(),
            dtypesIfCUDA=all_types_and_complex_and(torch.half),
@@ -5058,9 +5063,11 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_reduction_wrapper(False)),
     OpInfo('var_mean',
            dtypes=floating_and_complex_types_and(torch.half),
+           dtypesIfCPU=floating_and_complex_types_and(torch.half, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_reduction_wrapper(False),
            backward_dtypes=floating_types_and(torch.half),
+           backward_dtypesIfCPU=floating_types_and(torch.half, torch.bfloat16),
            backward_dtypesIfCUDA=floating_types_and(torch.half),
            # TODO: some signatures of var_mean do support out
            supports_out=False,
@@ -5075,9 +5082,11 @@ op_db: List[OpInfo] = [
                SkipInfo('TestGradients', 'test_forward_mode_AD'))),
     OpInfo('std_mean',
            dtypes=floating_and_complex_types_and(torch.half),
+           dtypesIfCPU=floating_and_complex_types_and(torch.half, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_reduction_wrapper(False),
            backward_dtypes=floating_types_and(torch.half),
+           backward_dtypesIfCPU=floating_types_and(torch.half, torch.bfloat16),
            backward_dtypesIfCUDA=floating_types_and(torch.half),
            # TODO: some signatures of std_mean do support out
            supports_out=False,
@@ -5565,8 +5574,9 @@ op_db: List[OpInfo] = [
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
     OpInfo('std',
            dtypes=floating_and_complex_types_and(torch.half),
+           dtypesIfCPU=floating_and_complex_types_and(torch.half, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
-           backward_dtypesIfCPU=floating_and_complex_types_and(torch.half),
+           backward_dtypesIfCPU=floating_and_complex_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_std_var,
            # TODO: std does support out in some signatures
            supports_out=False,
@@ -6265,8 +6275,9 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_unsqueeze),
     OpInfo('var',
            dtypes=floating_and_complex_types_and(torch.half),
+           dtypesIfCPU=floating_and_complex_types_and(torch.half, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
-           backward_dtypesIfCPU=floating_and_complex_types_and(torch.half),
+           backward_dtypesIfCPU=floating_and_complex_types_and(torch.half, torch.bfloat16),
            backward_dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_std_var,
            # TODO: revisit, some var signatures do support out (see std, too)
