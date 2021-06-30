@@ -1107,7 +1107,6 @@ void CudaCodeGen::call_fast(void* const* raw_args, size_t output_num_elements) {
       stream,
       ptr_to_args.data(),
       nullptr));
-  USE_TRIGGER(cuda_codegen_executed);
 
   if (prior_device != device) {
     at::cuda::set_device(prior_device);
