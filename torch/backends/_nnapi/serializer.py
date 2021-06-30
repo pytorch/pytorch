@@ -1915,9 +1915,10 @@ class _NnapiSerializer(object):
         image_id, image_oper = self.get_tensor_operand_by_jitval(jit_image)
         batch, in_ch, in_h, in_w = image_oper.shape
 
-        if batch == 0 or in_ch == 0:
-            raise Exception("Only H & W can be flexible")
-
+        if batch == 0:
+            self.forward_operand_shape(out_id, 0, image_id, 0)
+        if in_ch == 0:
+            raise Exception("Input channels can't be flexible")
         # H & W
         if transpose:
             if in_h == 0:

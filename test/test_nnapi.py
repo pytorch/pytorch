@@ -489,7 +489,7 @@ class TestNNAPI(TestCase):
                     output_size = model(inp).numel()
                     atol_rtol = None
                     limit = None
-                    convert_dims = input_dim[:2] + (0, 0)
+                    convert_dims = (0, in_ch, 0, 0)
                     convert_arg = torch.zeros(*convert_dims)
 
                     if "quant" in kind:
