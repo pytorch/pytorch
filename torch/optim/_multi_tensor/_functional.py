@@ -305,12 +305,12 @@ def sgd(params: List[Tensor],
         grads: List[Tensor],
         states: List[Dict],
         *,
-        momentum : float,
         has_sparse_grad: bool,
-        dampening: float,
-        nesterov: bool,
         weight_decay: float,
-        lr: float):
+        momentum : float,
+        lr: float,
+        dampening: float,
+        nesterov: bool):
     r"""Functional API that performs SGD algorithm computation.
     See :class:`~torch.optim.SGD` for details.
     """
