@@ -3,7 +3,7 @@ import enum
 import struct
 import array
 import logging
-from functools import reduce
+import functools
 from typing import (
     Tuple,
     NamedTuple,
@@ -932,12 +932,12 @@ class _NnapiSerializer(object):
 
         in_id, in_oper = self.get_tensor_operand_by_jitval_fixed_size(node.inputsAt(0))
 
-        start_ctype, start_dim = self.get_constant_value(node.inputsAt(1))
-        end_ctype, end_dim = self.get_constant_value(node.inputsAt(2))
+        start_ctype, start_dim = self.get_constant_value(node.inputsAt(1), "IntType")
+        end_ctype, end_dim = self.get_constant_value(node.inputsAt(2), "IntType")
 
         if in_oper.dim_order != DimOrder.PRESUMED_CONTIGUOUS:
             raise Exception(
-                "Currently, reshape is only supported on NHWC tensors")
+                "Currently, reshape is not supported on NHWC tensors")
 
         if start_dim < 0:
             start_dim += len(in_oper.shape)
@@ -946,7 +946,8 @@ class _NnapiSerializer(object):
 
         out_shape = (
             in_oper.shape[: start_dim] +
-            (reduce(lambda x, y: x * y, in_oper.shape[start_dim: end_dim + 1]),) +
+            (functools.reduce(
+                lambda x, y: x * y, in_oper.shape[start_dim: end_dim + 1]),) +
             in_oper.shape[end_dim + 1:]
         )
 
@@ -961,7 +962,7 @@ class _NnapiSerializer(object):
         #     for dim in out_shape
         # )
 
-        out_oper = in_oper._replace(shape=out_shape, dim_order=DimOrder.PRESUMED_CONTIGUOUS)
+        out_oper = in_oper._replace(shape=out_shape)
         out_id = self.add_tensor_operand(node.outputsAt(0), out_oper)
 
         inputs = [None] * 2
