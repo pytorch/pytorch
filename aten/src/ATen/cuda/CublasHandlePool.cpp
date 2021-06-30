@@ -23,14 +23,6 @@ void destroyCublasHandle(cublasHandle_t handle) {
 
 using CuBlasPoolType = DeviceThreadHandlePool<cublasHandle_t, createCublasHandle, destroyCublasHandle>;
 
-// Used for following the leaky singleton pattern for shared_ptrs:
-// https://isocpp.org/wiki/faq/ctors#construct-on-first-use-v2
-struct LeakyDeleter {
-    void operator()(CuBlasPoolType* p) const {
-      // Leak the memory.
-    }
-};
-
 } // namespace
 
 cublasHandle_t getCurrentCUDABlasHandle() {
@@ -45,8 +37,10 @@ cublasHandle_t getCurrentCUDABlasHandle() {
 
   // Use a leaky singleton for the pool following standard practice around
   // singletons: https://isocpp.org/wiki/faq/ctors#construct-on-first-use-v2
-  static auto pool = std::shared_ptr<CuBlasPoolType>(new CuBlasPoolType(),
-      LeakyDeleter());
+  static auto pool = std::shared_ptr<CuBlasPoolType>(
+      new CuBlasPoolType(), [](CuBlasPoolType* p) {
+        // Leak the memory.
+      });
   thread_local std::unique_ptr<CuBlasPoolType::PoolWindow> myPoolWindow(
       pool->newPoolWindow());
 
