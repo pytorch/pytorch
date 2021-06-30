@@ -272,10 +272,12 @@ def _dtype_test_suffix(dtypes):
 def _update_param_kwargs(param_kwargs, name, value):
     """ Adds a kwarg with the specified name and value to the param_kwargs dict. """
     if isinstance(value, list) or isinstance(value, tuple):
-        # Make name plural
+        # Make name plural (e.g. devices / dtypes) if the value is composite.
         param_kwargs['{}s'.format(name)] = value
     elif value:
         param_kwargs[name] = value
+
+    # Leave param_kwargs as-is when value is None.
 
 
 class DeviceTypeTestBase(TestCase):
@@ -612,13 +614,17 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
 # Category of dtypes to run an OpInfo-based test for
 # Example use: @ops(dtype=OpDTypes.supported)
 #
-# There are 3 categories: supported, unsupported and basic.
+# There are 6 categories:
 # - basic: The dtypes the operator wants to be tested on by default. This will be
 #          a subset of the types supported by the operator.
 # - supported: Every dtype supported by the operator. Use for exhaustive
 #              testing of all dtypes.
 # - unsupported: Run tests on dtypes not supported by the operator. e.g. for
 #                testing the operator raises an error and doesn't crash.
+# - supported_backward: Every dtype supported by the operator's backward pass.
+# - unsupported_backward: Run tests on dtypes not supported by the operator's backward pass.
+# - none: Useful for tests that are not dtype-specific. No dtype will be passed to the test
+#         when this is selected.
 class OpDTypes(Enum):
     basic = 0  # Test the basic set of dtypes (default)
     supported = 1  # Test all supported dtypes
