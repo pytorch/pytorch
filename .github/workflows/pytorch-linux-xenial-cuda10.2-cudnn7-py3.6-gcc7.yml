@@ -5,6 +5,7 @@ name: Linux CI (pytorch-linux-xenial-cuda10.2-cudnn7-py3.6-gcc7)
 
 on:
   # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
+  pull_request:
   push:
     branches:
       - master
@@ -194,9 +195,14 @@ jobs:
     runs-on: ubuntu-18.04
     env:
       TEST_RUNNER_TYPE: linux.8xlarge.nvidia.gpu
+      ENABLE_JIT_LEGACY_TEST: 1
       ENABLE_MULTIGPU_TEST: 1
+      ENABLE_NOGPU_NO_AVX_TEST: 1
+      ENABLE_NOGPU_NO_AVX2_TEST: 1
+      ENABLE_SLOW_TEST: 1
       NUM_TEST_SHARDS: 2
       MULTIGPU_RUNNER_TYPE: linux.16xlarge.nvidia.gpu
+      NOGPU_RUNNER_TYPE: linux.2xlarge
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
       render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}

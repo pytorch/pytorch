@@ -55,6 +55,7 @@ def PyTorchLinuxWorkflow(
     enable_jit_legacy_test: YamlShellBool = "''",
     enable_multigpu_test: YamlShellBool = "''",
     enable_nogpu_no_avx_test: YamlShellBool = "''",
+    enable_nogpu_no_avx2_test: YamlShellBool = "''",
     enable_slow_test: YamlShellBool = "''",
     num_test_shards: int = 1,
 ) -> PyTorchWorkflow:
@@ -67,6 +68,7 @@ def PyTorchLinuxWorkflow(
         "enable_jit_legacy_test": enable_jit_legacy_test,
         "enable_multigpu_test": enable_multigpu_test,
         "enable_nogpu_no_avx_test": enable_nogpu_no_avx_test,
+        "enable_nogpu_no_avx2_test": enable_nogpu_no_avx2_test,
         "enable_slow_test": enable_slow_test,
         "num_test_shards": num_test_shards,
     }
@@ -162,6 +164,7 @@ LINUX_WORKFLOWS = [
         enable_jit_legacy_test=1,
         enable_multigpu_test=1,
         enable_nogpu_no_avx_test=1,
+        enable_nogpu_no_avx2_test=1,
         enable_slow_test=1,
         num_test_shards=2,
     ),
