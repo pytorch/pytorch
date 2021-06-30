@@ -497,6 +497,17 @@ class SubprocessHandler:
             self._stderr.close()
 
 
+def _pr_set_pdeathsig() -> None:
+    """
+    Sets PR_SET_PDEATHSIG to ensure a child process is
+    terminated appropriately.
+
+    See http://stackoverflow.com/questions/1884941/ for more information.
+    For libc.so.6 read http://www.linux-m68k.org/faq/glibcinfo.html
+    """
+    mp._prctl_pr_set_pdeathsig(signal.SIGTERM)  # type: ignore[attr-defined]
+
+
 class SubprocessContext(PContext):
     """
     ``PContext`` holding worker processes invoked as a binary.
@@ -541,7 +552,7 @@ class SubprocessContext(PContext):
                 entrypoint=self.entrypoint,  # type: ignore[arg-type] # entrypoint is always a str
                 args=self.args[local_rank],
                 env=self.envs[local_rank],
-                preexec_fn=mp._prctl_pr_set_pdeathsig(signal.SIGTERM),  # type: ignore[attr-defined]
+                preexec_fn=_pr_set_pdeathsig,
                 stdout=self.stdouts[local_rank],
                 stderr=self.stderrs[local_rank],
             )
