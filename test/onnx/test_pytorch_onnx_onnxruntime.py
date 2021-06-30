@@ -9321,7 +9321,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_dist_uniform_correctness(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
-                return torch.distributions.Uniform(x, y).sample()
+                return torch.distributions.Uniform(x, y).sample([10000])
 
         expected_min = 5.0
         expected_max = 10.0
@@ -9332,16 +9332,13 @@ class TestONNXRuntime(unittest.TestCase):
         ort_sess = convert_to_onnx(model_export, input=dummy_input, opset_version=self.opset_version,
                                    training=torch.onnx.TrainingMode.EVAL)
 
-        ort_out = []
-        for i in range(1000):
-            ort_out.append(run_ort(ort_sess, input=dummy_input))
+        ort_out = run_ort(ort_sess, input=dummy_input)
+        actual_min = np.min(ort_out)
+        actual_max = np.max(ort_out)
+        actual_mean = np.mean(ort_out)
 
-        actual_min = min(ort_out)
-        actual_max = max(ort_out)
-        actual_mean = (actual_min[0] + actual_max[0]) / 2
-
-        assert actual_min[0] >= expected_min, "the minimum value of ort outputs is out of scope."
-        assert actual_max[0] <= expected_max, "the maximum value of ort outputs is out of scope."
+        assert actual_min >= expected_min, "the minimum value of ort outputs is out of scope."
+        assert actual_max <= expected_max, "the maximum value of ort outputs is out of scope."
         assert abs(actual_mean - expected_mean) <= expected_mean * 0.05, \
                "the mean value of ort outputs is out of scope."
 
