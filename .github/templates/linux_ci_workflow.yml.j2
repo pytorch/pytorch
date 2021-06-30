@@ -163,7 +163,7 @@ jobs:
           COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
           export COMMIT_TIME
           pip3 install requests
-          python3 .circleci/scripts/upload_binary_size_to_scuba.py || exit 0
+          python3 tools/stats/upload_binary_size_to_scuba.py || exit 0
       - name: Chown workspace
         run: |
           # Ensure the working directory gets chowned back to the current user
