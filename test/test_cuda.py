@@ -1763,46 +1763,6 @@ except RuntimeError as e:
 
     # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
     @skipIfRocm
-    def test_streaming_backwards_multiple_streams_legacy(self):
-        # Tests calling backward() under a side stream then using a grad
-        # on the default stream without syncing. Right now, this pattern is safe,
-        # but only for BC. In a future PR, this pattern will become unsafe,
-        # a sync will be required, and this test will be deleted in favor of
-        # test_streaming_backward_multiple_streams below.
-        class StreamModel(torch.nn.Module):
-            def __init__(self):
-                super(StreamModel, self).__init__()
-                self.event = torch.cuda.Event()
-                self.stream0 = torch.cuda.Stream()
-                self.stream1 = torch.cuda.Stream()
-
-            def forward(self, x):
-                x0 = x.clone()
-                torch._C._cuda_setStream(self.stream0._cdata)
-                y0 = x0 * 2
-                self.event.record(stream=torch.cuda.current_stream())
-
-                torch._C._cuda_setStream(self.stream1._cdata)
-                y1 = x * 3
-                self.stream1.wait_event(self.event)
-                return y0 + y1
-
-        stream = torch.cuda.Stream()
-
-        def accum_hook(grad):
-            self.assertEqual(torch.cuda.current_stream(), stream)
-
-        with torch.cuda.stream(stream):
-            x = torch.randn(5, 5, device='cuda', requires_grad=True)
-            x.register_hook(accum_hook)
-            torch.cuda.current_stream().wait_stream(stream)
-            model = StreamModel().cuda()
-            model(x).sum().backward()
-
-        self.assertEqual(x.grad, torch.ones_like(x) * 5)
-
-    # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
-    @skipIfRocm
     def test_streaming_backwards_multiple_streams(self):
         MultiplyInStream = self._make_multiply_in_stream()
 
@@ -3668,6 +3628,8 @@ torch.cuda.synchronize()
                      TEST_WITH_ROCM or
                      int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
     def test_graph_grad_scaling(self):
+        torch.cuda.empty_cache()
+
         scaler = torch.cuda.amp.GradScaler(init_scale=4.)
         g = torch.cuda._Graph()
         s = torch.cuda.Stream()
@@ -3680,15 +3642,13 @@ torch.cuda.synchronize()
         s.wait_stream(torch.cuda.current_stream())
         with torch.cuda.stream(s):
             # warmup
-            weight.grad = (scaler.scale(static_grad) * static_input).half().float()
+            loss = (weight.half() * static_input).sum()
+            scaler.scale(loss).backward()
+            opt.zero_grad(set_to_none=True)
             # capture
             g.capture_begin()
-            weight.grad = (scaler.scale(static_grad) * static_input).half().float()
-            # The above simulates a rudimentary backward pass.
-            # TODO: Once full-backward() capture is enabled (see https://github.com/pytorch/pytorch/pull/54227)
-            # change to
-            # loss = (w.half() * static_input).sum()
-            # scaler.scale(loss).backward()
+            loss = (weight.half() * static_input).sum()
+            scaler.scale(loss).backward()
             g.capture_end()
         torch.cuda.current_stream().wait_stream(s)
 
