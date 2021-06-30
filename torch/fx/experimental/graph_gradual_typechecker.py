@@ -5,10 +5,9 @@ import operator
 from math import floor
 from torch.fx.tensor_type import Dyn, is_consistent, TensorType, is_more_precise
 from typing import Callable, Dict
-from torch.fx.node import Target
+from torch.fx.node import Target, Node
 from torch.nn.modules.batchnorm import BatchNorm2d
 from torch.nn.modules.conv import Conv2d
-
 
 _INFERENCE_RULES: Dict[Target, Callable] = {}
 
@@ -60,7 +59,8 @@ def broadcast_types(t1, t2):
             raise TypeError('In-place operations cannot not change shape')
 
         return TensorType(tuple(new_t1)), TensorType(tuple(new_t2))
-
+    else:
+        raise TypeError(f'Cannot broadcast types {t1} and {t2}')
 
 def register_inference_rule(call_target):
     def register(fn):
@@ -73,9 +73,20 @@ def register_inference_rule(call_target):
 
 @register_inference_rule(torch.add)
 @register_inference_rule(operator.add)
-def add_inference_rule(n):
+def add_inference_rule(n: Node):
+    assert isinstance(n.args[0], Node)
+    assert isinstance(n.args[1], Node)
     t1 = n.args[0].type
     t2 = n.args[1].type
+
+    # handle scalar addition
+    if t1 == int and isinstance(t2, TensorType):
+        n.type = t2
+        return n.type
+
+    elif t2 == int and isinstance(t1, TensorType):
+        n.type = t1
+        return n.type
 
     (new_t1, new_t2) = broadcast_types(t1, t2)
     n.args[0].type = new_t1
@@ -84,9 +95,9 @@ def add_inference_rule(n):
     if is_consistent(new_t1, new_t2):
         # we return the more precise type
         if is_more_precise(new_t1, new_t2):
-            n.type = new_t1
-        else:
             n.type = new_t2
+        else:
+            n.type = new_t1
         return n.type
     else:
         raise TypeError(f'Cannot add arguments {n.args[0]} ({ n.args[0].type}) and {n.args[1]} ({ n.args[1].type}) in node {n}.'
@@ -94,24 +105,39 @@ def add_inference_rule(n):
 
 
 @register_inference_rule(torch.transpose)
-def transpose_inference_rule(n):
+def transpose_inference_rule(n: Node):
     if n.target == torch.transpose:
+        assert isinstance(n.args[0], Node)
         t = n.args[0].type
+
+        assert isinstance(n.args[1], int)
+        assert isinstance(n.args[2], int)
         dim1, dim2 = n.args[1], n.args[2]
 
-        if 0 <= dim1 < len(t.__args__) and 0 <= dim2 < len(t.__args__):
-            new_type = list(t.__args__)
-            new_type[dim1], new_type[dim2] = new_type[dim2], new_type[dim1]
-            final = TensorType(new_type)
-            n.type = final
+        if t == Dyn:
+            n.type = Dyn
             return n.type
+
+        elif isinstance(t, TensorType):
+
+            if 0 <= dim1 < len(t.__args__) and 0 <= dim2 < len(t.__args__):
+                new_type = list(t.__args__)
+                new_type[dim1], new_type[dim2] = new_type[dim2], new_type[dim1]
+                final = TensorType(new_type)
+                n.type = final
+                return n.type
+            else:
+                raise TypeError(f'Cannot transpose {dim1} and {dim2} in type {t} for node {n}')
         else:
-            raise TypeError(f'Cannot transpose {dim1} and {dim2} for node {n}')
+            raise TypeError(f'Cannot transpose {dim1} and {dim2} in type {t} for node {n}')
 
 
 @register_inference_rule(torch.reshape)
-def reshape_inference_rule(n):
+def reshape_inference_rule(n: Node):
+    assert isinstance(n.args[0], Node)
     t1 = n.args[0].type
+
+    assert isinstance(n.args[1], list)
     t2 = n.args[1]
     t2_type = TensorType([Dyn if elem == -1 else elem for elem in t2])
 
@@ -123,7 +149,8 @@ def reshape_inference_rule(n):
 
     # if any of the dimensions are unknown,
     # we check for divisibility
-    if isinstance(t1, TensorType) and Dyn in t1.__args__ or -1 in t2:
+    elif isinstance(t1, TensorType) and Dyn in t1.__args__ or -1 in t2:
+        assert isinstance(t1, TensorType)
         a = [e if e != Dyn else 1 for e in t1.__args__]
         p1 = reduce(lambda x, y: x * y, a)
         p2 = reduce(lambda x, y: x * y, t2)
@@ -134,7 +161,7 @@ def reshape_inference_rule(n):
             raise TypeError(f'Cannot reshape in node {n} from {t1} to {t2_type}')
 
     # if all dimensions are known we check the products
-    if isinstance(t1, TensorType):
+    elif isinstance(t1, TensorType):
         p1 = reduce(lambda x, y: x * y, t1.__args__)
         p2 = reduce(lambda x, y: x * y, t2)
         if p1 == p2:
@@ -216,7 +243,7 @@ class GraphTypeChecker:
             self.type_check_node(n)
         return True
 
-    def type_check_node(self, n):
+    def type_check_node(self, n: Node):
         """
         Type check a given fx node.
         Current operations:
@@ -244,6 +271,7 @@ class GraphTypeChecker:
                 raise RuntimeError(f'No inference rule registered for class {type(op_type)}!')
 
         if n.op == 'output':
+            assert isinstance(n.args[0], Node)
             n.type = n.args[0].type
             return n.type
 

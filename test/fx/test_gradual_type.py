@@ -91,8 +91,25 @@ class TypeCheckerTest(unittest.TestCase):
         tc.type_check()
         expected_ph_types = [TensorType((1, 2, 3, Dyn)),
                              TensorType((1, 2, 3, 4)),
-                             TensorType((1, 2, 3, 4)),
-                             TensorType((1, 2, 3, 4))]
+                             TensorType((1, 2, 3, Dyn)),
+                             TensorType((1, 2, 3, Dyn))]
+        expected_iter = iter(expected_ph_types)
+
+        for n in symbolic_traced.graph.nodes:
+            assert n.type == next(expected_iter)
+
+    def test_type_check_add_with_scalar(self):
+        class M(torch.nn.Module):
+            def forward(self, x: int, y: TensorType((2, 3, 4))):
+                return torch.add(x, y)
+        module = M()
+        symbolic_traced: torch.fx.GraphModule = symbolic_trace(module)
+        tc = GraphTypeChecker({}, symbolic_traced)
+        tc.type_check()
+        expected_ph_types = [int,
+                             TensorType((2, 3, 4)),
+                             TensorType((2, 3, 4)),
+                             TensorType((2, 3, 4))]
         expected_iter = iter(expected_ph_types)
 
         for n in symbolic_traced.graph.nodes:
@@ -124,7 +141,7 @@ class TypeCheckerTest(unittest.TestCase):
             if n.op == 'placeholder':
                 assert n.type == next(expected_iter)
             if n.op == 'output':
-                assert n.type == TensorType((1, 2, 3))
+                assert n.type == TensorType((1, 2, Dyn))
 
     def test_type_check_reshape_true(self):
         class M(torch.nn.Module):
