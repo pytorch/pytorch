@@ -91,6 +91,8 @@ the module level with :meth:`nn.Module.requires_grad_()`.
 When applied to a module, ``.requires_grad_()`` takes effect on all
 of the module's parameters (which have ``requires_grad=True`` by default).
 
+Tensors that are not module parameters have ``requires_grad=False` by default.
+
 Grad Modes
 ^^^^^^^^^^
 
