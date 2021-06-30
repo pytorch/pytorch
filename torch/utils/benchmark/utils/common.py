@@ -162,8 +162,8 @@ class Measurement:
     def _lazy_init(self) -> None:
         if self.raw_times and not self._sorted_times:
             self._sorted_times = tuple(sorted(self.times))
-            _sorted_times = torch.tensor(self._sorted_times)
-            self._median = _sorted_times.median().item()
+            _sorted_times = torch.tensor(self._sorted_times, dtype=torch.float64)
+            self._median = _sorted_times.quantile(.5).item()
             self._mean = _sorted_times.mean().item()
             self._p25 = _sorted_times.quantile(.25).item()
             self._p75 = _sorted_times.quantile(.75).item()
