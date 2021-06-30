@@ -1,26 +1,20 @@
+# @generated DO NOT EDIT MANUALLY
 # Template is at:    .github/templates/linux_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: Linux CI (!{{ build_environment }})
+name: Linux CI (pytorch-linux-bionic-py3.8-gcc9-coverage)
 
 on:
   # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
-{%- if on_pull_request %}
   pull_request:
-{%- endif %}
-{%- if is_scheduled %}
-  schedule:
-    - cron: !{{ is_scheduled }}
-{%- else %}
   push:
     branches:
       - master
       - release/*
-{%- endif %}
   workflow_dispatch:
 
 env:
-  BUILD_ENVIRONMENT: !{{ build_environment }}
-  DOCKER_IMAGE_BASE: !{{ docker_image_base }}
+  BUILD_ENVIRONMENT: pytorch-linux-bionic-py3.8-gcc9-coverage
+  DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-py3.8-gcc9
   SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
   TORCH_CUDA_ARCH_LIST: 5.2
   IN_CI: 1
@@ -29,7 +23,7 @@ env:
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
 
 concurrency:
-  group: !{{ build_environment }}-${{ github.event.pull_request.number || github.sha }}
+  group: pytorch-linux-bionic-py3.8-gcc9-coverage-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 jobs:
@@ -107,7 +101,7 @@ jobs:
     needs: calculate-docker-image
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
-      JOB_BASE_NAME: !{{ build_environment }}-build
+      JOB_BASE_NAME: pytorch-linux-bionic-py3.8-gcc9-coverage-build
     steps:
       - name: Log in to ECR
         run: |
@@ -200,15 +194,10 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: ubuntu-18.04
     env:
-      TEST_RUNNER_TYPE: !{{ test_runner_type }}
-      ENABLE_JIT_LEGACY_TEST: !{{ enable_jit_legacy_test }}
-      ENABLE_MULTIGPU_TEST: !{{ enable_multigpu_test }}
-      ENABLE_NOGPU_NO_AVX_TEST: !{{ enable_nogpu_no_avx_test }}
-      ENABLE_NOGPU_NO_AVX2_TEST: !{{ enable_nogpu_no_avx2_test }}
-      ENABLE_SLOW_TEST: !{{ enable_slow_test }}
-      NUM_TEST_SHARDS: !{{ num_test_shards }}
+      TEST_RUNNER_TYPE: linux.2xlarge
+      ENABLE_MULTIGPU_TEST: ''
+      NUM_TEST_SHARDS: 2
       MULTIGPU_RUNNER_TYPE: linux.16xlarge.nvidia.gpu
-      NOGPU_RUNNER_TYPE: linux.2xlarge
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
       render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
@@ -234,7 +223,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
-      JOB_BASE_NAME: !{{ build_environment }}-test
+      JOB_BASE_NAME: pytorch-linux-bionic-py3.8-gcc9-coverage-test
       TEST_CONFIG: ${{ matrix.config }}
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
@@ -396,7 +385,7 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_SECRET_ACCESS_KEY }}
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: !{{ build_environment }}-test
+          JOB_BASE_NAME: pytorch-linux-bionic-py3.8-gcc9-coverage-test
           CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
           CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
@@ -404,97 +393,3 @@ jobs:
         run: |
           export PYTHONPATH=$PWD
           python tools/stats/print_test_stats.py --upload-to-s3 --compare-with-s3 test
-  {%- if enable_doc_jobs %}
-
-  pytorch_python_doc_build:
-    runs-on: linux.2xlarge
-    needs:
-      - calculate-docker-image
-      - build
-    env:
-      DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
-    steps:
-      - name: Log in to ECR
-        run: |
-          aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
-          bash /tmp/ecr-login.sh
-          rm /tmp/ecr-login.sh
-      - name: Chown workspace
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Checkout PyTorch
-        uses: actions/checkout@v2
-        with:
-          fetch-depth: 0 # deep clone, to allow sharding to use git rev-list
-          submodules: recursive
-      - name: Pull docker image
-        run: |
-          docker pull "${DOCKER_IMAGE}"
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
-        name: Download PyTorch Build Artifacts
-        with:
-          name: ${{ env.BUILD_ENVIRONMENT }}
-      - name: Unzip artifacts
-        run: |
-          unzip -o artifacts.zip
-      - name: Build Python Doc in Docker
-        run: |
-          set -ex
-          time docker pull "${DOCKER_IMAGE}" > /dev/null
-          echo "${GITHUB_REF}"
-          ref=${GITHUB_REF##*/}
-          target=${ref//v}
-          docker run \
-            -e BUILD_ENVIRONMENT \
-            -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
-            -e IN_CI \
-            -e MAX_JOBS="$(nproc --ignore=2)" \
-            -e CIRCLE_SHA1="$GITHUB_SHA" \
-            --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
-            --security-opt seccomp=unconfined \
-            --cap-add=SYS_PTRACE \
-            --name="$GITHUB_SHA" \
-            --tty \
-            --user jenkins \
-            -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
-            -w /var/lib/jenkins/workspace \
-            "${DOCKER_IMAGE}" \
-            bash -c "sudo chown -R jenkins . && pip install dist/*.whl && ./.circleci/scripts/python_doc_push_script.sh docs/$target $target site"
-      - name: Chown workspace
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: driazati/upload-artifact-s3@21c31d0a7bcb056ca50bd6ce197ba6507c26a1be
-        if: github.event_name == 'pull_request'
-        name: Upload Docs Preview
-        with:
-          name: deploy
-          retention-days: 14
-          if-no-files-found: error
-          path: pytorch.github.io/docs/merge
-      - name: Show Docs Preview URL (Click Me)
-        if: github.event_name == 'pull_request'
-        env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          echo "See rendered docs at https://docs-preview.pytorch.org/$PR_NUMBER/"
-      - name: Archive artifacts into zip
-        run: |
-          zip -r pytorch_github_io.zip "${GITHUB_WORKSPACE}/pytorch.github.io"
-      - uses: actions/upload-artifact@v2
-        name: Store PyTorch Build Artifacts
-        with:
-          name: pytorch_github_io
-          if-no-files-found: error
-          path: pytorch_github_io.zip
-      - name: Clean up docker images
-        if: always()
-        run: |
-          # Prune all of the docker images
-          docker system prune -af
-
-  {%- endif -%}

@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import jinja2
 from typing_extensions import Literal
 
 DOCKER_REGISTRY = "308535385114.dkr.ecr.us-east-1.amazonaws.com"
 
-GITHUB_DIR = Path(__file__).parent.parent
+GITHUB_DIR = Path(__file__).resolve().parent.parent
 
 
 # it would be nice to statically specify that build_environment must be
@@ -30,6 +30,7 @@ def PyTorchWindowsWorkflow(
     on_pull_request: bool = False,
     only_build_on_pull_request: bool = False,
     num_test_shards: int = 1,
+    is_scheduled: Optional[str] = None,
 ) -> PyTorchWorkflow:
     return {
         "build_environment": build_environment,
@@ -37,6 +38,7 @@ def PyTorchWindowsWorkflow(
         "cuda_version": cuda_version,
         "on_pull_request": on_pull_request,
         "only_build_on_pull_request": only_build_on_pull_request and on_pull_request,
+        "is_scheduled": is_scheduled,
         "num_test_shards": num_test_shards,
     }
 
@@ -58,12 +60,14 @@ def PyTorchLinuxWorkflow(
     enable_nogpu_no_avx2_test: YamlShellBool = "''",
     enable_slow_test: YamlShellBool = "''",
     num_test_shards: int = 1,
+    is_scheduled: Optional[str] = None,
 ) -> PyTorchWorkflow:
     return {
         "build_environment": build_environment,
         "docker_image_base": docker_image_base,
         "test_runner_type": test_runner_type,
         "on_pull_request": on_pull_request,
+        "is_scheduled": is_scheduled,
         "enable_doc_jobs": enable_doc_jobs,
         "enable_jit_legacy_test": enable_jit_legacy_test,
         "enable_multigpu_test": enable_multigpu_test,
@@ -108,7 +112,14 @@ WINDOWS_WORKFLOWS = [
         cuda_version="11.1",
         test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
         num_test_shards=2,
-    )
+    ),
+    PyTorchWindowsWorkflow(
+        build_environment="periodic-pytorch-win-vs2019-cuda11-cudnn8-py3",
+        cuda_version="11.3",
+        test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
+        num_test_shards=2,
+        is_scheduled="45 0,4,8,12,16,20 * * *",
+    ),
 ]
 
 LINUX_WORKFLOWS = [
@@ -194,11 +205,13 @@ LINUX_WORKFLOWS = [
     #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-py3.6-clang9",
     #     test_runner_type=LINUX_CPU_TEST_RUNNER,
     # ),
-    # PyTorchLinuxWorkflow(
-    #     build_environment="pytorch-linux-bionic-py3.8-gcc9-coverage",
-    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-py3.8-gcc9",
-    #     test_runner_type=LINUX_CPU_TEST_RUNNER,
-    # ),
+    PyTorchLinuxWorkflow(
+        build_environment="pytorch-linux-bionic-py3.8-gcc9-coverage",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-py3.8-gcc9",
+        test_runner_type=LINUX_CPU_TEST_RUNNER,
+        on_pull_request=True,
+        num_test_shards=2,
+    ),
     # PyTorchLinuxWorkflow(
     #     build_environment="pytorch-linux-bionic-rocm3.9-py3.6",
     #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm3.9-py3.6",
