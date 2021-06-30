@@ -8,6 +8,8 @@ namespace at {
 namespace native {
 
 std::tuple<Tensor, Tensor> attn(const Tensor& q, const Tensor& k, const Tensor& v) {
+    TORCH_CHECK(!q.is_complex(), "torch.attn: not implemented for ", q.dtype());
+
     Tensor attn = tanh(q.matmul(k.swapaxes(0, 1)));
     Tensor output = attn.matmul(v);
     return std::make_tuple(output, attn);
