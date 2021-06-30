@@ -4,7 +4,7 @@
 namespace at {
 namespace native {
 
-static inline void assign_quantized_tensor_cuda(
+void assign_quantized_tensor_cuda(
   const Tensor& self, Tensor& dst) {
   AT_DISPATCH_QINT_TYPES(
       dst.scalar_type(), "assign_quantized_tensor_cuda", [&]() {
