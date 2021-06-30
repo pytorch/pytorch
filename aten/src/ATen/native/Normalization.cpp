@@ -193,14 +193,19 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
   }
 
   // non-contiguous path
-  parallel_for(0, n_input, 1, [&](int64_t b_begin, int64_t b_end) {
-    for (int64_t f = b_begin; f < b_end; ++f) {
-      Tensor in = input.select(1, f);
+  auto channel_stride = input.strides()[1];
+  auto in_data = input.data_ptr<scalar_t>();
+  auto reduce_iter = TensorIteratorConfig()
+      .add_input(input)
+      .resize_outputs(false)
+      .declare_static_shape(input.sizes(), /*squash_dims=*/1)
+      .build();
 
+  parallel_for(0, n_input, 1, [&](int64_t b_begin, int64_t b_end) {
+    TensorIterator iter(reduce_iter);
+    for (int64_t f = b_begin; f < b_end; ++f) {
       // compute variance per input
-      auto iter = TensorIteratorConfig()
-        .add_input(in)
-        .build();
+      iter.unsafe_replace_operand(0, in_data + channel_stride * f);
       accscalar_t var_sum = 0;
       auto mean = static_cast<accscalar_t>(save_mean_a[f]);
       cpu_serial_kernel(iter, [&](const scalar_t i) -> void {
@@ -279,11 +284,47 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
   auto sum = at::sum(grad_out_, /*dims=*/reduce_dims);
   auto sum_a = sum.accessor<scalar_t, 1>();
 
-  parallel_for(0, n_input, 1, [&](int64_t b_begin, int64_t b_end) {
-      for (int64_t f = b_begin; f < b_end; ++f) {
-        Tensor in = input.select(1, f);
-        Tensor grad_out = grad_out_.select(1, f);
+  auto reduce_iter = TensorIteratorConfig()
+      .add_input(input)
+      .add_input(grad_out_)
+      .resize_outputs(false)
+      .declare_static_shape(input.sizes(), /*squash_dims=*/1)
+      .build();
 
+  TensorIterator unary_iter;
+  TensorIterator binary_iter;
+  if (grad_input_mask[0]) {
+    unary_iter.build(
+        TensorIteratorConfig()
+        .add_output(grad_input)
+        .add_input(train ? input : grad_out_)
+        .resize_outputs(false)
+        .declare_static_shape(input.sizes(), /*squash_dims=*/1));
+
+    if (train) {
+      binary_iter.build(
+          TensorIteratorConfig()
+          .add_output(grad_input)
+          .add_input(grad_input)
+          .add_input(grad_out_)
+          .resize_outputs(false)
+          .declare_static_shape(input.sizes(), /*squash_dims=*/1));
+    }
+  }
+
+  auto in_channel_stride = input.strides()[1];
+  auto in_data = input.data_ptr<scalar_t>();
+  auto grad_in_channel_stride = grad_input_mask[0] ? grad_input.strides()[1] : 0;
+  auto grad_in_data = grad_input_mask[0] ? grad_input.data_ptr<scalar_t>() : nullptr;
+  auto grad_out_channel_stride = grad_out_.strides()[1];
+  auto grad_out_data = grad_out_.data_ptr<scalar_t>();
+
+  parallel_for(0, n_input, 1, [&](int64_t b_begin, int64_t b_end) {
+      TensorIterator reduce_iter_local(reduce_iter);
+      TensorIterator unary_iter_local(unary_iter);
+      TensorIterator binary_iter_local(binary_iter);
+
+      for (int64_t f = b_begin; f < b_end; ++f) {
         scalar_t w = weight.defined() ? weight_a[f] : 1;
 
         scalar_t mean, invstd;
@@ -297,16 +338,16 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
 
         // dot product of the Q(X) and gradOuput
         accscalar_t dotp = 0;
-        auto iter = TensorIteratorConfig()
-          .add_input(in)
-          .add_input(grad_out)
-          .build();
-        cpu_serial_kernel(iter, [&](const scalar_t i, const scalar_t go) -> void {
+        reduce_iter_local.unsafe_replace_operand(
+            0, in_data + f * in_channel_stride);
+        reduce_iter_local.unsafe_replace_operand(
+            1, grad_out_data + f * grad_out_channel_stride);
+
+        cpu_serial_kernel(reduce_iter_local, [&](const scalar_t i, const scalar_t go) -> void {
           dotp += (i - mean) * go;
         });
 
         if (grad_input_mask[0]) {
-          Tensor grad_in = grad_input.select(1, f);
           if (train) {
             // when in training mode
             // Q(X) = X - E[x] ; i.e. input centered to zero mean
@@ -316,16 +357,23 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
             // projection of gradOutput on to output scaled by std
             scalar_t k = (scalar_t) dotp * invstd * invstd / n;
             {
-              auto iter = TensorIterator::unary_op(grad_in, in);
-              cpu_serial_kernel(iter, [&](const scalar_t i) -> scalar_t {
+              unary_iter_local.unsafe_replace_operand(
+                  0, grad_in_data + f * grad_in_channel_stride);
+              unary_iter_local.unsafe_replace_operand(
+                  1, in_data + f * in_channel_stride);
+              cpu_serial_kernel(unary_iter_local, [&](const scalar_t i) -> scalar_t {
                 return (i - mean) * k;
               });
             }
 
             scalar_t grad_mean = sum_a[f] / n;
             {
-              auto iter = TensorIterator::borrowing_binary_op(grad_in, grad_in, grad_out);
-              cpu_serial_kernel(iter, [&](scalar_t gi, scalar_t go) -> scalar_t {
+              auto gI_data = grad_in_data + f * grad_in_channel_stride;
+              binary_iter_local.unsafe_replace_operand(0, gI_data);
+              binary_iter_local.unsafe_replace_operand(1, gI_data);
+              binary_iter_local.unsafe_replace_operand(
+                  2, grad_out_data + f * grad_out_channel_stride);
+              cpu_serial_kernel(binary_iter_local, [&](scalar_t gi, scalar_t go) -> scalar_t {
                 return (go - grad_mean - gi) * invstd * w;
               });
             }
@@ -335,8 +383,11 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
             // Y = Q(X) / running_std    ; i.e. BN output before weight and bias
             // dL/dX = w / running_std
             {
-              auto iter = TensorIterator::unary_op(grad_in, grad_out);
-              cpu_serial_kernel(iter, [&](const scalar_t i) -> scalar_t {
+              unary_iter_local.unsafe_replace_operand(
+                  0, grad_in_data + f * grad_in_channel_stride);
+              unary_iter_local.unsafe_replace_operand(
+                  1, grad_out_data + f * grad_out_channel_stride);
+              cpu_serial_kernel(unary_iter_local, [&](const scalar_t i) -> scalar_t {
                 return i * invstd * w;
               });
             }

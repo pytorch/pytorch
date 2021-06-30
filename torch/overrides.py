@@ -376,6 +376,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.clamp_min: lambda input, min, out=None: -1,
         torch.clamp_max: lambda input, max, out=None: -1,
         torch.column_stack: lambda tensors, out=None: -1,
+        torch.cov: lambda input, correction=1, fweights=None, aweights=None: -1,
         torch.clone: lambda input: -1,
         torch.combinations: lambda input, r=2, with_replacement=False: -1,
         torch.complex: lambda real, imag: -1,
