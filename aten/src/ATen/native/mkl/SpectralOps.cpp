@@ -229,6 +229,19 @@ T compute_fct(int64_t size, int64_t normalization) {
   AT_ERROR("Unsupported normalization type", normalization);
 }
 
+template<typename T>
+T compute_fct(const Tensor& t, IntArrayRef dim, int64_t normalization) {
+  if (static_cast<fft_norm_mode>(normalization) == fft_norm_mode::none) {
+    return static_cast<T>(1);
+  }
+  const auto& sizes = t.sizes();
+  int64_t n = 1;
+  for(auto idx: dim) {
+    n *= sizes[idx];
+  }
+  return compute_fct<T>(n, normalization);
+}
+
 } // anonymous namespace
 
 Tensor _fft_c2r_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, int64_t last_dim_size) {
@@ -240,11 +253,11 @@ Tensor _fft_c2r_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
   if (self.scalar_type() == kComplexFloat) {
     pocketfft::c2r(shape_from_tensor(out), stride_from_tensor(self), stride_from_tensor(out), axes, false,
                    tensor_cdata<float>(self),
-                   out.data<float>(), compute_fct<float>(last_dim_size, normalization));
+                   out.data<float>(), compute_fct<float>(out, dim, normalization));
   } else {
     pocketfft::c2r(shape_from_tensor(out), stride_from_tensor(self), stride_from_tensor(out), axes, false,
                    tensor_cdata<double>(self),
-                   out.data<double>(), compute_fct<double>(last_dim_size, normalization));
+                   out.data<double>(), compute_fct<double>(out, dim, normalization));
     }
   return out;
 }
@@ -265,11 +278,11 @@ Tensor _fft_r2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
   if (self.scalar_type() == kFloat) {
     pocketfft::r2c(shape_from_tensor(self), stride_from_tensor(self), stride_from_tensor(out), axes, true,
                    self.data<float>(),
-                   tensor_cdata<float>(out), compute_fct<float>(self.sizes()[dim.back()], normalization));
+                   tensor_cdata<float>(out), compute_fct<float>(self, dim, normalization));
   } else {
     pocketfft::r2c(shape_from_tensor(self), stride_from_tensor(self), stride_from_tensor(out), axes, true,
                    self.data<double>(),
-                   tensor_cdata<double>(out), compute_fct<double>(self.sizes()[dim.back()], normalization));
+                   tensor_cdata<double>(out), compute_fct<double>(self, dim, normalization));
   }
 
   if (!onesided) {
@@ -285,11 +298,11 @@ Tensor _fft_c2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
   if (self.scalar_type() == kComplexFloat) {
     pocketfft::c2c(shape_from_tensor(self), stride_from_tensor(self), stride_from_tensor(out), axes, forward,
                    tensor_cdata<float>(self),
-                   tensor_cdata<float>(out), compute_fct<float>(self.sizes()[dim.back()], normalization));
+                   tensor_cdata<float>(out), compute_fct<float>(self, dim, normalization));
   } else {
     pocketfft::c2c(shape_from_tensor(self), stride_from_tensor(self), stride_from_tensor(out), axes, forward,
                    tensor_cdata<double>(self),
-                   tensor_cdata<double>(out), compute_fct<double>(self.sizes()[dim.back()], normalization));
+                   tensor_cdata<double>(out), compute_fct<double>(self, dim, normalization));
   }
 
   return out;
