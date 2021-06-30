@@ -40,19 +40,12 @@ def clip_grad_norm_(
         total_norm = norms[0] if len(norms) == 1 else torch.max(torch.stack(norms))
     else:
         total_norm = torch.norm(torch.stack([torch.norm(p.grad.detach(), norm_type).to(device) for p in parameters]), norm_type)
-    if total_norm.isnan() or total_norm.isinf():
-        if error_if_nonfinite:
-            raise RuntimeError(
-                f'The total norm of order {norm_type} for gradients from '
-                '`parameters` is non-finite, so it cannot be clipped. To disable '
-                'this error and scale the gradients by the non-finite norm anyway, '
-                'set `error_if_nonfinite=False`')
-        else:
-            warnings.warn("Non-finite norm encountered in torch.nn.utils.clip_grad_norm_; continuing anyway. "
-                          "Note that the default behavior will change in a future release to error out "
-                          "if a non-finite total norm is encountered. At that point, setting "
-                          "error_if_nonfinite=false will be required to retain the old behavior.",
-                          FutureWarning, stacklevel=2)
+    if error_if_nonfinite and torch.logical_or(total_norm.isnan(), total_norm.isinf()):
+        raise RuntimeError(
+            f'The total norm of order {norm_type} for gradients from '
+            '`parameters` is non-finite, so it cannot be clipped. To disable '
+            'this error and scale the gradients by the non-finite norm anyway, '
+            'set `error_if_nonfinite=False`')
     clip_coef = max_norm / (total_norm + 1e-6)
     if clip_coef < 1:
         for p in parameters:
