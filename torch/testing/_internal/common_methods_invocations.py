@@ -22,7 +22,7 @@ from torch.testing import \
 from .._core import _dispatch_dtypes
 from torch.testing._internal.common_device_type import \
     (skipIf, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
-     skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfRocm, precisionOverride, toleranceOverride, tol)
+     skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIfRocm, precisionOverride, toleranceOverride, tol)
 from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater
 from torch.testing._internal.common_utils import \
     (is_iterable_of_tensors,
@@ -2647,7 +2647,7 @@ class SpectralFuncInfo(OpInfo):
                  **kwargs):
         decorators = list(decorators) if decorators is not None else []
         decorators += [
-            skipCPUIfNoMkl,
+            skipCPUIfNoFFT,
             skipCUDAIfRocm,
             # gradgrad is quite slow
             DecorateInfo(slowTest, 'TestGradients', 'test_fn_gradgrad'),
