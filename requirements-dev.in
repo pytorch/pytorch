@@ -18,7 +18,6 @@ networkx==2.0
 pytest
 rich
 ruamel.yaml
-scikit-image
 tabulate
 tb-nightly
 unittest-xml-reporting

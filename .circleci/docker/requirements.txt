@@ -42,8 +42,6 @@ coverage==5.5
     # via
     #   -r requirements-dev.in
     #   codecov
-cycler==0.10.0
-    # via matplotlib
 dataclasses==0.8 ; python_version < "3.7"
     # via
     #   -r requirements.txt
@@ -87,8 +85,6 @@ hypothesis==4.53.2
     # via -r requirements-dev.in
 idna==2.10
     # via requests
-imageio==2.9.0
-    # via scikit-image
 importlib-metadata==4.6.0
     # via
     #   click
@@ -109,14 +105,10 @@ jmespath==0.10.0
     #   botocore
 junitparser==2.1.1
     # via -r requirements-dev.in
-kiwisolver==1.3.1
-    # via matplotlib
 markdown==3.3.4
     # via tb-nightly
 markupsafe==2.0.1
     # via jinja2
-matplotlib==3.3.4
-    # via scikit-image
 mccabe==0.6.1
     # via
     #   -r requirements-flake8.txt
@@ -132,28 +124,15 @@ mypy==0.812
 mypy-extensions==0.4.3
     # via mypy
 networkx==2.0
-    # via
-    #   -r requirements-dev.in
-    #   scikit-image
+    # via -r requirements-dev.in
 numpy==1.19.5
     # via
     #   -r requirements.txt
-    #   imageio
-    #   matplotlib
-    #   pywavelets
-    #   scikit-image
-    #   scipy
     #   tb-nightly
-    #   tifffile
 oauthlib==3.1.1
     # via requests-oauthlib
 packaging==20.9
     # via pytest
-pillow==8.2.0
-    # via
-    #   imageio
-    #   matplotlib
-    #   scikit-image
 pluggy==0.13.1
     # via pytest
 protobuf==3.17.3
@@ -182,17 +161,11 @@ pyflakes==2.2.0
 pygments==2.9.0
     # via rich
 pyparsing==2.4.7
-    # via
-    #   matplotlib
-    #   packaging
+    # via packaging
 pytest==6.2.4
     # via -r requirements-dev.in
 python-dateutil==2.8.1
-    # via
-    #   botocore
-    #   matplotlib
-pywavelets==1.1.1
-    # via scikit-image
+    # via botocore
 pyyaml==5.4.1
     # via -r requirements.txt
 requests==2.25.1
@@ -213,16 +186,11 @@ ruamel.yaml.clib==0.2.4
     # via ruamel.yaml
 s3transfer==0.3.7
     # via boto3
-scikit-image==0.17.2
-    # via -r requirements-dev.in
-scipy==1.5.4
-    # via scikit-image
 six==1.16.0
     # via
     #   -r requirements.txt
     #   absl-py
     #   astunparse
-    #   cycler
     #   google-auth
     #   grpcio
     #   protobuf
@@ -237,8 +205,6 @@ tensorboard-data-server==0.6.1
     # via tb-nightly
 tensorboard-plugin-wit==1.8.0
     # via tb-nightly
-tifffile==2020.9.3
-    # via scikit-image
 toml==0.10.2
     # via pytest
 typed-ast==1.4.3

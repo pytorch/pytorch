@@ -108,7 +108,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # Pin MyPy version because new errors are likely to appear with each release
   # Pin hypothesis to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
   # Pin coverage so we can use COVERAGE_RCFILE
-  as_jenkins pip install --progress-bar off scipy==$SCIPY_VERSION
+  as_jenkins pip install --progress-bar off scikit-image scipy==$SCIPY_VERSION
   as_jenkins pip install --progress-bar off -r "$1"
 
   # Install numba only on python-3.8 or below
