@@ -12,7 +12,6 @@
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
 #include <torch/csrc/jit/tensorexpr/exceptions.h>
-#include <torch/csrc/jit/tensorexpr/execution_counter.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
@@ -22,9 +21,6 @@
 namespace torch {
 namespace jit {
 namespace tensorexpr {
-
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-DECLARE_TRIGGER(simple_ir_eval_executed);
 
 class Value {
  public:
