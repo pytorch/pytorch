@@ -187,6 +187,11 @@ class TORCH_API Reducer {
   // Whether we need to run autograd hooks (only false if user runs with
   // no_grad or no_sync context manager)
   bool expect_autograd_hooks_;
+  // Flag controlling whether we are in a backwards pass initiated by DDP module
+  // or not. It is true from when prepare_for_backward is called until
+  // finalize_backward is called at the end of autograd execution. Used for
+  // disabling hooks called by local modules that are wrapped by DDP.
+  bool in_ddp_backwards_{false};
   bool require_finalize_;
   size_t next_bucket_;
 
