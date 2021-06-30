@@ -14,6 +14,68 @@ namespace jit {
 
 namespace {
 
+using ArgumentCreator =  std::function<c10::optional<Stack>(Node*)>;
+
+static OperatorMap<ArgumentCreator>&  getArgumentCreatorMap() {
+  static ArgumentCreator defaultArgumentCreator = [](Node* n) -> c10::optional<Stack> {
+
+    std::vector<IValue> stack;
+    for (auto inp : n->inputs()) {
+        
+        if (auto tp = inp->type()->cast<TensorType>()) {
+          stack.push_back(at::empty({1}, at::TensorOptions(at::kMeta).dtype(*tp->scalarType())));
+        } else if (inp->type() == FloatType::get()) {
+          stack.push_back(0.);
+        } else if (inp->type() == IntType::get()) {
+          stack.push_back(0);
+        } else if (inp->type() == BoolType::get()) {
+          stack.push_back(false);
+        }
+    }
+    return stack;
+  };
+
+  static OperatorMap<ArgumentCreator> ops {
+    {"aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor", defaultArgumentCreator},
+    {"aten::div(Tensor self, Tensor other) -> Tensor", defaultArgumentCreator},
+    {"aten::mul(Tensor self, Tensor other) -> Tensor", defaultArgumentCreator}
+  };
+
+  return ops;
+}
+
+static bool canBeInferredWithMetaTensor(Node* n) {
+  auto opt_op = n->maybeOperator();
+  GRAPH_DEBUG("Checking ", getHeader(n));
+  if (!opt_op) {
+    GRAPH_DEBUG("not registered with Meta");
+    return false;
+  }
+  GRAPH_DEBUG("not registered with Meta");
+  return getArgumentCreatorMap().contains(*opt_op);
+}
+
+c10::optional<c10::ScalarType> inferWithMetaTensor(Node* n) {
+
+    GRAPH_DEBUG("inferWithMetaTensor");
+    auto argument_creator = *getArgumentCreatorMap().find(n->getOperator());
+    Stack stack = *argument_creator(n);
+    auto op = n->getOperation();
+    try {
+      GRAPH_DEBUG("Running op for ", getHeader(n));
+      op(&stack);
+      GRAPH_DEBUG("op run successfully", getHeader(n));
+      GRAPH_DEBUG("Received ", toString(stack.back().toTensor().scalar_type()));
+      GRAPH_DEBUG("After receive!");
+      return stack.back().toTensor().scalar_type();
+
+    }
+    catch(...) {
+      GRAPH_DEBUG("caught exception!");
+    };
+    return c10::nullopt;
+}
+
 using dtype_func_t = std::function<c10::optional<ScalarType>(Node*)>;
 static std::vector<std::pair<OperatorSet, dtype_func_t>>
     dtype_transfer_functions;
@@ -193,6 +255,30 @@ struct TensorPropertyPropagationPass {
     return false;
   }
 
+    static c10::optional<ScalarType> promoteWithMeta(Node* n) {
+    GRAPH_DEBUG("In promoteWithMeta");
+
+    std::vector<IValue> stack;
+    for (auto inp : n->inputs()) {
+      auto st = getScalarType(inp);
+      if (!st.has_value()) {
+        return c10::nullopt;
+      }
+
+      stack.push_back(at::empty({1}, at::TensorOptions(at::kMeta).dtype(*st)));
+    }
+
+    auto op = n->getOperation();
+    op(&stack);
+
+    GRAPH_DEBUG(
+        "Node output[0]",
+        getHeader(n),
+        " gets type ",
+        c10::toString(stack.back().toTensor().scalar_type()));
+    return {stack.back().toTensor().scalar_type()};
+  }
+
   bool checkSchemaReturnsTensors(const c10::FunctionSchema* schema) {
     const std::vector<Argument>& return_args = schema->returns();
     bool has_tensor_output = false;
@@ -218,41 +304,49 @@ struct TensorPropertyPropagationPass {
     }
 
     GRAPH_DEBUG("case = ", n->kind(), " ", *n);
-
+    c10::optional<ScalarType> scalarType;
     bool changed = false;
     bool found = false;
-    c10::optional<ScalarType> scalarType;
-    switch (n->kind()) {
-      case aten::eq:
-      case aten::lt:
-      case aten::gt:
-      case aten::ne:
-        scalarType = kBool;
-        found = true;
-        break;
-      case aten::dim:
-        scalarType = kInt64;
-        found = true;
-        break;
-      case aten::size:
-      case aten::len:
-        scalarType = kInt;
-        found = true;
-        break;
-      case aten::format: // note: returns string but ScalarType does not include
-                         // string
-        break;
-      case aten::append:
-        // TODO: add
-        break;
-      default:
-        for (auto& entry : dtype_transfer_functions) {
-          if (n->isMemberOf(entry.first)) {
-            scalarType = entry.second(n);
-            found = true;
-            break;
+    if (canBeInferredWithMetaTensor(n)) {
+      scalarType = inferWithMetaTensor(n);
+      found = true;
+    } else {
+      switch (n->kind()) {
+        case aten::mul:
+          scalarType = promoteWithMeta(n);
+          found = true;
+          break;
+        case aten::eq:
+        case aten::lt:
+        case aten::gt:
+        case aten::ne:
+          scalarType = kBool;
+          found = true;
+          break;
+        case aten::dim:
+          scalarType = kInt64;
+          found = true;
+          break;
+        case aten::size:
+        case aten::len:
+          scalarType = kInt;
+          found = true;
+          break;
+        case aten::format: // note: returns string but ScalarType does not include
+                          // string
+          break;
+        case aten::append:
+          // TODO: add
+          break;
+        default:
+          for (auto& entry : dtype_transfer_functions) {
+            if (n->isMemberOf(entry.first)) {
+              scalarType = entry.second(n);
+              found = true;
+              break;
+            }
           }
-        }
+      }
     }
     if (!found) {
       TORCH_INTERNAL_ASSERT(false, "schema not supported yet: ", schema_opt);
