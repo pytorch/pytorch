@@ -8931,6 +8931,8 @@ always be real-valued, even if :attr:`input` is complex.
              Different platforms, like NumPy, or inputs on different device types,
              may produce different `U` and `V` tensors.
 
+.. warning:: Backpropagation is only supported for input matrices with at most one zero eigenvalue.
+
 Args:
     input (Tensor): the input tensor of size `(*, m, n)` where `*` is zero or more
                     batch dimensions consisting of `(m, n)` matrices.
