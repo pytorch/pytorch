@@ -1,6 +1,5 @@
 import torch
 import functools
-import warnings
 
 class autocast(object):
     r"""
