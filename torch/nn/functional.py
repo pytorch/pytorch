@@ -4154,8 +4154,7 @@ def _pad(input: Tensor, pad: List[int], mode: str = "constant", value: float = 0
         return _VF.constant_pad_nd(input, pad, value)
     else:
         assert value == 0, 'Padding mode "{}"" doesn\'t take in value argument'.format(mode)
-        if input.dim() == 3:
-            assert len(pad) == 2, "3D tensors expect 2 values for padding"
+        if len(pad) == 2 and input.dim() in {2, 3}:
             if mode == "reflect":
                 return torch._C._nn.reflection_pad1d(input, pad)
             elif mode == "replicate":

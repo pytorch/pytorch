@@ -1247,6 +1247,11 @@ def fractional_max_pool3d_test(test_case):
             cpp_var_map={'random_samples': random_samples},
             fullname='FractionalMaxPool3d_asymsize')
 
+def single_batch_reference_fn(ref_input, parameters, ref_module):
+    single_batch_input = ref_input.unsqueeze(0)
+    with freeze_rng_state():
+        return ref_module(single_batch_input).squeeze(0)
+
 
 new_module_tests = [
     poissonnllloss_no_reduce_test(),
@@ -2196,6 +2201,14 @@ new_module_tests = [
         module_name='ReflectionPad1d',
         constructor_args=((1, 2),),
         cpp_constructor_args='torch::nn::ReflectionPad1dOptions({1, 2})',
+        input_size=(3, 8),
+        reference_fn=single_batch_reference_fn,
+        desc='batch',
+    ),
+    dict(
+        module_name='ReflectionPad1d',
+        constructor_args=((1, 2),),
+        cpp_constructor_args='torch::nn::ReflectionPad1dOptions({1, 2})',
         input_fn=lambda: torch.rand(2, 3, 8, dtype=torch.complex128, requires_grad=True),
         skip_half=True,
         desc='complex'
@@ -2233,6 +2246,14 @@ new_module_tests = [
         constructor_args=((1, 2),),
         cpp_constructor_args='torch::nn::ReplicationPad1dOptions({1, 2})',
         input_size=(2, 3, 4),
+    ),
+    dict(
+        module_name='ReplicationPad1d',
+        constructor_args=((1, 2),),
+        cpp_constructor_args='torch::nn::ReplicationPad1dOptions({1, 2})',
+        input_size=(3, 4),
+        reference_fn=single_batch_reference_fn,
+        desc='batch',
     ),
     dict(
         module_name='ReplicationPad1d',
@@ -2282,6 +2303,14 @@ new_module_tests = [
         constructor_args=((1, 2), 2.),
         cpp_constructor_args='torch::nn::ConstantPad1dOptions({1, 2}, 2.)',
         input_size=(2, 3, 4),
+    ),
+    dict(
+        module_name='ConstantPad1d',
+        constructor_args=((1, 2), 2.),
+        cpp_constructor_args='torch::nn::ConstantPad1dOptions({1, 2}, 2.)',
+        input_size=(3, 4),
+        reference_fn=single_batch_reference_fn,
+        desc='batch',
     ),
     dict(
         module_name='ConstantPad1d',
