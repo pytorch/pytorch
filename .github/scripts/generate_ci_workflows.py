@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import jinja2
 
@@ -27,7 +27,7 @@ def PyTorchWindowsWorkflow(
     on_pull_request: bool = False,
     only_build_on_pull_request: bool = False,
     num_test_shards: int = 1,
-    is_scheduled: str = None,
+    is_scheduled: Optional[str] = None,
 ) -> PyTorchWorkflow:
     return {
         "build_environment": build_environment,
@@ -52,7 +52,7 @@ def PyTorchLinuxWorkflow(
     on_pull_request: bool = False,
     enable_doc_jobs: bool = False,
     num_test_shards: int = 1,
-    is_scheduled: str = None,
+    is_scheduled: Optional[str] = None,
 ) -> PyTorchWorkflow:
     return {
         "build_environment": build_environment,

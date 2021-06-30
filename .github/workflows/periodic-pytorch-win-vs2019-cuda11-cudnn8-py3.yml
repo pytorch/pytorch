@@ -4,7 +4,6 @@
 name: Windows CI (periodic-pytorch-win-vs2019-cuda11-cudnn8-py3)
 
 on:
-  pull_request:
   schedule:
     - cron: 45 0,4,8,12,16,20 * * *
   workflow_dispatch:
