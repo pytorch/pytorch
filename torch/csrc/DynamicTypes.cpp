@@ -12,6 +12,7 @@
 
 #include <ATen/ATen.h>
 
+#include <array>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
@@ -25,14 +26,16 @@
 
 namespace torch {
 namespace {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::unordered_map<at::DeprecatedTypeProperties*, PyTypeObject*> attype_to_py_storage_type;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::unordered_map<PyTypeObject*, at::DeprecatedTypeProperties*> py_storage_type_to_attype;
 
-THPDtype* dtype_registry
-  [static_cast<int>(at::ScalarType::NumOptions)] = {};
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+std::array<THPDtype*, static_cast<int>(at::ScalarType::NumOptions)> dtype_registry = {};
 
-THPLayout* layout_registry
-  [static_cast<int>(at::Layout::NumOptions)] = {};
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+std::array<THPLayout*, static_cast<int>(at::Layout::NumOptions)> layout_registry = {};
 
 at::Backend get_backend(bool is_cuda, bool is_sparse) {
   if (is_cuda) {
@@ -59,7 +62,11 @@ at::DeprecatedTypeProperties* get_type(at::Backend backend, at::ScalarType scala
 
 PyTypeObject* getPyTypeObject(
     const at::Storage& storage,
-    const caffe2::TypeMeta& dtype) {
+    const caffe2::TypeMeta dtype) {
+  // TODO: https://github.com/pytorch/pytorch/issues/47442
+  if (storage.device_type() == at::DeviceType::Meta) {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "python bindings for meta storage objects not supported");
+  }
   at::ScalarType scalarType = at::typeMetaToScalarType(dtype);
   auto attype = &at::getDeprecatedTypeProperties(
       at::dispatchKeyToBackend(c10::computeDispatchKey(scalarType, c10::nullopt, storage.device_type())),
@@ -106,7 +113,7 @@ THPLayout* getTHPLayout(at::Layout layout) {
 
 PyObject* createPyObject(
     const at::Storage& storage,
-    const caffe2::TypeMeta& data_type) {
+    const caffe2::TypeMeta data_type) {
   auto type = getPyTypeObject(storage, data_type);
   auto obj = THPObjectPtr(type->tp_alloc(type, 0));
   if (!obj) throw python_error();

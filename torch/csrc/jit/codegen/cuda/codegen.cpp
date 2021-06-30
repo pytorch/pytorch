@@ -1,4 +1,3 @@
-
 #include <torch/csrc/jit/codegen/cuda/codegen.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
@@ -12,6 +11,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 namespace codegen {
 
 namespace {
@@ -182,6 +182,7 @@ class CudaKernelGenerator : private OptInConstDispatch {
     print_inline_ = true;
     const auto result = gen(stmt);
     print_inline_ = saved_inline;
+    // NOLINTNEXTLINE(performance-no-automatic-move)
     return result;
   }
 
@@ -293,9 +294,9 @@ class CudaKernelGenerator : private OptInConstDispatch {
       code_ << *op << gen(node->in());
     } else {
       if (node->getUnaryOpType() == UnaryOpType::Cast) {
-        const auto cast_str =
-            cast_func_str({node->in()->getDataType().value(),
-                           node->out()->getDataType().value()});
+        const auto cast_str = cast_func_str(
+            {node->in()->getDataType().value(),
+             node->out()->getDataType().value()});
         code_ << cast_str.value();
       } else {
         code_ << node->getUnaryOpType();
@@ -585,34 +586,43 @@ class CudaKernelGenerator : private OptInConstDispatch {
     TORCH_INTERNAL_ASSERT(tv->domain()->nDims() > 0);
     TORCH_INTERNAL_ASSERT(node->size() != nullptr);
 
-    switch (tv->memoryType()) {
-      case MemoryType::Global:
-        indent() << "// Allocate global tensor " << gen(tv) << "\n";
-        break;
-      case MemoryType::Shared:
-        if (node->size()->isConstScalar()) {
-          // Static shared memory
-          indent() << "__shared__ " << node->buffer_type() << " " << gen(tv)
-                   << "[" << genInline(node->size()) << "];\n";
-        } else {
-          // Align Offset Position
-          indent() << "offset = alignBufferSize(offset,"
-                   << dataTypeSize(node->buffer_type()) << ");\n";
-          // Shared Memory Pointer
-          indent() << node->buffer_type() << "* " << gen(tv)
-                   << " = reinterpret_cast<" << node->buffer_type() << "*>"
-                   << "(array + offset);\n";
-          // Increment Offset Position
-          indent() << "offset += (" << genInline(node->size()) << " * sizeof("
-                   << node->buffer_type() << "));\n";
-        }
-        break;
-      case MemoryType::Local:
-        indent() << node->buffer_type() << " " << gen(tv) << "["
-                 << genInline(node->size()) << "];\n";
-        break;
-      default:
-        TORCH_INTERNAL_ASSERT(false, "Unexpected memory type");
+    if (node->alias() != nullptr) {
+      // Allocate alias another Allocate node
+      const auto alias_tv = node->alias()->buffer()->as<kir::TensorView>();
+      indent() << "// Alias Allocation - " << node->getMemoryType() << "\n";
+      indent() << node->buffer_type() << "* " << gen(tv) << " = "
+               << gen(alias_tv) << ";\n";
+    } else {
+      // Standard Memory Allocation
+      switch (tv->memoryType()) {
+        case MemoryType::Global:
+          indent() << "// Allocate global tensor " << gen(tv) << "\n";
+          break;
+        case MemoryType::Shared:
+          if (node->size()->isConstScalar()) {
+            // Static shared memory
+            indent() << "__shared__ " << node->buffer_type() << " " << gen(tv)
+                     << "[" << genInline(node->size()) << "];\n";
+          } else {
+            // Align Offset Position
+            indent() << "offset = alignBufferSize(offset,"
+                     << dataTypeSize(node->buffer_type()) << ");\n";
+            // Shared Memory Pointer
+            indent() << node->buffer_type() << "* " << gen(tv)
+                     << " = reinterpret_cast<" << node->buffer_type() << "*>"
+                     << "(array + offset);\n";
+            // Increment Offset Position
+            indent() << "offset += (" << genInline(node->size()) << " * sizeof("
+                     << node->buffer_type() << "));\n";
+          }
+          break;
+        case MemoryType::Local:
+          indent() << node->buffer_type() << " " << gen(tv) << "["
+                   << genInline(node->size()) << "];\n";
+          break;
+        default:
+          TORCH_INTERNAL_ASSERT(false, "Unexpected memory type");
+      }
     }
   }
 
@@ -639,6 +649,7 @@ std::string generateCudaKernel(
 }
 
 } // namespace codegen
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

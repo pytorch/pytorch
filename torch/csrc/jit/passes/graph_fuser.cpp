@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/passes/graph_fuser.h>
 
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
@@ -151,12 +152,13 @@ struct GraphFuser {
       AliasDb* aliasDb,
       Block* block,
       FusionCallback callback,
-      Symbol kind)
+      Symbol kind,
+      bool strict_fuser_check = false)
       : block_(block),
         aliasDb_(aliasDb),
         callback_(std::move(callback)),
         kind_(kind),
-        strict_fuser_check_(false) {}
+        strict_fuser_check_(strict_fuser_check) {}
 
   void setInputArgLimit(size_t limit) {
     subgraph_arg_limit_ = limit;
@@ -176,7 +178,7 @@ struct GraphFuser {
     if (!v->type()->isSubtypeOf(TensorType::get())) {
       return true;
     }
-    auto device = v->type()->expect<TensorType>()->device();
+    auto device = v->type()->expectRef<TensorType>().device();
     if (!device) {
       return !strict_fuser_check;
     }
@@ -184,8 +186,11 @@ struct GraphFuser {
       return canFuseOnCPU();
     } else if ((*device).is_cuda()) {
       return canFuseOnGPU();
+    } else if ((*device).is_xpu()) {
+      return false;
+    } else {
+      TORCH_CHECK_NOT_IMPLEMENTED(false, "Unknown device for graph fuser");
     }
-    throw std::runtime_error("Unknown device");
   }
 
   // Default fusability check - used when the user doesn't pass in
@@ -596,7 +601,7 @@ struct GraphFuser {
     //   a_broadcasted, b_broadcasted = listUnpack(output_list)
     // `a_broadcasted` should receive the same aliasing info as `a`
     TORCH_INTERNAL_ASSERT(unpack_node->outputs().size() == inputs.size());
-    for (size_t i = 0; i < inputs.size(); i++) {
+    for (const auto i : c10::irange(inputs.size())) {
       Value* original_input = inputs[i];
       Value* broadcasted_output = unpack_node->outputs()[i];
       aliasDb_->copyValue(original_input, broadcasted_output);
@@ -749,7 +754,7 @@ struct GraphFuser {
     WithInsertPoint guard(bchunk->next());
 
     std::vector<Value*> producer_chunk_outputs;
-    for (size_t i = 0; i < nchunks; i++) {
+    for (const auto i : c10::irange(nchunks)) {
       producer_chunk_outputs.push_back(
           bchunk->output(nchunks * producer_index + i));
     }
@@ -811,6 +816,7 @@ struct GraphFuser {
         if (original_input->type()->isSubtypeOf(TensorType::get())) {
           AT_ASSERT(chunked_inputs_it != chunked_inputs.end());
           chunked_op->addInput(
+              // NOLINTNEXTLINE(clang-analyzer-core.DivideZero)
               chunked_inputs_it->at(chunk_sel->offset() % nchunks));
           ++chunked_inputs_it;
         } else {
@@ -823,7 +829,7 @@ struct GraphFuser {
     }
 
     bchunk->removeInput(producer_index);
-    for (size_t i = 0; i < nchunks; i++) {
+    for (const auto i : c10::irange(nchunks)) {
       bchunk->eraseOutput(nchunks * producer_index);
     }
 
@@ -1123,6 +1129,13 @@ struct GraphFuser {
   }
 
   void run() {
+// TODO: old fuser is not maintained internally, somewhere it is being turned on
+// inadvertently for certain workflows. make this a no-op until we identify
+// location
+#if defined(FBCODE_CAFFE2)
+    return;
+#endif
+
     // Run the pass until no changes are made.
     // This is necessary, because the algorithm can miss out on certain fusion
     // opportunities if ran only once. Consider this graph:
@@ -1143,6 +1156,7 @@ struct GraphFuser {
     while (any_changed) {
       any_changed = false;
       for (auto it = block_->nodes().rbegin(); it != block_->nodes().rend();) {
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         bool changed;
         std::tie(it, changed) = scanNode(*it);
         any_changed |= changed;
@@ -1169,7 +1183,8 @@ struct GraphFuser {
 
     for (Node* node : block_->nodes()) {
       for (Block* sub_block : node->blocks()) {
-        GraphFuser(aliasDb_, sub_block, callback_, kind_).run();
+        GraphFuser(aliasDb_, sub_block, callback_, kind_, strict_fuser_check_)
+            .run();
       }
     }
   }
@@ -1244,7 +1259,7 @@ void FuseGraph(std::shared_ptr<Graph>& graph, bool strict_fuser_check) {
 
 void CustomFuseGraph(
     std::shared_ptr<Graph>& graph,
-    std::function<bool(Node*)> fn,
+    const std::function<bool(Node*)>& fn,
     Symbol kind,
     size_t arg_limit) {
   AliasDb db(graph);

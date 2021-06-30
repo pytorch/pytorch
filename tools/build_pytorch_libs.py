@@ -1,32 +1,29 @@
 import os
-import sys
 from glob import glob
 import shutil
+from typing import Dict, Optional
 
 from .setup_helpers.env import IS_64BIT, IS_WINDOWS, check_negative_env_flag
-from .setup_helpers.cmake import USE_NINJA
+from .setup_helpers.cmake import USE_NINJA, CMake
+
+from setuptools import distutils  # type: ignore[import]
+
+def _overlay_windows_vcvars(env: Dict[str, str]) -> Dict[str, str]:
+    vc_arch = 'x64' if IS_64BIT else 'x86'
+    vc_env: Dict[str, str] = distutils._msvccompiler._get_vc_env(vc_arch)
+    # Keys in `_get_vc_env` are always lowercase.
+    # We turn them into uppercase before overlaying vcvars
+    # because OS environ keys are always uppercase on Windows.
+    # https://stackoverflow.com/a/7797329
+    vc_env = {k.upper(): v for k, v in vc_env.items()}
+    for k, v in env.items():
+        uk = k.upper()
+        if uk not in vc_env:
+            vc_env[uk] = v
+    return vc_env
 
 
-def _overlay_windows_vcvars(env):
-    if sys.version_info >= (3, 5):
-        from distutils._msvccompiler import _get_vc_env
-        vc_arch = 'x64' if IS_64BIT else 'x86'
-        vc_env = _get_vc_env(vc_arch)
-        # Keys in `_get_vc_env` are always lowercase.
-        # We turn them into uppercase before overlaying vcvars
-        # because OS environ keys are always uppercase on Windows.
-        # https://stackoverflow.com/a/7797329
-        vc_env = {k.upper(): v for k, v in vc_env.items()}
-        for k, v in env.items():
-            uk = k.upper()
-            if uk not in vc_env:
-                vc_env[uk] = v
-        return vc_env
-    else:
-        return env
-
-
-def _create_build_env():
+def _create_build_env() -> Dict[str, str]:
     # XXX - our cmake file sometimes looks at the system environment
     # and not cmake flags!
     # you should NEVER add something to this list. It is bad practice to
@@ -48,7 +45,14 @@ def _create_build_env():
     return my_env
 
 
-def build_caffe2(version, cmake_python_library, build_python, rerun_cmake, cmake_only, cmake):
+def build_caffe2(
+    version: Optional[str],
+    cmake_python_library: Optional[str],
+    build_python: bool,
+    rerun_cmake: bool,
+    cmake_only: bool,
+    cmake: CMake,
+) -> None:
     my_env = _create_build_env()
     build_test = not check_negative_env_flag('BUILD_TEST')
     cmake.generate(version,

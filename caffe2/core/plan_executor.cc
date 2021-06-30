@@ -11,12 +11,14 @@
 #include "caffe2/core/workspace.h"
 #include "caffe2/proto/caffe2_pb.h"
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_handle_executor_threads_exceptions,
     false,
     "If used we will handle exceptions in executor threads. "
     "This avoids SIGABRT but may cause process to deadlock");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int(
     caffe2_plan_executor_exception_timeout,
     60,
@@ -68,7 +70,8 @@ class ExceptionWrapper {
 // correctly grab it on exit.
 class ExceptionWrapperTerminate {
  public:
-  explicit ExceptionWrapperTerminate(ExceptionWrapper&& ew) : ew_(std::move(ew)) {}
+  explicit ExceptionWrapperTerminate(ExceptionWrapper&& ew)
+      : ew_(std::move(ew)) {}
 
   ~ExceptionWrapperTerminate() {
     ew_.rethrowException();
@@ -82,6 +85,7 @@ class ExceptionWrapperTerminate {
 class ScopeExitGuard {
  public:
   explicit ScopeExitGuard(std::function<void()>&& f) : f_(std::move(f)) {}
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   ~ScopeExitGuard() {
     f_();
   }
@@ -99,44 +103,6 @@ struct NetDefInfo {
 };
 
 using NetDefMap = std::unordered_map<std::string, NetDefInfo>;
-
-struct Reporter {
-  struct ReporterInstance {
-    std::mutex report_mutex;
-    std::condition_variable report_cv;
-    std::thread report_thread;
-    ReporterInstance(int intervalMillis, bool* done, std::function<void()> f) {
-      auto interval = std::chrono::milliseconds(intervalMillis);
-      auto reportWorker = [=]() {
-        std::unique_lock<std::mutex> lk(report_mutex);
-        do {
-          report_cv.wait_for(lk, interval, [&]() { return *done; });
-          f();
-        } while (!*done);
-      };
-      report_thread = std::thread(reportWorker);
-    }
-  };
-
-  void start(int64_t intervalMillis, std::function<void()> f) {
-    instances_.emplace_back(new ReporterInstance(intervalMillis, &done, f));
-  }
-
-  ~Reporter() {
-    done = true;
-    for (auto& instance : instances_) {
-      if (!instance->report_thread.joinable()) {
-        continue;
-      }
-      instance->report_cv.notify_all();
-      instance->report_thread.join();
-    }
-  }
-
- private:
-  std::vector<std::unique_ptr<ReporterInstance>> instances_;
-  bool done{false};
-};
 
 // Returns a function that returns `true` if we should continue
 // iterating, given the current iteration count.
@@ -170,8 +136,8 @@ std::function<bool(int64_t)> getContinuationTest(
 // if the blob doesn't exist or is not initialized, return false
 inline bool getShouldStop(const Blob* b) {
   if (!b ||
-      b->meta().id() ==
-          TypeIdentifier::uninitialized()) { // not exist or uninitialized
+      b->meta() ==
+          ScalarType::Undefined) { // not exist or uninitialized
     return false;
   }
 
@@ -242,6 +208,7 @@ struct ExecutionStepWrapper {
   ExecutionStepWrapper(
       const ExecutionStep* step,
       Workspace* externalWorkspace,
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       ShouldContinue externalShouldContinue,
       NetDefMap* netDefs,
       WorkspaceIdInjector* ws_id_injector)
@@ -274,6 +241,7 @@ struct ExecutionStepWrapper {
     }
 
    private:
+    // NOLINTNEXTLINE(modernize-use-equals-default,cppcoreguidelines-pro-type-member-init,clang-analyzer-optin.cplusplus.UninitializedObject)
     CompiledGuard() {}
     std::unique_ptr<CompiledExecutionStep> compiled_;
     CompiledExecutionStep* compiledRef_;
@@ -318,6 +286,7 @@ struct CompiledExecutionStep {
       WorkspaceIdInjector* ws_id_injector)
       : step(mainStep) {
     if (mainStep->create_workspace()) {
+      // NOLINTNEXTLINE(modernize-make-unique)
       localWorkspace_.reset(new Workspace(externalWorkspace));
       workspace = localWorkspace_.get();
       ws_id_injector->InjectWorkspaceId(workspace);
@@ -394,6 +363,23 @@ struct CompiledExecutionStep {
     };
   }
 
+  void Fail(const std::exception& ex) {
+    {
+      std::lock_guard<std::mutex> guard(exception_mutex_);
+      if (!first_exception_) {
+        LOG(ERROR) << "Substep exception:\n" << c10::GetExceptionString(ex);
+        first_exception_ = ExceptionWrapper(ex);
+      }
+      gotFailure = true;
+    }
+    Cancel();
+  }
+
+  ExceptionWrapper FirstException() {
+    std::lock_guard<std::mutex> guard(exception_mutex_);
+    return first_exception_;
+  }
+
   // Cancel attempts to cancel the running nets in a best effort way. If the net
   // or op type does IO and doesn't implement cancellation it may not be
   // possible to cancel leading to execution getting stuck on error.
@@ -412,20 +398,33 @@ struct CompiledExecutionStep {
     }
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const ExecutionStep* step;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Workspace* workspace;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   vector<std::shared_ptr<ExecutionStepWrapper>> reportSubsteps;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   vector<std::shared_ptr<ExecutionStepWrapper>> recurringSubsteps;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   vector<NetBase*> networks;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   NetBase* reportNet;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Blob* shouldStop{nullptr};
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   ShouldContinue netShouldContinue;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   ShouldContinue shouldContinue;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::atomic<bool> gotFailure{false};
 
  private:
   std::unique_ptr<Workspace> localWorkspace_;
+
+  std::mutex exception_mutex_; // protects first_exception_
+  ExceptionWrapper first_exception_;
 };
 
 void ExecutionStepWrapper::Cancel() {
@@ -435,6 +434,7 @@ void ExecutionStepWrapper::Cancel() {
 }
 
 std::unique_ptr<CompiledExecutionStep> ExecutionStepWrapper::doCompile() {
+  // NOLINTNEXTLINE(modernize-make-unique)
   return std::unique_ptr<CompiledExecutionStep>(new CompiledExecutionStep(
       step_,
       externalWorkspace_,
@@ -442,6 +442,65 @@ std::unique_ptr<CompiledExecutionStep> ExecutionStepWrapper::doCompile() {
       netDefs_,
       ws_id_injector_));
 }
+
+struct Reporter {
+  struct ReporterInstance {
+    std::mutex report_mutex;
+    std::condition_variable report_cv;
+    std::thread report_thread;
+    ExceptionWrapper exception;
+
+    ReporterInstance(
+        int intervalMillis,
+        std::atomic<bool>* done,
+        std::function<void()> f,
+        ExecutionStepWrapper::CompiledGuard* compiledStep) {
+      auto interval = std::chrono::milliseconds(intervalMillis);
+      auto reportWorker = [=]() {
+        std::unique_lock<std::mutex> lk(report_mutex);
+        do {
+          report_cv.wait_for(lk, interval, [&]() { return done->load(); });
+          try {
+            f();
+          } catch (const std::exception& ex) {
+            LOG(ERROR) << "Reporter instance exception:\n"
+                       << c10::GetExceptionString(ex);
+            if (!FLAGS_caffe2_handle_executor_threads_exceptions) {
+              throw;
+            }
+            (*compiledStep)->Fail(ex);
+            done->store(true);
+          }
+        } while (!done->load());
+      };
+      report_thread = std::thread(reportWorker);
+    }
+  };
+
+  explicit Reporter(ExecutionStepWrapper::CompiledGuard* compiledStep)
+      : compiledStep_(compiledStep) {}
+
+  void start(int64_t intervalMillis, std::function<void()> f) {
+    instances_.emplace_back(
+        new ReporterInstance(intervalMillis, &done_, f, compiledStep_));
+  }
+
+  ~Reporter() {
+    done_ = true;
+    for (auto& instance : instances_) {
+      if (!instance->report_thread.joinable()) {
+        continue;
+      }
+      instance->report_cv.notify_all();
+      instance->report_thread.join();
+    }
+  }
+
+ private:
+  std::vector<std::unique_ptr<ReporterInstance>> instances_;
+  std::atomic<bool> done_{false};
+  ExecutionStepWrapper::CompiledGuard* compiledStep_;
+};
 
 #define CHECK_SHOULD_STOP(step, shouldStop)                       \
   if (getShouldStop(shouldStop)) {                                \
@@ -458,7 +517,7 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
 
   std::unique_ptr<Reporter> reporter;
   if (step.has_report_net() || compiledStep->reportSubsteps.size() > 0) {
-    reporter = std::make_unique<Reporter>();
+    reporter = std::make_unique<Reporter>(&compiledStep);
     auto* reportNet = compiledStep->reportNet;
     if (reportNet) {
       VLOG(1) << "Starting reporter net";
@@ -500,9 +559,8 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
 
         std::atomic<int> next_substep{0};
         std::condition_variable cv;
-        std::mutex exception_mutex; // exception_mutex protects done and first_exception
+        std::mutex exception_mutex; // protects done
         int done{0};
-        ExceptionWrapper first_exception;
         auto worker = [&]() {
           ScopeExitGuard on_exit([&] {
             std::lock_guard<std::mutex> guard(exception_mutex);
@@ -511,6 +569,7 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
           });
 
           auto num_substeps = compiledStep->recurringSubsteps.size();
+          // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
           int substep_id = next_substep++ % num_substeps;
           if (compiledStep->gotFailure) {
             return;
@@ -521,14 +580,7 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
               compiledStep->gotFailure = true;
             }
           } catch (const std::exception& ex) {
-            std::lock_guard<std::mutex> guard(exception_mutex);
-            if (!first_exception) {
-              first_exception = ExceptionWrapper(ex);
-              LOG(ERROR) << "Parallel worker exception:\n"
-                         << c10::GetExceptionString(ex);
-            }
-            compiledStep->gotFailure = true;
-            compiledStep->Cancel();
+            compiledStep->Fail(ex);
             if (!FLAGS_caffe2_handle_executor_threads_exceptions) {
               // In complex plans other threads might get stuck if another
               // one fails. So we let exception to go out of thread which
@@ -550,18 +602,22 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
           threads.emplace_back(worker);
         }
 
+        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
         auto workersDone = [&] { return done == numThreads; };
 
         // If we get an exception, try to wait for all threads to stop
         // gracefully.
-        cv.wait(guard, [&] { return workersDone() || first_exception; });
+        cv.wait(
+            guard, [&] { return workersDone() || compiledStep->gotFailure; });
         cv.wait_for(
             guard,
             std::chrono::seconds(FLAGS_caffe2_plan_executor_exception_timeout),
             [&] { return workersDone(); });
+        auto first_exception = compiledStep->FirstException();
         if (!workersDone() && first_exception) {
           LOG(ERROR) << "failed to stop concurrent workers after exception: "
                      << first_exception.what();
+          // NOLINTNEXTLINE(bugprone-throw-keyword-missing)
           ExceptionWrapperTerminate(std::move(first_exception));
         }
 
@@ -570,6 +626,7 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
         }
         if (compiledStep->gotFailure) {
           LOG(ERROR) << "One of the workers failed.";
+          // NOLINTNEXTLINE(bugprone-use-after-move)
           if (first_exception) {
             first_exception.rethrowException();
           }
@@ -592,7 +649,11 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
       }
     }
   }
-  return true;
+
+  if (auto first_exception = compiledStep->FirstException()) {
+    first_exception.rethrowException();
+  }
+  return !compiledStep->gotFailure;
 }
 
 #undef CHECK_SHOULD_STOP

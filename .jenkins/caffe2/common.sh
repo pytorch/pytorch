@@ -2,9 +2,9 @@ set -ex
 
 LOCAL_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT_DIR=$(cd "$LOCAL_DIR"/../.. && pwd)
-TEST_DIR="$ROOT_DIR/caffe2_tests"
-gtest_reports_dir="${TEST_DIR}/cpp"
-pytest_reports_dir="${TEST_DIR}/python"
+TEST_DIR="$ROOT_DIR/test"
+gtest_reports_dir="${TEST_DIR}/test-reports/cpp"
+pytest_reports_dir="${TEST_DIR}/test-reports/python"
 
 # Figure out which Python to use
 PYTHON="$(which python)"
@@ -13,6 +13,8 @@ if [[ "${BUILD_ENVIRONMENT}" =~ py((2|3)\.?[0-9]?\.?[0-9]?) ]]; then
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
+    # HIP_PLATFORM is auto-detected by hipcc; unset to avoid build errors
+    unset HIP_PLATFORM
     if which sccache > /dev/null; then
         # Save sccache logs to file
         sccache --stop-server || true

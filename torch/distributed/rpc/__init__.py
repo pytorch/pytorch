@@ -1,5 +1,7 @@
 import logging
 import threading
+import warnings
+from typing import Generator, Tuple
 
 import torch
 import torch.distributed as dist
@@ -11,6 +13,7 @@ logger = logging.getLogger(__name__)
 _init_counter = 0
 _init_counter_lock = threading.Lock()
 
+
 def is_available():
     return hasattr(torch._C, "_rpc_init")
 
@@ -20,22 +23,59 @@ if is_available() and not torch._C._rpc_init():
 
 
 if is_available():
-    from . import api, backend_registry, functions, _set_profiler_node_id
-    from . import (
+    from torch._C._distributed_c10d import Store
+    from torch._C._distributed_rpc import (
         _disable_jit_rref_pickle,
         _enable_jit_rref_pickle,
+        _disable_server_process_global_profiler,
+        _enable_server_process_global_profiler,
         _set_and_start_rpc_agent,
+        _reset_current_rpc_agent,
+        _delete_all_user_and_unforked_owner_rrefs,
+        _destroy_rref_context,
+        _set_profiler_node_id,
+        _is_current_rpc_agent_set,
+        _rref_context_get_debug_info,
+        _cleanup_python_rpc_handler,
+        _invoke_rpc_builtin,
+        _invoke_rpc_python_udf,
+        _invoke_rpc_torchscript,
+        _invoke_remote_builtin,
+        _invoke_remote_python_udf,
+        _invoke_remote_torchscript,
+        _set_rpc_timeout,
+        _get_current_rpc_agent,
+        get_rpc_timeout,
+        enable_gil_profiling,
+        RpcBackendOptions,
+        _TensorPipeRpcBackendOptionsBase,
+        ProcessGroupRpcBackendOptions,
+        RpcAgent,
+        PyRRef,
+        ProcessGroupAgent,
+        TensorPipeAgent,
+        RemoteProfilerManager,
+        WorkerInfo,
+        _DEFAULT_INIT_METHOD,
+        _DEFAULT_NUM_SEND_RECV_THREADS,
+        _DEFAULT_NUM_WORKER_THREADS,
+        _UNSET_RPC_TIMEOUT,
+        _DEFAULT_RPC_TIMEOUT_SEC,
     )  # noqa: F401
-    from .api import *  # noqa: F401
-    from .options import TensorPipeRpcBackendOptions  # noqa: F401
+
+    from . import api, backend_registry, functions
+    from .api import *  # noqa: F401,F403
+    import numbers
+
+    import torch.distributed.autograd as dist_autograd
+
     from .backend_registry import BackendType
+    from .options import TensorPipeRpcBackendOptions  # noqa: F401
     from .server_process_global_profiler import (
         _server_process_global_profile,
     )
-    import torch.distributed.autograd as dist_autograd
 
-    import numbers
-
+    rendezvous_iterator: Generator[Tuple[Store, int, int], None, None]
 
     def init_rpc(
         name,
@@ -49,16 +89,16 @@ if is_available():
         and distributed autograd, which immediately makes the current
         process ready to send and receive RPCs.
 
-        Arguments:
+        Args:
+            name (str): a globally unique name of this node. (e.g.,
+                ``Trainer3``, ``ParameterServer2``, ``Master``, ``Worker1``)
+                Name can only contain number, alphabet, underscore, colon,
+                and/or dash, and must be shorter than 128 characters.
             backend (BackendType, optional): The type of RPC backend
                 implementation. Supported values include
                 ``BackendType.TENSORPIPE`` (the default) and
                 ``BackendType.PROCESS_GROUP``. See :ref:`rpc-backends` for more
                 information.
-            name (str): a globally unique name of this node. (e.g.,
-                ``Trainer3``, ``ParameterServer2``, ``Master``, ``Worker1``)
-                Name can only contain number, alphabet, underscore, colon,
-                and/or dash, and must be shorter than 128 characters.
             rank (int): a globally unique id/rank of this node.
             world_size (int): The number of workers in the group.
             rpc_backend_options (RpcBackendOptions, optional): The options
@@ -74,12 +114,14 @@ if is_available():
                 are available.
         """
 
-        if backend is not None and not isinstance(backend, backend_registry.BackendType):
-            raise TypeError(
-                "Argument backend must be a member of BackendType"
-            )
+        if backend is not None and not isinstance(
+            backend, backend_registry.BackendType
+        ):
+            raise TypeError("Argument backend must be a member of BackendType")
 
-        if rpc_backend_options is not None and not isinstance(rpc_backend_options, RpcBackendOptions):
+        if rpc_backend_options is not None and not isinstance(
+            rpc_backend_options, RpcBackendOptions
+        ):
             raise TypeError(
                 "Argument rpc_backend_options must be an instance of RpcBackendOptions"
             )
@@ -104,22 +146,26 @@ if is_available():
                 raise TypeError(
                     f"Could not infer backend for options {rpc_backend_options}"
                 )
-            if backend != BackendType.TENSORPIPE:
+            # Ignore type error because mypy doesn't handle dynamically generated type objects (#4865)
+            if backend != BackendType.TENSORPIPE:  # type: ignore[attr-defined]
                 logger.warning(
-                    f"RPC was initialized with no explicit backend but with options "
+                    f"RPC was initialized with no explicit backend but with options "  # type: ignore[attr-defined]
                     f"corresponding to {backend}, hence that backend will be used "
                     f"instead of the default {BackendType.TENSORPIPE}. To silence this "
                     f"warning pass `backend={backend}` explicitly."
                 )
 
         if backend is None:
-            backend = BackendType.TENSORPIPE
+            backend = BackendType.TENSORPIPE  # type: ignore[attr-defined]
 
-        if backend == BackendType.PROCESS_GROUP:
-            logger.warning(
+        if backend == BackendType.PROCESS_GROUP:  # type: ignore[attr-defined]
+            warnings.warn(
                 "RPC was initialized with the PROCESS_GROUP backend which is "
                 "deprecated and slated to be removed and superseded by the TENSORPIPE "
-                "backend. It is recommended to migrate to the TENSORPIPE backend."
+                "backend. It is recommended to migrate to the TENSORPIPE backend. "
+                "PyTorch v1.9 will be the last release that carries PROCESS_GROUP "
+                "RPC backend. If you have concerns or suggestions please comment in "
+                "https://github.com/pytorch/pytorch/issues/55615"
             )
 
         if rpc_backend_options is None:
@@ -141,7 +187,7 @@ if is_available():
         # Use a PrefixStore to distinguish multiple invocations.
         with _init_counter_lock:
             global _init_counter
-            store = dist.PrefixStore(str('rpc_prefix_{}'.format(_init_counter)), store)
+            store = dist.PrefixStore(str("rpc_prefix_{}".format(_init_counter)), store)
             _init_counter += 1
 
         # Initialize autograd before RPC since _init_rpc_backend guarantees all
@@ -155,7 +201,6 @@ if is_available():
         _set_profiler_node_id(rank)
         # Initialize RPC.
         _init_rpc_backend(backend, store, name, rank, world_size, rpc_backend_options)
-
 
     def _validate_rpc_args(backend, store, name, rank, world_size, rpc_backend_options):
         type_mapping = {
@@ -174,9 +219,8 @@ if is_available():
                     )
                 )
 
-
     def _init_rpc_backend(
-        backend=backend_registry.BackendType.TENSORPIPE,
+        backend=BackendType.TENSORPIPE,  # type: ignore[attr-defined]
         store=None,
         name=None,
         rank=-1,
@@ -201,10 +245,8 @@ if is_available():
 
         api._init_rpc_states(rpc_agent)
 
-
     @api._require_initialized
     def _get_debug_info():
-        from . import _rref_context_get_debug_info
         info = _rref_context_get_debug_info()
         info.update(api._get_current_rpc_agent().get_debug_info())
         info.update(dist_autograd._get_debug_info())

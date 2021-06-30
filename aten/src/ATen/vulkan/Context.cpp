@@ -3,9 +3,14 @@
 #include <ATen/Tensor.h>
 #include <ATen/vulkan/Context.h>
 
+#ifdef USE_VULKAN_API
+#include <ATen/native/vulkan/api/Context.h>
+#endif /* USE_VULKAN_API */
+
 namespace at {
 namespace vulkan {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<const VulkanImplInterface*> g_vulkan_impl_registry;
 
 VulkanImplRegistrar::VulkanImplRegistrar(VulkanImplInterface* impl) {
@@ -23,8 +28,12 @@ at::Tensor& vulkan_copy_(at::Tensor& self, const at::Tensor& src) {
 
 namespace native {
 bool is_vulkan_available() {
+#ifdef USE_VULKAN_API
+  return native::vulkan::api::available();
+#else
   auto p = at::vulkan::g_vulkan_impl_registry.load();
   return p ? p->is_vulkan_available() : false;
+#endif
 }
 } // namespace native
 

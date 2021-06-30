@@ -33,6 +33,11 @@ else
   export BUILDER_ROOT="$workdir/builder"
 fi
 
+# Try to extract PR number from branch if not already set
+if [[ -z "${CIRCLE_PR_NUMBER:-}" ]]; then
+  CIRCLE_PR_NUMBER="$(echo ${CIRCLE_BRANCH} | sed -E -n 's/pull\/([0-9]*).*/\1/p')"
+fi
+
 # Clone the Pytorch branch
 retry git clone https://github.com/pytorch/pytorch.git "$PYTORCH_ROOT"
 pushd "$PYTORCH_ROOT"

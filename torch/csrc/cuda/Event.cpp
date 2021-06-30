@@ -4,6 +4,7 @@
 #include <torch/csrc/cuda/Stream.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/THP.h>
+#include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 
 #include <c10/cuda/CUDAGuard.h>
@@ -20,6 +21,7 @@ static PyObject * THCPEvent_pynew(
   unsigned char blocking = 0;
   unsigned char interprocess = 0;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   static char *kwlist[] =
     {"enable_timing", "blocking", "interprocess", nullptr};
   if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|bbb", kwlist,
@@ -45,8 +47,9 @@ static PyObject * THCPEvent_pynew(
 }
 
 static PyObject * THCPEvent_from_ipc_handle(
-    PyTypeObject *type, PyObject *args, PyObject *kwargs) {
+    PyObject *_type, PyObject *args, PyObject *kwargs) {
   HANDLE_TH_ERRORS
+  auto type = (PyTypeObject*)_type;
 
   static torch::PythonArgParser parser({
     "from_ipc_handle(Device device, std::string ipc_handle)",
@@ -98,16 +101,20 @@ static PyObject * THCPEvent_get_device(THCPEvent *self, void *unused) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THCPEvent_record(THCPEvent *self, THCPStream *stream) {
+static PyObject * THCPEvent_record(PyObject *_self, PyObject *_stream) {
   HANDLE_TH_ERRORS
+  auto self = (THCPEvent*)_self;
+  auto stream = (THCPStream*)_stream;
   self->cuda_event.record(stream->cuda_stream);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THCPEvent_wait(THCPEvent *self, THCPStream *stream) {
+static PyObject * THCPEvent_wait(PyObject *_self, PyObject *_stream) {
   HANDLE_TH_ERRORS
   {
+    auto self = (THCPEvent*)_self;
+    auto stream = (THCPStream*)_stream;
     pybind11::gil_scoped_release no_gil;
     self->cuda_event.block(stream->cuda_stream);
   }
@@ -115,21 +122,25 @@ static PyObject * THCPEvent_wait(THCPEvent *self, THCPStream *stream) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THCPEvent_query(THCPEvent *self, PyObject *noargs) {
+static PyObject * THCPEvent_query(PyObject *_self, PyObject *noargs) {
   HANDLE_TH_ERRORS
+  auto self = (THCPEvent*)_self;
   return PyBool_FromLong(self->cuda_event.query());
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THCPEvent_elapsed_time(THCPEvent *self, THCPEvent *other) {
+static PyObject * THCPEvent_elapsed_time(PyObject *_self, PyObject *_other) {
   HANDLE_TH_ERRORS
+  auto self = (THCPEvent*)_self;
+  auto other = (THCPEvent*)_other;
   return PyFloat_FromDouble(self->cuda_event.elapsed_time(other->cuda_event));
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THCPEvent_synchronize(THCPEvent *self, PyObject *noargs) {
+static PyObject * THCPEvent_synchronize(PyObject *_self, PyObject *noargs) {
   HANDLE_TH_ERRORS
   {
+    auto self = (THCPEvent*)_self;
     pybind11::gil_scoped_release no_gil;
     self->cuda_event.synchronize();
   }
@@ -137,30 +148,34 @@ static PyObject * THCPEvent_synchronize(THCPEvent *self, PyObject *noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THCPEvent_ipc_handle(THCPEvent *self, PyObject *noargs) {
+static PyObject * THCPEvent_ipc_handle(PyObject *_self, PyObject *noargs) {
   HANDLE_TH_ERRORS
+  auto self = (THCPEvent*)_self;
   cudaIpcEventHandle_t handle;
   self->cuda_event.ipc_handle(&handle);
   return PyBytes_FromStringAndSize((const char *)&handle, sizeof(handle));
   END_HANDLE_TH_ERRORS
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, cppcoreguidelines-avoid-non-const-global-variables, modernize-avoid-c-arrays)
 static struct PyGetSetDef THCPEvent_properties[] = {
   {"device", (getter)THCPEvent_get_device, nullptr, nullptr, nullptr},
   {"cuda_event", (getter)THCPEvent_get_cuda_event, nullptr, nullptr, nullptr},
   {nullptr}
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, cppcoreguidelines-avoid-non-const-global-variables, modernize-avoid-c-arrays)
 static PyMethodDef THCPEvent_methods[] = {
-  {(char*)"from_ipc_handle", (PyCFunction)(void(*)(void))THCPEvent_from_ipc_handle,
+  {(char*)"from_ipc_handle",
+    castPyCFunctionWithKeywords(THCPEvent_from_ipc_handle),
     METH_CLASS | METH_VARARGS | METH_KEYWORDS, nullptr},
-  {(char*)"record", (PyCFunction)THCPEvent_record, METH_O, nullptr},
-  {(char*)"wait", (PyCFunction)THCPEvent_wait, METH_O, nullptr},
-  {(char*)"query", (PyCFunction)THCPEvent_query, METH_NOARGS, nullptr},
-  {(char*)"elapsed_time", (PyCFunction)THCPEvent_elapsed_time, METH_O, nullptr},
-  {(char*)"synchronize", (PyCFunction)THCPEvent_synchronize,
+  {(char*)"record", THCPEvent_record, METH_O, nullptr},
+  {(char*)"wait", THCPEvent_wait, METH_O, nullptr},
+  {(char*)"query", THCPEvent_query, METH_NOARGS, nullptr},
+  {(char*)"elapsed_time", THCPEvent_elapsed_time, METH_O, nullptr},
+  {(char*)"synchronize", THCPEvent_synchronize,
     METH_NOARGS, nullptr},
-  {(char*)"ipc_handle", (PyCFunction)THCPEvent_ipc_handle,
+  {(char*)"ipc_handle", THCPEvent_ipc_handle,
     METH_NOARGS, nullptr},
   {nullptr}
 };
@@ -172,36 +187,61 @@ PyTypeObject THCPEventType = {
   0,                                     /* tp_itemsize */
   (destructor)THCPEvent_dealloc,         /* tp_dealloc */
   0,                                     /* tp_vectorcall_offset */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_getattr */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_setattr */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_reserved */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_repr */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_as_number */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_as_sequence */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_as_mapping */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_hash  */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_call */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_str */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_getattro */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_setattro */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_as_buffer */
   Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
   nullptr,                                  /* tp_doc */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_traverse */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_clear */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_richcompare */
   0,                                     /* tp_weaklistoffset */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_iter */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_iternext */
   THCPEvent_methods,                     /* tp_methods */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_members */
   THCPEvent_properties,                  /* tp_getset */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_base */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_dict */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_descr_get */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_descr_set */
   0,                                     /* tp_dictoffset */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_init */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_alloc */
   THCPEvent_pynew,                       /* tp_new */
 };

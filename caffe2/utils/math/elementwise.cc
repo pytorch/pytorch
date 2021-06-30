@@ -46,6 +46,8 @@ DELEGATE_SIMPLE_UNARY_FUNCTION(
     VML_HA | VML_FTZDAZ_OFF | VML_ERRMODE_IGNORE)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Log, vsLn)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Log, vdLn)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Log1p, vsLog1p)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Log1p, vdLog1p)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sin, vsSin)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Sin, vdSin)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Asin, vsAsin)
@@ -155,6 +157,8 @@ DELEGATE_SIMPLE_UNARY_FUNCTION(float, Exp, exp)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Exp, exp)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Log, log)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Log, log)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Log1p, log1p)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Log1p, log1p)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sin, sin)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Sin, sin)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Asin, asin)
@@ -366,6 +370,7 @@ CAFFE2_SPECIALIZED_SCALE(float, double)
         ConstEigenVectorArrayMap<TData>(X, N) * static_cast<TData>(*alpha); \
   }
 CAFFE2_SPECIALIZED_AXPY(float, float)
+CAFFE2_SPECIALIZED_AXPY(float, double)
 #undef CAFFE2_SPECIALIZED_AXPY
 
 #else // CAFFE2_USE_EIGEN_FOR_BLAS
@@ -490,6 +495,7 @@ DELEGATE_SCALE(float, double, cblas_dscal)
     BLASFunc(N, static_cast<TData>(*alpha), X, 1, Y, 1); \
   }
 DELEGATE_AXPY(float, float, cblas_saxpy)
+DELEGATE_AXPY(float, double, cblas_daxpy)
 #undef DELEGATE_AXPY
 
 #endif // CAFFE2_USE_EIGEN_FOR_BLAS
@@ -635,47 +641,59 @@ DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_FUNCTION(double, Max, max)
 DELEGATE_SIMPLE_BINARY_FUNCTION_BY_STD_FUNCTION(
     bool,
     And,
+    // NOLINTNEXTLINE(modernize-use-transparent-functors)
     std::logical_and<bool>())
 DELEGATE_SIMPLE_BINARY_FUNCTION_BY_STD_FUNCTION(
     bool,
     Or,
+    // NOLINTNEXTLINE(modernize-use-transparent-functors)
     std::logical_or<bool>())
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_SIMPLE_BINARY_FUNCTION_BY_STD_FUNCTION(bool, Xor, std::bit_xor<bool>())
 DELEGATE_SIMPLE_BINARY_FUNCTION_BY_STD_FUNCTION(
     bool,
     BitwiseAnd,
+    // NOLINTNEXTLINE(modernize-use-transparent-functors)
     std::bit_and<bool>())
 DELEGATE_SIMPLE_BINARY_FUNCTION_BY_STD_FUNCTION(
     std::int32_t,
     BitwiseAnd,
+    // NOLINTNEXTLINE(modernize-use-transparent-functors)
     std::bit_and<std::int32_t>())
 DELEGATE_SIMPLE_BINARY_FUNCTION_BY_STD_FUNCTION(
     std::int64_t,
     BitwiseAnd,
+    // NOLINTNEXTLINE(modernize-use-transparent-functors)
     std::bit_and<std::int64_t>())
 DELEGATE_SIMPLE_BINARY_FUNCTION_BY_STD_FUNCTION(
     bool,
     BitwiseOr,
+    // NOLINTNEXTLINE(modernize-use-transparent-functors)
     std::bit_or<bool>())
 DELEGATE_SIMPLE_BINARY_FUNCTION_BY_STD_FUNCTION(
     std::int32_t,
     BitwiseOr,
+    // NOLINTNEXTLINE(modernize-use-transparent-functors)
     std::bit_or<std::int32_t>())
 DELEGATE_SIMPLE_BINARY_FUNCTION_BY_STD_FUNCTION(
     std::int64_t,
     BitwiseOr,
+    // NOLINTNEXTLINE(modernize-use-transparent-functors)
     std::bit_or<std::int64_t>())
 DELEGATE_SIMPLE_BINARY_FUNCTION_BY_STD_FUNCTION(
     bool,
     BitwiseXor,
+    // NOLINTNEXTLINE(modernize-use-transparent-functors)
     std::bit_xor<bool>())
 DELEGATE_SIMPLE_BINARY_FUNCTION_BY_STD_FUNCTION(
     std::int32_t,
     BitwiseXor,
+    // NOLINTNEXTLINE(modernize-use-transparent-functors)
     std::bit_xor<std::int32_t>())
 DELEGATE_SIMPLE_BINARY_FUNCTION_BY_STD_FUNCTION(
     std::int64_t,
     BitwiseXor,
+    // NOLINTNEXTLINE(modernize-use-transparent-functors)
     std::bit_xor<std::int64_t>())
 #undef DELEGATE_SIMPLE_BINARY_FUNCTION_BY_STD_FUNCTION
 

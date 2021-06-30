@@ -21,9 +21,7 @@ OperatorEntry::OperatorEntry(OperatorName&& operator_name)
 , schema_()
 , dispatchTable_()
 , dispatchKeyExtractor_(DispatchKeyExtractor::makeUninitialized())
-, manuallyBoxedKernel_()
 , kernels_()
-, catchAllKernel_()
 , cpp_signature_()
 , is_observed_(ObservedOperators::isObserved(name_))
 {
@@ -37,28 +35,35 @@ namespace {
     c10::optional<std::string> schema_difference = findSchemaDifferences(from_def, inferred);
     if (schema_difference.has_value()) {
       TORCH_CHECK(false,
-        "In registration for ", toString(name), ": expected schema of operator to be \"", toString(from_def), "\" (", from_def_debug, "), ",
-        "but got inferred schema \"", toString(inferred), "\" (", inferred_debug, "). ",
-        *schema_difference);
+        "Inferred operator schema for a C++ kernel function doesn't match the expected function schema.\n"
+        "  operator: ", toString(name), "\n",
+        "  expected schema: ", toString(from_def), "\n",
+        "    ", from_def_debug, "\n",
+        "  inferred schema: ", toString(inferred), "\n",
+        "    ", inferred_debug, "\n",
+        "  reason: ", *schema_difference);
     }
   }
 } // anonymous namespace
 
-const AnnotatedKernel OperatorEntry::ambiguousAutogradOtherKernel_ = AnnotatedKernel(
+const AnnotatedKernel& OperatorEntry::missingKernel() const {
+  static AnnotatedKernel kernel;
+  return kernel;
+}
+
+const AnnotatedKernel& OperatorEntry::ambiguousAutogradOtherKernel() const {
+  static AnnotatedKernel kernel(
     c10::KernelFunction::makeAmbiguousAutogradOther(), nullptr, "ambiguous_autogradother");
+  return kernel;
+}
 
 void OperatorEntry::registerSchema(FunctionSchema&& schema, std::string&& debug) {
   TORCH_INTERNAL_ASSERT(!schema_.has_value());
-  for (auto i = kernels_.begin(); i != kernels_.end(); ++i) {
-    for (auto j = i->second.begin(); j != i->second.end(); ++j) {
-      if (j->inferred_function_schema != nullptr) {
-        checkSchema(name_, schema, debug, *j->inferred_function_schema, j->debug);
+  for (const auto& kernel : kernels_) {
+    for (const auto &j : kernel.second) {
+      if (j.inferred_function_schema != nullptr) {
+        checkSchema(name_, schema, debug, *j.inferred_function_schema, j.debug);
       }
-    }
-  }
-  for (auto j = catchAllKernel_.begin(); j != catchAllKernel_.end(); ++j) {
-    if (j->inferred_function_schema != nullptr) {
-      checkSchema(name_, schema, debug, *j->inferred_function_schema, j->debug);
     }
   }
   // NB: don't register schema until after we've checked everything!
@@ -89,13 +94,19 @@ std::list<AnnotatedKernel>::iterator OperatorEntry::registerKernel(
   // that would also invalidate the old TypedOperatorHandles.
   if (cpp_signature.has_value()) {
     if (cpp_signature_.has_value()) {
-      TORCH_INTERNAL_ASSERT(*cpp_signature == *cpp_signature_,
-        "Tried to register a kernel (", debug, ") for operator ", name_," for dispatch key ", toString(dispatch_key),
-        ", but the C++ function signature ", cpp_signature->name(), " mismatched with a previous kernel that had the signature ",
-        cpp_signature_->name()
+      TORCH_CHECK(*cpp_signature == cpp_signature_->signature,
+        "\nMismatch in kernel C++ signatures\n",
+        "  operator: ", (this->schema_.has_value() ? toString(this->schema_->schema) : toString(name_)), "\n",
+        "    ", (this->schema_.has_value() ? this->schema_->debug : "no debug info"), "\n",
+        "  kernel 1: ", cpp_signature_->signature.name(), "\n",
+        "    dispatch key: ", toString(cpp_signature_->dispatch_key), "\n",
+        "    ", cpp_signature_->debug, "\n",
+        "  kernel 2: ", cpp_signature->name(), "\n",
+        "    dispatch key: ", toString(dispatch_key), "\n",
+        "    ", debug, "\n"
       );
     } else {
-      cpp_signature_ = *cpp_signature;
+      cpp_signature_ = CppSignatureWithDebug { *cpp_signature, debug, dispatch_key };
     }
   }
 
@@ -105,14 +116,17 @@ std::list<AnnotatedKernel>::iterator OperatorEntry::registerKernel(
 
   // Add the kernel to the kernels list,
   // possibly creating the list if this is the first kernel.
-  auto& k = dispatch_key.has_value() ? kernels_[*dispatch_key] : catchAllKernel_;
+  // Redirect catchAll registrations to CompositeImplicitAutograd.
+  auto& k = dispatch_key.has_value() ? kernels_[*dispatch_key] : kernels_[DispatchKey::CompositeImplicitAutograd];
 
   if (k.size() > 0) {
-    TORCH_WARN("Registering a kernel (", debug, ") for operator ", name_, " for dispatch key ", toString(dispatch_key), " that overwrote a previously registered kernel with the same dispatch key for the same operator.");
-  }
-
-  if (manuallyBoxedKernel_.has_value()) {
-    kernel.setManuallyBoxedKernel_(*manuallyBoxedKernel_);
+    TORCH_WARN("Overriding a previously registered kernel for the same operator and the same dispatch key\n",
+               "  operator: ", (schema_.has_value() ? toString(schema_->schema) : toString(name_)), "\n",
+               "    ", (this->schema_.has_value() ? this->schema_->debug : "no debug info"), "\n",
+               "  dispatch key: ", toString(dispatch_key), "\n",
+               "  previous kernel: ", (cpp_signature_.has_value() ? cpp_signature_->debug : "no debug info"), "\n",
+               "       new kernel: ", debug
+    );
   }
 
   k.emplace_front(std::move(kernel), std::move(inferred_function_schema), std::move(debug));
@@ -132,20 +146,17 @@ void OperatorEntry::deregisterKernel_(
   c10::optional<DispatchKey> dispatch_key,
   std::list<AnnotatedKernel>::iterator kernel
 ) {
-  if (dispatch_key.has_value()) {
-    auto found = kernels_.find(*dispatch_key);
-    TORCH_INTERNAL_ASSERT(found != kernels_.end(), "Tried to deregister a kernel for dispatch key ", toString(dispatch_key), " but there are no kernels registered for this dispatch key. The operator is ", toString(name_));
-    auto& k = found->second;
-    k.erase(kernel);
-    if (k.empty()) {
-      // the invariant says we don't want empty lists but instead remove the list from the map
-      kernels_.erase(found);
-    }
-    updateDispatchTable_(dispatcher, *dispatch_key);
-  } else {
-    catchAllKernel_.erase(kernel);
-    updateDispatchTableFull_(dispatcher);
+  // Redirect catchAll deregistrations to CompositeImplicitAutograd.
+  DispatchKey dk = dispatch_key.has_value() ? *dispatch_key : DispatchKey::CompositeImplicitAutograd;
+  auto found = kernels_.find(dk);
+  TORCH_INTERNAL_ASSERT(found != kernels_.end(), "Tried to deregister a kernel for dispatch key ", toString(dispatch_key), " but there are no kernels registered for this dispatch key. The operator is ", toString(name_));
+  auto& k = found->second;
+  k.erase(kernel);
+  if (k.empty()) {
+    // the invariant says we don't want empty lists but instead remove the list from the map
+    kernels_.erase(found);
   }
+  updateDispatchTable_(dispatcher, dk);
 }
 
 void OperatorEntry::updateFallback(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) {
@@ -180,67 +191,59 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   // For any dispatch key, it'll pick a kernel using the following order:
   //  (1) Use kernel if it's directly registered to this key
   //  (2) Handle runtime keys that have kernels available from alias keys
-  //    (2.1) Use kernel from DispatchKey::DefaultBackend if available.
+  //    (2.1) Use kernel from DispatchKey::CompositeExplicitAutograd if available.
   //          This is used to register a kernel that works for all backend in inference. But it requires
   //          separate registration for Autograd keys to support training.
-  //    (2.2) Use kernel from DispatchKey::Math if available.
-  //          For autograd keys, we only use kernel from Math when there's no direct registration
-  //          to its corresponding backend key or DefaultBackend. See Note [DefaultBackend and Math].
-  //          For AutogradOther, we eagerly return ambiguousAutogradOtherKernel_ if there's registration to any of
+  //    (2.2) Use kernel from DispatchKey::CompositeImplicitAutograd if available.
+  //          For autograd keys, we only use kernel from CompositeImplicitAutograd when there's no direct registration
+  //          to its corresponding backend key or CompositeExplicitAutograd. See Note [CompositeExplicitAutograd and CompositeImplicitAutograd].
+  //          For AutogradOther, we eagerly return ambiguousAutogradOtherKernel() if there's registration to any of
   //          its backends and ask backend extender to request a decicated Autograd key for the backend.
   //          See Note [Ambiguity in AutogradOther kernel] for more details.
-  //          A DefaultBackend kernel prevents Math kernel being used for Autograd keys, but it doesn't
+  //          A CompositeExplicitAutograd kernel prevents CompositeImplicitAutograd kernel being used for Autograd keys, but it doesn't
   //          cause confusion for AutogradOther. It's pretty straightforward to use Autograd (if available)
   //          in this case.
   //    (2.3) Use kernel from DispatchKey::Autograd if available
-  //    (2.4) Special logic to handle catchAll for Autograd keys
-  //          For autograd backend keys, we use kernel from alias Math key (catchAll will be moved to Math)
-  //          if there's no direct registration to the backend key.
-  //          Tensor factory functions used to have no registration to Autograd key but only to catchAll.
-  //          In the past we directly call into backends(filled with catchAll) after BackendSelect.
-  //          Now that we first call Autograd backend keys after BackendSelect, we should fill those
-  //          with catchAll as well.
-  //    The implementation of (2.2) & (2.4) relies on the invariant that for a given backend,
+  //    The implementation of (2.2) relies on the invariant that for a given backend,
   //    `computeDispatchTableEntryWithDebug()` will be called for that backend's autograd key after the
   //    backend key. See Note [Refresh Runtime Autograd entries in dispatchTable_]
   //  (3) Use fallthrough kernel that are registered as fallback.
-  //  (4) Use catchAll kernel if available
   // Alias Key Precedence:
-  //   DefaultBackend > Math > Autograd
-  // Note [DefaultBackend and Math]
-  //   When there're registrations to both DefaultBackend & Math & Autograd, from (2.2) we know DefaultBackend
-  //   and Autograd kernels will be picked up and Math is overriden.
-  //   This is fine and in practice DefaultBackend and Math shouldn't co-exist for an op.
+  //   CompositeExplicitAutograd > CompositeImplicitAutograd > Autograd
+  // Note [CompositeExplicitAutograd and CompositeImplicitAutograd]
+  //   When there're registrations to both CompositeExplicitAutograd & CompositeImplicitAutograd & Autograd, from (2.2) we know CompositeExplicitAutograd
+  //   and Autograd kernels will be picked up and CompositeImplicitAutograd is overriden.
+  //   This is fine and in practice CompositeExplicitAutograd and CompositeImplicitAutograd shouldn't co-exist for an op.
   // TODO: Update alias key precedence after we add new alias keys AutogradDispatchCPUOrCUDA .
-  // TODO: we can remove (2.4) and (4) after TypeDefault registrations are moved from catchAll to Math
-  //       so that Math can populate to Autograd backend keys before fallback kernels.
 
   // 1. Operator registration
   if (auto direct_registration = getKernelForDispatchKey(dispatch_key)) {
     return {*direct_registration.value(), "kernel"};
   }
 
-  // 2.1 Use DefaultBackend kernel if available.
-  if (isIncludedInAlias(dispatch_key, DispatchKey::DefaultBackend)) {
-    if (auto default_backend_registration = getKernelForDispatchKey(DispatchKey::DefaultBackend)) {
+  // 2.1 Use CompositeExplicitAutograd kernel if available.
+  //     See Note [Undefined in dispatchTable_] for the special handling for Undefined.
+  if (dispatch_key == DispatchKey::Undefined || isIncludedInAlias(dispatch_key, DispatchKey::CompositeExplicitAutograd)) {
+    if (auto default_backend_registration = getKernelForDispatchKey(DispatchKey::CompositeExplicitAutograd)) {
       return {*default_backend_registration.value(), "default backend kernel"};
     }
   }
 
-  // Note when there's direct registration to DefaultBackend, this code path will only be hit by
+  // Note when there's direct registration to CompositeExplicitAutograd, this code path will only be hit by
   // non backend keys (e.g AutogradXXX, Batched etc) due to (2.1).
   bool has_backend_kernel =
-    hasKernelForAnyDispatchKey(getBackendKeySetFromAutograd(dispatch_key).add(DispatchKey::DefaultBackend));
+    hasKernelForAnyDispatchKey(getBackendKeySetFromAutograd(dispatch_key).add(DispatchKey::CompositeExplicitAutograd));
 
-  // 2.2. Use Math kernel if available. For autograd keys, we only use kernel from Math
-  //      when there's no direct registration to its corresponding backend key or DefaultBackend.
-  //      For AutogradOther, we return ambiguousAutogradOtherKernel_ if there's registration
+  // 2.2. Use CompositeImplicitAutograd kernel if available. For autograd keys, we only use kernel from CompositeImplicitAutograd
+  //      when there's no direct registration to its corresponding backend key or CompositeExplicitAutograd.
+  //      For AutogradOther, we return ambiguousAutogradOtherKernel() if there's registration
   //      to any of its backends.
-  if (isIncludedInAlias(dispatch_key, DispatchKey::Math)) {
-    if (auto math_registration = getKernelForDispatchKey(DispatchKey::Math)) {
+  //      See Note [Undefined in dispatchTable_] for the special handling for Undefined.
+  if (dispatch_key == DispatchKey::Undefined || isIncludedInAlias(dispatch_key, DispatchKey::CompositeImplicitAutograd)) {
+    if (auto math_registration = getKernelForDispatchKey(DispatchKey::CompositeImplicitAutograd)) {
       if (dispatch_key == DispatchKey::AutogradOther
           && hasKernelForAnyDispatchKey(c10::autogradother_backends)) {
-        return {ambiguousAutogradOtherKernel_, "ambiguous autogradother"};
+        return {ambiguousAutogradOtherKernel(), "ambiguous autogradother"};
       } else if (!has_backend_kernel) {
         return {*math_registration.value(), "math kernel"};
       }
@@ -252,13 +255,6 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
     if (auto autograd_registration = getKernelForDispatchKey(DispatchKey::Autograd)) {
       return {*autograd_registration.value(), "autograd kernel"};
     }
-    // 2.4. For autograd dispatch keys, we use kernel from catchAll if there's no direct
-    //      registration to the backend key or DefaultBackend. Once CatchAll is moved to Math, this should
-    //      fit 2.1 and we can remove 2.4 entirely.
-    if (!has_backend_kernel && !catchAllKernel_.empty()) {
-      TORCH_INTERNAL_ASSERT(catchAllKernel_.front().kernel.isValid());
-      return {catchAllKernel_.front(), "catch all"};
-    }
   }
 
   // 3. Backend fallback
@@ -267,14 +263,8 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
     return {dispatcher.backendFallbackKernels_[dispatch_ix], "backend fallback"};
   }
 
-  // 4. Catch all
-  if (!catchAllKernel_.empty()) {
-    TORCH_INTERNAL_ASSERT(catchAllKernel_.front().kernel.isValid());
-    return {catchAllKernel_.front(), "catch all"};
-  }
-
-  // 5. Default to error
-  return {missingKernel_, "missing"};
+  // 4. Default to error
+  return {missingKernel(), "missing"};
 }
 
 // synchronizes the dispatch table entry for a given dispatch key
@@ -304,6 +294,11 @@ void OperatorEntry::updateDispatchTable_(const c10::Dispatcher& dispatcher, Disp
   for (auto k : c10::getRuntimeDispatchKeySet(dispatch_key)) {
     updateDispatchTableEntry_(dispatcher, k);
   }
+  // Registration to CompositeExplicitAutograd and CompositeImplicitAutograd should be populated to Undefined.
+  // We cannot do this above since Undefined cannot be represented in DispatchKeySet.
+  if (dispatch_key == DispatchKey::CompositeImplicitAutograd || dispatch_key == DispatchKey::CompositeExplicitAutograd) {
+    updateDispatchTableEntry_(dispatcher, DispatchKey::Undefined);
+  }
   // Note [Refresh Runtime Autograd entries in dispatchTable_]
   // Registering to backend key might affect computed entry at its Autograd backend key due to (2.1) & (2.3).
   if (c10::isBackendDispatchKey(dispatch_key)) {
@@ -324,31 +319,19 @@ void OperatorEntry::updateDispatchTable_(const c10::Dispatcher& dispatcher, Disp
 //
 void OperatorEntry::updateDispatchTableFull_(const c10::Dispatcher& dispatcher) {
   // Note [Undefined in dispatchTable_]
+  // DispatchKey Undefined is used in runtime:
   // (1) it gives people place to specify functionality that should run when there are no dispatch keys,
-  //     e.g., an empty TensorList argument
+  //     e.g., an op without Tensor inputs or empty TensorList arguments
   // (2) it would let us remove the explicit error checking code in the dispatch hotpath, and so when
   //     no dispatch keys are available we just slide into the undefined handler which would then raise
-  //     the error message./
+  //     the error message.
+  // In the old world of catchAll, the only way to "register" a kernel to Undefined is by registering it to
+  // catchAll. After catchAllKernel_ is removed, Undefined now can get a kernel from either CompositeExplicitAutograd
+  // or CompositeImplicitAutograd alias key so that we don't break the support. Ideally isIncludedInAlias(Undefined, CompositeImplicitAutograd)
+  // should return true, it returns false because Undefined cannot be represented in a DispatchKeySet.
   for (uint8_t iter = 0; iter != static_cast<uint8_t>(DispatchKey::NumDispatchKeys); ++iter) {
     updateDispatchTable_(dispatcher, static_cast<DispatchKey>(iter));
   }
-}
-
-void OperatorEntry::setManuallyBoxedKernel_(const c10::Dispatcher& dispatcher, KernelFunction::InternalBoxedKernelFunction* func) {
-  TORCH_INTERNAL_ASSERT(!manuallyBoxedKernel_);
-  manuallyBoxedKernel_ = func;
-
-  for (auto& kv : kernels_) {
-    for (auto& k : kv.second) {
-      k.kernel.setManuallyBoxedKernel_(func);
-    }
-  }
-  for (auto& k : catchAllKernel_) {
-    k.kernel.setManuallyBoxedKernel_(func);
-  }
-
-  // Refresh entries in dispatchTable_
-  updateDispatchTableFull_(dispatcher);
 }
 
 void OperatorEntry::checkInvariants() const {
@@ -387,20 +370,38 @@ std::string OperatorEntry::listAllDispatchKeys() const {
   return str.str();
 }
 
+void OperatorEntry::reportSignatureError(std::string name) const {
+  TORCH_CHECK(false,
+        "\nTried to access or call an operator with a wrong signature.\n",
+        "  operator: ", (schema_.has_value() ? toString(schema_->schema) : toString(name_)), "\n",
+        "    ", (schema_.has_value() ? schema_->debug : "unknown debug info"), "\n",
+        "  correct signature:  ", cpp_signature_->signature.name(), "\n",
+        "    ", cpp_signature_->debug, "\n",
+        "  accessed/called as: ", name, "\n",
+        "This likely happened in a call to OperatorHandle::typed<Return (Args...)>(). ",
+        "Please make sure that the function signature matches the signature in the operator registration call."
+  );
+};
+
 void OperatorEntry::reportError(DispatchKey dispatchKey) const {
   // If there is an invariant problem, report it now.
   checkInvariants();
 
   if (dispatchKey == DispatchKey::Undefined) {
-    TORCH_CHECK(false,
+    TORCH_CHECK_NOT_IMPLEMENTED(false,
           "There were no tensor arguments to this function (e.g., you passed an "
           "empty list of Tensors), but no fallback function is registered for schema ", name_,
-          ".  This usually means that this function requires a non-empty list of Tensors.  "
+          ".  This usually means that this function requires a non-empty list of Tensors, "
+          "or that you (the operator writer) forgot to register a fallback function.  "
           "Available functions are ", listAllDispatchKeys(), ".\n\n", dumpComputedTable())
   }
 
-  TORCH_CHECK(false, "Could not run '", name_, "' with arguments",
-          " from the '", toString(dispatchKey), "' backend. '",
+  TORCH_CHECK_NOT_IMPLEMENTED(false, "Could not run '", name_, "' with arguments",
+          " from the '", toString(dispatchKey), "' backend. This could be because "
+          "the operator doesn't exist for this backend, or was omitted during ",
+          "the selective/custom build process (if using custom build). If you are a ",
+          "Facebook employee using PyTorch on mobile, please visit ",
+          "https://fburl.com/ptmfixes for possible resolutions. '",
           name_, "' is only available for these backends: ",
           listAllDispatchKeys(), ".\n\n", dumpComputedTable());
 }
@@ -465,7 +466,6 @@ std::string OperatorEntry::dumpState() const {
       print_kernel(toString(k), it->second, c10::isAliasDispatchKey(k));
     }
   }
-  print_kernel("catchall", catchAllKernel_);
   return oss.str();
 }
 

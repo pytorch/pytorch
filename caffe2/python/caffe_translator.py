@@ -1,6 +1,5 @@
 ## @package caffe_translator
 # Module caffe2.python.caffe_translator
-#!/usr/bin/env python2
 
 import argparse
 import copy

@@ -12,6 +12,7 @@ class IDEEPTransposeOp final : public IDEEPOperator {
   IDEEPTransposeOp(const OperatorDef& operator_def, Workspace* ws)
       : IDEEPOperator(operator_def, ws),
         axes_(this->template GetRepeatedArgument<int>("axes")){ }
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~IDEEPTransposeOp() override {}
 
   bool RunOnDevice() override {
@@ -30,6 +31,7 @@ class IDEEPTransposeOp final : public IDEEPOperator {
   OUTPUT_TAGS(OUTPUT);
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(Transpose, IDEEPTransposeOp);
 
 } // namespace

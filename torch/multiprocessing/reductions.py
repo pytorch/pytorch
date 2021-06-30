@@ -27,10 +27,10 @@ class StorageWeakRef(object):
         self.cdata = storage._weak_ref()
         # Save a direct reference to _free_weak_ref because the `torch` module
         # might be cleared during Python shutdown before this module is cleared.
-        self._free_weak_ref = torch.Storage._free_weak_ref
+        self._free_weak_ref = torch.Storage._free_weak_ref  # type: ignore[attr-defined]
 
     def expired(self):
-        return torch.Storage._expired(self.cdata)
+        return torch.Storage._expired(self.cdata)  # type: ignore[attr-defined]
 
     def __del__(self):
         self._free_weak_ref(self.cdata)
@@ -52,22 +52,24 @@ class SharedCache(dict):
     def _after_fork(self):
         self.lock = threading.Lock()
 
+    def get(self, key):
+        with self.lock:
+            return dict.get(self, key)
+
     def __setitem__(self, key, storage_ref):
-        dict.__setitem__(self, key, storage_ref)
-        if len(self) > self.limit:
-            self.free_dead_references()
+        with self.lock:
+            dict.__setitem__(self, key, storage_ref)
+            if len(self) > self.limit:
+                self.free_dead_references()
 
     def free_dead_references(self):
-        # Multiple Python threads may call free_dead_references() concurrently.
-        # Without a lock, they may try deleting the same entry multiple times.
-        with self.lock:
-            live = 0
-            for key, storage_ref in list(self.items()):
-                if storage_ref.expired():
-                    del self[key]
-                else:
-                    live += 1
-            self.limit = max(128, live * 2)
+        live = 0
+        for key, storage_ref in list(self.items()):
+            if storage_ref.expired():
+                del self[key]
+            else:
+                live += 1
+        self.limit = max(128, live * 2)
 
 
 # mapping from handles to StorageWeakRef objects
@@ -121,9 +123,14 @@ def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
             storage_cls._release_ipc_counter(ref_counter_handle, ref_counter_offset)
 
     t = torch._utils._rebuild_tensor(storage, tensor_offset, tensor_size, tensor_stride)
+
     if tensor_cls == torch.nn.parameter.Parameter:
-        t = torch.nn.parameter.Parameter(t)
-    t.requires_grad = requires_grad
+        # It is crucial for integer tensors to receive
+        # the requires_grad=False as an argument in the constructor
+        t = torch.nn.parameter.Parameter(t, requires_grad=requires_grad)
+    else:
+        t.requires_grad = requires_grad
+
     return t
 
 
@@ -322,7 +329,7 @@ def reduce_storage(storage):
         df = multiprocessing.reduction.DupFd(fd)
         cache_key = fd_id(fd)
         metadata = (df, size)
-        rebuild = rebuild_storage_fd
+        rebuild = rebuild_storage_fd  # type: ignore[assignment]
 
     shared_cache[cache_key] = StorageWeakRef(storage)
     return (rebuild, (type(storage),) + metadata)

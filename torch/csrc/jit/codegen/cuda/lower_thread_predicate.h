@@ -9,6 +9,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 //! Maps TensorViews to std::pair<ir_utils::ParallelTypeBitmap, SourceMapType>>
 //!
@@ -21,7 +22,7 @@ namespace fuser {
 //! If we follow a reduction parallelized on TIDx with a broadcast on TIDx we
 //! no longer need the predicate and can reset the bit accordingly
 //!
-class TORCH_CUDA_API ThreadPredicateMap {
+class TORCH_CUDA_CU_API ThreadPredicateMap {
  public:
   using SourceMapType = std::unordered_map<
       ParallelType,
@@ -60,6 +61,7 @@ class TORCH_CUDA_API ThreadPredicateMap {
   MapType thread_predicates_;
 };
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

@@ -37,13 +37,17 @@ std::string getAtenOpPattern(
   std::string aten_op_pattern = graph_header;
   if (scalar_args) {
     for (const auto& extra_arg : _extra_op_args) {
-      aten_op_pattern += R"(
-          )" +
-          extra_arg + "_scalar = aten::item(" + extra_arg + ")";
+      aten_op_pattern
+          .append(R"(
+          )")
+          .append(extra_arg)
+          .append("_scalar = aten::item(")
+          .append(extra_arg)
+          .append(")");
     }
 
-    for (size_t i = 0; i < _extra_op_args.size(); ++i) {
-      _extra_op_args[i] = _extra_op_args[i] + "_scalar";
+    for (auto& _extra_op_arg : _extra_op_args) {
+      _extra_op_arg.append("_scalar");
     }
   }
   const auto& extra_op_arg_list = getExtraArgList(_extra_op_args);
@@ -169,6 +173,7 @@ QuantFusionInfo getClampOpFusionInfo(
   op_pattern += R"(
           %r = )";
   std::vector<std::string> scalar_extra_args;
+  scalar_extra_args.reserve(extra_op_args.size());
   for (const auto& arg : extra_op_args) {
     scalar_extra_args.push_back(arg + "_scalar");
   }

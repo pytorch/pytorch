@@ -1,4 +1,3 @@
-
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
@@ -9,6 +8,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #include <iostream>
 #include <stdexcept>
@@ -18,6 +18,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 Statement::Statement(const Statement* src, IrCloner* ir_cloner) {
   name_ = src->name_;
@@ -227,13 +228,14 @@ bool Expr::sameAs(const Expr* const other) const {
   if (inputs().size() != other->inputs().size() ||
       outputs().size() != other->outputs().size())
     return false;
-  for (size_t i = 0; i < inputs().size(); i++) {
+  for (const auto i : c10::irange(inputs().size())) {
     if (!input(i)->sameAs(other->input(i)))
       return false;
   }
   return true;
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

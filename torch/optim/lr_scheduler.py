@@ -19,8 +19,6 @@ EPOCH_DEPRECATION_WARNING = (
     "https://github.com/pytorch/pytorch/issues/new/choose."
 )
 
-SAVE_STATE_WARNING = "Please also save or load the state of the optimizer when saving or loading the scheduler."
-
 class _LRScheduler(object):
 
     def __init__(self, optimizer, last_epoch=-1, verbose=False):
@@ -40,7 +38,7 @@ class _LRScheduler(object):
                 if 'initial_lr' not in group:
                     raise KeyError("param 'initial_lr' is not specified "
                                    "in param_groups[{}] when resuming an optimizer".format(i))
-        self.base_lrs = list(map(lambda group: group['initial_lr'], optimizer.param_groups))
+        self.base_lrs = [group['initial_lr'] for group in optimizer.param_groups]
         self.last_epoch = last_epoch
 
         # Following https://github.com/pytorch/pytorch/issues/20124
@@ -89,7 +87,7 @@ class _LRScheduler(object):
     def load_state_dict(self, state_dict):
         """Loads the schedulers state.
 
-        Arguments:
+        Args:
             state_dict (dict): scheduler state. Should be an object returned
                 from a call to :meth:`state_dict`.
         """
@@ -211,9 +209,10 @@ class LambdaLR(_LRScheduler):
         is not the optimizer.
         The learning rate lambda functions will only be saved if they are callable objects
         and not if they are functions or lambdas.
+
+        When saving or loading the scheduler, please make sure to also save or load the state of the optimizer.
         """
 
-        warnings.warn(SAVE_STATE_WARNING, UserWarning)
         state_dict = {key: value for key, value in self.__dict__.items() if key not in ('optimizer', 'lr_lambdas')}
         state_dict['lr_lambdas'] = [None] * len(self.lr_lambdas)
 
@@ -226,12 +225,13 @@ class LambdaLR(_LRScheduler):
     def load_state_dict(self, state_dict):
         """Loads the schedulers state.
 
-        Arguments:
+        When saving or loading the scheduler, please make sure to also save or load the state of the optimizer.
+
+        Args:
             state_dict (dict): scheduler state. Should be an object returned
                 from a call to :meth:`state_dict`.
         """
 
-        warnings.warn(SAVE_STATE_WARNING, UserWarning)
         lr_lambdas = state_dict.pop('lr_lambdas')
         self.__dict__.update(state_dict)
         # Restore state_dict keys in order to prevent side effects
@@ -305,7 +305,7 @@ class MultiplicativeLR(_LRScheduler):
     def load_state_dict(self, state_dict):
         """Loads the schedulers state.
 
-        Arguments:
+        Args:
             state_dict (dict): scheduler state. Should be an object returned
                 from a call to :meth:`state_dict`.
         """
@@ -855,7 +855,7 @@ class CyclicLR(_LRScheduler):
             if last_epoch == -1:
                 for momentum, group in zip(base_momentums, optimizer.param_groups):
                     group['momentum'] = momentum
-            self.base_momentums = list(map(lambda group: group['momentum'], optimizer.param_groups))
+            self.base_momentums = [group['momentum'] for group in optimizer.param_groups]
             self.max_momentums = self._format_param('max_momentum', optimizer, max_momentum)
 
         super(CyclicLR, self).__init__(optimizer, last_epoch, verbose)

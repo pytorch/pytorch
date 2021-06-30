@@ -34,6 +34,7 @@ class ReservoirSamplingOp final : public Operator<Context> {
 
     if (output_initialized) {
       CAFFE_ENFORCE_EQ(output->dim(), input.dim());
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (size_t i = 1; i < input.dim(); ++i) {
         CAFFE_ENFORCE_EQ(output->size(i), input.size(i));
       }
@@ -150,10 +151,9 @@ class ReservoirSamplingOp final : public Operator<Context> {
         // append
         pos = *num_visited;
       } else {
-        auto& gen = context_.RandGenerator();
         // uniform between [0, num_visited]
-        std::uniform_int_distribution<int64_t> uniformDist(0, *num_visited);
-        pos = uniformDist(gen);
+        at::uniform_int_from_to_distribution<int64_t> uniformDist(*num_visited+1, 0);
+        pos = uniformDist(context_.RandGenerator());
         if (pos >= numToCollect_) {
           // discard
           pos = -1;
@@ -217,8 +217,10 @@ class ReservoirSamplingOp final : public Operator<Context> {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ReservoirSampling, ReservoirSamplingOp<CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ReservoirSampling)
     .NumInputs({4, 7})
     .NumOutputs({2, 4})
@@ -272,6 +274,7 @@ This operator is thread-safe.
     .Output(2, "OBJECT_TO_POS_MAP", "(Optional) Same as the input")
     .Output(3, "POS_TO_OBJECT", "(Optional) Same as the input");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(ReservoirSampling);
 } // namespace
 } // namespace caffe2

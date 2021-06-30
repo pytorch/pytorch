@@ -1,6 +1,8 @@
 #include <torch/cuda.h>
 
 #include <ATen/Context.h>
+#include <c10/core/DeviceGuard.h>
+#include <c10/util/irange.h>
 
 #include <cstddef>
 
@@ -39,7 +41,7 @@ void manual_seed(uint64_t seed) {
 /// Sets the seed for all available GPUs.
 void manual_seed_all(uint64_t seed) {
   auto num_gpu = device_count();
-  for (size_t i = 0; i < num_gpu; ++i) {
+  for (const auto i : c10::irange(num_gpu)) {
     auto gen = at::detail::getCUDAHooks().getDefaultCUDAGenerator(i);
     {
       // See Note [Acquire lock when using random generators]
@@ -47,6 +49,14 @@ void manual_seed_all(uint64_t seed) {
       gen.set_current_seed(seed);
     }
   }
+}
+
+void synchronize(int64_t device_index) {
+  TORCH_CHECK(is_available(), "No CUDA GPUs are available");
+  int64_t num_gpus = cuda::device_count();
+  TORCH_CHECK(device_index == -1 || device_index < num_gpus,
+    "Device index out of range: ", device_index);
+  at::detail::getCUDAHooks().deviceSynchronize(device_index);
 }
 
 } // namespace cuda

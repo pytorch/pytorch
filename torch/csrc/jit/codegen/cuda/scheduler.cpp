@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/util/irange.h>
 
 namespace torch {
 namespace jit {
@@ -23,7 +24,7 @@ namespace {
 std::vector<int> reductionAxes(TensorView* tv) {
   size_t n_dims = tv->nDims();
   std::vector<int> reduction_axes;
-  for (size_t i = 0; i < n_dims; i++) {
+  for (const auto i : c10::irange(n_dims)) {
     if (tv->axis(i)->isReduction()) {
       reduction_axes.emplace_back(i);
     }
@@ -112,9 +113,7 @@ bool scheduleFusion(Fusion* fusion, const at::ArrayRef<c10::IValue> inputs) {
     out_tv->split(0, kPwThreadX);
     // Split by another 4 which will be our unroll factor
     auto ur_factor = disable_unroll ? 1 : kUnrollFactor;
-    if (!disable_unroll) {
-      out_tv->split(0, ur_factor);
-    }
+    out_tv->split(0, ur_factor);
   }
 
   for (auto output : fusion->outputs()) {
@@ -222,6 +221,7 @@ ReductionParams reductionHeuristic(
   // Decision to do a cross-warp reduction per block
   if (red_elems_per_thread >= (bdimy * kMinValuesPerThread) ||
       red_elems_per_thread >= kMaxValuesPerThread || !rparams.fastest_dim) {
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
     inputs_consumed_per_block_iter *= bdimy;
     red_elems_per_thread = ceilDiv(red_elems_per_thread, bdimy);
     rparams.cross_block = true;
@@ -290,7 +290,7 @@ ReductionParams reductionHeuristic(
 }
 } // anonymous namespace
 
-TORCH_CUDA_API c10::optional<ReductionParams> getReductionHeuristics(
+TORCH_CUDA_CU_API c10::optional<ReductionParams> getReductionHeuristics(
     Fusion* fusion,
     const at::ArrayRef<c10::IValue>& fusion_inputs,
     TensorView* red_tv) {

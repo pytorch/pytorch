@@ -4,6 +4,7 @@
 #include <ATen/core/function.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
@@ -23,22 +24,37 @@
 namespace torch {
 namespace jit {
 
+namespace {
+
 // Constants relating to maintaining the topological index of nodes.
 //
 // Lower and upper bounds of the index. Inclusive range.
-static constexpr topo_position_t kLowerBound = INT64_MIN;
-static constexpr topo_position_t kUpperBound = INT64_MAX;
-static constexpr topo_position_t kMidPoint = 0;
+constexpr topo_position_t kLowerBound = INT64_MIN;
+constexpr topo_position_t kUpperBound = INT64_MAX;
+constexpr topo_position_t kMidPoint = 0;
 
 // How far away to space nodes that are appended to the graph.
 // should be 2^n, where:
 //   - n is the maximum number of repeated insertions without a re-index
 //   - 2^(64-n) is the maximum number of appends to the end without reindex
-static constexpr topo_position_t kAppendInterval = 1099511627776ULL /* 2^40 */;
+constexpr topo_position_t kAppendInterval = 1099511627776ULL /* 2^40 */;
 
-static void printValueRef(std::ostream& out, const Value* n) {
+void printValueRef(std::ostream& out, const Value* n) {
   out << "%" << n->debugName();
 }
+
+bool isNumber(c10::string_view str) {
+  return str.find_first_not_of("0123456789") == std::string::npos;
+}
+
+std::string normalizeAttrName(c10::string_view field) {
+  if (isNumber(field)) {
+    return "_" + std::string{field};
+  }
+  return std::string{field};
+}
+
+} // namespace
 
 // NB: This overload will become ambiguous with the one Caffe2 provides in its
 // logging, if they ever intersect.
@@ -104,10 +120,12 @@ std::ostream& operator<<(
 static void printAttribute(std::ostream& out, const at::Tensor& tensor) {
   // 1-elem tensors are usually boxed scalars, so print them like it
   if (tensor.numel() == 1) {
-    auto scalar_tensor = tensor.view({}).item();
+    auto scalar_tensor = tensor.view(std::vector<int64_t>{}).item();
     out << "{";
     if (scalar_tensor.isFloatingPoint()) {
       out << scalar_tensor.toDouble();
+    } else if (scalar_tensor.isComplex()) {
+      out << scalar_tensor.toComplexDouble();
     } else {
       out << scalar_tensor.toLong();
     }
@@ -133,6 +151,9 @@ static void printAttribute(std::ostream& out, const IValue& ival) {
     } else if (input.isTensorList()) {
       ss << "[<Tensors>]";
       return true;
+    } else if (input.isObject() && !input.type()->is_module()) {
+      ss << "object(" << &input.toObjectRef() << ")";
+      return true;
     }
     return false;
   };
@@ -154,6 +175,13 @@ static void printTypeList(
 
 void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
   switch (kindOf(name)) {
+    case AttributeKind::c:
+      printAttribute(out, c(name));
+      break;
+    case AttributeKind::cs:
+      // TODO(@anjali411): fix this
+      AT_ASSERT(false);
+      break;
     case AttributeKind::f:
       printAttribute(out, f(name));
       break;
@@ -282,6 +310,7 @@ std::ostream& Node::print(
     }
     if (auto file_line_col = r.file_line_col()) {
       std::string filename;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       size_t line, col;
       std::tie(filename, line, col) = *file_line_col;
       out << " # " << filename << ":" << line << ":" << col;
@@ -477,6 +506,7 @@ void Graph::lint() const {
       AT_ASSERT(!contains(n));
       nodes.insert(n);
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
     std::unique_ptr<LintScope> parent;
 
    private:
@@ -756,7 +786,7 @@ bool Value::isValidName(const std::string& name) {
   }
 
   // Numbers are not legal
-  if (name.find_first_not_of("0123456789") == std::string::npos) {
+  if (isNumber(name)) {
     return false;
   }
 
@@ -794,12 +824,24 @@ Value* Value::setDebugName(const std::string& name) {
         name_base = name.substr(0, last_dot_pos);
       }
     }
+
+    auto& names_suffixes = node()->owningGraph()->name_base_suffix_;
+    auto it = names_suffixes.find(name_base);
+    if (it != names_suffixes.end()) {
+      suffix = std::max(suffix, it->second + 1);
+    }
+
+    // Verify that new name is not used and find next usable name in case
+    // suffix is used.
     std::string replacement_name;
     do {
       std::stringstream ss;
       ss << name_base << "." << suffix++;
       replacement_name = ss.str();
     } while (names.count(replacement_name) > 0);
+
+    names_suffixes[name_base] = suffix;
+
     old_owner_of_name->second->setDebugName(replacement_name);
   }
 
@@ -843,6 +885,24 @@ void Value::replaceAllUsesAfterNodeWith(const Node* node, Value* newValue) {
           uses_.begin(),
           uses_.end(),
           [&node](const Use& u) { return u.user->isAfter(node); }),
+      uses_.end());
+}
+
+void Value::replaceAllUsesDominatedByNodeWith(
+    const Node* node,
+    Value* newValue) {
+  std::for_each(uses_.begin(), uses_.end(), [&node, newValue](Use& u) {
+    if (u.user->isDominatedBy(node)) {
+      u.user->inputs_[u.offset] = newValue;
+      newValue->uses_.push_back(u);
+    }
+  });
+
+  uses_.erase(
+      std::remove_if(
+          uses_.begin(),
+          uses_.end(),
+          [&node](const Use& u) { return u.user->isDominatedBy(node); }),
       uses_.end());
 }
 
@@ -1076,6 +1136,12 @@ bool Node::hasSideEffects() const {
     case prim::rpc_sync: // It represents RPC message sent.
     case prim::rpc_remote: // It represents RPC message sent.
     case aten::wait: // It can represent RPC message received.
+#ifndef __HIP_PLATFORM_HCC__
+    case cuda::set_stream:
+    case cuda::_set_device:
+    case cuda::_current_device:
+    case cuda::synchronize:
+#endif
     case prim::Enter:
     case prim::Exit:
       return true;
@@ -1091,7 +1157,7 @@ bool Node::hasSideEffects() const {
     return false;
   }
 
-  if (kind_.is_prim() || kind_.is_aten()) {
+  if (kind_.is_prim() || kind_.is_aten() || kind_.is_cuda()) {
     // TODO There is nothing in the system that relies on aten:: and prim::
     // ops using AliasAnalysisKind::FROM_SCHEMA,
     // AliasAnalysisKind::INTERNAL_SPECIAL_CASE, or
@@ -1111,9 +1177,7 @@ bool Node::hasSideEffects() const {
 
   switch (op->aliasAnalysisKind()) {
     case AliasAnalysisKind::PURE_FUNCTION:
-      return false;
     case AliasAnalysisKind::FROM_SCHEMA:
-      return false;
     case AliasAnalysisKind::INTERNAL_SPECIAL_CASE:
       return false;
     case AliasAnalysisKind::CONSERVATIVE:
@@ -1243,9 +1307,42 @@ void Node::cloneFrom(Node* s) {
 void Node::replaceAllUsesWith(Node* n) {
   AT_ASSERT(outputs().size() == n->outputs().size());
   size_t nOutputs = outputs().size();
-  for (size_t i = 0; i < nOutputs; i++) {
+  for (const auto i : c10::irange(nOutputs)) {
     outputs()[i]->replaceAllUsesWith(n->outputs()[i]);
   }
+}
+
+Node* Node::replaceWithNewSymbol(Symbol new_symbol) {
+  WithInsertPoint insert_guard{this};
+  bool had_operator = maybeOperator() != nullptr;
+  auto graph = owningGraph();
+  auto replace_node = graph->insertNode(graph->create(new_symbol, 0));
+  for (Value* v : inputs()) {
+    replace_node->addInput(v);
+  }
+  for (Value* v : outputs()) {
+    auto new_out = replace_node->addOutput()->copyMetadata(v);
+    v->replaceAllUsesWith(new_out);
+  }
+  replace_node->copyMetadata(this);
+  replace_node->copyAttributes(*this);
+  TORCH_INTERNAL_ASSERT(
+      (replace_node->maybeOperator() != nullptr) == had_operator,
+      "invalid symbol replacement:",
+      new_symbol,
+      kind());
+  return replace_node;
+}
+
+bool Node::isDominatedBy(const Node* dominator) const {
+  const Node* node = this;
+  while (node) {
+    if (node->owningBlock() == dominator->owningBlock()) {
+      return dominator->isBefore(node);
+    }
+    node = node->owningBlock()->owningNode();
+  }
+  return false;
 }
 
 Value* Node::insertInput(size_t i, Value* value) {
@@ -1534,7 +1631,7 @@ Value* Graph::insert(
 Node* Graph::create(NodeKind kind, size_t num_outputs) {
   // NB: Node constructor adds node to all_nodes
   auto n = new Node(this, kind);
-  for (size_t i = 0; i < num_outputs; i++) {
+  for (const auto i : c10::irange(num_outputs)) {
     n->addOutput();
   }
   return n;
@@ -1605,17 +1702,25 @@ Node* Graph::createTupleIndex(
   return n;
 }
 
-Node* Graph::createTupleSlice(Value* tup, int64_t beg, int64_t end) {
-  auto n = create(prim::TupleSlice, {tup});
-  auto tuple_type = tup->type()->expect<TupleType>();
-  n->i_(attr::beg, beg);
-  n->i_(attr::end, end);
-  std::vector<TypePtr> output_types;
-  for (auto i = beg; i < end; ++i) {
-    output_types.push_back(tuple_type->elements().at(i));
+Node* Graph::createTupleSlice(
+    Value* tup,
+    int64_t beg,
+    int64_t step_size,
+    int64_t num_values) {
+  std::vector<Value*> new_vals;
+  TupleTypePtr tt = tup->type()->expect<TupleType>();
+  new_vals.reserve(num_values);
+
+  int64_t i = beg;
+  for (int64_t j = 0; j < num_values; ++j) {
+    auto idx = insertConstant(IValue(static_cast<int64_t>(i)));
+    auto tupleIndex = insertNode(createTupleIndex(tup, idx, tt->elements()[i]));
+
+    new_vals.push_back(tupleIndex->output());
+    i += step_size;
   }
-  auto tt = TupleType::create(std::move(output_types));
-  n->output()->setType(tt);
+
+  auto n = createTuple(new_vals);
   return n;
 }
 
@@ -1706,6 +1811,7 @@ Node* Graph::createGetAttr(Value* obj, const std::string& field) {
 
   const auto outputType = classType->getAttribute(field);
   n->output()->setType(outputType);
+  n->output()->setDebugName(normalizeAttrName(field));
   return n;
 }
 
@@ -1752,11 +1858,13 @@ Value* Graph::insertToList(Value* v, TypePtr type) {
     elem_ty = 1;
   } else if (ptr == BoolType::get()) {
     elem_ty = 2;
+  } else if (ptr == ComplexType::get()) {
+    elem_ty = 3;
   } else {
     TORCH_CHECK(
         false,
         ptr->repr_str(),
-        " is not one of the supported element types for tolist: int, float, bool");
+        " is not one of the supported element types for tolist: int, float, complex, bool");
   }
 
   // Pass in the number of dimensions and base element type as arguments
@@ -1870,6 +1978,53 @@ at::ArrayRef<Value*> createTupleUnpack(Value* v) {
   return g.insertNode(g.createTupleUnpack(v))->outputs();
 }
 
+void inlineCallStackOfNode(
+    Node* n,
+    std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>& new_cs_entries,
+    Function* callee,
+    Node* to_replace,
+    c10::optional<ModuleInstanceInfo> m_info);
+
+void inlineCallStackOfBlock(
+    Block* b,
+    std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>& new_cs_entries,
+    Function* callee,
+    Node* to_replace,
+    c10::optional<ModuleInstanceInfo> m_info) {
+  for (auto n : b->nodes()) {
+    inlineCallStackOfNode(n, new_cs_entries, callee, to_replace, m_info);
+  }
+}
+
+void inlineCallStackOfNode(
+    Node* new_node,
+    std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>& new_cs_entries,
+    Function* callee,
+    Node* to_replace,
+    c10::optional<ModuleInstanceInfo> m_info) {
+  auto new_node_cs = new_node->callstack();
+
+  InlinedCallStack* raw_callstack_ptr =
+      new_node_cs ? new_node_cs->get() : nullptr;
+
+  if (!new_cs_entries.count(raw_callstack_ptr)) {
+    if (new_node_cs) {
+      new_cs_entries[raw_callstack_ptr] = c10::make_intrusive<InlinedCallStack>(
+          *new_node_cs, callee, to_replace->sourceRange(), m_info);
+    } else {
+      new_cs_entries[raw_callstack_ptr] = c10::make_intrusive<InlinedCallStack>(
+          callee, to_replace->sourceRange(), m_info);
+    }
+  }
+  new_node->setCallStack(new_cs_entries.at(raw_callstack_ptr));
+  // We updated the inlined callstack of new_node.
+  // Same must be done for the nodes of the blocks of new_node.
+  // For example If node's block otherwise is not annotated appropriately.
+  for (auto block : new_node->blocks()) {
+    inlineCallStackOfBlock(block, new_cs_entries, callee, to_replace, m_info);
+  }
+}
+
 // inline_optimized_graph argument is used in substitute function call for
 // ONNX conversion
 std::vector<Value*> inlineCallTo(
@@ -1897,34 +2052,62 @@ std::vector<Value*> inlineCallTo(
   std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>
       new_callstack_entries;
 
+  c10::optional<ModuleInstanceInfo> module_instance_info = c10::nullopt;
+  if (to_replace->kind() == prim::CallMethod) {
+    auto class_type_ptr = to_replace->input(0)->type()->cast<c10::ClassType>();
+    if (to_replace->input(0)->node()->kind() == prim::GetAttr) {
+      module_instance_info = c10::make_optional(ModuleInstanceInfo(
+          class_type_ptr, to_replace->input(0)->node()->s(attr::name)));
+    } else {
+      std::string instance_name_unknown("INSTANCE_NAME_UNKNOWN");
+      module_instance_info = c10::make_optional(
+          ModuleInstanceInfo(class_type_ptr, instance_name_unknown));
+    }
+  }
+
   // TODO: We might need to use nodes_map instead of value_map. Otherwise, we
   // are missing nodes without outputs (e.g. prim::Print).
   std::unordered_set<Node*> updated_nodes;
   for (const auto& kv : value_map) {
+    /* Skip the old value if it is the graph input.
+     * The reason is that, value_map contains values not all for the nodes of
+     * the graph but primary inputs as well, and it will create duplicates when
+     * the first inlined graph is input to the next one. To avoid this issue,
+     * skip the old value when it is one of the
+     * callee->optimized_graph()->inputs() or callee->graph()->inputs(), depends
+     * on if it is inlined_optimized_graph
+     */
+
+    if (inline_optimized_graph) {
+      auto is_graph_input = std::find(
+          callee->optimized_graph()->inputs().begin(),
+          callee->optimized_graph()->inputs().end(),
+          kv.first);
+      if (is_graph_input != callee->optimized_graph()->inputs().end()) {
+        continue;
+      }
+    } else {
+      auto is_graph_input = std::find(
+          callee->graph()->inputs().begin(),
+          callee->graph()->inputs().end(),
+          kv.first);
+      if (is_graph_input != callee->graph()->inputs().end()) {
+        continue;
+      }
+    }
+
     Node* new_node = kv.second->node();
     if (!updated_nodes.insert(new_node).second) {
       continue;
     }
 
-    auto new_node_cs = new_node->callstack();
-
-    InlinedCallStack* raw_callstack_ptr =
-        new_node_cs ? new_node_cs->get() : nullptr;
-
-    if (!new_callstack_entries.count(raw_callstack_ptr)) {
-      if (new_node_cs) {
-        new_callstack_entries[raw_callstack_ptr] =
-            c10::make_intrusive<InlinedCallStack>(
-                *new_node_cs, callee, to_replace->sourceRange());
-      } else {
-        new_callstack_entries[raw_callstack_ptr] =
-            c10::make_intrusive<InlinedCallStack>(
-                callee, to_replace->sourceRange());
-      }
-    }
-    new_node->setCallStack(new_callstack_entries.at(raw_callstack_ptr));
+    inlineCallStackOfNode(
+        new_node,
+        new_callstack_entries,
+        callee,
+        to_replace,
+        module_instance_info);
   }
-
   const auto& old_outputs = to_replace->outputs();
 
   AT_ASSERT(new_outputs.size() == old_outputs.size());
@@ -2000,14 +2183,14 @@ Node* ProfileOp::allocNewInstance(Graph* g) {
   return new ProfileOp(g, {nullptr});
 }
 
-void ProfileOptionalOp::cloneFrom(Node* other_) {
+void ProfileIValueOp::cloneFrom(Node* other_) {
   Node::cloneFrom(other_);
-  auto other = other_->cast<ProfileOptionalOp>();
+  auto other = other_->cast<ProfileIValueOp>();
   this->callback_ = other->getCallback();
 }
 
-Node* ProfileOptionalOp::allocNewInstance(Graph* g) {
-  return new ProfileOptionalOp(g, {nullptr});
+Node* ProfileIValueOp::allocNewInstance(Graph* g) {
+  return new ProfileIValueOp(g, {nullptr});
 }
 
 TypePtr NamedValue::type() const {
@@ -2018,8 +2201,8 @@ TypePtr NamedValue::type() const {
   }
 }
 
-constexpr Symbol ProfileOp::Kind;
-constexpr Symbol ProfileOptionalOp::Kind;
+const Symbol ProfileOp::Kind = ::c10::prim::profile;
+const Symbol ProfileIValueOp::Kind = ::c10::prim::profile_ivalue;
 
 OperatorSet::OperatorSet(std::initializer_list<const char*> sig_literals) {
   for (const char* sig : sig_literals) {

@@ -4,9 +4,12 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(NHWC2NCHW, NHWC2NCHWOp<float, CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(NCHW2NHWC, NCHW2NHWCOp<float, CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(NHWC2NCHW)
     .NumInputs(1)
     .NumOutputs(1)
@@ -32,6 +35,7 @@ k=1, 2, and 3.
     .Input(0, "data", "The input data (Tensor) in the NHWC order.")
     .Output(0, "output", "The output tensor (Tensor) in the NCHW order.");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(NCHW2NHWC)
     .NumInputs(1)
     .NumOutputs(1)
@@ -83,7 +87,9 @@ class GetNCHW2NHWCGradient : public GradientMakerBase {
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(NHWC2NCHW, GetNHWC2NCHWGradient);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(NCHW2NHWC, GetNCHW2NHWCGradient);
 
 } // namespace caffe2

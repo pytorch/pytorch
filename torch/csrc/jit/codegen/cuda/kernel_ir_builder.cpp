@@ -1,9 +1,9 @@
-
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
 
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 namespace kir {
 
 bool isLoweredScalar(const Val* val) {
@@ -53,12 +53,14 @@ Val* IrBuilder::newResult(const Val* lhs, const Val* rhs) {
 Val* IrBuilder::newArithmeticExpr(BinaryOpType op_type, Val* lhs, Val* rhs) {
   auto result = newResult(lhs, rhs);
   create<BinaryOp>(op_type, result, lhs, rhs);
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   return result;
 }
 
 Val* IrBuilder::newLogicExpr(BinaryOpType op_type, Val* lhs, Val* rhs) {
   auto result = create<Bool>(c10::nullopt);
   create<BinaryOp>(op_type, result, lhs, rhs);
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   return result;
 }
 
@@ -99,6 +101,7 @@ Val* IrBuilder::modExpr(Val* lhs, Val* rhs) {
 }
 
 } // namespace kir
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

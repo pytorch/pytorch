@@ -1,11 +1,5 @@
 #include "caffe2/utils/math/reduce.h"
 
-#include <algorithm>
-#include <cstring>
-#include <functional>
-#include <numeric>
-#include <vector>
-
 #ifdef CAFFE2_USE_ACCELERATE
 #include <Accelerate/Accelerate.h>
 #endif // CAFFE2_USE_ACCELERATE
@@ -14,11 +8,18 @@
 #include <mkl.h>
 #endif // CAFFE2_USE_MKL
 
+#include <c10/util/accumulate.h>
 #include "caffe2/core/context.h"
 #include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 #include "caffe2/utils/math/elementwise.h"
 #include "caffe2/utils/math/utils.h"
+
+#include <algorithm>
+#include <cstring>
+#include <functional>
+#include <numeric>
+#include <vector>
 
 namespace caffe2 {
 namespace math {
@@ -265,10 +266,8 @@ void ReduceTensorImpl(
     const T* X,
     T* Y,
     CPUContext* context) {
-  const int X_size =
-      std::accumulate(X_dims, X_dims + ndim, 1, std::multiplies<int>());
-  const int Y_size =
-      std::accumulate(Y_dims, Y_dims + ndim, 1, std::multiplies<int>());
+  const auto X_size = c10::multiply_integers(X_dims, X_dims + ndim);
+  const auto Y_size = c10::multiply_integers(Y_dims, Y_dims + ndim);
   Set<T, CPUContext>(Y_size, init, Y, context);
   std::vector<int> index(ndim, 0);
   for (int X_index = 0; X_index < X_size; ++X_index) {
@@ -296,8 +295,7 @@ void ReduceMinImpl(
       X,
       Y,
       context);
-  const int Y_size =
-      std::accumulate(Y_dims, Y_dims + ndim, 1, std::multiplies<int>());
+  const auto Y_size = c10::multiply_integers(Y_dims, Y_dims + ndim);
   Scale<T, T, CPUContext>(Y_size, alpha, Y, Y, context);
 }
 
@@ -319,8 +317,7 @@ void ReduceMaxImpl(
       X,
       Y,
       context);
-  const int Y_size =
-      std::accumulate(Y_dims, Y_dims + ndim, 1, std::multiplies<int>());
+  const auto Y_size = c10::multiply_integers(Y_dims, Y_dims + ndim);
   Scale<T, T, CPUContext>(Y_size, alpha, Y, Y, context);
 }
 
@@ -334,8 +331,7 @@ void ReduceSumImpl(
     T* Y,
     CPUContext* context) {
   ReduceTensorImpl(ndim, X_dims, Y_dims, std::plus<T>(), T(0), X, Y, context);
-  const int Y_size =
-      std::accumulate(Y_dims, Y_dims + ndim, 1, std::multiplies<int>());
+  const auto Y_size = c10::multiply_integers(Y_dims, Y_dims + ndim);
   Scale<T, T, CPUContext>(Y_size, alpha, Y, Y, context);
 }
 
@@ -349,10 +345,8 @@ void ReduceMeanImpl(
     T* Y,
     CPUContext* context) {
   ReduceTensorImpl(ndim, X_dims, Y_dims, std::plus<T>(), T(0), X, Y, context);
-  const int X_size =
-      std::accumulate(X_dims, X_dims + ndim, 1, std::multiplies<int>());
-  const int Y_size =
-      std::accumulate(Y_dims, Y_dims + ndim, 1, std::multiplies<int>());
+  const auto X_size = c10::multiply_integers(X_dims, X_dims + ndim);
+  const auto Y_size = c10::multiply_integers(Y_dims, Y_dims + ndim);
   Scale<T, T, CPUContext>(
       Y_size,
       alpha * static_cast<T>(Y_size) / static_cast<T>(X_size),
@@ -379,8 +373,7 @@ void ReduceL1Impl(
       X,
       Y,
       context);
-  const int Y_size =
-      std::accumulate(Y_dims, Y_dims + ndim, 1, std::multiplies<int>());
+  const auto Y_size = c10::multiply_integers(Y_dims, Y_dims + ndim);
   Scale<T, T, CPUContext>(Y_size, alpha, Y, Y, context);
 }
 
@@ -402,8 +395,7 @@ void ReduceL2Impl(
       X,
       Y,
       context);
-  const int Y_size =
-      std::accumulate(Y_dims, Y_dims + ndim, 1, std::multiplies<int>());
+  const auto Y_size = c10::multiply_integers(Y_dims, Y_dims + ndim);
   EigenVectorArrayMap<T> Y_arr(Y, Y_size);
   Y_arr = Y_arr.sqrt() * alpha;
 }
@@ -479,10 +471,8 @@ void MomentsImpl(
     T* mean,
     T* var,
     CPUContext* /* context */) {
-  const int X_size =
-      std::accumulate(X_dims, X_dims + ndim, 1, std::multiplies<int>());
-  const int Y_size =
-      std::accumulate(Y_dims, Y_dims + ndim, 1, std::multiplies<int>());
+  const auto X_size = c10::multiply_integers(X_dims, X_dims + ndim);
+  const auto Y_size = c10::multiply_integers(Y_dims, Y_dims + ndim);
   if (X_size == 0) {
     std::memset(mean, 0, sizeof(T) * Y_size);
     std::memset(var, 0, sizeof(T) * Y_size);
@@ -493,7 +483,9 @@ void MomentsImpl(
     std::memset(var, 0, sizeof(T) * Y_size);
     return;
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int rows;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int cols;
   if (utils::IsRowwiseReduce(ndim, X_dims, Y_dims, &rows, &cols)) {
     RowwiseMoments<T>(rows, cols, X, mean, var);
@@ -503,8 +495,11 @@ void MomentsImpl(
     ColwiseMoments<T>(rows, cols, X, mean, var);
     return;
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int pre;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int mid;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int nxt;
   if (utils::IsBothEndsReduce(ndim, X_dims, Y_dims, &pre, &mid, &nxt)) {
     BothEndsMoments<T>(pre, mid, nxt, X, mean, var);
@@ -596,57 +591,77 @@ DELEGATE_GLOBAL_REDUCE_FUNCTION(std::int64_t, ReduceMax, maxCoeff)
     }                                                                      \
     Func##Impl<T>(ndim, X_dims, Y_dims, alpha, X, Y, context);             \
   }
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_REDUCE_FUNCTION(
     float,
     ReduceMin,
     std::numeric_limits<float>::max(),
     false)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_REDUCE_FUNCTION(
     double,
     ReduceMin,
     std::numeric_limits<double>::max(),
     false)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_REDUCE_FUNCTION(
     std::int32_t,
     ReduceMin,
     std::numeric_limits<std::int32_t>::max(),
     false)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_REDUCE_FUNCTION(
     std::int64_t,
     ReduceMin,
     std::numeric_limits<std::int64_t>::max(),
     false)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_REDUCE_FUNCTION(
     float,
     ReduceMax,
     std::numeric_limits<float>::lowest(),
     false)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_REDUCE_FUNCTION(
     double,
     ReduceMax,
     std::numeric_limits<double>::lowest(),
     false)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_REDUCE_FUNCTION(
     std::int32_t,
     ReduceMax,
     std::numeric_limits<std::int32_t>::lowest(),
     false)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_REDUCE_FUNCTION(
     std::int64_t,
     ReduceMax,
     std::numeric_limits<std::int64_t>::lowest(),
     false)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_REDUCE_FUNCTION(float, ReduceSum, 0.0f, false)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_REDUCE_FUNCTION(double, ReduceSum, 0.0, false)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_REDUCE_FUNCTION(std::int32_t, ReduceSum, 0, false)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_REDUCE_FUNCTION(std::int64_t, ReduceSum, 0LL, false)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_REDUCE_FUNCTION(float, ReduceMean, 0.0f, false)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_REDUCE_FUNCTION(double, ReduceMean, 0.0, false)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_REDUCE_FUNCTION(float, ReduceL1, 0.0f, true)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_REDUCE_FUNCTION(double, ReduceL1, 0.0, true)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_REDUCE_FUNCTION(std::int32_t, ReduceL1, 0, true)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_REDUCE_FUNCTION(std::int64_t, ReduceL1, 0LL, true)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_REDUCE_FUNCTION(float, ReduceL2, 0.0f, true)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_REDUCE_FUNCTION(double, ReduceL2, 0.0, true)
 #undef DELEGATE_REDUCE_FUNCTION
 

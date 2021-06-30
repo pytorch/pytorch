@@ -1,5 +1,6 @@
 #include <ATen/TensorNames.h>
 #include <ATen/WrapDimUtils.h>
+#include <c10/util/irange.h>
 
 namespace at { namespace namedinference {
 
@@ -46,7 +47,7 @@ const TensorName& TensorName::unify(const TensorName& other, const char* op_name
 
 TensorNames::TensorNames(ArrayRef<Dimname> names) {
   names_.reserve(names.size());
-  for (int64_t idx = 0; idx < names.size(); ++idx) {
+  for (const auto idx : c10::irange(names.size())) {
     names_.emplace_back(names, idx);
   }
 }
@@ -61,10 +62,11 @@ TensorNames::TensorNames(ArrayRef<Dimname> names, int64_t start, int64_t end) {
 }
 
 TensorNames& TensorNames::unifyFromRightInplace(const TensorNames& other, const char* op_name) {
-  int64_t size_diff = std::labs(names_.size() - other.names_.size());
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,clang-diagnostic-absolute-value,cppcoreguidelines-narrowing-conversions)
+  size_t size_diff = std::labs(names_.size() - other.names_.size());
 
   if (names_.size() > other.names_.size()) {
-    for (int64_t idx = size_diff; idx < names_.size(); ++idx) {
+    for (const auto idx : c10::irange(size_diff, names_.size())) {
       names_[idx] = names_[idx].unify(other.names_[idx - size_diff], op_name);
     }
   } else {
@@ -73,7 +75,7 @@ TensorNames& TensorNames::unifyFromRightInplace(const TensorNames& other, const 
         names_.begin(),
         other.names_.begin(),
         other.names_.begin() + size_diff);
-    for (int64_t idx = size_diff; idx < names_.size(); ++idx) {
+    for (const auto idx : c10::irange(size_diff, names_.size())) {
       names_[idx] = names_[idx].unify(other.names_[idx], op_name);
     }
   }

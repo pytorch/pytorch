@@ -1,15 +1,22 @@
 #include <torch/csrc/THP.h>
 #include <torch/csrc/utils/tensor_numpy.h>
+#define WITH_NUMPY_IMPORT_ARRAY
 #include <torch/csrc/utils/numpy_stub.h>
+#include <c10/util/irange.h>
 
 #ifndef USE_NUMPY
 namespace torch { namespace utils {
 PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   throw std::runtime_error("PyTorch was compiled without NumPy support");
 }
-at::Tensor tensor_from_numpy(PyObject* obj) {
+at::Tensor tensor_from_numpy(PyObject* obj, bool warn_if_not_writeable/*=true*/) {
   throw std::runtime_error("PyTorch was compiled without NumPy support");
 }
+
+bool is_numpy_available() {
+  throw std::runtime_error("PyTorch was compiled without NumPy support");
+}
+
 bool is_numpy_int(PyObject* obj) {
   throw std::runtime_error("PyTorch was compiled without NumPy support");
 }
@@ -38,11 +45,36 @@ using namespace torch::autograd;
 
 namespace torch { namespace utils {
 
+bool is_numpy_available() {
+  static bool available = []() {
+    if (_import_array() >= 0) {
+      return true;
+    }
+    // Try to get exception message, print warning and return false
+    std::string message = "Failed to initialize NumPy";
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    PyObject *type, *value, *traceback;
+    PyErr_Fetch(&type, &value, &traceback);
+    if (auto str = value ? PyObject_Str(value) : nullptr) {
+      if (auto enc_str = PyUnicode_AsEncodedString(str, "utf-8", "strict")) {
+        if (auto byte_str = PyBytes_AS_STRING(enc_str)) {
+          message += ": " + std::string(byte_str);
+        }
+        Py_XDECREF(enc_str);
+      }
+      Py_XDECREF(str);
+    }
+    PyErr_Clear();
+    TORCH_WARN(message);
+    return false;
+  }();
+  return available;
+}
 static std::vector<npy_intp> to_numpy_shape(IntArrayRef x) {
   // shape and stride conversion from int64_t to npy_intp
   auto nelem = x.size();
   auto result = std::vector<npy_intp>(nelem);
-  for (size_t i = 0; i < nelem; i++) {
+  for(const auto i : c10::irange(nelem)) {
     result[i] = static_cast<npy_intp>(x[i]);
   }
   return result;
@@ -51,7 +83,7 @@ static std::vector<npy_intp> to_numpy_shape(IntArrayRef x) {
 static std::vector<int64_t> to_aten_shape(int ndim, npy_intp* values) {
   // shape and stride conversion from npy_intp to int64_t
   auto result = std::vector<int64_t>(ndim);
-  for (int i = 0; i < ndim; i++) {
+  for(const auto i : c10::irange(ndim)) {
     result[i] = static_cast<int64_t>(values[i]);
   }
   return result;
@@ -63,7 +95,7 @@ static std::vector<int64_t> seq_to_aten_shape(PyObject *py_seq) {
     throw TypeError("shape and strides must be sequences");
   }
   auto result = std::vector<int64_t>(ndim);
-  for (int i = 0; i < ndim; i++) {
+  for(const auto i : c10::irange(ndim)) {
     auto item = THPObjectPtr(PySequence_GetItem(py_seq, i));
     if (!item) throw python_error();
 
@@ -74,6 +106,9 @@ static std::vector<int64_t> seq_to_aten_shape(PyObject *py_seq) {
 }
 
 PyObject* tensor_to_numpy(const at::Tensor& tensor) {
+  if (!is_numpy_available()) {
+    throw std::runtime_error("Numpy is not available");
+  }
   if (tensor.device().type() != DeviceType::CPU) {
     throw TypeError(
       "can't convert %s device type tensor to numpy. Use Tensor.cpu() to "
@@ -125,13 +160,18 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   return array.release();
 }
 
-at::Tensor tensor_from_numpy(PyObject* obj) {
+at::Tensor tensor_from_numpy(PyObject* obj, bool warn_if_not_writeable/*=true*/) {
+  if (!is_numpy_available()) {
+    throw std::runtime_error("Numpy is not available");
+  }
   if (!PyArray_Check(obj)) {
     throw TypeError("expected np.ndarray (got %s)", Py_TYPE(obj)->tp_name);
   }
   auto array = (PyArrayObject*)obj;
 
-  if (!PyArray_ISWRITEABLE(array)) {
+  // warn_if_not_writable is true when a copy of numpy variable is created.
+  // the warning is suppressed when a copy is being created.
+  if (!PyArray_ISWRITEABLE(array) && warn_if_not_writeable) {
     TORCH_WARN_ONCE(
       "The given NumPy array is not writeable, and PyTorch does "
       "not support non-writeable tensors. This means you can write to the "
@@ -157,7 +197,7 @@ at::Tensor tensor_from_numpy(PyObject* obj) {
   }
 
   size_t storage_size = 1;
-  for (int i = 0; i < ndim; i++) {
+  for(const auto i : c10::irange(ndim)) {
     if (strides[i] < 0) {
       throw ValueError(
           "At least one stride in the given numpy array is negative, "
@@ -243,15 +283,18 @@ ScalarType numpy_dtype_to_aten(int dtype) {
 }
 
 bool is_numpy_int(PyObject* obj) {
-  return PyArray_IsScalar((obj), Integer);
+  return is_numpy_available() && PyArray_IsScalar((obj), Integer);
 }
 
 bool is_numpy_scalar(PyObject* obj) {
-  return is_numpy_int(obj) || PyArray_IsScalar(obj, Bool) ||
-         PyArray_IsScalar(obj, Floating) || PyArray_IsScalar(obj, ComplexFloating);
+  return is_numpy_available() && (is_numpy_int(obj) || PyArray_IsScalar(obj, Bool) ||
+         PyArray_IsScalar(obj, Floating) || PyArray_IsScalar(obj, ComplexFloating));
 }
 
 at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
+  if (!is_numpy_available()) {
+    throw std::runtime_error("Numpy is not available");
+  }
   auto cuda_dict = THPObjectPtr(PyObject_GetAttrString(obj, "__cuda_array_interface__"));
   TORCH_INTERNAL_ASSERT(cuda_dict);
 
@@ -271,12 +314,14 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
 
   // Extract the `obj.__cuda_array_interface__['typestr']` attribute
   ScalarType dtype;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int dtype_size_in_bytes;
   {
     PyObject *py_typestr = PyDict_GetItemString(cuda_dict, "typestr");
     if (py_typestr == nullptr) {
       throw TypeError("attribute `typestr` must exist");
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     PyArray_Descr *descr;
     if(!PyArray_DescrConverter(py_typestr, &descr)) {
       throw ValueError("cannot parse `typestr`");
@@ -287,6 +332,7 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
   }
 
   // Extract the `obj.__cuda_array_interface__['data']` attribute
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   void *data_ptr;
   {
     PyObject *py_data = PyDict_GetItemString(cuda_dict, "data");

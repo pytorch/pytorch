@@ -6,6 +6,7 @@
 #include <torch/csrc/autograd/variable.h>
 
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 
 #include <cstddef>
 #include <memory>
@@ -42,7 +43,7 @@ auto CopyBackwards::apply(variable_list&& grads) -> variable_list {
 CopySlices::CopySlices(
     const Variable& base_var,
     at::TensorGeometry view_,
-    c10::optional<std::function<at::Tensor(const at::Tensor&)>> view_fn_,
+    std::function<at::Tensor(const at::Tensor&)> view_fn_,
     std::shared_ptr<Node> fn_)
     : Node(),
       base(base_var),
@@ -55,7 +56,7 @@ CopySlices::CopySlices(
   const auto num_outputs = fn->num_outputs();
   next_edges_.reserve(num_outputs);
   add_next_edge(impl::gradient_edge(base_var));
-  for (size_t i = 1; i < num_outputs; i++) {
+  for (const auto i : c10::irange(1, num_outputs)) {
     add_next_edge(fn->next_edge(i));
   }
 }
@@ -75,13 +76,12 @@ auto CopySlices::apply(variable_list&& inputs) -> variable_list {
     throw std::runtime_error(ERR_BACKWARD_TWICE);
   }
 
-  auto result = at::empty_strided(base.sizes(), base.strides(), grad.options());
+  auto result = grad.new_empty_strided(base.sizes(), base.strides());
   result.copy_(grad);
 
   at::Tensor grad_slice;
-  if (view_fn.has_value()) {
-    auto fn = view_fn.value();
-    grad_slice = fn(result);
+  if (view_fn) {
+    grad_slice = view_fn(result);
   } else {
     auto offset = view.storage_offset() - base.storage_offset();
     grad_slice = result.as_strided(view.sizes(), view.strides(), offset);
@@ -93,7 +93,7 @@ auto CopySlices::apply(variable_list&& inputs) -> variable_list {
   auto res = (*fn)({ grad_slice.clone(at::MemoryFormat::Contiguous) });
 
   variable_list grad_inputs(num_outputs());
-  for (size_t i = 0; i < res.size(); i++) {
+  for(const auto i : c10::irange(res.size())) {
     if (should_compute_output(i)) {
       AT_ASSERT(res[i].defined());
       if (i == 0) {

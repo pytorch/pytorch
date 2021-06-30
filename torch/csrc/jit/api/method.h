@@ -1,3 +1,4 @@
+#pragma once
 
 #include <ATen/core/function.h>
 #include <ATen/core/ivalue.h>
@@ -30,6 +31,15 @@ struct TORCH_API Method {
   c10::IValue operator()(
       std::vector<c10::IValue> stack,
       const Kwargs& kwargs = Kwargs());
+
+  // Run method async. Invocation on this function would invokes a JIT
+  // interpreter that executes ops inline, one by one, on caller's thread. A
+  // model can utilize async op, i.e. `fork`, to launch an asynchronous task
+  // which will be launched on provided `taskLauncher`.
+  c10::intrusive_ptr<c10::ivalue::Future> run_async(
+      std::vector<c10::IValue> stack,
+      const Kwargs& kwargs = Kwargs(),
+      TaskLauncher taskLauncher = at::launch);
 
   std::shared_ptr<Graph> graph() const {
     return function_->graph();

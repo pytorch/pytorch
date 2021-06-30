@@ -2,6 +2,8 @@
 #include <sstream>
 #include <stdexcept>
 
+#include <gtest/gtest.h>
+
 #include <c10/macros/Macros.h>
 #include "test/cpp/tensorexpr/padded_buffer.h"
 #include "test/cpp/tensorexpr/test_base.h"
@@ -12,7 +14,8 @@ namespace jit {
 
 using namespace torch::jit::tensorexpr;
 
-void testATen_cast_Float() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ATen, _cast_Float) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
@@ -31,7 +34,7 @@ void testATen_cast_Float() {
     a_v(i) = i;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -40,7 +43,8 @@ void testATen_cast_Float() {
   }
 }
 
-void testATennegInt() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ATen, negInt) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
@@ -59,7 +63,7 @@ void testATennegInt() {
     a_v(i) = i;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -68,7 +72,8 @@ void testATennegInt() {
   }
 }
 
-void testATennegFloat() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ATen, negFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
@@ -87,7 +92,7 @@ void testATennegFloat() {
     a_v(i) = i;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -96,7 +101,8 @@ void testATennegFloat() {
   }
 }
 
-void testATenaddInt() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ATen, addInt) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
@@ -122,7 +128,7 @@ void testATenaddInt() {
     c_v(i) = 3 * i + 2;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf, d_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf, d_buf});
   ir_eval(a_v, b_v, c_v, d_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -133,7 +139,8 @@ void testATenaddInt() {
   }
 }
 
-void testATenaddFloat() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ATen, addFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
@@ -159,7 +166,7 @@ void testATenaddFloat() {
     c_v(i) = 3 * i + 2;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf, d_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf, d_buf});
   ir_eval(a_v, b_v, c_v, d_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -170,7 +177,8 @@ void testATenaddFloat() {
   }
 }
 
-void testATensubInt() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ATen, subInt) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
@@ -196,7 +204,7 @@ void testATensubInt() {
     c_v(i) = 3 * i + 2;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf, d_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf, d_buf});
   ir_eval(a_v, b_v, c_v, d_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -207,7 +215,8 @@ void testATensubInt() {
   }
 }
 
-void testATensubFloat() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ATen, subFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
@@ -233,7 +242,7 @@ void testATensubFloat() {
     c_v(i) = 3 * i + 2;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf, d_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf, d_buf});
   ir_eval(a_v, b_v, c_v, d_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -244,7 +253,8 @@ void testATensubFloat() {
   }
 }
 
-void testATenlerp() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ATen, lerp) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
@@ -270,7 +280,7 @@ void testATenlerp() {
     c_v(i) = 3 * i + 2;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf, d_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf, d_buf});
   ir_eval(a_v, b_v, c_v, d_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -281,7 +291,8 @@ void testATenlerp() {
   }
 }
 
-void testATenaddcmulInt() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ATen, addcmulInt) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
@@ -311,7 +322,7 @@ void testATenaddcmulInt() {
     d_v(i) = 5 * i + 3;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf, d_buf, e_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf, d_buf, e_buf});
   ir_eval(a_v, b_v, c_v, d_v, e_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -323,7 +334,8 @@ void testATenaddcmulInt() {
   }
 }
 
-void testATenaddcmulFloat() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ATen, addcmulFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
@@ -353,7 +365,7 @@ void testATenaddcmulFloat() {
     d_v(i) = 5 * i + 3;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf, d_buf, e_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf, d_buf, e_buf});
   ir_eval(a_v, b_v, c_v, d_v, e_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -365,7 +377,8 @@ void testATenaddcmulFloat() {
   }
 }
 
-void testATenmulInt() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ATen, mulInt) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
@@ -387,7 +400,7 @@ void testATenmulInt() {
     b_v(i) = 2 * i + 1;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf});
   ir_eval(a_v, b_v, c_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -397,7 +410,8 @@ void testATenmulInt() {
   }
 }
 
-void testATenmulFloat() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ATen, mulFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
@@ -419,7 +433,7 @@ void testATenmulFloat() {
     b_v(i) = 2 * i + 1;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf});
   ir_eval(a_v, b_v, c_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -429,7 +443,8 @@ void testATenmulFloat() {
   }
 }
 
-void testATendivInt() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ATen, divInt) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
@@ -451,7 +466,7 @@ void testATendivInt() {
     b_v(i) = i + 1;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf});
   ir_eval(a_v, b_v, c_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -461,7 +476,8 @@ void testATendivInt() {
   }
 }
 
-void testATendivFloat() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ATen, divFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
@@ -483,7 +499,7 @@ void testATendivFloat() {
     b_v(i) = i + 1;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf});
   ir_eval(a_v, b_v, c_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -493,7 +509,8 @@ void testATendivFloat() {
   }
 }
 
-void testATenmaxInt() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ATen, maxInt) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
@@ -515,7 +532,7 @@ void testATenmaxInt() {
     b_v(i) = 2 * i + 1;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf});
   ir_eval(a_v, b_v, c_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -525,7 +542,8 @@ void testATenmaxInt() {
   }
 }
 
-void testATenmaxFloat() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ATen, maxFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
@@ -547,7 +565,7 @@ void testATenmaxFloat() {
     b_v(i) = 2 * i + 1;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf});
   ir_eval(a_v, b_v, c_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -557,7 +575,8 @@ void testATenmaxFloat() {
   }
 }
 
-void testATenminInt() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ATen, minInt) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
@@ -579,7 +598,7 @@ void testATenminInt() {
     b_v(i) = 2 * i + 1;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf});
   ir_eval(a_v, b_v, c_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -589,7 +608,8 @@ void testATenminInt() {
   }
 }
 
-void testATenminFloat() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ATen, minFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
@@ -611,7 +631,7 @@ void testATenminFloat() {
     b_v(i) = 2 * i + 1;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf});
   ir_eval(a_v, b_v, c_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -639,7 +659,7 @@ void __ubsan_ignore_float_divide_by_zero__ testATenreciprocal() {
     a_v(i) = i;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -648,7 +668,8 @@ void __ubsan_ignore_float_divide_by_zero__ testATenreciprocal() {
   }
 }
 
-void testATenreluInt() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ATen, reluInt) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
@@ -666,7 +687,7 @@ void testATenreluInt() {
     a_v(i) = i - 64;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -675,7 +696,8 @@ void testATenreluInt() {
   }
 }
 
-void testATenreluFloat() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ATen, reluFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
@@ -695,7 +717,7 @@ void testATenreluFloat() {
     a_v(i) = i - 64;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -704,7 +726,8 @@ void testATenreluFloat() {
   }
 }
 
-void testATenlogFloat() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ATen, logFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
@@ -722,7 +745,7 @@ void testATenlogFloat() {
     a_v(i) = i + 10;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -731,7 +754,108 @@ void testATenlogFloat() {
   }
 }
 
-void testATenlog10Float() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ATen, fastLogFloat) {
+  KernelScope kernel_scope;
+  const int kTotalSize = 128;
+  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
+  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+
+  VarHandle index = VarHandle("index", kInt);
+  ExprHandle load_a = a_buf.load(index);
+  Stmt* store_b = b_buf.store({index}, fast_log(load_a));
+  Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
+
+  PaddedBuffer<float> a_v(kTotalSize);
+  PaddedBuffer<float> b_v(kTotalSize);
+
+  for (int i = 0; i < kTotalSize; ++i) {
+    a_v(i) = at::randn({1}).item().to<float>();
+  }
+
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
+  ir_eval(a_v, b_v);
+
+  for (int i = 0; i < kTotalSize; ++i) {
+    auto test = b_v(i);
+    auto ref = std::log(a_v(i));
+    if (std::isnan(ref)) {
+      ASSERT_EQ(std::isnan(test), true);
+    } else {
+      ASSERT_FLOAT_EQ(test, ref);
+    }
+  }
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ATen, fastTanhFloat) {
+  KernelScope kernel_scope;
+  const int kTotalSize = 128;
+  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
+  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+
+  VarHandle index = VarHandle("index", kInt);
+  ExprHandle load_a = a_buf.load(index);
+  Stmt* store_b = b_buf.store({index}, fast_tanh(load_a));
+  Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
+
+  PaddedBuffer<float> a_v(kTotalSize);
+  PaddedBuffer<float> b_v(kTotalSize);
+
+  for (int i = 0; i < kTotalSize; ++i) {
+    a_v(i) = at::randn({1}).item().to<float>();
+  }
+
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
+  ir_eval(a_v, b_v);
+
+  for (int i = 0; i < kTotalSize; ++i) {
+    auto test = b_v(i);
+    auto ref = std::tanh(a_v(i));
+    if (std::isnan(ref)) {
+      ASSERT_EQ(std::isnan(test), true);
+    } else {
+      ASSERT_NEAR(test, ref, 1e-6);
+    }
+  }
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ATen, fastSigmoidFloat) {
+  KernelScope kernel_scope;
+  const int kTotalSize = 128;
+  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
+  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+
+  VarHandle index = VarHandle("index", kInt);
+  ExprHandle load_a = a_buf.load(index);
+  Stmt* store_b = b_buf.store({index}, fast_sigmoid(load_a));
+  Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
+
+  PaddedBuffer<float> a_v(kTotalSize);
+  PaddedBuffer<float> b_v(kTotalSize);
+
+  for (int i = 0; i < kTotalSize; ++i) {
+    a_v(i) = at::randn({1}).item().to<float>();
+  }
+
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
+  ir_eval(a_v, b_v);
+
+  for (int i = 0; i < kTotalSize; ++i) {
+    auto test = b_v(i);
+    at::Tensor t = at::ones({1}) * a_v(i);
+    float ref = at::sigmoid(t).item().to<float>();
+    if (std::isnan(ref)) {
+      ASSERT_EQ(std::isnan(test), true);
+    } else {
+      ASSERT_NEAR(test, ref, 1e-6);
+    }
+  }
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ATen, log10Float) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
@@ -749,7 +873,7 @@ void testATenlog10Float() {
     a_v(i) = i + 10;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -758,7 +882,8 @@ void testATenlog10Float() {
   }
 }
 
-void testATenlog2Float() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ATen, log2Float) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
@@ -776,7 +901,7 @@ void testATenlog2Float() {
     a_v(i) = i + 10;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -785,7 +910,8 @@ void testATenlog2Float() {
   }
 }
 
-void testATenexpFloat() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ATen, expFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
@@ -800,10 +926,11 @@ void testATenexpFloat() {
   PaddedBuffer<float> b_v(kTotalSize);
 
   for (int i = 0; i < kTotalSize; ++i) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     a_v(i) = i / 10.0f;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -812,7 +939,8 @@ void testATenexpFloat() {
   }
 }
 
-void testATenerfFloat() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ATen, erfFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
@@ -827,10 +955,11 @@ void testATenerfFloat() {
   PaddedBuffer<float> b_v(kTotalSize);
 
   for (int i = 0; i < kTotalSize; ++i) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     a_v(i) = i / 10.0f;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -839,7 +968,8 @@ void testATenerfFloat() {
   }
 }
 
-void testATencosFloat() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ATen, cosFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
@@ -854,10 +984,11 @@ void testATencosFloat() {
   PaddedBuffer<float> b_v(kTotalSize);
 
   for (int i = 0; i < kTotalSize; ++i) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     a_v(i) = i / 10.0f;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -866,7 +997,8 @@ void testATencosFloat() {
   }
 }
 
-void testATeneqInt() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ATen, eqInt) {
   KernelScope kernel_scope;
   constexpr int N = 128;
   Placeholder a(BufHandle("A", {N}, kInt));
@@ -886,13 +1018,14 @@ void testATeneqInt() {
           CompareSelect::make(
               a.load(i), b.load(i), CompareSelectOperation::kEQ)));
 
-  SimpleIREvaluator ir_eval(memcpy_expr, a, b, c);
+  SimpleIREvaluator ir_eval(memcpy_expr, {a, b, c});
   ir_eval(a_buffer, b_buffer, c_buffer);
 
   assertAllEqual(c_buffer, 1);
 }
 
-void testATengeInt() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ATen, geInt) {
   KernelScope kernel_scope;
   constexpr int N = 128;
   Placeholder a(BufHandle("A", {N}, kInt));
@@ -912,13 +1045,14 @@ void testATengeInt() {
           CompareSelect::make(
               a.load(i), b.load(i), CompareSelectOperation::kGE)));
 
-  SimpleIREvaluator ir_eval(memcpy_expr, a, b, c);
+  SimpleIREvaluator ir_eval(memcpy_expr, {a, b, c});
   ir_eval(a_buffer, b_buffer, c_buffer);
 
   assertAllEqual(c_buffer, 1);
 }
 
-void testATengtInt() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ATen, gtInt) {
   KernelScope kernel_scope;
   constexpr int N = 128;
   Placeholder a(BufHandle("A", {N}, kInt));
@@ -938,13 +1072,14 @@ void testATengtInt() {
           CompareSelect::make(
               a.load(i), b.load(i), CompareSelectOperation::kGT)));
 
-  SimpleIREvaluator ir_eval(memcpy_expr, a, b, c);
+  SimpleIREvaluator ir_eval(memcpy_expr, {a, b, c});
   ir_eval(a_buffer, b_buffer, c_buffer);
 
   assertAllEqual(c_buffer, 1);
 }
 
-void testATenleInt() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ATen, leInt) {
   KernelScope kernel_scope;
   constexpr int N = 128;
   Placeholder a(BufHandle("A", {N}, kInt));
@@ -964,13 +1099,14 @@ void testATenleInt() {
           CompareSelect::make(
               a.load(i), b.load(i), CompareSelectOperation::kLE)));
 
-  SimpleIREvaluator ir_eval(memcpy_expr, a, b, c);
+  SimpleIREvaluator ir_eval(memcpy_expr, {a, b, c});
   ir_eval(a_buffer, b_buffer, c_buffer);
 
   assertAllEqual(c_buffer, 1);
 }
 
-void testATenltInt() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(ATen, ltInt) {
   KernelScope kernel_scope;
   constexpr int N = 128;
   Placeholder a(BufHandle("A", {N}, kInt));
@@ -990,7 +1126,7 @@ void testATenltInt() {
           CompareSelect::make(
               a.load(i), b.load(i), CompareSelectOperation::kLT)));
 
-  SimpleIREvaluator ir_eval(memcpy_expr, a, b, c);
+  SimpleIREvaluator ir_eval(memcpy_expr, {a, b, c});
   ir_eval(a_buffer, b_buffer, c_buffer);
 
   assertAllEqual(c_buffer, 0);

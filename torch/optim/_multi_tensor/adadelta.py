@@ -1,12 +1,14 @@
 import torch
+from . import _functional as F
 from ..optimizer import Optimizer
+from collections import defaultdict
 
 class Adadelta(Optimizer):
     """Implements Adadelta algorithm.
 
     It has been proposed in `ADADELTA: An Adaptive Learning Rate Method`__.
 
-    Arguments:
+    Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
         rho (float, optional): coefficient used for computing a running average
@@ -37,7 +39,7 @@ class Adadelta(Optimizer):
     def step(self, closure=None):
         """Performs a single optimization step.
 
-        Arguments:
+        Args:
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
@@ -56,7 +58,7 @@ class Adadelta(Optimizer):
             rho, eps = group['rho'], group['eps']
 
             for p in group['params']:
-                if p.grad is not None: 
+                if p.grad is not None:
                     if p.grad.is_sparse:
                         raise RuntimeError('Adadelta does not support sparse gradients')
 
@@ -77,23 +79,36 @@ class Adadelta(Optimizer):
                     state['step'] += 1
                     states.append(state)
 
-            if group['weight_decay'] != 0:
-                torch._foreach_add_(grads, params_with_grad, alpha=group['weight_decay'])
-
-            torch._foreach_mul_(square_avgs, rho)
-            torch._foreach_addcmul_(square_avgs, grads, grads, value=1 - rho)
-
-            std = torch._foreach_add(square_avgs, eps)
-            torch._foreach_sqrt_(std)
-
-            deltas = torch._foreach_add(acc_deltas, eps)
-            torch._foreach_sqrt_(deltas)
-            torch._foreach_div_(deltas, std)
-            torch._foreach_mul_(deltas, grads)
-
-            torch._foreach_add_(params_with_grad, deltas, alpha=-group['lr'])
-
-            torch._foreach_mul_(acc_deltas, rho)
-            torch._foreach_addcmul_(acc_deltas, deltas, deltas, value=1 - rho)
+            F.adadelta(params_with_grad,
+                       grads,
+                       square_avgs,
+                       acc_deltas,
+                       lr=group['lr'],
+                       weight_decay=group['weight_decay'],
+                       rho=group['rho'],
+                       eps=group['eps'])
 
         return loss
+
+    # TODO: refactor to a base class once foreach ops are in a good shape.
+    def zero_grad(self, set_to_none: bool = False):
+        per_device_and_dtype_grads = defaultdict(lambda: defaultdict(list))
+        for group in self.param_groups:
+            for p in group['params']:
+                if p.grad is not None:
+                    if set_to_none:
+                        p.grad = None
+                    else:
+                        if p.grad.grad_fn is not None:
+                            p.grad.detach_()
+                        else:
+                            p.grad.requires_grad_(False)
+
+                        if p.grad.is_sparse:
+                            p.grad.zero_()
+                        else:
+                            per_device_and_dtype_grads[p.grad.device][p.grad.dtype].append(p.grad)
+
+            for _, per_dtype_grads in per_device_and_dtype_grads.items():
+                for grads in per_dtype_grads.values():
+                    torch._foreach_zero_(grads)

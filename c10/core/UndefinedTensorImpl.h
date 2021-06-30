@@ -7,29 +7,29 @@ namespace c10 {
 struct C10_API UndefinedTensorImpl final : public TensorImpl {
  public:
   // Without this, we get:
-  //  error: identifier "at::UndefinedTensorImpl::_singleton" is undefined in device code
+  //  error: identifier "at::UndefinedTensorImpl::_singleton" is undefined in
+  //  device code
   // (ostensibly because the constexpr tricks MSVC into trying to compile this
   // function for device as well).
 #ifdef _WIN32
-  static inline TensorImpl * singleton() {
+  static inline TensorImpl* singleton() {
 #else
-  static constexpr inline TensorImpl * singleton() {
+  static constexpr inline TensorImpl* singleton() {
 #endif
     return &_singleton;
   }
-  IntArrayRef sizes() const override;
   IntArrayRef strides() const override;
   int64_t size(int64_t d) const override;
   int64_t stride(int64_t d) const override;
-  int64_t dim() const override;
+#ifdef DEBUG
   bool has_storage() const override;
-  const Storage& storage() const override;
-  int64_t storage_offset() const override;
-private:
+#endif
+  void set_storage_offset(int64_t offset) override;
+
+ private:
   UndefinedTensorImpl();
   static UndefinedTensorImpl _singleton;
-public:
-  friend struct UndefinedType;
+  const char* tensorimpl_type_name() const override;
 };
 
 } // namespace c10

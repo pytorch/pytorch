@@ -1,4 +1,3 @@
-
 #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
@@ -13,6 +12,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 // Generates a DOT (https://www.graphviz.org) graph
 // representation of a fuser IR
@@ -33,7 +33,7 @@ namespace fuser {
 //    for example you can't use "~/temp/ir.dot" ("/home/user/temp/ir.dot"
 //    must be used instead)
 //
-class TORCH_CUDA_API IrGraphGenerator : private OptInConstDispatch {
+class TORCH_CUDA_CU_API IrGraphGenerator : private OptInConstDispatch {
  public:
   enum class DetailLevel {
     ComputeOnly, // Only dataflow (compute) nodes
@@ -110,6 +110,7 @@ class TORCH_CUDA_API IrGraphGenerator : private OptInConstDispatch {
   int next_id_ = 1;
 };
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

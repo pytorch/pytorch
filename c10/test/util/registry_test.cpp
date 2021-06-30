@@ -13,10 +13,12 @@ class Foo {
   explicit Foo(int x) {
     // LOG(INFO) << "Foo " << x;
   }
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   virtual ~Foo() {}
 };
 
 C10_DECLARE_REGISTRY(FooRegistry, Foo, int);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_REGISTRY(FooRegistry, Foo, int);
 #define REGISTER_FOO(clsname) C10_REGISTER_CLASS(FooRegistry, clsname, clsname)
 
@@ -26,6 +28,7 @@ class Bar : public Foo {
     // LOG(INFO) << "Bar " << x;
   }
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_FOO(Bar);
 
 class AnotherBar : public Foo {
@@ -34,8 +37,10 @@ class AnotherBar : public Foo {
     // LOG(INFO) << "AnotherBar " << x;
   }
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_FOO(AnotherBar);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(RegistryTest, CanRunCreator) {
   std::unique_ptr<Foo> bar(FooRegistry()->Create("Bar", 1));
   EXPECT_TRUE(bar != nullptr) << "Cannot create bar.";
@@ -43,6 +48,7 @@ TEST(RegistryTest, CanRunCreator) {
   EXPECT_TRUE(another_bar != nullptr);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(RegistryTest, ReturnNullOnNonExistingCreator) {
   EXPECT_EQ(FooRegistry()->Create("Non-existing bar", 1), nullptr);
 }
@@ -68,11 +74,13 @@ void RegisterFooBarPreferred() {
       FooRegistry, FooWithPriority, c10::REGISTRY_PREFERRED, Bar);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(RegistryTest, RegistryPriorities) {
   FooRegistry()->SetTerminate(false);
   RegisterFooDefault();
 
   // throws because Foo is already registered with default priority
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   EXPECT_THROW(RegisterFooDefaultAgain(), std::runtime_error);
 
 #ifdef __GXX_RTTI

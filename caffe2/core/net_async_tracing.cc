@@ -19,20 +19,24 @@
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/string_utils.h"
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_string(
     caffe2_net_async_tracing_filepath,
     "/tmp",
     "Path to save tracing information");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_string(
     caffe2_net_async_names_to_trace,
     "",
     "Comma-separated list of net names to trace");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int(caffe2_net_async_tracing_nth, 100, "Trace every Nth batch");
 
 // For every Nth iterations, we will dump the tracing results to a json file
 // The file is appended with the iteration number.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int(
     caffe2_net_async_tracing_dumping_nth,
     10000,
@@ -56,6 +60,7 @@ int getCounterForNetName(const std::string& net_name) {
 Tracer::Tracer(
     const NetBase* net,
     const std::string& net_name,
+    // NOLINTNEXTLINE(modernize-pass-by-value)
     TracingConfig config)
     : net_(net),
       filename_(net_name),
@@ -119,15 +124,18 @@ std::string Tracer::serializeEvent(const TracerEvent& event) {
     std::unordered_map<std::string, int> int_args;
     std::unordered_map<std::string, std::string> string_args;
     if (event.name_) {
+      // NOLINTNEXTLINE(modernize-raw-string-literal)
       serialized_event << " \"name\": \"" << event.name_ << "\",\n";
     } else if (event.op_id_ >= 0) {
       auto* op = net_->GetOperators().at(event.op_id_);
+      // NOLINTNEXTLINE(modernize-raw-string-literal)
       serialized_event << " \"name\": \"" << opTraceName(op) << "\",\n";
     } else {
       serialized_event << " \"name\": \"n/a\",\n";
     }
 
     if (event.category_) {
+      // NOLINTNEXTLINE(modernize-raw-string-literal)
       serialized_event << " \"cat\": \"" << event.category_ << "\",\n";
     } else {
       serialized_event << " \"cat\": \"net\",\n";
@@ -153,6 +161,7 @@ std::string Tracer::serializeEvent(const TracerEvent& event) {
       int_args["stream_id"] = event.stream_id_;
     }
 
+    // NOLINTNEXTLINE(modernize-raw-string-literal)
     serialized_event << " \"ph\": \"B\"";
     if (!int_args.empty() || !string_args.empty()) {
       serialized_event << ",\n \"args\": {\n";
@@ -189,6 +198,7 @@ void Tracer::linearizeEvents() {
   const long time_eps = 1; // us
   for (auto& event : events_) {
     long tid =
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         (event.thread_label_ >= 0) ? event.thread_label_ : hasher(event.tid_);
     auto event_ts = event.timestamp_;
     if (last_times.count(tid)) {
@@ -296,6 +306,7 @@ Tracer::~Tracer() {
   dumpTracingResultAndClearEvents("final_batch");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local TracerGuard* current_tracer_guard;
 
 void TracerGuard::init(Tracer* tracer) {
@@ -389,8 +400,10 @@ int extractShardId(const std::string& name) {
   // metadata.
   auto pos = name.rfind(kShard);
   if (pos != std::string::npos) {
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     int left_pos = pos + kShard.length();
     int right_pos = left_pos;
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     while (right_pos < name.length() && isdigit(name[right_pos])) {
       right_pos++;
     }
@@ -473,7 +486,9 @@ bool startIter(const std::shared_ptr<Tracer>& tracer) {
     return false;
   }
   auto iter = tracer->bumpIter();
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool is_enabled;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool should_dump;
   if (tracer->config().mode == TracingMode::EVERY_K_ITERATIONS) {
     is_enabled = iter % tracer->config().trace_every_nth_batch == 0;

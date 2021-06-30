@@ -33,7 +33,7 @@ ARG KATEX
 ADD ./common/install_katex.sh install_katex.sh
 RUN bash ./install_katex.sh && rm install_katex.sh
 
-# Install conda
+# Install conda and other packages (e.g., numpy, coverage, pytest)
 ENV PATH /opt/conda/bin:$PATH
 ARG ANACONDA_PYTHON_VERSION
 ADD ./common/install_conda.sh install_conda.sh
@@ -44,12 +44,9 @@ ARG GCC_VERSION
 ADD ./common/install_gcc.sh install_gcc.sh
 RUN bash ./install_gcc.sh && rm install_gcc.sh
 
-# Install non-standard Python versions (via Travis binaries)
-ARG TRAVIS_PYTHON_VERSION
-ARG TRAVIS_DL_URL_PREFIX
-ENV PATH /opt/python/$TRAVIS_PYTHON_VERSION/bin:$PATH
-ADD ./common/install_travis_python.sh install_travis_python.sh
-RUN bash ./install_travis_python.sh && rm install_travis_python.sh
+# Install lcov for C++ code coverage
+ADD ./common/install_lcov.sh install_lcov.sh
+RUN  bash ./install_lcov.sh && rm install_lcov.sh
 
 # (optional) Install protobuf for ONNX
 ARG PROTOBUF
@@ -84,6 +81,13 @@ RUN rm install_android.sh
 RUN rm AndroidManifest.xml
 RUN rm build.gradle
 ENV INSTALLED_ANDROID ${ANDROID}
+
+# (optional) Install breakpad
+ARG BREAKPAD
+ADD ./common/install_breakpad.sh install_breakpad.sh
+RUN if [ -n "${BREAKPAD}" ]; then bash ./install_breakpad.sh; fi
+RUN rm install_breakpad.sh
+ENV INSTALLED_BREAKPAD ${BREAKPAD}
 
 # (optional) Install Vulkan SDK
 ARG VULKAN_SDK_VERSION
@@ -125,6 +129,10 @@ ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
 
 # Install LLVM dev version (Defined in the pytorch/builder github repository)
 COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
+
+ADD ./common/install_openssl.sh install_openssl.sh
+RUN bash ./install_openssl.sh
+ENV OPENSSL_ROOT_DIR /opt/openssl
 
 USER jenkins
 CMD ["bash"]

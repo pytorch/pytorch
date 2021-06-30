@@ -1,3 +1,5 @@
+#include <gtest/gtest.h>
+
 #include <stdexcept>
 #include "test/cpp/tensorexpr/test_base.h"
 
@@ -14,7 +16,8 @@ namespace jit {
 
 using namespace torch::jit::tensorexpr;
 
-void testIRPrinterBasicValueTest() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(IRPrinter, BasicValueTest) {
   KernelScope kernel_scope;
   ExprHandle a = IntImm::make(2), b = IntImm::make(3);
   ExprHandle c = Add::make(a, b);
@@ -24,7 +27,8 @@ void testIRPrinterBasicValueTest() {
   ASSERT_EQ(ss.str(), "2 + 3");
 }
 
-void testIRPrinterBasicValueTest02() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(IRPrinter, BasicValueTest02) {
   KernelScope kernel_scope;
   ExprHandle a(2.0f);
   ExprHandle b(3.0f);
@@ -37,7 +41,8 @@ void testIRPrinterBasicValueTest02() {
   ASSERT_EQ(ss.str(), "(2.f + 3.f) - (4.f + 5.f)");
 }
 
-void testIRPrinterCastTest() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(IRPrinter, CastTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kHalf);
   VarHandle y("y", kFloat);
@@ -49,7 +54,8 @@ void testIRPrinterCastTest() {
   ASSERT_EQ(ss.str(), "2.f + (float(x) * 3.f + 4.f * y)");
 }
 
-void testIRPrinterFunctionName() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(IRPrinter, FunctionName) {
   KernelScope kernel_scope;
   int M = 4;
   int N = 20;
@@ -63,21 +69,21 @@ void testIRPrinterFunctionName() {
       "chunk",
       {{M, "m"}, {N / 2, "n"}},
       [&](const ExprHandle& m, const ExprHandle& n) {
-        return producer->call(m, n);
+        return producer->load(m, n);
       });
 
   Tensor* chunk_1 = Compute(
       "chunk",
       {{M, "m"}, {N / 2, "n"}},
       [&](const ExprHandle& m, const ExprHandle& n) {
-        return producer->call(m, n + ExprHandle(N / 2));
+        return producer->load(m, n + ExprHandle(N / 2));
       });
 
   Tensor* consumer = Compute(
       "consumer",
       {{M, "i"}, {N / 2, "j"}},
       [&](const ExprHandle& i, const ExprHandle& j) {
-        return i * chunk_1->call(i, j);
+        return i * chunk_1->load(i, j);
       });
 
   LoopNest l({chunk_0, chunk_1, consumer});
@@ -90,7 +96,7 @@ void testIRPrinterFunctionName() {
       R"IR(
  # CHECK:   for (int i
  # CHECK:    for (int j
- # CHECK:     consumer[i, j] = i * (chunk_1(i, j)IR";
+ # CHECK:     consumer[i, j] = i * (chunk_1[i, j])IR";
 
   torch::jit::testing::FileCheck().run(verification_pattern, ss.str());
 }

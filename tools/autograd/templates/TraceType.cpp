@@ -1,10 +1,10 @@
 #include "torch/csrc/autograd/VariableTypeUtils.h"
 
-#include <ATen/TypeDefault.h>
 #include <torch/library.h>
 
 #include "torch/csrc/autograd/function.h"
 
+#include <ATen/RedispatchFunctions.h>
 #include "ATen/quantized/Quantizer.h"
 
 // ${generated_comment}

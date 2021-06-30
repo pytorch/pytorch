@@ -13,6 +13,7 @@ namespace data {
 struct WorkerException : public std::exception {
   /// Constructs a `WorkerException` from an `exception_ptr`.
   explicit WorkerException(std::exception_ptr original)
+      // NOLINTNEXTLINE(performance-move-const-arg)
       : original_exception(std::move(original)),
         message("Caught exception in DataLoader worker thread.") {
     try {

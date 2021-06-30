@@ -15,6 +15,45 @@ else
   export VC_YEAR=2019
 fi
 
+if [[ "${DESIRED_CUDA}" == "cu111" || "${DESIRED_CUDA}" == "cu113" ]]; then
+    export BUILD_SPLIT_CUDA="ON"
+
+    echo "Free Space for CUDA DEBUG BUILD"
+    if [[ "$CIRCLECI" == 'true' ]]; then
+        if [[ -d "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Commnuity" ]]; then
+            rm -rf "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Commnuity"
+        fi
+
+        if [[ -d "C:\\Program Files (x86)\\Microsoft Visual Studio 14.0" ]]; then
+            rm -rf "C:\\Program Files (x86)\\Microsoft Visual Studio 14.0"
+        fi
+
+        if [[ -d "C:\\Program Files (x86)\\Microsoft.NET" ]]; then
+            rm -rf "C:\\Program Files (x86)\\Microsoft.NET"
+        fi
+
+        if [[ -d "C:\\Program Files\\dotnet" ]]; then
+            rm -rf "C:\\Program Files\\dotnet"
+        fi
+
+        if [[ -d "C:\\Program Files (x86)\\dotnet" ]]; then
+            rm -rf "C:\\Program Files (x86)\\dotnet"
+        fi
+
+        if [[ -d "C:\\Program Files (x86)\\Microsoft SQL Server" ]]; then
+            rm -rf "C:\\Program Files (x86)\\Microsoft SQL Server"
+        fi
+
+        if [[ -d "C:\\Program Files (x86)\\Xamarin" ]]; then
+            rm -rf "C:\\Program Files (x86)\\Xamarin"
+        fi
+
+        if [[ -d "C:\\Program Files (x86)\\Google" ]]; then
+            rm -rf "C:\\Program Files (x86)\\Google"
+        fi
+    fi
+fi
+
 set +x
 export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4:-}
 export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4:-}
@@ -25,6 +64,11 @@ if [[ "$CIRCLECI" == 'true' && -d "C:\\ProgramData\\Microsoft\\VisualStudio\\Pac
   rm -rf "C:\\ProgramData\\Microsoft\\VisualStudio\\Packages"
   mkdir -p "C:\\ProgramData\\Microsoft\\VisualStudio\\Packages"
   mv _Instances "C:\\ProgramData\\Microsoft\\VisualStudio\\Packages"
+fi
+
+if [[ "$CIRCLECI" == 'true' && -d "C:\\Microsoft" ]]; then
+  # don't use quota here
+  rm -rf /c/Microsoft/AndroidNDK*
 fi
 
 echo "Free space on filesystem before build:"

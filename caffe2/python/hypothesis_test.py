@@ -1,7 +1,3 @@
-
-
-
-
 import numpy as np
 import copy
 import time
@@ -17,6 +13,21 @@ import caffe2.python.hypothesis_test_util as hu
 from caffe2.proto import caffe2_pb2
 
 dyndep.InitOpsLibrary('@/caffe2/caffe2/fb/optimizers:sgd_simd_ops')
+
+if workspace.has_gpu_support:
+    # NOTE: During GPU stress tests, the number of workers exceeds the number
+    #       of GPUs which results in flakiness from GPU contention. As a
+    #       result, deadlines are not enforced on CUDA runs.
+    _hypothesis_settings = settings
+
+    def settings(**kwargs):
+        if 'deadline' in kwargs:
+            kwargs['deadline'] = None
+            kwargs.setdefault('max_examples', 50)
+
+        def wrapped(f):
+            return _hypothesis_settings(**kwargs)(f)
+        return wrapped
 
 
 def sigmoid(x):
@@ -331,6 +342,7 @@ class TestOperators(hu.HypothesisTestCase):
 
     @unittest.skipIf(not workspace.has_gpu_support,
                      "Skipping test due to no gpu present.")
+    @settings(deadline=None)
     @given(hidden_size=st.integers(min_value=1, max_value=3),
            num_layers=st.integers(min_value=1, max_value=3),
            bidirectional=st.booleans(),
@@ -994,6 +1006,38 @@ class TestOperators(hu.HypothesisTestCase):
             inputs=[np.array(lengths, dtype=np.int32)],
             reference=op_ref)
 
+    @given(
+        lengths=st.lists(
+            st.integers(min_value=0, max_value=10), min_size=0, max_size=10
+        ),
+        include_last_offset=st.booleans(),
+        **hu.gcs_cpu_only
+    )
+    @settings(deadline=None)
+    def test_lengths_to_offsets(self, lengths, include_last_offset, gc, dc):
+        op = core.CreateOperator(
+            "LengthsToOffsets",
+            ["lengths"],
+            ["ranges"],
+            include_last_offset=include_last_offset,
+        )
+
+        def op_ref(x):
+            if not x.size:
+                arr = [x.reshape(0)]
+            else:
+                arr = [np.concatenate(([0], np.cumsum(x)[:-1]))]
+            if include_last_offset:
+                arr[0] = np.concatenate((arr[0], np.array([np.sum(x)])))
+            return tuple(arr)
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[np.array(lengths, dtype=np.int32)],
+            reference=op_ref,
+        )
+
     @given(prediction=hu.arrays(dims=[10, 3],
                                 elements=hu.floats(allow_nan=False,
                                                    allow_infinity=False,
@@ -1253,11 +1297,7 @@ class TestOperators(hu.HypothesisTestCase):
           original matrices.
         """
         import threading
-        try:
-            import queue
-        except ImportError:
-            # Py3
-            import Queue as queue
+        import queue
         op = core.CreateOperator(
             "CreateBlobsQueue",
             [],
@@ -2683,7 +2723,7 @@ class TestOperators(hu.HypothesisTestCase):
             Y[X >= upper_bound] = num_buckets + 1
             Y[(X >= lower_bound) & (X < upper_bound)] = \
                 ((X[(X >= lower_bound) & (X < upper_bound)] - lower_bound) /
-                        segment + 1).astype(np.int32)
+                    segment + 1).astype(np.int32)
 
             for i in range(Y.shape[0]):
                 for j in range(Y.shape[1]):

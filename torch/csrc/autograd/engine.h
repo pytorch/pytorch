@@ -95,9 +95,12 @@ struct GraphTask: std::enable_shared_from_this<GraphTask> {
   // Exec info has a bit complicated semantics. If it's empty, it means the task
   // is run in a "default" mode, which means that all next_edges we encounter
   // should get executed. If it's not empty, only functions that have an entry
-  // and this entry has needed == True should be executed. exec_info_.empty()
-  // means it's .backward(), otherwise it's .grad(). exec_info_ is safe to read
-  // without synchronization
+  // and this entry has needed == True should be executed. exec_info is only empty
+  // when the graph is executed via .backward() and the inputs parameter is not passed.
+  // Otherwise, when executed through .grad(), or when inputs arg is specified for
+  // .backward(), exec_info will be non-empty.
+  //
+  // exec_info_ is safe to read without synchronization
   std::unordered_map<Node*, ExecInfo> exec_info_;
   // Captures variables are grads captured that we return to the user. After
   // execution of the GraphTask is completed, the captured_vars_ are moved
@@ -109,7 +112,14 @@ struct GraphTask: std::enable_shared_from_this<GraphTask> {
 
   std::unordered_set<c10::Stream> leaf_streams;
 
-  void init_to_execute(Node& graph_root, const edge_list& outputs);
+  // Per-device current streams of the execute() that called this GraphTask.
+  // These will be synced with leaf_streams in exec_post_processing.
+  std::vector<c10::optional<c10::Stream>> caller_current_streams_;
+
+  // Collects caller_current_streams_
+  void stash_current_streams();
+
+  void init_to_execute(Node& graph_root, const edge_list& outputs, bool accumulate_grad, uint64_t min_topo_nr);
 
   // The value of worker_device in the thread that created this task.
   // See Note [Reentrant backwards]
@@ -118,7 +128,7 @@ struct GraphTask: std::enable_shared_from_this<GraphTask> {
   // The number of parent graph tasks for this graph task
   const int reentrant_depth_;
 
-  bool can_checkpoint() {
+  bool can_checkpoint() const {
     return exec_info_.empty();
   }
 
@@ -144,14 +154,14 @@ struct GraphTask: std::enable_shared_from_this<GraphTask> {
 
   // CPU threads are dedicated to processing CPU work for the backward they invoked.
   // So any given graph task maintains its own cpu_ready_queue_ where you should send
-  // work for it to be done. We memorize the cpu_ready_queue_ per GraphTask so that
+  // work for it to be done. We memoize the cpu_ready_queue_ per GraphTask so that
   // we know which ready queue we should push to if we are on device thread (i.e. GPU)
   // and but next NodeTask should be run on CPU.
   std::shared_ptr<ReadyQueue> cpu_ready_queue_;
 
   // Future representing the completion of the graph task. Notified when all
   // tasks are done.
-  std::shared_ptr<at::ivalue::Future> future_result_;
+  c10::intrusive_ptr<at::ivalue::Future> future_result_;
 
   // Final callbacks installed during execution of this GraphTask
   std::vector<std::function<void()>> final_callbacks_;
@@ -171,7 +181,7 @@ struct GraphTask: std::enable_shared_from_this<GraphTask> {
         reentrant_depth_(reentrant_depth),
         exit_on_error_(exit_on_error),
         cpu_ready_queue_(std::move(cpu_ready_queue)),
-        future_result_(std::make_shared<at::ivalue::Future>(c10::ListType::create(c10::TensorType::get()))) {}
+        future_result_(c10::make_intrusive<at::ivalue::Future>(c10::ListType::create(c10::TensorType::get()))) {}
  private:
   // run GraphTask post processing
   void exec_post_processing();
@@ -203,6 +213,7 @@ struct NodeTask {
   int getReentrantDepth() const;
 
   NodeTask(
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       std::weak_ptr<GraphTask> base,
       std::shared_ptr<Node> fn,
       InputBuffer inputs,
@@ -213,6 +224,15 @@ struct NodeTask {
         isShutdownTask_(isShutdownTask) {}
 };
 
+// Guard that sets and restores checkpoint_valid
+class CheckpointValidGuard {
+ public:
+  explicit CheckpointValidGuard(const std::shared_ptr<const GraphTask>& graph_task);
+  ~CheckpointValidGuard();
+ private:
+  bool prev_checkpoint_valid_state;
+};
+
 
 struct ReadyQueue {
  private:
@@ -220,6 +240,7 @@ struct ReadyQueue {
   // Shutdown tasks are first and then empty NodeTask are next.
   struct CompareNodeTaskTime {
     bool operator()(NodeTask const & t1, NodeTask const & t2) {
+      // NOLINTNEXTLINE(bugprone-branch-clone)
       if (t2.isShutdownTask_) {
         return true;
       } else if (!t1.fn_ || t1.isShutdownTask_) {
@@ -272,6 +293,7 @@ struct TORCH_API Engine {
       const variable_list& inputs,
       bool keep_graph,
       bool create_graph,
+      bool accumulate_grad,
       const edge_list& outputs = {});
 
   // Given a pre-populated GraphTask and GraphRoot, computes the backward pass
@@ -279,12 +301,13 @@ struct TORCH_API Engine {
   //
   // NB: This API should only be used by internal autograd specific
   // machinery and shouldn't be exposed to users in anyway.
-  virtual std::shared_ptr<at::ivalue::Future> execute_with_graph_task(
+  virtual c10::intrusive_ptr<at::ivalue::Future> execute_with_graph_task(
       const std::shared_ptr<GraphTask>& graph_task,
-      std::shared_ptr<Node> graph_root);
+      std::shared_ptr<Node> graph_root,
+      InputBuffer&& input_buffer);
 
   virtual std::unique_ptr<AnomalyMetadata> make_anomaly_metadata() {
-    return nullptr;
+    return std::make_unique<AnomalyMetadata>();
   }
 
   // We pass cpu_ready_queue to evaluate_function, so that it knows
@@ -310,6 +333,9 @@ struct TORCH_API Engine {
   // Should be called after fork to notify that worker threads are gone
   void release_workers();
 
+  // Must be called by subclass before destructing to avoid a data-race-on-vptr.
+  void stop();
+
   // Initializes a device thread for the autograd engine.
   virtual void thread_init(
       int device,
@@ -318,7 +344,7 @@ struct TORCH_API Engine {
 
  protected:
   Engine();
-  void compute_dependencies(Node* root, GraphTask& task);
+  void compute_dependencies(Node* root, GraphTask& task, uint64_t min_topo_nr);
 
   // initialize the thread local ready queue with the ready queue that is created
   // elsewhere (i.e. thread_init, Engine::execute, etc), or create a new
@@ -341,15 +367,20 @@ struct TORCH_API Engine {
   void add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task);
 
   // Ensures device_ready_queues_ are initialized only once
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::once_flag start_device_threads_flag_;
   // Safe to read device_ready_queues_ without synchronization after initialization
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<std::shared_ptr<ReadyQueue>> device_ready_queues_;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<std::function<void()>> final_callbacks_;
   // To protect reads and writes to final_callbacks_
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::mutex post_callbacks_lock_;
 
   // How many nested reentrant calls are allowed until a new thread is used
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   int max_recursion_depth_;
 
   struct ThreadPoolShared {
@@ -373,6 +404,7 @@ struct TORCH_API Engine {
  // We need shared ownership of all these objects because the threads are leaked
  // when Engine shuts down, so there may be threads waiting on work_
  // for the graphtasks_queue_ to be nonempty.
+ // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
  std::shared_ptr<ThreadPoolShared> thread_pool_shared_;
 
 private:
@@ -381,7 +413,11 @@ private:
   // Destructor will wait for non-reentrant threads to finish
   std::condition_variable non_reentrant_device_thread_condvar_;
   std::mutex non_reentrant_device_thread_mutex_;
-
+  // stop() must be called before the destruction path goes down to the base
+  // class, in order to avoid a data-race-on-vptr. Use this boolean to guard
+  // whether stop() has already been called, so we can call this in every
+  // destructor of the class hierarchy.
+  bool stopped_{false};
 };
 
 // allow python_engine to override the default engine when it loads

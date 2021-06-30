@@ -23,6 +23,7 @@ class IDEEPReluOp final : public IDEEPOperator {
       LOG(FATAL) << "Unsupported Relu method: " << operator_def.type();
     }
   }
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~IDEEPReluOp() override {}
 
   bool RunOnDevice() override {
@@ -61,6 +62,7 @@ class IDEEPReluGradientOp final : public IDEEPOperator {
       LOG(FATAL) << "Unsupported Relu method: " << operator_def.type();
     }
   }
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~IDEEPReluGradientOp() override {}
 
   bool RunOnDevice() override {
@@ -80,10 +82,14 @@ class IDEEPReluGradientOp final : public IDEEPOperator {
   OUTPUT_TAGS(INPUT_GRAD);
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(Relu, IDEEPReluOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(ReluGradient, IDEEPReluGradientOp);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(LeakyRelu, IDEEPReluOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(LeakyReluGradient, IDEEPReluGradientOp);
 
 } // namespace

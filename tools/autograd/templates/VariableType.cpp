@@ -1,8 +1,9 @@
 #include "torch/csrc/autograd/VariableTypeUtils.h"
 #include "torch/csrc/autograd/FunctionsManual.h"
 
-#include <ATen/TypeDefault.h>
+#include <ATen/RedispatchFunctions.h>
 #include <torch/library.h>
+
 
 // ${generated_comment}
 

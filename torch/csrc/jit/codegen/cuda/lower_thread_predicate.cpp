@@ -1,4 +1,3 @@
-
 #include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
 
 #include <torch/csrc/jit/codegen/cuda/arith.h>
@@ -8,9 +7,12 @@
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 
+#include <c10/util/irange.h>
+
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 namespace {
 
@@ -103,7 +105,7 @@ void avoidRedundantWritesToSmem(
     TensorView* out_tv,
     ir_utils::ParallelTypeBitmap& pred) {
   if (out_tv->getMemoryType() == MemoryType::Shared) {
-    for (size_t i = 0; i < out_tv->nDims(); i++) {
+    for (const auto i : c10::irange(out_tv->nDims())) {
       auto id = out_tv->getComputeAtAxis(i).first;
       if (out_tv->axis(i)->isBroadcast() && id->isThreadDim()) {
         pred.set(id->getParallelType(), true);
@@ -159,7 +161,7 @@ void ThreadPredicateMap::updateBitSet(Expr* expr) {
     }
 
     // Validate the combination of ptypes, reductions, bcasts
-    for (size_t i = 0; i < ir_utils::ParallelTypeBitmap::num_p_type; i++) {
+    for (const auto i : c10::irange(ir_utils::ParallelTypeBitmap::num_p_type)) {
       if (input_reductions[i]) {
         if (id_ptypes[i]) {
           TORCH_INTERNAL_ASSERT(
@@ -278,6 +280,7 @@ kir::Bool* ThreadPredicateMap::getExpr(const TensorView* out_tv) const {
   return getPredicate(at(out_tv).first, at(out_tv).second);
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

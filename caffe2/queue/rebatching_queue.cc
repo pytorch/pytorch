@@ -35,6 +35,7 @@ void concat(
   for (size_t i = 0; i < numRows; ++i) {
     CAFFE_ENFORCE_EQ(inputs[i].size(), numTensors);
 
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int j = 0; j < numTensors; ++j) {
       const auto& input = inputs[i][j];
 
@@ -183,6 +184,7 @@ bool RebatchingQueue::enqueue(
     std::vector<std::vector<TensorCPU>> splittedInputs) {
   int idx = 0;
   for (;;) {
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     if (idx >= splittedInputs.size()) {
       break;
     }
@@ -200,6 +202,7 @@ bool RebatchingQueue::enqueue(
 
       do {
         queue_[head_++ % capacity()] = std::move(splittedInputs[idx++]);
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       } while (canWrite() && idx < splittedInputs.size());
     }
 

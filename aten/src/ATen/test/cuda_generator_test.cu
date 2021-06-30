@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/CUDAGeneratorImpl.h>
+#include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <ATen/core/PhiloxRNGEngine.h>
 #include <cuda.h>
@@ -27,6 +28,7 @@ __global__ void testEngineReproducibility(){
 
 void test_engine_reproducibility(){
   testEngineReproducibility<<<1, 1>>>();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 TEST(CUDAGeneratorImpl, TestPhiloxEngineReproducibility) {
@@ -59,6 +61,7 @@ __global__ void testEngineOffset1(){
 
 void test_engine_offset1(){
   testEngineOffset1<<<1, 1>>>();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 TEST(CUDAGeneratorImpl, TestPhiloxEngineOffset1) {
@@ -80,7 +83,7 @@ __global__ void testEngineOffset2(){
   unsigned long long increment_val = ::ldexp(1.0, 64);
   at::Philox4_32_10 engine1(123, 0, increment_val);
   at::Philox4_32_10 engine2(123, increment_val, increment_val);
-  
+
   engine2.incr_n(increment_val);
   engine2.incr();
   assert(engine1() == engine2());
@@ -88,6 +91,7 @@ __global__ void testEngineOffset2(){
 
 void test_engine_offset2(){
   testEngineOffset2<<<1, 1>>>();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 TEST(CUDAGeneratorImpl, TestPhiloxEngineOffset2) {
@@ -114,6 +118,7 @@ __global__ void testEngineOffset3(){
 
 void test_engine_offset3(){
   testEngineOffset2<<<1, 1>>>();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 TEST(CUDAGeneratorImpl, TestPhiloxEngineOffset3) {
@@ -138,6 +143,7 @@ __global__ void testEngineThreadIndex(){
 
 void test_engine_thread_index(){
   testEngineThreadIndex<<<1, 1>>>();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 TEST(CUDAGeneratorImpl, TestPhiloxEngineIndex) {
@@ -166,7 +172,7 @@ TEST(CUDAGeneratorImpl, TestGeneratorDynamicCast) {
 }
 
 TEST(CUDAGeneratorImpl, TestDefaultGenerator) {
-  // Test Description: 
+  // Test Description:
   // Check if default generator state is created only once
   // address of generator should be same in all calls
   if (!at::cuda::is_available()) return;
@@ -186,7 +192,7 @@ TEST(CUDAGeneratorImpl, TestDefaultGenerator) {
 }
 
 TEST(CUDAGeneratorImpl, TestCloning) {
-  // Test Description: 
+  // Test Description:
   // Check cloning of new generators.
   // Note that we don't allow cloning of other
   // generator states into default generators.
@@ -211,9 +217,9 @@ void thread_func_get_set_current_seed(Generator generator) {
   current_seed++;
   generator.set_current_seed(current_seed);
 }
-  
+
 TEST(CUDAGeneratorImpl, TestMultithreadingGetSetCurrentSeed) {
-  // Test Description: 
+  // Test Description:
   // Test current seed getter and setter are thread safe
   // See Note [Acquire lock when using random generators]
   if (!at::cuda::is_available()) return;
@@ -229,7 +235,7 @@ TEST(CUDAGeneratorImpl, TestMultithreadingGetSetCurrentSeed) {
 }
 
 TEST(CUDAGeneratorImpl, TestRNGForking) {
-  // Test Description: 
+  // Test Description:
   // Test that state of a generator can be frozen and
   // restored
   // See Note [Acquire lock when using random generators]

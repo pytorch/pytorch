@@ -282,7 +282,7 @@ class Polynomial : public ExprNode<Polynomial> {
 class RoundOff : public BinaryOpNode<RoundOff> {
  public:
   RoundOff(const Expr* lhs, const Expr* rhs)
-      : BinaryOpNode(lhs, rhs, IRNodeType::kRoundOff) {}
+      : BinaryOpNode(lhs, rhs, IRNodeType::kOther) {}
 };
 
 class MaxTerm : public ExprNode<MaxTerm> {
@@ -406,7 +406,7 @@ class MinTerm : public ExprNode<MinTerm> {
 // Stmt simplification should occur in both modes.
 class TORCH_API IRSimplifierBase : public IRMutator {
  public:
-  virtual ~IRSimplifierBase() {}
+  ~IRSimplifierBase() override = default;
 
   Stmt* mutate(const Block* v) override;
 
@@ -414,11 +414,15 @@ class TORCH_API IRSimplifierBase : public IRMutator {
 
   Stmt* mutate(const For* v) override;
 
+  // Trivially factorize terms by GCD of scalar components.
+  const Term* factorizePolynomial(const Polynomial* poly);
+
   HashProvider& hasher() {
     return hasher_;
   }
 
  protected:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   HashProvider hasher_;
 };
 
@@ -471,9 +475,7 @@ class TORCH_API PolynomialTransformer : public IRSimplifierBase {
 
   const Expr* mutate(const Div* v) override;
 
-  const Expr* mutate(const Mod* v) override {
-    return mutateBinaryOp(v, this);
-  }
+  const Expr* mutate(const Mod* v) override;
 
   const Expr* mutate(const And* v) override {
     return mutateBinaryOp(v, this);
@@ -548,9 +550,6 @@ class TORCH_API TermExpander : public IRSimplifierBase {
   // Expand Terms out to a series of Muls.
   const Expr* mutate(const Term* v) override;
 
-  // Trivially factorize terms by GCD of scalar components.
-  const Expr* factorizePolynomial(const Polynomial* poly);
-
   // Expand Polynomials out to a series of Adds.
   const Expr* mutate(const Polynomial* v) override;
 
@@ -565,7 +564,6 @@ class TORCH_API TermExpander : public IRSimplifierBase {
 
   // Eliminate zero length allocations.
   Stmt* mutate(const Allocate* v) override;
-
   Stmt* mutate(const Free* v) override;
 
   // Override to enable condition fusing.
@@ -583,6 +581,7 @@ class TORCH_API IRSimplifier {
     // There may be terms left in the IR, expand them.
     TermExpander expander(&simplifier);
     e = e->accept_mutator(&expander);
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     if (!expander.check_safe()) {
       throw malformed_input("eliminated null Allocation without free");
     }
@@ -612,6 +611,8 @@ class TORCH_API IRSimplifier {
   }
 };
 
+// Flattens the buf and performs the simplifier on the flattened dims.
+const Expr* buf_flat_size(const Buf* v);
 // Returns true if expressions A and B can be simplified to an equal expression.
 TORCH_API bool exprEquals(const Expr* A, const Expr* B);
 

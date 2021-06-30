@@ -1,4 +1,3 @@
-
 #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
@@ -13,6 +12,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 //! Summary of interesting facts about the kernel
 //!
@@ -53,7 +53,7 @@ struct KernelSummary {
 //!  by a Fusion object. The goal is to have the Kernel object
 //!  own the Kernel IR nodes
 //!
-class TORCH_CUDA_API Kernel final : public NonCopyable {
+class TORCH_CUDA_CU_API Kernel final : public NonCopyable {
  public:
   Kernel() = default;
 
@@ -105,6 +105,9 @@ class TORCH_CUDA_API Kernel final : public NonCopyable {
     ir_nodes_.push_back(std::move(node));
   }
 
+  //! Debug dump of the Kernel IR
+  void print() const;
+
  private:
   // Analyze the kernel IR and caches the summary of interesting data
   void analyze();
@@ -131,6 +134,7 @@ class TORCH_CUDA_API Kernel final : public NonCopyable {
   std::unique_ptr<ThreadPredicateMap> predicate_map_;
 };
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

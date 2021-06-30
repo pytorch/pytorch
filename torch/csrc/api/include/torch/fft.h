@@ -16,7 +16,7 @@ namespace fft {
 inline Tensor fft(const Tensor& self,
                   c10::optional<int64_t> n=c10::nullopt,
                   int64_t dim=-1,
-                  c10::optional<std::string> norm=c10::nullopt) {
+                  c10::optional<c10::string_view> norm=c10::nullopt) {
   return torch::fft_fft(self, n, dim, norm);
 }
 
@@ -31,8 +31,38 @@ inline Tensor fft(const Tensor& self,
 inline Tensor ifft(const Tensor& self,
                   c10::optional<int64_t> n=c10::nullopt,
                   int64_t dim=-1,
-                  c10::optional<std::string> norm=c10::nullopt) {
+                  c10::optional<c10::string_view> norm=c10::nullopt) {
   return torch::fft_ifft(self, n, dim, norm);
+}
+
+/// Computes the 2-dimensional fast Fourier transform over the given dimensions.
+/// See https://pytorch.org/docs/master/fft.html#torch.fft.fft2.
+///
+/// Example:
+/// ```
+/// auto t = torch::randn({128, 128}, dtype=kComplexDouble);
+/// torch::fft::fft2(t);
+/// ```
+inline Tensor fft2(const Tensor& self,
+                   c10::optional<IntArrayRef> s=c10::nullopt,
+                   IntArrayRef dim={-2, -1},
+                   c10::optional<c10::string_view> norm=c10::nullopt) {
+  return torch::fft_fft2(self, s, dim, norm);
+}
+
+/// Computes the inverse of torch.fft.fft2
+/// See https://pytorch.org/docs/master/fft.html#torch.fft.ifft2.
+///
+/// Example:
+/// ```
+/// auto t = torch::randn({128, 128}, dtype=kComplexDouble);
+/// torch::fft::ifft2(t);
+/// ```
+inline Tensor ifft2(const Tensor& self,
+                    c10::optional<IntArrayRef> s=c10::nullopt,
+                    IntArrayRef dim={-2, -1},
+                    c10::optional<c10::string_view> norm=c10::nullopt) {
+  return torch::fft_ifft2(self, s, dim, norm);
 }
 
 /// Computes the N dimensional fast Fourier transform over given dimensions.
@@ -46,7 +76,7 @@ inline Tensor ifft(const Tensor& self,
 inline Tensor fftn(const Tensor& self,
                    c10::optional<IntArrayRef> s=c10::nullopt,
                    c10::optional<IntArrayRef> dim=c10::nullopt,
-                   c10::optional<std::string> norm=c10::nullopt) {
+                   c10::optional<c10::string_view> norm=c10::nullopt) {
   return torch::fft_fftn(self, s, dim, norm);
 }
 
@@ -61,7 +91,7 @@ inline Tensor fftn(const Tensor& self,
 inline Tensor ifftn(const Tensor& self,
                    c10::optional<IntArrayRef> s=c10::nullopt,
                    c10::optional<IntArrayRef> dim=c10::nullopt,
-                   c10::optional<std::string> norm=c10::nullopt) {
+                   c10::optional<c10::string_view> norm=c10::nullopt) {
   return torch::fft_ifftn(self, s, dim, norm);
 }
 
@@ -77,7 +107,7 @@ inline Tensor ifftn(const Tensor& self,
 inline Tensor rfft(const Tensor& self,
                   c10::optional<int64_t> n=c10::nullopt,
                   int64_t dim=-1,
-                  c10::optional<std::string> norm=c10::nullopt) {
+                  c10::optional<c10::string_view> norm=c10::nullopt) {
   return torch::fft_rfft(self, n, dim, norm);
 }
 
@@ -95,8 +125,38 @@ inline Tensor rfft(const Tensor& self,
 inline Tensor irfft(const Tensor& self,
                     c10::optional<int64_t> n=c10::nullopt,
                     int64_t dim=-1,
-                    c10::optional<std::string> norm=c10::nullopt) {
+                    c10::optional<c10::string_view> norm=c10::nullopt) {
   return torch::fft_irfft(self, n, dim, norm);
+}
+
+/// Computes the 2-dimensional FFT of real input. Returns a onesided Hermitian output.
+/// See https://pytorch.org/docs/master/fft.html#torch.fft.rfft2
+///
+/// Example:
+/// ```
+/// auto t = torch::randn({128, 128}, dtype=kDouble);
+/// torch::fft::rfft2(t);
+/// ```
+inline Tensor rfft2(const Tensor& self,
+                    c10::optional<IntArrayRef> s=c10::nullopt,
+                    IntArrayRef dim={-2, -1},
+                    c10::optional<c10::string_view> norm=c10::nullopt) {
+  return torch::fft_rfft2(self, s, dim, norm);
+}
+
+/// Computes the inverse of torch.fft.rfft2.
+/// See https://pytorch.org/docs/master/fft.html#torch.fft.irfft2.
+///
+/// Example:
+/// ```
+/// auto t = torch::randn({128, 128}, dtype=kComplexDouble);
+/// torch::fft::irfft2(t);
+/// ```
+inline Tensor irfft2(const Tensor& self,
+                     c10::optional<IntArrayRef> s=c10::nullopt,
+                     IntArrayRef dim={-2, -1},
+                     c10::optional<c10::string_view> norm=c10::nullopt) {
+  return torch::fft_irfft2(self, s, dim, norm);
 }
 
 /// Computes the N dimensional FFT of real input with onesided Hermitian output.
@@ -110,7 +170,7 @@ inline Tensor irfft(const Tensor& self,
 inline Tensor rfftn(const Tensor& self,
                     c10::optional<IntArrayRef> s=c10::nullopt,
                     c10::optional<IntArrayRef> dim=c10::nullopt,
-                    c10::optional<std::string> norm=c10::nullopt) {
+                    c10::optional<c10::string_view> norm=c10::nullopt) {
   return torch::fft_rfftn(self, s, dim, norm);
 }
 
@@ -125,7 +185,7 @@ inline Tensor rfftn(const Tensor& self,
 inline Tensor irfftn(const Tensor& self,
                    c10::optional<IntArrayRef> s=c10::nullopt,
                    c10::optional<IntArrayRef> dim=c10::nullopt,
-                   c10::optional<std::string> norm=c10::nullopt) {
+                   c10::optional<c10::string_view> norm=c10::nullopt) {
   return torch::fft_irfftn(self, s, dim, norm);
 }
 
@@ -144,7 +204,7 @@ inline Tensor irfftn(const Tensor& self,
 inline Tensor hfft(const Tensor& self,
                    c10::optional<int64_t> n=c10::nullopt,
                    int64_t dim=-1,
-                   c10::optional<std::string> norm=c10::nullopt) {
+                   c10::optional<c10::string_view> norm=c10::nullopt) {
   return torch::fft_hfft(self, n, dim, norm);
 }
 
@@ -162,7 +222,7 @@ inline Tensor hfft(const Tensor& self,
 inline Tensor ihfft(const Tensor& self,
                     c10::optional<int64_t> n=c10::nullopt,
                     int64_t dim=-1,
-                    c10::optional<std::string> norm=c10::nullopt) {
+                    c10::optional<c10::string_view> norm=c10::nullopt) {
   return torch::fft_ihfft(self, n, dim, norm);
 }
 

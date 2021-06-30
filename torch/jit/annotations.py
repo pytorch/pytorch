@@ -2,19 +2,20 @@ import ast
 import enum
 import inspect
 import re
+import builtins
 import torch
+import warnings
 from .._jit_internal import List, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
     is_optional, _qualified_name, Any, Future, is_future, is_ignored_fn
-from .._jit_internal import BroadcastingList1, BroadcastingList2, BroadcastingList3  # type: ignore
+from .._jit_internal import BroadcastingList1, BroadcastingList2, BroadcastingList3  # type: ignore[attr-defined]
 from ._state import _get_script_class
 
-from torch._C import TensorType, TupleType, FloatType, IntType, \
-    ListType, StringType, DictType, BoolType, OptionalType, ClassType, InterfaceType, AnyType, NoneType, \
+from torch._C import TensorType, TupleType, FloatType, IntType, ComplexType, \
+    ListType, StringType, DictType, BoolType, OptionalType, InterfaceType, AnyType, NoneType, \
     DeviceObjType, StreamObjType, FutureType, EnumType
 
 
 from textwrap import dedent
-from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
 from typing import Type
 
@@ -145,7 +146,7 @@ def parse_type_line(type_line, rcb, loc):
     arg_ann_str, ret_ann_str = split_type_line(type_line)
 
     try:
-        arg_ann = eval(arg_ann_str, {}, EvalEnv(rcb))  # type: ignore # noqa: P204
+        arg_ann = eval(arg_ann_str, {}, EvalEnv(rcb))  # type: ignore[arg-type] # noqa: P204
     except (NameError, SyntaxError) as e:
         raise RuntimeError("Failed to parse the argument list of a type annotation") from e
 
@@ -153,7 +154,7 @@ def parse_type_line(type_line, rcb, loc):
         arg_ann = (arg_ann,)
 
     try:
-        ret_ann = eval(ret_ann_str, {}, EvalEnv(rcb))  # type: ignore # noqa: P204
+        ret_ann = eval(ret_ann_str, {}, EvalEnv(rcb))  # type: ignore[arg-type] # noqa: P204
     except (NameError, SyntaxError) as e:
         raise RuntimeError("Failed to parse the return type of a type annotation") from e
 
@@ -170,17 +171,26 @@ def get_type_line(source):
     type_lines = list(filter(lambda line: type_comment in line[1], lines))
     # `type: ignore` comments may be needed in JIT'ed functions for mypy, due
     # to the hack in torch/_VF.py.
-    type_lines = list(filter(lambda line: not line[1].endswith("# type: ignore"),
+
+    # An ignore type comment can be of following format:
+    #   1) type: ignore
+    #   2) type: ignore[rule-code]
+    # This ignore statement must be at the end of the line
+
+    # adding an extra backslash before the space, to avoid triggering
+    # one of the checks in .github/workflows/lint.yml
+    type_pattern = re.compile("# type:\\ ignore(\\[[a-zA-Z-]+\\])?$")
+    type_lines = list(filter(lambda line: not type_pattern.search(line[1]),
                              type_lines))
-    lines_with_type = list(filter(lambda line: 'type' in line[1], lines))
 
     if len(type_lines) == 0:
-        type_pattern = re.compile('#[\t ]*type[\t ]*(?!: ignore$):')
-        wrong_type_lines = list(filter(lambda line: type_pattern.search(line[1]), lines))
+        # Catch common typo patterns like extra spaces, typo in 'ignore', etc.
+        wrong_type_pattern = re.compile("#[\t ]*type[\t ]*(?!: ignore(\\[.*\\])?$):")
+        wrong_type_lines = list(filter(lambda line: wrong_type_pattern.search(line[1]), lines))
         if len(wrong_type_lines) > 0:
             raise RuntimeError("The annotation prefix in line " + str(wrong_type_lines[0][0])
                                + " is probably invalid.\nIt must be '# type:'"
-                               + "\nSee PEP 484 (https://www.python.org/dev/peps/pep-0484/#suggested-syntax-for-python-2-7-and-straddling-code)" # noqa
+                               + "\nSee PEP 484 (https://www.python.org/dev/peps/pep-0484/#suggested-syntax-for-python-2-7-and-straddling-code)"  # noqa: B950
                                + "\nfor examples")
         return None
     elif len(type_lines) == 1:
@@ -202,7 +212,7 @@ def get_type_line(source):
             "Return type line '# type: (...) -> ...' not found on multiline "
             "type annotation\nfor type lines:\n" +
             '\n'.join([line[1] for line in type_lines]) +
-            "\n(See PEP 484 https://www.python.org/dev/peps/pep-0484/#suggested-syntax-for-python-2-7-and-straddling-code)")  # noqa
+            "\n(See PEP 484 https://www.python.org/dev/peps/pep-0484/#suggested-syntax-for-python-2-7-and-straddling-code)")
 
     def get_parameter_type(line):
         item_type = line[line.find(type_comment) + len(type_comment):]
@@ -243,13 +253,9 @@ def try_real_annotations(fn, loc):
     if all(ann is sig.empty for ann in all_annots):
         return None
 
-    def as_ann(ann):
-        # sig.empty is really annoying so convert it to None
-        return ann if ann is not sig.empty else None
-
-    arg_types = [ann_to_type(as_ann(p.annotation), loc)
+    arg_types = [ann_to_type(p.annotation, loc)
                  for p in sig.parameters.values()]
-    return_type = ann_to_type(as_ann(sig.return_annotation), loc)
+    return_type = ann_to_type(sig.return_annotation, loc)
     return arg_types, return_type
 
 
@@ -269,13 +275,34 @@ def get_enum_value_type(e: Type[enum.Enum], loc):
     # feature request if you find it necessary.
     return torch._C.unify_type_list(ir_types)
 
+def is_tensor(ann):
+
+    if issubclass(ann, torch.Tensor):
+        return True
+
+    if issubclass(ann, (torch.LongTensor, torch.DoubleTensor, torch.FloatTensor,
+                        torch.IntTensor, torch.ShortTensor, torch.HalfTensor,
+                        torch.CharTensor, torch.ByteTensor, torch.BoolTensor)):
+        warnings.warn("TorchScript will treat type annotations of Tensor "
+                      "dtype-specific subtypes as if they are normal Tensors. "
+                      "dtype constraints are not enforced in compilation either.")
+        return True
+
+    return False
+
+
 
 def try_ann_to_type(ann, loc):
-    if ann is None:
+    if ann is inspect.Signature.empty:
         return TensorType.getInferred()
-    if inspect.isclass(ann) and issubclass(ann, torch.Tensor):
+    if ann is None:
+        return NoneType.get()
+    if inspect.isclass(ann) and is_tensor(ann):
         return TensorType.get()
     if is_tuple(ann):
+        # Special case for the empty Tuple type annotation `Tuple[()]`
+        if len(ann.__args__) == 1 and ann.__args__[0] == ():
+            return TupleType([])
         return TupleType([try_ann_to_type(a, loc) for a in ann.__args__])
     if is_list(ann):
         elem_type = try_ann_to_type(ann.__args__[0], loc)
@@ -284,6 +311,11 @@ def try_ann_to_type(ann, loc):
     if is_dict(ann):
         key = try_ann_to_type(ann.__args__[0], loc)
         value = try_ann_to_type(ann.__args__[1], loc)
+        # Raise error if key or value is None
+        if key is None:
+            raise ValueError(f"Unknown type annotation: '{ann.__args__[0]}' at {loc.highlight()}")
+        if value is None:
+            raise ValueError(f"Unknown type annotation: '{ann.__args__[1]}' at {loc.highlight()}")
         return DictType(key, value)
     if is_optional(ann):
         if issubclass(ann.__args__[1], type(None)):
@@ -300,6 +332,8 @@ def try_ann_to_type(ann, loc):
         return FutureType(try_ann_to_type(ann.__args__[0], loc))
     if ann is float:
         return FloatType.get()
+    if ann is complex:
+        return ComplexType.get()
     if ann is int:
         return IntType.get()
     if ann is str:
@@ -311,7 +345,7 @@ def try_ann_to_type(ann, loc):
     if ann is type(None):
         return NoneType.get()
     if inspect.isclass(ann) and hasattr(ann, "__torch_script_interface__"):
-        return InterfaceType(_qualified_name(ann))
+        return InterfaceType(ann.__torch_script_interface__)
     if ann is torch.device:
         return DeviceObjType.get()
     if ann is torch.Stream:
@@ -319,18 +353,18 @@ def try_ann_to_type(ann, loc):
     if ann is torch.dtype:
         return IntType.get()  # dtype not yet bound in as its own type
     if inspect.isclass(ann) and issubclass(ann, enum.Enum):
-        qualified_name = _qualified_name(ann)
-        if _get_script_class(qualified_name) is None:
-            torch.jit._script._recursive_compile_class(ann, loc)
-        return EnumType(_qualified_name(ann), get_enum_value_type(ann, loc), list(ann))
+        if _get_script_class(ann) is None:
+            scripted_class = torch.jit._script._recursive_compile_class(ann, loc)
+            name = scripted_class.qualified_name()
+        else:
+            name = _qualified_name(ann)
+        return EnumType(name, get_enum_value_type(ann, loc), list(ann))
     if inspect.isclass(ann):
-        qualified_name = _qualified_name(ann)
-        if _get_script_class(qualified_name) is not None:
-            return ClassType(qualified_name)
-        ignored_builtin_classes = (torch.nn.Module, tuple, list, Exception)
-        if torch._jit_internal.can_compile_class(ann) and not issubclass(ann, ignored_builtin_classes):
-            torch.jit._script._recursive_compile_class(ann, loc)
-            return ClassType(qualified_name)
+        maybe_script_class = _get_script_class(ann)
+        if maybe_script_class is not None:
+            return maybe_script_class
+        if torch._jit_internal.can_compile_class(ann):
+            return torch.jit._script._recursive_compile_class(ann, loc)
 
     # Maybe resolve a NamedTuple to a Tuple Type
     def fake_rcb(key):
@@ -342,7 +376,7 @@ def ann_to_type(ann, loc):
     the_type = try_ann_to_type(ann, loc)
     if the_type is not None:
         return the_type
-    raise ValueError(f"Unknown type annotation: '{ann}'")
+    raise ValueError(f"Unknown type annotation: '{ann}' at {loc.highlight()}")
 
 
 __all__ = [
@@ -359,6 +393,7 @@ __all__ = [
     'TensorType',
     'TupleType',
     'FloatType',
+    'ComplexType',
     'IntType',
     'ListType',
     'StringType',
