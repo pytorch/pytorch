@@ -6185,7 +6185,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_reduction_wrapper(supports_multiple_dims=True)),
     OpInfo('nansum',
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           dtypesIfCPU=all_types_and(torch.float16, torch.bool),
            supports_out=False,
            sample_inputs_func=sample_inputs_reduction_wrapper(supports_multiple_dims=True)),
     # TODO(@heitorschueroff) Add test for dtype kwarg

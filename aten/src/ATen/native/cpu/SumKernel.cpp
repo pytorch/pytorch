@@ -613,8 +613,8 @@ void sum_kernel_impl(TensorIterator &iter) {
 }
 
 void nansum_kernel_impl(TensorIterator &iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND(
-    ScalarType::Half, iter.dtype(), "nansum_cpu",
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+    ScalarType::BFloat16, ScalarType::Half, iter.dtype(), "nansum_cpu",
     [&] {
       iter.output().fill_(scalar_t(0));
       iter.parallel_reduce(
