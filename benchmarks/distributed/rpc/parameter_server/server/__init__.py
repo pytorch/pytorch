@@ -1,5 +1,4 @@
-from .AverageBatchParameterServer import AverageBatchParameterServer
-from .AverageParameterServer import AverageParameterServer
+from .server import AverageBatchParameterServer, AverageParameterServer
 
 server_map = {
     "AverageParameterServer": AverageParameterServer,
