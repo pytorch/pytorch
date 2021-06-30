@@ -4799,7 +4799,7 @@ for shape in [(1,), ()]:
         y = getFn(True).apply(a)
 
         self.assertEqual((a, None), y.grad_fn.saved_tensors)
-        saved = y.grad_fn.raw_saved_tensors
+        saved = y.grad_fn._raw_saved_tensors
         self.assertIsInstance(saved[0], torch._C._autograd.SavedTensor)
         # We can't tell the underlying tensor is None without unpacking it
         self.assertIsInstance(saved[1], torch._C._autograd.SavedTensor)
