@@ -82,8 +82,10 @@ class ParametrizationList(ModuleList):
     Args:
         modules (sequence): sequence of modules representing the parametrizations
         original (Parameter or Tensor): parameter or buffer that is parametrized
-        unsafe (bool): a boolean flag that denotes whether the parametrization breaks the invariants (e.g. can be resized),
-            Warning: the current Module might not work anymore, enable this flag at your own risk.
+        unsafe (bool): a boolean flag that denotes whether the parametrization
+            may change the dtype and shape of the tensor. Default: `False`
+            Warning: the parametrization is not checked for consistency upon registration.
+            Enable this flag at your own risk.
     """
     original: Tensor
     unsafe: bool
