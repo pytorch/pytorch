@@ -3748,7 +3748,7 @@ new_module_tests = [
         cpp_constructor_args='torch::nn::LinearOptions(3, 5)',
         input_fn=lambda: torch.rand(3),
         reference_fn=lambda i, p, _: torch.mm(i.view(1, -1), p[0].t()).view(-1) + p[1],
-        desc="single_batch",
+        desc="no_batch_dim",
         with_tf32=True,
         tf32_precision=0.005,
     ),
