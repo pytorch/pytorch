@@ -156,7 +156,7 @@ test_python_shard2() {
 }
 
 test_python() {
-  time python test/run_test.py --exclude-jit-executor --exclude-dist-executor --verbose --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --exclude-jit-executor --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 

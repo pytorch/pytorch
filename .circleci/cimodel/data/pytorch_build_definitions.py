@@ -345,7 +345,7 @@ def instantiate_configs(only_slow_gradcheck):
         # TODO: fix pure_torch python test packaging issue.
         if shard_test:
             restrict_phases = ["build"] if restrict_phases is None else restrict_phases
-            restrict_phases.extend(["test1", "test2"])
+            restrict_phases.extend(["test1", "test2", "distributed_test"])
         if build_only or is_pure_torch:
             restrict_phases = ["build"]
 
