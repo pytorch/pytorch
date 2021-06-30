@@ -696,7 +696,7 @@ class TestFreezing(JitTestCase):
         # Post-freezing mutating m_s.a  does not affect m_f (m_f has its own copy).
         v = m_s.a
         v.append(5)
-        # m_s.a = v
+        m_s.a = v
         self.assertFalse(m_f.hasattr('a'))
         out = m_f.forward(torch.tensor([5]))
         expected = [1, 2, 3, 4]
