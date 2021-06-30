@@ -210,6 +210,7 @@ _functorch_lagging_meta = {
     ('narrow', ''),
     ('ne', ''),
     ('neg', ''),
+    ('nn.functional.dropout', ''),
     ('nn.functional.gelu', ''),
     ('nn.functional.hardshrink', ''),
     ('nn.functional.hardswish', ''),
