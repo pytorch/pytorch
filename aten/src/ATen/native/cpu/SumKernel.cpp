@@ -469,13 +469,7 @@ void sum_kernel_impl(TensorIterator &iter) {
 
 }  // namespace (anonymous)
 
-// sum on Float16 has poor accuracy with AVX2, and more so with AVX512.
-// So until it's fixed, it won't be dispatched with AVX512. GH issue 59489.
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-#ifndef CPU_CAPABILITY_AVX512
 REGISTER_DISPATCH(sum_stub, &sum_kernel_impl);
-#else
-REGISTER_NO_AVX512_DISPATCH(sum_stub, reduce_fn);
-#endif
 
 }}  // namespace at::native
