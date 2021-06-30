@@ -81,8 +81,6 @@ struct LocalState {
 #pragma pack(push, 1)
 template <int MAX_DIMS>
 struct SpecializationKey {
-  constexpr static int SIZEOF_SELF = 10 + MAX_DIMS;
-
   enum DimFlags {
     SIZE_MISSING = 1 << 0, // leading dimension implicitly added
     SIZE_ONE = 1 << 1, // == 1
@@ -151,9 +149,9 @@ struct SpecializationKey {
 
   int cmp(const SpecializationKey<MAX_DIMS>& other) const {
     static_assert(
-        sizeof(SpecializationKey<MAX_DIMS>) == SIZEOF_SELF,
+        sizeof(SpecializationKey<MAX_DIMS>) == 10 + MAX_DIMS,
         "struct is not packed, memcmp requires no padding");
-    return memcmp(this, &other, SIZEOF_SELF);
+    return memcmp(this, &other, sizeof(SpecializationKey<MAX_DIMS>));
   }
 
   at::DispatchKeySet dispatch_key() const {
@@ -324,9 +322,8 @@ class alignas(64) CompileCache3 {
 
       // NOLINTNEXTLINE: C-style arrays
       void* call_args
-          [Counts::num_buffers + stride_args_from_.size() + shape_from_.size()];
-      constexpr int allocated_arg_offset =
-          Counts::num_in + Counts::num_out_given;
+          [Counts::num_buffers + Counts::num_keys * MAX_DIMS + MAX_DIMS];
+      constexpr int allocated_arg_offset = Counts::num_keys;
       for (int i = 0; i < allocated_arg_offset; ++i) {
         call_args[i] = args[i].data_ptr();
       }
@@ -393,6 +390,9 @@ class alignas(64) CompileCache3 {
       TORCH_CHECK(shape_from_.size() <= MAX_DIMS);
       TORCH_CHECK(allocated_outputs_.size() == Counts::num_out_allocated);
       TORCH_CHECK(backwards_functions_.size() <= Counts::num_in);
+      TORCH_CHECK(
+          stride_args_from_.size() + shape_from_.size() <=
+          Counts::num_keys * MAX_DIMS + MAX_DIMS);
       for (auto& item : shape_from_) {
         TORCH_CHECK(item.first < Counts::num_keys);
         TORCH_CHECK(item.second < MAX_DIMS);
