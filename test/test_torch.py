@@ -4394,6 +4394,7 @@ else:
         if dtype != torch.int:
             yield torch.tensor([0, -2, nan, 10.2, inf], dtype=dtype, device=device)
 
+    @onlyOnCPUAndCUDA
     @dtypes(torch.int, torch.float, torch.cfloat)
     def test_corrcoef(self, device, dtype):
         for x in self._generate_correlation_tensors(device, dtype):
