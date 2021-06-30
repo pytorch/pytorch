@@ -77,8 +77,9 @@ __global__ void multilabel_margin_loss_forward_kernel(
   if (threadIdx.x == 0) {
     for (int dt = 0; dt < dim; dt++) {
       int target_idx = target_k[dt];
-      if (target_idx < 0)
+      if (target_idx < 0) {
         break;
+      }
       is_target_k[target_idx] = static_cast<scalar_t>(1);
     }
   }
@@ -89,8 +90,9 @@ __global__ void multilabel_margin_loss_forward_kernel(
   for (int dt = 0; dt < dim; dt++) {
     // next target:
     int target_idx = target_k[dt];
-    if (target_idx < 0)
+    if (target_idx < 0) {
       break;
+    }
 
     // current value for target
     scalar_t input_target_k = input_k[target_idx];
@@ -161,8 +163,9 @@ __global__ void multilabel_margin_loss_backward_kernel(
   for (int dt = 0; dt < dim; dt++) {
     // next target:
     int target_idx = static_cast<int>(target_k[dt]);
-    if (target_idx < 0)
+    if (target_idx < 0) {
       break;
+    }
 
     // current value for target
     scalar_t input_target_k = input_k[target_idx];
