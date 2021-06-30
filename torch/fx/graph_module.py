@@ -546,7 +546,8 @@ class {module_name}(torch.nn.Module):
     def __deepcopy__(self, memo):
         fake_mod = torch.nn.Module()
         fake_mod.__dict__ = copy.deepcopy(self.__dict__)
-        return GraphModule(fake_mod, self.graph)
+        graph_copy = copy.deepcopy(self.graph)
+        return GraphModule(fake_mod, graph_copy)
 
     def __copy__(self):
         return GraphModule(self, self.graph)
