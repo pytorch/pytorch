@@ -154,6 +154,9 @@ class ExcludeSingleDispatchKeyGuard {
   ExcludeDispatchKeyGuard<k_set.raw_repr(), has_overlap> guard_;
 };
 
+// Create a guard which can be exported by subclassing a specialization
+// of ExcludeDispatchKeyGuard. Note that because it will be created in ATen,
+// we need TORCH_API rather than C10_API.
 #define SPECIALIZE_EXCLUDE_GUARD(guard_name, k, has_overlap)              \
   class TORCH_API guard_name                                              \
       : c10::impl::ExcludeDispatchKeyGuard<k.raw_repr(), has_overlap> {   \
