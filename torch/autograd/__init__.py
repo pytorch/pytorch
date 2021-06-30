@@ -262,7 +262,7 @@ if not torch._C._autograd_init():
 from torch._C._autograd import (DeviceType, ProfilerActivity, ProfilerState, ProfilerConfig, ProfilerEvent,
                                 _enable_profiler_legacy, _disable_profiler_legacy, _profiler_enabled,
                                 _enable_record_function, _set_empty_test_observer, kineto_available,
-                                _supported_kineto_activities, _add_metadata_json)
+                                _supported_kineto_activities, _add_metadata_json, SavedTensor)
 
 if kineto_available():
     from torch._C._autograd import (_ProfilerResult, _KinetoEvent,
