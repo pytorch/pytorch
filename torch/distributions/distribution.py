@@ -49,6 +49,17 @@ class Distribution(object):
                     continue  # skip constraints that cannot be checked
                 if param not in self.__dict__ and isinstance(getattr(type(self), param), lazy_property):
                     continue  # skip checking lazily-constructed args
+                value = getattr(self, param)
+                valid = constraint.check(value)
+                if not valid.all():
+                    invalid_value = value.data[~valid]
+                    raise ValueError(
+                        f"Expected parameter {param} "
+                        f"({type(value).__name__} of shape {tuple(value.shape)}) "
+                        f"of distribution {repr(self)} "
+                        f"to satisfy the constraint {repr(constraint)}, "
+                        f"but found invalid values:\n{invalid_value}"
+                    )
                 if not constraint.check(getattr(self, param)).all():
                     raise ValueError("The parameter {} has invalid values".format(param))
         super(Distribution, self).__init__()
@@ -276,11 +287,12 @@ class Distribution(object):
         valid = support.check(value)
         if not valid.all():
             invalid_value = value.data[~valid]
-            error = ValueError(
-                f"The value argument ({type(value).__name__} of shape {tuple(value.shape)}) "
-                f"must be within the support ({repr(support)}) "
-                f"of the distribution {repr(self)}. "
-                f"Invalid values:\n{invalid_value}"
+            raise ValueError(
+                "Expected value argument "
+                f"({type(value).__name__} of shape {tuple(value.shape)}) "
+                f"to be within the support ({repr(support)}) "
+                f"of the distribution {repr(self)}, "
+                f"but found invalid values:\n{invalid_value}"
             )
 
     def _get_checked_instance(self, cls, _instance=None):
