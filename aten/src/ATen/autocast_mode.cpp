@@ -60,8 +60,8 @@ thread_local int nesting = 0;
 // autocast_cpu_dtype is the lower_precision_fp used by AutocastCPU.
 thread_local at::ScalarType autocast_cpu_dtype = at::kBFloat16;
 
+// autocast_gpu_dtype is the lower_precision_fp used by AutocastGPU.
 at::ScalarType autocast_gpu_dtype = at::kHalf;
-
 }
 
 void clear_cache() {
