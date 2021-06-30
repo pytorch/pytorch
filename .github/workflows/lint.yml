@@ -421,7 +421,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v2
         with:
-          python-version: 3.8
+          python-version: 3.6
           architecture: x64
       - name: Fetch PyTorch
         uses: actions/checkout@v2
