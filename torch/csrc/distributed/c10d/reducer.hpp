@@ -110,7 +110,7 @@ class TORCH_API Reducer {
       GradBucket grad_bucket);
 
   // Returns a vector of tensors in each bucket in sequential order.
-  std::vector<at::Tensor> get_bucket_tensors() const;
+  std::vector<c10d::GradBucket> get_bucket_tensors() const;
 
   // Rebuild buckets based on rebuilt_params_ and rebuilt_param_indices_
   // according to when tensors received grads in the backward pass.

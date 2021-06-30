@@ -442,12 +442,19 @@ void Reducer::mark_variable_ready_sparse(size_t variable_index) {
   });
 }
 
-std::vector<at::Tensor> Reducer::get_bucket_tensors() const {
+std::vector<c10d::GradBucket> Reducer::get_bucket_tensors() const {
   std::lock_guard<std::mutex> lock(mutex_);
-  std::vector<at::Tensor> bucketTensors;
+  std::vector<c10d::GradBucket> bucketTensors;
   bucketTensors.reserve(buckets_.size());
-  for (const auto& bucket : buckets_) {
-    bucketTensors.emplace_back(bucket.replicas[0].contents);
+  for (int i = 0; i < buckets_.size(); ++i) {
+    bucketTensors.emplace_back(
+      i,
+      // This API is only used for uneven inputs which requires zero tensors
+      at::zeros_like(buckets_[i].replicas[0].contents),
+      buckets_[i].replicas[0].offsets,
+      buckets_[i].replicas[0].lengths,
+      buckets_[i].replicas[0].sizes_vec
+    );
   }
   return bucketTensors;
 }
