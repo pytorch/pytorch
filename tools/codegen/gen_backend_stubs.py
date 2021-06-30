@@ -158,36 +158,6 @@ but expected {expected_overload_count} kernel(s). The expected function schemas 
             missing_kernels_count += 1
     assert missing_kernels_count == 0, "Found at least one missing kernel override. Check error messages above."
 
-    # Idea: If we strip out all whitespace from the kernel signatures + the the file where kernel definitions are defined,
-    # then we can directly match the file against each signature
-    # This makes regex-ing easier to deal with since clang-format usually spreads the kernel signature over multiple lines.
-    # (And we don't want the codegen to throw an error at you because you have extra whitespace).
-    # backend_defns_no_ws_str: str = ''.join(backend_defns.split())
-
-    # class_name: Optional[str] = backend_indices[backend_key].native_function_class_name()
-    # assert class_name is not None
-
-    # kernel_defn_regex = rf'{class_name}::[\w\d]*\([^{{]*\)'
-    # backend_defns_no_ws = re.findall(kernel_defn_regex, backend_defns_no_ws_str)
-
-    # def create_sig(f: NativeFunction) -> str:
-        # with native_function_manager(f):
-            # prefix = f'{class_name}::'
-            # sig_str = DispatcherSignature.from_schema(f.func, prefix=prefix).decl()
-            # # Trying to regex match the return value before the class name felt too fragile,
-            # # so instead I remove it from the NativeFunction decl.
-            # return prefix + sig_str.split(prefix, 1)[1]
-    # backend_sigs: List[str] = [create_sig(f) for f in backend_native_funcs]
-    # backend_sigs_no_ws: Dict[str, str] = {''.join(sig.split()): sig for sig in backend_sigs}
-
-    # missing_kernels_count = 0
-    # for sig in backend_sigs_no_ws.keys():
-        # if sig not in backend_defns_no_ws:
-            # import pdb; pdb.set_trace()
-            # print(f'{class_name} is missing a function override. Expecting a kernel with signature {backend_sigs_no_ws[sig]}')
-            # missing_kernels_count += 1
-    # assert missing_kernels_count == 0, "Found at least one missing kernel override. Check error messages above."
-
 def main() -> None:
     parser = argparse.ArgumentParser(description='Generate backend stub files')
     parser.add_argument(
