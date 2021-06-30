@@ -558,6 +558,39 @@ class BasicModuleTestWithCompiler(JitBackendTestCaseWithCompiler):
         input = torch.randn(5)
         self.check_forward((input, input))
 
+class ErrorMessagesWithCompiler(JitBackendTestCase):
+    """
+    Tests for errors that occur with compiler, specifically:
+        * an operator is not supported by the backend
+    """
+
+    class ModuleNotSupported(torch.nn.Module):
+        """
+        A module with an operator that is not supported.
+        """
+        def __init__(self):
+            super().__init__()
+
+        def forward(self, x, h):
+            return x * h
+            self._loweredmodule.forward()
+
+    def setUp(self):
+        super().setUp()
+
+    def test_errors(self):
+        scripted_module_n = torch.jit.script(ErrorMessagesWithCompiler.ModuleNotSupported())
+        # Test exception is thrown when lowering a module with an unsupported operator
+        with self.assertRaisesRegexWithHighlight(RuntimeError,
+                                                 # Special escape characters are replaced with '.'
+                                                 r"""The node of aten::mul is not supported in this compiler. .*
+        def forward.self, x, h.:
+            return x . h
+                   ~~~~~ <--- HERE
+            self._loweredmodule.forward..
+""", ""):
+            lowered_module_n = torch._C._jit_to_backend("backend_with_compiler_demo", scripted_module_n, {"forward": {"": ""}})
+
 
 # This is needed for IS_WINDOWS or IS_MACOS to skip the tests.
 @unittest.skipIf(TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE,
@@ -571,12 +604,18 @@ class TestBackendsWithCompiler(JitTestCase):
     def __init__(self, name):
         super().__init__(name)
         self.basic_module_compiler_test = BasicModuleTestWithCompiler(name)
+        self.error_module_compiler_test = ErrorMessagesWithCompiler(name)
 
     def setUp(self):
         super().setUp()
         if not TEST_WITH_ROCM:
             self.basic_module_compiler_test.setUp()
+            self.error_module_compiler_test.setUp()
 
     @skipIfRocm
     def test_execution(self):
         self.basic_module_compiler_test.test_execution()
+
+    @skipIfRocm
+    def test_errors(self):
+        self.error_module_compiler_test.test_errors()
