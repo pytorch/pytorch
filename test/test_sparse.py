@@ -11,7 +11,7 @@ from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_versi
 from numbers import Number
 from typing import Dict, Any
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, dtypes, dtypesIfCPU, onlyCPU, onlyCUDA)
+    (instantiate_device_type_tests, ops, dtypes, dtypesIfCPU, onlyCPU, onlyCUDA, deviceCountAtLeast)
 from torch.testing._internal.common_methods_invocations import \
     (sparse_unary_ufuncs)
 
