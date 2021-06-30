@@ -71,11 +71,9 @@ Tensor repeat_interleave(
     int64_t repeats,
     c10::optional<int64_t> dim,
     c10::optional<int64_t> output_size) {
-  return at::native::repeat_interleave(
-      self,
-      at::tensor({repeats}, self.options().dtype(kLong)),
-      dim,
-      output_size);
+  at::Tensor repeats_ =
+      at::empty(1, self.options().dtype(at::kLong)).fill_(repeats);
+  return at::native::repeat_interleave(self, repeats_, dim, output_size);
 }
 
 } // namespace native
