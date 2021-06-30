@@ -209,7 +209,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   }
 
 #if defined(__GNUC__) || defined(__clang__)
-#define USE_COMPUTED_GOTO
+#define JIT_USE_COMPUTED_GOTO
 #endif
 // Primitives for making interpreter internal state transitions.
 // We maintain two local variables as the internal interpreter state:
@@ -226,7 +226,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   profiling::InstructionSpan span {                  \
     *frame.function->instructions_source()[frame.pc] \
   }
-#if defined(USE_COMPUTED_GOTO)
+#if defined(JIT_USE_COMPUTED_GOTO)
 #define INST(NAME) \
   NAME:            \
   label_##NAME
@@ -257,7 +257,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       checkAndStartRecordFunction(frames.back(), stack);
     }
 
-#if defined(USE_COMPUTED_GOTO)
+#if defined(JIT_USE_COMPUTED_GOTO)
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays)
     static void* dispatch_table[] = {
 #define DISPATCH_TABLE_ENTRY(op, _) &&label_##op,
@@ -729,6 +729,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
 #undef INST
 #undef INST_GUARD
 #undef INST_FETCH
+#undef JIT_USE_COMPUTED_GOTO
 
   void formatStackTrace(std::ostream& out) {
     format_stack_trace(out, callstack());

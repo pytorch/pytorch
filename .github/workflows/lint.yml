@@ -87,6 +87,46 @@ jobs:
         run: |
           (! git --no-pager grep -I -no $'#include <cub/' --  ./aten  ':(exclude)aten/src/ATen/cuda/cub.cuh' || (echo "The above files have direct cub include; please include ATen/cuda/cub.cuh instead and wrap your cub calls in at::native namespace if necessary"; false))
 
+  clang-format:
+    runs-on: ubuntu-18.04
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.x
+          architecture: x64
+      - name: Fetch PyTorch
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0 # deep clone, to allow us to use git merge-base
+      - name: Run clang-format
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -eu
+          # This is necessary to get the same results regardless of whether the
+          # PR was opened directly or from a forked repo. See: `9f890a92` for more info.
+          git remote add upstream https://github.com/pytorch/pytorch
+          git fetch upstream "$GITHUB_BASE_REF"
+
+          # only run clang-format on allowlisted files
+          echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+          echo "| clang-format failures found! Run: "
+          echo "|    tools/linter/clang_format_ci.sh ${BASE_SHA} "
+          echo "| to fix this error. "
+          echo "| For more info, see: https://github.com/pytorch/pytorch/wiki/clang-format "
+          echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+
+          tools/linter/clang_format_ci.sh "${BASE_SHA}"
+
+          GIT_DIFF=$(git diff)
+          if [[ -z $GIT_DIFF ]]; then
+            exit 0
+          fi
+          echo "$GIT_DIFF"
+          exit 1
+
   py2-setup-validate-errormsg:
     runs-on: ubuntu-18.04
     steps:
@@ -103,6 +143,8 @@ jobs:
             echo 'Running setup.py with Python 2 did not give the expected error message.'
             false
           fi
+      - name: Keep torch.utils.collect_env python2 compliant
+        run: python2 -m py_compile torch/utils/collect_env.py
 
   shellcheck:
     runs-on: ubuntu-18.04
@@ -270,7 +312,7 @@ jobs:
     runs-on: linux.2xlarge
     container:
       # ubuntu18.04-cuda10.2-py3.6-tidy11
-      image: ghcr.io/pytorch/cilint-clang-tidy:7f0b4616100071a4813318bfdbd5b06ae36c5272
+      image: ghcr.io/pytorch/cilint-clang-tidy:b5a795a1165938adc6ccdab36bfa59bb3829ad47
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
@@ -288,8 +330,6 @@ jobs:
         run: |
           cd "${GITHUB_WORKSPACE}"
           set -eux
-          git remote add upstream https://github.com/pytorch/pytorch
-          git fetch upstream "$GITHUB_BASE_REF"
 
           if [ ! -d build ]; then
             git submodule update --init --recursive
@@ -333,6 +373,7 @@ jobs:
             --verbose \
             --paths torch/csrc/ \
             --diff-file pr.diff \
+            --include-dir /usr/lib/llvm-11/include/openmp \
             -g"-torch/csrc/jit/passes/onnx/helper.cpp" \
             -g"-torch/csrc/jit/passes/onnx/shape_type_inference.cpp" \
             -g"-torch/csrc/jit/serialization/onnx.cpp" \
@@ -402,7 +443,7 @@ jobs:
           set -eux
           pip install -r requirements.txt
           pip install numpy==1.20 # https://github.com/pytorch/pytorch/pull/60472
-          pip install mypy==0.812
+          pip install expecttest==0.1.3 mypy==0.812
           # Needed to check tools/render_junit.py
           pip install junitparser rich
       - name: Run autogen
