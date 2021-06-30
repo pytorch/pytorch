@@ -222,16 +222,6 @@ class TestNNAPI(TestCase):
                             torch.tensor([[3.0, 4.0], [5.0, 6.0]]),
                         ])
 
-                # Test flexible size
-                self.check(
-                    BinaryModule(),
-                    [
-                        torch.tensor([[1.0, 2.0]]),
-                        torch.tensor([[3.0, 4.0], [5.0, 6.0]]),
-                    ],
-                    convert_args=[torch.zeros(1, 2), torch.zeros(2, 2)],
-                )
-
     def test_hardtanh(self):
         inp = torch.tensor([-2.0, -0.5, 0.5, 2.0, 7.0])
         self.check(torch.nn.Hardtanh(), inp)
