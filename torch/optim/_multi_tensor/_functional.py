@@ -400,12 +400,12 @@ def rmsprop(params: List[Tensor],
             states: List[Tensor],
             square_avg: List[Tensor],
             *,
-            weight_decay: float,
-            centered: float,
-            eps: float,
-            momentum: float,
             lr: float,
-            alpha: float):
+            alpha: float,
+            eps: float,
+            weight_decay: float,
+            momentum: float,
+            centered: float):
     r"""Functional API that performs RMSprop algorithm computation.
 
     See :class:`~torch.optim.RMSprop` for details.

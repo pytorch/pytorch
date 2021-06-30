@@ -100,12 +100,12 @@ class RMSprop(Optimizer):
                       grads,
                       states,
                       square_avg,
-                      weight_decay=group['weight_decay'],
-                      centered=group['centered'],
-                      eps=group['eps'],
-                      momentum=group['momentum'],
                       lr=group['lr'],
-                      alpha=group['alpha'])
+                      alpha=group['alpha'],
+                      eps=group['eps'],
+                      weight_decay=group['weight_decay'],
+                      momentum=group['momentum'],
+                      centered=group['centered'])
 
         return loss
 
