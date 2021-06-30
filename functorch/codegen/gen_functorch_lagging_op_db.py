@@ -24,6 +24,7 @@ def deindent(code: str) -> str:
 
 if __name__ == '__main__':
     supported = {(opinfo.name, opinfo.variant_test_name) for opinfo in op_db}
+    supported = sorted(supported)
     print(deindent("""\
     # Copyright (c) Facebook, Inc. and its affiliates.
     # All rights reserved.
