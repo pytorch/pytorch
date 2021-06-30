@@ -21,7 +21,6 @@ import torch._jit_internal as _jit_internal
 from torch.utils import set_module
 from torch.jit._recursive import ScriptMethodStub, wrap_cpp_module, infer_methods_to_compile
 from torch.nn import Module
-from torch.jit.annotations import ann_to_type
 from torch.jit._state import _enabled
 from torch.jit._builtins import _register_builtin
 from torch._six import with_metaclass
@@ -969,7 +968,7 @@ def create_script_list(obj, type_hint=None):
         and can be passed between Python and TorchScript with reference semantics and
         zero copy overhead.
     """
-    return torch._C.ScriptList(obj)  # type: ignore
+    return torch._C.ScriptList(obj)  # type: ignore[attr-defined]
 
 
 def script(obj, optimize=None, _frames_up=0, _rcb=None):
