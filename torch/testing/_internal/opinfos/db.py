@@ -30,7 +30,7 @@ from torch.testing._internal.common_utils import \
      torch_to_numpy_dtype_dict, TEST_WITH_ASAN,
      GRADCHECK_NONDET_TOL,)
 from torch.testing._internal.opinfos.core import \
-    (OpInfo, SkipInfo, DecorateInfo, SampleInput, S, M, L)
+    (OpInfo, SkipInfo, DecorateInfo, SampleInput, S, M, L, _NOTHING)
 from torch.testing._internal.opinfos.unary import UnaryUfuncInfo
 from torch.testing._internal.opinfos.spectral import SpectralFuncInfo
 from torch.testing._internal.opinfos.shape import ShapeFuncInfo
@@ -6662,3 +6662,33 @@ unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo)]
 spectral_funcs = [op for op in op_db if isinstance(op, SpectralFuncInfo)]
 sparse_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse is True]
 shape_funcs = [op for op in op_db if isinstance(op, ShapeFuncInfo)]
+
+# TODO: review porting these to make_tensor
+def index_variable(shape, max_indices, device=torch.device('cpu')):
+    if not isinstance(shape, tuple):
+        shape = (shape,)
+    index = torch.rand(*shape, dtype=torch.double, device=device).mul_(max_indices).floor_().long()
+    return index
+
+def gather_variable(shape, index_dim, max_indices, duplicate=False, device=torch.device('cpu')):
+    assert len(shape) == 2
+    assert index_dim < 2
+    batch_dim = 1 - index_dim
+    index = torch.zeros(*shape, dtype=torch.long, device=device)
+    for i in range(shape[index_dim]):
+        index.select(index_dim, i).copy_(
+            torch.randperm(max_indices, device=device)[:shape[batch_dim]])
+    if duplicate:
+        index.select(batch_dim, 0).copy_(index.select(batch_dim, 1))
+    return index
+
+def bernoulli_scalar():
+    return torch.tensor(0, dtype=torch.bool).bernoulli_()
+
+def mask_not_all_zeros(shape):
+    assert len(shape) > 0
+    while True:
+        result = torch.randn(shape).gt(0)
+        if result.sum() > 0:
+            return result
+

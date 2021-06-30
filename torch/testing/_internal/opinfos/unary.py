@@ -1,7 +1,7 @@
 import torch
 from torch.testing import floating_types
 from torch.testing._internal.common_utils import make_tensor
-from .core import OpInfo, SampleInput
+from .core import OpInfo, SampleInput, L
 
 def sample_inputs_unary(op_info, device, dtype, requires_grad, **kwargs):
     low, high = op_info.domain
