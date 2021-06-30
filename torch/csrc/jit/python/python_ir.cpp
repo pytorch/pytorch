@@ -571,6 +571,7 @@ void initPythonIRBindings(PyObject* module_) {
           "getModuleHierarchy",
           [](Node& n) { return torch::jit::utils::getNodesModuleHierarchy(n); })
       .NS(addInput)
+      .NS(copyMetadata)
       .NS(replaceInput)
       .NS(replaceInputWith)
       .NS(replaceAllUsesWith)

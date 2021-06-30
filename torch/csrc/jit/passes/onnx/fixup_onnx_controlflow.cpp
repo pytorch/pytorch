@@ -147,6 +147,7 @@ std::vector<Value*> ConvertSequenceDependencies(Node* node, int opset_version) {
       split_node->addInput(loop_output);
       split_node->insertAfter(loop_node);
       split_node->output()->copyMetadata(loop_output);
+      split_node->copyMetadata(loop_node);
 
       // Update loop output metadata.
       loop_output->copyMetadata(inserted_value);
@@ -194,6 +195,7 @@ void FixupONNXSubblockOutputs(Node* n) {
         id_node->insertBefore(block->return_node());
         id_node->addInput(output);
         id_node->output()->copyMetadata(output);
+        id_node->copyMetadata(n);
         block->return_node()->replaceInputWith(output, id_node->output());
       }
     }
@@ -211,8 +213,10 @@ void FixupONNXLoopNodeInputs(Node* node) {
 
   // add cast to condition input outside the loop.
   Value* cond_val = node->input(1);
-  if (IsCondCastRequired(cond_val))
-    InsertCastForCond(cond_val, graph, node);
+  if (IsCondCastRequired(cond_val)) {
+    auto* cast_node = InsertCastForCond(cond_val, graph, node);
+    cast_node->copyMetadata(node);
+  }
 
   // Setup Loop input cond and i.
   TORCH_INTERNAL_ASSERT(node->blocks().size() == 1);
@@ -225,8 +229,11 @@ void FixupONNXLoopNodeInputs(Node* node) {
 
   // add cast to condition input inside the loop.
   Value* next_cond_val = sub_block->outputs().at(0);
-  if (IsCondCastRequired(next_cond_val))
-    InsertCastForCond(next_cond_val, graph, sub_block->return_node());
+  if (IsCondCastRequired(next_cond_val)) {
+    auto* cast_node =
+        InsertCastForCond(next_cond_val, graph, sub_block->return_node());
+    cast_node->copyMetadata(node);
+  }
 }
 
 std::vector<Value*> FixupONNXLoopNode(Node* node, int opset_version) {
@@ -277,6 +284,7 @@ void InferShapeTypeForUninitializedOutput(
         TensorType::create(*(output_type->scalarType()), at::kCPU, {}, {}));
   }
   const_node->insertBefore(block->return_node());
+  const_node->copyMetadata(block->return_node());
   uninitialized_output->replaceAllUsesWith(const_node->output());
   uninitialized_output->node()->destroy();
 }
@@ -316,6 +324,7 @@ void ONNXFixupUninitializedOutput(Node* node) {
   if (!if_node->input()->type()->isSubtypeOf(BoolType::get())) {
     Node* cast_node = CreateCastToBoolNode(if_node->input(), graph);
     cast_node->insertBefore(if_node);
+    cast_node->copyMetadata(if_node);
     if_node->replaceInputWith(if_node->input(), cast_node->output());
   }
 

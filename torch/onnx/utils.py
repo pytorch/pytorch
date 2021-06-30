@@ -124,12 +124,14 @@ def _split_tensor_list_constants(g, block):
             for val in node.output().toIValue():
                 input = g.insertConstant(val)
                 input.node().moveBefore(node)
+                input.node().copyMetadata(node)
                 inputs.append(input)
 
             lc = (g.create("prim::ListConstruct", inputs)
                   .insertBefore(node)
                   .output()
                   .setType(ListType.ofTensors()))
+            lc.node().copyMetadata(node)
             node.output().replaceAllUsesWith(lc)
 
 
@@ -206,7 +208,9 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
         input_names = [] if input_names is None else input_names
         dynamic_axes = {} if dynamic_axes is None else dynamic_axes
         torch._C._jit_pass_onnx_set_dynamic_input_shape(graph, dynamic_axes, input_names)
+    torch._C._jit_pass_onnx_lint(graph)
     graph = torch._C._jit_pass_onnx(graph, operator_export_type)
+    torch._C._jit_pass_onnx_lint(graph)
     torch._C._jit_pass_lint(graph)
 
     torch._C._jit_pass_onnx_scalar_type_analysis(graph, True, _export_onnx_opset_version)
@@ -427,6 +431,7 @@ def _create_jit_graph(model, args):
         return graph, params, torch_out, None
     else:
         graph, torch_out = _trace_and_get_graph_from_model(model, args)
+        torch._C._jit_pass_onnx_lint(graph)
         state_dict = _unique_state_dict(model)
         params = list(state_dict.values())
         graph_inputs = list(graph.inputs())
