@@ -136,17 +136,21 @@ genrule(
         "aten/src/ATen/RegisterMeta.cpp",
         "aten/src/ATen/RegisterSchema.cpp",
         "aten/src/ATen/CPUFunctions.h",
+        "aten/src/ATen/CPUFunctions_inl.h",
         "aten/src/ATen/CUDAFunctions.h",
+        "aten/src/ATen/CUDAFunctions_inl.h",
         "aten/src/ATen/CompositeExplicitAutogradFunctions.h",
+        "aten/src/ATen/CompositeExplicitAutogradFunctions_inl.h",
         "aten/src/ATen/CompositeImplicitAutogradFunctions.h",
+        "aten/src/ATen/CompositeImplicitAutogradFunctions_inl.h",
         "aten/src/ATen/Functions.h",
         "aten/src/ATen/Functions.cpp",
         "aten/src/ATen/RedispatchFunctions.h",
-        "aten/src/ATen/RedispatchFunctions.cpp",
         "aten/src/ATen/Operators.h",
         "aten/src/ATen/Operators.cpp",
         "aten/src/ATen/NativeFunctions.h",
         "aten/src/ATen/MetaFunctions.h",
+        "aten/src/ATen/MetaFunctions_inl.h",
         "aten/src/ATen/NativeMetaFunctions.h",
         "aten/src/ATen/core/TensorBody.h",
         "aten/src/ATen/core/TensorMethods.cpp",
@@ -328,12 +332,9 @@ filegroup(
 filegroup(
     name = "th_srcs",
     srcs = [
-        "aten/src/TH/THAllocator.cpp",
-        "aten/src/TH/THBlas.cpp",
         "aten/src/TH/THGeneral.cpp",
         "aten/src/TH/THStorageFunctions.cpp",
         "aten/src/TH/THTensor.cpp",
-        "aten/src/TH/THTensorMoreMath.cpp",
     ],
 )
 
@@ -543,10 +544,6 @@ header_template_rule(
     src = "aten/src/TH/THGeneral.h.in",
     out = "aten/src/TH/THGeneral.h",
     substitutions = {
-        "#cmakedefine USE_BLAS": "#define USE_BLAS",
-        "#cmakedefine USE_LAPACK": "#define USE_LAPACK",
-        "#cmakedefine BLAS_F2C": "/* #undef BLAS_F2C */",
-        "#cmakedefine BLAS_USE_CBLAS_DOT": "#define BLAS_USE_CBLAS_DOT",
     },
 )
 
