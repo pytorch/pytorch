@@ -1,26 +1,17 @@
+# @generated DO NOT EDIT MANUALLY
 # Template is at:    .github/templates/windows_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: Windows CI (!{{ build_environment }})
+name: Windows CI (periodic-pytorch-win-vs2019-cuda11-cudnn8-py3)
 
 on:
-{%- if on_pull_request %}
-  pull_request:
-{%- endif %}
-{%- if is_scheduled %}
   schedule:
-    - cron: !{{ is_scheduled }}
-{%- else %}
-  push:
-    branches:
-      - master
-      - release/*
-{%- endif %}
+    - cron: 45 0,4,8,12,16,20 * * *
   workflow_dispatch:
 
 env:
-  BUILD_ENVIRONMENT: !{{ build_environment }}
+  BUILD_ENVIRONMENT: periodic-pytorch-win-vs2019-cuda11-cudnn8-py3
   BUILD_WHEEL: 1
-  CUDA_VERSION: "!{{ cuda_version }}"
+  CUDA_VERSION: "11.3"
   IN_CI: 1
   INSTALL_WINDOWS_SDK: 1
   PYTHON_VERSION: "3.8"
@@ -28,20 +19,18 @@ env:
   VC_PRODUCT: "BuildTools"
   VC_VERSION: ""
   VC_YEAR: "2019"
-{%- if cuda_version != "cpu" %}
   TORCH_CUDA_ARCH_LIST: "7.0"
   USE_CUDA: 1
-{%- endif %}
 
 concurrency:
-  group: !{{ build_environment }}-${{ github.event.pull_request.number || github.sha }}
+  group: periodic-pytorch-win-vs2019-cuda11-cudnn8-py3-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 jobs:
   build:
     runs-on: "windows.4xlarge"
     env:
-      JOB_BASE_NAME: !{{ build_environment }}-build
+      JOB_BASE_NAME: periodic-pytorch-win-vs2019-cuda11-cudnn8-py3-build
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
@@ -55,7 +44,6 @@ jobs:
         shell: powershell
         run: |
           .\.circleci\scripts\vs_install.ps1
-{%- if cuda_version != "cpu" %}
       - name: Install Cuda
         shell: bash
         run: |
@@ -64,7 +52,6 @@ jobs:
         shell: bash
         run: |
           .circleci/scripts/windows_cudnn_install.sh
-{%- endif %}
       - name: Build
         shell: bash
         run: |
@@ -90,44 +77,37 @@ jobs:
           path: C:\w\build-results
 
   generate-test-matrix:
-{%- if only_build_on_pull_request %}
-    if: ${{ github.repository_owner == 'pytorch' && github.event_name == 'push' }}
-{%- else %}
     if: ${{ github.repository_owner == 'pytorch' }}
-{%- endif %}
     runs-on: ubuntu-18.04
     env:
-      TEST_RUNNER_TYPE: !{{ test_runner_type }}
-      NUM_TEST_SHARDS: !{{ num_test_shards }}
+      NUM_TEST_SHARDS: 2
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
-      render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
     container:
       image: python:3.9
     steps:
-      - name: Install dependencies
-        run: pip install typing-extensions
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - name: Generating test matrix
         id: set-matrix
-        run: .github/scripts/generate_pytorch_test_matrix.py
+        run: |
+          # outputting for debugging purposes
+          MATRIX=$(python .github/scripts/generate_pytorch_test_matrix.py)
+          echo "${MATRIX}"
+          echo "::set-output name=matrix::${MATRIX}"
 
   test:
-{%- if only_build_on_pull_request %}
-    if: ${{ github.event_name == 'push' }}
-{%- endif %}
+    runs-on: windows.8xlarge.nvidia.gpu
     env:
-      JOB_BASE_NAME: !{{ build_environment }}-test
-      SHARD_NUMBER: ${{ matrix.shard }}
-      NUM_TEST_SHARDS: ${{ matrix.num_shards }}
+      JOB_BASE_NAME: periodic-pytorch-win-vs2019-cuda11-cudnn8-py3-test
+      NUM_TEST_SHARDS: 2
+      TEST_CONFIG: ${{ matrix.test_config }}
     needs:
       - build
       - generate-test-matrix
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
       fail-fast: false
-    runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
@@ -141,7 +121,6 @@ jobs:
         shell: powershell
         run: |
           .\.circleci\scripts\vs_install.ps1
-{%- if cuda_version != "cpu" %}
       - name: Install Cuda
         shell: bash
         run: |
@@ -150,7 +129,6 @@ jobs:
         shell: bash
         run: |
           .circleci/scripts/windows_cudnn_install.sh
-{%- endif %}
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download PyTorch Build Artifacts
         with:
@@ -170,7 +148,9 @@ jobs:
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
         run: |
-            if [[ $NUM_TEST_SHARDS -ne 2 ]]; then
+            if [[ $NUM_TEST_SHARDS -eq 2 ]]; then
+              export SHARD_NUMBER=$TEST_CONFIG
+            else
               export SHARD_NUMBER=0
             fi
             if [[ -n $GITHUB_HEAD_REF && "$USE_CUDA" == 1 ]]; then
@@ -187,7 +167,7 @@ jobs:
         name: Store PyTorch Test Reports
         if: always()
         with:
-          name: test-reports-${{ matrix.config }}
+          name: test-reports
           retention-days: 14
           if-no-files-found: error
           path:
@@ -199,18 +179,10 @@ jobs:
   # logs (like test); we can always move it back to the other one, but it
   # doesn't create the best experience
   render_test_results:
-{%- if only_build_on_pull_request %}
-    if:  ${{ github.event_name == 'push' && always() }}
-{%- else %}
     if: always()
-{%- endif %}
     needs:
-      - generate-test-matrix
       - test
     runs-on: ubuntu-18.04
-    strategy:
-      matrix: ${{ fromJson(needs.generate-test-matrix.outputs.render-matrix) }}
-      fail-fast: false
     # TODO: Make this into a composite step
     steps:
       - name: Checkout PyTorch
@@ -221,7 +193,7 @@ jobs:
       - uses: actions/download-artifact@v2
         name: Download PyTorch Test Reports
         with:
-          name: test-reports-${{ matrix.config }}
+          name: test-reports
           path: .
       - name: Unzip test reports
         run: |
@@ -248,7 +220,7 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_SECRET_ACCESS_KEY }}
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: !{{ build_environment }}-test
+          JOB_BASE_NAME: periodic-pytorch-win-vs2019-cuda11-cudnn8-py3-test
           CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
           CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
