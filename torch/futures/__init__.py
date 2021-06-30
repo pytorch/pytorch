@@ -258,6 +258,7 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
             >>> fut = torch.futures.Future()
             >>> fut.set_exception(ValueError("foo"))
             >>> fut.wait()
+            Traceback (most recent call last):
             ...
             ValueError: foo
         """
