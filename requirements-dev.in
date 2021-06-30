@@ -6,6 +6,7 @@ click
 cmakelint
 codecov
 coverage==5.5
+expecttest
 hypothesis==4.53.2
 Jinja2
 junitparser

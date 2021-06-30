@@ -46,6 +46,8 @@ cycler==0.10.0
     # via matplotlib
 decorator==5.0.9
     # via networkx
+expecttest==0.1.3
+    # via -r requirements-dev.in
 flake8==3.8.2
     # via
     #   -r requirements-flake8.txt
