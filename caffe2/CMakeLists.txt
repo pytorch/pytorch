@@ -716,9 +716,9 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   list(APPEND Caffe2_CPU_SRCS ${TORCH_SRCS})
 endif()
 
-# NOTE [ Linking AVX and non-AVX files ]
+# NOTE [ Linking AVX-n and non-AVX-n files ]
 #
-# Regardless of the CPU capabilities, we build some files with AVX, AVX2, and AVX512
+# Regardless of the CPU capabilities, we build some files with AVX2, and AVX512
 # instruction set. If the host CPU doesn't support those, we simply ignore their
 # functions at runtime during dispatch.
 #
@@ -737,19 +737,14 @@ endif()
 #    instruction and crashes.
 #
 # Thus we organize the input files in the following order:
-# 1. All files with no AVX support
-# 2. All files with AVX support (conveniently, they all have names ending with
-#    'AVX.cpp')
-# 3. All files with AVX2 support ('*AVX2.cpp')
-# 4. All files with AVX512 support ('*AVX512.cpp')
+# 1. All files with no AVX-n support
+# 2. All files with AVX2 support ('*AVX2.cpp')
+# 3. All files with AVX512 support ('*AVX512.cpp')
 set(Caffe2_CPU_SRCS_NON_AVX)
-set(Caffe2_CPU_SRCS_AVX)
 set(Caffe2_CPU_SRCS_AVX2)
 set(Caffe2_CPU_SRCS_AVX512)
 foreach(input_filename ${Caffe2_CPU_SRCS})
-  if(${input_filename} MATCHES "AVX\\.cpp")
-    list(APPEND Caffe2_CPU_SRCS_AVX ${input_filename})
-  elseif(${input_filename} MATCHES "AVX2\\.cpp")
+  if(${input_filename} MATCHES "AVX2\\.cpp")
     list(APPEND Caffe2_CPU_SRCS_AVX2 ${input_filename})
   elseif(${input_filename} MATCHES "AVX512\\.cpp")
     list(APPEND Caffe2_CPU_SRCS_AVX512 ${input_filename})
@@ -757,7 +752,7 @@ foreach(input_filename ${Caffe2_CPU_SRCS})
     list(APPEND Caffe2_CPU_SRCS_NON_AVX ${input_filename})
   endif()
 endforeach(input_filename)
-set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS_NON_AVX} ${Caffe2_CPU_SRCS_AVX} ${Caffe2_CPU_SRCS_AVX2} ${Caffe2_CPU_SRCS_AVX512})
+set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS_NON_AVX} ${Caffe2_CPU_SRCS_AVX2} ${Caffe2_CPU_SRCS_AVX512})
 
 # ==========================================================
 # END formerly-libtorch sources
