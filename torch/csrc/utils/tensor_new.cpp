@@ -966,6 +966,7 @@ Tensor tensor_frombuffer(PyObject* buffer, ScalarType dtype, int64_t count, int6
         "You may want to copy the buffer to protect its data or make it writable "
         "before converting it to a tensor. This type of warning will be "
         "suppressed for the rest of this program.");
+    PyErr_Clear();
   }
 
   Py_INCREF(view.obj);

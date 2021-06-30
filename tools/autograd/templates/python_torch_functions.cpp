@@ -485,10 +485,11 @@ static PyObject * THPVariable_frombuffer(PyObject* self_, PyObject* args, PyObje
     auto offset = r.toInt64(3);
     auto requires_grad = r.toBool(4);
 
-    if (PyObject_CheckBuffer(buffer) != 0) {
-      ret = wrap(torch::utils::tensor_frombuffer(
-          buffer, dtype, count, offset, requires_grad));
-    }
+    TORCH_CHECK_VALUE(
+        PyObject_CheckBuffer(buffer) != 0,
+        "object does not implement Python buffer protocol.");
+    ret = wrap(torch::utils::tensor_frombuffer(
+        buffer, dtype, count, offset, requires_grad));
   }
 
   return ret;

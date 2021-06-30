@@ -1,9 +1,11 @@
 import torch.testing._internal.common_utils as common
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    dtypes, onlyCPU
+    dtypes, onlyCPU,
+    skipMeta
 )
 from torch.testing import all_types
+from torch.utils.dlpack import from_dlpack, to_dlpack
 
 import torch
 import array
@@ -167,8 +169,8 @@ class TestBufferProtocol(common.TestCase):
     @onlyCPU
     @dtypes(*all_types())
     def test_not_a_buffer(self, device, dtype):
-        with self.assertRaisesRegex(RuntimeError,
-                                    r"could not retrieve buffer from object"):
+        with self.assertRaisesRegex(ValueError,
+                                    r"object does not implement Python buffer protocol."):
             torch.frombuffer(self.INPUT, dtype=dtype)
 
     @onlyCPU
@@ -178,7 +180,37 @@ class TestBufferProtocol(common.TestCase):
                                        r"The given buffer is not writable."):
             torch.frombuffer(b"\x01\x02\x03\x04\x05\x06\x07\x08", dtype=dtype)
 
+class TestAsArray(common.TestCase):
+    def check_equal(self, a, b, same_ptr=True):
+        if same_ptr:
+            self.assertEqual(a.data_ptr(), b.data_ptr())
+        else:
+            self.assertEqual(a, b)
+            self.assertEqual(a.device, b.device)
+
+        self.assertEqual(a.dtype, b.dtype)
+
+    @skipMeta
+    @dtypes(*all_types())
+    def test_alias_from_dlpack(self, device, dtype):
+        # DLpack does not explicitly support bool
+        # It does it through uint8 type
+        if dtype is torch.bool:
+            return
+
+        # Simple tensor
+        tensor = common.make_tensor((5, 5), device, dtype)
+        result = torch.asarray(to_dlpack(tensor))
+        self.check_equal(tensor, result)
+
+    @onlyCPU
+    @dtypes(*all_types())
+    def test_alias_from_buffer(self, device, dtype):
+        pass
+
+
 instantiate_device_type_tests(TestBufferProtocol, globals())
+instantiate_device_type_tests(TestAsArray, globals())
 
 if __name__ == "__main__":
     common.run_tests()
