@@ -2,10 +2,10 @@ import functools
 import os
 import warnings
 
-from collections import defaultdict, namedtuple
+from collections import defaultdict
 
 from torch.utils.data import IterDataPipe, functional_datapipe, DFIterDataPipe, DataChunk
-from typing import Any, Callable, Dict, Iterator, List, Optional, Sized, Tuple, TypeVar
+from typing import Any, Callable, Dict, Iterator, List, Optional, Sized, Tuple, TypeVar, DefaultDict
 
 T_co = TypeVar('T_co', covariant=True)
 
@@ -238,7 +238,7 @@ class GroupByIterDataPipe(IterDataPipe):
             assert group_size > 0 and group_size <= buffer_size
             self.guaranteed_group_size = group_size
         if guaranteed_group_size is not None:
-            assert guaranteed_group_size > 0 and guaranteed_group_size <= group_size
+            assert guaranteed_group_size > 0 and group_size is not None and guaranteed_group_size <= group_size
             self.guaranteed_group_size = guaranteed_group_size
         self.drop_remaining = drop_remaining
 
@@ -252,7 +252,7 @@ class GroupByIterDataPipe(IterDataPipe):
                 biggest_key = findkey
 
         if self.guaranteed_group_size is not None and biggest_size < self.guaranteed_group_size and not self.drop_remaining:
-            raise RuntimeError('Failed to group items', str(buffer[biggest_key]))
+            raise RuntimeError('Failed to group items', str(buffer_elements[biggest_key]))
 
         if self.guaranteed_group_size is None or biggest_size >= self.guaranteed_group_size:
             result_to_yield = buffer_elements[biggest_key]
@@ -263,10 +263,16 @@ class GroupByIterDataPipe(IterDataPipe):
         return (result_to_yield, new_buffer_size)
 
     def __iter__(self):
-        buffer_elements = defaultdict(list)
+        buffer_elements: DefaultDict[Any, List] = defaultdict(list)
         buffer_size = 0
         for x in self.datapipe:
             key = self.group_key_fn(x)
+
+            if self.group_size is not None and self.group_size == len(buffer_elements[key]):
+                yield buffer_elements[key]
+                buffer_size -= len(buffer_elements[key])
+                del buffer_elements[key]
+
             if buffer_size == self.buffer_size:
                 (result_to_yield, buffer_size) = self._remove_biggest_key(buffer_elements, buffer_size)
                 if result_to_yield is not None:
@@ -274,11 +280,6 @@ class GroupByIterDataPipe(IterDataPipe):
 
             buffer_elements[key].append(x)
             buffer_size += 1
-
-            if self.group_size is not None and self.group_size == len(buffer_elements[key]):
-                yield buffer_elements[key]
-                buffer_size -= len(buffer_elements[key])
-                del buffer_elements[key]
 
         while buffer_size:
             (result_to_yield, buffer_size) = self._remove_biggest_key(buffer_elements, buffer_size)
