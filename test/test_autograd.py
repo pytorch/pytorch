@@ -37,7 +37,7 @@ from torch.testing import randn_like
 from torch.testing._internal.common_methods_invocations import (
     unpack_variables,
     mask_not_all_zeros)
-from torch.testing._internal.opinfo.core import S
+from torch.testing._internal.opinfos import S
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, skipCUDAIfRocm,
                                                         onlyCPU, onlyCUDA, onlyOnCPUAndCUDA, dtypes, dtypesIfCUDA,
                                                         deviceCountAtLeast, skipCUDAIfCudnnVersionLessThan,

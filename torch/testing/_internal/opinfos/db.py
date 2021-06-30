@@ -29,6 +29,7 @@ from torch.testing._internal.common_utils import \
      TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor, TEST_SCIPY,
      torch_to_numpy_dtype_dict, TEST_WITH_ASAN,
      GRADCHECK_NONDET_TOL,)
+from torch.testing._internal.common_methods_invocations import mask_not_all_zeros
 from torch.testing._internal.opinfos.core import \
     (OpInfo, SkipInfo, DecorateInfo, SampleInput, S, M, L, _NOTHING)
 from torch.testing._internal.opinfos.unary import UnaryUfuncInfo
@@ -6684,10 +6685,3 @@ def gather_variable(shape, index_dim, max_indices, duplicate=False, device=torch
 
 def bernoulli_scalar():
     return torch.tensor(0, dtype=torch.bool).bernoulli_()
-
-def mask_not_all_zeros(shape):
-    assert len(shape) > 0
-    while True:
-        result = torch.randn(shape).gt(0)
-        if result.sum() > 0:
-            return result

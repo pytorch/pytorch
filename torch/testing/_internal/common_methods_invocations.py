@@ -3,6 +3,12 @@ import torch
 from typing import List, Tuple
 from torch.testing import make_non_contiguous
 
+def mask_not_all_zeros(shape):
+    assert len(shape) > 0
+    while True:
+        result = torch.randn(shape).gt(0)
+        if result.sum() > 0:
+            return result
 
 # TODO: move all tri/tril/triu testing to tensor creation op test suite and remove
 #   these from here
