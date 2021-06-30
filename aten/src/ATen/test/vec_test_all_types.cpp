@@ -1353,7 +1353,7 @@ namespace {
       TYPED_TEST(FunctionalBF16Tests, Reduce) {
       using vec = TypeParam;
       // Can't use ValueType<TypeParam> here:
-      // Vectorized<BFloat16>::value_type returns uint16_t on AVX512
+      // Vectorized<BFloat16>::value_type returns uint16_t on AVX2/AVX512
       using VT = c10::BFloat16;
       using RT = float; // reference
       constexpr auto R = 2LL; // residual
