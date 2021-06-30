@@ -101,6 +101,7 @@ Indexing, Slicing, Joining, Mutating Ops
     moveaxis
     narrow
     nonzero
+    permute
     reshape
     row_stack
     scatter
@@ -480,6 +481,7 @@ Other Operations
     cdist
     clone
     combinations
+    cov
     cross
     cummax
     cummin
