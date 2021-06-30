@@ -1064,7 +1064,7 @@ class _NnapiSerializer(object):
         out_oper = None
         out_dim_size = 0
         for inp in tensors:
-            in_id, in_oper = self.get_tensor_operand_by_jitval_fixed_size(inp)
+            in_id, in_oper = self.get_tensor_operand_by_jitval(inp)
             if out_oper is None:
                 out_shape = change_element(in_oper.shape, dim, -1)
                 out_oper = in_oper._replace(shape=out_shape)
@@ -1085,10 +1085,19 @@ class _NnapiSerializer(object):
         else:
             nnapi_dim = dim
 
+        out_id = self.add_tensor_operand(node.outputsAt(0), out_oper)
+        for idx, d in enumerate(out_oper.shape):
+            if d == 0:
+                if idx == dim:
+                    shape = " + ".join(flex_name(ip_id, dim) for ip_id in in_ids)
+                    self.compute_operand_shape(out_id, idx, shape)
+                else:
+                    self.forward_operand_shape(out_id, idx, in_ids[0], idx)
+
         inputs = in_ids + [self.add_immediate_int_scalar(nnapi_dim)]
 
         outputs = [None] * 1
-        outputs[0] = self.add_tensor_operand(node.outputsAt(0), out_oper)
+        outputs[0] = out_id
 
         self.add_operation(NNAPI_OperationCode.CONCATENATION, inputs, outputs)
 

@@ -234,6 +234,17 @@ class TestNNAPI(TestCase):
                 nhwc(torch.randn(1, 4, 3, 3)),
             ])
 
+        self.check(
+            CatModule(1),
+            [
+                torch.randn(1, 2, 3, 3),
+                torch.randn(1, 4, 3, 3),
+            ],
+            convert_args=[
+                torch.zeros(0, 0, 0, 0),
+                torch.zeros(0, 0, 0, 0)
+            ])
+
     def test_pointwise_unary(self):
         for op in ["relu", "sigmoid"]:
             with self.subTest(op):
