@@ -2,7 +2,7 @@ import torch
 from typing import List
 
 from torch.testing import \
-    (floating_types, floating_types_and, 
+    (floating_types, floating_types_and,
      floating_and_complex_types, floating_and_complex_types_and,
      all_types_and_complex_and, all_types_and_complex)
 from torch.testing._internal.common_utils import make_tensor

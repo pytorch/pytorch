@@ -1,4 +1,3 @@
-import torch
 from torch.testing import floating_and_complex_types
 from torch.testing._internal.common_utils import make_tensor, slowTest
 from torch.testing._internal.common_device_type import \
@@ -61,4 +60,3 @@ class SpectralFuncInfo(OpInfo):
                          **kwargs)
         self.ref = ref if ref is not None else _getattr_qual(np, name)
         self.ndimensional = ndimensional
-
