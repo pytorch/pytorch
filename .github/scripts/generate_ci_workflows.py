@@ -225,6 +225,11 @@ LINUX_WORKFLOWS = [
     #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
     #     test_runner_type=LINUX_CPU_TEST_RUNNER,
     # ),
+    PyTorchLinuxWorkflow(
+        build_environment="pytorch-linux-xenial-py3.6-gcc7-bazel-test",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc7",
+        test_runner_type=LINUX_CPU_TEST_RUNNER,
+    ),
 ]
 
 if __name__ == "__main__":
