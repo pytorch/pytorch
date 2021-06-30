@@ -1472,11 +1472,22 @@ const std::vector<std::string> functions = {
                 return None, None
             return torch.ne(self, other), backward
 
+        def AD_shrink(self, grad_output, lambd: float):
+            mask = ((self > lambd) | (self < -lambd))
+            return grad_output * mask
+
+
         def hardshrink(self, lambd: number):
           def backward(grad_output):
-            mask = ((self > lambd) | (self < -lambd))
-            return grad_output * mask, None
+            grad_input = AD_shrink(self, grad_output, lambd)
+            return grad_input, None
           return torch.hardshrink(self, lambd=lambd), backward
+
+        def softshrink(self, lambd: number):
+          def backward(grad_output):
+            grad_input = AD_shrink(self, grad_output, lambd)
+            return grad_input, None
+          return torch.softshrink(self, lambd=lambd), backward
 
         def hardtanh(self, min_val: number, max_val: number):
           def backward(grad_output):
