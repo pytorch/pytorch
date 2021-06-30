@@ -284,7 +284,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
         Tensor in = input.select(1, f);
         Tensor grad_out = grad_out_.select(1, f);
 
-        scalar_t w = weight.defined() ? weight_a[f] : 1;
+        scalar_t w = weight.defined() ? weight_a[f] : scalar_t(1);
 
         scalar_t mean, invstd;
         if (train) {
@@ -537,7 +537,7 @@ std::tuple<Tensor, Tensor> batch_norm_update_stats_cpu(
   const Tensor& running_mean = *running_mean_maybe_owned;
   const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
 
-  return AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "batch_norm_update_stats_cpu", [&] {
+  return AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, self.scalar_type(), "batch_norm_update_stats_cpu", [&] {
       return batch_norm_cpu_update_stats_template<scalar_t, Var>(self, running_mean, running_var, momentum, 0);
     });
 }
@@ -553,7 +553,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu(const Tensor& self, const c10:
 
   checkBackend("batch_norm_cpu", {self, weight, bias, running_mean, running_var}, Backend::CPU);
 
-  return AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "batch_norm", [&] {
+  return AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, self.scalar_type(), "batch_norm", [&] {
       if (!train) {
         return batch_norm_cpu_transform_input_template<scalar_t>(self, weight, bias, {}, {}, running_mean, running_var, train, eps);
       } else {
@@ -573,7 +573,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu(const Tensor& grad_ou
   const Tensor& save_mean = c10::value_or_else(save_mean_opt, [] {return Tensor();});
   const Tensor& save_invstd = c10::value_or_else(save_invstd_opt, [] {return Tensor();});
 
-  return AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "batch_norm_backward_cpu", [&] {
+  return AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, self.scalar_type(), "batch_norm_backward_cpu", [&] {
       return batch_norm_backward_cpu_template<scalar_t>(grad_out, self, weight, running_mean, running_var, save_mean, save_invstd, train, eps, grad_input_mask);
     });
 }
