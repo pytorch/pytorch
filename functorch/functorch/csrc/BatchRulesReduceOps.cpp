@@ -248,6 +248,10 @@ std::tuple<Tensor,optional<int64_t>> argx_batch_rule(
   return std::make_tuple(result, 0);
 }
 
+Tensor dist_decomp(const Tensor& self, const Tensor& other, const Scalar& p) {
+  return at::norm((self - other), p);
+}
+
 
 std::tuple<Tensor,optional<int64_t>>
 _log_softmax_backward_data(
@@ -293,6 +297,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("argmin", SINGLE_ARG(argx_batch_rule<decltype(&at::argmin), &at::argmin>));
   VMAP_SUPPORT("cumprod", SINGLE_ARG(reduction_dim_batch_rule<decltype(&ATEN_FN(cumprod)), &at::cumprod, optional<ScalarType>>));
   VMAP_SUPPORT("cumsum", SINGLE_ARG(reduction_dim_batch_rule<decltype(&ATEN_FN(cumsum)), &at::cumsum, optional<ScalarType>>));
+  m.impl("dist", dist_decomp);
   VMAP_SUPPORT("log_softmax.int", SINGLE_ARG(reduction_dim_batch_rule<decltype(&ATEN_FN2(log_softmax, int)), &at::log_softmax, optional<ScalarType>>));
   VMAP_SUPPORT("logsumexp", SINGLE_ARG(reduction_dimarray_batch_rule<decltype(&ATEN_FN(logsumexp)), &at::logsumexp, bool>));
   VMAP_SUPPORT("nansum", nansum_batch_rule);
