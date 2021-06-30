@@ -20,8 +20,8 @@ if [[ "${DESIRED_CUDA}" == "cu111" || "${DESIRED_CUDA}" == "cu113" ]]; then
 
     echo "Free Space for CUDA DEBUG BUILD"
     if [[ "$CIRCLECI" == 'true' ]]; then
-        if [[ -d "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Commnuity" ]]; then
-            rm -rf "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Commnuity"
+        if [[ -d "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Community" ]]; then
+            rm -rf "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Community"
         fi
 
         if [[ -d "C:\\Program Files (x86)\\Microsoft Visual Studio 14.0" ]]; then
