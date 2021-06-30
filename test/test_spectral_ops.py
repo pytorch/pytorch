@@ -104,7 +104,7 @@ class TestFFT(TestCase):
     # So for ROCm, call np.fft.rfftn and use its output as the input
     # for testing ops that call hipfftExecC2R
     def _generate_valid_rocfft_input(self, input, op):
-        input_device=input.device
+        input_device = input.device
 
         # check if op can invoke hipfftExecC2R or hipfftExecZ2D
         if type(op) == SpectralFuncInfo:
