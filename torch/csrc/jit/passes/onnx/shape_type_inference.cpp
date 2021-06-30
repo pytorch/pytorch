@@ -200,8 +200,8 @@ void UpdateTorchValueByOnnxValueInfo(
 
 bool IsValidONNXControlflowNode(const Node* n) {
   // Skip when block size is zero. This is when the node is being created,
-  // and doesn't have subblocks attached yet. Run shape inference for these nodes
-  // later, when the subgraph has already completed shape inferencing.
+  // and doesn't have subblocks attached yet. Run shape inference for these
+  // nodes later, when the subgraph has already completed shape inferencing.
   auto node_kind = n->kind();
   if (node_kind == ::c10::onnx::Loop || node_kind == ::c10::onnx::If) {
     if (n->blocks().size() == 0) {
@@ -1551,8 +1551,8 @@ void ONNXShapeTypeInference(
         onnx::shape_inference::InferShapes(*model_proto);
         UpdateOutputTypeByONNXProto(n, clone_node, *model_proto, symbol_map);
       } catch (std::runtime_error& ex) {
-        // TODO: include this as warning once we have a more consolidated warning
-        // system.
+        // TODO: include this as warning once we have a more consolidated
+        // warning system.
         GRAPH_DEBUG(
             "ONNX shape inference fails with: ",
             ex.what(),
