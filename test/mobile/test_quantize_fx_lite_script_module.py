@@ -70,25 +70,23 @@ class TestFuseFx(QuantizationLiteTestCase):
         self._compare_script_and_mobile(m, input=data)
 
     def test_submodule(self):
-        model = LinearModelWithSubmodule().eval()
-        qconfig_dict = {"": torch.quantization.get_default_qconfig("qnnpack")}
-        model = prepare_fx(model, qconfig_dict)
-        quant = convert_fx(model)
+        # test quantizing complete module, submodule and linear layer
+        configs = [
+            {},
+            {"module_name": [("subm", None)]},
+            {"module_name": [("fc", None)]},
+        ]
+        for config in configs:
+            model = LinearModelWithSubmodule().eval()
+            qconfig_dict = {
+                "": torch.quantization.get_default_qconfig("qnnpack"),
+                **config,
+            }
+            model = prepare_fx(model, qconfig_dict)
+            quant = convert_fx(model)
 
-        x = torch.randn(5, 5)
-        self._compare_script_and_mobile(quant, input=x)
-
-    def test_submodule_partial(self):
-        model = LinearModelWithSubmodule().eval()
-        qconfig_dict = {
-            "": torch.quantization.get_default_qconfig("qnnpack"),
-            "module_name": [("subm", None)],
-        }
-        model = prepare_fx(model, qconfig_dict)
-        quant = convert_fx(model)
-
-        x = torch.randn(5, 5)
-        self._compare_script_and_mobile(quant, input=x)
+            x = torch.randn(5, 5)
+            self._compare_script_and_mobile(quant, input=x)
 
 
 if __name__ == "__main__":
