@@ -1,0 +1,11 @@
+# Python dependencies required for development
+astunparse
+future
+numpy
+psutil
+pyyaml
+requests
+setuptools
+six
+typing_extensions
+dataclasses; python_version<"3.7"
