@@ -63,8 +63,11 @@ was launched a :class:`api.SubprocessContext` is returned. Both are specific
 implementations of the parent :class:`api.PContext` class.
 """
 
+import inspect
 import os
-from typing import Callable, Dict, Tuple, Union
+import sys
+import signal
+from typing import Callable, Dict, Tuple, Union, Optional
 
 from torch.distributed.elastic.multiprocessing.api import (  # noqa: F401
     MultiprocessContext,
@@ -79,6 +82,18 @@ from torch.distributed.elastic.multiprocessing.api import (  # noqa: F401
 from torch.distributed.elastic.utils.logging import get_logger
 
 log = get_logger()
+
+
+def _termination_handler(context: PContext) -> None:
+    sig_names = {2: "SIGINT", 15: "SIGTERM"}
+
+    def _terminate_processes(signum: int, frame: Optional[inspect.FrameInfo]) -> None:
+        context.close(force_exit=True)
+        if signum in sig_names:
+            log.warn(f"Main process received {sig_names[signum]}, exiting")
+        sys.exit(1)
+
+    return _terminate_processes
 
 
 def start_processes(
@@ -265,6 +280,11 @@ def start_processes(
             error_files=error_files,
             start_method=start_method,
         )
+    # Register SIGINT and SIGTERM handlers. When these signals received by
+    # the process, it invokets handler that should abruptly kill child processes
+    signal_handler = _termination_handler(context)
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
 
     try:
         context.start()

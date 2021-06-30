@@ -15,7 +15,7 @@ import tempfile
 import time
 import unittest
 from itertools import product
-from typing import Dict, List
+from typing import Dict, List, cast, Union, Callable
 from unittest import mock
 from unittest.mock import patch
 
@@ -24,6 +24,7 @@ import torch.multiprocessing as mp
 from torch.distributed.elastic.multiprocessing import ProcessFailure, start_processes
 from torch.distributed.elastic.multiprocessing.api import (
     MultiprocessContext,
+    SubprocessContext,
     RunProcsResult,
     Std,
     _validate_full_rank,
@@ -173,6 +174,50 @@ def redirects_all() -> List[Std]:
     ]
 
 
+def bin(name: str):
+    dir = os.path.dirname(__file__)
+    return os.path.join(dir, "bin", name)
+
+
+def wait_fn(wait_time: int = 300) -> None:
+    time.sleep(wait_time)
+    print("Finished waiting")
+
+
+def start_processes_zombie_test(
+    idx: int,
+    entrypoint: Union[str, Callable],
+    mp_queue: mp.Queue,
+    log_dir: str,
+    nproc: int = 2,
+) -> None:
+    """
+    Starts processes
+    """
+
+    args = {}
+    envs = {}
+    for idx in range(nproc):
+        args[idx] = ()
+        envs[idx] = {}
+
+    pc = start_processes(
+        name="zombie_test",
+        entrypoint=entrypoint,
+        args=args,
+        envs=envs,
+        log_dir=log_dir,
+        redirects=Std.NONE,
+    )
+    my_pid = os.getpid()
+    mp_queue.put(my_pid)
+    subproc_context = cast(SubprocessContext, pc)
+    for child_pid in subproc_context.pids().values():
+        mp_queue.put(child_pid)
+
+    results = pc.wait(period=1, timeout=300)
+
+
 @unittest.skipIf(
     TEST_WITH_ASAN or TEST_WITH_TSAN or IS_WINDOWS or IS_MACOS,
     "tests incompatible with tsan or asan",
@@ -205,6 +250,7 @@ class StartProcessesTest(unittest.TestCase):
                 OSError, msg=f"local_rank: {local_rank} pid: {pid} should not exist"
             ):
                 os.kill(pid, 0)
+
 
     def test_to_map(self):
         local_world_size = 2
@@ -391,13 +437,9 @@ class StartProcessesTest(unittest.TestCase):
                 self.assertTrue(pc._stderr_tail.stopped())
                 self.assertTrue(pc._stdout_tail.stopped())
 
-    ########################################
+    #######################################
     # start_processes as binary tests
-    ########################################
-
-    def bin(self, name: str):
-        dir = os.path.dirname(__file__)
-        return os.path.join(dir, "bin", name)
+    #######################################
 
     def test_binary_exit(self):
         FAIL = 138
@@ -754,6 +796,37 @@ class StartProcessesNotCITest(StartProcessesTest):
                 self.assertFalse(results.stdouts[1])
                 self.assertTrue(pc._stderr_tail.stopped())
                 self.assertTrue(pc._stdout_tail.stopped())
+
+    def test_no_zombie_process_binary(self):
+        self._test_zombie_workflow(bin("zombie_test.py"))
+
+    def test_no_zombie_process_function(self):
+        self._test_zombie_workflow(wait_fn)
+
+    def _test_zombie_workflow(self, entrypoint: Union[str, Callable]) -> None:
+        mp_queue = mp.get_context("spawn").Queue()
+        child_nproc = 2
+        ctx = mp.spawn(
+            start_processes_zombie_test,
+            nprocs=1,
+            args=(entrypoint, mp_queue, self.log_dir(), child_nproc),
+            join=False,
+        )
+        total_processes = child_nproc + 1
+        pids = []
+        for _ in range(total_processes):
+            pids.append(mp_queue.get(timeout=120))
+        parent_pid = pids[0]
+        child_pids = pids[1:]
+
+        os.kill(parent_pid, signal.SIGTERM)
+        # Wait to give time for signal handlers to finish work
+        time.sleep(5)
+        for child_pid in child_pids:
+            # Killing parent should kill all children, we expect that each call to
+            # os.kill would raise OSError
+            with self.assertRaises(OSError):
+                os.kill(child_pid, 0)
 
 
 if __name__ == "__main__":

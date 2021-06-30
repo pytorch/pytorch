@@ -239,15 +239,15 @@ class PContext(abc.ABC):
         raise NotImplementedError()
 
     @abc.abstractmethod
-    def _close(self) -> None:
+    def _close(self, force_exit: bool = False) -> None:
         r"""
         Terminates all processes managed by this context and cleans up any
         meta resources (e.g. redirect, error_file files).
         """
         raise NotImplementedError()
 
-    def close(self) -> None:
-        self._close()
+    def close(self, force_exit: bool = False) -> None:
+        self._close(force_exit)
         if self._stdout_tail:
             self._stdout_tail.stop()
         if self._stderr_tail:
@@ -447,11 +447,14 @@ class MultiprocessContext(PContext):
         assert self._pc is not None  # assertion for mypy type checking
         return {local_rank: pid for local_rank, pid in enumerate(self._pc.pids())}
 
-    def _close(self) -> None:
+    def _close(self, force_exit: bool = False) -> None:
         if self._pc:
             for proc in self._pc.processes:
-                proc.terminate()
-                proc.join()
+                if force_exit:
+                    proc.kill()
+                else:
+                    proc.terminate()
+                    proc.join()
 
 
 class SubprocessHandler:
@@ -488,9 +491,12 @@ class SubprocessHandler:
             stderr=self._stderr,
         )
 
-    def close(self):
-        self.proc.terminate()
-        self.proc.wait()
+    def close(self, force_exit: bool = False) -> None:
+        if force_exit:
+            self.proc.kill()
+        else:
+            self.proc.terminate()
+            self.proc.wait()
         if self._stdout:
             self._stdout.close()
         if self._stderr:
@@ -597,7 +603,7 @@ class SubprocessContext(PContext):
             for local_rank, sh in self.subprocess_handlers.items()
         }
 
-    def _close(self) -> None:
+    def _close(self, force_exit: bool = False) -> None:
         if self.subprocess_handlers:
             for handler in self.subprocess_handlers.values():
-                handler.close()
+                handler.close(force_exit)
