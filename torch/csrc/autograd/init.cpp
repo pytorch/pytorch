@@ -10,6 +10,7 @@
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/saved_variable.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/autograd/utils/python_arg_parsing.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
@@ -262,6 +263,14 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
 
   py::class_<DisableTorchDispatch>(_C_m, "_DisableTorchDispatch")
       .def(py::init<>());
+
+  py::class_<torch::autograd::SavedVariable>(m, "SavedTensor")
+    .def(py::init([]()->torch::autograd::SavedVariable {
+      TORCH_CHECK(false, "Trying to create a SavedTensor object from Python is forbidden.");
+    }))
+    .def("register_hooks", [](torch::autograd::SavedVariable &s, py::function &pack_hook, py::function &unpack_hook) {
+        s.register_hooks();
+     });
 
   Py_RETURN_TRUE;
 }
