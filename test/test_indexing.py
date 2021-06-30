@@ -779,6 +779,16 @@ class TestIndexing(TestCase):
 
             self.assertEqual(output, input_list)
 
+    @onlyCUDA
+    def test_index_put_deterministic(self, device):
+        a = torch.arange(10, dtype=torch.float, device=device)
+        a[a>2.] = 1
+        torch.use_deterministic_algorithms(True) 
+        b = torch.arange(10, dtype=torch.float, device=device)
+        b[b>2.] = 1
+        torch.use_deterministic_algorithms(False)
+        self.assertEqual(a, b)
+
     def test_multiple_byte_mask(self, device):
         v = torch.randn(5, 7, 3, device=device)
         # note: these broadcast together and are transposed to the first dim

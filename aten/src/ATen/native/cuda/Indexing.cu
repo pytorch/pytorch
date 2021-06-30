@@ -249,8 +249,14 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
         range.data_ptr<int64_t>(), orig_indices.data_ptr<int64_t>(),
         num_indices, false, 0, nbits);
       }
-
-      TORCH_INTERNAL_ASSERT(linearIndex.numel()*sliceSize*nElemBefore == value.numel(), "number of flattened indices did not match number of elements in the value tensor", linearIndex.numel()*sliceSize*nElemBefore, value.numel());
+      size_t linearindex_numel = linearIndex.numel()*sliceSize*nElemBefore;
+      size_t value_numel = value.numel();
+      Tensor value_ = value;
+      if (value_numel < linearindex_numel && value_numel == 1) {
+        value_ = at::native::repeat(value, {(long) linearindex_numel});
+	value_numel = value_.numel();
+      }
+      TORCH_INTERNAL_ASSERT(linearindex_numel == value_numel, "number of flattened indices did not match number of elements in the value tensor but got more than one value", linearIndex.numel()*sliceSize*nElemBefore, value.numel());
       const int UNROLL = 4;
       const int indices_per_block = 4;
       dim3 grid(THCCeilDiv(num_indices, (int64_t) indices_per_block),
