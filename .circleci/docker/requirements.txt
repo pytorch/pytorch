@@ -102,7 +102,7 @@ markdown==3.3.4
     # via tb-nightly
 markupsafe==2.0.1
     # via jinja2
-matplotlib==3.4.2
+matplotlib==3.3.4
     # via scikit-image
 mccabe==0.6.1
     # via
