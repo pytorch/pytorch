@@ -1806,15 +1806,15 @@ def retry(ExceptionToCheck, tries=3, delay=3, skip_after_retries=False):
 # Methods for matrix and tensor generation
 
 def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, high=None,
-                requires_grad: bool = False, noncontiguous: bool = False,
-                exclude_zero: bool = False) -> torch.Tensor:
+                requires_grad: bool=False, noncontiguous: bool=False,
+                exclude_zero: bool=False) -> torch.Tensor:
     """ Creates a random tensor with the given size, device and dtype.
 
         By default, the tensor's values are in the range [-9, 9] for most dtypes. If low
-        and/or high are specified then the values will be in the range [max(-9, low), min(9, high)].
+        and/or high are specified then the values will be in the range [low, high].
 
-        For unsigned types the values are in the range[0, 9] and for complex types the real and imaginary
-        parts are each in the range [-9, 9].
+        For unsigned types the default range is [0, 9] and for complex types the real and imaginary
+        parts each have the default range as [-9, 9].
 
         If noncontiguous=True, a noncontiguous tensor with the given size will be returned unless the size
         specifies a tensor with a 1 or 0 elements in which case the noncontiguous parameter is ignored because
@@ -1825,22 +1825,23 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         complex type and 1 if integer/boolean type.
     """
 
+    # TODO: Not sure why this was required, because if low is None - we anyways replace it with the default range
     assert low is None or low < 9, "low value too high!"
     assert high is None or high > -9, "high value too low!"
 
     if dtype is torch.bool:
         result = torch.randint(0, 2, size, device=device, dtype=dtype)
     elif dtype is torch.uint8:
-        low = math.floor(0 if low is None else max(low, 0))
-        high = math.ceil(10 if high is None else min(high, 10))
+        low = math.floor(0 if low is None else low)
+        high = math.ceil(10 if high is None else high)
         result = torch.randint(low, high, size, device=device, dtype=dtype)
     elif dtype in integral_types():
-        low = math.floor(-9 if low is None else max(low, -9))
-        high = math.ceil(10 if high is None else min(high, 10))
+        low =  math.floor(-9 if low is None else low)
+        high = math.ceil(10 if high is None else high)
         result = torch.randint(low, high, size, device=device, dtype=dtype)
     elif dtype in floating_types_and(torch.half, torch.bfloat16):
-        low = -9 if low is None else max(low, -9)
-        high = 9 if high is None else min(high, 10)
+        low = -9 if low is None else low
+        high = 9 if high is None else high
         span = high - low
         # Windows doesn't support torch.rand(bfloat16) on CUDA
         if IS_WINDOWS and torch.device(device).type == 'cuda' and dtype is torch.bfloat16:
@@ -1849,8 +1850,8 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
             result = torch.rand(size, device=device, dtype=dtype) * span + low
     else:
         assert dtype in complex_types()
-        low = -9 if low is None else max(low, -9)
-        high = 9 if high is None else min(high, 10)
+        low = -9 if low is None else low
+        high = 9 if high is None else high
         span = high - low
         float_dtype = torch.float if dtype is torch.cfloat else torch.double
         real = torch.rand(size, device=device, dtype=float_dtype) * span + low
