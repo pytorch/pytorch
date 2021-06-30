@@ -1409,7 +1409,7 @@ class TestTracer(JitTestCase):
     def test_trace_multi_output_function(self):
         # An autograd.Function with two outputs.
         # It swaps inputs so we can check if shape
-        # handling is correct in TorchScript .
+        # handling is correct in TorchScript.
         class Foo(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x, y):
