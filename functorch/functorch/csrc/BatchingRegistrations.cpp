@@ -1337,8 +1337,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   // m.impl("log_softmax.int", log_softmax_batching_rule);
   m.impl("_log_softmax", _log_softmax_batching_rule);
   m.impl("is_complex", native::is_complex);
-  m.impl("conj", native::conj);
-  m.impl("cross_entropy_loss", native::cross_entropy_loss);
 //
 //   // inplace operations
 //   m.impl("fill_.Scalar", fill_inplace_scalar_batching_rule);
@@ -1356,12 +1354,10 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("tensor_split.indices", tensor_split_indices_batching_rule);
   m.impl("diagonal", diagonal_batching_rule);
   m.impl("expand", expand_batching_rule);
-  m.impl("expand_as", native::expand_as); // composite wrt autograd
   m.impl("movedim.intlist", movedim_batching_rule);
   m.impl("movedim.int", static_cast<Tensor(*)(const Tensor&,int64_t,int64_t)>(native::movedim)); // composite wrt autograd
   // NB: static_cast because there's another variant of narrow. However, we don't
   // want to support the other variant yet bc it isn't documented...
-  m.impl("narrow", static_cast<Tensor(*)(const Tensor&,int64_t,int64_t,int64_t)>(native::narrow)); // composite wrt autograd
   m.impl("numpy_T", native::numpy_T); // composite wrt autograd
   m.impl("permute", permute_batching_rule);
   m.impl("reshape", reshape_batching_rule);
