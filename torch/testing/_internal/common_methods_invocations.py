@@ -3037,6 +3037,22 @@ def sample_inputs_std_var(op_info, device, dtype, requires_grad, **kwargs):
     ]
 
 
+def sample_inputs_cov(op_info, device, dtype, requires_grad, **kwargs):
+    shapes = [(2,), (1, 2), (3, 2), (2, 3)]
+
+    inputs = []
+    for shape in shapes:
+        t = make_tensor(shape, device, dtype, requires_grad=requires_grad)
+        inputs.append(SampleInput(t))
+        num_observations = t.numel() if t.ndimension() < 2 else t.size(1)
+        fweights = make_tensor((num_observations,), device, torch.int, low=0, high=10, requires_grad=requires_grad)
+        aweights = make_tensor((num_observations,), device, torch.float, low=0, high=1, requires_grad=requires_grad)
+        for correction, fw, aw in product(range(num_observations), [None, fweights], [None, aweights]):
+            inputs.append(SampleInput(t, kwargs={'correction': correction, 'fweights': fw, 'aweights': aw}))
+
+    return inputs
+
+
 def _sample_inputs_svd(op_info, device, dtype, requires_grad=False, is_linalg_svd=False):
     """
     This function generates input for torch.svd with distinct singular values so that autograd is always stable.
@@ -5285,6 +5301,14 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard', device_type='cpu',
                                 dtypes=[torch.cfloat, torch.cdouble], active_if=IS_MACOS),
                    )),
+    OpInfo('cov',
+           dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
+           dtypesIfCUDA=all_types_and_complex_and(torch.half, *[torch.bfloat16] if CUDA11OrLater else []),
+           backward_dtypesIfCUDA=all_types_and_complex_and(torch.half, *[torch.bfloat16] if CUDA11OrLater else []),
+           sample_inputs_func=sample_inputs_cov,
+           supports_out=False,
+           # JIT test not working for tensor kwargs (https://github.com/pytorch/pytorch/issues/58507)
+           skips=(SkipInfo('TestJit', 'test_variant_consistency_jit'),)),
     OpInfo('cross',
            dtypes=all_types_and_complex(),
            dtypesIfCUDA=all_types_and_complex_and(torch.half),
@@ -6084,9 +6108,11 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_reduction_wrapper(False)),
     OpInfo('var_mean',
            dtypes=floating_and_complex_types_and(torch.half),
+           dtypesIfCPU=floating_and_complex_types_and(torch.half, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_reduction_wrapper(False),
            backward_dtypes=floating_types_and(torch.half),
+           backward_dtypesIfCPU=floating_types_and(torch.half, torch.bfloat16),
            backward_dtypesIfCUDA=floating_types_and(torch.half),
            # TODO: some signatures of var_mean do support out
            supports_out=False,
@@ -6101,9 +6127,11 @@ op_db: List[OpInfo] = [
                SkipInfo('TestGradients', 'test_forward_mode_AD'))),
     OpInfo('std_mean',
            dtypes=floating_and_complex_types_and(torch.half),
+           dtypesIfCPU=floating_and_complex_types_and(torch.half, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_reduction_wrapper(False),
            backward_dtypes=floating_types_and(torch.half),
+           backward_dtypesIfCPU=floating_types_and(torch.half, torch.bfloat16),
            backward_dtypesIfCUDA=floating_types_and(torch.half),
            # TODO: some signatures of std_mean do support out
            supports_out=False,
@@ -6591,8 +6619,9 @@ op_db: List[OpInfo] = [
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
     OpInfo('std',
            dtypes=floating_and_complex_types_and(torch.half),
+           dtypesIfCPU=floating_and_complex_types_and(torch.half, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
-           backward_dtypesIfCPU=floating_and_complex_types_and(torch.half),
+           backward_dtypesIfCPU=floating_and_complex_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_std_var,
            # TODO: std does support out in some signatures
            supports_out=False,
@@ -7291,8 +7320,9 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_unsqueeze),
     OpInfo('var',
            dtypes=floating_and_complex_types_and(torch.half),
+           dtypesIfCPU=floating_and_complex_types_and(torch.half, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
-           backward_dtypesIfCPU=floating_and_complex_types_and(torch.half),
+           backward_dtypesIfCPU=floating_and_complex_types_and(torch.half, torch.bfloat16),
            backward_dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_std_var,
            # TODO: revisit, some var signatures do support out (see std, too)

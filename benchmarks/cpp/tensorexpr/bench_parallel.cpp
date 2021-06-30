@@ -36,7 +36,6 @@ class ParallelAdd : public benchmark::Fixture {
 
 BENCHMARK_DEFINE_F(ParallelAdd, Simple)(benchmark::State& state) {
   KernelScope kernel_scope;
-  ExecutionCounter counter(llvm_codegen_parallel_dispatched);
   Placeholder a_buf("a", kFloat, {M});
   Placeholder b_buf("b", kFloat, {M});
   Tensor* c_tensor = Compute(
@@ -56,8 +55,6 @@ BENCHMARK_DEFINE_F(ParallelAdd, Simple)(benchmark::State& state) {
   float* c_ptr = C.data_ptr<float>();
   std::vector<void*> args({c_ptr, a_ptr, b_ptr});
   cg.value<int>(args);
-  int count = counter.elapsed_value();
-  TORCH_CHECK(count > 0);
   for (int i = 0; i < M; i++) {
     float diff = fabs(a_ptr[i] + b_ptr[i] - c_ptr[i]);
     TORCH_CHECK(diff < 1e-5);

@@ -526,22 +526,22 @@
 - func: _dim_arange(Tensor like, int dim) -> Tensor
 
 - func: argmax(Tensor self, int? dim=None, bool keepdim=False) -> Tensor
+  structured_delegate: argmax.out
   device_check: NoCheck   # TensorIterator
   variants: function, method
-  dispatch:
-    CPU, CUDA: argmax
 
 - func: argmax.out(Tensor self, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
   dispatch:
     CPU, CUDA: argmax_out
 
 - func: argmin(Tensor self, int? dim=None, bool keepdim=False) -> Tensor
+  structured_delegate: argmin.out
   device_check: NoCheck   # TensorIterator
   variants: function, method
-  dispatch:
-    CPU, CUDA: argmin
 
 - func: argmin.out(Tensor self, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
   dispatch:
     CPU, CUDA: argmin_out
 
@@ -1276,6 +1276,9 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: count_nonzero
+
+- func: cov(Tensor self, *, int correction=1, Tensor? fweights=None, Tensor? aweights=None) -> Tensor
+  variants: function, method
 
 - func: cudnn_affine_grid_generator(Tensor theta, int N, int C, int H, int W) -> Tensor grid
   dispatch:
