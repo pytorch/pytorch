@@ -606,7 +606,7 @@ class record_function(ContextDecorator):
         self.name: str = name
         # Whether or not we should run record function's end callbacks when exiting.
         self.run_callbacks_on_exit: bool = True
-        self.handle: torch.classes.profiler._RecordFunctionHolder()
+        self.handle: torch.classes.profiler._RecordFunctionHolder = torch.classes.profiler._RecordFunctionHolder()
 
     def __enter__(self):
         self.handle = torch.ops.profiler._record_function_enter(self.name)

@@ -24,6 +24,7 @@ from .graph_module import (
 from .quantization_patterns import (
     QuantizeHandler,
 )
+from ._equalize import update_obs_for_equalization, convert_eq_obs
 from .utils import (
     is_get_tensor_info_node,
     node_return_type_is_int,
@@ -155,9 +156,6 @@ def convert(model: GraphModule, is_reference: bool = False,
         convert_custom_config_dict = {}
     patterns, node_name_to_scope, prepare_custom_config_dict = restore_state(model)
     qconfig_map: Dict[str, QConfigAny] = model._qconfig_map  # type: ignore[assignment]
-    # always run weight observers in the top level forward method
-    # for dynamic quant ops or weight only quant ops
-    run_weight_observers(model)
 
     # move to cpu since we only have quantized cpu kernels
     model.eval().cpu()
@@ -179,6 +177,17 @@ def convert(model: GraphModule, is_reference: bool = False,
         model.graph, modules, patterns,
         qconfig_map,
         custom_module_classes=custom_module_classes)
+
+    if model._equalization_qconfig_map is not None:
+        # If we want to do equalization then do the following:
+        # Calculate the equalization scale, update the observers with the scaled
+        # inputs, and scale the weight
+        weight_eq_obs_dict = update_obs_for_equalization(model, modules)
+        convert_eq_obs(model, modules, weight_eq_obs_dict)
+
+    # always run weight observers in the top level forward method
+    # for dynamic quant ops or weight only quant ops
+    run_weight_observers(model)
 
     quantized_graph = Graph()
     env: Dict[str, Dict[Optional[torch.dtype], Node]] = defaultdict(lambda: defaultdict(Node))  # type: ignore[arg-type]
