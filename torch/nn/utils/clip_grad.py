@@ -47,9 +47,12 @@ def clip_grad_norm_(
             'this error and scale the gradients by the non-finite norm anyway, '
             'set `error_if_nonfinite=False`')
     clip_coef = max_norm / (total_norm + 1e-6)
-    if clip_coef < 1:
-        for p in parameters:
-            p.grad.detach().mul_(clip_coef.to(p.grad.device))
+    # Note: multiplying by the clamped coef is redundant when the coef is clamped to 1, but doing so
+    # avoids a `if clip_coef < 1:` conditional which can require a CPU <=> device synchronization
+    # when the gradients do not reside in CPU memory.
+    clip_coef_clamped = torch.clamp(clip_coef, max=1.0)
+    for p in parameters:
+        p.grad.detach().mul_(clip_coef_clamped.to(p.grad.device))
     return total_norm
 
 
