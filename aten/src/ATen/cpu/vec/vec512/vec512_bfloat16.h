@@ -16,12 +16,17 @@ namespace {
 
 #if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
 
+static inline void cvtbf16_fp32(const __m256i& a, __m512& o) {
+  o = _mm512_castsi512_ps(_mm512_slli_epi32(_mm512_cvtepu16_epi32(a), 16));
+}
+
 static inline void cvtbf16_fp32(const __m512i& a, __m512& o1, __m512& o2) {
   __m256i lo = _mm512_extracti32x8_epi32(a, 0);
   __m256i hi = _mm512_extracti32x8_epi32(a, 1);
-  o1 = _mm512_castsi512_ps(_mm512_slli_epi32(_mm512_cvtepu16_epi32(lo), 16));
-  o2 = _mm512_castsi512_ps(_mm512_slli_epi32(_mm512_cvtepu16_epi32(hi), 16));
+  cvtbf16_fp32(lo, o1);
+  cvtbf16_fp32(hi, o2);
 }
+
 static inline __m512i cvtfp32_bf16(const __m512& a, const __m512& b) {
   __m512i zero_vec = _mm512_set1_epi32(0);
   __m512i lo = _mm512_castps_si512(a);
@@ -299,7 +304,7 @@ public:
       const auto not_nan_mask = _mm512_cmp_ps_mask(values, values, _CMP_EQ_OQ);
       const auto non_nan_mask_vec = _mm512_mask_set1_epi32(_mm512_castps_si512(zero_vec),
                                                            not_nan_mask, 0xFFFFFFFF);
-      const auto nan_mask = _mm512_cmp_ps_mask(_mm512_castsi512_ps(non_nan_mask_vec), 
+      const auto nan_mask = _mm512_cmp_ps_mask(_mm512_castsi512_ps(non_nan_mask_vec),
                                                zero_vec, _CMP_EQ_OQ);
       const auto pi = _mm512_set1_ps(c10::pi<float>);
 
@@ -734,7 +739,7 @@ Vectorized<BFloat16> inline minimum(const Vectorized<BFloat16>& a, const Vectori
   auto nan_lo = _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, nan_lo_mask,
                                                            0xFFFFFFFF));
   auto nan_hi = _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, nan_hi_mask,
-                                                           0xFFFFFFFF));                                                            
+                                                           0xFFFFFFFF));
   // Exploit the fact that all-ones is a NaN.
   auto o1 = _mm512_or_ps(min_lo, nan_lo);
   auto o2 = _mm512_or_ps(min_hi, nan_hi);

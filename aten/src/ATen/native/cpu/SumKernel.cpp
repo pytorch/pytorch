@@ -85,6 +85,20 @@ struct InnerSumCastLoadPolicy<Vectorized<c10::BFloat16>, Vectorized<float>> {
     return _mm256_add_ps(first, second);
   }
 };
+#elif defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
+template <>
+struct InnerSumCastLoadPolicy<Vectorized<c10::BFloat16>, Vectorized<float>> {
+  using vec_t = Vectorized<c10::BFloat16>;
+  using vacc_t = Vectorized<float>;
+
+  static vacc_t load(const char * C10_RESTRICT data, int64_t stride, int64_t index) {
+    auto ptr = reinterpret_cast<const __m512i*>(data + stride * index);
+    __m512i values = _mm512_loadu_si512(ptr);
+    __m512 first, second;
+    cvtbf16_fp32(values, first, second);
+    return _mm512_add_ps(first, second);
+  }
+};
 #endif
 
 // For outer sum, load a partial vec_t of size vacc_t then cast to vacc_t
@@ -117,6 +131,20 @@ struct OuterSumCastLoadPolicy<Vectorized<c10::BFloat16>, Vectorized<float>> {
     auto ptr = reinterpret_cast<const __m128i*>(data + stride * index);
     __m128i bf_vals = _mm_loadu_si128(ptr);
     __m256 f_vals;
+    cvtbf16_fp32(bf_vals, f_vals);
+    return f_vals;
+  }
+};
+#elif defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
+template <>
+struct OuterSumCastLoadPolicy<Vectorized<c10::BFloat16>, Vectorized<float>> {
+  using vec_t = Vectorized<c10::BFloat16>;
+  using vacc_t = Vectorized<float>;
+
+  static vacc_t load(const char * C10_RESTRICT data, int64_t stride, int64_t index) {
+    auto ptr = reinterpret_cast<const __m256i*>(data + stride * index);
+    __m256i bf_vals = _mm256_loadu_si256(ptr);
+    __m512 f_vals;
     cvtbf16_fp32(bf_vals, f_vals);
     return f_vals;
   }
@@ -469,7 +497,6 @@ void sum_kernel_impl(TensorIterator &iter) {
 
 }  // namespace (anonymous)
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(sum_stub, &sum_kernel_impl);
 
 }}  // namespace at::native
