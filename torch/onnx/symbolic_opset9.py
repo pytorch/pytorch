@@ -470,6 +470,12 @@ def expand(g, self, size, implicit):
 
 
 def expand_as(g, self, other):
+    self_t = sym_help._maybe_get_const(self, "t")
+    if isinstance(self_t, torch.Tensor):
+        self_t = self_t.to(torch.double)
+        if torch.equal(self_t, torch.full_like(self_t, torch.mean(self_t))):
+            self = g.op("Constant", value_t=torch.mean(self_t))
+
     shape = g.op("Shape", other)
     return g.op("Expand", self, shape)
 
