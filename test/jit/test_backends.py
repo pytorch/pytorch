@@ -344,42 +344,42 @@ class SelectiveLoweringTest(JitBackendTestCase):
         FileCheck() \
             .check("OuterModule") \
             .check_not("__torch__.torch.classes.__backends__.test_backend") \
-            .check("test_backend.LoweredModule") \
+            .check("LoweredModule.test_backend") \
             .run(self.lowered_module.graph)
 
         # Check that self.lowered_module.sub1/sub2 were not lowered but that BasicModule has been replaced in their graphs.
         FileCheck() \
             .check("MiddleModule") \
             .check("BasicModule") \
-            .check_not("test_backend.LoweredModule") \
+            .check_not("LoweredModule.test_backend") \
             .run(self.scripted_module.sub1.graph)
         FileCheck() \
             .check("MiddleModule") \
             .check_not("__torch__.torch.classes.__backends__.test_backend") \
-            .check("test_backend.LoweredModule") \
+            .check("LoweredModule.test_backend") \
             .run(self.lowered_module.sub1.graph)
 
         FileCheck() \
             .check("MiddleModule") \
             .check("BasicModule") \
-            .check_not("test_backend.LoweredModule") \
+            .check_not("LoweredModule.test_backend") \
             .run(self.scripted_module.sub2.graph)
         FileCheck() \
             .check("MiddleModule") \
             .check_not("__torch__.torch.classes.__backends__.test_backend") \
-            .check("test_backend.LoweredModule") \
+            .check("LoweredModule.test_backend") \
             .run(self.lowered_module.sub2.graph)
 
         # Check that self.lowered_module.sub1/sub2.submodule were lowered. Its graph should mention
         # __torch__.torch.classes.__backends__.test_backend, the TorchBind class for executing functions
         # on the test JIT backend.
         FileCheck() \
-            .check("test_backend.LoweredModule") \
+            .check("LoweredModule.test_backend") \
             .check("__torch__.torch.classes.__backends__.test_backend") \
             .run(self.lowered_module.sub1.submodule.graph)
 
         FileCheck() \
-            .check("test_backend.LoweredModule") \
+            .check("LoweredModule.test_backend") \
             .check("__torch__.torch.classes.__backends__.test_backend") \
             .run(self.lowered_module.sub2.submodule.graph)
 
@@ -388,12 +388,12 @@ class SelectiveLoweringTest(JitBackendTestCase):
             .check("MiddleModule") \
             .check("BasicModule") \
             .check_not("__torch__.torch.classes.__backends__.test_backend") \
-            .check_not("test_backend.LoweredModule") \
+            .check_not("LoweredModule.test_backend") \
             .run(self.scripted_module.other.graph)
         FileCheck() \
             .check("BasicModule") \
             .check_not("__torch__.torch.classes.__backends__.test_backend") \
-            .check_not("test_backend.LoweredModule") \
+            .check_not("LoweredModule.test_backend") \
             .run(self.scripted_module.other.submodule.graph)
 
     def test_errors(self):
