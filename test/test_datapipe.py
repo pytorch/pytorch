@@ -413,6 +413,15 @@ class IDP(IterDataPipe):
         return self.length
 
 
+class MDP_NoLen(MapDataPipe):
+    def __init__(self, input_dp):
+        super().__init__()
+        self.input_dp = input_dp
+
+    def __getitem__(self, index):
+        return self.input_dp[index]
+
+
 class MDP(MapDataPipe):
     def __init__(self, input_dp):
         super().__init__()
@@ -906,6 +915,34 @@ class TestFunctionalMapDataPipe(TestCase):
                 )
                 with self.assertRaises(AttributeError):
                     p = pickle.dumps(datapipe)
+
+    def test_concat_datapipe(self):
+        input_dp1 = MDP(range(10))
+        input_dp2 = MDP(range(5))
+
+        with self.assertRaisesRegex(ValueError, r"Expected at least one DataPipe"):
+            dp.map.Concat()
+
+        with self.assertRaisesRegex(TypeError, r"Expected all inputs to be `MapDataPipe`"):
+            dp.map.Concat(input_dp1, ())  # type: ignore[arg-type]
+
+        concat_dp = input_dp1.concat(input_dp2)
+        self.assertEqual(len(concat_dp), 15)
+        for index in range(15):
+            self.assertEqual(concat_dp[index], (list(range(10)) + list(range(5)))[index])
+
+        # Test Reset
+        for index in range(15):
+            self.assertEqual(concat_dp[index], (list(range(10)) + list(range(5)))[index])
+
+        input_dp_nl = MDP_NoLen(range(5))
+
+        concat_dp = input_dp1.concat(input_dp_nl)
+        with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
+            len(concat_dp)
+
+        for index in range(15):
+            self.assertEqual(concat_dp[index], (list(range(10)) + list(range(5)))[index])
 
     def test_map_datapipe(self):
         arr = range(10)
