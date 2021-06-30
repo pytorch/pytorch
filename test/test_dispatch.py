@@ -4,9 +4,7 @@ from torch._python_dispatcher import PythonDispatcher
 
 from collections import namedtuple
 import itertools
-import os
 import re
-import torch.utils.cpp_extension
 
 # TODO: Expand the dispatcher API to be a generic API for interfacing with
 # the dispatcher from Python!
