@@ -31,7 +31,8 @@ def add_inference_rule(n):
             n.type = t2
         return n.type
     else:
-        return False
+        raise TypeError(f'Cannot add arguments {n.args[0]} ({t1}) and {n.args[1]} ({t2}) in node {n}.'
+                        f' Types should match ')
 
 
 @register_inference_rule(torch.transpose)
@@ -47,7 +48,7 @@ def transpose_inference_rule(n):
             n.type = final
             return n.type
         else:
-            return False
+            raise TypeError(f'Cannot transpose {dim1} and {dim2} for node {n}')
 
 
 @register_inference_rule(torch.reshape)
@@ -72,7 +73,7 @@ def reshape_inference_rule(n):
             n.type = t2_type
             return t2_type
         else:
-            return False
+            raise TypeError(f'Cannot reshape in node {n} from {t1} to {t2_type}')
 
     # if all dimensions are known we check the products
     if isinstance(t1, TensorType):
@@ -82,10 +83,10 @@ def reshape_inference_rule(n):
             n.type = t2_type
             return t2_type
         else:
-            return False
+            raise TypeError
 
     else:
-        return False
+        raise TypeError
 
 
 class GraphTypeChecker:
@@ -104,8 +105,7 @@ class GraphTypeChecker:
         # type check every node with gradual type rules
         # if any node does not type check return false
         for n in graph.nodes:
-            if not self.type_check_node(n):
-                return False
+            self.type_check_node(n)
         return True
 
     def type_check_node(self, n):
@@ -133,4 +133,4 @@ class GraphTypeChecker:
             return n.type
 
         else:
-            raise NotImplementedError("Method for " + n.node + " not yet implemented")
+            raise NotImplementedError("Method not yet implemented")
