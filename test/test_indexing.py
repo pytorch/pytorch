@@ -784,10 +784,10 @@ class TestIndexing(TestCase):
         deterministic = torch.are_deterministic_algorithms_enabled()
         torch.use_deterministic_algorithms(False)
         a = torch.arange(10, dtype=torch.float, device=device)
-        a[a>2.] = 1
+        a[a > 2] = 1
         torch.use_deterministic_algorithms(True)
         b = torch.arange(10, dtype=torch.float, device=device)
-        b[b>2.] = 1
+        b[b > 2] = 1
         torch.use_deterministic_algorithms(deterministic)
         self.assertEqual(a, b)
 
