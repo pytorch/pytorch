@@ -4372,6 +4372,53 @@ else:
         x = torch.empty(50000000, device=device, dtype=dtype).exponential_()
         self.assertTrue(x.min() > 0)
 
+    @dtypes(torch.float, torch.cfloat)
+    def test_cov(self, device, dtype):
+        def check(t, correction=1, fweights=None, aweights=None):
+            actual = torch.cov(t, correction=correction, fweights=fweights, aweights=aweights)
+            t = t.cpu().numpy()
+            fweights = fweights.cpu().numpy() if fweights is not None else None
+            aweights = aweights.cpu().numpy() if aweights is not None else None
+            expected = np.cov(t, ddof=correction, fweights=fweights, aweights=aweights)
+            expected = torch.from_numpy(np.array(expected)).to(dtype=actual.dtype)
+            self.assertEqual(actual, expected, atol=1e-05, rtol=1e-05)
+
+        def generate_input_tensors():
+            yield make_tensor((0, 0), device, dtype)
+            yield make_tensor((1, 0), device, dtype)
+            yield make_tensor((0, 1), device, dtype)
+            yield make_tensor((2), device, dtype)
+            yield make_tensor((2, 1), device, dtype)
+            yield make_tensor((2, 2), device, dtype)
+            yield make_tensor((2, 3), device, dtype)
+            yield make_tensor((5, 10), device, dtype)
+            yield make_tensor((5, 10), device, dtype, noncontiguous=True)
+            yield torch.tensor([0, -2, nan, 10.2, inf], dtype=dtype, device=device)
+
+        for t in generate_input_tensors():
+            check(t)
+            num_observations = t.numel() if t.ndim < 2 else t.size(1)
+            if num_observations > 0:
+                fweights = torch.randint(1, 10, (num_observations,), device=device)
+                aweights = make_tensor((num_observations,), device, torch.float, low=1)
+                for correction, fw, aw in product([0, 1, 2], [None, fweights], [None, aweights]):
+                    check(t, correction, fweights, aweights)
+
+    def test_cov_error(self, device):
+        def check(msg, *args, **kwargs):
+            with self.assertRaisesRegex(RuntimeError, r'cov\(\):.*' + msg + r'.*'):
+                torch.cov(*args, **kwargs)
+
+        a = torch.rand(2)
+        check(r'expected input to have two or fewer dimensions', torch.rand(2, 2, 2))
+        check(r'expected fweights to have one or fewer dimensions', a, fweights=torch.rand(2, 2))
+        check(r'expected aweights to have one or fewer dimensions', a, aweights=torch.rand(2, 2))
+        check(r'expected fweights to have integral dtype', a, fweights=torch.rand(2))
+        check(r'expected aweights to have floating point dtype', a, aweights=torch.tensor([1, 1]))
+        check(r'expected fweights to have the same numel', a, fweights=torch.tensor([1]))
+        check(r'expected aweights to have the same numel', a, aweights=torch.rand(1))
+        check(r'fweights cannot be negative', a, fweights=torch.tensor([-1, -2]))
+        check(r'aweights cannot be negative', a, aweights=torch.tensor([-1., -2.]))
 
     @skipIfNoSciPy
     @dtypes(*torch.testing.get_all_fp_dtypes())
