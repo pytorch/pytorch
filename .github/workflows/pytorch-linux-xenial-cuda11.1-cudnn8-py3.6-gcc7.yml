@@ -249,7 +249,7 @@ jobs:
         run: |
           docker pull "${DOCKER_IMAGE}"
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        if: ${{ contains(env.BUILD_ENVIRONMENT, 'cuda') }}
+        if: ${{ contains(env.BUILD_ENVIRONMENT, 'cuda') && !contains(matrix.config, 'nogpu') }}
         run: |
           bash .github/scripts/install_nvidia_utils_linux.sh
           echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
