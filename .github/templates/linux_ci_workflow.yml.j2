@@ -196,9 +196,13 @@ jobs:
     runs-on: ubuntu-18.04
     env:
       TEST_RUNNER_TYPE: !{{ test_runner_type }}
+      ENABLE_JIT_LEGACY_TEST: !{{ enable_jit_legacy_test }}
       ENABLE_MULTIGPU_TEST: !{{ enable_multigpu_test }}
+      ENABLE_NOGPU_NO_AVX_TEST: !{{ enable_nogpu_no_avx_test }}
+      ENABLE_SLOW_TEST: !{{ enable_slow_test }}
       NUM_TEST_SHARDS: !{{ num_test_shards }}
       MULTIGPU_RUNNER_TYPE: linux.16xlarge.nvidia.gpu
+      NOGPU_RUNNER_TYPE: linux.2xlarge
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
       render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}

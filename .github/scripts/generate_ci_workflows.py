@@ -52,7 +52,10 @@ def PyTorchLinuxWorkflow(
     test_runner_type: str,
     on_pull_request: bool = False,
     enable_doc_jobs: bool = False,
+    enable_jit_legacy_test: YamlShellBool = "''",
     enable_multigpu_test: YamlShellBool = "''",
+    enable_nogpu_no_avx_test: YamlShellBool = "''",
+    enable_slow_test: YamlShellBool = "''",
     num_test_shards: int = 1,
 ) -> PyTorchWorkflow:
     return {
@@ -61,7 +64,10 @@ def PyTorchLinuxWorkflow(
         "test_runner_type": test_runner_type,
         "on_pull_request": on_pull_request,
         "enable_doc_jobs": enable_doc_jobs,
+        "enable_jit_legacy_test": enable_jit_legacy_test,
         "enable_multigpu_test": enable_multigpu_test,
+        "enable_nogpu_no_avx_test": enable_nogpu_no_avx_test,
+        "enable_slow_test": enable_slow_test,
         "num_test_shards": num_test_shards,
     }
 
@@ -152,7 +158,11 @@ LINUX_WORKFLOWS = [
         build_environment="pytorch-linux-xenial-cuda10.2-cudnn7-py3.6-gcc7",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
+        on_pull_request=True,  # TODO: remove before merging!
+        enable_jit_legacy_test=1,
         enable_multigpu_test=1,
+        enable_nogpu_no_avx_test=1,
+        enable_slow_test=1,
         num_test_shards=2,
     ),
     PyTorchLinuxWorkflow(
