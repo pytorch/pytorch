@@ -526,7 +526,7 @@ class MultiProcessTestCase(TestCase):
         except Exception as e:
             logger.error(
                 f'Caught exception: \n{traceback.format_exc()} exiting '
-                'process with exit code: {MultiProcessTestCase.TEST_ERROR_EXIT_CODE}')
+                f'process {self.rank} with exit code: {MultiProcessTestCase.TEST_ERROR_EXIT_CODE}')
             # Send error to parent process.
             parent_pipe.send(traceback.format_exc())
             sys.exit(MultiProcessTestCase.TEST_ERROR_EXIT_CODE)
