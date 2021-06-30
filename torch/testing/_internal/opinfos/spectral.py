@@ -1,8 +1,9 @@
+import numpy as np
 from torch.testing import floating_and_complex_types
 from torch.testing._internal.common_utils import make_tensor, slowTest
 from torch.testing._internal.common_device_type import \
     (skipCPUIfNoMkl, skipCUDAIfRocm)
-from .core import OpInfo, SampleInput, DecorateInfo, S
+from .core import OpInfo, SampleInput, DecorateInfo, S, _getattr_qual
 
 
 def sample_inputs_spectral_ops(self, device, dtype, requires_grad=False, **kwargs):
