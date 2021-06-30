@@ -839,6 +839,18 @@ void Reducer::mark_variable_ready(size_t variable_index) {
   }
 }
 
+c10::intrusive_ptr<c10::ivalue::Future> Reducer::run_reduction_hook(
+    GradBucket grad_bucket) {
+  if (comm_hook_ == nullptr) {
+    _AllReduceCommHookWithDivFactorState state(
+        process_group_.get(), div_factor_);
+    _AllReduceCommHookWithDivFactor allreduce_hook(state);
+    return allreduce_hook.runHook(grad_bucket);
+  } else {
+    return comm_hook_->runHook(grad_bucket);
+  }
+}
+
 void Reducer::all_reduce_bucket(Bucket& bucket) {
   std::vector<at::Tensor> tensors;
   tensors.reserve(bucket.replicas.size());
@@ -862,13 +874,7 @@ void Reducer::all_reduce_bucket(Bucket& bucket) {
       bucket.replicas[0].offsets,
       bucket.replicas[0].lengths,
       bucket.replicas[0].sizes_vec);
-  if (comm_hook_ == nullptr) {
-    _AllReduceCommHookWithDivFactorState state(process_group_.get(), div_factor_);
-    _AllReduceCommHookWithDivFactor allreduce_hook(state);
-    bucket.future_work = allreduce_hook.runHook(grad_bucket);
-  } else {
-    bucket.future_work = comm_hook_->runHook(grad_bucket);
-  }
+  bucket.future_work = run_reduction_hook(std::move(grad_bucket));
 }
 
 // Called when the bucket at the specified index is ready to be reduced.
