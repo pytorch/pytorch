@@ -302,9 +302,11 @@ inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor>& ten
   return tensors;
 }
 
-inline void check_no_requires_grad(const Tensor& tensor, const char* name, const char* fn_name="") {
-  TORCH_CHECK(!(tensor.defined() && tensor.requires_grad()), "The function '", fn_name, "' is not differentiable "
-              "with respect to argument '", name, "'. This input cannot have requires_grad True.");
+inline void check_no_requires_grad(const Tensor& tensor, const char* name,
+                                   const char* fn_name="", bool check_grad_mode=true) {
+  TORCH_CHECK(!(tensor.defined() && tensor.requires_grad()) || !(check_grad_mode && GradMode::is_enabled()),
+              "The function '", fn_name, "' is not differentiable with respect to argument '", name,
+              "'. This input cannot have requires_grad True.");
 }
 
 inline void check_no_requires_grad(const c10::optional<Tensor>& tensor, const char* name, const char* fn_name="") {
@@ -314,15 +316,23 @@ inline void check_no_requires_grad(const c10::optional<Tensor>& tensor, const ch
 }
 
 inline void check_no_requires_grad(TensorList tensors, const char* name, const char* fn_name="") {
+  // GradMode check is expensive, so check it only once for TensorLists
+  if (!GradMode::is_enabled()) {
+    return;
+  }
   for (auto& tensor : tensors) {
-    check_no_requires_grad(tensor, name, fn_name);
+    check_no_requires_grad(tensor, name, fn_name, /*check_grad_mode*/ false);
   }
 }
 
 inline void check_no_requires_grad(const c10::List<c10::optional<Tensor>>& tensors, const char* name, const char* fn_name="") {
+  // GradMode check is expensive, so check it only once for TensorLists
+  if (!GradMode::is_enabled()) {
+    return;
+  }
   for (c10::optional<Tensor> tensor : tensors) {
     if (tensor.has_value()) {
-      check_no_requires_grad(*tensor, name, fn_name);
+      check_no_requires_grad(*tensor, name, fn_name, /*check_grad_mode*/ false);
     }
   }
 }
