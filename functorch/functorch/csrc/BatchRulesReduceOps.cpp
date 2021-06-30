@@ -315,6 +315,8 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE(std);
   OP_DECOMPOSE2(std, dim);
   VMAP_SUPPORT("std.correction", std_correction_batch_rule);
+  OP_DECOMPOSE2(softmax, int);
+  VMAP_SUPPORT("_softmax", SINGLE_ARG(reduction_dim_batch_rule<decltype(&ATEN_FN(_softmax)), &at::_softmax, bool>));
   VMAP_SUPPORT("sort", SINGLE_ARG(reduction_dim_ret_pair_batch_rule<decltype(&ATEN_FN(sort)), &at::sort, bool>));
   VMAP_SUPPORT("sort.stable", sort_stable_batch_rule);
   VMAP_SUPPORT("sum", sum_batch_rule);

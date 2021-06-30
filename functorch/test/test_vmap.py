@@ -2879,7 +2879,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         # Unsupported input types
         if op.name in op_skip:
             return
-
         # entries in here need don't work and need to be fixed.
         # Each one of these is a bug
         vmap_fail = {'__getitem__', 'squeeze', 'unfold'}
@@ -2921,15 +2920,6 @@ class TestVmapOperatorsOpInfo(TestCase):
             # todo(chilli): test these better
             # Not testing correctness, just that they run
             vmap(op, in_dims=(0,))(x,)
-
-    @unittest.expectedFailure
-    def test_einsum(self, device):
-        test = functools.partial(_vmap_test, check_propagates_grad=False)
-
-        op = torch.einsum
-
-        x = torch.randn(3)
-        test(self, op, ("i->", x), in_dims=(None, 0))
 
     def test_flatten(self, device):
         test = functools.partial(_vmap_test, check_propagates_grad=False)
