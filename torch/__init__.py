@@ -15,7 +15,7 @@ import platform
 import textwrap
 import ctypes
 import warnings
-
+from .autocast_mode import autocast
 if sys.version_info < (3,):
     raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
 
