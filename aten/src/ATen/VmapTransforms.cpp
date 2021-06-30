@@ -137,11 +137,12 @@ static Tensor alignBatchDimsAtFront(
 
   auto physical_sizes = physical_tensor.sizes();
 
-  auto tensor_example_dim = physical_sizes.size() - /*num_batch_dims*/tensor_levels.count();
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+  const auto tensor_example_dim = (
+    static_cast<int64_t>(physical_sizes.size())
+    - /*num_batch_dims*/static_cast<int64_t>(tensor_levels.count())
+  );
   TORCH_INTERNAL_ASSERT(tensor_example_dim <= requested_example_dim);
 
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   if (tensor_levels == requested_levels && tensor_example_dim == requested_example_dim) {
     // Optimization: no need to do another view if the physical tensor is
     // already the correct shape
