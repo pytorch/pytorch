@@ -6,7 +6,7 @@ from pathlib import Path
 from data import data_map
 from metrics.ProcessedMetricsPrinter import ProcessedMetricsPrinter
 from models import model_map
-from servers import server_map
+from server import server_map
 from trainer import (
     criterion_map,
     ddp_hook_map,
