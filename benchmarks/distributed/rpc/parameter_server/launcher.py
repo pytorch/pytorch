@@ -3,18 +3,19 @@ import json
 import os
 from pathlib import Path
 
-from criterion_functions import create_criterion_map
 from data import data_map
-from ddp_model_functions import create_ddp_model_map
-from hooks import ddp_hook_map
-from hookstates import hook_state_map
-from iteration_step_functions import iteration_step_map
 from metrics.ProcessedMetricsPrinter import ProcessedMetricsPrinter
 from models import model_map
-from optimizer_functions import create_optimizer_map
-from preprocess_data_functions import preprocess_data_map
 from servers import server_map
-from trainers import trainer_map
+from trainer import (
+    criterion_map,
+    ddp_hook_map,
+    ddp_model_map,
+    hook_state_map,
+    iteration_step_map,
+    preprocess_data_map,
+    trainer_map,
+)
 
 import torch
 import torch.distributed as c10d
@@ -142,11 +143,10 @@ def run_trainer(
 
     model = load_model(args)
     preprocess_data = preprocess_data_map[args.preprocess_data]
-    create_criterion = create_criterion_map[args.create_criterion]
-    create_ddp_model = create_ddp_model_map[args.create_ddp_model]
-    create_optimizer = create_optimizer_map[args.create_optimizer]
+    create_criterion = criterion_map[args.create_criterion]
+    create_ddp_model = ddp_model_map[args.create_ddp_model]
     iteration_step = iteration_step_map[args.iteration_step]
-    HookState = hook_state_map[args.hook_state]
+    hook_state_class = hook_state_map[args.hook_state]
     hook = ddp_hook_map[args.ddp_hook]
     # check if this a cudatrainer
     use_cuda_rpc = rank >= args.ntrainer
@@ -161,9 +161,7 @@ def run_trainer(
         preprocess_data,
         create_criterion,
         create_ddp_model,
-        args.lr,
-        create_optimizer,
-        HookState,
+        hook_state_class,
         hook,
         iteration_step,
         *trainer_args
@@ -366,8 +364,14 @@ def get_json_config(file_name, id):
         file_name (str): name of configuration file to load
         id (str): configuration that will be loaded
     """
-    with open(os.path.join(Path(__file__).parent, file_name), "r") as f:
-        json_config = json.load(f)[id]
+    f = open(
+        os.path.join(
+            Path(__file__).parent, file_name
+        ),
+        "r"
+    )
+    json_config = json.load(f)[id]
+    f.close()
     return json_config
 
 
@@ -578,16 +582,6 @@ if __name__ == "__main__":
         "--hook_state",
         type=str,
         help="this will be the state class used when registering the ddp communication hook"
-    )
-    parser.add_argument(
-        "--lr",
-        type=float,
-        help="this will be the learning rate used by the optimizer during training"
-    )
-    parser.add_argument(
-        "--create_optimizer",
-        type=str,
-        help="this function will be used to create the optimizer used to update gradients during training"
     )
     parser.add_argument(
         "--ddp_hook",
