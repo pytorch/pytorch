@@ -1,11 +1,34 @@
 from functools import reduce
 import torch
 import operator
+
+from math import floor
 from torch.fx.tensor_type import Dyn, is_consistent, TensorType, is_more_precise
 from typing import Callable, Dict
 from torch.fx.node import Target
+from torch.nn.modules.batchnorm import BatchNorm2d
+from torch.nn.modules.conv import Conv2d
+
 
 _INFERENCE_RULES: Dict[Target, Callable] = {}
+
+
+def apply_matching(t, n):
+    """
+    Expand a type to the desired tensor dimension if possible
+    Raise an error otherwise.
+    - t is the given type
+    - n is a number to expand to
+    """
+    if t == Dyn:
+        dims = [Dyn] * n
+        return TensorType(dims)
+    elif isinstance(t, TensorType):
+        if len(t.__args__) != n:
+            raise TypeError(f'Cannot apply matching. Tensor {t} has rank {len(t.__args__)}. It should have rank {n}')
+        return t
+    else:
+        raise TypeError(f'Cannot match the type {t}')
 
 
 def broadcast_types(t1, t2):
@@ -37,8 +60,6 @@ def broadcast_types(t1, t2):
             raise TypeError('In-place operations cannot not change shape')
 
         return TensorType(tuple(new_t1)), TensorType(tuple(new_t2))
-
-
 
 
 def register_inference_rule(call_target):
@@ -125,6 +146,56 @@ def reshape_inference_rule(n):
     else:
         raise TypeError(f'Cannot reshape in node {n} from {t1} to {t2_type}')
 
+# todo add broadcasting
+@register_inference_rule(Conv2d)
+def conv2d_inference_rule(n, op_type):
+    arg_type = apply_matching(n.args[0].type, 4)
+    n.type = apply_matching(n.type, 4)
+
+    if is_consistent(arg_type.__args__[1], op_type.in_channels) and \
+            is_consistent(n.type.__args__[1], op_type.in_channels) and \
+            is_consistent(arg_type, n.type):
+
+        w_in = arg_type.__args__[3]
+        h_in = arg_type.__args__[2]
+
+        h_out = floor((h_in + (2 * op_type.padding[0] - op_type.dilation[0] *
+                               (op_type.kernel_size[0] - 1) - 1)) /
+                      op_type.stride[0]) + 1
+
+        w_out = floor((w_in + (2 * op_type.padding[1] - op_type.dilation[1] *
+                               (op_type.kernel_size[1] - 1) - 1)) /
+                      op_type.stride[1]) + 1
+
+        new_type = TensorType((op_type.in_channels, op_type.out_channels, h_out, w_out))
+        n.type = new_type
+
+        return n.type
+    else:
+        raise TypeError
+
+# todo add broadcasting
+@register_inference_rule(BatchNorm2d)
+def bn2d_inference_rule(n, op_type):
+    arg_type = apply_matching(n.args[0].type, 4)
+    n.type = apply_matching(n.type, 4)
+
+    # we check the conditions on the incoming argument
+    # and any existing annotation
+    # we also check for consistency between both annotations
+    if is_consistent(arg_type.__args__[1], op_type.num_features) and \
+            is_consistent(n.type.__args__[1], op_type.num_features) and \
+            is_consistent(arg_type, n.type):
+
+        # we choose the more precise type
+        # to be the node type
+        # so if an incoming argument has more type information
+        # we set this node's type to be the argument type
+        if is_more_precise(arg_type, n.type):
+            n.type = arg_type
+        return n.type
+    else:
+        raise TypeError
 
 class GraphTypeChecker:
     def __init__(self, env, traced):
@@ -153,17 +224,24 @@ class GraphTypeChecker:
         - Transpose
         - Add
         """
+        if n.type is None:
+            n.type = Dyn
+
         if n.op == 'placeholder':
-            if n.type is None:
-                n.type = Dyn
-            else:
-                return n.type
+            return n.type
 
         if n.op == 'call_function':
             if n.target in _INFERENCE_RULES:
                 return _INFERENCE_RULES[n.target](n)
             else:
                 raise RuntimeError(f'No inference rule registered for target {n.target}!')
+
+        if n.op == 'call_module':
+            op_type = getattr(self.traced, n.name)
+            if type(op_type) in _INFERENCE_RULES:
+                return _INFERENCE_RULES[type(op_type)](n, op_type)
+            else:
+                raise RuntimeError(f'No inference rule registered for class {type(op_type)}!')
 
         if n.op == 'output':
             n.type = n.args[0].type
