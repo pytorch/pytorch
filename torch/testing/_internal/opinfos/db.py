@@ -1,7 +1,6 @@
 from functools import wraps, partial
 from itertools import product, chain
 import itertools
-import collections
 import copy
 import random
 
@@ -19,7 +18,7 @@ from torch.testing import \
 from torch.testing._core import _dispatch_dtypes
 from torch.testing._internal.common_device_type import \
     (skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
-     skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfRocm, precisionOverride, toleranceOverride, tol)
+     skipCPUIfNoLapack, skipCUDAIfRocm, precisionOverride, toleranceOverride, tol)
 from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater
 from torch.testing._internal.common_utils import \
     (random_symmetric_matrix, random_symmetric_psd_matrix,
@@ -28,7 +27,7 @@ from torch.testing._internal.common_utils import \
      make_symmetric_pd_matrices,
      random_fullrank_matrix_distinct_singular_value,
      TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor, TEST_SCIPY,
-     torch_to_numpy_dtype_dict, slowTest, TEST_WITH_ASAN,
+     torch_to_numpy_dtype_dict, TEST_WITH_ASAN,
      GRADCHECK_NONDET_TOL,)
 from torch.testing._internal.opinfos.core import \
     (OpInfo, SkipInfo, DecorateInfo, SampleInput, S, M, L)
