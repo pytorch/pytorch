@@ -771,8 +771,8 @@ class BuildExtension(build_ext, object):
             cuda_version = re.search(r'release (\d+[.]\d+)', cuda_version_str)
             if cuda_version is not None:
                 cuda_str_version = cuda_version.group(1)
-                cuda_ver = packaging.version.parse((cuda_str_version)
-                torch_cuda_version = packaging.version.parse((torch.version.cuda)  # type: ignore[arg-type]
+                cuda_ver = packaging.version.parse(cuda_str_version)
+                torch_cuda_version = packaging.version.parse(torch.version.cuda)  # type: ignore[arg-type]
                 if cuda_ver.major != torch_cuda_version.major:  # type: ignore[attr-defined]
                     raise RuntimeError(CUDA_MISMATCH_MESSAGE.format(
                         cuda_str_version, torch.version.cuda))
