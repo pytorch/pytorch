@@ -273,8 +273,15 @@ class Distribution(object):
                           '`validate_args=False` to turn off validation.')
             return
         assert support is not None
-        if not support.check(value).all():
-            raise ValueError('The value argument must be within the support')
+        valid = support.check(value)
+        if not valid.all():
+            invalid_value = value.data[~valid]
+            error = ValueError(
+                f"The value argument ({type(value).__name__} of shape {tuple(value.shape)}) "
+                f"must be within the support ({repr(support)}) "
+                f"of the distribution {repr(self)}. "
+                f"Invalid values:\n{invalid_value}"
+            )
 
     def _get_checked_instance(self, cls, _instance=None):
         if _instance is None and type(self).__init__ != cls.__init__:

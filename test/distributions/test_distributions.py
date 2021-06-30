@@ -4549,6 +4549,14 @@ class TestValidation(TestCase):
                                 log_prob = d_nonval.log_prob(val)
                             except RuntimeError:
                                 pass
+                # check correct samples are ok
+                v = d.sample()
+                # check invalid values raise ValueError
+                v = torch.full_like(v, math.nan)
+                with self.assertRaisesRegex(
+                    ValueError, "The value argument .* must be within the support .*"
+                ):
+                    d_val.log_prob(v)
 
     @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")
     def test_invalid(self):
