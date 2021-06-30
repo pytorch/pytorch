@@ -193,7 +193,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: ubuntu-18.04
     env:
-      NUM_TEST_SHARDS: 1
+      NUM_TEST_SHARDS: 2
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     container:
@@ -221,7 +221,7 @@ jobs:
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
       JOB_BASE_NAME: pytorch-linux-xenial-cuda10.2-cudnn7-py3.6-gcc7-test
-      NUM_TEST_SHARDS: 1
+      NUM_TEST_SHARDS: 2
       TEST_CONFIG: ${{ matrix.test_config }}
     steps:
       - name: Log in to ECR
