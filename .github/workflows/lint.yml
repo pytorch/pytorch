@@ -103,6 +103,8 @@ jobs:
             echo 'Running setup.py with Python 2 did not give the expected error message.'
             false
           fi
+      - name: Keep torch.utils.collect_env python2 compliant
+        run: python2 -m py_compile torch/utils/collect_env.py
 
   shellcheck:
     runs-on: ubuntu-18.04
