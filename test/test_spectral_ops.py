@@ -104,6 +104,8 @@ class TestFFT(TestCase):
     # So for ROCm, call np.fft.rfftn and use its output as the input
     # for testing ops that call hipfftExecC2R
     def _generate_valid_rocfft_input(self, input, op):
+        input_device=input.device
+
         # check if op can invoke hipfftExecC2R or hipfftExecZ2D
         if type(op) == SpectralFuncInfo:
             supported_ops = op.supported_dtypes("")
@@ -123,7 +125,7 @@ class TestFFT(TestCase):
         # generate Hermitian symmetric input using rfftn
         rfft_output = np.fft.rfftn(np_input_real)
 
-        return torch.from_numpy(rfft_output).to('cuda')
+        return torch.from_numpy(rfft_output).to(input_device)
 
     @onlyOnCPUAndCUDA
     @ops([op for op in spectral_funcs if not op.ndimensional])
