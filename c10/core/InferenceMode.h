@@ -54,16 +54,13 @@ struct TORCH_API InferenceMode {
         prev_keyset(c10::impl::snapshot_tls_keyset()),
         grad_mode(at::AutoGradMode(!enabled)) {
     _set_enabled(enabled);
-    DispatchKeySet included = enabled
+    const DispatchKeySet included = enabled
         ? prev_keyset.included_.remove(c10::DispatchKey::ADInplaceOrView)
         : prev_keyset.included_.add(c10::DispatchKey::ADInplaceOrView);
-    DispatchKeySet excluded = enabled
+    const DispatchKeySet excluded = enabled
         ? (prev_keyset.excluded_ | c10::autograd_dispatch_keyset)
         : (prev_keyset.excluded_ - c10::autograd_dispatch_keyset);
-    auto cur_keyset = prev_keyset;
-    cur_keyset.included_ = included;
-    cur_keyset.excluded_ = excluded;
-    c10::impl::_force_tls_local_dispatch_key_set(cur_keyset);
+    c10::impl::_force_tls_local_dispatch_key_set({included, excluded});
   }
 
   ~InferenceMode() {

@@ -55,10 +55,12 @@ class C10_API LocalDispatchKeySetWrapper {
 };
 
 struct C10_API LocalDispatchKeySet {
+  LocalDispatchKeySet(const DispatchKeySet included, const DispatchKeySet excluded)
+      : included_(included), excluded_(excluded) {};
   LocalDispatchKeySet(LocalDispatchKeySetWrapper x)
       : included_(x.included()), excluded_(x.excluded()) {}
-  DispatchKeySet included_;
-  DispatchKeySet excluded_;
+  const DispatchKeySet included_;
+  const DispatchKeySet excluded_;
 };
 
 inline C10_API LocalDispatchKeySet snapshot_tls_keyset() {
@@ -154,9 +156,9 @@ class ExcludeSingleDispatchKeyGuard {
   ExcludeDispatchKeyGuard<k_set.raw_repr(), has_overlap> guard_;
 };
 
-// Create a guard which can be exported by subclassing a specialization
-// of ExcludeDispatchKeyGuard. Note that because it will be created in ATen,
-// we need TORCH_API rather than C10_API.
+// Helper to create a guard which can be exported by subclassing a
+// specialization of ExcludeDispatchKeyGuard. Note that because it will be
+// created in ATen, we need TORCH_API rather than C10_API.
 #define SPECIALIZE_EXCLUDE_GUARD(guard_name, k, has_overlap)              \
   class TORCH_API guard_name                                              \
       : c10::impl::ExcludeDispatchKeyGuard<k.raw_repr(), has_overlap> {   \
