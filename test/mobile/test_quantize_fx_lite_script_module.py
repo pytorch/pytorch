@@ -2,6 +2,10 @@ import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
 import torch.utils.bundled_inputs
+from torch.quantization import (
+    default_qconfig,
+    float_qparams_weight_only_qconfig,
+)
 
 # graph mode quantization based on fx
 from torch.quantization.quantize_fx import (
@@ -9,10 +13,9 @@ from torch.quantization.quantize_fx import (
     convert_fx,
 )
 from torch.testing._internal.common_quantization import NodeSpec as ns
-from torch.testing._internal.common_quantization import QuantizationLiteTestCase
-from torch.quantization import (
-    default_qconfig,
-    float_qparams_weight_only_qconfig,
+from torch.testing._internal.common_quantization import (
+    QuantizationLiteTestCase,
+    LinearModelWithSubmodule,
 )
 
 
@@ -59,18 +62,33 @@ class TestFuseFx(QuantizationLiteTestCase):
                 return x
 
         m = M().eval()
-        qconfig_dict = {"object_type": [(torch.nn.Conv2d, default_qconfig)]}
+        qconfig_dict = {"": default_qconfig, "module_name": [("conv1", None)]}
         m = prepare_fx(m, qconfig_dict)
         data = torch.randn(1, 1, 1, 1)
         m = convert_fx(m)
         # first conv is quantized, second conv is not quantized
-        node_list = [
-            ns.call_function(torch.quantize_per_tensor),
-            ns.call_module(nnq.Conv2d),
-            ns.call_module(nnq.Conv2d),
-            ns.call_method("dequantize"),
-        ]
         self._compare_script_and_mobile(m, input=data)
+
+    def test_submodule(self):
+        model = LinearModelWithSubmodule().eval()
+        qconfig_dict = {"": torch.quantization.get_default_qconfig("qnnpack")}
+        model = prepare_fx(model, qconfig_dict)
+        quant = convert_fx(model)
+
+        x = torch.randn(5, 5)
+        self._compare_script_and_mobile(quant, input=x)
+
+    def test_submodule_partial(self):
+        model = LinearModelWithSubmodule().eval()
+        qconfig_dict = {
+            "": torch.quantization.get_default_qconfig("qnnpack"),
+            "module_name": [("subm", None)],
+        }
+        model = prepare_fx(model, qconfig_dict)
+        quant = convert_fx(model)
+
+        x = torch.randn(5, 5)
+        self._compare_script_and_mobile(quant, input=x)
 
 
 if __name__ == "__main__":
