@@ -12,24 +12,14 @@ from ._core import _unravel_index
 __all__ = ["assert_close"]
 
 
-# The UsageError should be raised in case the test function is not used correctly. With this the user is able to
-# differentiate between a test failure (there is a bug in the tested code) and a test error (there is a bug in the
-# test).
-class UsageError(Exception):
-    pass
-
-
-_TestingError = Union[AssertionError, UsageError]
-
-
 class _TestingErrorMeta(NamedTuple):
-    type: Type[_TestingError]
+    type: Type[Exception]
     msg: str
 
     def amend_msg(self, prefix: str = "", postfix: str = "") -> "_TestingErrorMeta":
         return self._replace(msg=f"{prefix}{self.msg}{postfix}")
 
-    def to_error(self) -> _TestingError:
+    def to_error(self) -> Exception:
         return self.type(self.msg)
 
 
@@ -177,10 +167,10 @@ def _check_supported_tensor(input: Tensor) -> Optional[_TestingErrorMeta]:
         (Optional[_TestingErrorMeta]): If check did not pass.
     """
     if input.is_quantized:
-        return _TestingErrorMeta(UsageError, "Comparison for quantized tensors is not supported yet.")
+        return _TestingErrorMeta(ValueError, "Comparison for quantized tensors is not supported yet.")
 
     if input.layout not in {torch.strided, torch.sparse_coo, torch.sparse_csr}:  # type: ignore[attr-defined]
-        return _TestingErrorMeta(UsageError, f"Unsupported tensor layout {input.layout}")
+        return _TestingErrorMeta(ValueError, f"Unsupported tensor layout {input.layout}")
 
     return None
 
@@ -530,7 +520,7 @@ def _to_tensor(tensor_or_scalar_like: Any) -> Tuple[Optional[_TestingErrorMeta],
             tensor = torch.as_tensor(tensor_or_scalar_like)
         except Exception:
             error_meta = _TestingErrorMeta(
-                UsageError, f"No tensor can be constructed from type {type(tensor_or_scalar_like)}."
+                ValueError, f"No tensor can be constructed from type {type(tensor_or_scalar_like)}."
             )
             return error_meta, None
 
@@ -740,9 +730,9 @@ def assert_close(
             the mismatching tensors and a namespace of diagnostics about the mismatches. See below for details.
 
     Raises:
-        UsageError: If a :class:`torch.Tensor` can't be constructed from an tensor-or-scalar-like.
-        UsageError: If any tensor is quantized. This is a temporary restriction and will be relaxed in the future.
-        UsageError: If only :attr:`rtol` or :attr:`atol` is specified.
+        ValueError: If a :class:`torch.Tensor` can't be constructed from an tensor-or-scalar-like.
+        ValueError: If any tensor is quantized. This is a temporary restriction and will be relaxed in the future.
+        ValueError: If only :attr:`rtol` or :attr:`atol` is specified.
         AssertionError: If corresponding tensor-or-scalar-likes do not share a common superclass.
         AssertionError: If :attr:`allow_subclasses` is ``False``, but tensor-or-scalar-likes have different types.
         AssertionError: If the inputs are :class:`~collections.abc.Sequence`'s, but their length does not match.
@@ -919,7 +909,7 @@ def assert_close(
     if (rtol is None) ^ (atol is None):
         # We require both tolerance to be omitted or specified, because specifying only one might lead to surprising
         # results. Imagine setting atol=0.0 and the tensors still match because rtol>0.0.
-        raise UsageError(
+        raise ValueError(
             f"Both 'rtol' and 'atol' must be either specified or omitted, "
             f"but got no {'rtol' if rtol is None else 'atol'}.",
         )
