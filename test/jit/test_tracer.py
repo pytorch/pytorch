@@ -1431,6 +1431,17 @@ class TestTracer(JitTestCase):
 
         traced = torch.jit.trace(Bar(), (x, y))
 
+        for n in traced.graph.nodes():
+            if n.kind() != 'prim::PythonOp':
+                continue
+            for o in n.outputs():
+                if o.type().kind() != 'TupleType':
+                    continue
+                for e in o.type().elements():
+                    # In this test, tensor elements in a tuple output 
+                    # can't have unknown shapes.
+                    assert e.dim()
+
         u, v = traced(x, y)
 
         self.assertEqual(u, y)
