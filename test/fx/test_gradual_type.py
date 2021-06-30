@@ -3,7 +3,7 @@ import torch
 from torch.fx import symbolic_trace
 from torch.fx.tensor_type import TensorType, Dyn, is_consistent, is_more_precise
 from torch.fx.annotate import annotate
-from torch.fx.experimental.graph_gradual_typechecker import GraphTypeChecker
+from torch.fx.experimental.graph_gradual_typechecker import GraphTypeChecker, broadcast_types
 
 
 class AnnotationsTest(unittest.TestCase):
@@ -61,8 +61,42 @@ class AnnotationsTest(unittest.TestCase):
         self.assertFalse(is_more_precise(TensorType((1, 2, 3)), TensorType((1, 2, 3, 5))))
         self.assertFalse(is_more_precise(TensorType((1, 2, 3)), int))
 
+    def test_broadcasting1(self):
+        t1 = TensorType((1, 2, 3, 4))
+        t2 = TensorType((1, 2, 1, 4))
+        assert broadcast_types(t1, t2) == (TensorType((1, 2, 3, 4)), TensorType((1, 2, 3, 4)))
+
+    def test_broadcasting2(self):
+        t1 = TensorType((2, 3, 4))
+        t2 = TensorType((1, 2, 1, 4))
+
+        with self.assertRaises(TypeError):
+            broadcast_types(t1, t2)
+
+    def test_broadcasting3(self):
+        t1 = TensorType((1, 2, 3, Dyn))
+        t2 = TensorType((2, 3, 4))
+        assert broadcast_types(t1, t2) == (TensorType((1, 2, 3, Dyn)), TensorType((1, 2, 3, 4)))
+
 
 class TypeCheckerTest(unittest.TestCase):
+
+    def test_type_check_add_with_broadcast(self):
+        class M(torch.nn.Module):
+            def forward(self, x: TensorType((1, 2, 3, Dyn)), y: TensorType((2, 3, 4))):
+                return torch.add(x, y)
+        module = M()
+        symbolic_traced: torch.fx.GraphModule = symbolic_trace(module)
+        tc = GraphTypeChecker({}, symbolic_traced)
+        tc.type_check()
+        expected_ph_types = [TensorType((1, 2, 3, Dyn)),
+                             TensorType((1, 2, 3, 4)),
+                             TensorType((1, 2, 3, 4)),
+                             TensorType((1, 2, 3, 4))]
+        expected_iter = iter(expected_ph_types)
+
+        for n in symbolic_traced.graph.nodes:
+            assert n.type == next(expected_iter)
 
     def test_type_check_add_false(self):
         class M(torch.nn.Module):

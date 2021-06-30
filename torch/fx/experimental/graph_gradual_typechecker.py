@@ -8,6 +8,55 @@ from torch.fx.node import Target
 _INFERENCE_RULES: Dict[Target, Callable] = {}
 
 
+def apply_matching(t, n):
+    """
+    Expand a type to the desired tensor dimension if possible
+    Raise an error otherwise.
+    """
+    if t == Dyn:
+        dims = [Dyn] * n
+        return TensorType(dims)
+    elif isinstance(t, TensorType):
+        if len(t.__args__) != 4:
+            raise TypeError("Wrong matching dimensions")
+        return t
+    else:
+        raise NotImplementedError("Matching not defined for " + t)
+
+
+def broadcast_types(t1, t2):
+    if isinstance(t1, TensorType) and isinstance(t2, TensorType):
+        s1 = len(t1.__args__)
+        s2 = len(t2.__args__)
+
+        new_t1 = list(t1.__args__)
+        new_t2 = list(t2.__args__)
+
+        if abs(s1 - s2) > 1 or s1 == 0 or s2 == 0:
+            raise TypeError(f'Cannot broadcast the tensors {t1} and {t2}')
+
+        if s1 > s2:
+            new_t2.insert(0, t1.__args__[0])
+
+        elif s2 > s1:
+            new_t1.insert(0, t2.__args__[0])
+
+        for i, (x, y) in enumerate(zip(new_t1, new_t2)):
+            if x == 1:
+                new_t1[i] = y
+            elif y == 1:
+                new_t2[i] = x
+            else:
+                continue
+
+        if tuple(new_t1) != t1.__args__ and tuple(new_t2) != t2.__args__:
+            raise TypeError('In-place operations cannot not change shape')
+
+        return TensorType(tuple(new_t1)), TensorType(tuple(new_t2))
+
+
+
+
 def register_inference_rule(call_target):
     def register(fn):
         if call_target in _INFERENCE_RULES:
@@ -23,15 +72,19 @@ def add_inference_rule(n):
     t1 = n.args[0].type
     t2 = n.args[1].type
 
-    if is_consistent(t1, t2):
+    (new_t1, new_t2) = broadcast_types(t1, t2)
+    n.args[0].type = new_t1
+    n.args[1].type = new_t2
+
+    if is_consistent(new_t1, new_t2):
         # we return the more precise type
-        if is_more_precise(t1, t2):
-            n.type = t1
+        if is_more_precise(new_t1, new_t2):
+            n.type = new_t1
         else:
-            n.type = t2
+            n.type = new_t2
         return n.type
     else:
-        raise TypeError(f'Cannot add arguments {n.args[0]} ({t1}) and {n.args[1]} ({t2}) in node {n}.'
+        raise TypeError(f'Cannot add arguments {n.args[0]} ({ n.args[0].type}) and {n.args[1]} ({ n.args[1].type}) in node {n}.'
                         f' Types should match ')
 
 
@@ -83,10 +136,10 @@ def reshape_inference_rule(n):
             n.type = t2_type
             return t2_type
         else:
-            raise TypeError
+            raise TypeError(f'Cannot reshape in node {n} from {t1} to {t2_type}')
 
     else:
-        raise TypeError
+        raise TypeError(f'Cannot reshape in node {n} from {t1} to {t2_type}')
 
 
 class GraphTypeChecker:
