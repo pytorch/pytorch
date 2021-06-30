@@ -45,6 +45,7 @@
 #include <torch/csrc/jit/passes/onnx/eval_peephole.h>
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_controlflow.h>
 #include <torch/csrc/jit/passes/onnx/fold_if_node.h>
+#include <torch/csrc/jit/passes/onnx/function_extraction.h>
 #include <torch/csrc/jit/passes/onnx/function_substitution.h>
 #include <torch/csrc/jit/passes/onnx/list_model_parameters.h>
 #include <torch/csrc/jit/passes/onnx/pattern_conversion/pattern_conversion.h>
@@ -262,6 +263,8 @@ void initJITBindings(PyObject* module) {
             ONNXShapeTypeInference(graph, params_dict, opset_version);
           })
       .def("_jit_pass_onnx_set_dynamic_input_shape", ONNXSetDynamicInputShape)
+      .def("_jit_pass_onnx_lint", ONNXLintGraph)
+      .def("_jit_pass_onnx_function_extraction", onnx::ONNXFunctionExtraction)
       .def("_jit_pass_fuse", FuseGraph)
       .def(
           "_jit_pass_dce",
