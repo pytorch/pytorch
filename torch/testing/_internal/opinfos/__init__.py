@@ -3,5 +3,4 @@ from .db import op_db, unary_ufuncs, spectral_funcs, sparse_unary_ufuncs, shape_
 from .unary import UnaryUfuncInfo
 from .spectral import SpectralFuncInfo
 from .shape import ShapeFuncInfo
-# these should be moved from db.py to their own file
-from .db import ForeachFuncInfo
+from .foreach import ForeachFuncInfo, foreach_unary_op_db
