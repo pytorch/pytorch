@@ -82,11 +82,14 @@ class ParametrizationList(ModuleList):
     Args:
         modules (sequence): sequence of modules representing the parametrizations
         original (Parameter or Tensor): parameter or buffer that is parametrized
+        unsafe (bool): a boolean flag that denotes whether the parametrization breaks the invariants (e.g. can be resized),
+            Warning: the current Module might not work anymore, enable this flag at your own risk.
     """
     original: Tensor
+    unsafe: bool
 
     def __init__(
-        self, modules: Sequence[Module], original: Union[Tensor, Parameter]
+        self, modules: Sequence[Module], original: Union[Tensor, Parameter], unsafe: bool = False
     ) -> None:
         # We require this because we need to treat differently the first parametrization
         # This should never throw, unless this class is used from the outside
@@ -94,6 +97,7 @@ class ParametrizationList(ModuleList):
             raise ValueError("ParametrizationList requires one or more modules.")
 
         super().__init__(modules)
+        self.unsafe = unsafe
 
         # In plain words:
         # module.weight must keep its dtype and shape.
@@ -162,26 +166,27 @@ class ParametrizationList(ModuleList):
                 originali.requires_grad_(original.requires_grad)
                 _register_parameter_or_buffer(self, f"original{i}", originali)
 
-        # Consistency checks:
-        # Since f : A -> B, right_inverse : B -> A, Z and original should live in B
-        # Z = forward(right_inverse(original))
-        Z = self()
-        if not isinstance(Z, Tensor):
-            raise ValueError(
-                f"A parametrization must return a tensor. Got {type(Z).__name__}."
-            )
-        if Z.dtype != original_dtype:
-            raise ValueError(
-                "Registering a parametrization may not change the dtype of the tensor.\n"
-                f"unparametrized dtype: {original_dtype}\n"
-                f"parametrized dtype: {Z.dtype}"
-            )
-        if Z.shape != original_shape:
-            raise ValueError(
-                "Registering a parametrization may not change the shape of the tensor.\n"
-                f"unarametrized shape: {original_shape}\n"
-                f"parametrized shape: {Z.shape}"
-            )
+        if not self.unsafe:
+            # Consistency checks:
+            # Since f : A -> B, right_inverse : B -> A, Z and original should live in B
+            # Z = forward(right_inverse(original))
+            Z = self()
+            if not isinstance(Z, Tensor):
+                raise ValueError(
+                    f"A parametrization must return a tensor. Got {type(Z).__name__}."
+                )
+            if Z.dtype != original_dtype:
+                raise ValueError(
+                    "Registering a parametrization may not change the dtype of the tensor, unless `unsafe` flag is enabled.\n"
+                    f"unparametrized dtype: {original_dtype}\n"
+                    f"parametrized dtype: {Z.dtype}"
+                )
+            if Z.shape != original_shape:
+                raise ValueError(
+                    "Registering a parametrization may not change the shape of the tensor, unless `unsafe` flag is enabled.\n"
+                    f"unparametrized shape: {original_shape}\n"
+                    f"parametrized shape: {Z.shape}"
+                )
 
     def right_inverse(self, value: Tensor) -> None:
         r"""Calls the methods ``right_inverse`` (see :func:`register_parametrization`)
@@ -319,10 +324,7 @@ def _inject_property(module: Module, tensor_name: str) -> None:
                                    'Either disable caching or avoid scripting.')
             elif torch._C._get_tracing_state() is not None:
                 # Tracing
-                raise RuntimeError('Caching should be disabled while tracing a '
-                                   'model. You can run a traced model with '
-                                   'caching, but during the tracing process '
-                                   'consider disabling it.')
+                raise RuntimeError('Cannot trace a model while caching parametrizations.')
             else:
                 return get_cached_parametrization(parametrization)
         else:
@@ -335,7 +337,7 @@ def _inject_property(module: Module, tensor_name: str) -> None:
     setattr(module.__class__, tensor_name, property(get_parametrized, set_original))
 
 def register_parametrization(
-    module: Module, tensor_name: str, parametrization: Module
+    module: Module, tensor_name: str, parametrization: Module, *, unsafe: bool = False,
 ) -> Module:
     r"""Adds a parametrization to a tensor in a module.
 
@@ -388,8 +390,10 @@ def register_parametrization(
 
     .. note::
 
-        Whenever a parametrization is registered, both its forward and backward method will be called
+        If unsafe=False (default) both the forward and right_inverse methods will be called
         once to perform a number of consistency checks.
+        If unsafe=True, then right_inverse will be called if the tensor is not parametrized,
+        and nothing will be called otherwise.
 
     .. warning::
 
@@ -403,6 +407,11 @@ def register_parametrization(
         tensor_name (str): name of the parameter or buffer on which to register
             the parametrization
         parametrization (nn.Module): the parametrization to register
+    Keyword args:
+        unsafe (bool): a boolean flag that denotes whether the parametrization
+            may change the dtype and shape of the tensor. Default: `False`
+            Warning: the parametrization is not checked for consistency upon registration.
+            Enable this flag at your own risk.
 
     Raises:
         ValueError: if the module does not have a parameter or a buffer named :attr:`tensor_name`
@@ -452,56 +461,58 @@ def register_parametrization(
         # If A is the space of tensors with shape and dtype equal to module.weight
         # we check that parametrization.forward and parametrization.right_inverse are
         # functions from A to A
-
-        Y = getattr(module, tensor_name)
-        X = parametrization(Y)
-        if not isinstance(X, Tensor):
-            raise ValueError(
-                f"A parametrization must return a tensor. Got {type(X).__name__}."
-            )
-        if X.dtype != Y.dtype:
-            raise ValueError(
-                "Registering a parametrization may not change the dtype of the tensor.\n"
-                f"module.{tensor_name}.dtype: {Y.dtype}\n"
-                f"parametrization(module.{tensor_name}).dtype: {X.dtype}"
-            )
-        if X.shape != Y.shape:
-            raise ValueError(
-                "Registering a parametrization may not change the shape of the tensor.\n"
-                f"module.{tensor_name}.shape: {Y.shape}\n"
-                f"parametrization(module.{tensor_name}).shape: {X.shape}"
-            )
-        if hasattr(parametrization, "right_inverse"):
-            Z = parametrization.right_inverse(X)  # type: ignore[operator]
-            if not isinstance(Z, Tensor):
+        if not unsafe:
+            Y = getattr(module, tensor_name)
+            X = parametrization(Y)
+            if not isinstance(X, Tensor):
                 raise ValueError(
-                    f"parametrization.right_inverse must return a tensor. Got: {type(Z).__name__}"
+                    f"A parametrization must return a tensor. Got {type(X).__name__}."
                 )
-            if Z.dtype != Y.dtype:
+            if X.dtype != Y.dtype:
                 raise ValueError(
-                    "The tensor returned by parametrization.right_inverse must have the same dtype "
-                    f"as module.{tensor_name}.\n"
+                    "Registering a parametrization may not change the dtype of the tensor, unless the `unsafe` flag is enabled.\n"
                     f"module.{tensor_name}.dtype: {Y.dtype}\n"
-                    f"returned dtype: {Z.dtype}"
+                    f"parametrization(module.{tensor_name}).dtype: {X.dtype}"
                 )
-            if Z.shape != Y.shape:
+            if X.shape != Y.shape:
                 raise ValueError(
-                    "The tensor returned by parametrization.right_inverse must have the same shape "
-                    f"as module.{tensor_name}.\n"
+                    "Registering a parametrization may not change the shape of the tensor, unless the `unsafe` flag is enabled.\n"
                     f"module.{tensor_name}.shape: {Y.shape}\n"
-                    f"returned shape: {Z.shape}"
+                    f"parametrization(module.{tensor_name}).shape: {X.shape}"
                 )
-        # else right_inverse is assumed to be the identity
+            if hasattr(parametrization, "right_inverse"):
+                Z = parametrization.right_inverse(X)  # type: ignore[operator]
+                if not isinstance(Z, Tensor):
+                    raise ValueError(
+                        f"parametrization.right_inverse must return a tensor. Got: {type(Z).__name__}"
+                    )
+                if Z.dtype != Y.dtype:
+                    raise ValueError(
+                        "The tensor returned by parametrization.right_inverse must have the same dtype "
+                        f"as module.{tensor_name}, unless the `unsafe` flag is enabled.\n"
+                        f"module.{tensor_name}.dtype: {Y.dtype}\n"
+                        f"returned dtype: {Z.dtype}"
+                    )
+                if Z.shape != Y.shape:
+                    raise ValueError(
+                        "The tensor returned by parametrization.right_inverse must have the same shape "
+                        f"as module.{tensor_name}, unless the `unsafe` flag is enabled.\n"
+                        f"module.{tensor_name}.shape: {Y.shape}\n"
+                        f"returned shape: {Z.shape}"
+                    )
+            # else right_inverse is assumed to be the identity
 
         # add the new parametrization to the parametrization list
         assert isinstance(module.parametrizations, ModuleDict)  # Make mypy happy
         module.parametrizations[tensor_name].append(parametrization)
+        # If unsafe was True in previous parametrization, keep it enabled
+        module.parametrizations[tensor_name].unsafe |= unsafe  # type: ignore[index, union-attr]
     elif tensor_name in module._buffers or tensor_name in module._parameters:
         # Set the parametrization mechanism
         # Fetch the original buffer or parameter
         original = getattr(module, tensor_name)
         # We create this early to check for possible errors
-        parametrizations = ParametrizationList([parametrization], original)
+        parametrizations = ParametrizationList([parametrization], original, unsafe=unsafe)
         # Delete the previous parameter or buffer
         delattr(module, tensor_name)
         # If this is the first parametrization registered on the module,
