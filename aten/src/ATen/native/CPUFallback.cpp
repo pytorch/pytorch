@@ -44,7 +44,6 @@ c10::optional<c10::Device> compute_target_device(std::vector<at::Tensor>& t_args
   // Decide what device to move the output tensor(s) to.
   // The current convention is that we use the first tensor arg to pick the device
   // Barring that, we take the first tensor from a TensorList arg.
-  c10::optional<c10::Device> tgt_device = c10::nullopt;
   if (t_args.size() > 0) {
     return t_args[0].device();
   } else {
