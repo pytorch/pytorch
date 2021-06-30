@@ -78,9 +78,11 @@ struct LocalState {
         grad_mode_enabled(at::GradMode::is_enabled()) {}
 };
 
+#pragma pack(push, 1)
 template <int MAX_DIMS>
 struct SpecializationKey {
- protected:
+  constexpr static int SIZEOF_SELF = 10 + MAX_DIMS;
+
   enum DimFlags {
     SIZE_MISSING = 1 << 0, // leading dimension implicitly added
     SIZE_ONE = 1 << 1, // == 1
@@ -148,19 +150,10 @@ struct SpecializationKey {
   }
 
   int cmp(const SpecializationKey<MAX_DIMS>& other) const {
-    return memcmp(
-        &flags_,
-        &other.flags_,
-        sizeof(flags_) + sizeof(alias_group_) + sizeof(dispatch_key_) +
-            sizeof(dimflags_));
-  }
-
-  void clear() {
-    memset(
-        &flags_,
-        0,
-        sizeof(flags_) + sizeof(alias_group_) + sizeof(dispatch_key_) +
-            sizeof(dimflags_));
+    static_assert(
+        sizeof(SpecializationKey<MAX_DIMS>) == SIZEOF_SELF,
+        "struct is not packed, memcmp requires no padding");
+    return memcmp(this, &other, SIZEOF_SELF);
   }
 
   at::DispatchKeySet dispatch_key() const {
@@ -224,7 +217,8 @@ struct SpecializationKey {
   uint64_t dispatch_key_; // DispatchKeySet includes device/layout
   // NOLINTNEXTLINE: C-style arrays
   uint8_t dimflags_[MAX_DIMS];
-} __attribute__((packed));
+};
+#pragma pack(pop)
 
 class CompileResultBase : public KernelScopedObject {
  public:
