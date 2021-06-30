@@ -29,6 +29,7 @@ struct FunctionSchema;
 struct NamedType;
 using OptNameList = c10::optional<std::vector<std::string>>;
 
+void standardizeVectorForUnion(std::vector<TypePtr>& reference, std::vector<TypePtr>* to_fill);
 void standardizeVectorForUnion(std::vector<TypePtr>* to_flatten);
 
 struct AnyType;
@@ -106,7 +107,7 @@ struct TORCH_API UnionType : public Type {
 
   std::string str() const;
 
-  static UnionTypePtr create(std::vector<TypePtr> types);
+  static UnionTypePtr create(std::vector<TypePtr> reference);
 
   bool operator==(const Type& rhs) const override;
 
@@ -138,10 +139,8 @@ struct TORCH_API UnionType : public Type {
     std::string annotation_str_impl(TypePrinter printer) const override;
     std::string unionStr(TypePrinter printer, bool is_annotation_str) const;
     bool has_free_variables_;
-
- private:
-  std::vector<TypePtr> types_;
-  bool can_hold_none_;
+    std::vector<TypePtr> types_;
+    bool can_hold_none_;
 
 };
 
@@ -1003,9 +1002,16 @@ using TupleTypePtr = std::shared_ptr<TupleType>;
 using NameList = std::vector<std::string>;
 // This type represents a Tuple
 struct TORCH_API TupleType : public NamedType {
+
   static TupleTypePtr createNamed(const c10::optional<c10::QualifiedName>& name,
       const std::vector<std::string>& field_names,
-      const std::vector<TypePtr>& types);
+      const std::vector<TypePtr>& field_types,
+      std::vector<IValue>& field_defaults);
+
+  static TupleTypePtr createNamed(const c10::optional<c10::QualifiedName>& name,
+      const std::vector<std::string>& field_names,
+      const std::vector<TypePtr>& field_types);
+
   static TupleTypePtr create(
       std::vector<TypePtr> types) {
     return TupleTypePtr(new TupleType(
