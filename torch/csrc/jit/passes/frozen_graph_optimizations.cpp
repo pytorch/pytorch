@@ -16,6 +16,7 @@ void OptimizeFrozenGraph(
   removeDropout(graph);
   // run a couple times to capture Conv -> Mul -> Add etc
   if (optimize_numerics) {
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
     for (const auto i : c10::irange(2)) {
       FoldFrozenConvBatchnorm(graph);
       FoldFrozenConvAddOrSub(graph);
