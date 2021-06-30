@@ -155,17 +155,17 @@ class TestNNAPI(TestCase):
             self.check(mod, torch.randn(4, 2, 1, 3, 7))
 
         # TODO(axit): To add support for runtime
-        # self.check(
-        #     torch.nn.Flatten(),
-        #     torch.randn(4, 2, 1, 3, 7),
-        #     convert_args=[torch.zeros(0, 2, 1, 3, 7)]
-        # )
-        # with self.assertRaisesRegex(Exception, "dims can't be flexible"):
-        #     self.check(torch.nn.Flatten(), torch.randn(4, 2, 0, 0, 7))
-        # with self.assertRaisesRegex(Exception, "Only 1 dim"):
-        #     self.check(
-        #         torch.nn.Flatten(start_dim=1, end_dim=-2),
-        #         torch.randn(0, 2, 1, 3, 0))
+        self.check(
+            torch.nn.Flatten(),
+            torch.randn(4, 2, 1, 3, 7),
+            convert_args=[torch.zeros(0, 2, 1, 3, 7)]
+        )
+        with self.assertRaisesRegex(Exception, "dims can't be flexible"):
+            self.check(torch.nn.Flatten(), torch.randn(4, 2, 0, 0, 7))
+        with self.assertRaisesRegex(Exception, "Only 1 dim"):
+            self.check(
+                torch.nn.Flatten(start_dim=1, end_dim=-2),
+                torch.randn(0, 2, 1, 3, 0))
 
     def test_slice(self):
         class SliceModule(torch.nn.Module):

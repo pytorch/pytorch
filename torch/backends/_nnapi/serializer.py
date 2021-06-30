@@ -936,7 +936,7 @@ class _NnapiSerializer(object):
         assert node.inputsSize() == 3
         assert node.outputsSize() == 1
 
-        in_id, in_oper = self.get_tensor_operand_by_jitval_fixed_size(node.inputsAt(0))
+        in_id, in_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
 
         start_ctype, start_dim = self.get_constant_value(node.inputsAt(1))
         end_ctype, end_dim = self.get_constant_value(node.inputsAt(2))
@@ -957,18 +957,22 @@ class _NnapiSerializer(object):
         )
 
         # TODO(axit): To add support for runtime
-        # if any(dim == 0 for dim in in_oper.shape[start_dim: end_dim + 1]):
-        #     raise Exception("Flattened dims can't be flexible")
-        # non_flattened_dims = in_oper.shape[: start_dim] + in_oper.shape[end_dim + 1:]
-        # if non_flattened_dims.count(0) > 1:
-        #     raise Exception("Only 1 dim can be flexible")
-        # out_shape = tuple(
-        #     dim if dim != 0 else -1
-        #     for dim in out_shape
-        # )
+        if any(dim == 0 for dim in in_oper.shape[start_dim: end_dim + 1]):
+            raise Exception("Flattened dims can't be flexible")
+        non_flattened_dims = in_oper.shape[: start_dim] + in_oper.shape[end_dim + 1:]
+        if non_flattened_dims.count(0) > 1:
+            raise Exception("Only 1 dim can be flexible")
+        out_shape = tuple(
+            dim if dim != 0 else -1
+            for dim in out_shape
+        )
 
         out_oper = in_oper._replace(shape=out_shape, dim_order=DimOrder.PRESUMED_CONTIGUOUS)
         out_id = self.add_tensor_operand(node.outputsAt(0), out_oper)
+
+        for idx, dim in enumerate(out_shape):
+            if dim == -1:
+                self.forward_operand_shape(out_id, idx, in_id, in_oper.shape.index(0))
 
         inputs = [None] * 2
         inputs[0] = in_id
