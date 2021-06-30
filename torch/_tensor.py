@@ -1083,7 +1083,7 @@ class Tensor(torch._C._TensorBase):
                 # Only synchronize on different streams
                 if stream != torch.cuda.current_stream:
                     event = torch.cuda.Event()
-                    event.record(stream)
+                    event.record(torch.cuda.current_stream())
                     torch.cuda.current_stream().wait_event(event)
         return torch.to_dlpack(self)
 

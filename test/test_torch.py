@@ -7097,11 +7097,9 @@ else:
     @skipMeta
     @dtypes(*torch.testing.get_all_dtypes())
     def test_dlpack_capsule_conversion(self, device, dtype):
-        # DLpack does not explicitly support bool
+        # DLpack does not explicitly support bool (xref dmlc/dlpack#75)
         # It does it through uint8 type
-        if dtype is torch.bool:
-            return
-        if 'xla' in device:
+        if dtype is torch.bool or 'xla' in device:
             return
         x = make_tensor((5,), device, dtype, low=-9, high=9)
         z = from_dlpack(to_dlpack(x))
@@ -7110,11 +7108,7 @@ else:
     @skipMeta
     @dtypes(*torch.testing.get_all_dtypes())
     def test_dlpack_protocol_conversion(self, device, dtype):
-        # DLpack does not explicitly support bool
-        # It does it through uint8 type
-        if dtype is torch.bool:
-            return
-        if 'xla' in device:
+        if dtype is torch.bool or 'xla' in device:
             return
         x = make_tensor((5,), device, dtype, low=-9, high=9)
         z = from_dlpack(x)
@@ -7123,31 +7117,21 @@ else:
     @skipMeta
     @dtypes(*torch.testing.get_all_dtypes())
     def test_dlpack_conversion_with_streams(self, device, dtype):
-        # DLpack does not explicitly support bool
-        # It does it through uint8 type
-        if dtype is torch.bool:
-            return
-        if 'xla' in device:
+        if dtype is torch.bool or 'xla' in device:
             return
         # Create a stream where the tensor will reside
         if device == 'cuda':
             x = make_tensor((5,), device, dtype, low=-9, high=9)
             stream = torch.cuda.Stream()
             with torch.cuda.stream(stream):
-                assert stream.query()
                 z = from_dlpack(x)
-                assert not stream.query()
-            assert stream.query()
+            stream.synchronize()
             self.assertEqual(z, x)
 
     @skipMeta
     @dtypes(*torch.testing.get_all_dtypes())
     def test_dlpack_conversion_with_diff_streams(self, device, dtype):
-        # DLpack does not explicitly support bool
-        # It does it through uint8 type
-        if dtype is torch.bool:
-            return
-        if 'xla' in device:
+        if dtype is torch.bool or 'xla' in device:
             return
         if device == 'cuda':
             from torch._C import _from_dlpack
@@ -7155,25 +7139,16 @@ else:
             stream_a = torch.cuda.Stream()
             stream_b = torch.cuda.Stream()
             with torch.cuda.stream(stream_a):
-                assert stream_a.query()
-                assert stream_b.query()
                 z = _from_dlpack(x.__dlpack__(stream_b.cuda_stream))
                 # sync in stream a forces the stream b work to be completed
-                assert not stream_a.query()
-                assert not stream_b.query()
                 stream_a.synchronize()
-                assert stream_a.query()
-                assert stream_b.query()
+            stream_b.synchronize()
             self.assertEqual(z, x)
 
     @skipMeta
     @dtypes(*torch.testing.get_all_dtypes())
     def test_dlpack_tensor_invalid_stream(self, device, dtype):
-        # DLpack does not explicitly support bool
-        # It does it through uint8 type
-        if dtype is torch.bool:
-            return
-        if 'xla' in device:
+        if dtype is torch.bool or 'xla' in device:
             return
         with self.assertRaises(TypeError):
             x = make_tensor((5,), device, dtype, low=-9, high=9)
