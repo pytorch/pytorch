@@ -1,5 +1,6 @@
 import torch
 import functools
+import warnings
 
 class autocast(object):
     r"""
@@ -112,8 +113,12 @@ class autocast(object):
                 self.fast_dtype = value
             elif key == 'device_type':
                 if not torch.cuda.is_available() and value == 'cuda':
-                    raise RuntimeError('User provided device_type of \'cuda\' but CUDA is not available.')
-                self.device = value
+                    warnings.warn('User provided device_type of \'cuda\' but CUDA is not available, defaulting to CPU bfloat16 implementation.')
+                    self.device = 'cpu'
+                    self.fast_dtype = torch.bfloat16
+                    break
+                else:
+                    self.device = value
             if not (key == 'fast_dtype' or key == 'device_type'):
                 raise RuntimeError('Unrecognized optional argument supplied to autocast context manager: ' + str(key))
 
