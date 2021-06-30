@@ -6,7 +6,6 @@
 
 #include <sstream>
 #include <stdexcept>
-#include <regex>
 
 #ifdef USE_KINETO
 #include <libkineto.h>
@@ -372,9 +371,12 @@ std::string stacksToStr(const std::vector<std::string>& stacks) {
       stacks.begin(),
       stacks.end(),
       std::ostream_iterator<std::string>(oss, ";"),
-      // replace the windows backslash with forward slash
       [](std::string s) -> std::string {
-        return std::regex_replace(s, std::regex("\\\\"), "/");
+#ifdef _WIN32
+        // replace the windows backslash with forward slash
+        std::replace(s.begin(), s.end(), '\\', '/');
+#endif
+        return s;
       });
   auto rc = oss.str();
   rc.pop_back();
