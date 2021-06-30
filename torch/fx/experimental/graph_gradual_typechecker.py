@@ -8,22 +8,6 @@ from torch.fx.node import Target
 _INFERENCE_RULES: Dict[Target, Callable] = {}
 
 
-def apply_matching(t, n):
-    """
-    Expand a type to the desired tensor dimension if possible
-    Raise an error otherwise.
-    """
-    if t == Dyn:
-        dims = [Dyn] * n
-        return TensorType(dims)
-    elif isinstance(t, TensorType):
-        if len(t.__args__) != 4:
-            raise TypeError("Wrong matching dimensions")
-        return t
-    else:
-        raise NotImplementedError("Matching not defined for " + t)
-
-
 def broadcast_types(t1, t2):
     if isinstance(t1, TensorType) and isinstance(t2, TensorType):
         s1 = len(t1.__args__)
