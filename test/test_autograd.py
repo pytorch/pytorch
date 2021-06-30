@@ -4698,7 +4698,7 @@ for shape in [(1,), ()]:
         a = torch.ones(2, 2, requires_grad=True)
         out = a * a
         out.grad_fn._raw_saved_self.register_hooks(lambda x: x, lambda x: x)
-        out.backward()
+        out.sum().backward()
         with self.assertRaisesRegex(RuntimeError, "after it has been freed"):
             out.grad_fn._raw_saved_self.register_hooks(lambda x: x, lambda x: x)
 
