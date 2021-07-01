@@ -1,18 +1,19 @@
 #include <ATen/native/layer_norm.h>
 
+#include <ATen/AccumulateType.h>
+#include <ATen/ATen.h>
+#include <ATen/Config.h>
+#include <ATen/CPUApplyUtils.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/Parallel.h>
+#include <c10/util/irange.h>
+#include <torch/library.h>
+
 #include <array>
 #include <functional>
 #include <numeric>
 #include <tuple>
 #include <vector>
-
-#include <ATen/ATen.h>
-#include <ATen/AccumulateType.h>
-#include <ATen/CPUApplyUtils.h>
-#include <ATen/Config.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/Parallel.h>
-#include <torch/library.h>
 
 namespace at {
 namespace native {
@@ -40,8 +41,8 @@ void layer_norm_cpu_out(
   for (size_t idx = 0; idx < axis; ++idx) {
     stat_shape.emplace_back(input_shape[idx]);
   }
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (size_t idx = axis; idx < input.dim(); ++idx) {
+  for (const auto idx : c10::irange(input.dim())) {
+    (void)idx; // Suppress unused variable warning
     stat_shape.emplace_back(1);
   }
 
@@ -217,12 +218,11 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   at::Tensor mean = std::get<1>(outputs);
   at::Tensor rstd = std::get<2>(outputs);
   std::vector<int64_t> stat_shape;
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (size_t idx = 0; idx < axis; ++idx) {
+  for (const auto idx : c10::irange(axis)) {
     stat_shape.push_back(input_shape[idx]);
   }
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (size_t idx = axis; idx < input.dim(); ++idx) {
+  for (const auto i : c10::irange(axis, input.dim())) {
+    (void)i; // Suppress unused variable
     stat_shape.push_back(1);
   }
   mean = mean.view(stat_shape);
