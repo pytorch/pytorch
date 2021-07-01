@@ -143,6 +143,21 @@ jobs:
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"
+      - name: Determine shm-size
+        run: |
+          shm_size="1g"
+          case "${BUILD_ENVIRONMENT}" in
+            *cuda*)
+              shm_size="2g"
+              ;;
+            *rocm*)
+              shm_size="8g"
+              ;;
+          esac
+          echo "SHM_SIZE=${shm_size}" >> "${GITHUB_ENV}"
+      - name: Output disk space left
+        run: |
+          sudo df -H
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
@@ -164,7 +179,7 @@ jobs:
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}" \
-            sh -c 'sudo chown -R jenkins . && sudo chown -R jenkins /dev && .jenkins/pytorch/build.sh'
+            sh -c 'sudo chown -R jenkins . && sudo chown -R jenkins /dev && .jenkins/pytorch/build.sh && .jenkins/pytorch/test.sh'
       - name: Display and upload binary build size statistics (Click Me)
         # temporary hack: set CIRCLE_* vars, until we update
         # tools/stats/print_test_stats.py to natively support GitHub Actions
@@ -181,24 +196,6 @@ jobs:
           export COMMIT_TIME
           pip3 install requests
           python3 .circleci/scripts/upload_binary_size_to_scuba.py || exit 0
-      - name: Determine shm-size
-        run: |
-          shm_size="1g"
-          case "${BUILD_ENVIRONMENT}" in
-            *cuda*)
-              shm_size="2g"
-              ;;
-            *rocm*)
-              shm_size="8g"
-              ;;
-          esac
-          echo "SHM_SIZE=${shm_size}" >> "${GITHUB_ENV}"
-      - name: Output disk space left
-        run: |
-          sudo df -H
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Test PyTorch
         run: |
           if [[ $NUM_TEST_SHARDS -eq 2 ]]; then
