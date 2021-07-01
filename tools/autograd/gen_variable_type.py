@@ -230,12 +230,12 @@ DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
     'slow_conv_transpose2d_backward_output_mask', 'slow_conv_transpose3d_backward_output_mask',
     '_embedding_bag', '_embedding_bag_forward_only',
     'mkldnn_convolution_backward', 'cudnn_convolution_backward',
-    'q_per_channel_scales', 'q_per_channel_zero_points'
+    'q_per_channel_scales', 'q_per_channel_zero_points', 'dequantize_self',
 }
 DONT_ENFORCE_STORAGE_IMPL_USE_COUNT = {
     # These 'non-view' functions return tensors with storage use_count > 1
     'thnn_conv2d_forward', 'slow_conv3d_forward', 'channel_shuffle',
-    'q_per_channel_zero_points', 'q_per_channel_scales'
+    'q_per_channel_zero_points', 'q_per_channel_scales', 'dequantize_self',
 }
 # END CHECKS FOR [ TensorImpl and Storage Pointer Sanity Checks ]
 
