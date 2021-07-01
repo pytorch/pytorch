@@ -375,7 +375,7 @@ class TypeCheckerTest(unittest.TestCase):
             def forward(self, x: TensorType((5, 2, 3, 4))):
                 identity = x
                 out = self.conv1(x)
-                # out += identity
+                out += identity
                 return out
 
         B = BasicBlock(2, 2)
@@ -395,6 +395,13 @@ class TypeCheckerTest(unittest.TestCase):
             if n.op == 'call_module':
                 assert n.type == t
 
+        B = BasicBlock(1, 2)
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(B)
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+        tc = GraphTypeChecker({}, traced)
+        with self.assertRaises(TypeError):
+            tc.type_check()
 
 if __name__ == '__main__':
     unittest.main()

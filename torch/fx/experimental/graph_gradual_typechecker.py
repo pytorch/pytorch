@@ -245,7 +245,7 @@ def conv2d_inference_rule(n: Node, op_type):
 
         return n.type
     else:
-        raise TypeError(f'Cannot apply Conv2D in node {n} with type {arg_type}')
+        raise TypeError(f'Cannot apply {op_type} with input type { arg_type} and existing type {n.type} on {n}')
 
 class GraphTypeChecker:
     def __init__(self, env, traced):
