@@ -1490,11 +1490,20 @@ add_docstr(torch.chunk,
            r"""
 chunk(input, chunks, dim=0) -> List of Tensors
 
-Splits a tensor into a specific number of chunks. Each chunk is a view of
+Attempts to split a tensor into the specified number of chunks. Each chunk is a view of
 the input tensor.
 
-Last chunk will be smaller if the tensor size along the given dimension
-:attr:`dim` is not divisible by :attr:`chunks`.
+..warning::
+    This function may return less then the specified number of chunks! 
+    For a function that always returns exactly the specified number of chunks, 
+    see :func:`torch.tensor_split`
+    
+If the tensor size along the given dimesion :attr:`dim` is divisible by :attr:`chunks`,
+all returned chunks will be the same size.
+If the tensor size along the given dimension :attr:`dim` is not divisible by :attr:`chunks`,
+all returned chunks will be the same size, except the last one.
+If such division is not possible, this function may return less
+than the specified number of chunks.
 
 Arguments:
     input (Tensor): the tensor to split
