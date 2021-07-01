@@ -274,6 +274,9 @@ void try_configs(cudnn_frontend::EngineConfigList& configs, const CacheKey& key,
       benchmark_cache.emplace(key, plan);
       return;
     } catch (cudnn_frontend::cudnnException &e) {} catch(CuDNNError &e) {}
+      catch (c10::CUDAOutOfMemoryError &e) {
+        cudaGetLastError(); // clear CUDA error
+    }
   }
   TORCH_CHECK(false, "FIND was unable to find an engine to execute this computation");
 }
