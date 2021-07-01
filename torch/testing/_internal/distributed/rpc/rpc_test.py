@@ -4056,6 +4056,47 @@ class RpcTest(RpcAgentTestFixture):
             with self.assertRaisesRegex(RuntimeError, "User RRefs require 'dist_autograd_ctx_id' to be specified"):
                 rref.backward()
 
+    @dist_init(setup_rpc=False)
+    def test_shutdown_errors(self):
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=self.rpc_backend_options,
+        )
+
+        if self.rank != 0:
+            og_func = rpc.api._broadcast_to_followers
+            og_rref_func = rpc.api._delete_all_user_and_unforked_owner_rrefs
+
+            # Monkey-patch _broadcast_to_followers to fail, which would ensure
+            # _all_gather on leader raises an exception.
+            def raise_error(sequence_id, objects_map):
+                og_func(sequence_id, objects_map)
+                raise RuntimeError('simulation')
+
+            # Monkey-patch _delete_all_user_and_unforked_owner_rrefs to fail,
+            # which would ensure barrier is not called on followers.
+            def rref_error():
+                raise RuntimeError('simulation rref')
+
+            try:
+                rpc.api._broadcast_to_followers = raise_error
+                rpc.api._delete_all_user_and_unforked_owner_rrefs = rref_error
+                with self.assertRaisesRegex(RuntimeError, 'simulation rref'):
+                    rpc.shutdown()
+            finally:
+                rpc.api._broadcast_to_followers = og_func
+                rpc.api._delete_all_user_and_unforked_owner_rrefs = og_rref_func
+        else:
+            rpc.shutdown()
+
+        dist.barrier()
+
+
 class CudaRpcTest(RpcAgentTestFixture):
 
     @skip_if_lt_x_gpu(2)
@@ -4569,7 +4610,6 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
     def test_rref_proxy_timeout(self):
         for rpc_api in ["rpc_sync", "rpc_async", "remote"]:
             self._test_rref_proxy_timeout(rpc_api)
-
 
 class MyConvNetForMNIST(nn.Module):
     def __init__(self, device):
