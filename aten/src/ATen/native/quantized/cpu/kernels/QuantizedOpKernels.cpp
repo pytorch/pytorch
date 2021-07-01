@@ -32,7 +32,7 @@ void check_tensor_memory_format(const Tensor& ref, const Tensor& other) {
   TORCH_CHECK(
       other.is_contiguous(ref.suggest_memory_format()),
       "Float tensor should be contiguous "
-      "in same memory format as quantizd tensor");
+      "in same memory format as quantized tensor");
 }
 
 // ****************** HEY YOU! YES YOU! Read this! ********************
