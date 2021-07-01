@@ -44,10 +44,6 @@ class ConstantPad1d(_ConstantPadNd):
 
           :math:`W_{out} = W_{in} + \text{padding\_left} + \text{padding\_right}`
 
-    .. note::
-        This module supports no-batch dimension, i.e. batch dimension, :math:`N`,
-        is optional.
-
     Examples::
 
         >>> m = nn.ConstantPad1d(2, 3.5)
@@ -197,10 +193,6 @@ class ReflectionPad1d(_ReflectionPadNd):
         - Output: :math:`(N, C, W_{out})` where
 
           :math:`W_{out} = W_{in} + \text{padding\_left} + \text{padding\_right}`
-
-    .. note::
-        This module supports no-batch dimension, i.e. batch dimension, :math:`N`,
-        is optional.
 
     Examples::
 
@@ -362,10 +354,6 @@ class ReplicationPad1d(_ReplicationPadNd):
         - Output: :math:`(N, C, W_{out})` where
 
           :math:`W_{out} = W_{in} + \text{padding\_left} + \text{padding\_right}`
-
-    .. note::
-        This module supports no-batch dimension, i.e. batch dimension, :math:`N`,
-        is optional.
 
     Examples::
 
