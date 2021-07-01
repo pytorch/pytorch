@@ -26,7 +26,7 @@ If `shared` is `True`, then memory is shared between all processes.
 All changes are written to the file. If `shared` is `False`, then the changes on
 the storage do not affect the file.
 
-`nbutes` is the number of bytes in the storage. If `shared` is `False`, then
+`nbytes` is the number of bytes in the storage. If `shared` is `False`, then
 the file must be at least `nbytes` bytes long.  If `shared` is `True` the file
 will be created if needed.
 
