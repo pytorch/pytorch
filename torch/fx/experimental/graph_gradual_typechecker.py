@@ -238,7 +238,7 @@ class GraphTypeChecker:
                 raise RuntimeError(f'No inference rule registered for target {n.target}!')
 
         if n.op == 'call_module':
-            op_type = getattr(self.traced, n.target)
+            op_type = getattr(self.traced, str(n.target))
             if type(op_type) in _INFERENCE_RULES:
                 return _INFERENCE_RULES[type(op_type)](n, op_type)
             else:
