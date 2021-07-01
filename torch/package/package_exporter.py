@@ -903,6 +903,74 @@ class PackageExporter:
             and is_stdlib_module(top_level_package_name)
         )
 
+    def dependency_graph_string(self) -> str:
+        edges = "\n".join(f'"{f}" -> "{t}";' for f, t in self.dependency_graph.edges)
+        return f"""\
+digraph G {{
+rankdir = LR;
+node [shape=box];
+{edges}
+}}
+"""
+
+    def _nodes_with_action_type(
+        self, action: Optional[_ModuleProviderAction]
+    ) -> List[str]:
+        result = []
+        for name, node_dict in self.dependency_graph.nodes.items():
+            node_action = node_dict.get("action", None)
+            if node_action == action and "is_pickle" not in node_dict:
+                result.append(name)
+        result.sort()
+        return result
+
+    def externed_list(self) -> List[str]:
+        """Return all modules that are currently externed.
+
+        Returns:
+            A list containing the names of modules which will be 
+            externed in this package.
+        """
+        return self._nodes_with_action_type(_ModuleProviderAction.EXTERN)
+
+    def interned_list(self) -> List[str]:
+        """Return all modules that are currently interned.
+
+        Returns:
+            A list containing the names of modules which will be 
+            interned in this package.
+        """
+        return self._nodes_with_action_type(_ModuleProviderAction.INTERN)
+
+    def mocked_list(self) -> List[str]:
+        """Return all modules that are currently mocked.
+
+        Returns:
+            A list containing the names of modules which will be 
+            mocked in this package.
+        """
+        return self._nodes_with_action_type(_ModuleProviderAction.MOCK)
+
+    def denied_list(self) -> List[str]:
+        """Return all modules that are currently denied.
+
+        Returns:
+            A list containing the names of modules which will be 
+            denied in this package.
+        """
+        return self._nodes_with_action_type(_ModuleProviderAction.DENY)
+
+    def relied_on_by(self, module_name: str) -> List[str]:
+        """Return a list of all modules which rely on the module ``module_name``.
+
+        Returns:
+            A list containing the names of modules which depend on ``module_name``.
+        """
+        if module_name in self.dependency_graph._pred.keys():
+            return list(self.dependency_graph._pred[module_name].keys())
+        else:
+            return []
+
 
 # even though these are in the standard library, we do not allow them to be
 # automatically externed since they offer a lot of system level access

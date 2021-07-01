@@ -4,6 +4,7 @@ from io import BytesIO
 from textwrap import dedent
 
 from torch.package import PackageExporter, PackageImporter, is_from_package
+from torch.package.package_exporter import PackagingError
 from torch.testing._internal.common_utils import run_tests
 
 try:
@@ -114,6 +115,34 @@ class TestMisc(PackageTestCase):
         file_structure = importer.file_structure()
         self.assertTrue(file_structure.has_file("package_a/subpackage.py"))
         self.assertFalse(file_structure.has_file("package_a/subpackage"))
+
+    def test_exporter_content_lists(self):
+        """
+        Test content list API for PackageExporter's contained modules.
+        """
+
+        with PackageExporter(BytesIO()) as he:
+            import package_b
+
+            he.extern("package_b.subpackage_1")
+            he.mock("package_b.subpackage_2")
+            he.intern("**")
+            he.save_pickle("obj", "obj.pkl", package_b.PackageBObject(["a"]))
+            self.assertEqual(he.externed_list(), ["package_b.subpackage_1"])
+            self.assertEqual(he.mocked_list(), ["package_b.subpackage_2"])
+            self.assertEqual(
+                he.interned_list(),
+                ["package_b", "package_b.subpackage_0.subsubpackage_0"],
+            )
+            self.assertEqual(he.relied_on_by("package_b.subpackage_2"), ["package_b"])
+
+        with self.assertRaises(PackagingError) as e:
+            with PackageExporter(BytesIO()) as he:
+                import package_b
+
+                he.deny("package_b")
+                he.save_pickle("obj", "obj.pkl", package_b.PackageBObject(["a"]))
+                self.assertEqual(he.denied_list(), ["package_b"])
 
     def test_is_from_package(self):
         """is_from_package should work for objects and modules"""
