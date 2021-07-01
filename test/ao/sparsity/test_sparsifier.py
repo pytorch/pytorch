@@ -97,7 +97,7 @@ class TestWeightNormSparsifier(TestCase):
             # The module_groups are unordered
             assert g['fqn'] in ('seq.0', 'linear')
 
-    def test_logic(self):
+    def test_step(self):
         model = Model()
         sparsifier = WeightNormSparsifier(sparsity_level=0.5)
         sparsifier.prepare(model, config=[model.linear])
