@@ -1,0 +1,22 @@
+name: Build PyTorch nightly Docker image and push to GitHub Container Registry
+on:
+  schedule:
+    # Push the nightly docker daily at 1 PM UTC
+    - cron: '0 13 * * *'
+  # Have the ability to trigger this job manually using the API as well
+  workflow_dispatch:
+
+jobs:
+  build-publish-docker:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    runs-on: linux.2xlarge
+    env:
+      GHCR_PAT: ${{ secrets.GHCR_PAT }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          ref: master
+      - name: Build and upload nightly docker
+        run: |
+          bash .github/scripts/build_publish_nightly_docker.sh
