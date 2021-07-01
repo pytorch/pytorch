@@ -94,7 +94,8 @@ class BaseSparsifier(abc.ABC):
         state = defaultdict(dict)
         for g in self.module_groups:
             parametrization = g['module'].parametrizations['weight']
-            original_weight = parametrization.original
+            # original_weight = parametrization.original
+            key = g['fqn']
             mask = None
             # Find the mask in the FakeSparsity.
             found = False
@@ -105,12 +106,11 @@ class BaseSparsifier(abc.ABC):
                     break
             if found:
                 mask = parametrization.mask
-            state[original_weight]['mask'] = mask
-            state[original_weight]['fqn'] = g['fqn']
+            state[key]['mask'] = mask
             # Get all the tensors inside the module_group
-            state[original_weight].update(
+            state[key].update(
                 {key: value for key, value in self.state.items()
-                    if key not in state[original_weight]})
+                    if key not in state[key]})
         return state
 
     def state_dict(self):
@@ -133,23 +133,27 @@ class BaseSparsifier(abc.ABC):
 
     def load_state_dict(self, state_dict, strict=True):
         module_groups = copy.deepcopy(state_dict['module_groups'])
-        for group in module_groups:
-            layer = _fqn_to_module(self.model, group['fqn'])
+        states = state_dict['state']
+        for fqn, s in states.items():
+            layer = _fqn_to_module(self.model, fqn)
             if strict and layer is None:
-                raise RuntimeError(f'Error loading {group["fqn"]} into the model')
+                raise RuntimeError(f'Error loading {fqn} into the model')
 
-            if group.get('state', None) is not None:
-                found = False
-                for p in layer.parametrizations['weight']:
-                    if isinstance(p, FakeSparsity):
-                        found = True
-                        break
-                if not found:
-                    p = FakeSparsity(torch.ones(group['module'].weight.shape))
-                    parametrize.register_parametrization(layer, 'weight', FakeSparsity(p))
+            found = False
+            for p in layer.parametrizations['weight']:
+                if isinstance(p, FakeSparsity):
+                    found = True
+                    break
+            if not found:
+                p = FakeSparsity(torch.ones(layer.weight.shape))
+                parametrize.register_parametrization(layer, 'weight', p)
+            if s.get('mask', None) is not None:
+                p.mask = s['mask']
 
-            group['module'] = layer
-        self.__setstate__({'module_groups': module_groups})
+            for mg in module_groups:
+                if mg['fqn'] == fqn:
+                    mg['module'] = layer
+        self.__setstate__({'state': states, 'module_groups': module_groups})
 
     def prepare(self, model, config):
         r"""Prepares a model, by adding the parametrizations.
