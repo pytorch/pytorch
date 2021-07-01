@@ -72,7 +72,7 @@ class Crawler:
 
                 for attr in attrs:
                     to_add.append(path + [Crawler.Item(name=attr, obj=None)])
-        
+
         for index, path in enumerate(to_add):
             self.apis[f"attr-{index}"] = path
 

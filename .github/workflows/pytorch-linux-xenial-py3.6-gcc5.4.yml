@@ -539,7 +539,7 @@ jobs:
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}" \
-            bash -c "sudo chown -R jenkins . && pip install dist/*.whl && python scripts/list_apis.py --module torch --public > apis.log"
+            bash -c "sudo chown -R jenkins . && pip install dist/*.whl && python scripts/list_apis.py --module torch --public | sort > apis.log"
       - name: Chown workspace
         run: |
           # Ensure the working directory gets chowned back to the current user
