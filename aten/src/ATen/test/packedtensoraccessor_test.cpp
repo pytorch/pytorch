@@ -14,7 +14,7 @@ TEST(PackedtensoraccessorTest, TransposeTest) {
   manual_seed(123);
   /* test a 3d tensor */
   constexpr int dimension = 3;
-  constexpr std::array<long, dimension> sizes{3, 4, 5};
+  constexpr std::array<int64_t, dimension> sizes{3, 4, 5};
   Tensor t = rand(sizes, CPU(kFloat));
   auto original = t.packed_accessor64<float, dimension, DefaultPtrTraits>();
   auto transposed = original.transpose(0, 2);
