@@ -15,7 +15,7 @@ load_tests = load_tests
 class TestSparseCSR(TestCase):
 
     @onlyCPU
-    def test_csr_layout(self, _):
+    def test_csr_layout(self):
         self.assertEqual(str(torch.sparse_csr), 'torch.sparse_csr')
         self.assertEqual(type(torch.sparse_csr), torch.layout)
 
