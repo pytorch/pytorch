@@ -48,11 +48,6 @@ _DTYPE_PRECISIONS = {
 }
 
 
-def _get_default_rtol_and_atol(actual: Tensor, expected: Tensor) -> Tuple[float, float]:
-    dtype = actual.dtype if actual.dtype == expected.dtype else torch.promote_types(actual.dtype, expected.dtype)
-    return _DTYPE_PRECISIONS.get(dtype, (0.0, 0.0))
-
-
 def _check_complex_components_individually(
     check_tensors: Callable[..., Optional[_TestingErrorMeta]]
 ) -> Callable[..., Optional[_TestingErrorMeta]]:
@@ -77,6 +72,9 @@ def _check_complex_components_individually(
 
         if actual.dtype not in (torch.complex32, torch.complex64, torch.complex128):
             return check_tensors(actual, expected, equal_nan=equal_nan, **kwargs)
+
+        actual = actual.resolve_conj()
+        expected = expected.resolve_conj()
 
         if relaxed_complex_nan:
             actual, expected = [
@@ -169,14 +167,36 @@ def _check_sparse_csr_members_individually(
     return wrapper
 
 
+def _check_quantized(
+    check_tensor_values: Callable[..., Optional[_TestingErrorMeta]]
+) -> Callable[..., Optional[_TestingErrorMeta]]:
+    """Decorates non-quantized tensor check functions to handle quantized tensors.
+
+    If the inputs are not quantized, this decorator is a no-op.
+
+    Args:
+        check_tensor_values (Callable[..., Optional[_TestingErrorMeta]]): Tensor check function for continuous tensors.
+
+    Returns:
+        Optional[_TestingErrorMeta]: Return value of :attr:`check_tensors`.
+    """
+
+    @functools.wraps(check_tensor_values)
+    def wrapper(actual: Tensor, expected: Tensor, **kwargs: Any) -> Optional[_TestingErrorMeta]:
+        if not actual.is_quantized:
+            return check_tensor_values(actual, expected, **kwargs)
+
+        return check_tensor_values(actual.dequantize(), expected.dequantize(), **kwargs)
+
+    return wrapper
+
+
 def _check_supported_tensor(input: Tensor) -> Optional[_TestingErrorMeta]:
     """Checks if the tensor is supported by the current infrastructure.
 
     Returns:
         (Optional[_TestingErrorMeta]): If check did not pass.
     """
-    if input.is_quantized:
-        return _TestingErrorMeta(UsageError, "Comparison for quantized tensors is not supported yet.")
 
     if input.layout not in {torch.strided, torch.sparse_coo, torch.sparse_csr}:  # type: ignore[attr-defined]
         return _TestingErrorMeta(UsageError, f"Unsupported tensor layout {input.layout}")
@@ -230,6 +250,13 @@ def _check_attributes_equal(
 
     if check_device and actual.device != expected.device:
         return _TestingErrorMeta(AssertionError, msg_fmtstr.format("device", actual.device, expected.device))
+
+    if actual.is_quantized != expected.is_quantized:
+        return _TestingErrorMeta(
+            AssertionError, msg_fmtstr.format("is_quantized", actual.is_quantized, expected.is_quantized)
+        )
+    elif actual.is_quantized and actual.qscheme() != expected.qscheme():
+        return _TestingErrorMeta(AssertionError, msg_fmtstr.format("qscheme()", actual.qscheme(), expected.qscheme()))
 
     if check_dtype and actual.dtype != expected.dtype:
         return _TestingErrorMeta(AssertionError, msg_fmtstr.format("dtype", actual.dtype, expected.dtype))
@@ -373,6 +400,7 @@ def _make_mismatch_msg(
     return msg.strip()
 
 
+@_check_quantized
 @_check_sparse_coo_members_individually
 @_check_sparse_csr_members_individually
 @_check_complex_components_individually
@@ -450,8 +478,6 @@ def _check_tensors_close(
             UsageError,
             f"Both 'rtol' and 'atol' must be either specified or omitted, but got rtol={rtol} and atol={atol} instead.",
         )
-    elif rtol is None or atol is None:
-        rtol, atol = _get_default_rtol_and_atol(actual, expected)
 
     error_meta = _check_attributes_equal(
         actual,
@@ -464,6 +490,9 @@ def _check_tensors_close(
     if error_meta:
         return error_meta
     actual, expected = _equalize_attributes(actual, expected)
+
+    if rtol is None or atol is None:
+        rtol, atol = _DTYPE_PRECISIONS.get(actual.dtype, (0.0, 0.0))
 
     error_meta = _check_values_close(actual, expected, rtol=rtol, atol=atol, equal_nan=equal_nan, msg=msg)
     if error_meta:
@@ -678,7 +707,8 @@ def assert_close(
 ) -> None:
     r"""Asserts that :attr:`actual` and :attr:`expected` are close.
 
-    If :attr:`actual` and :attr:`expected` are strided, real-valued, and finite, they are considered close if
+    If :attr:`actual` and :attr:`expected` are strided, non-quantized, real-valued, and finite, they are considered
+    close if
 
     .. math::
 
@@ -697,6 +727,10 @@ def assert_close(
     are always checked for equality whereas the values are checked for closeness according to the definition above.
     Sparse COO tensors are only considered close if both are either coalesced or uncoalesced (if
     :attr:`check_is_coalesced` is ``True``).
+
+    If :attr:`actual` and :attr:`expected` are quantized, they are considered close if they have the same
+    :meth:`~torch.Tensor.qscheme` and the result of :meth:`~torch.Tensor.dequantize` is close according to the
+    definition above.
 
     :attr:`actual` and :attr:`expected` can be :class:`~torch.Tensor`'s or any array-or-scalar-like of the same type,
     from which :class:`torch.Tensor`'s can be constructed with :func:`torch.as_tensor`. In addition, :attr:`actual` and
@@ -730,13 +764,13 @@ def assert_close(
 
     Raises:
         UsageError: If a :class:`torch.Tensor` can't be constructed from an array-or-scalar-like.
-        UsageError: If any tensor is quantized. This is a temporary restriction and will be relaxed in the future.
         UsageError: If only :attr:`rtol` or :attr:`atol` is specified.
         AssertionError: If corresponding array-likes have different types.
         AssertionError: If the inputs are :class:`~collections.abc.Sequence`'s, but their length does not match.
         AssertionError: If the inputs are :class:`~collections.abc.Mapping`'s, but their set of keys do not match.
         AssertionError: If corresponding tensors do not have the same :attr:`~torch.Tensor.shape`.
         AssertionError: If corresponding tensors do not have the same :attr:`~torch.Tensor.layout`.
+        AssertionError: If corresponding tensors are quantized, but have different :meth:`~torch.Tensor.qscheme`'s.
         AssertionError: If :attr:`check_device`, but corresponding tensors are not on the same
             :attr:`~torch.Tensor.device`.
         AssertionError: If :attr:`check_dtype`, but corresponding tensors do not have the same ``dtype``.
