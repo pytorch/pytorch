@@ -3,6 +3,9 @@ import torch
 class Attn(torch.autograd.Function):
     @staticmethod
     def forward(ctx, q, k, v):
+        assert q.size() == k.size()
+        assert q.size()[0] == v.size()[0]
+
         attn = torch.matmul(q, k.swapaxes(0, 1))
         attn = torch.tanh(attn)
         output = torch.matmul(attn, v)
