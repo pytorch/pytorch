@@ -57,7 +57,7 @@ class Unflatten(Module):
       (tuple of `(name, size)` tuples) for `NamedTensor` input.
 
     Shape:
-        - Input: :math:`(*, S_{dim}, *)`. Input can be any shape.
+        - Input: :math:`(*, S_{dim}, *)`. Input can be any shape, where :math:`S_{dim}=\prod *unflattened\_size`.
         - Output: :math:`(*, *unflattened\_size, *)`.
 
     Args:
