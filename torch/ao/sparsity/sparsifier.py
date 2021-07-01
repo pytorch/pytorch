@@ -2,6 +2,7 @@
 import abc
 import copy
 from collections import defaultdict
+from typing import Dict, Any
 
 import torch
 from torch import nn
@@ -91,7 +92,7 @@ class BaseSparsifier(abc.ABC):
         return format_string
 
     def _pack_state(self):
-        state = defaultdict(dict)
+        state: Dict[str, Any] = {}
         for g in self.module_groups:
             parametrization = g['module'].parametrizations['weight']
             # original_weight = parametrization.original
