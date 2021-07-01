@@ -17,9 +17,11 @@ class Attn(torch.autograd.Function):
         # computes and stores sech^2(qk')
         partial = 1 / torch.cosh(q.matmul(k.swapaxes(0, 1))).pow(2)
 
+        grad_output_vt_partial = grad_output.matmul(v.swapaxes(0, 1)).mul(partial)
+
         # computes grad_output terms
-        grad_q = grad_output.matmul(v.swapaxes(0, 1)).mul(partial).matmul(k)
-        grad_k = grad_output.matmul(v.swapaxes(0, 1)).mul(partial).swapaxes(0, 1).matmul(q)
+        grad_q = grad_output_vt_partial.matmul(k)
+        grad_k = grad_output_vt_partial.swapaxes(0, 1).matmul(q)
         grad_v = attn.swapaxes(0, 1).matmul(grad_output)
 
         # adds grad_attn terms
