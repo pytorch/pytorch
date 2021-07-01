@@ -170,6 +170,10 @@ void SavedVariable::register_hooks(std::unique_ptr<SavedVariableHooks>&& hooks) 
   TORCH_CHECK(!hooks_,
     "Calling register_hooks on a saved tensor whose hooks have already been set.");
   hooks_ = std::move(hooks);
+  // The following line is temporary and will be removed in the next PR
+  // (https://github.com/pytorch/pytorch/pull/60975). The purpose of this line
+  // is to make sure that calling unpack(pack(data_)) works without handling the logic
+  // of saving metadata.
   data_ = hooks_->call_unpack_hook(hooks_->call_pack_hook(data_));
 }
 
