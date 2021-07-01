@@ -266,6 +266,58 @@ def apply_nolint(fname: str, warnings: Dict[int, Set[str]]) -> None:
         f.write("".join(lines))
 
 
+def git(args: List[str]) -> str:
+    result = subprocess.run(
+        ["git"] + args,
+        stdout=subprocess.PIPE,
+        check=True
+    )
+    return result.stdout.decode("utf-8")
+
+
+def filter_from_diff(paths: List[str], diffs: List[str]) -> Tuple[List[str], List[Dict[Any,Any]]]:
+    files = []
+    line_filters = []
+
+    for diff in diffs:
+        changed_files = find_changed_lines(diff)
+        changed_files = {
+            filename: v
+            for filename, v in changed_files.items()
+            if any(filename.startswith(path) for path in paths)
+        }
+        line_filters += [
+            {"name": name, "lines": lines} for name, lines, in changed_files.items()
+        ]
+        files += list(changed_files.keys())
+
+    return files, line_filters
+
+
+def filter_changed_only(paths: List[str]) -> Tuple[List[str], List[Dict[Any,Any]]]:
+    # Modified, unstaged
+    modified = git(["diff"])
+
+    # Modified, staged
+    cached = git(["diff", "--cached"])
+
+    # Committed
+    merge_base = git(["merge-base", "origin/master", "HEAD"]).strip()
+    diff_with_origin = git(["diff", merge_base, "HEAD"])
+
+    return filter_from_diff(paths, [modified, cached, diff_with_origin])
+
+
+def filter_from_diff_file(paths: List[str], filename: str) -> Tuple[List[str], List[Dict[Any,Any]]]:
+    with open(filename, "r") as f:
+        diff = f.read()
+    return filter_from_diff(paths, [diff])
+
+
+def filter_default(paths: List[str]) -> Tuple[List[str], List[Dict[Any,Any]]]:
+    return get_all_files(paths), []
+
+
 def run(options: Any) -> None:
     # This flag is pervasive enough to set it globally. It makes the code
     # cleaner compared to threading it through every single function.
@@ -274,21 +326,15 @@ def run(options: Any) -> None:
 
     # Normalize the paths first.
     paths = [path.rstrip("/") for path in options.paths]
-    if options.diff_file:
-        with open(options.diff_file, "r") as f:
-            changed_files = find_changed_lines(f.read())
-            changed_files = {
-                filename: v
-                for filename, v in changed_files.items()
-                if any(filename.startswith(path) for path in options.paths)
-            }
-            line_filters = [
-                {"name": name, "lines": lines} for name, lines, in changed_files.items()
-            ]
-            files = list(changed_files.keys())
+
+    # Apply filters
+    if options.changed_only:
+        files, line_filters = filter_changed_only(options.paths)
+    elif options.diff_file:
+        files, line_filters = filter_from_diff_file(options.paths, options.diff_file)
     else:
-        line_filters = []
-        files = get_all_files(paths)
+        files, line_filters = filter_default(options.paths)
+
     file_patterns = get_file_patterns(options.glob, options.regex)
     files = list(filter_files(files, file_patterns))
 

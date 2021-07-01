@@ -104,8 +104,10 @@ cmakelint:
 		--step 'Run cmakelint'
 
 clang_tidy:
-	echo "clang-tidy local lint is not yet implemented"
-	exit 1
+	@$(PYTHON) tools/linter/clang_tidy \
+		--clang-tidy-exe .clang-tidy-bin/clang-tidy \
+		$(CHANGED_ONLY) \
+		--parallel
 
 toc:
 	@$(PYTHON) tools/actions_local_runner.py \
@@ -116,4 +118,4 @@ toc:
 lint: flake8 mypy quick_checks cmakelint shellcheck
 
 quicklint: CHANGED_ONLY=--changed-only
-quicklint: mypy flake8 quick_checks cmakelint shellcheck
+quicklint: mypy flake8 quick_checks cmakelint shellcheck clang_tidy

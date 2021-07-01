@@ -1,6 +1,8 @@
 import argparse
 import subprocess
 import os
+import shutil
+import stat
 
 from run import run
 
@@ -76,6 +78,11 @@ def parse_args() -> argparse.Namespace:
         "--diff-file", help="File containing diff to use for determining files to lint and line filters"
     )
     parser.add_argument(
+        "--changed-only",
+        action="store_true",
+        help="Run clang-tidy only on files that have changed"
+    )
+    parser.add_argument(
         "-p",
         "--paths",
         nargs="+",
@@ -128,6 +135,18 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     setup()
     options = parse_args()
+
+    # Check if clang-tidy executable exists
+    exists = os.access(options.clang_tidy_exe, os.X_OK) or shutil.which(options.clang_tidy_exe)
+    if not exists:
+        msg = (
+            "Could not find 'clang-tidy' binary\n"
+            "You can install it by running:\n"
+            "   python3 tools/linter/install/clang_tidy.py"
+        )
+        print(msg)
+        exit(1)
+
     run(options)
 
 
