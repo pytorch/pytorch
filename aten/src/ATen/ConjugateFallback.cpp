@@ -146,6 +146,7 @@ TORCH_LIBRARY_IMPL(aten, Conjugate, m) {
   m.impl("imag", torch::CppFunction::makeFallthrough());
   m.impl("real", torch::CppFunction::makeFallthrough());
   m.impl("view", torch::CppFunction::makeFallthrough());
+  m.impl("_unsafe_view", torch::CppFunction::makeFallthrough());
   m.impl("reshape", torch::CppFunction::makeFallthrough());
 }
 
