@@ -4551,9 +4551,11 @@ class TestValidation(TestCase):
                                 pass
 
                 # check correct samples are ok
-                valid_value = d.sample()
+                valid_value = d_val.sample()
                 d_val.log_prob(valid_value)
                 # check invalid values raise ValueError
+                if valid_value.dtype == torch.long:
+                    valid_value = valid_value.float()
                 invalid_value = torch.full_like(valid_value, math.nan)
                 try:
                     with self.assertRaisesRegex(
@@ -4572,13 +4574,10 @@ class TestValidation(TestCase):
         for Dist, params in BAD_EXAMPLES:
             for i, param in enumerate(params):
                 try:
-                    with self.assertRaisesRegex(
-                        ValueError,
-                        "Expected parameter .* to satisfy the constraint .*",
-                    ):
+                    with self.assertRaises(ValueError):
                         Dist(validate_args=True, **param)
                 except AssertionError as e:
-                    fail_string = "Constraint ValueError not raised for {} example {}/{}"
+                    fail_string = "ValueError not raised for {} example {}/{}"
                     raise AssertionError(
                         fail_string.format(Dist.__name__, i + 1, len(params))
                     ) from e

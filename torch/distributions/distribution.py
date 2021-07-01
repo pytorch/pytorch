@@ -52,13 +52,12 @@ class Distribution(object):
                 value = getattr(self, param)
                 valid = constraint.check(value)
                 if not valid.all():
-                    invalid_value = value.data[~valid]
                     raise ValueError(
                         f"Expected parameter {param} "
                         f"({type(value).__name__} of shape {tuple(value.shape)}) "
                         f"of distribution {repr(self)} "
                         f"to satisfy the constraint {repr(constraint)}, "
-                        f"but found invalid values:\n{invalid_value}"
+                        f"but found invalid values:\n{value}"
                     )
                 if not constraint.check(getattr(self, param)).all():
                     raise ValueError("The parameter {} has invalid values".format(param))
@@ -286,13 +285,12 @@ class Distribution(object):
         assert support is not None
         valid = support.check(value)
         if not valid.all():
-            invalid_value = value.data[~valid]
             raise ValueError(
                 "Expected value argument "
                 f"({type(value).__name__} of shape {tuple(value.shape)}) "
                 f"to be within the support ({repr(support)}) "
                 f"of the distribution {repr(self)}, "
-                f"but found invalid values:\n{invalid_value}"
+                f"but found invalid values:\n{value}"
             )
 
     def _get_checked_instance(self, cls, _instance=None):
