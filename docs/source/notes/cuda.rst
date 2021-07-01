@@ -201,10 +201,14 @@ ensure proper synchronization.
 Stream semantics of backward passes
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-A. Each backward CUDA op runs on the same stream that was used for its corresponding forward op.
+Each backward CUDA op runs on the same stream that was used for its corresponding forward op.
+If your forward pass runs independent ops in parallel on different streams,
+this helps the backward pass exploit that same parallelism.
 
-B. The stream semantics of a backward call with respect to surrounding ops are the same
-as for any other call. More concretely, when calling
+The stream semantics of a backward call with respect to surrounding ops are the same
+as for any other call. The backward pass inserts internal syncs to ensure this even when
+backward ops run on multiple streams as described in the previous paragraph.
+More concretely, when calling
 :func:`autograd.backward<torch.autograd.backward>`,
 :func:`autograd.grad<torch.autograd.grad>`, or
 :meth:`tensor.backward<torch.Tensor.backward>`,
@@ -255,11 +259,26 @@ have the same stream-semantics relationship as any group of ops::
         initial_grad.record_stream(s)
         loss.backward(gradient=initial_grad)
 
-If your forward pass runs some independent ops in parallel on different streams,
-A. helps the backward pass exploit that same parallelism.
+BC note: Using grads on the default stream
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The backward call inserts internal syncs as needed to ensure B. holds true even if A.
-makes some backward ops run on assorted side streams.
+In prior versions of Pytorch (1.9 and earlier), the autograd engine always synced
+the default stream with all backward ops, so the following pattern::
+
+    with torch.cuda.stream(s):
+        loss.backward()
+    use grads
+
+was safe as long as ``use grads`` happened on the default stream.
+In present Pytorch, that pattern is no longer safe. If ``backward()``
+and ``use grads`` are in different stream contexts, you must sync the streams::
+
+    with torch.cuda.stream(s):
+        loss.backward()
+    torch.cuda.current_stream().wait_stream(s)
+    use grads
+
+even if ``use grads`` is on the default stream.
 
 .. _CUDA stream: https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#streams
 
