@@ -287,7 +287,8 @@ class TORCH_API LoopNest {
   static void reorderAxis(For* a, For* b);
 
   // Reorder the given list of loops according to the permutation specified.
-  // Here permutation[i] represents the location of the loop i in the result.
+  // Here `permutation[i]` represents the position of the loop in the input
+  // which will end up at position `i` after the reorder.
   //
   // For example, consider the following code:
   //   for p

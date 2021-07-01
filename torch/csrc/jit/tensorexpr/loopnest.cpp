@@ -1945,7 +1945,7 @@ std::vector<For*> LoopNest::reorder(
   // Reorder the loops according to the permutation.
   std::vector<For*> result(loops.size());
   for (size_t i = 0; i < loops.size(); ++i) {
-    result[permutation[i]] = loops[i];
+    result[i] = loops[permutation[i]];
   }
 
   // Remove the bodies from all the loops.
