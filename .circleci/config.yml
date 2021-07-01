@@ -241,7 +241,7 @@ commands:
 
           export COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
 
-          python3 .circleci/scripts/upload_binary_size_to_scuba.py android
+          python3 tools/stats/upload_binary_size_to_scuba.py android
 
           '
         name: Binary Size - Upload << parameters.build_type >>
@@ -408,8 +408,7 @@ jobs:
 
           SCRIBE_GRAPHQL_ACCESS_TOKEN=${SCRIBE_GRAPHQL_ACCESS_TOKEN} \
 
-          python3 /pytorch/.circleci/scripts/upload_binary_size_to_scuba.py || exit
-          0
+          python3 /pytorch/tools/stats/upload_binary_size_to_scuba.py || exit 0
 
           '
         name: upload build & binary data
@@ -1473,7 +1472,7 @@ jobs:
 
           SCRIBE_GRAPHQL_ACCESS_TOKEN=${SCRIBE_GRAPHQL_ACCESS_TOKEN} \
 
-          python3 .circleci/scripts/upload_binary_size_to_scuba.py || exit 0
+          python3 tools/stats/upload_binary_size_to_scuba.py || exit 0
 
           '
         name: upload build & binary data
