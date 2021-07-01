@@ -567,7 +567,7 @@ rsync -az me@my_machine:/path/to/pytorch/docs/cpp/build/html cpp/build
 
 PyTorch will host documentation previews at `https://docs-preview.pytorch.org/<pr number>/` once the
 `pytorch_python_doc_build` GitHub Actions job has completed on your PR. You can visit that page directly
-or find its link the automated Dr. CI comment on your PR.
+or find its link in the automated Dr. CI comment on your PR.
 
 ### Adding documentation tests
 
