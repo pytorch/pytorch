@@ -146,6 +146,14 @@ class SampleInput(object):
 
         return self._repr_helper(formatter)
 
+    def log(self):
+        """
+        Print the name of the SampleInput to stdout. This is supposed to be called
+        by tests, to make it possible to know which SampleInput was in use in
+        case of a test failure
+        """
+        print(f'[SampleInput] {self.name}')
+
 
 class AliasInfo(object):
     """Class holds alias information. For example, torch.abs ->

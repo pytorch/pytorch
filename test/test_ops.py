@@ -69,6 +69,7 @@ class TestOpInfo(TestCase):
         # NOTE: assert exception raised on ANY sample input
         with self.assertRaises(RuntimeError):
             for sample in op.sample_inputs(device, dtype, requires_grad=True):
+                sample.log()
                 result = op(sample.input, *sample.args, **sample.kwargs)
                 # TODO: handle non-tensor outputs
                 if not isinstance(result, torch.Tensor):
