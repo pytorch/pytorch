@@ -1242,6 +1242,56 @@ Example:
     tensor([ True, False, False])
 """.format(**common_args))
 
+add_docstr(torch.bitwise_left_shift,
+           r"""
+bitwise_left_shift(input, other, *, out=None) -> Tensor
+
+Computes the left arithmetic shift of :attr:`input` by :attr:`other` bits.
+The result will have the same dtype as :attr:`input`.
+
+The operation applied is:
+
+.. math::
+    \text{{out}}_i = \text{{input}}_i \times 2 ^ {{\text{{other}}_i}}
+
+Args:
+    input (Tensor or Scalar): the first input tensor
+    other (Tensor or Scalar): the second input tensor
+
+Keyword args:
+    {out}
+
+Example:
+
+    >>> torch.bitwise_left_shift(torch.tensor([-1, -2, 3], dtype=torch.int8), torch.tensor([1, 0, 3], dtype=torch.int8))
+    tensor([-2, -2, 24], dtype=torch.int8)
+""".format(**common_args))
+
+add_docstr(torch.bitwise_right_shift,
+           r"""
+bitwise_right_shift(input, other, *, out=None) -> Tensor
+
+Computes the right arithmetic shift of :attr:`input` by :attr:`other` bits.
+The result will have the same dtype as :attr:`input`.
+
+The operation applied is:
+
+.. math::
+    \text{{out}}_i = \text{{input}}_i / 2 ^ {{\text{{other}}_i}}
+
+Args:
+    input (Tensor or Scalar): the first input tensor
+    other (Tensor or Scalar): the second input tensor
+
+Keyword args:
+    {out}
+
+Example:
+
+    >>> torch.bitwise_right_shift(torch.tensor([-2, -7, 31], dtype=torch.int8), torch.tensor([1, 0, 3], dtype=torch.int8))
+    tensor([-1, -7,  3], dtype=torch.int8)
+""".format(**common_args))
+
 add_docstr(torch.broadcast_to,
            r"""
 broadcast_to(input, shape) -> Tensor
@@ -1636,6 +1686,123 @@ Example::
     True
     >>> torch.can_cast(torch.float, torch.int)
     False
+""")
+
+add_docstr(torch.corrcoef, r"""
+corrcoef(input) -> Tensor
+
+Estimates the Pearson product-moment correlation coefficient matrix of the variables given by the :attr:`input` matrix,
+where rows are the variables and columns are the observations.
+
+.. note::
+
+    The correlation coefficient matrix R is computed using the covariance matrix C as given by
+    :math:`R_{ij} = \frac{ C_{ij} } { \sqrt{ C_{ii} * C_{jj} } }`
+
+.. note::
+
+    Due to floating point rounding, the resulting array may not be Hermitian and its diagonal elements may not be 1.
+    The real and imaginary values are clipped to the interval [-1, 1] in an attempt to improve this situation.
+
+Args:
+    input (Tensor): A 2D matrix containing multiple variables and observations, or a
+        Scalar or 1D vector representing a single variable.
+
+Returns:
+    (Tensor) The correlation coefficient matrix of the variables.
+
+.. seealso::
+
+        :func:`torch.cov` covariance matrix.
+
+Example::
+
+    >>> x = torch.tensor([[0, 1, 2], [2, 1, 0]])
+    >>> torch.corrcoef(x)
+    tensor([[ 1., -1.],
+            [-1.,  1.]])
+    >>> x = torch.randn(2, 4)
+    >>> x
+    tensor([[-0.2678, -0.0908, -0.3766,  0.2780],
+            [-0.5812,  0.1535,  0.2387,  0.2350]])
+    >>> torch.corrcoef(x)
+    tensor([[1.0000, 0.3582],
+            [0.3582, 1.0000]])
+    >>> torch.corrcoef(x[0])
+    tensor(1.)
+""")
+
+add_docstr(torch.cov, r"""
+cov(input, *, correction=1, fweights=None, aweights=None) -> Tensor
+
+Estimates the covariance matrix of the variables given by the :attr:`input` matrix, where rows are
+the variables and columns are the observations.
+
+A covariance matrix is a square matrix giving the covariance of each pair of variables. The diagonal contains
+the variance of each variable (covariance of a variable with itself). By definition, if :attr:`input` represents
+a single variable (Scalar or 1D) then its variance is returned.
+
+The unbiased sample covariance of the variables :math:`x` and :math:`y` is given by:
+
+.. math::
+    \text{cov}_w(x,y) = \frac{\sum^{N}_{i = 1}(x_{i} - \bar{x})(y_{i} - \bar{y})}{N~-~1}
+
+where :math:`\bar{x}` and :math:`\bar{y}` are the simple means of the :math:`x` and :math:`y` respectively.
+
+If :attr:`fweights` and/or :attr:`aweights` are provided, the unbiased weighted covariance
+is calculated, which is given by:
+
+.. math::
+    \text{cov}_w(x,y) = \frac{\sum^{N}_{i = 1}w_i(x_{i} - \mu_x^*)(y_{i} - \mu_y^*)}{\sum^{N}_{i = 1}w_i~-~1}
+
+where :math:`w` denotes :attr:`fweights` or :attr:`aweights` based on whichever is provided, or
+:math:`w = fweights \times aweights` if both are provided, and
+:math:`\mu_x^* = \frac{\sum^{N}_{i = 1}w_ix_{i} }{\sum^{N}_{i = 1}w_i}` is the weighted mean of the variable.
+
+Args:
+    input (Tensor): A 2D matrix containing multiple variables and observations, or a
+        Scalar or 1D vector representing a single variable.
+
+Keyword Args:
+    correction (int, optional): difference between the sample size and sample degrees of freedom.
+        Defaults to Bessel's correction, ``correction = 1`` which returns the unbiased estimate,
+        even if both :attr:`fweights` and :attr:`aweights` are specified. ``correction = 0``
+        will return the simple average. Defaults to ``1``.
+    fweights (tensor, optional): A Scalar or 1D tensor of observation vector frequencies representing the number of
+        times each observation should be repeated. Its numel must equal the number of columns of :attr:`input`.
+        Must have integral dtype. Ignored if ``None``. `Defaults to ``None``.
+    aweights (tensor, optional): A Scalar or 1D array of observation vector weights.
+        These relative weights are typically large for observations considered “important” and smaller for
+        observations considered less “important”. Its numel must equal the number of columns of :attr:`input`.
+        Must have floating point dtype. Ignored if ``None``. `Defaults to ``None``.
+
+Returns:
+    (Tensor) The covariance matrix of the variables.
+
+.. seealso::
+
+        :func:`torch.corrcoef` normalized covariance matrix.
+
+Example::
+    >>> x = torch.tensor([[0, 2], [1, 1], [2, 0]]).T
+    >>> x
+    tensor([[0, 1, 2],
+            [2, 1, 0]])
+    >>> torch.cov(x)
+    tensor([[ 1., -1.],
+            [-1.,  1.]])
+    >>> torch.cov(x, correction=0)
+    tensor([[ 0.6667, -0.6667],
+            [-0.6667,  0.6667]])
+    >>> fw = torch.randint(1, 10, (3,))
+    >>> fw
+    tensor([1, 6, 9])
+    >>> aw = torch.rand(3)
+    >>> aw
+    tensor([0.4282, 0.0255, 0.4144])
+    >>> torch.cov(x, fweights=fw, aweights=aw)
+    tensor([[ 0.4169, -0.4169],
+            [-0.4169,  0.4169]])
 """)
 
 add_docstr(torch.cat,
@@ -4640,7 +4807,7 @@ Multiplies :attr:`input` by 2**:attr:`other`.
 
 Typically this function is used to construct floating point numbers by multiplying
 mantissas in :attr:`input` with integral powers of two created from the exponents
-in :attr:'other'.
+in :attr:`other`.
 
 Args:
     {input}
@@ -5240,7 +5407,7 @@ remaining :math:`m - n` rows of that column.
     last `m - n` columns in the case `m > n`. In :func:`torch.linalg.lstsq`, the residuals
     are in the field 'residuals' of the returned named tuple.
 
-    Unpacking the solution as``X = torch.lstsq(B, A).solution[:A.size(1)]`` should be replaced with
+    Unpacking the solution as ``X = torch.lstsq(B, A).solution[:A.size(1)]`` should be replaced with
 
     .. code:: python
 
@@ -5669,10 +5836,7 @@ dimension(s) :attr:`dim`.
           while ``max(dim)``/``min(dim)`` propagates gradient only to a single
           index in the source tensor.
 
-If :attr:`keepdim is ``True``, the output tensors are of the same size
-as :attr:`input` except in the dimension(s) :attr:`dim` where they are of size 1.
-Otherwise, :attr:`dim`s are squeezed (see :func:`torch.squeeze`), resulting
-in the output tensors having fewer dimension than :attr:`input`.
+{keepdim_details}
 
 Args:
     {input}
@@ -6130,10 +6294,7 @@ dimension(s) :attr:`dim`.
           while ``max(dim)``/``min(dim)`` propagates gradient only to a single
           index in the source tensor.
 
-If :attr:`keepdim` is ``True``, the output tensors are of the same size as
-:attr:`input` except in the dimension(s) :attr:`dim` where they are of size 1.
-Otherwise, :attr:`dim`s are squeezed (see :func:`torch.squeeze`), resulting in
-the output tensors having fewer dimensions than :attr:`input`.
+{keepdim_details}
 
 Args:
     {input}
@@ -6675,7 +6836,7 @@ add_docstr(torch.narrow,
 narrow(input, dim, start, length) -> Tensor
 
 Returns a new tensor that is a narrowed version of :attr:`input` tensor. The
-dimension :attr:`dim` is input from :attr:`start` to :attr:`start + length`. The
+dimension :attr:`dim` is input from :attr:`start` to ``start + length``. The
 returned tensor and :attr:`input` tensor share the same underlying storage.
 
 Args:
@@ -6702,7 +6863,7 @@ nan_to_num(input, nan=0.0, posinf=None, neginf=None, *, out=None) -> Tensor
 
 Replaces :literal:`NaN`, positive infinity, and negative infinity values in :attr:`input`
 with the values specified by :attr:`nan`, :attr:`posinf`, and :attr:`neginf`, respectively.
-By default, :literal:`NaN`s are replaced with zero, positive infinity is replaced with the
+By default, :literal:`NaN`\ s are replaced with zero, positive infinity is replaced with the
 greatest finite value representable by :attr:`input`'s dtype, and negative infinity
 is replaced with the least finite value representable by :attr:`input`'s dtype.
 
@@ -6835,7 +6996,7 @@ nonzero(input, *, out=None, as_tuple=False) -> LongTensor or tuple of LongTensor
     When :attr:`input` is on CUDA, :func:`torch.nonzero() <torch.nonzero>` causes
     host-device synchronization.
 
-**When** :attr:`as_tuple` **is ``False`` (default)**:
+**When** :attr:`as_tuple` **is** ``False`` **(default)**:
 
 Returns a tensor containing the indices of all non-zero elements of
 :attr:`input`.  Each row in the result contains the indices of a non-zero
@@ -6846,7 +7007,7 @@ If :attr:`input` has :math:`n` dimensions, then the resulting indices tensor
 :attr:`out` is of size :math:`(z \times n)`, where :math:`z` is the total number of
 non-zero elements in the :attr:`input` tensor.
 
-**When** :attr:`as_tuple` **is ``True``**:
+**When** :attr:`as_tuple` **is** ``True``:
 
 Returns a tuple of 1-D tensors, one for each dimension in :attr:`input`,
 each containing the indices (in that dimension) of all non-zero elements of
@@ -7623,7 +7784,8 @@ Args:
 Keyword args:
     {generator}
     {out}
-    {dtype}
+    dtype (`torch.dtype`, optional) - the desired data type of returned tensor. Default: if ``None``,
+        this function returns a tensor with dtype ``torch.int64``.
     {layout}
     {device}
     {requires_grad}
@@ -10203,9 +10365,9 @@ The operation is defined as:
 
 Arguments:
     condition (BoolTensor): When True (nonzero), yield x, otherwise yield y
-    x (Tensor or Scalar): value (if :attr:x is a scalar) or values selected at indices
+    x (Tensor or Scalar): value (if :attr:`x` is a scalar) or values selected at indices
                           where :attr:`condition` is ``True``
-    y (Tensor or Scalar): value (if :attr:x is a scalar) or values selected at indices
+    y (Tensor or Scalar): value (if :attr:`y` is a scalar) or values selected at indices
                           where :attr:`condition` is ``False``
 
 Returns:

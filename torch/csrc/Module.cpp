@@ -928,6 +928,13 @@ PyObject* initModule() {
 #endif
  ASSERT_TRUE(set_module_attr("has_cudnn", has_cudnn));
 
+#if AT_MKL_ENABLED() || AT_POCKETFFT_ENABLED()
+  PyObject *has_spectral = Py_True;
+#else
+  PyObject *has_spectral = Py_False;
+#endif
+ ASSERT_TRUE(set_module_attr("has_spectral", has_spectral));
+
   // force ATen to initialize because it handles
   // setting up TH Errors so that they throw C++ exceptions
   at::init();
@@ -953,6 +960,9 @@ PyObject* initModule() {
   py_module.def("vitals_enabled", &at::vitals::torchVitalEnabled);
   py_module.def("set_vital", [](const std::string &vital, const std::string &attr, const std::string value){
     return at::vitals::VitalsAPI.setVital(vital, attr, value);
+  });
+  py_module.def("read_vitals", [](){
+    return at::vitals::VitalsAPI.readVitals();
   });
 
   py_module.def(
