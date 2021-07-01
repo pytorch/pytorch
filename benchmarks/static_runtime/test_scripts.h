@@ -134,15 +134,21 @@ const auto reshape_inplace_script = R"JIT(
 )JIT";
 
 const auto sigmoid_inplace_script = R"JIT(
-  def forward(self, inp: Tensor, shape: List[int]):
+  def forward(self, inp: Tensor):
       a = torch.sigmoid(inp, out=inp).clone()
       return (a)
 )JIT";
 
 const auto sigmoid_out_script = R"JIT(
-  def forward(self, inp: Tensor, shape: List[int]):
+  def forward(self, inp: Tensor):
       a = inp + inp
       b = torch.sigmoid(inp, out=a).clone()
+      return (b)
+)JIT";
+
+const auto sigmoid_script = R"JIT(
+  def forward(self, inp: Tensor):
+      b = torch.sigmoid(inp).clone()
       return (b)
 )JIT";
 
