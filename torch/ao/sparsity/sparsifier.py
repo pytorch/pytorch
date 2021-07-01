@@ -202,11 +202,6 @@ class BaseSparsifier(abc.ABC):
             module = config['module']
             parametrize.remove_parametrizations(module, 'weight',
                                                 leave_parametrized=True)
-            if getattr(module._parameters, 'mask', None):
-                del module._parameters['mask']
-            elif getattr(module._buffers, 'mask', None):
-                del module._buffers['mask']
-            delattr(module, 'mask')
 
     def convert(self):
         # TODO: Call the torch.ao.utils.convert in here
