@@ -4,7 +4,7 @@ from torch.nn import Module, Parameter
 import caffe2.python.onnx.backend as backend
 from verify import verify
 
-from test_pytorch_common import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests
 
 
 class TestVerify(TestCase):
