@@ -31,6 +31,8 @@ class ImplementedSparsifier(BaseSparsifier):
 
     def update_mask(self, layer, **kwargs):
         layer.parametrizations.weight[0].mask[0] = 0
+        linear_state = self.state['linear']
+        linear_state['step_count'] = linear_state.get('step_count', 0) + 1
 
 
 class TestBaseSparsifier(TestCase):
@@ -61,15 +63,22 @@ class TestBaseSparsifier(TestCase):
         assert torch.all(model.linear.parametrizations.weight[0].mask[0] == 0)
 
     def test_state_dict(self):
-        model = Model()
+        step_count = 3
+        model0 = Model()
         sparsifier0 = ImplementedSparsifier(test=3)
-        sparsifier0.prepare(model, [model.linear])
+        sparsifier0.prepare(model0, [model0.linear])
+        mask = model0.linear.parametrizations['weight'][0].mask
+        mask.data = torch.arange(mask.shape[0] * mask.shape[1]).reshape(mask.shape)
+        for step in range(step_count):
+            sparsifier0.step()
         state_dict = sparsifier0.state_dict()
 
         # Check the expected keys in the state_dict
         assert 'state' in state_dict
         assert 'linear' in state_dict['state']
         assert 'mask' in state_dict['state']['linear']
+        assert 'step_count' in state_dict['state']['linear']
+        assert state_dict['state']['linear']['step_count'] == 3
 
         assert 'module_groups' in state_dict
         assert 'test' in state_dict['module_groups'][0]
@@ -77,11 +86,42 @@ class TestBaseSparsifier(TestCase):
         assert state_dict['module_groups'][0]['fqn'] == 'linear'
 
         # Check loading static_dict creates an equivalent model
+        model1 = Model()
         sparsifier1 = ImplementedSparsifier()
-        sparsifier1.prepare(model, None)
-        assert sparsifier0.module_groups != sparsifier1.module_groups
+        sparsifier1.prepare(model1, None)
+
+        assert sparsifier0.state != sparsifier1.state
+
+        # Make sure the masks are different in the beginning
+        for mg in sparsifier0.module_groups:
+            if mg['fqn'] == 'linear':
+                mask0 = mg['module'].parametrizations.weight[0].mask
+        for mg in sparsifier1.module_groups:
+            if mg['fqn'] == 'linear':
+                mask1 = mg['module'].parametrizations.weight[0].mask
+        self.assertNotEqual(mask0, mask1)
+
         sparsifier1.load_state_dict(state_dict)
-        assert sparsifier0.module_groups == sparsifier1.module_groups
+
+        # Make sure the states are loaded, and are correct
+        assert sparsifier0.state == sparsifier1.state
+
+        # Make sure the masks (and all dicts) are the same after loading
+        assert len(sparsifier0.module_groups) == len(sparsifier1.module_groups)
+        for idx in range(len(sparsifier0.module_groups)):
+            mg0 = sparsifier0.module_groups[idx]
+            mg1 = sparsifier1.module_groups[idx]
+            for key in mg0.keys():
+                assert key in mg1
+                if key == 'module':
+                    # We cannot compare modules as they are different
+                    param0 = mg0[key].parametrizations.weight[0]
+                    param1 = mg1[key].parametrizations.weight[0]
+                    assert hasattr(param0, 'mask')
+                    assert hasattr(param1, 'mask')
+                    self.assertEqual(param0.__dict__, param1.__dict__)
+                else:
+                    assert mg0[key] == mg1[key]
 
     def test_mask_squash(self):
         model = Model()
@@ -116,3 +156,4 @@ class TestWeightNormSparsifier(TestCase):
         sparsifier.enable_mask_update = True
         sparsifier.step()
         self.assertAlmostEqual(model.linear.parametrizations['weight'][0].mask.mean().item(), 0.5, places=2)
+
