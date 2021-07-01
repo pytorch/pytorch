@@ -22,7 +22,7 @@ class TestPublicBindings(unittest.TestCase):
         #
         #   {elem for elem in dir(torch._C) if not elem.startswith("_")}
         #
-        torch_C_allowlist = {
+        torch_C_allowlist_superset = {
             "AggregationType",
             "AliasDb",
             "AnyType",
@@ -56,17 +56,24 @@ class TestPublicBindings(unittest.TestCase):
             "cpp",
             "CudaBFloat16StorageBase",
             "CudaBFloat16TensorBase",
+            "CudaBFloat16TensorBase",
             "CudaBoolStorageBase",
+            "CudaBoolTensorBase",
             "CudaBoolTensorBase",
             "CudaByteStorageBase",
             "CudaByteTensorBase",
+            "CudaByteTensorBase",
             "CudaCharStorageBase",
+            "CudaCharTensorBase",
             "CudaCharTensorBase",
             "CudaComplexDoubleStorageBase",
             "CudaComplexDoubleTensorBase",
+            "CudaComplexDoubleTensorBase",
             "CudaComplexFloatStorageBase",
             "CudaComplexFloatTensorBase",
+            "CudaComplexFloatTensorBase",
             "CudaDoubleStorageBase",
+            "CudaDoubleTensorBase",
             "CudaDoubleTensorBase",
             "CudaFloatStorageBase",
             "CudaFloatTensorBase",
@@ -74,9 +81,12 @@ class TestPublicBindings(unittest.TestCase):
             "CudaHalfTensorBase",
             "CudaIntStorageBase",
             "CudaIntTensorBase",
+            "CudaIntTensorBase",
             "CudaLongStorageBase",
             "CudaLongTensorBase",
+            "CudaLongTensorBase",
             "CudaShortStorageBase",
+            "CudaShortTensorBase",
             "CudaShortTensorBase",
             "DeepCopyMemoTable",
             "default_generator",
@@ -116,6 +126,7 @@ class TestPublicBindings(unittest.TestCase):
             "has_mkldnn",
             "has_mlc",
             "has_openmp",
+            "has_spectral",
             "HOIST_CONV_PACKED_PARAMS",
             "iinfo",
             "import_ir_module_from_buffer",
@@ -204,8 +215,13 @@ class TestPublicBindings(unittest.TestCase):
         }
         torch_C_bindings = {elem for elem in dir(torch._C) if not elem.startswith("_")}
 
-        # Check that both sets above have the same elements as each other.
-        self.assertSetEqual(torch_C_bindings, torch_C_allowlist)
+        # Check that the torch._C bindings are all in the allowlist. Since
+        # bindings can change based on how PyTorch was compiled (e.g. with/without
+        # CUDA), the two may not be an exact match but the bindings should be
+        # a subset of the allowlist.
+        difference = torch_C_bindings.difference(torch_C_allowlist_superset)
+        msg = f"torch._C had bindings that are not present in the allowlist:\n{difference}"
+        self.assertTrue(torch_C_bindings.issubset(torch_C_allowlist_superset), msg)
 
 
 if __name__ == '__main__':
