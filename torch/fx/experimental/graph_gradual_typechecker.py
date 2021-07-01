@@ -29,6 +29,9 @@ def apply_matching(t, n):
 
 
 def broadcast_types(t1, t2):
+    if t1 == Dyn or t2 == Dyn:
+        return t1, t2
+
     if isinstance(t1, TensorType) and isinstance(t2, TensorType):
         s1 = len(t1.__args__)
         s2 = len(t2.__args__)
