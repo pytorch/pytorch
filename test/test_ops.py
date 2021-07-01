@@ -12,7 +12,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_methods_invocations import \
     (op_db, _NOTHING, UnaryUfuncInfo, SpectralFuncInfo)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, onlyCUDA, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
+    (deviceCountAtLeast, instantiate_device_type_tests, ops, onlyCUDA, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, create_traced_fn, \
     check_alias_annotation
@@ -174,13 +174,10 @@ class TestCommon(TestCase):
     # Validates that each OpInfo works correctly on different CUDA devices
     @skipCUDAIfRocm
     @onlyCUDA
+    @deviceCountAtLeast(2)
     @ops(op_db, allowed_dtypes=(torch.float32, torch.long))
-    def test_multiple_devices(self, device, dtype, op):
-        if torch.cuda.device_count() < 2:
-            self.skipTest("Skipped! Multiple CUDA devices are not available.")
-
-        available_cuda_devices = self.get_all_devices()
-        for cuda_device_str in available_cuda_devices:
+    def test_multiple_devices(self, devices, dtype, op):
+        for cuda_device_str in devices:
             cuda_device = torch.device(cuda_device_str)
             # NOTE: only tests on first sample
             samples = op.sample_inputs(cuda_device, dtype)
