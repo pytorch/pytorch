@@ -19,6 +19,7 @@ Example of usage:
 
 """
 
+import os
 import logging
 
 from torch.distributed.elastic.events.handlers import get_logging_handler
@@ -46,12 +47,12 @@ def _get_or_create_logger(destination: str = "null") -> logging.Logger:
         return _events_logger
     logging_handler = get_logging_handler(destination)
     _events_logger = logging.getLogger(f"torchelastic-events-{destination}")
-    _events_logger.setLevel(logging.DEBUG)
+    _events_logger.setLevel(os.environ.get("LOGLEVEL", "INFO"))
     # Do not propagate message to the root logger
     _events_logger.propagate = False
     _events_logger.addHandler(logging_handler)
     return _events_logger
 
 
-def record(event: Event, destination: str = "console") -> None:
+def record(event: Event, destination: str = "null") -> None:
     _get_or_create_logger(destination).info(event.serialize())
