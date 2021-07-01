@@ -322,5 +322,14 @@ class TypeCheckerTest(unittest.TestCase):
             if n.op == 'call_module':
                 assert n.type == TensorType((2, 2, Dyn, 4))
 
+        B = BasicBlock(1, 1)
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(B)
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+        tc = GraphTypeChecker({}, traced)
+        with self.assertRaises(TypeError):
+            tc.type_check()
+
+
 if __name__ == '__main__':
     unittest.main()

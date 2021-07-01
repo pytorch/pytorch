@@ -19,7 +19,7 @@ def apply_matching(t, n):
     """
     if t == Dyn:
         dims = [Dyn] * n
-        return TensorType(dims)
+        return TensorType(tuple(dims))
     elif isinstance(t, TensorType):
         if len(t.__args__) != n:
             raise TypeError(f'Cannot apply matching. Tensor {t} has rank {len(t.__args__)}. It should have rank {n}')
@@ -196,7 +196,7 @@ def bn2d_inference_rule(n: Node, op_type):
             n.type = arg_type
         return n.type
     else:
-        raise TypeError
+        raise TypeError(f'Cannot apply {op_type} with input type { arg_type} and existing type {n.type} on {n}')
 
 class GraphTypeChecker:
     def __init__(self, env, traced):
