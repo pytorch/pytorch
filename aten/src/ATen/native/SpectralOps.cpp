@@ -236,16 +236,14 @@ ShapeAndDims canonicalize_fft_shape_and_dim_args(
   } else {
     // No shape, has dim
     ret.shape.resize(ret.dim.size());
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (int64_t i = 0; i < ret.dim.size(); ++i) {
+    for (const auto i : c10::irange(ret.dim.size())) {
       ret.shape[i] = input_sizes[ret.dim[i]];
     }
   }
 
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (int64_t i = 0; i < ret.shape.size(); ++i) {
-    TORCH_CHECK(ret.shape[i] > 0,
-                "Invalid number of data points (", ret.shape[i], ") specified");
+  for (const auto & shape : ret.shape) {
+    TORCH_CHECK(shape > 0,
+                "Invalid number of data points (", shape, ") specified");
   }
 
   return ret;
