@@ -40,6 +40,26 @@ class ConcatIterDataPipe(IterDataPipe):
         return len(self)
 
 
+# This is fake class to show API, going to be replaced by the copy from torchdata
+# TODO(VitalyFedyunin): Replace with valid version, documentation and tests
+class IterateBuffer(IterDataPipe):
+    def __init__(self, buffer):
+        self.buffer = buffer
+
+    def __iter__(self):
+        for i in self.buffer:
+            yield i
+
+
+@functional_datapipe('fork')
+class ForkIterDataPipe(IterDataPipe):
+
+    def __new__(cls, datapipe, instances):
+        result = []
+        buffer = list(datapipe)
+        return [IterateBuffer(buffer) for i in range(instances)]
+
+
 @functional_datapipe('zip')
 class ZipIterDataPipe(IterDataPipe[Tuple[T_co]]):
     r""" :class:`ZipIterDataPipe`.
