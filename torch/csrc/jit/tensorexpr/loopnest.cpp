@@ -1970,6 +1970,31 @@ std::vector<For*> LoopNest::reorder(
   return result;
 }
 
+bool LoopNest::shuffle(Block* block, const std::vector<size_t>& permutation) {
+  if (permutation.size() != static_cast<size_t>(block->nstmts())) {
+    return false; // invalid permutation size
+  }
+  if (isTrivialPermutation(permutation)) {
+    return true;
+  }
+  if (!isValidPermutation(permutation)) {
+    return false; // invalid permutation
+  }
+  // Remove all statements from the block and shuffle them as per the
+  // given permutation.
+  std::vector<Stmt*> result(permutation.size());
+  std::vector<Stmt*> curr_stmts(block->begin(), block->end());
+  for (size_t i = 0; i < permutation.size(); ++i) {
+    result[i] = curr_stmts[permutation[i]];
+  }
+  block->clear();
+  // Add the statements back in the shuffled order.
+  for (auto st : result) {
+    block->append_stmt(st);
+  }
+  return true;
+}
+
 For* LoopNest::getLoopAt(For* root, const std::vector<int>& indices) const {
   if (indices.empty()) {
     return root;

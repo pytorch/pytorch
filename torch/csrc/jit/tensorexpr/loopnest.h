@@ -308,6 +308,28 @@ class TORCH_API LoopNest {
       const std::vector<For*>& loops,
       const std::vector<size_t>& permutation);
 
+  // Shuffles the statements in the given block according to the permutation
+  // specified. `permutation[i]` represents the position of the statement in
+  // the input block which will end up at position `i` after the shuffle.
+  //
+  // Returns true if the shuffle is done successfully.
+  //
+  // NOTE: This API does not check if dependences between statements are
+  // violated due to the shuffle. It is the responsibility of the caller to
+  // ensure that all dependences are honored after the shuffle.
+  //
+  // For example, consider the following code:
+  //   for i
+  //      A[i] = 10;
+  //      B[i] = 20;
+  //      C[i] = 30;
+  // shuffle(forI->body(), {1, 2, 0}) will transform the code to:
+  //   for i
+  //      B[i] = 20;
+  //      C[i] = 30;
+  //      A[i] = 10;
+  static bool shuffle(Block* block, const std::vector<size_t>& permutation);
+
   // Tile takes a 2d domain (x, y) and splits it into small rectangular blocks
   // each with shape (x_factor, y_factor). The traversal over the domain turns
   // into an outer iteration over the blocks and an inner traversal over all
