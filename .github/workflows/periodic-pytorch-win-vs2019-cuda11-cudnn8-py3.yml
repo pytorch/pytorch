@@ -1,19 +1,17 @@
 # @generated DO NOT EDIT MANUALLY
 # Template is at:    .github/templates/windows_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: Windows CI (pytorch-win-vs2019-cuda11-cudnn8-py3)
+name: Windows CI (periodic-pytorch-win-vs2019-cuda11-cudnn8-py3)
 
 on:
-  push:
-    branches:
-      - master
-      - release/*
+  schedule:
+    - cron: 45 0,4,8,12,16,20 * * *
   workflow_dispatch:
 
 env:
-  BUILD_ENVIRONMENT: pytorch-win-vs2019-cuda11-cudnn8-py3
+  BUILD_ENVIRONMENT: periodic-pytorch-win-vs2019-cuda11-cudnn8-py3
   BUILD_WHEEL: 1
-  CUDA_VERSION: "11.1"
+  CUDA_VERSION: "11.3"
   IN_CI: 1
   INSTALL_WINDOWS_SDK: 1
   PYTHON_VERSION: "3.8"
@@ -25,14 +23,14 @@ env:
   USE_CUDA: 1
 
 concurrency:
-  group: pytorch-win-vs2019-cuda11-cudnn8-py3-${{ github.event.pull_request.number || github.sha }}
+  group: periodic-pytorch-win-vs2019-cuda11-cudnn8-py3-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 jobs:
   build:
     runs-on: "windows.4xlarge"
     env:
-      JOB_BASE_NAME: pytorch-win-vs2019-cuda11-cudnn8-py3-build
+      JOB_BASE_NAME: periodic-pytorch-win-vs2019-cuda11-cudnn8-py3-build
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
@@ -100,7 +98,7 @@ jobs:
 
   test:
     env:
-      JOB_BASE_NAME: pytorch-win-vs2019-cuda11-cudnn8-py3-test
+      JOB_BASE_NAME: periodic-pytorch-win-vs2019-cuda11-cudnn8-py3-test
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
     needs:
@@ -224,7 +222,7 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_SECRET_ACCESS_KEY }}
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: pytorch-win-vs2019-cuda11-cudnn8-py3-test
+          JOB_BASE_NAME: periodic-pytorch-win-vs2019-cuda11-cudnn8-py3-test
           CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
           CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
