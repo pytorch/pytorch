@@ -1,9 +1,11 @@
 import argparse
+import pathlib
 import subprocess
 import os
 import shutil
 
 from run import run
+from setup import setup
 
 
 DEFAULTS = {
@@ -35,11 +37,6 @@ DEFAULTS = {
     "paths": ["torch/csrc/"],
     "include-dir": ["/usr/lib/llvm-11/include/openmp"],
 }
-
-
-def setup() -> None:
-    dirname = os.path.dirname(os.path.realpath(__file__))
-    subprocess.call(["sh", os.path.join(dirname, "setup.sh")])
 
 
 def parse_args() -> argparse.Namespace:
@@ -137,7 +134,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    setup()
+    if not pathlib.Path("build").exists:
+        setup()
     options = parse_args()
 
     # Check if clang-tidy executable exists
