@@ -1768,7 +1768,20 @@ void TranslateApplicableWelford::translateSingleWelford(WelfordOp* welford) {
   //  equivalent to a welford operation.
   auto x_sum = sum(in_val, red_axes);
   new BinaryOp(BinaryOpType::Div, out_avg, x_sum, num_features);
-  auto x_avg_bcast = broadcast(out_avg, broadcast_mask);
+  // welford.avg may be broadcast. Reuse it if found.
+  TensorView* x_avg_bcast = nullptr;
+  for (auto& use_expr : out_avg->uses()) {
+    if (auto bcast = dynamic_cast<BroadcastOp*>(use_expr)) {
+      if (bcast->getBroadcastDimFlags() == broadcast_mask) {
+        // Same broadcast found.
+        x_avg_bcast = bcast->out()->as<TensorView>();
+        break;
+      }
+    }
+  }
+  if (x_avg_bcast == nullptr) {
+    x_avg_bcast = broadcast(out_avg, broadcast_mask);
+  }
   auto x_mean_sub = sub(in_val, x_avg_bcast);
   auto x_mean_sub_pow = mul(x_mean_sub, x_mean_sub);
   new ReductionOp(BinaryOpType::Add, new Double(0.0), out_var, x_mean_sub_pow);
