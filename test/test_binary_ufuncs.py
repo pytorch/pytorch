@@ -840,15 +840,15 @@ class TestBinaryUfuncs(TestCase):
             self.assertNotEqual(out_uint8_computation, out_int64_computation)
             self.assertEqual(out_uint8_computation.to(dtype=torch.uint8), out_int64_computation.to(dtype=torch.uint8))
 
-    def test_tensor_pow_tensor(self, dev):
+    def test_tensor_pow_tensor(self, device):
         def rotate(l, n):
             return l[-n:] + l[:-n]
 
         def test_tensor_pow_tensor(values, torch_type, numpy_type):
-            vals_tensor = torch.tensor(values, dtype=torch_type, device=dev)
+            vals_tensor = torch.tensor(values, dtype=torch_type, device=device)
             for i in range(len(values)):
                 pows = rotate(values, i)
-                pows_tensor = torch.tensor(pows, dtype=torch_type, device=dev)
+                pows_tensor = torch.tensor(pows, dtype=torch_type, device=device)
                 self._test_pow(vals_tensor, pows_tensor)
 
         ints = [0, 1, 2, 3]
