@@ -6,6 +6,8 @@ from torch.fx.annotate import annotate
 from torch.fx.experimental.graph_gradual_typechecker import GraphTypeChecker, broadcast_types
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx import GraphModule
+from benchmarks.functional_autograd_benchmark.torchvision_models import conv3x3
+
 
 class AnnotationsTest(unittest.TestCase):
 
@@ -321,6 +323,71 @@ class TypeCheckerTest(unittest.TestCase):
                 assert n.type == TensorType((Dyn, Dyn, Dyn, Dyn))
             if n.op == 'call_module':
                 assert n.type == TensorType((2, 2, Dyn, 4))
+
+    def test_type_check_conv2D(self):
+        class BasicBlock(torch.nn.Module):
+            def __init__(self, inplanes, planes, stride=1, norm_layer=None):
+                super(BasicBlock, self).__init__()
+                if norm_layer is None:
+                    norm_layer = torch.nn.BatchNorm2d
+                self.conv1 = conv3x3(inplanes, planes, stride)
+                self.bn1 = norm_layer(planes)
+
+            def forward(self, x: Dyn):
+                identity = x
+                out: TensorType((2, 2, Dyn, 4)) = self.conv1(x)
+                out += identity
+                return out
+
+        B = BasicBlock(2, 2)
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(B)
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+        tc = GraphTypeChecker({}, traced)
+        tc.type_check()
+        for n in graph.nodes:
+            if n.op == 'placeholder':
+                assert n.type == TensorType((Dyn, Dyn, Dyn, Dyn))
+            if n.op == 'call_function':
+                assert n.type == TensorType((Dyn, Dyn, Dyn, Dyn))
+            if n.op == 'output':
+                assert n.type == TensorType((Dyn, Dyn, Dyn, Dyn))
+            if n.op == 'call_module':
+                print(n.type)
+                assert n.type == TensorType((Dyn, 2, Dyn, Dyn))
+
+    def test_type_check_conv2D_2(self):
+        class BasicBlock(torch.nn.Module):
+            def __init__(self, inplanes, planes, stride=1, norm_layer=None):
+                super(BasicBlock, self).__init__()
+                if norm_layer is None:
+                    norm_layer = torch.nn.BatchNorm2d
+                self.conv1 = conv3x3(inplanes, planes, stride)
+                self.bn1 = norm_layer(planes)
+
+            def forward(self, x: TensorType((5, 2, 3, 4))):
+                identity = x
+                out = self.conv1(x)
+                # out += identity
+                return out
+
+        B = BasicBlock(2, 2)
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(B)
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+        tc = GraphTypeChecker({}, traced)
+        tc.type_check()
+        t = TensorType((5, 2, 3, 4))
+        for n in graph.nodes:
+            if n.op == 'placeholder':
+                assert n.type == t
+            if n.op == 'call_function':
+                assert n.type == t
+            if n.op == 'output':
+                assert n.type == t
+            if n.op == 'call_module':
+                assert n.type == t
+
 
 if __name__ == '__main__':
     unittest.main()

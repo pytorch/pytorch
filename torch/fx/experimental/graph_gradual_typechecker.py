@@ -5,6 +5,8 @@ from torch.fx.tensor_type import Dyn, is_consistent, TensorType, is_more_precise
 from typing import Callable, Dict
 from torch.fx.node import Target, Node
 from torch.nn.modules.batchnorm import BatchNorm2d
+from torch.nn.modules.conv import Conv2d
+from math import floor
 
 
 _INFERENCE_RULES: Dict[Target, Callable] = {}
@@ -29,6 +31,9 @@ def apply_matching(t, n):
 
 
 def broadcast_types(t1, t2):
+    if t1 == Dyn or t2 == Dyn:
+        return t1, t2
+
     if isinstance(t1, TensorType) and isinstance(t2, TensorType):
         s1 = len(t1.__args__)
         s2 = len(t2.__args__)
@@ -199,6 +204,53 @@ def bn2d_inference_rule(n: Node, op_type):
         return n.type
     else:
         raise TypeError
+
+def calculate_hout(h_in, op_type):
+    if h_in == Dyn:
+        return Dyn
+
+    elif isinstance(h_in, int):
+        h_out = floor((h_in + (2 * op_type.padding[0] - op_type.dilation[0] *
+                               (op_type.kernel_size[0] - 1) - 1)) / op_type.stride[0]) + 1
+        return h_out
+    else:
+        raise TypeError(f'{h_in} must be a number or Dyn')
+
+def calculate_wout(w_in, op_type):
+    if w_in == Dyn:
+        return Dyn
+
+    elif isinstance(w_in, int):
+        w_out = floor((w_in + (2 * op_type.padding[1] - op_type.dilation[1] *
+                               (op_type.kernel_size[1] - 1) - 1)) /
+                      op_type.stride[1]) + 1
+        return w_out
+    else:
+        raise TypeError(f'{w_in} in {op_type} must be a number or Dyn')
+
+@register_inference_rule(Conv2d)
+def conv2d_inference_rule(n: Node, op_type):
+    assert isinstance(n.args[0], Node)
+    n.args[0].type = apply_matching(n.args[0].type, 4)
+    arg_type = n.args[0].type
+    n.type = apply_matching(n.type, 4)
+    if is_consistent(arg_type.__args__[1], op_type.in_channels) and \
+            is_consistent(n.type.__args__[1], op_type.in_channels) and \
+            is_consistent(arg_type, n.type):
+
+        w_in = arg_type.__args__[3]
+        h_in = arg_type.__args__[2]
+
+        h_out = calculate_hout(h_in, op_type)
+
+        w_out = calculate_wout(w_in, op_type)
+
+        new_type = TensorType((arg_type.__args__[0], op_type.out_channels, h_out, w_out))
+        n.type = new_type
+
+        return n.type
+    else:
+        raise TypeError(f'Cannot apply Conv2D in node {n} with type {arg_type}')
 
 class GraphTypeChecker:
     def __init__(self, env, traced):
