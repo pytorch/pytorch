@@ -11,6 +11,9 @@ using namespace torch;
 using namespace torch::jit;
 using c10::IValue;
 
+C10_DECLARE_bool(
+    static_runtime_enable_fast_math);
+
 namespace {
 static at::Tensor getTensor(const at::IValue& ival) {
   if (ival.isTensor()) {
@@ -216,6 +219,21 @@ TEST(StaticRuntime, UnaryOps) {
   testStaticRuntime(aten_sum_1_true, args, args2);
 }
 
+TEST(StaticRuntime, Sigmoid) {
+  auto a = at::randn({2, 3});
+  auto b = at::randn({4, 3, 2});
+
+  std::vector<IValue> args{a}, args2{b};
+
+  testStaticRuntime(sigmoid_script, args);
+  testStaticRuntime(sigmoid_script, args, {args2});
+
+  FLAGS_static_runtime_enable_fast_math = false;
+  testStaticRuntime(sigmoid_script, args);
+  testStaticRuntime(sigmoid_script, args, {args2});
+  FLAGS_static_runtime_enable_fast_math = true;
+}
+
 TEST(StaticRuntime, Clone) {
   auto a = at::randn({2, 3});
   auto b = at::empty_strided({3, 2}, {1, 3});
@@ -304,6 +322,36 @@ TEST(StaticRuntime, LayerNorm) {
     testStaticRuntime(layer_norm_without_weights, args);
     testStaticRuntime(layer_norm_without_weights, args, {b, normalized_shape});
   }
+}
+
+TEST(StaticRuntime, Bmm) {
+  auto a = at::randn({10, 4, 5});
+  auto b = at::randn({10, 5, 6});
+
+  auto c = at::randn({12, 5, 6});
+  auto d = at::randn({12, 6, 7});
+
+  std::vector<IValue> args{a, b};
+  std::vector<IValue> args1{c, d};
+  testStaticRuntime(bmm_script, args);
+  testStaticRuntime(bmm_script, args1);
+  testStaticRuntime(bmm_script, args, args1);
+}
+
+TEST(StaticRuntime, Addmm) {
+  auto inp1 = at::randn({5});
+  auto mat1 = at::randn({3, 4});
+  auto mat2 = at::randn({4, 5});
+
+  auto inp2 = at::randn({3, 7});
+  auto mat3 = at::randn({3, 6});
+  auto mat4 = at::randn({6, 7});
+
+  std::vector<IValue> args{inp1, mat1, mat2, 1.0, 2.0};
+  std::vector<IValue> args1{inp2, mat3, mat4, 2.0, 1.0};
+  testStaticRuntime(addmm_script, args);
+  testStaticRuntime(addmm_script, args1);
+  testStaticRuntime(addmm_script, args, args1);
 }
 
 TEST(StaticRuntime, IndividualOps_Binary) {
