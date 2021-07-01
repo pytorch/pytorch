@@ -15,83 +15,24 @@ for name in sys.builtin_module_names:
     BUILTIN_MODULES.add(importlib.import_module(name))
 
 
-def get_submodules(module: ModuleType) -> List[ModuleType]:
-    """
-    Some modules aren't imported directly into the parent (i.e. torch.fx). So
-    this fails
-
-        import torch
-        print(torch.fx)  # AttributeError: module 'torch' has no attribute 'fx'
-    
-    but this works
-
-        import torch.fx
-        print(torch.fx)
-
-    This function gathers all submodules of a module by inspecting its search
-    path (the folder) and importing all subdirectories it can
-    """
-    ignore_list = {
-        "for_onnx"
-    }
-    try:
-        spec = importlib.util.find_spec(module.__name__)
-    except Exception as e:
-        # print(e)
-        return []
-
-    if spec is None or spec.submodule_search_locations is None:
-        return []
-
-    search_paths = [Path(loc) for loc in spec.submodule_search_locations]
-    submodules = []
-    for path in search_paths:
-        submodule_names = [subdir for subdir in path.glob("*") if subdir.is_dir()]
-        submodule_names = [subdir.name for subdir in submodule_names]
-        for submodule_name in submodule_names:
-            if submodule_name in ignore_list:
-                continue
-        
-            try:
-                submodules.append(importlib.import_module(f"{module.__name__}.{submodule_name}"))
-            except Exception as e:
-                # print(e)
-                pass
-
-        pass
-
-    return submodules
-
-def tprint(*args):
-    try:
-        print(*args)
-    except Exception as e:
-        print(e)
-
-
-
 def main(module: ModuleType, public: bool, private: bool, errors: bool) -> None:
     result = Crawler(module)
 
     for path in result.apis.values():
-        skip = False
+        is_private = False
         for item in path:
             if item.name.startswith("_"):
-                skip = True
+                is_private = True
                 break
-        
-        if not skip:
+
+        if public and not is_private:
+            print(".".join([a.name for a in path]))
+        elif private and is_private:
             print(".".join([a.name for a in path]))
 
-    # if public:
-    #     for item in result.public:
-    #         print(item)
-    # if private:
-    #     for item in result.private:
-    #         print(item)
-    # if errors:
-    #     for item in result.errors:
-    #         print(item)
+    if errors:
+        for error in result.errors:
+            print(error)
 
 
 class Crawler:
@@ -103,16 +44,82 @@ class Crawler:
         self.public = []
         self.private = []
         self.errors = []
-        self.items = []
 
-        self.seen_objects = {}
-
-        # map of id -> path
+        self.all_objects = []
         self.apis = {}
 
-        self.class_attr_count = 0
-
         self.crawl(obj=module, name=module.__name__, path=[])
+        self.add_class_attributes()
+
+    def add_class_attributes(self):
+        """
+        Add class attributes after we've already crawled through all the
+        modules their recursive members. This has to be delayed since we can run
+        into a class multiple times and we de-duplicate those based on the class'
+        id(), but that doesn't work for attributes since they are just a string.
+        So, instead we wait until all the classes are added and then add their
+        attributes.
+        """
+        to_add = []
+        for path in self.apis.values():
+            item = path[-1]
+            obj = item.obj
+            if inspect.isclass(obj):
+                # We don't want to re-add class attributes (these don't have an
+                # associated id() to de-duplicate them with, so we have to do it
+                # manually
+                attrs = dir(obj)
+
+                for attr in attrs:
+                    to_add.append(path + [Crawler.Item(name=attr, obj=None)])
+        
+        for index, path in enumerate(to_add):
+            self.apis[f"attr-{index}"] = path
+
+    def get_submodules(self, module: ModuleType) -> List[ModuleType]:
+        """
+        Some modules aren't imported directly into the parent (i.e. torch.fx). So
+        this fails
+
+            import torch
+            print(torch.fx)  # AttributeError: module 'torch' has no attribute 'fx'
+
+        but this works
+
+            import torch.fx
+            print(torch.fx)
+
+        This function gathers all submodules of a module by inspecting its search
+        path (the folder) and importing all subdirectories it can
+        """
+        ignore_list = {
+            "for_onnx"
+        }
+        try:
+            spec = importlib.util.find_spec(module.__name__)
+        except Exception as e:
+            # print(e)
+            return []
+
+        if spec is None or spec.submodule_search_locations is None:
+            return []
+
+        search_paths = [Path(loc) for loc in spec.submodule_search_locations]
+        submodules = []
+        for path in search_paths:
+            submodule_names = [subdir for subdir in path.glob("*") if subdir.is_dir()]
+            submodule_names = [subdir.name for subdir in submodule_names]
+            for submodule_name in submodule_names:
+                if submodule_name in ignore_list:
+                    continue
+
+                qualified_name = f"{module.__name__}.{submodule_name}"
+                try:
+                    submodules.append(importlib.import_module(qualified_name))
+                except Exception as e:
+                    self.errors.append(Crawler.Error(reason=str(e), path=qualified_name))
+
+        return submodules
 
     def get_module_attributes(self, module: ModuleType) -> Set[str]:
         """
@@ -137,6 +144,9 @@ class Crawler:
         if self.should_skip(obj, path):
             return
 
+        # Keep a reference around to ensure id() calls are valid
+        self.all_objects.append(obj)
+
         if id(obj) in self.apis:
             # Some things are listed twice, usually as a side-effect of importing
             # it directly while still in the library. This uses a heuristic of
@@ -148,14 +158,13 @@ class Crawler:
                 # both with it any further
                 return
 
-        # Add the current object
         self.apis[id(obj)] = path + [Crawler.Item(name=name, obj=obj)]
 
         # Drop down into modules and classes
         if isinstance(obj, ModuleType):
             # Explicit crawl through submodules that aren't directly reachable
             # (e.g. torch.fx) from the parent
-            submodules = get_submodules(obj)
+            submodules = self.get_submodules(obj)
             for submodule in submodules:
                 self.crawl(submodule, submodule.__name__.split(".")[-1], path + [Crawler.Item(name=name, obj=obj)])
 
@@ -168,14 +177,6 @@ class Crawler:
                     self.errors.append(Crawler.Error(path=attr_path, reason=str(e)))
 
                 self.crawl(next_obj, attr, attr_path)
-
-
-        elif inspect.isclass(obj):
-            attrs = dir(obj)
-
-            for attr in attrs:
-                self.class_attr_count += 1
-                self.apis[f"class-{self.class_attr_count}"] = path + [Crawler.Item(name=name, obj=obj), Crawler.Item(name=attr, obj=None)]
 
     def get_name(self, path: List[str], name: str) -> str:
         names = [item.name for item in path]
