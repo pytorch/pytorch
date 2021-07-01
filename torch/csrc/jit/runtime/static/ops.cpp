@@ -21,6 +21,12 @@
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 
+C10_DEFINE_bool(
+    static_runtime_enable_fast_math,
+    true,
+    "If on, static runtime may use use optimizations that cause accurary loss "
+    "vs the jit interpreter");
+
 namespace at {
 namespace native {
 
@@ -161,17 +167,22 @@ bool opIsRegistered(const c10::Symbol& op_name) {
   return SROperatorRegistry()->Has(name);
 }
 
-// Expensive check, use sparingly.
-// This is needed to make sure that we only switch to out variants for the
-// supported overloads, which is checked in the `Generate` step in
-// `SROperatorRegistry()->Create(op_name)->Generate(n)`
-bool canReuseInputsOutputs(Node* n) {
-  return getOutOfPlaceOperation(n) != nullptr;
+bool disableUnsafeMathOp(const char* op_name) {
+  if (FLAGS_static_runtime_enable_fast_math) {
+    return false;
+  }
+  // This list contains ops that use caffe2 math library or use NNC that does
+  // not guarantee bit exactness vs the jit interpreter. Note aten::relu is not
+  // included even though it uses NNC because the results of relu should always
+  // match.
+  static const std::unordered_set<std::string> fast_ops{
+      "aten::add", "aten::tanh", "aten::sigmoid", "aten::logit"};
+  return fast_ops.count(op_name) > 0;
 }
 
 std::function<void(ProcessedNode*)> getOutOfPlaceOperation(Node* n) {
   auto op_name = n->kind().toQualString();
-  if (SROperatorRegistry()->Has(op_name)) {
+  if (SROperatorRegistry()->Has(op_name) && !disableUnsafeMathOp(op_name)) {
     return SROperatorRegistry()->Create(op_name)->Generate(n);
   }
 
@@ -198,6 +209,14 @@ bool mayRunNatively(Node* n) {
     return false;
   }
   return true;
+}
+
+// Expensive check, use sparingly.
+// This is needed to make sure that we only switch to out variants for the
+// supported overloads, which is checked in the `Generate` step in
+// `SROperatorRegistry()->Create(op_name)->Generate(n)`
+bool canReuseInputsOutputs(Node* n) {
+  return getOutOfPlaceOperation(n) != nullptr;
 }
 
 // returns true if the producers of the inputs
@@ -1505,7 +1524,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::argmin, aten_argmin, [](Node* n) -> SROperator {
     }
     auto& out_t = p_node->Output(0).toTensor();
     fastResizeToZero(out_t);
-    at::native::argmin_out(in0_t, dim, keepdim, out_t);
+    at::cpu::argmin_out(out_t, in0_t, dim, keepdim);
   };
 });
 
