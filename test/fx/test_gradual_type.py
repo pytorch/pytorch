@@ -403,5 +403,59 @@ class TypeCheckerTest(unittest.TestCase):
         with self.assertRaises(TypeError):
             tc.type_check()
 
+    def test_typecheck_basicblock(self):
+        class BasicBlock(torch.nn.Module):
+            expansion = 1
+
+            def __init__(self, inplanes, planes, stride=1, downsample=None, groups=1,
+                         base_width=64, dilation=1, norm_layer=None):
+                super(BasicBlock, self).__init__()
+                if norm_layer is None:
+                    norm_layer = torch.nn.BatchNorm2d
+                if groups != 1 or base_width != 64:
+                    raise ValueError('BasicBlock only supports groups=1 and base_width=64')
+                if dilation > 1:
+                    raise NotImplementedError("Dilation > 1 not supported in BasicBlock")
+                # Both self.conv1 and self.downsample layers downsample the input when stride != 1
+                self.conv1 = conv3x3(inplanes, planes, stride)
+                self.bn1 = norm_layer(planes)
+                self.relu = torch.nn.ReLU(inplace=True)
+                self.conv2 = conv3x3(planes, planes)
+                self.bn2 = norm_layer(planes)
+                self.downsample = downsample
+                self.stride = stride
+
+            def forward(self, x: TensorType((2, 2, 4, 5))):
+                identity = x
+
+                out = self.conv1(x)
+                out = self.bn1(out)
+                out = self.relu(out)
+
+                out = self.conv2(out)
+                out = self.bn2(out)
+
+                if self.downsample is not None:
+                    identity = self.downsample(x)
+
+                out += identity
+                out = self.relu(out)
+
+                return out
+
+        B = BasicBlock(2, 2)
+
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(B)
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+
+        tc = GraphTypeChecker({}, traced)
+        tc.type_check()
+
+        for n in traced.graph.nodes:
+            if n.target == 'output':
+                assert isinstance(n.type, TensorType)
+                assert torch.Size(n.type.__args__) == B.forward(torch.rand(2, 2, 4, 5)).size()
+
 if __name__ == '__main__':
     unittest.main()

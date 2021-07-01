@@ -247,6 +247,19 @@ def conv2d_inference_rule(n: Node, op_type):
     else:
         raise TypeError(f'Cannot apply {op_type} with input type { arg_type} and existing type {n.type} on {n}')
 
+
+@register_inference_rule(torch.nn.ReLU)
+def relu_inference_rule(n: Node, op_type):
+    assert isinstance(n.args[0], Node)
+    arg_type = n.args[0].type
+    if is_consistent(arg_type, n.type):
+        if is_more_precise(arg_type, n.type):
+            n.type = arg_type
+        return n.type
+    else:
+        raise TypeError(f'Cannot apply {op_type}. Current shape {n.type} does not match argument shape {arg_type}')
+
+
 class GraphTypeChecker:
     def __init__(self, env, traced):
         self.env = env
