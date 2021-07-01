@@ -41,7 +41,7 @@ class TestBaseSparsifier(TestCase):
         sparsifier = ImplementedSparsifier(test=3)
         sparsifier.prepare(model, [model.linear])
         assert len(sparsifier.module_groups) == 1
-        assert sparsifier.module_groups[0]['path'] == 'linear'
+        assert sparsifier.module_groups[0]['fqn'] == 'linear'
         assert 'test' in sparsifier.module_groups[0]
         assert sparsifier.module_groups[0]['test'] == 3
 

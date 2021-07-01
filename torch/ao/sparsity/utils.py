@@ -8,7 +8,7 @@ class FakeSparsity(nn.Module):
     Note::
 
         Once the mask is passed, the variable should not change the id. The
-        contensts of the mask can change, but the mask reference itself should
+        contents of the mask can change, but the mask reference itself should
         not.
     """
     def __init__(self, mask):
