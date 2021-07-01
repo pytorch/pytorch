@@ -66,6 +66,7 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
 
   // torch.Storage()
   if (num_args == 0) {
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (allocator) {
       self->cdata = THPStorage_(newWithAllocator)(0, allocator);
     } else {
@@ -79,6 +80,7 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
   // torch.Storage(size)
   if (num_args == 1 && THPUtils_checkLong(first_arg)) {
     int64_t size = THPUtils_unpackLong(first_arg);
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (allocator) {
       self->cdata = THPStorage_(newWithAllocator)(size, allocator);
     } else {
@@ -103,6 +105,7 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
     try {
       for (Py_ssize_t i = 0; i < length; i++) {
         item = PySequence_GetItem(first_arg, i);
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         scalar_t value = THPUtils_(unpackReal)(item.get());
 #if !defined(THC_GENERIC_FILE)
         self->cdata->unsafe_data<scalar_t>()[i] = value;
