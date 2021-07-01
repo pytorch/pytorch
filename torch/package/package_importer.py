@@ -173,10 +173,10 @@ class PackageImporter(Importer):
         restore_location = _get_restore_location(map_location)
         loaded_storages = {}
         loaded_reduces = {}
-        storage_context = torch._C.StorageContext()
+        storage_context = torch._C.DeserializationStorageContext()
 
         def load_tensor(data_type, size, key, location, restore_location):
-            name = f"{key}.storage"
+            name = f"{int(key)}.storage"
             dtype = data_type(0).dtype
 
             if storage_context.has_storage(name):

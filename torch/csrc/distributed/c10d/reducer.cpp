@@ -565,7 +565,11 @@ void Reducer::set_logger(std::weak_ptr<c10d::Logger> logger) {
 // This function is only to be called from the autograd thread.
 void Reducer::autograd_hook(size_t index) {
   std::lock_guard<std::mutex> lock(this->mutex_);
-
+  // Local modules can also fire autograd hooks if user directly invokes
+  // backward on local module. In this case, don't run autograd hooks.
+  if (!in_ddp_backwards_) {
+    return;
+  }
   // Carry over thread local state from main thread. This allows for
   // thread-local flags such as profiler enabled to be configure correctly.
   at::ThreadLocalStateGuard g(thread_local_state_);
@@ -1257,6 +1261,7 @@ void Reducer::search_unused_parameters(
 void Reducer::prepare_for_backward(
     const std::vector<torch::autograd::Variable>& outputs) {
   std::lock_guard<std::mutex> lock(mutex_);
+  in_ddp_backwards_ = true;
   ++num_backward_calls_;
   backward_compute_start_time_ = current_time_in_nanos();
   if (should_collect_runtime_stats()) {
@@ -1429,6 +1434,7 @@ void Reducer::finalize_backward() {
   // No longer require call to finalize after this function returns.
   TORCH_INTERNAL_ASSERT(require_finalize_);
   require_finalize_ = false;
+  in_ddp_backwards_ = false;
 
   // Unset allreduce division factor, as it may change in next backwards pass
   // when running with DDP join mode.

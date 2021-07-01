@@ -279,8 +279,7 @@ void _validate_sparse_coo_tensor_args(
   int64_t sparse_dim = indices.size(0);
   int64_t dense_dim = values.dim() - 1;
   TORCH_CHECK(
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      size.size() == sparse_dim + dense_dim,
+      static_cast<int64_t>(size.size()) == sparse_dim + dense_dim,
       "number of dimensions must be sparse_dim (",
       sparse_dim,
       ") + dense_dim (",

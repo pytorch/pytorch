@@ -1,18 +1,22 @@
 #include <Python.h>
 #include <dlfcn.h>
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject* module;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static PyMethodDef TorchDlMethods[] = {
   {NULL, NULL, 0, NULL}
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyModuleDef torchdlmodule = {
-   PyModuleDef_HEAD_INIT,
-   "torch._dl",
-   NULL,
-   -1,
-   TorchDlMethods
+    PyModuleDef_HEAD_INIT,
+    "torch._dl",
+    NULL,
+    -1,
+    TorchDlMethods
+    // NOLINTNEXTLINE(clang-diagnostic-missing-field-initializers)
 };
 
 PyMODINIT_FUNC PyInit__dl(void)

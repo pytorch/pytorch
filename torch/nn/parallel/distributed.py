@@ -394,15 +394,12 @@ class DistributedDataParallel(Module):
                                wrapped module's ``forward`` function. Parameters
                                that don't receive gradients as part of this
                                graph are preemptively marked as being ready to
-                               be reduced. Note that all ``forward`` outputs
-                               that are derived from module parameters must
-                               participate in calculating loss and later the
-                               gradient computation. If they don't, this wrapper
-                               will hang waiting for autograd to produce
-                               gradients for those parameters. Any outputs
-                               derived from module parameters that are otherwise
-                               unused can be detached from the autograd graph
-                               using ``torch.Tensor.detach``. (default: ``False``)
+                               be reduced. In addition, parameters that may have
+                               been used in the wrapped module's ``forward``
+                               function but were not part of loss computation and
+                               thus would also not receive gradients are
+                               preemptively marked as ready to be reduced.
+                               (default: ``False``)
         check_reduction: This argument is deprecated.
         gradient_as_bucket_view (bool): When set to ``True``, gradients will be views
                       pointing to different offsets of ``allreduce`` communication
@@ -890,14 +887,25 @@ class DistributedDataParallel(Module):
             # features such as: enqueue delay allreduce for static graph, support
             # multiple calls to backwards with retain_graph=True, and support
             # finding all parameters that will not receive gradient.
+            output_placeholders = [None for _ in range(len(output_tensor_list))]
+            # Do not touch tensors that have no grad_fn, which can cause issues
+            # such as https://github.com/pytorch/pytorch/issues/60733
+            for i, output in enumerate(output_tensor_list):
+                if torch.is_tensor(output) and output.grad_fn is None:
+                    output_placeholders[i] = output
+
             passthrough_tensor_list = _DDPSink.apply(
                 self.reducer,
                 state_dict,
                 *output_tensor_list,
             )
+            for i in range(len(output_placeholders)):
+                if output_placeholders[i] is None:
+                    output_placeholders[i] = passthrough_tensor_list[i]
+
             # Reconstruct output data structure.
             output = _tree_unflatten_with_rref(
-                passthrough_tensor_list, treespec, output_is_rref
+                output_placeholders, treespec, output_is_rref
             )
             return output
 
