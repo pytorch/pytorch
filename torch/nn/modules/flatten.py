@@ -11,7 +11,7 @@ class Flatten(Module):
 
     Shape:
         - Input: :math:`(*, S_{start},..., S_{i}, ..., S_{end}, *)`, where :math:`S_{i}` is the
-          size at dimension :math:`i`.
+          size at dimension :math:`i` and :math:`*` means any number of dimensions including none.
         - Output: :math:`(*, \prod_{i=start}^{end} S_{i}, *)`
 
     Args:
@@ -59,7 +59,8 @@ class Unflatten(Module):
 
     Shape:
         - Input: :math:`(*, S_{dim}, *)`. Input can be any shape, where :math:`S_{dim}`
-          is the size at dimension :math:`dim` and :math:`S_{dim}=\prod *unflattened\_size`.
+          is the size at dimension :math:`dim`, :math:`S_{dim}=\prod *unflattened\_size`, and
+          :math:`*` means any number of dimensions including none.
         - Output: :math:`(*, *unflattened\_size, *)`.
 
     Args:
