@@ -243,7 +243,7 @@ Common Mistakes To Avoid
    -  When is it OK not to add a test? Sometimes a change can't be
       conveniently tested, or the change is so obviously correct (and
       unlikely to be broken) that it's OK not to test it. On the
-      contrary, if a change is seems likely (or is known to be likely)
+      contrary, if a change seems likely (or is known to be likely)
       to be accidentally broken, it's important to put in the time to
       work out a testing strategy.
 
