@@ -151,6 +151,7 @@ class TestPublicBindings(unittest.TestCase):
             "CudaShortTensorBase",
             "DeepCopyMemoTable",
             "default_generator",
+            "DeserializationStorageContext",
             "device",
             "DeviceObjType",
             "DictType",
@@ -244,6 +245,8 @@ class TestPublicBindings(unittest.TestCase):
             "ScriptModule",
             "ScriptModuleSerializer",
             "ScriptObject",
+            "ScriptObjectProperty",
+            "SerializationStorageContext",
             "set_anomaly_enabled",
             "set_autocast_cpu_dtype",
             "set_autocast_cpu_enabled",
@@ -255,7 +258,6 @@ class TestPublicBindings(unittest.TestCase):
             "ShortStorageBase",
             "Size",
             "StaticModule",
-            "StorageContext",
             "Stream",
             "StreamObjType",
             "StringType",
@@ -274,7 +276,7 @@ class TestPublicBindings(unittest.TestCase):
         torch_C_bindings = {elem for elem in dir(torch._C) if not elem.startswith("_")}
 
         # Check that both sets above have the same elements as each other.
-        self.assertSetEqual(torch_C_allowlist.symmetric_difference(torch_C_bindings), set())
+        self.assertSetEqual(torch_C_bindings, torch_C_allowlist)
 
 
 if __name__ == '__main__':
