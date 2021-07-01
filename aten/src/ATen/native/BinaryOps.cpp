@@ -1064,13 +1064,6 @@ TORCH_IMPL_FUNC(eq_Scalar_out)
   eq_stub(device_type(), *this);
 }
 
-Tensor& eq_out(const Tensor& self, const Tensor& other, Tensor& result) { return comparison_op_out(result, self, other, eq_stub); }
-Tensor eq(const Tensor& self, const Tensor& other) { return comparison_op(self, other, static_cast<OutFunc>(at::eq_out)); }
-Tensor& eq_(Tensor& self, const Tensor& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::eq_out)); }
-Tensor& eq_out(const Tensor& self, const Scalar& other, Tensor& result) { return comparison_op_out(result, self, other, static_cast<OutFunc>(at::eq_out)); }
-Tensor eq(const Tensor& self, const Scalar& other) { return comparison_op(self, other, static_cast<OutFunc>(at::eq_out)); }
-Tensor& eq_(Tensor& self, const Scalar& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::eq_out)); }
-
 Tensor& ne_out(const Tensor& self, const Tensor& other, Tensor& result) { return comparison_op_out(result, self, other, ne_stub); }
 Tensor ne(const Tensor& self, const Tensor& other) { return comparison_op(self, other, static_cast<OutFunc>(at::ne_out)); }
 Tensor& ne_(Tensor& self, const Tensor& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::ne_out)); }
