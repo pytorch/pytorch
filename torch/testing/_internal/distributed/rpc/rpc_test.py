@@ -1067,6 +1067,7 @@ class RpcTest(RpcAgentTestFixture):
                 self.assertEqual(val, 0)
 
     def test_wait_all_workers(self):
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
         rpc.init_rpc(
             name="worker%d" % self.rank,
             backend=self.rpc_backend,
@@ -1081,9 +1082,14 @@ class RpcTest(RpcAgentTestFixture):
         # worker1/2 calls this immediately and has some works after it.
         # worker3 calls this immediately and has no more work.
         rpc.api._wait_all_workers()
+
+        # Wait before proceeding to shutdown to ensure worker0 RPCs make
+        # it through to other workers.
+        dist.barrier()
         rpc.shutdown(graceful=False)
 
     def test_wait_all_workers_twice(self):
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
         rpc.init_rpc(
             name="worker%d" % self.rank,
             backend=self.rpc_backend,
@@ -1099,6 +1105,10 @@ class RpcTest(RpcAgentTestFixture):
         # worker3 calls this immediately and has no more work.
         rpc.api._wait_all_workers()
         rpc.api._wait_all_workers()
+
+        # Wait before proceeding to shutdown to ensure worker0 RPCs make
+        # it through to other workers.
+        dist.barrier()
         rpc.shutdown(graceful=False)
 
     @dist_init
