@@ -3,6 +3,7 @@
 #include <ATen/core/function.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/stack.h>
+#include <torch/csrc/api/include/torch/imethod.h>
 #include <torch/csrc/jit/api/function_impl.h>
 
 namespace torch {
@@ -18,7 +19,7 @@ using ObjectPtr = c10::intrusive_ptr<c10::ivalue::Object>;
 //     ...
 // Note: because Method/Module are exposed to python these
 // classes use python method naming conventions
-struct TORCH_API Method {
+struct TORCH_API Method : public torch::IMethod {
   Method(ObjectPtr owner, Function* function);
 
   // the module that contains this method.
@@ -30,7 +31,7 @@ struct TORCH_API Method {
 
   c10::IValue operator()(
       std::vector<c10::IValue> stack,
-      const Kwargs& kwargs = Kwargs());
+      const Kwargs& kwargs = Kwargs()) override;
 
   // Run method async. Invocation on this function would invokes a JIT
   // interpreter that executes ops inline, one by one, on caller's thread. A
@@ -55,6 +56,10 @@ struct TORCH_API Method {
 
   GraphExecutor& get_executor() {
     return function_->get_executor();
+  }
+
+  std::vector<std::string> getArgumentNames() override {
+    throw std::runtime_error("getArgumentNames not yet implemented");
   }
 
   Function& function() const {
