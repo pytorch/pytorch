@@ -22,7 +22,7 @@ from .graph_module import (
     FusedGraphModule
 )
 
-from .fusion_patterns import *  # noqa: F401,F403
+from .fusion_patterns import FuseHandler
 
 from .quantization_types import Pattern
 
