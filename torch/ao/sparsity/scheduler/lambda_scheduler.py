@@ -35,5 +35,9 @@ class LambdaSL(BaseScheduler):
         super(LambdaSL, self).__init__(sparsifier, last_epoch, verbose)
 
     def get_sl(self):
+        if not self._get_sl_called_within_step:
+            warnings.warn(
+                "To get the last sparsity level computed by the scheduler, "
+                "please use `get_last_sl()`.")
         return [base_sl * lmbda(self.last_epoch)
                 for lmbda, base_sl in zip(self.sl_lambdas, self.base_sl)]
