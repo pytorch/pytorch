@@ -1094,6 +1094,11 @@ def skipCPUIfNoLapack(fn):
     return skipCPUIf(not torch._C.has_lapack, "PyTorch compiled without Lapack")(fn)
 
 
+# Skips a test on CPU if FFT is not available.
+def skipCPUIfNoFFT(fn):
+    return skipCPUIf(not torch._C.has_spectral, "PyTorch is built without FFT support")(fn)
+
+
 # Skips a test on CPU if MKL is not available.
 def skipCPUIfNoMkl(fn):
     return skipCPUIf(not TEST_MKL, "PyTorch is built without MKL support")(fn)
