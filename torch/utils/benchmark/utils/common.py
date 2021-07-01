@@ -11,7 +11,6 @@ import time
 from typing import cast, Any, DefaultDict, Dict, Iterable, Iterator, List, Optional, Tuple
 import uuid
 
-import numpy as np
 import torch
 
 
@@ -144,15 +143,15 @@ class Measurement:
         self._lazy_init()
         n_total = len(self._sorted_times)
         lower_bound = int(n_total // 4)
-        upper_bound = int(np.ceil(3 * n_total / 4))
+        upper_bound = int(torch.tensor(3 * n_total / 4).ceil())
         interquartile_points: Tuple[float, ...] = self._sorted_times[lower_bound:upper_bound]
-        std = np.std(interquartile_points)
-        sqrt_n = np.sqrt(len(interquartile_points))
+        std = torch.tensor(interquartile_points).std(unbiased=False).item()
+        sqrt_n = torch.tensor(len(interquartile_points)).sqrt().item()
 
         # Rough estimates. These are by no means statistically rigorous.
         confidence_interval = max(1.645 * std / sqrt_n, _MIN_CONFIDENCE_INTERVAL)
-        relative_ci = np.log10(self._median / confidence_interval)
-        num_significant_figures = int(np.floor(relative_ci))
+        relative_ci = torch.tensor(self._median / confidence_interval).log10().item()
+        num_significant_figures = int(torch.tensor(relative_ci).floor())
         return min(max(num_significant_figures, 1), _MAX_SIGNIFICANT_FIGURES)
 
     @property
@@ -163,10 +162,11 @@ class Measurement:
     def _lazy_init(self) -> None:
         if self.raw_times and not self._sorted_times:
             self._sorted_times = tuple(sorted(self.times))
-            self._median = float(np.median(self._sorted_times))
-            self._mean = float(np.mean(self._sorted_times))
-            self._p25 = float(np.percentile(self._sorted_times, 25))
-            self._p75 = float(np.percentile(self._sorted_times, 75))
+            _sorted_times = torch.tensor(self._sorted_times, dtype=torch.float64)
+            self._median = _sorted_times.quantile(.5).item()
+            self._mean = _sorted_times.mean().item()
+            self._p25 = _sorted_times.quantile(.25).item()
+            self._p75 = _sorted_times.quantile(.75).item()
 
             def add_warning(msg: str) -> None:
                 rel_iqr = self.iqr / self.median * 100
@@ -259,7 +259,7 @@ def select_unit(t: float) -> Tuple[str, float]:
 
     This utility is used to format numbers for human consumption.
     """
-    time_unit = {-3: "ns", -2: "us", -1: "ms"}.get(int(np.log10(t) // 3), "s")
+    time_unit = {-3: "ns", -2: "us", -1: "ms"}.get(int(torch.tensor(t).log10().item() // 3), "s")
     time_scale = {"ns": 1e-9, "us": 1e-6, "ms": 1e-3, "s": 1}[time_unit]
     return time_unit, time_scale
 
@@ -276,9 +276,9 @@ def unit_to_english(u: str) -> str:
 def trim_sigfig(x: float, n: int) -> float:
     """Trim `x` to `n` significant figures. (e.g. 3.14159, 2 -> 3.10000)"""
     assert n == int(n)
-    magnitude = int(np.ceil(np.log10(np.abs(x))))
+    magnitude = int(torch.tensor(x).abs().log10().ceil().item())
     scale = 10 ** (magnitude - n)
-    return float(np.round(x / scale) * scale)
+    return float(torch.tensor(x / scale).round() * scale)
 
 
 def ordered_unique(elements: Iterable[Any]) -> List[Any]:
