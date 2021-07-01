@@ -771,7 +771,7 @@ class BuildExtension(build_ext, object):
             cuda_version = re.search(r'release (\d+[.]\d+)', cuda_version_str)
             if cuda_version is not None:
                 cuda_str_version = cuda_version.group(1)
-                cuda_ver = [int(x) for x in cuda_str_version.split('.')]
+                cuda_ver = [int(x) for x in cuda_str_version.split('.')]  # type: ignore[arg-type]
                 torch_cuda_version = [int(x) for x in torch.version.cuda.split('.')]  # type: ignore[arg-type]
                 if cuda_ver[0] != torch_cuda_version[0]:  # type: ignore[attr-defined]
                     raise RuntimeError(CUDA_MISMATCH_MESSAGE.format(
