@@ -4808,6 +4808,10 @@ for shape in [(1,), ()]:
         with self.assertRaisesRegex(RuntimeError, "None is forbidden"):
             saved[1].register_hooks(lambda x: x, lambda x: x)
 
+        with self.assertRaisesRegex(TypeError, "incompatible function arguments"):
+            saved[0].register_hooks(lambda x: x)
+        with self.assertRaisesRegex(TypeError, "incompatible function arguments"):
+            saved[0].register_hooks(1, 1)
         saved[0].register_hooks(lambda x: x, lambda x: x)
         with self.assertRaisesRegex(RuntimeError, "already been set"):
             saved[0].register_hooks(lambda x: x, lambda x: x)

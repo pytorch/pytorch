@@ -1,6 +1,5 @@
 #pragma once
 
-#include <torch/csrc/python_headers.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <ATen/ATen.h>
 
