@@ -141,7 +141,7 @@ def error_on_missing_kernels(
     kernel_defn_regex = rf'{class_name}::([\w\d]*)\([^\)]*\)\s*{{'
     actual_backend_kernel_name_counts = Counter(re.findall(kernel_defn_regex, backend_defns))
 
-    missing_kernels_count = 0
+    missing_kernels_err_msg = ""
     for expected_name, funcs in expected_backend_kernel_name_counts.items():
         expected_overload_count = len(funcs)
         actual_overload_count = actual_backend_kernel_name_counts[expected_name]
@@ -150,13 +150,13 @@ def error_on_missing_kernels(
                 with native_function_manager(f):
                     return DispatcherSignature.from_schema(f.func).decl()
             expected_schemas_str = '\n'.join([create_decl(f) for f in funcs])
-            print(f"""
+            missing_kernels_err_msg += f"""
 {class_name} is missing a kernel definition for {expected_name}. We found {actual_overload_count} kernel(s) with that name,
 but expected {expected_overload_count} kernel(s). The expected function schemas for the missing operator are:
 {expected_schemas_str}
-""")
-            missing_kernels_count += 1
-    assert missing_kernels_count == 0, "Found at least one missing kernel override. Check error messages above."
+
+"""
+    assert missing_kernels_err_msg == "", missing_kernels_err_msg
 
 def main() -> None:
     parser = argparse.ArgumentParser(description='Generate backend stub files')
