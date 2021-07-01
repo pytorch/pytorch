@@ -65,6 +65,18 @@ class TestBaseSparsifier(TestCase):
         sparsifier0 = ImplementedSparsifier(test=3)
         sparsifier0.prepare(model, [model.linear])
         state_dict = sparsifier0.state_dict()
+
+        # Check the expected keys in the state_dict
+        assert 'state' in state_dict
+        assert 'linear' in state_dict['state']
+        assert 'mask' in state_dict['state']['linear']
+
+        assert 'module_groups' in state_dict
+        assert 'test' in state_dict['module_groups'][0]
+        assert 'fqn' in state_dict['module_groups'][0]
+        assert state_dict['module_groups'][0]['fqn'] == 'linear'
+
+        # Check loading static_dict creates an equivalent model
         sparsifier1 = ImplementedSparsifier()
         sparsifier1.prepare(model, None)
         assert sparsifier0.module_groups != sparsifier1.module_groups
