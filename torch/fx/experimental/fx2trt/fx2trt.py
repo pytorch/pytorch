@@ -15,6 +15,8 @@ def trt_network_to_dot_graph(network):
     for i in range(network.num_layers):
         layer = network.get_layer(i)
         dot.node(layer.name)
+        print("layer:", layer.name)
+        print("layer precision:", layer.get_output_type(0))
 
     # add nodes (inputs)
     for i in range(network.num_inputs):
@@ -263,6 +265,9 @@ class BaseTRTInterpreter(torch.fx.Interpreter):
 
         print("network:", trt_network_to_dot_graph(self.network))
         engine = self.builder.build_engine(self.network, builder_config)
+        print("after built engine", engine)
+        print("input names:", self._input_names)
+        print("output names:", self._output_names)
         assert(engine)
         return engine, self._input_names, self._output_names
 

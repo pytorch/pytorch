@@ -39,6 +39,13 @@ class ConvReLU2d(nnqr.Conv2d):
     def _get_name(self):
         return "QuantizedConvReLU2d(Reference)"
 
+    def to_float(self):
+        conv_module = torch.nn.Conv2d(self.in_channels, self.out_channels, self.kernel_size, self.stride, self.padding, self.dilation, self.groups, self._bias is not None, self.padding_mode)        
+        conv_module.weight = torch.nn.Parameter(self._qweight.dequantize())
+        conv_module.bias = torch.nn.Parameter(self._bias)
+        float_module = torch.nn.intrinsic.ConvReLU2d(conv_module, torch.nn.ReLU())
+        return float_module
+
 class ConvReLU3d(nnqr.Conv3d):
     _FLOAT_MODULE = torch.nn.intrinsic.ConvReLU3d
 

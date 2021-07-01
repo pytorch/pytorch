@@ -68,8 +68,20 @@ def conv2d(network, submod, args, kwargs, layer_name):
 
     return common_conv(network, submod, dimension=2, input_val=input_val, layer_name=layer_name, is_quantized=False)
 
+@tensorrt_converter(torch.nn.intrinsic.modules.fused.ConvReLU2d)
+def conv_relu2d(network, submod, args, kwargs, layer_name):
+    input_val = args[0]
+
+    if not isinstance(input_val, trt.tensorrt.ITensor):
+        raise RuntimeError(f'Quantized ConvReLU2d received input {input_val} that is not part '
+                           'of the TensorRT region!')
+
+    submod = submod[0]
+    return common_conv_relu(network, submod, dimension=2, input_val=input_val, layer_name=f"{layer_name}_conv", is_quantized=False)
+
 
 @tensorrt_converter(torch.nn.quantized.modules.conv.Conv2d)
+@tensorrt_converter(torch.nn.quantized._reference.modules.conv.Conv2d)
 def quantized_conv2d(network, submod, args, kwargs, layer_name):
     input_val = args[0]
 
@@ -81,6 +93,7 @@ def quantized_conv2d(network, submod, args, kwargs, layer_name):
 
 
 @tensorrt_converter(torch.nn.intrinsic.quantized.modules.ConvReLU2d)
+@tensorrt_converter(torch.nn.intrinsic.quantized._reference.modules.conv_relu.ConvReLU2d)
 def quantized_conv_relu2d(network, submod, args, kwargs, layer_name):
     input_val = args[0]
 

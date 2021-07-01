@@ -62,8 +62,8 @@ def linear(network, submod, args, kwargs, layer_name):
 
     return common_linear(network, submod, input_val, layer_name, is_quantized=False)
 
-
 @tensorrt_converter(torch.nn.quantized.modules.linear.Linear)
+@tensorrt_converter(torch.nn.quantized._reference.modules.linear.Linear)
 def quantized_linear(network, submod, args, kwargs, layer_name):
     input_val = args[0]
 

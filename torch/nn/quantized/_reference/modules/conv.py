@@ -113,6 +113,15 @@ class Conv2d(_ConvNd, nnq.Conv2d):
     def _get_name(self):
         return 'QuantizedConv2d(Reference)'
 
+    def to_float(self):
+        print("in  channels:", self.in_channels)
+        print("groups:", self.groups)
+        float_module = torch.nn.Conv2d(self.in_channels, self.out_channels, self.kernel_size, self.stride, self.padding, self.dilation, self.groups, self._bias is not None, self.padding_mode)
+        float_module.weight = torch.nn.Parameter(self._qweight.dequantize())
+        float_module.bias = torch.nn.Parameter(self._bias)
+        return float_module
+        
+
 class Conv3d(_ConvNd, nnq.Conv3d):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,

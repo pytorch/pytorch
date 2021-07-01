@@ -50,7 +50,7 @@ def mark_as_int8_layer(layer, dynamic_range):
 
     for i in range(layer.num_outputs):
         output_val = layer.get_output(i)
-        output_val.dynamic_range = dynamic_range
+        # output_val.dynamic_range = dynamic_range
         layer.set_output_type(i, trt.int8)
         # output_val.dtype = trt.int8
 

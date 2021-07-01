@@ -123,7 +123,7 @@ class QuantizationTracer(Tracer):
                 not isinstance(m, torch.nn.Sequential)) or \
             module_qualified_name in self.skipped_module_names or \
             type(m) in self.skipped_module_classes or \
-            isinstance(m, _FusedModule)
+            isinstance(m, _FusedModule) and not type(m) in [torch.nn.Linear, torch.nn.Conv2d]
 
     def call_module(self, m: torch.nn.Module, forward: Callable[..., Any], args : Tuple[Any, ...], kwargs : Dict[str, Any]) -> Any:
         module_qualified_name = self.path_of_module(m)

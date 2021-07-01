@@ -14,13 +14,16 @@ quantize_per_tensor_inputs = ["input", "scale", "zero_point", "dtype"]
 @tensorrt_converter(torch.nn.quantized.modules.DeQuantize)
 def dequantize(network, submod, args, kwargs, layer_name):
     input_val = args[0]
-
+    input_val.dtype = trt.int8
     if not isinstance(input_val, trt.tensorrt.ITensor):
         raise RuntimeError(f'Dequantize received input {input_val} that is not part '
                            'of the TensorRT region!')
 
-    scale = network.add_constant((1,), trt.Weights(np.ascontiguousarray([1], dtype=np.float32))).get_output(0)
+    scale_layer = network.add_constant((1,), trt.Weights(np.ascontiguousarray([1], dtype=np.float32)))
+    # scale_layer.name = input_val.name + ".dequant.scale"
+    scale = scale_layer.get_output(0)
     layer = network.add_dequantize(input=input_val, scale=scale)
+    # layer.name = input_val.name + ".dequant"
     layer.axis = 0
     return layer.get_output(0)
 
@@ -41,16 +44,16 @@ def quantize(network, submod, args, kwargs, layer_name):
         raise RuntimeError(f'Quantize received input {input_val} that is not part '
                            'of the TensorRT region!')
 
-    if dtype != torch.quint8:
-        raise RuntimeError(f"Only support torch.quint8 quantized type for activation, get {dtype}.")
+    # if dtype != torch.quint8:
+    #     raise RuntimeError(f"Only support torch.quint8 quantized type for activation, get {dtype}.")
 
     # input_val.dynamic_range = get_dyn_range(scale, zero_point, dtype)
-    scale = network.add_constant((1,), trt.Weights(np.ascontiguousarray([1], dtype=np.float32))).get_output(0)
-    print(dir(scale))
+    scale_layer = network.add_constant((1,), trt.Weights(np.ascontiguousarray([1], dtype=np.float32)))
+    # scale_layer.name = input_val.name + ".quant.scale"
+    scale = scale_layer.get_output(0)
     layer = network.add_quantize(input=input_val, scale=scale)
     layer.axis = 0
-    print("type(layer):", type(layer))
-    print("dir layer:", dir(layer))
+    # layer.name = input_val.name + ".quant"
     return layer.get_output(0)
 
 

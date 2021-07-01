@@ -49,3 +49,9 @@ class Linear(nnq.Linear):
     def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
         self._qweight = w
         self._bias = b
+
+    def to_float(self):
+        float_module = torch.nn.Linear(self.in_features, self.out_features)
+        float_module.weight = torch.nn.Parameter(self._qweight.dequantize())
+        float_module.bias = torch.nn.Parameter(self._bias)
+        return float_module
