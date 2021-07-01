@@ -40,6 +40,7 @@ class ConcatIterDataPipe(IterDataPipe):
         return len(self)
 
 
+@functional_datapipe('zip')
 class ZipIterDataPipe(IterDataPipe[Tuple[T_co]]):
     r""" :class:`ZipIterDataPipe`.
 
