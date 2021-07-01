@@ -295,7 +295,7 @@ jobs:
       - name: Run clang-tidy
         run: |
           cd "${GITHUB_WORKSPACE}"
-          python3 tools/linter/clang_tidy.py \
+          python3 tools/linter/clang_tidy \
             --diff-file pr.diff \
             --parallel \
             --verbose \
