@@ -12,7 +12,7 @@ class Flatten(Module):
     Shape:
         - Input: :math:`(*, S_{start},..., S_{i}, ..., S_{end}, *)`, where :math:`S_{i}` is the
           size at dimension :math:`i` and :math:`*` means any number of dimensions including none.
-        - Output: :math:`(*, \prod_{i=start}^{end} S_{i}, *)`
+        - Output: :math:`(*, \prod_{i=start}^{end} S_{i}, *)`.
 
     Args:
         start_dim: first dim to flatten (default = 1).
@@ -58,10 +58,10 @@ class Unflatten(Module):
       (tuple of `(name, size)` tuples) for `NamedTensor` input.
 
     Shape:
-        - Input: :math:`(*, S_{dim}, *)`. Input can be any shape, where :math:`S_{dim}`
-          is the size at dimension :math:`dim`, :math:`S_{dim}=\prod *unflattened\_size`, and
-          :math:`*` means any number of dimensions including none.
-        - Output: :math:`(*, *unflattened\_size, *)`.
+        - Input: :math:`(*, S_{dim}, *)`, where :math:`S_{dim}` is the size at dimension :attr:`dim`
+          and :math:`*` means any number of dimensions including none.
+        - Output: :math:`(*, U_1, ..., U_n, *)`, where :math:`U` = :attr:`unflattened_size` and
+          :math:`\prod_i^n U_i = S_{dim}`.
 
     Args:
         dim (Union[int, str]): Dimension to be unflattened
