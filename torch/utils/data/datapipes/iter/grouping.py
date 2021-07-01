@@ -19,6 +19,8 @@ class BatchIterDataPipe(IterDataPipe[List[T_co]]):
         datapipe: Iterable DataPipe being batched
         batch_size: The size of each batch
         drop_last: Option to drop the last batch if it's not full
+        unbatch_level: Specifies if it necessary to unbatch source data before
+            applying new batching rule
     """
     datapipe: IterDataPipe[T_co]
     batch_size: int
@@ -29,10 +31,15 @@ class BatchIterDataPipe(IterDataPipe[List[T_co]]):
                  datapipe: IterDataPipe[T_co],
                  batch_size: int,
                  drop_last: bool = False,
+                 unbatch_level: int = 0,
                  ) -> None:
         assert batch_size > 0, "Batch size is required to be larger than 0!"
         super().__init__()
-        self.datapipe = datapipe
+        if unbatch_level == 0:
+            self.datapipe = datapipe
+        else:
+            self.datapipe = datapipe.unbatch(unbatch_level=unbatch_level)
+        self.unbatch_level = unbatch_level
         self.batch_size = batch_size
         self.drop_last = drop_last
         self.length = None
@@ -43,16 +50,16 @@ class BatchIterDataPipe(IterDataPipe[List[T_co]]):
             batch.append(x)
             if len(batch) == self.batch_size:
                 yield batch
-                batch.clear()
+                batch = []
         if len(batch) > 0:
             if not self.drop_last:
                 yield batch
-            batch.clear()
+            batch = []
 
     def __len__(self) -> int:
         if self.length is not None:
             return self.length
-        if isinstance(self.datapipe, Sized):
+        if isinstance(self.datapipe, Sized) and self.unbatch_level == 0:
             if self.drop_last:
                 self.length = len(self.datapipe) // self.batch_size
             else:
