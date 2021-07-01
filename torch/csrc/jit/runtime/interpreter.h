@@ -42,8 +42,7 @@ using c10::ivalue::Future;
 using TaskLauncher = std::function<void(std::function<void()>)>;
 
 struct TORCH_API Code {
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  Code() : pImpl(nullptr) {}
+  Code()  = default;
   explicit Code(interpreter::CodeImpl* pImpl);
   // remaining_bailout_depth is irrelevant in a `Code` object unless the `Code`
   // is directly created by `GraphExecutor` in which case it's likely to contain
