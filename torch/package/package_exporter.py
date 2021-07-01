@@ -195,6 +195,7 @@ class PackageExporter:
         # - Each directed edge (u, v) means u depends on v.
         # - Nodes may contain metadata that describe how to write the thing to the zipfile.
         self.dependency_graph = DiGraph()
+        self._failed_dunder_imports: List[str] = []
         self.script_module_serializer = torch._C.ScriptModuleSerializer(self.zip_file)
         self.storage_context = self.script_module_serializer.storage_context()
 
@@ -299,7 +300,10 @@ class PackageExporter:
             module_name if is_package else module_name.rsplit(".", maxsplit=1)[0]
         )
         try:
-            dep_pairs = find_files_source_depends_on(src, package_name)
+            dep_pairs, failed_dunder_imports = find_files_source_depends_on(
+                src, package_name, module_name
+            )
+            self._failed_dunder_imports.extend(failed_dunder_imports)
         except Exception as e:
             self.dependency_graph.add_node(
                 module_name,
@@ -970,6 +974,15 @@ node [shape=box];
             return list(self.dependency_graph._pred[module_name].keys())
         else:
             return []
+
+    def failed_dunder_import_list(self) -> List[str]:
+        """Return location of all failed ``__import__`` statements.
+
+        Returns:
+            A list containing the location of failed ``__import__``
+            statements.
+        """
+        return self._failed_dunder_imports
 
 
 # even though these are in the standard library, we do not allow them to be

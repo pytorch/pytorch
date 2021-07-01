@@ -108,6 +108,15 @@ class TestSaveLoad(PackageTestCase):
         subsubpackage_0 = hi.import_module("package_b.subpackage_0.subsubpackage_0")
         self.assertEqual(subsubpackage_0.result, "subsubpackage_0")
 
+    def test_bad_dunder_imports(self):
+        """Test to ensure bad __imports__ don't cause PackageExporter to fail."""
+        buffer = BytesIO()
+        with PackageExporter(buffer) as e:
+            e.save_source_string(
+                "m", '__import__(these, unresolvable, "things", wont, crash, me)'
+            )
+            self.assertEqual(e.failed_dunder_import_list(), ["module: 'm', lineno: 1"])
+
     def test_save_module_binary(self):
         f = BytesIO()
         with PackageExporter(f) as he:
