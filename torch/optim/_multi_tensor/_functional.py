@@ -49,10 +49,10 @@ def adagrad(
             size = grad.size()
 
             state_sum.add_(_make_sparse(grad, grad_indices, grad_values.pow(2)))
-            std = state_sum.sparse_mask(grad)
-            std_values = std._values().sqrt_().add_(eps)
+            std_sparse = state_sum.sparse_mask(grad)
+            std_sparse_values = std_sparse._values().sqrt_().add_(eps)
             param.add_(
-                _make_sparse(grad, grad_indices, grad_values / std_values),
+                _make_sparse(grad, grad_indices, grad_values / std_sparse_values),
                 alpha=minus_clr[i],
             )
     else:
