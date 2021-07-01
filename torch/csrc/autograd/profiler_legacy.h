@@ -23,8 +23,12 @@
 
 #include <torch/csrc/jit/frontend/source_range.h>
 
-struct CUevent_st;
-typedef std::shared_ptr<CUevent_st> CUDAEventStub;
+class KernelEventBase {
+public:
+  virtual ~KernelEventBase() = default;
+};
+
+typedef std::shared_ptr<KernelEventBase> KernelEventStub;
 
 namespace torch { namespace autograd {
 
@@ -33,10 +37,10 @@ struct Node;
 namespace profiler {
 
 struct TORCH_API CUDAStubs {
-  virtual void record(int* device, CUDAEventStub* event, int64_t* cpu_ns) const {
+  virtual void record(int* device, KernelEventStub* event, int64_t* cpu_ns) const {
     fail();
   }
-  virtual float elapsed(const CUDAEventStub* event, const CUDAEventStub* event2) const {
+  virtual float elapsed(const KernelEventStub* event, const KernelEventStub* event2) const {
     fail();
     return 0.f;
   }
@@ -69,6 +73,41 @@ private:
 TORCH_API void registerCUDAMethods(CUDAStubs* stubs);
 TORCH_API const CUDAStubs* cudaStubs();
 
+struct TORCH_API XPUStubs {
+  virtual void record(int* device, KernelEventStub* event, int64_t* cpu_ns) const {
+    fail();
+  }
+  virtual float timeDiff(const KernelEventStub& event, const KernelEventStub& event2) const {
+    fail();
+    return 0.f;
+  }
+  virtual float elapsed(const KernelEventStub& event) const {
+    fail();
+    return 0.f;
+  }
+  virtual bool enabled() const {
+    return false;
+  }
+  virtual void ittMark(const char* name) const {
+    fail();
+  }
+  virtual void ittRangePush(const char* name) const {
+    fail();
+  }
+  virtual void ittRangePop() const {
+    fail();
+  }
+  virtual ~XPUStubs() {};
+
+private:
+  void fail() const {
+    AT_ERROR("XPU used in profiler but not enabled.");
+  }
+};
+
+TORCH_API void registerXPUMethods(XPUStubs* stubs);
+TORCH_API const XPUStubs* xpuStubs();
+
 constexpr inline size_t ceilToMultiple(size_t a, size_t b) {
   return ((a + b - 1) / b) * b;
 }
@@ -96,6 +135,18 @@ inline int64_t getTime(bool allow_monotonic = false) {
 #endif
 }
 
+enum class C10_API_ENUM ProfilerState {
+  Disabled = 0,
+  CPU, // CPU-only profiling
+  CUDA, // CPU + CUDA events
+  NVTX,  // only emit NVTX markers
+  XPU, // CPU + XPU events
+  ITT, // only emit ITT markers
+  KINETO, // use libkineto
+  KINETO_GPU_FALLBACK, // use CUDA events when CUPTI is not available
+  NUM_PROFILER_STATES, // must be the last one
+};
+
 enum class C10_API_ENUM EventKind : uint16_t {
   Mark,
   PushRange,
@@ -110,7 +161,8 @@ struct TORCH_API LegacyEvent {
       EventKind kind,
       at::StringView name,
       uint16_t thread_id,
-      bool record_cuda,
+      bool include_kernel,
+      ProfilerState state,
       at::RecordFunctionHandle handle = 0,
       std::vector<std::vector<int64_t>>&& shapes = {},
       int node_id = -1,
@@ -122,7 +174,21 @@ struct TORCH_API LegacyEvent {
         shapes_(shapes),
         node_id_(node_id),
         is_async_(is_async) {
-    record(record_cuda);
+    record(include_kernel, state);
+  }
+
+  // Constructor to be used in marking a kernel event.
+  LegacyEvent(
+      EventKind kind,
+      at::StringView name,
+      uint16_t thread_id,
+      ProfilerState state,
+      KernelEventStub event)
+      : name_(std::move(name)),
+        kind_(kind),
+        thread_id_(thread_id),
+        kernel_event_(event) {
+    record(false, state);
   }
 
   // Constructor to be used in conjunction with LegacyEvent::fromIValue.
@@ -139,7 +205,7 @@ struct TORCH_API LegacyEvent {
       int64_t cpu_ns,
       bool cuda_recorded,
       int64_t cuda_memory_usage = 0,
-      int device = -1,
+      at::Device device = at::Device(DeviceType::CPU),
       double cuda_us = -1)
       : cpu_ns_(cpu_ns),
         name_(std::move(name)),
@@ -156,7 +222,7 @@ struct TORCH_API LegacyEvent {
     // Sanity check values that were deserialized
     TORCH_INTERNAL_ASSERT(cpu_ns_ > 0);
     if (cuda_recorded) {
-      TORCH_INTERNAL_ASSERT(device_ >= 0);
+      TORCH_INTERNAL_ASSERT(device_.index() >= 0);
       TORCH_INTERNAL_ASSERT(cuda_us_ >= 0);
     }
   }
@@ -168,7 +234,7 @@ struct TORCH_API LegacyEvent {
   // Reconstructs an event from IValues given by toIValue.
   static LegacyEvent fromIValue(const at::IValue& eventIValue);
 
-  void record(bool record_cuda);
+  void record(bool include_kernel, ProfilerState state);
 
   std::string kindStr() const {
     switch (kind_) {
@@ -212,10 +278,21 @@ struct TORCH_API LegacyEvent {
   double cudaElapsedUs(const LegacyEvent& e) const;
 
   bool hasCuda() const {
-    return cuda_event != nullptr || (isRemote() && device_ != -1);
+    return hasKernel() && device_.type() == DeviceType::CUDA;
   }
 
-  int device() const {
+  double xpuElapsedUs() const;
+  double xpuElapsedUs(const LegacyEvent& e) const;
+
+  bool hasXpu() const {
+    return hasKernel() && device_.type() == DeviceType::XPU;
+  }
+
+  bool hasKernel() const {
+    return kernel_event_ != nullptr || (isRemote() && device_.index() != -1);
+  }
+
+  at::Device device() const {
     return device_;
   }
 
@@ -227,6 +304,8 @@ struct TORCH_API LegacyEvent {
         device.type() == c10::DeviceType::MKLDNN ||
         device.type() == c10::DeviceType::IDEEP) {
       cpu_memory_usage_ = alloc_size;
+    } else if (device.is_xpu()) {
+      xpu_memory_usage_ = alloc_size;
     } else {
       LOG(WARNING) << "Unsupported memory profiling device: " << device;
     }
@@ -238,6 +317,10 @@ struct TORCH_API LegacyEvent {
 
   int64_t cudaMemoryUsage() const {
     return cuda_memory_usage_;
+  }
+
+  int64_t xpuMemoryUsage() const {
+    return xpu_memory_usage_;
   }
 
   at::RecordFunctionHandle handle() const {
@@ -337,8 +420,9 @@ struct TORCH_API LegacyEvent {
   std::vector<std::vector<int64_t>> shapes_;
   int64_t cpu_memory_usage_ = 0;
   int64_t cuda_memory_usage_ = 0;
-  int device_ = -1;
-  CUDAEventStub cuda_event = nullptr;
+  int64_t xpu_memory_usage_ = 0;
+  at::Device device_ = at::Device(DeviceType::CPU);
+  KernelEventStub kernel_event_;
   int node_id_ = 0;
   bool is_remote_ = false;
   int64_t cuda_us_ = -1;
@@ -392,16 +476,6 @@ struct RangeEventList {
   std::vector<LegacyEvent> events_;
 
   static const size_t kReservedCapacity = 1024;
-};
-
-enum class C10_API_ENUM ProfilerState {
-  Disabled = 0,
-  CPU, // CPU-only profiling
-  CUDA, // CPU + CUDA events
-  NVTX,  // only emit NVTX markers
-  KINETO, // use libkineto
-  KINETO_GPU_FALLBACK, // use CUDA events when CUPTI is not available
-  NUM_PROFILER_STATES, // must be the last one
 };
 
 struct TORCH_API ProfilerConfig {
@@ -461,6 +535,8 @@ TORCH_API bool profilerEnabled();
 TORCH_API ProfilerConfig getProfilerConfig();
 // Writes profiled events to a stream.
 TORCH_API void writeProfilerEventsToStream(std::ostream& out, const std::vector<LegacyEvent*>& events);
+// Add a kernel event to profile.
+TORCH_API void markKernel(std::string name, KernelEventStub& kernel_event);
 
 // Usage:
 //   {
@@ -537,7 +613,9 @@ struct TORCH_API ProfilerThreadLocalState : public c10::MemoryReportingInfoBase 
 
   thread_event_lists consolidate();
 
-  void mark(std::string name, bool include_cuda = true);
+  void mark(std::string name, bool include_kernel = true);
+
+  void markKernel(std::string name, KernelEventStub kernel_event);
 
   void setOrAddRemoteProfiledEvents(
       std::vector<LegacyEvent>&& remoteProfiledEvents);
@@ -548,7 +626,7 @@ struct TORCH_API ProfilerThreadLocalState : public c10::MemoryReportingInfoBase 
       const char* msg = "",
       std::vector<std::vector<int64_t>>&& shapes = {});
 
-  void popRange(const at::RecordFunction& fn, const bool record_cuda);
+  void popRange(const at::RecordFunction& fn, const bool record_kernel);
 
   void setCallbackHandle(at::CallbackHandle handle) {
     handle_ = handle;

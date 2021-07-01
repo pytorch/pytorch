@@ -124,7 +124,8 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
           EventKind::MemoryAlloc,
           at::StringView(""),
           thread_id,
-          config_.state == ProfilerState::CUDA);
+          false,
+          config_.state);
       evt.setCpuUs(getTimeUs()); // upd. time using Kineto's clock
       evt.updateMemoryStats(alloc_size, device);
       getEventList(thread_id).record(std::move(evt));

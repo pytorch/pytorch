@@ -42,8 +42,8 @@ struct KinetoObserverContext : public at::ObserverContext {
   c10::optional<std::vector<std::string>> stack;
   // Extra arguments for computing op flops
   c10::optional<std::unordered_map<std::string, c10::IValue>> extraArgs;
-  CUDAEventStub cuda_event_start_ = nullptr;
-  CUDAEventStub cuda_event_end_ = nullptr;
+  KernelEventStub cuda_event_start_ = nullptr;
+  KernelEventStub cuda_event_end_ = nullptr;
 };
 
 struct TORCH_API KinetoEvent {
@@ -215,8 +215,8 @@ struct TORCH_API KinetoEvent {
   int64_t device_resource_id_ = 0;
   bool is_async_{false};
 
-  CUDAEventStub cuda_event_start_ = nullptr;
-  CUDAEventStub cuda_event_end_ = nullptr;
+  KernelEventStub cuda_event_start_ = nullptr;
+  KernelEventStub cuda_event_end_ = nullptr;
 };
 
 // Consolidating events returned directly from Kineto

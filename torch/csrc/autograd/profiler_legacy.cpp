@@ -152,10 +152,23 @@ inline const CUDAStubs*& cuda_stubs() {
   static const CUDAStubs* stubs_ = default_stubs_addr;
   return stubs_;
 }
+
+const XPUStubs default_xpu_stubs;
+constexpr const XPUStubs* default_xpu_stubs_addr = &default_xpu_stubs;
+// constant initialization, so it is guaranteed to be initialized before
+// static initialization calls which may invoke registerXPUMethods
+inline const XPUStubs*& xpu_stubs() {
+  static const XPUStubs* stubs_ = default_xpu_stubs_addr;
+  return stubs_;
+}
 }
 
 const CUDAStubs* cudaStubs() {
   return cuda_stubs();
+}
+
+const XPUStubs* xpuStubs() {
+  return xpu_stubs();
 }
 
 // Profiler state
@@ -180,20 +193,37 @@ thread_event_lists ProfilerThreadLocalState::consolidate() {
   return result;
 }
 
-void ProfilerThreadLocalState::mark(std::string name, bool include_cuda) {
+void ProfilerThreadLocalState::mark(std::string name, bool include_kernel) {
   if (config_.state == ProfilerState::Disabled) {
     return;
   }
   if (config_.state == ProfilerState::NVTX) {
     cuda_stubs()->nvtxMarkA(name.c_str());
+  } else if (config_.state == ProfilerState::ITT) {
+    xpu_stubs()->ittMark(name.c_str());
   } else {
     LegacyEvent evt(
         EventKind::Mark,
         at::StringView(std::move(name)),
         at::RecordFunction::currentThreadId(),
-        include_cuda && config_.state == ProfilerState::CUDA);
+        include_kernel,
+        config_.state);
     evt.setNodeId(at::RecordFunction::getDefaultNodeId());
     getEventList().record(std::move(evt));
+  }
+}
+
+void ProfilerThreadLocalState::markKernel(std::string name, KernelEventStub kernel_event) {
+  if (config_.state == ProfilerState::Disabled) {
+    return;
+  }
+  if (config_.state == ProfilerState::XPU) {
+    getEventList().record(
+            EventKind::Mark,
+            at::StringView(std::move(name)),
+            at::RecordFunction::currentThreadId(),
+            config_.state,
+            kernel_event);
   }
 }
 
@@ -210,7 +240,7 @@ void ProfilerThreadLocalState::setOrAddRemoteProfiledEvents(
 
 void ProfilerThreadLocalState::pushRange(
     const at::RecordFunction& fn,
-    const bool record_cuda,
+    const bool include_kernel,
     const char* msg,
     std::vector<std::vector<int64_t>>&& shapes) {
   if (config_.state == ProfilerState::Disabled) {
@@ -219,12 +249,15 @@ void ProfilerThreadLocalState::pushRange(
   if (config_.state == ProfilerState::NVTX) {
     cuda_stubs()->nvtxRangePushA(getNvtxStr(
         fn.name(), msg, fn.seqNr(), shapes).c_str());
+  } else if (config_.state == ProfilerState::ITT) {
+    xpu_stubs()->ittRangePush(fn.name().str());
   } else {
     LegacyEvent evt(
         EventKind::PushRange,
         fn.name(),
         at::RecordFunction::currentThreadId(),
-        record_cuda,
+        include_kernel,
+        config_.state,
         fn.handle(),
         std::move(shapes),
         at::RecordFunction::getDefaultNodeId(),
@@ -253,12 +286,14 @@ void ProfilerThreadLocalState::pushRange(
   }
 }
 
-void ProfilerThreadLocalState::popRange(const at::RecordFunction& fn, const bool record_cuda) {
+void ProfilerThreadLocalState::popRange(const at::RecordFunction& fn, const bool include_kernel) {
   if (config_.state == ProfilerState::Disabled) {
     return;
   }
   if (config_.state == ProfilerState::NVTX) {
     cuda_stubs()->nvtxRangePop();
+  } else if (config_.state == ProfilerState::ITT) {
+    xpu_stubs()->ittRangePop();
   } else {
     // In some cases RecordFunction (and popRange) may be
     // called on a different thread than pushRange
@@ -268,7 +303,8 @@ void ProfilerThreadLocalState::popRange(const at::RecordFunction& fn, const bool
         EventKind::PopRange,
         at::StringView(""),
         at::RecordFunction::currentThreadId(),
-        record_cuda,
+        include_kernel,
+        config_.state,
         fn.handle());
     evt.setNodeId(at::RecordFunction::getDefaultNodeId());
     getEventList(fn.threadId()).record(std::move(evt));
@@ -285,7 +321,8 @@ void ProfilerThreadLocalState::reportMemoryUsage(
         EventKind::MemoryAlloc,
         at::StringView(""),
         thread_id,
-        config_.state == ProfilerState::CUDA);
+        false,
+        config_.state);
     evt.updateMemoryStats(alloc_size, device);
     getEventList(thread_id).record(std::move(evt));
   }
@@ -476,6 +513,10 @@ void registerCUDAMethods(CUDAStubs* stubs) {
   cuda_stubs() = stubs;
 }
 
+void registerXPUMethods(XPUStubs* stubs) {
+  xpu_stubs() = stubs;
+}
+
 at::IValue ProfilerConfig::toIValue() const {
   c10::impl::GenericList eventIValueList(at::AnyType::get());
   eventIValueList.reserve(NUM_PROFILER_CFG_IVALUE_IDX);
@@ -519,6 +560,8 @@ bool profilerEnabled() {
 void enableProfilerLegacy(const ProfilerConfig& new_config) {
   TORCH_CHECK(new_config.state != ProfilerState::NVTX || cuda_stubs()->enabled(),
     "Can't use NVTX profiler - PyTorch was compiled without CUDA");
+  TORCH_CHECK(new_config.state != ProfilerState::ITT || xpu_stubs()->enabled(),
+    "Can't use Intel(R) VTune Profiler's ITT functionality - PyTorch was compiled without XPU");
 
   TORCH_CHECK(new_config.state != ProfilerState::KINETO);
 
@@ -530,6 +573,11 @@ void enableProfilerLegacy(const ProfilerConfig& new_config) {
   pushProfilingCallbacksLegacy();
 
   state->mark("__start_profile", false);
+}
+
+void markKernel(std::string name, KernelEventStub kernel_event) {
+  auto state_ptr = getProfilerTLSState();
+  state_ptr->markKernel(name, kernel_event);
 }
 
 thread_event_lists disableProfilerLegacy(c10::optional<ProfilerDisableOptions> profilerDisableOptions) {
@@ -566,10 +614,21 @@ void addEventList(std::vector<LegacyEvent>&& profiledEvents) {
   state_ptr->setOrAddRemoteProfiledEvents(std::move(profiledEvents));
 }
 
-void LegacyEvent::record(bool record_cuda) {
-  if (record_cuda) {
-    cuda_stubs()->record(&device_, &cuda_event, &cpu_ns_);
-    return;
+void LegacyEvent::record(bool include_kernel, ProfilerState state) {
+  if (include_kernel) {
+    int device_id;
+    switch(state) {
+      case ProfilerState::CUDA:
+        cuda_stubs()->record(&device_id, &kernel_event_, &cpu_ns_);
+        device_ = at::Device(DeviceType::CUDA, device_id);
+        break;
+      case ProfilerState::XPU:
+        xpu_stubs()->record(&device_id, &kernel_event_, &cpu_ns_);
+        device_ = at::Device(DeviceType::XPU, device_id);
+        break;
+      default:
+        break;
+    }
   }
   cpu_ns_ = getTime();
 }
@@ -623,7 +682,7 @@ void LegacyEvent::record(bool record_cuda) {
       ivalues.get(EventIValueIdx::CPU_NS).toInt(), // cpu_ns
       ivalues.get(EventIValueIdx::CUDA_RECORDED).toBool(), // was cuda recorded
       ivalues.get(EventIValueIdx::CUDA_MEM_USAGE).toInt(), // cuda memory usage
-      ivalues.get(EventIValueIdx::CUDA_DEVICE).toInt(), // device
+      ivalues.get(EventIValueIdx::CUDA_DEVICE).toDevice(), // device
       ivalues.get(EventIValueIdx::CUDA_US).toInt() // cuda_us
   );
   return evt;
@@ -672,7 +731,22 @@ double LegacyEvent::cudaElapsedUs(const LegacyEvent& e) const {
     TORCH_INTERNAL_ASSERT(cuda_us_ >= 0 && e.cuda_us_ >= 0);
     return static_cast<double>(e.cuda_us_ - cuda_us_);
   }
-  return cuda_stubs()->elapsed(&cuda_event, &e.cuda_event);
+  return cuda_stubs()->elapsed(&kernel_event_, &e.kernel_event_);
+}
+
+double LegacyEvent::xpuElapsedUs() const {
+  if(!hasXpu()) {
+    throw std::logic_error("Events were not recorded for XPU");
+  }
+  return xpu_stubs()->elapsed(kernel_event_);
+}
+double LegacyEvent::xpuElapsedUs(const LegacyEvent& e) const {
+  TORCH_CHECK(e.hasXpu() && hasXpu(), "Events were not recorded for XPU");
+  TORCH_CHECK(
+          e.device() == device(),
+          c10::str(
+                  "Events are not on the same device: ", e.device(), " vs ", device()));
+  return xpu_stubs()->timeDiff(kernel_event_, e.kernel_event_);
 }
 
 CUDAStubs::~CUDAStubs() = default;

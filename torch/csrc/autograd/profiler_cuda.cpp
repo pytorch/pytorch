@@ -5,6 +5,8 @@
 
 #include <sstream>
 
+struct CUevent_st;
+
 namespace torch { namespace autograd { namespace profiler {
 
 namespace {
@@ -30,19 +32,33 @@ static inline void cudaCheck(cudaError_t result, const char * file, int line) {
     throw std::runtime_error(ss.str());
   }
 }
+
 #define TORCH_CUDA_CHECK(result) cudaCheck(result,__FILE__,__LINE__);
 
+class CUDAEventProfiler : public KernelEventBase {
+public:
+  CUDAEventProfiler(CUevent_st* evt_ptr = nullptr) : event_(evt_ptr, CUDAEventDestory) {};
+  virtual ~CUDAEventProfiler() = default;
+  CUevent_st* get() const {
+    return event_.get();
+  }
+private:
+  static void CUDAEventDestory(CUevent_st* ptr) {
+    TORCH_CUDA_CHECK(cudaEventDestroy(ptr));
+  }
+  std::unique_ptr<CUevent_st, std::function<void(CUevent_st*)>> event_;
+};
+
 struct CUDAMethods : public CUDAStubs {
-  void record(int* device, CUDAEventStub* event, int64_t* cpu_ns) const override {
+  void record(int* device, KernelEventStub* event, int64_t* cpu_ns) const override {
     if (device) {
       TORCH_CUDA_CHECK(cudaGetDevice(device));
     }
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     CUevent_st* cuda_event_ptr;
     TORCH_CUDA_CHECK(cudaEventCreate(&cuda_event_ptr));
-    *event = std::shared_ptr<CUevent_st>(cuda_event_ptr, [](CUevent_st* ptr) {
-      TORCH_CUDA_CHECK(cudaEventDestroy(ptr));
-    });
+    auto cuda_event_stub = std::make_shared<CUDAEventProfiler>(cuda_event_ptr);
+    *event = cuda_event_stub;
     auto stream = at::cuda::getCurrentCUDAStream();
     if (cpu_ns) {
       *cpu_ns = getTime();
@@ -50,12 +66,14 @@ struct CUDAMethods : public CUDAStubs {
     TORCH_CUDA_CHECK(cudaEventRecord(cuda_event_ptr, stream));
   }
 
-  float elapsed(const CUDAEventStub* event, const CUDAEventStub* event2) const override{
-    TORCH_CUDA_CHECK(cudaEventSynchronize(event->get()));
-    TORCH_CUDA_CHECK(cudaEventSynchronize(event2->get()));
+  float elapsed(const KernelEventStub* event, const KernelEventStub* event2) const override{
+    CUDAEventProfiler* cuda_event_ = dynamic_cast<CUDAEventProfiler*>(event->get());
+    CUDAEventProfiler* cuda_event2_ = dynamic_cast<CUDAEventProfiler*>(event2->get());
+    TORCH_CUDA_CHECK(cudaEventSynchronize(cuda_event_->get()));
+    TORCH_CUDA_CHECK(cudaEventSynchronize(cuda_event2_->get()));
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     float ms;
-    TORCH_CUDA_CHECK(cudaEventElapsedTime(&ms, event->get(), event2->get()));
+    TORCH_CUDA_CHECK(cudaEventElapsedTime(&ms, cuda_event_->get(), cuda_event2_->get()));
     // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions)
     return ms*1000.0;
   }

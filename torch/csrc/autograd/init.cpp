@@ -64,6 +64,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .value("CPU", ProfilerState::CPU)
       .value("CUDA", ProfilerState::CUDA)
       .value("NVTX", ProfilerState::NVTX)
+      .value("XPU", ProfilerState::XPU)
+      .value("ITT", ProfilerState::ITT)
       .value("KINETO", ProfilerState::KINETO)
       .value("KINETO_GPU_FALLBACK", ProfilerState::KINETO_GPU_FALLBACK);
 
@@ -82,10 +84,14 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .def("device", &LegacyEvent::device)
       .def("cpu_elapsed_us", &LegacyEvent::cpuElapsedUs)
       .def("cuda_elapsed_us", &LegacyEvent::cudaElapsedUs)
+      .def("xpu_elapsed_us", static_cast<double (LegacyEvent::*)(void) const>(&LegacyEvent::xpuElapsedUs))
+      .def("xpu_elapsed_us", static_cast<double (LegacyEvent::*)(const LegacyEvent& e) const>(&LegacyEvent::xpuElapsedUs))
       .def("has_cuda", &LegacyEvent::hasCuda)
+      .def("has_xpu", &LegacyEvent::hasXpu)
       .def("shapes", &LegacyEvent::shapes)
       .def("cpu_memory_usage", &LegacyEvent::cpuMemoryUsage)
       .def("cuda_memory_usage", &LegacyEvent::cudaMemoryUsage)
+      .def("xpu_memory_usage", &LegacyEvent::xpuMemoryUsage)
       .def("handle", &LegacyEvent::handle)
       .def("node_id", &LegacyEvent::nodeId)
       .def("is_remote", &LegacyEvent::isRemote)
@@ -112,7 +118,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .value("HPU", c10::DeviceType::HPU)
       .value("Meta", c10::DeviceType::Meta)
       .value("Vulkan", c10::DeviceType::Vulkan)
-      .value("Metal", c10::DeviceType::Metal);
+      .value("Metal", c10::DeviceType::Metal)
+      .value("XPU", c10::DeviceType::XPU);
 
 #ifdef USE_KINETO
   py::class_<KinetoEvent>(m, "_KinetoEvent")

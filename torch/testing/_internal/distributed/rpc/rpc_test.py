@@ -4093,9 +4093,9 @@ class CudaRpcTest(RpcAgentTestFixture):
                     self.assertEqual(1, len(event.kernels))
                     kernel = event.kernels[0]
                     if event.node_id == dst_cuda_0:
-                        self.assertEqual(kernel.device, 0)
+                        self.assertEqual(kernel.device, torch.device("cuda:{}".format(0)))
                     if event.node_id == dst_cuda_1:
-                        self.assertEqual(kernel.device, 1)
+                        self.assertEqual(kernel.device, torch.device("cuda:{}".format(1)))
                     self.assertGreater(event.cuda_time, 0)
 
         # Validate that EXPECTED_REMOTE_EVENTS is a subset of remotely profiled
