@@ -1,5 +1,4 @@
 # Variables
-from ._mappings import get_sparse_mapping
 from ._mappings import get_dynamic_sparse_quantized_mapping
 from ._mappings import get_static_sparse_quantized_mapping
 
@@ -22,4 +21,3 @@ from .experimental.pruner.parametrization import ActivationReconstruction
 
 # Pruner
 from .experimental.pruner.base_pruner import BasePruner
-
