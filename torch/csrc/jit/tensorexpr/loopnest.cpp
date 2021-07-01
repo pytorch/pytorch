@@ -2253,11 +2253,6 @@ void LoopNest::compressBuffer(Buf* buf, Stmt* stmt) {
   auto writes = WritesToBuf::find(stmt, buf);
   auto reads = StmtsReadingBuf::find(stmt, buf);
 
-  // All buffers must be read and written at least once.
-  // Is this a valid assumption? TODO
-  TORCH_INTERNAL_ASSERT(!writes.empty());
-  TORCH_INTERNAL_ASSERT(!reads.empty());
-
   // Find the parent common to all the buffer accesses.
   const Block* parent = dynamic_cast<Block*>(writes.front()->get_parent());
   TORCH_INTERNAL_ASSERT(parent);
@@ -2342,6 +2337,12 @@ void LoopNest::compressBuffer(Buf* buf, Stmt* stmt) {
     if (l->buf() == buf) {
       l->set_indices(get_new_indices(l->indices()));
     }
+  }
+}
+
+void LoopNest::compressAllBuffers(Stmt* stmt) {
+  for (auto buf : BufFinder::find(stmt)) {
+    compressBuffer(const_cast<Buf*>(buf), stmt);
   }
 }
 

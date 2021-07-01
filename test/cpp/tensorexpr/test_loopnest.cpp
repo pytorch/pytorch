@@ -6976,5 +6976,75 @@ TEST(LoopNest, compressBufferIndicesMixed) {
   ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(1))->value(), 200);
 }
 
+TEST(LoopNest, compressMultipleBuffers) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  // for (int i = 0; i < 100; ++i) {
+  //   for (int j = 0; j < 200; ++j) {
+  //     A[i,j] = sin(i*j)
+  //   }
+  //   for (int k = 0; k < 199; ++k) {
+  //     B[i,k] = A[i,k] + A[i, k+1]
+  //   }
+  //   for (int m = 0; m < 50; ++m) {
+  //     C[i,m] = B[i,m]
+  //   }
+  // }
+  Buf* A = new Buf("A", {new IntImm(100), new IntImm(200)}, kInt);
+  Buf* B = new Buf("B", {new IntImm(100), new IntImm(200)}, kInt);
+  Buf* C = new Buf("C", {new IntImm(100), new IntImm(200)}, kInt);
+  BufHandle a_buf(A);
+  BufHandle b_buf(B);
+  BufHandle c_buf(C);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle k("k", kInt);
+  VarHandle m("m", kInt);
+  auto forJ = For::make(j, 0, 200, Store::make(a_buf, {i, j}, sin(i * j)));
+  auto forK = For::make(
+      k,
+      0,
+      199,
+      Store::make(
+          b_buf,
+          {i, k},
+          Add::make(Load::make(a_buf, {i, k}), Load::make(a_buf, {i, k + 1}))));
+  auto forM = For::make(
+      m, 0, 50, Store::make(c_buf, {i, m}, Load::make(b_buf, {i, m})));
+  auto forI = For::make(i, 0, 100, Block::make({forJ, forK, forM}));
+  auto par = Block::make({forI});
+
+  // This should compress all buffers A, B, and C as follows:
+  //   A[100, 200] -> A[1, 200]
+  //   B[100, 200] -> B[1, 200]
+  //   C[100, 200] -> C[1, 1]
+  LoopNest::compressAllBuffers(par);
+
+  std::ostringstream oss;
+  oss << *par;
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT: for (int j
+# CHECK-NEXT: A[0, j] =
+# CHECK: for (int k
+# CHECK-NEXT: B[0, k] = (A[0, k]) + (A[0, k + 1])
+# CHECK: for (int m
+# CHECK-NEXT: C[0, 0] = B[0, m]
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  ASSERT_EQ(A->ndim(), 2);
+  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(0))->value(), 1);
+  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(1))->value(), 200);
+  ASSERT_EQ(B->ndim(), 2);
+  ASSERT_EQ(dynamic_cast<const IntImm*>(B->dim(0))->value(), 1);
+  ASSERT_EQ(dynamic_cast<const IntImm*>(B->dim(1))->value(), 200);
+  ASSERT_EQ(C->ndim(), 2);
+  ASSERT_EQ(dynamic_cast<const IntImm*>(C->dim(0))->value(), 1);
+  ASSERT_EQ(dynamic_cast<const IntImm*>(C->dim(1))->value(), 1);
+}
+
 } // namespace jit
 } // namespace torch
