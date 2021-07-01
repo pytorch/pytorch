@@ -538,8 +538,6 @@ jobs:
           set -ex
           time docker pull "${DOCKER_IMAGE}" > /dev/null
           echo "${GITHUB_REF}"
-          ref=${GITHUB_REF##*/}
-          target=${ref//v}
           docker run \
             -e BUILD_ENVIRONMENT \
             -e IN_CI \
