@@ -1,6 +1,7 @@
 
 import abc
 import copy
+from collections import defaultdict
 
 import torch
 from torch import nn
@@ -62,9 +63,9 @@ class BaseSparsifier(abc.ABC):
         if self.defaults is None:
             self.defaults = dict()
 
-        self.state = {}
+        self.state = dict()
         self.module_groups = []
-        self.enable_mask_update = False
+        self.enable_mask_update = True
 
     def __getstate__(self):
         return {
@@ -90,27 +91,64 @@ class BaseSparsifier(abc.ABC):
         format_string += ')'
         return format_string
 
+    def _pack_state(self):
+        state = defaultdict(dict)
+        for g in self.module_groups:
+            parametrization = g['module'].parametrizations['weight']
+            original_weight = parametrization.original
+            mask = None
+            # Find the mask in the FakeSparsity.
+            found = False
+            for p in parametrization:
+                if isinstance(p, FakeSparsity):
+                    parametrization = p
+                    found = True
+                    break
+            if found:
+                mask = parametrization.mask
+            state[original_weight]['mask'] = mask
+            state[original_weight]['fqn'] = g['fqn']
+            # Get all the tensors inside the module_group
+            state[original_weight].update(
+                {key: value for key, value in self.state.items()
+                    if key not in state[original_weight]})
+        return state
+
     def state_dict(self):
         r"""Returns the state of the optimizer as a :class:`dict`.
 
         It contains:
+        * state - current state of the sparsification.
         * module_groups - a list containing all sparsity configuration groups
-            with the key 'path' specifying the layer path within a model
+            with the key 'fqn' specifying the layer path within a model
         """
         module_groups = [
             dict(filter(lambda key_value: key_value[0] != 'module', mg.items()))
             for mg in self.module_groups
         ]
+
         return {
+            'state': self._pack_state(),
             'module_groups': module_groups,
         }
 
     def load_state_dict(self, state_dict, strict=True):
         module_groups = copy.deepcopy(state_dict['module_groups'])
         for group in module_groups:
-            layer = _fqn_to_module(self.model, group['path'])
+            layer = _fqn_to_module(self.model, group['fqn'])
             if strict and layer is None:
-                raise RuntimeError(f'Error loading group["path"] into the model')
+                raise RuntimeError(f'Error loading {group["fqn"]} into the model')
+
+            if group.get('state', None) is not None:
+                found = False
+                for p in layer.parametrizations['weight']:
+                    if isinstance(p, FakeSparsity):
+                        found = True
+                        break
+                if not found:
+                    p = FakeSparsity(torch.ones(group['module'].weight.shape))
+                    parametrize.register_parametrization(layer, 'weight', FakeSparsity(p))
+
             group['module'] = layer
         self.__setstate__({'module_groups': module_groups})
 
@@ -122,8 +160,8 @@ class BaseSparsifier(abc.ABC):
             The model is modified inplace. If you need to preserve the original
             model, use copy.deepcopy.
         """
+        self.model = model  # TODO: Need to figure out how to load without this.
         self.config = config
-        self.model = model
         # If no config -- try getting all the supported layers
         if self.config is None:
             # Add all models to the config
@@ -143,10 +181,10 @@ class BaseSparsifier(abc.ABC):
             local_args = copy.deepcopy(self.defaults)
             local_args.update(module_config)
             module = local_args['module']
-            module_path = _module_to_fqn(self.model, module)
-            if module_path and module_path[0] == '.':
-                module_path = module_path[1:]
-            local_args['path'] = module_path
+            module_fqn = _module_to_fqn(model, module)
+            if module_fqn and module_fqn[0] == '.':
+                module_fqn = module_fqn[1:]
+            local_args['fqn'] = module_fqn
             self.module_groups.append(local_args)
 
         self._prepare()
@@ -156,27 +194,20 @@ class BaseSparsifier(abc.ABC):
         """
         for config in self.module_groups:
             module = config['module']
-            if getattr(module, 'mask', None) is None:
-                module.register_buffer('mask', torch.ones(module.weight.shape))
             param = config.get('parametrization', FakeSparsity)
-            parametrize.register_parametrization(module, 'weight',
-                                                 param(module.mask))
+            mask = config.get('mask', torch.ones(module.weight.shape))
+            parametrize.register_parametrization(module, 'weight', param(mask))
 
     def squash_mask(self, *args, **kwargs):
         for config in self.module_groups:
             module = config['module']
             parametrize.remove_parametrizations(module, 'weight',
                                                 leave_parametrized=True)
-            if getattr(module._parameters, 'mask', None):
-                del module._parameters['mask']
-            elif getattr(module._buffers, 'mask', None):
-                del module._buffers['mask']
-            delattr(module, 'mask')
 
     def convert(self):
         # TODO: Call the torch.ao.utils.convert in here
-        raise NotImplementedError('`convert` is not implemented. '
-            'Please, use `torch.ao.utils.convert` instead.')
+        raise NotImplementedError('`convert` is not implemented. Please, use '
+                                  '`torch.ao.utils.convert` instead.')
 
     def step(self, use_path=True):
         if not self.enable_mask_update:
