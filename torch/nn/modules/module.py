@@ -1059,9 +1059,7 @@ class Module:
         if self._backward_hooks or _global_backward_hooks:
             full_backward_hooks, non_full_backward_hooks = self._get_backward_hooks()
         if _global_forward_pre_hooks or self._forward_pre_hooks:
-            for hook in itertools.chain(
-                    _global_forward_pre_hooks.values(),
-                    self._forward_pre_hooks.values()):
+            for hook in (*_global_forward_pre_hooks.values(), *self._forward_pre_hooks.values()):
                 result = hook(self, input)
                 if result is not None:
                     if not isinstance(result, tuple):
@@ -1075,9 +1073,7 @@ class Module:
 
         result = forward_call(*input, **kwargs)
         if _global_forward_hooks or self._forward_hooks:
-            for hook in itertools.chain(
-                    _global_forward_hooks.values(),
-                    self._forward_hooks.values()):
+            for hook in (*_global_forward_hooks.values(), *self._forward_hooks.values()):
                 hook_result = hook(self, input, result)
                 if hook_result is not None:
                     result = hook_result
