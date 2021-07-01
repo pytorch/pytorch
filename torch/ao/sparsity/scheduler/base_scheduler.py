@@ -2,6 +2,7 @@
 from torch.ao.sparsity import BaseSparsifier
 
 from functools import wraps
+import warnings
 import weakref
 
 class BaseScheduler(object):
@@ -78,6 +79,12 @@ class BaseScheduler(object):
 
     def get_sl(self):
         # Compute sparsity level using chainable form of the scheduler
+        # Note: This method is not intended to be called directly, and is only
+        #       used by the ".step" method. Use .get_last_sl() instead.
+        if not self._get_sl_called_within_step:
+            warnings.warn(
+                "To get the last sparsity level computed by the scheduler, "
+                "please use `get_last_sl()`.")
         raise NotImplementedError
 
     def print_sl(self, is_verbose, group, sl, epoch=None):
@@ -100,8 +107,19 @@ class BaseScheduler(object):
         return format_string
 
     def step(self, epoch=None):
-        # Raise a warning if old pattern is detected
+        # Raise warning if trying to call scheduler step before the sparsifier.
         # https://github.com/pytorch/pytorch/issues/20124
+        if self._step_count == 1:
+            if not hasattr(self.sparsifier.step, "_with_counter"):
+                warnings.warn("Seems like `sparsifier.step()` has been overridden after sparsity scheduler "
+                              "initialization. Please, make sure to call `sparsifier.step()` before "
+                              "`scheduler.step()`.", UserWarning)
+
+            # Just check if there were two first scheduler.step() calls before sparsifier.step()
+            elif self.sparsifier._step_count < 1:
+                warnings.warn("Detected call of `scheduler.step()` before `sparsifier.step()`. "
+                              "You have to make sure you run the sparsifier.step() BEFORE any "
+                              "calls to the scheduer.step().", UserWarning)
         self._step_count += 1
 
         class _enable_get_sl_call:
