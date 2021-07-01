@@ -6,7 +6,7 @@ import torch
 from torch import nn
 from torch.nn.utils import parametrize
 
-from .parametrization import PruningParametrization, ActivationReconstruction, BiasHook
+from .parametrization import PruningParametrization, ActivationReconstruction
 
 SUPPORTED_MODULES = {
     nn.Linear
@@ -109,6 +109,11 @@ class BasePruner(abc.ABC):
         format_string += ')'
         return format_string
 
+    def bias_hook(self, module, input, output):
+        if getattr(module, '_bias', None) is not None:
+            output += module._bias
+        return output
+
     def prepare(self, use_path=False, *args, **kwargs):
         r"""Adds mask parametrization to the layer weight
         """
@@ -132,9 +137,7 @@ class BasePruner(abc.ABC):
             if module.bias is not None:
                 module.register_parameter('_bias', nn.Parameter(module.bias.detach()))
                 module.bias = None
-                module.register_forward_hook(BiasHook(True))
-            else:
-                module.register_forward_hook(BiasHook(False))
+            module.register_forward_hook(self.bias_hook)
 
 
     def convert(self, use_path=False, *args, **kwargs):
