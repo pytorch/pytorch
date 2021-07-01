@@ -2301,23 +2301,6 @@ def coalescedonoff(f):
         f(self, *args, **kwargs, coalesced=False)
     return wrapped
 
-
-class nullcontext:
-    """Context manager that does no additional processing.
-
-    Vendored copy of contextlib.nullcontext, which is available only in py3.7+
-    """
-
-    def __init__(self, enter_result=None):
-        self.enter_result = enter_result
-
-    def __enter__(self):
-        return self.enter_result
-
-    def __exit__(self, *excinfo):
-        pass
-
-
 @contextlib.contextmanager
 def disable_gc():
     if gc.isenabled():

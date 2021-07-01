@@ -5,7 +5,6 @@ import collections
 import copy
 import operator
 import random
-import contextlib
 
 import torch
 import numpy as np
@@ -78,7 +77,6 @@ class SkipInfo(DecorateInfo):
         super().__init__(decorators=skipIf(True, "Skipped!"), cls_name=cls_name,
                          test_name=test_name, device_type=device_type, dtypes=dtypes,
                          active_if=active_if)
-
 
 class SampleInput(object):
     """Represents sample inputs to a function."""
@@ -301,17 +299,6 @@ class OpInfo(object):
         if aliases is not None:
             self.aliases = tuple(AliasInfo(a) for a in aliases)  # type: ignore[assignment]
         self.test_conjugated_samples = test_conjugated_samples
-        self.reset()
-
-    def reset(self):
-        """Reset the value of attributes which can change during a test.
-
-        This method must be called at the beginning of each test: the goal is
-        to ensure that we don't carry changed states between tests.
-        """
-        # the sample which is currently being iterted on by sample_inputs. See
-        # also decorate_errors()
-        self._current_sample = None
 
     def __call__(self, *args, **kwargs):
         """Calls the function variant of the operator."""
@@ -394,49 +381,31 @@ class OpInfo(object):
     def sample_inputs(self, device, dtype, requires_grad=False, **kwargs):
         """Generates a sequence of SampleInputs.
 
-        The OpInfo keeps track the the sample which is currently yielded: wrap
-        your code inside a with op.decorate_errors() to get better exception
-        messages which include the current sample.
+        This functions return the same samples returned by
+        generate_sample_inputs(), after ensuring that they have a meaningful
+        name.
 
         If subclasses want to customize the generation of inputs, they should
         override generate_sample_inputs(). On the contrary, end users should
         always call sample_inputs().
         """
-        if self._current_sample is not None:
-            raise ValueError('Cannot call op.sample_inputs() while another '
-                             'iteration is in progress')
-        samples = self.generate_sample_inputs(device, dtype, requires_grad, **kwargs)
-        for i, sample in enumerate(samples):
+        in_samples = self.generate_sample_inputs(device, dtype, requires_grad, **kwargs)
+        out_samples = []
+        for i, sample in enumerate(in_samples):
             assert isinstance(sample, SampleInput)
             # make sure that every SampleInput has a sensible name: if the
             # name was not given, use the index instead
             if not sample.name:
                 sample.name = str(i)
-            self._current_sample = sample
-            yield sample
-        self._current_sample = None
+            out_samples.append(sample)
+        return out_samples
 
     def get_one_sample_input(self, device, dtype, requires_grad=False, **kwargs):
         """Returns a single SampleInput if it exists, else None"""
-        samples = self.generate_sample_inputs(device, dtype, requires_grad, **kwargs)
-        samples = list(samples)
+        samples = self.sample_inputs(device, dtype, requires_grad, **kwargs)
         if len(samples) == 0:
             raise ValueError('sample_inputs_func must return at least 1 sample')
         return samples[0]
-
-    @contextlib.contextmanager
-    def decorate_errors(self):
-        """Attach additional information to exceptions.
-
-        In particular, display also the name of the current SampleInput if the
-        code is in the middle of a loop "for sample in op.sample_inputs():"
-        """
-        try:
-            yield
-        except Exception as exc:
-            if self._current_sample:
-                exc.args = (f'[{self._current_sample.summary()}] {exc}',)
-            raise
 
     # Returns True if the test should be skipped and False otherwise
     def should_skip(self, cls_name, test_name, device_type, dtype):
