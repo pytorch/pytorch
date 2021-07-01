@@ -1,6 +1,6 @@
 #pragma once
-#include <ATen/ATen.h>
 
+#include <ATen/ATen.h>
 #include <c10/util/irange.h>
 
 namespace at {
@@ -104,9 +104,9 @@ bool check_fast_path_restrictions(
     }
 
     // Check if corresponding tensors in tensor lists have the same strides.
-    for (int i=0; i < tensorLists.size(); i++) {
-      for (int j=0; j < tensorLists[0].size(); j++) {
-        if (tensorLists[0][j].strides() != tensorLists[i][j].strides()) {
+    for (const auto& tensor_list : tensorLists) {
+      for (const auto j : c10::irange(tensorLists[0].size())) {
+        if (tensorLists[0][j].strides() != tensor_list[j].strides()) {
           return false;
         }
       }
@@ -117,7 +117,7 @@ bool check_fast_path_restrictions(
     // checked by `check_foreach_api_restrictions`).
     // This means we only need to check if {tensorList[0][0], tensorList[0][1], tensorList[0][2], ...}
     // do type promotion with scalarLIst.
-    for (int i=0; i < tensorLists[0].size(); i++) {
+    for (const auto i : c10::irange(tensorLists[0].size())) {
       if (does_op_promote_integer_inputs_to_float) {
         if (at::isIntegralType(tensorLists[0][i].scalar_type(), /*includeBool*/ true)) {
           return false;
