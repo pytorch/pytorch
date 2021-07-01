@@ -1,4 +1,4 @@
-name: jit-triage
+name: Triage
 
 on:
   issues:
@@ -7,8 +7,16 @@ on:
 jobs:
   welcome:
     runs-on: ubuntu-18.04
+    strategy:
+      fail-fast: false
+      matrix:
+        name:
+          - JIT
+          - Quantization
     steps:
       - uses: actions/github-script@v2
+        env:
+          NAME: ${{ matrix.name }}
         with:
           github-token: ${{secrets.GITHUB_TOKEN}}
           script: |
@@ -18,8 +26,9 @@ jobs:
             // - core: A reference to the @actions/core package
             // - io: A reference to the @actions/io package
 
-            // Check if issue has a JIT label.
-            const kJitLabel = "oncall: jit";
+            const kName = process.env.NAME;
+            // Check if issue has the relevant label.
+            const kLabel = `oncall: ${kName.toLowerCase()}`;
 
             issue = await github.issues.get({
               owner: context.issue.owner,
@@ -27,15 +36,15 @@ jobs:
               issue_number: context.issue.number,
             })
 
-            const hasJitLabel = issue.data.labels.filter(label => label.name == kJitLabel).length > 0;
+            const hasLabel = issue.data.labels.filter(label => label.name == kLabel).length > 0;
 
-            if (!hasJitLabel) {
-              core.debug("Issue " + issue.data.title + " does not have JIT label");
+            if (!hasLabel) {
+              core.debug(`Issue ${issue.data.title} does not have ${kName} label`);
               return;
             }
 
             // Get project column ID.
-            const kProjectName = "JIT Triage";
+            const kProjectName = `${kName} Triage`;
             const kColumnName = "Need triage";
 
             // Query all projects in the repository.
@@ -45,7 +54,7 @@ jobs:
               repo: context.issue.repo,
             });
 
-            // Filter out unwanted projects and get the ID for the JIT Triage project.
+            // Filter out unwanted projects and get the ID for the specific Triage project.
             const filteredProjects = projects.data.filter(project => project.name == kProjectName);
 
             if (filteredProjects.length != 1) {
