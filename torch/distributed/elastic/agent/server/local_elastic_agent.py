@@ -205,7 +205,6 @@ class LocalElasticAgent(SimpleElasticAgent):
         result = self._pcontext.wait(0)
         if result:
             if result.is_failed():
-                log.error(f"[{role}] Worker group failed")
                 # map local rank failure to global rank
                 worker_failures = {}
                 for local_rank, failure in result.failures.items():
