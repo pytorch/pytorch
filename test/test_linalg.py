@@ -1963,11 +1963,6 @@ class TestLinalg(TestCase):
             for input_size, error_ords, dim in test_cases:
                 input = torch.randn(*input_size, dtype=dtype, device=device)
                 for ord in ord_matrix:
-                    # TODO: This was disabled in https://github.com/pytorch/pytorch/pull/59067, because it failed after
-                    #  fixing the underlying comparison mechanism. It should have never been passing in the first place.
-                    #  This should be reinstated as soon as https://github.com/pytorch/pytorch/issues/59198 is fixed.
-                    if input_size in ((S, S, 0), (1, S, 0)) and not keepdim and ord in (2, -2):
-                        continue
                     run_test_case(input, ord, dim, keepdim, ord in error_ords)
 
     def test_norm_fastpaths(self, device):
@@ -2128,10 +2123,10 @@ class TestLinalg(TestCase):
         assert out_evecs.tolist() == [1, 2, 3]
         #
         # check that we complain if we pass an out vector of the wrong dtype
-        wrong_out = torch.empty((0, 0), dtype=int)
-        with self.assertRaisesRegex(RuntimeError, r"Expected .* but got .*"):
+        wrong_out = torch.empty((0, 0), dtype=int, device=device)
+        with self.assertRaisesRegex(RuntimeError, r"Expected all tensors to be on the same device, .*"):
             torch.eig(t, eigenvectors=True, out=(wrong_out, out_evecs))
-        with self.assertRaisesRegex(RuntimeError, r"Expected .* but got .*"):
+        with self.assertRaisesRegex(RuntimeError, r"Expected all tensors to be on the same device, .*"):
             torch.eig(t, eigenvectors=True, out=(out_evals, wrong_out))
 
     @skipCPUIfNoLapack
