@@ -15,8 +15,7 @@ namespace autograd {
 namespace profiler {
 
 void RecordFunctionHolder::enter(const std::string& name) {
-  record_function_ = std::make_unique<at::RecordFunction>(
-    at::RecordScope::USER_SCOPE);
+  record_function_ = std::make_unique<at::RecordFunction>(at::RecordScope::USER_SCOPE);
   record_function_->before(name);
 }
 
@@ -29,10 +28,10 @@ void RecordFunctionHolder::exit() {
 // Creates a new profiling scope using RecordFunction and invokes its starting
 // callbacks.
 c10::intrusive_ptr<RecordFunctionHolder> record_function_enter(
-  const std::string& name) {
-  auto wrapper = c10::make_intrusive<RecordFunctionHolder>();
-  wrapper->enter(name);
-  return wrapper;
+    const std::string& name) {
+  auto holder = c10::make_intrusive<RecordFunctionHolder>();
+  holder->enter(name);
+  return holder;
 }
 
 // Ends the profiling scope created with record_function_enter.
@@ -41,7 +40,7 @@ void record_function_exit(c10::intrusive_ptr<RecordFunctionHolder> holder) {
 }
 
 c10::intrusive_ptr<c10::ivalue::Future> _call_end_callbacks_on_fut(
-    c10::intrusive_ptr<RecordFunctionHolder> holder,
+    c10::intrusive_ptr<RecordFunctionHolder>& holder,
     const c10::intrusive_ptr<c10::ivalue::Future>& fut) {
   // Profiling callback that ends the associated record_function
   // and returns the value of the passed in future.
@@ -68,7 +67,6 @@ c10::intrusive_ptr<c10::ivalue::Future> _call_end_callbacks_on_fut(
   return profiledFut;
 }
 
-// Internal only, ensure Python understands this class. do not use directly.
 TORCH_LIBRARY(profiler, m) {
   m.class_<RecordFunctionHolder>("_RecordFunctionHolder")
     .def(torch::init())

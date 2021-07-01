@@ -10,7 +10,7 @@ namespace profiler {
 // Holder of RecordFunction, used to store the state of a RecordFunction
 // object to record the enter and exit event for profiler.
 struct RecordFunctionHolder : torch::CustomClassHolder {
-  RecordFunctionHolder() {}
+  RecordFunctionHolder() = default;
   void enter(const std::string& name);
   void exit();
 private:
@@ -24,7 +24,7 @@ TORCH_API c10::intrusive_ptr<RecordFunctionHolder> record_function_enter(
 
 // Schedules RecordFunction's end callbacks to be run on completion of a future.
 TORCH_API c10::intrusive_ptr<c10::ivalue::Future> _call_end_callbacks_on_fut(
-    c10::intrusive_ptr<RecordFunctionHolder> holder,
+    c10::intrusive_ptr<RecordFunctionHolder>& holder,
     const c10::intrusive_ptr<c10::ivalue::Future>& fut);
 
 } // namespace profiler

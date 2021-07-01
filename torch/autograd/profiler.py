@@ -567,7 +567,6 @@ class profile(object):
         assert self.function_events is not None
         return self.function_events.self_cpu_time_total
 
-
 class record_function(ContextDecorator):
     """Context manager/function decorator that adds a label to a block of
     Python code (or function) when running autograd profiler. It is
@@ -606,7 +605,7 @@ class record_function(ContextDecorator):
         self.name: str = name
         # Whether or not we should run record function's end callbacks when exiting.
         self.run_callbacks_on_exit: bool = True
-        self.handle: torch.classes.profiler._RecordFunctionHolder = torch.classes.profiler._RecordFunctionHolder()
+        self.handle : __torch__.torch.classes.profiler._RecordFunctionHolder = torch.ops.profiler._record_function_enter('placeholder')
 
     def __enter__(self):
         self.handle = torch.ops.profiler._record_function_enter(self.name)
