@@ -1,4 +1,5 @@
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 toq = torch.ops.quantized
 
@@ -78,9 +79,17 @@ def get_reversed_fusions() -> Set[Tuple[NSFusionType, int]]:
         # linear-relu fp16 emulation:
         # fp16_to_fp32 -> linear -> relu -> fp32_to_fp16
         ((("to", torch.float16), F.relu, F.linear, "dequantize"), fp16_em_base_op_idx,),
+        # Conv-BN fusion (this happens outside of quantization patterns,
+        # which is why it is defined separately here).
+        ((nn.BatchNorm1d, nn.Conv1d), default_base_op_idx),
+        ((nn.BatchNorm2d, nn.Conv2d), default_base_op_idx),
+        ((nn.BatchNorm3d, nn.Conv3d), default_base_op_idx),
+        ((nn.ReLU, nn.BatchNorm1d, nn.Conv1d), default_base_op_idx),
+        ((nn.ReLU, nn.BatchNorm2d, nn.Conv2d), default_base_op_idx),
+        ((nn.ReLU, nn.BatchNorm3d, nn.Conv3d), default_base_op_idx),
     ]
     for p in patterns_to_add:
-        results.add(p)
+        results.add(p)  # type: ignore[arg-type]
 
     return results
 

@@ -729,13 +729,13 @@ class TestFXGraphMatcherModels(QuantizationTestCase):
         # verify that mobilenetv2 graph is able to be matched
         import torchvision
         m = torchvision.models.__dict__['mobilenet_v2'](pretrained=False).eval().float()
-        mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
-        # TODO(future PR): prevent the need for copying here, we can copy the
-        # modules but should reuse the underlying tensors
+        mp = prepare_fx(copy.deepcopy(m), {'': torch.quantization.default_qconfig})
+        # assume success if no exceptions
+        results_m_mp = get_matching_subgraph_pairs(torch.fx.symbolic_trace(m), mp)
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
         # assume success if no exceptions
-        results = get_matching_subgraph_pairs(mp, mq)
+        results_mp_mq = get_matching_subgraph_pairs(mp, mq)
 
     @override_qengines
     @skip_if_no_torchvision
@@ -743,13 +743,17 @@ class TestFXGraphMatcherModels(QuantizationTestCase):
         # verify that mobilenetv2 graph is able to be matched
         import torchvision
         m = torchvision.models.__dict__['mobilenet_v2'](pretrained=False).float()
-        mp = prepare_qat_fx(m, {'': torch.quantization.get_default_qat_qconfig('fbgemm')})
+        mp = prepare_qat_fx(
+            copy.deepcopy(m),
+            {'': torch.quantization.get_default_qat_qconfig('fbgemm')})
+        # assume success if no exceptions
+        results_m_mp = get_matching_subgraph_pairs(torch.fx.symbolic_trace(m), mp)
         # TODO(future PR): prevent the need for copying here, we can copy the
         # modules but should reuse the underlying tensors
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
         # assume success if no exceptions
-        results = get_matching_subgraph_pairs(mp, mq)
+        results_mp_mq = get_matching_subgraph_pairs(mp, mq)
 
 
 class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
@@ -758,7 +762,7 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
     ):
         if qconfig_dict is None:
             qconfig_dict = {'': torch.quantization.default_qconfig}
-        mp = prepare_fn(m, qconfig_dict)
+        mp = prepare_fn(copy.deepcopy(m), qconfig_dict)
         # TODO(future PR): prevent the need for copying here, we can copy the
         # modules but should reuse the underlying tensors
         mp_copy = copy.deepcopy(mp)
@@ -766,11 +770,13 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
 
         # test both the public API as well as the internal GraphModule API
         for extract_weights_fun in (extract_weights, _extract_weights_impl):
-            results = extract_weights_fun('fp32_prepared', mp, 'int8', mq)
-            self.assertTrue(
-                len(results) == results_len,
-                f"expected len {results_len}, got len {len(results)}")
-            self.assert_ns_compare_dict_valid(results)
+            # test both m vs mp and mp vs mq
+            for m1, m2 in ((m, mp), (mp, mq)):
+                results = extract_weights_fun('a', mp, 'b', mq)
+                self.assertTrue(
+                    len(results) == results_len,
+                    f"expected len {results_len}, got len {len(results)}")
+                self.assert_ns_compare_dict_valid(results)
 
     def _test_match_activations(
         self, m, data, prepared_expected_node_occurrence=None, results_len=0,
@@ -785,45 +791,60 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
             m.eval()
         else:
             m.train()
-        mp = prepare_fn(m, qconfig_dict)
+        mp = prepare_fn(copy.deepcopy(m), qconfig_dict)
         mp(*data)
         # TODO(future PR): prevent the need for copying here, we can copy the
         # modules but should reuse the underlying tensors
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
 
+        m_ns, mp_ns2 = add_loggers(
+            'a', m, 'b', copy.deepcopy(mp), OutputLogger,
+            should_log_inputs=should_log_inputs)
         mp_ns, mq_ns = add_loggers(
-            'fp32_prepared', mp, 'int8', mq, OutputLogger,
+            'a', mp, 'b', mq, OutputLogger,
             should_log_inputs=should_log_inputs)
 
         if prepared_expected_node_occurrence:
+            self.checkGraphModuleNodes(
+                m_ns, expected_node_occurrence=prepared_expected_node_occurrence)
+            self.checkGraphModuleNodes(
+                mp_ns2, expected_node_occurrence=prepared_expected_node_occurrence)
             self.checkGraphModuleNodes(
                 mp_ns, expected_node_occurrence=prepared_expected_node_occurrence)
             self.checkGraphModuleNodes(
                 mq_ns, expected_node_occurrence=prepared_expected_node_occurrence)
 
         if not skip_scripting:
+            m_ns = torch.jit.script(m_ns)
             mp_ns = torch.jit.script(mp_ns)
             mq_ns = torch.jit.script(mq_ns)
 
         # calibrate
+        m_ns(*data)
+        mp_ns2(*data)
         mp_ns(*data)
         mq_ns(*data)
 
         # check activation result correctness
-        act_compare_dict = extract_logger_info(
-            mp_ns, mq_ns, OutputLogger, 'int8')
-        self.assertTrue(
-            len(act_compare_dict) == results_len,
-            f"expected len {results_len}, got len {len(act_compare_dict)}")
-        self.assert_ns_compare_dict_valid(act_compare_dict)
-        return act_compare_dict
+        results = []
+        for m1, m2 in ((m_ns, mp_ns2), (mp_ns, mq_ns)):
+            act_compare_dict = extract_logger_info(
+                m1, m2, OutputLogger, 'b')
+            self.assertTrue(
+                len(act_compare_dict) == results_len,
+                f"expected len {results_len}, got len {len(act_compare_dict)}")
+            self.assert_ns_compare_dict_valid(act_compare_dict)
+            results.append(act_compare_dict)
+        return results
 
     def _test_match_shadow_activations(
         self, m, data, prepared_expected_node_occurrence=None, results_len=None,
         should_log_inputs=False, qconfig_dict=None, skip_scripting=False,
         prepare_fn=prepare_fx,
     ):
+        # TODO(future PR): add test for m vs mp (need to first stop
+        # removing observers from the graph)
         if qconfig_dict is None:
             qconfig_dict = {'': torch.quantization.default_qconfig}
         if prepare_fn == prepare_fx:
