@@ -94,7 +94,6 @@
 #include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import.h>
-#include <torch/csrc/jit/tensorexpr/execution_counter.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/jit/tensorexpr/tensorexpr_init.h>
 
@@ -654,14 +653,6 @@ void initJITBindings(PyObject* module) {
             return tryToInferType(std::move(obj));
           })
       .def(
-          "_jit_get_trigger_value",
-          [](const std::string& trigger_name) -> int {
-            using namespace torch::jit::tensorexpr;
-            ExecutionTrigger* trigger =
-                ExecutionTriggerList::GetInstance().FindByName(trigger_name);
-            return trigger->value();
-          })
-      .def(
           "_jit_get_te_cuda_pointwise_loop_levels",
           []() -> int {
             using namespace torch::jit::tensorexpr;
@@ -1126,12 +1117,14 @@ void initJITBindings(PyObject* module) {
 
   // Used by torch.Package to coordinate deserialization of storages across
   // ScriptModules and eager modules
-  py::class_<StorageContext, std::shared_ptr<StorageContext>>(
-      m, "StorageContext")
+  py::class_<
+      DeserializationStorageContext,
+      std::shared_ptr<DeserializationStorageContext>>(
+      m, "DeserializationStorageContext")
       .def(py::init<>())
       .def(
           "get_storage",
-          [](StorageContext& self,
+          [](DeserializationStorageContext& self,
              const std::string& name,
              py::object data_type_obj) {
             c10::Storage storage = self.getStorage(name);
@@ -1147,12 +1140,12 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "add_storage",
-          [](StorageContext& self,
+          [](DeserializationStorageContext& self,
              const std::string& name,
              const at::Tensor& tensor) {
-            self.addStorage(name, tensor.storage());
+            return self.addStorage(name, tensor.storage());
           })
-      .def("has_storage", &StorageContext::hasStorage);
+      .def("has_storage", &DeserializationStorageContext::hasStorage);
 
   m.def(
       "_jit_get_operation",
