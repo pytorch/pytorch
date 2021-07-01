@@ -1,11 +1,5 @@
 import torch
 
-def get_sparse_mapping():
-    _sparse_mapping = dict({
-        torch.nn.Linear: torch.ao.nn.sparse.Linear,
-    })
-    return _sparse_mapping
-
 def get_static_sparse_quantized_mapping():
     _static_sparse_quantized_mapping = dict({
         torch.nn.Linear: torch.ao.nn.sparse.quantized.Linear,
