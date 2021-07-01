@@ -3561,7 +3561,7 @@ class TestONNXRuntime(unittest.TestCase):
                       dynamic_axes={"x": [0, 1]},
                       test_with_inputs=[x2])
 
-        def test_multinomial(self):
+    def test_multinomial(self):
         class Multinomial(torch.nn.Module):
             def forward(self, weight):
                 return torch.multinomial(weight, 3, replacement=True)
