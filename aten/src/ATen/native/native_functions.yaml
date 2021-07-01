@@ -6542,7 +6542,7 @@
 
 - func: eig.e(Tensor self, bool eigenvectors=False, *, Tensor(a!) e, Tensor(b!) v) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
   dispatch:
-    CompositeExplicitAutograd: eig_out
+    CPU, CUDA: eig_out
 
 - func: eig(Tensor self, bool eigenvectors=False) -> (Tensor eigenvalues, Tensor eigenvectors)
   variants: method, function
