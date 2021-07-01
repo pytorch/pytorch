@@ -14,13 +14,12 @@ HOST_PLATFORM = platform.system()
 
 # PyTorch directory root
 result = subprocess.run(
-    ["git", "rev-parse", "--show-toplevel"],
-    stdout=subprocess.PIPE,
-    check=True,
+    ["git", "rev-parse", "--show-toplevel"], stdout=subprocess.PIPE, check=True,
 )
 PYTORCH_ROOT = result.stdout.decode("utf-8").strip()
 
 HASH_PATH = os.path.join(os.path.dirname(os.path.realpath(__file__)), "hashes")
+
 
 def compute_file_sha256(path: str) -> str:
     """Compute the SHA256 hash of a file and return it as a hex string."""
@@ -39,7 +38,9 @@ def compute_file_sha256(path: str) -> str:
     return hash.hexdigest()
 
 
-def report_download_progress(chunk_number: int, chunk_size: int, file_size: int) -> None:
+def report_download_progress(
+    chunk_number: int, chunk_size: int, file_size: int
+) -> None:
     """
     Pretty printer for file download progress.
     """
@@ -64,7 +65,9 @@ def download_bin(name: str, output_dir: str, platform_to_url: Dict[str, str]) ->
     print(f"Downloading {name} to {output_dir}")
     try:
         urllib.request.urlretrieve(
-            url, filename, reporthook=report_download_progress if sys.stdout.isatty() else None
+            url,
+            filename,
+            reporthook=report_download_progress if sys.stdout.isatty() else None,
         )
     except urllib.error.URLError as e:
         print(f"Error downloading {filename}: {e}")
@@ -75,7 +78,13 @@ def download_bin(name: str, output_dir: str, platform_to_url: Dict[str, str]) ->
     return True
 
 
-def download(name: str, output_dir: str, platform_to_url: Dict[str, str], platform_to_hash: Dict[str, str], verbose: bool = False) -> bool:
+def download(
+    name: str,
+    output_dir: str,
+    platform_to_url: Dict[str, str],
+    platform_to_hash: Dict[str, str],
+    verbose: bool = False,
+) -> bool:
     """
     Download a platform-appropriate binary if one doesn't already exist at the expected location and verifies
     that it is the right binary by checking its SHA256 hash against the expected hash.
