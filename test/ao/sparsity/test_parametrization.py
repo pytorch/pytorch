@@ -29,11 +29,6 @@ class ModelUnderTest(nn.Module):
             self.seq[0] = nn.Parameter(torch.zeros_like(self.seq[0].bias) + 20.0)
             self.seq[0] = nn.Parameter(torch.zeros_like(self.seq[0].bias) + 30.0)
 
-        # Make masks stored in the modules for convenience
-        self.linear.register_buffer('mask', torch.eye(16))
-        self.seq[0].register_buffer('mask', torch.eye(16))
-        self.seq[1].register_buffer('mask', torch.eye(16))
-
     def forward(self, x):
         x = self.linear(x)
         x = self.seq(x)
@@ -60,13 +55,15 @@ class TestFakeSparsity(TestCase):
         assert not hasattr(model.linear, 'parametrizations')
         assert not hasattr(model.seq[0], 'parametrizations')
         assert not hasattr(model.seq[1], 'parametrizations')
-
+        mask = torch.eye(16)
         parametrize.register_parametrization(model.linear, 'weight',
-                                             utils.FakeSparsity(model.linear.mask))
+                                             utils.FakeSparsity(mask))
+        mask = torch.eye(16)
         parametrize.register_parametrization(model.seq[0], 'weight',
-                                             utils.FakeSparsity(model.seq[0].mask))
+                                             utils.FakeSparsity(mask))
+        mask = torch.eye(16)
         parametrize.register_parametrization(model.seq[1], 'weight',
-                                             utils.FakeSparsity(model.seq[1].mask))
+                                             utils.FakeSparsity(mask))
 
         assert hasattr(model.linear, 'parametrizations')
         assert parametrize.is_parametrized(model.linear, 'weight')
@@ -78,21 +75,27 @@ class TestFakeSparsity(TestCase):
     def test_state_dict_preserved(self):
         model_save = ModelUnderTest(bias=False)
 
+        mask = torch.eye(16)
         parametrize.register_parametrization(model_save.linear, 'weight',
-                                             utils.FakeSparsity(model_save.linear.mask))
+                                             utils.FakeSparsity(mask))
+        mask = torch.eye(16)
         parametrize.register_parametrization(model_save.seq[0], 'weight',
-                                             utils.FakeSparsity(model_save.seq[0].mask))
+                                             utils.FakeSparsity(mask))
+        mask = torch.eye(16)
         parametrize.register_parametrization(model_save.seq[1], 'weight',
-                                             utils.FakeSparsity(model_save.seq[1].mask))
+                                             utils.FakeSparsity(mask))
         state_dict = model_save.state_dict()
 
         model_load = ModelUnderTest(bias=False)
+        mask = torch.zeros(model_load.linear.weight.shape)
         parametrize.register_parametrization(model_load.linear, 'weight',
-                                             utils.FakeSparsity(torch.zeros(model_load.linear.weight.shape)))
+                                             utils.FakeSparsity(mask))
+        mask = torch.zeros(model_load.seq[0].weight.shape)
         parametrize.register_parametrization(model_load.seq[0], 'weight',
-                                             utils.FakeSparsity(torch.zeros(model_load.seq[0].weight.shape)))
+                                             utils.FakeSparsity(mask))
+        mask = torch.zeros(model_load.seq[1].weight.shape)
         parametrize.register_parametrization(model_load.seq[1], 'weight',
-                                             utils.FakeSparsity(torch.zeros(model_load.seq[1].weight.shape)))
+                                             utils.FakeSparsity(mask))
         model_load.load_state_dict(state_dict)
 
         # Check the parametrizations are preserved
@@ -122,12 +125,15 @@ class TestFakeSparsity(TestCase):
     def test_jit_trace(self):
         model = ModelUnderTest(bias=False)
 
+        mask = torch.eye(16)
         parametrize.register_parametrization(model.linear, 'weight',
-                                             utils.FakeSparsity(model.linear.mask))
+                                             utils.FakeSparsity(mask))
+        mask = torch.eye(16)
         parametrize.register_parametrization(model.seq[0], 'weight',
-                                             utils.FakeSparsity(model.seq[0].mask))
+                                             utils.FakeSparsity(mask))
+        mask = torch.eye(16)
         parametrize.register_parametrization(model.seq[1], 'weight',
-                                             utils.FakeSparsity(model.seq[1].mask))
+                                             utils.FakeSparsity(mask))
 
         # Tracing
         example_x = torch.ones(3, 16)
