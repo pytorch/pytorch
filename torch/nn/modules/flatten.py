@@ -10,8 +10,9 @@ class Flatten(Module):
     Flattens a contiguous range of dims into a tensor. For use with :class:`~nn.Sequential`.
 
     Shape:
-        - Input: :math:`(*, S_{start}, *, S_{end}, *)`
-        - Output: :math:`(*, \prod_{i=start}^{end} S_{i}, *)` (for the default case).
+        - Input: :math:`(*, S_{start},..., S_{i}, ..., S_{end}, *)`, where :math:`S_{i}` is the
+          size at dimension :math:`i`.
+        - Output: :math:`(*, \prod_{i=start}^{end} S_{i}, *)`
 
     Args:
         start_dim: first dim to flatten (default = 1).
@@ -57,7 +58,8 @@ class Unflatten(Module):
       (tuple of `(name, size)` tuples) for `NamedTensor` input.
 
     Shape:
-        - Input: :math:`(*, S_{dim}, *)`. Input can be any shape, where :math:`S_{dim}=\prod *unflattened\_size`.
+        - Input: :math:`(*, S_{dim}, *)`. Input can be any shape, where :math:`S_{dim}`
+          is the size at dimension :math:`dim` and :math:`S_{dim}=\prod *unflattened\_size`.
         - Output: :math:`(*, *unflattened\_size, *)`.
 
     Args:
