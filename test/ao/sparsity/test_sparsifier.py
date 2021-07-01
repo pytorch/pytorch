@@ -30,7 +30,7 @@ class ImplementedSparsifier(BaseSparsifier):
         super().__init__(defaults=kwargs)
 
     def update_mask(self, layer, **kwargs):
-        layer.mask[0] = 0
+        layer.parametrizations.weight[0].mask[0] = 0
 
 
 class TestBaseSparsifier(TestCase):
@@ -48,7 +48,7 @@ class TestBaseSparsifier(TestCase):
         sparsifier = ImplementedSparsifier(test=3)
         sparsifier.prepare(model, [model.linear])
         assert len(sparsifier.module_groups) == 1
-        assert sparsifier.module_groups[0]['path'] == 'linear'
+        assert sparsifier.module_groups[0]['fqn'] == 'linear'
         assert 'test' in sparsifier.module_groups[0]
         assert sparsifier.module_groups[0]['test'] == 3
 
@@ -58,7 +58,7 @@ class TestBaseSparsifier(TestCase):
         sparsifier.enable_mask_update = True
         sparsifier.prepare(model, [model.linear])
         sparsifier.step()
-        assert torch.all(model.linear.mask[0] == 0)
+        assert torch.all(model.linear.parametrizations.weight[0].mask[0] == 0)
 
     def test_state_dict(self):
         model = Model()
@@ -75,7 +75,7 @@ class TestBaseSparsifier(TestCase):
         model = Model()
         sparsifier = ImplementedSparsifier(test=3)
         sparsifier.prepare(model, [model.linear])
-        assert hasattr(model.linear, 'mask')
+        assert hasattr(model.linear.parametrizations.weight[0], 'mask')
         assert is_parametrized(model.linear, 'weight')
         assert not hasattr(model.seq[0], 'mask')
         assert not is_parametrized(model.seq[0], 'weight')
@@ -95,7 +95,7 @@ class TestWeightNormSparsifier(TestCase):
         for g in sparsifier.module_groups:
             assert isinstance(g['module'], nn.Linear)
             # The module_groups are unordered
-            assert g['path'] in ('seq.0', 'linear')
+            assert g['fqn'] in ('seq.0', 'linear')
 
     def test_logic(self):
         model = Model()
@@ -103,4 +103,4 @@ class TestWeightNormSparsifier(TestCase):
         sparsifier.prepare(model, config=[model.linear])
         sparsifier.enable_mask_update = True
         sparsifier.step()
-        self.assertAlmostEqual(model.linear.mask.mean().item(), 0.5, places=2)
+        self.assertAlmostEqual(model.linear.parametrizations['weight'][0].mask.mean().item(), 0.5, places=2)
