@@ -31,7 +31,7 @@ if [[ "$CIRCLE_BRANCH" == "master" ]] || [[ "$CIRCLE_BRANCH" == release/* ]]; th
 fi
 
 pwd
-find .
+find /
 ls
 
 
