@@ -442,12 +442,12 @@ void Reducer::mark_variable_ready_sparse(size_t variable_index) {
   });
 }
 
-std::vector<c10d::GradBucket> Reducer::get_bucket_tensors() const {
+std::vector<c10d::GradBucket> Reducer::get_grad_buckets() const {
   std::lock_guard<std::mutex> lock(mutex_);
-  std::vector<c10d::GradBucket> bucketTensors;
-  bucketTensors.reserve(buckets_.size());
+  std::vector<c10d::GradBucket> gradBuckets;
+  gradBuckets.reserve(buckets_.size());
   for (int i = 0; i < buckets_.size(); ++i) {
-    bucketTensors.emplace_back(
+    gradBuckets.emplace_back(
       i,
       // This API is only used for uneven inputs which requires zero tensors
       at::zeros_like(buckets_[i].replicas[0].contents),
@@ -456,7 +456,7 @@ std::vector<c10d::GradBucket> Reducer::get_bucket_tensors() const {
       buckets_[i].replicas[0].sizes_vec
     );
   }
-  return bucketTensors;
+  return gradBuckets;
 }
 
 void Reducer::set_forward_pass_work_handle(
@@ -567,7 +567,11 @@ void Reducer::set_logger(std::weak_ptr<c10d::Logger> logger) {
 // This function is only to be called from the autograd thread.
 void Reducer::autograd_hook(size_t index) {
   std::lock_guard<std::mutex> lock(this->mutex_);
-
+  // Local modules can also fire autograd hooks if user directly invokes
+  // backward on local module. In this case, don't run autograd hooks.
+  if (!in_ddp_backwards_) {
+    return;
+  }
   // Carry over thread local state from main thread. This allows for
   // thread-local flags such as profiler enabled to be configure correctly.
   at::ThreadLocalStateGuard g(thread_local_state_);
@@ -846,8 +850,8 @@ void Reducer::mark_variable_ready(size_t variable_index) {
   }
 }
 
-c10::intrusive_ptr<c10::ivalue::Future> Reducer::run_reduction_hook(
-    GradBucket grad_bucket) {
+c10::intrusive_ptr<c10::ivalue::Future> Reducer::run_comm_hook(
+    GradBucket& grad_bucket) {
   if (comm_hook_ == nullptr) {
     _AllReduceCommHookWithDivFactorState state(
         process_group_.get(), div_factor_);
@@ -881,7 +885,7 @@ void Reducer::all_reduce_bucket(Bucket& bucket) {
       bucket.replicas[0].offsets,
       bucket.replicas[0].lengths,
       bucket.replicas[0].sizes_vec);
-  bucket.future_work = run_reduction_hook(std::move(grad_bucket));
+  bucket.future_work = run_comm_hook(grad_bucket);
 }
 
 // Called when the bucket at the specified index is ready to be reduced.
@@ -1265,6 +1269,7 @@ void Reducer::search_unused_parameters(
 void Reducer::prepare_for_backward(
     const std::vector<torch::autograd::Variable>& outputs) {
   std::lock_guard<std::mutex> lock(mutex_);
+  in_ddp_backwards_ = true;
   ++num_backward_calls_;
   backward_compute_start_time_ = current_time_in_nanos();
   if (should_collect_runtime_stats()) {
@@ -1437,6 +1442,7 @@ void Reducer::finalize_backward() {
   // No longer require call to finalize after this function returns.
   TORCH_INTERNAL_ASSERT(require_finalize_);
   require_finalize_ = false;
+  in_ddp_backwards_ = false;
 
   // Unset allreduce division factor, as it may change in next backwards pass
   // when running with DDP join mode.

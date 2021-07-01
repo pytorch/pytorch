@@ -366,8 +366,8 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           &::c10d::Reducer::rebuild_buckets,
           py::call_guard<py::gil_scoped_release>())
       .def(
-          "get_bucket_tensors",
-          &::c10d::Reducer::get_bucket_tensors,
+          "get_grad_buckets",
+          &::c10d::Reducer::get_grad_buckets,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_push_all_rebuilt_params",
@@ -398,11 +398,11 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           &::c10d::Reducer::delay_all_reduce,
           py::call_guard<py::gil_scoped_release>())
       .def(
-          "_run_reduction_hook",
+          "_run_comm_hook",
           [](::c10d::Reducer& reducer, ::c10d::GradBucket& bucket)
               -> std::shared_ptr<jit::PythonFutureWrapper> {
             c10::intrusive_ptr<c10::ivalue::Future> fut =
-                reducer.run_reduction_hook(bucket);
+                reducer.run_comm_hook(bucket);
             return std::make_shared<jit::PythonFutureWrapper>(fut);
           },
           py::call_guard<py::gil_scoped_release>())

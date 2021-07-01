@@ -264,6 +264,16 @@ class UnusedParamTwoLinLayerNet(nn.Module):
         b = self.b(x)
         return (a, b)
 
+class UnusedNet(UnusedParamTwoLinLayerNet):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x, local):
+        if local:
+            return self.a(x)
+        else:
+            return self.b(x)
+
 
 class DictOutputModule(nn.Module):
     def __init__(self):
@@ -7256,7 +7266,7 @@ class DistributedTest:
                     ):
                         self.assertEqual(p, p_static)
 
-        def _verify_ddp_model(self, ddp_model, local_model):
+        def _verify_ddp_model(self, ddp_model, local_model=None):
             # Verify weights are appropriately synchronized.
             all_params = [None for _ in range(dist.get_world_size())]
             dist.all_gather_object(all_params, list(ddp_model.parameters()))
@@ -7265,7 +7275,7 @@ class DistributedTest:
                 for i, p in enumerate(param_list):
                     rank_0_param = rank_0_params[i]
                     self.assertTrue(torch.equal(rank_0_param.data.cpu(), p.data.cpu()))
-            if self.rank == 0:
+            if self.rank == 0 and local_model is not None:
                 local_params = list(local_model.parameters())
                 for dist_param, local_param in zip(rank_0_params, local_params):
                     self.assertTrue(torch.equal(dist_param.data.cpu(), local_param.data.cpu()))
@@ -7356,6 +7366,93 @@ class DistributedTest:
             self._test_ddp_bwd_with_retain_graph(
                 static_graph=True, find_unused_parameters=True
             )
+
+        @skip_if_lt_x_gpu(2)
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        def test_ddp_new_tensor_in_fwd(self):
+            # Test from https://github.com/pytorch/pytorch/issues/60733
+            class MyModel(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.fc1 = nn.Linear(10, 10, bias=False)
+                    self.fc2 = nn.Linear(10, 10, bias=False)
+
+                def __init_opt(self):
+                    param = next(self.parameters())
+                    opt = torch.randn(1, 10, device=param.device)
+                    return opt
+
+                def forward(self, x, opt_1, opt_2, opt_nested):
+                    x = F.relu(self.fc1(x))
+                    x = self.fc2(x)
+                    if opt_1 is None:
+                        opt_1 = self.__init_opt()
+                    if opt_2 is None:
+                        opt_2 = self.__init_opt()
+                    if opt_nested is None or not torch.is_tensor(opt_nested):
+                        opt_nested = self.__init_opt()
+                    # Test multiple tensors as well as newly created tensors
+                    # within a struct.
+                    return x, opt_1, opt_2, {"tensor": opt_nested}
+
+            model = MyModel().to(self.rank)
+            for find_unused in [True, False]:
+                ddp = DistributedDataParallel(
+                    model,
+                    device_ids=[self.rank],
+                    output_device=self.rank,
+                    broadcast_buffers=False,
+                    find_unused_parameters=find_unused,
+                )
+
+                opt = [None for _ in range(3)]
+                for i in range(2):
+                    ddp.zero_grad()
+                    x = torch.randn(1, 10, device=self.rank)
+                    out, opt[0], opt[1], opt[2] = ddp(
+                        x,
+                        opt_1=opt[0],
+                        opt_2=opt[1],
+                        opt_nested=opt[2]
+                    )
+                    for i in range(len(opt)):
+                        if torch.is_tensor(opt[i]):
+                            self.assertEqual(opt[i].grad_fn, None)
+                        else:
+                            self.assertEqual(opt[i]["tensor"].grad_fn, None)
+                    out.mean().backward()
+
+        @skip_if_lt_x_gpu(2)
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        def test_ddp_local_model(self):
+            rank = self.rank
+            torch.cuda.set_device(rank)
+            local_model = UnusedNet().cuda()
+            ddp_model = torch.nn.parallel.DistributedDataParallel(
+                local_model,
+                device_ids=[rank],
+                find_unused_parameters=True,
+            )
+            inp = torch.randn(5, 10).cuda()
+            # DDP fwd + bwd
+            out = ddp_model(inp, False)
+            out.sum().backward()
+            # Local model runs fwd + bwd
+            out = local_model(inp, True)
+            out.sum().backward()
+            # If hooks were not disabled for local model, next DDP fwd pass
+            # would fail, as require_finalize would've been set but DDP would
+            # not have reduced gradients.
+            out = ddp_model(inp, False)
+            out.sum().backward()
+            # Validate gradients are synchronized across ranks.
+            self._verify_ddp_model(ddp_model)
 
         @skip_if_lt_x_gpu(2)
         @unittest.skipIf(

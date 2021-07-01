@@ -890,14 +890,25 @@ class DistributedDataParallel(Module):
             # features such as: enqueue delay allreduce for static graph, support
             # multiple calls to backwards with retain_graph=True, and support
             # finding all parameters that will not receive gradient.
+            output_placeholders = [None for _ in range(len(output_tensor_list))]
+            # Do not touch tensors that have no grad_fn, which can cause issues
+            # such as https://github.com/pytorch/pytorch/issues/60733
+            for i, output in enumerate(output_tensor_list):
+                if torch.is_tensor(output) and output.grad_fn is None:
+                    output_placeholders[i] = output
+
             passthrough_tensor_list = _DDPSink.apply(
                 self.reducer,
                 state_dict,
                 *output_tensor_list,
             )
+            for i in range(len(output_placeholders)):
+                if output_placeholders[i] is None:
+                    output_placeholders[i] = passthrough_tensor_list[i]
+
             # Reconstruct output data structure.
             output = _tree_unflatten_with_rref(
-                passthrough_tensor_list, treespec, output_is_rref
+                output_placeholders, treespec, output_is_rref
             )
             return output
 
@@ -1015,13 +1026,13 @@ class DistributedDataParallel(Module):
         # ensures that we keep the same order in join mode, such as when bucket
         # order is rebuilt dynamically.
 
-        grad_buckets = self.reducer.get_bucket_tensors()
+        grad_buckets = self.reducer.get_grad_buckets()
         for grad_bucket in grad_buckets:
             # Joined processes contribute zero gradient. In the case that
             # divide_by_initial_world_size=True, we divide grads by the static
             # world size, if not, the dividing factor is reduced by the number
             # of joined processes.
-            work = self.reducer._run_reduction_hook(grad_bucket)
+            work = self.reducer._run_comm_hook(grad_bucket)
             comm_work.append(work)
         for work in comm_work:
             work.wait()
