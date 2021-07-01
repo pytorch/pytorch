@@ -2,12 +2,12 @@
 set -e
 
 echo "Running pre-commit flake8"
-python tools/flake8_hook.py
+python tools/linter/flake8_hook.py
 
 if [ $(which clang-tidy) ]
 then
   echo "Running pre-commit clang-tidy"
-  python tools/clang_tidy.py \
+  python tools/linter/clang_tidy.py \
     --paths torch/csrc \
     --diff HEAD \
     -g"-torch/csrc/jit/passes/onnx/helper.cpp" \
@@ -22,4 +22,4 @@ else
 fi
 
 echo "Running pre-commit clang-format"
-tools/git-clang-format HEAD~ --force
+tools/linter/git-clang-format HEAD~ --force
