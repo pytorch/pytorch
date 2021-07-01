@@ -177,14 +177,9 @@ def reshape_inference_rule(n: Node):
 @register_inference_rule(BatchNorm2d)
 def bn2d_inference_rule(n: Node, op_type):
     assert isinstance(n.args[0], Node)
-    arg_type = apply_matching(n.args[0].type, 4)
-    n.type = apply_matching(n.type, 4)
-
-    # we apply broadcasting rules and update the types
-    (new_arg, new_ntype) = broadcast_types(arg_type, n.type)
-    n.args[0].type = new_arg
-    n.type = new_ntype
+    n.args[0].type = apply_matching(n.args[0].type, 4)
     arg_type = n.args[0].type
+    n.type = apply_matching(n.type, 4)
 
     # we check the conditions on the incoming argument
     # and any existing annotation
