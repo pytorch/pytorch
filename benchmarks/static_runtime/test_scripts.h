@@ -134,15 +134,21 @@ const auto reshape_inplace_script = R"JIT(
 )JIT";
 
 const auto sigmoid_inplace_script = R"JIT(
-  def forward(self, inp: Tensor, shape: List[int]):
+  def forward(self, inp: Tensor):
       a = torch.sigmoid(inp, out=inp).clone()
       return (a)
 )JIT";
 
 const auto sigmoid_out_script = R"JIT(
-  def forward(self, inp: Tensor, shape: List[int]):
+  def forward(self, inp: Tensor):
       a = inp + inp
       b = torch.sigmoid(inp, out=a).clone()
+      return (b)
+)JIT";
+
+const auto sigmoid_script = R"JIT(
+  def forward(self, inp: Tensor):
+      b = torch.sigmoid(inp).clone()
       return (b)
 )JIT";
 
@@ -465,4 +471,14 @@ const auto nested_output_script_3 = R"JIT(
     g = {"d": d, "b": b}
     h = {"e": e, "f": f}
     return [g, h]
+)JIT";
+
+const auto bmm_script = R"JIT(
+  def forward(self, inp: Tensor, mat2: Tensor):
+   return torch.bmm(inp, mat2).clone()
+)JIT";
+
+const auto addmm_script = R"JIT(
+  def forward(self, inp: Tensor, mat1: Tensor, mat2: Tensor, beta: float, alpha: float):
+   return torch.addmm(inp, mat1, mat2, alpha=alpha, beta=beta).clone()
 )JIT";
