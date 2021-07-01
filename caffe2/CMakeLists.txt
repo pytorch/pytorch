@@ -995,17 +995,20 @@ endif()
 
 
 if(LINUX)
-  find_library(BREAKPAD_LIB breakpad_client)
-  find_path(BREAKPAD_INCLUDE_DIR breakpad)
+  find_library(BREAKPAD_LIB breakpad_client
+    PATHS /usr/local/lib/)
+  find_path(BREAKPAD_INCLUDE_DIR breakpad
+    PATHS /usr/local/include/)
+
   if(BREAKPAD_LIB AND BREAKPAD_INCLUDE_DIR)
     message(STATUS "found breakpad library")
     target_link_libraries(torch_cpu PUBLIC ${BREAKPAD_LIB})
     target_compile_definitions(torch_cpu PRIVATE ADD_BREAKPAD_SIGNAL_HANDLER)
     target_include_directories(torch_cpu PUBLIC ${BREAKPAD_INCLUDE_DIR}/breakpad)
   else()
-    if(BREAKPAD_LIB)
+    if(BREAKPAD_INCLUDE_DIR)
       message(STATUS "breakpad_client library not found")
-    elseif(BREAKPAD_INCLUDE_DIR)
+    elseif(BREAKPAD_LIB)
       message(STATUS "breakpad include path not found")
     else()
       message(STATUS "breakpad_client library and include path not found")
