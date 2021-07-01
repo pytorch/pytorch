@@ -4780,13 +4780,23 @@ for shape in [(1,), ()]:
         a = torch.randn(5, requires_grad=True)
 
         y = getFn(True).apply(a)
-        self.assertEqual((a, None), y.grad_fn.saved_tensors)
-        self.assertIsInstance(y.grad_fn._raw_saved_tensors[0], torch._C._autograd.SavedTensor)
-        # Because raw_saved_tensors[1] is really the raw saved tensors, we can't tell the
-        # underlying tensor is None without unpacking it
-        self.assertIsInstance(y.grad_fn._raw_saved_tensors[1], torch._C._autograd.SavedTensor)
 
+        self.assertEqual((a, None), y.grad_fn.saved_tensors)
+        saved = y.grad_fn._raw_saved_tensors
+        self.assertIsInstance(saved[0], torch._C._autograd.SavedTensor)
+        # We can't tell the underlying tensor is None without unpacking it
+        self.assertIsInstance(saved[1], torch._C._autograd.SavedTensor)
+
+        # We catch that error when the user calls register_hooks on it
+        with self.assertRaisesRegex(RuntimeError, "None is forbidden"):
+            saved[1].register_hooks(lambda x: x, lambda x: x)
+
+        saved[0].register_hooks(lambda x: x, lambda x: x)
         y.sum().backward()
+
+        # Using a reference to the SavedTensor object after the
+        # saved variables have been released can lead to undefined behavior
+        del saved
         with self.assertRaisesRegex(RuntimeError, "after they have already been freed"):
             y.grad_fn._raw_saved_tensors
         with self.assertRaisesRegex(RuntimeError, "after they have already been freed"):
