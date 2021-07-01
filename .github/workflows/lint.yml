@@ -332,7 +332,7 @@ jobs:
           set -eux
 
           if [ ! -d build ]; then
-            git submodule update --init --recursive
+            git submodule update --init --recursive --jobs 4
 
             export USE_NCCL=0
             export USE_DEPLOY=1
