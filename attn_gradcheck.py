@@ -22,14 +22,18 @@ class Attn(torch.autograd.Function):
 
         grad_output_vt_partial = grad_output.matmul(v.swapaxes(0, 1)).mul(partial)
 
-        # computes grad_output terms
-        grad_q = grad_output_vt_partial.matmul(k)
-        grad_k = grad_output_vt_partial.swapaxes(0, 1).matmul(q)
-        grad_v = attn.swapaxes(0, 1).matmul(grad_output)
+        (needs_q, needs_k, needs_v) = ctx.needs_input_grad
 
-        # adds grad_attn terms
-        grad_q.add_(grad_attn.mul(partial).matmul(k))
-        grad_k.add_(grad_attn.mul(partial).swapaxes(0, 1).matmul(q))
+        if needs_q:
+            grad_q = grad_output_vt_partial.matmul(k)
+            grad_q.add_(grad_attn.mul(partial).matmul(k))
+
+        if needs_k:
+            grad_k = grad_output_vt_partial.swapaxes(0, 1).matmul(q)
+            grad_k.add_(grad_attn.mul(partial).swapaxes(0, 1).matmul(q))
+
+        if needs_v:
+            grad_v = attn.swapaxes(0, 1).matmul(grad_output)
 
         return grad_q, grad_k, grad_v
 
