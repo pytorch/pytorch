@@ -1829,19 +1829,24 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
     assert low is None or low < 9, "low value too high!"
     assert high is None or high > -9, "high value too low!"
 
+    _extremals = [None, float('inf'), float('nan')]
+
     if dtype is torch.bool:
         result = torch.randint(0, 2, size, device=device, dtype=dtype)
     elif dtype is torch.uint8:
-        low = math.floor(0 if low is None else low)
-        high = math.ceil(10 if high is None else high)
+        ranges = [torch.iinfo(dtype).min, torch.iinfo(dtype).max]
+        low = math.floor(0 if low in _extremals or low < ranges[0] else low)
+        high = math.ceil(10 if high in _extremals or high >= ranges[1] else high)
         result = torch.randint(low, high, size, device=device, dtype=dtype)
     elif dtype in integral_types():
-        low =  math.floor(-9 if low is None else low)
-        high = math.ceil(10 if high is None else high)
+        ranges = [torch.iinfo(dtype).min, torch.iinfo(dtype).max]
+        low = math.floor(-9 if low in _extremals or low < ranges[0] else low)
+        high = math.ceil(10 if high in _extremals or high >= ranges[1] else high)
         result = torch.randint(low, high, size, device=device, dtype=dtype)
     elif dtype in floating_types_and(torch.half, torch.bfloat16):
-        low = -9 if low is None else low
-        high = 9 if high is None else high
+        ranges = [torch.finfo(dtype).min, torch.finfo(dtype).max]
+        low = -9 if low in _extremals or low < ranges[0] else low
+        high = 9 if high in _extremals or high >= ranges[1] else high
         span = high - low
         # Windows doesn't support torch.rand(bfloat16) on CUDA
         if IS_WINDOWS and torch.device(device).type == 'cuda' and dtype is torch.bfloat16:
@@ -1850,8 +1855,8 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
             result = torch.rand(size, device=device, dtype=dtype) * span + low
     else:
         assert dtype in complex_types()
-        low = -9 if low is None else low
-        high = 9 if high is None else high
+        low = -9 if low in _extremals else low
+        high = 9 if high in _extremals else high
         span = high - low
         float_dtype = torch.float if dtype is torch.cfloat else torch.double
         real = torch.rand(size, device=device, dtype=float_dtype) * span + low
