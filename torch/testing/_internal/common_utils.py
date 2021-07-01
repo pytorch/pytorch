@@ -2365,6 +2365,7 @@ def coalescedonoff(f):
         f(self, *args, **kwargs, coalesced=False)
     return wrapped
 
+
 @contextlib.contextmanager
 def disable_gc():
     if gc.isenabled():
@@ -2375,3 +2376,22 @@ def disable_gc():
             gc.enable()
     else:
         yield
+
+def has_breakpad():
+    # In CI we expect these builds to have breakpad included, if they don't
+    # then something is probably wrong with the build and we need the test
+    # to fail in order to be alerted
+    job_name = os.getenv("CIRCLE_JOB", os.getenv("BUILD_ENVIRONMENT", ""))
+    prefixes = [
+        "pytorch_linux_bionic_py3_8_gcc9_coverage",
+        "binary_linux_manywheel",
+    ]
+    if any([prefix in job_name for prefix in prefixes]):
+        return True
+
+    # If not on a special build, check that the library was actually linked in
+    try:
+        torch._C._get_minidump_directory()  # type: ignore[attr-defined]
+        return True
+    except RuntimeError as e:
+        return "Minidump handler is uninintialized, make sure to call" in str(e)
