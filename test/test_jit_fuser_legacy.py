@@ -1,6 +1,7 @@
 import sys
-sys.argv.append("--jit_executor=legacy")
-from test_jit_fuser import *  # noqa: F403
+
+from torch.testing._internal.common_utils import run_tests
 
 if __name__ == '__main__':
+    sys.argv.append("--jit_executor=legacy")
     run_tests()
