@@ -24,3 +24,13 @@ class ActivationReconstruction:
         valid_columns = list(max_outputs - pruned_outputs)
         reconstructed_tensor[:, valid_columns] = output
         return reconstructed_tensor
+
+
+class BiasHook:
+    def __init__(self, has_bias):
+        self.has_bias = has_bias
+
+    def __call__(self, module, input, output):
+        if self.has_bias:
+            return output + module._bias
+        return output
