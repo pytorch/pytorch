@@ -218,11 +218,31 @@ auto get_plans_from_find(const cudnnHandle_t handle, const cudnnBackendDescripto
     }
   });
   TORCH_CHECK_WITH(CUDAOutOfMemoryError, max_workspace_size < 1_TiB, "Not enough memory for workspace!");
-  Tensor workspace = at::empty({max_workspace_size}, x.options().dtype(kByte));
-  auto variantPack  = cudnn_frontend::VariantPackBuilder()
+  Tensor workspace;
+  bool remove_invalid = false;
+  while (max_workspace_size) {
+    try {
+      workspace = at::empty({max_workspace_size}, x.options().dtype(kByte));
+      break;
+    } catch (c10::CUDAOutOfMemoryError &e) {
+      max_workspace_size /= 2;
+      cudaGetLastError(); // clear CUDA error
+      remove_invalid = true;
+    }
+  }
+  if (remove_invalid) {
+    cudnn_frontend::executionPlans_t new_valid_plans;
+    for (auto &plan : valid_plans) {
+      if (plan.getWorkspaceSize() <= max_workspace_size) {
+        new_valid_plans.emplace_back(std::move(plan));
+      }
+    }
+    valid_plans = std::move(new_valid_plans);
+  }
+  auto variantPack = cudnn_frontend::VariantPackBuilder()
       .setDataPointers(3, data_ptrs)
-      .setWorkspacePointer(workspace.data_ptr())
       .setUids(3, uids)
+      .setWorkspacePointer(workspace.data_ptr())
       .build();
 
   auto options = cudnn_frontend::time_sorted_plan<cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_TILL_STABLE>(handle, std::move(valid_plans), variantPack);
