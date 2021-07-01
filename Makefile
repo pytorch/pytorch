@@ -116,4 +116,4 @@ toc:
 lint: flake8 mypy quick_checks cmakelint shellcheck
 
 quicklint: CHANGED_ONLY=--changed-only
-quicklint: mypy flake8 mypy quick_checks cmakelint shellcheck
+quicklint: mypy flake8 quick_checks cmakelint shellcheck

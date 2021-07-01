@@ -24,7 +24,7 @@ class Diff(TypedDict):
     hunks: List[Hunk]
 
 
-# adapted from the similar regex in tools/linter/clang_tidy.py
+# adapted from the similar regex in tools/linter/clang_tidy/run.py
 # @@ -start,count +start,count @@
 hunk_pattern = r'^@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s+@@'
 
