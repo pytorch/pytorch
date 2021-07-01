@@ -30,10 +30,5 @@ if [[ "$CIRCLE_BRANCH" == "master" ]] || [[ "$CIRCLE_BRANCH" == release/* ]]; th
   export BUILD_DEBUG_INFO=1
 fi
 
-pwd
-find /
-ls
-
-
 # Build the package
 SKIP_ALL_TESTS=1 "/builder/$build_script"
