@@ -761,7 +761,7 @@ CompositeImplicitAutograd[alias] (inactive): fn1 :: (Tensor _0) -> (Tensor _0) [
         self.assertEqual(0, len(C._dispatch_find_dangling_impls()))
 
     def test_find_dangling_impls_ext(self):
-        extension_path = os.path.dirname(os.path.abspath(__file__)) + "/cpp_extensions/dangling_impl_extension.cpp"
+        extension_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cpp_extensions', 'dangling_impl_extension.cpp')
         module = torch.utils.cpp_extension.load(
             name="dangling_impl_extension",
             sources=[
@@ -775,9 +775,9 @@ CompositeImplicitAutograd[alias] (inactive): fn1 :: (Tensor _0) -> (Tensor _0) [
         self.assertEqual(1, len(impls))
         self.assertEqual(
             '''\
-name: aten::foo
+name: __test::foo
 schema: (none)
-MSNPU: registered at {}:5 :: () -> () [ boxed unboxed ]
+CPU: registered at {}:5 :: () -> () [ boxed unboxed ]
 '''.format(extension_path),
             impls[0])
 
