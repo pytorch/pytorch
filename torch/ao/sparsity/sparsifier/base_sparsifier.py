@@ -2,7 +2,7 @@
 import abc
 import copy
 from collections import defaultdict
-from typing import Dict, Any
+from typing import Dict
 
 import torch
 from torch import nn
@@ -64,7 +64,7 @@ class BaseSparsifier(abc.ABC):
         if self.defaults is None:
             self.defaults = dict()
 
-        self.state = dict()
+        self.state = defaultdict(dict)
         self.module_groups = []
         self.enable_mask_update = True
 
@@ -93,7 +93,7 @@ class BaseSparsifier(abc.ABC):
         return format_string
 
     def _pack_state(self):
-        state: Dict[str, Any] = {}
+        state: Dict[str, Dict] = defaultdict(dict)
         for g in self.module_groups:
             parametrization = g['module'].parametrizations['weight']
             # original_weight = parametrization.original
@@ -111,8 +111,7 @@ class BaseSparsifier(abc.ABC):
             state[key]['mask'] = mask
             # Get all the tensors inside the module_group
             state[key].update(
-                {key: value for key, value in self.state.items()
-                    if key not in state[key]})
+                {key: value for key, value in self.state[key].items()})
         return state
 
     def state_dict(self):
@@ -150,7 +149,8 @@ class BaseSparsifier(abc.ABC):
                 p = FakeSparsity(torch.ones(layer.weight.shape))
                 parametrize.register_parametrization(layer, 'weight', p)
             if s.get('mask', None) is not None:
-                p.mask = s['mask']
+                mask = s.pop('mask')
+                p.mask = mask
 
             for mg in module_groups:
                 if mg['fqn'] == fqn:
