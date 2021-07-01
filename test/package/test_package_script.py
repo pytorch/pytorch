@@ -28,7 +28,7 @@ class TestPackageScript(PackageTestCase):
         scripted.proxy_mod = torch.jit.script(fake.NewModule())
 
         buffer = BytesIO()
-        with PackageExporter(buffer, verbose=False) as pe:
+        with PackageExporter(buffer) as pe:
             pe.intern("**")
             pe.save_pickle("model", "model.pkl", uses_interface)
         buffer.seek(0)
@@ -54,7 +54,7 @@ class TestPackageScript(PackageTestCase):
         # Simulate a package that contains a different version of the
         # interface, with the exact same name.
         buffer = BytesIO()
-        with PackageExporter(buffer, verbose=False) as pe:
+        with PackageExporter(buffer) as pe:
             pe.save_source_string(
                 fake.__name__,
                 dedent(
@@ -94,7 +94,7 @@ class TestPackageScript(PackageTestCase):
         import package_a.fake_script_class as fake
 
         buffer = BytesIO()
-        with PackageExporter(buffer, verbose=False) as pe:
+        with PackageExporter(buffer) as pe:
             pe.save_module(fake.__name__)
         buffer.seek(0)
 
@@ -118,7 +118,7 @@ class TestPackageScript(PackageTestCase):
         # Simulate a package that contains a different version of the
         # script class ,with the attribute `bar` instead of `foo`
         buffer = BytesIO()
-        with PackageExporter(buffer, verbose=False) as pe2:
+        with PackageExporter(buffer) as pe2:
             pe2.save_source_string(
                 fake.__name__,
                 dedent(

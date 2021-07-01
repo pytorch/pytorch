@@ -63,7 +63,7 @@ class TestMisc(PackageTestCase):
             """
         )
 
-        with PackageExporter(buffer, verbose=False) as he:
+        with PackageExporter(buffer) as he:
             import module_a
             import package_a
             import package_a.subpackage
@@ -101,7 +101,7 @@ class TestMisc(PackageTestCase):
         Test Directory's has_file() method.
         """
         buffer = BytesIO()
-        with PackageExporter(buffer, verbose=False) as he:
+        with PackageExporter(buffer) as he:
             import package_a.subpackage
 
             he.intern("**")
@@ -122,7 +122,7 @@ class TestMisc(PackageTestCase):
         buffer = BytesIO()
         obj = package_a.subpackage.PackageASubpackageObject()
 
-        with PackageExporter(buffer, verbose=False) as pe:
+        with PackageExporter(buffer) as pe:
             pe.intern("**")
             pe.save_pickle("obj", "obj.pkl", obj)
 
@@ -144,7 +144,7 @@ class TestMisc(PackageTestCase):
         buffer = BytesIO()
         obj = package_a.subpackage.PackageASubpackageObject()
 
-        with PackageExporter(buffer, verbose=False) as pe:
+        with PackageExporter(buffer) as pe:
             pe.intern("**")
             pe.save_pickle("obj", "obj.pkl", obj)
 
@@ -168,7 +168,7 @@ class TestMisc(PackageTestCase):
         buffer = BytesIO()
         obj = package_a.subpackage.PackageASubpackageObject()
 
-        with PackageExporter(buffer, verbose=False) as pe:
+        with PackageExporter(buffer) as pe:
             pe.intern("**")
             pe.save_pickle("obj", "obj.pkl", obj)
 
@@ -187,7 +187,7 @@ class TestMisc(PackageTestCase):
 
         buffer = BytesIO()
 
-        with PackageExporter(buffer, verbose=False) as pe:
+        with PackageExporter(buffer) as pe:
             pe.intern("**")
             pe.save_module(mod.__name__)
 
@@ -208,7 +208,7 @@ class TestMisc(PackageTestCase):
         buffer = BytesIO()
         mod = package_a.std_sys_module_hacks.Module()
 
-        with PackageExporter(buffer, verbose=False) as pe:
+        with PackageExporter(buffer) as pe:
             pe.intern("**")
             pe.save_pickle("obj", "obj.pkl", mod)
 

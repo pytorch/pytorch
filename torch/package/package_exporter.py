@@ -169,7 +169,6 @@ class PackageExporter:
         self,
         f: Union[str, Path, BinaryIO],
         importer: Union[Importer, Sequence[Importer]] = sys_importer,
-        verbose: bool = True,
     ):
         """
         Create an exporter.
@@ -179,8 +178,6 @@ class PackageExporter:
                 or a binary I/O object.
             importer: If a single Importer is passed, use that to search for modules.
                 If a sequence of importers are passsed, an ``OrderedImporter`` will be constructed out of them.
-            verbose: Print information about dependency resolution to stdout.
-                Useful for tracking down why certain files get included.
         """
         if isinstance(f, (Path, str)):
             f = str(f)
@@ -198,7 +195,6 @@ class PackageExporter:
         # - Each directed edge (u, v) means u depends on v.
         # - Nodes may contain metadata that describe how to write the thing to the zipfile.
         self.dependency_graph = DiGraph()
-        self.verbose = verbose
         self.script_module_serializer = torch._C.ScriptModuleSerializer(self.zip_file)
         self.storage_context = self.script_module_serializer.storage_context()
 
@@ -329,10 +325,6 @@ class PackageExporter:
             if self._module_exists(dep_module_name):
                 dependencies[dep_module_name] = True
 
-        if self.verbose:
-            dep_str = "".join(f"  {dep}\n" for dep in dependencies)
-            print(f"{module_name} depends on:\n{dep_str}\n")
-
         return list(dependencies.keys())
 
     def save_source_string(
@@ -400,20 +392,6 @@ class PackageExporter:
         except Exception:
             return False
 
-    def _write_dep_graph(self, failing_module=None):
-        edges = "\n".join(f'"{f}" -> "{t}";' for f, t in self.dependency_graph.edges)
-        failing = "" if failing_module is None else f'"{failing_module}" [color=red];'
-        template = f"""\
-digraph G {{
-rankdir = LR;
-node [shape=box];
-{failing}
-{edges}
-}}
-"""
-        arg = quote(template, safe="")
-        return f"https://dreampuf.github.io/GraphvizOnline/#{arg}"
-
     def _get_source_of_module(self, module: types.ModuleType) -> Optional[str]:
         filename = getattr(module, "__file__", None)
         result = (
@@ -435,11 +413,6 @@ node [shape=box];
             return
 
         if self._can_implicitly_extern(module_name):
-            if self.verbose:
-                print(
-                    f"implicitly adding {module_name} to external modules "
-                    f"since it is part of the standard library and is a dependency."
-                )
             self.dependency_graph.add_node(
                 module_name, action=_ModuleProviderAction.EXTERN, provided=True
             )
@@ -571,10 +544,6 @@ node [shape=box];
                     module, field = arg.split(" ")
                     if module not in all_dependencies:
                         all_dependencies.append(module)
-
-            if self.verbose:
-                dep_string = "".join(f"  {dep}\n" for dep in all_dependencies)
-                print(f"{resource} depends on:\n{dep_string}\n")
 
             for module_name in all_dependencies:
                 self.dependency_graph.add_edge(name_in_dependency_graph, module_name)
@@ -911,9 +880,6 @@ node [shape=box];
             with PackageExporter("file.zip") as e:
                 ...
         """
-        if self.verbose:
-            print(f"Dependency graph for exported package: \n{self._write_dep_graph()}")
-
         self._execute_dependency_graph()
 
         self.script_module_serializer.write_files()
