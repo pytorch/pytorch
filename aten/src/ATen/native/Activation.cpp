@@ -13,6 +13,7 @@
 
 #include <c10/util/irange.h>
 #include <ATen/native/mkldnn/Gelu.h>
+#include <ATen/native/mkldnn/Utils.h>
 
 namespace at {
 namespace meta {
@@ -312,7 +313,9 @@ bool use_mkldnn(const Tensor& input) {
     return false;
   }
   return (input.is_mkldnn()) || // input is mkldnn Tensor
-    (input.device().is_cpu() && ((input.scalar_type() == kBFloat16) || (input.scalar_type() == kFloat))); // input is dense layout and bfloat16/float32
+    (input.device().is_cpu() &&
+    (((input.scalar_type() == kBFloat16) && mkldnn_bf16_device_check()) ||
+    (input.scalar_type() == kFloat))); // input is dense layout and bfloat16/float32
 #endif
   return false;
 }

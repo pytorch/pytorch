@@ -190,15 +190,16 @@ void GeluKernelImpl(TensorIteratorBase& it) {
   if (it.numel() > GELU_MIN_ELEMENTS_FOR_MULTI_THREADING) {
     grain_size = it.numel() / at::get_num_threads();
   }
-  AT_DISPATCH_FLOATING_TYPES(it.dtype(), "GeluKernelImpl", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      ScalarType::BFloat16, it.dtype(), "GeluKernelImpl", [&]() {
     using Vec = vec::Vectorized<scalar_t>;
-    const Vec kAlphaVec(M_SQRT1_2);
-    const Vec kOneVec(1);
-    const Vec kPointFiveVec(0.5);
+    const Vec kAlphaVec(scalar_t(M_SQRT1_2));
+    const Vec kOneVec(scalar_t(1));
+    const Vec kPointFiveVec(scalar_t(0.5));
     cpu_kernel_vec(
         it,
         [](scalar_t x) {
-          constexpr scalar_t kAlpha = M_SQRT1_2;
+          const scalar_t kAlpha = scalar_t(M_SQRT1_2);
           return x * scalar_t(0.5) * (scalar_t(1) + std::erf(x * kAlpha));
         },
         [&](Vec x_vec) {
@@ -210,18 +211,19 @@ void GeluKernelImpl(TensorIteratorBase& it) {
 }
 
 void GeluBackwardKernelImpl(TensorIteratorBase& it) {
-  AT_DISPATCH_FLOATING_TYPES(it.dtype(), "GeluBackwardKernelImpl", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      ScalarType::BFloat16, it.dtype(), "GeluBackwardKernelImpl", [&]() {
     using Vec = vec::Vectorized<scalar_t>;
-    const Vec kAlphaVec(M_SQRT1_2);
-    const Vec kBetaVec(M_2_SQRTPI * M_SQRT1_2 * 0.5);
-    const Vec kOneVec(1);
-    const Vec kPointFiveVec(0.5);
-    const Vec kMinusPointFiveVec(-0.5);
+    const Vec kAlphaVec(scalar_t(M_SQRT1_2));
+    const Vec kBetaVec(scalar_t(M_2_SQRTPI * M_SQRT1_2 * 0.5));
+    const Vec kOneVec(scalar_t(1));
+    const Vec kPointFiveVec(scalar_t(0.5));
+    const Vec kMinusPointFiveVec(scalar_t(-0.5));
     cpu_kernel_vec(
         it,
         [](scalar_t dy, scalar_t x) {
-          constexpr scalar_t kAlpha = M_SQRT1_2;
-          constexpr scalar_t kBeta = M_2_SQRTPI * M_SQRT1_2 * 0.5;
+          const scalar_t kAlpha = scalar_t(M_SQRT1_2);
+          const scalar_t kBeta = M_2_SQRTPI * M_SQRT1_2 * scalar_t(0.5);
           const scalar_t cdf =
               scalar_t(0.5) * (scalar_t(1) + std::erf(x * kAlpha));
           const scalar_t pdf = kBeta * std::exp(x * x * scalar_t(-0.5));
