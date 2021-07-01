@@ -481,6 +481,8 @@ Other Operations
     cdist
     clone
     combinations
+    corrcoef
+    cov
     cross
     cummax
     cummin
