@@ -31,6 +31,7 @@ __all__ = [
     'norm',
     'meshgrid',
     'pca_lowrank',
+    'result_type',
     'split',
     'stft',
     'svd_lowrank',
@@ -1630,3 +1631,30 @@ lu.__doc__ = _lu_impl.__doc__
 
 def align_tensors(*tensors):
     raise RuntimeError('`align_tensors` not yet implemented.')
+
+def result_type(*arrays_and_dtypes):
+    tensors = []
+    scalars = []
+    dtypes = []
+    for x in arrays_and_dtypes:
+        if isinstance(x, (bool, int, float, complex)):
+            scalars.append(x)
+        elif isinstance(x, torch.dtype):
+            dtypes.append(x)
+        else:
+            tensors.append(x)
+    if tensors:
+        dtypes.append(_VF.result_type(tensors))
+    if scalars:
+        scalar_dtype = _VF._result_type_scalars(scalars)
+        if dtypes:
+            tensor_dtype = _VF._result_type_dtypes(dtypes)
+            return _VF.result_type(_VF.tensor([], dtype=tensor_dtype),
+                                   _VF.tensor(0, dtype=scalar_dtype).item())
+        else:
+            return scalar_dtype
+    else:
+        if dtypes:
+            return _VF._result_type_dtypes(dtypes)
+        else:
+            raise TypeError("at least one argument is required.")
