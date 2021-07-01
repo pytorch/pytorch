@@ -1359,52 +1359,7 @@ class TestCase(expecttest.TestCase):
 
         # Tensor x Tensor
         elif isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
-            debug_msg = ("Attempted to compare with different is_quantized settings: "
-                         f"Expected: {x.is_quantized}; Actual: {y.is_quantized}.")
-            super().assertEqual(x.is_quantized, y.is_quantized, msg=self._get_assert_msg(msg=msg, debug_msg=debug_msg))
-            if x.is_quantized and y.is_quantized:
-                # TODO: remove this special case in favor of calling torch.testing.assert_close directly
-                #  when https://github.com/pytorch/pytorch/pull/58926 has landed
-                self.assertEqual(x.qscheme(), y.qscheme(), atol=atol, rtol=rtol,
-                                 msg=msg, exact_dtype=exact_dtype,
-                                 exact_device=exact_device, exact_stride=exact_stride,
-                                 exact_is_coalesced=exact_is_coalesced)
-
-                if x.qscheme() == torch.per_tensor_affine:
-                    self.assertEqual(x.q_scale(), y.q_scale(), atol=atol, rtol=rtol,
-                                     msg=msg, exact_dtype=exact_dtype,
-                                     exact_device=exact_device, exact_stride=exact_stride,
-                                     exact_is_coalesced=exact_is_coalesced)
-                    self.assertEqual(x.q_zero_point(), y.q_zero_point(),
-                                     atol=atol, rtol=rtol, msg=msg,
-                                     exact_dtype=exact_dtype, exact_device=exact_device, exact_stride=exact_stride,
-                                     exact_is_coalesced=exact_is_coalesced)
-                elif x.qscheme() == torch.per_channel_affine:
-                    self.assertEqual(x.q_per_channel_scales(), y.q_per_channel_scales(), atol=atol, rtol=rtol,
-                                     msg=msg, exact_dtype=exact_dtype,
-                                     exact_device=exact_device, exact_stride=exact_stride,
-                                     exact_is_coalesced=exact_is_coalesced)
-                    self.assertEqual(x.q_per_channel_zero_points(), y.q_per_channel_zero_points(),
-                                     atol=atol, rtol=rtol, msg=msg,
-                                     exact_dtype=exact_dtype, exact_device=exact_device, exact_stride=exact_stride,
-                                     exact_is_coalesced=exact_is_coalesced)
-                    self.assertEqual(x.q_per_channel_axis(), y.q_per_channel_axis(),
-                                     atol=atol, rtol=rtol, msg=msg,
-                                     exact_dtype=exact_dtype, exact_device=exact_device, exact_stride=exact_stride,
-                                     exact_is_coalesced=exact_is_coalesced)
-
-                result, debug_msg_compare = self._compareTensors(x.int_repr().to(torch.int32),
-                                                                 y.int_repr().to(torch.int32),
-                                                                 atol=atol, rtol=rtol,
-                                                                 exact_dtype=exact_dtype,
-                                                                 exact_device=exact_device,
-                                                                 exact_stride=exact_stride)
-
-                if not result:
-                    assert debug_msg_compare is not None
-                    debug_msg = "Quantized representations failed to compare as equal! " + debug_msg_compare
-                super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
-            elif x.dtype == torch.bool and y.dtype == torch.bool:
+            if x.dtype == torch.bool and y.dtype == torch.bool:
                 # TODO: remove this special case in favor of calling torch.testing.assert_close directly
                 #  when https://github.com/pytorch/pytorch/pull/60536 has landed
                 result, msg = self._compareTensors(
