@@ -1,5 +1,5 @@
 import torch
-from .. import _functional as F
+from . import _functional as F
 from ..optimizer import Optimizer
 
 class Adagrad(Optimizer):
@@ -82,33 +82,14 @@ class Adagrad(Optimizer):
                     # record the step after step update
                     state_steps.append(state['step'])
 
-            weight_decay = group['weight_decay']
-            lr = group['lr']
-            lr_decay = group['lr_decay']
-
-            if weight_decay != 0:
-                if has_sparse_grad:
-                    raise RuntimeError("weight_decay option is not compatible with sparse gradients")
-                torch._foreach_add_(grads, params_with_grad, alpha=weight_decay)
-
-            minus_clr = [-lr / (1 + (step - 1) * lr_decay) for step in state_steps]
-
-            if has_sparse_grad:
-                # sparse is not supported by multi_tensor. Fall back to optim.adagrad
-                # implementation.
-                F.adagrad(params_with_grad,
-                          grads,
-                          state_sums,
-                          state_steps,
-                          lr=lr,
-                          weight_decay=weight_decay,
-                          lr_decay=lr_decay,
-                          eps=group['eps'])
-            else:
-                torch._foreach_addcmul_(state_sums, grads, grads, value=1)
-                std = torch._foreach_add(torch._foreach_sqrt(state_sums), group['eps'])
-                torch._foreach_addcdiv_(
-                    params_with_grad, torch._foreach_mul(grads, minus_clr), std
-                )
+            F.adagrad(params_with_grad,
+                      grads,
+                      state_sums,
+                      state_steps,
+                      has_sparse_grad,
+                      lr=group['lr'],
+                      weight_decay=group['weight_decay'],
+                      lr_decay=group['lr_decay'],
+                      eps=group['eps'])
 
         return loss

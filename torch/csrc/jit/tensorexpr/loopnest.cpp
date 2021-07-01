@@ -1529,15 +1529,35 @@ bool areEqual(const Expr* expr1, const Expr* expr2) {
   return diff->isConstant() && (immediateAs<int>(diff) == 0);
 };
 
-bool areEqual(
+bool doesExprContainAnyVar(
+    const Expr* expr,
+    const std::unordered_set<const Var*>& vars) {
+  for (auto* v : VarFinder::find(expr)) {
+    if (vars.count(v)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Returns true if the given list of indices refer to two accesses
+// that are loop-independent w.r.t. the given list of outer loop
+// variables.
+bool areIndicesLoopIndependent(
     const std::vector<const Expr*>& expr_list1,
-    const std::vector<const Expr*>& expr_list2) {
+    const std::vector<const Expr*>& expr_list2,
+    const std::unordered_set<const Var*>& outer_loop_vars) {
   if (expr_list1.size() != expr_list2.size()) {
     return false;
   }
   for (size_t i = 0; i < expr_list1.size(); ++i) {
-    if (!areEqual(expr_list1[i], expr_list2[i])) {
-      return false;
+    auto expr1 = expr_list1[i];
+    auto expr2 = expr_list2[i];
+    if (doesExprContainAnyVar(expr1, outer_loop_vars) ||
+        doesExprContainAnyVar(expr2, outer_loop_vars)) {
+      if (!areEqual(expr1, expr2)) {
+        return false;
+      }
     }
   }
   return true;
@@ -1546,17 +1566,38 @@ bool areEqual(
 bool LoopNest::hasLoopCarriedDependence(For* loop) {
   analysis::MemDependencyChecker analyzer;
   loop->accept(&analyzer);
+
+  std::unordered_set<const Var*> outer_loop_vars = {loop->var()};
+  auto outer_loops = LoopNest::getEnclosingLoopNest(loop);
+  for (auto l : outer_loops) {
+    outer_loop_vars.insert(l->var());
+  }
+
   // High-level algorithm to check if two accesses to a buffer, A and B, one of
   // which is a Store, result in a loop-carried dependence:
-  //   1. If the index expressions are equal in A and B, then that is a
-  //      loop-independent dependence.
-  //   2. If the index expressions are not equal in A and B:
+  //   1. For every pair of index expressions, Ai and Bi, that refer to a dim
+  //      of A and B, if one of the following conditions are satisfied:
+  //       a) Ai and Bi are equal (OR)
+  //       b) Both Ai and Bi do not contain any outer-loop variables
+  //      then, the dependence between A and B is a loop-independent
+  //      dependence. This is because, in the case of b), those index
+  //      expressions do not affect the ordering of accesses A and B.
+  //   2. If condition 1) is not satisfied:
   //       a) if the bounds on the accesses overlap, then this is a
   //          loop-carried dependence.
   //       b) if the bounds on the accesses do not overlap, then there is no
   //          dependence.
   //
+  // NOTE: Since we check for equality of index expressions whenever outer
+  //     loop variables are involved, this may incorrectly report some cases as
+  //     having a loop-carried dependence. It is impractical to handle all
+  //     possible cases here, so, we are being conservative and allow for
+  //     some false positives. While this will prevent some loop fusion
+  //     opportunities, that should be a small fraction of the cases that are
+  //     allowed.
+  //
   // Implementation:
+  //
   // For every pair of statements, S1 and S2, in the loop:
   //  * Get the loads and stores in S1 and S2.
   //  * For every store in S1 and load in S2 to the same buffer, if the index
@@ -1578,7 +1619,8 @@ bool LoopNest::hasLoopCarriedDependence(For* loop) {
       for (auto& aStore : aStores) {
         for (auto& bLoad : bLoads) {
           if (aStore->buf() == bLoad->buf()) {
-            if (!areEqual(aStore->indices(), bLoad->indices())) {
+            if (!areIndicesLoopIndependent(
+                    aStore->indices(), bLoad->indices(), outer_loop_vars)) {
               if (isOverlapping(analyzer, aStore, bLoad)) {
                 return true;
               }
@@ -1590,7 +1632,8 @@ bool LoopNest::hasLoopCarriedDependence(For* loop) {
       for (auto& bStore : bStores) {
         for (auto& aLoad : aLoads) {
           if (bStore->buf() == aLoad->buf()) {
-            if (!areEqual(bStore->indices(), aLoad->indices())) {
+            if (!areIndicesLoopIndependent(
+                    bStore->indices(), aLoad->indices(), outer_loop_vars)) {
               if (isOverlapping(analyzer, bStore, aLoad)) {
                 return true;
               }
@@ -1602,7 +1645,8 @@ bool LoopNest::hasLoopCarriedDependence(For* loop) {
       for (auto& aStore : aStores) {
         for (auto& bStore : bStores) {
           if (aStore->buf() == bStore->buf()) {
-            if (!areEqual(aStore->indices(), bStore->indices())) {
+            if (!areIndicesLoopIndependent(
+                    aStore->indices(), bStore->indices(), outer_loop_vars)) {
               if (isOverlapping(analyzer, aStore, bStore)) {
                 return true;
               }
@@ -1926,6 +1970,68 @@ std::vector<For*> LoopNest::reorder(
   return result;
 }
 
+For* LoopNest::getLoopAt(For* root, const std::vector<int>& indices) const {
+  if (indices.empty()) {
+    return root;
+  }
+  if (root == nullptr) {
+    throw malformed_input("root loop is null");
+  }
+
+  For* curr = root;
+  for (auto i : indices) {
+    if (i < 0 || curr->body()->nstmts() <= i) {
+      return nullptr;
+    }
+    std::list<Stmt*>::iterator stmtp = curr->body()->begin();
+    std::advance(stmtp, i);
+    curr = dynamic_cast<For*>(*stmtp);
+    if (curr == nullptr) {
+      return nullptr;
+    }
+  }
+
+  return curr;
+}
+
+For* LoopNest::tile(For* x, For* y, int x_factor, int y_factor) {
+  auto parent = dynamic_cast<Block*>(x->get_parent());
+  if (parent == nullptr) {
+    throw malformed_input("parent of the loops must be a Block");
+  }
+  if (!areLoopsPerfectlyNested({x, y})) {
+    throw malformed_input("two loops must be perfectly nested");
+  }
+
+  // Split x, y axes by x_factor and y_factor
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  For *yi, *ytail;
+  splitWithTail(y, y_factor, &yi, &ytail);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  For *xi, *xtail;
+  splitWithTail(x, x_factor, &xi, &xtail);
+
+  // Distribute xi over yo and ytail so we can manipulate the loop order of {xo,
+  // xi, yo, yi}
+  auto loops = distributeLoop(xi);
+
+  // For {xi, yo, yi}, reorder the axes to be yo, xi, yi
+  xi = loops.front();
+  For* yo = dynamic_cast<For*>(xi->body()->stmts().front());
+  CHECK(yo);
+  reorder({xi, yo}, {1, 0});
+
+  // For {xi, ytail}, reorder the axes to be ytail, xi
+  if (loops.size() == 2) {
+    xi = loops.back();
+    ytail = dynamic_cast<For*>(xi->body()->stmts().front());
+    CHECK(ytail);
+    reorder({xi, ytail}, {1, 0});
+  }
+
+  return xtail;
+}
+
 bool LoopNest::areLoopsPerfectlyNested(const std::vector<For*>& loops) {
   if (loops.size() < 2) {
     return true;
@@ -2093,10 +2199,6 @@ bool LoopNest::flatten(const std::vector<For*>& loops) {
 }
 
 void LoopNest::compressBuffer(Buf* buf, Stmt* stmt) {
-  if (buf->initializer()) {
-    throw malformed_input("Can't compress buffer whose initializer is set");
-  }
-
   // Loop iterations in NNC IR do not follow sequential semantics by default.
   // In other words, the iterations of the loops could be executed in any
   // random order without affecting correctness. This constraint in turn

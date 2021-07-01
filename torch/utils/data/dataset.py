@@ -272,10 +272,10 @@ class ConcatDataset(Dataset[T_co]):
 
 
 class ChainDataset(IterableDataset):
-    r"""Dataset for chainning multiple :class:`IterableDataset` s.
+    r"""Dataset for chaining multiple :class:`IterableDataset` s.
 
     This class is useful to assemble different existing dataset streams. The
-    chainning operation is done on-the-fly, so concatenating large-scale
+    chaining operation is done on-the-fly, so concatenating large-scale
     datasets with this class will be efficient.
 
     Args:

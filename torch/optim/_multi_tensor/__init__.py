@@ -7,7 +7,9 @@ future.
 
 from .adam import Adam
 from .adamw import AdamW
+from .nadam import NAdam
 from .sgd import SGD
+from .radam import RAdam as RAdam
 from .rmsprop import RMSprop
 from .rprop import Rprop
 from .asgd import ASGD
@@ -18,6 +20,8 @@ from .adagrad import Adagrad
 del adam
 del adamw
 del sgd
+del radam
+del nadam
 del rmsprop
 del rprop
 del asgd
