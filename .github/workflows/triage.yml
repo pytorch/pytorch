@@ -10,13 +10,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        name:
-          - JIT
-          - Quantization
+        include:
+          - name: JIT
+            column: Need triage
+          - name: Quantization
+            column: Need Triage
     steps:
       - uses: actions/github-script@v2
         env:
           NAME: ${{ matrix.name }}
+          COLUMN: ${{ matrix.column }}
         with:
           github-token: ${{secrets.GITHUB_TOKEN}}
           script: |
@@ -45,7 +48,7 @@ jobs:
 
             // Get project column ID.
             const kProjectName = `${kName} Triage`;
-            const kColumnName = "Need triage";
+            const kColumnName = process.env.COLUMN;
 
             // Query all projects in the repository.
             // TODO: Support pagination once there are > 30 projects.
