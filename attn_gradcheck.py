@@ -3,6 +3,9 @@ import torch
 class Attn(torch.autograd.Function):
     @staticmethod
     def forward(ctx, q, k, v):
+        assert q.size() == k.size()
+        assert q.size()[0] == v.size()[0]
+
         attn = torch.matmul(q, k.swapaxes(0, 1))
         attn = torch.tanh(attn)
         output = torch.matmul(attn, v)
@@ -17,14 +20,20 @@ class Attn(torch.autograd.Function):
         # computes and stores sech^2(qk')
         partial = 1 / torch.cosh(q.matmul(k.swapaxes(0, 1))).pow(2)
 
-        # computes grad_output terms
-        grad_q = grad_output.matmul(v.swapaxes(0, 1)).mul(partial).matmul(k)
-        grad_k = grad_output.matmul(v.swapaxes(0, 1)).mul(partial).swapaxes(0, 1).matmul(q)
-        grad_v = attn.swapaxes(0, 1).matmul(grad_output)
+        grad_output_vt_partial = grad_output.matmul(v.swapaxes(0, 1)).mul(partial)
 
-        # adds grad_attn terms
-        grad_q.add_(grad_attn.mul(partial).matmul(k))
-        grad_k.add_(grad_attn.mul(partial).swapaxes(0, 1).matmul(q))
+        (needs_q, needs_k, needs_v) = ctx.needs_input_grad
+
+        if needs_q:
+            grad_q = grad_output_vt_partial.matmul(k)
+            grad_q.add_(grad_attn.mul(partial).matmul(k))
+
+        if needs_k:
+            grad_k = grad_output_vt_partial.swapaxes(0, 1).matmul(q)
+            grad_k.add_(grad_attn.mul(partial).swapaxes(0, 1).matmul(q))
+
+        if needs_v:
+            grad_v = attn.swapaxes(0, 1).matmul(grad_output)
 
         return grad_q, grad_k, grad_v
 
@@ -43,4 +52,3 @@ print(test)
 
 test = gradgradcheck(attn, (q, k, v), eps=1e-6, atol=1e-4)
 print(test)
-
