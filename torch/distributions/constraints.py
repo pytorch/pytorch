@@ -465,7 +465,7 @@ class _PositiveDefinite(Constraint):
     def check(self, value):
         # Assumes that the matrix or batch of matrices in value are symmetric
         # info == 0 means no error, that is, it's SPD
-        return torch.linalg.cholesky_ex(value).info.eq(0)
+        return torch.linalg.cholesky_ex(value).info.eq(0).unsqueeze(0)
 
 
 class _Cat(Constraint):
