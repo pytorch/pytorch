@@ -36,7 +36,8 @@ from caffe2.python.operator_test.torch_integration_test import (generate_rois_ro
 import onnx
 import caffe2.python.onnx.backend as c2
 
-from test_pytorch_common import skipIfTravis, skipIfNoLapack, skipIfNoCuda
+from torch.testing._internal.common_utils import skipIfNoLapack
+from test_pytorch_common import skipIfTravis, skipIfNoCuda
 from test_pytorch_common import BATCH_SIZE, RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 from test_pytorch_common import skipIfUnsupportedOpsetVersion, skipIfUnsupportedMinOpsetVersion
 import verify

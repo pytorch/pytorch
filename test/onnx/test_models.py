@@ -18,7 +18,8 @@ from model_defs.dcgan import _netD, _netG, weights_init, bsz, imgsz, nz
 from model_defs.op_test import DummyNet, ConcatNet, PermuteNet, PReluNet, FakeQuantNet
 from model_defs.emb_seq import EmbeddingNetwork1, EmbeddingNetwork2
 
-from test_pytorch_common import TestCase, run_tests, skipIfNoLapack, skipIfUnsupportedMinOpsetVersion, disableScriptTest
+from torch.testing._internal.common_utils import TestCase, run_tests, skipIfNoLapack
+from test_pytorch_common import skipIfUnsupportedMinOpsetVersion, disableScriptTest
 
 import torch
 import torch.onnx

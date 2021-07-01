@@ -8,7 +8,7 @@ from pytorch_helper import PyTorchModule
 import unittest
 from caffe2.python.core import workspace
 
-from test_pytorch_common import skipIfNoLapack
+from torch.testing._internal.common_utils import skipIfNoLapack
 
 
 class TestCaffe2Backend(unittest.TestCase):

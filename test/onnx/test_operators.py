@@ -1,5 +1,5 @@
-
-from test_pytorch_common import TestCase, run_tests, flatten, skipIfNoLapack
+from test_pytorch_common import flatten
+from torch.testing._internal.common_utils import TestCase, run_tests, skipIfNoLapack
 
 import torch
 import torch.onnx

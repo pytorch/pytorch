@@ -1,4 +1,4 @@
-from test_pytorch_common import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests
 
 import torch
 import torch.onnx
