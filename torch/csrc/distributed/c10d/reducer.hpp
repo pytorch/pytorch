@@ -110,8 +110,10 @@ class TORCH_API Reducer {
       GradBucket& grad_bucket);
 
   // Returns gradient buckets in sequential order of buckets_. This is the order
-  // in which buckets are reduced across processes.
-  std::vector<c10d::GradBucket> get_grad_buckets() const;
+  // in which buckets are reduced across processes. If return_zero_tensors=true,
+  // will return zero tensors of the same shape instead of the true tensors.
+  std::vector<c10d::GradBucket> get_grad_buckets(
+      bool return_zero_tensors = true) const;
 
   // Rebuild buckets based on rebuilt_params_ and rebuilt_param_indices_
   // according to when tensors received grads in the backward pass.

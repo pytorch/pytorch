@@ -1026,7 +1026,9 @@ class DistributedDataParallel(Module):
         # ensures that we keep the same order in join mode, such as when bucket
         # order is rebuilt dynamically.
 
-        grad_buckets = self.reducer.get_grad_buckets()
+        # Returns grad_buckets in order, but real tensors are substituted with
+        # zero tensors of the same shape.
+        grad_buckets = self.reducer._get_zeros_like_grad_buckets()
         for grad_bucket in grad_buckets:
             # Joined processes contribute zero gradient. In the case that
             # divide_by_initial_world_size=True, we divide grads by the static
