@@ -22,6 +22,10 @@ from .lbfgs import LBFGS
 from . import lr_scheduler
 from . import swa_utils
 
+
+Optimizer.__module__ = "torch.optim"
+
+
 del adadelta
 del adagrad
 del adam

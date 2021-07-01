@@ -5,6 +5,9 @@ from . import init
 from . import utils
 
 
+Module.__module__ = "torch.nn"
+
+
 def factory_kwargs(kwargs):
     r"""
     Given kwargs, returns a canonicalized dict of factory kwargs that can be directly passed
