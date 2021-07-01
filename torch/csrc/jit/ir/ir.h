@@ -1411,12 +1411,10 @@ struct WithInsertPoint {
  * the new one, and restores the original scope when the object is destroyed.
  */
 struct WithCurrentScope {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   WithCurrentScope(Graph& g, ScopePtr scope)
       : graph_(&g), prev_scope_(g.current_scope()) {
     g.set_current_scope(std::move(scope));
   }
-  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~WithCurrentScope() {
     graph_->set_current_scope(prev_scope_);
   }
