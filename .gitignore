@@ -306,3 +306,6 @@ bazel-*
 
 # core dump files
 core.*
+
+# Generated if you use the pre-commit script for clang-tidy
+pr.diff
