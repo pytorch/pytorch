@@ -96,12 +96,36 @@ jobs:
           export IMAGE_NAME=${DOCKER_IMAGE_BASE#308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/}
           cd .circleci/docker && ./build_docker.sh
 
-  build:
+  generate-test-matrix:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    runs-on: ubuntu-18.04
+    env:
+      NUM_TEST_SHARDS: 1
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    container:
+      image: python:3.9
+    steps:
+      - name: Clone pytorch/pytorch
+        uses: actions/checkout@v2
+      - name: Generating test matrix
+        id: set-matrix
+        run: |
+          # outputting for debugging purposes
+          MATRIX=$(python .github/scripts/generate_pytorch_test_matrix.py)
+          echo "${MATRIX}"
+          echo "::set-output name=matrix::${MATRIX}"
+
+  build-and-test:
     runs-on: linux.2xlarge
-    needs: calculate-docker-image
+    needs:
+      - calculate-docker-image
+      - generate-test-matrix
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
-      JOB_BASE_NAME: pytorch-linux-xenial-py3.6-gcc7-bazel-test-build
+      JOB_BASE_NAME: pytorch-linux-xenial-py3.6-gcc7-bazel-test-build-and-test
+      NUM_TEST_SHARDS: 1
+      TEST_CONFIG: ${{ matrix.test_config }}
     steps:
       - name: Log in to ECR
         run: |
@@ -142,6 +166,10 @@ jobs:
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}" \
             sh -c 'sudo chown -R jenkins . && sudo chown -R jenkins /dev && .jenkins/pytorch/build.sh'
+      - name: Chown workspace
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - name: Display and upload binary build size statistics (Click Me)
         # temporary hack: set CIRCLE_* vars, until we update
         # tools/stats/print_test_stats.py to natively support GitHub Actions
@@ -158,67 +186,6 @@ jobs:
           export COMMIT_TIME
           pip3 install requests
           python3 .circleci/scripts/upload_binary_size_to_scuba.py || exit 0
-      - name: Chown workspace
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean up docker images
-        if: always()
-        run: |
-          # Prune all of the docker images
-          docker system prune -af
-
-  generate-test-matrix:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: ubuntu-18.04
-    env:
-      NUM_TEST_SHARDS: 1
-    outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
-    container:
-      image: python:3.9
-    steps:
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
-      - name: Generating test matrix
-        id: set-matrix
-        run: |
-          # outputting for debugging purposes
-          MATRIX=$(python .github/scripts/generate_pytorch_test_matrix.py)
-          echo "${MATRIX}"
-          echo "::set-output name=matrix::${MATRIX}"
-
-  test:
-    runs-on: linux.2xlarge
-    needs:
-      - calculate-docker-image
-      - build
-      - generate-test-matrix
-    strategy:
-      matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
-      fail-fast: false
-    env:
-      DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
-      JOB_BASE_NAME: pytorch-linux-xenial-py3.6-gcc7-bazel-test-test
-      NUM_TEST_SHARDS: 1
-      TEST_CONFIG: ${{ matrix.test_config }}
-    steps:
-      - name: Log in to ECR
-        run: |
-          aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
-          bash /tmp/ecr-login.sh
-          rm /tmp/ecr-login.sh
-      - name: Chown workspace
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)/../":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Checkout PyTorch
-        uses: actions/checkout@v2
-        with:
-          submodules: recursive
-      - name: Pull docker image
-        run: |
-          docker pull "${DOCKER_IMAGE}"
       - name: Determine shm-size
         run: |
           shm_size="1g"
@@ -289,8 +256,6 @@ jobs:
       - name: Clean up docker images
         if: always()
         run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
           # Prune all of the docker images
           docker system prune -af
 
@@ -302,7 +267,7 @@ jobs:
   render_test_results:
     if: always()
     needs:
-      - test
+      - build-and-test
     runs-on: ubuntu-18.04
     steps:
       - name: Checkout PyTorch
