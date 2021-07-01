@@ -518,6 +518,11 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_codegen.cpp PROPERTIES COMPILE_FLAGS -Wno-init-list-lifetime)
   endif()
 
+  # Pass path to PocketFFT
+  if(AT_POCKETFFT_ENABLED)
+    set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/mkl/SpectralOps.cpp PROPERTIES INCLUDE_DIRECTORIES "${POCKETFFT_INCLUDE_DIR}")
+  endif()
+
   if(NOT INTERN_DISABLE_MOBILE_INTERP)
     set(MOBILE_SRCS
        ${TORCH_SRC_DIR}/csrc/jit/mobile/function.cpp
