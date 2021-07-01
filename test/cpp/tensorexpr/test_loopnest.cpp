@@ -5869,6 +5869,180 @@ TEST(LoopNest, fuseLoopsWithReductions) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(LoopNest, fuseLoopsWith2DReductions) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 20; i++) {
+  //     for (int j = 0; j < 50; j++) {
+  //       A[i,j] = 0
+  //       for (int k = 0; k < 100; k++) {
+  //         A[i,j] = A[i,j] + B[i,j,k];
+  //       }
+  //     }
+  //   }
+  //   for (int m = 0; m < 20; m++) {
+  //     for (int n = 0; n < 40; n++) {
+  //       C[m,n] = A[m,n];
+  //     }
+  //   }
+  BufHandle a_buf("A", {20, 50}, kInt);
+  BufHandle b_buf("B", {20, 50, 100}, kInt);
+  BufHandle c_buf("C", {20, 40}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle k("k", kInt);
+  VarHandle m("m", kInt);
+  VarHandle n("n", kInt);
+  auto initA = Store::make(a_buf, {i, j}, 0);
+  auto sumA = Store::make(
+      a_buf,
+      {i, j},
+      Add::make(Load::make(a_buf, {i, j}), Load::make(b_buf, {i, j, k})));
+  auto forK = For::make(k, 0, 100, sumA);
+  auto forJ = For::make(j, 0, 50, Block::make({initA, forK}));
+  auto forI = For::make(i, 0, 20, forJ);
+  auto storeC = Store::make(c_buf, {m, n}, Load::make(a_buf, {m, n}));
+  auto forM = For::make(m, 0, 20, For::make(n, 0, 40, storeC));
+  auto par = Block::make({forI, forM});
+
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  For* fused_loop;
+  ASSERT_TRUE(LoopNest::fuseLoops({forI, forM}, &fused_loop));
+
+  std::ostringstream oss;
+  oss << *par;
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT: for (int j
+# CHECK-NEXT: A[i, j] =
+# CHECK-NEXT: for (int k
+# CHECK-NEXT: A[i, j] = (A[i, j]) +
+# CHECK: for (int n
+# CHECK-NEXT: C[i, n] = A[i, n]
+# CHECK-NOT: for (
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  // The fused loop must be the same as the first loop.
+  ASSERT_EQ(fused_loop, forI);
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(LoopNest, fuseLoopsWithComplexIndices) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 20; i++) {
+  //     for (int j = 0; j < 20; j++) {
+  //       A[i,j*20+j+2] = i + j;
+  //     }
+  //   }
+  //   for (int m = 0; m < 20; m++) {
+  //     for (int n = 0; n < 20; n++) {
+  //       B[m,n] = A[m,n*20+n+2];
+  //     }
+  //   }
+  BufHandle a_buf("A", {20, 400}, kInt);
+  BufHandle b_buf("B", {20, 400}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle m("m", kInt);
+  VarHandle n("n", kInt);
+  auto writeA = Store::make(a_buf, {i, j * 20 + j + 2}, i + j);
+  auto forI = For::make(i, 0, 20, For::make(j, 0, 20, writeA));
+  auto storeB =
+      Store::make(b_buf, {m, n}, Load::make(a_buf, {m, n * 20 + n + 2}));
+  auto forM = For::make(m, 0, 20, For::make(n, 0, 20, storeB));
+  auto par = Block::make({forI, forM});
+
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  For* fused_loop;
+  ASSERT_TRUE(LoopNest::fuseLoops({forI, forM}, &fused_loop));
+
+  std::ostringstream oss;
+  oss << *par;
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT: for (int j
+# CHECK-NEXT: A[i, (j * 20 + j) + 2] = i + j
+# CHECK: for (int n
+# CHECK-NEXT: B[i, n] = A[i, (n * 20 + n) + 2]
+# CHECK-NOT: for (
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  // The fused loop must be the same as the first loop.
+  ASSERT_EQ(fused_loop, forI);
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(LoopNest, fuseLoopsWithMixedLoopVarsAsIndices) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 20; i++) {
+  //     for (int j = 0; j < 20; j++) {
+  //       A[i,i*20+j] = i + j;
+  //     }
+  //   }
+  //   for (int m = 0; m < 20; m++) {
+  //     for (int n = 0; n < 20; n++) {
+  //       B[m,n] = A[m,m*20+n];  // Both indices of A use m
+  //     }
+  //   }
+  BufHandle a_buf("A", {20, 500}, kInt);
+  BufHandle b_buf("B", {20, 500}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle m("m", kInt);
+  VarHandle n("n", kInt);
+  auto writeA = Store::make(a_buf, {i, i * 20 + j}, i + j);
+  auto forI = For::make(i, 0, 20, For::make(j, 0, 20, writeA));
+  auto storeB = Store::make(b_buf, {m, n}, Load::make(a_buf, {m, m * 20 + n}));
+  auto forM = For::make(m, 0, 20, For::make(n, 0, 20, storeB));
+  auto par = Block::make({forI, forM});
+
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  For* fused_loop;
+  ASSERT_FALSE(LoopNest::fuseLoops({forI, forM}, &fused_loop));
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(LoopNest, fuseLoopsWithTranspose) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 20; i++) {
+  //     for (int j = 0; j < 20; j++) {
+  //       A[i,j] = i + j;
+  //     }
+  //   }
+  //   for (int m = 0; m < 20; m++) {
+  //     for (int n = 0; n < 20; n++) {
+  //       B[m,n] = A[n,m];  // Transpose
+  //     }
+  //   }
+  BufHandle a_buf("A", {20, 20}, kInt);
+  BufHandle b_buf("B", {20, 20}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle m("m", kInt);
+  VarHandle n("n", kInt);
+  auto writeA = Store::make(a_buf, {i, j}, i + j);
+  auto forI = For::make(i, 0, 20, For::make(j, 0, 20, writeA));
+  auto storeB = Store::make(b_buf, {m, n}, Load::make(a_buf, {n, m}));
+  auto forM = For::make(m, 0, 20, For::make(n, 0, 20, storeB));
+  auto par = Block::make({forI, forM});
+
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  For* fused_loop;
+  ASSERT_FALSE(LoopNest::fuseLoops({forI, forM}, &fused_loop));
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, fuseLoopsThatViolateDependencies1) {
   KernelScope kernel_scope;
 
