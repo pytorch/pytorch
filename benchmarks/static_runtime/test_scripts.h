@@ -466,3 +466,13 @@ const auto nested_output_script_3 = R"JIT(
     h = {"e": e, "f": f}
     return [g, h]
 )JIT";
+
+const auto bmm_script = R"JIT(
+  def forward(self, inp: Tensor, mat2: Tensor):
+   return torch.bmm(inp, mat2).clone()
+)JIT";
+
+const auto addmm_script = R"JIT(
+  def forward(self, inp: Tensor, mat1: Tensor, mat2: Tensor, beta: float, alpha: float):
+   return torch.addmm(inp, mat1, mat2, alpha=alpha, beta=beta).clone()
+)JIT";

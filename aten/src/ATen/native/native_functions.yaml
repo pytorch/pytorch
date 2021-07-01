@@ -1280,6 +1280,9 @@
 - func: cov(Tensor self, *, int correction=1, Tensor? fweights=None, Tensor? aweights=None) -> Tensor
   variants: function, method
 
+- func: corrcoef(Tensor self) -> Tensor
+  variants: function, method
+
 - func: cudnn_affine_grid_generator(Tensor theta, int N, int C, int H, int W) -> Tensor grid
   dispatch:
     CUDA: cudnn_affine_grid_generator_forward
@@ -1793,7 +1796,7 @@
   dispatch:
     CPU, Meta: resize_
     CUDA: resize_cuda_
-    QuantizedCPU, QuantizedCUDA: quantized_resize_cpu_
+    QuantizedCPU: quantized_resize_cpu_
 
 - func: empty_quantized(int[] size, Tensor qtensor) -> Tensor
   variants: function
@@ -5161,7 +5164,6 @@
   variants: function, method
   dispatch:
     CPU: dequantize_cpu
-    CUDA: dequantize_quantized_cpu
     QuantizedCPU, QuantizedCUDA: dequantize_quantized_cpu
 
 - func: dequantize.tensors(Tensor[] tensors) -> Tensor[]
