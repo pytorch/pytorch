@@ -42,21 +42,20 @@ class ScriptList final {
   using diff_type = ssize_t;
 
   // Constructor for empty lists created during slicing, extending, etc.
-  ScriptList(const TypePtr& type) {
+  ScriptList(const TypePtr& type) : list_(AnyType::get()) {
     auto list_type = type->expect<ListType>();
-    auto d = c10::impl::GenericList(list_type);
-    list_ = IValue(d);
+    list_ = c10::impl::GenericList(list_type);
   }
 
   // Constructor for instances based on existing lists (e.g. a
   // Python instance or a list nested inside another).
-  ScriptList(IValue data) {
+  ScriptList(IValue data) : list_(AnyType::get()) {
     TORCH_INTERNAL_ASSERT(data.isList());
-    list_ = std::move(data);
+    list_ = data.toList();
   }
 
   ListTypePtr type() const {
-    return list_.type()->cast<ListType>();
+    return ListType::create(list_.elementType());
   }
 
   // Return a string representation that can be used
@@ -65,7 +64,7 @@ class ScriptList final {
     std::ostringstream s;
     s << '[';
     bool f = false;
-    for (auto const& elem : list_.toList()) {
+    for (auto const& elem : list_) {
       if (f) {
         s << ", ";
       }
@@ -78,33 +77,32 @@ class ScriptList final {
 
   // Return an iterator over the elements of the list.
   ScriptListIterator iter() const {
-    auto begin = list_.toList().begin();
-    auto end = list_.toList().end();
+    auto begin = list_.begin();
+    auto end = list_.end();
     return ScriptListIterator(begin, end);
   }
 
   // Interpret the list as a boolean; empty means false, non-empty means
   // true.
   bool toBool() const {
-    return !(list_.toList().empty());
+    return !(list_.empty());
   }
 
   // Get the value for the given index.
   IValue getItem(diff_type idx) {
     idx = wrap_index(idx);
-    return list_.toList().get(idx);
+    return list_.get(idx);
   };
 
   // Set the value corresponding to the given index.
-  // TODO: Handle negative and wraparound.
   void setItem(diff_type idx, const IValue& value) {
     idx = wrap_index(idx);
-    return list_.toList().set(idx, value);
+    return list_.set(idx, value);
   }
 
   // Check whether the list contains the given value.
   bool contains(const IValue& value) {
-    for (const auto& elem : list_.toList()) {
+    for (const auto& elem : list_) {
       if (elem == value) {
         return true;
       }
@@ -114,22 +112,22 @@ class ScriptList final {
   }
 
   // Delete the item at the given index from the list.
-  void delItem(size_type idx) {
+  void delItem(diff_type idx) {
     idx = wrap_index(idx);
-    auto iter = list_.toList().begin() + idx;
-    list_.toList().erase(iter);
+    auto iter = list_.begin() + idx;
+    list_.erase(iter);
   }
 
   // Get the size of the list.
   int64_t len() const {
-    return list_.toList().size();
+    return list_.size();
   }
 
   // Count the number of times a value appears in the list.
   int64_t count(const IValue& value) const {
     int64_t total = 0;
 
-    for (const auto& elem : list_.toList()) {
+    for (const auto& elem : list_) {
       if (elem == value) {
         ++total;
       }
@@ -140,7 +138,7 @@ class ScriptList final {
 
   // Remove the first occurrence of a value from the list.
   void remove(const IValue& value) {
-    auto list = list_.toList();
+    auto list = list_;
 
     int64_t idx = -1, i = 0;
 
@@ -162,32 +160,31 @@ class ScriptList final {
 
   // Append a value to the end of the list.
   void append(const IValue& value) {
-    list_.toList().emplace_back(value);
+    list_.emplace_back(value);
   }
 
   // Clear the contents of the list.
   void clear() {
-    list_.toList().clear();
+    list_.clear();
   }
 
   // Append the contents of an iterable to the list.
   void extend(const IValue& iterable) {
-    list_.toList().append(iterable.toList());
+    list_.append(iterable.toList());
   }
 
   // Remove and return the element at the specified index from the list. If no
   // index is passed, the last element is removed and returned.
   IValue pop(c10::optional<size_type> idx = c10::nullopt) {
-    auto list = list_.toList();
     IValue ret;
 
     if (idx) {
       idx = wrap_index(*idx);
-      ret = list.get(*idx);
-      list.erase(list.begin() + *idx);
+      ret = list_.get(*idx);
+      list_.erase(list_.begin() + *idx);
     } else {
-      ret = list.get(list.size() - 1);
-      list.pop_back();
+      ret = list_.get(list_.size() - 1);
+      list_.pop_back();
     }
 
     return ret;
@@ -204,12 +201,11 @@ class ScriptList final {
       throw std::out_of_range("list index out of range");
     }
 
-    auto list = list_.toList();
-    list.insert(list.begin() + idx, value);
+    list_.insert(list_.begin() + idx, value);
   }
 
   // A c10::List instance that holds the actual data.
-  IValue list_;
+  c10::impl::GenericList list_;
 
  private:
   // Wrap an index so that it can safely be used to access

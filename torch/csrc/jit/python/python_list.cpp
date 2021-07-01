@@ -82,10 +82,6 @@ void initScriptListBindings(PyObject* module) {
         auto data = toIValue(std::move(list), type);
         return std::make_shared<ScriptList>(data);
       }))
-      .def(py::init([](py::list list, const TypePtr& type) {
-        auto data = toIValue(std::move(list), type);
-        return std::make_shared<ScriptList>(data);
-      }))
       .def(
           "__repr__",
           [](const std::shared_ptr<ScriptList>& self) {

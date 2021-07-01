@@ -385,7 +385,6 @@ libtorch_distributed_extra_sources = [
     "torch/csrc/distributed/rpc/torchscript_functions.cpp",
     "torch/csrc/distributed/rpc/types.cpp",
     "torch/csrc/distributed/rpc/utils.cpp",
-    "torch/csrc/distributed/rpc/metrics/registry.cpp",
 ]
 
 libtorch_distributed_sources = libtorch_distributed_base_sources + libtorch_distributed_extra_sources
@@ -976,6 +975,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/ConvolutionMM3d.cpp",
     "aten/src/ATen/native/ConvolutionTBC.cpp",
     "aten/src/ATen/native/Copy.cpp",
+    "aten/src/ATen/native/Correlation.cpp",
     "aten/src/ATen/native/CPUFallback.cpp",
     "aten/src/ATen/native/Cross.cpp",
     "aten/src/ATen/native/DilatedMaxPool2d.cpp",
