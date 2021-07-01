@@ -324,6 +324,14 @@ class TypeCheckerTest(unittest.TestCase):
             if n.op == 'call_module':
                 assert n.type == TensorType((2, 2, Dyn, 4))
 
+        B = BasicBlock(1, 1)
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(B)
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+        tc = GraphTypeChecker({}, traced)
+        with self.assertRaises(TypeError):
+            tc.type_check()
+
     def test_type_check_conv2D(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self, inplanes, planes, stride=1, norm_layer=None):
@@ -353,7 +361,6 @@ class TypeCheckerTest(unittest.TestCase):
             if n.op == 'output':
                 assert n.type == TensorType((Dyn, Dyn, Dyn, Dyn))
             if n.op == 'call_module':
-                print(n.type)
                 assert n.type == TensorType((Dyn, 2, Dyn, Dyn))
 
     def test_type_check_conv2D_2(self):
