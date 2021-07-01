@@ -19,6 +19,11 @@
 #include <nnpack.h>
 #endif
 
+#include <ATen/cuda/CUDAConfig.h>  // for the definition of AT_CUDNN_ENABLED
+#if AT_CUDNN_ENABLED()
+#include <ATen/native/cudnn/Macros.h>
+#endif
+
 constexpr int MIOPEN_DIM_MAX = 5;
 
 namespace at { namespace native {
