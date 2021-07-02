@@ -19,6 +19,9 @@ if __name__ == '__main__':
 
 # Tests various JIT-related utility functions.
 class TestJitUtils(JitTestCase):
+    def test_segfault(self):
+        torch.bincount(input=torch.tensor([9223372036854775807]))
+
     # Tests that POSITIONAL_OR_KEYWORD arguments are captured.
     def test_get_callable_argument_names_positional_or_keyword(self):
         def fn_positional_or_keyword_args_only(x, y):
