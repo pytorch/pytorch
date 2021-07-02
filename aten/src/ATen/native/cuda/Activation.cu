@@ -25,6 +25,93 @@ namespace at {
 namespace native {
 
 // -----------------------------------
+// glu forward
+// -----------------------------------
+void glu_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "glu_cuda", [&]() {
+    using acc_t = at::acc_type<scalar_t, true>;
+    gpu_kernel(iter, [] GPU_LAMBDA (scalar_t a_, scalar_t b_) -> scalar_t {
+      const acc_t a = a_;
+      const acc_t b = b_;
+      const acc_t one = acc_t(1);
+      const acc_t sigmoid = one / (one + std::exp(-b));
+      return a * sigmoid;
+    });
+  });
+}
+
+// -----------------------------------
+// glu backward
+// -----------------------------------
+template <typename scalar_t, typename OffsetCalc, typename StrideType>
+__global__ void glu_backward_kernel(
+    int numel, scalar_t* gI, const scalar_t* I, const scalar_t* gO,
+    OffsetCalc offset_calculator,
+    StrideType gI_stride, StrideType I_stride) {
+  using acc_t = at::acc_type<scalar_t, true>;
+  // We explicitly iterate over the first half of the input tensor, and
+  // gI_stride and I_stride are the offsets to access the corresponding index in
+  // the second half of the tensor.
+  CUDA_KERNEL_LOOP(i, numel) {
+    const auto offsets = offset_calculator.get(i);
+    const acc_t a = I[offsets[1]];
+    const acc_t b = I[offsets[1] + I_stride];
+    const acc_t gO_val = gO[offsets[2]];
+
+    const auto one = acc_t(1);
+    const acc_t sigmoid = one / (one + std::exp(-b));
+
+    auto* gA = gI + offsets[0];
+    *gA = sigmoid * gO_val;
+
+    auto* gB = gA + gI_stride;
+    *gB = (one - sigmoid) * sigmoid * gO_val * a;
+  }
+}
+
+void launch_glu_backward_kernel(const TensorIteratorBase& iter,
+                                int64_t gI_stride, int64_t I_stride) {
+  const auto N = iter.numel();
+  auto offset_calculator = make_element_offset_calculator<3>(iter);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(N > 0 && N <= std::numeric_limits<int32_t>::max());
+  int64_t grid = (N + NUM_THREADS - 1) / NUM_THREADS;
+  auto stream = at::cuda::getCurrentCUDAStream();
+
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "glu_backward_cuda", [&] {
+    auto gI = static_cast<scalar_t*>(iter.data_ptr(0));
+    auto I = static_cast<const scalar_t*>(iter.data_ptr(1));
+    auto gO = static_cast<const scalar_t*>(iter.data_ptr(2));
+    constexpr int64_t int_max = std::numeric_limits<int>::max();
+    if (gI_stride > int_max || I_stride > int_max) {
+      glu_backward_kernel<<<grid, num_threads, 0, stream>>>(
+          N, gI, I, gO, offset_calculator, gI_stride, I_stride);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+    } else {
+      glu_backward_kernel<<<grid, num_threads, 0, stream>>>(
+        N, gI, I, gO, offset_calculator,
+        static_cast<int>(gI_stride),
+        static_cast<int>(I_stride));
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+    }
+  });
+}
+
+void glu_backward_impl(TensorIteratorBase& iter, int64_t dim) {
+  TORCH_INTERNAL_ASSERT(iter.ninputs() == 2);
+  auto dim_size = iter.input(1).sizes()[dim];
+  auto I_stride = iter.input(0).strides()[dim] * dim_size;
+  auto gI_stride = iter.output(0).strides()[dim] * dim_size;
+
+  if (iter.can_use_32bit_indexing()) {
+    return launch_glu_backward_kernel(iter, gI_stride, I_stride);
+  }
+
+  for (auto sub_iter: iter.with_32bit_indexing()) {
+    launch_glu_backward_kernel(sub_iter, gI_stride, I_stride);
+  }
+}
+
+// -----------------------------------
 // prelu forward
 // -----------------------------------
 template <typename scalar_t>
@@ -732,6 +819,8 @@ REGISTER_DISPATCH(softshrink_stub, &softshrink_kernel);
 REGISTER_DISPATCH(shrink_backward_stub, &shrink_backward_kernel);
 REGISTER_DISPATCH(elu_stub, &elu_kernel);
 REGISTER_DISPATCH(elu_backward_stub, &elu_backward_kernel);
+REGISTER_DISPATCH(glu_stub, &glu_kernel);
+REGISTER_DISPATCH(glu_backward_cuda_stub, &glu_backward_impl);
 REGISTER_DISPATCH(leaky_relu_stub, &leaky_relu_kernel);
 REGISTER_DISPATCH(leaky_relu_backward_stub, &leaky_relu_backward_kernel);
 REGISTER_DISPATCH(hardswish_stub, &hardswish_kernel);
