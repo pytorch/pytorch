@@ -22,6 +22,7 @@ env:
   BUILD_ENVIRONMENT: !{{ build_environment }}
   DOCKER_IMAGE_BASE: !{{ docker_image_base }}
   SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
+  GITHUB_PR_BODY: ${{ github.event.pull_request.body }}
   TORCH_CUDA_ARCH_LIST: 5.2
   IN_CI: 1
   # Used for custom_opertor, jit_hooks, custom_backend, see .jenkins/pytorch/build.sh
@@ -281,8 +282,6 @@ jobs:
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Test PyTorch
-        env:
-          GITHUB_PR_BODY: ${{ github.event.pull_request.body }}
         run: |
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
             TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
@@ -301,6 +300,7 @@ jobs:
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e GITHUB_ACTIONS \
             -e IN_CI \
+            -e GITHUB_PR_BODY \
             -e SHARD_NUMBER \
             -e JOB_BASE_NAME \
             -e MAX_JOBS="$(nproc --ignore=2)" \
