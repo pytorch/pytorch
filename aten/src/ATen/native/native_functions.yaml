@@ -10092,6 +10092,8 @@
 
 - func: linalg_eigvalsh.out(Tensor self, str UPLO='L', *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
+  dispatch:
+    CPU, CUDA: linalg_eigvalsh_out
 
 - func: linalg_householder_product(Tensor input, Tensor tau) -> Tensor
   python_module: linalg

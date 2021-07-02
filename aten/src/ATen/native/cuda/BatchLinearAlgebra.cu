@@ -2398,12 +2398,6 @@ void linalg_eigh_magma(const Tensor& eigenvalues, const Tensor& eigenvectors, co
 }
 
 void linalg_eigh_kernel(const Tensor& eigenvalues, const Tensor& eigenvectors, const Tensor& infos, bool upper, bool compute_eigenvectors) {
-  // This kernel is used also for at::native::linalg_eigvalsh which is registered as CompositeImplicitAutograd in native_functions.yml
-  // so that the derivative rule of linalg_eigh is picked up in autograd mode
-  // CompositeImplicitAutograd functions omit device guards
-  // Guarding here as a workaround
-  const OptionalDeviceGuard device_guard(device_of(eigenvalues));
-
 #if defined(USE_CUSOLVER)
   linalg_eigh_cusolver(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
 #else

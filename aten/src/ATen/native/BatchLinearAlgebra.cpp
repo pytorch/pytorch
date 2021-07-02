@@ -2358,35 +2358,44 @@ Tensor linalg_eigvalsh(const Tensor& input, c10::string_view uplo) {
     return values;
   }
 
-  squareCheckInputs(input);
-  checkUplo(uplo);
   ScalarType real_dtype = toValueType(input.scalar_type());
   Tensor values = at::empty({0}, input.options().dtype(real_dtype));
+  values = at::linalg_eigvalsh_outf(input, uplo, values);
+  return values;
+}
+
+Tensor& linalg_eigvalsh_out(const Tensor& input, c10::string_view uplo, Tensor& result) {
+  ScalarType real_dtype = toValueType(input.scalar_type());
+  checkLinalgCompatibleDtype("torch.linalg.eigvalsh", result.scalar_type(), real_dtype);
+
+  squareCheckInputs(input);
+  checkUplo(uplo);
+
+  auto expected_result_shape = IntArrayRef(input.sizes().data(), input.dim()-1);  // input.shape[:-1]
+  bool result_equal_expected_shape = result.sizes().equals(expected_result_shape);
+  bool expected_result_type = (result.scalar_type() == real_dtype);
+  bool copy_needed = !expected_result_type;
+  copy_needed |= (result.numel() != 0 && !result_equal_expected_shape);
+  copy_needed |= (result.numel() != 0 && !result.is_contiguous());
+
   Tensor vectors = at::empty({0}, input.options());
   Tensor infos = at::zeros({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt));
 
-  linalg_eigh_out_info(input, values, vectors, infos, false, uplo);
+  if (copy_needed) { // we have to allocate a temporary tensor
+    Tensor result_tmp = at::empty({expected_result_shape}, input.options().dtype(real_dtype));
+    linalg_eigh_out_info(input, result_tmp, vectors, infos, /*compute_eigenvectors=*/false, uplo);
+    at::native::resize_output(result, result_tmp.sizes());
+    result.copy_(result_tmp);
+  } else {
+    // else use the provided output storage directly
+    linalg_eigh_out_info(input, result, vectors, infos, /*compute_eigenvectors=*/false, uplo);
+  }
 
   if (input.dim() > 2) {
     batchCheckErrors(infos, "torch.linalg.eigvalsh");
   } else {
     singleCheckErrors(infos.item().toInt(), "torch.linalg.eigvalsh");
   }
-
-  return values;
-}
-
-// TODO: it's possible to make the _out variant to be a primal function and implement linalg_eigvalsh on top of _out
-// TODO: implement _out variant avoiding copy and using already allocated storage directly
-Tensor& linalg_eigvalsh_out(const Tensor& input, c10::string_view uplo, Tensor& result) {
-  checkSameDevice("torch.linalg.eigvalsh", result, input);
-  ScalarType real_dtype = toValueType(input.scalar_type());
-  checkLinalgCompatibleDtype("torch.linalg.eigvalsh", result.scalar_type(), real_dtype);
-
-  Tensor result_tmp = at::linalg_eigvalsh(input, uplo);
-
-  at::native::resize_output(result, result_tmp.sizes());
-  result.copy_(result_tmp);
 
   return result;
 }
