@@ -452,9 +452,9 @@ class TestOptim(TestCase):
 
     def _inner_loop_diffopt(self, opt, model, differentiable):
         states = {
-            "exp_avgs" : [torch.zeros_like(model[0], memory_format=torch.preserve_format) ],
-            "exp_avg_sqs" : [torch.zeros_like(model[0], memory_format=torch.preserve_format) ],
-            "max_exp_avg_sqs" : [torch.zeros_like(model[0], memory_format=torch.preserve_format) ]
+            "exp_avgs" : [torch.zeros_like(model[0], memory_format=torch.preserve_format)],
+            "exp_avg_sqs" : [torch.zeros_like(model[0], memory_format=torch.preserve_format)],
+            "max_exp_avg_sqs" : [torch.zeros_like(model[0], memory_format=torch.preserve_format)]
         }
         def inner_loop(model):
             for epoch in range(10):
