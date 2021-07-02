@@ -2330,8 +2330,6 @@ std::tuple<Tensor, Tensor> linalg_eigh(const Tensor& input, c10::string_view upl
 // TODO: it's possible to make the _out variant to be a primal function and implement linalg_eigh on top of _out
 // TODO: implement _out variant avoiding copy and using already allocated storage directly
 std::tuple<Tensor&, Tensor&> linalg_eigh_out(const Tensor& input, c10::string_view uplo, Tensor& eigvals, Tensor& eigvecs) {
-  checkSameDevice("torch.linalg.eigh", eigvecs, input, "eigenvectors");
-  checkSameDevice("torch.linalg.eigh", eigvals, input, "eigenvalues");
   checkLinalgCompatibleDtype("torch.linalg.eigh", eigvecs, input, "eigenvectors");
 
   // eigenvalues are always real-valued here
