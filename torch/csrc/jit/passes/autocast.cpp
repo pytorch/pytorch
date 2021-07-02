@@ -140,6 +140,8 @@ void castInputsToWidestType(Node* node) {
 void handleBlock(Block* block, bool initial_state) {
   std::stack<AutocastScope> autocast_stack;
 
+  c10::optional<bool> incompatible_amp = c10::nullopt;
+
   // The current autocast enabled/disabled state
   auto current_state = [&] {
     return autocast_stack.empty() ? initial_state
@@ -149,18 +151,27 @@ void handleBlock(Block* block, bool initial_state) {
   for (Node* node : block->nodes()) {
     switch (node->kind()) {
       case prim::CallFunction:
-        TORCH_INTERNAL_ASSERT(false, "Calls are not expected with AMP & JIT");
+        TORCH_INTERNAL_ASSERT(
+            !incompatible_amp.has_value() || incompatible_amp.value(),
+            "Calls are not expected with AMP & JIT");
+        incompatible_amp = true;
         break;
 
       case prim::CallMethod:
         if (auto class_type = node->input(0)->type()->cast<ClassType>()) {
           const auto& name = node->s(attr::name);
           const auto& function = class_type->getMethod(name);
-          TORCH_INTERNAL_ASSERT(
-              !function.isGraphFunction(),
-              "Calls are not expected with AMP & JIT");
+          if (!function.isGraphFunction()) {
+            TORCH_INTERNAL_ASSERT(
+                !incompatible_amp.has_value() || incompatible_amp.value(),
+                "Calls are not expected with AMP & JIT");
+            incompatible_amp = true;
+          }
         } else {
-          TORCH_INTERNAL_ASSERT(false, "Unexpected prim::CallMethod form");
+          TORCH_INTERNAL_ASSERT(
+              !incompatible_amp.has_value() || incompatible_amp.value(),
+              "Unexpected prim::CallMethod form with AMP & JIT");
+          incompatible_amp = true;
         }
         break;
 
@@ -170,6 +181,10 @@ void handleBlock(Block* block, bool initial_state) {
             // TODO: better error message
             AT_ERROR("`with autocast() as ...` is not supported");
           }
+          TORCH_INTERNAL_ASSERT(
+              !incompatible_amp.has_value() || !incompatible_amp.value(),
+              "Unsupported case by AMP & JIT");
+          incompatible_amp = false;
           autocast_stack.push(*autocast_scope);
         }
         break;
@@ -180,6 +195,10 @@ void handleBlock(Block* block, bool initial_state) {
           TORCH_INTERNAL_ASSERT(!autocast_stack.empty());
           TORCH_INTERNAL_ASSERT(
               autocast_stack.top().instance == autocast_scope->instance);
+          TORCH_INTERNAL_ASSERT(
+              !incompatible_amp.has_value() || !incompatible_amp.value(),
+              "Unsupported case by AMP & JIT");
+          incompatible_amp = false;
           autocast_stack.pop();
         }
         break;
