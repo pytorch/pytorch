@@ -39,19 +39,22 @@ class BaseScheduler(object):
             @wraps(func)
             def wrapper(*args, **kwargs):
                 instance = instance_ref()
-                instance._step_count += 1
+                instance._step_count += 1  # type: ignore[union-attr]
                 wrapped = func.__get__(instance, cls)
                 return wrapped(*args, **kwargs)
 
             # Note that the returned function here is no longer a bound method,
             # so attributes like `__func__` and `__self__` no longer exist.
-            wrapper._with_counter = True
+            wrapper._with_counter = True  # type: ignore[attr-defined]
             return wrapper
 
-        self.sparsifier.step = with_counter(self.sparsifier.step)
-        self.sparsifier._step_count = 0
-        self._step_count = 0
+        self.sparsifier.step = with_counter(self.sparsifier.step)  # type: ignore[assignment]
+        self.sparsifier._step_count = 0  # type: ignore[attr-defined]
+        self._step_count: int = 0
         self.verbose = verbose
+
+        # Housekeeping
+        self._get_sl_called_within_step: bool = False
 
         self.step()
 
@@ -116,7 +119,7 @@ class BaseScheduler(object):
                               "`scheduler.step()`.", UserWarning)
 
             # Just check if there were two first scheduler.step() calls before sparsifier.step()
-            elif self.sparsifier._step_count < 1:
+            elif self.sparsifier._step_count < 1:  # type: ignore[attr-defined]
                 warnings.warn("Detected call of `scheduler.step()` before `sparsifier.step()`. "
                               "You have to make sure you run the sparsifier.step() BEFORE any "
                               "calls to the scheduer.step().", UserWarning)
