@@ -59,7 +59,8 @@ class JitLoggingConfig {
 
  private:
   std::string logging_levels;
-  std::ostringstream* logging_output_stream = static_cast<std::ostringstream*>(&std::cerr);
+  std::ostringstream* logging_output_stream =
+      static_cast<std::ostringstream*>(&std::cerr);
   std::unordered_map<std::string, size_t> files_to_levels;
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -80,7 +81,7 @@ class JitLoggingConfig {
   }
 
   std::ostringstream& getLoggingOutputStream() {
-      return *this->logging_output_stream;
+    return *this->logging_output_stream;
   }
 
   void setLoggingOutputStream(std::ostringstream& stream) {
@@ -125,10 +126,11 @@ TORCH_API std::ostream& operator<<(
     std::ostream& out,
     ::torch::jit::JitLoggingLevels level);
 
-#define JIT_LOG(level, ...)                                                        \
-  if (is_enabled(__FILE__, level)) {                                               \
-    ::torch::jit::get_jit_logging_output_stream() << ::torch::jit::jit_log_prefix( \
-      level, __FILE__, __LINE__, ::c10::str(__VA_ARGS__));                         \
+#define JIT_LOG(level, ...)                                         \
+  if (is_enabled(__FILE__, level)) {                                \
+    ::torch::jit::get_jit_logging_output_stream()                   \
+        << ::torch::jit::jit_log_prefix(                            \
+               level, __FILE__, __LINE__, ::c10::str(__VA_ARGS__)); \
   }
 
 // tries to reconstruct original python source

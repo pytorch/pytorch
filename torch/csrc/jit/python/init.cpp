@@ -650,7 +650,8 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_get_logging_output_stream",
           []() {
-            if (::torch::jit::get_jit_logging_output_stream().rdbuf() == static_cast<std::ostringstream&>(std::cout).rdbuf())
+            if (::torch::jit::get_jit_logging_output_stream().rdbuf() ==
+                static_cast<std::ostringstream&>(std::cout).rdbuf())
               return "STDOUT";
             else
               return "STDERR";
@@ -659,9 +660,11 @@ void initJITBindings(PyObject* module) {
           "_jit_set_logging_output_stream_stdout",
           [](bool isStdout) -> void {
             if (isStdout)
-              ::torch::jit::set_jit_logging_output_stream(static_cast<std::ostringstream&>(std::cout));
+              ::torch::jit::set_jit_logging_output_stream(
+                  static_cast<std::ostringstream&>(std::cout));
             else
-              ::torch::jit::set_jit_logging_output_stream(static_cast<std::ostringstream&>(std::cerr));
+              ::torch::jit::set_jit_logging_output_stream(
+                  static_cast<std::ostringstream&>(std::cerr));
           })
       .def(
           "_jit_try_infer_type",
