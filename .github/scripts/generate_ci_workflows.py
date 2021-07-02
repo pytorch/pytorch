@@ -10,6 +10,7 @@ DOCKER_REGISTRY = "308535385114.dkr.ecr.us-east-1.amazonaws.com"
 
 GITHUB_DIR = Path(__file__).resolve().parent.parent
 
+
 # it would be nice to statically specify that build_environment must be
 # present, but currently Python has no easy way to do that
 # https://github.com/python/mypy/issues/4617
