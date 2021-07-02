@@ -1235,9 +1235,13 @@ def main():
         export_S3_test_times(test_times_filename, pull_job_times_from_S3())
         return
 
+    print("checking breakpad")
     if has_breakpad():
         # Write crash dumps on unstructured exceptions (e.g. SIGSEGV) to /tmp/pytorch_crashes
+        print("breakpad present, enabling minidumps")
         torch.utils._crash_handler.enable_minidumps()
+    else:
+        print("breakpad missing")
 
     specified_test_cases_filename = options.run_specified_test_cases
     if specified_test_cases_filename:
