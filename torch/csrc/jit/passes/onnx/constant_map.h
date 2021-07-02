@@ -40,6 +40,7 @@ class ConstantValueMap {
   ~ConstantValueMap() = default;
 
   ConstantValueMap& operator=(const ConstantValueMap&) = delete;
+
  private:
   ConstantValueMap() = default;
 

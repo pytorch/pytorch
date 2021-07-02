@@ -106,6 +106,7 @@ class ComputeAt {
   ComputeAt() = delete;
   ComputeAt(ComputeAt&) = delete;
   ComputeAt& operator=(const ComputeAt& other) = delete;
+
  private:
   TensorView* producer_;
   TensorView* consumer_;

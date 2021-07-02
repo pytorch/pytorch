@@ -817,7 +817,6 @@ struct TORCH_API Node {
   }
   // The names are returned in order, since name actually is the index.
   std::vector<Symbol> attributeNames() const {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<Symbol> names;
     for (const AVPtr& a : values_) {
       names.push_back(a->name);
@@ -825,7 +824,6 @@ struct TORCH_API Node {
     return names;
   }
   std::vector<const char*> attributeNamesS() const {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<const char*> names;
     for (const AVPtr& a : values_) {
       names.push_back(a->name.toUnqualString());
@@ -906,7 +904,6 @@ struct TORCH_API Node {
   typename T::ValueType& getAttr(Symbol name) const {
     AT_ASSERT(name.is_attr());
     auto it = findAttr(name, true);
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     auto* child = dynamic_cast<T*>(it->get());
     if (child == nullptr) {
       throw IRAttributeError(name, true);
@@ -1151,15 +1148,11 @@ struct Graph {
   Node* insert_before_;
 
  public:
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  Graph(ScopePtr scope_root)
+  Graph(ScopePtr scope_root = c10::make_intrusive<Scope>())
       : next_unique_(0),
         current_scope_(std::move(scope_root)),
         block_(new Block(this, nullptr)),
         insert_before_(return_node()) {}
-
-  // NOLINTNEXTLINE(modernize-use-equals-default,cppcoreguidelines-pro-type-member-init)
-  Graph() : Graph(c10::make_intrusive<Scope>()) {}
 
   at::ArrayRef<Value*> inputs() {
     return block_->inputs();
