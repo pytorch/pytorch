@@ -42,89 +42,15 @@ bool isTensorIndexOp(kir::Expr* expr) {
   return outputs.size() >= 1 && outputs[0]->isA<kir::TensorIndex>();
 }
 
-} // namespace
-
-namespace {
-
-//! Analyze whether IterDomain can be statically determined to be safe
-//! without bounds-checking predicates.
-class IterationDomainAnalysis : private OptOutDispatch {
- public:
-  //! Return true if the expression defining tv can be safely run
-  //! without a predicate
-  static bool canOmitPredicate(const TensorDomain* td) {
-    const auto gpu_lower = GpuLower::current();
-    for (size_t i = 0; i < td->nDims(); ++i) {
-      IterDomain* id = gpu_lower->caLoopMap().getConcreteMappedID(td->axis(i));
-      IterationDomainAnalysis id_analysis(id->fusion());
-      auto extent = id->extent();
-      id_analysis.handle(extent);
-      if (!id_analysis.isExact(extent)) {
-        return false;
-      }
-    }
-    return true;
-  }
-
- private:
-  IterationDomainAnalysis(Fusion* fusion) : fusion_(fusion) {}
-
-  using OptOutDispatch::handle;
-
-  //! Check if val has nothing that prevents a loop using val as its
-  //! extent to omit a bounds-checking predicate
-  bool isExact(const Val* val) {
-    return exact_vals_.find(val) != exact_vals_.end();
-  }
-
-  //! Record val does not need a predicate.
-  void setExact(const Val* val) {
-    exact_vals_.insert(val);
-  }
-
-  void handle(Val* val) override {
-    if (val->definition() != nullptr) {
-      handle(val->definition());
-    } else {
-      setExact(val);
-    }
-  }
-
-  void handle(BinaryOp* bop) override {
-    const auto lhs = bop->lhs();
-    const auto rhs = bop->rhs();
-
-    handle(lhs);
-    handle(rhs);
-
-    if (!(isExact(lhs) && isExact(rhs))) {
-      return;
-    }
-
-    if (bop->getBinaryOpType() == BinaryOpType::CeilDiv) {
-      // CeilDiv is the only expression that can make an extent val
-      // larger than the actual. Need to know the exact values.
-      ExpressionEvaluator ee(fusion_);
-      const auto lhs_value = ee.evaluate(lhs);
-      const auto rhs_value = ee.evaluate(rhs);
-      if (lhs_value.has_value() && rhs_value.has_value() &&
-          (lhs_value.value() % rhs_value.value()) == 0) {
-        setExact(bop->out());
-      }
-    } else if (bop->getBinaryOpType() == BinaryOpType::Mul) {
-      setExact(bop->out());
-    } else {
-      // Expr on extent should be either CeilDiv or Mul, which are
-      // derived from split and merge, respectively.
-      TORCH_INTERNAL_ASSERT("Unexpected BinaryOpType: ", bop);
-    }
-  }
-
- private:
-  Fusion* fusion_ = nullptr;
-  //! Vals that are known to need no predicate if used as IterDomain extent
-  std::unordered_set<const Val*> exact_vals_;
-};
+bool isOutputLocal(const kir::Expr* expr) {
+  return std::all_of(
+      expr->outputs().begin(),
+      expr->outputs().end(),
+      [](const kir::Val* output) {
+        return !output->isA<kir::TensorView>() ||
+            output->as<kir::TensorView>()->memoryType() == MemoryType::Local;
+      });
+}
 
 } // namespace
 
@@ -138,25 +64,19 @@ kir::Bool* PredicateCompute::getInlinePredicate(
   const auto gpu_lower = GpuLower::current();
   kir::IrBuilder ir_builder(gpu_lower->kernel());
 
+  // If outputs are registers, no need to predicate for threads
+  if (isOutputLocal(expr)) {
+    thread_pred = ir_builder.trueVal();
+  }
+
   if (loops.empty()) {
     TORCH_INTERNAL_ASSERT(thread_pred != nullptr);
     return thread_pred;
   }
-  auto out_tv = firstTensorViewOutput(expr);
-  // If local memory and assigning a scalar value, we don't need a
-  // predicate. This includes initializations of reduciton buffers.
-  if (out_tv->memoryType() == MemoryType::Local) {
-    if (auto uop = dynamic_cast<const kir::UnaryOp*>(expr)) {
-      if (uop->operation() == UnaryOpType::Set && uop->in()->isScalar()) {
-        return ir_builder.trueVal();
-      }
-    }
-  }
 
-  // Don't generate predicates unless needed. This is just for
-  // potential performance benefit.
-  if (IterationDomainAnalysis::canOmitPredicate(out_tv->fuserTv()->domain())) {
-    TORCH_INTERNAL_ASSERT(thread_pred != nullptr);
+  auto out_tv = firstTensorViewOutput(expr);
+
+  if (gpu_lower->predicateElimination().canOmitPredicate(expr)) {
     return thread_pred;
   }
 
@@ -221,6 +141,10 @@ void UnswitchPredicate::predicateOn(kir::Expr* tv_expr) {
   }
 
   const auto gpu_lower = GpuLower::current();
+
+  if (gpu_lower->predicateElimination().canOmitPredicate(tv_expr)) {
+    return;
+  }
 
   auto out_tv = firstTensorViewOutput(tv_expr);
 

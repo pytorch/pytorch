@@ -301,6 +301,9 @@ void GpuLower::lower() {
   // Compute thread predicates
   thread_pred_map_.build(fusion_);
 
+  // Detects all exprssions that don't need predicates
+  predicateElimination().build(fusion_);
+
   // Set the kernel inputs & outputs
   for (auto input : fusion_->inputs()) {
     kernel_->addInput(GpuLower::lowerValue(input));

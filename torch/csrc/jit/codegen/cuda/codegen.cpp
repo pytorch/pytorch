@@ -359,7 +359,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
         is_vector_op = (node->operation() == UnaryOpType::Set);
       }
 
-      if (is_vector_op) {
+      if (is_vector_op && !node->in()->isScalar()) {
         TORCH_INTERNAL_ASSERT(
             node->out()->dtype() == node->in()->dtype(),
             "Vectorized store/load requires input and output datatypes match.");
@@ -367,14 +367,22 @@ class CudaKernelGenerator : private kir::IrVisitor {
     }
 
     if (is_vector_op) {
-      indent() << "*reinterpret_cast<"
-               << "Array<" << node->out()->dtype() << ", " << vector_word_size
-               << ">*>"
-               << "(&" << gen(node->out()) << ") = "
-               << "*reinterpret_cast<"
-               << "Array<" << node->in()->dtype() << ", " << vector_word_size
-               << ">*>"
-               << "(&" << gen(node->in()) << ");\n";
+      if (node->in()->isScalar()) {
+        indent() << "reinterpret_cast<"
+                 << "Array<" << node->out()->dtype() << ", " << vector_word_size
+                 << ">*>"
+                 << "(&" << gen(node->out()) << ")->set(" << gen(node->in())
+                 << ");\n";
+      } else {
+        indent() << "*reinterpret_cast<"
+                 << "Array<" << node->out()->dtype() << ", " << vector_word_size
+                 << ">*>"
+                 << "(&" << gen(node->out()) << ")"
+                 << " = *reinterpret_cast<"
+                 << "Array<" << node->in()->dtype() << ", " << vector_word_size
+                 << ">*>"
+                 << "(&" << gen(node->in()) << ");\n";
+      }
       return;
     }
 

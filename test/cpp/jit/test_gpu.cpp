@@ -91,6 +91,14 @@ void checkIntValue(
   TORCH_CHECK(actual_value.value() == expected_value);
 }
 
+bool isPredicated(TensorView* tv, GpuLower& gpulw) {
+  auto parent_scope = gpulw.lowerValue(tv)->definition()->parentScope();
+  if (parent_scope->isA<kir::IfThenElse>()) {
+    return !parent_scope->predicate()->value()->isConst();
+  }
+  return true;
+};
+
 } // namespace
 
 // 1. Test cases are void() functions.
@@ -13083,7 +13091,11 @@ TEST(NVFuserTest, FusionOmitPredicate1_CUDA) {
   auto tv9 = add(tv8, new Double(1));
   fusion.addOutput(tv9);
 
-  tv8->setMemoryType(MemoryType::Global);
+  // Use global memory to test canOmitPredicate. Otherwise,
+  // PredicateElimination may be also involved.
+  for (auto tv : {tv2, tv3, tv4, tv5, tv6, tv8}) {
+    tv->setMemoryType(MemoryType::Global);
+  }
 
   // No predicate needed with evenly divisible split
   tv3->split(0, 32);
@@ -13108,22 +13120,14 @@ TEST(NVFuserTest, FusionOmitPredicate1_CUDA) {
 
   GpuLower gpulw(&fusion);
 
-  auto is_predicated = [&](TensorView* tv) {
-    auto parent_scope = gpulw.lowerValue(tv)->definition()->parentScope();
-    if (parent_scope->isA<kir::IfThenElse>()) {
-      return !parent_scope->predicate()->value()->isConst();
-    }
-    return true;
-  };
-
-  TORCH_CHECK(!is_predicated(tv2));
-  TORCH_CHECK(!is_predicated(tv3));
-  TORCH_CHECK(is_predicated(tv4));
-  TORCH_CHECK(!is_predicated(tv5));
-  TORCH_CHECK(!is_predicated(tv6));
-  TORCH_CHECK(is_predicated(tv7));
-  TORCH_CHECK(is_predicated(tv8));
-  TORCH_CHECK(!is_predicated(tv9));
+  TORCH_CHECK(!isPredicated(tv2, gpulw));
+  TORCH_CHECK(!isPredicated(tv3, gpulw));
+  TORCH_CHECK(isPredicated(tv4, gpulw));
+  TORCH_CHECK(!isPredicated(tv5, gpulw));
+  TORCH_CHECK(!isPredicated(tv6, gpulw));
+  TORCH_CHECK(isPredicated(tv7, gpulw));
+  TORCH_CHECK(isPredicated(tv8, gpulw));
+  TORCH_CHECK(!isPredicated(tv9, gpulw));
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({x}, options);
@@ -13167,20 +13171,18 @@ TEST(NVFuserTest, FusionOmitPredicate2_CUDA) {
   tv5->split(0, 4);
   tv4->computeAt(tv5, -1);
 
+  // Use global memory to test canOmitPredicate. Otherwise,
+  // PredicateElimination may be also involved.
+  for (auto tv : {tv2, tv4}) {
+    tv->setMemoryType(MemoryType::Global);
+  }
+
   GpuLower gpulw(&fusion);
 
-  auto is_predicated = [&](TensorView* tv) {
-    auto parent_scope = gpulw.lowerValue(tv)->definition()->parentScope();
-    if (parent_scope->isA<kir::IfThenElse>()) {
-      return !parent_scope->predicate()->value()->isConst();
-    }
-    return true;
-  };
-
-  TORCH_CHECK(!is_predicated(tv2));
-  TORCH_CHECK(!is_predicated(tv3));
-  TORCH_CHECK(is_predicated(tv4));
-  TORCH_CHECK(is_predicated(tv5));
+  TORCH_CHECK(!isPredicated(tv2, gpulw));
+  TORCH_CHECK(!isPredicated(tv3, gpulw));
+  TORCH_CHECK(isPredicated(tv4, gpulw));
+  TORCH_CHECK(isPredicated(tv5, gpulw));
 
   const int x = 10;
   const int y = 20;
@@ -15453,6 +15455,38 @@ TEST(NVFuserTest, FusionSegfaultReduction_CUDA) {
 
   testValidate(
       &fusion, outputs, inputs, {at_output0, at_output1}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionPredicateElimination_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = add(tv1, new Double(2));
+  auto tv3 = add(tv2, new Double(3));
+
+  fusion.addOutput(tv3);
+
+  tv3->split(0, 32);
+  tv0->computeAt(tv3, 1);
+
+  tv2->axis(1)->parallelize(ParallelType::Unswitch);
+
+  {
+    GpuLower gpulw(&fusion);
+    TORCH_CHECK(!isPredicated(tv2, gpulw));
+  }
+
+  tv2->axis(1)->parallelize(ParallelType::Serial);
+  tv2->split(1, 5);
+
+  {
+    GpuLower gpulw(&fusion);
+    TORCH_CHECK(isPredicated(tv2, gpulw));
+  }
 }
 
 TEST(NVFuserTest, FusionIssue970_CUDA) {

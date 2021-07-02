@@ -423,11 +423,19 @@ class AllocationInserter : public kir::MutableIrVisitor {
       }
 
       auto out_tv = out->as<kir::TensorView>();
+      auto default_val =
+          gpu_lower->predicateElimination().getInitValue(out_tv->fuserTv());
 
       kir::Val* init = nullptr;
       if (expr->isA<kir::ReductionOp>() && out_tv->fuserTv()->hasReduction()) {
+        TORCH_INTERNAL_ASSERT(
+            default_val == nullptr,
+            "Reduction should not have a default initialization value for predicate elimination.");
         init = expr->as<kir::ReductionOp>()->init();
       } else if (expr->isA<kir::WelfordOp>()) {
+        TORCH_INTERNAL_ASSERT(
+            default_val == nullptr,
+            "Welford should not have a default initialization value for predicate elimination.");
         const auto welford = expr->as<kir::WelfordOp>();
         if (out->id() == welford->outVar()->id()) {
           init = welford->initVar() == nullptr
@@ -442,6 +450,8 @@ class AllocationInserter : public kir::MutableIrVisitor {
               out->id() == welford->outN()->id(), "Unreachable");
           init = welford->initN();
         }
+      } else if (default_val != nullptr) {
+        init = default_val;
       }
 
       const bool is_output = gpu_lower->kernel()->isOutput(out);

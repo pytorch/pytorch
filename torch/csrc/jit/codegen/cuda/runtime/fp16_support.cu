@@ -2,8 +2,15 @@
 #define __HALF_TO_US(var) *(reinterpret_cast<unsigned short*>(&(var)))
 #define __HALF_TO_CUS(var) *(reinterpret_cast<const unsigned short*>(&(var)))
 
+struct __half;
+__device__ __half __float2half(const float);
+
 struct __align__(2) __half {
   __half() = default;
+
+  __device__ __half(const float f) {
+    __x = __float2half(f).__x;
+  }
 
  protected:
   unsigned short __x;
@@ -25,4 +32,9 @@ __device__ float __half2float(const __half h) {
 template <typename scalar_t, int vec_size>
 struct alignas(sizeof(scalar_t) * vec_size) Array {
   scalar_t val[vec_size];
+  __device__ void set(scalar_t v) {
+    for (int i = 0; i < vec_size; ++i) {
+      val[i] = v;
+    }
+  }
 };

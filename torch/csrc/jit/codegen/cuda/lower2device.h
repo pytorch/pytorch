@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
+#include <torch/csrc/jit/codegen/cuda/lower_predicate.h>
 #include <torch/csrc/jit/codegen/cuda/lower_shift.h>
 #include <torch/csrc/jit/codegen/cuda/lower_trivial_reductions.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
@@ -72,6 +73,14 @@ class TORCH_CUDA_CU_API GpuLower {
     return halo_info_;
   }
 
+  PredicateElimination& predicateElimination() {
+    return pred_elimination_;
+  }
+
+  const PredicateElimination& predicateElimination() const {
+    return pred_elimination_;
+  }
+
  private:
   void lower();
 
@@ -93,6 +102,7 @@ class TORCH_CUDA_CU_API GpuLower {
 
   // Some stateful information during lowering
   ThreadPredicateMap thread_pred_map_;
+  PredicateElimination pred_elimination_;
   ComputeAtMap ca_loop_map_;
   ComputeAtMap ca_index_map_;
   ComputeAtMap ca_parallel_map_;
