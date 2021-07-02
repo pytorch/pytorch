@@ -2405,7 +2405,7 @@ class TestAutograd(TestCase):
 
     def test_numpy_requires_grad(self):
         x = torch.randn(2, 2, requires_grad=True)
-        err_msg_outputs = r"Can't call numpy\(\) on Tensor that requires grad. Use tensor.detach\(\).numpy\(\) instead."
+        err_msg_outputs = r"Can't convert tensor that requires grad to numpy."
         with self.assertRaisesRegex(RuntimeError, err_msg_outputs):
             x.numpy()
 
