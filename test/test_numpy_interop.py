@@ -171,6 +171,7 @@ class TestNumPyInterop(TestCase):
                         if conj:
                             x = x.conj()
                             y = x.resolve_conj()
+                        expect_error = requires_grad or sparse or conj or not device == 'cpu'
                         error_msg = "Use tensor\..*\.numpy\(\) instead\."
                         if not force and expect_error:
                             self.assertRaisesRegex((RuntimeError, TypeError), error_msg, lambda: x.numpy())
