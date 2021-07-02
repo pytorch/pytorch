@@ -576,6 +576,7 @@ class TORCH_CUDA_CU_API Sync : public Expr {
 };
 
 // TODO(kir): promote to IR node
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class TORCH_CUDA_CU_API Scope {
  public:
   Scope() = default;
