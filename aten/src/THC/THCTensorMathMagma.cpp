@@ -29,6 +29,9 @@ struct Initializer {
   Initializer() {
     ::at::cuda::detail::THCMagma_init = _THCMagma_init;
   };
+  ~Initializer() {
+    ::at::cuda::detail::THCMagma_init = nullptr;
+  }
 } initializer;
 } // anonymous namespace
 

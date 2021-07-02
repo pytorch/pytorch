@@ -17,15 +17,20 @@ namespace cuda {
 namespace {
 class RegisterInterface {
  public:
-  RegisterInterface() {
+  RegisterInterface() : canFuseNodeIndex_(RegisterProfilingNode(canFuseNode)) {
     auto ptr = getFuserInterface();
     ptr->fn_compile_n_ = &compileCudaFusionGroup;
     ptr->fn_run_n_s_ = &runCudaFusionGroup;
     ptr->fn_fuse_graph_ = &CudaFuseGraph;
     ptr->fn_can_fuse_n_ = &isFusableCudaFusionGroup;
-
-    RegisterProfilingNode(canFuseNode);
   }
+
+  ~RegisterInterface() {
+    DeregisterProfilingNode(canFuseNodeIndex_);
+  }
+
+ private:
+  int canFuseNodeIndex_;
 };
 
 static RegisterInterface register_interface_;
