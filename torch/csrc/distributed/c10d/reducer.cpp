@@ -442,17 +442,12 @@ void Reducer::mark_variable_ready_sparse(size_t variable_index) {
   });
 }
 
-std::vector<std::vector<at::Tensor>> Reducer::get_bucket_tensors() const {
+std::vector<at::Tensor> Reducer::get_bucket_tensors() const {
   std::lock_guard<std::mutex> lock(mutex_);
-  std::vector<std::vector<at::Tensor>> bucketTensors;
+  std::vector<at::Tensor> bucketTensors;
   bucketTensors.reserve(buckets_.size());
   for (const auto& bucket : buckets_) {
-    std::vector<at::Tensor> tensors;
-    tensors.reserve(bucket.replicas.size());
-    for (const auto& rep : bucket.replicas) {
-      tensors.push_back(rep.contents);
-    }
-    bucketTensors.push_back(std::move(tensors));
+    bucketTensors.emplace_back(bucket.replicas[0].contents);
   }
   return bucketTensors;
 }
