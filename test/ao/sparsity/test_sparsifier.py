@@ -156,4 +156,3 @@ class TestWeightNormSparsifier(TestCase):
         sparsifier.enable_mask_update = True
         sparsifier.step()
         self.assertAlmostEqual(model.linear.parametrizations['weight'][0].mask.mean().item(), 0.5, places=2)
-

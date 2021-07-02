@@ -64,7 +64,7 @@ class BaseSparsifier(abc.ABC):
         if self.defaults is None:
             self.defaults = dict()
 
-        self.state = defaultdict(dict)
+        self.state: Dict[str, Dict] = defaultdict(dict)
         self.module_groups = []
         self.enable_mask_update = True
 
