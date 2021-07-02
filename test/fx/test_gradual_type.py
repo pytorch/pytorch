@@ -460,5 +460,34 @@ class TypeCheckerTest(unittest.TestCase):
                 assert isinstance(n.type, TensorType)
                 assert torch.Size(n.type.__args__) == B.forward(torch.rand(2, 2, 4, 5)).size()
 
+    def test_type_check_conv2D_and_maxpool2d(self):
+
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+
+                self.conv1 = torch.nn.Conv2d(3, 6, 5)
+                self.pool = torch.nn.MaxPool2d(2, 2)
+
+            def forward(self, x : TensorType((4, 3, 32, 32))):
+                out = self.conv1(x)
+                out = self.pool(out)
+                return out
+
+        B = BasicBlock()
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(B)
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+        tc = GraphTypeChecker({}, traced)
+        tc.type_check()
+
+        expected_ph_types = [TensorType((4, 3, 32, 32)), TensorType((4, 6, 28, 28)),
+                             TensorType((4, 6, 14, 14)), TensorType((4, 6, 14, 14))]
+        expected_iter = iter(expected_ph_types)
+
+        for n in traced.graph.nodes:
+            assert n.type == next(expected_iter)
+
+
 if __name__ == '__main__':
     unittest.main()
