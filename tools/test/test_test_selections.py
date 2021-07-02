@@ -1,7 +1,7 @@
 import random
 import unittest
 
-from tools.testing.test_selections import calculate_shards
+from tools.testing.test_selections import _calculate_shards
 from typing import Dict, List, Tuple
 
 
@@ -49,7 +49,7 @@ class TestCalculateShards(unittest.TestCase):
             (58.31, ['long_test1', 'long_test2', 'normal_test1', 'normal_test2', 'short_test1', 'short_test2',
                      'short_test3', 'short_test4', 'short_test5'])
         ]
-        self.assert_shards_equal(expected_shards, calculate_shards(2, self.tests, self.test_times))
+        self.assert_shards_equal(expected_shards, _calculate_shards(2, self.tests, self.test_times))
 
 
     def test_calculate_5_shards_with_complete_test_times(self) -> None:
@@ -60,7 +60,7 @@ class TestCalculateShards(unittest.TestCase):
             (11.31, ['normal_test1', 'short_test1', 'short_test2', 'short_test3', 'short_test4', 'short_test5']),
             (12.0, ['normal_test2', 'normal_test3']),
         ]
-        self.assert_shards_equal(expected_shards, calculate_shards(5, self.tests, self.test_times))
+        self.assert_shards_equal(expected_shards, _calculate_shards(5, self.tests, self.test_times))
 
 
     def test_calculate_2_shards_with_incomplete_test_times(self) -> None:
@@ -69,7 +69,7 @@ class TestCalculateShards(unittest.TestCase):
             (22.0, ['long_test1', 'long_test2', 'normal_test3', 'short_test3', 'short_test5']),
             (10.0, ['normal_test1', 'short_test1', 'super_long_test', 'normal_test2', 'short_test2', 'short_test4']),
         ]
-        self.assert_shards_equal(expected_shards, calculate_shards(2, self.tests, incomplete_test_times))
+        self.assert_shards_equal(expected_shards, _calculate_shards(2, self.tests, incomplete_test_times))
 
 
     def test_calculate_5_shards_with_incomplete_test_times(self) -> None:
@@ -81,7 +81,7 @@ class TestCalculateShards(unittest.TestCase):
             (0.0, ['super_long_test', 'short_test3']),
             (0.0, ['long_test2', 'short_test4']),
         ]
-        self.assert_shards_equal(expected_shards, calculate_shards(5, self.tests, incomplete_test_times))
+        self.assert_shards_equal(expected_shards, _calculate_shards(5, self.tests, incomplete_test_times))
 
     def test_calculate_2_shards_against_optimal_shards(self) -> None:
         for _ in range(100):
@@ -97,7 +97,7 @@ class TestCalculateShards(unittest.TestCase):
             #     (sum_of_rest, ['super_long_test', 'long_test1']),
             #     (sum_of_rest, [i for i in self.tests if i != 'super_long_test' and i != 'long_test1']),
             # ]
-            calculated_shards = calculate_shards(2, self.tests, random_times)
+            calculated_shards = _calculate_shards(2, self.tests, random_times)
             max_shard_time = max(calculated_shards[0][0], calculated_shards[1][0])
             if sum_of_rest != 0:
                 # The calculated shard should not have a ratio worse than 7/6 for num_shards = 2
