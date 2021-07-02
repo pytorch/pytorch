@@ -480,6 +480,12 @@ sandcastlesaxa
         self._inner_loop_diffopt(sgd, model, True)
         self._inner_loop_diffopt(sgd, model, False)
 
+<<<<<<< HEAD
+
+
+sandcastle
+=======
+>>>>>>> c82b87468f (To add differential SGD)
     def test_sparse_adam(self):
         self._test_rosenbrock_sparse(
             lambda params: optim.SparseAdam(params, lr=4e-2),
