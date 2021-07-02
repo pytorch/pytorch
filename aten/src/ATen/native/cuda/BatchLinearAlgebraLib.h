@@ -49,7 +49,7 @@ void geqrf_cusolver(const Tensor& input, const Tensor& tau);
 void ormqr_cusolver(const Tensor& input, const Tensor& tau, const Tensor& other, bool left, bool transpose);
 Tensor& orgqr_helper_cusolver(Tensor& result, const Tensor& tau);
 
-void linalg_eigh_cusolver(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos, bool upper, bool compute_eigenvectors);
+void linalg_eigh_cusolver(const Tensor& eigenvalues, const Tensor& eigenvectors, const Tensor& infos, bool upper, bool compute_eigenvectors);
 void lu_solve_looped_cusolver(const Tensor& b, const Tensor& lu, const Tensor& pivots);
 
 #endif  // USE_CUSOLVER
