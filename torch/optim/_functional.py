@@ -114,7 +114,8 @@ def adamw(params: List[Tensor],
           beta2: float,
           lr: float,
           weight_decay: float,
-          eps: float):
+          eps: float,
+          differentiable: bool = False):
     r"""Functional API that performs AdamW algorithm computation.
 
     See :class:`~torch.optim.AdamW` for details.
@@ -126,7 +127,10 @@ def adamw(params: List[Tensor],
         step = state_steps[i]
 
         # Perform stepweight decay
-        param.mul_(1 - lr * weight_decay)
+        if differentiable:
+            param = param.mul(1 - lr * weight_decay)
+        else:
+            param.mul_(1 - lr * weight_decay)
 
         bias_correction1 = 1 - beta1 ** step
         bias_correction2 = 1 - beta2 ** step
@@ -144,7 +148,10 @@ def adamw(params: List[Tensor],
 
         step_size = lr / bias_correction1
 
-        param.addcdiv_(exp_avg, denom, value=-step_size)
+        if differentiable:
+            param = param.addcdiv(exp_avg, denom, value=-step_size)
+        else:
+            param.addcdiv_(exp_avg, denom, value=-step_size)
 
 
 def sgd(params: List[Tensor],

@@ -477,7 +477,10 @@ class TestOptim(TestCase):
             adam(model, step, states["exp_avgs"], states["exp_avg_sqs"], states["max_exp_avg_sqs"], [epoch + 1],
                  amsgrad=False, beta1=0.99, beta2=0.99, lr=0.5, weight_decay=0., eps=0.001,
                  differentiable=differentiable)
-
+        if opt == adamw:
+            adamw(model, step, states["exp_avgs"], states["exp_avg_sqs"], states["max_exp_avg_sqs"], [epoch + 1],
+                  amsgrad=False, beta1=0.99, beta2=0.99, lr=0.5, weight_decay=0., eps=0.001,
+                  differentiable=differentiable)
 
     def test_differential_sgd(self):
         model = [torch.randn(2, 2, dtype=torch.double, requires_grad=True)]
@@ -488,6 +491,11 @@ class TestOptim(TestCase):
         model = [torch.randn(1, 2, dtype=torch.double, requires_grad=True)]
         self._inner_loop_diffopt(adam, model, True)
         self._inner_loop_diffopt(adam, model, False)
+
+    def test_differential_adamw(self):
+        model = [torch.randn(1, 2, dtype=torch.double, requires_grad=True)]
+        self._inner_loop_diffopt(adamw, model, True)
+        self._inner_loop_diffopt(adamw, model, False)
 
     def test_sparse_adam(self):
         self._test_rosenbrock_sparse(
