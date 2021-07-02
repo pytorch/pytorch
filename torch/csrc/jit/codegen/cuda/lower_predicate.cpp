@@ -268,7 +268,7 @@ class PredicateAnalyzer : public OptOutDispatch {
   //! Due to the way we allocate local-memory tensors, there should
   //! never be out-of-bound accesses with consumer tensors when allocated on
   //! local memory. However, accessing producer tensors still may
-  //! result in out-of-bound as they are replyaed as consumers.
+  //! result in out-of-bound as they are replayed as consumers.
   static bool needsPredicate(TensorView* producer, TensorView* consumer) {
     // Both tensors must be on local memory. Global tensors must be
     // predicated as allocation is done based on root domains. Smem
