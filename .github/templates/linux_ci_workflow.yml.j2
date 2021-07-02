@@ -280,6 +280,9 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
+      - name: Prepare crash dump folder
+        run: |
+          mkdir -p pytorch_crashes
       - name: Test PyTorch
         run: |
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
@@ -309,6 +312,7 @@ jobs:
             --tty \
             --user jenkins \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
+            -v "${GITHUB_WORKSPACE}/pytorch_crashes:/tmp/pytorch_crashes" \
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}" \
             sh -c 'sudo chown -R jenkins . && pip install dist/*.whl && '$TEST_COMMAND
@@ -341,6 +345,15 @@ jobs:
           if-no-files-found: error
           path:
             test-reports-*.zip
+      - uses: actions/upload-artifact@v2
+        name: Upload crash reports
+        if: always()
+        with:
+          name: crash-reports-${{ matrix.config }}
+          retention-days: 14
+          if-no-files-found: error
+          path:
+            pytorch_crashes/*.dmp
       - name: Clean up docker images
         if: always()
         run: |

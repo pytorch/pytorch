@@ -15,7 +15,8 @@ import tempfile
 
 import torch
 from torch.utils import cpp_extension
-from torch.testing._internal.common_utils import FILE_SCHEMA, IS_IN_CI, TEST_WITH_ROCM, shell, set_cwd
+from torch.testing._internal.common_utils import FILE_SCHEMA, IS_IN_CI, TEST_WITH_ROCM, \
+    shell, set_cwd, has_breakpad
 import torch.distributed as dist
 from typing import Dict, Optional, Tuple, List, Any
 from typing_extensions import TypedDict
@@ -1233,6 +1234,10 @@ def main():
         print(f'Exporting past test times from S3 to {test_times_filename}, no tests will be run.')
         export_S3_test_times(test_times_filename, pull_job_times_from_S3())
         return
+
+    if has_breakpad():
+        # Write crash dumps on unstructured exceptions (e.g. SIGSEGV) to /tmp/pytorch_crashes
+        torch.utils._crash_handler.enable_minidumps()
 
     specified_test_cases_filename = options.run_specified_test_cases
     if specified_test_cases_filename:
