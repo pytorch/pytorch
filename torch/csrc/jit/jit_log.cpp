@@ -24,6 +24,14 @@ void TORCH_API set_jit_logging_levels(std::string level) {
   JitLoggingConfig::getInstance().setLoggingLevels(level);
 }
 
+std::ostringstream& TORCH_API get_jit_logging_output_stream() {
+  return JitLoggingConfig::getInstance().getLoggingOutputStream();
+}
+
+void TORCH_API set_jit_logging_output_stream(std::ostringstream& stream) {
+  JitLoggingConfig::getInstance().setLoggingOutputStream(stream);
+}
+
 // gets a string representation of a node header
 // (e.g. outputs, a node kind and outputs)
 std::string getHeader(const Node* node) {

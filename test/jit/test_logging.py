@@ -115,3 +115,10 @@ class TestLogging(JitTestCase):
     def test_logging_levels_set(self):
         torch._C._jit_set_logging_option('foo')
         self.assertEqual('foo', torch._C._jit_get_logging_option())
+
+    def test_logging_output_stream(self):
+        self.assertEqual("STDERR", torch._C._jit_get_logging_output_stream())
+        torch._C._jit_set_logging_output_stream_stdout(1)
+        self.assertEqual("STDOUT", torch._C._jit_get_logging_output_stream())
+        torch._C._jit_set_logging_output_stream_stdout(0)
+        self.assertEqual("STDERR", torch._C._jit_get_logging_output_stream())
