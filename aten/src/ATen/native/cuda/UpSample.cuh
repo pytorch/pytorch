@@ -96,7 +96,7 @@ __host__ __forceinline__ static accscalar_t area_pixel_compute_scale(
     const c10::optional<double> scale) {
   if(align_corners){
     if(output_size > 1){
-      return (accscalar_t)(input_size - 1) / (output_size - 1);
+      return static_cast<accscalar_t>(input_size - 1) / (output_size - 1);
     }
     else{
       return static_cast<accscalar_t>(0);
