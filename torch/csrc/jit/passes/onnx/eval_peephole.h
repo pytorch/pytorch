@@ -7,8 +7,8 @@ namespace jit {
 
 void EvalPeepholeONNX(
     Block* b,
-    std::vector<std::string>& inputNames,
-    std::map<std::string, IValue>& paramDict);
+    std::map<std::string, IValue>& paramDict,
+    bool isAllowedToAdjustGraphInputs);
 
 } // namespace jit
 
