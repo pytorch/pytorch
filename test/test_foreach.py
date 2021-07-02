@@ -572,7 +572,7 @@ class TestForeach(TestCase):
         # different strides
         tensor1 = torch.zeros(10, 10, device=device, dtype=dtype)
         tensor2 = torch.ones(10, 10, device=device, dtype=dtype)
-        inputs = ([tensor1], [tensor2])
+        inputs = ([tensor1], [tensor2.t()])
         self._binary_test(dtype, foreach_op, native_op, inputs, is_fastpath=False, is_inplace=False)
         self._binary_test(dtype, foreach_op_, native_op_, inputs, is_fastpath=False, is_inplace=True)
 
