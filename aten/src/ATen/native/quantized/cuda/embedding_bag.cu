@@ -399,7 +399,7 @@ TORCH_LIBRARY_IMPL(quantized, CUDA, m) {
       TORCH_SELECTIVE_NAME("quantized::embedding_bag_byte_rowwise_offsets"),
       TORCH_FN(embedding_bag_byte_rowwise_offsets));
   m.impl(
-      TORCH_SELECTIVE_NAME("quantized::qembeddingbag_4bit_unpack"),
+      TORCH_SELECTIVE_NAME("quantized::embedding_bag_4bit_unpack"),
       TORCH_FN(qembeddingbag_4bit_unpack));
   m.impl(
       TORCH_SELECTIVE_NAME("quantized::embedding_bag_4bit_rowwise_offsets"),
