@@ -44,7 +44,7 @@ std::vector<at::Tensor> getValues(
 static void fuseConvBatchNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     for (auto* child_block : it->blocks()) {
-      fuseConvBatchNorm(child_block, inputNames, valsToParamsMap);
+      fuseConvBatchNorm(child_block, valsToParamsMap);
     }
     if (it->kind() == onnx::Conv) {
       if (it->output()->uses().size() != 1) {
@@ -138,22 +138,21 @@ static void fuseConvBatchNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
       it.destroyCurrent();
     }
   }
-
-  auto block_inputs = b->owningGraph()->inputs();
-  printf("In the end, print block's inputs.\n");
-  for (auto b_input : block_inputs) {
-    // b_input->node()->dump();
-    printf("=== input name: %s \n", b_input->debugNameBase().c_str());
-  }
-  printf("Finish print block's inputs.\n");
 }
 
 void EvalPeepholeONNX(
     Block* b,
-    std::vector<std::string>& inputNames,
-    ParamMap& paramsDict) {
+    ParamMap& paramsDict,
+    bool isAllowedToAdjustGraphInputs) {
   auto valsToParamsMap = buildValueToParamsMap(b, paramsDict);
-  fuseConvBatchNorm(b, inputNames, valsToParamsMap);
+
+  // Optimizations like fusing Conv and BatchNorm ops may adjust the graph inputs.
+  // If the graph inputs are not allowed to be adjusted, for example export_params is False,
+  // such optimizations will be skipped.
+  if (isAllowedToAdjustGraphInputs) {
+    fuseConvBatchNorm(b, valsToParamsMap);
+  }
+
   buildParamsMapFromValueToParamsMap(valsToParamsMap, paramsDict);
 }
 
