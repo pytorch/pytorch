@@ -252,14 +252,14 @@ static inline scalar_t area_pixel_compute_scale(
   // see Note [area_pixel_compute_scale]
   if(align_corners){
     if(output_size > 1){
-      return static_cast<accscalar_t>(input_size - 1) / (output_size - 1);
+      return static_cast<scalar_t>(input_size - 1) / (output_size - 1);
     }
     else{
-      return static_cast<accscalar_t>(0);
+      return static_cast<scalar_t>(0);
     }
   }
   else{
-    return compute_scales_value<accscalar_t>(scale, input_size, output_size);
+    return compute_scales_value<scalar_t>(scale, input_size, output_size);
   }
 }
 
