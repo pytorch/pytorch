@@ -204,7 +204,8 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& graph,
              std::map<std::string, IValue>& paramsDict,
              bool isAllowedToAdjustGraphInputs) {
-            EvalPeepholeONNX(graph->block(), paramsDict, isAllowedToAdjustGraphInputs);
+            EvalPeepholeONNX(
+                graph->block(), paramsDict, isAllowedToAdjustGraphInputs);
             return paramsDict;
           },
           pybind11::return_value_policy::move)

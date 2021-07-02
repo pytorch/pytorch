@@ -142,9 +142,9 @@ void EvalPeepholeONNX(
     bool isAllowedToAdjustGraphInputs) {
   auto valsToParamsMap = buildValueToParamsMap(b, paramsDict);
 
-  // Optimizations like fusing Conv and BatchNorm ops may adjust the graph inputs.
-  // If the graph inputs are not allowed to be adjusted, for example export_params is False,
-  // such optimizations will be skipped.
+  // Optimizations like fusing Conv and BatchNorm ops may adjust the graph
+  // inputs. If the graph inputs are not allowed to be adjusted, for example
+  // export_params is False, such optimizations will be skipped.
   if (isAllowedToAdjustGraphInputs) {
     fuseConvBatchNorm(b, valsToParamsMap);
   }
