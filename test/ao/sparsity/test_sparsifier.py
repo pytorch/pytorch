@@ -30,9 +30,8 @@ class ImplementedSparsifier(BaseSparsifier):
 
 class TestBaseSparsifier(TestCase):
     def test_constructor(self):
-        # Cannot instantiate the base
-        self.assertRaisesRegex(TypeError, 'with abstract methods step',
-                               BaseSparsifier)
+        # Cannot instantiate the abstract base
+        self.assertRaises(TypeError, BaseSparsifier)
         # Can instantiate the model with no configs
         model = Model()
         sparsifier = ImplementedSparsifier(test=3)
