@@ -106,6 +106,3 @@ class TestBaseSparsifier(TestCase):
                     self.assertEqual(param0.__dict__, param1.__dict__)
                 else:
                     assert mg0[key] == mg1[key]
-
-
-
