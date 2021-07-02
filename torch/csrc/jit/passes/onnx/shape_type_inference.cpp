@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/constant_fold.h>
 #include <torch/csrc/jit/passes/onnx/constant_map.h>
+#include <torch/csrc/jit/passes/onnx/fixup_onnx_controlflow.h>
 #include <torch/csrc/jit/passes/onnx/fold_if_node.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
@@ -1198,7 +1199,7 @@ void ProcessConstantValueMap(Node* n, int opset_version) {
 }
 
 // Any additional post process that are specific to individual node kind.
-void SpecialPostProcess(Node* n) {
+void SpecialPostProcess(Node* n, int opset_version) {
   switch (n->kind()) {
     case ::c10::onnx::SequenceInsert: {
       // Special case when input sequence to SequenceInsert is empty.
@@ -1344,9 +1345,7 @@ void SpecialPostProcess(Node* n) {
       if (!IsValidONNXControlflowNode(n)) {
         break;
       }
-      for (size_t i = 0; i < n->outputs().size(); ++i) {
-        n->output(i)->setType(n->blocks().at(0)->outputs().at(i)->type());
-      }
+      FixupONNXControlflowNode(n, opset_version);
       break;
     }
     case ::c10::onnx::Loop: {
@@ -1573,7 +1572,7 @@ void ONNXShapeTypeInference(
     }
   }
 
-  SpecialPostProcess(n);
+  SpecialPostProcess(n, opset_version);
 
   if (IsValidONNXNode(n)) {
     ProcessConstantValueMap(n, opset_version);

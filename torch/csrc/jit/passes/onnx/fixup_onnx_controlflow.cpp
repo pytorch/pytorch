@@ -347,25 +347,92 @@ void ONNXFixupUninitializedOutput(Node* node) {
           graph, else_block, else_block_output, then_block_output);
       if_node->outputs()[i]->setType(else_block->outputs()[i]->type());
     }
-    auto then_tensor_type =
-        then_block->outputs().at(i)->type()->castRaw<TensorType>();
-    auto else_tensor_type =
-        else_block->outputs().at(i)->type()->castRaw<TensorType>();
-    if (then_tensor_type && else_tensor_type) {
-      const auto& then_shape = then_tensor_type->symbolic_sizes();
-      const auto& else_shape = else_tensor_type->symbolic_sizes();
-      std::vector<::c10::ShapeSymbol> dims;
-      if (then_shape.rank() && else_shape.rank() &&
-          then_shape.rank() == else_shape.rank()) {
-        for (size_t j = 0; j < then_shape.rank().value(); ++j) {
-          if (then_shape[j] == else_shape[j]) {
-            dims.emplace_back(then_shape[j]);
-          } else {
-            dims.emplace_back(::c10::ShapeSymbol::newSymbol());
-          }
+  }
+}
+
+void ONNXMergeIfBlockOutputShapes(Node* node) {
+  TORCH_INTERNAL_ASSERT(node->kind() == ::c10::onnx::If);
+  Block* then_block = node->blocks().at(0);
+  Block* else_block = node->blocks().at(1);
+
+  TORCH_INTERNAL_ASSERT(
+      then_block->outputs().size() == else_block->outputs().size())
+
+  auto findCommonShape =
+      [](const ::c10::SymbolicShape& a,
+         const ::c10::SymbolicShape& b) -> ::c10::SymbolicShape {
+    std::vector<::c10::ShapeSymbol> dims;
+    if (a.rank() && b.rank() && a.rank() == b.rank()) {
+      for (size_t j = 0; j < a.rank().value(); ++j) {
+        if (a[j] == b[j]) {
+          dims.emplace_back(a[j]);
+        } else {
+          dims.emplace_back(::c10::ShapeSymbol::newSymbol());
         }
-        if_node->output(i)->setType(
-            then_tensor_type->withSymbolicShapes(::c10::SymbolicShape(dims)));
+      }
+      return ::c10::SymbolicShape(dims);
+    }
+    if (a.rank() && a.rank().value() > 0) {
+      return a;
+    }
+    if (b.rank() && b.rank().value() > 0) {
+      return b;
+    }
+
+    return ::c10::SymbolicShape();
+  };
+
+  auto mergeTensorType = [&findCommonShape](
+                             const TensorTypePtr a,
+                             const TensorTypePtr b) -> TensorTypePtr {
+    if (a && b) {
+      const auto& a_shape = a->symbolic_sizes();
+      const auto& b_shape = b->symbolic_sizes();
+      auto commonShape = findCommonShape(a_shape, b_shape);
+      return a->withSymbolicShapes(commonShape);
+    } else if (a) {
+      return a;
+    } else if (b) {
+      return b;
+    }
+    return nullptr;
+  };
+
+  auto mergeListType = [&mergeTensorType](
+                           const ListTypePtr a,
+                           const ListTypePtr b) -> ListTypePtr {
+    if (a && b) {
+      auto a_tensor_type = a->getElementType()->cast<TensorType>();
+      auto b_tensor_type = b->getElementType()->cast<TensorType>();
+      auto tensor_type = mergeTensorType(a_tensor_type, b_tensor_type);
+      if (tensor_type) {
+        return a->withContained({tensor_type})->cast<ListType>();
+      }
+      // Both branches produce ListType without tensor shape.
+      return a;
+    } else if (a) {
+      return a;
+    } else if (b) {
+      return b;
+    }
+    return nullptr;
+  };
+
+  for (const auto i : c10::irange(else_block->outputs().size())) {
+    auto then_type = then_block->outputs().at(i)->type();
+    auto else_type = else_block->outputs().at(i)->type();
+    auto then_tensor_type = then_type->cast<TensorType>();
+    auto else_tensor_type = else_type->cast<TensorType>();
+    auto then_list_type = then_type->cast<ListType>();
+    auto else_list_type = else_type->cast<ListType>();
+    if (then_tensor_type || else_tensor_type) {
+      if (auto tensor_type =
+              mergeTensorType(then_tensor_type, else_tensor_type)) {
+        node->output(i)->setType(tensor_type);
+      }
+    } else if (then_list_type || else_list_type) {
+      if (auto list_type = mergeListType(then_list_type, else_list_type)) {
+        node->output(i)->setType(list_type);
       }
     }
   }
@@ -376,16 +443,13 @@ std::vector<Value*> FixupONNXIfNode(Node* node, int opset_version) {
     return node->outputs().vec();
   }
   GRAPH_DUMP("Graph before fixing controlflow: ", node->owningGraph());
-  auto* if_node = node;
   FixupONNXSubblockOutputs(node);
-  ONNXFixupUninitializedOutput(if_node);
+  ONNXFixupUninitializedOutput(node);
   // Copy type of block output to node output.
-  for (size_t i = 0; i < node->outputs().size(); ++i) {
-    node->output(i)->setType(node->blocks().at(0)->outputs().at(i)->type());
-  }
+  ONNXMergeIfBlockOutputShapes(node);
 
   GRAPH_DUMP("Graph after fixing controlflow: ", node->owningGraph());
-  return if_node->outputs().vec();
+  return node->outputs().vec();
 }
 
 std::vector<Value*> FixupONNXControlflowNode(Node* n, int opset_version) {
