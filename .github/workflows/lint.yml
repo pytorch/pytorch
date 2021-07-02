@@ -31,7 +31,7 @@ jobs:
       - name: Ensure correct trailing newlines
         if: always() && steps.requirements.outcome == 'success'
         run: |
-          (! git --no-pager grep -Il '' -- . ':(exclude)**/contrib/**' ':(exclude)third_party' ':(exclude)**.expect' ':(exclude)tools/clang_format_hash' | tools/linter/trailing_newlines.py || (echo "The above files do not have correct trailing newlines; please normalize them"; false))
+          (! git --no-pager grep -Il '' -- . ':(exclude)**/contrib/**' ':(exclude)third_party' ':(exclude)**.expect' ':(exclude)**.ipynb' ':(exclude)tools/clang_format_hash' | tools/linter/trailing_newlines.py || (echo "The above files do not have correct trailing newlines; please normalize them"; false))
       - name: Ensure no trailing spaces
         if: always()
         run: |

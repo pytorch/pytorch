@@ -447,7 +447,7 @@ std::vector<c10d::GradBucket> Reducer::get_grad_buckets(
   std::lock_guard<std::mutex> lock(mutex_);
   std::vector<c10d::GradBucket> gradBuckets;
   gradBuckets.reserve(buckets_.size());
-  for (int i = 0; i < buckets_.size(); ++i) {
+  for (size_t i = 0; i < buckets_.size(); ++i) {
     gradBuckets.emplace_back(
       i,
       return_zero_tensors ? at::zeros_like(buckets_[i].replicas[0].contents)
