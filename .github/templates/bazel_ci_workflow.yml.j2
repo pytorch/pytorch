@@ -227,7 +227,7 @@ jobs:
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}" \
-            sh -c 'sudo chown -R jenkins . && sudo chown -R jenkins /dev && .jenkins/pytorch/test.sh && find . -type l -iname "bazel-testlogs" -ls && find /var/lib/jenkins/workspace -type l -iname "bazel-testlogs" -ls && find ~ -type l -iname "bazel-testlogs" -ls'
+            sh -c 'sudo chown -R jenkins . && sudo chown -R jenkins /dev && .jenkins/pytorch/test.sh'
       - name: Chown workspace
         if: always()
         run: |
@@ -236,6 +236,10 @@ jobs:
       - name: Zip test reports for upload
         if: always()
         run: |
+          find . -type l -iname "bazel-testlogs" -ls
+          find ${GITHUB_WORKSPACE} -type l -iname "bazel-testlogs" -ls
+          ls ./bazel-testlogs
+          find ./bazel-testlogs -type f -iname "*.xml"
           # Remove any previous test reports if they exist
           rm -f test-reports-*.zip
           zip -r "test-reports-${TEST_CONFIG}.zip" bazel-testlogs -i '*.xml'
