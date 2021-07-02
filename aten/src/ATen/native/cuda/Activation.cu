@@ -62,39 +62,44 @@ __global__ void glu_backward_kernel(
     OffsetCalc offset_calculator,
     int64_t gI_byte_offset, int64_t I_byte_offset) {
   using acc_t = at::acc_type<scalar_t, true>;
+
+  const uint32_t linear_index = blockIdx.x * blockDim.x + threadIdx.x;
+  if (linear_index >= numel) {
+    return;
+  }
+  const auto offsets = offset_calculator.get(linear_index);
+
   // We explicitly iterate over the first half of the input tensor, and
   // gI_byte_offset and I_byte_offset are the offsets to access the
   // corresponding index in the second half of the tensor.
-  CUDA_KERNEL_LOOP(i, numel) {
-    const auto offsets = offset_calculator.get(i);
-    const acc_t a = I[offsets[1]];
-    const acc_t b = *byte_offset(I + offsets[1], I_byte_offset);
-    const acc_t gO_val = gO[offsets[2]];
+  const acc_t a = I[offsets[1]];
+  const acc_t b = *byte_offset(I + offsets[1], I_byte_offset);
+  const acc_t gO_val = gO[offsets[2]];
 
-    const auto one = acc_t(1);
-    const acc_t sigmoid = one / (one + std::exp(-b));
+  const auto one = acc_t(1);
+  const acc_t sigmoid = one / (one + std::exp(-b));
 
-    auto* gA = gI + offsets[0];
-    *gA = sigmoid * gO_val;
+  auto* gA = gI + offsets[0];
+  *gA = sigmoid * gO_val;
 
-    auto* gB = byte_offset(gA, gI_byte_offset);
-    *gB = (one - sigmoid) * sigmoid * gO_val * a;
-  }
+  auto* gB = byte_offset(gA, gI_byte_offset);
+  *gB = (one - sigmoid) * sigmoid * gO_val * a;
 }
 
 void launch_glu_backward_kernel(const TensorIteratorBase& iter,
                                 int64_t gI_stride, int64_t I_stride) {
   const auto N = iter.numel();
-  auto offset_calculator = make_element_offset_calculator<3>(iter);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(N > 0 && N <= std::numeric_limits<int32_t>::max());
-  int64_t grid = (N + NUM_THREADS - 1) / NUM_THREADS;
-  auto stream = at::cuda::getCurrentCUDAStream();
+  const auto offset_calculator = make_element_offset_calculator<3>(iter);
+  constexpr int64_t block_size = 256;
+  const int64_t grid = (N - block_size - 1) / block_size;
+  const auto stream = at::cuda::getCurrentCUDAStream();
 
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "glu_backward_cuda", [&] {
     auto gI = static_cast<scalar_t*>(iter.data_ptr(0));
     auto I = static_cast<const scalar_t*>(iter.data_ptr(1));
     auto gO = static_cast<const scalar_t*>(iter.data_ptr(2));
-    glu_backward_kernel<<<grid, num_threads, 0, stream>>>(
+    glu_backward_kernel<<<grid, block_size, 0, stream>>>(
         N, gI, I, gO, offset_calculator,
         gI_stride * sizeof(scalar_t), I_stride * sizeof(scalar_t));
     C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -124,6 +129,10 @@ Tensor& glu_backward_cuda_out(const Tensor& grad_output, const Tensor& input,
     .resize_outputs(false)
     .declare_static_shape(iter_shape)
     .build();
+
+  if (iter.numel() == 0) {
+    return grad_input;
+  }
 
   const auto I_stride = input.strides()[wrap_dim] * dim_size;
   const auto gI_stride = grad_input.strides()[wrap_dim] * dim_size;
