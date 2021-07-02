@@ -250,12 +250,16 @@ static inline scalar_t area_pixel_compute_scale(
     bool align_corners,
     const c10::optional<double> scale) {
   // see Note [area_pixel_compute_scale]
-  if (output_size > 1) {
-    return align_corners
-        ? static_cast<scalar_t>(input_size - 1) / (output_size - 1)
-        : compute_scales_value<scalar_t>(scale, input_size, output_size);
-  } else {
-    return scalar_t(0);
+  if(align_corners){
+    if(output_size > 1){
+      return (accscalar_t)(input_size - 1) / (output_size - 1);
+    }
+    else{
+      return static_cast<accscalar_t>(0);
+    }
+  }
+  else{
+    return compute_scales_value<accscalar_t>(scale, input_size, output_size);
   }
 }
 
