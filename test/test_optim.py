@@ -10,7 +10,6 @@ import torch.optim._multi_tensor as optim_mt
 import torch.nn.functional as F
 from torch.optim import SGD
 from torch.autograd import Variable
-from torch import autograd
 from torch import sparse
 from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, StepLR, \
     MultiStepLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, \
@@ -18,7 +17,6 @@ from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, StepLR, \
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
     skipIfRocm
-from torch.optim._functional import sgd
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -450,32 +448,6 @@ class TestOptim(TestCase):
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
                 optimizer(None, lr=1e-2, weight_decay=-1)
 
-    def _inner_loop_diffopt(self, opt, model, is_diff):
-        def inner_loop(model):
-            for epoch in range(10):
-                loss = model[0].exp().sum()
-                step, = autograd.grad(loss, model, create_graph=True)
-                self.call_functional_optimizer(opt, model, step, is_diff)
-            return model[0].sum()
-
-        if is_diff:
-            torch.autograd.gradcheck(inner_loop, [model[0].clone()])
-        else:
-            with self.assertRaisesRegex(RuntimeError, "Output 0 of UnbindBackward is a view and is being modified inplace"):
-                torch.autograd.gradcheck(inner_loop, model)
-
-    def call_functional_optimizer(self, opt, model, step, is_diff):
-        if opt == sgd:
-            sgd(model, step, [None], momentum=0, lr=0.5, nesterov=False, dampening=0., weight_decay=0., differentiable=is_diff)
-
-    def test_differential_sgd(self):
-        model = [torch.randn(2, 2, dtype=torch.double, requires_grad=True)]
-        self._inner_loop_diffopt(sgd, model, True)
-        self._inner_loop_diffopt(sgd, model, False)
-
-
-
-sandcastle
     def test_sparse_adam(self):
         self._test_rosenbrock_sparse(
             lambda params: optim.SparseAdam(params, lr=4e-2),

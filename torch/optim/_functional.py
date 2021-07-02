@@ -151,8 +151,7 @@ def sgd(params: List[Tensor],
         momentum: float,
         lr: float,
         dampening: float,
-        nesterov: bool,
-        differentiable: bool = False):
+        nesterov: bool):
     r"""Functional API that performs SGD algorithm computation.
 
     See :class:`~torch.optim.SGD` for details.
@@ -178,10 +177,8 @@ def sgd(params: List[Tensor],
             else:
                 d_p = buf
 
-        if differentiable:
-            param = param.add(d_p, alpha=-lr)
-        else:
-            param.add_(d_p, alpha=-lr)
+        param.add_(d_p, alpha=-lr)
+
 
 def adadelta(params: List[Tensor],
              grads: List[Tensor],
