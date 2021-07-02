@@ -1,3 +1,4 @@
+import torch
 from torch import nn
 
 def _module_to_fqn(model, layer, prefix=''):
@@ -90,7 +91,7 @@ def convert(model: nn.Module, mapping: dict = None, config: dict = None) -> nn.M
         mapping = dict()
     if config is None:
         raise AttributeError('Currently, you have to specify the convert config')
-    mapping.setdefault('quantized', torch.quantization.get_static_quant_module_class())
+    mapping.setdefault('quantized', torch.quantization.get_default_static_quant_module_mappings())
     mapping.setdefault(
         'sparse_quantized',
         {
@@ -103,7 +104,7 @@ def convert(model: nn.Module, mapping: dict = None, config: dict = None) -> nn.M
     quant_config = config.get('quantized', dict())
     for mode in config.keys():
         for fqn, mode_config in config[mode]:
-            module = _path_to_module(model, fqn)
+            module = _fqn_to_module(model, fqn)
             torch.quantization.convert(module, mapping=mapping.get(mode, dict()), **mode_config)
     return model
 
