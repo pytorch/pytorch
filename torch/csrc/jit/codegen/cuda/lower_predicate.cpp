@@ -590,9 +590,10 @@ bool PredicateElimination::canOmitPredicate(const Expr* expr) const {
     return true;
   }
 
-  if (IterationDomainAnalysis::canOmitPredicate(out_tv->domain())) {
-    return true;
-  }
+  // TODO: This is not safe when parallelized. Disable this until it's fixed.
+  // if (IterationDomainAnalysis::canOmitPredicate(out_tv->domain())) {
+  //  return true;
+  //}
 
   return false;
 }

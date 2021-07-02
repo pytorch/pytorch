@@ -13068,6 +13068,8 @@ TEST(NVFuserTest, FusionKirScoping_CUDA) {
   TORCH_CHECK(top_level_scope == nullptr);
 }
 
+// Disabled temporarily. See #982
+#if 0
 TEST(NVFuserTest, FusionOmitPredicate1_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -13143,7 +13145,10 @@ TEST(NVFuserTest, FusionOmitPredicate1_CUDA) {
 
   testValidate(&fusion, cg_outputs, aten_inputs, {t7, t9}, __LINE__, __FILE__);
 }
+#endif
 
+// Disabled temporarily. See #982
+#if 0
 TEST(NVFuserTest, FusionOmitPredicate2_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -13199,6 +13204,7 @@ TEST(NVFuserTest, FusionOmitPredicate2_CUDA) {
 
   testValidate(&fusion, cg_outputs, aten_inputs, {t3, t3}, __LINE__, __FILE__);
 }
+#endif
 
 TEST(NVFuserTest, FusionBroadcastAcrossComputeAt_CUDA) {
   Fusion fusion;
