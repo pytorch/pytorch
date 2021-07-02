@@ -473,6 +473,9 @@ class TestOptim(TestCase):
         self._inner_loop_diffopt(sgd, model, True)
         self._inner_loop_diffopt(sgd, model, False)
 
+
+
+sandcastle
     def test_sparse_adam(self):
         self._test_rosenbrock_sparse(
             lambda params: optim.SparseAdam(params, lr=4e-2),
