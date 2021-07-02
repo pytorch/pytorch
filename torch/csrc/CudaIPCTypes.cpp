@@ -61,14 +61,6 @@ CudaIPCSentDataLimbo::~CudaIPCSentDataLimbo() {
   }
 }
 
-void CudaIPCSentDataLimbo::clear_shared_blocks() {
-  std::vector<std::unique_ptr<CudaIPCSentData>> tmp_blocks;
-  {
-    std::lock_guard<std::mutex> lock(limbo_mutex_);
-    tmp_blocks = std::move(shared_blocks_);
-  }
-}
-
 bool CudaIPCSentDataLimbo::collect() {
   bool freed_memory = false;
   std::vector<std::unique_ptr<CudaIPCSentData>> reset_blocks;
