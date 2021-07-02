@@ -103,6 +103,9 @@ class ComputeAt {
       TensorView* _consumer,
       unsigned int _consumer_position);
 
+  ComputeAt() = delete;
+  ComputeAt(ComputeAt&) = delete;
+  ComputeAt& operator=(const ComputeAt& other) = delete;
  private:
   TensorView* producer_;
   TensorView* consumer_;
@@ -155,13 +158,7 @@ class ComputeAt {
       TensorView* _consumer,
       unsigned int _consumer_position);
 
-  // NOLINTNEXTLINE(modernize-use-equals-delete)
-  ComputeAt() = delete;
   ~ComputeAt() = default;
-  // NOLINTNEXTLINE(modernize-use-equals-delete)
-  ComputeAt(ComputeAt&) = delete;
-  // NOLINTNEXTLINE(modernize-use-equals-delete)
-  ComputeAt& operator=(const ComputeAt& other) = delete;
 };
 
 } // namespace cuda
