@@ -143,18 +143,11 @@ kir::Bool* PredicateCompute::getInlinePredicate(
     return thread_pred;
   }
   auto out_tv = firstTensorViewOutput(expr);
-  // If local memory and initializing a reduction buffer, we don't need a
-  // predicate
+  // If local memory and assigning a scalar value, we don't need a
+  // predicate. This includes initializations of reduciton buffers.
   if (out_tv->memoryType() == MemoryType::Local) {
-    for (auto root_id : out_tv->fuserTv()->getMaybeRFactorDomain()) {
-      if (!root_id->isReduction()) {
-        continue;
-      }
-      auto kir_root_id = gpu_lower->lowerValue(root_id)->as<kir::IterDomain>();
-      if (!std::any_of(loops.begin(), loops.end(), [&](kir::ForLoop* for_loop) {
-            auto loop_id = for_loop->iter_domain();
-            return gpu_lower->caLoopMap().areMapped(kir_root_id, loop_id);
-          })) {
+    if (auto uop = dynamic_cast<const kir::UnaryOp*>(expr)) {
+      if (uop->operation() == UnaryOpType::Set && uop->in()->isScalar()) {
         return ir_builder.trueVal();
       }
     }

@@ -15412,6 +15412,37 @@ TEST(NVFuserTest, FusionSegfaultReduction_CUDA) {
       &fusion, outputs, inputs, {at_output0, at_output1}, __LINE__, __FILE__);
 }
 
+TEST(NVFuserTest, FusionIssue970_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  const int nelm = 10;
+
+  // tv3 = tv0 + sum(tv0)
+  auto tv0 = makeConcreteTensor({nelm, nelm});
+  fusion.addInput(tv0);
+  auto tv1 = sum(tv0, {1});
+  auto tv2 = broadcast(tv1, {false, true});
+  auto tv3 = add(tv2, tv0);
+  fusion.addOutput(tv3);
+
+  tv1->split(1, 4);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto options_int = at::TensorOptions().dtype(at::kLong).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  at::Tensor t0 = at::randn({nelm, nelm}, options);
+
+  auto outputs = fe.runFusion({t0});
+
+  auto ref = sum(t0, {1}).unsqueeze(-1).expand({nelm, nelm}) + t0;
+
+  testValidate(&fusion, outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)
