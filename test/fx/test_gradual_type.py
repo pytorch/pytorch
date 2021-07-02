@@ -6,8 +6,11 @@ from torch.fx.annotate import annotate
 from torch.fx.experimental.graph_gradual_typechecker import GraphTypeChecker, broadcast_types
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx import GraphModule
-from benchmarks.functional_autograd_benchmark.torchvision_models import conv3x3
 
+def conv3x3(in_planes, out_planes, stride=1, groups=1, dilation=1):
+    """3x3 convolution with padding"""
+    return torch.nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
+                           padding=dilation, groups=groups, bias=False, dilation=dilation)
 
 class AnnotationsTest(unittest.TestCase):
 
