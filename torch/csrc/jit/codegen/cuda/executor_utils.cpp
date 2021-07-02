@@ -190,7 +190,8 @@ bool validateKernelArg(
   }
 }
 
-// Return true if all the tensors have the same stride
+// Return true if all the tensors have the same stride, assumes all tensors are
+// contiguous
 bool checkSameStride(const std::vector<c10::IValue>& tensors) {
   if (tensors.size() < 2) {
     return true;
@@ -217,7 +218,7 @@ bool checkSameStride(const std::vector<c10::IValue>& tensors) {
   return true;
 }
 
-// Return true if all the tensors have the same stride
+// Return true if all the tensors are contiguous and have the same striding
 bool checkSameContiguity(const std::vector<c10::IValue>& tensors) {
   auto reference = tensors.front();
   if (!reference.isTensor()) {
@@ -229,6 +230,9 @@ bool checkSameContiguity(const std::vector<c10::IValue>& tensors) {
   int64_t expected_stride = 1;
   for (int64_t i = 1; i <= reference_tensor.ndimension(); ++i) {
     int64_t ind = reference_tensor.ndimension() - i;
+    if (reference_tensor.size(ind) == 1) {
+      continue;
+    }
     if (reference_tensor.stride(ind) != expected_stride) {
       return false;
     }
@@ -376,6 +380,9 @@ bool canVectorize(
   return true;
 }
 
+// Misaligned vectorization check. Currently misaligned vectorization is limited
+// to global-register and register-global load/store patterns. However, this
+// could be improved to include shared memory.
 void validateVectorizedTensors(
     Fusion* fusion,
     const at::ArrayRef<IValue>& inputs,
@@ -384,8 +391,8 @@ void validateVectorizedTensors(
     kir::ExpressionEvaluator& expr_eval) {
   std::unordered_set<TensorView*> global_inp_misaligned_tv;
   std::unordered_set<TensorView*> global_out_misaligned_tv;
-  std::unordered_set<TensorView*> misaligned_tv;
   std::unordered_map<TensorView*, int> tv_to_vector_word_size;
+  // Find all vectorized tensors and their word size
   for (auto expr : fusion->exprs()) {
     if (!expr->isA<UnaryOp>() ||
         expr->as<UnaryOp>()->getUnaryOpType() != UnaryOpType::Set) {
@@ -401,8 +408,11 @@ void validateVectorizedTensors(
     for (auto id : out_tv->domain()->domain()) {
       if (id->getParallelType() == ParallelType::Vectorize ||
           id->getParallelType() == ParallelType::MisalignedVectorize) {
+        TORCH_INTERNAL_ASSERT(
+            vector_dim == nullptr,
+            "Found multiple vectorized dimensions on tensor ",
+            out_tv);
         vector_dim = id;
-        break;
       }
     }
     if (vector_dim == nullptr) {
@@ -430,11 +440,11 @@ void validateVectorizedTensors(
             false,
             "Unsupported memory configuration for misaligned vectorization.");
       }
-      misaligned_tv.insert(out_tv);
-      misaligned_tv.insert(in_tv);
     }
   }
 
+  // Check striding information on input and outputs as well as size information
+  // of all
   std::vector<c10::IValue> inp_misaligned_tensors;
   std::vector<c10::IValue> out_misaligned_tensors;
   for (auto entry : tv_to_vector_word_size) {
@@ -483,7 +493,7 @@ void validateVectorizedTensors(
             word_size);
       }
     } else {
-      if (misaligned_tv.find(tv) == misaligned_tv.end()) {
+      if (!tv_to_vector_word_size.count(tv)) {
         TORCH_INTERNAL_ASSERT(
             canVectorize(tv, word_size, lower, expr_eval),
             "Could not vectorize ",

@@ -12645,6 +12645,49 @@ TEST(NVFuserTest, FusionMultipleVectorize_CUDA) {
   TORCH_CHECK(runtime1 != runtime3);
 }
 
+TEST(NVFuserTest, FusionVectorizeSimple_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  TensorView* tv0 = makeContigTensor(3);
+
+  fusion.addInput(tv0);
+
+  auto tv1 = unaryOp(UnaryOpType::Sin, tv0);
+
+  fusion.addOutput(tv1);
+
+  auto tv0_cache = tv0->cache_after();
+
+  auto tv1_cache = tv1->cache_before();
+
+  tv1->merge(0);
+  tv1->merge(0);
+  tv1->split(0, 4);
+  tv1->split(0, 128);
+
+  tv1->axis(0)->parallelize(ParallelType::BIDx);
+  tv1->axis(1)->parallelize(ParallelType::TIDx);
+
+  tv0->computeAt(tv1, 2);
+
+  tv0_cache->axis(2)->parallelize(ParallelType::Vectorize);
+  tv1->axis(2)->parallelize(ParallelType::Vectorize);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor aten_input = at::empty({2, 6, 32}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion({aten_input});
+
+  at::Tensor aten_output = aten_input.sin();
+
+  testValidate(
+      &fusion, cg_outputs, {aten_input}, {aten_output}, __LINE__, __FILE__);
+}
+
 TEST(NVFuserTest, FusionSegmentReduceSoftmax_CUDA) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());

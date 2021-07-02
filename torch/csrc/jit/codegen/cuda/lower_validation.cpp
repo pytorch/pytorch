@@ -178,12 +178,15 @@ void checkContiguity(
   }
 }
 
-// Check contiguity for all root domains associated with Misaligned Vectorize
-// ParallelType
+// Check all root iter domains in consumer that are present in domain, making
+// sure they're contiguous. Map these domains to producer and make sure they are
+// also contiguous in producer. Producer-consumer relationship is assumed to be
+// through a set operation.
 void checkContiguity(
     const std::unordered_set<IterDomain*>& domains,
     TensorView* consumer,
     TensorView* producer) {
+  // This seems not quite right, shouldn't we be able to reverse this?
   TORCH_INTERNAL_ASSERT(consumer->getMemoryType() == MemoryType::Local);
   TORCH_INTERNAL_ASSERT(producer->getMemoryType() == MemoryType::Global);
 
@@ -243,10 +246,12 @@ class VectorizeValidator : public OptInDispatch {
   }
 
   void handle(Merge* m) final {
-    if (m->inner()->isBroadcast() && !m->outer()->isBroadcast()) {
-      vectorized_id_ = m->outer();
-    } else {
-      vectorized_id_ = m->inner();
+    if (m->out() == vectorized_id_) {
+      if (m->inner()->isBroadcast() && !m->outer()->isBroadcast()) {
+        vectorized_id_ = m->outer();
+      } else {
+        vectorized_id_ = m->inner();
+      }
     }
     domains_.insert(m->outer());
     domains_.insert(m->inner());
