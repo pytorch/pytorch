@@ -157,6 +157,8 @@ def sgd(params: List[Tensor],
     See :class:`~torch.optim.SGD` for details.
     """
 
+ss
+
     for i, param in enumerate(params):
 
         d_p = d_p_list[i]
