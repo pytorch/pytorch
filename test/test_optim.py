@@ -450,23 +450,23 @@ class TestOptim(TestCase):
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
                 optimizer(None, lr=1e-2, weight_decay=-1)
 
-    def _inner_loop_diffopt(self, opt, model, is_diff):
+    def _inner_loop_diffopt(self, opt, model, differentiable):
         def inner_loop(model):
             for epoch in range(10):
                 loss = model[0].exp().sum()
                 step, = autograd.grad(loss, model, create_graph=True)
-                self.call_functional_optimizer(opt, model, step, is_diff)
+                self.call_functional_optimizer(opt, model, step, differentiable)
             return model[0].sum()
 
-        if is_diff:
+        if differentiable:
             torch.autograd.gradcheck(inner_loop, [model[0].clone()])
         else:
             with self.assertRaisesRegex(RuntimeError, "Output 0 of UnbindBackward is a view and is being modified inplace"):
                 torch.autograd.gradcheck(inner_loop, model)
 
-    def call_functional_optimizer(self, opt, model, step, is_diff):
+    def call_functional_optimizer(self, opt, model, step, differentiable):
         if opt == sgd:
-            sgd(model, step, [None], momentum=0, lr=0.5, nesterov=False, dampening=0., weight_decay=0., differentiable=is_diff)
+            sgd(model, step, [None], momentum=0, lr=0.5, nesterov=False, dampening=0., weight_decay=0., differentiable=differentiable)
 
     def test_differential_sgd(self):
         model = [torch.randn(2, 2, dtype=torch.double, requires_grad=True)]
