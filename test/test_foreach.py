@@ -486,7 +486,7 @@ class TestForeach(TestCase):
     @skipMeta
     @dtypes(torch.float)
     @ops(foreach_binary_op_db)
-    def test_binary_op_scalar_with_different_tensor_dtypes(self, device, _, op):
+    def test_binary_op_scalar_with_different_tensor_dtypes(self, device, dtype, op):
         foreach_op = op.method_variant
         tensors = [torch.tensor([1.1], dtype=torch.float, device=device),
                    torch.tensor([1], dtype=torch.long, device=device)]
