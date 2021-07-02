@@ -1168,6 +1168,7 @@ class ClassWithDestructorCallback {
 
   ClassWithDestructorCallback& operator=(
       const ClassWithDestructorCallback& rhs) = delete;
+
  private:
   const DestructorCallback* _destructorCallback;
 

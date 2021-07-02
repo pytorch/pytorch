@@ -37,7 +37,8 @@ class Passkey {
 class TORCH_CUDA_CU_API NamedScalar : public Val {
  public:
   NamedScalar(Passkey, std::string name, DataType dtype)
-      : Val(ValType::KirNamedScalar, dtype, true, true), name_(std::move(name)) {}
+      : Val(ValType::KirNamedScalar, dtype, true, true),
+        name_(std::move(name)) {}
 
   explicit NamedScalar(Passkey, const fuser::cuda::NamedScalar* node)
       : Val(node), name_(node->name()) {}
