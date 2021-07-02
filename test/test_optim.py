@@ -464,6 +464,13 @@ class TestOptim(TestCase):
             with self.assertRaisesRegex(RuntimeError, "Output 0 of UnbindBackward is a view and is being modified inplace"):
                 torch.autograd.gradcheck(inner_loop, model)
 
+
+step_sizes
+sssss 
+
+
+
+sandcastlesaxa
     def call_functional_optimizer(self, opt, model, step, is_diff):
         if opt == sgd:
             sgd(model, step, [None], momentum=0, lr=0.5, nesterov=False, dampening=0., weight_decay=0., differentiable=is_diff)
