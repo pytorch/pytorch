@@ -456,6 +456,7 @@ class TestOptim(TestCase):
             "exp_avg_sqs" : [torch.zeros_like(model[0], memory_format=torch.preserve_format)],
             "max_exp_avg_sqs" : [torch.zeros_like(model[0], memory_format=torch.preserve_format)]
         }
+
         def inner_loop(model):
             for epoch in range(10):
                 loss = model[0].exp().sum()
@@ -472,10 +473,12 @@ class TestOptim(TestCase):
     def call_functional_optimizer(self, opt, model, step, differentiable, states, epoch):
 
         if opt == sgd:
-            sgd(model, step, [None], momentum=0, lr=0.5, nesterov=False, dampening=0., weight_decay=0., differentiable=differentiable)
+            sgd(model, step, [None], momentum=0, lr=0.5, nesterov=False, dampening=0., weight_decay=0.,
+                differentiable=differentiable)
         if opt == adam:
-            adam(model, step, states["exp_avgs"], states["exp_avg_sqs"], states["max_exp_avg_sqs"], [epoch+1], amsgrad = False,
-                 beta1 = 0.99, beta2 = 0.99, lr=0.5, weight_decay=0., eps=0.001, differentiable=differentiable)
+            adam(model, step, states["exp_avgs"], states["exp_avg_sqs"], states["max_exp_avg_sqs"], [epoch + 1],
+                 amsgrad=False, beta1=0.99, beta2=0.99, lr=0.5, weight_decay=0., eps=0.001,
+                 differentiable=differentiable)
 
 
     def test_differential_sgd(self):

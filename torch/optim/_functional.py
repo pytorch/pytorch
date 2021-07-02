@@ -64,7 +64,7 @@ def adam(params: List[Tensor],
          lr: float,
          weight_decay: float,
          eps: float,
-         differentiable: bool=False):
+         differentiable: bool = False):
     r"""Functional API that performs Adam algorithm computation.
 
     See :class:`~torch.optim.Adam` for details.
