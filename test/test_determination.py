@@ -62,11 +62,11 @@ class DeterminationTest(unittest.TestCase):
     def test_test_file(self):
         """Test files trigger themselves and dependent tests"""
         self.assertEqual(
-            self.determined_tests(["test/test_jit.py"]), ["test_jit_profiling", "test_jit"]
+            self.determined_tests(["test/test_jit.py"]), ["test_jit"]
         )
         self.assertEqual(
             self.determined_tests(["test/jit/test_custom_operators.py"]),
-            ["test_jit_profiling", "test_jit"],
+            ["test_jit"],
         )
         self.assertEqual(
             self.determined_tests(["test/quantization/eager/test_quantize_eager_ptq.py"]),
@@ -78,7 +78,6 @@ class DeterminationTest(unittest.TestCase):
         self.assertEqual(
             self.determined_tests(["torch/testing/_internal/common_quantization.py"]),
             [
-                "test_jit_profiling",
                 "test_jit",
                 "test_quantization",
             ],
