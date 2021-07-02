@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import jinja2
 from typing_extensions import Literal
@@ -29,6 +29,7 @@ def PyTorchWindowsWorkflow(
     on_pull_request: bool = False,
     only_build_on_pull_request: bool = False,
     num_test_shards: int = 1,
+    is_scheduled: Optional[str] = None,
 ) -> PyTorchWorkflow:
     return {
         "build_environment": build_environment,
@@ -36,6 +37,7 @@ def PyTorchWindowsWorkflow(
         "cuda_version": cuda_version,
         "on_pull_request": on_pull_request,
         "only_build_on_pull_request": only_build_on_pull_request and on_pull_request,
+        "is_scheduled": is_scheduled,
         "num_test_shards": num_test_shards,
     }
 
@@ -53,12 +55,14 @@ def PyTorchLinuxWorkflow(
     enable_doc_jobs: bool = False,
     enable_multigpu_test: YamlShellBool = "''",
     num_test_shards: int = 1,
+    is_scheduled: Optional[str] = None,
 ) -> PyTorchWorkflow:
     return {
         "build_environment": build_environment,
         "docker_image_base": docker_image_base,
         "test_runner_type": test_runner_type,
         "on_pull_request": on_pull_request,
+        "is_scheduled": is_scheduled,
         "enable_doc_jobs": enable_doc_jobs,
         "enable_multigpu_test": enable_multigpu_test,
         "num_test_shards": num_test_shards,
@@ -99,7 +103,14 @@ WINDOWS_WORKFLOWS = [
         cuda_version="11.1",
         test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
         num_test_shards=2,
-    )
+    ),
+    PyTorchWindowsWorkflow(
+        build_environment="periodic-pytorch-win-vs2019-cuda11-cudnn8-py3",
+        cuda_version="11.3",
+        test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
+        num_test_shards=2,
+        is_scheduled="45 0,4,8,12,16,20 * * *",
+    ),
 ]
 
 LINUX_WORKFLOWS = [
