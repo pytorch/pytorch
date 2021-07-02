@@ -1,7 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/native/Activation.h>
-#include <ATen/native/Resize.h>
 
 namespace at {
 namespace native {
@@ -10,9 +9,6 @@ namespace native {
 DEFINE_DISPATCH(glu_stub);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(glu_backward_stub);
-DEFINE_DISPATCH(glu_backward_cuda_stub);
-
-REGISTER_NO_CPU_DISPATCH(glu_backward_cuda_stub, glu_backward_cuda_fn);
 
 Tensor& glu_out(const Tensor& self, int64_t dim, Tensor &result) {
   // this can't pass anyway because a 0-dimensional tensor has "size" 1, which
@@ -73,37 +69,6 @@ Tensor& glu_backward_cpu_out(const Tensor& grad_output, const Tensor& input,
 Tensor glu_backward_cpu(const Tensor& grad_output, const Tensor& input, int64_t dim) {
   auto grad_input = at::empty({0}, input.options());
   return glu_backward_cpu_out(grad_output, input, dim, grad_input);
-}
-
-Tensor& glu_backward_cuda_out(const Tensor& grad_output, const Tensor& input,
-                              int64_t dim, Tensor& grad_input) {
-  TORCH_CHECK(input.dim() > 0, "glu does not support 0-dimensional tensors");
-  auto wrap_dim = maybe_wrap_dim(dim, input.dim());
-  auto input_sizes = input.sizes();
-  const int64_t nIn = input_sizes[wrap_dim];
-  TORCH_CHECK(nIn % 2 == 0, "Halving dimension must be even, but dimension ",
-              wrap_dim, " is size ", nIn);
-
-  resize_output(grad_input, input_sizes);
-
-  DimVector iter_shape(input_sizes);
-  iter_shape[wrap_dim] = nIn / 2;
-  TORCH_CHECK(grad_output.sizes() == IntArrayRef{iter_shape});
-
-  auto iter = at::TensorIteratorConfig()
-    .add_output(grad_input)
-    .add_input(input)
-    .add_input(grad_output)
-    .resize_outputs(false)
-    .declare_static_shape(iter_shape)
-    .build();
-  glu_backward_cuda_stub(iter.device_type(), iter, wrap_dim);
-  return grad_input;
-}
-
-Tensor glu_backward_cuda(const Tensor& grad_output, const Tensor& input, int64_t dim) {
-  auto grad_input = at::empty({0}, input.options());
-  return glu_backward_cuda_out(grad_output, input, dim, grad_input);
 }
 
 } // at::native

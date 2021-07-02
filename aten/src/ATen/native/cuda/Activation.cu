@@ -19,6 +19,7 @@
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/DistributionTemplates.h>
+#include <ATen/native/Resize.h>
 #include <c10/cuda/CUDAMathCompat.h>
 
 namespace at {
@@ -43,19 +44,31 @@ void glu_kernel(TensorIterator& iter) {
 // -----------------------------------
 // glu backward
 // -----------------------------------
-template <typename scalar_t, typename OffsetCalc, typename StrideType>
+
+// Byte offsets don't require multiplication by sizeof(T), so are slightly cheaper.
+// For fixed offsets, this removes all penalty from 64-bit indexing.
+template <typename T>
+__device__ T* byte_offset(T* ptr, int64_t offset) {
+  using byte_ptr_t = typename std::conditional<
+    std::is_const<T>::value, const char*, char*>::type;
+  return reinterpret_cast<T*>(
+    reinterpret_cast<byte_ptr_t>(ptr) + offset
+  );
+}
+
+template <typename scalar_t, typename OffsetCalc>
 __global__ void glu_backward_kernel(
     int numel, scalar_t* gI, const scalar_t* I, const scalar_t* gO,
     OffsetCalc offset_calculator,
-    StrideType gI_stride, StrideType I_stride) {
+    int64_t gI_byte_offset, int64_t I_byte_offset) {
   using acc_t = at::acc_type<scalar_t, true>;
   // We explicitly iterate over the first half of the input tensor, and
-  // gI_stride and I_stride are the offsets to access the corresponding index in
-  // the second half of the tensor.
+  // gI_byte_offset and I_byte_offset are the offsets to access the
+  // corresponding index in the second half of the tensor.
   CUDA_KERNEL_LOOP(i, numel) {
     const auto offsets = offset_calculator.get(i);
     const acc_t a = I[offsets[1]];
-    const acc_t b = I[offsets[1] + I_stride];
+    const acc_t b = *byte_offset(I + offsets[1], I_byte_offset);
     const acc_t gO_val = gO[offsets[2]];
 
     const auto one = acc_t(1);
@@ -64,7 +77,7 @@ __global__ void glu_backward_kernel(
     auto* gA = gI + offsets[0];
     *gA = sigmoid * gO_val;
 
-    auto* gB = gA + gI_stride;
+    auto* gB = byte_offset(gA, gI_byte_offset);
     *gB = (one - sigmoid) * sigmoid * gO_val * a;
   }
 }
@@ -81,34 +94,53 @@ void launch_glu_backward_kernel(const TensorIteratorBase& iter,
     auto gI = static_cast<scalar_t*>(iter.data_ptr(0));
     auto I = static_cast<const scalar_t*>(iter.data_ptr(1));
     auto gO = static_cast<const scalar_t*>(iter.data_ptr(2));
-    constexpr int64_t int_max = std::numeric_limits<int>::max();
-    if (gI_stride > int_max || I_stride > int_max) {
-      glu_backward_kernel<<<grid, num_threads, 0, stream>>>(
-          N, gI, I, gO, offset_calculator, gI_stride, I_stride);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
-    } else {
-      glu_backward_kernel<<<grid, num_threads, 0, stream>>>(
+    glu_backward_kernel<<<grid, num_threads, 0, stream>>>(
         N, gI, I, gO, offset_calculator,
-        static_cast<int>(gI_stride),
-        static_cast<int>(I_stride));
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
-    }
+        gI_stride * sizeof(scalar_t), I_stride * sizeof(scalar_t));
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   });
 }
 
-void glu_backward_impl(TensorIteratorBase& iter, int64_t dim) {
-  TORCH_INTERNAL_ASSERT(iter.ninputs() == 2);
-  auto dim_size = iter.input(1).sizes()[dim];
-  auto I_stride = iter.input(0).strides()[dim] * dim_size;
-  auto gI_stride = iter.output(0).strides()[dim] * dim_size;
+Tensor& glu_backward_cuda_out(const Tensor& grad_output, const Tensor& input,
+                              int64_t dim, Tensor& grad_input) {
+  TORCH_CHECK(input.dim() > 0, "glu does not support 0-dimensional tensors");
+  auto wrap_dim = maybe_wrap_dim(dim, input.dim());
+  auto input_sizes = input.sizes();
+  const int64_t nIn = input_sizes[wrap_dim];
+  TORCH_CHECK(nIn % 2 == 0, "Halving dimension must be even, but dimension ",
+              wrap_dim, " is size ", nIn);
+
+  resize_output(grad_input, input_sizes);
+
+  DimVector iter_shape(input_sizes);
+  const auto dim_size = nIn / 2;
+  iter_shape[wrap_dim] = dim_size;
+  TORCH_CHECK(grad_output.sizes() == IntArrayRef{iter_shape});
+
+  const auto iter = at::TensorIteratorConfig()
+    .add_output(grad_input)
+    .add_input(input)
+    .add_input(grad_output)
+    .resize_outputs(false)
+    .declare_static_shape(iter_shape)
+    .build();
+
+  const auto I_stride = input.strides()[wrap_dim] * dim_size;
+  const auto gI_stride = grad_input.strides()[wrap_dim] * dim_size;
 
   if (iter.can_use_32bit_indexing()) {
-    return launch_glu_backward_kernel(iter, gI_stride, I_stride);
+    launch_glu_backward_kernel(iter, gI_stride, I_stride);
+  } else {
+    for (auto sub_iter: iter.with_32bit_indexing()) {
+      launch_glu_backward_kernel(sub_iter, gI_stride, I_stride);
+    }
   }
+  return grad_input;
+}
 
-  for (auto sub_iter: iter.with_32bit_indexing()) {
-    launch_glu_backward_kernel(sub_iter, gI_stride, I_stride);
-  }
+Tensor glu_backward_cuda(const Tensor& grad_output, const Tensor& input, int64_t dim) {
+  auto grad_input = at::empty({0}, input.options());
+  return glu_backward_cuda_out(grad_output, input, dim, grad_input);
 }
 
 // -----------------------------------
@@ -820,7 +852,6 @@ REGISTER_DISPATCH(shrink_backward_stub, &shrink_backward_kernel);
 REGISTER_DISPATCH(elu_stub, &elu_kernel);
 REGISTER_DISPATCH(elu_backward_stub, &elu_backward_kernel);
 REGISTER_DISPATCH(glu_stub, &glu_kernel);
-REGISTER_DISPATCH(glu_backward_cuda_stub, &glu_backward_impl);
 REGISTER_DISPATCH(leaky_relu_stub, &leaky_relu_kernel);
 REGISTER_DISPATCH(leaky_relu_backward_stub, &leaky_relu_backward_kernel);
 REGISTER_DISPATCH(hardswish_stub, &hardswish_kernel);
