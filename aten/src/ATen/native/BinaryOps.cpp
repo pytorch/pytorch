@@ -183,7 +183,6 @@ void comparison_op_check(const Tensor& self, const Tensor& other) {
   TORCH_META_FUNC2(func, Scalar)(const Tensor& self, const Scalar& other) { \
     auto other_tensor =                                                     \
         native::wrapped_scalar_tensor_and_check_convert(other, self);       \
-    comparison_op_check(self, other_tensor);                                \
     build_comparison_op(maybe_get_output(), self, other_tensor);            \
   }
 
