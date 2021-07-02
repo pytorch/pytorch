@@ -99,7 +99,7 @@ __host__ __forceinline__ static accscalar_t area_pixel_compute_scale(
       return (accscalar_t)(input_size - 1) / (output_size - 1);
     }
     else{
-      return static_cast<(accscalar_t)>(0);
+      return static_cast<accscalar_t>(0);
     }
   }
   else{
