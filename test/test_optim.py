@@ -17,6 +17,9 @@ from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, StepLR, \
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
     skipIfRocm
+from torch import autograd
+from torch.optim._functional import sgd, adam, adagrad, adamw, adadelta, adamax, asgd, nadam, \
+    radam, rmsprop, rprop, sparse_adam
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -483,6 +486,387 @@ class TestOptim(TestCase):
             )
             with self.assertRaisesRegex(ValueError, "Invalid rho value: 1.1"):
                 optimizer(None, lr=1e-2, rho=1.1)
+
+    def test_differential_sgdl(self):
+        ttt = [ torch.tensor([[1., 1.], [1., 1.] ], dtype=torch.double, requires_grad=True)]
+
+        def gh(model):
+            for epoch in range(10):
+                out = model[0].exp()
+                loss = out.sum()
+                step, = autograd.grad(loss, model, create_graph=True)
+                sgd(model, step, [None], momentum=0, lr=0.5, nesterov=False,dampening=0., weight_decay=0., differentiable=True)
+            return model[0].sum()
+
+        torch.autograd.gradcheck(gh, [ttt[0].clone()])
+
+
+    def test_error_differential_sgdl(self):
+        ttt = [ torch.tensor([[1., 1.], [1., 1.] ], dtype=torch.double, requires_grad=True)]
+
+        def gh(model):
+            for epoch in range(10):
+                out = model[0].exp()
+                loss = out.sum()
+                step, = autograd.grad(loss, model, create_graph=True)
+                sgd(model, step, [None], momentum=0, lr=0.5, nesterov=False,dampening=0., weight_decay=0., differentiable=False)
+            return model[0].sum()
+
+        with self.assertRaisesRegex(RuntimeError, "Output 0 of UnbindBackward is a view and is being modified inplace"):
+            torch.autograd.gradcheck(gh, [ttt[0].clone()])
+
+
+    def test_differential_adam(self):
+        ttt = [ torch.tensor([[1., 1.] ], dtype=torch.double, requires_grad=True)]
+
+        def gh(model):
+            exp_avgs = [torch.zeros_like(model, memory_format=torch.preserve_format) ]
+            exp_avg_sqs = [torch.zeros_like(model, memory_format=torch.preserve_format) ]
+            max_exp_avg_sqs = [torch.zeros_like(model, memory_format=torch.preserve_format) ]
+
+            for epoch in range(10):
+                out = model[0].exp()
+                loss = out.sum()
+                step, = autograd.grad(loss, model, create_graph=True)
+                adam(model, step, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, [epoch+1], amsgrad = False,
+                     beta1 = 0.99, beta2 = 0.99, lr=0.5, weight_decay=0.,
+                     eps=0.001, differentiable=True)
+            return model[0].sum()
+
+        torch.autograd.gradcheck(gh, [ttt[0].clone()])
+
+
+    def test_error_differential_adam(self):
+        ttt = [ torch.tensor([[1., 1.] ], dtype=torch.double, requires_grad=True)]
+
+        def gh(model):
+            exp_avgs = [torch.zeros_like(model, memory_format=torch.preserve_format) ]
+            exp_avg_sqs = [torch.zeros_like(model, memory_format=torch.preserve_format) ]
+            max_exp_avg_sqs = [torch.zeros_like(model, memory_format=torch.preserve_format) ]
+
+            for epoch in range(10):
+                out = model[0].exp()
+                loss = out.sum()
+                step, = autograd.grad(loss, model, create_graph=True)
+                adam(model, step, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, [epoch+1], amsgrad = False,
+                     beta1 = 0.99, beta2 = 0.99, lr=0.5, weight_decay=0.,
+                     eps=0.001, differentiable=False)
+            return model[0].sum()
+
+        with self.assertRaisesRegex(RuntimeError, "Output 0 of UnbindBackward is a view and is being modified inplace"):
+            torch.autograd.gradcheck(gh, [ttt[0].clone()])
+
+    def test_differential_adagrad(self):
+        ttt = [ torch.tensor([[1., 1.] ], dtype=torch.double, requires_grad=True)]
+
+        def gh(model):
+            sums = [torch.zeros_like(model, memory_format=torch.preserve_format) ]
+
+            for epoch in range(10):
+                out = model[0].exp()
+                loss = out.sum()
+                step, = autograd.grad(loss, model, create_graph=True)
+                adagrad(model, step, sums,  [epoch+1], 
+                        lr=0.5, weight_decay=0, lr_decay=0, eps=0.00001, differentiable=True)
+            return model[0].sum()
+
+        torch.autograd.gradcheck(gh, [ttt[0].clone()])
+
+
+    def test_error_differential_adagrad(self):
+        ttt = [ torch.tensor([[1., 1.] ], dtype=torch.double, requires_grad=True)]
+
+        def gh(model):
+            sums = [torch.zeros_like(model, memory_format=torch.preserve_format) ]
+
+            for epoch in range(10):
+                out = model[0].exp()
+                loss = out.sum()
+                step, = autograd.grad(loss, model, create_graph=True)
+                adagrad(model, step, sums,  [epoch+1], 
+                        lr=0.5, weight_decay=0, lr_decay=0, eps=0.00001, differentiable=False)
+            return model[0].sum()
+
+
+        with self.assertRaisesRegex(RuntimeError, "Output 0 of UnbindBackward is a view and is being modified inplace"):
+            torch.autograd.gradcheck(gh, [ttt[0].clone()])
+
+
+    def test_differential_adamw(self):
+        ttt = [ torch.tensor([[1., 1.] ], dtype=torch.double, requires_grad=True)]
+
+        def gh(model):
+            exp_avgs = [torch.zeros_like(model, memory_format=torch.preserve_format) ]
+            exp_avg_sqs = [torch.zeros_like(model, memory_format=torch.preserve_format) ]
+            max_exp_avg_sqs = [torch.zeros_like(model, memory_format=torch.preserve_format) ]
+
+            for epoch in range(10):
+                out = model[0].exp()
+                loss = out.sum()
+                step, = autograd.grad(loss, model, create_graph=True)
+                adamw(model, step, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, [epoch+1], amsgrad = False,
+                     beta1 = 0.99, beta2 = 0.99, lr=0.5, weight_decay=0.,
+                     eps=0.001, differentiable=True)
+            return model[0].sum()
+
+        torch.autograd.gradcheck(gh, [ttt[0].clone()])
+
+
+    def test_error_differential_adamw(self):
+        ttt = [ torch.tensor([[1., 1.] ], dtype=torch.double, requires_grad=True)]
+
+        def gh(model):
+            u = [torch.zeros_like(model, memory_format=torch.preserve_format) ]
+            v = [torch.zeros_like(model, memory_format=torch.preserve_format) ]
+            w = [torch.zeros_like(model, memory_format=torch.preserve_format) ]
+
+            for epoch in range(10):
+                out = model[0].exp()
+                loss = out.sum()
+                step, = autograd.grad(loss, model, create_graph=True)
+                adamw(model, step, u, v, w, [epoch+1], amsgrad = False,
+                     beta1 = 0.99, beta2 = 0.99, lr=0.5, weight_decay=0.,
+                     eps=0.001, differentiable=False)
+            return model[0].sum()
+
+        with self.assertRaisesRegex(RuntimeError, "Output 0 of UnbindBackward is a view and is being modified inplace"):
+            torch.autograd.gradcheck(gh, [ttt[0].clone()])
+
+
+    def test_differential_radam(self):
+        ttt = [ torch.tensor([[1., 1.] ], dtype=torch.double, requires_grad=True)]
+
+        def gh(model):
+            exp_avgs = [torch.zeros_like(model, memory_format=torch.preserve_format) ]
+            exp_avg_sqs = [torch.zeros_like(model, memory_format=torch.preserve_format) ]
+
+            for epoch in range(10):
+                out = model[0].exp()
+                loss = out.sum()
+                step, = autograd.grad(loss, model, create_graph=True)
+                radam(model, step, exp_avgs, exp_avg_sqs, [epoch+1],
+                     beta1 = 0.99, beta2 = 0.99, lr=0.5, weight_decay=0.,
+                     eps=0.001, differentiable=True)
+            return model[0].sum()
+
+        torch.autograd.gradcheck(gh, [ttt[0].clone()])
+
+
+    def test_error_differential_radam(self):
+        ttt = [ torch.tensor([[1., 1.] ], dtype=torch.double, requires_grad=True)]
+
+        def gh(model):
+            exp_avgs = [torch.zeros_like(model, memory_format=torch.preserve_format) ]
+            exp_avg_sqs = [torch.zeros_like(model, memory_format=torch.preserve_format) ]
+
+            for epoch in range(10):
+                out = model[0].exp()
+                loss = out.sum()
+                step, = autograd.grad(loss, model, create_graph=True)
+                radam(model, step, exp_avgs, exp_avg_sqs, [epoch+1],
+                     beta1 = 0.99, beta2 = 0.99, lr=0.5, weight_decay=0.,
+                     eps=0.001, differentiable=False)
+            return model[0].sum()
+
+        with self.assertRaisesRegex(RuntimeError, "Output 0 of UnbindBackward is a view and is being modified inplace"):
+            torch.autograd.gradcheck(gh, [ttt[0].clone()])
+
+
+    def test_differential_nadam(self):
+        ttt = [ torch.tensor([[1., 1.] ], dtype=torch.double, requires_grad=True)]
+
+        def gh(model):
+            exp_avgs = [torch.zeros_like(model, memory_format=torch.preserve_format) ]
+            exp_avg_sqs = [torch.zeros_like(model, memory_format=torch.preserve_format) ]
+
+            for epoch in range(10):
+                out = model[0].exp()
+                loss = out.sum()
+                step, = autograd.grad(loss, model, create_graph=True)
+                nadam(model, step, exp_avgs, exp_avg_sqs, [1], [epoch+1],
+                     beta1 = 0.99, beta2 = 0.99, lr=0.5, weight_decay=0., momentum_decay=0,
+                     eps=0.001, differentiable=True)
+            return model[0].sum()
+
+        torch.autograd.gradcheck(gh, [ttt[0].clone()])
+
+
+    def test_error_differential_nadam(self):
+        ttt = [ torch.tensor([[1., 1.] ], dtype=torch.double, requires_grad=True)]
+
+        def gh(model):
+            exp_avgs = [torch.zeros_like(model, memory_format=torch.preserve_format) ]
+            exp_avg_sqs = [torch.zeros_like(model, memory_format=torch.preserve_format) ]
+            mu_products = [torch.ones_like(model, memory_format=torch.preserve_format) ]
+
+            for epoch in range(10):
+                out = model[0].exp()
+                loss = out.sum()
+                step, = autograd.grad(loss, model, create_graph=True)
+                nadam(model, step, exp_avgs, exp_avg_sqs, [1], [epoch+1],
+                     beta1 = 0.99, beta2 = 0.99, lr=0.5, weight_decay=0., momentum_decay=0,
+                     eps=0.001, differentiable=False)
+            return model[0].sum()
+
+        with self.assertRaisesRegex(RuntimeError, "Output 0 of UnbindBackward is a view and is being modified inplace"):
+            torch.autograd.gradcheck(gh, [ttt[0].clone()])
+
+
+    def test_differential_adadelta(self):
+        ttt = [ torch.tensor([[1., 1.] ], dtype=torch.double, requires_grad=True)]
+
+        def gh(model):
+            square_avg = [torch.zeros_like(model, memory_format=torch.preserve_format) ]
+            acc_delta = [torch.zeros_like(model, memory_format=torch.preserve_format) ]
+
+            for epoch in range(10):
+                out = model[0].exp()
+                loss = out.sum()
+                step, = autograd.grad(loss, model, create_graph=True)
+                adadelta(model, step, square_avg, acc_delta,
+                     lr = 0.5, rho = 0.6, eps =0.001, weight_decay=0.,
+                     differentiable=True)
+            return model[0].sum()
+
+        torch.autograd.gradcheck(gh, [ttt[0].clone()])
+
+
+    def test_error_differential_adadelta(self):
+        ttt = [ torch.tensor([[1., 1.] ], dtype=torch.double, requires_grad=True)]
+
+        def gh(model):
+            square_avg = [torch.zeros_like(model, memory_format=torch.preserve_format) ]
+            acc_delta = [torch.zeros_like(model, memory_format=torch.preserve_format) ]
+
+            for epoch in range(10):
+                out = model[0].exp()
+                loss = out.sum()
+                step, = autograd.grad(loss, model, create_graph=True)
+                adadelta(model, step, square_avg, acc_delta,
+                     lr = 0.5, rho = 0.6, eps =0.001, weight_decay=0.,
+                     differentiable=False)
+            return model[0].sum()
+
+        with self.assertRaisesRegex(RuntimeError, "Output 0 of UnbindBackward is a view and is being modified inplace"):
+            torch.autograd.gradcheck(gh, [ttt[0].clone()])
+
+
+    def test_differential_asgd(self):
+        ttt = [ torch.tensor([[1., 1.] ], dtype=torch.double, requires_grad=True)]
+
+        def gh(model):
+            exp_avgs = [torch.zeros_like(model, memory_format=torch.preserve_format) ]
+            exp_avg_sqs = [torch.zeros_like(model, memory_format=torch.preserve_format) ]
+
+            for epoch in range(10):
+                out = model[0].exp()
+                loss = out.sum()
+                step, = autograd.grad(loss, model, create_graph=True)
+                asgd(model, step, exp_avgs, exp_avg_sqs, [epoch+1],
+                     beta1 = 0.99, beta2 = 0.99, lr=0.5, weight_decay=0.,
+                     eps=0.001, differentiable=True)
+            return model[0].sum()
+
+        torch.autograd.gradcheck(gh, [ttt[0].clone()])
+
+
+    def test_error_differential_asgd(self):
+        ttt = [ torch.tensor([[1., 1.] ], dtype=torch.double, requires_grad=True)]
+
+        def gh(model):
+            exp_avgs = [torch.zeros_like(model, memory_format=torch.preserve_format) ]
+            exp_avg_sqs = [torch.zeros_like(model, memory_format=torch.preserve_format) ]
+
+            for epoch in range(10):
+                out = model[0].exp()
+                loss = out.sum()
+                step, = autograd.grad(loss, model, create_graph=True)
+                asgd(model, step, exp_avgs, exp_avg_sqs, [epoch+1],
+                     beta1 = 0.99, beta2 = 0.99, lr=0.5, weight_decay=0.,
+                     eps=0.001, differentiable=False)
+            return model[0].sum()
+
+        with self.assertRaisesRegex(RuntimeError, "Output 0 of UnbindBackward is a view and is being modified inplace"):
+            torch.autograd.gradcheck(gh, [ttt[0].clone()])
+
+
+    def test_differential_rmsprop(self):
+        ttt = [ torch.tensor([[1., 1.] ], dtype=torch.double, requires_grad=True)]
+
+        def gh(model):
+            exp_avgs = [torch.zeros_like(model, memory_format=torch.preserve_format) ]
+            exp_avg_sqs = [torch.zeros_like(model, memory_format=torch.preserve_format) ]
+
+            for epoch in range(10):
+                out = model[0].exp()
+                loss = out.sum()
+                step, = autograd.grad(loss, model, create_graph=True)
+                rmsprop(model, step, exp_avgs, exp_avg_sqs, [epoch+1],
+                     beta1 = 0.99, beta2 = 0.99, lr=0.5, weight_decay=0.,
+                     eps=0.001, differentiable=True)
+            return model[0].sum()
+
+        torch.autograd.gradcheck(gh, [ttt[0].clone()])
+
+
+    def test_error_differential_rmsprop(self):
+        ttt = [ torch.tensor([[1., 1.] ], dtype=torch.double, requires_grad=True)]
+
+        def gh(model):
+            exp_avgs = [torch.zeros_like(model, memory_format=torch.preserve_format) ]
+            exp_avg_sqs = [torch.zeros_like(model, memory_format=torch.preserve_format) ]
+
+            for epoch in range(10):
+                out = model[0].exp()
+                loss = out.sum()
+                step, = autograd.grad(loss, model, create_graph=True)
+                rmsprop(model, step, exp_avgs, exp_avg_sqs, [epoch+1],
+                     beta1 = 0.99, beta2 = 0.99, lr=0.5, weight_decay=0.,
+                     eps=0.001, differentiable=False)
+            return model[0].sum()
+
+        with self.assertRaisesRegex(RuntimeError, "Output 0 of UnbindBackward is a view and is being modified inplace"):
+            torch.autograd.gradcheck(gh, [ttt[0].clone()])
+
+
+    def test_differential_rprop(self):
+        ttt = [ torch.tensor([[1., 1.] ], dtype=torch.double, requires_grad=True)]
+
+        def gh(model):
+            exp_avgs = [torch.zeros_like(model, memory_format=torch.preserve_format) ]
+            exp_avg_sqs = [torch.zeros_like(model, memory_format=torch.preserve_format) ]
+
+            for epoch in range(10):
+                out = model[0].exp()
+                loss = out.sum()
+                step, = autograd.grad(loss, model, create_graph=True)
+                rprop(model, step, exp_avgs, exp_avg_sqs, [epoch+1],
+                     beta1 = 0.99, beta2 = 0.99, lr=0.5, weight_decay=0.,
+                     eps=0.001, differentiable=True)
+            return model[0].sum()
+
+        torch.autograd.gradcheck(gh, [ttt[0].clone()])
+
+
+    def test_error_differential_rprop(self):
+        ttt = [ torch.tensor([[1., 1.] ], dtype=torch.double, requires_grad=True)]
+
+        def gh(model):
+            exp_avgs = [torch.zeros_like(model, memory_format=torch.preserve_format) ]
+            exp_avg_sqs = [torch.zeros_like(model, memory_format=torch.preserve_format) ]
+
+            for epoch in range(10):
+                out = model[0].exp()
+                loss = out.sum()
+                step, = autograd.grad(loss, model, create_graph=True)
+                rprop(model, step, exp_avgs, exp_avg_sqs, [epoch+1],
+                     beta1 = 0.99, beta2 = 0.99, lr=0.5, weight_decay=0.,
+                     eps=0.001, differentiable=False)
+            return model[0].sum()
+
+        with self.assertRaisesRegex(RuntimeError, "Output 0 of UnbindBackward is a view and is being modified inplace"):
+            torch.autograd.gradcheck(gh, [ttt[0].clone()])
+
 
     def test_nadam(self):
         for optimizer in [optim.NAdam, optim_mt.NAdam]:

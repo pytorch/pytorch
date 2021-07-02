@@ -21,7 +21,8 @@ def adagrad(params: List[Tensor],
             lr: float,
             weight_decay: float,
             lr_decay: float,
-            eps: float):
+            eps: float,
+            differentiable: bool=False):
     r"""Functional API that performs Adagrad algorithm computation.
 
     See :class:`~torch.optim.Adagrad` for details.
@@ -44,11 +45,17 @@ def adagrad(params: List[Tensor],
             state_sum.add_(_make_sparse(grad, grad_indices, grad_values.pow(2)))
             std = state_sum.sparse_mask(grad)
             std_values = std._values().sqrt_().add_(eps)
-            param.add_(_make_sparse(grad, grad_indices, grad_values / std_values), alpha=-clr)
+            if differentiable:
+                param = param.add(_make_sparse(grad, grad_indices, grad_values / std_values), alpha=-clr)
+            else:
+                param.add_(_make_sparse(grad, grad_indices, grad_values / std_values), alpha=-clr)
         else:
             state_sum.addcmul_(grad, grad, value=1)
             std = state_sum.sqrt().add_(eps)
-            param.addcdiv_(grad, std, value=-clr)
+            if differentiable:
+                param = param.addcdiv(grad, std, value=-clr)
+            else:
+                param.addcdiv_(grad, std, value=-clr)
 
 
 def adam(params: List[Tensor],
@@ -63,7 +70,8 @@ def adam(params: List[Tensor],
          beta2: float,
          lr: float,
          weight_decay: float,
-         eps: float):
+         eps: float,
+         differentiable: bool=False):
     r"""Functional API that performs Adam algorithm computation.
 
     See :class:`~torch.optim.Adam` for details.
@@ -95,7 +103,10 @@ def adam(params: List[Tensor],
 
         step_size = lr / bias_correction1
 
-        param.addcdiv_(exp_avg, denom, value=-step_size)
+        if differentiable:
+            param = param.addcdiv(exp_avg, denom, value=-step_size)
+        else:
+            param.addcdiv_(exp_avg, denom, value=-step_size)
 
 
 def adamw(params: List[Tensor],
@@ -110,7 +121,8 @@ def adamw(params: List[Tensor],
           beta2: float,
           lr: float,
           weight_decay: float,
-          eps: float):
+          eps: float,
+          differentiable: bool=False):
     r"""Functional API that performs AdamW algorithm computation.
 
     See :class:`~torch.optim.AdamW` for details.
@@ -122,7 +134,11 @@ def adamw(params: List[Tensor],
         step = state_steps[i]
 
         # Perform stepweight decay
-        param.mul_(1 - lr * weight_decay)
+        if differentiable:
+            param = param.mul(1 - lr * weight_decay)
+        else:
+            param.mul_(1 - lr * weight_decay)
+
 
         bias_correction1 = 1 - beta1 ** step
         bias_correction2 = 1 - beta2 ** step
@@ -140,7 +156,10 @@ def adamw(params: List[Tensor],
 
         step_size = lr / bias_correction1
 
-        param.addcdiv_(exp_avg, denom, value=-step_size)
+        if differentiable:
+            param = param.addcdiv(exp_avg, denom, value=-step_size)
+        else:
+            param.addcdiv_(exp_avg, denom, value=-step_size)
 
 
 def sgd(params: List[Tensor],
@@ -151,7 +170,8 @@ def sgd(params: List[Tensor],
         momentum: float,
         lr: float,
         dampening: float,
-        nesterov: bool):
+        nesterov: bool,
+        differentiable: bool=False):
     r"""Functional API that performs SGD algorithm computation.
 
     See :class:`~torch.optim.SGD` for details.
@@ -177,7 +197,10 @@ def sgd(params: List[Tensor],
             else:
                 d_p = buf
 
-        param.add_(d_p, alpha=-lr)
+        if differentiable:
+            param = param.add(d_p, alpha=-lr)
+        else:
+            param.add_(d_p, alpha=-lr)
 
 
 def adadelta(params: List[Tensor],
@@ -188,7 +211,8 @@ def adadelta(params: List[Tensor],
              lr: float,
              rho: float,
              eps: float,
-             weight_decay: float):
+             weight_decay: float,
+             differentiable: bool=False):
     r"""Functional API that performs Adadelta algorithm computation.
 
     See :class:`~torch.optim.Adadelta` for details.
@@ -201,7 +225,10 @@ def adadelta(params: List[Tensor],
         square_avg.mul_(rho).addcmul_(grad, grad, value=1 - rho)
         std = square_avg.add(eps).sqrt_()
         delta = acc_delta.add(eps).sqrt_().div_(std).mul_(grad)
-        param.add_(delta, alpha=-lr)
+        if differentiable:
+            param = param.add(delta, alpha=-lr)
+        else:
+            param.add_(delta, alpha=-lr)
         acc_delta.mul_(rho).addcmul_(delta, delta, value=1 - rho)
 
 
@@ -216,7 +243,8 @@ def rmsprop(params: List[Tensor],
             eps: float,
             weight_decay: float,
             momentum: float,
-            centered: bool):
+            centered: bool,        
+            differentiable: bool=False):
     r"""Functional API that performs rmsprop algorithm computation.
 
     See :class:`~torch.optim.RMSProp` for details.
@@ -241,9 +269,15 @@ def rmsprop(params: List[Tensor],
         if momentum > 0:
             buf = momentum_buffer_list[i]
             buf.mul_(momentum).addcdiv_(grad, avg)
-            param.add_(buf, alpha=-lr)
+            if differentiable:
+                param = param.add(buf, alpha=-lr)
+            else:
+                param.add_(buf, alpha=-lr)
         else:
-            param.addcdiv_(grad, avg, value=-lr)
+            if differentiable:
+                param = param.addcdiv(grad, avg, value=-lr)
+            else:
+                param.addcdiv_(grad, avg, value=-lr)
 
 
 def rprop(params: List[Tensor],
@@ -254,7 +288,8 @@ def rprop(params: List[Tensor],
           step_size_min: float,
           step_size_max: float,
           etaminus: float,
-          etaplus: float):
+          etaplus: float,
+          differentiable: bool=False):
     r"""Functional API that performs rprop algorithm computation.
 
     See :class:`~torch.optim.Rprop` for details.
@@ -279,8 +314,10 @@ def rprop(params: List[Tensor],
         grad[sign.eq(etaminus)] = 0
 
         # update parameters
-        param.addcmul_(grad.sign(), step_size, value=-1)
-
+        if differentiable:
+            param = param.addcmul(grad.sign(), step_size, value=-1)
+        else:
+            param.addcmul_(grad.sign(), step_size, value=-1)
         prev.copy_(grad)
 
 
@@ -294,7 +331,8 @@ def adamax(params: List[Tensor],
            beta1: float,
            beta2: float,
            lr: float,
-           weight_decay: float):
+           weight_decay: float,
+           differentiable: bool=False):
     r"""Functional API that performs adamax algorithm computation.
 
     See :class:`~torch.optim.Adamax` for details.
@@ -320,9 +358,10 @@ def adamax(params: List[Tensor],
 
         bias_correction = 1 - beta1 ** step
         clr = lr / bias_correction
-
-        param.addcdiv_(exp_avg, exp_inf, value=-clr)
-
+        if differentiable:
+            param=param.addcdiv(exp_avg, exp_inf, value=-clr)
+        else:
+            param.addcdiv_(exp_avg, exp_inf, value=-clr)
 
 def asgd(params: List[Tensor],
          grads: List[Tensor],
@@ -331,7 +370,8 @@ def asgd(params: List[Tensor],
          etas: List[float],
          *,
          weight_decay: float,
-         lambd: float):
+         lambd: float,
+         differentiable: bool=False):
     r"""Functional API that performs asgd algorithm computation.
 
     See :class:`~torch.optim.ASGD` for details.
@@ -346,11 +386,18 @@ def asgd(params: List[Tensor],
         if weight_decay != 0:
             grad = grad.add(param, alpha=weight_decay)
 
-        # decay term
-        param.mul_(1 - lambd * eta)
+        if differentiable:
+            # decay term
+            param = param.mul(1 - lambd * eta)
 
-        # update parameter
-        param.add_(grad, alpha=-eta)
+            # update parameter
+            param = param.add(grad, alpha=-eta)
+        else:
+            # decay term
+            param.mul_(1 - lambd * eta)
+
+            # update parameter
+            param.add_(grad, alpha=-eta)
 
         # averaging
         if mu != 1:
@@ -371,7 +418,8 @@ def nadam(params: List[Tensor],
           lr: float,
           weight_decay: float,
           momentum_decay: float,
-          eps: float):
+          eps: float,
+          differentiable: bool=False):
     r"""Functional API that performs NAdam algorithm computation.
 
     See :class:`~torch.optim.NAdam` for details.
@@ -400,9 +448,12 @@ def nadam(params: List[Tensor],
         exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
 
         denom = exp_avg_sq.div(bias_correction2).sqrt().add_(eps)
-        param.addcdiv_(grad, denom, value=-lr * (1. - mu) / (1. - mu_product))
-        param.addcdiv_(exp_avg, denom, value=-lr * mu_next / (1. - mu_product_next))
-
+        if differentiable:
+            param = param.addcdiv(grad, denom, value=-lr * (1. - mu) / (1. - mu_product))
+            param = param.addcdiv(exp_avg, denom, value=-lr * mu_next / (1. - mu_product_next))
+        else:
+            param.addcdiv_(grad, denom, value=-lr * (1. - mu) / (1. - mu_product))
+            param.addcdiv_(exp_avg, denom, value=-lr * mu_next / (1. - mu_product_next))
 
 def radam(params: List[Tensor],
           grads: List[Tensor],
@@ -414,7 +465,8 @@ def radam(params: List[Tensor],
           beta2: float,
           lr: float,
           weight_decay: float,
-          eps: float):
+          eps: float,
+          differentiable: bool=False):
     r"""Functional API that performs RAdam algorithm computation.
 
     See :class:`~torch.optim.RAdam` for details.
@@ -449,9 +501,16 @@ def radam(params: List[Tensor],
             rect = math.sqrt((rho_t - 4) * (rho_t - 2) * rho_inf / ((rho_inf - 4) * (rho_inf - 2) * rho_t))
             adaptive_lr = math.sqrt(bias_correction2) / exp_avg_sq.sqrt().add_(eps)
 
-            param.add_(bias_corrected_exp_avg * lr * adaptive_lr * rect, alpha=-1.0)
+            if differentiable:
+                param = param.add(bias_corrected_exp_avg * lr * adaptive_lr * rect, alpha=-1.0)
+            else:
+                param.add_(bias_corrected_exp_avg * lr * adaptive_lr * rect, alpha=-1.0)
         else:
-            param.add_(bias_corrected_exp_avg * lr, alpha=-1.0)
+            if differentiable:
+                param = param.add(bias_corrected_exp_avg * lr, alpha=-1.0)
+            else:
+                param.add_(bias_corrected_exp_avg * lr, alpha=-1.0)
+
 
 
 def sparse_adam(params: List[Tensor],
@@ -463,7 +522,8 @@ def sparse_adam(params: List[Tensor],
                 eps: float,
                 beta1: float,
                 beta2: float,
-                lr: float):
+                lr: float,
+                differentiable: bool=False):
     r"""Functional API that performs Sparse Adam algorithm computation.
 
     See :class:`~torch.optim.SparseAdam` for details.
@@ -506,4 +566,7 @@ def sparse_adam(params: List[Tensor],
         bias_correction2 = 1 - beta2 ** step
         step_size = lr * math.sqrt(bias_correction2) / bias_correction1
 
-        param.add_(make_sparse(-step_size * numer.div_(denom)))
+        if differentiable:
+            param = param.add(make_sparse(-step_size * numer.div_(denom)))
+        else:
+            param.add_(make_sparse(-step_size * numer.div_(denom)))
