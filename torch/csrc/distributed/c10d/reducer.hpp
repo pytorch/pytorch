@@ -105,8 +105,12 @@ class TORCH_API Reducer {
   // Cannot combine with the call of `register_comm_hook`.
   void register_builtin_comm_hook(c10d::BuiltinCommHookType comm_hook_type);
 
+  // Runs allreduce or installed communication hook given GradBucket instance.
+  c10::intrusive_ptr<c10::ivalue::Future> run_comm_hook(
+      GradBucket& grad_bucket);
+
   // Returns a vector of tensors in each bucket in sequential order.
-  std::vector<std::vector<at::Tensor>> get_bucket_tensors() const;
+  std::vector<at::Tensor> get_bucket_tensors() const;
 
   // Rebuild buckets based on rebuilt_params_ and rebuilt_param_indices_
   // according to when tensors received grads in the backward pass.
