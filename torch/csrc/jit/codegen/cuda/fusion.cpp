@@ -635,7 +635,35 @@ std::vector<Val*> Fusion::getTerminatingOutputs() {
   return terminating_outputs;
 }
 
+bool Fusion::isAliasCompatible(Val* left, Val* right) {
+  // Nullptr check
+  if (left == nullptr || right == nullptr) {
+    return false;
+  }
+
+  // DataType check
+  if (!left->getDataType().has_value() || !right->getDataType().has_value() ||
+      left->getDataType().value() != right->getDataType().value()) {
+    return false;
+  }
+
+  // ValType check
+  if (!left->getValType().has_value() || !right->getValType().has_value() ||
+      left->getValType().value() != right->getValType().value()) {
+    return false;
+  }
+
+  // Check same number of dimensions if both values are TensorViews
+  if (ir_utils::isTV(left) && ir_utils::isTV(right)) {
+    return left->as<TensorView>()->nDims() == right->as<TensorView>()->nDims();
+  }
+  return false;
+}
+
 void Fusion::aliasOutputToInput(Val* output, Val* input) {
+  TORCH_INTERNAL_ASSERT(
+      isAliasCompatible(input, output),
+      "The input and output values are not alias-compatible.");
   io_alias_[output] = input;
 }
 

@@ -82,6 +82,16 @@ TORCH_CUDA_CU_API BackwardNormResult batch_norm_backward(
     Val* eps,
     const std::vector<bool>& output_mask);
 
+TORCH_CUDA_CU_API ForwardNormResult instance_norm(
+    TensorView* x,
+    TensorView* weight,
+    TensorView* bias,
+    TensorView* running_mean,
+    TensorView* running_var,
+    const bool kUseInputStats,
+    Val* momentum,
+    Val* eps);
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

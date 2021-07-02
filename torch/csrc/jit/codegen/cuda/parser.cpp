@@ -27,6 +27,7 @@ constexpr auto kNumBinaryOpsWithAlpha = 4;
 constexpr auto kNumLerpOps = 2;
 constexpr auto kNumLayernormFwd = 2;
 constexpr auto kNumBatchnormFwd = 3;
+constexpr auto kNumInstancenormFwd = 1;
 constexpr auto kNumSumToSize = 2;
 constexpr auto kNumAutocastOps = 2;
 
@@ -624,6 +625,98 @@ class IrParser {
           },
           nullptr,
           nullptr);
+    }
+
+    {
+      std::array<const char*, kNumInstancenormFwd> InstanceNormFwd = {
+          "aten::instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, float momentum, float eps, bool cudnn_enabled) -> Tensor"};
+      for (auto signature : InstanceNormFwd) {
+        auto ptr_op = getOperatorForLiteral(signature);
+        REGISTER_PARSE_RULE(
+            ptr_op,
+            {
+              auto fusion = FusionGuard::getCurFusion();
+
+              auto input =
+                  value_map[node->input(0)->unique()]->as<TensorView>();
+
+              TensorView* weight = nullptr;
+              if (!node->input(1)->type()->isSubtypeOf(
+                      static_cast<c10::TypePtr>(NoneType::get()))) {
+                weight = value_map[node->input(1)->unique()]->as<TensorView>();
+              }
+
+              TensorView* bias = nullptr;
+              if (!node->input(2)->type()->isSubtypeOf(
+                      static_cast<c10::TypePtr>(NoneType::get()))) {
+                bias = value_map[node->input(2)->unique()]->as<TensorView>();
+              }
+
+              TensorView* running_mean = nullptr;
+              if (!node->input(3)->type()->isSubtypeOf(
+                      static_cast<c10::TypePtr>(NoneType::get()))) {
+                running_mean =
+                    value_map[node->input(3)->unique()]->as<TensorView>();
+                TORCH_INTERNAL_ASSERT(
+                    fusion->hasInput(running_mean),
+                    "IO_tensor `batch_norm::running_mean` can only be input tensor to fusion");
+              }
+
+              TensorView* running_var = nullptr;
+              if (!node->input(4)->type()->isSubtypeOf(
+                      static_cast<c10::TypePtr>(NoneType::get()))) {
+                running_var =
+                    value_map[node->input(4)->unique()]->as<TensorView>();
+                TORCH_INTERNAL_ASSERT(
+                    fusion->hasInput(running_var),
+                    "IO_tensor `batch_norm::running_var` can only be input tensor to fusion");
+              }
+
+              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+              auto use_input_stats = constant_as<bool>(node->input(5));
+              TORCH_INTERNAL_ASSERT(
+                  use_input_stats.has_value(),
+                  "The training (bool) parameter is required.");
+              const bool kUseInputStats = use_input_stats.value();
+
+              Val* momentum_ptr = nullptr;
+              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+              if (auto momentum = constant_as<float>(node->input(6))) {
+                momentum_ptr = new Double(momentum.value());
+              } else {
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+                momentum_ptr = value_map[node->input(6)->unique()];
+              }
+
+              Val* eps_ptr = nullptr;
+              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+              if (auto eps = constant_as<float>(node->input(7))) {
+                eps_ptr = new Double(eps.value());
+              } else {
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+                eps_ptr = value_map[node->input(7)->unique()];
+              }
+
+              auto result = instance_norm(
+                  input,
+                  weight,
+                  bias,
+                  running_mean,
+                  running_var,
+                  kUseInputStats,
+                  momentum_ptr,
+                  eps_ptr);
+
+              if (node->kind() ==
+                  c10::Symbol::fromQualString("aten::instance_norm")) {
+                value_map.emplace(node->output()->unique(), result.output);
+              }
+            },
+            [](const Node* node) -> bool { return true; },
+            [](const Node* node) -> OperatorType {
+              return OperatorType::Normalization;
+            });
+      }
     }
 
     {
@@ -1814,9 +1907,13 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
       getOperatorForLiteral(
           "aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor")
           ->schema();
+  static auto instance_norm_schema =
+      getOperatorForLiteral(
+          "aten::instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, float momentum, float eps, bool cudnn_enabled) -> Tensor")
+          ->schema();
   if (node->matches(native_batch_norm_schema) ||
       node->matches(batch_norm_impl_index_schema) ||
-      node->matches(batch_norm_schema)) {
+      node->matches(batch_norm_schema) || node->matches(instance_norm_schema)) {
     switch (offset) {
       // argument 5: training;
       case 5:

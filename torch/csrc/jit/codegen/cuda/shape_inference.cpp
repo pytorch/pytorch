@@ -196,6 +196,7 @@ class NaiveTypePropagator {
         node->output()->setType(out_type);
         break;
       }
+      case aten::instance_norm:
       case aten::batch_norm: {
         auto out_type = node->input(0)->type()->cast<TensorType>();
         node->output()->setType(out_type);

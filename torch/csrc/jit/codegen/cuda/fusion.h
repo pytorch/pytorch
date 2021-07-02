@@ -241,6 +241,10 @@ class TORCH_CUDA_CU_API Fusion final {
   StmtNameType getValName(ValType vtype);
   StmtNameType getExprName();
 
+  // Determine if the two values are compatible for aliasing
+  // Same DataType, ValType, and number of dimensions
+  bool isAliasCompatible(Val* left, Val* right);
+
  private:
   // Sets of all Vals/Exprs registered with this fusion
   // (val_deque_ is not owning the objects)
