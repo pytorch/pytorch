@@ -18,7 +18,7 @@ from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, StepLR, \
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
     skipIfRocm
-from torch.optim._functional import sgd
+from torch.optim._functional import sgd, adam
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -451,11 +451,17 @@ class TestOptim(TestCase):
                 optimizer(None, lr=1e-2, weight_decay=-1)
 
     def _inner_loop_diffopt(self, opt, model, is_diff):
+        states = {
+            "exp_avgs" : [torch.zeros_like(model[0], memory_format=torch.preserve_format)],
+            "exp_avg_sqs" : [torch.zeros_like(model[0], memory_format=torch.preserve_format)],
+            "max_exp_avg_sqs" : [torch.zeros_like(model[0], memory_format=torch.preserve_format)]
+        }
+
         def inner_loop(model):
             for epoch in range(10):
                 loss = model[0].exp().sum()
                 step, = autograd.grad(loss, model, create_graph=True)
-                self.call_functional_optimizer(opt, model, step, is_diff)
+                self.call_functional_optimizer(opt, model, step, differentiable, states, epoch)
             return model[0].sum()
 
         if is_diff:
@@ -464,14 +470,24 @@ class TestOptim(TestCase):
             with self.assertRaisesRegex(RuntimeError, "Output 0 of UnbindBackward is a view and is being modified inplace"):
                 torch.autograd.gradcheck(inner_loop, model)
 
-    def call_functional_optimizer(self, opt, model, step, is_diff):
-        if opt == sgd:
-            sgd(model, step, [None], momentum=0, lr=0.5, nesterov=False, dampening=0., weight_decay=0., differentiable=is_diff)
+    def call_functional_optimizer(self, opt, model, step, differentiable, states, epoch):
+            sgd(model, step, [None], momentum=0, lr=0.5, nesterov=False, dampening=0., weight_decay=0.,
+                differentiable=differentiable)
+        if opt == adam:
+            adam(model, step, states["exp_avgs"], states["exp_avg_sqs"], states["max_exp_avg_sqs"], [epoch + 1],
+                 amsgrad=False, beta1=0.99, beta2=0.99, lr=0.5, weight_decay=0., eps=0.001,
+                 differentiable=differentiable)
+
 
     def test_differential_sgd(self):
         model = [torch.randn(2, 2, dtype=torch.double, requires_grad=True)]
         self._inner_loop_diffopt(sgd, model, True)
         self._inner_loop_diffopt(sgd, model, False)
+
+    def test_differential_adam(self):
+        model = [torch.randn(1, 2, dtype=torch.double, requires_grad=True)]
+        self._inner_loop_diffopt(adam, model, True)
+        self._inner_loop_diffopt(adam, model, False)
 
     def test_sparse_adam(self):
         self._test_rosenbrock_sparse(
