@@ -810,6 +810,9 @@ void TensorIteratorBase::build_comparison_op(const Tensor& out, const Tensor& a,
   config.allow_cpu_scalars(true);
   config.promote_inputs_to_common_dtype(true);
 
+  // When 'out' isn't defined (e.g. for the functional operator 'a == b'), we
+  // want the output to be bool. Otherwise (e.g. 'torch.eq(a, b, out=c)') we
+  // don't coerce the output.
   if (!out.defined()) {
     config.declare_static_dtype_and_device(kBool, a.device());
   }
