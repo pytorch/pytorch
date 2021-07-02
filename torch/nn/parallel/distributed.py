@@ -394,15 +394,12 @@ class DistributedDataParallel(Module):
                                wrapped module's ``forward`` function. Parameters
                                that don't receive gradients as part of this
                                graph are preemptively marked as being ready to
-                               be reduced. Note that all ``forward`` outputs
-                               that are derived from module parameters must
-                               participate in calculating loss and later the
-                               gradient computation. If they don't, this wrapper
-                               will hang waiting for autograd to produce
-                               gradients for those parameters. Any outputs
-                               derived from module parameters that are otherwise
-                               unused can be detached from the autograd graph
-                               using ``torch.Tensor.detach``. (default: ``False``)
+                               be reduced. In addition, parameters that may have
+                               been used in the wrapped module's ``forward``
+                               function but were not part of loss computation and
+                               thus would also not receive gradients are
+                               preemptively marked as ready to be reduced.
+                               (default: ``False``)
         check_reduction: This argument is deprecated.
         gradient_as_bucket_view (bool): When set to ``True``, gradients will be views
                       pointing to different offsets of ``allreduce`` communication
@@ -1026,13 +1023,13 @@ class DistributedDataParallel(Module):
         # ensures that we keep the same order in join mode, such as when bucket
         # order is rebuilt dynamically.
         all_bucket_tensors = self.reducer.get_bucket_tensors()
-        for bucket_tensors in all_bucket_tensors:
+        for bucket_tensor in all_bucket_tensors:
             # Joined processes contribute zero gradient. In the case that
             # divide_by_initial_world_size=True, we divide grads by the static
             # world size, if not, the dividing factor is reduced by the number
             # of joined processes.
-            zero_tensors = [torch.zeros_like(t) for t in bucket_tensors]
-            work = self.process_group.allreduce(zero_tensors)
+            zero_tensor = [torch.zeros_like(bucket_tensor)]
+            work = self.process_group.allreduce(zero_tensor)
             allreduce_work.append(work)
         for work in allreduce_work:
             work.wait()

@@ -22,6 +22,7 @@ namespace tensorexpr {
 // A class that analyzes the given program relevant for Cuda backends.
 class CudaAnalysis : public IRVisitor {
  public:
+  // NOLINTNEXTLINE(modernize-use-equals-default,cppcoreguidelines-pro-type-member-init)
   CudaAnalysis() {
     gpu_block_extents_ = {new IntImm(1), new IntImm(1), new IntImm(1)};
     gpu_thread_extents_ = {new IntImm(1), new IntImm(1), new IntImm(1)};
@@ -71,6 +72,7 @@ class CudaAnalysis : public IRVisitor {
 // execution parameters, then if those params differ from the max mask each dim.
 class GPUMetaVarRewriter : public IRMutator {
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit GPUMetaVarRewriter(const CudaAnalysis* cuda_analysis)
       : cuda_analysis_(cuda_analysis) {
     gpu_block_vars_ = {
@@ -107,6 +109,7 @@ class GPUMetaVarRewriter : public IRMutator {
 
  private:
   // When processing a block, stores the contents of each sub-segment.
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   class Segment {
    public:
     void reset(bool mask) {
