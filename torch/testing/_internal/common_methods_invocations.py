@@ -4840,6 +4840,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True),
     OpInfo('add',
            variant_test_name='with_alpha',
+           # NumPy has no builtin reference for the alpha kwarg, but it is easy enough to emulate
            ref=lambda input, other, *, alpha: np.add(input, np.multiply(alpha, other)),
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            assert_autodiffed=True,
@@ -4862,6 +4863,7 @@ op_db: List[OpInfo] = [
            supports_inplace_autograd=False),
     OpInfo('sub',
            variant_test_name='with_alpha',
+           # NumPy has no builtin reference for the alpha kwarg, but it is easy enough to emulate
            ref=lambda input, other, *, alpha: np.subtract(input, np.multiply(alpha, other)),
            aliases=('subtract',),
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
