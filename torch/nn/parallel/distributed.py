@@ -1014,24 +1014,26 @@ class DistributedDataParallel(Module):
         )
         self._sync_params_and_buffers(authoritative_rank=self._authoritative_rank)
 
-    # Schedule allreduce ops to match those scheduled in the reducer's backward
+    # Schedule comm ops to match those scheduled in the reducer's backward
     # pass.
     def _match_all_reduce_for_bwd_pass(self):
-        allreduce_work = []
-        # Schedule allreduce in the same order as Reducer schedules them, i.e.
+        comm_work = []
+        # Schedule comm in the same order as Reducer schedules them, i.e.
         # the order of the buckets. Retrieving the bucket order from the reducer
         # ensures that we keep the same order in join mode, such as when bucket
         # order is rebuilt dynamically.
-        all_bucket_tensors = self.reducer.get_bucket_tensors()
-        for bucket_tensor in all_bucket_tensors:
+
+        # Returns grad_buckets in order, but real tensors are substituted with
+        # zero tensors of the same shape.
+        grad_buckets = self.reducer._get_zeros_like_grad_buckets()
+        for grad_bucket in grad_buckets:
             # Joined processes contribute zero gradient. In the case that
             # divide_by_initial_world_size=True, we divide grads by the static
             # world size, if not, the dividing factor is reduced by the number
             # of joined processes.
-            zero_tensor = [torch.zeros_like(bucket_tensor)]
-            work = self.process_group.allreduce(zero_tensor)
-            allreduce_work.append(work)
-        for work in allreduce_work:
+            work = self.reducer._run_comm_hook(grad_bucket)
+            comm_work.append(work)
+        for work in comm_work:
             work.wait()
 
     # Allreduces the used parameter mapping across ranks.
