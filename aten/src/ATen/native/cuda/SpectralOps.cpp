@@ -385,31 +385,36 @@ Tensor _fft_r2c_cufft(const Tensor& self, IntArrayRef dim, int64_t normalization
                          .movedim(-1, last_dim);
   }
 
-  // First do the R2C transform on the last dimension
-  {
-    auto target_sizes = dim.size() == 1 ? out_sizes : onesided_sizes;
-    _exec_fft(output, working_tensor, target_sizes, last_dim, /*forward=*/true);
-    if (dim.size() > 1) {
-      working_tensor = at::empty(out_sizes, out_options);
+  if (dim.size() <= cufft_max_ndim) {
+     // Perform single R2C if transformation dim is supported by cuFFT
+     _exec_fft(output, working_tensor, out_sizes, dim, /*forward=*/true);
+  } else {
+    // First do the R2C transform on the last dimension
+    {
+      auto target_sizes = dim.size() == 1 ? out_sizes : onesided_sizes;
+      _exec_fft(output, working_tensor, target_sizes, last_dim, /*forward=*/true);
+      if (dim.size() > 1) {
+        working_tensor = at::empty(out_sizes, out_options);
+      }
     }
-  }
 
-  // Then any remaining C2C transforms
-  DimVector sorted_dims(dim.begin(), dim.end() - 1);
-  while (!sorted_dims.empty()) {
-    std::swap(output, working_tensor);
+    // Then any remaining C2C transforms
+    DimVector sorted_dims(dim.begin(), dim.end() - 1);
+    while (!sorted_dims.empty()) {
+      std::swap(output, working_tensor);
 
-    // Resort dimensions every time as _exec_fft re-strides the output
-    auto strides = working_tensor.strides();
-    std::sort(sorted_dims.begin(), sorted_dims.end(),
-              [&](int64_t a, int64_t b) { return strides[a] > strides[b]; });
+      // Resort dimensions every time as _exec_fft re-strides the output
+      auto strides = working_tensor.strides();
+      std::sort(sorted_dims.begin(), sorted_dims.end(),
+                [&](int64_t a, int64_t b) { return strides[a] > strides[b]; });
 
-    const auto max_dims = std::min(static_cast<size_t>(cufft_max_ndim), sorted_dims.size());
-    auto last_dims = IntArrayRef(sorted_dims).slice(sorted_dims.size() - max_dims, max_dims);
+      const auto max_dims = std::min(static_cast<size_t>(cufft_max_ndim), sorted_dims.size());
+      auto last_dims = IntArrayRef(sorted_dims).slice(sorted_dims.size() - max_dims, max_dims);
 
-    // Intermediate results are always onesided
-    _exec_fft(output, working_tensor, onesided_sizes, last_dims, /*forward=*/true);
-    sorted_dims.resize(sorted_dims.size() - max_dims);
+      // Intermediate results are always onesided
+      _exec_fft(output, working_tensor, onesided_sizes, last_dims, /*forward=*/true);
+      sorted_dims.resize(sorted_dims.size() - max_dims);
+    }
   }
 
   // Only need to normalize the onesided slice since data in the other half is overwritten
@@ -451,21 +456,30 @@ Tensor _fft_c2r_cufft(const Tensor& self, IntArrayRef dim, int64_t normalization
   DimVector out_sizes(in_sizes.begin(), in_sizes.end());
   out_sizes[dim.back()] = lastdim;
 
-  // First complete any C2C transforms
-  Tensor temp;
-  if (dim.size() > 1) {
-    temp = _fft_c2c_cufft(
-        self, dim.slice(0, dim.size() - 1),
-        static_cast<int64_t>(fft_norm_mode::none), /*forward=*/false);
-  } else {
+  auto output = at::empty(out_sizes, self.options().dtype(c10::toValueType(self.scalar_type())));
+  if (dim.size() <= cufft_max_ndim) {
+    // Perform single C2R if transformation dim is supported by cuFFT
+    Tensor temp;
     // Complex to real FFTs may overwrite the input buffer, so must always clone (gh-34551)
     temp = self.clone(MemoryFormat::Contiguous);
+    _exec_fft(output, temp, out_sizes, dim, /*forward=*/false);
+  } else {
+    // First complete any C2C transforms
+    Tensor temp;
+    if (dim.size() > 1) {
+      temp = _fft_c2c_cufft(
+          self, dim.slice(0, dim.size() - 1),
+          static_cast<int64_t>(fft_norm_mode::none), /*forward=*/false);
+    } else {
+      // Complex to real FFTs may overwrite the input buffer, so must always clone (gh-34551)
+      temp = self.clone(MemoryFormat::Contiguous);
+    }
+
+    // Finally, do a 1D C2R transform
+    // TODO: could transform up to 2 other dims in the same cuFFT operation
+    _exec_fft(output, temp, out_sizes, dim.back(), /*forward=*/false);
   }
 
-  // Finally, do a 1D C2R transform
-  // TODO: could transform up to 2 other dims in the same cuFFT operation
-  auto output = at::empty(out_sizes, self.options().dtype(c10::toValueType(self.scalar_type())));
-  _exec_fft(output, temp, out_sizes, dim.back(), /*forward=*/false);
   return _fft_apply_normalization(output, normalization, out_sizes, dim);
 }
 
