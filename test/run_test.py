@@ -21,10 +21,10 @@ try:
     # using tools/ to optimize test run.
     sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
     from tools.testing.test_selections import (
-        export_S3_test_times, 
-        get_shard_based_on_S3, 
-        get_slow_tests_based_on_S3, 
-        get_specified_test_cases, 
+        export_S3_test_times,
+        get_shard_based_on_S3,
+        get_slow_tests_based_on_S3,
+        get_specified_test_cases,
         get_reordered_tests
     )
     HAVE_TEST_SELECTION_TOOLS = True
@@ -838,7 +838,7 @@ def get_selected_tests(options):
         which_shard, num_shards = options.shard
         assert which_shard <= num_shards, "Selected shard must be less than or equal to total number of shards"
         assert num_shards <= len(selected_tests), f"Number of shards must be less than {len(selected_tests)}"
-        # TODO: fix this to use test_times_filename, but currently this is not working 
+        # TODO: fix this to use test_times_filename, but currently this is not working
         # because setting the export arg immeidately halts the test execution.
         selected_tests = get_shard_based_on_S3(which_shard, num_shards, selected_tests, TEST_TIMES_FILE)
 
@@ -1010,7 +1010,8 @@ def main():
     specified_test_cases_filename = options.run_specified_test_cases
     if specified_test_cases_filename:
         print(f'Loading specified test cases to run from {specified_test_cases_filename}.')
-        get_specified_test_cases(specified_test_cases_filename, TESTS)
+        global SPECIFIED_TEST_CASES_DICT
+        SPECIFIED_TEST_CASES_DICT = get_specified_test_cases(specified_test_cases_filename, TESTS)
 
     test_directory = os.path.dirname(os.path.abspath(__file__))
     selected_tests = get_selected_tests(options)

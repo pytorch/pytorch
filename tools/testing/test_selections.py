@@ -6,10 +6,10 @@ import subprocess
 from tools.stats.s3_stat_parser import (
     get_previous_reports_for_branch,
     get_previous_reports_for_pr,
-    Report, VersionedReport, Version2Report,
+    Report, Version2Report,
     HAVE_BOTO3)
 
-from typing import Any, Dict, List, Tuple, cast
+from typing import Any, Dict, List, Optional, Tuple, cast
 from typing_extensions import TypedDict
 
 class JobTimeJSON(TypedDict):
@@ -103,12 +103,12 @@ def _pull_job_times_from_S3() -> Dict[str, float]:
     return _calculate_job_times(s3_reports)
 
 
-def _query_past_job_times(test_times_file: str) -> Dict[str, float]:
+def _query_past_job_times(test_times_file: Optional[str] = None) -> Dict[str, float]:
     """Read historic test job times from a file.
-    
+
     If the file doesn't exist or isn't matching current commit. It will download data from S3 and exported it.
     """
-    if os.path.exists(test_times_file):
+    if test_times_file and os.path.exists(test_times_file):
         with open(test_times_file) as file:
             test_times_json: JobTimeJSON = json.load(file)
 
@@ -127,7 +127,6 @@ def _query_past_job_times(test_times_file: str) -> Dict[str, float]:
         # Found file, but commit or CI job in JSON doesn't match
         print(f'Overwriting current file with stats based on current commit: {curr_commit} and CI job: {curr_ci_job}')
 
-    print(f'Exporting S3 test stats to {test_times_file}.')
     job_times = export_S3_test_times(test_times_file)
 
     return job_times
@@ -202,7 +201,7 @@ def get_specified_test_cases(filename: str, tests: List[str]) -> Dict[str, List[
     """
     if not os.path.exists(filename):
         print(f'Could not find specified tests file: {filename}. Proceeding with default behavior.')
-        return None
+        return dict()
 
     # The below encoding is utf-8-sig because utf-8 doesn't properly handle the byte-order-mark character
     with open(filename, mode='r', encoding="utf-8-sig") as csv_file:
@@ -214,7 +213,7 @@ def get_specified_test_cases(filename: str, tests: List[str]) -> Dict[str, List[
             if line_count == 1:
                 if 'test_filename' not in row or 'test_case_name' not in row:
                     print('Data is missing necessary columns for test specification. Proceeding with default behavior.')
-                    return None
+                    return dict()
             test_filename = row['test_filename']
             test_case_name = row['test_case_name']
             if test_filename not in tests:
@@ -274,9 +273,10 @@ def get_reordered_tests(tests: List[str], is_reordering_by_pr: bool) -> List[str
 
 
 # TODO Refactor this and unify with tools.stats.export_slow_tests
-def export_S3_test_times(test_times_filename: str = None) -> Dict[str, float]:
+def export_S3_test_times(test_times_filename: Optional[str] = None) -> Dict[str, float]:
     test_times: Dict[str, float] = _pull_job_times_from_S3()
     if test_times_filename is not None:
+        print(f'Exporting S3 test stats to {test_times_filename}.')
         if os.path.exists(test_times_filename):
             print(f'Overwriting existent file: {test_times_filename}')
         with open(test_times_filename, 'w+') as file:
