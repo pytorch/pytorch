@@ -442,14 +442,22 @@ void Reducer::mark_variable_ready_sparse(size_t variable_index) {
   });
 }
 
-std::vector<at::Tensor> Reducer::get_bucket_tensors() const {
+std::vector<c10d::GradBucket> Reducer::get_grad_buckets(
+    bool return_zero_tensors) const {
   std::lock_guard<std::mutex> lock(mutex_);
-  std::vector<at::Tensor> bucketTensors;
-  bucketTensors.reserve(buckets_.size());
-  for (const auto& bucket : buckets_) {
-    bucketTensors.emplace_back(bucket.replicas[0].contents);
+  std::vector<c10d::GradBucket> gradBuckets;
+  gradBuckets.reserve(buckets_.size());
+  for (size_t i = 0; i < buckets_.size(); ++i) {
+    gradBuckets.emplace_back(
+      i,
+      return_zero_tensors ? at::zeros_like(buckets_[i].replicas[0].contents)
+                            : buckets_[i].replicas[0].contents,
+      buckets_[i].replicas[0].offsets,
+      buckets_[i].replicas[0].lengths,
+      buckets_[i].replicas[0].sizes_vec
+    );
   }
-  return bucketTensors;
+  return gradBuckets;
 }
 
 void Reducer::set_forward_pass_work_handle(
