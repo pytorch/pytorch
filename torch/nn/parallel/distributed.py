@@ -1022,13 +1022,16 @@ class DistributedDataParallel(Module):
         # the order of the buckets. Retrieving the bucket order from the reducer
         # ensures that we keep the same order in join mode, such as when bucket
         # order is rebuilt dynamically.
-        all_bucket_tensors = self.reducer.get_bucket_tensors()
-        for bucket_tensor in all_bucket_tensors:
+
+        # Returns grad_buckets in order, but real tensors are substituted with
+        # zero tensors of the same shape.
+        grad_buckets = self.reducer._get_zeros_like_grad_buckets()
+        for grad_bucket in grad_buckets:
             # Joined processes contribute zero gradient. In the case that
             # divide_by_initial_world_size=True, we divide grads by the static
             # world size, if not, the dividing factor is reduced by the number
             # of joined processes.
-            zero_tensor = [torch.zeros_like(bucket_tensor)]
+            zero_tensor = grad_bucket.get_tensor()
             work = self.process_group.allreduce(zero_tensor)
             allreduce_work.append(work)
         for work in allreduce_work:
