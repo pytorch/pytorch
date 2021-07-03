@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from torch import nn
 from torch.ao.sparsity import WeightNormSparsifier
-from torch.ao.sparsity import BaseScheduler
+from torch.ao.sparsity import BaseScheduler, LambdaSL
 
 from torch.testing._internal.common_utils import TestCase
 
@@ -16,7 +16,7 @@ class ImplementedScheduler(BaseScheduler):
             return list(self.base_sl)
 
 
-class TestBaseScheduler(TestCase):
+class TestScheduler(TestCase):
     def test_constructor(self):
         model = nn.Sequential(
             nn.Linear(16, 16)
@@ -68,3 +68,15 @@ class TestBaseScheduler(TestCase):
         sparsifier.step()
         scheduler.step()
         assert sparsifier.module_groups[0]['sparsity_level'] == 0.25
+
+    def test_lambda_scheduler(self):
+        model = nn.Sequential(
+            nn.Linear(16, 16)
+        )
+        sparsifier = WeightNormSparsifier()
+        sparsifier.prepare(model, config=None)
+        assert sparsifier.module_groups[0]['sparsity_level'] == 0.5
+        scheduler = LambdaSL(sparsifier, lambda epoch: epoch * 10)
+        assert sparsifier.module_groups[0]['sparsity_level'] == 0.0  # Epoch 0
+        scheduler.step()
+        assert sparsifier.module_groups[0]['sparsity_level'] == 5.0  # Epoch 1
