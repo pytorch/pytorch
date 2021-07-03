@@ -485,6 +485,7 @@ class TestOptim(TestCase):
                 optimizer(None, lr=1e-2, rho=1.1)
 
 1
+2
 
     def test_nadam(self):
         for optimizer in [optim.NAdam, optim_mt.NAdam]:
