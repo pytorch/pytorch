@@ -400,6 +400,15 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           &::c10d::Reducer::delay_all_reduce,
           py::call_guard<py::gil_scoped_release>())
       .def(
+          "_run_comm_hook",
+          [](::c10d::Reducer& reducer, ::c10d::GradBucket& bucket)
+              -> std::shared_ptr<jit::PythonFutureWrapper> {
+            c10::intrusive_ptr<c10::ivalue::Future> fut =
+                reducer.run_comm_hook(bucket);
+            return std::make_shared<jit::PythonFutureWrapper>(fut);
+          },
+          py::call_guard<py::gil_scoped_release>())
+      .def(
           "set_logger",
           [](::c10d::Reducer& reducer,
              const std::shared_ptr<::c10d::Logger> logger) {
@@ -1472,7 +1481,7 @@ Example::
       .def(
           "get_future",
           [](::c10d::ProcessGroup::Work& work)
-              -> std::shared_ptr<jit::PythonFutureWrapper> {
+            -> std::shared_ptr<jit::PythonFutureWrapper> {
             return std::make_shared<jit::PythonFutureWrapper>(work.getFuture());
           },
           R"(
