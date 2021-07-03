@@ -4,7 +4,8 @@ import logging
 
 import torch
 from torch import nn
-from torch.ao.sparsity import BaseSparsifier
+from torch.ao.sparsity import BaseSparsifier, WeightNormSparsifier
+from torch.nn.utils.parametrize import is_parametrized
 
 from torch.testing._internal.common_utils import TestCase
 
@@ -14,16 +15,22 @@ class Model(nn.Module):
     def __init__(self):
         super().__init__()
         self.seq = nn.Sequential(
-            nn.Linear(3, 4)
+            nn.Linear(16, 16)
         )
-        self.linear = nn.Linear(4, 3)
+        self.linear = nn.Linear(16, 16)
+
+    def forward(self, x):
+        x = self.seq(x)
+        x = self.linear(x)
+        return x
 
 
 class ImplementedSparsifier(BaseSparsifier):
     def __init__(self, **kwargs):
         super().__init__(defaults=kwargs)
 
-    def step(self):
+    def update_mask(self, layer, **kwargs):
+        layer.parametrizations.weight[0].mask[0] = 0
         linear_state = self.state['linear']
         linear_state['step_count'] = linear_state.get('step_count', 0) + 1
 
@@ -45,6 +52,14 @@ class TestBaseSparsifier(TestCase):
         assert sparsifier.module_groups[0]['fqn'] == 'linear'
         assert 'test' in sparsifier.module_groups[0]
         assert sparsifier.module_groups[0]['test'] == 3
+
+    def test_step(self):
+        model = Model()
+        sparsifier = ImplementedSparsifier(test=3)
+        sparsifier.enable_mask_update = True
+        sparsifier.prepare(model, [model.linear])
+        sparsifier.step()
+        assert torch.all(model.linear.parametrizations.weight[0].mask[0] == 0)
 
     def test_state_dict(self):
         step_count = 3
@@ -86,6 +101,7 @@ class TestBaseSparsifier(TestCase):
         self.assertNotEqual(mask0, mask1)
 
         sparsifier1.load_state_dict(state_dict)
+
         # Make sure the states are loaded, and are correct
         assert sparsifier0.state == sparsifier1.state
 
@@ -105,3 +121,37 @@ class TestBaseSparsifier(TestCase):
                     self.assertEqual(param0.__dict__, param1.__dict__)
                 else:
                     assert mg0[key] == mg1[key]
+
+    def test_mask_squash(self):
+        model = Model()
+        sparsifier = ImplementedSparsifier(test=3)
+        sparsifier.prepare(model, [model.linear])
+        assert hasattr(model.linear.parametrizations.weight[0], 'mask')
+        assert is_parametrized(model.linear, 'weight')
+        assert not hasattr(model.seq[0], 'mask')
+        assert not is_parametrized(model.seq[0], 'weight')
+
+        sparsifier.squash_mask()
+        assert not hasattr(model.seq[0], 'mask')
+        assert not is_parametrized(model.seq[0], 'weight')
+        assert not hasattr(model.linear, 'mask')
+        assert not is_parametrized(model.linear, 'weight')
+
+
+class TestWeightNormSparsifier(TestCase):
+    def test_constructor(self):
+        model = Model()
+        sparsifier = WeightNormSparsifier()
+        sparsifier.prepare(model, config=None)
+        for g in sparsifier.module_groups:
+            assert isinstance(g['module'], nn.Linear)
+            # The module_groups are unordered
+            assert g['fqn'] in ('seq.0', 'linear')
+
+    def test_step(self):
+        model = Model()
+        sparsifier = WeightNormSparsifier(sparsity_level=0.5)
+        sparsifier.prepare(model, config=[model.linear])
+        sparsifier.enable_mask_update = True
+        sparsifier.step()
+        self.assertAlmostEqual(model.linear.parametrizations['weight'][0].mask.mean().item(), 0.5, places=2)
