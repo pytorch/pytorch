@@ -92,7 +92,7 @@ void launch_glu_backward_kernel(const TensorIteratorBase& iter,
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(N > 0 && N <= std::numeric_limits<int32_t>::max());
   const auto offset_calculator = make_element_offset_calculator<3>(iter);
   constexpr int64_t block_size = 256;
-  const int64_t grid = (N - block_size - 1) / block_size;
+  const int64_t grid = (N + block_size - 1) / block_size;
   const auto stream = at::cuda::getCurrentCUDAStream();
 
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "glu_backward_cuda", [&] {
