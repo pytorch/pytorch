@@ -1007,12 +1007,12 @@ class DistributedTest:
             param = next(model.parameters())
             tensor = torch.ones_like(param.data) * rank
             expected_avg_tensor = torch.ones_like(param.data) * sum(range(world_size)) / world_size
-            averager = averagers.PeriodicModelAverager(model, warmup_steps=10, period=4)
+            averager = averagers.PeriodicModelAverager(model, warmup_steps=12, period=4)
             for step in range(0, 20):
                 # Reset the parameters at every step.
                 param.data = copy.deepcopy(tensor)
                 averager.average_parameters()
-                if step < 10 or step % 4 == 0:
+                if step >= 12 and step % 4 == 0:
                     self.assertEqual(param.data, expected_avg_tensor)
                 else:
                     # No model averaging, so the parameters are not updated.
