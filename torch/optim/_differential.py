@@ -74,8 +74,8 @@ def adam(params: List[Tensor],
             grad = grad.add(param, alpha=weight_decay)
 
         # Decay the first and second moment running average coefficient
-        exp_avg = (exp_avg * beta1) + (1 - beta1) * grad
-        exp_avg_sq =  (exp_avg_sq * beta2) + (1 - beta2) * grad * grad
+        exp_avg = exp_avg * beta1 + (1 - beta1) * grad
+        exp_avg_sq = exp_avg_sq * beta2 + (1 - beta2) * grad * grad
         if amsgrad:
             # Maintains the maximum of all 2nd moment running avg. till now
             torch.maximum(max_exp_avg_sqs[i], exp_avg_sq, out=max_exp_avg_sqs[i])
