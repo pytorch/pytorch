@@ -3657,6 +3657,13 @@ struct to_ir {
     // `Any` as a catch-all supertype). Assume `[]` is `List[Tensor]`
     TypePtr elem_type = TensorType::get();
 
+    // Special case any return statements so that we can have stricter
+    // checks without breaking BC
+    TypePtr result_type = def_stack_.back().declared_return_type_;
+    if (!type_hint && result_type) {
+      type_hint = result_type;
+    }
+
     if (type_hint) {
       if (type_hint->kind() == TypeKind::ListType) {
         elem_type = type_hint->expectRef<ListType>().getElementType();
