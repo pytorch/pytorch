@@ -1,0 +1,90 @@
+name: Triage
+
+on:
+  issues:
+    types: [labeled]
+
+jobs:
+  welcome:
+    runs-on: ubuntu-18.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: JIT
+            column: Need triage
+          - name: Quantization
+            column: Need Triage
+    steps:
+      - uses: actions/github-script@v2
+        env:
+          NAME: ${{ matrix.name }}
+          COLUMN: ${{ matrix.column }}
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            // Arguments available:
+            // - github: A pre-authenticated octokit/rest.js client
+            // - context: An object containing the context of the workflow run
+            // - core: A reference to the @actions/core package
+            // - io: A reference to the @actions/io package
+
+            const kName = process.env.NAME;
+            // Check if issue has the relevant label.
+            const kLabel = `oncall: ${kName.toLowerCase()}`;
+
+            issue = await github.issues.get({
+              owner: context.issue.owner,
+              repo: context.issue.repo,
+              issue_number: context.issue.number,
+            })
+
+            const hasLabel = issue.data.labels.filter(label => label.name == kLabel).length > 0;
+
+            if (!hasLabel) {
+              core.debug(`Issue ${issue.data.title} does not have ${kName} label`);
+              return;
+            }
+
+            // Get project column ID.
+            const kProjectName = `${kName} Triage`;
+            const kColumnName = process.env.COLUMN;
+
+            // Query all projects in the repository.
+            // TODO: Support pagination once there are > 30 projects.
+            const projects = await github.projects.listForRepo({
+              owner: context.issue.owner,
+              repo: context.issue.repo,
+            });
+
+            // Filter out unwanted projects and get the ID for the specific Triage project.
+            const filteredProjects = projects.data.filter(project => project.name == kProjectName);
+
+            if (filteredProjects.length != 1) {
+              core.setFailed("Unable to find a project named " + kProjectName);
+              return;
+            }
+
+            const projectId = filteredProjects[0].id;
+            // First, query all columns in the project.
+            // TODO: Support pagination once there are > 30 columns.
+            const columns = await github.projects.listColumns({
+              project_id: projectId,
+            });
+
+            // Filter out unwanted projects and get the ID for the Need triage column.
+            const filteredColumns = columns.data.filter(column => column.name == kColumnName);
+
+            if (filteredColumns.length != 1) {
+              core.setFailed("Unable to find a column named " + kColumnName);
+              return;
+            }
+
+            const columnId = filteredColumns[0].id;
+
+            // Create a project card for this new issue.
+            await github.projects.createCard({
+              column_id: columnId,
+              content_id: issue.data.id,
+              content_type: "Issue",
+            })
