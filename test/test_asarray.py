@@ -4,7 +4,7 @@ from torch.testing._internal.common_device_type import (
     dtypes, onlyCPU,
     skipMeta
 )
-from torch.testing import all_types
+from torch.testing import all_types, get_all_dtypes
 from torch.utils.dlpack import from_dlpack, to_dlpack
 
 import torch
@@ -180,34 +180,243 @@ class TestBufferProtocol(common.TestCase):
                                        r"The given buffer is not writable."):
             torch.frombuffer(b"\x01\x02\x03\x04\x05\x06\x07\x08", dtype=dtype)
 
-class TestAsArray(common.TestCase):
-    def check_equal(self, a, b, same_ptr=True):
-        if same_ptr:
-            self.assertEqual(a.data_ptr(), b.data_ptr())
-        else:
-            self.assertEqual(a, b)
-            self.assertEqual(a.device, b.device)
+def getaddr(a):
+    if isinstance(a, torch.Tensor):
+        return a.data_ptr()
+    elif isinstance(a, array.array):
+        return a.buffer_info()[0]
+    raise RuntimeError(f"object {a} not supported.")
 
-        self.assertEqual(a.dtype, b.dtype)
+def getdevice(a):
+    if isinstance(a, torch.Tensor):
+        return a.device
+    return torch.device("cpu")
+
+def gettensorlike(o, tensor):
+    if isinstance(o, torch.Tensor):
+        return o
+    return torch.tensor(o, dtype=tensor.dtype, device=tensor.device)
+
+class TestAsArray(common.TestCase):
+    def _check(self, original, cvt=lambda t: t, is_alias=True, same_dtype=True, same_device=True, **kwargs):
+        """Check the output of 'asarray', given its input and assertion informations.
+
+        Besides calling 'asarray' itself, this function does 4 different checks:
+            1. Whether the result is aliased or not, depending on 'is_alias'
+            2. Whether the result has the expected dtype and elements
+            3. Whether the result lives in the expected device
+            4. Whether the result has its 'requires_grad' set or not
+        """
+        result = torch.asarray(cvt(original), **kwargs)
+        original_tensor = gettensorlike(original, result)
+        self.assertTrue(isinstance(result, torch.Tensor))
+
+        # 1. The storage pointers should be equal only if 'is_alias' is set
+        if is_alias:
+            self.assertEqual(result.data_ptr(), getaddr(original))
+        else:
+            self.assertNotEqual(result.data_ptr(), getaddr(original))
+
+        # 2. Comparison of the elements only takes place if the original
+        # sequence and the resulting tensor have the same data type
+        if same_dtype:
+            self.assertEqual(original_tensor, result)
+        else:
+            dtype = kwargs.get("dtype", torch.get_default_dtype())
+            self.assertEqual(original_tensor.shape, result.shape)
+            self.assertEqual(dtype, result.dtype)
+
+
+        # 3. Given the specified target device, we first check whether
+        # its type is the same, and then if its index is the same (if it
+        # is not None)
+        if same_device:
+            device = getdevice(original)
+        else:
+            device = torch.device(kwargs.get("device", "cpu"))
+
+        # Compare the target device type, and its index
+        self.assertEqual(device.type, result.device.type)
+        if device.index is not None:
+            self.assertEqual(device.index, result.device.index)
+
+        # 4. By default, 'requires_grad' is unset
+        self.assertEqual(result.requires_grad, kwargs.get("requires_grad", False))
 
     @skipMeta
-    @dtypes(*all_types())
+    @dtypes(*get_all_dtypes())
+    def test_alias_from_tensor(self, device, dtype):
+        # DLpack does not explicitly support bool
+        # It does it through uint8 type
+        if dtype is torch.bool:
+            return
+
+        original = common.make_tensor((5, 5), device, dtype)
+
+        def check(**kwargs):
+            self._check(original, **kwargs)
+
+        check(requires_grad=True)
+        check(copy=False)
+        check(dtype=dtype)
+        check(dtype=dtype, copy=False)
+        check(device=device)
+        check(device=device, dtype=dtype)
+        check(device=device, dtype=dtype, copy=False)
+
+    @skipMeta
+    @dtypes(*get_all_dtypes())
+    def test_copy_tensor(self, device, dtype):
+        if dtype is torch.bool:
+            return
+
+        original = common.make_tensor((5, 5), device, dtype)
+
+        def check(**kwargs):
+            self._check(original, is_alias=False, **kwargs)
+
+        check(requires_grad=True, copy=True)
+        check(dtype=dtype, copy=True)
+        check(device=device, copy=True)
+        check(device=device, dtype=dtype, copy=True)
+
+        # Copy is forced because of different device
+        if torch.cuda.is_available():
+            other = "cuda" if device == "cpu" else "cpu"
+            check(same_device=False, device=other)
+            check(same_device=False, device=other, copy=True)
+            check(same_device=False, device=other, dtype=dtype, copy=True)
+
+        # Copy is forced because of different dtype
+        for other in get_all_dtypes():
+            if dtype != other:
+                check(same_dtype=False, dtype=other)
+                check(same_dtype=False, dtype=other, copy=True)
+    @skipMeta
+    @dtypes(*get_all_dtypes())
     def test_alias_from_dlpack(self, device, dtype):
         # DLpack does not explicitly support bool
         # It does it through uint8 type
         if dtype is torch.bool:
             return
 
-        # Simple tensor
-        tensor = common.make_tensor((5, 5), device, dtype)
-        result = torch.asarray(to_dlpack(tensor))
-        self.check_equal(tensor, result)
+        original = common.make_tensor((5, 5), device, dtype)
+
+        def check(**kwargs):
+            self._check(original, to_dlpack, **kwargs)
+
+        check(requires_grad=True)
+        check(copy=False)
+        check(dtype=dtype)
+        check(dtype=dtype, copy=False)
+        check(device=device)
+        check(device=device, dtype=dtype)
+        check(device=device, dtype=dtype, copy=False)
+
+    @skipMeta
+    @dtypes(*get_all_dtypes())
+    def test_copy_from_dlpack(self, device, dtype):
+        if dtype is torch.bool:
+            return
+
+        original = common.make_tensor((5, 5), device, dtype)
+
+        def check(**kwargs):
+            self._check(original, to_dlpack, is_alias=False, **kwargs)
+
+        check(requires_grad=True, copy=True)
+        check(dtype=dtype, copy=True)
+        check(device=device, copy=True)
+        check(device=device, dtype=dtype, copy=True)
+
+        # Copy is forced because of different device
+        if torch.cuda.is_available():
+            other = "cuda" if device == "cpu" else "cpu"
+            check(same_device=False, device=other)
+            check(same_device=False, device=other, copy=True)
+            check(same_device=False, device=other, dtype=dtype, copy=True)
+
+        # Copy is forced because of different dtype
+        for other in get_all_dtypes():
+            if dtype != other:
+                check(same_dtype=False, dtype=other)
+                check(same_dtype=False, dtype=other, copy=True)
 
     @onlyCPU
     @dtypes(*all_types())
     def test_alias_from_buffer(self, device, dtype):
-        pass
+        original = common.make_tensor((5,), device, dtype)
+        arr = array.array(TORCH_TO_ARRAYTYPE[dtype], original)
 
+        def check(**kwargs):
+            self._check(arr, **kwargs)
+
+        check(dtype=dtype, requires_grad=True)
+        check(dtype=dtype, copy=False)
+        check(device=device, dtype=dtype)
+        check(device=device, dtype=dtype, copy=False)
+
+    @onlyCPU
+    @dtypes(*all_types())
+    def test_copy_from_buffer(self, device, dtype):
+        original = common.make_tensor((5,), device, dtype)
+        arr = array.array(TORCH_TO_ARRAYTYPE[dtype], original)
+
+        def check(**kwargs):
+            self._check(arr, is_alias=False, **kwargs)
+
+        check(dtype=dtype, requires_grad=True, copy=True)
+        check(dtype=dtype, device=device, copy=True)
+
+        # Copy is forced because of different device
+        if torch.cuda.is_available():
+            check(dtype=dtype, device="cuda")
+            check(dtype=dtype, device="cuda", copy=True)
+
+    @dtypes(*get_all_dtypes())
+    def test_copy_list(self, device, dtype):
+        original = common.make_tensor((5, 5), device, dtype)
+
+        def check(**kwargs):
+            self._check(original, torch.Tensor.tolist, is_alias=False, **kwargs)
+
+        check(dtype=dtype, requires_grad=True)
+        check(dtype=dtype, copy=True)
+        check(device=device, dtype=dtype)
+        check(device=device, dtype=dtype, copy=True)
+
+        # Copy is forced because of different device
+        if torch.cuda.is_available():
+            other = "cuda" if device == "cpu" else "cpu"
+            check(same_device=False, device=other, dtype=dtype)
+            check(same_device=False, device=other, dtype=dtype, copy=True)
+
+        # Copy is forced because of different dtype
+        for other in get_all_dtypes():
+            if dtype != other:
+                check(same_dtype=False, dtype=other)
+                check(same_dtype=False, dtype=other, copy=True)
+
+    @dtypes(*get_all_dtypes())
+    def test_unsupported_alias(self, device, dtype):
+        original = common.make_tensor((5, 5), device, dtype)
+
+        if torch.cuda.is_available():
+            other_device = "cuda" if device == "cpu" else "cpu"
+
+            with self.assertRaisesRegex(ValueError,
+                                        f"from device '{device}' to '{other_device}'"):
+                torch.asarray(original, device=other_device)
+
+        for other_dtype in get_all_dtypes():
+            if other_dtype != dtype:
+                with self.assertRaisesRegex(ValueError,
+                                            f"with dtype '{dtype}' into dtype '{other_dtype}'"):
+                    torch.asarray(original, dtype=other_dtype)
+
+        with self.assertRaisesRegex(ValueError,
+                                    f"can't alias arbitrary sequence"):
+            torch.asarray(original.tolist(), copy=False)
 
 instantiate_device_type_tests(TestBufferProtocol, globals())
 instantiate_device_type_tests(TestAsArray, globals())

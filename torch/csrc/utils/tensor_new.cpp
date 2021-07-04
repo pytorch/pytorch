@@ -1049,35 +1049,72 @@ Tensor asarray(
     bool requires_grad) {
   Tensor tensor;
 
-  bool force_copy = copy.has_value() && copy.value();
-  bool force_alias = copy.has_value() && !copy.value();
+  bool force_copy = copy.value_or(false);
+  bool force_alias = !copy.value_or(true);
 
   auto dtype_unwrapped =
       dtype.value_or(torch::tensors::get_default_scalar_type());
 
-  if (PyCapsule_IsValid(obj, "dltensor") != 0) {
-      tensor = tensor_fromDLPack(obj);
+  // Check whether 'obj' is a 'Tensor'
+  if (THPVariable_Check(obj)) {
+    tensor = THPVariable_Unpack(obj);
   }
 
+  // Check whether 'obj' is a 'DLPack' capsule
+  if (!tensor.defined() && PyCapsule_IsValid(obj, "dltensor") != 0) {
+    tensor = tensor_fromDLPack(obj);
+  }
+
+  // Check whether 'obj' implements the buffer protocol
   if (!tensor.defined() && PyObject_CheckBuffer(obj) != 0) {
     tensor = tensor_frombuffer(obj, dtype_unwrapped, -1, 0, requires_grad);
   }
 
-  if (tensor.defined() && force_copy) {
-    tensor = tensor.clone();
-  } else if (!tensor.defined()) {
+  if (tensor.defined()) {
+    // Given an aliasable tensor, should we copy it?
+    bool wrong_device = device.has_value() && device.value() != tensor.device();
+    bool wrong_dtype =
+        dtype.has_value() && dtype.value() != tensor.scalar_type();
+    bool needs_copying = !copy.has_value() && (wrong_device || wrong_dtype);
+
+    // Given a defined tensor, we copy it if either we have to (copy=True) or
+    // if we need to (copy=None) because of mismatched device or dtype.
+    if (force_copy || needs_copying) {
+      if (wrong_device || wrong_dtype) {
+        tensor = tensor.to(
+            device.value_or(tensor.device()),
+            dtype.value_or(tensor.scalar_type()));
+      } else {
+        tensor = tensor.clone();
+      }
+      tensor.detach_();
+    } else {
+      // If we are not copying, we have to check whther we have the tensor
+      // in the right device, with the right dtype.
+      TORCH_CHECK_VALUE(
+          !wrong_device,
+          "can't alias tensor from device '", tensor.device(),
+          "' to '", device.value(), "'.");
+      TORCH_CHECK_VALUE(
+          !wrong_dtype,
+          "can't alias tensor with dtype '", tensor.scalar_type(),
+          "' into dtype '", dtype.value(), "'.");
+    }
+  } else {
+    // Undefined tensor means it does not implement neither DLPack nor
+    // the buffer protocol. Last case is a sequence, in which case we must
+    // copy (copy can't be false).
     TORCH_CHECK_VALUE(
-        !force_alias, "Can't alias arbitrary sequence into a tensor.");
-    auto tensor = internal_new_from_data(
-        TensorOptions(),
-        dtype_unwrapped,
-        device,
-        obj,
-        true,
-        true,
-        !dtype.has_value());
+        !force_alias, "can't alias arbitrary sequence into a tensor.");
+
+    // Make tensor from sequence, inferring its type, and then convert
+    // it to the desired type.
+    tensor = internal_new_from_data(
+        TensorOptions(), dtype_unwrapped, device, obj, false, false, true);
+    tensor = tensor.to(dtype_unwrapped);
   }
 
+  tensor.set_requires_grad(requires_grad);
   return tensor;
 }
 

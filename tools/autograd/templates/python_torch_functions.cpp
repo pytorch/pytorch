@@ -512,7 +512,7 @@ static PyObject * THPVariable_asarray(PyObject* self_, PyObject* args, PyObject*
   if (r.idx == 0) {
     auto obj = r.pyobject(0);
     auto dtype = r.scalartypeOptional(1);
-    auto device = r.device(2);
+    auto device = r.deviceOptional(2);
     auto copy = r.toBoolOptional(3);
     auto requires_grad = r.toBool(4);
     ret = wrap(torch::utils::asarray(obj, dtype, device, copy, requires_grad));
