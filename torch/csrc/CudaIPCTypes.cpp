@@ -3,13 +3,7 @@
 #include <map>
 #include <mutex>
 #include <random>
-
-#ifdef _MSC_VER
-#include <c10/util/win32-headers.h>
-#else
-#include <sys/types.h>
-#include <unistd.h>
-#endif
+#include <string>
 
 namespace torch {
 
@@ -203,15 +197,7 @@ at::DataPtr GetNewRefCountedSentData(void* data, at::Device device) {
     std::lock_guard<std::mutex> lock(
         cuda_ipc_global_entities.ref_counters_mutex_);
     if (!cuda_ipc_global_entities.next_available_ref_counters_file_) {
-      static std::random_device rd;
-      std::string ref_counter_handle = "/torch_";
-#ifdef _MSC_VER
-      ref_counter_handle += std::to_string(GetCurrentProcessId());
-#else
-      ref_counter_handle += std::to_string(getpid());
-#endif
-      ref_counter_handle += "_";
-      ref_counter_handle += std::to_string(rd());
+      std::string ref_counter_handle = at::NewProcessWideShmHandle();
 
       int flags = at::ALLOCATOR_MAPPED_SHAREDMEM | at::ALLOCATOR_MAPPED_EXCLUSIVE;
       at::DataPtr sptr = at::RefcountedMapAllocator::makeDataPtr(
