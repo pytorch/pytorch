@@ -10,6 +10,7 @@ import torch.optim._multi_tensor as optim_mt
 import torch.nn.functional as F
 from torch.optim import SGD
 from torch.autograd import Variable
+from torch import autograd
 from torch import sparse
 from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, StepLR, \
     MultiStepLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, \
@@ -17,6 +18,8 @@ from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, StepLR, \
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
     skipIfRocm
+import torch.optim._functional as functional
+import torch.optim._differential as differential
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -447,6 +450,157 @@ class TestOptim(TestCase):
             )
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
                 optimizer(None, lr=1e-2, weight_decay=-1)
+
+    def _inner_loop_differential_optimizers(self, opt, model):
+        states = {
+            "exp_avgs" : [torch.zeros_like(model[0], memory_format=torch.preserve_format)],
+            "exp_avg_sqs" : [torch.zeros_like(model[0], memory_format=torch.preserve_format)],
+            "max_exp_avg_sqs" : [torch.zeros_like(model[0], memory_format=torch.preserve_format)],
+            "square_avg" : [torch.zeros_like(model[0], memory_format=torch.preserve_format)],
+            "acc_delta" : [torch.zeros_like(model[0], memory_format=torch.preserve_format)],
+            "sums" : [torch.zeros_like(model[0], memory_format=torch.preserve_format)],
+            "grad_avgs" : [torch.zeros_like(model[0], memory_format=torch.preserve_format)],
+            "momentum_buffer_list" : [torch.zeros_like(model[0], memory_format=torch.preserve_format)]
+        }
+
+        def inner_loop(model):
+            initial_loss = model[0].exp().sum()
+            for epoch in range(10):
+                loss = model[0].exp().sum()
+                step, = autograd.grad(loss, model, create_graph=True)
+                self._call_differential_optimizer(opt, model, step, states, epoch)
+
+            self.assertLessEqual(model[0].exp().sum(), initial_loss)
+            return model[0].sum()
+        torch.autograd.gradcheck(lambda inp: inner_loop(inp.clone()), model[0])
+
+    def _inner_loop_functional_optimizers(self, opt, model):
+        states = {
+            "exp_avgs" : [torch.zeros_like(model[0], memory_format=torch.preserve_format)],
+            "exp_avg_sqs" : [torch.zeros_like(model[0], memory_format=torch.preserve_format)],
+            "max_exp_avg_sqs" : [torch.zeros_like(model[0], memory_format=torch.preserve_format)],
+            "square_avg" : [torch.zeros_like(model[0], memory_format=torch.preserve_format)],
+            "acc_delta" : [torch.zeros_like(model[0], memory_format=torch.preserve_format)],
+            "sums" : [torch.zeros_like(model[0], memory_format=torch.preserve_format)],
+            "grad_avgs" : [torch.zeros_like(model[0], memory_format=torch.preserve_format)],
+            "momentum_buffer_list" : [torch.zeros_like(model[0], memory_format=torch.preserve_format)]
+        }
+
+        def inner_loop(model):
+            initial_loss = model[0].exp().sum()
+            for epoch in range(10):
+                loss = model[0].exp().sum()
+                step, = autograd.grad(loss, model, create_graph=True)
+                self._call_functional_optimizer(opt, model, step, states, epoch)
+            return model[0].sum()
+        torch.autograd.gradcheck(lambda inp: inner_loop(inp.clone()), model[0])
+
+    def _call_differential_optimizer(self, opt, model, step, states, epoch):
+        if opt == differential.sgd:
+            differential.sgd(model, step, [None], momentum=0.1, lr=0.5, nesterov=True, dampening=0.1, weight_decay=0.1)
+        if opt == differential.adam:
+            differential.adam(model, step, states["exp_avgs"], states["exp_avg_sqs"], states["max_exp_avg_sqs"],
+                              [epoch + 1], amsgrad=False, beta1=0.99, beta2=0.99, lr=0.5, weight_decay=0., eps=0.001)
+        if opt == differential.adamw:
+            differential.adamw(model, step, states["exp_avgs"], states["exp_avg_sqs"], states["max_exp_avg_sqs"],
+                               [epoch + 1], amsgrad=False, beta1=0.99, beta2=0.99, lr=0.5, weight_decay=0., eps=0.001)
+        if opt == differential.adadelta:
+            differential.adadelta(model, step, states["square_avg"], states["acc_delta"], lr=0.5, weight_decay=0.1,
+                                  rho=0.6, eps=0.001)
+        if opt == differential.adagrad:
+            differential.adagrad(model, step, states["sums"], [epoch + 1], lr=0.5, weight_decay=0.1, lr_decay=0.6,
+                                 eps=0.001)
+        if opt == differential.rmsprop:
+            differential.rmsprop(model, step, states["square_avg"], states["grad_avgs"], states["momentum_buffer_list"],
+                                 lr=0.5, alpha=0.5, eps=0.001, weight_decay=0.1, momentum=0.1, centered=True)
+        if opt == differential.radam:
+            differential.radam(model, step, states["exp_avgs"], states["exp_avg_sqs"],
+                               [epoch + 1], beta1=0.99, beta2=0.99, lr=0.5, weight_decay=0., eps=0.001)
+
+    def _call_functional_optimizer(self, opt, model, step, states, epoch):
+        if opt == functional.sgd:
+            functional.sgd(model, step, [None], momentum=0.1, lr=0.5, nesterov=True, dampening=0.1, weight_decay=0.1)
+        if opt == functional.adam:
+            functional.adam(model, step, states["exp_avgs"], states["exp_avg_sqs"], states["max_exp_avg_sqs"],
+                            [epoch + 1], amsgrad=False, beta1=0.99, beta2=0.99, lr=0.5, weight_decay=0., eps=0.001)
+        if opt == functional.adamw:
+            functional.adamw(model, step, states["exp_avgs"], states["exp_avg_sqs"], states["max_exp_avg_sqs"],
+                             [epoch + 1], amsgrad=False, beta1=0.99, beta2=0.99, lr=0.5, weight_decay=0., eps=0.001)
+        if opt == functional.adadelta:
+            functional.adadelta(model, step, states["square_avg"], states["acc_delta"], lr=0.5, weight_decay=0.1,
+                                rho=0.6, eps=0.001)
+        if opt == functional.adagrad:
+            functional.adagrad(model, step, states["sums"], [epoch + 1], lr=0.5, weight_decay=0.1, lr_decay=0.6,
+                               eps=0.001)
+        if opt == functional.rmsprop:
+            functional.rmsprop(model, step, states["square_avg"], states["grad_avgs"], states["momentum_buffer_list"],
+                               lr=0.5, alpha=0.5, eps=0.001, weight_decay=0.1, momentum=0.1, centered=True)
+        if opt == functional.radam:
+            functional.radam(model, step, states["exp_avgs"], states["exp_avg_sqs"],
+                             [epoch + 1], beta1=0.99, beta2=0.99, lr=0.5, weight_decay=0., eps=0.001)
+
+    def test_differential_sgd(self):
+        model = [torch.randn(1, 2, dtype=torch.double, requires_grad=True)]
+        self._inner_loop_differential_optimizers(differential.sgd, model)
+
+    def test_differentiability_functional_sgd(self):
+        model = [torch.randn(1, 2, dtype=torch.double, requires_grad=True)]
+        with self.assertRaisesRegex(RuntimeError, "Output 0 of UnbindBackward is a view and is being modified inplace"):
+            self._inner_loop_functional_optimizers(functional.sgd, model)
+
+    def test_differential_adam(self):
+        model = [torch.randn(1, 2, dtype=torch.double, requires_grad=True)]
+        self._inner_loop_differential_optimizers(differential.adam, model)
+
+    def test_differentiability_functional_adam(self):
+        model = [torch.randn(1, 2, dtype=torch.double, requires_grad=True)]
+        with self.assertRaisesRegex(RuntimeError, "Output 0 of UnbindBackward is a view and is being modified inplace"):
+            self._inner_loop_functional_optimizers(functional.adam, model)
+
+    def test_differential_adamw(self):
+        model = [torch.randn(1, 2, dtype=torch.double, requires_grad=True)]
+        self._inner_loop_differential_optimizers(differential.adamw, model)
+
+    def test_differentiability_functional_adamw(self):
+        model = [torch.randn(1, 2, dtype=torch.double, requires_grad=True)]
+        with self.assertRaisesRegex(RuntimeError, "Output 0 of UnbindBackward is a view and is being modified inplace"):
+            self._inner_loop_functional_optimizers(functional.adamw, model)
+
+    def test_differential_adadelta(self):
+        model = [torch.randn(1, 2, dtype=torch.double, requires_grad=True)]
+        self._inner_loop_differential_optimizers(differential.adadelta, model)
+
+    def test_differentiability_functional_adadelta(self):
+        model = [torch.randn(1, 2, dtype=torch.double, requires_grad=True)]
+        with self.assertRaisesRegex(RuntimeError, "Output 0 of UnbindBackward is a view and is being modified inplace"):
+            self._inner_loop_functional_optimizers(functional.adadelta, model)
+
+    def test_differential_adagrad(self):
+        model = [torch.randn(1, 2, dtype=torch.double, requires_grad=True)]
+        self._inner_loop_differential_optimizers(differential.adagrad, model)
+
+    def test_differentiability_functional_adagrad(self):
+        model = [torch.randn(1, 2, dtype=torch.double, requires_grad=True)]
+        with self.assertRaisesRegex(RuntimeError, "Output 0 of UnbindBackward is a view and is being modified inplace"):
+            self._inner_loop_functional_optimizers(functional.adagrad, model)
+
+    def test_differential_rmsprop(self):
+        model = [torch.randn(1, 2, dtype=torch.double, requires_grad=True)]
+        self._inner_loop_differential_optimizers(differential.rmsprop, model)
+
+    def test_differentiability_functional_rmsprop(self):
+        model = [torch.randn(1, 2, dtype=torch.double, requires_grad=True)]
+        with self.assertRaisesRegex(RuntimeError, "Output 0 of UnbindBackward is a view and is being modified inplace"):
+            self._inner_loop_functional_optimizers(functional.rmsprop, model)
+
+    def test_differential_radam(self):
+        model = [torch.randn(1, 2, dtype=torch.double, requires_grad=True)]
+        self._inner_loop_differential_optimizers(differential.radam, model)
+
+    def test_differentiability_functional_radam(self):
+        model = [torch.randn(1, 2, dtype=torch.double, requires_grad=True)]
+        with self.assertRaisesRegex(RuntimeError, "Output 0 of UnbindBackward is a view and is being modified inplace"):
+            self._inner_loop_functional_optimizers(functional.radam, model)
 
     def test_sparse_adam(self):
         self._test_rosenbrock_sparse(
