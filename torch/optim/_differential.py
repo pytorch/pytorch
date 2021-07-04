@@ -136,3 +136,28 @@ def adamw(params: List[Tensor],
         step_size = lr / bias_correction1
 
         params[i] = params[i] - step_size * exp_avg / denom
+
+
+def adadelta(params: List[Tensor],
+             grads: List[Tensor],
+             square_avgs: List[Tensor],
+             acc_deltas: List[Tensor],
+             *,
+             lr: float,
+             rho: float,
+             eps: float,
+             weight_decay: float):
+    r"""Differential Functional API that performs Adadelta algorithm computation.
+
+    See :class:`~torch.optim.Adadelta` for details.
+    """
+
+    for i, (param, grad, square_avg, acc_delta) in enumerate(zip(params, grads, square_avgs, acc_deltas)):
+        if weight_decay != 0:
+            grad = grad.add(param, alpha=weight_decay)
+
+        square_avg = square_avg * rho + (1 - rho) * grad * grad
+        std = square_avg.add(eps).sqrt_()
+        delta = acc_delta.add(eps).sqrt_().div_(std).mul_(grad)
+        params[i] = params[i] - lr * delta
+        acc_delta = rho * acc_delta + (1 - rho) * delta * delta
