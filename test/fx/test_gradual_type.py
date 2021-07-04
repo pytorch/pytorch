@@ -468,10 +468,15 @@ class TypeCheckerTest(unittest.TestCase):
 
                 self.conv1 = torch.nn.Conv2d(3, 6, 5)
                 self.pool = torch.nn.MaxPool2d(2, 2)
+                self.conv2 = torch.nn.Conv2d(6, 16, 5)
+                self.fc1 = torch.nn.Linear(5, 120)
 
             def forward(self, x : TensorType((4, 3, 32, 32))):
                 out = self.conv1(x)
                 out = self.pool(out)
+                out = self.conv2(out)
+                out = self.pool(out)
+                out = self.fc1(out)
                 return out
 
         B = BasicBlock()
@@ -482,7 +487,10 @@ class TypeCheckerTest(unittest.TestCase):
         tc.type_check()
 
         expected_ph_types = [TensorType((4, 3, 32, 32)), TensorType((4, 6, 28, 28)),
-                             TensorType((4, 6, 14, 14)), TensorType((4, 6, 14, 14))]
+                             TensorType((4, 6, 14, 14)), TensorType((4, 16, 10, 10)),
+                             TensorType((4, 16, 5, 5)), TensorType((4, 16, 5, 120)),
+                             TensorType((4, 16, 5, 120))]
+
         expected_iter = iter(expected_ph_types)
 
         for n in traced.graph.nodes:

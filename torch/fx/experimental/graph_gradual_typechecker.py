@@ -296,8 +296,57 @@ def maxpool2d_inference_rule(n: Node, op_type):
 
         return n.type
     else:
-        raise TypeError(f'Cannot apply {op_type} with input type { arg_type} and existing type {n.type} on {n}')
+        raise TypeError(f'Cannot apply {op_type} with input type {arg_type} and existing type {n.type} on {n}')
 
+
+def linear_check(tensor_type, op_type):
+    """
+    Checks that an input tensor type satisfies the conditions for linear operation
+    and returns the output type based on in and out features given by op_type
+    """
+    if len(tensor_type.__args__) >= 2:
+        if is_consistent(op_type.in_features, tensor_type.__args__[-1]):
+            # Todo backwards propagation
+            new_type_args = list(tensor_type.__args__)
+            new_type_args[-1] = op_type.out_features
+            return TensorType(tuple(new_type_args))
+        else:
+            raise TypeError(f'Inconsistent {op_type.in_features} and {tensor_type.__args__[-1]} in {op_type}')
+    else:
+        raise TypeError(f'Type {tensor_type} must have rank 2 or more.')
+
+@register_inference_rule(torch.nn.Linear)
+def linear_inference_rule(n: Node, op_type):
+    assert isinstance(n.args[0], Node)
+    if isinstance(n.args[0].type, TensorType) and isinstance(n.type, TensorType):
+        if is_consistent(n.args[0].type, n.type):
+            # Todo: type inference for argument
+            new_res_type_from_arg = linear_check(n.args[0].type, op_type)
+            new_res_type_from_node = linear_check(n.type, op_type)
+            n.type = new_res_type_from_node
+            if is_more_precise(new_res_type_from_arg, n.type):
+                n.type = new_res_type_from_arg
+            return n.type
+        else:
+            raise TypeError(f'Argument type {n.args[0].type} and node type {n.type} are inconsistent.'
+                            f' Cannot apply {op_type} operation to {n}')
+
+    elif isinstance(n.args[0].type, TensorType) and n.type == Dyn:
+        new_type = linear_check(n.args[0].type, op_type)
+        n.type = new_type
+        return n.type
+
+    elif isinstance(n.type, TensorType) and n.args[0].type == Dyn:
+        # Todo: type inference for argument
+        new_type = linear_check(n.type, op_type)
+        n.type = new_type
+        return n.type
+
+    elif n.args[0].type == Dyn and n.type == Dyn:
+        return Dyn
+
+    else:
+        raise TypeError(f'Wrong types {n.type} and {n.args[0].type} in {op_type}')
 
 class GraphTypeChecker:
     def __init__(self, env, traced):
