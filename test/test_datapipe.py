@@ -25,6 +25,7 @@ import torch
 import torch.nn as nn
 import torch.utils.data.datapipes as dp
 import torch.utils.data.graph
+import torch.utils.data.sharding
 
 from torch.testing._internal.common_utils import (TestCase, run_tests)
 from torch.utils.data import (
@@ -1272,6 +1273,32 @@ class TestGraph(TestCase):
         graph = torch.utils.data.graph.traverse(combined_dp)
         expected = {combined_dp: {dp0_upd: {dp0: {}}, dp1_upd: {dp1: {}}, dp2: {}}}
         self.assertEqual(expected, graph)
+
+
+class TestSharding(TestCase):
+    def test_simple_sharding(self):
+        def get_pipeline():
+            numbers_dp = NumbersDataset(size=10)
+            dp0, dp1 = numbers_dp.fork(2)
+            dp0_upd = dp0.map(lambda x: x * 10)
+            dp1_upd = dp1.filter(lambda x: x % 3 == 1)
+            combined_dp = dp0_upd.mux(dp1_upd)
+            return combined_dp
+
+        sharded_dp = get_pipeline().sharding_filter()
+        torch.utils.data.sharding.apply_sharding(sharded_dp, 3, 1)
+        items = list(sharded_dp)
+        self.assertEqual([1, 20, 40, 70], items)
+
+        all_items = list(get_pipeline())
+        items = []
+        for i in range(3):
+            sharded_dp = get_pipeline().sharding_filter()
+            torch.utils.data.sharding.apply_sharding(sharded_dp, 3, i)
+            items += list(sharded_dp)
+
+        self.assertEqual(sorted(all_items), sorted(items))
+
 
 if __name__ == '__main__':
     run_tests()
