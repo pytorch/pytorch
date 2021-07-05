@@ -348,6 +348,61 @@ def linear_inference_rule(n: Node, op_type):
     else:
         raise TypeError(f'Wrong types {n.type} and {n.args[0].type} in {op_type}')
 
+
+def adaptiveavgpool2d_check(tensor_type, op_type):
+    output_size = op_type.output_size
+    if isinstance(output_size, int):
+        output_size = [output_size, output_size]
+    elif isinstance(output_size, tuple):
+        output_size = list(output_size)
+        if output_size[0] is None:
+            output_size[0] = output_size[1]
+        if output_size[1] is None:
+            output_size[1] == output_size[0]
+
+    new_type_list = list(tensor_type.__args__)
+
+    if len(tensor_type.__args__) == 4 or len(tensor_type.__args__) == 3:
+        new_type_list[-1] = output_size[1]
+        new_type_list[-2] = output_size[0]
+
+        return TensorType(tuple(new_type_list))
+
+    else:
+        raise TypeError(f'Tensor ranks must be 3 or 4. Got {tensor_type}')
+
+@register_inference_rule(torch.nn.AdaptiveAvgPool2d)
+def adaptiveavgpool2d_inference_rule(n: Node, op_type):
+    assert isinstance(n.args[0], Node)
+
+    if isinstance(n.args[0].type, TensorType) and isinstance(n.type, TensorType):
+        if is_consistent(n.args[0].type, n.type):
+            new_res_type_from_arg = adaptiveavgpool2d_check(n.args[0].type, op_type)
+            new_res_type_from_node = adaptiveavgpool2d_check(n.type, op_type)
+            n.type = new_res_type_from_node
+            if is_more_precise(new_res_type_from_arg, n.type):
+                n.type = new_res_type_from_arg
+            return n.type
+        else:
+            raise TypeError(f'Argument type {n.args[0].type} and node type {n.type} are inconsistent.'
+                            f' Cannot apply {op_type} operation to {n}')
+
+    elif n.args[0].type == Dyn and isinstance(n.type, TensorType):
+        new_type = adaptiveavgpool2d_check(n.type, op_type)
+        n.type = new_type
+        return n.type
+
+    elif isinstance(n.args[0].type, TensorType) and n.type == Dyn:
+        new_type = adaptiveavgpool2d_check(n.args[0].type, op_type)
+        n.type = new_type
+        return n.type
+
+    elif n.type == Dyn and n.args[0].type == Dyn:
+        return Dyn
+    else:
+        raise TypeError(f'Wrong types {n.type} and {n.args[0].type} in {op_type}')
+
+
 class GraphTypeChecker:
     def __init__(self, env, traced):
         self.env = env
