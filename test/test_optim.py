@@ -10,6 +10,7 @@ import torch.optim._multi_tensor as optim_mt
 import torch.nn.functional as F
 from torch.optim import SGD
 from torch.autograd import Variable
+from torch import autograd
 from torch import sparse
 from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, StepLR, \
     MultiStepLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, \
@@ -17,6 +18,8 @@ from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, StepLR, \
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
     skipIfRocm
+import torch.optim._functional as functional
+import torch.optim._differentiable as differentiable
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -447,6 +450,46 @@ class TestOptim(TestCase):
             )
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
                 optimizer(None, lr=1e-2, weight_decay=-1)
+
+    def _inner_loop_differentiable_optimizers(self, opt, model):
+        def inner_loop(model):
+            initial_loss = model[0].exp().sum()
+            for epoch in range(10):
+                loss = model[0].exp().sum()
+                step, = autograd.grad(loss, model, create_graph=True)
+                self._call_differentiable_optimizer(opt, model, step)
+
+            self.assertLessEqual(model[0].exp().sum(), initial_loss)
+            return model[0].sum()
+        torch.autograd.gradcheck(lambda inp: inner_loop(inp.clone()), model[0])
+
+    def _inner_loop_functional_optimizers(self, opt, model):
+        def inner_loop(model):
+            initial_loss = model[0].exp().sum()
+            for epoch in range(10):
+                loss = model[0].exp().sum()
+                step, = autograd.grad(loss, model, create_graph=True)
+                self._call_functional_optimizer(opt, model, step)
+
+            return model[0].sum()
+        torch.autograd.gradcheck(lambda inp: inner_loop(inp.clone()), model[0])
+
+    def _call_differentiable_optimizer(self, opt, model, step):
+        if opt == differentiable.sgd:
+            differentiable.sgd(model, step, [None], momentum=0.1, lr=0.5, nesterov=True, dampening=0.1, weight_decay=0.1)
+
+    def _call_functional_optimizer(self, opt, model, step):
+        if opt == functional.sgd:
+            functional.sgd(model, step, [None], momentum=0.1, lr=0.5, nesterov=True, dampening=0.1, weight_decay=0.1)
+
+    def test_differentiable_sgd(self):
+        model = [torch.randn(1, 2, dtype=torch.double, requires_grad=True)]
+        self._inner_loop_differentiable_optimizers(differentiable.sgd, model)
+
+    def test_differentiability_functional_sgd(self):
+        model = [torch.randn(1, 2, dtype=torch.double, requires_grad=True)]
+        with self.assertRaisesRegex(RuntimeError, "Output 0 of UnbindBackward is a view and is being modified inplace"):
+            self._inner_loop_functional_optimizers(functional.sgd, model)
 
     def test_sparse_adam(self):
         self._test_rosenbrock_sparse(
