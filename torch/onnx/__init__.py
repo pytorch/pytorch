@@ -103,11 +103,17 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
         export_params (bool, default True): if True, all parameters will
             be exported. Set this to False if you want to export an untrained model.
             In this case, the exported model will first take all of its parameters
-            as arguments, with the ordering as specified by ``model.state_dict().values()``
+            as arguments, with the ordering as specified by ``model.state_dict().values()``.
+            This helps on stripping parameters from the model so that large models could be export
+            succssfully. Besides this, if this is False, no matter the model will be export in
+            inference mode or training mode, the optimization which may adjust graph inputs will
+            be skipped. For example, Conv and BatchNorm fusion.
         verbose (bool, default False): if True, prints a description of the
             model being exported to stdout.
         training (enum, default TrainingMode.EVAL):
-            * ``TrainingMode.EVAL``: export the model in inference mode.
+            * ``TrainingMode.EVAL``: export the model in inference mode. The value of parameter
+              export_params and keep_initializers_as_inputs might disable optimizations which might
+              adjust the graph inputs.
             * ``TrainingMode.PRESERVE``: export the model in inference mode if model.training is
               False and in training mode if model.training is True.
             * ``TrainingMode.TRAINING``: export the model in training mode. Disables optimizations
@@ -264,7 +270,11 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             initializers (typically corresponding to parameters) in the
             exported graph will also be added as inputs to the graph. If False,
             then initializers are not added as inputs to the graph, and only
-            the non-parameter inputs are added as inputs.
+            the non-parameter inputs are added as inputs. In such case, no matter
+            the model will be export in inference mode or training mode, the
+            optimization which might adjust graph inputs will be skipped.
+            For example, fusing Conv and BatchNorm ops.
+
             This may allow for better optimizations (e.g. constant folding) by
             backends/runtimes.
 
