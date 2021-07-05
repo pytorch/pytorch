@@ -7672,7 +7672,7 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and(torch.bool),
                    safe_casts_outputs=True),
     OpInfo('attn',
-           dtypes=floating_types_and(torch.bfloat16),
+           dtypes=floating_types(),
            sample_inputs_func=sample_inputs_attn,
            supports_out=False,
            ),
