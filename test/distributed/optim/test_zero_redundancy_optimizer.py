@@ -692,7 +692,8 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         inputs = [torch.randn(20, 2).to(self.device) for _ in range(NUM_INPUTS + rank)]
         labels = torch.randn(20, 3).to(self.device)
 
-        # Save the gradients and parameters from DDP as ground truth
+        # Save the gradients and parameters from DDP as the ground truth; do
+        # so on the last-joining rank (in this case, the largest rank)
         grads_at_each_iter = []
         params_at_each_iter = []
         with ddp_model.join():
@@ -712,7 +713,8 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                         grads_at_each_iter.append(grads)
                         params_at_each_iter.append(params)
 
-        # Broadcast the gradients and parameters to all ranks
+        # Broadcast the saved gradients and parameters to all of the other
+        # ranks (which joined early)
         grads_and_params = [grads_at_each_iter, params_at_each_iter]
         grads_and_params = _broadcast_object(grads_and_params, src_rank=world_size - 1, group=dist.group.WORLD, device=self.device)
         grads_at_each_iter = grads_and_params[0]
@@ -729,23 +731,29 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                 self.index = 0
                 self.device = device
 
-        def set_grads_join_hook(zero_optim, grads, device):
-            def pre_hook(zero_optim):
-                """Saves information needed for the main hook."""
+        class _SetGradsJoinHook(_JoinHook):
+            def __init__(self, zero_optim, grads, device):
                 zero_optim._join_grad_info = _JoinGradInfo(grads, device)
+                self.zero = zero_optim
+                super().__init__()
 
-            def main_hook(zero_optim):
-                """Sets the gradients manually."""
-                grads = zero_optim._join_grad_info.grads[zero_optim._join_grad_info.index]
-                zero_optim._join_grad_info.index += 1
-                for p, grad in zip(zero_optim._all_params, grads):
-                    p.grad = grad.detach().clone().to(zero_optim._join_grad_info.device)
+            def main_hook(self):
+                grads = self.zero._join_grad_info.grads[self.zero._join_grad_info.index]
+                self.zero._join_grad_info.index += 1
+                for p, grad in zip(self.zero._all_params, grads):
+                    p.grad = grad.detach().clone().to(self.zero._join_grad_info.device)
 
-            return _JoinHook(zero_optim, pre_hook, main_hook, None)
+            @property
+            def device(self):
+                return self.zero._join_grad_info.device
+
+            @property
+            def process_group(self):
+                return dist.group.WORLD
 
         num_grads_after_joining = NUM_EPOCHS * (world_size - rank - 1)
         grads = grads_at_each_iter[-num_grads_after_joining:]
-        set_grads_jh = set_grads_join_hook(zero_optim, grads, self.device)
+        set_grads_jh = _SetGradsJoinHook(zero_optim, grads, self.device)
         zero_jh = zero_optim._join_hook()
         iter = 0
         with _Join([set_grads_jh, zero_jh]):

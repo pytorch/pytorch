@@ -175,6 +175,75 @@ class _DDPSink(Function):
         return (None, None, *grad_outputs)
 
 
+class _DDPJoinHook(_JoinHook):
+    def __init__(self, ddp, divide_by_initial_world_size, enable, throw_on_early_termination):
+        """
+        Sets config variables for internal usage.
+        """
+        assert isinstance(ddp, DistributedDataParallel), \
+            "DDP join hook requires passing in a DistributedDataParallel " \
+            "instance as the state"
+        ddp.logger._set_uneven_input_join()
+        ddp.ddp_uneven_inputs_config = \
+            _DDPUnevenInputsConfig(
+                ddp_join_enabled=enable,
+                ddp_join_divide_by_initial_world_size=divide_by_initial_world_size,
+                ddp_join_throw_on_early_termination=throw_on_early_termination,
+            )
+        self.ddp = ddp
+        super().__init__()
+
+    def main_hook(self):
+        """
+        Shadows the DDP collective communication operations in the forward and
+        backward passes.
+        """
+        ddp = self.ddp
+        # Buckets are rebuilt only once during a training period
+        ddp.reducer._rebuild_buckets()
+
+        # Schedule a broadcast if we are syncing module buffers in the
+        # forward pass
+        ddp._check_and_sync_module_buffers()
+
+        # Check if need to sync in the backward pass
+        work = ddp._check_global_requires_backward_grad_sync(is_joined_rank=True)
+        work.wait()
+        should_sync_backwards = work.result()[0].item() != 0
+        # Forward parameter sync is disabled in the next iteration if we
+        # are skipping gradient sync this iteration, so set
+        # `require_forward_param_sync` accordingly
+        ddp.require_forward_param_sync = should_sync_backwards
+        if not should_sync_backwards:
+            return
+
+        # Schedule one allreduce per gradient bucket to match the backward
+        # pass allreduce
+        ddp._match_all_reduce_for_bwd_pass()
+
+        # Check if we need to allreduce locally unused parameters
+        if ddp.find_unused_parameters:
+            ddp._match_unused_params_allreduce()
+
+        # Rebuilt parametesr are pushed only once during a training period
+        ddp.reducer._push_all_rebuilt_params()
+
+    def post_hook(self, is_last_joiner: bool):
+        """
+        Syncs the final model to ensure that the model is the same across all
+        processes.
+        """
+        self.ddp._sync_final_model(is_last_joiner)
+
+    @property
+    def device(self):
+        return self.ddp.device
+
+    @property
+    def process_group(self):
+        return self.ddp.process_group
+
+
 class DistributedDataParallel(Module):
     r"""Implements distributed data parallelism that is based on
     ``torch.distributed`` package at the module level.
@@ -1147,7 +1216,7 @@ class DistributedDataParallel(Module):
             self._join_hook(
                 divide_by_initial_world_size=divide_by_initial_world_size,
                 enable=enable,
-                throw_on_early_termination=throw_on_early_termination
+                throw_on_early_termination=throw_on_early_termination,
             )
         ]
         return _Join(join_hooks, enable, throw_on_early_termination)
@@ -1163,77 +1232,12 @@ class DistributedDataParallel(Module):
         shadowing the collective communications in the forward and backward
         passes.
         """
-        return _JoinHook(
+        return _DDPJoinHook(
             self,
-            self._ddp_join_pre_hook(divide_by_initial_world_size, enable, throw_on_early_termination),
-            self._ddp_join_main_hook(),
-            self._ddp_join_post_hook(),
+            divide_by_initial_world_size=divide_by_initial_world_size,
+            enable=enable,
+            throw_on_early_termination=throw_on_early_termination
         )
-
-    def _ddp_join_pre_hook(
-        self,
-        divide_by_initial_world_size: bool = True,
-        enable: bool = True,
-        throw_on_early_termination: bool = False,
-    ):
-        r"""
-        Returns the DDP join pre-hook, which sets config variables for internal
-        usage.
-        """
-        def pre_hook(ddp: DistributedDataParallel):
-            ddp.logger._set_uneven_input_join()
-            ddp.ddp_uneven_inputs_config = \
-                _DDPUnevenInputsConfig(
-                    ddp_join_enabled=enable,
-                    ddp_join_divide_by_initial_world_size=divide_by_initial_world_size,
-                    ddp_join_throw_on_early_termination=throw_on_early_termination,
-                )
-        return pre_hook
-
-    def _ddp_join_main_hook(self):
-        r"""
-        Returns the DDP join main hook, which shadows the collective
-        communication operations in the forward and backward passes.
-        """
-        def main_hook(ddp: DistributedDataParallel):
-            # Buckets are rebuilt only once during a training period
-            ddp.reducer._rebuild_buckets()
-
-            # Schedule a broadcast if we are syncing module buffers in the
-            # forward pass
-            ddp._check_and_sync_module_buffers()
-
-            # Check if need to sync in the backward pass
-            work = ddp._check_global_requires_backward_grad_sync(is_joined_rank=True)
-            work.wait()
-            should_sync_backwards = work.result()[0].item() != 0
-            # Forward parameter sync is disabled in the next iteration if we
-            # are skipping gradient sync this iteration, so set
-            # `require_forward_param_sync` accordingly
-            ddp.require_forward_param_sync = should_sync_backwards
-            if not should_sync_backwards:
-                return
-
-            # Schedule one allreduce per gradient bucket to match the backward
-            # pass allreduce
-            ddp._match_all_reduce_for_bwd_pass()
-
-            # Check if we need to allreduce locally unused parameters
-            if ddp.find_unused_parameters:
-                ddp._match_unused_params_allreduce()
-
-            # Rebuilt parametesr are pushed only once during a training period
-            ddp.reducer._push_all_rebuilt_params()
-        return main_hook
-
-    def _ddp_join_post_hook(self):
-        r"""
-        Returns the DDP join post-hook, which syncs the final model to ensure
-        that the model is the same across all processes.
-        """
-        def post_hook(ddp: DistributedDataParallel, is_last_joiner: bool):
-            ddp._sync_final_model(is_last_joiner)
-        return post_hook
 
     def register_comm_hook(self, state: object, hook: callable):
         r"""

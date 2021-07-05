@@ -1,29 +1,55 @@
 import warnings
-from typing import NamedTuple, Any, Callable, List
+from typing import List
+from abc import ABC, abstractmethod
 
 import torch
 import torch.distributed as dist
 
-class _JoinHook(NamedTuple):
+class _JoinHook(ABC):
     r"""
-    This encapsulates the data defining a join hook, which provides three entry
-    points for hooks in the join context manager:
-        ``object`` (Any): This is the object to be passed into the hooks.
-        ``pre_hook`` (object -> None): This hook is called upon entering the
-            join context.
-        ``main_hook`` (object -> None): This hook is called repeatedly while
-            there exists a non-joined process to shadow collective
-            communications in the forward pass, backward pass, and optimizer
-            step.
-        ``post_hook`` (object * bool -> None): This hook is called after all
-            processes have joined. It is passed an additional ``bool`` argument
-            ``is_last_joiner``, which indicates if the rank is one of the last
-            to join.
+    This defines a join hook, which provides two entry points in the join
+    context manager: a main hook, which is called repeatedly while there exists
+    a non-joined process, and a post-hook, which is called once all processes
+    have joined.
+
+    To implement a join hook for the generic join context manager, define a
+    class that inherits from :class:`_JoinHook`, override ``main_hook()`` and
+    ``post_hook()`` as appropriate, and override ``device()`` and
+    ``process_group()`` to provide the device and process group information,
+    respectively, which are needed for the join context manager implementation.
     """
-    object: Any
-    pre_hook: Callable
-    main_hook: Callable
-    post_hook: Callable
+    def main_hook(self):
+        r"""
+        This hook is called repeatedly while there exists a non-joined process
+        to shadow collective communications in the forward pass, backward pass,
+        and optimizer.
+        """
+        ...
+
+    def post_hook(self, is_last_joiner: bool):
+        r"""
+        This hook is called after all processes have joined. It is passed an
+        additional ``bool`` argument ``is_last_joiner``, which indicates if the
+        rank is one of the last to join.
+        """
+        ...
+
+    @property
+    @abstractmethod
+    def device(self):
+        r"""
+        Returns the device from which to perform collective communications
+        needed for the join context manager implementation itself.
+        """
+        ...
+
+    @property
+    @abstractmethod
+    def process_group(self):
+        r"""
+        Returns the process group for join-related collective communications.
+        """
+        ...
 
 class _Join():
     r"""
@@ -41,13 +67,21 @@ class _Join():
         pass.
 
     .. warning::
-        For the ``join_hook.object`` s, the context manager requires that at
-        least one has its ``process_group`` attribute set, that at least one
-        has its ``device`` attribute set, and that all specified process groups
-        are the same. This process group and device information is used for
-        checking for non-joined processes and for notifying processes to
-        terminate if ``throw_on_early_termination`` is enabled, both of which
-        using an all-reduce.
+        If ``throw_on_early_termination`` is enabled, then the context manager
+        additionally requires every non-joined process to participate in an
+        all-reduce before it performs its collective communications in order to
+        check if it should terminate due to detecting uneven inputs. This all-
+        reduce should be of the form ``dist.all_reduce(torch.zeros(1))``; if
+        the result is positive, then the process should terminate.
+
+    .. warning::
+        The context manager requires that all ``process_group`` attributes in
+        the ``_JoinHook`` objects are the same. If there are multiple
+        ``_JoinHook`` objects, then the ``device`` of the first is used. The
+        process group and device information is used for checking for non-
+        joined processes and for notifying processes to terminate if
+        ``throw_on_early_termination`` is eanbled, both of which using an all-
+        reduce.
 
     Arguments:
         join_hooks (List[_JoinHook]): a list of the :class:`_JoinHook` s to
@@ -84,45 +118,26 @@ class _Join():
 
         Raises:
             ValueError
-                If none of the ``join_hook.object`` s have ``process_group``
-                set; if none of the ``join_hook.object`` s have ``device``
-                set; or if there are multiple conflicting ``process_group`` s.
+                If there are multiple conflicting ``process_group`` attributes
+                among the ``_JoinHook`` objects.
 
-        NOTE: If there are multiple devices specified, then the context manager
-        uses the first.
+        NOTE: The context manager uses the first specified device.
         """
         process_group = None
         device = None
         for join_hook in self._join_hooks:
-            if hasattr(join_hook.object, "process_group"):
-                if process_group is None:
-                    process_group = join_hook.object.process_group
-                elif process_group != join_hook.object.process_group:
-                    raise ValueError("Using join context manager with multiple process groups")
-            if hasattr(join_hook.object, "device"):
-                if device is None:
-                    device = join_hook.object.device
-        if process_group is None:
-            raise ValueError(
-                "Using the join context manager without specifying a process "
-                "group; make sure that at least one ``join_hook.object`` has "
-                "its ``process_group`` attribute set"
-            )
-        if device is None:
-            raise ValueError(
-                "Using the join context manager without specifying a device; "
-                "make sure that at least one ``join_hook.object`` has its "
-                "``device`` attribute set"
-            )
+            if process_group is None:
+                process_group = join_hook.process_group
+            elif process_group != join_hook.process_group:
+                raise ValueError("Using join context manager with multiple process groups")
+            if device is None:
+                device = join_hook.device
         self._process_group = process_group
         self._rank = dist.get_rank(self._process_group)
         self._device = device
 
     def __enter__(self):
-        """Runs the pre-hooks."""
-        for join_hook in self._join_hooks:
-            if join_hook.pre_hook is not None:
-                join_hook.pre_hook(join_hook.object)
+        ...
 
     def __exit__(self, type, value, traceback):
         r"""
@@ -163,16 +178,14 @@ class _Join():
 
                 # Run main hooks
                 for join_hook in self._join_hooks:
-                    if join_hook.main_hook is not None:
-                        join_hook.main_hook(join_hook.object)
+                    join_hook.main_hook()
 
                 is_last_joiner = False
                 i += 1
 
         # Run post-hooks
         for join_hook in self._join_hooks:
-            if join_hook.post_hook is not None:
-                join_hook.post_hook(join_hook.object, is_last_joiner)
+            join_hook.post_hook(is_last_joiner)
 
     def _get_num_nonjoined_procs(self):
         r"""
