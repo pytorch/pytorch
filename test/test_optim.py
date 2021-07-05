@@ -457,7 +457,8 @@ class TestOptim(TestCase):
             "exp_avg_sqs" : [torch.zeros_like(model[0], memory_format=torch.preserve_format)],
             "max_exp_avg_sqs" : [torch.zeros_like(model[0], memory_format=torch.preserve_format)],
             "square_avg" : [torch.zeros_like(model[0], memory_format=torch.preserve_format)],
-            "acc_delta" : [torch.zeros_like(model[0], memory_format=torch.preserve_format)]
+            "acc_delta" : [torch.zeros_like(model[0], memory_format=torch.preserve_format)],
+            "sums" : [torch.zeros_like(model[0], memory_format=torch.preserve_format)]
         }
 
         def inner_loop(model):
@@ -477,7 +478,8 @@ class TestOptim(TestCase):
             "exp_avg_sqs" : [torch.zeros_like(model[0], memory_format=torch.preserve_format)],
             "max_exp_avg_sqs" : [torch.zeros_like(model[0], memory_format=torch.preserve_format)],
             "square_avg" : [torch.zeros_like(model[0], memory_format=torch.preserve_format)],
-            "acc_delta" : [torch.zeros_like(model[0], memory_format=torch.preserve_format)]
+            "acc_delta" : [torch.zeros_like(model[0], memory_format=torch.preserve_format)],
+            "sums" : [torch.zeros_like(model[0], memory_format=torch.preserve_format)]
         }
 
         def inner_loop(model):
@@ -501,6 +503,9 @@ class TestOptim(TestCase):
         if opt == differentiable.adadelta:
             differentiable.adadelta(model, step, states["square_avg"], states["acc_delta"], lr=0.5, weight_decay=0.1,
                                     rho=0.6, eps=0.001)
+        if opt == differentiable.adagrad:
+            differentiable.adagrad(model, step, states["sums"], [epoch + 1], lr=0.5, weight_decay=0.1, lr_decay=0.6,
+                                   eps=0.001)
 
     def _call_functional_optimizer(self, opt, model, step, states, epoch):
         if opt == functional.sgd:
@@ -514,6 +519,9 @@ class TestOptim(TestCase):
         if opt == functional.adadelta:
             functional.adadelta(model, step, states["square_avg"], states["acc_delta"], lr=0.5, weight_decay=0.1,
                                 rho=0.6, eps=0.001)
+        if opt == functional.adagrad:
+            functional.adagrad(model, step, states["sums"], [epoch + 1], lr=0.5, weight_decay=0.1, lr_decay=0.6,
+                               eps=0.001)
 
     def test_differentiable_sgd(self):
         model = [torch.randn(1, 2, dtype=torch.double, requires_grad=True)]
@@ -550,6 +558,15 @@ class TestOptim(TestCase):
         model = [torch.randn(1, 2, dtype=torch.double, requires_grad=True)]
         with self.assertRaisesRegex(RuntimeError, "Output 0 of UnbindBackward is a view and is being modified inplace"):
             self._inner_loop_functional_optimizers(functional.adadelta, model)
+
+    def test_differentiable_adagrad(self):
+        model = [torch.randn(1, 2, dtype=torch.double, requires_grad=True)]
+        self._inner_loop_differentiable_optimizers(differentiable.adagrad, model)
+
+    def test_differentiability_functional_adagrad(self):
+        model = [torch.randn(1, 2, dtype=torch.double, requires_grad=True)]
+        with self.assertRaisesRegex(RuntimeError, "Output 0 of UnbindBackward is a view and is being modified inplace"):
+            self._inner_loop_functional_optimizers(functional.adagrad, model)
 
     def test_sparse_adam(self):
         self._test_rosenbrock_sparse(
