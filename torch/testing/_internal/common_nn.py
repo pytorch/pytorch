@@ -1248,6 +1248,7 @@ def fractional_max_pool3d_test(test_case):
             fullname='FractionalMaxPool3d_asymsize')
 
 def single_batch_reference_fn(ref_input, parameters, ref_module):
+    """Reference function for module supporting no batch dimensions."""
     single_batch_input = ref_input.unsqueeze(0)
     with freeze_rng_state():
         return ref_module(single_batch_input).squeeze(0)
