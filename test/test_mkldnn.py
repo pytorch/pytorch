@@ -993,7 +993,7 @@ class TestMkldnn(TestCase):
                 loaded(*inputs).to_dense())
 
     def _test_tracing(self, module, inputs):
-        traced = torch.jit.trace(module, inputs, check_trace=False)
+        traced = torch.jit.trace(module, inputs)
         self.assertEqual(
             module(*inputs).to_dense(),
             traced(*inputs).to_dense())
