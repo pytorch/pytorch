@@ -513,10 +513,12 @@ def _model_to_graph(model, args, verbose=False,
             if input_name not in params_names:
                 origin_input_names.append(input_name)
 
+    allow_adjust_graph_inputs = (export_params and not keep_initializers_as_inputs)
     if (training is None or training == TrainingMode.EVAL):
-        params_dict = torch._C._jit_pass_onnx_eval_peephole(graph, params_dict, (export_params and not keep_initializers_as_inputs))
+        params_dict = torch._C._jit_pass_onnx_eval_peephole(graph, params_dict, allow_adjust_graph_inputs)
 
-    if do_constant_folding and _export_onnx_opset_version in torch.onnx.constant_folding_opset_versions:
+    if do_constant_folding and allow_adjust_graph_inputs and \
+            _export_onnx_opset_version in torch.onnx.constant_folding_opset_versions:
         params_dict = torch._C._jit_pass_onnx_constant_fold(graph, params_dict,
                                                             _export_onnx_opset_version)
         torch._C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
