@@ -3,6 +3,7 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <ATen/native/Pow.h>
 
 namespace at { namespace native {
@@ -76,24 +77,56 @@ static inline __host__ __device__ B complex_pow_(B base, E exp) {
 }
 #endif
 
+/*template<typename scalar_t, typename func_t>
+__inline__ void dispatch_scalar_base_pow(TensorIterator iter, func_t f){
+  auto b = iter.scalar_value<scalar_t>(1);
+  iter.remove_operand(1);
+  const cuda::OptionalCUDAGuard device_guard(device_of(iter.tensor(1)));
+  gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t exp) -> scalar_t {return f(b, exp);});
+}*/
+
 void pow_tensor_tensor_kernel(TensorIteratorBase& iter) {
+  //we can never come here if exp is cpu scalar, hence no need for full gpu_kernel_with_scalars
+  //at worst, base can be a cpu scalar
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!iter.is_cpu_scalar(2));
   if (isComplexType(iter.common_dtype())) {
     AT_DISPATCH_COMPLEX_TYPES(iter.common_dtype(), "pow_cuda", [&]() {
-      gpu_kernel_with_scalars(iter, [=]GPU_LAMBDA(scalar_t base, scalar_t exp) -> scalar_t {
+      if (iter.is_cpu_scalar(1)){
+        auto b = iter.scalar_value<scalar_t>(1);
+        iter.remove_operand(1);
+        const cuda::OptionalCUDAGuard device_guard(device_of(iter.tensor(1)));
+        gpu_kernel(iter, [b]GPU_LAMBDA(scalar_t exp) -> scalar_t {return complex_pow_(b, exp);});
+      } else {
+        gpu_kernel(iter, []GPU_LAMBDA(scalar_t base, scalar_t exp) -> scalar_t {
         return complex_pow_(base, exp);
       });
+      }
     });
   } else if (isFloatingType(iter.common_dtype())) {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "pow_cuda", [&]() {
-      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t base, scalar_t exp) -> scalar_t {
-        return pow_(base, exp);
+      if (iter.is_cpu_scalar(1)){
+        auto b = iter.scalar_value<scalar_t>(1);
+        iter.remove_operand(1);
+        const cuda::OptionalCUDAGuard device_guard(device_of(iter.tensor(1)));
+        gpu_kernel(iter, [b]GPU_LAMBDA(scalar_t exp) -> scalar_t {return pow_(b, exp);});
+      } else {
+        gpu_kernel(iter, []GPU_LAMBDA(scalar_t base, scalar_t exp) -> scalar_t {
+          return pow_(base, exp);
       });
+      }
     });
   } else {
     AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "pow_cuda", [&]() {
-      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t base, scalar_t exp) -> scalar_t {
+      if (iter.is_cpu_scalar(1)){
+        auto b = iter.scalar_value<scalar_t>(1);
+        iter.remove_operand(1);
+        const cuda::OptionalCUDAGuard device_guard(device_of(iter.tensor(1)));
+        gpu_kernel(iter, [b]GPU_LAMBDA(scalar_t exp) -> scalar_t {return native::powi(b, exp);});
+      } else {
+        gpu_kernel(iter, []GPU_LAMBDA(scalar_t base, scalar_t exp) -> scalar_t {
         return native::powi(base, exp);
       });
+      }
     });
   }
 }
@@ -103,9 +136,20 @@ template<typename Base_type, typename Exp_type>
 void pow_tensor_scalar_kernel_impl(TensorIteratorBase& iter,
                                                  Exp_type exp) {
   const auto d_exp = static_cast<double>(exp);
+  gpu_kernel(iter, [=]GPU_LAMBDA(Base_type base) ->Base_type {
+    if (d_exp == 2) {
+      return base * base;
+    } else if (d_exp == 3) {
+      return base * base * base;
+    } else if (d_exp == -2) {
+      return 1.0 / (base * base);
+    } else {
+      return pow_(base, exp);
+    }
+  });
   // .5 (sqrt), -.5 (rsqrt) and -1 (reciprocal) specializations are handled
   // in pow_tensor_scalar_kernel
-  if (d_exp == 2) {
+  /*if (d_exp == 2) {
     gpu_kernel(iter, [=]GPU_LAMBDA(Base_type base) -> Base_type {
       return base * base;
     });
@@ -121,7 +165,7 @@ void pow_tensor_scalar_kernel_impl(TensorIteratorBase& iter,
     gpu_kernel(iter, [=]GPU_LAMBDA(Base_type base) -> Base_type {
       return pow_(base, exp);
     });
-  }
+  }*/
 }
 
 void pow_tensor_scalar_kernel(TensorIteratorBase& iter, const Scalar& exp_scalar) {
@@ -148,10 +192,11 @@ void pow_tensor_scalar_kernel(TensorIteratorBase& iter, const Scalar& exp_scalar
       pow_tensor_scalar_kernel_impl<scalar_t>(iter, exp);
     });
   } else {
-    const auto exp = exp_scalar.to<float>();
+    TORCH_INTERNAL_ASSERT(false, "should not come here", iter.common_dtype(), exp_scalar.isIntegral(false));
+  /*  const auto exp = exp_scalar.to<float>();
     AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "pow_cuda", [&]() {
       pow_tensor_scalar_kernel_impl<scalar_t>(iter, exp);
-    });
+    });*/
   }
 }
 
