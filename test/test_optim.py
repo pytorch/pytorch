@@ -516,6 +516,9 @@ class TestOptim(TestCase):
         if opt == differentiable.radam:
             differentiable.radam(model, step, states["exp_avgs"], states["exp_avg_sqs"],
                                  [epoch + 1], beta1=0.99, beta2=0.99, lr=0.5, weight_decay=0., eps=0.001)
+        if opt == differentiable.nadam:
+            differentiable.nadam(model, step, states["exp_avgs"], states["exp_avg_sqs"], [1.],
+                                 [epoch + 1], beta1=0.99, beta2=0.99, lr=0.5, weight_decay=0., momentum_decay=0.1, eps=0.001)
 
     def _call_functional_optimizer(self, opt, model, step, states, epoch):
         if opt == functional.sgd:
@@ -538,6 +541,9 @@ class TestOptim(TestCase):
         if opt == functional.radam:
             functional.radam(model, step, states["exp_avgs"], states["exp_avg_sqs"],
                              [epoch + 1], beta1=0.99, beta2=0.99, lr=0.5, weight_decay=0., eps=0.001)
+        if opt == functional.nadam:
+            functional.nadam(model, step, states["exp_avgs"], states["exp_avg_sqs"], [1.],
+                             [epoch + 1], beta1=0.99, beta2=0.99, lr=0.5, weight_decay=0., momentum_decay=0.1, eps=0.001)
 
     def test_differentiable_sgd(self):
         model = [torch.randn(1, 2, dtype=torch.double, requires_grad=True)]
@@ -601,6 +607,15 @@ class TestOptim(TestCase):
         model = [torch.randn(1, 2, dtype=torch.double, requires_grad=True)]
         with self.assertRaisesRegex(RuntimeError, "Output 0 of UnbindBackward is a view and is being modified inplace"):
             self._inner_loop_functional_optimizers(functional.radam, model)
+
+    def test_differentiable_nadam(self):
+        model = [torch.randn(1, 2, dtype=torch.double, requires_grad=True)]
+        self._inner_loop_differentiable_optimizers(differentiable.nadam, model)
+
+    def test_differentiability_functional_nadam(self):
+        model = [torch.randn(1, 2, dtype=torch.double, requires_grad=True)]
+        with self.assertRaisesRegex(RuntimeError, "Output 0 of UnbindBackward is a view and is being modified inplace"):
+            self._inner_loop_functional_optimizers(functional.nadam, model)
 
     def test_sparse_adam(self):
         self._test_rosenbrock_sparse(
