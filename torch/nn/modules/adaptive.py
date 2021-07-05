@@ -167,6 +167,14 @@ class AdaptiveLogSoftmaxWithLoss(Module):
             h2o.reset_parameters()
 
     def forward(self, input: Tensor, target: Tensor) -> _ASMoutput:
+        have_batch_dim = input.size(0) != self.in_features
+        if not have_batch_dim:
+            if target.dim() != 0:
+                raise RuntimeError('Target must be a scalar when there is no '
+                                   'batch dimension')
+            input = input.unsqueeze(0)
+            target = target.unsqueeze(0)
+
         if input.size(0) != target.size(0):
             raise RuntimeError('Input and target should have the same size '
                                'in the batch dimension.')
