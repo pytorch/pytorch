@@ -87,3 +87,52 @@ def adam(params: List[Tensor],
         step_size = lr / bias_correction1
 
         params[i] = params[i] - step_size * exp_avg / denom
+
+
+def adamw(params: List[Tensor],
+          grads: List[Tensor],
+          exp_avgs: List[Tensor],
+          exp_avg_sqs: List[Tensor],
+          max_exp_avg_sqs: List[Tensor],
+          state_steps: List[int],
+          *,
+          amsgrad: bool,
+          beta1: float,
+          beta2: float,
+          lr: float,
+          weight_decay: float,
+          eps: float):
+    r"""Differentiable Functional API that performs AdamW algorithm computation.
+
+    See :class:`~torch.optim.AdamW` for details.
+    """
+
+    for i, param in enumerate(params):
+
+        grad = grads[i]
+        exp_avg = exp_avgs[i]
+        exp_avg_sq = exp_avg_sqs[i]
+        step = state_steps[i]
+
+        params[i] = params[i] * (1 - lr * weight_decay)
+
+        bias_correction1 = 1 - beta1 ** step
+        bias_correction2 = 1 - beta2 ** step
+
+        if weight_decay != 0:
+            grad = grad.add(param, alpha=weight_decay)
+
+        # Decay the first and second moment running average coefficient
+        exp_avg = exp_avg * beta1 + (1 - beta1) * grad
+        exp_avg_sq = exp_avg_sq * beta2 + (1 - beta2) * grad * grad
+        if amsgrad:
+            # Maintains the maximum of all 2nd moment running avg. till now
+            torch.maximum(max_exp_avg_sqs[i], exp_avg_sq, out=max_exp_avg_sqs[i])
+            # Use the max. for normalizing running avg. of gradient
+            denom = (max_exp_avg_sqs[i].sqrt() / math.sqrt(bias_correction2)).add_(eps)
+        else:
+            denom = (exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(eps)
+
+        step_size = lr / bias_correction1
+
+        params[i] = params[i] - step_size * exp_avg / denom
