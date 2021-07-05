@@ -1010,6 +1010,12 @@ cov(*, correction=1, fweights=None, aweights=None) -> Tensor
 See :func:`torch.cov`
 """)
 
+add_docstr_all('corrcoef', r"""
+corrcoef() -> Tensor
+
+See :func:`torch.corrcoef`
+""")
+
 add_docstr_all('cross',
                r"""
 cross(other, dim=-1) -> Tensor

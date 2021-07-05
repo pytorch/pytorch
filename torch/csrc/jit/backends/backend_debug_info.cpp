@@ -11,6 +11,7 @@ static auto cls = torch::class_<PyTorchBackendDebugInfoDummy>(
                       kBackendDebugInfoClass)
                       .def(torch::init<>());
 #else
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto cls = torch::class_<PyTorchBackendDebugInfo>(
                       kBackendUtilsNamespace,
                       kBackendDebugInfoClass)
