@@ -513,6 +513,9 @@ class TestOptim(TestCase):
         if opt == differentiable.rmsprop:
             differentiable.rmsprop(model, step, states["square_avg"], states["grad_avgs"], states["momentum_buffer_list"],
                                    lr=0.5, alpha=0.5, eps=0.001, weight_decay=0.1, momentum=0.1, centered=True)
+        if opt == differentiable.radam:
+            differentiable.radam(model, step, states["exp_avgs"], states["exp_avg_sqs"],
+                                 [epoch + 1], beta1=0.99, beta2=0.99, lr=0.5, weight_decay=0., eps=0.001)
 
     def _call_functional_optimizer(self, opt, model, step, states, epoch):
         if opt == functional.sgd:
@@ -532,6 +535,9 @@ class TestOptim(TestCase):
         if opt == functional.rmsprop:
             functional.rmsprop(model, step, states["square_avg"], states["grad_avgs"], states["momentum_buffer_list"],
                                lr=0.5, alpha=0.5, eps=0.001, weight_decay=0.1, momentum=0.1, centered=True)
+        if opt == functional.radam:
+            functional.radam(model, step, states["exp_avgs"], states["exp_avg_sqs"],
+                             [epoch + 1], beta1=0.99, beta2=0.99, lr=0.5, weight_decay=0., eps=0.001)
 
     def test_differentiable_sgd(self):
         model = [torch.randn(1, 2, dtype=torch.double, requires_grad=True)]
@@ -586,6 +592,15 @@ class TestOptim(TestCase):
         model = [torch.randn(1, 2, dtype=torch.double, requires_grad=True)]
         with self.assertRaisesRegex(RuntimeError, "Output 0 of UnbindBackward is a view and is being modified inplace"):
             self._inner_loop_functional_optimizers(functional.rmsprop, model)
+
+    def test_differentiable_radam(self):
+        model = [torch.randn(1, 2, dtype=torch.double, requires_grad=True)]
+        self._inner_loop_differentiable_optimizers(differentiable.radam, model)
+
+    def test_differentiability_functional_radam(self):
+        model = [torch.randn(1, 2, dtype=torch.double, requires_grad=True)]
+        with self.assertRaisesRegex(RuntimeError, "Output 0 of UnbindBackward is a view and is being modified inplace"):
+            self._inner_loop_functional_optimizers(functional.radam, model)
 
     def test_sparse_adam(self):
         self._test_rosenbrock_sparse(
