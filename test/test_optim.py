@@ -452,35 +452,52 @@ class TestOptim(TestCase):
                 optimizer(None, lr=1e-2, weight_decay=-1)
 
     def _inner_loop_differentiable_optimizers(self, opt, model):
+        states = {
+            "exp_avgs" : [torch.zeros_like(model[0], memory_format=torch.preserve_format)],
+            "exp_avg_sqs" : [torch.zeros_like(model[0], memory_format=torch.preserve_format)],
+            "max_exp_avg_sqs" : [torch.zeros_like(model[0], memory_format=torch.preserve_format)]
+        }
+
         def inner_loop(model):
             initial_loss = model[0].exp().sum()
             for epoch in range(10):
                 loss = model[0].exp().sum()
                 step, = autograd.grad(loss, model, create_graph=True)
-                self._call_differentiable_optimizer(opt, model, step)
+                self._call_differentiable_optimizer(opt, model, step, states, epoch)
 
             self.assertLessEqual(model[0].exp().sum(), initial_loss)
             return model[0].sum()
         torch.autograd.gradcheck(lambda inp: inner_loop(inp.clone()), model[0])
 
     def _inner_loop_functional_optimizers(self, opt, model):
+        states = {
+            "exp_avgs" : [torch.zeros_like(model[0], memory_format=torch.preserve_format)],
+            "exp_avg_sqs" : [torch.zeros_like(model[0], memory_format=torch.preserve_format)],
+            "max_exp_avg_sqs" : [torch.zeros_like(model[0], memory_format=torch.preserve_format)]
+        }
+
         def inner_loop(model):
             initial_loss = model[0].exp().sum()
             for epoch in range(10):
                 loss = model[0].exp().sum()
                 step, = autograd.grad(loss, model, create_graph=True)
-                self._call_functional_optimizer(opt, model, step)
-
+                self._call_functional_optimizer(opt, model, step, states, epoch)
             return model[0].sum()
         torch.autograd.gradcheck(lambda inp: inner_loop(inp.clone()), model[0])
 
-    def _call_differentiable_optimizer(self, opt, model, step):
+    def _call_differentiable_optimizer(self, opt, model, step, states, epoch):
         if opt == differentiable.sgd:
             differentiable.sgd(model, step, [None], momentum=0.1, lr=0.5, nesterov=True, dampening=0.1, weight_decay=0.1)
+        if opt == differentiable.adam:
+            differentiable.adam(model, step, states["exp_avgs"], states["exp_avg_sqs"], states["max_exp_avg_sqs"],
+                                [epoch + 1], amsgrad=False, beta1=0.99, beta2=0.99, lr=0.5, weight_decay=0., eps=0.001)
 
-    def _call_functional_optimizer(self, opt, model, step):
+    def _call_functional_optimizer(self, opt, model, step, states, epoch):
         if opt == functional.sgd:
             functional.sgd(model, step, [None], momentum=0.1, lr=0.5, nesterov=True, dampening=0.1, weight_decay=0.1)
+        if opt == functional.adam:
+            functional.adam(model, step, states["exp_avgs"], states["exp_avg_sqs"], states["max_exp_avg_sqs"],
+                            [epoch + 1], amsgrad=False, beta1=0.99, beta2=0.99, lr=0.5, weight_decay=0., eps=0.001)
 
     def test_differentiable_sgd(self):
         model = [torch.randn(1, 2, dtype=torch.double, requires_grad=True)]
@@ -490,6 +507,15 @@ class TestOptim(TestCase):
         model = [torch.randn(1, 2, dtype=torch.double, requires_grad=True)]
         with self.assertRaisesRegex(RuntimeError, "Output 0 of UnbindBackward is a view and is being modified inplace"):
             self._inner_loop_functional_optimizers(functional.sgd, model)
+
+    def test_differentiable_adam(self):
+        model = [torch.randn(1, 2, dtype=torch.double, requires_grad=True)]
+        self._inner_loop_differentiable_optimizers(differentiable.adam, model)
+
+    def test_differentiability_functional_adam(self):
+        model = [torch.randn(1, 2, dtype=torch.double, requires_grad=True)]
+        with self.assertRaisesRegex(RuntimeError, "Output 0 of UnbindBackward is a view and is being modified inplace"):
+            self._inner_loop_functional_optimizers(functional.adam, model)
 
     def test_sparse_adam(self):
         self._test_rosenbrock_sparse(
