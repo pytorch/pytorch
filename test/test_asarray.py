@@ -292,6 +292,7 @@ class TestAsArray(common.TestCase):
             if dtype != other:
                 check(same_dtype=False, dtype=other)
                 check(same_dtype=False, dtype=other, copy=True)
+
     @skipMeta
     @dtypes(*get_all_dtypes())
     def test_alias_from_dlpack(self, device, dtype):
@@ -415,7 +416,7 @@ class TestAsArray(common.TestCase):
                     torch.asarray(original, dtype=other_dtype)
 
         with self.assertRaisesRegex(ValueError,
-                                    f"can't alias arbitrary sequence"):
+                                    "can't alias arbitrary sequence"):
             torch.asarray(original.tolist(), copy=False)
 
 instantiate_device_type_tests(TestBufferProtocol, globals())
