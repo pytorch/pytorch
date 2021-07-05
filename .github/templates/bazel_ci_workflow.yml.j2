@@ -97,36 +97,14 @@ jobs:
           export IMAGE_NAME=${DOCKER_IMAGE_BASE#308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/}
           cd .circleci/docker && ./build_docker.sh
 
-  generate-test-matrix:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: ubuntu-18.04
-    env:
-      NUM_TEST_SHARDS: !{{ num_test_shards }}
-    outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
-    container:
-      image: python:3.9
-    steps:
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
-      - name: Generating test matrix
-        id: set-matrix
-        run: |
-          # outputting for debugging purposes
-          MATRIX=$(python .github/scripts/generate_pytorch_test_matrix.py)
-          echo "${MATRIX}"
-          echo "::set-output name=matrix::${MATRIX}"
-
   build-and-test:
     runs-on: !{{ test_runner_type }}
     needs:
       - calculate-docker-image
-      - generate-test-matrix
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
       JOB_BASE_NAME: !{{ build_environment }}-build-and-test
       NUM_TEST_SHARDS: !{{ num_test_shards }}
-      TEST_CONFIG: ${{ matrix.test_config }}
     steps:
       - name: Log in to ECR
         run: |
@@ -200,11 +178,7 @@ jobs:
           python3 .circleci/scripts/upload_binary_size_to_scuba.py || exit 0
       - name: Test PyTorch
         run: |
-          if [[ $NUM_TEST_SHARDS -eq 2 ]]; then
-            export SHARD_NUMBER=$TEST_CONFIG
-          else
-            export SHARD_NUMBER=0
-          fi
+          export SHARD_NUMBER=0
           # TODO: Stop building test binaries as part of the build phase
           # Used for GPU_FLAG since that doesn't play nice
           # shellcheck disable=SC2086
@@ -227,7 +201,7 @@ jobs:
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}" \
-            sh -c 'sudo chown -R jenkins . && sudo chown -R jenkins /dev && .jenkins/pytorch/test.sh && cp -Lr ./bazel-testlogs ./testlogs'
+            sh -c 'sudo chown -R jenkins . && sudo chown -R jenkins /dev && .jenkins/pytorch/test.sh && cp -Lr ./bazel-testlogs ./test/test-reports'
       - name: Chown workspace
         if: always()
         run: |
@@ -236,13 +210,10 @@ jobs:
       - name: Zip test reports for upload
         if: always()
         run: |
-          find ${GITHUB_WORKSPACE} -type l -iname "bazel-testlogs" -ls
-          find ${GITHUB_WORKSPACE} -type d -iname "testlogs" -ls
-          ls ./testlogs
-          find ./testlogs -type f -iname "*.xml"
+          find ./test -type f -iname "*.xml"
           # Remove any previous test reports if they exist
           rm -f test-reports-*.zip
-          zip -r "test-reports-${TEST_CONFIG}.zip" testlogs -i '*.xml'
+          zip -r "test-reports-1.zip" test -i '*.xml'
       - uses: actions/upload-artifact@v2
         name: Store PyTorch Test Reports
         if: always()
