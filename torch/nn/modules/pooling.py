@@ -573,8 +573,8 @@ class AvgPool2d(_AvgPoolNd):
         divisor_override: if specified, it will be used as divisor, otherwise :attr:`kernel_size` will be used
 
     Shape:
-        - Input: :math:`(N, C, H_{in}, W_{in})`
-        - Output: :math:`(N, C, H_{out}, W_{out})`, where
+        - Input: :math:`(*, C, H_{in}, W_{in})`, where :math:`*` is 1 dimension or none.
+        - Output: :math:`(*, C, H_{out}, W_{out})`, where
 
           .. math::
               H_{out} = \left\lfloor\frac{H_{in}  + 2 \times \text{padding}[0] -
@@ -1109,6 +1109,10 @@ class AdaptiveAvgPool2d(_AdaptiveAvgPoolNd):
                      Can be a tuple (H, W) or a single H for a square image H x H.
                      H and W can be either a ``int``, or ``None`` which means the size will
                      be the same as that of the input.
+
+    Shape:
+        - Input: :math:`(*, C, H_{in}, W_{in})`, where :math:`*` is 1 dimension or none.
+        - Output: :math:`(*, C, \text{output_size}_0, \text{output_size}_1)`.
 
     Examples:
         >>> # target output size of 5x7

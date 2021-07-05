@@ -1248,6 +1248,12 @@ def fractional_max_pool3d_test(test_case):
             fullname='FractionalMaxPool3d_asymsize')
 
 
+def single_batch_reference_fn(ref_input, parameters, ref_module):
+    """Reference function for module supporting no batch dimensions."""
+    single_batch_input = ref_input.unsqueeze(0)
+    with freeze_rng_state():
+        return ref_module(single_batch_input).squeeze(0)
+
 new_module_tests = [
     poissonnllloss_no_reduce_test(),
     bceloss_no_reduce_test(),
@@ -2103,6 +2109,13 @@ new_module_tests = [
         constructor_args=((2, 2),),
         cpp_constructor_args='torch::nn::AvgPool2dOptions({2, 2})',
         input_size=(2, 3, 6, 6),
+    ),
+    dict(
+        module_name='AvgPool2d',
+        constructor_args=((2, 2),),
+        cpp_constructor_args='torch::nn::AvgPool2dOptions({2, 2})',
+        input_size=(3, 6, 6),
+        reference_fn=single_batch_reference_fn,
     ),
     dict(
         module_name='AvgPool2d',
@@ -3135,6 +3148,14 @@ new_module_tests = [
     ),
     dict(
         module_name='AdaptiveMaxPool2d',
+        constructor_args=(3,),
+        cpp_constructor_args='torch::nn::AdaptiveMaxPool2dOptions(3)',
+        input_fn=lambda: _rand_tensor_non_equal(3, 5, 6),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
+    ),
+    dict(
+        module_name='AdaptiveMaxPool2d',
         constructor_args=((3, 4),),
         cpp_constructor_args='torch::nn::AdaptiveMaxPool2dOptions({3, 4})',
         input_fn=lambda: _rand_tensor_non_equal(1, 3, 5, 6),
@@ -3201,6 +3222,14 @@ new_module_tests = [
         cpp_constructor_args='torch::nn::AdaptiveAvgPool2dOptions(3)',
         input_fn=lambda: torch.rand(1, 3, 5, 6),
         desc='single',
+    ),
+    dict(
+        module_name='AdaptiveAvgPool2d',
+        constructor_args=(3,),
+        cpp_constructor_args='torch::nn::AdaptiveAvgPool2dOptions(3)',
+        input_fn=lambda: torch.rand(3, 5, 6),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
     ),
     dict(
         module_name='AdaptiveAvgPool2d',
