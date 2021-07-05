@@ -64,17 +64,19 @@ class TORCH_CUDA_CPP_API CuSparseDnMatDescriptor
     : public CuSparseDescriptor<cusparseDnMatDescr, &cusparseDestroyDnMat> {
  public:
   CuSparseDnMatDescriptor(const Tensor& input) {
-    auto rows = input.size(-2);
-    auto cols = input.size(-1);
+    IntArrayRef input_strides = input.strides();
+    IntArrayRef input_sizes = input.sizes();
+    auto ndim = input.dim();
+    auto rows = input_sizes[ndim - 2];
+    auto cols = input_sizes[ndim - 1];
 
-    bool is_column_major = input.transpose(-2, -1).is_contiguous();
-    bool is_row_major = input.is_contiguous();
+    bool is_column_major = at::native::is_blas_compatible_column_major_order(input);
+    bool is_row_major = at::native::is_blas_compatible_row_major_order(input);
     TORCH_INTERNAL_ASSERT(
         is_column_major || is_row_major,
         "Expected either row or column major contiguous input.");
 
-    auto leading_dimension =
-        is_column_major ? input.stride(-1) : input.stride(-2);
+    auto leading_dimension = is_column_major ? input_strides[ndim - 1] : input_strides[ndim - 2];
     auto order = is_column_major ? CUSPARSE_ORDER_COL : CUSPARSE_ORDER_ROW;
 
     void* values_ptr = input.data_ptr();
@@ -91,10 +93,12 @@ class TORCH_CUDA_CPP_API CuSparseDnMatDescriptor
         value_type,
         order));
 
-    auto batch_count = at::native::cuda_int_cast(at::native::batchCount(input), "batch_count");
-    auto batch_stride = rows * leading_dimension;
-    TORCH_CUDASPARSE_CHECK(cusparseDnMatSetStridedBatch(
-        raw_descriptor, batch_count, batch_stride));
+    if (ndim > 2) {
+      auto batch_count = at::native::cuda_int_cast(at::native::batchCount(input), "batch_count");
+      auto batch_stride = input_strides[ndim - 3]; // is_column_major ? cols * leading_dimension : rows * leading_dimension;
+      TORCH_CUDASPARSE_CHECK(cusparseDnMatSetStridedBatch(
+          raw_descriptor, batch_count, batch_stride));
+    }
 
     descriptor_.reset(raw_descriptor);
   }
@@ -110,8 +114,10 @@ class TORCH_CUDA_CPP_API CuSparseSpMatCsrDescriptor
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.is_sparse_csr());
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.dim() >= 2);
 
-    auto rows = input.size(-2);
-    auto cols = input.size(-1);
+    IntArrayRef input_sizes = input.sizes();
+    auto ndim = input.dim();
+    auto rows = input_sizes[ndim - 2];
+    auto cols = input_sizes[ndim - 1];
     auto nnz = input._nnz();
 
     auto crow_indices = input.crow_indices();
@@ -131,10 +137,8 @@ class TORCH_CUDA_CPP_API CuSparseSpMatCsrDescriptor
         rows,
         cols,
         nnz,
-        crow_indices
-            .data_ptr(), // row offsets of the sparse matrix, size = rows + 1
-        col_indices
-            .data_ptr(), // column indices of the sparse matrix, size = nnz
+        crow_indices.data_ptr(), // row offsets of the sparse matrix, size = rows + 1
+        col_indices.data_ptr(), // column indices of the sparse matrix, size = nnz
         values.data_ptr(), // values of the sparse matrix, size = nnz
         index_type, // data type of row offsets index
         index_type, // data type of col indices
@@ -142,14 +146,14 @@ class TORCH_CUDA_CPP_API CuSparseSpMatCsrDescriptor
         value_type // data type of values
         ));
 
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(at::native::batchCount(input) == at::native::batchCount(values));
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        at::native::batchCount(input) == at::native::batchCount(crow_indices));
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        at::native::batchCount(input) == at::native::batchCount(col_indices));
-
-    auto batch_count = at::native::cuda_int_cast(at::native::batchCount(input), "batch_count");
-    if (batch_count > 1) {
+    if (ndim > 2) {
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+          at::native::batchCount(input) == at::native::batchCount(values));
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+          at::native::batchCount(input) == at::native::batchCount(crow_indices));
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+          at::native::batchCount(input) == at::native::batchCount(col_indices));
+      auto batch_count = at::native::cuda_int_cast(at::native::batchCount(input), "batch_count");
       auto crow_indices_batch_stride = crow_indices.stride(-2);
       auto columns_values_batch_stride = values.stride(-2);
       TORCH_CUDASPARSE_CHECK(cusparseCsrSetStridedBatch(
@@ -177,8 +181,10 @@ class TORCH_CUDA_CPP_API CuSparseSpMatCooDescriptor
     // with shape (batch_shape, nnz)
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.dim() == 2);
 
-    auto rows = input.size(-2);
-    auto cols = input.size(-1);
+    IntArrayRef input_sizes = input.sizes();
+    auto ndim = input.dim();
+    auto rows = input_sizes[ndim - 2];
+    auto cols = input_sizes[ndim - 1];
     auto nnz = input._nnz();
 
     auto indices = input.indices();
@@ -200,8 +206,7 @@ class TORCH_CUDA_CPP_API CuSparseSpMatCooDescriptor
         cols,
         nnz,
         row_indices.data_ptr(), // row indices of the sparse matrix, size = nnz
-        col_indices
-            .data_ptr(), // column indices of the sparse matrix, size = nnz
+        col_indices.data_ptr(), // column indices of the sparse matrix, size = nnz
         values.data_ptr(), // values of the sparse matrix, size = nnz
         index_type, // data type of indices
         CUSPARSE_INDEX_BASE_ZERO, // base index of row and col indices
