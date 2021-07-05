@@ -970,6 +970,64 @@ arctanh(input, *, out=None) -> Tensor
 Alias for :func:`torch.atanh`.
 """)
 
+add_docstr(torch.asarray,
+           r"""
+asarray(obj, *, dtype=None, device=None, copy=None, requires_grad=False) -> Tensor
+
+Creates a new :class:`Tensor` out of :attr:`obj` storage, by either copying or
+aliasing it.
+
+:attr:`obj` will be tested for, in order:
+
+1. a :class:`Tensor` object (copy and alias allowed)
+2. a DLPack object (copy and alias allowed)
+3. a Python object that implements the buffer protocol (copy and alias allowed)
+4. an arbitrary sequence (only copy allowed)
+
+When :attr:`copy` is not given, this function will try first to alias the given
+object. However, it will fallback into copying the elements if needed. If it is
+``False``, only aliasing is allowed (``ValueError`` is raised otherwise), and
+vice-versa.
+
+.. warning::
+    When passing a Python object that implements the buffer protocol, this function
+    will not infer its type, but will assume that the type is the given :attr:`dtype`.
+
+.. warning::
+    This function will error out if:
+
+    - Something goes wrong when parsing the DLPack (buffer) object.
+    - :attr:`copy` is ``False``, but the specified :attr:`dtype` or :attr:`device`
+      differ from the given :attr:`obj` properties.
+    - :attr:`copy` is ``False``, but the given :attr:`obj` is neither a
+      :class:`Tensor`, a DLPack object, nor a Python object that implements the
+      buffer protocol.
+
+Args:
+    obj (object): a Python object with one of the aforementioned types
+
+Keyword args:
+    {dtype}
+    copy (bool, optional): defines whether to copy, alias, or whatever is
+        appropriate (aliasing is prioritized).
+    {device}
+    {requires_grad}
+
+Example::
+
+    >>> a = torch.randint(10, 10, dtype=torch.int32)
+    >>> b = torch.asarray(a)
+    >>> a.data_ptr() == b.data_ptr()
+    True
+
+    >>> a = torch.randint(10, 10, dtype=torch.int32)
+    >>> c = torch.asarray(a, dtype=torch.float32)
+    >>> a.data_ptr() == c.data_ptr()
+    False
+    >>> (a == c.to(torch.int32)).all()
+    True
+""".format(**factory_common_args))
+
 add_docstr(torch.baddbmm,
            r"""
 baddbmm(input, batch1, batch2, *, beta=1, alpha=1, out=None) -> Tensor

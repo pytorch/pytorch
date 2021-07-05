@@ -5,7 +5,7 @@ from torch.testing._internal.common_device_type import (
     skipMeta
 )
 from torch.testing import all_types, get_all_dtypes
-from torch.utils.dlpack import from_dlpack, to_dlpack
+from torch.utils.dlpack import to_dlpack
 
 import torch
 import array
