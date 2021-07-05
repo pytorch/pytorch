@@ -20,7 +20,12 @@ class RemovableHandle(object):
     def remove(self) -> None:
         hooks_dict = self.hooks_dict_ref()
         if hooks_dict is not None and self.id in hooks_dict:
-            del hooks_dict[self.id]
+            # Keep the hook alive till the RemovableHandle
+            # lives. This is to make sure that we don't
+            # perform operations (like PyObject_getAttr)
+            # on a stale PyObject (of the removed hook) (in C++ land),
+            # if `handle.remove` is called inside the hook.
+            self.hook = hooks_dict.pop(self.id)
 
     def __getstate__(self):
         return (self.hooks_dict_ref(), self.id)
