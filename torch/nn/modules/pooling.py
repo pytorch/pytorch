@@ -1084,6 +1084,10 @@ class AdaptiveAvgPool1d(_AdaptiveAvgPoolNd):
     Args:
         output_size: the target output size H
 
+    Shape:
+        - Input: :math:`(*, C, L_{in})`, where :math:`*` is 1 dimension or none.
+        - Output: :math:`(*, C, \text{output\_size})`.
+
     Examples:
         >>> # target output size of 5
         >>> m = nn.AdaptiveAvgPool1d(5)
