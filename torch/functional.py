@@ -1633,6 +1633,25 @@ def align_tensors(*tensors):
     raise RuntimeError('`align_tensors` not yet implemented.')
 
 def result_type(*arrays_and_dtypes):
+    """result_type(*arrays_and_dtypes) -> dtype
+
+Returns the :class:`torch.dtype` that would result from performing an arithmetic
+operation on the provided input tensors. See type promotion :ref:`documentation <type-promotion-doc>`
+for more information on the type promotion logic.
+
+Args:
+    arrays_and_dtypes (Tensor, Number or dtype): input tensors, numbers or dtypes
+
+Example::
+
+    >>> torch.result_type(torch.tensor([1, 2], dtype=torch.int), 1.0)
+    torch.float32
+    >>> torch.result_type(torch.tensor([1, 2], dtype=torch.uint8), torch.tensor(1))
+    torch.uint8
+    >>> torch.result_type(torch.int32, torch.float32)
+    torch.float32
+"""
+
     tensors = []
     scalars = []
     dtypes = []
