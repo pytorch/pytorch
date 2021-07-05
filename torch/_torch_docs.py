@@ -5315,9 +5315,9 @@ Keyword args:
 Example::
 
     >>> a = torch.randn(3, 3)
-    >>> torch.special.logsumexp(a, 1)
+    >>> torch.logsumexp(a, 1)
     tensor([1.4907, 1.0593, 1.5696])
-    >>> torch.dist(torch.special.logsumexp(a, 1), torch.log(torch.sum(torch.exp(a), 1)))
+    >>> torch.dist(torch.logsumexp(a, 1), torch.log(torch.sum(torch.exp(a), 1)))
     tensor(1.6859e-07)
 """.format(**multi_dim_common))
 

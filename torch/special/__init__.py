@@ -222,7 +222,7 @@ logsumexp = _add_docstr(_special.special_logsumexp,
                         r"""
 logsumexp(input, dim, keepdim=False, *, out=None)
 
-Alias for :func:`torch.special.logsumexp`.
+Alias for :func:`torch.logsumexp`.
 """.format(**multi_dim_common))
 
 expit = _add_docstr(_special.special_expit,
