@@ -8,7 +8,6 @@ from torch.nn.modules.batchnorm import BatchNorm2d
 from torch.nn.modules.conv import Conv2d
 from math import floor
 
-
 _INFERENCE_RULES: Dict[Target, Callable] = {}
 
 
@@ -403,6 +402,67 @@ def adaptiveavgpool2d_inference_rule(n: Node, op_type):
         raise TypeError(f'Wrong types {n.type} and {n.args[0].type} in {op_type}')
 
 
+def flatten_check(typ, start_dim, end_dim):
+    l = len(typ.__args__)
+
+    if 0 <= start_dim <= (l - 1) and end_dim == -1 or 0 <= end_dim <= (l - 1) and start_dim < end_dim:
+        if end_dim == -1:
+            end_dim = l
+        else:
+            end_dim += 1
+
+        my_args = list(typ.__args__)
+
+        lhs = my_args[0:start_dim]
+        rhs = my_args[end_dim:]
+        mid = my_args[start_dim:end_dim]
+        if Dyn in mid:
+            mid = [Dyn]
+        else:
+            mid = [reduce(lambda x, y: x * y, my_args[start_dim:end_dim])]
+        new_type_list = lhs + mid + rhs
+        return TensorType(tuple(new_type_list))
+    else:
+        raise TypeError(f'Incompatable dimentions {start_dim}, {end_dim} in type {typ}')
+
+@register_inference_rule(torch.flatten)
+def flatten_inference_rule(n: Node):
+    assert isinstance(n.args[0], Node)
+
+    # set the default start and end dims
+    start_dim = 1
+    end_dim = -1
+
+    if len(n.args) > 1:
+        assert isinstance(n.args[1], int)
+        start_dim = n.args[1]
+
+    if len(n.args) > 2:
+        assert isinstance(n.args[2], int)
+        end_dim = n.args[2]
+
+    if n.args[0] == Dyn:
+        return Dyn
+
+    elif isinstance(n.args[0].type, TensorType) and n.type == Dyn:
+        n.type = flatten_check(n.args[0].type, start_dim, end_dim)
+        return n.type
+
+    elif isinstance(n.type, TensorType) and n.args[0].type == Dyn:
+        n.type = flatten_check(n.type, start_dim, end_dim)
+        return n.type
+
+    elif isinstance(n.type, TensorType) and isinstance(n.args[0].type, TensorType):
+        node_type = flatten_check(n.type, start_dim, end_dim)
+        arg_type = flatten_check(n.args[0].type, start_dim, end_dim)
+        n.type = node_type
+        if is_more_precise(arg_type, node_type):
+            n.type = arg_type
+        return n.type
+
+    else:
+        raise TypeError(f'Cannot apply {n} on {n.args[0]} with type {n.args[0].type} and existing type {n.type}')
+
 class GraphTypeChecker:
     def __init__(self, env, traced):
         self.env = env
@@ -443,7 +503,12 @@ class GraphTypeChecker:
                 raise RuntimeError(f'No inference rule registered for target {n.target}!')
 
         if n.op == 'call_module':
-            op_type = getattr(self.traced, str(n.target))
+
+            target_atoms = str(n.target).split('.')
+            op_type = self.traced
+            for atom in target_atoms:
+                op_type = getattr(op_type, str(atom))
+
             if type(op_type) in _INFERENCE_RULES:
                 return _INFERENCE_RULES[type(op_type)](n, op_type)
             else:
