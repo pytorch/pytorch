@@ -405,6 +405,39 @@ class TestTypePromotion(TestCase):
                    torch.tensor(1., dtype=torch.complex64, device=device), torch.complex128)
         _test_spot(torch.tensor([1, 1], dtype=torch.bool, device=device), 1., torch.get_default_dtype())
 
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_result_type_variadic(self, device):
+        # Floating dtypes are not listed here because the `numpy.result_type` may behave differently
+        # if inputs of mixed dtypes are given. The tests for floating type inputs are left to
+        # `test_result_type` and `test_result_type_tensor_vs_scalar`.
+        dtypes = [torch.bool, torch.uint8, torch.int16, torch.int64]
+        inputs = [
+            True,  # bool scalar
+            10,  # int scalar
+            *[torch.tensor([1, 2, 3], dtype=dtype) for dtype in dtypes],  # tensors
+            *dtypes,  # tensors
+        ]
+
+        def _expected_func(*inputs):
+            def _convert_to_numpy_input(x):
+                if isinstance(x, torch.Tensor):
+                    return x.cpu().numpy()
+                if isinstance(x, bool):
+                    return np.bool_(x)
+                if isinstance(x, int):
+                    return np.int64(x)
+                return torch.tensor([1], dtype=x).numpy().dtype
+            inputs = [_convert_to_numpy_input(x) for x in inputs]
+            return np.result_type(*inputs)
+
+        for x1 in inputs:
+            for x2 in inputs:
+                for x3 in inputs:
+                    actual = torch.result_type(x1, x2, x3)  # torch.dtype
+                    expected = _expected_func(x1, x2, x3)  # numpy.dtype
+                    self.assertIsInstance(actual, torch.dtype)
+                    self.assertEqual(repr(actual).split(".")[-1], expected.name)
+
     @float_double_default_dtype
     def test_can_cast(self, device):
         self.assertTrue(torch.can_cast(torch.double, torch.float))
