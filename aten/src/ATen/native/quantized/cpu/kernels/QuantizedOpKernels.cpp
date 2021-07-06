@@ -2182,14 +2182,14 @@ void fake_quant_per_channel_cachemask_cpu(
   //   for simplicity, as we do not expect this to be a bottleneck.
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "fake_quantize_channel_cachemask_cpu_type_handling", [&] {
     // write mask
-    cpu_kernel(iter_mask, [=](scalar_t self, float scale, int64_t zero_point) -> bool {
+    cpu_kernel(iter_mask, [=](scalar_t self, float scale, int32_t zero_point) -> bool {
       float inv_scale = 1.0f / scale;
       const auto qval = static_cast<int64_t>(zero_point + std::nearbyint(self * inv_scale));
       return ((quant_min <= qval) && (qval <= quant_max));
     });
 
     // write fake_quant
-    cpu_kernel(iter, [=](scalar_t self, float scale, int64_t zero_point) -> scalar_t {
+    cpu_kernel(iter, [=](scalar_t self, float scale, int32_t zero_point) -> scalar_t {
       float inv_scale = 1.0f / scale;
       // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       return (std::fmin(
