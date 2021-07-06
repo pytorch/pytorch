@@ -105,8 +105,15 @@ class TORCH_API Reducer {
   // Cannot combine with the call of `register_comm_hook`.
   void register_builtin_comm_hook(c10d::BuiltinCommHookType comm_hook_type);
 
-  // Returns a vector of tensors in each bucket in sequential order.
-  std::vector<std::vector<at::Tensor>> get_bucket_tensors() const;
+  // Runs allreduce or installed communication hook given GradBucket instance.
+  c10::intrusive_ptr<c10::ivalue::Future> run_comm_hook(
+      GradBucket& grad_bucket);
+
+  // Returns gradient buckets in sequential order of buckets_. This is the order
+  // in which buckets are reduced across processes. If return_zero_tensors=true,
+  // will return zero tensors of the same shape instead of the true tensors.
+  std::vector<c10d::GradBucket> get_grad_buckets(
+      bool return_zero_tensors = true) const;
 
   // Rebuild buckets based on rebuilt_params_ and rebuilt_param_indices_
   // according to when tensors received grads in the backward pass.
@@ -187,6 +194,11 @@ class TORCH_API Reducer {
   // Whether we need to run autograd hooks (only false if user runs with
   // no_grad or no_sync context manager)
   bool expect_autograd_hooks_;
+  // Flag controlling whether we are in a backwards pass initiated by DDP module
+  // or not. It is true from when prepare_for_backward is called until
+  // finalize_backward is called at the end of autograd execution. Used for
+  // disabling hooks called by local modules that are wrapped by DDP.
+  bool in_ddp_backwards_{false};
   bool require_finalize_;
   size_t next_bucket_;
 
