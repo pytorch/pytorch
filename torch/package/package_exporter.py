@@ -18,7 +18,6 @@ from typing import (
     Sequence,
     Union,
 )
-from urllib.parse import quote
 
 import torch
 from torch.serialization import location_tag, normalize_storage_type
