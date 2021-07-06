@@ -99,6 +99,7 @@ class NodeGuard {
 struct TORCH_API Node : std::enable_shared_from_this<Node> {
  public:
   /// Construct a new `Node` with the given `next_edges`
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit Node(
       uint64_t sequence_nr,
       edge_list&& next_edges = edge_list())
@@ -124,6 +125,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     thread_id_ = at::RecordFunction::currentThreadId();
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit Node(edge_list&& next_edges = edge_list())
     : Node(/*sequence_nr=*/at::sequence_number::get_and_increment(),
     std::move(next_edges)) {}
@@ -182,12 +184,14 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     const at::TensorOptions& options
   , at::IntArrayRef shape
   , at::Device device) noexcept {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     uint32_t input_nr = input_metadata_.size();
     input_metadata_.emplace_back(options, shape, device);
     return input_nr;
   }
 
   uint32_t add_input_metadata(const at::Tensor& t) noexcept {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     uint32_t input_nr = input_metadata_.size();
     input_metadata_.emplace_back(t);
     return input_nr;
@@ -195,6 +199,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
 
   /// Adds a placeholder for an input that will not be used.
   uint32_t add_input_metadata(undefined_input u) noexcept {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     uint32_t input_nr = input_metadata_.size();
     input_metadata_.emplace_back();
     return input_nr;
@@ -546,10 +551,12 @@ struct TraceableFunction : public Node {
 
 namespace detail {
 // Implementation of `collect_next_edges` (see below).
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct MakeNextFunctionList : IterArgs<MakeNextFunctionList> {
   edge_list next_edges;
   using IterArgs<MakeNextFunctionList>::operator();
   void operator()(const Variable& variable) {
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (variable.defined()) {
       next_edges.push_back(impl::gradient_edge(variable));
     } else {
@@ -557,6 +564,7 @@ struct MakeNextFunctionList : IterArgs<MakeNextFunctionList> {
     }
   }
   void operator()(const c10::optional<Variable>& variable) {
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (variable.has_value() && variable->defined()) {
       next_edges.push_back(impl::gradient_edge(*variable));
     } else {
