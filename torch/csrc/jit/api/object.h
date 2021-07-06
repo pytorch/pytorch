@@ -20,8 +20,10 @@ class ObjectAttributeError : public std::runtime_error {
   ObjectAttributeError(const std::string& what) : std::runtime_error(what) {}
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct TORCH_API Object {
   Object() = default;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Object(ObjectPtr _ivalue) : _ivalue_(std::move(_ivalue)) {}
   Object(std::shared_ptr<CompilationUnit> cu, const c10::ClassTypePtr& type);
   Object(
@@ -129,6 +131,16 @@ struct TORCH_API Object {
       }
     }
     AT_ERROR("Property '", name, "' is not defined.");
+  }
+
+  const std::vector<Property> get_properties() const {
+    return c10::fmap(type()->properties(), [&](ClassType::Property prop) {
+      c10::optional<Method> setter = c10::nullopt;
+      if (prop.setter) {
+        setter = Method(_ivalue(), prop.setter);
+      }
+      return Property{prop.name, Method(_ivalue(), prop.getter), setter};
+    });
   }
 
   c10::optional<Method> find_method(const std::string& basename) const;

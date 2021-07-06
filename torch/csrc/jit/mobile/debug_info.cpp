@@ -16,7 +16,9 @@ namespace {
 std::pair<std::vector<StackEntry>, std::string> getStackTraceWithModuleHierarchy(
     const DebugInfoTuple& source_callstack,
     const std::string& caller_name) {
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   constexpr size_t kSourceRange = 1;
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   constexpr size_t kModuleInstanceInfo = 2;
   std::vector<StackEntry> entries;
 
