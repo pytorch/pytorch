@@ -892,6 +892,7 @@ struct TORCH_API Node {
     AT_ASSERT(name.is_attr());
     auto it = findAttr(name, false);
     auto nv = AVPtr(new T(name, std::forward<typename T::ConstructorType>(v)));
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (it == values_.end()) {
       values_.push_back(std::move(nv));
     } else {
@@ -1147,13 +1148,11 @@ struct Graph {
   Node* insert_before_;
 
  public:
-  Graph(ScopePtr scope_root)
+  Graph(ScopePtr scope_root = c10::make_intrusive<Scope>())
       : next_unique_(0),
         current_scope_(std::move(scope_root)),
         block_(new Block(this, nullptr)),
         insert_before_(return_node()) {}
-
-  Graph() : Graph(c10::make_intrusive<Scope>()) {}
 
   at::ArrayRef<Value*> inputs() {
     return block_->inputs();
@@ -1418,6 +1417,7 @@ struct WithCurrentScope {
   ScopePtr prev_scope_;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 inline Value::Value(Node* node_, size_t offset_)
     : node_(node_),
       offset_(offset_),
@@ -1552,6 +1552,7 @@ struct OperatorSet {
 };
 
 template <typename T>
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct OperatorMap {
   // Type aliasing
   using OpMapType = typename std::pair<std::shared_ptr<Operator>, T>;
@@ -1559,10 +1560,12 @@ struct OperatorMap {
   using MapType = std::unordered_map<Symbol, ValueType>;
 
   OperatorMap() = default;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit OperatorMap(
       std::initializer_list<std::pair<std::shared_ptr<Operator>, T>> init) {
     insert(init);
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit OperatorMap(std::initializer_list<std::pair<const char*, T>> init) {
     insert(init);
   }
@@ -1631,6 +1634,7 @@ struct OperatorMap {
 
   // TODO: return iterator
   std::vector<OpMapType> getAllKeysAndValues() const {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<OpMapType> keys_values;
     for (auto& symbol_mapping : map) {
       auto& vec = symbol_mapping.second;
