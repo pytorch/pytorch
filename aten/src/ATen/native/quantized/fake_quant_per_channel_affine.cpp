@@ -50,8 +50,8 @@ std::tuple<Tensor, Tensor> fake_quantize_per_channel_affine_cachemask(
     int64_t axis,
     int64_t quant_min,
     int64_t quant_max) {
-  TORCH_CHECK(zero_point.scalar_type() == ScalarType::Long,
-              "Zero-point must be Long, found ", zero_point.scalar_type());
+  TORCH_CHECK(zero_point.scalar_type() == ScalarType::Int,
+              "Zero-point must be Int32, found ", zero_point.scalar_type());
   TORCH_CHECK(scale.dim() == 1, "scale should be a 1-D tensor");
   TORCH_CHECK(zero_point.dim() == 1, "zero point should be a 1-D tensor");
   TORCH_CHECK(
@@ -67,8 +67,8 @@ std::tuple<Tensor, Tensor> fake_quantize_per_channel_affine_cachemask(
         equal to `quant_max`.");
 
   TORCH_CHECK(
-      at::min(zero_point).item().toLong() >= quant_min &&
-          at::max(zero_point).item().toLong() <= quant_max,
+      at::min(zero_point).item().toInt() >= quant_min &&
+          at::max(zero_point).item().toInt() <= quant_max,
       "`zero_point` must be between `quant_min` and `quant_max`.");
 
   TORCH_CHECK(
@@ -145,7 +145,7 @@ Tensor _fake_quantize_learnable_per_channel_affine(
     int64_t quant_min,
     int64_t quant_max,
     double grad_factor) {
-  Tensor zero_point_rounded = _get_rounded_zero_point(zero_point, quant_min, quant_max).to(at::kLong);
+  Tensor zero_point_rounded = _get_rounded_zero_point(zero_point, quant_min, quant_max).to(at::kInt);
   return native::fake_quantize_per_channel_affine(
     self, scale, zero_point_rounded, axis, quant_min, quant_max);
 }
