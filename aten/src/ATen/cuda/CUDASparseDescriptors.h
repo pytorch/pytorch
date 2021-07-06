@@ -1,23 +1,14 @@
 #pragma once
 
-// #if defined(CUDART_VERSION) && defined(CUSPARSE_VERSION) && CUSPARSE_VERSION
-// >= 11000
-// // cusparse version >= 11000 includes descriptors API
-// #define USE_CUSPARSE_11
-// #endif
-
-// #ifdef USE_CUSPARSE_11
-
-#include <ATen/cuda/ATenCUDAGeneral.h>
+#include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDADataType.h>
-#include <ATen/cuda/Exceptions.h>
+#include <ATen/cuda/CUDASparse.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cuda/MiscUtils.h>
 
 #include <c10/core/ScalarType.h>
 
-#include <cusparse.h>
-#include <library_types.h>
+#if AT_USE_CUSPARSE_GENERIC_API()
 
 namespace at {
 namespace cuda {
@@ -221,4 +212,4 @@ class TORCH_CUDA_CPP_API CuSparseSpMatCooDescriptor
 } // namespace cuda
 } // namespace at
 
-// #endif // USE_CUSPARSE_11
+#endif // AT_USE_CUSPARSE_GENERIC_API()

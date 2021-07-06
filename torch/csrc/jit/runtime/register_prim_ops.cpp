@@ -443,6 +443,14 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA(
+             "aten::einsum.sublist(Tensor a, ...) -> Tensor"),
+         [](Stack* stack) {
+           size_t num_inputs = pop(stack).toInt();
+           einsum(*stack, num_inputs);
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("prim::NumToTensor.Scalar(Scalar a) -> Tensor"),
          [](Stack* stack) {
            at::Scalar s;
@@ -2063,6 +2071,7 @@ TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
       });
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg1(
     {OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("prim::rangelist(int n) -> int[]"),
@@ -2821,6 +2830,7 @@ RegisterOperators reg2({
         [](Stack* stack) {
           c10::List<c10::complex<double>> l = pop(stack).toComplexDoubleList();
           c10::complex<double> sum = 0.0;
+          // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
           for (int i = 0; i < l.size(); i++) {
             sum = sum + l.extract(i);
           }
