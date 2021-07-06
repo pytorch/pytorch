@@ -488,8 +488,7 @@ struct SourceImporterImpl : public Resolver,
           auto def_name = def.name().name();
           if (pre_hook_names.find(def_name) != pre_hook_names.end()) {
             pre_hook_def_map.emplace(def_name, def);
-            pre_hook_resolver_map.emplace(
-                def_name, shared_from_this());
+            pre_hook_resolver_map.emplace(def_name, shared_from_this());
           } else if (hook_names.find(def_name) != hook_names.end()) {
             hook_def_map.emplace(def_name, def);
             hook_resolver_map.emplace(def_name, shared_from_this());
