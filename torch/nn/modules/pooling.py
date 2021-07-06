@@ -95,7 +95,8 @@ class MaxPool2d(_MaxPoolNd):
     planes.
 
     In the simplest case, the output value of the layer with input size :math:`(N, C, H, W)`,
-    output :math:`(N, C, H_{out}, W_{out})` and :attr:`kernel_size` :math:`(kH, kW)`
+    output :math:`(N, C, H_{out}, W_{out})` or with input size :math:`(C, H, W)`,
+    output :math:`(C, H_{out}, W_{out})` and :attr:`kernel_size` :math:`(kH, kW)`
     can be precisely described as:
 
     .. math::
@@ -130,7 +131,10 @@ class MaxPool2d(_MaxPoolNd):
 
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})`
-        - Output: :math:`(N, C, H_{out}, W_{out})`, where
+        - Output: :math:`(N, C, H_{out}, W_{out})` or
+
+        - Input: :math:`(C, H_{in}, W_{in})`
+        - Output: :math:`(C, H_{out}, W_{out})` where,
 
           .. math::
               H_{out} = \left\lfloor\frac{H_{in} + 2 * \text{padding[0]} - \text{dilation[0]}
@@ -139,6 +143,7 @@ class MaxPool2d(_MaxPoolNd):
           .. math::
               W_{out} = \left\lfloor\frac{W_{in} + 2 * \text{padding[1]} - \text{dilation[1]}
                     \times (\text{kernel\_size[1]} - 1) - 1}{\text{stride[1]}} + 1\right\rfloor
+
 
     Examples::
 
