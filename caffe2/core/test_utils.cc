@@ -26,13 +26,16 @@ void assertTensorEqualsWithType<float>(
     float eps) {
   CAFFE_ENFORCE_EQ(tensor1.sizes(), tensor2.sizes());
   for (auto idx = 0; idx < tensor1.numel(); ++idx) {
-    CAFFE_ENFORCE_LT(
-        fabs(tensor1.data<float>()[idx] - tensor2.data<float>()[idx]),
-        eps,
-        "Mismatch at index ",
-        idx,
-        " exceeds threshold of ",
-        eps);
+    // When a == b, a - b may not be equal to 0
+    if (tensor1.data<float>()[idx] != tensor2.data<float>()[idx]) {
+      CAFFE_ENFORCE_LT(
+          fabs(tensor1.data<float>()[idx] - tensor2.data<float>()[idx]),
+          eps,
+          "Mismatch at index ",
+          idx,
+          " exceeds threshold of ",
+          eps);
+    }
   }
 }
 } // namespace
