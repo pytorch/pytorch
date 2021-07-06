@@ -6,10 +6,12 @@
 #include <cfloat>
 #include <limits>
 #include <type_traits>
+#include <ATen/NumericUtils.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
 #include <c10/util/MathConstants.h>
 #include <c10/util/math_compat.h>
+#include <ATen/AccumulateType.h>
 
 
 /* The next function is taken from  https://github.com/antelopeusersgroup/antelope_contrib/blob/master/lib/location/libgenloc/erfinv.c.
@@ -148,9 +150,14 @@ Date:  February 1996
  * This function is derived from the implementation of the zeta function in the Cephes Math Library.
  * See note [3-Clause BSD License for the Cephes Math Library].
  */
-static inline double zeta(double x, double q) {
-  static double MACHEP = 1.11022302462515654042E-16;
-  static double A[] = {
+template <typename scalar_t, bool is_cuda=false>
+C10_HOST_DEVICE static inline scalar_t zeta(scalar_t x, scalar_t q) __ubsan_ignore_float_divide_by_zero__ {
+  using acc_t = at::acc_type<scalar_t, is_cuda>;
+  const acc_t MACHEP = acc_t{1.11022302462515654042E-16};
+  constexpr acc_t zero = acc_t{0.0};
+  constexpr acc_t half = acc_t{0.5};
+  constexpr acc_t one = acc_t{1.0};
+  static const acc_t A[] = {
       12.0,
       -720.0,
       30240.0,
@@ -166,58 +173,58 @@ static inline double zeta(double x, double q) {
   };
 
   int i = 0;
-  double a, b, k, s, t, w;
-  if (x == 1.0) {
-    return INFINITY;
+  acc_t a, b, k, s, t, w;
+  if (x == one) {
+    return std::numeric_limits<scalar_t>::infinity();
   }
 
-  if (x < 1.0) {
-    return std::numeric_limits<double>::quiet_NaN();
+  if (x < one) {
+    return std::numeric_limits<scalar_t>::quiet_NaN();
   }
 
-  if (q <= 0.0) {
-    if (q == floor(q)) {
-      return INFINITY;
+  if (q <= zero) {
+    if (q == ::floor(q)) {
+      return std::numeric_limits<scalar_t>::infinity();
     }
-    if (x != floor(x)) {
-      return std::numeric_limits<double>::quiet_NaN();
+    if (x != ::floor(x)) {
+      return std::numeric_limits<scalar_t>::quiet_NaN();
     }
   }
 
-  s = std::pow(q, -x);
+  s = ::pow(q, -x);
   a = q;
   i = 0;
-  b = 0.0;
-  while ((i < 9) || (a <= 9.0)) {
+  b = zero;
+  while ((i < 9) || (a <= acc_t{9.0})) {
     i += 1;
-    a += 1.0;
-    b = std::pow(a, -x);
+    a += one;
+    b = ::pow(a, -x);
     s += b;
     if ((-MACHEP * s < b) && (b < MACHEP * s)) {
-      return s;
+      return static_cast<scalar_t>(s);
     }
   };
 
   w = a;
-  s += b * w / (x - 1.0);
-  s -= 0.5 * b;
-  a = 1.0;
-  k = 0.0;
+  s += b * w / (x - one);
+  s -= half * b;
+  a = one;
+  k = zero;
   for (int i = 0; i < 12; i++) {
     a *= x + k;
     b /= w;
     t = a * b / A[i];
     s = s + t;
-    t = std::abs(t / s);
+    t = ::abs(t / s);
     if (t < MACHEP) {
-      return s;
+      return static_cast<scalar_t>(s);
     }
-    k += 1.0;
+    k += one;
     a *= x + k;
     b /= w;
-    k += 1.0;
+    k += one;
   }
-  return s;
+  return static_cast<scalar_t>(s);
 }
 
 /*
@@ -397,16 +404,12 @@ static inline float calc_digamma(float x) {
   return result + logf(x) - (0.5f / x) - y;
 }
 
-static inline double calc_polygamma(int64_t n, double x) {
+template <typename scalar_t, bool is_cuda=false>
+static inline C10_HOST_DEVICE scalar_t calc_polygamma(int n, scalar_t x) {
   // already blocked if n <= 1
-  return ((n % 2) ? 1.0 : -1.0) * std::exp(lgamma(double(n) + 1.0)) *
-      zeta(double(n + 1), x);
-}
-
-static inline float calc_polygamma(int64_t n, float x) {
-  // already blocked if n <= 1
-  return ((n % 2) ? 1.0f : -1.0f) * std::exp(lgamma(double(n) + 1.0)) *
-      zeta(double(n + 1), x);
+  return ((n % 2) ? 1.0 : -1.0) *
+      ::exp(::lgamma(static_cast<scalar_t>(n) + 1.0)) *
+      zeta<scalar_t, is_cuda>(static_cast<scalar_t>(n + 1), x);
 }
 
 // regularized lower incomplete gamma
@@ -1361,18 +1364,17 @@ static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
 calc_i0(T _x) {
   T x = std::abs(_x);
 
-  if (x <= 8.0) {
+  if (x <= T{8.0}) {
     auto coeff_pair = chebyshev_coefficients_i0e_A<T>();
     auto A = std::get<0>(coeff_pair);
     auto len = std::get<1>(coeff_pair);
-    T y = (x / 2.0) - 2.0;
+    T y = (x / T{2.0}) - T{2.0};
     return static_cast<T>(std::exp(x) * chbevl(y, A, len));
   }
   auto coeff_pair = chebyshev_coefficients_i0e_B<T>();
   auto B = std::get<0>(coeff_pair);
   auto len = std::get<1>(coeff_pair);
-  return static_cast<T>(
-      std::exp(x) * chbevl(static_cast<T>(32.0 / x - 2.0), B, len) / std::sqrt(x));
+  return std::exp(x) * chbevl(T{32.0} / x - T{2.0}, B, len) / std::sqrt(x);
 }
 
 // Upcast bfloat16 input to float for numerical accuracy purposes
@@ -1392,19 +1394,18 @@ static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
 calc_i0e(T _x) {
   T x = std::abs(_x);
 
-  if (x <= 8.0) {
+  if (x <= T{8.0}) {
     auto coeff_pair = chebyshev_coefficients_i0e_A<T>();
     auto A = std::get<0>(coeff_pair);
     auto len = std::get<1>(coeff_pair);
-    T y = (x / 2.0) - 2.0;
-    return static_cast<T>(chbevl(y, A, len));
+    T y = (x / T{2.0}) - T{2.0};
+    return chbevl(y, A, len);
   }
 
   auto coeff_pair = chebyshev_coefficients_i0e_B<T>();
   auto B = std::get<0>(coeff_pair);
   auto len = std::get<1>(coeff_pair);
-  return static_cast<T>(
-      chbevl(static_cast<T>(32.0 / x - 2.0), B, len) / std::sqrt(x));
+  return chbevl(T{32.0} / x - T{2.0}, B, len) / std::sqrt(x);
 }
 
 // Upcast bfloat16 input to float for numerical accuracy purposes
@@ -1424,20 +1425,19 @@ static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
 calc_i1(T _x) {
   T x = std::abs(_x);
 
-  if (x <= 8.0) {
+  if (x <= T{8.0}) {
     auto coeff_pair = chebyshev_coefficients_i1e_A<T>();
     auto A = std::get<0>(coeff_pair);
     auto len = std::get<1>(coeff_pair);
-    T y = (x / 2.0) - 2.0;
-    const T out = static_cast<T>(std::exp(x) * x * chbevl(y, A, len));
-    return (_x < 0.0) ? -out : out;
+    T y = (x / T{2.0}) - T{2.0};
+    const T out = std::exp(x) * x * chbevl(y, A, len);
+    return (_x < T{0.0}) ? -out : out;
   }
   auto coeff_pair = chebyshev_coefficients_i1e_B<T>();
   auto B = std::get<0>(coeff_pair);
   auto len = std::get<1>(coeff_pair);
-  const auto out = static_cast<T>(
-      (std::exp(x) * chbevl(static_cast<T>(32.0 / x - 2.0), B, len)) / std::sqrt(x));
-  return (_x < 0.0) ? -out : out;
+  const T out = (std::exp(x) * chbevl(T{32.0} / x - T{2.0}, B, len)) / std::sqrt(x);
+  return (_x < T{0.0}) ? -out : out;
 }
 
 /*
@@ -1454,20 +1454,19 @@ static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
 calc_i1e(T _x) {
   T x = std::abs(_x);
 
-  if (x <= 8.0) {
+  if (x <= T{8.0}) {
     auto coeff_pair = chebyshev_coefficients_i1e_A<T>();
     auto A = std::get<0>(coeff_pair);
     auto len = std::get<1>(coeff_pair);
-    T y = (x / 2.0) - 2.0;
-    const auto out = static_cast<T>(chbevl(y, A, len) * x);
-    return (_x < 0.0) ? -out : out;
+    T y = (x / T{2.0}) - T{2.0};
+    const T out = chbevl(y, A, len) * x;
+    return (_x < T{0.0}) ? -out : out;
   }
   auto coeff_pair = chebyshev_coefficients_i1e_B<T>();
   auto B = std::get<0>(coeff_pair);
   auto len = std::get<1>(coeff_pair);
-  const auto out =
-      static_cast<T>(chbevl(static_cast<T>(32.0 / x - 2.0), B, len) / std::sqrt(x));
-  return (_x < 0.0) ? -out : out;
+  const auto out = chbevl(T{32.0} / x - T{2.0}, B, len) / std::sqrt(x);
+  return (_x < T{0.0}) ? -out : out;
 }
 
 /*
@@ -1666,7 +1665,7 @@ static inline C10_HOST_DEVICE T calc_ndtri(T y0) {
 
 
 template <typename T>
-static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
+C10_HOST_DEVICE  static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
 erfcx_y100(T y100)
 {
   switch (static_cast<int>(y100)) {
@@ -2077,10 +2076,10 @@ return 0.97771701335885035464e0 + (0.22000938572830479551e-1 + (0.27951610702682
 }
 
 template <typename T>
-static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
+C10_HOST_DEVICE static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
 calc_erfcx(T x)
 {
-  if (std::isnan(x)) {
+  if (at::_isnan(x)) {
     return x;
   }
 
