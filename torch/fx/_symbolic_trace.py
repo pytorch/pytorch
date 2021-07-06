@@ -525,7 +525,7 @@ class Tracer(TracerBase):
         # is some other attribute on the model. Construct a dict mapping Tensor
         # values to the qualified name here for efficiency. This is used downstream
         # in create_arg
-        self.tensor_attrs : Dict[torch.Tensor, str] = {}
+        self.tensor_attrs : Dict[Union[torch.Tensor, ScriptObject], str] = {}
 
         def collect_tensor_attrs(m : torch.nn.Module, prefix_atoms : List[str]):
             for k, v in m.__dict__.items():

@@ -516,6 +516,7 @@ header_template_rule(
         "@AT_MKLDNN_ENABLED@": "1",
         "@AT_MKL_ENABLED@": "0",
         "@AT_FFTW_ENABLED@": "0",
+        "@AT_POCKETFFT_ENABLED@": "0",
         "@AT_NNPACK_ENABLED@": "0",
         "@CAFFE2_STATIC_LINK_CUDA_INT@": "0",
         "@AT_BUILD_WITH_BLAS@": "1",
