@@ -80,15 +80,6 @@ def create_temp_dir_and_files():
             (temp_sub_dir, temp_sub_file1_name, temp_sub_file2_name)]
 
 
-class NumbersDataset(IterDataPipe):
-    def __init__(self, size=10):
-        self.size = size
-
-    def __iter__(self):
-        for i in range(self.size):
-            yield i
-
-
 class TestIterableDataPipeBasic(TestCase):
 
     def setUp(self):
@@ -140,7 +131,7 @@ class TestIterableDataPipeBasic(TestCase):
                 rec[1].close()
         self.assertEqual(count, len(self.temp_files))
 
-    #TODO(VitalyFedyunin): Generates unclosed buffer warning, need to investigate
+    # TODO(VitalyFedyunin): Generates unclosed buffer warning, need to investigate
     def test_readfilesfromtar_iterable_datapipe(self):
         temp_dir = self.temp_dir.name
         temp_tarfile_pathname = os.path.join(temp_dir, "test_tar.tar")
@@ -167,7 +158,7 @@ class TestIterableDataPipeBasic(TestCase):
                 self.assertEqual(data_ref[1].read(), f.read())
             data_ref[1].close()
 
-    #TODO(VitalyFedyunin): Generates unclosed buffer warning, need to investigate
+    # TODO(VitalyFedyunin): Generates unclosed buffer warning, need to investigate
     def test_readfilesfromzip_iterable_datapipe(self):
         temp_dir = self.temp_dir.name
         temp_zipfile_pathname = os.path.join(temp_dir, "test_zip.zip")
@@ -235,7 +226,7 @@ class TestIterableDataPipeBasic(TestCase):
         datapipe4.add_handler(_png_decoder)
         _helper(cached, datapipe4, channel_first=True)
 
-    #TODO(VitalyFedyunin): Generates unclosed buffer warning, need to investigate
+    # TODO(VitalyFedyunin): Generates unclosed buffer warning, need to investigate
     def test_groupbykey_iterable_datapipe(self):
         temp_dir = self.temp_dir.name
         temp_tarfile_pathname = os.path.join(temp_dir, "test_tar.tar")
@@ -464,7 +455,7 @@ def _worker_init_fn(worker_id):
 
 class TestFunctionalIterDataPipe(TestCase):
 
-    #TODO(VitalyFedyunin): If dill installed this test fails
+    # TODO(VitalyFedyunin): If dill installed this test fails
     def _test_picklable(self):
         arr = range(10)
         picklable_datapipes: List[Tuple[Type[IterDataPipe], IterDataPipe, Tuple, Dict[str, Any]]] = [
@@ -545,7 +536,7 @@ class TestFunctionalIterDataPipe(TestCase):
         for x, y in zip(map_dp_nl, input_dp_nl):
             self.assertEqual(x, torch.tensor(y, dtype=torch.float))
 
-    #TODO(VitalyFedyunin): If dill installed this test fails
+    # TODO(VitalyFedyunin): If dill installed this test fails
     def _test_map_datapipe_nested_level(self):
 
         input_dp = IDP([list(range(10)) for _ in range(3)])
@@ -907,7 +898,7 @@ class TestFunctionalIterDataPipe(TestCase):
 
 
 class TestFunctionalMapDataPipe(TestCase):
-    #TODO(VitalyFedyunin): If dill installed this test fails
+    # TODO(VitalyFedyunin): If dill installed this test fails
     def _test_picklable(self):
         arr = range(10)
         picklable_datapipes: List[
@@ -1285,7 +1276,8 @@ class TestGraph(TestCase):
         expected : Dict[Any, Any] = {mapped_dp: {numbers_dp: {}}}
         self.assertEqual(expected, graph)
 
-    #TODO(VitalyFedyunin): This test is incorrect because of 'buffer' nature of fork fake implementation, update fork first and fix this test too
+    # TODO(VitalyFedyunin): This test is incorrect because of 'buffer' nature 
+    # of the fork fake implementation, update fork first and fix this test too
     def test_traverse_forked(self):
         numbers_dp = NumbersDataset(size=50)
         dp0, dp1, dp2 = numbers_dp.fork(3)

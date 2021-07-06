@@ -1,6 +1,5 @@
 import io
 import pickle
-import copyreg
 
 from torch.utils.data import IterableDataset
 
