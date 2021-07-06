@@ -12,6 +12,7 @@ from torch.testing._internal.common_utils import (
 
 
 reductions = ["max", "mean", "min", "sum"]
+length_types = [torch.long, torch.int]
 
 
 class TestSegmentReductions(TestCase):
@@ -28,8 +29,9 @@ class TestSegmentReductions(TestCase):
         expected_arr,
         expected_grad_arr,
         check_backward,
+        lengths_dtype=torch.int,
     ):
-        lengths = torch.tensor(lengths_arr, device=device)
+        lengths = torch.tensor(lengths_arr, device=device, dtype=lengths_dtype)
         data = torch.tensor(
             data_arr,
             device=device,
@@ -111,19 +113,21 @@ class TestSegmentReductions(TestCase):
             for axis in [0, -1]:
                 for unsafe in [True, False]:
                     for initial in [initial_value, None]:
-                        self._test_common(
-                            reduction,
-                            device,
-                            dtype,
-                            unsafe,
-                            axis,
-                            initial_value,
-                            data,
-                            lengths,
-                            expected_result,
-                            expected_grad,
-                            check_backward,
-                        )
+                        for length_type in length_types:
+                            self._test_common(
+                                reduction,
+                                device,
+                                dtype,
+                                unsafe,
+                                axis,
+                                initial_value,
+                                data,
+                                lengths,
+                                expected_result,
+                                expected_grad,
+                                check_backward,
+                                length_type,
+                            )
 
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
     def test_multi_d_simple(self, device, dtype):
