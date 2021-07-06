@@ -160,7 +160,6 @@ class TORCH_API ReduceOp : public ExprNode<ReduceOp> {
 
 class Sum : public Reducer {
  public:
-  // NOLINTNEXTLINE(modernize-use-equals-default)
   Sum()
       : Reducer(ExprHandle(0), [](ExprHandle a, ExprHandle b) {
           return a + b;
