@@ -135,11 +135,14 @@ struct TORCH_API UnionType : public Type {
   c10::optional<TypePtr> subtractTypeSet(std::vector<TypePtr>& to_subtract) const;
 
  protected:
-    UnionType(std::vector<TypePtr> types, TypeKind kind=TypeKind::UnionType);
+    explicit UnionType(std::vector<TypePtr> types, TypeKind kind=TypeKind::UnionType);
     std::string annotation_str_impl(TypePrinter printer = nullptr) const override;
     std::string unionStr(TypePrinter printer = nullptr, bool is_annotation_str = false) const;
+    // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
     bool has_free_variables_;
+    // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
     std::vector<TypePtr> types_;
+    // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
     bool can_hold_none_;
 
 };
@@ -191,7 +194,7 @@ struct TORCH_API OptionalType : public UnionType {
   static OptionalTypePtr ofTensor();
 
  private:
-  OptionalType(TypePtr contained);
+  explicit OptionalType(TypePtr contained);
 
   TypePtr contained_;
 
@@ -1222,6 +1225,7 @@ struct TORCH_API FloatType : public NumberType {
     return "float";
   }
   bool isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const override {
+    // NOLINTNEXTLINE(bugprone-parent-virtual-call)
     return rhs->kind() == TypeKind::NumberType || Type::isSubtypeOfExt(rhs, why_not);
   }
   static const TypeKind Kind = TypeKind::FloatType;
@@ -1246,6 +1250,7 @@ struct TORCH_API ComplexType : public NumberType {
     return "complex";
   }
   bool isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const override {
+    // NOLINTNEXTLINE(bugprone-parent-virtual-call)
     return rhs->kind() == TypeKind::NumberType || Type::isSubtypeOfExt(rhs, why_not);
   }
   static const TypeKind Kind = TypeKind::ComplexType;
@@ -1270,6 +1275,7 @@ struct TORCH_API IntType : public NumberType {
     return "int";
   }
   bool isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const override {
+    // NOLINTNEXTLINE(bugprone-parent-virtual-call)
     return rhs->kind() == TypeKind::NumberType || Type::isSubtypeOfExt(rhs, why_not);
   }
   static const TypeKind Kind = TypeKind::IntType;
