@@ -6,6 +6,7 @@
 #include <cfloat>
 #include <limits>
 #include <type_traits>
+#include <ATen/NumericUtils.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
 #include <c10/util/MathConstants.h>
@@ -150,7 +151,7 @@ Date:  February 1996
  * See note [3-Clause BSD License for the Cephes Math Library].
  */
 template <typename scalar_t, bool is_cuda=false>
-C10_HOST_DEVICE static inline scalar_t zeta(scalar_t x, scalar_t q) {
+C10_HOST_DEVICE static inline scalar_t zeta(scalar_t x, scalar_t q) __ubsan_ignore_float_divide_by_zero__ {
   using acc_t = at::acc_type<scalar_t, is_cuda>;
   const acc_t MACHEP = acc_t{1.11022302462515654042E-16};
   constexpr acc_t zero = acc_t{0.0};
@@ -1664,7 +1665,7 @@ static inline C10_HOST_DEVICE T calc_ndtri(T y0) {
 
 
 template <typename T>
-static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
+C10_HOST_DEVICE  static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
 erfcx_y100(T y100)
 {
   switch (static_cast<int>(y100)) {
@@ -2075,10 +2076,10 @@ return 0.97771701335885035464e0 + (0.22000938572830479551e-1 + (0.27951610702682
 }
 
 template <typename T>
-static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
+C10_HOST_DEVICE static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
 calc_erfcx(T x)
 {
-  if (std::isnan(x)) {
+  if (at::_isnan(x)) {
     return x;
   }
 
