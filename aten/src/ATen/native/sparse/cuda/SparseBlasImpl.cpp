@@ -73,6 +73,7 @@ void addmm_out_sparse_csr_dense_cuda_impl(
   cusparseOperation_t opB = transpose_B ? CUSPARSE_OPERATION_TRANSPOSE
                                         : CUSPARSE_OPERATION_NON_TRANSPOSE;
 
+  // TODO: update this to support COO sparse layout
   auto descA = at::cuda::sparse::CuSparseSpMatCsrDescriptor(mat1);
   auto descB = at::cuda::sparse::CuSparseDnMatDescriptor(
       transpose_B ? mat2_->transpose(-2, -1) : *mat2_);
@@ -89,8 +90,6 @@ void addmm_out_sparse_csr_dense_cuda_impl(
         cudaDataType compute_type = at::cuda::getCudaDataType<scalar_t>();
         auto handle = at::cuda::getCurrentCUDASparseHandle();
 
-        // cusparseSpMM_bufferSize returns the bufferSize that can be used by
-        // cusparseSpMM
         size_t buffer_size;
         TORCH_CUDASPARSE_CHECK(cusparseSpMM_bufferSize(
             handle,
@@ -102,7 +101,7 @@ void addmm_out_sparse_csr_dense_cuda_impl(
             &beta_,
             descC.descriptor(),
             compute_type,
-            CUSPARSE_SPMM_CSR_ALG2,
+            CUSPARSE_SPMM_CSR_ALG2, // TODO: update this to support COO sparse layout
             &buffer_size // output
             ));
 
@@ -119,7 +118,7 @@ void addmm_out_sparse_csr_dense_cuda_impl(
             &beta_,
             descC.descriptor(),
             compute_type,
-            CUSPARSE_SPMM_CSR_ALG2,
+            CUSPARSE_SPMM_CSR_ALG2, // TODO: update this to support COO sparse layout
             work_data.get()));
       });
 

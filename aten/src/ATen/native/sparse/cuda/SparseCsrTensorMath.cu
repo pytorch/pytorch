@@ -45,6 +45,10 @@ Tensor& addmm_out_sparse_csr_dense_cuda(
 
   TORCH_INTERNAL_ASSERT(mat1.is_sparse_csr());
 
+  // All the checks are from addmm_out_cuda_impl at ATen/native/cuda/Blas.cpp
+  // TODO: remove code duplication and unify code
+  // There were undefined symbol problems,
+  // when using same function for CUDA and SparseCsrCUDA dispatch keys
   TORCH_CHECK(mat1.dim() == 2 && mat2.dim() == 2, "tensors must be 2-D");
 
   TensorArg args[]{{result, "out", 0}, {self, "self", 1}, {mat1, "mat1", 2}, {mat2, "mat2", 3}};
