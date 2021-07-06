@@ -62,8 +62,8 @@ class _InputEqualizationObserver(nn.Module):
 
     def forward(self, x_orig):
         # TODO: Allow for convoluational layers
-        if not (x_orig.ndim == 2):
-            raise ValueError("InputEqualizationObserver only supports Linear layers")
+        if not (x_orig.ndim == 2 or x_orig.ndim == 4):
+            raise ValueError("InputEqualizationObserver only supports Linear and Conv layers")
 
         return self.input_obs(x_orig)
 
@@ -134,8 +134,9 @@ class _WeightEqualizationObserver(nn.Module):
 
     def forward(self, w_orig):
         # TODO: Allow for convoluational layers
-        if not (w_orig.ndim == 2):
-            raise ValueError("WeightEqualizationObserver only supports Linear layers")
+        if not (w_orig.ndim == 2 or w_orig.ndim == 4):
+            raise ValueError("InputEqualizationObserver only supports Linear and Conv layers")
+
         return self.weight_col_obs(w_orig)
 
     def get_weight_col_minmax(self):
