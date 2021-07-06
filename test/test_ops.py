@@ -57,7 +57,7 @@ class TestCommon(TestCase):
     @skipCUDAIfRocm
     @onlyOnCPUAndCUDA
     @ops(op_db, dtypes=OpDTypes.none)
-    def test_dtypes(self, device, dtype, op):
+    def test_dtypes(self, device, op):
         # dtypes to try to backward in
         allowed_backward_dtypes = floating_and_complex_types_and(torch.bfloat16, torch.float16)
 

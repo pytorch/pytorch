@@ -817,6 +817,7 @@ struct TORCH_API Node {
   }
   // The names are returned in order, since name actually is the index.
   std::vector<Symbol> attributeNames() const {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<Symbol> names;
     for (const AVPtr& a : values_) {
       names.push_back(a->name);
@@ -824,6 +825,7 @@ struct TORCH_API Node {
     return names;
   }
   std::vector<const char*> attributeNamesS() const {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<const char*> names;
     for (const AVPtr& a : values_) {
       names.push_back(a->name.toUnqualString());
@@ -892,6 +894,7 @@ struct TORCH_API Node {
     AT_ASSERT(name.is_attr());
     auto it = findAttr(name, false);
     auto nv = AVPtr(new T(name, std::forward<typename T::ConstructorType>(v)));
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (it == values_.end()) {
       values_.push_back(std::move(nv));
     } else {
@@ -903,6 +906,7 @@ struct TORCH_API Node {
   typename T::ValueType& getAttr(Symbol name) const {
     AT_ASSERT(name.is_attr());
     auto it = findAttr(name, true);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     auto* child = dynamic_cast<T*>(it->get());
     if (child == nullptr) {
       throw IRAttributeError(name, true);
@@ -1147,12 +1151,14 @@ struct Graph {
   Node* insert_before_;
 
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Graph(ScopePtr scope_root)
       : next_unique_(0),
         current_scope_(std::move(scope_root)),
         block_(new Block(this, nullptr)),
         insert_before_(return_node()) {}
 
+  // NOLINTNEXTLINE(modernize-use-equals-default,cppcoreguidelines-pro-type-member-init)
   Graph() : Graph(c10::make_intrusive<Scope>()) {}
 
   at::ArrayRef<Value*> inputs() {
@@ -1405,10 +1411,12 @@ struct WithInsertPoint {
  * the new one, and restores the original scope when the object is destroyed.
  */
 struct WithCurrentScope {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   WithCurrentScope(Graph& g, ScopePtr scope)
       : graph_(&g), prev_scope_(g.current_scope()) {
     g.set_current_scope(std::move(scope));
   }
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~WithCurrentScope() {
     graph_->set_current_scope(prev_scope_);
   }
@@ -1418,6 +1426,7 @@ struct WithCurrentScope {
   ScopePtr prev_scope_;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 inline Value::Value(Node* node_, size_t offset_)
     : node_(node_),
       offset_(offset_),
@@ -1552,6 +1561,7 @@ struct OperatorSet {
 };
 
 template <typename T>
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct OperatorMap {
   // Type aliasing
   using OpMapType = typename std::pair<std::shared_ptr<Operator>, T>;
@@ -1559,10 +1569,12 @@ struct OperatorMap {
   using MapType = std::unordered_map<Symbol, ValueType>;
 
   OperatorMap() = default;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit OperatorMap(
       std::initializer_list<std::pair<std::shared_ptr<Operator>, T>> init) {
     insert(init);
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit OperatorMap(std::initializer_list<std::pair<const char*, T>> init) {
     insert(init);
   }
@@ -1631,6 +1643,7 @@ struct OperatorMap {
 
   // TODO: return iterator
   std::vector<OpMapType> getAllKeysAndValues() const {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<OpMapType> keys_values;
     for (auto& symbol_mapping : map) {
       auto& vec = symbol_mapping.second;

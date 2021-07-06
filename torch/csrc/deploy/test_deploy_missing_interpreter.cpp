@@ -8,6 +8,8 @@ int main(int argc, char* argv[]) {
   return rc;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchDeployMissingInterpreter, Throws) {
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   EXPECT_THROW(torch::deploy::InterpreterManager(1), c10::Error);
 }
