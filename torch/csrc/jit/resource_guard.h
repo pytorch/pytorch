@@ -13,6 +13,7 @@ class ResourceGuard {
       : _destructor(std::move(destructor)), _released(false) {}
 
   // NOLINTNEXTLINE(bugprone-exception-escape)
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~ResourceGuard() {
     if (!_released)
       _destructor();
