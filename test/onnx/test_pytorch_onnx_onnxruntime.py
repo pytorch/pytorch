@@ -3548,6 +3548,7 @@ class TestONNXRuntime(unittest.TestCase):
         size = torch.tensor(-1)
         self.run_test(ExpandTensorSizeModel(), input=(input, size))
 
+    @skipIfUnsupportedMinOpsetVersion(11)  # index_put is supported in opsets >= 11
     def test_dynamic_expand_as(self):
         class Model(torch.nn.Module):
             def forward(self, x):
