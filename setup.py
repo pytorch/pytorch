@@ -50,8 +50,8 @@
 #   MKLDNN_CPU_RUNTIME
 #     MKL-DNN threading mode: TBB or OMP (default)
 #
-#   USE_ITT=<Root folder of Intel(R) VTune Profiler>
-#     enable use of Intel(R) VTune Profiler's ITT functionality
+#   USE_ITT=0
+#     disable use of Intel(R) VTune Profiler's ITT functionality
 #
 #   USE_NNPACK=0
 #     disables NNPACK build
@@ -498,7 +498,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
         else:
             report('-- Building without distributed package')
 
-        if cmake_cache_vars['USE_ITT'] != 'None':
+        if cmake_cache_vars['USE_ITT']:
             report('-- Using ITT')
         else:
             report('-- Not using ITT')
