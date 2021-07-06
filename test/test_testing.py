@@ -3,7 +3,6 @@ import functools
 import itertools
 import math
 import os
-import random
 import re
 import unittest
 from typing import Any, Callable, Iterator, List, Tuple
@@ -11,8 +10,7 @@ from typing import Any, Callable, Iterator, List, Tuple
 import torch
 
 from torch.testing._internal.common_utils import \
-    (IS_SANDCASTLE, IS_WINDOWS, TestCase, make_tensor, run_tests, skipIfRocm, slowTest)
-from torch.testing._internal.framework_utils import calculate_shards
+    (IS_FBCODE, IS_SANDCASTLE, IS_WINDOWS, TestCase, make_tensor, run_tests, skipIfRocm, slowTest)
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
      get_device_type_test_bases, instantiate_device_type_tests, onlyCUDA, onlyOnCPUAndCUDA,
@@ -619,97 +617,6 @@ instantiate_device_type_tests(TestTesting, globals())
 
 
 class TestFrameworkUtils(TestCase):
-    tests = [
-        'super_long_test',
-        'long_test1',
-        'long_test2',
-        'normal_test1',
-        'normal_test2',
-        'normal_test3',
-        'short_test1',
-        'short_test2',
-        'short_test3',
-        'short_test4',
-        'short_test5',
-    ]
-
-    test_times = {
-        'super_long_test': 55,
-        'long_test1': 22,
-        'long_test2': 18,
-        'normal_test1': 9,
-        'normal_test2': 7,
-        'normal_test3': 5,
-        'short_test1': 1,
-        'short_test2': 0.6,
-        'short_test3': 0.4,
-        'short_test4': 0.3,
-        'short_test5': 0.01,
-    }
-
-    def test_calculate_2_shards_with_complete_test_times(self):
-        expected_shards = [
-            (60, ['super_long_test', 'normal_test3']),
-            (58.31, ['long_test1', 'long_test2', 'normal_test1', 'normal_test2', 'short_test1', 'short_test2',
-                     'short_test3', 'short_test4', 'short_test5'])
-        ]
-        self.assertEqual(expected_shards, calculate_shards(2, self.tests, self.test_times))
-
-
-    def test_calculate_5_shards_with_complete_test_times(self):
-        expected_shards = [
-            (55, ['super_long_test']),
-            (22, ['long_test1', ]),
-            (18, ['long_test2', ]),
-            (11.31, ['normal_test1', 'short_test1', 'short_test2', 'short_test3', 'short_test4', 'short_test5']),
-            (12, ['normal_test2', 'normal_test3']),
-        ]
-        self.assertEqual(expected_shards, calculate_shards(5, self.tests, self.test_times))
-
-
-    def test_calculate_2_shards_with_incomplete_test_times(self):
-        incomplete_test_times = {k: v for k, v in self.test_times.items() if 'test1' in k}
-        expected_shards = [
-            (22, ['long_test1', 'long_test2', 'normal_test3', 'short_test3', 'short_test5']),
-            (10, ['normal_test1', 'short_test1', 'super_long_test', 'normal_test2', 'short_test2', 'short_test4']),
-        ]
-        self.assertEqual(expected_shards, calculate_shards(2, self.tests, incomplete_test_times))
-
-
-    def test_calculate_5_shards_with_incomplete_test_times(self):
-        incomplete_test_times = {k: v for k, v in self.test_times.items() if 'test1' in k}
-        expected_shards = [
-            (22, ['long_test1', 'normal_test2', 'short_test5']),
-            (9, ['normal_test1', 'normal_test3']),
-            (1, ['short_test1', 'short_test2']),
-            (0, ['super_long_test', 'short_test3']),
-            (0, ['long_test2', 'short_test4']),
-        ]
-        self.assertEqual(expected_shards, calculate_shards(5, self.tests, incomplete_test_times))
-
-    def test_calculate_2_shards_against_optimal_shards(self):
-        for _ in range(100):
-            random.seed(120)
-            random_times = {k: random.random() * 10 for k in self.tests}
-            # all test times except first two
-            rest_of_tests = [i for k, i in random_times.items() if k != 'super_long_test' and k != 'long_test1']
-            sum_of_rest = sum(rest_of_tests)
-            random_times['super_long_test'] = max(sum_of_rest / 2, max(rest_of_tests))
-            random_times['long_test1'] = sum_of_rest - random_times['super_long_test']
-            # An optimal sharding would look like the below, but we don't need to compute this for the test:
-            # optimal_shards = [
-            #     (sum_of_rest, ['super_long_test', 'long_test1']),
-            #     (sum_of_rest, [i for i in self.tests if i != 'super_long_test' and i != 'long_test1']),
-            # ]
-            calculated_shards = calculate_shards(2, self.tests, random_times)
-            max_shard_time = max(calculated_shards[0][0], calculated_shards[1][0])
-            if sum_of_rest != 0:
-                # The calculated shard should not have a ratio worse than 7/6 for num_shards = 2
-                self.assertGreaterEqual(7.0 / 6.0, max_shard_time / sum_of_rest)
-                sorted_tests = sorted(self.tests)
-                sorted_shard_tests = sorted(calculated_shards[0][1] + calculated_shards[1][1])
-                # All the tests should be represented by some shard
-                self.assertEqual(sorted_tests, sorted_shard_tests)
 
     @skipIfRocm
     @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
@@ -817,24 +724,6 @@ def assert_close_with_inputs(actual: Any, expected: Any) -> Iterator[Callable]:
 
 
 class TestAssertClose(TestCase):
-    def test_sparse_support(self):
-        actual = torch.empty(())
-        expected = torch.sparse_coo_tensor(size=())
-
-        for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaises(UsageError):
-                fn()
-
-    def test_quantized_support(self):
-        val = 1
-        actual = torch.tensor([val], dtype=torch.int32)
-        expected = torch._empty_affine_quantized(actual.shape, scale=1, zero_point=0, dtype=torch.qint32)
-        expected.fill_(val)
-
-        for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaises(UsageError):
-                fn()
-
     def test_type_inequality(self):
         actual = torch.empty(2)
         expected = actual.tolist()
@@ -858,6 +747,25 @@ class TestAssertClose(TestCase):
         for fn in assert_close_with_inputs(actual, expected):
             with self.assertRaisesRegex(AssertionError, "shape"):
                 fn()
+
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), reason="MKLDNN is not available.")
+    def test_unknown_layout(self):
+        actual = torch.empty((2, 2))
+        expected = actual.to_mkldnn()
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaises(UsageError):
+                fn()
+
+    def test_mismatching_layout(self):
+        strided = torch.empty((2, 2))
+        sparse_coo = strided.to_sparse()
+        sparse_csr = strided.to_sparse_csr()
+
+        for actual, expected in itertools.combinations((strided, sparse_coo, sparse_csr), 2):
+            for fn in assert_close_with_inputs(actual, expected):
+                with self.assertRaisesRegex(AssertionError, "layout"):
+                    fn()
 
     def test_mismatching_dtype(self):
         actual = torch.empty((), dtype=torch.float)
@@ -1156,6 +1064,233 @@ class TestAssertCloseComplex(TestCase):
         for fn in assert_close_with_inputs(actual, expected):
             with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the imaginary part")):
                 fn()
+
+    def test_matching_conjugate_bit(self):
+        actual = torch.tensor(complex(1, 1)).conj()
+        expected = torch.tensor(complex(1, -1))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn()
+
+
+class TestAssertCloseSparseCOO(TestCase):
+    def test_matching_coalesced(self):
+        indices = (
+            (0, 1),
+            (1, 0),
+        )
+        values = (1, 2)
+        actual = torch.sparse_coo_tensor(indices, values, size=(2, 2)).coalesce()
+        expected = actual.clone()
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn()
+
+    def test_matching_uncoalesced(self):
+        indices = (
+            (0, 1),
+            (1, 0),
+        )
+        values = (1, 2)
+        actual = torch.sparse_coo_tensor(indices, values, size=(2, 2))
+        expected = actual.clone()
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn()
+
+    def test_mismatching_is_coalesced(self):
+        indices = (
+            (0, 1),
+            (1, 0),
+        )
+        values = (1, 2)
+        actual = torch.sparse_coo_tensor(indices, values, size=(2, 2))
+        expected = actual.clone().coalesce()
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, "is_coalesced"):
+                fn()
+
+    def test_mismatching_is_coalesced_no_check(self):
+        actual_indices = (
+            (0, 1),
+            (1, 0),
+        )
+        actual_values = (1, 2)
+        actual = torch.sparse_coo_tensor(actual_indices, actual_values, size=(2, 2)).coalesce()
+
+        expected_indices = (
+            (0, 1, 1,),
+            (1, 0, 0,),
+        )
+        expected_values = (1, 1, 1)
+        expected = torch.sparse_coo_tensor(expected_indices, expected_values, size=(2, 2))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn(check_is_coalesced=False)
+
+    def test_mismatching_nnz(self):
+        actual_indices = (
+            (0, 1),
+            (1, 0),
+        )
+        actual_values = (1, 2)
+        actual = torch.sparse_coo_tensor(actual_indices, actual_values, size=(2, 2))
+
+        expected_indices = (
+            (0, 1, 1,),
+            (1, 0, 0,),
+        )
+        expected_values = (1, 1, 1)
+        expected = torch.sparse_coo_tensor(expected_indices, expected_values, size=(2, 2))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("number of specified values")):
+                fn()
+
+    def test_mismatching_indices_msg(self):
+        actual_indices = (
+            (0, 1),
+            (1, 0),
+        )
+        actual_values = (1, 2)
+        actual = torch.sparse_coo_tensor(actual_indices, actual_values, size=(2, 2))
+
+        expected_indices = (
+            (0, 1),
+            (1, 1),
+        )
+        expected_values = (1, 2)
+        expected = torch.sparse_coo_tensor(expected_indices, expected_values, size=(2, 2))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the indices")):
+                fn()
+
+    def test_mismatching_values_msg(self):
+        actual_indices = (
+            (0, 1),
+            (1, 0),
+        )
+        actual_values = (1, 2)
+        actual = torch.sparse_coo_tensor(actual_indices, actual_values, size=(2, 2))
+
+        expected_indices = (
+            (0, 1),
+            (1, 0),
+        )
+        expected_values = (1, 3)
+        expected = torch.sparse_coo_tensor(expected_indices, expected_values, size=(2, 2))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the values")):
+                fn()
+
+
+@unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Not all sandcastle jobs support CSR testing")
+class TestAssertCloseSparseCSR(TestCase):
+    def test_matching(self):
+        crow_indices = (0, 1, 2)
+        col_indices = (1, 0)
+        values = (1, 2)
+        actual = torch.sparse_csr_tensor(crow_indices, col_indices, values, size=(2, 2))
+        # TODO: replace this by actual.clone() after https://github.com/pytorch/pytorch/issues/59285 is fixed
+        expected = torch.sparse_csr_tensor(
+            actual.crow_indices(), actual.col_indices(), actual.values(), size=actual.size(), device=actual.device
+        )
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn()
+
+    def test_mismatching_crow_indices_msg(self):
+        actual_crow_indices = (0, 1, 2)
+        actual_col_indices = (1, 0)
+        actual_values = (1, 2)
+        actual = torch.sparse_csr_tensor(actual_crow_indices, actual_col_indices, actual_values, size=(2, 2))
+
+        expected_crow_indices = (0, 2, 2)
+        expected_col_indices = actual_col_indices
+        expected_values = actual_values
+        expected = torch.sparse_csr_tensor(expected_crow_indices, expected_col_indices, expected_values, size=(2, 2))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the crow_indices")):
+                fn()
+
+    def test_mismatching_col_indices_msg(self):
+        actual_crow_indices = (0, 1, 2)
+        actual_col_indices = (1, 0)
+        actual_values = (1, 2)
+        actual = torch.sparse_csr_tensor(actual_crow_indices, actual_col_indices, actual_values, size=(2, 2))
+
+        expected_crow_indices = actual_crow_indices
+        expected_col_indices = (1, 1)
+        expected_values = actual_values
+        expected = torch.sparse_csr_tensor(expected_crow_indices, expected_col_indices, expected_values, size=(2, 2))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the col_indices")):
+                fn()
+
+    def test_mismatching_values_msg(self):
+        actual_crow_indices = (0, 1, 2)
+        actual_col_indices = (1, 0)
+        actual_values = (1, 2)
+        actual = torch.sparse_csr_tensor(actual_crow_indices, actual_col_indices, actual_values, size=(2, 2))
+
+        expected_crow_indices = actual_crow_indices
+        expected_col_indices = actual_col_indices
+        expected_values = (1, 3)
+        expected = torch.sparse_csr_tensor(expected_crow_indices, expected_col_indices, expected_values, size=(2, 2))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the values")):
+                fn()
+
+
+class TestAssertCloseQuantized(TestCase):
+    def test_mismatching_is_quantized(self):
+        actual = torch.tensor(1.0)
+        expected = torch.quantize_per_tensor(actual, scale=1.0, zero_point=0, dtype=torch.qint32)
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, "is_quantized"):
+                fn()
+
+    def test_mismatching_qscheme(self):
+        t = torch.tensor((1.0,))
+        actual = torch.quantize_per_tensor(t, scale=1.0, zero_point=0, dtype=torch.qint32)
+        expected = torch.quantize_per_channel(
+            t,
+            scales=torch.tensor((1.0,)),
+            zero_points=torch.tensor((0,)),
+            axis=0,
+            dtype=torch.qint32,
+        )
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, "qscheme"):
+                fn()
+
+    def test_matching_per_tensor(self):
+        actual = torch.quantize_per_tensor(torch.tensor(1.0), scale=1.0, zero_point=0, dtype=torch.qint32)
+        expected = actual.clone()
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn()
+
+    def test_matching_per_channel(self):
+        actual = torch.quantize_per_channel(
+            torch.tensor((1.0,)),
+            scales=torch.tensor((1.0,)),
+            zero_points=torch.tensor((0,)),
+            axis=0,
+            dtype=torch.qint32,
+        )
+        expected = actual.clone()
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn()
 
 
 if __name__ == '__main__':
