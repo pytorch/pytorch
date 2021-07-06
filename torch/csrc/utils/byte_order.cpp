@@ -236,6 +236,7 @@ void THP_encodeInt16Buffer(uint8_t* dst, const int16_t* src, THPByteOrder order,
 {
   memcpy(dst, src, sizeof(int16_t) * len);
   if (order != THP_nativeByteOrder()) {
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
     for(const auto i : c10::irange(len)) {
       swapBytes16(dst);
       dst += sizeof(int16_t);
@@ -247,6 +248,7 @@ void THP_encodeInt32Buffer(uint8_t* dst, const int32_t* src, THPByteOrder order,
 {
   memcpy(dst, src, sizeof(int32_t) * len);
   if (order != THP_nativeByteOrder()) {
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
     for(const auto i : c10::irange(len)) {
       swapBytes32(dst);
       dst += sizeof(int32_t);
@@ -258,6 +260,7 @@ void THP_encodeInt64Buffer(uint8_t* dst, const int64_t* src, THPByteOrder order,
 {
   memcpy(dst, src, sizeof(int64_t) * len);
   if (order != THP_nativeByteOrder()) {
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
     for(const auto i : c10::irange(len)) {
       swapBytes64(dst);
       dst += sizeof(int64_t);
@@ -269,6 +272,7 @@ void THP_encodeFloatBuffer(uint8_t* dst, const float* src, THPByteOrder order, s
 {
   memcpy(dst, src, sizeof(float) * len);
   if (order != THP_nativeByteOrder()) {
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
     for(const auto i : c10::irange(len)) {
       swapBytes32(dst);
       dst += sizeof(float);
@@ -280,6 +284,7 @@ void THP_encodeDoubleBuffer(uint8_t* dst, const double* src, THPByteOrder order,
 {
   memcpy(dst, src, sizeof(double) * len);
   if (order != THP_nativeByteOrder()) {
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
     for(const auto i : c10::irange(len)) {
       swapBytes64(dst);
       dst += sizeof(double);
