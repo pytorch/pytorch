@@ -41,8 +41,9 @@ struct TORCH_API NotImplemented : public Error {
 struct TORCH_API DelayedError : public Node {
   DelayedError(std::string msg, int num_inputs)
     : msg(std::move(msg)) {
-      for(const auto i : c10::irange(num_inputs))
-        add_input_metadata(Node::undefined_input());
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
+    for (const auto i : c10::irange(num_inputs))
+      add_input_metadata(Node::undefined_input());
     }
 
   variable_list apply(variable_list&& inputs) override;
@@ -69,6 +70,7 @@ struct TORCH_API UndefinedGradBackward : public Node {
 };
 
 struct TORCH_API GraphRoot : public Node {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   GraphRoot(edge_list functions, variable_list inputs)
       : Node(std::move(functions)),
       outputs(std::move(inputs)) {
