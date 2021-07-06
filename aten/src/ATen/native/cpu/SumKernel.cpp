@@ -11,16 +11,6 @@ namespace at {
 namespace native {
 namespace {
 
-// use float as accumulation type for BFloat16
-template <typename scalar_t> struct AccType { using type = scalar_t; };
-template <> struct AccType<BFloat16> { using type = float; };
-
-template <typename scalar_t> struct AccType<Vectorized<scalar_t>> { using type = Vectorized<scalar_t>; };
-template <> struct AccType<Vectorized<BFloat16>> { using type = Vec2f; };
-
-template <typename scalar_t>
-using acc_type = typename AccType<scalar_t>::type;
-
 template <typename scalar_t>
 struct LoadPolicy {
   static scalar_t load(const char * C10_RESTRICT data, int64_t stride, int64_t index) {
@@ -217,9 +207,8 @@ std::array<scalar_t, nrows> multi_row_sum(
   const int64_t level_mask = level_step - 1;
 
   // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-  using accscalar_t = acc_type<scalar_t>;
-  accscalar_t acc[num_levels][nrows];
-  std::fill_n(&acc[0][0], num_levels * nrows, accscalar_t(0));
+  scalar_t acc[num_levels][nrows];
+  std::fill_n(&acc[0][0], num_levels * nrows, scalar_t(0));
 
   int64_t i = 0;
   for (; i + level_step <= size;) {
@@ -239,7 +228,7 @@ std::array<scalar_t, nrows> multi_row_sum(
       #endif
       for (int64_t k = 0; k < nrows; ++k) {
         acc[j][k] += acc[j-1][k];
-        acc[j-1][k] = accscalar_t(0);
+        acc[j-1][k] = scalar_t(0);
       }
 
       const auto mask = (level_mask << (j * level_power));
@@ -271,7 +260,7 @@ std::array<scalar_t, nrows> multi_row_sum(
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   std::array<scalar_t, nrows> ret;
   for (int64_t k = 0; k < nrows; ++k) {
-    ret[k] = scalar_t(acc[0][k]);
+    ret[k] = acc[0][k];
   }
   return ret;
 }
