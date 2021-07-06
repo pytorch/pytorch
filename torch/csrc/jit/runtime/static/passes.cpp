@@ -488,11 +488,19 @@ void ReplaceWithCopy(std::shared_ptr<torch::jit::Graph>& graph) {
   for (const auto& p : replacement) {
     auto* old_node = p.first;
     auto* new_node = p.second;
+    new_node->output()->copyMetadata(old_node->output());
     old_node->replaceAllUsesWith(new_node);
     old_node->destroy();
   }
+#ifndef NDEBUG
+  graph->lint();
+  AliasDb db2(graph);
+  torch::jit::Lint(&db2);
+#endif
 }
 
+// NB: The alias type of the fused op needs to be changed to
+// c10::AliasAnalysisKind::PURE_FUNCTION to make alias analysis work.
 void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
   auto nodes = graph->nodes();
   for (auto it = nodes.begin(); it != nodes.end(); ++it) {
@@ -530,6 +538,11 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
       node->eraseOutput(0);
     }
   }
+#ifndef NDEBUG
+  graph->lint();
+  AliasDb db2(graph);
+  torch::jit::Lint(&db2);
+#endif
 }
 
 } // namespace jit
