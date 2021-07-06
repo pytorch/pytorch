@@ -9645,7 +9645,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU: special_erfcx_out
+    CPU, CUDA: special_erfcx_out
 
 - func: special_erfinv(Tensor self) -> Tensor
   python_module: special
