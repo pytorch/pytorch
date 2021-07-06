@@ -418,7 +418,6 @@ struct PythonPrintImpl {
     ident_refs_[v] = s;
   }
   void assignValue(Value* v, std::shared_ptr<TaggedStringStream> s) {
-
     expr_table_[v] = std::move(s);
   }
   void assignValue(Value* v, Value* w) {
@@ -517,7 +516,8 @@ struct PythonPrintImpl {
     if (lhs.size() == 1) {
       Value* v = lhs.at(0);
       if (!annotated_unions_.count(v) && !expr_table_.count(v) &&
-          (v->type()->kind() == UnionType::Kind || v->type()->kind() == OptionalType::Kind)) {
+          (v->type()->kind() == UnionType::Kind ||
+           v->type()->kind() == OptionalType::Kind)) {
         body_ << " : " << v->type()->annotation_str();
         annotated_unions_.insert(v);
       }
@@ -529,7 +529,8 @@ struct PythonPrintImpl {
   }
 
   bool requiresAnnotation(Value* lhs, Value* rhs) {
-    if (lhs->type()->kind() == UnionType::Kind || lhs->type()->kind() == OptionalType::Kind) {
+    if (lhs->type()->kind() == UnionType::Kind ||
+        lhs->type()->kind() == OptionalType::Kind) {
       if (!annotated_unions_.count(lhs)) {
         annotated_unions_.insert(lhs);
         return true;
