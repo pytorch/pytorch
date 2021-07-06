@@ -1688,6 +1688,50 @@ Example::
     False
 """)
 
+add_docstr(torch.corrcoef, r"""
+corrcoef(input) -> Tensor
+
+Estimates the Pearson product-moment correlation coefficient matrix of the variables given by the :attr:`input` matrix,
+where rows are the variables and columns are the observations.
+
+.. note::
+
+    The correlation coefficient matrix R is computed using the covariance matrix C as given by
+    :math:`R_{ij} = \frac{ C_{ij} } { \sqrt{ C_{ii} * C_{jj} } }`
+
+.. note::
+
+    Due to floating point rounding, the resulting array may not be Hermitian and its diagonal elements may not be 1.
+    The real and imaginary values are clipped to the interval [-1, 1] in an attempt to improve this situation.
+
+Args:
+    input (Tensor): A 2D matrix containing multiple variables and observations, or a
+        Scalar or 1D vector representing a single variable.
+
+Returns:
+    (Tensor) The correlation coefficient matrix of the variables.
+
+.. seealso::
+
+        :func:`torch.cov` covariance matrix.
+
+Example::
+
+    >>> x = torch.tensor([[0, 1, 2], [2, 1, 0]])
+    >>> torch.corrcoef(x)
+    tensor([[ 1., -1.],
+            [-1.,  1.]])
+    >>> x = torch.randn(2, 4)
+    >>> x
+    tensor([[-0.2678, -0.0908, -0.3766,  0.2780],
+            [-0.5812,  0.1535,  0.2387,  0.2350]])
+    >>> torch.corrcoef(x)
+    tensor([[1.0000, 0.3582],
+            [0.3582, 1.0000]])
+    >>> torch.corrcoef(x[0])
+    tensor(1.)
+""")
+
 add_docstr(torch.cov, r"""
 cov(input, *, correction=1, fweights=None, aweights=None) -> Tensor
 
@@ -1734,6 +1778,10 @@ Keyword Args:
 
 Returns:
     (Tensor) The covariance matrix of the variables.
+
+.. seealso::
+
+        :func:`torch.corrcoef` normalized covariance matrix.
 
 Example::
     >>> x = torch.tensor([[0, 2], [1, 1], [2, 0]]).T
