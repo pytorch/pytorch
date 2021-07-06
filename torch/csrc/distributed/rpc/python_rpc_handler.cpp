@@ -128,6 +128,7 @@ PythonRpcHandler& PythonRpcHandler::getInstance() {
   // release GIL to avoid this situation.
   TORCH_INTERNAL_ASSERT(!PyGILState_Check());
   // Leaky singleton to avoid module destructor race.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static PythonRpcHandler* handler = new PythonRpcHandler();
   handler->init();
   return *handler;
