@@ -501,18 +501,6 @@ def _model_to_graph(model, args, verbose=False,
     flatten_args, _ = torch._C._jit_flatten(args)
     assert len(params) + len(flatten_args) == sum(1 for _ in graph.inputs())
 
-    origin_input_names = []
-    params_dict = _get_named_param_dict(graph, params)
-    if input_names is not None:
-        origin_input_names = input_names
-    else:
-        params_dict = _get_named_param_dict(graph, params)
-        params_names = _unique_state_dict(model).keys()
-
-        for _, input_name in enumerate(all_input_and_param_names):
-            if input_name not in params_names:
-                origin_input_names.append(input_name)
-
     allow_adjust_graph_inputs = (export_params and not keep_initializers_as_inputs)
     if (training is None or training == TrainingMode.EVAL):
         params_dict = torch._C._jit_pass_onnx_eval_peephole(graph, params_dict, allow_adjust_graph_inputs)
