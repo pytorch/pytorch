@@ -6,14 +6,14 @@
 import collections
 import copy
 import io
+import logging
 from itertools import chain
 from typing import Any, Callable, Dict, List, Optional, Type
 
-import logging
 import torch
 import torch.distributed as dist
-from torch.optim import Optimizer
 from torch.distributed.algorithms.join import _JoinHook
+from torch.optim import Optimizer
 
 __all__ = ["ZeroRedundancyOptimizer"]
 

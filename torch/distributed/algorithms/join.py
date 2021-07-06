@@ -1,9 +1,10 @@
 import warnings
-from typing import List
 from abc import ABC, abstractmethod
+from typing import List
 
 import torch
 import torch.distributed as dist
+
 
 class _JoinHook(ABC):
     r"""
@@ -31,6 +32,10 @@ class _JoinHook(ABC):
         This hook is called after all processes have joined. It is passed an
         additional ``bool`` argument ``is_last_joiner``, which indicates if the
         rank is one of the last to join.
+
+        Arguments:
+            is_last_joiner (bool): ``True`` if the rank is one of the last to
+                join; ``False`` otherwise.
         """
         ...
 
