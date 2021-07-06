@@ -366,8 +366,10 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           &::c10d::Reducer::rebuild_buckets,
           py::call_guard<py::gil_scoped_release>())
       .def(
-          "get_bucket_tensors",
-          &::c10d::Reducer::get_bucket_tensors,
+          "_get_zeros_like_grad_buckets",
+          [](::c10d::Reducer& reducer) {
+              return reducer.get_grad_buckets(/* return_zero_tensors */ true);
+          },
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_push_all_rebuilt_params",
@@ -396,6 +398,15 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
       .def(
           "_delay_all_reduce",
           &::c10d::Reducer::delay_all_reduce,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_run_comm_hook",
+          [](::c10d::Reducer& reducer, ::c10d::GradBucket& bucket)
+              -> std::shared_ptr<jit::PythonFutureWrapper> {
+            c10::intrusive_ptr<c10::ivalue::Future> fut =
+                reducer.run_comm_hook(bucket);
+            return std::make_shared<jit::PythonFutureWrapper>(fut);
+          },
           py::call_guard<py::gil_scoped_release>())
       .def(
           "set_logger",
@@ -1470,7 +1481,7 @@ Example::
       .def(
           "get_future",
           [](::c10d::ProcessGroup::Work& work)
-              -> std::shared_ptr<jit::PythonFutureWrapper> {
+            -> std::shared_ptr<jit::PythonFutureWrapper> {
             return std::make_shared<jit::PythonFutureWrapper>(work.getFuture());
           },
           R"(
