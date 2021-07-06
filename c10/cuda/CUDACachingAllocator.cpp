@@ -799,8 +799,7 @@ class DeviceCachingAllocator {
     if (it == graph_pools.end()) {
       // mempool_id does not reference an existing pool. Make a new pool for
       // this capture.
-      graph_pools.emplace(
-          std::make_pair(mempool_id, std::make_unique<PrivatePool>()));
+      graph_pools.emplace(mempool_id, std::make_unique<PrivatePool>());
     } else {
       // mempool_id references an existing pool, which the current capture will
       // share. Check this pool is live (at least one other capture already
