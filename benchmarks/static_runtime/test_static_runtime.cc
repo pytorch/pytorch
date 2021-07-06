@@ -11,6 +11,9 @@ using namespace torch;
 using namespace torch::jit;
 using c10::IValue;
 
+C10_DECLARE_bool(
+    static_runtime_enable_fast_math);
+
 namespace {
 static at::Tensor getTensor(const at::IValue& ival) {
   if (ival.isTensor()) {
@@ -214,6 +217,21 @@ TEST(StaticRuntime, UnaryOps) {
   testStaticRuntime(aten_sum_1, args, args2);
   testStaticRuntime(aten_sum_0_true, args, args2);
   testStaticRuntime(aten_sum_1_true, args, args2);
+}
+
+TEST(StaticRuntime, Sigmoid) {
+  auto a = at::randn({2, 3});
+  auto b = at::randn({4, 3, 2});
+
+  std::vector<IValue> args{a}, args2{b};
+
+  testStaticRuntime(sigmoid_script, args);
+  testStaticRuntime(sigmoid_script, args, {args2});
+
+  FLAGS_static_runtime_enable_fast_math = false;
+  testStaticRuntime(sigmoid_script, args);
+  testStaticRuntime(sigmoid_script, args, {args2});
+  FLAGS_static_runtime_enable_fast_math = true;
 }
 
 TEST(StaticRuntime, Clone) {

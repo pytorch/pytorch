@@ -27,8 +27,9 @@ Tensor empty_override(IntArrayRef size, c10::optional<ScalarType> dtype, c10::op
 }
 
 Tensor add_override(const Tensor & a, const Tensor & b , const Scalar& c) {
+  auto out = empty({5, 5}, at::kMSNPU);  // Don't return self as-is
   test_int = 2;
-  return a;
+  return out;
 }
 
 Tensor empty_strided_override(
