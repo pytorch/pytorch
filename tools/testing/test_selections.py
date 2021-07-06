@@ -60,7 +60,7 @@ def _calculate_job_times(reports: List["Report"]) -> Dict[str, float]:
     return {job: time for job, (time, _) in jobs_to_times.items()}
 
 
-def _calculate_shards(num_shards: int, tests: List[str], job_times: Dict[str, float]) -> List[Tuple[float, List[str]]]:
+def calculate_shards(num_shards: int, tests: List[str], job_times: Dict[str, float]) -> List[Tuple[float, List[str]]]:
     filtered_job_times: Dict[str, float] = dict()
     unknown_jobs : List[str] = []
     for test in tests:
@@ -173,7 +173,7 @@ def get_shard_based_on_S3(which_shard: int, num_shards: int, tests: List[str], t
         print('Gathered no stats from S3. Proceeding with default sharding plan.')
         return tests[which_shard - 1 :: num_shards]
 
-    shards = _calculate_shards(num_shards, tests, jobs_to_times)
+    shards = calculate_shards(num_shards, tests, jobs_to_times)
     _, tests_from_shard = shards[which_shard - 1]
     return tests_from_shard
 
