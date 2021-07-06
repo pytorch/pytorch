@@ -78,6 +78,15 @@ def create_temp_dir_and_files():
             (temp_sub_dir, temp_sub_file1_name, temp_sub_file2_name)]
 
 
+class NumbersDataset(IterDataPipe):
+    def __init__(self, size=10):
+        self.size = size
+
+    def __iter__(self):
+        for i in range(self.size):
+            yield i
+
+
 class TestIterableDataPipeBasic(TestCase):
 
     def setUp(self):
