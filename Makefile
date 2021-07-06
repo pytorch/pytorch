@@ -104,7 +104,7 @@ cmakelint:
 		--job 'cmakelint' \
 		--step 'Run cmakelint'
 
-clang_tidy:
+clang-tidy:
 	@$(PYTHON) tools/linter/clang_tidy \
 		--clang-tidy-exe .clang-tidy-bin/clang-tidy \
 		$(CHANGED_ONLY) \
