@@ -2811,6 +2811,8 @@ class TestLinalg(TestCase):
         self.assertEqual(t, t2)
 
     def _test_svd_helper(self, shape, some, col_maj, device, dtype):
+        # To have accurate tests and less false positives on different CPUs and GPUs,
+        # we use double or complex double accuracy for CPU reference.
         cpu_dtype = torch.complex128 if dtype.is_complex else torch.float64
         cpu_tensor = torch.randn(shape, device='cpu', dtype=cpu_dtype)
         device_tensor = cpu_tensor.to(device=device, dtype=dtype)
@@ -2827,7 +2829,7 @@ class TestLinalg(TestCase):
         #   then the corresponding column of the V has to be changed.
         # Thus here we only compare result[..., :m].abs() from CPU and device.
         for x, y in zip(cpu_result, device_result):
-            self.assertEqual(x[..., :m].abs().to(dtype=dtype), y[..., :m].abs().to(dtype=dtype))
+            self.assertEqual(x[..., :m].abs(), y[..., :m].abs(), exact_dtype=False)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
