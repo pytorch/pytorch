@@ -503,12 +503,7 @@ class GraphTypeChecker:
                 raise RuntimeError(f'No inference rule registered for target {n.target}!')
 
         if n.op == 'call_module':
-
-            target_atoms = str(n.target).split('.')
-            op_type = self.traced
-            for atom in target_atoms:
-                op_type = getattr(op_type, str(atom))
-
+            op_type = self.traced.get_submodule(n.target)
             if type(op_type) in _INFERENCE_RULES:
                 return _INFERENCE_RULES[type(op_type)](n, op_type)
             else:
