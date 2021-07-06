@@ -75,7 +75,7 @@ class TestEqualizeFx(QuantizationTestCase):
            input_qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            input_qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)),
            weight_qdtype=st.sampled_from((torch.qint8, torch.quint8)),
-           weight_qscheme=st.sampled_from((torch.per_channel_affine, torch.per_channel_symmetric, 
+           weight_qscheme=st.sampled_from((torch.per_channel_affine, torch.per_channel_symmetric,
                                            torch.per_channel_affine_float_qparams)))
     def test_input_weight_eq_observer(self, ndim, input_qdtype, input_qscheme, weight_qdtype, weight_qscheme):
         if ndim == 2:
@@ -84,9 +84,9 @@ class TestEqualizeFx(QuantizationTestCase):
             w = (np.random.random(size=(np.random.randint(2, 10), width)) * 10).round(decimals=2).astype(np.float32)
         elif ndim == 4:
             channel = np.random.randint(1, 10)
-            x = (np.random.random(size=(np.random.randint(2, 10), channel, np.random.randint(2, 10), 
+            x = (np.random.random(size=(np.random.randint(2, 10), channel, np.random.randint(2, 10),
                                         np.random.randint(2, 10))) * 10).round(decimals=2).astype(np.float32)
-            w = (np.random.random(size=(np.random.randint(2, 10), channel, np.random.randint(2, 10), 
+            w = (np.random.random(size=(np.random.randint(2, 10), channel, np.random.randint(2, 10),
                                         np.random.randint(2, 10))) * 10).round(decimals=2).astype(np.float32)
 
         input_eq_obs = _InputEqualizationObserver(dtype=input_qdtype, qscheme=input_qscheme)
