@@ -42,8 +42,6 @@ class TypeParser {
       return simpleTypeIt->second;
     } else if (token == "List") {
       return CreateSingleElementType<ListType>();
-    } else if (token == "Optional") {
-      return CreateSingleElementType<OptionalType>();
     } else if (token == "Future") {
       return CreateSingleElementType<FutureType>();
     } else if (token == "Dict") {

@@ -367,7 +367,7 @@ Module ScriptModuleDeserializer::LEGACY_convertModule(
     // Verify that all the non-optional attributes have been initialized
     // TODO: Issue #20497
     const IValue& v = module._ivalue()->getSlot(i);
-    if (module_type->getAttribute(i)->isOptional()) {
+    if (!module_type->getAttribute(i)->isOptional()) {
       TORCH_CHECK(
           !v.isNone(),
           "The field '",

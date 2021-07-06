@@ -570,6 +570,30 @@ void initPythonIRBindings(PyObject* module_) {
           py::arg("recurse") = true)
       .def("input", [](Node& n) { return n.input(); })
       .def("output", [](Node& n) { return n.output(); })
+      .def(
+          "getModuleHierarchy",
+          [](Node& n) {
+            if (!n.callstack().has_value()) {
+              return std::string();
+            }
+            InlinedCallStackPtr callstack_ptr = n.callstack().value();
+            std::string module_info;
+            for (auto& entry : callstack_ptr->vec()) {
+              const auto& opt_module_info =
+                  std::get<kModuleInstanceInfo>(entry);
+              if (opt_module_info.has_value()) {
+                const auto& module_instance_info = opt_module_info.value();
+                if (!module_info.empty()) {
+                  module_info.append(".");
+                }
+                module_info.append(
+                    utils::get_module_info(module_instance_info));
+              } else {
+                module_info += ".UNKNOWN_INSTANCE(UNKNOWN_TYPE)";
+              }
+            }
+            return module_info;
+          })
       .NS(addInput)
       .NS(replaceInput)
       .NS(replaceInputWith)
@@ -866,7 +890,7 @@ void initPythonIRBindings(PyObject* module_) {
       });
   py::class_<UnionType, Type, std::shared_ptr<UnionType>>(m, "UnionType")
       .def(py::init(
-          [](std::vector<TypePtr> a) { return UnionType::create(a); }))
+          [](const std::vector<TypePtr> a) { return UnionType::create(a); }))
       .def("containedTypes", [](UnionType& self) {
         return self.containedTypes().vec();
       });
@@ -890,7 +914,7 @@ void initPythonIRBindings(PyObject* module_) {
   py::class_<Pybind11_OptionalType, UnionType, std::shared_ptr<Pybind11_OptionalType>>(
       m, "OptionalType")
       .def(py::init(
-          [](std::vector<TypePtr> a) { return Pybind11_OptionalType::create(std::move(a)); }))
+          [](const std::vector<TypePtr> a) { return Pybind11_OptionalType::create(std::move(a)); }))
       .def_static("ofTensor", &Pybind11_OptionalType::legacy_OptionalOfTensor)
       .def("getElementType", &UnionType::getContainedElementIfOptional);
   py::class_<FutureType, Type, std::shared_ptr<FutureType>>(m, "FutureType")

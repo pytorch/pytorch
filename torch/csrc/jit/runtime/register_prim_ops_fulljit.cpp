@@ -374,6 +374,7 @@ RegisterOperators logging_operators(
          },
          aliasAnalysisFromSchema())});
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 void hashValue(Stack* stack) {
   auto value = pop(stack);
   push(stack, value.hash());

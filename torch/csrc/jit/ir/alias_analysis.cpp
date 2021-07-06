@@ -157,7 +157,7 @@ c10::optional<TypePtr> AliasDb::mapTypeToAliasTypeSetPtr(
 
 bool AliasDb::isContainerType(const TypePtr& type) const {
   auto mut_type = mapTypeToAliasTypeSetPtr(type);
-  return mut_type.has_value();
+  return mut_type.has_value() && (*mut_type)->containedTypes().size() > 0;
 }
 
 AliasDb::~AliasDb() = default;
@@ -202,7 +202,7 @@ AliasDb::AliasDb(std::shared_ptr<Graph> graph, bool isFrozen)
   writeIndex_ = TWriteIndex();
   auto& writeIndex = *writeIndex_; // to make operator[] less ugly
 
-  // Build the write index
+  // build the write index
   for (const auto& write : writeRegistry_->writes_) {
     Node* node = write.first;
     const std::vector<const Value*> writtenValues = write.second;
@@ -537,7 +537,7 @@ bool AliasDb::tryRegisteredAnalysis(Node* node) {
 //   1. Retrieve alias information for every input.
 //   2. Use the node's schema's alias annotations to propgagate alias/write
 //      information to the outputs. For unschematized nodes, a special analyzer
-//      will have to be hand-written.
+//      will have to be handwritten.
 void AliasDb::analyzeImpl(Node* node) {
   auto op = node->maybeOperator();
   const bool hasSpecialCase = aliasAnalysisHasSpecialCaseFor(node->kind());
@@ -1040,7 +1040,7 @@ bool AliasDb::functionalNonEscapingListUse(const Use& use) const {
   return false;
 }
 
-// List or dict or tuple construct: create an aliasing element for the actual
+// List or dict or tuple: construct create an aliasing element for the actual
 // container, then mark all inputs as wildcards, since they've gone inside the
 // container. Then, add the wildcard sets of appropriate type to the contained
 // elements of the container.
@@ -1135,17 +1135,15 @@ void AliasDb::makePointerTo(const Value* from, const Value* to) {
         expected_kind, from->type()->str(), to->type()->str());
     return;
   }
-
   // both immutable
   if (!isMutableTypeInternal(from)) {
     return;
   }
-
   if (from == to) {
     return;
   }
 
-  // At this point, we are dealing with two mutable types.
+  // At this point, we are dealing with two mutable types
   auto from_el = getOrCreateElement(from);
   auto to_el = getOrCreateElement(to);
 
@@ -1759,7 +1757,7 @@ c10::optional<Element*> AliasDb::setWildcard(const Value* v) {
     return c10::nullopt;
   }
   // Ensure that we create a corresponding Element for `v` still, as it is an
-  // invariant that all mutable values have an Element.
+  // invariant that all mutable values have an Element
   getOrCreateElement(v);
   wildcards_.insert(v);
   return *maybe_wildcardElement;

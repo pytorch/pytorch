@@ -5,8 +5,8 @@
 #endif
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
-#include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/serialization/pickler.h>
+#include <torch/csrc/jit/serialization/storage_context.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 #include <string>
 
@@ -106,18 +106,6 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
         if (t->isOptional()) {
           if (!w.value.isNone()) {
             Work elem = {t->getContainedElementIfOptional(), w.value};
-            to_process.emplace_back(std::move(elem));
-          }
-        }
-      } break;
-      case UnionType::Kind: {
-        auto t = w.static_type->expect<UnionType>();
-        if (t->containedTypes().size() == 2 && t->canHoldType(NoneType::get())) {
-          if (!w.value.isNone()) {
-            auto inner = t->containedTypes()[0] != NoneType::get()
-                         ? t->containedTypes()[0]
-                         : t->containedTypes()[1];
-            Work elem = {inner, w.value};
             to_process.emplace_back(std::move(elem));
           }
         }
