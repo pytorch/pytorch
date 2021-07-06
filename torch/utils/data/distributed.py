@@ -58,7 +58,7 @@ class DistributedSampler(Sampler[T_co]):
 
     def __init__(self, dataset: Dataset, num_replicas: Optional[int] = None,
                  rank: Optional[int] = None, shuffle: bool = True,
-                 seed: int = 0, drop_last: bool = False) -> None:
+                 seed: int = 524287, drop_last: bool = False) -> None:
         if num_replicas is None:
             if not dist.is_available():
                 raise RuntimeError("Requires distributed package to be available")
