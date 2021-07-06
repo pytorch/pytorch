@@ -758,7 +758,9 @@ CompositeImplicitAutograd[alias] (inactive): fn1 :: (Tensor _0) -> (Tensor _0) [
         )
 
     def test_find_dangling_impls_default(self):
-        self.assertEqual(0, len(C._dispatch_find_dangling_impls()))
+        impls = C._dispatch_find_dangling_impls()
+        for i in range(len(impls)):
+            self.assertEqual('', impls[i])
 
     def test_find_dangling_impls_ext(self):
         extension_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cpp_extensions', 'dangling_impl_extension.cpp')
@@ -780,8 +782,6 @@ schema: (none)
 CPU: registered at {}:5 :: () -> () [ boxed unboxed ]
 '''.format(extension_path),
             impls[0])
-
-
 
 class TestPythonDispatcher(TestCase):
     def test_basic(self):
