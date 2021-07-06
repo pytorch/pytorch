@@ -100,7 +100,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
         f: a file-like object (such that ``f.fileno()`` returns a file descriptor)
             or a string containing a file name.  A binary protocol buffer will be written
             to this file.
-        export_params (bool, default True): if True, all parameters will
+        export_params (bool, default True): if True, all parameters will (test only)
             be exported. Set this to False if you want to export an untrained model.
             In this case, the exported model will first take all of its parameters
             as arguments, with the ordering as specified by ``model.state_dict().values()``
