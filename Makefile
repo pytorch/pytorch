@@ -105,10 +105,9 @@ cmakelint:
 		--step 'Run cmakelint'
 
 clang-tidy:
-	@$(PYTHON) tools/linter/clang_tidy \
-		--clang-tidy-exe .clang-tidy-bin/clang-tidy \
+	@$(PYTHON) tools/actions_local_runner.py \
 		$(CHANGED_ONLY) \
-		--parallel
+		--job 'clang-tidy'
 
 toc:
 	@$(PYTHON) tools/actions_local_runner.py \
@@ -119,4 +118,4 @@ toc:
 lint: flake8 mypy quick_checks cmakelint shellcheck
 
 quicklint: CHANGED_ONLY=--changed-only
-quicklint: mypy flake8 quick_checks cmakelint shellcheck clang_tidy
+quicklint: mypy flake8 quick_checks cmakelint shellcheck clang-tidy
