@@ -171,15 +171,14 @@ void MemoryDAG::setWildcards(
     MemoryLocations pointeeSet = getMemoryLocations(elementMap.at(v));
     for (auto wildcardElement : wildcardElement_list) {
       for (const auto& pointee : pointeeSet) {
-        Element* from = this->fromIndex(pointee);
-        // Avoid cycles where the Wildcard points to itself
+        auto from = this->fromIndex(pointee);
+        // avoid cycles where the wildcard points to itself
         if (from != wildcardElement) {
           makePointerToImpl(from, wildcardElement);
         }
       }
       // Track which memory locations we edited with a new pointer to the
-      // Wildcard
-      // Element.
+      // wildcard element.
       cacheUpdates[wildcardElement] |= pointeeSet;
     }
   }

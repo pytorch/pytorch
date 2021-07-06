@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
-#include <test/cpp/jit/test_utils.h>
 #include <aten/src/ATen/core/jit_type.h>
+#include <test/cpp/jit/test_utils.h>
 #include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {
@@ -32,8 +32,7 @@ class UnionTypeTest : public ::testing::Test {
   const TypePtr tup2 = TupleType::create({IntType::get(), IntType::get()});
 
   bool hasType(UnionTypePtr u, TypePtr t) {
-    auto res =
-        std::find(u->getTypes().begin(), u->getTypes().end(), t);
+    auto res = std::find(u->getTypes().begin(), u->getTypes().end(), t);
     return res != u->getTypes().end();
   }
 };
