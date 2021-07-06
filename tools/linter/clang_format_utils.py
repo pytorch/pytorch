@@ -1,5 +1,5 @@
 import os
-from install.download_bin import download, PYTORCH_ROOT  # type: ignore[import]
+from tools.linter.install.download_bin import download, PYTORCH_ROOT
 
 # This dictionary maps each platform to the S3 object URL for its clang-format binary.
 PLATFORM_TO_CF_URL = {

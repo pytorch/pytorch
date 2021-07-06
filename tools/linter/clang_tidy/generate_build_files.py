@@ -4,7 +4,7 @@ import os
 from typing import List
 
 
-def run_cmd(cmd: List[str]):
+def run_cmd(cmd: List[str]) -> None:
     result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,)
     stdout, stderr = result.stdout.decode("utf-8"), result.stderr.decode("utf-8")
     print(stdout, stderr)
@@ -13,21 +13,21 @@ def run_cmd(cmd: List[str]):
         exit(1)
 
 
-def run_timed_cmd(cmd: List[str]):
+def run_timed_cmd(cmd: List[str]) -> None:
     run_cmd(["time"] + cmd)
 
 
-def update_submodules():
+def update_submodules() -> None:
     run_cmd(["git", "submodule", "update", "--init", "--recursive"])
 
 
-def gen_compile_commands():
+def gen_compile_commands() -> None:
     os.environ["USE_NCCL"] = "0"
     os.environ["USE_DEPLOY"] = "1"
     run_timed_cmd([sys.executable, "setup.py", "--cmake-only", "build"])
 
 
-def run_autogen():
+def run_autogen() -> None:
     run_timed_cmd(
         [
             sys.executable,
@@ -54,7 +54,7 @@ def run_autogen():
     )
 
 
-def setup():
+def generate_build_files() -> None:
     update_submodules()
     gen_compile_commands()
     run_autogen()
