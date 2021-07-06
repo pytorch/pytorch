@@ -1044,6 +1044,7 @@ bool isConditionalFromCat(
     std::vector<const Expr*>* comp_values,
     std::vector<const Expr*>* sub_exprs) {
   const Var* var = nullptr;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   const Expr* comp_value;
   if (isConditionOptimizable(ite->condition(), &var, &comp_value)) {
     if (*cond_var == nullptr) {
