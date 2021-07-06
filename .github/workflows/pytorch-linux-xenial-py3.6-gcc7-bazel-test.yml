@@ -1,29 +1,19 @@
-{%- set exclude_test = exclude_test|default(false) -%}
-{%- block name -%}
-# Template is at:    .github/templates/linux_ci_workflow.yml.j2
+# @generated DO NOT EDIT MANUALLY
+# Template is at:    .github/templates/bazel_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: Linux CI (!{{ build_environment }})
-{%- endblock %}
+name: Bazel Linux CI (pytorch-linux-xenial-py3.6-gcc7-bazel-test)
 
 on:
   # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
-{%- if on_pull_request %}
-  pull_request:
-{%- endif %}
-{%- if is_scheduled %}
-  schedule:
-    - cron: !{{ is_scheduled }}
-{%- else %}
   push:
     branches:
       - master
       - release/*
-{%- endif %}
   workflow_dispatch:
 
 env:
-  BUILD_ENVIRONMENT: !{{ build_environment }}
-  DOCKER_IMAGE_BASE: !{{ docker_image_base }}
+  BUILD_ENVIRONMENT: pytorch-linux-xenial-py3.6-gcc7-bazel-test
+  DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc7
   SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
   TORCH_CUDA_ARCH_LIST: 5.2
   IN_CI: 1
@@ -32,7 +22,7 @@ env:
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
 
 concurrency:
-  group: !{{ build_environment }}-${{ github.event.pull_request.number || github.sha }}
+  group: pytorch-linux-xenial-py3.6-gcc7-bazel-test-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 jobs:
@@ -104,13 +94,16 @@ jobs:
         run: |
           export IMAGE_NAME=${DOCKER_IMAGE_BASE#308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/}
           cd .circleci/docker && ./build_docker.sh
-{% block build +%}
-  build:
+
+  # building and testing in a single job since bazel runs only small subset of tests
+  build-and-test:
     runs-on: linux.2xlarge
-    needs: calculate-docker-image
+    needs:
+      - calculate-docker-image
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
-      JOB_BASE_NAME: !{{ build_environment }}-build
+      JOB_BASE_NAME: pytorch-linux-xenial-py3.6-gcc7-bazel-test-build-and-test
+      NUM_TEST_SHARDS: 1
     steps:
       - name: Log in to ECR
         run: |
@@ -129,6 +122,21 @@ jobs:
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"
+      - name: Determine shm-size
+        run: |
+          shm_size="1g"
+          case "${BUILD_ENVIRONMENT}" in
+            *cuda*)
+              shm_size="2g"
+              ;;
+            *rocm*)
+              shm_size="8g"
+              ;;
+          esac
+          echo "SHM_SIZE=${shm_size}" >> "${GITHUB_ENV}"
+      - name: Output disk space left
+        run: |
+          sudo df -H
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
@@ -150,7 +158,7 @@ jobs:
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}" \
-            sh -c 'sudo chown -R jenkins . && .jenkins/pytorch/build.sh'
+            sh -c 'sudo chown -R jenkins . && sudo chown -R jenkins /dev && .jenkins/pytorch/build.sh'
       - name: Display and upload binary build size statistics (Click Me)
         # temporary hack: set CIRCLE_* vars, until we update
         # tools/stats/print_test_stats.py to natively support GitHub Actions
@@ -166,138 +174,15 @@ jobs:
           COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
           export COMMIT_TIME
           pip3 install requests
-          python3 tools/stats/upload_binary_size_to_scuba.py || exit 0
-      - name: Chown workspace
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Archive artifacts into zip
-        run: |
-          zip -r artifacts.zip dist/ build/ .pytorch-test-times.json
-      # Upload to github so that people can click and download artifacts
-      - uses: actions/upload-artifact@v2
-        # Don't fail on upload to GH since it's only for user convenience
-        continue-on-error: true
-        name: Store PyTorch Build Artifacts on Github
-        with:
-          name: ${{ env.BUILD_ENVIRONMENT }}
-          retention-days: 14
-          if-no-files-found: error
-          path:
-            artifacts.zip
-      - uses: seemethere/upload-artifact-s3@9d7ceb0ab39c2c88d93ef7792b27425b27d59162
-        name: Store PyTorch Build Artifacts on S3
-        with:
-          name: ${{ env.BUILD_ENVIRONMENT }}
-          retention-days: 14
-          if-no-files-found: error
-          path:
-            artifacts.zip
-      - name: Clean up docker images
-        if: always()
-        run: |
-          # Prune all of the docker images
-          docker system prune -af
-{%- endblock %}
-{%- if not exclude_test %}
-{% block test +%}
-  generate-test-matrix:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: ubuntu-18.04
-    env:
-      TEST_RUNNER_TYPE: !{{ test_runner_type }}
-      ENABLE_MULTIGPU_TEST: !{{ enable_multigpu_test }}
-      NUM_TEST_SHARDS: !{{ num_test_shards }}
-      MULTIGPU_RUNNER_TYPE: linux.16xlarge.nvidia.gpu
-    outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
-      render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
-    container:
-      image: python:3.9
-    steps:
-      - name: Install dependencies
-        run: pip install typing-extensions
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
-      - name: Generating test matrix
-        id: set-matrix
-        run: .github/scripts/generate_pytorch_test_matrix.py
-
-  test:
-    needs:
-      - calculate-docker-image
-      - build
-      - generate-test-matrix
-    strategy:
-      matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
-      fail-fast: false
-    runs-on: ${{ matrix.runner }}
-    env:
-      DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
-      JOB_BASE_NAME: !{{ build_environment }}-test
-      TEST_CONFIG: ${{ matrix.config }}
-      SHARD_NUMBER: ${{ matrix.shard }}
-      NUM_TEST_SHARDS: ${{ matrix.num_shards }}
-    steps:
-      - name: Log in to ECR
-        run: |
-          aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
-          bash /tmp/ecr-login.sh
-          rm /tmp/ecr-login.sh
-      - name: Chown workspace
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)/../":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Checkout PyTorch
-        uses: actions/checkout@v2
-        with:
-          submodules: recursive
-      - name: Pull docker image
-        run: |
-          docker pull "${DOCKER_IMAGE}"
-      - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        if: ${{ contains(env.BUILD_ENVIRONMENT, 'cuda') }}
-        run: |
-          bash .github/scripts/install_nvidia_utils_linux.sh
-          echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
-      - name: Determine shm-size
-        run: |
-          shm_size="1g"
-          case "${BUILD_ENVIRONMENT}" in
-            *cuda*)
-              shm_size="2g"
-              ;;
-            *rocm*)
-              shm_size="8g"
-              ;;
-          esac
-          echo "SHM_SIZE=${shm_size}" >> "${GITHUB_ENV}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
-        name: Download PyTorch Build Artifacts
-        with:
-          name: ${{ env.BUILD_ENVIRONMENT }}
-      - name: Unzip artifacts
-        run: |
-          unzip -o artifacts.zip
-      - name: Output disk space left
-        run: |
-          sudo df -H
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
+          python3 .circleci/scripts/upload_binary_size_to_scuba.py || exit 0
       - name: Test PyTorch
         run: |
-          if [[ $TEST_CONFIG == 'multigpu' ]]; then
-            TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
-          else
-            TEST_COMMAND=.jenkins/pytorch/test.sh
-          fi
-          if [[ $NUM_TEST_SHARDS -ne 2 ]]; then
-            export SHARD_NUMBER=0
-          fi
+          export SHARD_NUMBER=0
           # TODO: Stop building test binaries as part of the build phase
           # Used for GPU_FLAG since that doesn't play nice
           # shellcheck disable=SC2086
+          # Make sure we copy test results from bazel-testlogs symlink to
+          # a regular directory ./test/test-reports
           docker run \
             ${GPU_FLAG:-} \
             -e BUILD_ENVIRONMENT \
@@ -317,7 +202,7 @@ jobs:
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}" \
-            sh -c 'sudo chown -R jenkins . && pip install dist/*.whl && '$TEST_COMMAND
+            sh -c 'sudo chown -R jenkins . && sudo chown -R jenkins /dev && .jenkins/pytorch/test.sh && cp -Lr ./bazel-testlogs ./test/test-reports'
       - name: Chown workspace
         if: always()
         run: |
@@ -328,21 +213,12 @@ jobs:
         run: |
           # Remove any previous test reports if they exist
           rm -f test-reports-*.zip
-          zip -r "test-reports-${TEST_CONFIG}.zip" test -i '*.xml'
+          zip -r "test-reports-1.zip" test -i '*.xml'
       - uses: actions/upload-artifact@v2
         name: Store PyTorch Test Reports
         if: always()
         with:
-          name: test-reports-${{ matrix.config }}
-          retention-days: 14
-          if-no-files-found: error
-          path:
-            test-reports-*.zip
-      - uses: seemethere/upload-artifact-s3@9d7ceb0ab39c2c88d93ef7792b27425b27d59162
-        name: Store PyTorch Test Reports on S3
-        if: always()
-        with:
-          name: test-reports-${{ matrix.config }}
+          name: test-reports
           retention-days: 14
           if-no-files-found: error
           path:
@@ -350,13 +226,8 @@ jobs:
       - name: Clean up docker images
         if: always()
         run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
           # Prune all of the docker images
           docker system prune -af
-{% endblock %}
-{%- endif -%}
-{% block render_test_results +%}
   # this is a separate step from test because the log files from test are too
   # long: basically, GitHub tries to render all of the log files when you click
   # through an action causing extreme slowdown on actions that contain too many
@@ -365,12 +236,8 @@ jobs:
   render_test_results:
     if: always()
     needs:
-      - generate-test-matrix
-      - test
+      - build-and-test
     runs-on: ubuntu-18.04
-    strategy:
-      matrix: ${{ fromJson(needs.generate-test-matrix.outputs.render-matrix) }}
-      fail-fast: false
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
@@ -380,7 +247,7 @@ jobs:
       - uses: actions/download-artifact@v2
         name: Download PyTorch Test Reports
         with:
-          name: test-reports-${{ matrix.config }}
+          name: test-reports
           path: .
       - name: Unzip test reports
         run: |
@@ -408,7 +275,7 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_SECRET_ACCESS_KEY }}
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: !{{ build_environment }}-test
+          JOB_BASE_NAME: pytorch-linux-xenial-py3.6-gcc7-bazel-test-test
           CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
           CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
@@ -416,98 +283,3 @@ jobs:
         run: |
           export PYTHONPATH=$PWD
           python tools/stats/print_test_stats.py --upload-to-s3 --compare-with-s3 test
-{%- endblock %}
-  {%- if enable_doc_jobs %}
-
-  pytorch_python_doc_build:
-    runs-on: linux.2xlarge
-    needs:
-      - calculate-docker-image
-      - build
-    env:
-      DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
-    steps:
-      - name: Log in to ECR
-        run: |
-          aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
-          bash /tmp/ecr-login.sh
-          rm /tmp/ecr-login.sh
-      - name: Chown workspace
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Checkout PyTorch
-        uses: actions/checkout@v2
-        with:
-          fetch-depth: 0 # deep clone, to allow sharding to use git rev-list
-          submodules: recursive
-      - name: Pull docker image
-        run: |
-          docker pull "${DOCKER_IMAGE}"
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
-        name: Download PyTorch Build Artifacts
-        with:
-          name: ${{ env.BUILD_ENVIRONMENT }}
-      - name: Unzip artifacts
-        run: |
-          unzip -o artifacts.zip
-      - name: Build Python Doc in Docker
-        run: |
-          set -ex
-          time docker pull "${DOCKER_IMAGE}" > /dev/null
-          echo "${GITHUB_REF}"
-          ref=${GITHUB_REF##*/}
-          target=${ref//v}
-          docker run \
-            -e BUILD_ENVIRONMENT \
-            -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
-            -e IN_CI \
-            -e MAX_JOBS="$(nproc --ignore=2)" \
-            -e CIRCLE_SHA1="$GITHUB_SHA" \
-            --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
-            --security-opt seccomp=unconfined \
-            --cap-add=SYS_PTRACE \
-            --name="$GITHUB_SHA" \
-            --tty \
-            --user jenkins \
-            -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
-            -w /var/lib/jenkins/workspace \
-            "${DOCKER_IMAGE}" \
-            bash -c "sudo chown -R jenkins . && pip install dist/*.whl && ./.circleci/scripts/python_doc_push_script.sh docs/$target $target site"
-      - name: Chown workspace
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: driazati/upload-artifact-s3@21c31d0a7bcb056ca50bd6ce197ba6507c26a1be
-        if: github.event_name == 'pull_request'
-        name: Upload Docs Preview
-        with:
-          name: deploy
-          retention-days: 14
-          if-no-files-found: error
-          path: pytorch.github.io/docs/merge
-      - name: Show Docs Preview URL (Click Me)
-        if: github.event_name == 'pull_request'
-        env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          echo "See rendered docs at https://docs-preview.pytorch.org/$PR_NUMBER/"
-      - name: Archive artifacts into zip
-        run: |
-          zip -r pytorch_github_io.zip "${GITHUB_WORKSPACE}/pytorch.github.io"
-      - uses: actions/upload-artifact@v2
-        name: Store PyTorch Build Artifacts
-        with:
-          name: pytorch_github_io
-          if-no-files-found: error
-          path: pytorch_github_io.zip
-      - name: Clean up docker images
-        if: always()
-        run: |
-          # Prune all of the docker images
-          docker system prune -af
-
-  {%- endif -%}
