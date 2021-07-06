@@ -30,9 +30,9 @@ class Threshold(Module):
         inplace: can optionally do the operation in-place. Default: ``False``
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)` where `*` means, any number of additional
+          dimensions.
+        - Output: :math:`(*)`, same shape as the input.
 
     Examples::
 
@@ -72,9 +72,9 @@ class ReLU(Module):
         inplace: can optionally do the operation in-place. Default: ``False``
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)` where `*` means, any number of additional
+          dimensions.
+        - Output: :math:`(*)`, same shape as the input.
 
     .. image:: ../scripts/activation_images/ReLU.png
 
@@ -132,9 +132,9 @@ class RReLU(Module):
         inplace: can optionally do the operation in-place. Default: ``False``
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)` where `*` means, any number of additional
+          dimensions.
+        - Output: :math:`(*)`, same shape as the input.
 
     Examples::
 
@@ -194,9 +194,9 @@ class Hardtanh(Module):
     have been deprecated in favor of :attr:`min_val` and :attr:`max_val`.
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)` where `*` means, any number of additional
+          dimensions.
+        - Output: :math:`(*)`, same shape as the input.
 
     .. image:: ../scripts/activation_images/Hardtanh.png
 
@@ -253,9 +253,9 @@ class ReLU6(Hardtanh):
         inplace: can optionally do the operation in-place. Default: ``False``
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)` where `*` means, any number of additional
+          dimensions.
+        - Output: :math:`(*)`, same shape as the input.
 
     .. image:: ../scripts/activation_images/ReLU6.png
 
@@ -282,9 +282,9 @@ class Sigmoid(Module):
 
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)` where `*` means, any number of additional
+          dimensions.
+        - Output: :math:`(*)`, same shape as the input.
 
     .. image:: ../scripts/activation_images/Sigmoid.png
 
@@ -313,9 +313,9 @@ class Hardsigmoid(Module):
         inplace: can optionally do the operation in-place. Default: ``False``
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)` where `*` means, any number of additional
+          dimensions.
+        - Output: :math:`(*)`, same shape as the input.
 
     Examples::
 
@@ -342,9 +342,9 @@ class Tanh(Module):
         \text{Tanh}(x) = \tanh(x) = \frac{\exp(x) - \exp(-x)} {\exp(x) + \exp(-x)}
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)` where `*` means, any number of additional
+          dimensions.
+        - Output: :math:`(*)`, same shape as the input.
 
     .. image:: ../scripts/activation_images/Tanh.png
 
@@ -374,9 +374,9 @@ class SiLU(Module):
         where the SiLU was experimented with later.
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)` where `*` means, any number of additional
+          dimensions.
+        - Output: :math:`(*)`, same shape as the input.
 
     Examples::
 
@@ -409,9 +409,9 @@ class Mish(Module):
         See `Mish: A Self Regularized Non-Monotonic Neural Activation Function <https://arxiv.org/abs/1908.08681>`_
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)` where `*` means, any number of additional
+          dimensions.
+        - Output: :math:`(*)`, same shape as the input.
 
     Examples::
 
@@ -449,9 +449,9 @@ class Hardswish(Module):
         inplace: can optionally do the operation in-place. Default: ``False``
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)` where `*` means, any number of additional
+          dimensions.
+        - Output: :math:`(*)`, same shape as the input.
 
     Examples::
 
@@ -488,9 +488,9 @@ class ELU(Module):
         inplace: can optionally do the operation in-place. Default: ``False``
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)` where `*` means, any number of additional
+          dimensions.
+        - Output: :math:`(*)`, same shape as the input.
 
     .. image:: ../scripts/activation_images/ELU.png
 
@@ -530,9 +530,9 @@ class CELU(Module):
         inplace: can optionally do the operation in-place. Default: ``False``
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)` where `*` means, any number of additional
+          dimensions.
+        - Output: :math:`(*)`, same shape as the input.
 
     .. image:: ../scripts/activation_images/CELU.png
 
@@ -583,9 +583,9 @@ class SELU(Module):
         inplace (bool, optional): can optionally do the operation in-place. Default: ``False``
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)` where `*` means, any number of additional
+          dimensions.
+        - Output: :math:`(*)`, same shape as the input.
 
     .. image:: ../scripts/activation_images/SELU.png
 
@@ -653,9 +653,9 @@ class GELU(Module):
     where :math:`\Phi(x)` is the Cumulative Distribution Function for Gaussian Distribution.
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)` where `*` means, any number of additional
+          dimensions.
+        - Output: :math:`(*)`, same shape as the input.
 
     .. image:: ../scripts/activation_images/GELU.png
 
@@ -684,9 +684,9 @@ class Hardshrink(Module):
         lambd: the :math:`\lambda` value for the Hardshrink formulation. Default: 0.5
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)` where `*` means, any number of additional
+          dimensions.
+        - Output: :math:`(*)`, same shape as the input.
 
     .. image:: ../scripts/activation_images/Hardshrink.png
 
@@ -731,9 +731,9 @@ class LeakyReLU(Module):
         inplace: can optionally do the operation in-place. Default: ``False``
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
+        - Input: :math:`(*)` where `*` means, any number of additional
           dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Output: :math:`(*)`, same shape as the input
 
     .. image:: ../scripts/activation_images/LeakyReLU.png
 
@@ -767,9 +767,9 @@ class LogSigmoid(Module):
         \text{LogSigmoid}(x) = \log\left(\frac{ 1 }{ 1 + \exp(-x)}\right)
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)` where `*` means, any number of additional
+          dimensions.
+        - Output: :math:`(*)`, same shape as the input.
 
     .. image:: ../scripts/activation_images/LogSigmoid.png
 
@@ -801,9 +801,9 @@ class Softplus(Module):
         threshold: values above this revert to a linear function. Default: 20
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)` where `*` means, any number of additional
+          dimensions.
+        - Output: :math:`(*)`, same shape as the input.
 
     .. image:: ../scripts/activation_images/Softplus.png
 
@@ -844,9 +844,9 @@ class Softshrink(Module):
         lambd: the :math:`\lambda` (must be no less than zero) value for the Softshrink formulation. Default: 0.5
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)` where `*` means, any number of additional
+          dimensions.
+        - Output: :math:`(*)`, same shape as the input.
 
     .. image:: ../scripts/activation_images/Softshrink.png
 
@@ -1075,9 +1075,9 @@ class PReLU(Module):
         init (float): the initial value of :math:`a`. Default: 0.25
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`( *)` where `*` means, any number of additional
+          dimensions.
+        - Output: :math:`(*)`, same shape as the input.
 
     Attributes:
         weight (Tensor): the learnable weights of shape (:attr:`num_parameters`).
@@ -1114,9 +1114,9 @@ class Softsign(Module):
         \text{SoftSign}(x) = \frac{x}{ 1 + |x|}
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)` where `*` means, any number of additional
+          dimensions.
+        - Output: :math:`(*)`, same shape as the input.
 
     .. image:: ../scripts/activation_images/Softsign.png
 
@@ -1138,9 +1138,9 @@ class Tanhshrink(Module):
         \text{Tanhshrink}(x) = x - \tanh(x)
 
     Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)` where `*` means, any number of additional
+          dimensions.
+        - Output: :math:`(*)`, same shape as the input.
 
     .. image:: ../scripts/activation_images/Tanhshrink.png
 

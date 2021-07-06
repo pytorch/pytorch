@@ -1248,6 +1248,12 @@ def fractional_max_pool3d_test(test_case):
             fullname='FractionalMaxPool3d_asymsize')
 
 
+def single_batch_reference_fn(ref_input, parameters, ref_module):
+    """Reference function for module supporting no batch dimensions."""
+    single_batch_input = ref_input.unsqueeze(0)
+    with freeze_rng_state():
+        return ref_module(single_batch_input).squeeze(0)
+
 new_module_tests = [
     poissonnllloss_no_reduce_test(),
     bceloss_no_reduce_test(),
@@ -3790,6 +3796,33 @@ for padding_mode, cpp_padding_mode in zip(
                 tf32_precision=0.05
             ),
         )
+
+# Check that non linear activations work with no batch dimensions
+non_linear_activations_no_batch = [
+    'ELU', 'Hardshrink', 'Hardsigmoid', 'Hardtanh', 'Hardswish', 'LeakyReLU',
+    'LogSigmoid', 'PReLU', 'ReLU', 'ReLU6', 'RReLU', 'SELU', 'CELU', 'GELU',
+    'Sigmoid', 'SiLU', 'Mish', 'Softplus', 'Softshrink', 'Softsign', 'Tanh',
+    'Tanhshrink', 'Threshold'
+]
+non_linear_activations_extra_info = {
+    'CELU': {'constructor_args': (2.,)},
+    'Threshold': {'constructor_args': (2., 1.)},
+    'Hardsigmoid': {'check_gradgrad': False},
+    'Hardswish': {'check_gradgrad': False},
+    'RReLU': {'test_cuda': False},
+}
+for non_linear_activation in non_linear_activations_no_batch:
+    activation_test_info = dict(
+            module_name=non_linear_activation,
+            input_size=(3,),
+            reference_fn=single_batch_reference_fn,
+            desc='no_batch_dim',
+            test_cpp_api_parity=False,
+    )
+    activation_test_info.update(
+        non_linear_activations_extra_info.get(non_linear_activation, {})
+    )
+    new_module_tests.append(activation_test_info)
 
 
 def kldivloss_reference(input, target, reduction='mean'):
