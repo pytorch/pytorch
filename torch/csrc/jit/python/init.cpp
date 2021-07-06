@@ -94,7 +94,6 @@
 #include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import.h>
-#include <torch/csrc/jit/tensorexpr/execution_counter.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/jit/tensorexpr/tensorexpr_init.h>
 
@@ -652,14 +651,6 @@ void initJITBindings(PyObject* module) {
           "_jit_try_infer_type",
           [](py::object obj) -> InferredType {
             return tryToInferType(std::move(obj));
-          })
-      .def(
-          "_jit_get_trigger_value",
-          [](const std::string& trigger_name) -> int {
-            using namespace torch::jit::tensorexpr;
-            ExecutionTrigger* trigger =
-                ExecutionTriggerList::GetInstance().FindByName(trigger_name);
-            return trigger->value();
           })
       .def(
           "_jit_get_te_cuda_pointwise_loop_levels",
