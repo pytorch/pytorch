@@ -137,7 +137,7 @@ struct TORCH_API UnionType : public Type {
  protected:
     UnionType(std::vector<TypePtr> types, TypeKind kind=TypeKind::UnionType);
     std::string annotation_str_impl(TypePrinter printer = nullptr) const override;
-    std::string unionStr(TypePrinter printer = nullptr, bool is_annotation_str) const;
+    std::string unionStr(TypePrinter printer = nullptr, bool is_annotation_str = false) const;
     bool has_free_variables_;
     std::vector<TypePtr> types_;
     bool can_hold_none_;
