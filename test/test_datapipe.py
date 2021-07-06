@@ -27,7 +27,6 @@ import torch.utils.data.datapipes as dp
 import torch.utils.data.graph
 import torch.utils.data.sharding
 import torch.utils.data.backward_compatibility
-from torch.utils.data import DataLoader
 
 from torch.testing._internal.common_utils import (TestCase, run_tests)
 from torch.utils.data import (
@@ -1291,7 +1290,7 @@ class TestGraph(TestCase):
 
 class TestSharding(TestCase):
 
-    def get_pipeline(self):
+    def _get_pipeline(self):
         numbers_dp = NumbersDataset(size=10)
         dp0, dp1 = numbers_dp.fork(2)
         dp0_upd = dp0.map(lambda x: x * 10)
@@ -1300,25 +1299,25 @@ class TestSharding(TestCase):
         return combined_dp
 
     def test_simple_sharding(self):
-        sharded_dp = self.get_pipeline().sharding_filter()
+        sharded_dp = self._get_pipeline().sharding_filter()
         torch.utils.data.sharding.apply_sharding(sharded_dp, 3, 1)
         items = list(sharded_dp)
         self.assertEqual([1, 20, 40, 70], items)
 
-        all_items = list(self.get_pipeline())
+        all_items = list(self._get_pipeline())
         items = []
         for i in range(3):
-            sharded_dp = self.get_pipeline().sharding_filter()
+            sharded_dp = self._get_pipeline().sharding_filter()
             torch.utils.data.sharding.apply_sharding(sharded_dp, 3, i)
             items += list(sharded_dp)
 
         self.assertEqual(sorted(all_items), sorted(items))
 
     def test_old_dataloader(self):
-        dp = self.get_pipeline()
+        dp = self._get_pipeline()
         expected = list(dp)
 
-        dp = self.get_pipeline().sharding_filter()
+        dp = self._get_pipeline().sharding_filter()
         dl = DataLoader(dp, batch_size=1, shuffle=False, num_workers=2,
                         worker_init_fn=torch.utils.data.backward_compatibility.worker_init_fn)
         items = []
