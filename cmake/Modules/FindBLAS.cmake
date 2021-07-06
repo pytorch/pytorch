@@ -363,8 +363,8 @@ IF (BLAS_LIBRARIES)
       SET(BLAS_USE_CBLAS_DOT FALSE)
     ENDIF(BLAS_USE_CBLAS_DOT)
     SET(CMAKE_REQUIRED_LIBRARIES)
-    cmake_pop_check_state()
   ENDIF(CMAKE_CROSSCOMPILING)
+  cmake_pop_check_state()
 ENDIF(BLAS_LIBRARIES)
 
 # epilogue
