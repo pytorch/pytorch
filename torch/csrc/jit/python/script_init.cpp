@@ -480,7 +480,8 @@ static void setInputTensorTypes(
     TORCH_INTERNAL_ASSERT(input_values.size() == param_count_list.size());
   }
   for (auto v : input_values) {
-    AT_ASSERT(s_iter != stack.end());
+    if (s_iter == stack.end())
+      continue;
     // Leave packed param types alone. This is needed for downstream passes
     // (like alias analysis) to work properly. This will be unpacked later
     // in unpackQuantizedWeights.
