@@ -306,20 +306,6 @@ def filter_from_diff(
     return files, line_filters
 
 
-def filter_changed_only(paths: List[str]) -> Tuple[List[str], List[Dict[Any, Any]]]:
-    # Modified, unstaged
-    modified = git(["diff"])
-
-    # Modified, staged
-    cached = git(["diff", "--cached"])
-
-    # Committed
-    merge_base = git(["merge-base", "origin/master", "HEAD"]).strip()
-    diff_with_origin = git(["diff", merge_base, "HEAD"])
-
-    return filter_from_diff(paths, [modified, cached, diff_with_origin])
-
-
 def filter_from_diff_file(
     paths: List[str], filename: str
 ) -> Tuple[List[str], List[Dict[Any, Any]]]:
@@ -341,10 +327,7 @@ def run(options: Any) -> None:
     # Normalize the paths first.
     paths = [path.rstrip("/") for path in options.paths]
 
-    # Apply filters
-    if options.changed_only:
-        files, line_filters = filter_changed_only(options.paths)
-    elif options.diff_file:
+    if options.diff_file:
         files, line_filters = filter_from_diff_file(options.paths, options.diff_file)
     else:
         files, line_filters = filter_default(options.paths)

@@ -1,11 +1,42 @@
 import argparse
 import pathlib
-import subprocess
 import os
 import shutil
+import subprocess
+import re
+from typing import List
+
 
 from run import run
 from generate_build_files import generate_build_files
+
+
+def clang_search_dirs() -> List[str]:
+    result = subprocess.run(
+        ["clang", "-E", "-x", "c++", "-", "-v"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    stderr = result.stderr.decode().strip().split("\n")
+    search_start = r"#include.*search starts here:"
+    search_end = r"End of search list."
+
+    append_path = False
+    search_paths = []
+    for line in stderr:
+        if re.match(search_start, line):
+            if append_path:
+                continue
+            else:
+                append_path = True
+        elif re.match(search_end, line):
+            break
+        elif append_path:
+            search_paths.append(line.strip())
+
+    return search_paths
 
 
 DEFAULTS = {
@@ -35,7 +66,7 @@ DEFAULTS = {
         "-torch/csrc/deploy/interpreter/test_main.cpp",
     ],
     "paths": ["torch/csrc/"],
-    "include-dir": ["/usr/lib/llvm-11/include/openmp"],
+    "include-dir": ["/usr/lib/llvm-11/include/openmp"] + clang_search_dirs(),
 }
 
 
@@ -73,11 +104,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--diff-file",
         help="File containing diff to use for determining files to lint and line filters",
-    )
-    parser.add_argument(
-        "--changed-only",
-        action="store_true",
-        help="Run clang-tidy only on files that have changed",
     )
     parser.add_argument(
         "-p",
