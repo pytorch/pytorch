@@ -1700,7 +1700,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
         object_gather_list[i] = _tensor_to_object(tensor, tensor_size)
 
 
-def broadcast_object_list(object_list, src=0, group=None):
+def broadcast_object_list(object_list, src=0, group=None, dist_device=None):
     """
     Broadcasts picklable objects in ``object_list`` to the whole group. Similar
     to :func:`broadcast`, but Python objects can be passed in.
@@ -1714,6 +1714,8 @@ def broadcast_object_list(object_list, src=0, group=None):
         src (int): Source rank from which to broadcast ``object_list``.
         group: (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used. Default is ``None``.
+        device (``torch.device``, optional): device to send from or receive
+            to (default: ``torch.device("cpu")``).
 
     Returns:
         ``None``. If rank is part of the group, ``object_list`` will contain the
@@ -1759,15 +1761,25 @@ def broadcast_object_list(object_list, src=0, group=None):
     else:
         object_sizes_tensor = torch.empty(len(object_list), dtype=torch.long)
 
+    # Current device selection.
+    # To preserve  backwards compatibility, dist_device is default to None in
+    # which case we run current logic of device selection, i.e. current_device
+    # is cuda if backend is NCCL otherwise CPU device. In the case it is not
+    # None we move all intermediate tensors to this given device.
+    # See https://github.com/pytorch/pytorch/issues/60062
     group_backend = get_backend(group)
     is_nccl_backend = group_backend == Backend.NCCL
-    current_device = torch.device("cpu")
+    current_device = None
+    if dist_device is not None:
+        current_device = dist_device
+    else:
+        current_device = torch.device("cpu")
+        if is_nccl_backend:
+            # See note about using torch.cuda.current_device() here in
+            # docstring. We cannot simply use my_rank since rank == device is
+            # not necessarily true.
+            current_device = torch.device("cuda", torch.cuda.current_device())
     if is_nccl_backend:
-        # See note about using torch.cuda.current_device() here in docstring.
-        # We cannot simply use my_rank since rank == device is not necessarily
-        # true.
-        current_device = torch.device("cuda", torch.cuda.current_device())
-        object_sizes_tensor = object_sizes_tensor.to(current_device)
         object_sizes_tensor = object_sizes_tensor.to(current_device)
 
     # Broadcast object sizes

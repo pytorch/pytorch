@@ -12,12 +12,12 @@ from typing import List, Any, Type, cast
 import numpy as np
 import torch
 import torch.distributed as dist
+import torch.distributed.distributed_c10d as distributed_c10d
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 from torch.distributed.optim import ZeroRedundancyOptimizer
-from torch.distributed.optim.zero_redundancy_optimizer import _broadcast_object
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim import SGD
 from torch.testing._internal import common_utils, common_distributed
@@ -472,15 +472,17 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         else:
             optimizer_state_dict = {}
 
-        optimizer_state_dict = _broadcast_object(
-            optimizer_state_dict,
+        object_list = [optimizer_state_dict]
+        optimizer_state_dict = distributed_c10d.broadcast_object_list(
+            object_list,
             src_rank=RECIPIENT_RANK,
             group=dist.group.WORLD,
             device=self.device,
         )
 
         # Load the optimizer state dict, check that no exception is raised
-        optimizer.load_state_dict(optimizer_state_dict)
+        self.assertEqual(1, len(object_list))
+        optimizer.load_state_dict(object_list[0])
 
     def test_multiple_groups(self):
         """ Check that the ZeroRedundancyOptimizer handles working with multiple process groups"""
