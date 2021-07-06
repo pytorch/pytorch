@@ -106,8 +106,10 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
 
   // TODO: use kineto
   void reportMemoryUsage(
-      void* /* unused */,
+      void* ptr,
       int64_t alloc_size,
+      int64_t allocated_size,
+      int64_t reserved_size,
       c10::Device device) override {
     if (config_.profile_memory && config_.state != ProfilerState::Disabled) {
       uint64_t thread_id = at::RecordFunction::currentThreadId();
@@ -135,7 +137,18 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
         act.startTime = getTimeUs();
         act.addMetadata("Device Type", std::to_string((int8_t)device.type()));
         act.addMetadata("Device Id", std::to_string(device.index()));
+        act.addMetadata("Addr", [&]() {
+          std::ostringstream oss;
+          oss << std::hex << ptr;
+          return oss.str();
+        }());
         act.addMetadata("Bytes", std::to_string(alloc_size));
+        if (allocated_size >= 0) {
+          act.addMetadata("Allocated Bytes", std::to_string(allocated_size));
+        }
+        if (reserved_size >= 0) {
+          act.addMetadata("Reserved Bytes", std::to_string(reserved_size));
+        }
       }
     }
   }

@@ -579,15 +579,19 @@ class DeviceCachingAllocator {
     bool inserted = active_blocks.insert(block).second;
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
 
-    c10::reportMemoryUsageToProfiler(
-        block, block->size, c10::Device(c10::DeviceType::CUDA, device));
-
     update_stat_array(stats.allocation, 1, params.stat_types);
     update_stat_array(stats.allocated_bytes, block->size, params.stat_types);
     update_stat_array(stats.active, 1, params.stat_types);
     update_stat_array(stats.active_bytes, block->size, params.stat_types);
     if (block->size >= CachingAllocatorConfig::max_split_size())
       update_stat(stats.oversize_allocations, 1);
+
+    c10::reportMemoryUsageToProfiler(
+        block,
+        block->size,
+        stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
+        stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
+        c10::Device(c10::DeviceType::CUDA, device));
 
     return block;
   }
@@ -596,9 +600,6 @@ class DeviceCachingAllocator {
     std::lock_guard<std::recursive_mutex> lock(mutex);
 
     block->allocated = false;
-
-    c10::reportMemoryUsageToProfiler(
-        block, -block->size, c10::Device(c10::DeviceType::CUDA, block->device));
 
     StatTypes stat_types;
     stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
@@ -622,6 +623,13 @@ class DeviceCachingAllocator {
     } else {
       free_block(block);
     }
+
+    c10::reportMemoryUsageToProfiler(
+        block,
+        block->size,
+        stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
+        stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
+        c10::Device(c10::DeviceType::CUDA, block->device));
   }
 
   void* getBaseAllocation(Block* block, size_t* outSize) {

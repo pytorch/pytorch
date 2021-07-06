@@ -228,10 +228,20 @@ struct C10_API MemoryReportingInfoBase : public c10::DebugInfoBase {
   MemoryReportingInfoBase();
   virtual ~MemoryReportingInfoBase() {}
 
-  // Negative alloc_size corresponds to freeing of the memory
+  /**
+   * alloc corresponds to the size of the ptr
+   *
+   * allocated corresponds to total allocated memory (e.g. from allocator to
+   * tensor).
+   *
+   * reserved corresponds to total size of memory pool, both used and
+   * unused, if applicable.
+   */
   virtual void reportMemoryUsage(
       void* ptr,
       int64_t alloc_size,
+      int64_t allocated_size,
+      int64_t reserved_size,
       Device device) = 0;
 
   virtual bool memoryProfilingEnabled() const = 0;
@@ -241,6 +251,8 @@ C10_API bool memoryProfilingEnabled();
 C10_API void reportMemoryUsageToProfiler(
     void* ptr,
     int64_t alloc_size,
+    int64_t allocated_size,
+    int64_t reserved_size,
     Device device);
 
 } // namespace c10

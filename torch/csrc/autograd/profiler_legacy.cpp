@@ -278,6 +278,8 @@ void ProfilerThreadLocalState::popRange(const at::RecordFunction& fn, const bool
 void ProfilerThreadLocalState::reportMemoryUsage(
     void* /* unused */,
     int64_t alloc_size,
+    int64_t /* allocated_size, unused for legacy */,
+    int64_t /* reserved_size, unused for legacy */,
     c10::Device device) {
   if (config_.profile_memory && config_.state != ProfilerState::Disabled) {
     uint64_t thread_id = at::RecordFunction::currentThreadId();
