@@ -944,7 +944,7 @@ UnionType::UnionType(std::vector<TypePtr> reference, TypeKind kind) : Type(kind)
   can_hold_none_ = false;
   has_free_variables_ = false;
 
-  for (const TypePtr type : types_) {
+  for (const TypePtr& type : types_) {
     if (type->kind() == NoneType::Kind) {
       can_hold_none_ = true;
     }
@@ -995,7 +995,7 @@ UnionTypePtr UnionType::create(std::vector<TypePtr> reference) {
     }
   }
 
-  return UnionTypePtr(std::move(union_type));
+  return UnionTypePtr(union_type);
 }
 
 bool UnionType::operator==(const Type& rhs) const {
@@ -1223,6 +1223,7 @@ bool OptionalType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) con
       return true;
     }
   } else {
+    // NOLINTNEXTLINE(bugprone-argument-comment)
     return Type::isSubtypeOfExt(rhs, why_not);
   }
 }
