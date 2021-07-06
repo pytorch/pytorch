@@ -1723,5 +1723,19 @@ REGISTER_OPERATOR_FUNCTOR(aten::full_like, aten_full_like, [](Node* n) -> SROper
   };
 });
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_OPERATOR_FUNCTOR(prim::Concat, prim_Concat, [](Node* n) -> SROperator {
+  return [](ProcessedNode* p_node) {
+    const size_t num_inputs = p_node->inputs().size();
+    std::vector<at::Tensor> inputs(num_inputs - 1);
+    for (const auto i : c10::irange(num_inputs - 1)) {
+      inputs[i] = p_node->Input(i).toTensor();
+    }
+    const auto dim = p_node->Input(num_inputs - 1).toInt();
+    // TODO: Should we handle differently if output(0) is a Tensor?
+    p_node->Output(0) = at::cat(inputs, dim);
+  };
+});
+
 } // namespace jit
 } // namespace torch

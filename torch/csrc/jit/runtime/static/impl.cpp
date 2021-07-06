@@ -8,6 +8,7 @@
 #include <caffe2/core/timer.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
+#include <torch/csrc/jit/passes/concat_opt.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
@@ -31,6 +32,7 @@ void OptimizeGraph(
   ConstantPropagation(graph);
   RemoveTensorMutation(graph);
   ConstantPropagation(graph);
+  UseVariadicCat(graph);
   EliminateDeadCode(graph);
   FuseInferenceOpsForSparseNN(graph);
 
