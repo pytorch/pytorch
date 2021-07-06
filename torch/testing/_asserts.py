@@ -585,14 +585,14 @@ def _check_types(actual: Any, expected: Any, *, allow_subclasses: bool) -> Optio
         return None
 
     msg_fmtstr = f"Except for Python scalars, {{}}, but got {type(actual)} and {type(expected)} instead."
-    common_superclass = isinstance(actual, type(expected)) or isinstance(expected, type(actual))
-    if not common_superclass:
-        return _TestingErrorMeta(AssertionError, msg_fmtstr.format("inputs are required to share a common superclass"))
+    directly_related = isinstance(actual, type(expected)) or isinstance(expected, type(actual))
+    if not directly_related:
+        return _TestingErrorMeta(AssertionError, msg_fmtstr.format("input types need to be directly related"))
 
     if allow_subclasses or type(actual) is type(expected):
         return None
 
-    return _TestingErrorMeta(AssertionError, msg_fmtstr.format("type equality is required"))
+    return _TestingErrorMeta(AssertionError, msg_fmtstr.format("type equality is required if allow_subclasses=False"))
 
 
 def _to_tensor_pair(
@@ -758,7 +758,7 @@ def assert_close(
     Args:
         actual (Any): Actual input.
         expected (Any): Expected input.
-        allow_subclasses (bool): If ``True`` (default), inputs of a common superclass are allowed. Otherwise type
+        allow_subclasses (bool): If ``True`` (default), inputs of directly related types are allowed. Otherwise type
             equality is required.
         rtol (Optional[float]): Relative tolerance. If specified :attr:`atol` must also be specified. If omitted,
             default values based on the :attr:`~torch.Tensor.dtype` are selected with the below table.
