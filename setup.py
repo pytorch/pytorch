@@ -50,6 +50,9 @@
 #   MKLDNN_CPU_RUNTIME
 #     MKL-DNN threading mode: TBB or OMP (default)
 #
+#   USE_ITT=<Root folder of Intel(R) VTune Profiler>
+#     enable use of Intel(R) VTune Profiler's ITT functionality
+#
 #   USE_NNPACK=0
 #     disables NNPACK build
 #
@@ -494,6 +497,11 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 report('  -- USE_MPI={}'.format(cmake_cache_vars['USE_OPENMPI']))
         else:
             report('-- Building without distributed package')
+
+        if cmake_cache_vars['USE_ITT'] != 'None':
+            report('-- Using ITT')
+        else:
+            report('-- Not using ITT')
 
         # Do not use clang to compile extensions if `-fstack-clash-protection` is defined
         # in system CFLAGS

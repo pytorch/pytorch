@@ -28,6 +28,7 @@ if sys.executable == 'torch_deploy':
 else:
     from .version import __version__ as __version__
 from ._six import string_classes as _string_classes
+from . import itt
 
 from typing import Set, Type, TYPE_CHECKING
 

@@ -144,18 +144,31 @@ std::vector<std::string> callstackStr(const std::vector<FileLineFunc>& cs) {
 //
 
 namespace {
-const CUDAStubs default_stubs;
-constexpr const CUDAStubs* default_stubs_addr = &default_stubs;
+const CUDAStubs default_cuda_stubs;
+constexpr const CUDAStubs* default_cuda_stubs_addr = &default_cuda_stubs;
 // Constant initialization, so it is guaranteed to be initialized before
 // static initialization calls which may invoke registerCUDAMethods
 inline const CUDAStubs*& cuda_stubs() {
-  static const CUDAStubs* stubs_ = default_stubs_addr;
+  static const CUDAStubs* stubs_ = default_cuda_stubs_addr;
+  return stubs_;
+}
+
+const ITTStubs default_itt_stubs;
+constexpr const ITTStubs* default_itt_stubs_addr = &default_itt_stubs;
+// Constant initialization, so it is guaranteed to be initialized before
+// static initialization calls which may invoke registerCUDAMethods
+inline const ITTStubs*& itt_stubs() {
+  static const ITTStubs* stubs_ = default_itt_stubs_addr;
   return stubs_;
 }
 }
 
 const CUDAStubs* cudaStubs() {
   return cuda_stubs();
+}
+
+const ITTStubs* ittStubs() {
+  return itt_stubs();
 }
 
 // Profiler state
@@ -186,6 +199,8 @@ void ProfilerThreadLocalState::mark(std::string name, bool include_cuda) {
   }
   if (config_.state == ProfilerState::NVTX) {
     cuda_stubs()->nvtxMarkA(name.c_str());
+  } else if (config_.state == ProfilerState::ITT) {
+    itt_stubs()->ittMark(name.c_str());
   } else {
     LegacyEvent evt(
         EventKind::Mark,
@@ -219,6 +234,8 @@ void ProfilerThreadLocalState::pushRange(
   if (config_.state == ProfilerState::NVTX) {
     cuda_stubs()->nvtxRangePushA(getNvtxStr(
         fn.name(), msg, fn.seqNr(), shapes).c_str());
+  } else if (config_.state == ProfilerState::ITT) {
+    itt_stubs()->ittRangePush(fn.name().str());
   } else {
     LegacyEvent evt(
         EventKind::PushRange,
@@ -259,6 +276,8 @@ void ProfilerThreadLocalState::popRange(const at::RecordFunction& fn, const bool
   }
   if (config_.state == ProfilerState::NVTX) {
     cuda_stubs()->nvtxRangePop();
+  } else if (config_.state == ProfilerState::ITT) {
+    itt_stubs()->ittRangePop();
   } else {
     // In some cases RecordFunction (and popRange) may be
     // called on a different thread than pushRange
@@ -476,6 +495,10 @@ void registerCUDAMethods(CUDAStubs* stubs) {
   cuda_stubs() = stubs;
 }
 
+void registerITTMethods(ITTStubs* stubs) {
+  itt_stubs() = stubs;
+}
+
 at::IValue ProfilerConfig::toIValue() const {
   c10::impl::GenericList eventIValueList(at::AnyType::get());
   eventIValueList.reserve(NUM_PROFILER_CFG_IVALUE_IDX);
@@ -519,6 +542,8 @@ bool profilerEnabled() {
 void enableProfilerLegacy(const ProfilerConfig& new_config) {
   TORCH_CHECK(new_config.state != ProfilerState::NVTX || cuda_stubs()->enabled(),
     "Can't use NVTX profiler - PyTorch was compiled without CUDA");
+  TORCH_CHECK(new_config.state != ProfilerState::ITT || itt_stubs()->enabled(),
+    "Can't use ITT profiler - PyTorch was compiled without ITT");
 
   TORCH_CHECK(new_config.state != ProfilerState::KINETO);
 
@@ -676,6 +701,7 @@ double LegacyEvent::cudaElapsedUs(const LegacyEvent& e) const {
 }
 
 CUDAStubs::~CUDAStubs() = default;
+ITTStubs::~ITTStubs() = default;
 
 static const jit::CodeTemplate event_template(R"(
 {

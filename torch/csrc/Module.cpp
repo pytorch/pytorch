@@ -755,6 +755,12 @@ void initBindings(PyObject *module);
 }} // namespace torch::mlc
 #endif
 
+#ifdef USE_ITT
+namespace torch {
+void initIttBindings(PyObject *module);
+} // namespace torch
+#endif
+
 bool THDPDoubleStorage_init(PyObject *module);
 bool THDPFloatStorage_init(PyObject *module);
 // TODO: fix
@@ -867,6 +873,9 @@ PyObject* initModule() {
   torch::autograd::initSpecialFunctions(module);
   torch::autograd::init_legacy_variable(module);
   torch::python::init_bindings(module);
+#ifdef USE_ITT
+  torch::initIttBindings(module);
+#endif
 #ifdef USE_CUDA
   torch::cuda::initModule(module);
 #endif

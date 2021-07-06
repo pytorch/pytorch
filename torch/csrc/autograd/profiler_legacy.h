@@ -69,6 +69,30 @@ private:
 TORCH_API void registerCUDAMethods(CUDAStubs* stubs);
 TORCH_API const CUDAStubs* cudaStubs();
 
+struct TORCH_API ITTStubs {
+  virtual void ittMark(const char* name) const {
+    fail();
+  }
+  virtual void ittRangePush(const char* name) const {
+    fail();
+  }
+  virtual void ittRangePop() const {
+    fail();
+  }
+  virtual bool enabled() const {
+    return false;
+  }
+  virtual ~ITTStubs();
+
+private:
+  void fail() const {
+    AT_ERROR("ITT used in profiler but not enabled.");
+  }
+};
+
+TORCH_API void registerITTMethods(ITTStubs* stubs);
+TORCH_API const ITTStubs* ittStubs();
+
 constexpr inline size_t ceilToMultiple(size_t a, size_t b) {
   return ((a + b - 1) / b) * b;
 }
@@ -399,6 +423,7 @@ enum class C10_API_ENUM ProfilerState {
   CPU, // CPU-only profiling
   CUDA, // CPU + CUDA events
   NVTX,  // only emit NVTX markers
+  ITT,  // only emit ITT markers
   KINETO, // use libkineto
   KINETO_GPU_FALLBACK, // use CUDA events when CUPTI is not available
   NUM_PROFILER_STATES, // must be the last one
