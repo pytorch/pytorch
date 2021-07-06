@@ -1,11 +1,11 @@
 {%- extends "linux_ci_workflow.yml.j2" -%}
+{%- set exclude_test = true -%}
 {% block name -%}
 # Template is at:    .github/templates/bazel_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
 name: Bazel Linux CI (!{{ build_environment }})
 {%- endblock %}
-
-  {% block build -%}
+{% block build +%}
   # building and testing in a single job since bazel runs only small subset of tests
   build-and-test:
     runs-on: !{{ test_runner_type }}
@@ -139,9 +139,8 @@ name: Bazel Linux CI (!{{ build_environment }})
         run: |
           # Prune all of the docker images
           docker system prune -af
-  {%- endblock %}
-  {%- block test %}{%- endblock %}
-  {%- block render_test_results -%}
+{%- endblock %}
+{% block render_test_results +%}
   # this is a separate step from test because the log files from test are too
   # long: basically, GitHub tries to render all of the log files when you click
   # through an action causing extreme slowdown on actions that contain too many
@@ -197,4 +196,4 @@ name: Bazel Linux CI (!{{ build_environment }})
         run: |
           export PYTHONPATH=$PWD
           python tools/stats/print_test_stats.py --upload-to-s3 --compare-with-s3 test
-  {%- endblock %}
+{%- endblock %}

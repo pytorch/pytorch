@@ -1,3 +1,4 @@
+{%- set exclude_test = exclude_test|default(false) -%}
 {%- block name -%}
 # Template is at:    .github/templates/linux_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
@@ -103,8 +104,7 @@ jobs:
         run: |
           export IMAGE_NAME=${DOCKER_IMAGE_BASE#308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/}
           cd .circleci/docker && ./build_docker.sh
-
-  {% block build -%}
+{% block build +%}
   build:
     runs-on: linux.2xlarge
     needs: calculate-docker-image
@@ -198,9 +198,9 @@ jobs:
         run: |
           # Prune all of the docker images
           docker system prune -af
-  {%- endblock %}
-
-  {% block test -%}
+{%- endblock %}
+{%- if not exclude_test %}
+{% block test +%}
   generate-test-matrix:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: ubuntu-18.04
@@ -353,9 +353,9 @@ jobs:
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
           # Prune all of the docker images
           docker system prune -af
-  {%- endblock %}
-
-  {% block render_test_results -%}
+{% endblock %}
+{%- endif -%}
+{% block render_test_results +%}
   # this is a separate step from test because the log files from test are too
   # long: basically, GitHub tries to render all of the log files when you click
   # through an action causing extreme slowdown on actions that contain too many
@@ -415,7 +415,7 @@ jobs:
         run: |
           export PYTHONPATH=$PWD
           python tools/stats/print_test_stats.py --upload-to-s3 --compare-with-s3 test
-  {%- endblock %}
+{%- endblock %}
   {%- if enable_doc_jobs %}
 
   pytorch_python_doc_build:
