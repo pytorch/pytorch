@@ -19,7 +19,7 @@ from ..observer import (
 from ..utils import check_min_max_valid
 
 from collections import namedtuple
-from typing import Dict, Any, Tuple, Optional
+from typing import Dict, Any, List, Tuple, Optional
 import warnings
 
 
@@ -67,7 +67,7 @@ class _InputEqualizationObserver(nn.Module):
                                                   factory_kwargs=factory_kwargs)
 
         self.equalization_scale = torch.empty(0)
-        self.equalization_shape = []
+        self.equalization_shape: List[int] = []
 
     def forward(self, x_orig):
         # TODO: Allow for convoluational layers

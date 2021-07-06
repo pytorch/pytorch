@@ -86,7 +86,8 @@ class TestEqualizeFx(QuantizationTestCase):
            input_qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            input_qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)),
            weight_qdtype=st.sampled_from((torch.qint8, torch.quint8)),
-           weight_qscheme=st.sampled_from((torch.per_channel_affine, torch.per_channel_symmetric, torch.per_channel_affine_float_qparams)))
+           weight_qscheme=st.sampled_from((torch.per_channel_affine, torch.per_channel_symmetric, 
+                                           torch.per_channel_affine_float_qparams)))
     def test_input_weight_eq_observer(self, ndim, input_qdtype, input_qscheme, weight_qdtype, weight_qscheme):
         if ndim == 2:
             width = np.random.randint(1, 10)
@@ -94,8 +95,10 @@ class TestEqualizeFx(QuantizationTestCase):
             w = (np.random.random(size=(np.random.randint(2, 10), width)) * 10).round(decimals=2).astype(np.float32)
         elif ndim == 4:
             channel = np.random.randint(1, 10)
-            x = (np.random.random(size=(np.random.randint(2, 10), channel, np.random.randint(2, 10), np.random.randint(2, 10))) * 10).round(decimals=2).astype(np.float32)
-            w = (np.random.random(size=(np.random.randint(2, 10), channel, np.random.randint(2, 10), np.random.randint(2, 10))) * 10).round(decimals=2).astype(np.float32)
+            x = (np.random.random(size=(np.random.randint(2, 10), channel, np.random.randint(2, 10), 
+                                        np.random.randint(2, 10))) * 10).round(decimals=2).astype(np.float32)
+            w = (np.random.random(size=(np.random.randint(2, 10), channel, np.random.randint(2, 10), 
+                                        np.random.randint(2, 10))) * 10).round(decimals=2).astype(np.float32)
 
         input_eq_obs = _InputEqualizationObserver(dtype=input_qdtype, qscheme=input_qscheme)
         weight_eq_obs = _WeightEqualizationObserver(dtype=weight_qdtype, qscheme=weight_qscheme)
@@ -256,8 +259,8 @@ class TestEqualizeFx(QuantizationTestCase):
         """
 
         tests = [(SingleLayerLinearModel, 2), (LinearAddModel, 2), (TwoLayerLinearModel, 2),
-                 (SingleLayerFunctionalLinearModel, 2), (FunctionalLinearAddModel, 2), 
-                 (TwoLayerFunctionalLinearModel, 2), 
+                 (SingleLayerFunctionalLinearModel, 2), (FunctionalLinearAddModel, 2),
+                 (TwoLayerFunctionalLinearModel, 2),
                  (LinearReluModel, 2), (LinearReluLinearModel, 2), (LinearReluAddModel, 2),
                  (ConvModel, 4), (TwoLayerConvModel, 4), (SingleLayerFunctionalConvModel, 4)]
 
