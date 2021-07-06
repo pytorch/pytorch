@@ -38,6 +38,7 @@ void KernelArgumentHolder::push(const at::Tensor& tensor) {
   int nDims = tensor.ndimension();
 
   c10::ScalarType dtype = tensor.scalar_type();
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::unique_ptr<TensorArgAbstract> tensor_arg = getTensorArg(dtype, nDims);
   tensor_arg->setPointer(tensor.data_ptr());
   for (const auto i : c10::irange(nDims)) {
@@ -55,6 +56,7 @@ void KernelArgumentHolder::push(const IValue& val) {
       "Tried to push an arg to run in a fused kernel, expected a scalar but got, ",
       val);
   switch (val.toScalar().type()) {
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     case c10::ScalarType::Double:
       arguments_.push_back(std::make_unique<FloatArg>((float)val.toDouble()));
       return;
