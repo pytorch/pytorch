@@ -3,10 +3,13 @@ import warnings
 import unittest
 import random
 import itertools
+from torch.testing import get_all_complex_dtypes, get_all_fp_dtypes
+from torch.testing._internal.common_cuda import SM53OrLater, SM80OrLater
 from torch.testing._internal.common_utils import \
     (IS_MACOS, IS_WINDOWS, TestCase, run_tests, load_tests, coalescedonoff, make_tensor)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes, onlyCPU, onlyCUDA)
+    (instantiate_device_type_tests, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoCusparseGeneric,
+    precisionOverride)
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -298,7 +301,8 @@ class TestSparseCSR(TestCase):
         self.assertEqual(torch.tensor([0, 1, 2] * 3, dtype=torch.int64), sparse.col_indices())
         self.assertEqual(torch.tensor([2] * 9, dtype=dtype), sparse.values())
 
-    def run_test_sparse_csr_to_dense(self, device, dtype):
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_sparse_csr_to_dense(self, device, dtype):
         mn = [5, 2, 0]
         for (m, n) in itertools.product(mn, mn):
             size = (m, n)
@@ -313,23 +317,6 @@ class TestSparseCSR(TestCase):
                                       values, dtype=dtype, device=device)
         dense = torch.tensor([[1, 2, 1], [3, 4, 0]], dtype=dtype, device=device)
         self.assertEqual(csr.to_dense(), dense)
-
-    @dtypes(*torch.testing.get_all_dtypes())
-    def test_sparse_csr_to_dense(self, device, dtype):
-        if dtype in [torch.bool, torch.half, torch.bfloat16] or dtype.is_complex:
-            err_msg = "\"add_out_op2_sparse_csr\" not implemented"
-            if dtype == torch.float16 and self.device_type == 'cpu':
-                err_msg = r"to_dense\(\) not supported for float16 on CPU"
-            with self.assertRaisesRegex(RuntimeError, err_msg):
-                self.run_test_sparse_csr_to_dense(device, dtype)
-        else:
-            self.run_test_sparse_csr_to_dense(device, dtype)
-
-    # TODO: https://github.com/pytorch/pytorch/issues/60648
-    @dtypes(torch.bool, torch.half, torch.bfloat16, torch.complex64, torch.complex128)
-    @unittest.expectedFailure
-    def test_sparse_csr_to_dense_xfail(self, device, dtype):
-        _run_test_sparse_csr_to_dense(device, dtype)
 
     @coalescedonoff
     @dtypes(torch.double)
@@ -446,9 +433,11 @@ class TestSparseCSR(TestCase):
                     test_shape(i, j, k, i * j // 2)
         test_shape(4, 4, 4, 0)
 
-    # TODO: enable all dtypes when csr_sparse.to_dense() works
-    # See: https://github.com/pytorch/pytorch/issues/60648
+    @skipCUDAIfNoCusparseGeneric
     @dtypes(*torch.testing.floating_types())
+    @dtypesIfCUDA(*get_all_complex_dtypes(),
+                  *get_all_fp_dtypes(include_half=SM53OrLater, include_bfloat16=SM80OrLater))
+    @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2})
     def test_sparse_mm(self, device, dtype):
         def test_shape(d1, d2, d3, nnz, transposed, index_dtype):
             if transposed:
@@ -463,9 +452,11 @@ class TestSparseCSR(TestCase):
             test_shape(7, 8, 9, 20, False, index_dtype)
             test_shape(7, 8, 9, 20, True, index_dtype)
 
-    # TODO: enable more dtypes when csr_sparse.to_dense() works
-    # See: https://github.com/pytorch/pytorch/issues/60648
+    @skipCUDAIfNoCusparseGeneric
     @dtypes(*torch.testing.floating_types())
+    @dtypesIfCUDA(*get_all_complex_dtypes(),
+                  *get_all_fp_dtypes(include_half=SM53OrLater, include_bfloat16=SM80OrLater))
+    @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2})
     def test_sparse_addmm(self, device, dtype):
         def test_shape(m, n, p, nnz, broadcast, index_dtype, alpha_beta=None):
             if alpha_beta is None:
@@ -521,10 +512,7 @@ class TestSparseCSR(TestCase):
         _test_spadd_shape(10, [100, 1])
         _test_spadd_shape(10, [1, 100])
 
-    # TODO: enable all dtypes when csr_sparse.to_dense() works
-    # See: https://github.com/pytorch/pytorch/issues/60648
-    @dtypes(*torch.testing.get_all_dtypes(include_bool=False, include_half=False,
-                                          include_bfloat16=False, include_complex=False))
+    @dtypes(*torch.testing.get_all_dtypes())
     def test_coo_csr_conversion(self, device, dtype):
         for m, n in itertools.product([5, 2, 0], [5, 2, 0]):
             size = (m, n)
