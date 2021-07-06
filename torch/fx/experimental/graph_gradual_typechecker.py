@@ -274,29 +274,49 @@ def relu_inference_rule(n: Node, op_type):
         raise TypeError(f'Cannot apply {op_type}. Current shape {n.type} does not match argument shape {arg_type}')
 
 
-# Todo check if input can be 3D as well
+def maxpool2d_check(typ, op_type):
+    new_type_list = list(typ.__args__)
+    if len(new_type_list) == 4 or len(new_type_list) == 3:
+        w_in = new_type_list[-1]
+        h_in = new_type_list[-2]
+        h_out = calculate_hout(h_in, op_type)
+        w_out = calculate_wout(w_in, op_type)
+        new_type_list[-1] = w_out
+        new_type_list[-2] = h_out
+        return TensorType(tuple(new_type_list))
+
+    else:
+        raise TypeError(f'Wrong size {typ} for {op_type}')
+
+
 @register_inference_rule(torch.nn.MaxPool2d)
 def maxpool2d_inference_rule(n: Node, op_type):
     assert isinstance(n.args[0], Node)
-    n.args[0].type = apply_matching(n.args[0].type, 4)
-    arg_type = n.args[0].type
-    n.type = apply_matching(n.type, 4)
-    if is_consistent(arg_type, n.type):
 
-        w_in = arg_type.__args__[3]
-        h_in = arg_type.__args__[2]
+    if n.args[0].type == Dyn and n.type == Dyn:
+        return Dyn
 
-        h_out = calculate_hout(h_in, op_type)
-        w_out = calculate_wout(w_in, op_type)
+    # Todo backwards propagation
+    elif n.args[0].type == Dyn and isinstance(n.type, TensorType):
+        n.type = maxpool2d_check(n.type, op_type)
+        return n.type
 
-        # todo backwards propagation
+    elif n.type == Dyn and isinstance(n.args[0].type, TensorType):
+        n.type = maxpool2d_check(n.args[0].type, op_type)
+        return n.type
 
-        new_type = TensorType((arg_type.__args__[0], arg_type.__args__[1], h_out, w_out))
-        n.type = new_type
+    elif isinstance(n.args[0].type, TensorType) and isinstance(n.type, TensorType):
+        new_arg = maxpool2d_check(n.args[0].type, op_type)
+        new_node_type = maxpool2d_check(n.type, op_type)
 
+        n.type = new_node_type
+
+        if is_more_precise(new_arg, n.type):
+            n.type = new_arg
         return n.type
     else:
-        raise TypeError(f'Cannot apply {op_type} with input type {arg_type} and existing type {n.type} on {n}')
+        raise TypeError(f'Cannot apply {op_type} with input type {n.args[0].type} and existing type {n.type} on {n}')
+
 
 
 def linear_check(tensor_type, op_type):
