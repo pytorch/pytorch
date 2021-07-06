@@ -3562,6 +3562,18 @@ class TestONNXRuntime(unittest.TestCase):
                       dynamic_axes={"x": [0, 1]},
                       test_with_inputs=[x2])
 
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                x[:, x.size(0):] = torch.tensor([1, 2, 3])
+                return x
+
+        x = torch.ones(2, 5, 3)
+        x2 = torch.randn(3, 4, 3)
+        self.run_test(Model(), (x, ),
+                      input_names=["x"],
+                      dynamic_axes={"x": [0, 1, 2]},
+                      test_with_inputs=[x2])
+
     def test_multinomial(self):
         class Multinomial(torch.nn.Module):
             def forward(self, weight):
