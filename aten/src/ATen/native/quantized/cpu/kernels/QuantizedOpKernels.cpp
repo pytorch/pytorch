@@ -2059,14 +2059,15 @@ void q_batch_norm_kernel(
 
 }
 
-void fake_quantize_tensor_cachemask_kernel(
-    Tensor& output,
-    Tensor& mask,
-    const Tensor& input,
-    float sc,
-    int64_t z_point,
-    int64_t quant_min,
-    int64_t quant_max) {
+void _fake_quantize_tensor_helper(
+  Tensor& output,
+  Tensor& mask,
+  const Tensor& input,
+  float sc,
+  int64_t z_point,
+  int64_t quant_min,
+  int64_t quant_max) {
+
   float inv_scale = 1.0f / sc;
 
   auto iter_combined = TensorIteratorConfig()
@@ -2089,6 +2090,33 @@ void fake_quantize_tensor_cachemask_kernel(
       }
     });
   });
+  }
+
+void fake_quantize_tensor_cachemask_kernel(
+    Tensor& output,
+    Tensor& mask,
+    const Tensor& input,
+    float sc,
+    int64_t z_point,
+    int64_t quant_min,
+    int64_t quant_max) {
+  _fake_quantize_tensor_helper(output, mask, input, sc, z_point, quant_min, quant_max);
+
+}
+
+void fake_quantize_tensor_cachemask_tensor_qparams_kernel(
+    Tensor& output,
+    Tensor& mask,
+    const Tensor& input,
+    const Tensor& sc,
+    const Tensor& z_point,
+    int64_t quant_min,
+    int64_t quant_max) {
+
+  float* scale_ptr = sc.data_ptr<float>();
+  int32_t* zp_ptr = z_point.data_ptr<int32_t>();
+
+  _fake_quantize_tensor_helper(output, mask, input, *scale_ptr, *zp_ptr, quant_min, quant_max);
 
 }
 
@@ -3083,6 +3111,9 @@ REGISTER_DISPATCH(fake_quant_per_channel_cachemask_stub, &fake_quant_per_channel
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(fake_quant_tensor_cachemask_stub,
                   &fake_quantize_tensor_cachemask_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(fake_quant_tensor_cachemask_tensor_qparams_stub,
+                  &fake_quantize_tensor_cachemask_tensor_qparams_kernel);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(qadaptive_avg_pool2d_nhwc_stub,
                   &qadaptive_avg_pool2d_nhwc_kernel);

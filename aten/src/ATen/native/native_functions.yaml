@@ -5221,10 +5221,19 @@
   device_check: NoCheck   # TensorIterator
   variants: function
 
+- func: fake_quantize_per_tensor_affine.tensor_qparams(Tensor self, Tensor scale, Tensor zero_point, int quant_min, int quant_max) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  variants: function
+
 - func: fake_quantize_per_tensor_affine_cachemask(Tensor self, float scale, int zero_point, int quant_min, int quant_max) -> (Tensor output, Tensor mask)
   variants: function
   dispatch:
     CPU, CUDA: fake_quantize_per_tensor_affine_cachemask
+
+- func: fake_quantize_per_tensor_affine_cachemask_tensor_qparams(Tensor self, Tensor scale, Tensor zero_point, int quant_min, int quant_max) -> (Tensor output, Tensor mask)
+  variants: function
+  dispatch:
+    CPU, CUDA: fake_quantize_per_tensor_affine_cachemask_tensor_qparams
 
 - func: fake_quantize_per_tensor_affine_cachemask_backward(Tensor grad, Tensor mask) -> Tensor
   variants: function
