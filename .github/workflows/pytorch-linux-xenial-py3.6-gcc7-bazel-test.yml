@@ -229,9 +229,6 @@ jobs:
         run: |
           # Prune all of the docker images
           docker system prune -af
-
-  
-
   # this is a separate step from test because the log files from test are too
   # long: basically, GitHub tries to render all of the log files when you click
   # through an action causing extreme slowdown on actions that contain too many
