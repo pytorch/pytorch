@@ -1,39 +1,57 @@
+import http.server
 import itertools
-import numpy as np
 import os
 import os.path
 import pickle
 import random
+import socketserver
 import sys
 import tarfile
 import tempfile
-import warnings
-import zipfile
-
-import unittest
-from unittest import skipIf
-from typing import (
-    Any, Awaitable, Dict, Generic, Iterator, List, NamedTuple, Optional, Tuple,
-    Type, TypeVar, Set, Union)
-import http.server
-import socketserver
 import threading
 import time
+import unittest
+import warnings
+import zipfile
 from functools import partial
+from typing import (
+    Any,
+    Awaitable,
+    Dict,
+    Generic,
+    Iterator,
+    List,
+    NamedTuple,
+    Optional,
+    Set,
+    Tuple,
+    Type,
+    TypeVar,
+    Union,
+)
+from unittest import skipIf
+
+import numpy as np
 
 import torch
 import torch.nn as nn
+import torch.utils.data.backward_compatibility
 import torch.utils.data.datapipes as dp
 import torch.utils.data.graph
 import torch.utils.data.sharding
-import torch.utils.data.backward_compatibility
-
-from torch.testing._internal.common_utils import (TestCase, run_tests)
+from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.utils.data import (
-    IterDataPipe, MapDataPipe, RandomSampler, DataLoader,
-    argument_validation, runtime_validation_disabled, runtime_validation)
+    DataLoader,
+    IterDataPipe,
+    MapDataPipe,
+    RandomSampler,
+    argument_validation,
+    runtime_validation,
+    runtime_validation_disabled,
+)
 from torch.utils.data.datapipes.utils.decoder import (
-    basichandlers as decoder_basichandlers)
+    basichandlers as decoder_basichandlers,
+)
 
 try:
     import torchvision.transforms
@@ -115,7 +133,10 @@ class TestIterableDataPipeBasic(TestCase):
 
     def test_loadfilesfromdisk_iterable_datapipe(self):
         # test import datapipe class directly
-        from torch.utils.data.datapipes.iter import ListDirFiles, LoadFilesFromDisk
+        from torch.utils.data.datapipes.iter import (
+            ListDirFiles,
+            LoadFilesFromDisk,
+        )
 
         temp_dir = self.temp_dir.name
         datapipe1 = ListDirFiles(temp_dir, '')
