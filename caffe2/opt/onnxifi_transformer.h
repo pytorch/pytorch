@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "caffe2/opt/backend_cutting.h"
 #include "onnx/onnx_pb.h"
 
 #include "caffe2/core/operator.h"
@@ -38,6 +39,9 @@ struct OnnxifiTransformerOptions final : public BackendTransformOptions {
   // Whether to combine fp32 batched inputs into one tensor and convert it to
   // fp16 or not
   bool merge_fp32_inputs_into_fp16{false};
+
+  // Whether to verify that a single subnet was created
+  bool verify_only_single_subnet{false};
 
   // Whether the net has been ssaRewritten
   bool predictor_net_ssa_rewritten{false};
@@ -127,7 +131,7 @@ class TORCH_API OnnxifiTransformer final : public BackendTransformerBase {
       const std::unordered_map<int, ShapeInfoMap>& shape_hints_per_bs);
 
   // Transform by passing C2 proto to backend
-  NetDef TransformViaC2(
+  opt::CutResult TransformViaC2(
       NetDef* pred_net,
       const std::unordered_set<std::string>& weights,
       const std::unordered_set<int>& blocklisted_ops,
@@ -135,7 +139,7 @@ class TORCH_API OnnxifiTransformer final : public BackendTransformerBase {
       const std::unordered_map<int, ShapeInfoMap>& shape_hints_per_bs);
 
   // Transform by passing ONNX proto to backend
-  NetDef TransformViaOnnx(
+  opt::CutResult TransformViaOnnx(
       Workspace* ws,
       NetDef* pred_net,
       const std::unordered_set<std::string>& weights,
