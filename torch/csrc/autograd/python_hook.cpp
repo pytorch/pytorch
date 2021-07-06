@@ -37,6 +37,21 @@ PyFunctionPreHook::~PyFunctionPreHook() {
   }
 }
 
+namespace {
+struct HookManager {
+  // RAII struct to manage the lifetime of hook.
+  PyObject* hook;
+  explicit HookManager(PyObject* hook) : hook(hook) {
+    Py_INCREF(hook);
+  }
+
+  ~HookManager() {
+    Py_DECREF(hook);
+  }
+};
+
+} // namespace
+
 auto PyFunctionPreHook::operator()(const variable_list& values) -> variable_list
 {
   pybind11::gil_scoped_acquire gil;
@@ -48,6 +63,16 @@ auto PyFunctionPreHook::operator()(const variable_list& values) -> variable_list
   PyObject *key, *hook;
   Py_ssize_t pos = 0;
   while (PyDict_Next(dict, &pos, &key, &hook)) {
+    // Note: [Extend Hook Lifetime]
+    // Hold a reference to callable hook.
+    // This is to handle the case when hook calls `handle.remove` inside it
+    // and it's refcount goes to `0`, Python is free to GC it.
+    // We hold onto a stale pointer and subsequent call to
+    // `check_single_result`, which tries to fetch the `hook`'s name segfaults.
+    // So, we bump the refcount to increase the lifetime till we have verified
+    // the result.
+    // Reference: https://github.com/pytorch/pytorch/issues/58354
+    auto hook_m = HookManager{hook};
     THPObjectPtr res(PyObject_CallFunctionObjArgs(hook, value.get(), nullptr));
     if (!res) throw python_error();
     if (res == Py_None) continue;
@@ -85,6 +110,8 @@ auto PyFunctionPostHook::operator()(
   PyObject *key, *hook;
   Py_ssize_t pos = 0;
   while (PyDict_Next(dict, &pos, &key, &hook)) {
+    // See Note: [Extend Hook Lifetime]
+    auto hook_m = HookManager{hook};
     THPObjectPtr res(PyObject_CallFunctionObjArgs(
         hook, outputs.get(), inputs.get(), nullptr));
     if (!res) throw python_error();
