@@ -77,6 +77,16 @@ static inline __host__ __device__ B complex_pow_(B base, E exp) {
 }
 #endif
 
+template<typename scalar_t>
+struct ComplexPowFunctor {
+  ComplexPowFunctor(scalar_t base): base_(base){}
+  __device__ scalar_t operator() (scalar_t exp) const {
+    return std::pow(base_, exp);
+  }
+  private:
+    scalar_t base_;
+};
+
 /*template<typename scalar_t, typename func_t>
 __inline__ void dispatch_scalar_base_pow(TensorIterator iter, func_t f){
   auto b = iter.scalar_value<scalar_t>(1);
@@ -92,10 +102,12 @@ void pow_tensor_tensor_kernel(TensorIteratorBase& iter) {
   if (isComplexType(iter.common_dtype())) {
     AT_DISPATCH_COMPLEX_TYPES(iter.common_dtype(), "pow_cuda", [&]() {
       if (iter.is_cpu_scalar(1)){
-        auto b = iter.scalar_value<scalar_t>(1);
+        const auto b = iter.scalar_value<scalar_t>(1);
         iter.remove_operand(1);
         const cuda::OptionalCUDAGuard device_guard(device_of(iter.tensor(1)));
-        gpu_kernel(iter, [b]GPU_LAMBDA(scalar_t exp) -> scalar_t {return complex_pow_(b, exp);});
+  //      ComplexPowFunctor<scalar_t> f(b);
+  //      gpu_kernel(iter, f);
+          gpu_kernel(iter, [b]GPU_LAMBDA(scalar_t exp) -> scalar_t {return complex_pow_(b, exp);});
       } else {
         gpu_kernel(iter, []GPU_LAMBDA(scalar_t base, scalar_t exp) -> scalar_t {
         return complex_pow_(base, exp);
