@@ -80,17 +80,6 @@ CONFIG_TREE_DATA = [
                 ]),
             ]),
         ]),
-        ("gcc", [
-            ("9", [
-                ("3.8", [
-                    ("coverage", [
-                        (True, [
-                            ("shard_test", [XImportant(True)]),
-                        ]),
-                    ]),
-                ]),
-            ]),
-        ]),
         ("rocm", [
             ("3.9", [
                 ("3.6", [
