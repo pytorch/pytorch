@@ -23,6 +23,9 @@ from torch.testing._internal.common_quantization import (
     SingleLayerFunctionalLinearModel,
     TwoLayerFunctionalLinearModel,
     FunctionalLinearAddModel,
+    ConvModel,
+    TwoLayerConvModel,
+    TwoLayerFunctionalConvModel,
     skipIfNoFBGEMM,
     LinearReluModel,
     LinearReluLinearModel,
@@ -40,18 +43,25 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 
-qconfig_dict = {"": None,
-                "object_type": [(nn.Linear, default_qconfig),
-                                (F.linear, default_qconfig),
-                                (nn.ReLU, default_qconfig),
-                                (F.relu, default_qconfig)]}
+qconfig_dict = {
+    "": None,
+    "object_type": [(nn.Linear, default_qconfig),
+                    (F.linear, default_qconfig),
+                    (nn.ReLU, default_qconfig),
+                    (F.relu, default_qconfig),
+                    (nn.Conv2d, default_qconfig),
+                    (F.conv2d, default_qconfig)]
+}
 
 default_equalization_qconfig_dict = {
     "": None,
     "object_type": [(nn.Linear, default_equalization_qconfig),
                     (F.linear, default_equalization_qconfig),
                     (nn.ReLU, default_equalization_qconfig),
-                    (F.relu, default_equalization_qconfig)]}
+                    (F.relu, default_equalization_qconfig),
+                    (nn.Conv2d, default_equalization_qconfig),
+                    (F.conv2d, default_equalization_qconfig)]
+}
 
 
 class TestEqualizeFx(QuantizationTestCase):
@@ -193,43 +203,45 @@ class TestEqualizeFx(QuantizationTestCase):
         """ Tests that graphs created after prepare_fx is as expected
         """
 
-        linear_node_occurrence = {
+        single_nn_layer_node_occurrence = {
             ns.call_module(_InputEqualizationObserver): 1,
             ns.call_module(MinMaxObserver): 2,
         }
 
-        linear2_node_occurrence = {
+        two_nn_layer_node_occurrence = {
             ns.call_module(_InputEqualizationObserver): 2,
             ns.call_module(MinMaxObserver): 3,
         }
 
-        functionalLinear_node_occurrence = {
+        single_F_layer_node_occurrence = {
             ns.call_module(_InputEqualizationObserver): 1,
             ns.call_module(_WeightEqualizationObserver): 1,
             ns.call_module(MinMaxObserver): 3,
         }
 
-        functionalLinear2_node_occurrence = {
+        two_F_layer_node_occurrence = {
             ns.call_module(_InputEqualizationObserver): 2,
             ns.call_module(_WeightEqualizationObserver): 2,
             ns.call_module(MinMaxObserver): 5,
         }
 
-        functionalLinear2Add_node_occurrence = {
+        fp_F_layer_node_occurrence = {
             ns.call_module(_InputEqualizationObserver): 2,
             ns.call_module(_WeightEqualizationObserver): 2,
             ns.call_module(MinMaxObserver): 6,
         }
 
-        tests = [(SingleLayerLinearModel, linear_node_occurrence),
-                 (TwoLayerLinearModel, linear2_node_occurrence),
-                 (SingleLayerFunctionalLinearModel, functionalLinear_node_occurrence),
-                 (TwoLayerFunctionalLinearModel, functionalLinear2_node_occurrence),
-                 (FunctionalLinearAddModel, functionalLinear2Add_node_occurrence),
-                 (LinearReluModel, linear_node_occurrence),
-                 (LinearReluLinearModel, linear2_node_occurrence),
-                 (FunctionalLinearReluModel, functionalLinear_node_occurrence),
-                 (FunctionalLinearReluLinearModel, functionalLinear2_node_occurrence)]
+        tests = [(SingleLayerLinearModel, single_nn_layer_node_occurrence),
+                 (TwoLayerLinearModel, two_nn_layer_node_occurrence),
+                 (TwoLayerFunctionalLinearModel, two_F_layer_node_occurrence),
+                 (FunctionalLinearAddModel, fp_F_layer_node_occurrence),
+                 (LinearReluModel, single_nn_layer_node_occurrence),
+                 (LinearReluLinearModel, two_nn_layer_node_occurrence),
+                 (FunctionalLinearReluModel, single_F_layer_node_occurrence),
+                 (FunctionalLinearReluLinearModel, two_F_layer_node_occurrence),
+                 (ConvModel, single_nn_layer_node_occurrence),
+                 (TwoLayerConvModel, two_nn_layer_node_occurrence),
+                 (TwoLayerFunctionalConvModel, two_F_layer_node_occurrence)]
 
         for (M, node_occurrence) in tests:
             m = M().eval()
