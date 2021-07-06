@@ -37,7 +37,6 @@ DECLARE_DISPATCH(elu_backward_fn, elu_backward_stub);
 DECLARE_DISPATCH(softplus_fn, softplus_stub);
 DECLARE_DISPATCH(softplus_backward_fn, softplus_backward_stub);
 DECLARE_DISPATCH(log_sigmoid_cpu_fn, log_sigmoid_cpu_stub);
-DECLARE_DISPATCH(activation_fn, log_sigmoid_cuda_stub);
 DECLARE_DISPATCH(activation_backward_fn, log_sigmoid_backward_stub);
 DECLARE_DISPATCH(threshold_fn, threshold_stub);
 DECLARE_DISPATCH(structured_activation_fn, GeluKernel);

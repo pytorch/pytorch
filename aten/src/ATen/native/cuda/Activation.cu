@@ -156,7 +156,12 @@ Tensor glu_backward_cuda(const Tensor& grad_output, const Tensor& input, int64_t
 // log_sigmoid forward
 // -----------------------------------
 
-void log_sigmoid_forward_kernel(TensorIterator& iter) {
+std::tuple<Tensor&, Tensor&> log_sigmoid_forward_out_cuda(const Tensor& input, Tensor& result, Tensor& buffer) {
+  // NOTE: buffer is only used by CPU dispatch, we just ignore it here
+  auto iter = TensorIteratorConfig()
+    .add_output(result)
+    .add_input(input)
+    .build();
   AT_DISPATCH_FLOATING_TYPES_AND(kHalf, iter.common_dtype(),
                                  "log_sigmoid_forward_cuda", [&] {
     using acc_t = acc_type<scalar_t, true>;
@@ -168,6 +173,14 @@ void log_sigmoid_forward_kernel(TensorIterator& iter) {
           return -(max + std::log(z));
         });
   });
+  return std::forward_as_tuple(result, buffer);
+}
+
+std::tuple<Tensor, Tensor> log_sigmoid_forward_cuda(const Tensor& input) {
+  auto result = at::empty_like(input);
+  auto buffer = at::empty({0}, input.options());
+  log_sigmoid_forward_out_cuda(input, result, buffer);
+  return std::forward_as_tuple(result, buffer);
 }
 
 // -----------------------------------
@@ -897,7 +910,6 @@ TORCH_IMPL_FUNC(gelu_backward_out_cuda) (
 
 REGISTER_DISPATCH(hardtanh_backward_stub, &hardtanh_backward_kernel);
 REGISTER_DISPATCH(hardshrink_stub, &hardshrink_kernel);
-REGISTER_DISPATCH(log_sigmoid_cuda_stub, &log_sigmoid_forward_kernel);
 REGISTER_DISPATCH(log_sigmoid_backward_stub, &log_sigmoid_backward_kernel);
 REGISTER_DISPATCH(softshrink_stub, &softshrink_kernel);
 REGISTER_DISPATCH(shrink_backward_stub, &shrink_backward_kernel);

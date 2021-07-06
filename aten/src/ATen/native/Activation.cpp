@@ -189,8 +189,6 @@ DEFINE_DISPATCH(softplus_backward_stub);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log_sigmoid_cpu_stub);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-DEFINE_DISPATCH(log_sigmoid_cuda_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log_sigmoid_backward_stub);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(threshold_stub);
@@ -222,9 +220,6 @@ DEFINE_DISPATCH(silu_backward_stub);
 DEFINE_DISPATCH(mish_stub);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(mish_backward_stub);
-
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_NO_CPU_DISPATCH(log_sigmoid_cuda_stub, activation_fn);
 
 TORCH_IMPL_FUNC(elu_out) (
   const Tensor& self, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale, const Tensor& result
@@ -855,23 +850,6 @@ std::tuple<Tensor&, Tensor&> log_sigmoid_forward_out_cpu(const Tensor& input, Te
   if (!result.is_contiguous()) {
     result.copy_(result_tmp);
   }
-  return std::forward_as_tuple(result, buffer);
-}
-
-std::tuple<Tensor&, Tensor&> log_sigmoid_forward_out_cuda(const Tensor& input, Tensor& result, Tensor& buffer) {
-  // NOTE: buffer is only used by CPU dispatch, we just ignore it here
-  auto iter = TensorIteratorConfig()
-      .add_output(result)
-      .add_input(input)
-      .build();
-  log_sigmoid_cuda_stub(kCUDA, iter);
-  return std::forward_as_tuple(result, buffer);
-}
-
-std::tuple<Tensor, Tensor> log_sigmoid_forward_cuda(const Tensor& input) {
-  auto result = at::empty_like(input);
-  auto buffer = at::empty({0}, input.options());
-  log_sigmoid_forward_out_cuda(input, result, buffer);
   return std::forward_as_tuple(result, buffer);
 }
 
