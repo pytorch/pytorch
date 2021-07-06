@@ -298,7 +298,7 @@ int64_t hsum(const int32_t* A, int len) {
     __m256i src_epi32 = _mm256_loadu_si256(reinterpret_cast<__m256i const*>(A + i));
     // widen
     __m128i src_lo_epi32 = _mm256_castsi256_si128(src_epi32);
-    __m128i src_hi_epi32 = _mm256_extractf128_si256(src_epi32, 1);
+    __m128i src_hi_epi32 = _mm256_extracti128_si256(src_epi32, 1);
     __m256i src_lo_epi64 = _mm256_cvtepi32_epi64(src_lo_epi32);
     __m256i src_hi_epi64 = _mm256_cvtepi32_epi64(src_hi_epi32);
     // add
@@ -318,8 +318,7 @@ int64_t hsum(const int32_t* A, int len) {
     __m512i src_epi32 = _mm512_loadu_si512(reinterpret_cast<__m512i const*>(A + i));
     // widen
     __m256i src_lo_epi32 = _mm512_castsi512_si256(src_epi32);
-    __m256i src_hi_epi32 =
-        _mm256_castps_si256(_mm512_extractf32x8_ps(_mm512_castsi512_ps(src_epi32), 1));
+    __m256i src_hi_epi32 = _mm512_extracti32x8_epi32(src_epi32, 1);
     __m512i src_lo_epi64 = _mm512_cvtepi32_epi64(src_lo_epi32);
     __m512i src_hi_epi64 = _mm512_cvtepi32_epi64(src_hi_epi32);
     // add
