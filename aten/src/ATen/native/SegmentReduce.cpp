@@ -92,7 +92,8 @@ Tensor _segment_reduce_cpu_kernel(
                   // ===== step3: finalize reduction
                   TORCH_CHECK(lengths_data[i] >= 0);
 
-                  if (lengths_data[i] == 0 && !initial.has_value()) {
+                  if (lengths_data[i] == 0 && !initial.has_value() &&
+                      reduction == SegmentReductionType::MEAN) {
                     initial_value = static_cast<scalar_t>(NAN);
                   } else if (
                       reduction == SegmentReductionType::MEAN &&
@@ -229,7 +230,6 @@ Tensor segment_reduce_kernel(
   if (!unsafe) {
     auto min_length = lengths_value.min().item<int64_t>();
     TORCH_CHECK((min_length >= 0), "lengths contains negative value!");
-    TORCH_CHECK(min_length != 0 || initial.has_value());
     TORCH_CHECK(lengths_value.sum().item<int64_t>() == data.size(axis));
   }
 

@@ -126,7 +126,8 @@ __global__ void segment_reduce_forward_kernel(
 
   // ===== step3: finalize reduction
   CUDA_KERNEL_ASSERT(lengths_data[row_id] >= 0);
-  if (lengths_data[row_id] == 0 && !is_initial_set) {
+  if (lengths_data[row_id] == 0 && !is_initial_set &&
+      reduction == SegmentReductionType::MEAN) {
     initial_value = static_cast<scalar_t>(NAN);
   } else if (
       reduction == SegmentReductionType::MEAN && lengths_data[row_id] > 0 &&
