@@ -208,8 +208,7 @@ Tensor PerChannelAffineFloatQParamsQuantizer::dequantize(const Tensor& qtensor) 
   return rtensor;
 }
 
-// NOLINTNEXTLINE(modernize-use-equals-default)
-Quantizer::~Quantizer() {}
+Quantizer::~Quantizer() = default;
 
 C10_EXPORT void set_quantizer_(const Tensor& self, ConstQuantizerPtr quantizer) {
   get_qtensorimpl(self)->set_quantizer_(quantizer);

@@ -10,10 +10,12 @@
 #include <cub/block/block_reduce.cuh>
 #include <cub/cub.cuh>
 
+#include <thrust/host_vector.h>
 #include <thrust/device_vector.h>
 #include <thrust/functional.h>
 
 #include "caffe2/core/context_gpu.h"
+#include "caffe2/utils/GpuAtomics.cuh"
 #include "caffe2/utils/conversions.h"
 
 #include "caffe2/utils/fixed_divisor.h"
@@ -2217,13 +2219,13 @@ __global__ void Im2ColNdNCHWCUDAKernel(
       if (!kCol2Im) {
         Y_data[col_index] = is_padding ? 0 : __ldg(X_data + img_index);
       } else if (!is_padding) {
-        atomicAdd(Y_data + img_index, __ldg(X_data + col_index));
+        gpu_atomic_add(Y_data + img_index, __ldg(X_data + col_index));
       }
 #else
       if (!kCol2Im) {
         Y_data[col_index] = is_padding ? 0 : X_data[img_index];
       } else if (!is_padding) {
-        atomicAdd(Y_data + img_index, X_data[col_index]);
+        gpu_atomic_add(Y_data + img_index, X_data[col_index]);
       }
 #endif
     }
