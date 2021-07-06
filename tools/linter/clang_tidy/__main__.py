@@ -5,7 +5,7 @@ import os
 import shutil
 
 from run import run
-from setup import setup
+from generate_build_files import generate_build_files
 
 
 DEFAULTS = {
@@ -134,8 +134,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    if not pathlib.Path("build").exists:
-        setup()
+    if not pathlib.Path("build").exists():
+        generate_build_files()
     options = parse_args()
 
     # Check if clang-tidy executable exists

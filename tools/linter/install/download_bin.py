@@ -128,7 +128,6 @@ def download(
 
     # This is the path to the file containing the reference hash.
     hashpath = os.path.join(PYTORCH_ROOT, platform_to_hash[HOST_PLATFORM])
-    print(hashpath)
 
     if not os.path.exists(hashpath):
         print("Unable to find reference binary hash")
