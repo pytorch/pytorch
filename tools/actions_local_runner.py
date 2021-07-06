@@ -311,7 +311,11 @@ class ClangTidy(Check):
 
     async def full(self) -> None:
         await shell_cmd(
-            [sys.executable, "tools/linter/clang_tidy",] + self.common_options
+            [
+                sys.executable,
+                "tools/linter/clang_tidy",
+            ]
+            + self.common_options
         )
 
 
