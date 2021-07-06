@@ -181,6 +181,8 @@ jobs:
           # TODO: Stop building test binaries as part of the build phase
           # Used for GPU_FLAG since that doesn't play nice
           # shellcheck disable=SC2086
+          # Make sure we copy test results from bazel-testlogs symlink to
+          # a regular directory ./test/test-reports
           docker run \
             ${GPU_FLAG:-} \
             -e BUILD_ENVIRONMENT \
@@ -209,7 +211,6 @@ jobs:
       - name: Zip test reports for upload
         if: always()
         run: |
-          find ./test -type f -iname "*.xml"
           # Remove any previous test reports if they exist
           rm -f test-reports-*.zip
           zip -r "test-reports-1.zip" test -i '*.xml'
