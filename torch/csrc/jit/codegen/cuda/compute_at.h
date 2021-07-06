@@ -18,8 +18,10 @@ class TensorView;
 // We're going to keep data related to the computeAt pass for each TensorView in
 // this structure, this will allow us to keep a single entry in a map from a
 // TensorView to this one.
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class ComputeAtData {
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   ComputeAtData() = default;
   ComputeAtData(TensorView* tv);
 
@@ -101,6 +103,10 @@ class ComputeAt {
       TensorView* _consumer,
       unsigned int _consumer_position);
 
+  ComputeAt() = delete;
+  ComputeAt(ComputeAt&) = delete;
+  ComputeAt& operator=(const ComputeAt& other) = delete;
+
  private:
   TensorView* producer_;
   TensorView* consumer_;
@@ -153,10 +159,7 @@ class ComputeAt {
       TensorView* _consumer,
       unsigned int _consumer_position);
 
-  ComputeAt() = delete;
   ~ComputeAt() = default;
-  ComputeAt(ComputeAt&) = delete;
-  ComputeAt& operator=(const ComputeAt& other) = delete;
 };
 
 } // namespace cuda
