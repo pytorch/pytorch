@@ -154,6 +154,7 @@ std::unique_ptr<TensorArgAbstract> getTensorArg(
     c10::ScalarType dtype,
     int nDims);
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class KernelArgumentHolder {
  public:
   // Push a tensor to the arguments
