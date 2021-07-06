@@ -6,19 +6,11 @@ namespace {
     // See discussion in forward_grad.h for why these are global variables and not
     // thread local
 
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-    static std::mutex all_forward_levels_mutex_;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-    static uint64_t next_forward_idx_ = 0;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-    static std::vector<std::shared_ptr<ForwardADLevel>> all_forward_levels_;
+    std::mutex all_forward_levels_mutex_;
+    uint64_t next_forward_idx_ = 0;
+    std::vector<std::shared_ptr<ForwardADLevel>> all_forward_levels_;
 
     const static at::Tensor singleton_undefined_tensor;
-
-    // Temporary flag to disable forward mode
-    // TODO(alband) remove these when perf issues are solved
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-    static bool is_forward_grad_enabled = false;
 }
 
 uint64_t ForwardADLevel::get_next_idx() {
