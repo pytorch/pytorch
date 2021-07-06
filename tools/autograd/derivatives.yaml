@@ -1554,7 +1554,11 @@
   self: elu_backward(grad, alpha, 1, 1.0/alpha.toFloat(), /* is_result */ true, result)
 
 - name: gelu(Tensor self) -> Tensor
-  self: "GradMode::is_enabled() ? infinitely_differentiable_gelu_backward(grad, self) : gelu_backward(grad, self)"
+  self: gelu_backward(grad, self)
+
+- name: gelu_backward(Tensor grad_output, Tensor self) -> Tensor
+  grad_output: gelu_backward(grad, self)
+  self: gelu_double_backward(grad, grad_output, self)
 
 - name: glu(Tensor self, int dim=-1) -> Tensor
   self: glu_backward(grad, self, dim)

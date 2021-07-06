@@ -2051,6 +2051,18 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
   }
 }
 
+Tensor gelu_double_backward(
+		const Tensor & grad_grad_input,
+		const Tensor & grad_output,
+		const Tensor & input) {
+  constexpr auto kBeta = M_2_SQRTPI * M_SQRT1_2 * 0.5;
+  auto input_sq = input * input;
+  auto pdf = kBeta * at::exp(-0.5 * input_sq);
+  auto dgrad_dInput = 2 * pdf - input_sq * pdf;
+  auto gI = grad_grad_input * grad_output * dgrad_dInput;
+  return gI;
+}
+
 Tensor elu_double_backward(
     const Tensor& grad,
     const Tensor& grad_output,

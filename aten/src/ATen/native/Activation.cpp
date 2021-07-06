@@ -333,7 +333,7 @@ TORCH_IMPL_FUNC(gelu_out_cpu) (
 }
 
 TORCH_IMPL_FUNC(gelu_backward_out_cpu) (
-  const Tensor& grad, const Tensor& self, const Tensor& grad_input
+  const Tensor& grad_output, const Tensor& self, const Tensor& grad_input
 ) {
   GeluBackwardKernel(kCPU, *this);
 }
