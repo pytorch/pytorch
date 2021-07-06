@@ -37,6 +37,7 @@ TESTS = [
     'test_import_time',
     'test_public_bindings',
     'test_type_hints',
+    'test_ao_sparsity',
     'test_autograd',
     'benchmark_utils/test_benchmark_utils',
     'test_binary_ufuncs',
@@ -65,7 +66,6 @@ TESTS = [
     'distributions/test_constraints',
     'distributions/test_distributions',
     'test_dispatch',
-    'test_expecttest',
     'test_foreach',
     'test_indexing',
     'test_jit',
@@ -247,7 +247,6 @@ ROCM_BLOCKLIST = [
 
 RUN_PARALLEL_BLOCKLIST = [
     'test_cpp_extensions_jit',
-    'test_expecttest',
     'test_jit_disabled',
     'test_mobile_optimizer',
     'test_multiprocessing',

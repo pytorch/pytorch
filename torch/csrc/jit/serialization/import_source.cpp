@@ -485,14 +485,13 @@ struct SourceImporterImpl : public Resolver,
         } break;
         case TK_DEF: {
           Def def = Def(statement);
-          std::string def_name = def.name().name();
-          if (pre_hook_names.find(def_name) != pre_hook_names.end()) {
-            pre_hook_def_map.emplace(def_name, def);
+          if (pre_hook_names.find(def.name().name()) != pre_hook_names.end()) {
+            pre_hook_def_map.emplace(def.name().name(), def);
             pre_hook_resolver_map.emplace(
-                def_name, shared_from_this());
-          } else if (hook_names.find(def_name) != hook_names.end()) {
-            hook_def_map.emplace(def_name, def);
-            hook_resolver_map.emplace(def_name, shared_from_this());
+                def.name().name(), shared_from_this());
+          } else if (hook_names.find(def.name().name()) != hook_names.end()) {
+            hook_def_map.emplace(def.name().name(), def);
+            hook_resolver_map.emplace(def.name().name(), shared_from_this());
           } else {
             methods.emplace_back(def);
             method_resolvers.push_back(shared_from_this());
@@ -642,21 +641,35 @@ struct SourceImporterImpl : public Resolver,
     ScriptTypeParser type_parser(shared_from_this());
     std::vector<std::string> field_names;
     std::vector<TypePtr> field_types;
+    std::vector<IValue> field_defaults;
     for (const auto& statement : named_tuple_def.body()) {
       if (statement.kind() != TK_ASSIGN) {
         throw ErrorReport(statement.range())
             << "Unexpected statement in NamedTuple body: "
                "only attribute annotations are currently supported.";
       }
-
       const auto assign = Assign(statement);
-      auto name = Var(assign.lhs()).name().name();
-      field_names.emplace_back(std::move(name));
+
+      auto name = Var(Assign(statement).lhs()).name().name();
+      c10::optional<IValue> default_val;
+      if (assign.rhs().present()) {
+        std::vector<IValue> parsed = type_parser.evaluateDefaults(
+            assign.rhs().range(), {assign.rhs().get()}, {assign.type().get()});
+        TORCH_INTERNAL_ASSERT(parsed.size() == 1);
+        default_val = parsed[0];
+      }
+
       auto type = type_parser.parseTypeFromExpr(assign.type().get());
+
+      field_names.emplace_back(std::move(name));
       field_types.emplace_back(std::move(type));
+      if (default_val) {
+        field_defaults.emplace_back(std::move(*default_val));
+      }
     }
 
-    auto tt = TupleType::createNamed(qualified_name, field_names, field_types);
+    auto tt = TupleType::createNamed(
+        qualified_name, field_names, field_types, field_defaults);
     cu_->register_type(tt);
   }
 

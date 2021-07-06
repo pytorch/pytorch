@@ -1669,8 +1669,10 @@ struct to_ir {
         }
       }
 
-      bool default_to_union =
-          full_type && (full_type->kind() == UnionType::Kind || full_type->kind() == OptionalType::Kind || full_type->kind() == NumberType::Kind);
+      bool default_to_union = full_type &&
+          (full_type->kind() == UnionType::Kind ||
+           full_type->kind() == OptionalType::Kind ||
+           full_type->kind() == NumberType::Kind);
       auto unified = unifyTypes(
           tv->type(), fv->type(), /*default_to_union=*/default_to_union);
 
@@ -1716,9 +1718,6 @@ struct to_ir {
   }
 
   CondValue emitIsInstance(const Expr& obj, const Expr& classinfo) {
-    // For use with `unifyTypeList`
-    std::stringstream nowhere;
-
     Value* lhs_val = emitExpr(obj);
     std::vector<TypePtr> lhs_types;
     std::vector<TypePtr> rhs_types;
@@ -1745,92 +1744,112 @@ struct to_ir {
     TypePtr unified_true = nullptr;
     TypePtr unified_false = nullptr;
 
-    if (obj.kind() == TK_VAR) {
-      std::string ident = Var(obj).name().name();
+    std::vector<TypePtr> isinstance_types;
+    std::vector<TypePtr> not_isinstance_types;
 
-      std::vector<Refinement> true_refinements;
-      std::vector<Refinement> false_refinements;
+    std::vector<Refinement> true_refinements;
+    std::vector<Refinement> false_refinements;
 
-      std::vector<TypePtr> isinstance_types;
-      std::vector<TypePtr> not_isinstance_types;
+    bool all_lhs_subtype_some_rhs = true;
 
-      // We can discard any rhs types that we know statically would be
-      // impossible. For example, if we had:
-      //
-      //    def fn(x: Optional[str]):
-      //        if isinstance(x, (List[str], str, int)):
-      //            ...
-      //
-      // then `x` would be `str` in the true branch and `None` in the
-      // false branch, not `(List[str], str, int)` in the true branch
-      // and `None` in the false branch
-      for (TypePtr lhs_type : lhs_types) {
-        if (lhs_type == AnyType::get()) {
-          isinstance_types.insert(
-              isinstance_types.end(), rhs_types.begin(), rhs_types.end());
-          break;
+    // We can discard any rhs types that we know statically would be
+    // impossible. For example, if we had:
+    //
+    //    def fn(x: Optional[str]):
+    //        if isinstance(x, (List[str], str, int)):
+    //            ...
+    //
+    // then `x` would be `str` in the true branch and `None` in the
+    // false branch, not `(List[str], str, int)` in the true branch
+    // and `None` in the false branch
+    for (TypePtr lhs_type : lhs_types) {
+      if (lhs_type == AnyType::get()) {
+        isinstance_types.insert(
+            isinstance_types.end(), rhs_types.begin(), rhs_types.end());
+        not_isinstance_types.push_back(AnyType::get());
+        // Edge case: we can still say that all lhs types subtype some
+        // rhs type if `lhs` is `Any` and `rhs` is `Any`
+        if (isinstance_types.size() != 1 ||
+            isinstance_types[0] != AnyType::get()) {
+          all_lhs_subtype_some_rhs = false;
         }
-        if (std::any_of(
-                rhs_types.begin(), rhs_types.end(), [&](TypePtr rhs_type) {
-                  return lhs_type->isSubtypeOf(rhs_type);
-                })) {
-          isinstance_types.push_back(lhs_type);
+        break;
+      }
+
+      auto get_smaller_type = [&](TypePtr t1, TypePtr t2) -> TypePtr {
+        if (!t1 && !t2) {
+          return nullptr;
+        } else if (!t1 || !t2) {
+          return t1 ? t1 : t2;
+        } else if (t1->isSubtypeOf(t2)) {
+          return t1;
+        } else if (t2->isSubtypeOf(t1)) {
+          return t2;
         } else {
-          not_isinstance_types.push_back(lhs_type);
+          return nullptr;
+        }
+      };
+
+      TypePtr found_refinement = nullptr;
+      for (TypePtr rhs_type : rhs_types) {
+        TypePtr maybe_smaller_type = get_smaller_type(lhs_type, rhs_type);
+        if (!maybe_smaller_type) {
+          continue;
+        } else if (*maybe_smaller_type == *lhs_type) {
+          // Cover the case that we have something like
+          // lhs = `List[str]` and rhs = `list`
+          found_refinement = lhs_type;
+        } else if (*maybe_smaller_type == *rhs_type) {
+          // We want the narrowest possible type
+          found_refinement = get_smaller_type(found_refinement, rhs_type);
         }
       }
 
-      // Get a single type for the true and false branches
-      if (!isinstance_types.empty()) {
-        unified_true = *unifyTypeList(isinstance_types, nowhere,/*default_to_union=*/true);
+      if (found_refinement) {
+        if (*found_refinement == *lhs_type) {
+          all_lhs_subtype_some_rhs &= true;
+        }
+        isinstance_types.push_back(found_refinement);
+      } else {
+        // If the lhs couldn't be a subtype of the rhs (or couldn't
+        // be "refined" to itself, as in the `List[str]` and `list`
+        // case above), then we add `lhs_type` to the false branch
+        // refinements. This is because the type can still be itself
+        // if the `isinstance` check is false
+        not_isinstance_types.push_back(lhs_type);
+        all_lhs_subtype_some_rhs = false;
       }
-      if (unified_true) {
-        true_refinements = {Refinement(ident, unified_true)};
-      }
-
-      // Get a single type for the true and false branches
-      if (!not_isinstance_types.empty()) {
-        unified_false = *unifyTypeList(not_isinstance_types, nowhere,/*default_to_union=*/true);
-      }
-      if (unified_false) {
-        false_refinements = {Refinement(ident, unified_false)};
-      }
-
-      refinement = RefinementSet(true_refinements, false_refinements);
     }
 
-    bool is_statically_true =
-        std::all_of(lhs_types.begin(), lhs_types.end(), [&](TypePtr lhs_type) {
-          return std::any_of(
-              rhs_types.begin(), rhs_types.end(), [&](TypePtr rhs_type) {
-                return lhs_type->isSubtypeOf(rhs_type);
-              });
-        });
+    // For use with `unifyTypeList`
+    std::stringstream nowhere;
 
-    bool is_statically_false =
-        std::all_of(lhs_types.begin(), lhs_types.end(), [&](TypePtr lhs_type) {
-          if (lhs_type == AnyType::get()) {
-            return false;
-          }
-          for (const auto& rhs_type : rhs_types) {
-            if (lhs_type->isSubtypeOf(rhs_type)) {
-              return false;
-            }
-            if (rhs_type->isSubtypeOf(AnyListType::get()) &&
-                (lhs_type->kind() == ListType::Kind ||
-                 lhs_type->kind() == AnyType::Kind)) {
-              return false;
-            }
-            if (rhs_type->isSubtypeOf(AnyTupleType::get()) &&
-                (lhs_type->kind() == TupleType::Kind ||
-                 lhs_type->kind() == AnyType::Kind)) {
-              return false;
-            }
-          }
-          return true;
-        });
+    // Get a single type for the true and false branches
+    if (!isinstance_types.empty()) {
+      unified_true =
+          *unifyTypeList(isinstance_types, nowhere, /*default_to_union=*/true);
+    }
+    if (obj.kind() == TK_VAR && unified_true) {
+      std::string ident = Var(obj).name().name();
+      true_refinements = {Refinement(ident, unified_true)};
+    }
 
-    if (is_statically_true) {
+    // Get a single type for the true and false branches
+    if (!not_isinstance_types.empty()) {
+      unified_false = *unifyTypeList(
+          not_isinstance_types, nowhere, /*default_to_union=*/true);
+    }
+    if (obj.kind() == TK_VAR && unified_false) {
+      std::string ident = Var(obj).name().name();
+      false_refinements = {Refinement(ident, unified_false)};
+    }
+
+    refinement = RefinementSet(true_refinements, false_refinements);
+
+    bool is_statically_false = isinstance_types.empty();
+
+    // If the statement is statically true
+    if (all_lhs_subtype_some_rhs) {
       return CondValue(*graph, obj.range(), true, std::move(refinement));
     }
 

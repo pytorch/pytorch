@@ -29,6 +29,7 @@ struct FunctionSchema;
 struct NamedType;
 using OptNameList = c10::optional<std::vector<std::string>>;
 
+void standardizeVectorForUnion(std::vector<TypePtr>& reference, std::vector<TypePtr>* to_fill);
 void standardizeVectorForUnion(std::vector<TypePtr>* to_flatten);
 
 struct AnyType;
@@ -102,11 +103,11 @@ struct TORCH_API UnionType : public Type {
 
   static const TypeKind Kind = TypeKind::UnionType;
 
-  bool isSubtypeOfExt(const TypePtr& rhs_, std::ostream* why_not) const;
+  bool isSubtypeOfExt(const TypePtr& rhs_, std::ostream* why_not) const override;
 
-  std::string str() const;
+  std::string str() const override;
 
-  static UnionTypePtr create(std::vector<TypePtr> types);
+  static UnionTypePtr create(std::vector<TypePtr> reference);
 
   bool operator==(const Type& rhs) const override;
 
@@ -135,13 +136,11 @@ struct TORCH_API UnionType : public Type {
 
  protected:
     UnionType(std::vector<TypePtr> types, TypeKind kind=TypeKind::UnionType);
-    std::string annotation_str_impl(TypePrinter printer) const override;
-    std::string unionStr(TypePrinter printer, bool is_annotation_str) const;
+    std::string annotation_str_impl(TypePrinter printer = nullptr) const override;
+    std::string unionStr(TypePrinter printer = nullptr, bool is_annotation_str = false) const;
     bool has_free_variables_;
-
- private:
-  std::vector<TypePtr> types_;
-  bool can_hold_none_;
+    std::vector<TypePtr> types_;
+    bool can_hold_none_;
 
 };
 
@@ -1003,9 +1002,16 @@ using TupleTypePtr = std::shared_ptr<TupleType>;
 using NameList = std::vector<std::string>;
 // This type represents a Tuple
 struct TORCH_API TupleType : public NamedType {
+
   static TupleTypePtr createNamed(const c10::optional<c10::QualifiedName>& name,
       const std::vector<std::string>& field_names,
-      const std::vector<TypePtr>& types);
+      const std::vector<TypePtr>& field_types,
+      std::vector<IValue>& field_defaults);
+
+  static TupleTypePtr createNamed(const c10::optional<c10::QualifiedName>& name,
+      const std::vector<std::string>& field_names,
+      const std::vector<TypePtr>& field_types);
+
   static TupleTypePtr create(
       std::vector<TypePtr> types) {
     return TupleTypePtr(new TupleType(
@@ -2086,8 +2092,8 @@ struct TORCH_API ClassType : public NamedType {
   c10::optional<ClassType::Property> getProperty(const std::string& name);
   // Add a property named \p name with \p getter and \p setter as its getter and setter.
   void addProperty(const std::string& name, torch::jit::Function* getter, torch::jit::Function* setter);
-
-  const std::vector<Property> properties() const {
+  // Get a list of all properties.
+  const std::vector<Property>& properties() const {
     return properties_;
   }
 

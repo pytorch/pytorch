@@ -9,9 +9,6 @@ namespace jit {
 namespace tensorexpr {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-DEFINE_TRIGGER(simple_ir_eval_executed);
-
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterCodeGen<SimpleIREvaluator> ir_eval_codegen_reg("simple_ir_eval");
 
 template <typename T>
@@ -993,7 +990,6 @@ void SimpleIREvaluator::call_raw(const std::vector<void*>& args) {
   }
   stmt()->accept(&*impl_);
   impl_->clear();
-  USE_TRIGGER(simple_ir_eval_executed);
 }
 
 void SimpleIREvaluator::bindArg(const BufferArg& bufArg, void* data) {
