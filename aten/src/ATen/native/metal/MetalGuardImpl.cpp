@@ -5,8 +5,7 @@ namespace at {
 namespace detail {
 
 struct MetalGuardImpl final : public c10::impl::DeviceGuardImplInterface {
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  MetalGuardImpl() {}
+  MetalGuardImpl() = default;
 
   explicit MetalGuardImpl(DeviceType t) {
     TORCH_INTERNAL_ASSERT(t == DeviceType::Metal);

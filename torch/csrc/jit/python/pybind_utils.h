@@ -18,7 +18,6 @@
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/python/python_custom_class.h>
-#include <torch/csrc/jit/python/python_dict.h>
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/runtime/operator.h>
