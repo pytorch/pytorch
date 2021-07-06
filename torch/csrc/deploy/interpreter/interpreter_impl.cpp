@@ -108,9 +108,12 @@ FOREACH_LIBRARY(DECLARE_LIBRARY_INIT)
 #undef DECLARE_LIBRARY_INIT
 
 extern "C" PyObject* initModule(void);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern "C" struct _frozen _PyImport_FrozenModules[];
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern "C" struct _frozen _PyImport_FrozenModules_torch[];
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char* startup = R"RAW(
 import sys
 import importlib.abc
@@ -271,6 +274,7 @@ struct InitLockAcquire {
     // thread grabs the GIL to do non-initialization tasks, then it might start
     // initializing (GIL -> init_lock). To avoid this, release the GIL before
     // trying to get the init_lock and then reacquire it afterward.
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     PyThreadState* _save;
     _save = PyEval_SaveThread();
     init_lock.lock();
