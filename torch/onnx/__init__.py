@@ -112,7 +112,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             model being exported to stdout.
         training (enum, default TrainingMode.EVAL):
             * ``TrainingMode.EVAL``: export the model in inference mode. The value of parameter
-              ``export_params`` and ``keep_initializers_as_inputs`` might disable optimizations which 
+              ``export_params`` and ``keep_initializers_as_inputs`` might disable optimizations which
               might adjust the graph inputs.
             * ``TrainingMode.PRESERVE``: export the model in inference mode if model.training is
               False and in training mode if model.training is True.
