@@ -7,6 +7,9 @@
 #include <functorch/csrc/BatchRulesHelper.h>
 #include <iostream>
 #include <ATen/Operators.h>
+#include <functorch/csrc/PlumbingHelper.h>
+#include <functorch/csrc/BatchedFallback.h>
+#include <ATen/core/dispatch/Dispatcher.h>
 
 
 namespace at { namespace functorch {
@@ -149,6 +152,43 @@ std::tuple<Tensor,optional<int64_t>> flip_batch_rule(const Tensor& self, optiona
   return std::make_tuple(at::flip(self_, new_dims), 0);
 }
 
+const Tensor& resize__plumbing(
+    const Tensor& self,
+    IntArrayRef size,
+    c10::optional<MemoryFormat> optional_memory_format) {
+  TORCH_CHECK(
+      !optional_memory_format.has_value() ||
+      optional_memory_format == c10::MemoryFormat::Contiguous,
+      "resize_: batching rule only supports None or Contiguous MemoryFormat");
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  TORCH_INTERNAL_ASSERT(self_bdim.has_value());
+
+  // TODO: The following algorithm only works for batch dim == 0.
+  // To get it to work for something else we need the ability to modify
+  // the BatchDims attribute of BatchedTensorImpl
+  TORCH_INTERNAL_ASSERT(self_bdim.value() == 0, "NYI: resize_ batch rule for batch dim != 0");
+
+  // Resize the wrapped tensor
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  self_value = moveBatchDimToFront(self_value, self_bdim);
+  VmapDimVector new_size(size);
+  new_size.insert(new_size.begin(), self_value.size(*self_bdim));
+  self_value.resize_(new_size);
+
+  // Update the sizes and strides of the wrapper
+  auto* batched = maybeGetBatchedImpl(self);
+  TORCH_INTERNAL_ASSERT(batched);
+  batched->refreshSizesAndStrides();
+
+  return self;
+}
+
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("diag", diag_batch_rule);
 
@@ -163,6 +203,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("repeat", repeat_batch_rule);
   VMAP_SUPPORT("_unsafe_view", _unsafe_view_batch_rule);
   VMAP_SUPPORT("unsqueeze", unsqueeze_batch_rule);
+  m.impl("resize_", resize__plumbing);
 }
 
 }}
