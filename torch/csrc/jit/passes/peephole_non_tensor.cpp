@@ -8,6 +8,7 @@ namespace torch {
 namespace jit {
 
 struct PeepholeOptimizeNonTensorImpl {
+  // NOLINTNEXTLINE(modernize-pass-by-value)
   PeepholeOptimizeNonTensorImpl(const std::shared_ptr<Graph>& graph)
       : graph_(graph) {}
 
