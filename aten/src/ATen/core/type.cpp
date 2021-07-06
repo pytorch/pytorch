@@ -1112,7 +1112,7 @@ std::string UnionType::str() const {
 }
 
 std::string UnionType::annotation_str_impl(TypePrinter printer) const {
-  return this->unionStr(nullptr, /*is_annotation_str=*/true);
+  return this->unionStr(printer, /*is_annotation_str=*/true);
 }
 
 bool UnionType::canHoldType(TypePtr type) const {

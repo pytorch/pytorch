@@ -6,10 +6,15 @@ on:
 {%- if on_pull_request %}
   pull_request:
 {%- endif %}
+{%- if is_scheduled %}
+  schedule:
+    - cron: !{{ is_scheduled }}
+{%- else %}
   push:
     branches:
       - master
       - release/*
+{%- endif %}
   workflow_dispatch:
 
 env:
