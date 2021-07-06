@@ -4102,7 +4102,8 @@ class RpcTest(RpcAgentTestFixture):
                 rpc.api._broadcast_to_followers = og_func
                 rpc.api._delete_all_user_and_unforked_owner_rrefs = og_rref_func
         else:
-            rpc.shutdown()
+            with self.assertRaisesRegex(RuntimeError, 'timed out in _all_gather'):
+                rpc.shutdown()
 
         dist.barrier()
 
