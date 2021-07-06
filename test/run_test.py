@@ -120,6 +120,7 @@ TESTS = [
     'test_tensorexpr_pybind',
     'test_openmp',
     'test_profiler',
+    'test_incorrect_dispatch_key_ops',
     "distributed/test_launcher",
     'distributed/nn/jit/test_instantiator',
     'distributed/rpc/test_faulty_agent',
