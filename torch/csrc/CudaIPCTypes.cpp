@@ -26,13 +26,12 @@ void warnProducerTerminatedBeforeSharedTensorsReleased() {
 
 struct CudaIPCGlobalEntities {
   std::mutex ref_counters_mutex_;
-  std::atomic<int64_t> sync_events_used_;
+  std::atomic<int64_t> sync_events_used_{0};
   std::map<std::string, std::shared_ptr<CudaIPCRefCountersFile>>
       ref_counters_files_;
   std::shared_ptr<CudaIPCRefCountersFile> next_available_ref_counters_file_;
   CudaIPCSentDataLimbo CudaIPCSentDataLimbo_;
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  CudaIPCGlobalEntities() : ref_counters_files_() {}
+  CudaIPCGlobalEntities()  = default;
   ~CudaIPCGlobalEntities() {
     CudaIPCSentDataLimbo_.collect();
     // Clear shared blocks to avoid releasing shared blocks after
@@ -55,6 +54,7 @@ struct CudaIPCGlobalEntities {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 CudaIPCGlobalEntities cuda_ipc_global_entities;
 
 CudaIPCSentDataLimbo::~CudaIPCSentDataLimbo() {
@@ -130,13 +130,12 @@ void ReturnRefCounter(const std::string& handle, uint64_t offset /* unused */) {
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 CudaIPCSentData::CudaIPCSentData(
-    const std::string& handle,
+    std::string handle,
     int64_t offset,
     int64_t* counter_ptr,
     at::Device device)
-    : handle_(handle),
+    : handle_(std::move(handle)),
       offset_(offset),
       counter_ptr_(counter_ptr),
       original_ptr_(),
@@ -169,6 +168,7 @@ CudaIPCSentData::CudaIPCSentData(
   } else {
     auto stream = c10::cuda::getCurrentCUDAStream(device.index());
     C10_CUDA_CHECK(cudaStreamSynchronize(stream));
+    event_ = nullptr;
     event_sync_required_ = false;
   }
 #else
@@ -252,6 +252,7 @@ bool CudaIPCCollect() {
 
 namespace c10 {
 namespace {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_FREE_MEMORY_CALLBACK("cuda_ipc_collect", CudaIPCCollectCallback);
 }
 } // namespace c10
