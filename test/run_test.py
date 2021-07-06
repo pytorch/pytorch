@@ -121,6 +121,7 @@ TESTS = [
     'test_openmp',
     'test_profiler',
     'test_incorrect_dispatch_key_ops',
+    'test_gen_backend_stubs',
     "distributed/test_launcher",
     'distributed/nn/jit/test_instantiator',
     'distributed/rpc/test_faulty_agent',
