@@ -1,16 +1,5 @@
 #pragma once
 
-#include <caffe2/core/types.h>
-
-#ifdef __CUDA_ARCH__
-// Proxy for including cuda_fp16.h, because common_gpu.h
-// has necessary diagnostic guards.
-#include <caffe2/core/common_gpu.h>
-#endif
-#ifdef __HIP_DEVICE_COMPILE__
-#include <caffe2/core/hip/common_gpu.h>
-#endif
-
 // See Note [hip-clang differences to hcc]
 
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__) || \

@@ -515,19 +515,31 @@ struct PythonPrintImpl {
     // (Python doesn't allow type annotations in multiple assignment)
     if (lhs.size() == 1) {
       Value* v = lhs.at(0);
-      if (!annotated_unions_.count(v) &&
-          (v->type()->kind() == UnionType::Kind || v->type()->kind() == OptionalType::Kind)) {
+      if (!annotated_unions_.count(v) && !expr_table_.count(v) &&
+          (v->type()->kind() == UnionType::Kind ||
+           v->type()->kind() == OptionalType::Kind)) {
         body_ << " : " << v->type()->annotation_str();
         annotated_unions_.insert(v);
       }
     }
     body_ << " = ";
+    // or if value is being assigned to something of a union type
     printValueList(body_, rhs);
     body_ << "\n";
   }
 
   bool requiresAnnotation(Value* lhs, Value* rhs) {
-    return *lhs->type() != *rhs->type();
+    if (lhs->type()->kind() == UnionType::Kind ||
+        lhs->type()->kind() == OptionalType::Kind) {
+      if (!annotated_unions_.count(lhs)) {
+        annotated_unions_.insert(lhs);
+        return true;
+      } else {
+        return false;
+      }
+    } else {
+      return *lhs->type() != *rhs->type();
+    }
   }
 
   void printAnnotatedAssignment(
