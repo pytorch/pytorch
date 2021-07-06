@@ -1731,18 +1731,25 @@ class TestFrozenOptimizations(JitTestCase):
                 def forward(self, x):
                     return x + self.tensor
 
-            def test_unsupported(module, preserved_attrs=None):
+            def test_unsupported_lin(module, preserved_attrs=None):
                 mod = torch.jit.freeze(torch.jit.script(module.eval()), preserved_attrs)
                 self.run_pass("convert_frozen_ops_to_mkldnn", mod.graph)
                 FileCheck().check("to_mkldnn").check("linear").check("to_dense").check("add").run(mod.graph)
 
+            def test_unsupported_bn(module, preserved_attrs=None):
+                mod = torch.jit.freeze(torch.jit.script(module.eval()), preserved_attrs)
+                self.run_pass("convert_frozen_ops_to_mkldnn", mod.graph)
+                FileCheck().check("to_mkldnn").check("batch_norm").check("to_dense").run(mod.graph)
+
             lin = nn.Linear(20, 20)
             # Scalar-Tensor not supported
-            test_unsupported(nn.Sequential(lin, Add(.5)))
+            test_unsupported_lin(nn.Sequential(lin, Add(.5)))
             # # 0-dim not supported
-            test_unsupported(nn.Sequential(lin, Add(torch.tensor(.5))))
+            test_unsupported_lin(nn.Sequential(lin, Add(torch.tensor(.5))))
             # tensor of unknown dtype (getAttr node here) not supported
-            test_unsupported(nn.Sequential(lin, Add(torch.tensor([20]))), ['1'])
+            test_unsupported_lin(nn.Sequential(lin, Add(torch.tensor([20]))), ['1'])
+            # 1d batch norm not supported
+            test_unsupported_bn(nn.BatchNorm1d(512))
 
     @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
     def test_mkldnn_fuser_broadcasting(self):

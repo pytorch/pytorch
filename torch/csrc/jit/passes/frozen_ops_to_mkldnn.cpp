@@ -879,7 +879,6 @@ class MKLDNNSubgraphSlicer {
       case aten::hardsigmoid:
       case aten::hardswish:
       case aten::tanh:
-      case aten::batch_norm:
       case aten::max_pool2d:
       case aten::max_pool3d:
       case aten::avg_pool2d:
@@ -889,6 +888,16 @@ class MKLDNNSubgraphSlicer {
         // case aten::adaptive_max_pool3d: // return tuples which break fusion
         // case aten::adaptive_avg_pool3d: // no ideep binding
         return true;
+    }
+
+    // mkldnn does not support BatchNorm1d
+    if (n->kind() == aten::batch_norm) {
+      // Can only tell the difference by the input tensor
+      auto const_tensor = constant_as<Tensor>(n->namedInput("input"));
+      if (const_tensor) {
+        // BatchNorm2d, ndimension of 4, is the minimum supported
+        return const_tensor->ndimension() >= 4;
+      }
     }
 
     if ((n->kind() == aten::hardtanh || n->kind() == aten::clamp) &&
