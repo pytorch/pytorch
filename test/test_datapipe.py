@@ -1282,7 +1282,7 @@ class TestGraph(TestCase):
         numbers_dp = NumbersDataset(size=50)
         mapped_dp = numbers_dp.map(lambda x: x * 10)
         graph = torch.utils.data.graph.traverse(mapped_dp)
-        expected = {mapped_dp: {numbers_dp: {}}}
+        expected : Dict[Any, Any] = {mapped_dp: {numbers_dp: {}}}
         self.assertEqual(expected, graph)
 
     #TODO(VitalyFedyunin): This test is incorrect because of 'buffer' nature of fork fake implementation, update fork first and fix this test too
