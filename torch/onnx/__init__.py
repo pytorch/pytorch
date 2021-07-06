@@ -112,8 +112,8 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             model being exported to stdout.
         training (enum, default TrainingMode.EVAL):
             * ``TrainingMode.EVAL``: export the model in inference mode. The value of parameter
-              export_params and keep_initializers_as_inputs might disable optimizations which might
-              adjust the graph inputs.
+              ``export_params`` and ``keep_initializers_as_inputs`` might disable optimizations which 
+              might adjust the graph inputs.
             * ``TrainingMode.PRESERVE``: export the model in inference mode if model.training is
               False and in training mode if model.training is True.
             * ``TrainingMode.TRAINING``: export the model in training mode. Disables optimizations
@@ -187,6 +187,8 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
         do_constant_folding (bool, default False): Apply the constant-folding optimization.
             Constant-folding will replace some of the ops that have all constant inputs
             with pre-computed constant nodes.
+            The value of parameter ``export_params`` and ``keep_initializers_as_inputs`` might disable
+            this optimazation because it might adjust the graph inputs.
         example_outputs (T or a tuple of T, where T is Tensor or convertible to Tensor, default None):
             Must be provided when exporting a ScriptModule or ScriptFunction, ignored otherwise.
             Used to determine the type and shape of the outputs without tracing the execution of
