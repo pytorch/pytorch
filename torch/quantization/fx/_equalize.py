@@ -70,7 +70,6 @@ class _InputEqualizationObserver(nn.Module):
         self.equalization_shape: List[int] = []
 
     def forward(self, x_orig):
-        # TODO: Allow for convoluational layers
         if not (x_orig.ndim == 2 or x_orig.ndim == 4):
             raise ValueError("InputEqualizationObserver only supports Linear and Conv layers")
 
@@ -147,7 +146,6 @@ class _WeightEqualizationObserver(nn.Module):
         self.equalization_scale = torch.empty(0)
 
     def forward(self, w_orig):
-        # TODO: Allow for convoluational layers
         if not (w_orig.ndim == 2 or w_orig.ndim == 4):
             raise ValueError("InputEqualizationObserver only supports Linear and Conv layers")
 
