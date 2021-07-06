@@ -449,8 +449,7 @@ at::DataPtr PlacementDeleteContext::makeDataPtr(
       device};
 }
 
-// NOLINTNEXTLINE(modernize-use-equals-default)
-AutogradMetaInterface::~AutogradMetaInterface() {}
+AutogradMetaInterface::~AutogradMetaInterface() = default;
 
 // Setting requires_grad to true on inference tensor outside InferenceMode
 // is forbidden.  Ideally it would also be illegal inside InferenceMode.

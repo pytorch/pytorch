@@ -11,8 +11,10 @@ import zipfile
 
 import requests
 
+from typing import Any, Dict, Generator, List
 
-def get_size(file_dir):
+
+def get_size(file_dir: str) -> int:
     try:
         # we should only expect one file, if no, something is wrong
         file_name = glob.glob(os.path.join(file_dir, "*"))[0]
@@ -22,12 +24,9 @@ def get_size(file_dir):
         return 0
 
 
-def build_message(size):
-    pkg_type, py_ver, cu_ver, *_ = os.environ.get("BUILD_ENVIRONMENT", "").split() + [
-        None,
-        None,
-        None,
-    ]
+def build_message(size: int) -> Dict[str, Any]:
+    build_env_split: List[Any] = os.environ.get("BUILD_ENVIRONMENT", "").split()
+    pkg_type, py_ver, cu_ver, *_ = build_env_split + [None, None, None]
     os_name = os.uname()[0].lower()
     if os_name == "darwin":
         os_name = "macos"
@@ -52,7 +51,7 @@ def build_message(size):
     }
 
 
-def send_message(messages):
+def send_message(messages: List[Dict[str, Any]]) -> None:
     access_token = os.environ.get("SCRIBE_GRAPHQL_ACCESS_TOKEN")
     if not access_token:
         raise ValueError("Can't find access token from environment variable")
@@ -77,8 +76,8 @@ def send_message(messages):
     r.raise_for_status()
 
 
-def report_android_sizes(file_dir):
-    def gen_sizes():
+def report_android_sizes(file_dir: str) -> None:
+    def gen_sizes() -> Generator[List[Any], None, None]:
         # we should only expect one file, if no, something is wrong
         aar_files = list(pathlib.Path(file_dir).rglob("pytorch_android-*.aar"))
         if len(aar_files) != 1:
@@ -101,7 +100,7 @@ def report_android_sizes(file_dir):
         # report whole package size
         yield ["aar", aar_file.name, os.stat(aar_file).st_size, 0]
 
-    def gen_messages():
+    def gen_messages() -> Generator[Dict[str, Any], None, None]:
         android_build_type = os.environ.get("ANDROID_BUILD_TYPE")
         for arch, lib, comp_size, uncomp_size in gen_sizes():
             print(android_build_type, arch, lib, comp_size, uncomp_size)
