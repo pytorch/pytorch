@@ -460,7 +460,7 @@ class TypeCheckerTest(unittest.TestCase):
                 assert isinstance(n.type, TensorType)
                 assert torch.Size(n.type.__args__) == B.forward(torch.rand(2, 2, 4, 5)).size()
 
-    def test_type_check_conv2D_and_maxpool2d(self):
+    def test_type_check_conv2D__maxpool2d_flatten(self):
 
         class BasicBlock(torch.nn.Module):
             def __init__(self):
@@ -479,6 +479,7 @@ class TypeCheckerTest(unittest.TestCase):
                 out = self.pool(out)
                 out = self.fc1(out)
                 out = self.pool2(out)
+                out = torch.flatten(out, 1)
                 return out
 
         B = BasicBlock()
@@ -491,12 +492,39 @@ class TypeCheckerTest(unittest.TestCase):
         expected_ph_types = [TensorType((4, 3, 32, 32)), TensorType((4, 6, 28, 28)),
                              TensorType((4, 6, 14, 14)), TensorType((4, 16, 10, 10)),
                              TensorType((4, 16, 5, 5)), TensorType((4, 16, 5, 120)),
-                             TensorType((4, 16, 6, 7)), TensorType((4, 16, 6, 7))]
+                             TensorType((4, 16, 6, 7)), TensorType((4, 672)), TensorType((4, 672))]
 
         expected_iter = iter(expected_ph_types)
 
         for n in traced.graph.nodes:
             assert n.type == next(expected_iter)
+
+    def test_type_check_flatten(self):
+        class M(torch.nn.Module):
+            def forward(self, x: TensorType((1, 2, 3, 5, Dyn))):
+                return torch.flatten(x, 1, 2)
+
+        module = M()
+        symbolic_traced: torch.fx.GraphModule = symbolic_trace(module)
+        tc = GraphTypeChecker({}, symbolic_traced)
+        tc.type_check()
+        for n in symbolic_traced.graph.nodes:
+            if n.op == 'output':
+                assert n.type == TensorType((1, 6, 5, Dyn))
+
+
+    def test_type_check_flatten_2(self):
+        class M(torch.nn.Module):
+            def forward(self, x: TensorType((1, Dyn, 3, 5, Dyn))):
+                return torch.flatten(x, 1, 2)
+
+        module = M()
+        symbolic_traced: torch.fx.GraphModule = symbolic_trace(module)
+        tc = GraphTypeChecker({}, symbolic_traced)
+        tc.type_check()
+        for n in symbolic_traced.graph.nodes:
+            if n.op == 'output':
+                assert n.type == TensorType((1, Dyn, 5, Dyn))
 
 
 if __name__ == '__main__':
