@@ -18,7 +18,6 @@ from typing import (
     Sequence,
     Union,
 )
-from urllib.parse import quote
 
 import torch
 from torch.serialization import location_tag, normalize_storage_type
@@ -932,7 +931,7 @@ node [shape=box];
         """Return all modules that are currently externed.
 
         Returns:
-            A list containing the names of modules which will be 
+            A list containing the names of modules which will be
             externed in this package.
         """
         return self._nodes_with_action_type(_ModuleProviderAction.EXTERN)
@@ -941,7 +940,7 @@ node [shape=box];
         """Return all modules that are currently interned.
 
         Returns:
-            A list containing the names of modules which will be 
+            A list containing the names of modules which will be
             interned in this package.
         """
         return self._nodes_with_action_type(_ModuleProviderAction.INTERN)
@@ -950,7 +949,7 @@ node [shape=box];
         """Return all modules that are currently mocked.
 
         Returns:
-            A list containing the names of modules which will be 
+            A list containing the names of modules which will be
             mocked in this package.
         """
         return self._nodes_with_action_type(_ModuleProviderAction.MOCK)
@@ -959,7 +958,7 @@ node [shape=box];
         """Return all modules that are currently denied.
 
         Returns:
-            A list containing the names of modules which will be 
+            A list containing the names of modules which will be
             denied in this package.
         """
         return self._nodes_with_action_type(_ModuleProviderAction.DENY)

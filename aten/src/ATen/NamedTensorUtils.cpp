@@ -1,6 +1,8 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/TensorNames.h>
 #include <ATen/WrapDimUtilsMulti.h>
+#include <c10/util/irange.h>
+
 #include <bitset>
 #include <sstream>
 
@@ -166,10 +168,9 @@ void propagate_names_except(const Tensor& result, const Tensor& src, IntArrayRef
   if (!result.has_names() && !src.has_names()) {
     return;
   }
-  auto src_names = src.names();
-  auto result_dim = result.dim();
-  auto src_dim = src_names.size();
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+  const auto src_names = src.names();
+  const auto result_dim = static_cast<int64_t>(result.dim());
+  const auto src_dim = static_cast<int64_t>(src_names.size());
   TORCH_INTERNAL_ASSERT(src_dim - excluded_idxs.size() == result_dim);
 
   // fast path
@@ -183,7 +184,7 @@ void propagate_names_except(const Tensor& result, const Tensor& src, IntArrayRef
   std::vector<Dimname> outnames;
   outnames.reserve(result_dim);
   auto included_idxs = compute_included_idxs(excluded_idxs, src_dim);
-  for (size_t dim = 0; dim < src_dim; ++dim) {
+  for (const auto dim : c10::irange(src_dim)) {
     if (included_idxs[dim]) {
       outnames.push_back(src_names[dim]);
     }
@@ -266,13 +267,11 @@ static std::vector<Dimname> compute_dot_product_outnames(
   }
   std::vector<Dimname> outnames(num_outnames, Dimname::wildcard());
   int64_t index = 0;
-  for (size_t j = 0; j < tensor_names.size(); ++j) {
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+  for (const auto j : c10::irange(static_cast<int64_t>(tensor_names.size()))) {
     if (j == tensor_dotted_dim) continue;
     outnames[index++] = tensor_names[j];
   }
-  for (size_t j = 0; j < other_names.size(); ++j) {
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+  for (const auto j : c10::irange(static_cast<int64_t>(other_names.size()))) {
     if (j == other_dotted_dim) continue;
     outnames[index++] = other_names[j];
   }
