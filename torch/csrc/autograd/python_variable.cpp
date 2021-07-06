@@ -103,6 +103,7 @@ class PyInterpreterHolder {
  private:
   c10::impl::PyInterpreter* impl_;
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyInterpreterHolder self_interpreter;
 
 } // anonymous namespace
@@ -754,7 +755,9 @@ struct ConcretePythonGILHooks : public c10::impl::PythonGILHooks {
 // An alternative way to reduce the risk of python_gil_hooks going prematurely
 // dead would be to leak it at destruction time.  I didn't do that because
 // it's annoying to write the Registerer class for this case.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 ConcretePythonGILHooks python_gil_hooks;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static c10::impl::PythonGILHooksRegisterer python_gil_hooks_registerer(&python_gil_hooks);
 #endif
 
@@ -1136,7 +1139,9 @@ PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs
 }
 
 static void clear_slots(PyTypeObject* type, PyObject* self) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   Py_ssize_t i, n;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   PyMemberDef* mp;
 
   n = Py_SIZE(type);
@@ -1145,7 +1150,9 @@ static void clear_slots(PyTypeObject* type, PyObject* self) {
     if (mp->type == T_OBJECT_EX && !(mp->flags & READONLY)) {
       char* addr = (char*)self + mp->offset;
       PyObject* obj = *(PyObject**)addr;
+      // NOLINTNEXTLINE(modernize-use-nullptr)
       if (obj != NULL) {
+        // NOLINTNEXTLINE(modernize-use-nullptr)
         *(PyObject**)addr = NULL;
         Py_DECREF(obj);
       }
@@ -1230,10 +1237,13 @@ void THPVariable_subclass_dealloc(PyObject* self) {
   // All Python defined classes have __dict__
   if (C10_LIKELY(type->tp_dictoffset)) {
     PyObject** dictptr = _PyObject_GetDictPtr(self);
+    // NOLINTNEXTLINE(modernize-use-nullptr)
     if (dictptr != NULL) {
       PyObject* dict = *dictptr;
+      // NOLINTNEXTLINE(modernize-use-nullptr)
       if (dict != NULL) {
         Py_DECREF(dict);
+        // NOLINTNEXTLINE(modernize-use-nullptr)
         *dictptr = NULL;
       }
     }
@@ -1298,7 +1308,9 @@ static int traverse_slots(
     PyObject* self,
     visitproc visit,
     void* arg) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   Py_ssize_t i, n;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   PyMemberDef* mp;
 
   n = Py_SIZE(type);
@@ -1307,6 +1319,7 @@ static int traverse_slots(
     if (mp->type == T_OBJECT_EX) {
       char* addr = (char*)self + mp->offset;
       PyObject* obj = *(PyObject**)addr;
+      // NOLINTNEXTLINE(modernize-use-nullptr)
       if (obj != NULL) {
         int err = visit(obj, arg);
         if (err)
