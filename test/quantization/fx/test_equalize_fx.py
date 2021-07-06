@@ -25,6 +25,7 @@ from torch.testing._internal.common_quantization import (
     FunctionalLinearAddModel,
     ConvModel,
     TwoLayerConvModel,
+    SingleLayerFunctionalConvModel,
     TwoLayerFunctionalConvModel,
     skipIfNoFBGEMM,
     LinearReluModel,
@@ -254,14 +255,20 @@ class TestEqualizeFx(QuantizationTestCase):
         returns the same output as the original model
         """
 
-        tests = [SingleLayerLinearModel, LinearAddModel, TwoLayerLinearModel,
-                 SingleLayerFunctionalLinearModel, FunctionalLinearAddModel, TwoLayerFunctionalLinearModel,
-                 LinearReluModel, LinearReluLinearModel, LinearReluAddModel,
-                 FunctionalLinearReluModel, FunctionalLinearReluLinearModel]
+        tests = [(SingleLayerLinearModel, 2), (LinearAddModel, 2), (TwoLayerLinearModel, 2),
+                 (SingleLayerFunctionalLinearModel, 2), (FunctionalLinearAddModel, 2), 
+                 (TwoLayerFunctionalLinearModel, 2), 
+                 (LinearReluModel, 2), (LinearReluLinearModel, 2), (LinearReluAddModel, 2),
+                 (ConvModel, 4), (TwoLayerConvModel, 4), (SingleLayerFunctionalConvModel, 4)]
 
-        x = torch.rand((5, 5))
-        for M in tests:
+        for (M, ndim) in tests:
             m = M().eval()
+
+            if ndim == 2:
+                x = torch.rand((5, 5))
+            elif ndim == 4:
+                x = torch.rand((16, 3, 224, 224))
+
             prepared = prepare_fx(copy.deepcopy(m), qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
             output = prepared(x)
 
@@ -324,7 +331,7 @@ class TestEqualizeFx(QuantizationTestCase):
             counter = 0
             for node in convert_ref.graph.nodes:
                 if 'equalization_scale' in node.name and node.op == 'get_attr':
-                    self.assertEqual(convert_ref.get_buffer(str(node.target)), exp_eq_scales[counter])
+                    self.assertEqual(convert_ref.get_buffer(str(node.target)).reshape(-1), exp_eq_scales[counter])
                     counter += 1
 
     def get_expected_weights_bias(self, model, x, exp_eq_scales):
@@ -575,21 +582,59 @@ class TestEqualizeFx(QuantizationTestCase):
             ns.call_method('dequantize')
         ]
 
-        tests = [(SingleLayerLinearModel, linear_node_list),
-                 (LinearAddModel, linearAdd_node_list),
-                 (TwoLayerLinearModel, linear2_node_list),
-                 (SingleLayerFunctionalLinearModel, functionalLinear_node_list),
-                 (FunctionalLinearAddModel, functionalLinearAdd_node_list),
-                 (TwoLayerFunctionalLinearModel, functionalLinear2_node_list),
-                 (LinearReluModel, linearRelu_node_list),
-                 (LinearReluLinearModel, linearReluLinear_node_list),
-                 (FunctionalLinearReluModel, functionalLinearRelu_node_list),
-                 (FunctionalLinearReluLinearModel, functionalLinearReluLinear_node_list)]
+        conv_node_list = [
+            ns.call_function(torch.mul),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_module(nnq.Conv2d),
+            ns.call_method('dequantize')
+        ]
 
-        torch.manual_seed(0)
-        x = torch.rand((5, 5))
-        for (M, node_list) in tests:
+        conv2_node_list = [
+            ns.call_function(torch.mul),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_module(nnq.Conv2d),
+            ns.call_module(nnq.Conv2d),
+            ns.call_method('dequantize')
+        ]
+
+        functionalConv_node_list = [
+            ns.call_function(torch.mul),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_function(torch.ops.quantized.conv2d),
+            ns.call_method('dequantize')
+        ]
+
+        functionalConv2_node_list = [
+            ns.call_function(torch.mul),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_function(torch.ops.quantized.conv2d),
+            ns.call_function(torch.ops.quantized.conv2d),
+            ns.call_method('dequantize')
+        ]
+
+        tests = [(SingleLayerLinearModel, 2, linear_node_list),
+                 (LinearAddModel, 2, linearAdd_node_list),
+                 (TwoLayerLinearModel, 2, linear2_node_list),
+                 (SingleLayerFunctionalLinearModel, 2, functionalLinear_node_list),
+                 (FunctionalLinearAddModel, 2, functionalLinearAdd_node_list),
+                 (TwoLayerFunctionalLinearModel, 2, functionalLinear2_node_list),
+                 (LinearReluModel, 2, linearRelu_node_list),
+                 (LinearReluLinearModel, 2, linearReluLinear_node_list),
+                 (FunctionalLinearReluModel, 2, functionalLinearRelu_node_list),
+                 (FunctionalLinearReluLinearModel, 2, functionalLinearReluLinear_node_list),
+                 (ConvModel, 4, conv_node_list),
+                 (TwoLayerConvModel, 4, conv2_node_list),
+                 (SingleLayerFunctionalConvModel, 4, functionalConv_node_list),
+                 (TwoLayerFunctionalConvModel, 4, functionalConv2_node_list)]
+
+        for (M, ndim, node_list) in tests:
             m = M().eval()
+
+            if ndim == 2:
+                x = torch.rand((5, 5))
+            elif ndim == 4:
+                x = torch.rand((16, 3, 224, 224))
+
             prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
             prepared(x)
             equalized_quantized_model = convert_fx(prepared)
