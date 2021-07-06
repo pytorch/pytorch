@@ -34,7 +34,13 @@ cublasHandle_t getCurrentCUDABlasHandle() {
   // See: https://github.com/pytorch/pytorch/pull/22405
   // This thread local unique_ptrs will be destroyed when the thread terminates,
   // releasing its reserved handles back to the pool.
-  static auto pool = std::make_shared<CuBlasPoolType>();
+
+  // Use a leaky singleton for the pool following standard practice around
+  // singletons: https://isocpp.org/wiki/faq/ctors#construct-on-first-use-v2
+  static auto pool = std::shared_ptr<CuBlasPoolType>(
+      new CuBlasPoolType(), [](CuBlasPoolType* p) {
+        // Leak the memory.
+      });
   thread_local std::unique_ptr<CuBlasPoolType::PoolWindow> myPoolWindow(
       pool->newPoolWindow());
 
