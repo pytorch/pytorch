@@ -12,6 +12,7 @@
 #include <structmember.h>
 #include <cuda_runtime_api.h>
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject *THCPEventClass = nullptr;
 
 static PyObject * THCPEvent_pynew(
@@ -34,7 +35,9 @@ static PyObject * THCPEvent_pynew(
     return nullptr;
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   THCPEvent* self = (THCPEvent *)ptr.get();
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   unsigned int flags =
     (blocking ? cudaEventBlockingSync : cudaEventDefault) |
     (enable_timing ? cudaEventDefault : cudaEventDisableTiming) |
@@ -70,8 +73,10 @@ static PyObject * THCPEvent_from_ipc_handle(
   if (!ptr) {
     return nullptr;
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   THCPEvent* self = (THCPEvent *)ptr.get();
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   cudaIpcEventHandle_t handle;
   std::memcpy(&handle, handle_string.c_str(), handle_string.size());
   new (&self->cuda_event) at::cuda::CUDAEvent(device.index(), &handle);
@@ -151,6 +156,7 @@ static PyObject * THCPEvent_synchronize(PyObject *_self, PyObject *noargs) {
 static PyObject * THCPEvent_ipc_handle(PyObject *_self, PyObject *noargs) {
   HANDLE_TH_ERRORS
   auto self = (THCPEvent*)_self;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   cudaIpcEventHandle_t handle;
   self->cuda_event.ipc_handle(&handle);
   return PyBytes_FromStringAndSize((const char *)&handle, sizeof(handle));
@@ -180,6 +186,7 @@ static PyMethodDef THCPEvent_methods[] = {
   {nullptr}
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyTypeObject THCPEventType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
   "torch._C._CudaEventBase",             /* tp_name */
