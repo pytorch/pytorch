@@ -136,3 +136,6 @@
 [submodule "third_party/kineto"]
     path = third_party/kineto
     url = https://github.com/pytorch/kineto
+[submodule "third_party/ittapi"]
+	path = third_party/ittapi
+	url = https://github.com/intel/ittapi.git
