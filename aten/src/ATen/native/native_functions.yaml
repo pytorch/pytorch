@@ -9833,7 +9833,7 @@
   python_module: special
   variants: function
 
-- func: special_log_softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
+- func: special_log_softmax(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
   python_module: special
   variants: function
 

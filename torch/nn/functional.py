@@ -1748,7 +1748,7 @@ def log_softmax(input: Tensor, dim: Optional[int] = None, _stacklevel: int = 3, 
     r"""Applies a softmax followed by a logarithm.
 
     While mathematically equivalent to log(softmax(x)), doing these two
-    operations separately is slower, and numerically unstable. This function
+    operations separately is slower and numerically unstable. This function
     uses an alternative formulation to compute the output and gradient correctly.
 
     See :class:`~torch.nn.LogSoftmax` for more details.
@@ -1757,7 +1757,7 @@ def log_softmax(input: Tensor, dim: Optional[int] = None, _stacklevel: int = 3, 
         input (Tensor): input
         dim (int): A dimension along which log_softmax will be computed.
         dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-          If specified, the input tensor is casted to :attr:`dtype` before the operation
+          If specified, the input tensor is cast to :attr:`dtype` before the operation
           is performed. This is useful for preventing data type overflows. Default: None.
     """
     if has_torch_function_unary(input):
