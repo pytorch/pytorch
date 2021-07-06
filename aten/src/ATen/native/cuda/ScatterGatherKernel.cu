@@ -11,6 +11,7 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/native/cuda/KernelUtils.cuh>
 #include <THC/THCAtomics.cuh>
 
 namespace at { namespace native {
@@ -28,8 +29,8 @@ static ReduceMultiply reduce_multiply;
 class ReduceAdd {
 public:
   template <typename scalar_t>
-  constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
-    gpuAtomicAddNoReturn(self_data, *src_data);
+  constexpr C10_DEVICE void operator() (scalar_t * self_data, int64_t index, const int64_t numel, const scalar_t * src_data) const {
+    fastAtomicAdd(self_data, index, numel, *src_data, /* fast_atomic */true);
   }
 };
 static ReduceAdd reduce_add;
@@ -49,7 +50,7 @@ static TensorAssign tensor_assign;
 // of the same size.
 template <int N> struct alignas(N) OpaqueType { char data[N]; };
 
-// essentialy rewritten related to legacy::launch_kernel parts
+// essentially rewritten related to legacy::launch_kernel parts
 template <int nt, int vt, typename func_t>
 C10_LAUNCH_BOUNDS_2(nt, vt)
 __global__ void _scatter_gather_elementwise_kernel(int N, func_t f) {
@@ -121,7 +122,48 @@ struct _cuda_scatter_gather_internal_kernel {
         (scalar_t*)self_data + (is_scatter_like ? idx_dim * index_stride : 0),
         (scalar_t*)src_data + (is_scatter_like ? 0 : idx_dim * index_stride)
       );
+    };
 
+    _launch_scatter_gather_kernel<num_threads, thread_work_size>(iter.numel(), loop);
+  }
+
+  void operator() (
+    TensorIterator& iter,
+    int64_t index_size,
+    int64_t index_stride,
+    const ReduceAdd& f
+  ) {
+    const int64_t numel = iter.numel();
+    if (numel == 0) {
+      return;
+    }
+
+    if (!iter.can_use_32bit_indexing()) {
+      for (auto& sub_iter : iter.with_32bit_indexing()) {
+        _cuda_scatter_gather_internal_kernel<is_scatter_like, scalar_t>()(
+          sub_iter, index_size, index_stride, f
+        );
+      }
+      return;
+    }
+
+    char* self_ptr = (char*)iter.data_ptr(0);
+    char* src_ptr = (char*)iter.data_ptr(1);
+    char* index_ptr = (char*)iter.data_ptr(2);
+
+    auto offset_calc = make_offset_calculator<3>(iter);
+    auto loop = [=]C10_DEVICE(int i) {
+      auto offsets = offset_calc.get(i);
+
+      int64_t idx_dim = *(int64_t*)(index_ptr + offsets[2]);
+      CUDA_KERNEL_ASSERT(idx_dim >= 0 && idx_dim < index_size
+        && "index out of bounds");
+
+      char* self_data = self_ptr + offsets[0];
+      char* src_data = src_ptr + offsets[1];
+      scalar_t* src_val = (scalar_t*)src_data + (is_scatter_like ? 0 : idx_dim * index_stride);
+      int64_t index = is_scatter_like ? idx_dim * index_stride : 0;
+      f((scalar_t*)self_data, index, numel, src_val);
     };
 
     _launch_scatter_gather_kernel<num_threads, thread_work_size>(iter.numel(), loop);
@@ -311,6 +353,47 @@ struct _cuda_scatter_fill_internal_kernel {
         (scalar_t*)self_data + idx_dim * index_stride,
         (scalar_t*)&src_val
       );
+
+    };
+
+    _launch_scatter_gather_kernel<num_threads, thread_work_size>(iter.numel(), loop);
+  }
+
+  void operator() (
+    TensorIterator& iter,
+    scalar_t src_val,
+    int64_t index_size,
+    int64_t index_stride,
+    const ReduceAdd& f
+  ) {
+    const int64_t numel = iter.numel();
+    if (numel == 0) {
+      return;
+    }
+
+    if (!iter.can_use_32bit_indexing()) {
+      for (auto& sub_iter : iter.with_32bit_indexing()) {
+        _cuda_scatter_fill_internal_kernel<scalar_t>()(
+          sub_iter, src_val, index_size, index_stride, f
+        );
+      }
+      return;
+    }
+
+    char* self_ptr = (char*)iter.data_ptr(0);
+    char* index_ptr = (char*)iter.data_ptr(1);
+
+    auto offset_calc = make_offset_calculator<2>(iter);
+    auto loop = [=]C10_DEVICE(int i) {
+      auto offsets = offset_calc.get(i);
+
+      int64_t idx_dim = *(int64_t*)(index_ptr + offsets[1]);
+      CUDA_KERNEL_ASSERT(idx_dim >= 0 && idx_dim < index_size
+        && "index out of bounds"
+      );
+
+      char* self_data = self_ptr + offsets[0];
+      f((scalar_t*)self_data, idx_dim * index_stride, numel, &src_val);
 
     };
 
