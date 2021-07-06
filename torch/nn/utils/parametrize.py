@@ -307,17 +307,28 @@ def _inject_property(module: Module, tensor_name: str) -> None:
     # This should never fire if register_parametrization is correctly implemented
     assert not hasattr(module, tensor_name)
 
-    def get_parametrized(self) -> Tensor:
+    @torch.jit.unused
+    def get_cached_parametrization(parametrization) -> Tensor:
         global _cache
+        key = (id(module), tensor_name)
+        tensor = _cache.get(key)
+        if tensor is None:
+            tensor = parametrization()
+            _cache[key] = tensor
+        return tensor
 
+    def get_parametrized(self) -> Tensor:
         parametrization = self.parametrizations[tensor_name]
         if _cache_enabled:
-            key = (id(module), tensor_name)
-            tensor = _cache.get(key)
-            if tensor is None:
-                tensor = parametrization()
-                _cache[key] = tensor
-            return tensor
+            if torch.jit.is_scripting():
+                # Scripting
+                raise RuntimeError('Caching is not implemented for scripting. '
+                                   'Either disable caching or avoid scripting.')
+            elif torch._C._get_tracing_state() is not None:
+                # Tracing
+                raise RuntimeError('Cannot trace a model while caching parametrizations.')
+            else:
+                return get_cached_parametrization(parametrization)
         else:
             # If caching is not active, this function just evaluates the parametrization
             return parametrization()
