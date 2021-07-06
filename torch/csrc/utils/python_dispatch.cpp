@@ -6,6 +6,7 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 
 #include <pybind11/operators.h>
+#include <pybind11/stl.h>
 
 #include <iostream>
 
@@ -183,6 +184,18 @@ void initDispatchBindings(PyObject* module) {
 
   m.def("_dispatch_check_all_invariants", []() {
     c10::Dispatcher::singleton().checkInvariants();
+  });
+
+  m.def("_dispatch_find_dangling_impls", []() -> std::vector<std::string> {
+    auto danglingImpls =  c10::Dispatcher::singleton().findDanglingImpls();
+
+    std::vector<std::string> states;
+    states.reserve(danglingImpls.size());
+    for (auto& danglingImpl : danglingImpls) {
+      states.push_back(danglingImpl.dumpState());
+    }
+
+    return states;
   });
 }
 
