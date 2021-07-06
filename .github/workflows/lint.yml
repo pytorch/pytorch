@@ -366,7 +366,7 @@ jobs:
           # FunctionsManual.cpp is excluded to keep this diff clean. It will be fixed
           # in a follow up PR.
           # /torch/csrc/generic/*.cpp is excluded because those files aren't actually built.
-          # deploy/interpreter files are excluded due to using macros and other techniquies
+          # deploy/interpreter files are excluded due to using macros and other techniques
           # that are not easily converted to accepted c++
           python3 tools/linter/clang_tidy.py \
             --parallel \
