@@ -51,6 +51,7 @@ class Scope;
 class AccessInfo {
  public:
   AccessInfo() = default;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   AccessInfo(
       SimplifierHashType h,
       const Buf* b,
@@ -220,6 +221,7 @@ using AccessHashMap =
 // Represents a scope block and holds all accesses contained within it.
 class Scope {
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Scope(const Block* b, std::shared_ptr<Scope> parent, size_t conditionId = 0)
       : block_(b), parent_(std::move(parent)), conditionId_(conditionId) {}
 
@@ -317,6 +319,7 @@ class Scope {
  */
 class TORCH_API RegisterizerAnalysis : public IRVisitor {
  public:
+  // NOLINTNEXTLINE(modernize-use-equals-default,cppcoreguidelines-pro-type-member-init)
   RegisterizerAnalysis()
       : currentScope_(std::make_shared<Scope>(nullptr, nullptr, 0)) {}
   ~RegisterizerAnalysis() override = default;
@@ -376,6 +379,7 @@ class TORCH_API RegisterizerAnalysis : public IRVisitor {
  */
 class TORCH_API RegisterizerReplacer : public IRMutator {
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   RegisterizerReplacer(std::vector<std::shared_ptr<AccessInfo>>& vec)
       : infoSet_(vec) {
     buildReplacements();
@@ -388,6 +392,7 @@ class TORCH_API RegisterizerReplacer : public IRMutator {
   Stmt* mutate(const Block* v) override;
 
  private:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   struct ReplacerScope {
     std::unordered_map<const Stmt*, std::deque<std::shared_ptr<AccessInfo>>>
         initializerPoints_;

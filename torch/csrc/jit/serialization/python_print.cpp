@@ -516,7 +516,7 @@ struct PythonPrintImpl {
     // (Python doesn't allow type annotations in multiple assignment)
     if (lhs.size() == 1) {
       Value* v = lhs.at(0);
-      if (!annotated_unions_.count(v) && !expr_table_.count(v) && //!annotated_unions_.count(rhs.at(0)) &&
+      if (!annotated_unions_.count(v) && !expr_table_.count(v) &&
           (v->type()->kind() == UnionType::Kind || v->type()->kind() == OptionalType::Kind)) {
         body_ << " : " << v->type()->annotation_str();
         annotated_unions_.insert(v);

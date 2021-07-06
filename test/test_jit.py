@@ -9,7 +9,7 @@ from jit.test_recursive_script import TestRecursiveScript  # noqa: F401
 from jit.test_type_sharing import TestTypeSharing  # noqa: F401
 from jit.test_logging import TestLogging  # noqa: F401
 from jit.test_backends import TestBackends, TestBackendsWithCompiler  # noqa: F401
-from jit.test_list_dict import TestList, TestDict, TestNamedTuple, TestScriptDict  # noqa: F401
+from jit.test_list_dict import TestList, TestDict, TestNamedTuple, TestScriptDict, TestScriptList  # noqa: F401
 from jit.test_async import TestAsync  # noqa: F401
 from jit.test_data_parallel import TestDataParallel  # noqa: F401
 from jit.test_models import TestModels  # noqa: F401
@@ -57,6 +57,7 @@ from jit.test_tensor_creation_ops import TestTensorCreationOps  # noqa: F401
 from jit.test_module_apis import TestModuleAPIs  # noqa: F401
 from jit.test_script_profile import TestScriptProfile  # noqa: F401
 from jit.test_convert_activation import TestFunctionalToInplaceActivation, TestInplaceToFunctionalActivation  # noqa: F401
+from jit.test_parametrization import TestParametrization  # noqa: F401
 from jit.test_union import TestUnion  # noqa: F401
 
 # Torch
@@ -8859,7 +8860,7 @@ dedent """
         torch.testing.assert_allclose(imported(x), x + torch.neg(torch.ones(3, 4, dtype=torch.float)))
 
     @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
-    @unittest.skipIf(True, "Temporarily skipping while landing PR stack")
+    @unittest.skipIf(True, "Skipping while landing PR stack")
     def test_torch_functional(self):
         def stft(input, n_fft):
             # type: (Tensor, int) -> Tensor
@@ -8903,8 +8904,8 @@ dedent """
         self.checkScript(cdist_fn, ())
 
         def norm():
-            c = torch.rand(2, 3)
-            return torch.norm(c, p="fro")
+            c = torch.tensor([[1, 2, 3], [-1, 1, 4]], dtype=torch.float)
+            return torch.norm(c, p="fro"), torch.norm(c, p="nuc"), torch.norm(c), torch.norm(c, p=.5)
 
         self.checkScript(norm, ())
 

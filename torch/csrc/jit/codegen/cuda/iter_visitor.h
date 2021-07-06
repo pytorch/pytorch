@@ -30,6 +30,7 @@ namespace cuda {
  * TODO: We may want to have ordering of outputs to inputs. I'm not sure why we
  * would want this, but seems like it would be a reasonable request.
  */
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class TORCH_CUDA_CU_API IterVisitor : public OptOutDispatch {
  public:
   // NOLINTNEXTLINE(modernize-use-override)
@@ -49,6 +50,7 @@ class TORCH_CUDA_CU_API IterVisitor : public OptOutDispatch {
   // to inputs based on depth first traversal. Next could be called on a node
   // multiple times.
   virtual std::vector<Statement*> next(Statement* stmt) {
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (stmt->isVal()) {
       return next(stmt->as<Val>());
     } else if (stmt->isExpr()) {
@@ -69,6 +71,7 @@ class TORCH_CUDA_CU_API IterVisitor : public OptOutDispatch {
 
   virtual std::vector<Statement*> next(Expr* expr) {
     FusionGuard::getCurFusion()->assertInFusion(expr, "Cannot traverse expr, ");
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<Statement*> next_stmts{
         expr->inputs().begin(), expr->inputs().end()};
     return next_stmts;
@@ -150,6 +153,7 @@ class TORCH_CUDA_CU_API IterVisitor : public OptOutDispatch {
  * outputs to guarentee that we will traverse all outputs of all exprs during
  * the backward traversal.
  */
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class TORCH_CUDA_CU_API BackwardVisitor : public OptOutDispatch {
  public:
   // NOLINTNEXTLINE(modernize-use-override)

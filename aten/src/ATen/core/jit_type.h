@@ -103,9 +103,9 @@ struct TORCH_API UnionType : public Type {
 
   static const TypeKind Kind = TypeKind::UnionType;
 
-  bool isSubtypeOfExt(const TypePtr& rhs_, std::ostream* why_not) const;
+  bool isSubtypeOfExt(const TypePtr& rhs_, std::ostream* why_not) const override;
 
-  std::string str() const;
+  std::string str() const override;
 
   static UnionTypePtr create(std::vector<TypePtr> reference);
 
@@ -136,8 +136,8 @@ struct TORCH_API UnionType : public Type {
 
  protected:
     UnionType(std::vector<TypePtr> types, TypeKind kind=TypeKind::UnionType);
-    std::string annotation_str_impl(TypePrinter printer) const override;
-    std::string unionStr(TypePrinter printer, bool is_annotation_str) const;
+    std::string annotation_str_impl(TypePrinter printer = nullptr) const override;
+    std::string unionStr(TypePrinter printer = nullptr, bool is_annotation_str = false) const;
     bool has_free_variables_;
     std::vector<TypePtr> types_;
     bool can_hold_none_;
@@ -2092,8 +2092,8 @@ struct TORCH_API ClassType : public NamedType {
   c10::optional<ClassType::Property> getProperty(const std::string& name);
   // Add a property named \p name with \p getter and \p setter as its getter and setter.
   void addProperty(const std::string& name, torch::jit::Function* getter, torch::jit::Function* setter);
-
-  const std::vector<Property> properties() const {
+  // Get a list of all properties.
+  const std::vector<Property>& properties() const {
     return properties_;
   }
 

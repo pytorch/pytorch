@@ -485,14 +485,13 @@ struct SourceImporterImpl : public Resolver,
         } break;
         case TK_DEF: {
           Def def = Def(statement);
-          std::string def_name = def.name().name();
-          if (pre_hook_names.find(def_name) != pre_hook_names.end()) {
-            pre_hook_def_map.emplace(def_name, def);
+          if (pre_hook_names.find(def.name().name()) != pre_hook_names.end()) {
+            pre_hook_def_map.emplace(def.name().name(), def);
             pre_hook_resolver_map.emplace(
-                def_name, shared_from_this());
-          } else if (hook_names.find(def_name) != hook_names.end()) {
-            hook_def_map.emplace(def_name, def);
-            hook_resolver_map.emplace(def_name, shared_from_this());
+                def.name().name(), shared_from_this());
+          } else if (hook_names.find(def.name().name()) != hook_names.end()) {
+            hook_def_map.emplace(def.name().name(), def);
+            hook_resolver_map.emplace(def.name().name(), shared_from_this());
           } else {
             methods.emplace_back(def);
             method_resolvers.push_back(shared_from_this());
