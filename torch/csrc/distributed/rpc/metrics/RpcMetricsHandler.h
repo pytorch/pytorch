@@ -19,8 +19,7 @@ class RpcMetricsHandler {
   virtual void accumulateMetric(const std::string& name, double value) = 0;
   // Increment a count for the metric given by the name.
   virtual void incrementMetric(const std::string& name) = 0;
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  virtual ~RpcMetricsHandler() {}
+  virtual ~RpcMetricsHandler() = default;
 };
 
 // Configuration struct for metrics handling.
