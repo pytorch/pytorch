@@ -41,6 +41,17 @@ except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = skipIf(not HAS_TORCHVISION, "no torchvision")
 
+try:
+    import dill
+    # XXX: By default, dill writes the Pickler dispatch table to inject its
+    # own logic there. This globally affects the behavior of the standard library
+    # pickler for any user who transitively depends on this module!
+    # Undo this extension to avoid altering the behavior of the pickler globally.
+    dill.extend(use_dill=False)
+    HAS_DILL = True
+except ImportError:
+    HAS_DILL = False
+skipIfNoDill = skipIf(not HAS_DILL, "no dill")
 
 T_co = TypeVar('T_co', covariant=True)
 
@@ -1267,6 +1278,7 @@ class NumbersDataset(IterDataPipe):
 
 
 class TestGraph(TestCase):
+    @skipIfNoDill
     def test_simple_traverse(self):
         numbers_dp = NumbersDataset(size=50)
         mapped_dp = numbers_dp.map(lambda x: x * 10)
@@ -1276,6 +1288,7 @@ class TestGraph(TestCase):
 
     # TODO(VitalyFedyunin): This test is incorrect because of 'buffer' nature
     # of the fork fake implementation, update fork first and fix this test too
+    @skipIfNoDill
     def test_traverse_forked(self):
         numbers_dp = NumbersDataset(size=50)
         dp0, dp1, dp2 = numbers_dp.fork(3)
@@ -1288,6 +1301,7 @@ class TestGraph(TestCase):
 
 
 class TestSharding(TestCase):
+    @skipIfNoDill
     def test_simple_sharding(self):
         def get_pipeline():
             numbers_dp = NumbersDataset(size=10)
