@@ -286,6 +286,10 @@ def run(options: Any) -> None:
                 {"name": name, "lines": lines} for name, lines, in changed_files.items()
             ]
             files = list(changed_files.keys())
+            # Since header files are excluded, add .cpp file if it exists in the same folder
+            cpp_files = [f[:-1] + "cpp" for f in files if f.endswith(".h")]
+            cpp_files = [f for f in cpp_files if os.path.exists(f)]
+            files = list(set(files + cpp_files))
     else:
         line_filters = []
         files = get_all_files(paths)
