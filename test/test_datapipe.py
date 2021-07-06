@@ -1276,7 +1276,7 @@ class TestGraph(TestCase):
         expected : Dict[Any, Any] = {mapped_dp: {numbers_dp: {}}}
         self.assertEqual(expected, graph)
 
-    # TODO(VitalyFedyunin): This test is incorrect because of 'buffer' nature 
+    # TODO(VitalyFedyunin): This test is incorrect because of 'buffer' nature
     # of the fork fake implementation, update fork first and fix this test too
     def test_traverse_forked(self):
         numbers_dp = NumbersDataset(size=50)
