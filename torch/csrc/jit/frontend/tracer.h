@@ -97,6 +97,7 @@ struct TORCH_API TracingState
 // data dependencies, but once they get to the ATen call where we actually have
 // the tracing logic, they get converted into a raw IntArrayRef, and we loose
 // all information. To prevent this, we temporarily stash it in here.
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct ArgumentStash {
   struct IntArrayRefTrace : std::vector<Value*> {
     IntArrayRefTrace(int size) : std::vector<Value*>(size, nullptr) {}
@@ -177,6 +178,7 @@ inline void warn(const char* _reason, const char* _kind = nullptr) {
 TORCH_API void setWarn(warn_fn_type fn);
 
 struct TORCH_API NoWarn {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   NoWarn() : state(getTracingState()) {
     if (state) {
       prev = state->warn;
