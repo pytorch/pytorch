@@ -527,5 +527,28 @@ class TypeCheckerTest(unittest.TestCase):
                 assert n.type == TensorType((1, Dyn, 5, Dyn))
 
 
+
+    def test_type_typechecl_maxpool2d_3dinput(self):
+
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+                self.pool = torch.nn.MaxPool2d(5, 8)
+
+            def forward(self, x : TensorType((64, 8, 8))):
+                out = self.pool(x)
+                return out
+
+        B = BasicBlock()
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(B)
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+        tc = GraphTypeChecker({}, traced)
+        tc.type_check()
+
+        for n in traced.graph.nodes:
+            if n.target == 'output':
+                assert n.type == TensorType((64, 1, 1))
+
 if __name__ == '__main__':
     unittest.main()
