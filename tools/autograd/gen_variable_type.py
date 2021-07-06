@@ -48,7 +48,8 @@ from tools.codegen.utils import mapMaybe
 from tools.codegen.model import (Argument, NativeFunction, SchemaKind,
                                  SelfArgument, TensorOptionsArguments,
                                  BaseType, ListType)
-from typing import Callable, List, Optional, Sequence, Union
+from typing import Callable, List, Optional, Sequence, Union, Pattern, Set
+import re
 
 # We don't set or modify grad_fn on these methods. Generally, they return
 # tensors that have requires_grad=False. In-place functions listed here will
@@ -220,23 +221,42 @@ DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE = {
     # These functions are expected to change impl or storage of input tensors
     'set_', '_cudnn_rnn_flatten_weight',
 }
-DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
-    # These functions return tensors with use_count > 1
-    # https://github.com/pytorch/pytorch/issues/60426
+DONT_ENFORCE_TENSOR_IMPL_USE_COUNT: Set[Union[str, Pattern[str]]] = {
+    # These non-inplace, non-out functions return tensors with use_count != 1
+    # Therefore, they MAY (but not necessarily) return one of its inputs as-is
+    # See https://github.com/pytorch/pytorch/issues/60426 for more information
     'native_batch_norm', 'native_batch_norm_backward', 'native_group_norm_backward',
-    'cudnn_batch_norm',
-    'native_layer_norm_backward', 'slow_conv_transpose2d_backward_output_mask',
-    'thnn_conv2d_backward_output_mask', 'slow_conv3d_backward_output_mask',
-    'slow_conv_transpose2d_backward_output_mask', 'slow_conv_transpose3d_backward_output_mask',
+    'cudnn_batch_norm', 'native_layer_norm_backward',
+
+    # TODO: we probably dont' want to skip all conv.*_backward
+    re.compile(r'conv.*_backward'),
     '_embedding_bag', '_embedding_bag_forward_only',
-    'mkldnn_convolution_backward', 'cudnn_convolution_backward',
-    'q_per_channel_scales', 'q_per_channel_zero_points', 'dequantize_self',
+    'q_per_channel_scales', 'q_per_channel_zero_points',
+    'lu_unpack',
+
+    # The below failed StorageImpl use_count check but we skip tensor_impl check
+    # just in case
+    '_cudnn_rnn', 'dequantize_self',
 }
-DONT_ENFORCE_STORAGE_IMPL_USE_COUNT = {
-    # These 'non-view' functions return tensors with storage use_count > 1
+
+DONT_ENFORCE_STORAGE_IMPL_USE_COUNT: Set[Union[str, Pattern[str]]] = {
+    # These non-view functions return tensors with storage use_count != 1
     'thnn_conv2d_forward', 'slow_conv3d_forward', 'channel_shuffle',
-    'q_per_channel_zero_points', 'q_per_channel_scales', 'dequantize_self',
+
+    # If an input is returned as-is in output, we cannot guarantee its storage_impl
+    # use count to be 1 either.
+    *DONT_ENFORCE_TENSOR_IMPL_USE_COUNT,
 }
+
+def contains_string_or_matching_pattern(list: Set[Union[str, Pattern[str]]], cpp_name: str) -> bool:
+    for pattern in list:
+        if isinstance(pattern, str):
+            if cpp_name == pattern:
+                return True
+        else:
+            if pattern.search(cpp_name) is not None:
+                return True
+    return False
 # END CHECKS FOR [ TensorImpl and Storage Pointer Sanity Checks ]
 
 DECLARE_GRAD_FN = CodeTemplate("""\
@@ -730,11 +750,11 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                         stmts_after_call += [ENFORCE_SAME_TENSOR_STORAGE.substitute(tensor_name=aliased_arg_name,
                                                                                     out_tensor_name=ret_name)]
                     else:
-                        if type_wrapper_name(f) not in DONT_ENFORCE_STORAGE_IMPL_USE_COUNT:
+                        if not contains_string_or_matching_pattern(DONT_ENFORCE_STORAGE_IMPL_USE_COUNT, type_wrapper_name(f)):
                             stmts_after_call += [ENFORCE_TENSOR_STORAGE_USE_COUNT_EQUALS_ONE.substitute(
                                 tensor_name=ret_name, fn_name=type_wrapper_name(f))]
 
-                    if type_wrapper_name(f) not in DONT_ENFORCE_TENSOR_IMPL_USE_COUNT:
+                    if not contains_string_or_matching_pattern(DONT_ENFORCE_TENSOR_IMPL_USE_COUNT, type_wrapper_name(f)):
                         stmts_after_call += [ENFORCE_TENSOR_IMPL_USE_COUNT_EQUALS_ONE.substitute(
                             tensor_name=ret_name, fn_name=type_wrapper_name(f))]
 
