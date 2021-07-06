@@ -9828,7 +9828,7 @@ Keyword args:
     {out}
 
 Returns:
-    A tuple (var, mean) containing the variance and mean. Here 2
+    A tuple (var, mean) containing the variance and mean.
 
 Example:
 
