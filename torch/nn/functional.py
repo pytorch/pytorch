@@ -1,5 +1,5 @@
 r"""Functional interface"""
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple, Any
 import math
 import warnings
 
@@ -927,10 +927,16 @@ def max_unpool3d(
     output_size = _unpool_output_size(input, kernel_size, _stride, padding, output_size)
     return torch._C._nn.max_unpool3d(input, indices, output_size, _stride, padding)
 
+def _union_int_float(norm_type: Any) -> float:
+    if torch.jit.isinstance(norm_type, int):
+        return float(norm_type)
+    elif torch.jit.isinstance(norm_type, float):
+        return norm_type
+    raise ValueError("Expected norm_type to be of type int or float")
 
 def lp_pool2d(
-    input: Tensor, norm_type: float,
-    kernel_size: int,
+    input: Tensor, norm_type: Any,
+    kernel_size: BroadcastingList2[int],
     stride: Optional[BroadcastingList2[int]] = None,
     ceil_mode: bool = False
 ) -> Tensor:
@@ -940,22 +946,22 @@ def lp_pool2d(
 
     See :class:`~torch.nn.LPPool2d` for details.
     """
+    norm_type_ = _union_int_float(norm_type)
     if has_torch_function_unary(input):
         return handle_torch_function(
-            lp_pool2d, (input,), input, norm_type, kernel_size, stride=stride, ceil_mode=ceil_mode
+            lp_pool2d, (input,), input, norm_type_, kernel_size, stride=stride, ceil_mode=ceil_mode
         )
     kw, kh = utils._pair(kernel_size)
     if stride is not None:
-        out = avg_pool2d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
+        out = avg_pool2d(input.pow(norm_type_), kernel_size, stride, 0, ceil_mode)
     else:
-        out = avg_pool2d(input.pow(norm_type), kernel_size, padding=0, ceil_mode=ceil_mode)
+        out = avg_pool2d(input.pow(norm_type_), kernel_size, padding=0, ceil_mode=ceil_mode)
 
-    return (torch.sign(out) * relu(torch.abs(out))).mul(kw * kh).pow(1.0 / norm_type)
-
+    return (torch.sign(out) * relu(torch.abs(out))).mul(kw * kh).pow(1.0 / norm_type_)
 
 def lp_pool1d(
-    input: Tensor, norm_type: float,
-    kernel_size: int,
+    input: Tensor, norm_type: Any,
+    kernel_size: BroadcastingList1[int],
     stride: Optional[BroadcastingList1[int]] = None,
     ceil_mode: bool = False
 ) -> Tensor:
@@ -965,16 +971,17 @@ def lp_pool1d(
 
     See :class:`~torch.nn.LPPool1d` for details.
     """
+    norm_type_ = _union_int_float(norm_type)
     if has_torch_function_unary(input):
         return handle_torch_function(
-            lp_pool1d, (input,), input, norm_type, kernel_size, stride=stride, ceil_mode=ceil_mode
+            lp_pool1d, (input,), input, norm_type_, kernel_size, stride=stride, ceil_mode=ceil_mode
         )
     if stride is not None:
-        out = avg_pool1d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
+        out = avg_pool1d(input.pow(norm_type_), kernel_size, stride, 0, ceil_mode)
     else:
-        out = avg_pool1d(input.pow(norm_type), kernel_size, padding=0, ceil_mode=ceil_mode)
+        out = avg_pool1d(input.pow(norm_type_), kernel_size, padding=0, ceil_mode=ceil_mode)
 
-    return (torch.sign(out) * relu(torch.abs(out))).mul(kernel_size).pow(1.0 / norm_type)
+    return (torch.sign(out) * relu(torch.abs(out))).mul(kernel_size).pow(1.0 / norm_type_)
 
 
 def adaptive_max_pool1d_with_indices(
@@ -4088,7 +4095,7 @@ def affine_grid(theta: Tensor, size: List[int], align_corners: Optional[bool] = 
     return torch.affine_grid_generator(theta, size, align_corners)
 
 
-def _pad(input: Tensor, pad: List[int], mode: str = "constant", value: float = 0) -> Tensor:
+def _pad(input: Tensor, pad: BroadcastingList1[int], mode: str = "constant", value: Any = 0) -> Tensor:
     r"""Pads tensor.
 
     Padding size:
@@ -4146,14 +4153,15 @@ def _pad(input: Tensor, pad: List[int], mode: str = "constant", value: float = 0
         torch.Size([3, 9, 7, 3])
 
     """
+    value_ = _union_int_float(value)
     if has_torch_function_unary(input):
-        return handle_torch_function(_pad, (input,), input, pad, mode=mode, value=value)
+        return handle_torch_function(_pad, (input,), input, pad, mode=mode, value=value_)
     assert len(pad) % 2 == 0, "Padding length must be divisible by 2"
     assert len(pad) // 2 <= input.dim(), "Padding length too large"
     if mode == "constant":
-        return _VF.constant_pad_nd(input, pad, value)
+        return _VF.constant_pad_nd(input, pad, value_)
     else:
-        assert value == 0, 'Padding mode "{}"" doesn\'t take in value argument'.format(mode)
+        assert value_ == 0, 'Padding mode "{}"" doesn\'t take in value argument'.format(mode)
         if input.dim() == 3:
             assert len(pad) == 2, "3D tensors expect 2 values for padding"
             if mode == "reflect":
