@@ -11,7 +11,7 @@ reduce_ex_hook = None
 def stub_unpickler():
     return "STUB"
 
-
+# TODO(VitalyFedyunin): Make sure it works without dill module installed
 def list_connected_datapipes(scan_obj):
 
     f = io.BytesIO()
