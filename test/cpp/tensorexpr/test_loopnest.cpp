@@ -5261,6 +5261,118 @@ TEST(LoopNest, DistributeLoopOverInnerLoops) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(LoopNest, DistributeLoopAndParentsWithoutAnyPivot) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  // for (int m = 0; m < 50; m++) {
+  //   for (int i = 0; i < 20; i++) {
+  //     A[m,i] = 0;
+  //     for (int j = 0; j < 100; j++) {
+  //       A[m,i] = A[m,i] + i * j;
+  //     }
+  //     B[m,i] = A[m,i];
+  //     for (int k = 0; k < 50; k++) {
+  //       B[m,i] = B[m,i] + i * k;
+  //     }
+  //   }
+  // }
+  BufHandle a_buf("A", {100, 100}, kInt);
+  BufHandle b_buf("B", {100, 100}, kInt);
+  VarHandle m("m", kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle k("k", kInt);
+  auto initA = Store::make(a_buf, {m, i}, 0);
+  auto forJ = For::make(
+      j,
+      0,
+      100,
+      Store::make(
+          a_buf,
+          {m, i},
+          Add::make(Load::make(a_buf, {m, i}), Mul::make(i, j))));
+  auto initB = Store::make(b_buf, {m, i}, Load::make(a_buf, {m, i}));
+  auto forK = For::make(
+      k,
+      0,
+      50,
+      Store::make(
+          b_buf,
+          {m, i},
+          Add::make(Load::make(b_buf, {m, i}), Mul::make(i, k))));
+  auto forI = For::make(i, 0, 20, Block::make({initA, forJ, initB, forK}));
+
+  {
+    // Check the case of distributing loop and its parents over all the
+    // statements in the loop.
+    const std::string& verification_pattern =
+        R"IR(
+# CHECK: for (int m
+# CHECK-NEXT: for (int i
+# CHECK-NEXT: A[m, i] = 0
+# CHECK: for (int m
+# CHECK-NEXT: for (int i
+# CHECK-NEXT: for (int j
+# CHECK-NEXT: A[m, i] =
+# CHECK: for (int m
+# CHECK-NEXT: for (int i
+# CHECK-NEXT: B[m, i] = A[m, i]
+# CHECK: for (int m
+# CHECK-NEXT: for (int i
+# CHECK-NEXT: for (int k
+# CHECK-NEXT: B[m, i] =
+# CHECK-NOT: for (
+        )IR";
+
+    auto newForI = dynamic_cast<For*>(Stmt::clone(forI));
+    auto forM = For::make(m, 0, 50, newForI);
+    auto par = Block::make({forM});
+    LoopNest nest(par, {a_buf.node(), b_buf.node()});
+    auto new_loops = LoopNest::distributeLoopAndParents(newForI);
+
+    std::ostringstream oss;
+    oss << *par;
+    torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+    // The first loop after distribution must be same as the original For.
+    ASSERT_EQ(new_loops.front(), forM);
+  }
+
+  {
+    // Check the case of distributing loop and its parents over all the inner
+    // loops.
+    const std::string& verification_pattern =
+        R"IR(
+# CHECK: for (int m
+# CHECK-NEXT: for (int i
+# CHECK-NEXT: A[m, i] = 0
+# CHECK-NEXT: for (int j
+# CHECK-NEXT: A[m, i] =
+# CHECK: for (int m
+# CHECK-NEXT: for (int i
+# CHECK-NEXT: B[m, i] = A[m, i]
+# CHECK-NEXT: for (int k
+# CHECK-NEXT: B[m, i] =
+# CHECK-NOT: for (
+        )IR";
+
+    auto newForI = dynamic_cast<For*>(Stmt::clone(forI));
+    auto forM = For::make(m, 0, 50, newForI);
+    auto par = Block::make({forM});
+    LoopNest nest(par, {a_buf.node(), b_buf.node()});
+    auto new_loops = LoopNest::distributeLoopAndParentsOverInnerLoops(newForI);
+
+    std::ostringstream oss;
+    oss << *par;
+    torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+    // The first loop after distribution must be same as the original For.
+    ASSERT_EQ(new_loops.front(), forM);
+  }
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, fuseLoopsSimple) {
   KernelScope kernel_scope;
 

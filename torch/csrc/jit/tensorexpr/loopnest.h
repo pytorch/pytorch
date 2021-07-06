@@ -238,6 +238,9 @@ class TORCH_API LoopNest {
   // S6:    for k
   // S7:      B[i] = B[i] +
   static std::vector<For*> distributeLoop(For* loop);
+  // Same as above, but also distribute parent loops.
+  // Returns the result of distributing the outermost loop.
+  static std::vector<For*> distributeLoopAndParents(For* loop);
 
   // This method distributes the given loop over its body by splitting
   // after every For stmt in its body.
@@ -254,6 +257,9 @@ class TORCH_API LoopNest {
   // S6:    for k
   // S7:      B[i] = B[i] +
   static std::vector<For*> distributeLoopOverInnerLoops(For* loop);
+  // Same as above, but also distribute parent loops.
+  // Returns the result of distributing the outermost loop.
+  static std::vector<For*> distributeLoopAndParentsOverInnerLoops(For* loop);
 
   // This method performs loop fusion.
   // For example, consider the following code.
