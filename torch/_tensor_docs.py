@@ -1004,6 +1004,18 @@ count_nonzero(dim=None) -> Tensor
 See :func:`torch.count_nonzero`
 """)
 
+add_docstr_all('cov', r"""
+cov(*, correction=1, fweights=None, aweights=None) -> Tensor
+
+See :func:`torch.cov`
+""")
+
+add_docstr_all('corrcoef', r"""
+corrcoef() -> Tensor
+
+See :func:`torch.corrcoef`
+""")
+
 add_docstr_all('cross',
                r"""
 cross(other, dim=-1) -> Tensor
@@ -1751,7 +1763,7 @@ add_docstr_all('index_add_',
                r"""
 index_add_(dim, index, tensor, *, alpha=1) -> Tensor
 
-Accumulate the elements of attr:`alpha` times :attr:`tensor` into the :attr:`self`
+Accumulate the elements of :attr:`alpha` times :attr:`tensor` into the :attr:`self`
 tensor by adding to the indices in the order given in :attr:`index`. For example,
 if ``dim == 0``, ``index[i] == j``, and ``alpha=-1``, then the ``i``\ th row of
 :attr:`tensor` is subtracted from the ``j``\ th row of :attr:`self`.

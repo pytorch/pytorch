@@ -989,6 +989,14 @@ void xlog1py_kernel(TensorIteratorBase& iter) {
   });
 }
 
+void zeta_kernel(TensorIteratorBase& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "zeta_cpu", [&]() {
+    cpu_kernel(iter, [](scalar_t x, scalar_t q) -> scalar_t {
+      return zeta(x, q);
+    });
+  });
+}
+
 } // namespace
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -1082,6 +1090,7 @@ REGISTER_DISPATCH(copysign_stub, &copysign_kernel);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(xlogy_stub, &xlogy_kernel);
 REGISTER_DISPATCH(xlog1py_stub, &xlog1py_kernel);
+REGISTER_DISPATCH(zeta_stub, &zeta_kernel);
 
 } // namespace native
 } // namespace at

@@ -1,5 +1,5 @@
 #include <torch/csrc/CudaIPCTypes.h>
-#include <TH/THAllocator.h>
+#include <ATen/MapAllocator.h>
 #include <map>
 #include <mutex>
 #include <random>
@@ -32,6 +32,7 @@ struct CudaIPCGlobalEntities {
   std::shared_ptr<CudaIPCRefCountersFile> next_available_ref_counters_file_;
   CudaIPCSentDataLimbo CudaIPCSentDataLimbo_;
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   CudaIPCGlobalEntities() : ref_counters_files_() {}
   ~CudaIPCGlobalEntities() {
     CudaIPCSentDataLimbo_.collect();
@@ -55,6 +56,7 @@ struct CudaIPCGlobalEntities {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 CudaIPCGlobalEntities cuda_ipc_global_entities;
 
 CudaIPCSentDataLimbo::~CudaIPCSentDataLimbo() {
@@ -107,6 +109,7 @@ void CudaIPCSentDataLimbo::add(std::unique_ptr<CudaIPCSentData> shared_block) {
 }
 
 void CudaIPCSentDataDelete(void* ptr) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::unique_ptr<CudaIPCSentData> sent_data(
       static_cast<CudaIPCSentData*>(ptr));
   if (sent_data->counter_value() > 0) {
@@ -213,8 +216,8 @@ at::DataPtr GetNewRefCountedSentData(void* data, at::Device device) {
       ref_counter_handle += "_";
       ref_counter_handle += std::to_string(rd());
 
-      int flags = TH_ALLOCATOR_MAPPED_SHAREDMEM | TH_ALLOCATOR_MAPPED_EXCLUSIVE;
-      at::DataPtr sptr = THRefcountedMapAllocator::makeDataPtr(
+      int flags = at::ALLOCATOR_MAPPED_SHAREDMEM | at::ALLOCATOR_MAPPED_EXCLUSIVE;
+      at::DataPtr sptr = at::RefcountedMapAllocator::makeDataPtr(
           ref_counter_handle.c_str(),
           flags,
           sizeof(int64_t) * CUDA_IPC_REF_COUNTER_FILE_SIZE,
@@ -252,6 +255,7 @@ bool CudaIPCCollect() {
 
 namespace c10 {
 namespace {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_FREE_MEMORY_CALLBACK("cuda_ipc_collect", CudaIPCCollectCallback);
 }
 } // namespace c10

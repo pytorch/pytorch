@@ -840,15 +840,15 @@ class TestBinaryUfuncs(TestCase):
             self.assertNotEqual(out_uint8_computation, out_int64_computation)
             self.assertEqual(out_uint8_computation.to(dtype=torch.uint8), out_int64_computation.to(dtype=torch.uint8))
 
-    def test_tensor_pow_tensor(self, dev):
+    def test_tensor_pow_tensor(self, device):
         def rotate(l, n):
             return l[-n:] + l[:-n]
 
         def test_tensor_pow_tensor(values, torch_type, numpy_type):
-            vals_tensor = torch.tensor(values, dtype=torch_type, device=dev)
+            vals_tensor = torch.tensor(values, dtype=torch_type, device=device)
             for i in range(len(values)):
                 pows = rotate(values, i)
-                pows_tensor = torch.tensor(pows, dtype=torch_type, device=dev)
+                pows_tensor = torch.tensor(pows, dtype=torch_type, device=device)
                 self._test_pow(vals_tensor, pows_tensor)
 
         ints = [0, 1, 2, 3]
@@ -2809,6 +2809,60 @@ class TestBinaryUfuncs(TestCase):
 
         _compare_helper(t, zeros, *xlog1py_fns)
         _compare_helper(t, 0., *xlog1py_fns)
+
+    @dtypes(*product(torch.testing.get_all_dtypes(include_complex=False,
+                                                  include_half=False, include_bfloat16=False),
+                     torch.testing.get_all_dtypes(include_complex=False,
+                                                  include_half=False, include_bfloat16=False)))
+    @skipIf(not TEST_SCIPY, "Scipy required for the test.")
+    def test_zeta(self, device, dtypes):
+        x_dtype, q_dtype = dtypes
+
+        def test_helper(x, q):
+            x_np = x if isinstance(x, float) else x.cpu().numpy()
+            q_np = q if isinstance(q, float) else q.cpu().numpy()
+            expected = torch.from_numpy(scipy.special.zeta(x_np, q_np))
+            actual = torch.special.zeta(x, q)
+
+            rtol, atol = None, None
+            if self.device_type == 'cpu':
+                rtol, atol = 1e-6, 1e-6
+            self.assertEqual(expected, actual, rtol=rtol, atol=atol, exact_dtype=False)
+
+        # x tensor - q tensor same size
+        x = make_tensor((2, 3, 4), device, x_dtype)
+        q = make_tensor((2, 3, 4), device, q_dtype)
+        test_helper(x, q)
+
+        # x tensor - q tensor broadcast lhs
+        x = make_tensor((2, 1, 4), device, x_dtype)
+        q = make_tensor((2, 3, 4), device, q_dtype)
+        test_helper(x, q)
+
+        # x tensor - q tensor broadcast rhs
+        x = make_tensor((2, 3, 4), device, x_dtype)
+        q = make_tensor((2, 1, 4), device, q_dtype)
+        test_helper(x, q)
+
+        # x tensor - q tensor broadcast all
+        x = make_tensor((2, 3, 1), device, x_dtype)
+        q = make_tensor((2, 1, 4), device, q_dtype)
+        test_helper(x, q)
+
+        # x scalar - q tensor
+        for x in np.linspace(-5, 5, num=10).tolist():
+            if not q_dtype.is_floating_point:
+                q_dtype = torch.get_default_dtype()
+            q = make_tensor((2, 3, 4), device, q_dtype)
+            test_helper(x, q)
+
+        # x tensor - q scalar
+        for q in np.linspace(-5, 5, num=10).tolist():
+            if not x_dtype.is_floating_point:
+                x_dtype = torch.get_default_dtype()
+            x = make_tensor((2, 3, 4), device, x_dtype)
+            test_helper(x, q)
+
 
 tensor_binary_ops = [
     '__lt__', '__le__',
