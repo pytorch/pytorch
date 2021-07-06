@@ -1,7 +1,7 @@
 # @generated DO NOT EDIT MANUALLY
 # Template is at:    .github/templates/bazel_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: Linux CI (pytorch-linux-xenial-py3.6-gcc7-bazel-test)
+name: Bazel Linux CI (pytorch-linux-xenial-py3.6-gcc7-bazel-test)
 
 on:
   # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
@@ -96,6 +96,7 @@ jobs:
           export IMAGE_NAME=${DOCKER_IMAGE_BASE#308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/}
           cd .circleci/docker && ./build_docker.sh
 
+  # building and testing in a single job since bazel runs only small subset of tests
   build-and-test:
     runs-on: linux.2xlarge
     needs:
@@ -228,6 +229,8 @@ jobs:
         run: |
           # Prune all of the docker images
           docker system prune -af
+
+  
 
   # this is a separate step from test because the log files from test are too
   # long: basically, GitHub tries to render all of the log files when you click
