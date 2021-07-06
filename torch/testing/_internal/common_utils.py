@@ -2509,6 +2509,7 @@ def coalescedonoff(f):
         f(self, *args, **kwargs, coalesced=False)
     return wrapped
 
+
 @contextlib.contextmanager
 def disable_gc():
     if gc.isenabled():
@@ -2519,3 +2520,11 @@ def disable_gc():
             gc.enable()
     else:
         yield
+
+def has_breakpad() -> bool:
+    # If not on a special build, check that the library was actually linked in
+    try:
+        torch._C._get_minidump_directory()  # type: ignore[attr-defined]
+        return True
+    except RuntimeError as e:
+        return False
