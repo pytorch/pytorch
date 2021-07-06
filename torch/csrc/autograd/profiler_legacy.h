@@ -357,6 +357,7 @@ struct TORCH_API LegacyEvent {
 // a std::vector resize from taking a large amount of time inside
 // a profiling  event
 struct RangeEventList {
+  // NOLINTNEXTLINE(modernize-use-equals-default,cppcoreguidelines-pro-type-member-init)
   RangeEventList() {
     events_.reserve(kReservedCapacity);
   }
@@ -369,6 +370,7 @@ struct RangeEventList {
 
   std::vector<LegacyEvent> consolidate() {
     std::lock_guard<std::mutex> lock(mutex_);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<LegacyEvent> result;
     result.insert(
         result.begin(),
@@ -500,6 +502,7 @@ struct TORCH_API TLSProfilerGuard {
     enableProfilerLegacy(cfg);
   }
   ~TLSProfilerGuard() {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     thread_event_lists event_lists = disableProfilerLegacy(profilerDisableOptions_);
     if (cb_) {
       try {
@@ -525,6 +528,7 @@ TORCH_API std::vector<std::string> callstackStr(const std::vector<FileLineFunc>&
 TORCH_API std::vector<std::vector<int64_t>> inputSizes(const at::RecordFunction& fn);
 
 struct TORCH_API ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit ProfilerThreadLocalState(const ProfilerConfig& config)
       : config_(config), remoteProfiledEvents_{c10::nullopt} {}
   ~ProfilerThreadLocalState() override = default;

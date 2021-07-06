@@ -270,6 +270,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       TORCH_CHECK(false, "Trying to create a SavedTensor object from Python is forbidden.");
     }))
     .def("register_hooks", [](torch::autograd::SavedVariable &s, py::function &pack_hook, py::function &unpack_hook) {
+        // By using py::function, which inherits from py::object, we let pybind11 handle the refcounting
+        // i.e. the refcount of pack_hook will be incremented when `register_hooks` is called and
+        // decremented when the PySavedVariableHooks object is destructed.
         s.register_hooks(std::make_unique<torch::autograd::PySavedVariableHooks>(pack_hook, unpack_hook));
     });
 
