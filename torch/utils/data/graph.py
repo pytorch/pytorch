@@ -4,6 +4,8 @@ import copyreg
 
 from torch.utils.data import IterableDataset
 
+from typing import Any, Dict
+
 reduce_ex_hook = None
 
 
@@ -37,7 +39,7 @@ def list_connected_datapipes(scan_obj):
 
 def traverse(datapipe):
     items = list_connected_datapipes(datapipe)
-    d = {datapipe: {}}
+    d : Dict[Any, Any]  = {datapipe: {}}
     for item in items:
         d[datapipe].update(traverse(item))
     return d
