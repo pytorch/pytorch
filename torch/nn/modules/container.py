@@ -167,6 +167,7 @@ class ModuleList(Module):
     """
 
     _modules: Dict[str, Module]  # type: ignore[assignment]
+
     def __init__(self, modules: Optional[Iterable[Module]] = None) -> None:
         super(ModuleList, self).__init__()
         if modules is not None:
@@ -425,6 +426,7 @@ class ParameterList(Module):
     """
 
     _parameters: Dict[str, Parameter]  # type: ignore[assignment]
+
     def __init__(self, parameters: Optional[Iterable['Parameter']] = None) -> None:
         super(ParameterList, self).__init__()
         self._initialized = True
