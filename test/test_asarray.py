@@ -243,6 +243,12 @@ class TestAsArray(common.TestCase):
         # 4. By default, 'requires_grad' is unset
         self.assertEqual(result.requires_grad, kwargs.get("requires_grad", False))
 
+    def _may_compute_grad(self, dtype):
+        return dtype.is_floating_point or dtype.is_complex
+
+    # Skipping 'meta' devices, since there's no point in comparing their
+    # data pointer (which is basically the point here), since they all
+    # return 0.
     @skipMeta
     @dtypes(*get_all_dtypes())
     def test_alias_from_tensor(self, device, dtype):
@@ -256,7 +262,7 @@ class TestAsArray(common.TestCase):
         def check(**kwargs):
             self._check(original, **kwargs)
 
-        check(requires_grad=True)
+        check(requires_grad=self._may_compute_grad(dtype))
         check(copy=False)
         check(dtype=dtype)
         check(dtype=dtype, copy=False)
@@ -275,7 +281,7 @@ class TestAsArray(common.TestCase):
         def check(**kwargs):
             self._check(original, is_alias=False, **kwargs)
 
-        check(requires_grad=True, copy=True)
+        check(requires_grad=self._may_compute_grad(dtype), copy=True)
         check(dtype=dtype, copy=True)
         check(device=device, copy=True)
         check(device=device, dtype=dtype, copy=True)
@@ -293,6 +299,7 @@ class TestAsArray(common.TestCase):
                 check(same_dtype=False, dtype=other)
                 check(same_dtype=False, dtype=other, copy=True)
 
+    # Skipping 'meta', since 'to_dlpack' does not work for them.
     @skipMeta
     @dtypes(*get_all_dtypes())
     def test_alias_from_dlpack(self, device, dtype):
@@ -306,7 +313,7 @@ class TestAsArray(common.TestCase):
         def check(**kwargs):
             self._check(original, to_dlpack, **kwargs)
 
-        check(requires_grad=True)
+        check(requires_grad=self._may_compute_grad(dtype))
         check(copy=False)
         check(dtype=dtype)
         check(dtype=dtype, copy=False)
@@ -325,7 +332,7 @@ class TestAsArray(common.TestCase):
         def check(**kwargs):
             self._check(original, to_dlpack, is_alias=False, **kwargs)
 
-        check(requires_grad=True, copy=True)
+        check(requires_grad=self._may_compute_grad(dtype), copy=True)
         check(dtype=dtype, copy=True)
         check(device=device, copy=True)
         check(device=device, dtype=dtype, copy=True)
@@ -352,7 +359,7 @@ class TestAsArray(common.TestCase):
         def check(**kwargs):
             self._check(arr, **kwargs)
 
-        check(dtype=dtype, requires_grad=True)
+        check(dtype=dtype, requires_grad=self._may_compute_grad(dtype))
         check(dtype=dtype, copy=False)
         check(device=device, dtype=dtype)
         check(device=device, dtype=dtype, copy=False)
@@ -366,13 +373,13 @@ class TestAsArray(common.TestCase):
         def check(**kwargs):
             self._check(arr, is_alias=False, **kwargs)
 
-        check(dtype=dtype, requires_grad=True, copy=True)
+        check(dtype=dtype, requires_grad=self._may_compute_grad(dtype), copy=True)
         check(dtype=dtype, device=device, copy=True)
 
         # Copy is forced because of different device
         if torch.cuda.is_available():
-            check(dtype=dtype, device="cuda")
-            check(dtype=dtype, device="cuda", copy=True)
+            check(same_device=False, dtype=dtype, device="cuda")
+            check(same_device=False, dtype=dtype, device="cuda", copy=True)
 
     @dtypes(*get_all_dtypes())
     def test_copy_list(self, device, dtype):
@@ -381,22 +388,9 @@ class TestAsArray(common.TestCase):
         def check(**kwargs):
             self._check(original, torch.Tensor.tolist, is_alias=False, **kwargs)
 
-        check(dtype=dtype, requires_grad=True)
-        check(dtype=dtype, copy=True)
         check(device=device, dtype=dtype)
+        check(device=device, dtype=dtype, requires_grad=self._may_compute_grad(dtype))
         check(device=device, dtype=dtype, copy=True)
-
-        # Copy is forced because of different device
-        if torch.cuda.is_available():
-            other = "cuda" if device == "cpu" else "cpu"
-            check(same_device=False, device=other, dtype=dtype)
-            check(same_device=False, device=other, dtype=dtype, copy=True)
-
-        # Copy is forced because of different dtype
-        for other in get_all_dtypes():
-            if dtype != other:
-                check(same_dtype=False, dtype=other)
-                check(same_dtype=False, dtype=other, copy=True)
 
     @dtypes(*get_all_dtypes())
     def test_unsupported_alias(self, device, dtype):
@@ -407,13 +401,13 @@ class TestAsArray(common.TestCase):
 
             with self.assertRaisesRegex(ValueError,
                                         f"from device '{device}' to '{other_device}'"):
-                torch.asarray(original, device=other_device)
+                torch.asarray(original, device=other_device, copy=False)
 
         for other_dtype in get_all_dtypes():
             if other_dtype != dtype:
                 with self.assertRaisesRegex(ValueError,
-                                            f"with dtype '{dtype}' into dtype '{other_dtype}'"):
-                    torch.asarray(original, dtype=other_dtype)
+                                            f"with dtype '.*' into dtype '.*'"):
+                    torch.asarray(original, dtype=other_dtype, copy=False)
 
         with self.assertRaisesRegex(ValueError,
                                     "can't alias arbitrary sequence"):
