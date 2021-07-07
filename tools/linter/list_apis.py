@@ -5,7 +5,7 @@ import sys
 
 from types import ModuleType
 from collections import namedtuple
-from typing import List, Any, Set, NamedTuple, Tuple, Dict
+from typing import List, Any, Dict, Union
 from pathlib import Path
 
 
@@ -41,17 +41,15 @@ class Crawler:
 
     def __init__(self, module: ModuleType):
         self.module = module
-        self.public = []
-        self.private = []
-        self.errors = []
+        self.errors: List[Crawler.Error] = []
 
-        self.all_objects = []
-        self.apis = {}
+        self.all_objects: List[Any] = []
+        self.apis: Dict[Union[str, int], List[Crawler.Item]] = {}
 
         self.crawl(obj=module, name=module.__name__, path=[])
         self.add_class_attributes()
 
-    def add_class_attributes(self):
+    def add_class_attributes(self) -> None:
         """
         Add class attributes after we've already crawled through all the
         modules their recursive members. This has to be delayed since we can run
@@ -67,7 +65,7 @@ class Crawler:
             if inspect.isclass(obj):
                 # We don't want to re-add class attributes (these don't have an
                 # associated id() to de-duplicate them with, so we have to do it
-                # manually
+                # manually)
                 attrs = dir(obj)
 
                 for attr in attrs:
@@ -78,7 +76,7 @@ class Crawler:
 
     def get_submodules(self, module: ModuleType) -> List[ModuleType]:
         """
-        Some modules aren't imported directly into the parent (i.e. torch.fx). So
+        Some modules aren't imported directly into the parent (e.g. torch.fx). So
         this fails
 
             import torch
@@ -107,8 +105,8 @@ class Crawler:
         search_paths = [Path(loc) for loc in spec.submodule_search_locations]
         submodules = []
         for path in search_paths:
-            submodule_names = [subdir for subdir in path.glob("*") if subdir.is_dir()]
-            submodule_names = [subdir.name for subdir in submodule_names]
+            submodule_paths = [subdir for subdir in path.glob("*") if subdir.is_dir()]
+            submodule_names = [subdir.name for subdir in submodule_paths]
             for submodule_name in submodule_names:
                 if submodule_name in ignore_list:
                     continue
@@ -121,7 +119,7 @@ class Crawler:
 
         return submodules
 
-    def get_module_attributes(self, module: ModuleType) -> Set[str]:
+    def get_module_attributes(self, module: ModuleType) -> List[str]:
         """
         Return the combined list of attributes from dir and __all__
         """
@@ -133,7 +131,7 @@ class Crawler:
         except Exception as e:
             self.errors.append(Crawler.Error(reason=str(e), path=""))
 
-        return set(attrs)
+        return list(sorted(list(set(attrs))))
 
     def crawl(
         self,
@@ -155,7 +153,7 @@ class Crawler:
             curr_len = len(path) + 1
             if curr_len >= prev_len:
                 # It's a longer path and this already has an entry, so don't
-                # both with it any further
+                # bother with it any further
                 return
 
         self.apis[id(obj)] = path + [Crawler.Item(name=name, obj=obj)]
@@ -178,15 +176,15 @@ class Crawler:
 
                 self.crawl(next_obj, attr, attr_path)
 
-    def get_name(self, path: List[str], name: str) -> str:
+    def get_name(self, path: List["Crawler.Item"], name: str) -> str:
         names = [item.name for item in path]
         return ".".join(names + [name])
 
     def should_skip(self, obj: Any, path: List[Item]) -> bool:
         """
-        Return whether 'obj' is relevant to 'relevant_module'. If 'obj' is not a
+        Return whether 'obj' is relevant to 'self.module'. If 'obj' is not a
         module, then get its module from the __module__ attribute. Then check if
-        the module is part of the relevant_module by comparing their __file__ paths.
+        the module is part of the self.module by comparing their __file__ paths.
 
         We don't want to crawl or list attributes of system modules or other
         third-party modules that have been exposed via imports. Since submodules of
@@ -219,7 +217,7 @@ class Crawler:
 
 
         if module == self.module:
-            # If the object is a direct child of the concered module, then don't
+            # If the object is a direct child of the concerned module, then don't
             # skip
             return False
 

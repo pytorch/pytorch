@@ -34,8 +34,9 @@ def fetch_master_python_apis() -> Set[str]:
 
 def fetch_current_python_apis() -> Set[str]:
     repo_dir = pathlib.Path(__file__).resolve().parent.parent
-    list_apis_script = repo_dir / "scripts" / "list_apis.py"
+    list_apis_script = repo_dir / "tools" / "linter" / "list_apis.py"
     cmd = [sys.executable, str(list_apis_script), "--module", "torch", "--public"]
+    print(" ".join(cmd))
     proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     if proc.returncode != 0:
@@ -66,14 +67,19 @@ class TestPublicBindings(unittest.TestCase):
             return
 
         difference = master_public_bindings.symmetric_difference(current_public_bindings)
+        added = list(sorted(list(current_public_bindings - master_public_bindings)))[:10]
+        removed = list(sorted(list(master_public_bindings - current_public_bindings)))[:10]
         msg = textwrap.dedent(f"""
-            New public API(s) were added: {', '.join(difference)}
+            These new public API(s) were added: {', '.join(added)}
+
+            These new public API(s) were removed: {', '.join(removed)}
 
             To silence this error, add a release notes section to your PR body:
 
                 ### Release Notes
                 * the new feature""")
-        self.assertTrue(difference != set() and "### Release Notes" not in PR_BODY, msg)
+
+        self.assertTrue(difference == set() or "### Release Notes" in PR_BODY, msg)
 
     def test_no_new_c_bindings(self):
         """
