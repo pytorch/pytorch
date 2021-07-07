@@ -305,7 +305,6 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
                 activation_post_process = \
                     self._maybe_get_last_node_only_observer(modules)
                 assert activation_post_process is not None
-                print("quantizing node:", op_out)
                 return quantize_node(
                     op_out, activation_post_process,
                     node, modules, quantized_graph, node_name_to_scope, is_input=False)
@@ -1331,7 +1330,18 @@ class CopyNodeQuantizeHandler(QuantizeHandler):
                 env: Dict[str, Dict[Optional[torch.dtype], Node]],              
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
-        return quantized_graph.node_copy(node, load_arg(quantized=None))
+        op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
+        activation_post_process = \
+            self._maybe_get_last_node_only_observer(modules)
+        assert activation_post_process is not None
+        return quantize_node(
+            op_out,
+            activation_post_process,
+            node,
+            modules,
+            quantized_graph,
+            node_name_to_scope,
+            is_input=False)
 
 class CustomModuleQuantizeHandler(QuantizeHandler):
     def convert(self,

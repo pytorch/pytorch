@@ -15,8 +15,6 @@ def trt_network_to_dot_graph(network):
     for i in range(network.num_layers):
         layer = network.get_layer(i)
         dot.node(layer.name)
-        print("layer:", layer.name)
-        print("layer precision:", layer.get_output_type(0))
 
     # add nodes (inputs)
     for i in range(network.num_inputs):

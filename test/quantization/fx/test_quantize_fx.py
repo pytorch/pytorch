@@ -4666,29 +4666,15 @@ class TestQuantizeFxModels(QuantizationTestCase):
         from torchvision import models
         model = models.__dict__["resnet18"](pretrained=False).eval().float()
 
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(5, 5)
-                self.weight = torch.randn(5, 5)
-
-            def forward(self, x):
-                x = self.linear(x)
-                # x = torch.nn.functional.relu(x)
-                return x
-
-        # model = M().eval()
-        # model = model.layer1
         model = prepare_fx(model, {"": default_qconfig})
-        print("prepared:", model)
         import copy
         model_copy = copy.deepcopy(model)
         model_reference = convert_fx(model, is_reference=True)
 
+        # convert directly, the default scale and zero_point will be 1 and 0, since we hardcoded these values in fx2trt convert as well
+        # we expect the output to match
         model = convert_fx(model_copy)
         data = torch.rand(1, 3, 224, 224)
-        # data = torch.rand(5, 5)
-        # data = torch.rand(1, 64, 20, 20)
         input = (data,)
         out = model(*input)
         out_reference = model(*input)
@@ -4703,28 +4689,23 @@ class TestQuantizeFxModels(QuantizationTestCase):
         TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
 
         def expand_node(n: torch.fx.Node, model: torch.fx.GraphModule, modules: Dict[str, torch.nn.Module], load_arg, env):
-            print("node:", n.format_node())
             if n.op == "call_module" and type(modules[n.target]) in [nnqr.Linear, nnqr.Conv2d, nniqr.ConvReLU2d]:
                 module = modules[n.target]
                 owning_graph = n.graph
                 with owning_graph.inserting_before(n):
                     env[n.args[0].name] = owning_graph.call_method("dequantize", (n.args[0],), {})
-                    print("owning graph:", owning_graph)
                     parent, child = _parent_name(n.target)
                     setattr(modules[parent], child, module.to_float())
                     output_node = owning_graph.create_node("call_module", n.target, load_arg(n.args), load_arg(n.kwargs))
                     env[output_node.name] = output_node
-                    print("out node:", output_node.format_node())
                     scale_node = create_getattr_from_value(modules[""], owning_graph, n.target + "_scale_", module.scale)
                     env[scale_node.name] = scale_node
                     zp_node = create_getattr_from_value(modules[""], owning_graph, n.target + "_zero_point_", module.zero_point)
                     env[zp_node.name] = zp_node
                     node_args = (output_node, scale_node, zp_node, torch.quint8)
-                    # proxy_args = torch.fx.node.map_arg(node_args, torch.fx.Proxy)
                     output_node = owning_graph.create_node("call_function", torch.quantize_per_tensor, load_arg(node_args), {})
                     n.replace_all_uses_with(output_node)
                     owning_graph.erase_node(n)
-                    print("owning graph after modification:", owning_graph)
                     model.graph = owning_graph
                     return output_node
             
@@ -4743,14 +4724,12 @@ class TestQuantizeFxModels(QuantizationTestCase):
             return mod
 
 
-
         def lower_mod_to_trt(mod: torch.fx.GraphModule, inputs: Tuple[torch.Tensor]):
             """
             Helper function that given a GraphModule `mod` and its `inputs`, build a
             TRTModule that runs the original `mod` on TensorRT.
             """
             mod = expand_reference_module(mod)
-            print("expanded:", mod)
             interp = TRTInterpreter(mod, InputTensorSpec.from_tensors(inputs))
             engine, input_names, output_names = interp.run(int8_mode=True)
             serialized_engine = engine.serialize()
