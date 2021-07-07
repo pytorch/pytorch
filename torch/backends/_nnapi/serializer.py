@@ -737,6 +737,8 @@ class _NnapiSerializer(object):
             self.add_tuple_construct(node),
         "aten::unsqueeze": lambda self, node:
             self.add_unsqueeze(node),
+        "aten::to": lambda self, node:
+            self.add_to(node),
         "aten::reshape": lambda self, node:
             self.add_reshape(node),
         "aten::size": lambda self, node:
@@ -798,6 +800,11 @@ class _NnapiSerializer(object):
         if not adder:
             raise Exception("Unsupported node kind (%r) in node %r" % (node.kind(), node))
         adder(self, node)
+
+    def _identity(self, node):
+        in_id, in_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
+        jitval = node.outputsAt(0)
+        self.jitval_operand_map[jitval] = in_id
 
     def add_getattr(self, node):
         assert node.inputsSize() == 1
@@ -876,6 +883,10 @@ class _NnapiSerializer(object):
         outputs[0] = self.add_tensor_operand(node.outputsAt(0), out_oper)
 
         self.add_operation(NNAPI_OperationCode.EXPAND_DIMS, inputs, outputs)
+
+    def add_to(self, node):
+        # Handle to("cpu") / to("gpu") case
+        self._identity(node)
 
     def add_reshape(self, node):
         assert node.inputsSize() == 2
