@@ -16,7 +16,9 @@ namespace {
 std::pair<std::vector<StackEntry>, std::string> getStackTraceWithModuleHierarchy(
     const DebugInfoTuple& source_callstack,
     const std::string& caller_name) {
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   constexpr size_t kSourceRange = 1;
+  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   constexpr size_t kModuleInstanceInfo = 2;
   std::vector<StackEntry> entries;
 
@@ -35,24 +37,18 @@ std::pair<std::vector<StackEntry>, std::string> getStackTraceWithModuleHierarchy
       const auto& opt_module_instance_info = callstack_ptr->module_instance();
       if (opt_module_instance_info.has_value()) {
         const auto& module_instance_info = opt_module_instance_info.value();
+        // Sometimes (e.g., in lowered backends) we augment instance name with
+        // type name instead of losing type name. In those cases instance_name
+        // includes both instance name and type name. See
+        // callstack_debug_info_serialization.cpp
         if (module_instance_info.class_type()) {
-          const auto& class_type = module_instance_info.class_type();
-          const auto& instance_name = module_instance_info.instance_name();
-          auto type_name = class_type->name()->qualifiedName();
-          type_name = type_name.substr(type_name.find_last_of('.') + 1);
-          module_info.append(".")
-              .append(instance_name)
-              .append("(")
-              .append(type_name)
-              .append(")");
-        } else if (!module_instance_info.instance_name().empty()) {
-          module_info += "." + module_instance_info.instance_name();
+          module_info.append(".").append(
+              utils::get_module_info(module_instance_info));
         } else {
-          const auto& instance_name = module_instance_info.instance_name();
-          module_info += "." + instance_name + "(UNKNOWN_TYPE)";
+          module_info.append(".").append(module_instance_info.instance_name());
         }
       } else {
-        module_info += ".(UNKNOWN_INSTANCE(UNKNOWN_TYPE)";
+        module_info += ".UNKNOWN_INSTANCE(UNKNOWN_TYPE)";
       }
       // Now add source range info to stack
       // When we serialize function names, those can be added here.
