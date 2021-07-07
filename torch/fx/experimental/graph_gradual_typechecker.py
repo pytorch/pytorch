@@ -24,7 +24,7 @@ def expand_to_tensor_dim(t, n):
         return TensorType(tuple(dims))
     elif isinstance(t, TensorType):
         if len(t.__args__) != n:
-            raise TypeError(f'Cannot apply matching. Tensor {t} has rank {len(t.__args__)}. It should have rank {n}')
+            raise TypeError(f'Cannot extend tensor dimension. Tensor {t} has rank {len(t.__args__)}. It should have rank {n}')
         return t
     else:
         raise TypeError(f'Cannot match the type {t}')
@@ -247,9 +247,9 @@ def calculate_wout(w_in, op_type):
 @register_inference_rule(Conv2d)
 def conv2d_inference_rule(n: Node, op_type):
     assert isinstance(n.args[0], Node)
-    n.args[0].type = apply_matching(n.args[0].type, 4)
+    n.args[0].type = expand_to_tensor_dim(n.args[0].type, 4)
     arg_type = n.args[0].type
-    n.type = apply_matching(n.type, 4)
+    n.type = expand_to_tensor_dim(n.type, 4)
     if is_consistent(arg_type.__args__[1], op_type.in_channels) and \
             is_consistent(n.type.__args__[1], op_type.in_channels) and \
             is_consistent(arg_type, n.type):
