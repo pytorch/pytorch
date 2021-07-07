@@ -115,94 +115,19 @@ class TORCH_API TensorMaker {
     return *this;
   }
 
-  Tensor make_tensor() {
-    AutoDispatchBelowADInplaceOrView guard{}; // TODO: Remove.
-    tracer::impl::NoTracerDispatchMode tracer_guard{};
-
-    check_size_nonnegative(sizes_);
-
-    TORCH_CHECK_VALUE(
-        !deleter_ || !ctx_,
-        "The deleter and context arguments are mutually exclusive.");
-
-    if (device_ == nullopt) {
-      device_ = globalContext().getDeviceFromPtr(data_, opts_.device().type());
-    }
-
-    if (opts_.device().has_index()) {
-      // clang-format off
-      TORCH_CHECK_VALUE(
-          opts_.device() == *device_,
-          "Specified device ", opts_.device(), " does not match device of data ", *device_);
-      // clang-format on
-    }
-
-    std::size_t size_bytes = computeStorageSize();
-
-    DataPtr data_ptr{};
-    if (deleter_) {
-      data_ptr = makeDataPtrFromDeleter();
-    } else {
-      data_ptr = makeDataPtrFromContext();
-    }
-
-    Storage storage{Storage::use_byte_size_t{}, size_bytes, std::move(data_ptr)};
-
-    Tensor tensor = detail::make_tensor<TensorImpl>(
-        std::move(storage), opts_.computeDispatchKey(), opts_.dtype());
-
-    if (sizes_.size() != 1 || sizes_[0] != 0) {
-      TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
-
-      if (strides_) {
-        tensor_impl->set_sizes_and_strides(sizes_, *strides_);
-      } else {
-        tensor_impl->set_sizes_contiguous(sizes_);
-      }
-    }
-
-    return tensor;
-  }
+  Tensor make_tensor();
 
  private:
   explicit TensorMaker(void* data, IntArrayRef sizes) noexcept
       : data_{data}, sizes_{sizes} {}
 
-  std::size_t computeStorageSize() const noexcept {
-    std::size_t itemsize = opts_.dtype().itemsize();
+  std::size_t computeStorageSize() const noexcept;
 
-    if (strides_) {
-      return detail::computeStorageNbytes(sizes_, *strides_, itemsize);
-    }
+  DataPtr makeDataPtrFromDeleter() const;
 
-    std::size_t size = 1;
-    for (std::int64_t s : sizes_) {
-      size *= static_cast<std::size_t>(s);
-    }
-    return size * itemsize;
-  }
+  DataPtr makeDataPtrFromContext() noexcept;
 
-  inline DataPtr makeDataPtrFromDeleter() const {
-    return InefficientStdFunctionContext::makeDataPtr(data_, deleter_, *device_);
-  }
-
-  inline DataPtr makeDataPtrFromContext() noexcept {
-    return DataPtr{data_, ctx_.release(), ctx_.get_deleter(), *device_};
-  }
-
-  IntArrayRef makeTempSizes() const noexcept {
-    static std::int64_t zeros[5] = {0, 0, 0, 0, 0};
-    if (opts_.has_memory_format()) {
-      MemoryFormat format = *opts_.memory_format_opt();
-      if (format == MemoryFormat::ChannelsLast) {
-        return IntArrayRef(zeros, 4);
-      }
-      if (format == MemoryFormat::ChannelsLast3d) {
-        return IntArrayRef(zeros, 5);
-      }
-    }
-    return IntArrayRef(zeros, 1);
-  }
+  IntArrayRef makeTempSizes() const noexcept;
 
   void* data_;
   IntArrayRef sizes_;

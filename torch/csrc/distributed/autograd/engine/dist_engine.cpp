@@ -26,7 +26,9 @@ using torch::autograd::ReadyQueue;
 using torch::autograd::validate_outputs;
 using torch::autograd::variable_list;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static constexpr char* kNumBackwardPasses = "num_current_backward_passes";
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static constexpr char* kNumAutogradContexts = "num_autograd_contexts";
 
 // This hook does 3 things:
@@ -142,6 +144,7 @@ DistEngine::~DistEngine() {
 
 DistEngine& DistEngine::getInstance() {
   // Leaky singleton to avoid module destructor race.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static DistEngine* engine = new DistEngine();
   return *engine;
 }
@@ -263,7 +266,7 @@ void DistEngine::computeDependencies(
   }
 
   if (will_use_cuda) {
-    // Collects current and default streams for devices where this process has a context,
+    // Collects current streams for devices where this process has a context,
     // so graphTask::exec_post_processing can sync them with leaf_streams.
     graphTask->stash_current_streams();
   }
