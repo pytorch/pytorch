@@ -391,7 +391,14 @@ void Reducer::mark_variable_ready_dense(size_t variable_index) {
       // to bucket_view. If grad has already been set as views of buckets in
       // previous iterations, no copy is needed.
       if (!grad.is_alias_of(bucket_view)) {
-        bucket_view.copy_(grad);
+        if (comm_hook_ == nullptr) {
+          auto wrapped = at::native::wrapped_scalar_tensor(double(1.) / div_factor_);
+          // Divides while copying into the bucket view to save one scan over all the input parameters.
+          at::mul_out(bucket_view, grad, wrapped);
+        } else {
+          bucket_view.copy_(grad);
+        }
+
         if (gradient_as_bucket_view_) {
           // Let grad point to bucket_view buffer.
           grad = bucket_view;
@@ -854,9 +861,7 @@ void Reducer::mark_variable_ready(size_t variable_index) {
 c10::intrusive_ptr<c10::ivalue::Future> Reducer::run_comm_hook(
     GradBucket& grad_bucket) {
   if (comm_hook_ == nullptr) {
-    _AllReduceCommHookWithDivFactorState state(
-        process_group_.get(), div_factor_);
-    _AllReduceCommHookWithDivFactor allreduce_hook(state);
+    _AllReduceBySumCommHook allreduce_hook(process_group_.get());
     return allreduce_hook.runHook(grad_bucket);
   } else {
     return comm_hook_->runHook(grad_bucket);
