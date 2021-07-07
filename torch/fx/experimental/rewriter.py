@@ -77,6 +77,7 @@ class AST_Rewriter(ast.NodeTransformer):
             func=ast.Name(id='annotate', ctx=ast.Load()),
             args=[node.value, node.annotation], keywords=[]))
 
+
 class RewritingTracer(Tracer):
     def trace(self, root: Union[torch.nn.Module, Callable], concrete_args: Optional[Dict[str, Any]] = None) -> Graph:
         return super().trace(_rewrite(root), concrete_args)
