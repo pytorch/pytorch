@@ -530,6 +530,8 @@ class TensorWrapper:
         self.tensor = t
         # Add one non-picklable field, to ensure it's ignored/skipped.
         self.lock = Lock()
+        self.event1 = torch.cuda.Event(enable_timing=True)
+        self.event2 = torch.cuda.Event(enable_timing=True)
 
     def increase(self, v):
         with self.lock:
@@ -537,7 +539,9 @@ class TensorWrapper:
 
     def sum(self):
         with self.lock:
+            self.event1.record()
             return self.tensor.sum()
+            self.event2.record()
 
 
 # Copied from test/test_cuda.py.
