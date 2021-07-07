@@ -319,7 +319,6 @@ class Scope {
  */
 class TORCH_API RegisterizerAnalysis : public IRVisitor {
  public:
-  // NOLINTNEXTLINE(modernize-use-equals-default,cppcoreguidelines-pro-type-member-init)
   RegisterizerAnalysis()
       : currentScope_(std::make_shared<Scope>(nullptr, nullptr, 0)) {}
   ~RegisterizerAnalysis() override = default;
@@ -392,7 +391,6 @@ class TORCH_API RegisterizerReplacer : public IRMutator {
   Stmt* mutate(const Block* v) override;
 
  private:
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   struct ReplacerScope {
     std::unordered_map<const Stmt*, std::deque<std::shared_ptr<AccessInfo>>>
         initializerPoints_;
