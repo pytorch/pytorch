@@ -841,46 +841,60 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
     def _test_match_shadow_activations(
         self, m, data, prepared_expected_node_occurrence=None, results_len=None,
         should_log_inputs=False, qconfig_dict=None, skip_scripting=False,
-        prepare_fn=prepare_fx,
+        prepare_fn=prepare_fx, compare_fp32_vs_fp32_prepared=True,
     ):
-        # TODO(future PR): add test for m vs mp (need to first stop
-        # removing observers from the graph)
         if qconfig_dict is None:
             qconfig_dict = {'': torch.quantization.default_qconfig}
         if prepare_fn == prepare_fx:
             m.eval()
         else:
             m.train()
-        mp = prepare_fn(m, qconfig_dict)
+        mp = prepare_fn(copy.deepcopy(m), qconfig_dict)
         mp(*data)
         # TODO(future PR): prevent the need for copying here, we can copy the
         # modules but should reuse the underlying tensors
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
 
+        if compare_fp32_vs_fp32_prepared:
+            m_shadows_mp = add_shadow_loggers(
+                'a', copy.deepcopy(m), 'b', copy.deepcopy(mp),
+                OutputLogger, should_log_inputs=should_log_inputs)
         mp_shadows_mq = add_shadow_loggers(
-            'fp32_prepared', mp, 'int8', mq, OutputLogger,
+            'a', mp, 'b', mq, OutputLogger,
             should_log_inputs=should_log_inputs)
 
         if prepared_expected_node_occurrence:
+            if compare_fp32_vs_fp32_prepared:
+                self.checkGraphModuleNodes(
+                    m_shadows_mp, expected_node_occurrence=prepared_expected_node_occurrence)
             self.checkGraphModuleNodes(
                 mp_shadows_mq, expected_node_occurrence=prepared_expected_node_occurrence)
 
         if not skip_scripting:
+            if compare_fp32_vs_fp32_prepared:
+                m_shadows_mp = torch.jit.script(m_shadows_mp)
             mp_shadows_mq = torch.jit.script(mp_shadows_mq)
 
         # calibrate
+        if compare_fp32_vs_fp32_prepared:
+            m_shadows_mp(*data)
         mp_shadows_mq(*data)
 
         # check activation result correctness
-        act_compare_dict = extract_shadow_logger_info(
-            mp_shadows_mq, OutputLogger, 'int8')
-        if results_len is not None:
-            self.assertTrue(
-                len(act_compare_dict) == results_len,
-                f"expected len {results_len}, got len {len(act_compare_dict)}")
-        self.assert_ns_compare_dict_valid(act_compare_dict)
-        return act_compare_dict
+        results = []
+        models = (m_shadows_mp, mp_shadows_mq) if \
+            compare_fp32_vs_fp32_prepared else (mp_shadows_mq,)
+        for model in models:
+            act_compare_dict = extract_shadow_logger_info(
+                model, OutputLogger, 'b')
+            if results_len is not None:
+                self.assertTrue(
+                    len(act_compare_dict) == results_len,
+                    f"expected len {results_len}, got len {len(act_compare_dict)}")
+            self.assert_ns_compare_dict_valid(act_compare_dict)
+            results.append(act_compare_dict)
+        return results
 
 
 class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
@@ -1082,7 +1096,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         self._test_match_shadow_activations(
             m, (torch.randn(4, 4),),
             prepared_expected_node_occurrence=expected_occurrence,
-            results_len=1)
+            results_len=1, compare_fp32_vs_fp32_prepared=False)
 
     @skipIfNoFBGEMM
     def test_logging_inputs(self):
