@@ -37,21 +37,6 @@ PyFunctionPreHook::~PyFunctionPreHook() {
   }
 }
 
-namespace {
-struct HookManager {
-  // RAII struct to manage the lifetime of hook.
-  PyObject* hook;
-  explicit HookManager(PyObject* hook) : hook(hook) {
-    Py_INCREF(hook);
-  }
-
-  ~HookManager() {
-    Py_DECREF(hook);
-  }
-};
-
-} // namespace
-
 auto PyFunctionPreHook::operator()(const variable_list& values) -> variable_list
 {
   pybind11::gil_scoped_acquire gil;
@@ -72,7 +57,8 @@ auto PyFunctionPreHook::operator()(const variable_list& values) -> variable_list
     // So, we bump the refcount to increase the lifetime till we have verified
     // the result.
     // Reference: https://github.com/pytorch/pytorch/issues/58354
-    auto hook_m = HookManager{hook};
+    Py_INCREF(hook);
+    THPObjectPtr hook_m{hook};
     THPObjectPtr res(PyObject_CallFunctionObjArgs(hook, value.get(), nullptr));
     if (!res) throw python_error();
     if (res == Py_None) continue;
@@ -111,7 +97,8 @@ auto PyFunctionPostHook::operator()(
   Py_ssize_t pos = 0;
   while (PyDict_Next(dict, &pos, &key, &hook)) {
     // See Note: [Extend Hook Lifetime]
-    auto hook_m = HookManager{hook};
+    Py_INCREF(hook);
+    THPObjectPtr hook_m{hook};
     THPObjectPtr res(PyObject_CallFunctionObjArgs(
         hook, outputs.get(), inputs.get(), nullptr));
     if (!res) throw python_error();
