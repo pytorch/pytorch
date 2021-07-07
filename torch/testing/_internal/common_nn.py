@@ -3813,15 +3813,17 @@ non_linear_activations_extra_info = {
     'Threshold': {'constructor_args': (2., 1.)},
     'Hardsigmoid': {'check_gradgrad': False},
     'Hardswish': {'check_gradgrad': False},
+    # For RRelu, test that compare CPU and GPU results fail because RNG
+    # is different between CPU and GPU
     'RReLU': {'test_cuda': False},
 }
 for non_linear_activation in non_linear_activations_no_batch:
     activation_test_info = dict(
-            module_name=non_linear_activation,
-            input_size=(3,),
-            reference_fn=single_batch_reference_fn,
-            desc='no_batch_dim',
-            test_cpp_api_parity=False,
+        module_name=non_linear_activation,
+        input_size=(3,),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
+        test_cpp_api_parity=False,
     )
     activation_test_info.update(
         non_linear_activations_extra_info.get(non_linear_activation, {})
