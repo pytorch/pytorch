@@ -406,7 +406,7 @@ class TestAsArray(common.TestCase):
         for other_dtype in get_all_dtypes():
             if other_dtype != dtype:
                 with self.assertRaisesRegex(ValueError,
-                                            f"with dtype '.*' into dtype '.*'"):
+                                            "with dtype '.*' into dtype '.*'"):
                     torch.asarray(original, dtype=other_dtype, copy=False)
 
         with self.assertRaisesRegex(ValueError,
