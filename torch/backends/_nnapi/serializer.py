@@ -740,6 +740,8 @@ class _NnapiSerializer(object):
             self.add_unsqueeze(node),
         "aten::to": lambda self, node:
             self.add_to(node),
+        "aten::detach": lambda self, node:
+            self._identity(node),
         "aten::reshape": lambda self, node:
             self.add_reshape(node),
         "aten::flatten": lambda self, node:
@@ -1123,13 +1125,18 @@ class _NnapiSerializer(object):
         assert node.inputsSize() == 1
         assert node.outputsSize() == 1
 
-        in_id, in_oper = self.get_tensor_operand_by_jitval_fixed_size(node.inputsAt(0))
+        in_id, in_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
+        out_id = self.add_tensor_operand(node.outputsAt(0), in_oper)
+
+        for idx, dim in enumerate(in_oper.shape):
+            if dim == 0:
+                self.forward_operand_shape(out_id, idx, in_id, idx)
 
         inputs = [None] * 1
         inputs[0] = in_id
 
         outputs = [None] * 1
-        outputs[0] = self.add_tensor_operand(node.outputsAt(0), in_oper)
+        outputs[0] = out_id
 
         self.add_operation(opcode, inputs, outputs)
 
