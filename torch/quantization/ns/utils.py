@@ -389,12 +389,27 @@ def maybe_add_missing_fqns(results: NSResultsType) -> None:
                         fqn = ref_model_results[i]['fqn']
                         model_results[i]['fqn'] = fqn
 
+def maybe_dequantize_first_two_tensor_args(f):
+    def inner(*args, **kwargs):
+        a0, a1, *a_other = args
+        if a0.is_quantized:
+            a0 = a0.dequantize()
+        if a1.is_quantized:
+            a1 = a1.dequantize()
+        new_args = (a0, a1, *a_other)
+        return f(*new_args, **kwargs)
+    return inner
 
+@maybe_dequantize_first_two_tensor_args
 def compute_sqnr(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-    if x.is_quantized:
-        x = x.dequantize()
-    if y.is_quantized:
-        y = y.dequantize()
     Ps = torch.norm(x)
     Pn = torch.norm(x - y)
     return 20 * torch.log10(Ps / Pn)
+
+@maybe_dequantize_first_two_tensor_args
+def compute_l2_error(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    return ((x - y) ** 2).sum()
+
+@maybe_dequantize_first_two_tensor_args
+def compute_cosine_similarity(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    return torch.nn.functional.cosine_similarity(x, y)

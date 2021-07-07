@@ -42,6 +42,8 @@ from torch.quantization.ns.graph_matcher import (
 )
 from torch.quantization.ns.utils import (
     compute_sqnr,
+    compute_l2_error,
+    compute_cosine_similarity,
 )
 from torch.quantization.ns.mappings import (
     get_node_type_to_io_type_map,
@@ -1668,9 +1670,18 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         results = extract_weights('fp32', mp, 'int8', mq)
         extend_logger_results_with_comparison(
             results, 'fp32', 'int8', compute_sqnr, 'sqnr_int8_vs_fp32')
+        extend_logger_results_with_comparison(
+            results, 'fp32', 'int8', compute_l2_error, 'l2_error_int8_vs_fp32')
+        extend_logger_results_with_comparison(
+            results, 'fp32', 'int8', compute_cosine_similarity,
+            'cosine_similarity_int8_vs_fp32')
 
         for layer_name, layer_results in results.items():
             assert 'sqnr_int8_vs_fp32' in \
+                layer_results['weight']['int8'][0].keys()
+            assert 'l2_error_int8_vs_fp32' in \
+                layer_results['weight']['int8'][0].keys()
+            assert 'cosine_similarity_int8_vs_fp32' in \
                 layer_results['weight']['int8'][0].keys()
 
     @skipIfNoFBGEMM
