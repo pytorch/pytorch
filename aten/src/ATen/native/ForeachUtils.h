@@ -1,6 +1,6 @@
 #pragma once
-#include <ATen/ATen.h>
 
+#include <ATen/ATen.h>
 #include <c10/util/irange.h>
 
 namespace at {
@@ -65,20 +65,6 @@ void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2, Te
 // - All tensors must be non-overlapping and dense
 // - Resulting tensor must have the same dtype as the input one
 
-// TODO(mkozuki): Consider whether we really need this function or not.
-// Note that, there is a possibility that foreach fastpath supports type promotion in the future,
-// which might complicate the functionality this function should provides.
-// However, as of now, the check of division op with integer inputs is duplicated.
-// `check_fast_path_restrictions` does the same thing in it before calling this function.
-bool will_promote_tensor(const Tensor& tensor, const Scalar& scalar, bool does_op_promote_integer_inputs_to_float = false) {
-  // In case of division, integer inputs will result in float
-  if (does_op_promote_integer_inputs_to_float &&
-      at::isIntegralType(tensor.scalar_type(), /* includeBool */ true)) {
-    return true;
-  }
-  return tensor.scalar_type() != at::native::result_type(scalar, tensor);
-}
-
 // Please, make sure to call check_foreach_api_restrictions before calling this method.
 // There is a set of preconditions that have to be satisfied.
 bool check_fast_path_restrictions(
@@ -104,9 +90,9 @@ bool check_fast_path_restrictions(
     }
 
     // Check if corresponding tensors in tensor lists have the same strides.
-    for (int i=0; i < tensorLists.size(); i++) {
-      for (int j=0; j < tensorLists[0].size(); j++) {
-        if (tensorLists[0][j].strides() != tensorLists[i][j].strides()) {
+    for (const auto& tensor_list : tensorLists) {
+      for (const auto j : c10::irange(tensorLists[0].size())) {
+        if (tensorLists[0][j].strides() != tensor_list[j].strides()) {
           return false;
         }
       }
@@ -114,29 +100,21 @@ bool check_fast_path_restrictions(
 
     // This function has already checked that `tensorList[j][i]` for all j, i has the same dtype
     // using `is_tensor_okay` function above.
-    // checked by `check_foreach_api_restrictions`).
     // This means we only need to check if {tensorList[0][0], tensorList[0][1], tensorList[0][2], ...}
     // do type promotion with scalarLIst.
-    for (int i=0; i < tensorLists[0].size(); i++) {
+    for (const auto i : c10::irange(tensorLists[0].size())) {
+      // For division, integer inputs will result in float.
       if (does_op_promote_integer_inputs_to_float) {
         if (at::isIntegralType(tensorLists[0][i].scalar_type(), /*includeBool*/ true)) {
           return false;
         }
       }
-
-      if (scalarList.size() == 1) {
-        if (will_promote_tensor(tensorLists[0][i], scalarList[0])) {
-          return false;
-        }
-      } else if (scalarList.size() > 1) {
-        // FIXME(mkozuki): Consider specializing `TensorListScalarListMetadata` for complex dtypes
-        // to access the following comment.
-        // Complex scalar list is not supported due to the limit for kernel launch argument (4KB)
-        if (scalarList[i].isComplex()) {
-          return false;
-        }
-
-        if (will_promote_tensor(tensorLists[0][i], scalarList[i])) {
+      if (scalarList.size() > 0) {
+        const auto& scalar = scalarList.size() == 1 ? scalarList[0] : scalarList[i];
+        const auto& tensor = tensorLists[0][i];
+        // note(mkozuki): This check might be responsible for `_foreach_add(bool_tensors, bool_tensors)`
+        // being pushed to slow path.
+        if (tensor.scalar_type() != at::native::result_type(scalar, tensor)) {
           return false;
         }
       }
