@@ -88,7 +88,7 @@ public:
       case 6:
         return blend<63>(a, b);
       case 7:
-        return blend<127>(a, b);        
+        return blend<127>(a, b);
     }
     return b;
   }

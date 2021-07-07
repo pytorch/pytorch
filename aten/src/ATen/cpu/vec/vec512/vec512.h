@@ -165,12 +165,12 @@ inline interleave2<float>(const Vectorized<float>& a, const Vectorized<float>& b
   //   a = {a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15}
   //   b = {b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14, b15}
   //
-  //  return: 
+  //  return:
   //    {a0, b0, a1, b1, a2, b2, a3, b3, a4, b4, a5, b5, a6, b6, a7, b7}
   //    {a8, b8, a9, b9, a10, b10, a11, b11, a12, b12, a13, b13, a14, b14, a15, b15}
   __m512i idx1 = _mm512_set_epi32(23, 7, 22, 6, 21, 5, 20, 4,
                                   19, 3, 18, 2, 17, 1, 16, 0);
-  __m512i idx2 = _mm512_set_epi32(31, 15, 30, 14, 29, 13, 28, 12, 
+  __m512i idx2 = _mm512_set_epi32(31, 15, 30, 14, 29, 13, 28, 12,
                                   27, 11, 26, 10, 25, 9, 24, 8);
   return std::make_pair(_mm512_mask_permutex2var_ps(a, 0xffff, idx1, b),
                         _mm512_mask_permutex2var_ps(a, 0xffff, idx2, b));

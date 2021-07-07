@@ -96,7 +96,7 @@ public:
     return _mm512_mask_blend_pd(mmask, a.values, b.values);
   }
   template<typename step_t>
-  static Vectorized<c10::complex<double>> arange(c10::complex<double> base = 0., 
+  static Vectorized<c10::complex<double>> arange(c10::complex<double> base = 0.,
                                                 step_t step = static_cast<step_t>(1)) {
     return Vectorized<c10::complex<double>>(base,
                                            base + c10::complex<double>(1)*step,
@@ -367,7 +367,7 @@ public:
   //   `Q`: do not raise if an operand is NaN
   Vectorized<c10::complex<double>> operator==(const Vectorized<c10::complex<double>>& other) const {
     auto mask = _mm512_cmp_pd_mask(values, other.values, _CMP_EQ_OQ);
-    return _mm512_castsi512_pd(_mm512_mask_set1_epi64(zero_vector, mask, 
+    return _mm512_castsi512_pd(_mm512_mask_set1_epi64(zero_vector, mask,
                                                       0xFFFFFFFFFFFFFFFF));
   }
   Vectorized<c10::complex<double>> operator!=(const Vectorized<c10::complex<double>>& other) const {
@@ -508,7 +508,7 @@ Vectorized<c10::complex<double>> inline operator|(const Vectorized<c10::complex<
 }
 
 template <>
-Vectorized<c10::complex<double>> inline operator^(const Vectorized<c10::complex<double>>& a, 
+Vectorized<c10::complex<double>> inline operator^(const Vectorized<c10::complex<double>>& a,
                                                  const Vectorized<c10::complex<double>>& b) {
   return _mm512_xor_pd(a, b);
 }

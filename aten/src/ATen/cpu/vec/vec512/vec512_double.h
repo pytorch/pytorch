@@ -133,7 +133,7 @@ public:
     const auto zero_vec = _mm512_castsi512_pd(zero_vector);
     const auto nan_vec = _mm512_set1_pd(NAN);
     const auto not_nan_mask = _mm512_cmp_pd_mask(values, values, _CMP_EQ_OQ);
-    const auto not_nan = _mm512_mask_set1_epi64(zero_vector, not_nan_mask, 
+    const auto not_nan = _mm512_mask_set1_epi64(zero_vector, not_nan_mask,
                                                 0xFFFFFFFFFFFFFFFF);
     const auto nan_mask = _mm512_cmp_pd_mask(_mm512_castsi512_pd(not_nan),
                                              zero_vec, _CMP_EQ_OQ);
@@ -284,37 +284,37 @@ public:
   //   `Q`: do not raise if an operand is NaN
   Vectorized<double> operator==(const Vectorized<double>& other) const {
     auto cmp_mask = _mm512_cmp_pd_mask(values, other.values, _CMP_EQ_OQ);
-    return _mm512_castsi512_pd(_mm512_mask_set1_epi64(zero_vector, cmp_mask, 
+    return _mm512_castsi512_pd(_mm512_mask_set1_epi64(zero_vector, cmp_mask,
                                                       0xFFFFFFFFFFFFFFFF));
   }
 
   Vectorized<double> operator!=(const Vectorized<double>& other) const {
     auto cmp_mask = _mm512_cmp_pd_mask(values, other.values, _CMP_NEQ_OQ);
-    return _mm512_castsi512_pd(_mm512_mask_set1_epi64(zero_vector, cmp_mask, 
+    return _mm512_castsi512_pd(_mm512_mask_set1_epi64(zero_vector, cmp_mask,
                                                       0xFFFFFFFFFFFFFFFF));
   }
 
   Vectorized<double> operator<(const Vectorized<double>& other) const {
     auto cmp_mask = _mm512_cmp_pd_mask(values, other.values, _CMP_LT_OQ);
-    return _mm512_castsi512_pd(_mm512_mask_set1_epi64(zero_vector, cmp_mask, 
+    return _mm512_castsi512_pd(_mm512_mask_set1_epi64(zero_vector, cmp_mask,
                                                       0xFFFFFFFFFFFFFFFF));
   }
 
   Vectorized<double> operator<=(const Vectorized<double>& other) const {
     auto cmp_mask = _mm512_cmp_pd_mask(values, other.values, _CMP_LE_OQ);
-    return _mm512_castsi512_pd(_mm512_mask_set1_epi64(zero_vector, cmp_mask, 
+    return _mm512_castsi512_pd(_mm512_mask_set1_epi64(zero_vector, cmp_mask,
                                                       0xFFFFFFFFFFFFFFFF));
   }
 
   Vectorized<double> operator>(const Vectorized<double>& other) const {
     auto cmp_mask = _mm512_cmp_pd_mask(values, other.values, _CMP_GT_OQ);
-    return _mm512_castsi512_pd(_mm512_mask_set1_epi64(zero_vector, cmp_mask, 
+    return _mm512_castsi512_pd(_mm512_mask_set1_epi64(zero_vector, cmp_mask,
                                                       0xFFFFFFFFFFFFFFFF));
   }
 
   Vectorized<double> operator>=(const Vectorized<double>& other) const {
     auto cmp_mask = _mm512_cmp_pd_mask(values, other.values, _CMP_GE_OQ);
-    return _mm512_castsi512_pd(_mm512_mask_set1_epi64(zero_vector, cmp_mask, 
+    return _mm512_castsi512_pd(_mm512_mask_set1_epi64(zero_vector, cmp_mask,
                                                       0xFFFFFFFFFFFFFFFF));
   }
 
@@ -358,7 +358,7 @@ Vectorized<double> inline maximum(const Vectorized<double>& a, const Vectorized<
   auto zero_vec = _mm512_set1_epi64(0);
   Vectorized<double> max = _mm512_max_pd(a, b);
   auto isnan_mask = _mm512_cmp_pd_mask(a, b, _CMP_UNORD_Q);
-  auto isnan = _mm512_castsi512_pd(_mm512_mask_set1_epi64(zero_vec, isnan_mask, 
+  auto isnan = _mm512_castsi512_pd(_mm512_mask_set1_epi64(zero_vec, isnan_mask,
                                                           0xFFFFFFFFFFFFFFFF));
   // Exploit the fact that all-ones is a NaN.
   return _mm512_or_pd(max, isnan);
@@ -371,7 +371,7 @@ Vectorized<double> inline minimum(const Vectorized<double>& a, const Vectorized<
   auto zero_vec = _mm512_set1_epi64(0);
   Vectorized<double> min = _mm512_min_pd(a, b);
   auto isnan_mask = _mm512_cmp_pd_mask(a, b, _CMP_UNORD_Q);
-  auto isnan = _mm512_castsi512_pd(_mm512_mask_set1_epi64(zero_vec, isnan_mask, 
+  auto isnan = _mm512_castsi512_pd(_mm512_mask_set1_epi64(zero_vec, isnan_mask,
                                                           0xFFFFFFFFFFFFFFFF));
   // Exploit the fact that all-ones is a NaN.
   return _mm512_or_pd(min, isnan);

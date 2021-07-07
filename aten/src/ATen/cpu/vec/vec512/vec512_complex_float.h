@@ -101,7 +101,7 @@ public:
         return _mm512_mask_blend_ps(0x300, a.values, b.values);
       case 17:
         return _mm512_mask_blend_ps(0x303, a.values, b.values);
-      case 18:        
+      case 18:
         return _mm512_mask_blend_ps(0x30C, a.values, b.values);
       case 19:
         return _mm512_mask_blend_ps(0x30F, a.values, b.values);
@@ -163,7 +163,7 @@ public:
         return _mm512_mask_blend_ps(0xCFF, a.values, b.values);
       case 48:
         return _mm512_mask_blend_ps(0xF00, a.values, b.values);
-      case 49:        
+      case 49:
         return _mm512_mask_blend_ps(0xF03, a.values, b.values);
       case 50:
         return _mm512_mask_blend_ps(0xF0C, a.values, b.values);
@@ -355,7 +355,7 @@ public:
         return _mm512_mask_blend_ps(0xC0FF, a.values, b.values);
       case 144:
         return _mm512_mask_blend_ps(0xC300, a.values, b.values);
-      case 145:        
+      case 145: 
         return _mm512_mask_blend_ps(0xC303, a.values, b.values);
       case 146:
         return _mm512_mask_blend_ps(0xC30C, a.values, b.values);
@@ -417,7 +417,7 @@ public:
         return _mm512_mask_blend_ps(0xCCFC, a.values, b.values);
       case 175:
         return _mm512_mask_blend_ps(0xCCFF, a.values, b.values);
-      case 176:        
+      case 176:
         return _mm512_mask_blend_ps(0xCF00, a.values, b.values);
       case 177:
         return _mm512_mask_blend_ps(0xCF03, a.values, b.values);
@@ -588,7 +588,7 @@ public:
     return _mm512_mask_blend_ps(mmask, a.values, b.values);
   }
   template<typename step_t>
-  static Vectorized<c10::complex<float>> arange(c10::complex<float> base = 0., 
+  static Vectorized<c10::complex<float>> arange(c10::complex<float> base = 0.,
                                                step_t step = static_cast<step_t>(1)) {
     return Vectorized<c10::complex<float>>(base,
                                         base + step,
@@ -599,7 +599,7 @@ public:
                                         base + c10::complex<float>(6)*step,
                                         base + c10::complex<float>(7)*step);
   }
-  static Vectorized<c10::complex<float>> set(const Vectorized<c10::complex<float>>& a, 
+  static Vectorized<c10::complex<float>> set(const Vectorized<c10::complex<float>>& a,
                                             const Vectorized<c10::complex<float>>& b,
                             int64_t count = size()) {
     switch (count) {

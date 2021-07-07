@@ -93,7 +93,7 @@ public:
       case 14:
         return blend<16383>(a, b);
       case 15:
-        return blend<32767>(a, b); 
+        return blend<32767>(a, b);
     }
     return b;
   }
@@ -148,9 +148,9 @@ public:
     __m512 zero_vec = _mm512_set1_ps(0.f);
     const auto nan_vec = _mm512_set1_ps(NAN);
     const auto not_nan_mask = _mm512_cmp_ps_mask(values, values, _CMP_EQ_OQ);
-    const auto not_nan_vec = _mm512_mask_set1_epi32(_mm512_castps_si512(zero_vec), 
+    const auto not_nan_vec = _mm512_mask_set1_epi32(_mm512_castps_si512(zero_vec),
                                                     not_nan_mask, 0xFFFFFFFF);
-    const auto nan_mask = _mm512_cmp_ps_mask(_mm512_castsi512_ps(not_nan_vec), 
+    const auto nan_mask = _mm512_cmp_ps_mask(_mm512_castsi512_ps(not_nan_vec),
                                              zero_vec, _CMP_EQ_OQ);
     const auto pi = _mm512_set1_ps(c10::pi<double>);
 
@@ -373,7 +373,7 @@ Vectorized<float> inline maximum(const Vectorized<float>& a, const Vectorized<fl
   auto zero_vec = _mm512_set1_epi32(0);
   auto max = _mm512_max_ps(a, b);
   auto isnan_mask = _mm512_cmp_ps_mask(a, b, _CMP_UNORD_Q);
-  auto isnan = _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, isnan_mask, 
+  auto isnan = _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, isnan_mask,
                                                           0xFFFFFFFF));
   // Exploit the fact that all-ones is a NaN.
   return _mm512_or_ps(max, isnan);
@@ -386,7 +386,7 @@ Vectorized<float> inline minimum(const Vectorized<float>& a, const Vectorized<fl
   auto zero_vec = _mm512_set1_epi32(0);
   auto min = _mm512_min_ps(a, b);
   auto isnan_mask = _mm512_cmp_ps_mask(a, b, _CMP_UNORD_Q);
-  auto isnan = _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, isnan_mask, 
+  auto isnan = _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, isnan_mask,
                                                           0xFFFFFFFF));
   // Exploit the fact that all-ones is a NaN.
   return _mm512_or_ps(min, isnan);
