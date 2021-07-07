@@ -2,6 +2,7 @@ import enum
 import struct
 import array
 import logging
+import functools
 from typing import (
     Tuple,
     NamedTuple,
@@ -741,6 +742,8 @@ class _NnapiSerializer(object):
             self.add_to(node),
         "aten::reshape": lambda self, node:
             self.add_reshape(node),
+        "aten::flatten": lambda self, node:
+            self.add_flatten(node),
         "aten::size": lambda self, node:
             self.add_size(node),
         "aten::cat": lambda self, node:
@@ -915,6 +918,54 @@ class _NnapiSerializer(object):
 
         outputs = [None] * 1
         outputs[0] = self.add_tensor_operand(node.outputsAt(0), out_oper)
+
+        self.add_operation(NNAPI_OperationCode.RESHAPE, inputs, outputs)
+
+    def add_flatten(self, node):
+        assert node.inputsSize() == 3
+        assert node.outputsSize() == 1
+
+        in_id, in_oper = self.get_tensor_operand_by_jitval_fixed_size(node.inputsAt(0))
+
+        start_ctype, start_dim = self.get_constant_value(node.inputsAt(1), "IntType")
+        end_ctype, end_dim = self.get_constant_value(node.inputsAt(2), "IntType")
+
+        if in_oper.dim_order != DimOrder.PRESUMED_CONTIGUOUS:
+            raise Exception(
+                "Currently, reshape is not supported on NHWC tensors")
+
+        if start_dim < 0:
+            start_dim += len(in_oper.shape)
+        if end_dim < 0:
+            end_dim += len(in_oper.shape)
+
+        out_shape = (
+            in_oper.shape[: start_dim] +
+            (functools.reduce(
+                lambda x, y: x * y, in_oper.shape[start_dim: end_dim + 1]),) +
+            in_oper.shape[end_dim + 1:]
+        )
+
+        # TODO(axit): To add support for runtime
+        # if any(dim == 0 for dim in in_oper.shape[start_dim: end_dim + 1]):
+        #     raise Exception("Flattened dims can't be flexible")
+        # non_flattened_dims = in_oper.shape[: start_dim] + in_oper.shape[end_dim + 1:]
+        # if non_flattened_dims.count(0) > 1:
+        #     raise Exception("Only 1 dim can be flexible")
+        # out_shape = tuple(
+        #     dim if dim != 0 else -1
+        #     for dim in out_shape
+        # )
+
+        out_oper = in_oper._replace(shape=out_shape)
+        out_id = self.add_tensor_operand(node.outputsAt(0), out_oper)
+
+        inputs = [None] * 2
+        inputs[0] = in_id
+        inputs[1] = self.add_immediate_int_vector(out_shape)
+
+        outputs = [None] * 1
+        outputs[0] = out_id
 
         self.add_operation(NNAPI_OperationCode.RESHAPE, inputs, outputs)
 
