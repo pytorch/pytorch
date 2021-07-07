@@ -1015,12 +1015,12 @@ Keyword args:
 
 Example::
 
-    >>> a = torch.randint(10, 10, dtype=torch.int32)
+    >>> a = torch.randint(10, (10, 10), dtype=torch.int32)
     >>> b = torch.asarray(a)
     >>> a.data_ptr() == b.data_ptr()
     True
 
-    >>> a = torch.randint(10, 10, dtype=torch.int32)
+    >>> a = torch.randint(10, (10, 10), dtype=torch.int32)
     >>> c = torch.asarray(a, dtype=torch.float32)
     >>> a.data_ptr() == c.data_ptr()
     False
