@@ -35,10 +35,6 @@ std::tuple<Tensor &,Tensor &> _thnn_nll_loss2d_forward_out(const Tensor & self, 
 std::tuple<Tensor,Tensor> _thnn_nll_loss2d_forward(const Tensor & self, const Tensor & target, const optional<Tensor> & weight, int64_t reduction, int64_t ignore_index);
 Tensor & _thnn_nll_loss2d_backward_out(const Tensor & grad_output, const Tensor & self, const Tensor & target, const c10::optional<Tensor>& weight_opt, int64_t reduction, int64_t ignore_index, const Tensor & total_weight, Tensor & grad_input);
 Tensor _thnn_nll_loss2d_backward(const Tensor & grad_output, const Tensor & self, const Tensor & target, const optional<Tensor> & weight, int64_t reduction, int64_t ignore_index, const Tensor & total_weight);
-Tensor & _thnn_glu_forward_out(const Tensor & self, int64_t dim, Tensor & output);
-Tensor _thnn_glu_forward(const Tensor & self, int64_t dim);
-Tensor & _thnn_glu_backward_out(const Tensor & grad_output, const Tensor & self, int64_t dim, Tensor & grad_input);
-Tensor _thnn_glu_backward(const Tensor & grad_output, const Tensor & self, int64_t dim);
 std::tuple<Tensor &,Tensor &> _thnn_log_sigmoid_forward_out(const Tensor & self, Tensor & output, Tensor & buffer);
 std::tuple<Tensor,Tensor> _thnn_log_sigmoid_forward(const Tensor & self);
 Tensor & _thnn_log_sigmoid_backward_out(const Tensor & grad_output, const Tensor & self, const Tensor & buffer, Tensor & grad_input);
