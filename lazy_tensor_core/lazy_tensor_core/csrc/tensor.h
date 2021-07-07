@@ -1070,6 +1070,10 @@ class LazyTensor {
                         bool keep_reduced_dimensions,
                         lazy_tensors::int64 correction);
 
+  static std::tuple<LazyTensor, LazyTensor> std_mean(
+      const LazyTensor& input, std::vector<lazy_tensors::int64> dimensions,
+      lazy_tensors::int64 correction, bool keep_reduced_dimensions);
+
   static LazyTensor sub(
       const LazyTensor& input, const LazyTensor& other, const at::Scalar& alpha,
       c10::optional<at::ScalarType> logical_element_type = c10::nullopt);
@@ -1182,6 +1186,10 @@ class LazyTensor {
                         std::vector<lazy_tensors::int64> dimensions,
                         lazy_tensors::int64 correction,
                         bool keep_reduced_dimensions);
+
+  static std::tuple<LazyTensor, LazyTensor> var_mean(
+      const LazyTensor& input, std::vector<lazy_tensors::int64> dimensions,
+      lazy_tensors::int64 correction, bool keep_reduced_dimensions);
 
   // Like reshape, but it returns a view into the original tensor.
   static LazyTensor view(
@@ -1333,6 +1341,7 @@ class LazyTensor {
                                    ir::Value ir_value) const;
 
   void SetSubView(ViewInfo view_info) const;
+  void ModifyCurrentView(ViewInfo view_info) const;
   std::shared_ptr<View> CreateView(ViewInfo view_info) const;
   LazyTensor CreateViewTensor(ViewInfo view_info) const;
 

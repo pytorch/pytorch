@@ -117,9 +117,6 @@ NodePtr Fmod(const Value& dividend, const Value& divisor);
 
 NodePtr Not(const Value& input);
 
-NodePtr TransposeOp(const Value& input, lazy_tensors::int64 dim0,
-                    lazy_tensors::int64 dim1);
-
 NodePtr HardSigmoid(const Value& input);
 
 NodePtr HardSigmoidBackward(const Value& grad_output, const Value& input);

@@ -810,6 +810,20 @@ void LazyTensor::SetSubView(ViewInfo view_info) const {
   data()->generation += 1;
 }
 
+void LazyTensor::ModifyCurrentView(ViewInfo view_info) const {
+  if (data()->view != nullptr) {
+    data()->view = data()->view->CreateSubView(view_info.shape, view_info);
+    return;
+  }
+  // This node is not a view. Since this function is meant to modify a view
+  // in place, we need to turn this existing tensor into a view.
+  ir::Value ir_value = GetIrValue();
+  std::shared_ptr<Alias> alias = std::make_shared<Alias>(ir_value);
+  data()->view =
+      std::make_shared<View>(ir_value.shape(), alias, std::move(view_info));
+  AssignIrValue(ir::Value());
+}
+
 std::shared_ptr<View> LazyTensor::CreateView(ViewInfo view_info) const {
   if (data()->view != nullptr) {
     return data()->view->CreateSubView(view_info.shape, view_info);

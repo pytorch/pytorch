@@ -103,6 +103,7 @@
 #include "lazy_tensor_core/csrc/ops/squeeze.h"
 #include "lazy_tensor_core/csrc/ops/stack.h"
 #include "lazy_tensor_core/csrc/ops/std.h"
+#include "lazy_tensor_core/csrc/ops/std_mean.h"
 #include "lazy_tensor_core/csrc/ops/sum.h"
 #include "lazy_tensor_core/csrc/ops/svd.h"
 #include "lazy_tensor_core/csrc/ops/symeig.h"
@@ -122,6 +123,7 @@
 #include "lazy_tensor_core/csrc/ops/upsample_nearest2d.h"
 #include "lazy_tensor_core/csrc/ops/upsample_nearest2d_backward.h"
 #include "lazy_tensor_core/csrc/ops/var.h"
+#include "lazy_tensor_core/csrc/ops/var_mean.h"
 #include "lazy_tensor_core/csrc/ops/view.h"
 #include "lazy_tensor_core/csrc/shape_builder.h"
 #include "lazy_tensor_core/csrc/tensor.h"
@@ -2522,6 +2524,18 @@ LazyTensor LazyTensor::std(const LazyTensor& input,
                                  keep_reduced_dimensions, correction));
 }
 
+std::tuple<LazyTensor, LazyTensor> LazyTensor::std_mean(
+    const LazyTensor& input, std::vector<lazy_tensors::int64> dimensions,
+    lazy_tensors::int64 correction, bool keep_reduced_dimensions) {
+  ir::NodePtr node = ir::MakeNode<ir::ops::StdMean>(
+      input.GetIrValue(),
+      Helpers::GetCanonicalDimensionIndices(dimensions,
+                                            input.shape().get().rank()),
+      correction, keep_reduced_dimensions);
+  return std::make_tuple(input.CreateFrom(ir::Value(node, 0)),
+                         input.CreateFrom(ir::Value(node, 1)));
+}
+
 LazyTensor LazyTensor::sub(const LazyTensor& input, const LazyTensor& other,
                            const at::Scalar& alpha,
                            c10::optional<at::ScalarType> logical_element_type) {
@@ -2666,7 +2680,11 @@ LazyTensor LazyTensor::transpose(const LazyTensor& input,
 
 void LazyTensor::transpose_(LazyTensor& input, lazy_tensors::int64 dim0,
                             lazy_tensors::int64 dim1) {
-  input.SetIrValue(ir::ops::TransposeOp(input.GetIrValue(), dim0, dim1));
+  auto input_shape = input.shape();
+  auto permute_dims = Helpers::MakeTransposePermutation(
+      /*dim0=*/dim0, /*dim1=*/dim1, /*rank=*/input_shape.get().rank());
+  ViewInfo view_info(ViewInfo::Type::kPermute, input_shape, permute_dims);
+  return input.ModifyCurrentView(std::move(view_info));
 }
 
 std::tuple<LazyTensor, LazyTensor> LazyTensor::triangular_solve(
@@ -2793,6 +2811,18 @@ LazyTensor LazyTensor::var(const LazyTensor& input,
                                  Helpers::GetCanonicalDimensionIndices(
                                      dimensions, input.shape().get().rank()),
                                  correction, keep_reduced_dimensions));
+}
+
+std::tuple<LazyTensor, LazyTensor> LazyTensor::var_mean(
+    const LazyTensor& input, std::vector<lazy_tensors::int64> dimensions,
+    lazy_tensors::int64 correction, bool keep_reduced_dimensions) {
+  ir::NodePtr node = ir::MakeNode<ir::ops::VarMean>(
+      input.GetIrValue(),
+      Helpers::GetCanonicalDimensionIndices(dimensions,
+                                            input.shape().get().rank()),
+      correction, keep_reduced_dimensions);
+  return std::make_tuple(input.CreateFrom(ir::Value(node, 0)),
+                         input.CreateFrom(ir::Value(node, 1)));
 }
 
 void LazyTensor::zero_(LazyTensor& input) {

@@ -92,13 +92,6 @@ NodePtr ReluOp(const Value& input) {
   return node;
 }
 
-NodePtr TransposeOp(const Value& input, lazy_tensors::int64 dim0,
-                    lazy_tensors::int64 dim1) {
-  return MakeNode<Permute>(input, Helpers::MakeTransposePermutation(
-                                      /*dim0=*/dim0, /*dim1=*/dim1,
-                                      /*rank=*/input.shape().rank()));
-}
-
 NodePtr HardSigmoid(const Value& input) {
   return GenericOp(OpKind(at::aten::hardsigmoid), {input}, input.shape());
 }
@@ -243,6 +236,12 @@ NodePtr ARange(const at::Scalar& start, const at::Scalar& end,
           static_cast<lazy_tensors::bfloat16>(start.toFloat()),
           static_cast<lazy_tensors::bfloat16>(end.toFloat()),
           static_cast<lazy_tensors::bfloat16>(step.toFloat()));
+      break;
+    case lazy_tensors::PrimitiveType::F16:
+      values = Helpers::Range<lazy_tensors::half>(
+          static_cast<lazy_tensors::half>(start.toHalf()),
+          static_cast<lazy_tensors::half>(end.toHalf()),
+          static_cast<lazy_tensors::half>(step.toHalf()));
       break;
     case lazy_tensors::PrimitiveType::F32:
       values =
