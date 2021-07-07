@@ -46,11 +46,6 @@ Tensor randn_mbatching_rule(IntArrayRef shape, TENSOROPTIONSPARAMS) {
 
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
-  // NB: I'd really like to register a special kernel like
-  // CppFunction::makeNamedNotSupported() to avoid listing out the types of everything.
-  // However, registering e.g. CppFunction::makeNamedNotSupported() as an implementation
-  // only works for operators that support boxing.
-  // random operations (out-of-place)
   UNSUPPORTED_RANDOM(bernoulli);
   UNSUPPORTED_RANDOM2(bernoulli, out);
   UNSUPPORTED_RANDOM2(bernoulli, p);
