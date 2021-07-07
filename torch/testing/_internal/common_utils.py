@@ -1973,24 +1973,22 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         assert low <= high, "low value too high!"
         assert high >= low, "high value too low!"
 
-    _extremals = [None, float('inf')]
-
     if dtype is torch.bool:
         result = torch.randint(0, 2, size, device=device, dtype=dtype)
     elif dtype is torch.uint8:
-        ranges = [torch.iinfo(dtype).min, torch.iinfo(dtype).max]
-        low = math.floor(0 if low in _extremals or low < ranges[0] else low)
-        high = math.ceil(10 if high in _extremals or high >= ranges[1] else high)
+        ranges = (torch.iinfo(dtype).min, torch.iinfo(dtype).max)
+        low = math.floor(ranges[0] if low is float('-inf') else 0 if low is None or low < ranges[0] else low)
+        high = math.ceil(ranges[1] if high is float('inf') else 10 if high is None or high >= ranges[1] else high)
         result = torch.randint(low, high, size, device=device, dtype=dtype)
     elif dtype in integral_types():
-        ranges = [torch.iinfo(dtype).min, torch.iinfo(dtype).max]
-        low = math.floor(-9 if low in _extremals or low < ranges[0] else low)
-        high = math.ceil(10 if high in _extremals or high >= ranges[1] else high)
+        ranges = (torch.iinfo(dtype).min, torch.iinfo(dtype).max)
+        low = math.floor(ranges[0] if low is float('-inf') else -9 if low is None or low < ranges[0] else low)
+        high = math.ceil(ranges[1] if high is float('inf') else 10 if high is None or high >= ranges[1] else high)
         result = torch.randint(low, high, size, device=device, dtype=dtype)
     elif dtype in floating_types_and(torch.half, torch.bfloat16):
-        ranges = [torch.finfo(dtype).min, torch.finfo(dtype).max]
-        low = -9 if low in _extremals or low < ranges[0] else low
-        high = 9 if high in _extremals or high >= ranges[1] else high
+        ranges_floats = (torch.finfo(dtype).min, torch.finfo(dtype).max)
+        low = ranges_floats[0] if low is float('-inf') else -9 if low is None or low < ranges[0] else low
+        high = ranges_floats[1] if high is float('inf') else 9 if high is None or high >= ranges[1] else high
         span = high - low
         # Windows doesn't support torch.rand(bfloat16) on CUDA
         if IS_WINDOWS and torch.device(device).type == 'cuda' and dtype is torch.bfloat16:
@@ -2000,9 +1998,9 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
     else:
         assert dtype in complex_types()
         float_dtype = torch.float if dtype is torch.cfloat else torch.double
-        ranges = [torch.finfo(dtype).min, torch.finfo(dtype).max]
-        low = -9 if low in _extremals or low < ranges[0] else low
-        high = 9 if high in _extremals or high >= ranges[1] else high
+        ranges_floats = (torch.finfo(dtype).min, torch.finfo(dtype).max)
+        low = ranges_floats[0] if low is float('-inf') else -9 if low is None or low < ranges[0] else low
+        high = ranges_floats[1] if high is float('inf') else 9 if high is None  or high >= ranges[1] else high
         span = high - low
         real = torch.rand(size, device=device, dtype=float_dtype) * span + low
         imag = torch.rand(size, device=device, dtype=float_dtype) * span + low
