@@ -18,9 +18,9 @@ namespace {
 
 template <> class Vectorized<float> {
 private:
-  __m512 values;
   static constexpr __m512i zero_vec {0, 0, 0, 0, 0, 0, 0, 0};
 public:
+  __m512 values;
   using value_type = float;
   using size_type = int;
   static constexpr size_type size() {

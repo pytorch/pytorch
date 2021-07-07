@@ -355,7 +355,7 @@ public:
         return _mm512_mask_blend_ps(0xC0FF, a.values, b.values);
       case 144:
         return _mm512_mask_blend_ps(0xC300, a.values, b.values);
-      case 145: 
+      case 145:
         return _mm512_mask_blend_ps(0xC303, a.values, b.values);
       case 146:
         return _mm512_mask_blend_ps(0xC30C, a.values, b.values);
