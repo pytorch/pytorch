@@ -4712,6 +4712,12 @@ def reference_sigmoid(x):
     return scipy.special.expit(x)
 
 
+def reference_logsigmoid(x):
+    max_ = np.maximum(x.dtype.type(0), -x)
+    z = np.exp(-max_) + np.exp(-x - max_)
+    return -(max_ + np.log(z))
+
+
 def reference_lgamma(x):
     # scipy.special.gammaln returns `-inf` when input is `-inf`.
     # While Pytorch, C and C++, all return `inf` when input is `-inf`.
@@ -6263,6 +6269,29 @@ op_db: List[OpInfo] = [
            supports_gradgrad=True,
            supports_out=False,
            autodiff_nonfusible_nodes=["aten::leaky_relu"]),
+    UnaryUfuncInfo(
+        'nn.functional.logsigmoid',
+        aten_name="log_sigmoid",
+        ref=reference_logsigmoid,
+        dtypes=floating_types(),
+        dtypesIfCUDA=floating_types_and(torch.float16),
+        supports_autograd=True,
+        assert_autodiffed=False,
+        supports_gradgrad=True,
+        supports_out=False,
+        # autodiff_nonfusible_nodes=["aten::log_sigmoid"],
+        decorators=[
+            DecorateInfo(
+                precisionOverride({torch.float16: 1e-2}),
+                'TestUnaryUfuncs', 'test_reference_numerics_normal'),
+            DecorateInfo(
+                precisionOverride({torch.float16: 1e-2}),
+                'TestUnaryUfuncs', 'test_reference_numerics_hard'),
+            DecorateInfo(
+                precisionOverride({torch.float16: 1e-2}),
+                'TestUnaryUfuncs', 'test_reference_numerics_extremal'),
+        ],
+    ),
     OpInfo('topk',
            dtypes=all_types(),
            dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
@@ -6568,6 +6597,30 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            supports_forward_ad=True,
            autodiff_nonfusible_nodes=['aten::mul'],),
+    OpInfo('__rand__',
+           op=torch.Tensor.__rand__,
+           dtypes=integral_types_and(),
+           sample_inputs_func=sample_inputs_rbinops,
+           supports_out=False,
+           skips=(SkipInfo('TestCommon', 'test_variant_consistency_jit',),),
+           supports_autograd=False,
+           supports_forward_ad=True,),
+    OpInfo('__ror__',
+           op=torch.Tensor.__ror__,
+           dtypes=integral_types_and(),
+           sample_inputs_func=sample_inputs_rbinops,
+           supports_out=False,
+           skips=(SkipInfo('TestCommon', 'test_variant_consistency_jit',),),
+           supports_autograd=False,
+           supports_forward_ad=True,),
+    OpInfo('__rxor__',
+           op=torch.Tensor.__rxor__,
+           dtypes=integral_types_and(),
+           sample_inputs_func=sample_inputs_rbinops,
+           supports_out=False,
+           skips=(SkipInfo('TestCommon', 'test_variant_consistency_jit',),),
+           supports_autograd=False,
+           supports_forward_ad=True,),
     OpInfo('__rmatmul__',
            op=torch.Tensor.__rmatmul__,
            dtypes=floating_types(),
@@ -7282,12 +7335,7 @@ op_db: List[OpInfo] = [
            aliases=('moveaxis',),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
-           sample_inputs_func=sample_movedim_moveaxis,
-           skips=(
-               # Expected a value of type 'int' for argument 'source'
-               #   but instead found type 'list'.
-               SkipInfo('TestJit', 'test_jit_alias_remapping'),
-           )),
+           sample_inputs_func=sample_movedim_moveaxis),
     OpInfo('renorm',
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_renorm),
@@ -7415,6 +7463,7 @@ op_db: List[OpInfo] = [
            ),
            sample_inputs_func=sample_inputs_zeta),
     OpInfo('logsumexp',
+           aliases=('special.logsumexp',),
            dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.half),
            assert_autodiffed=True,
