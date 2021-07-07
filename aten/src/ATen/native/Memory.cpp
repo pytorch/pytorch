@@ -17,5 +17,14 @@ bool is_pinned_default(const Tensor& self, c10::optional<Device> device) {
   return false;
 }
 
+Tensor pin_memory(const Tensor& self, c10::optional<Device> device) {
+  // Kind of mad that I have to do two dynamic dispatches here, pretty
+  // annoying
+  if (self.is_pinned(device)) {
+    return self;
+  }
+  return at::_pin_memory(self, device);
+}
+
 }
 }
