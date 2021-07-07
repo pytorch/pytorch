@@ -510,6 +510,8 @@ std::shared_ptr<TEWrapper> wrapTECompute(
 #else
 
 struct TEWrapper {
+  tensorexpr::KernelArena ka;
+  tensorexpr::KernelScope ks;
   TEWrapper() = default;
   template <typename... Ts>
   void operator()(const Ts&... ts) {
@@ -1503,7 +1505,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::argmin, aten_argmin, [](Node* n) -> SROperator {
     }
     auto& out_t = p_node->Output(0).toTensor();
     fastResizeToZero(out_t);
-    at::native::argmin_out(in0_t, dim, keepdim, out_t);
+    at::cpu::argmin_out(out_t, in0_t, dim, keepdim);
   };
 });
 
