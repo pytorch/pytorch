@@ -4,7 +4,8 @@ import torch
 class MkldnnLinear(torch.jit.ScriptModule):
     def __init__(self, dense_module, dtype):
         super(MkldnnLinear, self).__init__()
-        self.register_buffer('weight', dense_module.weight.to_mkldnn(dtype))
+        self.register_buffer('weight', torch._C._nn.mkldnn_reorder_linear_weight(
+            dense_module.weight.to_mkldnn(dtype)))
         if dense_module.bias is not None:
             # Bias can be fp32 or bf16 for OneDNN bf16 path, but for good accuracy,
             # we use fp32 dtype.
@@ -21,15 +22,19 @@ class MkldnnLinear(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def __setstate__(self, state):
-        self.weight = state[0].to_mkldnn()
+        self.weight = torch._C._nn.mkldnn_reorder_linear_weight(state[0].to_mkldnn())
         self.bias = state[1].to_mkldnn()
         self.training = state[2]
 
     @torch.jit.script_method
     def forward(self, x):
-        x_mkldnn = x if x.is_mkldnn else x.to_mkldnn()
-        y_mkldnn = torch._C._nn.mkldnn_linear(x_mkldnn, self.weight, self.bias)
-        y = y_mkldnn if x.is_mkldnn else y_mkldnn.to_dense()
+        # for float input, mkldnn linear only handle mkldnn input
+        if x.dtype == torch.float:
+            x = x if x.is_mkldnn else x.to_mkldnn()
+        y = torch._C._nn.mkldnn_linear(x, self.weight, self.bias)
+        # mkldnn in, mkldnn out
+        if x.dtype == torch.float:
+            y = y if y.is_mkldnn else y.to_mkldnn()
         return y
 
 
