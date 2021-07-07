@@ -651,8 +651,8 @@ TEST(TensorTest, CopyAndAssignment) {
   Tensor y(x);
   // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   Tensor z = x;
-  testing::assertTensorEquals(x, y);
-  testing::assertTensorEquals(x, z);
+  testing::assertTensorEquals(x, y, 0);
+  testing::assertTensorEquals(x, z, 0);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
