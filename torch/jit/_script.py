@@ -54,6 +54,12 @@ ScriptFunction.__doc__ = """
 Functionally equivalent to a :class:`ScriptModule`, but represents a single
 function and does not have any attributes or Parameters.
 """
+
+def _get_state(cls):
+    raise pickle.PickleError("ScriptFunction cannot be pickled")
+
+ScriptFunction.__getstate__ = _get_state
+
 set_module(ScriptFunction, "torch.jit")
 
 
