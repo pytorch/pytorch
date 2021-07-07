@@ -321,9 +321,8 @@ def _trace_mismatches(actual: Tensor, expected: Tensor, mismatches: Tensor, *, r
     number_of_elements = mismatches.numel()
     total_mismatches = torch.sum(mismatches).item()
 
-    dtype = torch.float64 if actual.dtype.is_floating_point else torch.int64
-    a_flat = actual.flatten().to(dtype)
-    b_flat = expected.flatten().to(dtype)
+    a_flat = actual.flatten()
+    b_flat = expected.flatten()
     matches_flat = ~mismatches.flatten()
 
     abs_diff = torch.abs(a_flat - b_flat)
@@ -427,7 +426,9 @@ def _check_values_close(
     Returns:
         (Optional[AssertionError]): If check did not pass.
     """
-
+    dtype = torch.float64 if actual.dtype.is_floating_point else torch.int64
+    actual = actual.to(dtype)
+    expected = expected.to(dtype)
     mismatches = ~torch.isclose(actual, expected, rtol=rtol, atol=atol, equal_nan=equal_nan)
     if not torch.any(mismatches):
         return None
