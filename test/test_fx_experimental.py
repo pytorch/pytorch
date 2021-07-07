@@ -930,6 +930,16 @@ terrible spacing
         traced(input)
         self.assertEqual(traced(input), ref_outs)
 
+    def test_normalize_args_for_getitem_with_slices(self):
+        def test(x):
+            return x[::, ::, ::]
+
+        input = torch.randn(1, 2, 3, 4)
+        traced = torch.fx.symbolic_trace(test)
+        ShapeProp(traced).propagate(input)
+        traced = NormalizeArgs(traced).transform()
+        self.assertEqual(traced(input), test(input))
+
     def test_normalize_modules_exhaustive(self):
         """
         Exhaustively test `Node.normalized_arguments` on all standard

@@ -5,7 +5,7 @@ import torch
 import torch.fx
 import torch.fx as fx
 from torch.fx import Transformer, Proxy
-from torch.fx.node import Argument, Target, Node, map_aggregate
+from torch.fx.node import Argument, Target, Node
 from torch.fx.operator_schemas import (
     normalize_module,
     normalize_function,
@@ -48,8 +48,15 @@ class NormalizeArgs(Transformer):
                 return n.meta["type"] if "type" in n.meta else None
             return type(arg)
 
-        arg_types = map_aggregate(n.args, get_type)
-        assert isinstance(arg_types, tuple)
+        arg_types = []
+        for arg in n.args:
+            if isinstance(arg, tuple):
+                arg_types.append(tuple(get_type(i) for i in arg))
+            elif isinstance(arg, list):
+                arg_types.append([get_type(i) for i in arg])
+            else:
+                arg_types.append(get_type(arg))
+
         arg_types = tuple([create_type_hint(i) for i in arg_types])
         kwarg_types = {k: get_type(v) for k, v in kwargs.items()}
         if n.op == "call_function":
