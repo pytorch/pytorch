@@ -18,8 +18,8 @@
   - [Building documentation](#building-documentation)
     - [Tips](#tips)
     - [Building C++ Documentation](#building-c-documentation)
-  - [Previewing changes](#previewing-changes)
-    - [Submitting changes for review](#submitting-changes-for-review)
+  - [Previewing changes locally](#previewing-changes-locally)
+  - [Previewing documentation on PRs](#previewing-documentation-on-prs)
   - [Adding documentation tests](#adding-documentation-tests)
 - [Profiling with `py-spy`](#profiling-with-py-spy)
 - [Managing multiple build trees](#managing-multiple-build-trees)
@@ -439,12 +439,12 @@ is part of the test suite `ContainerAliasingTest` in the file
 ### Run Specific CI Jobs
 
 You can generate a commit that limits the CI to only run a specific job by using
-`tools/explicit_ci_jobs.py` like so:
+`tools/testing/explicit_ci_jobs.py` like so:
 
 ```bash
 # --job: specify one or more times to filter to a specific job + its dependencies
 # --make-commit: commit CI changes to git with a message explaining the change
-python tools/explicit_ci_jobs.py --job binary_linux_manywheel_3_6m_cpu_devtoolset7_nightly_test --make-commit
+python tools/testing/explicit_ci_jobs.py --job binary_linux_manywheel_3_6m_cpu_devtoolset7_nightly_test --make-commit
 
 # Make your changes
 
@@ -528,7 +528,7 @@ commands. To run this check locally, run `./check-doxygen.sh` from inside
 To build the documentation, follow the same steps as above, but run them from
 `docs/cpp` instead of `docs`.
 
-### Previewing changes
+### Previewing changes locally
 
 To view HTML files locally, you can open the files in your web browser. For example,
 navigate to `file:///your_pytorch_folder/docs/build/html/index.html` in a web
@@ -563,42 +563,11 @@ rsync -az me@my_machine:/path/to/pytorch/docs/build/html build
 rsync -az me@my_machine:/path/to/pytorch/docs/cpp/build/html cpp/build
 ```
 
-#### Submitting changes for review
+### Previewing documentation on PRs
 
-It is helpful when submitting a PR that changes the docs to provide a rendered
-version of the result. If your change is small, you can add a screenshot of the
-changed docs to your PR.
-
-If your change to the docs is large and affects multiple pages, you can host
-the docs yourself with the following steps, then add a link to the output in your
-PR. These instructions use GitHub pages to host the docs
-you have built. To do so, follow [these steps](https://guides.github.com/features/pages/)
-to make a repo to host your changed documentation.
-
-GitHub pages expects to be hosting a Jekyll generated website which does not work
-well with the static resource paths used in the PyTorch documentation. To get around
-this, you must add an empty file called `.nojekyll` to your repo.
-
-```bash
-cd your_github_pages_repo
-touch .nojekyll
-git add .
-git commit
-git push
-```
-
-Then, copy built documentation and push the changes:
-
-```bash
-cd your_github_pages_repo
-cp -r ~/my_pytorch_path/docs/build/html/* .
-git add .
-git commit
-git push
-```
-
-Then you should be able to see the changes at your_github_username.github.com/your_github_pages_repo.
-
+PyTorch will host documentation previews at `https://docs-preview.pytorch.org/<pr number>/` once the
+`pytorch_python_doc_build` GitHub Actions job has completed on your PR. You can visit that page directly
+or find its link in the automated Dr. CI comment on your PR.
 
 ### Adding documentation tests
 
@@ -1128,7 +1097,7 @@ have more checks than older versions. In our CI, we run clang-tidy-6.0.
    uncommitted changes). Changes are picked up based on a `git diff` with the
    given revision:
   ```bash
-  python tools/clang_tidy.py -d build -p torch/csrc --diff 'HEAD~1'
+  python tools/linter/clang_tidy.py -d build -p torch/csrc --diff 'HEAD~1'
   ```
 
 Above, it is assumed you are in the PyTorch root folder. `path/to/build` should

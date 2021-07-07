@@ -335,6 +335,7 @@ class ConcatExpander {
       TORCH_INTERNAL_ASSERT(cat_inp_tensor_type);
       TORCH_INTERNAL_ASSERT(cat_inp_tensor_type->dim());
       auto cat_inp_tensortype_sizes = cat_inp_tensor_type->sizes();
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       int end_idx = start_idx + *cat_inp_tensortype_sizes[cat_dim_value];
       auto end = graph_->insertConstant(end_idx);
 
@@ -508,6 +509,76 @@ void OptimizeConcat(const std::shared_ptr<Graph>& graph) {
   ConstantPooling(graph);
   EliminateDeadCode(graph);
   GRAPH_DUMP("After ConcatOpt", graph);
+}
+
+namespace {
+
+class VariadicCatUpdater {
+ public:
+  explicit VariadicCatUpdater(std::shared_ptr<Graph> graph)
+      : graph_(std::move(graph)) {}
+
+  bool run() {
+    collectCatNodes(graph_->block());
+    bool changed = false;
+    for (auto c : cat_nodes_) {
+      changed = changed || replaceWithVariadicCat(c);
+    }
+    return changed;
+  }
+
+ private:
+  void collectCatNodes(Block* block) {
+    for (auto node : block->nodes()) {
+      if (node->kind() == aten::cat) {
+        cat_nodes_.push_back(node);
+      }
+      for (Block* b : node->blocks()) {
+        collectCatNodes(b);
+      }
+    }
+  }
+
+  bool replaceWithVariadicCat(Node* cat) {
+    if (cat->input(0)->node()->kind() != prim::ListConstruct) {
+      return false;
+    }
+    auto list = cat->input(0)->node();
+    // We do not transform cat ops whose list input has > 1 use. This is
+    // because these uses could be modifying the list using ops like
+    // `aten::append`. So, we conservatively assume that any use other than
+    // the one in cat mutates the list.
+    if (list->output()->uses().size() > 1) {
+      return false;
+    }
+    std::vector<Value*> inputs = list->inputs().vec();
+    inputs.push_back(cat->input(1));
+    auto var_cat = cat->owningGraph()->create(prim::Concat, inputs);
+    GRAPH_UPDATE("Adding\n", *var_cat);
+    var_cat->insertBefore(list);
+    GRAPH_UPDATE("Replacing\n", *cat, "with\n", *var_cat);
+    cat->output()->replaceAllUsesWith(var_cat->output());
+    GRAPH_UPDATE("Deleting\n", *cat);
+    cat->destroy();
+    TORCH_INTERNAL_ASSERT(!list->hasUses());
+    GRAPH_UPDATE("Deleting\n", *list);
+    list->destroy();
+    return true;
+  }
+
+  std::shared_ptr<Graph> graph_;
+  std::vector<Node*> cat_nodes_;
+};
+
+} // namespace
+
+bool UseVariadicCat(const std::shared_ptr<Graph>& graph) {
+  GRAPH_DUMP("Before VariadicCat", graph);
+  bool changed = VariadicCatUpdater(graph).run();
+  if (changed) {
+    GRAPH_DUMP("After VariadicCat", graph);
+  }
+  return changed;
 }
 
 } // namespace jit

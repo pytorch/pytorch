@@ -1161,20 +1161,16 @@ class ClassWithDestructorCallback {
  public:
   ClassWithDestructorCallback(const DestructorCallback* destructorCallback)
       : _destructorCallback(destructorCallback) {}
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  ClassWithDestructorCallback(const ClassWithDestructorCallback& rhs)
-      : _destructorCallback(rhs._destructorCallback) {}
 
   ~ClassWithDestructorCallback() {
     _destructorCallback->call();
   }
 
- private:
-  const DestructorCallback* _destructorCallback;
-
-  // NOLINTNEXTLINE(modernize-use-equals-delete)
   ClassWithDestructorCallback& operator=(
       const ClassWithDestructorCallback& rhs) = delete;
+
+ private:
+  const DestructorCallback* _destructorCallback;
 };
 class OnlyMoveableClassWithDestructorCallback {
  public:
