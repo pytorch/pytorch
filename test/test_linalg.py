@@ -7917,6 +7917,10 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         cn = torch.from_numpy(np.tensordot(a.cpu().numpy(), b.cpu().numpy()))
         self.assertEqual(c, cn)
 
+        a = torch.tensordot(torch.tensor(0.), torch.tensor(0.), 0)
+        an = torch.from_numpy(np.tensordot(np.zeros((), dtype=np.float32), np.zeros((), dtype=np.float32), 0))
+        self.assertEqual(a, an)
+
 
 instantiate_device_type_tests(TestLinalg, globals())
 
