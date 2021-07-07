@@ -247,7 +247,7 @@ class Module:
     training: bool
     _is_full_backward_hook: Optional[bool]
 
-    def __init__(self) -> None:
+    def __init__(self):
         """
         Initializes internal Module state, shared by both nn.Module and ScriptModule.
         """
