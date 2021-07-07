@@ -336,7 +336,7 @@ class TestNNAPI(TestCase):
             convert_args=[torch.zeros(1, 2, 0, 0)])
 
     def test_log_softmax(self):
-        inp = torch.randn(3, 1000)
+        inp = torch.randn(3, 10)
         self.check(torch.nn.LogSoftmax(), inp)
         self.check(torch.nn.LogSoftmax(0), inp)
 

@@ -12,7 +12,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_methods_invocations import \
     (op_db, _NOTHING, UnaryUfuncInfo, SpectralFuncInfo)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
+    (deviceCountAtLeast, instantiate_device_type_tests, ops, onlyCUDA, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, create_traced_fn, \
     check_alias_annotation
@@ -170,6 +170,26 @@ class TestCommon(TestCase):
             msg += "The following backward dtypes should be removed from the OpInfo: {0}.".format(claimed_but_unsupported)
 
         self.assertEqual(supported_backward_dtypes, claimed_backward_supported, msg=msg)
+
+    # Validates that each OpInfo works correctly on different CUDA devices
+    @skipCUDAIfRocm
+    @onlyCUDA
+    @deviceCountAtLeast(2)
+    @ops(op_db, allowed_dtypes=(torch.float32, torch.long))
+    def test_multiple_devices(self, devices, dtype, op):
+        for cuda_device_str in devices:
+            cuda_device = torch.device(cuda_device_str)
+            # NOTE: only tests on first sample
+            samples = op.sample_inputs(cuda_device, dtype)
+            sample = samples[0]
+            result = op(sample.input, *sample.args, **sample.kwargs)
+
+            if isinstance(result, torch.Tensor):
+                self.assertTrue(result.device == cuda_device)
+            elif is_iterable_of_tensors(result):
+                self.assertTrue(all(map(lambda t: t.device == cuda_device, result)))
+            else:
+                self.skipTest("Skipped! Only supports single tensor or iterable of tensor outputs.")
 
     # Tests that the function and its (ndarray-accepting) reference produce the same
     #   values on the tensors from sample_inputs func for the corresponding op.

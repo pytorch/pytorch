@@ -1754,6 +1754,7 @@ class _NnapiSerializer(object):
 
         inputs = [None] * 3
         inputs[0] = input_id
+        # specifying 1 as the scaling factor for the exponent, beta
         inputs[1] = self.add_immediate_float_scalar(1)
         inputs[2] = self.add_immediate_int_scalar(dim)
 
