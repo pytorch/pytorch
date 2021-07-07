@@ -1199,6 +1199,44 @@ class LinearReluAddModel(torch.nn.Module):
         self.relu = torch.nn.ReLU()
         return x
 
+class ConvReluModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc = torch.nn.Conv2d(3, 5, 3).to(dtype=torch.float)
+        self.relu = torch.nn.ReLU()
+
+    def forward(self, x):
+        x = self.relu(self.fc(x))
+        return x
+
+class ConvReluConvModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc1 = torch.nn.Conv2d(3, 5, 3).to(dtype=torch.float)
+        self.relu = torch.nn.ReLU()
+        self.fc2 = torch.nn.Conv2d(5, 5, 1).to(dtype=torch.float)
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.relu(x)
+        x = self.fc2(x)
+        return x
+
+class ConvReluAddModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc1 = torch.nn.Conv2d(3, 5, 3).to(dtype=torch.float)
+        self.relu = torch.nn.ReLU()
+        self.fc2 = torch.nn.Conv2d(5, 5, 1).to(dtype=torch.float)
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.relu(x)
+        x = torch.add(x, 5)
+        x = self.fc2(x)
+        self.relu = torch.nn.ReLU()
+        return x
+
 class NormalizationTestModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -1425,6 +1463,29 @@ class TwoLayerFunctionalConvModel(torch.nn.Module):
 
     def forward(self, x):
         x = self.conv1(x)
+        x = self.conv2(x)
+        return x
+
+class FunctionalConvReluModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv = FunctionalConv2d()
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = F.relu(x)
+        return x
+
+class FunctionalConvReluConvModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv1 = FunctionalConv2d()
+        self.relu = nn.ReLU()
+        self.conv2 = FunctionalConv2d()
+
+    def forward(self, x):
+        x = self.conv1(x)
+        x = self.relu(x)
         x = self.conv2(x)
         return x
 

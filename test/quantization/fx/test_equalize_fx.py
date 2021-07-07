@@ -33,6 +33,11 @@ from torch.testing._internal.common_quantization import (
     LinearReluAddModel,
     FunctionalLinearReluModel,
     FunctionalLinearReluLinearModel,
+    ConvReluModel,
+    ConvReluConvModel,
+    ConvReluAddModel,
+    FunctionalConvReluModel,
+    FunctionalConvReluConvModel,
 )
 
 # Standard Libraries
@@ -245,7 +250,11 @@ class TestEqualizeFx(QuantizationTestCase):
                  (FunctionalLinearReluLinearModel, two_F_layer_node_occurrence),
                  (ConvModel, single_nn_layer_node_occurrence),
                  (TwoLayerConvModel, two_nn_layer_node_occurrence),
-                 (TwoLayerFunctionalConvModel, two_F_layer_node_occurrence)]
+                 (TwoLayerFunctionalConvModel, two_F_layer_node_occurrence),
+                 (ConvReluModel, single_nn_layer_node_occurrence),
+                 (ConvReluConvModel, two_nn_layer_node_occurrence),
+                 (FunctionalConvReluModel, single_F_layer_node_occurrence),
+                 (FunctionalConvReluConvModel, two_F_layer_node_occurrence)]
 
         for (M, node_occurrence) in tests:
             m = M().eval()
@@ -264,7 +273,9 @@ class TestEqualizeFx(QuantizationTestCase):
                  (LinearReluModel, 2), (LinearReluLinearModel, 2), (LinearReluAddModel, 2),
                  (FunctionalLinearReluModel, 2), (FunctionalLinearReluLinearModel, 2), 
                  (ConvModel, 4), (TwoLayerConvModel, 4), (SingleLayerFunctionalConvModel, 4),
-                 (TwoLayerFunctionalConvModel, 4)]
+                 (TwoLayerFunctionalConvModel, 4),
+                 (ConvReluModel, 4), (ConvReluConvModel, 4), (ConvReluAddModel, 4),
+                 (FunctionalConvReluModel, 4), (FunctionalConvReluConvModel, 4)] 
 
         for (M, ndim) in tests:
             m = M().eval()
@@ -617,6 +628,36 @@ class TestEqualizeFx(QuantizationTestCase):
             ns.call_method('dequantize')
         ]
 
+        convRelu_node_list = [
+            ns.call_function(torch.mul),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_module(nniq.ConvReLU2d),
+            ns.call_method('dequantize')
+        ]
+
+        convReluConv_node_list = [
+            ns.call_function(torch.mul),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_module(nniq.ConvReLU2d),
+            ns.call_module(nnq.Conv2d),
+            ns.call_method('dequantize')
+        ]
+
+        functionalConvRelu_node_list = [
+            ns.call_function(torch.mul),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_function(torch.ops.quantized.conv2d_relu),
+            ns.call_method('dequantize')
+        ]
+
+        functionalConvReluConv_node_list = [
+            ns.call_function(torch.mul),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_function(torch.ops.quantized.conv2d_relu),
+            ns.call_function(torch.ops.quantized.conv2d),
+            ns.call_method('dequantize')
+        ]
+
         tests = [(SingleLayerLinearModel, 2, linear_node_list),
                  (LinearAddModel, 2, linearAdd_node_list),
                  (TwoLayerLinearModel, 2, linear2_node_list),
@@ -630,7 +671,11 @@ class TestEqualizeFx(QuantizationTestCase):
                  (ConvModel, 4, conv_node_list),
                  (TwoLayerConvModel, 4, conv2_node_list),
                  (SingleLayerFunctionalConvModel, 4, functionalConv_node_list),
-                 (TwoLayerFunctionalConvModel, 4, functionalConv2_node_list)]
+                 (TwoLayerFunctionalConvModel, 4, functionalConv2_node_list),
+                 (ConvReluModel, 4, convRelu_node_list),
+                 (ConvReluConvModel, 4, convReluConv_node_list),
+                 (FunctionalConvReluModel, 4, functionalConvRelu_node_list),
+                 (FunctionalConvReluConvModel, 4, functionalConvReluConv_node_list)]
 
         for (M, ndim, node_list) in tests:
             m = M().eval()

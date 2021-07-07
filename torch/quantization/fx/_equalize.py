@@ -230,7 +230,8 @@ def node_supports_equalization(node: Node, modules) -> bool:
     if node.op == 'call_module':
         return (isinstance(modules[node.target], nn.Linear) or
                 isinstance(modules[node.target], nni.LinearReLU) or
-                isinstance(modules[node.target], nn.Conv2d))
+                isinstance(modules[node.target], nn.Conv2d) or
+                isinstance(modules[node.target], nni.ConvReLU2d))
     elif node.op == 'call_function':
         return node.target == F.linear or node.target == F.conv2d
     return False
@@ -379,9 +380,10 @@ def scale_weight_node(
         next_equalization_scale: Next node's calculated equalization scale if
            the following node needs to be equalized, 1 otherwise
     """
-    if isinstance(modules[str(node.target)], nni.LinearReLU):
+    if isinstance(modules[str(node.target)], nni.LinearReLU) or \
+       isinstance(modules[str(node.target)], nni.ConvReLU2d):
         op_module = modules[str(node.target)][0]    # type: ignore[index]
-        assert(isinstance(op_module, nn.Linear))
+        assert(isinstance(op_module, nn.Linear) or isinstance(op_module, nn.Conv2d))
     else:
         op_module = modules[str(node.target)]
         assert(isinstance(modules[str(node.target)], nn.Linear) or
@@ -538,10 +540,11 @@ def update_obs_for_equalization(model: GraphModule, modules: Dict[str, nn.Module
             if op_node.op == 'call_module':
                 # Calibrate the weight equalization observer since it has just
                 # been created
-                if isinstance(modules[str(op_node.target)], nni.LinearReLU):
-                    linear_node = modules[str(op_node.target)][0]   # type: ignore[index]
-                    assert(isinstance(linear_node, nn.Linear))
-                    weight_eq_obs(linear_node.weight)
+                if isinstance(modules[str(op_node.target)], nni.LinearReLU) or \
+                   isinstance(modules[str(op_node.target)], nni.ConvReLU2d):
+                    node = modules[str(op_node.target)][0]   # type: ignore[index]
+                    assert(isinstance(node, nn.Linear) or isinstance(node, nn.Conv2d))
+                    weight_eq_obs(node.weight)
                 else:
                     weight_eq_obs(modules[str(op_node.target)].weight)
 
