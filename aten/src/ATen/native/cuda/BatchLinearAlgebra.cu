@@ -1913,20 +1913,38 @@ static void apply_lu_batched_magma(const Tensor& input, const Tensor& pivots, co
 #endif
 }
 
-static void lu_magma(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
-  // TODO: compare performance and use the best performing option based on input's sizes
-  if (input.dim() == 2) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "lu_magma", [&]{
-      apply_lu_looped_magma<scalar_t>(input, pivots, infos, compute_pivots);
-    });
-  } else {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "lu_magma", [&]{
-      apply_lu_batched_magma<scalar_t>(input, pivots, infos, compute_pivots);
-    });
+static void lu_looped_magma(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "lu_magma_looped", [&]{
+    apply_lu_looped_magma<scalar_t>(input, pivots, infos, compute_pivots);
+  });
+}
+
+static void lu_batched_magma(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "lu_magma_batched", [&]{
+    apply_lu_batched_magma<scalar_t>(input, pivots, infos, compute_pivots);
+  });
+}
+
+static void apply_lu(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
+  int64_t batch_size = batchCount(input);
+#ifdef USE_CUSOLVER
+  // Use a heuristic to determine that cusolver is faster than MAGMA for the following sizes.
+  auto m = input.size(-2);
+  // exclude complex128 since nan_to_num_ does not work with it.
+  if ((batch_size == 1 || (batch_size <= 8 && m <= 16) || !use_magma_ ) && !input.is_complex()) {
+    lu_looped_cusolver(input, pivots, infos, compute_pivots);
+  }
+#else
+  if (batch_size == 1) {
+    lu_looped_magma(input, pivots, infos, compute_pivots);
+  }
+#endif // USE_CUSOLVER
+  else {
+    lu_batched_magma(input, pivots, infos, compute_pivots);
   }
 }
 
-REGISTER_DISPATCH(lu_stub, &lu_magma);
+REGISTER_DISPATCH(lu_stub, &apply_lu);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangular_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
