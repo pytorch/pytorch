@@ -218,7 +218,7 @@ void RpcAgent::rpcRetryCallback(
   } else {
     // This try succeeded, so we can make the original future as complete.
     earliestRpc->originalFuture_->markCompleted(
-        jitFuture.value(), jitFuture.dataPtrs());
+        jitFuture.value(), jitFuture.storages());
   }
 }
 
@@ -226,6 +226,7 @@ const WorkerInfo& RpcAgent::getWorkerInfo() const {
   return workerInfo_;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::shared_ptr<RpcAgent> RpcAgent::currentRpcAgent_ = nullptr;
 
 bool RpcAgent::isCurrentRpcAgentSet() {
