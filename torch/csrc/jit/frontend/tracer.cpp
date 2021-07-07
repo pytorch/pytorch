@@ -1033,9 +1033,3 @@ void setWarn(warn_fn_type fn) {
 } // namespace tracer
 } // namespace jit
 } // namespace torch
-
-TORCH_LIBRARY_IMPL(_, Tracer, m) {
-  // TODO: register fallback kernel with tracing function from
-  // `torch/csrc/jit/runtime/register_c10_ops.cpp`.
-  m.fallback(torch::CppFunction::makeFallthrough());
-}
