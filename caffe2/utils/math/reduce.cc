@@ -1,5 +1,11 @@
 #include "caffe2/utils/math/reduce.h"
 
+#include <algorithm>
+#include <cstring>
+#include <functional>
+#include <numeric>
+#include <vector>
+
 #ifdef CAFFE2_USE_ACCELERATE
 #include <Accelerate/Accelerate.h>
 #endif // CAFFE2_USE_ACCELERATE
@@ -14,12 +20,6 @@
 #include "caffe2/utils/math.h"
 #include "caffe2/utils/math/elementwise.h"
 #include "caffe2/utils/math/utils.h"
-
-#include <algorithm>
-#include <cstring>
-#include <functional>
-#include <numeric>
-#include <vector>
 
 namespace caffe2 {
 namespace math {
@@ -409,8 +409,9 @@ void RowwiseMoments(
     T* var) {
   ConstEigenArrayMap<T> X_arr(X, cols, rows);
   for (int i = 0; i < rows; ++i) {
-    mean[i] = X_arr.col(i).mean();
-    var[i] = X_arr.col(i).square().mean() - mean[i] * mean[i];
+    const T m = X_arr.col(i).mean();
+    mean[i] = m;
+    var[i] = (X_arr.col(i) - m).square().mean();
   }
 }
 
@@ -424,15 +425,15 @@ void ColwiseMoments(
   ConstEigenArrayMap<T> X_arr(X, cols, rows);
   EigenVectorArrayMap<T> mean_arr(mean, cols);
   EigenVectorArrayMap<T> var_arr(var, cols);
-  mean_arr = X_arr.col(0);
-  var_arr = X_arr.col(0).square();
-  for (int i = 1; i < rows; ++i) {
-    mean_arr += X_arr.col(i);
-    var_arr += X_arr.col(i).square();
+  EArrXt<T> delta_arr(cols);
+  mean_arr.setZero();
+  var_arr.setZero();
+  for (int i = 0; i < rows; ++i) {
+    delta_arr = X_arr.col(i) - mean_arr;
+    mean_arr += delta_arr / static_cast<T>(i + 1);
+    var_arr += delta_arr * (X_arr.col(i) - mean_arr);
   }
-  const T scale = T(1) / static_cast<T>(rows);
-  mean_arr *= scale;
-  var_arr = var_arr * scale - mean_arr.square();
+  var_arr /= static_cast<T>(rows);
 }
 
 template <typename T>
