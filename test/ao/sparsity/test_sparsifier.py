@@ -167,3 +167,13 @@ class TestWeightNormSparsifier(TestCase):
             # Check parametrization exists and is correct
             assert is_parametrized(module, 'weight')
             assert type(module.parametrizations.weight[0]) == FakeSparsity
+
+    def test_mask_squash(self):
+        model = Model()
+        sparsifier = WeightNormSparsifier()
+        sparsifier.prepare(model, config=None)
+        sparsifier.squash_mask()
+        for g in sparsifier.module_groups:
+            module = g['module']
+            assert not is_parametrized(module, 'weight')
+            assert not hasattr(module, 'mask')
