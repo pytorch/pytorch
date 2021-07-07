@@ -349,6 +349,11 @@ class TestSparseCSR(TestCase):
 
         self.assertEqual(coo_product, csr_product)
 
+        self.assertEqual(sparse_csr.crow_indices().shape[0], size[0] + 1)
+        self.assertEqual(sparse_csr.crow_indices().min(), 0)
+        self.assertEqual(sparse_csr.crow_indices().max(), sparse_csr.col_indices().shape[0])
+        self.assertTrue(all(sparse_csr.crow_indices()[1:] >= sparse_csr.crow_indices()[:-1]))
+
         vec = torch.randn((100, 1), dtype=dtype, device=device)
         index = torch.tensor([
             [1, 0, 35, 14, 39, 6, 71, 66, 40, 27],
@@ -359,6 +364,19 @@ class TestSparseCSR(TestCase):
         csr = coo.to_sparse_csr()
 
         self.assertEqual(coo.matmul(vec), csr.matmul(vec))
+
+        col_indices = torch.tensor([
+            31, 92, 65, 50, 34, 62, 22, 56, 74, 89
+        ], dtype=torch.int64, device=device)
+        self.assertEqual(csr.col_indices(), col_indices)
+
+        self.assertEqual(csr.crow_indices().shape[0], 101)
+        self.assertEqual(csr.crow_indices().min(), 0)
+        self.assertEqual(csr.crow_indices().max(), 10)
+        self.assertTrue(all(csr.crow_indices()[1:] >= csr.crow_indices()[:-1]))
+
+        values = torch.tensor([2, 1, 6, 4, 10, 3, 5, 9, 8, 7], dtype=dtype, device=device)
+        self.assertEqual(csr.values(), values)
 
     @onlyCPU
     @unittest.skipIf(IS_MACOS or IS_WINDOWS, "MKL doesn't work on windows or mac")
