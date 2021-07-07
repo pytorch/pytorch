@@ -413,15 +413,6 @@ class IDP(IterDataPipe):
         return self.length
 
 
-class MDP_NoLen(MapDataPipe):
-    def __init__(self, input_dp):
-        super().__init__()
-        self.input_dp = input_dp
-
-    def __getitem__(self, index):
-        return self.input_dp[index]
-
-
 class MDP(MapDataPipe):
     def __init__(self, input_dp):
         super().__init__()
@@ -930,19 +921,7 @@ class TestFunctionalMapDataPipe(TestCase):
         self.assertEqual(len(concat_dp), 15)
         for index in range(15):
             self.assertEqual(concat_dp[index], (list(range(10)) + list(range(5)))[index])
-
-        # Test Reset
-        for index in range(15):
-            self.assertEqual(concat_dp[index], (list(range(10)) + list(range(5)))[index])
-
-        input_dp_nl = MDP_NoLen(range(5))
-
-        concat_dp = input_dp1.concat(input_dp_nl)
-        with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
-            len(concat_dp)
-
-        for index in range(15):
-            self.assertEqual(concat_dp[index], (list(range(10)) + list(range(5)))[index])
+        self.assertEqual(list(concat_dp), list(range(10)) + list(range(5)))
 
     def test_map_datapipe(self):
         arr = range(10)

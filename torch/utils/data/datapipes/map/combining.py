@@ -1,5 +1,5 @@
 from torch.utils.data import MapDataPipe, functional_datapipe
-from typing import Optional, Sized, Tuple, TypeVar
+from typing import Sized, Tuple, TypeVar
 
 T_co = TypeVar('T_co', covariant=True)
 
@@ -9,40 +9,37 @@ class ConcatMapDataPipe(MapDataPipe):
     r""" :class:`ConcatMapDataPipe`.
 
     Map DataPipe to concatenate multiple Map DataPipes.
+    The actual index of is the cumulative sum of source datapipes.
+    For example, if there are 2 source datapipes both with length 5,
+    index 0 to 4 of the resulting `ConcatMapDataPipe` would refer to
+    elements of the first datapipe, and 5 to 9 would refer to elements
+    of the second datapipe.
     args:
         datapipes: Map DataPipes being concatenated
     """
     datapipes: Tuple[MapDataPipe]
-    length: Optional[int]
+    length: int
 
     def __init__(self, *datapipes: MapDataPipe):
         if len(datapipes) == 0:
             raise ValueError("Expected at least one DataPipe, but got nothing")
         if not all(isinstance(dp, MapDataPipe) for dp in datapipes):
             raise TypeError("Expected all inputs to be `MapDataPipe`")
+        if not all(isinstance(dp, Sized) for dp in datapipes):
+            raise TypeError("Expected all inputs to be `Sized`")
         self.datapipes = datapipes  # type: ignore[assignment]
-        self.length = None
+        self.length = -1
 
     def __getitem__(self, index) -> T_co:
         offset = 0
         for dp in self.datapipes:
-            if isinstance(dp, Sized):
-                if index - offset < len(dp):
-                    return dp[index - offset]
-                else:
-                    offset += len(dp)
-            else:
-                # Regard the datapipe with no valid length as unlimited.
+            if index - offset < len(dp):
                 return dp[index - offset]
-        raise ValueError("Index {} is out of range.".format(index))
+            else:
+                offset += len(dp)
+        raise IndexError("Index {} is out of range.".format(index))
 
     def __len__(self) -> int:
-        if self.length is not None:
-            if self.length == -1:
-                raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
-            return self.length
-        if all(isinstance(dp, Sized) for dp in self.datapipes):
+        if self.length == -1:
             self.length = sum(len(dp) for dp in self.datapipes)
-        else:
-            self.length = -1
-        return len(self)
+        return self.length
