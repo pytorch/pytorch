@@ -13,8 +13,7 @@ class Foo {
   explicit Foo(int x) {
     // LOG(INFO) << "Foo " << x;
   }
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  virtual ~Foo() {}
+  virtual ~Foo() = default;
 };
 
 C10_DECLARE_REGISTRY(FooRegistry, Foo, int);
