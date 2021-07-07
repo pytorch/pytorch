@@ -571,8 +571,8 @@ class Module:
                         param.grad.data = grad_applied
                     else:
                         assert param.grad.is_leaf
-                        # type: ignore[union-attr]
-                        self._parameters[key].grad = grad_applied.requires_grad_(param.grad.requires_grad)
+                        self._parameters[key].grad = grad_applied.requires_grad_(  # type: ignore[union-attr]
+                            param.grad.requires_grad)
 
         for key, buf in self._buffers.items():
             if buf is not None:
