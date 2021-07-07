@@ -20,7 +20,7 @@ namespace nn {
 /// ```
 struct TORCH_API TransformerOptions {
 
-  using activation_t = c10::variant<enumtype::kReLU, enumtype::kGELU>;
+  using activation_t = c10::variant<enumtype::kReLU, enumtype::kGELU, std::function<Tensor(const Tensor&)> >;
 
   // The following constructors are commonly used
   // Please don't add more unless it is proved as a common usage
