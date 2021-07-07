@@ -70,7 +70,7 @@ class _InputEqualizationObserver(nn.Module):
         self.equalization_shape: List[int] = []
 
     def forward(self, x_orig):
-        if not (x_orig.ndim == 2 or x_orig.ndim == 4):
+        if not (x_orig.ndim >= 2 and x_orig.ndim <= 5):
             raise ValueError("InputEqualizationObserver only supports Linear and Conv layers")
 
         # Calculate the shape needed to reshape the equalization scale later (needed for Conv layers)
@@ -146,7 +146,7 @@ class _WeightEqualizationObserver(nn.Module):
         self.equalization_scale = torch.empty(0)
 
     def forward(self, w_orig):
-        if not (w_orig.ndim == 2 or w_orig.ndim == 4):
+        if not (w_orig.ndim >= 2 and w_orig.ndim <= 5):
             raise ValueError("InputEqualizationObserver only supports Linear and Conv layers")
 
         return self.weight_col_obs(w_orig)
