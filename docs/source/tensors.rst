@@ -534,6 +534,7 @@ Tensor class reference
     Tensor.orgqr
     Tensor.ormqr
     Tensor.outer
+    Tensor.pad
     Tensor.permute
     Tensor.pin_memory
     Tensor.pinverse

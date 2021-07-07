@@ -1047,6 +1047,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/Normalization.cpp",
     "aten/src/ATen/native/Onehot.cpp",
     "aten/src/ATen/native/PackedSequence.cpp",
+    "aten/src/ATen/native/Pad.cpp",
     "aten/src/ATen/native/PixelShuffle.cpp",
     "aten/src/ATen/native/PointwiseOps.cpp",
     "aten/src/ATen/native/Pooling.cpp",

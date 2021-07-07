@@ -795,6 +795,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.numel: lambda input: -1,
         torch.orgqr: lambda input, tau: -1,
         torch.ormqr: lambda input, input2, input3, left=True, transpose=False: -1,
+        torch.pad: lambda input, pad_width, mode='constant', *, constant_values=None, out=None: -1,
         torch.pairwise_distance: lambda x1, x2, p=2.0, eps=1e-06, keepdim=False: -1,
         torch.permute: lambda self, dim: -1,
         torch.pca_lowrank: lambda input, q=None, center=True, niter=2: -1,

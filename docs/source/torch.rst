@@ -527,6 +527,7 @@ Other Operations
     view_as_complex
     resolve_conj
     resolve_neg
+    pad
 
 
 BLAS and LAPACK Operations

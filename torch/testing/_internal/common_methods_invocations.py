@@ -2099,6 +2099,26 @@ def sample_inputs_index_put(op_info, device, dtype, requires_grad, **kwargs):
 
     return inputs
 
+def sample_inputs_pad(op_info, device, dtype, requires_grad, **kwargs):
+    inputs = [
+        SampleInput(
+            make_tensor((S, S, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
+            args=(
+                10,
+            ),
+            kwargs=dict(mode='constant')),
+        SampleInput(
+            make_tensor((S, S, S, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
+            args=(
+                ((1, 2), (3, 4), (5, 6), (7, 0)),
+            ),
+            kwargs=dict(
+                mode='constant',
+                constant_values=((-3, -2), (-1, 0), (1, 2), (3, 4)))),
+    ]
+
+    return inputs
+
 # Missing to test the nondeterminism of the operation
 # https://github.com/pytorch/pytorch/issues/53352
 def sample_inputs_index_add(op_info, device, dtype, requires_grad, **kwargs):
@@ -8100,6 +8120,18 @@ op_db: List[OpInfo] = [
            test_neg_view=False,
            sample_inputs_func=sample_inputs_index_put,
            skips=(
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+           )),
+    OpInfo('pad',
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           supports_out=True,
+           supports_inplace_autograd=True,
+           sample_inputs_func=sample_inputs_pad,
+           skips=(
+               # This test is skipped because it fails with the following
+               # error, or similar, if a pad specifier arg is a non-tensor:
+               #    Expected a value of type 'Tensor' for argument 'pad_width'
+               #    but instead found type 'int'.
                SkipInfo('TestJit', 'test_variant_consistency_jit'),
            )),
     OpInfo('sort',

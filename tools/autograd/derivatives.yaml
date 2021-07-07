@@ -725,6 +725,11 @@
   index: non_differentiable
   result: auto_linear
 
+- name: pad(Tensor self, Tensor pad_width, str mode='constant', *, Tensor? constant_values=None) -> Tensor
+  self: pad_backward(grad, self, pad_width, mode)
+  pad_width: non_differentiable
+  constant_values: non_differentiable
+
 - name: inverse(Tensor self) -> Tensor
   self: -at::matmul(result.conj().transpose(-2, -1), at::matmul(grad, result.conj().transpose(-2, -1)))
 

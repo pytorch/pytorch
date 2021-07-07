@@ -5376,6 +5376,283 @@ else:
             sz[d] = 0
             self.assertEqual(sz, y.size())
 
+    # This test calls torch.pad and numpy.pad many different ways to ensure
+    # that they give the same results
+    # NOTE: bfloat16 is skipped because numpy.pad does not support it
+    @onlyOnCPUAndCUDA
+    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False))
+    def test_pad(self, device, dtype):
+        test_cases = [
+            # Input size, pad mode, pad width, kwargs
+
+            #################################################
+            # 'constant' mode
+            ((10, 10, 10), 'constant', ((0, 0), (0, 0), (0, 0)), {}),
+            ((4, 13, 2, 5), 'constant', ((3, 2), (8, 10), (1, 0), (5, 6)), {}),
+            ((10, 10), 'constant', ((2, 2), (2, 2)), {}),
+            ((10, 10), 'constant', ((2, 2), (2, 2)), {'constant_values': 10}),
+            ((5, 2, 4, 1, 7), 'constant', ((1, 2), (6, 4), (10, 7), (3, 3), (0, 0)), {'constant_values': 89}),
+            ((15,), 'constant', ((100, 100),), {'constant_values': 1234}),
+
+            # pad_width containing zeros, and degenerate inputs
+            ((15,), 'constant', ((0, 1000),), {'constant_values': 1234}),
+            ((15,), 'constant', ((100, 0),), {'constant_values': 1234}),
+            ((0,), 'constant', ((100, 0),), {'constant_values': 1234}),
+            ((0,), 'constant', ((0, 100),), {'constant_values': 1234}),
+            ((0,), 'constant', ((0, 0),), {'constant_values': 1234}),
+            ((0, 0), 'constant', ((100, 0), (100, 100)), {'constant_values': 1234}),
+            ((0, 0), 'constant', ((1, 0), (1, 0)), {'constant_values': 1234}),
+            ((0, 0), 'constant', ((0, 100), (1, 0)), {'constant_values': 1234}),
+            ((0, 0), 'constant', ((1, 1), (1, 1)), {'constant_values': 1234}),
+            ((0, 0), 'constant', ((0, 0), (0, 0)), {'constant_values': 1234}),
+
+            #################################################
+            # 'empty' mode
+            ((10, 10, 10), 'empty', ((0, 0), (0, 0), (0, 0)), {}),
+            ((4, 13, 2, 5), 'empty', ((3, 2), (8, 10), (1, 0), (5, 6)), {}),
+            ((10, 10), 'empty', ((2, 2), (2, 2)), {}),
+            ((10, 10), 'empty', ((2, 2), (2, 2)), {}),
+            ((5, 2, 4, 1, 7), 'empty', ((1, 2), (6, 4), (10, 7), (3, 3), (0, 0)), {}),
+            ((15,), 'empty', ((100, 100),), {}),
+
+            # pad_width containing zeros, and degenerate inputs
+            ((15,), 'empty', ((0, 1000),), {}),
+            ((15,), 'empty', ((100, 0),), {}),
+            ((0,), 'empty', ((100, 0),), {}),
+            ((0,), 'empty', ((0, 100),), {}),
+            ((0,), 'empty', ((0, 0),), {}),
+            ((0, 0), 'empty', ((100, 0), (100, 100)), {}),
+            ((0, 0), 'empty', ((1, 0), (1, 0)), {}),
+            ((0, 0), 'empty', ((0, 100), (1, 0)), {}),
+            ((0, 0), 'empty', ((1, 1), (1, 1)), {}),
+            ((0, 0), 'empty', ((0, 0), (0, 0)), {}),
+        ]
+
+        # 'constant' mode with each combination of the different formats for
+        # pad_width and constant_values
+        pad_width_list = [
+            5,
+            (7,),
+            ((4,),),
+            ((3,), (4,), (2,), (5,)),
+            (3, 5),
+            ((4, 2),),
+            ((3, 2), (8, 10), (1, 0), (5, 6)),
+        ]
+        constant_values_list = [
+            2,
+            (4,),
+            ((8,),),
+            ((1,), (3,), (5,), (0,)),
+            (5, 2),
+            ((9, 3),),
+            ((1, 2), (3, 4), (4, 5), (6, 7)),
+        ]
+        for pad_width, constant_values in product(pad_width_list, constant_values_list):
+            test_cases.append(
+                ((4, 13, 2, 5), 'constant', pad_width, {'constant_values': constant_values}))
+
+
+        # 'constant' mode with floating point constant_values
+        if dtype.is_floating_point or dtype.is_complex:
+            test_cases += [
+                ((4, 13, 2, 5), 'constant', ((3, 2), (8, 10), (1, 0), (5, 6)),
+                    {'constant_values': ((3.3, 1.3), (4.4, 5), (10, 1), (4, 8))}),
+                ((4, 13, 2, 5), 'constant', ((3, 2), (8, 10), (1, 0), (5, 6)),
+                    {'constant_values': 5.4}),
+            ]
+
+        # 'constant' mode with complex constant_values
+        if dtype.is_complex:
+            test_cases += [
+                ((4, 13, 2, 5), 'constant', ((3, 2), (8, 10), (1, 0), (5, 6)),
+                    {'constant_values': ((3. + 1j, 1.3j), (4.4, 5), (10, 1), (4j, 8))}),
+                ((4, 13, 2, 5), 'constant', ((3, 2), (8, 10), (1, 0), (5, 6)),
+                    {'constant_values': 1.2j}),
+            ]
+
+        for input_size, mode, pad_width, kwargs in test_cases:
+            input = make_tensor(input_size, device, dtype, low=-9, high=9)
+            input_np = input.cpu().numpy()
+
+            result = input.pad(pad_width, mode, **kwargs).cpu()
+            result_np = torch.from_numpy(np.pad(input_np, pad_width, mode, **kwargs))
+
+            msg = f'input_size: {input_size}, mode: {mode}, pad_width: {pad_width}, kwargs: {kwargs}'
+
+            self.assertEqual(result.size(), result_np.size(), msg=msg)
+
+            if mode == 'empty':
+                # For empty mode, only check the non-padded elements,
+                # since the padded elements could have any value
+
+                if input.numel() == 0:
+                    continue
+
+                slices = []
+
+                pw = torch.tensor(pad_width)
+
+                if pw.numel() == 1:
+                    pw = pw.as_strided((input.dim(), 2), (0, 0))
+                elif (pw.dim() == 2) and (pw.size(0) == input.dim()) and (pw.size(1) == 1):
+                    pw = pw.as_strided((input.dim(), 2), (1, 0))
+                elif pw.numel() == 2:
+                    pw = pw.as_strided((input.dim(), 2), (0, 1))
+
+                for (before, after), dim_idx in zip(pw, range(input.dim())):
+                    slices.append([before, before + input.size(dim_idx) - 1])
+
+                self.assertEqual(result[slices], result_np[slices], msg=msg)
+
+            else:
+                self.assertEqual(result, result_np, msg=msg)
+
+    # This test ensures that torch.pad's input and constant_values arg can have
+    # different dtypes, for mode='constant'. The result should match what we
+    # get if we cast constant_values to the input's dtype before the torch.pad
+    # call.
+    @onlyOnCPUAndCUDA
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_pad_constant_values_dtypes(self, device, dtype):
+        input = make_tensor((3, 3, 3), device, dtype, low=-9, high=9)
+        dtypes = torch.testing.get_all_dtypes()
+        sizes = [(), (1,), (2,), (1, 1), (1, 2), (input.dim(), 1), (input.dim(), 2)]
+        pad_widths = ((3, 4), (5, 6), (7, 8))
+
+        for constant_values_dtype, constant_values_size in product(dtypes, sizes):
+            constant_values = torch.zeros(constant_values_size, device=device, dtype=constant_values_dtype)
+
+            result_torch = input.pad(pad_widths, constant_values=constant_values).cpu()
+
+            result_torch_precast = input.pad(pad_widths, constant_values=constant_values.to(dtype)).cpu()
+            self.assertEqual(result_torch, result_torch_precast)
+
+            if torch.bfloat16 not in [dtype, constant_values_dtype]:
+                # numpy.pad has weird inconsistent support for dtype mismatches
+                # between the input and constant_values. Mismatches are
+                # supported in most cases, but when both of the following are
+                # conditions are true, numpy.pad throws an error
+                size_unsupported_condition = constant_values.size() in [torch.Size([input.dim(), 1]), torch.Size([input.dim(), 2])]
+                dtypes_unsupported_condition = constant_values_dtype.is_complex and not dtype.is_complex and (dtype != torch.bool)
+
+                if not size_unsupported_condition or not dtypes_unsupported_condition:
+                    result_numpy = torch.tensor(np.pad(
+                        input.cpu().numpy(),
+                        pad_widths,
+                        constant_values=constant_values.cpu().numpy()))
+                    self.assertEqual(result_torch, result_numpy)
+
+    @onlyOnCPUAndCUDA
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_pad_errors(self, device, dtype):
+        input = make_tensor((3, 3, 3), device, dtype, low=-9, high=9)
+
+        # pad_width tensor dtype errors
+        for pad_width_dtype in torch.testing.get_all_dtypes():
+            for pad_width_size in [(), (2,), (input.dim(), 2)]:
+                pad_width = torch.zeros(pad_width_size, device='cpu', dtype=pad_width_dtype)
+
+                if pad_width_dtype == torch.int64:
+                    input.pad(pad_width)
+                    if torch.bfloat16 not in [dtype, pad_width_dtype]:
+                        np.pad(input.cpu().numpy(), pad_width.cpu().numpy())
+                else:
+                    with self.assertRaisesRegex(RuntimeError, r"Expected 'pad_width' to be Long dtype"):
+                        input.pad(pad_width)
+
+                    if torch.bfloat16 not in [dtype, pad_width_dtype]:
+                        # Numpy does support char, short, and int types, but torch.pad only supports long
+                        if pad_width_dtype not in [torch.int8, torch.int16, torch.int32]:
+                            with self.assertRaises(TypeError):
+                                np.pad(input.cpu().numpy(), pad_width.cpu().numpy())
+
+        # pad_width primitive type errors
+        for pad_width in [0., (0.,), ((0, 0), (0, 0), (0., 0)), 1j, (1j,), ((0, 0), (0, 0), (1j, 0))]:
+            with self.assertRaisesRegex(RuntimeError, r"Expected 'pad_width' to be of integer type"):
+                input.pad(pad_width)
+
+            if dtype != torch.bfloat16:
+                with self.assertRaises(TypeError):
+                    np.pad(input.cpu().numpy(), pad_width)
+
+        # constant_values should only be legal for mode='constant'
+        for mode in ['empty']:
+            with self.assertRaisesRegex(RuntimeError, rf"Unsupported keyword argument for '{mode}' mode: constant_values"):
+                input.pad(0, mode=mode, constant_values=0)
+
+    # Ensure proper device checking for tensor inputs to torch.pad
+    @onlyOnCPUAndCUDA
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_pad_errors_devices(self, device, dtype):
+        modes = ['constant', 'empty']
+
+        if torch.cuda.is_available():
+            # If pad_width is a tensor, it must be CPU
+            input = make_tensor((3, 3), device, dtype, low=-9, high=9)
+            for mode in modes:
+                pad_width = torch.tensor(1, device='cuda', dtype=torch.int64)
+
+                with self.assertRaisesRegex(RuntimeError, r"Expected 'pad_width' to be on CPU, but got cuda"):
+                    input.pad(pad_width, mode=mode)
+
+    # Check that torch.pad throws an error for incorrect pad_width argument sizes
+    @onlyOnCPUAndCUDA
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_pad_errors_pad_width_size(self, device, dtype):
+        S = 3
+
+        # Test pad_width size checks
+        test_cases = [
+            # input size, pad width size, should error
+            ((S,), (), False),
+            ((S,), (1,), False),
+            ((S,), (2,), False),
+            ((S,), (1, 1), False),
+            ((S,), (1, 2), False),
+            ((S,), (2, 1), True),
+
+            ((S, S), (), False),
+            ((S, S), (1,), False),
+            ((S, S), (2,), False),
+            ((S, S), (1, 1), False),
+            ((S, S), (1, 2), False),
+            ((S, S), (2, 2), False),
+
+            ((S, S, S), (), False),
+            ((S, S, S), (1,), False),
+            ((S, S, S), (2,), False),
+            ((S, S, S), (1, 1), False),
+            ((S, S, S), (1, 2), False),
+            ((S, S, S), (3, 2), False),
+
+            ((S, S, S, S), (), False),
+            ((S, S, S, S), (1,), False),
+            ((S, S, S, S), (2,), False),
+            ((S, S, S, S), (1, 1), False),
+            ((S, S, S, S), (1, 2), False),
+            ((S, S, S, S), (4, 2), False),
+
+            ((S, S, S, S, S), (), False),
+            ((S, S, S, S, S), (1,), False),
+            ((S, S, S, S, S), (2,), False),
+            ((S, S, S, S, S), (1, 1), False),
+            ((S, S, S, S, S), (1, 2), False),
+            ((S, S, S, S, S), (5, 2), False),
+            ((S, S, S, S, S), (0,), True),
+            ((S, S, S, S, S), (3,), True),
+            ((S, S, S, S, S), (5,), True),
+
+        ]
+        for input_size, pad_width_size, should_error in test_cases:
+            input = make_tensor(input_size, device, dtype, low=-9, high=9)
+            pad_width = torch.zeros(pad_width_size, dtype=torch.int64, device='cpu')
+            if should_error:
+                with self.assertRaisesRegex(RuntimeError, r'Expected pad_width.size\(\) to be either'):
+                    input.pad(pad_width)
+            else:
+                input.pad(pad_width)
+
     @dtypes(*torch.testing.get_all_dtypes())
     def test_index_copy(self, device, dtype):
         # We just test for num_copy <= num_dest, as otherwise there are repeated indices

@@ -523,6 +523,12 @@ class Tensor(torch._C._TensorBase):
         else:
             return super(Tensor, self).split_with_sizes(split_size, dim)
 
+    def pad(self, pad_width, mode='constant', *, constant_values=None, out=None):
+        r"""See :func:`torch.pad`"""
+        if has_torch_function_unary(self):
+            return handle_torch_function(Tensor.pad, (self,), self, pad_width, mode=mode, constant_values=constant_values, out=out)
+        return torch.pad(self, pad_width, mode, constant_values=constant_values, out=out)
+
     def unique(self, sorted=True, return_inverse=False, return_counts=False, dim=None):
         r"""Returns the unique elements of the input tensor.
 

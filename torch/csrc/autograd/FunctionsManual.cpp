@@ -10,6 +10,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/native/Pad.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/Utils.h>
@@ -3391,6 +3392,12 @@ Tensor constant_pad_nd_backward(const Tensor& grad, IntArrayRef pad) {
   // NOLINTNEXTLINE(modernize-use-transparent-functors)
   std::transform(negated_pad.cbegin(), negated_pad.cend(), negated_pad.begin(), std::negate<int64_t>());
   return at::constant_pad_nd(grad, negated_pad, 0);
+}
+
+at::Tensor pad_backward(const at::Tensor& grad, const at::Tensor& self, const at::Tensor& pad_width, c10::string_view mode_str) {
+  Tensor pad_width_ = at::_expand_pad_specifier(pad_width, "pad_width", self.dim());
+  std::vector<at::indexing::TensorIndex> slices = at::native::pad_width_to_inner_slices(pad_width_, self);
+  return grad.index(slices);
 }
 
 Tensor embedding_dense_double_backward(const Tensor & grad, const Tensor & indices, int64_t padding_idx) {

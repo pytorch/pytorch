@@ -26,6 +26,7 @@ __all__ = [
     'cdist',
     'chain_matmul',
     'einsum',
+    'pad',
     'istft',
     'lu',
     'norm',
@@ -325,6 +326,122 @@ def einsum(*args):
         return einsum(equation, *_operands)
 
     return _VF.einsum(equation, operands)  # type: ignore[attr-defined]
+
+# If pad specifier is not None and not a tensor, convert it to a tensor.
+#
+# Arguments:
+#
+#   pad_spec    The pad specifier argument to convert to a tensor
+#
+#   arg_name    Name of pad specifier argument, used for error messages
+#
+#   dtype       The expected data type of the pad specifier tensor
+#
+#   device      The device to use for the pad specifier tensor
+def _maybe_convert_pad_specifier(pad_spec, arg_name, dtype, device):
+    if pad_spec is None or torch.is_tensor(pad_spec):
+        return pad_spec
+
+    # A valid pad specifier argument is either a single number, a sequence,
+    # of a homogeneous sequence of sequences. All of these can be represented
+    # as a tensor.
+    pad_spec_tensor = torch.tensor(pad_spec, device=device)
+
+    # If the expected dtype is an integer, we need to throw an error if the
+    # pad specifier argument contains any float or complex types.
+    # TODO: It would be more performant to specify dtype in the torch.tensor
+    # call and then catch errors and warnings it throws.
+    if pad_spec_tensor.dtype != dtype:
+        def is_int(dtype):
+            return (not dtype.is_floating_point) and (not dtype.is_complex)
+
+        if is_int(dtype) and not is_int(pad_spec_tensor.dtype):
+            raise RuntimeError(f"Expected '{arg_name}' to be of integer type")
+
+        pad_spec_tensor = pad_spec_tensor.to(dtype)
+
+    return pad_spec_tensor
+
+# This method is defined in Python because pad specifier arguments, like
+# `pad_width` and `constant_values`, can be given as a scalar, a 1-D or 2-D
+# sequence, or a tensor. To support all these different types in
+# a native_functions.yaml declaration, we would need several different
+# declarations for each pad specifier argument. So for simplicity, we only
+# declare tensor pad specifier arguments in native_functions.yaml, and handle
+# the other acceptable types in Python
+def pad(input, pad_width, mode='constant', *, constant_values=None, out=None):
+    r"""Pad a tensor by extending the size of one or more dimensions. The new
+    elements are filled with values according to the chosen padding mode.
+    Padding can be added to the beginning of each dimension, called "before
+    padding", and/or the end of each dimension, called "after padding".
+
+    Args:
+        input (Tensor): Tensor to pad
+
+        pad_width (Tensor, sequence, array_like, or int): Number of values
+            padded to the edges of each dimension. If a tensor is given,
+            it must be on CPU. The following formats can be used:
+
+                * Scalar, (all,), or ((all,)) yields equal before and after pad
+                  widths for all dimensions.
+                * ((both_1), ..., (both_N)) yields unique padding for each
+                  dimension, but before and after pad widths within each
+                  dimension are equal.
+                * ((before, after),) or (before, after) yields unique before
+                  and after pad widths, but same for all dimensions.
+                * ((before_1, after_1), ..., (before_N, after_N)) yields unique
+                  before and after pad widths for each dimension.
+
+        mode (str, optional): Padding mode to use to fill padding elements. One
+            of the following string values can be used. Default: `constant`
+
+                * 'constant' (default): Pads with constant values, according to
+                  the :attr:`constant_values` argument.
+                * 'empty': Pads with undefined values from uninitialized memory.
+
+    Keyword args:
+        constant_values (Tensor, sequence, array_like, or scalar): Used in
+            ``mode='constant'`` to specify the padding values for each dimension.
+            The following formats can be used. Default: 0
+
+                * Scalar, (all,), or ((all,)) yields equal before and after pad
+                  values for all dimensions.
+                * ((both_1), ..., (both_N)) yields unique padding for each
+                  dimension, but before and after pad values within each
+                  dimension are equal.
+                * ((before, after),) or (before, after) yields unique before
+                  and after pad values, but same for all dimensions.
+                * ((before_1, after_1), ..., (before_N, after_N)) yields unique
+                  before and after pad values for each dimension.
+
+        out (Tensor, optional): Output tensor. Default: None
+
+    """
+    if has_torch_function_variadic(input, pad_width, constant_values):
+        return handle_torch_function(
+            pad,
+            (input, pad_width, constant_values),
+            input, pad_width, mode,
+            constant_values=constant_values,
+            out=out)
+    pad_width_ = _maybe_convert_pad_specifier(
+        pad_width,
+        'pad_width',
+        torch.int64,
+        # NOTE: Even if the input is CUDA, putting pad_width on the CPU is more
+        # efficient since we need to use its data to calculate the result size
+        'cpu')
+    constant_values_ = _maybe_convert_pad_specifier(
+        constant_values,
+        'constant_values',
+        input.dtype,
+        input.device)
+    return _VF.pad(
+        input,
+        pad_width_,
+        mode,
+        constant_values=constant_values_,
+        out=out)
 
 
 # This wrapper exists to support variadic args.

@@ -273,6 +273,7 @@ namespace c10 {
   _(aten, _set_item)                 \
   _(aten, manual_seed)               \
   _(aten, set_)                      \
+  _(aten, pad)                       \
   _(aten, index_put_)                \
   _(aten, device)                    \
   _(aten, hash)                      \

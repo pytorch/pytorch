@@ -10563,6 +10563,21 @@
   python_module: nn
   variants: function
 
+- func: pad(Tensor self, Tensor pad_width, str mode='constant', *, Tensor? constant_values=None) -> Tensor
+  variants: function, method
+  dispatch:
+    CPU, CUDA: pad
+  device_check: NoCheck  # pad_width can only be on CPU, for better performance
+
+- func: pad.out(Tensor self, Tensor pad_width, str mode='constant', *, Tensor? constant_values=None, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: pad_out
+  device_check: NoCheck  # pad_width can only be on CPU, for better performance
+
+- func: _expand_pad_specifier(Tensor pad_specifier, str arg_name, int ndim) -> Tensor
+  dispatch:
+    CPU, CUDA: _expand_pad_specifier
+
 - func: flatten_dense_tensors(Tensor[] tensors) -> Tensor
   variants: function
   python_module: nn
