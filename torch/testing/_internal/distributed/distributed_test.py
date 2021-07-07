@@ -5759,6 +5759,7 @@ class DistributedTest:
         @require_n_gpus_for_nccl_backend(
             int(os.environ["WORLD_SIZE"]), os.environ["BACKEND"]
         )
+
         def test_broadcast_object_list(self):
             # Only set device for NCCL backend since it must use GPUs.
             backend = os.environ["BACKEND"]
@@ -5778,7 +5779,14 @@ class DistributedTest:
                 else [None for _ in COLLECTIVES_OBJECT_TEST_LIST]
             )
 
-            # Single object test
+            # Single object test with dist_device_specified
+            single_obj_list = [objects[0]]
+            if self.rank != src_rank:
+                self.assertNotEqual(single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0])
+            dist.broadcast_object_list(single_obj_list, src=0, group=None, dist_device=torch.device("cpu"))
+            self.assertEqual(single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0])
+
+            # Single object test: backward compatibility when dist_device unspecified
             single_obj_list = [objects[0]]
             if self.rank != src_rank:
                 self.assertNotEqual(single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0])
@@ -5790,6 +5798,7 @@ class DistributedTest:
                 self.assertNotEqual(objects, COLLECTIVES_OBJECT_TEST_LIST)
             dist.broadcast_object_list(objects, src=0)
             self.assertEqual(objects, COLLECTIVES_OBJECT_TEST_LIST)
+
 
         def _test_ddp_ignore_params_arg(self, static_graph=False):
             class TestModel(nn.Module):

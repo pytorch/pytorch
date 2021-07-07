@@ -12,11 +12,9 @@ from typing import Any, Callable, Dict, List, Optional, Type
 import logging
 import torch
 import torch.distributed as dist
-import torch.distributed.distributed_c10d as distributed_c10d
 from torch.optim import Optimizer
 
 __all__ = ["ZeroRedundancyOptimizer"]
-
 
 # Credits:  classy_vision/generic/distributed_util.py
 def _recursive_copy_to_device(
@@ -60,7 +58,7 @@ def _get_global_rank(group: Any, rank: int) -> int:
     Returns the global rank for the given group and rank.
     """
     return (rank if group is dist.group.WORLD
-            else distributed_c10d._get_global_rank(group, rank))
+            else dist.distributed_c10d._get_global_rank(group, rank))
 
 
 class ZeroRedundancyOptimizer(Optimizer):
@@ -240,9 +238,6 @@ class ZeroRedundancyOptimizer(Optimizer):
         # case they have been updated
         self._sync_param_groups(self.param_groups, self.optim.param_groups)
 
-        # Pull the sharded state from all ranks and store them in rank order
-        empty_messenger = torch.tensor([0], dtype=torch.uint8, device=self._default_device)
-
         # NOTE: We wastefully use `broadcast()` (e.g. instead of `gather()`)
         # due to compatibility issues with NCCL backend; a possible follow-up
         # is to move all sharded state management to RPC RRef
@@ -259,12 +254,12 @@ class ZeroRedundancyOptimizer(Optimizer):
                     )
                 else:
                     # Receive the optimizer state from the source rank
-                    object_list = [empty_messenger]
-                    distributed_c10d.broadcast_object_list(
+                    object_list = [None]
+                    dist.broadcast_object_list(
                         object_list,
                         src_rank=global_rank,
                         group=self.group,
-                        device=self._default_device,
+                        dist_device=self._default_device,
                     )
                     self._all_state_dicts.append(
                         _recursive_copy_to_device(object_list[0], non_blocking=True, device=torch.device("cpu"))
@@ -272,20 +267,20 @@ class ZeroRedundancyOptimizer(Optimizer):
             else:
                 if rank == self.rank:
                     # Send the optimizer state to the target rank
-                    _ = distributed_c10d.broadcast_object_list(
+                    _ = dist.broadcast_object_list(
                         [self.optim.state_dict()],
                         src_rank=self.global_rank,
                         group=self.group,
-                        device=self._default_device,
+                        dist_device=self._default_device,
                     )
                 elif rank != to:
                     # Discard the received object; `broadcast()` is used for
                     # compatibility reasons
-                    _ = distributed_c10d.broadcast_object_list(
-                        [empty_messenger],
+                    _ = dist.broadcast_object_list(
+                        [None],
                         src_rank=global_rank,
                         group=self.group,
-                        device=self._default_device,
+                        dist_device=self._default_device,
                     )
 
     def _partition_parameters(self) -> List[List[Dict]]:

@@ -23,6 +23,7 @@ from torch._C._distributed_c10d import (
     ScatterOptions,
     Store,
 )
+
 from torch._C._distributed_c10d import _get_debug_mode, _DistributedDebugLevel
 from torch._six import string_classes
 
@@ -1714,8 +1715,9 @@ def broadcast_object_list(object_list, src=0, group=None, dist_device=None):
         src (int): Source rank from which to broadcast ``object_list``.
         group: (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used. Default is ``None``.
-        device (``torch.device``, optional): device to send from or receive
-            to (default: ``torch.device("cpu")``).
+        dist_device (``torch.device``, optional): device to send from or receive
+            to (default: `torch.device("cuda") if backend is NCCL, otherwise`
+            `torch.device("cpu")``).
 
     Returns:
         ``None``. If rank is part of the group, ``object_list`` will contain the
@@ -1746,7 +1748,9 @@ def broadcast_object_list(object_list, src=0, group=None, dist_device=None):
         >>>     objects = ["foo", 12, {1: 2}] # any picklable object
         >>> else:
         >>>     objects = [None, None, None]
-        >>> dist.broadcast_object_list(objects, src=0)
+        >>> # Assumes backend is not NCCL
+        >>> dist_device = torch.device("cpu")
+        >>> dist.broadcast_object_list(objects, src=0, dist_device=dist_device)
         >>> broadcast_objects
         ['foo', 12, {1: 2}]
     """
@@ -1762,9 +1766,9 @@ def broadcast_object_list(object_list, src=0, group=None, dist_device=None):
         object_sizes_tensor = torch.empty(len(object_list), dtype=torch.long)
 
     # Current device selection.
-    # To preserve  backwards compatibility, dist_device is default to None in
+    # To preserve backwards compatibility, dist_device is default to None in
     # which case we run current logic of device selection, i.e. current_device
-    # is cuda if backend is NCCL otherwise CPU device. In the case it is not
+    # is CUDA if backend is NCCL otherwise CPU device. In the case it is not
     # None we move all intermediate tensors to this given device.
     # See https://github.com/pytorch/pytorch/issues/60062
     group_backend = get_backend(group)
