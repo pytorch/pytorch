@@ -4,7 +4,7 @@ import logging
 
 import torch
 from torch import nn
-from torch.ao.sparsity import BaseSparsifier, WeightNormSparsifier
+from torch.ao.sparsity import BaseSparsifier, WeightNormSparsifier, FakeSparsity
 from torch.nn.utils.parametrize import is_parametrized
 
 from torch.testing._internal.common_utils import TestCase
@@ -155,3 +155,15 @@ class TestWeightNormSparsifier(TestCase):
         sparsifier.enable_mask_update = True
         sparsifier.step()
         self.assertAlmostEqual(model.linear.parametrizations['weight'][0].mask.mean().item(), 0.5, places=2)
+
+    def test_prepare(self):
+        model = Model()
+        sparsifier = WeightNormSparsifier()
+        sparsifier.prepare(model, config=None)
+        for g in sparsifier.module_groups:
+            module = g['module']
+            # Check mask exists
+            assert hasattr(module.parametrizations['weight'][0], 'mask')
+            # Check parametrization exists and is correct
+            assert is_parametrized(module, 'weight')
+            assert type(module.parametrizations.weight[0]) == FakeSparsity
