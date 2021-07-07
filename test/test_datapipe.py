@@ -1330,7 +1330,7 @@ class TestSharding(TestCase):
         dp1_upd = dp1.filter(lambda x: x % 3 == 1)
         combined_dp = dp0_upd.mux(dp1_upd)
         return combined_dp
-    
+
     @skipIfNoDill
     def test_simple_sharding(self):
         sharded_dp = self._get_pipeline().sharding_filter()
