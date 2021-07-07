@@ -103,6 +103,8 @@ jobs:
             echo 'Running setup.py with Python 2 did not give the expected error message.'
             false
           fi
+      - name: Keep torch.utils.collect_env python2 compliant
+        run: python2 -m py_compile torch/utils/collect_env.py
 
   shellcheck:
     runs-on: ubuntu-18.04
@@ -267,10 +269,10 @@ jobs:
 
   clang-tidy:
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-18.04
+    runs-on: linux.2xlarge
     container:
       # ubuntu18.04-cuda10.2-py3.6-tidy11
-      image: ghcr.io/pytorch/cilint-clang-tidy:7f0b4616100071a4813318bfdbd5b06ae36c5272
+      image: ghcr.io/pytorch/cilint-clang-tidy:b5a795a1165938adc6ccdab36bfa59bb3829ad47
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
@@ -288,8 +290,6 @@ jobs:
         run: |
           cd "${GITHUB_WORKSPACE}"
           set -eux
-          git remote add upstream https://github.com/pytorch/pytorch
-          git fetch upstream "$GITHUB_BASE_REF"
 
           if [ ! -d build ]; then
             git submodule update --init --recursive
@@ -329,9 +329,11 @@ jobs:
           # deploy/interpreter files are excluded due to using macros and other techniquies
           # that are not easily converted to accepted c++
           python3 tools/linter/clang_tidy.py \
+            --parallel \
             --verbose \
             --paths torch/csrc/ \
             --diff-file pr.diff \
+            --include-dir /usr/lib/llvm-11/include/openmp \
             -g"-torch/csrc/jit/passes/onnx/helper.cpp" \
             -g"-torch/csrc/jit/passes/onnx/shape_type_inference.cpp" \
             -g"-torch/csrc/jit/serialization/onnx.cpp" \
@@ -401,7 +403,7 @@ jobs:
           set -eux
           pip install -r requirements.txt
           pip install numpy==1.20 # https://github.com/pytorch/pytorch/pull/60472
-          pip install mypy==0.812
+          pip install expecttest==0.1.3 mypy==0.812
           # Needed to check tools/render_junit.py
           pip install junitparser rich
       - name: Run autogen
