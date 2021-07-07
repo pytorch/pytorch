@@ -394,7 +394,7 @@ def _make_mismatch_msg(
         msg, type="relative", difference=trace.max_rel_diff, index=trace.max_rel_diff_idx, tolerance=trace.rtol
     )
 
-    return msg
+    return msg.strip()
 
 
 @_check_quantized
@@ -821,14 +821,14 @@ def assert_close(
         define an ``assert_equal`` that uses zero tolrances for every ``dtype`` by default:
 
         >>> import functools
-        >>> import torch
         >>> assert_equal = functools.partial(torch.testing.assert_close, rtol=0, atol=0)
         >>> assert_equal(1e-9, 1e-10)
-        AssertionError: Tensors are not close!
+        Traceback (most recent call last):
+        ...
+        AssertionError: Scalars are not equal!
         <BLANKLINE>
-        Mismatched elements: 1 / 1 (100.0%)
-        Greatest absolute difference: 8.999999703829253e-10 at 0 (up to 0 allowed)
-        Greatest relative difference: 8.999999583666371 at 0 (up to 0 allowed)
+        Absolute difference: 8.999999703829253e-10
+        Relative difference: 8.999999583666371
 
     Examples:
         >>> # tensor to tensor comparison
@@ -872,6 +872,8 @@ def assert_close(
         >>> expected = torch.tensor([1.0, 2.0, 3.0])
         >>> actual = expected.numpy()
         >>> torch.testing.assert_close(actual, expected)
+        Traceback (most recent call last):
+        ...
         AssertionError: Except for scalars, type equality is required, but got
         <class 'numpy.ndarray'> and <class 'torch.Tensor'> instead.
         >>> # Scalars of different types are an exception and can be compared with
@@ -882,22 +884,34 @@ def assert_close(
         >>> expected = torch.tensor(float("Nan"))
         >>> actual = expected.clone()
         >>> torch.testing.assert_close(actual, expected)
-        AssertionError: Tensors are not close!
+        Traceback (most recent call last):
+        ...
+        AssertionError: Scalars are not close!
+        <BLANKLINE>
+        Absolute difference: nan (up to 1e-05 allowed)
+        Relative difference: nan (up to 1.3e-06 allowed)
         >>> torch.testing.assert_close(actual, expected, equal_nan=True)
 
         >>> # If equal_nan=True, the real and imaginary NaN's of complex inputs have to match.
         >>> expected = torch.tensor(complex(float("NaN"), 0))
         >>> actual = torch.tensor(complex(0, float("NaN")))
         >>> torch.testing.assert_close(actual, expected, equal_nan=True)
-        AssertionError: Tensors are not close!
+        Traceback (most recent call last):
+        ...
+        AssertionError: Scalars are not close!
+        <BLANKLINE>
+        Absolute difference: nan (up to 1e-05 allowed)
+        Relative difference: nan (up to 1.3e-06 allowed)
         >>> # If equal_nan="relaxed", however, then complex numbers are treated as NaN if any
-        >>> # of the real or imaginary component is NaN.
+        >>> # of the real or imaginary components is NaN.
         >>> torch.testing.assert_close(actual, expected, equal_nan="relaxed")
 
         >>> expected = torch.tensor([1.0, 2.0, 3.0])
         >>> actual = torch.tensor([1.0, 4.0, 5.0])
         >>> # The default mismatch message can be overwritten.
         >>> torch.testing.assert_close(actual, expected, msg="Argh, the tensors are not close!")
+        Traceback (most recent call last):
+        ...
         AssertionError: Argh, the tensors are not close!
         >>> # The error message can also created at runtime by passing a callable.
         >>> def custom_msg(actual, expected, diagnostic_info):
@@ -907,6 +921,8 @@ def assert_close(
         ...         f"That is {ratio:.1%}!"
         ...     )
         >>> torch.testing.assert_close(actual, expected, msg=custom_msg)
+        Traceback (most recent call last):
+        ...
         AssertionError: Argh, we found 2 mismatches! That is 66.7%!
     """
     # Hide this function from `pytest`'s traceback
