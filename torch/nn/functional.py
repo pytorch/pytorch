@@ -1,5 +1,5 @@
 r"""Functional interface"""
-from typing import Callable, List, Optional, Tuple, Any
+from typing import Callable, List, Optional, Tuple, Any # TODO: ```, Any``` can be removed once Union[int, float] is available
 import math
 import warnings
 
@@ -927,15 +927,17 @@ def max_unpool3d(
     output_size = _unpool_output_size(input, kernel_size, _stride, padding, output_size)
     return torch._C._nn.max_unpool3d(input, indices, output_size, _stride, padding)
 
+# TODO: can be removed once Union[int, float] is available
 def _union_int_float(norm_type: Any) -> float:
     if torch.jit.isinstance(norm_type, int):
         return float(norm_type)
     elif torch.jit.isinstance(norm_type, float):
         return norm_type
     raise ValueError("Expected norm_type to be of type int or float")
+# /TODO
 
 def lp_pool2d(
-    input: Tensor, norm_type: Any,
+    input: Tensor, norm_type: Any, # TODO: change Any to Union[int, float] once it is available
     kernel_size: BroadcastingList2[int],
     stride: Optional[BroadcastingList2[int]] = None,
     ceil_mode: bool = False
@@ -946,7 +948,7 @@ def lp_pool2d(
 
     See :class:`~torch.nn.LPPool2d` for details.
     """
-    norm_type_ = _union_int_float(norm_type)
+    norm_type_ = _union_int_float(norm_type) # TODO: can be removed once Union[int, float] is available
     if has_torch_function_unary(input):
         return handle_torch_function(
             lp_pool2d, (input,), input, norm_type_, kernel_size, stride=stride, ceil_mode=ceil_mode
@@ -960,7 +962,7 @@ def lp_pool2d(
     return (torch.sign(out) * relu(torch.abs(out))).mul(kw * kh).pow(1.0 / norm_type_)
 
 def lp_pool1d(
-    input: Tensor, norm_type: Any,
+    input: Tensor, norm_type: Any, # TODO: change Any to Union[int, float] once it is available
     kernel_size: BroadcastingList1[int],
     stride: Optional[BroadcastingList1[int]] = None,
     ceil_mode: bool = False
@@ -971,7 +973,7 @@ def lp_pool1d(
 
     See :class:`~torch.nn.LPPool1d` for details.
     """
-    norm_type_ = _union_int_float(norm_type)
+    norm_type_ = _union_int_float(norm_type) # TODO: can be removed once Union[int, float] is available
     if has_torch_function_unary(input):
         return handle_torch_function(
             lp_pool1d, (input,), input, norm_type_, kernel_size, stride=stride, ceil_mode=ceil_mode
@@ -4095,7 +4097,7 @@ def affine_grid(theta: Tensor, size: List[int], align_corners: Optional[bool] = 
     return torch.affine_grid_generator(theta, size, align_corners)
 
 
-def _pad(input: Tensor, pad: BroadcastingList1[int], mode: str = "constant", value: Any = 0) -> Tensor:
+def _pad(input: Tensor, pad: BroadcastingList1[int], mode: str = "constant", value: Any = 0) -> Tensor: # TODO: change Any to Union[int, float] once it is available
     r"""Pads tensor.
 
     Padding size:
@@ -4153,7 +4155,7 @@ def _pad(input: Tensor, pad: BroadcastingList1[int], mode: str = "constant", val
         torch.Size([3, 9, 7, 3])
 
     """
-    value_ = _union_int_float(value)
+    value_ = _union_int_float(value) # TODO: can be removed once Union[int, float] is available
     if has_torch_function_unary(input):
         return handle_torch_function(_pad, (input,), input, pad, mode=mode, value=value_)
     assert len(pad) % 2 == 0, "Padding length must be divisible by 2"
