@@ -12920,7 +12920,7 @@ class TestNNDeviceType(NNTestCase):
     def test_LayerNorm_general(self, device):
         self._test_LayerNorm_general(device)
 
-        if self.device_type == 'cuda':
+        if self.device_type == 'cuda' or self.device_type == 'cpu':
             self._test_LayerNorm_general(device, dtype=torch.bfloat16)
 
         if self.device_type == 'cuda':
@@ -13860,20 +13860,23 @@ class TestNNDeviceType(NNTestCase):
             input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
             grad = torch.randn(n, c, (h - kernel_size) // stride + 1, (w - kernel_size) // stride + 1,
                                dtype=dtype, device=device)
-            pool = torch.nn.MaxPool2d(kernel_size, stride).to(device)
+            pool = torch.nn.MaxPool2d(kernel_size, stride, return_indices=True).to(device)
 
             ref_input = input.detach().clone().contiguous().requires_grad_(True)
             ref_grad = grad.detach().clone().contiguous()
-            ref_pool = torch.nn.MaxPool2d(kernel_size, stride).to(device)
+            ref_pool = torch.nn.MaxPool2d(kernel_size, stride, return_indices=True).to(device)
 
-            out = pool(input)
+            out, ind = pool(input)
             out.backward(grad)
-            ref_out = ref_pool(ref_input)
+            ref_out, ref_ind = ref_pool(ref_input)
             ref_out.backward(ref_grad)
 
             self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
             self.assertTrue(ref_out.is_contiguous())
+            self.assertTrue(ind.is_contiguous(memory_format=torch.channels_last))
+            self.assertTrue(ref_ind.is_contiguous())
             self.assertTrue(torch.allclose(out, ref_out))
+            self.assertTrue(torch.allclose(ind, ref_ind))
             self.assertTrue(torch.allclose(input.grad, ref_input.grad))
 
         helper(4, 8, 8, 8, 7)
