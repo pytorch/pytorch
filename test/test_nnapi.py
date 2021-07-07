@@ -143,6 +143,67 @@ class TestNNAPI(TestCase):
                 ReshapeModule((2, 4)),
                 nhwc(torch.randn(4, 2, 1, 1)))
 
+    def test_flatten(self):
+        for mod in [
+            torch.nn.Flatten(),
+            torch.nn.Flatten(start_dim=2, end_dim=3),
+            torch.nn.Flatten(start_dim=2, end_dim=4),
+            torch.nn.Flatten(start_dim=0, end_dim=-2),
+            torch.nn.Flatten(start_dim=0, end_dim=4)
+
+        ]:
+            self.check(mod, torch.randn(4, 2, 1, 3, 7))
+
+        # TODO(axit): To add support for runtime
+        # self.check(
+        #     torch.nn.Flatten(),
+        #     torch.randn(4, 2, 1, 3, 7),
+        #     convert_args=[torch.zeros(0, 2, 1, 3, 7)]
+        # )
+        # with self.assertRaisesRegex(Exception, "dims can't be flexible"):
+        #     self.check(torch.nn.Flatten(), torch.randn(4, 2, 0, 0, 7))
+        # with self.assertRaisesRegex(Exception, "Only 1 dim"):
+        #     self.check(
+        #         torch.nn.Flatten(start_dim=1, end_dim=-2),
+        #         torch.randn(0, 2, 1, 3, 0))
+
+    def test_slice(self):
+        class SliceModule(torch.nn.Module):
+            def __init__(self, start, stop, step):
+                super().__init__()
+                self.start = start
+                self.stop = stop
+                self.step = step
+
+            def forward(self, t):
+                return t[1:, self.start:self.stop:self.step, :]
+
+        class SliceModule2(torch.nn.Module):
+            def forward(self, t):
+                return t[3:]
+
+        self.check(
+            SliceModule(1, 5, 2),
+            torch.randn(4, 6, 2)
+        )
+        self.check(
+            SliceModule2(),
+            torch.randn(5)
+        )
+
+        # flex inputs
+        self.check(
+            SliceModule(1, 5, 2),
+            torch.randn(4, 6, 2),
+            convert_args=[torch.zeros(4, 6, 0)]
+        )
+        with self.assertRaisesRegex(Exception, "slice with flexible shape"):
+            self.check(
+                SliceModule(1, 5, 2),
+                torch.randn(4, 6, 2),
+                convert_args=[torch.zeros(0, 0, 0)]
+            )
+
     def test_cat(self):
         class CatModule(torch.nn.Module):
             def __init__(self, dim):
@@ -186,7 +247,7 @@ class TestNNAPI(TestCase):
                 self.check(UnaryModule(), torch.tensor([-1.0, 1.0]))
 
     def test_pointwise_binary(self):
-        for op in ["add", "sub", "mul"]:
+        for op in ["add", "sub", "mul", "div"]:
             with self.subTest(op):
                 class BinaryModule(torch.nn.Module):
                     def forward(self, lhs, rhs):
@@ -196,6 +257,8 @@ class TestNNAPI(TestCase):
                             return lhs - rhs
                         if op == "mul":
                             return lhs * rhs
+                        if op == "div":
+                            return lhs / rhs
                         raise Exception("Bad op")
 
                 self.check(
@@ -226,6 +289,51 @@ class TestNNAPI(TestCase):
         self.check(torch.nn.Hardtanh(0.0, 6.0), inp)
         with self.assertRaisesRegex(Exception, "hardtanh with args"):
             self.check(torch.nn.Hardtanh(0.0, 5.0), inp)
+
+    def test_softmax(self):
+        inp = torch.tensor([[-2.0, -0.5], [0.5, 2.0]])
+        self.check(torch.nn.Softmax(), inp)
+        self.check(torch.nn.Softmax(dim=0), inp)
+        # Test flexible size
+        self.check(
+            torch.nn.Softmax(),
+            inp,
+            convert_args=[torch.zeros(0, 0)],
+        )
+
+    def test_to(self):
+        class ToCPU(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.prelu = torch.nn.PReLU()
+
+            def forward(self, x):
+                y = x.to("cpu")
+                # add prelu since input operand can't be output
+                return self.prelu(y)
+
+        arg = torch.randn(1, 2, 3, 3)
+        self.check(ToCPU(), arg)
+        # Test flexible size
+        self.check(
+            ToCPU(),
+            arg,
+            convert_args=[torch.zeros(1, 2, 0, 0)],
+        )
+
+    def test_detach(self):
+        class DetachModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                y = x.detach()
+                return torch.nn.functional.relu(y)
+
+        self.check(DetachModule(), torch.randn(1, 2, 3, 3))
+        self.check(
+            DetachModule(), torch.randn(1, 2, 3, 3),
+            convert_args=[torch.zeros(1, 2, 0, 0)])
 
     def test_log_softmax(self):
         inp = torch.randn(3, 1000)
