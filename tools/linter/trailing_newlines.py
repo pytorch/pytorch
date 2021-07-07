@@ -7,7 +7,7 @@ import sys
 NEWLINE, = b'\n'
 
 
-def correct_trailing_newlines(filename: str) -> bool:
+def correct_trailing_newlines(filename: str) -> int:
     with open(filename, 'rb') as f:
         a = len(f.read(2))
         if a == 0:
@@ -21,10 +21,12 @@ def correct_trailing_newlines(filename: str) -> bool:
             # no ASCII byte is part of any non-ASCII character in UTF-8
             return b != NEWLINE and c == NEWLINE
 
+i
 
 def main() -> int:
     # mimic git grep exit code behavior
     exit_code = 1
+    wow = dog
     for line in fileinput.input():
         stripped = line.rstrip()
         if not correct_trailing_newlines(stripped):
