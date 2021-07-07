@@ -8,9 +8,10 @@ import warnings
 from typing import Dict, List, Set, Type
 
 import torch._jit_internal as _jit_internal
-from torch.jit.frontend import get_default_args, get_jit_def, get_class_properties
+from torch.jit.frontend import get_default_args, get_jit_class_def, get_jit_def, get_class_properties
 from torch.jit._builtins import _find_builtin
 from torch.jit._check import AttributeTypeIsSupportedChecker
+from torch.jit._state import _python_cu, _add_script_class, _get_script_class
 from torch.nn import Module
 
 
@@ -32,6 +33,17 @@ ignored_attributes = [
     "_load_state_dict_pre_hooks",
     "dump_patches",
 ]
+
+def _compile_and_register_class(obj, rcb, qualified_name):
+    script_class = _get_script_class(obj)
+
+    if not script_class:
+        ast = get_jit_class_def(obj, obj.__name__)
+        defaults = torch.jit.frontend.get_default_args_for_class(obj)
+        script_class = torch._C._jit_script_class_compile(qualified_name, ast, defaults, rcb)
+        _add_script_class(obj, script_class)
+
+    return script_class
 
 def make_stub(func, name):
     rcb = _jit_internal.createResolutionCallbackFromClosure(func)
@@ -287,7 +299,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
                 value)
             continue
 
-        # If we got here, this is a regular "data" attribute, Add it to the concrete type
+        # If we got here, this is a regular "data" attribute, add it to the concrete type
         attr_type, inferred = infer_type(name, value)
         if attr_type.success():
             concrete_type_builder.add_attribute(name, attr_type.type(), False, False)
@@ -393,6 +405,27 @@ def get_module_concrete_type(nn_module, share_types=True):
 
     return concrete_type
 
+def create_script_class(obj):
+    """
+    Create and return a RecursiveScriptClass instance from a Python object.
+
+    Arguments:
+        obj: A Python object.
+    """
+    qualified_class_name = _jit_internal._qualified_name(type(obj))
+    rcb = _jit_internal.createResolutionCallbackForClassMethods(type(obj))
+    # Script the type of obj if it hasn't already been scripted.
+    _compile_and_register_class(type(obj), rcb, qualified_class_name)
+    class_ty = _python_cu.get_class(qualified_class_name)
+    # Create an empty torch._C.ScriptObject with the scripted type.
+    cpp_object = torch._C._create_object_with_type(class_ty)
+    # Copy all of the attributes over to the torch._C.ScriptObject.
+    for name, value in obj.__dict__.items():
+        cpp_object.setattr(name, value)
+
+    # Wrap the torch._C.ScriptObject in a RecursiveScriptClass instance.
+    return wrap_cpp_class(cpp_object)
+
 def create_script_module(nn_module, stubs_fn, share_types=True, is_tracing=False):
     """
     Creates a new ScriptModule from an nn.Module
@@ -466,7 +499,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
                 continue
             item = getattr(nn_module, name, None)
             if inspect.ismethod(item) and _jit_internal.is_ignored_fn(item):
-                unbound_function = getattr(type(nn_module), name)
+                unbound_function = getattr(nn_module, name).__func__
                 bound_method = unbound_function.__get__(script_module)
                 setattr(script_module, name, bound_method)
             elif concrete_type.is_ignored_attribute(name):
@@ -798,6 +831,12 @@ def try_compile_fn(fn, loc):
     # object
     rcb = _jit_internal.createResolutionCallbackFromClosure(fn)
     return torch.jit.script(fn, _rcb=rcb)
+
+def wrap_cpp_class(cpp_class):
+    """
+    Wrap this torch._C.Object in a Python RecursiveScriptClass.
+    """
+    return torch.jit.RecursiveScriptClass(cpp_class)
 
 def wrap_cpp_module(cpp_module):
     """

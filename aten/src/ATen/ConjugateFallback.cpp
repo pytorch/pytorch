@@ -1,9 +1,10 @@
 #include <ATen/ATen.h>
-#include <ATen/core/op_registration/op_registration.h>
-#include <torch/library.h>
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/NativeFunctions.h>
+#include <c10/util/irange.h>
+#include <torch/library.h>
 
 namespace at {
 
@@ -27,7 +28,7 @@ void conjugateFallback(const c10::OperatorHandle& op, DispatchKeySet dispatch_ke
   const auto stack_start = stack->size() - num_arguments;
 
   c10::optional<bool> is_write;
-  for (int64_t i = 0; i < num_arguments; ++i) {
+  for (const auto i : c10::irange(num_arguments)) {
     const auto& alias_info = arguments[i].alias_info();
     // Three possible states:
     // 1. alias_info has no value --> out-of-place operation
@@ -58,7 +59,7 @@ void conjugateFallback(const c10::OperatorHandle& op, DispatchKeySet dispatch_ke
   // Mutable inputs to be tracked separately
   std::vector<Tensor> mutable_inputs;
 
-  for (int64_t i = 0; i < num_arguments; ++i) {
+  for (const auto i : c10::irange(num_arguments)) {
     auto& ivalue = (*stack)[stack_start + i];
     if (!(ivalue.isTensor() || ivalue.isTensorList())) {
       continue;
@@ -146,6 +147,7 @@ TORCH_LIBRARY_IMPL(aten, Conjugate, m) {
   m.impl("imag", torch::CppFunction::makeFallthrough());
   m.impl("real", torch::CppFunction::makeFallthrough());
   m.impl("view", torch::CppFunction::makeFallthrough());
+  m.impl("_unsafe_view", torch::CppFunction::makeFallthrough());
   m.impl("reshape", torch::CppFunction::makeFallthrough());
 }
 
