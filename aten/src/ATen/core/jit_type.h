@@ -950,9 +950,16 @@ using TupleTypePtr = std::shared_ptr<TupleType>;
 using NameList = std::vector<std::string>;
 // This type represents a Tuple
 struct TORCH_API TupleType : public NamedType {
+
   static TupleTypePtr createNamed(const c10::optional<c10::QualifiedName>& name,
       const std::vector<std::string>& field_names,
-      const std::vector<TypePtr>& types);
+      const std::vector<TypePtr>& field_types,
+      std::vector<IValue>& field_defaults);
+
+  static TupleTypePtr createNamed(const c10::optional<c10::QualifiedName>& name,
+      const std::vector<std::string>& field_names,
+      const std::vector<TypePtr>& field_types);
+
   static TupleTypePtr create(
       std::vector<TypePtr> types) {
     return TupleTypePtr(new TupleType(
@@ -2037,8 +2044,8 @@ struct TORCH_API ClassType : public NamedType {
   c10::optional<ClassType::Property> getProperty(const std::string& name);
   // Add a property named \p name with \p getter and \p setter as its getter and setter.
   void addProperty(const std::string& name, torch::jit::Function* getter, torch::jit::Function* setter);
-
-  const std::vector<Property> properties() const {
+  // Get a list of all properties.
+  const std::vector<Property>& properties() const {
     return properties_;
   }
 

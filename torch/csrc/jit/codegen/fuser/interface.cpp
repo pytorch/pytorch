@@ -21,6 +21,7 @@ namespace detail {
 #if defined(FBCODE_CAFFE2)
 bool cpu_fuser_enabled = true;
 #else
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 bool cpu_fuser_enabled = false;
 #endif
 
