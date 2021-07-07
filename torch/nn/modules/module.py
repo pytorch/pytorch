@@ -247,23 +247,23 @@ class Module:
     training: bool
     _is_full_backward_hook: Optional[bool]
 
-    def __init__(self):
+    def __init__(self) -> None:
         """
         Initializes internal Module state, shared by both nn.Module and ScriptModule.
         """
         torch._C._log_api_usage_once("python.nn_module")
 
         self.training = True
-        self._parameters = OrderedDict()
-        self._buffers = OrderedDict()
-        self._non_persistent_buffers_set = set()
-        self._backward_hooks = OrderedDict()
+        self._parameters: Dict[str, Optional[Parameter]] = OrderedDict()
+        self._buffers: Dict[str, Optional[Tensor]] = OrderedDict()
+        self._non_persistent_buffers_set: Set[str] = set()
+        self._backward_hooks: Dict[int, Callable] = OrderedDict()
         self._is_full_backward_hook = None
-        self._forward_hooks = OrderedDict()
-        self._forward_pre_hooks = OrderedDict()
-        self._state_dict_hooks = OrderedDict()
-        self._load_state_dict_pre_hooks = OrderedDict()
-        self._modules = OrderedDict()
+        self._forward_hooks: Dict[int, Callable] = OrderedDict()
+        self._forward_pre_hooks: Dict[int, Callable] = OrderedDict()
+        self._state_dict_hooks: Dict[int, Callable] = OrderedDict()
+        self._load_state_dict_pre_hooks: Dict[int, Callable] = OrderedDict()
+        self._modules: Dict[str, Optional['Module']] = OrderedDict()
 
     forward: Callable[..., Any] = _forward_unimplemented
 
@@ -571,6 +571,7 @@ class Module:
                         param.grad.data = grad_applied
                     else:
                         assert param.grad.is_leaf
+                        # type: ignore[union-attr]
                         self._parameters[key].grad = grad_applied.requires_grad_(param.grad.requires_grad)
 
         for key, buf in self._buffers.items():
