@@ -91,7 +91,7 @@ class ScriptModuleDeserializer final {
       std::shared_ptr<PyTorchStreamReader> reader,
       std::string pickle_dir_prefix,
       std::string tensor_dir_prefix,
-      std::shared_ptr<StorageContext> storage_context)
+      std::shared_ptr<DeserializationStorageContext> storage_context)
       : compilation_unit_(std::move(cu)),
         reader_(std::move(reader)),
         storage_context_(std::move(storage_context)),
@@ -116,7 +116,7 @@ class ScriptModuleDeserializer final {
 
   std::shared_ptr<CompilationUnit> compilation_unit_;
   std::shared_ptr<PyTorchStreamReader> reader_;
-  std::shared_ptr<StorageContext> storage_context_;
+  std::shared_ptr<DeserializationStorageContext> storage_context_;
   c10::optional<at::Device> device_;
   std::vector<at::IValue> constants_table_;
   std::string code_prefix_;
@@ -291,7 +291,7 @@ Module import_ir_module(
 Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
     std::shared_ptr<PyTorchStreamReader> reader,
-    std::shared_ptr<StorageContext> storage_context,
+    std::shared_ptr<DeserializationStorageContext> storage_context,
     c10::optional<at::Device> device,
     std::string ts_id) {
   ScriptModuleDeserializer deserializer(

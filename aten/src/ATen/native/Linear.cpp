@@ -593,8 +593,8 @@ Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor& weight
   auto size1 = input1.sizes();
   output_size.insert(output_size.end(), size1.begin(), size1.end() - 1);
   output_size.push_back(weight.size(0));
-  auto input1_flattened = input1.view({-1, input1.size(-1)});
-  auto input2_flattened = input2.view({-1, input2.size(-1)});
+  auto input1_flattened = input1.reshape({-1, input1.size(-1)});
+  auto input2_flattened = input2.reshape({-1, input2.size(-1)});
   Tensor output = at::_trilinear(input1_flattened, weight, input2_flattened, {1,3}, {0}, {1,2}, {2,3}).reshape(output_size);
   if (bias.defined()) {
     output = output + bias;
