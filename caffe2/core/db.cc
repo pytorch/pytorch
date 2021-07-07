@@ -104,7 +104,7 @@ class MiniDBTransaction : public Transaction {
     Commit();
   }
 
-  void Put(const string& key, const string& value) override {
+  void Put(const string& key, string&& value) override {
     int key_len = key.size();
     int value_len = value.size();
     CAFFE_ENFORCE_EQ(fwrite(&key_len, sizeof(int), 1, file_), 1);

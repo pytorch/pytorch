@@ -119,7 +119,7 @@ def hierarchical_pickle(data):
         }
     if isinstance(data, torch.utils.show_pickle.FakeObject):
         typename = f"{data.module}.{data.name}"
-        if typename.startswith("__torch__."):
+        if typename.startswith("__torch__.") or typename.startswith("torch.jit.LoweredModule."):
             assert data.args == ()
             return {
                 "__module_type__": typename,
@@ -334,10 +334,10 @@ def get_inline_skeleton():
 
     import importlib.resources
 
-    skeleton = importlib.resources.read_text(__package__, "skeleton.html")  # type: ignore[attr-defined]
-    js_code = importlib.resources.read_text(__package__, "code.js")  # type: ignore[attr-defined]
+    skeleton = importlib.resources.read_text(__package__, "skeleton.html")
+    js_code = importlib.resources.read_text(__package__, "code.js")
     for js_module in ["preact", "htm"]:
-        js_lib = importlib.resources.read_binary(__package__, f"{js_module}.mjs")  # type: ignore[attr-defined]
+        js_lib = importlib.resources.read_binary(__package__, f"{js_module}.mjs")
         js_url = "data:application/javascript," + urllib.parse.quote(js_lib)
         js_code = js_code.replace(f"https://unpkg.com/{js_module}?module", js_url)
     skeleton = skeleton.replace(' src="./code.js">', ">\n" + js_code)

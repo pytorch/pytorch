@@ -17,7 +17,7 @@ namespace {
 
     // Temporary flag to disable forward mode
     // TODO(alband) remove these when perf issues are solved
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+    // NOLINTNEXTLINE(clang-diagnostic-unused-variable,cppcoreguidelines-avoid-non-const-global-variables)
     static bool is_forward_grad_enabled = false;
 }
 
