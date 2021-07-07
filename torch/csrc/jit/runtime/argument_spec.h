@@ -67,6 +67,7 @@ static_assert(
     "ArgumentInfo is expected to be a 32-bit struct");
 
 struct ArgumentSpec {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   ArgumentSpec(size_t num_flat_tensor_inputs, size_t num_flat_optional_inputs) {
     hash_code =
         c10::hash_combine(num_flat_tensor_inputs, num_flat_optional_inputs);
@@ -100,7 +101,9 @@ struct ArgumentSpec {
       // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       at::Device device = t->device();
       arg.dev_type_ =
+          // NOLINTNEXTLINE(bugprone-signed-char-misuse)
           static_cast<std::underlying_type<DeviceType>::type>(device.type());
+      // NOLINTNEXTLINE(bugprone-signed-char-misuse)
       arg.device_ = device.index();
       arg.type_ = static_cast<unsigned>(t->scalar_type());
     }
@@ -233,9 +236,11 @@ static_assert(
 struct CompleteArgumentInfo;
 
 struct CompleteArgumentSpec {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   CompleteArgumentSpec(bool with_grad, at::ArrayRef<IValue> inputs)
       : hash_code(0), ninputs(inputs.size()) {
     int32_t all_dims = 0;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     const int32_t num_inputs = inputs.size();
     for (int32_t i = 0; i < num_inputs; i++) {
       if (!inputs[i].isTensor())
@@ -247,6 +252,7 @@ struct CompleteArgumentSpec {
     data.resize(ninputs + all_dims * 2);
 
     // and reinterpret our data array as these structs
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     auto* pods = reinterpret_cast<CompleteArgumentInfoPOD*>(data.data());
     int64_t* next_dim = sizes_strides();
     int32_t total_dims = 0;
@@ -260,8 +266,10 @@ struct CompleteArgumentSpec {
           pod.type = static_cast<int>(t.scalar_type());
           // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
           at::Device device = t.device();
+          // NOLINTNEXTLINE(bugprone-signed-char-misuse)
           pod.dev_type = static_cast<std::underlying_type<DeviceType>::type>(
               device.type());
+          // NOLINTNEXTLINE(bugprone-signed-char-misuse)
           pod.device = device.index();
           pod.requires_grad = with_grad && t.requires_grad();
           total_dims += t.ndimension();

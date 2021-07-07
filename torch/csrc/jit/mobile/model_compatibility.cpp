@@ -137,6 +137,7 @@ std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
 std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
     std::vector<IValue> bytecode_ivalues) {
   constexpr uint64_t min_version_with_schema = 6;
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   if (_get_model_bytecode_version(bytecode_ivalues) < min_version_with_schema) {
     TORCH_WARN(
         "Only models with bytecode version 6 and above contain operator schema information. Please re-export your model to generate it");
@@ -147,6 +148,7 @@ std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
     return result;
   }
   // loop over all the functions in the bytecode
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (int i = 1; i < bytecode_ivalues.size(); i++) {
     // descend to the operators list
     auto method_tuple = bytecode_ivalues.at(i).toTuple()->elements();
