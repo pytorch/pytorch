@@ -122,9 +122,9 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
   // Special case calling `unchecked_unwrap_optional` now that
   // `OptionalType` has been deprecated
   if (value_->type()->isOptional() && field == "unchecked_unwrap_optional") {
-      auto r = m.graph()->insert(
-          Symbol::fromQualString("prim::unchecked_unwrap_optional"), {value_});
-      return std::make_shared<SimpleValue>(r);
+    auto r = m.graph()->insert(
+        Symbol::fromQualString("prim::unchecked_unwrap_optional"), {value_});
+    return std::make_shared<SimpleValue>(r);
   }
 
   auto kind = value_->type()->kind();

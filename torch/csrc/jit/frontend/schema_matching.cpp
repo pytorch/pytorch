@@ -58,18 +58,11 @@ Value* tryConvertToType(
     Value* value,
     bool allow_conversions) {
   // treat conversion to Optional[T] as conversions to T
-  if (concrete_type->isOptional() && !value->type()->isOptional() && !value->type()->isSubtypeOf(NoneType::get())) {
-    auto contained = concrete_type->expect<UnionType>()->getContainedElementIfOptional();
+  if (concrete_type->isOptional() && !value->type()->isOptional() &&
+      !value->type()->isSubtypeOf(NoneType::get())) {
+    auto contained =
+        concrete_type->expect<UnionType>()->getContainedElementIfOptional();
     return tryConvertToType(loc, graph, contained, value, allow_conversions);
-  }
-
-  //// Transform `Union[T, None]` to `Optional[T]` for schema matching
-  //// purposes only
-  if (UnionTypePtr union_type = concrete_type->cast<UnionType>()) {
-    auto maybeOpt = union_type->toOptional();
-    if (maybeOpt) {
-      return tryConvertToType(loc, graph, *maybeOpt, value, allow_conversions);
-    }
   }
 
   if (auto value_tuple = value->type()->cast<TupleType>()) {

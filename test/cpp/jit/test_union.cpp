@@ -7,7 +7,6 @@
 namespace torch {
 namespace jit {
 
-
 class UnionTypeTest : public ::testing::Test {
  public:
   // None
@@ -29,14 +28,15 @@ class UnionTypeTest : public ::testing::Test {
   const TypePtr opt3 = UnionType::createOptionalOf(ListType::ofStrings());
 
   // Tuple[Optional[int], int]
-  const TypePtr tup1 =
-      TupleType::create({UnionType::createOptionalOf(IntType::get()), IntType::get()});
+  const TypePtr tup1 = TupleType::create(
+      {UnionType::createOptionalOf(IntType::get()), IntType::get()});
 
   // Tuple[int, int]
   const TypePtr tup2 = TupleType::create({IntType::get(), IntType::get()});
 
   bool hasType(TypePtr u, TypePtr t) {
-    auto res = std::find(u->containedTypes().begin(), u->containedTypes().end(), t);
+    auto res =
+        std::find(u->containedTypes().begin(), u->containedTypes().end(), t);
     return res != u->containedTypes().end();
   }
 };
@@ -149,7 +149,6 @@ TEST_F(UnionTypeTest, Subtyping_OptionalType) {
   ASSERT_TRUE(union4->isSubtypeOf(union5));
   ASSERT_FALSE(union5->isSubtypeOf(union4));
 }
-
 
 } // namespace jit
 } // namespace torch

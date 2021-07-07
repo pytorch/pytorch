@@ -911,10 +911,13 @@ void initPythonIRBindings(PyObject* module_) {
   py::class_<RRefType, Type, std::shared_ptr<RRefType>>(m, "RRefType")
       .def(py::init([](TypePtr a) { return RRefType::create(std::move(a)); }))
       .def("getElementType", &RRefType::getElementType);
-  py::class_<Pybind11_OptionalType, UnionType, std::shared_ptr<Pybind11_OptionalType>>(
-      m, "OptionalType")
-      .def(py::init(
-          [](const std::vector<TypePtr> a) { return Pybind11_OptionalType::create(std::move(a)); }))
+  py::class_<
+      Pybind11_OptionalType,
+      UnionType,
+      std::shared_ptr<Pybind11_OptionalType>>(m, "OptionalType")
+      .def(py::init([](const std::vector<TypePtr> a) {
+        return Pybind11_OptionalType::create(std::move(a));
+      }))
       .def_static("ofTensor", &Pybind11_OptionalType::legacy_OptionalOfTensor)
       .def("getElementType", &UnionType::getContainedElementIfOptional);
   py::class_<FutureType, Type, std::shared_ptr<FutureType>>(m, "FutureType")

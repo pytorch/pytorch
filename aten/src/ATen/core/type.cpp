@@ -1025,18 +1025,27 @@ bool UnionType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const 
 std::string UnionType::unionStr(TypePrinter printer, bool is_annotation_str) const {
   std::stringstream ss;
 
-  ss << "Union[";
-  for (size_t i = 0; i < types_.size(); ++i) {
-    if (i > 0) {
-      ss << ", ";
-    }
+  if (this->isOptional()) {
+    auto inner = this->getContainedElementIfOptional();
     if (is_annotation_str) {
-      ss << types_[i]->annotation_str(printer);
+      ss << "Optional[" << inner->annotation_str(printer) << "]";
     } else {
-      ss << types_[i]->str();
+      ss << inner->str() << "?";
     }
+  } else {
+    ss << "Union[";
+    for (size_t i = 0; i < types_.size(); ++i) {
+      if (i > 0) {
+        ss << ", ";
+      }
+      if (is_annotation_str) {
+        ss << types_[i]->annotation_str(printer);
+      } else {
+        ss << types_[i]->str();
+      }
+    }
+    ss << "]";
   }
-  ss << "]";
 
   return ss.str();
 }
@@ -1068,7 +1077,7 @@ TypePtr UnionType::subtractTypeSet(std::vector<TypePtr>& to_subtract) const {
   // Given a TypePtr `lhs`, this function says whether or not `lhs` (or
   // one of its parent types) is in the `to_subtract` vector
   auto should_subtract = [&](TypePtr lhs) -> bool {
-    return std::none_of(to_subtract.begin(), to_subtract.end(),
+    return std::any_of(to_subtract.begin(), to_subtract.end(),
                         [&](TypePtr rhs) {
                           return lhs->isSubtypeOf(rhs);
                         });

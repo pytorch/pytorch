@@ -265,7 +265,8 @@ RegisterOperators reg(
                create_graph,
                allow_unused);
 
-           c10::impl::GenericList res_list{UnionType::createOptionalOf(TensorType::get())};
+           c10::impl::GenericList res_list{
+               UnionType::createOptionalOf(TensorType::get())};
            for (const at::Tensor& t : res) {
              res_list.emplace_back(t.defined() ? t : IValue());
            }

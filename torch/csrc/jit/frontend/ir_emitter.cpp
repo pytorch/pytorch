@@ -186,7 +186,7 @@ NoneStatus canBeNone(Value* v) {
     return ALWAYS;
   }
   if (v->type()->kind() == UnionType::Kind &&
-       v->type()->expect<UnionType>()->canHoldType(NoneType::get())) {
+      v->type()->expect<UnionType>()->canHoldType(NoneType::get())) {
     return MAYBE;
   }
   return NEVER;
@@ -1149,6 +1149,10 @@ struct to_ir {
     }
     // statement must be var {is, is not} None
     const std::string& name = Var(lhs).name().name();
+    std::string testtt{"x"};
+    if (name == testtt) {
+      int foo = 5;
+    }
 
     if (const auto union_type = lhs_value->type()->cast<UnionType>()) {
       std::vector<TypePtr> to_subtract{NoneType::get()};
@@ -2372,9 +2376,12 @@ struct to_ir {
       } else {
         // Special case: we tried to do "advanced indexing". Lower this expr
         // into `index` and `index_put_` ops with tensordices of Tensor?[]
-        const auto indices = graph->insertNode(graph->createList(
-                                     UnionType::createOptionalOf(TensorType::get()), tensorIndices))
-                                 ->output();
+        const auto indices =
+            graph
+                ->insertNode(graph->createList(
+                    UnionType::createOptionalOf(TensorType::get()),
+                    tensorIndices))
+                ->output();
         const auto indexed =
             graph->insert(aten::index, {slicedArg, indices}, {}, stmt.range());
         const auto augmented = emitBuiltinCall(
@@ -2458,10 +2465,12 @@ struct to_ir {
       } else {
         // Special case: we tried to do "advanced indexing" with a tensor.
         // Dispatch to `aten::index_put_` with tensorindices of Tensor?[]
-        const auto indices = graph
-                                 ->insertNode(graph->createList(
-                                     UnionType::createOptionalOf(TensorType::get()), tensorIndices))
-                                 ->output();
+        const auto indices =
+            graph
+                ->insertNode(graph->createList(
+                    UnionType::createOptionalOf(TensorType::get()),
+                    tensorIndices))
+                ->output();
 
         graph->insert(
             aten::index_put_,
@@ -2931,7 +2940,7 @@ struct to_ir {
         // get the right type. To do this, we make a None constant that
         // has the type Optional[T]
         if (type->kind() == UnionType::Kind &&
-              type->expect<UnionType>()->canHoldType(NoneType::get()) &&
+            type->expect<UnionType>()->canHoldType(NoneType::get()) &&
             expr->type()->isSubtypeOf(NoneType::get())) {
           Node* none = graph->createNone();
           none->output()->setType(type);
@@ -4033,7 +4042,8 @@ struct to_ir {
         } else {
           return dim;
         }
-      } else if (index->type()->isSubtypeOf(UnionType::createOptionalOf(TensorType::get()))) {
+      } else if (index->type()->isSubtypeOf(
+                     UnionType::createOptionalOf(TensorType::get()))) {
         if (is_reverse) {
           throw ErrorReport(loc)
               << "Ellipses followed by tensor indexing is currently not supported";
@@ -4104,7 +4114,8 @@ struct to_ir {
       } else if (expr->type() == IntType::get()) {
         sliceable =
             emitSelect(loc, sliceable, insert_value_for_dim(dims[i]), expr);
-      } else if (expr->type()->isSubtypeOf(UnionType::createOptionalOf(TensorType::get()))) {
+      } else if (expr->type()->isSubtypeOf(
+                     UnionType::createOptionalOf(TensorType::get()))) {
         tensor_indices.resize(dims[i] + 1);
         tensor_indices[dims[i]] = expr;
       } else {

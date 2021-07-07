@@ -159,32 +159,8 @@ struct TORCH_API Pybind11_OptionalType : public UnionType {
 
   static UnionTypePtr legacy_OptionalOfTensor();
 
-<<<<<<< HEAD
-  TypePtr createWithContained(
-      std::vector<TypePtr> contained_types) const override {
-    AT_ASSERT(contained_types.size() == 1);
-    return create(contained_types[0]);
-  }
-
-  bool isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const override;
-
-  // common cast Optional[Tensor] for undefined tensor type
-  static OptionalTypePtr ofTensor();
-
- private:
-  explicit OptionalType(TypePtr contained);
-
-  TypePtr contained_;
-
-  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
-    std::stringstream ss;
-    ss << "Optional[" << getElementType()->annotation_str(printer) << "]";
-    return ss.str();
-  }
-=======
  protected:
   Pybind11_OptionalType(std::vector<TypePtr> types) : UnionType(std::move(types)) {}
->>>>>>> 80e7f60229 (Canonicalize Optional[T] as Union[T, None])
 };
 
 template <typename T>

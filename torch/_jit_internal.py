@@ -836,12 +836,17 @@ def is_dict(ann) -> bool:
             getattr(ann, '__origin__', None) is dict)
 
 def is_union(ann):
+    if ann is Optional:
+        raise_error_container_parameter_missing("Optional")
     if ann is Union:
         raise_error_container_parameter_missing("Union")
 
-    return (hasattr(ann, '__module__') and
-            ann.__module__ == 'typing' and
-            (getattr(ann, '__origin__', None) is Union))
+    if not hasattr(ann, '__module__') or not ann.__module__ == 'typing':
+       return False
+
+    typ = getattr(ann, '__origin__', None)
+
+    return typ is Union or typ is Optional
 
 def is_future(ann) -> bool:
     if ann is Future:
@@ -1076,7 +1081,8 @@ def check_args_exist(target_type) -> None:
         raise_error_container_parameter_missing("Dict")
     elif target_type is None or target_type is Optional:
         raise_error_container_parameter_missing("Optional")
-
+    elif target_type is Union:
+        raise_error_container_parameter_missing("Union")
 
 # supports List/Dict/Tuple and Optional types
 # TODO support future

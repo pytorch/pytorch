@@ -1126,8 +1126,7 @@ void AliasDb::makePointerTo(const Value* from, const Value* to) {
     bool expected_kind = false;
     for (auto kind : {from->type()->kind(), to->type()->kind()}) {
       expected_kind = expected_kind ||
-          (kind == TypeKind::FutureType ||
-           kind == TypeKind::TupleType ||
+          (kind == TypeKind::FutureType || kind == TypeKind::TupleType ||
            kind == TypeKind::UnionType) // immutable type containers
           || kind == TypeKind::AnyType;
     }

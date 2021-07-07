@@ -113,7 +113,7 @@ class TestList(JitTestCase):
             if 1 == 1:
                 x = [1.0]
             return
-        with self.assertRaisesRegexWithHighlight(RuntimeError, "previously has type", "x"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "previously had type", "x"):
             self.checkScript(reassign_bad_type, (), optimize=False)
 
         def reassign_nested():
@@ -123,7 +123,7 @@ class TestList(JitTestCase):
                 if 1 == 1:
                     x = [1.0]
             return
-        with self.assertRaisesRegexWithHighlight(RuntimeError, "previously has type", "x"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "previously had type", "x"):
             self.checkScript(reassign_nested, (), optimize=False)
 
     def test_del(self):
