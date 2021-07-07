@@ -888,7 +888,12 @@ CompositeImplicitAutograd[alias] fn_CompositeImplicitAutograd
 
     # TODO(jwtan): Use a C++ extension, like msnpu, to introduce a dangling impl and examine the output.
     def test_find_dangling_impls(self):
-        self.assertEqual(0, len(C._dispatch_find_dangling_impls()))
+        dangling_impls = C._dispatch_find_dangling_impls()
+        self.assertEqual(
+            0,
+            len(dangling_impls),
+            msg=f"Expect zero dangling impls, but found: {dangling_impls}"
+        )
 
 if __name__ == '__main__':
     run_tests()

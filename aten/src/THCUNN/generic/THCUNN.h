@@ -5,19 +5,6 @@
 #include <ATen/core/Reduction.h>
 #include <ATen/Generator.h>
 
-TORCH_CUDA_CU_API void THNN_(GatedLinear_updateOutput)(
-    THCState* state,
-    THCTensor* input,
-    THCTensor* output,
-    int dim);
-
-TORCH_CUDA_CU_API void THNN_(GatedLinear_updateGradInput)(
-    THCState* state,
-    THCTensor* input,
-    THCTensor* gradOutput,
-    THCTensor* gradInput,
-    int dim);
-
 TORCH_CUDA_CU_API void THNN_(LogSigmoid_updateOutput)(
     THCState* state,
     THCTensor* input,
