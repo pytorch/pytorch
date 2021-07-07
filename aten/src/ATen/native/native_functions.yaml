@@ -8322,26 +8322,24 @@
 - func: glu.out(Tensor self, int dim=-1, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: glu_out
-    CUDA: legacy::cuda::_thnn_glu_forward_out
+    CPU, CUDA: glu_out
 
 - func: glu(Tensor self, int dim=-1) -> Tensor
   python_module: nn
   dispatch:
-    CPU: glu
-    CUDA: legacy::cuda::_thnn_glu_forward
+    CPU, CUDA: glu
 
 - func: glu_backward.grad_input(Tensor grad_output, Tensor self, int dim, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: glu_backward_out
-    CUDA: legacy::cuda::_thnn_glu_backward_out
+    CPU: glu_backward_cpu_out
+    CUDA: glu_backward_cuda_out
 
 - func: glu_backward(Tensor grad_output, Tensor self, int dim) -> Tensor
   python_module: nn
   dispatch:
-    CPU: glu_backward
-    CUDA: legacy::cuda::_thnn_glu_backward
+    CPU: glu_backward_cpu
+    CUDA: glu_backward_cuda
 
 - func: hardsigmoid.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
