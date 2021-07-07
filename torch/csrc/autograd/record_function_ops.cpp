@@ -20,8 +20,8 @@ void RecordFunctionHolder::enter(const std::string& name) {
 }
 
 void RecordFunctionHolder::exit() {
-  TORCH_CHECK(record_function_ != nullptr,
-              "record_function_ must be set via enter!");
+  TORCH_INTERNAL_ASSERT(record_function_ != nullptr,
+                        "record_function_ must be set via enter!");
   record_function_->end();
 }
 
