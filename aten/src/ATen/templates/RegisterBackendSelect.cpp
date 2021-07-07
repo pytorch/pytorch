@@ -40,8 +40,8 @@ at::Tensor _pin_memory(const Tensor& self, c10::optional<at::Device> device) {
 
 TORCH_LIBRARY_IMPL(aten, BackendSelect, m) {
   ${backend_select_function_registrations};
-  m.impl(TORCH_SELECTIVE_NAME("is_pinned"), is_pinned);
-  m.impl(TORCH_SELECTIVE_NAME("_pin_memory"), _pin_memory);
+  m.impl(TORCH_SELECTIVE_NAME("is_pinned"), TORCH_FN(is_pinned));
+  m.impl(TORCH_SELECTIVE_NAME("_pin_memory"), TORCH_FN(_pin_memory));
 }
 
 } // namespace
