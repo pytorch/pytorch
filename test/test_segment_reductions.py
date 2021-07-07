@@ -1,3 +1,5 @@
+from itertools import product
+
 import numpy as np
 import torch
 from torch.testing._internal.common_device_type import (
@@ -28,8 +30,9 @@ class TestSegmentReductions(TestCase):
         expected_arr,
         expected_grad_arr,
         check_backward,
+        lengths_dtype=torch.int,
     ):
-        lengths = torch.tensor(lengths_arr, device=device)
+        lengths = torch.tensor(lengths_arr, device=device, dtype=lengths_dtype)
         data = torch.tensor(
             data_arr,
             device=device,
@@ -85,8 +88,14 @@ class TestSegmentReductions(TestCase):
                 )
             )
 
-    @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
-    def test_simple_1d(self, device, dtype):
+    @dtypes(
+        *product(
+            (torch.half, torch.bfloat16, torch.float, torch.double),
+            (torch.int, torch.int64),
+        )
+    )
+    def test_simple_1d(self, device, dtypes):
+        val_dtype, length_type = dtypes
         lengths = [1, 2, 3, 0]
         data = [1, float("nan"), 3, 4, 5, 5]
         check_backward = True
@@ -114,7 +123,7 @@ class TestSegmentReductions(TestCase):
                         self._test_common(
                             reduction,
                             device,
-                            dtype,
+                            val_dtype,
                             unsafe,
                             axis,
                             initial_value,
@@ -123,10 +132,17 @@ class TestSegmentReductions(TestCase):
                             expected_result,
                             expected_grad,
                             check_backward,
+                            length_type,
                         )
 
-    @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
-    def test_multi_d_simple(self, device, dtype):
+    @dtypes(
+        *product(
+            (torch.half, torch.bfloat16, torch.float, torch.double),
+            (torch.int, torch.int64),
+        )
+    )
+    def test_multi_d_simple(self, device, dtypes):
+        val_dtype, length_type = dtypes
         check_backward = True
         axis = 0
         lengths = [1, 2, 3, 0]
@@ -202,7 +218,7 @@ class TestSegmentReductions(TestCase):
                     self._test_common(
                         reduction,
                         device,
-                        dtype,
+                        val_dtype,
                         unsafe,
                         axis,
                         initial_value,
@@ -213,8 +229,14 @@ class TestSegmentReductions(TestCase):
                         check_backward,
                     )
 
-    @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
-    def test_multi_d(self, device, dtype):
+    @dtypes(
+        *product(
+            (torch.half, torch.bfloat16, torch.float, torch.double),
+            (torch.int, torch.int64),
+        )
+    )
+    def test_multi_d(self, device, dtypes):
+        val_dtype, length_type = dtypes
         axis = 0
         lengths = [0, 2]
         data = np.arange(20).reshape(2, 2, 5).tolist()
@@ -253,7 +275,7 @@ class TestSegmentReductions(TestCase):
                     self._test_common(
                         reduction,
                         device,
-                        dtype,
+                        val_dtype,
                         unsafe,
                         axis,
                         initial_value,
