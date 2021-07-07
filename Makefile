@@ -71,6 +71,7 @@ setup_lint:
 	fi
 	pip install jinja2
 	pip install -r tools/linter/clang_tidy/requirements.txt
+	$(PYTHON) tools/linter/install/clang_tidy.py
 
 quick_checks:
 # TODO: This is broken when 'git config submodule.recurse' is 'true' since the

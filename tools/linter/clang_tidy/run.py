@@ -280,11 +280,6 @@ def apply_nolint(fname: str, warnings: Dict[int, Set[str]]) -> None:
         f.write("".join(lines))
 
 
-def git(args: List[str]) -> str:
-    result = subprocess.run(["git"] + args, stdout=subprocess.PIPE, check=True)
-    return result.stdout.decode("utf-8")
-
-
 def filter_from_diff(
     paths: List[str], diffs: List[str]
 ) -> Tuple[List[str], List[Dict[Any, Any]]]:
@@ -318,7 +313,7 @@ def filter_default(paths: List[str]) -> Tuple[List[str], List[Dict[Any, Any]]]:
     return get_all_files(paths), []
 
 
-def run(options: Any) -> None:
+def run(options: Any) -> int:
     # This flag is pervasive enough to set it globally. It makes the code
     # cleaner compared to threading it through every single function.
     global VERBOSE
@@ -341,6 +336,9 @@ def run(options: Any) -> None:
         sys.exit()
 
     clang_tidy_output = run_clang_tidy(options, line_filters, files)
+    warnings = extract_warnings(
+        clang_tidy_output, base_dir=options.compile_commands_dir
+    )
     if options.suppress_diagnostics:
         warnings = extract_warnings(
             clang_tidy_output, base_dir=options.compile_commands_dir
@@ -358,3 +356,5 @@ def run(options: Any) -> None:
     for line in clang_tidy_output.splitlines():
         if line.startswith(pwd):
             print(line[len(pwd) :])
+
+    return len(warnings.keys())

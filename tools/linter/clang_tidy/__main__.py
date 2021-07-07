@@ -12,8 +12,16 @@ from generate_build_files import generate_build_files
 
 
 def clang_search_dirs() -> List[str]:
+    # Compilers are ordered based on fallback preference
+    # We pick the first one that is available on the system
+    compilers = ["clang", "gcc", "cpp", "cc"]
+    compilers = [c for c in compilers if shutil.which(c) is not None]
+    if len(compilers) == 0:
+        raise RuntimeError(f"None of {compilers} were found")
+    compiler = compilers[0]
+
     result = subprocess.run(
-        ["clang", "-E", "-x", "c++", "-", "-v"],
+        [compiler, "-E", "-x", "c++", "-", "-v"],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -177,7 +185,9 @@ def main() -> None:
         print(msg)
         exit(1)
 
-    run(options)
+    return_code = run(options)
+    if return_code != 0:
+        raise RuntimeError("Warnings found in clang-tidy output!")
 
 
 main()

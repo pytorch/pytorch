@@ -296,7 +296,6 @@ class ClangTidy(Check):
         "--clang-tidy-exe",
         ".clang-tidy-bin/clang-tidy",
         "--parallel",
-        "--verbose",
     ]
 
     def filter_files(self, files: List[str]) -> List[str]:
@@ -311,11 +310,7 @@ class ClangTidy(Check):
 
     async def full(self) -> None:
         await shell_cmd(
-            [
-                sys.executable,
-                "tools/linter/clang_tidy",
-            ]
-            + self.common_options
+            [sys.executable, "tools/linter/clang_tidy"] + self.common_options
         )
 
 
