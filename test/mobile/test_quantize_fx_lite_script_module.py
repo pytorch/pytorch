@@ -19,7 +19,7 @@ from torch.testing._internal.common_quantization import (
 )
 
 
-class TestFuseFx(QuantizationLiteTestCase):
+class TestLiteFuseFx(QuantizationLiteTestCase):
 
     # Tests from:
     # ./caffe2/test/quantization/fx/test_quantize_fx.py
