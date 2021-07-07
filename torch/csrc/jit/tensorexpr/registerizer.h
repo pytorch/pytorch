@@ -51,6 +51,7 @@ class Scope;
 class AccessInfo {
  public:
   AccessInfo() = default;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   AccessInfo(
       SimplifierHashType h,
       const Buf* b,
@@ -220,6 +221,7 @@ using AccessHashMap =
 // Represents a scope block and holds all accesses contained within it.
 class Scope {
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Scope(const Block* b, std::shared_ptr<Scope> parent, size_t conditionId = 0)
       : block_(b), parent_(std::move(parent)), conditionId_(conditionId) {}
 
@@ -376,6 +378,7 @@ class TORCH_API RegisterizerAnalysis : public IRVisitor {
  */
 class TORCH_API RegisterizerReplacer : public IRMutator {
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   RegisterizerReplacer(std::vector<std::shared_ptr<AccessInfo>>& vec)
       : infoSet_(vec) {
     buildReplacements();
