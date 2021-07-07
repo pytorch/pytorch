@@ -55,7 +55,8 @@ else
   export PYTORCH_TEST_SKIP_NOARCH=1
 fi
 
-if [[ -n "$IN_PULL_REQUEST" ]]; then
+if [[ -n "$IN_PULL_REQUEST" ]] && [[ -z "$CI_MASTER" || "$CI_MASTER" == "false" ]]; then
+  # skip expensive checks when on PR and CI_MASTER flag is not set
   export PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK=1
 else
   export PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK=0
@@ -264,7 +265,9 @@ test_distributed() {
     build/bin/TCPStoreTest --gtest_output=xml:$TEST_REPORTS_DIR/TCPStoreTest.xml
 
     MPIEXEC=$(command -v mpiexec)
-    if [[ -n "$MPIEXEC" ]]; then
+    # TODO: this is disabled on GitHub Actions until this issue is resolved
+    # https://github.com/pytorch/pytorch/issues/60756
+    if [[ -n "$MPIEXEC" ]] && [[ -z "$GITHUB_ACTIONS" ]]; then
       MPICMD="${MPIEXEC} -np 2 build/bin/ProcessGroupMPITest"
       eval "$MPICMD"
     fi
@@ -444,7 +447,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *jit_legacy-test || "${JOB_BASE_NAME}" == *jit
 elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
-elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${SHARD_NUMBER}" == 1 ]]; then
+elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 || "${SHARD_NUMBER}" == 1 ]]; then
   if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7-test1 ]]; then
     test_torch_deploy
   fi
@@ -452,7 +455,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${SHARD_NUMBER}" == 1 ]]; then
   install_torchvision
   test_python_shard1
   test_aten
-elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${SHARD_NUMBER}" == 2 ]]; then
+elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 || "${SHARD_NUMBER}" == 2 ]]; then
   install_torchvision
   test_python_shard2
   test_libtorch
