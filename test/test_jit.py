@@ -6440,7 +6440,7 @@ a")
         self.checkScript(func, inputs_true, optimize=True)
         self.checkScript(func, inputs_false, optimize=True)
 
-    @unittest.skipIf(True, "Temporarily skipping test while landing PR stack")
+    @unittest.skipIf(True, "Temporarily skipping while landing entire Union PR stack")
     def test_ternary_module_type_hint(self):
         class M1(torch.nn.Module):
             def forward(self) -> Any:
