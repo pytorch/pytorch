@@ -371,7 +371,7 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   if (isQIntType(self_.scalar_type())) {
     value = valueToTensor(device(kCPU).dtype(kFloat), py_value, at::Device(kCPU));
   } else {
-    value = valueToTensor(self_.options(), py_value, self_device);
+    value = valueToTensor(self_.options(), py_value, at::Device(kCPU));
   }
 
   // handle simple types: ellipsis, none, bool

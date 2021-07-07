@@ -302,7 +302,7 @@ const Tensor& value){
       num_ind++;
     } else {
       Tensor index = std::move(*i);
-      if (index.scalar_type() != kByte || index.scalar_type() != kBool || mask.defined()){
+      if ((index.scalar_type() != kByte && index.scalar_type() != kBool) || mask.defined()){
         return std::make_tuple(false, Tensor());
       } else {
         mask = index;
@@ -315,7 +315,7 @@ const Tensor& value){
       }
     }
   }
-  for (int64_t i = num_ind; i<= self.ndimension(); i++){
+  for (int64_t i = num_ind; i< self.ndimension(); i++){
     mask = mask.unsqueeze(-1);
   }
   return std::make_tuple(true, mask);
@@ -507,6 +507,10 @@ Tensor & _index_put_impl_(Tensor & self, const torch::List<c10::optional<Tensor>
       return self.masked_fill_(std::get<1>(masked_fill_dispatch), value.item());
     }
   }
+  auto value_ = value;
+  if (value.device() != self.device()) {
+    value_ = value.to(self.device());
+  }
   at::assert_no_overlap(self, value);
   // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
   for (const c10::optional<Tensor>& index: indices) {
@@ -514,16 +518,15 @@ Tensor & _index_put_impl_(Tensor & self, const torch::List<c10::optional<Tensor>
       at::assert_no_overlap(self, *index);
     }
   }
-
   if (self.device().type() == DeviceType::CUDA && (accumulate || globalContext().deterministicAlgorithms())) {
-      TORCH_CHECK(value.device() == self.device(), "expected device ", self.device(), " but got device ",
-      value.device(), " for value tensor");
-      index_put_with_sort_stub(self.device().type(), self, indices, value, accumulate, unsafe);
+      TORCH_CHECK(value_.device() == self.device(), "expected device ", self.device(), " but got device ",
+      value_.device(), " for value tensor");
+      index_put_with_sort_stub(self.device().type(), self, indices, value_, accumulate, unsafe);
       return self;
   }
 
   auto info = make_info(self, indices);
-  auto iter = make_index_put_iterator(info, value);
+  auto iter = make_index_put_iterator(info, value_);
   index_put_stub(iter.device_type(), iter, info.indexed_sizes, info.indexed_strides, accumulate);
   return self;
 }
