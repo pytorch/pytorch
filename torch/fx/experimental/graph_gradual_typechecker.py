@@ -6,7 +6,6 @@ from typing import Callable, Dict
 from torch.fx.node import Target, Node
 from torch.nn.modules.batchnorm import BatchNorm2d
 from torch.nn.modules.conv import Conv2d
-from math import floor
 
 
 _INFERENCE_RULES: Dict[Target, Callable] = {}
@@ -209,70 +208,116 @@ def bn2d_inference_rule(n: Node, module_instance):
     else:
         raise TypeError(f'Cannot apply {module_instance} with input type {arg_type} and existing type {n.type} on {n}')
 
-def calculate_hout(h_in, op_type):
 
-    padding = (op_type.padding, op_type.padding) if isinstance(op_type.padding, int) else op_type.padding
-    kernel_size = (op_type.kernel_size, op_type.kernel_size) if isinstance(op_type.kernel_size, int) else op_type.kernel_size
-    stride = (op_type.stride, op_type.stride) if isinstance(op_type.stride, int) else op_type.stride
-    dilation = (op_type.dilation, op_type.dilation) if isinstance(op_type.dilation, int) else op_type.dilation
+def calculate(d_in, module_instance, index):
+    """
+    For calculating h_in and w_out.
+    """
 
+    padding = (module_instance.padding, module_instance.padding) \
+        if isinstance(module_instance.padding, int) else module_instance.padding
+    kernel_size = (module_instance.kernel_size, module_instance.kernel_size)\
+        if isinstance(module_instance.kernel_size, int) else module_instance.kernel_size
+    stride = (module_instance.stride, module_instance.stride) \
+        if isinstance(module_instance.stride, int) else module_instance.stride
+    dilation = (module_instance.dilation, module_instance.dilation)\
+        if isinstance(module_instance.dilation, int) else module_instance.dilation
 
-    if h_in == Dyn:
+    if d_in == Dyn:
         return Dyn
 
-    elif isinstance(h_in, int):
-        h_out = floor((h_in + (2 * padding[0] - dilation[0] *
-                               (kernel_size[0] - 1) - 1)) / stride[0]) + 1
-        return h_out
-    else:
-        raise TypeError(f'{h_in} must be a number or Dyn')
+    elif isinstance(d_in, int):
+        n = d_in + 2 * padding[index] - \
+            dilation[index] * \
+            (kernel_size[index] - 1) - 1
 
-def calculate_wout(w_in, op_type):
-    padding = (op_type.padding, op_type.padding) if isinstance(op_type.padding, int) else op_type.padding
-    kernel_size = (op_type.kernel_size, op_type.kernel_size) if isinstance(op_type.kernel_size, int) else op_type.kernel_size
-    stride = (op_type.stride, op_type.stride) if isinstance(op_type.stride, int) else op_type.stride
-    dilation = (op_type.dilation, op_type.dilation) if isinstance(op_type.dilation, int) else op_type.dilation
+        return (n // stride[0]) + 1
 
-    if w_in == Dyn:
-        return Dyn
 
-    elif isinstance(w_in, int):
-        w_out = floor((w_in + (2 * padding[1] - dilation[1] *
-                               (kernel_size[1] - 1) - 1)) /
-                      stride[1]) + 1
-        return w_out
-    else:
-        raise TypeError(f'{w_in} in {op_type} must be a number or Dyn')
+# def calculate_hout(h_in, op_type):
+#
+#     padding = (op_type.padding, op_type.padding) if isinstance(op_type.padding, int) else op_type.padding
+#     kernel_size = (op_type.kernel_size, op_type.kernel_size) if isinstance(op_type.kernel_size, int) else op_type.kernel_size
+#     stride = (op_type.stride, op_type.stride) if isinstance(op_type.stride, int) else op_type.stride
+#     dilation = (op_type.dilation, op_type.dilation) if isinstance(op_type.dilation, int) else op_type.dilation
+#
+#
+#     if h_in == Dyn:
+#         return Dyn
+#
+#     elif isinstance(h_in, int):
+#         h_out = floor((h_in + (2 * padding[0] - dilation[0] *
+#                                (kernel_size[0] - 1) - 1)) / stride[0]) + 1
+#         return h_out
+#     else:
+#         raise TypeError(f'{d_in} in {module_instance} must be a number or Dyn')
+
+
+
+def get_greatest_upper_bound(type1, type2):
+    """
+    Get the most precise type that's consistent with the given types
+    """
+    if type1 == Dyn:
+        return type2
+    elif type2 == Dyn:
+        return type1
+    elif isinstance(type1, TensorType) and isinstance(type2, TensorType):
+        assert len(type1.__args__) == len(type2.__args__)
+        gub = [t1 if is_more_precise(t1, t2) else t2 for (t1, t2) in zip(type1.__args__, type2.__args__)]
+        return TensorType(tuple(gub))
+
+
+# def calculate_wout(w_in, op_type):
+#     padding = (op_type.padding, op_type.padding) if isinstance(op_type.padding, int) else op_type.padding
+#     kernel_size = (op_type.kernel_size, op_type.kernel_size) if isinstance(op_type.kernel_size, int) else op_type.kernel_size
+#     stride = (op_type.stride, op_type.stride) if isinstance(op_type.stride, int) else op_type.stride
+#     dilation = (op_type.dilation, op_type.dilation) if isinstance(op_type.dilation, int) else op_type.dilation
+#
+#     if w_in == Dyn:
+#         return Dyn
+#
+#     elif isinstance(w_in, int):
+#         w_out = floor((w_in + (2 * padding[1] - dilation[1] *
+#                                (kernel_size[1] - 1) - 1)) /
+#                       stride[1]) + 1
+#         return w_out
+#         raise NotImplementedError(f'Greatest upper bound not yet implemented for these types {type1}, {type2}')
 
 @register_inference_rule(Conv2d)
-def conv2d_inference_rule(n: Node, op_type):
+def conv2d_inference_rule(n: Node, module_instance):
+    """
+    Given a Conv2D instance and a node check the following conditions:
+    - the input type can be expanded to a size 4 tensor: t =  (x_1, x_2, H, W)
+    - the current node type can be expanded to a size 4 tensor: t' =  (x_1', x_2', x_3', x_4')
+    - x_2 is consistent with the module's in_channels
+    - let o = (x_1, out_channels, H_out, W_out)
+    then the outout is the greatest upper bound of o and the existing node type t'.
+    """
     assert isinstance(n.args[0], Node)
     n.args[0].type = expand_to_tensor_dim(n.args[0].type, 4)
     arg_type = n.args[0].type
-    n.type = expand_to_tensor_dim(n.type, 4)
-    if is_consistent(arg_type.__args__[1], op_type.in_channels) and \
-            is_consistent(n.type.__args__[1], op_type.in_channels) and \
-            is_consistent(arg_type, n.type):
+    curr_node_type = expand_to_tensor_dim(n.type, 4)
 
+    if is_consistent(arg_type.__args__[1], module_instance.in_channels):
         w_in = arg_type.__args__[3]
         h_in = arg_type.__args__[2]
+        h_out = calculate(h_in, module_instance, 0)
+        w_out = calculate(w_in, module_instance, 1)
+        new_type = TensorType((arg_type.__args__[0], module_instance.out_channels, h_out, w_out))
 
-        h_out = calculate_hout(h_in, op_type)
-
-        w_out = calculate_wout(w_in, op_type)
-
-        # todo backwards propagation
-
-        new_type = TensorType((arg_type.__args__[0], op_type.out_channels, h_out, w_out))
-        n.type = new_type
-
+        if not is_consistent(new_type, curr_node_type):
+            raise TypeError(f'Inconsistent types {new_type} and {curr_node_type}')
+        else:
+            gub = get_greatest_upper_bound(new_type, curr_node_type)
+            n.type = gub
         return n.type
     else:
-        raise TypeError(f'Cannot apply {op_type} with input type { arg_type} and existing type {n.type} on {n}')
+        raise TypeError(f'Cannot apply {module_instance} with input type { arg_type} and existing type {n.type} on {n}')
 
 
 @register_inference_rule(torch.nn.ReLU)
-def relu_inference_rule(n: Node, op_type):
+def relu_inference_rule(n: Node, module_instance):
     assert isinstance(n.args[0], Node)
     arg_type = n.args[0].type
     if is_consistent(arg_type, n.type):
@@ -280,26 +325,26 @@ def relu_inference_rule(n: Node, op_type):
             n.type = arg_type
         return n.type
     else:
-        raise TypeError(f'Cannot apply {op_type}. Current shape {n.type} does not match argument shape {arg_type}')
+        raise TypeError(f'Cannot apply {module_instance}. Current shape {n.type} does not match argument shape {arg_type}')
 
 
-def maxpool2d_check(typ, op_type):
+def maxpool2d_check(typ, module_instance):
     new_type_list = list(typ.__args__)
     if len(new_type_list) == 4 or len(new_type_list) == 3:
         w_in = new_type_list[-1]
         h_in = new_type_list[-2]
-        h_out = calculate_hout(h_in, op_type)
-        w_out = calculate_wout(w_in, op_type)
+        h_out = calculate(h_in, module_instance, 0)
+        w_out = calculate(w_in, module_instance, 1)
         new_type_list[-1] = w_out
         new_type_list[-2] = h_out
         return TensorType(tuple(new_type_list))
 
     else:
-        raise TypeError(f'Wrong size {typ} for {op_type}')
+        raise TypeError(f'Wrong size {typ} for {module_instance}')
 
 
 @register_inference_rule(torch.nn.MaxPool2d)
-def maxpool2d_inference_rule(n: Node, op_type):
+def maxpool2d_inference_rule(n: Node, module_instance):
     assert isinstance(n.args[0], Node)
 
     if n.args[0].type == Dyn and n.type == Dyn:
@@ -307,16 +352,16 @@ def maxpool2d_inference_rule(n: Node, op_type):
 
     # Todo backwards propagation
     elif n.args[0].type == Dyn and isinstance(n.type, TensorType):
-        n.type = maxpool2d_check(n.type, op_type)
+        n.type = maxpool2d_check(n.type, module_instance)
         return n.type
 
     elif n.type == Dyn and isinstance(n.args[0].type, TensorType):
-        n.type = maxpool2d_check(n.args[0].type, op_type)
+        n.type = maxpool2d_check(n.args[0].type, module_instance)
         return n.type
 
     elif isinstance(n.args[0].type, TensorType) and isinstance(n.type, TensorType):
-        new_arg = maxpool2d_check(n.args[0].type, op_type)
-        new_node_type = maxpool2d_check(n.type, op_type)
+        new_arg = maxpool2d_check(n.args[0].type, module_instance)
+        new_node_type = maxpool2d_check(n.type, module_instance)
 
         n.type = new_node_type
 
@@ -324,7 +369,7 @@ def maxpool2d_inference_rule(n: Node, op_type):
             n.type = new_arg
         return n.type
     else:
-        raise TypeError(f'Cannot apply {op_type} with input type {n.args[0].type} and existing type {n.type} on {n}')
+        raise TypeError(f'Cannot apply {module_instance} with input type {n.args[0].type} and existing type {n.type} on {n}')
 
 
 class GraphTypeChecker:
