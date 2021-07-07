@@ -262,7 +262,7 @@ class TestEqualizeFx(QuantizationTestCase):
                  (SingleLayerFunctionalLinearModel, 2), (FunctionalLinearAddModel, 2),
                  (TwoLayerFunctionalLinearModel, 2),
                  (LinearReluModel, 2), (LinearReluLinearModel, 2), (LinearReluAddModel, 2),
-                 (FunctionalLinearReluModel, 2), (FunctionalLinearReluLinearModel, 2), 
+                 (FunctionalLinearReluModel, 2), (FunctionalLinearReluLinearModel, 2),
                  (ConvModel, 4), (TwoLayerConvModel, 4), (SingleLayerFunctionalConvModel, 4),
                  (TwoLayerFunctionalConvModel, 4)]
 
