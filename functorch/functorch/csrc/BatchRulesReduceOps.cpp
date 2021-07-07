@@ -27,11 +27,11 @@ bool is_allowed_dim_on_scalar_tensor(int64_t dim) {
 
 // Taken from https://stackoverflow.com/a/41301717
 template<typename R, typename... A>
-R ret(R(*)(A...));
+R ret_type(R(*)(A...));
 
 // Optional implies the weird case with 0-dim tensors i.e. torch.sum(torch.randn(()), 0)
 template <typename F, F Func, typename... ExtraArgs>
-optional<std::tuple<decltype(ret(Func)), optional<int64_t>>> reduction_dimarray_batch_rule_impl(    const Tensor& self, optional<int64_t> self_bdim, IntArrayRef dims, ExtraArgs... extra_args) {
+optional<std::tuple<decltype(ret_type(Func)), optional<int64_t>>> reduction_dimarray_batch_rule_impl(    const Tensor& self, optional<int64_t> self_bdim, IntArrayRef dims, ExtraArgs... extra_args) {
   auto logical_dim = rankWithoutBatchDim(self, self_bdim);
 
   // If the dim intlist is empty, that's equivalent to passing in a dim on all dimensions.
@@ -65,7 +65,7 @@ std::tuple<Tensor,optional<int64_t>> reduction_dimarray_batch_rule(
 
 // Optional implies the weird case with 0-dim tensors i.e. torch.sum(torch.randn(()), 0)
 template <typename F, F Func, typename... ExtraArgs>
-optional<std::tuple<decltype(ret(Func)), optional<int64_t>>> reduction_dim_batch_rule_impl(const Tensor& self, optional<int64_t> self_bdim, int64_t dim, ExtraArgs... extra_args) {
+optional<std::tuple<decltype(ret_type(Func)), optional<int64_t>>> reduction_dim_batch_rule_impl(const Tensor& self, optional<int64_t> self_bdim, int64_t dim, ExtraArgs... extra_args) {
   auto logical_dim = rankWithoutBatchDim(self, self_bdim);
   if (logical_dim == 0 && is_allowed_dim_on_scalar_tensor(dim)) {
     return nullopt;
