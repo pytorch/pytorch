@@ -48,6 +48,12 @@ _DTYPE_PRECISIONS = {
 }
 
 
+def _get_default_rtol_and_atol(actual: Tensor, expected: Tensor) -> Tuple[float, float]:
+    actual_rtol, actual_atol = _DTYPE_PRECISIONS.get(actual.dtype, (0.0, 0.0))
+    expected_rtol, expected_atol = _DTYPE_PRECISIONS.get(expected.dtype, (0.0, 0.0))
+    return max(actual_rtol, expected_rtol), max(actual_atol, expected_atol)
+
+
 def _check_complex_components_individually(
     check_tensors: Callable[..., Optional[_TestingErrorMeta]]
 ) -> Callable[..., Optional[_TestingErrorMeta]]:
@@ -472,13 +478,8 @@ def _check_tensors_close(
     Returns:
         Optional[_TestingErrorMeta]: If checks did not pass.
     """
-    if (rtol is None) ^ (atol is None):
-        # We require both tolerance to be omitted or specified, because specifying only one might lead to surprising
-        # results. Imagine setting atol=0.0 and the tensors still match because rtol>0.0.
-        return _TestingErrorMeta(
-            UsageError,
-            f"Both 'rtol' and 'atol' must be either specified or omitted, but got rtol={rtol} and atol={atol} instead.",
-        )
+    if rtol is None or atol is None:
+        rtol, atol = _get_default_rtol_and_atol(actual, expected)
 
     error_meta = _check_attributes_equal(
         actual,
@@ -780,8 +781,8 @@ def assert_close(
             coalesced or uncoalesced.
         AssertionError: If the values of corresponding tensors are not close.
 
-    The following table displays the default ``rtol`` and ``atol`` for different ``dtype``'s. Note that the ``dtype``
-    refers to the promoted type in case :attr:`actual` and :attr:`expected` do not have the same ``dtype``.
+    The following table displays the default ``rtol`` and ``atol`` for different ``dtype``'s. In case of mismatching
+    ``dtype``'s, the maximum of both tolerances is used.
 
     +---------------------------+------------+----------+
     | ``dtype``                 | ``rtol``   | ``atol`` |
@@ -929,6 +930,14 @@ def assert_close(
     """
     # Hide this function from `pytest`'s traceback
     __tracebackhide__ = True
+
+    if (rtol is None) ^ (atol is None):
+        # We require both tolerance to be omitted or specified, because specifying only one might lead to surprising
+        # results. Imagine setting atol=0.0 and the tensors still match because rtol>0.0.
+        raise UsageError(
+            f"Both 'rtol' and 'atol' must be either specified or omitted, "
+            f"but got no {'rtol' if rtol is None else 'atol'}.",
+        )
 
     error_meta, pair = _parse_inputs(actual, expected)
     if error_meta:
