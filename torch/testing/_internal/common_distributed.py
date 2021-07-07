@@ -3,7 +3,6 @@ from datetime import timedelta
 from enum import Enum
 import faulthandler
 import multiprocessing
-from multiprocessing import Manager
 from io import StringIO
 import os
 import sys
@@ -436,7 +435,12 @@ class MultiProcessTestCase(TestCase):
         return self.id().split(".")[-1]
 
     def _start_processes(self, proc) -> None:
-        test_skips_manager = Manager()
+        # Creating a Manager will spawn a subprocess which will in turn launch
+        # a thread. TSAN doesn't like this because there could have been other
+        # threads already in the parent process and mixing all this is unsafe.
+        # Instead we should exec after the fork (i.e., use the "spawn" method)
+        # so that we reset the subprocess's state before creating new threads.
+        test_skips_manager = torch.multiprocessing.get_context("spawn").Manager()
         test_skips = test_skips_manager.dict()
         global TEST_SKIPS
         test_skips.update(TEST_SKIPS)
@@ -526,7 +530,7 @@ class MultiProcessTestCase(TestCase):
         except Exception as e:
             logger.error(
                 f'Caught exception: \n{traceback.format_exc()} exiting '
-                'process with exit code: {MultiProcessTestCase.TEST_ERROR_EXIT_CODE}')
+                f'process {self.rank} with exit code: {MultiProcessTestCase.TEST_ERROR_EXIT_CODE}')
             # Send error to parent process.
             parent_pipe.send(traceback.format_exc())
             sys.exit(MultiProcessTestCase.TEST_ERROR_EXIT_CODE)
