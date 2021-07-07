@@ -1,4 +1,3 @@
-#include "c10d/Utils.hpp"
 #ifdef _WIN32
 #include <c10d/WinSockUtils.hpp>
 #else
