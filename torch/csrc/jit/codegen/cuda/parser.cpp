@@ -20,7 +20,7 @@ typedef Node JitOp;
 namespace fuser {
 namespace cuda {
 
-constexpr auto kNumUnaryOps = 31;
+constexpr auto kNumUnaryOps = 30;
 constexpr auto kNumBinaryOps = 24;
 constexpr auto kNumBinaryOpsWithAlpha = 4;
 constexpr auto kNumLerpOps = 2;
@@ -303,7 +303,6 @@ class IrParser {
         "aten::reciprocal(Tensor self) -> Tensor",
         "aten::relu(Tensor self) -> Tensor",
         "aten::sigmoid(Tensor self) -> Tensor",
-        "aten::gelu(Tensor self) -> Tensor",
     };
     for (auto signature : UnaryOp) {
       auto ptr_op = getOperatorForLiteral(signature);

@@ -570,7 +570,7 @@ TORCH_MODULE(GLU);
 // NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API GELUImpl : public torch::nn::Cloneable<GELUImpl> {
  public:
-  Tensor forward(const Tensor& input);
+  Tensor forward(const Tensor& input, bool approximate);
 
   void reset() override;
 
