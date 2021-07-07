@@ -406,6 +406,7 @@ jobs:
       - name: Run mypy
         run: |
           set -eux
+          export MYPY_FORCE_COLOR=1
           STATUS=
           for CONFIG in mypy*.ini; do
             if ! mypy --config="$CONFIG"; then
