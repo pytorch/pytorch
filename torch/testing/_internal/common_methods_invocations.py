@@ -7282,12 +7282,7 @@ op_db: List[OpInfo] = [
            aliases=('moveaxis',),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
-           sample_inputs_func=sample_movedim_moveaxis,
-           skips=(
-               # Expected a value of type 'int' for argument 'source'
-               #   but instead found type 'list'.
-               SkipInfo('TestJit', 'test_jit_alias_remapping'),
-           )),
+           sample_inputs_func=sample_movedim_moveaxis),
     OpInfo('renorm',
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_renorm),
@@ -7415,6 +7410,7 @@ op_db: List[OpInfo] = [
            ),
            sample_inputs_func=sample_inputs_zeta),
     OpInfo('logsumexp',
+           aliases=('special.logsumexp',),
            dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.half),
            assert_autodiffed=True,

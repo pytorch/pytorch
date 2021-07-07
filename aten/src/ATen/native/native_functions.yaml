@@ -9819,6 +9819,13 @@
 - func: special_logit.out(Tensor self, float? eps=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: special
 
+- func: special_logsumexp(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
+  python_module: special
+  variants: function
+
+- func: special_logsumexp.out(Tensor self, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+
 - func: special_expit(Tensor self) -> Tensor
   python_module: special
   variants: function
