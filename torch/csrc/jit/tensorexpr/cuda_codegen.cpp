@@ -39,7 +39,6 @@ class ScopedVarName {
   ScopedVarName(const ScopedVarName&) = delete;
   ScopedVarName& operator=(const ScopedVarName&) = delete;
 
-  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~ScopedVarName() noexcept(false) {
     mapping_->erase(var_);
   }
