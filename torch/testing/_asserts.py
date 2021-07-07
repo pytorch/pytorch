@@ -2,7 +2,7 @@ import collections.abc
 import functools
 import numbers
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Type, Union, cast
-from types import SimpleNamespace
+from types import SimpleNamespace as Diagnostics
 
 import torch
 from torch import Tensor
@@ -295,12 +295,7 @@ def _equalize_attributes(actual: Tensor, expected: Tensor) -> Tuple[Tensor, Tens
     return actual, expected
 
 
-DiagnosticInfo = SimpleNamespace
-
-
-def _trace_mismatches(
-    actual: Tensor, expected: Tensor, mismatches: Tensor, *, rtol: float, atol: float
-) -> DiagnosticInfo:
+def _trace_mismatches(actual: Tensor, expected: Tensor, mismatches: Tensor, *, rtol: float, atol: float) -> Diagnostics:
     """Traces mismatches and returns diagnostic information.
 
     Args:
@@ -310,7 +305,7 @@ def _trace_mismatches(
             the location of mismatches.
 
     Returns:
-        (DiagnosticInfo): Mismatch diagnostics with the following attributes:
+        (Diagnostics): Mismatch diagnostics with the following attributes:
 
             - ``number_of_elements`` (int): Number of elements in each tensor being compared.
             - ``total_mismatches`` (int): Total number of mismatches.
@@ -341,7 +336,7 @@ def _trace_mismatches(
     rel_diff[matches_flat] = 0
     max_rel_diff, max_rel_diff_flat_idx = torch.max(rel_diff, 0)
 
-    return SimpleNamespace(
+    return Diagnostics(
         number_of_elements=number_of_elements,
         total_mismatches=cast(int, total_mismatches),
         max_abs_diff=max_abs_diff.item(),
@@ -356,12 +351,12 @@ def _trace_mismatches(
 def _make_mismatch_msg(
     actual: Tensor,
     expected: Tensor,
-    trace: DiagnosticInfo,
+    diagnostics: Diagnostics,
     *,
     identifier: Optional[Union[str, Callable[[str], str]]] = None,
 ) -> str:
     scalar_comparison = actual.size() == torch.Size([])
-    equality = trace.rtol == 0 and trace.atol == 0
+    equality = diagnostics.rtol == 0 and diagnostics.atol == 0
 
     def append_difference(msg: str, *, type: str, difference: float, index: Tuple[int, ...], tolerance: float) -> str:
         if scalar_comparison:
@@ -383,15 +378,23 @@ def _make_mismatch_msg(
 
     if not scalar_comparison:
         msg += (
-            f"Mismatched elements: {trace.total_mismatches} / {trace.number_of_elements} "
-            f"({trace.total_mismatches / trace.number_of_elements:.1%})\n"
+            f"Mismatched elements: {diagnostics.total_mismatches} / {diagnostics.number_of_elements} "
+            f"({diagnostics.total_mismatches / diagnostics.number_of_elements:.1%})\n"
         )
 
     msg = append_difference(
-        msg, type="absolute", difference=trace.max_abs_diff, index=trace.max_abs_diff_idx, tolerance=trace.atol
+        msg,
+        type="absolute",
+        difference=diagnostics.max_abs_diff,
+        index=diagnostics.max_abs_diff_idx,
+        tolerance=diagnostics.atol,
     )
     msg = append_difference(
-        msg, type="relative", difference=trace.max_rel_diff, index=trace.max_rel_diff_idx, tolerance=trace.rtol
+        msg,
+        type="relative",
+        difference=diagnostics.max_rel_diff,
+        index=diagnostics.max_rel_diff_idx,
+        tolerance=diagnostics.rtol,
     )
 
     return msg.strip()
@@ -408,7 +411,7 @@ def _check_values_close(
     rtol: float,
     atol: float,
     equal_nan: bool,
-    msg: Optional[Union[str, Callable[[Tensor, Tensor, SimpleNamespace], str]]],
+    msg: Optional[Union[str, Callable[[Tensor, Tensor, Diagnostics], str]]],
 ) -> Optional[_TestingErrorMeta]:
     """Checks if the values of two tensors are close up to a desired tolerance.
 
@@ -418,9 +421,8 @@ def _check_values_close(
         rtol (float): Relative tolerance.
         atol (float): Absolute tolerance.
         equal_nan (bool): If ``True``, two ``NaN`` values will be considered equal.
-        msg (Optional[Union[str, Callable[[Tensor, Tensor, DiagnosticInfo], str]]]): Optional error message. Can be
-            passed as callable in which case it will be called with the inputs and the result of
-            :func:`_trace_mismatches`.
+        msg (Optional[Union[str, Callable[[Tensor, Tensor, Diagnostics], str]]]): Optional error message. Can be passed
+            as callable in which case it will be called with the inputs and the result of :func:`_trace_mismatches`.
 
     Returns:
         (Optional[AssertionError]): If check did not pass.
@@ -430,11 +432,11 @@ def _check_values_close(
     if not torch.any(mismatches):
         return None
 
-    trace = _trace_mismatches(actual, expected, mismatches, rtol=rtol, atol=atol)
+    diagnostics = _trace_mismatches(actual, expected, mismatches, rtol=rtol, atol=atol)
     if msg is None:
         msg = _make_mismatch_msg
     if callable(msg):
-        msg = msg(actual, expected, trace)
+        msg = msg(actual, expected, diagnostics)
     return _TestingErrorMeta(AssertionError, msg)
 
 
@@ -449,7 +451,7 @@ def _check_tensors_close(
     check_dtype: bool = True,
     check_stride: bool = True,
     check_is_coalesced: bool = True,
-    msg: Union[str, Callable[[Tensor, Tensor, DiagnosticInfo], str]],
+    msg: Union[str, Callable[[Tensor, Tensor, Diagnostics], str]],
 ) -> Optional[_TestingErrorMeta]:
     r"""Checks that the values of :attr:`actual` and :attr:`expected` are close.
 
@@ -701,7 +703,7 @@ def assert_close(
     check_dtype: bool = True,
     check_stride: bool = True,
     check_is_coalesced: bool = True,
-    msg: Optional[Union[str, Callable[[Tensor, Tensor, SimpleNamespace], str]]] = None,
+    msg: Optional[Union[str, Callable[[Tensor, Tensor, Diagnostics], str]]] = None,
 ) -> None:
     r"""Asserts that :attr:`actual` and :attr:`expected` are close.
 
@@ -756,9 +758,9 @@ def assert_close(
         check_is_coalesced (bool): If ``True`` (default) and corresponding tensors are sparse COO, checks that both
             :attr:`actual` and :attr:`expected` are either coalesced or uncoalesced. If this check is disabled,
             tensors are :meth:`~torch.Tensor.coalesce`'ed before being compared.
-        msg (Optional[Union[str, Callable[[Tensor, Tensor, DiagnosticInfo], str]]]): Optional error message to use if
-            the values of corresponding tensors mismatch. Can be passed as callable in which case it will be called
-            with the mismatching tensors and a namespace of diagnostic info about the mismatches. See below for details.
+        msg (Optional[Union[str, Callable[[Tensor, Tensor, Diagnostics], str]]]): Optional error message to use if the
+            values of corresponding tensors mismatch. Can be passed as callable in which case it will be called with
+            the mismatching tensors and a namespace of diagnostics about the mismatches. See below for details.
 
     Raises:
         UsageError: If a :class:`torch.Tensor` can't be constructed from an array-or-scalar-like.
@@ -800,8 +802,7 @@ def assert_close(
     | other                     | ``0.0``    | ``0.0``  |
     +---------------------------+------------+----------+
 
-    The namespace of diagnostic information that will be passed to :attr:`msg` if its a callable has the following
-    attributes:
+    The namespace of diagnostics that will be passed to :attr:`msg` if its a callable has the following attributes:
 
     - ``number_of_elements`` (int): Number of elements in each tensor being compared.
     - ``total_mismatches`` (int): Total number of mismatches.
@@ -914,10 +915,10 @@ def assert_close(
         ...
         AssertionError: Argh, the tensors are not close!
         >>> # The error message can also created at runtime by passing a callable.
-        >>> def custom_msg(actual, expected, diagnostic_info):
-        ...     ratio = diagnostic_info.total_mismatches / diagnostic_info.number_of_elements
+        >>> def custom_msg(actual, expected, diagnostics):
+        ...     ratio = diagnostics.total_mismatches / diagnostics.number_of_elements
         ...     return (
-        ...         f"Argh, we found {diagnostic_info.total_mismatches} mismatches! "
+        ...         f"Argh, we found {diagnostics.total_mismatches} mismatches! "
         ...         f"That is {ratio:.1%}!"
         ...     )
         >>> torch.testing.assert_close(actual, expected, msg=custom_msg)

@@ -1042,7 +1042,7 @@ class TestAssertCloseErrorMessage(TestCase):
     def test_msg_callable(self):
         msg = "Custom error message!"
 
-        def make_msg(actual, expected, trace):
+        def make_msg(actual, expected, diagnostics):
             return msg
 
         actual = torch.tensor(1)
@@ -1050,6 +1050,80 @@ class TestAssertCloseErrorMessage(TestCase):
 
         for fn in assert_close_with_inputs(actual, expected):
             with self.assertRaisesRegex(AssertionError, msg):
+                fn(msg=make_msg)
+
+    def test_msg_callable_inputs(self):
+        sentinel = (
+            "This is just a sentinel. If you see this in a traceback, "
+            "you probably need to look at the exception that caused this to see the actual error!"
+        )
+
+        expected_actual = torch.tensor(1)
+        expected_expected = torch.tensor(2)
+
+        def make_msg(actual_actual, actual_expected, diagnostics):
+            torch.testing.assert_close(
+                actual_actual, expected_actual, msg="`actual` is not passed correctly to the `msg` callable!"
+            )
+            torch.testing.assert_close(
+                actual_expected, expected_expected, msg="`expected` is not passed correctly to the `msg` callable!"
+            )
+            return sentinel
+
+        for fn in assert_close_with_inputs(expected_actual, expected_expected):
+            with self.assertRaisesRegex(AssertionError, sentinel):
+                fn(msg=make_msg)
+
+    def test_msg_callable_diagnostics(self):
+        sentinel = (
+            "This is just a sentinel. If you see this in a traceback, "
+            "you probably need to look at the exception that caused this to see the actual error!"
+        )
+
+        expected_attributes = dict(
+            number_of_elements=int,
+            total_mismatches=int,
+            max_abs_diff=(int, float),
+            max_abs_diff_idx=(int, tuple),
+            atol=float,
+            max_rel_diff=(int, float),
+            max_rel_diff_idx=(int, tuple),
+            rtol=float,
+        )
+
+        def check_diagnostics_smoke(diagnostics):
+            actual_attributes = vars(diagnostics)
+
+            extra_attributes = set(actual_attributes.keys()) - set(expected_attributes.keys())
+            if extra_attributes:
+                raise AssertionError(
+                    f"`diagnostics_info` has the following attributes that are not documented:\n\n "
+                    f"'{', '.join(sorted(extra_attributes))}'"
+                )
+
+            missing_attributes = set(expected_attributes.keys()) - set(actual_attributes.keys())
+            if missing_attributes:
+                raise AssertionError(
+                    f"`diagnostics_info` is missing the following attributes:\n\n "
+                    f"'{', '.join(sorted(missing_attributes))}'"
+                )
+
+            for name, expected_type in expected_attributes.items():
+                if not isinstance(actual_attributes[name], expected_type):
+                    raise AssertionError(
+                        f"`diagnostics_info.{name}` should be {expected_type}, "
+                        f"but got {type(actual_attributes[name])} instead."
+                    )
+
+        def make_msg(actual, expected, diagnostics):
+            check_diagnostics_smoke(diagnostics)
+            return sentinel
+
+        actual = torch.tensor(1)
+        expected = torch.tensor(2)
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, sentinel):
                 fn(msg=make_msg)
 
 
