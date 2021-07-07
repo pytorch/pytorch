@@ -22,7 +22,7 @@ static void check1d(
 }
 
 Tensor adaptive_avg_pool1d(const Tensor & self, IntArrayRef output_size) {
-  checkDimRange("adaptive_avg_pool1d", TensorArg(self, "self", 1), 2, 4);
+  checkDimRange("adaptive_avg_pool1d", TensorArg(self, "self", 1), 2, 4 /* exclusive */);
   check1d("adaptive_avg_pool1d", "output_size", output_size);
 
   auto output = at::adaptive_avg_pool2d(
