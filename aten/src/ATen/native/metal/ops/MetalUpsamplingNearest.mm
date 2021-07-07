@@ -1,8 +1,8 @@
 #import <ATen/native/metal/MetalCommandBuffer.h>
 #import <ATen/native/metal/MetalTensorImpl.h>
 #import <ATen/native/metal/MetalTensorImplStorage.h>
-#import <ATen/native/metal/MetalUtils.h>
-#import <ATen/native/metal/mpscnn/MPSCNNContext.h>
+#import <ATen/native/metal/MetalTensorUtils.h>
+#import <ATen/native/metal/MetalContext.h>
 #import <ATen/native/metal/mpscnn/MPSCNNUtils.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
 #import <ATen/native/metal/mpscnn/MPSImageUtils.h>
@@ -46,12 +46,12 @@ Tensor upsample_nearest2d_vec(
   }
   MPSImage* X = imageFromTensor(input);
   MetalTensorImplStorage mt{outputSizes};
-  MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
+  MetalCommandBuffer* commandBuffer = getCommandBuffer(input);
   mt.texture()->allocateTemporaryStorage(outputSizes, commandBuffer);
   MPSImage* Y = mt.texture()->image();
   if (@available(iOS 11.0, *)) {
     MPSCNNUpsamplingNearest* kernel = [[MPSCNNUpsamplingNearest alloc]
-             initWithDevice:[MPSCNNContext sharedInstance].device
+             initWithDevice:[MetalContext sharedInstance].device
         integerScaleFactorX:(NSUInteger)scale_w.value()
         integerScaleFactorY:(NSUInteger)scale_h.value()];
     [kernel encodeToCommandBuffer:commandBuffer.buffer
@@ -60,7 +60,7 @@ Tensor upsample_nearest2d_vec(
   } else {
     NSUInteger sh = scale_h.value() * 10000;
     NSUInteger sw = scale_w.value() * 10000;
-    id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
+    id<MTLComputePipelineState> state = [[MetalContext sharedInstance]
         specializedPipelineState:mpscnn::kernelFor(
                                      Y,
                                      "resize_nearest",
@@ -81,8 +81,6 @@ Tensor upsample_nearest2d_vec(
     [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
             threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
     [encoder endEncoding];
-    [X markRead];
-    [Y markRead];
   }
   auto output = makeTensor(std::move(mt), input.options());
   return output;

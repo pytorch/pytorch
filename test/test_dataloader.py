@@ -13,12 +13,12 @@ import itertools
 import warnings
 import tempfile
 from torch import multiprocessing as mp
-from torch.utils.data import _utils, Dataset, IterableDataset, TensorDataset, DataLoader, ConcatDataset, ChainDataset
+from torch.utils.data import _utils, Dataset, IterableDataset, TensorDataset, DataLoader, ConcatDataset, ChainDataset, Subset
 from torch.utils.data._utils import MP_STATUS_CHECK_INTERVAL
 from torch.utils.data.dataset import random_split
 from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS,
-                                                  IS_PYTORCH_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
+                                                  IS_IN_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
                                                   load_tests, TEST_WITH_TSAN, IS_SANDCASTLE)
 
 try:
@@ -28,7 +28,7 @@ except ImportError:
     HAS_PSUTIL = False
     err_msg = ("psutil not found. Some critical data loader tests relying on it "
                "(e.g., TestDataLoader.test_proper_exit) will not run.")
-    if IS_PYTORCH_CI:
+    if IS_IN_CI:
         raise ImportError(err_msg) from None
     else:
         warnings.warn(err_msg)
@@ -150,6 +150,35 @@ class TestDatasetRandomSplit(TestCase):
         random_split(range(10), [5, 5], generator=torch.Generator().manual_seed(42))
         b = torch.rand(10)
         self.assertEqual(a, b)
+
+    def test_slicing_of_subset_of_dataset(self):
+        # Testing slicing a subset initialized with a dataset
+        dataset = TensorDataset(torch.tensor([1, 2, 3, 4, 5]))
+        subset_of_dataset = Subset(dataset, [0, 1, 2, 3, 4])
+        self.assertEqual(subset_of_dataset[:], dataset[:])
+        self.assertEqual(subset_of_dataset[1:2], dataset[1:2])
+        self.assertEqual(subset_of_dataset[0:-1:2], dataset[0:-1:2])
+        # Testing slicing of subset from random split
+        subset1, subset2 = random_split(dataset, [3, 2])
+        self.assertEqual(subset1[:], dataset[subset1.indices[:]])
+        self.assertEqual(subset1[0:2], dataset[subset1.indices[0:2]])
+        self.assertEqual(subset1[0:-1:2], dataset[subset1.indices[0:-1:2]])
+
+    def test_slicing_of_subset_of_subset(self):
+        # Testing slicing a subset initialized with a subset
+        dataset = TensorDataset(torch.tensor([1, 2, 3, 4, 5]))
+        subset_of_dataset = Subset(dataset, [0, 1, 2, 3, 4])
+        subset_of_subset = Subset(subset_of_dataset, [0, 1, 2, 3, 4])
+        self.assertEqual(subset_of_subset[:], dataset[:])
+        self.assertEqual(subset_of_subset[0:2], dataset[0:2])
+        self.assertEqual(subset_of_subset[0:-1:2], dataset[0:-1:2])
+        # Testing slicing of subset of subset from random split
+        subset1, subset2 = random_split(dataset, [4, 1])
+        subset_of_subset1, subset_of_subset2 = random_split(subset1, [3, 1])
+        idx = [subset1.indices[i] for i in subset_of_subset1.indices]
+        self.assertEqual(subset_of_subset1[:], dataset[idx[:]])
+        self.assertEqual(subset_of_subset1[0:2], dataset[idx[0:2]])
+        self.assertEqual(subset_of_subset1[0:-1:2], dataset[idx[0:-1:2]])
 
 
 class CUDACountingDataset(Dataset):
@@ -898,7 +927,7 @@ class RandomDataset(IterableDataset):
 try:
     keep_fds_alive = []
     resource.setrlimit(resource.RLIMIT_NOFILE, (100, 100))
-    for random_t in DataLoader(RandomDataset(200, (2,2)),
+    for random_t in DataLoader(RandomDataset(200, (2,2)), multiprocessing_context="fork",
                                num_workers=1):
       random_t.max(dim=0)
       keep_fds_alive.append(random_t)
@@ -2043,7 +2072,7 @@ class RandomDataset(IterableDataset):
 try:
     keep_fds_alive = []
     resource.setrlimit(resource.RLIMIT_NOFILE, (100, 100))
-    for random_t in DataLoader(RandomDataset(200, (2,2)),
+    for random_t in DataLoader(RandomDataset(200, (2,2)), multiprocessing_context="fork",
                                num_workers=1, persistent_workers=True):
       random_t.max(dim=0)
       keep_fds_alive.append(random_t)

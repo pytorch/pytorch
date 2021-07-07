@@ -142,22 +142,34 @@ class _DDPSink(Function):
     @staticmethod
     def backward(ctx, *grad_outputs):
         state_dict = ctx.state_dict
-        static_graph_training = ctx.state_dict['static_graph']
-        if static_graph_training and ctx.state_dict['num_iterations'] == 1:
-            Variable._execution_engine.queue_callback(ctx.reducer._delay_all_reduce)
 
-        elif state_dict['find_unused'] and not static_graph_training:
-            # First type of unused params: parameters that did not participate
-            # in computing model outputs. These are found by the below call to
-            # prepare_for_backward.
-            # Second type of unused params: params that won't get gradient
-            # because outputs they produced do not get used in computing loss
-            # for this call to backward. Due to this passthrough autograd
-            # function, autograd hooks for these parameters are now triggered
-            # with undefined gradient to maintain parity with local training.
-            # DDP takes care of undefined grads in this case to ensure the .grad
-            # field of the param is not touched.
-            ctx.reducer.prepare_for_backward(list(_find_tensors(ctx.inputs)))
+        grad_enabled = state_dict['grad_enabled']
+        require_backward_grad_sync = state_dict['require_backward_grad_sync']
+        static_graph_training = ctx.state_dict['static_graph']
+        if grad_enabled and require_backward_grad_sync:
+            if static_graph_training or not state_dict['find_unused']:
+                ctx.reducer.prepare_for_backward([])
+            else:
+                # First type of unused params: parameters that did not participate
+                # in computing model outputs. These are found by the below call to
+                # prepare_for_backward.
+                # Second type of unused params: params that won't get gradient
+                # because outputs they produced do not get used in computing loss
+                # for this call to backward. Due to this passthrough autograd
+                # function, autograd hooks for these parameters are now triggered
+                # with undefined gradient to maintain parity with local training.
+                # DDP takes care of undefined grads in this case to ensure the .grad
+                # field of the param is not touched.
+                ctx.reducer.prepare_for_backward(list(_find_tensors(ctx.inputs)))
+
+        # Note that we enqueue delay allreduce after prepare_for_backward in
+        # static graph training as prepare_for_backward sets the
+        # num_backwards_call counter in the reducer.
+        static_graph_first_bwd = (
+            static_graph_training and ctx.reducer._static_graph_first_bwd()
+        )
+        if static_graph_first_bwd:
+            Variable._execution_engine.queue_callback(ctx.reducer._delay_all_reduce)
 
         return (None, None, *grad_outputs)
 
@@ -382,15 +394,12 @@ class DistributedDataParallel(Module):
                                wrapped module's ``forward`` function. Parameters
                                that don't receive gradients as part of this
                                graph are preemptively marked as being ready to
-                               be reduced. Note that all ``forward`` outputs
-                               that are derived from module parameters must
-                               participate in calculating loss and later the
-                               gradient computation. If they don't, this wrapper
-                               will hang waiting for autograd to produce
-                               gradients for those parameters. Any outputs
-                               derived from module parameters that are otherwise
-                               unused can be detached from the autograd graph
-                               using ``torch.Tensor.detach``. (default: ``False``)
+                               be reduced. In addition, parameters that may have
+                               been used in the wrapped module's ``forward``
+                               function but were not part of loss computation and
+                               thus would also not receive gradients are
+                               preemptively marked as ready to be reduced.
+                               (default: ``False``)
         check_reduction: This argument is deprecated.
         gradient_as_bucket_view (bool): When set to ``True``, gradients will be views
                       pointing to different offsets of ``allreduce`` communication
@@ -573,7 +582,6 @@ class DistributedDataParallel(Module):
         (4) Logging constructin-time DDP logging data
         (5) passing a handle of DDP to SyncBatchNorm Layer
         """
-        self.num_iterations = 0
         # The bucket size limit is specified in the constructor.
         # Additionally, we allow for a single small bucket for parameters
         # that are defined first, such that their gradients don't spill into
@@ -807,10 +815,10 @@ class DistributedDataParallel(Module):
         with torch.autograd.profiler.record_function("DistributedDataParallel.forward"):
             self.reducer.save_thread_local_state()
             grad_enabled = torch.is_grad_enabled()
-            if grad_enabled and self.require_backward_grad_sync:
+            will_run_grad_reduction = grad_enabled and self.require_backward_grad_sync
+            if will_run_grad_reduction:
                 self.logger.set_runtime_stats_and_log()
-                self.num_iterations += 1
-                self.reducer.prepare_for_forward()
+            self.reducer.prepare_for_forward(will_run_grad_reduction)
             if self.ddp_uneven_inputs_config.ddp_join_enabled:
                 ones = torch.ones(1, device=self.device)
                 work = dist.all_reduce(ones, group=self.process_group, async_op=True)
@@ -856,43 +864,50 @@ class DistributedDataParallel(Module):
             else:
                 output = self.module(*inputs, **kwargs)
 
-            if grad_enabled and self.require_backward_grad_sync:
-                self.require_forward_param_sync = True
-                if self.static_graph or not self.find_unused_parameters:
-                    self.reducer.prepare_for_backward([])
-            else:
-                self.require_forward_param_sync = False
+            self.require_forward_param_sync = (
+                grad_enabled and self.require_backward_grad_sync
+            )
 
-        # TODO: DDPSink is currently enabled for unused parameter detection and
-        # static graph training for first iteration, in the future we plan to
-        # enable this passthrough for all training use cases.
-        if (self.find_unused_parameters and not self.static_graph) or (
-            self.static_graph and self.num_iterations == 1
-        ):
-            find_unused = all([
-                grad_enabled,
-                self.require_backward_grad_sync,
-                self.find_unused_parameters,
-            ])
+            if not grad_enabled:
+                # Don't need to run through DDPSink as there will be no backward
+                # pass.
+                return output
+
             state_dict = {
                 'static_graph': self.static_graph,
-                'find_unused': find_unused,
-                'num_iterations': self.num_iterations,
+                'find_unused': self.find_unused_parameters,
+                'grad_enabled': grad_enabled,
+                'require_backward_grad_sync': self.require_backward_grad_sync,
             }
-
             output_tensor_list, treespec, output_is_rref = _tree_flatten_with_rref(
                 output
             )
+            # Note: DDPSink helps to ensure that prepare_for_backward is called
+            # immediately before the backwards pass, to support a variety of
+            # features such as: enqueue delay allreduce for static graph, support
+            # multiple calls to backwards with retain_graph=True, and support
+            # finding all parameters that will not receive gradient.
+            output_placeholders = [None for _ in range(len(output_tensor_list))]
+            # Do not touch tensors that have no grad_fn, which can cause issues
+            # such as https://github.com/pytorch/pytorch/issues/60733
+            for i, output in enumerate(output_tensor_list):
+                if torch.is_tensor(output) and output.grad_fn is None:
+                    output_placeholders[i] = output
+
             passthrough_tensor_list = _DDPSink.apply(
                 self.reducer,
                 state_dict,
                 *output_tensor_list,
             )
+            for i in range(len(output_placeholders)):
+                if output_placeholders[i] is None:
+                    output_placeholders[i] = passthrough_tensor_list[i]
+
             # Reconstruct output data structure.
             output = _tree_unflatten_with_rref(
-                passthrough_tensor_list, treespec, output_is_rref
+                output_placeholders, treespec, output_is_rref
             )
-        return output
+            return output
 
     def scatter(self, inputs, kwargs, device_ids):
         return scatter_kwargs(inputs, kwargs, device_ids, dim=self.dim)
@@ -999,24 +1014,26 @@ class DistributedDataParallel(Module):
         )
         self._sync_params_and_buffers(authoritative_rank=self._authoritative_rank)
 
-    # Schedule allreduce ops to match those scheduled in the reducer's backward
+    # Schedule comm ops to match those scheduled in the reducer's backward
     # pass.
     def _match_all_reduce_for_bwd_pass(self):
-        allreduce_work = []
-        # Schedule allreduce in the same order as Reducer schedules them, i.e.
+        comm_work = []
+        # Schedule comm in the same order as Reducer schedules them, i.e.
         # the order of the buckets. Retrieving the bucket order from the reducer
         # ensures that we keep the same order in join mode, such as when bucket
         # order is rebuilt dynamically.
-        all_bucket_tensors = self.reducer.get_bucket_tensors()
-        for bucket_tensors in all_bucket_tensors:
+
+        # Returns grad_buckets in order, but real tensors are substituted with
+        # zero tensors of the same shape.
+        grad_buckets = self.reducer._get_zeros_like_grad_buckets()
+        for grad_bucket in grad_buckets:
             # Joined processes contribute zero gradient. In the case that
             # divide_by_initial_world_size=True, we divide grads by the static
             # world size, if not, the dividing factor is reduced by the number
             # of joined processes.
-            zero_tensors = [torch.zeros_like(t) for t in bucket_tensors]
-            work = self.process_group.allreduce(zero_tensors)
-            allreduce_work.append(work)
-        for work in allreduce_work:
+            work = self.reducer._run_comm_hook(grad_bucket)
+            comm_work.append(work)
+        for work in comm_work:
             work.wait()
 
     # Allreduces the used parameter mapping across ranks.

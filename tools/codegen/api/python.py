@@ -814,7 +814,7 @@ def argument_type_str_pyi(t: Type) -> str:
             ret = 'Union[Tensor, Tuple[Tensor, ...], List[Tensor]]' if t.size is not None else \
                   'Union[Tuple[Tensor, ...], List[Tensor]]'
         elif str(t.elem) == 'float':
-            ret = 'Sequence[float]'
+            ret = 'Sequence[_float]'
         else:
             elem = argument_type_str_pyi(t.elem)
             ret = f'Sequence[{elem}]'
@@ -1034,6 +1034,8 @@ def arg_parser_unpack_method(t: Type, has_default: bool) -> str:
                 return 'generator'
             elif t.elem.name == BaseTy.Layout:
                 return 'layoutWithDefault' if has_default else 'layoutOptional'
+            elif t.elem.name == BaseTy.Device:
+                return 'deviceWithDefault' if has_default else 'deviceOptional'
 
         elif isinstance(t.elem, ListType):
             if str(t.elem.elem) == 'int':

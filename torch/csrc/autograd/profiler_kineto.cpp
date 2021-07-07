@@ -367,7 +367,17 @@ std::string dtypesToStr(const std::vector<std::string>& types) {
 
 std::string stacksToStr(const std::vector<std::string>& stacks) {
   std::ostringstream oss;
-  std::copy(stacks.begin(), stacks.end(), std::ostream_iterator<std::string>(oss, ";"));
+  std::transform(
+      stacks.begin(),
+      stacks.end(),
+      std::ostream_iterator<std::string>(oss, ";"),
+      [](std::string s) -> std::string {
+#ifdef _WIN32
+        // replace the windows backslash with forward slash
+        std::replace(s.begin(), s.end(), '\\', '/');
+#endif
+        return s;
+      });
   auto rc = oss.str();
   rc.pop_back();
   return "\"" + rc + "\"";
@@ -385,6 +395,7 @@ void prepareProfiler(
 
   std::set<libkineto::ActivityType> cpuTypes = {
     libkineto::ActivityType::CPU_OP,
+    libkineto::ActivityType::CPU_INSTANT_EVENT,
 #ifdef USE_KINETO_UPDATED
     libkineto::ActivityType::USER_ANNOTATION,
 #endif

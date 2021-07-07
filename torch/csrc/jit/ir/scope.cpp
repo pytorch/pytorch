@@ -4,7 +4,29 @@
 
 namespace torch {
 namespace jit {
+// util functions
+namespace utils {
 
+std::string get_module_info(const ModuleInstanceInfo& module_instance_info) {
+  std::string module_info;
+  const auto& class_type = module_instance_info.class_type();
+  std::string instance_name = module_instance_info.instance_name();
+  std::string type_name;
+  if (class_type) {
+    type_name += class_type->name()->qualifiedName();
+    type_name = type_name.substr(type_name.find_last_of('.') + 1);
+  }
+  if (type_name.empty()) {
+    type_name = "UNKNOWN_TYPE";
+  }
+  if (instance_name.empty()) {
+    instance_name = "UNKNOWN_INSTANCE";
+  }
+  module_info.append(instance_name).append("(").append(type_name).append(")");
+  return module_info;
+}
+
+} // namespace utils
 ScopePtr Scope::intrusive_from_this() {
   c10::raw::intrusive_ptr::incref(this); // we are creating a new pointer
                                          // from a raw `this` pointer
