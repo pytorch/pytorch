@@ -437,7 +437,7 @@ class TestSubgraphRewriter(JitTestCase):
         submod = traced.get_submodule("submod")
         self.assertEqual(type(submod), torch.nn.ReLU)
 
-    def test_subgraph_rewriter_annotations(self):
+    def test_subgraph_rewriter_annotations_int(self):
 
         class M1(torch.nn.Module):
             def forward(self, x):
