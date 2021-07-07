@@ -524,9 +524,8 @@ class TestFunctionalIterDataPipe(TestCase):
 
         input_dp = IDP([list(range(10)) for _ in range(3)])
 
-        def fn(item, dtype=torch.float, *, sum=False):
-            data = torch.tensor(item, dtype=dtype)
-            return data if not sum else data.sum()
+        def fn(item, *, dtype=torch.float):
+            return torch.tensor(item, dtype=dtype)
 
         with warnings.catch_warnings(record=True) as wa:
             map_dp = input_dp.map(lambda ls: ls * 2, nesting_level=0)
@@ -833,14 +832,14 @@ class TestFunctionalIterDataPipe(TestCase):
         input_dp = IDP(inputs)
         # Raise TypeError for python function
         with self.assertRaisesRegex(TypeError, r"`transforms` are required to be"):
-            input_dp.transforms(_fake_fn)
+            input_dp.legacy_transforms(_fake_fn)
 
         # transforms.Compose of several transforms
         transforms = torchvision.transforms.Compose([
             torchvision.transforms.ToTensor(),
             torchvision.transforms.Pad(1, fill=1, padding_mode='constant'),
         ])
-        tsfm_dp = input_dp.transforms(transforms)
+        tsfm_dp = input_dp.legacy_transforms(transforms)
         self.assertEqual(len(tsfm_dp), len(input_dp))
         for tsfm_data, input_data in zip(tsfm_dp, tensor_inputs):
             self.assertEqual(tsfm_data[:, 1:(h + 1), 1:(w + 1)], input_data)
@@ -850,7 +849,7 @@ class TestFunctionalIterDataPipe(TestCase):
         transforms = nn.Sequential(
             torchvision.transforms.Pad(1, fill=1, padding_mode='constant'),
         )
-        tsfm_dp = input_dp.transforms(transforms)
+        tsfm_dp = input_dp.legacy_transforms(transforms)
         self.assertEqual(len(tsfm_dp), len(input_dp))
         for tsfm_data, input_data in zip(tsfm_dp, tensor_inputs):
             self.assertEqual(tsfm_data[:, 1:(h + 1), 1:(w + 1)], input_data)
@@ -858,7 +857,7 @@ class TestFunctionalIterDataPipe(TestCase):
         # Single transform
         input_dp = IDP_NoLen(inputs)  # type: ignore[assignment]
         transform = torchvision.transforms.ToTensor()
-        tsfm_dp = input_dp.transforms(transform)
+        tsfm_dp = input_dp.legacy_transforms(transform)
         with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
             len(tsfm_dp)
         for tsfm_data, input_data in zip(tsfm_dp, tensor_inputs):

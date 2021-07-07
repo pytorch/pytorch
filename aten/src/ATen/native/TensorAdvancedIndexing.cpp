@@ -283,9 +283,8 @@ AdvancedIndex::AdvancedIndex(const Tensor& src, TensorList indices_list)
   // simplify the CUDA kernel.
   if (indices.size() >= 2 && this->src.device().type() == kCUDA) {
     if (!all_strides_match(indices)) {
-      // NOLINTNEXTLINE(modernize-loop-convert)
-      for (size_t i = 0; i < indices.size(); i++) {
-        indices[i] = indices[i].contiguous();
+      for (auto & indice : indices) {
+        indice = indice.contiguous();
       }
     }
   }
@@ -312,10 +311,9 @@ static AdvancedIndex make_info(Tensor self, const torch::List<c10::optional<at::
     std::tie(self, indices) = transposeToFront(self, indices);
   }
   // Ensure indices are on the same device as self
-  // NOLINTNEXTLINE(modernize-loop-convert)
-  for (size_t i = 0; i < indices.size(); i++) {
-    if (indices[i].defined() && indices[i].device() != self.device()) {
-      indices[i] = indices[i].to(self.device());
+  for (auto & indice : indices) {
+    if (indice.defined() && indice.device() != self.device()) {
+      indice = indice.to(self.device());
     }
   }
   return AdvancedIndex(self, indices);
@@ -1568,7 +1566,10 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
   const auto self_sizes = self.sizes();
   const auto total_nonzero = thread_count_nonzero.back();
   const int64_t ndim = self_sizes.size();
-  resize_output(result, {total_nonzero, ndim});
+  if (resize_output(result, {total_nonzero, ndim})) {
+    // Default to fortran-contiguous output (see gh-46224)
+    result.as_strided_({total_nonzero, ndim}, {1, total_nonzero});
+  }
 
   if (result.numel() == 0) {
     return result;

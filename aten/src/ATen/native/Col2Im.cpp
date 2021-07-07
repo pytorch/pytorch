@@ -1,5 +1,4 @@
 #include <ATen/ATen.h>
-#include <ATen/LegacyTHFunctionsCPU.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <ATen/div_rtn.h>

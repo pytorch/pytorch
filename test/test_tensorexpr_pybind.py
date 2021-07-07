@@ -49,7 +49,7 @@ class TestTensorExprPyBind(JitTestCase):
     def test_call_raw(self):
         with kernel_arena_scope():
             n = 16
-            cg = construct_adder(n, dtype=te.Dtype.Double)
+            cg = construct_adder(n, dtype=torch.float64)
 
             tA = torch.randn(n, dtype=torch.float64)
             tB = torch.randn(n, dtype=torch.float64)
@@ -59,7 +59,7 @@ class TestTensorExprPyBind(JitTestCase):
 
     def test_external_calls(self):
         with kernel_arena_scope():
-            dtype = te.Dtype.Float
+            dtype = torch.float32
 
             ONE = te.ExprHandle.int(1)
             FOUR = te.ExprHandle.int(4)
@@ -81,22 +81,21 @@ class TestTensorExprPyBind(JitTestCase):
 
     def test_dynamic_shape(self):
         with kernel_arena_scope():
-            dN = te.VarHandle("n", te.Dtype.Int)
-            A = te.Placeholder('A', te.Dtype.Double, [dN])
-            B = te.Placeholder('B', te.Dtype.Double, [dN])
+            dN = te.VarHandle(torch.int32)
+            A = te.BufHandle(torch.float64)
+            B = te.BufHandle(torch.float64)
 
             def compute(i):
-                return A.load([i]) - B.load([i])
+                return A.load(i) - B.load(i)
 
-            C = te.Compute('C', [te.DimArg(dN, 'i')], compute)
+            C = te.Compute('C', [dN], compute)
 
             loopnest = te.LoopNest([C])
             loopnest.prepare_for_codegen()
-            stmt = te.simplify(loopnest.root_stmt())
 
             cg = te.construct_codegen(
                 'ir_eval',
-                stmt,
+                loopnest.simplify(),
                 [A, B, C, dN])
 
             def test_with_shape(n):
@@ -108,6 +107,14 @@ class TestTensorExprPyBind(JitTestCase):
 
             test_with_shape(8)
             test_with_shape(31)
+
+    def test_dtype_error(self):
+        with kernel_arena_scope():
+            one = te.ExprHandle.int(1)
+            te.Placeholder([one], torch.float32)  # ok
+            te.Placeholder([one])  # ok
+            self.assertRaises(TypeError,
+                              lambda: te.Placeholder([one], "float55"))
 
     @unittest.skipIf(not LLVM_ENABLED, "LLVM backend not enabled")
     def test_kernel_with_tensor_inputs(self):
