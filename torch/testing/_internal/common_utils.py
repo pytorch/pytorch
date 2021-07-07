@@ -1806,8 +1806,8 @@ def retry(ExceptionToCheck, tries=3, delay=3, skip_after_retries=False):
 # Methods for matrix and tensor generation
 
 def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, high=None,
-                requires_grad: bool=False, noncontiguous: bool=False,
-                exclude_zero: bool=False) -> torch.Tensor:
+                requires_grad: bool = False, noncontiguous: bool = False,
+                exclude_zero: bool = False) -> torch.Tensor:
     """ Creates a random tensor with the given size, device and dtype.
 
         By default, the tensor's values are in the range [-9, 9] for most dtypes. If low
@@ -1824,15 +1824,10 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         created tensor are replaced with an epsilon value if floating type, [`eps + `eps`.j] if
         complex type and 1 if integer/boolean type.
     """
-    # Helper local function to make a uniformly distributed tensor within range low and high for given dtype and device
-    def _make_uniform(low, high, dtype):
-        return torch.distributions.uniform.Uniform(
-            torch.tensor(low, dtype=dtype, device=device, requires_grad=requires_grad),
-            torch.tensor(high, dtype=dtype, device=device, requires_grad=requires_grad)
-        ).sample(size)
 
-    assert low is None or low < high, "low value too high!"
-    assert high is None or high > low, "high value too low!"
+    if low is not None and high is not None:
+        assert low <= high, "low value too high!"
+        assert high >= low, "high value too low!"
 
     _extremals = [None, float('inf')]
 
@@ -1855,17 +1850,18 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         span = high - low
         # Windows doesn't support torch.rand(bfloat16) on CUDA
         if IS_WINDOWS and torch.device(device).type == 'cuda' and dtype is torch.bfloat16:
-            result = (_make_uniform(low, high, torch.float32)).to(torch.bfloat16)
+            result = (torch.rand(size, device=device, dtype=torch.float32) * span + low).to(torch.bfloat16)
         else:
-            result = _make_uniform(low, high, dtype)
+            result = torch.rand(size, device=device, dtype=dtype) * span + low
     else:
         assert dtype in complex_types()
         float_dtype = torch.float if dtype is torch.cfloat else torch.double
         ranges = [torch.finfo(dtype).min, torch.finfo(dtype).max]
         low = -9 if low in _extremals or low < ranges[0] else low
         high = 9 if high in _extremals or high >= ranges[1] else high
-        real = _make_uniform(low, high, float_dtype)
-        imag = _make_uniform(low, high, float_dtype)
+        span = high - low
+        real = torch.rand(size, device=device, dtype=float_dtype) * span + low
+        imag = torch.rand(size, device=device, dtype=float_dtype) * span + low
         result = torch.complex(real, imag)
 
     if noncontiguous and result.numel() > 1:
