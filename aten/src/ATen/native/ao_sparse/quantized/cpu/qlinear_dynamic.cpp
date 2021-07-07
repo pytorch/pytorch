@@ -2,6 +2,7 @@
 #include <ATen/Parallel.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
+#include <c10/util/accumulate.h>
 
 #include <ATen/native/quantized/cpu/quant_utils.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>

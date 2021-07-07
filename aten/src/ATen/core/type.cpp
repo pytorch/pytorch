@@ -978,20 +978,20 @@ UnionTypePtr UnionType::create(std::vector<TypePtr> reference) {
     }
   };
 
-  for (const auto& t : union_type->types_) {
+  for (const auto& t : union_type->containedTypes()) {
     update_is_opt_flags(t);
   }
 
   bool numbertype_found = int_found && float_found && complex_found;
 
   if (nonetype_found) {
-    if (union_type->types_.size() == 4 && numbertype_found) {
+    if (union_type->containedTypes().size() == 4 && numbertype_found) {
       return OptionalType::create(NumberType::get());
     }
-    if (union_type->types_.size() == 2) {
-      auto not_none = union_type->types_[0] != NoneType::get()
-                      ? union_type->types_[0]
-                      : union_type->types_[1];
+    if (union_type->containedTypes().size() == 2) {
+      auto not_none = union_type->containedTypes()[0] != NoneType::get()
+                      ? union_type->containedTypes()[0]
+                      : union_type->containedTypes()[1];
       return OptionalType::create(not_none);
     }
   }
@@ -1004,29 +1004,29 @@ bool UnionType::operator==(const Type& rhs) const {
     // We can't compare the type vectors for equality using `operator=`,
     // because the vectors hold `TypePtr`s and we want to compare `Type`
     // equality
-    if (union_rhs->types_.size() != this->types_.size()) {
+    if (union_rhs->containedTypes().size() != this->containedTypes().size()) {
       return false;
     }
     // Check that all the types in `this->types_` are also in
     // `union_rhs->types_`
-    return std::all_of(this->types_.begin(), this->types_.end(),
+    return std::all_of(this->containedTypes().begin(), this->containedTypes().end(),
                        [&](TypePtr lhs_type) {
-                         return std::any_of(union_rhs->types_.begin(),
-                                            union_rhs->types_.end(),
+                         return std::any_of(union_rhs->containedTypes().begin(),
+                                            union_rhs->containedTypes().end(),
                                             [&](TypePtr rhs_type) {
                                               return *lhs_type == *rhs_type;
                                             });
                        });
   } else if (auto optional_rhs = rhs.cast<OptionalType>()) {
     if (optional_rhs->getElementType() == NumberType::get()) {
-      return this->types_.size() == 4
+      return this->containedTypes().size() == 4
              && this->can_hold_none_
              && this->canHoldType(NumberType::get());
     }
     auto optional_lhs = this->toOptional();
     return optional_lhs && *optional_rhs == *((optional_lhs.value())->expect<OptionalType>());
   } else if (rhs.kind() == NumberType::Kind) {
-    return this->types_.size() == 3 && canHoldType(NumberType::get());
+    return this->containedTypes().size() == 3 && canHoldType(NumberType::get());
   } else {
     return false;
   }
@@ -1036,7 +1036,7 @@ bool UnionType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const 
   std::vector<TypePtr> rhs_types;
   if (const auto union_rhs = rhs->cast<UnionType>()) {
     // Fast path
-    if (this->types_ == rhs->containedTypes()) {
+    if (this->containedTypes() == rhs->containedTypes()) {
       return true;
     }
     rhs_types = rhs->containedTypes().vec();
@@ -1054,7 +1054,7 @@ bool UnionType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const 
   } else {
     rhs_types.push_back(rhs);
   }
-  return std::all_of(this->types_.begin(), this->types_.end(),
+  return std::all_of(this->containedTypes().begin(), this->containedTypes().end(),
                      [&](TypePtr lhs_type) -> bool {
                       return std::any_of(rhs_types.begin(),
                                          rhs_types.end(),
@@ -1063,6 +1063,7 @@ bool UnionType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const 
                                          });
   });
 }
+
 
 std::string UnionType::unionStr(TypePrinter printer, bool is_annotation_str) const {
   std::stringstream ss;
@@ -1089,9 +1090,9 @@ std::string UnionType::unionStr(TypePrinter printer, bool is_annotation_str) con
         printed = true;
       }
       if (is_annotation_str) {
-        ss << types_[i]->annotation_str(printer);
+        ss << this->containedTypes()[i]->annotation_str(printer);
       } else {
-        ss << types_[i]->str();
+        ss << this->containedTypes()[i]->str();
       }
     }
   }
@@ -1123,7 +1124,7 @@ bool UnionType::canHoldType(TypePtr type) const {
            && canHoldType(FloatType::get())
            && canHoldType(ComplexType::get());
   } else {
-    return std::any_of(types_.begin(), types_.end(),
+    return std::any_of(this->containedTypes().begin(), this->containedTypes().end(),
                     [&](TypePtr inner) {
                       return type->isSubtypeOf(inner);
                     });
@@ -1135,7 +1136,7 @@ c10::optional<TypePtr> UnionType::toOptional() const {
       return c10::nullopt;
   }
 
-  std::vector<TypePtr> copied_types = this->types_;
+  std::vector<TypePtr> copied_types = this->containedTypes().vec();
 
   auto maybe_opt = UnionType::create(std::move(copied_types));
 
@@ -1160,7 +1161,7 @@ c10::optional<TypePtr> UnionType::subtractTypeSet(std::vector<TypePtr>& to_subtr
 
   // Copy all the elements that should NOT be subtracted to the `types`
   // vector
-  std::copy_if(types_.begin(), types_.end(),
+  std::copy_if(this->containedTypes().begin(), this->containedTypes().end(),
               std::back_inserter(types),
               [&](const TypePtr t) {
                 return !should_subtract(t);
