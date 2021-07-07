@@ -463,7 +463,7 @@ def scale_weight_functional(
         return
 
     # Multiply the weights row wise by the next equalization scale
-    next_equalization_scale_reshaped = reshape_scale(next_equalization_scale, 0, weight)
+    next_equalization_scale_reshaped = reshape_scale(next_equalization_scale, 0, scaled_weight)
     scaled_weight = torch.mul(scaled_weight, next_equalization_scale_reshaped)
 
     setattr(modules[weight_parent_name], weight_name, scaled_weight)
@@ -471,7 +471,7 @@ def scale_weight_functional(
 
     # Multiply the bias element wise by the next equalization scale
     bias_node = None
-    for node, _ in op_node.users.items():
+    for node in op_node.args:
         # Find the node containing the weight values
         if node.op == 'get_attr' and 'bias' in node.name:
             bias_node = node

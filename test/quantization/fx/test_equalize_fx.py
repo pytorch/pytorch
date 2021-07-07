@@ -262,7 +262,8 @@ class TestEqualizeFx(QuantizationTestCase):
                  (SingleLayerFunctionalLinearModel, 2), (FunctionalLinearAddModel, 2),
                  (TwoLayerFunctionalLinearModel, 2),
                  (LinearReluModel, 2), (LinearReluLinearModel, 2), (LinearReluAddModel, 2),
-                 (ConvModel, 4), (TwoLayerConvModel, 4), (SingleLayerFunctionalConvModel, 4)]
+                 (ConvModel, 4), (TwoLayerConvModel, 4), (SingleLayerFunctionalConvModel, 4),
+                 (TwoLayerFunctionalConvModel, 4)]
 
         for (M, ndim) in tests:
             m = M().eval()
