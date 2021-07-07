@@ -524,14 +524,13 @@ def async_cuda_nested_add(to, x, y, z):
 # A custom Python class that contains a tensor, needed to see if we correctly
 # use the Python pickler to extract tensors from non-IValue-convertible types.
 class TensorWrapper:
-    __slots__ = ("tensor", "lock")
+    __slots__ = ("tensor", "lock", "event")
 
     def __init__(self, t):
         self.tensor = t
         # Add one non-picklable field, to ensure it's ignored/skipped.
         self.lock = Lock()
-        self.event1 = torch.cuda.Event(enable_timing=True)
-        self.event2 = torch.cuda.Event(enable_timing=True)
+        self.event = torch.cuda.Event(enable_timing=True)
 
     def increase(self, v):
         with self.lock:
@@ -539,10 +538,8 @@ class TensorWrapper:
 
     def sum(self):
         with self.lock:
-            self.event1.record()
+            self.event.record()
             return self.tensor.sum()
-            self.event2.record()
-
 
 # Copied from test/test_cuda.py.
 _cycles_per_ms = None
