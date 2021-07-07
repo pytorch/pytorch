@@ -152,9 +152,17 @@ class TestWeightNormSparsifier(TestCase):
         model = Model()
         sparsifier = WeightNormSparsifier(sparsity_level=0.5)
         sparsifier.prepare(model, config=[model.linear])
+        for g in sparsifier.module_groups:
+            # Before step
+            module = g['module']
+            assert (1.0 - module.parametrizations['weight'][0].mask.mean()) == 0  # checking sparsity level is 0
         sparsifier.enable_mask_update = True
         sparsifier.step()
         self.assertAlmostEqual(model.linear.parametrizations['weight'][0].mask.mean().item(), 0.5, places=2)
+        for g in sparsifier.module_groups:
+            # After step
+            module = g['module']
+            assert (1.0 - module.parametrizations['weight'][0].mask.mean()) > 0  # checking sparsity level has increased
 
     def test_prepare(self):
         model = Model()
