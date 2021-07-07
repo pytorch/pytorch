@@ -915,6 +915,39 @@ instantiate_device_type_tests(TestAssertCloseMultiDevice, globals(), only_for="c
 
 
 class TestAssertCloseErrorMessage(TestCase):
+    def test_identifier_tensor_likes(self):
+        actual = torch.tensor([1, 2, 3, 4])
+        expected = torch.tensor([1, 2, 5, 6])
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Tensor-likes")):
+                fn()
+
+    def test_identifier_scalars(self):
+        actual = 3
+        expected = 5
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Scalars")):
+                fn()
+
+    def test_not_equal(self):
+        actual = torch.tensor([1, 2, 3, 4], dtype=torch.float32)
+        expected = torch.tensor([1, 2, 5, 6], dtype=torch.float32)
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("not equal")):
+                fn(rtol=0.0, atol=0.0)
+
+    def test_not_close(self):
+        actual = torch.tensor([1, 2, 3, 4], dtype=torch.float32)
+        expected = torch.tensor([1, 2, 5, 6], dtype=torch.float32)
+
+        for fn, (rtol, atol) in itertools.product(
+            assert_close_with_inputs(actual, expected), ((1.3e-6, 0.0), (0.0, 1e-5), (1.3e-6, 1e-5))
+        ):
+            with self.assertRaisesRegex(AssertionError, re.escape("not close")):
+                fn(rtol=rtol, atol=atol)
+
     def test_mismatched_elements(self):
         actual = torch.tensor([1, 2, 3, 4])
         expected = torch.tensor([1, 2, 5, 6])
@@ -928,7 +961,15 @@ class TestAssertCloseErrorMessage(TestCase):
         expected = torch.tensor([[1, 2], [5, 4]])
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, re.escape("Greatest absolute difference: 2 at (1, 0)")):
+            with self.assertRaisesRegex(AssertionError, re.escape("Greatest absolute difference: 2 at index (1, 0)")):
+                fn()
+
+    def test_abs_diff_scalar(self):
+        actual = 3
+        expected = 5
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Absolute difference: 2")):
                 fn()
 
     def test_rel_diff(self):
@@ -936,7 +977,15 @@ class TestAssertCloseErrorMessage(TestCase):
         expected = torch.tensor([[1, 4], [3, 4]])
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, re.escape("Greatest relative difference: 0.5 at (0, 1)")):
+            with self.assertRaisesRegex(AssertionError, re.escape("Greatest relative difference: 0.5 at index (0, 1)")):
+                fn()
+
+    def test_rel_diff_scalar(self):
+        actual = 2
+        expected = 4
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Relative difference: 0.5")):
                 fn()
 
     def test_zero_div_zero(self):
@@ -952,25 +1001,21 @@ class TestAssertCloseErrorMessage(TestCase):
     def test_rtol(self):
         rtol = 1e-3
 
-        actual = torch.tensor(1)
-        expected = torch.tensor(2)
+        actual = torch.tensor((1, 2))
+        expected = torch.tensor((2, 2))
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(
-                AssertionError, re.escape(f"Greatest relative difference: 0.5 at 0 (up to {rtol} allowed)")
-            ):
+            with self.assertRaisesRegex(AssertionError, re.escape(f"(up to {rtol} allowed)")):
                 fn(rtol=rtol, atol=0.0)
 
     def test_atol(self):
         atol = 1e-3
 
-        actual = torch.tensor(1)
-        expected = torch.tensor(2)
+        actual = torch.tensor((1, 2))
+        expected = torch.tensor((2, 2))
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(
-                AssertionError, re.escape(f"Greatest absolute difference: 1 at 0 (up to {atol} allowed)")
-            ):
+            with self.assertRaisesRegex(AssertionError, re.escape(f"(up to {atol} allowed)")):
                 fn(rtol=0.0, atol=atol)
 
     def test_msg_str(self):
@@ -1048,22 +1093,6 @@ class TestAssertCloseComplex(TestCase):
 
         for fn in assert_close_with_inputs(actual, expected):
             fn(equal_nan="relaxed")
-
-    def test_mismatching_values_msg_real(self):
-        actual = torch.tensor(complex(0, 1))
-        expected = torch.tensor(complex(1, 1))
-
-        for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the real part")):
-                fn()
-
-    def test_mismatching_values_msg_imag(self):
-        actual = torch.tensor(complex(1, 0))
-        expected = torch.tensor(complex(1, 1))
-
-        for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the imaginary part")):
-                fn()
 
     def test_matching_conjugate_bit(self):
         actual = torch.tensor(complex(1, 1)).conj()
