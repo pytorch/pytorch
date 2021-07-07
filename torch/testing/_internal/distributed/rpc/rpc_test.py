@@ -4089,8 +4089,9 @@ class CudaRpcTest(RpcAgentTestFixture):
                     continue
                 self.assertTrue(event.node_id in [dst_cuda_0, dst_cuda_1])
                 if get_name(event) in EXPECTED_REMOTE_EVENTS:
-                    self.assertGreater(event.cuda_time_total, 0)
                     self.assertEqual(1, len(event.kernels))
+                    self.assertEqual(torch.device("cuda:{}".format(0)), event.kernels[0].device)
+                    self.assertGreater(event.cuda_time_total, 0)
                     kernel = event.kernels[0]
                     if event.node_id == dst_cuda_0:
                         self.assertEqual(kernel.device, torch.device("cuda:{}".format(0)))
