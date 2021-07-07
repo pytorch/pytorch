@@ -143,6 +143,30 @@ class TestNNAPI(TestCase):
                 ReshapeModule((2, 4)),
                 nhwc(torch.randn(4, 2, 1, 1)))
 
+    def test_flatten(self):
+        for mod in [
+            torch.nn.Flatten(),
+            torch.nn.Flatten(start_dim=2, end_dim=3),
+            torch.nn.Flatten(start_dim=2, end_dim=4),
+            torch.nn.Flatten(start_dim=0, end_dim=-2),
+            torch.nn.Flatten(start_dim=0, end_dim=4)
+
+        ]:
+            self.check(mod, torch.randn(4, 2, 1, 3, 7))
+
+        # TODO(axit): To add support for runtime
+        # self.check(
+        #     torch.nn.Flatten(),
+        #     torch.randn(4, 2, 1, 3, 7),
+        #     convert_args=[torch.zeros(0, 2, 1, 3, 7)]
+        # )
+        # with self.assertRaisesRegex(Exception, "dims can't be flexible"):
+        #     self.check(torch.nn.Flatten(), torch.randn(4, 2, 0, 0, 7))
+        # with self.assertRaisesRegex(Exception, "Only 1 dim"):
+        #     self.check(
+        #         torch.nn.Flatten(start_dim=1, end_dim=-2),
+        #         torch.randn(0, 2, 1, 3, 0))
+
     def test_cat(self):
         class CatModule(torch.nn.Module):
             def __init__(self, dim):
