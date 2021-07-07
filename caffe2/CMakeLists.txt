@@ -518,6 +518,11 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_codegen.cpp PROPERTIES COMPILE_FLAGS -Wno-init-list-lifetime)
   endif()
 
+  # Pass path to PocketFFT
+  if(AT_POCKETFFT_ENABLED)
+    set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/mkl/SpectralOps.cpp PROPERTIES INCLUDE_DIRECTORIES "${POCKETFFT_INCLUDE_DIR}")
+  endif()
+
   if(NOT INTERN_DISABLE_MOBILE_INTERP)
     set(MOBILE_SRCS
        ${TORCH_SRC_DIR}/csrc/jit/mobile/function.cpp
@@ -990,15 +995,24 @@ endif()
 
 
 if(LINUX)
-  find_library(BREAKPAD_LIB breakpad_client)
-  find_path(BREAKPAD_INCLUDE_DIR breakpad)
+  find_library(BREAKPAD_LIB breakpad_client
+    PATHS /usr/local/lib/)
+  find_path(BREAKPAD_INCLUDE_DIR breakpad
+    PATHS /usr/local/include/)
+
   if(BREAKPAD_LIB AND BREAKPAD_INCLUDE_DIR)
     message(STATUS "found breakpad library")
-    target_link_libraries(torch_cpu PUBLIC ${BREAKPAD_LIB})
+    target_link_libraries(torch_cpu PRIVATE ${BREAKPAD_LIB})
     target_compile_definitions(torch_cpu PRIVATE ADD_BREAKPAD_SIGNAL_HANDLER)
-    target_include_directories(torch_cpu PUBLIC ${BREAKPAD_INCLUDE_DIR}/breakpad)
+    target_include_directories(torch_cpu PRIVATE ${BREAKPAD_INCLUDE_DIR}/breakpad)
   else()
-    message(STATUS "breakpad library not found")
+    if(BREAKPAD_INCLUDE_DIR)
+      message(STATUS "breakpad_client library not found")
+    elseif(BREAKPAD_LIB)
+      message(STATUS "breakpad include path not found")
+    else()
+      message(STATUS "breakpad_client library and include path not found")
+    endif()
   endif()
 endif()
 
