@@ -344,7 +344,7 @@ static void clamp_kernel_impl(TensorIterator& iter) {
   });
 }
 
-static void clamp_scalar_kernel_impl(TensorIterator& iter, Scalar min_, Scalar max_) {
+static void clamp_scalar_kernel_impl(TensorIteratorBase& iter, Scalar min_, Scalar max_) {
   AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.common_dtype(), "clamp_scalar_cpu", [&]() {
     const auto min = min_.to<scalar_t>();
     const auto max = max_.to<scalar_t>();

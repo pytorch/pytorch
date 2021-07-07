@@ -37,9 +37,7 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
                 "add OptionalTensor c.f. https://github.com/pytorch/pytorch/issues/51456"
             )
         elif t.elem == BaseType(BaseTy.Scalar):
-            raise AssertionError(
-                "optional scalar not supported by structured yet"
-            )
+            return NamedCType(binds, ConstRefCType(OptionalCType(BaseCType(scalarT))))
         elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)
         return NamedCType(binds, OptionalCType(elem.type))
     elif isinstance(t, ListType):

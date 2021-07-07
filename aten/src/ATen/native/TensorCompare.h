@@ -29,7 +29,7 @@ DECLARE_DISPATCH(clamp_fn, clamp_stub);
 DECLARE_DISPATCH(clamp_fn, clamp_min_stub);
 DECLARE_DISPATCH(clamp_fn, clamp_max_stub);
 
-DECLARE_DISPATCH(void (*)(TensorIterator &, Scalar, Scalar), clamp_scalar_stub);
+DECLARE_DISPATCH(void (*)(TensorIteratorBase &, Scalar, Scalar), clamp_scalar_stub);
 DECLARE_DISPATCH(void (*)(TensorIterator &, Scalar), clamp_min_scalar_stub);
 DECLARE_DISPATCH(void (*)(TensorIterator &, Scalar), clamp_max_scalar_stub);
 

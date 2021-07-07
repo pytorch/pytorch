@@ -362,7 +362,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::clamp, aten_clamp, [](Node* n) -> SROperator {
     } else {
       auto in1_s = p_node->Input(1).toOptional<at::Scalar>();
       auto in2_s = p_node->Input(2).toOptional<at::Scalar>();
-      at::native::clamp_out(in0_t, in1_s, in2_s, out_t);
+      out_t = at::clamp(in0_t, in1_s, in2_s);
     }
   };
 });
