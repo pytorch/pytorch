@@ -26,7 +26,7 @@ jobs:
           set -eux
           pip install -r requirements.txt
           pip install boto3==1.16.34
-          PYTHONPATH="$PYTHONPATH:$(pwd)"
+          PYTHONPATH=$(pwd)
           export PYTHONPATH
           make setup_lint
       - name: Run tests
