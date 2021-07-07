@@ -7,7 +7,7 @@ import torch
 from .module import Module
 from torch._jit_internal import _copy_to_script_wrapper
 
-from typing import Any, Iterable, Iterator, Mapping, Optional, TYPE_CHECKING, overload, Tuple, TypeVar, Union
+from typing import Any, Dict, Iterable, Iterator, Mapping, Optional, TYPE_CHECKING, overload, Tuple, TypeVar, Union
 
 if TYPE_CHECKING:
     from torch.nn import Parameter
@@ -70,6 +70,8 @@ class Sequential(Module):
                   ('relu2', nn.ReLU())
                 ]))
     """
+
+    _modules: Dict[str, Module]  # type: ignore[assignment]
 
     @overload
     def __init__(self, *args: Module) -> None:
@@ -164,6 +166,7 @@ class ModuleList(Module):
                 return x
     """
 
+    _modules: Dict[str, Module]  # type: ignore[assignment]
     def __init__(self, modules: Optional[Iterable[Module]] = None) -> None:
         super(ModuleList, self).__init__()
         if modules is not None:
@@ -297,6 +300,8 @@ class ModuleDict(Module):
                 return x
     """
 
+    _modules: Dict[str, Module]  # type: ignore[assignment]
+
     def __init__(self, modules: Optional[Mapping[str, Module]] = None) -> None:
         super(ModuleDict, self).__init__()
         if modules is not None:
@@ -419,6 +424,7 @@ class ParameterList(Module):
                 return x
     """
 
+    _parameters: Dict[str, Parameter]  # type: ignore[assignment]
     def __init__(self, parameters: Optional[Iterable['Parameter']] = None) -> None:
         super(ParameterList, self).__init__()
         self._initialized = True
@@ -560,6 +566,8 @@ class ParameterDict(Module):
                 x = self.params[choice].mm(x)
                 return x
     """
+
+    _parameters: Dict[str, 'Parameter']  # type: ignore[assignment]
 
     def __init__(self, parameters: Optional[Mapping[str, 'Parameter']] = None) -> None:
         super(ParameterDict, self).__init__()
