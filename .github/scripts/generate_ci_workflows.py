@@ -8,7 +8,7 @@ from typing_extensions import Literal
 
 DOCKER_REGISTRY = "308535385114.dkr.ecr.us-east-1.amazonaws.com"
 
-GITHUB_DIR = Path(__file__).parent.parent
+GITHUB_DIR = Path(__file__).resolve().parent.parent
 
 
 # it would be nice to statically specify that build_environment must be
@@ -192,11 +192,13 @@ LINUX_WORKFLOWS = [
     #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-py3.6-clang9",
     #     test_runner_type=LINUX_CPU_TEST_RUNNER,
     # ),
-    # PyTorchLinuxWorkflow(
-    #     build_environment="pytorch-linux-bionic-py3.8-gcc9-coverage",
-    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-py3.8-gcc9",
-    #     test_runner_type=LINUX_CPU_TEST_RUNNER,
-    # ),
+    PyTorchLinuxWorkflow(
+        build_environment="pytorch-linux-bionic-py3.8-gcc9-coverage",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-py3.8-gcc9",
+        test_runner_type=LINUX_CPU_TEST_RUNNER,
+        on_pull_request=True,
+        num_test_shards=2,
+    ),
     # PyTorchLinuxWorkflow(
     #     build_environment="pytorch-linux-bionic-rocm3.9-py3.6",
     #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm3.9-py3.6",
@@ -244,6 +246,15 @@ LINUX_WORKFLOWS = [
     # ),
 ]
 
+
+BAZEL_WORKFLOWS = [
+    PyTorchLinuxWorkflow(
+        build_environment="pytorch-linux-xenial-py3.6-gcc7-bazel-test",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc7",
+        test_runner_type=LINUX_CPU_TEST_RUNNER,
+    ),
+]
+
 if __name__ == "__main__":
     jinja_env = jinja2.Environment(
         variable_start_string="!{{",
@@ -251,7 +262,8 @@ if __name__ == "__main__":
     )
     template_and_workflows = [
         (jinja_env.get_template("linux_ci_workflow.yml.j2"), LINUX_WORKFLOWS),
-        (jinja_env.get_template("windows_ci_workflow.yml.j2"), WINDOWS_WORKFLOWS)
+        (jinja_env.get_template("windows_ci_workflow.yml.j2"), WINDOWS_WORKFLOWS),
+        (jinja_env.get_template("bazel_ci_workflow.yml.j2"), BAZEL_WORKFLOWS),
     ]
     for template, workflows in template_and_workflows:
         for workflow in workflows:
