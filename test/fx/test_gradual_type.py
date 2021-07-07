@@ -364,7 +364,7 @@ class TypeCheckerTest(unittest.TestCase):
             if n.op == 'output':
                 assert n.type == TensorType((Dyn, Dyn, Dyn, Dyn))
             if n.op == 'call_module':
-                assert n.type == TensorType((Dyn, 2, Dyn, Dyn))
+                assert n.type == TensorType((2, 2, Dyn, 4))
 
     def test_type_check_conv2D_2(self):
         class BasicBlock(torch.nn.Module):
@@ -382,6 +382,8 @@ class TypeCheckerTest(unittest.TestCase):
                 return out
 
         B = BasicBlock(2, 2)
+        b = B.forward(torch.rand(5, 2, 3, 4))
+
         ast_rewriter = RewritingTracer()
         graph = ast_rewriter.trace(B)
         traced = GraphModule(ast_rewriter.root, graph, "gm")
@@ -394,7 +396,7 @@ class TypeCheckerTest(unittest.TestCase):
             if n.op == 'call_function':
                 assert n.type == t
             if n.op == 'output':
-                assert n.type == t
+                assert torch.Size(n.type.__args__) == b.shape
             if n.op == 'call_module':
                 assert n.type == t
 
@@ -405,6 +407,59 @@ class TypeCheckerTest(unittest.TestCase):
         tc = GraphTypeChecker({}, traced)
         with self.assertRaises(TypeError):
             tc.type_check()
+
+
+
+    def test_type_check_conv2D_2_fully_static(self):
+
+        annotation_list = [(1, 2, 3, 5), (2, 5, 6, 9), (10, 15, 13, 14)]
+        in_planes_list = [2, 5, 15]
+        stride_list = [1, 2, 3]
+        out_planes_list = [2, 5, 15]
+        groups_list = [1, 5, 5]
+        dilation_list = [1, 2, 3]
+        padding_list = [1, 2, 3]
+        kernel_size_list = [1, 2, 3]
+
+        for i in range(3):
+            annotation = annotation_list[i]
+            in_planes = in_planes_list[i]
+            stride = stride_list[i]
+            out_planes = out_planes_list[i]
+            groups = groups_list[i]
+            dilation = dilation_list[i]
+            padding = padding_list[i]
+            kernel_size = kernel_size_list[i]
+
+            class BasicBlock(torch.nn.Module):
+                def __init__(self, in_planes, out_planes, kernel_size, stride, padding, groups, dilation):
+                    super(BasicBlock, self).__init__()
+                    self.conv1 = torch.nn.Conv2d(in_channels=in_planes, out_channels=out_planes,
+                                                 kernel_size=kernel_size, stride=stride,
+                                                 padding=padding, groups=groups, bias=False, dilation=dilation)
+
+                def forward(self, x):
+                    identity = x
+                    out = self.conv1(x)
+                    return out
+
+            B = BasicBlock(in_planes, out_planes, kernel_size, stride, padding, groups, dilation)
+            ast_rewriter = RewritingTracer()
+            graph = ast_rewriter.trace(B)
+            traced = GraphModule(ast_rewriter.root, graph, "gm")
+
+            # annotate our program
+            for n in graph.nodes:
+                if n.op == 'placeholder':
+                    n.type = TensorType(annotation)
+
+            b = B.forward(torch.rand(annotation))
+            tc = GraphTypeChecker({}, traced)
+            tc.type_check()
+
+            for n in graph.nodes:
+                if n.op == 'output':
+                    assert torch.Size(n.type.__args__) == b.size()
 
 if __name__ == '__main__':
     unittest.main()
