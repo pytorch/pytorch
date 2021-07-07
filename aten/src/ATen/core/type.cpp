@@ -1152,7 +1152,7 @@ c10::optional<TypePtr> UnionType::subtractTypeSet(std::vector<TypePtr>& to_subtr
   // Given a TypePtr `lhs`, this function says whether or not `lhs` (or
   // one of its parent types) is in the `to_subtract` vector
   auto should_subtract = [&](TypePtr lhs) -> bool {
-    return std::none_of(to_subtract.begin(), to_subtract.end(),
+    return std::any_of(to_subtract.begin(), to_subtract.end(),
                         [&](TypePtr rhs) {
                           return lhs->isSubtypeOf(rhs);
                         });
