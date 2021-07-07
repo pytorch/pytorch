@@ -1255,6 +1255,64 @@ void linalg_eigh_cusolver(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& inf
   }
 }
 
+// The 'apply_' word is used for templated by dtype functions that call an API routine
+// underneath. Since the cusolver API has a slightly different structure we do not prepend
+// apply_ to this function.
+void lu_looped_cusolver(const Tensor& self, const Tensor& pivots, const Tensor& infos, bool get_pivots) {
+  // Fill the pivots tensor with indices using 1-based (Fortran) indexing. This
+  // is needed for maintaining the same results with MAGMA.
+  auto k = std::min(self.size(-2), self.size(-1));
+  Tensor pivots_tmp = at::arange(1, k + 1, self.options().dtype(at::kInt)).expand_as(pivots);
+  pivots.copy_(pivots_tmp);
+
+  AT_DISPATCH_FLOATING_TYPES(
+    self.scalar_type(),
+    "lu_cusolver",
+    [&self,
+     &pivots,
+     &infos,
+     &get_pivots]() {
+    int m = cuda_int_cast(self.size(-2), "m");
+    int n = cuda_int_cast(self.size(-1), "n");
+    int lda = std::max<int>(1, m);
+    int64_t self_stride = matrixStride(self);
+    int64_t batch_size = batchCount(self);
+    scalar_t* self_data = self.data_ptr<scalar_t>();
+    int* infos_data = infos.data_ptr<int>();
+
+    auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+    for (auto batch = decltype(batch_size){0}; batch < batch_size; ++batch) {
+      if (get_pivots) {
+        auto pivots_data = pivots.data_ptr<int>();
+        auto pivots_stride = pivots.size(-1);
+        at::cuda::solver::getrf<scalar_t>(
+          handle, m, n,
+          self_data + batch * self_stride,
+          lda,
+          pivots_data + batch * pivots_stride,
+          infos_data + batch
+        );
+      }
+      else {
+        at::cuda::solver::getrf<scalar_t>(
+          handle, m, n,
+          self_data + batch * self_stride,
+          lda,
+          nullptr,
+          infos_data + batch
+        );
+      }
+    }
+  });
+
+  // Necessary because cuSOLVER uses nan for outputs that correspond to 0 in MAGMA for non-pivoted LU.
+  // See https://github.com/pytorch/pytorch/issues/53879 for more details.
+  if (!get_pivots) {
+    at::nan_to_num_(const_cast<Tensor&>(self), 0, std::numeric_limits<double>::infinity(),
+      -std::numeric_limits<double>::infinity());
+  }
+}
+
 void lu_solve_looped_cusolver(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(b.scalar_type(), "lu_solve_cusolver", [&] {
     int n = cuda_int_cast(lu.size(-2), "n");
