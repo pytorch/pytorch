@@ -664,14 +664,14 @@ class emit_itt(object):
     Args:
         enabled (bool, optional, default=True): Setting ``enabled=False`` makes this context manager a no-op.
             Default: ``True``.
-        record_shapes (bool, optional, default=False): If ``record_shapes=True``, the nvtx range wrapping
+        record_shapes (bool, optional, default=False): If ``record_shapes=True``, the itt range wrapping
             each autograd op will append information about the sizes of Tensor arguments received
             by that op, in the following format:
             ``[[arg0.size(0), arg0.size(1), ...], [arg1.size(0), arg1.size(1), ...], ...]``
             Non-tensor arguments will be represented by ``[]``.
             Arguments will be listed in the order they are received by the backend op.
             Please note that this order may not match the order in which those arguments were passed
-            on the Python side.  Also note that shape recording may increase the overhead of nvtx range creation.
+            on the Python side.  Also note that shape recording may increase the overhead of itt range creation.
 
     Example:
         >>>     model(x) # Warmup
