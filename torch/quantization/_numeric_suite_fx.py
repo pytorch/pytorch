@@ -24,6 +24,7 @@ from .ns.graph_passes import (
 
 from .ns.utils import (
     rekey_logger_info_on_node_name_of_model,
+    maybe_add_missing_fqns,
 )
 
 from .ns.ns_types import (
@@ -50,6 +51,7 @@ class OutputLogger(nn.Module):
         results_type: str,
         index_within_arg: int,
         index_of_arg: int,
+        fqn: Optional[str],
     ):
         super().__init__()
         self.stats: List[torch.Tensor] = []
@@ -88,6 +90,8 @@ class OutputLogger(nn.Module):
         # index of this node within the args of the input/output node
         # for example, in add(x1, x2), x2 would have index_of_arg == 1
         self.index_of_arg = index_of_arg
+        # fully qualified name
+        self.fqn = fqn
 
     # Note: cannot annotate the type of x because TorchScript does not support
     #   the Union type.
@@ -103,7 +107,7 @@ class OutputLogger(nn.Module):
         return f"""OutputLogger(ref_name={self.ref_name}, model_name={self.model_name},
 prev_node_name={self.prev_node_name}, ref_node_name={self.ref_node_name},
 results_type={self.results_type}, index_within_arg={self.index_within_arg},
-index_of_arg={self.index_of_arg})"""
+index_of_arg={self.index_of_arg}, fqn={self.fqn})"""
 
 
 class NSTracer(quantize_fx.QuantizationTracer):
@@ -168,6 +172,9 @@ def _extract_weights_impl(
     _extract_weights_one_model(
         model_name_b, gm_b, nodes_and_names_to_instrument_b, results)
 
+    # fill in missing fqn entries
+    maybe_add_missing_fqns(results)
+
     # rekey on names of nodes in gm_b
     results = rekey_logger_info_on_node_name_of_model(results, model_name_b)
 
@@ -193,7 +200,11 @@ def extract_weights(
     tracer_a = NSTracer(skipped_module_names, skipped_module_classes)
     tracer_b = NSTracer(skipped_module_names, skipped_module_classes)
     gm_a = GraphModule(model_a, tracer_a.trace(model_a))
+    if hasattr(model_a, '_node_name_to_scope'):
+        gm_a._node_name_to_scope = model_a._node_name_to_scope
     gm_b = GraphModule(model_b, tracer_b.trace(model_b))
+    if hasattr(model_b, '_node_name_to_scope'):
+        gm_b._node_name_to_scope = model_b._node_name_to_scope
     return _extract_weights_impl(
         model_name_a, gm_a, model_name_b, gm_b, base_name_to_sets_of_related_ops,
         unmatchable_types_map)
@@ -278,7 +289,11 @@ def add_loggers(
     tracer_a = NSTracer(skipped_module_names, skipped_module_classes)
     tracer_b = NSTracer(skipped_module_names, skipped_module_classes)
     gm_a = GraphModule(model_a, tracer_a.trace(model_a))
+    if hasattr(model_a, '_node_name_to_scope'):
+        gm_a._node_name_to_scope = model_a._node_name_to_scope
     gm_b = GraphModule(model_b, tracer_b.trace(model_b))
+    if hasattr(model_b, '_node_name_to_scope'):
+        gm_b._node_name_to_scope = model_b._node_name_to_scope
     return _add_loggers_impl(
         name_a, gm_a, name_b, gm_b, logger_cls,
         should_log_inputs=should_log_inputs,
@@ -322,6 +337,7 @@ def _extract_logger_info_one_model(
                 'prev_node_target_type': mod.prev_node_target_type,
                 'index_within_arg': mod.index_within_arg,
                 'index_of_arg': mod.index_of_arg,
+                'fqn': mod.fqn,
             })
             # ensure the list stays sorted
             results[key][mod.results_type][mod.model_name].sort(
@@ -350,6 +366,8 @@ def extract_logger_info(
     results: NSResultsType = {}
     for model in (model_a, model_b):
         _extract_logger_info_one_model(model, results, logger_cls)
+    # fill in missing fqn entries
+    maybe_add_missing_fqns(results)
     # rekey on the name of model b
     results = rekey_logger_info_on_node_name_of_model(
         results, model_name_to_use_for_layer_names)
@@ -400,7 +418,11 @@ def add_shadow_loggers(
     tracer_a = NSTracer(skipped_module_names, skipped_module_classes)
     tracer_b = NSTracer(skipped_module_names, skipped_module_classes)
     gm_a = GraphModule(model_a, tracer_a.trace(model_a))
+    if hasattr(model_a, '_node_name_to_scope'):
+        gm_a._node_name_to_scope = model_a._node_name_to_scope
     gm_b = GraphModule(model_b, tracer_b.trace(model_b))
+    if hasattr(model_b, '_node_name_to_scope'):
+        gm_b._node_name_to_scope = model_b._node_name_to_scope
     return _add_shadow_loggers_impl(
         name_a, gm_a, name_b, gm_b, logger_cls,
         should_log_inputs=should_log_inputs,
@@ -421,6 +443,8 @@ def extract_shadow_logger_info(
     torch._C._log_api_usage_once("quantization_api._numeric_suite_fx.extract_shadow_logger_info")
     results: NSResultsType = collections.defaultdict(dict)
     _extract_logger_info_one_model(model_a_shadows_b, results, logger_cls)
+    # fill in missing fqn entries
+    maybe_add_missing_fqns(results)
     # rekey on the name of model b
     results = rekey_logger_info_on_node_name_of_model(
         results, model_name_to_use_for_layer_names)

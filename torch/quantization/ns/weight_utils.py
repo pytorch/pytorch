@@ -135,6 +135,13 @@ def extract_weight_from_node(
     type_a_related_to_b: Set[Tuple[NSNodeTargetType, NSNodeTargetType]],
 ) -> Optional[NSSingleResultType]:
     res_type = NSSingleResultValuesType.WEIGHT.value
+
+    # Not all graphmodules have _node_name_to_scope, so only fill it
+    # out if it exists.
+    fqn = None
+    if hasattr(gm, '_node_name_to_scope'):
+        fqn = gm._node_name_to_scope[node.name][0]  # type: ignore[index]
+
     if node.op == 'call_function':
 
         related_to_linear = node.target in (F.linear,) or \
@@ -156,6 +163,7 @@ def extract_weight_from_node(
                 'ref_node_name': node.name,
                 'index_within_arg': 0,
                 'index_of_arg': 0,
+                'fqn': fqn,
             }
         elif (related_to_conv1d or related_to_conv2d or related_to_conv3d):
             weight = get_conv_fun_weight(node, gm)
@@ -167,6 +175,7 @@ def extract_weight_from_node(
                 'ref_node_name': node.name,
                 'index_within_arg': 0,
                 'index_of_arg': 0,
+                'fqn': fqn,
             }
 
     elif node.op == 'call_module':
@@ -197,6 +206,7 @@ def extract_weight_from_node(
                 'ref_node_name': node.name,
                 'index_within_arg': 0,
                 'index_of_arg': 0,
+                'fqn': fqn,
             }
         elif related_to_lstm_mod:
             weights = get_lstm_mod_weights(mod)
@@ -208,6 +218,7 @@ def extract_weight_from_node(
                 'ref_node_name': node.name,
                 'index_within_arg': 0,
                 'index_of_arg': 0,
+                'fqn': fqn,
             }
         elif related_to_linear_mod:
             weights = [get_linear_mod_weight(mod)]
@@ -219,6 +230,7 @@ def extract_weight_from_node(
                 'ref_node_name': node.name,
                 'index_within_arg': 0,
                 'index_of_arg': 0,
+                'fqn': fqn,
             }
 
     return None
