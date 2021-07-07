@@ -246,6 +246,15 @@ LINUX_WORKFLOWS = [
     # ),
 ]
 
+
+BAZEL_WORKFLOWS = [
+    PyTorchLinuxWorkflow(
+        build_environment="pytorch-linux-xenial-py3.6-gcc7-bazel-test",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc7",
+        test_runner_type=LINUX_CPU_TEST_RUNNER,
+    ),
+]
+
 if __name__ == "__main__":
     jinja_env = jinja2.Environment(
         variable_start_string="!{{",
@@ -253,7 +262,8 @@ if __name__ == "__main__":
     )
     template_and_workflows = [
         (jinja_env.get_template("linux_ci_workflow.yml.j2"), LINUX_WORKFLOWS),
-        (jinja_env.get_template("windows_ci_workflow.yml.j2"), WINDOWS_WORKFLOWS)
+        (jinja_env.get_template("windows_ci_workflow.yml.j2"), WINDOWS_WORKFLOWS),
+        (jinja_env.get_template("bazel_ci_workflow.yml.j2"), BAZEL_WORKFLOWS),
     ]
     for template, workflows in template_and_workflows:
         for workflow in workflows:
