@@ -316,6 +316,11 @@ const std::string embedding_bag_max_last_offset = R"JIT(
       return torch.embedding_bag(a, b, c, False, 2, False, None, True)
 )JIT";
 
+const auto sign_tensor = R"JIT(
+  def forward(self, input: Tensor):
+      return torch.sign(input).clone()
+)JIT";
+
 const auto div_tensor = R"JIT(
   def forward(self, a: Tensor, b: Tensor):
       return torch.div(a, b).clone()

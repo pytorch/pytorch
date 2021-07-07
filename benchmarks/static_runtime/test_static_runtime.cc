@@ -394,6 +394,15 @@ TEST(StaticRuntime, IndividualOps_Binary_MatMul) {
   testStaticRuntime(aten_matmul, args3, args4);
 }
 
+TEST(StaticRuntime, IndividualOps_Sign) {
+  auto a = at::randn({2, 3});
+  auto b = at::randn({4, 3, 2});
+
+  std::vector<IValue> args{a};
+  testStaticRuntime(sign_tensor, args);
+  testStaticRuntime(sign_tensor, args, {b});
+}
+
 TEST(StaticRuntime, IndividualOps_Div) {
   auto a = at::randn({2, 3});
   auto b = at::randn({2, 3});
