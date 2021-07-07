@@ -21,6 +21,7 @@ Functions
 .. autofunction:: entr
 .. autofunction:: erf
 .. autofunction:: erfc
+.. autofunction:: erfcx
 .. autofunction:: erfinv
 .. autofunction:: expit
 .. autofunction:: expm1
@@ -39,3 +40,4 @@ Functions
 .. autofunction:: round
 .. autofunction:: sinc
 .. autofunction:: xlog1py
+.. autofunction:: zeta
