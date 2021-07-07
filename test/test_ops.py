@@ -186,8 +186,10 @@ class TestCommon(TestCase):
 
             if isinstance(result, torch.Tensor):
                 self.assertTrue(result.device == cuda_device)
-            else:  # assumes that result is an iterable of tensors
+            elif is_iterable_of_tensors(result):
                 self.assertTrue(all(map(lambda t: t.device == cuda_device, result)))
+            else:
+                self.skipTest("Skipped! Only supports single tensor or iterable of tensor outputs.")
 
     # Tests that the function and its (ndarray-accepting) reference produce the same
     #   values on the tensors from sample_inputs func for the corresponding op.
