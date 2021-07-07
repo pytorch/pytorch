@@ -155,7 +155,7 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
     return data_;
   }
 
-  const auto data = hooks_ ? hooks_->call_unpack_hook(py_data_) : data_;
+  const auto data = hooks_ ? hooks_->call_unpack_hook() : data_;
 
   // NB: saved views are unpacked as normal Variables (not views) even though
   // they still share the same storage. This works only because we never call
@@ -235,7 +235,7 @@ void SavedVariable::register_hooks(std::unique_ptr<SavedVariableHooks>&& hooks) 
 
   const bool prev = GradMode::is_enabled();
   GradMode::set_enabled(false);
-  py_data_ = hooks_->call_pack_hook(data_);
+  hooks_->call_pack_hook(data_);
   GradMode::set_enabled(prev);
   data_.reset();
 }

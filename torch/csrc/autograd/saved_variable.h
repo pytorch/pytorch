@@ -95,8 +95,5 @@ class TORCH_API SavedVariable {
   std::shared_ptr<Node> grad_fn_;
   std::weak_ptr<Node> grad_accumulator_;
   bool requires_grad_ = false;
-
-  // Field to store packed data as specified by pack_hook.
-  PyObject* py_data_ = nullptr;
 };
 }} // namespace torch::autograd
