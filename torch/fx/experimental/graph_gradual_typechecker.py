@@ -12,7 +12,7 @@ from math import floor
 _INFERENCE_RULES: Dict[Target, Callable] = {}
 
 
-def apply_matching(t, n):
+def expand_to_tensor_dim(t, n):
     """
     Expand a type to the desired tensor dimension if possible
     Raise an error otherwise.
@@ -177,17 +177,26 @@ def reshape_inference_rule(n: Node):
         raise TypeError(f'Cannot reshape in node {n} from {t1} to {t2_type}')
 
 @register_inference_rule(BatchNorm2d)
-def bn2d_inference_rule(n: Node, op_type):
+def bn2d_inference_rule(n: Node, module_instance):
+    """
+    Given a BatchNorm2D instance and a node check the following conditions:
+    - the input type can be expanded to a size 4 tensor: t =  (x_1, x_2, x_3, x_4)
+    - the current node type can be expanded to a size 4 tensor: t' =  (x_1', x_2', x_3', x_4')
+    - t is consistent with t'
+    - x_2 is consistent with the module's num_features
+    - x_2' is consistent with the module's num_features
+    output type: the more precise type of t and t'
+    """
     assert isinstance(n.args[0], Node)
-    n.args[0].type = apply_matching(n.args[0].type, 4)
+    n.args[0].type = expand_to_tensor_dim(n.args[0].type, 4)
     arg_type = n.args[0].type
-    n.type = apply_matching(n.type, 4)
+    n.type = expand_to_tensor_dim(n.type, 4)
 
     # we check the conditions on the incoming argument
     # and any existing annotation
     # we also check for consistency between both annotations
-    if is_consistent(arg_type.__args__[1], op_type.num_features) and \
-            is_consistent(n.type.__args__[1], op_type.num_features) and \
+    if is_consistent(arg_type.__args__[1], module_instance.num_features) and \
+            is_consistent(n.type.__args__[1], module_instance.num_features) and \
             is_consistent(arg_type, n.type):
 
         # we choose the more precise type
@@ -198,7 +207,7 @@ def bn2d_inference_rule(n: Node, op_type):
             n.type = arg_type
         return n.type
     else:
-        raise TypeError(f'Cannot apply {op_type} with input type { arg_type} and existing type {n.type} on {n}')
+        raise TypeError(f'Cannot apply {module_instance} with input type {arg_type} and existing type {n.type} on {n}')
 
 def calculate_hout(h_in, op_type):
 
@@ -463,11 +472,11 @@ class GraphTypeChecker:
                 raise RuntimeError(f'No inference rule registered for target {n.target}!')
 
         if n.op == 'call_module':
-            op_type = getattr(self.traced, str(n.target))
-            if type(op_type) in _INFERENCE_RULES:
-                return _INFERENCE_RULES[type(op_type)](n, op_type)
+            module_instance = getattr(self.traced, str(n.target))
+            if type(module_instance) in _INFERENCE_RULES:
+                return _INFERENCE_RULES[type(module_instance)](n, module_instance)
             else:
-                raise RuntimeError(f'No inference rule registered for class {type(op_type)}!')
+                raise RuntimeError(f'No inference rule registered for class {type(module_instance)}!')
 
         if n.op == 'output':
             assert isinstance(n.args[0], Node)
