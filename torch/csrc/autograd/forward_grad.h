@@ -84,17 +84,17 @@ struct ForwardGrad;
 #define EXPECTED_MAX_LEVEL 2
 
 struct TORCH_API ForwardADLevel {
-    ForwardADLevel(uint64_t idx): idx_(idx) {}
-    ~ForwardADLevel();
+  ForwardADLevel(uint64_t idx) : idx_(idx) {}
+  ~ForwardADLevel();
 
-    static uint64_t get_next_idx();
-    static void release_idx(uint64_t idx);
-    static std::shared_ptr<ForwardADLevel> get_by_idx(uint64_t idx);
-    static std::shared_ptr<ForwardADLevel> try_get_by_idx(uint64_t idx);
+  static uint64_t get_next_idx();
+  static void release_idx(uint64_t idx);
+  static std::shared_ptr<ForwardADLevel> get_by_idx(uint64_t idx);
+  static std::shared_ptr<ForwardADLevel> try_get_by_idx(uint64_t idx);
 
-    void erase(const std::shared_ptr<ForwardGrad>& grad) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        grads_.erase(grad);
+  void erase(const std::shared_ptr<ForwardGrad>& grad) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    grads_.erase(grad);
     }
 
     void insert(const std::shared_ptr<ForwardGrad>& grad) {
@@ -110,37 +110,37 @@ private:
 };
 
 struct TORCH_API ForwardGrad : std::enable_shared_from_this<ForwardGrad> {
+  ForwardGrad() = default;
 
-    // NOLINTNEXTLINE(modernize-use-equals-default)
-    ForwardGrad() {}
+  // This function must only be called when AutogradMeta or SavedVariable is
+  // being destructed as it ensures that:
+  //   - The only (potential) other references to this ForwardGrad are the
+  //     different level it is registered to
+  //   - No other thread will try to call `set_value` or `value` ever from now
+  //   on
+  //   - Any of the ForwardADLevel that this ForwardGrad is registered with
+  //   might
+  //     call `reset` at any point during this function
+  void clear() {
+    c10::SmallVector<uint64_t, EXPECTED_MAX_LEVEL> levels_idx;
 
-    // This function must only be called when AutogradMeta or SavedVariable is being
-    // destructed as it ensures that:
-    //   - The only (potential) other references to this ForwardGrad are the
-    //     different level it is registered to
-    //   - No other thread will try to call `set_value` or `value` ever from now on
-    //   - Any of the ForwardADLevel that this ForwardGrad is registered with might
-    //     call `reset` at any point during this function
-    void clear() {
-        c10::SmallVector<uint64_t, EXPECTED_MAX_LEVEL> levels_idx;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      for (auto& c : content_) {
+        levels_idx.push_back(c.first);
+      }
+    }
 
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            for (auto& c: content_) {
-                levels_idx.push_back(c.first);
-            }
-        }
-
-        for (auto l_idx: levels_idx) {
-            // Use "try" version here as another thread might have deleted this
-            // level before we got here
-            // This is an owning reference as we want to keep the level alive
-            // until we successfully unregister ourselves
-            auto level = ForwardADLevel::try_get_by_idx(l_idx);
-            if (level) {
-                level->erase(shared_from_this());
-            }
-        }
+    for (auto l_idx : levels_idx) {
+      // Use "try" version here as another thread might have deleted this
+      // level before we got here
+      // This is an owning reference as we want to keep the level alive
+      // until we successfully unregister ourselves
+      auto level = ForwardADLevel::try_get_by_idx(l_idx);
+      if (level) {
+        level->erase(shared_from_this());
+      }
+    }
     }
 
     void set_value(const at::Tensor& value, uint64_t level) {
