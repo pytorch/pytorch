@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
+#include <ATen/native/cpu/utils.h>
 
 #include <tuple>
 #include <vector>
@@ -30,9 +31,16 @@ TORCH_META_FUNC(fractional_max_pool2d) (
   int64_t poolSizeW = pool_size[1];
 
   int64_t ndims = input.ndimension();
-  TORCH_CHECK(input.numel() > 0 && (ndims == 3 || ndims == 4),
-    "non-empty 3D or 4D (batch mode) tensor expected for input, but got: ",
-    ndims);
+  const auto memory_format = input.suggest_memory_format();
+  if (memory_format == at::MemoryFormat::ChannelsLast) {
+    TORCH_CHECK(ndims == 4,
+        "non-empty 4D (batch mode) tensor expected for input with channels_last layout");
+  } else if (memory_format == at::MemoryFormat::Contiguous) {
+    TORCH_CHECK((ndims == 3 || ndims == 4),
+        "non-empty 3D or 4D (batch mode) tensor expected for input");
+  } else {
+    TORCH_CHECK(false, "Unsupport memory format. Supports only ChannelsLast, Contiguous");
+  }
 
   if (ndims == 4) {
     numBatch = input.size(0);
@@ -58,9 +66,9 @@ TORCH_META_FUNC(fractional_max_pool2d) (
     /* indices will contain the locations for each output point */
     set_output(1, {numPlanes, outputH, outputW}, input.options().dtype(kLong));
   } else {
-    set_output(0, {numBatch, numPlanes, outputH, outputW}, input.options());
+    set_output(0, {numBatch, numPlanes, outputH, outputW}, input.options().memory_format(memory_format));
     /* indices will contain the locations for each output point */
-    set_output(1, {numBatch, numPlanes, outputH, outputW}, input.options().dtype(kLong));
+    set_output(1, {numBatch, numPlanes, outputH, outputW}, input.options().memory_format(memory_format).dtype(kLong));
   }
 }
 
@@ -91,97 +99,121 @@ static std::vector<int> fractional_max_pool2d_generate_intervals(
 }
 
 template <typename scalar_t>
-static void fractional_max_pool2d_out_single_batch_frame(
-  scalar_t* input,
-  scalar_t* output,
-  int64_t* indices,
-  scalar_t* randomSamples,
-  int numPlanes,
-  int inputW, int inputH,
-  int outputW, int outputH,
-  int poolSizeW, int poolSizeH) {
-  at::parallel_for(0, numPlanes, 0, [&](int64_t start, int64_t end) {
-    for (auto plane = start; plane < end; ++plane) {
-      /* each plane contains 2 random samples, one for W and one for H */
-      scalar_t* randomSamplesForPlane = randomSamples + plane * 2;
+static void fractional_max_pool2d_contiguous(
+    scalar_t* input,
+    scalar_t* output,
+    int64_t* indices,
+    scalar_t* randomSamples,
+    int64_t numBatch, int64_t numPlanes,
+    int64_t inputW, int64_t inputH,
+    int64_t outputW, int64_t outputH,
+    int64_t poolSizeW, int64_t poolSizeH) {
 
+  at::parallel_for(0, numBatch * numPlanes, 0, [&](int64_t begin, int64_t end) {
+    int64_t n;
+    int64_t c;
+    data_index_init(begin, n, numBatch, c, numPlanes);
+
+    for (int64_t i = begin; i < end; i++) {
       /* Generate interval sequence */
+      scalar_t* randomSamplesForPlane = randomSamples + i * 2;
       auto sequenceW = fractional_max_pool2d_generate_intervals<scalar_t>(
           randomSamplesForPlane[0], inputW, outputW, poolSizeW);
       auto sequenceH = fractional_max_pool2d_generate_intervals<scalar_t>(
           randomSamplesForPlane[1], inputH, outputH, poolSizeH);
 
-      /* loop over output */
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      int h, w;
+      /* local pointers for each plane */
+      scalar_t* input_ptr = input + i * inputW * inputH;
+      scalar_t* output_ptr = output + i * outputW * outputH;
+      int64_t* indices_ptr = indices + i * outputW * outputH;
 
-      scalar_t* inputForPlane = input + plane * inputW * inputH;
-      scalar_t* outputForPlane = output + plane * outputW * outputH;
-      int64_t* indicesForPlane = indices + plane * outputW * outputH;
+      for (int64_t oh = 0; oh < outputH; oh++) {
+        int64_t ih0 = sequenceH[oh];
 
-      for (h = 0; h < outputH; ++h) {
-        int inputHStart = sequenceH[h];
+        for (int64_t ow = 0; ow < outputW; ow++) {
+          int64_t iw0 = sequenceW[ow];
 
-        for (w = 0; w < outputW; ++w) {
-          int inputWStart = sequenceW[w];
-
-          int h2 = inputHStart, w2 = inputWStart;
           scalar_t maxVal = -std::numeric_limits<scalar_t>::infinity();
-          int64_t maxIndex = h2 * inputW + w2;
+          int64_t maxIndex = ih0 * inputW + iw0;
+          for (int64_t ih = ih0; ih < ih0 + poolSizeH; ih++) {
+            AT_ASSERT(ih >= 0 && ih < inputH);
+            for (int64_t iw = iw0; iw < iw0 + poolSizeW; iw++) {
+              AT_ASSERT(iw >= 0 && iw < inputW);
 
-          for (h2 = inputHStart; h2 < inputHStart + poolSizeH; ++h2) {
-            for (w2 = inputWStart; w2 < inputWStart + poolSizeW; ++w2) {
-              AT_ASSERT(h2 >= 0 && h2 < inputH);
-              AT_ASSERT(w2 >= 0 && w2 < inputW);
-
-              int planeIndex = h2 * inputW + w2;
-              scalar_t val = inputForPlane[planeIndex];
+              int index = ih * inputW + iw;
+              scalar_t val = input_ptr[index];
               if (val > maxVal || std::isnan(val)) {
                 maxVal = val;
-                maxIndex = planeIndex;
+                maxIndex = index;
               }
             }
           }
-
-          outputForPlane[h * outputW + w] = maxVal;
-          indicesForPlane[h * outputW + w] = maxIndex;
+          output_ptr[oh * outputW + ow] = maxVal;
+          indices_ptr[oh * outputW + ow] = maxIndex;
         }
       }
+
+      data_index_step(n, numBatch, c, numPlanes);
     }
   });
 }
 
 template <typename scalar_t>
-static void fractional_max_pool2d_out_frame(
-  scalar_t* input,
-  scalar_t* output,
-  int64_t* indices,
-  scalar_t* randomSamples,
-  int numBatch, int numPlanes,
-  int inputW, int inputH,
-  int outputW, int outputH,
-  int poolSizeW, int poolSizeH) {
-    if(numBatch == 1) {
-      fractional_max_pool2d_out_single_batch_frame<scalar_t>(
-        input,
-        output,
-        indices,
-        randomSamples,
-        numPlanes, inputW, inputH, outputW, outputH, poolSizeW, poolSizeH
-      );
-      return;
-    }
-    at::parallel_for(0, numBatch, 0, [&](int64_t start, int64_t end) {
-      for (auto batch = start; batch < end; ++batch) {
-        fractional_max_pool2d_out_single_batch_frame<scalar_t>(
-          input + batch * numPlanes * inputH * inputW,
-          output + batch * numPlanes * outputH * outputW,
-          indices + batch * numPlanes * outputH * outputW,
-          randomSamples + batch * numPlanes * 2,
-          numPlanes, inputW, inputH, outputW, outputH, poolSizeW, poolSizeH);
+static void fractional_max_pool2d_channels_last(
+    scalar_t* input,
+    scalar_t* output,
+    int64_t* indices,
+    scalar_t* randomSamples,
+    int64_t numBatch, int64_t numPlanes,
+    int64_t inputW, int64_t inputH,
+    int64_t outputW, int64_t outputH,
+    int64_t poolSizeW, int64_t poolSizeH) {
+
+  scalar_t alphaH = (outputH == 1) ? static_cast<scalar_t>(1)
+      : static_cast<scalar_t>(inputH - poolSizeH) / static_cast<scalar_t>(outputH - 1);
+  scalar_t alphaW = (outputW == 1) ? static_cast<scalar_t>(1)
+      : static_cast<scalar_t>(inputW - poolSizeW) / static_cast<scalar_t>(outputW - 1);
+
+  int64_t stride_n = inputH * inputW * numPlanes;
+  at::parallel_for(0, numBatch * outputH * outputW, 0, [&](int64_t begin, int64_t end) {
+    int64_t n = 0;
+    int64_t oh = 0;
+    int64_t ow = 0;
+    data_index_init(begin, n, numBatch, oh, outputH, ow, outputW);
+
+    for (int64_t i = begin; i < end; i++) {
+      for (int64_t c = 0; c < numPlanes; c++) {
+        scalar_t* randomSamplesForPlane = randomSamples + n * numPlanes * 2 + c * 2;
+        scalar_t sampleW = randomSamplesForPlane[0];
+        scalar_t sampleH = randomSamplesForPlane[1];
+
+        int64_t ih0 = (oh == outputH - 1) ? inputH - poolSizeH
+            : static_cast<int64_t>((oh + sampleH) * alphaH) - static_cast<int64_t>(sampleH * alphaH);
+        int64_t iw0 = (ow == outputW - 1) ? inputW - poolSizeW
+            : static_cast<int64_t>((ow + sampleW) * alphaW) - static_cast<int64_t>(sampleW * alphaW);
+
+        scalar_t maxVal = -std::numeric_limits<scalar_t>::infinity();
+        int64_t maxIndex = ih0 * inputW + iw0;
+        for (int64_t ih = ih0; ih < ih0 + poolSizeH; ih++) {
+          AT_ASSERT(ih >= 0 && ih < inputH);
+          for (int64_t iw = iw0; iw < iw0 + poolSizeW; iw++) {
+            AT_ASSERT(iw >= 0 && iw < inputW);
+            int64_t index = ih * inputW + iw;
+            scalar_t val = input[n * stride_n + index * numPlanes + c];
+            if (val > maxVal || std::isnan(val)) {
+              maxVal = val;
+              maxIndex = index;
+            }
+          }
+        }
+        output[i * numPlanes + c] = maxVal;
+        indices[i * numPlanes + c] = maxIndex;
       }
-    });
-  }
+
+      data_index_step(n, numBatch, oh, outputH, ow, outputW);
+    }
+  });
+}
 
 } // anonymous namespace
 
@@ -203,7 +235,8 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_out_cpu) (
   int64_t poolSizeW = pool_size[1];
 
   /* get contiguous input */
-  auto input = input_.contiguous();
+  auto memory_format = input_.suggest_memory_format();
+  auto input = input_.contiguous(memory_format);
 
   int64_t ndims = input.ndimension();
 
@@ -219,23 +252,38 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_out_cpu) (
   int64_t inputH = input.size(heightDim);
   int64_t inputW = input.size(widthDim);
 
-  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(),
-  "fractional_max_pool2d_out_frame", [&] {
-    auto input_data = input.data_ptr<scalar_t>();
-    auto output_data = output.data_ptr<scalar_t>();
-    auto indices_data = indices.data_ptr<int64_t>();
-    auto randomSamples_data = randomSamples.data_ptr<scalar_t>();
-    fractional_max_pool2d_out_frame<scalar_t>(
-      input_data,
-      output_data,
-      indices_data,
-      randomSamples_data,
-      numBatch, numPlanes,
-      inputW, inputH,
-      outputW, outputH,
-      poolSizeW, poolSizeH);
+  switch (input.suggest_memory_format()) {
+    case at::MemoryFormat::Contiguous: {
+      AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "fractional_max_pool2d_contiguous", [&] {
+        fractional_max_pool2d_contiguous<scalar_t>(
+            input.data_ptr<scalar_t>(),
+            output.data_ptr<scalar_t>(),
+            indices.data_ptr<int64_t>(),
+            randomSamples.data_ptr<scalar_t>(),
+            numBatch, numPlanes,
+            inputW, inputH,
+            outputW, outputH,
+            poolSizeW, poolSizeH);
+      });
+      break;
     }
-  );
+    case at::MemoryFormat::ChannelsLast: {
+      AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "fractional_max_pool2d_channels_last", [&] {
+        fractional_max_pool2d_channels_last<scalar_t>(
+            input.data_ptr<scalar_t>(),
+            output.data_ptr<scalar_t>(),
+            indices.data_ptr<int64_t>(),
+            randomSamples.data_ptr<scalar_t>(),
+            numBatch, numPlanes,
+            inputW, inputH,
+            outputW, outputH,
+            poolSizeW, poolSizeH);
+      });
+      break;
+    }
+    default:
+      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
+  }
 }
 
 namespace {
@@ -302,7 +350,7 @@ Tensor& fractional_max_pool2d_backward_out_cpu_template(
   at::Tensor& gradInput,
   IntArrayRef output_size,
   IntArrayRef pool_size /* unused */,
-  const at::Tensor& indices) {
+  const at::Tensor& indices_) {
 
   int numBatch = 1;
   int planeDim = 0;
@@ -327,6 +375,7 @@ Tensor& fractional_max_pool2d_backward_out_cpu_template(
 
   /* get contiguous gradOutput */
   auto gradOutput = gradOutput_.contiguous();
+  auto indices = indices_.contiguous();
 
   TORCH_CHECK(outputW == gradOutput.size(widthDim),
     "fractional_max_pool2d_backward(): gradOutput width unexpected");
