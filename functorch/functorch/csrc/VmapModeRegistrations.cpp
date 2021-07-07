@@ -15,6 +15,12 @@
 
 namespace at {
 namespace functorch {
+
+void unsupportedRandomOp2(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+  TORCH_CHECK(false, "vmap: We do not yet support calling random operations inside of vmap. ",
+              "Please perform random operations outside of vmap as a workaround");
+}
+
 template <typename... Args> Tensor unsupportedRandomOp(Args... args) {
   TORCH_CHECK(false, "vmap: We do not yet support calling random operations inside of vmap. ",
               "Please perform random operations outside of vmap as a workaround");
@@ -30,6 +36,12 @@ TORCH_LIBRARY_IMPL(_, FuncTorchVmapMode, m) {
 }
 
 #define TENSOROPTIONSPARAMS c10::optional<c10::ScalarType> dtype, c10::optional<c10::Layout> layout, c10::optional<c10::Device> device, c10::optional<bool> pin_memory
+
+#define UNSUPPORTED_RANDOM(op) \
+  m.impl(#op, torch::CppFunction::makeFromBoxedFunction<&unsupportedRandomOp2>());
+
+#define UNSUPPORTED_RANDOM2(op, overload) \
+  m.impl(#op"."#overload, torch::CppFunction::makeFromBoxedFunction<&unsupportedRandomOp2>());
 
 #define TENSOROPTIONSARGS dtype, layout, device, pin_memory
 
@@ -51,12 +63,11 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   // However, registering e.g. CppFunction::makeNamedNotSupported() as an implementation
   // only works for operators that support boxing.
 #define TENSOROPTIONS c10::optional<c10::ScalarType>, c10::optional<c10::Layout>, c10::optional<c10::Device>, c10::optional<bool>
-
   // random operations (out-of-place)
-  m.impl("bernoulli", unsupportedRandomOp<const Tensor&, optional<Generator>>);
-  m.impl("bernoulli.out", unsupportedRandomOp_<const Tensor&, optional<Generator>, Tensor&>);
-  m.impl("bernoulli.p", unsupportedRandomOp<const Tensor&, double, optional<Generator>>);
-  m.impl("bernoulli_.Tensor", unsupportedRandomOp_<Tensor&, const Tensor&, optional<Generator>>);
+  UNSUPPORTED_RANDOM(bernoulli);
+  UNSUPPORTED_RANDOM2(bernoulli, out);
+  UNSUPPORTED_RANDOM2(bernoulli, p);
+  UNSUPPORTED_RANDOM2(bernoulli_, Tensor);
   m.impl("bernoulli_.float", unsupportedRandomOp_<Tensor&, double, optional<Generator>>);
 
   m.impl("cauchy_", unsupportedRandomOp_<Tensor&, double, double, optional<Generator>>);
