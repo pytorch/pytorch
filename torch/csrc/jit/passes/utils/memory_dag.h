@@ -29,8 +29,7 @@ class MemoryDAG;
  */
 class TORCH_API MemoryDAGBuilder {
  public:
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  MemoryDAGBuilder() {}
+  MemoryDAGBuilder() = default;
   MemoryDAGBuilder(const MemoryDAGBuilder&) = delete;
   MemoryDAGBuilder& operator=(const MemoryDAGBuilder&) = delete;
 
