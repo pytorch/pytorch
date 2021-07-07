@@ -419,8 +419,11 @@ def get_matching_subgraph_pairs(
                 gm_a, gm_b, type_a_related_to_b)
             if subgraph_relationship == SubgraphTypeRelationship.NOT_RELATED:
                 msg = f"""
+The subgraphs
 ({cur_subgraph_a}, {type_start_a}) and
-({cur_subgraph_b}, {type_start_b}) are not related"""
+({cur_subgraph_b}, {type_start_b})
+are not related. Please ensure that the two models you pass in have the same number
+of subgraphs, and each pair of subgraphs is related to each other."""
                 raise GraphMatchingException(msg)
             elif subgraph_relationship == SubgraphTypeRelationship.EQUAL_BUT_UKNOWN:
                 # skip matching but unknown types
@@ -441,8 +444,11 @@ def get_matching_subgraph_pairs(
         else:
             # only one node was fetched, no match possible, throw error
             msg = f"""
-Matchable nodes count mismatch: ({cur_subgraph_a}, {type_start_a}) and
-({cur_subgraph_b}, {type_start_b})"""
+Attempting to match
+({cur_subgraph_a}, {type_start_a}) and
+({cur_subgraph_b}, {type_start_b}),
+one of which is empty. Please ensure that the two models you pass in have the same number
+of subgraphs."""
             raise GraphMatchingException(msg)
 
     return results
