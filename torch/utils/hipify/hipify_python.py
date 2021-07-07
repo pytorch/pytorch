@@ -481,8 +481,11 @@ def get_hip_file_path(filepath):
     dirpath = dirpath.replace('cuda', 'hip')
     dirpath = dirpath.replace('THC', 'THH')
 
-    root = root.replace('cuda', 'hip')
-    root = root.replace('CUDA', 'HIP')
+    if ext == '.cuh' or ext == '.hpp':
+        root = root
+    else:
+        root = root.replace('cuda', 'hip')
+        root = root.replace('CUDA', 'HIP')
     # Special case to handle caffe2/core/THCCachingAllocator
     if dirpath != "caffe2/core":
         root = root.replace('THC', 'THH')
