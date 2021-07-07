@@ -1,8 +1,8 @@
 import argparse
 import pathlib
 
-from run import run
-from generate_build_files import generate_build_files
+from tools.linter.clang_tidy.run import run
+from tools.linter.clang_tidy.generate_build_files import generate_build_files
 
 
 DEFAULTS = {
