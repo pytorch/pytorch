@@ -3,7 +3,7 @@
 // DO NOT DEFINE STATIC DATA IN THIS HEADER!
 // See Note [Do not compile initializers with AVX]
 
-#include <ATen/cpu/vec/vec512/intrinsics.h>
+#include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec512/vec512_base.h>
 #if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
 #include <sleef.h>
@@ -18,10 +18,9 @@ namespace {
 
 template <> class Vectorized<float> {
 private:
+  __m512 values;
   static constexpr __m512i zero_vec {0, 0, 0, 0, 0, 0, 0, 0};
 public:
-  // values needs to be public, as vec512.h uses it
-  __m512 values;
   using value_type = float;
   using size_type = int;
   static constexpr size_type size() {
@@ -460,12 +459,10 @@ inline void convert(const float* src, float* dst, int64_t n) {
   }
 }
 
-#ifdef CPU_CAPABILITY_AVX512
 template <>
 Vectorized<float> inline fmadd(const Vectorized<float>& a, const Vectorized<float>& b, const Vectorized<float>& c) {
   return _mm512_fmadd_ps(a, b, c);
 }
-#endif
 
 #endif
 

@@ -9,7 +9,7 @@
 #include <type_traits>
 #include <bitset>
 
-#include <ATen/cpu/vec/vec512/intrinsics.h>
+#include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/native/Math.h>
 #include <ATen/NumericUtils.h>
 #include <c10/util/C++17.h>
@@ -59,7 +59,7 @@ using int_same_size_t = typename int_of_size<sizeof(T)>::type;
 
 // NOTE: If you specialize on a type, you must define all operations!
 
-// emulates Vectorizedtorized types
+// emulates Vectorized types
 template <class T>
 struct Vectorized {
 private:
@@ -92,60 +92,60 @@ public:
   template <int64_t mask_>
   static Vectorized<T> blend(const Vectorized<T>& a, const Vectorized<T>& b) {
     int64_t mask = mask_;
-    Vectorized Vectorized;
+    Vectorized vec;
     for (int64_t i = 0; i < size(); i++) {
       if (mask & 0x01) {
-        Vectorized[i] = b[i];
+        vec[i] = b[i];
       } else {
-        Vectorized[i] = a[i];
+        vec[i] = a[i];
       }
       mask = mask >> 1;
     }
-    return Vectorized;
+    return vec;
   }
   static Vectorized<T> blendv(const Vectorized<T>& a, const Vectorized<T>& b,
                           const Vectorized<T>& mask) {
-    Vectorized Vectorized;
+    Vectorized vec;
     int_same_size_t<T> buffer[size()];
     mask.store(buffer);
     for (int64_t i = 0; i < size(); i++) {
       if (buffer[i] & 0x01)
        {
-        Vectorized[i] = b[i];
+        vec[i] = b[i];
       } else {
-        Vectorized[i] = a[i];
+        vec[i] = a[i];
       }
     }
-    return Vectorized;
+    return vec;
   }
   template<typename step_t>  // step sometimes requires a higher precision type (e.g., T=int, step_t=double)
   static Vectorized<T> arange(T base = static_cast<T>(0), step_t step = static_cast<step_t>(1)) {
-    Vectorized Vectorized;
+    Vectorized vec;
     for (int64_t i = 0; i < size(); i++) {
-      Vectorized.values[i] = base + i * step;
+      vec.values[i] = base + i * step;
     }
-    return Vectorized;
+    return vec;
   }
   static Vectorized<T> set(const Vectorized<T>& a, const Vectorized<T>& b, int64_t count = size()) {
-    Vectorized Vectorized;
+    Vectorized vec;
     for (int64_t i = 0; i < size(); i++) {
       if (i < count) {
-        Vectorized[i] = b[i];
+        vec[i] = b[i];
       } else {
-        Vectorized[i] = a[i];
+        vec[i] = a[i];
       }
     }
-    return Vectorized;
+    return vec;
   }
   static Vectorized<T> loadu(const void* ptr) {
-    Vectorized Vectorized;
-    std::memcpy(Vectorized.values, ptr, 64);
-    return Vectorized;
+    Vectorized vec;
+    std::memcpy(vec.values, ptr, 32);
+    return vec;
   }
   static Vectorized<T> loadu(const void* ptr, int64_t count) {
-    Vectorized Vectorized;
-    std::memcpy(Vectorized.values, ptr, count * sizeof(T));
-    return Vectorized;
+    Vectorized vec;
+    std::memcpy(vec.values, ptr, count * sizeof(T));
+    return vec;
   }
   void store(void* ptr, int count = size()) const {
     std::memcpy(ptr, values, count * sizeof(T));
@@ -161,15 +161,15 @@ public:
     return mask;
   }
   Vectorized<T> isnan() const {
-    Vectorized<T> Vectorized;
+    Vectorized<T> vec;
     for (int64_t i = 0; i != size(); i++) {
       if (_isnan(values[i])) {
-        std::memset(static_cast<void*>(Vectorized.values + i), 0xFF, sizeof(T));
+        std::memset(static_cast<void*>(vec.values + i), 0xFF, sizeof(T));
       } else {
-        std::memset(static_cast<void*>(Vectorized.values + i), 0, sizeof(T));
+        std::memset(static_cast<void*>(vec.values + i), 0, sizeof(T));
       }
     }
-    return Vectorized;
+    return vec;
   }
   Vectorized<T> map(T (*const f)(T)) const {
     Vectorized<T> ret;
@@ -446,15 +446,15 @@ private:
   template <typename Op>
   inline Vectorized<T> binary_pred(const Vectorized<T>& other, Op op) const {
     // All bits are set to 1 if the pred is true, otherwise 0.
-    Vectorized<T> Vectorized;
+    Vectorized<T> vec;
     for (int64_t i = 0; i != size(); i++) {
       if (op(values[i], other.values[i])) {
-        std::memset(static_cast<void*>(Vectorized.values + i), 0xFF, sizeof(T));
+        std::memset(static_cast<void*>(vec.values + i), 0xFF, sizeof(T));
       } else {
-        std::memset(static_cast<void*>(Vectorized.values + i), 0, sizeof(T));
+        std::memset(static_cast<void*>(vec.values + i), 0, sizeof(T));
       }
     }
-    return Vectorized;
+    return vec;
   }
 
 public:
@@ -469,11 +469,11 @@ private:
   template <typename Op>
   inline Vectorized<T> binary_pred_bool(const Vectorized<T>& other, Op op) const {
     // 1 if the pred is true, otherwise 0.
-    Vectorized<T> Vectorized;
+    Vectorized<T> vec;
     for (int i = 0; i != size(); ++ i) {
-      Vectorized[i] = bool(op(values[i], other.values[i]));
+      vec[i] = bool(op(values[i], other.values[i]));
     }
-    return Vectorized;
+    return vec;
   }
 
 public:
@@ -486,7 +486,7 @@ public:
 };
 
 template <class T> Vectorized<T> inline operator+(const Vectorized<T> &a, const Vectorized<T> &b) {
-  Vectorized<T> c = Vectorized<T>();
+  Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
     c[i] = a[i] + b[i];
   }
@@ -494,7 +494,7 @@ template <class T> Vectorized<T> inline operator+(const Vectorized<T> &a, const 
 }
 
 template <class T> Vectorized<T> inline operator-(const Vectorized<T> &a, const Vectorized<T> &b) {
-  Vectorized<T> c = Vectorized<T>();
+  Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
     c[i] = a[i] - b[i];
   }
@@ -502,7 +502,7 @@ template <class T> Vectorized<T> inline operator-(const Vectorized<T> &a, const 
 }
 
 template <class T> Vectorized<T> inline operator*(const Vectorized<T> &a, const Vectorized<T> &b) {
-  Vectorized<T> c = Vectorized<T>();
+  Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
     c[i] = a[i] * b[i];
   }
@@ -510,7 +510,7 @@ template <class T> Vectorized<T> inline operator*(const Vectorized<T> &a, const 
 }
 
 template <class T> Vectorized<T> inline operator/(const Vectorized<T> &a, const Vectorized<T> &b) __ubsan_ignore_float_divide_by_zero__ {
-  Vectorized<T> c = Vectorized<T>();
+  Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
     c[i] = a[i] / b[i];
   }
@@ -519,7 +519,7 @@ template <class T> Vectorized<T> inline operator/(const Vectorized<T> &a, const 
 
 template <class T> Vectorized<T> inline operator||(
     const Vectorized<T> &a, const Vectorized<T> &b) {
-  Vectorized<T> c = Vectorized<T>();
+  Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
     c[i] = a[i] || b[i];
   }
@@ -531,7 +531,7 @@ template <class T> Vectorized<T> inline operator||(
 template <class T,
           typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
 Vectorized<T> inline maximum(const Vectorized<T> &a, const Vectorized<T> &b) {
-  Vectorized<T> c = Vectorized<T>();
+  Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
     c[i] = (a[i] > b[i]) ? a[i] : b[i];
     if (_isnan(a[i])) {
@@ -547,7 +547,7 @@ Vectorized<T> inline maximum(const Vectorized<T> &a, const Vectorized<T> &b) {
 template <class T,
           typename std::enable_if<c10::is_complex<T>::value, int>::type = 0>
 Vectorized<T> inline maximum(const Vectorized<T> &a, const Vectorized<T> &b) {
-  Vectorized<T> c = Vectorized<T>();
+  Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
     c[i] = (std::abs(a[i]) > std::abs(b[i])) ? a[i] : b[i];
     if (_isnan(a[i])) {
@@ -565,7 +565,7 @@ Vectorized<T> inline maximum(const Vectorized<T> &a, const Vectorized<T> &b) {
 template <class T,
           typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
 Vectorized<T> inline minimum(const Vectorized<T> &a, const Vectorized<T> &b) {
-  Vectorized<T> c = Vectorized<T>();
+  Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
     c[i] = (a[i] < b[i]) ? a[i] : b[i];
     if (_isnan(a[i])) {
@@ -581,7 +581,7 @@ Vectorized<T> inline minimum(const Vectorized<T> &a, const Vectorized<T> &b) {
 template <class T,
           typename std::enable_if<c10::is_complex<T>::value, int>::type = 0>
 Vectorized<T> inline minimum(const Vectorized<T> &a, const Vectorized<T> &b) {
-  Vectorized<T> c = Vectorized<T>();
+  Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
     c[i] = (std::abs(a[i]) < std::abs(b[i])) ? a[i] : b[i];
     if (_isnan(a[i])) {
@@ -596,37 +596,35 @@ Vectorized<T> inline minimum(const Vectorized<T> &a, const Vectorized<T> &b) {
 
 template <class T,
           typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
-Vectorized<T> inline clamp(const Vectorized<T> &a, const Vectorized<T> &min_Vectorized, const Vectorized<T> &max_Vectorized) {
-  Vectorized<T> c = Vectorized<T>();
+Vectorized<T> inline clamp(const Vectorized<T> &a, const Vectorized<T> &min_vec, const Vectorized<T> &max_vec) {
+  Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
-    c[i] = std::min(std::max(a[i], min_Vectorized[i]), max_Vectorized[i]);
+    c[i] = std::min(std::max(a[i], min_vec[i]), max_vec[i]);
   }
   return c;
 }
 
 template <class T,
           typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
-Vectorized<T> inline clamp_max(const Vectorized<T> &a, const Vectorized<T> &max_Vectorized) {
-  Vectorized<T> c = Vectorized<T>();
+Vectorized<T> inline clamp_max(const Vectorized<T> &a, const Vectorized<T> &max_vec) {
+  Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
-    c[i] = a[i] > max_Vectorized[i] ? max_Vectorized[i] : a[i];
+    c[i] = a[i] > max_vec[i] ? max_vec[i] : a[i];
   }
   return c;
 }
 
 template <class T,
           typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
-Vectorized<T> inline clamp_min(const Vectorized<T> &a, const Vectorized<T> &min_Vectorized) {
-  Vectorized<T> c = Vectorized<T>();
+Vectorized<T> inline clamp_min(const Vectorized<T> &a, const Vectorized<T> &min_vec) {
+  Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
-    c[i] = a[i] < min_Vectorized[i] ? min_Vectorized[i] : a[i];
+    c[i] = a[i] < min_vec[i] ? min_vec[i] : a[i];
   }
   return c;
 }
 
 struct Vectorizedi;
-
-#ifdef CPU_CAPABILITY_AVX512
 
 
 template <class T, typename Op>
@@ -655,35 +653,6 @@ inline Vectorized<T> operator^(const Vectorized<T>& a, const Vectorized<T>& b) {
   // We enclose _mm512_xor_si512 with lambda because it is always_inline
   return bitwise_binary_op(a, b, [](__m512i a, __m512i b) { return _mm512_xor_si512(a, b); });
 }
-
-#else
-
-template<class T, typename Op>
-static inline Vectorized<T> bitwise_binary_op(const Vectorized<T> &a, const Vectorized<T> &b, Op op) {
-  static constexpr uint32_t element_no = 64 / sizeof(intmax_t);
-  __at_align64__ intmax_t buffer[element_no];
-  const intmax_t *a_ptr = reinterpret_cast<const intmax_t*>((const T*) a);
-  const intmax_t *b_ptr = reinterpret_cast<const intmax_t*>((const T*) b);
-  for (uint32_t i = 0U; i < element_no; ++ i) {
-    buffer[i] = op(a_ptr[i], b_ptr[i]);
-  }
-  return Vectorized<T>::loadu(buffer);
-}
-
-template<class T, typename std::enable_if_t<!std::is_base_of<Vectorizedi, Vectorized<T>>::value, int> = 0>
-inline Vectorized<T> operator&(const Vectorized<T>& a, const Vectorized<T>& b) {
-  return bitwise_binary_op(a, b, std::bit_and<intmax_t>());
-}
-template<class T, typename std::enable_if_t<!std::is_base_of<Vectorizedi, Vectorized<T>>::value, int> = 0>
-inline Vectorized<T> operator|(const Vectorized<T>& a, const Vectorized<T>& b) {
-  return bitwise_binary_op(a, b, std::bit_or<intmax_t>());
-}
-template<class T, typename std::enable_if_t<!std::is_base_of<Vectorizedi, Vectorized<T>>::value, int> = 0>
-inline Vectorized<T> operator^(const Vectorized<T>& a, const Vectorized<T>& b) {
-  return bitwise_binary_op(a, b, std::bit_xor<intmax_t>());
-}
-
-#endif
 
 template<class T, typename std::enable_if_t<!std::is_base_of<Vectorizedi, Vectorized<T>>::value, int> = 0>
 inline Vectorized<T> operator~(const Vectorized<T>& a) {
@@ -760,9 +729,9 @@ inline mask_gather(const Vectorized<T>& src, T const* base_addr,
   return Vectorized<T>::loadu(static_cast<void*>(buffer));
 }
 
-// Cast a given Vectorizedtor to another type without changing the bits representation.
-// So a Vec<double> of 512 bits containing all ones can be cast to a
-// Vec<int64_t> of 512 bits containing all ones (i.e., four negative 1s).
+// Cast a given vector to another type without changing the bits representation.
+// So a Vectorized<double> of 512 bits containing all ones can be cast to a
+// Vectorized<int64_t> of 512 bits containing all ones (i.e., four negative 1s).
 namespace {
   // There is a struct here because we don't have static_if and I can't
   // partially specialize a templated function.

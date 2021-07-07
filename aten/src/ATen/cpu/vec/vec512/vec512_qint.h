@@ -3,7 +3,7 @@
 // DO NOT DEFINE STATIC DATA IN THIS HEADER!
 // See Note [Do not compile initializers with AVX]
 
-#include <ATen/cpu/vec/vec512/intrinsics.h>
+#include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec512/vec512_base.h>
 #include <ATen/native/quantized/affine_quantizer_base.h>
 #include <c10/util/qint32.h>

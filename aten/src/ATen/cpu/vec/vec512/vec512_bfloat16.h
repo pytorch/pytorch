@@ -3,7 +3,7 @@
 // DO NOT DEFINE STATIC DATA IN THIS HEADER!
 // See Note [Do not compile initializers with AVX]
 
-#include <ATen/cpu/vec/vec512/intrinsics.h>
+#include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec512/vec512_base.h>
 #if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
 #include <sleef.h>
@@ -28,7 +28,6 @@ static inline void cvtbf16_fp32(const __m512i& a, __m512& o1, __m512& o2) {
 }
 
 static inline __m512i cvtfp32_bf16(const __m512& a, const __m512& b) {
-  __m512i zero_vec = _mm512_set1_epi32(0);
   __m512i lo = _mm512_castps_si512(a);
   __m512i hi = _mm512_castps_si512(b);
   __m512i nan = _mm512_set1_epi32(0xffff);

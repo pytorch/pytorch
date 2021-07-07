@@ -20,7 +20,7 @@
 #include <type_traits>
 #include <bitset>
 
-#include <ATen/cpu/vec/vec256/intrinsics.h>
+#include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/native/Math.h>
 #include <ATen/NumericUtils.h>
 #include <c10/util/C++17.h>

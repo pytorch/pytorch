@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/cpu/vec/vec256/intrinsics.h>
+#include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec256/vec256_base.h>
 #include <ATen/cpu/vec/vec256/vsx/vsx_helpers.h>
 namespace at {

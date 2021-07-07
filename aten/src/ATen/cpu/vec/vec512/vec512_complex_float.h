@@ -4,7 +4,7 @@
 // See Note [Do not compile initializers with AVX]
 
 #include <c10/util/complex.h>
-#include <ATen/cpu/vec/vec512/intrinsics.h>
+#include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec512/vec512_base.h>
 #if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
 #include <sleef.h>

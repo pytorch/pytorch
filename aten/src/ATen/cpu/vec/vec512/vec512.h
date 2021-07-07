@@ -3,7 +3,7 @@
 // DO NOT DEFINE STATIC DATA IN THIS HEADER!
 // See Note [Do not compile initializers with AVX]
 
-#include <ATen/cpu/vec/vec512/intrinsics.h>
+#include <ATen/cpu/vec/intrinsics.h>
 
 #include <ATen/cpu/vec/vec512/vec512_base.h>
 #include <ATen/cpu/vec/vec512/vec512_float.h>
@@ -129,9 +129,6 @@ inline mask_gather(const Vectorized<float>& src, const float* base_addr,
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CONVERT ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-// Only works for inputs in the range: [-2^51, 2^51]
-// From: https://stackoverflow.com/a/41148578
-// We can revisit it if tests would nudge us to
 template<>
 Vectorized<int64_t>
 inline convert_to_int_of_same_size<double>(const Vectorized<double> &src) {
@@ -146,7 +143,6 @@ inline convert_to_int_of_same_size<float>(const Vectorized<float> &src) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ INTERLEAVE ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-// From https://stackoverflow.com/a/63862043
 template <>
 std::pair<Vectorized<double>, Vectorized<double>>
 inline interleave2<double>(const Vectorized<double>& a, const Vectorized<double>& b) {
