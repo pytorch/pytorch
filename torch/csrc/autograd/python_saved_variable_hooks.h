@@ -22,7 +22,7 @@ struct TORCH_API PySavedVariableHooks : public SavedVariableHooks {
       return THPVariable_Unpack(unpack_hook_(py::cast<py::object>(obj)).release().ptr());
     }
 
-    ~PySavedVariableHooks() override = default;
+    // ~PySavedVariableHooks() override = default;
 
   private:
     py::function pack_hook_;
