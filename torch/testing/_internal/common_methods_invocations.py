@@ -1644,6 +1644,21 @@ def sample_inputs_broadcast_to(op_info, device, dtype, requires_grad, **kwargs):
             make_tensor(size, device, dtype, low=None, high=None, requires_grad=requires_grad),
             args=(shape,)) for size, shape in test_cases)
 
+def sample_inputs_bitwise_and(op_info, device, dtype, requires_grad, **kwargs):
+    test_cases = (
+        (S, S, S),
+        (S,),
+        (),
+    )
+
+    sample_inputs = []
+    for size in test_cases:
+        tensor1 = make_tensor(size, device, dtype, requires_grad=requires_grad)
+        tensor2 = make_tensor(size, device, dtype, requires_grad=requires_grad)
+        sample_inputs.append(SampleInput(tensor1, args=(tensor2,)))
+
+    return tuple(sample_inputs)
+
 def sample_inputs_bitwise_shift(op_info, device, dtype, requires_grad, **kwargs):
     test_cases = (
         (S, S, S),
@@ -5115,6 +5130,10 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_broadcast_to),
+    OpInfo('bitwise_and',
+           dtypes=integral_types_and(torch.bool),
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_bitwise_and),
     UnaryUfuncInfo('bitwise_not',
                    ref=np.bitwise_not,
                    dtypes=integral_types_and(torch.bool),
