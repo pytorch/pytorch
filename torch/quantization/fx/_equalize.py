@@ -473,7 +473,7 @@ def scale_weight_functional(
     bias_node = None
     for node in op_node.args:
         # Find the node containing the weight values
-        if node.op == 'get_attr' and 'bias' in node.name:
+        if isinstance(node, Node) and node.op == 'get_attr' and 'bias' in node.name:
             bias_node = node
             break
     if bias_node is None:
