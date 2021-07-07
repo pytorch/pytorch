@@ -1,16 +1,24 @@
+{%- set exclude_test = exclude_test|default(false) -%}
+{%- block name -%}
 # Template is at:    .github/templates/linux_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
 name: Linux CI (!{{ build_environment }})
+{%- endblock %}
 
 on:
   # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
 {%- if on_pull_request %}
   pull_request:
 {%- endif %}
+{%- if is_scheduled %}
+  schedule:
+    - cron: !{{ is_scheduled }}
+{%- else %}
   push:
     branches:
       - master
       - release/*
+{%- endif %}
   workflow_dispatch:
 
 env:
@@ -96,7 +104,7 @@ jobs:
         run: |
           export IMAGE_NAME=${DOCKER_IMAGE_BASE#308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/}
           cd .circleci/docker && ./build_docker.sh
-
+{% block build +%}
   build:
     runs-on: linux.2xlarge
     needs: calculate-docker-image
@@ -158,7 +166,7 @@ jobs:
           COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
           export COMMIT_TIME
           pip3 install requests
-          python3 .circleci/scripts/upload_binary_size_to_scuba.py || exit 0
+          python3 tools/stats/upload_binary_size_to_scuba.py || exit 0
       - name: Chown workspace
         run: |
           # Ensure the working directory gets chowned back to the current user
@@ -190,29 +198,32 @@ jobs:
         run: |
           # Prune all of the docker images
           docker system prune -af
-
+{%- endblock %}
+{%- if not exclude_test %}
+{% block test +%}
   generate-test-matrix:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: ubuntu-18.04
     env:
+      TEST_RUNNER_TYPE: !{{ test_runner_type }}
+      ENABLE_MULTIGPU_TEST: !{{ enable_multigpu_test }}
       NUM_TEST_SHARDS: !{{ num_test_shards }}
+      MULTIGPU_RUNNER_TYPE: linux.16xlarge.nvidia.gpu
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
+      render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
     container:
       image: python:3.9
     steps:
+      - name: Install dependencies
+        run: pip install typing-extensions
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - name: Generating test matrix
         id: set-matrix
-        run: |
-          # outputting for debugging purposes
-          MATRIX=$(python .github/scripts/generate_pytorch_test_matrix.py)
-          echo "${MATRIX}"
-          echo "::set-output name=matrix::${MATRIX}"
+        run: .github/scripts/generate_pytorch_test_matrix.py
 
   test:
-    runs-on: !{{ test_runner_type }}
     needs:
       - calculate-docker-image
       - build
@@ -220,11 +231,13 @@ jobs:
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
       fail-fast: false
+    runs-on: ${{ matrix.runner }}
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
       JOB_BASE_NAME: !{{ build_environment }}-test
-      NUM_TEST_SHARDS: !{{ num_test_shards }}
-      TEST_CONFIG: ${{ matrix.test_config }}
+      TEST_CONFIG: ${{ matrix.config }}
+      SHARD_NUMBER: ${{ matrix.shard }}
+      NUM_TEST_SHARDS: ${{ matrix.num_shards }}
     steps:
       - name: Log in to ECR
         run: |
@@ -274,9 +287,12 @@ jobs:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Test PyTorch
         run: |
-          if [[ $NUM_TEST_SHARDS -eq 2 ]]; then
-            export SHARD_NUMBER=$TEST_CONFIG
+          if [[ $TEST_CONFIG == 'multigpu' ]]; then
+            TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
           else
+            TEST_COMMAND=.jenkins/pytorch/test.sh
+          fi
+          if [[ $NUM_TEST_SHARDS -ne 2 ]]; then
             export SHARD_NUMBER=0
           fi
           # TODO: Stop building test binaries as part of the build phase
@@ -291,6 +307,7 @@ jobs:
             -e SHARD_NUMBER \
             -e JOB_BASE_NAME \
             -e MAX_JOBS="$(nproc --ignore=2)" \
+            -e SCCACHE_BUCKET \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
@@ -300,7 +317,7 @@ jobs:
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}" \
-            sh -c 'sudo chown -R jenkins . && pip install dist/*.whl && .jenkins/pytorch/test.sh'
+            sh -c 'sudo chown -R jenkins . && pip install dist/*.whl && '$TEST_COMMAND
       - name: Chown workspace
         if: always()
         run: |
@@ -316,7 +333,16 @@ jobs:
         name: Store PyTorch Test Reports
         if: always()
         with:
-          name: test-reports
+          name: test-reports-${{ matrix.config }}
+          retention-days: 14
+          if-no-files-found: error
+          path:
+            test-reports-*.zip
+      - uses: seemethere/upload-artifact-s3@9d7ceb0ab39c2c88d93ef7792b27425b27d59162
+        name: Store PyTorch Test Reports on S3
+        if: always()
+        with:
+          name: test-reports-${{ matrix.config }}
           retention-days: 14
           if-no-files-found: error
           path:
@@ -328,7 +354,9 @@ jobs:
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
           # Prune all of the docker images
           docker system prune -af
-
+{% endblock %}
+{%- endif -%}
+{% block render_test_results +%}
   # this is a separate step from test because the log files from test are too
   # long: basically, GitHub tries to render all of the log files when you click
   # through an action causing extreme slowdown on actions that contain too many
@@ -337,8 +365,12 @@ jobs:
   render_test_results:
     if: always()
     needs:
+      - generate-test-matrix
       - test
     runs-on: ubuntu-18.04
+    strategy:
+      matrix: ${{ fromJson(needs.generate-test-matrix.outputs.render-matrix) }}
+      fail-fast: false
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
@@ -348,7 +380,7 @@ jobs:
       - uses: actions/download-artifact@v2
         name: Download PyTorch Test Reports
         with:
-          name: test-reports
+          name: test-reports-${{ matrix.config }}
           path: .
       - name: Unzip test reports
         run: |
@@ -384,6 +416,7 @@ jobs:
         run: |
           export PYTHONPATH=$PWD
           python tools/stats/print_test_stats.py --upload-to-s3 --compare-with-s3 test
+{%- endblock %}
   {%- if enable_doc_jobs %}
 
   pytorch_python_doc_build:
@@ -455,13 +488,13 @@ jobs:
           name: deploy
           retention-days: 14
           if-no-files-found: error
-          path: pytorch.github.io/docs/master
+          path: pytorch.github.io/docs/merge
       - name: Show Docs Preview URL (Click Me)
         if: github.event_name == 'pull_request'
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          echo "See rendered docs at https://d28slxzaq48q8t.cloudfront.net/$PR_NUMBER/"
+          echo "See rendered docs at https://docs-preview.pytorch.org/$PR_NUMBER/"
       - name: Archive artifacts into zip
         run: |
           zip -r pytorch_github_io.zip "${GITHUB_WORKSPACE}/pytorch.github.io"
