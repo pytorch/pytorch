@@ -6,7 +6,6 @@ from typing import Callable, Dict
 from torch.fx.node import Target, Node
 from torch.nn.modules.batchnorm import BatchNorm2d
 from torch.nn.modules.conv import Conv2d
-from math import floor
 
 _INFERENCE_RULES: Dict[Target, Callable] = {}
 
@@ -208,72 +207,72 @@ def bn2d_inference_rule(n: Node, module_instance):
     else:
         raise TypeError(f'Cannot apply {module_instance} with input type {arg_type} and existing type {n.type} on {n}')
 
-def calculate_hout(h_in, module_instance):
 
+def calculate(d_in, module_instance, index):
+    """
+    For calculating h_in and w_out.
+    """
     padding = (module_instance.padding, module_instance.padding) \
         if isinstance(module_instance.padding, int) else module_instance.padding
-    kernel_size = (module_instance.kernel_size, module_instance.kernel_size) \
+    kernel_size = (module_instance.kernel_size, module_instance.kernel_size)\
         if isinstance(module_instance.kernel_size, int) else module_instance.kernel_size
     stride = (module_instance.stride, module_instance.stride) \
         if isinstance(module_instance.stride, int) else module_instance.stride
-    dilation = (module_instance.dilation, module_instance.dilation) \
+    dilation = (module_instance.dilation, module_instance.dilation)\
         if isinstance(module_instance.dilation, int) else module_instance.dilation
 
-
-    if h_in == Dyn:
+    if d_in == Dyn:
         return Dyn
 
-    elif isinstance(h_in, int):
-        h_out = floor((h_in + (2 * padding[0] - dilation[0] *
-                               (kernel_size[0] - 1) - 1)) / stride[0]) + 1
-        return h_out
-    else:
-        raise TypeError(f'{h_in} must be a number or Dyn')
+    elif isinstance(d_in, int):
+        n = d_in + 2 * padding[index] - \
+            dilation[index] * \
+            (kernel_size[index] - 1) - 1
 
-def calculate_wout(w_in, module_instance):
-    padding = (module_instance.padding, module_instance.padding) \
-        if isinstance(module_instance.padding, int) else module_instance.padding
-    kernel_size = (module_instance.kernel_size, module_instance.kernel_size) \
-        if isinstance(module_instance.kernel_size, int) else module_instance.kernel_size
-    stride = (module_instance.stride, module_instance.stride) \
-        if isinstance(module_instance.stride, int) else module_instance.stride
-    dilation = (module_instance.dilation, module_instance.dilation) \
-        if isinstance(module_instance.dilation, int) else module_instance.dilation
+        return (n // stride[0]) + 1
 
-    if w_in == Dyn:
-        return Dyn
-
-    elif isinstance(w_in, int):
-        w_out = floor((w_in + (2 * padding[1] - dilation[1] *
-                               (kernel_size[1] - 1) - 1)) /
-                      stride[1]) + 1
-        return w_out
-    else:
-        raise TypeError(f'{w_in} in {module_instance} must be a number or Dyn')
+def get_greatest_upper_bound(type1, type2):
+    """
+    Get the most precise type that's consistent with the given types
+    """
+    if type1 == Dyn:
+        return type2
+    elif type2 == Dyn:
+        return type1
+    elif isinstance(type1, TensorType) and isinstance(type2, TensorType):
+        assert len(type1.__args__) == len(type2.__args__)
+        gub = [t1 if is_more_precise(t1, t2) else t2 for (t1, t2) in zip(type1.__args__, type2.__args__)]
+        return TensorType(tuple(gub))
 
 @register_inference_rule(Conv2d)
 def conv2d_inference_rule(n: Node, module_instance):
+    """
+    Given a Conv2D instance and a node check the following conditions:
+    - the input type can be expanded to a size 4 tensor: t =  (x_1, x_2, H, W)
+    - the current node type can be expanded to a size 4 tensor: t' =  (x_1', x_2', x_3', x_4')
+    - x_2 is consistent with the module's in_channels
+    - let o = (x_1, out_channels, H_out, W_out)
+    then the outout is the greatest upper bound of o and the existing node type t'.
+    """
     assert isinstance(n.args[0], Node)
     n.args[0].type = expand_to_tensor_dim(n.args[0].type, 4)
     arg_type = n.args[0].type
-    n.type = expand_to_tensor_dim(n.type, 4)
-    if is_consistent(arg_type.__args__[1], module_instance.in_channels) and \
-            is_consistent(n.type.__args__[1], module_instance.in_channels) and \
-            is_consistent(arg_type, n.type):
+    curr_node_type = expand_to_tensor_dim(n.type, 4)
 
+    if is_consistent(arg_type.__args__[1], module_instance.in_channels):
         w_in = arg_type.__args__[3]
         h_in = arg_type.__args__[2]
-
-        h_out = calculate_hout(h_in, module_instance)
-
-        w_out = calculate_wout(w_in, module_instance)
-
-        # todo backwards propagation
-
+        h_out = calculate(h_in, module_instance, 0)
+        w_out = calculate(w_in, module_instance, 1)
         new_type = TensorType((arg_type.__args__[0], module_instance.out_channels, h_out, w_out))
-        n.type = new_type
 
-        return n.type
+        if not is_consistent(new_type, curr_node_type):
+            raise TypeError(f'Inconsistent types {new_type} and {curr_node_type}')
+        else:
+            gub = get_greatest_upper_bound(new_type, curr_node_type)
+            n.type = gub
+            return n.type
+
     else:
         raise TypeError(f'Cannot apply {module_instance} with input type { arg_type} and existing type {n.type} on {n}')
 
@@ -295,8 +294,10 @@ def maxpool2d_check(typ, module_instance):
     if len(new_type_list) == 4 or len(new_type_list) == 3:
         w_in = new_type_list[-1]
         h_in = new_type_list[-2]
-        h_out = calculate_hout(h_in, module_instance)
-        w_out = calculate_wout(w_in, module_instance)
+
+        h_out = calculate(h_in, module_instance, 0)
+        w_out = calculate(w_in, module_instance, 1)
+
         new_type_list[-1] = w_out
         new_type_list[-2] = h_out
         return TensorType(tuple(new_type_list))
