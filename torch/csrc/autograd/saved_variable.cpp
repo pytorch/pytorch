@@ -138,7 +138,7 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   // they still share the same storage. This works only because we never call
   // in-place functions on unpacked variables.
   Variable var = make_variable(data_, Edge(std::move(grad_fn), output_nr_));
-  impl::set_version_counter(var, saved_version_);
+  impl::set_version_counter(var, version_counter_);
 
   // NB: var here is never a view so there is no need to make anything special
   // for the case where the saved Tensor was a view. This whole argument relies
@@ -151,6 +151,22 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   }
 
   return var;
+}
+
+void SavedVariable::register_hooks() {
+  if (!data_.defined()) {
+    if (!was_default_constructed_) {
+      TORCH_CHECK(false,
+        "Calling register_hooks on a saved tensor after it has been freed. "
+        "Saved intermediate values of the graph are freed when you call "
+        ".backward() or autograd.grad(). Specify retain_graph=True if you "
+        "need to backward through the graph a second time or if you need to "
+        "access saved variables after calling backward.");
+    } else {
+      TORCH_CHECK(false,
+        "Calling register_hooks on a saved tensor with value None is forbidden");
+    }
+  }
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)

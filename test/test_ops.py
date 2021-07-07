@@ -8,9 +8,9 @@ from torch.testing import \
     (FileCheck, floating_and_complex_types_and, get_all_dtypes)
 from torch.testing._internal.common_utils import \
     (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor,
-     gradcheck, gradgradcheck, IS_PYTORCH_CI)
+     gradcheck, gradgradcheck, IS_IN_CI, suppress_warnings)
 from torch.testing._internal.common_methods_invocations import \
-    (op_db,)
+    (op_db, _NOTHING, UnaryUfuncInfo, SpectralFuncInfo)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
@@ -24,6 +24,12 @@ import torch.testing._internal.opinfo_helper as opinfo_helper
 _variant_ops = partial(ops, dtypes=OpDTypes.supported,
                        allowed_dtypes=(torch.float, torch.cfloat))
 
+# Get names of all the operators which have ref in their entry in OpInfo (testing infra)
+#   except for Unary Ufuncs (separately implemented in test/test_unary_ufuncs.py)
+#   and Spectral Functions (separately implemented for only 1D as of now, in test/test_spectral_ops.py)
+_ref_test_ops = list(filter(lambda op: not isinstance(op, (UnaryUfuncInfo, SpectralFuncInfo)) and
+                     op.ref is not None and op.ref is not _NOTHING, op_db))
+
 
 # Tests that apply to all operators and aren't related to any particular
 #   system
@@ -35,7 +41,7 @@ class TestCommon(TestCase):
     def tearDownClass(cls):
         super().tearDownClass()
 
-        if IS_PYTORCH_CI:
+        if IS_IN_CI:
             err_msg = ("The operator(s) below is(are) using dynamic_dtypes in the OpInfo entries."
                        "This is OK for testing, but be sure to set the dtypes manually before landing your PR!")
             # Assure no opinfo entry has dynamic_dtypes
@@ -51,7 +57,7 @@ class TestCommon(TestCase):
     @skipCUDAIfRocm
     @onlyOnCPUAndCUDA
     @ops(op_db, dtypes=OpDTypes.none)
-    def test_dtypes(self, device, dtype, op):
+    def test_dtypes(self, device, op):
         # dtypes to try to backward in
         allowed_backward_dtypes = floating_and_complex_types_and(torch.bfloat16, torch.float16)
 
@@ -164,6 +170,16 @@ class TestCommon(TestCase):
             msg += "The following backward dtypes should be removed from the OpInfo: {0}.".format(claimed_but_unsupported)
 
         self.assertEqual(supported_backward_dtypes, claimed_backward_supported, msg=msg)
+
+    # Tests that the function and its (ndarray-accepting) reference produce the same
+    #   values on the tensors from sample_inputs func for the corresponding op.
+    @onlyOnCPUAndCUDA
+    @suppress_warnings
+    @ops(_ref_test_ops, allowed_dtypes=(torch.float32, torch.long))
+    def test_reference_testing(self, device, dtype, op):
+        sample_inputs = op.sample_inputs(device, dtype)
+        for sample_input in sample_inputs:
+            self.compare_with_reference(op, op.ref, sample_input)
 
     # Validates ops implement the correct out= behavior
     # See https://github.com/pytorch/pytorch/wiki/Developer-FAQ#how-does-out-work-in-pytorch

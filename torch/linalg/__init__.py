@@ -1212,7 +1212,7 @@ If :attr:`A` is complex valued, it computes the norm of :attr:`A`\ `.abs()`
 
 Supports input of float, double, cfloat and cdouble dtypes.
 
-This function does not necessarily treat multidimensonal attr:`A` as a batch of
+This function does not necessarily treat multidimensonal :attr:`A` as a batch of
 vectors, instead:
 
 - If :attr:`dim`\ `= None`, :attr:`A` will be flattened before the norm is computed.
@@ -1223,15 +1223,15 @@ This behavior is for consistency with :func:`torch.linalg.norm`.
 
 :attr:`ord` defines the vector norm that is computed. The following norms are supported:
 
-======================   ========================================================
+======================   ===============================
 :attr:`ord`              vector norm
-======================   ========================================================
+======================   ===============================
 `2` (default)            `2`-norm (see below)
 `inf`                    `max(abs(x))`
 `-inf`                   `min(abs(x))`
 `0`                      `sum(x != 0)`
 other `int` or `float`   `sum(abs(x)^{ord})^{(1 / ord)}`
-======================   ========================================================
+======================   ===============================
 
 where `inf` refers to `float('inf')`, NumPy's `inf` object, or any equivalent object.
 

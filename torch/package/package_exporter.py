@@ -16,7 +16,6 @@ from typing import (
     List,
     Optional,
     Sequence,
-    Set,
     Union,
 )
 from urllib.parse import quote
@@ -192,7 +191,6 @@ class PackageExporter:
         self.zip_file = torch._C.PyTorchFileWriter(f)
         self.zip_file.set_min_version(6)
         self.serialized_reduces: Dict[int, Any] = {}
-        self.serialized_storages: Set[str] = set()
 
         # A graph tracking all the modules and pickle objects added to this
         # package and the dependencies between them.
@@ -202,6 +200,7 @@ class PackageExporter:
         self.dependency_graph = DiGraph()
         self.verbose = verbose
         self.script_module_serializer = torch._C.ScriptModuleSerializer(self.zip_file)
+        self.storage_context = self.script_module_serializer.storage_context()
 
         # These are OrderedDicts for compatibility with RemovableHandle.
         # Generic OrderedDict type annotations are not present until 3.7.
@@ -222,6 +221,60 @@ class PackageExporter:
 
         self.patterns: Dict[GlobGroup, _PatternInfo] = {}
         self._unique_id = 0
+
+    def save_source_file(
+        self, module_name: str, file_or_directory: str, dependencies=True
+    ):
+        """Adds the local file system ``file_or_directory`` to the source package to provide the code
+        for ``module_name``.
+
+        Args:
+            module_name (str): e.g. ``"my_package.my_subpackage"``, code will be saved to provide code for this package.
+            file_or_directory (str): the path to a file or directory of code. When a directory, all python files in the directory
+                are recursively copied using :meth:`save_source_file`. If a file is named ``"/__init__.py"`` the code is treated
+                as a package.
+            dependencies (bool, optional): If ``True``, we scan the source for dependencies.
+        """
+        path = Path(file_or_directory)
+        if path.is_dir():
+            to_save = []  # list of tuples with arguments to save_source_string
+            module_path = module_name.replace(".", "/")
+            for filename in path.glob("**/*.py"):
+                relative_path = filename.relative_to(path).as_posix()
+                archivename = module_path + "/" + relative_path
+                submodule_name = None
+                if filename.name == "__init__.py":
+                    submodule_name = archivename[: -len("/__init__.py")].replace(
+                        "/", "."
+                    )
+                    is_package = True
+                else:
+                    submodule_name = archivename[: -len(".py")].replace("/", ".")
+                    is_package = False
+
+                # we delay the call to save_source_string so that we record all the source files
+                # being provided by this directory structure _before_ attempting to resolve the dependencies
+                # on the source. This makes sure we don't try to copy over modules that will just get
+                # overwritten by this directory blob
+                to_save.append(
+                    (
+                        submodule_name,
+                        _read_file(str(filename)),
+                        is_package,
+                        dependencies,
+                    )
+                )
+
+            for item in to_save:
+                self.save_source_string(*item)
+        else:
+            is_package = path.name == "__init__.py"
+            self.save_source_string(
+                module_name,
+                _read_file(file_or_directory),
+                is_package,
+                dependencies,
+            )
 
     def get_unique_id(self) -> str:
         """Get an id. This id is guaranteed to only be handed out once for this package."""
@@ -722,20 +775,19 @@ node [shape=box];
     def _persistent_id(self, obj):
         if torch.is_storage(obj):
             storage_type = normalize_storage_type(type(obj))
-            obj_key = str(obj._cdata)
             location = location_tag(obj)
-            name = f".data/{obj_key}.storage"
 
-            if name not in self.serialized_storages:
-                # check to see if storage was previously serialized
-                serialized_files = self.zip_file.get_all_written_records()
-                if name not in serialized_files:
-                    if obj.device.type != "cpu":
-                        obj = obj.cpu()
-                    num_bytes = obj.size() * obj.element_size()
-                    self.zip_file.write_record(name, obj.data_ptr(), num_bytes)
-                self.serialized_storages.add(name)
-            return ("storage", storage_type, obj_key, location, obj.size())
+            # serialize storage if not already written
+            storage_present = self.storage_context.has_storage(obj)
+            storage_id = self.storage_context.get_or_add_storage(obj)
+            if not storage_present:
+                if obj.device.type != "cpu":
+                    obj = obj.cpu()
+                num_bytes = obj.size() * obj.element_size()
+                self.zip_file.write_record(
+                    f".data/{storage_id}.storage", obj.data_ptr(), num_bytes
+                )
+            return ("storage", storage_type, storage_id, location, obj.size())
 
         if hasattr(obj, "__reduce_package__"):
             if _gate_torchscript_serialization and isinstance(

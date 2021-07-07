@@ -216,6 +216,18 @@ if(USE_FFTW OR NOT MKL_FOUND)
   endif()
 endif()
 
+# --- [ PocketFFT
+set(AT_POCKETFFT_ENABLED 0)
+if(NOT MKL_FOUND)
+  find_path(POCKETFFT_INCLUDE_DIR NAMES pocketfft_hdronly.h
+            PATHS /usr/local/include
+            PATHS $ENV{POCKETFFT_HOME}
+           )
+  if(POCKETFFT_INCLUDE_DIR)
+    set(AT_POCKETFFT_ENABLED 1)
+  endif()
+endif()
+
 # ---[ Dependencies
 # NNPACK and family (QNNPACK, PYTORCH_QNNPACK, and XNNPACK) can download and
 # compile their dependencies in isolation as part of their build.  These dependencies
@@ -1377,6 +1389,13 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
     add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe)
 
     list(APPEND Caffe2_DEPENDENCY_LIBS tensorpipe)
+    if(USE_CUDA)
+      list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS tensorpipe_cuda)
+    elseif(USE_ROCM)
+      message(WARNING "TensorPipe doesn't yet support ROCm")
+      # Not yet...
+      # list(APPEND Caffe2_HIP_DEPENDENCY_LIBS tensorpipe_hip)
+    endif()
   endif()
 endif()
 
@@ -1520,6 +1539,8 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
 endif()
 
 # --[ ATen checks
+set(USE_LAPACK 0)
+
 if(NOT INTERN_BUILD_MOBILE)
   set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
   set(TORCH_NVCC_FLAGS $ENV{TORCH_NVCC_FLAGS})
@@ -1702,8 +1723,6 @@ if(NOT INTERN_BUILD_MOBILE)
   if(LAPACK_FOUND)
     set(USE_LAPACK 1)
     list(APPEND Caffe2_PRIVATE_DEPENDENCY_LIBS ${LAPACK_LIBRARIES})
-  else()
-    set(USE_LAPACK 0)
   endif()
 
   if(NOT USE_CUDA)
