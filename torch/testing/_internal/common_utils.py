@@ -1503,21 +1503,7 @@ class TestCase(expecttest.TestCase):
 
         # Tensor x Tensor
         elif isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
-            if x.dtype == torch.bool and y.dtype == torch.bool:
-                # TODO: remove this special case in favor of calling torch.testing.assert_close directly
-                #  when https://github.com/pytorch/pytorch/pull/60536 has landed
-                result, msg = self._compareTensors(
-                    x,
-                    y,
-                    atol=atol,
-                    rtol=rtol,
-                    exact_dtype=exact_dtype,
-                    exact_device=exact_device,
-                    exact_stride=exact_stride,
-                )
-                self.assertTrue(result, msg=msg)
-            else:
-                assert_close_(x, y)
+            assert_close_(x, y)
         elif isinstance(x, (np.ndarray, torch.Tensor)) or isinstance(y, (np.ndarray, torch.Tensor)):
             def maybe_to_tensor(a: Union[np.ndarray, torch.Tensor]) -> Union[np.ndarray, torch.Tensor]:
                 if not isinstance(a, np.ndarray):
