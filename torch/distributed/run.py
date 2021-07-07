@@ -584,7 +584,7 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
     if not use_env:
         log.warning(
             "--use_env is deprecated and will be removed in future releases.\n"
-            " Please read local_rank from `os.environ('LOCAL_RANK')` instead."
+            " Please read local_rank from `os.environ['LOCAL_RANK']` instead."
         )
         cmd_args.append(f"--local_rank={macros.local_rank}")
     cmd_args.extend(args.training_script_args)
