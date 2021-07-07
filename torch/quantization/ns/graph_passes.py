@@ -62,7 +62,7 @@ def _insert_logger_after_node(
         'call_module', logger_node_name, (node,), {})
     return logger_node
 
-def remove_observers_add_loggers(
+def add_loggers_to_model(
     gm: GraphModule,
     node_to_instrument_inputs_to_ref_node_name: Dict[Node, str],
     node_to_instrument_outputs_to_ref_node_name: Dict[Node, str],
@@ -70,7 +70,7 @@ def remove_observers_add_loggers(
     model_name: str,
 ) -> GraphModule:
     """
-    Takes the graph of gm, removes all observers, adds loggers to the output
+    Takes the graph of gm, adds loggers to the output
     of each node in nodes_to_instrument. Returns a GraphModule with the new
     graph.
     """
@@ -87,11 +87,7 @@ def remove_observers_add_loggers(
             new_graph.output(map_arg(node.args[0], load_arg))
             continue
 
-        if node.op == 'call_module' and is_activation_post_process(modules[node.target]):
-            # remove activation post process node
-            env[node.name] = env[node.args[0].name]
-
-        elif (
+        if (
             (node in node_to_instrument_inputs_to_ref_node_name) or
             (node in node_to_instrument_outputs_to_ref_node_name)
         ):
@@ -553,16 +549,10 @@ def create_a_shadows_b(
             continue
 
         # calculate the flags to determine what to do with this node
-        node_b_is_observer = \
-            node_b.op == 'call_module' and is_activation_post_process(modules[node_b.target])
         node_b_is_start_node = node_b in start_node_b_to_matched_subgraph_a_and_name
         node_b_is_end_node = node_b in end_node_b_to_matched_subgraph_a_and_name
 
-        if node_b_is_observer:
-            # remove activation post process node
-            env_c[node_b.name] = env_c[node_b.args[0].name]
-
-        elif (node_b_is_start_node or node_b_is_end_node):
+        if (node_b_is_start_node or node_b_is_end_node):
 
             if node_b_is_start_node:
                 subgraph_a, ref_name = \

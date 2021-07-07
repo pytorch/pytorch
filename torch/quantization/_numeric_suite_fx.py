@@ -18,7 +18,7 @@ from .ns.weight_utils import (
 )
 
 from .ns.graph_passes import (
-    remove_observers_add_loggers,
+    add_loggers_to_model,
     create_a_shadows_b,
 )
 
@@ -217,7 +217,7 @@ def _add_loggers_one_model(
     for node, ref_name in nodes_and_names_to_instrument_outputs:
         node_to_instrument_outputs_to_ref_name[node] = ref_name
 
-    model = remove_observers_add_loggers(
+    model = add_loggers_to_model(
         model, node_to_instrument_inputs_to_ref_name,
         node_to_instrument_outputs_to_ref_name, logger_cls, model_name)
     return model

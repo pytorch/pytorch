@@ -281,7 +281,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
             base_name_to_sets_of_related_ops, nn.Conv2d) + '_0'
 
         expected_types = {
-            conv_name_0: ((nn.Conv2d, nn.Conv2d), (nnq.Conv2d, nnq.Conv2d)),
+            conv_name_0: ((nn.Conv2d, torch.quantization.MinMaxObserver), (nnq.Conv2d, nnq.Conv2d)),
         }
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
@@ -311,7 +311,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
 
         expected_types = {
             linear_name_0:
-                ((F.linear, F.linear), (toq.linear, toq.linear))
+                ((F.linear, torch.quantization.MinMaxObserver), (toq.linear, toq.linear))
         }
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
@@ -331,7 +331,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
 
         expected_types = {
             linear_name_0:
-                ((F.linear, F.relu), (toq.linear_relu, toq.linear_relu)),
+                ((F.linear, torch.quantization.MinMaxObserver), (toq.linear_relu, toq.linear_relu)),
         }
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
@@ -507,10 +507,10 @@ class TestFXGraphMatcher(QuantizationTestCase):
         # all of these should be matched
         expected_types = {
             conv_name_1:
-                ((nn.Conv2d, nn.Conv2d), (nnq.Conv2d, nnq.Conv2d)),
+                ((nn.Conv2d, torch.quantization.MinMaxObserver), (nnq.Conv2d, nnq.Conv2d)),
             conv_name_0:
-                ((nn.Conv2d, nn.Conv2d), (nn.Conv2d, nn.Conv2d)),
-            mul_name_0: ((torch.mul, torch.mul), (toq.mul, toq.mul)),
+                ((nn.Conv2d, torch.quantization.MinMaxObserver), (nn.Conv2d, nn.Conv2d)),
+            mul_name_0: ((torch.mul, torch.quantization.MinMaxObserver), (toq.mul, toq.mul)),
             relu_name_0: ((F.relu, F.relu), (F.relu, F.relu)),
             sigmoid_name_0:
                 ((torch.sigmoid, torch.sigmoid), (torch.sigmoid, torch.sigmoid)),
@@ -715,7 +715,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
 
         expected_types = {
             hardswish_name_0:
-                ((F.hardswish, F.hardswish), (_wrapped_hardswish, _wrapped_hardswish)),
+                ((F.hardswish, torch.quantization.MinMaxObserver), (_wrapped_hardswish, _wrapped_hardswish)),
         }
         self.assert_types_for_matched_subgraph_pairs(
             results, expected_types, m1, m2)
@@ -1672,6 +1672,42 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             mp_shadows_mq, OutputLogger, 'fp32')
         self.assertTrue(len(act_compare_dict) == 4)
         self.assert_ns_compare_dict_valid(act_compare_dict)
+
+    @skipIfNoFBGEMM
+    def test_loggers_preserve_qat_numerics(self):
+        m = nn.Sequential(nn.Conv2d(1, 1, 1), nn.Conv2d(1, 1, 1))
+        qconfig_dict = {'': torch.quantization.get_default_qat_qconfig('fbgemm')}
+        mp = prepare_qat_fx(m, qconfig_dict)
+        mp(torch.randn(1, 1, 1, 1))
+        mc = convert_fx(copy.deepcopy(mp))
+        mp.apply(torch.quantization.disable_observer)
+
+        datum = torch.randn(1, 1, 1, 1)
+        ref_fp32 = mp(datum)
+        ref_int8 = mc(datum)
+
+        mp_ns, mc_ns = add_loggers('fp32', mp, 'int8', mc, OutputLogger)
+        ref_fp32_ns = mp_ns(datum)
+        ref_int8_ns = mc_ns(datum)
+        self.assertTrue(torch.allclose(ref_fp32, ref_fp32_ns))
+        self.assertTrue(torch.allclose(ref_int8, ref_int8_ns))
+
+    @skipIfNoFBGEMM
+    def test_shadow_loggers_preserve_qat_numerics(self):
+        m = nn.Sequential(nn.Conv2d(1, 1, 1), nn.Conv2d(1, 1, 1))
+        qconfig_dict = {'': torch.quantization.get_default_qat_qconfig('fbgemm')}
+        mp = prepare_qat_fx(m, qconfig_dict)
+        mp(torch.randn(1, 1, 1, 1))
+        mc = convert_fx(copy.deepcopy(mp))
+        mp.apply(torch.quantization.disable_observer)
+
+        datum = torch.randn(1, 1, 1, 1)
+        ref_fp32 = mp(datum)
+        ref_int8 = mc(datum)
+
+        mc_shadows_mp = add_shadow_loggers('int8', mc, 'fp32', mp, OutputLogger)
+        ref_shadow = mc_shadows_mp(datum)
+        self.assertTrue(torch.allclose(ref_fp32, ref_shadow))
 
 class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
     """

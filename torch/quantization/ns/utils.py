@@ -9,6 +9,10 @@ toq = torch.ops.quantized
 from torch.fx import GraphModule
 from torch.fx.graph import Node
 from torch.quantization.quantize import is_activation_post_process
+from torch.quantization import (
+    ObserverBase,
+    FakeQuantizeBase,
+)
 
 from .ns_types import NSNodeTargetType, NSResultsType
 
@@ -72,9 +76,9 @@ def get_node_first_input_and_output_type(
         assert node.op == 'call_module'
         assert isinstance(node.target, str)
         mod = getattr_from_fqn(gm, node.target)
-        if isinstance(mod, logger_cls):  # type: ignore[arg-type]
-            # A logger's input and output type is the output type of
-            # the preceding node.
+        if isinstance(mod, (logger_cls, ObserverBase, FakeQuantizeBase)):  # type: ignore[arg-type]
+            # A logger or observer's input and output type is the output
+            # type of the preceding node.
             first_arg = node.args[0]
             assert isinstance(first_arg, Node)
             _prev_node_input_type, prev_node_output_type = \
