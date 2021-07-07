@@ -31,7 +31,6 @@ from torch.quantization.quantization_mappings import (
     get_default_float_to_quantized_operator_mappings,
 )
 from torch.testing._internal.common_quantization import NodeSpec as ns
-from torch.testing._internal.common_quantized import override_qengines
 from torch.quantization.fx.pattern_utils import get_default_quant_patterns
 import torch.quantization.fx.quantization_patterns as qp
 from torch.quantization.ns.pattern_utils import (
@@ -266,12 +265,10 @@ def _wrapped_sigmoid(x):
 
 class TestFXGraphMatcher(QuantizationTestCase):
 
-    @override_qengines
+    @skipIfNoFBGEMM
     def test_simple_mod(self):
         m = nn.Sequential(nn.Conv2d(1, 1, 1)).eval()
         mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
-        # TODO(future PR): prevent the need for copying here, we can copy the
-        # modules but should reuse the underlying tensors
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
         results = get_matching_subgraph_pairs(mp, mq)
@@ -285,7 +282,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
         }
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
-    @override_qengines
+    @skipIfNoFBGEMM
     def test_simple_fun(self):
         class M(nn.Module):
             def __init__(self):
@@ -299,8 +296,6 @@ class TestFXGraphMatcher(QuantizationTestCase):
 
         m = M().eval()
         mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
-        # TODO(future PR): prevent the need for copying here, we can copy the
-        # modules but should reuse the underlying tensors
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
         results = get_matching_subgraph_pairs(mp, mq)
@@ -315,12 +310,10 @@ class TestFXGraphMatcher(QuantizationTestCase):
         }
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
-    @override_qengines
+    @skipIfNoFBGEMM
     def test_simple_fusion(self):
         m = LinearReluFunctional().eval()
         mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
-        # TODO(future PR): prevent the need for copying here, we can copy the
-        # modules but should reuse the underlying tensors
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
         results = get_matching_subgraph_pairs(mp, mq)
@@ -335,7 +328,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
         }
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
-    @override_qengines
+    @skipIfNoFBGEMM
     def test_simple_mod_multi(self):
         m = nn.Sequential(
             nn.Sequential(
@@ -344,14 +337,12 @@ class TestFXGraphMatcher(QuantizationTestCase):
             nn.Conv2d(1, 1, 1),
         ).eval()
         mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
-        # TODO(future PR): prevent the need for copying here, we can copy the
-        # modules but should reuse the underlying tensors
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
         # assume success if no exceptions
         results = get_matching_subgraph_pairs(mp, mq)
 
-    @override_qengines
+    @skipIfNoFBGEMM
     def test_simple_tensor_ops(self):
         class M(nn.Module):
             def __init__(self):
@@ -363,14 +354,12 @@ class TestFXGraphMatcher(QuantizationTestCase):
 
         m = M().eval()
         mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
-        # TODO(future PR): prevent the need for copying here, we can copy the
-        # modules but should reuse the underlying tensors
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
         # assume success if no exceptions
         results = get_matching_subgraph_pairs(mp, mq)
 
-    @override_qengines
+    @skipIfNoFBGEMM
     def test_matching_failure_node_count(self):
         # verify that matching graphs with matching node types but
         # different counts of matchable nodes fails
@@ -381,7 +370,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
         with self.assertRaises(GraphMatchingException) as ex:
             results = get_matching_subgraph_pairs(mp1, mp2)
 
-    @override_qengines
+    @skipIfNoFBGEMM
     def test_matching_failure_node_type(self):
         # verify that matching graphs with non-matching node types fails
         m1 = nn.Sequential(nn.Conv2d(1, 1, 1)).eval()
@@ -391,7 +380,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
         with self.assertRaises(GraphMatchingException) as ex:
             results = get_matching_subgraph_pairs(mp1, mp2)
 
-    @override_qengines
+    @skipIfNoFBGEMM
     def test_nodes_before_cat(self):
         # verify that nodes before cat get matched
         class M(nn.Module):
@@ -406,8 +395,6 @@ class TestFXGraphMatcher(QuantizationTestCase):
 
         m = M().eval()
         mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
-        # TODO(future PR): prevent the need for copying here, we can copy the
-        # modules but should reuse the underlying tensors
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
         results = get_matching_subgraph_pairs(mp, mq)
@@ -427,7 +414,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
         }
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
-    @override_qengines
+    @skipIfNoFBGEMM
     def test_dict_return_type(self):
         # verify that we can traverse up nodes which return dictionaries
         class M(nn.Module):
@@ -443,8 +430,6 @@ class TestFXGraphMatcher(QuantizationTestCase):
 
         m = M().eval()
         mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
-        # TODO(future PR): prevent the need for copying here, we can copy the
-        # modules but should reuse the underlying tensors
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
         results = get_matching_subgraph_pairs(mp, mq)
@@ -723,7 +708,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
 
 class TestFXGraphMatcherModels(QuantizationTestCase):
 
-    @override_qengines
+    @skipIfNoFBGEMM
     @skip_if_no_torchvision
     def test_mobilenet_v2(self):
         # verify that mobilenetv2 graph is able to be matched
@@ -737,7 +722,7 @@ class TestFXGraphMatcherModels(QuantizationTestCase):
         # assume success if no exceptions
         results_mp_mq = get_matching_subgraph_pairs(mp, mq)
 
-    @override_qengines
+    @skipIfNoFBGEMM
     @skip_if_no_torchvision
     def test_mobilenet_v2_qat(self):
         # verify that mobilenetv2 graph is able to be matched
@@ -748,8 +733,6 @@ class TestFXGraphMatcherModels(QuantizationTestCase):
             {'': torch.quantization.get_default_qat_qconfig('fbgemm')})
         # assume success if no exceptions
         results_m_mp = get_matching_subgraph_pairs(torch.fx.symbolic_trace(m), mp)
-        # TODO(future PR): prevent the need for copying here, we can copy the
-        # modules but should reuse the underlying tensors
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
         # assume success if no exceptions
@@ -763,8 +746,6 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
         if qconfig_dict is None:
             qconfig_dict = {'': torch.quantization.default_qconfig}
         mp = prepare_fn(copy.deepcopy(m), qconfig_dict)
-        # TODO(future PR): prevent the need for copying here, we can copy the
-        # modules but should reuse the underlying tensors
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
 
@@ -793,8 +774,6 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
             m.train()
         mp = prepare_fn(copy.deepcopy(m), qconfig_dict)
         mp(*data)
-        # TODO(future PR): prevent the need for copying here, we can copy the
-        # modules but should reuse the underlying tensors
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
 
@@ -851,8 +830,6 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
             m.train()
         mp = prepare_fn(copy.deepcopy(m), qconfig_dict)
         mp(*data)
-        # TODO(future PR): prevent the need for copying here, we can copy the
-        # modules but should reuse the underlying tensors
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
 
