@@ -283,8 +283,9 @@ TAGS
 # ccls file
 .ccls-cache/
 
-# clang-format storage location used by apply_clang_format.py
+# clang tooling storage location
 .clang-format-bin
+.clang-tidy-bin
 
 # clangd background index
 .clangd/
@@ -305,3 +306,6 @@ bazel-*
 
 # core dump files
 core.*
+
+# Generated if you use the pre-commit script for clang-tidy
+pr.diff
