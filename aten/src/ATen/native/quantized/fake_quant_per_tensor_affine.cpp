@@ -48,7 +48,7 @@ Tensor fake_quantize_per_tensor_affine(
     const Tensor& zero_point,
     int64_t quant_min,
     int64_t quant_max) {
-  const auto res = at::fake_quantize_per_tensor_affine_cachemask_tensor_qparams(
+  const auto res = at::_fake_quantize_per_tensor_affine_cachemask_tensor_qparams(
       self, scale, zero_point, quant_min, quant_max);
   return std::get<0>(res);
 }
@@ -92,7 +92,7 @@ std::tuple<Tensor, Tensor> fake_quantize_per_tensor_affine_cachemask(
   return std::make_tuple(Y, mask);
 }
 
-std::tuple<Tensor, Tensor> fake_quantize_per_tensor_affine_cachemask_tensor_qparams(
+std::tuple<Tensor, Tensor> _fake_quantize_per_tensor_affine_cachemask_tensor_qparams(
     const Tensor& self,
     const Tensor& scale,
     const Tensor& zero_point,
