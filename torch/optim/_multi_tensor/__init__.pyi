@@ -8,3 +8,4 @@ from .rprop import Rprop as Rprop
 from .asgd import ASGD as ASGD
 from .adamax import Adamax as Adamax
 from .adadelta import Adadelta as Adadelta
+from .adagrad import Adagrad as Adagrad
