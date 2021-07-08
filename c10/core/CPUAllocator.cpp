@@ -103,10 +103,7 @@ void free_cpu(void* data) {
 }
 
 struct C10_API DefaultCPUAllocator final : at::Allocator {
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  DefaultCPUAllocator() {}
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  ~DefaultCPUAllocator() override {}
+  DefaultCPUAllocator() = default;
   at::DataPtr allocate(size_t nbytes) const override {
     void* data = alloc_cpu(nbytes);
     profiledCPUMemoryReporter().New(data, nbytes);
