@@ -385,7 +385,7 @@ test_bazel() {
 }
 
 test_benchmarks() {
-  if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$BUILD_ENVIRONMENT" != *nogpu* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$BUILD_ENVIRONMENT" != *nogpu* && $TEST_CONFIG != *nogpu* ]]; then
     pip_install --user "pytest-benchmark==3.2.3"
     pip_install --user "requests"
     BENCHMARK_DATA="benchmarks/.data"
