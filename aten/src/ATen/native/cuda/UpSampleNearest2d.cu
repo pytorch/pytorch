@@ -215,8 +215,8 @@ static void upsample_nearest2d_out_cuda_template(
   }
 
   // heuristic: only use channels_last path when it's faster than the contiguous path
-  if (memory_format == at::MemoryFormat::ChannelsLast && channels >= 4) {
-  // if (false) {
+  if (memory_format == at::MemoryFormat::ChannelsLast && channels >= 4 && \
+        output.is_contiguous(memory_format)) {
     TORCH_INTERNAL_ASSERT(output.is_contiguous(at::MemoryFormat::ChannelsLast),
       "output is not contiguous in channels_last");
     at::Tensor input = input_.contiguous(at::MemoryFormat::ChannelsLast);
@@ -347,9 +347,8 @@ static void upsample_nearest2d_backward_out_cuda_template(
     return;
   }
 
-  if (memory_format == at::MemoryFormat::ChannelsLast) {
-    TORCH_INTERNAL_ASSERT(grad_input.is_contiguous(at::MemoryFormat::ChannelsLast),
-      "grad_input is not contiguous in channels_last");
+  if (memory_format == at::MemoryFormat::ChannelsLast && \
+        grad_input.is_contiguous(memory_format)) {
     Tensor grad_output = grad_output_.contiguous(at::MemoryFormat::ChannelsLast);
 
     TORCH_CHECK(grad_input.numel() < std::numeric_limits<int>::max(),
@@ -384,6 +383,9 @@ static void upsample_nearest2d_backward_out_cuda_template(
   } else {
     Tensor grad_output = grad_output_.contiguous();
 
+    // This is needed for non-contiguous tensors.
+    auto grad_input_c = grad_input.is_contiguous() ? grad_input : at::empty(grad_input.sizes(), grad_input.options());
+
     // upsample_nearest2d meta call makes sure `nbatch != 0`
     unsigned int n = grad_input.numel() / nbatch;
     dim3 bdim{std::min<unsigned int>(
@@ -396,7 +398,7 @@ static void upsample_nearest2d_backward_out_cuda_template(
     AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::Byte, grad_output.scalar_type(), "upsample_nearest2d_backward_out_frame", [&] {
       using accscalar_t = at::acc_type<scalar_t, true>;
 
-      auto idata = grad_input.data_ptr<scalar_t>();
+      auto idata = grad_input_c.data_ptr<scalar_t>();
       auto odata = grad_output.data_ptr<scalar_t>();
 
 
@@ -414,6 +416,10 @@ static void upsample_nearest2d_backward_out_cuda_template(
               width_scale);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     });
+
+    if (!grad_input.is_contiguous()) {
+        grad_input.copy_(grad_input_c);
+    }
   }
 }
 

@@ -274,9 +274,8 @@ static void upsample_bilinear2d_out_cuda_template(
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "upsample_bilinear2d_out_frame", [&] {
     // heuristic: only use channels_last path when it's faster than the contiguous path
-    if (memory_format == at::MemoryFormat::ChannelsLast && channels >= 16) {
-      TORCH_INTERNAL_ASSERT(output.is_contiguous(at::MemoryFormat::ChannelsLast),
-        "output is not contiguous in channels_last");
+    if (memory_format == at::MemoryFormat::ChannelsLast && channels >= 16 && \
+          output.is_contiguous(memory_format)) {
       using accscalar_t = at::acc_type<scalar_t, true>;
 
       TORCH_CHECK(input.numel() < std::numeric_limits<int>::max(),
@@ -390,9 +389,8 @@ static void upsample_bilinear2d_backward_out_cuda_template(
   }
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad_output.scalar_type(), "upsample_bilinear2d_backward_out_frame", [&] {
-    if (memory_format == at::MemoryFormat::ChannelsLast) {
-      TORCH_INTERNAL_ASSERT(grad_input.is_contiguous(at::MemoryFormat::ChannelsLast),
-        "grad_input is not contiguous in channels_last");
+    if (memory_format == at::MemoryFormat::ChannelsLast && \
+          grad_input.is_contiguous(memory_format)) {
       using accscalar_t = at::acc_type<scalar_t, true>;
 
       auto idata = grad_input.data_ptr<scalar_t>();
@@ -422,7 +420,10 @@ static void upsample_bilinear2d_backward_out_cuda_template(
     } else {
       using accscalar_t = at::acc_type<scalar_t, true>;
 
-      auto idata = grad_input.data_ptr<scalar_t>();
+      // This is needed for non-contiguous tensors.
+      auto grad_input_c = grad_input.is_contiguous() ? grad_input : at::empty(grad_input.sizes(), grad_input.options());
+
+      auto idata = grad_input_c.data_ptr<scalar_t>();
       auto odata = grad_output.data_ptr<scalar_t>();
 
       const accscalar_t rheight = area_pixel_compute_scale<accscalar_t>(
@@ -446,6 +447,10 @@ static void upsample_bilinear2d_backward_out_cuda_template(
               idata,
               odata);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+      if (!grad_input.is_contiguous()) {
+          grad_input.copy_(grad_input_c);
+      }
     }
   });
 }
