@@ -2238,8 +2238,10 @@ class FaultyAgentDistAutogradTest(RpcAgentTestFixture):
 
     @dist_init
     def test_verify_backend_options(self):
-        self.assertEqual(self.rpc_backend, rpc.backend_registry.BackendType.FAULTY_PROCESS_GROUP)
-        self.assertEqual(self.rpc_backend_options.num_send_recv_threads, 8)
+        # self.assertEqual(self.rpc_backend, rpc.backend_registry.BackendType.FAULTY_PROCESS_GROUP)
+        self.assertEqual(self.rpc_backend, rpc.backend_registry.BackendType.FAULTY_TENSORPIPE)
+        # self.assertEqual(self.rpc_backend_options.num_send_recv_threads, 8)
+        self.assertEqual(self.rpc_backend_options.num_worker_threads, 8)
         self.assertEqual(self.rpc_backend_options.num_fail_sends, 3)
         self.assertEqual(len(self.rpc_backend_options.messages_to_fail), 4)
 

@@ -28,7 +28,8 @@ class FaultyRpcAgentTestFixture(RpcAgentTestFixture):
     @property
     def rpc_backend(self):
         return rpc.backend_registry.BackendType[
-            "FAULTY_PROCESS_GROUP"
+            # "FAULTY_PROCESS_GROUP"
+            "FAULTY_TENSORPIPE"
         ]
 
     @property
@@ -36,7 +37,8 @@ class FaultyRpcAgentTestFixture(RpcAgentTestFixture):
         return rpc.backend_registry.construct_rpc_backend_options(
             self.rpc_backend,
             init_method=self.init_method,
-            num_send_recv_threads=8,
+            # num_send_recv_threads=8,
+            num_worker_threads=8,
             num_fail_sends=3,
             messages_to_fail=self.messages_to_fail,
             messages_to_delay=self.messages_to_delay,

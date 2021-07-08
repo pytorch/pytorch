@@ -1,5 +1,5 @@
 from ._distributed_c10d import ProcessGroup, Store
-from ._distributed_rpc import ProcessGroupAgent, ProcessGroupRpcBackendOptions, WorkerInfo
+from ._distributed_rpc import ProcessGroupAgent, ProcessGroupRpcBackendOptions, TensorPipeRpcBackendOptions, TensorPipeAgent, WorkerInfo
 from typing import List, Dict, overload
 from datetime import timedelta
 
@@ -9,6 +9,21 @@ class FaultyProcessGroupRpcBackendOptions(ProcessGroupRpcBackendOptions):
     def __init__(
         self,
         num_send_recv_threads: int,
+        rpc_timeout: float,
+        init_method: str,
+        messages_to_fail: List[str],
+        messages_to_delay: Dict[str, float],
+        num_fail_sends: int
+    ): ...
+    num_send_recv_threads: int
+    messages_to_fail: List[str]
+    messages_to_delay: Dict[str, float]
+    num_fail_sends: int
+
+class FaultyTensorPipeRpcBackendOptions(TensorPipeRpcBackendOptions):
+    def __init__(
+        self,
+        num_workers_threads: int,
         rpc_timeout: float,
         init_method: str,
         messages_to_fail: List[str],
@@ -41,3 +56,18 @@ class FaultyProcessGroupAgent(ProcessGroupAgent):
     @overload
     def get_worker_info(self, id: int) -> WorkerInfo: ...
     def get_worker_infos(self) -> List[WorkerInfo]: ...
+
+class FaultyTensorPipeAgent(TensorPipeAgent):
+    def __init__(
+        self,
+        store: Store,
+        name: str,
+        rank: int,
+        world_size: int,
+        process_group: ProcessGroup,
+        num_send_recv_threads: int,
+        rpc_timeout: timedelta,
+        messages_to_fail: List[str],
+        messages_to_delay: Dict[str, float],
+        num_fail_sends: int
+    ): ...
