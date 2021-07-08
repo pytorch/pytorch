@@ -52,7 +52,7 @@ Tensor _get_complete_sum(const Tensor& lengths) {
   offsets[0].zero_();
 
   AT_DISPATCH_INDEX_TYPES(
-      lengths.type(), "_segment_reduce_cuda_backward_kernel1", ([&] {
+      lengths.type(), "_segment_reduce_cuda_backward_kernel1", [&]() {
         auto* lengths_data_ptr = lengths.data_ptr<index_t>();
         auto* offsets_data_ptr = offsets.data_ptr<index_t>();
         CUB_WRAPPER(
@@ -61,7 +61,7 @@ Tensor _get_complete_sum(const Tensor& lengths) {
             offsets_data_ptr + 1,
             segment_count,
             at::cuda::getCurrentCUDAStream());
-      }));
+      });
   return offsets;
 }
 
@@ -229,7 +229,7 @@ Tensor _segment_reduce_cuda_backward_kernel(
   num_blocks = std::max(num_blocks, (int64_t)1);
 
   AT_DISPATCH_INDEX_TYPES(
-      lengths_contig.type(), "_segment_reduce_cuda_backward_kernel1", ([&] {
+      lengths_contig.type(), "_segment_reduce_cuda_backward_kernel1", [&]() {
         const auto* lengths_data = lengths_contig.data_ptr<index_t>();
         auto* offsets_data = offsets.data_ptr<index_t>();
 
@@ -240,7 +240,7 @@ Tensor _segment_reduce_cuda_backward_kernel(
             kHalf,
             data_contig.scalar_type(),
             "_segment_reduce_cpu",
-            ([&]() {
+            [&]() {
               auto* output_data = output_contig.data_ptr<scalar_t>();
               auto* grad_data = grad_contig.data_ptr<scalar_t>();
               auto* grad_input_data = grad_input.data_ptr<scalar_t>();
@@ -261,8 +261,8 @@ Tensor _segment_reduce_cuda_backward_kernel(
                       segment_count,
                       stride_count);
               C10_CUDA_KERNEL_LAUNCH_CHECK();
-            }));
-      }));
+            });
+      });
   return grad_input;
 }
 
@@ -289,7 +289,7 @@ Tensor _segment_reduce_cuda_kernel(
   num_blocks = std::max(num_blocks, (int64_t)1);
 
   AT_DISPATCH_INDEX_TYPES(
-      lengths.type(), "_segment_reduce_cuda_kernel1", ([&] {
+      lengths.type(), "_segment_reduce_cuda_kernel1", [&]() {
         auto* offsets_data_ptr = offsets.data_ptr<index_t>();
         auto* lengths_data_ptr = lengths.data_ptr<index_t>();
         AT_DISPATCH_FLOATING_TYPES_AND2(
@@ -395,7 +395,7 @@ Tensor _segment_reduce_cuda_kernel(
                 }
               }
             });
-      }));
+      });
 
   return output;
 }
