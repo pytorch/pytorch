@@ -12,7 +12,7 @@ import os
 import torch
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
     skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN, \
-    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, DeterministicGuard, TEST_SKIP_NOARCH, IS_WINDOWS
+    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, DeterministicGuard, TEST_SKIP_NOARCH
 from torch.testing._internal.common_cuda import _get_torch_cuda_version, TEST_CUSPARSE_GENERIC
 from torch.testing import \
     (get_all_dtypes)
@@ -821,9 +821,9 @@ class enableSparseCSR(_TestParametrizer):
             for dtype in dtypes:
                 # Construct the test name
                 test_name = '{}{}_{}{}'.format(test.__name__,
-                                                    '_sparse_csr' if sparse_csr else '',
-                                                    device_cls.device_type,
-                                                    _dtype_test_suffix(dtype))
+                                               '_sparse_csr' if sparse_csr else '',
+                                               device_cls.device_type,
+                                               _dtype_test_suffix(dtype))
 
                 # Construct parameter kwargs to pass to the test
                 param_kwargs = {'sparse_csr': sparse_csr}
