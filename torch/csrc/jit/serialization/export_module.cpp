@@ -353,9 +353,11 @@ SourceRangeRecords getBackendSourceRanges(const Module& m) {
             std::get<kDebugInfoTupleSourceRangeIndex>(it.second);
         sr_records.emplace_back(
             std::numeric_limits<size_t>::max(), source_range);
+        // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
         auto cs_ptr = std::get<kDebugInfoTupleInlinedCSIndex>(it.second);
         if (cs_ptr) {
           for (const auto& e : cs_ptr->vec()) {
+            // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
             const auto sr = std::get<kSourceRange>(e);
             sr_records.emplace_back(std::numeric_limits<size_t>::max(), sr);
           }
@@ -869,6 +871,7 @@ std::vector<std::string> export_opnames(const script::Module& m) {
 // Thread local flag (only happens in export, i.e. on server side)
 // to control if instructions for bytecode default inputs are emitted
 // or not. It's the major difference between bytecode v5 and v6.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local bool emitBytecodeDefaultInputs =
     caffe2::serialize::kProducedBytecodeVersion <= 5 ? true : false;
 bool BytecodeEmitDefaultValueForUnspecifiedArgMode::is_enabled() {
