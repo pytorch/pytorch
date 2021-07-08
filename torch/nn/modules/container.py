@@ -425,7 +425,7 @@ class ParameterList(Module):
                 return x
     """
 
-    _parameters: Dict[str, Parameter]  # type: ignore[assignment]
+    _parameters: Dict[str, 'Parameter']  # type: ignore[assignment]
 
     def __init__(self, parameters: Optional[Iterable['Parameter']] = None) -> None:
         super(ParameterList, self).__init__()
