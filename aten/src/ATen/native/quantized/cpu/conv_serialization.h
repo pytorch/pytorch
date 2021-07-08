@@ -1,12 +1,10 @@
 #pragma once
 
-#include <c10/util/irange.h>
-
 #include <ATen/ATen.h>
 #include <ATen/core/List.h>
-
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <c10/util/irange.h>
 
 #include <tuple>
 
@@ -121,21 +119,21 @@ ConvParamsSerializationTypeV3 parse_conv_serialized_state(c10::IValue v) {
 
     std::vector<int64_t> config_vals;
     config_vals.push_back(kSpatialDim);
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (int i = 0; i < stride_x_kSpatialDim.size(); i++) {
+    for (const auto i : c10::irange(stride_x_kSpatialDim.size())) {
       auto stride = stride_x_kSpatialDim.get(i);
       config_vals.push_back(stride[0].item<int16_t>());
     }
-    for (int i = 0; i < padding_x_kSpatialDim.size(); i++) {
+    for (const auto i : c10::irange(padding_x_kSpatialDim.size())) {
       auto padding = padding_x_kSpatialDim.get(i);
       config_vals.push_back(padding[0].item<int16_t>());
     }
-    for (int i = 0; i < dilation_x_kSpatialDim.size(); i++) {
+    for (const auto i : c10::irange(dilation_x_kSpatialDim.size())) {
       auto dilation = dilation_x_kSpatialDim.get(i);
       config_vals.push_back(dilation[0].item<int16_t>());
     }
     // output_padding does not exist in v1, so we fill in a default value
-    for (int i = 0; i < kSpatialDim; i++) {
+    for (const auto i : c10::irange(kSpatialDim)) {
+      (void)i; // Suppress unused variable
       config_vals.push_back(0);
     }
     config_vals.push_back(groups[0].item<int16_t>());
@@ -291,20 +289,23 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
   torch::List<int64_t> stride, padding, output_padding, dilation;
   // skip kSpatialDim
   int idx = 1;
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (int i = 0; i < kSpatialDim; ++i) {
+  for (const auto i : c10::irange(kSpatialDim)) {
+    (void)i; // Suppress unused variable
     stride.emplace_back(config_vals.at(idx));
     idx++;
   }
-  for (int i = 0; i < kSpatialDim; ++i) {
+  for (const auto i : c10::irange(kSpatialDim)) {
+    (void)i; // Suppress unused variable
     padding.emplace_back(config_vals.at(idx));
     idx++;
   }
-  for (int i = 0; i < kSpatialDim; ++i) {
+  for (const auto i : c10::irange(kSpatialDim)) {
+    (void)i; // Suppress unused variable
     dilation.emplace_back(config_vals.at(idx));
     idx++;
   }
-  for (int i = 0; i < kSpatialDim; ++i) {
+  for (const auto i : c10::irange(kSpatialDim)) {
+    (void)i; // Suppress unused variable
     output_padding.emplace_back(config_vals.at(idx));
     idx++;
   }
@@ -312,7 +313,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
   idx++;
   int64_t flags = config_vals.at(idx);
   idx++;
-  TORCH_INTERNAL_ASSERT(idx == config_vals.size(),
+  TORCH_INTERNAL_ASSERT(idx == static_cast<int64_t>(config_vals.size()),
       "Unexpected length of config_vals, expected ",
       idx,
       " got ",

@@ -367,6 +367,7 @@ import sphinx.ext.doctest
 doctest_test_doctest_blocks = ''
 doctest_default_flags = sphinx.ext.doctest.doctest.ELLIPSIS
 doctest_global_setup = '''
+import torch
 try:
     import torchvision
 except ImportError:
