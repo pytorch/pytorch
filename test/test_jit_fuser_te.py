@@ -30,8 +30,6 @@ from itertools import product, permutations
 from test_jit import backward_graph, get_lstm_inputs, get_milstm_inputs, \
     LSTMCellC, LSTMCellF, LSTMCellS, MiLSTMCell
 
-from torch.testing._internal.te_utils import CudaCodeGenExecuted
-
 from jit.test_fuser_common import TestFuserCommon  # noqa: F401
 
 FUSION_GROUP = 'prim::TensorExprGroup'
@@ -913,9 +911,7 @@ class TestTEFuser(JitTestCase):
         x = torch.zeros([3, 4, 5], dtype=torch.float, device='cuda')
         m = M()
         out1 = m.create(x)
-        cx = CudaCodeGenExecuted()
         out2 = m.create(x)
-        assert cx.elapsed_value() == 1
         self.assertNotEqual(out1, out2)
         self.assertTrue(torch.all(out1 >= 0))
         self.assertTrue(torch.all(out1 < 1))
@@ -994,9 +990,7 @@ class TestTEFuser(JitTestCase):
         y = torch.randn(4, 4, dtype=torch.float, device='cuda')
         script_f = torch.jit.script(fn_test_diamond)
         warmup_forward(script_f, x, y)
-        cx = CudaCodeGenExecuted()
         out = script_f(x, y)
-        assert cx.elapsed_value() == 1
         self.assertEqual(out, x + y)
 
     def test_scalar(self):
