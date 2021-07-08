@@ -33,7 +33,8 @@ def get_versions() -> (str, str):
     current_version = releases[0]
     base_version = releases[1]
 
-    parser = argparse.ArgumentParser(description='Diff native functions. Please run this script in the OSS repo.')
+    # TODO(jwtan): Figure out a way such that user can just supply the current version, and the base version will default to the previous version.
+    parser = argparse.ArgumentParser(description='Diff native functions. Please run this script in the open-source repository.')
     parser.add_argument(
         '-c',
         '--current-version',
@@ -63,6 +64,7 @@ def get_versions() -> (str, str):
 # TODO(jwtan): Can we combine get_versions() and get_commits(...)?
 def get_commits(current_version: str, base_version: str) -> (str, str):
     response = requests.get("https://api.github.com/repos/pytorch/pytorch/tags")
+    # TODO(jwtan): We can probably just traverse the response.json().
     tags = {tag['name']: tag['commit']['sha'] for tag in response.json()}
 
     return tags[current_version], tags[base_version]
@@ -108,18 +110,19 @@ def main() -> None:
 
         if key in tags.keys():
             if value != tags[key]:
-                mismatched_jit_schema_functions.append(value)
+                mismatched_jit_schema_functions.append((value, tags[key]))
             continue
 
         new_functions.append(value)
 
-    print('The following funtions has breaking changes:\n')
-    for function in mismatched_jit_schema_functions:
-        print(function)
+    print('The following functions has breaking changes:\n')
+    for functions in mismatched_jit_schema_functions:
+        print(current_version + ': ' + functions[0])
+        print(base_version + ': ' + functions[1] + '\n')
 
     print('\n============================================\n')
 
-    print('The following funtions are newly added:\n')
+    print('The following functions are newly added in {}:\n'.format(current_version))
     for function in new_functions:
         print(function)
 
