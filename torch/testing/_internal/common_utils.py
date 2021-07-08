@@ -1381,18 +1381,6 @@ class TestCase(expecttest.TestCase):
                     exact_is_coalesced=False) -> None:
         assert (atol is None) == (rtol is None), "If one of atol or rtol is specified, then the other must be too"
 
-        assert_close = partial(
-            torch.testing.assert_close,
-            rtol=rtol,
-            atol=atol,
-            check_device=exact_device,
-            check_dtype=exact_dtype,
-            check_stride=exact_stride,
-            check_is_coalesced=exact_is_coalesced,
-            equal_nan=equal_nan,
-            msg=msg,
-        )
-
         if isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
             # In order to honor the @toleranceOverride and @precisionOverride decorators, we need to resolve the
             # tolerances before we call assert_close
@@ -1400,7 +1388,19 @@ class TestCase(expecttest.TestCase):
                 rtol, atol = _get_default_rtol_and_atol(x, y)
             rtol = max(rtol, self.rel_tol)
             atol = max(atol, self.precision)
-            assert_close(x, y, rtol=rtol, atol=atol)
+
+            torch.testing.assert_close(
+                x,
+                y,
+                rtol=rtol,
+                atol=atol,
+                check_device=exact_device,
+                check_dtype=exact_dtype,
+                check_stride=exact_stride,
+                check_is_coalesced=exact_is_coalesced,
+                equal_nan=equal_nan,
+                msg=msg,
+            )
         elif isinstance(x, Number) or isinstance(y, Number):
             # torch.testing.assert_close does not allow Tensor vs. Number comparisons
             self.assertEqual(

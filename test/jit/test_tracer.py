@@ -319,7 +319,7 @@ class TestTracer(JitTestCase):
             self.assertTrue(op.hasAttribute('inplace'))
         inplace_flags = [False, True, True, False]
         for op, is_inplace in zip(ops, inplace_flags):
-            self.assertEqual(op.i('inplace'), is_inplace)
+            self.assertEqual(bool(op.i('inplace')), is_inplace)
 
     def test_inplace_check(self):
         class MyInplaceFn(Function):
@@ -1999,8 +1999,8 @@ class TestMixTracingScripting(JitTestCase):
         # test we propagated shapes through the function
         self.assertTrue("Dynamic" not in str(use.graph))
 
-        self.assertEqual(3, use(torch.ones(1, dtype=torch.float)).item())
-        self.assertEqual(2, use(torch.zeros(1, dtype=torch.float)).item())
+        self.assertEqual(3.0, use(torch.ones(1, dtype=torch.float)).item())
+        self.assertEqual(2.0, use(torch.zeros(1, dtype=torch.float)).item())
 
     def test_trace_with_size(self):
         @_trace(torch.zeros(1, 1))

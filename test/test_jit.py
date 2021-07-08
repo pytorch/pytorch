@@ -4721,7 +4721,7 @@ a")
 
         def func6(a : int, b : int):
             # type: (int, int) -> float
-            return pow(a, b)
+            return float(pow(a, b))
 
         a = torch.rand(1)
         b = torch.rand(1)
@@ -4733,7 +4733,7 @@ a")
         self.checkScript(func4, ())
         self.checkScript(func6, (2, 4))
 
-        inputs = [torch.tensor(2), torch.tensor(-2), torch.tensor(.5), torch.tensor(.2)]
+        inputs = [torch.tensor(2.0), torch.tensor(-2.0), torch.tensor(.5), torch.tensor(.2)]
         for x in inputs:
             for y in inputs:
                 if x < 0:
@@ -6804,7 +6804,7 @@ a")
             return {func}({scalar1}, {scalar2})
         ''')
         funcs = ['min', 'max']
-        scalars = ['7', '2', '3', '-3', '3.14', '0.125', '-0.5', '2.0', '-2.0']
+        scalars = ['7.0', '2.0', '3.0', '-3.0', '3.14', '0.125', '-0.5', '2.0', '-2.0']
         scalar_pairs = [(scalar1, scalar2) for scalar1 in scalars for scalar2 in scalars]
 
         def run_test(code):
@@ -6930,7 +6930,7 @@ a")
 
     def test_number_augassign_bitwise_pow(self):
         def func() -> float:
-            z = 8
+            z = 8.0
             z **= 2
             return z
 
@@ -8629,7 +8629,7 @@ dedent """
         with torch.jit.optimized_execution(False):
             m = M()
             o0, o1, o2 = m()
-        self.assertEqual(o0, 0)
+        self.assertEqual(o0, False)
         self.assertEqual(o1, 1)
         self.assertEqual(o2, 3.5)
 
@@ -13459,11 +13459,11 @@ dedent """
     def test_round(self):
         def round_float(x):
             # type: (float) -> float
-            return round(x)
+            return float(round(x))
 
         def round_int(x):
             # type: (int) -> float
-            return round(x)
+            return float(round(x))
 
         self.checkScript(round_float, (1.5,))
         self.checkScript(round_int, (2,))

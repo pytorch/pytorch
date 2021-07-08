@@ -702,7 +702,7 @@ class TestViewOps(TestCase):
         rows = torch.tensor([[0, 0], [2, 2]], device=device)
         cols = torch.tensor([[0, 1], [2, 2]], device=device)
         t[rows, cols] = 0
-        self.assertEqual(t[2, 2], 0)
+        self.assertEqual(t[2, 2], 0.0)
 
     @unittest.skip("See https://github.com/pytorch/pytorch/pull/32720")
     def test_chunk_view(self, device):

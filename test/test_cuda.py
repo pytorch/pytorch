@@ -287,10 +287,10 @@ class TestCuda(TestCase):
         self.assertFalse(t.is_pinned())
         cudart = torch.cuda.cudart()
         r = cudart.cudaHostRegister(t.data_ptr(), t.numel() * t.element_size(), 0)
-        self.assertEqual(r, 0)
+        self.assertEqual(r.value, 0)
         self.assertTrue(t.is_pinned())
         r = cudart.cudaHostUnregister(t.data_ptr())
-        self.assertEqual(r, 0)
+        self.assertEqual(r.value, 0)
         self.assertFalse(t.is_pinned())
 
     def test_memory_stats(self):
@@ -1323,12 +1323,12 @@ class TestCuda(TestCase):
         with device:
             try:
                 out = cudart.cudaStreamCreate(stream_p_int)
-                self.assertEqual(out, 0)
+                self.assertEqual(out.value, 0)
                 self.assertNotEqual(stream.value, 0)
                 yield stream.value
             finally:
                 out = cudart.cudaStreamDestroy(stream.value)
-                self.assertEqual(out, 0)
+                self.assertEqual(out.value, 0)
 
     @skipIfRocm
     def test_external_streams(self):
@@ -1370,7 +1370,7 @@ class TestCuda(TestCase):
         del t
         t = torch.FloatTensor([1]).pin_memory()
         self.assertNotEqual(t.data_ptr(), ptr, msg='allocation re-used too soon')
-        self.assertEqual(list(gpu_tensor), [1])
+        self.assertEqual(list(gpu_tensor), [1.0])
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_caching_pinned_memory_multi_gpu(self):
@@ -1394,8 +1394,8 @@ class TestCuda(TestCase):
         with torch.cuda.device(0):
             gpu_tensor0.copy_(t, non_blocking=True)
 
-        self.assertEqual(gpu_tensor1[0], 1)
-        self.assertEqual(gpu_tensor0[0], 2)
+        self.assertEqual(gpu_tensor1[0], 1.0)
+        self.assertEqual(gpu_tensor0[0], 2.0)
 
     def test_caching_allocator_record_stream_oom(self):
         """allocations delayed by a record_stream call should still be freed on
@@ -1424,14 +1424,14 @@ class TestCuda(TestCase):
 
     def test_sum_fp16(self):
         x = torch.zeros(10, device='cuda', dtype=torch.float16)
-        self.assertEqual(x.sum(), 0)
+        self.assertEqual(x.sum().item(), 0.0)
 
         x = torch.ones(65504, device='cuda', dtype=torch.float16)
-        self.assertEqual(x.sum(), 65504)
-        self.assertEqual(x.sum(dtype=torch.float32), 65504)
+        self.assertEqual(x.sum().item(), 65504.0)
+        self.assertEqual(x.sum(dtype=torch.float32).item(), 65504.0)
 
         x = torch.ones(65536, device='cuda', dtype=torch.float16)
-        self.assertEqual(x.sum(dtype=torch.float32), 65536)
+        self.assertEqual(x.sum(dtype=torch.float32).item(), 65536.0)
 
         a = torch.zeros(1203611).bernoulli_(0.0005)
         x = a.to(device='cuda', dtype=torch.float16)
@@ -1443,20 +1443,20 @@ class TestCuda(TestCase):
 
     def test_mean_fp16(self):
         x = torch.ones(65536, device='cuda', dtype=torch.float16)
-        self.assertEqual(x.mean(), 1)
+        self.assertEqual(x.mean(), torch.tensor(1, dtype=torch.float16))
 
         x = torch.ones(65536, device='cuda', dtype=torch.float16)
-        self.assertEqual(x.mean(dtype=torch.float32), 1)
+        self.assertEqual(x.mean(dtype=torch.float32), torch.tensor(1, dtype=torch.float32))
 
     def test_prod_large(self):
         # tests global reduction (should_global_reduce = true) in case of non-zero identity element
         x = torch.ones(240000, device='cuda', dtype=torch.float32)
-        self.assertEqual(x.prod(), 1)
+        self.assertEqual(x.prod(), 1.0)
 
         # test for complex types. Note 240k is divisible by 4
         for dtype in [torch.cfloat, torch.cdouble]:
             x = torch.ones(240000, device='cuda', dtype=dtype) * (0 + 1j)
-            self.assertEqual(x.prod(), 1)
+            self.assertEqual(x.prod(), torch.tensor(1, dtype=dtype))
 
     def test_multinomial_ext(self):
         # Test two corner cases from older PyTorch (Issue #4858)
@@ -1631,7 +1631,7 @@ except RuntimeError as e:
 
     def test_norm_type_conversion(self):
         a = torch.ones(65536).cuda().half()
-        self.assertEqual(a.norm(p=0, dtype=torch.float32), 65536)
+        self.assertEqual(a.norm(p=0, dtype=torch.float32), 65536.0)
 
     # Test that wrap_with_cuda_memory_check successfully detects leak
     def test_cuda_memory_leak_detection(self):
@@ -2577,7 +2577,7 @@ torch.cuda.synchronize()
                 thread.join()
 
             for t in range(num_threads):
-                self.assertEqual(results[t].sum().item(), size * size)
+                self.assertEqual(results[t].long().sum().item(), size * size)
 
     # Test is flaky on Windows (https://github.com/pytorch/pytorch/issues/57401)
     @unittest.skipIf(IS_WINDOWS, 'Test is flaky on Windows (see issue 57401)')
@@ -2632,7 +2632,7 @@ torch.cuda.synchronize()
                     thread.join()
 
                 for t in range(num_threads):
-                    self.assertEqual(results[t].sum().item(),
+                    self.assertEqual(results[t].long().sum().item(),
                                      (2048 - test_iters) * (2048 - test_iters))
 
     def test_cusparse_multiple_threads_same_device(self):
@@ -3304,8 +3304,8 @@ torch.cuda.synchronize()
             for _ in range(2):
                 c = func_with_temps(c, 3)
 
-            self.assertEqual(b.sum().item(), size * 3070)
-            self.assertEqual(c.sum().item(), size * 442)
+            self.assertEqual(b.long().sum().item(), size * 3070)
+            self.assertEqual(c.long().sum().item(), size * 442)
 
             if share_mem != "Don't share":
                 self.assertEqual(reserved_no_sharing - torch.cuda.memory_stats()["reserved_bytes.all.current"],
@@ -3430,8 +3430,8 @@ torch.cuda.synchronize()
             g1.replay()
             g2.replay()
 
-            self.assertEqual(e.sum().item(), size * 5)
-            self.assertEqual(f.sum().item(), size * 7)
+            self.assertEqual(e.long().sum().item(), size * 5)
+            self.assertEqual(f.long().sum().item(), size * 7)
 
             # Tests that replaying as g0, g2, g1 is only valid if they don't share a pool
             g0.replay()
@@ -3440,8 +3440,8 @@ torch.cuda.synchronize()
 
             # If share_mem is True, g2's capture should have reused c's memory for f. We replayed g2 then g1,
             # so we expect g1's captured "e = c + 3" mistakenly filled e with "f's vals + 3".
-            self.assertEqual(e.sum().item(), size * (7 + 3) if share_mem != "Don't share" else size * 5)
-            self.assertEqual(f.sum().item(), size * 7)
+            self.assertEqual(e.long().sum().item(), size * (7 + 3) if share_mem != "Don't share" else size * 5)
+            self.assertEqual(f.long().sum().item(), size * 7)
 
             del a, b, d, e, f, g0, g1, g2
             # Tensors used across streams (a, e, f) were held until just now, so no need to call record_stream on them.
@@ -3526,7 +3526,7 @@ torch.cuda.synchronize()
                                      stat + " = {}, expected = {}, numel = {}".format(current, expected, numel))
 
                 g.replay()
-                self.assertEqual(b.sum().item(), 6 * numel)
+                self.assertEqual(b.long().sum().item(), 6 * numel)
                 if i == 0:
                     torch.cuda.empty_cache()
 
@@ -3536,7 +3536,7 @@ torch.cuda.synchronize()
             postdel_stats = torch.cuda.memory_stats()
 
             # Uses graph result b after graph has been deleted
-            self.assertEqual(b.sum().item(), 6 * numel)
+            self.assertEqual(b.long().sum().item(), 6 * numel)
 
             # b should be the only live reference remaining from the graph's private pool
             expecteds = (1, delta_cudaMalloc_bytes_post_del_g, 1, numel * elem)
@@ -3655,7 +3655,7 @@ torch.cuda.synchronize()
         input_vals = [5, 20000, 5, 40000]
         # If the scale gets updated properly, these are the scale, growth tracker,
         # and grad values we expect.
-        expected_scales = [4, 2, 2, 1]
+        expected_scales = [4.0, 2.0, 2.0, 1.0]
         expected_growth_trackers = [1, 0, 1, 0]
         expected_grad_vals = [5 * 4, float("inf"), 5 * 2, float("inf")]
 
