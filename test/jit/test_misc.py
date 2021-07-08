@@ -153,7 +153,6 @@ class TestMisc(JitTestCase):
 
         FileCheck().check('Dict(int, Future(int))?').run(fn.graph)
 
-    @unittest.skipIf(True, "Temporarily skipping while landing entire Union PR stack")
     def test_if_returning_any(self):
         """
         Check that an if statement can return different
