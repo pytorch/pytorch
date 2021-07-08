@@ -3,9 +3,19 @@ import re
 from typing import List
 
 
+# > Why is DEFAULT_MAX_TOKEN_COUNT set to 1?
+#
+# clang-tidy doesn't have a direct way to query for token counts in the
+# codebase. The workaround is to set the max token count to 1. This will cause
+# clang-tidy to output a warning with the actual token count of the file.
+#
+# A non-destructive way to set the max token count to 1 would be to pass it
+# through the -fmax-tokens option. However, this flag will be overriden if here
+# exists a #pragma max_tokens_total statement in the file. This necessitates a
+# destructive way to set the max token count to 1.
 DEFAULT_MAX_TOKEN_COUNT = 1
 MAX_TOKENS_CHECK_DIAG_NAME = "misc-max-tokens"
-MAX_TOKENS_PRAGMA_PATERN = r"#pragma\s+clang\s+max_tokens_total\s+(\d+)"
+MAX_TOKENS_PRAGMA_PATERN = r"^#pragma\s+clang\s+max_tokens_total\s+(\d+)$"
 
 
 def add_max_tokens_pragma(code: str, num_max_tokens: int) -> str:
