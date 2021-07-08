@@ -734,6 +734,7 @@ struct TORCH_API ListType
 
   // common cast List[Tensor]
   static ListTypePtr ofTensors();
+  static ListTypePtr ofOptionalTensors();
   static ListTypePtr ofInts();
   static ListTypePtr ofFloats();
   static ListTypePtr ofComplexDoubles();

@@ -220,6 +220,10 @@ ListTypePtr ListType::ofTensors() {
   static auto value = ListType::create(TensorType::get());
   return value;
 }
+ListTypePtr ListType::ofOptionalTensors() {
+  static auto value = ListType::create(OptionalType::ofTensor());
+  return value;
+}
 ListTypePtr ListType::ofInts() {
   static auto value = ListType::create(IntType::get());
   return value;
@@ -304,7 +308,7 @@ c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2, bool
     }
     std::vector<TypePtr> elements;
     for (size_t i = 0; i < tuple1->elements().size(); i++) {
-    if (auto elem = unifyTypes(tuple1->elements().at(i), tuple2->elements().at(i), default_to_any)) {
+      if (auto elem = unifyTypes(tuple1->elements().at(i), tuple2->elements().at(i))) {
         elements.push_back(*elem);
       } else {
         return c10::nullopt;
@@ -373,7 +377,7 @@ c10::optional<TypePtr> unifyTypeList(
               << ret_type->repr_str() << ")";
       return c10::nullopt;
     }
-    ret_type = maybe_unified.value();
+    ret_type = *maybe_unified;
   }
 
   return ret_type;
