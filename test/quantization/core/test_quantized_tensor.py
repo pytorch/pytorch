@@ -783,6 +783,17 @@ class TestQuantizedTensor(TestCase):
             self.assertEqual(q_filled.q_scale(), scale)
             self.assertEqual(q_filled.q_zero_point(), zero_point)
 
+    def test_qtensor_index_select(self):
+        x = torch.randn(3, 3).to('cuda')
+        scale = 1
+        zp = 0
+        q = torch.quantize_per_tensor(x, scale, zp, torch.quint8)
+        # s = torch.index_select(x, 0, torch.tensor([0, 2]).to('cuda'))
+        qs = torch.index_select(q, 1, torch.tensor([0, 2]).to('cuda'))
+        for i in range(3):
+            self.assertTrue(q[i, 0].item() == qs[i, 0].item())
+            self.assertTrue(q[i, 2].item() == qs[i, 1].item())
+
     def test_qtensor_view(self):
         scale, zero_point, dtype = 1.0, 2, torch.uint8
         for device in get_supported_device_types():

@@ -747,8 +747,8 @@ void index_select_out_cuda_impl(Tensor& out, const Tensor& self, long dim,
   if (self.dim() > 0) {
     newSize[dim] = numIndices;
   }
-  at::native::resize_output(out, newSize);
-
+  # need to check for quantized/non quantized here and use appropriate function or just rewrite
+  out = at::empty_quantized(newSize, self);
   ptrdiff_t outTotalSize = out.numel();
   if (outTotalSize == 0) {
     return;
@@ -882,9 +882,36 @@ Tensor& index_select_out_cuda(const Tensor& self, int64_t dim,
   return out;
 }
 
+Tensor& index_select_out_quant_cuda(const Tensor& self, int64_t dim,
+                                    const Tensor& index, Tensor& out) {
+  static constexpr string_view DIM_WARNING =
+  "Tensor too large or too many (> 25) dimensions";
+
+  TORCH_CHECK(at::cuda::check_device({out, self, index}),
+  "Input, output and indices must be on the current device");
+  at::assert_no_internal_overlap(out);
+  at::assert_no_overlap(out, self);
+  at::assert_no_overlap(out, index);
+
+  dim = at::maybe_wrap_dim(dim, self);
+  TORCH_CHECK(self.dim() <= MAX_TENSORINFO_DIMS, DIM_WARNING);
+  TORCH_CHECK(index.dim() <= MAX_TENSORINFO_DIMS, DIM_WARNING);
+
+  AT_DISPATCH_QINT_TYPES(out.scalar_type(), "index_select_quant_cuda",
+      [&] {index_select_out_cuda_impl<scalar_t>(out, self, dim, index); });
+
+  return out;
+}
+
 Tensor index_select_cuda(const Tensor& self, int64_t dim, const Tensor& index) {
   Tensor out = at::empty({0}, self.options());
   at::native::index_select_out_cuda(self, dim, index, out);
+  return out;
+}
+
+Tensor index_select_quant_cuda(const Tensor& self, int64_t dim, const Tensor& index) {
+  Tensor out = at::empty_quantized({0}, self);
+  at::native::index_select_out_quant_cuda(self, dim, index, out);
   return out;
 }
 
