@@ -2156,16 +2156,18 @@ def sample_inputs_max_min_binary(op_info, device, dtype, requires_grad, **kwargs
     return inputs
 
 def sample_inputs_dropout(self, device, dtype, requires_grad):
-    tensors = []
+    samples = []
     dropout_args = [
         (0.6, False, False),
-        (1.0, True, True),
+        (1.0, True, False),
         (0.0, True, False)
     ]
+    shapes = [(), (2,), (2, 3, 4), (2, 3, 4, 5, 6)]
     for rank in [1, 3, 5]:
-        for args in dropout_args:
-            tensors.append(SampleInput(make_tensor(list(range(rank)), device=device, dtype=dtype, requires_grad=requires_grad, low=-5, high=5), args=args))
-    return tensors
+        for shape in shapes:
+            for args in dropout_args:
+                samples.append(SampleInput(make_tensor(shape, device=device, dtype=dtype, requires_grad=requires_grad, low=-5, high=5), args=args))
+    return samples
 
 def sample_inputs_hardswish(self, device, dtype, requires_grad):
     N = 5
