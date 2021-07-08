@@ -795,6 +795,8 @@ class _NnapiSerializer(object):
             self.add_conv_underscore(node),
         "aten::conv2d": lambda self, node:
             self.add_conv2d(node),
+        "aten::log_softmax": lambda self, node:
+            self.add_log_softmax(node),
         "quantized::linear": lambda self, node:
             self.add_qlinear(node),
         "quantized::conv2d": lambda self, node:
@@ -1735,6 +1737,31 @@ class _NnapiSerializer(object):
             False,  # transpose
             NNAPI_FuseCode.FUSED_NONE,
         )
+
+    def add_log_softmax(self, node):
+        assert node.inputsSize() == 3
+        assert node.outputsSize() == 1
+
+        (
+            jit_input,
+            jit_dim,
+            jit_half_to_float
+        ) = node.inputs()
+        input_id, input_oper = self.get_tensor_operand_by_jitval_fixed_size(jit_input)
+        _, dim = self.get_constant_value(jit_dim, "IntType")
+
+        out_shape = input_oper.shape
+
+        inputs = [None] * 3
+        inputs[0] = input_id
+        # specifying 1 as the scaling factor for the exponent, beta
+        inputs[1] = self.add_immediate_float_scalar(1)
+        inputs[2] = self.add_immediate_int_scalar(dim)
+
+        outputs = [None] * 1
+        outputs[0] = self.add_tensor_operand(node.outputsAt(0), input_oper._replace(shape=out_shape))
+        self.add_operation(NNAPI_OperationCode.LOG_SOFTMAX, inputs, outputs)
+
 
     def add_qconv2d(self, node, fuse_code):
         assert node.inputsSize() == 4
