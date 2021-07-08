@@ -25,7 +25,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 if (Test-Path "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe") {
-    $vc_version_major = [int] $VC_VERSION.split(".")[0]
+    $vc_version_major = [int] ${env:VC_VERSION}.split(".")[0]
     $existingPath = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -products "Microsoft.VisualStudio.Product.BuildTools" -version "[${env:VC_VERSION}, ${env:vc_version_major + 1})" -property installationPath
     if ($existingPath -ne $null) {
         echo "Found existing BuildTools installation in $existingPath"
