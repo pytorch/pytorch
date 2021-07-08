@@ -187,12 +187,14 @@ class TORCH_API Buf : public ExprNode<Buf> {
     base_handle_->set_name_hint(name_hint);
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Buf(const std::string& name_hint,
       const std::vector<const Expr*>& dims,
       Dtype dtype,
       const Expr* initializer = nullptr)
       : Buf(new Var(name_hint, kHandle), dims, dtype, initializer) {}
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Buf(Var* var,
       std::vector<const Expr*> dims,
       Dtype dtype,
