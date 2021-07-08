@@ -961,14 +961,19 @@ class FunctionEvent(FormattedTimesMixin):
         if self.device_type == DeviceType.CPU:
             if not self.is_legacy:
                 # account for the kernels in the children ops
+                if len(self.kernels) > 0:
+                    assert self.kernels[0].device.type == DeviceType.CUDA
                 return (sum(kinfo.duration for kinfo in self.kernels if kinfo.device.type == DeviceType.CUDA) +
                         sum(ch.cuda_time_total for ch in self.cpu_children))
             else:
                 # each legacy cpu events has a single (fake) kernel
+                if len(self.kernels) > 0:
+                    assert self.kernels[0].device.type == DeviceType.CUDA
                 return sum(kinfo.duration for kinfo in self.kernels if kinfo.device.type == DeviceType.CUDA)
         elif self.device_type == DeviceType.CUDA:
             return self.time_range.elapsed_us()
         else:
+            print("johnlu cuda_time_total dev type:", self.device_type)
             return 0
 
     @property
