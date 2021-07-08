@@ -8,7 +8,7 @@ class PeriodicModelAverager:
     r"""
     Averages parameters periodically after the warm-up stage.
 
-    This can be used for running `post-local SDG <https://arxiv.org/abs/1808.07217>`_,
+    This can be used for running `post-local SGD <https://arxiv.org/abs/1808.07217>`_,
     by running :class:`~torch.nn.DistributedDataParallel` (DDP)
     using the subgroups created by :meth:`~torch.distributed.new_subgroups`.
 
@@ -92,6 +92,6 @@ class PeriodicModelAverager:
         and it can be divided by ``period``, where ``step`` is increased by 1
         at each iteration in the training loop.
         """
-        if self.step >= self.warmup_steps and self.step % self.period == 0:
+        if self.step >= self.warmup_steps and (self.step - self.warmup_steps) % self.period == 0:
             utils.average_parameters(self.module, self.process_group)
         self.step += 1

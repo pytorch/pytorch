@@ -54,7 +54,9 @@ def post_localSGD_hook(
 ) -> torch.futures.Future:
     """
     This DDP communication hook is used for running post-localSGD algorithm,
-    by combining with a model averaging component that runs after the optimizer step.
+    by combining with a model averaging component (e.g.,
+    :class:`~torch.distributed.algorithms.model_averaging.averagers.PeriodicModelAverager`)
+    that runs after the optimizer step.
 
     Args:
         state (PostLocalSGDState): State information to run post-localSGD.
@@ -70,6 +72,8 @@ def post_localSGD_hook(
         >>> state = PostLocalSGDState(process_group=process_group, subgroup=subgroup,
                                   start_localSGD_iter=10)
         >>> ddp_model.register_comm_hook(state, post_localSGD_hook)
+        >>> # Also need to establish a model averaging module and run model averaging after ``optimizer.step()``.
+        >>> # Please refer to the examples in ``torch.distributed.algorithms.model_averaging.averagers`` module.
     """
     global_group_to_use = (
         state.process_group if state.process_group is not None else dist.group.WORLD
