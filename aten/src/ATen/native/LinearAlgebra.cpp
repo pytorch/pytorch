@@ -33,12 +33,6 @@ TORCH_META_FUNC(addmm)(const Tensor& self, const Tensor& mat1, const Tensor& mat
       mat1.sizes()[1] == mat2.sizes()[0], "mat1 and mat2 shapes cannot be multiplied (",
       mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
 
-  TORCH_CHECK(
-      self.sizes()[0] == mat1.sizes()[0] && self.sizes()[1] == mat2.sizes()[1],
-      "input shape is incompatible with matrix multiplication (",
-      mat1.sizes()[0], "x", mat1.sizes()[1], " @ ", mat2.sizes()[0], "x", mat2.sizes()[1], " != ",
-      self.sizes()[0], "x", self.sizes()[1], ")");
-
   auto names = at::namedinference::propagate_names_for_addmm(mat1, mat2, self);
   set_output(0, {mat1.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
   const auto& result = maybe_get_output(0);
@@ -955,6 +949,12 @@ static void addmm_impl_cpu_(
   auto m1_sizes = m1.sizes();
   auto m2_strides = m2.strides();
   auto m2_sizes = m2.sizes();
+
+  TORCH_CHECK(
+      self_sizes[0] == m1_sizes[0] && self_sizes[1] == m2_sizes[1],
+      "input shape is incompatible with matrix multiplication (",
+      m1_sizes[0], "x", m1_sizes[1], " @ ", m2_sizes[0], "x", m2_sizes[1], " != ",
+      self_sizes[0], "x", self_sizes[1], ")");
 
   at::native::resize_output(result, self_sizes);
   const auto result_strides = result.strides();
