@@ -289,6 +289,7 @@ Tensor class reference
     Tensor.cos_
     Tensor.cosh
     Tensor.cosh_
+    Tensor.corrcoef
     Tensor.count_nonzero
     Tensor.cov
     Tensor.acosh
