@@ -880,21 +880,24 @@ def assert_close(
 
         >>> expected = torch.tensor([1.0, 2.0, 3.0])
         >>> actual = expected.clone()
-        >>> # By default instances of a common superclass can be compared
+        >>> # By default, directly related instances can be compared
         >>> torch.testing.assert_close(torch.nn.Parameter(actual), expected)
         >>> # This check can be made more strict with allow_subclasses=False
-        >>> torch.testing.assert_close(torch.nn.Parameter(actual), expected, allow_subclasses=False)
+        >>> torch.testing.assert_close(
+        ...     torch.nn.Parameter(actual), expected, allow_subclasses=False
+        ... )
         Traceback (most recent call last):
         ...
-        AssertionError: Except for Python scalars, type equality is required, but got
-        <class 'torch.nn.parameter.Parameter'> and <class 'torch.Tensor'> instead.
-        >>> # If the inputs do not share a common superclass they are never considered close
+        AssertionError: Except for Python scalars, type equality is required if
+        allow_subclasses=False, but got <class 'torch.nn.parameter.Parameter'> and
+        <class 'torch.Tensor'> instead.
+        >>> # If the inputs are not directly related, they are never considered close
         >>> torch.testing.assert_close(actual.numpy(), expected)
         Traceback (most recent call last):
         ...
-        AssertionError: Except for Python scalars, inputs are required to share a common
-        superclass, but got <class 'numpy.ndarray'> and <class 'torch.Tensor'> instead.
-        >>> # An expection to all of this are Python scalars. Regardless of their type, they can
+        AssertionError: Except for Python scalars, input types need to be directly
+        related, but got <class 'numpy.ndarray'> and <class 'torch.Tensor'> instead.
+        >>> # Exceptions to all of this are Python scalars. Regardless of their type, they can
         >>> # be compared if check_dtype=False.
         >>> torch.testing.assert_close(1.0, 1, check_dtype=False)
 
