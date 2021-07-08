@@ -95,9 +95,10 @@ void filterEngineConfigs(
       if (cudnn_frontend::hasNumericalNote<CUDNN_NUMERICAL_NOTE_NONDETERMINISTIC>(c)) return true;
     }
     if (scalar_type == kFloat && !allow_tf32) {
-      if (cudnn_frontend::hasNumericalNote<CUDNN_NUMERICAL_NOTE_DOWN_CONVERT_INPUTS>(c)) return true;
       if (cudnn_frontend::hasNumericalNote<CUDNN_NUMERICAL_NOTE_TENSOR_CORE>(c)) return true;
     }
+    // TODO: check under which conditions this is OK
+    if (cudnn_frontend::hasNumericalNote<CUDNN_NUMERICAL_NOTE_DOWN_CONVERT_INPUTS>(c)) return true;
     return false;
   };
   cudnn_frontend::filter(from, to, filter);
