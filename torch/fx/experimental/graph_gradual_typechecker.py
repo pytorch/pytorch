@@ -328,7 +328,7 @@ def maxpool2d_inference_rule(n: Node, module_instance):
         pass
 
     elif n.args[0].type == Dyn and isinstance(n.type, TensorType):
-        n.type = maxpool2d_check(n.args[0].type, module_instance)
+        n.type = get_greatest_upper_bound(maxpool2d_check(n.args[0].type, module_instance), n.type)
         # n.args[0].type = n.type # backwards propagation example (for next PR)
 
     elif n.type == Dyn and isinstance(n.args[0].type, TensorType):
