@@ -12,8 +12,10 @@
 // to simply copy the contents of this symbol to disk and dlopen it to create an
 // instance of python.
 extern "C" __attribute__((
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     __weak__)) char _binary_libtorch_deployinterpreter_so_start[];
 extern "C"
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     __attribute__((__weak__)) char _binary_libtorch_deployinterpreter_so_end[];
 #ifdef FBCODE_CAFFE2
 // in fbcode, we build the interpreter version with cuda bindings explicitly and
@@ -59,6 +61,7 @@ InterpreterSession ReplicatedObj::acquire_session(
   TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 InterpreterSession::~InterpreterSession() {
   if (manager_ && notify_idx_ >= 0) {
     manager_->resources_.free(notify_idx_);
@@ -80,6 +83,7 @@ void ReplicatedObjImpl::unload(const Interpreter* on_this_interpreter) {
   TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 ReplicatedObjImpl::~ReplicatedObjImpl() {
   unload(nullptr);
 }
