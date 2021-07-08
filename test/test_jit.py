@@ -380,7 +380,7 @@ class TestJit(JitTestCase):
             def fn(x: torch.Tensor) -> torch.Tensor:
                 return x
 
-            pickle.dumps(fn, protocol=0)
+            pkl_fn = pickle.dumps(fn, protocol=0)
 
 
     def test_restore_device(self):
