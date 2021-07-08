@@ -12,7 +12,7 @@ sys.path.append(os.path.realpath(os.path.join(
     'torch',
     'utils')))
 
-from hipify import hipify_python
+from hipify import hipify_python  # type: ignore[import]
 
 parser = argparse.ArgumentParser(description='Top-level script for HIPifying, filling in most common parameters')
 parser.add_argument(
@@ -115,7 +115,7 @@ ignores = [
 ]
 
 # Check if the compiler is hip-clang.
-def is_hip_clang():
+def is_hip_clang() -> bool:
     try:
         hip_path = os.getenv('HIP_PATH', '/opt/rocm/hip')
         return 'HIP_COMPILER=clang' in open(hip_path + '/lib/.hipInfo').read()

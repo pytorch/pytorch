@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/util/irange.h>
 
 namespace torch {
 namespace jit {
@@ -22,8 +23,9 @@ namespace {
 
 std::vector<int> reductionAxes(TensorView* tv) {
   size_t n_dims = tv->nDims();
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<int> reduction_axes;
-  for (size_t i = 0; i < n_dims; i++) {
+  for (const auto i : c10::irange(n_dims)) {
     if (tv->axis(i)->isReduction()) {
       reduction_axes.emplace_back(i);
     }
@@ -235,8 +237,10 @@ ReductionParams reductionHeuristic(
   // 5. Distributing work across blocks
 
   // WARNING: Current device for codegen may not be the target device
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int device_max_threads_per_multiprocessor =
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int device_multiprocessor_count =
       at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 

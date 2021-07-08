@@ -15,6 +15,7 @@
 #include <ATen/core/Vitals.h>
 #include <TH/TH.h>
 #include <c10/util/Logging.h>
+#include <c10/util/irange.h>
 #include <cstdlib>
 #include <libshm.h>
 #include <pybind11/pybind11.h>
@@ -573,9 +574,11 @@ PyObject *THPModule_setQEngine(PyObject */* unused */, PyObject *arg)
 {
   THPUtils_assert(THPUtils_checkLong(arg), "set_qengine expects an int, "
           "but got %s", THPUtils_typename(arg));
+  HANDLE_TH_ERRORS
   auto qengine = static_cast<int>(THPUtils_unpackLong(arg));
   at::globalContext().setQEngine(static_cast<at::QEngine>(qengine));
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject *THPModule_qEngine(PyObject *_unused, PyObject *noargs)
@@ -587,7 +590,7 @@ PyObject *THPModule_supportedQEngines(PyObject *_unused, PyObject *noargs)
 {
   auto qengines = at::globalContext().supportedQEngines();
   auto list = THPObjectPtr(PyList_New(qengines.size()));
-  for (size_t i = 0; i < qengines.size(); ++i) {
+  for (const auto i : c10::irange(qengines.size())) {
     PyObject *i64 = THPUtils_packInt64(static_cast<int>(qengines[i]));
     if (!i64) {
       throw python_error();
@@ -925,13 +928,20 @@ PyObject* initModule() {
 #endif
  ASSERT_TRUE(set_module_attr("has_cudnn", has_cudnn));
 
+#if AT_MKL_ENABLED() || AT_POCKETFFT_ENABLED()
+  PyObject *has_spectral = Py_True;
+#else
+  PyObject *has_spectral = Py_False;
+#endif
+ ASSERT_TRUE(set_module_attr("has_spectral", has_spectral));
+
   // force ATen to initialize because it handles
   // setting up TH Errors so that they throw C++ exceptions
   at::init();
 
   // Automatically translate errors thrown from pybind11 functions
   py::register_exception_translator([](std::exception_ptr e) { // NOLINT
-    if (torch::crash_handler::is_enabled()) {
+    if (torch::crash_handler::is_enabled_on_exceptions()) {
       torch::crash_handler::write_minidump();
     }
 
@@ -950,6 +960,9 @@ PyObject* initModule() {
   py_module.def("vitals_enabled", &at::vitals::torchVitalEnabled);
   py_module.def("set_vital", [](const std::string &vital, const std::string &attr, const std::string value){
     return at::vitals::VitalsAPI.setVital(vital, attr, value);
+  });
+  py_module.def("read_vitals", [](){
+    return at::vitals::VitalsAPI.readVitals();
   });
 
   py_module.def(

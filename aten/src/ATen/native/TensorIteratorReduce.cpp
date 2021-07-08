@@ -139,8 +139,8 @@ void TensorIteratorBase::foreach_reduced_elt(loop_subiter_t loop, bool paralleli
     auto non_reduced_shape = shape.slice(reduce_dims, shape.size() - reduce_dims);
 
     int64_t non_reduced_numel = 1;
-    for (const auto i : c10::irange(non_reduced_shape.size())) {
-      non_reduced_numel *= non_reduced_shape[i];
+    for (const auto i : non_reduced_shape) {
+      non_reduced_numel *= i;
     }
     DimCounter dims {non_reduced_shape, {0, non_reduced_numel}};
     while (!dims.is_done()) {
