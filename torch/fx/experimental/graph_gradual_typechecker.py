@@ -231,6 +231,10 @@ def calculate(d_in, module_instance, index):
 
         return (n // stride[0]) + 1
 
+    else:
+        raise TypeError(f'{d_in} in {module_instance} must be a number or Dyn')
+
+
 def get_greatest_upper_bound(type1, type2):
     """
     Get the most precise type that's consistent with the given types
@@ -240,9 +244,10 @@ def get_greatest_upper_bound(type1, type2):
     elif type2 == Dyn:
         return type1
     elif isinstance(type1, TensorType) and isinstance(type2, TensorType):
-        assert len(type1.__args__) == len(type2.__args__)
+        assert is_consistent(type1, type2)
         gub = [t1 if is_more_precise(t1, t2) else t2 for (t1, t2) in zip(type1.__args__, type2.__args__)]
         return TensorType(tuple(gub))
+
 
 @register_inference_rule(Conv2d)
 def conv2d_inference_rule(n: Node, module_instance):
@@ -308,31 +313,36 @@ def maxpool2d_check(typ, module_instance):
 
 @register_inference_rule(torch.nn.MaxPool2d)
 def maxpool2d_inference_rule(n: Node, module_instance):
+    """
+    Given a MaxPool2D instance and a node check the following conditions:
+    - Input size matches size 3 or 4
+    - Current node type is consistent with the output type we will calculate
+    - Input size matches output size and the last two dimensions of the output
+      are w_out and h_out. The remaining dimensions are the same as the input
+    - Our final result is the greatest lower bound of the output we calculate
+      and the current node type.
+    """
     assert isinstance(n.args[0], Node)
 
     if n.args[0].type == Dyn and n.type == Dyn:
-        return Dyn
+        pass
 
-    # Todo backwards propagation
     elif n.args[0].type == Dyn and isinstance(n.type, TensorType):
-        n.type = maxpool2d_check(n.type, module_instance)
-        return n.type
+        n.type = maxpool2d_check(n.args[0].type, module_instance)
+        # n.args[0].type = n.type # backwards propagation example (for next PR)
 
     elif n.type == Dyn and isinstance(n.args[0].type, TensorType):
+        # forward type inference
         n.type = maxpool2d_check(n.args[0].type, module_instance)
-        return n.type
 
     elif isinstance(n.args[0].type, TensorType) and isinstance(n.type, TensorType):
-        new_arg = maxpool2d_check(n.args[0].type, module_instance)
-        new_node_type = maxpool2d_check(n.type, module_instance)
+        n.args[0].type = maxpool2d_check(n.args[0].type, module_instance)
+        n.type = get_greatest_upper_bound(n.type, n.args[0].type)
 
-        n.type = new_node_type
-
-        if is_more_precise(new_arg, n.type):
-            n.type = new_arg
-        return n.type
     else:
         raise TypeError(f'Cannot apply {module_instance} with input type {n.args[0].type} and existing type {n.type} on {n}')
+
+    return n.type
 
 
 
