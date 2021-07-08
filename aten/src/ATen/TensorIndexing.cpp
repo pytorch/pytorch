@@ -50,7 +50,7 @@ static inline void set_item(const Tensor& self, ArrayRef<TensorIndex> indices, c
     if (isQIntType(self.scalar_type())) {
       value = at::indexing::scalarToTensor(v, device(kCPU).dtype(kFloat), at::Device(kCPU));
     } else {
-      value = at::indexing::scalarToTensor(v, self.options(), self.device());
+      value = at::indexing::scalarToTensor(v, self.options(), at::Device(kCPU));
     }
   }
 
