@@ -2700,18 +2700,15 @@ Tensor _det_lu_based_helper_backward(
     return Tensor();
   }
 
-  // run det_backward only if backward is run on _det_lu_based_helper_backward.
-  // _det_lu_based_helper_backward is more stable for forward det computing functions,
-  // but it fails with double backward gradient checks (gradgradcheck).
-  // det_backward, on the other hand, is less stable (due to restrictions on svd_backward,
-  // namely, svd_backward requries distinct singular values which are sufficiently different
-  // from each other), yet, if its computation is stable, so is its double backward.
-  // Hence, if only single backward is run, we use _det_lu_based_helper_backward,
-  // for the double backward case we use det_backward. The latter approach could produce
-  // unstable gradients, therefore we DO NOT recommend double backpropagation through
-  // det computing functions.
+  // lu_solve does not support double backward yet.
+  // Hence, if double backward, we use the eigendecomposition.
   if (at::GradMode::is_enabled()) {
-    return det_backward(det_grad, self, det);
+    Tensor l, v;
+    std::tie(l, v) = at::linalg_eig(self);
+
+    auto l_grad = prod_backward(det_grad, l, l.prod(-1), -1, false);
+
+    return linalg_eig_backward({l_grad, {}}, self, l, v);
   }
 
   // we use a sequence of kernels to avoid memory copies and checks,
