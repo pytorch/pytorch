@@ -61,6 +61,7 @@ static PyObject * THPStorage_(new)(PyObject *_self, PyObject *noargs)
   HANDLE_TH_ERRORS
   auto self = (THPStorage*)_self;
   THWStoragePtr new_storage(THWStorage_(new)(LIBRARY_STATE_NOARGS));
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   PyObject *_ret = THPStorage_(New)(new_storage);
   new_storage.release();
   return _ret;

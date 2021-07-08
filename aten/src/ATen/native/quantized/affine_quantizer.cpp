@@ -150,13 +150,14 @@ Tensor& quantize_tensor_per_channel_affine(
 
   checkRoundingMode(fn_name);
   checkFloatTensor(fn_name, rtensor);
-  checkCPUTensor(fn_name, rtensor);
   checkSameDevice(fn_name, rtensor, qtensor);
   checkSameSize(fn_name, qtensor, rtensor);
 
   AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
-    checkZeroPoints<underlying_t>(fn_name, zero_points);
+    if(qtensor.device().type() != c10::DeviceType::CUDA){
+      checkZeroPoints<underlying_t>(fn_name, zero_points);
+    }
   });
 
   TORCH_CHECK(
@@ -190,7 +191,6 @@ Tensor& quantize_tensor_per_channel_float_qparams(
 
   checkRoundingMode(fn_name);
   checkFloatTensor(fn_name, rtensor);
-  checkCPUTensor(fn_name, rtensor);
   checkSameDevice(fn_name, rtensor, qtensor);
   checkSameSize(fn_name, qtensor, rtensor);
 
@@ -254,13 +254,14 @@ Tensor& dequantize_tensor_per_channel_affine(
   static const std::string fn_name = "dequantize_tensor_per_channel_affine";
 
   checkFloatTensor(fn_name, rtensor);
-  checkCPUTensor(fn_name, rtensor);
   checkSameDevice(fn_name, rtensor, qtensor);
   checkSameSize(fn_name, qtensor, rtensor);
 
   AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
-    checkZeroPoints<underlying_t>(fn_name, zero_points);
+    if(qtensor.device().type() != c10::DeviceType::CUDA){
+      checkZeroPoints<underlying_t>(fn_name, zero_points);
+    }
   });
 
   TORCH_CHECK(
@@ -292,7 +293,6 @@ Tensor& dequantize_tensor_per_channel_float_qparams(
   static const std::string fn_name = "dequantize_tensor_per_channel_affine";
 
   checkFloatTensor(fn_name, rtensor);
-  checkCPUTensor(fn_name, rtensor);
   checkSameDevice(fn_name, rtensor, qtensor);
   checkSameSize(fn_name, qtensor, rtensor);
 
