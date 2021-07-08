@@ -468,7 +468,6 @@ def _model_to_graph(model, args, verbose=False,
 
     params_dict = _get_named_param_dict(graph, params)
 
-    all_input_and_param_names = [val.debugName() for val in graph.inputs()]
     graph = _optimize_graph(graph, operator_export_type,
                             _disable_torch_constant_prop=_disable_torch_constant_prop,
                             fixed_batch_size=fixed_batch_size, params_dict=params_dict,

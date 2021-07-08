@@ -104,16 +104,16 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             be exported. Set this to False if you want to export an untrained model.
             In this case, the exported model will first take all of its parameters
             as arguments, with the ordering as specified by ``model.state_dict().values()``.
-            This helps on stripping parameters from the model so that large models could be export
-            succssfully. Besides this, if this is False, no matter the model will be export in
+            This helps in stripping parameters from the model so that large models could be export
+            successfully. Besides this, if this is False, no matter the model will be export in
             inference mode or training mode, the optimization which may adjust graph inputs will
-            be skipped. For example, Conv and BatchNorm fusion.
+            be skipped — for example, Conv and BatchNorm fusion.
         verbose (bool, default False): if True, prints a description of the
             model being exported to stdout.
         training (enum, default TrainingMode.EVAL):
-            * ``TrainingMode.EVAL``: export the model in inference mode. The value of parameter
-              ``export_params`` and ``keep_initializers_as_inputs`` might disable optimizations which
-              might adjust the graph inputs.
+            * ``TrainingMode.EVAL``: export the model in inference mode. If export_params = Flase
+              or keep_initializers_as_inputs = True.", the optimization that might adjust graph
+              inputs will be skipped (e.g., fusing Conv and BatchNorm ops).
             * ``TrainingMode.PRESERVE``: export the model in inference mode if model.training is
               False and in training mode if model.training is True.
             * ``TrainingMode.TRAINING``: export the model in training mode. Disables optimizations
@@ -187,8 +187,8 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
         do_constant_folding (bool, default False): Apply the constant-folding optimization.
             Constant-folding will replace some of the ops that have all constant inputs
             with pre-computed constant nodes.
-            The value of parameter ``export_params`` and ``keep_initializers_as_inputs`` might disable
-            this optimazation because it might adjust the graph inputs.
+            Since this optimization adjusts model initializers, it will be disabled if
+            export_params = Flase or keep_initializers_as_inputs = True.
         example_outputs (T or a tuple of T, where T is Tensor or convertible to Tensor, default None):
             Must be provided when exporting a ScriptModule or ScriptFunction, ignored otherwise.
             Used to determine the type and shape of the outputs without tracing the execution of
@@ -270,12 +270,12 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
 
         keep_initializers_as_inputs (bool, default None): If True, all the
             initializers (typically corresponding to parameters) in the
-            exported graph will also be added as inputs to the graph. If False,
-            then initializers are not added as inputs to the graph, and only
-            the non-parameter inputs are added as inputs. In such case, no matter
-            the model will be export in inference mode or training mode, the
-            optimization which might adjust graph inputs will be skipped.
-            For example, fusing Conv and BatchNorm ops.
+            exported graph will also be added as inputs to the graph.
+
+            If False, then initializers are not added as inputs to the graph, and only
+            the non-parameter inputs are added as inputs. Meanwhile, the optimization
+            that might adjust graph inputs will be skipped (e.g., fusing Conv and
+            BatchNorm ops), even the user export this model in inference mode.
 
             This may allow for better optimizations (e.g. constant folding) by
             backends/runtimes.
