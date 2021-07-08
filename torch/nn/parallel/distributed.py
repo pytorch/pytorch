@@ -1290,26 +1290,25 @@ class DistributedDataParallel(Module):
 
             >>> def noop(state: object, bucket: dist.GradBucket): -> torch.futures.Future
             >>>     fut = torch.futures.Future()
-            >>>     fut.set_result(bucket.get_tensors())
+            >>>     fut.set_result([bucket.get_tensor()])
             >>>     return fut
 
-            >>> ddp.register_comm_hook(state = None, hook = noop)
+            >>> ddp.register_comm_hook(state=None, hook=noop)
 
         Example::
             Below is an example of a Parallel SGD algorithm where gradients are encoded before
             allreduce, and then decoded after allreduce.
 
             >>> def encode_and_decode(state: object, bucket: dist.GradBucket): -> torch.futures.Future
-            >>>     tensors = [t / process_group.world_size for t in bucket.get_tensors()]
-            >>>     encoded_tensors = encode(tensors) # encode gradients
-            >>>     fut = process_group.allreduce(encoded_tensors).get_future()
+            >>>     encoded_tensor = encode(bucket.get_tensor()) # encode gradients
+            >>>     fut = torch.distributed.all_reduce(encoded_tensor).get_future()
             >>>     # Define the then callback to decode.
             >>>     def decode(fut):
-            >>>         decoded_tensors = decode(fut.value()) # decode gradients
-            >>>         return decoded_tensors
+            >>>         decoded_tensor = decode(fut.value()[0]) # decode gradients
+            >>>         return [decoded_tensor]
             >>>     return fut.then(decode)
 
-            >>> ddp.register_comm_hook(state = None, hook = encode_and_decode)
+            >>> ddp.register_comm_hook(state=None, hook=encode_and_decode)
         """
         self._check_comm_hook(hook)
         self.logger._set_comm_hook_name(hook.__qualname__)
