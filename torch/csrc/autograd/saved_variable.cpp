@@ -153,6 +153,22 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   return var;
 }
 
+void SavedVariable::register_hooks() {
+  if (!data_.defined()) {
+    if (!was_default_constructed_) {
+      TORCH_CHECK(false,
+        "Calling register_hooks on a saved tensor after it has been freed. "
+        "Saved intermediate values of the graph are freed when you call "
+        ".backward() or autograd.grad(). Specify retain_graph=True if you "
+        "need to backward through the graph a second time or if you need to "
+        "access saved variables after calling backward.");
+    } else {
+      TORCH_CHECK(false,
+        "Calling register_hooks on a saved tensor with value None is forbidden");
+    }
+  }
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char* ERR_BACKWARD_TWICE =
     "Trying to backward through the graph a second time (or directly access saved "
