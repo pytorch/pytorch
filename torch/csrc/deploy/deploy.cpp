@@ -12,8 +12,10 @@
 // to simply copy the contents of this symbol to disk and dlopen it to create an
 // instance of python.
 extern "C" __attribute__((
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     __weak__)) char _binary_libtorch_deployinterpreter_so_start[];
 extern "C"
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     __attribute__((__weak__)) char _binary_libtorch_deployinterpreter_so_end[];
 #ifdef FBCODE_CAFFE2
 // in fbcode, we build the interpreter version with cuda bindings explicitly and
@@ -59,6 +61,7 @@ InterpreterSession ReplicatedObj::acquire_session(
   TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 InterpreterSession::~InterpreterSession() {
   if (manager_ && notify_idx_ >= 0) {
     manager_->resources_.free(notify_idx_);
@@ -80,6 +83,7 @@ void ReplicatedObjImpl::unload(const Interpreter* on_this_interpreter) {
   TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 ReplicatedObjImpl::~ReplicatedObjImpl() {
   unload(nullptr);
 }
@@ -119,9 +123,9 @@ Interpreter::Interpreter(InterpreterManager* manager)
   // See comment above for fbcode vs oss behavior
   char* lib_start = nullptr;
   char* lib_end = nullptr;
+  bool cuda_available = torch::cuda::is_available();
 #ifdef FBCODE_CAFFE2
-  if (torch::cuda::is_available() &&
-      &_binary_libtorch_deployinterpreter_cuda_so_start &&
+  if (&_binary_libtorch_deployinterpreter_cuda_so_start &&
       &_binary_libtorch_deployinterpreter_cuda_so_end) {
     lib_start = _binary_libtorch_deployinterpreter_cuda_so_start;
     lib_end = _binary_libtorch_deployinterpreter_cuda_so_end;
@@ -135,9 +139,11 @@ Interpreter::Interpreter(InterpreterManager* manager)
   lib_start = _binary_libtorch_deployinterpreter_so_start;
   lib_end = _binary_libtorch_deployinterpreter_so_end;
 #endif // FBCODE_CAFFE2
+  std::string cuda_available_str = cuda_available ? "true" : "false";
   TORCH_CHECK(
       lib_start != nullptr && lib_end != nullptr,
-      "torch::deploy requires a build-time dependency on embedded_interpreter or embedded_interpreter_cuda, neither of which were found.");
+      "torch::deploy requires a build-time dependency on embedded_interpreter or embedded_interpreter_cuda, neither of which were found.  torch::cuda::is_available()=" +
+          cuda_available_str);
 
   write_tmp_lib(dst, lib_start, lib_end);
   fclose(dst);

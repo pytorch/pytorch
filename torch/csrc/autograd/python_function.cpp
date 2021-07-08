@@ -2,11 +2,9 @@
 
 #include <torch/csrc/python_headers.h>
 #include <structmember.h>
-#include <unordered_map>
-#include <unordered_set>
-#include <exception>
 #include <ATen/ATen.h>
 #include <ATen/SequenceNumber.h>
+#include <c10/util/irange.h>
 #include <pybind11/pybind11.h>
 
 #include <torch/csrc/THP.h>
@@ -32,6 +30,8 @@
 #include <stdexcept>
 #include <string>
 #include <tuple>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -67,7 +67,7 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   THPObjectPtr pyInputs(PyTuple_New(num_inputs));
   if (!pyInputs) throw_python_error();
   auto& output_info = py_fn->output_info;
-  for (size_t i = 0; i < num_inputs; ++i) {
+  for (const auto i : c10::irange(num_inputs)) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     PyObject* input;
     if (inputs[i].defined() || !py_fn->materialize_grads) {
@@ -92,7 +92,7 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   // Truncate the result tuple in that case.
   if (num_outputs > num_forward_inputs) {
     bool all_none = true;
-    for (int i = num_forward_inputs; i < num_outputs; i++) {
+    for (const auto i : c10::irange(num_forward_inputs, num_outputs)) {
       all_none &= PyTuple_GET_ITEM(r.get(), i) == Py_None;
     }
     if (all_none) {
@@ -114,8 +114,6 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   // Massage the Python results tuple back into a C++ variable_list
   variable_list results;
   results.reserve(num_outputs);
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-  auto& input_info = py_fn->input_info;
   for (int i = 0; i != num_outputs; ++i) {
     PyObject* output = PyTuple_GET_ITEM(r.get(), i);
     bool was_variable = is_variable_input[i];
@@ -197,19 +195,9 @@ static int THPFunction_traverse(THPFunction *self, visitproc visit, void *arg)
 
 static int THPFunction_clear(THPFunction *self)
 {
-  // Why is this guaranteed to be true?  Suppose that self->cdata is non-null
-  // (otherwise the condition is trivially true).  Then there is a PyNode
-  // which contains an owning reference to this object.  But we are only
-  // allowed to clear if all owning references are gone!  Contradiction.
-  //
-  // However, note that THPFunction_clear is typically called in the shared_ptr
-  // destructor of PyNode; in that case, per
-  // https://cplusplus.github.io/LWG/lwg-active.html#2751 it's not currently
-  // specified in the standard that this is guaranteed.  If you see this
-  // assert triggering in the wild, feel free to comment it out.  They're
-  // likely to standardize that you ARE guaranteed to see the weak pointers
-  // as expired in the destructor in the future, so we'll keep this for now.
-  TORCH_INTERNAL_ASSERT(self->cdata.expired());
+  // Note that the cdata might not be expired yet in the case where this
+  // object is part of a cycle and the GC happens to tp_clear this PyObject
+  // before the other ones that trigger the de-allocation of the cdata
 
   Py_CLEAR(self->needs_input_grad);
 
@@ -227,6 +215,20 @@ static int THPFunction_clear(THPFunction *self)
 
 static void THPFunction_dealloc(THPFunction* self)
 {
+  // Why is this guaranteed to be true?  Suppose that self->cdata is non-null
+  // (otherwise the condition is trivially true).  Then there is a PyNode
+  // which contains an owning reference to this object.  But we are only
+  // allowed to clear if all owning references are gone!  Contradiction.
+  //
+  // However, note that THPFunction_clear is typically called in the shared_ptr
+  // destructor of PyNode; in that case, per
+  // https://cplusplus.github.io/LWG/lwg-active.html#2751 it's not currently
+  // specified in the standard that this is guaranteed.  If you see this
+  // assert triggering in the wild, feel free to comment it out.  They're
+  // likely to standardize that you ARE guaranteed to see the weak pointers
+  // as expired in the destructor in the future, so we'll keep this for now.
+  TORCH_INTERNAL_ASSERT(self->cdata.expired());
+
   PyObject_GC_UnTrack(self);
   THPFunction_clear(self);
   self->cdata.~weak_ptr<PyNode>();
@@ -271,7 +273,7 @@ static std::unordered_set<at::TensorImpl*> _mark_dirty(THPFunction *self)
       "but is %s", THPUtils_typename(self->dirty_tensors));
   Py_ssize_t num_dirty = PyTuple_GET_SIZE(self->dirty_tensors);
   dirty_inputs.reserve(num_dirty);
-  for (int i = 0; i < num_dirty; i++) {
+  for(const auto i : c10::irange(num_dirty)) {
     PyObject *obj = PyTuple_GET_ITEM(self->dirty_tensors, i);
     THPFunction_assert(THPVariable_Check(obj), "mark_dirty can "
         "only accept variables, but argument %d is of type %s", i,
@@ -314,7 +316,7 @@ static void _wrap_outputs(const std::shared_ptr<PyNode>& cdata, THPFunction *sel
 
   std::vector<c10::optional<Variable>> raw_output_vars;
   raw_output_vars.reserve(num_outputs);
-  for(int i = 0; i < num_outputs; ++i){
+  for (const auto i : c10::irange(num_outputs)) {
     PyObject* obj = PyTuple_GET_ITEM(raw_output, i);
     // Only process tensors as outputs for autograd purposes.
     if (THPVariable_Check(obj)) {
@@ -327,7 +329,7 @@ static void _wrap_outputs(const std::shared_ptr<PyNode>& cdata, THPFunction *sel
   // Wrap only the tensor outputs.
   auto wrapped_outputs = _wrap_outputs(input_vars, non_differentiable, dirty_inputs, raw_output_vars, cdata_if_executable);
 
-  for (int i = 0; i < num_outputs; i++) {
+  for(const auto i : c10::irange(num_outputs)) {
     PyObject* obj = PyTuple_GetItem(raw_output, i);
     // Keep the non-tensor outputs as is.
     if (!THPVariable_Check(obj)) {
@@ -356,7 +358,7 @@ static void _save_variables(const std::shared_ptr<PyNode>& cdata_ptr, THPFunctio
   Py_ssize_t num_saved = PyTuple_GET_SIZE(self->to_save);
   self->saved_variables.clear();
   self->saved_variables.reserve(num_saved);
-  for (int i = 0; i < num_saved; i++) {
+  for(const auto i : c10::irange(num_saved)) {
     PyObject *obj = PyTuple_GET_ITEM(self->to_save, i);
     if (obj == Py_None) {
       self->saved_variables.emplace_back();
@@ -367,7 +369,7 @@ static void _save_variables(const std::shared_ptr<PyNode>& cdata_ptr, THPFunctio
       self->saved_variables.emplace_back(tensor, is_output);
     } else {
       throw torch::TypeError(
-          "save_for_backward can only save variables, but argument %d is of "
+          "save_for_backward can only save variables, but argument %ld is of "
           "type %s", i, Py_TYPE(obj)->tp_name);
     }
   }
@@ -387,7 +389,7 @@ _parse_non_differentiable(THPFunction *self)
       "tuple but is %s", THPUtils_typename(self->non_differentiable));
   Py_ssize_t num_nondiff = PyTuple_GET_SIZE(self->non_differentiable);
   set.reserve(num_nondiff);
-  for (int i = 0; i < num_nondiff; i++) {
+  for(const auto i : c10::irange(num_nondiff)) {
     PyObject *t = PyTuple_GET_ITEM(self->non_differentiable, i);
     THPFunction_assert(THPVariable_Check(t), "mark_non_differentiable "
         "only accepts variable arguments, but got %s", THPUtils_typename(t));
@@ -417,7 +419,7 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args) {
   auto num_args = PyTuple_GET_SIZE(args);
   unpacked.input_tuple = PyTuple_New(num_args);
   flags.needs_input_grad = PyTuple_New(num_args);
-  for (int i = 0; i < num_args; i++) {
+  for(const auto i : c10::irange(num_args)) {
     PyObject *arg = PyTuple_GET_ITEM(args, i);
 
     bool is_variable = THPVariable_Check(arg);
@@ -461,7 +463,7 @@ static torch::jit::Node* _trace_pre_record(
   std::string arg_types;
   arg_types.reserve(num_args);
   scalar_args.reserve(num_args);
-  for (int i = 0; i < num_args; i++) {
+  for(const auto i : c10::irange(num_args)) {
     PyObject *arg_object = PyTuple_GET_ITEM(input_objects, i);
     if (THPVariable_Check(arg_object)) {
       arg_types.push_back('d');
@@ -493,7 +495,6 @@ static void _trace_post_record(
 
   // Isolate C variable ptrs in a vector
   int num_outputs = PyTuple_GET_SIZE(output_objects);
-  variable_list output_vars(num_outputs);
   auto graph = node->owningGraph();
   node->addOutput();
   if (!unpack_output) {
@@ -503,7 +504,7 @@ static void _trace_post_record(
     auto unpacked = graph->createTupleUnpack(node->output())->insertAfter(node);
     node = unpacked;
   }
-  for (int i = 0; i < num_outputs; ++i) {
+  for (const auto i : c10::irange(num_outputs)) {
     PyObject* obj = PyTuple_GET_ITEM(output_objects, i);
     if (THPVariable_Check(obj)) {
       Value* value = node->outputs()[i];
@@ -611,7 +612,7 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
   if (!ctx_input_tuple) return nullptr;
   Py_INCREF(ctx);
   PyTuple_SET_ITEM(ctx_input_tuple.get(), 0, (PyObject*)ctx);
-  for (int i = 0; i < num_args; ++i) {
+  for (const auto i : c10::irange(num_args)) {
     PyObject *arg = PyTuple_GET_ITEM(unpacked_input.input_tuple.get(), i);
     Py_INCREF(arg);
     PyTuple_SET_ITEM(ctx_input_tuple.get(), i + 1, arg);
@@ -707,7 +708,7 @@ static PyObject *unpack_saved_variables(
   // because we will never hit this line of code if the buffers are freed--
   // and in any case saved_for will be non-NULL.)
   TORCH_INTERNAL_ASSERT(saved_for);
-  for (int i = 0; i < num_saved; i++) {
+  for(const auto i : c10::irange(num_saved)) {
     auto unpacked_var = saved_variables[i].unpack(saved_for);
     THPObjectPtr value;
     if (!unpacked_var.defined()) {
@@ -742,6 +743,27 @@ PyObject *THPFunction_saved_variables(THPFunction *self, void *_unused)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject *THPFunction_raw_saved_tensors(THPFunction *self, void *_unused)
+{
+  HANDLE_TH_ERRORS
+  // User tries to access saved variables after they have been freed
+  THPUtils_assert(!self->has_freed_buffers, ERR_BACKWARD_TWICE);
+  const auto& saved_variables = self->saved_variables;
+  if (saved_variables.empty())
+    return PyTuple_New(0);
+  size_t num_saved = saved_variables.size();
+  THPObjectPtr saved(PyTuple_New(num_saved));
+  if (!saved) {
+    return nullptr;
+  }
+  for(const auto i : c10::irange(num_saved)) {
+    py::object obj = py::cast(saved_variables[i], py::return_value_policy::reference);
+    PyTuple_SET_ITEM(saved.get(), i, obj.release().ptr());
+  }
+  return saved.release();
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject *THPFunction_next_functions(THPFunction *self, void *_unused)
 {
   HANDLE_TH_ERRORS
@@ -756,7 +778,7 @@ PyObject *THPFunction_next_functions(THPFunction *self, void *_unused)
   THPObjectPtr result(PyTuple_New(num_outputs));
   if (!result)
     return nullptr;
-  for (uint32_t i = 0; i < num_outputs; i++) {
+  for (const auto i : c10::irange(num_outputs)) {
     THPObjectPtr fn_tuple(PyTuple_New(2));
     if (!fn_tuple) return nullptr;
     const auto& edge = cdata->next_edge(i);
@@ -844,6 +866,7 @@ PyObject* getRequiresGrad(PyObject* obj, void* _unused) {
 static struct PyGetSetDef THPFunction_properties[] = {
   {"saved_tensors", (getter)THPFunction_saved_tensors, nullptr, nullptr, nullptr},
   {"saved_variables", (getter)THPFunction_saved_variables, nullptr, nullptr, nullptr},
+  {"_raw_saved_tensors", (getter)THPFunction_raw_saved_tensors, nullptr, nullptr, nullptr},
   {"next_functions", (getter)THPFunction_next_functions, nullptr, nullptr, nullptr},
   {"to_save", &getObject<&THPFunction::to_save>, &setObject<&THPFunction::to_save>, nullptr, nullptr},
   {"non_differentiable", &getObject<&THPFunction::non_differentiable>, &setObject<&THPFunction::non_differentiable>, nullptr, nullptr},

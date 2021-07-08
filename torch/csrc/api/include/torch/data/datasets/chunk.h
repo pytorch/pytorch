@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/irange.h>
 #include <torch/arg.h>
 #include <torch/csrc/utils/memory.h>
 #include <torch/data/datasets/stateful.h>
@@ -399,7 +400,7 @@ class ChunkDataset final
 
     AT_ASSERT(running_preloaders_ == 0);
     running_preloaders_ = options_.preloader_count();
-    for (size_t i = 0; i < options_.preloader_count(); ++i) {
+    for (const auto i : c10::irange(options_.preloader_count())) {
       preload_threads_.emplace_back([this, i]() { this->preloader(i); });
     }
   }
@@ -441,7 +442,7 @@ class ChunkDataset final
           }
         }
         UnwrappedBatchType data = chunk_reader_.read_chunk(chunk_idx[0]);
-        for (size_t i = 1; i < chunk_idx.size(); ++i) {
+        for (const auto i : c10::irange(1, chunk_idx.size())) {
           auto chunk_data = chunk_reader_.read_chunk(chunk_idx[i]);
           std::move(
               chunk_data.begin(), chunk_data.end(), std::back_inserter(data));

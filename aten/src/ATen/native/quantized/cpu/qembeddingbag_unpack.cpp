@@ -72,11 +72,10 @@ at::Tensor PackedEmbeddingBagWeight::unpack() {
         uint8_t* output_row =
             output_data + row * output_columns / num_elem_per_byte;
 
-        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-        for (std::size_t col = 0; col < output_columns / num_elem_per_byte;
-             ++col) {
+        // output_columns
+        for (const auto col : c10::irange(output_columns / num_elem_per_byte)) {
           output_row[col] = input_row[col];
-        } // output_columns
+        }
       }
     });
 
@@ -128,7 +127,7 @@ Tensor qembeddingbag_byte_unpack(const Tensor& packed_weight) {
     at::parallel_for(
       0, input_rows, 1, [&](int32_t start_idx, int32_t end_idx) {
         for (int64_t row = start_idx; row < end_idx; ++row) {
-          fbgemm::Fused8BitRowwiseQuantizedSBFloatToFloat(
+          fbgemm::Fused8BitRowwiseQuantizedSBFloatToFloatOrHalf<float>(
             input_data + row * input_columns,
             1,
             input_columns,
@@ -175,7 +174,7 @@ Tensor _qembeddingbag_nbit_unpack_helper(
     at::parallel_for(
       0, input_rows, 1, [&](int32_t start_idx, int32_t end_idx) {
         for (int64_t row = start_idx; row < end_idx; ++row) {
-          fbgemm::FusedNBitRowwiseQuantizedSBHalfToFloat(BIT_RATE,
+          fbgemm::FusedNBitRowwiseQuantizedSBHalfToFloatOrHalf<float>(BIT_RATE,
             input_data + row * input_columns,
             1,
             input_columns,

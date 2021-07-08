@@ -71,6 +71,12 @@ TORCH_META_FUNC(silu) (const Tensor& self) {
   build_unary_op(maybe_get_output(), self);
 }
 
+TORCH_META_FUNC(silu_backward) (
+  const Tensor& grad_output, const Tensor& input
+) {
+  build_borrowing_binary_op(maybe_get_output(), grad_output, input);
+}
+
 TORCH_META_FUNC(mish) (const Tensor& self) {
   build_unary_op(maybe_get_output(), self);
 }
@@ -127,6 +133,16 @@ TORCH_META_FUNC(hardsigmoid_backward) (const Tensor& grad_output, const Tensor& 
   build_borrowing_binary_op(maybe_get_output(), grad_output, self);
 }
 
+TORCH_META_FUNC(hardshrink) (const Tensor & self, const Scalar& lambd) {
+  build_unary_op(maybe_get_output(), self);
+}
+
+TORCH_META_FUNC(hardshrink_backward) (
+  const Tensor & grad, const Tensor & self, const Scalar& lambd
+) {
+  build_borrowing_binary_op(maybe_get_output(), grad, self);
+}
+
 static inline void softshrink_check(const Scalar& lambd) {
   double lamb = lambd.to<double>();
   TORCH_CHECK(lamb >= 0, "lambda must be greater or equal to 0, but found to be ", lamb, ".");
@@ -137,6 +153,22 @@ TORCH_META_FUNC(softshrink) (
 ) {
   softshrink_check(lambd);
   build_unary_op(maybe_get_output(), self);
+}
+
+TORCH_META_FUNC(softshrink_backward) (
+  const Tensor & grad, const Tensor & self, const Scalar& lambd
+) {
+  build_borrowing_binary_op(maybe_get_output(), grad, self);
+}
+
+TORCH_META_FUNC(gelu) (const Tensor & self) {
+  build_unary_op(maybe_get_output(), self);
+}
+
+TORCH_META_FUNC(gelu_backward) (
+  const Tensor& grad, const Tensor& self
+) {
+  build_borrowing_binary_op(maybe_get_output(), grad, self);
 }
 
 } // namespace meta
@@ -213,6 +245,12 @@ TORCH_IMPL_FUNC(silu_out) (
   silu_stub(device_type(), *this);
 }
 
+TORCH_IMPL_FUNC(silu_backward_out) (
+  const Tensor& grad_output, const Tensor& input, const Tensor& grad_input
+) {
+  silu_backward_stub(device_type(), *this);
+}
+
 TORCH_IMPL_FUNC(mish_out) (
   const Tensor& self, const Tensor& result
 ) {
@@ -264,10 +302,40 @@ TORCH_IMPL_FUNC(hardsigmoid_backward_out) (
   hardsigmoid_backward_stub(device_type(), *this);
 }
 
+TORCH_IMPL_FUNC(hardshrink_out) (
+  const Tensor & self, const Scalar& lambd, const Tensor& result
+) {
+  hardshrink_stub(device_type(), *this, lambd);
+}
+
+TORCH_IMPL_FUNC(hardshrink_backward_out) (
+  const Tensor & grad, const Tensor & self, const Scalar& lambd, const Tensor& grad_input
+) {
+  shrink_backward_stub(device_type(), *this, lambd);
+}
+
 TORCH_IMPL_FUNC(softshrink_out) (
   const Tensor & self, const Scalar& lambd, const Tensor& result
 ) {
   softshrink_stub(device_type(), *this, lambd);
+}
+
+TORCH_IMPL_FUNC(softshrink_backward_out) (
+  const Tensor & grad, const Tensor & self, const Scalar& lambd, const Tensor& grad_input
+) {
+  shrink_backward_stub(device_type(), *this, lambd);
+}
+
+TORCH_IMPL_FUNC(gelu_out_cpu) (
+  const Tensor& self, const Tensor& result
+) {
+  GeluKernel(kCPU, *this);
+}
+
+TORCH_IMPL_FUNC(gelu_backward_out_cpu) (
+  const Tensor& grad, const Tensor& self, const Tensor& grad_input
+) {
+  GeluBackwardKernel(kCPU, *this);
 }
 
 Tensor hardtanh(const Tensor& self, const Scalar& min, const Scalar& max) {
@@ -368,15 +436,6 @@ Tensor & celu_(Tensor & self, const Scalar& alpha) {
       "ZeroDivisionError: alpha cannot be 0 for CELU");
   double inv_alpha = 1. / alpha.to<double>();
   return at::elu_(self, alpha, Scalar(1.0), Scalar(inv_alpha));
-}
-
-Tensor silu_backward(
-    const Tensor& grad_output,
-    const Tensor& input) {
-  Tensor grad_input = at::empty({0}, input.options());
-  auto iter = TensorIterator::borrowing_binary_op(grad_input, grad_output, input);
-  silu_backward_stub(iter.device_type(), iter);
-  return grad_input;
 }
 
 Tensor math_silu_backward(
@@ -763,63 +822,6 @@ std::tuple<Tensor, Tensor> prelu_backward_cpu(const Tensor& grad_out_, const Ten
     weight_grad = weight_grad_collector.sum(reduce_dims);
   }
   return std::tuple<Tensor, Tensor>{input_grad, weight_grad};
-}
-
-// -----------------------------------
-// hardshrink
-// -----------------------------------
-Tensor hardshrink(const Tensor & self, const Scalar& lambd) {
-  auto out_tensor = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  auto iter = TensorIterator::unary_op(out_tensor, self);
-  hardshrink_stub(iter.device_type(), iter, lambd);
-  return out_tensor;
-}
-
-Tensor hardshrink_backward(const Tensor & grad, const Tensor & self, const Scalar& lambd) {
-  auto out_tensor = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  auto iter = TensorIterator::borrowing_binary_op(out_tensor, grad, self);
-  shrink_backward_stub(iter.device_type(), iter, lambd);
-  return out_tensor;
-}
-
-
-Tensor& softshrink_backward_out(const Tensor & grad, const Tensor & self, const Scalar& lambd, Tensor& grad_input) {
-  auto iter = TensorIterator::borrowing_binary_op(grad_input, grad, self);
-  shrink_backward_stub(iter.device_type(), iter, lambd);
-  return grad_input;
-}
-
-Tensor softshrink_backward(const Tensor & grad, const Tensor & self, const Scalar& lambd) {
-  Tensor result;
-  auto iter = TensorIterator::borrowing_binary_op(result, grad, self);
-  shrink_backward_stub(iter.device_type(), iter, lambd);
-  return iter.output();
-}
-
-Tensor gelu_cpu(const Tensor& self) {
-  Tensor Y = at::native::empty_like(
-      self,
-      c10::nullopt /* dtype */,
-      c10::nullopt /* layout */,
-      c10::nullopt /* device */,
-      c10::nullopt /* pin_memory */,
-      LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  auto it = TensorIterator::unary_op(Y, self);
-  GeluKernel(kCPU, it);
-  return Y;
-}
-
-Tensor gelu_backward_cpu(const Tensor& grad, const Tensor& self) {
-  Tensor dX = at::native::empty_like(
-      self,
-      c10::nullopt /* dtype */,
-      c10::nullopt /* layout */,
-      c10::nullopt /* device */,
-      c10::nullopt /* pin_memory */,
-      LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  auto it = TensorIterator::borrowing_binary_op(dX, grad, self);
-  GeluBackwardKernel(kCPU, it);
-  return dX;
 }
 
 Tensor infinitely_differentiable_gelu_backward(

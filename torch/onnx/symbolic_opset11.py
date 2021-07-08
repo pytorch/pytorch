@@ -75,6 +75,18 @@ def clamp_max(g, self, max):
         return g.op("Min", self, max)
 
 
+def relu6(g, input):
+    relu = g.op("Relu", input)
+    dtype = input.type().scalarType()
+    if dtype is None:
+        dtype = 6  # float
+    else:
+        dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
+    min_val = g.op("Constant", value_t=torch.tensor(0, dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
+    max_val = g.op("Constant", value_t=torch.tensor(6, dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
+    return clamp(g, relu, min_val, max_val)
+
+
 # Opset 11 gather accepts negative indices
 @parse_args("v", "i", "v")
 def select(g, self, dim, index):

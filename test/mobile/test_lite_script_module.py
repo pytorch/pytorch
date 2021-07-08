@@ -1,12 +1,22 @@
 import torch
 import torch.utils.bundled_inputs
 import io
-from typing import Dict, List, NamedTuple
+from typing import Dict, List, NamedTuple, Type
 from collections import namedtuple
 import inspect
 
 from torch.jit.mobile import _load_for_lite_interpreter, _export_operator_list
 from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_quantized import (
+    override_quantized_engine,
+)
+from torch.testing._internal.common_quantization import (
+    AnnotatedSingleLayerLinearModel,
+    TwoLayerLinearModel,
+    AnnotatedNestedModel
+)
+from torch.quantization import quantize
+from torch.testing._internal.common_quantization import QuantizationTestCase, test_only_eval_fn
 
 class TestLiteScriptModule(TestCase):
 
@@ -430,6 +440,98 @@ class TestLiteScriptModule(TestCase):
             error_message = f"{e}"
         self.assertTrue('test_lite_script_module.py\", line {}'.format(lineno + 8) in error_message)
         self.assertTrue('top(FooTest5)' in error_message)
+
+
+class TestLiteScriptQuantizedModule(QuantizationTestCase):
+
+    def _create_quantized_model(self, model_class: Type[torch.nn.Module], **kwargs):
+        qengine = "qnnpack"
+        with override_quantized_engine(qengine):
+            qconfig = torch.quantization.get_default_qconfig(qengine)
+            model = model_class(**kwargs)
+            model = quantize(model, test_only_eval_fn, [self.calib_data])
+
+        return model
+
+    def _compare_script_and_mobile(self,
+                                   model: torch.nn.Module,
+                                   input: torch.Tensor):
+        qengine = "qnnpack"
+        with override_quantized_engine(qengine):
+            script_module = torch.jit.script(model)
+            script_module_result = script_module(input)
+
+            max_retry = 5
+            for retry in range(1, max_retry + 1):
+                # retires `max_retry` times; breaks iff succeeds else throws exception
+                try:
+                    buffer = io.BytesIO(script_module._save_to_buffer_for_lite_interpreter())
+                    buffer.seek(0)
+                    mobile_module = _load_for_lite_interpreter(buffer)
+
+                    mobile_module_result = mobile_module(input)
+
+                    torch.testing.assert_allclose(script_module_result, mobile_module_result)
+                    mobile_module_forward_result = mobile_module.forward(input)
+                    torch.testing.assert_allclose(script_module_result, mobile_module_forward_result)
+
+                    mobile_module_run_method_result = mobile_module.run_method("forward", input)
+                    torch.testing.assert_allclose(script_module_result, mobile_module_run_method_result)
+                except AssertionError as e:
+                    if retry == max_retry:
+                        raise e
+                    else:
+                        continue
+                break
+
+
+
+    def test_single_layer(self):
+        input = torch.rand(2, 5, dtype=torch.float)
+        quantized_model = self._create_quantized_model(model_class=AnnotatedSingleLayerLinearModel, qengine="qnnpack")
+        self._compare_script_and_mobile(model=quantized_model, input=input)
+
+    def test_two_layer(self):
+        input = torch.rand(2, 5, dtype=torch.float)
+        quantized_model = self._create_quantized_model(model_class=TwoLayerLinearModel)
+        self._compare_script_and_mobile(model=quantized_model, input=input)
+
+    def test_annotated_nested(self):
+        input = torch.rand(2, 5, dtype=torch.float)
+        quantized_model = self._create_quantized_model(model_class=AnnotatedNestedModel, qengine="qnnpack")
+        self._compare_script_and_mobile(model=quantized_model, input=input)
+
+    def test_quantization_example(self):
+
+        # From the example in Static Quantization section of https://pytorch.org/docs/stable/quantization.html
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.quant = torch.quantization.QuantStub()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+                self.relu = torch.nn.ReLU()
+                self.dequant = torch.quantization.DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.conv(x)
+                x = self.relu(x)
+                x = self.dequant(x)
+                return x
+
+        model_fp32 = M()
+
+        model_fp32.eval()
+        model_fp32.qconfig = torch.quantization.get_default_qconfig('qnnpack')
+        model_fp32_fused = torch.quantization.fuse_modules(model_fp32, [['conv', 'relu']])
+        model_fp32_prepared = torch.quantization.prepare(model_fp32_fused)
+        input_fp32 = torch.randn(4, 1, 4, 4)
+        model_fp32_prepared(input_fp32)
+        model_int8 = torch.quantization.convert(model_fp32_prepared)
+
+        input = torch.randn(4, 1, 4, 4)
+        self._compare_script_and_mobile(model=model_int8, input=input)
+
 
 if __name__ == '__main__':
     run_tests()

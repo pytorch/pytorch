@@ -216,6 +216,18 @@ if(USE_FFTW OR NOT MKL_FOUND)
   endif()
 endif()
 
+# --- [ PocketFFT
+set(AT_POCKETFFT_ENABLED 0)
+if(NOT MKL_FOUND)
+  find_path(POCKETFFT_INCLUDE_DIR NAMES pocketfft_hdronly.h
+            PATHS /usr/local/include
+            PATHS $ENV{POCKETFFT_HOME}
+           )
+  if(POCKETFFT_INCLUDE_DIR)
+    set(AT_POCKETFFT_ENABLED 1)
+  endif()
+endif()
+
 # ---[ Dependencies
 # NNPACK and family (QNNPACK, PYTORCH_QNNPACK, and XNNPACK) can download and
 # compile their dependencies in isolation as part of their build.  These dependencies
@@ -1161,7 +1173,7 @@ if(USE_CUDA)
       caffe2_update_option(USE_NVRTC OFF)
     endif()
     if(CAFFE2_USE_CUDNN)
-      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cudnn)
+      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cudnn-public)
     else()
       caffe2_update_option(USE_CUDNN OFF)
     endif()
@@ -1377,6 +1389,13 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
     add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe)
 
     list(APPEND Caffe2_DEPENDENCY_LIBS tensorpipe)
+    if(USE_CUDA)
+      list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS tensorpipe_cuda)
+    elseif(USE_ROCM)
+      message(WARNING "TensorPipe doesn't yet support ROCm")
+      # Not yet...
+      # list(APPEND Caffe2_HIP_DEPENDENCY_LIBS tensorpipe_hip)
+    endif()
   endif()
 endif()
 
@@ -1462,7 +1481,7 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
   if(NOT USE_SYSTEM_ONNX)
     include_directories(${ONNX_INCLUDE_DIRS})
     # In mobile build we care about code size, and so we need drop
-    # everything (e.g. checker, optimizer) in onnx but the pb definition.
+    # everything (e.g. checker) in onnx but the pb definition.
     if(ANDROID OR IOS)
       caffe2_interface_library(onnx_proto onnx_library)
     else()
@@ -1520,6 +1539,8 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
 endif()
 
 # --[ ATen checks
+set(USE_LAPACK 0)
+
 if(NOT INTERN_BUILD_MOBILE)
   set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
   set(TORCH_NVCC_FLAGS $ENV{TORCH_NVCC_FLAGS})
@@ -1702,8 +1723,6 @@ if(NOT INTERN_BUILD_MOBILE)
   if(LAPACK_FOUND)
     set(USE_LAPACK 1)
     list(APPEND Caffe2_PRIVATE_DEPENDENCY_LIBS ${LAPACK_LIBRARIES})
-  else()
-    set(USE_LAPACK 0)
   endif()
 
   if(NOT USE_CUDA)
@@ -1835,11 +1854,21 @@ endif()
 
 if(USE_KINETO)
   if((NOT USE_CUDA) OR MSVC)
-    set(LIBKINETO_NOCUPTI ON CACHE STRING "")
-    message(STATUS "Using CPU-only version of Kineto")
+    set(LIBKINETO_NOCUPTI ON CACHE STRING "" FORCE)
   else()
     set(LIBKINETO_NOCUPTI OFF CACHE STRING "")
     message(STATUS "Using Kineto with CUPTI support")
+  endif()
+
+  if(NOT USE_ROCM)
+    set(LIBKINETO_NOROCTRACER ON CACHE STRING "" FORCE)
+  else()
+    set(LIBKINETO_NOROCTRACER OFF CACHE STRING "")
+    message(STATUS "Using Kineto with Roctracer support")
+  endif()
+
+  if(LIBKINETO_NOCUPTI AND LIBKINETO_NOROCTRACER)
+    message(STATUS "Using CPU-only version of Kineto")
   endif()
 
   set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party" CACHE STRING "")
@@ -1887,6 +1916,12 @@ if(USE_KINETO)
     else()
       message(STATUS "Could not find CUPTI library, using CPU-only Kineto build")
       set(LIBKINETO_NOCUPTI ON CACHE STRING "" FORCE)
+    endif()
+  endif()
+
+  if(NOT LIBKINETO_NOROCTRACER)
+    if(NOT ENV{ROCM_SOURCE_DIR})
+      set(ENV{ROCM_SOURCE_DIR} "/opt/rocm")
     endif()
   endif()
 
