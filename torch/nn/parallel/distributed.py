@@ -142,34 +142,22 @@ class _DDPSink(Function):
     @staticmethod
     def backward(ctx, *grad_outputs):
         state_dict = ctx.state_dict
-
-        grad_enabled = state_dict['grad_enabled']
-        require_backward_grad_sync = state_dict['require_backward_grad_sync']
         static_graph_training = ctx.state_dict['static_graph']
-        if grad_enabled and require_backward_grad_sync:
-            if static_graph_training or not state_dict['find_unused']:
-                ctx.reducer.prepare_for_backward([])
-            else:
-                # First type of unused params: parameters that did not participate
-                # in computing model outputs. These are found by the below call to
-                # prepare_for_backward.
-                # Second type of unused params: params that won't get gradient
-                # because outputs they produced do not get used in computing loss
-                # for this call to backward. Due to this passthrough autograd
-                # function, autograd hooks for these parameters are now triggered
-                # with undefined gradient to maintain parity with local training.
-                # DDP takes care of undefined grads in this case to ensure the .grad
-                # field of the param is not touched.
-                ctx.reducer.prepare_for_backward(list(_find_tensors(ctx.inputs)))
-
-        # Note that we enqueue delay allreduce after prepare_for_backward in
-        # static graph training as prepare_for_backward sets the
-        # num_backwards_call counter in the reducer.
-        static_graph_first_bwd = (
-            static_graph_training and ctx.reducer._static_graph_first_bwd()
-        )
-        if static_graph_first_bwd:
+        if static_graph_training and ctx.state_dict['num_iterations'] == 1:
             Variable._execution_engine.queue_callback(ctx.reducer._delay_all_reduce)
+
+        elif state_dict['find_unused'] and not static_graph_training:
+            # First type of unused params: parameters that did not participate
+            # in computing model outputs. These are found by the below call to
+            # prepare_for_backward.
+            # Second type of unused params: params that won't get gradient
+            # because outputs they produced do not get used in computing loss
+            # for this call to backward. Due to this passthrough autograd
+            # function, autograd hooks for these parameters are now triggered
+            # with undefined gradient to maintain parity with local training.
+            # DDP takes care of undefined grads in this case to ensure the .grad
+            # field of the param is not touched.
+            ctx.reducer.prepare_for_backward(list(_find_tensors(ctx.inputs)))
 
         return (None, None, *grad_outputs)
 
@@ -582,6 +570,7 @@ class DistributedDataParallel(Module):
         (4) Logging constructin-time DDP logging data
         (5) passing a handle of DDP to SyncBatchNorm Layer
         """
+        self.num_iterations = 0
         # The bucket size limit is specified in the constructor.
         # Additionally, we allow for a single small bucket for parameters
         # that are defined first, such that their gradients don't spill into
@@ -815,10 +804,10 @@ class DistributedDataParallel(Module):
         with torch.autograd.profiler.record_function("DistributedDataParallel.forward"):
             self.reducer.save_thread_local_state()
             grad_enabled = torch.is_grad_enabled()
-            will_run_grad_reduction = grad_enabled and self.require_backward_grad_sync
-            if will_run_grad_reduction:
+            if grad_enabled and self.require_backward_grad_sync:
                 self.logger.set_runtime_stats_and_log()
-            self.reducer.prepare_for_forward(will_run_grad_reduction)
+                self.num_iterations += 1
+                self.reducer.prepare_for_forward()
             if self.ddp_uneven_inputs_config.ddp_join_enabled:
                 ones = torch.ones(1, device=self.device)
                 work = dist.all_reduce(ones, group=self.process_group, async_op=True)
@@ -864,21 +853,30 @@ class DistributedDataParallel(Module):
             else:
                 output = self.module(*inputs, **kwargs)
 
-            self.require_forward_param_sync = (
-                grad_enabled and self.require_backward_grad_sync
-            )
+            if grad_enabled and self.require_backward_grad_sync:
+                self.require_forward_param_sync = True
+                if self.static_graph or not self.find_unused_parameters:
+                    self.reducer.prepare_for_backward([])
+            else:
+                self.require_forward_param_sync = False
 
-            if not grad_enabled:
-                # Don't need to run through DDPSink as there will be no backward
-                # pass.
-                return output
-
+        # TODO: DDPSink is currently enabled for unused parameter detection and
+        # static graph training for first iteration, in the future we plan to
+        # enable this passthrough for all training use cases.
+        if (self.find_unused_parameters and not self.static_graph) or (
+            self.static_graph and self.num_iterations == 1
+        ):
+            find_unused = all([
+                grad_enabled,
+                self.require_backward_grad_sync,
+                self.find_unused_parameters,
+            ])
             state_dict = {
                 'static_graph': self.static_graph,
-                'find_unused': self.find_unused_parameters,
-                'grad_enabled': grad_enabled,
-                'require_backward_grad_sync': self.require_backward_grad_sync,
+                'find_unused': find_unused,
+                'num_iterations': self.num_iterations,
             }
+
             output_tensor_list, treespec, output_is_rref = _tree_flatten_with_rref(
                 output
             )
@@ -907,7 +905,7 @@ class DistributedDataParallel(Module):
             output = _tree_unflatten_with_rref(
                 output_placeholders, treespec, output_is_rref
             )
-            return output
+        return output
 
     def scatter(self, inputs, kwargs, device_ids):
         return scatter_kwargs(inputs, kwargs, device_ids, dim=self.dim)
