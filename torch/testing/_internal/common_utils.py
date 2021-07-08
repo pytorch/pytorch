@@ -1471,7 +1471,7 @@ class TestCase(expecttest.TestCase):
     def assertEqual(self, x, y, msg: Optional[str] = None, *,
                     atol: Optional[float] = None, rtol: Optional[float] = None,
                     equal_nan=True, exact_dtype=True, exact_device=False, exact_stride=False,
-                    exact_is_coalesced=True) -> None:
+                    exact_is_coalesced=False) -> None:
         assert (atol is None) == (rtol is None), "If one of atol or rtol is specified, then the other must be too"
         debug_msg: Optional[str] = None
 

@@ -2387,7 +2387,7 @@ class DistributedTest:
             for (inputs, outputs) in tests:
                 tensors = [fn(input) for input in inputs]
                 dist.all_reduce(tensors[0], dist.ReduceOp.SUM, group_id)
-                self.assertEqual(tensors[0], outputs[0], exact_is_coalesced=False)
+                self.assertEqual(tensors[0], outputs[0])
 
         @unittest.skipIf(
             BACKEND != "gloo", "Only Gloo backend support sparse all reduce"

@@ -1611,7 +1611,7 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
         # Check that the gradients are sparse and identical
         vanilla_parameter = next(vanilla_model.parameters())
         ddp_parameter = next(ddp_model.parameters())
-        self.assertEqual(vanilla_parameter.grad, ddp_parameter.grad, exact_is_coalesced=False)
+        self.assertEqual(vanilla_parameter.grad, ddp_parameter.grad)
 
     @requires_gloo()
     @skip_if_lt_x_gpu(2)

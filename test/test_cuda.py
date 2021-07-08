@@ -73,7 +73,7 @@ def make_sparse_tensor(t, n, *sizes):
         torch.cat([torch.LongTensor(1, n).random_(s) for s in sizes], 0))
     v = tensor._values()
     v = v.new(n).copy_(torch.randn(n))
-    return t(i, v, torch.Size(sizes)).coalesce()
+    return t(i, v, torch.Size(sizes))
 
 _cycles_per_ms = None
 
@@ -3844,10 +3844,10 @@ class TestCudaComm(TestCase):
         r_tensors = [comm.reduce_add(t) for t in zip(*dup_tensors)]
         for r, t in zip(r_tensors, tensors):
             self.assertEqualTypeString(r, t)
-            self.assertEqual(r, t * 2, exact_is_coalesced=False)
+            self.assertEqual(r, t * 2)
 
         rc_tensors = comm.reduce_add_coalesced(dup_tensors, buffer_size=buffer_size)
-        self.assertEqual(r_tensors, rc_tensors, exact_is_coalesced=False)
+        self.assertEqual(r_tensors, rc_tensors)
         for r, rc in zip(r_tensors, rc_tensors):
             self.assertEqualTypeString(rc, r)
 
