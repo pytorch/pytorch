@@ -2000,7 +2000,7 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         float_dtype = torch.float if dtype is torch.cfloat else torch.double
         ranges_floats = (torch.finfo(dtype).min, torch.finfo(dtype).max)
         low = ranges_floats[0] if low is float('-inf') else -9 if low is None or low < ranges_floats[0] else low
-        high = ranges_floats[1] if high is float('inf') else 9 if high is None  or high >= ranges_floats[1] else high
+        high = ranges_floats[1] if high is float('inf') else 9 if high is None or high >= ranges_floats[1] else high
         span = high - low
         real = torch.rand(size, device=device, dtype=float_dtype) * span + low
         imag = torch.rand(size, device=device, dtype=float_dtype) * span + low
