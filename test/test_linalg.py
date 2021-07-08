@@ -20,9 +20,9 @@ from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes,
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, onlyOnCPUAndCUDA, dtypesIfCUDA,
-     onlyCUDA, skipCUDAVersionIn, skipMeta, skipCUDAIfNoCusolver)
+     onlyCUDA, skipCUDAVersionIn, skipMeta, skipCUDAIfNoCusolver, enableSparseCSR)
 from torch.testing import floating_and_complex_types, floating_types, all_types
-from torch.testing._internal.common_cuda import SM53OrLater, tf32_on_and_off, CUDA11OrLater, CUDA9
+from torch.testing._internal.common_cuda import SM53OrLater, SM80OrLater, tf32_on_and_off, CUDA11OrLater, CUDA9
 from torch.distributions.binomial import Binomial
 
 # Protects against includes accidentally setting the default dtype
@@ -5890,7 +5890,13 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 ---(input size: {:4}, eigenpairs:{:2}, units: relative error, maxiter={:4})---
 '''.format(tol, eq_err, eq_err_general, iters1, eq_err_scipy, eq_err_general_scipy, iters2, m, k, niter))
 
-    def _test_addmm_addmv(self, f, t, m, v, *, alpha=None, beta=None, transpose_out=False):
+    def _test_addmm_addmv(self, f, t, m, v, *, alpha=None, beta=None, transpose_out=False, sparse_csr_mat=False):
+        """
+        Unified test for checking `f(t, m, v, alpha=alpha, beta=beta)` computation,
+        where f is `torch.addmv` or `torch.addmm`.
+        `transpose_out` controls whether the out argument is in column-major order.
+        `sparse_csr_mat` controls whether `m` is converted to sparse_csr layout or not.
+        """
         dtype = t.dtype
         numpy_dtype = dtype
         if dtype in {torch.bfloat16}:
@@ -5901,11 +5907,22 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         else:
             alpha = 1.2 if alpha is None else alpha
             beta = 0.8 if beta is None else beta
-        res1 = f(t, m, v, alpha=alpha, beta=beta)
+
+        # float16 inputs with cusparse backend require larger tolerance than with cublas
+        if sparse_csr_mat and m.dtype == torch.float16:
+            self.precision = 1e-1
+
+        def to_sparse_csr(mat):
+            if sparse_csr_mat:
+                return mat.to_sparse_csr()
+            else:
+                return mat
+
+        res1 = f(t, to_sparse_csr(m), v, alpha=alpha, beta=beta)
         res2 = torch.full_like(res1, math.nan)
         if transpose_out:
             res2 = res2.t().clone(memory_format=torch.contiguous_format).t()
-        f(t, m, v, alpha=alpha, beta=beta, out=res2)
+        f(t, to_sparse_csr(m), v, alpha=alpha, beta=beta, out=res2)
         res3 = alpha * (m.to(numpy_dtype).cpu().numpy() @ v.to(numpy_dtype).cpu().numpy())
         if beta != 0:
             res3 += (beta * t).to(numpy_dtype).cpu().numpy()
@@ -5919,7 +5936,11 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                   *torch.testing.get_all_fp_dtypes(include_bfloat16=(TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater)),
                                                    include_half=(not TEST_WITH_ROCM)))
     @dtypes(torch.bfloat16, torch.float, torch.double, torch.cfloat, torch.cdouble)
-    def test_addmv(self, device, dtype):
+    @enableSparseCSR(only_cuda=True,
+                     dtypes_cuda=(*torch.testing.get_all_complex_dtypes(),
+                                  *torch.testing.get_all_fp_dtypes(include_bfloat16=SM80OrLater,
+                                                                   include_half=SM53OrLater)))
+    def test_addmv(self, device, dtype, sparse_csr):
         # have to use torch.randn(...).to(bfloat16) instead of
         # torch.randn(..., dtype=bfloat16). randn does not support
         # bfloat16 yet.
@@ -5945,15 +5966,18 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             torch.randn((100, 10), device=device).to(dtype).t(),
         ]
         for m, v, t in itertools.product(ms, vs, ts):
-            self._test_addmm_addmv(torch.addmv, t, m, v)
+            self._test_addmm_addmv(torch.addmv, t, m, v, sparse_csr_mat=sparse_csr)
         # Test beta=0, t=nan
         t = torch.full((10,), math.nan, device=device).to(dtype)
         for m, v in itertools.product(ms, vs):
-            self._test_addmm_addmv(torch.addmv, t, m, v, beta=0)
+            self._test_addmm_addmv(torch.addmv, t, m, v, beta=0, sparse_csr_mat=sparse_csr)
 
     @dtypesIfCUDA(*torch.testing.get_all_fp_dtypes(include_bfloat16=(TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater))))
     @dtypes(torch.float, torch.double)
-    def test_addmv_rowmajor_colmajor_incx_incy_lda(self, device, dtype):
+    @enableSparseCSR(only_cuda=True,
+                     dtypes_cuda=torch.testing.get_all_fp_dtypes(include_bfloat16=SM80OrLater,
+                                                                 include_half=SM53OrLater))
+    def test_addmv_rowmajor_colmajor_incx_incy_lda(self, device, dtype, sparse_csr):
         # tests (o, s)*(s).  o is output size, s is summed size.
         o = 5
         s = 3
@@ -5975,7 +5999,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             y_storage = torch.full((o, incy), float('nan'), device=device, dtype=dtype)
             y = y_storage[:, 0].copy_(y_data)
 
-            self._test_addmm_addmv(torch.addmv, y, a, x)
+            self._test_addmm_addmv(torch.addmv, y, a, x, sparse_csr_mat=sparse_csr)
 
         for row_major, incx, incy, lda_tail in itertools.product((False, True), (1, 2), (1, 2), (0, 1)):
             _test(row_major, incx, incy, lda_tail)
@@ -5986,23 +6010,27 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                   *torch.testing.get_all_fp_dtypes(include_bfloat16=(TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater))))
     @dtypes(*torch.testing.get_all_complex_dtypes(), *torch.testing.get_all_fp_dtypes())
     @tf32_on_and_off(0.05)
-    def test_addmm(self, device, dtype):
+    @enableSparseCSR(only_cuda=True,
+                     dtypes_cuda=(*torch.testing.get_all_complex_dtypes(),
+                                  *torch.testing.get_all_fp_dtypes(include_bfloat16=SM80OrLater,
+                                                                   include_half=SM53OrLater)))
+    def test_addmm(self, device, dtype, sparse_csr):
         M = torch.randn(10, 25, device=device).to(dtype)
         m1 = torch.randn(10, 50, device=device).to(dtype)
         m2 = torch.randn(50, 25, device=device).to(dtype)
-        self._test_addmm_addmv(torch.addmm, M, m1, m2)
+        self._test_addmm_addmv(torch.addmm, M, m1, m2, sparse_csr_mat=sparse_csr)
 
         # Test 0-strided
         M = torch.randn(10, 1, device=device).to(dtype).expand(10, 25)
         m1 = torch.randn(10, 1, device=device).to(dtype).expand(10, 50)
         m2 = torch.randn(50, 25, device=device).to(dtype)
-        self._test_addmm_addmv(torch.addmm, M, m1, m2)
+        self._test_addmm_addmv(torch.addmm, M, m1, m2, sparse_csr_mat=sparse_csr)
 
         # Test beta=0, M=nan
         M = torch.full((10, 25), math.nan, device=device).to(dtype)
         m1 = torch.randn(10, 50, device=device).to(dtype)
         m2 = torch.randn(50, 25, device=device).to(dtype)
-        self._test_addmm_addmv(torch.addmm, M, m1, m2, beta=0)
+        self._test_addmm_addmv(torch.addmm, M, m1, m2, beta=0, sparse_csr_mat=sparse_csr)
 
         # Test transpose
         for t1, t2, t3, t4 in itertools.product([True, False], repeat=4):
@@ -6014,19 +6042,23 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             M = maybe_transpose(t1, torch.randn(10, 25, device=device).to(dtype))
             m1 = maybe_transpose(t2, torch.randn(10, 50, device=device).to(dtype))
             m2 = maybe_transpose(t3, torch.randn(50, 25, device=device).to(dtype))
-            self._test_addmm_addmv(torch.addmm, M, m1, m2, transpose_out=t4)
+            self._test_addmm_addmv(torch.addmm, M, m1, m2, transpose_out=t4, sparse_csr_mat=sparse_csr)
 
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(*([torch.float, torch.double] + torch.testing.get_all_complex_dtypes()))
     @tf32_on_and_off(0.005)
-    def test_addmm_sizes(self, device, dtype):
+    @enableSparseCSR(only_cuda=True,
+                     dtypes_cuda=(*torch.testing.get_all_complex_dtypes(),
+                                  *torch.testing.get_all_fp_dtypes(include_bfloat16=SM80OrLater,
+                                                                   include_half=SM53OrLater)))
+    def test_addmm_sizes(self, device, dtype, sparse_csr):
         for m in [0, 1, 25]:
             for n in [0, 1, 10]:
                 for k in [0, 1, 8]:
                     M = torch.randn(n, m, device=device).to(dtype)
                     m1 = torch.randn(n, k, device=device).to(dtype)
                     m2 = torch.randn(k, m, device=device).to(dtype)
-                    self._test_addmm_addmv(torch.addmm, M, m1, m2)
+                    self._test_addmm_addmv(torch.addmm, M, m1, m2, sparse_csr_mat=sparse_csr)
 
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @onlyCUDA

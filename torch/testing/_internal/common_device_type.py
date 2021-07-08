@@ -13,7 +13,7 @@ import torch
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
     skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN, \
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, DeterministicGuard, TEST_SKIP_NOARCH, IS_WINDOWS
-from torch.testing._internal.common_cuda import _get_torch_cuda_version
+from torch.testing._internal.common_cuda import _get_torch_cuda_version, TEST_CUSPARSE_GENERIC
 from torch.testing import \
     (get_all_dtypes)
 
@@ -788,6 +788,63 @@ class ops(_TestParametrizer):
                     print("Failed to instantiate {0} for op {1}!".format(test_name, op.name))
                     raise ex
 
+# Decorator that generates two set of tests with kwarg sparse_csr=True and sparse_csr=False.
+# All keyword arguments are used only if sparse_csr==True, so they have no effect on the original test
+class enableSparseCSR(_TestParametrizer):
+    def __init__(self, *,
+                 dtypes: Optional[Sequence[torch.dtype]] = None,
+                 dtypes_cpu: Optional[Sequence[torch.dtype]] = None,
+                 dtypes_cuda: Optional[Sequence[torch.dtype]] = None,
+                 only_cuda=False,
+                 skip_cuda_if_no_cusparse=True):
+        self.dtypes = set(dtypes) if dtypes is not None else None
+        self.dtypes_cpu = set(dtypes_cpu) if dtypes_cpu is not None else None
+        self.dtypes_cuda = set(dtypes_cuda) if dtypes_cuda is not None else None
+        self.only_cuda = only_cuda
+        self.skip_cuda_if_no_cusparse = skip_cuda_if_no_cusparse
+
+    def _parametrize_test(self, test, generic_cls, device_cls):
+        """ Parameterizes the given test function with boolean sparse_csr flag. """
+        for sparse_csr in (True, False):
+            # get dtypes specified with @dtypes, @dtypesIfCPU, @dtypesIfCUDA
+            dtypes = set(device_cls._get_dtypes(test))
+
+            # replace dtypes only if sparse_csr == True
+            if sparse_csr:
+                if self.dtypes_cpu is not None and device_cls.device_type == 'cpu':
+                    dtypes = self.dtypes_cpu
+                if self.dtypes_cuda is not None and device_cls.device_type == 'cuda':
+                    dtypes = self.dtypes_cuda
+                elif self.dtypes is not None:
+                    dtypes = self.dtypes
+
+            for dtype in dtypes:
+                # Construct the test name
+                test_name = '{}{}_{}{}'.format(test.__name__,
+                                                    '_sparse_csr' if sparse_csr else '',
+                                                    device_cls.device_type,
+                                                    _dtype_test_suffix(dtype))
+
+                # Construct parameter kwargs to pass to the test
+                param_kwargs = {'sparse_csr': sparse_csr}
+                _update_param_kwargs(param_kwargs, 'dtype', dtype)
+
+                active_decorators = []
+                if sparse_csr and self.skip_cuda_if_no_cusparse:
+                    active_decorators.append(skipCUDAIfNoCusparseGeneric)
+
+                if sparse_csr and self.only_cuda:
+                    active_decorators.append(onlyCUDA)
+
+                @wraps(test)
+                def test_wrapper(*args, **kwargs):
+                    return test(*args, **kwargs)
+
+                for decorator in active_decorators:
+                    test_wrapper = decorator(test_wrapper)
+
+                yield (test_wrapper, test_name, param_kwargs)
+
 # Decorator that skips a test if the given condition is true.
 # Notes:
 #   (1) Skip conditions stack.
@@ -1221,11 +1278,7 @@ def skipCUDAIfNoCudnn(fn):
 
 # Skips a test on CUDA if cuSparse generic API is not available
 def skipCUDAIfNoCusparseGeneric(fn):
-    version = _get_torch_cuda_version()
-    min_supported_version = (10, 2)
-    if IS_WINDOWS:
-        min_supported_version = (11, 0)
-    return skipCUDAIf(version < min_supported_version, "cuSparse Generic API not available")(fn)
+    return skipCUDAIf(not TEST_CUSPARSE_GENERIC, "cuSparse Generic API not available")(fn)
 
 def skipMeta(fn):
     return skipMetaIf(True, "test doesn't work with meta tensors")(fn)
