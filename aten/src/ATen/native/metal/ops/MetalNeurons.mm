@@ -81,6 +81,7 @@ Tensor tanh(const Tensor& input) {
 }
 
 TORCH_LIBRARY_IMPL(aten, Metal, m) {
+  m.impl("tanh", tanh);
   m.impl("relu", TORCH_FN(relu));
   m.impl("relu_", TORCH_FN(relu_));
   m.impl("sigmoid", TORCH_FN(sigmoid));
