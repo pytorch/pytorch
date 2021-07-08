@@ -154,7 +154,12 @@ bool einsum_check_label(unsigned char label) {
 
 uint8_t einsum_label_to_index(unsigned char label) {
   constexpr uint8_t NUM_OF_LETTERS = 'z' - 'a' + 1;
-  return std::islower(label) ? label - 'a' : NUM_OF_LETTERS + (label - 'A');
+  return std::isupper(label) ? label - 'A' : NUM_OF_LETTERS + (label - 'a');
+}
+
+unsigned char einsum_index_to_label(uint8_t index) {
+  constexpr uint8_t NUM_OF_LETTERS = 'z' - 'a' + 1;
+  return index < NUM_OF_LETTERS ? index + 'A' : index - NUM_OF_LETTERS + 'a';
 }
 
 } // namespace
@@ -166,7 +171,6 @@ uint8_t einsum_label_to_index(unsigned char label) {
 //    dimensions We do the last part by reducing to bmm.
 Tensor einsum(c10::string_view equation, TensorList operands) {
   TORCH_CHECK(!operands.empty(), "einsum(): must provide at least one operand");
-  checkDeviceType("einsum():", operands, operands[0].device().type());
 
   // Code used to identify ELLIPSIS ("...")
   constexpr uint8_t ELLIPSIS = 52;
@@ -245,7 +249,7 @@ Tensor einsum(c10::string_view equation, TensorList operands) {
     const auto operand = operands[i];
     const auto labels = op_labels[i];
     const auto ndims = operand.dim();
-    int64_t nlabels = labels.size();
+    int64_t nlabels = static_cast<int64_t>(labels.size());
     bool has_ellipsis = false;
 
     for (const auto& label : labels) {
@@ -364,11 +368,11 @@ Tensor einsum(c10::string_view equation, TensorList operands) {
     const auto labels = op_labels[i];
     const auto original_sizes = operand.sizes();
 
-    std::size_t j = 0;
+    int64_t j = 0;
     for (const auto& label : labels) {
       if (label == ELLIPSIS) {
         // Add missing dimensions covered by the ellipsis
-        const int64_t num_missing_dim =
+        const auto num_missing_dim =
             ell_num_dim - (original_sizes.size() - labels.size() + 1);
         for (const auto k : c10::irange(num_missing_dim)) {
           (void)k; //Suppress unused warning
@@ -383,7 +387,7 @@ Tensor einsum(c10::string_view equation, TensorList operands) {
         TORCH_CHECK(
             operand.size(j) == operand.size(dim),
             "einsum(): subscript ",
-            char(label + 'a'),
+            einsum_index_to_label(label),
             " is repeated for operand ",
             i,
             " but the sizes don't match, ",
@@ -589,8 +593,8 @@ Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor& weight
   auto size1 = input1.sizes();
   output_size.insert(output_size.end(), size1.begin(), size1.end() - 1);
   output_size.push_back(weight.size(0));
-  auto input1_flattened = input1.view({-1, input1.size(-1)});
-  auto input2_flattened = input2.view({-1, input2.size(-1)});
+  auto input1_flattened = input1.reshape({-1, input1.size(-1)});
+  auto input2_flattened = input2.reshape({-1, input2.size(-1)});
   Tensor output = at::_trilinear(input1_flattened, weight, input2_flattened, {1,3}, {0}, {1,2}, {2,3}).reshape(output_size);
   if (bias.defined()) {
     output = output + bias;
@@ -636,11 +640,11 @@ Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, 
       rsizes.emplace_back(t1.size(i));
     }
   }
-  for (const auto i : c10::irange(dims1.size())) {
-    p1.emplace_back(dims1[i]);
+  for (const auto x : dims1) {
+    p1.emplace_back(x);
   }
-  for (const auto i : c10::irange(dims2.size())) {
-    p2.emplace_back(dims2[i]);
+  for (const auto x : dims2) {
+    p2.emplace_back(x);
   }
   for (const auto i : c10::irange(input2.dim())) {
     if (! cdims2[i]) {

@@ -45,8 +45,6 @@ from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
 from torch.testing._internal.distributed.rpc.rpc_test import (
     CudaRpcTest,
     FaultyAgentRpcTest,
-    ProcessGroupAgentRpcTest,
-    ProcessGroupAgentCudaRpcTest,
     RpcTest,
     TensorPipeAgentRpcTest,
     TensorPipeAgentCudaRpcTest,
@@ -144,17 +142,6 @@ GENERIC_CUDA_TESTS = [
     CudaRemoteModuleTest,
     CudaDdpComparisonTest,
     PipeWithDDPTest,
-]
-
-
-# This list contains test suites that will only be run on the ProcessGroupAgent.
-# These suites should be standalone, and separate from the ones in the generic
-# list (not subclasses of those!).
-PROCESS_GROUP_TESTS = [
-    ProcessGroupAgentRpcTest
-]
-PROCESS_GROUP_CUDA_TESTS = [
-    ProcessGroupAgentCudaRpcTest,
 ]
 
 

@@ -7,17 +7,18 @@ namespace native {
 
 template <
     typename scalar_t,
+    typename index_t,
     typename std::enable_if<std::is_same<c10::Half, scalar_t>::value>::type* =
         nullptr>
 __device__ __forceinline__ void fastSpecializedAtomicAdd(
     scalar_t* tensor,
-    size_t index,
-    const size_t numel,
+    index_t index,
+    const index_t numel,
     scalar_t value) {
 #if (                         \
     (CUDA_VERSION < 10000) || \
     (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 700)))
-  gpuAtomicAdd(
+  gpuAtomicAddNoReturn(
       reinterpret_cast<at::Half*>(tensor) + index,
       static_cast<at::Half>(value));
 #else
@@ -46,27 +47,28 @@ __device__ __forceinline__ void fastSpecializedAtomicAdd(
 
 template <
     typename scalar_t,
+    typename index_t,
     typename std::enable_if<!std::is_same<c10::Half, scalar_t>::value>::type* =
         nullptr>
 __device__ __forceinline__ void fastSpecializedAtomicAdd(
     scalar_t* tensor,
-    size_t index,
-    const size_t numel,
+    index_t index,
+    const index_t numel,
     scalar_t value) {
-  gpuAtomicAdd(tensor + index, value);
+  gpuAtomicAddNoReturn(tensor + index, value);
 }
 
-template <class scalar_t>
+template <class scalar_t, class index_t>
 __device__ __forceinline__ void fastAtomicAdd(
     scalar_t* tensor,
-    size_t index,
-    const size_t numel,
+    index_t index,
+    const index_t numel,
     scalar_t value,
     bool fast_atomics) {
   if (fast_atomics) {
     fastSpecializedAtomicAdd(tensor, index, numel, value);
   } else {
-    gpuAtomicAdd(tensor + index, value);
+    gpuAtomicAddNoReturn(tensor + index, value);
   }
 }
 

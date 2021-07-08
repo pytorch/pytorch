@@ -72,8 +72,10 @@ std::string Dtype::ToCppString() const {
 #define TYPE_CASE(t, n) \
   case ScalarType::n:   \
     return #t;
-    AT_FORALL_SCALAR_TYPES_AND(Bool, TYPE_CASE);
+    AT_FORALL_SCALAR_TYPES(TYPE_CASE);
 #undef TYPE_CASE
+    case ScalarType::Bool:
+      return "bool";
     case ScalarType::Half:
       return "half";
     default:
