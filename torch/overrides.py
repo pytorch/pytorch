@@ -393,6 +393,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.conv_transpose1d: lambda input, weight, bias=None, stride=1, padding=0, output_padding=0, groups=1, dilation=1: -1,
         torch.conv_transpose2d: lambda input, weight, bias=None, stride=1, padding=0, output_padding=0, groups=1, dilation=1: -1,
         torch.conv_transpose3d: lambda input, weight, bias=None, stride=1, padding=0, output_padding=0, groups=1, dilation=1: -1,
+        torch.corrcoef: lambda input: -1,
         torch.cos: lambda input, out=None: -1,
         torch.cosine_embedding_loss: lambda input1, input2, target, margin=0, size_average=None, reduce=None, reduction='mean': -1,
         torch.cosh: lambda input, out=None: -1,
