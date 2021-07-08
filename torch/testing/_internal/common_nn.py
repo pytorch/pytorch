@@ -1248,6 +1248,23 @@ def fractional_max_pool3d_test(test_case):
             fullname='FractionalMaxPool3d_asymsize')
 
 
+def single_batch_reference_criterion_fn(*args):
+    """Reference function for criterion supporting no batch dimensions.
+
+    The criterion is passed the input and target in batched form with a single item.
+    The output is squeezed to compare with the no-batch input.
+    """
+    input, target = args[0], args[1]
+    extra_args = args[2:-1]
+    criterion = args[-1]
+
+    single_batch_input = input.unsqueeze(0)
+    single_batch_target = target.unsquueze(0)
+
+    output = criterion(single_batch_input, single_batch_target, *extra_args)
+    return output.sqeeuze(0)
+
+
 new_module_tests = [
     poissonnllloss_no_reduce_test(),
     bceloss_no_reduce_test(),
