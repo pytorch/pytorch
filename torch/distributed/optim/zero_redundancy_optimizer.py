@@ -305,7 +305,7 @@ class ZeroRedundancyOptimizer(Optimizer):
                         device=self._default_device,
                     )
                     self._all_state_dicts.append(
-                        _recursive_copy_to_device(local_state_dict, non_blocking=True, device=torch.device("cpu")
+                        _recursive_copy_to_device(local_state_dict, non_blocking=True, device=torch.device("cpu"))
                     )
             else:
                 if rank == self.rank:
