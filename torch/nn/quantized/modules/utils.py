@@ -4,7 +4,9 @@ import collections
 from torch.nn.modules.module import _addindent
 
 def _quantize_weight(float_wt, observer):
-    wt_scale, wt_zp = observer.calculate_qparams()
+    device = float_wt.device
+    wt_scale, wt_zp = observer.calculate_qparams()  # may be better to make calculate qparams give on correct device
+    wt_scale, wt_zp = wt_scale.to(device), wt_zp.to(device)
     if observer.qscheme in [torch.per_tensor_symmetric, torch.per_tensor_affine]:
         qweight = torch.quantize_per_tensor(
             float_wt,
@@ -20,7 +22,7 @@ def _quantize_weight(float_wt, observer):
             wt_scale.to(torch.float), wt_zp.to(torch.float), observer.ch_axis, observer.dtype)
     else:
         raise ValueError("Unexpected qscheme " + observer.qscheme)
-    return qweight
+    return qweight  # should be on correct device as long as scale and zp and weights are
 
 def _ntuple_from_first(n):
     """Converts the argument to a tuple of size n

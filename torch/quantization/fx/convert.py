@@ -158,7 +158,9 @@ def convert(model: GraphModule, is_reference: bool = False,
     qconfig_map: Dict[str, QConfigAny] = model._qconfig_map  # type: ignore[assignment]
 
     # move to cpu since we only have quantized cpu kernels
-    model.eval().cpu()
+    model.eval()
+    if not is_reference:
+        model.cpu()
     # mapping from fully qualified module name to module instance
     # for example,
     # {

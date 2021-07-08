@@ -1295,6 +1295,25 @@ class TestQuantizeFx(QuantizationTestCase):
         ]
         self.checkGraphModuleNodes(m, expected_node_list=node_list)
 
+    @skipIfNoFBGEMM
+    def test_static_gpu_convert(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.conv1 = nn.Conv2d(1, 6, 5)
+
+            def forward(self, x):
+                return self.conv1(x)
+
+        input = torch.randn((5, 1, 32, 32)).to('cuda')
+        model = Net().to('cuda').eval()
+        qconfig_dict = {"": torch.quantization.get_default_qconfig('fbgemm')}
+        model_prepared = prepare_fx(model, qconfig_dict)
+        model_quantized = convert_fx(model_prepared, is_reference=True)
+        import pdb
+        pdb.set_trace()
+        out = model_quantized(input)
+        self.assertTrue(out == 3)
 
     def test_qconfig_dict_validity(self):
         r"""
@@ -4735,3 +4754,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
         model = models.__dict__[name](pretrained=True).eval().float()
         self._test_model_impl(
             'ddp', 'resnet18', model, eager_quantizable_model)
+
+if __name__ == "__main__":
+    a = TestQuantizeFx()
+    a.test_static_gpu_convert()
