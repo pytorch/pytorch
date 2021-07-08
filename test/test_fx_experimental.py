@@ -1471,6 +1471,7 @@ class TestNormalizeOperators(JitTestCase):
             "reshape_as",
             "resize_",
             "resize_as_",
+            "special.zeta",
             "to_sparse",
             "view",
             "view_as",
@@ -1484,6 +1485,9 @@ class TestNormalizeOperators(JitTestCase):
             "__rdiv__",
             "__rmod__",
             "__rpow__",
+            '__rand__',
+            '__ror__',
+            '__rxor__',
             "__rmatmul__",
         }
 

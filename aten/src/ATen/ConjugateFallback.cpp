@@ -50,12 +50,13 @@ TORCH_LIBRARY_IMPL(aten, Conjugate, m) {
   m.impl("size.int", torch::CppFunction::makeFallthrough());
   m.impl("size.Dimname", torch::CppFunction::makeFallthrough());
   m.impl("is_complex", torch::CppFunction::makeFallthrough());
-  m.impl("_view_as_real_physical", torch::CppFunction::makeFallthrough());
   m.impl("view_as_real", torch::CppFunction::makeFallthrough());
   m.impl("imag", torch::CppFunction::makeFallthrough());
   m.impl("real", torch::CppFunction::makeFallthrough());
   m.impl("view", torch::CppFunction::makeFallthrough());
+  m.impl("_unsafe_view", torch::CppFunction::makeFallthrough());
   m.impl("reshape", torch::CppFunction::makeFallthrough());
+  m.impl("_unsafe_view", torch::CppFunction::makeFallthrough());
 }
 
 } // namespace at

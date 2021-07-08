@@ -367,8 +367,7 @@ Tensor angle(const Tensor& self) {
 
 Tensor real(const Tensor& self) {
   if (self.is_complex()) {
-    // real is never affected by conjugate bit, safe to use physical version
-    auto real_tensor = at::_view_as_real_physical(self);
+    auto real_tensor = self.is_conj() ? at::view_as_real(self._conj()) : at::view_as_real(self);
     return at::select(real_tensor, real_tensor.dim() - 1, 0);
   } else {
     TORCH_CHECK(false, "real is not implemented for tensors with non-complex dtypes.");
@@ -384,9 +383,15 @@ Tensor _neg_view(const Tensor& self) {
 
 Tensor imag(const Tensor& self) {
   if (self.is_complex()) {
-    auto real_tensor = at::_view_as_real_physical(self);
-    auto true_real_tensor = self.is_conj() ? at::_neg_view(real_tensor) : real_tensor;
-    return at::select(true_real_tensor, real_tensor.dim() - 1, 1);
+    Tensor real_tensor;
+    if (self.is_conj()) {
+      real_tensor = at::view_as_real(self._conj());
+      // preemptively set the negative flag for the final imag tensor
+      real_tensor = real_tensor._neg_view();
+    } else {
+      real_tensor = at::view_as_real(self);
+    }
+    return at::select(real_tensor, real_tensor.dim() - 1, 1);
   } else {
     TORCH_CHECK(false, "imag is not implemented for tensors with non-complex dtypes.");
   }

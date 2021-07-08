@@ -26,6 +26,7 @@ namespace c10 {
   _(prim, BroadcastingChunk)         \
   _(prim, BroadcastSizes)            \
   _(prim, ReductionSizes)            \
+  _(prim, Concat)                    \
   _(prim, Constant)                  \
   _(prim, ChunkSizes)                \
   _(prim, ConstantMKLDNNTensor)      \
@@ -322,6 +323,8 @@ namespace c10 {
   _(aten, moveaxis)                  \
   _(aten, lgamma)                    \
   _(aten, special_gammaln)           \
+  _(aten, logsumexp)                 \
+  _(aten, special_logsumexp)         \
   _(aten, digamma)                   \
   _(aten, special_psi)               \
   _(aten, special_digamma)           \
@@ -351,6 +354,7 @@ namespace c10 {
   _(aten, special_i0e)               \
   _(aten, special_i1)                \
   _(aten, special_i1e)               \
+  _(aten, special_zeta)              \
   _(aten, has_torch_function)        \
   _(aten, hardswish)                 \
   _(aten, hardswish_)                \
