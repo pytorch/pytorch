@@ -56,9 +56,10 @@ to disable gradient computation but, because of its name, is often mixed up with
 Setting ``requires_grad``
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
-:attr:`requires_grad` is a flag that allows for fine-grained exclusion of
-subgraphs from gradient computation. It takes effect in both the forward
-and backward passes:
+:attr:`requires_grad` is a flag, defaulting to false *unless wrapped
+in a ``nn.Parameter``*, that allows for fine-grained exclusion of
+subgraphs from gradient computation. It takes effect in both the
+forward and backward passes:
 
 During the forward pass, an operation is only recorded in the backward graph if
 at least one of its input tensors require grad.
@@ -90,8 +91,6 @@ Because this is such a common pattern, ``requires_grad`` can also be set at
 the module level with :meth:`nn.Module.requires_grad_()`.
 When applied to a module, ``.requires_grad_()`` takes effect on all
 of the module's parameters (which have ``requires_grad=True`` by default).
-
-Tensors that are not module parameters have ``requires_grad=False` by default.
 
 Grad Modes
 ^^^^^^^^^^
