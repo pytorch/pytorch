@@ -5759,7 +5759,6 @@ class DistributedTest:
         @require_n_gpus_for_nccl_backend(
             int(os.environ["WORLD_SIZE"]), os.environ["BACKEND"]
         )
-
         def test_broadcast_object_list(self):
             # Only set device for NCCL backend since it must use GPUs.
             backend = os.environ["BACKEND"]
@@ -5798,7 +5797,6 @@ class DistributedTest:
                 self.assertNotEqual(objects, COLLECTIVES_OBJECT_TEST_LIST)
             dist.broadcast_object_list(objects, src=0)
             self.assertEqual(objects, COLLECTIVES_OBJECT_TEST_LIST)
-
 
         def _test_ddp_ignore_params_arg(self, static_graph=False):
             class TestModel(nn.Module):

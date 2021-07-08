@@ -1715,9 +1715,10 @@ def broadcast_object_list(object_list, src=0, group=None, dist_device=None):
         src (int): Source rank from which to broadcast ``object_list``.
         group: (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used. Default is ``None``.
-        dist_device (``torch.device``, optional): device to send from or receive
-            to (default: `torch.device("cuda") if backend is NCCL, otherwise`
-            `torch.device("cpu")``).
+        dist_device (``torch.device``, optional): If nont None, then intermediate
+            tensor representations of objects, or any tensors within the contained
+            objects, will be moved to this device before broadcasting. Default is
+            ``None``.
 
     Returns:
         ``None``. If rank is part of the group, ``object_list`` will contain the
