@@ -68,6 +68,7 @@ class TestNNAPI(TestCase):
                     # Too many mismatches.  Re-run the check with no tolerance
                     # to get a nice message.
                     self.assertEqual(eager_output, nnapi_output, atol=0, rtol=0)
+            return eager_output, nnapi_output
 
     def float_and_quant_and_nhwc(self, inp_float, scale, zero_point):
         torch.manual_seed(29)
@@ -261,22 +262,6 @@ class TestNNAPI(TestCase):
                             return lhs / rhs
                         raise Exception("Bad op")
 
-                class BinaryConstModule(torch.nn.Module):
-                    def __init__(self, rhs):
-                        super().__init__()
-                        self.rhs = rhs
-
-                    def forward(self, lhs):
-                        if op == "add":
-                            return lhs + self.rhs
-                        if op == "sub":
-                            return lhs - self.rhs
-                        if op == "mul":
-                            return lhs * self.rhs
-                        if op == "div":
-                            return lhs / self.rhs
-                        raise Exception("Bad op")
-
                 self.check(
                     BinaryModule(),
                     [
@@ -299,22 +284,25 @@ class TestNNAPI(TestCase):
                             torch.tensor([[3.0, 4.0], [5.0, 6.0]]),
                         ])
 
-                # Test Const Module
-                self.check(
-                    BinaryConstModule(torch.tensor([3.0, 4.0])),
-                    torch.tensor([1.0, 2.0])
-                )
+    def test_pointwise_binary_const(self):
+        class ArgPlusConst(torch.nn.Module):
+            def forward(self, arg):
+                return arg + torch.ones(1, 1, 1, 1)
 
-                self.check(
-                    BinaryConstModule(torch.tensor([[1.0, 2.0]])),
-                    torch.tensor([[3.0, 4.0], [5.0, 6.0]])
-                )
+        class ConstPlusArg(torch.nn.Module):
+            def forward(self, arg):
+                return torch.ones(1, 1, 1, 1) + arg
 
-                with self.assertRaisesRegex(Exception, "Non-equal-rank broadcast"):
-                    self.check(
-                        BinaryConstModule(torch.tensor([1.0, 2.0])),
-                        torch.tensor([[3.0, 4.0], [5.0, 6.0]])
-                    )
+        arg_cont = torch.randn(2, 4, 6, 6)
+        arg_nhwc = nhwc(arg_cont)
+
+        for mod_class in [ArgPlusConst, ConstPlusArg]:
+            for use_nhwc in [False, True]:
+                with self.subTest(mod_class=mod_class.__name__, use_nhwc=use_nhwc):
+                    arg = arg_nhwc if use_nhwc else arg_cont
+                    eager_out, nnapi_out = self.check(mod_class(), arg)
+                    self.assertTrue(nnapi_out.is_contiguous(memory_format=(
+                        torch.channels_last if use_nhwc else torch.contiguous_format)))
 
     def test_hardtanh(self):
         inp = torch.tensor([-2.0, -0.5, 0.5, 2.0, 7.0])
