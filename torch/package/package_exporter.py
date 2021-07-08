@@ -16,6 +16,7 @@ from typing import (
     List,
     Optional,
     Sequence,
+    Set,
     Union,
 )
 from urllib.parse import quote
@@ -190,6 +191,8 @@ class PackageExporter:
 
         self.zip_file = torch._C.PyTorchFileWriter(f)
         self.zip_file.set_min_version(6)
+        self._written_files: Set[str] = set()
+
         self.serialized_reduces: Dict[int, Any] = {}
 
         # A graph tracking all the modules and pickle objects added to this
@@ -824,8 +827,15 @@ node [shape=box];
         self.close()
 
     def _write(self, filename, str_or_bytes):
+        if filename in self._written_files:
+            raise AssertionError(
+                f"Tried to write file '{filename}', but it already exists in this archive. "
+                "Please file a bug."
+            )
+        self._written_files.add(filename)
+
         if is_mangled(filename):
-            raise RuntimeError(
+            raise AssertionError(
                 f"Tried to save a torch.package'd module as '{filename}'. "
                 "Directly saving torch.package'd modules is not allowed."
             )
