@@ -226,7 +226,7 @@ class _DDPJoinHook(_JoinHook):
         if ddp.find_unused_parameters:
             ddp._match_unused_params_allreduce()
 
-        # Rebuilt parametesr are pushed only once during a training period
+        # Rebuilt parameters are pushed only once during a training period
         ddp.reducer._push_all_rebuilt_params()
 
     def post_hook(self, is_last_joiner: bool):
