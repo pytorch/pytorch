@@ -433,8 +433,6 @@ node [shape=box];
     def add_dependency(self, module_name: str, dependencies=True):
         """Given a module, add it to the dependency graph according to patterns
         specified by the user.
-
-        This method can be overriden to customize handling of dependencies.
         """
         if (
             module_name in self.dependency_graph
