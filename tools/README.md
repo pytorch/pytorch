@@ -37,7 +37,7 @@ Build system pieces:
 
 Developer tools which you might find useful:
 
-* [linter/clang_tidy.py](linter/clang_tidy.py) - Script for running clang-tidy
+* [linter/clang_tidy](linter/clang_tidy/__main__.py) - Script for running clang-tidy
   on lines of your script which you changed.
 * [extract_scripts.py](extract_scripts.py) - Extract scripts from
   `.github/workflows/*.yml` into a specified dir, on which linters such as
