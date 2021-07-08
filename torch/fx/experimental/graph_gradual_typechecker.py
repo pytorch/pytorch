@@ -202,8 +202,7 @@ def bn2d_inference_rule(n: Node, module_instance):
         # to be the node type
         # so if an incoming argument has more type information
         # we set this node's type to be the argument type
-        if is_more_precise(arg_type, n.type):
-            n.type = arg_type
+        n.type = get_greatest_upper_bound(arg_type, n.type)
         return n.type
     else:
         raise TypeError(f'Cannot apply {module_instance} with input type {arg_type} and existing type {n.type} on {n}')
@@ -282,14 +281,13 @@ def conv2d_inference_rule(n: Node, module_instance):
 
 @register_inference_rule(torch.nn.ReLU)
 def relu_inference_rule(n: Node, module_instance):
+    """
+    Input and output shapes should be equal.
+    """
     assert isinstance(n.args[0], Node)
     arg_type = n.args[0].type
-    if is_consistent(arg_type, n.type):
-        if is_more_precise(arg_type, n.type):
-            n.type = arg_type
-        return n.type
-    else:
-        raise TypeError(f'Cannot apply {module_instance}. Current shape {n.type} does not match argument shape {arg_type}')
+    n.type = get_greatest_upper_bound(arg_type, n.type)
+    return n.type
 
 
 def maxpool2d_check(typ, module_instance):
@@ -319,27 +317,8 @@ def maxpool2d_inference_rule(n: Node, module_instance):
       and the current node type.
     """
     assert isinstance(n.args[0], Node)
-
-    if n.args[0].type == Dyn and n.type == Dyn:
-        pass
-
-    elif n.args[0].type == Dyn and isinstance(n.type, TensorType):
-        n.type = get_greatest_upper_bound(maxpool2d_check(n.args[0].type, module_instance), n.type)
-        # n.args[0].type = n.type # backwards propagation example (for next PR)
-
-    elif n.type == Dyn and isinstance(n.args[0].type, TensorType):
-        # forward type inference
-        n.type = maxpool2d_check(n.args[0].type, module_instance)
-
-    elif isinstance(n.args[0].type, TensorType) and isinstance(n.type, TensorType):
-        n.args[0].type = maxpool2d_check(n.args[0].type, module_instance)
-        n.type = get_greatest_upper_bound(n.type, n.args[0].type)
-
-    else:
-        raise TypeError(f'Cannot apply {module_instance} with input type {n.args[0].type} and existing type {n.type} on {n}')
-
+    n.type = get_greatest_upper_bound(maxpool2d_check(n.args[0].type, module_instance), n.type)
     return n.type
-
 
 
 def linear_check(tensor_type, module_instance):
@@ -362,27 +341,8 @@ def linear_check(tensor_type, module_instance):
 @register_inference_rule(torch.nn.Linear)
 def linear_inference_rule(n: Node, module_instance):
     assert isinstance(n.args[0], Node)
-    if isinstance(n.args[0].type, TensorType) and isinstance(n.type, TensorType):
-        # Todo: type inference for argument
-        new_res_type_from_arg = linear_check(n.args[0].type, module_instance)
-        n.type = get_greatest_upper_bound(new_res_type_from_arg, n.type)
-        return n.type
-
-    elif isinstance(n.args[0].type, TensorType) and n.type == Dyn:
-        new_type = linear_check(n.args[0].type, module_instance)
-        n.type = new_type
-        return n.type
-
-    elif isinstance(n.type, TensorType) and n.args[0].type == Dyn:
-        # Todo: type inference for argument
-        new_type = linear_check(n.args[0].type, module_instance)
-        n.type = get_greatest_upper_bound(new_type, n.type)
-        return n.type
-
-    elif n.args[0].type == Dyn and n.type == Dyn:
-        return Dyn
-    else:
-        raise TypeError(f'Wrong types {n.type} and {n.args[0].type} in {module_instance}')
+    n.type = get_greatest_upper_bound(linear_check(n.args[0].type, module_instance), n.type)
+    return n.type
 
 
 class GraphTypeChecker:
