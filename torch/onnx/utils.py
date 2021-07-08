@@ -443,7 +443,7 @@ def _model_to_graph(model, args, verbose=False,
                     _retain_param_name=False, do_constant_folding=True,
                     _disable_torch_constant_prop=False, fixed_batch_size=False,
                     training=None, dynamic_axes=None, export_params=True,
-                    keep_initializers_as_inputs=True):
+                    keep_initializers_as_inputs=False):
     r"""Converts model into an ONNX graph.
 
     Returns:
@@ -502,6 +502,7 @@ def _model_to_graph(model, args, verbose=False,
     assert len(params) + len(flatten_args) == sum(1 for _ in graph.inputs())
 
     allow_adjust_graph_inputs = (export_params and not keep_initializers_as_inputs)
+    # allow_adjust_graph_inputs = True
     if (training is None or training == TrainingMode.EVAL):
         params_dict = torch._C._jit_pass_onnx_eval_peephole(graph, params_dict, allow_adjust_graph_inputs)
 
