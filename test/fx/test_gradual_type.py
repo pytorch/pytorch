@@ -411,17 +411,19 @@ class TypeCheckerTest(unittest.TestCase):
 
     def test_type_check_conv2D_2_fully_static(self):
 
-        annotation_list = [(1, 2, 3, 5), (2, 5, 6, 9), (10, 15, 13, 14)]
-        in_planes_list = [2, 5, 15]
-        stride_list = [1, 2, 3]
-        out_planes_list = [2, 5, 15]
-        groups_list = [1, 5, 5]
-        dilation_list = [1, 2, 3]
-        padding_list = [1, 2, 3]
-        kernel_size_list = [1, 2, 3]
+        annotation_list = [(1, 2, 3, 5), (2, 5, 6, 9), (10, 15, 13, 14), (10, Dyn, 13, 14), (Dyn, Dyn, Dyn, 3)]
+        input_list = [(1, 2, 3, 5), (2, 5, 6, 9), (10, 15, 13, 14), (10, 15, 13, 14), (1, 2, 2, 3)]
+        in_planes_list = [2, 5, 15, 15, 2]
+        stride_list = [1, 2, 3, 2, 2]
+        out_planes_list = [2, 5, 15, 15, 2]
+        groups_list = [1, 5, 5, 5, 2]
+        dilation_list = [1, 2, 3, 3, 3]
+        padding_list = [1, 2, 3, 3, 3]
+        kernel_size_list = [1, 2, 3, 3, 3]
 
-        for i in range(3):
+        for i in range(5):
             annotation = annotation_list[i]
+            input = input_list[i]
             in_planes = in_planes_list[i]
             stride = stride_list[i]
             out_planes = out_planes_list[i]
@@ -438,7 +440,6 @@ class TypeCheckerTest(unittest.TestCase):
                                                  padding=padding, groups=groups, bias=False, dilation=dilation)
 
                 def forward(self, x):
-                    identity = x
                     out = self.conv1(x)
                     return out
 
@@ -452,13 +453,14 @@ class TypeCheckerTest(unittest.TestCase):
                 if n.op == 'placeholder':
                     n.type = TensorType(annotation)
 
-            b = B.forward(torch.rand(annotation))
+            b = B.forward(torch.rand(input))
             tc = GraphTypeChecker({}, traced)
             tc.type_check()
 
             for n in graph.nodes:
                 if n.op == 'output':
-                    assert torch.Size(n.type.__args__) == b.size()
+                    assert is_consistent(n.type, TensorType(b.size()))
+
 
     def test_typecheck_basicblock(self):
         class BasicBlock(torch.nn.Module):
