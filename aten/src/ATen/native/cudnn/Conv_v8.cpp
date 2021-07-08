@@ -19,6 +19,8 @@
 #include <ATen/cudnn/Handle.h>
 #include <ATen/TensorUtils.h>
 
+#include <c10/util/env.h>
+
 #include <THC/THC.h>
 
 #include <mutex>
@@ -27,6 +29,20 @@
 namespace at { namespace native {
 
 namespace {
+
+int v8_flag = -1;
+
+bool use_v8() {
+  if (v8_flag < 0) {
+    auto val = c10::utils::check_env("CUDNN_V8_API_ENABLED");
+    if (val == true) {
+      v8_flag = 1;
+    } else {
+      v8_flag = 0;
+    }
+  }
+  return v8_flag;
+}
 
 // TODO: remove duplicate code in Conv_v7.cpp
 constexpr size_t operator "" _TiB(unsigned long long n) {
@@ -340,9 +356,15 @@ void raw_cudnn_convolution_forward_out(
     const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, const int64_t groups,
     const bool benchmark, const bool deterministic, const bool allow_tf32)
 {
-  if (output.numel() > 0) {
+  if (output.numel() == 0) { return; }
+  if (use_v8()) {
     run_single_conv(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR,
       input, output, weight, padding, stride, dilation, groups,
+      benchmark, deterministic, allow_tf32);
+  } else {
+    raw_cudnn_convolution_forward_out_v7(
+      output, input, weight,
+      padding, stride, dilation, groups,
       benchmark, deterministic, allow_tf32);
   }
 }
@@ -353,9 +375,17 @@ void raw_cudnn_convolution_backward_input_out(
     const at::Tensor& weight,
     const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, const int64_t groups,
     const bool benchmark, const bool deterministic, const bool allow_tf32) {
-  if (grad_input.numel() > 0) {
+  if (grad_input.numel() == 0) { return; }
+  if (use_v8()) {
     run_single_conv(CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR,
       grad_input, grad_output, weight, padding, stride, dilation, groups,
+      benchmark, deterministic, allow_tf32);
+  } else {
+    raw_cudnn_convolution_backward_input_out_v7(
+      grad_input,
+      grad_output,
+      weight,
+      padding, stride, dilation, groups,
       benchmark, deterministic, allow_tf32);
   }
 }
@@ -364,9 +394,15 @@ void raw_cudnn_convolution_backward_weight_out(
     const Tensor& grad_weight, const Tensor& grad_output, const Tensor& input,
     const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, const int64_t groups,
     const bool benchmark, const bool deterministic, const bool allow_tf32) {
-  if (grad_weight.numel() > 0) {
+  if (grad_weight.numel() == 0) { return; }
+  if (use_v8()) {
     run_single_conv(CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR,
       input, grad_output, grad_weight, padding, stride, dilation, groups,
+      benchmark, deterministic, allow_tf32);
+  } else { 
+    raw_cudnn_convolution_backward_weight_out_v7(
+      grad_weight, grad_output, input,
+      padding, stride, dilation, groups,
       benchmark, deterministic, allow_tf32);
   }
 }

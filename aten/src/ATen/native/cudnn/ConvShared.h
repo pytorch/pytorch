@@ -105,4 +105,43 @@ void raw_cudnn_convolution_add_relu_fallback_out(
     bool benchmark,
     bool deterministic,
     bool allow_tf32);
+
+
+#if AT_CUDNN_ENABLED()
+#include <ATen/native/cudnn/Macros.h>
+
+#if HAS_CUDNN_V8()
+void raw_cudnn_convolution_forward_out_v7(
+    const Tensor& output, const Tensor& input, const Tensor& weight,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
+    bool benchmark, bool deterministic, bool allow_tf32);
+
+void raw_cudnn_convolution_backward_input_out_v7(
+    const at::Tensor& grad_input,
+    const at::Tensor& grad_output,
+    const at::Tensor& weight,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
+    bool benchmark, bool deterministic, bool allow_tf32);
+
+void raw_cudnn_convolution_backward_weight_out_v7(
+    const Tensor& grad_weight, const Tensor& grad_output, const Tensor& input,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
+    bool benchmark, bool deterministic, bool allow_tf32);
+
+void raw_cudnn_convolution_add_relu_out_v7(
+    const Tensor& output,
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& z,
+    float alpha,
+    const Tensor& bias,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    int64_t groups,
+    bool benchmark,
+    bool deterministic,
+    bool allow_tf32);
+#endif
+#endif
 }}
