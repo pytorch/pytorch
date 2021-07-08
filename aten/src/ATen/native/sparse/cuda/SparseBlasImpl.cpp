@@ -29,6 +29,16 @@ c10::MaybeOwned<Tensor> inline prepare_dense_matrix_for_cusparse(
   }
 }
 
+c10::MaybeOwned<Tensor> inline prepare_dense_vector_for_cusparse(
+    const Tensor& tensor) {
+  if (tensor.is_non_overlapping_and_dense()) {
+    return c10::MaybeOwned<Tensor>::borrowed(tensor);
+  } else {
+    return c10::MaybeOwned<Tensor>::owned(
+        tensor.clone(at::MemoryFormat::Contiguous));
+  }
+}
+
 } // anonymous namespace
 
 void addmm_out_sparse_csr_dense_cuda_impl(
@@ -123,6 +133,92 @@ void addmm_out_sparse_csr_dense_cuda_impl(
             work_data.get()));
       });
 
+  if (!result.is_same(*result_)) {
+    result.copy_(*result_);
+  }
+#endif
+}
+
+/*
+  Computes a sparse matrix-dense vector product defined as
+  y <- alpha*op(A)*x + beta*y
+
+  Args:
+  * `mat` - Tensor storing sparse m x n matrix A.
+  * `vec` - Tensor storing dense vector x of size n.
+  * `result` - [in] Tensor storing dense vector y of size m.
+               [out] result of the operation.
+*/
+void addmv_out_sparse_csr_cuda_impl(
+    const at::sparse_csr::SparseCsrTensor& mat,
+    const Tensor& vec,
+    const Scalar& beta,
+    const Scalar& alpha,
+    const Tensor& result) {
+#if !AT_USE_CUSPARSE_GENERIC_API()
+  TORCH_CHECK(
+      false,
+      "Calling addmv on a sparse GPU tensor requires compiling ",
+      "PyTorch with CUDA 10.2+ (CUDA 11+ on Windows). ",
+      "Please use PyTorch built with newer CUDA version.");
+#else
+  cusparseOperation_t opA = CUSPARSE_OPERATION_NON_TRANSPOSE;
+
+  c10::MaybeOwned<Tensor> result_ = prepare_dense_vector_for_cusparse(result);
+  c10::MaybeOwned<Tensor> vec_ = prepare_dense_vector_for_cusparse(vec);
+
+  // TODO: update this to support COO sparse layout
+  auto descA = at::cuda::sparse::CuSparseSpMatCsrDescriptor(mat);
+  auto descX = at::cuda::sparse::CuSparseDnVecDescriptor(*vec_);
+  auto descY = at::cuda::sparse::CuSparseDnVecDescriptor(*result_);
+
+  // There is no dispatch for kHalf and kBFloat16 types because cusparse
+  // computes garbage in this case, latest checked version of cuda is 11.3
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+      result.scalar_type(),
+      "addmv_out_sparse_csr_cuda_impl",
+      [&] {
+        auto beta_ = beta.to<scalar_t>();
+        auto alpha_ = alpha.to<scalar_t>();
+        cudaDataType compute_type = at::cuda::getCudaDataType<scalar_t>();
+        auto handle = at::cuda::getCurrentCUDASparseHandle();
+
+        // cusparseSpMVAlg_t was updated in cuda 11.2.1
+        #if CUSPARSE_VERSION >= 11400
+        cusparseSpMVAlg_t alg = CUSPARSE_SPMV_ALG_DEFAULT;
+        #else
+        cusparseSpMVAlg_t alg = CUSPARSE_MV_ALG_DEFAULT;
+        #endif
+
+        size_t buffer_size;
+        TORCH_CUDASPARSE_CHECK(cusparseSpMV_bufferSize(
+            handle,
+            opA,
+            &alpha_,
+            descA.descriptor(),
+            descX.descriptor(),
+            &beta_,
+            descY.descriptor(),
+            compute_type,
+            alg,
+            &buffer_size // output
+            ));
+
+        auto& allocator = *c10::cuda::CUDACachingAllocator::get();
+        auto work_data = allocator.allocate(buffer_size);
+
+        TORCH_CUDASPARSE_CHECK(cusparseSpMV(
+            handle,
+            opA,
+            &alpha_,
+            descA.descriptor(),
+            descX.descriptor(),
+            &beta_,
+            descY.descriptor(),
+            compute_type,
+            alg,
+            work_data.get()));
+      });
   if (!result.is_same(*result_)) {
     result.copy_(*result_);
   }

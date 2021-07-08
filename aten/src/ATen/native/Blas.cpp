@@ -13,7 +13,7 @@ TORCH_META_FUNC(addmv)(const Tensor &self, const Tensor &mat, const Tensor &vec,
   TORCH_CHECK(mat.size(1) == vec.size(0) && (mat.size(0) == self.numel() || self.numel() == 1),
      "size mismatch, got ", self.size(0), ", ", mat.size(0), "x", mat.size(1), ",", vec.size(0));
   auto names = at::namedinference::propagate_names_for_addmv(mat, vec, self);
-  set_output(0, IntArrayRef(mat.sizes().data(), 1), {}, mat.options(), names);
+  set_output(0, IntArrayRef(mat.sizes().data(), 1), {}, vec.options(), names);
   auto result = maybe_get_output(0);
   //this check can fire for inplace op only, for all other versions result is guaranteed to be correct size
   TORCH_CHECK(result.dim() == 1 && result.sizes()[0] == mat.sizes()[0], "output of addmv operation should be 1D with ",
@@ -91,14 +91,14 @@ Tensor &mv_out(const Tensor &self, const Tensor &vec, Tensor& result) {
   //in addmv, because addmv expects self to satisfy proper conditions
   //to avoid this, supply correctly sized self, its contents doesn't matter because beta is 0
   if (result.dim() > 1 || (result.numel() != self.size(0) || result.numel() !=1)) {
-    Tensor self_addmv = at::empty({self.size(0)}, self.options());
+    Tensor self_addmv = at::empty({self.size(0)}, vec.options());
     return at::addmv_out(result, self_addmv, self, vec, 0, 1);
   }
   return at::addmv_out(result, result, self, vec, 0, 1);
 }
 
 Tensor mv(const Tensor &self, const Tensor &vec) {
-  Tensor result = at::empty({self.size(0)}, self.options());
+  Tensor result = at::empty({self.size(0)}, vec.options());
   //inplace version is more efficient if we can use it
   return at::addmv_(result, self, vec, 0, 1);
 }

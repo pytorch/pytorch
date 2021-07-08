@@ -388,7 +388,11 @@ class TestSparseCSR(TestCase):
                 with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
                     torch.addmm(s, csr, m2)
 
-    @dtypes(torch.float, torch.double)
+    @skipCUDAIfNoCusparseGeneric
+    @dtypes(*torch.testing.floating_types())
+    @dtypesIfCUDA(*get_all_complex_dtypes(),
+                  *get_all_fp_dtypes(include_half=SM53OrLater, include_bfloat16=SM80OrLater))
+    @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2})
     def test_csr_matvec(self, device, dtype):
         side = 100
         for index_dtype in [torch.int32, torch.int64]:
@@ -401,7 +405,12 @@ class TestSparseCSR(TestCase):
             self.assertEqual(res, expected)
 
             bad_vec = torch.randn(side + 10, dtype=dtype, device=device)
-            with self.assertRaisesRegex(RuntimeError, "mv: expected"):
+            err_msg = "mv: expected"
+            # CUDA path now uses generic meta/structured implementation
+            # TODO: move CPU path to not use `mv_sparse` function
+            if self.device_type == 'cuda':
+                err_msg = "size mismatch, got"
+            with self.assertRaisesRegex(RuntimeError, err_msg):
                 csr.matmul(bad_vec)
 
     @dtypes(torch.double)
