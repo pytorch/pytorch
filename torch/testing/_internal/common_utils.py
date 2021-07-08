@@ -935,12 +935,11 @@ def check_disabled(test_name):
                 "windows": IS_WINDOWS,
                 "linux": IS_LINUX
             }
-            to_disable = platforms == [] or any([platform_to_conditional[platform] for platform in platforms])
-            raise unittest.skipIf(
-                to_disable,
-                f"Test is disabled because an issue exists disabling it: {issue_url}" +
-                f" for {'all' if platforms == [] else ''}platform(s) {', '.join(platforms)}." +
-                " To enable, set the environment variable PYTORCH_RUN_DISABLED_TESTS=1")
+            if platforms == [] or any([platform_to_conditional[platform] for platform in platforms]):
+                raise unittest.SkipTest(
+                    f"Test is disabled because an issue exists disabling it: {issue_url}" +
+                    f" for {'all' if platforms == [] else ''}platform(s) {', '.join(platforms)}." +
+                    " To enable, set the environment variable PYTORCH_RUN_DISABLED_TESTS=1")
 
 
 # Acquires the comparison dtype, required since isclose
