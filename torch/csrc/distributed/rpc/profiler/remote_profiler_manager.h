@@ -39,20 +39,18 @@ class TORCH_API RemoteProfilerManager {
   // case that many RPCs are being profiled.
   void eraseKey(const ProfilingId& globallyUniqueId);
 
+  RemoteProfilerManager(const RemoteProfilerManager& other) = delete;
+  RemoteProfilerManager operator=(const RemoteProfilerManager& other) = delete;
+  RemoteProfilerManager(RemoteProfilerManager&&) = delete;
+  RemoteProfilerManager& operator=(RemoteProfilerManager&&) = delete;
+
  private:
   RemoteProfilerManager();
   ~RemoteProfilerManager() = default;
-  // NOLINTNEXTLINE(modernize-use-equals-delete)
-  RemoteProfilerManager(const RemoteProfilerManager& other) = delete;
-  // NOLINTNEXTLINE(modernize-use-equals-delete)
-  RemoteProfilerManager operator=(const RemoteProfilerManager& other) = delete;
-  // NOLINTNEXTLINE(modernize-use-equals-delete)
-  RemoteProfilerManager(RemoteProfilerManager&&) = delete;
-  // NOLINTNEXTLINE(modernize-use-equals-delete)
-  RemoteProfilerManager& operator=(RemoteProfilerManager&&) = delete;
   local_id_t getNextLocalId();
   std::unordered_map<ProfilingId, std::string, ProfilingId::Hash>
       profiledRpcKeys_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static thread_local c10::optional<std::string> currentThreadLocalKey_;
   std::mutex mutex_;
   local_id_t currentLocalId_;
