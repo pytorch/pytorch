@@ -573,8 +573,8 @@ class AvgPool2d(_AvgPoolNd):
         divisor_override: if specified, it will be used as divisor, otherwise :attr:`kernel_size` will be used
 
     Shape:
-        - Input: :math:`(*, C, H_{in}, W_{in})`, where :math:`*` is 1 dimension or none.
-        - Output: :math:`(*, C, H_{out}, W_{out})`, where
+        - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`.
+        - Output: :math:`(N, C, H_{out}, W_{out})` or :math:`(C, H_{out}, W_{out})`, where
 
           .. math::
               H_{out} = \left\lfloor\frac{H_{in}  + 2 \times \text{padding}[0] -
@@ -654,8 +654,9 @@ class AvgPool3d(_AvgPoolNd):
         divisor_override: if specified, it will be used as divisor, otherwise :attr:`kernel_size` will be used
 
     Shape:
-        - Input: :math:`(*, C, D_{in}, H_{in}, W_{in})`, where :math:`*` is 1 dimension or none.
-        - Output: :math:`(*, C, D_{out}, H_{out}, W_{out})`, where
+        - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})` or :math:`(C, D_{in}, H_{in}, W_{in})`.
+        - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})` or
+          :math:`(C, D_{out}, H_{out}, W_{out})`, where
 
           .. math::
               D_{out} = \left\lfloor\frac{D_{in} + 2 \times \text{padding}[0] -
@@ -1111,8 +1112,9 @@ class AdaptiveAvgPool2d(_AdaptiveAvgPoolNd):
                      be the same as that of the input.
 
     Shape:
-        - Input: :math:`(*, C, H_{in}, W_{in})`, where :math:`*` is 1 dimension or none.
-        - Output: :math:`(*, C, S_{0}, S_{1})`, where :math:`S=\text{output\_size}`.
+        - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`.
+        - Output: :math:`(N, C, S_{0}, S_{1})` or :math:`(C, S_{0}, S_{1})`, where
+          :math:`S=\text{output\_size}`.
 
     Examples:
         >>> # target output size of 5x7
@@ -1149,8 +1151,9 @@ class AdaptiveAvgPool3d(_AdaptiveAvgPoolNd):
                      be the same as that of the input.
 
     Shape:
-        - Input: :math:`(*, C, H_{in}, W_{in})`, where :math:`*` is 1 dimension or none.
-        - Output: :math:`(*, C, S_{0}, S_{1}, S_{2})`, where :math:`S=\text{output\_size}`.
+        - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`.
+        - Output: :math:`(N, C, S_{0}, S_{1}, S_{2})` or :math:`(C, S_{0}, S_{1}, S_{2})`,
+          where :math:`S=\text{output\_size}`.
 
     Examples:
         >>> # target output size of 5x7x9
