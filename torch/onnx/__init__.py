@@ -107,12 +107,12 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             This helps in stripping parameters from the model so that large models could be export
             successfully. Besides this, if this is False, no matter the model will be export in
             inference mode or training mode, the optimization which may adjust graph inputs will
-            be skipped — for example, Conv and BatchNorm fusion.
+            be skipped - for example, Conv and BatchNorm fusion.
         verbose (bool, default False): if True, prints a description of the
             model being exported to stdout.
         training (enum, default TrainingMode.EVAL):
-            * ``TrainingMode.EVAL``: export the model in inference mode. If export_params = Flase
-              or keep_initializers_as_inputs = True.", the optimization that might adjust graph
+            * ``TrainingMode.EVAL``: export the model in inference mode. If export_params = False
+              or keep_initializers_as_inputs = True, the optimization that might adjust graph
               inputs will be skipped (e.g., fusing Conv and BatchNorm ops).
             * ``TrainingMode.PRESERVE``: export the model in inference mode if model.training is
               False and in training mode if model.training is True.
@@ -188,7 +188,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             Constant-folding will replace some of the ops that have all constant inputs
             with pre-computed constant nodes.
             Since this optimization adjusts model initializers, it will be disabled if
-            export_params = Flase or keep_initializers_as_inputs = True.
+            export_params = False or keep_initializers_as_inputs = True.
         example_outputs (T or a tuple of T, where T is Tensor or convertible to Tensor, default None):
             Must be provided when exporting a ScriptModule or ScriptFunction, ignored otherwise.
             Used to determine the type and shape of the outputs without tracing the execution of
