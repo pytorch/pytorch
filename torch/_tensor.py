@@ -942,7 +942,7 @@ class Tensor(torch._C._TensorBase):
             coalesced_self = self.coalesce()
             row_indices = coalesced_self.indices()[0]
             device = coalesced_self.values().device
-            arange = torch.arange(self.shape[0] + 1, device=device)
+            arange = torch.arange(self.shape[0] + 1, dtype=row_indices.dtype, device=device)
             crow_indices = torch.bucketize(arange, row_indices, out_int32=row_indices.dtype == torch.int32)
             return torch.sparse_csr_tensor(crow_indices,
                                            coalesced_self.indices()[1].contiguous(),
