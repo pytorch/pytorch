@@ -24,8 +24,8 @@ static inline void check_for_unsupported_isin_dtype(const ScalarType type) {
 
 TORCH_META_FUNC(clamp) (
 const Tensor& self,
-const c10::optional<Scalar>& min,
-const c10::optional<Scalar>& max) {
+const OptionalScalarRef min,
+const OptionalScalarRef max) {
   if (!min && !max) {
     TORCH_CHECK(false, "torch.clamp: At least one of 'min' or 'max' must not be None");
   }
@@ -587,18 +587,18 @@ std::tuple<Tensor&, Tensor&> min_out(
 TORCH_IMPL_FUNC(clamp_out)
 (
  const Tensor& self,
- const c10::optional<Scalar>& min,
- const c10::optional<Scalar>& max,
+ const OptionalScalarRef min,
+ const OptionalScalarRef max,
  const Tensor& result) {
   if (min && max) {
-    clamp_scalar_stub(device_type(), *this, *min, *max);
+    clamp_scalar_stub(device_type(), *this, min.toScalar(), max.toScalar());
   } else if (max) {
     Tensor temp(result);
-    at::clamp_max_outf(self, *max, temp);
+    at::clamp_max_outf(self, max.toScalar(), temp);
     result.copy_(temp);
   } else if (min) {
     Tensor temp(result);
-    at::clamp_min_outf(self, *min, temp);
+    at::clamp_min_outf(self, min.toScalar(), temp);
     result.copy_(temp);
   }
 }

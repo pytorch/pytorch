@@ -186,6 +186,28 @@ class C10_API Scalar {
   } v;
 };
 
+struct OptionalScalarRef {
+  OptionalScalarRef() : sentinel_(), scalar_(sentinel_), valid_(false) {}
+  OptionalScalarRef(const Scalar& scalar) : scalar_(scalar), valid_(true) {}
+
+  bool has_value() const {
+    return valid_;
+  }
+
+  const Scalar& toScalar() const {
+    return scalar_;
+  }
+
+  operator bool() const {
+    return valid_;
+  }
+
+private:
+  const Scalar sentinel_;
+  const Scalar& scalar_;
+  bool valid_;
+};
+
 // define the scalar.to<int64_t>() specializations
 #define DEFINE_TO(T, name)         \
   template <>                      \

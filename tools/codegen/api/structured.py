@@ -5,7 +5,8 @@ from tools.codegen.model import (Argument, BaseTy, BaseType, ListType,
 
 from tools.codegen.api.types import (ArgName, BaseCType, Binding, ArrayRefCType,
                                      ConstRefCType, OptionalCType, NamedCType,
-                                     tensorT, scalarT, intArrayRefT, dimnameListT)
+                                     tensorT, scalarT, intArrayRefT, dimnameListT,
+                                     optionalScalarRefT)
 from tools.codegen.api import cpp
 
 from typing import Union, List
@@ -37,7 +38,7 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
                 "add OptionalTensor c.f. https://github.com/pytorch/pytorch/issues/51456"
             )
         elif t.elem == BaseType(BaseTy.Scalar):
-            return NamedCType(binds, ConstRefCType(OptionalCType(BaseCType(scalarT))))
+            return NamedCType(binds, BaseCType(optionalScalarRefT))
         elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)
         return NamedCType(binds, OptionalCType(elem.type))
     elif isinstance(t, ListType):
