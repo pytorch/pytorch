@@ -234,7 +234,7 @@ def get_greatest_upper_bound(type1, type2):
     elif type2 == Dyn:
         return type1
     elif isinstance(type1, TensorType) and isinstance(type2, TensorType):
-        assert len(type1.__args__) == len(type2.__args__)
+        assert is_consistent(type1, type2)
         gub = [t1 if is_more_precise(t1, t2) else t2 for (t1, t2) in zip(type1.__args__, type2.__args__)]
         return TensorType(tuple(gub))
     else:
@@ -248,7 +248,7 @@ def conv2d_inference_rule(n: Node, module_instance):
     - the current node type can be expanded to a size 4 tensor: t' =  (x_1', x_2', x_3', x_4')
     - x_2 is consistent with the module's in_channels
     - let o = (x_1, out_channels, H_out, W_out)
-    then the outout is the greatest upper bound of o and the existing node type t'.
+    then the output is the greatest upper bound of o and the existing node type t'.
     """
     assert isinstance(n.args[0], Node)
     n.args[0].type = expand_to_tensor_dim(n.args[0].type, 4)
@@ -261,12 +261,9 @@ def conv2d_inference_rule(n: Node, module_instance):
         h_out = calculate(h_in, module_instance, 0)
         w_out = calculate(w_in, module_instance, 1)
         new_type = TensorType((arg_type.__args__[0], module_instance.out_channels, h_out, w_out))
-
-        if not is_consistent(new_type, curr_node_type):
-            raise TypeError(f'Inconsistent types {new_type} and {curr_node_type}')
-        else:
-            gub = get_greatest_upper_bound(new_type, curr_node_type)
-            n.type = gub
+        gub = get_greatest_upper_bound(new_type, curr_node_type)
+        n.type = gub
+        return n.type
     else:
         raise TypeError(f'Cannot apply {module_instance} with input type { arg_type} and existing type {n.type} on {n}')
 
