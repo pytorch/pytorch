@@ -1913,20 +1913,38 @@ static void apply_lu_batched_magma(const Tensor& input, const Tensor& pivots, co
 #endif
 }
 
-static void lu_magma(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
-  // TODO: compare performance and use the best performing option based on input's sizes
-  if (input.dim() == 2) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "lu_magma", [&]{
-      apply_lu_looped_magma<scalar_t>(input, pivots, infos, compute_pivots);
-    });
-  } else {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "lu_magma", [&]{
-      apply_lu_batched_magma<scalar_t>(input, pivots, infos, compute_pivots);
-    });
+static void lu_looped_magma(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "lu_magma_looped", [&]{
+    apply_lu_looped_magma<scalar_t>(input, pivots, infos, compute_pivots);
+  });
+}
+
+static void lu_batched_magma(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "lu_magma_batched", [&]{
+    apply_lu_batched_magma<scalar_t>(input, pivots, infos, compute_pivots);
+  });
+}
+
+static void apply_lu(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
+  int64_t batch_size = batchCount(input);
+#ifdef USE_CUSOLVER
+  // Use a heuristic to determine that cusolver is faster than MAGMA for the following sizes.
+  auto m = input.size(-2);
+  // exclude complex128 since nan_to_num_ does not work with it.
+  if ((batch_size == 1 || (batch_size <= 8 && m <= 16) || !use_magma_ ) && !input.is_complex()) {
+    lu_looped_cusolver(input, pivots, infos, compute_pivots);
+  }
+#else
+  if (batch_size == 1) {
+    lu_looped_magma(input, pivots, infos, compute_pivots);
+  }
+#endif // USE_CUSOLVER
+  else {
+    lu_batched_magma(input, pivots, infos, compute_pivots);
   }
 }
 
-REGISTER_DISPATCH(lu_stub, &lu_magma);
+REGISTER_DISPATCH(lu_stub, &apply_lu);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangular_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -2250,7 +2268,7 @@ std::tuple<Tensor, Tensor> _linalg_qr_helper_cuda(const Tensor& input, c10::stri
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ symeig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>
-static void apply_magma_eigh(Tensor& values, Tensor& vectors, Tensor& infos, bool upper, bool compute_eigenvectors) {
+static void apply_magma_eigh(const Tensor& values, const Tensor& vectors, const Tensor& infos, bool upper, bool compute_eigenvectors) {
 #ifndef USE_MAGMA
   TORCH_CHECK(
     false,
@@ -2363,23 +2381,24 @@ std::tuple<Tensor, Tensor> _symeig_helper_cuda(const Tensor& self, bool eigenvec
 
 // This is a type dispatch function for 'apply_magma_eigh'
 // For small inputs result is computed on CPU
-void linalg_eigh_magma(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos, bool upper, bool compute_eigenvectors) {
+void linalg_eigh_magma(const Tensor& eigenvalues, const Tensor& eigenvectors, const Tensor& infos, bool upper, bool compute_eigenvectors) {
   // MAGMA just calls LAPACK for eigenvectors.size(-1) <= 128
   // See https://bitbucket.org/icl/magma/src/e6fdca447bd402693e8b0b950a898b6879bbcc41/src/zheevd_gpu.cpp?at=master#lines-258
   // in addition lda is ignored breaking 0x0 inputs
   if (eigenvectors.size(-1) > 128) {
     // MAGMA requires eigenvalues and infos tensors to reside on CPU
     Tensor eigenvalues_cpu = eigenvalues.to(kCPU);
-    infos = infos.to(kCPU);
+    Tensor infos_cpu = infos.to(kCPU);
 
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
-      eigenvectors.scalar_type(), "linalg_eigh_cpu", [&] {
+      eigenvectors.scalar_type(), "linalg_eigh_magma", [&] {
         apply_magma_eigh<scalar_t>(
-            eigenvalues_cpu, eigenvectors, infos, upper, compute_eigenvectors);
+            eigenvalues_cpu, eigenvectors, infos_cpu, upper, compute_eigenvectors);
       });
 
     // Transfer computed by MAGMA results from CPU to GPU
     eigenvalues.copy_(eigenvalues_cpu);
+    infos.copy_(infos_cpu);
   } else { // eigenvectors.size(-1) <= 128
     // transfer to CPU, compute the result and copy back to GPU
     // this is faster than going through MAGMA that does the same
@@ -2395,7 +2414,7 @@ void linalg_eigh_magma(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos,
   }
 }
 
-void linalg_eigh_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos, bool upper, bool compute_eigenvectors) {
+void linalg_eigh_kernel(const Tensor& eigenvalues, const Tensor& eigenvectors, const Tensor& infos, bool upper, bool compute_eigenvectors) {
 #if defined(USE_CUSOLVER)
   linalg_eigh_cusolver(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
 #else
