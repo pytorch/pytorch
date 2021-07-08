@@ -24,6 +24,7 @@
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_dict.h>
+#include <torch/csrc/jit/python/python_list.h>
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/logging.h>
@@ -2135,6 +2136,7 @@ void initJitScriptBindings(PyObject* module) {
   });
 
   initScriptDictBindings(module);
+  initScriptListBindings(module);
 }
 } // namespace jit
 } // namespace torch

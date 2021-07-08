@@ -296,6 +296,7 @@ jobs:
             -e SHARD_NUMBER \
             -e JOB_BASE_NAME \
             -e MAX_JOBS="$(nproc --ignore=2)" \
+            -e SCCACHE_BUCKET \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
