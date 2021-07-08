@@ -45,6 +45,7 @@ from typing import cast, Any, Dict, Iterable, Iterator, Optional, Union
 import numpy as np
 
 from torch.testing import floating_types_and, integral_types, complex_types, assert_close
+from torch.testing._asserts import _get_default_rtol_and_atol
 import expecttest
 from .._core import \
     (_compare_tensors_internal, _compare_scalars_internal, _compare_return_type)
@@ -1503,7 +1504,13 @@ class TestCase(expecttest.TestCase):
 
         # Tensor x Tensor
         elif isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
-            assert_close_(x, y)
+            # In order to honor the @toleranceOverride and @precisionOverride decorators, we need to resolve the
+            # tolerances before we call assert_close
+            if rtol is None and atol is None:
+                rtol, atol = _get_default_rtol_and_atol(x, y)
+            rtol = max(rtol, self.rel_tol)
+            atol = max(atol, self.precision)
+            assert_close_(x, y, rtol=rtol, atol=atol)
         elif isinstance(x, (np.ndarray, torch.Tensor)) or isinstance(y, (np.ndarray, torch.Tensor)):
             def maybe_to_tensor(a: Union[np.ndarray, torch.Tensor]) -> Union[np.ndarray, torch.Tensor]:
                 if not isinstance(a, np.ndarray):
@@ -1539,6 +1546,7 @@ class TestCase(expecttest.TestCase):
                 exact_device=exact_device,
                 exact_stride=exact_stride,
                 exact_is_coalesced=exact_is_coalesced,
+                equal_nan=equal_nan,
             )
         elif isinstance(x, string_classes) and isinstance(y, string_classes):
             debug_msg = ("Attempted to compare [string] types: "
