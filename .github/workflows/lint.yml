@@ -406,9 +406,11 @@ jobs:
       - name: Run mypy
         env:
           MYPY_FORCE_COLOR: 1
+          TERM: xterm-color
         run: |
           set -eux
           export MYPY_FORCE_COLOR=1
+          export TERM=xterm-color
           STATUS=
           for CONFIG in mypy*.ini; do
             if ! mypy --config="$CONFIG" --color-output; then
