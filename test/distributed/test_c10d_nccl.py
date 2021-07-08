@@ -462,6 +462,41 @@ class ProcessGroupNCCLTest(TestCase):
                     self.assertEqual(output_ts[idx][i], 0)
 
     @requires_nccl()
+    def test_scatter_ops(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        def scatter(output_t, input_t, rootRank):
+            opts = c10d.ScatterOptions()
+            opts.rootRank = rootRank
+            if rootRank == self.rank:
+                work = pg.scatter(output_t, input_t, opts) 
+            else:
+                work = pg.scatter([], input_t, opts)  
+            work.wait()
+
+        # init input
+        input_ts = [[] for _ in range(self.num_gpus)]
+        for idx, ls in enumerate(input_ts):
+            for _ in range(self.world_size * self.num_gpus):
+                ls.append(torch.tensor([idx]).cuda(idx))
+
+        # init output
+        output_ts = []
+        for i in range(self.num_gpus):
+            output_ts.append(torch.tensor([0]).cuda(i))
+
+        # init golden output
+        golden_ts = []
+        for i in range(self.num_gpus):
+            golden_ts.append(torch.tensor([self.rank]).cuda(i))
+
+        scatter(output_ts, input_ts, self.rank)
+
+        # Verification
+        self.assertEqual(output_ts, golden_ts)
+
+    @requires_nccl()
     def test_reduce_scatter_base_basics(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
