@@ -217,7 +217,16 @@ bool MulFunctor<CUDAContext>::Backward(
     TGrad* dA,
     TGrad* dB,
     CUDAContext* context) const {
+  if (dA != nullptr) {
+    CAFFE_ENFORCE_NE(dA, dB, "Outputs dA and dB should point to distinct blobs");
+  }
   if (A_dims == B_dims) {
+    if (dC == dA) {
+      // Ensure operation can be performed in-place.
+      // We want to avoid clobbering dC if it aliases dA.
+      std::swap(A, B);
+      std::swap(dA, dB);
+    }
     const int size = std::accumulate(
         A_dims.cbegin(), A_dims.cend(), 1, std::multiplies<int>());
     math::Mul(size, dC, B, dA, context);

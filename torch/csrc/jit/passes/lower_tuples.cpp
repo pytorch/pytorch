@@ -2,6 +2,7 @@
 
 #include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 
@@ -229,7 +230,7 @@ static void flattenOutputs(Node* n, Node* insert_point) {
     // is placed at the current insertion point
     if (TupleTypePtr tt = output->type()->cast<TupleType>()) {
       if (supported_ops.count(n->kind()) > 0) {
-        for (size_t j = 0; j < tt->elements().size(); j++) {
+        for (const auto j : c10::irange(tt->elements().size())) {
           n->insertOutput(i + 1 + j)->setType(tt->elements()[j]);
         }
         auto new_tup =

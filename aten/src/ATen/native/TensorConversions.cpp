@@ -33,7 +33,7 @@ static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, b
                   (options.layout() == c10::kStrided));
 
   if (memory_format == MemoryFormat::Preserve) {
-    if (self.is_non_overlapping_and_dense()) {
+    if (self.is_non_overlapping_and_dense() && options.device().supports_as_strided()) {
       // Copy all strides
       auto r = at::empty_strided(self.sizes(),
                                  self.strides(),
@@ -138,9 +138,8 @@ Tensor view_dtype(const Tensor& self, ScalarType dtype) {
   if (self.scalar_type() == dtype) {
     return self;
   }
-  auto type_meta = c10::scalarTypeToTypeMeta(dtype);
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  TORCH_CHECK(self.element_size() == type_meta.itemsize(),
+  const auto type_meta = c10::scalarTypeToTypeMeta(dtype);
+  TORCH_CHECK(self.element_size() == static_cast<int64_t>(type_meta.itemsize()),
     "Viewing a tensor as a new dtype with a different number of bytes per element is not supported.");
   Storage storage = self.storage();
   auto new_tensor = detail::make_tensor<TensorImpl>(

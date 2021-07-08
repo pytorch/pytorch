@@ -132,7 +132,7 @@ Tensor softmax_cpu(const Tensor& input_, const int64_t dim_, const bool half_to_
   if (input.numel() == 0) {
     return output;
   }
- if (input.dim() == 0)
+  if (input.dim() == 0)
     input = input.view(1);
   TORCH_CHECK(
       dim >= 0 && dim < input.dim(),
@@ -140,9 +140,7 @@ Tensor softmax_cpu(const Tensor& input_, const int64_t dim_, const bool half_to_
   if (input.ndimension() > 0 && dim == input.ndimension() - 1) {
     softmax_lastdim_kernel(kCPU, output, input);
   } else {
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "softmax", [&] {
-      host_softmax<scalar_t, false>(output, input, dim);
-    });
+    softmax_kernel(kCPU, output, input, dim);
   }
   return output;
 }
@@ -309,6 +307,8 @@ DEFINE_DISPATCH(log_softmax_lastdim_kernel);
 DEFINE_DISPATCH(softmax_backward_lastdim_kernel);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log_softmax_backward_lastdim_kernel);
+
+DEFINE_DISPATCH(softmax_kernel);
 
 Tensor softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) {
   return at::softmax(self, dimname_to_position(self, dim), dtype);
