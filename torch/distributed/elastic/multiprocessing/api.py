@@ -491,7 +491,7 @@ class SubprocessHandler:
             #  `Tuple[str, *Tuple[Any, ...]]`.
             args=args,
             env=env,
-            preexec_fn=preexec_fn,
+            # preexec_fn=preexec_fn,
             stdout=self._stdout,
             stderr=self._stderr,
         )
