@@ -63,7 +63,6 @@ cc_library(
             "onnx/defs/tensor/*.cc",
             "onnx/defs/traditionalml/*.cc",
             "onnx/defs/training/defs.cc",
-            "onnx/optimizer/*.cc",
             "onnx/shape_inference/*.cc",
             "onnx/version_converter/*.cc",
         ],
@@ -78,8 +77,6 @@ cc_library(
         "onnx/defs/*.h",
         "onnx/defs/tensor/*.h",
         "onnx/shape_inference/*.h",
-        "onnx/optimizer/*.h",
-        "onnx/optimizer/passes/*.h",
         "onnx/version_converter/adapters/*.h",
     ]) + [
         "onnx/onnx-ml.pb.h",

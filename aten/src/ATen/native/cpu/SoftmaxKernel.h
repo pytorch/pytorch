@@ -14,5 +14,8 @@ DECLARE_DISPATCH(forward_fn, log_softmax_lastdim_kernel);
 DECLARE_DISPATCH(backward_fn, softmax_backward_lastdim_kernel);
 DECLARE_DISPATCH(backward_fn, log_softmax_backward_lastdim_kernel);
 
+using forward_fn_with_dim = void(*)(Tensor &, const Tensor &, const int64_t);
+DECLARE_DISPATCH(forward_fn_with_dim, softmax_kernel);
+
 }
 }
