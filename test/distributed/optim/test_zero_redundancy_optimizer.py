@@ -777,8 +777,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
 
     def _test_zero_model_parallel(self, parameters_as_bucket_view: bool):
         # Use two processes each with two GPUs
-        if self.rank >= 2:
-            return
+        assert self.rank < 2
         NUM_EPOCHS = 3
         NUM_INPUTS = 5
         LR = 0.01
@@ -859,16 +858,26 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                     assert torch.allclose(local_p, ddp_p), "Models differ after a step"
 
     @common_distributed.skip_if_lt_x_gpu(4)
-    def test_zero_model_parallel(self):
+    def test_zero_model_parallel_with_bucket_view(self):
         """
         Check that ZeRO works with model parallelism where layers are sharded
-        across devices.
+        across devices when ``parameters_as_bucket_view=True``.
         """
         if self.rank >= 2:
             return
         self.dist_init(self.rank, world_size=2)
-        for parameters_as_bucket_view in [False, True]:
-            self._test_zero_model_parallel(parameters_as_bucket_view)
+        self._test_zero_model_parallel(parameters_as_bucket_view=True)
+
+    @common_distributed.skip_if_lt_x_gpu(4)
+    def test_zero_model_parallel_without_bucket_view(self):
+        """
+        Check that ZeRO works with model parallelism where layers are sharded
+        across devices when ``parameters_as_bucket_view=False``.
+        """
+        if self.rank >= 2:
+            return
+        self.dist_init(self.rank, world_size=2)
+        self._test_zero_model_parallel(parameters_as_bucket_view=False)
 
 
 if __name__ == "__main__":

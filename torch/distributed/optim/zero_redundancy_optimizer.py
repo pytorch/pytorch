@@ -455,6 +455,7 @@ class ZeroRedundancyOptimizer(Optimizer):
         Dict mapping device to a list of the per-rank parameter lists
         containing the parameters stored on the device.
 
+        Let ``dev_i`` denote the ``i``th device for this rank. Then:
         ``dev_0`` maps to a list containing:
             rank 0's assigned parameters stored on ``dev_0``,
             rank 1's assigned parameters stored on ``dev_0``,
