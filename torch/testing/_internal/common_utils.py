@@ -1506,7 +1506,7 @@ class TestCase(expecttest.TestCase):
         elif isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
             # In order to honor the @toleranceOverride and @precisionOverride decorators, we need to resolve the
             # tolerances before we call assert_close
-            if rtol is None and atol is None:
+            if rtol is None or atol is None:
                 rtol, atol = _get_default_rtol_and_atol(x, y)
             rtol = max(rtol, self.rel_tol)
             atol = max(atol, self.precision)
