@@ -97,7 +97,7 @@ TORCH_META_FUNC(trunc) (const Tensor& self) {
   // Note: this is consistent with NumPy
   TORCH_CHECK(!self.is_complex(),
     "trunc is not supported for complex inputs");
-  build_unary_op(maybe_get_output(), self);
+  build_unary_float_op(maybe_get_output(), self);
 }
 
 TORCH_META_FUNC(floor) (const Tensor& self) {

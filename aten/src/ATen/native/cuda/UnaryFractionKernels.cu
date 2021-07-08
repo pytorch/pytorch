@@ -129,7 +129,13 @@ __host__ __device__ static inline c10::complex<double> nearbyint_wrapper(c10::co
 #pragma pop
 
 void round_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(
+  if (c10::isIntegralType(iter.common_dtype(), true)) {
+    AT_DISPATCH_INTEGRAL_TYPES_AND(
+        ScalarType::Bool, iter.dtype(), "round_cuda", [&]() {
+          gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t { return a; });
+        });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       iter.dtype(), "round_cuda",
       [&]() {
@@ -138,6 +144,7 @@ void round_kernel_cuda(TensorIteratorBase& iter) {
           return nearbyint_wrapper(a);
         });
       });
+  }
 }
 
 // We manually overload trunc because std::trunc does not work with std::complex types and ROCm.
@@ -161,7 +168,7 @@ __host__ __device__ static inline c10::complex<double> trunc_wrapper(c10::comple
 void trunc_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
-      iter.dtype(), "trunc_cuda",
+      iter.common_dtype(), "trunc_cuda",
       [&]() {
         gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
           return trunc_wrapper(a);
