@@ -136,7 +136,6 @@ class _DDPSink(Function):
         ctx.set_materialize_grads(False)
         ctx.reducer = reducer
         ctx.state_dict = state_dict
-        ctx.inputs = inputs
         return inputs
 
     @staticmethod
@@ -145,19 +144,6 @@ class _DDPSink(Function):
         static_graph_training = ctx.state_dict['static_graph']
         if static_graph_training and ctx.state_dict['num_iterations'] == 1:
             Variable._execution_engine.queue_callback(ctx.reducer._delay_all_reduce)
-
-        elif state_dict['find_unused'] and not static_graph_training:
-            # First type of unused params: parameters that did not participate
-            # in computing model outputs. These are found by the below call to
-            # prepare_for_backward.
-            # Second type of unused params: params that won't get gradient
-            # because outputs they produced do not get used in computing loss
-            # for this call to backward. Due to this passthrough autograd
-            # function, autograd hooks for these parameters are now triggered
-            # with undefined gradient to maintain parity with local training.
-            # DDP takes care of undefined grads in this case to ensure the .grad
-            # field of the param is not touched.
-            ctx.reducer.prepare_for_backward(list(_find_tensors(ctx.inputs)))
 
         return (None, None, *grad_outputs)
 
@@ -855,8 +841,13 @@ class DistributedDataParallel(Module):
 
             if grad_enabled and self.require_backward_grad_sync:
                 self.require_forward_param_sync = True
+                # Static graph does not need to conduct unused parameter search
+                # as it finds unused parameters by keeping track of how many
+                # times grad hooks have been fired.
                 if self.static_graph or not self.find_unused_parameters:
                     self.reducer.prepare_for_backward([])
+                else:
+                    self.reducer.prepare_for_backward(list(_find_tensors(output)))
             else:
                 self.require_forward_param_sync = False
 
@@ -866,25 +857,14 @@ class DistributedDataParallel(Module):
         if (self.find_unused_parameters and not self.static_graph) or (
             self.static_graph and self.num_iterations == 1
         ):
-            find_unused = all([
-                grad_enabled,
-                self.require_backward_grad_sync,
-                self.find_unused_parameters,
-            ])
             state_dict = {
                 'static_graph': self.static_graph,
-                'find_unused': find_unused,
                 'num_iterations': self.num_iterations,
             }
 
             output_tensor_list, treespec, output_is_rref = _tree_flatten_with_rref(
                 output
             )
-            # Note: DDPSink helps to ensure that prepare_for_backward is called
-            # immediately before the backwards pass, to support a variety of
-            # features such as: enqueue delay allreduce for static graph, support
-            # multiple calls to backwards with retain_graph=True, and support
-            # finding all parameters that will not receive gradient.
             output_placeholders = [None for _ in range(len(output_tensor_list))]
             # Do not touch tensors that have no grad_fn, which can cause issues
             # such as https://github.com/pytorch/pytorch/issues/60733

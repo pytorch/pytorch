@@ -266,15 +266,22 @@ class TestQuantizedTensor(TestCase):
         self.assertRaises(RuntimeError, lambda: qr.new(torch.Size([2, 3])))
         self.assertRaises(RuntimeError, lambda: qr.new([6]))
 
-    def test_per_channel_qtensor_creation(self):
+    def test_per_channel_qtensor_creation_cpu(self):
+        self._test_per_channel_qtensor_creation(torch.device('cpu'))
+
+    @unittest.skipIf(not TEST_CUDA, "No gpu is available.")
+    def test_per_channel_qtensor_creation_cuda(self):
+        self._test_per_channel_qtensor_creation(torch.device('cuda'))
+
+    def _test_per_channel_qtensor_creation(self, device):
         numel = 10
         ch_axis = 0
-        scales = torch.rand(numel)
-        zero_points_int = torch.randint(0, 10, size=(numel,))
-        zero_points_float = torch.randn(numel)
+        scales = torch.rand(numel, device=device)
+        zero_points_int = torch.randint(0, 10, size=(numel,), device=device)
+        zero_points_float = torch.randn(numel, device=device)
         for dtype, zero_points in itertools.product([torch.qint8, torch.quint8], [zero_points_float, zero_points_int]):
             q = torch._empty_per_channel_affine_quantized(
-                [numel], scales=scales, zero_points=zero_points, axis=ch_axis, dtype=dtype)
+                [numel], scales=scales, zero_points=zero_points, axis=ch_axis, dtype=dtype, device=device)
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
             self.assertEqualIgnoreType(scales, q.q_per_channel_scales())
             self.assertEqual(zero_points, q.q_per_channel_zero_points())
@@ -282,7 +289,7 @@ class TestQuantizedTensor(TestCase):
 
         # create Tensor from uint8_t Tensor, scales and zero_points
         for zero_points in [zero_points_float, zero_points_int]:
-            int_tensor = torch.randint(0, 100, size=(numel,), dtype=torch.uint8)
+            int_tensor = torch.randint(0, 100, size=(numel,), dtype=torch.uint8, device=device)
             q = torch._make_per_channel_quantized_tensor(int_tensor, scales, zero_points, ch_axis)
             self.assertEqual(int_tensor, q.int_repr())
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
@@ -348,6 +355,31 @@ class TestQuantizedTensor(TestCase):
             self.assertEqual('cuda', qr.device.type)
             self.assertEqual('cpu', qr_cuda.device.type)
 
+    @unittest.skipIf(not TEST_CUDA, "No gpu is available.")
+    def test_per_channel_to_device(self):
+        dtype_and_zero_types = [
+            (torch.quint8, torch.float),
+            (torch.qint8, torch.float),
+            #  (torch.qint32, torch.float) not supported for quantize_per_channel
+            (torch.quint8, torch.long),
+            (torch.qint8, torch.long),
+            (torch.qint32, torch.long),
+        ]
+        axis = 1
+        device = torch.device('cuda')
+        for dtype, zero_type in dtype_and_zero_types:
+            r = torch.rand(2, 2, dtype=torch.float) * 10
+            scales = torch.rand(2).abs()
+            zero_points = (torch.rand(2) * 10).round().to(zero_type)
+
+            dqr = torch.quantize_per_channel(r, scales, zero_points, axis, dtype)
+            dqr = dqr.to(device)
+            dqr_cuda = torch.quantize_per_channel(r.to(device), scales.to(
+                device), zero_points.to(device), axis, dtype)
+            dqr_cuda = dqr_cuda.to('cpu')
+            self.assertEqual('cuda', dqr.device.type)
+            self.assertEqual('cpu', dqr_cuda.device.type)
+
     @unittest.skipIf(not torch.cuda.is_available() or TEST_WITH_ROCM, 'CUDA is not available')
     def test_compare_per_tensor_device_numerics(self):
         dtypes = [
@@ -368,6 +400,33 @@ class TestQuantizedTensor(TestCase):
             dqtr_cuda = qtr_cuda.dequantize()
             self.assertEqual(qtr.int_repr(), qtr_cuda.int_repr())
             self.assertTrue(np.allclose(dqtr.numpy(), dqtr_cuda.cpu().numpy()))
+
+    @unittest.skipIf(not torch.cuda.is_available() or TEST_WITH_ROCM, 'CUDA is not available')
+    def test_compare_per_channel_device_numerics(self):
+        dtype_and_zero_types = [
+            (torch.quint8, torch.float),
+            (torch.qint8, torch.float),
+            #  (torch.qint32, torch.float) not supported for quantize_per_channel
+            (torch.quint8, torch.long),
+            (torch.qint8, torch.long),
+            (torch.qint32, torch.long),
+        ]
+        axis = 1
+        device = torch.device('cuda')
+        for i in range(20):
+            for dtype, zero_type in dtype_and_zero_types:
+                r = torch.rand(2, 2) * 10
+                r[0, 0] = 2.5
+                scales = torch.rand(2).abs()
+                zero_points = (torch.rand(2) * 10).round().to(zero_type)
+
+                qr = torch.quantize_per_channel(r, scales, zero_points, axis, dtype)
+                dqr = qr.dequantize()
+                qr_cuda = torch.quantize_per_channel(r.to(device), scales.to(
+                    device), zero_points.to(device), axis, dtype)
+                dqr_cuda = qr_cuda.dequantize()
+                self.assertEqual(qr.int_repr(), qr_cuda.int_repr())
+                self.assertTrue(np.allclose(dqr, dqr_cuda.cpu()))
 
     def _test_quantize_per_channel(self, r, scales, zero_points, axis, float_params):
 
@@ -567,26 +626,27 @@ class TestQuantizedTensor(TestCase):
                 qx.permute([1, 0])
 
     def test_qtensor_per_channel_permute(self):
-        r = torch.rand(20, 10, 2, 2, dtype=torch.float) * 4 - 2
-        dtype = torch.qint8
-        scales = torch.rand(10) * 0.02 + 0.01
-        zero_points = torch.round(torch.rand(10) * 2 - 1).to(torch.long)
-        qr = torch.quantize_per_channel(r, scales, zero_points, 1, dtype)
+        for device in get_supported_device_types():
+            r = torch.rand(20, 10, 2, 2, dtype=torch.float, device=device) * 4 - 2
+            dtype = torch.qint8
+            scales = torch.rand(10, device=device) * 0.02 + 0.01
+            zero_points = torch.round(torch.rand(10, device=device) * 2 - 1).to(torch.long)
+            qr = torch.quantize_per_channel(r, scales, zero_points, 1, dtype)
 
-        # we can't reorder the axis
-        with self.assertRaises(RuntimeError):
-            qr.transpose(0, 1)
+            # we can't reorder the axis
+            with self.assertRaises(RuntimeError):
+                qr.transpose(0, 1)
 
-        # but we can change memory format
-        qlast = qr.contiguous(memory_format=torch.channels_last)
-        self.assertEqual(qr.stride(), list(reversed(sorted(qr.stride()))))
-        self.assertNotEqual(qlast.stride(), list(reversed(sorted(qlast.stride()))))
-        self.assertEqual(qr.int_repr(), qlast.int_repr())
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(scales, qlast.q_per_channel_scales())
-        self.assertEqual(zero_points, qlast.q_per_channel_zero_points())
-        self.assertEqual(1, qlast.q_per_channel_axis())
-        self.assertEqual(qlast.dequantize(), qr.dequantize())
+            # but we can change memory format
+            qlast = qr.contiguous(memory_format=torch.channels_last)
+            self.assertEqual(qr.stride(), list(reversed(sorted(qr.stride()))))
+            self.assertNotEqual(qlast.stride(), list(reversed(sorted(qlast.stride()))))
+            self.assertEqual(qr.int_repr(), qlast.int_repr())
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            self.assertEqualIgnoreType(scales, qlast.q_per_channel_scales())
+            self.assertEqual(zero_points, qlast.q_per_channel_zero_points())
+            self.assertEqual(1, qlast.q_per_channel_axis())
+            self.assertEqual(qlast.dequantize(), qr.dequantize())
 
     def test_qtensor_load_save(self):
         scale = 0.2
@@ -758,8 +818,8 @@ class TestQuantizedTensor(TestCase):
             b.contiguous().view(1, 4, 2, 3)
 
     def test_qtensor_resize(self):
-        scale, zero_point, dtype = 1.0, 2, torch.uint8
         for device in get_supported_device_types():
+            scale, zero_point, dtype = 1.0, 2, torch.uint8
             sizes1 = [1, 2, 3, 4]
             sizes2 = [1 * 2, 3 * 4]
             sizes3 = [1, 2 * 3, 4]
@@ -836,16 +896,16 @@ class TestQuantizedTensor(TestCase):
 
     def test_qtensor_unsqueeze(self):
         for device in get_supported_device_types():
-            x = torch.randn((1, 3, 4))
-            qx = torch.quantize_per_tensor(x.to(device), scale=1.0, zero_point=0, dtype=torch.quint8)
+            x = torch.randn((1, 3, 4), device=device)
+            qx = torch.quantize_per_tensor(x, scale=1.0, zero_point=0, dtype=torch.quint8)
             qy = qx.unsqueeze(2)
             self.assertEqual(qy.size(), (1, 3, 1, 4))
             qy = qy.squeeze(2)
             self.assertEqual(qy.size(), qx.size())
 
             # Per channel qtensor
-            scales = torch.tensor([1.0])
-            zero_points = torch.tensor([0])
+            scales = torch.tensor([1.0], device=device)
+            zero_points = torch.tensor([0], device=device)
             qx = torch.quantize_per_channel(x, scales=scales, zero_points=zero_points, dtype=torch.quint8, axis=0)
             qy = qx.unsqueeze(0)
             self.assertEqual(qy.size(), (1, 1, 3, 4))
@@ -858,9 +918,9 @@ class TestQuantizedTensor(TestCase):
                 qz = qy.squeeze(1)
 
             # squeeze without dim specified
-            x = torch.randn((3, 1, 2, 1, 4))
-            scales = torch.tensor([1.0, 1.0])
-            zero_points = torch.tensor([0, 0])
+            x = torch.randn((3, 1, 2, 1, 4), device=device)
+            scales = torch.tensor([1.0, 1.0], device=device)
+            zero_points = torch.tensor([0, 0], device=device)
             qx = torch.quantize_per_channel(x, scales=scales, zero_points=zero_points, dtype=torch.quint8, axis=2)
             qz = qx.squeeze()
             self.assertEqual(qz.size(), (3, 2, 4))
