@@ -323,6 +323,8 @@ namespace c10 {
   _(aten, moveaxis)                  \
   _(aten, lgamma)                    \
   _(aten, special_gammaln)           \
+  _(aten, logsumexp)                 \
+  _(aten, special_logsumexp)         \
   _(aten, digamma)                   \
   _(aten, special_psi)               \
   _(aten, special_digamma)           \
