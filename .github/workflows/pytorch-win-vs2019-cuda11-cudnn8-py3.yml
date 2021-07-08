@@ -42,6 +42,10 @@ jobs:
         shell: bash
         run: |
           git clean -xdf
+      - name: Install Visual Studio 2019 toolchain
+        shell: powershell
+        run: |
+          .\.circleci\scripts\vs_install.ps1
       - name: Install Cuda
         shell: bash
         run: |
@@ -123,6 +127,10 @@ jobs:
         shell: bash
         run: |
           git clean -xdf
+      - name: Install Visual Studio 2019 toolchain
+        shell: powershell
+        run: |
+          .\.circleci\scripts\vs_install.ps1
       - name: Install Cuda
         shell: bash
         run: |

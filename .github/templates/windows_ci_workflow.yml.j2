@@ -26,7 +26,7 @@ env:
   PYTHON_VERSION: "3.8"
   SCCACHE_BUCKET: "ossci-compiler-cache"
   VC_PRODUCT: "BuildTools"
-  VC_VERSION: ""
+  VC_VERSION: "16.8.6"
   VC_YEAR: "2019"
 {%- if cuda_version != "cpu" %}
   TORCH_CUDA_ARCH_LIST: "7.0"
@@ -51,6 +51,10 @@ jobs:
         shell: bash
         run: |
           git clean -xdf
+      - name: Install Visual Studio 2019 toolchain
+        shell: powershell
+        run: |
+          .\.circleci\scripts\vs_install.ps1
 {%- if cuda_version != "cpu" %}
       - name: Install Cuda
         shell: bash
@@ -141,6 +145,10 @@ jobs:
         shell: bash
         run: |
           git clean -xdf
+      - name: Install Visual Studio 2019 toolchain
+        shell: powershell
+        run: |
+          .\.circleci\scripts\vs_install.ps1
 {%- if cuda_version != "cpu" %}
       - name: Install Cuda
         shell: bash
