@@ -6436,7 +6436,6 @@ a")
         self.checkScript(func, inputs_true, optimize=True)
         self.checkScript(func, inputs_false, optimize=True)
 
-    @unittest.skipIf(True, "Temporarily skipping while landing entire Union PR stack")
     def test_ternary_module_type_hint(self):
         class M1(torch.nn.Module):
             def forward(self) -> Any:
@@ -9767,8 +9766,7 @@ dedent """
             bar()
 
     def test_if_different_type(self):
-        with self.assertRaisesRegex(RuntimeError, "Type mismatch: c0 is set to type int "
-                                    "in the true branch and type float in the false branch:"):
+        with self.assertRaisesRegex(RuntimeError, "Variable 'c0' previously had type float"):
             @torch.jit.script
             def diff_type_used():
                 if 1 == 2:

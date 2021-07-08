@@ -42,6 +42,24 @@ class TypeParser {
       return simpleTypeIt->second;
     } else if (token == "List") {
       return CreateSingleElementType<ListType>();
+    } else if (token == "Union") {
+      std::vector<TypePtr> types;
+      expect("[");
+      while (cur() != "]") {
+        types.emplace_back(parse());
+        if (cur() != "]") {
+          expect(",");
+        }
+      }
+      expect("]");
+      return UnionType::create(types);
+    } else if (token == "Optional") {
+      std::vector<TypePtr> types;
+      expect("[");
+      types.emplace_back(parse());
+      types.emplace_back(NoneType::get());
+      expect("]");
+      return UnionType::create(types);
     } else if (token == "Future") {
       return CreateSingleElementType<FutureType>();
     } else if (token == "Dict") {
