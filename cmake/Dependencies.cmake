@@ -216,6 +216,18 @@ if(USE_FFTW OR NOT MKL_FOUND)
   endif()
 endif()
 
+# --- [ PocketFFT
+set(AT_POCKETFFT_ENABLED 0)
+if(NOT MKL_FOUND)
+  find_path(POCKETFFT_INCLUDE_DIR NAMES pocketfft_hdronly.h
+            PATHS /usr/local/include
+            PATHS $ENV{POCKETFFT_HOME}
+           )
+  if(POCKETFFT_INCLUDE_DIR)
+    set(AT_POCKETFFT_ENABLED 1)
+  endif()
+endif()
+
 # ---[ Dependencies
 # NNPACK and family (QNNPACK, PYTORCH_QNNPACK, and XNNPACK) can download and
 # compile their dependencies in isolation as part of their build.  These dependencies
