@@ -3808,10 +3808,10 @@ non_linear_activations_no_batch = [
     'Sigmoid', 'SiLU', 'Mish', 'Softplus', 'Softshrink', 'Softsign', 'Tanh',
     'Tanhshrink', 'Threshold'
 ]
-non_linear_activations_extra_info = {
+non_linear_activations_extra_info: Dict[str, dict] = {
     'CELU': {'constructor_args': (2.,)},
     'Threshold': {'constructor_args': (2., 1.)},
-    'Hardsigmoid': {'check_gradgrad': False},
+    'Hardsigmoid': {'check_gradgrad': False, 'check_jit': False},
     'Hardswish': {'check_gradgrad': False},
     # For RRelu, test that compare CPU and GPU results fail because RNG
     # is different between CPU and GPU
@@ -3825,9 +3825,8 @@ for non_linear_activation in non_linear_activations_no_batch:
         desc='no_batch_dim',
         test_cpp_api_parity=False,
     )
-    activation_test_info.update(
-        non_linear_activations_extra_info.get(non_linear_activation, {})
-    )
+    extra_info = non_linear_activations_extra_info.get(non_linear_activation, {})
+    activation_test_info.update(extra_info)
     new_module_tests.append(activation_test_info)
 
 
