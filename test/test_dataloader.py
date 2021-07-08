@@ -305,9 +305,9 @@ class TestConcatDataset(TestCase):
         d3 = TensorDataset(torch.rand(7, 3, 28, 28), torch.rand(7))
         result = d1 + d2 + d3
         self.assertEqual(21, len(result))
-        self.assertEqual(0, (d1[0][0] - result[0][0]).abs().sum())
-        self.assertEqual(0, (d2[0][0] - result[7][0]).abs().sum())
-        self.assertEqual(0, (d3[0][0] - result[14][0]).abs().sum())
+        self.assertEqual(d1[0][0], result[0][0])
+        self.assertEqual(d2[0][0], result[7][0])
+        self.assertEqual(d3[0][0], result[14][0])
 
     def test_iterable_dataset_err(self):
         d1 = TensorDataset(torch.rand(7, 3, 28, 28), torch.rand(7))
