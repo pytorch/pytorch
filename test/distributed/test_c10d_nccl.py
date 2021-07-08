@@ -421,6 +421,47 @@ class ProcessGroupNCCLTest(TestCase):
             allgather_base(output_t, tensor)
 
     @requires_nccl()
+    def test_gather_ops(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        def gather(output_t, input_t, rootRank):
+            opts = c10d.GatherOptions()
+            opts.rootRank = rootRank
+            if rootRank == self.rank:
+                work = pg.gather(output_t, input_t, opts) 
+            else:
+                work = pg.gather([], input_t, opts)  
+            work.wait()
+
+        # init input
+        tensors = []
+        for i in range(self.num_gpus):
+            tensors.append(torch.tensor([self.rank]).cuda(i))
+
+        # init golden output
+        golden_ts = [[] for _ in range(self.num_gpus)]
+        for idx, ls in enumerate(golden_ts):
+            for _ in range(self.num_gpus):
+                ls.append(torch.tensor([idx]).cuda(idx))
+
+        # init output
+        output_ts = [[] for _ in range(self.num_gpus)]
+        for idx, ls in enumerate(output_ts):
+            for _ in range(self.world_size * self.num_gpus):
+                ls.append(torch.tensor([0]).cuda(idx))
+
+        gather(output_ts, tensors, self.rank)
+
+        # Verification
+        for idx, ls in enumerate(output_ts):
+            if idx == self.rank:
+                self.assertEqual(output_ts[idx], golden_ts[idx])
+            else:
+                for i in range(self.num_gpus):
+                    self.assertEqual(output_ts[idx][i], 0)
+
+    @requires_nccl()
     def test_reduce_scatter_base_basics(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
