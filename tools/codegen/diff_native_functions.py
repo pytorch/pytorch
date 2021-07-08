@@ -79,6 +79,14 @@ def get_yaml(commit_hash: str):
     os.close(handle)
     return path
 
+# Returns the hash key for the given NativeFunction.
+def calculate_key(function: 'NativeFunction') -> str:
+    return str(function.func.name)
+
+# Returns the hash value for the given NativeFunction.
+def calculate_value(function: 'NativeFunction') -> str:
+    return str(function.func)
+
 # TODO(jwtan): Consider adding support for the ToT native_functions.yaml.
 def main() -> None:
     current_version, base_version = get_versions()
@@ -99,14 +107,14 @@ def main() -> None:
     # print(len(base_native_functions.native_functions))
 
     # TODO(jwtan): Maybe we want the whole object of function.func instead of a serialized format.
-    tags = {(function.func.name.name.base, function.func.name.overload_name): str(function.func) for function in base_native_functions.native_functions}
-    # print(tags)
+    tags = {calculate_key(function): calculate_value(function) for function in base_native_functions.native_functions}
+    # print(tags.keys())
 
     mismatched_jit_schema_functions = []
     new_functions = []
     for function in current_native_functions.native_functions:
-        key = (function.func.name.name.base, function.func.name.overload_name)
-        value = str(function.func)
+        key = calculate_key(function)
+        value = calculate_value(function)
 
         if key in tags.keys():
             if value != tags[key]:
