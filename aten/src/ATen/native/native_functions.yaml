@@ -1798,7 +1798,8 @@
     CUDA: resize_cuda_
     QuantizedCPU: quantized_resize_cpu_
 
-- func: empty_quantized(int[] size, Tensor qtensor) -> Tensor
+- func: empty_quantized(int[] size, Tensor qtensor, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  category_override: factory
   variants: function
   dispatch:
     QuantizedCPU, QuantizedCUDA: empty_quantized
@@ -8716,6 +8717,7 @@
 
 - func: avg_pool3d_backward.grad_input(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, bool ceil_mode, bool count_include_pad, int? divisor_override, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  structured: True
   dispatch:
     CPU: avg_pool3d_backward_out_cpu
     CUDA: avg_pool3d_backward_out_cuda
@@ -8723,9 +8725,8 @@
 
 - func: avg_pool3d_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, bool ceil_mode, bool count_include_pad, int? divisor_override) -> Tensor
   python_module: nn
+  structured_delegate: avg_pool3d_backward.grad_input
   dispatch:
-    CPU: avg_pool3d_backward_cpu
-    CUDA: avg_pool3d_backward_cuda
     MkldnnCPU: mkldnn_avg_pool3d_backward
 
 # Return: (Tensor output, Tensor indices)
@@ -9535,15 +9536,21 @@
 
 - func: isposinf(Tensor self) -> Tensor
   variants: function, method
+  structured_delegate: isposinf.out
 
 - func: isposinf.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: isposinf_out
 
 - func: isneginf(Tensor self) -> Tensor
   variants: function, method
+  structured_delegate: isneginf.out
 
 - func: isneginf.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: isneginf_out
 
@@ -9810,6 +9817,13 @@
   variants: function
 
 - func: special_logit.out(Tensor self, float? eps=None, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+
+- func: special_logsumexp(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
+  python_module: special
+  variants: function
+
+- func: special_logsumexp.out(Tensor self, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   python_module: special
 
 - func: special_expit(Tensor self) -> Tensor
