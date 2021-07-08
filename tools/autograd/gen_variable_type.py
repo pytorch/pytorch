@@ -236,7 +236,7 @@ DONT_ENFORCE_TENSOR_IMPL_USE_COUNT: Set[Union[str, Pattern[str]]] = {
 
     # The below failed StorageImpl use_count check but we skip tensor_impl check
     # just in case
-    '_cudnn_rnn', 'dequantize_self',
+    '_cudnn_rnn', 'dequantize_self', '_cudnn_rnn_backward',
 }
 
 DONT_ENFORCE_STORAGE_IMPL_USE_COUNT: Set[Union[str, Pattern[str]]] = {
