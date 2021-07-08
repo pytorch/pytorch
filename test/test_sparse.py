@@ -11,7 +11,7 @@ from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_versi
 from numbers import Number
 from typing import Dict, Any
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, dtypes, onlyCPU, onlyCUDA)
+    (instantiate_device_type_tests, ops, dtypes, dtypesIfCPU, onlyCPU, onlyCUDA, deviceCountAtLeast)
 from torch.testing._internal.common_methods_invocations import \
     (sparse_unary_ufuncs)
 
@@ -738,9 +738,9 @@ class TestSparse(TestCase):
         self.assertEqual(None, x1.grad)
 
     @onlyCUDA
-    def test_cuda_empty(self, _):
+    def test_cuda_empty(self, device):
         def test_tensor(x):
-            y = x.cuda(0)
+            y = x.to(device)
             self.assertEqual(x.sparse_dim(), y.sparse_dim())
             self.assertEqual(x.dense_dim(), y.dense_dim())
             x = y.cpu()
@@ -1212,9 +1212,13 @@ class TestSparse(TestCase):
         # Test code from issue https://github.com/pytorch/pytorch/issues/45113
         batch_size, input_size, hidden_size = 5, 3, 7
 
-        # Create coalesced sparse tensor as in the issue
+        # Create coalesced sparse tensor with non-contiguous indices
         weight = torch.randn(hidden_size, input_size, dtype=dtype, device=device).to_sparse()
         self.assertTrue(weight.is_coalesced())
+        non_contig_indices = weight.indices().transpose(-1, -2).contiguous().transpose(-1, -2)
+        weight = torch.sparse_coo_tensor(
+            indices=non_contig_indices, values=weight.values(), size=weight.shape)
+        weight._coalesced_(True)
         self.assertFalse(weight._indices().is_contiguous())
         # Create un/coalesced sparse tensor
         bias = torch.randn((hidden_size, 1), dtype=dtype, device=device).to_sparse()
@@ -2206,7 +2210,7 @@ class TestSparse(TestCase):
         self.assertFalse(z._indices().numel() != 2 and z.is_coalesced())
 
     @onlyCUDA
-    def test_storage_not_null(self, _):
+    def test_storage_not_null(self):
         x = torch.cuda.sparse.FloatTensor(2)
         self.assertNotEqual(x.get_device(), -1)
 
@@ -2214,20 +2218,22 @@ class TestSparse(TestCase):
         self.assertNotEqual(x.get_device(), -1)
 
     @onlyCUDA
-    @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
-    def test_same_gpu(self, _):
+    @deviceCountAtLeast(2)
+    def test_same_gpu(self, devices):
         def check_device(x, device_id):
             self.assertEqual(x.get_device(), device_id)
             self.assertEqual(x._values().get_device(), device_id)
             self.assertEqual(x._indices().get_device(), device_id)
 
-        i = self.index_tensor([[2]]).cuda(1)
-        v = torch.tensor([5]).cuda(1)
+        dev1, dev2 = devices[0], devices[1]
+
+        i = self.index_tensor([[2]], device=dev2)
+        v = torch.tensor([5], device=dev2)
         x = self.sparse_tensor(i, v, torch.Size([3]), device=1)
         check_device(x, 1)
 
-        i = self.index_tensor([[2]]).cuda(1)
-        v = torch.empty(1, 0).cuda(1)
+        i = self.index_tensor([[2]], device=dev2)
+        v = torch.empty(1, 0, device=dev2)
         x = self.sparse_tensor(i, v, torch.Size([3, 0]), device=1)
         check_device(x, 1)
 
@@ -2237,13 +2243,13 @@ class TestSparse(TestCase):
         x = self.sparse_empty(3, 0, device=1)
         check_device(x, 1)
 
-        i = self.index_tensor([[2]]).cuda(1)
-        v = torch.tensor([5]).cuda(0)
+        i = self.index_tensor([[2]], device=dev2)
+        v = torch.tensor([5], device=dev1)
         # NB: non-legacy constructor allows this and moves indices
         self.assertRaises(RuntimeError, lambda: self.legacy_sparse_tensor(i, v, torch.Size([3])))
 
-        i = self.index_tensor([[2]]).cuda(1)
-        v = torch.empty(1, 0).cuda(0)
+        i = self.index_tensor([[2]], device=dev2)
+        v = torch.empty(1, 0, device=dev1)
         # NB: non-legacy constructor allows this and moves indices
         self.assertRaises(RuntimeError, lambda: self.legacy_sparse_tensor(i, v, torch.Size([3, 0])))
 
@@ -2257,7 +2263,7 @@ class TestSparse(TestCase):
         self.assertEqual(x2.get_device(), device)
 
     @onlyCUDA
-    def test_new_device_single_gpu(self, _):
+    def test_new_device_single_gpu(self):
         self._test_new_device((), 0)
         self._test_new_device((30, 20), 0)
         self._test_new_device((30, 20, 10), 0)
@@ -2265,7 +2271,7 @@ class TestSparse(TestCase):
 
     @onlyCUDA
     @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
-    def test_new_device_multi_gpu(self, _):
+    def test_new_device_multi_gpu(self):
         self._test_new_device((), 1)
         self._test_new_device((30, 20), 1)
         self._test_new_device((30, 20, 10), 1)
@@ -3207,6 +3213,7 @@ class TestSparse(TestCase):
     @skipIfRocm
     @coalescedonoff
     @dtypes(torch.double)
+    @dtypesIfCPU(torch.double, torch.cdouble)
     def test_sparse_matmul(self, device, dtype, coalesced):
         """
         This function test `torch.sparse.mm` when both the mat1 and mat2 are sparse tensors.
@@ -3425,7 +3432,7 @@ class TestSparseUnaryUfuncs(TestCase):
 
     @ops(sparse_unary_ufuncs)
     def test_sparse_consistency(self, device, dtype, op):
-        unsupportedTypes = [torch.bfloat16, torch.cfloat, torch.cdouble]
+        unsupportedTypes = [torch.bfloat16, torch.float16]
         if dtype in unsupportedTypes:
             self.skipTest('Skipped! Unsupported dtypes for Sparse')
 
@@ -3443,6 +3450,21 @@ class TestSparseUnaryUfuncs(TestCase):
         output = op(sample.input.to_sparse())
         assert torch.is_tensor(output)
         self.assertEqual(output.to_dense(), expected)
+
+    @ops(sparse_unary_ufuncs)
+    def test_sparse_zero_dims(self, device, dtype, op):
+        # test 0x0 sparse_coo_tensor
+
+        unsupportedTypes = [torch.bfloat16, torch.float16]
+        if dtype in unsupportedTypes:
+            self.skipTest('Skipped! Unsupported dtypes for Sparse')
+
+        indices = torch.empty(2, 0, dtype=torch.int64)
+        values = torch.empty(0, dtype=dtype)
+        sparse_0x0 = torch.sparse_coo_tensor(indices, values, (0, 0))
+        expected = torch.sparse_coo_tensor(indices, op(values), (0, 0))
+        actual = op(sparse_0x0)
+        self.assertEqual(expected, actual)
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
 instantiate_device_type_tests(TestSparseUnaryUfuncs, globals())

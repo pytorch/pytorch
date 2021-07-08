@@ -148,8 +148,8 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     export MAX_JOBS=$(($(nproc) - 1))
   fi
 
-  if [[ -n "$IN_CI" ]]; then
-      # Set ROCM_ARCH to gfx900 and gfx906 for CI builds
+  if [[ -n "$IN_CI" && -z "$PYTORCH_ROCM_ARCH" ]]; then
+      # Set ROCM_ARCH to gfx900 and gfx906 for CI builds, if user doesn't override.
       echo "Limiting PYTORCH_ROCM_ARCH to gfx90[06] for CI builds"
       export PYTORCH_ROCM_ARCH="gfx900;gfx906"
   fi
@@ -200,8 +200,10 @@ fi
 
 # Patch required to build xla
 if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
-  git clone --recursive https://github.com/pytorch/xla.git
-  ./xla/scripts/apply_patches.sh
+  clone_pytorch_xla
+  # shellcheck disable=SC1091
+  source "xla/.circleci/common.sh"
+  apply_patches
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3.6-gcc7-build || "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3.6-gcc5.4-build ]]; then
@@ -311,36 +313,10 @@ fi
 
 # Test XLA build
 if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
-  # TODO: Move this to Dockerfile.
-
-  pip_install lark-parser
-  pip_install cloud-tpu-client
-
-  sudo apt-get -qq update
-  sudo apt-get -qq install npm nodejs
-
-  # XLA build requires Bazel
-  # We use bazelisk to avoid updating Bazel version manually.
-  sudo npm install -g @bazel/bazelisk
-  sudo ln -s "$(command -v bazelisk)" /usr/bin/bazel
-
-  # Install bazels3cache for cloud cache
-  sudo npm install -g bazels3cache
-  BAZELS3CACHE="$(which bazels3cache)"
-  if [ -z "${BAZELS3CACHE}" ]; then
-    echo "Unable to find bazels3cache..."
-    exit 1
-  fi
-
-  bazels3cache --bucket="${XLA_CLANG_CACHE_S3_BUCKET_NAME}" --maxEntrySizeBytes=0
-  pushd xla
-  export CC=clang-9 CXX=clang++-9
-  # Use cloud cache to build when available.
-  # shellcheck disable=SC1003
-  sed -i '/bazel build/ a --remote_http_cache=http://localhost:7777 \\' build_torch_xla_libs.sh
-
-  python setup.py install
-  popd
+  XLA_DIR=xla
+  # These functions are defined in .circleci/common.sh in pytorch/xla repo
+  install_deps_pytorch_xla $XLA_DIR
+  build_torch_xla $XLA_DIR
   assert_git_not_dirty
 fi
 

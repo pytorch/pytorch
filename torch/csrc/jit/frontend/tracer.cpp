@@ -5,6 +5,7 @@
 #include <ATen/core/Dict.h>
 #include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
@@ -381,7 +382,7 @@ static IValue addInput(
 
     if (input.isTensorList()) {
       auto elems = input.toTensorList();
-      for (size_t i = 0; i < num_elems; i++) {
+      for (const auto i : c10::irange(num_elems)) {
         elems[i] = addInput(
                        state,
                        elems.get(i),
@@ -392,7 +393,7 @@ static IValue addInput(
       return elems;
     } else {
       auto elems = input.toList();
-      for (size_t i = 0; i < num_elems; i++) {
+      for (const auto i : c10::irange(num_elems)) {
         elems[i] = addInput(
             state,
             elems.get(i),
@@ -1032,9 +1033,3 @@ void setWarn(warn_fn_type fn) {
 } // namespace tracer
 } // namespace jit
 } // namespace torch
-
-TORCH_LIBRARY_IMPL(_, Tracer, m) {
-  // TODO: register fallback kernel with tracing function from
-  // `torch/csrc/jit/runtime/register_c10_ops.cpp`.
-  m.fallback(torch::CppFunction::makeFallthrough());
-}
