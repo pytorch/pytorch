@@ -814,7 +814,7 @@ class TestFunctionalIterDataPipe(TestCase):
             for num_workers in (0, 1):
                 random.seed(123)
                 dl = DataLoader(shuffle_dp, num_workers=num_workers, worker_init_fn=_worker_init_fn)
-                dl_res = list(dl)
+                dl_res = [item.squeeze() for item in dl]
                 self.assertEqual(res, dl_res)
 
         shuffle_dp_nl = IDP_NoLen(range(20)).shuffle(buffer_size=5)
