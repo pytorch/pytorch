@@ -34,10 +34,15 @@ static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, b
 
   if (memory_format == MemoryFormat::Preserve) {
     if (self.is_non_overlapping_and_dense() && options.device().supports_as_strided()) {
-      // Copy all strides
-      auto r = at::empty_strided(self.sizes(),
-                                 self.strides(),
-                                 options.memory_format(c10::nullopt).pinned_memory(pin_out));
+      Tensor r;
+      if (self.is_quantized()) {
+        r = at::empty_quantized(self.sizes(), self, options);
+      } else {
+        r = at::empty_strided(
+            self.sizes(),
+            self.strides(),
+            options.memory_format(c10::nullopt).pinned_memory(pin_out));
+      }
       r.copy_(self, non_blocking);
       return r;
     } else {
