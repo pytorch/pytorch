@@ -409,11 +409,9 @@ jobs:
           TERM: xterm-color
         run: |
           set -eux
-          export MYPY_FORCE_COLOR=1
-          export TERM=xterm-color
           STATUS=
           for CONFIG in mypy*.ini; do
-            if ! mypy --config="$CONFIG" --color-output; then
+            if ! mypy --config="$CONFIG"; then
               STATUS=fail
             fi
           done
