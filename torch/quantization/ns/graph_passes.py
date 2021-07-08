@@ -12,6 +12,7 @@ from .utils import (
     get_number_of_non_param_args,
     get_target_type_str,
     get_arg_indices_of_inputs_to_log,
+    get_node_input_qparams,
 )
 
 from .ns_types import (
@@ -142,6 +143,35 @@ def remove_observers_add_loggers(
     new_gm = GraphModule(gm, new_graph)
     return new_gm
 
+def _insert_quantize_per_tensor_node(
+    prev_node_c: Node,
+    node_a: Node,
+    gm_b: GraphModule,
+    graph_c: Graph,
+    scale: Union[torch.Tensor, float],
+    zero_point: Union[torch.Tensor, int],
+    dtype_cast_name: str,
+) -> Node:
+    # copy scale
+    scale_node_name = \
+        get_new_attr_name_with_prefix(
+            node_a.name + '_input_scale_')(gm_b)
+    setattr(gm_b, scale_node_name, scale)
+    scale_node = graph_c.create_node(
+        'get_attr', scale_node_name, (), {}, scale_node_name)
+    # copy zero_point
+    zero_point_node_name = \
+        get_new_attr_name_with_prefix(
+            node_a.name + '_input_zero_point_')(gm_b)
+    setattr(gm_b, zero_point_node_name, zero_point)
+    zero_point_node = graph_c.create_node(
+        'get_attr', zero_point_node_name, (), {}, zero_point_node_name)
+    # create the quantize_per_tensor call
+    return graph_c.create_node(
+        'call_function', torch.quantize_per_tensor,
+        (prev_node_c, scale_node, zero_point_node, torch.quint8), {},
+        dtype_cast_name)
+
 def _insert_dtype_cast_after_node(
     node_a: Node,
     node_c: Node,
@@ -171,6 +201,8 @@ def _insert_dtype_cast_after_node(
     """
     dtype_cast_op = None
     dtype_cast_mod_cls = None
+    dtype_cast_scale = None
+    dtype_cast_zero_point = None
     node_input_type_a, _node_output_type_a = \
         get_node_first_input_and_output_type(
             node_a, gm_a, logger_cls, node_type_to_io_type_map)
@@ -195,6 +227,17 @@ def _insert_dtype_cast_after_node(
         node_input_type_a != NodeInputOrOutputType.UNKNOWN
     ):
         dtype_cast_mod_cls = torch.nn.Identity
+    elif (
+        node_input_type_a == NodeInputOrOutputType.INT8 and
+        node_input_type_c == NodeInputOrOutputType.FP32
+    ):
+        # int8 shadows fp32, the dtype cast needs to quantize to int8
+        # with the right qparams.
+        node_a_input_qparams = get_node_input_qparams(
+            node_a, gm_a, node_type_to_io_type_map)
+        if node_a_input_qparams is not None:
+            dtype_cast_op = torch.quantize_per_tensor  # type: ignore[assignment]
+            dtype_cast_scale, dtype_cast_zero_point = node_a_input_qparams
     else:
         raise AssertionError(
             f"dtype cast from {node_input_type_c} {node_c.format_node()} to " +
@@ -204,9 +247,14 @@ def _insert_dtype_cast_after_node(
         new_dtype_cast_name = \
             get_new_attr_name_with_prefix(node_name_prefix)(gm_b)
         if dtype_cast_op:
-            return graph_c.create_node(
-                'call_function', dtype_cast_op, (prev_node_c,), {},
-                new_dtype_cast_name)
+            if dtype_cast_scale is not None and dtype_cast_zero_point is not None:
+                return _insert_quantize_per_tensor_node(
+                    prev_node_c, node_a, gm_b, graph_c, dtype_cast_scale,
+                    dtype_cast_zero_point, new_dtype_cast_name)
+            else:
+                return graph_c.create_node(
+                    'call_function', dtype_cast_op, (prev_node_c,), {},
+                    new_dtype_cast_name)
         else:
             assert dtype_cast_mod_cls
             dtype_cast_mod = dtype_cast_mod_cls()
@@ -220,6 +268,7 @@ def _insert_dtype_cast_after_node(
             new_dtype_cast_name = \
                 get_new_attr_name_with_prefix(node_name_prefix)(gm_b)
             if dtype_cast_op:
+                # TODO(future PR): add handling for quantize_per_tensor
                 new_dtype_cast_node = graph_c.create_node(
                     'call_function', dtype_cast_op, (prev_node_c_inner,), {},
                     new_dtype_cast_name)
@@ -546,6 +595,23 @@ def create_a_shadows_b(
                     ', unknown dtype cast')
                 env_c[node_b.name] = graph_c.node_copy(node_b, load_arg)
                 continue
+
+            # If we are shadowing from fp32 to int8, we need to insert
+            # quantize_per_tensor call with qparams from the previous node.
+            # Only do this if we are able to infer these qparams from the graph.
+            if (
+                node_input_type_a == NodeInputOrOutputType.INT8 and
+                node_input_type_b == NodeInputOrOutputType.FP32
+            ):
+                node_a_input_qparams = get_node_input_qparams(
+                    subgraph_a.start_node, gm_a, node_type_to_io_type_map)
+                if not node_a_input_qparams:
+                    print(
+                        f'skipping shadow loggers for node_b: {get_target_type_str(node_b, gm_b)}' +
+                        f', start_node_a: {get_target_type_str(subgraph_a.start_node, gm_a)}' +
+                        ', unknown input qparams')
+                    env_c[node_b.name] = graph_c.node_copy(node_b, load_arg)
+                    continue
 
             if node_b_is_start_node:
 
