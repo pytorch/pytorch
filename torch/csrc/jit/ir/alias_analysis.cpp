@@ -20,7 +20,7 @@ namespace {
 class MutableTypePtrHelper {
  public:
   explicit MutableTypePtrHelper(
-      std::unordered_map<TypePtr, TypePtr>* mutable_type_cache)
+      std::unordered_map<TypePtr, AliasTypeSet>* mutable_type_cache)
       : mutable_type_cache_(mutable_type_cache) {}
 
   // Map any mutable type to a type such that all other types which the
@@ -46,22 +46,22 @@ class MutableTypePtrHelper {
   //     of dimension 4 would map to the same type as a Tensor of
   //     dimension 1. This allows us to treat all subclasses of Tensor
   //     as a single, homogenous "Tensor" type.
-  c10::optional<TypePtr> mapTypeToAliasTypeSet(const TypePtr& type) {
+  c10::optional<AliasTypeSet> mapTypeToAliasTypeSet(const TypePtr& type) {
     if (mutable_type_cache_) {
       auto maybe_type_mapping = mutable_type_cache_->find(type);
       if (maybe_type_mapping != mutable_type_cache_->end()) {
         return maybe_type_mapping->second;
       }
     }
-    auto mutable_type = mapTypeToAliasTypeSetImpl(type);
-    if (mutable_type_cache_ && mutable_type) {
-      mutable_type_cache_->emplace(type, *mutable_type);
+    auto mutable_types = mapTypeToAliasTypeSetImpl(type);
+    if (mutable_type_cache_ && mutable_types) {
+      mutable_type_cache_->emplace(type, *mutable_types);
     }
-    return mutable_type;
+    return mutable_types;
   }
 
  private:
-  c10::optional<TypePtr> mapTypeToAliasTypeSetImpl(const TypePtr& type) {
+  c10::optional<AliasTypeSet> mapTypeToAliasTypeSetImpl(const TypePtr& type) {
     switch (type->kind()) {
       case TypeKind::ListType:
       case TypeKind::DictType:
@@ -71,53 +71,59 @@ class MutableTypePtrHelper {
         // because a `List[Optional[T]]` should still be
         // `List[Optional[Unshaped(T)]]`, but
         // `mapTypeToAliasTypeSet(Optional[T])` should be `T`
-        return unshapedType(type);
+        return {AliasTypeSet{unshapedType(type)}};
       case TypeKind::UnionType: {
-        std::vector<TypePtr> mutable_types;
+        AliasTypeSet mutable_types;
         for (TypePtr inner : type->expect<UnionType>()->containedTypes()) {
-          if (auto maybe_mut_type = mapTypeToAliasTypeSet(inner)) {
-            mutable_types.emplace_back(*maybe_mut_type);
+          if (auto maybe_inner_types = mapTypeToAliasTypeSet(inner)) {
+            mutable_types.insert(
+                mutable_types.end(),
+                (*maybe_inner_types).begin(),
+                (*maybe_inner_types).end());
           }
         }
         if (mutable_types.size() == 0) {
           return c10::nullopt;
         }
-        if (mutable_types.size() == 1) {
-          return mutable_types[0];
-        }
-        return c10::optional<TypePtr>(UnionType::create(mutable_types));
+        return mutable_types;
       }
       case TypeKind::AnyType:
-        return c10::optional<TypePtr>(type);
+        return {AliasTypeSet{type}};
       case TypeKind::FutureType: {
-        if (auto maybe_mut_type = mapTypeToAliasTypeSet(
+        if (auto maybe_mut_types = mapTypeToAliasTypeSet(
                 type->castRaw<FutureType>()->getElementType())) {
-          return FutureType::create(*maybe_mut_type);
+          auto mut_type = (*maybe_mut_types).size() == 1
+              ? (*maybe_mut_types)[0]
+              : UnionType::create(*maybe_mut_types);
+          return {AliasTypeSet{FutureType::create(mut_type)}};
         }
         return c10::nullopt;
       }
       case TypeKind::TupleType: {
         std::vector<TypePtr> mutable_types;
         for (TypePtr inner : type->expectRef<TupleType>().elements()) {
-          if (auto maybe_mut_type = mapTypeToAliasTypeSet(inner)) {
-            mutable_types.emplace_back(*maybe_mut_type);
+          if (auto maybe_inner_types = mapTypeToAliasTypeSet(inner)) {
+            mutable_types.insert(
+                mutable_types.end(),
+                (*maybe_inner_types).begin(),
+                (*maybe_inner_types).end());
           }
         }
         if (mutable_types.size() == 0) {
           return c10::nullopt;
         }
-        return c10::optional<TypePtr>(TupleType::create(mutable_types));
+        return {AliasTypeSet{TupleType::create(mutable_types)}};
       }
       default:
         return c10::nullopt;
     }
   }
-  std::unordered_map<TypePtr, TypePtr>* mutable_type_cache_;
+  std::unordered_map<TypePtr, AliasTypeSet>* mutable_type_cache_;
 };
 
 bool isMutableTypeImpl(
     const TypePtr& type,
-    std::unordered_map<TypePtr, TypePtr>* mutable_type_cache) {
+    std::unordered_map<TypePtr, AliasTypeSet>* mutable_type_cache) {
   // check common cases to avoid recursively constructing type in
   // mapTypeToAliasTypeSetPtrImpl
   auto kind = type->kind();
@@ -149,15 +155,15 @@ bool AliasDb::isMutableTypeInternal(const Value* v) const {
   return isMutableTypeInternal(v->type());
 }
 
-c10::optional<TypePtr> AliasDb::mapTypeToAliasTypeSetPtr(
+c10::optional<AliasTypeSet> AliasDb::mapTypeToAliasTypeSetPtr(
     const TypePtr& type) const {
   MutableTypePtrHelper helper(&mapped_mutable_types_);
   return helper.mapTypeToAliasTypeSet(type);
 }
 
 bool AliasDb::isContainerType(const TypePtr& type) const {
-  auto mut_type = mapTypeToAliasTypeSetPtr(type);
-  return mut_type.has_value() && (*mut_type)->containedTypes().size() > 0;
+  auto mut_types = mapTypeToAliasTypeSetPtr(type);
+  return mut_types && (*mut_types).size() > 0;
 }
 
 AliasDb::~AliasDb() = default;
@@ -1246,8 +1252,8 @@ void AliasDb::createValue(const Value* value) {
 void AliasDb::giveFreshAlias(
     const Value* value,
     bool add_wildcard_to_contained_elems) {
-  auto maybe_mut_type = mapTypeToAliasTypeSetPtr(value->type());
-  if (!maybe_mut_type) {
+  auto maybe_mut_types = mapTypeToAliasTypeSetPtr(value->type());
+  if (!maybe_mut_types) {
     return;
   }
 
@@ -1260,7 +1266,7 @@ void AliasDb::giveFreshAlias(
   auto new_elem = memoryDAGBuilder_->makeFreshValue(value);
   elementMap_[value] = new_elem;
   if (add_wildcard_to_contained_elems) {
-    addContainedTypesToFreshElement(new_elem, std::move(*maybe_mut_type));
+    addContainedTypesToFreshElement(new_elem, std::move(*maybe_mut_types));
   }
 }
 
@@ -1687,27 +1693,32 @@ bool AliasDb::mayAliasWildcard(const at::ArrayRef<Value*> vs) const {
 }
 
 c10::optional<Element*> AliasDb::tryGetOrCreateWildcard(const TypePtr& type) {
-  auto maybe_mut_type = mapTypeToAliasTypeSetPtr(type);
-  if (!maybe_mut_type) {
+  auto maybe_mut_types = mapTypeToAliasTypeSetPtr(type);
+  if (!maybe_mut_types) {
     return c10::nullopt;
   }
-  auto existing_wildcard = wildcardIndex_.find(*maybe_mut_type);
+  auto mut_type = (*maybe_mut_types).size() == 1
+      ? (*maybe_mut_types)[0]
+      : UnionType::create(*maybe_mut_types);
+  auto existing_wildcard = wildcardIndex_.find(mut_type);
   if (existing_wildcard != wildcardIndex_.end()) {
     return existing_wildcard->second;
   }
   auto wildcard_elem = memoryDAGBuilder_->makeFreshValue(nullptr);
-  wildcardIndex_.emplace(*maybe_mut_type, wildcard_elem);
-  addContainedTypesToFreshElement(wildcard_elem, *maybe_mut_type);
+  wildcardIndex_.emplace(mut_type, wildcard_elem);
+  addContainedTypesToFreshElement(wildcard_elem, {mut_type});
   return wildcard_elem;
 }
 
 void AliasDb::addContainedTypesToFreshElement(
     Element* container_elem,
-    const TypePtr& mut_type) {
-  for (const auto& contained : mut_type->containedTypes()) {
-    auto maybe_elem = tryGetOrCreateWildcard(contained);
-    if (maybe_elem) {
-      memoryDAGBuilder_->addToContainedElements(*maybe_elem, container_elem);
+    const AliasTypeSet& mut_types) {
+  for (const auto& mut_type : mut_types) {
+    for (const auto& contained : mut_type->containedTypes()) {
+      auto maybe_elem = tryGetOrCreateWildcard(contained);
+      if (maybe_elem) {
+        memoryDAGBuilder_->addToContainedElements(*maybe_elem, container_elem);
+      }
     }
   }
 }
@@ -1715,14 +1726,14 @@ void AliasDb::addContainedTypesToFreshElement(
 // Search the wildcard index for an Element that corresponds to the given type.
 // Const version returns nullptr
 std::vector<Element*> AliasDb::getWildcard(const TypePtr& type) const {
-  auto maybe_mut_type = mapTypeToAliasTypeSetPtr(type);
-  if (!maybe_mut_type) {
+  auto maybe_mut_types = mapTypeToAliasTypeSetPtr(type);
+  if (!maybe_mut_types) {
     return {};
   }
-  if ((*maybe_mut_type)->kind() == UnionType::Kind) {
+  if ((*maybe_mut_types).size() > 1) {
     std::vector<Element*> res;
-    const auto union_type = (*maybe_mut_type)->expect<UnionType>();
-    res.reserve(union_type->containedTypes().size() + 1);
+    res.reserve((*maybe_mut_types).size() + 1);
+    auto union_type = UnionType::create(*maybe_mut_types);
     // Get a <TypePtr, Element*> pair where the TypePtr is this Union
     // type and the Element is the corresponding Wildcard
     auto maybe_union_pair = wildcardIndex_.find(union_type);
@@ -1730,7 +1741,7 @@ std::vector<Element*> AliasDb::getWildcard(const TypePtr& type) const {
       res.push_back((*maybe_union_pair).second);
     }
     // Get the Wildcards for all applicable inner types
-    for (const auto& inner : union_type->containedTypes()) {
+    for (const auto& inner : *maybe_mut_types) {
       auto inner_pair = wildcardIndex_.find(inner);
       if (inner_pair != wildcardIndex_.end()) {
         res.push_back(inner_pair->second);
@@ -1740,7 +1751,7 @@ std::vector<Element*> AliasDb::getWildcard(const TypePtr& type) const {
   } else {
     // Get a <TypePtr, Element*> pair where the TypePtr is the given
     // type and the Element is the corresponding Wildcard
-    auto type_pair = wildcardIndex_.find(*maybe_mut_type);
+    auto type_pair = wildcardIndex_.find((*maybe_mut_types)[0]);
     if (type_pair != wildcardIndex_.end()) {
       return {type_pair->second};
     }
