@@ -1000,9 +1000,9 @@ class TestDistributions(TestCase):
         r = torch.tensor(0.3, requires_grad=True)
         s = 0.3
         self.assertEqual(Geometric(p).sample((8,)).size(), (8, 3))
-        self.assertEqual(Geometric(1).sample(), 0)
+        self.assertEqual(Geometric(1).sample(), 0.0)
         self.assertEqual(Geometric(1).log_prob(torch.tensor(1.)), -inf)
-        self.assertEqual(Geometric(1).log_prob(torch.tensor(0.)), 0)
+        self.assertEqual(Geometric(1).log_prob(torch.tensor(0.)), 0.0)
         self.assertFalse(Geometric(p).sample().requires_grad)
         self.assertEqual(Geometric(r).sample((8,)).size(), (8,))
         self.assertEqual(Geometric(r).sample().size(), ())
@@ -1100,13 +1100,13 @@ class TestDistributions(TestCase):
     def test_binomial_extreme_vals(self):
         total_count = 100
         bin0 = Binomial(total_count, 0)
-        self.assertEqual(bin0.sample(), 0)
-        self.assertEqual(bin0.log_prob(torch.tensor([0.]))[0], 0, atol=1e-3, rtol=0)
-        self.assertEqual(float(bin0.log_prob(torch.tensor([1.])).exp()), 0)
+        self.assertEqual(bin0.sample(), 0.0)
+        self.assertEqual(bin0.log_prob(torch.tensor([0.]))[0], 0.0, atol=1e-3, rtol=0)
+        self.assertEqual(float(bin0.log_prob(torch.tensor([1.])).exp()), 0.0)
         bin1 = Binomial(total_count, 1)
-        self.assertEqual(bin1.sample(), total_count)
-        self.assertEqual(bin1.log_prob(torch.tensor([float(total_count)]))[0], 0, atol=1e-3, rtol=0)
-        self.assertEqual(float(bin1.log_prob(torch.tensor([float(total_count - 1)])).exp()), 0)
+        self.assertEqual(bin1.sample().long(), total_count)
+        self.assertEqual(bin1.log_prob(torch.tensor([float(total_count)]))[0], 0.0, atol=1e-3, rtol=0)
+        self.assertEqual(float(bin1.log_prob(torch.tensor([float(total_count - 1)])).exp()), 0.0)
         zero_counts = torch.zeros(torch.Size((2, 2)))
         bin2 = Binomial(zero_counts, 1)
         self.assertEqual(bin2.sample(), zero_counts)
@@ -1464,8 +1464,8 @@ class TestDistributions(TestCase):
         self.assertEqual(uniform.log_prob(below_low).item(), -inf)
 
         # check cdf computation when value outside range
-        self.assertEqual(uniform.cdf(below_low).item(), 0)
-        self.assertEqual(uniform.cdf(above_high).item(), 1)
+        self.assertEqual(uniform.cdf(below_low).item(), 0.0)
+        self.assertEqual(uniform.cdf(above_high).item(), 1.0)
 
         set_rng_seed(1)
         self._gradcheck_log_prob(Uniform, (low, high))
@@ -3853,9 +3853,9 @@ class TestKL(TestCase):
                             'Incorrect KL({}, {})'.format(type(p).__name__, type(q).__name__))
 
     def test_kl_edgecases(self):
-        self.assertEqual(kl_divergence(Bernoulli(0), Bernoulli(0)), 0)
-        self.assertEqual(kl_divergence(Bernoulli(1), Bernoulli(1)), 0)
-        self.assertEqual(kl_divergence(Categorical(torch.tensor([0., 1.])), Categorical(torch.tensor([0., 1.]))), 0)
+        self.assertEqual(kl_divergence(Bernoulli(0), Bernoulli(0)), 0.0)
+        self.assertEqual(kl_divergence(Bernoulli(1), Bernoulli(1)), 0.0)
+        self.assertEqual(kl_divergence(Categorical(torch.tensor([0., 1.])), Categorical(torch.tensor([0., 1.]))), 0.0)
 
     def test_kl_shape(self):
         for Dist, params in EXAMPLES:
@@ -4068,14 +4068,14 @@ class TestNumericalStability(TestCase):
             p = torch.tensor([0, 1], dtype=dtype, requires_grad=True)
             categorical = OneHotCategorical(p)
             log_pdf = categorical.log_prob(torch.tensor([0, 1], dtype=dtype))
-            self.assertEqual(log_pdf.item(), 0)
+            self.assertEqual(log_pdf.item(), 0.0, atol=2e-7, rtol=0)
 
     def test_categorical_log_prob_with_logits(self):
         for dtype in ([torch.float, torch.double]):
             p = torch.tensor([-inf, 0], dtype=dtype, requires_grad=True)
             categorical = OneHotCategorical(logits=p)
             log_pdf_prob_1 = categorical.log_prob(torch.tensor([0, 1], dtype=dtype))
-            self.assertEqual(log_pdf_prob_1.item(), 0)
+            self.assertEqual(log_pdf_prob_1.item(), 0.0)
             log_pdf_prob_0 = categorical.log_prob(torch.tensor([1, 0], dtype=dtype))
             self.assertEqual(log_pdf_prob_0.item(), -inf)
 
@@ -4085,14 +4085,14 @@ class TestNumericalStability(TestCase):
             s = torch.tensor([0, 10], dtype=dtype)
             multinomial = Multinomial(10, p)
             log_pdf = multinomial.log_prob(s)
-            self.assertEqual(log_pdf.item(), 0)
+            self.assertEqual(log_pdf.item(), 0.0, atol=2e-6, rtol=0)
 
     def test_multinomial_log_prob_with_logits(self):
         for dtype in ([torch.float, torch.double]):
             p = torch.tensor([-inf, 0], dtype=dtype, requires_grad=True)
             multinomial = Multinomial(10, logits=p)
             log_pdf_prob_1 = multinomial.log_prob(torch.tensor([0, 10], dtype=dtype))
-            self.assertEqual(log_pdf_prob_1.item(), 0)
+            self.assertEqual(log_pdf_prob_1.item(), 0.0)
             log_pdf_prob_0 = multinomial.log_prob(torch.tensor([10, 0], dtype=dtype))
             self.assertEqual(log_pdf_prob_0.item(), -inf)
 

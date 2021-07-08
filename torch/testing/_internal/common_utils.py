@@ -1379,6 +1379,8 @@ class TestCase(expecttest.TestCase):
                     atol: Optional[float] = None, rtol: Optional[float] = None,
                     equal_nan=True, exact_dtype=True, exact_device=False, exact_stride=False,
                     exact_is_coalesced=False) -> None:
+        assert (atol is None) == (rtol is None), "If one of atol or rtol is specified, then the other must be too"
+
         assert_close = partial(
             torch.testing.assert_close,
             rtol=rtol,
