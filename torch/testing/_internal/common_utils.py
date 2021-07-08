@@ -40,15 +40,13 @@ import json
 from urllib.request import urlopen
 import __main__  # type: ignore[import]
 import errno
-from typing import cast, Any, Dict, Iterable, Iterator, Optional, Union
+from typing import Any, Dict, Iterable, Iterator, Optional
 
 import numpy as np
 
 from torch.testing import floating_types_and, integral_types, complex_types
 from torch.testing._asserts import _get_default_rtol_and_atol
 import expecttest
-from .._core import \
-    (_compare_tensors_internal, _compare_scalars_internal, _compare_return_type)
 
 import torch
 import torch.cuda

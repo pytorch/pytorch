@@ -2,7 +2,6 @@ import collections
 import doctest
 import functools
 import itertools
-import math
 import os
 import re
 import unittest
