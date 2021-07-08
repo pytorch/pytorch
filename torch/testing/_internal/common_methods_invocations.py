@@ -5978,8 +5978,6 @@ op_db: List[OpInfo] = [
            supports_inplace_autograd=False,
            skips=(
                SkipInfo('TestCommon', 'test_dtypes'),
-               # the double backward run depends on svd_backward, which is
-               # yet unstable for inputs with repeated singular values
                SkipInfo('TestGradients', 'test_fn_gradgrad'),
                # This test fails because singular inputs cannot be reliably
                # generated unless we're using double types
