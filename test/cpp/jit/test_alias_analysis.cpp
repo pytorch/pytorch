@@ -1,9 +1,9 @@
 #include <gtest/gtest.h>
 
 #include <torch/csrc/autograd/generated/variable_factories.h>
-#include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/utils/memory.h>
 
