@@ -214,7 +214,7 @@ def einsum(*args):
         As of PyTorch 1.10 :func:`torch.einsum` also supports the sublist format (see examples below). In this format,
         subscripts for each operand are specified by sublists, list of integers in the range [0, 52). These sublists
         follow their operands, and an extra sublist can appear at the end of the input to specify the output's
-        subscripts., e.g.`torch.einsum(op1, sublist1, op2, sublist2, ..., [subslist_out])`. Python's `Ellipsis` object
+        subscripts., e.g. `torch.einsum(op1, sublist1, op2, sublist2, ..., [subslist_out])`. Python's `Ellipsis` object
         may be provided in a sublist to enable broadcasting as described in the Equation section above.
 
     Args:
@@ -1286,7 +1286,7 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
             :attr:`dim` = ``None`` and :attr:`out` = ``None``.
         dtype (:class:`torch.dtype`, optional): the desired data type of
             returned tensor. If specified, the input tensor is casted to
-            :attr:'dtype' while performing the operation. Default: None.
+            :attr:`dtype` while performing the operation. Default: None.
 
     .. note::
         Even though ``p='fro'`` supports any number of dimensions, the true

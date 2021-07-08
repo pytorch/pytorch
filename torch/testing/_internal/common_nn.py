@@ -1568,6 +1568,15 @@ new_module_tests = [
     ),
     dict(
         module_name='LayerNorm',
+        constructor_args=([56, 56, 56], 1e-5, False),
+        cpp_constructor_args='torch::nn::LayerNormOptions({56, 56, 56}).eps(1e-5).elementwise_affine(false)',
+        input_size=(4, 56, 56, 56),
+        cudnn=True,
+        check_eval=True,
+        desc='3d_no_affine_large_feature',
+    ),
+    dict(
+        module_name='LayerNorm',
         constructor_args=([5], 1e-3),
         cpp_constructor_args='torch::nn::LayerNormOptions({5}).eps(1e-3)',
         input_size=(0, 5),
@@ -2409,7 +2418,7 @@ new_module_tests = [
         input_size=(2, 3, 6, 5, 4),
         cudnn=True,
         with_tf32=True,
-        tf32_precision=0.005,
+        tf32_precision=0.05,
     ),
     dict(
         fullname='Conv3d_pad_same',
@@ -2418,7 +2427,7 @@ new_module_tests = [
         input_size=(2, 3, 6, 5, 4),
         cudnn=True,
         with_tf32=True,
-        tf32_precision=0.005,
+        tf32_precision=0.05,
     ),
     dict(
         fullname='Conv3d_pad_same_dilated',
@@ -2427,7 +2436,7 @@ new_module_tests = [
         input_size=(2, 3, 6, 5, 4),
         cudnn=True,
         with_tf32=True,
-        tf32_precision=0.005,
+        tf32_precision=0.05,
     ),
     dict(
         module_name='ConvTranspose3d',
@@ -3236,6 +3245,13 @@ new_module_tests = [
         desc='tuple_none',
     ),
     dict(
+        module_name='AdaptiveAvgPool3d',
+        constructor_args=((3, 2, 2),),
+        cpp_constructor_args='torch::nn::AdaptiveAvgPool3dOptions({3, 2, 2})',
+        input_fn=lambda: torch.rand(1, 1, 3, 2, 6),
+        desc='last_dim',
+    ),
+    dict(
         module_name='SELU',
         input_size=(3, 2, 5),
         check_inplace=True
@@ -3725,7 +3741,17 @@ new_module_tests = [
         desc='multilayer_coder',
         with_tf32=True,
         tf32_precision=0.01,
-    )
+    ),
+    dict(
+        module_name='Linear',
+        constructor_args=(3, 5),
+        cpp_constructor_args='torch::nn::LinearOptions(3, 5)',
+        input_fn=lambda: torch.rand(3),
+        reference_fn=lambda i, p, _: torch.mm(i.view(1, -1), p[0].t()).view(-1) + p[1],
+        desc="no_batch_dim",
+        with_tf32=True,
+        tf32_precision=0.005,
+    ),
 ]
 
 # add conv padding mode tests:

@@ -18,7 +18,7 @@ __device__ __forceinline__ void fastSpecializedAtomicAdd(
 #if (                         \
     (CUDA_VERSION < 10000) || \
     (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 700)))
-  gpuAtomicAdd(
+  gpuAtomicAddNoReturn(
       reinterpret_cast<at::Half*>(tensor) + index,
       static_cast<at::Half>(value));
 #else
@@ -55,7 +55,7 @@ __device__ __forceinline__ void fastSpecializedAtomicAdd(
     index_t index,
     const index_t numel,
     scalar_t value) {
-  gpuAtomicAdd(tensor + index, value);
+  gpuAtomicAddNoReturn(tensor + index, value);
 }
 
 template <class scalar_t, class index_t>
@@ -68,7 +68,7 @@ __device__ __forceinline__ void fastAtomicAdd(
   if (fast_atomics) {
     fastSpecializedAtomicAdd(tensor, index, numel, value);
   } else {
-    gpuAtomicAdd(tensor + index, value);
+    gpuAtomicAddNoReturn(tensor + index, value);
   }
 }
 

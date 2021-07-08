@@ -191,8 +191,9 @@ class PackageExporter:
 
         self.zip_file = torch._C.PyTorchFileWriter(f)
         self.zip_file.set_min_version(6)
+        self._written_files: Set[str] = set()
+
         self.serialized_reduces: Dict[int, Any] = {}
-        self.serialized_storages: Set[str] = set()
 
         # A graph tracking all the modules and pickle objects added to this
         # package and the dependencies between them.
@@ -202,6 +203,7 @@ class PackageExporter:
         self.dependency_graph = DiGraph()
         self.verbose = verbose
         self.script_module_serializer = torch._C.ScriptModuleSerializer(self.zip_file)
+        self.storage_context = self.script_module_serializer.storage_context()
 
         # These are OrderedDicts for compatibility with RemovableHandle.
         # Generic OrderedDict type annotations are not present until 3.7.
@@ -776,20 +778,19 @@ node [shape=box];
     def _persistent_id(self, obj):
         if torch.is_storage(obj):
             storage_type = normalize_storage_type(type(obj))
-            obj_key = str(obj._cdata)
             location = location_tag(obj)
-            name = f".data/{obj_key}.storage"
 
-            if name not in self.serialized_storages:
-                # check to see if storage was previously serialized
-                serialized_files = self.zip_file.get_all_written_records()
-                if name not in serialized_files:
-                    if obj.device.type != "cpu":
-                        obj = obj.cpu()
-                    num_bytes = obj.size() * obj.element_size()
-                    self.zip_file.write_record(name, obj.data_ptr(), num_bytes)
-                self.serialized_storages.add(name)
-            return ("storage", storage_type, obj_key, location, obj.size())
+            # serialize storage if not already written
+            storage_present = self.storage_context.has_storage(obj)
+            storage_id = self.storage_context.get_or_add_storage(obj)
+            if not storage_present:
+                if obj.device.type != "cpu":
+                    obj = obj.cpu()
+                num_bytes = obj.size() * obj.element_size()
+                self.zip_file.write_record(
+                    f".data/{storage_id}.storage", obj.data_ptr(), num_bytes
+                )
+            return ("storage", storage_type, storage_id, location, obj.size())
 
         if hasattr(obj, "__reduce_package__"):
             if _gate_torchscript_serialization and isinstance(
@@ -826,8 +827,15 @@ node [shape=box];
         self.close()
 
     def _write(self, filename, str_or_bytes):
+        if filename in self._written_files:
+            raise AssertionError(
+                f"Tried to write file '{filename}', but it already exists in this archive. "
+                "Please file a bug."
+            )
+        self._written_files.add(filename)
+
         if is_mangled(filename):
-            raise RuntimeError(
+            raise AssertionError(
                 f"Tried to save a torch.package'd module as '{filename}'. "
                 "Directly saving torch.package'd modules is not allowed."
             )

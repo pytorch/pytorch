@@ -161,6 +161,7 @@ struct CaptureList {
         case CAPTURE_LIST: {
           c10::List<at::Tensor> lst;
           auto size = *size_it++;
+          // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
           for (const auto i : c10::irange(size)) {
             lst.emplace_back(var_capture_it->unpack(saved_for));
             var_capture_it++;
@@ -444,6 +445,7 @@ struct DifferentiableGraphOp {
       for (auto& tensor : lst) {
         tensor = detach(tensor);
       }
+      // NOLINTNEXTLINE(performance-move-const-arg)
       v = std::move(lst);
     }
   }

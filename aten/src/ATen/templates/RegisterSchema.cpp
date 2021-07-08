@@ -9,6 +9,7 @@
 #include <ATen/NativeFunctions.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/Storage.h>
+#include <ATen/Operators.h>
 #include <ATen/Tensor.h>
 #include <c10/core/TensorOptions.h>
 #include <ATen/DeviceGuard.h>

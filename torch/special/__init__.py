@@ -2,7 +2,7 @@ import sys
 
 import torch
 from torch._C import _add_docstr, _special  # type: ignore[attr-defined]
-from torch._torch_docs import common_args
+from torch._torch_docs import common_args, multi_dim_common
 
 Tensor = torch.Tensor
 
@@ -217,6 +217,13 @@ Example::
     >>> torch.special.logit(a, eps=1e-6)
     tensor([-0.9466,  2.6352,  0.6131, -1.7169,  0.6261])
 """.format(**common_args))
+
+logsumexp = _add_docstr(_special.special_logsumexp,
+                        r"""
+logsumexp(input, dim, keepdim=False, *, out=None)
+
+Alias for :func:`torch.logsumexp`.
+""".format(**multi_dim_common))
 
 expit = _add_docstr(_special.special_expit,
                     r"""
@@ -504,3 +511,33 @@ round(input, *, out=None) -> Tensor
 
 Alias for :func:`torch.round`.
 """)
+
+zeta = _add_docstr(_special.special_zeta,
+                   r"""
+zeta(input, other, *, out=None) -> Tensor
+
+Computes the Hurwitz zeta function, elementwise.
+
+.. math::
+    \zeta(x, q) = \sum_{k=0}^{\infty} \frac{1}{(k + q)^x}
+
+""" + r"""
+Args:
+    input (Tensor): the input tensor corresponding to `x`.
+    other (Tensor): the input tensor corresponding to `q`.
+
+.. note::
+    The Riemann zeta function corresponds to the case when `q = 1`
+
+Keyword args:
+    {out}
+
+Example::
+    >>> x = torch.tensor([2., 4.])
+    >>> torch.special.zeta(x, 1)
+    tensor([1.6449, 1.0823])
+    >>> torch.special.zeta(x, torch.tensor([1., 2.]))
+    tensor([1.6449, 0.0823])
+    >>> torch.special.zeta(2, torch.tensor([1., 2.]))
+    tensor([1.6449, 0.6449])
+""".format(**common_args))
