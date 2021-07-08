@@ -8,15 +8,9 @@ from tools.codegen.gen import FileManager, get_grouped_native_functions, parse_n
 from tools.codegen.model import (BackendIndex, BackendMetadata, DispatchKey,
                                  NativeFunction, NativeFunctionsGroup, OperatorName)
 from tools.codegen.selective_build.selector import SelectiveBuilder
-from tools.codegen.utils import Target, concatMap, context
+from tools.codegen.utils import Target, concatMap, context, YamlLoader
 import tools.codegen.dest as dest
 import tools.codegen.api.dispatcher as dispatcher
-
-try:
-    # use faster C loader if available
-    from yaml import CSafeLoader as Loader
-except ImportError:
-    from yaml import SafeLoader as Loader  # type: ignore[misc]
 
 
 # Parses the external backend's yaml, and adds a new BackendIndex for the backend's dispatch key.
@@ -35,7 +29,7 @@ def parse_backend_yaml(
     }
 
     with open(backend_yaml_path, 'r') as f:
-        yaml_values = yaml.load(f, Loader=Loader)
+        yaml_values = yaml.load(f, Loader=YamlLoader)
     assert isinstance(yaml_values, dict)
 
     valid_keys = ['backend', 'cpp_namespace', 'extra_headers', 'supported', 'autograd']
@@ -78,7 +72,7 @@ Only the following keys are supported: {", ".join(valid_keys)}'
 
     backend_key: Optional[DispatchKey] = None
     if len(supported) > 0:
-        with context(f'The provided value for "backend" must be a valid DispatchKey, but got {backend}.'):
+        with context(lambda: f'The provided value for "backend" must be a valid DispatchKey, but got {backend}.'):
             backend_key = DispatchKey.parse(backend)
 
         backend_idx = create_backend_index(supported, backend_key)
@@ -87,7 +81,7 @@ Only the following keys are supported: {", ".join(valid_keys)}'
 
     autograd_key: Optional[DispatchKey] = None
     if len(supported_autograd) > 0:
-        with context(f'The "autograd" key was specified, which indicates that you would like to override \
+        with context(lambda: f'The "autograd" key was specified, which indicates that you would like to override \
 the behavior of autograd for some operators on your backend. However "Autograd{backend}" is not a valid DispatchKey.'):
             autograd_key = DispatchKey.parse(f'Autograd{backend}')
 
@@ -179,8 +173,8 @@ def run(source_yaml: str, output_dir: str, dry_run: bool) -> None:
             fm.write_with_template(f'Register{dispatch_key}.cpp', 'RegisterDispatchKey.cpp', lambda: {
                 'extra_cuda_headers': '',
                 'legacy_th_headers': '',
-                'external_backend_headers': f'''#include "{output_dir}/{backend_key}NativeFunctions.h"
-#include <torch_xla/csrc/aten_xla_type_default.h>''',
+                'external_backend_headers': f'#include "{output_dir}/{backend_key}NativeFunctions.h"',
+                'namespaced_headers': '',
                 'DispatchKey': dispatch_key,
                 'dispatch_namespace': dispatch_key.lower(),
                 'dispatch_namespaced_definitions': list(concatMap(
@@ -211,30 +205,6 @@ def run(source_yaml: str, output_dir: str, dry_run: bool) -> None:
                     grouped_native_functions
                 )),
             })
-
-        fm.write('aten_xla_type_default.h', lambda: {
-            'generated_comment': generated_comment,
-            'cpp_namespace': cpp_namespace,
-            'dispatch_aten_fallback_declarations': list(concatMap(
-                dest.GenExternalAtenFallback(Target.NAMESPACED_DECLARATION, backend_indices[backend_dispatch_key]),
-                grouped_native_functions
-            )),
-        })
-
-        fm.write('aten_xla_type_default.cpp', lambda: {
-            'generated_comment': generated_comment,
-            'cpp_namespace': cpp_namespace,
-            # TODO: after cpu fallbacks are moved to a boxed kernel,
-            # merge registrations / definitions into RegisterDispatchKey
-            'dispatch_aten_fallback_definitions': list(concatMap(
-                dest.GenExternalAtenFallback(Target.NAMESPACED_DEFINITION, backend_indices[backend_dispatch_key]),
-                grouped_native_functions
-            )),
-            'dispatch_registrations': list(concatMap(
-                dest.GenExternalAtenFallback(Target.REGISTRATION, backend_indices[backend_dispatch_key]),
-                grouped_native_functions
-            )),
-        })
 
 if __name__ == '__main__':
     main()

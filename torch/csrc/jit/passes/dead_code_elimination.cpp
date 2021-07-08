@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -114,7 +115,7 @@ class DeadCodeEliminator {
         outerNode->kind() == c10::onnx::Loop) {
       // Special handling to deal with loop carried dependencies.
       auto loop = LoopView(outerNode);
-      for (size_t i = 0; i < loop.carriedOutputs().size(); i++) {
+      for (const auto i : c10::irange(loop.carriedOutputs().size())) {
         if (outerNode->kind() == c10::onnx::Loop) {
           // Special handling for onnx loop.
           // The number of body carried inputs and outputs are different.
@@ -135,7 +136,7 @@ class DeadCodeEliminator {
       liveValues_.insert(loop.nextCond());
     } else {
       AT_ASSERT(outerNode->outputs().size() == node->inputs().size());
-      for (size_t i = 0; i < outerNode->outputs().size(); i++) {
+      for (const auto i : c10::irange(outerNode->outputs().size())) {
         auto innerOutput = node->inputs()[i];
         auto outerOutput = outerNode->outputs()[i];
         if (liveValues_.count(outerOutput)) {

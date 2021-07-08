@@ -124,11 +124,11 @@ class TORCH_API Function {
 
   // The parameters (e.g. weights / bias tensors) to be passed to the generated
   // NNC kernel.
-  const std::vector<at::Tensor>& parameters() const {
+  const c10::impl::GenericList& parameters() const {
     return parameters_;
   }
 
-  void set_parameters(const std::vector<at::Tensor>& parameters) {
+  void set_parameters(const c10::impl::GenericList& parameters) {
     parameters_ = parameters;
   }
 
@@ -144,7 +144,7 @@ class TORCH_API Function {
     return output_specs_;
   }
 
-  void set_output_spec(const std::vector<OutputSpec>& output_specs) {
+  void set_output_specs(const std::vector<OutputSpec>& output_specs) {
     output_specs_ = output_specs;
   }
 
@@ -161,7 +161,7 @@ class TORCH_API Function {
 
   c10::QualifiedName name_;
   std::string nnc_kernel_id_;
-  std::vector<at::Tensor> parameters_;
+  c10::impl::GenericList parameters_{at::AnyType::get()};
   std::vector<InputSpec> input_specs_;
   std::vector<OutputSpec> output_specs_;
   MemoryPlan memory_plan_;

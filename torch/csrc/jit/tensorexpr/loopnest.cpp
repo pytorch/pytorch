@@ -8,6 +8,7 @@
 #include <vector>
 
 #include <c10/util/Logging.h>
+#include <c10/util/irange.h>
 #include <c10/util/string_utils.h>
 
 #include <ATen/core/functional.h>
@@ -21,6 +22,11 @@
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/ir_verifier.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
+
+#include <stdexcept>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 namespace torch {
 namespace jit {
@@ -416,10 +422,10 @@ class Vectorizer : public IRMutator {
   const Expr* start_ = nullptr;
 };
 
-void LoopNest::vectorize(For* f) {
+bool LoopNest::vectorize(For* f) {
   Block* b = dynamic_cast<Block*>(f->get_parent());
   if (!b) {
-    return;
+    return false;
   }
 
   // Can't vectorize reduction axes.
@@ -427,22 +433,31 @@ void LoopNest::vectorize(For* f) {
   for (auto* r : reductions) {
     if (std::find(r->reduce_args().begin(), r->reduce_args().end(), f->var()) !=
         r->reduce_args().end()) {
-      throw std::logic_error("Cannot vectorize reduction axis - rfactor first");
+      return false;
     }
   }
 
   Vectorizer v;
-  Stmt* old_f = Stmt::clone(f);
   Stmt* new_f = nullptr;
   try {
-    new_f = FlattenIndexes(f);
+    new_f = Stmt::clone(f);
+    normalize(dynamic_cast<For*>(new_f));
+    new_f = FlattenIndexes(new_f);
     new_f = v.vectorize(dynamic_cast<For*>(new_f));
   } catch (std::runtime_error& e) {
-    // Partial vectorization may have corrupted f
-    new_f = old_f;
+    // We clone f before vectorizing. So, any partial vectorization will
+    // have modified the clone. In case of an exception, we can continue
+    // using f.
+    new_f = f;
   }
 
-  b->replace_stmt(f, IRSimplifier::simplify(new_f));
+  if (new_f != f) {
+    b->replace_stmt(f, IRSimplifier::simplify(new_f));
+    return true;
+  }
+
+  // Vectorization was not successful.
+  return false;
 }
 
 void LoopNest::initialize(
@@ -501,7 +516,7 @@ class FunctionInliner : public IRMutator {
   const Expr* mutate_loads(const Buf* buf, std::vector<const Expr*> dims) {
     std::vector<const Var*> index_vars;
     TORCH_INTERNAL_ASSERT(buf->ndim() == producer_index_vars_.size());
-    for (size_t i = 0; i < buf->ndim(); i++) {
+    for (const auto i : c10::irange(buf->ndim())) {
       const Var* func_callee_arg = producer_index_vars_.at(i);
       const Expr* func_caller_param = dims.at(i);
       if (func_callee_arg == nullptr) {
@@ -1029,6 +1044,7 @@ bool isConditionalFromCat(
     std::vector<const Expr*>* comp_values,
     std::vector<const Expr*>* sub_exprs) {
   const Var* var = nullptr;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   const Expr* comp_value;
   if (isConditionOptimizable(ite->condition(), &var, &comp_value)) {
     if (*cond_var == nullptr) {
@@ -1514,15 +1530,35 @@ bool areEqual(const Expr* expr1, const Expr* expr2) {
   return diff->isConstant() && (immediateAs<int>(diff) == 0);
 };
 
-bool areEqual(
+bool doesExprContainAnyVar(
+    const Expr* expr,
+    const std::unordered_set<const Var*>& vars) {
+  for (auto* v : VarFinder::find(expr)) {
+    if (vars.count(v)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Returns true if the given list of indices refer to two accesses
+// that are loop-independent w.r.t. the given list of outer loop
+// variables.
+bool areIndicesLoopIndependent(
     const std::vector<const Expr*>& expr_list1,
-    const std::vector<const Expr*>& expr_list2) {
+    const std::vector<const Expr*>& expr_list2,
+    const std::unordered_set<const Var*>& outer_loop_vars) {
   if (expr_list1.size() != expr_list2.size()) {
     return false;
   }
   for (size_t i = 0; i < expr_list1.size(); ++i) {
-    if (!areEqual(expr_list1[i], expr_list2[i])) {
-      return false;
+    auto expr1 = expr_list1[i];
+    auto expr2 = expr_list2[i];
+    if (doesExprContainAnyVar(expr1, outer_loop_vars) ||
+        doesExprContainAnyVar(expr2, outer_loop_vars)) {
+      if (!areEqual(expr1, expr2)) {
+        return false;
+      }
     }
   }
   return true;
@@ -1531,17 +1567,38 @@ bool areEqual(
 bool LoopNest::hasLoopCarriedDependence(For* loop) {
   analysis::MemDependencyChecker analyzer;
   loop->accept(&analyzer);
+
+  std::unordered_set<const Var*> outer_loop_vars = {loop->var()};
+  auto outer_loops = LoopNest::getEnclosingLoopNest(loop);
+  for (auto l : outer_loops) {
+    outer_loop_vars.insert(l->var());
+  }
+
   // High-level algorithm to check if two accesses to a buffer, A and B, one of
   // which is a Store, result in a loop-carried dependence:
-  //   1. If the index expressions are equal in A and B, then that is a
-  //      loop-independent dependence.
-  //   2. If the index expressions are not equal in A and B:
+  //   1. For every pair of index expressions, Ai and Bi, that refer to a dim
+  //      of A and B, if one of the following conditions are satisfied:
+  //       a) Ai and Bi are equal (OR)
+  //       b) Both Ai and Bi do not contain any outer-loop variables
+  //      then, the dependence between A and B is a loop-independent
+  //      dependence. This is because, in the case of b), those index
+  //      expressions do not affect the ordering of accesses A and B.
+  //   2. If condition 1) is not satisfied:
   //       a) if the bounds on the accesses overlap, then this is a
   //          loop-carried dependence.
   //       b) if the bounds on the accesses do not overlap, then there is no
   //          dependence.
   //
+  // NOTE: Since we check for equality of index expressions whenever outer
+  //     loop variables are involved, this may incorrectly report some cases as
+  //     having a loop-carried dependence. It is impractical to handle all
+  //     possible cases here, so, we are being conservative and allow for
+  //     some false positives. While this will prevent some loop fusion
+  //     opportunities, that should be a small fraction of the cases that are
+  //     allowed.
+  //
   // Implementation:
+  //
   // For every pair of statements, S1 and S2, in the loop:
   //  * Get the loads and stores in S1 and S2.
   //  * For every store in S1 and load in S2 to the same buffer, if the index
@@ -1563,7 +1620,8 @@ bool LoopNest::hasLoopCarriedDependence(For* loop) {
       for (auto& aStore : aStores) {
         for (auto& bLoad : bLoads) {
           if (aStore->buf() == bLoad->buf()) {
-            if (!areEqual(aStore->indices(), bLoad->indices())) {
+            if (!areIndicesLoopIndependent(
+                    aStore->indices(), bLoad->indices(), outer_loop_vars)) {
               if (isOverlapping(analyzer, aStore, bLoad)) {
                 return true;
               }
@@ -1575,7 +1633,8 @@ bool LoopNest::hasLoopCarriedDependence(For* loop) {
       for (auto& bStore : bStores) {
         for (auto& aLoad : aLoads) {
           if (bStore->buf() == aLoad->buf()) {
-            if (!areEqual(bStore->indices(), aLoad->indices())) {
+            if (!areIndicesLoopIndependent(
+                    bStore->indices(), aLoad->indices(), outer_loop_vars)) {
               if (isOverlapping(analyzer, bStore, aLoad)) {
                 return true;
               }
@@ -1587,7 +1646,8 @@ bool LoopNest::hasLoopCarriedDependence(For* loop) {
       for (auto& aStore : aStores) {
         for (auto& bStore : bStores) {
           if (aStore->buf() == bStore->buf()) {
-            if (!areEqual(aStore->indices(), bStore->indices())) {
+            if (!areIndicesLoopIndependent(
+                    aStore->indices(), bStore->indices(), outer_loop_vars)) {
               if (isOverlapping(analyzer, aStore, bStore)) {
                 return true;
               }
@@ -1911,6 +1971,68 @@ std::vector<For*> LoopNest::reorder(
   return result;
 }
 
+For* LoopNest::getLoopAt(For* root, const std::vector<int>& indices) const {
+  if (indices.empty()) {
+    return root;
+  }
+  if (root == nullptr) {
+    throw malformed_input("root loop is null");
+  }
+
+  For* curr = root;
+  for (auto i : indices) {
+    if (i < 0 || curr->body()->nstmts() <= i) {
+      return nullptr;
+    }
+    std::list<Stmt*>::iterator stmtp = curr->body()->begin();
+    std::advance(stmtp, i);
+    curr = dynamic_cast<For*>(*stmtp);
+    if (curr == nullptr) {
+      return nullptr;
+    }
+  }
+
+  return curr;
+}
+
+For* LoopNest::tile(For* x, For* y, int x_factor, int y_factor) {
+  auto parent = dynamic_cast<Block*>(x->get_parent());
+  if (parent == nullptr) {
+    throw malformed_input("parent of the loops must be a Block");
+  }
+  if (!areLoopsPerfectlyNested({x, y})) {
+    throw malformed_input("two loops must be perfectly nested");
+  }
+
+  // Split x, y axes by x_factor and y_factor
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  For *yi, *ytail;
+  splitWithTail(y, y_factor, &yi, &ytail);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  For *xi, *xtail;
+  splitWithTail(x, x_factor, &xi, &xtail);
+
+  // Distribute xi over yo and ytail so we can manipulate the loop order of {xo,
+  // xi, yo, yi}
+  auto loops = distributeLoop(xi);
+
+  // For {xi, yo, yi}, reorder the axes to be yo, xi, yi
+  xi = loops.front();
+  For* yo = dynamic_cast<For*>(xi->body()->stmts().front());
+  CHECK(yo);
+  reorder({xi, yo}, {1, 0});
+
+  // For {xi, ytail}, reorder the axes to be ytail, xi
+  if (loops.size() == 2) {
+    xi = loops.back();
+    ytail = dynamic_cast<For*>(xi->body()->stmts().front());
+    CHECK(ytail);
+    reorder({xi, ytail}, {1, 0});
+  }
+
+  return xtail;
+}
+
 bool LoopNest::areLoopsPerfectlyNested(const std::vector<For*>& loops) {
   if (loops.size() < 2) {
     return true;
@@ -1984,8 +2106,8 @@ bool LoopNest::normalize(For* f) {
   auto for_body_normalized = Substitute(
       f->body(),
       {{f->var(), (VarHandle(f->var()) + ExprHandle(f->start())).node()}});
-  f->setBody(for_body_normalized);
-  f->setStop(new Sub(f->stop(), f->start()));
+  f->setBody(IRSimplifier::simplify(for_body_normalized));
+  f->setStop(IRSimplifier::simplify(new Sub(f->stop(), f->start())));
   f->setStart(new IntImm(0));
   return true;
 }
@@ -2078,10 +2200,6 @@ bool LoopNest::flatten(const std::vector<For*>& loops) {
 }
 
 void LoopNest::compressBuffer(Buf* buf, Stmt* stmt) {
-  if (buf->initializer()) {
-    throw malformed_input("Can't compress buffer whose initializer is set");
-  }
-
   // Loop iterations in NNC IR do not follow sequential semantics by default.
   // In other words, the iterations of the loops could be executed in any
   // random order without affecting correctness. This constraint in turn
@@ -2226,20 +2344,6 @@ std::vector<For*> LoopNest::getLoopStmtsFor(Stmt* s) const {
   return result;
 }
 
-void LoopNest::setGPUBlockIndex(For* f, int block_index) {
-  f->set_gpu_block_index(block_index);
-}
-
-void LoopNest::setGPUThreadIndex(For* f, int thread_index) {
-  f->set_gpu_thread_index(thread_index);
-}
-
-void LoopNest::setBufferMap(
-    For* f,
-    const std::unordered_map<std::string, const Buf*>& map) {
-  f->set_buffer_map(map);
-}
-
 Stmt* LoopNest::getLoopBodyFor(Tensor* t) const {
   return getLoopBodyFor(t->buf());
 }
@@ -2348,7 +2452,7 @@ class LoopComputeAtRewriter : public IRMutator {
       return v;
     }
     std::vector<const Expr*> new_indices(v->indices().size());
-    for (size_t i = 0; i < v->indices().size(); i++) {
+    for (const auto i : c10::irange(v->indices().size())) {
       new_indices[i] =
           IRSimplifier::simplify(new Sub(v->indices()[i], offsets_[i]));
     }
@@ -2514,10 +2618,25 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
     consumer_block->replace_stmt(consumer, new_consumer);
   }
 
-  // If there's a reduction we can't just write the result straight back to the
-  // original buffer, since after parallelism the writes will race. Instead we
-  // need to create a new ReduceOp.
+  // If there's a reduction and we are operating on the reduce axis, we need to
+  // initialize the cache with 0s. Also, we can't just write the result straight
+  // back to the original buffer, since after parallelism the writes will race.
+  // Instead we need to create a new ReduceOp.
+  bool on_reduce_axis = false;
   if (reduceOp) {
+    std::set<const Var*> reduce_args(
+        reduceOp->reduce_args().begin(), reduceOp->reduce_args().end());
+    std::set<const Var*> enclosing_vars;
+    for (auto enclosing_for_stmt : NodeFinder<For>::find(consumer)) {
+      enclosing_vars.insert(enclosing_for_stmt->var());
+    }
+    for (auto reduce_arg : reduce_args) {
+      if (enclosing_vars.find(reduce_arg) == enclosing_vars.end()) {
+        on_reduce_axis = true;
+      }
+    }
+  }
+  if (reduceOp && on_reduce_axis) {
     // reduceOp means we had both loads and stores.
 
     // Init cache to 0.
@@ -2713,7 +2832,7 @@ void LoopNest::computeAt(Stmt* s, For* f) {
 
   // Generate index variables for 'temp'
   std::vector<const Expr*> temp_indices(dims.size());
-  for (size_t i = 0; i < dims.size(); i++) {
+  for (const auto i : c10::irange(dims.size())) {
     // TODO: Use name-hint of the producer indices instead of 'idx'
     temp_indices[i] = new Var(std::string("idx") + c10::to_string(i), kInt);
   }
@@ -2729,7 +2848,7 @@ void LoopNest::computeAt(Stmt* s, For* f) {
   std::vector<std::pair<const Var*, const Expr*>> rewrite_indices_map;
   std::vector<const Expr*> offsets;
   for (const TensorAccessBoundsInfo& p : bounds_it->second) {
-    for (size_t i = 0; i < p.start.size(); i++) {
+    for (const auto i : c10::irange(p.start.size())) {
       if (offsets.size() <= i) {
         offsets.push_back(p.start[i]);
       } else {
@@ -2739,7 +2858,7 @@ void LoopNest::computeAt(Stmt* s, For* f) {
     }
   }
 
-  for (size_t i = 0; i < prod_indices.size(); i++) {
+  for (const auto i : c10::irange(prod_indices.size())) {
     rewrite_indices_map.push_back(
         {prod_indices[i], new Add(temp_indices[i], offsets[i])});
   }
@@ -2749,7 +2868,7 @@ void LoopNest::computeAt(Stmt* s, For* f) {
       temp_buf, temp_indices, Substitute(st->value(), rewrite_indices_map));
 
   // Construct the loop nest for the temp computation
-  for (size_t i = 0; i < dims.size(); i++) {
+  for (const auto i : c10::irange(dims.size())) {
     // We're creating loops from innermost to outermost, so we need to access
     // dimensions in reversed order.
     size_t dim_idx = dims.size() - 1 - i;

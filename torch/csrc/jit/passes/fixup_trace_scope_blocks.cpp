@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/passes/fixup_trace_scope_blocks.h>
 
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
@@ -200,14 +201,14 @@ struct ConvertTracedAttrReferences {
         // the proper attribute.
         auto attr_atoms = attr_qualname.atoms();
         Value* replaced_value = self;
-        for (size_t i = 0; i < attr_atoms.size(); i++) {
+        for (const auto i : c10::irange(attr_atoms.size())) {
           if (i < prefix_atoms.size()) {
             TORCH_INTERNAL_ASSERT(attr_atoms[i] == prefix_atoms[i]);
           } else {
             replaced_value = n->owningBlock()->owningGraph()->insertGetAttr(
                 replaced_value, attr_atoms[i]);
           } // if (i < prefix_atoms.size())
-        } // for (size_t i = 0; i < attr_atoms.size(); i++)
+        } // for(const auto i : c10::irange(attr_atoms.size()))
         n->replaceInput(inp_idx, replaced_value);
         local_remaps[inp] = replaced_value;
       } else {

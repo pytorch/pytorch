@@ -44,16 +44,12 @@ MAKE_SMART_PTR(Execution)
 #undef MAKE_SMART_PTR
 
 struct NnapiCompilation : torch::jit::CustomClassHolder {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,modernize-use-equals-default)
-  NnapiCompilation() {
-    // Could possibly call load_platform_library here, but error reporting
-    // can be complicated if the constructor is called during model loading.
-    // Instead, delay all work until the explicit init call.
-  }
+  // Could possibly call load_platform_library here, but error reporting
+  // can be complicated if the constructor is called during model loading.
+  // Instead, delay all work until the explicit init call.
+  NnapiCompilation() = default;
 
-  // NOLINTNEXTLINE(modernize-use-override,modernize-use-equals-default)
-  ~NnapiCompilation() {
-  }
+  ~NnapiCompilation() override = default;
 
   void init(
       at::Tensor serialized_model_tensor,

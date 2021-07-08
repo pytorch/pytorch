@@ -1,20 +1,17 @@
 import concurrent.futures
 import contextlib
 import json
-import logging
 import os
 import sys
+import threading
 import time
 import unittest
-import warnings
-
 
 from collections import namedtuple
 from functools import partial
 from threading import Event
 from threading import Lock
 from unittest import mock
-
 
 import torch
 import torch.nn as nn
@@ -89,6 +86,16 @@ DONE_FUTURE = concurrent.futures.Future()
 
 FIFTY_MIL_CYCLES = 50000000
 
+_rpc_barrier_count = 0
+
+def _increment_count():
+    global _rpc_barrier_count
+    _rpc_barrier_count += 1
+
+def _reset_count():
+    global _rpc_barrier_count
+    _rpc_barrier_count = 0
+
 class StubRpcAgent:
     def __init__(self, world_size):
         self.world_size = world_size
@@ -125,7 +132,6 @@ def set_and_check_done(value):
 # classes and functions are used to test python user defined class and
 # methods over rpc
 TensorClass = namedtuple("TensorClass", ["tensors"])
-
 
 class MyPickleClass:
     def __init__(self):
@@ -203,6 +209,10 @@ def add_rref_to_value(rref, value):
 def run_nested_pickle(pickle_cls_instance, tensor):
     return pickle_cls_instance.t + tensor
 
+def build_sparse_tensor():
+    i = [[0, 1, 1], [2, 0, 2]]
+    v = [3, 4, 5]
+    return torch.sparse_coo_tensor(i, v, (2, 3))
 
 def build_complex_tensors():
     a = torch.ones(3, 3)
@@ -488,13 +498,46 @@ def async_add_multi_fanout(to, x, num, step):
     return ret_future
 
 
+@rpc.functions.async_execution
+def async_cuda_sleep_and_set_to_one(t):
+    device = t.device
+    original_stream = torch.cuda.current_stream(device)
+    new_stream = torch.cuda.Stream(device)
+    new_stream.wait_stream(original_stream)
+    with torch.cuda.stream(new_stream):
+        torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
+        t.fill_(1)
+        fut = Future(devices=[device])
+        fut.set_result(t)
+        return fut
+
+
+@rpc.functions.async_execution
+def async_cuda_nested_add(to, x, y, z):
+    def cb(fut):
+        torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
+        return fut.value() + z
+
+    return rpc.rpc_async(to, torch.add, args=(x, y)).then(cb)
+
+
 # A custom Python class that contains a tensor, needed to see if we correctly
 # use the Python pickler to extract tensors from non-IValue-convertible types.
 class TensorWrapper:
-    __slots__ = ("tensor",)
+    __slots__ = ("tensor", "lock")
 
     def __init__(self, t):
         self.tensor = t
+        # Add one non-picklable field, to ensure it's ignored/skipped.
+        self.lock = Lock()
+
+    def increase(self, v):
+        with self.lock:
+            self.tensor += v
+
+    def sum(self):
+        with self.lock:
+            return self.tensor.sum()
 
 
 # Copied from test/test_cuda.py.
@@ -1082,6 +1125,63 @@ class RpcTest(RpcAgentTestFixture):
             expected_error = self.get_timeout_error_regex()
             with self.assertRaisesRegex(RuntimeError, expected_error):
                 rpc.api._all_gather(SlowPickleClass(0.5))
+
+    def _test_barrier_helper(self, info, names, multi_threaded=False):
+        names = sorted(names)
+        leader = names[0]
+        rpc.rpc_sync(leader, _reset_count)
+        if not multi_threaded and info.name == leader:
+            self.assertEqual(_rpc_barrier_count, 0)
+        rpc.api._barrier(names)
+        rpc.rpc_sync(leader, _increment_count)
+        rpc.api._barrier(names)
+        if not multi_threaded and info.name == leader:
+            self.assertEqual(_rpc_barrier_count, len(names))
+
+    @dist_init
+    def test_rpc_barrier_all(self):
+        # Test rpc barrier when called with full list of workers
+        info = rpc.get_worker_info()
+        all_worker_info = rpc._get_current_rpc_agent().get_worker_infos()
+        names = [worker.name for worker in all_worker_info]
+        self._test_barrier_helper(info, names)
+
+    @dist_init
+    def test_rpc_barrier_subset(self):
+        # Test rpc barrier when processes are called with different subsets of the full list
+        info = rpc.get_worker_info()
+        all_worker_info = rpc._get_current_rpc_agent().get_worker_infos()
+        if info.id % 2:
+            names = [worker.name for worker in all_worker_info if worker.id % 2]
+        else:
+            names = [worker.name for worker in all_worker_info if not worker.id % 2]
+        self._test_barrier_helper(info, names)
+
+    @dist_init
+    def test_rpc_barrier_partial_subset(self):
+        # Test rpc barrier when some processes are not involved in the barrier
+        info = rpc.get_worker_info()
+        all_worker_info = rpc._get_current_rpc_agent().get_worker_infos()
+        if info.id % 2:
+            names = [worker.name for worker in all_worker_info if worker.id % 2]
+        else:
+            names = [f"worker{info.id}"]
+        self._test_barrier_helper(info, names)
+
+    @dist_init
+    def test_rpc_barrier_multithreaded(self):
+        # This tests validates the implementation of barrier when multiple threads call into it
+        # We only need to check that it does not hang in this case
+        info = rpc.get_worker_info()
+        all_worker_info = rpc._get_current_rpc_agent().get_worker_infos()
+        names = [worker.name for worker in all_worker_info]
+        threads = []
+        for _ in range(3):
+            th = threading.Thread(target=self._test_barrier_helper, args=(info, names, True))
+            threads.append(th)
+            th.start()
+        for th in threads:
+            th.join()
 
     @dist_init
     def test_graceful_shutdown_with_uneven_workload(self):
@@ -4004,343 +4104,6 @@ class CudaRpcTest(RpcAgentTestFixture):
         remote_event_names = [get_name(event) for event in remote_events if get_name(event) in EXPECTED_REMOTE_EVENTS]
         self.assertEqual(set(remote_event_names), set(EXPECTED_REMOTE_EVENTS))
 
-class ProcessGroupAgentRpcTest(RpcAgentTestFixture):
-
-    def test_mismatched_type_for_options(self):
-        # An exception should be raised if the options are not an instance of
-        # ProcessGroupRpcBackendOptions.
-        rpc_backend_options = FooBackendOptions(self.init_method)
-
-        with self.assertRaisesRegex(
-            TypeError, "`rpc_backend_options` must be a `ProcessGroupRpcBackendOptions`"
-        ):
-            rpc.init_rpc(
-                name=worker_name(self.rank),
-                rank=self.rank,
-                world_size=self.world_size,
-                backend=rpc.BackendType.PROCESS_GROUP,
-                rpc_backend_options=rpc_backend_options,
-            )
-
-    def test_infer_backend_from_options(self):
-        rpc_backend_options = rpc.ProcessGroupRpcBackendOptions(
-            init_method=self.init_method
-        )
-
-        with self.assertLogs("torch.distributed.rpc", logging.WARNING) as cm:
-            rpc.init_rpc(
-                name=worker_name(self.rank),
-                rank=self.rank,
-                world_size=self.world_size,
-                # Do _not_ pass backend.
-                rpc_backend_options=rpc_backend_options,
-            )
-        self.assertIn(
-            "To silence this warning pass `backend=BackendType.PROCESS_GROUP` explicitly.",
-            "\n".join(cm.output),
-        )
-
-        self.assertIsInstance(rpc.api._get_current_rpc_agent(), rpc.ProcessGroupAgent)
-
-    def test_logs_deprecation_warning(self):
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-
-            rpc.init_rpc(
-                name=worker_name(self.rank),
-                rank=self.rank,
-                world_size=self.world_size,
-                backend=rpc.BackendType.PROCESS_GROUP,
-                rpc_backend_options=self.rpc_backend_options,
-            )
-
-            self.assertEqual(1, len(w))
-            self.assertIn(
-                "It is recommended to migrate to the TENSORPIPE backend.",
-                str(w[-1].message),
-            )
-
-            rpc.shutdown()
-
-    def test_single_threaded_rref_owner(self):
-        # We need a process group in order to perform a barrier at the end.
-        initialize_pg(self.file_init_method, self.rank, self.world_size)
-
-        # This test aims to verify if the server can handle all internal RPC
-        # messages using just one thread.
-        caller_rank = 0
-        callee_rank = 1
-        rpc_backend_options = rpc.ProcessGroupRpcBackendOptions(
-            init_method=self.rpc_backend_options.init_method,
-            num_send_recv_threads=1
-        ) if self.rank == callee_rank else self.rpc_backend_options
-
-        rpc.init_rpc(
-            name=worker_name(self.rank),
-            backend=self.rpc_backend,
-            rank=self.rank,
-            world_size=self.world_size,
-            rpc_backend_options=rpc_backend_options,
-        )
-
-        if self.rank == caller_rank:
-            dst = worker_name(callee_rank)
-            rrefs = []
-
-            # makes sure there is no existing OwnerRRefs on dst
-            info = rpc.rpc_sync(dst, get_rref_debug_info)
-            self.assertEqual(0, int(info["num_owner_rrefs"]))
-
-            # creating RRefs on dst
-            for i in range(20):
-                rrefs.append(
-                    rpc.remote(dst, delayed_add, args=(torch.zeros(2, 2), i))
-                )
-
-            # using RRefs on dst
-            futs = []
-            for i in range(len(rrefs)):
-                futs.append(
-                    rpc.rpc_async(dst, my_rref_function, args=(rrefs[i], rrefs[i]))
-                )
-
-            # wait for results and check
-            for i in range(len(futs)):
-                self.assertEqual(2 * (torch.zeros(2, 2) + i), futs[i].wait())
-
-            # check we created the expected number of RRefs on dst
-            info = rpc.rpc_sync(dst, get_rref_debug_info)
-            num_owner_rrefs = int(info["num_owner_rrefs"])
-            self.assertEqual(len(futs), num_owner_rrefs)
-
-            # trigger RRef deletion
-            del futs
-            del rrefs
-
-            # wait until OwnerRRefs are cleared on dst
-            while num_owner_rrefs > 0:
-                info = rpc.rpc_sync(dst, get_rref_debug_info)
-                num_owner_rrefs = int(info["num_owner_rrefs"])
-                time.sleep(0.01)
-
-        # use a barrier to prevent messages sent during shutdown occupies the
-        # only thread on callee (rank == 1) too early.
-        dist.barrier()
-        rpc.shutdown()
-
-    def test_single_threaded_rref_to_here(self):
-        # We need a process group in order to perform a barrier at the end.
-        initialize_pg(self.file_init_method, self.rank, self.world_size)
-
-        # This test aims to verify if the server can handle all internal RPC
-        # messages using just one thread.
-        caller_rank = 0
-        callee_rank = 1
-        rpc_backend_options = rpc.ProcessGroupRpcBackendOptions(
-            init_method=self.rpc_backend_options.init_method,
-            num_send_recv_threads=1
-        ) if self.rank == callee_rank else self.rpc_backend_options
-
-        rpc.init_rpc(
-            name=worker_name(self.rank),
-            backend=self.rpc_backend,
-            rank=self.rank,
-            world_size=self.world_size,
-            rpc_backend_options=rpc_backend_options,
-        )
-
-        if self.rank == caller_rank:
-            dst = worker_name(callee_rank)
-            rrefs = []
-
-            # makes sure there is no existing OwnerRRefs on dst
-            info = rpc.rpc_sync(dst, get_rref_debug_info)
-            self.assertEqual(0, int(info["num_owner_rrefs"]))
-
-            # creating RRefs on dst
-            for i in range(20):
-                rrefs.append(
-                    rpc.remote(dst, delayed_add, args=(torch.zeros(2, 2), i))
-                )
-
-            # wait for results and check
-            for i in range(len(rrefs)):
-                self.assertEqual(torch.zeros(2, 2) + i, rrefs[i].to_here())
-
-            # check we created the expected number of RRefs on dst
-            info = rpc.rpc_sync(dst, get_rref_debug_info)
-            num_owner_rrefs = int(info["num_owner_rrefs"])
-            self.assertEqual(len(rrefs), num_owner_rrefs)
-
-            # trigger RRef deletion
-            del rrefs
-
-            # wait until OwnerRRefs are cleared on dst
-            while num_owner_rrefs > 0:
-                info = rpc.rpc_sync(dst, get_rref_debug_info)
-                num_owner_rrefs = int(info["num_owner_rrefs"])
-                time.sleep(0.01)
-
-        # use a barrier to prevent messages sent during shutdown occupies the
-        # only thread on callee (rank == 1) too early.
-        dist.barrier()
-        rpc.shutdown()
-
-    @dist_init
-    def test_process_group_debug_info(self):
-        rpc.enable_gil_profiling(True)
-        initialize_pg(self.file_init_method, self.rank, self.world_size)
-        NUM_THREAD = self.rpc_backend_options.num_send_recv_threads
-
-        info = rpc.api._get_current_rpc_agent().get_debug_info()
-        self.assertIn("agent.num_pending_requests", info)
-        self.assertIn("agent.thread_pool_size", info)
-        self.assertIn("agent.num_idle_threads", info)
-        self.assertIn("agent.gil_average_wait_time_us", info)
-        self.assertEqual(int(info["agent.num_pending_requests"]), 0)
-        self.assertEqual(int(info["agent.thread_pool_size"]), NUM_THREAD)
-        self.assertEqual(int(info["agent.num_idle_threads"]), NUM_THREAD)
-        # for the above check, add a barrier to ensure that another worker
-        # cannot send a request before we check num_idle_threads, since we'd
-        # use up an idle thread if we start processing that request.
-        dist.barrier()
-        dst_rank = (self.rank + 1) % self.world_size
-        fut = rpc.rpc_async(
-            worker_name(dst_rank), set_and_check_done, args=(dst_rank,)
-        )
-        # blocks until the request arrives
-        self.assertEqual(self.rank, VALUE_FUTURE.result())
-
-        info = rpc.api._get_current_rpc_agent().get_debug_info()
-        self.assertIn("agent.num_pending_requests", info)
-        self.assertIn("agent.thread_pool_size", info)
-        self.assertIn("agent.num_idle_threads", info)
-        self.assertIn("agent.gil_average_wait_time_us", info)
-        self.assertGreaterEqual(float(info["agent.gil_average_wait_time_us"]), 0)
-        self.assertEqual(int(info["agent.num_pending_requests"]), 1)
-        self.assertEqual(int(info["agent.thread_pool_size"]), NUM_THREAD)
-        num_idle_threads = int(info["agent.num_idle_threads"])
-        # as we cannot know for sure whether the send thread has returned, there
-        # might be either 1 or 2 busy threads
-        self.assertTrue(num_idle_threads in [NUM_THREAD - 1, NUM_THREAD - 2])
-
-        # add a barrier to make sure the request is not finished before checking
-        # num_pending_requests
-        dist.barrier()
-
-        DONE_FUTURE.set_result(self.rank)
-        self.assertEqual(dst_rank, fut.wait())
-
-        # add a barrier to make sure the dst_rank has finished processing the
-        # request
-        dist.barrier()
-
-        info = rpc.api._get_current_rpc_agent().get_debug_info()
-        self.assertIn("agent.num_pending_requests", info)
-        self.assertIn("agent.thread_pool_size", info)
-        self.assertIn("agent.num_idle_threads", info)
-        self.assertEqual(int(info["agent.num_pending_requests"]), 0)
-        self.assertEqual(int(info["agent.thread_pool_size"]), NUM_THREAD)
-
-        for retry in range(3):
-            # even if the future has completed, there is no guarantee that
-            # the local send/recv threads would have finished. We try three
-            # times. (NB: this might potentially be flaky. If flakiness does
-            # occur, then we have to relax the assert.)
-            info = rpc.api._get_current_rpc_agent().get_debug_info()
-            if int(info["agent.num_idle_threads"]) == NUM_THREAD:
-                break
-            time.sleep(0.1)
-        self.assertEqual(int(info["agent.num_idle_threads"]), NUM_THREAD)
-
-        # add a barrier to make sure SHUTDOWN message is not sent
-        dist.barrier()
-
-    @dist_init(setup_rpc=False)
-    def test_set_and_get_num_send_recv_threads(self):
-        NUM_THREADS = 27
-        rpc_backend_options = rpc.ProcessGroupRpcBackendOptions(
-            init_method=self.rpc_backend_options.init_method,
-            num_send_recv_threads=NUM_THREADS
-        )
-        rpc.init_rpc(
-            name=worker_name(self.rank),
-            backend=self.rpc_backend,
-            rank=self.rank,
-            world_size=self.world_size,
-            rpc_backend_options=rpc_backend_options,
-        )
-
-        info = rpc.api._get_current_rpc_agent().get_debug_info()
-        self.assertEqual(int(info["agent.thread_pool_size"]), NUM_THREADS)
-        rpc.shutdown()
-
-    @dist_init(setup_rpc=False)
-    def test_process_group_set_default_timeout(self):
-        timeout = 0.5
-        rpc_backend_options = rpc.ProcessGroupRpcBackendOptions(
-            init_method=self.rpc_backend_options.init_method,
-            num_send_recv_threads=self.rpc_backend_options.num_send_recv_threads,
-            rpc_timeout=timeout
-        )
-        rpc.init_rpc(
-            name=worker_name(self.rank),
-            backend=self.rpc_backend,
-            rank=self.rank,
-            world_size=self.world_size,
-            rpc_backend_options=rpc_backend_options,
-        )
-
-        default_timeout = rpc.get_rpc_timeout()
-        self.assertEqual(default_timeout, timeout)
-        rpc.shutdown()
-
-    @dist_init(setup_rpc=False)
-    def test_process_group_options_throw_on_timedelta_timeout(self):
-        from datetime import timedelta
-
-        timeout = timedelta()
-        # Ensure that constructing ProcessGroupRpcBackendOptions with timedelta fails
-        with self.assertRaisesRegex(TypeError, "incompatible constructor arguments"):
-            rpc_backend_options = rpc.ProcessGroupRpcBackendOptions(
-                init_method=self.rpc_backend_options.init_method,
-                num_send_recv_threads=self.rpc_backend_options.num_send_recv_threads,
-                rpc_timeout=timeout,
-            )
-
-class ProcessGroupAgentCudaRpcTest(RpcAgentTestFixture):
-
-    @skip_if_lt_x_gpu(2)
-    @dist_init
-    def test_cuda(self):
-        dst = worker_name((self.rank + 1) % self.world_size)
-        t1 = torch.rand(3, 3).cuda(0)
-        t2 = torch.rand(3, 3).cuda(1)
-        t3 = torch.rand(3, 3)
-
-        # cuda tensors as args fail.
-        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
-            rpc.rpc_sync(dst, torch.add, args=(t1, t2))
-
-        # mix of cpu and cuda tensors as args fail.
-        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
-            rpc.rpc_sync(dst, torch.add, args=(t1, t3))
-
-        # gpu tensor list as args fails.
-        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
-            rpc.rpc_sync(dst, RpcTest._gpu_tensor_list_arg, args=([t1, t2]))
-
-        # cuda tensors as return values fail.
-        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
-            rpc.rpc_sync(dst, RpcTest._return_gpu_tensor, args=())
-
-        # cuda tensors as a list of return value fails
-        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
-            rpc.rpc_sync(dst, RpcTest._return_gpu_tensor_list, args=())
-
-        # Sending to self should fail too.
-        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
-            rpc.rpc_sync(worker_name(self.rank), torch.add, args=(t1, t2))
 
 class FaultyAgentRpcTest(RpcAgentTestFixture):
 
@@ -4831,10 +4594,15 @@ class MyConvNetForMNIST(nn.Module):
             torch.cuda._sleep(10 * FIFTY_MIL_CYCLES)
             return self.net(x)
 
+    def __getstate__(self):
+        # return an empty dict to avoid inspecting the model contents on the
+        # owner
+        return {}
+
 
 class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
 
-    def _test_device_maps(self, options, errMsg="Invalid device_map"):
+    def _test_device_maps(self, options, errMsg):
         with self.assertRaisesRegex(ValueError, errMsg):
             rpc.init_rpc(
                 name=worker_name(self.rank),
@@ -4850,7 +4618,11 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
     def test_device_maps_wrong_worker_name(self):
         options = self.rpc_backend_options
         options.set_device_map("none_exist", {0: 1})
-        self._test_device_maps(options, "Wrong worker names")
+
+        self._test_device_maps(
+            options,
+            errMsg="Node worker0 has invalid target node names in its device maps"
+        )
 
     @skip_if_lt_x_gpu(1)
     def test_device_maps_invalid_max_local_device(self):
@@ -4860,7 +4632,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
 
         self._test_device_maps(
             options,
-            errMsg="Invalid device in TensorPipe options"
+            errMsg="Node worker0 has source devices with invalid indices in its device map for worker1"
         )
 
     @skip_if_lt_x_gpu(1)
@@ -4869,7 +4641,10 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
         dst = worker_name((self.rank + 1) % self.world_size)
         options.set_device_map(dst, {0: torch.cuda.device_count()})
 
-        self._test_device_maps(options)
+        self._test_device_maps(
+            options,
+            errMsg="Node worker0 has target devices with invalid indices in its device map for worker1"
+        )
 
     @skip_if_lt_x_gpu(2)
     def test_device_maps_many_to_one(self):
@@ -4878,7 +4653,10 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
         options.set_device_map(dst, {1: 0})
         options.set_device_map(dst, {0: 0})
 
-        self._test_device_maps(options)
+        self._test_device_maps(
+            options,
+            errMsg="Node worker0 has duplicated target devices in its device map for worker1"
+        )
 
     @skip_if_lt_x_gpu(2)
     def test_device_maps_one_to_many(self):
@@ -5460,13 +5238,14 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
     def _slow_add_on_user_stream(x, y):
         s0 = torch.cuda.current_stream(x.device)
         s1 = torch.cuda.Stream(device=x.device)
+        s1.wait_stream(s0)
+        x.record_stream(s1)
+        y.record_stream(s1)
         with torch.cuda.stream(s1):
             torch.cuda._sleep(10 * FIFTY_MIL_CYCLES)
-            s1.wait_stream(s0)
             z = x + y
-            event = torch.cuda.Event()
-            event.record(s1)
-        event.wait(s0)
+        s0.wait_stream(s1)
+        z.record_stream(s0)
         return z
 
     def _test_custom_stream(self, fn, device_map):
@@ -5872,11 +5651,11 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
 
         rpc.shutdown()
 
-    @skip_if_lt_x_gpu(1)
+    @skip_if_lt_x_gpu(2)
     def test_devices_option_mismatch(self):
         with self.assertRaisesRegex(
-            RuntimeError,
-            "but not included the devices field"
+            ValueError,
+            "Node worker0 has unexpected source devices in its device map for worker1"
         ):
             dst = worker_name((self.rank + 1) % self.world_size)
             options = self.rpc_backend_options
@@ -5893,11 +5672,11 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
 
             rpc.shutdown()
 
-    @skip_if_lt_x_gpu(1)
+    @skip_if_lt_x_gpu(2)
     def test_devices_option_mismatch_reverse(self):
         with self.assertRaisesRegex(
-            RuntimeError,
-            "but not included the devices field"
+            ValueError,
+            "Node worker0 has unexpected target devices in its device map for worker1"
         ):
             dst = worker_name((self.rank + 1) % self.world_size)
 
@@ -5937,37 +5716,70 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
         ):
             fut = Future(devices=["cpu"])
 
-    def _test_cuda_future_extraction(self, wrapper, unwrapper):
-        # We check proper CUDA stream synchronization by filling the tensor with
-        # the expected value in one stream, and reading it from another stream.
-        tensor = torch.zeros((100,), device="cuda:0")
+    def _test_cuda_future_extraction(self, wrapper, unwrapper, sparse_tensor):
+        # We check proper CUDA stream synchronization by adding to the tensor
+        # in one stream to get the expected value, and reading it from another stream.
         future = Future(devices=["cuda:0"])
         with torch.cuda.device("cuda:0"):
             stream = torch.cuda.Stream()
             another_stream = torch.cuda.Stream()
             with torch.cuda.stream(stream):
+                if sparse_tensor:
+                    tensor = build_sparse_tensor().to("cuda:0")
+                    add_tensor = build_sparse_tensor().to("cuda:0")
+                    expected_tensor = (tensor + add_tensor).coalesce()
+                else:
+                    tensor = torch.zeros((100,), device="cuda:0")
+                    add_tensor = torch.ones((100,), device="cuda:0")
+                    expected_tensor = tensor + add_tensor
                 torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
-                tensor.fill_(1)
+                tensor += add_tensor
+                if sparse_tensor:
+                    tensor = tensor.coalesce()
                 future.set_result(wrapper(tensor))
             with torch.cuda.stream(another_stream):
-                self.assertTrue(torch.eq(unwrapper(future.wait()), 1).all().item())
+                tensor = unwrapper(future.wait())
+                if sparse_tensor:
+                    self.assertTrue(torch.eq(tensor.indices(), expected_tensor.indices()).all().item())
+                    self.assertTrue(torch.eq(tensor.values(), expected_tensor.values()).all().item())
+                    self.assertEqual(tensor.size(), expected_tensor.size())
+                else:
+                    self.assertTrue(torch.eq(tensor, expected_tensor).all().item())
 
     @skip_if_lt_x_gpu(1)
     def test_cuda_future_can_extract_cuda_tensor(self):
         self._test_cuda_future_extraction(
-            wrapper=lambda t: t, unwrapper=lambda v: v
+            wrapper=lambda t: t, unwrapper=lambda v: v, sparse_tensor=False
         )
 
     @skip_if_lt_x_gpu(1)
     def test_cuda_future_can_extract_list_with_cuda_tensor(self):
         self._test_cuda_future_extraction(
-            wrapper=lambda t: [t], unwrapper=lambda v: v[0]
+            wrapper=lambda t: [t], unwrapper=lambda v: v[0], sparse_tensor=False
         )
 
     @skip_if_lt_x_gpu(1)
     def test_cuda_future_can_extract_custom_class_with_cuda_tensor(self):
         self._test_cuda_future_extraction(
-            wrapper=lambda t: TensorWrapper(t), unwrapper=lambda v: v.tensor
+            wrapper=lambda t: TensorWrapper(t), unwrapper=lambda v: v.tensor, sparse_tensor=False
+        )
+
+    @skip_if_lt_x_gpu(1)
+    def test_cuda_future_can_extract_cuda_sparse_tensor(self):
+        self._test_cuda_future_extraction(
+            wrapper=lambda t: t, unwrapper=lambda v: v, sparse_tensor=True
+        )
+
+    @skip_if_lt_x_gpu(1)
+    def test_cuda_future_can_extract_list_with_cuda_sparse_tensor(self):
+        self._test_cuda_future_extraction(
+            wrapper=lambda t: [t], unwrapper=lambda v: v[0], sparse_tensor=True
+        )
+
+    @skip_if_lt_x_gpu(1)
+    def test_cuda_future_can_extract_custom_class_with_cuda_sparse_tensor(self):
+        self._test_cuda_future_extraction(
+            wrapper=lambda t: TensorWrapper(t), unwrapper=lambda v: v.tensor, sparse_tensor=True
         )
 
     @skip_if_lt_x_gpu(2)
@@ -6027,3 +5839,102 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
             another_stream = torch.cuda.Stream()
             with torch.cuda.stream(another_stream):
                 self.assertTrue(torch.eq(child_future.wait(), 1).all().item())
+
+    @skip_if_lt_x_gpu(1)
+    def test_async_execution_with_cuda_future(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        options = self.rpc_backend_options
+        options.set_device_map(dst, {"cuda:0": "cuda:0"})
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=options,
+        )
+
+        t = torch.zeros((100,), device="cuda:0")
+        fut = rpc.rpc_async(dst, async_cuda_sleep_and_set_to_one, args=(t,))
+        another_stream = torch.cuda.Stream("cuda:0")
+        with torch.cuda.stream(another_stream):
+            self.assertTrue(torch.eq(fut.wait(), 1).all().item())
+
+        rpc.shutdown()
+
+    @skip_if_lt_x_gpu(1)
+    def test_async_execution_nested_with_cuda_future(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        nested_dst = worker_name((self.rank + 2) % self.world_size)
+        options = self.rpc_backend_options
+        options.set_device_map(dst, {"cuda:0": "cuda:0"})
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=options,
+        )
+
+        a = torch.ones((100,), device="cuda:0")
+        b = torch.ones((100,), device="cuda:0")
+        c = torch.ones((100,), device="cuda:0")
+        fut = rpc.rpc_async(dst, async_cuda_nested_add, args=(nested_dst, a, b, c))
+        another_stream = torch.cuda.Stream("cuda:0")
+        with torch.cuda.stream(another_stream):
+            self.assertTrue(torch.eq(fut.wait(), 3).all().item())
+
+        rpc.shutdown()
+
+    @skip_if_lt_x_gpu(1)
+    def test_cuda_future_modify_tensor_inplace(self):
+        tensor = torch.zeros((100,), device="cuda:0")
+        future = Future(devices=["cuda:0"])
+        future.set_result(tensor)
+        # It's weird to modify the value of a future once it's complete, but
+        # technically possible. Currently this is considered undefined behavior
+        # (in practice the future will ignore the modification and still
+        # synchronize with the original value). We could one day add logic to
+        # detect and warn or throw in such cases, but for now we just check that
+        # this doesn't crash.
+        tensor.fill_(1)
+        future.wait()
+
+    @skip_if_lt_x_gpu(1)
+    def test_cuda_future_replace_tensor(self):
+        tensor_list = [torch.zeros((100,), device="cuda:0")]
+        future = Future(devices=["cuda:0"])
+        future.set_result(tensor_list)
+        # It's weird to modify the value of a future once it's complete, but
+        # technically possible. Currently this is considered undefined behavior
+        # (in practice the future will ignore the modification and still
+        # synchronize with the original value). We could one day add logic to
+        # detect and warn or throw in such cases, but for now we just check that
+        # this doesn't crash.
+        # We set things up so that the original tensor contained in the list
+        # gets deleted once we replace it with the other one. This will
+        # invalidate any cached information held by the future.
+        tensor_list[0] = torch.ones((100,), device="cuda:0")
+        future.wait()
+
+    @skip_if_lt_x_gpu(1)
+    def test_rref_with_unpickleable_attributes(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        options = self.rpc_backend_options
+        options.set_device_map(dst, {"cuda:0": "cuda:0"})
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=options,
+        )
+
+        rref = rpc.remote(dst, TensorWrapper, args=(torch.zeros(42, device="cuda:0"),))
+        rref.rpc_sync().increase(1)
+        ret = rref.rpc_sync().sum()
+        self.assertEqual(ret, 42)
+
+        rpc.shutdown()

@@ -24,7 +24,6 @@ struct MAGMAQueue {
 
   // Constructor
   explicit MAGMAQueue(int64_t device_id) {
-    auto& context = at::globalContext();
     cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
 #if CUDA_VERSION >= 11000
     // Magma operations is numerically sensitive, so TF32 should be off
