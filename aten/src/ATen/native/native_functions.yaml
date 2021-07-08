@@ -1280,6 +1280,9 @@
 - func: cov(Tensor self, *, int correction=1, Tensor? fweights=None, Tensor? aweights=None) -> Tensor
   variants: function, method
 
+- func: corrcoef(Tensor self) -> Tensor
+  variants: function, method
+
 - func: cudnn_affine_grid_generator(Tensor theta, int N, int C, int H, int W) -> Tensor grid
   dispatch:
     CUDA: cudnn_affine_grid_generator_forward
@@ -1795,7 +1798,8 @@
     CUDA: resize_cuda_
     QuantizedCPU: quantized_resize_cpu_
 
-- func: empty_quantized(int[] size, Tensor qtensor) -> Tensor
+- func: empty_quantized(int[] size, Tensor qtensor, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  category_override: factory
   variants: function
   dispatch:
     QuantizedCPU, QuantizedCUDA: empty_quantized
@@ -5185,7 +5189,7 @@
 - func: quantize_per_channel(Tensor self, Tensor scales, Tensor zero_points, int axis, ScalarType dtype) -> Tensor
   variants: function
   dispatch:
-    CPU: quantize_per_channel_cpu
+    CPU, CUDA: quantize_per_channel_cpu
 
 - func: dequantize.self(Tensor self) -> Tensor
   variants: function, method
@@ -5238,6 +5242,7 @@
 - func: _make_per_channel_quantized_tensor(Tensor self, Tensor scale, Tensor zero_point, int axis) -> Tensor
   dispatch:
     CPU: make_per_channel_quantized_tensor_cpu
+    CUDA: make_per_channel_quantized_tensor_cuda
 
 - func: qscheme(Tensor self) -> QScheme
   variants: method
@@ -6706,12 +6711,12 @@
 
 - func: lu_solve.out(Tensor self, Tensor LU_data, Tensor LU_pivots, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CompositeExplicitAutograd: lu_solve_out
+    CPU, CUDA: lu_solve_out
 
 - func: lu_solve(Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
   variants: method, function
   dispatch:
-    CompositeExplicitAutograd: lu_solve
+    CPU, CUDA: lu_solve
 
 - func: lu_unpack(Tensor LU_data, Tensor LU_pivots, bool unpack_data=True, bool unpack_pivots=True) -> (Tensor P, Tensor L, Tensor U)
   variants: function
@@ -8349,26 +8354,24 @@
 - func: glu.out(Tensor self, int dim=-1, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: glu_out
-    CUDA: legacy::cuda::_thnn_glu_forward_out
+    CPU, CUDA: glu_out
 
 - func: glu(Tensor self, int dim=-1) -> Tensor
   python_module: nn
   dispatch:
-    CPU: glu
-    CUDA: legacy::cuda::_thnn_glu_forward
+    CPU, CUDA: glu
 
 - func: glu_backward.grad_input(Tensor grad_output, Tensor self, int dim, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: glu_backward_out
-    CUDA: legacy::cuda::_thnn_glu_backward_out
+    CPU: glu_backward_cpu_out
+    CUDA: glu_backward_cuda_out
 
 - func: glu_backward(Tensor grad_output, Tensor self, int dim) -> Tensor
   python_module: nn
   dispatch:
-    CPU: glu_backward
-    CUDA: legacy::cuda::_thnn_glu_backward
+    CPU: glu_backward_cpu
+    CUDA: glu_backward_cuda
 
 - func: hardsigmoid.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -8502,26 +8505,26 @@
   python_module: nn
   dispatch:
     CPU: log_sigmoid_forward_out_cpu
-    CUDA: legacy::cuda::_thnn_log_sigmoid_forward_out
+    CUDA: log_sigmoid_forward_out_cuda
 
 - func: log_sigmoid_forward(Tensor self) -> (Tensor output, Tensor buffer)
   device_check: NoCheck   # TensorIterator
   python_module: nn
   dispatch:
     CPU: log_sigmoid_forward_cpu
-    CUDA: legacy::cuda::_thnn_log_sigmoid_forward
+    CUDA: log_sigmoid_forward_cuda
 
 - func: log_sigmoid_backward.grad_input(Tensor grad_output, Tensor self, Tensor buffer, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: log_sigmoid_backward_out_cpu
-    CUDA: legacy::cuda::_thnn_log_sigmoid_backward_out
+    CPU: log_sigmoid_backward_cpu_out
+    CUDA: log_sigmoid_backward_cuda_out
 
 - func: log_sigmoid_backward(Tensor grad_output, Tensor self, Tensor buffer) -> Tensor
   python_module: nn
   dispatch:
     CPU: log_sigmoid_backward_cpu
-    CUDA: legacy::cuda::_thnn_log_sigmoid_backward
+    CUDA: log_sigmoid_backward_cuda
 
 - func: rrelu_with_noise.out(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -8745,6 +8748,7 @@
 
 - func: avg_pool3d_backward.grad_input(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, bool ceil_mode, bool count_include_pad, int? divisor_override, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  structured: True
   dispatch:
     CPU: avg_pool3d_backward_out_cpu
     CUDA: avg_pool3d_backward_out_cuda
@@ -8752,9 +8756,8 @@
 
 - func: avg_pool3d_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, bool ceil_mode, bool count_include_pad, int? divisor_override) -> Tensor
   python_module: nn
+  structured_delegate: avg_pool3d_backward.grad_input
   dispatch:
-    CPU: avg_pool3d_backward_cpu
-    CUDA: avg_pool3d_backward_cuda
     MkldnnCPU: mkldnn_avg_pool3d_backward
 
 # Return: (Tensor output, Tensor indices)
@@ -9564,15 +9567,21 @@
 
 - func: isposinf(Tensor self) -> Tensor
   variants: function, method
+  structured_delegate: isposinf.out
 
 - func: isposinf.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: isposinf_out
 
 - func: isneginf(Tensor self) -> Tensor
   variants: function, method
+  structured_delegate: isneginf.out
 
 - func: isneginf.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: isneginf_out
 
@@ -9839,6 +9848,13 @@
   variants: function
 
 - func: special_logit.out(Tensor self, float? eps=None, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+
+- func: special_logsumexp(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
+  python_module: special
+  variants: function
+
+- func: special_logsumexp.out(Tensor self, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   python_module: special
 
 - func: special_expit(Tensor self) -> Tensor
@@ -10109,12 +10125,12 @@
   python_module: linalg
   variants: function
   dispatch:
-    CompositeExplicitAutograd: linalg_eigh
+    CPU, CUDA: linalg_eigh
 
 - func: linalg_eigh.eigvals(Tensor self, str UPLO="L", *, Tensor(a!) eigvals, Tensor(b!) eigvecs) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
   python_module: linalg
   dispatch:
-    CompositeExplicitAutograd: linalg_eigh_out
+    CPU, CUDA: linalg_eigh_out
 
 - func: linalg_eigvalsh(Tensor self, str UPLO="L") -> Tensor
   python_module: linalg
@@ -10122,6 +10138,8 @@
 
 - func: linalg_eigvalsh.out(Tensor self, str UPLO='L', *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
+  dispatch:
+    CPU, CUDA: linalg_eigvalsh_out
 
 - func: linalg_householder_product(Tensor input, Tensor tau) -> Tensor
   python_module: linalg
