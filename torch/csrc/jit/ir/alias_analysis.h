@@ -10,6 +10,8 @@
 namespace torch {
 namespace jit {
 
+using AliasTypeSet = std::vector<TypePtr>;
+
 /**
  * Alias analysis pass.
  *
@@ -231,7 +233,8 @@ class AliasDb {
       bool add_wildcard_to_contained_elems = true);
   Element* getOrCreateElement(const Value* value);
 
-  c10::optional<TypePtr> mapTypeToAliasTypeSetPtr(const TypePtr& type) const;
+  c10::optional<AliasTypeSet> mapTypeToAliasTypeSetPtr(
+      const TypePtr& type) const;
   bool functionalNonEscapingListUse(const Use& use) const;
 
   bool isContainerType(const TypePtr& type) const;
@@ -255,7 +258,7 @@ class AliasDb {
   c10::optional<Element*> tryGetOrCreateWildcard(const TypePtr& type);
   void addContainedTypesToFreshElement(
       Element* container_elem,
-      const TypePtr& mut_type);
+      const AliasTypeSet& mut_types);
 
   std::vector<Element*> getElements(at::ArrayRef<Value*> vs) const;
   bool mayAliasWildcard(const Value* v) const;
@@ -263,7 +266,7 @@ class AliasDb {
   bool hasWriters(const at::ArrayRef<Value*>& values) const;
 
   // cached mapping of type ptrs to their mutable types
-  mutable std::unordered_map<TypePtr, TypePtr> mapped_mutable_types_;
+  mutable std::unordered_map<TypePtr, AliasTypeSet> mapped_mutable_types_;
 
   /**
    * State for tracking write info.
