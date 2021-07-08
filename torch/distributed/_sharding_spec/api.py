@@ -112,14 +112,10 @@ class ShardMetadata(object):
         shard_lengths(List[int]): Lengths indicating the length of each
             dimension for this shard. Should have the same rank as the
             original tensor.
-        placement(List[Device]):
-            Specifies the placement of each shard of the Tensor. The size of
-            the list represents the number of shards to be created. This
-            parameter can be a list of devices
-            (ex: ["rank:0/cuda:0", "rank:1/cuda:1"]) or a list of custom
-            placement specs.
+        placement(Device):
+            Specifies the placement of this shard.
 
-            The device can be a local device or a remote device specified by one
+            The placement can be a local device or a remote device specified by one
             of the following remote formats:
 
                 1. "rank:<rank>/<device>" (ex: "rank:0/cuda:0").
