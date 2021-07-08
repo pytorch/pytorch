@@ -365,8 +365,8 @@ class TestMkldnn(TestCase):
         loss2 = y2.sum()
         loss1.backward()
         loss2.backward()
-        self.assertEqual(y1, y2, atol=1e-3, rtol=0)
-        self.assertEqual(x1.grad, x2.grad.to_dense(), atol=1e-3, rtol=0)
+        self.assertEqual(y1, y2)
+        self.assertEqual(x1.grad, x2.grad.to_dense())
 
     @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def test_gelu_bf16(self):

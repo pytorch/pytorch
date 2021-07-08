@@ -17,7 +17,7 @@ Tensor mkldnn_gelu_backward(const Tensor& grad_output, const Tensor& input) {
 
 }}
 
-#else // AT_MKLDNN_EBABLED
+#else // AT_MKLDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
@@ -26,15 +26,6 @@ Tensor mkldnn_gelu_backward(const Tensor& grad_output, const Tensor& input) {
 namespace at { namespace native {
 
 Tensor _mkldnn_gelu(const Tensor& input, const Tensor& result) {
-  if (input.scalar_type() == ScalarType::BFloat16) {
-    TORCH_CHECK(mkldnn_bf16_device_check(),
-        "mkldnn_gelu: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
-  }
-  bool is_scalar_input = (input.dim() == 0) && (input.numel() == 1);
-  if (is_scalar_input) {
-    input.resize_({1});
-  }
-
   const ideep::tensor& x = itensor_from_tensor(input);
   ideep::tensor y;
   if (!input.is_mkldnn()) {
@@ -52,15 +43,15 @@ Tensor _mkldnn_gelu(const Tensor& input, const Tensor& result) {
 }
 
 Tensor mkldnn_gelu(const Tensor& input) {
+  if (input.scalar_type() == ScalarType::BFloat16) {
+    TORCH_CHECK(mkldnn_bf16_device_check(),
+        "mkldnn_gelu: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+  }
   Tensor result = at::empty({0}, input.options());
   return _mkldnn_gelu(input, result);
 }
 
 Tensor _mkldnn_gelu_backward(const Tensor& grad_output, const Tensor& input, const Tensor& grad_input) {
-  bool is_scalar_input = (input.dim() == 0) && (input.numel() == 1);
-  if (is_scalar_input) {
-    input.resize_({1});
-  }
   const ideep::tensor& x = itensor_from_tensor(input);
   ideep::tensor grady = itensor_from_tensor(grad_output);
   ideep::tensor gradx;

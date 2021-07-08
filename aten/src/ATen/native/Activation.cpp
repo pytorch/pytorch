@@ -312,6 +312,9 @@ bool use_mkldnn(const Tensor& input) {
   if (!at::globalContext().userEnabledMkldnn()) {
     return false;
   }
+  if (!input.is_contiguous() || input.numel() == 1) {
+    return false;
+  }
   return (input.is_mkldnn()) || // input is mkldnn Tensor
     (input.device().is_cpu() &&
     (((input.scalar_type() == kBFloat16) && mkldnn_bf16_device_check()) ||
@@ -324,7 +327,7 @@ TORCH_IMPL_FUNC(gelu_out_cpu) (
   const Tensor& self, const Tensor& result
 ) {
   if (use_mkldnn(self)) {
-    at::native::_mkldnn_gelu(self.contiguous(), result);
+    at::native::_mkldnn_gelu(self, result);
   } else {
     GeluKernel(kCPU, *this);
   }
@@ -334,7 +337,7 @@ TORCH_IMPL_FUNC(gelu_backward_out_cpu) (
   const Tensor& grad, const Tensor& self, const Tensor& grad_input
 ) {
   if (use_mkldnn(self)) {
-    at::native::_mkldnn_gelu_backward(grad.contiguous(), self.contiguous(), grad_input);
+    at::native::_mkldnn_gelu_backward(grad, self, grad_input);
   } else {
     GeluBackwardKernel(kCPU, *this);
   }
