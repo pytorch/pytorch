@@ -41,14 +41,14 @@ Tensor _segment_reduce_cpu_kernel(
   int64_t stride_count = data.numel() / data.size(axis);
 
   AT_DISPATCH_INDEX_TYPES(
-      lengths.type(), "_segment_reduce_cpu_kernel1", ([&] {
+      lengths.type(), "_segment_reduce_cpu_kernel1", [&]() {
         const auto* lengths_data = lengths.data_ptr<index_t>();
         AT_DISPATCH_FLOATING_TYPES_AND2(
             kBFloat16,
             kHalf,
             data.scalar_type(),
             "_segment_reduce_cpu",
-            ([&]() {
+            [&]() {
               auto* output_data = output.data_ptr<scalar_t>();
               const auto* values_data = data.data_ptr<scalar_t>();
               int64_t lengths_cum_sum = 0;
@@ -105,8 +105,8 @@ Tensor _segment_reduce_cpu_kernel(
                 }
                 lengths_cum_sum += lengths_data[i];
               }
-            }));
-      }));
+            });
+      });
 
   return output;
 }
