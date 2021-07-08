@@ -10,7 +10,7 @@ namespace py = pybind11;
 
 namespace torch { namespace autograd {
 
-struct PySavedVariableHooks : public SavedVariableHooks {
+struct TORCH_API PySavedVariableHooks : public SavedVariableHooks {
     TORCH_API PySavedVariableHooks(py::function &pack_hook, py::function &unpack_hook) : pack_hook_(pack_hook), unpack_hook_(unpack_hook){}
 
     TORCH_API void call_pack_hook(at::Tensor &tensor) override {
