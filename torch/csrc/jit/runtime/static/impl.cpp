@@ -51,27 +51,6 @@ void CheckGraphEligibility(const std::shared_ptr<torch::jit::Graph>& graph) {
       throw std::runtime_error("Cannot accelerate unfrozen graphs");
     }
   }
-  // check output types
-  // Static Runtime doesn't support complex outputs such as List of Lists
-  for (Value* output : graph->outputs()) {
-    VLOG(1) << "output: %" << output->debugName()
-            << " has type: " << output->type()->repr_str();
-    auto kind = output->node()->kind();
-    if (kind == prim::TupleConstruct || kind == prim::ListConstruct ||
-        kind == prim::DictConstruct) {
-      for (Value* input : output->node()->inputs()) {
-        const auto& type = input->type();
-        const auto& type_kind = type->kind();
-        TORCH_CHECK(
-            type_kind != TypeKind::ListType &&
-                type_kind != TypeKind::TupleType &&
-                type_kind != TypeKind::DictType,
-            "Static Runtime requires output type to not be a nested "
-            "List/Tuple/Dict, but got a List/Tuple/Dict of: ",
-            type->repr_str());
-      }
-    }
-  }
 }
 
 // remove unused input 0 from graph
@@ -875,8 +854,10 @@ float StaticRuntime::benchmark_model(
 bool display_ivalue(const IValue& iv) {
   if (iv.isTensor()) {
     std::cout << "Tensor " << iv.toTensor().toString() << " {";
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (auto i = 0; i < iv.toTensor().sizes().size(); ++i) {
       std::cout << iv.toTensor().sizes()[i];
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       if (iv.toTensor().sizes().size() > i + 1) {
         std::cout << ", ";
       }
@@ -908,6 +889,7 @@ bool display_ivalue(const IValue& iv) {
 void display_pnode_info(const ProcessedNode& pnode) {
   pnode.node()->print(std::cout, 0, nullptr, false);
   const std::vector<const IValue*>& inputs = pnode.inputs();
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (auto i = 0; i < inputs.size(); ++i) {
     std::cout << "\ti" << i << ": ";
     if (!display_ivalue(*inputs[i])) {
@@ -915,6 +897,7 @@ void display_pnode_info(const ProcessedNode& pnode) {
     }
   }
   const std::vector<IValue>& outputs = pnode.outputs();
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (auto i = 0; i < outputs.size(); ++i) {
     std::cout << "\to" << i << ": ";
     if (!display_ivalue(outputs[i])) {

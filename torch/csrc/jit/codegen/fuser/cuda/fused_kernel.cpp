@@ -52,6 +52,7 @@ void codegenOutputQuery(
   } else if (nvrtc_major <= 8 && prop->major > 6) { // 8 supports 2-6.x
     major = 6;
     minor = 0;
+    // NOLINTNEXTLINE(bugprone-branch-clone)
   } else if (nvrtc_major <= 9 && prop->major >= 7) { // 9 supports 3-7.2
     major = 7;
     minor = (prop->major == 7 && prop->minor <= 2) ? prop->minor : 0;
@@ -91,6 +92,7 @@ FusedKernelCUDA::FusedKernelCUDA(
       device_(device) {
   // Initializes driver's API context (if necessary)
   // NOLINTNEXTLINE(modernize-use-nullptr)
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   CUcontext pctx = 0;
   AT_CUDA_DRIVER_CHECK(nvrtc().cuCtxGetCurrent(&pctx));
   if (!pctx) {
@@ -139,6 +141,7 @@ FusedKernelCUDA::FusedKernelCUDA(
       "compute_" +
 #endif
       std::to_string(major) + std::to_string(minor);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   const std::vector<const char*> args = {
       "--std=c++14", compute.c_str(), "-default-device"};
 #endif
@@ -148,6 +151,7 @@ FusedKernelCUDA::FusedKernelCUDA(
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t logsize;
     AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetProgramLogSize(program, &logsize));
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<char> log(logsize);
     AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetProgramLog(program, log.data()));
     std::stringstream cu;
@@ -274,6 +278,7 @@ static std::shared_ptr<FusedKernel> createFusionKernel(
       has_random);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterFusionBackend reg(DeviceType::CUDA, createFusionKernel);
 
 } // namespace cuda

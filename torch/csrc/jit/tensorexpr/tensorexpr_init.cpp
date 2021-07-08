@@ -334,9 +334,9 @@ void initTensorExprBindings(PyObject* module) {
       .def_static(
           "make",
           [](const BufHandle& buf,
-             std::vector<ExprHandle>& indicies,
+             std::vector<ExprHandle>& indices,
              const ExprHandle& value) {
-            return Store::make(buf, indicies, value);
+            return Store::make(buf, indices, value);
           },
           py::return_value_policy::reference);
 
@@ -444,6 +444,12 @@ void initTensorExprBindings(PyObject* module) {
           },
           py::return_value_policy::reference)
       .def(
+          "get_loop_at",
+          [](const LoopNest& self, For* root, const std::vector<int>& indices) {
+            return self.getLoopAt(root, indices);
+          },
+          py::return_value_policy::reference)
+      .def(
           "get_parent_loop",
           [](const LoopNest& self, const Stmt* s) {
             return self.getParentLoop(s);
@@ -494,6 +500,12 @@ void initTensorExprBindings(PyObject* module) {
             return f;
           },
           py::return_value_policy::reference)
+      .def(
+          "tile",
+          [](LoopNest& self, For* x, For* y, int x_factor, int y_factor) {
+            return self.tile(x, y, x_factor, y_factor);
+          },
+          py::return_value_policy::reference)
       .def_static(
           "distribute_loop",
           [](For* f) { return LoopNest::distributeLoop(f); },
@@ -507,6 +519,14 @@ void initTensorExprBindings(PyObject* module) {
       .def_static(
           "distribute_loop_over_inner_loops",
           [](For* f) { return LoopNest::distributeLoopOverInnerLoops(f); },
+          py::return_value_policy::reference)
+      .def_static(
+          "unsafe_fuse_loops",
+          [](const std::vector<For*>& loops) {
+            For* fused_loop = nullptr;
+            LoopNest::unsafeFuseLoops(loops, &fused_loop);
+            return fused_loop;
+          },
           py::return_value_policy::reference)
       .def_static(
           "fuse_loops",
