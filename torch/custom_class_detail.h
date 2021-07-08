@@ -4,6 +4,7 @@
 #include <ATen/core/function.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/TypeTraits.h>
+#include <c10/util/irange.h>
 
 namespace torch {
 
@@ -157,7 +158,7 @@ inline bool validIdent(size_t i, char n) {
 }
 
 inline void checkValidIdent(const std::string& str, const char *type) {
-  for (size_t i = 0; i < str.size(); ++i) {
+  for (const auto i : c10::irange(str.size())) {
     TORCH_CHECK(validIdent(i, str[i]),
       type,
       " must be a valid Python/C++ identifier."

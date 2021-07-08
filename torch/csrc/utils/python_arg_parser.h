@@ -66,6 +66,7 @@
 
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #include <array>
 #include <cstddef>
@@ -287,6 +288,7 @@ inline at::Tensor PythonArgs::tensor(int i) {
 
 inline c10::optional<at::Tensor> PythonArgs::optionalTensor(int i) {
   at::Tensor t = tensor(i);
+  // NOLINTNEXTLINE(bugprone-branch-clone)
   if (t.defined()) {
     return t;
   } else {
@@ -305,8 +307,9 @@ inline std::vector<at::Scalar> PythonArgs::scalarlist(int i) {
   THPObjectPtr arg = six::maybeAsTuple(args[i]);
   // NOLINTNEXTLINE(bugprone-branch-clone)
   auto size = tuple ? PyTuple_GET_SIZE(arg.get()) : PyList_GET_SIZE(arg.get());
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<at::Scalar> res(size);
-  for (int idx = 0; idx < size; idx++) {
+  for(const auto idx : c10::irange(size)) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg.get(), idx) : PyList_GET_ITEM(arg.get(), idx);
     res[idx] = scalar_slow(obj);
   }
@@ -329,8 +332,9 @@ inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) {
   THPObjectPtr arg = six::maybeAsTuple(args[i]);
   // NOLINTNEXTLINE(bugprone-branch-clone)
   auto size = tuple ? PyTuple_GET_SIZE(arg.get()) : PyList_GET_SIZE(arg.get());
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<at::Tensor> res(size);
-  for (int idx = 0; idx < size; idx++) {
+  for(const auto idx : c10::irange(size)) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg.get(), idx) : PyList_GET_ITEM(arg.get(), idx);
     // This is checked by the argument parser so it's safe to cast without checking
     // if this is a tensor first
@@ -345,9 +349,10 @@ inline torch::List<c10::optional<at::Tensor>> PythonArgs::list_of_optional_tenso
   THPObjectPtr arg = six::maybeAsTuple(args[i]);
   // NOLINTNEXTLINE(bugprone-branch-clone)
   auto size = tuple ? PyTuple_GET_SIZE(arg.get()) : PyList_GET_SIZE(arg.get());
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   torch::List<c10::optional<at::Tensor>> res;
   res.reserve(size);
-  for (int idx = 0; idx < size; idx++) {
+  for(const auto idx : c10::irange(size)) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg.get(), idx) : PyList_GET_ITEM(arg.get(), idx);
     // This is checked by the argument parser so it's safe to cast without checking
     // if this is a tensor first
@@ -367,7 +372,7 @@ inline std::array<at::Tensor, N> PythonArgs::tensorlist_n(int i) {
   if (size != N) {
     throw TypeError("expected tuple of %d elements but got %d", N, (int)size);
   }
-  for (int idx = 0; idx < size; idx++) {
+  for(const auto idx : c10::irange(size)) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg.get(), idx) : PyList_GET_ITEM(arg.get(), idx);
     // This is checked by the argument parser so it's safe to cast without checking
     // if this is a tensor first
@@ -383,15 +388,16 @@ inline std::vector<int64_t> PythonArgs::intlist(int i) {
 inline std::vector<int64_t> PythonArgs::intlistWithDefault(int i, std::vector<int64_t> default_intlist) {
   if (!args[i]) return default_intlist;
   PyObject* arg = args[i];
-  auto size = signature.params[i].size;
-  if (size > 0 && THPUtils_checkLong(arg)) {
-    return std::vector<int64_t>(size, THPUtils_unpackIndex(arg));
+  const auto size1 = signature.params[i].size;
+  if (size1 > 0 && THPUtils_checkLong(arg)) {
+    return std::vector<int64_t>(size1, THPUtils_unpackIndex(arg));
   }
   auto tuple = PyTuple_Check(arg);
   // NOLINTNEXTLINE(bugprone-branch-clone)
-  size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
-  std::vector<int64_t> res(size);
-  for (int idx = 0; idx < size; idx++) {
+  const auto size2 = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  std::vector<int64_t> res(size2);
+  for(const auto idx : c10::irange(size2)) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
     try {
       // Elements of torch.Size are tensors during tracing, and we need to record extra
@@ -399,14 +405,14 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(int i, std::vector<in
       if (traceable && jit::tracer::isTracing() && THPVariable_Check(obj)) {
         auto & var = THPVariable_Unpack(obj);
         jit::tracer::ArgumentStash::stashIntArrayRefElem(
-            signature.params[i].name, size, idx, var);
+            signature.params[i].name, size2, idx, var);
         res[idx] = var.item<int64_t>();
         continue;
       } else {
         res[idx] = THPUtils_unpackIndex(obj);
       }
     } catch (const std::exception &e) {
-      throw TypeError("%s(): argument '%s' must be %s, but found element of type %s at pos %d",
+      throw TypeError("%s(): argument '%s' must be %s, but found element of type %s at pos %ld",
           signature.name.c_str(), signature.params[i].name.c_str(),
           signature.params[i].type_name().c_str(), Py_TYPE(obj)->tp_name, idx + 1);
     }
@@ -426,13 +432,14 @@ inline std::vector<double> PythonArgs::getDoublelist(int i) {
   auto tuple = PyTuple_Check(arg);
   // NOLINTNEXTLINE(bugprone-branch-clone)
   auto size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<double> res(size);
-  for (int idx = 0; idx < size; idx++) {
+  for(const auto idx : c10::irange(size)) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
     try {
       res[idx] = THPUtils_unpackDouble(obj);
     } catch (const std::exception &e) {
-      throw TypeError("%s(): argument '%s' must be %s, but found element of type %s at pos %d",
+      throw TypeError("%s(): argument '%s' must be %s, but found element of type %s at pos %ld",
           signature.name.c_str(), signature.params[i].name.c_str(),
           signature.params[i].type_name().c_str(), Py_TYPE(obj)->tp_name, idx + 1);
     }
@@ -536,9 +543,10 @@ inline std::vector<at::Dimname> parseDimnameList(PyObject* arg) {
   auto tuple = PyTuple_Check(arg);
   // NOLINTNEXTLINE(bugprone-branch-clone)
   auto size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<at::Dimname> res;
   res.reserve(size);
-  for (int idx = 0; idx < size; idx++) {
+  for(const auto idx : c10::irange(size)) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
     res.push_back(THPDimname_parse(obj));
   }
@@ -766,7 +774,7 @@ auto handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyOb
 auto handle_torch_function(PyObject* self, const std::string& func_name, PyObject* args=nullptr, PyObject* kwargs=nullptr, PyObject* torch_api=THPVariableClass, const std::string& module_name="torch.Tensor") -> PyObject*;
 
 // Used for functions created in C++, e.g., C++ custom op, which doesn't use PythonArgParser to get overloaded_args.
-auto handle_torch_function_no_python_arg_parser(const std::vector<py::handle> &overloaded_args, PyObject* args, PyObject* kwargs, const char* func_name, PyObject* torch_api_function, const char* module_name) -> PyObject*;
+auto handle_torch_function_no_python_arg_parser(const std::vector<py::handle> &overloaded_args, PyObject* args, PyObject* kwargs, const char* func_name, PyObject* torch_api_function, const char* module_name, const char* torch_function_name = "__torch_function__") -> PyObject*;
 
 // Used for getters of Tensor properties
 auto handle_torch_function_getter(THPVariable* self, const std::string& property_name) -> PyObject*;

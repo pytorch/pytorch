@@ -31,7 +31,7 @@ class ConcatIterDataPipe(IterDataPipe):
     def __len__(self) -> int:
         if self.length is not None:
             if self.length == -1:
-                raise NotImplementedError
+                raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
             return self.length
         if all(isinstance(dp, Sized) for dp in self.datapipes):
             self.length = sum(len(dp) for dp in self.datapipes)
@@ -40,6 +40,27 @@ class ConcatIterDataPipe(IterDataPipe):
         return len(self)
 
 
+# This is fake class to show API, going to be replaced by the copy from torchdata
+# TODO(VitalyFedyunin): Replace with valid version, documentation and tests
+class IterateBuffer(IterDataPipe):
+    def __init__(self, buffer):
+        self.buffer = buffer
+
+    def __iter__(self):
+        for i in self.buffer:
+            yield i
+
+
+@functional_datapipe('fork')
+class ForkIterDataPipe(IterDataPipe):
+
+    def __new__(cls, datapipe, instances):
+        result = []
+        buffer = list(datapipe)
+        return [IterateBuffer(buffer) for i in range(instances)]
+
+
+@functional_datapipe('zip')
 class ZipIterDataPipe(IterDataPipe[Tuple[T_co]]):
     r""" :class:`ZipIterDataPipe`.
 
@@ -67,7 +88,7 @@ class ZipIterDataPipe(IterDataPipe[Tuple[T_co]]):
     def __len__(self) -> int:
         if self.length is not None:
             if self.length == -1:
-                raise NotImplementedError
+                raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
             return self.length
         if all(isinstance(dp, Sized) for dp in self.datapipes):
             self.length = min(len(dp) for dp in self.datapipes)

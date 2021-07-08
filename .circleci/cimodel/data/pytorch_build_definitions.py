@@ -31,6 +31,7 @@ class Conf:
     is_libtorch: bool = False
     is_important: bool = False
     parallel_backend: Optional[str] = None
+    build_only: bool = False
 
     @staticmethod
     def is_test_phase(phase):
@@ -112,6 +113,8 @@ class Conf:
             parameters["resource_class"] = "xlarge"
         if hasattr(self, 'filters'):
             parameters['filters'] = self.filters
+        if self.build_only:
+            parameters['build_only'] = miniutils.quote(str(int(True)))
         return parameters
 
     def gen_workflow_job(self, phase):
@@ -258,7 +261,7 @@ def gen_tree():
     return configs_list
 
 
-def instantiate_configs():
+def instantiate_configs(only_slow_gradcheck):
 
     config_list = []
 
@@ -277,7 +280,11 @@ def instantiate_configs():
         is_onnx = fc.find_prop("is_onnx") or False
         is_pure_torch = fc.find_prop("is_pure_torch") or False
         is_vulkan = fc.find_prop("is_vulkan") or False
+        is_slow_gradcheck = fc.find_prop("is_slow_gradcheck") or False
         parms_list_ignored_for_docker_image = []
+
+        if only_slow_gradcheck ^ is_slow_gradcheck:
+            continue
 
         python_version = None
         if compiler_name == "cuda" or compiler_name == "android":
@@ -342,6 +349,10 @@ def instantiate_configs():
         if build_only or is_pure_torch:
             restrict_phases = ["build"]
 
+        if is_slow_gradcheck:
+            parms_list_ignored_for_docker_image.append("old")
+            parms_list_ignored_for_docker_image.append("gradcheck")
+
         gpu_resource = None
         if cuda_version and cuda_version != "10":
             gpu_resource = "medium"
@@ -361,6 +372,7 @@ def instantiate_configs():
             is_libtorch=is_libtorch,
             is_important=is_important,
             parallel_backend=parallel_backend,
+            build_only=build_only,
         )
 
         # run docs builds on "pytorch-linux-xenial-py3.6-gcc5.4". Docs builds
@@ -381,7 +393,7 @@ def instantiate_configs():
                                         tags_list=RC_PATTERN)
             c.dependent_tests = gen_docs_configs(c)
 
-        if cuda_version == "10.2" and python_version == "3.6" and not is_libtorch:
+        if cuda_version == "10.2" and python_version == "3.6" and not is_libtorch and not is_slow_gradcheck:
             c.dependent_tests = gen_dependent_configs(c)
 
         if (
@@ -408,9 +420,9 @@ def instantiate_configs():
     return config_list
 
 
-def get_workflow_jobs():
+def get_workflow_jobs(only_slow_gradcheck=False):
 
-    config_list = instantiate_configs()
+    config_list = instantiate_configs(only_slow_gradcheck)
 
     x = []
     for conf_options in config_list:

@@ -130,7 +130,6 @@ static inline Tensor _run_cufft(
   }
 
   auto& plan = config.plan();
-  auto& ctx = at::globalContext();
 
   // set output
   auto output = at::empty(output_sizes, input.options());
@@ -488,7 +487,6 @@ Tensor _fft_c2c_cufft(const Tensor& self, IntArrayRef dim, int64_t normalization
 
   // Perform any number of C2C transforms
   DimVector sorted_dims(dim.begin(), dim.end());
-  auto self_strides = self.strides();
   auto working_tensor = self;
   while (true) {
     // Sort dimensions every time as _exec_fft re-strides the output

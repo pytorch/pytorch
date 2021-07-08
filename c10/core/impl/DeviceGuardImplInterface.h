@@ -177,6 +177,22 @@ struct C10_API DeviceGuardImplInterface {
   virtual DeviceIndex deviceCount() const noexcept = 0;
 
   /**
+   * Return true if all the work previously enqueued on the stream for
+   * asynchronous execution has completed running on the device.
+   */
+  virtual bool queryStream(const Stream& stream) const {
+    TORCH_CHECK(false, "Backend doesn't support querying streams.");
+  }
+
+  /**
+   * Wait (by blocking the calling thread) until all the work previously
+   * enqueued on the stream has completed running on the device.
+   */
+  virtual void synchronizeStream(const Stream& stream) const {
+    TORCH_CHECK(false, "Backend doesn't support synchronizing streams.");
+  }
+
+  /**
    * Ensure the caching allocator (if any) is aware that the given DataPtr is
    * being used on the given stream, and that it should thus avoid recycling the
    * DataPtr until all work on that stream is done.
@@ -241,6 +257,14 @@ struct NoOpDeviceGuardImpl final : public DeviceGuardImplInterface {
   }
   void destroyEvent(void* event, const DeviceIndex device_index)
       const noexcept override {}
+
+  // Stream-related functions
+  bool queryStream(const Stream& stream) const override {
+    return true;
+  }
+  void synchronizeStream(const Stream& stream) const override {
+    // Don't wait for anything.
+  }
 };
 
 // The registry is NON-owning.  Each stored pointer is std::atomic so

@@ -238,6 +238,9 @@ _(aten, coalesce) \
 _(aten, combinations) \
 _(aten, _conj) \
 _(aten, conj) \
+_(aten, conj_physical) \
+_(aten, conj_physical_) \
+_(aten, resolve_conj) \
 _(aten, complex) \
 _(aten, copysign) \
 _(aten, polar) \
@@ -251,12 +254,14 @@ _(aten, conv_tbc_backward) \
 _(aten, conv_transpose1d) \
 _(aten, convolution) \
 _(aten, copy_sparse_to_sparse) \
+_(aten, corrcoef) \
 _(aten, cos) \
 _(aten, cosh) \
 _(aten, cosine_embedding_loss) \
 _(aten, cosine_similarity) \
 _(aten, count_nonzero) \
 _(aten, cross) \
+_(aten, cov) \
 _(aten, std_mean) \
 _(aten, var_mean) \
 _(aten, ctc_loss) \
@@ -293,7 +298,6 @@ _(aten, diagonal) \
 _(aten, fill_diagonal_) \
 _(aten, diff) \
 _(aten, frexp) \
-_(aten, digamma) \
 _(aten, dim) \
 _(aten, dist) \
 _(aten, dot) \
@@ -372,11 +376,11 @@ _(aten, hardtanh_forward) \
 _(aten, heaviside) \
 _(aten, hinge_embedding_loss) \
 _(aten, histc) \
+_(aten, histogram) \
 _(aten, hspmm) \
 _(aten, hsplit) \
 _(aten, hstack) \
 _(aten, hypot) \
-_(aten, i0) \
 _(aten, i0_) \
 _(aten, igamma) \
 _(aten, igamma_) \
@@ -401,6 +405,7 @@ _(aten, is_cuda) \
 _(aten, is_mlc) \
 _(aten, is_distributed) \
 _(aten, is_floating_point) \
+_(aten, is_inference) \
 _(aten, is_nonzero) \
 _(aten, is_same_size) \
 _(aten, is_set_to) \
@@ -429,7 +434,6 @@ _(aten, linear) \
 _(aten, linspace) \
 _(aten, log) \
 _(aten, log10) \
-_(aten, log1p) \
 _(aten, log2) \
 _(aten, log_normal) \
 _(aten, log_sigmoid) \
@@ -531,6 +535,7 @@ _(aten, native_tensor) \
 _(aten, native_zero) \
 _(aten, special_ndtr) \
 _(aten, nextafter) \
+_(aten, special_ndtri) \
 _(aten, bitwise_and) \
 _(aten, bitwise_not) \
 _(aten, bitwise_or) \
@@ -590,6 +595,9 @@ _(aten, reflection_pad1d_forward) \
 _(aten, reflection_pad2d) \
 _(aten, reflection_pad2d_backward) \
 _(aten, reflection_pad2d_forward) \
+_(aten, reflection_pad3d) \
+_(aten, reflection_pad3d_backward) \
+_(aten, reflection_pad3d_forward) \
 _(aten, relu) \
 _(aten, remainder) \
 _(aten, renorm) \
@@ -615,7 +623,6 @@ _(aten, rnn_relu_cell) \
 _(aten, rnn_tanh) \
 _(aten, rnn_tanh_cell) \
 _(aten, rot90) \
-_(aten, round) \
 _(aten, rrelu) \
 _(aten, rrelu_with_noise) \
 _(aten, rrelu_with_noise_backward) \
@@ -632,7 +639,6 @@ _(aten, signbit) \
 _(aten, silu) \
 _(aten, sgn) \
 _(aten, sin) \
-_(aten, sinc) \
 _(aten, sinh) \
 _(aten, size) \
 _(aten, sizes) \
@@ -764,6 +770,7 @@ _(aten, zeros_like) \
 _(aten, real) \
 _(aten, imag) \
 _(aten, view_as_real) \
+_(aten, _view_as_real_physical) \
 _(aten, view_as_complex) \
 /* nothing */
 

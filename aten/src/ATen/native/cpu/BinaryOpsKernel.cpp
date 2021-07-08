@@ -305,7 +305,7 @@ void bitwise_xor_kernel(TensorIterator& iter) {
   }
 }
 
-void lshift_kernel(TensorIterator& iter) {
+void lshift_kernel(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Float || iter.dtype() == ScalarType::Double) {
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "lshift_cpu", [&]() {
       auto base_vec = Vectorized<scalar_t>((scalar_t)(2));
@@ -385,7 +385,7 @@ void logical_xor_kernel(TensorIterator& iter) {
   }
 }
 
-void rshift_kernel(TensorIterator& iter) {
+void rshift_kernel(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Float || iter.dtype() == ScalarType::Double) {
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "rshift_cpu", [&]() {
       auto base_vec = Vectorized<scalar_t>((scalar_t)(2));
@@ -672,16 +672,32 @@ void huber_kernel(TensorIterator& iter, double delta) {
 }
 
 void sigmoid_backward_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "sigmoid_backward_cpu", [&]() {
-    auto one_vec = Vectorized<scalar_t>((scalar_t)(1));
-    cpu_kernel_vec(iter,
-      [=](scalar_t a, scalar_t b) -> scalar_t {
-        return a * (scalar_t(1) - b) * b;
-      },
-      [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
-        return a * (one_vec - b) * b;
-      });
-  });
+  if (isComplexType(iter.dtype())) {
+    AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "sigmoid_backward_cpu", [&]() {
+      auto one_vec = Vectorized<scalar_t>(scalar_t{1});
+      cpu_kernel_vec(
+        iter,
+        [=](scalar_t a, scalar_t b) -> scalar_t {
+          return a * std::conj((scalar_t(1) - b) * b);
+        },
+        [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
+          return a * ((one_vec - b) * b).conj();
+        });
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        kBFloat16, kHalf, iter.dtype(), "sigmoid_backward_cpu", [&]() {
+          auto one_vec = Vectorized<scalar_t>((scalar_t)(1));
+          cpu_kernel_vec(
+              iter,
+              [=](scalar_t a, scalar_t b) -> scalar_t {
+                return a * (scalar_t(1) - b) * b;
+              },
+              [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
+                return a * (one_vec - b) * b;
+              });
+        });
+  }
 }
 
 void logit_backward_kernel(TensorIterator& iter, const Scalar& eps_scalar) {
@@ -973,6 +989,14 @@ void xlog1py_kernel(TensorIteratorBase& iter) {
   });
 }
 
+void zeta_kernel(TensorIteratorBase& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "zeta_cpu", [&]() {
+    cpu_kernel(iter, [](scalar_t x, scalar_t q) -> scalar_t {
+      return zeta(x, q);
+    });
+  });
+}
+
 } // namespace
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -1066,6 +1090,7 @@ REGISTER_DISPATCH(copysign_stub, &copysign_kernel);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(xlogy_stub, &xlogy_kernel);
 REGISTER_DISPATCH(xlog1py_stub, &xlog1py_kernel);
+REGISTER_DISPATCH(zeta_stub, &zeta_kernel);
 
 } // namespace native
 } // namespace at

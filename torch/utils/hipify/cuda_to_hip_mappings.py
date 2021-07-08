@@ -7962,6 +7962,15 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
             ("hip::getDefaultHIPStreamMasqueradingAsCUDA", API_PYTORCH),
         ),
         (
+            "cuda::getStreamFromExternal",
+            ("hip::getStreamFromExternalMasqueradingAsCUDA", API_PYTORCH),
+        ),
+        ("getStreamFromExternal", ("getStreamFromExternalMasqueradingAsCUDA", API_PYTORCH)),
+        (
+            "cuda::getDefaultCUDAStream",
+            ("hip::getDefaultHIPStreamMasqueradingAsCUDA", API_PYTORCH),
+        ),
+        (
             "getDefaultCUDAStream",
             ("getDefaultHIPStreamMasqueradingAsCUDA", API_PYTORCH),
         ),
@@ -8053,6 +8062,7 @@ CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict(
         ("/THCCachingAllocator_gpu", ("/hip/THCCachingAllocator_gpu", API_CAFFE2)),
         ("/top_k_heap_selection", ("/hip/top_k_heap_selection", API_CAFFE2)),
         ("/top_k_radix_selection", ("/hip/top_k_radix_selection", API_CAFFE2)),
+        ("/GpuAtomics", ("/hip/GpuAtomics", API_CAFFE2)),
         ("/GpuDefs", ("/hip/GpuDefs", API_CAFFE2)),
         ("/GpuScanUtils", ("/hip/GpuScanUtils", API_CAFFE2)),
         ("/GpuBitonicSort", ("/hip/GpuBitonicSort", API_CAFFE2)),

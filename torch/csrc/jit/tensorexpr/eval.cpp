@@ -2,12 +2,11 @@
 
 #include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
 
+#include <c10/util/irange.h>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
-
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-DEFINE_TRIGGER(simple_ir_eval_executed);
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterCodeGen<SimpleIREvaluator> ir_eval_codegen_reg("simple_ir_eval");
@@ -158,7 +157,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     std::vector<T> lhs_v = lhs.as_vec<T>();
     std::vector<T> rhs_v = rhs.as_vec<T>();
     std::vector<T> result_v(lhs_v.size());
-    for (size_t i = 0; i < lhs_v.size(); i++) {
+    for (const auto i : c10::irange(lhs_v.size())) {
       switch (op_type) {
         case IRNodeType::kAdd:
           result_v[i] = lhs_v[i] + rhs_v[i];
@@ -197,7 +196,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     std::vector<T> lhs_v = lhs.as_vec<T>();
     std::vector<T> rhs_v = rhs.as_vec<T>();
     std::vector<T> result_v(lhs_v.size());
-    for (size_t i = 0; i < lhs_v.size(); i++) {
+    for (const auto i : c10::irange(lhs_v.size())) {
       switch (op_type) {
         case IRNodeType::kAnd:
           result_v[i] = lhs_v[i] & rhs_v[i];
@@ -224,7 +223,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     std::vector<T> lhs_v = lhs.as_vec<T>();
     std::vector<T> rhs_v = rhs.as_vec<T>();
     std::vector<T> result_v(lhs_v.size());
-    for (size_t i = 0; i < lhs_v.size(); i++) {
+    for (const auto i : c10::irange(lhs_v.size())) {
       switch (op_type) {
         case IRNodeType::kLshift: {
           typename std::make_unsigned<T>::type a =
@@ -255,7 +254,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     std::vector<R> ret_val1_v = retval1.as_vec<R>();
     std::vector<R> ret_val2_v = retval2.as_vec<R>();
     std::vector<R> result_v(lhs_v.size());
-    for (size_t i = 0; i < lhs_v.size(); i++) {
+    for (const auto i : c10::irange(lhs_v.size())) {
       switch (cmp_op) {
         case CompareSelectOperation::kEQ:
           result_v[i] = (lhs_v[i] == rhs_v[i]) ? ret_val1_v[i] : ret_val2_v[i];
@@ -559,7 +558,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     int lanes = v->lanes();
 
     std::vector<int> values(lanes);
-    for (int i = 0; i < lanes; i++) {
+    for (const auto i : c10::irange(lanes)) {
       values[i] = base + i * stride;
     }
 
@@ -619,14 +618,14 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     std::vector<int> index = value().as_vec<int>();
     ScalarType v_sdtype = v->dtype().scalar_type();
     switch (v_sdtype) {
-#define TYPE_CASE(Type, Name)                   \
-  case ScalarType::Name: {                      \
-    Type* ptr##Name = static_cast<Type*>(ptr);  \
-    std::vector<Type> v(index.size());          \
-    for (size_t i = 0; i < index.size(); i++) { \
-      v[i] = ptr##Name[index[i]];               \
-    }                                           \
-    value_ = Value(v);                          \
+#define TYPE_CASE(Type, Name)                        \
+  case ScalarType::Name: {                           \
+    Type* ptr##Name = static_cast<Type*>(ptr);       \
+    std::vector<Type> v(index.size());               \
+    for (const auto i : c10::irange(index.size())) { \
+      v[i] = ptr##Name[index[i]];                    \
+    }                                                \
+    value_ = Value(v);                               \
   } break;
       AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
@@ -657,7 +656,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       throw malformed_input("value size mismatch in Store", v); \
     }                                                           \
     Type* ptr##Name = static_cast<Type*>(ptr);                  \
-    for (size_t i = 0; i < index.size(); i++) {                 \
+    for (const auto i : c10::irange(index.size())) {            \
       ptr##Name[index[i]] = value[i];                           \
     }                                                           \
   } break;
@@ -726,7 +725,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
   template <typename TReturn, typename TInput>
   void visit_intrinsics_helper(const Intrinsics* v) {
     std::vector<Value> values(v->nparams());
-    for (int i = 0; i < v->nparams(); i++) {
+    for (const auto i : c10::irange(v->nparams())) {
       v->param(i)->accept(this);
       values[i] = this->value();
     }
@@ -748,11 +747,11 @@ class SimpleIREvaluatorImpl : public IRVisitor {
 
     std::vector<TReturn> result(v1.size(), -1);
     if (values.size() == 1ULL) {
-      for (size_t i = 0; i < v1.size(); i++) {
+      for (const auto i : c10::irange(v1.size())) {
         result[i] = compute_intrinsics<TReturn>(v->op_type(), v1[i]);
       }
     } else {
-      for (size_t i = 0; i < v1.size(); i++) {
+      for (const auto i : c10::irange(v1.size())) {
         result[i] = compute_intrinsics<TReturn>(v->op_type(), v1[i], v2[i]);
       }
     }
@@ -792,8 +791,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       dim->accept(this);
       total_byte_size *= value_.as<int>();
     }
-    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-    int int_count = (total_byte_size + sizeof(int) - 1) / sizeof(int);
+    const auto int_count = (total_byte_size + sizeof(int) - 1) / sizeof(int);
     std::unique_ptr<std::vector<int>> buffer(new std::vector<int>(int_count));
     auto iter = buffer_mapping_.find(b);
     if (iter != buffer_mapping_.end() && iter->second != nullptr) {
@@ -987,12 +985,11 @@ void SimpleIREvaluator::call_raw(const std::vector<void*>& args) {
   if (args.size() != buffer_args().size()) {
     throw malformed_input("bad args in IREvaluator call");
   }
-  for (size_t i = 0; i < args.size(); i++) {
+  for (const auto i : c10::irange(args.size())) {
     bindArg(buffer_args()[i], args[i]);
   }
   stmt()->accept(&*impl_);
   impl_->clear();
-  USE_TRIGGER(simple_ir_eval_executed);
 }
 
 void SimpleIREvaluator::bindArg(const BufferArg& bufArg, void* data) {

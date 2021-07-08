@@ -126,7 +126,6 @@ class ElasticLaunchTest(unittest.TestCase):
             "--master_addr=localhost",
             f"--master_port={master_port}",
             "--node_rank=0",
-            "--use_env",
             path("bin/test_script.py"),
             f"--touch_file_dir={self.test_dir}",
         ]

@@ -21,6 +21,8 @@ std::string DeviceTypeName(DeviceType d, bool lower_case) {
       return lower_case ? "ideep" : "IDEEP";
     case DeviceType::HIP:
       return lower_case ? "hip" : "HIP";
+    case DeviceType::VE:
+      return lower_case ? "ve" : "VE";
     case DeviceType::FPGA:
       return lower_case ? "fpga" : "FPGA";
     case DeviceType::MSNPU:
@@ -69,6 +71,7 @@ bool isValidDeviceType(DeviceType d) {
     case DeviceType::MKLDNN:
     case DeviceType::IDEEP:
     case DeviceType::HIP:
+    case DeviceType::VE:
     case DeviceType::FPGA:
     case DeviceType::MSNPU:
     case DeviceType::XLA:

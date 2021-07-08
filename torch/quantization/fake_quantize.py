@@ -130,9 +130,10 @@ class FakeQuantize(FakeQuantizeBase):
             self.activation_post_process(X.detach())
             _scale, _zero_point = self.calculate_qparams()
             _scale, _zero_point = _scale.to(self.scale.device), _zero_point.to(self.zero_point.device)
-            self.scale.resize_(_scale.shape)
+            if self.scale.shape != _scale.shape:
+                self.scale.resize_(_scale.shape)
+                self.zero_point.resize_(_zero_point.shape)
             self.scale.copy_(_scale)
-            self.zero_point.resize_(_zero_point.shape)
             self.zero_point.copy_(_zero_point)
 
         if self.fake_quant_enabled[0] == 1:
