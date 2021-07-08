@@ -2680,6 +2680,9 @@ class TestOperatorSignatures(JitTestCase):
                            '__rdiv__',
                            '__rmod__',
                            '__rpow__',
+                           '__rand__',
+                           '__ror__',
+                           '__rxor__',
                            '__rmatmul__'}
 
         try:
