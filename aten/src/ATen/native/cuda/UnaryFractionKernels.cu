@@ -129,15 +129,15 @@ __host__ __device__ static inline c10::complex<double> nearbyint_wrapper(c10::co
 #pragma pop
 
 void round_kernel_cuda(TensorIteratorBase& iter) {
-  if (c10::isIntegralType(iter.common_dtype(), true)) {
+  if (c10::isIntegralType(iter.common_dtype(), /*includeBool=*/true)) {
     AT_DISPATCH_INTEGRAL_TYPES_AND(
-        ScalarType::Bool, iter.dtype(), "round_cuda", [&]() {
+        ScalarType::Bool, iter.common_dtype(), "round_cuda", [&]() {
           gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t { return a; });
         });
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
-      iter.dtype(), "round_cuda",
+      iter.common_dtype(), "round_cuda",
       [&]() {
         gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
           // We do not use std::round because we would like to round midway numbers to the nearest even integer.

@@ -642,7 +642,7 @@ static void erfcx_kernel(TensorIteratorBase& iter){
 }
 
 static void round_kernel(TensorIteratorBase& iter) {
-  if (c10::isIntegralType(iter.common_dtype(), true)) {
+  if (c10::isIntegralType(iter.common_dtype(), /*includeBool=*/true)) {
     AT_DISPATCH_INTEGRAL_TYPES_AND(
         ScalarType::Bool, iter.common_dtype(), "round_cpu", [&]() {
           cpu_kernel(iter, [](scalar_t a) -> scalar_t { return a; });
