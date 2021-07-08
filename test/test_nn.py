@@ -1300,6 +1300,15 @@ class TestNN(NNTestCase):
         m.register_buffer('buffer_name', buffer3)
         self.assertEqual(m.buffer_name, buffer3)
 
+    def test_get_buffer(self):
+        m = nn.Module()
+        buffer1 = torch.randn(2, 3)
+        buffer2 = torch.randn(4, 5)
+        m.register_buffer('foo', buffer1)
+        m.register_buffer('bar', buffer2)
+        self.assertEqual(buffer1, m.get_buffer('foo'))
+        self.assertEqual(buffer2, m.get_buffer('bar'))
+
     def test_buffer_not_persistent(self):
         m = nn.Module()
         m.register_buffer('buf', torch.rand(5), persistent=False)
