@@ -191,9 +191,9 @@ using ormqr_fn = void (*)(const Tensor& /*input*/, const Tensor& /*tau*/, const 
 DECLARE_DISPATCH(ormqr_fn, ormqr_stub);
 
 using linalg_eigh_fn = void (*)(
-    Tensor& /*eigenvalues*/,
-    Tensor& /*eigenvectors*/,
-    Tensor& /*infos*/,
+    const Tensor& /*eigenvalues*/,
+    const Tensor& /*eigenvectors*/,
+    const Tensor& /*infos*/,
     bool /*upper*/,
     bool /*compute_eigenvectors*/);
 DECLARE_DISPATCH(linalg_eigh_fn, linalg_eigh_stub);

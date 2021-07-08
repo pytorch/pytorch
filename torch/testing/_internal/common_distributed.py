@@ -2,7 +2,7 @@ from contextlib import contextmanager
 from datetime import timedelta
 from enum import Enum
 import faulthandler
-from multiprocessing import Manager
+import multiprocessing
 from io import StringIO
 import os
 import sys
@@ -435,7 +435,12 @@ class MultiProcessTestCase(TestCase):
         return self.id().split(".")[-1]
 
     def _start_processes(self, proc) -> None:
-        test_skips_manager = Manager()
+        # Creating a Manager will spawn a subprocess which will in turn launch
+        # a thread. TSAN doesn't like this because there could have been other
+        # threads already in the parent process and mixing all this is unsafe.
+        # Instead we should exec after the fork (i.e., use the "spawn" method)
+        # so that we reset the subprocess's state before creating new threads.
+        test_skips_manager = torch.multiprocessing.get_context("spawn").Manager()
         test_skips = test_skips_manager.dict()
         global TEST_SKIPS
         test_skips.update(TEST_SKIPS)
@@ -465,16 +470,18 @@ class MultiProcessTestCase(TestCase):
         GET_TRACEBACK = 1
 
     @staticmethod
-    def _event_listener(pipe, rank: int):
+    def _event_listener(parent_pipe, signal_pipe, rank: int):
         logger.info(f'Starting event listener thread for {rank}')
         while True:
-            if pipe.poll(None):
+            ready_pipes = multiprocessing.connection.wait([parent_pipe, signal_pipe])
 
-                if pipe.closed:
+            if parent_pipe in ready_pipes:
+
+                if parent_pipe.closed:
                     logger.info(f'Pipe closed for process {rank}, stopping event listener thread')
                     return
 
-                event = pipe.recv()
+                event = parent_pipe.recv()
                 logger.info(f'Received event {event} on process {rank}')
 
                 if event == MultiProcessTestCase.Event.GET_TRACEBACK:
@@ -484,27 +491,33 @@ class MultiProcessTestCase(TestCase):
                         # Flush buffers and seek to read from the beginning
                         tmp_file.flush()
                         tmp_file.seek(0)
-                        pipe.send(tmp_file.read())
+                        parent_pipe.send(tmp_file.read())
 
                         logger.info(f'Process {rank} sent traceback')
 
+            if signal_pipe in ready_pipes:
+                return
+
     @classmethod
-    def _run(cls, rank: int, test_name: str, file_name: str, pipe) -> None:
+    def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe) -> None:
         self = cls(test_name)
 
         # Start event listener thread.
-        threading.Thread(
+        signal_recv_pipe, signal_send_pipe = torch.multiprocessing.Pipe(duplex=False)
+        event_listener_thread = threading.Thread(
             target=MultiProcessTestCase._event_listener,
-            args=(pipe, rank),
-            daemon=True).start()
+            args=(parent_pipe, signal_recv_pipe, rank),
+            daemon=True)
+        event_listener_thread.start()
 
         self.rank = rank
         self.file_name = file_name
-        self.run_test(test_name, pipe)
+        self.run_test(test_name, parent_pipe, signal_send_pipe, event_listener_thread)
+
         # exit to avoid run teardown() for fork processes
         sys.exit(0)
 
-    def run_test(self, test_name: str, pipe) -> None:
+    def run_test(self, test_name: str, parent_pipe, signal_pipe=None, event_listener_thread=None) -> None:
         if sys.platform != 'win32' and sys.platform != 'darwin':
             # Register signal handler to dump stack traces on FATALs.
             # Windows and MacOS do not support the signal handlers.
@@ -514,16 +527,20 @@ class MultiProcessTestCase(TestCase):
         # We're retrieving a corresponding test and executing it.
         try:
             getattr(self, test_name)()
-            # Close pipe after done with test.
-            pipe.close()
         except Exception as e:
             logger.error(
                 f'Caught exception: \n{traceback.format_exc()} exiting '
-                'process with exit code: {MultiProcessTestCase.TEST_ERROR_EXIT_CODE}')
+                f'process {self.rank} with exit code: {MultiProcessTestCase.TEST_ERROR_EXIT_CODE}')
             # Send error to parent process.
-            pipe.send(traceback.format_exc())
-            pipe.close()
+            parent_pipe.send(traceback.format_exc())
             sys.exit(MultiProcessTestCase.TEST_ERROR_EXIT_CODE)
+        finally:
+            if signal_pipe is not None:
+                signal_pipe.send(None)
+            if event_listener_thread is not None:
+                event_listener_thread.join()
+            # Close pipe after done with test.
+            parent_pipe.close()
 
     def _get_timedout_process_traceback(self) -> None:
         pipes = []
@@ -533,21 +550,24 @@ class MultiProcessTestCase(TestCase):
                 try:
                     pipe.send(MultiProcessTestCase.Event.GET_TRACEBACK)
                     pipes.append((i, pipe))
-                except BrokenPipeError as e:
+                except ConnectionError as e:
                     logger.error(f'Encountered error while trying to get traceback for process {i}: {e}')
 
         # Wait for results.
         for rank, pipe in pipes:
-            # Wait for traceback
-            if pipe.poll(5):
-                if pipe.closed:
-                    logger.info(f'Pipe closed for process {rank}, cannot retrieve traceback')
-                    continue
+            try:
+                # Wait for traceback
+                if pipe.poll(5):
+                    if pipe.closed:
+                        logger.info(f'Pipe closed for process {rank}, cannot retrieve traceback')
+                        continue
 
-                traceback = pipe.recv()
-                logger.error(f'Process {rank} timed out with traceback: \n\n{traceback}')
-            else:
-                logger.error(f'Could not retrieve traceback for timed out process: {rank}')
+                    traceback = pipe.recv()
+                    logger.error(f'Process {rank} timed out with traceback: \n\n{traceback}')
+                else:
+                    logger.error(f'Could not retrieve traceback for timed out process: {rank}')
+            except ConnectionError as e:
+                logger.error(f'Encountered error while trying to get traceback for process {rank}: {e}')
 
     def _join_processes(self, fn) -> None:
         timeout = get_timeout(self.id())
