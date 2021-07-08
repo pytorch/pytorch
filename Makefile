@@ -70,6 +70,7 @@ setup_lint:
 		--job 'shellcheck' --step 'Install ShellCheck' --no-quiet; \
 	fi
 	pip install jinja2
+	pip install -r tools/linter/clang_tidy/requirements.txt
 
 quick_checks:
 # TODO: This is broken when 'git config submodule.recurse' is 'true' since the
@@ -116,4 +117,4 @@ toc:
 lint: flake8 mypy quick_checks cmakelint shellcheck
 
 quicklint: CHANGED_ONLY=--changed-only
-quicklint: mypy flake8 mypy quick_checks cmakelint shellcheck
+quicklint: mypy flake8 quick_checks cmakelint shellcheck

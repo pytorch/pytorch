@@ -15,7 +15,7 @@ from torch.distributed.elastic import events, metrics
 from torch.distributed.elastic.agent.server.api import WorkerSpec, WorkerState
 from torch.distributed.elastic.agent.server.local_elastic_agent import LocalElasticAgent
 from torch.distributed.elastic.multiprocessing import Std
-from torch.distributed.elastic.multiprocessing.errors import ChildFailedError
+from torch.distributed.elastic.multiprocessing.errors import ChildFailedError, record
 from torch.distributed.elastic.rendezvous import RendezvousParameters
 from torch.distributed.elastic.rendezvous.utils import parse_rendezvous_endpoint
 from torch.distributed.elastic.utils.logging import get_logger
@@ -172,6 +172,7 @@ def _get_addr_and_port(
 
 # pyre-fixme[56]: Pyre was not able to infer the type of the decorator
 # torch.distributed.elastic.multiprocessing.errors.record.
+@record
 def launch_agent(
     config: LaunchConfig,
     entrypoint: Union[Callable, str, None],
