@@ -113,13 +113,6 @@ struct cpu_scatter_gather_base_kernel {
 
     dim = maybe_wrap_dim(dim, self.dim());
 
-    if (is_scatter_like) {
-      scatter_shape_check(self, dim, index, self);
-    }
-    else {
-      gather_shape_check(self, dim, index, self);
-    }
-
     auto index_sizes = ensure_nonempty_vec(index.sizes().vec());
     auto index_strides = ensure_nonempty_vec(index.strides().vec());
 
@@ -215,10 +208,7 @@ struct cpu_scatter_gather_base_kernel {
     dim = maybe_wrap_dim(dim, self.dim());
 
     scatter_gather_dtype_check(method_name, self, index, src);
-    if (is_scatter_like) {
-      scatter_shape_check(self, dim, index, src);
-    }
-    else {
+    if (!is_scatter_like) {
       gather_shape_check(self, dim, index, src);
     }
 

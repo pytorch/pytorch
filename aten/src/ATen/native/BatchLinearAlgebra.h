@@ -1,18 +1,17 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <ATen/Config.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cpu/zmath.h>
-
-#include <TH/TH.h> // for USE_LAPACK
 
 
 namespace at { namespace native {
 
 enum class LapackLstsqDriverType : int64_t { Gels, Gelsd, Gelsy, Gelss};
 
-#ifdef USE_LAPACK
+#if AT_BUILD_WITH_LAPACK()
 // Define per-batch functions to be used in the implementation of batched
 // linear algebra operations
 
