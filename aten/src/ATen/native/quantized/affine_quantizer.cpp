@@ -93,8 +93,7 @@ void checkZeroPoint(const std::string& fn_name, int64_t zero_point) {
 template <typename T>
 void checkZeroPoints(const std::string& fn_name, const Tensor& zero_points) {
   auto zero_points_data = zero_points.data_ptr<int64_t>();
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (size_t i = 0; i < zero_points.numel(); ++i) {
+  for (const auto i : c10::irange(zero_points.numel())) {
     checkZeroPoint<T>(fn_name, zero_points_data[i]);
   }
 }

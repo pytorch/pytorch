@@ -529,8 +529,8 @@ class MSELoss(_Loss):
 
 
 class BCELoss(_WeightedLoss):
-    r"""Creates a criterion that measures the Binary Cross Entropy
-    between the target and the output:
+    r"""Creates a criterion that measures the Binary Cross Entropy between the target and
+    the input probabilities:
 
     The unreduced (i.e. with :attr:`reduction` set to ``'none'``) loss can be described as:
 
@@ -1288,7 +1288,7 @@ class MultiMarginLoss(_WeightedLoss):
     output :math:`y` is:
 
     .. math::
-        \text{loss}(x, y) = \frac{\sum_i \max(0, \text{margin} - x[y] + x[i]))^p}{\text{x.size}(0)}
+        \text{loss}(x, y) = \frac{\sum_i \max(0, \text{margin} - x[y] + x[i])^p}{\text{x.size}(0)}
 
     where :math:`x \in \left\{0, \; \cdots , \; \text{x.size}(0) - 1\right\}`
     and :math:`i \neq y`.

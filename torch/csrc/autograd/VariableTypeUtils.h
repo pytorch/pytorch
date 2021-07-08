@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/irange.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
 
 #include <torch/csrc/autograd/variable.h>
@@ -84,8 +85,7 @@ inline void throw_error_for_complex_autograd(const Tensor& tensor, const char* n
 }
 
 inline void throw_error_for_complex_autograd(const TensorList& tensorlist, const char* name) {
-  // NOLINTNEXTLINE(performance-for-range-copy)
-  for (auto tensor: tensorlist) {
+  for (const auto& tensor: tensorlist) {
     throw_error_for_complex_autograd(tensor, name);
   }
 }
@@ -147,7 +147,7 @@ inline Tensor as_view(const Tensor & base, const Tensor & tensor, bool is_bw_dif
   // If Inplace and View were separate dispatch keys we can just put Inplace
   // in the default_included_set, so that view ops on inference tensor doesn't
   // have to go through as_view even outside InferenceMode.
-  if (base.unsafeGetTensorImpl()->is_inference_tensor()) return tensor;
+  if (base.is_inference()) return tensor;
 
   auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(base);
 
@@ -205,7 +205,7 @@ inline Tensor as_view(const Tensor & base, const Tensor & tensor, bool is_bw_dif
 inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor>& tensors, bool is_bw_differentiable,
                                    bool is_fw_differentiable, CreationMeta creation_meta=CreationMeta::DEFAULT) {
   // See Note [View of inference tensor]
-  if (base.unsafeGetTensorImpl()->is_inference_tensor()) return tensors;
+  if (base.is_inference()) return tensors;
 
   auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(base);
 
@@ -292,32 +292,37 @@ inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor>& ten
   return tensors;
 }
 
-inline void check_no_requires_grad(const Tensor& tensor, const char* name) {
-  auto& var = static_cast<const Variable&>(tensor);
-  if (var.defined() && var.requires_grad()) {
-    std::string msg = "the derivative for '";
-    msg += name;
-    msg += "' is not implemented";
-    throw std::runtime_error(msg);
-  }
+inline void check_no_requires_grad(const Tensor& tensor, const char* name,
+                                   const char* fn_name="", bool check_grad_mode=true) {
+  TORCH_CHECK(!(tensor.defined() && tensor.requires_grad()) || !(check_grad_mode && GradMode::is_enabled()),
+              "The function '", fn_name, "' is not differentiable with respect to argument '", name,
+              "'. This input cannot have requires_grad True.");
 }
 
-inline void check_no_requires_grad(const c10::optional<Tensor>& tensor, const char* name) {
+inline void check_no_requires_grad(const c10::optional<Tensor>& tensor, const char* name, const char* fn_name="") {
   if (tensor.has_value()) {
-    check_no_requires_grad(*tensor, name);
+    check_no_requires_grad(*tensor, name, fn_name);
   }
 }
 
-inline void check_no_requires_grad(TensorList tensors, const char* name) {
+inline void check_no_requires_grad(TensorList tensors, const char* name, const char* fn_name="") {
+  // GradMode check is expensive, so check it only once for TensorLists
+  if (!GradMode::is_enabled()) {
+    return;
+  }
   for (auto& tensor : tensors) {
-    check_no_requires_grad(tensor, name);
+    check_no_requires_grad(tensor, name, fn_name, /*check_grad_mode*/ false);
   }
 }
 
-inline void check_no_requires_grad(const c10::List<c10::optional<Tensor>>& tensors, const char* name) {
+inline void check_no_requires_grad(const c10::List<c10::optional<Tensor>>& tensors, const char* name, const char* fn_name="") {
+  // GradMode check is expensive, so check it only once for TensorLists
+  if (!GradMode::is_enabled()) {
+    return;
+  }
   for (c10::optional<Tensor> tensor : tensors) {
     if (tensor.has_value()) {
-      check_no_requires_grad(*tensor, name);
+      check_no_requires_grad(*tensor, name, fn_name, /*check_grad_mode*/ false);
     }
   }
 }
@@ -341,7 +346,7 @@ inline std::vector<SavedVariable> make_saved_variable_list(const c10::List<c10::
 
 inline std::vector<std::vector<int64_t>> to_args_sizes(TensorList tensors) {
   std::vector<std::vector<int64_t>> args_sizes(tensors.size());
-  for (size_t i = 0; i < tensors.size(); ++i) {
+  for (const auto i : c10::irange(tensors.size())) {
     args_sizes[i] = tensors[i].sizes().vec();
   }
   return args_sizes;
@@ -349,7 +354,7 @@ inline std::vector<std::vector<int64_t>> to_args_sizes(TensorList tensors) {
 
 inline std::vector<ScalarType> to_args_scalartypes(TensorList tensors) {
   std::vector<ScalarType> args_scalartypes(tensors.size());
-  for (size_t i = 0; i < tensors.size(); ++i) {
+  for (const auto i : c10::irange(tensors.size())) {
     args_scalartypes[i] = tensors[i].scalar_type();
   }
   return args_scalartypes;

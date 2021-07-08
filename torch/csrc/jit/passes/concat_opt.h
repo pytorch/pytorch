@@ -18,5 +18,9 @@ TORCH_API void ExpandConcatAndEliminateRedundancy(
 //  * ExpandConcatAndEliminateRedundancy
 TORCH_API void OptimizeConcat(const std::shared_ptr<Graph>& graph);
 
+// Replaces the `aten::cat` ops in the given graph with variadic cat ops.
+// Returns true if the graph is modified.
+TORCH_API bool UseVariadicCat(const std::shared_ptr<Graph>& graph);
+
 } // namespace jit
 } // namespace torch

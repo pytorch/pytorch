@@ -3,7 +3,8 @@
 #include <ATen/ATen.h>
 #include <ATen/native/ResizeCommon.h>
 #include <ATen/TensorUtils.h>
-#include <TH/THTensor.hpp>
+
+#include <c10/core/CPUAllocator.h>
 
 
 namespace at { namespace native {
@@ -19,9 +20,7 @@ namespace at { namespace native {
 // Returns a bool saying whether or not the resize actually happened or not
 TORCH_API bool resize_output(const Tensor& output, IntArrayRef shape);
 
-// These functions are called by native::resize_ as well as (legacy) TH resize.
-// They are not in TH/THTensor.cpp because the at namespace is easier
-// to benchmark than TH; I can't get gbenchmark to call fns from THTensor.cpp
+TORCH_API void resize_bytes_cpu(StorageImpl* storage, size_t size_bytes);
 
 static inline void maybe_resize_storage_cpu(TensorImpl* self, uint64_t new_size) {
   // It does not make sense to try to resize a storage
@@ -32,21 +31,23 @@ static inline void maybe_resize_storage_cpu(TensorImpl* self, uint64_t new_size)
   if (new_size == 0) {
     return;
   }
-  if (!THTensor_getStoragePtr(self)) {
-#ifndef NDEBUG
-    caffe2::TypeMeta dtype = self->dtype();
-#endif
-    THTensor_stealAndSetStoragePtr(self, THStorage_new());
-#ifndef NDEBUG
-    // THTensor_stealAndSetStoragePtr guarantees this. Leave debug
-    // assert in case of code changes.
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(dtype == self->dtype());
-#endif
-  }
-  uint64_t new_size_bytes =
+
+  const auto new_size_bytes_i =
       (new_size + self->storage_offset()) * self->dtype().itemsize();
-  if (new_size_bytes > self->storage().nbytes()) {
-    THStorage_resizeBytes(THTensor_getStoragePtr(self), new_size_bytes);
+  TORCH_CHECK(!overflows<size_t>(new_size_bytes_i), "Requested storage size (",
+              new_size_bytes_i, ") cannot be represented as a size_t");
+  const auto new_size_bytes = static_cast<size_t>(new_size_bytes_i);
+
+  const Storage& storage = self->unsafe_storage();
+  if (!storage) {
+    auto new_storage = c10::make_intrusive<StorageImpl>(
+        StorageImpl::use_byte_size_t(),
+        new_size_bytes,
+        c10::GetCPUAllocator(),
+        true);
+    self->set_storage_keep_dtype(std::move(new_storage));
+  } else if (new_size_bytes > storage.nbytes()) {
+    resize_bytes_cpu(storage.unsafeGetStorageImpl(), new_size_bytes);
   }
 }
 

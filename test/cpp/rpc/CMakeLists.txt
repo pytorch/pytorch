@@ -5,7 +5,7 @@ set(TORCH_RPC_TEST_SOURCES
   ${TORCH_RPC_TEST_DIR}/test_wire_serialization.cpp
 )
 set(TORCH_RPC_TEST_DEPENDENCY_LIBS
-  torch c10d gtest process_group_agent
+  torch gtest
 )
 
 if(USE_GLOO)
@@ -20,7 +20,7 @@ if(USE_TENSORPIPE)
     ${TORCH_RPC_TEST_DIR}/test_tensorpipe_serialization.cpp
   )
   list(APPEND TORCH_RPC_TEST_DEPENDENCY_LIBS
-    tensorpipe_agent tensorpipe
+    tensorpipe
   )
 endif()
 
@@ -28,6 +28,9 @@ add_executable(test_cpp_rpc ${TORCH_RPC_TEST_SOURCES})
 target_include_directories(
   test_cpp_rpc PRIVATE
   ${ATen_CPU_INCLUDE})
+target_include_directories(
+  test_cpp_rpc PRIVATE
+  $<BUILD_INTERFACE:${TORCH_SRC_DIR}/csrc/distributed>)
 target_link_libraries(test_cpp_rpc PRIVATE ${TORCH_RPC_TEST_DEPENDENCY_LIBS})
 
 if(USE_CUDA)

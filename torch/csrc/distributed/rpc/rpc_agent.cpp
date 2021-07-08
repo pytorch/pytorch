@@ -50,7 +50,7 @@ void RpcAgent::shutdown() {
 
 c10::intrusive_ptr<JitFuture> RpcAgent::sendWithRetries(
     const WorkerInfo& to,
-    Message&& message,
+    c10::intrusive_ptr<Message> message,
     RpcRetryOptions retryOptions) {
   TORCH_CHECK(retryOptions.maxRetries >= 0, "maxRetries cannot be negative.");
   TORCH_CHECK(
@@ -64,15 +64,13 @@ c10::intrusive_ptr<JitFuture> RpcAgent::sendWithRetries(
       c10::make_intrusive<JitFuture>(at::AnyClassType::get(), getDevices());
   steady_clock_time_point newTime =
       computeNewRpcRetryTime(retryOptions, /* retryCount */ 0);
-  // Making a copy of the message so it can be retried after the first send.
-  Message msgCopy = message;
-  auto jitFuture = send(to, std::move(message));
   auto firstRetryRpc = std::make_shared<RpcRetryInfo>(
       to,
-      std::move(msgCopy),
+      message,
       originalFuture,
       /* retryCount */ 0,
       retryOptions);
+  auto jitFuture = send(to, std::move(message));
   jitFuture->addCallback([this, newTime, firstRetryRpc](JitFuture& future) {
     rpcRetryCallback(future, newTime, firstRetryRpc);
   });
@@ -122,8 +120,6 @@ void RpcAgent::retryExpiredRpcs() {
     for (auto it = earliestRpcList.begin(); it != earliestRpcList.end();
          /* no increment */) {
       auto& earliestRpc = *it;
-      // Making a copy of the message so it can be retried in the future.
-      Message msgCopy = earliestRpc->message_;
       c10::intrusive_ptr<JitFuture> jitFuture;
 
       // send() will throw an exception if an RPC is retried while the agent is
@@ -131,7 +127,7 @@ void RpcAgent::retryExpiredRpcs() {
       // with an error, since this RPC never succeeded and can no longer be
       // retried.
       try {
-        jitFuture = send(earliestRpc->to_, std::move(msgCopy));
+        jitFuture = send(earliestRpc->to_, earliestRpc->message_);
         futures.emplace_back(jitFuture, earliestRpc);
       } catch (std::exception& e) {
         // We must store the futures and exception messages here and only mark
@@ -222,7 +218,7 @@ void RpcAgent::rpcRetryCallback(
   } else {
     // This try succeeded, so we can make the original future as complete.
     earliestRpc->originalFuture_->markCompleted(
-        jitFuture.value(), jitFuture.dataPtrs());
+        jitFuture.value(), jitFuture.storages());
   }
 }
 
@@ -230,6 +226,7 @@ const WorkerInfo& RpcAgent::getWorkerInfo() const {
   return workerInfo_;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::shared_ptr<RpcAgent> RpcAgent::currentRpcAgent_ = nullptr;
 
 bool RpcAgent::isCurrentRpcAgentSet() {

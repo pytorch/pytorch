@@ -36,6 +36,7 @@ pointwise ops)
 - Supporting returning partially evaluated shape compute graph
 */
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool symbolic_shape_analysis_test_mode = false;
 
 namespace torch {
@@ -109,6 +110,7 @@ struct SymbolicShapeNodeAnalyzer {
       }
 
       if (auto tt = type->castRaw<TensorType>()) {
+        // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
         c10::SymbolicShape symbolic_shapes = tt->symbolic_sizes();
 
         // for testing, we don't insert complete tensor shapes and rely on our
@@ -160,7 +162,7 @@ struct SymbolicShapeNodeAnalyzer {
       std::unordered_map<Value*, int64_t>* symbolic_shape_values) {
     // clang-format off
     // here we iteratively substitute properties of the node's input tensors
-    // into the shape compute graph. we can substitute constants into the 
+    // into the shape compute graph. we can substitute constants into the
     // like len(inp) or inp[0] if the tensor has a fixed length or a fixed
     // first dimension. we also try to resolve symbolic shapes of the same
     // symbolic value to the same Value * in the shape compute graph.
@@ -172,14 +174,14 @@ struct SymbolicShapeNodeAnalyzer {
     // value, then it is a valid transformation to replace dim2 with dim1 or
     // vice versa. to do this we collect all Value * for a particular symbolic
     // shape. Then, we replace all Value * within that set with their dominator.
-    // In the example above, this allows us to infer  that the output will be the 
+    // In the example above, this allows us to infer  that the output will be the
     // symbolic dimension value of dim1.
-  
+
     // if `symbolic_shape_values` is not null, record list accesses
     // which resolve to symbolic dimension values with their concrete symbolic
     // shape value. Because symbolic dimensions are represented as negative numbers and
     // are not real values, inserting them as constants in the graph would invalidate
-    // the graph for further use. Instead, we keep track of what there value would be
+    // the graph for further use. Instead, we keep track of what their value would be
     // for extracting output shapes.
     // clang-format on
 
@@ -248,6 +250,7 @@ struct SymbolicShapeNodeAnalyzer {
     for (size_t i = 0; i < symbolic_set.size(); ++i) {
       Value* v = symbolic_set[i];
       Value* dominating_value = v;
+      // NOLINTNEXTLINE(modernize-loop-convert)
       for (size_t j = 0; j < symbolic_set.size(); ++j) {
         if (dominating_value->node()->isDominatedBy(symbolic_set[j]->node())) {
           dominating_value = symbolic_set[j];
