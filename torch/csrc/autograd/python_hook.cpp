@@ -53,10 +53,10 @@ auto PyFunctionPreHook::operator()(const variable_list& values) -> variable_list
   // So, we use `PyDict_Values` which returns a new reference to the values
   // i.e. we hold the reference to the hooks till we have iterated over them.
   // Reference: https://github.com/pytorch/pytorch/issues/58354
-  auto hooks = PyDict_Values(dict);
-  auto len = PyList_Size(hooks);
+  const auto hooks = PyDict_Values(dict);
+  const auto len = PyList_Size(hooks);
   for (int idx = 0; idx < len; ++idx) {
-    auto hook = PyList_GetItem(hooks, idx);
+    const auto hook = PyList_GetItem(hooks, idx);
     THPObjectPtr res(PyObject_CallFunctionObjArgs(hook, value.get(), nullptr));
     if (!res) throw python_error();
     if (res == Py_None) continue;
@@ -93,7 +93,7 @@ auto PyFunctionPostHook::operator()(
 
   // See Note: [Extend Hook Lifetime]
   const auto hooks = PyDict_Values(dict);
-  auto len = PyList_Size(hooks);
+  const auto len = PyList_Size(hooks);
   for (int idx = 0; idx < len; ++idx) {
     const auto hook = PyList_GetItem(hooks, idx);
     THPObjectPtr res(PyObject_CallFunctionObjArgs(
