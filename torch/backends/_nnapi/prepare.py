@@ -82,10 +82,9 @@ def convert_model_to_nnapi(model, inputs, serializer=None):
     if isinstance(inputs, torch.Tensor):
         inputs = [inputs]
 
-    if serializer:
-        ser_model, used_weights, inp_mem_fmts, out_mem_fmts, shape_compute_lines, retval_count = serializer.serialize_model(model, inputs)
-    else:
-        ser_model, used_weights, inp_mem_fmts, out_mem_fmts, shape_compute_lines, retval_count = _NnapiSerializer(config=None).serialize_model(model, inputs)
+    serializer = serializer or _NnapiSerializer(config=None)
+    (ser_model, used_weights, inp_mem_fmts, out_mem_fmts, shape_compute_lines,
+     retval_count) = serializer.serialize_model(model, inputs)
     ser_model_tensor = torch.tensor(ser_model, dtype=torch.int32)
 
     # We have to create a new class here every time this function is called
