@@ -518,7 +518,7 @@ class TestFunctionalIterDataPipe(TestCase):
         with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
             len(map_dp_nl)
         for x, y in zip(map_dp_nl, input_dp_nl):
-            self.assertEqual(x, torch.tensor(y, dtype=torch.float))
+            self.assertEqual(x, y)
 
     def test_map_datapipe_nested_level(self):
 
