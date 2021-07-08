@@ -335,7 +335,7 @@ jobs:
       - name: Run clang-tidy
         run: |
           cd "${GITHUB_WORKSPACE}"
-          LANG=C.UTF-8 python3 tools/linter/clang_tidy \
+          python3 tools/linter/clang_tidy \
             --diff-file pr.diff \
             --parallel \
             --verbose \
