@@ -46,6 +46,20 @@ TORCH_META_FUNC2(isin, Scalar_Tensor) (
   set_output({0}, TensorOptions(test_elements.device()).dtype(ScalarType::Bool));
 }
 
+TORCH_META_FUNC(isposinf) (const Tensor& self) {
+  TORCH_CHECK(!self.is_complex(), "isposinf does not support complex inputs.");
+  TORCH_CHECK(maybe_get_output().defined() ? maybe_get_output().dtype() == at::kBool : true,
+              "isposinf does not support non-boolean outputs.");
+  build_unary_force_boolean_op(maybe_get_output(), self);
+}
+
+TORCH_META_FUNC(isneginf) (const Tensor& self) {
+  TORCH_CHECK(!self.is_complex(), "isneginf does not support complex inputs.");
+  TORCH_CHECK(maybe_get_output().defined() ? maybe_get_output().dtype() == at::kBool : true,
+              "isneginf does not support non-boolean outputs.");
+  build_unary_force_boolean_op(maybe_get_output(), self);
+}
+
 } // namespace meta
 
 namespace native {
@@ -157,54 +171,6 @@ Tensor isinf(const Tensor &self) {
   return AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, self.scalar_type(), "isinf", [&]() {
     return self.abs() == std::numeric_limits<scalar_t>::infinity();
   });
-}
-
-Tensor isposinf(const Tensor &self) {
-  Tensor result = at::empty_like(self, at::kBool, at::MemoryFormat::Preserve);
-  at::isposinf_out(result, self);
-  return result;
-}
-
-Tensor& isposinf_out(const Tensor& self, Tensor& result) {
-  TORCH_CHECK(!self.is_complex(), "isposinf does not support complex inputs.");
-  TORCH_CHECK(result.scalar_type() == at::kBool, "isposinf does not support non-boolean outputs.");
-  result.resize_(self.sizes());
-
-  if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
-    result.fill_(false);
-  } else {
-    auto iter = TensorIteratorConfig()
-      .check_all_same_dtype(false)
-      .add_output(result)
-      .add_input(self)
-      .build();
-    isposinf_stub(iter.device_type(), iter);
-  }
-  return result;
-}
-
-Tensor isneginf(const Tensor &self) {
-  Tensor result = at::empty_like(self, at::kBool, at::MemoryFormat::Preserve);
-  at::isneginf_out(result, self);
-  return result;
-}
-
-Tensor& isneginf_out(const Tensor& self, Tensor& result) {
-  TORCH_CHECK(!self.is_complex(), "isneginf does not support complex inputs.");
-  TORCH_CHECK(result.scalar_type() == at::kBool, "isneginf does not support non-boolean outputs.");
-  result.resize_(self.sizes());
-
-  if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
-    result.fill_(false);
-  } else {
-    auto iter = TensorIteratorConfig()
-      .check_all_same_dtype(false)
-      .add_output(result)
-      .add_input(self)
-      .build();
-    isneginf_stub(iter.device_type(), iter);
-  }
-  return result;
 }
 
 Tensor isfinite(const Tensor& self) {
@@ -785,6 +751,22 @@ TORCH_IMPL_FUNC(isin_Scalar_Tensor_out) (
   // redispatch
   at::isin_out(const_cast<Tensor&>(out), wrapped_scalar_tensor(elements, test_elements.device()),
     test_elements, assume_unique, invert);
+}
+
+TORCH_IMPL_FUNC(isposinf_out) (const Tensor& self, const Tensor& result) {
+  if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
+    result.fill_(false);
+  } else {
+    isposinf_stub(device_type(), *this);
+  }
+}
+
+TORCH_IMPL_FUNC(isneginf_out) (const Tensor& self, const Tensor& result) {
+  if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
+    result.fill_(false);
+  } else {
+    isneginf_stub(device_type(), *this);
+  }
 }
 
 } // namespace native

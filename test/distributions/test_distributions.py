@@ -4529,7 +4529,7 @@ class TestValidation(TestCase):
                 # TransformedDistribution has a distribution instance
                 # as the argument, so we cannot do much about that
                 continue
-            for param in params:
+            for i, param in enumerate(params):
                 d_nonval = Dist(validate_args=False, **param)
                 d_val = Dist(validate_args=True, **param)
                 for v in torch.tensor([-2.0, -1.0, 0.0, 1.0, 2.0]):
@@ -4550,6 +4550,25 @@ class TestValidation(TestCase):
                             except RuntimeError:
                                 pass
 
+                # check correct samples are ok
+                valid_value = d_val.sample()
+                d_val.log_prob(valid_value)
+                # check invalid values raise ValueError
+                if valid_value.dtype == torch.long:
+                    valid_value = valid_value.float()
+                invalid_value = torch.full_like(valid_value, math.nan)
+                try:
+                    with self.assertRaisesRegex(
+                        ValueError,
+                        "Expected value argument .* to be within the support .*",
+                    ):
+                        d_val.log_prob(invalid_value)
+                except AssertionError as e:
+                    fail_string = "Support ValueError not raised for {} example {}/{}"
+                    raise AssertionError(
+                        fail_string.format(Dist.__name__, i + 1, len(params))
+                    ) from e
+
     @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")
     def test_invalid(self):
         for Dist, params in BAD_EXAMPLES:
@@ -4558,8 +4577,10 @@ class TestValidation(TestCase):
                     with self.assertRaises(ValueError):
                         Dist(validate_args=True, **param)
                 except AssertionError as e:
-                    fail_string = 'ValueError not raised for {} example {}/{}'
-                    raise AssertionError(fail_string.format(Dist.__name__, i + 1, len(params))) from e
+                    fail_string = "ValueError not raised for {} example {}/{}"
+                    raise AssertionError(
+                        fail_string.format(Dist.__name__, i + 1, len(params))
+                    ) from e
 
     def test_warning_unimplemented_constraints(self):
         class Delta(Distribution):
