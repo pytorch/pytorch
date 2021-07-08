@@ -335,6 +335,11 @@ class TestNNAPI(TestCase):
             DetachModule(), torch.randn(1, 2, 3, 3),
             convert_args=[torch.zeros(1, 2, 0, 0)])
 
+    def test_log_softmax(self):
+        inp = torch.randn(3, 10)
+        self.check(torch.nn.LogSoftmax(), inp)
+        self.check(torch.nn.LogSoftmax(0), inp)
+
     def test_mean(self):
         class MeanModule(torch.nn.Module):
             def __init__(self, dim, keep=False):
