@@ -152,7 +152,6 @@ def run(
             args + [
                 # don't special-case the last line
                 '--no-error-summary',
-                '--color-output',
                 f'--config-file={config}',
             ] + filtered
         )
