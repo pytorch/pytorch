@@ -404,12 +404,14 @@ jobs:
           time python -mtools.codegen.gen -s aten/src/ATen -d build/aten/src/ATen
           time python -mtools.pyi.gen_pyi --native-functions-path aten/src/ATen/native/native_functions.yaml --deprecated-functions-path "tools/autograd/deprecated.yaml"
       - name: Run mypy
+        env:
+          MYPY_FORCE_COLOR: 1
         run: |
           set -eux
           export MYPY_FORCE_COLOR=1
           STATUS=
           for CONFIG in mypy*.ini; do
-            if ! mypy --config="$CONFIG"; then
+            if ! mypy --config="$CONFIG" --color-output; then
               STATUS=fail
             fi
           done
