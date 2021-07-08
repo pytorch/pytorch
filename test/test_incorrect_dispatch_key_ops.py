@@ -43,7 +43,7 @@ class TestIncorrectDispatchKeyOps(TestCase):
     def find_dispatch_stub_kernels(self) -> List[str]:
         curr_path = os.path.dirname(os.path.realpath(__file__))
         root_dir = os.path.join(curr_path, '../aten/src/ATen/')
-        regex = re.compile("DEFINE_DISPATCH\((.*)_stub\)")
+        regex = re.compile(r"DEFINE_DISPATCH\((.*)_stub\)")
 
         matches = []
         for root, dirs, files in os.walk(root_dir):
