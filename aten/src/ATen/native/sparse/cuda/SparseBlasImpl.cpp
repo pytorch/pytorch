@@ -49,23 +49,24 @@ void addmm_out_sparse_csr_dense_cuda_impl(
 
   // Here subscript "c" stands for column-major, substript "r" stands for
   // row-major order Both orders are supported by cuSPARSE. For mixed input we
-  // need to cast 'mat2' to order of 'result'. We compute result = mat1 @
-  // op(mat2) + result. If order of 'mat2' and 'result' matches, the op is
+  // need to cast 'mat2' to order of 'result'. We compute
+  // result = mat1 @ op(mat2) + result.
+  // If order of 'mat2' and 'result' matches, the op is
   // identity; op(mat2) == mat2. If 'result' is column-major and 'mat2' is
-  // row-major we pass 'mat2' as column-major and compute result_c = mat1 @
-  // transpose(mat2_c) + result_c; mat2_r == transpose(mat2_c) if 'result' is
-  // row-major and 'mat2' is column-major we pass 'mat2' as row-major and
-  // compute result_r = mat1 @ transpose(mat2_r) + result_r; mat2_c ==
-  // transpose(mat2_r)
+  // row-major we pass 'mat2' as column-major and compute
+  // result_c = mat1 @ transpose(mat2_c) + result_c; mat2_r==transpose(mat2_c)
+  // if 'result' is row-major and 'mat2' is column-major we pass 'mat2'
+  // as row-major and compute
+  // result_r = mat1 @ transpose(mat2_r) + result_r; mat2_c==transpose(mat2_r)
   IntArrayRef result_strides = result_->strides();
   IntArrayRef mat2_strides = mat2_->strides();
   auto ndim = result_->dim();
-  bool is_result_column_major = (result_strides[ndim - 2] == 1);
-  bool is_mat2_column_major = (mat2_strides[ndim - 2] == 1);
+  bool is_result_row_major = (result_strides[ndim - 1] == 1);
+  bool is_mat2_row_major = (mat2_strides[ndim - 1] == 1);
   bool transpose_B = false;
-  if (is_result_column_major && !is_mat2_column_major) {
+  if (!is_result_row_major && is_mat2_row_major) {
     transpose_B = true;
-  } else if (!is_result_column_major && is_mat2_column_major) {
+  } else if (is_result_row_major && !is_mat2_row_major) {
     transpose_B = true;
   }
 

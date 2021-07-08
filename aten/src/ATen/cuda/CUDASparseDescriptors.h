@@ -14,6 +14,31 @@ namespace at {
 namespace cuda {
 namespace sparse {
 
+namespace {
+
+// If a specific GPU model does not provide native support for a given data
+// type, cuSparse routines return CUSPARSE_STATUS_ARCH_MISMATCH error
+void check_supported_cuda_type(cudaDataType cuda_type) {
+  if (cuda_type == CUDA_R_16F || cuda_type == CUDA_R_16BF) {
+    cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+    TORCH_CHECK(
+        prop->major >= 5 &&
+            !(cuda_type == CUDA_R_16F && (10 * prop->major + prop->minor) < 53),
+        "CUDA tensors with Float16 type are not supported on GPUs with compute capability < 53 (current: ",
+        prop->major,
+        prop->minor,
+        ")");
+    TORCH_CHECK(
+        !(cuda_type == CUDA_R_16BF && prop->major < 8),
+        "CUDA tensors with BFloat16 type are not supported on GPUs with compute capability < 80 (current: ",
+        prop->major,
+        prop->minor,
+        ")");
+  }
+}
+
+} // anonymous namespace
+
 inline cusparseIndexType_t getCuSparseIndexType(const c10::ScalarType& scalar_type) {
   if (scalar_type == c10::ScalarType::Int) {
     return CUSPARSE_INDEX_32I;
@@ -67,12 +92,13 @@ class TORCH_CUDA_CPP_API CuSparseDnMatDescriptor
         is_column_major || is_row_major,
         "Expected either row or column major contiguous input.");
 
-    auto leading_dimension = is_column_major ? input_strides[ndim - 1] : input_strides[ndim - 2];
-    auto order = is_column_major ? CUSPARSE_ORDER_COL : CUSPARSE_ORDER_ROW;
+    auto leading_dimension = is_row_major ? input_strides[ndim - 2] : input_strides[ndim - 1];
+    auto order = is_row_major ? CUSPARSE_ORDER_ROW : CUSPARSE_ORDER_COL;
 
     void* values_ptr = input.data_ptr();
 
     cudaDataType value_type = ScalarTypeToCudaDataType(input.scalar_type());
+    check_supported_cuda_type(value_type);
 
     cusparseDnMatDescr_t raw_descriptor;
     TORCH_CUDASPARSE_CHECK(cusparseCreateDnMat(
@@ -86,7 +112,7 @@ class TORCH_CUDA_CPP_API CuSparseDnMatDescriptor
 
     if (ndim > 2) {
       auto batch_count = at::native::cuda_int_cast(at::native::batchCount(input), "batch_count");
-      auto batch_stride = input_strides[ndim - 3]; // is_column_major ? cols * leading_dimension : rows * leading_dimension;
+      auto batch_stride = input_strides[ndim - 3];
       TORCH_CUDASPARSE_CHECK(cusparseDnMatSetStridedBatch(
           raw_descriptor, batch_count, batch_stride));
     }
@@ -121,6 +147,7 @@ class TORCH_CUDA_CPP_API CuSparseSpMatCsrDescriptor
 
     cusparseIndexType_t index_type = getCuSparseIndexType(crow_indices.scalar_type());
     cudaDataType value_type = ScalarTypeToCudaDataType(input.scalar_type());
+    check_supported_cuda_type(value_type);
 
     cusparseSpMatDescr_t raw_descriptor;
     TORCH_CUDASPARSE_CHECK(cusparseCreateCsr(
@@ -189,6 +216,7 @@ class TORCH_CUDA_CPP_API CuSparseSpMatCooDescriptor
 
     cusparseIndexType_t index_type = getCuSparseIndexType(indices.scalar_type());
     cudaDataType value_type = ScalarTypeToCudaDataType(values.scalar_type());
+    check_supported_cuda_type(value_type);
 
     cusparseSpMatDescr_t raw_descriptor;
     TORCH_CUDASPARSE_CHECK(cusparseCreateCoo(

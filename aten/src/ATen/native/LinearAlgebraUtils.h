@@ -540,7 +540,7 @@ static inline bool is_blas_compatible_column_major_order(const Tensor& input) {
   IntArrayRef input_sizes = input.sizes();
   auto ndim = input.dim();
   auto leading_dimension = input_strides[ndim - 1];
-  auto rows = input_sizes[ndim - 1];
+  auto rows = input_sizes[ndim - 2];
   return (input_strides[ndim - 2] == 1) && (leading_dimension >= std::max<int64_t>(1, rows));
 }
 
