@@ -49,6 +49,11 @@ class _ModuleProviderAction(Enum):
     EXTERN = 2
     MOCK = 3
     DENY = 4
+    # Special case: when a module is mocked, PackageExporter writes out a
+    # `_mock` module that implements our mocking stubs. If we re-package code,
+    # we may encounter a `_mock` module from the original package. If we do,
+    # just ignore it and write a `_mock` module once.
+    REPACKAGED_MOCK_MODULE = 5
 
 
 class PackagingErrorReason(Enum):
@@ -438,6 +443,14 @@ node [shape=box];
             module_name in self.dependency_graph
             and self.dependency_graph.nodes[module_name].get("provided") is True
         ):
+            return
+
+        if module_name == "_mock":
+            self.dependency_graph.add_node(
+                module_name,
+                action=_ModuleProviderAction.REPACKAGED_MOCK_MODULE,
+                provided=True,
+            )
             return
 
         if self._can_implicitly_extern(module_name):
@@ -868,6 +881,11 @@ node [shape=box];
                     f"Exporter did not match any modules to {pattern}, which was marked as allow_empty=False"
                 )
 
+    def _write_mock_file(self):
+        if "_mock.py" not in self._written_files:
+            mock_file = str(Path(__file__).parent / "_mock.py")
+            self._write_source_string("_mock", _read_file(mock_file), is_package=False)
+
     def _execute_dependency_graph(self):
         """Takes a finalized dependency graph describing how to package all
         modules and executes it, writing to the ZIP archive.
@@ -889,12 +907,7 @@ node [shape=box];
                 for hook in self._mock_hooks.values():
                     hook(self, module_name)
 
-                if not _mock_written:
-                    mock_file = str(Path(__file__).parent / "_mock.py")
-                    self._write_source_string(
-                        "_mock", _read_file(mock_file), is_package=False
-                    )
-                    _mock_written = True
+                self._write_mock_file()
 
                 is_package = hasattr(self._import_module(module_name), "__path__")
                 self._write_source_string(module_name, _MOCK_IMPL, is_package)
@@ -917,6 +930,9 @@ node [shape=box];
                 is_package = attrs["is_package"]
                 source = attrs["source"]
                 self._write_source_string(module_name, source, is_package)
+
+            elif action == _ModuleProviderAction.REPACKAGED_MOCK_MODULE:
+                self._write_mock_file()
 
             else:
                 raise AssertionError(
