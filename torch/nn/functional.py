@@ -963,8 +963,8 @@ def lp_pool2d(
 
 def lp_pool1d(
     input: Tensor, norm_type: Any, # TODO: change Any to Union[int, float] once it is available
-    kernel_size: BroadcastingList1[int],
-    stride: Optional[BroadcastingList1[int]] = None,
+    kernel_size: int,
+    stride: Optional[int] = None,
     ceil_mode: bool = False
 ) -> Tensor:
     r"""Applies a 1D power-average pooling over an input signal composed of
