@@ -5,6 +5,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <c10/util/TypeCast.h>
+#include <ATen/native/cpu/zmath.h>
 
 namespace at {
 namespace native {
@@ -13,6 +14,15 @@ namespace {
 static void copy_kernel(TensorIterator& iter, bool non_blocking) {
   ScalarType dtype = iter.dtype(0);
   if (dtype == iter.dtype(1)) {
+    // TODO: as the majority of these operations can be done treating
+    // their datatypes as opaque bit patterns, we don't actually need
+    // separate instantiations per dtype; we only need a separate
+    // instantiation per dtype size.  This would probably save us a
+    // little bit of code size here
+    // TODO: not sure if optimizer is able to compile two levels of
+    // conditionals into a single jump table.  We should have a
+    // single jump table here; might be worth just writing out the
+    // dispatch statement by hand instead of using AT_DISPATCH
     if (dtype == ScalarType::Half) {
       cpu_kernel(iter, [=](at::Half a) -> at::Half { return a; });
     } else if (dtype == ScalarType::ComplexHalf) {
@@ -25,12 +35,21 @@ static void copy_kernel(TensorIterator& iter, bool non_blocking) {
             [=](Vectorized<scalar_t> a) -> Vectorized<scalar_t> { return a; });
       });
     } else if (isComplexType(dtype)) {
-      AT_DISPATCH_COMPLEX_TYPES(dtype, "copy_kernel", [&] {
-          cpu_kernel_vec(
-            iter,
-            [=](scalar_t a) -> scalar_t { return a; },
-            [=](Vectorized<scalar_t> a) -> Vectorized<scalar_t> { return a; });
-        });
+      if (iter.tensor(0).is_conj() == iter.tensor(1).is_conj()) {
+        AT_DISPATCH_COMPLEX_TYPES(dtype, "copy_kernel", [&] {
+            cpu_kernel_vec(
+              iter,
+              [=](scalar_t a) -> scalar_t { return a; },
+              [=](Vectorized<scalar_t> a) -> Vectorized<scalar_t> { return a; });
+          });
+      } else {
+        AT_DISPATCH_COMPLEX_TYPES(dtype, "conj_kernel", [&] {
+            cpu_kernel_vec(
+              iter,
+              [=](scalar_t a) -> scalar_t { return conj_impl(a); },
+              [=](Vectorized<scalar_t> a) -> Vectorized<scalar_t> { return a.conj(); });
+          });
+      }
     } else {
       AT_DISPATCH_ALL_TYPES_AND2(
           ScalarType::Bool, ScalarType::BFloat16,dtype, "copy_kernel", [&] {
@@ -62,6 +81,9 @@ static void copy_kernel(TensorIterator& iter, bool non_blocking) {
           return c10::static_cast_with_inter_type<dest_t, scalar_t>::apply(src); });
       });
     });
+    if (iter.tensor(0).is_conj() != iter.tensor(1).is_conj()) {
+      iter.tensor(0).conj_physical_();
+    }
   }
 }
 

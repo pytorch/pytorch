@@ -22,6 +22,7 @@ struct Arguments final {
   // Output layer dimensions
   int64_t out_rows;
   int64_t out_cols;
+  int64_t out_channels;
 };
 
 inline std::vector<int64_t> calculate_conv_output_size(
@@ -273,6 +274,7 @@ Tensor _convolution_depthwise3x3_winograd(
       padding[1],         // Padding Columns
       output_sizes[2],    // Output H
       output_sizes[3],    // Output W
+      output_sizes[1],    // Output C
   };
 
   const int64_t input_hxw = args.in_rows * args.in_cols;
@@ -282,12 +284,13 @@ Tensor _convolution_depthwise3x3_winograd(
                       bias_potentially_undefined :
                       at::zeros({kernel_sizes[0]}, input.options());
 
-  at::parallel_for(0, args.batch * groups, 0, [&](int64_t start, int64_t end) {
+  at::parallel_for(0, args.batch * args.out_channels, 0, [&](int64_t start, int64_t end) {
     for (int64_t k = start; k < end; ++k) {
-      const int64_t g = k % groups;
+      const int64_t g = k % args.out_channels;
+      const int64_t i = k / (args.out_channels / groups);
       convolution_depthwise3x3_winograd_impl(
           args,
-          input.data_ptr<float>() + k * input_hxw,
+          input.data_ptr<float>() + i * input_hxw,
           kernel.data_ptr<float>() + g * 3 * 3,
           bias.data_ptr<float>() + g,
           output.data_ptr<float>() + k * output_hxw);

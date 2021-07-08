@@ -1067,6 +1067,10 @@ __global__ void batch_norm_transform_input_channels_last_kernel(
   int m_offset = blockIdx.y * blockDim.y + threadIdx.y;
   int c_offset = blockIdx.x * blockDim.x + threadIdx.x;
 
+  if (c_offset >= stride || m_offset >= reduction_size) {
+    return;
+  }
+
   auto m_c = mean[c_offset];
   auto inv_std_c = static_cast<accscalar_t>(inv_std[c_offset]);
   auto w_c = weight == nullptr ? accscalar_t(1.0) : static_cast<accscalar_t>(weight[c_offset]);
@@ -1154,6 +1158,10 @@ __global__ void batch_norm_backward_reduce_channels_last_kernel(
   // offset along m dimension
   int m_offset = blockIdx.y * blockDim.y + threadIdx.y;
   int c_offset = blockIdx.x * blockDim.x + threadIdx.x;
+
+  if (c_offset >= stride || m_offset >= reduction_size) {
+    return;
+  }
 
   int loop_count = 1 + (reduction_size - 1) / (inner_loop_stride * PARALLEL_LOADS);
   int address_base = m_offset * stride + c_offset;
@@ -1295,6 +1303,10 @@ __device__ __forceinline__ void batch_norm_backward_elemt_channels_last_kernel_i
   // offset along m dimension
   int m_offset = blockIdx.y * blockDim.y + threadIdx.y;
   int c_offset = blockIdx.x * blockDim.x + threadIdx.x;
+
+  if (c_offset >= stride || m_offset >= reduction_size) {
+    return;
+  }
 
   auto m_c = mean[c_offset];
   auto m_dy_c = sum_dy[c_offset] * norm_fct;

@@ -145,7 +145,11 @@ Tensor q_batch_norm1d_impl(
   // Remove the fake dimension, and go back to contiguous format
   // (since there is no 4th channel). Note, this has a performance
   // cost.
-  return qy.contiguous(MemoryFormat::Contiguous).squeeze(-1);
+  Tensor result = qy.contiguous(MemoryFormat::Contiguous).squeeze(-1);
+  if (ndim == 2) {
+    result = result.squeeze(-1);
+  }
+  return result;
 }
 
 template <bool ReluFused>

@@ -48,6 +48,45 @@ enum class JitLoggingLevels {
   GRAPH_DEBUG,
 };
 
+class JitLoggingConfig {
+ public:
+  static JitLoggingConfig& getInstance() {
+    static JitLoggingConfig instance;
+    return instance;
+  }
+  JitLoggingConfig(JitLoggingConfig const&) = delete;
+  void operator=(JitLoggingConfig const&) = delete;
+
+ private:
+  std::string logging_levels;
+  std::unordered_map<std::string, size_t> files_to_levels;
+
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  JitLoggingConfig() {
+    const char* jit_log_level = std::getenv("PYTORCH_JIT_LOG_LEVEL");
+    logging_levels.assign(jit_log_level == nullptr ? "" : jit_log_level);
+    parse();
+  }
+  void parse();
+
+ public:
+  std::string getLoggingLevels() {
+    return this->logging_levels;
+  }
+  void setLoggingLevels(std::string levels) {
+    this->logging_levels = levels;
+    parse();
+  }
+
+  std::unordered_map<std::string, size_t> getFilesToLevels() {
+    return this->files_to_levels;
+  }
+};
+
+std::string TORCH_API get_jit_logging_levels();
+
+void TORCH_API set_jit_logging_levels(std::string level);
+
 std::string TORCH_API getHeader(const Node* node);
 
 std::string TORCH_API log_function(const std::shared_ptr<Graph>& graph);

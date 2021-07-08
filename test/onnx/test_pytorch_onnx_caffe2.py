@@ -454,6 +454,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         other_input = make_input(RNN_BATCH_SIZE + 1)
         _ = run_embed_params(onnxir, model, other_input, use_gpu=False)
 
+    @unittest.skip("Disabled due to onnx optimizer deprecation")
     def test_rnn_init_predict_split(self):
         model = nn.LSTM(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, 3, bidirectional=True)
         seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=7)
@@ -592,18 +593,22 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         self.run_model_test(model, train=False, input=(x, model.hidden),
                             batch_size=batchsize, use_gpu=False)
 
+    @unittest.skip("Disabled due to onnx optimizer deprecation")
     @skipIfUnsupportedOpsetVersion([10])
     def test_word_language_model_RNN_TANH(self):
         self.run_word_language_model("RNN_TANH")
 
+    @unittest.skip("Disabled due to onnx optimizer deprecation")
     @skipIfUnsupportedOpsetVersion([10])
     def test_word_language_model_RNN_RELU(self):
         self.run_word_language_model("RNN_RELU")
 
+    @unittest.skip("Disabled due to onnx optimizer deprecation")
     @skipIfUnsupportedOpsetVersion([10])
     def test_word_language_model_LSTM(self):
         self.run_word_language_model("LSTM")
 
+    @unittest.skip("Disabled due to onnx optimizer deprecation")
     @skipIfUnsupportedOpsetVersion([10])
     def test_word_language_model_GRU(self):
         self.run_word_language_model("GRU")
@@ -879,6 +884,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         model = nn.AvgPool2d(5)
         self.run_model_test(model, train=False, batch_size=BATCH_SIZE)
 
+    @unittest.skip("Disabled due to onnx optimizer deprecation")
     @skipIfUnsupportedOpsetVersion([10])
     def test_avg_pool1D_ceil(self):
         model = torch.nn.AvgPool1d(3, 2, ceil_mode=True)
@@ -891,6 +897,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         x = torch.randn(20, 16, 50, 32, requires_grad=True)
         self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
 
+    @unittest.skip("Disabled due to onnx optimizer deprecation")
     @skipIfUnsupportedOpsetVersion([10])
     def test_avg_pool3D_ceil(self):
         model = torch.nn.AvgPool3d(3, 2, ceil_mode=True)
@@ -1058,6 +1065,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                             input=(x, y), batch_size=BATCH_SIZE, use_gpu=False,
                             operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
 
+    @unittest.skip("Disabled due to onnx optimizer deprecation")
     @skipIfUnsupportedOpsetVersion([10])
     def test_lstm_constant_folding(self):
         class LstmNet(nn.Module):
@@ -1085,6 +1093,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         model2, input2 = get_LstmNet_model_and_inputs(5, 4, 3, batch_size2, 7, False)
         self.run_actual_test(model2, train=False, batch_size=batch_size2, input=input2, use_gpu=False, do_constant_folding=True)
 
+    @unittest.skip("Disabled due to onnx optimizer deprecation")
     @skipIfUnsupportedOpsetVersion([10])
     def test_gru_constant_folding(self):
         class GruNet(nn.Module):
@@ -1290,6 +1299,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         underlying = nn.InstanceNorm2d(3)
         self.run_model_test(underlying, train=False, batch_size=BATCH_SIZE)
 
+    @unittest.skip("Disabled due to onnx optimizer deprecation")
     def test_pixel_shuffle(self):
         underlying = nn.PixelShuffle(4)
         shape = (1, 32, 5, 5)
@@ -2260,6 +2270,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         self.run_model_test(model, train=False, input=(x, a), batch_size=BATCH_SIZE,
                             example_outputs=(outputs,))
 
+    @unittest.skip("Disabled due to onnx optimizer deprecation")
     def test_loop(self):
         class LoopModel(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -2274,6 +2285,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         self.run_model_test(model, train=False, input=(inputs,), batch_size=BATCH_SIZE,
                             example_outputs=(outputs,))
 
+    @unittest.skip("Disabled due to onnx optimizer deprecation")
     def test_dynamic_loop(self):
         class LoopModel(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -2288,6 +2300,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         self.run_model_test(model, train=False, input=(inputs,), batch_size=BATCH_SIZE,
                             example_outputs=(outputs,))
 
+    @unittest.skip("Disabled due to onnx optimizer deprecation")
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_nested_loops(self):
         class NestedLoopsModel(torch.jit.ScriptModule):
@@ -2447,6 +2460,7 @@ def make_test(name, base, layer, bidirectional, initial_state,
         variable_length[1], dropout[1]
     ]))
 
+    @unittest.skip("Disabled due to onnx optimizer deprecation")
     @skipIfUnsupportedOpsetVersion([10])
     @skipIfUnsupportedMinOpsetVersion(8)
     def f(self):

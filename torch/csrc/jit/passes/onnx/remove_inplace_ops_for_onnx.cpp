@@ -9,6 +9,8 @@
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/onnx/pattern_conversion/pattern_encapsulation.h>
 
+#include <c10/util/irange.h>
+
 #include <limits>
 
 namespace torch {

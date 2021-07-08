@@ -188,6 +188,8 @@ class TORCH_API StaticRuntime {
       const std::vector<c10::IValue>& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
 
+  void display_nodes(const std::vector<c10::IValue>& args);
+
   void benchmark(
       const std::vector<c10::IValue>& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs,
