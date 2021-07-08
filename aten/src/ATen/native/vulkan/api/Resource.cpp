@@ -374,7 +374,7 @@ Resource::Pool::Pool(
       std::move(policy),
     },
     image_{
-      std::vector<Handle<Image, void(*)(const Image&)>>(), 
+      std::vector<Handle<Image, void(*)(const Image&)>>(),
       Image::Sampler{gpu},
     },
     fence_{} {

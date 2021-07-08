@@ -238,7 +238,9 @@ template <
     typename Equal,
     typename ArgumentAlloc,
     typename EntryAlloc>
-class sherwood_v3_table : private EntryAlloc, private DetailHasher, private Equal {
+class sherwood_v3_table : private EntryAlloc,
+                          private DetailHasher,
+                          private Equal {
   using Entry = detailv3::sherwood_v3_entry<T>;
   using AllocatorTraits = std::allocator_traits<EntryAlloc>;
   using EntryPointer = typename AllocatorTraits::pointer;
@@ -371,7 +373,9 @@ class sherwood_v3_table : private EntryAlloc, private DetailHasher, private Equa
   sherwood_v3_table(
       sherwood_v3_table&& other,
       const ArgumentAlloc& alloc) noexcept
-      : EntryAlloc(alloc), DetailHasher(std::move(other)), Equal(std::move(other)) {
+      : EntryAlloc(alloc),
+        DetailHasher(std::move(other)),
+        Equal(std::move(other)) {
     swap_pointers(other);
   }
   sherwood_v3_table& operator=(const sherwood_v3_table& other) {
