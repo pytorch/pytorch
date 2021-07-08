@@ -2,6 +2,7 @@
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/upsample_op.h"
+#include "caffe2/utils/GpuAtomics.cuh"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
@@ -126,16 +127,16 @@ __global__ void UpsampleBilinearGradientKernel(
     const float dYi = dY[index];
 #endif
 
-    atomicAdd(
+    gpu_atomic_add(
         &dX[idx(n, num_channels, c, output_height, output_width, h1, w1)],
         h0lambda * w0lambda * dYi);
-    atomicAdd(
+    gpu_atomic_add(
         &dX[idx(n, num_channels, c, output_height, output_width, h1, w1 + w1p)],
         h0lambda * w1lambda * dYi);
-    atomicAdd(
+    gpu_atomic_add(
         &dX[idx(n, num_channels, c, output_height, output_width, h1 + h1p, w1)],
         h1lambda * w0lambda * dYi);
-    atomicAdd(
+    gpu_atomic_add(
         &dX[idx(
             n,
             num_channels,

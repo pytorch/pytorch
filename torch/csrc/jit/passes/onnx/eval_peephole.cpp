@@ -3,6 +3,7 @@
 #include <torch/torch.h>
 
 #include <c10/util/Optional.h>
+#include <c10/util/irange.h>
 #include <algorithm>
 
 namespace torch {
@@ -88,8 +89,7 @@ static void fuseConvBatchNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
       bn_scale = bn_scale.div(bn_var);
 
       // Calculate weight
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      for (size_t i = 0; i < w_conv.size(0); i++) {
+      for (const auto i : c10::irange(w_conv.size(0))) {
         w_conv[i] = w_conv[i].mul(bn_scale[i]);
       }
 

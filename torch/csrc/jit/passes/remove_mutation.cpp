@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/remove_mutation.h>
+#include <torch/csrc/jit/passes/restore_mutation.h>
 
 namespace torch {
 namespace jit {
@@ -11,7 +12,7 @@ bool MutationRemover::removeTensorMutation() {
   return RemoveTensorMutation(graph_->block());
 }
 
-bool MutationRemover::newMemoryLocation(Value* v) {
+bool MutationRemover::hasSideEffectOrAlias(Value* v, AliasDb* aliasDb) {
   // bail on nodes with side effects, blocks, or graph / graph inputs
   Node* n = v->node();
   bool unhandled_node = n->blocks().size() != 0 ||
@@ -20,9 +21,8 @@ bool MutationRemover::newMemoryLocation(Value* v) {
 
   // if the output isn't contained or alias by the inputs to its node, it's
   // unique
-  return !unhandled_node &&
-      !getOrCreateAliasDb()->mayContainAlias(v->node()->inputs(), v) &&
-      !(v->node()->kind() == prim::Param);
+  return unhandled_node || aliasDb->mayContainAlias(v->node()->inputs(), v) ||
+      (v->node()->kind() == prim::Param);
 }
 
 Node* MutationRemover::createSpecialMappedOp(Node* n) {
@@ -81,7 +81,7 @@ bool MutationRemover::tryMakeCreationAndMutationAtomic(
   // We can only remove mutation to values that are unique aliases in the
   // graph. if x = y[0] or y = self.y, then removing the mutation could
   // change observable semantics
-  if (!newMemoryLocation(mutated_value)) {
+  if (hasSideEffectOrAlias(mutated_value, getOrCreateAliasDb())) {
     return false;
   }
 
@@ -116,7 +116,8 @@ bool MutationRemover::tryMakeUnaliasedIfOutputAndMutationAtomic(
     return false;
   }
 
-  if (!newMemoryLocation(true_value) || !newMemoryLocation(false_value)) {
+  if (hasSideEffectOrAlias(true_value, getOrCreateAliasDb()) ||
+      hasSideEffectOrAlias(false_value, getOrCreateAliasDb())) {
     return false;
   }
 
@@ -327,6 +328,21 @@ bool RemoveTensorMutation(
     c10::optional<std::function<bool(Node*)>> mutation_filter) {
   MutationRemover mr(graph, std::move(mutation_filter));
   return mr.removeTensorMutation();
+}
+
+static const std::unordered_set<Symbol> activation_ops = []() {
+  std::unordered_set<Symbol> target_ops;
+  for (const auto& iter : activation_type_promotion_mapping) {
+    std::string name = std::string(iter.first.toQualString()) + "_";
+    target_ops.insert(Symbol::fromQualString(name));
+  }
+  return target_ops;
+}();
+
+bool InplaceToFunctionalActivation(const std::shared_ptr<Graph>& graph) {
+  return RemoveTensorMutation(graph, [](Node* node) {
+    return activation_ops.count(node->kind()) != 0;
+  });
 }
 
 } // namespace jit
