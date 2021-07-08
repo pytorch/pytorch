@@ -62,11 +62,13 @@ struct GraphTask: std::enable_shared_from_this<GraphTask> {
   std::unordered_map<Node*, InputBuffer> not_ready_;
   std::unordered_map<Node*, int> dependencies_;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   struct ExecInfo {
     struct Capture {
       Capture(const Capture&) = delete;
       Capture(Capture&&) = default;
 
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
       Capture(int input_idx, int output_idx)
           : input_idx_(input_idx), output_idx_(output_idx) {}
       int input_idx_; // within Node inputs
@@ -169,6 +171,7 @@ struct GraphTask: std::enable_shared_from_this<GraphTask> {
   // mutex_ as the two are protecting different data structures.
   std::mutex final_callbacks_lock_;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   GraphTask(
       bool keep_graph,
       bool grad_mode,
@@ -397,6 +400,7 @@ struct TORCH_API Engine {
     // allocated inside Engine::execute and lives for the duration of execute
     std::queue<std::weak_ptr<GraphTask>> graphtasks_queue_;
 
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     ThreadPoolShared() : num_workers_(0) {}
  };
 
