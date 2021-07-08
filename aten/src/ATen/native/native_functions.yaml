@@ -526,22 +526,22 @@
 - func: _dim_arange(Tensor like, int dim) -> Tensor
 
 - func: argmax(Tensor self, int? dim=None, bool keepdim=False) -> Tensor
+  structured_delegate: argmax.out
   device_check: NoCheck   # TensorIterator
   variants: function, method
-  dispatch:
-    CPU, CUDA: argmax
 
 - func: argmax.out(Tensor self, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
   dispatch:
     CPU, CUDA: argmax_out
 
 - func: argmin(Tensor self, int? dim=None, bool keepdim=False) -> Tensor
+  structured_delegate: argmin.out
   device_check: NoCheck   # TensorIterator
   variants: function, method
-  dispatch:
-    CPU, CUDA: argmin
 
 - func: argmin.out(Tensor self, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
   dispatch:
     CPU, CUDA: argmin_out
 
@@ -1280,6 +1280,9 @@
 - func: cov(Tensor self, *, int correction=1, Tensor? fweights=None, Tensor? aweights=None) -> Tensor
   variants: function, method
 
+- func: corrcoef(Tensor self) -> Tensor
+  variants: function, method
+
 - func: cudnn_affine_grid_generator(Tensor theta, int N, int C, int H, int W) -> Tensor grid
   dispatch:
     CUDA: cudnn_affine_grid_generator_forward
@@ -1795,7 +1798,8 @@
     CUDA: resize_cuda_
     QuantizedCPU: quantized_resize_cpu_
 
-- func: empty_quantized(int[] size, Tensor qtensor) -> Tensor
+- func: empty_quantized(int[] size, Tensor qtensor, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  category_override: factory
   variants: function
   dispatch:
     QuantizedCPU, QuantizedCUDA: empty_quantized
@@ -8319,26 +8323,24 @@
 - func: glu.out(Tensor self, int dim=-1, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: glu_out
-    CUDA: legacy::cuda::_thnn_glu_forward_out
+    CPU, CUDA: glu_out
 
 - func: glu(Tensor self, int dim=-1) -> Tensor
   python_module: nn
   dispatch:
-    CPU: glu
-    CUDA: legacy::cuda::_thnn_glu_forward
+    CPU, CUDA: glu
 
 - func: glu_backward.grad_input(Tensor grad_output, Tensor self, int dim, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: glu_backward_out
-    CUDA: legacy::cuda::_thnn_glu_backward_out
+    CPU: glu_backward_cpu_out
+    CUDA: glu_backward_cuda_out
 
 - func: glu_backward(Tensor grad_output, Tensor self, int dim) -> Tensor
   python_module: nn
   dispatch:
-    CPU: glu_backward
-    CUDA: legacy::cuda::_thnn_glu_backward
+    CPU: glu_backward_cpu
+    CUDA: glu_backward_cuda
 
 - func: hardsigmoid.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -8715,6 +8717,7 @@
 
 - func: avg_pool3d_backward.grad_input(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, bool ceil_mode, bool count_include_pad, int? divisor_override, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  structured: True
   dispatch:
     CPU: avg_pool3d_backward_out_cpu
     CUDA: avg_pool3d_backward_out_cuda
@@ -8722,9 +8725,8 @@
 
 - func: avg_pool3d_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, bool ceil_mode, bool count_include_pad, int? divisor_override) -> Tensor
   python_module: nn
+  structured_delegate: avg_pool3d_backward.grad_input
   dispatch:
-    CPU: avg_pool3d_backward_cpu
-    CUDA: avg_pool3d_backward_cuda
     MkldnnCPU: mkldnn_avg_pool3d_backward
 
 # Return: (Tensor output, Tensor indices)
@@ -9534,15 +9536,21 @@
 
 - func: isposinf(Tensor self) -> Tensor
   variants: function, method
+  structured_delegate: isposinf.out
 
 - func: isposinf.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: isposinf_out
 
 - func: isneginf(Tensor self) -> Tensor
   variants: function, method
+  structured_delegate: isneginf.out
 
 - func: isneginf.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: isneginf_out
 
