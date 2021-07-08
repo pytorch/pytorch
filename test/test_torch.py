@@ -7716,8 +7716,7 @@ else:
                     return torch.zeros_like(tensor)
                 handle = tensor.register_hook(hook)
 
-            t = torch.ones((1, 5), device=device)
-            t.requires_grad_()
+            t = torch.ones((1, 5), device=device, requires_grad=True)
             install_hook(t)
 
             # First call to backward
