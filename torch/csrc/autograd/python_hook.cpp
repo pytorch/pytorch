@@ -56,7 +56,7 @@ auto PyFunctionPreHook::operator()(const variable_list& values) -> variable_list
   auto hooks = THPObjectPtr{PyDict_Values(dict)};
   const auto len = PyList_Size(hooks);
   for (Py_ssize_t idx = 0; idx < len; ++idx) {
-    const auto hook = PyList_GetItem(hooks.get(), idx);
+    const auto hook = PyList_GetItem(hooks, idx);
     THPObjectPtr res(PyObject_CallFunctionObjArgs(hook, value.get(), nullptr));
     if (!res) throw python_error();
     if (res == Py_None) continue;
