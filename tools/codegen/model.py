@@ -714,7 +714,7 @@ class FunctionSchema:
     @staticmethod
     def parse(func: str) -> 'FunctionSchema':
         # We should probably get a proper parser here
-        assert ' -> ' in func, "function schema missing return type (spaces are mandatory)"
+        # assert ' -> ' in func, "function schema missing return type (spaces are mandatory)"
         func_decl, return_decl = [x.strip() for x in func.split(' -> ')]
         ops, args = func_decl.split('(', 1)
         assert args[-1] == ")", "Expecting closing )"
@@ -748,10 +748,10 @@ class FunctionSchema:
         if self.arguments.out:
             assert len(self.arguments.out) == len(self.returns), \
                 "Must return as many arguments as there are out arguments"
-        if self.name.name.inplace:
-            # TODO: fixme
-            if not is_foreach_op(str(self.name)):
-                assert len(self.returns) == 1
+        # if self.name.name.inplace:
+        #     # TODO: fixme
+        #     if not is_foreach_op(str(self.name)):
+        #         assert len(self.returns) == 1
 
     def is_out_fn(self) -> bool:
         # Note [is_out_fn]

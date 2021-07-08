@@ -1,28 +1,15 @@
-# TODO(jwtan): Prune some imports.
 import argparse
 import os
-import requests # TODO(jwtan): Figure out the conventional API to use within the PyTorch repo.
+import requests  # TODO(jwtan): Figure out the conventional API to use within the PyTorch repository.
 import subprocess
 import sys
 import tempfile
-import yaml
-
-from collections import OrderedDict, defaultdict, namedtuple
 
 # TODO(jwtan): Figure out why we need this.
 root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, root)
 
-from tools.codegen.gen import LineLoader, error_check_native_functions, parse_native_yaml
-from tools.codegen.model import (Argument, DispatchKey, FunctionSchema,
-                                 Location, NativeFunction,
-                                 NativeFunctionsGroup, OperatorName,
-                                 BackendIndex, BackendMetadata,
-                                 OptionalType, SchemaKind, SelfArgument,
-                                 TensorOptionsArguments, Type, Variant,
-                                 assert_never, is_cuda_dispatch_key,
-                                 is_generic_dispatch_key)
-from tools.codegen.utils import Target, concatMap, context, mapMaybe, YamlDumper, YamlLoader
+from tools.codegen.gen import parse_native_yaml
 
 # Returns the current_version and the base_version if specified by users.
 def get_versions() -> (str, str):
@@ -31,9 +18,7 @@ def get_versions() -> (str, str):
     releases = [release['tag_name'] for release in response.json()]
 
     current_version = releases[0]
-    base_version = releases[1]
 
-    # TODO(jwtan): Figure out a way such that user can just supply the current version, and the base version will default to the previous version.
     parser = argparse.ArgumentParser(description='Diff native functions. Please run this script in the open-source repository.')
     parser.add_argument(
         '-c',
@@ -43,19 +28,22 @@ def get_versions() -> (str, str):
     parser.add_argument(
         '-b',
         '--base-version',
-        help='base PyTorch version for comparison, default: ' + base_version,
-        default=base_version)
+        help='base PyTorch version for comparison, default to the previous version')
     options = parser.parse_args()
 
     current_version = options.current_version
     base_version = options.base_version
 
     release_map = {value: index for index, value in enumerate(releases)}
-    if (current_version not in release_map.keys()) or (base_version not in release_map.keys()):
+    if (current_version not in release_map.keys()) or (base_version != None and base_version not in release_map.keys()):
         # TODO(jwtan): Figure out the conventional way to log/print error.
         print('Input versions are invalid. Valid versions are {}.'.format(releases))
+
+    if base_version == None:
+        base_version = releases[release_map[current_version] + 1]
+
     if release_map[current_version] >= release_map[base_version]:
-        # TODO(jwtan): Figure out the 131313conventional way to log/print error.
+        # TODO(jwtan): Figure out the conventional way to log/print error.
         print('Base version should be older than the current version.')
 
     return current_version, base_version
@@ -64,10 +52,16 @@ def get_versions() -> (str, str):
 # TODO(jwtan): Can we combine get_versions() and get_commits(...)?
 def get_commits(current_version: str, base_version: str) -> (str, str):
     response = requests.get("https://api.github.com/repos/pytorch/pytorch/tags")
-    # TODO(jwtan): We can probably just traverse the response.json().
-    tags = {tag['name']: tag['commit']['sha'] for tag in response.json()}
 
-    return tags[current_version], tags[base_version]
+    current_commit_hash = ''
+    base_commit_hash = ''
+    for tag in response.json():
+        if tag['name'] == current_version:
+            current_commit_hash = tag['commit']['sha']
+        if tag['name'] == base_version:
+            base_commit_hash = tag['commit']['sha']
+
+    return current_commit_hash, base_commit_hash
 
 # Writes the native_functions.yaml of the provided commit to a temp file, and returns the absolute path to the file.
 # Caller should unlink the files when done.
@@ -88,6 +82,7 @@ def calculate_value(function: 'NativeFunction') -> str:
     return str(function.func)
 
 # TODO(jwtan): Consider adding support for the ToT native_functions.yaml.
+# TODO(jwtan): Consider adding support for deleted/deprecated native functions.
 def main() -> None:
     current_version, base_version = get_versions()
     # print(current_version, base_version)
@@ -122,15 +117,17 @@ def main() -> None:
             continue
 
         new_functions.append(value)
+    mismatched_jit_schema_functions.sort()
+    new_functions.sort()
 
-    print('The following functions has breaking changes:\n')
+    print('The following functions, total {}, have breaking changes:\n'.format(len(mismatched_jit_schema_functions)))
     for functions in mismatched_jit_schema_functions:
         print(current_version + ': ' + functions[0])
         print(base_version + ': ' + functions[1] + '\n')
 
     print('\n============================================\n')
 
-    print('The following functions are newly added in {}:\n'.format(current_version))
+    print('The following functions, total {}, are newly added in {}:\n'.format(len(new_functions), current_version))
     for function in new_functions:
         print(function)
 
