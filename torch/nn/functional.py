@@ -4179,7 +4179,7 @@ def _pad(input: Tensor, pad: List[int], mode: str = "constant", value: float = 0
         elif input.dim() == 5:
             assert len(pad) == 6, "5D tensors expect 6 values for padding"
             if mode == "reflect":
-                return torch._C._nn.reflection_pad3d(input, pad)
+                raise NotImplementedError
             elif mode == "replicate":
                 return torch._C._nn.replication_pad3d(input, pad)
             elif mode == "circular":

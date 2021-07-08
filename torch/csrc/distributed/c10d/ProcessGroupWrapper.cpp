@@ -2,6 +2,8 @@
 
 #ifdef USE_C10D_GLOO
 
+#include <c10/core/Allocator.h>
+#include <c10/core/DeviceType.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/Exception.h>
@@ -23,46 +25,71 @@ struct CollectiveFingerPrint {
   // Ref to input tensors, if given, of the collective. If given, shapes will be
   // checked across processes to ensure valid input into the collective.
   const std::vector<at::Tensor>& input_tensors_;
+  // input tensor data types
+  std::vector<int8_t> tensor_dtypes_;
+  // input tensor device types
+  std::vector<int8_t> tensor_device_types_;
   explicit CollectiveFingerPrint(
       OpType op_type,
       const std::vector<at::Tensor>& input_tensors)
-      : op_type_(op_type), input_tensors_(input_tensors) {}
-
-  // Verifies a given int is the same across processes.
-  void verify_num(
-      int64_t value,
-      const c10::intrusive_ptr<ProcessGroup>& pg,
-      const std::string& failureMsg) {
-    auto tensor = at::full({1}, value, at::TensorOptions().dtype(at::kLong));
-    std::vector<at::Tensor> tensors;
-    tensors.reserve(pg->getSize());
-    for (int i = 0; i < pg->getSize(); ++i) {
-      tensors.emplace_back(at::zeros_like(tensor));
-    }
-    std::vector<std::vector<at::Tensor>> out_tensors({tensors});
-    std::vector<at::Tensor> inp_tensors({tensor});
-    pg->allgather(out_tensors, inp_tensors)->wait();
-    std::unordered_set<int64_t> gathered;
-    for (const auto& t : out_tensors[0]) {
-      auto n = t.item().to<int64_t>();
-      gathered.insert(n);
-      if (gathered.size() > 1) {
-        TORCH_CHECK(false, failureMsg);
-      }
+      : op_type_(op_type), input_tensors_(input_tensors) {
+    tensor_dtypes_.reserve(input_tensors.size());
+    tensor_device_types_.reserve(input_tensors.size());
+    for (const at::Tensor& t : input_tensors_) {
+      tensor_dtypes_.push_back(static_cast<int8_t>(t.dtype().toScalarType()));
+      tensor_device_types_.push_back(static_cast<int8_t>(t.device().type()));
     }
   }
 
-  // Verifies that shapes are consistent across processes.
-  // shape_tensors_to_report should be specified as the tensors to report when a
-  // shape inconsistency is found. This is not necessarily shape_tensors such as
-  // in the case we are checking shape dimensionality.
-  void verify_shapes(
-      std::vector<at::Tensor> shape_tensors,
-      std::vector<at::Tensor> shape_tensors_to_report,
+  // Logs collective information in case of a failure.
+  friend std::ostream& operator<<(
+      std::ostream& output,
+      const CollectiveFingerPrint& collective_fingerprint);
+
+  at::Tensor serialize_fingerprint() {
+    auto data = std::make_unique<std::vector<int64_t>>();
+    // std::vector<int64_t> data;
+    // OpType
+    data->push_back(static_cast<int64_t>(op_type_));
+    // Shapes
+    for (const auto& tensor : input_tensors_) {
+      auto sizes = tensor.sizes().vec();
+      for (const auto& s : sizes) {
+        data->push_back(s);
+      }
+    }
+    // tensor dtypes
+    for (const auto& type : tensor_dtypes_) {
+      data->push_back(type);
+    }
+    // device types
+    for (const auto& d : tensor_device_types_) {
+      data->push_back(d);
+    }
+    // Serialize data into tensor
+    int64_t data_size = data->size();
+    // Need to release here and get the ptr due to C++ parameter evaluation
+    // order.
+    auto d = data.release();
+    at::Tensor serialized_tensor =
+        at::for_blob(d->data(), {data_size})
+            .context(
+                d,
+                [](void* ctx) {
+                  delete static_cast<std::vector<int64_t>*>(ctx);
+                })
+            .options(at::TensorOptions().dtype(at::kLong))
+            .make_tensor();
+    return serialized_tensor;
+  }
+
+  void verify_tensors(
+      std::vector<at::Tensor>& tensors_to_verify,
       c10::intrusive_ptr<ProcessGroup>& pg) {
+    // Create output tensor data structure to pass into allgather.
     std::vector<std::vector<at::Tensor>> output_tensors;
-    output_tensors.reserve(shape_tensors.size());
-    for (auto & tensor_shape : shape_tensors) {
+    output_tensors.reserve(tensors_to_verify.size());
+    for (auto& tensor_shape : tensors_to_verify) {
       std::vector<at::Tensor> outputs;
       outputs.reserve(pg->getSize());
       for (int i = 0; i < pg->getSize(); ++i) {
@@ -71,22 +98,18 @@ struct CollectiveFingerPrint {
       output_tensors.emplace_back(outputs);
     }
     // Allgather tensor shapes.
-    pg->allgather(output_tensors, shape_tensors)->wait();
+    pg->allgather(output_tensors, tensors_to_verify)->wait();
     // Verify equivalence
     for (const auto i : c10::irange(output_tensors.size())) {
-      auto world_tensor_shapes = output_tensors[i];
-      auto reference_shape_tensor = shape_tensors[i];
-      for (const auto& rank_tensor_shape : world_tensor_shapes) {
-        if (!rank_tensor_shape.equal(reference_shape_tensor)) {
-          TORCH_CHECK(
-              false,
-              c10::str(
-                  "Error when verifying shape tensors for collective ",
-                  opTypeToString(op_type_),
-                  " on rank ",
-                  pg->getRank(),
-                  ". This likely indicates that input shapes into the collective are mismatched across ranks. Got shapes: ",
-                  shape_tensors_to_report));
+      const std::vector<at::Tensor> gathered_tensors = output_tensors[i];
+      const at::Tensor reference_tensor = tensors_to_verify[i];
+      for (const auto& rank_tensor : gathered_tensors) {
+        if (!rank_tensor.equal(reference_tensor)) {
+          std::stringstream ss;
+          ss << "Detected mismatch between collectives on ranks. Rank "
+             << pg->getRank()
+             << " is running inconsistent collective: " << *this;
+          TORCH_CHECK(false, ss.str());
         }
       }
     }
@@ -94,58 +117,58 @@ struct CollectiveFingerPrint {
 
   // Executes and verifies the collective fingerprint.
   void verify(c10::intrusive_ptr<ProcessGroup> pg) {
-    // For collectives, all ranks should participate and call into them in the
-    // same order. Verify the same operation type is being requested.
-    int64_t op_type_int = static_cast<int64_t>(op_type_);
-    verify_num(
-        op_type_int,
-        pg,
-        c10::str(
-            "Mismatch between collective operation types across ranks.",
-            "This likely indicates an application bug where different ranks are ",
-            "calling different collectives. ",
-            "Rank ",
-            pg->getRank(),
-            " is calling collective: ",
-            opTypeToString(op_type_)));
-    // Retrieve input tensor shapes.
-    std::vector<at::Tensor> shape_tensors =
-        c10d::getTensorShapes(input_tensors_);
-    // If input_tensors_ is empty we would get no shape tensors back, but still
-    // do verification in case input_tensors_.empty() is
-    // inconsistent across ranks. In this case, sub in a single zeros tensor and
-    // ensure all ranks agree, because gloo pg does not allow collectives with
-    // empty inputs.
-    if (shape_tensors.size() == 0) {
-      shape_tensors = {at::zeros(1)};
-    }
-    // Verify dimensionality of shapes. This catches errors where tensor shapes
-    // have different dimensions such as torch.randn(2, 3) vs torch.randn(2, 3,
-    // 4). If we did not do this step and instead proceeded directly with
-    // verifying tensor shapes, we would have malformed input into allgather()
-    // and crash with an unhelpful error.
-    std::vector<at::Tensor> meta_shape_tensors =
-        c10d::getTensorShapes(shape_tensors);
-
-    verify_shapes(
-        meta_shape_tensors, /* shape_tensors_to_report= */ shape_tensors, pg);
-
-    // If all meta shapes are 0 then we can skip the below verification since
-    // it is not possible that there would be a difference. This happens only
-    // when the tensor wraps a single scalar.
-    bool skip = true;
-    for (auto & t : meta_shape_tensors) {
-      if (t.item().to<int64_t>() != 0) {
-        skip = false;
-        break;
-      }
-    }
-    if (!skip) {
-      verify_shapes(
-          shape_tensors, /* shape_tensors_to_report= */ shape_tensors, pg);
-    }
+    at::Tensor serialized_tensor = serialize_fingerprint();
+    std::vector<at::Tensor> inp{serialized_tensor};
+    // First verify tensor shapes. This is needed because if e.g. tensor dim
+    // does not match across processes, directly verifying tensors will result
+    // in a crash during allgather, but we'd actually like to report a
+    // description about the inconsistency. Since the input is just a 1D tensor
+    // the shape will be a single int k_i and we need to make sure k_i is
+    // consistent across the whole world.
+    std::vector<at::Tensor> sp = c10d::getTensorShapes(inp);
+    verify_tensors(sp, pg);
+    // Now verify consistency for the actual tensor.
+    verify_tensors(inp, pg);
   }
 };
+
+std::ostream& operator<<(
+    std::ostream& output,
+    const CollectiveFingerPrint& collective_fingerprint) {
+  std::string collectiveInfo;
+  if (!collective_fingerprint.input_tensors_.empty()) {
+    // Convert dtype and device type info to string.
+    std::vector<std::string> dtype_strs;
+    std::vector<std::string> device_type_strs;
+    for (const auto& tensor_dtype : collective_fingerprint.tensor_dtypes_) {
+      dtype_strs.push_back(
+          c10::toString(static_cast<at::ScalarType>(tensor_dtype)));
+    }
+    for (const auto& tensor_device_type :
+         collective_fingerprint.tensor_device_types_) {
+      device_type_strs.push_back(
+          c10::toString(static_cast<at::DeviceType>(tensor_device_type)));
+    }
+
+    collectiveInfo = c10::str(
+        "CollectiveFingerPrint(",
+        "OpType=",
+        opTypeToString(collective_fingerprint.op_type_),
+        ", TensorShape=",
+        (collective_fingerprint.input_tensors_)[0].sizes(),
+        ", TensorDtypes=",
+        (dtype_strs),
+        ", TensorDeviceTypes=",
+        (device_type_strs));
+  } else {
+    collectiveInfo = c10::str(
+        "CollectiveFingerPrint(",
+        "OpType=",
+        opTypeToString(collective_fingerprint.op_type_));
+  }
+  return output << collectiveInfo;
+}
+
 } // namespace
 
 ProcessGroupWrapper::ProcessGroupWrapper(
@@ -163,7 +186,7 @@ const std::string ProcessGroupWrapper::getBackendName() const {
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::broadcast(
     std::vector<at::Tensor>& data,
     const BroadcastOptions& opts) {
-  runCollectiveChecks(OpType::BARRIER, data);
+  runCollectiveChecks(OpType::BROADCAST, data);
   return pg_->broadcast(data, opts);
 }
 

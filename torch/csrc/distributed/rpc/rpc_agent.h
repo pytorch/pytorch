@@ -287,6 +287,7 @@ class TORCH_API RpcAgent {
   std::atomic<bool> rpcAgentRunning_;
 
  private:
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static std::shared_ptr<RpcAgent> currentRpcAgent_;
   // Add GIL wait time data point to metrics
   virtual void addGilWaitTime(const std::chrono::microseconds gilWaitTime) = 0;

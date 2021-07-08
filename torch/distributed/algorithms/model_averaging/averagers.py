@@ -28,7 +28,7 @@ class PeriodicModelAverager:
 
         >>>  import torch
         >>>  import torch.distributed as dist
-        >>>  import torch.distributed .algorithms.model_averaging.averagers as averagers
+        >>>  import torch.distributed.algorithms.model_averaging.averagers as averagers
         >>>  import torch.nn as nn
         >>>
         >>>  dist.init_process_group("nccl", rank=rank, world_size=16)
@@ -50,7 +50,7 @@ class PeriodicModelAverager:
         >>>     optimizer.step()
         >>>     # Average parameters globally after ``optimizer.step()``.
         >>>     # Thus, the inter-node communication only occurs periodically after ``warmup_steps``.
-        >>>     averager.average_parameters(step)
+        >>>     averager.average_parameters()
 
     .. warning ::
         `PeriodicModelAverager` is experimental and subject to change.
@@ -80,14 +80,14 @@ class PeriodicModelAverager:
         self.process_group = (
             process_group if process_group is not None else dist.group.WORLD
         )
+        self.step = 0
 
-    def average_parameters(self, step: int):
+    def average_parameters(self):
         r"""
-        Averages parameters if the given step is in less than ``warmup_steps``,
-        or it can be divided by ``period``.
-
-        Args:
-            step (int): Training step.
+        Averages parameters if ``step`` is less than ``warmup_steps``,
+        or it can be divided by ``period``, where ``step`` is increased by 1
+        at each iteration in the training loop.
         """
-        if step < self.warmup_steps or step % self.period == 0:
+        if self.step < self.warmup_steps or self.step % self.period == 0:
             utils.average_parameters(self.module, self.process_group)
+        self.step += 1

@@ -9,7 +9,7 @@ from jit.test_recursive_script import TestRecursiveScript  # noqa: F401
 from jit.test_type_sharing import TestTypeSharing  # noqa: F401
 from jit.test_logging import TestLogging  # noqa: F401
 from jit.test_backends import TestBackends, TestBackendsWithCompiler  # noqa: F401
-from jit.test_list_dict import TestList, TestDict, TestNamedTuple, TestScriptDict  # noqa: F401
+from jit.test_list_dict import TestList, TestDict, TestNamedTuple, TestScriptDict, TestScriptList  # noqa: F401
 from jit.test_async import TestAsync  # noqa: F401
 from jit.test_data_parallel import TestDataParallel  # noqa: F401
 from jit.test_models import TestModels  # noqa: F401
@@ -57,6 +57,7 @@ from jit.test_tensor_creation_ops import TestTensorCreationOps  # noqa: F401
 from jit.test_module_apis import TestModuleAPIs  # noqa: F401
 from jit.test_script_profile import TestScriptProfile  # noqa: F401
 from jit.test_convert_activation import TestFunctionalToInplaceActivation, TestInplaceToFunctionalActivation  # noqa: F401
+from jit.test_parametrization import TestParametrization  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -132,7 +133,6 @@ def canonical(graph):
 
 def LSTMCellF(input, hx, cx, *params):
     return LSTMCell(input, (hx, cx), *params)
-
 
 def doAutodiffCheck(testname):
     # TODO: setting false on test itself is not working
@@ -1744,20 +1744,18 @@ graph(%Ra, %Rb):
         def equation_format(x, y):
             return torch.einsum('i,j->ij', (x, y))
 
+        def equation_format_varargs(x, y):
+            return torch.einsum('i,j->ij', x, y)
+
         def sublist_format(x, y):
             return torch.einsum(x, [0], y, [1], [0, 1])
-
-        # Sublist format cannot be scripted because it is
-        # a NumPy API only feature
-        with self.assertRaises(RuntimeError):
-            torch.jit.script(sublist_format)
 
         x = make_tensor((5,), 'cpu', torch.float32)
         y = make_tensor((10,), 'cpu', torch.float32)
 
-        check(equation_format, torch.jit.script(equation_format), x, y)
-        check(equation_format, torch.jit.trace(equation_format, (x, y)), x, y)
-        check(sublist_format, torch.jit.trace(sublist_format, (x, y)), x, y)
+        for fn in [equation_format, equation_format_varargs, sublist_format]:
+            check(fn, torch.jit.script(fn), x, y)
+            check(fn, torch.jit.trace(fn, (x, y)), x, y)
 
     def test_python_ivalue(self):
         # Test if pure python object can be hold as IValue and conversion
@@ -14150,6 +14148,131 @@ dedent """
         with self.assertRaisesRegex(RuntimeError, r"Expected a value of type \'Tensor \(inferred\)\' "
                                                   r"for argument \'value\' but instead found type \'int\'."):
             torch.jit.script(test_error)
+
+    def test_namedtuple_default_values_simple_type(self):
+
+        class Point(NamedTuple):
+            x: Optional[int] = None
+            y: int = 2
+
+        make_global(Point)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+
+            def forward(self, point: Point):
+                return point
+
+        p = Point(x=3, y=2)
+
+        self.checkModule(M(), (p,))
+        self.checkModule(M(), (Point(),))
+
+        m = torch.jit.script(M())
+
+        FileCheck().check(r"NamedTuple(x : int? = None, y : int = 2))")   \
+                   .run(m.graph)
+
+    def test_namedtuple_default_values_missing(self):
+
+        class Point(NamedTuple):
+            x: Optional[int]
+            y: int
+            z: int = 3
+
+        make_global(Point)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+
+            def forward(self, point: Point):
+                return point
+
+        p1 = Point(x=3, y=2)
+        p2 = Point(x=3, y=2, z=1)
+
+        self.checkModule(M(), (p1,))
+        self.checkModule(M(), (p2,))
+
+        m = torch.jit.script(M())
+
+        FileCheck().check(r"NamedTuple(x : int?, y : int, z : int = 3))")   \
+                   .run(m.graph)
+
+    def test_namedtuple_default_values_container_type(self):
+
+        class Point(NamedTuple):
+            x: Optional[List[int]] = None
+            y: List[int] = [1, 2, 3]
+            z: Optional[Dict[str, int]] = {"a": 1}
+
+        make_global(Point)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+
+            def forward(self, point: Point):
+                return point
+
+        p = Point(x=[4, 5, 6], y=[3, 2, 1], z={"b": 2})
+
+        self.checkModule(M(), (p,))
+        self.checkModule(M(), (Point(),))
+
+        m = torch.jit.script(M())
+
+        first_line = r"NamedTuple(x : int[]? = None, y : int[] = "    \
+                     r"[1, 2, 3], z : Dict(str, int)? = {a: 1}))"
+
+        FileCheck().check(first_line)   \
+                   .run(m.graph)
+
+    def test_namedtuple_default_values_Tensor_type(self):
+
+        class Point(NamedTuple):
+            x: torch.Tensor = torch.rand(2, 3)
+
+        make_global(Point)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+
+            def forward(self, point: Point):
+                return point
+
+        p = Point(x=torch.rand(2, 3))
+
+        with self.assertRaisesRegex(RuntimeError, "Tensors are not "
+                                    "supported as default NamedTuple "
+                                    "fields"):
+            m = torch.jit.script(M())
+            m(p)
+
+    @unittest.skipIf(sys.version_info < (3, 7, 0), "defaults keyword added in Python 3.8")
+    def test_namedtuple_default_values_using_factory_constructor(self):
+        Pair = namedtuple("Pair", ["x", "y"], defaults=(1, 2))
+
+        make_global(Pair)
+
+        @torch.jit.script
+        def fn(x: Pair) -> Pair:
+            return x
+
+        # TODO: We can't use `checkScript` with the NamedTuple factory
+        # constructor. Using the factory constructor with TorchScript
+        # TorchScript creates an anonymous `NamedTuple` class instead of
+        # preserving the actual name. For example, the actual generated
+        # signature in this case is:
+        #   graph(%x.1 : NamedTuple(x : Tensor, y : Tensor))
+        # It looks like similar test cases have had this issue as well
+        # (see: `test_namedtuple_python`).
+        FileCheck().check(r"NamedTuple(x : Tensor = 1, y : Tensor = 2))")   \
+                   .check_next(r"return (%x.1)")    \
+                   .run(fn.graph)
 
     def test_isinstance_dynamic(self):
         @torch.jit.script
