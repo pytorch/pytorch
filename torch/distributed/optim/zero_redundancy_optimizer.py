@@ -62,6 +62,7 @@ def _broadcast_object(
     r"""
     Broadcasts an object to the given group, sending the object if called from
     the source rank and receiving the object otherwise.
+
     Arguments:
         obj: object to broadcast; only used if called on the source rank.
         src_rank (int): source rank.
@@ -69,6 +70,7 @@ def _broadcast_object(
             (default: ``dist.group.WORLD``).
         device (``torch.device``, optional): device to send from or receive
             to (default: ``torch.device("cpu")``).
+
     Returns:
         The broadcasted object.
     """
@@ -276,6 +278,7 @@ class ZeroRedundancyOptimizer(Optimizer):
         # Sync the exposed `param_groups` attributes to the local optimizer in
         # case they have been updated
         self._sync_param_groups(self.param_groups, self.optim.param_groups)
+
         # Pull the sharded state from all ranks and store them in rank order
         empty_messenger = torch.tensor([0], dtype=torch.uint8, device=self._default_device)
 
@@ -301,8 +304,9 @@ class ZeroRedundancyOptimizer(Optimizer):
                         group=self.group,
                         device=self._default_device,
                     )
-                     self._all_state_dicts.append(
-                        _recursive_copy_to_device(local_state_dict, non_blocking=True, device=torch.device("cpu"))
+                    self._all_state_dicts.append(
+                        _recursive_copy_to_device(local_state_dict, non_blocking=True, device=torch.device("cpu")
+                    )
             else:
                 if rank == self.rank:
                     # Send the optimizer state to the target rank
