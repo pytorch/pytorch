@@ -3812,7 +3812,7 @@ non_linear_activations_extra_info: Dict[str, dict] = {
     'CELU': {'constructor_args': (2.,)},
     'Threshold': {'constructor_args': (2., 1.)},
     'Hardsigmoid': {'check_gradgrad': False, 'check_jit': False},
-    'Hardswish': {'check_gradgrad': False},
+    'Hardswish': {'check_gradgrad': False, 'check_jit': False},
     # For RRelu, test that compare CPU and GPU results fail because RNG
     # is different between CPU and GPU
     'RReLU': {'test_cuda': False},
