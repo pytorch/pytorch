@@ -362,21 +362,15 @@ def linear_check(tensor_type, module_instance):
     else:
         raise TypeError(f'Type {tensor_type} must have rank 2 or more.')
 
+
 @register_inference_rule(torch.nn.Linear)
 def linear_inference_rule(n: Node, module_instance):
     assert isinstance(n.args[0], Node)
     if isinstance(n.args[0].type, TensorType) and isinstance(n.type, TensorType):
-        if is_consistent(n.args[0].type, n.type):
-            # Todo: type inference for argument
-            new_res_type_from_arg = linear_check(n.args[0].type, module_instance)
-            new_res_type_from_node = linear_check(n.type, module_instance)
-            n.type = new_res_type_from_node
-            if is_more_precise(new_res_type_from_arg, n.type):
-                n.type = new_res_type_from_arg
-            return n.type
-        else:
-            raise TypeError(f'Argument type {n.args[0].type} and node type {n.type} are inconsistent.'
-                            f' Cannot apply {module_instance} operation to {n}')
+        # Todo: type inference for argument
+        new_res_type_from_arg = linear_check(n.args[0].type, module_instance)
+        n.type = get_greatest_upper_bound(new_res_type_from_arg, n.type)
+        return n.type
 
     elif isinstance(n.args[0].type, TensorType) and n.type == Dyn:
         new_type = linear_check(n.args[0].type, module_instance)
@@ -385,13 +379,12 @@ def linear_inference_rule(n: Node, module_instance):
 
     elif isinstance(n.type, TensorType) and n.args[0].type == Dyn:
         # Todo: type inference for argument
-        new_type = linear_check(n.type, module_instance)
-        n.type = new_type
+        new_type = linear_check(n.args[0].type, module_instance)
+        n.type = get_greatest_upper_bound(new_type, n.type)
         return n.type
 
     elif n.args[0].type == Dyn and n.type == Dyn:
         return Dyn
-
     else:
         raise TypeError(f'Wrong types {n.type} and {n.args[0].type} in {module_instance}')
 
