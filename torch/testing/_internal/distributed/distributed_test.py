@@ -11,7 +11,7 @@ from collections import namedtuple
 from contextlib import contextmanager, suppress
 from datetime import timedelta
 from functools import reduce
-from typing import Union, NamedTuple
+from typing import Union, NamedTuple, Callable, Any
 
 import torch
 import torch.cuda
@@ -183,6 +183,8 @@ class DDPUnevenTestInput(NamedTuple):
     inp: Union[torch.tensor, tuple]
     sync_interval: int
     throw_on_early_termination: bool = False
+    hook: Callable = None
+    state: Any = None
 
 
 class _FC2(nn.Module):
@@ -5384,6 +5386,11 @@ class DistributedTest:
                 bucket_cap_mb=1,
                 find_unused_parameters=find_unused_params,
             )
+            # Register hook if specified
+            if test_case.hook is not None:
+                net.register_comm_hook(test_case.state, test_case.hook)
+                print(f"registered hook {test_case.hook}")
+
 
             # Determine num iters for this rank via the passed in mapping.
             num_iters = iteration_mapping[rank]
@@ -5601,6 +5608,35 @@ class DistributedTest:
                     sync_interval=1,
                 ),
             ]
+
+            # Test models that have hook installed.
+            models_with_hook = [
+                DDPUnevenTestInput(
+                    name="small_model_allreduce_hook",
+                    model=small_model,
+                    hook=default.allreduce_hook,
+                    state=None,
+                    inp=torch.ones(batch, dim, device=rank),
+                    sync_interval=1,
+                ),
+                DDPUnevenTestInput(
+                    name="small_model_power_sgd_hook",
+                    model=small_model,
+                    hook=powerSGD.powerSGD_hook,
+                    state=powerSGD.PowerSGDState(
+                        process_group=None,
+                        matrix_approximation_rank=1,
+                        # Config so that powerSGD runs immediately instead of
+                        # allreduce.
+                        start_powerSGD_iter=1,
+                        warm_start=False,
+                        use_error_feedback=False,
+                    ),
+                    inp=torch.ones(batch, dim, device=rank),
+                    sync_interval=1,
+                ),
+            ]
+            models_to_test.extend(models_with_hook)
 
             # Add resnet model if we have torchvision installed.
             if HAS_TORCHVISION:

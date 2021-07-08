@@ -2683,9 +2683,11 @@ class ShapeFuncInfo(OpInfo):
                                             **kwargs)
         self.ref = ref
 
-def sample_inputs_foreach(self, device, dtype, N, *, noncontiguous=False):
-    tensors = [make_tensor((N - i, N - i), device, dtype, noncontiguous=noncontiguous) for i in range(N)]
-    return tensors
+def sample_inputs_foreach(self, device, dtype, N, *, noncontiguous=False, same_size=False):
+    if same_size:
+        return [make_tensor((N, N), device, dtype, noncontiguous=noncontiguous) for _ in range(N)]
+    else:
+        return [make_tensor((N - i, N - i), device, dtype, noncontiguous=noncontiguous) for i in range(N)]
 
 
 def get_foreach_method_names(name):
@@ -2709,6 +2711,7 @@ class ForeachFuncInfo(OpInfo):
                  dtypesIfCUDA=floating_and_complex_types_and(torch.half),
                  dtypesIfROCM=None,
                  safe_casts_outputs=True,
+                 supports_alpha_param=False,
                  sample_inputs_func=sample_inputs_foreach,
                  **kwargs):
         super().__init__(
@@ -2727,6 +2730,7 @@ class ForeachFuncInfo(OpInfo):
         self.inplace_variant = foreach_method_inplace
         self.ref = torch_ref_method
         self.ref_inplace = torch_ref_inplace
+        self.supports_alpha_param = supports_alpha_param
 
 
 def sample_inputs_linalg_cholesky_inverse(op_info, device, dtype, requires_grad=False):
@@ -4641,6 +4645,31 @@ foreach_unary_op_db: List[OpInfo] = [
         dtypesIfCUDA=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
         safe_casts_outputs=False,
         supports_forward_ad=True,
+    ),
+]
+
+foreach_binary_op_db: List[OpInfo] = [
+    ForeachFuncInfo(
+        "add",
+        dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+        dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+        supports_alpha_param=True,
+    ),
+    ForeachFuncInfo(
+        "sub",
+        dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+        dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+        supports_alpha_param=True,
+    ),
+    ForeachFuncInfo(
+        "mul",
+        dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+        dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+    ),
+    ForeachFuncInfo(
+        "div",
+        dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+        dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
     ),
 ]
 
