@@ -603,8 +603,8 @@ def _to_tensor_pair(
     Args:
         actual (Any): Actual tensor-or-scalar-like.
         expected (Any): Expected tensor-or-scalar-like.
-        allow_subclasses (bool): If ``True`` inputs of a common superclass are allowed. Otherwise type equality is
-            required.
+        allow_subclasses (bool): If ``True`` (default) and except for Python scalars, inputs of directly related types
+            are allowed. Otherwise type equality is required.
 
     Returns:
         (Optional[_TestingErrorMeta], Optional[_TensorPair]): The two elements are orthogonal, i.e. if the first is
@@ -640,8 +640,8 @@ def _parse_inputs(
     Args:
         actual (Any): Actual input.
         expected (Any): Expected input.
-        allow_subclasses (bool): If ``True`` inputs of a common superclass are allowed. Otherwise type equality is
-            required.
+        allow_subclasses (bool): If ``True`` (default) and except for Python scalars, inputs of directly related types
+            are allowed. Otherwise type equality is required.
 
     Returns:
         (Tuple[Optional[_TestingErrorMeta], Optional[Union[_TensorPair, List, Dict]]]): The two elements are
@@ -749,17 +749,23 @@ def assert_close(
     :meth:`~torch.Tensor.qscheme` and the result of :meth:`~torch.Tensor.dequantize` is close according to the
     definition above.
 
-    :attr:`actual` and :attr:`expected` can be :class:`~torch.Tensor`'s or any tensor-or-scalar-like that share the a
-    common superclass (if :attr:`allow_subclasses` is ``True``), from which :class:`torch.Tensor`'s can be constructed
-    with :func:`torch.as_tensor`. In addition, :attr:`actual` and :attr:`expected` can be
+    :attr:`actual` and :attr:`expected` can be :class:`~torch.Tensor`'s or any tensor-or-scalar-likes from which
+    :class:`torch.Tensor`'s can be constructed with :func:`torch.as_tensor`. Except for Python scalars the input types
+    have to be directly related. In addition, :attr:`actual` and :attr:`expected` can be
     :class:`~collections.abc.Sequence`'s or :class:`~collections.abc.Mapping`'s in which case they are considered close
     if their structure matches and all their elements are considered close according to the above definition.
+
+    .. note::
+
+        Python scalars are an exception to the type relation requirement, because their :func:`type`, i.e.
+        :class:`int`, :class:`float`, and :class:`complex`, is equivalent to the ``dtype`` of a tensor-like. Thus,
+        Python scalars of different types can be checked, but require :attr:`check_dtype` to be set to ``False``.
 
     Args:
         actual (Any): Actual input.
         expected (Any): Expected input.
-        allow_subclasses (bool): If ``True`` (default), inputs of directly related types are allowed. Otherwise type
-            equality is required.
+        allow_subclasses (bool): If ``True`` (default) and except for Python scalars, inputs of directly related types
+            are allowed. Otherwise type equality is required.
         rtol (Optional[float]): Relative tolerance. If specified :attr:`atol` must also be specified. If omitted,
             default values based on the :attr:`~torch.Tensor.dtype` are selected with the below table.
         atol (Optional[float]): Absolute tolerance. If specified :attr:`rtol` must also be specified. If omitted,
@@ -783,8 +789,9 @@ def assert_close(
     Raises:
         UsageError: If no :class:`torch.Tensor` can be constructed from an input.
         UsageError: If only :attr:`rtol` or :attr:`atol` is specified.
-        AssertionError: If corresponding tensor-or-scalar-likes do not share a common superclass.
-        AssertionError: If :attr:`allow_subclasses` is ``False``, but tensor-or-scalar-likes have different types.
+        AssertionError: If corresponding inputs are not Python scalars and are not directly related.
+        AssertionError: If :attr:`allow_subclasses` is ``False``, but corresponding inputs are not Python scalars and
+            have different types.
         AssertionError: If the inputs are :class:`~collections.abc.Sequence`'s, but their length does not match.
         AssertionError: If the inputs are :class:`~collections.abc.Mapping`'s, but their set of keys do not match.
         AssertionError: If corresponding tensors do not have the same :attr:`~torch.Tensor.shape`.
@@ -908,8 +915,8 @@ def assert_close(
         ...
         AssertionError: Except for Python scalars, input types need to be directly
         related, but got <class 'numpy.ndarray'> and <class 'torch.Tensor'> instead.
-        >>> # Exceptions to all of this are Python scalars. Regardless of their type, they can
-        >>> # be compared if check_dtype=False.
+        >>> # Exceptions to these rules are Python scalars. They can be checked regardless of
+        >>> # their type if check_dtype=False.
         >>> torch.testing.assert_close(1.0, 1, check_dtype=False)
 
         >>> # NaN != NaN by default.
