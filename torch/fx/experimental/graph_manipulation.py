@@ -211,6 +211,7 @@ def serialize_weight(tensor: torch.Tensor, weights: Dict, name: str) -> Dict:
     weight_dict: Dict[str, Dict] = {name: {}}
     weight_dict[name]["dtype"] = str(tensor.dtype)
     weight_dict[name]["shape"] = serialize_shape(tensor.shape)
+    weight_dict[name]["requires_grad"] = str(tensor.requires_grad)
     weight_dict[name]["is_quantized"] = tensor.is_quantized
     weight_dict[name]["stride"] = serialize_stride(tensor.stride())
 
@@ -303,6 +304,7 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
         node_rep = {
             "shape": serialize_shape(tensor_meta.shape),
             "dtype": str(tensor_meta.dtype),
+            "requires_grad": str(tensor_meta.requires_grad),
             "stride": serialize_stride(tensor_meta.stride),
             "is_quantized": tensor_meta.is_quantized,
         }
