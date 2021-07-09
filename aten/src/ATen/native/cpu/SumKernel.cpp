@@ -11,6 +11,24 @@ namespace at {
 namespace native {
 namespace {
 
+// These macros help decrease duplicate code for AVX2 & AVX512
+#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#define outer_sum_bf16_vec  __m128i
+#define inner_sum_bf16_vec __m256i
+#define inner_sum_float_vec_add _mm256_add_ps
+#define float_vec __m256
+#define load_outer_sum_bf16_vec _mm_loadu_si128
+#define load_float_vec _mm256_loadu_si256
+#elif defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
+#define outer_sum_bf16_vec  __m256i
+#define inner_sum_bf16_vec __m512i
+#define inner_sum_float_vec_add _mm512_add_ps
+#define float_vec __m512
+#define load_outer_sum_bf16_vec _mm256_loadu_si256
+#define load_float_vec _mm512_loadu_si512
+#endif
+
+
 template <typename scalar_t>
 struct LoadPolicy {
   static scalar_t load(const char * C10_RESTRICT data, int64_t stride, int64_t index) {
@@ -71,32 +89,18 @@ struct InnerSumCastLoadPolicy<scalar_t, scalar_t>:
     LoadPolicy<scalar_t> {
 };
 
-#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#if (defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
 template <>
 struct InnerSumCastLoadPolicy<Vectorized<c10::BFloat16>, Vectorized<float>> {
   using vec_t = Vectorized<c10::BFloat16>;
   using vacc_t = Vectorized<float>;
 
   static vacc_t load(const char * C10_RESTRICT data, int64_t stride, int64_t index) {
-    auto ptr = reinterpret_cast<const __m256i*>(data + stride * index);
-    __m256i values = _mm256_loadu_si256(ptr);
-    __m256 first, second;
+    auto ptr = reinterpret_cast<const inner_sum_bf16_vec*>(data + stride * index);
+    inner_sum_bf16_vec values = load_float_vec(ptr);
+    float_vec first, second;
     cvtbf16_fp32(values, first, second);
-    return _mm256_add_ps(first, second);
-  }
-};
-#elif defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
-template <>
-struct InnerSumCastLoadPolicy<Vectorized<c10::BFloat16>, Vectorized<float>> {
-  using vec_t = Vectorized<c10::BFloat16>;
-  using vacc_t = Vectorized<float>;
-
-  static vacc_t load(const char * C10_RESTRICT data, int64_t stride, int64_t index) {
-    auto ptr = reinterpret_cast<const __m512i*>(data + stride * index);
-    __m512i values = _mm512_loadu_si512(ptr);
-    __m512 first, second;
-    cvtbf16_fp32(values, first, second);
-    return _mm512_add_ps(first, second);
+    return inner_sum_float_vec_add(first, second);
   }
 };
 #endif
@@ -121,30 +125,16 @@ struct OuterSumCastLoadPolicy {
   }
 };
 
-#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512))  && !defined(_MSC_VER)
 template <>
 struct OuterSumCastLoadPolicy<Vectorized<c10::BFloat16>, Vectorized<float>> {
   using vec_t = Vectorized<c10::BFloat16>;
   using vacc_t = Vectorized<float>;
 
   static vacc_t load(const char * C10_RESTRICT data, int64_t stride, int64_t index) {
-    auto ptr = reinterpret_cast<const __m128i*>(data + stride * index);
-    __m128i bf_vals = _mm_loadu_si128(ptr);
-    __m256 f_vals;
-    cvtbf16_fp32(bf_vals, f_vals);
-    return f_vals;
-  }
-};
-#elif defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
-template <>
-struct OuterSumCastLoadPolicy<Vectorized<c10::BFloat16>, Vectorized<float>> {
-  using vec_t = Vectorized<c10::BFloat16>;
-  using vacc_t = Vectorized<float>;
-
-  static vacc_t load(const char * C10_RESTRICT data, int64_t stride, int64_t index) {
-    auto ptr = reinterpret_cast<const __m256i*>(data + stride * index);
-    __m256i bf_vals = _mm256_loadu_si256(ptr);
-    __m512 f_vals;
+    auto ptr = reinterpret_cast<const outer_sum_bf16_vec*>(data + stride * index);
+    outer_sum_bf16_vec bf_vals = load_outer_sum_bf16_vec(ptr);
+    float_vec f_vals;
     cvtbf16_fp32(bf_vals, f_vals);
     return f_vals;
   }
@@ -153,7 +143,7 @@ struct OuterSumCastLoadPolicy<Vectorized<c10::BFloat16>, Vectorized<float>> {
 
 template <typename scalar_t>
 struct OuterSumCastLoadPolicy<scalar_t, scalar_t>:
-    LoadPolicy<scalar_t> {
+  LoadPolicy<scalar_t> {
 };
 
 template <typename scalar_t, typename acc_t>

@@ -5,7 +5,7 @@
 
 #include <ATen/cpu/vec/intrinsics.h>
 
-#include <ATen/cpu/vec/vec256/vec256_base.h>
+#include <ATen/cpu/vec/vec_base.h>
 #if !defined(__VSX__)  || !defined(CPU_CAPABILITY_VSX)
 #include <ATen/cpu/vec/vec256/vec256_float.h>
 #include <ATen/cpu/vec/vec256/vec256_float_neon.h>

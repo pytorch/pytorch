@@ -5,7 +5,7 @@
 
 #include <c10/util/complex.h>
 #include <ATen/cpu/vec/intrinsics.h>
-#include <ATen/cpu/vec/vec512/vec512_base.h>
+#include <ATen/cpu/vec/vec_base.h>
 #if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
 #include <sleef.h>
 #endif
@@ -626,7 +626,7 @@ public:
     if (count == size())
       return _mm512_loadu_ps(reinterpret_cast<const float*>(ptr));
 
-    __at_align64__ float tmp_values[2*size()];
+    __at_align__ float tmp_values[2*size()];
     // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
     // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
     // instructions while a loop would be compiled to one instruction.
@@ -665,7 +665,7 @@ public:
   const c10::complex<float>& operator[](int idx) const  = delete;
   c10::complex<float>& operator[](int idx) = delete;
   Vectorized<c10::complex<float>> map(c10::complex<float> (*const f)(const c10::complex<float> &)) const {
-    __at_align64__ c10::complex<float> tmp[size()];
+    __at_align__ c10::complex<float> tmp[size()];
     store(tmp);
     for (int i = 0; i < size(); i++) {
       tmp[i] = f(tmp[i]);
@@ -854,8 +854,8 @@ public:
     return sqrt().reciprocal();
   }
   Vectorized<c10::complex<float>> pow(const Vectorized<c10::complex<float>> &exp) const {
-    __at_align64__ c10::complex<float> x_tmp[size()];
-    __at_align64__ c10::complex<float> y_tmp[size()];
+    __at_align__ c10::complex<float> x_tmp[size()];
+    __at_align__ c10::complex<float> y_tmp[size()];
     store(x_tmp);
     exp.store(y_tmp);
     for (int i = 0; i < size(); i++) {

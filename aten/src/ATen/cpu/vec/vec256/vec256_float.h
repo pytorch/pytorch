@@ -4,7 +4,7 @@
 // See Note [Do not compile initializers with AVX]
 
 #include <ATen/cpu/vec/intrinsics.h>
-#include <ATen/cpu/vec/vec256/vec256_base.h>
+#include <ATen/cpu/vec/vec_base.h>
 #if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 #include <sleef.h>
 #endif
@@ -76,7 +76,7 @@ public:
   static Vectorized<float> loadu(const void* ptr, int64_t count = size()) {
     if (count == size())
       return _mm256_loadu_ps(reinterpret_cast<const float*>(ptr));
-    __at_align32__ float tmp_values[size()];
+    __at_align__ float tmp_values[size()];
     // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
     // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
     // instructions while a loop would be compiled to one instruction.
@@ -107,7 +107,7 @@ public:
     return _mm256_cmp_ps(values, _mm256_set1_ps(0.0f), _CMP_UNORD_Q);
   }
   Vectorized<float> map(float (*const f)(float)) const {
-    __at_align32__ float tmp[size()];
+    __at_align__ float tmp[size()];
     store(tmp);
     for (int64_t i = 0; i < size(); i++) {
       tmp[i] = f(tmp[i]);
@@ -213,8 +213,8 @@ public:
     return map(calc_i0e);
   }
   Vectorized<float> igamma(const Vectorized<float> &x) const {
-    __at_align32__ float tmp[size()];
-    __at_align32__ float tmp_x[size()];
+    __at_align__ float tmp[size()];
+    __at_align__ float tmp_x[size()];
     store(tmp);
     x.store(tmp_x);
     for (int64_t i = 0; i < size(); i++) {
@@ -223,8 +223,8 @@ public:
     return loadu(tmp);
   }
   Vectorized<float> igammac(const Vectorized<float> &x) const {
-    __at_align32__ float tmp[size()];
-    __at_align32__ float tmp_x[size()];
+    __at_align__ float tmp[size()];
+    __at_align__ float tmp_x[size()];
     store(tmp);
     x.store(tmp_x);
     for (int64_t i = 0; i < size(); i++) {

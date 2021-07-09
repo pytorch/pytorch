@@ -1,6 +1,6 @@
 #pragma once
-#if (defined(__clang__) || defined(__GNUC__)) && (defined(__x86_64__) || defined(__i386__))
-/* CGCC or clang-compatible compiler, targeting x86/x86-64 */
+#if defined(__GNUC__) && (defined(__x86_64__) || defined(__i386__))
+/* GCC or clang-compatible compiler, targeting x86/x86-64 */
 #include <x86intrin.h>
 #elif defined(__clang__) && (defined(__ARM_NEON__) || defined(__aarch64__))
 /* Clang-compatible compiler, targeting arm neon */

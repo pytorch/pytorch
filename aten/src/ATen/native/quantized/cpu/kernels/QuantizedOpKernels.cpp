@@ -216,7 +216,7 @@ int64_t hsum(const uint8_t* A, int len) {
 
   alignas(64) int32_t temp[16];
   _mm512_store_si512(reinterpret_cast<__m512i*>(temp), sum_v);
-  for (int k = 0; k < 16; ++k) {
+  for (const auto k : c10::irange(16)) {
     row_sum += temp[k];
   }
 #endif // CPU_CAPABILITY_AVX2 or CPU_CAPABILITY_AVX512
@@ -273,7 +273,7 @@ int64_t hsum(const int8_t* A, int len) {
 
   alignas(64) int32_t temp[16];
   _mm512_store_si512(reinterpret_cast<__m512i*>(temp), sum_v);
-  for (int k = 0; k < 16; ++k) {
+  for (const auto k : c10::irange(16)) {
     row_sum += temp[k];
   }
 #endif // CPU_CAPABILITY_AVX2 or CPU_CAPABILITY_AVX512
@@ -328,7 +328,7 @@ int64_t hsum(const int32_t* A, int len) {
 
   alignas(64) int64_t temp[8];
   _mm512_store_si512(reinterpret_cast<__m512i*>(temp), sum_epi64);
-  for (int k = 0; k < 8; ++k) {
+  for (const auto k : c10::irange(8)) {
     row_sum += temp[k];
   }
 #endif // CPU_CAPABILITY_AVX2 or CPU_CAPABILITY_AVX512
@@ -391,8 +391,7 @@ int64_t hsum_sq(const uint8_t* A, int len) {
       // (i15 ^ 2, ..., i0 ^ 2)
       __m256i sq_lo_epu16 = _mm512_castsi512_si256(sq_epu16);
       // (i31 ^ 2, ..., i16 ^ 2)
-      __m256i sq_hi_epu16 =
-          _mm256_castps_si256(_mm512_extractf32x8_ps(_mm512_castsi512_ps(sq_epu16), 1));
+      __m256i sq_hi_epu16 = _mm512_extracti32x8_epi32(sq_epu16, 1);
       // widen to epu32
       __m512i sq_lo_epu32 = _mm512_cvtepu16_epi32(sq_lo_epu16);
       __m512i sq_hi_epu32 = _mm512_cvtepu16_epi32(sq_hi_epu16);
@@ -401,7 +400,7 @@ int64_t hsum_sq(const uint8_t* A, int len) {
       sum_v_epu32 = _mm512_add_epi32(sum_v_epu32, sq_hi_epu32);
     }
     _mm512_store_si512(reinterpret_cast<__m512i*>(temp), sum_v_epu32);
-    for (int k = 0; k < 16; ++k) {
+    for (const auto k : c10::irange(16)) {
       row_sum += temp[k];
     }
     sum_v_epu32 = _mm512_setzero_si512();
@@ -472,8 +471,7 @@ int64_t hsum_sq(const int8_t* A, int len) {
       // (i15 ^ 2, ..., i0 ^ 2)
       __m256i sq_lo_epi16 = _mm512_castsi512_si256(sq_epi16);
       // (i31 ^ 2, ..., i16 ^ 2)
-      __m256i sq_hi_epi16 =
-          _mm256_castps_si256(_mm512_extractf32x8_ps(_mm512_castsi512_ps(sq_epi16), 1));
+      __m256i sq_hi_epi16 = _mm512_extracti32x8_epi32(sq_epi16, 1);
       // widen to epi32
       __m512i sq_lo_epi32 = _mm512_cvtepi16_epi32(sq_lo_epi16);
       __m512i sq_hi_epi32 = _mm512_cvtepi16_epi32(sq_hi_epi16);
@@ -483,7 +481,7 @@ int64_t hsum_sq(const int8_t* A, int len) {
     }
     _mm512_store_si512(reinterpret_cast<__m512i*>(temp), sum_v_epi32);
 
-    for (int k = 0; k < 16; ++k) {
+    for (const auto k : c10::irange(16)) {
       row_sum += temp[k];
     }
     sum_v_epi32 = _mm512_setzero_si512();
@@ -529,7 +527,7 @@ float hsum_sq(const int32_t* A, int len) {
 
   alignas(64) float temp[16];
   _mm512_store_ps(temp, sum_ps);
-  for (int k = 0; k < 16; ++k) {
+  for (const auto k : c10::irange(16)) {
     row_sum += static_cast<float>(temp[k]);
   }
 #endif // CPU_CAPABILITY_AVX2 or CPU_CAPABILITY_AVX512

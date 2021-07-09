@@ -4,7 +4,7 @@
 // See Note [Do not compile initializers with AVX]
 
 #include <ATen/cpu/vec/intrinsics.h>
-#include <ATen/cpu/vec/vec512/vec512_base.h>
+#include <ATen/cpu/vec/vec_base.h>
 #if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
 #include <sleef.h>
 #endif
@@ -108,7 +108,7 @@ public:
     return _mm512_loadu_si512(reinterpret_cast<const __m512i*>(ptr));
   }
   static Vectorized<BFloat16> loadu(const void* ptr, int16_t count) {
-    __at_align64__ int16_t tmp_values[size()];
+    __at_align__ int16_t tmp_values[size()];
     std::memcpy(tmp_values, ptr, count * sizeof(int16_t));
     return loadu(tmp_values);
   }
@@ -116,14 +116,14 @@ public:
     if (count == size()) {
       _mm512_storeu_si512(reinterpret_cast<__m512i*>(ptr), values);
     } else if (count > 0) {
-      __at_align64__ int16_t tmp_values[size()];
+      __at_align__ int16_t tmp_values[size()];
       _mm512_storeu_si512(reinterpret_cast<__m512i*>(tmp_values), values);
       std::memcpy(ptr, tmp_values, count * sizeof(int16_t));
     }
   }
   template <int64_t mask>
   static Vectorized<BFloat16> blend(const Vectorized<BFloat16>& a, const Vectorized<BFloat16>& b) {
-    __at_align64__ int16_t tmp_values[size()];
+    __at_align__ int16_t tmp_values[size()];
     a.store(tmp_values);
     if (mask & 0x01)
       tmp_values[0] = b.values[31];
@@ -361,7 +361,7 @@ public:
   Vectorized<BFloat16> erfinv() const {
     __m512 lo, hi;
     cvtbf16_fp32(values, lo, hi);
-    __at_align64__ float tmp1[size() / 2], tmp2[size() / 2];
+    __at_align__ float tmp1[size() / 2], tmp2[size() / 2];
     _mm512_storeu_ps(reinterpret_cast<float*>(tmp1), lo);
     _mm512_storeu_ps(reinterpret_cast<float*>(tmp2), hi);
     for (int64_t i = 0; i < size() / 2; i++) {
@@ -399,7 +399,7 @@ public:
   Vectorized<BFloat16> i0() const {
     __m512 lo, hi;
     cvtbf16_fp32(values, lo, hi);
-    __at_align64__ float tmp1[size() / 2], tmp2[size() / 2];
+    __at_align__ float tmp1[size() / 2], tmp2[size() / 2];
     _mm512_storeu_ps(reinterpret_cast<float*>(tmp1), lo);
     _mm512_storeu_ps(reinterpret_cast<float*>(tmp2), hi);
     for (int64_t i = 0; i < size() / 2; i++) {
@@ -414,7 +414,7 @@ public:
     __m512 lo, hi;
     cvtbf16_fp32(values, lo, hi);
     constexpr auto sz = size();
-    __at_align64__ float tmp1[sz / 2], tmp2[sz / 2];
+    __at_align__ float tmp1[sz / 2], tmp2[sz / 2];
     _mm512_storeu_ps(reinterpret_cast<float*>(tmp1), lo);
     _mm512_storeu_ps(reinterpret_cast<float*>(tmp2), hi);
 
@@ -431,10 +431,10 @@ public:
     __m512 xlo, xhi;
     cvtbf16_fp32(values, lo, hi);
     cvtbf16_fp32(x.values, xlo, xhi);
-    __at_align64__ float tmp1[size() / 2], tmp2[size() / 2];
+    __at_align__ float tmp1[size() / 2], tmp2[size() / 2];
     _mm512_storeu_ps(reinterpret_cast<float*>(tmp1), lo);
     _mm512_storeu_ps(reinterpret_cast<float*>(tmp2), hi);
-    __at_align64__ float tmpx1[size() / 2], tmpx2[size() / 2];
+    __at_align__ float tmpx1[size() / 2], tmpx2[size() / 2];
     _mm512_storeu_ps(reinterpret_cast<float*>(tmpx1), xlo);
     _mm512_storeu_ps(reinterpret_cast<float*>(tmpx2), xhi);
     for (int64_t i = 0; i < size() / 2; ++i) {
@@ -451,10 +451,10 @@ public:
     __m512 xlo, xhi;
     cvtbf16_fp32(values, lo, hi);
     cvtbf16_fp32(x.values, xlo, xhi);
-    __at_align64__ float tmp1[size() / 2], tmp2[size() / 2];
+    __at_align__ float tmp1[size() / 2], tmp2[size() / 2];
     _mm512_storeu_ps(reinterpret_cast<float*>(tmp1), lo);
     _mm512_storeu_ps(reinterpret_cast<float*>(tmp2), hi);
-    __at_align64__ float tmpx1[size() / 2], tmpx2[size() / 2];
+    __at_align__ float tmpx1[size() / 2], tmpx2[size() / 2];
     _mm512_storeu_ps(reinterpret_cast<float*>(tmpx1), xlo);
     _mm512_storeu_ps(reinterpret_cast<float*>(tmpx2), xhi);
     for (int64_t i = 0; i < size() / 2; ++i) {
@@ -823,8 +823,8 @@ inline Vectorized<BFloat16> convert_float_bfloat16(const Vectorized<float>& a, c
 
 inline std::tuple<Vectorized<float>, Vectorized<float>> convert_bfloat16_float(const Vectorized<BFloat16>& a) {
   constexpr int64_t K = Vectorized<BFloat16>::size();
-  __at_align64__ float arr[K];
-  __at_align64__ BFloat16 arr2[K];
+  __at_align__ float arr[K];
+  __at_align__ BFloat16 arr2[K];
   a.store(arr2);
   convert(arr2, arr, K);
   return std::make_tuple(
@@ -834,8 +834,8 @@ inline std::tuple<Vectorized<float>, Vectorized<float>> convert_bfloat16_float(c
 
 inline Vectorized<BFloat16> convert_float_bfloat16(const Vectorized<float>& a, const Vectorized<float>& b) {
   constexpr int64_t K = Vectorized<BFloat16>::size();
-  __at_align64__ float arr[K];
-  __at_align64__ BFloat16 arr2[K];
+  __at_align__ float arr[K];
+  __at_align__ BFloat16 arr2[K];
   a.store(arr);
   b.store(arr + Vectorized<float>::size());
   convert(arr, arr2, K);
