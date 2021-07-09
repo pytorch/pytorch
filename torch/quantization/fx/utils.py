@@ -360,7 +360,7 @@ def create_getattr_from_value(module: torch.nn.Module, graph: Graph, prefix: str
     """
     get_new_attr_name = get_new_attr_name_with_prefix(prefix)
     attr_name = get_new_attr_name(module)
-    module.register_buffer(attr_name, value)# .to('cuda'))  # this one destroys me
+    module.register_buffer(attr_name, value)  # .to('cuda'))  # this is a problem
     # Create get_attr with value
     attr_node = graph.create_node("get_attr", attr_name)
     return attr_node
