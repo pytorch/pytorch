@@ -83,6 +83,8 @@ const char* toString(DispatchKey t) {
       return "Autograd";
     case DispatchKey::AutogradCPU:
       return "AutogradCPU";
+    case DispatchKey::AutogradXPU:
+      return "AutogradXPU";
     case DispatchKey::AutogradCUDA:
       return "AutogradCUDA";
     case DispatchKey::AutogradXLA:

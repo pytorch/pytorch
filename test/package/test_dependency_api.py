@@ -271,9 +271,7 @@ class TestDependencyAPI(PackageTestCase):
         buffer = BytesIO()
 
         with self.assertRaises(PackagingError) as e:
-            with PackageExporter(
-                buffer, importer=BrokenImporter()
-            ) as exporter:
+            with PackageExporter(buffer, importer=BrokenImporter()) as exporter:
                 exporter.intern(["foo", "bar"])
                 exporter.save_source_string("my_module", "import foo; import bar")
 

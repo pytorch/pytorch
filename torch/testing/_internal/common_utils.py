@@ -879,7 +879,7 @@ slow_tests_dict: Optional[Dict[str, float]] = None
 def check_slow_test_from_stats(test):
     global slow_tests_dict
     if slow_tests_dict is None:
-        if not IS_SANDCASTLE and os.getenv("PYTORCH_RUN_DISABLED_TESTS", "0") != "1":
+        if not IS_SANDCASTLE:
             url = "https://raw.githubusercontent.com/pytorch/test-infra/master/stats/slow-tests.json"
             slow_tests_dict = fetch_and_cache(".pytorch-slow-tests.json", url)
         else:
@@ -2509,6 +2509,7 @@ def coalescedonoff(f):
         f(self, *args, **kwargs, coalesced=False)
     return wrapped
 
+
 @contextlib.contextmanager
 def disable_gc():
     if gc.isenabled():
@@ -2519,3 +2520,11 @@ def disable_gc():
             gc.enable()
     else:
         yield
+
+def has_breakpad() -> bool:
+    # If not on a special build, check that the library was actually linked in
+    try:
+        torch._C._get_minidump_directory()  # type: ignore[attr-defined]
+        return True
+    except RuntimeError as e:
+        return False
