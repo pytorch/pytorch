@@ -91,13 +91,32 @@ def parameterized(arg_name, case_dict):
         return fn
     return decorator
 
+def parameterized_with_device(arg_name, case_dict):
+    def decorator(fn):
+        param_meta = get_param_meta(fn)
+        param_meta.push((arg_name, case_dict))
+        fn._has_device = True
+        return fn
+    return decorator
+
+
 def _set_parameterized_method(test_base, fn, instantiated_cases, extension_name):
     new_name = f'{fn.__name__}_{extension_name}'
 
-    def wrapped(self, *args, **kwargs):
+    def wrapped_no_device(self, *args, **kwargs):
         for arg_name, case in instantiated_cases:
             kwargs[arg_name] = case
         return fn(self, *args, **kwargs)
+
+    def wrapped_with_device(self, device, *args, **kwargs):
+        for arg_name, case in instantiated_cases:
+            kwargs[arg_name] = case
+        return fn(self, device, *args, **kwargs)
+
+    if getattr(fn, '_has_device', False):
+        wrapped = wrapped_with_device
+    else:
+        wrapped = wrapped_no_device
 
     wrapped.__name__ = new_name
     setattr(test_base, new_name, wrapped)
