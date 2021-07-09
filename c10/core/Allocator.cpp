@@ -51,7 +51,6 @@ void reportMemoryUsageToProfiler(void* ptr, int64_t alloc_size, Device device) {
   }
 }
 
-// NOLINTNEXTLINE(modernize-use-equals-default)
-MemoryReportingInfoBase::MemoryReportingInfoBase() {}
+MemoryReportingInfoBase::MemoryReportingInfoBase() = default;
 
 } // namespace c10
