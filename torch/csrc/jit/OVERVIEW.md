@@ -1285,10 +1285,6 @@ This annotation language is consumed by the `FunctionSchema` parser, which produ
 
 [ir/alias_analysis.h](ir/alias_analysis.h)
 
-<<<<<<< HEAD
-=======
-
->>>>>>> ca3a699656 ([BE] Improve docs and fix grammar/spelling errors)
 An alias analysis pass consumes the per-operator aliasing information to construct a database of aliasing and mutation relationships in a graph, called `AliasDb`. This section focuses on the alias analysis pass; the public interface to `AliasDb` will be described later.
 
 The core data structure in the AliasDb is called `MemoryDAG`, which is a DAG where the edges are "may point to" relationships and the  vertices are aliasing `Element`s. The most common kind of `Element` is an IR `Value`, but there are other kinds of things that can alias that aren't first-class `Value`s in the IR, like wildcards or contained types (such as in a list or tuple).
