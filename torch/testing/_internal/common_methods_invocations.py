@@ -2479,8 +2479,6 @@ def sample_inputs_narrow(op_info, device, dtype, requires_grad, **kwargs):
 
 def sample_trapezoid(op_info, device, dtype, requires_grad, **kwargs):
 
-    from typing import Any, Dict
-
     shapes_and_kwargs = (
         ((2, 3), {'x': [[1, 2, 3], [4, 5, 6]]}),
         ((6), {'x': [1, 2, 3, 4, 5, 6]}),
@@ -2488,8 +2486,6 @@ def sample_trapezoid(op_info, device, dtype, requires_grad, **kwargs):
         ((2, 2), {'dx': 2})
     )
     samples = []
-    shape: Any
-    kwarg: Dict[str, Any]
     for shape, kwarg in shapes_and_kwargs:
         tensor = make_tensor(shape, device, dtype, low=None, high=None,
                              requires_grad=requires_grad)
