@@ -308,7 +308,7 @@ c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2, bool
     }
     std::vector<TypePtr> elements;
     for (size_t i = 0; i < tuple1->elements().size(); i++) {
-      if (auto elem = unifyTypes(tuple1->elements().at(i), tuple2->elements().at(i))) {
+      if (auto elem = unifyTypes(tuple1->elements().at(i), tuple2->elements().at(i), default_to_any)) {
         elements.push_back(*elem);
       } else {
         return c10::nullopt;
