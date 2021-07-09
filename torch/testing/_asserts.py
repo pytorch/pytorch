@@ -546,10 +546,10 @@ def _check_pair_close(
         return _check_tensors_close(pair.actual, pair.expected, **kwargs)
 
 
-def _to_tensor(array_or_scalar_like: Any) -> Tuple[Optional[_TestingErrorMeta], Optional[Tensor]]:
-    """Converts a scalar-or-array-like to a :class:`~torch.Tensor`.
+def _to_tensor(tensor_or_scalar_like: Any) -> Tuple[Optional[_TestingErrorMeta], Optional[Tensor]]:
+    """Converts a tensor-or-scalar-like to a :class:`~torch.Tensor`.
     Args:
-        array_or_scalar_like (Any): Scalar-or-array-like.
+        tensor_or_scalar_like (Any): Tensor-or-scalar-like.
     Returns:
 
         (Tuple[Optional[_TestingErrorMeta], Optional[Tensor]]): The two elements are orthogonal, i.e. if the first is
@@ -559,14 +559,14 @@ def _to_tensor(array_or_scalar_like: Any) -> Tuple[Optional[_TestingErrorMeta], 
     """
     error_meta: Optional[_TestingErrorMeta]
 
-    if isinstance(array_or_scalar_like, Tensor):
-        tensor = array_or_scalar_like
+    if isinstance(tensor_or_scalar_like, Tensor):
+        tensor = tensor_or_scalar_like
     else:
         try:
-            tensor = torch.as_tensor(array_or_scalar_like)
+            tensor = torch.as_tensor(tensor_or_scalar_like)
         except Exception:
             error_meta = _TestingErrorMeta(
-                UsageError, f"No tensor can be constructed from type {type(array_or_scalar_like)}."
+                UsageError, f"No tensor can be constructed from type {type(tensor_or_scalar_like)}."
             )
             return error_meta, None
 
@@ -598,11 +598,11 @@ def _check_types(actual: Any, expected: Any, *, allow_subclasses: bool) -> Optio
 def _to_tensor_pair(
     actual: Any, expected: Any, *, allow_subclasses: bool
 ) -> Tuple[Optional[_TestingErrorMeta], Optional[_TensorPair]]:
-    """Converts a scalar-or-array-like pair to a :class:`_TensorPair`.
+    """Converts a tensor-or-scalar-like pair to a :class:`_TensorPair`.
 
     Args:
-        actual (Any): Actual array-or-scalar-like.
-        expected (Any): Expected array-or-scalar-like.
+        actual (Any): Actual tensor-or-scalar-like.
+        expected (Any): Expected tensor-or-scalar-like.
         allow_subclasses (bool): If ``True`` (default) and except for Python scalars, inputs of directly related types
             are allowed. Otherwise type equality is required.
 
@@ -630,7 +630,7 @@ def _to_tensor_pair(
 def _parse_inputs(
     actual: Any, expected: Any, *, allow_subclasses: bool
 ) -> Tuple[Optional[_TestingErrorMeta], Optional[Union[_TensorPair, List, Dict]]]:
-    """Parses the positional inputs by constructing :class:`_TensorPair`'s from corresponding array-or-scalar-likes.
+    """Parses the positional inputs by constructing :class:`_TensorPair`'s from corresponding tensor-or-scalar-likes.
 
 
     :class:`~collections.abc.Sequence`'s or :class:`~collections.abc.Mapping`'s are parsed elementwise. Parsing is
@@ -787,7 +787,7 @@ def assert_close(
             the mismatching tensors and a namespace of diagnostics about the mismatches. See below for details.
 
     Raises:
-        UsageError: If a :class:`torch.Tensor` can't be constructed from an array-or-scalar-like.
+        UsageError: If no :class:`torch.Tensor` can be constructed from an input.
         UsageError: If only :attr:`rtol` or :attr:`atol` is specified.
         AssertionError: If corresponding inputs are not Python scalars and are not directly related.
         AssertionError: If :attr:`allow_subclasses` is ``False``, but corresponding inputs are not Python scalars and
