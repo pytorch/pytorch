@@ -1450,10 +1450,6 @@ void Reducer::finalize_backward() {
   require_finalize_ = false;
   in_ddp_backwards_ = false;
 
-  // Unset allreduce division factor, as it may change in next backwards pass
-  // when running with DDP join mode.
-  div_factor_ = kUnsetDivFactor;
-
   // Wait for asynchronous reduction to complete and unflatten contents.
   for (auto& bucket : buckets_) {
     // See Note [DDP Communication Hook]
@@ -1467,6 +1463,9 @@ void Reducer::finalize_backward() {
         : comm_hook_->parseHookResult(bucket.future_work->value());
     for (const auto i : c10::irange(future_result.size())) {
       auto& replica = bucket.replicas[i];
+      if (comm_hook_ == nullptr) {
+        future_result[i].div_(div_factor_);
+      }
       if (bucket.expect_sparse_gradient) {
         replica.contents.copy_(future_result[i]);
       } else {
@@ -1475,6 +1474,10 @@ void Reducer::finalize_backward() {
         populate_bucket_views_out(replica, future_result[i]);
       }
     }
+
+    // Unset allreduce division factor, as it may change in next backwards pass
+    // when running with DDP join mode.
+    div_factor_ = kUnsetDivFactor;
 
     if (!bucket.expect_sparse_gradient) {
       // We don't need to finalize the sparse bucket since the sparse grad and
