@@ -554,3 +554,39 @@ class TestPeephole(JitTestCase):
         self.run_pass("peephole", foo.graph)
         FileCheck().check("aten::len").run(foo.graph)
         self.assertEqual(3, foo(torch.rand([3, 1])))
+
+    def test_peephole_arith(self):
+        @torch.jit.script
+        def foo(input: List[int]) -> List[int]:
+            _1 = torch.add(input[2], 2)
+            _3 = torch.add(input[3], 2)
+            _4 = input[0]
+            _5 = torch.add(torch.sub(_1, 3) // 1, 1)
+            _6 = torch.add(1 * torch.sub(_3, 3) // 1, 1)
+            return [_4, _5, _6]
+
+        FileCheck().check("aten::add").check("aten::sub") \
+                   .check("aten::mul").check("aten::floordiv").run(foo.graph)
+        self.run_pass("peephole", foo.graph)
+        FileCheck().check_not("aten::add").check_not("aten::sub") \
+                   .check_not("aten::mul").check_not("aten::floordiv").run(foo.graph)
+        self.assertEqual(foo([0, 1, 2, 3]), [0, 2, 3])
+
+
+@torch.jit.script
+def foo(input: List[int]) -> List[int]:
+  _1 = torch.add(input[2], 2)
+  _3 = torch.add(input[3], 2)
+  _4 = input[0]
+  _5 = torch.add(torch.sub(_1, 3) // 1, 1)
+  _6 = torch.add(torch.sub(_3, 3) // 1, 1)
+  return [_4, 64, _5, _6]
+@torch.jit.script
+def foo(input: List[int]) -> List[int]:
+  _1 = torch.add(input[2], 2)
+  _3 = torch.add(input[3], 2)
+  _4 = input[0]
+  _5 = torch.add(torch.sub(_1, 3) // 1, 1)
+  _6 = torch.add(torch.sub(_3, 3) // 1, 1)
+  return [_4, 64, _5, _6]
+

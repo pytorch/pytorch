@@ -3,9 +3,133 @@
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
+#include "ATen/core/interned_strings.h"
+#include "c10/util/Exception.h"
+#include "c10/util/Optional.h"
+#include "jit/ir/attributes.h"
 
 namespace torch {
 namespace jit {
+
+namespace {
+
+c10::optional<IntAttr::ValueType> getConstantInt(Node& node, size_t pos) {
+  auto n = node.inputs().at(pos)->node();
+  if (n->kind() == prim::Constant &&
+      n->kindOf(attr::value) == AttributeKind::i) {
+    return n->i(attr::value);
+  }
+
+  return {};
+}
+
+c10::optional<IntAttr::ValueType> normalizeArithNode(Node& node) {
+  TORCH_INTERNAL_ASSERT(node.inputs().size() == 2);
+  if (node.kind() == aten::mul || node.kind() == aten::add) {
+    if (auto i = getConstantInt(node, 0)) {
+      node.permuteInputs({1, 0});
+      return i;
+    }
+  }
+
+  return getConstantInt(node, 1);
+}
+
+bool tryReduceArith(Node& node);
+
+/**
+ * Remove a mul/floordiv node if it is multiplication or division by 1.
+ *
+ * @return true only if the input IR node is successfully replaced.
+ */
+bool tryReduceMulAndDiv(Node& node) {
+  auto constant = normalizeArithNode(node);
+  if (!constant || *constant != 1) {
+    return false;
+  }
+
+  const auto uses = node.output()->uses();
+  for (const auto& u : uses) {
+    if (tryReduceArith(*u.user)) {
+      u.user->destroy();
+    }
+  }
+
+  node.output()->replaceAllUsesWith(node.inputs().at(0));
+  return true;
+}
+
+/**
+ * Merge an add/sub node with its users. If there exists a mul/floordiv node by 1,
+ * we firstly run tryReduceMulAndDiv() to bring all subsequent IR nodes as
+ * direct IR user node. If all updated user nodes are add/sub node with
+ * constants, we will merge the constant parts together, and replace all uses of
+ * the input node.
+ *
+ * @return true only if the input IR node is successfully replaced with its parent.
+ */
+bool tryReduceAddAndSub(Node& node) {
+  auto constant = normalizeArithNode(node);
+  if (!constant) {
+    return false;
+  }
+
+  if (*constant == 0) {
+    node.output()->replaceAllUsesWith(node.inputs().at(0));
+    return true;
+  }
+
+
+  std::vector<Node*> mulAndDivToRemove;
+  for (const auto& u : node.output()->uses()) {
+    if (u.user->kind() == aten::mul || u.user->kind() == aten::floordiv) {
+      mulAndDivToRemove.push_back(u.user);
+    }
+  }
+
+  for (auto n : mulAndDivToRemove) {
+    if (tryReduceMulAndDiv(*n)) {
+      n->destroy();
+    } else {
+      return false;
+    }
+  }
+
+  std::vector<std::pair<Node*, IntAttr::ValueType>> addAndSubToMerge;
+  for (const auto& u : node.output()->uses()) {
+    if (u.user->kind() != aten::add && u.user->kind() != aten::sub) {
+      return false;
+    }
+
+    if (auto i = normalizeArithNode(*u.user)) {
+      addAndSubToMerge.emplace_back(u.user, *i);
+    } else {
+      return false;
+    }
+  }
+
+  for (const auto& u: addAndSubToMerge) {
+    WithInsertPoint g(&node);
+    auto user = u.first;
+    auto delta = user->kind() == node.kind() ? *constant : -*constant;
+    user->replaceInput(1, node.owningGraph()->insertConstant(u.second + delta));
+  }
+  node.output()->replaceAllUsesWith(node.inputs().at(0));
+
+  return true;
+}
+
+bool tryReduceArith(Node& node) {
+  if (node.kind() == aten::add || node.kind() == aten::sub) {
+    return tryReduceAddAndSub(node);
+  } else if (node.kind() == aten::mul || node.kind() == aten::floordiv) {
+    return tryReduceMulAndDiv(node);
+  } else {
+    return false;
+  }
+}
+
+}
 
 struct PeepholeOptimizeNonTensorImpl {
   // NOLINTNEXTLINE(modernize-pass-by-value)
@@ -135,6 +259,8 @@ struct PeepholeOptimizeNonTensorImpl {
           default:
             break;
         }
+      } else if (tryReduceArith(*node)) {
+        changed = true;
       }
     }
     return changed;
