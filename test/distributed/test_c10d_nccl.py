@@ -429,9 +429,9 @@ class ProcessGroupNCCLTest(TestCase):
             opts = c10d.GatherOptions()
             opts.rootRank = rootRank
             if rootRank == self.rank:
-                work = pg.gather(output_t, input_t, opts) 
+                work = pg.gather(output_t, input_t, opts)
             else:
-                work = pg.gather([], input_t, opts)  
+                work = pg.gather([], input_t, opts)
             work.wait()
 
         # init input
