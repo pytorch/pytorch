@@ -153,7 +153,8 @@ enum class DispatchKey : uint8_t {
   // This is implemented at a dispatch level right before any backends run
   Conjugate,
 
-  // The Negative dispatch key is set for any tensors that need to perform negation
+  // The Negative dispatch key is set for any tensors that need to perform
+  // negation
   // This is implemented at a dispatch level right before any backends run
   Negative,
 
