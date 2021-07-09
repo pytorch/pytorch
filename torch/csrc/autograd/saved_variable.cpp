@@ -231,6 +231,7 @@ void SavedVariable::register_hooks(std::unique_ptr<SavedVariableHooks>&& hooks) 
       // Current code assumes that the original variable is saved if and only if (is_leaf_ || !is_output)
       TORCH_INTERNAL_ASSERT(false);
     }
+    data_ = data_.tensor_data();
   }
 
   const bool prev = GradMode::is_enabled();
