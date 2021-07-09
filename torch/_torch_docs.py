@@ -10721,7 +10721,8 @@ Arguments:
     y (Tensor): The values of the function to integrate
 
 Keyword args:
-    dx (float): The distance between points at which `y` is sampled.
+    dx (Scalar): The distance between points at which `y` is sampled.
+        Currently, only flooat/double types are supported.
     dim (int): The dimension along which to integrate.
         By default, use the last dimension.
 
@@ -10736,6 +10737,7 @@ add_docstr(torch.trapz,
 trapz(y, x, *, dim=-1) -> Tensor
 
 This is deprecated, please use :func:`torch.trapezoid`.
+
 Estimate :math:`\int y\,dx` along `dim`, using the trapezoid rule.
 
 Arguments:
