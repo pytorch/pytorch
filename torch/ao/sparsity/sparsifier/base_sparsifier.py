@@ -38,7 +38,8 @@ class BaseSparsifier(abc.ABC):
 
     Abstract methods that need to be implemented:
 
-    - step: Function to compute a new mask for all keys in the `module_groups`.
+    - update_mask: Function to compute a new mask for all keys in the
+        `module_groups`.
 
     Args:
         - model [nn.Module]: model to configure. The model itself is not saved
@@ -213,6 +214,14 @@ class BaseSparsifier(abc.ABC):
         raise NotImplementedError('`convert` is not implemented. Please, use '
                                   '`torch.ao.utils.convert` instead.')
 
+    def step(self, use_path=True):
+        if not self.enable_mask_update:
+            return
+        with torch.no_grad():
+            for config in self.module_groups:
+                module = config['module']
+                self.update_mask(module, **config)
+
     @abc.abstractmethod
-    def step(self):
-        return
+    def update_mask(self, layer, **kwargs):
+        pass

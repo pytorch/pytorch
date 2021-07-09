@@ -394,6 +394,15 @@ TEST(StaticRuntime, IndividualOps_Binary_MatMul) {
   testStaticRuntime(aten_matmul, args3, args4);
 }
 
+TEST(StaticRuntime, IndividualOps_Sign) {
+  auto a = at::randn({2, 3});
+  auto b = at::randn({4, 3, 2});
+
+  std::vector<IValue> args{a};
+  testStaticRuntime(sign_tensor, args);
+  testStaticRuntime(sign_tensor, args, {b});
+}
+
 TEST(StaticRuntime, IndividualOps_Div) {
   auto a = at::randn({2, 3});
   auto b = at::randn({2, 3});
@@ -415,6 +424,16 @@ TEST(StaticRuntime, IndividualOps_Div) {
   std::vector<IValue> args3{a, 2.3, "trunc"};
   testStaticRuntime(div_scalar_mode, args3);
   testStaticRuntime(div_scalar_mode, args3, {a, 1.5, "trunc"});
+}
+
+TEST(StaticRuntime, IndividualOps_Log) {
+  // Ensure that the input values are valid.
+  auto a = at::abs(at::randn({2, 3}));
+  auto b = at::abs(at::randn({4, 3, 2}));
+
+  std::vector<IValue> args{a};
+  testStaticRuntime(log_tensor, args);
+  testStaticRuntime(log_tensor, args, {b});
 }
 
 TEST(StaticRuntime, IndividualOps_Sub) {
