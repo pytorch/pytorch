@@ -84,7 +84,6 @@ struct ForwardGrad;
 #define EXPECTED_MAX_LEVEL 2
 
 struct TORCH_API ForwardADLevel {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   ForwardADLevel(uint64_t idx) : idx_(idx) {}
   ~ForwardADLevel();
 
@@ -111,8 +110,7 @@ private:
 };
 
 struct TORCH_API ForwardGrad : std::enable_shared_from_this<ForwardGrad> {
-  // NOLINTNEXTLINE(modernize-use-equals-default,cppcoreguidelines-pro-type-member-init)
-  ForwardGrad() {}
+  ForwardGrad() = default;
 
   // This function must only be called when AutogradMeta or SavedVariable is
   // being destructed as it ensures that:
