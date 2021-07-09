@@ -10,7 +10,7 @@ namespace {
 constexpr int MULTIMARGIN_THREADS = 128;
 
 template <int P, typename scalar_t>
-__global__ void cunn_MultiMarginCriterion_updateOutput_kernel(
+__global__ void MultiMarginLoss_forward_kernel(
     scalar_t *output, scalar_t *input, int64_t *target, scalar_t *weights,
     int nframe, int dim, bool sizeAverage, scalar_t margin) {
   using acc_t = at::acc_type<scalar_t, true>;
@@ -54,7 +54,7 @@ __global__ void cunn_MultiMarginCriterion_updateOutput_kernel(
 }
 
 template <int P, typename scalar_t>
-__global__ void cunn_MultiMarginCriterion_updateGradInput_kernel(
+__global__ void MultiMarginLoss_backward_kernel(
     scalar_t *gradInput, scalar_t *gradOutput, scalar_t *input, int64_t *target,
     scalar_t *weights, int nframe, int dim, bool sizeAverage, scalar_t margin,
     bool reduce) {
@@ -171,7 +171,7 @@ Tensor& multi_margin_loss_cuda_out(
       dim3 blocks(1);
       dim3 threads(MULTIMARGIN_THREADS);
       if (p == 1) {
-        cunn_MultiMarginCriterion_updateOutput_kernel<1> <<<blocks, threads, 0, stream>>>(
+        MultiMarginLoss_forward_kernel<1> <<<blocks, threads, 0, stream>>>(
             out.data_ptr<scalar_t>(),
             input.data_ptr<scalar_t>(),
             target.data_ptr<int64_t>(),
@@ -182,7 +182,7 @@ Tensor& multi_margin_loss_cuda_out(
             margin);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else if (p == 2) {
-        cunn_MultiMarginCriterion_updateOutput_kernel<2> <<<blocks, threads, 0, stream>>>(
+        MultiMarginLoss_forward_kernel<2> <<<blocks, threads, 0, stream>>>(
             out.data_ptr<scalar_t>(),
             input.data_ptr<scalar_t>(),
             target.data_ptr<int64_t>(),
@@ -193,8 +193,9 @@ Tensor& multi_margin_loss_cuda_out(
             margin);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
-    } else if (input.dim() == 2) {
+    } else {
       auto in_sizes = input.sizes();
+      TORCH_INTERAL_ASSERT(in_sizes.size() == 2);
       int nframe = in_sizes[0];
       // allow zero-dim target for 2D input.
       TORCH_CHECK(in_sizes[1] != 0 && target.dim() <= 1 && target.numel() == nframe,
@@ -204,7 +205,7 @@ Tensor& multi_margin_loss_cuda_out(
 
       if (reduction == at::Reduction::None) {
         if (p == 1) {
-          cunn_MultiMarginCriterion_updateOutput_kernel<1> <<<blocks, threads, 0, stream>>>(
+          MultiMarginLoss_forward_kernel<1> <<<blocks, threads, 0, stream>>>(
               out.data_ptr<scalar_t>(),
               input.data_ptr<scalar_t>(),
               target.data_ptr<int64_t>(),
@@ -214,7 +215,7 @@ Tensor& multi_margin_loss_cuda_out(
               margin);
           C10_CUDA_KERNEL_LAUNCH_CHECK();
         } else if (p == 2) {
-          cunn_MultiMarginCriterion_updateOutput_kernel<2> <<<blocks, threads, 0, stream>>>(
+          MultiMarginLoss_forward_kernel<2> <<<blocks, threads, 0, stream>>>(
               out.data_ptr<scalar_t>(),
               input.data_ptr<scalar_t>(),
               target.data_ptr<int64_t>(),
@@ -227,7 +228,7 @@ Tensor& multi_margin_loss_cuda_out(
       } else {
         auto tmp_output = at::empty({nframe}, input.options());
         if (p == 1) {
-          cunn_MultiMarginCriterion_updateOutput_kernel<1> <<<blocks, threads, 0, stream>>>(
+          MultiMarginLoss_forward_kernel<1> <<<blocks, threads, 0, stream>>>(
               tmp_output.data_ptr<scalar_t>(),
               input.data_ptr<scalar_t>(),
               target.data_ptr<int64_t>(),
@@ -237,7 +238,7 @@ Tensor& multi_margin_loss_cuda_out(
               margin);
           C10_CUDA_KERNEL_LAUNCH_CHECK();
         } else if (p == 2) {
-          cunn_MultiMarginCriterion_updateOutput_kernel<2> <<<blocks, threads, 0, stream>>>(
+          MultiMarginLoss_forward_kernel<2> <<<blocks, threads, 0, stream>>>(
               tmp_output.data_ptr<scalar_t>(),
               input.data_ptr<scalar_t>(),
               target.data_ptr<int64_t>(),
@@ -249,9 +250,6 @@ Tensor& multi_margin_loss_cuda_out(
         }
         at::sum_out(out, tmp_output, /*dims=*/IntArrayRef{});
       }
-    } else {
-      TORCH_CHECK(false, "Expected 2D input with optional zero batch dim, or 1D input with non-zero dims, but got sizes: ",
-      input.sizes());
     }
   });
 
@@ -304,7 +302,7 @@ Tensor& multi_margin_loss_cuda_backward_out(
       dim3 threads(MULTIMARGIN_THREADS);
 
       if (p == 1) {
-        cunn_MultiMarginCriterion_updateGradInput_kernel<1> <<<blocks, threads, 0, stream>>>(
+        MultiMarginLoss_backward_kernel<1> <<<blocks, threads, 0, stream>>>(
             grad_input.data_ptr<scalar_t>(),
             grad_output.data_ptr<scalar_t>(),
             input.data_ptr<scalar_t>(),
@@ -317,7 +315,7 @@ Tensor& multi_margin_loss_cuda_backward_out(
             reduction != at::Reduction::None);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else if (p == 2) {
-        cunn_MultiMarginCriterion_updateGradInput_kernel<2> <<<blocks, threads, 0, stream>>>(
+        MultiMarginLoss_backward_kernel<2> <<<blocks, threads, 0, stream>>>(
             grad_input.data_ptr<scalar_t>(),
             grad_output.data_ptr<scalar_t>(),
             input.data_ptr<scalar_t>(),
@@ -330,8 +328,9 @@ Tensor& multi_margin_loss_cuda_backward_out(
             reduction != at::Reduction::None);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
-    } else if (input.dim() == 2) {
+    } else {
       auto in_sizes = input.sizes();
+      TORCH_INTERNAL_ASSERT(in_sizes.size() == 2);
       int nframe = in_sizes[0];
       TORCH_CHECK((in_sizes[1] != 0) && (target.dim() <= 1) && (target.numel() == nframe),
                   "inconsistent target size");
@@ -339,7 +338,7 @@ Tensor& multi_margin_loss_cuda_backward_out(
       dim3 threads(MULTIMARGIN_THREADS);
 
       if (p == 1) {
-        cunn_MultiMarginCriterion_updateGradInput_kernel<1> <<<blocks, threads, 0, stream>>>(
+        MultiMarginLoss_backward_kernel<1> <<<blocks, threads, 0, stream>>>(
             grad_input.data_ptr<scalar_t>(),
             grad_output.data_ptr<scalar_t>(),
             input.data_ptr<scalar_t>(),
@@ -351,7 +350,7 @@ Tensor& multi_margin_loss_cuda_backward_out(
             reduction != at::Reduction::None);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else if (p == 2) {
-        cunn_MultiMarginCriterion_updateGradInput_kernel<2> <<<blocks, threads, 0, stream>>>(
+        MultiMarginLoss_backward_kernel<2> <<<blocks, threads, 0, stream>>>(
             grad_input.data_ptr<scalar_t>(),
             grad_output.data_ptr<scalar_t>(),
             input.data_ptr<scalar_t>(),
@@ -363,9 +362,6 @@ Tensor& multi_margin_loss_cuda_backward_out(
             reduction != at::Reduction::None);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
-    } else {
-      TORCH_CHECK(false, "Expected 2D input with optional zero batch dim, or 1D input with non-zero dims, but got sizes: ",
-      input.sizes());
     }
   });
 
