@@ -28,6 +28,7 @@ def PyTorchWindowsWorkflow(
     test_runner_type: str,
     cuda_version: str,
     on_pull_request: bool = False,
+    enable_force_on_cpu_test: YamlShellBool = "''",
     only_build_on_pull_request: bool = False,
     num_test_shards: int = 1,
     is_scheduled: Optional[str] = None,
@@ -37,6 +38,7 @@ def PyTorchWindowsWorkflow(
         "test_runner_type": test_runner_type,
         "cuda_version": cuda_version,
         "on_pull_request": on_pull_request,
+        "enable_force_on_cpu_test": enable_force_on_cpu_test,
         "only_build_on_pull_request": only_build_on_pull_request and on_pull_request,
         "is_scheduled": is_scheduled,
         "num_test_shards": num_test_shards,
@@ -106,6 +108,7 @@ WINDOWS_WORKFLOWS = [
         test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
         on_pull_request=True,
         num_test_shards=2,
+        enable_force_on_cpu_test=1,
     ),
     PyTorchWindowsWorkflow(
         build_environment="pytorch-win-vs2019-cuda11-cudnn8-py3",
