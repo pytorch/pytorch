@@ -4267,6 +4267,14 @@
   dispatch:
     CompositeExplicitAutograd: rot90
 
+- func: trapezoid.x(Tensor y, Tensor x, *, int dim=-1) -> Tensor
+
+- func: trapezoid.dx(Tensor y, *, float dx=1, int dim=-1) -> Tensor
+
+- func: trapezoid.x_out(Tensor y, Tensor x, *, int dim=-1, Tensor(a!) out) -> Tensor(a!)
+
+- func: trapezoid.dx_out(Tensor y, *, float dx=1, int dim=-1, Tensor(a!) out) -> Tensor(a!)
+
 - func: trapz.x(Tensor y, Tensor x, *, int dim=-1) -> Tensor
 
 - func: trapz.dx(Tensor y, *, float dx=1, int dim=-1) -> Tensor

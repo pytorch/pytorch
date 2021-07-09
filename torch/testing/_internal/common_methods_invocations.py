@@ -2481,6 +2481,20 @@ def sample_inputs_narrow(op_info, device, dtype, requires_grad, **kwargs):
 
     return list(generator())
 
+def sample_trapezoid(op_info, device, dtype, requires_grad, **kwargs):
+    shapes_and_kwargs = (
+        ((2, 3), dict(x=[[1,2,3], [4,5,6]])),
+        ((6), dict(x=[1,2,3,4,5,6])),
+        ((3, 2), dict(dx=1)),
+        ((2, 2), dict(dx=2))
+    )
+    samples = []
+
+    for shape, kwargs in shapes_and_kwargs:
+        tensor = make_tensor(shape, device, type, dtype, low=None, high=None,
+                             requires_grad=requires_grad)
+        samples.append(SampleInput(tensor, kwargs=kwargs))
+    return samples
 
 def sample_unsqueeze(op_info, device, dtype, requires_grad, **kwargs):
     shapes_and_axes = [
@@ -7313,6 +7327,10 @@ op_db: List[OpInfo] = [
                   dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
                   supports_out=False,
                   sample_inputs_func=sample_repeat_tile),
+    OpInfo('trapezoid',
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           supports_out=True,
+           sample_inputs_func=sample_trapezoid),
     OpInfo('unsqueeze',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,

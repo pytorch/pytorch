@@ -569,6 +569,7 @@ BLAS and LAPACK Operations
     symeig
     lobpcg
     trapz
+    trapezoid
     triangular_solve
     vdot
 
