@@ -283,8 +283,12 @@ def relu_inference_rule(n: Node, module_instance):
     Input and output shapes should be equal.
     """
     assert isinstance(n.args[0], Node)
-    arg_type = n.args[0].type
-    n.type = get_greatest_upper_bound(arg_type, n.type)
+
+    if n.args[0].type == Dyn and isinstance(n.type, TensorType):
+        n.args[0].type = expand_to_tensor_dim(n.args[0].type, len(n.type.__args__))
+
+    if isinstance(n.args[0].type, TensorType):
+        n.type = get_greatest_upper_bound(n.args[0].type, n.type)
     return n.type
 
 
@@ -346,7 +350,10 @@ def linear_check(tensor_type, module_instance):
 @register_inference_rule(torch.nn.Linear)
 def linear_inference_rule(n: Node, module_instance):
     assert isinstance(n.args[0], Node)
-    n.type = get_greatest_upper_bound(linear_check(n.args[0].type, module_instance), n.type)
+    if n.args[0].type == Dyn and isinstance(n.type, TensorType):
+        n.args[0].type = expand_to_tensor_dim(n.args[0].type, len(n.type.__args__))
+    if isinstance(n.args[0].type, TensorType):
+        n.type = get_greatest_upper_bound(linear_check(n.args[0].type, module_instance), n.type)
     return n.type
 
 
@@ -375,7 +382,10 @@ def adaptiveavgpool2d_check(tensor_type, module_instance):
 @register_inference_rule(torch.nn.AdaptiveAvgPool2d)
 def adaptiveavgpool2d_inference_rule(n: Node, module_instance):
     assert isinstance(n.args[0], Node)
-    n.type = get_greatest_upper_bound(n.type, adaptiveavgpool2d_check(n.args[0].type, module_instance))
+    if n.args[0].type == Dyn and isinstance(n.type, TensorType):
+        n.args[0].type = expand_to_tensor_dim(n.args[0].type, len(n.type.__args__))
+    if isinstance(n.args[0].type, TensorType):
+        n.type = get_greatest_upper_bound(n.type, adaptiveavgpool2d_check(n.args[0].type, module_instance))
     return n.type
 
 def flatten_check(typ, start_dim, end_dim):
