@@ -112,106 +112,106 @@ class TestFFT(TestCase):
         op_name = get_op_name(op)
 
         # pick ops that call hipfftExecC2R or hipfftExecZ2D
-        if op_name== "fft.irfft":
-            n=s
+        if op_name == "fft.irfft":
+            n = s
             # figure out fft_size
             if dim is None and n is None:
-                dim=tuple(range(-(input.dim()),0))
-                s=[input.size(d) for d in dim]
+                dim = tuple(range(-(input.dim()), 0))
+                s = [input.size(d) for d in dim]
             elif dim is None and n is not None:
-                dim=-1
-                s=[n]
+                dim = -1
+                s = [n]
             elif dim is not None and n is None:
-                s=[input.size(d) for d in [dim]]
+                s = [input.size(d) for d in [dim]]
             else:
-                s=[n]
-            fft_size =s[-1]
+                s = [n]
+            fft_size = s[-1]
 
             # make fft_size even to match rocfft behavior to cuda and numpy
             if (fft_size % 2) != 0:
                 n = fft_size + 1
 
-            # generate Hermitian symmetric input 
+            # generate Hermitian symmetric input
             if torch.is_complex(input):
                 valid_input = torch.fft.rfft(input.real, n=n, dim=dim, norm=norm)
             else:
                 valid_input = torch.fft.rfft(input, n=n, dim=dim, norm=norm)
 
-            return (valid_input,n,dim,norm)
-        elif op_name== "fft.irfftn":
+            return (valid_input, n, dim, norm)
+        elif op_name == "fft.irfftn":
             # figure out fft_size
             if dim is None and s is None:
-                dim=tuple(range(-(input.dim()),0))
-                s=[input.size(d) for d in dim]
+                dim = tuple(range(-(input.dim()), 0))
+                s = [input.size(d) for d in dim]
             elif dim is None and s is not None:
-                dim=tuple(range(-(len(s)),0))
+                dim = tuple(range(-(len(s)), 0))
             elif dim is not None and s is None:
-                s=[input.size(d) for d in dim]
+                s = [input.size(d) for d in dim]
 
-            fft_size =s[-1]
+            fft_size = s[-1]
 
             # make fft_size even to match rocfft behavior to cuda and numpy
             if (fft_size % 2) != 0:
                 if type(s) is tuple:
-                    s=list(s)
+                    s = list(s)
                     s[-1] = fft_size + 1
 
-            # generate Hermitian symmetric input 
+            # generate Hermitian symmetric input
             if torch.is_complex(input):
                 valid_input = torch.fft.rfftn(input.real, s=s, dim=dim, norm=norm)
             else:
                 valid_input = torch.fft.rfftn(input, s=s, dim=dim, norm=norm)
-            return (valid_input,s,dim,norm)
-        elif op_name=="fft_irfft2":
+            return (valid_input, s, dim, norm)
+        elif op_name == "fft_irfft2":
             # figure out fft_size
             if dim is None and s is None:
-                dim=tuple(range(-(2),0))
-                s=[input.size(d) for d in dim]
+                dim = tuple(range(-(2), 0))
+                s = [input.size(d) for d in dim]
             elif dim is None and s is not None:
-                dim=tuple(range(-(len(s)),0))
+                dim = tuple(range(-(len(s)), 0))
             elif dim is not None and s is None:
-                s=[input.size(d) for d in dim]
-            fft_size =s[-1]
+                s = [input.size(d) for d in dim]
+            fft_size = s[-1]
 
             # make fft_size even to match rocfft behavior to cuda and numpy
             if (fft_size % 2) != 0:
                 if type(s) is tuple:
-                    s=list(s)
+                    s = list(s)
                     s[-1] = fft_size + 1
-            # generate Hermitian symmetric input 
+            # generate Hermitian symmetric input
             if torch.is_complex(input):
                 valid_input = torch.fft.rfft2(input.real, s=s, dim=dim, norm=norm)
             else:
                 valid_input = torch.fft.rfft2(input, s=s, dim=dim, norm=norm)
-            return (valid_input,s, dim,norm)
-        elif op_name=="fft.hfft":
-            n=s
+            return (valid_input, s, dim, norm)
+        elif op_name == "fft.hfft":
+            n = s
             # figure out fft_size
             if dim is None and n is None:
-                dim=tuple(range(-(input.dim()),0))
-                s=[input.size(d) for d in dim]
+                dim = tuple(range(-(input.dim()), 0))
+                s = [input.size(d) for d in dim]
             elif dim is None and n is not None:
-                dim=-1
-                s=[n]
+                dim = -1
+                s = [n]
             elif dim is not None and n is None:
-                s=[input.size(d) for d in [dim]]
+                s = [input.size(d) for d in [dim]]
             else:
-                s=[n]
-            fft_size =s[-1]
+                s = [n]
+            fft_size = s[-1]
 
             # make fft_size even to match rocfft behavior to cuda and numpy
             if (fft_size % 2) != 0:
                 n = fft_size + 1
-            
-             # generate Hermitian symmetric input
+
+            # generate Hermitian symmetric input
             if torch.is_complex(input):
                 valid_input = torch.fft.ihfft(input.real, n=n, dim=dim, norm=norm)
             else:
                 valid_input = torch.fft.ihfft(input, n=n, dim=dim, norm=norm)
-            
-            return (valid_input,n,dim,norm)
+
+            return (valid_input, n, dim, norm)
         else:
-            return (input,s,dim,norm)
+            return (input, s, dim, norm)
 
     @onlyOnCPUAndCUDA
     @ops([op for op in spectral_funcs if not op.ndimensional])
