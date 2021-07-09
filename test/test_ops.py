@@ -961,10 +961,13 @@ class TestMathBits(TestCase):
         if not op.test_neg_view:
             self.skipTest("Operation not tested with tensors with negative bit.")
         math_op_physical = torch.neg
-        math_op_view = lambda x: torch.conj(x*1j).imag
+
+        def math_op_view(x):
+            return torch.conj(x * 1j).imag
         _requires_grad = (op.supports_autograd and op.supports_complex_autograd(torch.device(device).type))
         is_bit_set = torch.is_neg
-        self._test_math_view(device, dtype, op, _requires_grad, math_op_physical, math_op_view, is_bit_set, lambda x: not torch.is_complex(x))
+        self._test_math_view(device, dtype, op, _requires_grad, math_op_physical, math_op_view, is_bit_set,
+                             lambda x: not torch.is_complex(x))
 
 
 instantiate_device_type_tests(TestCommon, globals())
