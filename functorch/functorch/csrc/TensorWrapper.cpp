@@ -7,6 +7,7 @@
 #include <functorch/csrc/TensorWrapper.h>
 #include <functorch/csrc/DynamicLayer.h>
 #include <functorch/csrc/BatchedTensorImpl.h>
+#include <functorch/csrc/PythonKey.h>
 
 #include <torch/library.h>
 #include <ATen/core/dispatch/Dispatcher.h>
@@ -149,17 +150,19 @@ TensorWrapper::TensorWrapper(
   refreshMetadata();
 
   // Note [TensorWrapper sometimes has storage]
-  // TensorWrapper has storage if it isn't wrapping a BatchedTensor.
-  // If TensorWrapper ultimately wraps a BatchedTensor (directly or
-  // indirectly), then it does not have storage.
+  // TensorWrapper has storage if wraps a Tensor that has storage. Otherwise,
+  // it does not have storage. This happens in particular with:
+  // - BatchedTensor
+  // - PythonTensor
   //
-  // TensorImpl's storage_access_should_throw_ field is private
-  // (TODO: we probably want to make it protected or add an accessor)
-  // so we work around it by trying to figure out if the storage access
+  // TODO: there's not an easy way to tell if a tensor has storage or not.
+  // we should probably expose TensorImpl's storage_access_should_throw_.
+  // We work around it by trying to figure out if the storage access
   // will throw or not. A possible alternative is to try-catch .storage().
+  bool python_tensor = hasPythonKey(value_);
   auto* wrapped = maybeGetTensorWrapper(value_);
   auto* batched = maybeGetBatchedImpl(value_);
-  if (batched || wrapped && wrapped->storage_access_should_throw()) {
+  if (python_tensor || batched || (wrapped && wrapped->storage_access_should_throw())) {
     hacky_storage_access_should_throw_ = true;
     set_storage_access_should_throw();
   } else {
