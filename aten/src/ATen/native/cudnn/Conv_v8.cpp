@@ -31,17 +31,27 @@ namespace at { namespace native {
 namespace {
 
 int v8_flag = -1;
+int debug = -1;
 
 bool use_v8() {
   if (v8_flag < 0) {
     auto val = c10::utils::check_env("CUDNN_V8_API_ENABLED");
+    auto debug_val = c10::utils::check_env("CUDNN_V8_API_DEBUG");
     if (val == true) {
       v8_flag = 1;
     } else {
       v8_flag = 0;
     }
+    if (debug_val == true) {
+      debug = 1;
+    } else {
+      debug = 0;
+    }
   }
-  return v8_flag;
+  if (debug == 1) {
+    TORCH_WARN("CUDNN_V8_DEBUG ON, V8_FLAG: ", v8_flag);
+  }
+  return v8_flag == 1;
 }
 
 // TODO: remove duplicate code in Conv_v7.cpp
