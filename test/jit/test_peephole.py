@@ -571,4 +571,3 @@ class TestPeephole(JitTestCase):
         FileCheck().check_not("aten::add").check_not("aten::sub") \
                    .check_not("aten::mul").check_not("aten::floordiv").run(foo.graph)
         self.assertEqual(foo([0, 1, 2, 3]), [0, 2, 3])
-
