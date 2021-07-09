@@ -927,7 +927,7 @@ class RandomDataset(IterableDataset):
 try:
     keep_fds_alive = []
     resource.setrlimit(resource.RLIMIT_NOFILE, (100, 100))
-    for random_t in DataLoader(RandomDataset(200, (2,2)),
+    for random_t in DataLoader(RandomDataset(200, (2,2)), multiprocessing_context="fork",
                                num_workers=1):
       random_t.max(dim=0)
       keep_fds_alive.append(random_t)
@@ -2072,7 +2072,7 @@ class RandomDataset(IterableDataset):
 try:
     keep_fds_alive = []
     resource.setrlimit(resource.RLIMIT_NOFILE, (100, 100))
-    for random_t in DataLoader(RandomDataset(200, (2,2)),
+    for random_t in DataLoader(RandomDataset(200, (2,2)), multiprocessing_context="fork",
                                num_workers=1, persistent_workers=True):
       random_t.max(dim=0)
       keep_fds_alive.append(random_t)
