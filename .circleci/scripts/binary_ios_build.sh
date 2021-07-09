@@ -22,7 +22,7 @@ export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 # sync submodules
 cd ${PROJ_ROOT}
 git submodule sync
-git submodule update --init --recursive
+git submodule update --init --recursive --jobs 0
 
 # run build script
 chmod a+x ${PROJ_ROOT}/scripts/build_ios.sh
