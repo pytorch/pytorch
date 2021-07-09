@@ -573,14 +573,14 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         for arg in tensor_args:
             if arg in args_with_derivatives:
                 continue
-            name = arg.name
-            if info and name in info.non_differentiable_arg_names:
+            arg_name = arg.name
+            if info and arg_name in info.non_differentiable_arg_names:
                 continue
-            if name == 'output':
+            if arg_name == 'output':
                 # Double-backwards definitions sometimes take in 'input' and
                 # 'output', but only define the derivative for input.
                 continue
-            body.append(f'check_no_requires_grad({name}, "{name}");')
+            body.append(f'check_no_requires_grad({arg_name}, "{arg_name}", "{name}");')
         return body
 
     def save_variables(

@@ -46,16 +46,23 @@ namespace {
   }
 } // anonymous namespace
 
-const AnnotatedKernel OperatorEntry::ambiguousAutogradOtherKernel_ = AnnotatedKernel(
+const AnnotatedKernel& OperatorEntry::missingKernel() const {
+  static AnnotatedKernel kernel;
+  return kernel;
+}
+
+const AnnotatedKernel& OperatorEntry::ambiguousAutogradOtherKernel() const {
+  static AnnotatedKernel kernel(
     c10::KernelFunction::makeAmbiguousAutogradOther(), nullptr, "ambiguous_autogradother");
+  return kernel;
+}
 
 void OperatorEntry::registerSchema(FunctionSchema&& schema, std::string&& debug) {
   TORCH_INTERNAL_ASSERT(!schema_.has_value());
-  // NOLINTNEXTLINE(modernize-loop-convert)
-  for (auto i = kernels_.begin(); i != kernels_.end(); ++i) {
-    for (auto j = i->second.begin(); j != i->second.end(); ++j) {
-      if (j->inferred_function_schema != nullptr) {
-        checkSchema(name_, schema, debug, *j->inferred_function_schema, j->debug);
+  for (const auto& kernel : kernels_) {
+    for (const auto &j : kernel.second) {
+      if (j.inferred_function_schema != nullptr) {
+        checkSchema(name_, schema, debug, *j.inferred_function_schema, j.debug);
       }
     }
   }
@@ -190,7 +197,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   //    (2.2) Use kernel from DispatchKey::CompositeImplicitAutograd if available.
   //          For autograd keys, we only use kernel from CompositeImplicitAutograd when there's no direct registration
   //          to its corresponding backend key or CompositeExplicitAutograd. See Note [CompositeExplicitAutograd and CompositeImplicitAutograd].
-  //          For AutogradOther, we eagerly return ambiguousAutogradOtherKernel_ if there's registration to any of
+  //          For AutogradOther, we eagerly return ambiguousAutogradOtherKernel() if there's registration to any of
   //          its backends and ask backend extender to request a decicated Autograd key for the backend.
   //          See Note [Ambiguity in AutogradOther kernel] for more details.
   //          A CompositeExplicitAutograd kernel prevents CompositeImplicitAutograd kernel being used for Autograd keys, but it doesn't
@@ -229,14 +236,14 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
 
   // 2.2. Use CompositeImplicitAutograd kernel if available. For autograd keys, we only use kernel from CompositeImplicitAutograd
   //      when there's no direct registration to its corresponding backend key or CompositeExplicitAutograd.
-  //      For AutogradOther, we return ambiguousAutogradOtherKernel_ if there's registration
+  //      For AutogradOther, we return ambiguousAutogradOtherKernel() if there's registration
   //      to any of its backends.
   //      See Note [Undefined in dispatchTable_] for the special handling for Undefined.
   if (dispatch_key == DispatchKey::Undefined || isIncludedInAlias(dispatch_key, DispatchKey::CompositeImplicitAutograd)) {
     if (auto math_registration = getKernelForDispatchKey(DispatchKey::CompositeImplicitAutograd)) {
       if (dispatch_key == DispatchKey::AutogradOther
           && hasKernelForAnyDispatchKey(c10::autogradother_backends)) {
-        return {ambiguousAutogradOtherKernel_, "ambiguous autogradother"};
+        return {ambiguousAutogradOtherKernel(), "ambiguous autogradother"};
       } else if (!has_backend_kernel) {
         return {*math_registration.value(), "math kernel"};
       }
@@ -257,7 +264,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   }
 
   // 4. Default to error
-  return {missingKernel_, "missing"};
+  return {missingKernel(), "missing"};
 }
 
 // synchronizes the dispatch table entry for a given dispatch key

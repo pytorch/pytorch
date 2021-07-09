@@ -113,9 +113,16 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       if(i > 0)
         out << ", ";
       if (tup->schema()) {
-        out << tup->schema()->arguments()[i].name() << " : ";
+        auto arg = tup->schema()->arguments()[i];
+        out << arg.name() << " : ";
+        out << *(tup->elements()[i]);
+        if (arg.default_value()) {
+          out << " = " << *arg.default_value();
+        }
       }
-      out << *(tup->elements()[i]);
+      else {
+        out << *(tup->elements()[i]);
+      }
     }
     out << ")";
   } else if (t.kind() == TypeKind::FunctionType) {
@@ -742,13 +749,41 @@ TupleTypePtr TupleType::createNamed(
     const c10::optional<c10::QualifiedName>& qualName,
     const std::vector<std::string>& field_names,
     const std::vector<TypePtr>& field_types) {
+      std::vector<IValue> empty_defaults;
+      return TupleType::createNamed(qualName, field_names, field_types, empty_defaults);
+    }
+
+
+TupleTypePtr TupleType::createNamed(const c10::optional<c10::QualifiedName>& qualName,
+    const std::vector<std::string>& field_names,
+    const std::vector<TypePtr>& field_types,
+    std::vector<IValue>& field_defaults) {
   TORCH_INTERNAL_ASSERT(field_names.size() == field_types.size());
+
   std::vector<Argument> arguments;
+  arguments.reserve(field_names.size());
+  auto min_default_idx = field_names.size() - field_defaults.size();
   for (size_t i = 0; i < field_names.size(); ++i) {
-    arguments.emplace_back(
-        /*name=*/field_names[i],
-        /*type=*/field_types[i],
-        /*N=*/i);
+    if (i < min_default_idx) {
+      Argument arg{
+          /*name=*/field_names[i],
+          /*type=*/field_types[i],
+          /*N=*/i};
+      arguments.emplace_back(std::move(arg));
+    }
+    else {
+      size_t j = i - min_default_idx;
+      TORCH_CHECK(field_defaults[j].tagKind() != "Tensor", "Tensors are "
+                  "not supported as default NamedTuple fields. Their "
+                  "mutability could lead to potential memory aliasing "
+                  "problems");
+      Argument arg{
+          /*name=*/field_names[i],
+          /*type=*/field_types[i],
+          /*N=*/i,
+          /*default_value=*/field_defaults[j]};
+      arguments.emplace_back(std::move(arg));
+    }
   }
 
   auto schema = std::make_shared<FunctionSchema>(
@@ -1634,10 +1669,9 @@ void ClassType::checkNotExist(const std::string& name, const std::string& what) 
   }
 
   // Check no overlap with existing attributes
-  // NOLINTNEXTLINE(modernize-loop-convert)
-  for (size_t i = 0; i < attributes_.size(); ++i) {
+  for (const auto & attribute : attributes_) {
     TORCH_CHECK(
-        name != attributes_[i].getName(),
+        name != attribute.getName(),
         "attempting to add ",
         what,
         " '",
@@ -1645,7 +1679,7 @@ void ClassType::checkNotExist(const std::string& name, const std::string& what) 
         "' to ",
         repr_str(),
         " but an attribute field of the same name already exists with type ",
-        attributes_[i].getType()->repr_str());
+        attribute.getType()->repr_str());
   }
 }
 

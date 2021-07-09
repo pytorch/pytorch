@@ -26,7 +26,7 @@ SHELLCHECK_GHA_GENERATED_FOLDER=.shellcheck_generated_gha
 shellcheck-gha:
 	@$(RM) -r $(SHELLCHECK_GHA_GENERATED_FOLDER)
 	tools/extract_scripts.py --out=$(SHELLCHECK_GHA_GENERATED_FOLDER)
-	tools/run_shellcheck.sh $(SHELLCHECK_GHA_GENERATED_FOLDER)
+	tools/linter/run_shellcheck.sh $(SHELLCHECK_GHA_GENERATED_FOLDER)
 
 generate-gha-workflows:
 	.github/scripts/generate_ci_workflows.py
