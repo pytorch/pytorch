@@ -22,18 +22,14 @@ struct TORCH_API PySavedVariableHooks : public SavedVariableHooks {
 
     at::Tensor call_unpack_hook() override {
       py::gil_scoped_acquire acquire;
-      return THPVariable_Unpack(unpack_hook_(py::cast<py::object>(data_)).release().ptr());
-    }
-
-    void reset_data() override {
-      if (data_) {
-        Py_DECREF(data_);
-        data_ = nullptr;
-      }
+      auto res = unpack_hook_(py::cast<py::object>(data_));
+      return THPVariable_Unpack(res.ptr());
     }
 
     ~PySavedVariableHooks() override {
-      reset_data();
+      if (data_) {
+        Py_DECREF(data_);
+      }
     };
 
   private:
