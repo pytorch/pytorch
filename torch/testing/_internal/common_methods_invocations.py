@@ -2491,6 +2491,7 @@ def sample_trapezoid(op_info, device, dtype, requires_grad, **kwargs):
                              requires_grad=requires_grad)
         samples.append(SampleInput(tensor, kwargs=kwargs))
     return samples
+
         ((3, 2), dict(dx=1)),
         ((2, 2), dict(dx=2))
     )
