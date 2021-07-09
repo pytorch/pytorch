@@ -231,7 +231,8 @@ ListTypePtr ListType::ofTensors() {
   return value;
 }
 ListTypePtr ListType::ofOptionalTensors() {
-  static auto value = ListType::create(OptionalType::ofTensor());
+  static auto inner = UnionType::createOptionalOf(TensorType::get());
+  static auto value = ListType::create(inner);
   return value;
 }
 ListTypePtr ListType::ofInts() {

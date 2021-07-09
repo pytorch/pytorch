@@ -842,7 +842,7 @@ def is_union(ann):
         raise_error_container_parameter_missing("Union")
 
     if not hasattr(ann, '__module__') or not ann.__module__ == 'typing':
-       return False
+        return False
 
     typ = getattr(ann, '__origin__', None)
 

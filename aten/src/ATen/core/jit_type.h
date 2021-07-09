@@ -137,7 +137,7 @@ struct TORCH_API UnionType : public Type {
   TypePtr subtractTypeSet(std::vector<TypePtr>& to_subtract) const;
 
  protected:
-    UnionType(std::vector<TypePtr> types);
+    explicit UnionType(std::vector<TypePtr> types);
     std::string annotation_str_impl(TypePrinter printer = nullptr) const override;
     std::string unionStr(TypePrinter printer = nullptr, bool is_annotation_str = false) const;
     // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
@@ -160,7 +160,7 @@ struct TORCH_API Pybind11_OptionalType : public UnionType {
   static UnionTypePtr legacy_OptionalOfTensor();
 
  protected:
-  Pybind11_OptionalType(std::vector<TypePtr> types) : UnionType(std::move(types)) {}
+  explicit Pybind11_OptionalType(std::vector<TypePtr> types) : UnionType(std::move(types)) {}
 };
 
 template <typename T>

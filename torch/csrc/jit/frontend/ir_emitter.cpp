@@ -1149,10 +1149,6 @@ struct to_ir {
     }
     // statement must be var {is, is not} None
     const std::string& name = Var(lhs).name().name();
-    std::string testtt{"x"};
-    if (name == testtt) {
-      int foo = 5;
-    }
 
     if (const auto union_type = lhs_value->type()->cast<UnionType>()) {
       std::vector<TypePtr> to_subtract{NoneType::get()};
