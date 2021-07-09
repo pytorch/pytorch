@@ -12,8 +12,8 @@ import os
 import torch
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
     skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN, \
-    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, DeterministicGuard, TEST_SKIP_NOARCH, IS_WINDOWS
-from torch.testing._internal.common_cuda import _get_torch_cuda_version
+    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, DeterministicGuard, TEST_SKIP_NOARCH
+from torch.testing._internal.common_cuda import _get_torch_cuda_version, TEST_CUSPARSE_GENERIC
 from torch.testing import \
     (get_all_dtypes)
 
@@ -1221,11 +1221,7 @@ def skipCUDAIfNoCudnn(fn):
 
 # Skips a test on CUDA if cuSparse generic API is not available
 def skipCUDAIfNoCusparseGeneric(fn):
-    version = _get_torch_cuda_version()
-    min_supported_version = (10, 2)
-    if IS_WINDOWS:
-        min_supported_version = (11, 0)
-    return skipCUDAIf(version < min_supported_version, "cuSparse Generic API not available")(fn)
+    return skipCUDAIf(not TEST_CUSPARSE_GENERIC, "cuSparse Generic API not available")(fn)
 
 def skipMeta(fn):
     return skipMetaIf(True, "test doesn't work with meta tensors")(fn)
