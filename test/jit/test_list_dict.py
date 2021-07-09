@@ -1771,7 +1771,7 @@ class TestDict(JitTestCase):
 
 
 class TestNamedTuple(JitTestCase):
-    def test_named_tuple(self):
+    def test_namedtuple(self):
         class FeatureVector(NamedTuple):
             float_features: float
             sequence_features: List[float]
@@ -1788,7 +1788,7 @@ class TestNamedTuple(JitTestCase):
 
         self.assertEqual(foo(torch.rand(3, 4)), 18.0)
 
-    def test_named_tuple_constant(self):
+    def test_namedtuple_constant(self):
         class Tup(NamedTuple):
             a: int
             b: int
@@ -1816,7 +1816,7 @@ class TestNamedTuple(JitTestCase):
         self.assertEqual(out.sequence_features, [3.0])
         self.assertEqual(out.time_since_first, 3.0)
 
-    def test_named_tuple_as_attr(self):
+    def test_namedtuple_as_attr(self):
         class Config(NamedTuple):
             size: int
 
@@ -1834,7 +1834,7 @@ class TestNamedTuple(JitTestCase):
 
         s = torch.jit.script(MyMod({0: Config(size=16)}))
 
-    def test_named_tuple_resolution(self):
+    def test_namedtuple_resolution(self):
         class TheType(NamedTuple):
             t: int
 
@@ -1852,7 +1852,7 @@ class TestNamedTuple(JitTestCase):
 
         self.checkScript(fn, [])
 
-    def test_named_tuple_slice_unpack(self):
+    def test_namedtuple_slice_unpack(self):
         class MyCoolNamedTuple(NamedTuple):
             a : int
             b : float
@@ -1866,7 +1866,7 @@ class TestNamedTuple(JitTestCase):
 
         self.assertEqual(foo(3, 3.5, [6]), ((3,), 3, [6]))
 
-    def test_named_tuple_lower(self):
+    def test_namedtuple_lower(self):
         class MyCoolNamedTuple(NamedTuple):
             a : int
             b : float
@@ -1881,7 +1881,7 @@ class TestNamedTuple(JitTestCase):
         torch._C._jit_pass_lower_all_tuples(foo.graph)
         FileCheck().check_not('TupleConstruct').run(foo.graph)
 
-    def test_named_tuple_type_annotation(self):
+    def test_namedtuple_type_annotation(self):
         global MyCoolNamedTuple  # see [local resolution in python]
 
         class MyCoolNamedTuple(NamedTuple):
@@ -1896,7 +1896,7 @@ class TestNamedTuple(JitTestCase):
         mnt = MyCoolNamedTuple(42, 420.0, [666])
         self.assertEqual(foo(mnt), mnt)
 
-    def test_named_tuple_wrong_types(self):
+    def test_namedtuple_wrong_types(self):
         class MyCoolNamedTuple(NamedTuple):
             a : int
             b : float
@@ -1909,7 +1909,7 @@ class TestNamedTuple(JitTestCase):
                 tup = MyCoolNamedTuple('foo', 'bar', 'baz')
                 return tup
 
-    def test_named_tuple_kwarg_construct(self):
+    def test_namedtuple_kwarg_construct(self):
         class MyCoolNamedTuple(NamedTuple):
             a : int
             b : float
@@ -1925,20 +1925,8 @@ class TestNamedTuple(JitTestCase):
         self.assertEqual(tup.b, 3.5)
         self.assertEqual(tup.c, [1, 2, 3])
 
-    def test_named_tuple_default_error(self):
-        class MyCoolNamedTuple(NamedTuple):
-            a : int
-            b : float
-            c : List[int] = [3, 4, 5]
-
-        with self.assertRaisesRegex(RuntimeError, 'Default values are currently not supported'):
-            @torch.jit.script
-            def foo():
-                tup = MyCoolNamedTuple(c=[1, 2, 3], b=3.5, a=9)
-                return tup
-
     @unittest.skipIf(True, "broken while these tests were not in CI")
-    def test_named_tuple_serialization(self):
+    def test_namedtuple_serialization(self):
         class MyCoolNamedTuple(NamedTuple):
             a : int
             b : float
