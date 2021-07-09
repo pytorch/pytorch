@@ -143,6 +143,67 @@ class TestNNAPI(TestCase):
                 ReshapeModule((2, 4)),
                 nhwc(torch.randn(4, 2, 1, 1)))
 
+    def test_flatten(self):
+        for mod in [
+            torch.nn.Flatten(),
+            torch.nn.Flatten(start_dim=2, end_dim=3),
+            torch.nn.Flatten(start_dim=2, end_dim=4),
+            torch.nn.Flatten(start_dim=0, end_dim=-2),
+            torch.nn.Flatten(start_dim=0, end_dim=4)
+
+        ]:
+            self.check(mod, torch.randn(4, 2, 1, 3, 7))
+
+        # TODO(axit): To add support for runtime
+        # self.check(
+        #     torch.nn.Flatten(),
+        #     torch.randn(4, 2, 1, 3, 7),
+        #     convert_args=[torch.zeros(0, 2, 1, 3, 7)]
+        # )
+        # with self.assertRaisesRegex(Exception, "dims can't be flexible"):
+        #     self.check(torch.nn.Flatten(), torch.randn(4, 2, 0, 0, 7))
+        # with self.assertRaisesRegex(Exception, "Only 1 dim"):
+        #     self.check(
+        #         torch.nn.Flatten(start_dim=1, end_dim=-2),
+        #         torch.randn(0, 2, 1, 3, 0))
+
+    def test_slice(self):
+        class SliceModule(torch.nn.Module):
+            def __init__(self, start, stop, step):
+                super().__init__()
+                self.start = start
+                self.stop = stop
+                self.step = step
+
+            def forward(self, t):
+                return t[1:, self.start:self.stop:self.step, :]
+
+        class SliceModule2(torch.nn.Module):
+            def forward(self, t):
+                return t[3:]
+
+        self.check(
+            SliceModule(1, 5, 2),
+            torch.randn(4, 6, 2)
+        )
+        self.check(
+            SliceModule2(),
+            torch.randn(5)
+        )
+
+        # flex inputs
+        self.check(
+            SliceModule(1, 5, 2),
+            torch.randn(4, 6, 2),
+            convert_args=[torch.zeros(4, 6, 0)]
+        )
+        with self.assertRaisesRegex(Exception, "slice with flexible shape"):
+            self.check(
+                SliceModule(1, 5, 2),
+                torch.randn(4, 6, 2),
+                convert_args=[torch.zeros(0, 0, 0)]
+            )
+
     def test_cat(self):
         class CatModule(torch.nn.Module):
             def __init__(self, dim):
@@ -186,7 +247,7 @@ class TestNNAPI(TestCase):
                 self.check(UnaryModule(), torch.tensor([-1.0, 1.0]))
 
     def test_pointwise_binary(self):
-        for op in ["add", "sub", "mul"]:
+        for op in ["add", "sub", "mul", "div"]:
             with self.subTest(op):
                 class BinaryModule(torch.nn.Module):
                     def forward(self, lhs, rhs):
@@ -196,6 +257,8 @@ class TestNNAPI(TestCase):
                             return lhs - rhs
                         if op == "mul":
                             return lhs * rhs
+                        if op == "div":
+                            return lhs / rhs
                         raise Exception("Bad op")
 
                 self.check(
@@ -227,6 +290,56 @@ class TestNNAPI(TestCase):
         with self.assertRaisesRegex(Exception, "hardtanh with args"):
             self.check(torch.nn.Hardtanh(0.0, 5.0), inp)
 
+    def test_softmax(self):
+        inp = torch.tensor([[-2.0, -0.5], [0.5, 2.0]])
+        self.check(torch.nn.Softmax(), inp)
+        self.check(torch.nn.Softmax(dim=0), inp)
+        # Test flexible size
+        self.check(
+            torch.nn.Softmax(),
+            inp,
+            convert_args=[torch.zeros(0, 0)],
+        )
+
+    def test_to(self):
+        class ToCPU(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.prelu = torch.nn.PReLU()
+
+            def forward(self, x):
+                y = x.to("cpu")
+                # add prelu since input operand can't be output
+                return self.prelu(y)
+
+        arg = torch.randn(1, 2, 3, 3)
+        self.check(ToCPU(), arg)
+        # Test flexible size
+        self.check(
+            ToCPU(),
+            arg,
+            convert_args=[torch.zeros(1, 2, 0, 0)],
+        )
+
+    def test_detach(self):
+        class DetachModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                y = x.detach()
+                return torch.nn.functional.relu(y)
+
+        self.check(DetachModule(), torch.randn(1, 2, 3, 3))
+        self.check(
+            DetachModule(), torch.randn(1, 2, 3, 3),
+            convert_args=[torch.zeros(1, 2, 0, 0)])
+
+    def test_log_softmax(self):
+        inp = torch.randn(3, 10)
+        self.check(torch.nn.LogSoftmax(), inp)
+        self.check(torch.nn.LogSoftmax(0), inp)
+
     def test_mean(self):
         class MeanModule(torch.nn.Module):
             def __init__(self, dim, keep=False):
@@ -250,6 +363,34 @@ class TestNNAPI(TestCase):
                 self.check(torch.nn.MaxPool2d(2), inp)
                 self.check(torch.nn.MaxPool2d((3, 4)), inp)
                 self.check(torch.nn.MaxPool2d((3, 4), (1, 2)), inp)
+
+    def test_avg_pool2d(self):
+        for (name, inp) in self.float_and_quant_and_nhwc(torch.randn(2, 3, 12, 16), 0.3, 128):
+            with self.subTest(name):
+                atol_rtol = None
+                limit = None
+                convert_dims = (2, 3, 0, 0)
+                convert_arg = torch.zeros(*convert_dims)
+
+                for model in (
+                        torch.nn.AvgPool2d(2),
+                        torch.nn.AvgPool2d((3, 4)),
+                        torch.nn.AvgPool2d((3, 4), (1, 2))):
+                    if "quant" in name:
+                        atol_rtol = (1, 0)
+                        limit = model(inp).numel()
+                        convert_arg = qpt(torch.zeros(*convert_dims), 1.0 / 16, 128)
+                    if "nhwc" in name:
+                        convert_arg = nhwc(convert_arg)
+
+                    self.check(model, inp, atol_rtol=atol_rtol, limit=limit)
+                    self.check(
+                        model,
+                        inp,
+                        convert_args=[convert_arg],
+                        atol_rtol=atol_rtol,
+                        limit=limit
+                    )
 
     def test_adaptive_avg_pool2d(self):
         for (name, inp) in self.float_and_quant_and_nhwc(torch.randn(2, 3, 12, 16), 0.3, 128):
