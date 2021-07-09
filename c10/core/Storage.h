@@ -118,6 +118,10 @@ struct C10_API Storage {
     return storage_impl_.get();
   }
 
+  c10::weak_intrusive_ptr<StorageImpl> getWeakStorageImpl() const {
+    return c10::weak_intrusive_ptr<StorageImpl>(storage_impl_);
+  }
+
   operator bool() const {
     return storage_impl_;
   }
