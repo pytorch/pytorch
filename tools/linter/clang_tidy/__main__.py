@@ -7,8 +7,8 @@ import re
 from typing import List
 
 
-from run import run
-from generate_build_files import generate_build_files
+from tools.linter.clang_tidy.run import run
+from tools.linter.clang_tidy.generate_build_files import generate_build_files
 
 
 def clang_search_dirs() -> List[str]:
