@@ -46,6 +46,7 @@ class TensorpipeDeviceTypeConverter {
 extern TORCH_API std::array<
     std::atomic<const TensorpipeDeviceTypeConverter*>,
     static_cast<size_t>(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)>
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     device_type_converter_registry;
 
 class TORCH_API TensorpipeDeviceTypeConverterRegistrar {
