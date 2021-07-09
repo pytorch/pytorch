@@ -229,12 +229,11 @@ struct C10_API MemoryReportingInfoBase : public c10::DebugInfoBase {
   virtual ~MemoryReportingInfoBase() {}
 
   /**
-   * alloc corresponds to the size of the ptr
+   * alloc_size corresponds to the size of the ptr.
    *
-   * allocated corresponds to total allocated memory (e.g. from allocator to
-   * tensor).
+   * allocated_size corresponds to total allocated memory.
    *
-   * reserved corresponds to total size of memory pool, both used and
+   * reserved_size corresponds to total size of memory pool, both used and
    * unused, if applicable.
    */
   virtual void reportMemoryUsage(

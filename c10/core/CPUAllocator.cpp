@@ -324,7 +324,7 @@ void ProfiledCPUMemoryReporter::Delete(void* ptr) {
   }
   if (profile_memory) {
     reportMemoryUsageToProfiler(
-        ptr, nbytes, allocated, 0, c10::Device(c10::DeviceType::CPU));
+        ptr, -nbytes, allocated, 0, c10::Device(c10::DeviceType::CPU));
   }
 }
 
