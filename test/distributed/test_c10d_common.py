@@ -376,7 +376,7 @@ class AbstractDistributedDataParallelTest(object):
                 len(list(model.parameters())), len(list(ddp_model.parameters()))
             )
             for i, j in zip(model.parameters(), ddp_model.parameters()):
-                self.assertEqual(i, j)
+                self.assertEqual(i, j, rtol=1.3e-06, atol=5e-5)
 
             # Shuffle the input so that DDP input is different
             torch.manual_seed(1337 + iteration)

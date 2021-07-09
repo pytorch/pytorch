@@ -22,6 +22,10 @@ from .ns.graph_passes import (
     create_a_shadows_b,
 )
 
+from .ns.utils import (
+    rekey_logger_info_on_node_name_of_model,
+)
+
 from .ns.ns_types import (
     NSSingleResultValuesType,
     NSResultsType,
@@ -128,11 +132,11 @@ def _extract_weights_one_model(
 
     for node, ref_name in nodes_and_names_to_instrument:
         res_type = NSSingleResultValuesType.WEIGHT.value
-        if ref_name not in results:
-            results[ref_name] = {res_type: {}}
         extracted_weight = \
             extract_weight_from_node(node, model, type_a_related_to_b)
         if extracted_weight:
+            if ref_name not in results:
+                results[ref_name] = {res_type: {}}
             results[ref_name][res_type][model_name] = [extracted_weight]
 
 
@@ -163,6 +167,9 @@ def _extract_weights_impl(
         model_name_a, gm_a, nodes_and_names_to_instrument_a, results)
     _extract_weights_one_model(
         model_name_b, gm_b, nodes_and_names_to_instrument_b, results)
+
+    # rekey on names of nodes in gm_b
+    results = rekey_logger_info_on_node_name_of_model(results, model_name_b)
 
     return results
 
@@ -329,6 +336,7 @@ def extract_logger_info(
     model_a: nn.Module,
     model_b: nn.Module,
     logger_cls: Callable,
+    model_name_to_use_for_layer_names: str,
 ) -> NSResultsType:
     """
     Same thing as ns.extract_logger_info, but for models prepared with
@@ -342,6 +350,9 @@ def extract_logger_info(
     results: NSResultsType = {}
     for model in (model_a, model_b):
         _extract_logger_info_one_model(model, results, logger_cls)
+    # rekey on the name of model b
+    results = rekey_logger_info_on_node_name_of_model(
+        results, model_name_to_use_for_layer_names)
     return results
 
 
@@ -401,6 +412,7 @@ def add_shadow_loggers(
 def extract_shadow_logger_info(
     model_a_shadows_b: nn.Module,
     logger_cls: Callable,
+    model_name_to_use_for_layer_names: str,
 ) -> NSResultsType:
     """
     Same thing as extract_logger_info, but for an `a_shadows_b` model.
@@ -409,4 +421,53 @@ def extract_shadow_logger_info(
     torch._C._log_api_usage_once("quantization_api._numeric_suite_fx.extract_shadow_logger_info")
     results: NSResultsType = collections.defaultdict(dict)
     _extract_logger_info_one_model(model_a_shadows_b, results, logger_cls)
+    # rekey on the name of model b
+    results = rekey_logger_info_on_node_name_of_model(
+        results, model_name_to_use_for_layer_names)
     return dict(results)
+
+
+def extend_logger_results_with_comparison(
+    results: NSResultsType,
+    model_name_1: str,
+    model_name_2: str,
+    comparison_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
+    comparison_name: str,
+) -> None:
+    """
+    Compares the logged values from `model_name_2` against the corresponding
+    values in `model_name_1`, using `comparison_fn`. Records the result
+    in `model_name_2`'s results under `comparison_name`.
+    """
+    for _, results_type_to_results in results.items():
+        for _, model_name_to_results in results_type_to_results.items():
+            assert model_name_1 in model_name_to_results, \
+                f"{model_name_1} not found in results"
+            assert model_name_2 in model_name_to_results, \
+                f"{model_name_2} not found in results"
+
+            results_1 = model_name_to_results[model_name_1]
+            results_2 = model_name_to_results[model_name_2]
+
+            for result_2 in results_2:
+                index_within_arg_2 = result_2['index_within_arg']
+                index_of_arg_2 = result_2['index_of_arg']
+                # find corresponding result_1
+                result_1 = None
+                for cur_result_1 in results_1:
+                    index_within_arg_1 = cur_result_1['index_within_arg']
+                    index_of_arg_1 = cur_result_1['index_of_arg']
+                    if (
+                        (index_within_arg_1 == index_within_arg_2) and
+                        (index_of_arg_1 == index_of_arg_2)
+                    ):
+                        result_1 = cur_result_1
+                        break
+                assert result_1 is not None
+
+                values_1 = result_1['values']
+                values_2 = result_2['values']
+                result_2[comparison_name] = []
+                for value_1, value_2 in zip(values_1, values_2):
+                    comparison_result = comparison_fn(value_1, value_2)
+                    result_2[comparison_name].append(comparison_result)

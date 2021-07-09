@@ -343,7 +343,7 @@ class ZeroRedundancyOptimizer(Optimizer):
             for param_group in self.param_groups:
                 param_lists = [list() for _ in range(self.world_size)]
                 # Sort the parameters by size (largest first)
-                params_sorted = sorted(param_group["params"], key=lambda t: t.size()[0], reverse=True)
+                params_sorted = sorted(param_group["params"], key=lambda t: t.numel(), reverse=True)
                 for param in params_sorted:
                     # Greedily add the parameter to rank with smallest size so far
                     rank = sizes.index(min(sizes))

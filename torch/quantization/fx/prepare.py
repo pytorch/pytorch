@@ -62,6 +62,8 @@ from .utils import (
     FUNCTIONAL_OPS_WITH_BIAS,
 )
 
+from ..fuser_method_mappings import DEFAULT_OP_LIST_TO_FUSER_METHOD
+
 from ..quantization_mappings import (
     get_default_qat_module_mappings,
 )
@@ -149,6 +151,57 @@ def qat_swap_modules(
     all_mappings = get_combined_dict(
         get_default_qat_module_mappings(), additional_qat_module_mapping)
     convert(root, mapping=all_mappings, inplace=True, remove_qconfig=False)
+
+def update_qconfig_for_qat(
+    qconfig_dict: Any,
+    additional_qat_module_mapping: Dict[Callable, Callable]
+) -> Any:
+    """
+    Update the qconfig_dict to account for module swaps during QAT.
+    During QAT we perform a module swap on the nn.Module types to the corresponding nn.qat.modules types.
+    """
+    all_qat_mappings = get_combined_dict(
+        get_default_qat_module_mappings(), additional_qat_module_mapping)
+    object_type_dict = qconfig_dict.get("object_type", None)
+    for k, v in object_type_dict.items():
+        if k in all_qat_mappings:
+            object_type_dict[all_qat_mappings[k]] = v
+    return qconfig_dict
+
+def update_qconfig_for_fusion(
+    model: GraphModule,
+    qconfig_dict: Any,
+) -> Any:
+    """
+    Update the qconfig_dict to account for fused modules such as LinearReLU.
+    """
+    object_type_dict = qconfig_dict.get("object_type", None)
+    if object_type_dict is None:
+        return qconfig_dict
+
+    modules = dict(model.named_modules())
+
+    for node in model.graph.nodes:
+        if node.op == 'call_module':
+            module_type = type(modules[str(node.target)])
+            if module_type not in list(DEFAULT_OP_LIST_TO_FUSER_METHOD.values()):
+                continue
+
+            for ops, fuser in DEFAULT_OP_LIST_TO_FUSER_METHOD.items():
+                if module_type == fuser:
+                    fused_qconfig = object_type_dict.get(ops[0], None)
+
+                    # Raise an error if the modules in the fused module have
+                    # different qconfigs specified in the qconfig_dict
+                    for op in ops:
+                        if object_type_dict.get(op, None) != fused_qconfig:
+                            raise LookupError("During fusion, we need to specify the same " +
+                                              f"qconfigs for both modules in {module_type}.")
+
+                    if fused_qconfig is not None:
+                        object_type_dict[module_type] = fused_qconfig
+
+    return qconfig_dict
 
 def insert_observer(
     node: Node,
@@ -1028,10 +1081,15 @@ def prepare(
     flattened_qconfig_dict = get_flattened_qconfig_dict(qconfig_dict)
     # TODO: support regex as well
     propagate_qconfig_(model, flattened_qconfig_dict)
+
     if model.training:
         additional_qat_module_mapping = prepare_custom_config_dict.get(
             "additional_qat_module_mapping", {})
         qat_swap_modules(model, additional_qat_module_mapping)
+        qconfig_dict = update_qconfig_for_qat(qconfig_dict, additional_qat_module_mapping)
+
+    qconfig_dict = update_qconfig_for_fusion(model, qconfig_dict)
+    equalization_qconfig_dict = update_qconfig_for_fusion(model, equalization_qconfig_dict)
 
     # mapping from fully qualified module name to module instance
     # for example,
