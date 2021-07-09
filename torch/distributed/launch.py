@@ -1,8 +1,10 @@
 r"""
-`torch.distributed.launch` is a module that spawns up multiple distributed
+``torch.distributed.launch`` is a module that spawns up multiple distributed
 training processes on each of the training nodes.
 
-NOTE: This module is deprecated, use torch.distributed.run.
+.. warning::
+
+    This module is going to be deprecated in favor of :ref:`torch.distributed.run <launcher-api>`.
 
 The utility can be used for single-node distributed training, in which one or
 more processes per node will be spawned. The utility can be used for either
@@ -136,9 +138,12 @@ will not pass ``--local_rank`` when you specify this flag.
     https://github.com/pytorch/pytorch/issues/12042 for an example of
     how things can go wrong if you don't do this correctly.
 
+
+
 """
 
 import logging
+import warnings
 
 from torch.distributed.run import get_args_parser, run
 
@@ -159,14 +164,27 @@ def parse_args(args):
     return parser.parse_args(args)
 
 
+def launch(args):
+    if args.no_python and not args.use_env:
+        raise ValueError(
+            "When using the '--no_python' flag,"
+            " you must also set the '--use_env' flag."
+        )
+    run(args)
+
+
 def main(args=None):
-    logger.warning(
-        "The module torch.distributed.launch is deprecated "
-        "and going to be removed in future."
-        "Migrate to torch.distributed.run"
+    warnings.warn(
+        "The module torch.distributed.launch is deprecated\n"
+        "and will be removed in future. Use torch.distributed.run.\n"
+        "Note that --use_env is set by default in torch.distributed.run.\n"
+        "If your script expects `--local_rank` argument to be set, please\n"
+        "change it to read from `os.environ['LOCAL_RANK']` instead. See \n"
+        "https://pytorch.org/docs/stable/distributed.html#launch-utility for \n"
+        "further instructions\n", FutureWarning
     )
     args = parse_args(args)
-    run(args)
+    launch(args)
 
 
 if __name__ == "__main__":
