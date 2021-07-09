@@ -2,7 +2,7 @@ import collections.abc
 import functools
 import numbers
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Type, Union, cast
-from types import SimpleNamespace
+from types import SimpleNamespace as Diagnostics
 
 import torch
 from torch import Tensor
@@ -49,8 +49,9 @@ _DTYPE_PRECISIONS = {
 
 
 def _get_default_rtol_and_atol(actual: Tensor, expected: Tensor) -> Tuple[float, float]:
-    dtype = actual.dtype if actual.dtype == expected.dtype else torch.promote_types(actual.dtype, expected.dtype)
-    return _DTYPE_PRECISIONS.get(dtype, (0.0, 0.0))
+    actual_rtol, actual_atol = _DTYPE_PRECISIONS.get(actual.dtype, (0.0, 0.0))
+    expected_rtol, expected_atol = _DTYPE_PRECISIONS.get(expected.dtype, (0.0, 0.0))
+    return max(actual_rtol, expected_rtol), max(actual_atol, expected_atol)
 
 
 def _check_complex_components_individually(
@@ -78,6 +79,9 @@ def _check_complex_components_individually(
         if actual.dtype not in (torch.complex32, torch.complex64, torch.complex128):
             return check_tensors(actual, expected, equal_nan=equal_nan, **kwargs)
 
+        actual = actual.resolve_conj()
+        expected = expected.resolve_conj()
+
         if relaxed_complex_nan:
             actual, expected = [
                 t.clone().masked_fill(
@@ -88,11 +92,11 @@ def _check_complex_components_individually(
 
         error_meta = check_tensors(actual.real, expected.real, equal_nan=equal_nan, **kwargs)
         if error_meta:
-            return error_meta.amend_msg(postfix="\n\nThe failure occurred for the real part.")
+            return error_meta
 
         error_meta = check_tensors(actual.imag, expected.imag, equal_nan=equal_nan, **kwargs)
         if error_meta:
-            return error_meta.amend_msg(postfix="\n\nThe failure occurred for the imaginary part.")
+            return error_meta
 
         return None
 
@@ -169,14 +173,36 @@ def _check_sparse_csr_members_individually(
     return wrapper
 
 
+def _check_quantized(
+    check_tensor_values: Callable[..., Optional[_TestingErrorMeta]]
+) -> Callable[..., Optional[_TestingErrorMeta]]:
+    """Decorates non-quantized tensor check functions to handle quantized tensors.
+
+    If the inputs are not quantized, this decorator is a no-op.
+
+    Args:
+        check_tensor_values (Callable[..., Optional[_TestingErrorMeta]]): Tensor check function for continuous tensors.
+
+    Returns:
+        Optional[_TestingErrorMeta]: Return value of :attr:`check_tensors`.
+    """
+
+    @functools.wraps(check_tensor_values)
+    def wrapper(actual: Tensor, expected: Tensor, **kwargs: Any) -> Optional[_TestingErrorMeta]:
+        if not actual.is_quantized:
+            return check_tensor_values(actual, expected, **kwargs)
+
+        return check_tensor_values(actual.dequantize(), expected.dequantize(), **kwargs)
+
+    return wrapper
+
+
 def _check_supported_tensor(input: Tensor) -> Optional[_TestingErrorMeta]:
     """Checks if the tensor is supported by the current infrastructure.
 
     Returns:
         (Optional[_TestingErrorMeta]): If check did not pass.
     """
-    if input.is_quantized:
-        return _TestingErrorMeta(UsageError, "Comparison for quantized tensors is not supported yet.")
 
     if input.layout not in {torch.strided, torch.sparse_coo, torch.sparse_csr}:  # type: ignore[attr-defined]
         return _TestingErrorMeta(UsageError, f"Unsupported tensor layout {input.layout}")
@@ -231,6 +257,13 @@ def _check_attributes_equal(
     if check_device and actual.device != expected.device:
         return _TestingErrorMeta(AssertionError, msg_fmtstr.format("device", actual.device, expected.device))
 
+    if actual.is_quantized != expected.is_quantized:
+        return _TestingErrorMeta(
+            AssertionError, msg_fmtstr.format("is_quantized", actual.is_quantized, expected.is_quantized)
+        )
+    elif actual.is_quantized and actual.qscheme() != expected.qscheme():
+        return _TestingErrorMeta(AssertionError, msg_fmtstr.format("qscheme()", actual.qscheme(), expected.qscheme()))
+
     if check_dtype and actual.dtype != expected.dtype:
         return _TestingErrorMeta(AssertionError, msg_fmtstr.format("dtype", actual.dtype, expected.dtype))
 
@@ -268,10 +301,7 @@ def _equalize_attributes(actual: Tensor, expected: Tensor) -> Tuple[Tensor, Tens
     return actual, expected
 
 
-DiagnosticInfo = SimpleNamespace
-
-
-def _trace_mismatches(actual: Tensor, expected: Tensor, mismatches: Tensor) -> DiagnosticInfo:
+def _trace_mismatches(actual: Tensor, expected: Tensor, mismatches: Tensor, *, rtol: float, atol: float) -> Diagnostics:
     """Traces mismatches and returns diagnostic information.
 
     Args:
@@ -281,25 +311,24 @@ def _trace_mismatches(actual: Tensor, expected: Tensor, mismatches: Tensor) -> D
             the location of mismatches.
 
     Returns:
-        (DiagnosticInfo): Mismatch diagnostics with the following attributes:
+        (Diagnostics): Mismatch diagnostics with the following attributes:
 
             - ``number_of_elements`` (int): Number of elements in each tensor being compared.
             - ``total_mismatches`` (int): Total number of mismatches.
-            - ``mismatch_ratio`` (float): Total mismatches divided by number of elements.
             - ``max_abs_diff`` (Union[int, float]): Greatest absolute difference of the inputs.
             - ``max_abs_diff_idx`` (Union[int, Tuple[int, ...]]): Index of greatest absolute difference.
+            - ``atol`` (float): Allowed absolute tolerance.
             - ``max_rel_diff`` (Union[int, float]): Greatest relative difference of the inputs.
             - ``max_rel_diff_idx`` (Union[int, Tuple[int, ...]]): Index of greatest relative difference.
+            - ``rtol`` (float): Allowed relative tolerance.
 
             For ``max_abs_diff`` and ``max_rel_diff`` the type depends on the :attr:`~torch.Tensor.dtype` of the inputs.
     """
     number_of_elements = mismatches.numel()
     total_mismatches = torch.sum(mismatches).item()
-    mismatch_ratio = total_mismatches / number_of_elements
 
-    dtype = torch.float64 if actual.dtype.is_floating_point else torch.int64
-    a_flat = actual.flatten().to(dtype)
-    b_flat = expected.flatten().to(dtype)
+    a_flat = actual.flatten()
+    b_flat = expected.flatten()
     matches_flat = ~mismatches.flatten()
 
     abs_diff = torch.abs(a_flat - b_flat)
@@ -312,17 +341,71 @@ def _trace_mismatches(actual: Tensor, expected: Tensor, mismatches: Tensor) -> D
     rel_diff[matches_flat] = 0
     max_rel_diff, max_rel_diff_flat_idx = torch.max(rel_diff, 0)
 
-    return SimpleNamespace(
+    return Diagnostics(
         number_of_elements=number_of_elements,
         total_mismatches=cast(int, total_mismatches),
-        mismatch_ratio=mismatch_ratio,
         max_abs_diff=max_abs_diff.item(),
         max_abs_diff_idx=_unravel_index(max_abs_diff_flat_idx.item(), mismatches.shape),
+        atol=atol,
         max_rel_diff=max_rel_diff.item(),
         max_rel_diff_idx=_unravel_index(max_rel_diff_flat_idx.item(), mismatches.shape),
+        rtol=rtol,
     )
 
 
+def _make_mismatch_msg(
+    actual: Tensor,
+    expected: Tensor,
+    diagnostics: Diagnostics,
+    *,
+    identifier: Optional[Union[str, Callable[[str], str]]] = None,
+) -> str:
+    scalar_comparison = actual.size() == torch.Size([])
+    equality = diagnostics.rtol == 0 and diagnostics.atol == 0
+
+    def append_difference(msg: str, *, type: str, difference: float, index: Tuple[int, ...], tolerance: float) -> str:
+        if scalar_comparison:
+            msg += f"{type.title()} difference: {difference}"
+        else:
+            msg += f"Greatest {type} difference: {difference} at index {index}"
+        if not equality:
+            msg += f" (up to {tolerance} allowed)"
+        msg += "\n"
+        return msg
+
+    default_identifier = "Scalars" if scalar_comparison else "Tensor-likes"
+    if identifier is None:
+        identifier = default_identifier
+    elif callable(identifier):
+        identifier = identifier(default_identifier)
+
+    msg = f"{identifier} are not {'equal' if equality else 'close'}!\n\n"
+
+    if not scalar_comparison:
+        msg += (
+            f"Mismatched elements: {diagnostics.total_mismatches} / {diagnostics.number_of_elements} "
+            f"({diagnostics.total_mismatches / diagnostics.number_of_elements:.1%})\n"
+        )
+
+    msg = append_difference(
+        msg,
+        type="absolute",
+        difference=diagnostics.max_abs_diff,
+        index=diagnostics.max_abs_diff_idx,
+        tolerance=diagnostics.atol,
+    )
+    msg = append_difference(
+        msg,
+        type="relative",
+        difference=diagnostics.max_rel_diff,
+        index=diagnostics.max_rel_diff_idx,
+        tolerance=diagnostics.rtol,
+    )
+
+    return msg.strip()
+
+
+@_check_quantized
 @_check_sparse_coo_members_individually
 @_check_sparse_csr_members_individually
 @_check_complex_components_individually
@@ -333,7 +416,7 @@ def _check_values_close(
     rtol: float,
     atol: float,
     equal_nan: bool,
-    msg: Optional[Union[str, Callable[[Tensor, Tensor, SimpleNamespace], str]]],
+    msg: Optional[Union[str, Callable[[Tensor, Tensor, Diagnostics], str]]],
 ) -> Optional[_TestingErrorMeta]:
     """Checks if the values of two tensors are close up to a desired tolerance.
 
@@ -343,28 +426,24 @@ def _check_values_close(
         rtol (float): Relative tolerance.
         atol (float): Absolute tolerance.
         equal_nan (bool): If ``True``, two ``NaN`` values will be considered equal.
-        msg (Optional[Union[str, Callable[[Tensor, Tensor, SimpleNamespace], str]]]): Optional error message. Can be
-            passed as callable in which case it will be called with the inputs and the result of
-            :func:`_trace_mismatches`.
+        msg (Optional[Union[str, Callable[[Tensor, Tensor, Diagnostics], str]]]): Optional error message. Can be passed
+            as callable in which case it will be called with the inputs and the result of :func:`_trace_mismatches`.
 
     Returns:
         (Optional[AssertionError]): If check did not pass.
     """
-
+    dtype = torch.float64 if actual.dtype.is_floating_point else torch.int64
+    actual = actual.to(dtype)
+    expected = expected.to(dtype)
     mismatches = ~torch.isclose(actual, expected, rtol=rtol, atol=atol, equal_nan=equal_nan)
     if not torch.any(mismatches):
         return None
 
-    trace = _trace_mismatches(actual, expected, mismatches)
+    diagnostics = _trace_mismatches(actual, expected, mismatches, rtol=rtol, atol=atol)
     if msg is None:
-        msg = (
-            f"Tensors are not close!\n\n"
-            f"Mismatched elements: {trace.total_mismatches} / {trace.number_of_elements} ({trace.mismatch_ratio:.1%})\n"
-            f"Greatest absolute difference: {trace.max_abs_diff} at {trace.max_abs_diff_idx} (up to {atol} allowed)\n"
-            f"Greatest relative difference: {trace.max_rel_diff} at {trace.max_rel_diff_idx} (up to {rtol} allowed)"
-        )
-    elif callable(msg):
-        msg = msg(actual, expected, trace)
+        msg = _make_mismatch_msg
+    if callable(msg):
+        msg = msg(actual, expected, diagnostics)
     return _TestingErrorMeta(AssertionError, msg)
 
 
@@ -379,7 +458,7 @@ def _check_tensors_close(
     check_dtype: bool = True,
     check_stride: bool = True,
     check_is_coalesced: bool = True,
-    msg: Optional[Union[str, Callable[[Tensor, Tensor, SimpleNamespace], str]]] = None,
+    msg: Union[str, Callable[[Tensor, Tensor, Diagnostics], str]],
 ) -> Optional[_TestingErrorMeta]:
     r"""Checks that the values of :attr:`actual` and :attr:`expected` are close.
 
@@ -394,19 +473,12 @@ def _check_tensors_close(
     only considered close if and only if they are equal. ``NaN``'s are only considered equal to each other if
     :attr:`equal_nan` is ``True``.
 
-    For a description of the parameters see :func:`assert_equal`.
+    For a description of the parameters see :func:`assert_close`.
 
     Returns:
         Optional[_TestingErrorMeta]: If checks did not pass.
     """
-    if (rtol is None) ^ (atol is None):
-        # We require both tolerance to be omitted or specified, because specifying only one might lead to surprising
-        # results. Imagine setting atol=0.0 and the tensors still match because rtol>0.0.
-        return _TestingErrorMeta(
-            UsageError,
-            f"Both 'rtol' and 'atol' must be either specified or omitted, but got rtol={rtol} and atol={atol} instead.",
-        )
-    elif rtol is None or atol is None:
+    if rtol is None or atol is None:
         rtol, atol = _get_default_rtol_and_atol(actual, expected)
 
     error_meta = _check_attributes_equal(
@@ -420,6 +492,9 @@ def _check_tensors_close(
     if error_meta:
         return error_meta
     actual, expected = _equalize_attributes(actual, expected)
+
+    if rtol is None or atol is None:
+        rtol, atol = _DTYPE_PRECISIONS.get(actual.dtype, (0.0, 0.0))
 
     error_meta = _check_values_close(actual, expected, rtol=rtol, atol=atol, equal_nan=equal_nan, msg=msg)
     if error_meta:
@@ -628,13 +703,14 @@ def assert_close(
     equal_nan: Union[bool, str] = False,
     check_device: bool = True,
     check_dtype: bool = True,
-    check_stride: bool = True,
+    check_stride: bool = False,
     check_is_coalesced: bool = True,
-    msg: Optional[Union[str, Callable[[Tensor, Tensor, SimpleNamespace], str]]] = None,
+    msg: Optional[Union[str, Callable[[Tensor, Tensor, Diagnostics], str]]] = None,
 ) -> None:
     r"""Asserts that :attr:`actual` and :attr:`expected` are close.
 
-    If :attr:`actual` and :attr:`expected` are strided, real-valued, and finite, they are considered close if
+    If :attr:`actual` and :attr:`expected` are strided, non-quantized, real-valued, and finite, they are considered
+    close if
 
     .. math::
 
@@ -653,6 +729,10 @@ def assert_close(
     are always checked for equality whereas the values are checked for closeness according to the definition above.
     Sparse COO tensors are only considered close if both are either coalesced or uncoalesced (if
     :attr:`check_is_coalesced` is ``True``).
+
+    If :attr:`actual` and :attr:`expected` are quantized, they are considered close if they have the same
+    :meth:`~torch.Tensor.qscheme` and the result of :meth:`~torch.Tensor.dequantize` is close according to the
+    definition above.
 
     :attr:`actual` and :attr:`expected` can be :class:`~torch.Tensor`'s or any array-or-scalar-like of the same type,
     from which :class:`torch.Tensor`'s can be constructed with :func:`torch.as_tensor`. In addition, :attr:`actual` and
@@ -675,24 +755,23 @@ def assert_close(
         check_dtype (bool): If ``True`` (default), asserts that corresponding tensors have the same ``dtype``. If this
             check is disabled, tensors with different ``dtype``'s are promoted  to a common ``dtype`` (according to
             :func:`torch.promote_types`) before being compared.
-        check_stride (bool): If ``True`` (default) and corresponding tensors are strided, asserts that they have the
-            same stride.
+        check_stride (bool): If ``True`` and corresponding tensors are strided, asserts that they have the same stride.
         check_is_coalesced (bool): If ``True`` (default) and corresponding tensors are sparse COO, checks that both
             :attr:`actual` and :attr:`expected` are either coalesced or uncoalesced. If this check is disabled,
             tensors are :meth:`~torch.Tensor.coalesce`'ed before being compared.
-        msg (Optional[Union[str, Callable[[Tensor, Tensor, DiagnosticInfo], str]]]): Optional error message to use if
-            the values of corresponding tensors mismatch. Can be passed as callable in which case it will be called
-            with the mismatching tensors and a namespace of diagnostic info about the mismatches. See below for details.
+        msg (Optional[Union[str, Callable[[Tensor, Tensor, Diagnostics], str]]]): Optional error message to use if the
+            values of corresponding tensors mismatch. Can be passed as callable in which case it will be called with
+            the mismatching tensors and a namespace of diagnostics about the mismatches. See below for details.
 
     Raises:
         UsageError: If a :class:`torch.Tensor` can't be constructed from an array-or-scalar-like.
-        UsageError: If any tensor is quantized. This is a temporary restriction and will be relaxed in the future.
         UsageError: If only :attr:`rtol` or :attr:`atol` is specified.
         AssertionError: If corresponding array-likes have different types.
         AssertionError: If the inputs are :class:`~collections.abc.Sequence`'s, but their length does not match.
         AssertionError: If the inputs are :class:`~collections.abc.Mapping`'s, but their set of keys do not match.
         AssertionError: If corresponding tensors do not have the same :attr:`~torch.Tensor.shape`.
         AssertionError: If corresponding tensors do not have the same :attr:`~torch.Tensor.layout`.
+        AssertionError: If corresponding tensors are quantized, but have different :meth:`~torch.Tensor.qscheme`'s.
         AssertionError: If :attr:`check_device`, but corresponding tensors are not on the same
             :attr:`~torch.Tensor.device`.
         AssertionError: If :attr:`check_dtype`, but corresponding tensors do not have the same ``dtype``.
@@ -701,8 +780,8 @@ def assert_close(
             coalesced or uncoalesced.
         AssertionError: If the values of corresponding tensors are not close.
 
-    The following table displays the default ``rtol`` and ``atol`` for different ``dtype``'s. Note that the ``dtype``
-    refers to the promoted type in case :attr:`actual` and :attr:`expected` do not have the same ``dtype``.
+    The following table displays the default ``rtol`` and ``atol`` for different ``dtype``'s. In case of mismatching
+    ``dtype``'s, the maximum of both tolerances is used.
 
     +---------------------------+------------+----------+
     | ``dtype``                 | ``rtol``   | ``atol`` |
@@ -724,16 +803,16 @@ def assert_close(
     | other                     | ``0.0``    | ``0.0``  |
     +---------------------------+------------+----------+
 
-    The namespace of diagnostic information that will be passed to :attr:`msg` if its a callable has the following
-    attributes:
+    The namespace of diagnostics that will be passed to :attr:`msg` if its a callable has the following attributes:
 
     - ``number_of_elements`` (int): Number of elements in each tensor being compared.
     - ``total_mismatches`` (int): Total number of mismatches.
-    - ``mismatch_ratio`` (float): Total mismatches divided by number of elements.
     - ``max_abs_diff`` (Union[int, float]): Greatest absolute difference of the inputs.
     - ``max_abs_diff_idx`` (Union[int, Tuple[int, ...]]): Index of greatest absolute difference.
+    - ``atol`` (float): Allowed absolute tolerance.
     - ``max_rel_diff`` (Union[int, float]): Greatest relative difference of the inputs.
     - ``max_rel_diff_idx`` (Union[int, Tuple[int, ...]]): Index of greatest relative difference.
+    - ``rtol`` (float): Allowed relative tolerance.
 
     For ``max_abs_diff`` and ``max_rel_diff`` the type depends on the :attr:`~torch.Tensor.dtype` of the inputs.
 
@@ -744,14 +823,14 @@ def assert_close(
         define an ``assert_equal`` that uses zero tolrances for every ``dtype`` by default:
 
         >>> import functools
-        >>> import torch
         >>> assert_equal = functools.partial(torch.testing.assert_close, rtol=0, atol=0)
         >>> assert_equal(1e-9, 1e-10)
-        AssertionError: Tensors are not close!
+        Traceback (most recent call last):
+        ...
+        AssertionError: Scalars are not equal!
         <BLANKLINE>
-        Mismatched elements: 1 / 1 (100.0%)
-        Greatest absolute difference: 8.999999703829253e-10 at 0 (up to 0 allowed)
-        Greatest relative difference: 8.999999583666371 at 0 (up to 0 allowed)
+        Absolute difference: 8.999999703829253e-10
+        Relative difference: 8.999999583666371
 
     Examples:
         >>> # tensor to tensor comparison
@@ -795,6 +874,8 @@ def assert_close(
         >>> expected = torch.tensor([1.0, 2.0, 3.0])
         >>> actual = expected.numpy()
         >>> torch.testing.assert_close(actual, expected)
+        Traceback (most recent call last):
+        ...
         AssertionError: Except for scalars, type equality is required, but got
         <class 'numpy.ndarray'> and <class 'torch.Tensor'> instead.
         >>> # Scalars of different types are an exception and can be compared with
@@ -805,34 +886,57 @@ def assert_close(
         >>> expected = torch.tensor(float("Nan"))
         >>> actual = expected.clone()
         >>> torch.testing.assert_close(actual, expected)
-        AssertionError: Tensors are not close!
+        Traceback (most recent call last):
+        ...
+        AssertionError: Scalars are not close!
+        <BLANKLINE>
+        Absolute difference: nan (up to 1e-05 allowed)
+        Relative difference: nan (up to 1.3e-06 allowed)
         >>> torch.testing.assert_close(actual, expected, equal_nan=True)
 
         >>> # If equal_nan=True, the real and imaginary NaN's of complex inputs have to match.
         >>> expected = torch.tensor(complex(float("NaN"), 0))
         >>> actual = torch.tensor(complex(0, float("NaN")))
         >>> torch.testing.assert_close(actual, expected, equal_nan=True)
-        AssertionError: Tensors are not close!
+        Traceback (most recent call last):
+        ...
+        AssertionError: Scalars are not close!
+        <BLANKLINE>
+        Absolute difference: nan (up to 1e-05 allowed)
+        Relative difference: nan (up to 1.3e-06 allowed)
         >>> # If equal_nan="relaxed", however, then complex numbers are treated as NaN if any
-        >>> # of the real or imaginary component is NaN.
+        >>> # of the real or imaginary components is NaN.
         >>> torch.testing.assert_close(actual, expected, equal_nan="relaxed")
 
         >>> expected = torch.tensor([1.0, 2.0, 3.0])
         >>> actual = torch.tensor([1.0, 4.0, 5.0])
         >>> # The default mismatch message can be overwritten.
         >>> torch.testing.assert_close(actual, expected, msg="Argh, the tensors are not close!")
+        Traceback (most recent call last):
+        ...
         AssertionError: Argh, the tensors are not close!
         >>> # The error message can also created at runtime by passing a callable.
-        >>> def custom_msg(actual, expected, diagnostic_info):
+        >>> def custom_msg(actual, expected, diagnostics):
+        ...     ratio = diagnostics.total_mismatches / diagnostics.number_of_elements
         ...     return (
-        ...         f"Argh, we found {diagnostic_info.total_mismatches} mismatches! "
-        ...         f"That is {diagnostic_info.mismatch_ratio:.1%}!"
+        ...         f"Argh, we found {diagnostics.total_mismatches} mismatches! "
+        ...         f"That is {ratio:.1%}!"
         ...     )
         >>> torch.testing.assert_close(actual, expected, msg=custom_msg)
+        Traceback (most recent call last):
+        ...
         AssertionError: Argh, we found 2 mismatches! That is 66.7%!
     """
     # Hide this function from `pytest`'s traceback
     __tracebackhide__ = True
+
+    if (rtol is None) ^ (atol is None):
+        # We require both tolerance to be omitted or specified, because specifying only one might lead to surprising
+        # results. Imagine setting atol=0.0 and the tensors still match because rtol>0.0.
+        raise UsageError(
+            f"Both 'rtol' and 'atol' must be either specified or omitted, "
+            f"but got no {'rtol' if rtol is None else 'atol'}.",
+        )
 
     error_meta, pair = _parse_inputs(actual, expected)
     if error_meta:

@@ -276,6 +276,14 @@ class TORCH_API LoopNest {
   // S6:    for k
   // S7:      B[m] = B[m] +
   //
+  // This transformation is unsafe as it simply add all loops into the body of
+  // the first loop for fusion without correctness checks.
+  //
+  // Below are the two requirements to apply unsafeFuseLoops:
+  //  * All the loops have the same parent.
+  //  * There are no statements between these loops in their parent body.
+  static bool unsafeFuseLoops(const std::vector<For*>& loops, For** fused);
+
   // Loop fusion is done only when all the conditions below are satisfied.
   //  * All the loops have the same parent.
   //  * There are no statements between these loops in their parent body.
