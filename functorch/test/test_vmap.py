@@ -18,6 +18,7 @@ from torch.testing._internal.common_device_type import ops, onlyCPU
 from functorch_lagging_op_db import functorch_lagging_op_db
 from common_utils import (
     parameterized,
+    parameterized_with_device,
     instantiate_parameterized_methods,
     get_fallback_and_vmap_exhaustive,
 )
@@ -2710,7 +2711,7 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         self._batched_grad_test(torch.log1p, (x,))
         self._batched_grad_grad_test(torch.log1p, (x,))
 
-    @parameterized('param', {'foo': None, 'bar': None})
+    @parameterized_with_device('param', {'foo': None, 'bar': None})
     def test_param_device(self, device, param):
         pass
 
@@ -2945,9 +2946,9 @@ class TestVmapOperatorsOpInfo(TestCase):
         bias = torch.randn(B, C)
         test(self, op, (x, 4, weight, bias), in_dims=(0, None, 0, 0))
 
-    @parameterized('training', {'train': True, 'eval': False})
-    @parameterized('track_running_stats', {'running_stats1': True, 'running_stats0': False})
-    @parameterized('affine', {'affine1': True, 'affine0': False})
+    @parameterized_with_device('training', {'train': True, 'eval': False})
+    @parameterized_with_device('track_running_stats', {'running_stats1': True, 'running_stats0': False})
+    @parameterized_with_device('affine', {'affine1': True, 'affine0': False})
     def test_batch_norm(self, device, affine, track_running_stats, training):
         if not track_running_stats and not training:
             return
