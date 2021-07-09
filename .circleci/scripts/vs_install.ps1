@@ -47,7 +47,6 @@ echo "Installing Visual Studio version ${env:VS_VERSION}."
 $process = Start-Process "${PWD}\vs_installer.exe" -ArgumentList $VS_INSTALL_ARGS -NoNewWindow -Wait -PassThru
 Remove-Item -Path vs_installer.exe -Force
 $exitCode = $process.ExitCode
-echo $exitCode
 if (($exitCode -ne 0) -and ($exitCode -ne 3010)) {
     echo "VS 2019 installer exited with code $exitCode, which should be one of [0, 3010]."
     curl.exe --retry 3 -kL $COLLECT_DOWNLOAD_LINK --output Collect.exe
@@ -57,6 +56,6 @@ if (($exitCode -ne 0) -and ($exitCode -ne 3010)) {
     }
     Start-Process "${PWD}\Collect.exe" -NoNewWindow -Wait -PassThru
     New-Item -Path "C:\w\build-results" -ItemType "directory" -Force
-    Copy-Item -Path "${PWD}\AppData\Local\Temp\vslogs.zip" -Destination "C:\w\build-results\"
+    Copy-Item -Path "${env:TEMP}\vslogs.zip" -Destination "C:\w\build-results\"
     exit 1
 }
