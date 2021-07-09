@@ -52,7 +52,8 @@ void reportMemoryUsageToProfiler(
   auto* reporter_ptr = static_cast<MemoryReportingInfoBase*>(
       ThreadLocalDebugInfo::get(DebugInfoKind::PROFILER_STATE));
   if (reporter_ptr) {
-    reporter_ptr->reportMemoryUsage(ptr, alloc_size, allocated_size, reserved_size, device);
+    reporter_ptr->reportMemoryUsage(
+        ptr, alloc_size, allocated_size, reserved_size, device);
   }
 }
 
