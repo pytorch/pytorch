@@ -57,6 +57,10 @@ TORCH_META_FUNC(special_xlog1py) (const Tensor& self, const Tensor& other) {
   build_borrowing_binary_float_op(maybe_get_output(), self, other);
 }
 
+TORCH_META_FUNC(special_zeta) (const Tensor& self, const Tensor& other) {
+  build_borrowing_binary_float_op(maybe_get_output(), self, other);
+}
+
 TORCH_META_FUNC2(copysign, Tensor) (
   const Tensor& self, const Tensor& other
 ) {
@@ -81,6 +85,18 @@ TORCH_META_FUNC(atan2) (const Tensor& self, const Tensor& other) {
 }
 
 TORCH_META_FUNC2(remainder, Tensor)(const Tensor& self, const Tensor& other) {
+  build_borrowing_binary_op(maybe_get_output(), self, other);
+}
+
+TORCH_META_FUNC2(bitwise_left_shift, Tensor) (
+  const Tensor& self, const Tensor& other
+) {
+  build_borrowing_binary_op(maybe_get_output(), self, other);
+}
+
+TORCH_META_FUNC2(bitwise_right_shift, Tensor) (
+  const Tensor& self, const Tensor& other
+) {
   build_borrowing_binary_op(maybe_get_output(), self, other);
 }
 
@@ -209,6 +225,7 @@ DEFINE_DISPATCH(copysign_stub);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(xlogy_stub);
 DEFINE_DISPATCH(xlog1py_stub);
+DEFINE_DISPATCH(zeta_stub);
 
 TORCH_IMPL_FUNC(add_out) (
   const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& result
@@ -250,6 +267,10 @@ TORCH_IMPL_FUNC(special_xlog1py_out) (const Tensor& self, const Tensor& other, c
   xlog1py_stub(device_type(), *this);
 }
 
+TORCH_IMPL_FUNC(special_zeta_out) (const Tensor& self, const Tensor& other, const Tensor& result) {
+  zeta_stub(device_type(), *this);
+}
+
 #define CREATE_BINARY_TORCH_IMPL_FUNC(func_out, func_stub)                                                    \
 TORCH_IMPL_FUNC(func_out) (const Tensor& self, const Tensor& other, const Tensor& result) {  \
   func_stub(device_type(), *this);                                                           \
@@ -283,6 +304,22 @@ Tensor& special_xlog1py_out(const Scalar& self, const Tensor& other, Tensor& res
 
 Tensor& special_xlog1py_out(const Tensor& self, const Scalar& other, Tensor& result) {
   return at::special_xlog1py_out(result, self, wrapped_scalar_tensor(other));
+}
+
+Tensor special_zeta(const Scalar& x, const Tensor& y) {
+  return at::special_zeta(wrapped_scalar_tensor(x), y);
+}
+
+Tensor special_zeta(const Tensor& x, const Scalar& y) {
+  return at::special_zeta(x, wrapped_scalar_tensor(y));
+}
+
+Tensor& special_zeta_out(const Scalar& self, const Tensor& other, Tensor& result) {
+  return at::special_zeta_out(result, wrapped_scalar_tensor(self), other);
+}
+
+Tensor& special_zeta_out(const Tensor& self, const Scalar& other, Tensor& result) {
+  return at::special_zeta_out(result, self, wrapped_scalar_tensor(other));
 }
 
 TORCH_IMPL_FUNC(atan2_out) (const Tensor& self, const Tensor& other, const Tensor& result) {
@@ -803,6 +840,26 @@ Tensor& __ilshift__(Tensor& self, const Scalar& other) {
   return self;
 }
 
+TORCH_IMPL_FUNC(bitwise_left_shift_out) (const Tensor& self, const Tensor& other, const Tensor& result) {
+  lshift_stub(device_type(), *this);
+}
+
+Tensor& bitwise_left_shift_out(const Tensor& self, const Scalar& other, Tensor& result) {
+  return at::bitwise_left_shift_out(result, self, wrapped_scalar_tensor(other).toType(self.scalar_type()));
+}
+
+Tensor bitwise_left_shift(const Tensor& self, const Scalar& other) {
+  return at::bitwise_left_shift(self, wrapped_scalar_tensor(other).toType(self.scalar_type()));
+}
+
+Tensor& bitwise_left_shift_(Tensor& self, const Scalar& other) {
+  return at::bitwise_left_shift_out(self, self, wrapped_scalar_tensor(other).toType(self.scalar_type()));
+}
+
+Tensor bitwise_left_shift(const Scalar& self, const Tensor& other) {
+  return at::bitwise_left_shift(wrapped_scalar_tensor(self).toType(other.scalar_type()), other);
+}
+
 Tensor __rshift__(const Tensor& self, const Tensor& other) {
   Tensor result;
   auto iter = TensorIterator::binary_op(result, self, other);
@@ -829,6 +886,26 @@ Tensor& __irshift__(Tensor& self, const Scalar& other) {
   auto iter = TensorIterator::binary_op(self, self, wrapper);
   rshift_stub(iter.device_type(), iter);
   return self;
+}
+
+TORCH_IMPL_FUNC(bitwise_right_shift_out) (const Tensor& self, const Tensor& other, const Tensor& result) {
+  rshift_stub(device_type(), *this);
+}
+
+Tensor& bitwise_right_shift_out(const Tensor& self, const Scalar& other, Tensor& result) {
+  return at::bitwise_right_shift_out(result, self, wrapped_scalar_tensor(other).toType(self.scalar_type()));
+}
+
+Tensor bitwise_right_shift(const Tensor& self, const Scalar& other) {
+  return at::bitwise_right_shift(self, wrapped_scalar_tensor(other).toType(self.scalar_type()));
+}
+
+Tensor& bitwise_right_shift_(Tensor& self, const Scalar& other) {
+  return at::bitwise_right_shift_out(self, self, wrapped_scalar_tensor(other).toType(self.scalar_type()));
+}
+
+Tensor bitwise_right_shift(const Scalar& self, const Tensor& other) {
+  return at::bitwise_right_shift(wrapped_scalar_tensor(self).toType(other.scalar_type()), other);
 }
 
 template <typename Stub>

@@ -1,5 +1,5 @@
 #include <torch/csrc/CudaIPCTypes.h>
-#include <TH/THAllocator.h>
+#include <ATen/MapAllocator.h>
 #include <map>
 #include <mutex>
 #include <random>
@@ -213,8 +213,8 @@ at::DataPtr GetNewRefCountedSentData(void* data, at::Device device) {
       ref_counter_handle += "_";
       ref_counter_handle += std::to_string(rd());
 
-      int flags = TH_ALLOCATOR_MAPPED_SHAREDMEM | TH_ALLOCATOR_MAPPED_EXCLUSIVE;
-      at::DataPtr sptr = THRefcountedMapAllocator::makeDataPtr(
+      int flags = at::ALLOCATOR_MAPPED_SHAREDMEM | at::ALLOCATOR_MAPPED_EXCLUSIVE;
+      at::DataPtr sptr = at::RefcountedMapAllocator::makeDataPtr(
           ref_counter_handle.c_str(),
           flags,
           sizeof(int64_t) * CUDA_IPC_REF_COUNTER_FILE_SIZE,
