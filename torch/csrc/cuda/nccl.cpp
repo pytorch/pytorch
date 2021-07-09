@@ -809,15 +809,15 @@ void recv(
 
 void gather(
     const at::Tensor& inputs,
-    at::Tensor& outputs,   
+    at::Tensor& outputs,
     ncclComm_t _comm,
     at::cuda::CUDAStream& stream,
     int32_t root) {
 #ifdef USE_NCCL
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && (NCCL_MAJOR * 10 + NCCL_MINOR) >= 27
   using namespace torch::cuda::nccl::detail;
-  
-  auto comm = to_nccl_comm(_comm); 
+
+  auto comm = to_nccl_comm(_comm);
   int numranks, cur_rank;
   NCCL_CHECK(ncclCommCount(comm, &numranks));
   NCCL_CHECK(ncclCommUserRank(comm, &cur_rank));
@@ -848,15 +848,15 @@ void gather(
 
 void scatter(
     const at::Tensor& inputs,
-    at::Tensor& outputs,   
+    at::Tensor& outputs,
     ncclComm_t _comm,
     at::cuda::CUDAStream& stream,
     int32_t root) {
 #ifdef USE_NCCL
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && (NCCL_MAJOR * 10 + NCCL_MINOR) >= 27
   using namespace torch::cuda::nccl::detail;
-  
-  auto comm = to_nccl_comm(_comm); 
+
+  auto comm = to_nccl_comm(_comm);
   int numranks, cur_rank;
   NCCL_CHECK(ncclCommCount(comm, &numranks));
   NCCL_CHECK(ncclCommUserRank(comm, &cur_rank));

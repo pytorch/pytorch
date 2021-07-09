@@ -1886,16 +1886,16 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::gather(
 
   return collective(
       inputTensors,
-      outputFlattened,	
+      outputFlattened,
       [&](at::Tensor& input,
-          at::Tensor& output,      
-	  ncclComm_t comm,
- 	  at::cuda::CUDAStream& stream) {
+          at::Tensor& output,
+          ncclComm_t comm,
+          at::cuda::CUDAStream& stream) {
         c10::cuda::CUDACachingAllocator::recordStream(
             output.storage().data_ptr(), stream);
-	const auto root = opts.rootRank * inputTensors.size();
-	torch::cuda::nccl::gather(input, output, comm, stream, root);
-	return ncclSuccess;
+        const auto root = opts.rootRank * inputTensors.size();
+        torch::cuda::nccl::gather(input, output, comm, stream, root);
+        return ncclSuccess;
       },
       [&](std::vector<at::cuda::CUDAStream>& ncclStreams) {},
       [&](std::vector<at::cuda::CUDAStream>& ncclStreams) {
@@ -1937,16 +1937,16 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::scatter(
 
   return collective(
       inputFlattened,
-      outputTensors,	
+      outputTensors,
       [&](at::Tensor& input,
-          at::Tensor& output,      
-	  ncclComm_t comm,
- 	  at::cuda::CUDAStream& stream) {
+          at::Tensor& output,
+          ncclComm_t comm,
+          at::cuda::CUDAStream& stream) {
         c10::cuda::CUDACachingAllocator::recordStream(
             output.storage().data_ptr(), stream);
-	const auto root = opts.rootRank * inputTensors.size();  //inputTensor or outputTensor?
-	torch::cuda::nccl::scatter(input, output, comm, stream, root);
-	return ncclSuccess;
+        const auto root = opts.rootRank * inputTensors.size();  //inputTensor or outputTensor?
+        torch::cuda::nccl::scatter(input, output, comm, stream, root);
+        return ncclSuccess;
       },
       OpType::SCATTER,
       "nccl:scatter");
