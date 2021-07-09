@@ -4355,6 +4355,16 @@
   dispatch:
     CompositeExplicitAutograd: _unsafe_view
 
+# _unsafe_reshape_alias is used in cases where reshape can be performed as
+# a view operation and we want to preserve gradients.
+
+- func: _unsafe_reshape_alias(Tensor(a) self, int[] size, int[] strides) -> Tensor(a)
+  variants: function, method
+  device_check: NoCheck
+  device_guard: False
+  dispatch:
+    CPU, CUDA, Meta, QuantizedCPU, QuantizedCUDA: _unsafe_reshape_alias
+
 - func: unsqueeze(Tensor(a) self, int dim) -> Tensor(a)
   variants: function, method
   device_check: NoCheck
