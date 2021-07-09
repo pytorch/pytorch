@@ -1963,11 +1963,6 @@ class TestLinalg(TestCase):
             for input_size, error_ords, dim in test_cases:
                 input = torch.randn(*input_size, dtype=dtype, device=device)
                 for ord in ord_matrix:
-                    # TODO: This was disabled in https://github.com/pytorch/pytorch/pull/59067, because it failed after
-                    #  fixing the underlying comparison mechanism. It should have never been passing in the first place.
-                    #  This should be reinstated as soon as https://github.com/pytorch/pytorch/issues/59198 is fixed.
-                    if input_size in ((S, S, 0), (1, S, 0)) and not keepdim and ord in (2, -2):
-                        continue
                     run_test_case(input, ord, dim, keepdim, ord in error_ords)
 
     def test_norm_fastpaths(self, device):
@@ -6435,13 +6430,12 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             # b and A have to be modified to match accepted inputs sizes for lu_solve
             b = b.unsqueeze(0)
             A = A.unsqueeze(0)
-            with self.assertRaisesRegex(RuntimeError, generic_backend_dispatch_err_str):
+            with self.assertRaisesRegex(RuntimeError, specific_backend_dispatch_err_str):
                 torch.lu_solve(b, A, torch.rand(A.shape[:-1], device=A_device).int())
 
             # This checks if a suitable error message is thrown
-            # when LU output and pivots are on the same device
-            with self.assertRaisesRegex(RuntimeError,
-                                        "Expected LU_pivots and LU_data to be on the same device"):
+            # when LU output and pivots are not on the same device
+            with self.assertRaisesRegex(RuntimeError, specific_backend_dispatch_err_str):
                 torch.lu_solve(b, A, torch.rand(A.shape[:-1], device=b_device).int())
 
     @precisionOverride({torch.float32: 5e-3, torch.complex64: 1e-3})
