@@ -1022,6 +1022,7 @@ class TestReductions(TestCase):
             (True, False),  # noncontiguous
             (0, 1, None),   # dim
         )
+        zero = torch.zeros((), device=device, dtype=dtype)
 
         for noncontiguous, dim in args:
             # Randomly scale the values
@@ -1029,12 +1030,17 @@ class TestReductions(TestCase):
             x = make_tensor((17, 17), device=device, dtype=dtype,
                             low=-scale, high=scale, noncontiguous=noncontiguous)
 
-            if dtype in [torch.half, torch.float, torch.double]:
-                x[x < 0.2 * scale] = float('nan')
+            if dtype.is_floating_point:
+                nan_mask = x < 0.2 * scale
+                x_nonan = torch.where(nan_mask, zero, x)
+                x[nan_mask] = np.nan
+            else:
+                x_nonan = x
 
-            numpy_fn = np.nansum if dim is None else lambda x: np.nansum(x, axis=dim)
-            torch_fn = torch.nansum if dim is None else lambda x: torch.nansum(x, dim=dim)
-            self.compare_with_numpy(torch_fn, numpy_fn, x)
+            dim_kwargs = {} if dim is None else {"dim": dim}
+            expect = torch.sum(x_nonan, **dim_kwargs)
+            actual = torch.nansum(x, **dim_kwargs)
+            self.assertEqual(expect, actual)
 
     def _test_reduction_function_with_numpy(self, torch_func, np_func, device, dtype,
                                             with_extremal=False, atol=None, rtol=None,

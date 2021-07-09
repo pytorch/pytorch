@@ -11,6 +11,29 @@ namespace at {
 namespace native {
 namespace {
 
+// Load vector from a smaller type to a larger type, reducing neighboring
+// elements until it fits into the vector size.
+template <typename acc_t, typename scalar_t, typename F>
+Vectorized<acc_t> load_reduce_vec(const scalar_t* data, F reduce, acc_t ident) {
+  using vec_t = Vectorized<scalar_t>;
+  using vacc_t = Vectorized<acc_t>;
+  static_assert(vacc_t::size() <= vec_t::size(), "");
+  const auto val = vec_t::loadu(data);
+  alignas(64) std::array<scalar_t, vec_t::size()> values;
+  val.store(values.data());
+
+  constexpr int vstride = vec_t::size() / vacc_t::size();
+  alignas(64) std::array<acc_t, vacc_t::size()> acc;
+  acc.fill(ident);
+  for (int k = 0; k < vstride; ++k) {
+    for (int i = 0; i < vacc_t::size(); ++i) {
+      acc[i] = reduce(acc[i], values[i * vstride + k]);
+    }
+  }
+
+  return vacc_t::loadu(acc.data());
+}
+
 template <typename scalar_t>
 struct LoadPolicy {
   static constexpr int64_t memsize() {
@@ -68,23 +91,10 @@ struct InnerSumCastLoadPolicy {
   }
 
   static vacc_t load(const char * C10_RESTRICT data, int64_t stride, int64_t index) {
-    static_assert(vacc_t::size() <= vec_t::size(), "");
-    const auto val = LoadPolicy<vec_t>::load(data, stride, index);
-    alignas(64) scalar_t values[vec_t::size()];
-    val.store(values);
-
-    constexpr int vstride = vec_t::size() / vacc_t::size();
-    alignas(64) acc_t acc[vacc_t::size()];
-    for (int i = 0; i < vacc_t::size(); ++i) {
-      acc[i] = values[i * vstride];
-    }
-    for (int k = 1; k < vstride; ++k) {
-      for (int i = 0; i < vacc_t::size(); ++i) {
-        acc[i] += values[i * vstride + k];
-      }
-    }
-
-    return vacc_t::loadu(acc);
+    auto ptr = reinterpret_cast<const scalar_t*>(data + stride * index);
+    return load_reduce_vec<acc_t>(ptr, [](acc_t a, scalar_t b) {
+      return a + b;
+    }, acc_t(0));
   }
 };
 
@@ -216,24 +226,10 @@ struct InnerNanSumCastLoadPolicy {
   }
 
   static vacc_t load(const char * C10_RESTRICT data, int64_t stride, int64_t index) {
-    static_assert(vacc_t::size() <= vec_t::size(), "");
-    const auto val = LoadPolicy<vec_t>::load(data, stride, index);
-    alignas(64) std::array<scalar_t, vec_t::size()> values;
-    val.store(values.data());
-
-    constexpr int vstride = vec_t::size() / vacc_t::size();
-    alignas(64) std::array<acc_t, vacc_t::size()> acc;
-    acc.fill(0);
-    for (int k = 0; k < vstride; ++k) {
-      for (int i = 0; i < vacc_t::size(); ++i) {
-        auto val = values[i * vstride + k];
-        if (!at::_isnan(val)) {
-          acc[i] += val;
-        }
-      }
-    }
-
-    return vacc_t::loadu(acc.data());
+    auto ptr = reinterpret_cast<const scalar_t*>(data + stride * index);
+    return load_reduce_vec<acc_t>(ptr, [](acc_t a, scalar_t b) {
+      return at::_isnan(b) ? a : a + b;
+    }, acc_t(0));
   }
 };
 
@@ -241,29 +237,6 @@ template <typename scalar_t>
 struct InnerNanSumCastLoadPolicy<scalar_t, scalar_t> :
     NanSumLoadPolicy<scalar_t> {
 };
-
-#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
-template <>
-struct InnerNanSumCastLoadPolicy<Vectorized<c10::BFloat16>, Vectorized<float>> {
-  using vec_t = Vectorized<c10::BFloat16>;
-  using vacc_t = Vectorized<float>;
-
-  static constexpr int64_t memsize() {
-    return LoadPolicy<vec_t>::memsize();
-  }
-
-  static vacc_t load(const char * C10_RESTRICT data, int64_t stride, int64_t index) {
-    auto ptr = reinterpret_cast<const __m256i*>(data + stride * index);
-    __m256i values = _mm256_loadu_si256(ptr);
-    __m256 first, second;
-    cvtbf16_fp32(values, first, second);
-    const vacc_t vfirst(first), vsecond(second);
-    const vacc_t zero(0);
-    return (vacc_t::blendv(vfirst, zero, vfirst.isnan()) +
-            vacc_t::blendv(vsecond, zero, vsecond.isnan()));
-  }
-};
-#endif
 
 template <typename vec_t, typename vacc_t>
 struct OuterNanSumCastLoadPolicy {
