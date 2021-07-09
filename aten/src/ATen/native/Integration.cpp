@@ -61,12 +61,13 @@ Tensor trapezoid(const Tensor& y, const Tensor& x, int64_t dim) {
     return do_trapezoid(y, dx, dim);
 }
 
-Tensor trapezoid(const Tensor& y, double dx, int64_t dim) {
+Tensor trapezoid(const Tensor& y, const Scalar& dx, int64_t dim) {
     // see above
     if (y.size(dim) == 0) {
         return zeros_like_except(y, dim);
     }
-    return do_trapezoid(y, dx, dim);
+    TORCH_CHECK(dx.isFloatingPoint(), "trapezoid: Currently, we only support dx as a double.");
+    return do_trapezoid(y, dx.toDouble(), dim);
 }
 
 Tensor& trapezoid_out(const Tensor& y, const Tensor& x, int64_t dim, Tensor& self) {
@@ -74,7 +75,7 @@ Tensor& trapezoid_out(const Tensor& y, const Tensor& x, int64_t dim, Tensor& sel
     return self;
 }
 
-Tensor& trapezoid_out(const Tensor& y, double dx, int64_t dim, Tensor& self) {
+Tensor& trapezoid_out(const Tensor& y, const Scalar& dx, int64_t dim, Tensor& self) {
     // TODO: Make an actual out version
     return self;
 }
