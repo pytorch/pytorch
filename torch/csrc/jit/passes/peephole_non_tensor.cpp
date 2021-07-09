@@ -3,10 +3,6 @@
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
-#include "ATen/core/interned_strings.h"
-#include "c10/util/Exception.h"
-#include "c10/util/Optional.h"
-#include "jit/ir/attributes.h"
 
 namespace torch {
 namespace jit {
