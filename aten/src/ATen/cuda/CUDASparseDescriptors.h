@@ -26,14 +26,14 @@ void check_supported_cuda_type(cudaDataType cuda_type) {
             !(cuda_type == CUDA_R_16F && (10 * prop->major + prop->minor) < 53),
         "Sparse operations with CUDA tensors of Float16 type are not supported on GPUs with compute capability < 5.3 (current: ",
         prop->major,
-        "."
+        ".",
         prop->minor,
         ")");
     TORCH_CHECK(
         !(cuda_type == CUDA_R_16BF && prop->major < 8),
         "Sparse operations with CUDA tensors of BFloat16 type are not supported on GPUs with compute capability < 8.0 (current: ",
         prop->major,
-        "."
+        ".",
         prop->minor,
         ")");
   }
