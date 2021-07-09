@@ -1540,7 +1540,7 @@ See :class:`~torch.nn.LogSigmoid` for more details.
 )
 
 
-def gelu(input, approximate):
+def gelu(input: Tensor, approximate: bool = False) -> Tensor:
     r"""gelu(input, approximate) -> Tensor
 
     Applies element-wise the function
@@ -1548,8 +1548,8 @@ def gelu(input, approximate):
 
     where :math:`\Phi(x)` is the Cumulative Distribution Function for Gaussian Distribution.
 
-    When approximation is enabled, the CDF is estimated with:
-    :math:`\Phi(x) = 0.5 * (1 + \text{Tanh}(\sqrt(2 / \pi) * (x + 0.044715 * x^3)))`
+    When the approximation flag is enabled, Gelu is estimated with:
+        :math::  \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt(2 / \pi) * (x + 0.044715 * x^3)))
 
     See `Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`_.
     """

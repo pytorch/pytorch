@@ -896,8 +896,8 @@ const std::vector<std::string> functions = {
                 return grad_output * torch.where(self > 0, 1.0, negative_slope).type_as(result), None
             return result, backward
 
-        def gelu(self):
-            result = torch.gelu(self)
+        def gelu(self : Tensor, approximate : bool):
+            result = torch.gelu(self, False)
             def backward(grad_output):
                 m_2_sqrtpi = 1.12837916709551257390
                 m_sqrt1_2 = 0.707106781186547524401
@@ -905,7 +905,7 @@ const std::vector<std::string> functions = {
                 beta = m_2_sqrtpi * m_sqrt1_2 * 0.5
                 cdf = (torch.erf(self * m_sqrt1_2) + 1.0) * 0.5
                 pdf = beta * torch.exp(self * self * -0.5)
-                return grad_output * (cdf + self * pdf)
+                return grad_output * (cdf + self * pdf), None
             return result, backward
 
         def hardswish(self):
