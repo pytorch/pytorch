@@ -41,7 +41,7 @@
 #else
 #define __at_align__
 #endif
-#define ALIGNMENT_SIZE 64
+#define VECTOR_WIDTH 64
 #define int_vector __m512i
 #else // CPU_CAPABILITY_AVX512
 #if defined(__GNUC__)
@@ -51,7 +51,7 @@
 #else
 #define __at_align__
 #endif
-#define ALIGNMENT_SIZE 32
+#define VECTOR_WIDTH 32
 #define int_vector __m256i
 #endif // CPU_CAPABILITY_AVX512
 
@@ -89,7 +89,7 @@ using int_same_size_t = typename int_of_size<sizeof(T)>::type;
 template <class T>
 struct Vectorized {
 private:
-  __at_align__ T values[ALIGNMENT_SIZE / sizeof(T)];
+  __at_align__ T values[VECTOR_WIDTH / sizeof(T)];
 public:
   using value_type = T;
   using size_type = int;
@@ -126,7 +126,7 @@ public:
   // identifier is odr-used or not, and in any case it's hard to tell if
   // a variable is odr-used or not.  So best to just cut the problem at the root.
   static constexpr size_type size() {
-    return ALIGNMENT_SIZE / sizeof(T);
+    return VECTOR_WIDTH / sizeof(T);
   }
   Vectorized() : values{0} {}
   Vectorized(T val) {
@@ -196,7 +196,7 @@ public:
   }
   static Vectorized<T> loadu(const void* ptr) {
     Vectorized vector;
-    std::memcpy(vector.values, ptr, ALIGNMENT_SIZE);
+    std::memcpy(vector.values, ptr, VECTOR_WIDTH);
     return vector;
   }
   static Vectorized<T> loadu(const void* ptr, int64_t count) {
@@ -737,7 +737,7 @@ inline Vectorized<T> operator^(const Vectorized<T>& a, const Vectorized<T>& b) {
 
 template<class T, typename Op>
 static inline Vectorized<T> bitwise_binary_op(const Vectorized<T> &a, const Vectorized<T> &b, Op op) {
-  static constexpr uint32_t element_no = ALIGNMENT_SIZE / sizeof(intmax_t);
+  static constexpr uint32_t element_no = VECTOR_WIDTH / sizeof(intmax_t);
   __at_align__ intmax_t buffer[element_no];
   const intmax_t *a_ptr = reinterpret_cast<const intmax_t*>((const T*) a);
   const intmax_t *b_ptr = reinterpret_cast<const intmax_t*>((const T*) b);
@@ -765,7 +765,7 @@ inline Vectorized<T> operator^(const Vectorized<T>& a, const Vectorized<T>& b) {
 template<class T, typename std::enable_if_t<!std::is_base_of<Vectorizedi, Vectorized<T>>::value, int> = 0>
 inline Vectorized<T> operator~(const Vectorized<T>& a) {
   Vectorized<T> ones;  // All bits are 1
-  memset((T*) ones, 0xFF, ALIGNMENT_SIZE);
+  memset((T*) ones, 0xFF, VECTOR_WIDTH);
   return a ^ ones;
 }
 
