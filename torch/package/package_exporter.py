@@ -8,6 +8,7 @@ from collections import OrderedDict, defaultdict
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from sys import version_info
 from typing import (
     Any,
     BinaryIO,
@@ -719,6 +720,11 @@ class PackageExporter:
                 If ``allow_empty=True``, no such exception is thrown.
 
         """
+        if version_info < (3, 7):
+            raise RuntimeError(
+                "Python 3.7 or higher is required to mock out modules. "
+                "Please upgrade your Python version."
+            )
         self.patterns[GlobGroup(include, exclude=exclude)] = _PatternInfo(
             _ModuleProviderAction.MOCK, allow_empty
         )
