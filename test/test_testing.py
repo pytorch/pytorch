@@ -725,13 +725,28 @@ def assert_close_with_inputs(actual: Any, expected: Any) -> Iterator[Callable]:
 
 
 class TestAssertClose(TestCase):
-    def test_type_inequality(self):
-        actual = torch.empty(2)
-        expected = actual.tolist()
+    def test_mismatching_types_subclasses(self):
+        actual = torch.empty(())
+        expected = torch.nn.Parameter(actual)
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn()
+
+    def test_mismatching_types_type_equality(self):
+        actual = torch.empty(())
+        expected = torch.nn.Parameter(actual)
 
         for fn in assert_close_with_inputs(actual, expected):
             with self.assertRaisesRegex(AssertionError, str(type(expected))):
-                fn()
+                fn(allow_subclasses=False)
+
+    def test_mismatching_types(self):
+        actual = torch.empty(2)
+        expected = actual.numpy()
+
+        for fn, allow_subclasses in itertools.product(assert_close_with_inputs(actual, expected), (True, False)):
+            with self.assertRaisesRegex(AssertionError, str(type(expected))):
+                fn(allow_subclasses=allow_subclasses)
 
     def test_unknown_type(self):
         actual = "0"
