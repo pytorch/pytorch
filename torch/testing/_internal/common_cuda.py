@@ -3,7 +3,7 @@ r"""This file is allowed to initialize CUDA context when imported."""
 import functools
 import torch
 import torch.cuda
-from torch.testing._internal.common_utils import TEST_NUMBA
+from torch.testing._internal.common_utils import TEST_NUMBA, IS_WINDOWS
 import inspect
 import contextlib
 from setuptools import distutils
@@ -165,3 +165,12 @@ def _get_torch_cuda_version():
         return (0, 0)
     cuda_version = str(torch.version.cuda)
     return tuple(int(x) for x in cuda_version.split("."))
+
+def _check_cusparse_generic_available():
+    version = _get_torch_cuda_version()
+    min_supported_version = (10, 2)
+    if IS_WINDOWS:
+        min_supported_version = (11, 0)
+    return version > min_supported_version
+
+TEST_CUSPARSE_GENERIC = _check_cusparse_generic_available()
