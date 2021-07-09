@@ -928,6 +928,13 @@ PyObject* initModule() {
 #endif
  ASSERT_TRUE(set_module_attr("has_cudnn", has_cudnn));
 
+#if AT_MKL_ENABLED() || AT_POCKETFFT_ENABLED()
+  PyObject *has_spectral = Py_True;
+#else
+  PyObject *has_spectral = Py_False;
+#endif
+ ASSERT_TRUE(set_module_attr("has_spectral", has_spectral));
+
   // force ATen to initialize because it handles
   // setting up TH Errors so that they throw C++ exceptions
   at::init();
