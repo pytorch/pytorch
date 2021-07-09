@@ -1839,15 +1839,21 @@ class Module:
 
         return sorted(keys)
 
-    def _replicate_for_data_parallel(self):
+    def _replicate_empty(self, keep_buffers=False):
         replica = self.__new__(type(self))
         replica.__dict__ = self.__dict__.copy()
 
         # replicas do not have parameters themselves, the replicas reference the original
         # module.
         replica._parameters = OrderedDict()
-        replica._buffers = replica._buffers.copy()
+        if keep_buffers:
+            replica._buffers = replica._buffers.copy()
+        else:
+            replica._buffers = OrderedDict()
         replica._modules = replica._modules.copy()
         replica._is_replica = True
 
         return replica
+
+    def _replicate_for_data_parallel(self):
+        return self._replicate_empty(True)
