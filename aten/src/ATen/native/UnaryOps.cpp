@@ -367,7 +367,12 @@ Tensor angle(const Tensor& self) {
 
 Tensor real(const Tensor& self) {
   if (self.is_complex()) {
-    auto real_tensor = self.is_conj() ? at::view_as_real(self._conj()) : at::view_as_real(self);
+    Tensor real_tensor;
+    if (self.is_conj()) {
+      real_tensor = at::view_as_real(self._conj());
+    } else {
+      real_tensor = at::view_as_real(self);
+    }
     return at::select(real_tensor, real_tensor.dim() - 1, 0);
   } else {
     TORCH_CHECK(false, "real is not implemented for tensors with non-complex dtypes.");
