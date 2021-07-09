@@ -81,13 +81,13 @@ void checkZeroPoint(const std::string& fn_name, int64_t zero_point) {
       fn_name,
       " zero_point ",
       zero_point,
-      " is out of range.");
+      " is above upper bound.");
   TORCH_CHECK(
       zero_point >= std::numeric_limits<T>::min(),
       fn_name,
       " zero_point ",
       zero_point,
-      " is out of range.");
+      " is below lower bound.");
 }
 
 template <typename T>
@@ -157,7 +157,7 @@ Tensor& quantize_tensor_per_channel_affine(
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
     if(qtensor.device().type() != c10::DeviceType::CUDA){
       checkZeroPoints<underlying_t>(fn_name, zero_points);
-    }
+    }  // for cuda, this check will occur in the actual cuda function
   });
 
   TORCH_CHECK(
@@ -261,7 +261,7 @@ Tensor& dequantize_tensor_per_channel_affine(
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
     if(qtensor.device().type() != c10::DeviceType::CUDA){
       checkZeroPoints<underlying_t>(fn_name, zero_points);
-    }
+    }  // for cuda, this check will occur in the actual cuda function
   });
 
   TORCH_CHECK(
