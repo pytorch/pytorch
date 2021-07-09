@@ -12,7 +12,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_methods_invocations import \
     (op_db, _NOTHING, UnaryUfuncInfo, SpectralFuncInfo)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
+    (deviceCountAtLeast, instantiate_device_type_tests, ops, onlyCUDA, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, create_traced_fn, \
     check_alias_annotation
@@ -57,7 +57,7 @@ class TestCommon(TestCase):
     @skipCUDAIfRocm
     @onlyOnCPUAndCUDA
     @ops(op_db, dtypes=OpDTypes.none)
-    def test_dtypes(self, device, dtype, op):
+    def test_dtypes(self, device, op):
         # dtypes to try to backward in
         allowed_backward_dtypes = floating_and_complex_types_and(torch.bfloat16, torch.float16)
 
@@ -170,6 +170,26 @@ class TestCommon(TestCase):
             msg += "The following backward dtypes should be removed from the OpInfo: {0}.".format(claimed_but_unsupported)
 
         self.assertEqual(supported_backward_dtypes, claimed_backward_supported, msg=msg)
+
+    # Validates that each OpInfo works correctly on different CUDA devices
+    @skipCUDAIfRocm
+    @onlyCUDA
+    @deviceCountAtLeast(2)
+    @ops(op_db, allowed_dtypes=(torch.float32, torch.long))
+    def test_multiple_devices(self, devices, dtype, op):
+        for cuda_device_str in devices:
+            cuda_device = torch.device(cuda_device_str)
+            # NOTE: only tests on first sample
+            samples = op.sample_inputs(cuda_device, dtype)
+            sample = samples[0]
+            result = op(sample.input, *sample.args, **sample.kwargs)
+
+            if isinstance(result, torch.Tensor):
+                self.assertTrue(result.device == cuda_device)
+            elif is_iterable_of_tensors(result):
+                self.assertTrue(all(map(lambda t: t.device == cuda_device, result)))
+            else:
+                self.skipTest("Skipped! Only supports single tensor or iterable of tensor outputs.")
 
     # Tests that the function and its (ndarray-accepting) reference produce the same
     #   values on the tensors from sample_inputs func for the corresponding op.
@@ -827,6 +847,9 @@ class TestJit(JitCommonTestCase):
 
     @_alias_ops((op for op in op_db if op.aliases))
     def test_jit_alias_remapping(self, device, dtype, op):
+        # Required to avoid undefined value: tensor error in JIT compilation of the function template
+        tensor = torch.tensor
+
         samples = op.sample_inputs(device, dtype, requires_grad=True)
         if len(samples) == 0:
             self.skipTest("Skipped! No sample inputs!")
@@ -839,11 +862,8 @@ class TestJit(JitCommonTestCase):
         # Below we prepare strings of args/kwargs with and without type annotations.
         # These strings are inserted into function template strings which is then torch scripted.
         # - args string is ["t0"] corresponding to the "input" tensor required by the op
-        # - args_annot_kw is the string for the template function signature, for example,
-        # ["t0", "s0: float", "s1: bool", "max: float = 1.0", "min: float = 0.0"] ->
-        #    def fn(t0, s0: float, s1: bool, max: float = 1.0, min: float = 0.0)
-        # - args_kw is the string of args/kwargs used to call the op, same as args_annot_kw but
-        # without type annotations
+        # - args_kw is the value of args and strings of kwargs used to call the op (without type annotations), for example,
+        # ["to", "1.0", "(1,)", "True", "tensor(1.0)"] -> def fn(t0): return variant(t0, 1.0, (1,), True, tensor(1.0))
         args = ["t0"]
 
         def quote_strs(v):
@@ -852,11 +872,8 @@ class TestJit(JitCommonTestCase):
 
             return str(v)
 
-        args_annot_kw = args + \
-            [f"s{i}: {type(v).__name__}" for i, v in enumerate(sample.args)] + \
-            [f"{k}: {type(v).__name__} = {quote_strs(v)}" for k, v in sample.kwargs.items()]
         args_kw = args + \
-            [f"s{i}" for i in range(len(sample.args))] + \
+            [f"{v}" for v in sample.args] + \
             [f"{k}={quote_strs(v)}" for k, v in sample.kwargs.items()]
 
         # Prepare data for test tracing
@@ -882,23 +899,22 @@ class TestJit(JitCommonTestCase):
 
                 if variant in method_or_inplace:
                     fn_template = '''
-                        def _fn(t0{c}{args_annot_kw}):
+                        def _fn(t0{c}):
                             return t0.{alias_name}({args_kw})
                     '''
                     # remove the first input tensor
                     script = fn_template.format(
-                        c=", " if len(args_kw[1:]) > 1 or len(args_annot_kw[1:]) >= 1 else "",
-                        args_annot_kw=", ".join(args_annot_kw[1:]),
+                        c=", " if len(args_kw[1:]) > 1 else "",
                         args_kw=", ".join(args_kw[1:]),
                         alias_name=variant_name,
                     )
                 else:
                     fn_template = '''
-                        def _fn({args_annot_kw}):
+                        def _fn({args}):
                             return variant({args_kw})
                     '''
                     script = fn_template.format(
-                        args_annot_kw=", ".join(args_annot_kw),
+                        args=", ".join(args),
                         args_kw=", ".join(args_kw),
                     )
                 scripted = torch.jit.CompilationUnit(script)._fn
@@ -906,15 +922,15 @@ class TestJit(JitCommonTestCase):
                 if (variant is inplace and not torch.can_cast(expected_dtype, dtype)):
                     try:
                         inp = clone_input_helper(sample.input)
-                        scripted(inp, *sample.args, **sample.kwargs)
+                        scripted(inp)
                     except Exception as e:
                         continue
                     self.fail("Inplace operation on integer tensor that should be promoted to float didn't fail!")
 
                 inp = clone_input_helper(sample.input)
-                scripted(inp, *sample.args, **sample.kwargs)
+                scripted(inp)
                 inp = clone_input_helper(sample.input)
-                graph = scripted.graph_for(inp, *sample.args, **sample.kwargs)
+                graph = scripted.graph_for(inp)
                 FileCheck().check(op.aten_name).check_not(variant_name).run(graph)
 
             # Test tracing:
