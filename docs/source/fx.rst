@@ -247,7 +247,7 @@ multiplication after the ``F.relu``, and then clean up the original
 objects to automatically record operations into the :class:`Graph`.
 
 To use this method, we write the operations that we want inserted as regular
-PyTorch code and invoke that code with :class:`Proxy` objects as arugments.
+PyTorch code and invoke that code with :class:`Proxy` objects as arguments.
 These :class:`Proxy` objects will capture the operations that are performed
 on them and append them to the :class:`Graph`.
 
