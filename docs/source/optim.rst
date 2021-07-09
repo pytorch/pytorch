@@ -133,6 +133,7 @@ Algorithms
     ASGD
     LBFGS
     NAdam
+    RAdam
     RMSprop
     Rprop
     SGD

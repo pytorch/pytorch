@@ -260,6 +260,7 @@ _(aten, cosine_embedding_loss) \
 _(aten, cosine_similarity) \
 _(aten, count_nonzero) \
 _(aten, cross) \
+_(aten, cov) \
 _(aten, std_mean) \
 _(aten, var_mean) \
 _(aten, ctc_loss) \
