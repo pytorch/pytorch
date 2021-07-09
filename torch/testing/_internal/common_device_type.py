@@ -5,7 +5,7 @@ import runpy
 import threading
 from collections import namedtuple
 from enum import Enum
-from functools import wraps
+from functools import wraps, partial
 from typing import List, Any, ClassVar, Optional, Sequence, Tuple
 import unittest
 import os
@@ -788,15 +788,18 @@ class ops(_TestParametrizer):
                     print("Failed to instantiate {0} for op {1}!".format(test_name, op.name))
                     raise ex
 
-# Decorator that generates two set of tests with kwarg sparse_csr=True and sparse_csr=False.
-# All keyword arguments are used only if sparse_csr==True, so they have no effect on the original test
-class enableSparseCSR(_TestParametrizer):
-    def __init__(self, *,
+# Decorator that generates two set of tests with layout=torch.strided and layout=specified_layout.
+# All keyword arguments are used only for the specified layout, so they have no effect on the original test.
+class enableLayout(_TestParametrizer):
+    def __init__(self, layout: torch.layout, *,
                  dtypes: Optional[Sequence[torch.dtype]] = None,
                  dtypes_cpu: Optional[Sequence[torch.dtype]] = None,
                  dtypes_cuda: Optional[Sequence[torch.dtype]] = None,
-                 only_cuda=False,
-                 skip_cuda_if_no_cusparse=True):
+                 only_cuda: bool = False,
+                 skip_cuda_if_no_cusparse: bool = True):
+        if not isinstance(layout, torch.layout):
+            raise RuntimeError("Expected to get torch.layout as layout, but got ", layout)
+        self.layout = layout
         self.dtypes = set(dtypes) if dtypes is not None else None
         self.dtypes_cpu = set(dtypes_cpu) if dtypes_cpu is not None else None
         self.dtypes_cuda = set(dtypes_cuda) if dtypes_cuda is not None else None
@@ -805,12 +808,15 @@ class enableSparseCSR(_TestParametrizer):
 
     def _parametrize_test(self, test, generic_cls, device_cls):
         """ Parameterizes the given test function with boolean sparse_csr flag. """
-        for sparse_csr in (True, False):
+        # if self.layout == torch.strided generate only one set of tests
+        maybe_layout = (self.layout,) if self.layout != torch.strided else tuple()
+        for layout in (torch.strided, *maybe_layout):
             # get dtypes specified with @dtypes, @dtypesIfCPU, @dtypesIfCUDA
             dtypes = set(device_cls._get_dtypes(test))
 
-            # replace dtypes only if sparse_csr == True
-            if sparse_csr:
+            # replace dtypes only with non-default layout
+            non_default_layout = (layout != torch.strided)
+            if non_default_layout:
                 if self.dtypes_cpu is not None and device_cls.device_type == 'cpu':
                     dtypes = self.dtypes_cpu
                 if self.dtypes_cuda is not None and device_cls.device_type == 'cuda':
@@ -819,21 +825,22 @@ class enableSparseCSR(_TestParametrizer):
                     dtypes = self.dtypes
 
             for dtype in dtypes:
+                layout_str = str(layout).replace('torch.', '_')
                 # Construct the test name
                 test_name = '{}{}_{}{}'.format(test.__name__,
-                                               '_sparse_csr' if sparse_csr else '',
+                                               layout_str if non_default_layout else '',
                                                device_cls.device_type,
                                                _dtype_test_suffix(dtype))
 
                 # Construct parameter kwargs to pass to the test
-                param_kwargs = {'sparse_csr': sparse_csr}
+                param_kwargs = {'layout': layout}
                 _update_param_kwargs(param_kwargs, 'dtype', dtype)
 
                 active_decorators = []
-                if sparse_csr and self.skip_cuda_if_no_cusparse:
+                if non_default_layout and self.skip_cuda_if_no_cusparse:
                     active_decorators.append(skipCUDAIfNoCusparseGeneric)
 
-                if sparse_csr and self.only_cuda:
+                if non_default_layout and self.only_cuda:
                     active_decorators.append(onlyCUDA)
 
                 @wraps(test)
@@ -844,6 +851,8 @@ class enableSparseCSR(_TestParametrizer):
                     test_wrapper = decorator(test_wrapper)
 
                 yield (test_wrapper, test_name, param_kwargs)
+
+enableSparseCSR = partial(enableLayout, torch.sparse_csr)
 
 # Decorator that skips a test if the given condition is true.
 # Notes:
