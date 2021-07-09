@@ -82,8 +82,10 @@ class ParametrizationList(ModuleList):
     Args:
         modules (sequence): sequence of modules representing the parametrizations
         original (Parameter or Tensor): parameter or buffer that is parametrized
-        unsafe (bool): a boolean flag that denotes whether the parametrization breaks the invariants (e.g. can be resized),
-            Warning: the current Module might not work anymore, enable this flag at your own risk.
+        unsafe (bool): a boolean flag that denotes whether the parametrization
+            may change the dtype and shape of the tensor. Default: `False`
+            Warning: the parametrization is not checked for consistency upon registration.
+            Enable this flag at your own risk.
     """
     original: Tensor
     unsafe: bool
@@ -305,17 +307,28 @@ def _inject_property(module: Module, tensor_name: str) -> None:
     # This should never fire if register_parametrization is correctly implemented
     assert not hasattr(module, tensor_name)
 
-    def get_parametrized(self) -> Tensor:
+    @torch.jit.unused
+    def get_cached_parametrization(parametrization) -> Tensor:
         global _cache
+        key = (id(module), tensor_name)
+        tensor = _cache.get(key)
+        if tensor is None:
+            tensor = parametrization()
+            _cache[key] = tensor
+        return tensor
 
+    def get_parametrized(self) -> Tensor:
         parametrization = self.parametrizations[tensor_name]
         if _cache_enabled:
-            key = (id(module), tensor_name)
-            tensor = _cache.get(key)
-            if tensor is None:
-                tensor = parametrization()
-                _cache[key] = tensor
-            return tensor
+            if torch.jit.is_scripting():
+                # Scripting
+                raise RuntimeError('Caching is not implemented for scripting. '
+                                   'Either disable caching or avoid scripting.')
+            elif torch._C._get_tracing_state() is not None:
+                # Tracing
+                raise RuntimeError('Cannot trace a model while caching parametrizations.')
+            else:
+                return get_cached_parametrization(parametrization)
         else:
             # If caching is not active, this function just evaluates the parametrization
             return parametrization()

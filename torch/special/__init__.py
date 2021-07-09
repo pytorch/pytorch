@@ -2,7 +2,7 @@ import sys
 
 import torch
 from torch._C import _add_docstr, _special  # type: ignore[attr-defined]
-from torch._torch_docs import common_args
+from torch._torch_docs import common_args, multi_dim_common
 
 Tensor = torch.Tensor
 
@@ -217,6 +217,13 @@ Example::
     >>> torch.special.logit(a, eps=1e-6)
     tensor([-0.9466,  2.6352,  0.6131, -1.7169,  0.6261])
 """.format(**common_args))
+
+logsumexp = _add_docstr(_special.special_logsumexp,
+                        r"""
+logsumexp(input, dim, keepdim=False, *, out=None)
+
+Alias for :func:`torch.logsumexp`.
+""".format(**multi_dim_common))
 
 expit = _add_docstr(_special.special_expit,
                     r"""
