@@ -49,9 +49,6 @@ def synchronize(
     Note: The data on the path is not deleted, as a result there can be stale data if
         you use the same key_prefix twice.
     """
-    warnings.warn(
-        "This is an experimental API and will be changed in future.", FutureWarning
-    )
     store.set_timeout(timedelta(seconds=barrier_timeout))
     store.set(f"{key_prefix}{rank}", data)
     agent_data = get_all(store, key_prefix, world_size)
