@@ -264,9 +264,8 @@ void InferShapeTypeForUninitializedOutput(
     Block* block,
     Value* uninitialized_output,
     Value* other_output) {
-  Node* const_node;
-  if (other_output->type()->cast<TensorType>() != nullptr) {
-    auto output_type = other_output->type()->expect<TensorType>();
+  Node* const_node = nullptr;
+  if (auto output_type = other_output->type()->cast<TensorType>()) {
     auto elem_type =
         at::initialTensorOptions().dtype(output_type->scalarType());
     const_node = graph->create(::c10::onnx::Constant, 1);
@@ -280,11 +279,10 @@ void InferShapeTypeForUninitializedOutput(
       const_node->output()->setType(
           TensorType::create(*(output_type->scalarType()), at::kCPU, {}, {}));
     }
-  } else if (other_output->type()->cast<ListType>() != nullptr) {
-    auto output_type = other_output->type()->expect<ListType>();
+  } else if (auto output_type = other_output->type()->cast<ListType>()) {
     TypePtr elem = output_type->getElementType();
     const_node = graph->create(::c10::onnx::SequenceEmpty, 1);
-    if (elem->cast<TensorType>()->scalarType().has_value()) {
+    if (elem->cast<TensorType>() && elem->cast<TensorType>()->scalarType().has_value()) {
       auto scalar_type = elem->cast<TensorType>()->scalarType().value();
       auto onnx_type = ATenTypeToOnnxType(scalar_type);
       const_node->i_(attr::dtype, onnx_type);
