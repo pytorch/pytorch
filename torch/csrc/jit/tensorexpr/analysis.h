@@ -31,6 +31,7 @@ class HasRand : public IRVisitor {
 };
 
 template <typename Node>
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class NodeFinder : public IRVisitor {
  public:
   void visit(const Node* v) override {
@@ -53,6 +54,7 @@ class NodeFinder : public IRVisitor {
   std::vector<Node*> nodes;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class VarFinder : public IRVisitor {
  public:
   void visit(const Var* v) override {
@@ -83,6 +85,7 @@ class VarFinder : public IRVisitor {
 // Finds all kinds of write operations to the provided Buf.
 class WritesToBuf : public IRVisitor {
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   WritesToBuf(const Buf* target) : target_(target) {}
 
   std::vector<const Stmt*> writes() {
@@ -114,6 +117,7 @@ class WritesToBuf : public IRVisitor {
 
 class StmtsReadingBuf : public IRVisitor {
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   StmtsReadingBuf(const Buf* target) : target_(target) {}
 
   std::vector<const Stmt*> reads() {
