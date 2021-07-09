@@ -18,7 +18,6 @@ from torch.testing._internal.common_device_type import \
      deviceCountAtLeast)
 from torch.testing._internal.common_methods_invocations import op_db
 import torch.testing._internal.opinfo_helper as opinfo_helper
-from torch.testing._asserts import UsageError
 
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):
@@ -753,7 +752,7 @@ class TestAssertClose(TestCase):
         expected = "0"
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(UsageError, str(type(actual))):
+            with self.assertRaisesRegex(ValueError, str(type(actual))):
                 fn()
 
     def test_mismatching_shape(self):
@@ -770,7 +769,7 @@ class TestAssertClose(TestCase):
         expected = actual.to_mkldnn()
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaises(UsageError):
+            with self.assertRaises(ValueError):
                 fn()
 
     def test_mismatching_layout(self):
@@ -817,7 +816,7 @@ class TestAssertClose(TestCase):
         expected = actual.clone()
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaises(UsageError):
+            with self.assertRaises(ValueError):
                 fn(rtol=0.0)
 
     def test_only_atol(self):
@@ -825,7 +824,7 @@ class TestAssertClose(TestCase):
         expected = actual.clone()
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaises(UsageError):
+            with self.assertRaises(ValueError):
                 fn(atol=0.0)
 
     def test_mismatching_values(self):
