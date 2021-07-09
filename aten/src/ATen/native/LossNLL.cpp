@@ -1,3 +1,4 @@
+#include "ATen/TensorMeta.h"
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
@@ -6,6 +7,43 @@
 #include <ATen/native/cpu/utils.h>
 
 namespace at {
+namespace meta {
+TORCH_META_FUNC(nll_loss_forward)
+(const Tensor& self,
+ const Tensor& target,
+ const OptionalTensorRef weight_opt,
+ int64_t reduction,
+ int64_t ignore_index) {
+  const Tensor& weight = weight_opt.getTensorRef();
+
+  TORCH_CHECK(
+      self.dim() > 0 && self.dim() <= 2, "input tensor should be 1D or 2D");
+  TORCH_CHECK(
+      target.dim() == 1,
+      "1D target tensor expected, multi-target not supported");
+  TORCH_CHECK(
+      self.size(0) == target.size(0),
+      "size mismatch (got input: ",
+      self.sizes(),
+      ", target: ",
+      target.sizes(),
+      ")")
+
+  const auto n_classes = self.size(-1);
+
+  TORCH_CHECK(
+      !weight.defined() || (weight.dim() == 1 && weight.numel() == n_classes),
+      "weight tensor should be defined either for all ",
+      n_classes,
+      " classes or no classes"
+      " but got weight tensor of shape: ",
+      weight.sizes());
+
+  set_output(0, {0}, self.options());
+  set_output(1, {0}, self.options());
+}
+} // namespace meta
+
 namespace native {
 
 namespace {
@@ -26,8 +64,8 @@ inline scalar_t* optional_data(const Tensor& source) {
 
 template <typename scalar_t, typename target_t>
 static void nll_loss_out_frame(
-    Tensor& output,
-    Tensor& total_weight,
+    const Tensor& output,
+    const Tensor& total_weight,
     const Tensor& input,
     const Tensor& target,
     const Tensor& weight,
@@ -158,36 +196,13 @@ static void nll_loss_out_frame(
 }
 
 void nll_loss_forward_out_cpu_template(
-    Tensor& output,
-    Tensor& total_weight,
+    const Tensor& output,
+    const Tensor& total_weight,
     const Tensor& input,
     const Tensor& target,
     const Tensor& weight,
     int64_t reduction,
     int64_t ignore_index) {
-  TORCH_CHECK(
-      input.dim() > 0 && input.dim() <= 2, "input tensor should be 1D or 2D");
-  TORCH_CHECK(
-      target.dim() == 1,
-      "1D target tensor expected, multi-target not supported");
-  TORCH_CHECK(
-      input.size(0) == target.size(0),
-      "size mismatch (got input: ",
-      input.sizes(),
-      ", target: ",
-      target.sizes(),
-      ")")
-
-  const auto n_classes = input.size(-1);
-
-  TORCH_CHECK(
-      !weight.defined() || (weight.dim() == 1 && weight.numel() == n_classes),
-      "weight tensor should be defined either for all ",
-      n_classes,
-      " classes or no classes"
-      " but got weight tensor of shape: ",
-      weight.sizes());
-
   total_weight.resize_({});
 
   AT_DISPATCH_FLOATING_TYPES_AND(
@@ -377,35 +392,17 @@ void nll_loss_backward_out_cpu_template(
 
 } // namespace
 
-std::tuple<Tensor&, Tensor&> nll_loss_forward_out_cpu(const Tensor& self,
-    const Tensor& target, const c10::optional<Tensor>& weight_opt,
-    int64_t reduction,
-    int64_t ignore_index,
-    Tensor& output,
-    Tensor& total_weight) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-
+TORCH_IMPL_FUNC(nll_loss_forward_out_cpu)
+(const Tensor& self,
+ const Tensor& target,
+ const OptionalTensorRef weight_opt,
+ int64_t reduction,
+ int64_t ignore_index,
+ const Tensor& output,
+ const Tensor& total_weight) {
+  const Tensor& weight = weight_opt.getTensorRef();
   nll_loss_forward_out_cpu_template(
       output, total_weight, self, target, weight, reduction, ignore_index);
-  return std::tuple<Tensor&, Tensor&>(output, total_weight);
-}
-
-std::tuple<Tensor, Tensor> nll_loss_forward_cpu(
-    const Tensor& self,
-    const Tensor& target, const c10::optional<Tensor>& weight_opt,
-    int64_t reduction,
-    int64_t ignore_index) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-
-  auto output = at::empty({0}, self.options());
-  auto total_weight = at::empty({0}, self.options());
-  at::native::nll_loss_forward_out_cpu(
-      self, target, weight, reduction, ignore_index, output, total_weight);
-  return std::make_tuple(output, total_weight);
 }
 
 Tensor& nll_loss_backward_out_cpu(const Tensor& grad_output,

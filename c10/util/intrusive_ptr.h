@@ -285,9 +285,11 @@ class intrusive_ptr final {
   // This constructor will not increase the ref counter for you.
   // We use the tagged dispatch mechanism to explicitly mark this constructor
   // to not increase the refcount
-  explicit intrusive_ptr(TTarget* target, raw::DontIncreaseRefcount) noexcept
-      : target_(target) {}
+  public:
+    explicit intrusive_ptr(TTarget* target, raw::DontIncreaseRefcount) noexcept
+        : target_(target) {}
 
+  private:
   // This constructor will increase the ref counter for you.
   // This constructor will be used by the make_intrusive(), and also pybind11,
   // which wrap the intrusive_ptr holder around the raw pointer and incref
