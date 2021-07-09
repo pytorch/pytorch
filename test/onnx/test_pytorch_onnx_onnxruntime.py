@@ -6551,6 +6551,26 @@ class TestONNXRuntime(unittest.TestCase):
                       input_names=["input_1"],
                       dynamic_axes={"input_1": [0, 1]})
 
+    @skipIfUnsupportedMinOpsetVersion(14)  # Need onnx::identity of sequence in opset 14
+    @skipIfONNXShapeInference(False)
+    def test_uninitialized_tensorList_shape_dynamic(self):
+        class UninitializedModel(torch.nn.Module):
+            def forward(self, y):
+                if y.shape[1] < 5:
+                    if y.size(0) == 1:
+                        y = y + 4
+                    else:
+                        y_list = [y]
+                        y_list.append(y)
+                        return y_list
+                return [y, y]
+
+        x = torch.ones((3, 4), dtype=torch.int)
+        y = torch.ones((4, 6), dtype=torch.int)
+        self.run_test(UninitializedModel(), x, test_with_inputs=[y],
+                      input_names=["input_1"],
+                      dynamic_axes={"input_1": [0, 1]})
+
     # Sequence type as loop-carried dependencies only supported for ONNX opset >= 13
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_sequance_loopcarried(self):

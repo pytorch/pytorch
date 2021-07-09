@@ -282,12 +282,16 @@ void InferShapeTypeForUninitializedOutput(
   } else if (auto output_type = other_output->type()->cast<ListType>()) {
     TypePtr elem = output_type->getElementType();
     const_node = graph->create(::c10::onnx::SequenceEmpty, 1);
-    if (elem->cast<TensorType>() && elem->cast<TensorType>()->scalarType().has_value()) {
+    if (elem->cast<TensorType>() &&
+        elem->cast<TensorType>()->scalarType().has_value()) {
       auto scalar_type = elem->cast<TensorType>()->scalarType().value();
       auto onnx_type = ATenTypeToOnnxType(scalar_type);
       const_node->i_(attr::dtype, onnx_type);
-      const_node->output()->setType(ListType::create(elem->cast<TensorType>()));
+      const_node->output()->setType(other_output->type());
     } else {
+      std::cerr
+          << "Warning: UninitializedOutput - Invalid number of elem Type of ListTensor found"
+          << std::endl;
       const_node->output()->setType(other_output->type());
     }
   }
