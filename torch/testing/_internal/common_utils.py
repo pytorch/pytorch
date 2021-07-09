@@ -70,6 +70,9 @@ IS_REMOTE_GPU = os.getenv('PYTORCH_TEST_REMOTE_GPU') == '1'
 DISABLED_TESTS_FILE = '.pytorch-disabled-tests.json'
 SLOW_TESTS_FILE = '.pytorch-slow-tests.json'
 
+slow_tests_dict: Optional[Dict[str, Any]] = None
+disabled_tests_dict: Optional[Dict[str, Any]] = None
+
 class ProfilingMode(Enum):
     LEGACY = 1
     SIMPLE = 2
@@ -856,10 +859,6 @@ try:
     )
 except ImportError:
     print('Fail to import hypothesis in common_utils, tests are not derandomized')
-
-
-slow_tests_dict: Optional[Dict[str, Any]] = None
-disabled_tests_dict: Optional[Dict[str, Any]] = None
 
 def check_if_enable(test: unittest.TestCase):
     test_suite = str(test.__class__).split('\'')[1]
