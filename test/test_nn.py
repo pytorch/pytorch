@@ -17513,7 +17513,7 @@ class TestLazyModules(TestCase):
                                     lambda: nn.LazyConvTranspose3d(32, 2),
                                     (16, 32, 2, 2, 2), (32,))
 
-    def _check_lazy_batchnorm(self, cls, lazy_cls, input_shape):
+    def _check_lazy_norm(self, cls, lazy_cls, input_shape):
         for affine in [False, True]:
             for track_running_stats in [False, True]:
                 lazy_module = lazy_cls(affine=affine, track_running_stats=track_running_stats)
@@ -17550,7 +17550,7 @@ class TestLazyModules(TestCase):
                     self.assertEqual(lazy_module.num_batches_tracked.shape, module.num_batches_tracked.shape)
                     self.assertEqual(lazy_module.num_batches_tracked, module.num_batches_tracked)
 
-    def _check_lazy_batchnorm_pickle(self, cls, lazy_cls, input_shape):
+    def _check_lazy_norm_pickle(self, cls, lazy_cls, input_shape):
         for affine in [False, True]:
             for track_running_stats in [False, True]:
                 module = lazy_cls(affine=affine, track_running_stats=track_running_stats)
@@ -17595,99 +17595,6 @@ class TestLazyModules(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'shape of an uninitialized'):
             module.load_state_dict(lazy_module.state_dict())
 
-    def test_lazy_batchnorm1d(self):
-        self._check_lazy_batchnorm(nn.BatchNorm1d, nn.LazyBatchNorm1d, (16, 3, 6))
-        self._check_lazy_batchnorm(nn.BatchNorm1d, nn.LazyBatchNorm1d, (16, 6))
-
-    def test_lazy_batchnorm1d_pickle(self):
-        self._check_lazy_batchnorm_pickle(nn.BatchNorm1d, nn.LazyBatchNorm1d, (16, 3, 6))
-        self._check_lazy_batchnorm_pickle(nn.BatchNorm1d, nn.LazyBatchNorm1d, (16, 6))
-
-    def test_lazy_batchnorm1d_state(self):
-        self._check_lazy_batchnorm_state(nn.BatchNorm1d, nn.LazyBatchNorm1d)
-        self._check_lazy_batchnorm_state(nn.BatchNorm1d, nn.LazyBatchNorm1d)
-
-    def test_lazy_batchnorm2d(self):
-        self._check_lazy_batchnorm(nn.BatchNorm2d, nn.LazyBatchNorm2d, (16, 3, 6, 7))
-
-    def test_lazy_batchnorm2d_pickle(self):
-        self._check_lazy_batchnorm_pickle(nn.BatchNorm2d, nn.LazyBatchNorm2d, (16, 3, 6, 7))
-
-    def test_lazy_batchnorm2d_state(self):
-        self._check_lazy_batchnorm_state(nn.BatchNorm2d, nn.LazyBatchNorm2d)
-        self._check_lazy_batchnorm_state(nn.BatchNorm2d, nn.LazyBatchNorm2d)
-
-    def test_lazy_batchnorm3d(self):
-        self._check_lazy_batchnorm(nn.BatchNorm3d, nn.LazyBatchNorm3d, (16, 3, 6, 7, 8))
-
-    def test_lazy_batchnorm3d_pickle(self):
-        self._check_lazy_batchnorm_pickle(nn.BatchNorm3d, nn.LazyBatchNorm3d, (16, 3, 6, 7, 8))
-
-    def test_lazy_batchnorm3d_state(self):
-        self._check_lazy_batchnorm_state(nn.BatchNorm3d, nn.LazyBatchNorm3d)
-        self._check_lazy_batchnorm_state(nn.BatchNorm3d, nn.LazyBatchNorm3d)
-
-    def _check_lazy_instancenorm(self, cls, lazy_cls, input_shape):
-        for affine in [False, True]:
-            for track_running_stats in [False, True]:
-                lazy_module = lazy_cls(affine=affine, track_running_stats=track_running_stats)
-
-                if affine:
-                    self.assertIsInstance(lazy_module.weight, UninitializedParameter)
-                    self.assertIsInstance(lazy_module.bias, UninitializedParameter)
-                if track_running_stats:
-                    self.assertIsInstance(lazy_module.running_mean, UninitializedBuffer)
-                    self.assertIsInstance(lazy_module.running_var, UninitializedBuffer)
-
-                input = torch.ones(*input_shape)
-                y = lazy_module(input)
-                self.assertIsInstance(lazy_module, cls)
-                self.assertNotIsInstance(lazy_module, lazy_cls)
-
-                num_features = input_shape[1]
-                module = cls(num_features, affine=affine, track_running_stats=track_running_stats)
-                expected = module(input)
-
-                if module.weight is not None:
-                    self.assertEqual(lazy_module.weight.shape, module.weight.shape)
-                    self.assertEqual(lazy_module.weight, module.weight)
-                if module.bias is not None:
-                    self.assertEqual(lazy_module.bias.shape, module.bias.shape)
-                    self.assertEqual(lazy_module.bias, module.bias)
-                if module.running_mean is not None:
-                    self.assertEqual(lazy_module.running_mean.shape, module.running_mean.shape)
-                    self.assertEqual(lazy_module.running_mean, module.running_mean)
-                if module.running_var is not None:
-                    self.assertEqual(lazy_module.running_var.shape, module.running_var.shape)
-                    self.assertEqual(lazy_module.running_var, module.running_var)
-
-    def _check_lazy_instancenorm_pickle(self, cls, lazy_cls, input_shape):
-        for affine in [False, True]:
-            for track_running_stats in [False, True]:
-                module = lazy_cls(affine=affine, track_running_stats=track_running_stats)
-                module = pickle.loads(pickle.dumps(module))
-
-                self.assertIsInstance(module, lazy_cls)
-                if affine:
-                    self.assertIsInstance(module.weight, UninitializedParameter)
-                    self.assertIsInstance(module.bias, UninitializedParameter)
-                if track_running_stats:
-                    self.assertIsInstance(module.running_mean, UninitializedBuffer)
-                    self.assertIsInstance(module.running_var, UninitializedBuffer)
-
-                input = torch.ones(*input_shape)
-                module(input)  # fully materialized
-                module = pickle.loads(pickle.dumps(module))
-
-                self.assertNotIsInstance(module, lazy_cls)
-                self.assertIsInstance(module, cls)
-                if affine:
-                    self.assertNotIsInstance(module.weight, UninitializedParameter)
-                    self.assertNotIsInstance(module.bias, UninitializedParameter)
-                if track_running_stats:
-                    self.assertNotIsInstance(module.running_mean, UninitializedBuffer)
-                    self.assertNotIsInstance(module.running_var, UninitializedBuffer)
-
     def _check_lazy_instancenorm_state(self, cls, lazy_cls):
         for affine in [False, True]:
             for track_running_stats in [False, True]:
@@ -17710,31 +17617,63 @@ class TestLazyModules(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'shape of an uninitialized'):
             module.load_state_dict(lazy_module.state_dict())
 
+    def test_lazy_batchnorm1d(self):
+        self._check_lazy_norm(nn.BatchNorm1d, nn.LazyBatchNorm1d, (16, 3, 6))
+        self._check_lazy_norm(nn.BatchNorm1d, nn.LazyBatchNorm1d, (16, 6))
+
+    def test_lazy_batchnorm1d_pickle(self):
+        self._check_lazy_norm_pickle(nn.BatchNorm1d, nn.LazyBatchNorm1d, (16, 3, 6))
+        self._check_lazy_norm_pickle(nn.BatchNorm1d, nn.LazyBatchNorm1d, (16, 6))
+
+    def test_lazy_batchnorm1d_state(self):
+        self._check_lazy_batchnorm_state(nn.BatchNorm1d, nn.LazyBatchNorm1d)
+        self._check_lazy_batchnorm_state(nn.BatchNorm1d, nn.LazyBatchNorm1d)
+
+    def test_lazy_batchnorm2d(self):
+        self._check_lazy_norm(nn.BatchNorm2d, nn.LazyBatchNorm2d, (16, 3, 6, 7))
+
+    def test_lazy_batchnorm2d_pickle(self):
+        self._check_lazy_norm_pickle(nn.BatchNorm2d, nn.LazyBatchNorm2d, (16, 3, 6, 7))
+
+    def test_lazy_batchnorm2d_state(self):
+        self._check_lazy_batchnorm_state(nn.BatchNorm2d, nn.LazyBatchNorm2d)
+        self._check_lazy_batchnorm_state(nn.BatchNorm2d, nn.LazyBatchNorm2d)
+
+    def test_lazy_batchnorm3d(self):
+        self._check_lazy_norm(nn.BatchNorm3d, nn.LazyBatchNorm3d, (16, 3, 6, 7, 8))
+
+    def test_lazy_batchnorm3d_pickle(self):
+        self._check_lazy_norm_pickle(nn.BatchNorm3d, nn.LazyBatchNorm3d, (16, 3, 6, 7, 8))
+
+    def test_lazy_batchnorm3d_state(self):
+        self._check_lazy_batchnorm_state(nn.BatchNorm3d, nn.LazyBatchNorm3d)
+        self._check_lazy_batchnorm_state(nn.BatchNorm3d, nn.LazyBatchNorm3d)
+
     def test_lazy_instancenorm1d(self):
-        self._check_lazy_instancenorm(nn.InstanceNorm1d, nn.LazyInstanceNorm1d, (16, 3, 6))
+        self._check_lazy_norm(nn.InstanceNorm1d, nn.LazyInstanceNorm1d, (16, 3, 6))
 
     def test_lazy_instancenorm1d_pickle(self):
-        self._check_lazy_instancenorm_pickle(nn.InstanceNorm1d, nn.LazyInstanceNorm1d, (16, 3, 6))
+        self._check_lazy_norm_pickle(nn.InstanceNorm1d, nn.LazyInstanceNorm1d, (16, 3, 6))
 
     def test_lazy_instancenorm1d_state(self):
         self._check_lazy_instancenorm_state(nn.InstanceNorm1d, nn.LazyInstanceNorm1d)
         self._check_lazy_instancenorm_state(nn.InstanceNorm1d, nn.LazyInstanceNorm1d)
 
     def test_lazy_instancenorm2d(self):
-        self._check_lazy_instancenorm(nn.InstanceNorm2d, nn.LazyInstanceNorm2d, (16, 3, 6, 7))
+        self._check_lazy_norm(nn.InstanceNorm2d, nn.LazyInstanceNorm2d, (16, 3, 6, 7))
 
     def test_lazy_instancenorm2d_pickle(self):
-        self._check_lazy_instancenorm_pickle(nn.InstanceNorm2d, nn.LazyInstanceNorm2d, (16, 3, 6, 7))
+        self._check_lazy_norm_pickle(nn.InstanceNorm2d, nn.LazyInstanceNorm2d, (16, 3, 6, 7))
 
     def test_lazy_instancenorm2d_state(self):
         self._check_lazy_instancenorm_state(nn.InstanceNorm2d, nn.LazyInstanceNorm2d)
         self._check_lazy_instancenorm_state(nn.InstanceNorm2d, nn.LazyInstanceNorm2d)
 
     def test_lazy_instancenorm3d(self):
-        self._check_lazy_instancenorm(nn.InstanceNorm3d, nn.LazyInstanceNorm3d, (16, 3, 6, 7, 8))
+        self._check_lazy_norm(nn.InstanceNorm3d, nn.LazyInstanceNorm3d, (16, 3, 6, 7, 8))
 
     def test_lazy_instancenorm3d_pickle(self):
-        self._check_lazy_instancenorm_pickle(nn.InstanceNorm3d, nn.LazyInstanceNorm3d, (16, 3, 6, 7, 8))
+        self._check_lazy_norm_pickle(nn.InstanceNorm3d, nn.LazyInstanceNorm3d, (16, 3, 6, 7, 8))
 
     def test_lazy_instancenorm3d_state(self):
         self._check_lazy_instancenorm_state(nn.InstanceNorm3d, nn.LazyInstanceNorm3d)
