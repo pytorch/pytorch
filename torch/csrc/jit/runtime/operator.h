@@ -60,7 +60,7 @@ struct TORCH_API Operator {
     Operation op_;
   };
   struct UnparsedFunctionSchema final {
-    std::string schema_string_;
+    const char* schema_string_;
     mutable c10::optional<c10::AliasAnalysisKind> alias_analysis_;
   };
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -78,21 +78,21 @@ struct TORCH_API Operator {
             C10Operator{opHandle, std::move(operation)})) {}
 
   Operator(
-      std::string schema,
+      const char* schema,
       Operation op,
       c10::AliasAnalysisKind alias_analysis)
       : op_(c10::make_right<C10Operator, JitOnlyOperator>(JitOnlyOperator{
             c10::make_right<FunctionSchema, UnparsedFunctionSchema>(
-                UnparsedFunctionSchema{std::move(schema), alias_analysis}),
+                UnparsedFunctionSchema{schema, alias_analysis}),
             c10::make_left<Operation, OperationCreator>(std::move(op))})) {}
 
   Operator(
-      std::string schema,
+      const char* schema,
       OperationCreator op_creator,
       c10::AliasAnalysisKind alias_analysis)
       : op_(c10::make_right<C10Operator, JitOnlyOperator>(JitOnlyOperator{
             c10::make_right<FunctionSchema, UnparsedFunctionSchema>(
-                UnparsedFunctionSchema{std::move(schema), alias_analysis}),
+                UnparsedFunctionSchema{schema, alias_analysis}),
             c10::make_right<Operation, OperationCreator>(op_creator)})) {}
 
   // Helper constructor to register `op` to run
@@ -223,8 +223,8 @@ c10::optional<Operator> OperatorGenerator(
     torch::detail::SelectiveStr<true> schema_str,
     Func&& op,
     AliasAnalysisKind alias_analysis) {
-  return c10::optional<Operator>(Operator(
-      std::string(schema_str), std::forward<Func>(op), alias_analysis));
+  return c10::optional<Operator>(
+      Operator(schema_str, std::forward<Func>(op), alias_analysis));
 }
 
 template <typename Func>
