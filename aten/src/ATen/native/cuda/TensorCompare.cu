@@ -29,7 +29,7 @@ void where_kernel_impl(TensorIterator &iter, ScalarType condition_type) {
   });
 }
 
-void isposinf_kernel_impl(TensorIterator &iter) {
+void isposinf_kernel_impl(TensorIteratorBase &iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.input_dtype(), "isposinf_cuda", [&]() {
     gpu_kernel(
       iter,
@@ -38,7 +38,7 @@ void isposinf_kernel_impl(TensorIterator &iter) {
   });
 }
 
-void isneginf_kernel_impl(TensorIterator &iter) {
+void isneginf_kernel_impl(TensorIteratorBase &iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.input_dtype(), "isneginf_cuda", [&]() {
     gpu_kernel(
       iter,
