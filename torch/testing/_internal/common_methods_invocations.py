@@ -178,9 +178,9 @@ class AliasInfo(object):
     torch.absolute, torch.Tensor.absolute, torch.Tensor.absolute_
     """
 
-    def __init__(self, alias_name, alias_op=None):
+    def __init__(self, alias_name):
         self.name = alias_name
-        self.op = alias_op if alias_op else _getattr_qual(torch, alias_name)
+        self.op = _getattr_qual(torch, alias_name)
         self.method_variant = getattr(torch.Tensor, alias_name, None)
         self.inplace_variant = getattr(torch.Tensor, alias_name + "_", None)
 
@@ -7055,7 +7055,7 @@ op_db: List[OpInfo] = [
                        # def the_method(i0):
                        #     return torch.polygamma(i0, 1)
                        #            ~~~~~~~~~~~~~~~ <--- HERE
-                       SkipInfo('TestCommon', 'test_variant_consistency_jit'),
+                       SkipInfo('TestJit', 'test_variant_consistency_jit'),
                        SkipInfo('TestCommon', 'test_jit_alias_remapping'),),
                    sample_kwargs=lambda device, dtype, input: ({'n': 0}, {'n': 0})),
     UnaryUfuncInfo('polygamma',
