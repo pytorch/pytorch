@@ -432,12 +432,13 @@ class ZeroRedundancyOptimizer(Optimizer):
         """
         handles = []
         if self.parameters_as_bucket_view:
-            for rank, bucket in enumerate(self._buckets):
-                global_rank = _get_global_rank(self.process_group, rank)
-                handles.append(
-                    dist.broadcast(tensor=bucket, src=global_rank,
-                                   group=self.process_group, async_op=True)
-                )
+            for dev_i_buckets in self._buckets:
+                for rank, bucket in enumerate(dev_i_buckets):
+                    global_rank = _get_global_rank(self.process_group, rank)
+                    handles.append(
+                        dist.broadcast(tensor=bucket, src=global_rank,
+                                       group=self.process_group, async_op=True)
+                    )
         else:
             for rank, param_groups in enumerate(self._partition_parameters()):
                 global_rank = _get_global_rank(self.process_group, rank)
