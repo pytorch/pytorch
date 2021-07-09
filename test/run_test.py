@@ -452,9 +452,8 @@ def run_test(test_module, test_directory, options, launcher_cmd=None, extra_unit
     # If using pytest, replace -f with equivalent -x
     if options.pytest:
         unittest_args = [arg if arg != '-f' else '-x' for arg in unittest_args]
-
-    if IS_IN_CI:
-        # use the downloaded test cases configuration
+    elif IS_IN_CI:
+        # use the downloaded test cases configuration, not supported in pytest
         unittest_args.extend(['--import-slow-tests', '--import-disabled-tests'])
 
     # Multiprocessing related tests cannot run with coverage.
