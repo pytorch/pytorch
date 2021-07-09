@@ -332,6 +332,7 @@ class ConcatExpander {
       TORCH_INTERNAL_ASSERT(cat_inp_tensor_type);
       TORCH_INTERNAL_ASSERT(cat_inp_tensor_type->dim());
       auto cat_inp_tensortype_sizes = cat_inp_tensor_type->sizes();
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       int end_idx = start_idx + *cat_inp_tensortype_sizes[cat_dim_value];
       auto end = graph_->insertConstant(end_idx);
 
@@ -521,29 +522,15 @@ class VariadicCatUpdater {
     }
   }
 
-  bool isListMutatedBeforeCat(Node* list, Node* cat) {
-    // For every use u of list, if u mutates list and u could be moved before
-    // cat, then it implies that there is a path in which the mutation appears
-    // before cat.
-    auto list_uses = list->output()->uses();
-    auto aliasDb = getOrCreateAliasDb();
-    for (auto use : list_uses) {
-      if (aliasDb->isMutable(use.user)) {
-        if (aliasDb->couldMoveBeforeTopologically(use.user, cat)) {
-          return true;
-        }
-      }
-    }
-    return false;
-  }
-
   bool replaceWithVariadicCat(Node* cat) {
     if (cat->input(0)->node()->kind() != prim::ListConstruct) {
       return false;
     }
     auto list = cat->input(0)->node();
-    // We do not transform cat ops whose list input is mutated before cat.
-    if (isListMutatedBeforeCat(list, cat)) {
+    // We do not transform cat ops whose list input can not be moved to the
+    // position before cat. This in turn implies that there is some mutation
+    // of the input list before cat.
+    if (!getOrCreateAliasDb()->couldMoveBeforeTopologically(list, cat)) {
       return false;
     }
     std::vector<Value*> inputs = list->inputs().vec();
