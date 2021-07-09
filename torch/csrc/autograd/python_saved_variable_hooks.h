@@ -15,15 +15,19 @@ struct TORCH_API PySavedVariableHooks : public SavedVariableHooks {
 
     void call_pack_hook(at::Tensor &tensor) override {
       py::gil_scoped_acquire acquire;
-      // Here, the output of pack_hook_ is a py::object, that we steal using `.release()`
-      // so we don't need to increment the ref count.
-      data_ = pack_hook_(py::reinterpret_steal<py::object>(THPVariable_Wrap(tensor))).release().ptr();
+      auto wrapped = THPVariable_Wrap(tensor); // here, we own the reference
+      py::object obj = py::reinterpret_steal<py::object>(wrapped); // obj steals the reference
+      py::object packed = pack_hook_(obj); // packed is a new object with a reference
+      data_ = packed.release().ptr(); // steals the reference
+      // obj is decrefed on exit, but we will manually decref data_ when the saved variable is released
     }
 
     at::Tensor call_unpack_hook() override {
       py::gil_scoped_acquire acquire;
-      auto res = unpack_hook_(py::cast<py::object>(data_));
-      return THPVariable_Unpack(res.ptr());
+      py::object obj = py::cast<py::object>(data_); // copies the content of data_
+      py::object res = unpack_hook_(obj); // new object, comes with a reference
+      return THPVariable_Unpack(res.ptr()); // borrows from res, we only need the argument as long as res is alive
+      // obj and res are decrefed on exit
     }
 
     ~PySavedVariableHooks() override {
