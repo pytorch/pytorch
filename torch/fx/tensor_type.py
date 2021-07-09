@@ -39,6 +39,9 @@ class _DynType:
     def __str__(self):
         return "Dyn"
 
+    def __repr__(self):
+        return "Dyn"
+
 
 Dyn = _DynType()
 
