@@ -143,7 +143,7 @@ TORCH_CUDA_CPP_API void gather(
     at::Tensor& outputs,
     ncclComm_t comm,
     at::cuda::CUDAStream& stream,
-    int32_t root = 0); 
+    int32_t root = 0);
 
 TORCH_CUDA_CPP_API void all2all_single_equal_split(
     at::Tensor& input,
