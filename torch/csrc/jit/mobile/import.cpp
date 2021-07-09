@@ -587,7 +587,7 @@ c10::IValue BytecodeDeserializer::readArchive(
 mobile::Module _load_for_mobile_impl(
     std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device,
-    ExtraFilesMap& extra_files,
+    ExtraFilesMap& extra_info,
     uint64_t module_load_options);
 
 mobile::Module _load_for_mobile(
@@ -652,7 +652,7 @@ mobile::Module _load_for_mobile(
 mobile::Module _load_for_mobile_impl(
     std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device,
-    ExtraFilesMap& extra_files,
+    ExtraFilesMap& extra_info,
     uint64_t module_load_options) {
   auto observer = torch::observerConfig().getModuleObserver();
   // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
@@ -676,15 +676,21 @@ mobile::Module _load_for_mobile_impl(
   });
 
   try {
-    mobile::Module result = deserializer.deserialize(device, extra_files);
-    std::unordered_map<std::string, std::string> copied_metadata =
-        result.metadata();
-    if (result.metadata().find("model_name") == result.metadata().end()) {
-      copied_metadata["model_name"] = result.name();
-    }
-    copied_metadata["model_size"] = c10::guts::to_string(model_size);
+    mobile::Module result = deserializer.deserialize(device, extra_info);
     if (observer) {
-      observer->onExitLoadModel(instance_key, copied_metadata);
+      // Add mobile_info.json and producer_info.json to ExtraFilesMap
+      auto extraFileList = observer->getExtraFile();
+      for (auto i : extraFileList) {
+        extra_info.insert(std::make_pair(i, ""));
+      }
+      // Deserialize mobile_info.json and producer_info.json
+      result = deserializer.deserialize(device, extra_info);
+      // If mobile_info.json does not contain model name
+      // result.name() will be logged
+      extra_info.insert(std::make_pair("model_name", result.name()));
+      extra_info.insert(
+          std::make_pair("model_size", c10::guts::to_string(model_size)));
+      observer->onExitLoadModel(instance_key, extra_info);
     }
     guard.release();
     return result;
