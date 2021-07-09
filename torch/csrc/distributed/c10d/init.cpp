@@ -368,7 +368,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
       .def(
           "_get_zeros_like_grad_buckets",
           [](::c10d::Reducer& reducer) {
-              return reducer.get_grad_buckets(/* return_zero_tensors */ true);
+            return reducer.get_grad_buckets(/* return_zero_tensors */ true);
           },
           py::call_guard<py::gil_scoped_release>())
       .def(
@@ -415,11 +415,10 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
             std::weak_ptr<::c10d::Logger> logger_weakref = logger;
             reducer.set_logger(logger_weakref);
           })
-       .def(
-           "_static_graph_first_bwd",
-           &::c10d::Reducer::static_graph_first_bwd,
-           py::call_guard<py::gil_scoped_release>()
-       );
+      .def(
+          "_static_graph_first_bwd",
+          &::c10d::Reducer::static_graph_first_bwd,
+          py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<::c10d::Logger>(module, "Logger")
       .def(
@@ -441,7 +440,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
       .def(
           "set_error_and_log",
           [](::c10d::Logger& logger, const std::string& error) {
-              logger.set_error_and_log(error);
+            logger.set_error_and_log(error);
           },
           py::call_guard<py::gil_scoped_release>())
       .def(
@@ -823,9 +822,10 @@ Example::
     >>> store2.get("first_key")
 
       )")
-      .def(py::init<const std::string&, int>(),
-           py::arg("file_name"),
-           py::arg("world_size") = -1)
+      .def(
+          py::init<const std::string&, int>(),
+          py::arg("file_name"),
+          py::arg("world_size") = -1)
       .def_property_readonly(
           "path",
           &::c10d::FileStore::getPath,
@@ -1343,10 +1343,10 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           py::call_guard<py::gil_scoped_release>())
       .def_property_readonly("options", &::c10d::ProcessGroupGloo::getOptions);
 
-    // ProcessGroupWrapper is a wrapper pg that includes a helper gloo process
-    // group. It can be used to validate collective calls across processes by
-    // checking the op type and input tensor shapes.
-    auto processGroupWrapper =
+  // ProcessGroupWrapper is a wrapper pg that includes a helper gloo process
+  // group. It can be used to validate collective calls across processes by
+  // checking the op type and input tensor shapes.
+  auto processGroupWrapper =
       intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupWrapper>(
           module, "_ProcessGroupWrapper", processGroup)
           .def(
@@ -1481,7 +1481,7 @@ Example::
       .def(
           "get_future",
           [](::c10d::ProcessGroup::Work& work)
-            -> std::shared_ptr<jit::PythonFutureWrapper> {
+              -> std::shared_ptr<jit::PythonFutureWrapper> {
             return std::make_shared<jit::PythonFutureWrapper>(work.getFuture());
           },
           R"(
@@ -1493,14 +1493,13 @@ Example::
             Example::
                 Below is an example of a simple allreduce DDP communication hook that uses
                 ``get_future` API to retrieve a Future associated with the completion of
-                ``allreduce`` work.
+                ``allreduce``.
 
-                >>> def allreduce(state: object, bucket: dist.GradBucket): -> torch._C.Future
-                >>>     tensors = [t / process_group.world_size for t in bucket.get_tensors()]
-                >>>     work = process_group.allreduce(tensors)
-                >>>     return work.get_future()
-
-                >>> ddp_model._egister_comm_hook(state = None, hook = allreduce)
+                >>> def allreduce(process_group: dist.ProcessGroup, bucket: dist.GradBucket): -> torch.futures.Future
+                >>>     group_to_use = process_group if process_group is not None else torch.distributed.group.WORLD
+                >>>     tensor = bucket.get_tensor().div_(group_to_use.size())
+                >>>     return torch.distributed.all_reduce(tensor, group=group_to_use, async_op=True).get_future()
+                >>> ddp_model.register_comm_hook(state=None, hook=allreduce)
 
             .. warning ::
                 ``get_future`` API supports NCCL, and partially GLOO and MPI backends
@@ -1629,7 +1628,7 @@ Example::
 
 #undef PROCESS_GROUP_DEPRECATION_WARNING
 
-}
+} // namespace
 
 // c10d methods on torch._C
 static PyMethodDef methods[] = { // NOLINT
