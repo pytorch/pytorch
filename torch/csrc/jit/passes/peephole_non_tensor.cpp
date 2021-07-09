@@ -40,6 +40,7 @@ bool tryReduceArith(Node& node);
 /**
  * Remove a mul/floordiv node if it is multiplication or division by 1.
  *
+ * @pre node is either aten::mul or aten::floordiv
  * @return true only if the input IR node is successfully replaced.
  */
 bool tryReduceMulAndDiv(Node& node) {
@@ -60,13 +61,15 @@ bool tryReduceMulAndDiv(Node& node) {
 }
 
 /**
- * Merge an add/sub node with its users. If there exists a mul/floordiv node by 1,
- * we firstly run tryReduceMulAndDiv() to bring all subsequent IR nodes as
+ * Merge an add/sub node with its users. If there exists a mul/floordiv node by
+ * 1, we firstly run tryReduceMulAndDiv() to bring all subsequent IR nodes as
  * direct IR user node. If all updated user nodes are add/sub node with
  * constants, we will merge the constant parts together, and replace all uses of
  * the input node.
  *
- * @return true only if the input IR node is successfully replaced with its parent.
+ * @pre node is either aten::add or aten::sub
+ * @return true only if the input IR node is successfully replaced with its
+ * parent.
  */
 bool tryReduceAddAndSub(Node& node) {
   auto constant = normalizeArithNode(node);
@@ -78,7 +81,6 @@ bool tryReduceAddAndSub(Node& node) {
     node.output()->replaceAllUsesWith(node.inputs().at(0));
     return true;
   }
-
 
   std::vector<Node*> mulAndDivToRemove;
   for (const auto& u : node.output()->uses()) {
@@ -108,7 +110,7 @@ bool tryReduceAddAndSub(Node& node) {
     }
   }
 
-  for (const auto& u: addAndSubToMerge) {
+  for (const auto& u : addAndSubToMerge) {
     WithInsertPoint g(&node);
     auto user = u.first;
     auto delta = user->kind() == node.kind() ? *constant : -*constant;
@@ -129,7 +131,7 @@ bool tryReduceArith(Node& node) {
   }
 }
 
-}
+} // namespace
 
 struct PeepholeOptimizeNonTensorImpl {
   // NOLINTNEXTLINE(modernize-pass-by-value)
