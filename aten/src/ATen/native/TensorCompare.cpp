@@ -58,6 +58,7 @@ TORCH_META_FUNC(isneginf) (const Tensor& self) {
   TORCH_CHECK(maybe_get_output().defined() ? maybe_get_output().dtype() == at::kBool : true,
               "isneginf does not support non-boolean outputs.");
   build_unary_force_boolean_op(maybe_get_output(), self);
+}
 
 void check_minmax_for_meta(
     impl::MetaBase& meta,
