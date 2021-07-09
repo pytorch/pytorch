@@ -368,7 +368,7 @@ def adaptiveavgpool2d_check(tensor_type, module_instance):
         if output_size[0] is None:
             output_size[0] = output_size[1]
         if output_size[1] is None:
-            output_size[1] == output_size[0]
+            output_size[1] = output_size[0]
 
     new_type_list = list(tensor_type.__args__)
 
