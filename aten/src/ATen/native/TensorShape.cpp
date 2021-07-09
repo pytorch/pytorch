@@ -1040,17 +1040,18 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
     return at::_mkldnn_reshape(self, shape);
   }
 
-  auto stride =
-      at::detail::computeStride(self.sizes(), self.strides(), shape);
-    // `computeStride` returns the proper strides to use if this
-    // `reshape` can be just a view.
-    //
-    // NB: Even though we have viewable geometry and the target strides here,
-    //     we do not just call `as_strided` on `self` because the backward
-    //     for `as_strided` is not as efficient as that of `view` (since the
-    //     former is meant to handle general cases).
+  auto stride = at::detail::computeStride(self.sizes(), self.strides(), shape);
+  // `computeStride` returns the proper strides to use if this
+  // `reshape` can be just a view.
+  //
+  // NB: Even though we have viewable geometry and the target strides here,
+  //     we do not just call `as_strided` on `self` because the backward
+  //     for `as_strided` is not as efficient as that of `view` (since the
+  //     former is meant to handle general cases).
   if (stride.has_value()) {
-    return self.view(shape);
+    // Instead of delegating to .view() which repeats some of the above work
+    // directly return an alias.
+    return alias_with_sizes_and_strides(self, shape, *stride);
   }
   return at::_unsafe_view(self.clone(at::MemoryFormat::Contiguous), shape);
 }
