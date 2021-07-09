@@ -601,6 +601,11 @@ class DeviceCachingAllocator {
 
     block->allocated = false;
 
+    // following logic might modifying underlaying Block, causing the size
+    // changed. We store ahead for reporting
+    auto orig_block_ptr = block->ptr;
+    auto orig_block_size = block->size;
+
     StatTypes stat_types;
     stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
     stat_types[static_cast<size_t>(get_stat_type_for_pool(*(block->pool)))] =
@@ -625,8 +630,8 @@ class DeviceCachingAllocator {
     }
 
     c10::reportMemoryUsageToProfiler(
-        block->ptr,
-        block->size,
+        orig_block_ptr,
+        -orig_block_size,
         stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
         stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
         c10::Device(c10::DeviceType::CUDA, block->device));
