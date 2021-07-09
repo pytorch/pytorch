@@ -371,8 +371,6 @@ static void upsample_bilinear2d_backward_out_cuda_template(
 
   const auto memory_format = grad_output_.suggest_memory_format();
 
-  Tensor grad_output = grad_output_.contiguous(memory_format);
-
   // initialization to zero is required here. As we launch one thread per output
   // element, and atomicAdd to input gradient. Given a sparse sampling case, our
   // threads are not covering the whole input tensor.
@@ -383,15 +381,17 @@ static void upsample_bilinear2d_backward_out_cuda_template(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-  if (grad_output.sizes() == grad_input.sizes()) {
-    grad_input.copy_(grad_output);
+  if (grad_output_.sizes() == grad_input.sizes()) {
+    grad_input.copy_(grad_output_);
     return;
   }
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad_output.scalar_type(), "upsample_bilinear2d_backward_out_frame", [&] {
-    if (memory_format == at::MemoryFormat::ChannelsLast && \
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad_output_.scalar_type(), "upsample_bilinear2d_backward_out_frame", [&] {
+    if (memory_format == at::MemoryFormat::ChannelsLast && channels >= 4 && \
           grad_input.is_contiguous(memory_format)) {
       using accscalar_t = at::acc_type<scalar_t, true>;
+
+      Tensor grad_output = grad_output_.contiguous(at::MemoryFormat::ChannelsLast);
 
       auto idata = grad_input.data_ptr<scalar_t>();
       auto odata = grad_output.data_ptr<scalar_t>();
@@ -421,7 +421,8 @@ static void upsample_bilinear2d_backward_out_cuda_template(
       using accscalar_t = at::acc_type<scalar_t, true>;
 
       // This is needed for non-contiguous tensors.
-      auto grad_input_c = grad_input.is_contiguous() ? grad_input : at::empty(grad_input.sizes(), grad_input.options());
+      Tensor grad_input_c = grad_input.is_contiguous() ? grad_input : at::zeros(grad_input.sizes(), grad_input.options());
+      Tensor grad_output = grad_output_.contiguous();
 
       auto idata = grad_input_c.data_ptr<scalar_t>();
       auto odata = grad_output.data_ptr<scalar_t>();

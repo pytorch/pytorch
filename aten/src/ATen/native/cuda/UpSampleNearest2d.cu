@@ -251,8 +251,7 @@ static void upsample_nearest2d_out_cuda_template(
   }
   else {
     // This is needed for non-contiguous tensors.
-    auto output_c = output.is_contiguous() ? output : at::empty(output.sizes(), output.options());
-
+    Tensor output_c = output.is_contiguous() ? output : at::empty(output.sizes(), output.options());
     Tensor input = input_.contiguous();
 
     int nc = nbatch * channels;
@@ -347,7 +346,7 @@ static void upsample_nearest2d_backward_out_cuda_template(
     return;
   }
 
-  if (memory_format == at::MemoryFormat::ChannelsLast && \
+  if (memory_format == at::MemoryFormat::ChannelsLast && channels >= 4 && \
         grad_input.is_contiguous(memory_format)) {
     Tensor grad_output = grad_output_.contiguous(at::MemoryFormat::ChannelsLast);
 
@@ -381,10 +380,9 @@ static void upsample_nearest2d_backward_out_cuda_template(
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     });
   } else {
-    Tensor grad_output = grad_output_.contiguous();
-
     // This is needed for non-contiguous tensors.
-    auto grad_input_c = grad_input.is_contiguous() ? grad_input : at::empty(grad_input.sizes(), grad_input.options());
+    Tensor grad_input_c = grad_input.is_contiguous() ? grad_input : at::empty(grad_input.sizes(), grad_input.options());
+    Tensor grad_output = grad_output_.contiguous();
 
     // upsample_nearest2d meta call makes sure `nbatch != 0`
     unsigned int n = grad_input.numel() / nbatch;
