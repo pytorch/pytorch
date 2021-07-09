@@ -1,22 +1,18 @@
 import torch
 import torch.utils.bundled_inputs
 import io
-from typing import Dict, List, NamedTuple, Type
+from typing import Dict, List, NamedTuple
 from collections import namedtuple
 import inspect
 
 from torch.jit.mobile import _load_for_lite_interpreter, _export_operator_list
 from torch.testing._internal.common_utils import TestCase, run_tests
-from torch.testing._internal.common_quantized import (
-    override_quantized_engine,
-)
 from torch.testing._internal.common_quantization import (
     AnnotatedSingleLayerLinearModel,
     TwoLayerLinearModel,
     AnnotatedNestedModel
 )
-from torch.quantization import quantize
-from torch.testing._internal.common_quantization import QuantizationTestCase, test_only_eval_fn
+from torch.testing._internal.common_quantization import QuantizationLiteTestCase
 
 class TestLiteScriptModule(TestCase):
 
@@ -442,49 +438,7 @@ class TestLiteScriptModule(TestCase):
         self.assertTrue('top(FooTest5)' in error_message)
 
 
-class TestLiteScriptQuantizedModule(QuantizationTestCase):
-
-    def _create_quantized_model(self, model_class: Type[torch.nn.Module], **kwargs):
-        qengine = "qnnpack"
-        with override_quantized_engine(qengine):
-            qconfig = torch.quantization.get_default_qconfig(qengine)
-            model = model_class(**kwargs)
-            model = quantize(model, test_only_eval_fn, [self.calib_data])
-
-        return model
-
-    def _compare_script_and_mobile(self,
-                                   model: torch.nn.Module,
-                                   input: torch.Tensor):
-        qengine = "qnnpack"
-        with override_quantized_engine(qengine):
-            script_module = torch.jit.script(model)
-            script_module_result = script_module(input)
-
-            max_retry = 5
-            for retry in range(1, max_retry + 1):
-                # retires `max_retry` times; breaks iff succeeds else throws exception
-                try:
-                    buffer = io.BytesIO(script_module._save_to_buffer_for_lite_interpreter())
-                    buffer.seek(0)
-                    mobile_module = _load_for_lite_interpreter(buffer)
-
-                    mobile_module_result = mobile_module(input)
-
-                    torch.testing.assert_allclose(script_module_result, mobile_module_result)
-                    mobile_module_forward_result = mobile_module.forward(input)
-                    torch.testing.assert_allclose(script_module_result, mobile_module_forward_result)
-
-                    mobile_module_run_method_result = mobile_module.run_method("forward", input)
-                    torch.testing.assert_allclose(script_module_result, mobile_module_run_method_result)
-                except AssertionError as e:
-                    if retry == max_retry:
-                        raise e
-                    else:
-                        continue
-                break
-
-
+class TestLiteScriptQuantizedModule(QuantizationLiteTestCase):
 
     def test_single_layer(self):
         input = torch.rand(2, 5, dtype=torch.float)
