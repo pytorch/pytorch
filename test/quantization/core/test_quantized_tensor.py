@@ -162,9 +162,9 @@ class TestQuantizedTensor(TestCase):
             # slicing and int_repr
             int_repr = qr.int_repr()
             for num in int_repr:
-                self.assertEqual(num, 3)
+                self.assertEqual(num.item(), 3)
             for num in qr[2:].int_repr():
-                self.assertEqual(num, 3)
+                self.assertEqual(num.item(), 3)
             # dequantize
             rqr = qr.dequantize()
             for i in range(num_elements):
@@ -195,7 +195,7 @@ class TestQuantizedTensor(TestCase):
 
             int_repr = qr.int_repr()
             for num in int_repr[0:5]:
-                self.assertEqual(num, 51)  # Packed entries, each of value 3, i.e. 00110011
+                self.assertEqual(num.item(), 51)  # Packed entries, each of value 3, i.e. 00110011
 
             # Test tensor creation
             q = torch._empty_affine_quantized([num_elements], scale=scale, zero_point=zero_point,
@@ -999,8 +999,8 @@ class TestQuantizedTensor(TestCase):
             x = torch.randn(64, dtype=torch.float)
             y = torch.choose_qparams_optimized(x, numel=64, n_bins=200, ratio=0.16, bit_width=bit_width)
             ref = param_search_greedy(x.numpy(), bit_rate=bit_width)
-            self.assertEqual(y[0].numpy(), ref[0])
-            self.assertEqual(y[1].numpy(), ref[1])
+            self.assertEqual(y[0].item(), ref[0])
+            self.assertEqual(y[1].item(), ref[1])
 
     def _test_pickle_checkpoint_qtensor(self, device):
         with TemporaryFileName() as fname:
