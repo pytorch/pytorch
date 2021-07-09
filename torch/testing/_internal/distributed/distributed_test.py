@@ -7076,7 +7076,7 @@ class DistributedTest:
             ).cuda()
             local_syncbn_model = copy.deepcopy(syncbn_model)
             syncbn_model = torch.nn.parallel.DistributedDataParallel(
-                local_syncbn_model,
+                syncbn_model,
                 device_ids=[rank]
             )
             inp = torch.randn(10, 2, device=rank)
@@ -7095,7 +7095,7 @@ class DistributedTest:
                                 test_local_model(test_inp)
                             )
 
-                    model.eval()
+                    test_model.eval()
                     for _ in range(6):
                         self.assertEqual(
                             test_model(test_inp),
