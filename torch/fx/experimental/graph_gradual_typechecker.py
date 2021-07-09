@@ -243,7 +243,8 @@ def get_greatest_upper_bound(type1, type2):
     elif type2 == Dyn:
         return type1
     elif isinstance(type1, TensorType) and isinstance(type2, TensorType):
-        assert is_consistent(type1, type2)
+        if not is_consistent(type1, type2):
+            raise TypeError(f'Inconsistent types {type1}, {type2}')
         gub = [t1 if is_more_precise(t1, t2) else t2 for (t1, t2) in zip(type1.__args__, type2.__args__)]
         return TensorType(tuple(gub))
 
@@ -312,12 +313,17 @@ def maxpool2d_inference_rule(n: Node, module_instance):
     - Current node type is consistent with the output type we will calculate
     - Input size matches output size and the last two dimensions of the output
       are w_out and h_out. The remaining dimensions are the same as the input
-    - Our final result is the greatest lower bound of the output we calculate
+    - Our final result is the greatest upper bound of the output we calculate
       and the current node type.
     """
     assert isinstance(n.args[0], Node)
-    n.type = get_greatest_upper_bound(maxpool2d_check(n.args[0].type, module_instance), n.type)
+
+    if n.args[0].type == Dyn and isinstance(n.type, TensorType):
+        n.args[0].type = expand_to_tensor_dim(n.args[0].type, len(n.type.__args__))
+    if isinstance(n.args[0].type, TensorType):
+        n.type = get_greatest_upper_bound(maxpool2d_check(n.args[0].type, module_instance), n.type)
     return n.type
+
 
 
 def linear_check(tensor_type, module_instance):
