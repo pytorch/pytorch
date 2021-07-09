@@ -10,22 +10,22 @@ from typing import List
 # clang-tidy to output a warning with the actual token count of the file.
 #
 # A non-destructive way to set the max token count to 1 would be to pass it
-# through the -fmax-tokens option. However, this flag will be overriden if here
+# through the -fmax-tokens option. However, this flag will be overridden if here
 # exists a #pragma max_tokens_total statement in the file. This necessitates a
 # destructive way to set the max token count to 1.
 DEFAULT_MAX_TOKEN_COUNT = 1
 MAX_TOKENS_CHECK_DIAG_NAME = "misc-max-tokens"
-MAX_TOKENS_PRAGMA_PATERN = r"^#pragma\s+clang\s+max_tokens_total\s+(\d+)$"
+MAX_TOKENS_PRAGMA_PATTERN = r"^#pragma\s+clang\s+max_tokens_total\s+(\d+)$"
 
 
 def add_max_tokens_pragma(code: str, num_max_tokens: int) -> str:
-    lines = code.split("\n")
+    lines = code.splitlines()
 
     found_pragma = False
     pragma = f"#pragma clang max_tokens_total {num_max_tokens}"
 
     for idx, line in enumerate(lines):
-        match = re.match(MAX_TOKENS_PRAGMA_PATERN, line.strip())
+        match = re.match(MAX_TOKENS_PRAGMA_PATTERN, line.strip())
         if match:
             found_pragma = True
             token_count = match.group(1)
@@ -39,11 +39,11 @@ def add_max_tokens_pragma(code: str, num_max_tokens: int) -> str:
 
 
 def strip_max_tokens_pragmas(code: str) -> str:
-    lines = code.split("\n")
+    lines = code.splitlines()
     lines = [
         line
         for line in lines
-        if re.match(MAX_TOKENS_PRAGMA_PATERN, line.strip()) is None
+        if re.match(MAX_TOKENS_PRAGMA_PATTERN, line.strip()) is None
     ]
     return "\n".join(lines)
 
@@ -85,7 +85,7 @@ def parse_args() -> argparse.Namespace:
         "files", nargs="+", help="Add max_tokens_total pragmas to the specified files"
     )
     parser.add_argument(
-        "-i", "--ignores", nargs="+", default=[], help="Ignore the specified files"
+        "-i", "--ignore", nargs="+", default=[], help="Ignore the specified files"
     )
     parser.add_argument(
         "-s",
@@ -99,8 +99,8 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     options = parse_args()
 
-    ignores = set(options.ignores)
-    files = [filename for filename in options.files if filename not in ignores]
+    ignored = set(options.ignore)
+    files = [filename for filename in options.files if filename not in ignored]
     if options.strip:
         strip_max_tokens_pragma_from_files(files)
     else:

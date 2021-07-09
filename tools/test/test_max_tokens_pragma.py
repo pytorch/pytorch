@@ -6,8 +6,8 @@ from tools.linter.clang_tidy.max_tokens_pragma import (
 
 
 def compare_code(a: str, b: str) -> bool:
-    a_lines = [line.strip() for line in a.split("\n")]
-    b_lines = [line.strip() for line in b.split("\n")]
+    a_lines = [line.strip() for line in a.splitlines()]
+    b_lines = [line.strip() for line in b.splitlines()]
     return a_lines == b_lines
 
 
