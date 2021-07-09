@@ -174,6 +174,12 @@ jobs:
               export RUN_SMOKE_TESTS_ONLY=1
             fi
             .jenkins/pytorch/win-test.sh
+      - name: Zip test reports for upload
+        if: always()
+        shell: powershell
+        run: |
+          # -ir => recursive include all files in pattern
+          7z a "test-reports-$Env:TEST_CONFIG.zip" -ir'!test\*.xml'
       - uses: actions/upload-artifact@v2
         name: Store PyTorch Test Reports
         if: always()
@@ -182,7 +188,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            test/**/*.xml
+            test-reports-*.zip
 
   # this is a separate step from test because the log files from test are too
   # long: basically, GitHub tries to render all of the log files when you click
@@ -203,13 +209,16 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
-          # deep clone, to allow tools/print_test_stats.py to use Git commands
+          # deep clone, to allow tools/stats/print_test_stats.py to use Git commands
           fetch-depth: 0
       - uses: actions/download-artifact@v2
         name: Download PyTorch Test Reports
         with:
           name: test-reports
-          path: test/test-reports
+          path: .
+      - name: Unzip test reports
+        run: |
+          unzip -o 'test-reports-*.zip'
       - uses: actions/setup-python@v2
         with:
           python-version: 3.9
@@ -226,7 +235,7 @@ jobs:
         run: .github/scripts/parse_ref.py
       - name: Display and upload test statistics (Click Me)
         # temporary hack: set CIRCLE_* vars, until we update
-        # tools/print_test_stats.py to natively support GitHub Actions
+        # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_ACCESS_KEY_ID }}
@@ -239,4 +248,4 @@ jobs:
           CIRCLE_WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         run: |
           export PYTHONPATH=$PWD
-          python tools/print_test_stats.py --upload-to-s3 --compare-with-s3 test
+          python tools/stats/print_test_stats.py --upload-to-s3 --compare-with-s3 test
