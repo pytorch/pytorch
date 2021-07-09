@@ -358,7 +358,7 @@ class PackageExporter:
 
             for dep in deps:
                 self.dependency_graph.add_edge(module_name, dep)
-                self.require_module_if_not_provided(dep)
+                self.add_dependency(dep)
 
     def _write_source_string(
         self,
@@ -407,7 +407,10 @@ class PackageExporter:
 
         return "".join(result)
 
-    def require_module_if_not_provided(self, module_name: str, dependencies=True):
+    def add_dependency(self, module_name: str, dependencies=True):
+        """Given a module, add it to the dependency graph according to patterns
+        specified by the user.
+        """
         if (
             module_name in self.dependency_graph
             and self.dependency_graph.nodes[module_name].get("provided") is True
@@ -436,7 +439,7 @@ class PackageExporter:
                 # If we are interning this module, we need to retrieve its
                 # dependencies and package those as well.
                 if pattern_info.action == _ModuleProviderAction.INTERN:
-                    self._add_module_to_dependency_graph(module_name, dependencies)
+                    self._intern_module(module_name, dependencies)
                 return
 
         # No patterns have matched. Explicitly add this as an error.
@@ -459,15 +462,19 @@ class PackageExporter:
             )
 
         self.dependency_graph.add_node(
-            module_name, provided=True, action=_ModuleProviderAction.INTERN
+            module_name,
+            provided=True,
         )
-        self._add_module_to_dependency_graph(module_name, dependencies)
+        self._intern_module(module_name, dependencies)
 
-    def _add_module_to_dependency_graph(
+    def _intern_module(
         self,
         module_name: str,
         dependencies: bool,
     ):
+        """Adds the module to the dependency graph as an interned module,
+        along with any metadata needed to write it out to the zipfile at serialization time.
+        """
         module_obj = self._import_module(module_name)
 
         # Find dependencies of this module and require them as well.
@@ -487,6 +494,7 @@ class PackageExporter:
                 error_context = f"filename: {filename}"
             self.dependency_graph.add_node(
                 module_name,
+                action=_ModuleProviderAction.INTERN,
                 is_package=is_package,
                 error=packaging_error,
                 error_context=error_context,
@@ -494,14 +502,18 @@ class PackageExporter:
             return
 
         self.dependency_graph.add_node(
-            module_name, is_package=is_package, source=source, provided=True
+            module_name,
+            action=_ModuleProviderAction.INTERN,
+            is_package=is_package,
+            source=source,
+            provided=True,
         )
 
         if dependencies:
             deps = self._get_dependencies(source, module_name, is_package)
             for dep in deps:
                 self.dependency_graph.add_edge(module_name, dep)
-                self.require_module_if_not_provided(dep)
+                self.add_dependency(dep)
 
     def save_pickle(
         self, package: str, resource: str, obj: Any, dependencies: bool = True
@@ -549,7 +561,7 @@ class PackageExporter:
 
             for module_name in all_dependencies:
                 self.dependency_graph.add_edge(name_in_dependency_graph, module_name)
-                self.require_module_if_not_provided(module_name)
+                self.add_dependency(module_name)
 
         self._write(filename, data_value)
 
