@@ -1463,10 +1463,12 @@ void Reducer::finalize_backward() {
         : comm_hook_->parseHookResult(bucket.future_work->value());
     for (const auto i : c10::irange(future_result.size())) {
       auto& replica = bucket.replicas[i];
-      if (comm_hook_ == nullptr) {
-        future_result[i].div_(div_factor_);
-      }
       if (bucket.expect_sparse_gradient) {
+        // If no DDP comm hook is registered,
+        // the allreduce only sums up the value, and a separate division is required.
+        if (comm_hook_ == nullptr) {
+          future_result[i].div_(div_factor_);
+        }
         replica.contents.copy_(future_result[i]);
       } else {
         // Reinitialize only `bucket_views_out` with the future_result by
