@@ -357,7 +357,7 @@ class TestViewOps(TestCase):
 
         if (t.is_complex()):
             v_imag = v.imag
-            self.assertTrue(self.is_view_of(v, v_imag))
+            self.assertTrue(self.is_view_of(t, v_imag))
             self.assertEqual(v_imag, t_numpy_conj.imag)
             self.assertTrue(v_imag.is_neg())
 
