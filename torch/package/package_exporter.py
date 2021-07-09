@@ -48,6 +48,11 @@ class _ModuleProviderAction(Enum):
     EXTERN = 2
     MOCK = 3
     DENY = 4
+    # Special case: when a module is mocked, PackageExporter writes out a
+    # `_mock` module that implements our mocking stubs. If we re-package code,
+    # we may encounter a `_mock` module from the original package. If we do,
+    # just ignore it and write a `_mock` module once.
+    REPACKAGED_MOCK_MODULE = 5
 
 
 class PackagingErrorReason(Enum):
@@ -358,7 +363,7 @@ class PackageExporter:
 
             for dep in deps:
                 self.dependency_graph.add_edge(module_name, dep)
-                self.require_module_if_not_provided(dep)
+                self.add_dependency(dep)
 
     def _write_source_string(
         self,
@@ -407,11 +412,22 @@ class PackageExporter:
 
         return "".join(result)
 
-    def require_module_if_not_provided(self, module_name: str, dependencies=True):
+    def add_dependency(self, module_name: str, dependencies=True):
+        """Given a module, add it to the dependency graph according to patterns
+        specified by the user.
+        """
         if (
             module_name in self.dependency_graph
             and self.dependency_graph.nodes[module_name].get("provided") is True
         ):
+            return
+
+        if module_name == "_mock":
+            self.dependency_graph.add_node(
+                module_name,
+                action=_ModuleProviderAction.REPACKAGED_MOCK_MODULE,
+                provided=True,
+            )
             return
 
         if self._can_implicitly_extern(module_name):
@@ -436,7 +452,7 @@ class PackageExporter:
                 # If we are interning this module, we need to retrieve its
                 # dependencies and package those as well.
                 if pattern_info.action == _ModuleProviderAction.INTERN:
-                    self._add_module_to_dependency_graph(module_name, dependencies)
+                    self._intern_module(module_name, dependencies)
                 return
 
         # No patterns have matched. Explicitly add this as an error.
@@ -459,15 +475,19 @@ class PackageExporter:
             )
 
         self.dependency_graph.add_node(
-            module_name, provided=True, action=_ModuleProviderAction.INTERN
+            module_name,
+            provided=True,
         )
-        self._add_module_to_dependency_graph(module_name, dependencies)
+        self._intern_module(module_name, dependencies)
 
-    def _add_module_to_dependency_graph(
+    def _intern_module(
         self,
         module_name: str,
         dependencies: bool,
     ):
+        """Adds the module to the dependency graph as an interned module,
+        along with any metadata needed to write it out to the zipfile at serialization time.
+        """
         module_obj = self._import_module(module_name)
 
         # Find dependencies of this module and require them as well.
@@ -487,6 +507,7 @@ class PackageExporter:
                 error_context = f"filename: {filename}"
             self.dependency_graph.add_node(
                 module_name,
+                action=_ModuleProviderAction.INTERN,
                 is_package=is_package,
                 error=packaging_error,
                 error_context=error_context,
@@ -494,14 +515,18 @@ class PackageExporter:
             return
 
         self.dependency_graph.add_node(
-            module_name, is_package=is_package, source=source, provided=True
+            module_name,
+            action=_ModuleProviderAction.INTERN,
+            is_package=is_package,
+            source=source,
+            provided=True,
         )
 
         if dependencies:
             deps = self._get_dependencies(source, module_name, is_package)
             for dep in deps:
                 self.dependency_graph.add_edge(module_name, dep)
-                self.require_module_if_not_provided(dep)
+                self.add_dependency(dep)
 
     def save_pickle(
         self, package: str, resource: str, obj: Any, dependencies: bool = True
@@ -549,7 +574,7 @@ class PackageExporter:
 
             for module_name in all_dependencies:
                 self.dependency_graph.add_edge(name_in_dependency_graph, module_name)
-                self.require_module_if_not_provided(module_name)
+                self.add_dependency(module_name)
 
         self._write(filename, data_value)
 
@@ -824,6 +849,11 @@ class PackageExporter:
                     f"Exporter did not match any modules to {pattern}, which was marked as allow_empty=False"
                 )
 
+    def _write_mock_file(self):
+        if "_mock.py" not in self._written_files:
+            mock_file = str(Path(__file__).parent / "_mock.py")
+            self._write_source_string("_mock", _read_file(mock_file), is_package=False)
+
     def _execute_dependency_graph(self):
         """Takes a finalized dependency graph describing how to package all
         modules and executes it, writing to the ZIP archive.
@@ -845,12 +875,7 @@ class PackageExporter:
                 for hook in self._mock_hooks.values():
                     hook(self, module_name)
 
-                if not _mock_written:
-                    mock_file = str(Path(__file__).parent / "_mock.py")
-                    self._write_source_string(
-                        "_mock", _read_file(mock_file), is_package=False
-                    )
-                    _mock_written = True
+                self._write_mock_file()
 
                 is_package = hasattr(self._import_module(module_name), "__path__")
                 self._write_source_string(module_name, _MOCK_IMPL, is_package)
@@ -873,6 +898,9 @@ class PackageExporter:
                 is_package = attrs["is_package"]
                 source = attrs["source"]
                 self._write_source_string(module_name, source, is_package)
+
+            elif action == _ModuleProviderAction.REPACKAGED_MOCK_MODULE:
+                self._write_mock_file()
 
             else:
                 raise AssertionError(
