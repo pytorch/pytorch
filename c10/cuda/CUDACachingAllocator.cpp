@@ -587,7 +587,7 @@ class DeviceCachingAllocator {
       update_stat(stats.oversize_allocations, 1);
 
     c10::reportMemoryUsageToProfiler(
-        block,
+        block->ptr,
         block->size,
         stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
         stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
@@ -625,7 +625,7 @@ class DeviceCachingAllocator {
     }
 
     c10::reportMemoryUsageToProfiler(
-        block,
+        block->ptr,
         block->size,
         stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
         stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
