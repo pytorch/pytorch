@@ -171,7 +171,6 @@ LINUX_WORKFLOWS = [
         build_environment="pytorch-linux-xenial-cuda10.2-cudnn7-py3.6-gcc7",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
-        on_pull_request=True,  # TODO: remove before merging!
         enable_jit_legacy_test=1,
         enable_multigpu_test=1,
         enable_nogpu_no_avx_test=1,
