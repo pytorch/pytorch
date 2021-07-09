@@ -2101,7 +2101,6 @@ void fake_quantize_tensor_cachemask_kernel(
     int64_t quant_min,
     int64_t quant_max) {
   _fake_quantize_tensor_helper(output, mask, input, sc, z_point, quant_min, quant_max);
-
 }
 
 void fake_quantize_tensor_cachemask_tensor_qparams_kernel(
@@ -2112,12 +2111,7 @@ void fake_quantize_tensor_cachemask_tensor_qparams_kernel(
     const Tensor& z_point,
     int64_t quant_min,
     int64_t quant_max) {
-
-  float* scale_ptr = sc.data_ptr<float>();
-  int32_t* zp_ptr = z_point.data_ptr<int32_t>();
-
-  _fake_quantize_tensor_helper(output, mask, input, *scale_ptr, *zp_ptr, quant_min, quant_max);
-
+  _fake_quantize_tensor_helper(output, mask, input, sc.item().toFloat(), z_point.item().toInt(), quant_min, quant_max);
 }
 
 void fake_quantize_learnable_tensor_grad_kernel_cpu(
