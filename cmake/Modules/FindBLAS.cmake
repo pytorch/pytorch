@@ -292,6 +292,12 @@ endif()
 
 # Determine if blas was compiled with the f2c conventions
 IF (BLAS_LIBRARIES)
+   # Push host architecture when cross-compiling otherwise check would fail
+   # when cross-compiling for arm64 on x86_64
+   cmake_push_check_state(RESET)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND CMAKE_OSX_ARCHITECTURES MATCHES "^(x86_64|arm64)$")
+    list(APPEND CMAKE_REQUIRED_FLAGS "-arch ${CMAKE_HOST_SYSTEM_PROCESSOR}")
+  endif()
   SET(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
   CHECK_C_SOURCE_RUNS("
 #include <stdlib.h>
@@ -342,6 +348,7 @@ int main() {
     SET(BLAS_USE_CBLAS_DOT FALSE)
   ENDIF(BLAS_USE_CBLAS_DOT)
   SET(CMAKE_REQUIRED_LIBRARIES)
+  cmake_pop_check_state()
 ENDIF(BLAS_LIBRARIES)
 
 # epilogue
