@@ -18,12 +18,6 @@ if (${env:INSTALL_WINDOWS_SDK} -eq "1") {
     $VS_INSTALL_ARGS += "--add Microsoft.VisualStudio.Component.Windows10SDK.19041"
 }
 
-curl.exe --retry 3 -kL $VS_DOWNLOAD_LINK --output vs_installer.exe
-if ($LASTEXITCODE -ne 0) {
-    echo "Download of the VS 2019 Version ${env:VS_VERSION} installer failed"
-    exit 1
-}
-
 if (Test-Path "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe") {
     $VS_VERSION_major = [int] ${env:VS_VERSION}.split(".")[0]
     $existingPath = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -products "Microsoft.VisualStudio.Product.BuildTools" -version "[${env:VS_VERSION}, ${env:VS_VERSION_major + 1})" -property installationPath
@@ -33,6 +27,23 @@ if (Test-Path "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswher
     }
 }
 
+echo "Removing all VS installers and installations for a clean start."
+$process = Start-Process "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\resources\app\layout\InstallCleanup.exe" -ArgumentList @("-i") -NoNewWindow -Wait -PassThru
+$exitCode = $process.ExitCode
+if (($exitCode -ne 0) -and ($exitCode -ne 3010)) {
+    echo "Installation cleanup failed with code $exitCode"
+    exit 1
+}
+echo "Visual Studio and installers successfully uninstalled."
+
+echo "Downloading VS installer from S3."
+curl.exe --retry 3 -kL $VS_DOWNLOAD_LINK --output vs_installer.exe
+if ($LASTEXITCODE -ne 0) {
+    echo "Download of the VS 2019 Version ${env:VS_VERSION} installer failed"
+    exit 1
+}
+
+echo "Installing Visual Studio version ${env:VS_VERSION}."
 $process = Start-Process "${PWD}\vs_installer.exe" -ArgumentList $VS_INSTALL_ARGS -NoNewWindow -Wait -PassThru
 Remove-Item -Path vs_installer.exe -Force
 $exitCode = $process.ExitCode
