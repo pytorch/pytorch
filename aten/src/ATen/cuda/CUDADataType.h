@@ -2,6 +2,7 @@
 
 #include <c10/core/ScalarType.h>
 
+#include <cuda.h>
 #include <library_types.h>
 
 namespace at {
