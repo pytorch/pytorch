@@ -13877,21 +13877,25 @@ class TestNNDeviceType(NNTestCase):
             # Assert that cpu and cuda handle channels_last memory format in the same way
             # https://github.com/pytorch/pytorch/issues/54590
             if torch.device(device).type == 'cuda':
-                a_cuda = torch.randn(2, 2, 3, 4, device=device).contiguous(memory_format=memory_format).requires_grad_()
-                a_cpu = a_cuda.detach().cpu().requires_grad_()
+                for shapes, scale_factor in product([
+                    (2, 2, 3, 4), (2, 3, 4, 5), (3, 1, 2, 2), (1, 5, 3, 2)
+                ], [0.5, 1.5, 2]):
+                    a_cuda = torch.randn(*shapes, device=device).contiguous(memory_format=memory_format).requires_grad_()
+                    a_cpu = a_cuda.detach().cpu().requires_grad_()
 
-                out_cuda = F.interpolate(a_cuda, scale_factor=2, mode='nearest')
-                out_cpu = F.interpolate(a_cpu, scale_factor=2, mode='nearest')
+                    with warnings.catch_warnings(record=True):
+                        out_cuda = F.interpolate(a_cuda, scale_factor=scale_factor, mode='nearest')
+                        out_cpu = F.interpolate(a_cpu, scale_factor=scale_factor, mode='nearest')
 
-                self.assertEqual(out_cpu.cuda(), out_cuda)
+                    self.assertEqual(out_cpu.cuda(), out_cuda)
 
-                g_cuda = torch.randn_like(out_cuda)
-                g_cpu = g_cuda.cpu()
+                    g_cuda = torch.randn_like(out_cuda)
+                    g_cpu = g_cuda.cpu()
 
-                out_cuda.backward(g_cuda)
-                out_cpu.backward(g_cpu)
+                    out_cuda.backward(g_cuda)
+                    out_cpu.backward(g_cpu)
 
-                self.assertEqual(a_cuda.grad, a_cpu.grad)
+                    self.assertEqual(a_cuda.grad, a_cpu.grad)
 
     def test_upsamplingBilinear2d(self, device):
         for align_corners in [True, False]:
@@ -13911,6 +13915,28 @@ class TestNNDeviceType(NNTestCase):
 
                     input = torch.randn(1, 2, 2, 2, device=device).contiguous(memory_format=memory_format).requires_grad_()
                     gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
+
+                    # Assert that cpu and cuda give same results
+                    if torch.device(device).type == 'cuda':
+                        for shapes in [
+                            (2, 2, 3, 4), (2, 3, 4, 5), (3, 1, 2, 2), (1, 5, 3, 2)
+                        ]:
+                            a_cuda = torch.randn(*shapes, device=device).contiguous(memory_format=memory_format).requires_grad_()
+                            a_cpu = a_cuda.detach().cpu().requires_grad_()
+
+                            with warnings.catch_warnings(record=True):
+                                out_cuda = F.interpolate(a_cuda, scale_factor=scale_factor, **kwargs)
+                                out_cpu = F.interpolate(a_cpu, scale_factor=scale_factor, **kwargs)
+
+                            self.assertEqual(out_cpu.cuda(), out_cuda)
+
+                            g_cuda = torch.randn_like(out_cuda)
+                            g_cpu = g_cuda.cpu()
+
+                            out_cuda.backward(g_cuda)
+                            out_cpu.backward(g_cpu)
+
+                            self.assertEqual(a_cuda.grad, a_cpu.grad)
 
     @onlyCPU
     @dtypes(torch.float, torch.double)
