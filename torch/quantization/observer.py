@@ -279,7 +279,8 @@ class _ObserverBase(ObserverBase):
         min_val_neg = torch.min(min_val, torch.zeros_like(min_val))
         max_val_pos = torch.max(max_val, torch.zeros_like(max_val))
 
-        device = min_val_neg.device
+        # device = min_val_neg.device
+        device = self.device
         scale = torch.ones(min_val_neg.size(), dtype=torch.float32, device=device)
         zero_point = torch.zeros(min_val_neg.size(), dtype=torch.int64, device=device)
 
@@ -289,7 +290,7 @@ class _ObserverBase(ObserverBase):
         ):
             max_val_pos = torch.max(-min_val_neg, max_val_pos)
             scale = max_val_pos / (float(quant_max - quant_min) / 2)
-            scale = torch.max(scale, self.eps)
+            scale = torch.max(scale, self.eps).to(device)
             if self.dtype == torch.quint8:
                 if self.has_customized_qrange:
                     # When customized quantization range is used, down-rounded midpoint of the range is chosen.
@@ -439,6 +440,7 @@ class MinMaxObserver(_ObserverBase):
 
     def forward(self, x_orig):
         r"""Records the running minimum and maximum of ``x``."""
+        setattr(self, 'device', x_orig.device.type)
         if x_orig.numel() == 0:
             return x_orig
         x = x_orig.detach()  # avoid keeping autograd tape
@@ -530,6 +532,7 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
         )
 
     def forward(self, x_orig):
+        setattr(self, 'device', x_orig.device.type)
         if x_orig.numel() == 0:
             return x_orig
         x = x_orig.detach()  # avoid keeping autograd tape
@@ -607,6 +610,7 @@ class PerChannelMinMaxObserver(_ObserverBase):
             )
 
     def forward(self, x_orig):
+        setattr(self, 'device', x_orig.device.type)
         return self._forward(x_orig)
 
     def _forward(self, x_orig):
@@ -768,6 +772,7 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         self.averaging_constant = averaging_constant
 
     def forward(self, x_orig):
+        setattr(self, 'device', x_orig.device.type)
         if x_orig.numel() == 0:
             return x_orig
         x = x_orig.detach()  # avoid keeping autograd tape
@@ -1038,6 +1043,7 @@ class HistogramObserver(_ObserverBase):
         return orig_hist
 
     def forward(self, x_orig: torch.Tensor) -> torch.Tensor:
+        setattr(self, 'device', x_orig.device.type)
         if x_orig.numel() == 0:
             return x_orig
         x = x_orig.detach()
@@ -1106,7 +1112,7 @@ class HistogramObserver(_ObserverBase):
                 "must run observer before calling calculate_qparams.\
                                     Returning default scale and zero point "
             )
-            return torch.tensor([1.0]), torch.tensor([0])
+            return torch.tensor([1.0]).to('cuda'), torch.tensor([0]).to('cuda')
         assert self.bins == len(self.histogram), (
             "The number of bins in histogram should be equal to the number of bins "
             "supplied while making this observer"

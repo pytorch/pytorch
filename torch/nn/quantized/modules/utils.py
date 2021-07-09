@@ -4,9 +4,7 @@ import collections
 from torch.nn.modules.module import _addindent
 
 def _quantize_weight(float_wt, observer):
-    device = float_wt.device
-    wt_scale, wt_zp = observer.calculate_qparams()  # may be better to make calculate qparams give on correct device
-    wt_scale, wt_zp = wt_scale.to(device), wt_zp.to(device)
+    wt_scale, wt_zp = observer.calculate_qparams()
     if observer.qscheme in [torch.per_tensor_symmetric, torch.per_tensor_affine]:
         qweight = torch.quantize_per_tensor(
             float_wt,
