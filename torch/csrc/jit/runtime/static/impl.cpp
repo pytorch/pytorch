@@ -1310,9 +1310,13 @@ void ProcessedNode::run() {
   } else {
     std::vector<IValue> stack;
     const size_t size = node_->inputs().size();
-    stack.reserve(size);
+    stack.reserve(size + 1);
     for (const auto i : c10::irange(size)) {
       stack.emplace_back(Input(i));
+    }
+    // Need to store the number of inputs in stack for variadic ops.
+    if (hasVarArgs(node_)) {
+      stack.emplace_back(static_cast<int>(size));
     }
 
     DCHECK(op_);

@@ -394,6 +394,15 @@ TEST(StaticRuntime, IndividualOps_Binary_MatMul) {
   testStaticRuntime(aten_matmul, args3, args4);
 }
 
+TEST(StaticRuntime, IndividualOps_Sign) {
+  auto a = at::randn({2, 3});
+  auto b = at::randn({4, 3, 2});
+
+  std::vector<IValue> args{a};
+  testStaticRuntime(sign_tensor, args);
+  testStaticRuntime(sign_tensor, args, {b});
+}
+
 TEST(StaticRuntime, IndividualOps_Div) {
   auto a = at::randn({2, 3});
   auto b = at::randn({2, 3});
@@ -415,6 +424,16 @@ TEST(StaticRuntime, IndividualOps_Div) {
   std::vector<IValue> args3{a, 2.3, "trunc"};
   testStaticRuntime(div_scalar_mode, args3);
   testStaticRuntime(div_scalar_mode, args3, {a, 1.5, "trunc"});
+}
+
+TEST(StaticRuntime, IndividualOps_Log) {
+  // Ensure that the input values are valid.
+  auto a = at::abs(at::randn({2, 3}));
+  auto b = at::abs(at::randn({4, 3, 2}));
+
+  std::vector<IValue> args{a};
+  testStaticRuntime(log_tensor, args);
+  testStaticRuntime(log_tensor, args, {b});
 }
 
 TEST(StaticRuntime, IndividualOps_Sub) {
@@ -592,6 +611,20 @@ TEST(StaticRuntime, IndividualOps_FullLike) {
       b, 4, dtype, at::kStrided, cpu, false, c10::MemoryFormat::Contiguous};
   testStaticRuntime(full_like_script, args);
   testStaticRuntime(full_like_script, args, args2);
+}
+
+TEST(StaticRuntime, IndividualOps_VarCat) {
+  // 2D tensors - cat dim = 0
+  std::vector<IValue> args1 = {at::randn({4, 6}), at::randn({5, 6}), 0};
+  testStaticRuntime(var_cat_script, args1);
+
+  // 3D tensors - cat dim = 1
+  std::vector<IValue> args2 = {at::randn({4, 5, 6}), at::randn({4, 8, 6}), 1};
+  testStaticRuntime(var_cat_script, args2);
+
+  // 3D tensors - cat dim = 2
+  std::vector<IValue> args3 = {at::randn({4, 5, 6}), at::randn({4, 5, 7}), 2};
+  testStaticRuntime(var_cat_script, args3);
 }
 
 TEST(StaticRuntime, LongModel) {
