@@ -7074,9 +7074,9 @@ class DistributedTest:
             syncbn_model = nn.SyncBatchNorm(
                 2, momentum=0.99, track_running_stats=False
             ).cuda()
-            local_syncbn_model = copy.deepcopy(model)
+            local_syncbn_model = copy.deepcopy(syncbn_model)
             syncbn_model = torch.nn.parallel.DistributedDataParallel(
-                model,
+                local_syncbn_model,
                 device_ids=[rank]
             )
             inp = torch.randn(10, 2, device=rank)
