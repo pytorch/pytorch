@@ -35,3 +35,6 @@
 /torch/csrc/jit/passes/onnx/ @bowenbao @neginraoof @shubhambhokare1
 /torch/onnx/ @bowenbao @neginraoof @shubhambhokare1
 /test/onnx/ @bowenbao @neginraoof @shubhambhokare1
+
+# Docker
+/.circleci/docker/ @jeffdaily @jithunnair-amd
