@@ -299,6 +299,8 @@ jobs:
             -e IN_CI \
             -e SHARD_NUMBER \
             -e JOB_BASE_NAME \
+            -e TEST_CONFIG \
+            -e NUM_TEST_SHARDS \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
