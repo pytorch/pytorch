@@ -1360,7 +1360,9 @@ struct to_ir {
             lc.range().str());
       }
 
-      list_value->setType(ListType::create(*unified));
+      if (!type_hint) {
+        list_value->setType(ListType::create(*unified));
+      }
 
       NamedValue self = NamedValue(loc, "self", list_value);
       NamedValue input = NamedValue(loc, "", out);
