@@ -5,6 +5,7 @@ from torch.fx.tensor_type import Dyn, is_consistent, TensorType, is_more_precise
 from typing import Callable, Dict
 from torch.fx.node import Target, Node
 from torch.nn.modules.batchnorm import BatchNorm2d
+from torch.nn.modules.conv import Conv2d
 
 
 _INFERENCE_RULES: Dict[Target, Callable] = {}
@@ -22,7 +23,7 @@ def expand_to_tensor_dim(t, n):
         return TensorType(tuple(dims))
     elif isinstance(t, TensorType):
         if len(t.__args__) != n:
-            raise TypeError(f'Cannot apply matching. Tensor {t} has rank {len(t.__args__)}. It should have rank {n}')
+            raise TypeError(f'Cannot extend tensor dimension. Tensor {t} has rank {len(t.__args__)}. It should have rank {n}')
         return t
     else:
         raise TypeError(f'Cannot match the type {t}')
@@ -206,6 +207,65 @@ def bn2d_inference_rule(n: Node, module_instance):
         return n.type
     else:
         raise TypeError(f'Cannot apply {module_instance} with input type {arg_type} and existing type {n.type} on {n}')
+
+def calculate(d_in, module_instance, index):
+    """
+    For calculating h_in and w_out.
+    """
+    if d_in == Dyn:
+        return Dyn
+
+    elif isinstance(d_in, int):
+        n = d_in + 2 * module_instance.padding[index] - \
+            module_instance.dilation[index] * \
+            (module_instance.kernel_size[index] - 1) - 1
+
+        return (n // module_instance.stride[0]) + 1
+    else:
+        raise TypeError(f'{d_in} in {module_instance} must be a number or Dyn')
+
+
+def get_greatest_upper_bound(type1, type2):
+    """
+    Get the most precise type that's consistent with the given types
+    """
+    if type1 == Dyn:
+        return type2
+    elif type2 == Dyn:
+        return type1
+    elif isinstance(type1, TensorType) and isinstance(type2, TensorType):
+        assert is_consistent(type1, type2)
+        gub = [t1 if is_more_precise(t1, t2) else t2 for (t1, t2) in zip(type1.__args__, type2.__args__)]
+        return TensorType(tuple(gub))
+    else:
+        raise NotImplementedError(f'Greatest upper bound not yet implemented for these types {type1}, {type2}')
+
+@register_inference_rule(Conv2d)
+def conv2d_inference_rule(n: Node, module_instance):
+    """
+    Given a Conv2D instance and a node check the following conditions:
+    - the input type can be expanded to a size 4 tensor: t =  (x_1, x_2, H, W)
+    - the current node type can be expanded to a size 4 tensor: t' =  (x_1', x_2', x_3', x_4')
+    - x_2 is consistent with the module's in_channels
+    - let o = (x_1, out_channels, H_out, W_out)
+    then the output is the greatest upper bound of o and the existing node type t'.
+    """
+    assert isinstance(n.args[0], Node)
+    n.args[0].type = expand_to_tensor_dim(n.args[0].type, 4)
+    arg_type = n.args[0].type
+    curr_node_type = expand_to_tensor_dim(n.type, 4)
+
+    if is_consistent(arg_type.__args__[1], module_instance.in_channels):
+        w_in = arg_type.__args__[3]
+        h_in = arg_type.__args__[2]
+        h_out = calculate(h_in, module_instance, 0)
+        w_out = calculate(w_in, module_instance, 1)
+        new_type = TensorType((arg_type.__args__[0], module_instance.out_channels, h_out, w_out))
+        gub = get_greatest_upper_bound(new_type, curr_node_type)
+        n.type = gub
+        return n.type
+    else:
+        raise TypeError(f'Cannot apply {module_instance} with input type { arg_type} and existing type {n.type} on {n}')
 
 class GraphTypeChecker:
     def __init__(self, env, traced):
