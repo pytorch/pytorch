@@ -20,7 +20,7 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     const Node* node,
     std::vector<at::Tensor>& inputTensorValues,
     int opset_version);
-}
+} // namespace onnx_constant_fold
 
 void ConstantFoldONNX(
     Block* b,
