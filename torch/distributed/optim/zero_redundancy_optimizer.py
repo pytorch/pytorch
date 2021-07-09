@@ -6,12 +6,13 @@
 import collections
 import copy
 import io
+import logging
 from itertools import chain
 from typing import Any, Callable, Dict, List, Optional, Type
 
-import logging
 import torch
 import torch.distributed as dist
+from torch.distributed.algorithms.join import _JoinHook
 from torch.optim import Optimizer
 
 __all__ = ["ZeroRedundancyOptimizer"]
@@ -102,6 +103,30 @@ def _get_global_rank(group: Any, rank: int) -> int:
             else dist.distributed_c10d._get_global_rank(group, rank))
 
 
+class _ZeROJoinHook(_JoinHook):
+    def __init__(self, zero):
+        assert isinstance(zero, ZeroRedundancyOptimizer), \
+            "ZeRO join hook requires passing in a ZeroRedundancyOptimizer " \
+            "instance as the state"
+        self.zero = zero
+        super().__init__()
+
+    def main_hook(self):
+        """
+        Performs an optimizer step, which updates the joined process's shard of
+        the parameters and broadcasts those parameters.
+        """
+        self.zero.step()
+
+    @property
+    def device(self):
+        return self.zero._default_device
+
+    @property
+    def process_group(self):
+        return self.zero.process_group
+
+
 class ZeroRedundancyOptimizer(Optimizer):
     r"""
     This class wraps an arbitrary :class:`optim.Optimizer
@@ -127,7 +152,7 @@ class ZeroRedundancyOptimizer(Optimizer):
     Keyword Args:
         optimizer_class (:class:`torch.nn.Optimizer`): the class of the local
             optimizer.
-        group (``ProcessGroup``, optional): ``torch.distributed``
+        process_group (``ProcessGroup``, optional): ``torch.distributed``
             ``ProcessGroup`` (default: ``dist.group.WORLD`` initialized by
             :meth:`torch.distributed.init_process_group`).
         parameters_as_bucket_view (bool): when enabled, parameters are packed
@@ -168,7 +193,7 @@ class ZeroRedundancyOptimizer(Optimizer):
         self,
         params,
         optimizer_class: Type[Optimizer],
-        group: Optional[Any] = None,
+        process_group: Optional[Any] = None,
         parameters_as_bucket_view: bool = False,
         **defaults: Any,
     ):
@@ -196,10 +221,10 @@ class ZeroRedundancyOptimizer(Optimizer):
         # Default device for collective communication and buckets
         self._default_device = self._all_params[0].device
 
-        self.group = group if group is not None else dist.group.WORLD
-        self.world_size = dist.get_world_size(self.group)
-        self.rank = dist.get_rank(self.group)
-        self.global_rank = _get_global_rank(self.group, self.rank)
+        self.process_group = process_group if process_group is not None else dist.group.WORLD
+        self.world_size = dist.get_world_size(self.process_group)
+        self.rank = dist.get_rank(self.process_group)
+        self.global_rank = _get_global_rank(self.process_group, self.rank)
 
         self._optim_defaults = defaults
         self._optim_constructor = optimizer_class
@@ -287,7 +312,7 @@ class ZeroRedundancyOptimizer(Optimizer):
         # is to move all sharded state management to RPC RRef
         self._all_state_dicts = []
         for rank in range(self.world_size):
-            global_rank = _get_global_rank(self.group, rank)
+            global_rank = _get_global_rank(self.process_group, rank)
             if self.rank == to:
                 # Consolidate all local `state_dict`s on this rank, storing on
                 # CPU to save GPU memory
@@ -301,7 +326,7 @@ class ZeroRedundancyOptimizer(Optimizer):
                     local_state_dict = _broadcast_object(
                         empty_messenger,
                         src_rank=global_rank,
-                        group=self.group,
+                        group=self.process_group,
                         device=self._default_device,
                     )
                     self._all_state_dicts.append(
@@ -313,7 +338,7 @@ class ZeroRedundancyOptimizer(Optimizer):
                     _ = _broadcast_object(
                         self.optim.state_dict(),
                         src_rank=self.global_rank,
-                        group=self.group,
+                        group=self.process_group,
                         device=self._default_device,
                     )
                 elif rank != to:
@@ -322,7 +347,7 @@ class ZeroRedundancyOptimizer(Optimizer):
                     _ = _broadcast_object(
                         empty_messenger,
                         src_rank=global_rank,
-                        group=self.group,
+                        group=self.process_group,
                         device=self._default_device,
                     )
 
@@ -395,6 +420,34 @@ class ZeroRedundancyOptimizer(Optimizer):
             self._index_to_param_cache = list(chain(*(g["params"] for g in self.param_groups)))
         return self._index_to_param_cache
 
+    def _sync_parameters(self):
+        r"""
+        Syncs all parameter shards across the ranks.
+
+        The rank sends its shard to all other ranks and receives a shard from
+        each other rank using ``broadcast()``. Parameters are sent bucket-by-
+        bucket if ``parameters_as_bucket_view`` is enabled and sent parameter-
+        by-parameter otherwise.
+        """
+        handles = []
+        if self.parameters_as_bucket_view:
+            for rank, bucket in enumerate(self._buckets):
+                global_rank = _get_global_rank(self.process_group, rank)
+                handles.append(
+                    dist.broadcast(tensor=bucket, src=global_rank,
+                                   group=self.process_group, async_op=True)
+                )
+        else:
+            for rank, param_groups in enumerate(self._partition_parameters()):
+                global_rank = _get_global_rank(self.process_group, rank)
+                for param_group in param_groups:
+                    for param in param_group["params"]:
+                        handles.append(
+                            dist.broadcast(tensor=param.data, src=global_rank,
+                                           group=self.process_group, async_op=True)
+                        )
+        _ = list(map(lambda x: x.wait(), handles))
+
     def step(
         self,
         closure: Optional[Callable[[], float]] = None,
@@ -432,30 +485,22 @@ class ZeroRedundancyOptimizer(Optimizer):
             loss = self.optim.step(**kwargs)
 
         # Sync all of the updated parameter shards across the ranks
-        handles = []
-        if self.parameters_as_bucket_view:
-            for rank, bucket in enumerate(self._buckets):
-                global_rank = _get_global_rank(self.group, rank)
-                handles.append(
-                    dist.broadcast(tensor=bucket, src=global_rank,
-                                   group=self.group, async_op=True)
-                )
-        else:
-            for rank, param_groups in enumerate(self._partition_parameters()):
-                global_rank = _get_global_rank(self.group, rank)
-                for param_group in param_groups:
-                    for param in param_group["params"]:
-                        handles.append(
-                            dist.broadcast(tensor=param.data, src=global_rank,
-                                           group=self.group, async_op=True)
-                        )
-        _ = list(map(lambda x: x.wait(), handles))
+        self._sync_parameters()
 
         # Sync any updated attributes in the local optimizer to the exposed
         # `param_groups`
         self._sync_param_groups(self.optim.param_groups, self.param_groups)
 
         return loss
+
+    def _join_hook(self):
+        r"""
+        Returns the ZeRO join hook, which enables training on uneven inputs by
+        shadowing the collective communications in the optimizer step.
+
+        Gradients must be properly set before this hook is called.
+        """
+        return _ZeROJoinHook(self)
 
     def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
         r"""

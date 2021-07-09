@@ -128,13 +128,13 @@ class TestMisc(PackageTestCase):
             he.mock("package_b.subpackage_2")
             he.intern("**")
             he.save_pickle("obj", "obj.pkl", package_b.PackageBObject(["a"]))
-            self.assertEqual(he.externed_list(), ["package_b.subpackage_1"])
-            self.assertEqual(he.mocked_list(), ["package_b.subpackage_2"])
+            self.assertEqual(he.externed_modules(), ["package_b.subpackage_1"])
+            self.assertEqual(he.mocked_modules(), ["package_b.subpackage_2"])
             self.assertEqual(
-                he.interned_list(),
+                he.interned_modules(),
                 ["package_b", "package_b.subpackage_0.subsubpackage_0"],
             )
-            self.assertEqual(he.relied_on_by("package_b.subpackage_2"), ["package_b"])
+            self.assertEqual(he.get_rdeps("package_b.subpackage_2"), ["package_b"])
 
         with self.assertRaises(PackagingError) as e:
             with PackageExporter(BytesIO()) as he:
@@ -142,7 +142,7 @@ class TestMisc(PackageTestCase):
 
                 he.deny("package_b")
                 he.save_pickle("obj", "obj.pkl", package_b.PackageBObject(["a"]))
-                self.assertEqual(he.denied_list(), ["package_b"])
+                self.assertEqual(he.denied_modules(), ["package_b"])
 
     def test_is_from_package(self):
         """is_from_package should work for objects and modules"""

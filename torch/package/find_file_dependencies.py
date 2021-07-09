@@ -11,19 +11,15 @@ class _ExtractModuleReferences(ast.NodeVisitor):
     """
 
     @classmethod
-    def run(
-        cls, src: str, package: str, module: str
-    ) -> Tuple[List[Tuple[str, Optional[str]]], List[str]]:
-        visitor = cls(package, module)
+    def run(cls, src: str, package: str) -> List[Tuple[str, Optional[str]]]:
+        visitor = cls(package)
         tree = ast.parse(src)
         visitor.visit(tree)
-        return list(visitor.references.keys()), visitor.failed_dunder_imports
+        return list(visitor.references.keys())
 
-    def __init__(self, package, module):
+    def __init__(self, package):
         super().__init__()
         self.package = package
-        self.module = module
-        self.failed_dunder_imports: List[str] = []
         self.references = {}
 
     def _absmodule(self, module_name: str, level: int) -> str:
@@ -100,13 +96,6 @@ class _ExtractModuleReferences(ast.NodeVisitor):
                         else:
                             self.references[(name, None)] = True
             except Exception as e:
-                info_string = (
-                    "module: '"
-                    + self.module
-                    + "', lineno: "
-                    + str(node.__dict__["lineno"])
-                )
-                self.failed_dunder_imports.append(info_string)
                 return
 
 

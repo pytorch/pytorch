@@ -16,6 +16,7 @@ from typing import (
     List,
     Optional,
     Sequence,
+    Set,
     Union,
 )
 
@@ -186,6 +187,8 @@ class PackageExporter:
 
         self.zip_file = torch._C.PyTorchFileWriter(f)
         self.zip_file.set_min_version(6)
+        self._written_files: Set[str] = set()
+
         self.serialized_reduces: Dict[int, Any] = {}
 
         # A graph tracking all the modules and pickle objects added to this
@@ -194,7 +197,6 @@ class PackageExporter:
         # - Each directed edge (u, v) means u depends on v.
         # - Nodes may contain metadata that describe how to write the thing to the zipfile.
         self.dependency_graph = DiGraph()
-        self._failed_dunder_imports: List[str] = []
         self.script_module_serializer = torch._C.ScriptModuleSerializer(self.zip_file)
         self.storage_context = self.script_module_serializer.storage_context()
 
@@ -299,10 +301,7 @@ class PackageExporter:
             module_name if is_package else module_name.rsplit(".", maxsplit=1)[0]
         )
         try:
-            dep_pairs, failed_dunder_imports = find_files_source_depends_on(
-                src, package_name, module_name
-            )
-            self._failed_dunder_imports.extend(failed_dunder_imports)
+            dep_pairs = find_files_source_depends_on(src, package_name)
         except Exception as e:
             self.dependency_graph.add_node(
                 module_name,
@@ -359,7 +358,7 @@ class PackageExporter:
 
             for dep in deps:
                 self.dependency_graph.add_edge(module_name, dep)
-                self.require_module_if_not_provided(dep)
+                self.add_dependency(dep)
 
     def _write_source_string(
         self,
@@ -408,7 +407,10 @@ class PackageExporter:
 
         return "".join(result)
 
-    def require_module_if_not_provided(self, module_name: str, dependencies=True):
+    def add_dependency(self, module_name: str, dependencies=True):
+        """Given a module, add it to the dependency graph according to patterns
+        specified by the user.
+        """
         if (
             module_name in self.dependency_graph
             and self.dependency_graph.nodes[module_name].get("provided") is True
@@ -437,7 +439,7 @@ class PackageExporter:
                 # If we are interning this module, we need to retrieve its
                 # dependencies and package those as well.
                 if pattern_info.action == _ModuleProviderAction.INTERN:
-                    self._add_module_to_dependency_graph(module_name, dependencies)
+                    self._intern_module(module_name, dependencies)
                 return
 
         # No patterns have matched. Explicitly add this as an error.
@@ -460,15 +462,19 @@ class PackageExporter:
             )
 
         self.dependency_graph.add_node(
-            module_name, provided=True, action=_ModuleProviderAction.INTERN
+            module_name,
+            provided=True,
         )
-        self._add_module_to_dependency_graph(module_name, dependencies)
+        self._intern_module(module_name, dependencies)
 
-    def _add_module_to_dependency_graph(
+    def _intern_module(
         self,
         module_name: str,
         dependencies: bool,
     ):
+        """Adds the module to the dependency graph as an interned module,
+        along with any metadata needed to write it out to the zipfile at serialization time.
+        """
         module_obj = self._import_module(module_name)
 
         # Find dependencies of this module and require them as well.
@@ -488,6 +494,7 @@ class PackageExporter:
                 error_context = f"filename: {filename}"
             self.dependency_graph.add_node(
                 module_name,
+                action=_ModuleProviderAction.INTERN,
                 is_package=is_package,
                 error=packaging_error,
                 error_context=error_context,
@@ -495,14 +502,18 @@ class PackageExporter:
             return
 
         self.dependency_graph.add_node(
-            module_name, is_package=is_package, source=source, provided=True
+            module_name,
+            action=_ModuleProviderAction.INTERN,
+            is_package=is_package,
+            source=source,
+            provided=True,
         )
 
         if dependencies:
             deps = self._get_dependencies(source, module_name, is_package)
             for dep in deps:
                 self.dependency_graph.add_edge(module_name, dep)
-                self.require_module_if_not_provided(dep)
+                self.add_dependency(dep)
 
     def save_pickle(
         self, package: str, resource: str, obj: Any, dependencies: bool = True
@@ -550,7 +561,7 @@ class PackageExporter:
 
             for module_name in all_dependencies:
                 self.dependency_graph.add_edge(name_in_dependency_graph, module_name)
-                self.require_module_if_not_provided(module_name)
+                self.add_dependency(module_name)
 
         self._write(filename, data_value)
 
@@ -796,8 +807,15 @@ class PackageExporter:
         self.close()
 
     def _write(self, filename, str_or_bytes):
+        if filename in self._written_files:
+            raise AssertionError(
+                f"Tried to write file '{filename}', but it already exists in this archive. "
+                "Please file a bug."
+            )
+        self._written_files.add(filename)
+
         if is_mangled(filename):
-            raise RuntimeError(
+            raise AssertionError(
                 f"Tried to save a torch.package'd module as '{filename}'. "
                 "Directly saving torch.package'd modules is not allowed."
             )
@@ -907,6 +925,11 @@ class PackageExporter:
         )
 
     def dependency_graph_string(self) -> str:
+        """Returns digraph string representation of dependencies in package.
+
+        Returns:
+            A string representation of dependencies in package.
+        """
         edges = "\n".join(f'"{f}" -> "{t}";' for f, t in self.dependency_graph.edges)
         return f"""\
 digraph G {{
@@ -927,7 +950,7 @@ node [shape=box];
         result.sort()
         return result
 
-    def externed_list(self) -> List[str]:
+    def externed_modules(self) -> List[str]:
         """Return all modules that are currently externed.
 
         Returns:
@@ -936,7 +959,7 @@ node [shape=box];
         """
         return self._nodes_with_action_type(_ModuleProviderAction.EXTERN)
 
-    def interned_list(self) -> List[str]:
+    def interned_modules(self) -> List[str]:
         """Return all modules that are currently interned.
 
         Returns:
@@ -945,7 +968,7 @@ node [shape=box];
         """
         return self._nodes_with_action_type(_ModuleProviderAction.INTERN)
 
-    def mocked_list(self) -> List[str]:
+    def mocked_modules(self) -> List[str]:
         """Return all modules that are currently mocked.
 
         Returns:
@@ -954,7 +977,7 @@ node [shape=box];
         """
         return self._nodes_with_action_type(_ModuleProviderAction.MOCK)
 
-    def denied_list(self) -> List[str]:
+    def denied_modules(self) -> List[str]:
         """Return all modules that are currently denied.
 
         Returns:
@@ -963,8 +986,8 @@ node [shape=box];
         """
         return self._nodes_with_action_type(_ModuleProviderAction.DENY)
 
-    def relied_on_by(self, module_name: str) -> List[str]:
-        """Return a list of all modules which rely on the module ``module_name``.
+    def get_rdeps(self, module_name: str) -> List[str]:
+        """Return a list of all modules which depend on the module ``module_name``.
 
         Returns:
             A list containing the names of modules which depend on ``module_name``.
@@ -973,15 +996,6 @@ node [shape=box];
             return list(self.dependency_graph._pred[module_name].keys())
         else:
             return []
-
-    def failed_dunder_import_list(self) -> List[str]:
-        """Return location of all failed ``__import__`` statements.
-
-        Returns:
-            A list containing the location of failed ``__import__``
-            statements.
-        """
-        return self._failed_dunder_imports
 
 
 # even though these are in the standard library, we do not allow them to be

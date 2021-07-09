@@ -115,7 +115,6 @@ class TestSaveLoad(PackageTestCase):
             e.save_source_string(
                 "m", '__import__(these, unresolvable, "things", wont, crash, me)'
             )
-            self.assertEqual(e.failed_dunder_import_list(), ["module: 'm', lineno: 1"])
 
     def test_save_module_binary(self):
         f = BytesIO()
