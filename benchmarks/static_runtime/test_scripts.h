@@ -341,6 +341,12 @@ const auto div_scalar_mode = R"JIT(
       return torch.div(a, b, rounding_mode=c).clone()
 )JIT";
 
+const auto log_tensor = R"JIT(
+  def forward(self, inp: Tensor):
+      a = torch.log(inp).clone()
+      return (a)
+)JIT";
+
 const auto sub_tensor = R"JIT(
   def forward(self, a: Tensor, b: Tensor):
       return torch.sub(a, b).clone()
