@@ -76,8 +76,7 @@ TEST(TypeMetaTest, TypeMeta) {
 class ClassAllowAssignment {
  public:
   ClassAllowAssignment() : x(42) {}
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  ClassAllowAssignment(const ClassAllowAssignment& src) : x(src.x) {}
+  ClassAllowAssignment(const ClassAllowAssignment& src) = default;
   ClassAllowAssignment& operator=(const ClassAllowAssignment& src) = default;
   int x;
 };
