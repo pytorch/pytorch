@@ -2,7 +2,7 @@
 # Where to find the links: https://docs.microsoft.com/en-us/visualstudio/releases/2019/history#release-dates-and-build-numbers
 
 # BuildTools from S3
-$VS_DOWNLOAD_LINK = "https://s3.amazonaws.com/ossci-windows/vs${env:VC_VERSION}_BuildTools.exe"
+$VS_DOWNLOAD_LINK = "https://s3.amazonaws.com/ossci-windows/vs${env:VS_VERSION}_BuildTools.exe"
 $COLLECT_DOWNLOAD_LINK = "https://aka.ms/vscollect.exe"
 $VS_INSTALL_ARGS = @("--nocache","--quiet","--wait", "--add Microsoft.VisualStudio.Workload.VCTools",
                                                      "--add Microsoft.Component.MSBuild",
@@ -20,13 +20,13 @@ if (${env:INSTALL_WINDOWS_SDK} -eq "1") {
 
 curl.exe --retry 3 -kL $VS_DOWNLOAD_LINK --output vs_installer.exe
 if ($LASTEXITCODE -ne 0) {
-    echo "Download of the VS 2019 Version ${env:VC_VERSION} installer failed"
+    echo "Download of the VS 2019 Version ${env:VS_VERSION} installer failed"
     exit 1
 }
 
 if (Test-Path "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe") {
-    $vc_version_major = [int] ${env:VC_VERSION}.split(".")[0]
-    $existingPath = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -products "Microsoft.VisualStudio.Product.BuildTools" -version "[${env:VC_VERSION}, ${env:vc_version_major + 1})" -property installationPath
+    $VS_VERSION_major = [int] ${env:VS_VERSION}.split(".")[0]
+    $existingPath = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -products "Microsoft.VisualStudio.Product.BuildTools" -version "[${env:VS_VERSION}, ${env:VS_VERSION_major + 1})" -property installationPath
     if ($existingPath -ne $null) {
         echo "Found existing BuildTools installation in $existingPath"
         exit 0
