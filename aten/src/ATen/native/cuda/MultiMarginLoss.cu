@@ -195,7 +195,7 @@ Tensor& multi_margin_loss_cuda_out(
       }
     } else {
       auto in_sizes = input.sizes();
-      TORCH_INTERAL_ASSERT(in_sizes.size() == 2);
+      TORCH_INTERNAL_ASSERT(in_sizes.size() == 2);
       int nframe = in_sizes[0];
       // allow zero-dim target for 2D input.
       TORCH_CHECK(in_sizes[1] != 0 && target.dim() <= 1 && target.numel() == nframe,
