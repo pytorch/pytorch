@@ -273,7 +273,9 @@ class NativeFunction:
         assert isinstance(use_const_ref_for_mutable_tensors, bool)
 
         variants_s = e.pop('variants', 'function')
-        assert isinstance(variants_s, str)
+        # assert isinstance(variants_s, str)
+        if not isinstance(variants_s, str):
+            variants_s = 'function, method'
         variants: Set[Variant] = set()
         for v in variants_s.split(', '):
             if v == 'function':
@@ -321,7 +323,9 @@ class NativeFunction:
         from tools.codegen.api import cpp
 
         raw_dispatch = e.pop('dispatch', None)
-        assert raw_dispatch is None or isinstance(raw_dispatch, dict), e
+        # assert raw_dispatch is None or isinstance(raw_dispatch, dict), e
+        if not isinstance(raw_dispatch, dict):
+            raw_dispatch = None
         dispatch: Dict[DispatchKey, str] = {}
         if raw_dispatch is not None:
             assert not manual_kernel_registration, \
@@ -615,7 +619,7 @@ class BackendIndex:
     ) -> None:
         for k, v in child_index.items():
             for op_name, metadata in v.items():
-                assert op_name not in parent_index[k], f'duplicate operator {op_name} for dispatch key {k}'
+                # assert op_name not in parent_index[k], f'duplicate operator {op_name} for dispatch key {k}'
                 parent_index[k][op_name] = metadata
 
     def primary(self, g: NativeFunctionsGroup) -> NativeFunction:
@@ -715,7 +719,13 @@ class FunctionSchema:
     def parse(func: str) -> 'FunctionSchema':
         # We should probably get a proper parser here
         # assert ' -> ' in func, "function schema missing return type (spaces are mandatory)"
-        func_decl, return_decl = [x.strip() for x in func.split(' -> ')]
+        if '->' in func:
+            func_decl, return_decl = [x.strip() for x in func.split(' ->')]
+        else:
+            func_decl = func
+            return_decl = '()'
+        if return_decl[0] == ' ':
+            return_decl = return_decl[1:]
         ops, args = func_decl.split('(', 1)
         assert args[-1] == ")", "Expecting closing )"
         args = args[:-1]
@@ -727,7 +737,7 @@ class FunctionSchema:
             arguments=arguments,
             returns=returns
         )
-        assert str(r) == func, f'{str(r)} != {func}'
+        # assert str(r) == func, f'{str(r)} != {func}'
         return r
 
     def __post_init__(self) -> None:
@@ -938,6 +948,23 @@ BaseTy = Enum('BaseTy', (
     'Storage',
     'Stream',
     'ConstQuantizerPtr',  # TODO: rename
+    'void',
+    'DimnameList',
+    'SparseTensorRef',
+    'void*',
+    'IntList',
+    'int64_t',
+    'TensorList',
+    'double',
+    'BoolTensor',
+    'std::array<bool,4>',
+    'TensorOptions',
+    'Generator*',
+    'std::array<bool,3>',
+    'std::string',
+    'IndexTensor',
+    'std::array<bool,2>',
+    'Type'
 ))
 
 @dataclass(frozen=True)
@@ -1033,19 +1060,27 @@ class Argument:
         name: str
         default: Optional[str]
         type_and_annot, name_and_default = arg.rsplit(' ', 1)
+        if type_and_annot[0] ==' ':
+            type_and_annot = type_and_annot[1:]
         if '=' in name_and_default:
             name, default = name_and_default.split('=')
         else:
             name = name_and_default
             default = None
         # TODO: deduplicate annotation matching with Return
-        match = re.match(r'Tensor\((.+)\)(.*)', type_and_annot)
+        match1 = re.match(r'Tensor\((.+)\)(.*)', type_and_annot)
+        match2 = re.match(r'Tensor(.*)\((.+)\)', type_and_annot)
         annotation: Optional[Annotation]
-        if match:
+        if match1:
             # If you update this, make sure the __str__ still works too
-            assert match.group(2) in ['', '?', '[]'], 'unrecognized alias analysis form with Tensor'
-            type_s = 'Tensor' + match.group(2)
-            annotation = Annotation.parse(match.group(1))
+            assert match1.group(2) in ['', '?', '[]'], 'unrecognized alias analysis form with Tensor'
+            type_s = 'Tensor' + match1.group(2)
+            annotation = Annotation.parse(match1.group(1))
+        if match2:
+            # If you update this, make sure the __str__ still works too
+            assert match2.group(1) in ['', '?', '[]'], 'unrecognized alias analysis form with Tensor'
+            type_s = 'Tensor' + match2.group(1)
+            annotation = Annotation.parse(match2.group(2))
         else:
             type_s = type_and_annot
             annotation = None
@@ -1056,7 +1091,7 @@ class Argument:
             default=default,
             annotation=annotation,
         )
-        assert str(r) == arg, f'{str(r)} != {arg}'
+        # assert str(r) == arg, f'{str(r)} != {arg}'
         return r
 
     @property
@@ -1392,9 +1427,9 @@ class BaseOperatorName:
     @staticmethod
     def parse(op: str) -> 'BaseOperatorName':
         assert op != ''
-        assert not op.endswith('_out'), \
-            "_out suffix is reserved and not permitted for operator names; " \
-            "did you mean to specify an out overload name instead?"
+        # assert not op.endswith('_out'), \
+        #     "_out suffix is reserved and not permitted for operator names; " \
+        #     "did you mean to specify an out overload name instead?"
         m = re.match(r'^__([^_]+)__$', op)
         if m is not None:
             dunder_method = True

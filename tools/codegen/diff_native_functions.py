@@ -14,7 +14,8 @@ from tools.codegen.gen import parse_native_yaml
 # Returns the current_version and the base_version if specified by users.
 def get_versions() -> (str, str):
     # TODO(jwtan): It returns a lot of information including release notes. Figure out a way to only query the tag names.
-    response = requests.get("https://api.github.com/repos/pytorch/pytorch/releases")
+    # TODO(jwtan): per_page=100 is not future proof.
+    response = requests.get("https://api.github.com/repos/pytorch/pytorch/releases?per_page=100")
     releases = [release['tag_name'] for release in response.json()]
 
     current_version = releases[0]
@@ -35,11 +36,11 @@ def get_versions() -> (str, str):
     base_version = options.base_version
 
     release_map = {value: index for index, value in enumerate(releases)}
-    if (current_version not in release_map.keys()) or (base_version != None and base_version not in release_map.keys()):
+    if (current_version not in release_map.keys()) or ((base_version is not None) and (base_version not in release_map.keys())):
         # TODO(jwtan): Figure out the conventional way to log/print error.
         print('Input versions are invalid. Valid versions are {}.'.format(releases))
 
-    if base_version == None:
+    if base_version is None:
         base_version = releases[release_map[current_version] + 1]
 
     if release_map[current_version] >= release_map[base_version]:
@@ -51,7 +52,8 @@ def get_versions() -> (str, str):
 # Returns the corresponding commits for current_version and the base_version.
 # TODO(jwtan): Can we combine get_versions() and get_commits(...)?
 def get_commits(current_version: str, base_version: str) -> (str, str):
-    response = requests.get("https://api.github.com/repos/pytorch/pytorch/tags")
+    # TODO(jwtan): per_page=100 is not future proof.
+    response = requests.get("https://api.github.com/repos/pytorch/pytorch/tags?per_page=100")
 
     current_commit_hash = ''
     base_commit_hash = ''
@@ -85,13 +87,19 @@ def calculate_value(function: 'NativeFunction') -> str:
 # TODO(jwtan): Consider adding support for deleted/deprecated native functions.
 def main() -> None:
     current_version, base_version = get_versions()
+    assert current_version is not None
+    assert base_version is not None
     # print(current_version, base_version)
 
     current_commit_hash, base_commit_hash = get_commits(current_version, base_version)
+    assert current_commit_hash is not None
+    assert base_commit_hash is not None
     # print(current_commit_hash, base_commit_hash)
 
     current_temp_path = get_yaml(current_commit_hash)
     base_temp_path = get_yaml(base_commit_hash)
+    assert current_temp_path is not None
+    assert base_temp_path is not None
     # print(current_temp_path, base_temp_path)
 
     current_native_functions = parse_native_yaml(current_temp_path)
