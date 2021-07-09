@@ -65,6 +65,13 @@ namespace detail {
         ts = ts | x.key_set();
       }
     }
+    void operator()(at::ArrayRef<c10::optional<at::Tensor>> xs) {
+      for (const auto& x : xs) {
+        if (x.has_value()) {
+          ts = ts | x.value().key_set();
+        }
+      }
+    }
     void operator()(const at::Generator& gen) {
       if (gen.defined()) {
         ts = ts | gen.key_set();
@@ -131,6 +138,14 @@ public:
       } else if (C10_UNLIKELY(ivalue.isTensorList())) {
         for (const at::Tensor tensor : ivalue.toTensorList()) {
           ks = ks | tensor.key_set();
+        }
+      }
+      // Tensor?[] translates to a c10::List<IValue> so we need to peek inside
+      else if (C10_UNLIKELY(ivalue.isList())) {
+        for (const auto& elt : ivalue.toListRef()) {
+          if (elt.isTensor()) {
+            ks = ks | elt.toTensor().key_set();
+          }
         }
       }
     });

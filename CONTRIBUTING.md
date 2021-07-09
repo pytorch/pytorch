@@ -102,7 +102,7 @@ cd pytorch
 ```bash
 git pull --rebase
 git submodule sync --recursive
-git submodule update --init --recursive
+git submodule update --init --recursive --jobs 0
 ```
 
 If you want to have no-op incremental rebuilds (which are fast), see the section below titled "Make no-op build fast."
@@ -165,15 +165,15 @@ with `brew install cmake` if you are developing on MacOS or Linux system.
   git submodule deinit -f .
   git clean -xdf
   python setup.py clean
-  git submodule update --init --recursive # very important to sync the submodules
-  python setup.py develop                 # then try running the command again
+  git submodule update --init --recursive --jobs 0 # very important to sync the submodules
+  python setup.py develop                          # then try running the command again
   ```
   4. The main step within `python setup.py develop` is running `make` from the `build` directory. If you want to
   experiment with some environment variables, you can pass them into the command:
   ```bash
   ENV_KEY1=ENV_VAL1[, ENV_KEY2=ENV_VAL2]* python setup.py develop
   ```
-* If you run into issue running `git submodule update --init --recursive`. Please try the following:
+* If you run into issue running `git submodule update --init --recursive --jobs 0`. Please try the following:
   - If you encountered error such as
     ```
     error: Submodule 'third_party/pybind11' could not be updated
