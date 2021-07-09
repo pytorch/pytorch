@@ -72,7 +72,7 @@ Tensor to(
       .layout(layout)
       .device(device)
       .pinned_memory(pin_memory)
-      .merge_memory_format(optional_memory_format);
+      .memory_format(optional_memory_format);
 
   TORCH_CHECK(!options.has_layout() || self.layout() == options.layout(),
            "to(options) doesn't support converting to a different layout, "
