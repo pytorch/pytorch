@@ -5,9 +5,8 @@
 namespace at {
 
 namespace meta {
-TORCH_META_FUNC(glu) (
-    const Tensor& self, int64_t dim
-) {
+
+TORCH_META_FUNC(glu) (const Tensor& self, int64_t dim) {
   // this can't pass anyway because a 0-dimensional tensor has "size" 1, which
   // can't be evenly halved, but give a nicer error message here.
   TORCH_CHECK(self.dim() > 0, "glu does not support 0-dimensional tensors");
@@ -21,7 +20,9 @@ TORCH_META_FUNC(glu) (
   auto newSizes = self.sizes().vec();
   newSizes[wrap_dim] = selfSize;
   set_output(0, newSizes, {}, self.options(), {});
+  build_unary_op(maybe_get_output(), self);
 }
+
 } // namespace meta
 
 namespace native {
