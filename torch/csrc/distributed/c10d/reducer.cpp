@@ -405,6 +405,11 @@ void Reducer::mark_variable_ready_dense(size_t variable_index) {
           // The grad is modified and need to be written back.
           return true;
         }
+      } else {
+        // If grad and bucket view point to the same storage, no need to copy.
+        if (comm_hook_ == nullptr) {
+          bucket_view.div_(div_factor_);
+        }
       }
     } else {
       // Gradient is undefined. When find_unused_parameters=True, ensure it is
