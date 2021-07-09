@@ -649,11 +649,28 @@ static void round_kernel(TensorIteratorBase& iter) {
         });
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND(
-        kBFloat16, iter.common_dtype(), "round_vml_cpu", [&]() {
+        kBFloat16, iter.common_dtype(), "round_cpu", [&]() {
           cpu_kernel_vec(
               iter,
               [](scalar_t a) { return std::nearbyint(a); },
               [](Vectorized<scalar_t> x) { return x.round(); });
+        });
+  }
+}
+
+static void trunc_kernel(TensorIteratorBase& iter) {
+  if (c10::isIntegralType(iter.common_dtype(), /*includeBool=*/true)) {
+    AT_DISPATCH_INTEGRAL_TYPES_AND(
+        ScalarType::Bool, iter.common_dtype(), "trunc_cpu", [&]() {
+          cpu_kernel(iter, [](scalar_t a) -> scalar_t { return a; });
+        });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND(
+        kBFloat16, iter.common_dtype(), "trunc_cpu", [&]() {
+          cpu_kernel_vec(
+              iter,
+              [](scalar_t a) { return std::trunc(a); },
+              [](Vectorized<scalar_t> x) { return x.trunc(); });
         });
   }
 }
@@ -807,6 +824,8 @@ REGISTER_DISPATCH(special_i1e_stub, &CPU_CAPABILITY::i1e_kernel);
 REGISTER_DISPATCH(special_erfcx_stub, &CPU_CAPABILITY::erfcx_kernel);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(round_stub, &CPU_CAPABILITY::round_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(trunc_stub, &CPU_CAPABILITY::trunc_kernel);
 
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
@@ -849,8 +868,6 @@ IMPLEMENT_COMPLEX_KERNEL(sqrt)
 IMPLEMENT_COMPLEX_KERNEL(tan)
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_COMPLEX_KERNEL(tanh)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_FLOAT_KERNEL(trunc)
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_FLOAT_KERNEL(lgamma)
 
