@@ -151,7 +151,7 @@ Date:  February 1996
  * See note [3-Clause BSD License for the Cephes Math Library].
  */
 template <typename scalar_t, bool is_cuda=false>
-C10_HOST_DEVICE static inline scalar_t zeta(scalar_t x, scalar_t q) {
+C10_HOST_DEVICE static inline scalar_t zeta(scalar_t x, scalar_t q) __ubsan_ignore_float_divide_by_zero__ {
   using acc_t = at::acc_type<scalar_t, is_cuda>;
   const acc_t MACHEP = acc_t{1.11022302462515654042E-16};
   constexpr acc_t zero = acc_t{0.0};
