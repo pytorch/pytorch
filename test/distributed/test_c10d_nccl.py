@@ -1134,7 +1134,7 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
                 )
                 for i, j in zip(model.parameters(), ddp_model.parameters()):
                     # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                    self.assertEqualIgnoreType(i.grad, j.grad)
+                    self.assertEqualIgnoreType(i.grad, j.grad, rtol=1.3e-06, atol=5e-5)
 
             # Shuffle the input so that DDP input is different
             torch.manual_seed(1337 + iteration)
@@ -1777,7 +1777,7 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
             for i, j in zip(model.parameters(), ddp_model.parameters()):
                 self.assertTrue(i.grad is not None)
                 self.assertTrue(j.grad is not None)
-                self.assertEqual(i.grad, j.grad)
+                self.assertEqual(i.grad, j.grad, rtol=1.3e-06, atol=5e-5)
 
     # DDP works as expect when layer is checkpointed only once
     @requires_nccl()

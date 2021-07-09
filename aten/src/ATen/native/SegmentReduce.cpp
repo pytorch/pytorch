@@ -18,6 +18,10 @@ SegmentReductionType get_reduction_enum(const c10::string_view& reduce) {
     return SegmentReductionType::MAX;
   } else if (reduce == "mean") {
     return SegmentReductionType::MEAN;
+  } else if (reduce == "min") {
+    return SegmentReductionType::MIN;
+  } else if (reduce == "sum") {
+    return SegmentReductionType::SUM;
   } else {
     TORCH_CHECK(false, "unsopported reduction given! ", reduce);
   }
@@ -37,7 +41,7 @@ Tensor _segment_reduce_cpu_kernel(
   int64_t stride_count = data.numel() / data.size(axis);
   const auto* lengths_data = lengths.data_ptr<int64_t>();
 
-  AT_DISPATCH_ALL_TYPES_AND2(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
       kBFloat16, kHalf, data.scalar_type(), "_segment_reduce_cpu", ([&]() {
         auto* output_data = output.data_ptr<scalar_t>();
         const auto* values_data = data.data_ptr<scalar_t>();
@@ -49,9 +53,13 @@ Tensor _segment_reduce_cpu_kernel(
             if (initial.has_value()) {
               initial_value = initial.value().to<scalar_t>();
             } else if (reduction == SegmentReductionType::MAX) {
-              initial_value = std::numeric_limits<scalar_t>::lowest();
-            } else if (reduction == SegmentReductionType::MEAN) {
+              initial_value = -std::numeric_limits<scalar_t>::infinity();
+            } else if (
+                reduction == SegmentReductionType::MEAN ||
+                reduction == SegmentReductionType::SUM) {
               initial_value = 0;
+            } else if (reduction == SegmentReductionType::MIN) {
+              initial_value = std::numeric_limits<scalar_t>::infinity();
             }
 
             // ===== step2: apply reduction
@@ -64,8 +72,14 @@ Tensor _segment_reduce_cpu_kernel(
                 initial_value = at::_isnan(data)
                     ? data
                     : std::max<scalar_t>(initial_value, data);
-              } else if (reduction == SegmentReductionType::MEAN) {
+              } else if (
+                  reduction == SegmentReductionType::MEAN ||
+                  reduction == SegmentReductionType::SUM) {
                 initial_value = initial_value + data;
+              } else if (reduction == SegmentReductionType::MIN) {
+                initial_value = at::_isnan(data)
+                    ? data
+                    : std::min<scalar_t>(initial_value, data);
               }
             }
 
@@ -105,7 +119,7 @@ Tensor _segment_reduce_cpu_backward_kernel(
   const auto* lengths_data = lengths_contig.data_ptr<int64_t>();
 
   // TODO: Swtich to TensorIterator for better maintainablility and readability
-  AT_DISPATCH_ALL_TYPES_AND2(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
       kBFloat16,
       kHalf,
       data_contig.scalar_type(),
@@ -125,7 +139,8 @@ Tensor _segment_reduce_cpu_backward_kernel(
           for (int64_t l = 0; l < stride_count; ++l) {
             int64_t output_index = (i * stride_count) + l;
 
-            if (reduction == SegmentReductionType::MAX) {
+            if (reduction == SegmentReductionType::MAX ||
+                reduction == SegmentReductionType::MIN) {
               int64_t counter = 0;
               for (int64_t j = 0; j < lengths_data[i]; ++j) {
                 int64_t starting_index =
@@ -151,6 +166,13 @@ Tensor _segment_reduce_cpu_backward_kernel(
               }
             } else if (reduction == SegmentReductionType::MEAN) {
               auto grad_val = grad_data[output_index] / lengths_data[i];
+              for (int64_t j = 0; j < lengths_data[i]; ++j) {
+                int64_t starting_index =
+                    ((lengths_cum_sum + j) * stride_count) + l;
+                grad_input_data[starting_index] = grad_val;
+              }
+            } else if (reduction == SegmentReductionType::SUM) {
+              const auto& grad_val = grad_data[output_index];
               for (int64_t j = 0; j < lengths_data[i]; ++j) {
                 int64_t starting_index =
                     ((lengths_cum_sum + j) * stride_count) + l;

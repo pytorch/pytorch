@@ -48,6 +48,32 @@ struct type_caster<at::Tensor> {
   }
 };
 
+// torch._StorageBase <-> at::Storage
+template <>
+struct type_caster<at::Storage> {
+ public:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  PYBIND11_TYPE_CASTER(at::Storage, _("at::Storage"));
+
+  bool load(handle src, bool) {
+    PyObject* obj = src.ptr();
+    if (torch::isStorage(obj)) {
+      value = torch::createStorage(obj);
+      return true;
+    }
+    return false;
+  }
+
+  static handle
+  cast(const at::Storage& src, return_value_policy /* policy */, handle /* parent */) {
+    TORCH_CHECK(
+        false,
+        "NotImplementedError: pybind conversion of at::Storages from C++ to python not supported.");
+    // Storages are untyped, see: https://github.com/pytorch/pytorch/issues/47442
+    return handle(torch::createPyObject(src, caffe2::TypeMeta()));
+  }
+};
+
 template <>
 struct type_caster<at::Generator> {
  public:

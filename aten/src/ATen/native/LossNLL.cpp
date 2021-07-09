@@ -181,7 +181,7 @@ void nll_loss_forward_out_cpu_template(
   const auto n_classes = input.size(-1);
 
   TORCH_CHECK(
-      !weight.defined() || weight.numel() == n_classes,
+      !weight.defined() || (weight.dim() == 1 && weight.numel() == n_classes),
       "weight tensor should be defined either for all ",
       n_classes,
       " classes or no classes"
