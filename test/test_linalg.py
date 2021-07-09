@@ -5896,7 +5896,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         where f is `torch.addmv` or `torch.addmm`.
         `transpose_out` controls whether the out argument is in column-major order.
         `layout` controls whether `m` is converted to specified layout or not.
-        Custom behaviour only for torch.sparse_csr layout is implemented.
+        Custom behaviour is implemented only for torch.sparse_csr layout.
         """
         dtype = t.dtype
         numpy_dtype = dtype
