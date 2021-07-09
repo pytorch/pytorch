@@ -4297,7 +4297,7 @@ else:
     def test_bernoulli_p(self, device, dtype):
         for trivial_p in ([0, 1], [1, 0, 1, 1, 0, 1]):
             x = torch.tensor(trivial_p, dtype=dtype, device=device)
-            self.assertEqual(x.bernoulli().tolist(), trivial_p)
+            self.assertEqual(x.bernoulli(), torch.tensor(trivial_p).to(x))
 
         def isBinary(t):
             return torch.ne(t, 0).mul_(torch.ne(t, 1)).sum().item() == 0
@@ -4516,7 +4516,7 @@ else:
             actual = np.histogram(t.cpu().to(torch.double), np.arange(1, 100))[0]
             expected = stats.geom(p).pmf(np.arange(1, 99)) * size
             res = stats.chisquare(actual, expected)
-            self.assertEqual(res.pvalue, 1.0, atol=0.1, rtol=0)
+            self.assertEqual(res.pvalue, 1.0, atol=0.1, rtol=0, exact_dtype=False)
 
     def test_pairwise_distance_empty(self, device):
         shape = (2, 0)
