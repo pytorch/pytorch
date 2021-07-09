@@ -524,7 +524,7 @@ std::tuple<Tensor, Tensor> min(const Tensor& self, int64_t dim, bool keepdim) {
   TORCH_INTERNAL_ASSERT(self.is_quantized());
   Tensor min_indices = at::empty({0}, self.options().dtype(kLong));
   Tensor min = at::empty({0}, self.options().dtype(toUnderlying(self.scalar_type())));
-  at::min_fout(self.int_repr(), dim, keepdim, min, min_indices);
+  at::min_outf(self.int_repr(), dim, keepdim, min, min_indices);
   return std::tuple<Tensor, Tensor>(
       at::_make_per_tensor_quantized_tensor(min, self.q_scale(), self.q_zero_point()), min_indices);
 }
