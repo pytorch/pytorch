@@ -1248,23 +1248,6 @@ def fractional_max_pool3d_test(test_case):
             fullname='FractionalMaxPool3d_asymsize')
 
 
-def single_batch_reference_criterion_fn(*args):
-    """Reference function for criterion supporting no batch dimensions.
-
-    The criterion is passed the input and target in batched form with a single item.
-    The output is squeezed to compare with the no-batch input.
-    """
-    input, target = args[0], args[1]
-    extra_args = args[2:-1]
-    criterion = args[-1]
-
-    single_batch_input = input.unsqueeze(0)
-    single_batch_target = target.unsquueze(0)
-
-    output = criterion(single_batch_input, single_batch_target, *extra_args)
-    return output.sqeeuze(0)
-
-
 new_module_tests = [
     poissonnllloss_no_reduce_test(),
     bceloss_no_reduce_test(),
@@ -4813,6 +4796,42 @@ criterion_tests = [
         check_half=False,
     ),
 ]
+
+
+def single_batch_reference_criterion_fn(*args):
+    """Reference function for criterion supporting no batch dimensions.
+
+    The criterion is passed the input and target in batched form with a single item.
+    The output is squeezed to compare with the no-batch input.
+    """
+    criterion = args[-1]
+    single_batch_input_args = [input.unsqueeze(0) for input in args[:-1]]
+
+    output = criterion(*single_batch_input_args)
+    reduction = get_reduction(criterion)
+
+    if reduction == 'none':
+        return output.squeeze(0)
+    # reduction is 'sum' or 'mean' which results in a scalar
+    return output
+
+
+# Check that regression criterion work with no batch dimensions
+regression_criterion_no_batch = [
+    'L1Loss', 'MSELoss', 'PoissonNLLLoss', 'KLDivLoss', 'HuberLoss', 'SmoothL1Loss'
+]
+reductions = ['none', 'mean', 'sum']
+for regression_criterion, reduction in product(regression_criterion_no_batch,
+                                               reductions):
+    regression_test_info = dict(
+        fullname="{}_no_batch_dim_{}".format(regression_criterion, reduction),
+        constructor=lambda *args: getattr(nn, regression_criterion)(reduction=reduction),
+        input_size=(3, ),
+        target_fn=lambda: torch.randn(3),
+        reference_fn=single_batch_reference_criterion_fn,
+        test_cpp_api_parity=False,
+    )
+    criterion_tests.append(regression_test_info)
 
 
 class NNTestCase(TestCase):
