@@ -422,6 +422,9 @@ class TestNNAPI(TestCase):
     def test_linear(self):
         torch.manual_seed(29)
         self.check(torch.nn.Linear(16, 32), torch.randn(2, 16))
+        self.check(
+            torch.nn.Linear(16, 32), torch.randn(2, 16),
+            convert_args=[torch.zeros(0, 16)])
 
     def test_conv2d(self):
         cases = [
