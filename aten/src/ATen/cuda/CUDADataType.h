@@ -2,6 +2,7 @@
 
 #include <c10/core/ScalarType.h>
 
+#include <cuda.h>
 #include <library_types.h>
 
 namespace at {
@@ -44,7 +45,7 @@ template<> inline cudaDataType getCudaDataType<int>() {
 }
 #endif
 
-#if !defined(__HIP_PLATFORM_HCC__) || (defined(CUDA_VERSION) && CUDA_VERSION >= 11000)
+#if !defined(__HIP_PLATFORM_HCC__) && defined(CUDA_VERSION) && CUDA_VERSION >= 11000
 template<> inline cudaDataType getCudaDataType<int16_t>() {
   return CUDA_R_16I;
 }
@@ -79,7 +80,7 @@ inline cudaDataType ScalarTypeToCudaDataType(const c10::ScalarType& scalar_type)
       return CUDA_C_32F;
     case c10::ScalarType::ComplexDouble:
       return CUDA_C_64F;
-#if !defined(__HIP_PLATFORM_HCC__) || (defined(CUDA_VERSION) && CUDA_VERSION >= 11000)
+#if !defined(__HIP_PLATFORM_HCC__) && defined(CUDA_VERSION) && CUDA_VERSION >= 11000
     case c10::ScalarType::Short:
       return CUDA_R_16I;
     case c10::ScalarType::Long:
