@@ -1024,6 +1024,32 @@ void ComputeConstant(Node* n, int opset_version) {
       ProcessTimeSeriesNode(n);
       break;
     }
+    case ::c10::onnx::Size: {
+      if (ConstantValueMap::HasShape(n->input(0)->debugName())) {
+        auto input0_shape_size =
+            ConstantValueMap::GetShape(n->input(0)->debugName())
+                .value()
+                .sizes();
+        if (input0_shape_size.has_value()) {
+          auto input0_shape_value = input0_shape_size.value();
+          int64_t total_size = 1;
+          auto is_full_static = true;
+          for (auto i = 0; i < input0_shape_value.size(); i++) {
+            if (input0_shape_value[i].is_static()) {
+              total_size *= input0_shape_value[i].static_size();
+            } else {
+              is_full_static = false;
+              break;
+            }
+          }
+          if (is_full_static) {
+            auto f_final = onnx_constant_fold::IntToTensor(total_size);
+            ConstantValueMap::SetValue(n->output(0)->debugName(), f_final);
+          }
+        }
+      }
+      break;
+    }
     case ::c10::onnx::Slice: {
       ProcessSliceNode(n, opset_version);
       break;
@@ -1148,17 +1174,6 @@ void ProcessConstantValueMap(Node* n, int opset_version) {
 // Any additional post process that are specific to individual node kind.
 void SpecialPostProcess(Node* n) {
   switch (n->kind()) {
-    case ::c10::onnx::If: {
-      if (!IsBlockReturnTypeSame(n) && IsStaticConditionONNX(n)) {
-        auto cond = ConditionValueONNX(n);
-        auto block_idx = cond ? 0 : 1;
-        for (const auto i : c10::irange(n->outputs().size())) {
-          n->outputs()[i]->setType(
-              n->blocks()[block_idx]->outputs()[i]->type());
-        }
-      }
-      break;
-    }
     case ::c10::onnx::SequenceInsert: {
       // Special case when input sequence to SequenceInsert is empty.
       // onnx Sequence type requires element type to be set.
@@ -1231,12 +1246,7 @@ void SpecialPostProcess(Node* n) {
       };
 
       if (seq_node && t_type && t_type->scalarType()) {
-        if (seq_node->kind() == prim::ListConstruct &&
-            seq_node->inputs().size() != 0) {
-          // When prim::ListConstruct is not yet converted to
-          // onnx::SequenceEmpty
-          n->output()->setType(ListType::create(t_type));
-        } else if (seq_node->kind() == ::c10::onnx::SequenceEmpty) {
+        if (seq_node->kind() == ::c10::onnx::SequenceEmpty) {
           update_sequence_empty_dtype(seq_node, t_type);
         } else if (seq_node->kind() == prim::Param) {
           // Try to find original onnx::SequenceEmpty node in outer block.
@@ -1245,6 +1255,7 @@ void SpecialPostProcess(Node* n) {
             update_sequence_empty_dtype(seq_empty_n, t_type);
           }
         }
+        n->output()->setType(ListType::create(t_type));
       }
 
       break;

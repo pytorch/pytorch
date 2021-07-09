@@ -66,11 +66,12 @@ void Message::setId(int64_t id) {
   id_ = id;
 }
 
-std::vector<c10::Storage> Message::getStorages() const {
-  std::vector<c10::Storage> storages;
+std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> Message::getStorages()
+    const {
+  std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> storages;
   storages.reserve(tensors_.size());
   for (const auto& tensor : tensors_) {
-    storages.emplace_back(tensor.storage());
+    storages.emplace_back(tensor.storage().getWeakStorageImpl());
   }
   return storages;
 }
