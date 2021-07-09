@@ -68,7 +68,7 @@ struct ReduceConfig {
     : element_size_bytes(element_size_bytes)
     , num_inputs(num_inputs)
     , num_outputs(num_outputs) {}
-
+  
   int element_size_bytes;
   int num_inputs;
   int num_outputs;
@@ -85,8 +85,10 @@ struct ReduceConfig {
   bool vectorize_input = false;
   int output_vec_size = 1;
 
-  void set_block_dimension(int64_t dim0, int64_t dim1) {
-    const int max_num_threads = MAX_NUM_THREADS / output_vec_size;
+  void set_block_dimension(int64_t dim0, int64_t dim1, bool is_complex_double=false) {
+    //const int max_num_threads = MAX_NUM_THREADS / output_vec_size;
+    const int max_num_threads = is_complex_double ? MAX_NUM_THREADS / (output_vec_size * 2) : MAX_NUM_THREADS / output_vec_size;
+    
     int dim0_pow2 = dim0 < max_num_threads ? static_cast<int>(last_pow2(dim0)) : max_num_threads;
     int dim1_pow2 = dim1 < max_num_threads ? static_cast<int>(last_pow2(dim1)) : max_num_threads;
     block_width = std::min(dim0_pow2, int(at::cuda::warp_size()));
@@ -1023,8 +1025,11 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
     }
   }
 
+  bool is_complex_double = (std::is_same<scalar_t, c10::complex<double>>::value);
+
   // Adjust block_width and block_height
-  config.set_block_dimension(dim0, dim1);
+  //config.set_block_dimension(dim0, dim1);
+  config.set_block_dimension(dim0, dim1, is_complex_double);
 
   int block_width = config.block_width;
   int block_height = config.block_height;
@@ -1105,7 +1110,13 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
   reduce.accumulate = iter.should_accumulate();
   reduce.final_output = iter.is_final_output();
 
-  launch_reduce_kernel<ReduceConfig::MAX_NUM_THREADS>(config, reduce);
+  //launch_reduce_kernel<ReduceConfig::MAX_NUM_THREADS>(config, reduce);
+   
+  if (is_complex_double) {
+    launch_reduce_kernel<ReduceConfig::MAX_NUM_THREADS / 2>(config, reduce);
+  } else {
+    launch_reduce_kernel<ReduceConfig::MAX_NUM_THREADS>(config, reduce);
+  }
 }
 
 }} // namespace at::native
