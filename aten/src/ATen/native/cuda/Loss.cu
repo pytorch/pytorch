@@ -273,8 +273,8 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_2d(
 }
 
 void nll_loss_forward_out_cuda_template(
-    Tensor& output,
-    Tensor& total_weight,
+    const Tensor& output,
+    const Tensor& total_weight,
     const Tensor& input,
     const Tensor& target,
     const Tensor& weight,

@@ -39,8 +39,8 @@ TORCH_META_FUNC(nll_loss_forward)
       " but got weight tensor of shape: ",
       weight.sizes());
 
-  set_output(0, {0}, self.options());
-  set_output(1, {0}, self.options());
+  set_output(0, {}, self.options());
+  set_output(1, {}, self.options());
 }
 } // namespace meta
 
@@ -203,8 +203,6 @@ void nll_loss_forward_out_cpu_template(
     const Tensor& weight,
     int64_t reduction,
     int64_t ignore_index) {
-  total_weight.resize_({});
-
   AT_DISPATCH_FLOATING_TYPES_AND(
       ScalarType::BFloat16, input.scalar_type(), "nll_loss_out_frame", [&] {
         if (target.scalar_type() == kByte) {
