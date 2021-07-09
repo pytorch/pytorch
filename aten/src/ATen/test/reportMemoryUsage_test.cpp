@@ -1,6 +1,7 @@
 #include "reportMemoryUsage.h"
 
 #include <gtest/gtest.h>
+
 #include <c10/core/CPUAllocator.h>
 
 TEST(DefaultCPUAllocator, check_reporter) {

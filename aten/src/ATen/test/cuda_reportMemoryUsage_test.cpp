@@ -1,14 +1,15 @@
 #include "reportMemoryUsage.h"
 
-#include <c10/cuda/CUDACachingAllocator.h>
 #include <gtest/gtest.h>
+
+#include <c10/cuda/CUDACachingAllocator.h>
 
 TEST(DeviceCachingAllocator, check_reporter) {
   auto reporter = std::make_shared<TestMemoryReportingInfo>();
   c10::DebugInfoGuard guard(c10::DebugInfoKind::PROFILER_STATE, reporter);
 
-  auto _200kb = 200*1024;
-  auto _500mb = 500*1024*1024;
+  auto _200kb = 200 * 1024;
+  auto _500mb = 500 * 1024 * 1024;
 
   auto allocator = c10::cuda::CUDACachingAllocator::get();
 
@@ -45,8 +46,11 @@ TEST(DeviceCachingAllocator, check_reporter) {
   EXPECT_EQ(alloc1_true_ptr, r.ptr);
   EXPECT_EQ(-alloc1_true_alloc_size, r.alloc_size);
   EXPECT_EQ(alloc2_true_alloc_size, r.allocated_size);
-  // alloc2 remain, is is a free, so it shouldn't reserve more memory.
-  EXPECT_TRUE(alloc2_true_alloc_size <= r.reserved_size && r.reserved_size <= max_reserved);
+  // alloc2 remain, it is a memory free operation, so it shouldn't reserve more
+  // memory.
+  EXPECT_TRUE(
+      alloc2_true_alloc_size <= r.reserved_size &&
+      r.reserved_size <= max_reserved);
   EXPECT_TRUE(r.device.is_cuda());
 
   alloc2.clear();
