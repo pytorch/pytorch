@@ -20,7 +20,10 @@ c10::optional<IntAttr::ValueType> getConstantInt(Node& node, size_t pos) {
 }
 
 c10::optional<IntAttr::ValueType> normalizeArithNode(Node& node) {
-  TORCH_INTERNAL_ASSERT(node.inputs().size() == 2);
+  if (node.inputs().size() != 2) {
+    return {};
+  }
+
   if (node.kind() == aten::mul || node.kind() == aten::add) {
     if (auto i = getConstantInt(node, 0)) {
       node.permuteInputs({1, 0});
