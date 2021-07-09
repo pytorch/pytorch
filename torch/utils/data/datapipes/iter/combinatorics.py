@@ -31,7 +31,8 @@ class SamplerIterDataPipe(IterDataPipe[T_co]):
         self.sampler_args = () if sampler_args is None else sampler_args
         self.sampler_kwargs = {} if sampler_kwargs is None else sampler_kwargs
         # https://github.com/python/mypy/pull/9629 will solve
-        self.sampler = sampler(data_source=self.datapipe, *self.sampler_args, **self.sampler_kwargs)  # type: ignore[misc]
+        self.sampler = sampler(data_source=self.datapipe, *self.sampler_args,
+                               **self.sampler_kwargs)  # type: ignore[misc]
 
     def __iter__(self) -> Iterator[T_co]:
         return iter(self.sampler)
@@ -65,7 +66,9 @@ class ShuffleIterDataPipe(IterDataPipe[T_co]):
 
     args:
         datapipe: The IterDataPipe being shuffled
-        buffer_size: The buffer size for shuffling
+        buffer_size: The buffer size for shuffling (default to 10000)
+        unbatch_level: Specifies if it necessary to unbatch source data before
+            applying the shuffle
     """
     datapipe: IterDataPipe[T_co]
     buffer_size: int
@@ -74,19 +77,29 @@ class ShuffleIterDataPipe(IterDataPipe[T_co]):
     def __init__(self,
                  datapipe: IterDataPipe[T_co],
                  *,
-                 buffer_size: int) -> None:
+                 buffer_size: int = 10000,
+                 unbatch_level: int = 0
+                 ) -> None:
         super().__init__()
         assert buffer_size > 0, "buffer_size should be larger than 0"
-        self.datapipe = datapipe
+        if unbatch_level == 0:
+            self.datapipe = datapipe
+        else:
+            self.datapipe = datapipe.unbatch(unbatch_level=unbatch_level)
         self.buffer_size = buffer_size
         self._buffer = []
 
+    def buffer_replace(self, x):
+        idx = random.randint(0, self.buffer_size - 1)
+        val = self._buffer[idx]
+        self._buffer[idx] = x
+        return val
+
     def __iter__(self) -> Iterator[T_co]:
+        # TODO: Buffer is global, should be per __iter__ !!!
         for x in self.datapipe:
             if len(self._buffer) == self.buffer_size:
-                idx = random.randint(0, self.buffer_size - 1)
-                yield self._buffer[idx]
-                self._buffer[idx] = x
+                yield self.buffer_replace(x)
             else:
                 self._buffer.append(x)
         random.shuffle(self._buffer)
