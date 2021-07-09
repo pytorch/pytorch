@@ -524,12 +524,13 @@ def async_cuda_nested_add(to, x, y, z):
 # A custom Python class that contains a tensor, needed to see if we correctly
 # use the Python pickler to extract tensors from non-IValue-convertible types.
 class TensorWrapper:
-    __slots__ = ("tensor", "lock")
+    __slots__ = ("tensor", "lock", "event")
 
     def __init__(self, t):
         self.tensor = t
         # Add one non-picklable field, to ensure it's ignored/skipped.
         self.lock = Lock()
+        self.event = torch.cuda.Event(enable_timing=True)
 
     def increase(self, v):
         with self.lock:
@@ -537,8 +538,8 @@ class TensorWrapper:
 
     def sum(self):
         with self.lock:
+            self.event.record()
             return self.tensor.sum()
-
 
 # Copied from test/test_cuda.py.
 _cycles_per_ms = None
@@ -1067,6 +1068,7 @@ class RpcTest(RpcAgentTestFixture):
                 self.assertEqual(val, 0)
 
     def test_wait_all_workers(self):
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
         rpc.init_rpc(
             name="worker%d" % self.rank,
             backend=self.rpc_backend,
@@ -1081,9 +1083,14 @@ class RpcTest(RpcAgentTestFixture):
         # worker1/2 calls this immediately and has some works after it.
         # worker3 calls this immediately and has no more work.
         rpc.api._wait_all_workers()
+
+        # Wait before proceeding to shutdown to ensure worker0 RPCs make
+        # it through to other workers.
+        dist.barrier()
         rpc.shutdown(graceful=False)
 
     def test_wait_all_workers_twice(self):
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
         rpc.init_rpc(
             name="worker%d" % self.rank,
             backend=self.rpc_backend,
@@ -1099,6 +1106,10 @@ class RpcTest(RpcAgentTestFixture):
         # worker3 calls this immediately and has no more work.
         rpc.api._wait_all_workers()
         rpc.api._wait_all_workers()
+
+        # Wait before proceeding to shutdown to ensure worker0 RPCs make
+        # it through to other workers.
+        dist.barrier()
         rpc.shutdown(graceful=False)
 
     @dist_init
@@ -4056,6 +4067,48 @@ class RpcTest(RpcAgentTestFixture):
             with self.assertRaisesRegex(RuntimeError, "User RRefs require 'dist_autograd_ctx_id' to be specified"):
                 rref.backward()
 
+    @dist_init(setup_rpc=False)
+    def test_shutdown_errors(self):
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=self.rpc_backend_options,
+        )
+
+        if self.rank != 0:
+            og_func = rpc.api._broadcast_to_followers
+            og_rref_func = rpc.api._delete_all_user_and_unforked_owner_rrefs
+
+            # Monkey-patch _broadcast_to_followers to fail, which would ensure
+            # _all_gather on leader raises an exception.
+            def raise_error(sequence_id, objects_map):
+                og_func(sequence_id, objects_map)
+                raise RuntimeError('simulation')
+
+            # Monkey-patch _delete_all_user_and_unforked_owner_rrefs to fail,
+            # which would ensure barrier is not called on followers.
+            def rref_error():
+                raise RuntimeError('simulation rref')
+
+            try:
+                rpc.api._broadcast_to_followers = raise_error
+                rpc.api._delete_all_user_and_unforked_owner_rrefs = rref_error
+                with self.assertRaisesRegex(RuntimeError, 'simulation rref'):
+                    rpc.shutdown()
+            finally:
+                rpc.api._broadcast_to_followers = og_func
+                rpc.api._delete_all_user_and_unforked_owner_rrefs = og_rref_func
+        else:
+            with self.assertRaisesRegex(RuntimeError, 'timed out in _all_gather'):
+                rpc.shutdown()
+
+        dist.barrier()
+
+
 class CudaRpcTest(RpcAgentTestFixture):
 
     @skip_if_lt_x_gpu(2)
@@ -4569,7 +4622,6 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
     def test_rref_proxy_timeout(self):
         for rpc_api in ["rpc_sync", "rpc_async", "remote"]:
             self._test_rref_proxy_timeout(rpc_api)
-
 
 class MyConvNetForMNIST(nn.Module):
     def __init__(self, device):

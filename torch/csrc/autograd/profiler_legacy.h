@@ -500,6 +500,7 @@ struct TORCH_API TLSProfilerGuard {
     enableProfilerLegacy(cfg);
   }
   ~TLSProfilerGuard() {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     thread_event_lists event_lists = disableProfilerLegacy(profilerDisableOptions_);
     if (cb_) {
       try {
@@ -525,6 +526,7 @@ TORCH_API std::vector<std::string> callstackStr(const std::vector<FileLineFunc>&
 TORCH_API std::vector<std::vector<int64_t>> inputSizes(const at::RecordFunction& fn);
 
 struct TORCH_API ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit ProfilerThreadLocalState(const ProfilerConfig& config)
       : config_(config), remoteProfiledEvents_{c10::nullopt} {}
   ~ProfilerThreadLocalState() override = default;
