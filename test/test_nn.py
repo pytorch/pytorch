@@ -13842,22 +13842,20 @@ class TestNNDeviceType(NNTestCase):
 
     def test_upsamplingNearest2d(self, device):
         for memory_format in [torch.contiguous_format, torch.channels_last]:
-            m = nn.Upsample(size=4, mode='nearest')
             in_t = torch.ones(1, 2, 2, 2, device=device).contiguous(memory_format=memory_format)
             in_uint8_t = torch.ones(1, 2, 2, 2, dtype=torch.uint8, device=device).contiguous(memory_format=memory_format)
             with warnings.catch_warnings(record=True) as w:
-                out_t = m(in_t)
-                out_uint8_t = m(in_uint8_t)
+                out_t = F.interpolate(in_t, size=4, mode='nearest')
+                out_uint8_t = F.interpolate(in_uint8_t, size=4, mode='nearest')
             self.assertEqual(torch.ones(1, 2, 4, 4, device=device), out_t)
             self.assertEqual(torch.ones(1, 2, 4, 4, dtype=torch.uint8, device=device), out_uint8_t)
             # Assert that memory format is carried through to the output
             self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
 
             # test forward when input's height is not same as width
-            m = nn.Upsample(size=(4, 2), mode='nearest')
             in_t = torch.ones(1, 2, 2, 1, device=device).contiguous(memory_format=memory_format).requires_grad_()
             with warnings.catch_warnings(record=True) as w:
-                out_t = m(in_t)
+                out_t = F.interpolate(in_t, size=(4, 2), mode='nearest')
             self.assertEqual(torch.ones(1, 2, 4, 2, device=device), out_t)
             self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
 
@@ -13882,8 +13880,8 @@ class TestNNDeviceType(NNTestCase):
                 a_cuda = torch.randn(2, 2, 3, 4, device=device).contiguous(memory_format=memory_format).requires_grad_()
                 a_cpu = a_cuda.detach().cpu().requires_grad_()
 
-                out_cuda = torch.nn.functional.interpolate(a_cuda, scale_factor=2, mode='nearest')
-                out_cpu = torch.nn.functional.interpolate(a_cpu, scale_factor=2, mode='nearest')
+                out_cuda = F.interpolate(a_cuda, scale_factor=2, mode='nearest')
+                out_cpu = F.interpolate(a_cpu, scale_factor=2, mode='nearest')
 
                 self.assertEqual(out_cpu.cuda(), out_cuda)
 
@@ -13901,11 +13899,10 @@ class TestNNDeviceType(NNTestCase):
             for memory_format in [torch.contiguous_format, torch.channels_last]:
                 # test float scale factor up & downsampling
                 for scale_factor in [0.5, 1.5, 2]:
-                    m = nn.Upsample(scale_factor=scale_factor, **kwargs)
                     in_t = torch.ones(1, 2, 2, 2, device=device).contiguous(memory_format=memory_format).requires_grad_()
                     out_size = int(math.floor(in_t.shape[-1] * scale_factor))
                     with warnings.catch_warnings(record=True) as w:
-                        out_t = m(in_t)
+                        out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
                     self.assertEqual(torch.ones(1, 2, out_size, out_size, device=device), out_t.data)
                     # Assert that memory format is carried through to the output
                     self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
