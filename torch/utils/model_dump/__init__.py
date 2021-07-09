@@ -222,6 +222,7 @@ def get_model_info(
         version = zf.read(path_prefix + "/version").decode("utf-8").strip()
 
         def get_pickle(name):
+            assert path_prefix is not None
             with zf.open(path_prefix + f"/{name}.pkl") as handle:
                 raw = torch.utils.show_pickle.DumpUnpickler(handle, catch_invalid_utf8=True).load()
                 return hierarchical_pickle(raw)
