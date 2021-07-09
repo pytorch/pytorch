@@ -708,7 +708,7 @@ static inline Vectorized<T> bitwise_binary_op(const Vectorized<T> &a, const Vect
 template<class T, typename std::enable_if_t<!std::is_base_of<Vectorizedi, Vectorized<T>>::value, int> = 0>
 inline Vectorized<T> operator&(const Vectorized<T>& a, const Vectorized<T>& b) {
   // We enclose _mm512_and_si512 or _mm256_and_si256 with lambda because it is always_inline
-#if defined(CPU_CAPABILITY_AVX2)  
+#if defined(CPU_CAPABILITY_AVX2)
   return bitwise_binary_op(a, b, [](int_vector a, int_vector b) { return _mm256_and_si256(a, b); });
 #elif defined(CPU_CAPABILITY_AVX512)
   return bitwise_binary_op(a, b, [](int_vector a, int_vector b) { return _mm512_and_si512(a, b); });
@@ -717,7 +717,7 @@ inline Vectorized<T> operator&(const Vectorized<T>& a, const Vectorized<T>& b) {
 template<class T, typename std::enable_if_t<!std::is_base_of<Vectorizedi, Vectorized<T>>::value, int> = 0>
 inline Vectorized<T> operator|(const Vectorized<T>& a, const Vectorized<T>& b) {
   // We enclose _mm512_or_si512 or _mm256_or_si256 with lambda because it is always_inline
-#if defined(CPU_CAPABILITY_AVX2)  
+#if defined(CPU_CAPABILITY_AVX2)
   return bitwise_binary_op(a, b, [](int_vector a, int_vector b) { return _mm256_or_si256(a, b); });
 #elif defined(CPU_CAPABILITY_AVX512)
   return bitwise_binary_op(a, b, [](int_vector a, int_vector b) { return _mm512_or_si512(a, b); });
@@ -726,7 +726,7 @@ inline Vectorized<T> operator|(const Vectorized<T>& a, const Vectorized<T>& b) {
 template<class T, typename std::enable_if_t<!std::is_base_of<Vectorizedi, Vectorized<T>>::value, int> = 0>
 inline Vectorized<T> operator^(const Vectorized<T>& a, const Vectorized<T>& b) {
   // We enclose _mm512_xor_si512 or _mm256_xor_si256 with lambda because it is always_inline
-#if defined(CPU_CAPABILITY_AVX2)  
+#if defined(CPU_CAPABILITY_AVX2)
   return bitwise_binary_op(a, b, [](int_vector a, int_vector b) { return _mm256_xor_si256(a, b); });
 #elif defined(CPU_CAPABILITY_AVX512)
   return bitwise_binary_op(a, b, [](int_vector a, int_vector b) { return _mm512_xor_si512(a, b); });
