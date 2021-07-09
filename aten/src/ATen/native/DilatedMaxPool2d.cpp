@@ -70,11 +70,11 @@ bool ceil_mode) {
   if (input.ndimension() == 3) {
     set_output(0, {nInputPlane, outputHeight, outputWidth}, {}, input.options().memory_format(memory_format), maybe_names);
     /* indices will contain the locations for each output point */
-    set_output(1, {nInputPlane, outputHeight, outputWidth}, {}, input.options().dtype(kLong), maybe_names);
+    set_output(1, {nInputPlane, outputHeight, outputWidth}, {}, input.options().memory_format(memory_format).dtype(kLong), maybe_names);
   } else {
     set_output(0, {nbatch, nInputPlane, outputHeight, outputWidth}, {}, input.options().memory_format(memory_format), maybe_names);
     /* indices will contain the locations for each output point */
-    set_output(1, {nbatch, nInputPlane, outputHeight, outputWidth}, {}, input.options().dtype(kLong), maybe_names);
+    set_output(1, {nbatch, nInputPlane, outputHeight, outputWidth}, {}, input.options().memory_format(memory_format).dtype(kLong), maybe_names);
   }
 }
 
@@ -110,9 +110,6 @@ const Tensor& indices) {
     "max_pool2d: dilation must be either a single int, or a tuple of two ints");
   const int dilationH = safe_downcast<int, int64_t>(dilation[0]);
   const int dilationW = dilation.size() == 1 ? dilationH : safe_downcast<int, int64_t>(dilation[1]);
-
-  TORCH_CHECK((input.ndimension() == 3 || input.ndimension() == 4),
-    "non-empty 3D or 4D (batch mode) tensor expected for input");
 
   TORCH_CHECK(input.dtype() == gradOutput.dtype(),
     "expected dtype ", input.dtype(), " for `gradOutput` but got dtype ", gradOutput.dtype());
