@@ -232,6 +232,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._python_dispatch.__get__,
         Tensor._conj,
         Tensor._conj_physical,
+        Tensor._neg_view,
     }
 
 
@@ -540,6 +541,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.linalg.inv_ex: lambda input, check_errors=False, out=None: -1,
         torch.is_complex: lambda input: -1,
         torch.is_conj: lambda input: -1,
+        torch.is_neg: lambda input: -1,
         torch.is_distributed: lambda input: -1,
         torch.is_inference: lambda input: -1,
         torch.is_floating_point: lambda input: -1,

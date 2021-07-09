@@ -62,7 +62,6 @@ TORCH_LIBRARY_IMPL(aten, Conjugate, m) {
   m.impl("view", torch::CppFunction::makeFallthrough());
   m.impl("_unsafe_view", torch::CppFunction::makeFallthrough());
   m.impl("reshape", torch::CppFunction::makeFallthrough());
-  m.impl("_unsafe_view", torch::CppFunction::makeFallthrough());
   m.impl("mm", torch::CppFunction::makeFallthrough());
   m.impl("addmm", torch::CppFunction::makeFallthrough());
   m.impl("mm.out", torch::CppFunction::makeFromBoxedFunction<&conjugateFallbackToHandleOnlyMutableInputs>());
