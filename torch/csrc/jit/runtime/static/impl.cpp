@@ -854,8 +854,10 @@ float StaticRuntime::benchmark_model(
 bool display_ivalue(const IValue& iv) {
   if (iv.isTensor()) {
     std::cout << "Tensor " << iv.toTensor().toString() << " {";
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (auto i = 0; i < iv.toTensor().sizes().size(); ++i) {
       std::cout << iv.toTensor().sizes()[i];
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       if (iv.toTensor().sizes().size() > i + 1) {
         std::cout << ", ";
       }
@@ -887,6 +889,7 @@ bool display_ivalue(const IValue& iv) {
 void display_pnode_info(const ProcessedNode& pnode) {
   pnode.node()->print(std::cout, 0, nullptr, false);
   const std::vector<const IValue*>& inputs = pnode.inputs();
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (auto i = 0; i < inputs.size(); ++i) {
     std::cout << "\ti" << i << ": ";
     if (!display_ivalue(*inputs[i])) {
@@ -894,6 +897,7 @@ void display_pnode_info(const ProcessedNode& pnode) {
     }
   }
   const std::vector<IValue>& outputs = pnode.outputs();
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (auto i = 0; i < outputs.size(); ++i) {
     std::cout << "\to" << i << ": ";
     if (!display_ivalue(outputs[i])) {
