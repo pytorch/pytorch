@@ -110,6 +110,7 @@ class TORCH_API SimpleIREvaluator : public CodeGen {
 
   template <typename... Ts>
   void operator()(const Ts&... ts) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<CallArg> args({CallArg(ts)...});
     call(args);
   }
@@ -138,15 +139,19 @@ class ExprEval {
   ExprEval(const ExprHandle& expr, Ts... ts)
       : ExprEval(expr, {BufferArg(ts)...}) {}
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   ExprEval(const ExprHandle& expr, const std::vector<BufferArg>& buffer_args)
       : dtype_(expr.dtype()) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<BufferArg> buffer_args_extended = buffer_args;
     Placeholder ret_buf("ret_val", dtype_, {1});
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<const Expr*> indices;
     const Expr* zero = new IntImm(0);
     for (size_t i = 0; i < ret_buf.data()->ndim(); i++) {
       indices.push_back(zero);
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Stmt* store_stmt =
         // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
         new Store(ret_buf.data(), indices, expr.node());
@@ -178,6 +183,7 @@ class ExprEval {
   }
 
   void call(const std::vector<CallArg>& call_args) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<CallArg> call_args_extended = call_args;
     switch (dtype_.scalar_type()) {
 #define TYPE_CASE(Type, Name)                           \
@@ -191,6 +197,7 @@ class ExprEval {
       AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
 #undef TYPE_CASE
       case ScalarType::Bool: {
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         std::vector<unsigned char> ret_val_arg(1);
         // NOLINTNEXTLINE(modernize-use-emplace)
         call_args_extended.push_back(CallArg(ret_val_arg.data()));
@@ -203,6 +210,7 @@ class ExprEval {
   }
 
   void call_raw(const std::vector<void*>& args) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<void*> args_extended = args;
     switch (dtype_.scalar_type()) {
 #define TYPE_CASE(Type, Name)                    \
@@ -215,6 +223,7 @@ class ExprEval {
       AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
 #undef TYPE_CASE
       case ScalarType::Bool: {
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         std::vector<unsigned char> ret_val_arg(1);
         args_extended.push_back(ret_val_arg.data());
         codegen_->call_raw(args_extended);

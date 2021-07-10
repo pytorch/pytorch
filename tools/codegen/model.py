@@ -640,6 +640,15 @@ class BackendIndex:
             return None
         return self.index[f.func.name]
 
+    def native_function_class_name(self) -> Optional[str]:
+        if self.external:
+            return f'{str(self.dispatch_key)}NativeFunctions'
+        else:
+            # TODO: This discrepancy isn't required; we could also generated
+            # a class for in-tree kernels. It'll just require carefully
+            # updating every kernel definition + callsite of every in-tree aten kernel.
+            return None
+
 
 # The function schema is undoubtedly the most important data structure
 # in all of the codegen, as it defines the type signature for operators,

@@ -26,6 +26,7 @@ struct TORCH_API InterpreterSession {
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Obj self; // when retreived from a PythonMovable this will be set.
   InterpreterSession(InterpreterSession&&) noexcept = default;
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   ~InterpreterSession();
   Obj global(const char* module, const char* name) {
     TORCH_DEPLOY_TRY
@@ -186,6 +187,7 @@ struct TORCH_API ReplicatedObjImpl {
       PickledObject data,
       InterpreterManager* manager)
       : object_id_(object_id), data_(data), manager_(manager) {}
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   ~ReplicatedObjImpl();
   void unload(const Interpreter* on_this_interpreter);
   int64_t object_id_;
@@ -237,8 +239,9 @@ class PythonMethodWrapper : public torch::IMethod {
   // ReplicatedObj which represents a python method, and
   // is therefore callable and has argument names accessible.
  public:
+  // TODO(whc) make bound method pickleable, then directly construct from that
   PythonMethodWrapper(
-      torch::deploy::ReplicatedObj& model,
+      torch::deploy::ReplicatedObj model,
       std::string method_name)
       : model_(std::move(model)), method_name_(std::move(method_name)) {}
 
