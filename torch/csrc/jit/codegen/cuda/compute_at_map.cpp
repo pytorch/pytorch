@@ -12,33 +12,45 @@ namespace fuser {
 namespace cuda {
 namespace {
 
-//! Class to figure out how many non-broadcast axes were used to produce an iter
-//! domain. This is important for figuring out what the correct broadcasted
-//! extent is of an iteration domain.
+//! Class to figure out how many non-broadcast axes and how many broadcast axes
+//! were used to produce an iter domain. This is important for figuring out what
+//! the correct broadcasted extent is of an iteration domain.
 //!
 //! When GpuLower is available, trivial reductions are not counted as
 //! concrete domains so that they should not be used to generate
 //! for-loops.
-class ConcreteInputCounter : public IterVisitor {
+class InputDomainCounter : public IterVisitor {
  public:
-  // Returns number of non-braodcast non-reduction iteration domains used to
-  // generate the iteration domains in provided target domain.
-  static std::unordered_map<IterDomain*, int> produceCounts(
+  // Returns number of {non-braodcast non-reduction iteration domains, broadcast
+  // and trivial reduction domains} used to generate the iteration domains in
+  // provided target domain.
+  static std::unordered_map<IterDomain*, std::pair<int, int>> produceCounts(
       const std::vector<IterDomain*>& domain,
       GpuLower* gpu_lower) {
-    std::unordered_map<IterDomain*, int> count_map;
     if (domain.empty()) {
-      return count_map;
+      return std::unordered_map<IterDomain*, std::pair<int, int>>();
     }
-    ConcreteInputCounter counter(domain, gpu_lower);
-    std::transform(
-        counter.concrete_domain_set_.begin(),
-        counter.concrete_domain_set_.end(),
-        std::inserter(count_map, count_map.begin()),
-        [](const std::pair<IterDomain*, std::unordered_set<IterDomain*>>&
-               entry) {
-          return std::make_pair(entry.first, entry.second.size());
-        });
+
+    InputDomainCounter counter(domain);
+
+    std::unordered_map<IterDomain*, std::pair<int, int>> count_map;
+    for (auto entry : counter.domain_set_) {
+      auto id = entry.first;
+      auto input_id_set = entry.second;
+      int concrete_counts = 0;
+      int broadcast_counts = 0;
+      for (auto input_id : input_id_set) {
+        if (input_id->isBroadcast() ||
+            (gpu_lower &&
+             gpu_lower->trivialReductionInfo().isDerived(input_id))) {
+          broadcast_counts++;
+        } else {
+          concrete_counts++;
+        }
+      }
+      count_map[id] = {concrete_counts, broadcast_counts};
+    }
+
     // Inputs may be root domains which wouldn't have any entries if no exprs
     // were traversed, so manually insert their count
     for (auto id : domain) {
@@ -46,37 +58,32 @@ class ConcreteInputCounter : public IterVisitor {
         count_map[id] =
             (id->isBroadcast() ||
              (gpu_lower && gpu_lower->trivialReductionInfo().isDerived(id)))
-            ? 0
-            : 1;
+            ? std::make_pair(0, 1)
+            : std::make_pair(1, 0);
       }
     }
     return count_map;
   }
 
  private:
-  ConcreteInputCounter(
-      const std::vector<IterDomain*>& domain_,
-      GpuLower* gpu_lower)
-      : gpu_lower_(gpu_lower) {
+  InputDomainCounter(const std::vector<IterDomain*>& domain_) {
     traverseFrom(
         domain_[0]->fusion(),
         std::vector<Val*>(domain_.begin(), domain_.end()));
   }
 
+ private:
   std::unordered_set<IterDomain*>& getEntry(IterDomain* id) {
-    auto concrete_set_it = concrete_domain_set_.find(id);
-    if (concrete_set_it == concrete_domain_set_.end()) {
-      concrete_set_it =
-          concrete_domain_set_
+    auto domain_set_it = domain_set_.find(id);
+    if (domain_set_it == domain_set_.end()) {
+      domain_set_it =
+          domain_set_
               .emplace(std::make_pair(id, std::unordered_set<IterDomain*>()))
               .first;
-      if (!id->isBroadcast() &&
-          (gpu_lower_ && !gpu_lower_->trivialReductionInfo().isDerived(id))) {
-        concrete_set_it->second.emplace(id);
-      }
+      domain_set_it->second.emplace(id);
     }
 
-    return concrete_set_it->second;
+    return domain_set_it->second;
   }
 
   void handle(Expr* expr) override {
@@ -98,13 +105,11 @@ class ConcreteInputCounter : public IterVisitor {
       resulting_set.insert(input_entry.begin(), input_entry.end());
     }
     for (auto output_id : ir_utils::filterByType<IterDomain>(expr->outputs())) {
-      concrete_domain_set_.emplace(std::make_pair(output_id, resulting_set));
+      domain_set_.emplace(std::make_pair(output_id, resulting_set));
     }
   }
 
-  std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>
-      concrete_domain_set_;
-  GpuLower* gpu_lower_ = nullptr;
+  std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>> domain_set_;
 };
 
 // Only used once, consider removing.
@@ -310,49 +315,69 @@ void ComputeAtMap::build(Fusion* fusion, GpuLower* gpu_lower) {
   }
 
   // For each IterDomain set we will track how many concrete root domains were
-  // used to generate the IterDomain. Used to populate conrete_id_map
+  // used to generate the IterDomain. Used to populate conrete_id_map. Concrete
+  // ID has maximum of concrete ids, ties are decided based on n_broadcast_ids.
+  // Refer to AdvancedLowering5 for why we need to split ties with broadcast
+  // dims.
   std::unordered_map<IterDomain*, int> n_concrete_ids_;
+  std::unordered_map<IterDomain*, int> n_broadcast_ids_;
 
   for (auto c_tv : consumer_tvs) {
-    auto counts = ConcreteInputCounter::produceCounts(
-        c_tv->domain()->domain(), gpu_lower);
-    n_concrete_ids_.insert(counts.begin(), counts.end());
+    auto counts =
+        InputDomainCounter::produceCounts(c_tv->domain()->domain(), gpu_lower);
+    std::transform(
+        counts.begin(),
+        counts.end(),
+        std::inserter(n_concrete_ids_, n_concrete_ids_.end()),
+        [](auto counts_entry) {
+          return std::make_pair(counts_entry.first, counts_entry.second.first);
+        });
+    std::transform(
+        counts.begin(),
+        counts.end(),
+        std::inserter(n_broadcast_ids_, n_broadcast_ids_.end()),
+        [](auto counts_entry) {
+          return std::make_pair(counts_entry.first, counts_entry.second.second);
+        });
   }
 
   for (auto inp_tv : ir_utils::filterByType<TensorView>(fusion->inputs())) {
-    auto counts = ConcreteInputCounter::produceCounts(
+    auto counts = InputDomainCounter::produceCounts(
         inp_tv->domain()->domain(), gpu_lower);
-    n_concrete_ids_.insert(counts.begin(), counts.end());
+    std::transform(
+        counts.begin(),
+        counts.end(),
+        std::inserter(n_concrete_ids_, n_concrete_ids_.end()),
+        [](auto counts_entry) {
+          return std::make_pair(counts_entry.first, counts_entry.second.first);
+        });
+    std::transform(
+        counts.begin(),
+        counts.end(),
+        std::inserter(n_broadcast_ids_, n_broadcast_ids_.end()),
+        [](auto counts_entry) {
+          return std::make_pair(counts_entry.first, counts_entry.second.second);
+        });
   }
 
   // Populate concrete id map
   for (const auto& set : disjoint_iter_sets_) {
-    int max_pos = -1;
+    int max_concrete_count = -1;
+    int max_broadcast_count = -1;
     IterDomain* concrete_id = nullptr;
     for (auto id : *set) {
-      // Uncertain if the following is needed, Maybe it makes sense to not
-      // create loop nests based on rfactor axes if we can avoid it
-      // if(id->isRFactorProduct() && id->definition() == nullptr){
-      //   continue;
-      // }
-      int pos = n_concrete_ids_.at(id);
-      if (pos > max_pos) {
-        max_pos = pos;
-        concrete_id = id;
+      int concrete_count = n_concrete_ids_.at(id);
+      if (concrete_count >= max_concrete_count) {
+        int broadcast_count = n_broadcast_ids_.at(id);
+        if (concrete_count > max_concrete_count ||
+            broadcast_count > max_broadcast_count) {
+          max_concrete_count = concrete_count;
+          max_broadcast_count = broadcast_count;
+          concrete_id = id;
+        }
       }
     }
-    // Uncertain if the following is needed, Maybe it makes sense to not
-    // create loop nests based on rfactor axes if we can avoid it
-    // if(concrete_id == nullptr){
-    //   // Same thing as above, but consider non-input rfactor iter domains
-    //   for (auto id : *set) {
-    //     int pos = n_concrete_ids_.at(id);
-    //     if (pos > max_pos) {
-    //       max_pos = pos;
-    //       concrete_id = id;
-    //     }
-    //   }
-    // }
+
     TORCH_INTERNAL_ASSERT(
         concrete_id != nullptr, "Could not concretize an IterDomain set.");
 

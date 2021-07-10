@@ -217,8 +217,16 @@ TensorDomain* IndexReferenceReplay::computeReplay() {
           // Matching has to be done on loop map, though replay was done in ID
           // map, so we need to manually check that things are mapped in the
           // loop map. Cannot simply look up concrete IDs to match them as index
-          // map and loop map do not have the same concrete id mapping.
-          if (gpu_lower->caLoopMap().areMapped(id, loop_id)) {
+          // map and loop map do not have the same concrete id mapping. We also
+          // allow matching explicitly through the index map. Index map is not
+          // gauranteed to be contained in loop map, therefore if we generate
+          // mappings to conrete id's through the index map, the mapping from
+          // those ID's to the ID's we replay are not gauranteed to be in loop
+          // map. The reverse is also true, so for validation make sure one of
+          // the mappings exist. For reference check the difference between:
+          // AdvancedLowering5 test and AdvancedIndexing1.
+          if (gpu_lower->caLoopMap().areMapped(id, loop_id) ||
+              gpu_lower->caIndexMap().areMapped(id, loop_id)) {
             concrete_leaf_ids.erase(id);
             auto replayed_id = concrete_to_id_.at(id);
             if (loop_id->getParallelType() == ParallelType::Vectorize) {

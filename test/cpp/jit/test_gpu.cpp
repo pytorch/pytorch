@@ -5708,6 +5708,44 @@ TEST(NVFuserTest, FusionAdvancedLowering4_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
+TEST(NVFuserTest, FusionAdvancedLowering5_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  TensorView* tv0 = makeConcreteTensor({5, 4, 3});
+  fusion.addInput(tv0);
+
+  TensorView* tv1 = makeConcreteTensor({5, 3});
+  fusion.addInput(tv1);
+
+  auto tv2 = broadcast(tv1, {false, true, false});
+
+  auto tv3 = add(tv0, tv2);
+
+  fusion.addOutput(tv3);
+
+  tv2->merge(0);
+  tv1->computeAt(tv2, 1);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(1);
+  at::Tensor t0 = at::randn({5, 4, 3}, options);
+  at::Tensor t1 = at::randn({5, 3}, options);
+  auto t2 = t1.unsqueeze(1);
+  auto t3 = t0 + t2;
+
+  std::vector<IValue> aten_inputs = {t0, t1};
+  std::vector<at::Tensor> aten_outputs = {t3};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  auto cg_outputs = fe.runFusion(aten_inputs);
+
+  testValidate(
+      &fusion, cg_outputs, aten_inputs, aten_outputs, __LINE__, __FILE__);
+}
+
 // Test a simple Gemm but also play around with fusion executor features
 TEST(NVFuserTest, FusionSimpleGemm_CUDA) {
   Fusion fusion;
