@@ -2163,6 +2163,7 @@ def sample_inputs_hardswish(self, device, dtype, requires_grad):
     return tensors
 
 def sample_inputs_gelu(self, device, dtype, requires_grad):
+    N = 5
     inputs = []
     for _ in range(1, N):
         for approximate in [False, True]:
