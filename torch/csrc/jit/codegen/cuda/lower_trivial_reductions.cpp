@@ -30,7 +30,8 @@ bool traverseToRFactorTensor(TensorView* tv, IterDomain* root_id) {
   const auto& inputs = tv->definition()->inputs();
 
   if (inputs.size() != 1 || !inputs[0]->isA<TensorView>() ||
-      tv->definition()->getExprType() != ExprType::ReductionOp) {
+      (tv->definition()->getExprType() != ExprType::ReductionOp &&
+       tv->definition()->getExprType() != ExprType::WelfordOp)) {
     // No rfactor producer found
     return false;
   }

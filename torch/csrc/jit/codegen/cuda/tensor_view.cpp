@@ -655,7 +655,9 @@ TensorView* TensorView::cache_before() {
       " its definition is a nullptr and we restrict using cache_before on an input.");
 
   TORCH_CHECK(
-      isFusionOutput() || definition()->getExprType() != ExprType::ReductionOp,
+      isFusionOutput() ||
+          definition()->getExprType() != ExprType::ReductionOp ||
+          definition()->getExprType() != ExprType::WelfordOp,
       "Error adding cache_before ",
       this,
       " its definition is a reduction and it is not an output, instead please use cache_after.");
@@ -696,7 +698,8 @@ TensorView* TensorView::cache_before() {
   // this TV is an output and its definition is a reduction
   // remove reduction axis from this tv
   bool consumer_replay_needed = false;
-  if (definition()->getExprType() == ExprType::ReductionOp) {
+  if (definition()->getExprType() == ExprType::ReductionOp ||
+      definition()->getExprType() == ExprType::WelfordOp) {
     size_t i = 0;
     auto no_reduction_root_domain = TensorDomain::noReductions(getRootDomain());
     std::vector<IterDomain*> new_root_domain(no_reduction_root_domain.size());

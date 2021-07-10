@@ -92,17 +92,18 @@ bool isTV(const Val* val) {
 
 // Check if we're a TensorView op that we can generate code for.
 bool isTVOp(const Expr* expr) {
-  if (expr->outputs().size() == 1 && isTV(expr->output(0)) &&
+  if (std::any_of(
+          expr->outputs().begin(),
+          expr->outputs().end(),
+          [](Val* v) { return isTV(v); }) &&
       (expr->getExprType().value() == ExprType::BinaryOp ||
        expr->getExprType().value() == ExprType::UnaryOp ||
        expr->getExprType().value() == ExprType::TernaryOp ||
        expr->getExprType().value() == ExprType::ReductionOp ||
+       expr->getExprType().value() == ExprType::WelfordOp ||
        expr->getExprType().value() == ExprType::BroadcastOp ||
        expr->getExprType().value() == ExprType::TransposeOp ||
        expr->getExprType().value() == ExprType::ShiftOp)) {
-    return true;
-  }
-  if (expr->getExprType().value() == ExprType::WelfordOp) {
     return true;
   }
   return false;
