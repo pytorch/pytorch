@@ -38,8 +38,8 @@ void OptimizeGraph(
   // to exposed folders.
 #ifdef FBCODE_CAFFE2
   if (opts.enable_out_variant) {
-    ReplaceWithCopy(graph);
     FuseListUnpack(graph);
+    ReplaceWithCopy(graph);
   }
 #endif
   ConstantPropagation(graph);
@@ -101,24 +101,53 @@ bool mayContainAlias(
   return db.mayContainAlias(as, bs);
 }
 
-// Returns two useful constructs:
-//  first: map each value to all values that are alive
-//    at the same time.
-//  second: set of all inputs/outputs/constants (always alive)
-//    and their aliases
+// Get set of all inputs/outputs/constants (always alive) and their aliases
+std::unordered_set<const Value*> GetAlwaysAliveValues(
+    const std::shared_ptr<torch::jit::Graph>& graph,
+    AliasDb& db) {
+  // a set of Values whose live-range exceed current inference
+  std::unordered_set<const Value*> always_alive;
+
+  // mark inputs, constants, outputs as always_alive
+  for (const auto* input : graph->inputs()) {
+    always_alive.insert(input);
+  }
+  for (const auto* output : graph->outputs()) {
+    always_alive.insert(output);
+  }
+  for (const auto* node : graph->nodes()) {
+    if (node->kind() == prim::Constant) {
+      for (const auto* output : node->outputs()) {
+        always_alive.insert(output);
+      }
+    }
+  }
+
+  // insert aliases of always live Values
+  for (const auto* node : graph->nodes()) {
+    // constants are already in the always_alive set
+    if (node->kind() != prim::Constant) {
+      for (const auto* v : node->outputs()) {
+        if (mayContainAlias(db, ValueSet{v}, always_alive)) {
+          always_alive.insert(v);
+        }
+      }
+    }
+  }
+  return always_alive;
+}
+
+//  Map each value to all values that are alive at the same time.
+using LivenessMap = std::unordered_map<const Value*, std::set<const Value*>>;
+
 //  The algorithm does a traversal of the execution graph
 //  while keeping track of the live values.
-using LivenessInformation = std::pair<
-    std::unordered_map<const Value*, std::set<const Value*>>,
-    std::unordered_set<const Value*>>;
-
-LivenessInformation GetLivenessInformation(
+LivenessMap GetLivenessMap(
     const std::shared_ptr<torch::jit::Graph>& graph,
+    const std::unordered_set<const Value*>& always_alive,
     AliasDb& db) {
   // map a Value to a set of Values that overlap live-ranges with the Value's
   std::unordered_map<const Value*, std::set<const Value*>> liveness_map;
-  // a set of Values whose live-range exceed current inference
-  std::unordered_set<const Value*> always_alive;
 
   // map Values to its creation order in graph (Note: only traverse top-level
   // nodes such that nodes under control-flows are represented by top-level
@@ -139,21 +168,6 @@ LivenessInformation GetLivenessInformation(
   // Node mapped to set of Values that the Node may use (i.e., def-chain of node
   // inputs)
   std::unordered_map<const Node*, std::set<const Value*>> live_nodes_def_chain;
-
-  // mark inputs, constants, outputs as always_alive
-  for (const auto* input : graph->inputs()) {
-    always_alive.insert(input);
-  }
-  for (const auto* output : graph->outputs()) {
-    always_alive.insert(output);
-  }
-  for (const auto* node : graph->nodes()) {
-    if (node->kind() == prim::Constant) {
-      for (const auto* output : node->outputs()) {
-        always_alive.insert(output);
-      }
-    }
-  }
 
   // add v to the current liveness_map
   std::function<void(const Value* v)> add_live_value_fn = [&](const Value* v) {
@@ -225,9 +239,7 @@ LivenessInformation GetLivenessInformation(
 
   for (const auto* node : graph->nodes()) {
     for (const auto* v : node->outputs()) {
-      if (mayContainAlias(db, ValueSet{v}, always_alive)) {
-        always_alive.insert(v);
-      } else {
+      if (always_alive.count(v) == 0) {
         add_live_value_fn(v);
       }
     }
@@ -254,7 +266,7 @@ LivenessInformation GetLivenessInformation(
     }
   }
 
-  return std::make_pair(liveness_map, always_alive);
+  return liveness_map;
 }
 
 // Collect the set of Values that are candidates for memory planning:
@@ -338,12 +350,11 @@ GetMemoryPlanningCandidates(const std::shared_ptr<torch::jit::Graph>& graph) {
 // and debug.
 std::unordered_map<const Value*, std::vector<const Value*>>
 GenerateSameStorageValues(
-    const LivenessInformation& lm,
+    const LivenessMap& alive_during,
+    const std::unordered_set<const Value*>& always_alive,
     const std::pair<std::vector<const Value*>, std::vector<const Value*>>&
         optimizable,
     AliasDb& db) {
-  const auto& alive_during = lm.first;
-  const auto& always_alive = lm.second;
   const auto& optimizable_values = optimizable.first;
   const auto& all_values = optimizable.second;
 
@@ -599,12 +610,13 @@ StaticModule::StaticModule(
 
   // Prepare for memory planning
   AliasDb alias_db(graph_);
-  auto lm = GetLivenessInformation(graph_, alias_db);
-  external_values_ = lm.second;
+  external_values_ = GetAlwaysAliveValues(graph_, alias_db);
+
   if (opts_.optimize_memory) {
+    auto lm = GetLivenessMap(graph_, external_values_, alias_db);
     auto values = GetMemoryPlanningCandidates(graph_);
     value_to_same_storage_values_ =
-        GenerateSameStorageValues(lm, values, alias_db);
+        GenerateSameStorageValues(lm, external_values_, values, alias_db);
   }
 }
 
