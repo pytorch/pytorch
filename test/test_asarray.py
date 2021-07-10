@@ -167,10 +167,10 @@ class TestBufferProtocol(common.TestCase):
     @dtypes(*common.torch_to_numpy_dtype_dict.keys())
     def test_non_writable_buffer(self, device, dtype):
         numpy_arr = common.make_tensor((1,), device, dtype).numpy()
-        mview = memoryview(numpy_arr).toreadonly()
+        byte_arr = numpy_arr.tobytes()
         with self.assertWarnsOnceRegex(UserWarning,
                                        r"The given buffer is not writable."):
-            torch.frombuffer(mview, dtype=dtype)
+            torch.frombuffer(byte_arr, dtype=dtype)
 
 def getaddr(a):
     if isinstance(a, torch.Tensor):
