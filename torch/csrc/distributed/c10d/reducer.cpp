@@ -391,12 +391,24 @@ void Reducer::mark_variable_ready_dense(size_t variable_index) {
       // to bucket_view. If grad has already been set as views of buckets in
       // previous iterations, no copy is needed.
       if (!grad.is_alias_of(bucket_view)) {
-        bucket_view.copy_(grad);
+        if (comm_hook_ == nullptr) {
+          auto wrapped = at::native::wrapped_scalar_tensor(double(1.) / div_factor_);
+          // Divides while copying into the bucket view to save one scan over all the input parameters.
+          at::mul_out(bucket_view, grad, wrapped);
+        } else {
+          bucket_view.copy_(grad);
+        }
+
         if (gradient_as_bucket_view_) {
           // Let grad point to bucket_view buffer.
           grad = bucket_view;
           // The grad is modified and need to be written back.
           return true;
+        }
+      } else {
+        // If grad and bucket view point to the same storage, no need to copy.
+        if (comm_hook_ == nullptr) {
+          bucket_view.div_(div_factor_);
         }
       }
     } else {
@@ -442,19 +454,22 @@ void Reducer::mark_variable_ready_sparse(size_t variable_index) {
   });
 }
 
-std::vector<std::vector<at::Tensor>> Reducer::get_bucket_tensors() const {
+std::vector<c10d::GradBucket> Reducer::get_grad_buckets(
+    bool return_zero_tensors) const {
   std::lock_guard<std::mutex> lock(mutex_);
-  std::vector<std::vector<at::Tensor>> bucketTensors;
-  bucketTensors.reserve(buckets_.size());
-  for (const auto& bucket : buckets_) {
-    std::vector<at::Tensor> tensors;
-    tensors.reserve(bucket.replicas.size());
-    for (const auto& rep : bucket.replicas) {
-      tensors.push_back(rep.contents);
-    }
-    bucketTensors.push_back(std::move(tensors));
+  std::vector<c10d::GradBucket> gradBuckets;
+  gradBuckets.reserve(buckets_.size());
+  for (size_t i = 0; i < buckets_.size(); ++i) {
+    gradBuckets.emplace_back(
+      i,
+      return_zero_tensors ? at::zeros_like(buckets_[i].replicas[0].contents)
+                            : buckets_[i].replicas[0].contents,
+      buckets_[i].replicas[0].offsets,
+      buckets_[i].replicas[0].lengths,
+      buckets_[i].replicas[0].sizes_vec
+    );
   }
-  return bucketTensors;
+  return gradBuckets;
 }
 
 void Reducer::set_forward_pass_work_handle(
@@ -565,7 +580,11 @@ void Reducer::set_logger(std::weak_ptr<c10d::Logger> logger) {
 // This function is only to be called from the autograd thread.
 void Reducer::autograd_hook(size_t index) {
   std::lock_guard<std::mutex> lock(this->mutex_);
-
+  // Local modules can also fire autograd hooks if user directly invokes
+  // backward on local module. In this case, don't run autograd hooks.
+  if (!in_ddp_backwards_) {
+    return;
+  }
   // Carry over thread local state from main thread. This allows for
   // thread-local flags such as profiler enabled to be configure correctly.
   at::ThreadLocalStateGuard g(thread_local_state_);
@@ -844,6 +863,16 @@ void Reducer::mark_variable_ready(size_t variable_index) {
   }
 }
 
+c10::intrusive_ptr<c10::ivalue::Future> Reducer::run_comm_hook(
+    GradBucket& grad_bucket) {
+  if (comm_hook_ == nullptr) {
+    _AllReduceBySumCommHook allreduce_hook(process_group_.get());
+    return allreduce_hook.runHook(grad_bucket);
+  } else {
+    return comm_hook_->runHook(grad_bucket);
+  }
+}
+
 void Reducer::all_reduce_bucket(Bucket& bucket) {
   std::vector<at::Tensor> tensors;
   tensors.reserve(bucket.replicas.size());
@@ -867,13 +896,7 @@ void Reducer::all_reduce_bucket(Bucket& bucket) {
       bucket.replicas[0].offsets,
       bucket.replicas[0].lengths,
       bucket.replicas[0].sizes_vec);
-  if (comm_hook_ == nullptr) {
-    _AllReduceCommHookWithDivFactorState state(process_group_.get(), div_factor_);
-    _AllReduceCommHookWithDivFactor allreduce_hook(state);
-    bucket.future_work = allreduce_hook.runHook(grad_bucket);
-  } else {
-    bucket.future_work = comm_hook_->runHook(grad_bucket);
-  }
+  bucket.future_work = run_comm_hook(grad_bucket);
 }
 
 // Called when the bucket at the specified index is ready to be reduced.
@@ -1257,6 +1280,7 @@ void Reducer::search_unused_parameters(
 void Reducer::prepare_for_backward(
     const std::vector<torch::autograd::Variable>& outputs) {
   std::lock_guard<std::mutex> lock(mutex_);
+  in_ddp_backwards_ = true;
   ++num_backward_calls_;
   backward_compute_start_time_ = current_time_in_nanos();
   if (should_collect_runtime_stats()) {
@@ -1429,10 +1453,7 @@ void Reducer::finalize_backward() {
   // No longer require call to finalize after this function returns.
   TORCH_INTERNAL_ASSERT(require_finalize_);
   require_finalize_ = false;
-
-  // Unset allreduce division factor, as it may change in next backwards pass
-  // when running with DDP join mode.
-  div_factor_ = kUnsetDivFactor;
+  in_ddp_backwards_ = false;
 
   // Wait for asynchronous reduction to complete and unflatten contents.
   for (auto& bucket : buckets_) {
@@ -1448,6 +1469,11 @@ void Reducer::finalize_backward() {
     for (const auto i : c10::irange(future_result.size())) {
       auto& replica = bucket.replicas[i];
       if (bucket.expect_sparse_gradient) {
+        // If no DDP comm hook is registered,
+        // the allreduce only sums up the value, and a separate division is required.
+        if (comm_hook_ == nullptr) {
+          future_result[i].div_(div_factor_);
+        }
         replica.contents.copy_(future_result[i]);
       } else {
         // Reinitialize only `bucket_views_out` with the future_result by
@@ -1455,6 +1481,10 @@ void Reducer::finalize_backward() {
         populate_bucket_views_out(replica, future_result[i]);
       }
     }
+
+    // Unset allreduce division factor, as it may change in next backwards pass
+    // when running with DDP join mode.
+    div_factor_ = kUnsetDivFactor;
 
     if (!bucket.expect_sparse_gradient) {
       // We don't need to finalize the sparse bucket since the sparse grad and
