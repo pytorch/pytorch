@@ -11,6 +11,7 @@
 #include <c10/util/quint8.h>
 
 #include <array>
+#include <iostream>
 
 // This file defines Vectorized<> for the quantized types.
 //
