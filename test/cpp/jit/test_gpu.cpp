@@ -15395,6 +15395,93 @@ TEST(NVFuserTest, FusionPredicateElimination_CUDA) {
   }
 }
 
+TEST(NVFuserTest, ForceFp16Simple_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  auto fusion = fusion_ptr.get();
+  FusionGuard fg(fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  auto tv1 = makeSymbolicTensor(2);
+
+  fusion->addInput(tv0);
+  fusion->addInput(tv1);
+
+  // Group 1
+  auto tv2 = sum(tv0, {1});
+  auto tv3 = broadcast(tv2, {false, true});
+
+  // Group 2
+  auto tv4 = add(tv3, tv1); // Edge: tv3: expect cast
+  auto tv5 = castOp(DataType::Half, tv4);
+
+  fusion->addOutput(tv5);
+
+  FusionExecutorCache fec(std::move(fusion_ptr));
+
+  std::vector<int64_t> shape{15, 16};
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto in0 = at::randn(shape, options);
+  auto in1 = at::randn(shape, options);
+  fec.runFusionWithInputs({in0, in1});
+
+  // Check the segmented edge is fp16
+  auto segmented_fusion = fec.getMostRecentKernelRuntime()->fusionSegments();
+  for (auto edge : segmented_fusion->edges()) {
+    auto edge_tv = edge->val->as<TensorView>();
+    TORCH_CHECK(edge_tv->getDataType() == DataType::Half);
+  }
+}
+
+TEST(NVFuserTest, ForceFp16NotAllCast_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  auto fusion = fusion_ptr.get();
+  FusionGuard fg(fusion);
+
+  auto tv0 = makeSymbolicTensor(3);
+  auto tv1 = makeSymbolicTensor(3);
+
+  fusion->addInput(tv0);
+  fusion->addInput(tv1);
+
+  // Group 1
+  auto tv3 = sum(tv0, {1});
+  auto tv4 = broadcast(tv3, {false, true, false});
+  auto tv5 = sum(tv0, {1});
+
+  // Group 2
+  auto tv6 = add(tv4, tv1); // edge tv4, expect cast
+  auto tv7 = castOp(DataType::Half, tv6);
+
+  // Group 3
+  auto tv8 = sum(tv5, {1}); // edge tv5, don't expect cast
+
+  fusion->addOutput(tv7);
+  fusion->addOutput(tv8);
+
+  FusionExecutorCache fec(std::move(fusion_ptr));
+
+  std::vector<int64_t> shape{16, 16, 16};
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto in0 = at::randn(shape, options);
+  auto in1 = at::randn(shape, options);
+  fec.runFusionWithInputs({in0, in1});
+
+  auto segmented_fusion = fec.getMostRecentKernelRuntime()->fusionSegments();
+  auto complete_fusion = segmented_fusion->completeFusion();
+
+  // Check that the edge that wasn't fp16 is the producer of the
+  //  reduction op, i.e. tv8 = sum(tv5,{1});.
+  for (auto edge : segmented_fusion->edges()) {
+    auto edge_tv = edge->val->as<TensorView>();
+    if (edge_tv->getDataType() == DataType::Float) {
+      auto consumer = *(complete_fusion->unordered_uses(edge_tv).begin());
+      TORCH_CHECK(consumer->isA<ReductionOp>());
+    }
+  }
+}
+
 TEST(NVFuserTest, FusionIssue970_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);

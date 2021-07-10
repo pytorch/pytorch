@@ -311,6 +311,16 @@ class TORCH_CUDA_CU_API SegmentedFusion {
   //! API for adding edges
   SegmentedEdge* newEdge(SegmentedGroup* from, SegmentedGroup* to, Val* val);
 
+  //! Returns the set of potential intermediate tensors that
+  //!  will be cast to fp16 when written to global mem.
+  //!  These are not actual intermediate tensors,
+  //!  just the ones that will need to cast to fp16 if
+  //!  they end up being an intermediate tensor between
+  //!  segmented groups.
+  const auto& getForceToFP16Set() {
+    return force_fp16_tv_set_;
+  }
+
  protected:
   //! Unique name for segmented fusion
   int segmented_fusion_name_;
@@ -341,6 +351,10 @@ class TORCH_CUDA_CU_API SegmentedFusion {
   //! A Copy of original full fusion
   std::unique_ptr<Fusion> complete_fusion_;
 
+  //! A set of intermediate tensors that need to be cast to fp16
+  std::unordered_set<TensorView*> force_fp16_tv_set_;
+
+  // TODO: this class needs cleanup
  protected:
   friend class SegmentCandidateFinder;
   //! Make a heuristics entry for a group and parameters
@@ -351,6 +365,10 @@ class TORCH_CUDA_CU_API SegmentedFusion {
   //! Cleanup function to be call at the end of fusion
   //!  segment pass
   void finalize();
+
+  //! Collect all the intermediate tensors between segmented
+  //!  groups that will cast to fp16
+  void annotateFP16IntermediateTensors();
 
   //! Utility to give unique name for each segmented fusion
   static size_t segmentedFusionName() {
@@ -492,6 +510,10 @@ class TORCH_CUDA_CU_API SegmentCandidateFinder {
   //! Duplicate and add all exprs producing the used
   //!  scalar values in group
   void resolveScalarsInGroup(SegmentedGroup* group);
+
+  //! Remove all scalar edges in group
+  //!  (TODO: need structure better so we don't have to do this)
+  void removeScalarEdges();
 
   //! Utility function to merge a vector of groups in one step,
   //!  need to check for DAG condition before using this method

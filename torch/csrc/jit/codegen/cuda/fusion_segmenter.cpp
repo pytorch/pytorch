@@ -253,6 +253,7 @@ std::string toString(const SegmentedEdge* edge) {
 SegmentedFusion::SegmentedFusion(std::unique_ptr<Fusion> fusion)
     : impl_(this), complete_fusion_(std::move(fusion)) {
   segmented_fusion_name_ = segmentedFusionName();
+  annotateFP16IntermediateTensors();
 }
 
 SegmentedGroup* SegmentedFusion::Impl::makeGroup() {
@@ -313,13 +314,6 @@ SegmentedEdge* SegmentedFusion::newEdge(
   SegmentedEdge* e = impl_.makeEdge(from, to, val);
   edges_.push_back(e);
   return e;
-}
-
-void SegmentedFusion::finalize() {
-  impl_.cleanUnused();
-  for (auto g : groups_) {
-    g->finalize();
-  }
 }
 
 void SegmentedFusion::draw() {
@@ -631,7 +625,127 @@ void detailGroupPrint(std::ostream& os, const SegmentedGroup* group) {
   os << "}\n\n";
 }
 
+//! Insert casts for an intermediate tensorview, i.e. ones
+//!  that are in segmentedEdges. The insertion is done on
+//!  the complete fusion, which should be owned by a segmented
+//!  fusion so that only one segmented fusion will be affected.
+//!  The replacement pattern is:
+//!                 TV0
+//!     replaced as:
+//!       fp16_tv = cast(TV0)
+//!       fp32_tv = cast(fp16_tv)
+//!
+//!  All segmented groups that take TV0 as input will then
+//!   take fp16_tv instead and the cast to fp32 will be
+//!   automatically included in each of the groups.
+TensorView* castIntermediateValueInCompleteFusion(
+    Fusion* fusion,
+    TensorView* original_tv) {
+  FusionGuard fg(fusion);
+
+  // A utility lambda that creates consumer tensordomain of
+  //  the given tv and create a new tensorview around the
+  //  new tensordomain with the given data type.
+  auto make_consumer_tv = [&](TensorView* from, DataType data_type) {
+    // Keep broadcast axes and remove reduction axes
+    size_t i = 0;
+    auto no_reduction_root_domain =
+        TensorDomain::noReductions(original_tv->getRootDomain());
+    std::vector<IterDomain*> new_root_domain(no_reduction_root_domain.size());
+    for (const auto& dom : no_reduction_root_domain) {
+      new_root_domain[i++] = dom->clone();
+    }
+
+    // Create the actual domain and tv.
+    return new TensorView(
+        new TensorDomain(
+            new_root_domain, std::vector<bool>(new_root_domain.size(), true)),
+        data_type);
+  };
+
+  // create the tv's to cast
+  auto fp16_tv = make_consumer_tv(original_tv, DataType::Half);
+  auto fp32_tv = make_consumer_tv(original_tv, DataType::Float);
+
+  // replace uses of original tv with fp32_tv in the complete
+  //  fusion
+  for (auto expr : fusion->unordered_uses(original_tv)) {
+    ir_utils::replaceValInExpr(expr, original_tv, fp32_tv);
+  }
+
+  // Insert the cast ops.
+  new UnaryOp(UnaryOpType::Cast, fp16_tv, original_tv);
+  new UnaryOp(UnaryOpType::Cast, fp32_tv, fp16_tv);
+
+  // Return the new tv to replace original tv with
+  //  on the segmented edges.
+  return fp16_tv;
+}
+
 } // namespace
+
+void SegmentedFusion::finalize() {
+  impl_.cleanUnused();
+
+  // Insert casts for the tensorviews that are on
+  //  segmented edges and also on the force_to_fp16 list
+  //
+  // Note:
+  //  The cast is inserted after the segmenter canSchedule check, which
+  //  shouldn't cause problem short-term. The reason we put the cast here
+  //  is  we don't want to keep making copies of the original fusion
+  //  during segmentation. Could consider making the cast insertion
+  //  reversible if we do have to test canSchedule with the casts inserted
+  //  during segmentation process in the future.
+
+  // Keep track of groups that need to update expr list,
+  //  including both the producer and consumer of the selected tv's that
+  //  we cast to fp16.
+  std::unordered_set<SegmentedGroup*> affected_group_set;
+
+  // A map to keep track of the tv's that have been inserted cast
+  //  and its fp16 version.
+  std::unordered_map<TensorView*, TensorView*> fp32_to_fp16_cast_map;
+
+  // Go through all edges of the segmented fusion.
+  for (auto edge : edges()) {
+    auto edge_tv = edge->val->as<TensorView>();
+    // Only look at ones that need to cast to fp16
+    if (force_fp16_tv_set_.count(edge_tv)) {
+      auto cast_tv_it = fp32_to_fp16_cast_map.find(edge->val->as<TensorView>());
+      TensorView* cast_tv = nullptr;
+      // Insert cast ops for this tv if we haven't done so.
+      if (cast_tv_it == fp32_to_fp16_cast_map.end()) {
+        cast_tv = castIntermediateValueInCompleteFusion(
+            complete_fusion_.get(), edge_tv);
+        fp32_to_fp16_cast_map[edge->val->as<TensorView>()] = cast_tv;
+      } else {
+        cast_tv = cast_tv_it->second;
+      }
+
+      // Update the edge to use the fp16 version
+      edge->val = cast_tv;
+
+      // Mark the groups for update later
+      affected_group_set.insert(edge->from);
+      affected_group_set.insert(edge->to);
+    }
+  }
+
+  // Reset expression lists of all affected groups
+  // TODO : this could have been a general operation that
+  //  the group supports. Could consider moving this into
+  //  segmentedGroup in a follow up.
+  for (auto group : affected_group_set) {
+    auto input_group_vec = getAllInputs(group);
+    std::unordered_set<Val*> input_group_set(
+        input_group_vec.begin(), input_group_vec.end());
+
+    auto expr_set = DependencyCheck::getAllExprsBetween(
+        input_group_set, getAllOutputs(group));
+    group->exprs_ = std::vector<Expr*>(expr_set.begin(), expr_set.end());
+  }
+}
 
 //! An utility class to compute and maintain the "producers of"
 //!   relationship in a segmented graph. Space heavy and should
@@ -2486,11 +2600,13 @@ void SegmentCandidateFinder::findSegments() {
   }
 
   for (auto group : groups()) {
-    // Add all the scalar inputs needed in the group
-    resolveScalarsInGroup(group);
     // Set heuristics in case single reduction kernels were left out
     group->setHeuristic(deriveHeuristic(group));
   }
+
+  // Remove all scalar edges since they do not represent actual
+  //  dependency among segmented groups.
+  removeScalarEdges();
 
   // Run pre-merge heuristics
   if (options_.run_combine_reductions && CombineReductions::shouldRun(this)) {
@@ -2687,7 +2803,9 @@ void SegmentCandidateFinder::resolveScalarsInGroup(SegmentedGroup* group) {
   for (auto expr : exprs_to_add) {
     group->exprs_.push_back(expr);
   }
+}
 
+void SegmentCandidateFinder::removeScalarEdges() {
   // Remove all scalar edges between groups
   //  They may have been created by welford
   //   translation.
@@ -2727,7 +2845,21 @@ void SegmentCandidateFinder::finalize() {
     (*it)->setID(i);
   }
 
+  // TODO: too many things are currently abstracted under the term
+  //  finalize. Need to re-structure in a follow up.
+
+  // Finalize connections between segmented groups
   segmented_fusion_->finalize();
+
+  // Resolve all the scalar expressions needed in each group
+  for (auto group : segmented_fusion_->groups()) {
+    resolveScalarsInGroup(group);
+  }
+
+  // Finalize each group, fill in the missing inputs, i.e. tensor dims.
+  for (auto g : groups()) {
+    g->finalize();
+  }
 }
 
 GroupDependencyAnalysis* SegmentCandidateFinder::getGroupDependency() {
@@ -2754,6 +2886,57 @@ std::unique_ptr<FusionHeuristics> SegmentedFusion::makeHeuristics(
     ret->emplaceBack(makeSchedulerEntry(g, runtime_info));
   }
   return ret;
+}
+
+namespace {
+
+//! A thin traversal class that collects all the tensorviews
+//!  that could cast to fp16 if they were segmented edges.
+//!  The selected values are currently defined as all the
+//!  tensorviews that
+//!     1. are not complete fusion input/output,
+//!     2. have a use chain that ends with a fp16
+//!         complete fusion output
+//!     3. are fp32 datatype
+class ForceFP16Annotation : public IterVisitor {
+ public:
+  static std::unordered_set<TensorView*> getAnnotatedSet(Fusion* fusion) {
+    ForceFP16Annotation annotation;
+    std::vector<Val*> fp16_outputs;
+
+    std::copy_if(
+        fusion->outputs().begin(),
+        fusion->outputs().end(),
+        std::back_inserter(fp16_outputs),
+        [](auto* val) {
+          return val->template isA<TensorView>() &&
+              val->getDataType().has_value() &&
+              val->getDataType().value() == DataType::Half;
+        });
+
+    annotation.traverseFrom(fusion, fp16_outputs);
+    return annotation.force_fp16_tv_set_;
+  }
+
+ private:
+  using IterVisitor::handle;
+
+  void handle(TensorView* tv) override {
+    auto dtype = tv->getDataType();
+    if (dtype.has_value() && dtype.value() == DataType::Float &&
+        !tv->isFusionOutput() && !tv->isFusionInput()) {
+      force_fp16_tv_set_.insert(tv);
+    }
+  }
+
+  std::unordered_set<TensorView*> force_fp16_tv_set_;
+};
+
+} // namespace
+
+void SegmentedFusion::annotateFP16IntermediateTensors() {
+  force_fp16_tv_set_ =
+      ForceFP16Annotation::getAnnotatedSet(complete_fusion_.get());
 }
 
 TORCH_CUDA_CU_API std::string toString(
