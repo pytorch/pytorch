@@ -13,8 +13,8 @@ class MyShapeProp(torch.fx.Interpreter):
     def run_node(self, n):
         result = super().run_node(n)
         if isinstance(result, torch.Tensor):
-            n.shape = result.shape  # type: ignore
-            n.dtype = result.dtype  # type: ignore
+            n.shape = result.shape
+            n.dtype = result.dtype
         return result
 
     def propagate(self, *args):
