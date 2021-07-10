@@ -406,10 +406,8 @@ filegroup(
     srcs = [
         "aten/src/THCUNN/BCECriterion.cu.cc",
         "aten/src/THCUNN/ELU.cu.cc",
-        "aten/src/THCUNN/GatedLinearUnit.cu.cc",
         "aten/src/THCUNN/HardTanh.cu.cc",
         "aten/src/THCUNN/LeakyReLU.cu.cc",
-        "aten/src/THCUNN/LogSigmoid.cu.cc",
         "aten/src/THCUNN/MultiLabelMarginCriterion.cu.cc",
         "aten/src/THCUNN/MultiMarginCriterion.cu.cc",
         "aten/src/THCUNN/SoftMarginCriterion.cu.cc",
@@ -516,6 +514,7 @@ header_template_rule(
         "@AT_MKLDNN_ENABLED@": "1",
         "@AT_MKL_ENABLED@": "0",
         "@AT_FFTW_ENABLED@": "0",
+        "@AT_POCKETFFT_ENABLED@": "0",
         "@AT_NNPACK_ENABLED@": "0",
         "@CAFFE2_STATIC_LINK_CUDA_INT@": "0",
         "@AT_BUILD_WITH_BLAS@": "1",
