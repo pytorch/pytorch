@@ -154,18 +154,17 @@ class TestNNAPI(TestCase):
         ]:
             self.check(mod, torch.randn(4, 2, 1, 3, 7))
 
-        # TODO(axit): To add support for runtime
-        # self.check(
-        #     torch.nn.Flatten(),
-        #     torch.randn(4, 2, 1, 3, 7),
-        #     convert_args=[torch.zeros(0, 2, 1, 3, 7)]
-        # )
-        # with self.assertRaisesRegex(Exception, "dims can't be flexible"):
-        #     self.check(torch.nn.Flatten(), torch.randn(4, 2, 0, 0, 7))
-        # with self.assertRaisesRegex(Exception, "Only 1 dim"):
-        #     self.check(
-        #         torch.nn.Flatten(start_dim=1, end_dim=-2),
-        #         torch.randn(0, 2, 1, 3, 0))
+        self.check(
+            torch.nn.Flatten(),
+            torch.randn(4, 2, 1, 3, 7),
+            convert_args=[torch.zeros(0, 2, 1, 3, 7)]
+        )
+        with self.assertRaisesRegex(Exception, "dims can't be flexible"):
+            self.check(torch.nn.Flatten(), torch.randn(4, 2, 0, 0, 7))
+        with self.assertRaisesRegex(Exception, "Only 1 dim"):
+            self.check(
+                torch.nn.Flatten(start_dim=1, end_dim=-2),
+                torch.randn(0, 2, 1, 3, 0))
 
     def test_slice(self):
         class SliceModule(torch.nn.Module):
@@ -232,6 +231,17 @@ class TestNNAPI(TestCase):
             [
                 nhwc(torch.randn(1, 2, 3, 3)),
                 nhwc(torch.randn(1, 4, 3, 3)),
+            ])
+
+        self.check(
+            CatModule(1),
+            [
+                torch.randn(1, 2, 3, 3),
+                torch.randn(1, 4, 3, 3),
+            ],
+            convert_args=[
+                torch.zeros(0, 0, 0, 0),
+                torch.zeros(0, 0, 0, 0)
             ])
 
     def test_pointwise_unary(self):
@@ -422,6 +432,9 @@ class TestNNAPI(TestCase):
     def test_linear(self):
         torch.manual_seed(29)
         self.check(torch.nn.Linear(16, 32), torch.randn(2, 16))
+        self.check(
+            torch.nn.Linear(16, 32), torch.randn(2, 16),
+            convert_args=[torch.zeros(0, 16)])
 
     def test_conv2d(self):
         cases = [
