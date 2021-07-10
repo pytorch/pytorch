@@ -201,7 +201,7 @@ public:
     }
     return b;
   }
-  Vectorized<BFloat16> map(const __m256 (*const vop)(__m256)) const {
+  Vectorized<BFloat16> map(__m256 (*const vop)(__m256)) const {
     __m256 lo, hi;
     cvtbf16_fp32(values, lo, hi);
     const auto o1 = vop(lo);
