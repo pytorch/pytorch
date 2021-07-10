@@ -18,6 +18,7 @@ env:
   SCCACHE_BUCKET: "ossci-compiler-cache"
   VC_PRODUCT: "BuildTools"
   VC_VERSION: ""
+  VS_VERSION: "16.8.6"
   VC_YEAR: "2019"
   TORCH_CUDA_ARCH_LIST: "7.0"
   USE_CUDA: 1

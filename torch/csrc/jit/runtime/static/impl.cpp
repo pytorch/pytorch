@@ -45,20 +45,29 @@ void OptimizeGraph(
   ConstantPropagation(graph);
 }
 
-void CheckGraphEligibility(const std::shared_ptr<torch::jit::Graph>& graph) {
-  for (auto n : graph->nodes()) {
-    if (n->kind() == c10::Symbol::fromQualString("prim::GetAttr")) {
-      throw std::runtime_error("Cannot accelerate unfrozen graphs");
+bool CheckGraphEligibility(const std::shared_ptr<torch::jit::Graph>& graph) {
+  // check for sub-blocks
+  bool can_support = true;
+  for (auto* node : graph->block()->nodes()) {
+    for (Block* sub_block : node->blocks()) {
+      VLOG(1) << "Found nested sub-blocks in graph at node: "
+              << PrintNode(node);
+      can_support = false;
     }
   }
+
+  return can_support;
 }
 
 // remove unused input 0 from graph
-void RemoveSelfFromGraphInput(std::shared_ptr<torch::jit::Graph>& graph) {
+bool RemoveSelfFromGraphInput(std::shared_ptr<torch::jit::Graph>& graph) {
   if (graph->inputs().at(0)->type()->is_module()) {
-    TORCH_CHECK(!graph->inputs().at(0)->hasUses());
+    if (graph->inputs().at(0)->hasUses()) {
+      return false;
+    }
     graph->eraseInput(0);
   }
+  return true;
 }
 
 // remove "self" from function schema
@@ -443,12 +452,12 @@ GenerateSameStorageValues(
 void PrepareGraphForStaticModule(
     std::shared_ptr<torch::jit::Graph> graph,
     const StaticModuleOptions& opts) {
-  CheckGraphEligibility(graph);
+  // TODO: call CheckGraphEligibility before trying to enable static runtime
+  TORCH_CHECK(CheckGraphEligibility(graph));
   OptimizeGraph(graph, opts);
-  RemoveSelfFromGraphInput(graph);
 }
 
-std::pair<std::shared_ptr<Graph>, c10::optional<c10::FunctionSchema>>
+std::pair<std::shared_ptr<Graph>, std::shared_ptr<Module>>
 PrepareForStaticModule(
     const torch::jit::Module& m,
     const StaticModuleOptions& opts) {
@@ -461,22 +470,23 @@ PrepareForStaticModule(
   auto module = m.copy();
   module.eval();
 
-  module = freeze_module(module);
+  auto module_ptr = std::make_shared<Module>(freeze_module(module));
 
-  Method method = module.get_method("forward");
-  auto graph = module.get_method("forward").graph();
+  Method method = module_ptr->get_method("forward");
+  auto graph = module_ptr->get_method("forward").graph();
+
+  // graph->dump();
   PrepareGraphForStaticModule(graph, opts);
 
-  c10::FunctionSchema s = RemoveSelfFromSchema(method.function().getSchema());
-  return std::make_pair(graph, s);
+  return std::make_pair(graph, module_ptr);
 }
 
-std::pair<std::shared_ptr<Graph>, c10::optional<c10::FunctionSchema>>
+std::pair<std::shared_ptr<Graph>, std::shared_ptr<Module>>
 PrepareForStaticModule(
     std::shared_ptr<torch::jit::Graph> graph,
     const StaticModuleOptions& opts) {
   PrepareGraphForStaticModule(graph, opts);
-  return std::make_pair(graph, c10::nullopt);
+  return std::make_pair(graph, nullptr);
 }
 
 } // namespace
@@ -492,13 +502,12 @@ StaticModule::StaticModule(
     : StaticModule(PrepareForStaticModule(m, opts), opts) {}
 
 StaticModule::StaticModule(
-    std::pair<
-        std::shared_ptr<torch::jit::Graph>,
-        c10::optional<c10::FunctionSchema>> graph_and_schema,
+    std::pair<std::shared_ptr<torch::jit::Graph>, std::shared_ptr<Module>>
+        graph_and_module,
     const StaticModuleOptions& opts)
     : opts_(opts),
-      graph_(std::move(graph_and_schema.first)),
-      schema_(std::move(graph_and_schema.second)) {
+      graph_(std::move(graph_and_module.first)),
+      module_(std::move(graph_and_module.second)) {
   // check opt flags
   if (opts.optimize_graph_output_memory) {
     TORCH_CHECK(
@@ -509,6 +518,18 @@ StaticModule::StaticModule(
     TORCH_CHECK(
         opts_.enable_out_variant,
         "When optimize_memory is true, enable_out_variant must be set to true");
+  }
+
+  // handle schema
+  if (module_) {
+    Method method = module_->get_method("forward");
+    schema_ = method.function().getSchema();
+    if (RemoveSelfFromGraphInput(graph_)) {
+      schema_ = RemoveSelfFromSchema(method.function().getSchema());
+    } else {
+      first_input_is_self_ = true;
+      schema_ = method.function().getSchema();
+    }
   }
 
   // map Value* to IValue (from inputs or prim::Constant) or null
@@ -620,6 +641,7 @@ StaticRuntime::StaticRuntime(const StaticModule& sm) : static_module_(sm) {
   // NB: create unchanging std::vector<IValue>s we can reference
   inputs_.resize(sm.num_inputs());
   nodes_.resize(sm.nodes().size());
+
   for (const auto idx : c10::irange(sm.nodes().size())) {
     const auto& n_ref = sm.nodes()[idx];
     nodes_[idx] = n_ref; // copy the node
@@ -688,6 +710,43 @@ std::vector<at::Tensor> StaticRuntime::operator()(
   return out;
 }
 
+void StaticRuntime::set_inputs(
+    const std::vector<c10::IValue>& args,
+    const std::unordered_map<std::string, c10::IValue>& kwargs) {
+  if (!kwargs.empty()) {
+    // This is not ideal
+    TORCH_CHECK(
+        static_module_.schema(),
+        "Schema is not available. Consider creating the Static Runtime "
+        "with StaticModule(const torch::jit::Module& m) instead.");
+    std::vector<c10::IValue> stack;
+    stack.reserve(inputs_.size());
+    if (static_module_.first_input_is_self()) {
+      stack.emplace_back(static_module_.module()._ivalue());
+    }
+    stack.insert(stack.end(), args.begin(), args.end());
+
+    static_module_.schema()->checkAndNormalizeInputs(stack, kwargs);
+    DCHECK_EQ(inputs_.size(), stack.size());
+    for (const auto i : c10::irange(stack.size())) {
+      Input(i) = std::move(stack[i]);
+    }
+  } else {
+    if (static_module_.first_input_is_self()) {
+      Input(0) = static_module_.module()._ivalue();
+      DCHECK_EQ(inputs_.size(), args.size() + 1);
+      for (const auto i : c10::irange(args.size())) {
+        Input(i + 1) = args[i];
+      }
+    } else {
+      DCHECK_EQ(inputs_.size(), args.size());
+      for (const auto i : c10::irange(args.size())) {
+        Input(i) = args[i];
+      }
+    }
+  }
+}
+
 c10::IValue StaticRuntime::operator()(
     const std::vector<c10::IValue>& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
@@ -701,27 +760,13 @@ c10::IValue StaticRuntime::operator()(
     planner_->allocate();
   }
 
-  if (!kwargs.empty()) {
-    // This is not ideal
-    TORCH_CHECK(
-        static_module_.schema(),
-        "Schema is not available. Consider creating the Static Runtime "
-        "with StaticModule(const torch::jit::Module& m) instead.");
-    std::vector<c10::IValue> s = args;
-    static_module_.schema()->checkAndNormalizeInputs(s, kwargs);
-    for (const auto i : c10::irange(s.size())) {
-      Input(i) = std::move(s[i]);
-    }
-  } else {
-    for (const auto i : c10::irange(args.size())) {
-      Input(i) = args[i];
-    }
-  }
+  set_inputs(args, kwargs);
 
   // NB: before optimizing the order of execution, ensure that the
   // memory optimization pass (LivenessMap) is
   // aware of the new order!
   for (auto& n : nodes_) {
+    // LOG(INFO) << "Running node: " << PrintNode(n.node());
     n.run();
   }
 
@@ -739,9 +784,7 @@ c10::IValue StaticRuntime::operator()(
     }
     planner_->deallocate();
     // clean up owning refs of input tensors
-    for (IValue& ival : inputs_) {
-      ival = IValue();
-    }
+    clean_up_input_ivalues();
   }
 
   // no need to keep references of outputs in static runtime anymore
@@ -829,6 +872,10 @@ void StaticRuntime::benchmark(
               << "%)" << std::endl;
   }
   check_for_memory_leak();
+
+#ifndef NDEBUG
+  display_nodes(args, kwargs);
+#endif
 }
 
 float StaticRuntime::benchmark_model(
@@ -906,15 +953,35 @@ void display_pnode_info(const ProcessedNode& pnode) {
   }
 }
 
-void StaticRuntime::display_nodes(const std::vector<c10::IValue>& args) {
+void StaticRuntime::display_nodes(
+    const std::vector<c10::IValue>& args,
+    const std::unordered_map<std::string, c10::IValue>& kwargs) {
   c10::InferenceMode mode;
-  std::vector<IValue> stack(args);
-  for (size_t i = 0; i < stack.size(); i++) {
-    Input(i) = stack[i];
+  if (planner_) {
+    planner_->allocate();
   }
+  set_inputs(args, kwargs);
+
   for (auto& node : nodes_) {
     node.run();
     display_pnode_info(node);
+  }
+
+  if (static_module_.opts().cleanup_activations) {
+    // MemoryPlanner is created after the first invocation of `run()`. This is
+    // done intentionally because MemoryPlanner uses `Tensor` sizes of the
+    // previous `run()` for memory planning of subsequent runs
+    if (!planner_) {
+      planner_ = std::make_unique<MemoryPlanner>(
+          this,
+          static_module_.values_share_same_storage(),
+          static_module_.external_values(),
+          static_module_.opts().enable_out_variant,
+          static_module_.opts().optimize_graph_output_memory);
+    }
+    planner_->deallocate();
+    // clean up owning refs of input tensors
+    clean_up_input_ivalues();
   }
 }
 
@@ -934,18 +1001,9 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
 
   // setup time
   caffe2::Timer timer;
-  std::vector<IValue> stack(args);
-  if (!kwargs.empty()) {
-    // This is not ideal
-    TORCH_CHECK(
-        static_module_.schema(),
-        "Schema is not available. Consider creating the Static Runtime "
-        "with StaticModule(const torch::jit::Module& m) instead.");
-    static_module_.schema()->checkAndNormalizeInputs(stack, kwargs);
-  }
-  for (const auto i : c10::irange(stack.size())) {
-    Input(i) = stack[i];
-  }
+
+  set_inputs(args, kwargs);
+
   results.setup_time = timer.MilliSeconds();
 
   // warmup runs
@@ -957,9 +1015,9 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
   // main runs
   for (const auto k : c10::irange(main_runs)) {
     (void)k; // Suppress unused variable warning
-    for (const auto i : c10::irange(stack.size())) {
-      Input(i) = stack[i];
-    }
+
+    set_inputs(args, kwargs);
+
     timer.Start();
     if (planner_) {
       planner_->allocate();
@@ -985,9 +1043,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
       }
       planner_->deallocate();
       // clean up owning refs of input tensors
-      for (IValue& ival : inputs_) {
-        ival = IValue();
-      }
+      clean_up_input_ivalues();
     }
     millis = timer.MilliSeconds();
     results.memory_dealloc_time += millis;
@@ -1283,16 +1339,11 @@ ProcessedNode::ProcessedNode(
     VLOG(1) << "Switch to out variant for node: " << PrintNode(node);
     return;
   }
-  if (!fn_ && mayRunNatively(node)) {
-    native_fn_ = getNativeOperation(node);
-    if (native_fn_) {
-      VLOG(1) << "Switch to native impl for node: " << PrintNode(node);
-      return;
-    }
+  if (!fn_ && (native_fn_ = getNativeOperation(node))) {
+    VLOG(1) << "Switch to native impl for node: " << PrintNode(node);
+    return;
   }
-  if (node->kind() != prim::ListConstruct &&
-      node->kind() != prim::TupleConstruct &&
-      node->kind() != prim::DictConstruct && node->kind() != prim::ListUnpack) {
+  {
     const Operator& op = node->getOperator();
     TORCH_CHECK(op.hasOperation());
     op_ = op.getOperation(node);
