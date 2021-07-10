@@ -9,6 +9,7 @@ add_executable(nvfuser_bench
   reduction.cpp
   softmax.cpp
   scale_bias_relu.cpp
+  utils.cpp
   main.cpp)
 
 target_link_libraries(nvfuser_bench PRIVATE torch_library benchmark)

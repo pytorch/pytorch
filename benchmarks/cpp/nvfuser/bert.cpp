@@ -244,46 +244,6 @@ static void MagicScheduler_DivMaxSoftDropBwd(
       bytes * int64_t(benchmark_state.iterations()));
 }
 
-static void DivMaxSoftDropFwd_fp32(benchmark::State& benchmark_state) {
-  MagicScheduler_DivMaxSoftDropFwd(benchmark_state, DataType::Float);
-}
-
-static void DivMaxSoftDropBwd_fp32(benchmark::State& benchmark_state) {
-  MagicScheduler_DivMaxSoftDropBwd(benchmark_state, DataType::Float);
-}
-
-static void DivMaxSoftDropFwd_fp16(benchmark::State& benchmark_state) {
-  MagicScheduler_DivMaxSoftDropFwd(benchmark_state, DataType::Half);
-}
-
-static void DivMaxSoftDropBwd_fp16(benchmark::State& benchmark_state) {
-  MagicScheduler_DivMaxSoftDropBwd(benchmark_state, DataType::Half);
-}
-
-BENCHMARK(DivMaxSoftDropFwd_fp32)
-    ->RangeMultiplier(8)
-    ->Ranges({{8, 8}, {16, 16}, {128, 128}, {128, 128}})
-    ->Unit(benchmark::kMicrosecond)
-    ->UseManualTime();
-
-BENCHMARK(DivMaxSoftDropBwd_fp32)
-    ->RangeMultiplier(8)
-    ->Ranges({{8, 8}, {16, 16}, {128, 128}, {128, 128}})
-    ->Unit(benchmark::kMicrosecond)
-    ->UseManualTime();
-
-BENCHMARK(DivMaxSoftDropFwd_fp16)
-    ->RangeMultiplier(8)
-    ->Ranges({{8, 8}, {16, 16}, {128, 128}, {128, 128}})
-    ->Unit(benchmark::kMicrosecond)
-    ->UseManualTime();
-
-BENCHMARK(DivMaxSoftDropBwd_fp16)
-    ->RangeMultiplier(8)
-    ->Ranges({{8, 8}, {16, 16}, {128, 128}, {128, 128}})
-    ->Unit(benchmark::kMicrosecond)
-    ->UseManualTime();
-
 static void setupBiasDropoutAddLayernormFwd(Fusion* fusion, DataType dtype) {
   FusionGuard fg(fusion);
 
@@ -531,7 +491,6 @@ static void MagicScheduler_BiasDropoutAddLayernormBwd1(
   cudaDeviceSynchronize();
   for (auto _ : benchmark_state) {
     clearL2Cache();
-    CudaKernelTimer timer;
     cg_outputs = fe.runFusion(at_inputs, norm_params.value().lparams);
     benchmark_state.SetIterationTime(fe.kernelTimeMs() / 1000.0);
   }
@@ -554,28 +513,6 @@ static void MagicScheduler_BiasDropoutAddLayernormBwd1(
   benchmark_state.SetBytesProcessed(
       bytes * int64_t(benchmark_state.iterations()));
 }
-
-static void BiasDropoutAddLayernormBwd1_fp32(
-    benchmark::State& benchmark_state) {
-  MagicScheduler_BiasDropoutAddLayernormBwd1(benchmark_state, DataType::Float);
-}
-static void BiasDropoutAddLayernormBwd1_tf32(
-    benchmark::State& benchmark_state) {
-  MagicScheduler_BiasDropoutAddLayernormBwd1(benchmark_state, DataType::Float);
-}
-
-BENCHMARK(BiasDropoutAddLayernormBwd1_fp32)
-    ->RangeMultiplier(2)
-    ->Ranges({{32, 1024}, {128, 128}, {1024, 1024}})
-    ->Unit(benchmark::kMicrosecond)
-    ->UseManualTime();
-
-// I am making a full AMPERE wave at 8 * 108 to compare
-BENCHMARK(BiasDropoutAddLayernormBwd1_tf32)
-    ->RangeMultiplier(2)
-    ->Ranges({{32, 1024}, {128, 128}, {864, 864}})
-    ->Unit(benchmark::kMicrosecond)
-    ->UseManualTime();
 
 static void setupBiasDropoutAddLayernormBwd2(Fusion* fusion, DataType dtype) {
   FusionGuard fg(fusion);
@@ -705,16 +642,6 @@ static void MagicScheduler_BiasDropoutAddLayernormBwd2(
       bytes * int64_t(benchmark_state.iterations()));
 }
 
-static void BiasDropoutAddLayernormBwd2_fp32(
-    benchmark::State& benchmark_state) {
-  MagicScheduler_BiasDropoutAddLayernormBwd2(benchmark_state, DataType::Float);
-}
-
-BENCHMARK(BiasDropoutAddLayernormBwd2_fp32)
-    ->Ranges({{32, 1024}, {128, 128}, {1024, 1024}})
-    ->Unit(benchmark::kMicrosecond)
-    ->UseManualTime();
-
 static void setupBiasDropoutAddLayernormBwd3(Fusion* fusion, DataType dtype) {
   FusionGuard fg(fusion);
 
@@ -816,10 +743,88 @@ static void MagicScheduler_BiasDropoutAddLayernormBwd3(
       bytes * int64_t(benchmark_state.iterations()));
 }
 
+//------------------------------------------------------------------------------
+
+static void DivMaxSoftDropFwd_fp32(benchmark::State& benchmark_state) {
+  MagicScheduler_DivMaxSoftDropFwd(benchmark_state, DataType::Float);
+}
+
+static void DivMaxSoftDropBwd_fp32(benchmark::State& benchmark_state) {
+  MagicScheduler_DivMaxSoftDropBwd(benchmark_state, DataType::Float);
+}
+
+static void DivMaxSoftDropFwd_fp16(benchmark::State& benchmark_state) {
+  MagicScheduler_DivMaxSoftDropFwd(benchmark_state, DataType::Half);
+}
+
+static void DivMaxSoftDropBwd_fp16(benchmark::State& benchmark_state) {
+  MagicScheduler_DivMaxSoftDropBwd(benchmark_state, DataType::Half);
+}
+
+static void BiasDropoutAddLayernormBwd1_fp32(
+    benchmark::State& benchmark_state) {
+  MagicScheduler_BiasDropoutAddLayernormBwd1(benchmark_state, DataType::Float);
+}
+
+// Use full ampere wave here
+static void BiasDropoutAddLayernormBwd1_tf32(
+    benchmark::State& benchmark_state) {
+  MagicScheduler_BiasDropoutAddLayernormBwd1(benchmark_state, DataType::Float);
+}
+
+static void BiasDropoutAddLayernormBwd2_fp32(
+    benchmark::State& benchmark_state) {
+  MagicScheduler_BiasDropoutAddLayernormBwd2(benchmark_state, DataType::Float);
+}
+
 static void BiasDropoutAddLayernormBwd3_fp32(
     benchmark::State& benchmark_state) {
   MagicScheduler_BiasDropoutAddLayernormBwd3(benchmark_state, DataType::Float);
 }
+
+//------------------------------------------------------------------------------
+
+BENCHMARK(DivMaxSoftDropFwd_fp32)
+    ->RangeMultiplier(8)
+    ->Ranges({{8, 8}, {16, 16}, {128, 128}, {128, 128}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(DivMaxSoftDropBwd_fp32)
+    ->RangeMultiplier(8)
+    ->Ranges({{8, 8}, {16, 16}, {128, 128}, {128, 128}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(DivMaxSoftDropFwd_fp16)
+    ->RangeMultiplier(8)
+    ->Ranges({{8, 8}, {16, 16}, {128, 128}, {128, 128}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(DivMaxSoftDropBwd_fp16)
+    ->RangeMultiplier(8)
+    ->Ranges({{8, 8}, {16, 16}, {128, 128}, {128, 128}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(BiasDropoutAddLayernormBwd1_fp32)
+    ->RangeMultiplier(2)
+    ->Ranges({{32, 1024}, {128, 128}, {1024, 1024}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+// Use full ampere wave here
+BENCHMARK(BiasDropoutAddLayernormBwd1_tf32)
+    ->RangeMultiplier(2)
+    ->Ranges({{32, 1024}, {128, 128}, {864, 864}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(BiasDropoutAddLayernormBwd2_fp32)
+    ->Ranges({{32, 1024}, {128, 128}, {1024, 1024}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
 
 BENCHMARK(BiasDropoutAddLayernormBwd3_fp32)
     ->Ranges({{32, 1024}, {128, 128}, {1024, 1024}})

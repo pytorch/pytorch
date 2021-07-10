@@ -18,16 +18,19 @@
 
 using namespace torch::jit::fuser::cuda;
 
-static void clearL2Cache() {
-  torch::NoGradGuard no_grad;
-  auto l2_cache_size = at::cuda::getCurrentDeviceProperties()->l2CacheSize;
-  auto options =
-      torch::TensorOptions().dtype(torch::kFloat32).device(at::kCUDA, 0);
+std::string toString(ReductionParams rparams);
 
-  auto l2_elems = l2_cache_size / 4;
-  torch::Tensor t0 = torch::empty(l2_elems, options);
-  torch::Tensor t1 = torch::clone(t0);
-};
+std::string toString(LaunchParams lparams);
+
+// Run benchmark iterations with provided inputs. If not segmented, report
+// kernel time from the runtime, as well as heuristic parameters. If segmented
+// use timers. Make sure to clear L2 between iterations.
+void runBenchmarkIterations(
+    benchmark::State& benchmark_state,
+    FusionExecutorCache* fusion_executor_cache,
+    std::vector<c10::IValue>& aten_inputs);
+
+void clearL2Cache();
 
 class CudaKernelTimer {
  public:
@@ -41,6 +44,10 @@ class CudaKernelTimer {
   ~CudaKernelTimer() {
     cudaEventDestroy(start_event);
     cudaEventDestroy(finish_event);
+  }
+
+  void restart() {
+    cudaEventRecord(start_event);
   }
 
   float elapsed() {
@@ -59,14 +66,11 @@ class CudaKernelTimer {
   cudaEvent_t finish_event = {};
 };
 
-namespace {
+namespace executorCache {
 using ExecutorPtr = std::unique_ptr<FusionExecutorCache>;
 using ExecutorMap = std::unordered_map<std::string, ExecutorPtr>;
-static ExecutorMap& getGlobalExecutorCacheMap() {
-  static ExecutorMap executor_map_;
-  return executor_map_;
-}
-} // namespace
+ExecutorMap& getGlobalMap();
+} // namespace executorCache
 
 //! Utility to manage FusionExecutorCache instances for
 //!  all defined benchmarks
@@ -91,15 +95,16 @@ class BenchmarkGraph : public benchmark::Fixture {
       auto fusion_ptr = std::make_unique<Fusion>();
       FusionGuard(fusion_ptr.get());
       setupFusion()(fusion_ptr.get());
-      executor_ = std::make_unique<FusionExecutorCache>(std::move(fusion_ptr));
+      getExecutorCacheMap()[graphName()] =
+          std::make_unique<FusionExecutorCache>(std::move(fusion_ptr));
     }
   }
 
   void TearDown(const ::benchmark::State& state) {}
 
  protected:
-  static ExecutorMap& getExecutorCacheMap() {
-    return getGlobalExecutorCacheMap();
+  static executorCache::ExecutorMap& getExecutorCacheMap() {
+    return executorCache::getGlobalMap();
   }
 };
 
