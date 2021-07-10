@@ -241,10 +241,10 @@ static void Baseline_Softmax_Dropout(
   // 1 bool: dropout_results.mask
   // All the same size
   benchmark_state.SetBytesProcessed(
-      int64_t(benchmark_state.iterations()) * 5 * at_scores.numel() *
+      int64_t(benchmark_state.iterations()) * 5 * attention_scores.numel() *
           int64_t(dataTypeSize(dtype)) +
       // bool mask
-      int64_t(benchmark_state.iterations()) * at_scores.numel() *
+      int64_t(benchmark_state.iterations()) * attention_scores.numel() *
           int64_t(dataTypeSize(DataType::Bool)));
 }
 
