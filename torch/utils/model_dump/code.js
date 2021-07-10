@@ -88,15 +88,15 @@ function ModelSizeSection({model: {file_size, zip_files}}) {
     </pre><//>`;
 }
 
-function ModelStructureSection({model: {model_data}}) {
+function StructuredDataSection({name, data, shown}) {
   return html`
-    <${Hider} name="Model Structure" shown=true>
+    <${Hider} name=${name} shown=${shown}>
     <div style="font-family:monospace;">
-      <${ModelData} data=${model_data} indent="" prefix=""/>
+      <${StructuredData} data=${data} indent="" prefix=""/>
     </div><//>`;
 }
 
-class ModelData extends Component {
+class StructuredData extends Component {
   constructor() {
     super();
     this.state = { shown: false };
@@ -236,7 +236,7 @@ class ModelData extends Component {
       let parts = [];
       for (let idx = 0; idx < data.length; idx++) {
         // Does it make sense to put explicit index numbers here?
-        parts.push(html`<br/><${ModelData} prefix=${idx + ": "} indent=${new_indent} data=${data[idx]} />`);
+        parts.push(html`<br/><${StructuredData} prefix=${idx + ": "} indent=${new_indent} data=${data[idx]} />`);
       }
       return parts;
     }
@@ -251,7 +251,7 @@ class ModelData extends Component {
         if (typeof(data.keys[idx]) != "string") {
           parts.push(html`<br/>${new_indent}Non-string key`);
         } else {
-          parts.push(html`<br/><${ModelData} prefix=${data.keys[idx] + ": "} indent=${new_indent} data=${data.values[idx]} />`);
+          parts.push(html`<br/><${StructuredData} prefix=${data.keys[idx] + ": "} indent=${new_indent} data=${data.values[idx]} />`);
         }
       }
       return parts;
@@ -271,16 +271,16 @@ class ModelData extends Component {
           } else if (this.IGNORED_STATE_KEYS.has(mstate.keys[idx])) {
             // Do nothing.
           } else {
-            parts.push(html`<br/><${ModelData} prefix=${mstate.keys[idx] + ": "} indent=${new_indent} data=${mstate.values[idx]} />`);
+            parts.push(html`<br/><${StructuredData} prefix=${mstate.keys[idx] + ": "} indent=${new_indent} data=${mstate.values[idx]} />`);
           }
         }
       } else if (mstate.__tuple_values__) {
-        parts.push(html`<br/><${ModelData} prefix="" indent=${new_indent} data=${mstate} />`);
+        parts.push(html`<br/><${StructuredData} prefix="" indent=${new_indent} data=${mstate} />`);
       } else if (mstate.__module_type__) {
         // We normally wouldn't have the state of a module be another module,
         // but we use "modules" to encode special values (like Unicode decode
         // errors) that might be valid states.  Just go with it.
-        parts.push(html`<br/><${ModelData} prefix="" indent=${new_indent} data=${mstate} />`);
+        parts.push(html`<br/><${StructuredData} prefix="" indent=${new_indent} data=${mstate} />`);
       } else {
         throw new Error("Bad module state");
       }
@@ -639,7 +639,8 @@ class App extends Component {
         <h1>TorchScript Model (version ${model.version}): ${model.title}</h1>
         <button onClick=${() => console.log(model)}>Log Raw Model Info</button>
         <${ModelSizeSection} model=${model}/>
-        <${ModelStructureSection} model=${model}/>
+        <${StructuredDataSection} name="Model Data" data=${model.model_data} shown=true/>
+        <${StructuredDataSection} name="Constants" data=${model.constants} shown=false/>
         <${ZipContentsSection} model=${model}/>
         <${CodeSection} model=${model}/>
         <${ExtraJsonSection} files=${model.extra_files_jsons}/>
