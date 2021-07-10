@@ -189,28 +189,6 @@ std::function<void(ProcessedNode*)> getOutOfPlaceOperation(Node* n) {
   return nullptr;
 }
 
-// TODO: expand to include all view producing ops, mostly in
-// https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/native/TensorShape.cpp
-bool mayRunNatively(Node* n) {
-  // In alphabetical order
-  const static std::unordered_set<std::string> native_nodes{
-      "aten::flatten",
-      "aten::reshape",
-      "aten::slice",
-      "aten::transpose",
-      "aten::to",
-      "prim::ListConstruct",
-      "prim::ListUnpack",
-      "prim::TupleConstruct",
-      "prim::DictConstruct",
-      "aten::__getitem__"};
-  auto str = std::string(n->kind().toQualString());
-  if (!native_nodes.count(str)) {
-    return false;
-  }
-  return true;
-}
-
 // Expensive check, use sparingly.
 // This is needed to make sure that we only switch to out variants for the
 // supported overloads, which is checked in the `Generate` step in
@@ -1301,6 +1279,24 @@ std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
           in0_t.unsafeGetTensorImpl()) {
         p_node->Output(0) = in0_t.clone();
       }
+    };
+  } else if (n->kind() == prim::GetAttr) {
+    return [](ProcessedNode* p_node) {
+      auto module = p_node->Input(0).toObject();
+      Node* node = p_node->node();
+      const auto type = node->input()->type()->expect<ClassType>();
+      const auto& field = node->s(attr::name);
+      const auto slot = type->getAttributeSlot(field);
+      p_node->Output(0) = module->getSlot(slot);
+    };
+  } else if (n->kind() == prim::SetAttr) {
+    return [](ProcessedNode* p_node) {
+      auto module = p_node->Input(0).toObject();
+      Node* node = p_node->node();
+      const auto type = node->inputs()[0]->type()->expect<ClassType>();
+      const auto& field = node->s(attr::name);
+      const auto slot = type->getAttributeSlot(field);
+      module->setSlot(slot, p_node->Input(1));
     };
   }
   return nullptr;
