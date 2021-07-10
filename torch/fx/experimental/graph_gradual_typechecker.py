@@ -202,8 +202,7 @@ def bn2d_inference_rule(n: Node, module_instance):
         # to be the node type
         # so if an incoming argument has more type information
         # we set this node's type to be the argument type
-        if is_more_precise(arg_type, n.type):
-            n.type = arg_type
+        n.type = get_greatest_upper_bound(arg_type, n.type)
         return n.type
     else:
         raise TypeError(f'Cannot apply {module_instance} with input type {arg_type} and existing type {n.type} on {n}')
@@ -266,6 +265,21 @@ def conv2d_inference_rule(n: Node, module_instance):
         return n.type
     else:
         raise TypeError(f'Cannot apply {module_instance} with input type { arg_type} and existing type {n.type} on {n}')
+
+
+@register_inference_rule(torch.nn.ReLU)
+def relu_inference_rule(n: Node, module_instance):
+    """
+    Input and output shapes should be equal.
+    """
+    assert isinstance(n.args[0], Node)
+
+    if n.args[0].type == Dyn and isinstance(n.type, TensorType):
+        n.args[0].type = expand_to_tensor_dim(n.args[0].type, len(n.type.__args__))
+
+    if isinstance(n.args[0].type, TensorType):
+        n.type = get_greatest_upper_bound(n.args[0].type, n.type)
+    return n.type
 
 class GraphTypeChecker:
     def __init__(self, env, traced):
