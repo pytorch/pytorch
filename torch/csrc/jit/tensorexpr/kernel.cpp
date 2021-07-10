@@ -1144,6 +1144,7 @@ std::pair<ScalarType, std::vector<BufHandle>> processCatList(
 Tensor* computeCatWoConditionals(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape) {
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   auto input_list = c10::get<BufList>(inputs[0]);
   auto arg_dim = inputs[1];
   auto cat_info = processCatList(input_list);
@@ -1225,6 +1226,7 @@ Tensor* computeCat(
   if (device == at::kCPU && getCatWoConditionals()) {
     return computeCatWoConditionals(inputs, outputShape);
   }
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   auto inputList = c10::get<BufList>(inputs[0]);
   auto argDim = inputs[1];
   auto catInfo = processCatList(inputList);
@@ -2319,6 +2321,7 @@ Tensor* tensorexpr::computeOperandValue(
                         idx = i5 + i4*2 + i3*2 + i2*18 + i1*18
                         B[i1,i2,i3,i4,i5] = A[idx/(3*2), (idx/3)%2, idx%3]
             */
+            // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
             ExprHandle cur_stride = 1;
             std::vector<const Expr*> dims, indices;
             for (size_t idx = 0; idx < view_dims.size(); idx++) {
@@ -2342,6 +2345,7 @@ Tensor* tensorexpr::computeOperandValue(
               // then it's 3 for dim_idx = 1, and then it's 3*2 for dim_idx = 0.
               stride = stride * A.dim(dim_idx);
             }
+            // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
             return A.load(orig_buf_indexes);
           });
     }
