@@ -107,6 +107,9 @@ static struct PyGetSetDef ${op}_properties[] = {
 PY_GETSETDEF_STRUCT = CodeTemplate("""\
 {(char*)"_saved_${name}", (getter)THP${op}_${name}_getter, nullptr, nullptr, nullptr}""")
 
+PY_RAW_GETSETDEF_STRUCT = CodeTemplate("""\
+{(char*)"_raw_saved_${name}", (getter)THP${op}_${name}_raw_getter, nullptr, nullptr, nullptr}""")
+
 # Getter templates
 GETTER_DEFINITION = CodeTemplate("""\
 PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
@@ -126,8 +129,31 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
 }
 """)
 
+GETTER_DEFINITION_RAW_SAVEDVAR = CodeTemplate("""\
+PyObject* THP${op}_${name}_raw_getter(THPCppFunction *self, void *_unused) {
+  HANDLE_TH_ERRORS
+  const auto& prop = static_cast<${op}*>(self->cdata.get())->${name}_;
+  ${body}
+  END_HANDLE_TH_ERRORS
+}
+""")
+
 GETTER_DEFINITION_VEC_SAVEDVAR = CodeTemplate("""\
 PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
+  HANDLE_TH_ERRORS
+  const auto *node = static_cast<${op}*>(self->cdata.get());
+  const auto& prop = node->${name}_;
+  if (node->${name}_released_) {
+    PyErr_SetString(PyExc_RuntimeError, ERR_BACKWARD_TWICE);
+    return nullptr;
+  }
+  ${body}
+  END_HANDLE_TH_ERRORS
+}
+""")
+
+GETTER_DEFINITION_RAW_VEC_SAVEDVAR = CodeTemplate("""\
+PyObject* THP${op}_${name}_raw_getter(THPCppFunction *self, void *_unused) {
   HANDLE_TH_ERRORS
   const auto *node = static_cast<${op}*>(self->cdata.get());
   const auto& prop = node->${name}_;
@@ -171,10 +197,24 @@ GETTER_BODY_SAVEDVAR = """\
 return THPVariable_Wrap(prop.unpack(self->cdata));
 """
 
+GETTER_BODY_RAW_SAVEDVAR = """\
+pybind11::object obj = pybind11::cast(prop, pybind11::return_value_policy::reference);
+return obj.release().ptr();
+"""
+
 GETTER_BODY_VEC_SAVEDVAR = """\
 PyObject* tup = PyTuple_New((Py_ssize_t) prop.size());
 for (int i = 0; i < prop.size(); i++) {
   PyTuple_SetItem(tup, (Py_ssize_t) i, THPVariable_Wrap(prop[i].unpack(self->cdata)));
+}
+return tup;
+"""
+
+GETTER_BODY_RAW_VEC_SAVEDVAR = """\
+PyObject* tup = PyTuple_New((Py_ssize_t) prop.size());
+for (int i = 0; i < prop.size(); i++) {
+  pybind11::object obj = pybind11::cast(prop[i], pybind11::return_value_policy::reference);
+  PyTuple_SetItem(tup, (Py_ssize_t) i, obj.release().ptr());
 }
 return tup;
 """
@@ -318,6 +358,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
         name = var.nctype.name
         type = var.nctype.type
         should_append_getsetdef = True
+        should_append_raw_getsetdef = False
 
         if type == BaseCType(tensorT) or type == OptionalCType(BaseCType(tensorT)) or \
                 type == MutRefCType(OptionalCType(BaseCType(tensorT))) or \
@@ -328,6 +369,9 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             unpack.append(f'auto {name} = {name}_.unpack({ptr});')
             getter_definitions.append(GETTER_DEFINITION_SAVEDVAR.substitute(
                 op=info.op, name=name, body=GETTER_BODY_SAVEDVAR))
+            getter_definitions.append(GETTER_DEFINITION_RAW_SAVEDVAR.substitute(
+                op=info.op, name=name, body=GETTER_BODY_RAW_SAVEDVAR))
+            should_append_raw_getsetdef = True
         elif type == BaseCType(tensorListT):
             saved_variables.append(f'std::vector<SavedVariable> {name}_;')
             saved_variables.append(f'bool {name}_released_ = false;')
@@ -339,6 +383,9 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             asserts.append(f'TORCH_CHECK(!{name}_released_, ERR_BACKWARD_TWICE);')
             getter_definitions.append(GETTER_DEFINITION_VEC_SAVEDVAR.substitute(
                 op=info.op, name=name, body=GETTER_BODY_VEC_SAVEDVAR))
+            getter_definitions.append(GETTER_DEFINITION_RAW_VEC_SAVEDVAR.substitute(
+                op=info.op, name=name, body=GETTER_BODY_RAW_VEC_SAVEDVAR))
+            should_append_raw_getsetdef = True
         elif type == ListCType(OptionalCType(BaseCType(tensorT))):
             saved_variables.append(f'std::vector<SavedVariable> {name}_;')
             saved_variables.append(f'bool {name}_released_ = false;')
@@ -350,6 +397,9 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             asserts.append(f'TORCH_CHECK(!{name}_released_, ERR_BACKWARD_TWICE);')
             getter_definitions.append(GETTER_DEFINITION_VEC_SAVEDVAR.substitute(
                 op=info.op, name=name, body=GETTER_BODY_VEC_SAVEDVAR))
+            getter_definitions.append(GETTER_DEFINITION_RAW_VEC_SAVEDVAR.substitute(
+                op=info.op, name=name, body=GETTER_BODY_RAW_VEC_SAVEDVAR))
+            should_append_raw_getsetdef = True
         elif type == BaseCType(intArrayRefT):
             saved_variables.append(f'std::vector<int64_t> {name};')
             getter_definitions.append(GETTER_DEFINITION.substitute(
@@ -388,6 +438,8 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
 
         if should_append_getsetdef:
             py_getsetdef_structs.append(PY_GETSETDEF_STRUCT.substitute(op=info.op, name=name))
+        if should_append_raw_getsetdef:
+            py_getsetdef_structs.append(PY_RAW_GETSETDEF_STRUCT.substitute(op=info.op, name=name))
 
     for var in info.all_saved_inputs:
         save_var(var, is_output=False)
