@@ -5,8 +5,9 @@
 namespace at {
 
 namespace meta {
-
-TORCH_META_FUNC(glu) (const Tensor& self, int64_t dim) {
+TORCH_META_FUNC(glu) (
+    const Tensor& self, int64_t dim
+) {
   // this can't pass anyway because a 0-dimensional tensor has "size" 1, which
   // can't be evenly halved, but give a nicer error message here.
   TORCH_CHECK(self.dim() > 0, "glu does not support 0-dimensional tensors");
@@ -19,10 +20,11 @@ TORCH_META_FUNC(glu) (const Tensor& self, int64_t dim) {
   const int64_t selfSize = nIn / 2;
   auto newSizes = self.sizes().vec();
   newSizes[wrap_dim] = selfSize;
-  set_output(0, newSizes, {}, self.options(), {});
-  build_unary_op(maybe_get_output(), self);
+  Tensor firstHalf = self.narrow(wrap_dim, 0, selfSize);
+  Tensor secondHalf = self.narrow(wrap_dim, selfSize, selfSize);
+  build_borrowing_binary_op(maybe_get_output(), firstHalf, secondHalf);
+//  set_output(0, newSizes, {}, self.options(), {});
 }
-
 } // namespace meta
 
 namespace native {
@@ -33,15 +35,7 @@ DEFINE_DISPATCH(glu_stub);
 DEFINE_DISPATCH(glu_backward_stub);
 
 TORCH_IMPL_FUNC(glu_out) (const Tensor& self, int64_t dim, const Tensor& out) {
-  auto selfSize = out.size(dim);
-  auto wrap_dim = maybe_wrap_dim(dim, self.dim());
-
-  // half tensor
-  Tensor firstHalf = self.narrow(wrap_dim, 0, selfSize);
-  Tensor secondHalf = self.narrow(wrap_dim, selfSize, selfSize);
-
-  auto iter = TensorIterator::borrowing_binary_op(out, firstHalf, secondHalf);
-  glu_stub(iter.device_type(), iter);
+  glu_stub(device_type(), *this);
 }
 
 Tensor& glu_backward_cpu_out(const Tensor& grad_output, const Tensor& input,
