@@ -344,42 +344,42 @@ class SelectiveLoweringTest(JitBackendTestCase):
         FileCheck() \
             .check("OuterModule") \
             .check_not("__torch__.torch.classes.__backends__.test_backend") \
-            .check("test_backend.LoweredModule") \
+            .check("LoweredModule.test_backend") \
             .run(self.lowered_module.graph)
 
         # Check that self.lowered_module.sub1/sub2 were not lowered but that BasicModule has been replaced in their graphs.
         FileCheck() \
             .check("MiddleModule") \
             .check("BasicModule") \
-            .check_not("test_backend.LoweredModule") \
+            .check_not("LoweredModule.test_backend") \
             .run(self.scripted_module.sub1.graph)
         FileCheck() \
             .check("MiddleModule") \
             .check_not("__torch__.torch.classes.__backends__.test_backend") \
-            .check("test_backend.LoweredModule") \
+            .check("LoweredModule.test_backend") \
             .run(self.lowered_module.sub1.graph)
 
         FileCheck() \
             .check("MiddleModule") \
             .check("BasicModule") \
-            .check_not("test_backend.LoweredModule") \
+            .check_not("LoweredModule.test_backend") \
             .run(self.scripted_module.sub2.graph)
         FileCheck() \
             .check("MiddleModule") \
             .check_not("__torch__.torch.classes.__backends__.test_backend") \
-            .check("test_backend.LoweredModule") \
+            .check("LoweredModule.test_backend") \
             .run(self.lowered_module.sub2.graph)
 
         # Check that self.lowered_module.sub1/sub2.submodule were lowered. Its graph should mention
         # __torch__.torch.classes.__backends__.test_backend, the TorchBind class for executing functions
         # on the test JIT backend.
         FileCheck() \
-            .check("test_backend.LoweredModule") \
+            .check("LoweredModule.test_backend") \
             .check("__torch__.torch.classes.__backends__.test_backend") \
             .run(self.lowered_module.sub1.submodule.graph)
 
         FileCheck() \
-            .check("test_backend.LoweredModule") \
+            .check("LoweredModule.test_backend") \
             .check("__torch__.torch.classes.__backends__.test_backend") \
             .run(self.lowered_module.sub2.submodule.graph)
 
@@ -388,12 +388,12 @@ class SelectiveLoweringTest(JitBackendTestCase):
             .check("MiddleModule") \
             .check("BasicModule") \
             .check_not("__torch__.torch.classes.__backends__.test_backend") \
-            .check_not("test_backend.LoweredModule") \
+            .check_not("LoweredModule.test_backend") \
             .run(self.scripted_module.other.graph)
         FileCheck() \
             .check("BasicModule") \
             .check_not("__torch__.torch.classes.__backends__.test_backend") \
-            .check_not("test_backend.LoweredModule") \
+            .check_not("LoweredModule.test_backend") \
             .run(self.scripted_module.other.submodule.graph)
 
     def test_errors(self):
@@ -591,6 +591,69 @@ class ErrorMessagesWithCompiler(JitBackendTestCase):
 """, ""):
             lowered_module_n = torch._C._jit_to_backend("backend_with_compiler_demo", scripted_module_n, {"forward": {"": ""}})
 
+class CompModuleTestWithCompiler(JitBackendTestCase):
+    """
+    Tests for CompModule, which is a module with two lowered submodules
+    """
+
+    class BasicModuleSub(torch.nn.Module):
+        """
+        A simple subtraction Module to be used in CompModule.
+        """
+        def __init__(self):
+            super().__init__()
+
+        def forward(self, x, h):
+            return x - h
+
+    class CompModule(torch.nn.Module):
+        """
+        A module with two lowered submodules.
+        """
+
+        def __init__(self, addmodule, submodule):
+            super().__init__()
+            self.lowered_add = addmodule
+            self.lowered_sub = submodule
+
+        def forward(self, a, b, s):
+            c = self.lowered_add.forward(a, b)
+            d = self.lowered_sub.forward(a, b)
+            y = s * (c * d)
+            return y
+
+    def setUp(self):
+        super().setUp()
+        # Create Python and JIT versions of CompModule with lowered submodules.
+        compile_spec = {
+            "forward": {
+                "input_shapes": "((1, 1, 320, 240), (1, 3))",
+                "some_other_option": "True",
+            },
+        }
+        lowered_add = torch._C._jit_to_backend(
+            "backend_with_compiler_demo", torch.jit.script(BasicModuleAdd()), compile_spec)
+        lowered_sub = torch._C._jit_to_backend(
+            "backend_with_compiler_demo",
+            torch.jit.script(CompModuleTestWithCompiler.BasicModuleSub()),
+            {"forward": {"": ""}}
+        )
+        self.module = CompModuleTestWithCompiler.CompModule(lowered_add, lowered_sub)
+        self.scripted_module = torch.jit.script(CompModuleTestWithCompiler.CompModule(lowered_add, lowered_sub))
+        # No backend version of CompModule currently, so this is filler.
+        self.lowered_module = self.scripted_module
+        # Create a mobile version of CompModule from JIT version
+        buffer = io.BytesIO(self.scripted_module._save_to_buffer_for_lite_interpreter())
+        buffer.seek(0)
+        self.mobile_module = _load_for_lite_interpreter(buffer)
+
+    def test_execution(self):
+        # Test execution with backend against Python and JIT.
+        input1 = torch.randn(5)
+        input2 = torch.randn(5)
+
+        # Test forward.
+        self.check_function("forward", (input1, input2, input2))
 
 # This is needed for IS_WINDOWS or IS_MACOS to skip the tests.
 @unittest.skipIf(TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE,
@@ -605,16 +668,19 @@ class TestBackendsWithCompiler(JitTestCase):
         super().__init__(name)
         self.basic_module_compiler_test = BasicModuleTestWithCompiler(name)
         self.error_module_compiler_test = ErrorMessagesWithCompiler(name)
+        self.comp_module_compiler_test = CompModuleTestWithCompiler(name)
 
     def setUp(self):
         super().setUp()
         if not TEST_WITH_ROCM:
             self.basic_module_compiler_test.setUp()
             self.error_module_compiler_test.setUp()
+            self.comp_module_compiler_test.setUp()
 
     @skipIfRocm
     def test_execution(self):
         self.basic_module_compiler_test.test_execution()
+        self.comp_module_compiler_test.test_execution()
 
     @skipIfRocm
     def test_errors(self):
