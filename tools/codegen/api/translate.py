@@ -96,7 +96,7 @@ def translate(
 
         if isinstance(t, NamedCType) and isinstance(t.type, ConstRefCType) and \
                 isinstance(t.type.elem, OptionalCType) and isinstance(t.type.elem.elem, BaseCType) \
-                        and str(t.type.elem.elem.type) == 'at::Tensor':
+                and str(t.type.elem.elem.type) == 'at::Tensor':
             ctx[NamedCType(t.name, BaseCType(optionalTensorRefT))] = \
                 f'({b.expr}.has_value() ? at::OptionalTensorRef(*{b.expr}) : at::OptionalTensorRef())'
 

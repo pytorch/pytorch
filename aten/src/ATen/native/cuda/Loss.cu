@@ -280,6 +280,10 @@ void nll_loss_forward_out_cuda_template(
     const Tensor& weight,
     int64_t reduction,
     int64_t ignore_index) {
+  int64_t n_classes = input.size(-1);
+  int64_t n_dims = input.dim();
+  int64_t batch_size = n_dims == 1 ? 1 : input.size(0);
+
   auto weight_ = weight.defined() ? weight.contiguous() : weight;
 
   if (reduction == Reduction::None & n_dims == 2) {

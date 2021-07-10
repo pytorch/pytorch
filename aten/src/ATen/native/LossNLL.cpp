@@ -1,8 +1,8 @@
-#include "ATen/TensorMeta.h"
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
+#include <ATen/TensorMeta.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/cpu/utils.h>
 
@@ -39,7 +39,7 @@ TORCH_META_FUNC(nll_loss_forward)
       " but got weight tensor of shape: ",
       weight.sizes());
 
-  set_output(0, {}, self.options());
+  set_output(0, {0}, self.options());
   set_output(1, {}, self.options());
 }
 } // namespace meta
