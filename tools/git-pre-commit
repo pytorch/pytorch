@@ -7,9 +7,10 @@ python tools/linter/flake8_hook.py
 if [ $(which clang-tidy) ]
 then
   echo "Running pre-commit clang-tidy"
-  python tools/linter/clang_tidy.py \
+  git diff HEAD > pr.diff
+  python tools/linter/clang_tidy \
     --paths torch/csrc \
-    --diff HEAD \
+    --diff-file "pr.diff" \
     -g"-torch/csrc/jit/passes/onnx/helper.cpp" \
     -g"-torch/csrc/jit/passes/onnx/shape_type_inference.cpp" \
     -g"-torch/csrc/jit/serialization/onnx.cpp" \
