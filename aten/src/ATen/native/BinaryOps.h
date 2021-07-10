@@ -29,7 +29,7 @@ inline void sub_check(const Tensor& self, const Tensor& other) {
 
 inline void sub_check(const Tensor& self, const Scalar& scalar) {
   TORCH_CHECK(self.scalar_type() != kBool || !scalar.isBoolean(),
-              "Subtraction, the `-` operator, with two bool tensors is not supported."
+              "Subtraction, the `-` operator, with two bool tensors is not supported. "
               "Use the `^` or `logical_xor()` operator instead.")
   TORCH_CHECK(self.scalar_type() != kBool && !scalar.isBoolean(),
               "Subtraction, the `-` operator, with a bool tensor is not supported. "
