@@ -95,6 +95,7 @@ std::vector<Tensor>& broadcast_out(
 }
 
 std::vector<Tensor> broadcast(const Tensor& tensor, IntArrayRef devices) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<Tensor> diff_device_dst_tensors;
   diff_device_dst_tensors.reserve(devices.size());
   for (auto device : devices) {
@@ -108,10 +109,12 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntArrayRef devices) {
     }
   }
   _broadcast_out_impl(tensor, diff_device_dst_tensors);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<Tensor> dst_tensors;
   dst_tensors.reserve(devices.size());
   auto it = diff_device_dst_tensors.begin();
   for (auto device : devices) {
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (device != tensor.get_device()) {
       dst_tensors.push_back(*it++);
     } else {
@@ -169,6 +172,7 @@ tensor_list2d broadcast_coalesced(
   buffer_size = std::min(torch::cuda::nccl::get_max_count(), buffer_size);
 #endif
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   tensor_list2d outputs(devices.size());
   outputs[0] = tensors.vec();
   for (auto& o : outputs)
@@ -235,6 +239,7 @@ std::vector<at::Tensor>& scatter_out(
       "Expected at least one output tensor to scatter to");
   dim = at::maybe_wrap_dim(dim, tensor);
   int64_t total_size = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<int64_t> chunk_sizes;
   chunk_sizes.reserve(out_tensors.size());
   for(const auto i : c10::irange(out_tensors.size())) {
@@ -324,6 +329,7 @@ std::vector<at::Tensor> scatter(
         chunk_sizes->size());
   }
   dim = at::maybe_wrap_dim(dim, tensor);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<at::Tensor> chunks = chunk_sizes
       ? tensor.split_with_sizes(/*split_sizes=*/*chunk_sizes, /*dim=*/dim)
       : tensor.chunk(/*chunks=*/devices.size(), /*dim=*/dim);
@@ -369,6 +375,7 @@ static inline at::Tensor& _gather_out_impl(
     at::TensorList tensors,
     at::Tensor& out_tensor,
     int64_t dim) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<int64_t> chunk_sizes;
   chunk_sizes.reserve(tensors.size());
   for (auto& tensor : tensors) {
@@ -391,6 +398,7 @@ at::Tensor& gather_out(
   auto& first = tensors.front();
   const auto first_size = first.sizes();
   dim = at::maybe_wrap_dim(dim, first);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<int64_t> expected_size(first_size.begin(), first_size.end());
   for(const auto i : c10::irange(tensors.size())) {
     const auto& tensor = tensors[i];
@@ -445,6 +453,7 @@ at::Tensor gather(
   auto& first = tensors.front();
   const auto first_size = first.sizes();
   dim = at::maybe_wrap_dim(dim, first);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<int64_t> expected_size(first_size.begin(), first_size.end());
   auto memory_format = first.suggest_memory_format();
   for(const auto i : c10::irange(tensors.size())) {
