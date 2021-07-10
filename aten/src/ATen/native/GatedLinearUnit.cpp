@@ -23,7 +23,6 @@ TORCH_META_FUNC(glu) (
   Tensor firstHalf = self.narrow(wrap_dim, 0, selfSize);
   Tensor secondHalf = self.narrow(wrap_dim, selfSize, selfSize);
   build_borrowing_binary_op(maybe_get_output(), firstHalf, secondHalf);
-//  set_output(0, newSizes, {}, self.options(), {});
 }
 } // namespace meta
 

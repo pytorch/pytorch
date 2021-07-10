@@ -6106,7 +6106,9 @@ else:
         self.assertEqual(2, x.stride(0))
         self.assertEqual(1, x.stride(2))
 
+        print("hello 1")
         self.assertEqual(x, torch.nn.functional.glu(x, 0))
+        print("hello 1")
         self.assertEqual((0, 1, 1, 0), torch.nn.functional.glu(x, 2).shape)
 
         # softmax, logsoftmax
@@ -8265,4 +8267,14 @@ instantiate_device_type_tests(TestTorchDeviceType, globals())
 instantiate_device_type_tests(TestDevicePrecision, globals(), except_for='cpu')
 
 if __name__ == '__main__':
-    run_tests()
+    # run_tests()
+    shape = (2, 1, 2, 0)
+    device = "cuda"
+    x = torch.randn(shape, device=device)
+    print(x)
+
+    # size stride
+    print("hello 1")
+    torch.nn.functional.glu(x, 0)
+    print("hello 2")
+    torch.nn.functional.glu(x, 2).shape
