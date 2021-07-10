@@ -248,22 +248,6 @@ class TestZeroRedundancyOptimizerSingleRank(TestZeroRedundancyOptimizer):
             with self.assertRaises(ValueError):
                 ZeroRedundancyOptimizer(input, optimizer_class=SGD, lr=0.1)
 
-    def test_same_param_device(self):
-        """Check that ZeroRedundancyOptimizer raises an exception if the input
-        parameters are sharded on multiple devices.
-
-        NOTE: This test should be removed once support for sharding a rank's
-        model parameters across multiple devices is added.
-        """
-        if not torch.cuda.is_available() or torch.cuda.device_count() < 2:
-            return
-        self.dist_init(self.rank)
-
-        # Move the parameters to cuda:0 and cuda:1 respectively
-        params = [torch.Tensor(1).to(0), torch.Tensor(1).to(1)]
-        with self.assertRaises(ValueError):
-            ZeroRedundancyOptimizer(params, optimizer_class=SGD, lr=0.1)
-
 
 class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
     @property
@@ -790,6 +774,110 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
     def test_zero_join_cpu(self):
         """Check that the ZeRO join hook allows training with uneven inputs on CPU."""
         self._test_zero_join(torch.device("cpu"))
+
+    def _test_zero_model_parallel(self, parameters_as_bucket_view: bool):
+        # Use two processes each with two GPUs
+        assert self.rank < 2
+        NUM_EPOCHS = 3
+        NUM_INPUTS = 5
+        LR = 0.01
+        torch.manual_seed(0)
+        torch.cuda.manual_seed(0)
+
+        class ModelParallelModel(torch.nn.Module):
+            def __init__(self, dev0, dev1):
+                super().__init__()
+                self.dev0 = dev0
+                self.dev1 = dev1
+                self.net0 = torch.nn.Linear(10, 10).to(dev0)
+                self.relu = torch.nn.ReLU()
+                self.net1 = torch.nn.Linear(10, 5).to(dev1)
+
+            def forward(self, x):
+                x = x.to(self.dev0)
+                x = self.relu(self.net0(x))
+                x = x.to(self.dev1)
+                return self.net1(x)
+
+        class LocalModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.net0 = torch.nn.Linear(10, 10)
+                self.relu = torch.nn.ReLU()
+                self.net1 = torch.nn.Linear(10, 5)
+
+            def forward(self, x):
+                return self.net1(self.relu(self.net0(x)))
+
+        dev0 = 2 * self.rank
+        dev1 = 2 * self.rank + 1
+        mp_model = ModelParallelModel(dev0, dev1)
+        ddp_model = DDP(mp_model)
+        local_model = LocalModel()
+        cpu_device = torch.device("cpu")
+        # Ensure the parameters are the same across the two models
+        local_model.net0.weight = torch.nn.Parameter(mp_model.net0.weight.detach().clone().to(cpu_device))
+        local_model.net0.bias = torch.nn.Parameter(mp_model.net0.bias.detach().clone().to(cpu_device))
+        local_model.net1.weight = torch.nn.Parameter(mp_model.net1.weight.detach().clone().to(cpu_device))
+        local_model.net1.bias = torch.nn.Parameter(mp_model.net1.bias.detach().clone().to(cpu_device))
+
+        # Compare parity between DDP with model parallelism using ZeRO and
+        # a local model using a local optimizer
+        zero_optim = ZeroRedundancyOptimizer(
+            ddp_model.parameters(),
+            optimizer_class=torch.optim.Adam,
+            parameters_as_bucket_view=parameters_as_bucket_view,
+            lr=LR
+        )
+        local_optim = torch.optim.Adam(local_model.parameters(), lr=LR)
+        inputs = [torch.randn(20, 10) for _ in range(NUM_INPUTS)]
+
+        for _ in range(NUM_EPOCHS):
+            for input in inputs:
+                def closure_local():
+                    local_optim.zero_grad()
+                    local_loss = local_model(input).abs().sum()
+                    local_loss.backward()
+                    return local_loss
+
+                def closure_ddp():
+                    zero_optim.zero_grad()
+                    ddp_loss = ddp_model(input).abs().sum()
+                    ddp_loss.backward()
+                    return ddp_loss
+
+                local_loss = cast(torch.Tensor, local_optim.step(closure=closure_local))
+                ddp_loss = cast(torch.Tensor, zero_optim.step(closure=closure_ddp)).to(cpu_device)
+
+                assert torch.allclose(
+                    local_loss, ddp_loss
+                ), "Losses differ between local optim and ZeroRedundancyOptimizer"
+
+                for local_p, ddp_p in zip(local_model.parameters(), ddp_model.parameters()):
+                    ddp_p = ddp_p.to(cpu_device)
+                    assert torch.allclose(local_p, ddp_p), "Models differ after a step"
+
+    @common_distributed.skip_if_lt_x_gpu(4)
+    def test_zero_model_parallel_with_bucket_view(self):
+        """
+        Check that ZeRO works with model parallelism where layers are sharded
+        across devices when ``parameters_as_bucket_view=True``.
+        """
+        if self.rank >= 2:
+            return
+        self.dist_init(self.rank, world_size=2)
+        self._test_zero_model_parallel(parameters_as_bucket_view=True)
+
+    @common_distributed.skip_if_lt_x_gpu(4)
+    def test_zero_model_parallel_without_bucket_view(self):
+        """
+        Check that ZeRO works with model parallelism where layers are sharded
+        across devices when ``parameters_as_bucket_view=False``.
+        """
+        if self.rank >= 2:
+            return
+        self.dist_init(self.rank, world_size=2)
+        self._test_zero_model_parallel(parameters_as_bucket_view=False)
 
 
 if __name__ == "__main__":
