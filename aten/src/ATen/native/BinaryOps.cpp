@@ -100,10 +100,6 @@ TORCH_META_FUNC2(bitwise_right_shift, Tensor) (
   build_borrowing_binary_op(maybe_get_output(), self, other);
 }
 
-TORCH_META_FUNC2(fmod, Tensor) (const Tensor& self, const Tensor& other) {
-  build_borrowing_binary_op(maybe_get_output(), self, other);
-}
-
 TORCH_META_FUNC2(bitwise_and, Tensor) (const Tensor& self, const Tensor& other) {
   build_borrowing_binary_op(maybe_get_output(), self, other);
 }
@@ -113,6 +109,10 @@ TORCH_META_FUNC2(bitwise_or, Tensor) (const Tensor& self, const Tensor& other) {
 }
 
 TORCH_META_FUNC2(bitwise_xor, Tensor) (const Tensor& self, const Tensor& other) {
+  build_borrowing_binary_op(maybe_get_output(), self, other);
+}
+
+TORCH_META_FUNC2(fmod, Tensor) (const Tensor& self, const Tensor& other) {
   build_borrowing_binary_op(maybe_get_output(), self, other);
 }
 
