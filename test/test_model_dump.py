@@ -205,6 +205,20 @@ class TestModelDump(TestCase):
 
         check_memory(torch.jit.script(SimpleModel()), simple_model_memory)
 
+        # The same SimpleModel instance appears twice in this model.
+        # The tensors will be shared, so ensure no double-counting.
+        a_simple_model = SimpleModel()
+        check_memory(
+            torch.jit.script(
+                torch.nn.Sequential(a_simple_model, a_simple_model)),
+            simple_model_memory)
+
+        # The freezing process will move the weight and bias
+        # from data to constants.  Ensure they are still counted.
+        check_memory(
+            torch.jit.freeze(torch.jit.script(SimpleModel()).eval()),
+            simple_model_memory)
+
 
 if __name__ == '__main__':
     run_tests()
