@@ -100,10 +100,6 @@ TORCH_META_FUNC2(bitwise_right_shift, Tensor) (
   build_borrowing_binary_op(maybe_get_output(), self, other);
 }
 
-TORCH_META_FUNC2(fmod, Tensor) (const Tensor& self, const Tensor& other) {
-  build_borrowing_binary_op(maybe_get_output(), self, other);
-}
-
 TORCH_META_FUNC2(bitwise_and, Tensor) (const Tensor& self, const Tensor& other) {
   build_borrowing_binary_op(maybe_get_output(), self, other);
 }
@@ -114,6 +110,26 @@ TORCH_META_FUNC2(bitwise_or, Tensor) (const Tensor& self, const Tensor& other) {
 
 TORCH_META_FUNC2(bitwise_xor, Tensor) (const Tensor& self, const Tensor& other) {
   build_borrowing_binary_op(maybe_get_output(), self, other);
+}
+
+TORCH_META_FUNC2(fmod, Tensor) (const Tensor& self, const Tensor& other) {
+  build_borrowing_binary_op(maybe_get_output(), self, other);
+}
+
+TORCH_META_FUNC2(xlogy, Tensor) (const Tensor& self, const Tensor& other) {
+  build_borrowing_binary_float_op(maybe_get_output(), self, other);
+}
+
+TORCH_META_FUNC(logit_backward) (const Tensor& grad_output, const Tensor& input, c10::optional<double> eps) {
+  build_borrowing_binary_op(maybe_get_output(), grad_output, input);
+}
+
+TORCH_META_FUNC(sigmoid_backward) (const Tensor& grad_output, const Tensor& output) {
+  build_borrowing_binary_op(maybe_get_output(), grad_output, output);
+}
+
+TORCH_META_FUNC(tanh_backward) (const Tensor& grad_output, const Tensor& output) {
+  build_borrowing_binary_op(maybe_get_output(), grad_output, output);
 }
 
 // These are normal binary ops that preserve dtype
@@ -279,12 +295,24 @@ TORCH_IMPL_FUNC(div_out_mode) (
   }
 }
 
+TORCH_IMPL_FUNC(logit_backward_out) (const Tensor& grad_output, const Tensor& input, c10::optional<double> eps, const Tensor& result) {
+  logit_backward_stub(device_type(), *this, Scalar(eps ? eps.value() : -1.0));
+}
+
+TORCH_IMPL_FUNC(sigmoid_backward_out) (const Tensor& grad_output, const Tensor& output, const Tensor& result) {
+  sigmoid_backward_stub(device_type(), *this);
+}
+
 TORCH_IMPL_FUNC(special_xlog1py_out) (const Tensor& self, const Tensor& other, const Tensor& result) {
   xlog1py_stub(device_type(), *this);
 }
 
 TORCH_IMPL_FUNC(special_zeta_out) (const Tensor& self, const Tensor& other, const Tensor& result) {
   zeta_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(tanh_backward_out) (const Tensor& grad_output, const Tensor& output, const Tensor& result) {
+  tanh_backward_stub(device_type(), *this);
 }
 
 #define CREATE_BINARY_TORCH_IMPL_FUNC(func_out, func_stub)                                                    \
@@ -309,6 +337,7 @@ CREATE_BINARY_TORCH_IMPL_FUNC(igamma_out, igamma_stub);
 CREATE_BINARY_TORCH_IMPL_FUNC(igammac_out, igammac_stub);
 CREATE_BINARY_TORCH_IMPL_FUNC(nextafter_out, nextafter_stub);
 CREATE_BINARY_TORCH_IMPL_FUNC(remainder_out, remainder_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(xlogy_out, xlogy_stub);
 
 Tensor special_xlog1py(const Scalar& x, const Tensor& y) {
   return at::special_xlog1py(wrapped_scalar_tensor(x), y);
@@ -591,53 +620,6 @@ Tensor subtract(const Tensor& self, const Scalar& other, const Scalar& alpha) {
 
 Tensor& subtract_(Tensor& self, const Scalar& other, const Scalar& alpha) {
   return self.sub_(other, alpha);
-}
-
-Tensor& sigmoid_backward_out(const Tensor& grad_output, const Tensor& output, Tensor& result) {
-  auto iter = TensorIterator::binary_op(result, grad_output, output);
-  sigmoid_backward_stub(iter.device_type(), iter);
-  return result;
-}
-
-Tensor sigmoid_backward(const Tensor& grad_output, const Tensor& output) {
-  Tensor result;
-  auto iter = TensorIterator::binary_op(result, grad_output, output);
-  sigmoid_backward_stub(iter.device_type(), iter);
-  return iter.output();
-}
-
-Tensor& logit_backward_out(const Tensor& grad_output,
-    const Tensor& input,
-    c10::optional<double> eps,
-    Tensor& result) {
-  auto iter = TensorIterator::binary_op(result, grad_output, input);
-  logit_backward_stub(
-      iter.device_type(), iter, Scalar(eps ? eps.value() : -1.0));
-  return result;
-}
-
-Tensor logit_backward(
-    const Tensor& grad_output,
-    const Tensor& input,
-    c10::optional<double> eps) {
-  Tensor result;
-  auto iter = TensorIterator::binary_op(result, grad_output, input);
-  logit_backward_stub(
-      iter.device_type(), iter, Scalar(eps ? eps.value() : -1.0));
-  return iter.output();
-}
-
-Tensor& tanh_backward_out(const Tensor& grad_output, const Tensor& output, Tensor& result) {
-  auto iter = TensorIterator::binary_op(result, grad_output, output);
-  tanh_backward_stub(iter.device_type(), iter);
-  return result;
-}
-
-Tensor tanh_backward(const Tensor& grad_output, const Tensor& output) {
-  Tensor result;
-  auto iter = TensorIterator::binary_op(result, grad_output, output);
-  tanh_backward_stub(iter.device_type(), iter);
-  return iter.output();
 }
 
 Tensor rsub(const Tensor& self, const Tensor& other, const Scalar& alpha) {
@@ -1097,25 +1079,12 @@ Tensor& ldexp_(Tensor& self, const Tensor& other) {
   return at::ldexp_out(self, self, other);
 }
 
-Tensor& xlogy_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  auto iter = TensorIterator::binary_float_op(result, self, other);
-  xlogy_stub(iter.device_type(), iter);
-  return result;
-}
-
 Tensor& xlogy_out(const Scalar& self, const Tensor& other, Tensor& result) {
   return at::xlogy_out(result, wrapped_scalar_tensor(self), other);
 }
 
 Tensor& xlogy_out(const Tensor& self, const Scalar& other, Tensor& result) {
   return at::xlogy_out(result, self, wrapped_scalar_tensor(other));
-}
-
-Tensor xlogy(const Tensor& x, const Tensor& y) {
-  Tensor result;
-  auto iter = TensorIterator::binary_float_op(result, x, y);
-  xlogy_stub(iter.device_type(), iter);
-  return iter.output();
 }
 
 Tensor xlogy(const Scalar& x, const Tensor& y) {
@@ -1126,12 +1095,8 @@ Tensor xlogy(const Tensor& x, const Scalar& y) {
   return at::xlogy(x, wrapped_scalar_tensor(y));
 }
 
-Tensor& xlogy_(Tensor& x, const Tensor& y) {
-  return at::xlogy_out(x, x, y);
-}
-
 Tensor& xlogy_(Tensor& x, const Scalar& y) {
-  return at::xlogy_out(x, x, wrapped_scalar_tensor(y));
+  return at::xlogy_(x, wrapped_scalar_tensor(y));
 }
 
 } // namespace native

@@ -671,7 +671,7 @@ void huber_kernel(TensorIterator& iter, double delta) {
   });
 }
 
-void sigmoid_backward_kernel(TensorIterator& iter) {
+void sigmoid_backward_kernel(TensorIteratorBase& iter) {
   if (isComplexType(iter.dtype())) {
     AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "sigmoid_backward_cpu", [&]() {
       auto one_vec = Vectorized<scalar_t>(scalar_t{1});
@@ -700,7 +700,7 @@ void sigmoid_backward_kernel(TensorIterator& iter) {
   }
 }
 
-void logit_backward_kernel(TensorIterator& iter, const Scalar& eps_scalar) {
+void logit_backward_kernel(TensorIteratorBase& iter, const Scalar& eps_scalar) {
   AT_DISPATCH_FLOATING_TYPES_AND(
       kBFloat16, iter.dtype(), "logit_backward_cpu", [&]() {
         const scalar_t eps = eps_scalar.to<scalar_t>();
@@ -750,7 +750,7 @@ void logit_backward_kernel(TensorIterator& iter, const Scalar& eps_scalar) {
       });
 }
 
-void tanh_backward_kernel(TensorIterator& iter) {
+void tanh_backward_kernel(TensorIteratorBase& iter) {
   if (isComplexType(iter.dtype())) {
     AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "tanh_backward_cpu", [&]() {
       auto one_vec = Vectorized<scalar_t>(scalar_t{1});
@@ -961,7 +961,7 @@ void copysign_kernel(TensorIteratorBase& iter) {
   });
 }
 
-void xlogy_kernel(TensorIterator& iter) {
+void xlogy_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "xlogy_cpu", [&]() {
     cpu_kernel(iter, [](scalar_t x, scalar_t y) -> scalar_t {
       if (at::_isnan(y)){
