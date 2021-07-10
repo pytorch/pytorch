@@ -3,7 +3,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
-#include <iostream>
+#include <ostream>
 #include <string>
 #include <vector>
 
