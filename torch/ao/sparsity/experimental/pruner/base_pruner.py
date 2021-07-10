@@ -59,6 +59,8 @@ class BasePruner(abc.ABC):
 
         self.module_groups = []
         self.enable_mask_update = False
+        self.activation_handle = None
+        self.bias_handle = None
 
         self.model = model
         # If no config -- try getting all the supported layers
@@ -109,6 +111,11 @@ class BasePruner(abc.ABC):
         format_string += ')'
         return format_string
 
+    def bias_hook(self, module, input, output):
+        if getattr(module, '_bias', None) is not None:
+            output += module._bias
+        return output
+
     def prepare(self, use_path=False, *args, **kwargs):
         r"""Adds mask parametrization to the layer weight
         """
@@ -124,9 +131,16 @@ class BasePruner(abc.ABC):
             parametrize.register_parametrization(module, 'weight',
                                                  param(module.mask),
                                                  unsafe=True)
-            module.register_forward_hook(
+
+            self.activation_handle = module.register_forward_hook(
                 ActivationReconstruction(module.parametrizations.weight[0])
             )
+
+            if module.bias is not None:
+                module.register_parameter('_bias', nn.Parameter(module.bias.detach()))
+                module.bias = None
+            self.bias_handle = module.register_forward_hook(self.bias_hook)
+
 
     def convert(self, use_path=False, *args, **kwargs):
         for config in self.module_groups:
