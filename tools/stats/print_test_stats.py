@@ -700,6 +700,7 @@ def build_info() -> ReportMetaMeta:
         "build_branch": os.environ.get("CIRCLE_BRANCH", ""),
         "build_job": os.environ.get("JOB_BASE_NAME", ""),
         "build_workflow_id": os.environ.get("CIRCLE_WORKFLOW_ID", ""),
+        "build_start_time_epoch": str(int(os.path.getmtime(os.path.realpath(__file__)))),
     }
 
 
