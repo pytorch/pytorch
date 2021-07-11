@@ -5159,13 +5159,13 @@
 - func: quantize_per_channel(Tensor self, Tensor scales, Tensor zero_points, int axis, ScalarType dtype) -> Tensor
   variants: function
   dispatch:
-    CPU, CUDA: quantize_per_channel_cpu
+    CPU, CUDA: quantize_per_channel
 
 - func: dequantize.self(Tensor self) -> Tensor
   variants: function, method
   dispatch:
     CPU: dequantize_cpu
-    QuantizedCPU, QuantizedCUDA: dequantize_quantized_cpu
+    QuantizedCPU, QuantizedCUDA: dequantize_quantized
 
 - func: dequantize.tensors(Tensor[] tensors) -> Tensor[]
   variants: function
@@ -6416,18 +6416,16 @@
 
 - func: index_select.out(Tensor self, int dim, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: index_select_out_cpu_
-    CUDA: index_select_out_cuda
-    QuantizedCUDA: index_select_out_quant_cuda
+    CPU, QuantizedCPU: index_select_out_cpu_
+    CUDA, QuantizedCUDA: index_select_out_cuda
 
 - func: index_select(Tensor self, int dim, Tensor index) -> Tensor
   variants: method, function
   dispatch:
-    CPU: index_select_cpu_
-    CUDA: index_select_cuda
+    CPU, QuantizedCPU: index_select_cpu_
+    CUDA, QuantizedCUDA: index_select_cuda
     SparseCPU: index_select_sparse
     SparseCUDA: index_select_sparse
-    QuantizedCUDA: index_select_quant_cuda
 
 - func: index_select.dimname_out(Tensor self, Dimname dim, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
 

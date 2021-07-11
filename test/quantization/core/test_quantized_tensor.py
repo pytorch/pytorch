@@ -399,7 +399,7 @@ class TestQuantizedTensor(TestCase):
             qtr_cuda = torch.quantize_per_tensor(r.to(device), scale, zero_point, dtype)
             dqtr_cuda = qtr_cuda.dequantize()
             self.assertEqual(qtr.int_repr(), qtr_cuda.int_repr())
-            self.assertTrue(np.allclose(dqtr.numpy(), dqtr_cuda.cpu().numpy()))
+            self.assertTrue(np.allclose(dqtr, dqtr_cuda.cpu()))
 
     @unittest.skipIf(not torch.cuda.is_available() or TEST_WITH_ROCM, 'CUDA is not available')
     def test_compare_per_channel_device_numerics(self):
@@ -783,16 +783,31 @@ class TestQuantizedTensor(TestCase):
             self.assertEqual(q_filled.q_scale(), scale)
             self.assertEqual(q_filled.q_zero_point(), zero_point)
 
-    def test_qtensor_index_select(self):
-        x = torch.randn(3, 3).to('cuda')
-        scale = 1
-        zp = 0
-        q = torch.quantize_per_tensor(x, scale, zp, torch.quint8)
-        # s = torch.index_select(x, 0, torch.tensor([0, 2]).to('cuda'))
-        qs = torch.index_select(q, 1, torch.tensor([0, 2]).to('cuda'))
-        for i in range(3):
-            self.assertTrue(q[i, 0].item() == qs[i, 0].item())
-            self.assertTrue(q[i, 2].item() == qs[i, 1].item())
+    @unittest.skipIf(not TEST_CUDA, "No gpu is available.")
+    def test_qtensor_index_select_cuda(self):
+        self._test_qtensor_index_select('cuda')
+
+    def test_qtensor_index_select_cpu(self):
+        self._test_qtensor_index_select('cpu')
+
+    def _test_qtensor_index_select(self, device):
+        for quant_type in [torch.quint8, torch.qint8]:
+            dims = 3
+            index = torch.randint(dims, [1]).item()
+            selected = torch.randperm(dims)[:2].to(device)
+            scale = 1
+            zp = 0
+
+            x = torch.randn([3] * dims, device=device) * 10
+            q = torch.quantize_per_tensor(x, scale, zp, quant_type)
+            qs = torch.index_select(q, index, selected)
+            for altered_index in range(2):
+                for i in range(3):
+                    for j in range(3):
+                        qs_coord, q_coord = [i, j], [i, j]
+                        qs_coord.insert(index, altered_index)
+                        q_coord.insert(index, selected[altered_index])
+                        self.assertEqual(qs[tuple(qs_coord)].item(), q[tuple(q_coord)].item())
 
     def test_qtensor_view(self):
         scale, zero_point, dtype = 1.0, 2, torch.uint8
