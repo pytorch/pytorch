@@ -1,3 +1,4 @@
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <ATen/native/MathBitsFallback.cpp>
 
 namespace at {
