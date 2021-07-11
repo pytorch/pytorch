@@ -7154,6 +7154,7 @@ op_db: List[OpInfo] = [
            aten_name="leaky_relu",
            dtypes=floating_types(),
            sample_inputs_func=sample_inputs_leaky_relu,
+           dtypesIfCPU=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_autograd=True,
            assert_autodiffed=True,

@@ -1034,17 +1034,19 @@ TEST_F(FunctionalTest, LeakyReLU) {
   const auto size = 3;
   for (const auto negative_slope : {0.0, 0.42, 1.0}) {
     for (const auto inplace : {false, true}) {
-      auto x = torch::linspace(-10.0, 10.0, size * size * size);
-      x.resize_({size, size, size});
-      auto y_exp = (x < 0) * x * negative_slope + (x >= 0) * x;
-      auto y = F::leaky_relu(x, F::LeakyReLUFuncOptions()
-        .negative_slope(negative_slope).inplace(inplace));
+      for (const auto type : {torch::kFloat, torch::kBFloat16}) {
+        auto x = torch::linspace(-10.0, 10.0, size * size * size).to(type);
+        x.resize_({size, size, size});
+        auto y_exp = (x < 0) * x * negative_slope + (x >= 0) * x;
+        auto y = F::leaky_relu(x, F::LeakyReLUFuncOptions()
+          .negative_slope(negative_slope).inplace(inplace));
 
-      ASSERT_EQ(y.ndimension(), 3);
-      ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
-      ASSERT_TRUE(torch::allclose(y, y_exp));
-      if (inplace) {
-        ASSERT_TRUE(torch::allclose(x, y_exp));
+        ASSERT_EQ(y.ndimension(), 3);
+        ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
+        ASSERT_TRUE(torch::allclose(y, y_exp));
+        if (inplace) {
+          ASSERT_TRUE(torch::allclose(x, y_exp));
+        }
       }
     }
   }
