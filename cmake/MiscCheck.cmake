@@ -46,9 +46,15 @@ if(NOT INTERN_BUILD_MOBILE)
   if(CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND CMAKE_OSX_ARCHITECTURES MATCHES "^(x86_64|arm64)$")
     list(APPEND CMAKE_REQUIRED_FLAGS "-arch ${CMAKE_HOST_SYSTEM_PROCESSOR}")
   endif()
-  CHECK_C_SOURCE_RUNS("
-  int main() { return 0; }
-  " COMPILER_WORKS)
+  if(CMAKE_CROSSCOMPILING)
+    CHECK_C_SOURCE_COMPILES("
+    int main() { return 0; }
+    " COMPILER_WORKS)
+  else()
+    CHECK_C_SOURCE_RUNS("
+    int main() { return 0; }
+    " COMPILER_WORKS)
+  endif()
   if(NOT COMPILER_WORKS)
     # Force cmake to retest next time around
     unset(COMPILER_WORKS CACHE)

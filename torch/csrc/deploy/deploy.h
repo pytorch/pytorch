@@ -239,8 +239,9 @@ class PythonMethodWrapper : public torch::IMethod {
   // ReplicatedObj which represents a python method, and
   // is therefore callable and has argument names accessible.
  public:
+  // TODO(whc) make bound method pickleable, then directly construct from that
   PythonMethodWrapper(
-      torch::deploy::ReplicatedObj& model,
+      torch::deploy::ReplicatedObj model,
       std::string method_name)
       : model_(std::move(model)), method_name_(std::move(method_name)) {}
 
