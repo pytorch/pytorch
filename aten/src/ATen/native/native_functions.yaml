@@ -5231,10 +5231,19 @@
   device_check: NoCheck   # TensorIterator
   variants: function
 
+- func: fake_quantize_per_tensor_affine.tensor_qparams(Tensor self, Tensor scale, Tensor zero_point, int quant_min, int quant_max) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  variants: function
+
 - func: fake_quantize_per_tensor_affine_cachemask(Tensor self, float scale, int zero_point, int quant_min, int quant_max) -> (Tensor output, Tensor mask)
   variants: function
   dispatch:
     CPU, CUDA: fake_quantize_per_tensor_affine_cachemask
+
+- func: _fake_quantize_per_tensor_affine_cachemask_tensor_qparams(Tensor self, Tensor scale, Tensor zero_point, int quant_min, int quant_max) -> (Tensor output, Tensor mask)
+  variants: function
+  dispatch:
+    CPU, CUDA: _fake_quantize_per_tensor_affine_cachemask_tensor_qparams
 
 - func: fake_quantize_per_tensor_affine_cachemask_backward(Tensor grad, Tensor mask) -> Tensor
   variants: function
@@ -8121,25 +8130,25 @@
   python_module: nn
   dispatch:
     CPU: multi_margin_loss_cpu_out
-    CUDA: legacy::cuda::_thnn_multi_margin_loss_forward_out
+    CUDA: multi_margin_loss_cuda_out
 
 - func: multi_margin_loss(Tensor self, Tensor target, Scalar p=1, Scalar margin=1, Tensor? weight=None, int reduction=Mean) -> Tensor
   python_module: nn
   dispatch:
     CPU: multi_margin_loss_cpu
-    CUDA: legacy::cuda::_thnn_multi_margin_loss_forward
+    CUDA: multi_margin_loss_cuda
 
 - func: multi_margin_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, Scalar p, Scalar margin, Tensor? weight=None, int reduction=Mean, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
     CPU: multi_margin_loss_cpu_backward_out
-    CUDA: legacy::cuda::_thnn_multi_margin_loss_backward_out
+    CUDA: multi_margin_loss_cuda_backward_out
 
 - func: multi_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, Scalar p, Scalar margin, Tensor? weight=None, int reduction=Mean) -> Tensor
   python_module: nn
   dispatch:
     CPU: multi_margin_loss_cpu_backward
-    CUDA: legacy::cuda::_thnn_multi_margin_loss_backward
+    CUDA: multi_margin_loss_cuda_backward
 
 - func: multilabel_margin_loss.out(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
