@@ -332,6 +332,7 @@ static void PrepareForRemoveMutations(MutationRemover& mr, Block* b) {
 static void PrepareForRemoveMutations(std::shared_ptr<Graph> graph) {
   MutationRemover mr(graph);
   PrepareForRemoveMutations(mr, graph->block());
+  GRAPH_DUMP("After PrepareForRemoveMutations: ", graph);
 }
 
 // findSubModuleAttr function chases getAttr chains backwards to locate the
@@ -769,10 +770,10 @@ void InplaceConverter::replaceAttrWithInplaceOps(
 void InplaceConverter::convertGetSetAttrToInplaceOps(Block* block) {
   std::unordered_map<std::string, Value*> attr_name_value_map = {};
   std::unordered_map<Node*, std::string> attr_node_fullname_map = {};
-  // First pass over graph, to gather all attribute names, and their intial
+  // First pass over graph, to gather all attribute names, and their initial
   // values. Create dummy initial values for attributes if necessary. By the end
   // of this pass, these dummy initial values should have zero uses, and can be
-  // safely removed. Otherwise it will imply error in model for using
+  // safely removed. Otherwise it will imply an error in the model for using
   // uninitialized values.
   gatherAttrNameInitialValueMap(
       block, attr_name_value_map, attr_node_fullname_map);
