@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/constant_fold.h>
 
 #include <c10/util/Exception.h>
@@ -577,8 +578,6 @@ std::vector<Node*> getOnnxConstParentsToRemove(Node* node) {
 // known.
 void ConstantFoldONNX(Block* b, ParamMap& paramsDict, int opset_version) {
   if (opset_version < ONNX_OPSET_9) {
-    // Number of elements of 'axes' and 'ends' 1-D input tensors should be the
-    // same
     std::cerr << "Warning: Constant folding supported for only opsets >= 9. "
               << "Constant folding not applied." << std::endl;
     return;
@@ -613,7 +612,7 @@ void ConstantFoldONNX(Block* b, ParamMap& paramsDict, int opset_version) {
       continue;
     }
     // Create a new input to the block (prim::Param node output). Add a
-    // corresponding entryin valToParamMap. Replace the downstream inputs
+    // corresponding entry in valToParamMap. Replace the downstream inputs
     // with this value, and disconnect all the input values of the folded node.
     at::Tensor updatedVal = *updatedValWrapped;
     auto newSourceNodeOutput = b->addInput();
@@ -625,10 +624,10 @@ void ConstantFoldONNX(Block* b, ParamMap& paramsDict, int opset_version) {
     // Next we remove the current node that has been replaced by
     // an initializer. But before we start de-wiring this node,
     // we check if any parents of this nodes were onnx::Constant
-    // and remove them first (following proper sequence as shown
-    // below), and then remove the current node. If the parent was
-    // an initializer (not onnx::Constant) then they are all removed
-    // by eraseUnusedBlockInputs() call (below) outside the loop.
+    // and remove them first, and then remove the current node.
+    // If the parent was an initializer (not onnx::Constant) then
+    // they are all removed by the eraseUnusedBlockInputs() call
+    // (below) outside the loop.
     auto onnxConstParents =
         onnx_constant_fold::getOnnxConstParentsToRemove(node);
     node->removeAllInputs();
@@ -641,6 +640,14 @@ void ConstantFoldONNX(Block* b, ParamMap& paramsDict, int opset_version) {
   eraseUnusedBlockInputs(b);
   buildParamsMapFromValueToParamsMap(valsToParamsMap, paramsDict);
   return;
+}
+
+void ConstantFoldONNX(
+    std::shared_ptr<Graph>& g,
+    ParamMap& paramsDict,
+    int opset_version) {
+  ConstantFoldONNX(g->block(), paramsDict, opset_version);
+  GRAPH_DUMP("After ConstantFoldONNX:", g);
 }
 
 } // namespace jit
