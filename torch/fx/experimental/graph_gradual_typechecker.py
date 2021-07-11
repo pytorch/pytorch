@@ -207,19 +207,31 @@ def bn2d_inference_rule(n: Node, module_instance):
     else:
         raise TypeError(f'Cannot apply {module_instance} with input type {arg_type} and existing type {n.type} on {n}')
 
+
 def calculate(d_in, module_instance, index):
     """
     For calculating h_in and w_out.
     """
+
+    padding = (module_instance.padding, module_instance.padding) \
+        if isinstance(module_instance.padding, int) else module_instance.padding
+    kernel_size = (module_instance.kernel_size, module_instance.kernel_size)\
+        if isinstance(module_instance.kernel_size, int) else module_instance.kernel_size
+    stride = (module_instance.stride, module_instance.stride) \
+        if isinstance(module_instance.stride, int) else module_instance.stride
+    dilation = (module_instance.dilation, module_instance.dilation)\
+        if isinstance(module_instance.dilation, int) else module_instance.dilation
+
     if d_in == Dyn:
         return Dyn
 
     elif isinstance(d_in, int):
-        n = d_in + 2 * module_instance.padding[index] - \
-            module_instance.dilation[index] * \
-            (module_instance.kernel_size[index] - 1) - 1
+        n = d_in + 2 * padding[index] - \
+            dilation[index] * \
+            (kernel_size[index] - 1) - 1
 
-        return (n // module_instance.stride[0]) + 1
+        return (n // stride[0]) + 1
+
     else:
         raise TypeError(f'{d_in} in {module_instance} must be a number or Dyn')
 
@@ -233,11 +245,11 @@ def get_greatest_upper_bound(type1, type2):
     elif type2 == Dyn:
         return type1
     elif isinstance(type1, TensorType) and isinstance(type2, TensorType):
-        assert is_consistent(type1, type2)
+        if not is_consistent(type1, type2):
+            raise TypeError(f'Inconsistent types {type1}, {type2}')
         gub = [t1 if is_more_precise(t1, t2) else t2 for (t1, t2) in zip(type1.__args__, type2.__args__)]
         return TensorType(tuple(gub))
-    else:
-        raise NotImplementedError(f'Greatest upper bound not yet implemented for these types {type1}, {type2}')
+
 
 @register_inference_rule(Conv2d)
 def conv2d_inference_rule(n: Node, module_instance):
@@ -262,6 +274,7 @@ def conv2d_inference_rule(n: Node, module_instance):
         new_type = TensorType((arg_type.__args__[0], module_instance.out_channels, h_out, w_out))
         gub = get_greatest_upper_bound(new_type, curr_node_type)
         n.type = gub
+
         return n.type
     else:
         raise TypeError(f'Cannot apply {module_instance} with input type { arg_type} and existing type {n.type} on {n}')
@@ -280,6 +293,43 @@ def relu_inference_rule(n: Node, module_instance):
     if isinstance(n.args[0].type, TensorType):
         n.type = get_greatest_upper_bound(n.args[0].type, n.type)
     return n.type
+
+
+def maxpool2d_check(typ, module_instance):
+    new_type_list = list(typ.__args__)
+    if len(new_type_list) == 4 or len(new_type_list) == 3:
+        w_in = new_type_list[-1]
+        h_in = new_type_list[-2]
+        h_out = calculate(h_in, module_instance, 0)
+        w_out = calculate(w_in, module_instance, 1)
+        new_type_list[-1] = w_out
+        new_type_list[-2] = h_out
+        return TensorType(tuple(new_type_list))
+
+    else:
+        raise TypeError(f'Wrong size {typ} for {module_instance}')
+
+
+@register_inference_rule(torch.nn.MaxPool2d)
+def maxpool2d_inference_rule(n: Node, module_instance):
+    """
+    Given a MaxPool2D instance and a node check the following conditions:
+    - Input size matches size 3 or 4
+    - Current node type is consistent with the output type we will calculate
+    - Input size matches output size and the last two dimensions of the output
+      are w_out and h_out. The remaining dimensions are the same as the input
+    - Our final result is the greatest upper bound of the output we calculate
+      and the current node type.
+    """
+    assert isinstance(n.args[0], Node)
+
+    if n.args[0].type == Dyn and isinstance(n.type, TensorType):
+        n.args[0].type = expand_to_tensor_dim(n.args[0].type, len(n.type.__args__))
+    if isinstance(n.args[0].type, TensorType):
+        output = maxpool2d_check(n.args[0].type, module_instance)
+        n.type = get_greatest_upper_bound(output, n.type)
+    return n.type
+
 
 class GraphTypeChecker:
     def __init__(self, env, traced):
