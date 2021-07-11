@@ -21,10 +21,25 @@ class TestDiGraph(PackageTestCase):
         self.assertIn("baz", list(g.successors("foo")))
         self.assertEqual(len(list(g.successors("qux"))), 0)
 
+    def test_predecessors(self):
+        g = DiGraph()
+        g.add_edge("foo", "bar")
+        g.add_edge("foo", "baz")
+        g.add_node("qux")
+
+        self.assertIn("foo", list(g.predecessors("bar")))
+        self.assertIn("foo", list(g.predecessors("baz")))
+        self.assertEqual(len(list(g.predecessors("qux"))), 0)
+
     def test_successor_not_in_graph(self):
         g = DiGraph()
         with self.assertRaises(ValueError):
             g.successors("not in graph")
+
+    def test_predecessor_not_in_graph(self):
+        g = DiGraph()
+        with self.assertRaises(ValueError):
+            g.predecessors("not in graph")
 
     def test_node_attrs(self):
         g = DiGraph()
