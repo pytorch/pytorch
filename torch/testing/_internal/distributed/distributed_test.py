@@ -1010,16 +1010,18 @@ class DistributedTest:
             param = next(model.parameters())
             tensor = torch.ones_like(param.data) * rank
             expected_avg_tensor = torch.ones_like(param.data) * sum(range(world_size)) / world_size
-            averager = averagers.PeriodicModelAverager(model, warmup_steps=10, period=4)
-            for step in range(0, 20):
-                # Reset the parameters at every step.
-                param.data = copy.deepcopy(tensor)
-                averager.average_parameters()
-                if step < 10 or step % 4 == 0:
-                    self.assertEqual(param.data, expected_avg_tensor)
-                else:
-                    # No model averaging, so the parameters are not updated.
-                    self.assertEqual(param.data, tensor)
+            period = 4
+            for warmup_steps in [12, 13, 14, 15]:
+                averager = averagers.PeriodicModelAverager(model, warmup_steps=warmup_steps, period=period)
+                for step in range(0, 20):
+                    # Reset the parameters at every step.
+                    param.data = copy.deepcopy(tensor)
+                    averager.average_parameters()
+                    if step >= warmup_steps and (step - warmup_steps) % period == 0:
+                        self.assertEqual(param.data, expected_avg_tensor)
+                    else:
+                        # No model averaging, so the parameters are not updated.
+                        self.assertEqual(param.data, tensor)
 
         # NCCL Batch SEND RECV
         @skip_if_no_gpu
