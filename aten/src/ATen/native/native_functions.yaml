@@ -6683,7 +6683,7 @@
   dispatch:
     CPU, CUDA: ormqr
 
-- func: _lu_with_info(Tensor self, bool pivot=True, bool check_errors=True) -> (Tensor LU, Tensor pivs, Tensor info)
+- func: _lu_with_info(Tensor self, bool pivot=True, bool check_errors=True) -> (Tensor LU, Tensor pivs, Tensor infos)
   variants: function
   dispatch:
     CPU, CUDA: _lu_with_info
