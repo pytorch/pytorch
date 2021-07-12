@@ -4,6 +4,7 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/autograd/saved_variable_hooks.h>
 #include <torch/csrc/python_headers.h>
+#include <torch/csrc/THP.h>
 #include <ATen/ATen.h>
 
 namespace py = pybind11;
@@ -26,7 +27,9 @@ struct TORCH_API PySavedVariableHooks : public SavedVariableHooks {
       py::gil_scoped_acquire acquire;
       py::object obj = py::cast<py::object>(data_); // copies the content of data_
       py::object res = unpack_hook_(obj); // new object, comes with a reference
-      return THPVariable_Unpack(res.ptr()); // borrows from res, we only need the argument as long as res is alive
+      PyObject* ptr = res.ptr(); // borrows from, we only need this to be alive as long as res is alive
+      TORCH_CHECK_TYPE(THPVariable_Check(ptr), "Output of saved tensor unpack_hook expected to be a Tensor but got result of type ", THPUtils_typename(ptr));
+      return THPVariable_Unpack(ptr);
       // obj and res are decrefed on exit
     }
 
