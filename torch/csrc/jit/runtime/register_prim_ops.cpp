@@ -79,7 +79,7 @@ c10::List<std::string> splitNoneSeparator(const std::string& string) {
   return splits;
 }
 
-static constexpr OperatorGeneratorArgs opGenArgs[] = {
+static const OperatorGeneratorArgs opGenArgs[] = {
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::str(t elem) -> str"),
         [](Stack* stack) {
@@ -1513,7 +1513,7 @@ void dictConstructFromList(Stack* stack) {
           aliasAnalysisFromSchema())
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-static constexpr OperatorGeneratorArgs dict_ops[] = {
+static const OperatorGeneratorArgs dict_ops[] = {
     CREATE_DICT_OPS("str"),
     CREATE_DICT_OPS("int"),
     CREATE_DICT_OPS("bool"),
@@ -2093,7 +2093,7 @@ TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
       });
 }
 
-static constexpr OperatorGeneratorArgs opGenArgs1[] = {
+static const OperatorGeneratorArgs opGenArgs1[] = {
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::rangelist(int n) -> int[]"),
         [](Stack* stack) {
@@ -2450,7 +2450,7 @@ void hashValue(Stack* stack) {
   push(stack, value.hash());
 }
 
-static constexpr OperatorGeneratorArgs opGenArgs2[] = {
+static const OperatorGeneratorArgs opGenArgs2[] = {
     // registered as Any[] so that heterogenous tuples can be called with len()
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::len.any(Any[] a) -> int"),
