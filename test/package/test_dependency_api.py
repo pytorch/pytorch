@@ -130,15 +130,6 @@ class TestDependencyAPI(PackageTestCase):
         with self.assertRaisesRegex(NotImplementedError, "was mocked out"):
             r()
 
-    @skipIf(version_info > (3, 6), "tests specific 3.6 behavior")
-    def test_mock_36_error(self):
-        """Test that an error is properly thrown when we attempt to mock a
-        module in Python 3.6.
-        """
-        with self.assertRaisesRegex(RuntimeError, "upgrade your Python"):
-            with PackageExporter(BytesIO()) as exporter:
-                exporter.mock(["package_a"])
-
     @skipIf(version_info < (3, 7), "mock uses __getattr__ a 3.7 feature")
     def test_mock_glob(self):
         buffer = BytesIO()
