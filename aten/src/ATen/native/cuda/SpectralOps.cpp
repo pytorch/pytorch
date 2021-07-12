@@ -361,6 +361,18 @@ Tensor& _fft_apply_normalization_out(Tensor& out, const Tensor& self, int64_t no
 
 }  // namespace (anonymous)
 
+// Use the optimized path to perform single R2C or C2R if transformation dim is supported by cuFFT
+bool use_optimized_cufft_path(IntArrayRef dim) {
+  // For performance reason, when dim starts with (0, 1), do not use the optimized path.
+  if (dim.size() > cufft_max_ndim || (
+    dim.size() >= 2 && dim[0] == 0 && dim[1] == 1
+  )) {
+    return false;
+  } else {
+    return true;
+  }
+}
+
 // n-dimensional real to complex FFT
 Tensor _fft_r2c_cufft(const Tensor& self, IntArrayRef dim, int64_t normalization, bool onesided) {
   TORCH_CHECK(self.is_floating_point());
@@ -385,9 +397,8 @@ Tensor _fft_r2c_cufft(const Tensor& self, IntArrayRef dim, int64_t normalization
                          .movedim(-1, last_dim);
   }
 
-  if (dim.size() <= cufft_max_ndim) {
-     // Perform single R2C if transformation dim is supported by cuFFT
-     _exec_fft(output, working_tensor, out_sizes, dim, /*forward=*/true);
+  if (use_optimized_cufft_path(dim)) {
+    _exec_fft(output, working_tensor, out_sizes, dim, /*forward=*/true);
   } else {
     // First do the R2C transform on the last dimension
     {
@@ -457,8 +468,8 @@ Tensor _fft_c2r_cufft(const Tensor& self, IntArrayRef dim, int64_t normalization
   out_sizes[dim.back()] = lastdim;
 
   auto output = at::empty(out_sizes, self.options().dtype(c10::toValueType(self.scalar_type())));
-  if (dim.size() <= cufft_max_ndim) {
-    // Perform single C2R if transformation dim is supported by cuFFT
+
+  if (use_optimized_cufft_path(dim)) {
     Tensor temp;
     // Complex to real FFTs may overwrite the input buffer, so must always clone (gh-34551)
     temp = self.clone(MemoryFormat::Contiguous);
