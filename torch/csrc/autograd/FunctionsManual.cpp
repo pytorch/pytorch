@@ -3602,7 +3602,9 @@ Tensor lu_backward_base(
 
   auto phi = phi_L + phi_U;
   auto psi = at::zeros_like(self);
+
   // TODO: consider the squared case separately
+  Tensor self_grad;
   if (m <= n) {
     auto U_complement = U.narrow(-2, 0, k).narrow(-1, k, n - k);
     auto U_grad_complement = U_grad.narrow(-2, 0, k).narrow(-1, k, n - k);
@@ -3613,18 +3615,16 @@ Tensor lu_backward_base(
 
     psi.narrow(-2, 0, k).narrow(-1, k, n - k).copy_(U_grad_complement);
 
-    auto psi_square = std::get<0>(
-      at::triangular_solve(
-        phi.transpose(-2, -1).conj(),
-        U_square,
-        /*upper=*/true,
-        /*transpose=*/false,
-        /*unitriangular=*/false
-      )
-    ).transpose(-2, -1).conj();
+    auto psi_square = std::get<0>(at::triangular_solve(
+      phi.transpose(-2, -1).conj(),
+      U_square,
+      /*upper=*/true,
+      /*transpose=*/false,
+      /*unitriangular=*/false
+    )).transpose(-2, -1).conj();
     psi.narrow(-2, 0, k).narrow(-1, 0, k).copy_(psi_square);
 
-    auto self_grad = P.matmul(
+    self_grad = P.matmul(
       std::get<0>(at::triangular_solve(
         psi,
         L_square_H,
@@ -3633,11 +3633,35 @@ Tensor lu_backward_base(
         /*unitriangular=*/true
       ))
     );
-    return self_grad;
   }
   else if (m > n) {
+    auto L_complement = L.narrow(-2, k, m - k).narrow(-1, 0, k);
+    auto L_grad_complement = L_grad.narrow(-2, k, m - k).narrow(-1, 0, k);
+
+    auto phi_complement = L_complement.transpose(-2, -1).conj().matmul(L_grad_complement).triu_();
+    phi.sub_(phi_complement);
+
+    psi.narrow(-2, k, m - k).narrow(-1, 0, k).copy_(L_grad_complement);
+
+    auto psi_square = std::get<0>(at::triangular_solve(
+      phi,
+      L_square_H,
+      /*upper=*/true,
+      /*transpose=*/false,
+      /*unitriangular=*/true
+    ));
+    psi.narrow(-2, 0, k).narrow(-1, 0, k).copy_(psi_square);
+
+    self_grad = std::get<0>(at::triangular_solve(
+      psi.transpose(-2, -1).conj(),
+      U_square,
+      /*upper=*/true,
+      /*transpose=*/false,
+      /*unitriangular=*/false
+    )).matmul(P.transpose(-2, -1)).transpose(-2, -1).conj();
   }
-  return self;
+
+  return self_grad;
 }
 
 Tensor _lu_with_info_backward(
