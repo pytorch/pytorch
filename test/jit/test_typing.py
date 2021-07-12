@@ -92,8 +92,6 @@ class TestTyping(JitTestCase):
 
         graph = torch.jit.script(fn).graph
 
-        print(graph)
-
         # Check that we're making a `List[Tuple[str, Any]]`
         FileCheck().check(r"(str, Any)[] = prim::ListConstruct").run(graph)
 
@@ -115,8 +113,6 @@ class TestTyping(JitTestCase):
         self.checkScript(fn, (torch.arange(5),))
 
         graph = torch.jit.script(fn).graph
-
-        print(graph)
 
         # Check that we're making a `List[Tuple[str, Any]]`
         FileCheck().check(r"(str, Any)[] = prim::ListConstruct").run(graph)
