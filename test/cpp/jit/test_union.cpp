@@ -58,8 +58,8 @@ TEST_F(UnionTypeTest, UnionCreate_DuplicateTypesRemoved) {
 
   ASSERT_EQ(u->containedTypes().size(), 2);
   ASSERT_TRUE(UnionTypeTest::hasType(u, NoneType::get()));
-  ASSERT_TRUE(UnionTypeTest::hasType(u, StringType::get()));
-  ASSERT_FALSE(UnionTypeTest::hasType(u, ListType::ofStrings()));
+  ASSERT_FALSE(UnionTypeTest::hasType(u, StringType::get()));
+  ASSERT_TRUE(UnionTypeTest::hasType(u, ListType::ofStrings()));
 }
 
 TEST_F(UnionTypeTest, UnionCreate_TupleWithSubtypingRelationship) {
@@ -146,8 +146,8 @@ TEST_F(UnionTypeTest, Subtyping_OptionalType) {
 
   ASSERT_FALSE(union2->isSubtypeOf(union1));
 
-  ASSERT_TRUE(union4->isSubtypeOf(union5));
-  ASSERT_FALSE(union5->isSubtypeOf(union4));
+  ASSERT_FALSE(union4->isSubtypeOf(union5));
+  ASSERT_TRUE(union5->isSubtypeOf(union4));
 }
 
 } // namespace jit

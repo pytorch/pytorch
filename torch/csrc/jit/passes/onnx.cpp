@@ -42,6 +42,7 @@ void removePrintOps(Block* block) {
 
 void RemovePrintOps(std::shared_ptr<Graph>& graph) {
   removePrintOps(graph->block());
+  GRAPH_DUMP("After RemovePrintOps: ", graph);
 }
 
 void checkONNXCompatibility(const c10::FunctionSchema& schema) {
@@ -159,6 +160,7 @@ void preprocessCaffe2Ops(Block* block) {
 
 void PreprocessCaffe2Ops(std::shared_ptr<Graph>& graph) {
   preprocessCaffe2Ops(graph->block());
+  GRAPH_DUMP("After PreprocessCaffe2Ops: ", graph);
 }
 
 // Transform PythonOps into Nodes that match ONNX semantics.
@@ -170,6 +172,7 @@ std::shared_ptr<Graph> ToONNX(
   auto new_graph = std::make_shared<Graph>(graph->current_scope());
   std::unordered_map<Value*, Value*> env;
   BlockToONNX(graph->block(), new_graph->block(), operator_export_type, env);
+  GRAPH_DUMP("after ToONNX: ", new_graph);
   return new_graph;
 }
 
@@ -373,7 +376,7 @@ void NodeToONNX(
     // TODO: Assert it's an ATen identifier???
     // (Sometimes it's not...)
     processSymbolicOutput(n->kind().toUnqualString(), n, raw_output);
-    GRAPH_DUMP("after process output:", new_block->owningGraph());
+    GRAPH_DUMP("after processSymbolicOutput: ", new_block->owningGraph());
   };
 
   auto callPySymbolicMethod = [&](ConcretePythonOp* op) {

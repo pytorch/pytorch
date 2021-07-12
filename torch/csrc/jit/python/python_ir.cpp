@@ -888,8 +888,9 @@ void initPythonIRBindings(PyObject* module_) {
         return types;
       });
   py::class_<UnionType, Type, std::shared_ptr<UnionType>>(m, "UnionType")
-      .def(py::init(
-          [](const std::vector<TypePtr> a) { return UnionType::create(a); }))
+      .def(py::init([](std::vector<TypePtr> a) {
+        return UnionType::create(std::move(a));
+      }))
       .def("containedTypes", [](UnionType& self) {
         return self.containedTypes().vec();
       });
@@ -914,7 +915,7 @@ void initPythonIRBindings(PyObject* module_) {
       Pybind11_OptionalType,
       UnionType,
       std::shared_ptr<Pybind11_OptionalType>>(m, "OptionalType")
-      .def(py::init([](const std::vector<TypePtr> a) {
+      .def(py::init([](std::vector<TypePtr> a) {
         return Pybind11_OptionalType::create(std::move(a));
       }))
       .def_static("ofTensor", &Pybind11_OptionalType::legacy_OptionalOfTensor)

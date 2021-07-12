@@ -7,6 +7,11 @@ from torch.fx.experimental.graph_gradual_typechecker import GraphTypeChecker, br
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx import GraphModule
 
+def conv3x3(in_planes, out_planes, stride=1, groups=1, dilation=1):
+    """3x3 convolution with padding"""
+    return torch.nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
+                           padding=dilation, groups=groups, bias=False, dilation=dilation)
+
 class AnnotationsTest(unittest.TestCase):
 
     def test_annotations(self):
@@ -329,6 +334,371 @@ class TypeCheckerTest(unittest.TestCase):
         tc = GraphTypeChecker({}, traced)
         with self.assertRaises(TypeError):
             tc.type_check()
+
+    def test_type_check_conv2D(self):
+        class BasicBlock(torch.nn.Module):
+            def __init__(self, inplanes, planes, stride=1, norm_layer=None):
+                super(BasicBlock, self).__init__()
+                if norm_layer is None:
+                    norm_layer = torch.nn.BatchNorm2d
+                self.conv1 = conv3x3(inplanes, planes, stride)
+                self.bn1 = norm_layer(planes)
+
+            def forward(self, x: Dyn):
+                identity = x
+                out: TensorType((2, 2, Dyn, 4)) = self.conv1(x)
+                out += identity
+                return out
+
+        B = BasicBlock(2, 2)
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(B)
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+        tc = GraphTypeChecker({}, traced)
+        tc.type_check()
+        for n in graph.nodes:
+            if n.op == 'placeholder':
+                assert n.type == TensorType((Dyn, Dyn, Dyn, Dyn))
+            if n.op == 'call_function':
+                assert n.type == TensorType((Dyn, Dyn, Dyn, Dyn))
+            if n.op == 'output':
+                assert n.type == TensorType((Dyn, Dyn, Dyn, Dyn))
+            if n.op == 'call_module':
+                assert n.type == TensorType((2, 2, Dyn, 4))
+
+    def test_type_check_conv2D_2(self):
+        class BasicBlock(torch.nn.Module):
+            def __init__(self, inplanes, planes, stride=1, norm_layer=None):
+                super(BasicBlock, self).__init__()
+                if norm_layer is None:
+                    norm_layer = torch.nn.BatchNorm2d
+                self.conv1 = conv3x3(inplanes, planes, stride)
+                self.bn1 = norm_layer(planes)
+
+            def forward(self, x: TensorType((5, 2, 3, 4))):
+                identity = x
+                out = self.conv1(x)
+                out += identity
+                return out
+
+        B = BasicBlock(2, 2)
+        b = B.forward(torch.rand(5, 2, 3, 4))
+
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(B)
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+        tc = GraphTypeChecker({}, traced)
+        tc.type_check()
+        t = TensorType((5, 2, 3, 4))
+        for n in graph.nodes:
+            if n.op == 'placeholder':
+                assert n.type == t
+            if n.op == 'call_function':
+                assert n.type == t
+            if n.op == 'output':
+                assert torch.Size(n.type.__args__) == b.shape
+            if n.op == 'call_module':
+                assert n.type == t
+
+        B = BasicBlock(1, 2)
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(B)
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+        tc = GraphTypeChecker({}, traced)
+        with self.assertRaises(TypeError):
+            tc.type_check()
+
+
+    def test_type_check_conv2D_2_fully_static(self):
+        annotation_list = [(1, 2, 3, 5), (2, 5, 6, 9), (10, 15, 13, 14),
+                           (10, Dyn, 13, 14), (Dyn, Dyn, Dyn, 3)]
+        input_list = [(1, 2, 3, 5), (2, 5, 6, 9), (10, 15, 13, 14),
+                      (10, 15, 13, 14), (1, 2, 2, 3)]
+        intermediate_types = [(1, Dyn, Dyn, 7), (2, Dyn, 4, 6), (10, 15, Dyn, 5),
+                              (10, 15, 7, 7), (1, Dyn, Dyn, Dyn)]
+        in_planes_list = [2, 5, 15, 15, 2]
+        stride_list = [1, 2, 3, 2, 2]
+        out_planes_list = [2, 5, 15, 15, 2]
+        groups_list = [1, 5, 5, 5, 2]
+        dilation_list = [1, 2, 3, 3, 3]
+        padding_list = [1, 2, 3, 3, 3]
+        kernel_size_list = [1, 2, 3, 3, 3]
+        output_types = [(1, 2, Dyn, 7), (2, 5, 4, 6), (10, 15, Dyn, 5), (10, 15, 7, 7), (1, 2, Dyn, Dyn)]
+
+        for i in range(5):
+            annotation = annotation_list[i]
+            input = input_list[i]
+            in_planes = in_planes_list[i]
+            stride = stride_list[i]
+            out_planes = out_planes_list[i]
+            groups = groups_list[i]
+            dilation = dilation_list[i]
+            padding = padding_list[i]
+            kernel_size = kernel_size_list[i]
+            intermediate_type = intermediate_types[i]
+
+            class BasicBlock(torch.nn.Module):
+                def __init__(self, in_planes, out_planes, kernel_size, stride, padding, groups, dilation):
+                    super(BasicBlock, self).__init__()
+                    self.conv1 = torch.nn.Conv2d(in_channels=in_planes, out_channels=out_planes,
+                                                 kernel_size=kernel_size, stride=stride,
+                                                 padding=padding, groups=groups, bias=False, dilation=dilation)
+
+                def forward(self, x):
+                    out = self.conv1(x)
+                    return out
+
+            B = BasicBlock(in_planes, out_planes, kernel_size, stride, padding, groups, dilation)
+            ast_rewriter = RewritingTracer()
+            graph = ast_rewriter.trace(B)
+            traced = GraphModule(ast_rewriter.root, graph, "gm")
+
+            # annotate our argument
+            for n in graph.nodes:
+                if n.op == 'placeholder':
+                    n.type = TensorType(annotation)
+
+            b = B.forward(torch.rand(input))
+            tc = GraphTypeChecker({}, traced)
+            tc.type_check()
+
+            for n in graph.nodes:
+                if n.op == 'output':
+                    assert is_consistent(n.type, TensorType(b.size()))
+
+            # test with intermediate annotations
+            class BasicBlock(torch.nn.Module):
+                def __init__(self, in_planes, out_planes, kernel_size, stride, padding, groups, dilation):
+                    super(BasicBlock, self).__init__()
+                    self.conv1 = torch.nn.Conv2d(in_channels=in_planes, out_channels=out_planes,
+                                                 kernel_size=kernel_size, stride=stride,
+                                                 padding=padding, groups=groups, bias=False, dilation=dilation)
+
+                def forward(self, x):
+                    out = self.conv1(x)
+                    return out
+
+            B = BasicBlock(in_planes, out_planes, kernel_size, stride, padding, groups, dilation)
+            ast_rewriter = RewritingTracer()
+            graph = ast_rewriter.trace(B)
+            traced = GraphModule(ast_rewriter.root, graph, "gm")
+
+            # populate our intermediate notes
+            for n in traced.graph.nodes:
+                if n.op == 'call_module':
+                    n.type = TensorType(intermediate_type)
+
+            tc = GraphTypeChecker({}, traced)
+            tc.type_check()
+
+            for n in traced.graph.nodes:
+                if n.op == 'output':
+                    assert n.type == TensorType(output_types[i])
+                    assert is_consistent(n.type, TensorType(b.size()))
+
+
+    def test_typecheck_basicblock(self):
+        class BasicBlock(torch.nn.Module):
+            expansion = 1
+
+            def __init__(self, inplanes, planes, stride=1, downsample=None, groups=1,
+                         base_width=64, dilation=1, norm_layer=None):
+                super(BasicBlock, self).__init__()
+                if norm_layer is None:
+                    norm_layer = torch.nn.BatchNorm2d
+                if groups != 1 or base_width != 64:
+                    raise ValueError('BasicBlock only supports groups=1 and base_width=64')
+                if dilation > 1:
+                    raise NotImplementedError("Dilation > 1 not supported in BasicBlock")
+                # Both self.conv1 and self.downsample layers downsample the input when stride != 1
+                self.conv1 = conv3x3(inplanes, planes, stride)
+                self.bn1 = norm_layer(planes)
+                self.relu = torch.nn.ReLU(inplace=True)
+                self.conv2 = conv3x3(planes, planes)
+                self.bn2 = norm_layer(planes)
+                self.downsample = downsample
+                self.stride = stride
+
+            def forward(self, x: TensorType((2, 2, 4, 5))):
+                identity = x
+
+                out = self.conv1(x)
+                out = self.bn1(out)
+                out = self.relu(out)
+
+                out = self.conv2(out)
+                out = self.bn2(out)
+
+                if self.downsample is not None:
+                    identity = self.downsample(x)
+
+                out += identity
+                out = self.relu(out)
+
+                return out
+
+        B = BasicBlock(2, 2)
+
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(B)
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+
+        tc = GraphTypeChecker({}, traced)
+        tc.type_check()
+
+        for n in traced.graph.nodes:
+            if n.target == 'output':
+                assert isinstance(n.type, TensorType)
+                assert torch.Size(n.type.__args__) == B.forward(torch.rand(2, 2, 4, 5)).size()
+
+    def test_type_check_conv2D_and_maxpool2d(self):
+
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+
+                self.conv1 = torch.nn.Conv2d(3, 6, 5)
+                self.pool = torch.nn.MaxPool2d(2, 2)
+                self.conv2 = torch.nn.Conv2d(6, 16, 5)
+                self.fc1 = torch.nn.Linear(5, 120)
+                self.pool2 = torch.nn.AdaptiveAvgPool2d((6, 7))
+
+            def forward(self, x : TensorType((4, 3, 32, 32))):
+                out = self.conv1(x)
+                out = self.pool(out)
+                out = self.conv2(out)
+                out = self.pool(out)
+                out = self.fc1(out)
+                out = self.pool2(out)
+                return out
+
+        B = BasicBlock()
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(B)
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+        tc = GraphTypeChecker({}, traced)
+        tc.type_check()
+
+        expected_ph_types = [TensorType((4, 3, 32, 32)), TensorType((4, 6, 28, 28)),
+                             TensorType((4, 6, 14, 14)), TensorType((4, 16, 10, 10)),
+                             TensorType((4, 16, 5, 5)), TensorType((4, 16, 5, 120)),
+                             TensorType((4, 16, 6, 7)), TensorType((4, 16, 6, 7))]
+
+        expected_iter = iter(expected_ph_types)
+
+        for n in traced.graph.nodes:
+            assert n.type == next(expected_iter)
+
+
+
+    def test_type_typechecl_maxpool2d_3dinput(self):
+
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+                self.pool = torch.nn.MaxPool2d(5, 8)
+
+            def forward(self, x : TensorType((64, 8, 8))):
+                out = self.pool(x)
+                return out
+
+        B = BasicBlock()
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(B)
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+        tc = GraphTypeChecker({}, traced)
+        tc.type_check()
+
+        for n in traced.graph.nodes:
+            if n.target == 'output':
+                assert n.type == TensorType((64, 1, 1))
+
+    def test_type_maxpool2d_fully_static(self):
+        annotation_list = [(Dyn, Dyn, 3, 5), (2, 5, 6, 9), (10, 15, 13, 14),
+                           (10, Dyn, 13, 14), (Dyn, Dyn, Dyn, 10)]
+        input_list = [(1, 2, 3, 5), (2, 5, 6, 9), (10, 15, 13, 14),
+                      (10, 15, 13, 14), (2, 2, 10, 10)]
+        intermediate_types = [(1, 2, Dyn, Dyn), (2, Dyn, 2, 4), (10, 15, Dyn, 2),
+                              (10, 15, 2, 3), (2, Dyn, Dyn, Dyn)]
+        stride_list = [1, 2, 3, 2, 1]
+        dilation_list = [1, 2, 3, 3, 2]
+        padding_list = [1, 2, 3, 3, 1]
+        kernel_size_list = [2, 4, 6, 6, 3]
+        output_types = [(1, 2, 4, 6), (2, 5, 2, 4), (10, 15, 2, 2), (10, 15, 2, 3), (2, Dyn, Dyn, 8)]
+
+        for i in range(5):
+            annotation = annotation_list[i]
+            input = input_list[i]
+            stride = stride_list[i]
+            dilation = dilation_list[i]
+            padding = padding_list[i]
+            kernel_size = kernel_size_list[i]
+            intermediate_type = intermediate_types[i]
+
+            class BasicBlock(torch.nn.Module):
+                def __init__(self, kernel_size, stride, padding, dilation):
+                    super(BasicBlock, self).__init__()
+                    self.pool = torch.nn.MaxPool2d(kernel_size, stride=stride,
+                                                   padding=padding, dilation=dilation,
+                                                   return_indices=False, ceil_mode=False)
+
+                def forward(self, x):
+                    out = self.pool(x)
+                    return out
+
+            B = BasicBlock(kernel_size, stride, padding, dilation)
+            ast_rewriter = RewritingTracer()
+            graph = ast_rewriter.trace(B)
+            traced = GraphModule(ast_rewriter.root, graph, "gm")
+
+            # annotate our argument
+            for n in graph.nodes:
+                if n.op == 'placeholder':
+                    n.type = TensorType(annotation)
+
+            b = B.forward(torch.rand(input))
+            tc = GraphTypeChecker({}, traced)
+            tc.type_check()
+
+            for n in graph.nodes:
+                if n.op == 'output':
+                    assert is_consistent(n.type, TensorType(b.size()))
+
+            # test with intermediate annotations
+            class BasicBlock(torch.nn.Module):
+                def __init__(self, kernel_size, stride, padding, dilation):
+                    super(BasicBlock, self).__init__()
+                    self.pool = torch.nn.MaxPool2d(kernel_size, stride=stride,
+                                                   padding=padding, dilation=dilation,
+                                                   return_indices=False, ceil_mode=False)
+
+                def forward(self, x):
+                    out = self.pool(x)
+                    return out
+
+            B = BasicBlock(kernel_size, stride, padding, dilation)
+            ast_rewriter = RewritingTracer()
+            graph = ast_rewriter.trace(B)
+            traced = GraphModule(ast_rewriter.root, graph, "gm")
+
+            # annotate our argument
+            for n in graph.nodes:
+                if n.op == 'placeholder':
+                    n.type = TensorType(annotation)
+
+            # populate our intermediate notes
+            for n in traced.graph.nodes:
+                if n.op == 'call_module':
+                    n.type = TensorType(intermediate_type)
+
+            tc = GraphTypeChecker({}, traced)
+            tc.type_check()
+
+            for n in traced.graph.nodes:
+                if n.op == 'output':
+                    assert n.type == TensorType(output_types[i])
+                    assert is_consistent(n.type, TensorType(b.size()))
+
 
 
 if __name__ == '__main__':
