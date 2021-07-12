@@ -271,9 +271,7 @@ class TestDependencyAPI(PackageTestCase):
         buffer = BytesIO()
 
         with self.assertRaises(PackagingError) as e:
-            with PackageExporter(
-                buffer, importer=BrokenImporter()
-            ) as exporter:
+            with PackageExporter(buffer, importer=BrokenImporter()) as exporter:
                 exporter.intern(["foo", "bar"])
                 exporter.save_source_string("my_module", "import foo; import bar")
 
@@ -306,6 +304,38 @@ class TestDependencyAPI(PackageTestCase):
                 """
             ),
         )
+
+    @skipIf(version_info < (3, 7), "mock uses __getattr__ a 3.7 feature")
+    def test_repackage_mocked_module(self):
+        """Re-packaging a package that contains a mocked module should work correctly."""
+        buffer = BytesIO()
+        with PackageExporter(buffer) as exporter:
+            exporter.mock("package_a")
+            exporter.save_source_string("foo", "import package_a")
+
+        buffer.seek(0)
+        importer = PackageImporter(buffer)
+        foo = importer.import_module("foo")
+
+        # "package_a" should be mocked out.
+        with self.assertRaises(NotImplementedError):
+            foo.package_a.get_something()
+
+        # Re-package the model, but intern the previously-mocked module and mock
+        # everything else.
+        buffer2 = BytesIO()
+        with PackageExporter(buffer2, importer=importer) as exporter:
+            exporter.intern("package_a")
+            exporter.mock("**")
+            exporter.save_source_string("foo", "import package_a")
+
+        buffer2.seek(0)
+        importer2 = PackageImporter(buffer2)
+        foo2 = importer2.import_module("foo")
+
+        # "package_a" should still be mocked out.
+        with self.assertRaises(NotImplementedError):
+            foo2.package_a.get_something()
 
 
 if __name__ == "__main__":
