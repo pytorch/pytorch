@@ -1427,20 +1427,16 @@ class TestCase(expecttest.TestCase):
             elif isinstance(y, torch.Tensor):
                 dtype = y.dtype
             else:
-                dtype = None
-
-            x = torch.as_tensor(x)
-            y = torch.as_tensor(y)
-
-            if not dtype:
-                dtype = torch.promote_types(x.dtype, y.dtype)
-
-            x = x.to(dtype)
-            y = y.to(dtype)
+                if isinstance(x, complex) or isinstance(y, complex):
+                    dtype = torch.complex128
+                elif isinstance(x, float) or isinstance(y, float):
+                    dtype = torch.float64
+                else:
+                    dtype = torch.int64
 
             self.assertEqual(
-                x,
-                y,
+                torch.as_tensor(x, dtype=dtype),
+                torch.as_tensor(y, dtype=dtype),
                 msg=msg,
                 atol=atol,
                 rtol=rtol,

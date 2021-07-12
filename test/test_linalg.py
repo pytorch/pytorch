@@ -7775,7 +7775,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 resid_info = gels_result[n:]
 
                 resid_norm = (torch.mm(a, x) - b).norm()
-                self.assertEqual(resid_norm, expectedNorm, atol=1e-8, rtol=0)
+                self.assertEqual(resid_norm, expected_norm, atol=1e-8, rtol=0)
                 self.assertEqual(resid_info.norm(), resid_norm, atol=1e-8, rtol=0)
 
             a_copy = a.clone()
