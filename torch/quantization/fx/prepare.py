@@ -17,6 +17,7 @@ from .qconfig_utils import (
     convert_dict_to_ordered_dict,
     generate_qconfig_map,
     get_flattened_qconfig_dict,
+    add_device_to_obs_ctr_in_qconfig,
     QConfigAny,
 )
 
@@ -1078,6 +1079,11 @@ def prepare(
 
     convert_dict_to_ordered_dict(qconfig_dict)
     convert_dict_to_ordered_dict(equalization_qconfig_dict)
+
+    device = assert_and_get_unique_device(model)
+    add_device_to_obs_ctr_in_qconfig(qconfig_dict, device)
+    add_device_to_obs_ctr_in_qconfig(equalization_qconfig_dict, device)
+
     flattened_qconfig_dict = get_flattened_qconfig_dict(qconfig_dict)
     # TODO: support regex as well
     propagate_qconfig_(model, flattened_qconfig_dict)

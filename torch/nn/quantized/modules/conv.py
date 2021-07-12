@@ -16,6 +16,8 @@ from torch.nn.quantized.modules.utils import _pair_from_first
 from torch.nn.quantized.modules.utils import _quantize_weight
 from torch.nn.utils import fuse_conv_bn_weights
 
+# from torch.quantization.fx.utils import assert_and_get_unique_device
+
 _SUPPORTED_PADDING = {
     'zeros',
     'reflect'
@@ -200,17 +202,13 @@ class _ConvNd(nn.Module):
         assert weight_post_process.dtype == torch.qint8, \
             'Weight observer must have a dtype of qint8'
         qweight = _quantize_weight(mod.weight.float(), weight_post_process)
-        device = qweight.device.type
-        act_scale, act_zp = act_scale.to(device), act_zp.to(device)
         # the __init__ call used is the one from derived classes and not the one from _ConvNd
         qconv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,
                     mod.stride, mod.padding, mod.dilation, mod.groups,
                     mod.bias is not None, mod.padding_mode)
         qconv.set_weight_bias(qweight, mod.bias)
-        # qconv.scale = float(act_scale)
-        # qconv.zero_point = int(act_zp)
-        qconv.scale = act_scale
-        qconv.zero_point = act_zp
+        qconv.scale = act_scale.to(torch.float)
+        qconv.zero_point = act_zp.to(torch.long)
         return qconv
 
     @staticmethod

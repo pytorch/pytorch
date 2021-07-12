@@ -20,7 +20,7 @@ def _quantize_weight(float_wt, observer):
             wt_scale.to(torch.float), wt_zp.to(torch.float), observer.ch_axis, observer.dtype)
     else:
         raise ValueError("Unexpected qscheme " + observer.qscheme)
-    return qweight  # should be on correct device as long as scale and zp and weights are
+    return qweight
 
 def _ntuple_from_first(n):
     """Converts the argument to a tuple of size n

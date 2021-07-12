@@ -275,6 +275,6 @@ class Linear(torch.nn.Module):
                       mod.out_features,
                       dtype=dtype)
         qlinear.set_weight_bias(qweight, mod.bias)
-        qlinear.scale = float(act_scale)
-        qlinear.zero_point = int(act_zp)
+        qlinear.scale = act_scale.to(torch.float)
+        qlinear.zero_point = act_zp.to(torch.long)
         return qlinear

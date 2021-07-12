@@ -131,8 +131,6 @@ def get_quantize_node_info(activation_post_process: Callable) -> Tuple[str, Unio
             qparams = {"_scale_": scale, "_zero_point_": zero_point, "_axis_": ch_axis, "_dtype_": dtype}
             quantize_op = torch.quantize_per_channel
         else:
-            scale = scale
-            zero_point = zero_point
             qparams = {"_scale_": scale, "_zero_point_": zero_point, "_dtype_": dtype}
             quantize_op = torch.quantize_per_tensor
     elif dtype == torch.float16:
@@ -360,7 +358,8 @@ def create_getattr_from_value(module: torch.nn.Module, graph: Graph, prefix: str
     """
     get_new_attr_name = get_new_attr_name_with_prefix(prefix)
     attr_name = get_new_attr_name(module)
-    module.register_buffer(attr_name, value)  # .to('cuda'))  # this is a problem
+    # works with tensors and non-tensors through tensors throw a warning
+    module.register_buffer(attr_name, torch.tensor(value))
     # Create get_attr with value
     attr_node = graph.create_node("get_attr", attr_name)
     return attr_node

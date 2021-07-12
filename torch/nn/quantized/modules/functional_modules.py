@@ -225,6 +225,6 @@ class QFunctional(torch.nn.Module):
             "QFunctional.from_float expects an instance of FloatFunctional"
         scale, zero_point = mod.activation_post_process.calculate_qparams()
         new_mod = QFunctional()
-        new_mod.scale = float(scale)
-        new_mod.zero_point = int(zero_point)
+        new_mod.scale = scale.to(torch.float)
+        new_mod.zero_point = zero_point.to(torch.long)
         return new_mod
