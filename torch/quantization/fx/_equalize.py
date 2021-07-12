@@ -214,11 +214,9 @@ def node_supports_equalization(node: Node, modules) -> bool:
     Currently we only support nn.Linear/F.Linear and nn.Conv/F.conv layers
     """
     if node.op == 'call_module':
-        return (isinstance(modules[node.target], nn.Linear) or
-                isinstance(modules[node.target], nni.LinearReLU) or
-                isinstance(modules[node.target], nn.Conv2d))
+        return type(modules[node.target]) in [nn.Linear, nni.LinearReLU, nn.Conv2d]
     elif node.op == 'call_function':
-        return node.target == F.linear or node.target == F.conv2d
+        return node.target in [F.linear, F.conv2d]
     return False
 
 def is_equalization_observer(observer: nn.Module) -> bool:
