@@ -3236,9 +3236,19 @@
 
 - func: is_pinned(Tensor self, Device? device=None) -> bool
   variants: method
+  dispatch:
+    CUDA: is_pinned_cuda
+    CompositeExplicitAutograd: is_pinned_default
 
+# TODO: add a copy kwarg that guarantees that the tensor is put into fresh
+# pinned memory
 - func: pin_memory(Tensor(a) self, Device? device=None) -> Tensor(a)
   variants: method
+
+# Unlike pin_memory, this is guaranteed to give a new non-aliasing tensor
+- func: _pin_memory(Tensor self, Device? device=None) -> Tensor
+  dispatch:
+    CUDA: _pin_memory_cuda
 
 - func: pinverse(Tensor self, float rcond=1e-15) -> Tensor
   variants: function, method
