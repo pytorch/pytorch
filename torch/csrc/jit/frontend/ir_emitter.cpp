@@ -1015,7 +1015,7 @@ struct to_ir {
   void emitReturn(const Return& stmt) {
     TypePtr declared_return_type =
         def_stack_.back().declared_return_type_; // nullptr if not annotated
-    Value* actual_return = emitExpr(stmt.expr(), declared_return_type);
+    auto actual_return = emitExpr(stmt.expr(), declared_return_type);
 
     // result type is annotated, every return must convert to that type
     if (declared_return_type) {
