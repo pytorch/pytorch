@@ -137,11 +137,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
         act.startTime = getTimeUs();
         act.addMetadata("Device Type", std::to_string((int8_t)device.type()));
         act.addMetadata("Device Id", std::to_string(device.index()));
-        act.addMetadata("Addr", [&]() {
-          std::ostringstream oss;
-          oss << std::hex << ptr;
-          return oss.str();
-        }());
+        act.addMetadata("Addr", std::to_string(reinterpret_cast<intptr_t>(ptr)));
         act.addMetadata("Bytes", std::to_string(alloc_size));
         if (allocated_size >= 0) {
           act.addMetadata("Allocated Bytes", std::to_string(allocated_size));
