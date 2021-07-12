@@ -1700,7 +1700,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
         object_gather_list[i] = _tensor_to_object(tensor, tensor_size)
 
 
-def broadcast_object_list(object_list, src=0, group=None, dist_device=None):
+def broadcast_object_list(object_list, src=0, group=None, device=None):
     """
     Broadcasts picklable objects in ``object_list`` to the whole group. Similar
     to :func:`broadcast`, but Python objects can be passed in.
@@ -1714,7 +1714,7 @@ def broadcast_object_list(object_list, src=0, group=None, dist_device=None):
         src (int): Source rank from which to broadcast ``object_list``.
         group: (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used. Default is ``None``.
-        dist_device (``torch.device``, optional): If not None, then intermediate
+        device (``torch.device``, optional): If not None, then intermediate
             tensor representations of objects, or any tensors within the contained
             objects, will be moved to this device before broadcasting. Default is
             ``None``.
@@ -1749,8 +1749,8 @@ def broadcast_object_list(object_list, src=0, group=None, dist_device=None):
         >>> else:
         >>>     objects = [None, None, None]
         >>> # Assumes backend is not NCCL
-        >>> dist_device = torch.device("cpu")
-        >>> dist.broadcast_object_list(objects, src=0, dist_device=dist_device)
+        >>> device = torch.device("cpu")
+        >>> dist.broadcast_object_list(objects, src=0, device=device)
         >>> broadcast_objects
         ['foo', 12, {1: 2}]
     """
@@ -1766,16 +1766,18 @@ def broadcast_object_list(object_list, src=0, group=None, dist_device=None):
         object_sizes_tensor = torch.empty(len(object_list), dtype=torch.long)
 
     # Current device selection.
-    # To preserve backwards compatibility, ``dist_device`` is default to ``None``
+    # To preserve backwards compatibility, ``device`` is default to ``None``
     # in which case we run current logic of device selection, i.e.
     # ``current_device`` is CUDA if backend is NCCL otherwise CPU device. In the
-    # case it is not ``None``e we move all intermediate tensors to this given
+    # case it is not ``None`` we move all intermediate tensors to this given
     # device. See https://github.com/pytorch/pytorch/issues/60062
     group_backend = get_backend(group)
     is_nccl_backend = group_backend == Backend.NCCL
     current_device = None
-    if dist_device is not None:
-        current_device = dist_device
+    if device is not None:
+        if is_nccl_backend and device.type != 'cuda':
+            raise ValueError('device type must be cuda for nccl backend')
+        current_device = device
     else:
         current_device = torch.device("cpu")
         if is_nccl_backend:
