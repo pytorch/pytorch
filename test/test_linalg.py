@@ -5937,7 +5937,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                   *torch.testing.get_all_fp_dtypes(include_bfloat16=(TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater)),
                                                    include_half=(not TEST_WITH_ROCM)))
     @dtypes(torch.bfloat16, torch.float, torch.double, torch.cfloat, torch.cdouble)
-    @enableSparseCSR(only_cuda=True,
+    @enableSparseCSR(dtypes_cpu=floating_and_complex_types(),
                      dtypes_cuda=(*torch.testing.get_all_complex_dtypes(),
                                   *torch.testing.get_all_fp_dtypes(include_bfloat16=SM80OrLater,
                                                                    include_half=SM53OrLater)))
@@ -5975,8 +5975,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
     @dtypesIfCUDA(*torch.testing.get_all_fp_dtypes(include_bfloat16=(TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater))))
     @dtypes(torch.float, torch.double)
-    @enableSparseCSR(only_cuda=True,
-                     dtypes_cuda=torch.testing.get_all_fp_dtypes(include_bfloat16=SM80OrLater,
+    @enableSparseCSR(dtypes_cuda=torch.testing.get_all_fp_dtypes(include_bfloat16=SM80OrLater,
                                                                  include_half=SM53OrLater))
     def test_addmv_rowmajor_colmajor_incx_incy_lda(self, device, dtype, layout):
         # tests (o, s)*(s).  o is output size, s is summed size.
