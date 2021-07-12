@@ -1,7 +1,6 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include <c10/util/Deprecated.h>
 
 namespace torch {
 namespace linalg {
