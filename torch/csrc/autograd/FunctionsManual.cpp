@@ -3602,34 +3602,42 @@ Tensor lu_backward_base(
 
   auto phi = phi_L + phi_U;
   auto psi = at::zeros_like(self);
-  if (m < n) {
+  // TODO: consider the squared case separately
+  if (m <= n) {
+    auto U_complement = U.narrow(-2, 0, k).narrow(-1, k, n - k);
+    auto U_grad_complement = U_grad.narrow(-2, 0, k).narrow(-1, k, n - k);
+
+    auto phi_complement = U_grad_complement.matmul(U_complement.transpose(-2, -1).conj()).tril_();
+    phi_complement.diagonal(0, -2, -1).fill_(0.0);
+    phi.sub_(phi_complement);
+
+    psi.narrow(-2, 0, k).narrow(-1, k, n - k).copy_(U_grad_complement);
+
+    auto psi_square = std::get<0>(
+      at::triangular_solve(
+        phi.transpose(-2, -1).conj(),
+        U_square,
+        /*upper=*/true,
+        /*transpose=*/false,
+        /*unitriangular=*/false
+      )
+    ).transpose(-2, -1).conj();
+    psi.narrow(-2, 0, k).narrow(-1, 0, k).copy_(psi_square);
+
+    auto self_grad = P.matmul(
+      std::get<0>(at::triangular_solve(
+        psi,
+        L_square_H,
+        /*upper=*/true,
+        /*transpose=*/false,
+        /*unitriangular=*/true
+      ))
+    );
+    return self_grad;
   }
   else if (m > n) {
   }
-
-  auto psi_square = std::get<0>(
-    at::triangular_solve(
-      phi.transpose(-2, -1).conj(),
-      U_square,
-      /*upper=*/true,
-      /*transpose=*/false,
-      /*unitriangular=*/false
-    )
-  ).transpose(-2, -1).conj();
-  psi.narrow(-2, 0, k).narrow(-1, 0, k).copy_(psi_square);
-
-  auto self_grad_square = P.matmul(
-    std::get<0>(at::triangular_solve(
-      psi,
-      L_square_H,
-      /*upper=*/true,
-      /*transpose=*/false,
-      /*unitriangular=*/true
-    ))
-  );
-  auto self_grad = at::zeros_like(self);
-  self_grad.narrow(-2, 0, k).narrow(-1, 0, k).copy_(self_grad_square);
-  return self_grad;
+  return self;
 }
 
 Tensor _lu_with_info_backward(
