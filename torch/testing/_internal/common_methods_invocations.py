@@ -6058,7 +6058,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            supports_inplace_autograd=False,
            # we use in-place operations which cannot be avoided.
-           # This cases vmap failures, hence we skip batched gradient checks
+           # This causes vmap failures, hence we skip batched gradient checks
            check_batched_grad=False,
            check_batched_gradgrad=False,
            supports_out=False,
@@ -6073,7 +6073,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            supports_inplace_autograd=False,
            # we use in-place operations which cannot be avoided.
-           # This cases vmap failures, hence we skip batched gradient checks
+           # This causes vmap failures, hence we skip batched gradient checks
            check_batched_grad=False,
            supports_out=True,
            sample_inputs_func=sample_inputs_lu_unpack,
