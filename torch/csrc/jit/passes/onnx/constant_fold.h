@@ -1,5 +1,7 @@
 #pragma once
 
+#include <memory>
+
 #include <c10/util/Optional.h>
 #include <torch/csrc/jit/ir/ir.h>
 
@@ -20,10 +22,10 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     const Node* node,
     std::vector<at::Tensor>& inputTensorValues,
     int opset_version);
-}
+} // namespace onnx_constant_fold
 
 void ConstantFoldONNX(
-    Block* b,
+    std::shared_ptr<Graph>& g,
     std::map<std::string, IValue>& paramDict,
     int opset_version);
 
