@@ -76,6 +76,15 @@ def create_temp_dir_and_files():
             (temp_sub_dir, temp_sub_file1_name, temp_sub_file2_name)]
 
 
+class NumbersDataset(IterDataPipe):
+    def __init__(self, size=10):
+        self.size = size
+
+    def __iter__(self):
+        for i in range(self.size):
+            yield i
+
+
 class TestIterableDataPipeBasic(TestCase):
 
     def setUp(self):
@@ -254,6 +263,17 @@ class TestIterableDataPipeBasic(TestCase):
                 self.assertEqual(rec[i][1].read(), b'12345abcde')
                 rec[i][1].close()
         self.assertEqual(count, 8)
+
+    def test_demux_mux_datapipe(self):
+        numbers = NumbersDataset(10)
+        n1, n2 = numbers.demux(2, lambda x: x % 2)
+        self.assertEqual([0, 2, 4, 6, 8], list(n1))
+        self.assertEqual([1, 3, 5, 7, 9], list(n2))
+
+        numbers = NumbersDataset(10)
+        n1, n2, n3 = numbers.demux(3, lambda x: x % 3)
+        n = n1.mux(n2, n3)
+        self.assertEqual(list(range(10)), list(n))
 
 
 class FileLoggerSimpleHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
