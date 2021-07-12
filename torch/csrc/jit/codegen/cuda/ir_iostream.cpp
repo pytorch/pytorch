@@ -68,6 +68,17 @@ void IrPrinter::handle(const TensorView* tv) {
     os_ << typePrefix(tv->getDataType().value()) << tv->name();
   } else {
     os_ << "T" << tv->name();
+    switch (tv->getMemoryType()) {
+      case MemoryType::Global:
+        os_ << "_g";
+        break;
+      case MemoryType::Shared:
+        os_ << "_s";
+        break;
+      case MemoryType::Local:
+        os_ << "_l";
+        break;
+    }
     handle(tv->domain());
 
     if (tv->getComputeAtPosition() > 0) {
@@ -201,7 +212,7 @@ void IrPrinter::handle(const UnaryOp* uop) {
     }
     if (op_type == UnaryOpType::RandLike) {
       os_ << "(";
-      os_ << "rnd";
+      handle(uop->in());
     } else {
       os_ << "(";
       handle(uop->in());
