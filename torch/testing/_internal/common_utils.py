@@ -1421,6 +1421,7 @@ class TestCase(expecttest.TestCase):
             )
         elif isinstance(x, Number) or isinstance(y, Number):
             # torch.testing.assert_close does not allow Tensor vs. Number comparisons
+            dtype: Optional[torch.dtype]
             if isinstance(x, torch.Tensor):
                 dtype = x.dtype
             elif isinstance(y, torch.Tensor):
