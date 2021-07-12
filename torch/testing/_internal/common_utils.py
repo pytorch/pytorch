@@ -1955,7 +1955,9 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
     """ Creates a random tensor with the given size, device and dtype.
 
         By default, the tensor's values are in the range [-9, 9] for most dtypes. If low
-        and/or high are specified then the values will be in the range [low, high).
+        and/or high are specified then the values will be in the range [low, high). If low
+        and/or high are passed as -inf/inf (respectively), then the values will be minimum
+        and maximum limit of the respective dtype.
 
         For unsigned types the default range is [0, 9] and for complex types the real and imaginary
         parts each have the default range as [-9, 9].
@@ -1970,8 +1972,8 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
     """
 
     if low is not None and high is not None:
-        assert low <= high, "low value too high!"
-        assert high >= low, "high value too low!"
+        assert low <= high, "Expected low value to be lower than or equal to high, but found higher instead."
+        assert high >= low, "Expected high value to be higher than or equal to low, but found lower instead."
 
     if dtype is torch.bool:
         result = torch.randint(0, 2, size, device=device, dtype=dtype)
