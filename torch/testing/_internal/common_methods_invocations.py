@@ -6053,16 +6053,16 @@ op_db: List[OpInfo] = [
            op=torch.lu,
            dtypes=floating_and_complex_types(),
            supports_inplace_autograd=False,
+           # we use in-place operations which cannot be avoided.
+           # This cases vmap failures, hence we skip batched gradient checks
+           check_batched_grad=False,
            check_batched_gradgrad=False,
            supports_out=False,
            sample_inputs_func=sample_inputs_lu,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
-               # we skip jit tests because lu_backward is impelemented as autograd.Function,
-               # which does not support autograd with scripting
+               # we skip jit tests because `lu` is a torch function
                SkipInfo('TestJit', 'test_variant_consistency_jit'),
-               # Skip operator schema test because this is a functional and not an operator
-               SkipInfo('TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
            )),
     OpInfo('lu_unpack',
            op=torch.lu_unpack,
