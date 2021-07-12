@@ -3585,7 +3585,51 @@ Tensor lu_backward_base(
   auto L_grad = grads[0];
   auto U_grad = grads[1];
 
-  return self;
+  auto m = self.size(-2);
+  auto n = self.size(-1);
+  auto k = std::min(m, n);
+
+  auto L_square = L.narrow(-2, 0, k).narrow(-1, 0, k);
+  auto L_square_H = L_square.transpose(-2, -1).conj();
+  auto L_grad_square = L_grad.narrow(-2, 0, k).narrow(-1, 0, k);
+  auto U_square = U.narrow(-2, 0, k).narrow(-1, 0, k);
+  auto U_square_H = U_square.transpose(-2, -1).conj();
+  auto U_grad_square = U_grad.narrow(-2, 0, k).narrow(-1, 0, k);
+
+  auto phi_L = L_square_H.matmul(L_grad_square).tril_();
+  phi_L.diagonal(0, -2, -1).fill_(0.0);
+  auto phi_U = U_grad_square.matmul(U_square_H).triu_();
+
+  auto phi = phi_L + phi_U;
+  if (m < n) {
+  }
+  else if (m > n) {
+  }
+
+  auto psi_square = std::get<0>(
+    at::triangular_solve(
+      phi.transpose(-2, -1).conj(),
+      U_square,
+      /*upper=*/true,
+      /*transpose=*/false,
+      /*unitriangular=*/false
+    )
+  ).transpose(-2, -1).conj();
+  auto psi = at::zeros_like(self);
+  psi.narrow(-2, 0, k).narrow(-1, 0, k).copy_(psi_square);
+
+  auto self_grad_square = P.matmul(
+    std::get<0>(at::triangular_solve(
+      psi,
+      L_square_H,
+      /*upper=*/true,
+      /*transpose=*/false,
+      /*unitriangular=*/true
+    ))
+  );
+  auto self_grad = at::zeros_like(self);
+  self_grad.narrow(-2, 0, k).narrow(-1, 0, k).copy_(self_grad_square);
+  return self_grad;
 }
 
 Tensor _lu_with_info_backward(
