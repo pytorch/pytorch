@@ -140,7 +140,9 @@ class TestTypesAndAnnotation(JitTestCase):
             wrong : List[int] = [0.5]
             return wrong
 
-        with self.assertRaisesRegex(RuntimeError, "Lists must contain only a single type"):
+        with self.assertRaisesRegex(RuntimeError, "List type annotation"
+                                    r" `List\[int\]` did not match the "
+                                    "types of the given list elements"):
             torch.jit.script(wrong_type)
 
     def test_optional_no_element_type_annotation(self):

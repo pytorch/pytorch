@@ -4866,6 +4866,8 @@ op_db: List[OpInfo] = [
                                 dtypes=[torch.cdouble]),
                    )),
     OpInfo('add',
+           # NumPy has no builtin reference for the alpha kwarg, but it is easy enough to emulate
+           ref=lambda input, other, *, alpha=1: np.add(input, np.multiply(alpha, other)),
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            assert_autodiffed=True,
            sample_inputs_func=partial(sample_inputs_binary_pwise, alpha=2),
@@ -4878,6 +4880,8 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_binary_pwise),
     OpInfo('sub',
+           # NumPy has no builtin reference for the alpha kwarg, but it is easy enough to emulate
+           ref=lambda input, other, *, alpha=1: np.subtract(input, np.multiply(alpha, other)),
            aliases=('subtract',),
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
            assert_autodiffed=True,
