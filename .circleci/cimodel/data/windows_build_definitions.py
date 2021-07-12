@@ -1,6 +1,7 @@
+# TODO: Delete this file after we get re-run with SSH on windows for GHA
+
 import cimodel.lib.miniutils as miniutils
 from cimodel.data.simple.util.branch_filters import gen_filter_dict, RC_PATTERN, NON_PR_BRANCH_LIST
-from cimodel.data.simple.util.versions import CudaVersion
 
 
 class WindowsJob:
@@ -143,18 +144,19 @@ class VcSpec:
     def render(self):
         return "_".join(self.get_elements())
 
-_VC2019 = VcSpec(2019)
 
 WORKFLOW_DATA = [
-    # VS2019 CUDA-10.1
-    WindowsJob(None, _VC2019, CudaVersion(10, 1), master_only=True),
-    # VS2019 CUDA-10.1 force on cpu
-    WindowsJob(1, _VC2019, CudaVersion(10, 1), force_on_cpu=True, master_only=True),
-
     # TODO: This test is disabled due to https://github.com/pytorch/pytorch/issues/59724
     # WindowsJob('_azure_multi_gpu', _VC2019, CudaVersion(11, 1), multi_gpu=True, master_and_nightly=True),
 ]
 
+# NOTE: For users looking to re-run windows builds with SSH uncomment the following lines
+# from cimodel.data.simple.util.versions import CudaVersion
+# _VC2019 = VcSpec(2019)
+# WORKFLOW_DATA.extend([
+#     WindowsJob(None, _VC2019, CudaVersion(10, 1)),
+#     WindowsJob(1, _VC2019, CudaVersion(10, 1), force_on_cpu=True),
+# ])
 
 def get_windows_workflows():
     return [item.gen_tree() for item in WORKFLOW_DATA]
