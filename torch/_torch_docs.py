@@ -9011,9 +9011,9 @@ always be real-valued, even if :attr:`input` is complex.
                default value for both is `True`, so the default behavior is
                effectively the opposite.
              * :func:`torch.svd` returns `V`, whereas :func:`torch.linalg.svd` returns
-               `Vh`, that is, `Vᴴ`.
+               `Vᴴ`.
              * If :attr:`compute_uv` is `False`, :func:`torch.svd` returns zero-filled
-               tensors for `U` and `Vh`, whereas :func:`torch.linalg.svd` returns
+               tensors for `U` and `Vᴴ`, whereas :func:`torch.linalg.svd` returns
                empty tensors.
 
 .. note:: The singular values are returned in descending order. If :attr:`input` is a batch of matrices,
