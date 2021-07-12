@@ -512,6 +512,33 @@ round(input, *, out=None) -> Tensor
 Alias for :func:`torch.round`.
 """)
 
+log_softmax = _add_docstr(_special.special_log_softmax,
+                          r"""
+log_softmax(input, dim, *, dtype=None) -> Tensor
+Computes softmax followed by a logarithm.
+
+While mathematically equivalent to log(softmax(x)), doing these two
+operations separately is slower and numerically unstable. This function
+is computed as:
+
+.. math::
+    \text{log\_softmax}(x_{i}) = \log\left(\frac{\exp(x_i) }{ \sum_j \exp(x_j)} \right)
+""" + r"""
+
+Args:
+    input (Tensor): input
+    dim (int): A dimension along which log_softmax will be computed.
+    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+        If specified, the input tensor is cast to :attr:`dtype` before the operation
+        is performed. This is useful for preventing data type overflows. Default: None.
+
+Example::
+    >>> t = torch.ones(2, 2)
+    >>> torch.special.log_softmax(t, 0)
+    tensor([[-0.6931, -0.6931],
+            [-0.6931, -0.6931]])
+""")
+
 zeta = _add_docstr(_special.special_zeta,
                    r"""
 zeta(input, other, *, out=None) -> Tensor
