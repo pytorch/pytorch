@@ -3623,13 +3623,13 @@ def sample_inputs_log_softmax(op_info, device, dtype, requires_grad, with_dtype=
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     if with_dtype:
-        cases = (((S, S, S), (1, torch.float64)),)
+        cases = (((S, S, S), (1, ), {'dtype': torch.float64}),)
     else:
-        cases = (((S, S, S), (1,)),)  # type:ignore[assignment]
+        cases = (((S, S, S), (1,), {}),)  # type:ignore[assignment]
 
     def generator():
-        for shape, args in cases:
-            yield SampleInput(make_arg(shape), args=args)
+        for shape, args, kwargs in cases:
+            yield SampleInput(make_arg(shape), args=args, kwargs=kwargs)
 
     return list(generator())
 
@@ -7662,6 +7662,7 @@ op_db: List[OpInfo] = [
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
     OpInfo(
         'log_softmax',
+        aliases=('special.log_softmax', 'nn.functional.log_softmax'),
         supports_out=False,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
@@ -7670,9 +7671,27 @@ op_db: List[OpInfo] = [
     OpInfo(
         'log_softmax',
         variant_test_name='dtype',
+        aliases=('special.log_softmax', 'nn.functional.log_softmax'),
         supports_out=False,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         sample_inputs_func=partial(sample_inputs_log_softmax, with_dtype=True),
+        skips=(
+            # NOTE: This should work once https://github.com/pytorch/pytorch/pull/58838 is in
+            # RuntimeError:
+            # Unknown type name 'dtype':
+            # File "<string>", line 2
+            #         def _fn(t0, s0: int, dtype: dtype = torch.float64):
+            #                                     ~~~~~ <--- HERE
+            #             return variant(t0, s0, dtype=torch.float64)
+
+            # 'defaults' is being compiled since it was called from '_fn'
+            # File "<string>", line 2
+            #         def _fn(t0, s0: int, dtype: dtype = torch.float64):
+            #             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            #             return variant(t0, s0, dtype=torch.float64)
+            #             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
+            SkipInfo('TestJit', 'test_jit_alias_remapping'),
+        ),
         assert_autodiffed=True),
     UnaryUfuncInfo('logit',
                    ref=scipy.special.logit if TEST_SCIPY else _NOTHING,
