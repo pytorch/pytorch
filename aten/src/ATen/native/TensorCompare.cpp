@@ -115,6 +115,10 @@ Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol
       close.__ior__((self != self).__iand__(other != other));
   }
 
+  if (rtol == 0 && atol == 0){
+      return close;
+  }
+
   // Note [closeness error computation]
   // atol and rtol are provided as doubles, so the computation
   // rtol * other will produce a float or complex tensor.
