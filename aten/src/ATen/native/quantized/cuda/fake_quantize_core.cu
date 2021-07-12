@@ -52,6 +52,39 @@ void fake_quantize_tensor_cachemask_kernel_cuda(
   });
 }
 
+void fake_quantize_tensor_cachemask_tensor_qparams_kernel_cuda(
+    Tensor& output,
+    Tensor& mask,
+    const Tensor& input,
+    const Tensor& scale,
+    const Tensor& zero_point,
+    int64_t quant_min,
+    int64_t quant_max) {
+  float* scale_ptr = scale.data_ptr<float>();
+  int32_t* zp_ptr = zero_point.data_ptr<int32_t>();
+  auto iter = TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .add_output(output)
+    .add_output(mask)
+    .add_input(input)
+    .build();
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "fake_quantize_tensor_cachemask_kernel_types", [&] {
+    gpu_kernel_multiple_outputs(
+      iter,
+      [=] GPU_LAMBDA (scalar_t input_val) -> thrust::tuple<scalar_t, bool> {
+        float inv_scale = 1.0f / (*scale_ptr);
+        const auto qval = static_cast<int64_t>(std::nearbyint(input_val * inv_scale) + (*zp_ptr));
+        return {
+          // fake_quantized value
+          (fminf(quant_max, fmaxf(quant_min, qval)) - (*zp_ptr)) * (*scale_ptr),
+          // mask for grad
+          ((quant_min <= qval) && (qval <= quant_max))
+        };
+      }
+    );
+  });
+}
+
 void _fake_quantize_grad_learnable_tensor_kernel_cuda(
     TensorIterator& iter,
     float scale,
@@ -80,6 +113,7 @@ void _fake_quantize_grad_learnable_tensor_kernel_cuda(
 }
 
 REGISTER_DISPATCH(fake_quant_tensor_cachemask_stub, &fake_quantize_tensor_cachemask_kernel_cuda);
+REGISTER_DISPATCH(fake_quant_tensor_cachemask_tensor_qparams_stub, &fake_quantize_tensor_cachemask_tensor_qparams_kernel_cuda);
 REGISTER_DISPATCH(fake_quant_grad_learnable_tensor_stub, &_fake_quantize_grad_learnable_tensor_kernel_cuda);
 
 // Fake quantize per channel
