@@ -298,6 +298,7 @@ Key-Value Stores: :class:`~torch.distributed.TCPStore`,
 .. autofunction:: torch.distributed.Store.set
 .. autofunction:: torch.distributed.Store.get
 .. autofunction:: torch.distributed.Store.add
+.. autofunction:: torch.distributed.Store.compare_set
 .. autofunction:: torch.distributed.Store.wait
 .. autofunction:: torch.distributed.Store.num_keys
 .. autofunction:: torch.distributed.Store.delete_key
