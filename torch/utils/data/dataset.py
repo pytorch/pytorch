@@ -2,10 +2,11 @@ import bisect
 import warnings
 import functools
 
+import numpy as np
 from torch._utils import _accumulate
 from torch import randperm
 # No 'default_generator' in torch/__init__.pyi
-from torch import default_generator
+from torch import default_generator, stack
 from torch.utils.data._typing import _DataPipeMeta
 from typing import TypeVar, Generic, Iterable, Iterator, Sequence, List, Optional, Tuple, Dict, Callable
 from ... import Tensor, Generator
@@ -274,7 +275,7 @@ class ConcatDataset(Dataset[T_co]):
 class ConcatTensorDataset(ConcatDataset):
     r"""ConcatDataset of TensorDatasets which supports getting slices and index lists/arrays.
 
-    This dataset allows the use of slices, e.g. ds[2:4] and of arrays or lists of multiple indices 
+    This dataset allows the use of slices, e.g. ds[2:4] and of arrays or lists of multiple indices
     if all concatenated datasets are either TensorDatasets or Subset or other ConcatTensorDataset instances
     which eventually contain only TensorDataset instances. If no slicing is needed,
     this class works exactly like torch.utils.data.ConcatDataset and can concatenate arbitrary
@@ -289,10 +290,10 @@ class ConcatTensorDataset(ConcatDataset):
     def __getitem__(self, idx):
         if isinstance(idx, slice):
             rows = [super(ConcatTensorDataset, self).__getitem__(i) for i in range(self.__len__())[idx]]
-            return tuple(map(torch.stack, zip(*rows)))
+            return tuple(map(stack, zip(*rows)))
         elif isinstance(idx, (list, np.ndarray)):
             rows = [super(ConcatTensorDataset, self).__getitem__(i) for i in idx]
-            return tuple(map(torch.stack, zip(*rows)))
+            return tuple(map(stack, zip(*rows)))
         else:
             return super(ConcatTensorDataset, self).__getitem__(idx)
 
