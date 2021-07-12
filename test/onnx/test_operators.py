@@ -895,6 +895,7 @@ class TestOperators(TestCase):
     def test_aten_embedding_1(self):
         _onnx_opset_version = 12
 
+<<<<<<< HEAD
         @parse_args("v", "v", "i", "b", "b")
         def embedding(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
             custom_attributes_json = (
@@ -909,6 +910,22 @@ class TestOperators(TestCase):
             return output
 
         register_custom_op_symbolic("::embedding", embedding, _onnx_opset_version)
+=======
+        @parse_args('v', 'v', 'i', 'b', 'b')
+        def embedding(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
+            custom_attributes_json = (
+                '{'
+                f'"padding_idx":{str(padding_idx)},'
+                f'"scale_grad_by_freq":{str(scale_grad_by_freq).lower()},'
+                f'"sparse":{str(sparse).lower()}'
+                '}'
+            )
+            output = g.op("com.microsoft::ATenOp", weight, indices, name_s='aten::embedding',
+                          custom_attributes_json_s=custom_attributes_json)
+            return output
+
+        register_custom_op_symbolic('::embedding', embedding, _onnx_opset_version)
+>>>>>>> Enhance shape (#60335)
 
         class Model(torch.nn.Module):
             def __init__(self):
@@ -950,7 +967,11 @@ class TestOperators(TestCase):
                 output.setType(output_type)
             return output
 
+<<<<<<< HEAD
         register_custom_op_symbolic("::embedding", embedding, _onnx_opset_version)
+=======
+        register_custom_op_symbolic('::embedding', embedding, _onnx_opset_version)
+>>>>>>> Enhance shape (#60335)
 
         class Model(torch.nn.Module):
             def __init__(self):
@@ -965,10 +986,17 @@ class TestOperators(TestCase):
         model = Model()
         x = torch.ones(32, dtype=torch.long)
         y = torch.randn(1, 8)
+<<<<<<< HEAD
         self.assertONNX(model, (x, y), opset_version=_onnx_opset_version, input_names=["input_1", "input_2"],
                         dynamic_axes={"input_1": {0: "dim_0"}, "input_2": {0: "dim_1", 1: "dim_2"}})
 
         unregister_custom_op_symbolic("::embedding", _onnx_opset_version)
+=======
+        self.assertONNX(model, (x, y), opset_version=_onnx_opset_version, input_names=['input_1', 'input_2'],
+                        dynamic_axes={"input_1": {0: "dim_0"}, 'input_2': {0: "dim_1", 1: "dim_2"}})
+
+        unregister_custom_op_symbolic('::embedding', _onnx_opset_version)
+>>>>>>> Enhance shape (#60335)
 
 if __name__ == "__main__":
     no_onnx_dep_flag = "--no-onnx"

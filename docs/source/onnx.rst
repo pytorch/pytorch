@@ -400,12 +400,20 @@ symbolic function should use the ``name`` kwarg which gets set to the name of th
 the ``prim`` namespace, so for this use case, there's a back door: register the
 symbolic for ``"::prim_PythonOp"``.
 
+<<<<<<< HEAD
 Custom symbolic functions should add type and shape information by calling ``setType(...)``
 on Value objects before returning them (implemented in C++ by
 ``torch::jit::Value::setType``). This is not required, but it can help the exporter's
 shape and type inference for down-stream nodes. For a non-trivial example of ``setType``, see
 ``test_aten_embedding_2`` in
 `test_operators.py <https://github.com/pytorch/pytorch/blob/master/test/onnx/test_operators.py>`_.
+=======
+Please also consider adding shape inference logic when you regiester a custom symbolic function
+via setType API. This can help the exporter to obtain correct shape inference.
+An example of setType is test_aten_embedding_2 in test_operators.py.
+Although it is not required to add shape inference logic,
+the exporter emits a warning message if it is not added.
+>>>>>>> Enhance shape (#60335)
 
 The example below shows how you can access ``requires_grad`` via the ``Node`` object::
 
