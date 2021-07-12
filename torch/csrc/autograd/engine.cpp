@@ -164,18 +164,13 @@ C10_DEFINE_TLS_static(std::shared_ptr<ReadyQueue>, tls_local_ready_queue);
 //
 // Internally, backward() runs ops (including leaf nodes) on side threads.
 // And streams are thread local. So GraphTask achieves the above semantics by
-//  1. remembering the current and default streams on all active CUDA devices
+//  1. remembering the current streams on all active CUDA devices
 //     in the user-facing thread (aka, the thread that called execute() to
 //     launch the GraphTask)
 //  2. remembering the "leaf streams" (streams each backward leaf node ran on)
 //  3. during exec_post_processing, for each leaf stream, sync the remembered
-//     current and default streams (on the leaf stream's device) with that
+//     current streams (on the leaf stream's device) with that
 //     leaf stream.
-//
-// Syncing default streams (as well as current streams) with leaf streams is
-// done for temporary BC, and is more conservative than the usage guidance
-// (https://pytorch.org/docs/stable/notes/cuda.html) requires.
-// TODO: change 1, 2, 3 to sync only current streams with leaf streams.
 
 int NodeTask::getReentrantDepth() const {
   std::shared_ptr<GraphTask> graph_task = base_.lock();
@@ -591,18 +586,6 @@ void GraphTask::exec_post_processing() {
       cb_lock.lock();
     }
   }
-
-  // For temporary BC, syncs default streams with caller_current_streams so callback results are also
-  // usable on user-facing default streams after backward()
-  for (const auto& caller_current_stream : caller_current_streams_filtered) {
-    const auto caller_default_stream = *caller_default_streams_[caller_current_stream.device_index()];
-
-    if (caller_current_stream != caller_default_stream) {
-      auto event = c10::Event{c10::DeviceType::CUDA};
-      event.record(caller_current_stream);
-      caller_default_stream.wait(event);
-    }
-  }
 }
 
 void GraphTask::set_exception_without_signal(const std::shared_ptr<Node>& fn) {
@@ -782,6 +765,18 @@ void Engine::evaluate_function(
     Node* func,
     InputBuffer& inputs,
     const std::shared_ptr<ReadyQueue>& cpu_ready_queue) {
+  // Set the ThreadLocalState before calling the function.
+  // NB: The ThreadLocalStateGuard doesn't set the grad_mode because GraphTask
+  // always saves ThreadLocalState without grad_mode.
+  at::ThreadLocalStateGuard tls_guard(graph_task->thread_locals_);
+
+  // The InputBuffer::adds that supplied incoming grads took pains to
+  // ensure they're safe to consume in the context of the present
+  // func's stream (if applicable). So we guard onto that stream
+  // before working with the grads in any capacity.
+  const auto opt_parent_stream = (*func).stream(c10::DeviceType::CUDA);
+  c10::OptionalStreamGuard parent_stream_guard{opt_parent_stream};
+
   // If exec_info_ is not empty, we have to instrument the execution
   auto& exec_info_ = graph_task->exec_info_;
   if (!exec_info_.empty()) {
@@ -795,6 +790,10 @@ void Engine::evaluate_function(
         for (auto& hook : capture.hooks_) {
           captured_grad = (*hook)(captured_grad);
         }
+        if (opt_parent_stream) {
+          // No need to take graph_task->mutex_ here, we already hold it
+          graph_task->leaf_streams.emplace(*opt_parent_stream);
+        }
       }
     }
     if (!fn_info.needed_) {
@@ -802,15 +801,6 @@ void Engine::evaluate_function(
       return;
     }
   }
-
-  // Set the ThreadLocalState before calling the function.
-  // NB: The ThreadLocalStateGuard doesn't set the grad_mode because GraphTask
-  // always saves ThreadLocalState without grad_mode.
-  at::ThreadLocalStateGuard tls_guard(graph_task->thread_locals_);
-
-  // Switches to a function's CUDA stream (if applicable) before calling it
-  const auto opt_parent_stream = (*func).stream(c10::DeviceType::CUDA);
-  c10::OptionalStreamGuard parent_stream_guard{opt_parent_stream};
 
   auto outputs = call_function(graph_task, func, inputs);
 
@@ -952,7 +942,7 @@ auto Engine::compute_dependencies(Node* root, GraphTask& task, uint64_t min_topo
   }
 
   if (will_use_cuda) {
-    // Collects current and default streams for devices where this process has a context,
+    // Collects current streams for devices where this process has a context,
     // so GraphTask::exec_post_processing can sync them with leaf_streams.
     task.stash_current_streams();
   }
@@ -976,6 +966,13 @@ auto Engine::execute(const edge_list& roots,
       "If you have to use this function, make sure to reset the .grad fields of "
       "your parameters to None after use to break the cycle and avoid the leak.");
   }
+
+  // accumulate_grad is true if and only if the frontend call was to
+  // grad(), not backward(). grad() returns the sum of the gradients
+  // w.r.t. the inputs and thus needs the inputs to be present.
+  TORCH_CHECK_VALUE(accumulate_grad || !outputs.empty(),
+                    "grad requires non-empty inputs.");
+
   // A fresh first time Engine::execute call should start on the CPU device, initialize
   // a new thread local ready queue on CPU or reuse the existing one (if there is one
   // allocated already, i.e. consecutive backward calls, re-entrant backward calls),
@@ -1240,13 +1237,12 @@ void Engine::add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task) {
   thread_pool_shared_->work_.notify_one();
 }
 
-// Remembers current and default streams on all devices where a context has been created.
+// Remembers current streams on all devices where a context has been created.
 // Only called if Engine::execute detects at least one node runs on a cuda stream.
 void GraphTask::stash_current_streams() {
   const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
   auto num_gpus = guard.deviceCount();
   caller_current_streams_.resize(num_gpus);
-  caller_default_streams_.resize(num_gpus);
   if (num_gpus > 0) {
     for (c10::DeviceIndex idx = 0; idx < num_gpus;  idx++) {
 #ifdef __HIP_PLATFORM_HCC__
@@ -1258,10 +1254,8 @@ void GraphTask::stash_current_streams() {
       if (at::detail::getCUDAHooks().hasPrimaryContext(idx)) {
 #endif
         caller_current_streams_[idx] = guard.getStream({c10::DeviceType::CUDA, idx});
-        caller_default_streams_[idx] = guard.getDefaultStream({c10::DeviceType::CUDA, idx});
       } else {
         caller_current_streams_[idx] = c10::nullopt;
-        caller_default_streams_[idx] = c10::nullopt;
       }
     }
   }

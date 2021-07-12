@@ -254,12 +254,14 @@ _(aten, conv_tbc_backward) \
 _(aten, conv_transpose1d) \
 _(aten, convolution) \
 _(aten, copy_sparse_to_sparse) \
+_(aten, corrcoef) \
 _(aten, cos) \
 _(aten, cosh) \
 _(aten, cosine_embedding_loss) \
 _(aten, cosine_similarity) \
 _(aten, count_nonzero) \
 _(aten, cross) \
+_(aten, cov) \
 _(aten, std_mean) \
 _(aten, var_mean) \
 _(aten, ctc_loss) \
@@ -374,6 +376,7 @@ _(aten, hardtanh_forward) \
 _(aten, heaviside) \
 _(aten, hinge_embedding_loss) \
 _(aten, histc) \
+_(aten, histogram) \
 _(aten, hspmm) \
 _(aten, hsplit) \
 _(aten, hstack) \
@@ -442,7 +445,6 @@ _(aten, _log_softmax_backward_data) \
 _(aten, logcumsumexp) \
 _(aten, logdet) \
 _(aten, logspace) \
-_(aten, logsumexp) \
 _(aten, xlogy) \
 _(aten, special_xlog1py) \
 _(aten, lstm) \
