@@ -1131,10 +1131,10 @@ static constexpr OperatorGeneratorArgs opGenArgs[] = {
                                 }
                               }))};
 
-static std::vector<c10::optional<Operator>> createOperators(
+static std::vector<Operator> createOperators(
     const OperatorGeneratorArgs* args,
     int length) {
-  std::vector<c10::optional<Operator>> result;
+  std::vector<Operator> result;
   result.reserve(length);
   for (int ii = 0; ii < length; ++ii) {
     if (args[ii].schema_str) {
@@ -1147,8 +1147,6 @@ static std::vector<c10::optional<Operator>> createOperators(
         result.push_back(OperatorGenerator(
             args[ii].schema_str, args[ii].operation, args[ii].aliasAnalysis));
       }
-    } else {
-      result.push_back(c10::nullopt);
     }
   }
   return result;

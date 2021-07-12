@@ -1,11 +1,11 @@
+import unittest
+from typing import Dict, Optional
+
 import numpy as np
 import torch
-import unittest
-
 from torch import nn
 from torch.testing._internal.common_utils import TestCase, run_tests
 
-from typing import Dict, Optional
 
 class StaticModule:
     def __init__(self, scripted):
@@ -30,7 +30,9 @@ class StaticModule:
         )
 
 
-def linear_shim(input: torch.Tensor, weight: torch.Tensor, bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+def linear_shim(
+    input: torch.Tensor, weight: torch.Tensor, bias: Optional[torch.Tensor] = None
+) -> torch.Tensor:
     output = input.matmul(weight.t())
     if bias is not None:
         output += bias
@@ -107,7 +109,8 @@ def trivial_graph(a, b, c):
     s = torch.tensor([[3, 3], [3, 3]])
     return a + b * c + s
 
-def loop_graph(a, b, iters : int):
+
+def loop_graph(a, b, iters: int):
     c = a + b * 2
     for i in range(iters):
         c = c + b
@@ -115,13 +118,49 @@ def loop_graph(a, b, iters : int):
         c -= a
     return c
 
-def output_graph(a, b, c, iters : int):
+
+def output_graph(a, b, c, iters: int):
     s = torch.tensor([[3, 3], [3, 3]])
     k = a + b * c + s
-    d : Dict[int, torch.Tensor] = {}
+    d: Dict[int, torch.Tensor] = {}
     for i in range(iters):
         d[i] = k + i
     return d
+
+
+class SubModule(nn.Module):
+    def __init__(self):
+        super(SubModule, self).__init__()
+        self.a = 11
+        self.b = 2
+
+    def forward(self, x):
+        return self.a + self.b + x
+
+
+class SubModule2(nn.Module):
+    def __init__(self):
+        super(SubModule2, self).__init__()
+        self.a = 12
+        self.b = 2
+
+    def forward(self, x):
+        self.b = 30
+        return self.a + self.b + x
+
+
+class TestModule(nn.Module):
+    def __init__(self):
+        super(TestModule, self).__init__()
+        self.sub1 = SubModule()
+        self.sub2 = SubModule2()
+        self.a = 3
+        self.b = 4
+
+    def forward(self, x):
+        self.b = 20
+        return self.sub1(x) + self.a + self.b + self.sub2(x)
+
 
 class TestStaticModule(TestCase):
     def test_multihead_attention_layer(self):
@@ -220,6 +259,46 @@ class TestStaticModule(TestCase):
         o_test = tg_a(s)[0]
         torch.testing.assert_allclose(o_ref, o_test)
 
+    def test_attr(self):
+        """
+        TorchScript IR of TestModule() after freezing:
+        graph(%self : __torch__.test_static_runtime.___torch_mangle_0.TestModule,
+              %x.1 : Tensor):
+            %18 : int = prim::Constant[value=30]()
+            %30 : int = prim::Constant[value=13]()
+            %3 : int = prim::Constant[value=20]()
+            %2 : int = prim::Constant[value=1]()
+            %self.sub2.a : int = prim::Constant[value=12]()
+            %self.a : int = prim::Constant[value=3]()
+            = prim::SetAttr[name="b"](%self, %3)
+            %17 : Tensor = aten::add(%x.1, %30, %2)
+            %7 : Tensor = aten::add(%17, %self.a, %2)
+            %b.1 : int = prim::GetAttr[name="b"](%self)
+            %9 : Tensor = aten::add(%7, %b.1, %2)
+            %sub2 : __torch__.test_static_runtime.___torch_mangle_2.SubModule2 = prim::GetAttr[name="sub2"](%self)
+            = prim::SetAttr[name="b"](%sub2, %18)
+            %b : int = prim::GetAttr[name="b"](%sub2)
+            %22 : int = aten::add(%self.sub2.a, %b)
+            %23 : Tensor = aten::add(%x.1, %22, %2)
+            %12 : Tensor = aten::add(%9, %23, %2)
+            return (%12)
+        """
+        # test prim::SetAttr and prim::GetAttr impl in Static Runtime
+        m = TestModule()
+
+        m.eval()
+        input = torch.randn(2, 2)
+        output_s = m.forward(input)
+
+        ms = torch.jit.script(m)
+        sm = StaticModule(ms)
+        output_sm = sm(input)[0]
+        torch.testing.assert_allclose(output_s, output_sm)
+        sm.benchmark([input], {}, 2, 2)
+        sm.benchmark_individual_ops([input], {}, 2, 2)
+        sm.benchmark([], {"x": input}, 2, 2)
+        sm.benchmark_individual_ops([], {"x": input}, 2, 2)
+
     @unittest.skip("Temporarily disabled")
     def test_fusion_trivial_graph(self):
         s = torch.full((2, 2), 2)
@@ -279,7 +358,6 @@ class TestStaticModule(TestCase):
         o_test = og(a, b, b, c)
         for i in o_ref.keys():
             torch.testing.assert_allclose(o_ref[i], o_test[i])
-
 
 
 if __name__ == "__main__":
