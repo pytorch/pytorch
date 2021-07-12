@@ -3,7 +3,7 @@ from typing import Iterable, Union
 
 from packaging.version import InvalidVersion, Version # type: ignore[import]
 
-from ._version import __version__ as internal_version
+from .version import __version__ as internal_version
 
 
 @total_ordering

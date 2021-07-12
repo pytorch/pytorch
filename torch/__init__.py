@@ -27,8 +27,6 @@ if sys.executable == 'torch_deploy':
     __version__ = "torch-deploy-1.8"
 else:
     from .torch_version import __version__ as __version__
-    # for backwards compat of people using torch.version directly
-    from . import _version as version
 
 from ._six import string_classes as _string_classes
 
