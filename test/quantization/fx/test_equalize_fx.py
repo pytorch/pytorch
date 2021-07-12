@@ -71,23 +71,33 @@ class TestEqualizeFx(QuantizationTestCase):
 
         return (mins, maxs)
 
-    @given(ndim=st.sampled_from((2, 4)),
+    @given(ndim=st.sampled_from((2, 3, 4, 5)),
            input_qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            input_qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)),
            weight_qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            weight_qscheme=st.sampled_from((torch.per_channel_affine, torch.per_channel_symmetric,
                                            torch.per_channel_affine_float_qparams)))
     def test_input_weight_eq_observer(self, ndim, input_qdtype, input_qscheme, weight_qdtype, weight_qscheme):
+        sizes = []
+        for _ in range((ndim - 1) * 2):
+            sizes.append(np.random.randint(2, 10))
+
+        channel = np.random.randint(1, 10)
         if ndim == 2:
-            width = np.random.randint(1, 10)
-            x = (np.random.random(size=(np.random.randint(2, 10), width)) * 10).round(decimals=2).astype(np.float32)
-            w = (np.random.random(size=(np.random.randint(2, 10), width)) * 10).round(decimals=2).astype(np.float32)
+            x = np.random.random(size=(sizes[0], channel))
+            w = np.random.random(size=(sizes[1], channel))
+        elif ndim == 3:
+            x = np.random.random(size=(sizes[0], channel, sizes[1]))
+            w = np.random.random(size=(sizes[2], channel, sizes[3]))
         elif ndim == 4:
-            channel = np.random.randint(1, 10)
-            x = (np.random.random(size=(np.random.randint(2, 10), channel, np.random.randint(2, 10),
-                                        np.random.randint(2, 10))) * 10).round(decimals=2).astype(np.float32)
-            w = (np.random.random(size=(np.random.randint(2, 10), channel, np.random.randint(2, 10),
-                                        np.random.randint(2, 10))) * 10).round(decimals=2).astype(np.float32)
+            x = np.random.random(size=(sizes[0], channel, sizes[1], sizes[2]))
+            w = np.random.random(size=(sizes[3], channel, sizes[4], sizes[5]))
+        elif ndim == 5:
+            x = np.random.random(size=(sizes[0], channel, sizes[1], sizes[2], sizes[3]))
+            w = np.random.random(size=(sizes[4], channel, sizes[5], sizes[6], sizes[7]))
+
+        x = (x * 10).round(decimals=2).astype(np.float32)
+        w = (w * 10).round(decimals=2).astype(np.float32)
 
         input_eq_obs = _InputEqualizationObserver(dtype=input_qdtype, qscheme=input_qscheme)
         weight_eq_obs = _WeightEqualizationObserver(dtype=weight_qdtype, qscheme=weight_qscheme)
