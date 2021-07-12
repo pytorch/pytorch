@@ -20,6 +20,7 @@ env:
   SCCACHE_BUCKET: "ossci-compiler-cache"
   VC_PRODUCT: "BuildTools"
   VC_VERSION: ""
+  VS_VERSION: "16.8.6"
   VC_YEAR: "2019"
   TORCH_CUDA_ARCH_LIST: "7.0"
   USE_CUDA: 1
@@ -56,6 +57,8 @@ jobs:
           .circleci/scripts/windows_cudnn_install.sh
       - name: Build
         shell: bash
+        env:
+          PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
         run: |
           .jenkins/pytorch/win-build.sh
       # Upload to github so that people can click and download artifacts
@@ -68,7 +71,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           name: ${{ env.BUILD_ENVIRONMENT }}
-          path: C:\w\build-results
+          path: C:\${{ github.run_id }}\build-results
       - name: Upload artifacts to s3
         if: always()
         uses: seemethere/upload-artifact-s3@9d7ceb0ab39c2c88d93ef7792b27425b27d59162
@@ -76,7 +79,13 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           name: ${{ env.BUILD_ENVIRONMENT }}
-          path: C:\w\build-results
+          path: C:\${{ github.run_id }}\build-results
+      - name: Cleanup build-results
+        shell: bash
+        env:
+          PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
+        run: |
+          rm -rf "${PYTORCH_FINAL_PACKAGE_DIR}"
 
   generate-test-matrix:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -230,5 +239,4 @@ jobs:
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
           CIRCLE_WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         run: |
-          export PYTHONPATH=$PWD
-          python tools/stats/print_test_stats.py --upload-to-s3 --compare-with-s3 test
+          python -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test

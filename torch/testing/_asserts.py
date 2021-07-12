@@ -12,24 +12,14 @@ from ._core import _unravel_index
 __all__ = ["assert_close"]
 
 
-# The UsageError should be raised in case the test function is not used correctly. With this the user is able to
-# differentiate between a test failure (there is a bug in the tested code) and a test error (there is a bug in the
-# test).
-class UsageError(Exception):
-    pass
-
-
-_TestingError = Union[AssertionError, UsageError]
-
-
 class _TestingErrorMeta(NamedTuple):
-    type: Type[_TestingError]
+    type: Type[Exception]
     msg: str
 
     def amend_msg(self, prefix: str = "", postfix: str = "") -> "_TestingErrorMeta":
         return self._replace(msg=f"{prefix}{self.msg}{postfix}")
 
-    def to_error(self) -> _TestingError:
+    def to_error(self) -> Exception:
         return self.type(self.msg)
 
 
@@ -203,9 +193,8 @@ def _check_supported_tensor(input: Tensor) -> Optional[_TestingErrorMeta]:
     Returns:
         (Optional[_TestingErrorMeta]): If check did not pass.
     """
-
     if input.layout not in {torch.strided, torch.sparse_coo, torch.sparse_csr}:  # type: ignore[attr-defined]
-        return _TestingErrorMeta(UsageError, f"Unsupported tensor layout {input.layout}")
+        return _TestingErrorMeta(ValueError, f"Unsupported tensor layout {input.layout}")
 
     return None
 
@@ -546,10 +535,10 @@ def _check_pair_close(
         return _check_tensors_close(pair.actual, pair.expected, **kwargs)
 
 
-def _to_tensor(array_or_scalar_like: Any) -> Tuple[Optional[_TestingErrorMeta], Optional[Tensor]]:
-    """Converts a scalar-or-array-like to a :class:`~torch.Tensor`.
+def _to_tensor(tensor_or_scalar_like: Any) -> Tuple[Optional[_TestingErrorMeta], Optional[Tensor]]:
+    """Converts a tensor-or-scalar-like to a :class:`~torch.Tensor`.
     Args:
-        array_or_scalar_like (Any): Scalar-or-array-like.
+        tensor_or_scalar_like (Any): Tensor-or-scalar-like.
     Returns:
 
         (Tuple[Optional[_TestingErrorMeta], Optional[Tensor]]): The two elements are orthogonal, i.e. if the first is
@@ -559,14 +548,14 @@ def _to_tensor(array_or_scalar_like: Any) -> Tuple[Optional[_TestingErrorMeta], 
     """
     error_meta: Optional[_TestingErrorMeta]
 
-    if isinstance(array_or_scalar_like, Tensor):
-        tensor = array_or_scalar_like
+    if isinstance(tensor_or_scalar_like, Tensor):
+        tensor = tensor_or_scalar_like
     else:
         try:
-            tensor = torch.as_tensor(array_or_scalar_like)
+            tensor = torch.as_tensor(tensor_or_scalar_like)
         except Exception:
             error_meta = _TestingErrorMeta(
-                UsageError, f"No tensor can be constructed from type {type(array_or_scalar_like)}."
+                ValueError, f"No tensor can be constructed from type {type(tensor_or_scalar_like)}."
             )
             return error_meta, None
 
@@ -577,12 +566,34 @@ def _to_tensor(array_or_scalar_like: Any) -> Tuple[Optional[_TestingErrorMeta], 
     return None, tensor
 
 
-def _to_tensor_pair(actual: Any, expected: Any) -> Tuple[Optional[_TestingErrorMeta], Optional[_TensorPair]]:
-    """Converts a scalar-or-array-like pair to a :class:`_TensorPair`.
+def _check_types(actual: Any, expected: Any, *, allow_subclasses: bool) -> Optional[_TestingErrorMeta]:
+    # We exclude numbers here, since numbers of different type, e.g. int vs. float, should be treated the same as
+    # tensors with different dtypes. Without user input, passing numbers of different types will still fail, but this
+    # can be disabled by setting `check_dtype=False`.
+    if isinstance(actual, numbers.Number) and isinstance(expected, numbers.Number):
+        return None
+
+    msg_fmtstr = f"Except for Python scalars, {{}}, but got {type(actual)} and {type(expected)} instead."
+    directly_related = isinstance(actual, type(expected)) or isinstance(expected, type(actual))
+    if not directly_related:
+        return _TestingErrorMeta(AssertionError, msg_fmtstr.format("input types need to be directly related"))
+
+    if allow_subclasses or type(actual) is type(expected):
+        return None
+
+    return _TestingErrorMeta(AssertionError, msg_fmtstr.format("type equality is required if allow_subclasses=False"))
+
+
+def _to_tensor_pair(
+    actual: Any, expected: Any, *, allow_subclasses: bool
+) -> Tuple[Optional[_TestingErrorMeta], Optional[_TensorPair]]:
+    """Converts a tensor-or-scalar-like pair to a :class:`_TensorPair`.
 
     Args:
-        actual (Any): Actual array-or-scalar-like.
-        expected (Any): Expected array-or-scalar-like.
+        actual (Any): Actual tensor-or-scalar-like.
+        expected (Any): Expected tensor-or-scalar-like.
+        allow_subclasses (bool): If ``True`` (default) and except for Python scalars, inputs of directly related types
+            are allowed. Otherwise type equality is required.
 
     Returns:
         (Optional[_TestingErrorMeta], Optional[_TensorPair]): The two elements are orthogonal, i.e. if the first is
@@ -590,18 +601,8 @@ def _to_tensor_pair(actual: Any, expected: Any) -> Tuple[Optional[_TestingErrorM
             :attr:`expected` are not scalars and do not have the same type. Additionally, returns any error meta from
             :func:`_to_tensor`.
     """
-    error_meta: Optional[_TestingErrorMeta]
-
-    # We exclude numbers here, since numbers of different type, e.g. int vs. float, should be treated the same as
-    # tensors with different dtypes. Without user input, passing numbers of different types will still fail, but this
-    # can be disabled by setting `check_dtype=False`.
-    if type(actual) is not type(expected) and not (
-        isinstance(actual, numbers.Number) and isinstance(expected, numbers.Number)
-    ):
-        error_meta = _TestingErrorMeta(
-            AssertionError,
-            f"Except for scalars, type equality is required, but got {type(actual)} and {type(expected)} instead.",
-        )
+    error_meta = _check_types(actual, expected, allow_subclasses=allow_subclasses)
+    if error_meta:
         return error_meta, None
 
     error_meta, actual = _to_tensor(actual)
@@ -616,9 +617,9 @@ def _to_tensor_pair(actual: Any, expected: Any) -> Tuple[Optional[_TestingErrorM
 
 
 def _parse_inputs(
-    actual: Any, expected: Any
+    actual: Any, expected: Any, *, allow_subclasses: bool
 ) -> Tuple[Optional[_TestingErrorMeta], Optional[Union[_TensorPair, List, Dict]]]:
-    """Parses the positional inputs by constructing :class:`_TensorPair`'s from corresponding array-or-scalar-likes.
+    """Parses the positional inputs by constructing :class:`_TensorPair`'s from corresponding tensor-or-scalar-likes.
 
 
     :class:`~collections.abc.Sequence`'s or :class:`~collections.abc.Mapping`'s are parsed elementwise. Parsing is
@@ -628,6 +629,8 @@ def _parse_inputs(
     Args:
         actual (Any): Actual input.
         expected (Any): Expected input.
+        allow_subclasses (bool): If ``True`` (default) and except for Python scalars, inputs of directly related types
+            are allowed. Otherwise type equality is required.
 
     Returns:
         (Tuple[Optional[_TestingErrorMeta], Optional[Union[_TensorPair, List, Dict]]]): The two elements are
@@ -656,7 +659,7 @@ def _parse_inputs(
 
         pair_list = []
         for idx in range(actual_len):
-            error_meta, pair = _parse_inputs(actual[idx], expected[idx])
+            error_meta, pair = _parse_inputs(actual[idx], expected[idx], allow_subclasses=allow_subclasses)
             if error_meta:
                 error_meta = error_meta.amend_msg(postfix=f"\n\n{_SEQUENCE_MSG_FMTSTR.format(idx)}")
                 return error_meta, None
@@ -681,7 +684,7 @@ def _parse_inputs(
 
         pair_dict = {}
         for key in sorted(actual_keys):
-            error_meta, pair = _parse_inputs(actual[key], expected[key])
+            error_meta, pair = _parse_inputs(actual[key], expected[key], allow_subclasses=allow_subclasses)
             if error_meta:
                 error_meta = error_meta.amend_msg(postfix=f"\n\n{_MAPPING_MSG_FMTSTR.format(key)}")
                 return error_meta, None
@@ -691,13 +694,14 @@ def _parse_inputs(
             return None, pair_dict
 
     else:
-        return _to_tensor_pair(actual, expected)
+        return _to_tensor_pair(actual, expected, allow_subclasses=allow_subclasses)
 
 
 def assert_close(
     actual: Any,
     expected: Any,
     *,
+    allow_subclasses: bool = True,
     rtol: Optional[float] = None,
     atol: Optional[float] = None,
     equal_nan: Union[bool, str] = False,
@@ -734,15 +738,23 @@ def assert_close(
     :meth:`~torch.Tensor.qscheme` and the result of :meth:`~torch.Tensor.dequantize` is close according to the
     definition above.
 
-    :attr:`actual` and :attr:`expected` can be :class:`~torch.Tensor`'s or any array-or-scalar-like of the same type,
-    from which :class:`torch.Tensor`'s can be constructed with :func:`torch.as_tensor`. In addition, :attr:`actual` and
-    :attr:`expected` can be :class:`~collections.abc.Sequence`'s or :class:`~collections.abc.Mapping`'s in which case
-    they are considered close if their structure matches and all their elements are considered close according to the
-    above definition.
+    :attr:`actual` and :attr:`expected` can be :class:`~torch.Tensor`'s or any tensor-or-scalar-likes from which
+    :class:`torch.Tensor`'s can be constructed with :func:`torch.as_tensor`. Except for Python scalars the input types
+    have to be directly related. In addition, :attr:`actual` and :attr:`expected` can be
+    :class:`~collections.abc.Sequence`'s or :class:`~collections.abc.Mapping`'s in which case they are considered close
+    if their structure matches and all their elements are considered close according to the above definition.
+
+    .. note::
+
+        Python scalars are an exception to the type relation requirement, because their :func:`type`, i.e.
+        :class:`int`, :class:`float`, and :class:`complex`, is equivalent to the ``dtype`` of a tensor-like. Thus,
+        Python scalars of different types can be checked, but require :attr:`check_dtype` to be set to ``False``.
 
     Args:
         actual (Any): Actual input.
         expected (Any): Expected input.
+        allow_subclasses (bool): If ``True`` (default) and except for Python scalars, inputs of directly related types
+            are allowed. Otherwise type equality is required.
         rtol (Optional[float]): Relative tolerance. If specified :attr:`atol` must also be specified. If omitted,
             default values based on the :attr:`~torch.Tensor.dtype` are selected with the below table.
         atol (Optional[float]): Absolute tolerance. If specified :attr:`rtol` must also be specified. If omitted,
@@ -764,21 +776,24 @@ def assert_close(
             the mismatching tensors and a namespace of diagnostics about the mismatches. See below for details.
 
     Raises:
-        UsageError: If a :class:`torch.Tensor` can't be constructed from an array-or-scalar-like.
-        UsageError: If only :attr:`rtol` or :attr:`atol` is specified.
-        AssertionError: If corresponding array-likes have different types.
+        ValueError: If no :class:`torch.Tensor` can be constructed from an input.
+        ValueError: If only :attr:`rtol` or :attr:`atol` is specified.
+        AssertionError: If corresponding inputs are not Python scalars and are not directly related.
+        AssertionError: If :attr:`allow_subclasses` is ``False``, but corresponding inputs are not Python scalars and
+            have different types.
         AssertionError: If the inputs are :class:`~collections.abc.Sequence`'s, but their length does not match.
         AssertionError: If the inputs are :class:`~collections.abc.Mapping`'s, but their set of keys do not match.
         AssertionError: If corresponding tensors do not have the same :attr:`~torch.Tensor.shape`.
         AssertionError: If corresponding tensors do not have the same :attr:`~torch.Tensor.layout`.
         AssertionError: If corresponding tensors are quantized, but have different :meth:`~torch.Tensor.qscheme`'s.
-        AssertionError: If :attr:`check_device`, but corresponding tensors are not on the same
+        AssertionError: If :attr:`check_device` is ``True``, but corresponding tensors are not on the same
             :attr:`~torch.Tensor.device`.
-        AssertionError: If :attr:`check_dtype`, but corresponding tensors do not have the same ``dtype``.
-        AssertionError: If :attr:`check_stride`, but corresponding strided tensors do not have the same stride.
-        AssertionError: If :attr:`check_is_coalesced`, but corresponding sparse COO tensors are not both either
-            coalesced or uncoalesced.
-        AssertionError: If the values of corresponding tensors are not close.
+        AssertionError: If :attr:`check_dtype` is ``True``, but corresponding tensors do not have the same ``dtype``.
+        AssertionError: If :attr:`check_stride` is ``True``, but corresponding strided tensors do not have the same
+            stride.
+        AssertionError: If :attr:`check_is_coalesced`  is ``True``, but corresponding sparse COO tensors are not both
+            either coalesced or uncoalesced.
+        AssertionError: If the values of corresponding tensors are not close according to the definition above.
 
     The following table displays the default ``rtol`` and ``atol`` for different ``dtype``'s. In case of mismatching
     ``dtype``'s, the maximum of both tolerances is used.
@@ -870,16 +885,27 @@ def assert_close(
         >>> actual = {"baz": baz, "bar": bar, "foo": foo}
         >>> torch.testing.assert_close(actual, expected)
 
-        >>> # Different input types are never considered close.
         >>> expected = torch.tensor([1.0, 2.0, 3.0])
-        >>> actual = expected.numpy()
-        >>> torch.testing.assert_close(actual, expected)
+        >>> actual = expected.clone()
+        >>> # By default, directly related instances can be compared
+        >>> torch.testing.assert_close(torch.nn.Parameter(actual), expected)
+        >>> # This check can be made more strict with allow_subclasses=False
+        >>> torch.testing.assert_close(
+        ...     torch.nn.Parameter(actual), expected, allow_subclasses=False
+        ... )
         Traceback (most recent call last):
         ...
-        AssertionError: Except for scalars, type equality is required, but got
-        <class 'numpy.ndarray'> and <class 'torch.Tensor'> instead.
-        >>> # Scalars of different types are an exception and can be compared with
-        >>> # check_dtype=False.
+        AssertionError: Except for Python scalars, type equality is required if
+        allow_subclasses=False, but got <class 'torch.nn.parameter.Parameter'> and
+        <class 'torch.Tensor'> instead.
+        >>> # If the inputs are not directly related, they are never considered close
+        >>> torch.testing.assert_close(actual.numpy(), expected)
+        Traceback (most recent call last):
+        ...
+        AssertionError: Except for Python scalars, input types need to be directly
+        related, but got <class 'numpy.ndarray'> and <class 'torch.Tensor'> instead.
+        >>> # Exceptions to these rules are Python scalars. They can be checked regardless of
+        >>> # their type if check_dtype=False.
         >>> torch.testing.assert_close(1.0, 1, check_dtype=False)
 
         >>> # NaN != NaN by default.
@@ -933,12 +959,12 @@ def assert_close(
     if (rtol is None) ^ (atol is None):
         # We require both tolerance to be omitted or specified, because specifying only one might lead to surprising
         # results. Imagine setting atol=0.0 and the tensors still match because rtol>0.0.
-        raise UsageError(
+        raise ValueError(
             f"Both 'rtol' and 'atol' must be either specified or omitted, "
             f"but got no {'rtol' if rtol is None else 'atol'}.",
         )
 
-    error_meta, pair = _parse_inputs(actual, expected)
+    error_meta, pair = _parse_inputs(actual, expected, allow_subclasses=allow_subclasses)
     if error_meta:
         raise error_meta.to_error()
     else:
