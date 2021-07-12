@@ -7670,7 +7670,7 @@ class TestONNXRuntime(unittest.TestCase):
                 x = self.bn2(x)
                 x = self.cv2(x)
                 x = self.bn3(x)
-                return x, self.bn3.running_mean, self.bn3.running_var
+                return x
 
         x = torch.randn(10, 3, 20, 20) * 2
         model_export = MyModule()
@@ -7726,8 +7726,8 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(10, 3, 128, 128)
         model_export = MyModule()
-        model_export.eval()
         self.run_test(model_export, (x,), training=torch.onnx.TrainingMode.EVAL, rtol=1e-3, atol=1e-5)
+        model_export.eval()
         self.run_test(model_export, (x,), training=torch.onnx.TrainingMode.PRESERVE, rtol=1e-3, atol=1e-5)
 
     @skipIfUnsupportedMinOpsetVersion(12)
@@ -8074,6 +8074,9 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(TransformModule(), (input,),
                       input_names=["input1"], dynamic_axes={"input1": [0, 1, 2]},
                       test_with_inputs=[(input,), (input_test,)])
+
+
+
 
     @skipIfUnsupportedMinOpsetVersion(11)
     @disableScriptTest()

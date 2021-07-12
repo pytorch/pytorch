@@ -47,12 +47,13 @@ static void fuseConvBatchNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
       fuseConvBatchNorm(child_block, valsToParamsMap);
     }
     if (it->kind() == onnx::Conv) {
-      auto origconvNode = *it;
-      auto bnNode = origconvNode->outputs().at(0)->uses()[0].user;
+      auto oldConv = *it;
+      auto bnNode = oldConv->outputs().at(0)->uses()[0].user;
       if (bnNode->kind() != onnx::BatchNormalization) {
         continue;
       }
-      if (bnNode->outputs().size() > 1) {  // BN layer is not in eval mode
+
+      if (bnNode->outputs().size() > 1) { // BN layer is not in eval mode
         continue;
       }
 
