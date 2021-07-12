@@ -4,7 +4,7 @@ import logging
 
 import torch
 from torch import nn
-from torch.ao.sparsity import BaseSparsifier, WeightNormSparsifier
+from torch.ao.sparsity import BaseSparsifier, WeightNormSparsifier, FakeSparsity
 from torch.nn.utils.parametrize import is_parametrized
 
 from torch.testing._internal.common_utils import TestCase
@@ -152,6 +152,36 @@ class TestWeightNormSparsifier(TestCase):
         model = Model()
         sparsifier = WeightNormSparsifier(sparsity_level=0.5)
         sparsifier.prepare(model, config=[model.linear])
+        for g in sparsifier.module_groups:
+            # Before step
+            module = g['module']
+            assert (1.0 - module.parametrizations['weight'][0].mask.mean()) == 0  # checking sparsity level is 0
         sparsifier.enable_mask_update = True
         sparsifier.step()
         self.assertAlmostEqual(model.linear.parametrizations['weight'][0].mask.mean().item(), 0.5, places=2)
+        for g in sparsifier.module_groups:
+            # After step
+            module = g['module']
+            assert (1.0 - module.parametrizations['weight'][0].mask.mean()) > 0  # checking sparsity level has increased
+
+    def test_prepare(self):
+        model = Model()
+        sparsifier = WeightNormSparsifier()
+        sparsifier.prepare(model, config=None)
+        for g in sparsifier.module_groups:
+            module = g['module']
+            # Check mask exists
+            assert hasattr(module.parametrizations['weight'][0], 'mask')
+            # Check parametrization exists and is correct
+            assert is_parametrized(module, 'weight')
+            assert type(module.parametrizations.weight[0]) == FakeSparsity
+
+    def test_mask_squash(self):
+        model = Model()
+        sparsifier = WeightNormSparsifier()
+        sparsifier.prepare(model, config=None)
+        sparsifier.squash_mask()
+        for g in sparsifier.module_groups:
+            module = g['module']
+            assert not is_parametrized(module, 'weight')
+            assert not hasattr(module, 'mask')
