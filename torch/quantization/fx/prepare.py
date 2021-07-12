@@ -24,6 +24,7 @@ from .quantization_patterns import (
     QuantizeHandler,
     CatQuantizeHandler,
     CopyNodeQuantizeHandler,
+    BinaryOpQuantizeHandler,
     CustomModuleQuantizeHandler,
     StandaloneModuleQuantizeHandler,
 )
@@ -354,7 +355,7 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
         node_dtype = node_name_to_target_dtype[node.name]
         dtype_changes_and_second_dtype_not_float = (
             # if the dtypes are different, we need an observer
-            (arg_dtype != node_dtype) and
+            # (arg_dtype != node_dtype) and
             # except if the second dtype is float, a dequant will be inserted
             # without an observer in convert
             # TODO(future PR): change this so a placeholder is inserted for
@@ -364,6 +365,9 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
             (arg_dtype not in (torch.bool, None)) and
             (is_activation and activation_is_statically_quantized(qconfig))
         )
+        print("arg dtype node dtype:", arg_dtype, node_dtype)
+        print("node:", node)
+        print("dtype change:", dtype_changes_and_second_dtype_not_float)
 
         needs_obs = (
             weight_needs_obs or
@@ -740,8 +744,18 @@ def adjust_observers_for_cat(
     """
     # find the observer module to use
     first_arg = node.args[0]
-    assert isinstance(first_arg, (list, tuple))
-    first_arg_arg = first_arg[0]
+    first_arg_arg = first_arg
+    for i in range(len(node.args)):
+        if isinstance(node.args[i], Node):
+            first_arg_arg = node.args[i]
+            break
+
+    # did not find a Node arg
+    if not isinstance(first_arg_arg, Node):
+        return
+
+    if isinstance(first_arg, (list, tuple)):
+        first_arg_arg = first_arg[0]
 
     # if we have a graph such as
     #   observed_node -> non_observed_node -> cat
@@ -758,19 +772,20 @@ def adjust_observers_for_cat(
     assert isinstance(target_to_use, str)
     obs_mod_to_use = modules[target_to_use]
 
-    # set all other input observer nodes to use that module
-    for input_idx, input_arg in enumerate(first_arg):
-        if input_idx == 0:
-            continue
-        iteration_guard = 0
-        while not is_activation_post_process_node(input_arg, modules):
-            input_arg = input_arg.args[0]
-            iteration_guard += 1
-            if iteration_guard > 10000:
-                raise AssertionError('Unable to find observer of previous node')
+    if isinstance(first_arg, (list, tuple)):
+        # set all other input observer nodes to use that module
+        for input_idx, input_arg in enumerate(first_arg):
+            if input_idx == 0:
+                continue
+            iteration_guard = 0
+            while not is_activation_post_process_node(input_arg, modules):
+                input_arg = input_arg.args[0]
+                iteration_guard += 1
+                if iteration_guard > 10000:
+                    raise AssertionError('Unable to find observer of previous node')
 
-        parent_name, name = _parent_name(input_arg.target)
-        setattr(modules[parent_name], name, obs_mod_to_use)
+            parent_name, name = _parent_name(input_arg.target)
+            setattr(modules[parent_name], name, obs_mod_to_use)
 
     # set the output observer node to use that module
     for output_obs_node, _ in node.users.items():
@@ -856,6 +871,7 @@ def insert_observers_for_model(
             node, qconfig, inputs_seen_counter, outputs_seen_counter,
             input_quantized_idxs, output_quantized_idxs, qhandler,
             modules, cache_for_no_tensor_check)
+    print("node name to target_dtype:", node_name_to_target_dtype)
 
     # Second, for nodes with known input dtypes, propagate them throughout the
     # graph. For example, if there is a call such as
@@ -914,11 +930,13 @@ def insert_observers_for_model(
                         node_name_to_target_dtype)
 
                     is_last_node_of_pattern = root_node is node
+                    print("root_node:", root_node, is_last_node_of_pattern)
+                    print("handler:", qhandler)
                     is_like_copy_node = \
                         (qhandler is not None and (
-                            isinstance(qhandler, CopyNodeQuantizeHandler)
+                            isinstance(qhandler, CopyNodeQuantizeHandler) or isinstance(qhandler, BinaryOpQuantizeHandler) and qhandler.num_tensor_args == 1
                         ))
-                    if is_last_node_of_pattern and (not is_like_copy_node):
+                    if is_last_node_of_pattern:
                         # this returns the new observer node if it was needed
                         maybe_output_obs_node = maybe_insert_output_observer_for_node(
                             node, model, modules, graph, matches,
@@ -948,7 +966,7 @@ def insert_observers_for_model(
                             # for quantized cat nodes only, we modify the graph
                             # to make all inputs and outputs use the first input's
                             # observer
-                            if isinstance(qhandler, CatQuantizeHandler):
+                            if isinstance(qhandler, CatQuantizeHandler) or is_like_copy_node:
                                 adjust_observers_for_cat(node, model, modules)
 
                             if isinstance(qhandler, CustomModuleQuantizeHandler):

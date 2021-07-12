@@ -3052,17 +3052,25 @@ class TestQuantizeFxOps(QuantizationTestCase):
         data = (torch.randn(1, 1, 1, 1, dtype=torch.float),
                 torch.randn(1, 1, 1, 1, dtype=torch.float))
         quantized_node = ns.call_function(quantized_op)
-        options = itertools.product([True, False], [True, False])
+        options = itertools.product([True, False], [True, False], [True, False])
         quant_type = QuantType.STATIC
         # testing for default int8 static quant
-        for is_inplace, is_scalar in options:
+        for is_inplace, is_scalar, is_reference in options:
+            print(f"{is_inplace}, {is_scalar}, {is_reference}")
+            node_list = None
+            if is_reference:
+                node_list = [
+                    ns.call_method("dequantize"),
+                    ns.call_function(binary_op),
+                    ns.call_function(torch.quantize_per_tensor)
+                ]
+                quantized_node = None
             self.checkGraphModeFxOp(
-                BinaryOp(binary_op, ibinary_op, is_inplace, is_scalar), data, quant_type, quantized_node)
+                BinaryOp(binary_op, ibinary_op, is_inplace, is_scalar), data, quant_type, quantized_node, expected_node_list=node_list, print_debug_info=True, is_reference=is_reference)
             # This tests the binary op should be quantized even when it is not feed with a
             # quantized input
             self.checkGraphModeFxOp(
-                BinaryOpNonQuantizedInput(binary_op, ibinary_op, is_inplace, is_scalar), data, quant_type, quantized_node)
-
+                BinaryOpNonQuantizedInput(binary_op, ibinary_op, is_inplace, is_scalar), data, quant_type, quantized_node, expected_node_list=node_list, is_reference=is_reference)
 
     def _test_binary_op_float16_impl(self, binary_op, ibinary_op):
         data = (torch.randn(1, 1, 1, 1, dtype=torch.float),
@@ -4477,7 +4485,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
         m = convert_fx(m)
         m(torch.rand(1, 2, 3, 4), torch.rand(3, 4).bool())
         return m
-
 
 class TestQuantizeFxModels(QuantizationTestCase):
     def _test_model_impl(
