@@ -439,7 +439,6 @@ _(aten, log_normal) \
 _(aten, log_sigmoid) \
 _(aten, log_sigmoid_backward) \
 _(aten, log_sigmoid_forward) \
-_(aten, log_softmax) \
 _(aten, _log_softmax) \
 _(aten, _log_softmax_backward_data) \
 _(aten, logcumsumexp) \
