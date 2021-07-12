@@ -566,11 +566,12 @@ def export_to_pretty_string(model, args, f, export_params=True, verbose=False, t
                             google_printer=False, opset_version=None, _retain_param_name=None,
                             keep_initializers_as_inputs=None, custom_opsets=None, add_node_names=True,
                             do_constant_folding=True, dynamic_axes=None):
-    if f is not None:
-        warnings.warn("'f' is deprecated and ignored. It will be removed in the next PyTorch release.")
-    if _retain_param_name is not None:
-        warnings.warn("'_retain_param_name' is deprecated and ignored. "
-                      "It will be removed in the next PyTorch release.")
+    if aten:
+        assert operator_export_type is None
+        assert aten
+        operator_export_type = OperatorExportTypes.ONNX_ATEN
+    elif operator_export_type is None:
+        operator_export_type = OperatorExportTypes.ONNX
     return _export_to_pretty_string(model, args, f, export_params, verbose, training,
                                     input_names, output_names, operator_export_type,
                                     export_type, example_outputs, google_printer,
@@ -606,11 +607,9 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
         args = _decide_input_format(model, args)
         graph, params_dict, torch_out = _model_to_graph(model, args, verbose, input_names,
                                                         output_names, operator_export_type,
-                                                        example_outputs, val_do_constant_folding,
-                                                        fixed_batch_size=fixed_batch_size,
-                                                        training=training, dynamic_axes=dynamic_axes,
-                                                        export_params=export_params,
-                                                        keep_initializers_as_inputs=val_keep_init_as_ip)
+                                                        example_outputs, _retain_param_name,
+                                                        val_do_constant_folding, fixed_batch_size=fixed_batch_size,
+                                                        training=training, dynamic_axes=dynamic_axes)
 
         return graph._pretty_print_onnx(params_dict, opset_version, False,
                                         operator_export_type, google_printer,

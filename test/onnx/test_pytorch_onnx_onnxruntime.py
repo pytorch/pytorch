@@ -40,16 +40,6 @@ from torch.onnx import register_custom_op_symbolic, unregister_custom_op_symboli
 from torch.onnx.utils import ONNXCheckerError
 
 
-def flatten_tuples(elem):
-    tup = []
-    for t in elem:
-        if isinstance(t, (tuple)):
-            tup += flatten_tuples(t)
-        else:
-            tup += [t]
-    return tup
-
-
 def to_numpy(elem):
     if isinstance(elem, torch.Tensor):
         if elem.requires_grad:
@@ -9795,19 +9785,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.assertTrue(f.getvalue(), "ONNX graph was not exported.")
         loaded_model = onnx.load_from_string(f.getvalue())
 
-
-    def test_tuple_output_from_if_with_raised_exception(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-
-            def forward(self, t: Tensor) -> Tuple[Tensor, Tensor]:
-                if float(t) < 0:
-                    raise Exception("Negative input")
-                else:
-                    return torch.zeros(5), torch.zeros(5)
-        x = torch.zeros(1)
-        self.run_test(torch.jit.script(M()), (x,))
 
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout, script_test_min_opset_version,

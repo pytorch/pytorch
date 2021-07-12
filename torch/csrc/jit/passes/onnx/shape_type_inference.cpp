@@ -197,18 +197,6 @@ void UpdateTorchValueByOnnxValueInfo(
       MergeInferredTypeAndSetMap(v, v->type(), torch_list_type);
     }
   }
-}
-
-bool IsValidONNXControlflowNode(const Node* n) {
-  // Skip when block size is zero. This is when the node is being created,
-  // and doesn't have subblocks attached yet. Run shape inference for these
-  // nodes later, when the subgraph has already completed shape inferencing.
-  auto node_kind = n->kind();
-  if (node_kind == ::c10::onnx::Loop || node_kind == ::c10::onnx::If) {
-    if (n->blocks().size() == 0) {
-      return false;
-    }
-  }
 
   return true;
 }
@@ -1514,17 +1502,20 @@ void ONNXShapeTypeInference(
   SetGraphInputTypeReliable(n->owningGraph());
   GRAPH_UPDATE(
       "Running ONNX shape inference for node: ", n->kind().toDisplayString());
-  if (IsValidONNXNode(n)) {
-    // Create a Graph containing only the single node n.
-    // This graph is later converted to ONNX to run shape inference.
-    auto n_graph = std::make_shared<Graph>();
-    auto clone_node = CloneNodeToGraph(n, n_graph, params_dict, opset_version);
-    n_graph->insertNode(clone_node);
+  if (!IsSupportedNode(n)) {
+    UpdateReliable(n);
+    return;
+  }
+  // Create a Graph containing only the single node n.
+  // This graph is later converted to ONNX to run shape inference.
+  auto n_graph = std::make_shared<Graph>();
+  auto clone_node = CloneNodeToGraph(n, n_graph, params_dict, opset_version);
+  n_graph->insertNode(clone_node);
 
-    // Register all node outputs as graph outputs.
-    for (auto output : clone_node->outputs()) {
-      n_graph->registerOutput(output);
-    }
+  // Register all node outputs as graph outputs.
+  for (auto output : clone_node->outputs()) {
+    n_graph->registerOutput(output);
+  }
 
     // Use scalar_type_analysis without low precision cast
     ScalarTypeAnalysisForONNX(n_graph, false, opset_version);
@@ -1574,17 +1565,15 @@ void ONNXShapeTypeInference(
   }
 
   SpecialPostProcess(n);
-  if (IsValidONNXNode(n)) {
-    ProcessConstantValueMap(n, opset_version);
-    if (n->kind() != prim::ListConstruct) {
-      for (auto input : n->inputs()) {
-        if (input->node()->kind() == prim::ListConstruct) {
-          UpdateReliable(input, AreInputsReliableOrStatic(input->node()));
-        }
+  ProcessConstantValueMap(n, opset_version);
+  if (n->kind() != prim::ListConstruct) {
+    for (auto input : n->inputs()) {
+      if (input->node()->kind() == prim::ListConstruct) {
+        UpdateReliable(input, AreInputsReliableOrStatic(input->node()));
       }
     }
-    UpdateReliable(n);
   }
+  UpdateReliable(n);
 
   GRAPH_DEBUG(
       "Torch graph after shape inference:", n->owningGraph()->toString());
