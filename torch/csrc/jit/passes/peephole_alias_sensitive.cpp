@@ -51,9 +51,9 @@ struct PeepholeOptimizeAliasSensitiveImpl {
         auto kind = node->kind();
         int64_t output_size =
             kind == aten::conv1d ? 3 : (kind == aten::conv2d ? 4 : 5);
-        // this is to handle potential resize_ calls, however unlikely
-        // if we add more checks related to resize_ in the graph,
-        // factor this out like collectResizeSet in shape_analysis
+        // This is to handle potential resize_ calls, however unlikely.
+        // If we add more checks related to resize_ in the graph,
+        // factor this out like collectResizeSet in shape_analysis.
         if (!aliasDb_->hasWriters(node->output())) {
           for (const Use& dim_use : dim_uses) {
             replaceWithIValue(dim_use.user->output(), output_size);
