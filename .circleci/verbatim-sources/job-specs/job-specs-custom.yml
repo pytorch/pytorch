@@ -208,12 +208,11 @@
             set -ex
             source /Users/distiller/workspace/miniconda3/bin/activate
             pip install boto3
-            export PYTHONPATH="$PWD"
 
             # Using the same IAM user to write stats to our OSS bucket
             export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4}
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4}
-            python tools/stats/print_test_stats.py --upload-to-s3 --compare-with-s3 test
+            python -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
           when: always
       - store_test_results:
           path: test/test-reports

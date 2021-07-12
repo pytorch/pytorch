@@ -310,6 +310,7 @@ def run_tests(argv=UNITTEST_ARGS):
     else:
         unittest.main(argv=argv)
 
+IS_LINUX = sys.platform == "linux"
 IS_WINDOWS = sys.platform == "win32"
 IS_MACOS = sys.platform == "darwin"
 IS_PPC = platform.machine() == "ppc64le"
@@ -901,14 +902,21 @@ def check_disabled(test_name):
 
         def read_and_process():
             url = 'https://raw.githubusercontent.com/pytorch/test-infra/master/stats/disabled-tests.json'
-            contents = urlopen(url, timeout=1).read().decode('utf-8')
             the_response = fetch_and_cache(".pytorch-disabled-tests", url)
             for item in the_response['items']:
                 title = item['title']
                 key = 'DISABLED '
                 if title.startswith(key):
                     test_name = title[len(key):].strip()
-                    _disabled_test_from_issues[test_name] = item['html_url']
+                    body = item['body']
+                    platforms_to_skip = []
+                    key = 'platforms:'
+                    for line in body.splitlines():
+                        line = line.lower()
+                        if line.startswith(key):
+                            pattern = re.compile(r"^\s+|\s*,\s*|\s+$")
+                            platforms_to_skip.extend([x for x in pattern.split(line[len(key):]) if x])
+                    _disabled_test_from_issues[test_name] = (item['html_url'], platforms_to_skip)
 
         if not IS_SANDCASTLE and os.getenv("PYTORCH_RUN_DISABLED_TESTS", "0") != "1":
             try:
@@ -920,9 +928,19 @@ def check_disabled(test_name):
 
     if disabled_test_from_issues is not None:
         if test_name in disabled_test_from_issues:
-            raise unittest.SkipTest(
-                "Test is disabled because an issue exists disabling it: {}".format(disabled_test_from_issues[test_name]) +
-                " To enable set the environment variable PYTORCH_RUN_DISABLED_TESTS=1")
+            issue_url, platforms = disabled_test_from_issues[test_name]
+            platform_to_conditional: Dict = {
+                "mac": IS_MACOS,
+                "macos": IS_MACOS,
+                "windows": IS_WINDOWS,
+                "linux": IS_LINUX
+            }
+            if platforms == [] or any([platform_to_conditional[platform] for platform in platforms]):
+                raise unittest.SkipTest(
+                    f"Test is disabled because an issue exists disabling it: {issue_url}" +
+                    f" for {'all' if platforms == [] else ''}platform(s) {', '.join(platforms)}." +
+                    " To enable, set the environment variable PYTORCH_RUN_DISABLED_TESTS=1")
+
 
 # Acquires the comparison dtype, required since isclose
 # requires both inputs have the same dtype, and isclose is not supported
