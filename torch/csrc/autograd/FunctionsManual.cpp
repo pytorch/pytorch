@@ -3601,6 +3601,7 @@ Tensor lu_backward_base(
   auto phi_U = U_grad_square.matmul(U_square_H).triu_();
 
   auto phi = phi_L + phi_U;
+  auto psi = at::zeros_like(self);
   if (m < n) {
   }
   else if (m > n) {
@@ -3615,7 +3616,6 @@ Tensor lu_backward_base(
       /*unitriangular=*/false
     )
   ).transpose(-2, -1).conj();
-  auto psi = at::zeros_like(self);
   psi.narrow(-2, 0, k).narrow(-1, 0, k).copy_(psi_square);
 
   auto self_grad_square = P.matmul(
