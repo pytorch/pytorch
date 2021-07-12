@@ -1131,10 +1131,10 @@ static constexpr OperatorGeneratorArgs opGenArgs[] = {
                                 }
                               }))};
 
-static std::vector<Operator> createOperators(
+static std::vector<c10::optional<Operator>> createOperators(
     const OperatorGeneratorArgs* args,
     int length) {
-  std::vector<Operator> result;
+  std::vector<c10::optional<Operator>> result;
   result.reserve(length);
   for (int ii = 0; ii < length; ++ii) {
     if (args[ii].schema_str) {

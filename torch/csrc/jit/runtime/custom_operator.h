@@ -26,11 +26,6 @@ struct TORCH_API RegisterOperators {
       }
     }
   }
-  explicit RegisterOperators(std::vector<Operator> operators) {
-    for (Operator& o : operators) {
-      registerOperator(std::move(o));
-    }
-  }
 };
 
 } // namespace jit
