@@ -10,7 +10,6 @@ from .overrides import (
     handle_torch_function)
 from ._jit_internal import boolean_dispatch, List
 from ._jit_internal import _overload as overload
-from torch._autograd_functions import _LU
 
 Tensor = torch.Tensor
 from torch import _VF
