@@ -168,6 +168,10 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     if (err != cudaErrorNotReady) {
       C10_CUDA_CHECK(err);
     }
+    else {
+      // ignore and clear the error if not ready
+      cudaGetLastError();
+    }
     return (err == cudaSuccess);
   }
 
