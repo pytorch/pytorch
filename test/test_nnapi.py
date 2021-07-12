@@ -154,18 +154,17 @@ class TestNNAPI(TestCase):
         ]:
             self.check(mod, torch.randn(4, 2, 1, 3, 7))
 
-        # TODO(axit): To add support for runtime
-        # self.check(
-        #     torch.nn.Flatten(),
-        #     torch.randn(4, 2, 1, 3, 7),
-        #     convert_args=[torch.zeros(0, 2, 1, 3, 7)]
-        # )
-        # with self.assertRaisesRegex(Exception, "dims can't be flexible"):
-        #     self.check(torch.nn.Flatten(), torch.randn(4, 2, 0, 0, 7))
-        # with self.assertRaisesRegex(Exception, "Only 1 dim"):
-        #     self.check(
-        #         torch.nn.Flatten(start_dim=1, end_dim=-2),
-        #         torch.randn(0, 2, 1, 3, 0))
+        self.check(
+            torch.nn.Flatten(),
+            torch.randn(4, 2, 1, 3, 7),
+            convert_args=[torch.zeros(0, 2, 1, 3, 7)]
+        )
+        with self.assertRaisesRegex(Exception, "dims can't be flexible"):
+            self.check(torch.nn.Flatten(), torch.randn(4, 2, 0, 0, 7))
+        with self.assertRaisesRegex(Exception, "Only 1 dim"):
+            self.check(
+                torch.nn.Flatten(start_dim=1, end_dim=-2),
+                torch.randn(0, 2, 1, 3, 0))
 
     def test_slice(self):
         class SliceModule(torch.nn.Module):
@@ -232,6 +231,17 @@ class TestNNAPI(TestCase):
             [
                 nhwc(torch.randn(1, 2, 3, 3)),
                 nhwc(torch.randn(1, 4, 3, 3)),
+            ])
+
+        self.check(
+            CatModule(1),
+            [
+                torch.randn(1, 2, 3, 3),
+                torch.randn(1, 4, 3, 3),
+            ],
+            convert_args=[
+                torch.zeros(0, 0, 0, 0),
+                torch.zeros(0, 0, 0, 0)
             ])
 
     def test_pointwise_unary(self):
@@ -422,6 +432,9 @@ class TestNNAPI(TestCase):
     def test_linear(self):
         torch.manual_seed(29)
         self.check(torch.nn.Linear(16, 32), torch.randn(2, 16))
+        self.check(
+            torch.nn.Linear(16, 32), torch.randn(2, 16),
+            convert_args=[torch.zeros(0, 16)])
 
     def test_conv2d(self):
         cases = [
@@ -444,7 +457,7 @@ class TestNNAPI(TestCase):
                     output_size = model(inp).numel()
                     atol_rtol = None
                     limit = None
-                    convert_dims = input_dim[:2] + (0, 0)
+                    convert_dims = (0, in_ch, 0, 0)
                     convert_arg = torch.zeros(*convert_dims)
 
                     if "quant" in kind:
@@ -474,6 +487,51 @@ class TestNNAPI(TestCase):
                         atol_rtol=atol_rtol,
                         limit=limit
                     )
+
+    def test_conv2d_transpose(self):
+        in_ch, out_ch, kernel = (5, 7, (2, 2))
+        input_dim = (4, 5, 3, 3)
+        inp = torch.randn(input_dim)
+        convert_dims = input_dim[:2] + (0, 0)
+
+        for kind in ["float", "float-nhwc", "quant", "quant-nhwc"]:
+            with self.subTest(kind):
+                model = torch.nn.ConvTranspose2d(in_ch, out_ch, kernel)
+                output_size = model(inp).numel()
+                atol_rtol = (0.0002, 0)
+                limit = None
+                convert_arg = torch.zeros(*convert_dims)
+
+                if "quant" in kind:
+                    # FIXME 'aten::slow_conv_transpose2d' with arguments from the 'QuantizedCPU' backend
+                    continue
+                    model = torch.nn.Sequential(model)
+                    model.eval()
+                    model.qconfig = torch.quantization.get_default_qconfig('qnnpack')
+                    model = torch.quantization.prepare(model)
+                    model(inp)
+                    model = torch.quantization.convert(model)
+                    inp = qpt(inp, 1.0 / 16, 128)
+                    # I've seen numerical differences between QNNPACK and NNAPI,
+                    # but never more than 1 quantum, and never more than ~1% of
+                    # the output in this test.
+                    atol_rtol = (1, 0)
+                    limit = output_size * 0.03
+                    convert_arg = qpt(convert_arg, 1.0 / 16, 128)
+
+                if "nhwc" in kind:
+                    inp = nhwc(inp)
+                    convert_arg = nhwc(convert_arg)
+
+                self.check(model, inp, atol_rtol=atol_rtol, limit=limit)
+                self.check(
+                    model,
+                    inp,
+                    convert_args=[convert_arg],
+                    atol_rtol=atol_rtol,
+                    limit=limit
+                )
+
 
     def test_qadd(self):
         func = torch.nn.quantized.QFunctional()
