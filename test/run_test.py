@@ -1048,7 +1048,7 @@ def main():
 
     if IS_IN_CI:
         selected_tests = get_reordered_tests(selected_tests, ENABLE_PR_HISTORY_REORDERING)
-        # downloading test cases configuration to local
+        # downloading test cases configuration to local environment
         get_test_case_configs(dirpath=os.path.dirname(os.path.abspath(__file__)))
 
     has_failed = False

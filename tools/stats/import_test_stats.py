@@ -25,7 +25,7 @@ def fetch_and_cache(
     path = os.path.join(dirpath, name)
 
     def is_cached_file_valid() -> bool:
-        # Check if the file is new enough (say 1 hour for now). A real check
+        # Check if the file is new enough (see: FILE_CACHE_LIFESPAN_SECONDS). A real check
         # could make a HEAD request and check/store the file's ETag
         fname = pathlib.Path(path)
         now = datetime.datetime.now()

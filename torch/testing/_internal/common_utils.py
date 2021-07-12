@@ -863,9 +863,9 @@ except ImportError:
 def check_if_enable(test: unittest.TestCase):
     test_suite = str(test.__class__).split('\'')[1]
     test_name = f'{test._testMethodName} ({test_suite})'
-    if not TEST_WITH_SLOW and slow_tests_dict is not None:
-        if test_name in slow_tests_dict:
+    if slow_tests_dict is not None and test_name in slow_tests_dict:
             getattr(test, test._testMethodName).__dict__['slow_test'] = True
+        if not TEST_WITH_SLOW:
             raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
     if not IS_SANDCASTLE and disabled_tests_dict is not None:
         if test_name in disabled_tests_dict:
