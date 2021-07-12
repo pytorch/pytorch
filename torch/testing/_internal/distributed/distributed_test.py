@@ -7080,6 +7080,7 @@ class DistributedTest:
             # certain parameters.
             self._test_ddp_multiple_nested_unused_params_error(ignore_sparse=True)
 
+        @unittest.skip("See: https://github.com/pytorch/pytorch/issues/61481")
         @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                          "Only Nccl & Gloo backend support DistributedDataParallel")
         @skip_if_lt_x_gpu(2)
@@ -7097,9 +7098,9 @@ class DistributedTest:
             syncbn_model = nn.SyncBatchNorm(
                 2, momentum=0.99, track_running_stats=False
             ).cuda()
-            local_syncbn_model = copy.deepcopy(model)
+            local_syncbn_model = copy.deepcopy(syncbn_model)
             syncbn_model = torch.nn.parallel.DistributedDataParallel(
-                model,
+                syncbn_model,
                 device_ids=[rank]
             )
             inp = torch.randn(10, 2, device=rank)
@@ -7118,7 +7119,7 @@ class DistributedTest:
                                 test_local_model(test_inp)
                             )
 
-                    model.eval()
+                    test_model.eval()
                     for _ in range(6):
                         self.assertEqual(
                             test_model(test_inp),
