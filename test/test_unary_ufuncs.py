@@ -4,13 +4,12 @@ import numpy as np
 import warnings
 import math
 from itertools import product, chain
-from numbers import Number
 import random
 import unittest
 
 from torch._six import inf, nan
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, torch_to_numpy_dtype_dict, numpy_to_torch_dtype_dict,
+    TestCase, run_tests, torch_to_numpy_dtype_dict,
     suppress_warnings, make_tensor, TEST_SCIPY, slowTest, skipIfNoSciPy, IS_WINDOWS)
 from torch.testing._internal.common_methods_invocations import (
     unary_ufuncs, _NOTHING)
@@ -251,39 +250,23 @@ class TestUnaryUfuncs(TestCase):
                                                                             high,
                                                                             result.item()))
 
-    # Helper for comparing torch tensors and numpy arrays
-    # TODO: should this or assertEqual also validate that strides are equal?
-    def assertEqualHelper(self, actual, expected, msg, *, exact_dtype=True, **kwargs):
-        assert isinstance(actual, torch.Tensor)
-
-        # Some NumPy functions return scalars, not arrays
-        if isinstance(expected, Number):
-            self.assertEqual(actual.item(), expected, exact_dtype=exact_dtype, **kwargs)
-        elif isinstance(expected, np.ndarray):
-            self.assertEqual(actual,
-                             torch.from_numpy(expected),
-                             msg,
-                             exact_dtype=exact_dtype,
-                             exact_device=False,
-                             **kwargs)
-        else:
-            self.assertEqual(actual, expected, msg, exact_dtype=exact_dtype, exact_device=False, **kwargs)
-
     # Tests that the function and its (array-accepting) reference produce the same
     #   values on given tensors
     def _test_reference_numerics(self, dtype, op, tensors, equal_nan=True):
         def _helper_reference_numerics(expected, actual, msg, equal_nan=True):
+            expected = torch.as_tensor(expected).to(actual)
+
             if dtype in [torch.uint8, torch.int8, torch.bool]:
                 # NOTE: For these dtypes, PyTorch computes in the default scalar type (float)
                 # while NumPy computes in float16
-                self.assertEqualHelper(actual, expected, msg,
-                                       exact_dtype=False, rtol=1e-3, atol=1e-2)
+                rtol, atol = 1e-3, 1e-2
             elif dtype is torch.bfloat16:
                 # Ref: https://github.com/pytorch/pytorch/blob/master/torch/testing/_internal/common_utils.py#L1149
-                self.assertEqualHelper(actual, expected, msg,
-                                       exact_dtype=False, rtol=16e-3, atol=1e-5)
+                rtol, atol = 16e-3, 1e-5
             else:
-                self.assertEqualHelper(actual, expected, msg, equal_nan=equal_nan, exact_dtype=False)
+                rtol = atol = None
+
+            self.assertEqual(actual, expected, msg, equal_nan=equal_nan, rtol=rtol, atol=atol)
 
         for t in tensors:
             torch_kwargs, numpy_kwargs = op.sample_kwargs(t.device, dtype, t)
