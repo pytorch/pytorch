@@ -1,17 +1,9 @@
-from __future__ import division
-from __future__ import print_function
-
 import argparse
 import gzip
 import os
+from urllib.error import URLError
+from urllib.request import urlretrieve
 import sys
-
-try:
-    from urllib.error import URLError
-    from urllib.request import urlretrieve
-except ImportError:
-    from urllib2 import URLError
-    from urllib import urlretrieve
 
 MIRRORS = [
     'http://yann.lecun.com/exdb/mnist/',
@@ -26,14 +18,18 @@ RESOURCES = [
 ]
 
 
-def report_download_progress(chunk_number, chunk_size, file_size):
+def report_download_progress(
+    chunk_number: int,
+    chunk_size: int,
+    file_size: int,
+) -> None:
     if file_size != -1:
         percent = min(1, (chunk_number * chunk_size) / file_size)
         bar = '#' * int(64 * percent)
         sys.stdout.write('\r0% |{:<64}| {}%'.format(bar, int(percent * 100)))
 
 
-def download(destination_path, resource, quiet):
+def download(destination_path: str, resource: str, quiet: bool) -> None:
     if os.path.exists(destination_path):
         if not quiet:
             print('{} already exists, skipping ...'.format(destination_path))
@@ -56,7 +52,7 @@ def download(destination_path, resource, quiet):
             raise RuntimeError('Error downloading resource!')
 
 
-def unzip(zipped_path, quiet):
+def unzip(zipped_path: str, quiet: bool) -> None:
     unzipped_path = os.path.splitext(zipped_path)[0]
     if os.path.exists(unzipped_path):
         if not quiet:
@@ -69,7 +65,7 @@ def unzip(zipped_path, quiet):
                 print('Unzipped {} ...'.format(zipped_path))
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description='Download the MNIST dataset from the internet')
     parser.add_argument(

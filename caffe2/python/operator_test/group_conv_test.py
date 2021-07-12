@@ -1,6 +1,6 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+
+
+
 
 import numpy as np
 from hypothesis import assume, given, settings
@@ -12,7 +12,6 @@ import caffe2.python.hip_test_util as hiputl
 import caffe2.python.hypothesis_test_util as hu
 
 import unittest
-import os
 
 class TestGroupConvolution(hu.HypothesisTestCase):
 

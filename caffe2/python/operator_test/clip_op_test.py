@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import numpy as np
 
@@ -19,7 +19,7 @@ class TestClip(serial.SerializedTestCase):
            max_=st.floats(min_value=0, max_value=2),
            inplace=st.booleans(),
            **hu.gcs)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_clip(self, X, min_, max_, inplace, gc, dc):
         # go away from the origin point to avoid kink problems
         if np.isscalar(X):

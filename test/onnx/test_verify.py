@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import torch
 from torch.autograd import Function
 from torch.nn import Module, Parameter
@@ -108,5 +103,5 @@ class TestVerify(TestCase):
         self.assertVerifyExpectFail(MyModel(), x, backend, test_args=[(y,)])
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_tests()

@@ -8,7 +8,7 @@ void THStorage_(copy)(THStorage *storage, THStorage *src)
   scalar_t *scalar_src = THStorage_(data)(src);
   scalar_t *data = THStorage_(data)(storage);
   uint64_t numel = storage->nbytes() / sizeof(scalar_t);
-  for (ptrdiff_t i = 0; i < numel; ++i) {
+  for (uint64_t i = 0; i < numel; ++i) {
     data[i] = scalar_src[i];
   }
 }
@@ -19,11 +19,10 @@ void THStorage_(copy)(THStorage *storage, THStorage *src)
 #define IMPLEMENT_THStorage_COPY(TYPENAMESRC)                \
   void THStorage_(copy##TYPENAMESRC)(                        \
       THStorage * storage, TH##TYPENAMESRC##Storage * src) { \
-    ptrdiff_t i;                                             \
     auto data = THStorage_(data)(storage);                   \
     auto src_data = TH##TYPENAMESRC##Storage_data(src);      \
     uint64_t numel = storage->nbytes() / sizeof(scalar_t);   \
-    for (i = 0; i < numel; i++)                              \
+    for (uint64_t i = 0; i < numel; i++)                     \
       data[i] = static_cast<scalar_t>(src_data[i]);          \
   }
 

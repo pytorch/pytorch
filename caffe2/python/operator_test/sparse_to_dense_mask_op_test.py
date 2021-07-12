@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core
 from hypothesis import given, settings
@@ -14,7 +14,7 @@ class TestFcOperator(hu.HypothesisTestCase):
 
     @given(n=st.integers(1, 10), k=st.integers(1, 5),
            use_length=st.booleans(), **hu.gcs_cpu_only)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_sparse_to_dense_mask(self, n, k, use_length, gc, dc):
         lengths = np.random.randint(k, size=n).astype(np.int32) + 1
         N = sum(lengths)
@@ -47,7 +47,7 @@ class TestFcOperator(hu.HypothesisTestCase):
 
     @given(n=st.integers(1, 10), k=st.integers(1, 5),
            use_length=st.booleans(), **hu.gcs_cpu_only)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_sparse_to_dense_mask_with_int64(self, n, k, use_length, gc, dc):
         lengths = np.random.randint(k, size=n).astype(np.int32) + 1
         N = sum(lengths)

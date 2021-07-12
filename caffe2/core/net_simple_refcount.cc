@@ -76,6 +76,7 @@ bool SimpleRefCountNet::Run() {
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_NET(simple_refcount, SimpleRefCountNet);
 
 } // namespace caffe2

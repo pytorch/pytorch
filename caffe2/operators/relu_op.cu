@@ -131,6 +131,7 @@ operator()(const int N, const T* X, T* Y, CUDAContext* context) const {
     const int M = math::DivUp(N, CAFFE_CUDA_NUM_THREADS);
     ReluCUDAKernel<T>
         <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(N, X, Y);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
   return true;
 }
@@ -152,11 +153,13 @@ bool ReluFunctor<CUDAContext>::operator()<at::Half>(
             N / 2,
             reinterpret_cast<const half2*>(X),
             reinterpret_cast<half2*>(Y));
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     const int M = math::DivUp(N, CAFFE_CUDA_NUM_THREADS);
     ReluCUDAKernel<half>
         <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
             N, reinterpret_cast<const half*>(X), reinterpret_cast<half*>(Y));
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
   return true;
 }
@@ -177,6 +180,7 @@ bool ReluGradientFunctor<CUDAContext>::Forward(
     ReluGradientCUDAKernel<T>
         <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
             N, dY, Y, dX);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
   return true;
 }
@@ -203,6 +207,7 @@ bool ReluGradientFunctor<CUDAContext>::Forward<at::Half>(
             reinterpret_cast<const half2*>(dY),
             reinterpret_cast<const half2*>(Y),
             reinterpret_cast<half2*>(dX));
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     const int M = math::DivUp(N, CAFFE_CUDA_NUM_THREADS);
     ReluGradientCUDAKernel<half>
@@ -211,6 +216,7 @@ bool ReluGradientFunctor<CUDAContext>::Forward<at::Half>(
             reinterpret_cast<const half*>(dY),
             reinterpret_cast<const half*>(Y),
             reinterpret_cast<half*>(dX));
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
   return true;
 }

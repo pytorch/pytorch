@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core
 from hypothesis import given, settings
@@ -33,7 +33,7 @@ class TestSelu(serial.SerializedTestCase):
     @given(X=hu.tensor(),
            engine=st.sampled_from(["", "CUDNN"]),
             **hu.gcs)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_selu_2(self, X, gc, dc, engine):
         alpha = 1.6732
         scale = 1.0507
@@ -50,7 +50,7 @@ class TestSelu(serial.SerializedTestCase):
     @given(X=hu.tensor(),
            engine=st.sampled_from(["", "CUDNN"]),
             **hu.gcs)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_selu_3(self, X, gc, dc, engine):
         alpha = 1.3
         scale = 1.1

@@ -12,5 +12,7 @@ namespace jit {
 // Currently only handles normalization of op aliases.
 TORCH_API void NormalizeOps(const std::shared_ptr<Graph>& graph);
 
+const std::unordered_map<Symbol, Symbol>& getOperatorAliasMap();
+
 } // namespace jit
 } // namespace torch

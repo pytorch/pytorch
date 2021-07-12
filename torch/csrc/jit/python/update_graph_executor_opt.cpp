@@ -3,6 +3,7 @@
 namespace torch {
 namespace jit {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local bool kOptimize = true;
 void setGraphExecutorOptimize(bool o) {
   kOptimize = o;

@@ -108,6 +108,7 @@ void fp32_momentum_sgd_update<CUDAContext>(
       nesterov,
       weight_decay,
       reinterpret_cast<float2*>(param));
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
   // not setting N to N/2
   // TODO_ check float performance vs float2
 }

@@ -9,6 +9,7 @@
 
 #include <torch/csrc/THP.h>
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject *THPException_FatalError;
 
 #define ASSERT_TRUE(cond) if (!(cond)) return false
@@ -129,6 +130,7 @@ std::string processErrorMsg(std::string str) {
 
 static std::string formatMessage(const char *format, va_list fmt_args) {
   static const size_t ERROR_BUF_SIZE = 1024;
+  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   char error_buf[ERROR_BUF_SIZE];
   vsnprintf(error_buf, ERROR_BUF_SIZE, format, fmt_args);
 
@@ -159,6 +161,13 @@ ValueError::ValueError(const char *format, ...) {
   va_end(fmt_args);
 }
 
+AttributeError::AttributeError(const char* format, ...) {
+  va_list fmt_args;
+  va_start(fmt_args, format);
+  msg = formatMessage(format, fmt_args);
+  va_end(fmt_args);
+}
+
 void PyWarningHandler::process(
     const c10::SourceLocation& source_location,
     const std::string& msg,
@@ -178,6 +187,7 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
   c10::Warning::set_warning_handler(prev_handler_);
 
   if (warning_buffer_.size() > 0) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     PyObject *type, *value, *traceback;
     pybind11::gil_scoped_acquire gil;
     auto result = 0;
@@ -228,6 +238,7 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
       throw python_error();
     }
     if (in_exception_) {
+      // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
       PyErr_Restore(type, value, traceback);
     }
   }

@@ -2,10 +2,12 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     RecurrentNetworkBlobFetcher,
     RecurrentNetworkBlobFetcherOp<CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RecurrentNetworkBlobFetcher)
     .NumInputs(1)
     .NumOutputs(1)
@@ -24,5 +26,6 @@ workspace under CPUContext.
         "blob_names",
         "1D tensor of strings containing extracted blob names.");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(RecurrentNetworkBlobFetcher);
 } // namespace caffe2

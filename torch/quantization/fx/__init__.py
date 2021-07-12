@@ -1,3 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
-from .quantize import Quantizer
+from .prepare import prepare
+from .convert import convert
 from .fuse import Fuser

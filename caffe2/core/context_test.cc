@@ -6,6 +6,7 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CPUContextTest, TestAllocAlignment) {
   for (int i = 1; i < 10; ++i) {
     auto data = CPUContext::New(i);
@@ -14,6 +15,7 @@ TEST(CPUContextTest, TestAllocAlignment) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CPUContextTest, TestAllocDealloc) {
   auto data_ptr = CPUContext::New(10 * sizeof(float));
   float* data = static_cast<float*>(data_ptr.get());
@@ -22,6 +24,7 @@ TEST(CPUContextTest, TestAllocDealloc) {
   float* dst_data = static_cast<float*>(dst_data_ptr.get());
   EXPECT_NE(dst_data, nullptr);
   for (int i = 0; i < 10; ++i) {
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     data[i] = i;
   }
   DeviceOption option;

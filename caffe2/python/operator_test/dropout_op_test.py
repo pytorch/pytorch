@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from hypothesis import assume, given, settings
 import hypothesis.strategies as st
@@ -48,7 +48,7 @@ class TestDropout(serial.SerializedTestCase):
            output_mask=st.booleans(),
            engine=st.sampled_from(["", "CUDNN"]),
            **hu.gcs)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_dropout_ratio0(self, X, in_place, output_mask, engine, gc, dc):
         """Test with ratio=0 for a deterministic reference impl."""
         # TODO(lukeyeager): enable this path when the op is fixed

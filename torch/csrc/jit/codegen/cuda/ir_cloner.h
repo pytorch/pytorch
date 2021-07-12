@@ -1,4 +1,3 @@
-
 #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
@@ -10,14 +9,16 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 class Fusion;
 
 // Clones nodes from an exiting Fusion
-class TORCH_CUDA_API IrCloner : private OptInConstDispatch {
+class TORCH_CUDA_CU_API IrCloner : private OptInConstDispatch {
   friend class Statement;
 
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit IrCloner(Fusion* new_fusion) : fusion_(new_fusion) {}
 
   Statement* clone(const Statement* statement);
@@ -30,7 +31,9 @@ class TORCH_CUDA_API IrCloner : private OptInConstDispatch {
 
   template <class T>
   std::vector<T*> clone(const std::vector<T*>& container) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<T*> copy;
+    copy.reserve(container.size());
     for (auto p : container) {
       copy.push_back(clone(p));
     }
@@ -67,29 +70,6 @@ class TORCH_CUDA_API IrCloner : private OptInConstDispatch {
   void handle(const Split*) override;
   void handle(const Merge*) override;
 
-  void handle(const kir::Bool*) override;
-  void handle(const kir::Float*) override;
-  void handle(const kir::Half*) override;
-  void handle(const kir::Int*) override;
-  void handle(const kir::NamedScalar*) override;
-
-  void handle(const kir::IterDomain*) override;
-  void handle(const kir::TensorDomain*) override;
-  void handle(const kir::TensorView*) override;
-
-  void handle(const kir::UnaryOp*) override;
-  void handle(const kir::BinaryOp*) override;
-  void handle(const kir::TernaryOp*) override;
-  void handle(const kir::ReductionOp*) override;
-  void handle(const kir::BroadcastOp*) override;
-
-  void handle(const kir::TensorIndex*) override;
-  void handle(const kir::Allocate*) override;
-  void handle(const kir::Sync*) override;
-  void handle(const kir::ForLoop*) override;
-  void handle(const kir::IfThenElse*) override;
-  void handle(const kir::GridReduction*) override;
-
  private:
   // The destination Fusion container
   Fusion* fusion_ = nullptr;
@@ -104,6 +84,7 @@ class TORCH_CUDA_API IrCloner : private OptInConstDispatch {
   std::unordered_map<const Statement*, Statement*> clones_map_;
 };
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

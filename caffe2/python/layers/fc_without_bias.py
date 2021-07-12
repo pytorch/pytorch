@@ -1,9 +1,9 @@
 ## @package fc_without_bias
 # Module caffe2.python.layers.fc_without_bias
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import schema
 from caffe2.python.layers.layers import ModelLayer

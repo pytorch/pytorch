@@ -22,7 +22,7 @@ class _server_process_global_profile(profile):
     only report runtime of PyTorch functions.
     Note: profiler is thread local and is automatically propagated into the async tasks
 
-    Arguments:
+    Args:
         enabled (bool, optional): Setting this to False makes this context manager a no-op.
             Default: ``True``.
 
@@ -103,7 +103,7 @@ class _server_process_global_profile(profile):
         if not self.enabled:
             return
 
-        if self.entered:
+        if self.entered:  # type: ignore[has-type]
             raise RuntimeError("autograd profiler traces are not reentrant")
         self.entered = True
 
@@ -113,8 +113,11 @@ class _server_process_global_profile(profile):
             else torch.autograd.ProfilerState.CPU
         )
         profiler_config = torch.autograd.ProfilerConfig(
-            profiler_kind, self.record_shapes, self.profile_memory
-        )
+            profiler_kind,
+            self.record_shapes,
+            self.profile_memory,
+            False,
+            False)
         _enable_server_process_global_profiler(profiler_config)
         return self
 
@@ -143,13 +146,13 @@ class _server_process_global_profile(profile):
         process_global_function_events = []
         for thread_local_events in process_global_events:
             # Parse from ``Event``s to ``FunctionEvent``s.
-            thread_local_function_events = torch.autograd.profiler.parse_cpu_trace(
+            thread_local_function_events = torch.autograd.profiler.parse_legacy_records(
                 thread_local_events
             )
             thread_local_function_events.sort(
                 key=lambda function_event: [
-                    function_event.cpu_interval.start,
-                    -(function_event.cpu_interval.end),
+                    function_event.time_range.start,
+                    -(function_event.time_range.end),
                 ]
             )
             process_global_function_events.append(thread_local_function_events)
@@ -162,6 +165,7 @@ class _server_process_global_profile(profile):
             use_cuda=self.use_cuda,
             profile_memory=self.profile_memory,
         )
+        self.function_events._build_tree()
 
         self.process_global_function_events = process_global_function_events
 

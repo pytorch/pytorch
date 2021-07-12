@@ -23,7 +23,7 @@ class IDEEPContext final : public BaseContext {
 
   ~IDEEPContext() noexcept override {}
 
-  inline void SwitchToDevice(int /*stream_id*/) {}
+  inline void SwitchToDevice(int64_t /*stream_id*/) {}
   using BaseContext::SwitchToDevice;
 
   inline void WaitEvent(const Event& ev) {
@@ -91,7 +91,7 @@ class IDEEPContext final : public BaseContext {
 
   template <class SrcContext, class DstContext>
   inline void
-  CopyItems(const TypeMeta& meta, size_t n, const void* src, void* dst) {
+  CopyItems(const TypeMeta meta, size_t n, const void* src, void* dst) {
     if (meta.copy()) {
       meta.copy()(src, dst, n);
     } else {

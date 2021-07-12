@@ -1,9 +1,9 @@
 ## @package sparse_lookup
 # Module caffe2.python.layers.sparse_lookup
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python.optimizer import FP16_ENGINES, Optimizer
 from caffe2.python.helpers.arg_scope import get_current_scope

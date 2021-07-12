@@ -4,6 +4,8 @@
 #include <ostream>
 #include <sstream>
 
+#include <c10/util/irange.h>
+
 namespace caffe2 {
 
 ProfDAGCounters::ProfDAGCounters(const std::shared_ptr<const NetDef>& net_def) {
@@ -81,7 +83,7 @@ void ProfDAGCounters::ReportRunEnd() {
   CaffeMap<std::string, float> cum_per_type_time_run;
   CaffeMap<std::string, float> cum_per_type_invocations_run;
   std::vector<float> per_op_time_run(report_.op_types_.size(), 0.0);
-  for (auto op_id = 0U; op_id < report_.op_types_.size(); ++op_id) {
+  for (const auto op_id : c10::irange(report_.op_types_.size())) {
     // check that we have valid times, otherwise return;
     // times might not be valid if network execution ended prematurely
     // because of operator errors
@@ -109,7 +111,7 @@ void ProfDAGCounters::ReportRunEnd() {
   // all operator times are valid, update report stats
   report_.runtime_stats_ += ProfDAGStats(runtime);
 
-  for (auto op_id = 0U; op_id < report_.op_types_.size(); ++op_id) {
+  for (const auto op_id : c10::irange(report_.op_types_.size())) {
     report_.time_per_op_total_[op_id] += ProfDAGStats(per_op_time_run[op_id]);
   }
 
@@ -159,7 +161,7 @@ ProfDAGProtos ProfDAGReport::GetPerOperatorCost() const {
   ProfDAGProtos prof_dag_protos;
   prof_dag_protos.set_net_name(net_name_);
   if (hasStats()) {
-    for (auto op_id = 0U; op_id < op_types_.size(); op_id++) {
+    for (const auto op_id : c10::irange(op_types_.size())) {
       const string& op_type = op_types_[op_id];
       auto buf = prof_dag_protos.add_stats();
       std::string op_output_name =
@@ -208,7 +210,7 @@ ProfDAGReport& ProfDAGReport::operator+=(const ProfDAGReport& rhs) {
       op_types_.size(),
       rhs.op_types_.size(),
       "Incompatible nets to add counters");
-  for (auto idx = 0U; idx < op_types_.size(); ++idx) {
+  for (const auto idx : c10::irange(op_types_.size())) {
     CAFFE_ENFORCE_EQ(
         op_types_[idx],
         rhs.op_types_[idx],
@@ -229,7 +231,7 @@ ProfDAGReport& ProfDAGReport::operator+=(const ProfDAGReport& rhs) {
   }
 
   // Do the addition
-  for (auto idx = 0U; idx < time_per_op_total_.size(); ++idx) {
+  for (const auto idx : c10::irange(time_per_op_total_.size())) {
     time_per_op_total_[idx] += rhs.time_per_op_total_.at(idx);
   }
   for (auto& item : time_per_op_type_total_) {

@@ -37,9 +37,9 @@ __global__ void AxpyCUDAKernel(
     const TAlpha alpha,
     const TData* X,
     TData* Y) {
-  const std::int64_t index = static_cast<std::int64_t>(blockIdx.x) *
-          static_cast<std::int64_t>(CAFFE_CUDA_NUM_THREADS) +
-      static_cast<std::int64_t>(threadIdx.x);
+  const int64_t index = static_cast<int64_t>(blockIdx.x) *
+          static_cast<int64_t>(CAFFE_CUDA_NUM_THREADS) +
+      static_cast<int64_t>(threadIdx.x);
   if (index < N) {
     Y[index] += static_cast<TData>(alpha) * __ldg(X + index);
   }
@@ -56,9 +56,9 @@ __global__ void AxpyCUDAKernel(
     a = static_cast<TData>(__ldg(alpha));
   }
   __syncthreads();
-  const std::int64_t index = static_cast<std::int64_t>(blockIdx.x) *
-          static_cast<std::int64_t>(CAFFE_CUDA_NUM_THREADS) +
-      static_cast<std::int64_t>(threadIdx.x);
+  const int64_t index = static_cast<int64_t>(blockIdx.x) *
+          static_cast<int64_t>(CAFFE_CUDA_NUM_THREADS) +
+      static_cast<int64_t>(threadIdx.x);
   if (index < N) {
     Y[index] += a * __ldg(X + index);
   }
@@ -71,9 +71,9 @@ __global__ void AxpyCUDAKernel(
       const TAlpha alpha,                                              \
       const at::Half* X,                                               \
       at::Half* Y) {                                                   \
-    const std::int64_t index = static_cast<std::int64_t>(blockIdx.x) * \
-            static_cast<std::int64_t>(CAFFE_CUDA_NUM_THREADS) +        \
-        static_cast<std::int64_t>(threadIdx.x);                        \
+    const int64_t index = static_cast<int64_t>(blockIdx.x) *           \
+            static_cast<int64_t>(CAFFE_CUDA_NUM_THREADS) +             \
+        static_cast<int64_t>(threadIdx.x);                             \
     if (index < N) {                                                   \
       Y[index] = convert::To<TAlpha, at::Half>(FMAFunc(                \
           alpha,                                                       \
@@ -92,9 +92,9 @@ __global__ void AxpyCUDAKernel(
       a = __ldg(alpha);                                                \
     }                                                                  \
     __syncthreads();                                                   \
-    const std::int64_t index = static_cast<std::int64_t>(blockIdx.x) * \
-            static_cast<std::int64_t>(CAFFE_CUDA_NUM_THREADS) +        \
-        static_cast<std::int64_t>(threadIdx.x);                        \
+    const int64_t index = static_cast<int64_t>(blockIdx.x) *           \
+            static_cast<int64_t>(CAFFE_CUDA_NUM_THREADS) +             \
+        static_cast<int64_t>(threadIdx.x);                             \
     if (index < N) {                                                   \
       Y[index] = convert::To<TAlpha, at::Half>(FMAFunc(                \
           a,                                                           \
@@ -131,9 +131,9 @@ __global__ void AxpbyCUDAKernel(
       const TData* X,                                                  \
       const TAlpha beta,                                               \
       TData* Y) {                                                      \
-    const std::int64_t index = static_cast<std::int64_t>(blockIdx.x) * \
-            static_cast<std::int64_t>(CAFFE_CUDA_NUM_THREADS) +        \
-        static_cast<std::int64_t>(threadIdx.x);                        \
+    const int64_t index = static_cast<int64_t>(blockIdx.x) *           \
+            static_cast<int64_t>(CAFFE_CUDA_NUM_THREADS) +             \
+        static_cast<int64_t>(threadIdx.x);                             \
     if (index < N) {                                                   \
       Y[index] = FMAFunc(                                              \
           static_cast<TData>(alpha),                                   \
@@ -155,9 +155,9 @@ __global__ void AxpbyCUDAKernel(
       b = static_cast<TData>(*beta);                                   \
     }                                                                  \
     __syncthreads();                                                   \
-    const std::int64_t index = static_cast<std::int64_t>(blockIdx.x) * \
-            static_cast<std::int64_t>(CAFFE_CUDA_NUM_THREADS) +        \
-        static_cast<std::int64_t>(threadIdx.x);                        \
+    const int64_t index = static_cast<int64_t>(blockIdx.x) *           \
+            static_cast<int64_t>(CAFFE_CUDA_NUM_THREADS) +             \
+        static_cast<int64_t>(threadIdx.x);                             \
     if (index < N) {                                                   \
       Y[index] = FMAFunc(a, X[index], b * Y[index]);                   \
     }                                                                  \
@@ -174,9 +174,9 @@ DELEGATE_AXPBY_CUDA_KERNEL(float, double, fma)
       const at::Half* X,                                               \
       const TAlpha beta,                                               \
       at::Half* Y) {                                                   \
-    const std::int64_t index = static_cast<std::int64_t>(blockIdx.x) * \
-            static_cast<std::int64_t>(CAFFE_CUDA_NUM_THREADS) +        \
-        static_cast<std::int64_t>(threadIdx.x);                        \
+    const int64_t index = static_cast<int64_t>(blockIdx.x) *           \
+            static_cast<int64_t>(CAFFE_CUDA_NUM_THREADS) +             \
+        static_cast<int64_t>(threadIdx.x);                             \
     if (index < N) {                                                   \
       Y[index] = convert::To<TAlpha, at::Half>(FMAFunc(                \
           alpha,                                                       \
@@ -198,9 +198,9 @@ DELEGATE_AXPBY_CUDA_KERNEL(float, double, fma)
       b = *beta;                                                       \
     }                                                                  \
     __syncthreads();                                                   \
-    const std::int64_t index = static_cast<std::int64_t>(blockIdx.x) * \
-            static_cast<std::int64_t>(CAFFE_CUDA_NUM_THREADS) +        \
-        static_cast<std::int64_t>(threadIdx.x);                        \
+    const int64_t index = static_cast<int64_t>(blockIdx.x) *           \
+            static_cast<int64_t>(CAFFE_CUDA_NUM_THREADS) +             \
+        static_cast<int64_t>(threadIdx.x);                             \
     if (index < N) {                                                   \
       Y[index] = convert::To<TAlpha, at::Half>(FMAFunc(                \
           a,                                                           \
@@ -210,6 +210,90 @@ DELEGATE_AXPBY_CUDA_KERNEL(float, double, fma)
   }
 DELEGATE_HALF_AXPBY_CUDA_KERNEL(float, fmaf)
 #undef DELEGATE_HALF_AXPBY_CUDA_KERNEL
+
+template <typename TAlpha, typename TData>
+__global__ void ScaleCUDAKernel(
+    const std::int64_t N,
+    const TAlpha alpha,
+    const TData* X,
+    TData* Y);
+
+template <typename TAlpha, typename TData>
+__global__ void ScaleCUDAKernel(
+    const std::int64_t N,
+    const TAlpha* alpha,
+    const TData* X,
+    TData* Y);
+
+#define CAFFE2_SPECIALIZED_SCALE_CUDA_KERNEL(TAlpha, TData)                  \
+  template <>                                                                \
+  __global__ void ScaleCUDAKernel<TAlpha, TData>(                            \
+      const std::int64_t N, const TAlpha alpha, const TData* X, TData* Y) {  \
+    const int64_t index = static_cast<int64_t>(blockIdx.x) *                 \
+            static_cast<int64_t>(CAFFE_CUDA_NUM_THREADS) +                   \
+        static_cast<int64_t>(threadIdx.x);                                   \
+    if (index < N) {                                                         \
+      Y[index] = static_cast<TData>(alpha) * X[index];                       \
+    }                                                                        \
+  }                                                                          \
+  template <>                                                                \
+  __global__ void ScaleCUDAKernel<TAlpha, TData>(                            \
+      const std::int64_t N, const TAlpha* alpha, const TData* X, TData* Y) { \
+    __shared__ TData a;                                                      \
+    if (threadIdx.x == 0) {                                                  \
+      a = static_cast<TData>(*alpha);                                        \
+    }                                                                        \
+    __syncthreads();                                                         \
+    const int64_t index = static_cast<int64_t>(blockIdx.x) *                 \
+            static_cast<int64_t>(CAFFE_CUDA_NUM_THREADS) +                   \
+        static_cast<int64_t>(threadIdx.x);                                   \
+    if (index < N) {                                                         \
+      Y[index] = a * X[index];                                               \
+    }                                                                        \
+  }
+CAFFE2_SPECIALIZED_SCALE_CUDA_KERNEL(float, float)
+CAFFE2_SPECIALIZED_SCALE_CUDA_KERNEL(double, double)
+CAFFE2_SPECIALIZED_SCALE_CUDA_KERNEL(float, double)
+CAFFE2_SPECIALIZED_SCALE_CUDA_KERNEL(std::int32_t, std::int32_t)
+CAFFE2_SPECIALIZED_SCALE_CUDA_KERNEL(std::int64_t, std::int64_t)
+#undef CAFFE2_SPECIALIZED_SCALE_CUDA_KERNEL
+
+#define CAFFE2_SPECIALIZED_HALF_SCALE_CUDA_KERNEL(TAlpha)              \
+  template <>                                                          \
+  __global__ void ScaleCUDAKernel<TAlpha, at::Half>(                   \
+      const std::int64_t N,                                            \
+      const TAlpha alpha,                                              \
+      const at::Half* X,                                               \
+      at::Half* Y) {                                                   \
+    const int64_t index = static_cast<int64_t>(blockIdx.x) *           \
+            static_cast<int64_t>(CAFFE_CUDA_NUM_THREADS) +             \
+        static_cast<int64_t>(threadIdx.x);                             \
+    if (index < N) {                                                   \
+      Y[index] = convert::To<TAlpha, at::Half>(                        \
+          alpha * convert::To<at::Half, TAlpha>(X[index]));            \
+    }                                                                  \
+  }                                                                    \
+  template <>                                                          \
+  __global__ void ScaleCUDAKernel<TAlpha, at::Half>(                   \
+      const std::int64_t N,                                            \
+      const TAlpha* alpha,                                             \
+      const at::Half* X,                                               \
+      at::Half* Y) {                                                   \
+    __shared__ TAlpha a;                                               \
+    if (threadIdx.x == 0) {                                            \
+      a = *alpha;                                                      \
+    }                                                                  \
+    __syncthreads();                                                   \
+    const int64_t index = static_cast<int64_t>(blockIdx.x) * \
+            static_cast<int64_t>(CAFFE_CUDA_NUM_THREADS) +        \
+        static_cast<int64_t>(threadIdx.x);                        \
+    if (index < N) {                                                   \
+      Y[index] = convert::To<TAlpha, at::Half>(                        \
+          a * convert::To<at::Half, TAlpha>(X[index]));                \
+    }                                                                  \
+  }
+CAFFE2_SPECIALIZED_HALF_SCALE_CUDA_KERNEL(float)
+#undef CAFFE2_SPECIALIZED_HALF_SCALE_CUDA_KERNEL
 
 } // namespace
 
@@ -256,6 +340,7 @@ CAFFE2_SPECIALIZED_CUDA_SET(at::BFloat16)
   }
 DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Exp, expf)
 DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Log, logf)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Log1p, log1pf)
 DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Sin, sinf)
 DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Asin, asinf)
 DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Cos, cosf)
@@ -332,239 +417,171 @@ DELEGATE_CUDA_POWX(float, powf)
       SinCosCUDAKernel<T>                                             \
           <<<K, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>( \
               N, X, S, C);                                            \
+      C10_CUDA_KERNEL_LAUNCH_CHECK();                                 \
     }                                                                 \
   }
 CAFFE2_SPECIALIZED_CUDA_SINCOS(float)
 CAFFE2_SPECIALIZED_CUDA_SINCOS(double)
 #undef CAFFE2_SPECIALIZED_CUDA_SINCOS
 
-#define DELEGATE_CUDA_SCALE_BY_CUBLAS_FUNCTION(TAlpha, TData, CuBLASFunc)     \
-  template <>                                                                 \
-  CAFFE2_CUDA_EXPORT void Scale<TAlpha, TData, CUDAContext>(                  \
-      const int N,                                                            \
-      const TAlpha alpha,                                                     \
-      const TData* X,                                                         \
-      TData* Y,                                                               \
-      CUDAContext* context) {                                                 \
-    if (N == 0) {                                                             \
-      return;                                                                 \
-    }                                                                         \
-    const TData alpha_host = static_cast<TData>(alpha);                       \
-    if (Y == X) {                                                             \
-      CUBLAS_ENFORCE(cublasSetPointerMode(                                    \
-          context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));               \
-      CUBLAS_ENFORCE(                                                         \
-          CuBLASFunc(context->cublas_handle(), N, &alpha_host, Y, 1));        \
-    } else {                                                                  \
-      thrust::transform(                                                      \
-          thrust::cuda::par.on(context->cuda_stream()),                       \
-          X,                                                                  \
-          X + N,                                                              \
-          Y,                                                                  \
-          [alpha_host] __device__(const TData x) { return x * alpha_host; }); \
-    }                                                                         \
-  }                                                                           \
-  template <>                                                                 \
-  CAFFE2_CUDA_EXPORT void Scale<TAlpha, TData, CUDAContext>(                  \
-      const int N,                                                            \
-      const TAlpha* alpha,                                                    \
-      const TData* X,                                                         \
-      TData* Y,                                                               \
-      CUDAContext* context) {                                                 \
-    if (N == 0) {                                                             \
-      return;                                                                 \
-    }                                                                         \
-    if (std::is_same<TAlpha, TData>::value && Y == X) {                       \
-      CUBLAS_ENFORCE(cublasSetPointerMode(                                    \
-          context->cublas_handle(), CUBLAS_POINTER_MODE_DEVICE));             \
-      CUBLAS_ENFORCE(CuBLASFunc(                                              \
-          context->cublas_handle(),                                           \
-          N,                                                                  \
-          reinterpret_cast<const TData*>(alpha),                              \
-          Y,                                                                  \
-          1));                                                                \
-    } else {                                                                  \
-      thrust::transform(                                                      \
-          thrust::cuda::par.on(context->cuda_stream()),                       \
-          X,                                                                  \
-          X + N,                                                              \
-          Y,                                                                  \
-          [alpha] __device__(const TData x) {                                 \
-            return x * static_cast<TData>(*alpha);                            \
-          });                                                                 \
-    }                                                                         \
+#define DELEGATE_CUDA_SCALE(T, CuBLASFunc)                                   \
+  template <>                                                                \
+  CAFFE2_CUDA_EXPORT void Scale<T, T, CUDAContext>(                          \
+      const std::int64_t N,                                                  \
+      const T alpha,                                                         \
+      const T* X,                                                            \
+      T* Y,                                                                  \
+      CUDAContext* context) {                                                \
+    if (N == 0) {                                                            \
+      return;                                                                \
+    }                                                                        \
+    if (Y == X) {                                                            \
+      CUBLAS_ENFORCE(cublasSetPointerMode(                                   \
+          context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));              \
+      CUBLAS_ENFORCE(CuBLASFunc(context->cublas_handle(), N, &alpha, Y, 1)); \
+    } else {                                                                 \
+      const std::int64_t M = DivUp<std::int64_t>(N, CAFFE_CUDA_NUM_THREADS); \
+      ScaleCUDAKernel<T, T>                                                  \
+          <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(        \
+              N, alpha, X, Y);                                               \
+      C10_CUDA_KERNEL_LAUNCH_CHECK();                                        \
+    }                                                                        \
+  }                                                                          \
+  template <>                                                                \
+  CAFFE2_CUDA_EXPORT void Scale<T, T, CUDAContext>(                          \
+      const std::int64_t N,                                                  \
+      const T* alpha,                                                        \
+      const T* X,                                                            \
+      T* Y,                                                                  \
+      CUDAContext* context) {                                                \
+    if (N == 0) {                                                            \
+      return;                                                                \
+    }                                                                        \
+    if (Y == X) {                                                            \
+      CUBLAS_ENFORCE(cublasSetPointerMode(                                   \
+          context->cublas_handle(), CUBLAS_POINTER_MODE_DEVICE));            \
+      CUBLAS_ENFORCE(CuBLASFunc(context->cublas_handle(), N, alpha, Y, 1));  \
+    } else {                                                                 \
+      const std::int64_t M = DivUp<std::int64_t>(N, CAFFE_CUDA_NUM_THREADS); \
+      ScaleCUDAKernel<T, T>                                                  \
+          <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(        \
+              N, alpha, X, Y);                                               \
+      C10_CUDA_KERNEL_LAUNCH_CHECK();                                        \
+    }                                                                        \
   }
-DELEGATE_CUDA_SCALE_BY_CUBLAS_FUNCTION(float, float, cublasSscal)
-DELEGATE_CUDA_SCALE_BY_CUBLAS_FUNCTION(double, double, cublasDscal)
-DELEGATE_CUDA_SCALE_BY_CUBLAS_FUNCTION(float, double, cublasDscal)
-#undef DELEGATE_CUDA_SCALE_BY_CUBLAS_FUNCTION
+DELEGATE_CUDA_SCALE(float, cublasSscal)
+DELEGATE_CUDA_SCALE(double, cublasDscal)
+#undef DELEGATE_CUDA_SCALE
 
-#define CAFFE2_SPECIALIZED_CUDA_SCALE(TAlpha, TData)         \
-  template <>                                                \
-  CAFFE2_CUDA_EXPORT void Scale<TAlpha, TData, CUDAContext>( \
-      const int N,                                           \
-      const TAlpha alpha,                                    \
-      const TData* X,                                        \
-      TData* Y,                                              \
-      CUDAContext* context) {                                \
-    if (N > 0) {                                             \
-      thrust::transform(                                     \
-          thrust::cuda::par.on(context->cuda_stream()),      \
-          X,                                                 \
-          X + N,                                             \
-          Y,                                                 \
-          [alpha] __device__(const TData x) {                \
-            return x * static_cast<TData>(alpha);            \
-          });                                                \
-    }                                                        \
-  }                                                          \
-  template <>                                                \
-  CAFFE2_CUDA_EXPORT void Scale<TAlpha, TData, CUDAContext>( \
-      const int N,                                           \
-      const TAlpha* alpha,                                   \
-      const TData* X,                                        \
-      TData* Y,                                              \
-      CUDAContext* context) {                                \
-    if (N > 0) {                                             \
-      thrust::transform(                                     \
-          thrust::cuda::par.on(context->cuda_stream()),      \
-          X,                                                 \
-          X + N,                                             \
-          Y,                                                 \
-          [alpha] __device__(const TData x) {                \
-            return x * static_cast<TData>(*alpha);           \
-          });                                                \
-    }                                                        \
+#ifndef __HIP_PLATFORM_HCC__
+
+#define DELEGATE_CUDA_SCALE_EX(                                              \
+    TAlpha, TData, kAlphaType, kDataType, kExecutionType)                    \
+  template <>                                                                \
+  CAFFE2_CUDA_EXPORT void Scale<TAlpha, TData, CUDAContext>(                 \
+      const std::int64_t N,                                                  \
+      const TAlpha alpha,                                                    \
+      const TData* X,                                                        \
+      TData* Y,                                                              \
+      CUDAContext* context) {                                                \
+    if (N == 0) {                                                            \
+      return;                                                                \
+    }                                                                        \
+    if (Y == X) {                                                            \
+      CUBLAS_ENFORCE(cublasSetPointerMode(                                   \
+          context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));              \
+      CUBLAS_ENFORCE(cublasScalEx(                                           \
+          context->cublas_handle(),                                          \
+          N,                                                                 \
+          &alpha,                                                            \
+          kAlphaType,                                                        \
+          Y,                                                                 \
+          kDataType,                                                         \
+          1,                                                                 \
+          kExecutionType));                                                  \
+    } else {                                                                 \
+      const std::int64_t M = DivUp<std::int64_t>(N, CAFFE_CUDA_NUM_THREADS); \
+      ScaleCUDAKernel<TAlpha, TData>                                         \
+          <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(        \
+              N, alpha, X, Y);                                               \
+      C10_CUDA_KERNEL_LAUNCH_CHECK();                                        \
+    }                                                                        \
+  }                                                                          \
+  template <>                                                                \
+  CAFFE2_CUDA_EXPORT void Scale<TAlpha, TData, CUDAContext>(                 \
+      const std::int64_t N,                                                  \
+      const TAlpha* alpha,                                                   \
+      const TData* X,                                                        \
+      TData* Y,                                                              \
+      CUDAContext* context) {                                                \
+    if (N == 0) {                                                            \
+      return;                                                                \
+    }                                                                        \
+    if (Y == X) {                                                            \
+      CUBLAS_ENFORCE(cublasSetPointerMode(                                   \
+          context->cublas_handle(), CUBLAS_POINTER_MODE_DEVICE));            \
+      CUBLAS_ENFORCE(cublasScalEx(                                           \
+          context->cublas_handle(),                                          \
+          N,                                                                 \
+          alpha,                                                             \
+          kAlphaType,                                                        \
+          Y,                                                                 \
+          kDataType,                                                         \
+          1,                                                                 \
+          kExecutionType));                                                  \
+    } else {                                                                 \
+      const std::int64_t M = DivUp<std::int64_t>(N, CAFFE_CUDA_NUM_THREADS); \
+      ScaleCUDAKernel<TAlpha, TData>                                         \
+          <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(        \
+              N, alpha, X, Y);                                               \
+      C10_CUDA_KERNEL_LAUNCH_CHECK();                                        \
+    }                                                                        \
+  }
+DELEGATE_CUDA_SCALE_EX(float, double, CUDA_R_32F, CUDA_R_64F, CUDA_R_64F)
+DELEGATE_CUDA_SCALE_EX(float, at::Half, CUDA_R_32F, CUDA_R_16F, CUDA_R_32F)
+#undef DELEGATE_CUDA_SCALE_EX
+
+#endif // __HIP_PLATFORM_HCC__
+
+#define CAFFE2_SPECIALIZED_CUDA_SCALE(TAlpha, TData)                         \
+  template <>                                                                \
+  CAFFE2_CUDA_EXPORT void Scale<TAlpha, TData, CUDAContext>(                 \
+      const std::int64_t N,                                                  \
+      const TAlpha alpha,                                                    \
+      const TData* X,                                                        \
+      TData* Y,                                                              \
+      CUDAContext* context) {                                                \
+    if (N > 0) {                                                             \
+      const std::int64_t M = DivUp<std::int64_t>(N, CAFFE_CUDA_NUM_THREADS); \
+      ScaleCUDAKernel<TAlpha, TData>                                         \
+          <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(        \
+              N, alpha, X, Y);                                               \
+      C10_CUDA_KERNEL_LAUNCH_CHECK();                                        \
+    }                                                                        \
+  }                                                                          \
+  template <>                                                                \
+  CAFFE2_CUDA_EXPORT void Scale<TAlpha, TData, CUDAContext>(                 \
+      const std::int64_t N,                                                  \
+      const TAlpha* alpha,                                                   \
+      const TData* X,                                                        \
+      TData* Y,                                                              \
+      CUDAContext* context) {                                                \
+    if (N > 0) {                                                             \
+      const std::int64_t M = DivUp<std::int64_t>(N, CAFFE_CUDA_NUM_THREADS); \
+      ScaleCUDAKernel<TAlpha, TData>                                         \
+          <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(        \
+              N, *alpha, X, Y);                                              \
+      C10_CUDA_KERNEL_LAUNCH_CHECK();                                        \
+    }                                                                        \
   }
 CAFFE2_SPECIALIZED_CUDA_SCALE(std::int32_t, std::int32_t)
 CAFFE2_SPECIALIZED_CUDA_SCALE(std::int64_t, std::int64_t)
-#undef CAFFE2_SPECIALIZED_CUDA_SCALE
 
 #ifdef __HIP_PLATFORM_HCC__
-
-#define CAFFE2_SPECIALIZED_CUDA_HALF_SCALE(TAlpha)                \
-  template <>                                                     \
-  CAFFE2_CUDA_EXPORT void Scale<TAlpha, at::Half, CUDAContext>(   \
-      const int N,                                                \
-      const TAlpha alpha,                                         \
-      const at::Half* X,                                          \
-      at::Half* Y,                                                \
-      CUDAContext* context) {                                     \
-    if (N > 0) {                                                  \
-      const float alpha_host = convert::To<TAlpha, float>(alpha); \
-      thrust::transform(                                          \
-          thrust::cuda::par.on(context->cuda_stream()),           \
-          X,                                                      \
-          X + N,                                                  \
-          Y,                                                      \
-          [alpha_host] __device__(const at::Half x) {             \
-            return convert::To<float, at::Half>(                  \
-                convert::To<at::Half, float>(x) * alpha_host);    \
-          });                                                     \
-    }                                                             \
-  }                                                               \
-  template <>                                                     \
-  CAFFE2_CUDA_EXPORT void Scale<TAlpha, at::Half, CUDAContext>(   \
-      const int N,                                                \
-      const TAlpha* alpha,                                        \
-      const at::Half* X,                                          \
-      at::Half* Y,                                                \
-      CUDAContext* context) {                                     \
-    if (N > 0) {                                                  \
-      thrust::transform(                                          \
-          thrust::cuda::par.on(context->cuda_stream()),           \
-          X,                                                      \
-          X + N,                                                  \
-          Y,                                                      \
-          [alpha] __device__(const at::Half x) {                  \
-            return convert::To<float, at::Half>(                  \
-                convert::To<at::Half, float>(x) *                 \
-                convert::To<TAlpha, float>(*alpha));              \
-          });                                                     \
-    }                                                             \
-  }
-CAFFE2_SPECIALIZED_CUDA_HALF_SCALE(at::Half)
-CAFFE2_SPECIALIZED_CUDA_HALF_SCALE(float)
-#undef CAFFE2_SPECIALIZED_CUDA_HALF_SCALE
-
-#else // __HIP_PLATFORM_HCC__
-
-#define DELEGATE_CUDA_HALF_SCALE(TAlpha, kAlphaType, kExecutionType) \
-  template <>                                                        \
-  CAFFE2_CUDA_EXPORT void Scale<TAlpha, at::Half, CUDAContext>(      \
-      const int N,                                                   \
-      const TAlpha alpha,                                            \
-      const at::Half* X,                                             \
-      at::Half* Y,                                                   \
-      CUDAContext* context) {                                        \
-    if (N == 0) {                                                    \
-      return;                                                        \
-    }                                                                \
-    if (Y == X) {                                                    \
-      CUBLAS_ENFORCE(cublasSetPointerMode(                           \
-          context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));      \
-      CUBLAS_ENFORCE(cublasScalEx(                                   \
-          context->cublas_handle(),                                  \
-          N,                                                         \
-          &alpha,                                                    \
-          kAlphaType,                                                \
-          Y,                                                         \
-          CUDA_R_16F,                                                \
-          1,                                                         \
-          kExecutionType));                                          \
-    } else {                                                         \
-      const float alpha_host = convert::To<TAlpha, float>(alpha);    \
-      thrust::transform(                                             \
-          thrust::cuda::par.on(context->cuda_stream()),              \
-          X,                                                         \
-          X + N,                                                     \
-          Y,                                                         \
-          [alpha_host] __device__(const at::Half x) {                \
-            return convert::To<float, at::Half>(                     \
-                convert::To<at::Half, float>(x) * alpha_host);       \
-          });                                                        \
-    }                                                                \
-  }                                                                  \
-  template <>                                                        \
-  CAFFE2_CUDA_EXPORT void Scale<TAlpha, at::Half, CUDAContext>(      \
-      const int N,                                                   \
-      const TAlpha* alpha,                                           \
-      const at::Half* X,                                             \
-      at::Half* Y,                                                   \
-      CUDAContext* context) {                                        \
-    if (N == 0) {                                                    \
-      return;                                                        \
-    }                                                                \
-    if (Y == X) {                                                    \
-      CUBLAS_ENFORCE(cublasSetPointerMode(                           \
-          context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));      \
-      CUBLAS_ENFORCE(cublasScalEx(                                   \
-          context->cublas_handle(),                                  \
-          N,                                                         \
-          alpha,                                                     \
-          kAlphaType,                                                \
-          Y,                                                         \
-          CUDA_R_16F,                                                \
-          1,                                                         \
-          kExecutionType));                                          \
-    } else {                                                         \
-      thrust::transform(                                             \
-          thrust::cuda::par.on(context->cuda_stream()),              \
-          X,                                                         \
-          X + N,                                                     \
-          Y,                                                         \
-          [alpha] __device__(const at::Half x) {                     \
-            return convert::To<float, at::Half>(                     \
-                convert::To<at::Half, float>(x) *                    \
-                convert::To<TAlpha, float>(*alpha));                 \
-          });                                                        \
-    }                                                                \
-  }
-DELEGATE_CUDA_HALF_SCALE(at::Half, CUDA_R_16F, CUDA_R_32F)
-DELEGATE_CUDA_HALF_SCALE(float, CUDA_R_32F, CUDA_R_32F)
-#undef DELEGATE_CUDA_HALF_SCALE
-
+CAFFE2_SPECIALIZED_CUDA_SCALE(float, double)
+CAFFE2_SPECIALIZED_CUDA_SCALE(float, at::Half)
 #endif // __HIP_PLATFORM_HCC__
+#undef CAFFE2_SPECIALIZED_CUDA_SCALE
 
 #define DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(T, Func, DeviceFunc)        \
   template <>                                                            \
@@ -842,6 +859,7 @@ DELEGATE_CUDA_AXPY_EX(float, at::Half, CUDA_R_32F, CUDA_R_16F, CUDA_R_32F)
     AxpyCUDAKernel<TAlpha, TData>                                          \
         <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(        \
             N, alpha, X, Y);                                               \
+    C10_CUDA_KERNEL_LAUNCH_CHECK();                                        \
   }                                                                        \
   template <>                                                              \
   CAFFE2_CUDA_EXPORT void Axpy<TAlpha, TData, CUDAContext>(                \
@@ -854,6 +872,7 @@ DELEGATE_CUDA_AXPY_EX(float, at::Half, CUDA_R_32F, CUDA_R_16F, CUDA_R_32F)
     AxpyCUDAKernel<TAlpha, TData>                                          \
         <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(        \
             N, alpha, X, Y);                                               \
+    C10_CUDA_KERNEL_LAUNCH_CHECK();                                        \
   }
 CAFFE2_SPECIALIZED_CUDA_AXPY(float, double)
 CAFFE2_SPECIALIZED_CUDA_AXPY(float, at::Half)
@@ -874,6 +893,7 @@ CAFFE2_SPECIALIZED_CUDA_AXPY(float, at::Half)
     AxpbyCUDAKernel<TAlpha, TData>                                         \
         <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(        \
             N, alpha, X, beta, Y);                                         \
+    C10_CUDA_KERNEL_LAUNCH_CHECK();                                        \
   }                                                                        \
   template <>                                                              \
   CAFFE2_CUDA_EXPORT void Axpby<TAlpha, TData, CUDAContext>(               \
@@ -887,6 +907,7 @@ CAFFE2_SPECIALIZED_CUDA_AXPY(float, at::Half)
     AxpbyCUDAKernel<TAlpha, TData>                                         \
         <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(        \
             N, alpha, X, beta, Y);                                         \
+    C10_CUDA_KERNEL_LAUNCH_CHECK();                                        \
   }
 CAFFE2_SPECIALIZED_CUDA_AXPBY(float, float)
 CAFFE2_SPECIALIZED_CUDA_AXPBY(float, double)

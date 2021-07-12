@@ -101,25 +101,8 @@ analyze_torch_mobile() {
   call_analyzer
 }
 
-convert_output_to_bazel() {
-  cd "${SRC_ROOT}"
-
-  DEST="${BUILD_ROOT}/pt_deps.bzl"
-
-  args=(
-    --op_dependency "${OUTPUT}"
-    --output "${DEST}"
-  )
-
-  if [ -n "${BASE_OPS_FILE}" ] && [ -f "${BASE_OPS_FILE}" ]; then
-    args+=(
-      --base_ops $(< ${BASE_OPS_FILE})
-    )
-  fi
-
-  python -m tools.code_analyzer.op_deps_processor "${args[@]}"
-
-  echo "Deployed file at: ${DEST}"
+print_output_file_path() {
+  echo "Deployed file at: ${OUTPUT}"
 }
 
 analyze_test_project() {
@@ -153,7 +136,7 @@ if [ -n "${ANALYZE_TORCH}" ]; then
   build_torch_mobile
   analyze_torch_mobile
   if [ -n "${DEPLOY}" ]; then
-    convert_output_to_bazel
+    print_output_file_path
   fi
 fi
 

@@ -34,6 +34,7 @@ class PrependDimOp : public Operator<Context> {
     vector<int64_t> actual_new_shape(input.dim() + 1);
     actual_new_shape[0] = dim_size_;
     actual_new_shape[1] = input.size(0) / dim_size_;
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 1; i < input.sizes().size(); ++i) {
       actual_new_shape[i + 1] = input.size(i);
     }
@@ -70,6 +71,7 @@ class MergeDimOp : public Operator<Context> {
 
     vector<int64_t> actual_new_shape(input.dim() - 1);
     actual_new_shape[0] = input.size(0) * input.size(1);
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 1; i < input.sizes().size() - 1; ++i) {
       actual_new_shape[i] = input.size(i + 1);
     }

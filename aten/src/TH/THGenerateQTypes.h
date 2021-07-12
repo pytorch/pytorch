@@ -10,6 +10,7 @@
 #include <TH/THGenerateQUInt8Type.h>
 #include <TH/THGenerateQInt8Type.h>
 #include <TH/THGenerateQInt32Type.h>
+#include <TH/THGenerateQUInt4x2Type.h>
 
 #ifdef THQLocalGenerateManyTypes
 #undef THQLocalGenerateManyTypes

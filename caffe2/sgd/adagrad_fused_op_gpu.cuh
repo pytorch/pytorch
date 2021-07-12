@@ -8,6 +8,7 @@
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/utils/GpuAtomics.cuh"
 
 #ifdef __HIP_PLATFORM_HCC__
 #define SEGREDUCE_MINBLOCKS 8
@@ -25,6 +26,27 @@
 #endif
 
 namespace caffe2 {
+
+constexpr int kWarpSize = 32;
+
+template <typename T>
+inline __device__ T shfl_xor(const T val, int laneMask, int width = kWarpSize) {
+#ifndef __HIP_PLATFORM_HCC__
+  return __shfl_xor_sync(0xffffffff, val, laneMask, width);
+#else
+  return __shfl_xor(val, laneMask, width);
+#endif
+}
+
+/// Sums a register value across all warp threads
+template <typename T, int ReduceWidth = kWarpSize>
+inline __device__ T warpReduceAllSum(T val) {
+#pragma unroll
+  for (int mask = ReduceWidth / 2; mask > 0; mask >>= 1) {
+    val += shfl_xor(val, mask);
+  }
+  return val;
+}
 
 enum roundOption : int { NEAREST = 0, STOCHASTIC = 1 };
 
@@ -82,7 +104,7 @@ randFactor<at::Half, float, NEAREST>::convertTypeFromTargetToParam(
 }
 
 static inline __device__ void gpuAtomicAdd(float* address, float val) {
-  atomicAdd(address, val);
+  gpu_atomic_add(address, val);
 }
 
 static inline __device__ void gpuAtomicAdd(c10::Half* address, c10::Half val) {

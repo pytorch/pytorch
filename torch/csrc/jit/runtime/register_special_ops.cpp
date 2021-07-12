@@ -4,8 +4,8 @@
 #include <ATen/core/jit_type.h>
 #include <aten/src/ATen/ExpandUtils.h>
 #include <c10/core/DefaultDtype.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/api/include/torch/utils.h>
-#include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator.h>
@@ -100,7 +100,7 @@ void storeLastDimension(
   auto n = sizes[dim];
   auto seq_size = obj.size();
   checkSequenceSize(n, dim, seq_size);
-  for (int64_t i = 0; i < n; i++) {
+  for (const auto i : c10::irange(n)) {
     *(DTYPE*)data = obj[i].to<DTYPE>();
     data += strides[dim] * elementSize;
   }
@@ -116,7 +116,7 @@ void storeLastDimensionFloat(
   auto n = sizes[dim];
   auto seq_size = obj.size();
   checkSequenceSize(n, dim, seq_size);
-  for (int64_t i = 0; i < n; i++) {
+  for (const auto i : c10::irange(n)) {
     *(float*)data = static_cast<float>(obj[i].to<double>());
     data += strides[dim] * elementSize;
   }
@@ -132,7 +132,7 @@ void storeLastDimensionHalf(
   auto n = sizes[dim];
   auto seq_size = obj.size();
   checkSequenceSize(n, dim, seq_size);
-  for (int64_t i = 0; i < n; i++) {
+  for (const auto i : c10::irange(n)) {
     *(at::Half*)data = at::convert<at::Half, double>(obj[i].to<double>());
     data += strides[dim] * elementSize;
   }
@@ -151,7 +151,7 @@ void recursiveStore(
   auto seq = obj.toListRef();
   checkSequenceSize(n, dim, seq.size());
   if (dim + 1 < static_cast<long>(ndim)) {
-    for (int64_t i = 0; i < n; i++) {
+    for (const auto i : c10::irange(n)) {
       recursiveStore(data, sizes, strides, dim + 1, tenElementSize, seq[i]);
       data += strides[dim] * tenElementSize;
     }
@@ -187,6 +187,7 @@ template <bool if_set_requires_grad>
 void createTensorFromList(Stack* stack) {
   // torch.tensor has a fourth requires_grad arg but torch.as_tensor not, so
   // we use the template arg to distinguish between these two cases
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool requires_grad;
   IValue data;
   IValue dtype;
@@ -210,13 +211,15 @@ void createTensorFromList(Stack* stack) {
   auto tensor =
       at::empty(sizes, at::initialTensorOptions().dtype(initial_scalar_type));
 
-  recursiveStore(
-      (char*)tensor.data_ptr(),
-      sizes,
-      tensor.strides(),
-      0,
-      tensor.element_size(),
-      data);
+  if (tensor.numel() != 0) {
+    recursiveStore(
+        (char*)tensor.data_ptr(),
+        sizes,
+        tensor.strides(),
+        0,
+        tensor.element_size(),
+        data);
+  }
 
   tensor = castTensorTo(tensor, dtype, device);
   auto default_type = at::typeMetaToScalarType(at::get_default_dtype());
@@ -239,6 +242,7 @@ void createTensorFromList(Stack* stack) {
   push(stack, std::move(tensor));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg({
     OperatorGenerator(
         TORCH_SELECTIVE_SCHEMA(
@@ -293,12 +297,24 @@ RegisterOperators reg({
         double,
         at::native::scalar_tensor(
             scalar_val,
-            at::device(at::kCPU).dtype(c10::get_default_dtype())))
+            typeMetaToScalarType(c10::get_default_dtype()),
+            c10::nullopt /* layout */,
+            at::kCPU,
+            c10::nullopt /* pin_memory*/))
         DEFINE_TORCH_TENSOR_OP(int, int64_t, at::scalar_to_tensor(scalar_val))
             DEFINE_TORCH_TENSOR_OP(
                 bool,
                 bool,
                 at::empty({}, at::CPU(at::kBool).options()).fill_(scalar_val))
+                DEFINE_TORCH_TENSOR_OP(
+                    complex,
+                    c10::complex<double>,
+                    at::native::scalar_tensor(
+                        scalar_val,
+                        typeMetaToScalarType(c10::get_default_complex_dtype()),
+                        c10::nullopt /* layout */,
+                        at::kCPU,
+                        c10::nullopt /* pin_memory */))
 
     // reference python implementation: internal_new_from_data in
     // tensor_new.cpp
@@ -316,7 +332,9 @@ RegisterOperators reg({
         [](Stack* stack) {
           at::Tensor weight;
           at::Tensor input;
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           double max_norm;
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           double norm_type;
           pop(stack, weight, input, max_norm, norm_type);
 
@@ -371,6 +389,10 @@ RegisterOperators reg({
         [](Stack* stack) { push(stack, true); },
         aliasAnalysisFromSchema()),
     OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA("aten::has_torch_function(...) -> bool"),
+        [](Stack* stack) { push(stack, false); },
+        aliasAnalysisFromSchema()),
+    OperatorGenerator(
         TORCH_SELECTIVE_SCHEMA(
             "aten::_no_grad_uniform_(Tensor(a!) tensor, float a, float b) -> Tensor(a!)"),
         [](Stack* stack) {
@@ -378,7 +400,9 @@ RegisterOperators reg({
           torch::NoGradGuard no_grad;
 
           at::Tensor tensor;
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           double a;
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           double b;
           pop(stack, tensor, a, b);
           push(stack, tensor.uniform_(a, b));
@@ -392,7 +416,9 @@ RegisterOperators reg({
           torch::NoGradGuard no_grad;
 
           at::Tensor tensor;
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           double mean;
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           double std;
           pop(stack, tensor, mean, std);
           push(stack, tensor.normal_(mean, std));
@@ -406,6 +432,7 @@ RegisterOperators reg({
           torch::NoGradGuard no_grad;
 
           at::Tensor tensor;
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           double val;
           pop(stack, tensor, val);
           push(stack, at::fill_(tensor, val));
@@ -429,10 +456,7 @@ RegisterOperators reg({
         aliasAnalysisConservative()),
     Operator(
         "aten::set_grad_enabled(bool val) -> ()",
-        [](Stack* stack) {
-          torch::GradMode::set_enabled(pop(stack).toBool());
-          push(stack, IValue());
-        },
+        [](Stack* stack) { torch::GradMode::set_enabled(pop(stack).toBool()); },
         aliasAnalysisConservative()),
 });
 } // namespace

@@ -1,17 +1,22 @@
 #include <TH/THTensor.hpp>
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <TH/generic/THTensor.cpp>
 #include <TH/THGenerateAllTypes.h>
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <TH/generic/THTensor.cpp>
 #include <TH/THGenerateComplexTypes.h>
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <TH/generic/THTensor.cpp>
 #include <TH/THGenerateHalfType.h>
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <TH/generic/THTensor.cpp>
 #include <TH/THGenerateBoolType.h>
 
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <TH/generic/THTensor.cpp>
 #include <TH/THGenerateBFloat16Type.h>
 
@@ -30,43 +35,4 @@ void THTensor_free(THTensor *self)
 void THTensor_setStorage(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, at::IntArrayRef size_, at::IntArrayRef stride_) {
   c10::raw::intrusive_ptr::incref(storage_);
   THTensor_wrap(self).set_(at::Storage(c10::intrusive_ptr<at::StorageImpl>::reclaim(storage_)), storageOffset_, size_, stride_);
-}
-
-void THTensor_resize(THTensor *self, at::IntArrayRef size, at::IntArrayRef stride)
-{
-  if (stride.data()) {
-    THArgCheck(stride.size() == size.size(), 3, "invalid stride");
-  }
-
-#ifdef DEBUG
-  THAssert(size.size() <= INT_MAX);
-#endif
-  THTensor_resizeNd(self, size.size(), size.data(), stride.data());
-}
-
-void THTensor_resizeNd(THTensor *self, int nDimension, const int64_t *size, const int64_t *stride)
-{
-  TORCH_CHECK(nDimension >= 0, "resizeNd nDimension must be non-negative");
-  at::IntArrayRef sizes(size, nDimension);
-  at::optional<at::IntArrayRef> strides;
-  if (stride) {
-    strides = at::IntArrayRef(stride, nDimension);
-  }
-  at::native::resize_impl_cpu_(self, sizes, strides);
-}
-
-// NB: Steals ownership of storage
-void THTensor_stealAndSetStoragePtr(THTensor* tensor, THStorage* storage) {
-  // Caffe2 might have tensors whose storages are null, but we
-  // don't allow it in PyTorch.
-  AT_ASSERT(storage);
-
-  // We used to allow this, but this breaks device caching.
-  // Let's put an actual error message for this one.
-  TORCH_CHECK(tensor->storage().device() == storage->device(),
-            "Attempted to set the storage of a tensor on device \"", tensor->storage().device(),
-             "\" to a storage on different device \"", storage->device(),
-            "\".  This is no longer allowed; the devices must match.");
-  tensor->set_storage_keep_dtype(
-      at::Storage(c10::intrusive_ptr<THStorage>::reclaim(storage)));
 }

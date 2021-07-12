@@ -9,6 +9,7 @@ namespace torch {
 namespace jit {
 
 struct TORCH_API GraphFunction : public Function {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   GraphFunction(
       c10::QualifiedName name,
       std::shared_ptr<Graph> graph,
@@ -25,7 +26,9 @@ struct TORCH_API GraphFunction : public Function {
 
   void run(Stack&& stack) override;
 
-  c10::intrusive_ptr<c10::ivalue::Future> runAsync(Stack& stack) override;
+  c10::intrusive_ptr<c10::ivalue::Future> runAsync(
+      Stack& stack,
+      TaskLauncher taskLauncher = at::launch) override;
 
   IValue operator()(std::vector<IValue> stack, const Kwargs& kwargs = Kwargs())
       override;

@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core
 from hypothesis import given, settings
@@ -14,7 +14,7 @@ class TestSoftplus(hu.HypothesisTestCase):
 
     @given(X=hu.tensor(),
            **hu.gcs)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_softplus(self, X, gc, dc):
         op = core.CreateOperator("Softplus", ["X"], ["Y"])
         self.assertDeviceChecks(dc, op, [X], [0])

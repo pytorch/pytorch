@@ -7,7 +7,7 @@ from torch.backends import ContextProp, PropModule, __allow_nonbracketed_mutatio
 try:
     from torch._C import _cudnn
 except ImportError:
-    _cudnn = None  # type: ignore
+    _cudnn = None  # type: ignore[assignment]
 
 # Write:
 #
@@ -46,6 +46,7 @@ else:
 
 
 def version():
+    """Returns the version of cuDNN"""
     if not _init():
         return None
     return __cudnn_version

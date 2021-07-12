@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core
 from hypothesis import given, settings
@@ -33,7 +33,7 @@ class TestSinusoidPositionEncodingOp(serial.SerializedTestCase):
         amplitude=st.floats(MIN_TEST_AMPLITUDE, MAX_TEST_AMPLITUDE),
         **hu.gcs_cpu_only
     )
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_sinusoid_embedding(
         self, positions_vec, embedding_size, batch_size, alpha, amplitude, gc, dc
     ):

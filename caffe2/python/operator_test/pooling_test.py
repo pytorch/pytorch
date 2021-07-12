@@ -1,6 +1,6 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+
+
+
 
 import numpy as np
 from hypothesis import assume, given, settings
@@ -90,7 +90,7 @@ class TestPooling(hu.HypothesisTestCase):
            op_type=st.sampled_from(["MaxPool", "AveragePool",
                                     "MaxPool1D", "AveragePool1D"]),
            **hu.gcs)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_pooling_1d(self, stride, pad, kernel, size, input_channels,
                         batch_size, order, op_type, gc, dc):
         assume(pad < kernel)

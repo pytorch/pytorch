@@ -2,7 +2,9 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Adam, AdamOp<float, CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Adam)
     .NumInputs(6)
     .NumOutputs(3, 4)
@@ -48,7 +50,9 @@ and returns (param_o, m1_o, m2_o, grad_o), in which grad_o is an optional output
     .Arg("beta2", "Default 0.999")
     .Arg("epsilon", "Default 1e-5");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SparseAdam, SparseAdamOp<float, CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseAdam)
     .NumInputs(7)
     .NumOutputs(3, 4)
@@ -87,9 +91,11 @@ OPERATOR_SCHEMA(SparseAdam)
     .Arg("epsilon", "Default 1e-5")
     .Arg("enableRAdam", "Default false");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     RowWiseSparseAdam,
     RowWiseSparseAdamOp<float, CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RowWiseSparseAdam)
     .NumInputs(7)
     .NumOutputs(3, 4)
@@ -130,7 +136,10 @@ OPERATOR_SCHEMA(RowWiseSparseAdam)
     .Arg("beta2", "Default 0.999")
     .Arg("epsilon", "Default 1e-5");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(Adam);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(SparseAdam);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(RowWiseSparseAdam);
 } // namespace caffe2

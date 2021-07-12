@@ -43,9 +43,18 @@ if(NOT INTERN_BUILD_MOBILE)
   # important because with ASAN you might need to help the compiled library find
   # some dynamic libraries.
   cmake_push_check_state(RESET)
-  CHECK_C_SOURCE_RUNS("
-  int main() { return 0; }
-  " COMPILER_WORKS)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND CMAKE_OSX_ARCHITECTURES MATCHES "^(x86_64|arm64)$")
+    list(APPEND CMAKE_REQUIRED_FLAGS "-arch ${CMAKE_HOST_SYSTEM_PROCESSOR}")
+  endif()
+  if(CMAKE_CROSSCOMPILING)
+    CHECK_C_SOURCE_COMPILES("
+    int main() { return 0; }
+    " COMPILER_WORKS)
+  else()
+    CHECK_C_SOURCE_RUNS("
+    int main() { return 0; }
+    " COMPILER_WORKS)
+  endif()
   if(NOT COMPILER_WORKS)
     # Force cmake to retest next time around
     unset(COMPILER_WORKS CACHE)
@@ -306,8 +315,9 @@ endif()
 # Also, we will turn off deprecated-declarations
 # due to protobuf.
 
-if(IOS)
+if(IOS AND (${IOS_ARCH} MATCHES "armv7*"))
   add_definitions("-mfpu=neon-fp16")
+  add_definitions("-arch" ${IOS_ARCH})
   add_definitions("-Wno-deprecated-declarations")
 endif()
 
@@ -315,21 +325,23 @@ endif()
 # TODO: This only works with new style gcc and clang (not the old -faddress-sanitizer).
 # Change if necessary on old platforms.
 if(USE_ASAN)
-  set(CAFFE2_ASAN_FLAG "-fsanitize=address -fPIE -pie")
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CAFFE2_ASAN_FLAG}")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CAFFE2_ASAN_FLAG}")
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${CAFFE2_ASAN_FLAG}")
-  set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} ${CAFFE2_ASAN_FLAG}")
-  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${CAFFE2_ASAN_FLAG}")
+  set(CAFFE2_ASAN_COMPILER_FLAGS "-fsanitize=address -fPIE")
+  set(CAFFE2_ASAN_LINKER_FLAGS "-pie")
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CAFFE2_ASAN_COMPILER_FLAGS}")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CAFFE2_ASAN_COMPILER_FLAGS}")
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${CAFFE2_ASAN_LINKER_FLAGS}")
+  set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} ${CAFFE2_ASAN_LINKER_FLAGS}")
+  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${CAFFE2_ASAN_LINKER_FLAGS}")
 endif()
 
 if(USE_TSAN)
-  set(CAFFE2_TSAN_FLAG "-fsanitize=thread -fPIE -pie")
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CAFFE2_TSAN_FLAG}")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CAFFE2_TSAN_FLAG}")
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${CAFFE2_TSAN_FLAG}")
-  set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} ${CAFFE2_TSAN_FLAG}")
-  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${CAFFE2_TSAN_FLAG}")
+  set(CAFFE2_TSAN_COMPILER_FLAGS "-fsanitize=thread -fPIE")
+  set(CAFFE2_TSAN_LINKER_FLAGS "-pie")
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CAFFE2_TSAN_COMPILER_FLAGS}")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CAFFE2_TSAN_COMPILER_FLAGS}")
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${CAFFE2_TSAN_LINKER_FLAGS}")
+  set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} ${CAFFE2_TSAN_LINKER_FLAGS}")
+  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${CAFFE2_TSAN_LINKER_FLAGS}")
 endif()
 
 # ---[ Create CAFFE2_BUILD_SHARED_LIBS for macros.h.in usage.

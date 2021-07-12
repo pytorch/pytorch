@@ -9,11 +9,21 @@
 
 namespace at { namespace native {
 
-DECLARE_DISPATCH(void(*)(TensorIterator&, Scalar, Scalar, Scalar), arange_stub);
-DECLARE_DISPATCH(void(*)(TensorIterator&, Scalar, Scalar, int64_t), linspace_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+DECLARE_DISPATCH(void(*)(TensorIterator&, const Scalar&, const Scalar&, const Scalar&), arange_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+DECLARE_DISPATCH(void(*)(TensorIterator&, const Scalar&, const Scalar&, int64_t), linspace_stub);
 
-Tensor& linspace_cpu_out(Tensor& result, Scalar start, Scalar end, int64_t steps) {
+Tensor& linspace_cpu_out(const Scalar& start, const Scalar& end, c10::optional<int64_t> optional_steps, Tensor& result) {
+  const auto steps = optional_steps.value_or(100);
   TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
+
+  if (!optional_steps.has_value()) {
+    TORCH_WARN_ONCE(
+      "Not providing a value for linspace's steps is deprecated and will "
+      "throw a runtime error in a future release. This warning will appear "
+      "only once per process.");
+  }
 
   if (result.numel() != steps) {
     result.resize_({steps});
@@ -25,7 +35,7 @@ Tensor& linspace_cpu_out(Tensor& result, Scalar start, Scalar end, int64_t steps
     result.fill_(start);
   } else {
     Tensor r = result.is_contiguous() ? result : result.contiguous();
-    auto iter = TensorIterator::nullary_op(r);
+    auto iter = TensorIterator::borrowing_nullary_op(r);
     linspace_stub(iter.device_type(), iter, start, end, steps);
     if (!result.is_contiguous()) {
       result.copy_(r);
@@ -35,8 +45,16 @@ Tensor& linspace_cpu_out(Tensor& result, Scalar start, Scalar end, int64_t steps
   return result;
 }
 
-Tensor& logspace_cpu_out(Tensor& result, Scalar start, Scalar end, int64_t steps, double base) {
+Tensor& logspace_cpu_out(const Scalar& start, const Scalar& end, c10::optional<int64_t> optional_steps, double base, Tensor& result) {
+  const auto steps = optional_steps.value_or(100);
   TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
+
+  if (!optional_steps.has_value()) {
+    TORCH_WARN_ONCE(
+      "Not providing a value for logspace's steps is deprecated and will "
+      "throw a runtime error in a future release. This warning will appear "
+      "only once per process.");
+  }
 
   if (result.numel() != steps) {
     result.resize_({steps});
@@ -46,7 +64,11 @@ Tensor& logspace_cpu_out(Tensor& result, Scalar start, Scalar end, int64_t steps
   if (steps == 0) {
     // skip
   } else if (steps == 1) {
-    r.fill_(std::pow(base, start.to<double>()));
+    if (isComplexType(r.scalar_type())){
+      r.fill_(std::pow(base, start.to<c10::complex<double>>()));
+    } else {
+      r.fill_(std::pow(base, start.to<double>()));
+    }
   } else if (isComplexType(r.scalar_type())) {
     AT_DISPATCH_COMPLEX_TYPES(r.scalar_type(), "logspace_cpu", [&]() {
       scalar_t scalar_base = static_cast<scalar_t>(base);
@@ -67,12 +89,12 @@ Tensor& logspace_cpu_out(Tensor& result, Scalar start, Scalar end, int64_t steps
       });
     });
   } else {
-    AT_DISPATCH_ALL_TYPES(r.scalar_type(), "logspace_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND(kBFloat16, r.scalar_type(), "logspace_cpu", [&]() {
       double scalar_base = static_cast<double>(base); // will be autopromoted anyway
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_t>();
       scalar_t *data_ptr = r.data_ptr<scalar_t>();
-      double step = static_cast<double>(scalar_end - scalar_start) / (steps-1);
+      double step = static_cast<double>(scalar_end - scalar_start) / (steps - 1);
       const int64_t halfway = steps / 2;
       at::parallel_for(0, steps, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
         for (int64_t i=p_begin; i < p_end; i++) {
@@ -92,7 +114,7 @@ Tensor& logspace_cpu_out(Tensor& result, Scalar start, Scalar end, int64_t steps
   return result;
 }
 
-Tensor& range_cpu_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
+Tensor& range_cpu_out(const Scalar& start, const Scalar& end, const Scalar& step, Tensor& result) {
   AT_DISPATCH_ALL_TYPES(result.scalar_type(), "range_cpu", [&]() {
     using accscalar_t = at::acc_type<scalar_t, false>;
     auto xstart = start.to<accscalar_t>();
@@ -126,7 +148,7 @@ Tensor& range_cpu_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
   return result;
 }
 
-Tensor& arange_cpu_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
+Tensor& arange_cpu_out(const Scalar& start, const Scalar& end, const Scalar& step, Tensor& result) {
   AT_DISPATCH_ALL_TYPES(result.scalar_type(), "arange_cpu", [&]() {
     using accscalar_t = at::acc_type<scalar_t, false>;
     auto xstart = start.to<accscalar_t>();
@@ -141,6 +163,7 @@ Tensor& arange_cpu_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
     // we dont want.
     // the corner-case we do want to take into account is int64_t, which has higher precision than double
     double size_d;
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (std::is_same<scalar_t, int64_t>::value) {
       size_d = std::ceil(static_cast<double>(end.to<accscalar_t>() - start.to<accscalar_t>())
                          / step.to<accscalar_t>());
@@ -173,7 +196,7 @@ Tensor& arange_cpu_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
     }
 
     Tensor r = result.is_contiguous() ? result : result.contiguous();
-    auto iter = TensorIterator::nullary_op(r);
+    auto iter = TensorIterator::borrowing_nullary_op(r);
     arange_stub(iter.device_type(), iter, start, size, step);
     if (!result.is_contiguous()) {
       result.copy_(r);
@@ -183,7 +206,9 @@ Tensor& arange_cpu_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
   return result;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(arange_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(linspace_stub);
 
 }} // namespace at::native

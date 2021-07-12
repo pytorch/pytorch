@@ -2,6 +2,8 @@
 
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 
+#include <c10/util/irange.h>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -154,11 +156,7 @@ void HashProvider::visit(const Load* v) {
     ind->accept(this);
     indices_hash = hash_combine(indices_hash, hashOf(ind));
   }
-  v->mask()->accept(this);
-  putHash(
-      v,
-      hash_combine(
-          "load", hashOf(v->base_handle()), indices_hash, hashOf(v->mask())));
+  putHash(v, hash_combine("load", hashOf(v->base_handle()), indices_hash));
 }
 
 void HashProvider::visit(const Store* v) {
@@ -170,15 +168,10 @@ void HashProvider::visit(const Store* v) {
     indices_hash = hash_combine(indices_hash, hashOf(ind));
   }
   v->value()->accept(this);
-  v->mask()->accept(this);
   putHash(
       v,
       hash_combine(
-          "store",
-          hashOf(v->base_handle()),
-          indices_hash,
-          hashOf(v->value()),
-          hashOf(v->mask())));
+          "store", hashOf(v->base_handle()), indices_hash, hashOf(v->value())));
 }
 
 void HashProvider::visit(const Block* v) {
@@ -230,10 +223,18 @@ void HashProvider::visit(const IfThenElse* v) {
           hashOf(v->false_value())));
 }
 
-void HashProvider::visit(const BaseCallNode* v) {
+void HashProvider::visit(const Intrinsics* v) {
   CACHE_GUARD();
+  // calls to rand are not symbolic and have a different value each time, they
+  // should not hash to anything and this is the best we can do.
+  if (v->op_type() == kRand) {
+    // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
+    putHash(v, (SimplifierHashType)rand());
+    return;
+  }
+
   SimplifierHashType hash(te_hash(v->func_name()));
-  for (int i = 0; i < v->nparams(); i++) {
+  for (const auto i : c10::irange(v->nparams())) {
     v->param(i)->accept(this);
     hash = hash_combine(hash, hashOf(v->param(i)));
   }
@@ -310,6 +311,39 @@ void HashProvider::visit(const Polynomial* v) {
 
   putHash(v, hash);
 }
+
+void HashProvider::visit(const MaxTerm* v) {
+  CACHE_GUARD();
+  SimplifierHashType hash = hash_combine("maxterm");
+  if (v->scalar()) {
+    v->scalar()->accept(this);
+    hash = hash_combine(hash, hashOf(v->scalar()));
+  }
+
+  for (auto* c : v->variables()) {
+    c->accept(this);
+    hash = hash_combine(hash, hashOf(c));
+  }
+
+  putHash(v, hash);
+}
+
+void HashProvider::visit(const MinTerm* v) {
+  CACHE_GUARD();
+  SimplifierHashType hash = hash_combine("minterm");
+  if (v->scalar()) {
+    v->scalar()->accept(this);
+    hash = hash_combine(hash, hashOf(v->scalar()));
+  }
+
+  for (auto* c : v->variables()) {
+    c->accept(this);
+    hash = hash_combine(hash, hashOf(c));
+  }
+
+  putHash(v, hash);
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 #include <map>
+#include <memory>
 #include <set>
 #include <unordered_map>
 #include <unordered_set>
@@ -64,20 +65,26 @@ class ChildDestructableMock final : public DestructableMock {
       : DestructableMock(resourcesReleased, wasDestructed) {}
 };
 class NullType1 final {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static SomeClass singleton_;
-public:
+
+ public:
   static constexpr SomeClass* singleton() {
     return &singleton_;
   }
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SomeClass NullType1::singleton_;
 class NullType2 final {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static SomeClass singleton_;
-public:
+
+ public:
   static constexpr SomeClass* singleton() {
     return &singleton_;
   }
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SomeClass NullType2::singleton_;
 static_assert(NullType1::singleton() != NullType2::singleton(), "");
 } // namespace
@@ -86,6 +93,7 @@ static_assert(
     std::is_same<SomeClass, intrusive_ptr<SomeClass>::element_type>::value,
     "intrusive_ptr<T>::element_type is wrong");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MakeIntrusiveTest, ClassWith0Parameters) {
   intrusive_ptr<SomeClass0Parameters> var =
       make_intrusive<SomeClass0Parameters>();
@@ -93,12 +101,14 @@ TEST(MakeIntrusiveTest, ClassWith0Parameters) {
   EXPECT_EQ(var.get(), dynamic_cast<SomeClass0Parameters*>(var.get()));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MakeIntrusiveTest, ClassWith1Parameter) {
   intrusive_ptr<SomeClass1Parameter> var =
       make_intrusive<SomeClass1Parameter>(5);
   EXPECT_EQ(5, var->param);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MakeIntrusiveTest, ClassWith2Parameters) {
   intrusive_ptr<SomeClass2Parameters> var =
       make_intrusive<SomeClass2Parameters>(7, 2);
@@ -106,56 +116,66 @@ TEST(MakeIntrusiveTest, ClassWith2Parameters) {
   EXPECT_EQ(2, var->param2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MakeIntrusiveTest, TypeIsAutoDeductible) {
   auto var2 = make_intrusive<SomeClass0Parameters>();
   auto var3 = make_intrusive<SomeClass1Parameter>(2);
   auto var4 = make_intrusive<SomeClass2Parameters>(2, 3);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MakeIntrusiveTest, CanAssignToBaseClassPtr) {
   intrusive_ptr<SomeBaseClass> var = make_intrusive<SomeChildClass>(3);
   EXPECT_EQ(3, var->v);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTargetTest, whenAllocatedOnStack_thenDoesntCrash) {
   SomeClass myClass;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenValidPtr_whenCallingGet_thenReturnsObject) {
   intrusive_ptr<SomeClass1Parameter> obj =
       make_intrusive<SomeClass1Parameter>(5);
   EXPECT_EQ(5, obj.get()->param);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenValidPtr_whenCallingConstGet_thenReturnsObject) {
   const intrusive_ptr<SomeClass1Parameter> obj =
       make_intrusive<SomeClass1Parameter>(5);
   EXPECT_EQ(5, obj.get()->param);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenInvalidPtr_whenCallingGet_thenReturnsNullptr) {
   intrusive_ptr<SomeClass1Parameter> obj;
   EXPECT_EQ(nullptr, obj.get());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenValidPtr_whenDereferencing_thenReturnsObject) {
   intrusive_ptr<SomeClass1Parameter> obj =
       make_intrusive<SomeClass1Parameter>(5);
   EXPECT_EQ(5, (*obj).param);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenValidPtr_whenConstDereferencing_thenReturnsObject) {
   const intrusive_ptr<SomeClass1Parameter> obj =
       make_intrusive<SomeClass1Parameter>(5);
   EXPECT_EQ(5, (*obj).param);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenValidPtr_whenArrowDereferencing_thenReturnsObject) {
   intrusive_ptr<SomeClass1Parameter> obj =
       make_intrusive<SomeClass1Parameter>(3);
   EXPECT_EQ(3, obj->param);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenValidPtr_whenConstArrowDereferencing_thenReturnsObject) {
@@ -164,6 +184,7 @@ TEST(
   EXPECT_EQ(3, obj->param);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenValidPtr_whenMoveAssigning_thenPointsToSameObject) {
   intrusive_ptr<SomeClass> obj1 = make_intrusive<SomeClass>();
   intrusive_ptr<SomeClass> obj2 = make_intrusive<SomeClass>();
@@ -172,46 +193,57 @@ TEST(IntrusivePtrTest, givenValidPtr_whenMoveAssigning_thenPointsToSameObject) {
   EXPECT_EQ(obj1ptr, obj2.get());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenValidPtr_whenMoveAssigning_thenOldInstanceInvalid) {
   intrusive_ptr<SomeClass> obj1 = make_intrusive<SomeClass>();
   intrusive_ptr<SomeClass> obj2 = make_intrusive<SomeClass>();
   obj2 = std::move(obj1);
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.Move,bugprone-use-after-move)
   EXPECT_FALSE(obj1.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenValidPtr_whenMoveAssigningToSelf_thenPointsToSameObject) {
   intrusive_ptr<SomeClass> obj1 = make_intrusive<SomeClass>();
   SomeClass* obj1ptr = obj1.get();
   obj1 = std::move(obj1);
+  // NOLINTNEXTLINE(bugprone-use-after-move)
   EXPECT_EQ(obj1ptr, obj1.get());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenValidPtr_whenMoveAssigningToSelf_thenStaysValid) {
   intrusive_ptr<SomeClass> obj1 = make_intrusive<SomeClass>();
   obj1 = std::move(obj1);
+  // NOLINTNEXTLINE(bugprone-use-after-move)
   EXPECT_TRUE(obj1.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenInvalidPtr_whenMoveAssigningToSelf_thenStaysInvalid) {
   intrusive_ptr<SomeClass> obj1;
   obj1 = std::move(obj1);
+  // NOLINTNEXTLINE(bugprone-use-after-move)
   EXPECT_FALSE(obj1.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenInvalidPtr_whenMoveAssigning_thenNewInstanceIsValid) {
   intrusive_ptr<SomeClass> obj1 = make_intrusive<SomeClass>();
   intrusive_ptr<SomeClass> obj2;
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   SomeClass* obj1ptr = obj1.get();
   obj2 = std::move(obj1);
   EXPECT_TRUE(obj2.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenInvalidPtr_whenMoveAssigning_thenPointsToSameObject) {
@@ -222,6 +254,7 @@ TEST(
   EXPECT_EQ(obj1ptr, obj2.get());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenValidPtr_whenMoveAssigningFromInvalidPtr_thenNewInstanceIsInvalid) {
@@ -232,6 +265,7 @@ TEST(
   EXPECT_FALSE(obj2.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenValidPtr_whenMoveAssigningToBaseClass_thenPointsToSameObject) {
@@ -243,25 +277,30 @@ TEST(
   EXPECT_EQ(1, obj2->v);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenValidPtr_whenMoveAssigningToBaseClass_thenOldInstanceInvalid) {
   intrusive_ptr<SomeChildClass> obj1 = make_intrusive<SomeChildClass>(1);
   intrusive_ptr<SomeBaseClass> obj2 = make_intrusive<SomeBaseClass>(2);
   obj2 = std::move(obj1);
+  // NOLINTNEXTLINE(bugprone-use-after-move)
   EXPECT_FALSE(obj1.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenInvalidPtr_whenMoveAssigningToBaseClass_thenNewInstanceIsValid) {
   intrusive_ptr<SomeChildClass> obj1 = make_intrusive<SomeChildClass>(5);
   intrusive_ptr<SomeBaseClass> obj2;
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   SomeBaseClass* obj1ptr = obj1.get();
   obj2 = std::move(obj1);
   EXPECT_TRUE(obj2.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenInvalidPtr_whenMoveAssigningToBaseClass_thenPointsToSameObject) {
@@ -273,6 +312,7 @@ TEST(
   EXPECT_EQ(5, obj2->v);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenInvalidPtr_whenMoveAssigningInvalidPtrToBaseClass_thenNewInstanceIsValid) {
@@ -283,6 +323,7 @@ TEST(
   EXPECT_FALSE(obj2.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenNullPtr_whenMoveAssigningToDifferentNullptr_thenHasNewNullptr) {
@@ -290,12 +331,14 @@ TEST(
   intrusive_ptr<SomeClass, NullType2> obj2;
   obj2 = std::move(obj1);
   EXPECT_NE(NullType1::singleton(), NullType2::singleton());
+  // NOLINTNEXTLINE(bugprone-use-after-move)
   EXPECT_EQ(NullType1::singleton(), obj1.get());
   EXPECT_EQ(NullType2::singleton(), obj2.get());
   EXPECT_FALSE(obj1.defined());
   EXPECT_FALSE(obj2.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenValidPtr_whenCopyAssigning_thenPointsToSameObject) {
   intrusive_ptr<SomeClass> obj1 = make_intrusive<SomeClass>();
   intrusive_ptr<SomeClass> obj2 = make_intrusive<SomeClass>();
@@ -304,6 +347,7 @@ TEST(IntrusivePtrTest, givenValidPtr_whenCopyAssigning_thenPointsToSameObject) {
   EXPECT_EQ(obj1ptr, obj2.get());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenValidPtr_whenCopyAssigning_thenOldInstanceValid) {
   intrusive_ptr<SomeClass> obj1 = make_intrusive<SomeClass>();
   intrusive_ptr<SomeClass> obj2 = make_intrusive<SomeClass>();
@@ -311,39 +355,48 @@ TEST(IntrusivePtrTest, givenValidPtr_whenCopyAssigning_thenOldInstanceValid) {
   EXPECT_TRUE(obj1.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenValidPtr_whenCopyAssigningToSelf_thenPointsToSameObject) {
   intrusive_ptr<SomeClass> obj1 = make_intrusive<SomeClass>();
   SomeClass* obj1ptr = obj1.get();
+  // NOLINTNEXTLINE(clang-diagnostic-self-assign-overloaded)
   obj1 = obj1;
   EXPECT_EQ(obj1ptr, obj1.get());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenValidPtr_whenCopyAssigningToSelf_thenStaysValid) {
   intrusive_ptr<SomeClass> obj1 = make_intrusive<SomeClass>();
+  // NOLINTNEXTLINE(clang-diagnostic-self-assign-overloaded)
   obj1 = obj1;
   EXPECT_TRUE(obj1.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenInvalidPtr_whenCopyAssigningToSelf_thenStaysInvalid) {
   intrusive_ptr<SomeClass> obj1;
+  // NOLINTNEXTLINE(clang-diagnostic-self-assign-overloaded)
   obj1 = obj1;
   EXPECT_FALSE(obj1.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenInvalidPtr_whenCopyAssigning_thenNewInstanceIsValid) {
   intrusive_ptr<SomeClass> obj1 = make_intrusive<SomeClass>();
   intrusive_ptr<SomeClass> obj2;
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   SomeClass* obj1ptr = obj1.get();
   obj2 = obj1;
   EXPECT_TRUE(obj2.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenValidPtr_whenCopyAssigningToBaseClass_thenPointsToSameObject) {
@@ -353,6 +406,7 @@ TEST(
   EXPECT_EQ(3, base->v);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenValidPtr_whenCopyAssigningToBaseClass_thenOldInstanceInvalid) {
@@ -362,16 +416,19 @@ TEST(
   EXPECT_TRUE(obj1.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenInvalidPtr_whenCopyAssigningToBaseClass_thenNewInstanceIsValid) {
   intrusive_ptr<SomeChildClass> obj1 = make_intrusive<SomeChildClass>(5);
   intrusive_ptr<SomeBaseClass> obj2;
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   SomeBaseClass* obj1ptr = obj1.get();
   obj2 = obj1;
   EXPECT_TRUE(obj2.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenInvalidPtr_whenCopyAssigningToBaseClass_thenPointsToSameObject) {
@@ -383,6 +440,7 @@ TEST(
   EXPECT_EQ(5, obj2->v);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenPtr_whenCopyAssigningInvalidPtrToBaseClass_thenNewInstanceIsInvalid) {
@@ -393,6 +451,7 @@ TEST(
   EXPECT_FALSE(obj2.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenNullPtr_whenCopyAssigningToDifferentNullptr_thenHasNewNullptr) {
@@ -406,6 +465,7 @@ TEST(
   EXPECT_FALSE(obj2.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenPtr_whenMoveConstructing_thenPointsToSameObject) {
   intrusive_ptr<SomeClass> obj1 = make_intrusive<SomeClass>();
   SomeClass* obj1ptr = obj1.get();
@@ -413,18 +473,22 @@ TEST(IntrusivePtrTest, givenPtr_whenMoveConstructing_thenPointsToSameObject) {
   EXPECT_EQ(obj1ptr, obj2.get());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenPtr_whenMoveConstructing_thenOldInstanceInvalid) {
   intrusive_ptr<SomeClass> obj1 = make_intrusive<SomeClass>();
   intrusive_ptr<SomeClass> obj2 = std::move(obj1);
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.Move,bugprone-use-after-move)
   EXPECT_FALSE(obj1.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenPtr_whenMoveConstructing_thenNewInstanceValid) {
   intrusive_ptr<SomeClass> obj1 = make_intrusive<SomeClass>();
   intrusive_ptr<SomeClass> obj2 = std::move(obj1);
   EXPECT_TRUE(obj2.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenPtr_whenMoveConstructingFromInvalidPtr_thenNewInstanceInvalid) {
@@ -433,6 +497,7 @@ TEST(
   EXPECT_FALSE(obj2.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenPtr_whenMoveConstructingToBaseClass_thenPointsToSameObject) {
@@ -443,14 +508,17 @@ TEST(
   EXPECT_EQ(objptr, base.get());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenPtr_whenMoveConstructingToBaseClass_thenOldInstanceInvalid) {
   intrusive_ptr<SomeChildClass> child = make_intrusive<SomeChildClass>(3);
   intrusive_ptr<SomeBaseClass> base = std::move(child);
+  // NOLINTNEXTLINE(bugprone-use-after-move)
   EXPECT_FALSE(child.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenPtr_whenMoveConstructingToBaseClass_thenNewInstanceValid) {
@@ -459,6 +527,7 @@ TEST(
   EXPECT_TRUE(obj2.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenPtr_whenMoveConstructingToBaseClassFromInvalidPtr_thenNewInstanceInvalid) {
@@ -467,46 +536,57 @@ TEST(
   EXPECT_FALSE(obj2.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenNullPtr_whenMoveConstructingToDifferentNullptr_thenHasNewNullptr) {
   intrusive_ptr<SomeClass, NullType1> obj1;
   intrusive_ptr<SomeClass, NullType2> obj2 = std::move(obj1);
   EXPECT_NE(NullType1::singleton(), NullType2::singleton());
+  // NOLINTNEXTLINE(bugprone-use-after-move)
   EXPECT_EQ(NullType1::singleton(), obj1.get());
   EXPECT_EQ(NullType2::singleton(), obj2.get());
   EXPECT_FALSE(obj1.defined());
   EXPECT_FALSE(obj2.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenPtr_whenCopyConstructing_thenPointsToSameObject) {
   intrusive_ptr<SomeClass> obj1 = make_intrusive<SomeClass>();
   SomeClass* obj1ptr = obj1.get();
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   intrusive_ptr<SomeClass> obj2 = obj1;
   EXPECT_EQ(obj1ptr, obj2.get());
   EXPECT_TRUE(obj1.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenPtr_whenCopyConstructing_thenOldInstanceValid) {
   intrusive_ptr<SomeClass> obj1 = make_intrusive<SomeClass>();
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   intrusive_ptr<SomeClass> obj2 = obj1;
   EXPECT_TRUE(obj1.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenPtr_whenCopyConstructing_thenNewInstanceValid) {
   intrusive_ptr<SomeClass> obj1 = make_intrusive<SomeClass>();
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   intrusive_ptr<SomeClass> obj2 = obj1;
   EXPECT_TRUE(obj2.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenPtr_whenCopyConstructingFromInvalidPtr_thenNewInstanceInvalid) {
   intrusive_ptr<SomeClass> obj1;
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   intrusive_ptr<SomeClass> obj2 = obj1;
   EXPECT_FALSE(obj2.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenPtr_whenCopyConstructingToBaseClass_thenPointsToSameObject) {
@@ -517,6 +597,7 @@ TEST(
   EXPECT_EQ(objptr, base.get());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenPtr_whenCopyConstructingToBaseClass_thenOldInstanceInvalid) {
@@ -525,6 +606,7 @@ TEST(
   EXPECT_TRUE(child.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenPtr_whenCopyConstructingToBaseClass_thenNewInstanceInvalid) {
@@ -533,6 +615,7 @@ TEST(
   EXPECT_TRUE(base.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenPtr_whenCopyConstructingToBaseClassFromInvalidPtr_thenNewInstanceInvalid) {
@@ -541,6 +624,7 @@ TEST(
   EXPECT_FALSE(obj2.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenNullPtr_whenCopyConstructingToDifferentNullptr_thenHasNewNullptr) {
@@ -553,6 +637,7 @@ TEST(
   EXPECT_FALSE(obj2.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, SwapFunction) {
   intrusive_ptr<SomeClass> obj1 = make_intrusive<SomeClass>();
   intrusive_ptr<SomeClass> obj2 = make_intrusive<SomeClass>();
@@ -563,6 +648,7 @@ TEST(IntrusivePtrTest, SwapFunction) {
   EXPECT_EQ(obj1ptr, obj2.get());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, SwapMethod) {
   intrusive_ptr<SomeClass> obj1 = make_intrusive<SomeClass>();
   intrusive_ptr<SomeClass> obj2 = make_intrusive<SomeClass>();
@@ -573,6 +659,7 @@ TEST(IntrusivePtrTest, SwapMethod) {
   EXPECT_EQ(obj1ptr, obj2.get());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, SwapFunctionFromInvalid) {
   intrusive_ptr<SomeClass> obj1;
   intrusive_ptr<SomeClass> obj2 = make_intrusive<SomeClass>();
@@ -583,6 +670,7 @@ TEST(IntrusivePtrTest, SwapFunctionFromInvalid) {
   EXPECT_FALSE(obj2.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, SwapMethodFromInvalid) {
   intrusive_ptr<SomeClass> obj1;
   intrusive_ptr<SomeClass> obj2 = make_intrusive<SomeClass>();
@@ -593,6 +681,7 @@ TEST(IntrusivePtrTest, SwapMethodFromInvalid) {
   EXPECT_FALSE(obj2.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, SwapFunctionWithInvalid) {
   intrusive_ptr<SomeClass> obj1 = make_intrusive<SomeClass>();
   intrusive_ptr<SomeClass> obj2;
@@ -603,6 +692,7 @@ TEST(IntrusivePtrTest, SwapFunctionWithInvalid) {
   EXPECT_EQ(obj1ptr, obj2.get());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, SwapMethodWithInvalid) {
   intrusive_ptr<SomeClass> obj1 = make_intrusive<SomeClass>();
   intrusive_ptr<SomeClass> obj2;
@@ -613,6 +703,7 @@ TEST(IntrusivePtrTest, SwapMethodWithInvalid) {
   EXPECT_EQ(obj1ptr, obj2.get());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, SwapFunctionInvalidWithInvalid) {
   intrusive_ptr<SomeClass> obj1;
   intrusive_ptr<SomeClass> obj2;
@@ -621,6 +712,7 @@ TEST(IntrusivePtrTest, SwapFunctionInvalidWithInvalid) {
   EXPECT_FALSE(obj2.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, SwapMethodInvalidWithInvalid) {
   intrusive_ptr<SomeClass> obj1;
   intrusive_ptr<SomeClass> obj2;
@@ -629,24 +721,28 @@ TEST(IntrusivePtrTest, SwapMethodInvalidWithInvalid) {
   EXPECT_FALSE(obj2.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, CanBePutInContainer) {
   std::vector<intrusive_ptr<SomeClass1Parameter>> vec;
   vec.push_back(make_intrusive<SomeClass1Parameter>(5));
   EXPECT_EQ(5, vec[0]->param);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, CanBePutInSet) {
   std::set<intrusive_ptr<SomeClass1Parameter>> set;
   set.insert(make_intrusive<SomeClass1Parameter>(5));
   EXPECT_EQ(5, (*set.begin())->param);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, CanBePutInUnorderedSet) {
   std::unordered_set<intrusive_ptr<SomeClass1Parameter>> set;
   set.insert(make_intrusive<SomeClass1Parameter>(5));
   EXPECT_EQ(5, (*set.begin())->param);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, CanBePutInMap) {
   std::map<
       intrusive_ptr<SomeClass1Parameter>,
@@ -659,6 +755,7 @@ TEST(IntrusivePtrTest, CanBePutInMap) {
   EXPECT_EQ(3, map.begin()->second->param);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, CanBePutInUnorderedMap) {
   std::unordered_map<
       intrusive_ptr<SomeClass1Parameter>,
@@ -671,13 +768,16 @@ TEST(IntrusivePtrTest, CanBePutInUnorderedMap) {
   EXPECT_EQ(5, map.begin()->second->param);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, Equality_AfterCopyConstructor) {
   intrusive_ptr<SomeClass> var1 = make_intrusive<SomeClass>();
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   intrusive_ptr<SomeClass> var2 = var1;
   EXPECT_TRUE(var1 == var2);
   EXPECT_FALSE(var1 != var2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, Equality_AfterCopyAssignment) {
   intrusive_ptr<SomeClass> var1 = make_intrusive<SomeClass>();
   intrusive_ptr<SomeClass> var2 = make_intrusive<SomeClass>();
@@ -686,6 +786,7 @@ TEST(IntrusivePtrTest, Equality_AfterCopyAssignment) {
   EXPECT_FALSE(var1 != var2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, Equality_Nullptr) {
   intrusive_ptr<SomeClass> var1;
   intrusive_ptr<SomeClass> var2;
@@ -693,27 +794,31 @@ TEST(IntrusivePtrTest, Equality_Nullptr) {
   EXPECT_FALSE(var1 != var2);
 }
 
-TEST(IntrusivePtrTest, Nonequality) {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(IntrusivePtrTest, Inequality) {
   intrusive_ptr<SomeClass> var1 = make_intrusive<SomeClass>();
   intrusive_ptr<SomeClass> var2 = make_intrusive<SomeClass>();
   EXPECT_TRUE(var1 != var2);
   EXPECT_FALSE(var1 == var2);
 }
 
-TEST(IntrusivePtrTest, Nonequality_NullptrLeft) {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(IntrusivePtrTest, Inequality_NullptrLeft) {
   intrusive_ptr<SomeClass> var1;
   intrusive_ptr<SomeClass> var2 = make_intrusive<SomeClass>();
   EXPECT_TRUE(var1 != var2);
   EXPECT_FALSE(var1 == var2);
 }
 
-TEST(IntrusivePtrTest, Nonequality_NullptrRight) {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(IntrusivePtrTest, Inequality_NullptrRight) {
   intrusive_ptr<SomeClass> var1 = make_intrusive<SomeClass>();
   intrusive_ptr<SomeClass> var2;
   EXPECT_TRUE(var1 != var2);
   EXPECT_FALSE(var1 == var2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, HashIsDifferent) {
   intrusive_ptr<SomeClass> var1 = make_intrusive<SomeClass>();
   intrusive_ptr<SomeClass> var2 = make_intrusive<SomeClass>();
@@ -722,6 +827,7 @@ TEST(IntrusivePtrTest, HashIsDifferent) {
       std::hash<intrusive_ptr<SomeClass>>()(var2));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, HashIsDifferent_ValidAndInvalid) {
   intrusive_ptr<SomeClass> var1;
   intrusive_ptr<SomeClass> var2 = make_intrusive<SomeClass>();
@@ -730,14 +836,17 @@ TEST(IntrusivePtrTest, HashIsDifferent_ValidAndInvalid) {
       std::hash<intrusive_ptr<SomeClass>>()(var2));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, HashIsSame_AfterCopyConstructor) {
   intrusive_ptr<SomeClass> var1 = make_intrusive<SomeClass>();
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   intrusive_ptr<SomeClass> var2 = var1;
   EXPECT_EQ(
       std::hash<intrusive_ptr<SomeClass>>()(var1),
       std::hash<intrusive_ptr<SomeClass>>()(var2));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, HashIsSame_AfterCopyAssignment) {
   intrusive_ptr<SomeClass> var1 = make_intrusive<SomeClass>();
   intrusive_ptr<SomeClass> var2 = make_intrusive<SomeClass>();
@@ -747,6 +856,7 @@ TEST(IntrusivePtrTest, HashIsSame_AfterCopyAssignment) {
       std::hash<intrusive_ptr<SomeClass>>()(var2));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, HashIsSame_BothNullptr) {
   intrusive_ptr<SomeClass> var1;
   intrusive_ptr<SomeClass> var2;
@@ -755,32 +865,42 @@ TEST(IntrusivePtrTest, HashIsSame_BothNullptr) {
       std::hash<intrusive_ptr<SomeClass>>()(var2));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, OneIsLess) {
   intrusive_ptr<SomeClass> var1 = make_intrusive<SomeClass>();
   intrusive_ptr<SomeClass> var2 = make_intrusive<SomeClass>();
   EXPECT_TRUE(
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       std::less<intrusive_ptr<SomeClass>>()(var1, var2) !=
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       std::less<intrusive_ptr<SomeClass>>()(var2, var1));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, NullptrIsLess1) {
   intrusive_ptr<SomeClass> var1;
   intrusive_ptr<SomeClass> var2 = make_intrusive<SomeClass>();
+  // NOLINTNEXTLINE(modernize-use-transparent-functors)
   EXPECT_TRUE(std::less<intrusive_ptr<SomeClass>>()(var1, var2));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, NullptrIsLess2) {
   intrusive_ptr<SomeClass> var1 = make_intrusive<SomeClass>();
   intrusive_ptr<SomeClass> var2;
+  // NOLINTNEXTLINE(modernize-use-transparent-functors)
   EXPECT_FALSE(std::less<intrusive_ptr<SomeClass>>()(var1, var2));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, NullptrIsNotLessThanNullptr) {
   intrusive_ptr<SomeClass> var1;
   intrusive_ptr<SomeClass> var2;
+  // NOLINTNEXTLINE(modernize-use-transparent-functors)
   EXPECT_FALSE(std::less<intrusive_ptr<SomeClass>>()(var1, var2));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenPtr_whenCallingReset_thenIsInvalid) {
   auto obj = make_intrusive<SomeClass>();
   EXPECT_TRUE(obj.defined());
@@ -788,6 +908,7 @@ TEST(IntrusivePtrTest, givenPtr_whenCallingReset_thenIsInvalid) {
   EXPECT_FALSE(obj.defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenPtr_whenCallingReset_thenHoldsNullptr) {
   auto obj = make_intrusive<SomeClass>();
   EXPECT_NE(nullptr, obj.get());
@@ -795,11 +916,13 @@ TEST(IntrusivePtrTest, givenPtr_whenCallingReset_thenHoldsNullptr) {
   EXPECT_EQ(nullptr, obj.get());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenPtr_whenDestructed_thenDestructsObject) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
   {
-    auto obj = make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj =
+        make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
     EXPECT_FALSE(resourcesReleased);
     EXPECT_FALSE(wasDestructed);
   }
@@ -807,12 +930,14 @@ TEST(IntrusivePtrTest, givenPtr_whenDestructed_thenDestructsObject) {
   EXPECT_TRUE(wasDestructed);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenPtr_whenMoveConstructed_thenDestructsObjectAfterSecondDestructed) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
-  auto obj = make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+  auto obj =
+      make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
   {
     auto obj2 = std::move(obj);
     EXPECT_FALSE(resourcesReleased);
@@ -822,12 +947,14 @@ TEST(
   EXPECT_TRUE(wasDestructed);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenPtr_whenMoveConstructedToBaseClass_thenDestructsObjectAfterSecondDestructed) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
-  auto obj = make_intrusive<ChildDestructableMock>(&resourcesReleased, &wasDestructed);
+  auto obj =
+      make_intrusive<ChildDestructableMock>(&resourcesReleased, &wasDestructed);
   {
     intrusive_ptr<DestructableMock> obj2 = std::move(obj);
     EXPECT_FALSE(resourcesReleased);
@@ -837,13 +964,15 @@ TEST(
   EXPECT_TRUE(wasDestructed);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenPtr_whenMoveAssigned_thenDestructsOldObject) {
   bool dummy = false;
   bool resourcesReleased = false;
   bool wasDestructed = false;
   auto obj = make_intrusive<DestructableMock>(&dummy, &dummy);
   {
-    auto obj2 = make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj2 =
+        make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
     EXPECT_FALSE(resourcesReleased);
     EXPECT_FALSE(wasDestructed);
     obj2 = std::move(obj);
@@ -852,6 +981,7 @@ TEST(IntrusivePtrTest, givenPtr_whenMoveAssigned_thenDestructsOldObject) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenPtr_whenMoveAssignedToBaseClass_thenDestructsOldObject) {
@@ -860,7 +990,8 @@ TEST(
   bool wasDestructed = false;
   auto obj = make_intrusive<ChildDestructableMock>(&dummy, &dummy);
   {
-    auto obj2 = make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj2 =
+        make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
     EXPECT_FALSE(resourcesReleased);
     EXPECT_FALSE(wasDestructed);
     obj2 = std::move(obj);
@@ -869,6 +1000,7 @@ TEST(
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenPtrWithCopy_whenMoveAssigned_thenDestructsOldObjectAfterCopyIsDestructed) {
@@ -877,7 +1009,8 @@ TEST(
   bool wasDestructed = false;
   auto obj = make_intrusive<DestructableMock>(&dummy, &dummy);
   {
-    auto obj2 = make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj2 =
+        make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
     {
       auto copy = obj2;
       EXPECT_FALSE(resourcesReleased);
@@ -891,6 +1024,7 @@ TEST(
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenPtrWithBaseClassCopy_whenMoveAssigned_thenDestructsOldObjectAfterCopyIsDestructed) {
@@ -899,8 +1033,8 @@ TEST(
   bool wasDestructed = false;
   auto obj = make_intrusive<ChildDestructableMock>(&dummy, &dummy);
   {
-    auto obj2 =
-        make_intrusive<ChildDestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj2 = make_intrusive<ChildDestructableMock>(
+        &resourcesReleased, &wasDestructed);
     {
       intrusive_ptr<DestructableMock> copy = obj2;
       EXPECT_FALSE(resourcesReleased);
@@ -914,6 +1048,7 @@ TEST(
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenPtrWithCopy_whenMoveAssignedToBaseClass_thenDestructsOldObjectAfterCopyIsDestructed) {
@@ -922,7 +1057,8 @@ TEST(
   bool wasDestructed = false;
   auto obj = make_intrusive<ChildDestructableMock>(&dummy, &dummy);
   {
-    auto obj2 = make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj2 =
+        make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
     {
       intrusive_ptr<DestructableMock> copy = obj2;
       EXPECT_FALSE(resourcesReleased);
@@ -936,13 +1072,15 @@ TEST(
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenPtr_whenMoveAssigned_thenDestructsObjectAfterSecondDestructed) {
   bool dummy = false;
   bool resourcesReleased = false;
   bool wasDestructed = false;
-  auto obj = make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+  auto obj =
+      make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
   {
     auto obj2 = make_intrusive<DestructableMock>(&dummy, &dummy);
     obj2 = std::move(obj);
@@ -953,13 +1091,15 @@ TEST(
   EXPECT_TRUE(wasDestructed);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenPtr_whenMoveAssignedToBaseClass_thenDestructsObjectAfterSecondDestructed) {
   bool dummy = false;
   bool resourcesReleased = false;
   bool wasDestructed = false;
-  auto obj = make_intrusive<ChildDestructableMock>(&resourcesReleased, &wasDestructed);
+  auto obj =
+      make_intrusive<ChildDestructableMock>(&resourcesReleased, &wasDestructed);
   {
     auto obj2 = make_intrusive<DestructableMock>(&dummy, &dummy);
     obj2 = std::move(obj);
@@ -970,14 +1110,17 @@ TEST(
   EXPECT_TRUE(wasDestructed);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenPtr_whenCopyConstructedAndDestructed_thenDestructsObjectAfterLastDestruction) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
   {
-    auto obj = make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj =
+        make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
     {
+      // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
       intrusive_ptr<DestructableMock> copy = obj;
       EXPECT_FALSE(resourcesReleased);
       EXPECT_FALSE(wasDestructed);
@@ -989,13 +1132,15 @@ TEST(
   EXPECT_TRUE(wasDestructed);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenPtr_whenCopyConstructedToBaseClassAndDestructed_thenDestructsObjectAfterLastDestruction) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
   {
-    auto obj = make_intrusive<ChildDestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj = make_intrusive<ChildDestructableMock>(
+        &resourcesReleased, &wasDestructed);
     {
       intrusive_ptr<DestructableMock> copy = obj;
       EXPECT_FALSE(resourcesReleased);
@@ -1008,13 +1153,15 @@ TEST(
   EXPECT_TRUE(wasDestructed);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenPtr_whenCopyConstructedAndOriginalDestructed_thenDestructsObjectAfterLastDestruction) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
   {
-    auto obj = make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj =
+        make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
     intrusive_ptr<DestructableMock> copy = obj;
     obj.reset();
     EXPECT_FALSE(resourcesReleased);
@@ -1024,13 +1171,15 @@ TEST(
   EXPECT_TRUE(wasDestructed);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenPtr_whenCopyConstructedToBaseClassAndOriginalDestructed_thenDestructsObjectAfterLastDestruction) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
   {
-    auto obj = make_intrusive<ChildDestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj = make_intrusive<ChildDestructableMock>(
+        &resourcesReleased, &wasDestructed);
     intrusive_ptr<DestructableMock> copy = obj;
     obj.reset();
     EXPECT_FALSE(resourcesReleased);
@@ -1040,6 +1189,7 @@ TEST(
   EXPECT_TRUE(wasDestructed);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenPtr_whenCopyAssignedAndDestructed_thenDestructsObjectAfterLastDestruction) {
@@ -1047,7 +1197,8 @@ TEST(
   bool wasDestructed = false;
   bool dummy = false;
   {
-    auto obj = make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj =
+        make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
     {
       intrusive_ptr<DestructableMock> copy =
           make_intrusive<DestructableMock>(&dummy, &dummy);
@@ -1062,6 +1213,7 @@ TEST(
   EXPECT_TRUE(wasDestructed);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenPtr_whenCopyAssignedToBaseClassAndDestructed_thenDestructsObjectAfterLastDestruction) {
@@ -1069,7 +1221,8 @@ TEST(
   bool wasDestructed = false;
   bool dummy = false;
   {
-    auto obj = make_intrusive<ChildDestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj = make_intrusive<ChildDestructableMock>(
+        &resourcesReleased, &wasDestructed);
     {
       intrusive_ptr<DestructableMock> copy =
           make_intrusive<DestructableMock>(&dummy, &dummy);
@@ -1084,6 +1237,7 @@ TEST(
   EXPECT_TRUE(wasDestructed);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenPtr_whenCopyAssignedAndOriginalDestructed_thenDestructsObjectAfterLastDestruction) {
@@ -1093,7 +1247,8 @@ TEST(
   {
     auto copy = make_intrusive<DestructableMock>(&dummy, &dummy);
     {
-      auto obj = make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+      auto obj =
+          make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
       copy = obj;
       EXPECT_FALSE(resourcesReleased);
       EXPECT_FALSE(wasDestructed);
@@ -1105,6 +1260,7 @@ TEST(
   EXPECT_TRUE(wasDestructed);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenPtr_whenCopyAssignedToBaseClassAndOriginalDestructed_thenDestructsObjectAfterLastDestruction) {
@@ -1114,8 +1270,8 @@ TEST(
   {
     auto copy = make_intrusive<DestructableMock>(&dummy, &dummy);
     {
-      auto obj =
-          make_intrusive<ChildDestructableMock>(&resourcesReleased, &wasDestructed);
+      auto obj = make_intrusive<ChildDestructableMock>(
+          &resourcesReleased, &wasDestructed);
       copy = obj;
       EXPECT_FALSE(resourcesReleased);
       EXPECT_FALSE(wasDestructed);
@@ -1127,13 +1283,15 @@ TEST(
   EXPECT_TRUE(wasDestructed);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenPtr_whenCopyAssigned_thenDestructsOldObject) {
   bool dummy = false;
   bool resourcesReleased = false;
   bool wasDestructed = false;
   auto obj = make_intrusive<DestructableMock>(&dummy, &dummy);
   {
-    auto obj2 = make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj2 =
+        make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
     EXPECT_FALSE(resourcesReleased);
     EXPECT_FALSE(wasDestructed);
     obj2 = obj;
@@ -1142,6 +1300,7 @@ TEST(IntrusivePtrTest, givenPtr_whenCopyAssigned_thenDestructsOldObject) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenPtr_whenCopyAssignedToBaseClass_thenDestructsOldObject) {
@@ -1150,7 +1309,8 @@ TEST(
   bool wasDestructed = false;
   auto obj = make_intrusive<ChildDestructableMock>(&dummy, &dummy);
   {
-    auto obj2 = make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj2 =
+        make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
     EXPECT_FALSE(resourcesReleased);
     EXPECT_FALSE(wasDestructed);
     obj2 = obj;
@@ -1159,6 +1319,7 @@ TEST(
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenPtrWithCopy_whenCopyAssigned_thenDestructsOldObjectAfterCopyIsDestructed) {
@@ -1167,7 +1328,8 @@ TEST(
   bool wasDestructed = false;
   auto obj = make_intrusive<DestructableMock>(&dummy, &dummy);
   {
-    auto obj2 = make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj2 =
+        make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
     {
       auto copy = obj2;
       EXPECT_FALSE(resourcesReleased);
@@ -1181,6 +1343,7 @@ TEST(
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenPtrWithBaseClassCopy_whenCopyAssigned_thenDestructsOldObjectAfterCopyIsDestructed) {
@@ -1189,8 +1352,8 @@ TEST(
   bool wasDestructed = false;
   auto obj = make_intrusive<ChildDestructableMock>(&dummy, &dummy);
   {
-    auto obj2 =
-        make_intrusive<ChildDestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj2 = make_intrusive<ChildDestructableMock>(
+        &resourcesReleased, &wasDestructed);
     {
       intrusive_ptr<DestructableMock> copy = obj2;
       EXPECT_FALSE(resourcesReleased);
@@ -1204,6 +1367,7 @@ TEST(
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenPtrWithCopy_whenCopyAssignedToBaseClass_thenDestructsOldObjectAfterCopyIsDestructed) {
@@ -1212,7 +1376,8 @@ TEST(
   bool wasDestructed = false;
   auto obj = make_intrusive<ChildDestructableMock>(&dummy, &dummy);
   {
-    auto obj2 = make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj2 =
+        make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
     {
       intrusive_ptr<DestructableMock> copy = obj2;
       EXPECT_FALSE(resourcesReleased);
@@ -1226,10 +1391,12 @@ TEST(
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenPtr_whenCallingReset_thenDestructs) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
-  auto obj = make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+  auto obj =
+      make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
   EXPECT_FALSE(resourcesReleased);
   EXPECT_FALSE(wasDestructed);
   obj.reset();
@@ -1237,12 +1404,14 @@ TEST(IntrusivePtrTest, givenPtr_whenCallingReset_thenDestructs) {
   EXPECT_TRUE(wasDestructed);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenPtrWithCopy_whenCallingReset_thenDestructsAfterCopyDestructed) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
-  auto obj = make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+  auto obj =
+      make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
   {
     auto copy = obj;
     obj.reset();
@@ -1254,12 +1423,14 @@ TEST(
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenPtrWithCopy_whenCallingResetOnCopy_thenDestructsAfterOriginalDestructed) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
-  auto obj = make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+  auto obj =
+      make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
   {
     auto copy = obj;
     copy.reset();
@@ -1271,14 +1442,17 @@ TEST(
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenPtrWithMoved_whenCallingReset_thenDestructsAfterMovedDestructed) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
-  auto obj = make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+  auto obj =
+      make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
   {
     auto moved = std::move(obj);
+    // NOLINTNEXTLINE(bugprone-use-after-move)
     obj.reset();
     EXPECT_FALSE(resourcesReleased);
     EXPECT_FALSE(wasDestructed);
@@ -1288,12 +1462,14 @@ TEST(
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenPtrWithMoved_whenCallingResetOnMoved_thenDestructsImmediately) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
-  auto obj = make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+  auto obj =
+      make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
   {
     auto moved = std::move(obj);
     moved.reset();
@@ -1302,84 +1478,101 @@ TEST(
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, AllowsMoveConstructingToConst) {
   intrusive_ptr<SomeClass> a = make_intrusive<SomeClass>();
   intrusive_ptr<const SomeClass> b = std::move(a);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, AllowsCopyConstructingToConst) {
   intrusive_ptr<SomeClass> a = make_intrusive<SomeClass>();
   intrusive_ptr<const SomeClass> b = a;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, AllowsMoveAssigningToConst) {
   intrusive_ptr<SomeClass> a = make_intrusive<SomeClass>();
   intrusive_ptr<const SomeClass> b = make_intrusive<SomeClass>();
   b = std::move(a);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, AllowsCopyAssigningToConst) {
   intrusive_ptr<SomeClass> a = make_intrusive<SomeClass>();
   intrusive_ptr<const SomeClass> b = make_intrusive<const SomeClass>();
   b = a;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenNewPtr_thenHasUseCount1) {
   intrusive_ptr<SomeClass> obj = make_intrusive<SomeClass>();
   EXPECT_EQ(1, obj.use_count());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenNewPtr_thenIsUnique) {
   intrusive_ptr<SomeClass> obj = make_intrusive<SomeClass>();
   EXPECT_TRUE(obj.unique());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenEmptyPtr_thenHasUseCount0) {
   intrusive_ptr<SomeClass> obj;
   EXPECT_EQ(0, obj.use_count());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenEmptyPtr_thenIsNotUnique) {
   intrusive_ptr<SomeClass> obj;
   EXPECT_FALSE(obj.unique());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenResetPtr_thenHasUseCount0) {
   intrusive_ptr<SomeClass> obj = make_intrusive<SomeClass>();
   obj.reset();
   EXPECT_EQ(0, obj.use_count());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenResetPtr_thenIsNotUnique) {
   intrusive_ptr<SomeClass> obj = make_intrusive<SomeClass>();
   obj.reset();
   EXPECT_FALSE(obj.unique());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenMoveConstructedPtr_thenHasUseCount1) {
   intrusive_ptr<SomeClass> obj = make_intrusive<SomeClass>();
   intrusive_ptr<SomeClass> obj2 = std::move(obj);
   EXPECT_EQ(1, obj2.use_count());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenMoveConstructedPtr_thenIsUnique) {
   intrusive_ptr<SomeClass> obj = make_intrusive<SomeClass>();
   intrusive_ptr<SomeClass> obj2 = std::move(obj);
   EXPECT_TRUE(obj2.unique());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenMoveConstructedPtr_thenOldHasUseCount0) {
   intrusive_ptr<SomeClass> obj = make_intrusive<SomeClass>();
   intrusive_ptr<SomeClass> obj2 = std::move(obj);
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.Move,bugprone-use-after-move)
   EXPECT_EQ(0, obj.use_count());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenMoveConstructedPtr_thenOldIsNotUnique) {
   intrusive_ptr<SomeClass> obj = make_intrusive<SomeClass>();
   intrusive_ptr<SomeClass> obj2 = std::move(obj);
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.Move,bugprone-use-after-move)
   EXPECT_FALSE(obj.unique());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenMoveAssignedPtr_thenHasUseCount1) {
   intrusive_ptr<SomeClass> obj = make_intrusive<SomeClass>();
   intrusive_ptr<SomeClass> obj2 = make_intrusive<SomeClass>();
@@ -1387,6 +1580,7 @@ TEST(IntrusivePtrTest, givenMoveAssignedPtr_thenHasUseCount1) {
   EXPECT_EQ(1, obj2.use_count());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenMoveAssignedPtr_thenIsUnique) {
   intrusive_ptr<SomeClass> obj = make_intrusive<SomeClass>();
   intrusive_ptr<SomeClass> obj2 = make_intrusive<SomeClass>();
@@ -1394,66 +1588,83 @@ TEST(IntrusivePtrTest, givenMoveAssignedPtr_thenIsUnique) {
   EXPECT_TRUE(obj2.unique());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenMoveAssignedPtr_thenOldHasUseCount0) {
   intrusive_ptr<SomeClass> obj = make_intrusive<SomeClass>();
   intrusive_ptr<SomeClass> obj2 = make_intrusive<SomeClass>();
   obj2 = std::move(obj);
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.Move,bugprone-use-after-move)
   EXPECT_EQ(0, obj.use_count());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenMoveAssignedPtr_thenOldIsNotUnique) {
   intrusive_ptr<SomeClass> obj = make_intrusive<SomeClass>();
   intrusive_ptr<SomeClass> obj2 = make_intrusive<SomeClass>();
   obj2 = std::move(obj);
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.Move,bugprone-use-after-move)
   EXPECT_FALSE(obj.unique());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenCopyConstructedPtr_thenHasUseCount2) {
   intrusive_ptr<SomeClass> obj = make_intrusive<SomeClass>();
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   intrusive_ptr<SomeClass> obj2 = obj;
   EXPECT_EQ(2, obj2.use_count());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenCopyConstructedPtr_thenIsNotUnique) {
   intrusive_ptr<SomeClass> obj = make_intrusive<SomeClass>();
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   intrusive_ptr<SomeClass> obj2 = obj;
   EXPECT_FALSE(obj2.unique());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenCopyConstructedPtr_thenOldHasUseCount2) {
   intrusive_ptr<SomeClass> obj = make_intrusive<SomeClass>();
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   intrusive_ptr<SomeClass> obj2 = obj;
   EXPECT_EQ(2, obj.use_count());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenCopyConstructedPtr_thenOldIsNotUnique) {
   intrusive_ptr<SomeClass> obj = make_intrusive<SomeClass>();
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   intrusive_ptr<SomeClass> obj2 = obj;
   EXPECT_FALSE(obj.unique());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenCopyConstructedPtr_whenDestructingCopy_thenHasUseCount1) {
   intrusive_ptr<SomeClass> obj = make_intrusive<SomeClass>();
   {
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     intrusive_ptr<SomeClass> obj2 = obj;
     EXPECT_EQ(2, obj.use_count());
   }
   EXPECT_EQ(1, obj.use_count());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenCopyConstructedPtr_whenDestructingCopy_thenIsUnique) {
   intrusive_ptr<SomeClass> obj = make_intrusive<SomeClass>();
   {
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     intrusive_ptr<SomeClass> obj2 = obj;
     EXPECT_FALSE(obj.unique());
   }
   EXPECT_TRUE(obj.unique());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenCopyConstructedPtr_whenReassigningCopy_thenHasUseCount1) {
@@ -1465,6 +1676,7 @@ TEST(
   EXPECT_EQ(1, obj2.use_count());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenCopyConstructedPtr_whenReassigningCopy_thenIsUnique) {
@@ -1476,6 +1688,7 @@ TEST(
   EXPECT_TRUE(obj2.unique());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenCopyAssignedPtr_thenHasUseCount2) {
   intrusive_ptr<SomeClass> obj = make_intrusive<SomeClass>();
   intrusive_ptr<SomeClass> obj2 = make_intrusive<SomeClass>();
@@ -1484,6 +1697,7 @@ TEST(IntrusivePtrTest, givenCopyAssignedPtr_thenHasUseCount2) {
   EXPECT_EQ(2, obj2.use_count());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenCopyAssignedPtr_thenIsNotUnique) {
   intrusive_ptr<SomeClass> obj = make_intrusive<SomeClass>();
   intrusive_ptr<SomeClass> obj2 = make_intrusive<SomeClass>();
@@ -1492,6 +1706,7 @@ TEST(IntrusivePtrTest, givenCopyAssignedPtr_thenIsNotUnique) {
   EXPECT_FALSE(obj2.unique());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenCopyAssignedPtr_whenDestructingCopy_thenHasUseCount1) {
@@ -1504,6 +1719,7 @@ TEST(
   EXPECT_EQ(1, obj.use_count());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenCopyAssignedPtr_whenDestructingCopy_thenIsUnique) {
   intrusive_ptr<SomeClass> obj = make_intrusive<SomeClass>();
   {
@@ -1514,6 +1730,7 @@ TEST(IntrusivePtrTest, givenCopyAssignedPtr_whenDestructingCopy_thenIsUnique) {
   EXPECT_TRUE(obj.unique());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenCopyAssignedPtr_whenReassigningCopy_thenHasUseCount1) {
@@ -1526,6 +1743,7 @@ TEST(
   EXPECT_EQ(1, obj2.use_count());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenCopyAssignedPtr_whenReassigningCopy_thenIsUnique) {
   intrusive_ptr<SomeClass> obj = make_intrusive<SomeClass>();
   intrusive_ptr<SomeClass> obj2 = make_intrusive<SomeClass>();
@@ -1536,6 +1754,7 @@ TEST(IntrusivePtrTest, givenCopyAssignedPtr_whenReassigningCopy_thenIsUnique) {
   EXPECT_TRUE(obj2.unique());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenPtr_whenReleasedAndReclaimed_thenDoesntCrash) {
   intrusive_ptr<SomeClass> obj = make_intrusive<SomeClass>();
   SomeClass* ptr = obj.release();
@@ -1543,6 +1762,7 @@ TEST(IntrusivePtrTest, givenPtr_whenReleasedAndReclaimed_thenDoesntCrash) {
   intrusive_ptr<SomeClass> reclaimed = intrusive_ptr<SomeClass>::reclaim(ptr);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     IntrusivePtrTest,
     givenPtr_whenReleasedAndReclaimed_thenIsDestructedAtEnd) {
@@ -1580,6 +1800,7 @@ TEST(IntrusivePtrTest, givenStackObject_whenReclaimed_thenCrashes) {
 #endif
 }*/
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenPtr_whenNonOwningReclaimed_thenDoesntCrash) {
   intrusive_ptr<SomeClass> obj = make_intrusive<SomeClass>();
   SomeClass* raw_ptr = obj.get();
@@ -1590,9 +1811,8 @@ TEST(IntrusivePtrTest, givenPtr_whenNonOwningReclaimed_thenDoesntCrash) {
   EXPECT_EQ(reclaimed.get(), obj.get());
 }
 
-TEST(
-    IntrusivePtrTest,
-    givenPtr_whenNonOwningReclaimed_thenIsDestructedAtEnd) {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(IntrusivePtrTest, givenPtr_whenNonOwningReclaimed_thenIsDestructedAtEnd) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
   {
@@ -1630,7 +1850,9 @@ weak_intrusive_ptr<T> make_weak_only(Args&&... args) {
   auto intrusive = make_intrusive<T>(std::forward<Args>(args)...);
   return weak_intrusive_ptr<T>(intrusive);
 }
-template <class T, class NullType = c10::detail::intrusive_target_default_null_type<T>>
+template <
+    class T,
+    class NullType = c10::detail::intrusive_target_default_null_type<T>>
 weak_intrusive_ptr<T, NullType> make_invalid_weak() {
   return weak_intrusive_ptr<T, NullType>(intrusive_ptr<T, NullType>());
 }
@@ -1640,18 +1862,38 @@ static_assert(
     std::is_same<SomeClass, weak_intrusive_ptr<SomeClass>::element_type>::value,
     "weak_intrusive_ptr<T>::element_type is wrong");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtr_whenCreatingAndDestructing_thenDoesntCrash) {
   IntrusiveAndWeak<SomeClass> var = make_weak_intrusive<SomeClass>();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, givenPtr_whenLocking_thenReturnsCorrectObject) {
   IntrusiveAndWeak<SomeClass> var = make_weak_intrusive<SomeClass>();
   intrusive_ptr<SomeClass> locked = var.weak.lock();
   EXPECT_EQ(var.ptr.get(), locked.get());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(WeakIntrusivePtrTest, expiredPtr_whenLocking_thenReturnsNullType) {
+  IntrusiveAndWeak<SomeClass> var = make_weak_intrusive<SomeClass>();
+  // reset the intrusive_ptr to test if weak pointer still valid
+  var.ptr.reset();
+  EXPECT_TRUE(var.weak.expired());
+  intrusive_ptr<SomeClass> locked = var.weak.lock();
+  EXPECT_FALSE(locked.defined());
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(WeakIntrusivePtrTest, weakNullPtr_locking) {
+  auto weak_ptr = make_invalid_weak<SomeClass>();
+  intrusive_ptr<SomeClass> locked = weak_ptr.lock();
+  EXPECT_FALSE(locked.defined());
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenValidPtr_whenMoveAssigning_thenPointsToSameObject) {
@@ -1662,6 +1904,7 @@ TEST(
   EXPECT_EQ(obj1ptr, obj2.weak.lock().get());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenValidPtr_whenMoveAssigning_thenOldInstanceInvalid) {
@@ -1671,16 +1914,27 @@ TEST(
   EXPECT_TRUE(obj1.weak.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(WeakIntrusivePtrTest, vector_insert_weak_intrusive) {
+  std::vector<weak_intrusive_ptr<SomeClass>> priorWorks;
+  std::vector<intrusive_ptr<SomeClass>> wips;
+  wips.push_back(make_intrusive<SomeClass>());
+  priorWorks.insert(priorWorks.end(), wips.begin(), wips.end());
+  EXPECT_EQ(priorWorks.size(), 1);
+}
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenInvalidPtr_whenMoveAssigning_thenNewInstanceIsValid) {
   IntrusiveAndWeak<SomeClass> obj1 = make_weak_intrusive<SomeClass>();
   weak_intrusive_ptr<SomeClass> obj2 = make_invalid_weak<SomeClass>();
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   SomeClass* obj1ptr = obj1.weak.lock().get();
   obj2 = std::move(obj1.weak);
   EXPECT_FALSE(obj2.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenValidPtr_whenMoveAssigningToSelf_thenPointsToSameObject) {
@@ -1690,6 +1944,7 @@ TEST(
   EXPECT_EQ(obj1ptr, obj1.weak.lock().get());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenValidPtr_whenMoveAssigningToSelf_thenStaysValid) {
@@ -1698,6 +1953,7 @@ TEST(
   EXPECT_FALSE(obj1.weak.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenInvalidPtr_whenMoveAssigning_thenPointsToSameObject) {
@@ -1708,24 +1964,29 @@ TEST(
   EXPECT_EQ(obj1ptr, obj2.lock().get());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenInvalidPtr_whenMoveAssigningToSelf_thenStaysInvalid) {
   weak_intrusive_ptr<SomeClass> obj1 = make_invalid_weak<SomeClass>();
   obj1 = std::move(obj1);
+  // NOLINTNEXTLINE(bugprone-use-after-move)
   EXPECT_TRUE(obj1.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenWeakOnlyPtr_whenMoveAssigning_thenNewInstanceIsValid) {
   IntrusiveAndWeak<SomeClass> obj1 = make_weak_intrusive<SomeClass>();
   weak_intrusive_ptr<SomeClass> obj2 = make_weak_only<SomeClass>();
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   SomeClass* obj1ptr = obj1.weak.lock().get();
   obj2 = std::move(obj1.weak);
   EXPECT_FALSE(obj2.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenWeakOnlyPtr_whenMoveAssigning_thenPointsToSameObject) {
@@ -1736,24 +1997,30 @@ TEST(
   EXPECT_EQ(obj1ptr, obj2.lock().get());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenWeakOnlyPtr_whenMoveAssigningToSelf_thenStaysInvalid) {
   weak_intrusive_ptr<SomeClass> obj1 = make_weak_only<SomeClass>();
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   SomeClass* obj1ptr = obj1.lock().get();
   obj1 = std::move(obj1);
+  // NOLINTNEXTLINE(bugprone-use-after-move)
   EXPECT_TRUE(obj1.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenWeakOnlyPtr_whenMoveAssigningToSelf_thenPointsToSameObject) {
   weak_intrusive_ptr<SomeClass> obj1 = make_weak_only<SomeClass>();
   SomeClass* obj1ptr = obj1.lock().get();
   obj1 = std::move(obj1);
+  // NOLINTNEXTLINE(bugprone-use-after-move)
   EXPECT_EQ(obj1ptr, obj1.lock().get());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenValidPtr_whenMoveAssigningFromInvalidPtr_thenNewInstanceIsInvalid) {
@@ -1764,6 +2031,7 @@ TEST(
   EXPECT_TRUE(obj2.weak.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenValidPtr_whenMoveAssigningFromWeakOnlyPtr_thenNewInstanceIsInvalid) {
@@ -1774,6 +2042,7 @@ TEST(
   EXPECT_TRUE(obj2.weak.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenValidPtr_whenMoveAssigningToBaseClass_thenPointsToSameObject) {
@@ -1786,6 +2055,7 @@ TEST(
   EXPECT_EQ(1, obj2.weak.lock()->v);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenValidPtr_whenMoveAssigningToBaseClass_thenOldInstanceInvalid) {
@@ -1796,17 +2066,20 @@ TEST(
   EXPECT_TRUE(obj1.weak.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenInvalidPtr_whenMoveAssigningToBaseClass_thenNewInstanceIsValid) {
   IntrusiveAndWeak<SomeChildClass> obj1 =
       make_weak_intrusive<SomeChildClass>(5);
   weak_intrusive_ptr<SomeBaseClass> obj2 = make_invalid_weak<SomeBaseClass>();
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   SomeBaseClass* obj1ptr = obj1.weak.lock().get();
   obj2 = std::move(obj1.weak);
   EXPECT_FALSE(obj2.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenInvalidPtr_whenMoveAssigningToBaseClass_thenPointsToSameObject) {
@@ -1819,6 +2092,7 @@ TEST(
   EXPECT_EQ(5, obj2.lock()->v);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenInvalidPtr_whenMoveAssigningInvalidPtrToBaseClass_thenNewInstanceIsValid) {
@@ -1829,17 +2103,20 @@ TEST(
   EXPECT_TRUE(obj2.weak.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenWeakOnlyPtr_whenMoveAssigningToBaseClass_thenNewInstanceIsValid) {
   IntrusiveAndWeak<SomeChildClass> obj1 =
       make_weak_intrusive<SomeChildClass>(5);
   weak_intrusive_ptr<SomeBaseClass> obj2 = make_weak_only<SomeBaseClass>(2);
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   SomeBaseClass* obj1ptr = obj1.weak.lock().get();
   obj2 = std::move(obj1.weak);
   EXPECT_FALSE(obj2.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenWeakOnlyPtr_whenMoveAssigningToBaseClass_thenPointsToSameObject) {
@@ -1852,6 +2129,7 @@ TEST(
   EXPECT_EQ(5, obj2.lock()->v);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenWeakOnlyPtr_whenMoveAssigningInvalidPtrToBaseClass_thenNewInstanceIsValid) {
@@ -1862,17 +2140,22 @@ TEST(
   EXPECT_TRUE(obj2.weak.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenNullPtr_whenMoveAssigningToDifferentNullptr_thenHasNewNullptr) {
-  weak_intrusive_ptr<SomeClass, NullType1> obj1 = make_invalid_weak<SomeClass, NullType1>();
-  weak_intrusive_ptr<SomeClass, NullType2> obj2 = make_invalid_weak<SomeClass, NullType2>();
+  weak_intrusive_ptr<SomeClass, NullType1> obj1 =
+      make_invalid_weak<SomeClass, NullType1>();
+  weak_intrusive_ptr<SomeClass, NullType2> obj2 =
+      make_invalid_weak<SomeClass, NullType2>();
   obj2 = std::move(obj1);
   EXPECT_NE(NullType1::singleton(), NullType2::singleton());
+  // NOLINTNEXTLINE(bugprone-use-after-move)
   EXPECT_TRUE(obj1.expired());
   EXPECT_TRUE(obj2.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenValidPtr_whenCopyAssigning_thenPointsToSameObject) {
@@ -1883,6 +2166,7 @@ TEST(
   EXPECT_EQ(obj1ptr, obj2.weak.lock().get());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenValidPtr_whenCopyAssigning_thenOldInstanceValid) {
@@ -1892,6 +2176,7 @@ TEST(
   EXPECT_FALSE(obj1.weak.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenValidPtr_whenCopyAssigningToSelf_thenPointsToSameObject) {
@@ -1901,6 +2186,7 @@ TEST(
   EXPECT_EQ(obj1ptr, obj1.weak.lock().get());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenValidPtr_whenCopyAssigningToSelf_thenStaysValid) {
@@ -1909,34 +2195,41 @@ TEST(
   EXPECT_FALSE(obj1.weak.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenInvalidPtr_whenCopyAssigning_thenNewInstanceIsValid) {
   IntrusiveAndWeak<SomeClass> obj1 = make_weak_intrusive<SomeClass>();
   weak_intrusive_ptr<SomeClass> obj2 = make_invalid_weak<SomeClass>();
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   SomeClass* obj1ptr = obj1.weak.lock().get();
   obj2 = obj1.weak;
   EXPECT_FALSE(obj2.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenInvalidPtr_whenCopyAssigningToSelf_thenStaysInvalid) {
   weak_intrusive_ptr<SomeClass> obj1 = make_invalid_weak<SomeClass>();
+  // NOLINTNEXTLINE(clang-diagnostic-self-assign-overloaded)
   obj1 = obj1;
   EXPECT_TRUE(obj1.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenWeakOnlyPtr_whenCopyAssigning_thenNewInstanceIsValid) {
   IntrusiveAndWeak<SomeClass> obj1 = make_weak_intrusive<SomeClass>();
   weak_intrusive_ptr<SomeClass> obj2 = make_weak_only<SomeClass>();
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   SomeClass* obj1ptr = obj1.weak.lock().get();
   obj2 = obj1.weak;
   EXPECT_FALSE(obj2.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenWeakOnlyPtr_whenCopyAssigning_thenPointsToSameObject) {
@@ -1947,24 +2240,30 @@ TEST(
   EXPECT_EQ(obj1ptr, obj2.lock().get());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenWeakOnlyPtr_whenCopyAssigningToSelf_thenStaysInvalid) {
   weak_intrusive_ptr<SomeClass> obj1 = make_weak_only<SomeClass>();
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   SomeClass* obj1ptr = obj1.lock().get();
+  // NOLINTNEXTLINE(clang-diagnostic-self-assign-overloaded)
   obj1 = obj1;
   EXPECT_TRUE(obj1.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenWeakOnlyPtr_whenCopyAssigningToSelf_thenPointsToSameObject) {
   weak_intrusive_ptr<SomeClass> obj1 = make_weak_only<SomeClass>();
   SomeClass* obj1ptr = obj1.lock().get();
+  // NOLINTNEXTLINE(clang-diagnostic-self-assign-overloaded)
   obj1 = obj1;
   EXPECT_EQ(obj1ptr, obj1.lock().get());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenValidPtr_whenCopyAssigningToBaseClass_thenPointsToSameObject) {
@@ -1975,6 +2274,7 @@ TEST(
   EXPECT_EQ(3, base.weak.lock()->v);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenValidPtr_whenCopyAssigningToBaseClass_thenOldInstanceInvalid) {
@@ -1985,17 +2285,20 @@ TEST(
   EXPECT_FALSE(obj1.weak.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenInvalidPtr_whenCopyAssigningToBaseClass_thenNewInstanceIsValid) {
   IntrusiveAndWeak<SomeChildClass> obj1 =
       make_weak_intrusive<SomeChildClass>(5);
   weak_intrusive_ptr<SomeBaseClass> obj2 = make_invalid_weak<SomeBaseClass>();
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   SomeBaseClass* obj1ptr = obj1.weak.lock().get();
   obj2 = obj1.weak;
   EXPECT_FALSE(obj2.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenInvalidPtr_whenCopyAssigningToBaseClass_thenPointsToSameObject) {
@@ -2008,6 +2311,7 @@ TEST(
   EXPECT_EQ(5, obj2.lock()->v);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtr_whenCopyAssigningInvalidPtrToBaseClass_thenNewInstanceIsInvalid) {
@@ -2018,17 +2322,20 @@ TEST(
   EXPECT_TRUE(obj2.weak.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenWeakOnlyPtr_whenCopyAssigningToBaseClass_thenNewInstanceIsValid) {
   IntrusiveAndWeak<SomeChildClass> obj1 =
       make_weak_intrusive<SomeChildClass>(5);
   weak_intrusive_ptr<SomeBaseClass> obj2 = make_weak_only<SomeBaseClass>(2);
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   SomeBaseClass* obj1ptr = obj1.weak.lock().get();
   obj2 = obj1.weak;
   EXPECT_FALSE(obj2.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenWeakOnlyPtr_whenCopyAssigningToBaseClass_thenPointsToSameObject) {
@@ -2041,6 +2348,7 @@ TEST(
   EXPECT_EQ(5, obj2.lock()->v);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtr_whenCopyAssigningWeakOnlyPtrToBaseClass_thenNewInstanceIsValid) {
@@ -2051,17 +2359,21 @@ TEST(
   EXPECT_TRUE(obj2.weak.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenNullPtr_whenCopyAssigningToDifferentNullptr_thenHasNewNullptr) {
-  weak_intrusive_ptr<SomeClass, NullType1> obj1 = make_invalid_weak<SomeClass, NullType1>();
-  weak_intrusive_ptr<SomeClass, NullType2> obj2 = make_invalid_weak<SomeClass, NullType2>();
+  weak_intrusive_ptr<SomeClass, NullType1> obj1 =
+      make_invalid_weak<SomeClass, NullType1>();
+  weak_intrusive_ptr<SomeClass, NullType2> obj2 =
+      make_invalid_weak<SomeClass, NullType2>();
   obj2 = obj1;
   EXPECT_NE(NullType1::singleton(), NullType2::singleton());
   EXPECT_TRUE(obj1.expired());
   EXPECT_TRUE(obj2.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtr_whenMoveConstructing_thenPointsToSameObject) {
@@ -2071,6 +2383,7 @@ TEST(
   EXPECT_EQ(obj1ptr, obj2.lock().get());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtr_whenMoveConstructing_thenOldInstanceInvalid) {
@@ -2079,12 +2392,14 @@ TEST(
   EXPECT_TRUE(obj1.weak.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, givenPtr_whenMoveConstructing_thenNewInstanceValid) {
   IntrusiveAndWeak<SomeClass> obj1 = make_weak_intrusive<SomeClass>();
   weak_intrusive_ptr<SomeClass> obj2 = std::move(obj1.weak);
   EXPECT_FALSE(obj2.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtr_whenMoveConstructingFromInvalidPtr_thenNewInstanceInvalid) {
@@ -2093,6 +2408,7 @@ TEST(
   EXPECT_TRUE(obj2.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtr_whenMoveConstructingFromWeakOnlyPtr_thenNewInstanceInvalid) {
@@ -2101,6 +2417,7 @@ TEST(
   EXPECT_TRUE(obj2.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtr_whenMoveConstructingToBaseClass_thenPointsToSameObject) {
@@ -2112,6 +2429,7 @@ TEST(
   EXPECT_EQ(objptr, base.lock().get());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtr_whenMoveConstructingToBaseClass_thenOldInstanceInvalid) {
@@ -2121,6 +2439,7 @@ TEST(
   EXPECT_TRUE(child.weak.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtr_whenMoveConstructingToBaseClass_thenNewInstanceValid) {
@@ -2130,6 +2449,7 @@ TEST(
   EXPECT_FALSE(obj2.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtr_whenMoveConstructingToBaseClassFromInvalidPtr_thenNewInstanceInvalid) {
@@ -2138,6 +2458,7 @@ TEST(
   EXPECT_TRUE(obj2.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtr_whenMoveConstructingToBaseClassFromWeakOnlyPtr_thenNewInstanceInvalid) {
@@ -2146,16 +2467,20 @@ TEST(
   EXPECT_TRUE(obj2.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenNullPtr_whenMoveConstructingToDifferentNullptr_thenHasNewNullptr) {
-  weak_intrusive_ptr<SomeClass, NullType1> obj1 = make_invalid_weak<SomeClass, NullType1>();
+  weak_intrusive_ptr<SomeClass, NullType1> obj1 =
+      make_invalid_weak<SomeClass, NullType1>();
   weak_intrusive_ptr<SomeClass, NullType2> obj2 = std::move(obj1);
   EXPECT_NE(NullType1::singleton(), NullType2::singleton());
+  // NOLINTNEXTLINE(bugprone-use-after-move)
   EXPECT_TRUE(obj1.expired());
   EXPECT_TRUE(obj2.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtr_whenCopyConstructing_thenPointsToSameObject) {
@@ -2166,34 +2491,41 @@ TEST(
   EXPECT_FALSE(obj1.weak.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, givenPtr_whenCopyConstructing_thenOldInstanceValid) {
   IntrusiveAndWeak<SomeClass> obj1 = make_weak_intrusive<SomeClass>();
   weak_intrusive_ptr<SomeClass> obj2 = obj1.weak;
   EXPECT_FALSE(obj1.weak.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, givenPtr_whenCopyConstructing_thenNewInstanceValid) {
   IntrusiveAndWeak<SomeClass> obj1 = make_weak_intrusive<SomeClass>();
   weak_intrusive_ptr<SomeClass> obj2 = obj1.weak;
   EXPECT_FALSE(obj2.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtr_whenCopyConstructingFromInvalidPtr_thenNewInstanceInvalid) {
   weak_intrusive_ptr<SomeClass> obj1 = make_invalid_weak<SomeClass>();
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   weak_intrusive_ptr<SomeClass> obj2 = obj1;
   EXPECT_TRUE(obj2.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtr_whenCopyConstructingFromWeakOnlyPtr_thenNewInstanceInvalid) {
   weak_intrusive_ptr<SomeClass> obj1 = make_weak_only<SomeClass>();
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   weak_intrusive_ptr<SomeClass> obj2 = obj1;
   EXPECT_TRUE(obj2.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtr_whenCopyConstructingToBaseClass_thenPointsToSameObject) {
@@ -2205,6 +2537,7 @@ TEST(
   EXPECT_EQ(objptr, base.lock().get());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtr_whenCopyConstructingToBaseClass_thenOldInstanceInvalid) {
@@ -2214,6 +2547,7 @@ TEST(
   EXPECT_FALSE(child.weak.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtr_whenCopyConstructingToBaseClass_thenNewInstanceInvalid) {
@@ -2223,6 +2557,7 @@ TEST(
   EXPECT_FALSE(base.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtr_whenCopyConstructingToBaseClassFromInvalidPtr_thenNewInstanceInvalid) {
@@ -2231,6 +2566,7 @@ TEST(
   EXPECT_TRUE(obj2.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtr_whenCopyConstructingToBaseClassFromWeakOnlyPtr_thenNewInstanceInvalid) {
@@ -2239,16 +2575,19 @@ TEST(
   EXPECT_TRUE(obj2.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenNullPtr_whenCopyConstructingToDifferentNullptr_thenHasNewNullptr) {
-  weak_intrusive_ptr<SomeClass, NullType1> obj1 = make_invalid_weak<SomeClass, NullType1>();
+  weak_intrusive_ptr<SomeClass, NullType1> obj1 =
+      make_invalid_weak<SomeClass, NullType1>();
   weak_intrusive_ptr<SomeClass, NullType2> obj2 = obj1;
   EXPECT_NE(NullType1::singleton(), NullType2::singleton());
   EXPECT_TRUE(obj1.expired());
   EXPECT_TRUE(obj2.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, SwapFunction) {
   IntrusiveAndWeak<SomeClass> obj1 = make_weak_intrusive<SomeClass>();
   IntrusiveAndWeak<SomeClass> obj2 = make_weak_intrusive<SomeClass>();
@@ -2259,6 +2598,7 @@ TEST(WeakIntrusivePtrTest, SwapFunction) {
   EXPECT_EQ(obj1ptr, obj2.weak.lock().get());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, SwapMethod) {
   IntrusiveAndWeak<SomeClass> obj1 = make_weak_intrusive<SomeClass>();
   IntrusiveAndWeak<SomeClass> obj2 = make_weak_intrusive<SomeClass>();
@@ -2269,6 +2609,7 @@ TEST(WeakIntrusivePtrTest, SwapMethod) {
   EXPECT_EQ(obj1ptr, obj2.weak.lock().get());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, SwapFunctionFromInvalid) {
   weak_intrusive_ptr<SomeClass> obj1 = make_invalid_weak<SomeClass>();
   IntrusiveAndWeak<SomeClass> obj2 = make_weak_intrusive<SomeClass>();
@@ -2279,6 +2620,7 @@ TEST(WeakIntrusivePtrTest, SwapFunctionFromInvalid) {
   EXPECT_TRUE(obj2.weak.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, SwapMethodFromInvalid) {
   weak_intrusive_ptr<SomeClass> obj1 = make_invalid_weak<SomeClass>();
   IntrusiveAndWeak<SomeClass> obj2 = make_weak_intrusive<SomeClass>();
@@ -2289,6 +2631,7 @@ TEST(WeakIntrusivePtrTest, SwapMethodFromInvalid) {
   EXPECT_TRUE(obj2.weak.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, SwapFunctionWithInvalid) {
   IntrusiveAndWeak<SomeClass> obj1 = make_weak_intrusive<SomeClass>();
   weak_intrusive_ptr<SomeClass> obj2 = make_invalid_weak<SomeClass>();
@@ -2299,6 +2642,7 @@ TEST(WeakIntrusivePtrTest, SwapFunctionWithInvalid) {
   EXPECT_EQ(obj1ptr, obj2.lock().get());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, SwapMethodWithInvalid) {
   IntrusiveAndWeak<SomeClass> obj1 = make_weak_intrusive<SomeClass>();
   weak_intrusive_ptr<SomeClass> obj2 = make_invalid_weak<SomeClass>();
@@ -2309,6 +2653,7 @@ TEST(WeakIntrusivePtrTest, SwapMethodWithInvalid) {
   EXPECT_EQ(obj1ptr, obj2.lock().get());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, SwapFunctionInvalidWithInvalid) {
   weak_intrusive_ptr<SomeClass> obj1 = make_invalid_weak<SomeClass>();
   weak_intrusive_ptr<SomeClass> obj2 = make_invalid_weak<SomeClass>();
@@ -2317,6 +2662,7 @@ TEST(WeakIntrusivePtrTest, SwapFunctionInvalidWithInvalid) {
   EXPECT_TRUE(obj2.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, SwapMethodInvalidWithInvalid) {
   weak_intrusive_ptr<SomeClass> obj1 = make_invalid_weak<SomeClass>();
   weak_intrusive_ptr<SomeClass> obj2 = make_invalid_weak<SomeClass>();
@@ -2325,6 +2671,7 @@ TEST(WeakIntrusivePtrTest, SwapMethodInvalidWithInvalid) {
   EXPECT_TRUE(obj2.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, SwapFunctionFromWeakOnlyPtr) {
   weak_intrusive_ptr<SomeClass> obj1 = make_weak_only<SomeClass>();
   IntrusiveAndWeak<SomeClass> obj2 = make_weak_intrusive<SomeClass>();
@@ -2335,6 +2682,7 @@ TEST(WeakIntrusivePtrTest, SwapFunctionFromWeakOnlyPtr) {
   EXPECT_TRUE(obj2.weak.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, SwapMethodFromWeakOnlyPtr) {
   weak_intrusive_ptr<SomeClass> obj1 = make_weak_only<SomeClass>();
   IntrusiveAndWeak<SomeClass> obj2 = make_weak_intrusive<SomeClass>();
@@ -2345,6 +2693,7 @@ TEST(WeakIntrusivePtrTest, SwapMethodFromWeakOnlyPtr) {
   EXPECT_TRUE(obj2.weak.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, SwapFunctionWithWeakOnlyPtr) {
   IntrusiveAndWeak<SomeClass> obj1 = make_weak_intrusive<SomeClass>();
   weak_intrusive_ptr<SomeClass> obj2 = make_weak_only<SomeClass>();
@@ -2355,6 +2704,7 @@ TEST(WeakIntrusivePtrTest, SwapFunctionWithWeakOnlyPtr) {
   EXPECT_EQ(obj1ptr, obj2.lock().get());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, SwapMethodWithWeakOnlyPtr) {
   IntrusiveAndWeak<SomeClass> obj1 = make_weak_intrusive<SomeClass>();
   weak_intrusive_ptr<SomeClass> obj2 = make_weak_only<SomeClass>();
@@ -2365,6 +2715,7 @@ TEST(WeakIntrusivePtrTest, SwapMethodWithWeakOnlyPtr) {
   EXPECT_EQ(obj1ptr, obj2.lock().get());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, SwapFunctionWeakOnlyPtrWithWeakOnlyPtr) {
   weak_intrusive_ptr<SomeClass> obj1 = make_weak_only<SomeClass>();
   weak_intrusive_ptr<SomeClass> obj2 = make_weak_only<SomeClass>();
@@ -2373,6 +2724,7 @@ TEST(WeakIntrusivePtrTest, SwapFunctionWeakOnlyPtrWithWeakOnlyPtr) {
   EXPECT_TRUE(obj2.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, SwapMethodWeakOnlyPtrWithWeakOnlyPtr) {
   weak_intrusive_ptr<SomeClass> obj1 = make_weak_only<SomeClass>();
   weak_intrusive_ptr<SomeClass> obj2 = make_weak_only<SomeClass>();
@@ -2381,6 +2733,7 @@ TEST(WeakIntrusivePtrTest, SwapMethodWeakOnlyPtrWithWeakOnlyPtr) {
   EXPECT_TRUE(obj2.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, CanBePutInContainer) {
   std::vector<weak_intrusive_ptr<SomeClass1Parameter>> vec;
   IntrusiveAndWeak<SomeClass1Parameter> obj =
@@ -2389,6 +2742,7 @@ TEST(WeakIntrusivePtrTest, CanBePutInContainer) {
   EXPECT_EQ(5, vec[0].lock()->param);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, CanBePutInSet) {
   std::set<weak_intrusive_ptr<SomeClass1Parameter>> set;
   IntrusiveAndWeak<SomeClass1Parameter> obj =
@@ -2397,6 +2751,7 @@ TEST(WeakIntrusivePtrTest, CanBePutInSet) {
   EXPECT_EQ(5, set.begin()->lock()->param);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, CanBePutInUnorderedSet) {
   std::unordered_set<weak_intrusive_ptr<SomeClass1Parameter>> set;
   IntrusiveAndWeak<SomeClass1Parameter> obj =
@@ -2405,6 +2760,7 @@ TEST(WeakIntrusivePtrTest, CanBePutInUnorderedSet) {
   EXPECT_EQ(5, set.begin()->lock()->param);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, CanBePutInMap) {
   std::map<
       weak_intrusive_ptr<SomeClass1Parameter>,
@@ -2419,6 +2775,7 @@ TEST(WeakIntrusivePtrTest, CanBePutInMap) {
   EXPECT_EQ(3, map.begin()->second.lock()->param);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, CanBePutInUnorderedMap) {
   std::unordered_map<
       weak_intrusive_ptr<SomeClass1Parameter>,
@@ -2433,6 +2790,7 @@ TEST(WeakIntrusivePtrTest, CanBePutInUnorderedMap) {
   EXPECT_EQ(3, map.begin()->second.lock()->param);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, Equality_AfterCopyConstructor) {
   IntrusiveAndWeak<SomeClass> var1 = make_weak_intrusive<SomeClass>();
   weak_intrusive_ptr<SomeClass> var2 = var1.weak;
@@ -2440,6 +2798,7 @@ TEST(WeakIntrusivePtrTest, Equality_AfterCopyConstructor) {
   EXPECT_FALSE(var1.weak != var2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, Equality_AfterCopyAssignment) {
   IntrusiveAndWeak<SomeClass> var1 = make_weak_intrusive<SomeClass>();
   IntrusiveAndWeak<SomeClass> var2 = make_weak_intrusive<SomeClass>();
@@ -2448,13 +2807,16 @@ TEST(WeakIntrusivePtrTest, Equality_AfterCopyAssignment) {
   EXPECT_FALSE(var1.weak != var2.weak);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, Equality_AfterCopyAssignment_WeakOnly) {
   weak_intrusive_ptr<SomeClass> var1 = make_weak_only<SomeClass>();
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   weak_intrusive_ptr<SomeClass> var2 = var1;
   EXPECT_TRUE(var1 == var2);
   EXPECT_FALSE(var1 != var2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, Equality_Invalid) {
   weak_intrusive_ptr<SomeClass> var1 = make_invalid_weak<SomeClass>();
   weak_intrusive_ptr<SomeClass> var2 = make_invalid_weak<SomeClass>();
@@ -2462,34 +2824,39 @@ TEST(WeakIntrusivePtrTest, Equality_Invalid) {
   EXPECT_FALSE(var1 != var2);
 }
 
-TEST(WeakIntrusivePtrTest, Nonequality) {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(WeakIntrusivePtrTest, Inequality) {
   IntrusiveAndWeak<SomeClass> var1 = make_intrusive<SomeClass>();
   IntrusiveAndWeak<SomeClass> var2 = make_intrusive<SomeClass>();
   EXPECT_TRUE(var1.weak != var2.weak);
   EXPECT_FALSE(var1.weak == var2.weak);
 }
 
-TEST(WeakIntrusivePtrTest, Nonequality_InvalidLeft) {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(WeakIntrusivePtrTest, Inequality_InvalidLeft) {
   weak_intrusive_ptr<SomeClass> var1 = make_invalid_weak<SomeClass>();
   IntrusiveAndWeak<SomeClass> var2 = make_intrusive<SomeClass>();
   EXPECT_TRUE(var1 != var2.weak);
   EXPECT_FALSE(var1 == var2.weak);
 }
 
-TEST(WeakIntrusivePtrTest, Nonequality_InvalidRight) {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(WeakIntrusivePtrTest, Inequality_InvalidRight) {
   IntrusiveAndWeak<SomeClass> var1 = make_intrusive<SomeClass>();
   weak_intrusive_ptr<SomeClass> var2 = make_invalid_weak<SomeClass>();
   EXPECT_TRUE(var1.weak != var2);
   EXPECT_FALSE(var1.weak == var2);
 }
 
-TEST(WeakIntrusivePtrTest, Nonequality_WeakOnly) {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(WeakIntrusivePtrTest, Inequality_WeakOnly) {
   weak_intrusive_ptr<SomeClass> var1 = make_weak_only<SomeClass>();
   weak_intrusive_ptr<SomeClass> var2 = make_weak_only<SomeClass>();
   EXPECT_TRUE(var1 != var2);
   EXPECT_FALSE(var1 == var2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, HashIsDifferent) {
   IntrusiveAndWeak<SomeClass> var1 = make_weak_intrusive<SomeClass>();
   IntrusiveAndWeak<SomeClass> var2 = make_weak_intrusive<SomeClass>();
@@ -2498,6 +2865,7 @@ TEST(WeakIntrusivePtrTest, HashIsDifferent) {
       std::hash<weak_intrusive_ptr<SomeClass>>()(var2.weak));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, HashIsDifferent_ValidAndInvalid) {
   weak_intrusive_ptr<SomeClass> var1 = make_invalid_weak<SomeClass>();
   IntrusiveAndWeak<SomeClass> var2 = make_weak_intrusive<SomeClass>();
@@ -2506,6 +2874,7 @@ TEST(WeakIntrusivePtrTest, HashIsDifferent_ValidAndInvalid) {
       std::hash<weak_intrusive_ptr<SomeClass>>()(var2.weak));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, HashIsDifferent_ValidAndWeakOnly) {
   weak_intrusive_ptr<SomeClass> var1 = make_weak_only<SomeClass>();
   IntrusiveAndWeak<SomeClass> var2 = make_weak_intrusive<SomeClass>();
@@ -2514,6 +2883,7 @@ TEST(WeakIntrusivePtrTest, HashIsDifferent_ValidAndWeakOnly) {
       std::hash<weak_intrusive_ptr<SomeClass>>()(var2.weak));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, HashIsDifferent_WeakOnlyAndWeakOnly) {
   weak_intrusive_ptr<SomeClass> var1 = make_weak_only<SomeClass>();
   weak_intrusive_ptr<SomeClass> var2 = make_weak_only<SomeClass>();
@@ -2522,6 +2892,7 @@ TEST(WeakIntrusivePtrTest, HashIsDifferent_WeakOnlyAndWeakOnly) {
       std::hash<weak_intrusive_ptr<SomeClass>>()(var2));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, HashIsSame_AfterCopyConstructor) {
   IntrusiveAndWeak<SomeClass> var1 = make_weak_intrusive<SomeClass>();
   weak_intrusive_ptr<SomeClass> var2 = var1.weak;
@@ -2530,14 +2901,17 @@ TEST(WeakIntrusivePtrTest, HashIsSame_AfterCopyConstructor) {
       std::hash<weak_intrusive_ptr<SomeClass>>()(var2));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, HashIsSame_AfterCopyConstructor_WeakOnly) {
   weak_intrusive_ptr<SomeClass> var1 = make_weak_only<SomeClass>();
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   weak_intrusive_ptr<SomeClass> var2 = var1;
   EXPECT_EQ(
       std::hash<weak_intrusive_ptr<SomeClass>>()(var1),
       std::hash<weak_intrusive_ptr<SomeClass>>()(var2));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, HashIsSame_AfterCopyAssignment) {
   IntrusiveAndWeak<SomeClass> var1 = make_weak_intrusive<SomeClass>();
   IntrusiveAndWeak<SomeClass> var2 = make_weak_intrusive<SomeClass>();
@@ -2547,6 +2921,7 @@ TEST(WeakIntrusivePtrTest, HashIsSame_AfterCopyAssignment) {
       std::hash<weak_intrusive_ptr<SomeClass>>()(var2.weak));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, HashIsSame_AfterCopyAssignment_WeakOnly) {
   weak_intrusive_ptr<SomeClass> var1 = make_weak_only<SomeClass>();
   weak_intrusive_ptr<SomeClass> var2 = make_invalid_weak<SomeClass>();
@@ -2556,6 +2931,7 @@ TEST(WeakIntrusivePtrTest, HashIsSame_AfterCopyAssignment_WeakOnly) {
       std::hash<weak_intrusive_ptr<SomeClass>>()(var2));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, HashIsSame_BothInvalid) {
   weak_intrusive_ptr<SomeClass> var1 = make_invalid_weak<SomeClass>();
   weak_intrusive_ptr<SomeClass> var2 = make_invalid_weak<SomeClass>();
@@ -2564,32 +2940,42 @@ TEST(WeakIntrusivePtrTest, HashIsSame_BothInvalid) {
       std::hash<weak_intrusive_ptr<SomeClass>>()(var2));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, OneIsLess) {
   IntrusiveAndWeak<SomeClass> var1 = make_weak_intrusive<SomeClass>();
   IntrusiveAndWeak<SomeClass> var2 = make_weak_intrusive<SomeClass>();
   EXPECT_TRUE(
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       std::less<weak_intrusive_ptr<SomeClass>>()(var1.weak, var2.weak) !=
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       std::less<weak_intrusive_ptr<SomeClass>>()(var2.weak, var1.weak));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, InvalidIsLess1) {
   weak_intrusive_ptr<SomeClass> var1 = make_invalid_weak<SomeClass>();
   IntrusiveAndWeak<SomeClass> var2 = make_weak_intrusive<SomeClass>();
+  // NOLINTNEXTLINE(modernize-use-transparent-functors)
   EXPECT_TRUE(std::less<weak_intrusive_ptr<SomeClass>>()(var1, var2.weak));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, InvalidIsLess2) {
   IntrusiveAndWeak<SomeClass> var1 = make_weak_intrusive<SomeClass>();
   weak_intrusive_ptr<SomeClass> var2 = make_invalid_weak<SomeClass>();
+  // NOLINTNEXTLINE(modernize-use-transparent-functors)
   EXPECT_FALSE(std::less<weak_intrusive_ptr<SomeClass>>()(var1.weak, var2));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, InvalidIsNotLessThanInvalid) {
   weak_intrusive_ptr<SomeClass> var1 = make_invalid_weak<SomeClass>();
   weak_intrusive_ptr<SomeClass> var2 = make_invalid_weak<SomeClass>();
+  // NOLINTNEXTLINE(modernize-use-transparent-functors)
   EXPECT_FALSE(std::less<weak_intrusive_ptr<SomeClass>>()(var1, var2));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, givenPtr_whenCallingResetOnWeakPtr_thenIsInvalid) {
   IntrusiveAndWeak<SomeClass> obj = make_weak_intrusive<SomeClass>();
   EXPECT_FALSE(obj.weak.expired());
@@ -2597,6 +2983,7 @@ TEST(WeakIntrusivePtrTest, givenPtr_whenCallingResetOnWeakPtr_thenIsInvalid) {
   EXPECT_TRUE(obj.weak.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, givenPtr_whenCallingResetOnStrongPtr_thenIsInvalid) {
   IntrusiveAndWeak<SomeClass> obj = make_weak_intrusive<SomeClass>();
   EXPECT_FALSE(obj.weak.expired());
@@ -2604,106 +2991,125 @@ TEST(WeakIntrusivePtrTest, givenPtr_whenCallingResetOnStrongPtr_thenIsInvalid) {
   EXPECT_TRUE(obj.weak.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, AllowsMoveConstructingToConst) {
   IntrusiveAndWeak<SomeClass> a = make_weak_intrusive<SomeClass>();
   weak_intrusive_ptr<const SomeClass> b = std::move(a.weak);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, AllowsCopyConstructingToConst) {
   IntrusiveAndWeak<SomeClass> a = make_weak_intrusive<SomeClass>();
   weak_intrusive_ptr<const SomeClass> b = a.weak;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, AllowsMoveAssigningToConst) {
   IntrusiveAndWeak<SomeClass> a = make_weak_intrusive<SomeClass>();
   IntrusiveAndWeak<const SomeClass> b = make_weak_intrusive<const SomeClass>();
   b.weak = std::move(a.weak);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, AllowsCopyAssigningToConst) {
   IntrusiveAndWeak<SomeClass> a = make_weak_intrusive<SomeClass>();
   IntrusiveAndWeak<const SomeClass> b = make_weak_intrusive<const SomeClass>();
   b.weak = a.weak;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, givenNewPtr_thenHasUseCount1) {
   IntrusiveAndWeak<SomeClass> obj = make_weak_intrusive<SomeClass>();
   EXPECT_EQ(1, obj.weak.use_count());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, givenNewPtr_thenIsNotExpired) {
   IntrusiveAndWeak<SomeClass> obj = make_weak_intrusive<SomeClass>();
   EXPECT_FALSE(obj.weak.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, givenInvalidPtr_thenHasUseCount0) {
   weak_intrusive_ptr<SomeClass> obj = make_invalid_weak<SomeClass>();
   EXPECT_EQ(0, obj.use_count());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, givenInvalidPtr_thenIsExpired) {
   weak_intrusive_ptr<SomeClass> obj = make_invalid_weak<SomeClass>();
   EXPECT_TRUE(obj.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, givenWeakOnlyPtr_thenHasUseCount0) {
   weak_intrusive_ptr<SomeClass> obj = make_weak_only<SomeClass>();
   EXPECT_EQ(0, obj.use_count());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, givenWeakOnlyPtr_thenIsExpired) {
   weak_intrusive_ptr<SomeClass> obj = make_weak_only<SomeClass>();
   EXPECT_TRUE(obj.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, givenPtr_whenCallingWeakReset_thenHasUseCount0) {
   IntrusiveAndWeak<SomeClass> obj = make_weak_intrusive<SomeClass>();
   obj.weak.reset();
   EXPECT_EQ(0, obj.weak.use_count());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, givenPtr_whenCallingWeakReset_thenIsExpired) {
   IntrusiveAndWeak<SomeClass> obj = make_weak_intrusive<SomeClass>();
   obj.weak.reset();
   EXPECT_TRUE(obj.weak.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, givenPtr_whenCallingStrongReset_thenHasUseCount0) {
   IntrusiveAndWeak<SomeClass> obj = make_weak_intrusive<SomeClass>();
   obj.ptr.reset();
   EXPECT_EQ(0, obj.weak.use_count());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, givenPtr_whenCallingStrongReset_thenIsExpired) {
   IntrusiveAndWeak<SomeClass> obj = make_weak_intrusive<SomeClass>();
   obj.ptr.reset();
   EXPECT_TRUE(obj.weak.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, givenMoveConstructedPtr_thenHasUseCount1) {
   IntrusiveAndWeak<SomeClass> obj = make_weak_intrusive<SomeClass>();
   weak_intrusive_ptr<SomeClass> obj2 = std::move(obj.weak);
   EXPECT_EQ(1, obj2.use_count());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, givenMoveConstructedPtr_thenIsNotExpired) {
   IntrusiveAndWeak<SomeClass> obj = make_weak_intrusive<SomeClass>();
   weak_intrusive_ptr<SomeClass> obj2 = std::move(obj.weak);
   EXPECT_FALSE(obj2.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, givenMoveConstructedPtr_thenOldHasUseCount0) {
   IntrusiveAndWeak<SomeClass> obj = make_weak_intrusive<SomeClass>();
   weak_intrusive_ptr<SomeClass> obj2 = std::move(obj.weak);
   EXPECT_EQ(0, obj.weak.use_count());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, givenMoveConstructedPtr_thenOldIsExpired) {
   IntrusiveAndWeak<SomeClass> obj = make_weak_intrusive<SomeClass>();
   weak_intrusive_ptr<SomeClass> obj2 = std::move(obj.weak);
   EXPECT_TRUE(obj.weak.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, givenMoveAssignedPtr_thenHasUseCount1) {
   IntrusiveAndWeak<SomeClass> obj = make_weak_intrusive<SomeClass>();
   IntrusiveAndWeak<SomeClass> obj2 = make_weak_intrusive<SomeClass>();
@@ -2711,6 +3117,7 @@ TEST(WeakIntrusivePtrTest, givenMoveAssignedPtr_thenHasUseCount1) {
   EXPECT_EQ(1, obj2.weak.use_count());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, givenMoveAssignedPtr_thenIsNotExpired) {
   IntrusiveAndWeak<SomeClass> obj = make_weak_intrusive<SomeClass>();
   IntrusiveAndWeak<SomeClass> obj2 = make_weak_intrusive<SomeClass>();
@@ -2718,6 +3125,7 @@ TEST(WeakIntrusivePtrTest, givenMoveAssignedPtr_thenIsNotExpired) {
   EXPECT_FALSE(obj2.weak.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, givenMoveAssignedPtr_thenOldHasUseCount0) {
   IntrusiveAndWeak<SomeClass> obj = make_weak_intrusive<SomeClass>();
   IntrusiveAndWeak<SomeClass> obj2 = make_weak_intrusive<SomeClass>();
@@ -2725,6 +3133,7 @@ TEST(WeakIntrusivePtrTest, givenMoveAssignedPtr_thenOldHasUseCount0) {
   EXPECT_EQ(0, obj.weak.use_count());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, givenMoveAssignedPtr_thenOldIsExpired) {
   IntrusiveAndWeak<SomeClass> obj = make_weak_intrusive<SomeClass>();
   IntrusiveAndWeak<SomeClass> obj2 = make_weak_intrusive<SomeClass>();
@@ -2732,36 +3141,42 @@ TEST(WeakIntrusivePtrTest, givenMoveAssignedPtr_thenOldIsExpired) {
   EXPECT_TRUE(obj.weak.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, givenCopyConstructedPtr_thenHasUseCount1) {
   IntrusiveAndWeak<SomeClass> obj = make_weak_intrusive<SomeClass>();
   weak_intrusive_ptr<SomeClass> obj2 = obj.weak;
   EXPECT_EQ(1, obj2.use_count());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, givenCopyConstructedPtr_thenIsNotExpired) {
   IntrusiveAndWeak<SomeClass> obj = make_weak_intrusive<SomeClass>();
   weak_intrusive_ptr<SomeClass> obj2 = obj.weak;
   EXPECT_FALSE(obj2.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, givenCopyConstructedPtr_thenOldHasUseCount1) {
   IntrusiveAndWeak<SomeClass> obj = make_weak_intrusive<SomeClass>();
   weak_intrusive_ptr<SomeClass> obj2 = obj.weak;
   EXPECT_EQ(1, obj.weak.use_count());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, givenCopyConstructedPtr_thenOldIsNotExpired) {
   IntrusiveAndWeak<SomeClass> obj = make_weak_intrusive<SomeClass>();
   weak_intrusive_ptr<SomeClass> obj2 = obj.weak;
   EXPECT_FALSE(obj.weak.expired());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtr_whenLastStrongPointerResets_thenReleasesResources) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
-  auto obj = make_weak_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+  auto obj =
+      make_weak_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
   EXPECT_FALSE(resourcesReleased);
   EXPECT_FALSE(wasDestructed);
   obj.ptr.reset();
@@ -2772,12 +3187,14 @@ TEST(
   EXPECT_TRUE(wasDestructed);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtr_whenDestructedButStillHasStrongPointers_thenDoesntReleaseResources) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
-  auto obj = make_weak_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+  auto obj =
+      make_weak_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
   EXPECT_FALSE(resourcesReleased);
   EXPECT_FALSE(wasDestructed);
   obj.weak.reset();
@@ -2788,11 +3205,13 @@ TEST(
   EXPECT_TRUE(wasDestructed);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, givenPtr_whenDestructed_thenDestructsObject) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
   {
-    auto obj = make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj =
+        make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
     EXPECT_TRUE(resourcesReleased);
     EXPECT_FALSE(wasDestructed);
   }
@@ -2800,12 +3219,14 @@ TEST(WeakIntrusivePtrTest, givenPtr_whenDestructed_thenDestructsObject) {
   EXPECT_TRUE(wasDestructed);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtr_whenMoveConstructed_thenDestructsObjectAfterSecondDestructed) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
-  auto obj = make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
+  auto obj =
+      make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
   {
     auto obj2 = std::move(obj);
     EXPECT_TRUE(resourcesReleased);
@@ -2815,12 +3236,14 @@ TEST(
   EXPECT_TRUE(wasDestructed);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtr_whenMoveConstructedToBaseClass_thenDestructsObjectAfterSecondDestructed) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
-  auto obj = make_weak_only<ChildDestructableMock>(&resourcesReleased, &wasDestructed);
+  auto obj =
+      make_weak_only<ChildDestructableMock>(&resourcesReleased, &wasDestructed);
   {
     weak_intrusive_ptr<DestructableMock> obj2 = std::move(obj);
     EXPECT_TRUE(resourcesReleased);
@@ -2830,13 +3253,15 @@ TEST(
   EXPECT_TRUE(wasDestructed);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, givenPtr_whenMoveAssigned_thenDestructsOldObject) {
   bool dummy = false;
   bool resourcesReleased = false;
   bool wasDestructed = false;
   auto obj = make_weak_only<DestructableMock>(&dummy, &dummy);
   {
-    auto obj2 = make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj2 =
+        make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
     EXPECT_TRUE(resourcesReleased);
     EXPECT_FALSE(wasDestructed);
     obj2 = std::move(obj);
@@ -2845,6 +3270,7 @@ TEST(WeakIntrusivePtrTest, givenPtr_whenMoveAssigned_thenDestructsOldObject) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtr_whenMoveAssignedToBaseClass_thenDestructsOldObject) {
@@ -2853,7 +3279,8 @@ TEST(
   bool wasDestructed = false;
   auto obj = make_weak_only<ChildDestructableMock>(&dummy, &dummy);
   {
-    auto obj2 = make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj2 =
+        make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
     EXPECT_TRUE(resourcesReleased);
     EXPECT_FALSE(wasDestructed);
     obj2 = std::move(obj);
@@ -2862,6 +3289,7 @@ TEST(
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtrWithCopy_whenMoveAssigned_thenDestructsOldObjectAfterCopyIsDestructed) {
@@ -2870,7 +3298,8 @@ TEST(
   bool wasDestructed = false;
   auto obj = make_weak_only<DestructableMock>(&dummy, &dummy);
   {
-    auto obj2 = make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj2 =
+        make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
     {
       auto copy = obj2;
       EXPECT_TRUE(resourcesReleased);
@@ -2884,6 +3313,7 @@ TEST(
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtrWithBaseClassCopy_whenMoveAssigned_thenDestructsOldObjectAfterCopyIsDestructed) {
@@ -2892,8 +3322,8 @@ TEST(
   bool wasDestructed = false;
   auto obj = make_weak_only<ChildDestructableMock>(&dummy, &dummy);
   {
-    auto obj2 =
-        make_weak_only<ChildDestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj2 = make_weak_only<ChildDestructableMock>(
+        &resourcesReleased, &wasDestructed);
     {
       weak_intrusive_ptr<DestructableMock> copy = obj2;
       EXPECT_TRUE(resourcesReleased);
@@ -2907,6 +3337,7 @@ TEST(
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtrWithCopy_whenMoveAssignedToBaseClass_thenDestructsOldObjectAfterCopyIsDestructed) {
@@ -2915,7 +3346,8 @@ TEST(
   bool wasDestructed = false;
   auto obj = make_weak_only<ChildDestructableMock>(&dummy, &dummy);
   {
-    auto obj2 = make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj2 =
+        make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
     {
       weak_intrusive_ptr<DestructableMock> copy = obj2;
       EXPECT_TRUE(resourcesReleased);
@@ -2929,13 +3361,15 @@ TEST(
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtr_whenMoveAssigned_thenDestructsObjectAfterSecondDestructed) {
   bool dummy = false;
   bool resourcesReleased = false;
   bool wasDestructed = false;
-  auto obj = make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
+  auto obj =
+      make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
   {
     auto obj2 = make_weak_only<DestructableMock>(&dummy, &dummy);
     obj2 = std::move(obj);
@@ -2946,13 +3380,15 @@ TEST(
   EXPECT_TRUE(wasDestructed);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtr_whenMoveAssignedToBaseClass_thenDestructsObjectAfterSecondDestructed) {
   bool dummy = false;
   bool resourcesReleased = false;
   bool wasDestructed = false;
-  auto obj = make_weak_only<ChildDestructableMock>(&resourcesReleased, &wasDestructed);
+  auto obj =
+      make_weak_only<ChildDestructableMock>(&resourcesReleased, &wasDestructed);
   {
     auto obj2 = make_weak_only<DestructableMock>(&dummy, &dummy);
     obj2 = std::move(obj);
@@ -2963,14 +3399,17 @@ TEST(
   EXPECT_TRUE(wasDestructed);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtr_whenCopyConstructedAndDestructed_thenDestructsObjectAfterLastDestruction) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
   {
-    auto obj = make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj =
+        make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
     {
+      // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
       weak_intrusive_ptr<DestructableMock> copy = obj;
       EXPECT_TRUE(resourcesReleased);
       EXPECT_FALSE(wasDestructed);
@@ -2982,13 +3421,15 @@ TEST(
   EXPECT_TRUE(wasDestructed);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtr_whenCopyConstructedToBaseClassAndDestructed_thenDestructsObjectAfterLastDestruction) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
   {
-    auto obj = make_weak_only<ChildDestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj = make_weak_only<ChildDestructableMock>(
+        &resourcesReleased, &wasDestructed);
     {
       weak_intrusive_ptr<DestructableMock> copy = obj;
       EXPECT_TRUE(resourcesReleased);
@@ -3001,13 +3442,15 @@ TEST(
   EXPECT_TRUE(wasDestructed);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtr_whenCopyConstructedAndOriginalDestructed_thenDestructsObjectAfterLastDestruction) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
   {
-    auto obj = make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj =
+        make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
     weak_intrusive_ptr<DestructableMock> copy = obj;
     obj.reset();
     EXPECT_TRUE(resourcesReleased);
@@ -3017,13 +3460,15 @@ TEST(
   EXPECT_TRUE(wasDestructed);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtr_whenCopyConstructedToBaseClassAndOriginalDestructed_thenDestructsObjectAfterLastDestruction) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
   {
-    auto obj = make_weak_only<ChildDestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj = make_weak_only<ChildDestructableMock>(
+        &resourcesReleased, &wasDestructed);
     weak_intrusive_ptr<DestructableMock> copy = obj;
     obj.reset();
     EXPECT_TRUE(resourcesReleased);
@@ -3033,6 +3478,7 @@ TEST(
   EXPECT_TRUE(wasDestructed);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtr_whenCopyAssignedAndDestructed_thenDestructsObjectAfterLastDestruction) {
@@ -3040,7 +3486,8 @@ TEST(
   bool wasDestructed = false;
   bool dummy = false;
   {
-    auto obj = make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj =
+        make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
     {
       weak_intrusive_ptr<DestructableMock> copy =
           make_weak_only<DestructableMock>(&dummy, &dummy);
@@ -3055,6 +3502,7 @@ TEST(
   EXPECT_TRUE(wasDestructed);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtr_whenCopyAssignedToBaseClassAndDestructed_thenDestructsObjectAfterLastDestruction) {
@@ -3062,7 +3510,8 @@ TEST(
   bool wasDestructed = false;
   bool dummy = false;
   {
-    auto obj = make_weak_only<ChildDestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj = make_weak_only<ChildDestructableMock>(
+        &resourcesReleased, &wasDestructed);
     {
       weak_intrusive_ptr<DestructableMock> copy =
           make_weak_only<DestructableMock>(&dummy, &dummy);
@@ -3077,6 +3526,7 @@ TEST(
   EXPECT_TRUE(wasDestructed);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtr_whenCopyAssignedAndOriginalDestructed_thenDestructsObjectAfterLastDestruction) {
@@ -3086,7 +3536,8 @@ TEST(
   {
     auto copy = make_weak_only<DestructableMock>(&dummy, &dummy);
     {
-      auto obj = make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
+      auto obj =
+          make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
       copy = obj;
       EXPECT_TRUE(resourcesReleased);
       EXPECT_FALSE(wasDestructed);
@@ -3098,6 +3549,7 @@ TEST(
   EXPECT_TRUE(wasDestructed);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtr_whenCopyAssignedToBaseClassAndOriginalDestructed_thenDestructsObjectAfterLastDestruction) {
@@ -3107,8 +3559,8 @@ TEST(
   {
     auto copy = make_weak_only<DestructableMock>(&dummy, &dummy);
     {
-      auto obj =
-          make_weak_only<ChildDestructableMock>(&resourcesReleased, &wasDestructed);
+      auto obj = make_weak_only<ChildDestructableMock>(
+          &resourcesReleased, &wasDestructed);
       copy = obj;
       EXPECT_TRUE(resourcesReleased);
       EXPECT_FALSE(wasDestructed);
@@ -3120,13 +3572,15 @@ TEST(
   EXPECT_TRUE(wasDestructed);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, givenPtr_whenCopyAssigned_thenDestructsOldObject) {
   bool dummy = false;
   bool resourcesReleased = false;
   bool wasDestructed = false;
   auto obj = make_weak_only<DestructableMock>(&dummy, &dummy);
   {
-    auto obj2 = make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj2 =
+        make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
     EXPECT_TRUE(resourcesReleased);
     EXPECT_FALSE(wasDestructed);
     obj2 = obj;
@@ -3135,6 +3589,7 @@ TEST(WeakIntrusivePtrTest, givenPtr_whenCopyAssigned_thenDestructsOldObject) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtr_whenCopyAssignedToBaseClass_thenDestructsOldObject) {
@@ -3143,7 +3598,8 @@ TEST(
   bool wasDestructed = false;
   auto obj = make_weak_only<ChildDestructableMock>(&dummy, &dummy);
   {
-    auto obj2 = make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj2 =
+        make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
     EXPECT_TRUE(resourcesReleased);
     EXPECT_FALSE(wasDestructed);
     obj2 = obj;
@@ -3152,6 +3608,7 @@ TEST(
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtrWithCopy_whenCopyAssigned_thenDestructsOldObjectAfterCopyIsDestructed) {
@@ -3160,7 +3617,8 @@ TEST(
   bool wasDestructed = false;
   auto obj = make_weak_only<DestructableMock>(&dummy, &dummy);
   {
-    auto obj2 = make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj2 =
+        make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
     {
       auto copy = obj2;
       EXPECT_TRUE(resourcesReleased);
@@ -3174,6 +3632,7 @@ TEST(
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtrWithBaseClassCopy_whenCopyAssigned_thenDestructsOldObjectAfterCopyIsDestructed) {
@@ -3182,8 +3641,8 @@ TEST(
   bool wasDestructed = false;
   auto obj = make_weak_only<ChildDestructableMock>(&dummy, &dummy);
   {
-    auto obj2 =
-        make_weak_only<ChildDestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj2 = make_weak_only<ChildDestructableMock>(
+        &resourcesReleased, &wasDestructed);
     {
       weak_intrusive_ptr<DestructableMock> copy = obj2;
       EXPECT_TRUE(resourcesReleased);
@@ -3197,6 +3656,7 @@ TEST(
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtrWithCopy_whenCopyAssignedToBaseClass_thenDestructsOldObjectAfterCopyIsDestructed) {
@@ -3205,7 +3665,8 @@ TEST(
   bool wasDestructed = false;
   auto obj = make_weak_only<ChildDestructableMock>(&dummy, &dummy);
   {
-    auto obj2 = make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
+    auto obj2 =
+        make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
     {
       weak_intrusive_ptr<DestructableMock> copy = obj2;
       EXPECT_TRUE(resourcesReleased);
@@ -3219,10 +3680,12 @@ TEST(
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, givenPtr_whenCallingReset_thenDestructs) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
-  auto obj = make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
+  auto obj =
+      make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
   EXPECT_TRUE(resourcesReleased);
   EXPECT_FALSE(wasDestructed);
   obj.reset();
@@ -3230,12 +3693,14 @@ TEST(WeakIntrusivePtrTest, givenPtr_whenCallingReset_thenDestructs) {
   EXPECT_TRUE(wasDestructed);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtrWithCopy_whenCallingReset_thenDestructsAfterCopyDestructed) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
-  auto obj = make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
+  auto obj =
+      make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
   {
     auto copy = obj;
     obj.reset();
@@ -3247,12 +3712,14 @@ TEST(
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtrWithCopy_whenCallingResetOnCopy_thenDestructsAfterOriginalDestructed) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
-  auto obj = make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
+  auto obj =
+      make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
   {
     auto copy = obj;
     copy.reset();
@@ -3264,14 +3731,17 @@ TEST(
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtrWithMoved_whenCallingReset_thenDestructsAfterMovedDestructed) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
-  auto obj = make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
+  auto obj =
+      make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
   {
     auto moved = std::move(obj);
+    // NOLINTNEXTLINE(bugprone-use-after-move)
     obj.reset();
     EXPECT_TRUE(resourcesReleased);
     EXPECT_FALSE(wasDestructed);
@@ -3281,12 +3751,14 @@ TEST(
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtrWithMoved_whenCallingResetOnMoved_thenDestructsImmediately) {
   bool resourcesReleased = false;
   bool wasDestructed = false;
-  auto obj = make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
+  auto obj =
+      make_weak_only<DestructableMock>(&resourcesReleased, &wasDestructed);
   {
     auto moved = std::move(obj);
     moved.reset();
@@ -3295,6 +3767,7 @@ TEST(
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, givenPtr_whenReleasedAndReclaimed_thenDoesntCrash) {
   IntrusiveAndWeak<SomeClass> obj = make_weak_intrusive<SomeClass>();
   SomeClass* ptr = obj.weak.release();
@@ -3302,6 +3775,7 @@ TEST(WeakIntrusivePtrTest, givenPtr_whenReleasedAndReclaimed_thenDoesntCrash) {
       weak_intrusive_ptr<SomeClass>::reclaim(ptr);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenWeakOnlyPtr_whenReleasedAndReclaimed_thenDoesntCrash) {
@@ -3311,6 +3785,7 @@ TEST(
       weak_intrusive_ptr<SomeClass>::reclaim(ptr);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenPtr_whenReleasedAndReclaimed_thenIsDestructedAtEnd) {
@@ -3344,6 +3819,7 @@ TEST(
   EXPECT_TRUE(wasDestructed);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     WeakIntrusivePtrTest,
     givenWeakOnlyPtr_whenReleasedAndReclaimed_thenIsDestructedAtEnd) {
@@ -3371,12 +3847,14 @@ TEST(
   EXPECT_TRUE(wasDestructed);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WeakIntrusivePtrTest, givenStackObject_whenReclaimed_thenCrashes) {
   // This would cause very weird bugs on destruction.
   // Better to crash early on creation.
   SomeClass obj;
   weak_intrusive_ptr<SomeClass> ptr = make_invalid_weak<SomeClass>();
 #ifdef NDEBUG
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   EXPECT_NO_THROW(ptr = weak_intrusive_ptr<SomeClass>::reclaim(&obj));
 #else
   EXPECT_ANY_THROW(ptr = weak_intrusive_ptr<SomeClass>::reclaim(&obj));

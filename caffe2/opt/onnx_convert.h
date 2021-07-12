@@ -1,6 +1,6 @@
 #include "caffe2/core/common.h"
 
-class CAFFE2_API OnnxAnnotation : public nom::repr::Annotation {
+class TORCH_API OnnxAnnotation : public nom::repr::Annotation {
 public:
   OnnxAnnotation() : Annotation(AnnotationKind::Onnx) {}
   OnnxAnnotation(std::string device)
@@ -30,8 +30,8 @@ private:
   caffe2::OperatorDef* OpDef = nullptr;
 };
 
-CAFFE2_API nom::repr::NNModule convertToNNModule(caffe2::NetDef &net, std::unordered_map<std::string, nom::repr::NNGraph::NodeRef>* blobMapOut = nullptr);
+TORCH_API nom::repr::NNModule convertToNNModule(caffe2::NetDef &net, std::unordered_map<std::string, nom::repr::NNGraph::NodeRef>* blobMapOut = nullptr);
 
-CAFFE2_API caffe2::NetDef convertToOnnxProto(nom::repr::NNModule&);
+TORCH_API caffe2::NetDef convertToOnnxProto(nom::repr::NNModule&);
 
-CAFFE2_API std::unique_ptr<nom::repr::NeuralNetOperator> convertToOperatorDef(caffe2::OperatorDef op);
+TORCH_API std::unique_ptr<nom::repr::NeuralNetOperator> convertToOperatorDef(caffe2::OperatorDef op);

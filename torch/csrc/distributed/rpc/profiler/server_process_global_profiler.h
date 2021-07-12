@@ -51,8 +51,7 @@ class State {
   // parse_cpu_trace(result) for results of all profile range.
   std::mutex resultsMutex_;
   std::vector<thread_event_lists> results_;
-  const ProfilerConfig config_ =
-      ProfilerConfig(ProfilerState::Disabled, false, false);
+  const ProfilerConfig config_ = ProfilerConfig(ProfilerState::Disabled);
 };
 
 class StateStackEntry;
@@ -72,7 +71,9 @@ using wLockType = std::unique_lock<std::shared_timed_mutex>;
 #endif
 
 // This is the global stack of ``State``s.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TORCH_API extern std::shared_ptr<StateStackEntry> currentStateStackEntryPtr;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TORCH_API extern mutexType currentStateStackEntryMutex;
 
 // This class is used to implement a stack of ``State``s.
@@ -83,7 +84,9 @@ TORCH_API extern mutexType currentStateStackEntryMutex;
 class StateStackEntry {
  public:
   StateStackEntry(
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       std::shared_ptr<StateStackEntry> prevPtr,
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       std::shared_ptr<State> statePtr)
       : prevPtr_(prevPtr), statePtr_(statePtr) {}
 

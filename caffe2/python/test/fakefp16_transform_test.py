@@ -1,6 +1,6 @@
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
 
 import unittest
 from caffe2.python.fakefp16_transform_lib import fakeFp16FuseOps

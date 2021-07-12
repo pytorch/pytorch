@@ -11,6 +11,7 @@ std::vector<Argument> createArgumentVector(c10::ArrayRef<ArgumentDef> args) {
   result.reserve(args.size());
   for (size_t i = 0; i < args.size(); ++i) {
     // Arguments are named "_<index>"
+    // NOLINTNEXTLINE(modernize-use-emplace)
     result.push_back(Argument("_" + c10::guts::to_string(i), (*args[i].getTypeFn)()));
   }
   return result;
@@ -20,6 +21,10 @@ std::vector<Argument> createArgumentVector(c10::ArrayRef<ArgumentDef> args) {
 // because then the template is smaller and that benefits binary size
 C10_EXPORT FunctionSchema make_function_schema(std::string&& name, std::string&& overload_name, c10::ArrayRef<ArgumentDef> arguments, c10::ArrayRef<ArgumentDef> returns) {
   return FunctionSchema(std::move(name), std::move(overload_name), createArgumentVector(arguments), createArgumentVector(returns));
+}
+
+C10_EXPORT FunctionSchema make_function_schema(c10::ArrayRef<ArgumentDef> arguments, c10::ArrayRef<ArgumentDef> returns) {
+  return make_function_schema("", "", arguments, returns);
 }
 }
 }

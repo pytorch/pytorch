@@ -2,10 +2,13 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(AveragedLoss, AveragedLoss<float, CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(AveragedLossGradient,
                       AveragedLossGradient<float, CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(AveragedLoss)
   .NumInputs(1)
   .NumOutputs(1)
@@ -61,6 +64,7 @@ output:
   .Input(0, "input", "The input data as Tensor")
   .Output(0, "output", "The output tensor of size 1 containing the averaged value.");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(AveragedLossGradient).NumInputs(2).NumOutputs(1);
 
 class GetAveragedLossGradient : public GradientMakerBase {
@@ -72,6 +76,7 @@ class GetAveragedLossGradient : public GradientMakerBase {
         vector<string>{GI(0)});
   }
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(AveragedLoss, GetAveragedLossGradient);
 
 }  // namespace caffe2

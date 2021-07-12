@@ -1,12 +1,12 @@
 #include <gtest/gtest.h>
 
 #include <ATen/cuda/CUDAContext.h>
-#include <c10/cuda/impl/CUDAGuardImpl.h>
-#include <c10/core/impl/InlineEvent.h>
-#include <c10/core/Event.h>
-#include <c10/cuda/CUDAGuard.h>
-#include <ATen/cuda/CUDAMultiStreamGuard.h>
 #include <ATen/cuda/CUDAEvent.h>
+#include <c10/core/Event.h>
+#include <c10/core/impl/InlineEvent.h>
+#include <c10/cuda/CUDAGuard.h>
+#include <c10/cuda/impl/CUDAGuardImpl.h>
+#include <c10/util/irange.h>
 
 #include <cuda_runtime.h>
 
@@ -144,14 +144,6 @@ TEST(TestStream, CUDAGuardTest) {
 
   // -- end setup
 
-  // Test that all original streams are recorded.
-  {
-    at::cuda::CUDAMultiStreamGuard guard;
-    ASSERT_EQ_CUDA(guard.original_streams().size(), at::cuda::getNumGPUs());
-    ASSERT_EQ_CUDA(guard.original_streams()[0], streams0[0]);
-    ASSERT_EQ_CUDA(guard.original_streams()[1], streams1[0]);
-  }
-
   // Setting a stream changes the current device and the stream on that device
   {
     at::cuda::CUDAStreamGuard guard(streams1[1]);
@@ -180,13 +172,13 @@ TEST(TestStream, CUDAGuardTest) {
 TEST(TestStream, StreamPoolTest) {
   if (!at::cuda::is_available()) return;
   std::vector<at::cuda::CUDAStream> streams{};
-  for (int i = 0; i < 200; ++i) {
+  for (const auto i : c10::irange(200)) {
     streams.emplace_back(at::cuda::getStreamFromPool());
   }
 
   std::unordered_set<cudaStream_t> stream_set{};
   bool hasDuplicates = false;
-  for (auto i = decltype(streams.size()){0}; i < streams.size(); ++i) {
+  for (const auto i: c10::irange(streams.size())) {
     cudaStream_t cuda_stream = streams[i];
     auto result_pair = stream_set.insert(cuda_stream);
     if (!result_pair.second)

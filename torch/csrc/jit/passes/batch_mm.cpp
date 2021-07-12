@@ -106,6 +106,7 @@ bool shape_is_fast_for_reduce(const at::Tensor& lhs, const at::Tensor& rhs) {
   return m < 512 || ((l < 256 && r < 256) || (l > 256 && r > 256));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators mm_tree_reduction_reg({Operator(
     "prim::MMTreeReduce(...) -> Tensor",
     [](Stack* stack) {
@@ -314,6 +315,7 @@ bool shape_is_fast_for_side(const at::Tensor& other_side_input) {
   return other_side_input.numel() <= 1024 * 2048;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators mm_batch_side_reg({Operator(
     prim::MMBatchSide,
     [](const Node* node) -> Operation {
@@ -475,7 +477,9 @@ void BatchMM(std::shared_ptr<Graph>& graph) {
   EliminateDeadCode(graph);
   // It's possible that transpose rearrangements have created sequences of
   // consecutive transposes that didn't exist before.
-  PeepholeOptimize(graph);
+
+  // tensor type properties are not guaranteed to be correct
+  PeepholeOptimize(graph, /*disable_shape_peepholes*/ true);
 }
 
 } // namespace jit

@@ -30,12 +30,12 @@ def get_processor_arch_name(gpu_version):
         "cu" + gpu_version.strip("cuda") if gpu_version.startswith("cuda") else gpu_version
     )
 
-
 LINUX_PACKAGE_VARIANTS = OrderedDict(
     manywheel=[
         "3.6m",
         "3.7m",
         "3.8m",
+        "3.9m"
     ],
     conda=dimensions.STANDARD_PYTHON_VERSIONS,
     libtorch=[
@@ -52,9 +52,18 @@ CONFIG_TREE_DATA = OrderedDict(
             "3.7",
         ],
     )),
-    # Skip CUDA-9.2 builds on Windows
+    macos_arm64=([None], OrderedDict(
+        wheel=[
+            "3.8",
+            "3.9",
+        ],
+        conda=[
+            "3.8",
+            "3.9",
+        ],
+    )),
     windows=(
-        [v for v in dimensions.GPU_VERSIONS if v not in ['cuda92', "rocm3.7"]],
+        [v for v in dimensions.GPU_VERSIONS if v not in dimensions.ROCM_VERSION_LABELS],
         OrderedDict(
             wheel=dimensions.STANDARD_PYTHON_VERSIONS,
             conda=dimensions.STANDARD_PYTHON_VERSIONS,
@@ -117,6 +126,10 @@ class PackageFormatConfigNode(ConfigNode):
         self.props["python_versions"] = python_versions
         self.props["package_format"] = package_format
 
+        # XXX Disabling conda for 11.3 as there's currently no appropriate cudatoolkit available
+        if package_format == "conda":
+            self.props["gpu_versions"] = filter(lambda x: x != "cuda113", self.find_prop("gpu_versions"))
+
     def get_children(self):
         if self.find_prop("os_name") == "linux":
             return [LinuxGccConfigNode(self, v) for v in LINUX_GCC_CONFIG_VARIANTS[self.find_prop("package_format")]]
@@ -142,11 +155,11 @@ class LinuxGccConfigNode(ConfigNode):
 
         # XXX disabling conda rocm build since docker images are not there
         if self.find_prop("package_format") == 'conda':
-            gpu_versions = filter(lambda x: x != "rocm3.7", gpu_versions)
+            gpu_versions = filter(lambda x: x not in dimensions.ROCM_VERSION_LABELS, gpu_versions)
 
         # XXX libtorch rocm build  is temporarily disabled
         if self.find_prop("package_format") == 'libtorch':
-            gpu_versions = filter(lambda x: x != "rocm3.7", gpu_versions)
+            gpu_versions = filter(lambda x: x not in dimensions.ROCM_VERSION_LABELS, gpu_versions)
 
         return [ArchConfigNode(self, v) for v in gpu_versions]
 

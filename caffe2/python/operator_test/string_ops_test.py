@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core
 from hypothesis import given, settings
@@ -20,7 +20,7 @@ def _string_lists(alphabet=None):
 
 class TestStringOps(serial.SerializedTestCase):
     @given(strings=_string_lists())
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_string_prefix(self, strings):
         length = 3
         # although we are utf-8 encoding below to avoid python exceptions,
@@ -48,7 +48,7 @@ class TestStringOps(serial.SerializedTestCase):
             string_prefix_ref)
 
     @given(strings=_string_lists())
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_string_suffix(self, strings):
         length = 3
         strings = np.array(
@@ -72,7 +72,7 @@ class TestStringOps(serial.SerializedTestCase):
             string_suffix_ref)
 
     @given(strings=st.text(alphabet=['a', 'b']))
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_string_starts_with(self, strings):
         prefix = 'a'
         strings = np.array(
@@ -96,7 +96,7 @@ class TestStringOps(serial.SerializedTestCase):
             string_starts_with_ref)
 
     @given(strings=st.text(alphabet=['a', 'b']))
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_string_ends_with(self, strings):
         suffix = 'a'
         strings = np.array(
@@ -118,6 +118,33 @@ class TestStringOps(serial.SerializedTestCase):
             op,
             [strings],
             string_ends_with_ref)
+
+    @given(strings=st.text(alphabet=['a', 'b']))
+    @settings(deadline=10000)
+    def test_string_equals(self, strings):
+        text = ""
+        if strings:
+            text = strings[0]
+
+        strings = np.array(
+            [str(a) for a in strings], dtype=np.object
+        )
+
+        def string_equals_ref(strings):
+            return (
+                np.array([a == text for a in strings], dtype=bool),
+            )
+
+        op = core.CreateOperator(
+            'StringEquals',
+            ['strings'],
+            ['bools'],
+            text=text)
+        self.assertReferenceChecks(
+            hu.cpu_do,
+            op,
+            [strings],
+            string_equals_ref)
 
 if __name__ == "__main__":
     import unittest

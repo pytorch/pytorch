@@ -20,17 +20,18 @@ class Linear(nn.Linear):
     _FLOAT_MODULE = nn.Linear
 
     def __init__(self, in_features, out_features, bias=True,
-                 qconfig=None):
-        super(Linear, self).__init__(in_features, out_features, bias)
+                 qconfig=None, device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
+        super().__init__(in_features, out_features, bias, **factory_kwargs)
         assert qconfig, 'qconfig must be provided for QAT module'
         self.qconfig = qconfig
-        self.weight_fake_quant = qconfig.weight()
+        self.weight_fake_quant = qconfig.weight(factory_kwargs=factory_kwargs)
 
     def forward(self, input):
         return F.linear(input, self.weight_fake_quant(self.weight), self.bias)
 
     @classmethod
-    def from_float(cls, mod, qconfig=None):
+    def from_float(cls, mod):
         r"""Create a qat module from a float module or qparams_dict
 
             Args: `mod` a float module, either produced by torch.quantization utilities
@@ -38,9 +39,8 @@ class Linear(nn.Linear):
         """
         assert type(mod) == cls._FLOAT_MODULE, ' qat.' + cls.__name__ + '.from_float only works for ' + \
             cls._FLOAT_MODULE.__name__
-        if not qconfig:
-            assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
-            assert mod.qconfig, 'Input float module must have a valid qconfig'
+        assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
+        assert mod.qconfig, 'Input float module must have a valid qconfig'
         if type(mod) == LinearReLU:
             mod = mod[0]
 

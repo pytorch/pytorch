@@ -1,4 +1,3 @@
-
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
@@ -9,6 +8,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #include <iostream>
 #include <stdexcept>
@@ -18,6 +18,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 Statement::Statement(const Statement* src, IrCloner* ir_cloner) {
   name_ = src->name_;
@@ -36,7 +37,7 @@ Expr* Statement::asExpr() {
 }
 
 void Statement::print() const {
-  IRPrinter ir_printer(std::cout);
+  IrPrinter ir_printer(std::cout);
   ir_printer.handle(this);
   std::cout << std::endl;
 }
@@ -118,6 +119,26 @@ class ConstCheck : OptOutConstDispatch {
   }
 
   void handle(const NamedScalar* ns) override {
+    is_const_ = is_const_ && false;
+  }
+
+  void handle(const kir::Bool* b) override {
+    is_const_ = is_const_ && b->isConst();
+  }
+
+  void handle(const kir::Float* f) override {
+    is_const_ = is_const_ && f->isConst();
+  }
+
+  void handle(const kir::Half* h) override {
+    is_const_ = is_const_ && h->isConst();
+  }
+
+  void handle(const kir::Int* i) override {
+    is_const_ = is_const_ && i->isConst();
+  }
+
+  void handle(const kir::NamedScalar* ns) override {
     is_const_ = is_const_ && false;
   }
 
@@ -207,13 +228,14 @@ bool Expr::sameAs(const Expr* const other) const {
   if (inputs().size() != other->inputs().size() ||
       outputs().size() != other->outputs().size())
     return false;
-  for (size_t i = 0; i < inputs().size(); i++) {
+  for (const auto i : c10::irange(inputs().size())) {
     if (!input(i)->sameAs(other->input(i)))
       return false;
   }
   return true;
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

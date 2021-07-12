@@ -31,6 +31,7 @@ class RecurrentNetworkBlobFetcherOp final : public Operator<Context> {
 
     std::vector<std::string> blob_names_vector = {};
 
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int64_t i = 0; i < stepWorkspaces.size(); i++) {
       Workspace* currentStepWorkspace = stepWorkspaces[i].get();
       std::vector<std::string> blob_names = currentStepWorkspace->LocalBlobs();

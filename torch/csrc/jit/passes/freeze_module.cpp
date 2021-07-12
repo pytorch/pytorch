@@ -1,8 +1,12 @@
 #include <torch/csrc/jit/passes/freeze_module.h>
+
 #include <torch/csrc/jit/jit_log.h>
 
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/passes/clear_profiling.h>
 #include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/runtime/graph_executor_impl.h>
 
 #include <stack>
@@ -11,38 +15,29 @@ namespace torch {
 namespace jit {
 
 namespace {
-ModulePtr getModulePtrForGetAttrNode(
-    const Node* node,
-    const std::shared_ptr<Graph>& graph,
-    const Module& graph_input_module) {
-  std::vector<std::string> names;
-  names.clear();
-  while (!(node->outputs()[0]->type() == graph->inputs()[0]->type())) {
-    TORCH_INTERNAL_ASSERT(
-        node->kind() == prim::GetAttr, "Expected prim::GetAttr nodes");
-    names.insert(names.begin(), node->s(attr::name));
-    node = node->inputs()[0]->node();
-  }
-  // Copy/paste from quantization/helper.h
-  Module m = graph_input_module;
-  for (const auto& p : names) {
-    m = m.attr(p).toModule();
-  }
-  return m._ivalue();
-}
 
 class AttributePropagator {
  public:
   AttributePropagator(
       Module& module,
       std::vector<std::string>& preservedAttrs,
-      bool freezeInterfaces)
-      : module_(module), freezeInterfaces_(freezeInterfaces) {
+      bool freezeInterfaces,
+      bool preserveParameters)
+      : module_(module),
+        freezeInterfaces_(freezeInterfaces),
+        preserveParameters_(preserveParameters) {
     // Currently only top level attributes and functions can  be preserved
     // explicitly.
     auto checkName = [this](std::string& name) {
       if (module_.hasattr(name)) {
-        insertMutableAttr(name, module_.attr(name), module_._ivalue());
+        auto attr = module_.attr(name);
+
+        // Freezing client wants to presever this submodule. When cleaning
+        // the frozen module, make sure it will be preserved entirely.
+        if (attr.isModule()) {
+          preservedSubModule_.insert(attr.toModule()._ivalue());
+        }
+        insertMutableAttr(name, attr, module_._ivalue());
         return true;
       }
 
@@ -55,9 +50,12 @@ class AttributePropagator {
       return false;
     };
 
-    // forward is preserved by default.
-    auto method = module_.get_method("forward");
-    preservedMethods_.insert(&method.function());
+    // forward is preserved by default, but
+    // not all modules have a forward function defined
+    if (module_.find_method("forward")) {
+      auto method = module_.get_method("forward");
+      preservedMethods_.insert(&method.function());
+    }
 
     for (auto name : preservedAttrs) {
       TORCH_CHECK(checkName(name), "Unknown name: " + name);
@@ -87,9 +85,12 @@ class AttributePropagator {
   void run() {
     auto applyInline = [](std::shared_ptr<Graph>& subgraph) {
       Inline(*subgraph);
+      ClearProfilingInformation(subgraph);
     };
     auto applyOptimizations = [](std::shared_ptr<Graph>& subgraph) {
-      runOptimization(subgraph, /* unroll? */ false);
+      runOptimization(
+          subgraph, /* unroll? */ false, /* const_prop_user_classes? */ false);
+      LowerSimpleTuples(subgraph);
     };
 
     for (auto function : preservedMethods_) {
@@ -97,12 +98,7 @@ class AttributePropagator {
       auto graph = function->graph();
       optimizeSubGraphs(graph, applyInline);
       if (freezeInterfaces_) {
-        optimizeSubGraphs(
-            graph,
-            std::bind(
-                &AttributePropagator::inlineInterfaceCalls,
-                *this,
-                std::placeholders::_1));
+        inlineInterfaceCalls(graph);
       }
       // Record Attributes that are explicitly set in the module.
       // They cannot be folded.
@@ -166,7 +162,7 @@ class AttributePropagator {
       Module& attrModule,
       std::shared_ptr<Graph>& graph) {
     if (!input->type()->cast<InterfaceType>() &&
-        !input->type()->expect<ClassType>()->is_module()) {
+        !input->type()->expectRef<ClassType>().is_module()) {
       return false;
     }
 
@@ -229,6 +225,13 @@ class AttributePropagator {
         for (Block* sub_block : n->blocks()) {
           blocks.push(sub_block);
         }
+
+        // Modules with prim::ModuleContainerIndex cannot be frozen because they
+        // return InterfaceTypes.
+        TORCH_CHECK(
+            n->kind() != prim::ModuleContainerIndex,
+            "Freezing modules containing prim::ModuleContainerIndex is not supported");
+
         if (n->kind() == prim::SetAttr || n->kind() == prim::GetAttr) {
           // By default if interface attributes are present then fail freezing.
           // If freezingInterfaces is on then Interfaces are folded similarly
@@ -267,6 +270,7 @@ class AttributePropagator {
           applyToForkSubgraph(
               n,
               graph,
+              // NOLINTNEXTLINE(modernize-avoid-bind)
               std::bind(
                   &AttributePropagator::recordMutableAttrs,
                   *this,
@@ -293,11 +297,11 @@ class AttributePropagator {
 
   IValue overrideGradient(IValue attr) {
     if (attr.isTensor()) {
-      auto t = attr.toTensor();
+      auto& t = attr.toTensor();
       if (t.requires_grad()) {
-        t = t.detach();
-        t.set_requires_grad(false);
-        attr = IValue(t);
+        auto detached = t.detach();
+        detached.set_requires_grad(false);
+        attr = IValue(std::move(detached));
       }
     } else if (attr.isTuple()) {
       auto tuple = std::move(attr).toTuple();
@@ -309,7 +313,7 @@ class AttributePropagator {
 
     } else if (attr.isList()) {
       c10::List<IValue> elems = std::move(attr).toList();
-      for (size_t i = 0; i < elems.size(); i++) {
+      for (const auto i : c10::irange(elems.size())) {
         elems.set(i, overrideGradient(elems.extract(i)));
       }
       attr = std::move(elems);
@@ -320,6 +324,15 @@ class AttributePropagator {
         val = overrideGradient(val);
       }
       attr = std::move(dict);
+    } else if (attr.isObject() && !attr.toObjectRef().type()->is_module()) {
+      auto obj_type = attr.type()->expect<ClassType>();
+      auto obj_value = std::move(attr).toObject();
+      auto sub_attributes = obj_type->getAttributes();
+      for (const auto& sub_attr : sub_attributes) {
+        auto sub_attr_val = obj_value->getAttr(sub_attr.getName());
+        sub_attr_val = overrideGradient(sub_attr_val);
+      }
+      return obj_value;
     }
 
     return attr;
@@ -379,6 +392,15 @@ class AttributePropagator {
           inlineInterfaceCall(n, attr);
           // Reset the GetAttr to concrete module type.
           n->output()->setType(attr.type());
+        } else if (n->kind() == prim::fork) {
+          applyToForkSubgraph(
+              n,
+              graph,
+              // NOLINTNEXTLINE(modernize-avoid-bind)
+              std::bind(
+                  &AttributePropagator::inlineInterfaceCalls,
+                  *this,
+                  std::placeholders::_1));
         }
       }
     }
@@ -411,7 +433,7 @@ class AttributePropagator {
           if (!findConstantAttr(input, name, attrModule, graph)) {
             GRAPH_DEBUG(
                 input->type()->cast<InterfaceType>() ||
-                        input->type()->expect<ClassType>()->is_module()
+                        input->type()->expectRef<ClassType>().is_module()
                     ? "attribute: " + name + " is mutable."
                     : "");
             continue;
@@ -426,8 +448,20 @@ class AttributePropagator {
           }
           if (!paramConst) {
             auto attr = attrModule.attr(name);
-
-            if (isEval) {
+            if (!isEval || preserveParameters_) {
+              auto type = attrModule.type();
+              auto slot = *type->findAttributeSlot(name);
+              if (type->is_parameter(slot) || type->is_buffer(slot) ||
+                  (attr.isObject() &&
+                   !attr.toObjectRef().type()->is_module())) {
+                continue;
+              } else {
+                attr = overrideGradient(attr);
+              }
+              if (!isEval && name == "training") {
+                continue;
+              }
+            } else {
               attr = overrideGradient(attr);
             }
             if (auto attrVal = tryInsertConstant(*graph, attr)) {
@@ -458,6 +492,7 @@ class AttributePropagator {
           applyToForkSubgraph(
               n,
               graph,
+              // NOLINTNEXTLINE(modernize-avoid-bind)
               std::bind(
                   &AttributePropagator::propagateAttributes,
                   *this,
@@ -476,18 +511,20 @@ class AttributePropagator {
     auto node = n->inputs()[0]->node();
     // Check if first parameter of fork is a module. This module is used
     // as the base module (similar to 'self' in forward) to resolve GetAttrs.
-    if (node->kind() != prim::GetAttr) {
-      return;
+    //  Otherwise freezing is applied using module_
+    if (node->kind() == prim::GetAttr &&
+        node->output()->type()->cast<ClassType>()) {
+      auto name = node->s(attr::name);
+      auto input = node->inputs()[0];
+      if (!findConstantAttr(input, name, attrModule, graph)) {
+        // Module needs to be preserved.
+        return;
+      }
+      attrModule = attrModule.attr(name).toModule();
+      std::swap(module_, attrModule);
     }
-    auto name = node->s(attr::name);
-    auto input = node->inputs()[0];
-    if (!findConstantAttr(input, name, attrModule, graph)) {
-      // Module needs to be preserved.
-      return;
-    }
-    attrModule = attrModule.attr(name).toModule();
+
     auto subgraph = n->g(attr::Subgraph);
-    std::swap(module_, attrModule);
     func(subgraph);
     module_ = attrModule;
   }
@@ -498,7 +535,32 @@ class AttributePropagator {
         return true;
       }
     }
-    return false;
+    return preservedSubModule_.count(subModule._ivalue());
+  }
+
+  void removeExtraWaitCalls(Block* b) {
+    auto nodes = b->nodes();
+    for (auto it = nodes.begin(); it != nodes.end(); it++) {
+      auto node = *it;
+      if (node->kind() != aten::wait) {
+        continue;
+      }
+      TORCH_INTERNAL_ASSERT(node->inputs().size() == 1);
+      TORCH_INTERNAL_ASSERT(node->outputs().size() == 1);
+      // If input type is not a from aten::fork call then the
+      // aten::wait operator can be deleted.
+      if (node->input()->type()->kind() != TypeKind::FutureType) {
+        node->output()->replaceAllUsesWith(node->input());
+        it.destroyCurrent();
+      }
+    }
+    // For the remaining nodes, recurse.
+    for (auto it = nodes.begin(); it != nodes.end(); it++) {
+      auto node = *it;
+      for (auto sub_b : node->blocks()) {
+        removeExtraWaitCalls(sub_b);
+      }
+    }
   }
 
   // cleanupFrozenModule function cleans up the Frozen module. It performs the
@@ -511,11 +573,12 @@ class AttributePropagator {
       auto graph = function->graph();
       recordReferencedAttrs(graph);
       handleSharedClassType(module_, graph);
+      removeExtraWaitCalls(graph->block());
     }
     removeUnusedAttrs();
   }
 
-  // Prepraring for clean up phase. At this point, record all  subModules that
+  // Prepraring for clean up phase. At this point, record all subModules that
   // contains mutable attributes.
   void recordReferencedAttrs(std::shared_ptr<Graph>& graph) {
     std::stack<Block*> blocks({graph->block()});
@@ -529,17 +592,33 @@ class AttributePropagator {
         }
         if (n->kind() == prim::GetAttr) {
           auto& name = n->s(attr::name);
-          auto mptr =
-              getModulePtrForGetAttrNode(n->input(0)->node(), graph, module_);
-          auto module = Module(mptr);
-          if (module.type() == n->inputs()[0]->type() && module.hasattr(name)) {
-            auto attr = module.attr(name);
-            insertMutableAttr(name, attr, mptr);
+          // For now, use all module ivalues which are the same type
+          // and could be the module that this GetAttr resolves to
+          // TODO: we could attempt to follow the GetAttr chain and
+          // find the exact ivalue, we would have to be careful
+          // that the chain does not contain any attributes which
+          // get written to (setAttr calls)
+          for (auto& mptr : modules) {
+            auto module = Module(mptr);
+            if (module.type() == n->inputs()[0]->type()) {
+              TORCH_INTERNAL_ASSERT(module.hasattr(name));
+              auto module = Module(mptr);
+              auto attr = module.attr(name);
+              // TODO: this could be insertReferencedAttr to be more clear,
+              // these are attributes we could not inline, which include
+              // other reasons besides mutation (unsupported constant,
+              // getAttr resolving to non-getAttr node, etc)
+              insertMutableAttr(name, attr, mptr);
+              if (attr.isModule()) {
+                modules.insert(attr.toModule()._ivalue());
+              }
+            }
           }
         } else if (n->kind() == prim::fork) {
           applyToForkSubgraph(
               n,
               graph,
+              // NOLINTNEXTLINE(modernize-avoid-bind)
               std::bind(
                   &AttributePropagator::recordReferencedAttrs,
                   *this,
@@ -571,6 +650,7 @@ class AttributePropagator {
       auto attr = module.attr(name);
       auto attrTy = attr.type();
 
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       bool isMutable;
       if (AliasDb::isMutableType(attrTy)) {
         isMutable = preservedAttrs_.count(attr);
@@ -652,6 +732,9 @@ class AttributePropagator {
   // Contains user specified methods to be preserved in frozen module.
   std::unordered_set<Function*> preservedMethods_;
 
+  // Contains user specified sub module to be preserve in frozen module.
+  std::unordered_set<ModulePtr> preservedSubModule_;
+
   // Track all used attributes ivalues that can be aliased.
   IValue::HashAliasedIValues usedAttrs_;
 
@@ -667,6 +750,9 @@ class AttributePropagator {
   // Allow to freeze modules containing interfaces.
   bool freezeInterfaces_;
 
+  // Preserve module parameters
+  bool preserveParameters_;
+
   // Contains the attributes names (e.g. {"self", "subModule", "a"}
   std::deque<std::string> names_;
 }; // class AttributePropagator
@@ -675,29 +761,21 @@ class AttributePropagator {
 Module freeze_module(
     const Module& module,
     std::vector<std::string> preservedAttrs,
-    bool freezeInterfaces) {
-  // Currently freezing module is supported only in eval mode.
-  // If assertion below is commented and module is in training mode then this
-  // implementation folds attributes correctly. Tensor attributes with
-  // required_grad set are not folded and 'training' attribute is also not
-  // folded.
-  // TODO: Determine if freezing in training mode is useful and further clarify
-  // its semantics.
-  TORCH_CHECK(
-      !module.hasattr("training") || !module.is_training(),
-      "Freezing module in training mode is not yet supported");
-
-  Method method = module.get_method("forward");
-  // Check that module does not return itself.
-  for (auto& output : method.graph()->outputs()) {
-    TORCH_CHECK(
-        output->type() != module.type(),
-        "attempted to freeze a module that return itself");
+    bool freezeInterfaces,
+    bool preserveParameters) {
+  if (module.find_method("forward")) {
+    Method method = module.get_method("forward");
+    // Check that module does not return itself.
+    for (auto& output : method.graph()->outputs()) {
+      TORCH_CHECK(
+          output->type() != module.type(),
+          "attempted to freeze a module that return itself");
+    }
   }
 
   auto moduleClone = module.clone(true);
   AttributePropagator attrPropagator(
-      moduleClone, preservedAttrs, freezeInterfaces);
+      moduleClone, preservedAttrs, freezeInterfaces, preserveParameters);
   attrPropagator.run();
   return moduleClone;
 }

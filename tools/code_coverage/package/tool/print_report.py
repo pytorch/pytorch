@@ -1,20 +1,22 @@
 import os
-import time
-from typing import IO, Dict, List, Set
+import subprocess
+from typing import IO, Dict, List, Set, Tuple
 
+from ..oss.utils import get_pytorch_folder
 from ..util.setting import SUMMARY_FOLDER_DIR, TestList, TestStatusType
-from ..util.utils import convert_time
+
+CoverageItem = Tuple[str, float, int, int]
 
 
-def key_by_percentage(x):
+def key_by_percentage(x: CoverageItem) -> float:
     return x[1]
 
 
-def key_by_name(x):
+def key_by_name(x: CoverageItem) -> str:
     return x[0]
 
 
-def is_intrested_file(file_path: str, interested_folders: List[str]):
+def is_intrested_file(file_path: str, interested_folders: List[str]) -> bool:
     if "cuda" in file_path:
         return False
     if "aten/gen_aten" in file_path or "aten/aten_" in file_path:
@@ -34,7 +36,7 @@ def is_this_type_of_tests(target_name: str, test_set_by_type: Set[str]) -> bool:
 
 
 def print_test_by_type(
-    tests: TestList, test_set_by_type: Set[str], type_name: str, summary_file: IO
+    tests: TestList, test_set_by_type: Set[str], type_name: str, summary_file: IO[str]
 ) -> None:
 
     print("Tests " + type_name + " to collect coverage:", file=summary_file)
@@ -49,7 +51,7 @@ def print_test_condition(
     tests_type: TestStatusType,
     interested_folders: List[str],
     coverage_only: List[str],
-    summary_file: IO,
+    summary_file: IO[str],
     summary_type: str,
 ) -> None:
     print_test_by_type(tests, tests_type["success"], "fully success", summary_file)
@@ -91,33 +93,16 @@ def line_oriented_report(
             "LINE SUMMARY",
         )
         for file_name in covered_lines:
-            if len(covered_lines[file_name]) == 0:
-                covered = {}
-            else:
-                covered = covered_lines[file_name]
-            if len(uncovered_lines[file_name]) == 0:
-                uncovered = {}
-            else:
-                uncovered = uncovered_lines[file_name]
+            covered = covered_lines[file_name]
+            uncovered = uncovered_lines[file_name]
             print(
                 f"{file_name}\n  covered lines: {sorted(covered)}\n  unconvered lines:{sorted(uncovered)}",
                 file=report_file,
             )
 
 
-def print_total_program_time(start_time: float, summary_file: IO) -> None:
-    end_time = time.time()
-    # print to summary file
-    print(
-        f"PROGRAM RUNNING TIME: {convert_time(end_time - start_time)}\n\n",
-        file=summary_file,
-    )
-    # print to terminal
-    print(f"time: {convert_time(end_time - start_time)}")
-
-
 def print_file_summary(
-    covered_summary: int, total_summary: int, summary_file: IO
+    covered_summary: int, total_summary: int, summary_file: IO[str]
 ) -> float:
     # print summary first
     try:
@@ -135,19 +120,17 @@ def print_file_summary(
 
 def print_file_oriented_report(
     tests_type: TestStatusType,
-    coverage,
+    coverage: List[CoverageItem],
     covered_summary: int,
     total_summary: int,
-    summary_file: IO,
+    summary_file: IO[str],
     tests: TestList,
     interested_folders: List[str],
     coverage_only: List[str],
-    program_start_time: float,
 ) -> None:
     coverage_percentage = print_file_summary(
         covered_summary, total_summary, summary_file
     )
-    print_total_program_time(program_start_time, summary_file)
     # print test condition (interested folder / tests that are successsful or failed)
     print_test_condition(
         tests,
@@ -175,12 +158,10 @@ def file_oriented_report(
     tests_type: TestStatusType,
     interested_folders: List[str],
     coverage_only: List[str],
-    program_start_time: float,
     covered_lines: Dict[str, Set[int]],
     uncovered_lines: Dict[str, Set[int]],
 ) -> None:
     with open(os.path.join(SUMMARY_FOLDER_DIR, "file_summary"), "w+") as summary_file:
-        start_time = time.time()
         covered_summary = 0
         total_summary = 0
         coverage = []
@@ -193,7 +174,7 @@ def file_oriented_report(
             except ZeroDivisionError:
                 percentage = 0
             # store information in a list to be sorted
-            coverage.append([file_name, percentage, covered_count, total_count])
+            coverage.append((file_name, percentage, covered_count, total_count))
             # update summary
             covered_summary = covered_summary + covered_count
             total_summary = total_summary + total_count
@@ -210,5 +191,44 @@ def file_oriented_report(
             tests,
             interested_folders,
             coverage_only,
-            program_start_time,
         )
+
+
+def get_html_ignored_pattern() -> List[str]:
+    return ["/usr/*", "*anaconda3/*", "*third_party/*"]
+
+
+def html_oriented_report() -> None:
+    # use lcov to generate the coverage report
+    build_folder = os.path.join(get_pytorch_folder(), "build")
+    coverage_info_file = os.path.join(SUMMARY_FOLDER_DIR, "coverage.info")
+    # generage coverage report -- coverage.info in build folder
+    subprocess.check_call(
+        [
+            "lcov",
+            "--capture",
+            "--directory",
+            build_folder,
+            "--output-file",
+            coverage_info_file,
+        ]
+    )
+    # remove files that are unrelated
+    cmd_array = (
+        ["lcov", "--remove", coverage_info_file]
+        + get_html_ignored_pattern()
+        + ["--output-file", coverage_info_file]
+    )
+    subprocess.check_call(
+        # ["lcov", "--remove", coverage_info_file, "--output-file", coverage_info_file]
+        cmd_array
+    )
+    # generate beautiful html page
+    subprocess.check_call(
+        [
+            "genhtml",
+            coverage_info_file,
+            "--output-directory",
+            os.path.join(SUMMARY_FOLDER_DIR, "html_report"),
+        ]
+    )

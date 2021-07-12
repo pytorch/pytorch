@@ -30,8 +30,10 @@ class NormalizePlanarYUVOp : public Operator<CPUContext> {
     const auto* Xdata = X.data<float>();
     auto* Zdata = Z->template mutable_data<float>();
 
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     int offset = H * W;
     for (auto n = 0; n < N; n++) { // realistically N will always be 1
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       int batch_offset = n * C * offset;
       for (auto c = 0; c < C; c++) {
         ConstEigenVectorMap<float> channel_s(
@@ -46,7 +48,9 @@ class NormalizePlanarYUVOp : public Operator<CPUContext> {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(NormalizePlanarYUV, NormalizePlanarYUVOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(NormalizePlanarYUV)
     .NumInputs(3)
     .NumOutputs(1)

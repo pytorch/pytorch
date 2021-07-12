@@ -1,7 +1,7 @@
-from __future__ import division
-from __future__ import absolute_import
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import numpy as np
 import torch
@@ -30,8 +30,8 @@ def heatmap_approx_keypoint_ref(maps, rois):
 
 def c10_op_ref(maps, rois):
     keypoints = torch.ops._caffe2.HeatmapMaxKeypoint(
-        torch.Tensor(maps),
-        torch.Tensor(rois),
+        torch.tensor(maps),
+        torch.tensor(rois),
         should_output_softmax=True,
     )
     return [keypoints.numpy()]

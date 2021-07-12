@@ -23,6 +23,7 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     FbFCPacked,
     FbFCPackedOperator<CPUContext, DefaultEngine, fbgemm::float16>);
@@ -44,6 +45,7 @@ bool Caffe2InitializeFbgemm(int*, char***) {
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CAFFE2_INIT_FUNCTION(
     InitFbgemmContext,
     &Caffe2InitializeFbgemm,
@@ -96,15 +98,19 @@ void PackedGemmMatrixFP16ShapeFunctions::SetupExternalTensorDescriptor(
   desc->isOffline = 0;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_EXTERNAL_TENSOR_FUNCTIONS(
     (TypeMeta::Id<unique_ptr<fbgemm::PackedGemmMatrixFP16>>()),
     PackedGemmMatrixFP16ShapeFunctions);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(FbFCPacked)
     .NumInputs(3)
     .NumOutputs(1)
+    // NOLINTNEXTLINE(modernize-avoid-bind)
     .TensorInferenceFunction(std::bind(FCShapeInference, _1, _2, false))
     .CostInferenceFunction(OpSchema::CostInferenceFunctionType(
+        // NOLINTNEXTLINE(modernize-avoid-bind)
         std::bind(CostInferenceForFC, _1, _2, false)))
     .SetDoc(R"DOC(Same as FC,
       but the weight is prepacked as a fbgemm::PackedGemmMatrixFP16)DOC");

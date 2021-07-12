@@ -28,12 +28,22 @@ enum pytorch_qnnp_ukernel_type {
   pytorch_qnnp_ukernel_type_conv,
   pytorch_qnnp_ukernel_type_dwconv,
   pytorch_qnnp_ukernel_type_gemm,
+  pytorch_qnnp_ukernel_type_gemm_sparse_dq,
+  pytorch_qnnp_ukernel_type_gemm_prepackA_sparse_dq,
   pytorch_qnnp_ukernel_type_global_average_pooling,
   pytorch_qnnp_ukernel_type_lut,
   pytorch_qnnp_ukernel_type_max_pooling,
   pytorch_qnnp_ukernel_type_softargmax,
   pytorch_qnnp_ukernel_type_xzp_gemm,
 };
+
+typedef struct {
+  const uint32_t* col_indices;
+  const uint32_t* row_values;
+  const uint8_t* values;
+  uint32_t row_block_size;
+  uint32_t col_block_size;
+} sparse_matrix_t;
 
 struct pytorch_qnnp_operator {
   size_t batch_size;
@@ -100,6 +110,12 @@ struct pytorch_qnnp_operator {
   enum pytorch_qnnp_format format;
 
   bool per_channel;
+
+  // Sparsity support
+  sparse_matrix_t sparse_matrix;
+  const void* bias;
+  struct pytorch_qnnp_conv_dynamic_quantization_params dynamic_conv_quantization_params;
+  uint8_t* prepacked_a;
 };
 
 static inline uint32_t pytorch_qnnp_operator_get_log2_output_element_size(

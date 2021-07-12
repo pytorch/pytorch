@@ -34,7 +34,8 @@ __global__ static void max_pool3d_with_indices_single_out_frame(
   int oColumn = blockIdx.x * blockDim.x + threadIdx.x;
   int oRow    = blockIdx.y * blockDim.y + threadIdx.y;
   int oFrame  = (blockIdx.z + offsetZ) % output.size(1); // output frame/time
-  int slice   = (blockIdx.z + offsetZ) / output.size(1); // output slice/feature
+  int64_t slice   = (blockIdx.z + offsetZ) / output.size(1); // output slice/feature
+  // For int64_t data type, see https://github.com/pytorch/pytorch/issues/52822
 
   if (oRow < output.size(2) && oColumn < output.size(3))
   {
@@ -112,8 +113,7 @@ void max_pool3d_with_indices_out_frame(
          pT, pH, pW,
          dilationT, dilationH, dilationW,
          offsetZ);
-
-    AT_CUDA_CHECK(cudaGetLastError());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
 
     totalZ -= 65535;
     offsetZ += 65535;
@@ -142,7 +142,7 @@ __global__ static void max_pool3d_with_indices_backward_single_out_frame(
   {
     int maxIndex = indices[slice][oFrame][oRow][oColumn];
     if (maxIndex != -1) {
-      gpuAtomicAdd(&gradInputData[slice * itime * iheight * iwidth + maxIndex],
+      gpuAtomicAddNoReturn(&gradInputData[slice * itime * iheight * iwidth + maxIndex],
                 gradOutput[slice][oFrame][oRow][oColumn]);
     }
   }
@@ -178,8 +178,7 @@ void max_pool3d_with_indices_backward_out_frame(
         pT, pH, pW,
         dilationT, dilationH, dilationW,
         offsetZ);
-
-    AT_CUDA_CHECK(cudaGetLastError());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
 
     totalZ -= 65535;
     offsetZ += 65535;
@@ -200,7 +199,7 @@ void max_pool3d_with_indices_out_cuda_template(
   TensorArg indices_arg{ indices, "indices", 2 };
   TensorArg input_arg{ input, "input", 3 };
 
-  checkAllSameGPU("max_pool3d_with_indices_out_cuda",
+  checkAllSameGPU(__func__,
                   {output_arg, indices_arg, input_arg});
 
   // #20866, #22032: Guarantee this for the official C++ API?
@@ -276,20 +275,18 @@ void max_pool3d_with_indices_out_cuda_template(
     input.scalar_type(),
     "max_pool3d_with_indices_out_frame",
     [&]{
-      AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "max_pool3d_with_indices_out_frame", [&] {
-        scalar_t *input_data = work_input.data_ptr<scalar_t>();
-        int64_t totalZ = otime * nslices * nbatch;
+      scalar_t *input_data = work_input.data_ptr<scalar_t>();
+      int64_t totalZ = otime * nslices * nbatch;
 
-        max_pool3d_with_indices_out_frame(
-          input_data, work_output, work_indices,
-          totalZ,
-          itime, iheight, iwidth,
-          otime, oheight, owidth,
-          kT, kH, kW,
-          dT, dH, dW,
-          pT, pH, pW,
-          dilationT, dilationH, dilationW);
-      });
+      max_pool3d_with_indices_out_frame(
+        input_data, work_output, work_indices,
+        totalZ,
+        itime, iheight, iwidth,
+        otime, oheight, owidth,
+        kT, kH, kW,
+        dT, dH, dW,
+        pT, pH, pW,
+        dilationT, dilationH, dilationW);
     }
   );
 }
@@ -310,7 +307,7 @@ void max_pool3d_with_indices_backward_out_cuda_template(
   TensorArg input_arg{ input, "input", 3 };
   TensorArg indices_arg{ indices, "indices", 4 };
 
-  checkAllSameGPU("max_pool3d_with_indices_backward_out_cuda",
+  checkAllSameGPU(__func__,
                   {gradInput_arg, gradOutput_arg, input_arg, indices_arg});
 
   // #20866, #22032: Guarantee this for the official C++ API?
@@ -387,34 +384,31 @@ void max_pool3d_with_indices_backward_out_cuda_template(
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
     "max_pool3d_with_indices_backward_out_frame",
     [&] {
-      AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "max_pool3d_with_indices_backward_out_frame", [&] {
-        const int64_t totalZ = otime * nslices * nbatch;
-        scalar_t *grad_input_data = work_grad_input.data_ptr<scalar_t>();
+      const int64_t totalZ = otime * nslices * nbatch;
+      scalar_t *grad_input_data = work_grad_input.data_ptr<scalar_t>();
 
-        max_pool3d_with_indices_backward_out_frame(
-          grad_input_data, work_grad_output, work_indices,
-          totalZ,
-          itime, iheight, iwidth,
-          oheight, owidth,
-          dT, dH, dW,
-          pT, pH, pW,
-          dilationT, dilationH, dilationW);
-      });
+      max_pool3d_with_indices_backward_out_frame(
+        grad_input_data, work_grad_output, work_indices,
+        totalZ,
+        itime, iheight, iwidth,
+        oheight, owidth,
+        dT, dH, dW,
+        pT, pH, pW,
+        dilationT, dilationH, dilationW);
     }
   );
 }
 
 } // namespace
 
-std::tuple<Tensor&, Tensor&> max_pool3d_with_indices_out_cuda(
-  Tensor& output,
-  Tensor& indices,
-  const Tensor& input,
+std::tuple<Tensor&, Tensor&> max_pool3d_with_indices_out_cuda(const Tensor& input,
   IntArrayRef kernel_size,
   IntArrayRef stride,
   IntArrayRef padding,
   IntArrayRef dilation,
-  bool ceil_mode)
+  bool ceil_mode,
+  Tensor& output,
+  Tensor& indices)
 {
   max_pool3d_with_indices_out_cuda_template(
     output,
@@ -457,17 +451,17 @@ std::tuple<Tensor, Tensor> max_pool3d_with_indices_cuda(
   return std::tuple<Tensor, Tensor>(output, indices);
 }
 
-Tensor& max_pool3d_with_indices_backward_out_cuda(
-  Tensor& gradInput,
-  const Tensor& gradOutput,
+Tensor& max_pool3d_with_indices_backward_out_cuda(const Tensor& gradOutput,
   const Tensor& input,
   IntArrayRef kernel_size,
   IntArrayRef stride,
   IntArrayRef padding,
   IntArrayRef dilation,
   bool ceil_mode,
-  const Tensor& indices)
+  const Tensor& indices,
+  Tensor& gradInput)
 {
+  // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("max_pool3d_with_indices_backward_out_cuda");
   max_pool3d_with_indices_backward_out_cuda_template(
@@ -493,6 +487,7 @@ Tensor max_pool3d_with_indices_backward_cuda(
   bool ceil_mode,
   const Tensor& indices)
 {
+  // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("max_pool3d_with_indices_backward_cuda");
   auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);

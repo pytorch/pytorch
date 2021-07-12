@@ -1,13 +1,19 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/index_compute.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
+#include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
+#include <torch/csrc/jit/codegen/cuda/predicate_compute.h>
 
 #include <torch/csrc/jit/codegen/cuda/lower_index.h>
 
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
+
+IndexLowering::IndexLowering() : ir_builder_(GpuLower::current()->kernel()) {}
 
 Val* IndexLowering::lowerOperand(Val* op, Val* out) const {
   if (ir_utils::isTV(op)) {
@@ -16,7 +22,7 @@ Val* IndexLowering::lowerOperand(Val* op, Val* out) const {
         ir_utils::asTV(out),
         scope_utils::getLoops(active_scope_expr));
   } else {
-    return kir::lowerValue(op);
+    return GpuLower::lowerValue(op);
   }
 }
 
@@ -27,27 +33,29 @@ Val* IndexLowering::lowerOutput(Expr* expr) const {
     return Index::getConsumerIndex(
         ir_utils::asTV(out), scope_utils::getLoops(active_scope_expr));
   } else {
-    return kir::lowerValue(out);
+    return GpuLower::lowerValue(out);
   }
 }
 
 void IndexLowering::pushBack(Expr* expr) {
-  if (active_scope == nullptr)
+  if (active_scope == nullptr) {
     lowered_exprs.push_back(expr);
-  else
+  } else {
     active_scope->push_back(expr);
+  }
 }
 
 void IndexLowering::handle(kir::IfThenElse* ite) {
   Expr* prev_scope_expr = active_scope_expr;
   kir::Scope* prev_scope = active_scope;
 
-  auto new_ite = new kir::IfThenElse(ite->cond(), {}, {}, prev_scope_expr);
+  auto new_ite =
+      ir_builder_.create<kir::IfThenElse>(ite->cond(), prev_scope_expr);
   pushBack(new_ite);
   active_scope_expr = new_ite;
-  active_scope = &new_ite->body();
+  active_scope = &new_ite->thenBody();
 
-  for (auto expr : ite->body().exprs()) {
+  for (auto expr : ite->thenBody().exprs()) {
     OptInDispatch::handle(expr);
   }
 
@@ -65,8 +73,8 @@ void IndexLowering::handle(kir::ForLoop* fl) {
   Expr* prev_scope_expr = active_scope_expr;
   kir::Scope* prev_scope = active_scope;
 
-  auto newFl =
-      new kir::ForLoop(fl->index(), fl->iter_domain(), {}, prev_scope_expr);
+  auto newFl = ir_builder_.create<kir::ForLoop>(
+      fl->index(), fl->iter_domain(), prev_scope_expr);
   pushBack(newFl);
 
   active_scope_expr = newFl;
@@ -81,52 +89,52 @@ void IndexLowering::handle(kir::ForLoop* fl) {
 }
 
 void IndexLowering::handle(UnaryOp* uop) {
-  // TODO(kir): lower this expression
-  if (!ir_utils::isTVOp(uop)) {
-    pushBack(uop);
-    return;
+  if (ir_utils::isTVOp(uop)) {
+    const auto in = lowerOperand(uop->in(), uop->out());
+    const auto out = lowerOutput(uop);
+    pushBack(ir_builder_.create<kir::UnaryOp>(uop->getUnaryOpType(), out, in));
+  } else {
+    // This will automatically lower the expression defining the value
+    pushBack(GpuLower::lowerValue(uop->out())->getOrigin());
   }
-
-  const auto in = lowerOperand(uop->in(), uop->out());
-  const auto out = lowerOutput(uop);
-  pushBack(new kir::UnaryOp(uop->getUnaryOpType(), out, in));
 }
 
 void IndexLowering::handle(BinaryOp* bop) {
-  // TODO(kir): lower this expression
-  if (!ir_utils::isTVOp(bop)) {
-    pushBack(bop);
-    return;
+  if (ir_utils::isTVOp(bop)) {
+    const auto lhs = lowerOperand(bop->lhs(), bop->out());
+    const auto rhs = lowerOperand(bop->rhs(), bop->out());
+    const auto out = lowerOutput(bop);
+    pushBack(ir_builder_.create<kir::BinaryOp>(
+        bop->getBinaryOpType(), out, lhs, rhs));
+  } else {
+    // This will automatically lower the expression defining the value
+    pushBack(GpuLower::lowerValue(bop->out())->getOrigin());
   }
-
-  const auto lhs = lowerOperand(bop->lhs(), bop->out());
-  const auto rhs = lowerOperand(bop->rhs(), bop->out());
-  const auto out = lowerOutput(bop);
-  pushBack(new kir::BinaryOp(bop->getBinaryOpType(), out, lhs, rhs));
 }
 
 void IndexLowering::handle(TernaryOp* top) {
-  // TODO(kir): lower this expression
-  if (!ir_utils::isTVOp(top)) {
-    pushBack(top);
-    return;
+  if (ir_utils::isTVOp(top)) {
+    const auto in1 = lowerOperand(top->in1(), top->out());
+    const auto in2 = lowerOperand(top->in2(), top->out());
+    const auto in3 = lowerOperand(top->in3(), top->out());
+    const auto out = lowerOutput(top);
+    pushBack(ir_builder_.create<kir::TernaryOp>(
+        top->getTernaryOpType(), out, in1, in2, in3));
+  } else {
+    // This will automatically lower the expression defining the value
+    pushBack(GpuLower::lowerValue(top->out())->getOrigin());
   }
-
-  const auto in1 = lowerOperand(top->in1(), top->out());
-  const auto in2 = lowerOperand(top->in2(), top->out());
-  const auto in3 = lowerOperand(top->in3(), top->out());
-  const auto out = lowerOutput(top);
-  pushBack(new kir::TernaryOp(top->getTernaryOpType(), out, in1, in2, in3));
 }
 
 namespace {
 
 void allocateGridReductionFlag(TensorView* out_tv, Expr* current_scope_expr) {
+  kir::IrBuilder ir_builder(GpuLower::current()->kernel());
   auto flag_name = kir::GridReduction::getPredicateFlagName(out_tv);
-  auto flag_var = new kir::Allocate(
-      new kir::NamedScalar(flag_name, DataType::Bool),
+  auto flag_var = ir_builder.create<kir::Allocate>(
+      ir_builder.create<kir::NamedScalar>(flag_name, DataType::Bool),
       MemoryType::Local,
-      new kir::Int(1));
+      ir_builder.create<kir::Int>(1));
   // When enclosed by IfThenElse, place the variable outside of the
   // IfThenElse. This IfThenElse is assumed to be the prediate for
   // this grid reduction expression.
@@ -174,8 +182,15 @@ void IndexLowering::handle(ReductionOp* rop) {
 
   kir::ReductionOp* block_reduction_op = nullptr;
   if (is_block_reduce) {
-    block_reduction_op = new kir::ReductionOp(
-        rop->getReductionOpType(), kir::lowerValue(rop->init()), out, in);
+    auto pred =
+        PredicateCompute::getInlinePredicate(rop, loops, nullptr, false);
+
+    block_reduction_op = ir_builder_.create<kir::ReductionOp>(
+        rop->getReductionOpType(),
+        GpuLower::lowerValue(rop->init()),
+        out,
+        in,
+        pred);
     pushBack(block_reduction_op);
   }
 
@@ -217,23 +232,34 @@ void IndexLowering::handle(ReductionOp* rop) {
 
     IterDomain* buffer_id = new IterDomain(new Int(0), buffer_size);
     TensorView* reduce_buffer_tv = new TensorView(
-        new TensorDomain({buffer_id}), out->getDataType().value());
+        new TensorDomain({buffer_id}),
+        out->getDataType().value(),
+        MemoryType::Global);
 
     IterDomain* sync_id = new IterDomain(new Int(0), sync_size);
-    TensorView* reduce_sync_tv =
-        new TensorView(new TensorDomain({sync_id}), DataType::Int);
+    TensorView* reduce_sync_tv = new TensorView(
+        new TensorDomain({sync_id}), DataType::Int, MemoryType::Global);
 
-    const auto reduce_buffer = new kir::Allocate(
-        kir::lowerValue(reduce_buffer_tv), MemoryType::Global);
-    const auto sync_buffer =
-        new kir::Allocate(kir::lowerValue(reduce_sync_tv), MemoryType::Global);
+    const auto reduce_buffer = ir_builder_.create<kir::Allocate>(
+        GpuLower::lowerValue(reduce_buffer_tv),
+        reduce_sync_tv->getMemoryType());
+    const auto sync_buffer = ir_builder_.create<kir::Allocate>(
+        GpuLower::lowerValue(reduce_sync_tv),
+        reduce_sync_tv->getMemoryType(),
+        nullptr,
+        true);
 
     const auto grid_reduction_op = block_reduction_op == nullptr
-        ? new kir::ReductionOp(
-              rop->getReductionOpType(), kir::lowerValue(rop->init()), out, in)
+        ? ir_builder_.create<kir::ReductionOp>(
+              rop->getReductionOpType(),
+              GpuLower::lowerValue(rop->init()),
+              out,
+              in)
         : block_reduction_op;
-    const auto grid_reduction =
-        new kir::GridReduction(grid_reduction_op, reduce_buffer, sync_buffer);
+    auto pred =
+        PredicateCompute::getInlinePredicate(rop, loops, nullptr, false);
+    const auto grid_reduction = ir_builder_.create<kir::GridReduction>(
+        grid_reduction_op, reduce_buffer, sync_buffer, pred);
 
     pushBack(reduce_buffer);
     pushBack(sync_buffer);
@@ -241,7 +267,8 @@ void IndexLowering::handle(ReductionOp* rop) {
   }
 
   if (!is_block_reduce && !is_grid_reduce) {
-    pushBack(new kir::BinaryOp(rop->getReductionOpType(), out, out, in));
+    pushBack(ir_builder_.create<kir::BinaryOp>(
+        rop->getReductionOpType(), out, out, in));
   }
 }
 
@@ -260,7 +287,7 @@ void IndexLowering::handle(BroadcastOp* bop) {
   if (ir_utils::isTV(in))
     in = Index::getProducerIndex(
         ir_utils::asTV(in), ir_utils::asTV(bop->out()), loops);
-  pushBack(new kir::BroadcastOp(out, in));
+  pushBack(ir_builder_.create<kir::BroadcastOp>(out, in));
 }
 
 void IndexLowering::handle(kir::Allocate* allocate) {
@@ -278,6 +305,7 @@ void IndexLowering::generate(const std::vector<Expr*>& exprs) {
   }
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

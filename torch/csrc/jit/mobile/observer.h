@@ -32,8 +32,6 @@ class MobileDebugInfo : public c10::DebugInfoBase {
     op_idx_ = op_idx;
   }
 
-  virtual ~MobileDebugInfo() {}
-
  private:
   std::string model_name_;
   std::string method_name_;
@@ -70,14 +68,19 @@ class MobileModuleObserver {
 
   virtual void onEnterRunMethod(
       const std::unordered_map<std::string, std::string>&,
+      const int32_t,
       const std::string&) {}
-  virtual void onExitRunMethod() {}
-  virtual void onCancelRunMethod(const std::string&) {}
-  virtual void onFailRunMethod(const char*) {}
-  virtual void onEnterLoadModel() {}
+  virtual void onExitRunMethod(const int32_t) {}
+  virtual void onFailRunMethod(const int32_t, const char*) {}
+  virtual void onEnterLoadModel(const int32_t) {}
   virtual void onExitLoadModel(
+      const int32_t,
       const std::unordered_map<std::string, std::string>&) {}
-  virtual void onFailLoadModel(const char*) {}
+  virtual void onFailLoadModel(const int32_t, const char*) {}
+  virtual void onFailLoadModel(
+      const int32_t,
+      const char*,
+      const std::unordered_map<std::string, std::string>&) {}
 };
 
 class MobileObserverConfig {

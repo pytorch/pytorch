@@ -22,10 +22,6 @@ if(NOT __NCCL_INCLUDED)
       CONFIGURE_COMMAND ""
       BUILD_COMMAND
         env
-        # TODO: remove these flags when
-        # https://github.com/pytorch/pytorch/issues/13362 is fixed
-        "CCACHE_DISABLE=1"
-        "SCCACHE_DISABLE=1"
         make
         "CXX=${CMAKE_CXX_COMPILER}"
         "CUDA_HOME=${CUDA_TOOLKIT_ROOT_DIR}"
@@ -34,7 +30,7 @@ if(NOT __NCCL_INCLUDED)
         "BUILDDIR=${__NCCL_BUILD_DIR}"
         "VERBOSE=0"
         "-j"
-        "$ENV{MAX_JOBS}"
+        $ENV{MAX_JOBS}
         BUILD_BYPRODUCTS "${__NCCL_BUILD_DIR}/lib/libnccl_static.a"
       INSTALL_COMMAND ""
       )

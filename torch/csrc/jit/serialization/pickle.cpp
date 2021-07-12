@@ -1,9 +1,10 @@
 #include <torch/csrc/jit/serialization/pickle.h>
+
 #include <ATen/core/ivalue.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/serialization/export.h>
-#include <torch/csrc/jit/serialization/import.h>
+#include <torch/csrc/jit/serialization/import_read.h>
 
 namespace torch {
 namespace jit {
@@ -75,7 +76,7 @@ std::vector<char> pickle_save(const at::IValue& ivalue) {
 #ifndef C10_MOBILE
 class VectorReader : public caffe2::serialize::ReadAdapterInterface {
  public:
-  VectorReader(const std::vector<char>& data) : data_(std::move(data)) {}
+  VectorReader(std::vector<char> data) : data_(std::move(data)) {}
 
   size_t size() const override {
     return data_.size();
@@ -103,7 +104,9 @@ IValue pickle_load(const std::vector<char>& data) {
 
   return readArchiveAndTensors(
       "data",
-      /*class_resolver=*/c10::nullopt,
+      /*pickle_prefix=*/"",
+      /*tensor_prefix=*/"",
+      /*type_resolver=*/c10::nullopt,
       /*obj_loader=*/c10::nullopt,
       /*device=*/c10::nullopt,
       reader);
@@ -117,7 +120,7 @@ IValue pickle_load(const std::vector<char>& data) {
 IValue unpickle(
     std::function<size_t(char*, size_t)> reader,
     TypeResolver type_resolver,
-    const std::vector<at::Tensor>* tensor_table) {
+    c10::ArrayRef<at::Tensor> tensor_table) {
   Unpickler unpickler(
       std::move(reader), std::move(type_resolver), tensor_table);
   return unpickler.parse_ivalue();
@@ -127,7 +130,7 @@ IValue unpickle(
     const char* data,
     size_t size,
     TypeResolver type_resolver,
-    const std::vector<at::Tensor>* tensor_table) {
+    c10::ArrayRef<at::Tensor> tensor_table) {
   size_t bytes_read = 0;
   return unpickle(
       [&](char* buffer, size_t len) -> size_t {

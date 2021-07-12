@@ -1,6 +1,7 @@
 #!/bin/bash
 
 # Common setup for all Jenkins scripts
+# shellcheck source=./common_utils.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
 set -ex
 
@@ -12,11 +13,13 @@ SCRIPT_DIR="$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )"
 
 # Figure out which Python to use for ROCm
 if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]] && [[ "${BUILD_ENVIRONMENT}" =~ py((2|3)\.?[0-9]?\.?[0-9]?) ]]; then
+  # HIP_PLATFORM is auto-detected by hipcc; unset to avoid build errors
+  unset HIP_PLATFORM
   PYTHON=$(which "python${BASH_REMATCH[1]}")
   # non-interactive bashs do not expand aliases by default
   shopt -s expand_aliases
   export PYTORCH_TEST_WITH_ROCM=1
-  alias python="$PYTHON"
+  alias python='$PYTHON'
   # temporary to locate some kernel issues on the CI nodes
   export HSAKMT_DEBUG_LEVEL=4
 fi
@@ -26,7 +29,10 @@ fi
 # system; to find out more, grep for this string in ossci-job-dsl.
 echo "ENTERED_USER_LAND"
 
-export IS_PYTORCH_CI=1
+# Previously IN_CI is only set in .circleci/scripts/setup_ci_environment.sh,
+# this means other CI system doesn't actually have this flag properly set.
+# Now we explicitly export IN_CI environment variable here.
+export IN_CI=1
 
 # compositional trap taken from https://stackoverflow.com/a/7287873/23845
 
@@ -43,7 +49,7 @@ fatal() { error "$@"; exit 1; }
 # - remaining args:  names of traps to modify
 #
 trap_add() {
-    trap_add_cmd=$1; shift || fatal "${FUNCNAME} usage error"
+    trap_add_cmd=$1; shift || fatal "${FUNCNAME[0]} usage error"
     for trap_add_name in "$@"; do
         trap -- "$(
             # helper fn to get existing trap command from output
@@ -67,9 +73,18 @@ trap_add cleanup EXIT
 if [[ "$BUILD_ENVIRONMENT" != *pytorch-win-* ]]; then
   if which sccache > /dev/null; then
     # Save sccache logs to file
-    sccache --stop-server || true
+    sccache --stop-server > /dev/null  2>&1 || true
     rm ~/sccache_error.log || true
-    if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
+    if [[ -n "${SKIP_SCCACHE_INITIALIZATION:-}" ]]; then
+      # sccache --start-server seems to hang forever on self hosted runners for GHA
+      # so let's just go ahead and skip the --start-server altogether since it seems
+      # as though sccache still gets used even when the sscache server isn't started
+      # explicitly
+      echo "Skipping sccache server initialization, setting environment variables"
+      export SCCACHE_IDLE_TIMEOUT=1200
+      export SCCACHE_ERROR_LOG=~/sccache_error.log
+      export RUST_LOG=sccache::server=error
+    elif [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
       SCCACHE_ERROR_LOG=~/sccache_error.log SCCACHE_IDLE_TIMEOUT=0 sccache --start-server
     else
       # increasing SCCACHE_IDLE_TIMEOUT so that extension_backend_test.cpp can build after this PR:
@@ -114,6 +129,7 @@ if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda10.1-cudnn7-py3* ]] || \
    [[ "$BUILD_ENVIRONMENT" == *pytorch_macos* ]]; then
   BUILD_TEST_LIBTORCH=1
 else
+  # shellcheck disable=SC2034
   BUILD_TEST_LIBTORCH=0
 fi
 
@@ -126,6 +142,7 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *pytorch-xla-linux-bionic* ]] || \
    [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda9-cudnn7-py2* ]] || \
    [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda10.1-cudnn7-py3* ]] || \
+   [[ "$BUILD_ENVIRONMENT" == *pytorch-*centos* ]] || \
    [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-bionic* ]]; then
   if ! which conda; then
     echo "Expected ${BUILD_ENVIRONMENT} to use conda, but 'which conda' returns empty"
@@ -133,9 +150,12 @@ if [[ "$BUILD_ENVIRONMENT" == *pytorch-xla-linux-bionic* ]] || \
   else
     conda install -q -y cmake
   fi
+  if [[ "$BUILD_ENVIRONMENT" == *pytorch-*centos* ]]; then
+    # cmake3 package will conflict with conda cmake
+    sudo yum -y remove cmake3 || true
+  fi
 fi
 
 retry () {
-  $*  || (sleep 1 && $*) || (sleep 2 && $*)
+  "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
 }
-

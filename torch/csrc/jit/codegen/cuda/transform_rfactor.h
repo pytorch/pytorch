@@ -11,10 +11,11 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 // TODO: Only replay dispatch is really borrowed from TransformIter, we should
 // reevaluate the reuse of dispatch for classes that inherit TransformIter.
-class TORCH_CUDA_API TransformRFactor {
+class TORCH_CUDA_CU_API TransformRFactor {
  public:
   // Create a copy of td, change its history by presrving axes so they appear in
   // the root domain
@@ -23,6 +24,7 @@ class TORCH_CUDA_API TransformRFactor {
   static TensorDomain* runReplay2(TensorDomain*, std::vector<int> axes);
 };
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

@@ -35,7 +35,8 @@ Tensor mkldnn_softmax(
   ideep::tensor& x = itensor_from_mkldnn(self);
   ideep::tensor y;
   ideep::softmax_forward::compute(x, y, wrapped_dim);
-  return new_with_itensor_mkldnn(std::move(y), self.options());
+  return new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(self.options().dtype_opt()),
+                                 self.options().device_opt());
 }
 
 } // namespace native

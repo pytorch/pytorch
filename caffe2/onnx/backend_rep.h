@@ -9,7 +9,7 @@
 
 namespace caffe2 {
 namespace onnx {
-class CAFFE2_API Caffe2BackendRep {
+class TORCH_API Caffe2BackendRep {
  public:
   void Run(
       const caffe2::Predictor::TensorList& inputs,

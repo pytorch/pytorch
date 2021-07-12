@@ -2,7 +2,9 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SelfBinningHistogram, SelfBinningHistogramOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SelfBinningHistogram)
     .NumInputs(1, INT_MAX)
     .NumOutputs(2)
@@ -35,7 +37,12 @@ OPERATOR_SCHEMA(SelfBinningHistogram)
         "logspace_start",
         "A float that's used as the starting point for logarithmic spacing. "
         "Since logarithmic spacing cannot contain <=0 values this value will "
-        "be used to represent all such values.");
+        "be used to represent all such values.")
+    .Arg(
+        "abs",
+        "Apply abs() on every input value."
+    );
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(SelfBinningHistogram);
 } // namespace caffe2

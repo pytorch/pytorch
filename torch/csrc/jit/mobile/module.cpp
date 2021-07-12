@@ -1,4 +1,6 @@
 #include <torch/csrc/jit/mobile/module.h>
+
+#include <torch/csrc/jit/backends/backend_exception.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/observer.h>
 #include <torch/csrc/jit/runtime/jit_exception.h>
@@ -24,70 +26,17 @@ Function* CompilationUnit::find_function(const c10::QualifiedName& qn) {
   return nullptr;
 }
 
-c10::IValue Module::run_method(const std::string& method_name, Stack stack) {
-  auto observer = torch::observerConfig().getModuleObserver();
-  /* if the metadata dict doesn't contain "model_name", copy the metadata and
-  set the value of "model_name" as name() */
-  std::unordered_map<std::string, std::string> copied_metadata = metadata();
-  if (metadata().find("model_name") == metadata().end()) {
-    copied_metadata["model_name"] = name();
+Method Module::get_method(const std::string& name) const {
+  if (auto method = find_method(name)) {
+    return *method;
   }
-  if (observer) {
-    observer->onEnterRunMethod(copied_metadata, method_name);
-  }
-
-  auto debug_info = std::make_shared<MobileDebugInfo>();
-  std::string name = copied_metadata["model_name"];
-  debug_info->setModelName(name);
-  debug_info->setMethodName(method_name);
-  at::DebugInfoGuard guard(at::DebugInfoKind::MOBILE_RUNTIME_INFO, debug_info);
-
-  auto m = find_method(method_name);
-  if (m == c10::nullopt) {
-    if (observer) {
-      std::string cancellation_reason =
-          "Method '" + method_name + "' is not defined";
-      observer->onCancelRunMethod(cancellation_reason);
-    }
-    AT_ERROR("Method '", method_name, "' is not defined.");
-  }
-  try {
-    m->run(stack);
-    c10::IValue result = stack.front();
-    if (observer) {
-      observer->onExitRunMethod();
-    }
-    return result;
-  } catch (c10::Error& error) {
-    if (observer) {
-      observer->onFailRunMethod(error.what());
-    }
-    TORCH_RETHROW(error);
-  } catch (...) {
-    auto currentException = std::current_exception();
-    try {
-      if (!currentException) {
-        TORCH_CHECK(false, "Unknown exception");
-      } else {
-        try {
-          std::rethrow_exception(currentException);
-        } catch (const std::exception& e) {
-          TORCH_CHECK(false, e.what());
-        }
-      }
-    } catch (c10::Error& error) {
-      if (observer) {
-        observer->onFailRunMethod(error.what());
-      }
-      TORCH_RETHROW(error);
-    }
-  }
+  AT_ERROR("Method '", name, "' is not defined.");
 }
 
 c10::optional<Method> Module::find_method(const std::string& basename) const {
   for (auto& fn : cu_->methods()) {
     if (fn->name() == basename) {
-      return c10::make_optional<Method>(Method(_ivalue(), fn.get()));
+      return c10::make_optional<Method>(Method(this, fn.get()));
     }
   }
   return c10::nullopt;
@@ -132,12 +81,25 @@ void slot_named_params_recurse(
     std::string name =
         parent_name.size() == 0 ? parent_name : parent_name + ".";
     name += obj->type()->getAttributeName(i);
-    if (slot.isTensor()) {
+    // TODO: Fix this filter. Requires_grad is not the appropriate
+    // filter of a parameter, but is a temporary hack to help probable
+    // users of this api. The correct behavior is to filter by the
+    // obj->type->is_parameter() but this currently always returns
+    // false on mobile.
+    if (slot.isTensor() && slot.toTensor().requires_grad()) {
       (*params)[name] = slot.toTensor();
     } else if (slot.isObject()) {
       slot_named_params_recurse(slot.toObject(), params, name);
     }
   }
+}
+
+std::string getTopModuleTypeName(const Module& m) {
+  std::string name;
+  if (m._ivalue()->type() && m._ivalue()->type()->name()) {
+    name = m._ivalue()->type()->name().value().name();
+  }
+  return name;
 }
 } // namespace
 
@@ -147,6 +109,10 @@ const std::vector<at::Tensor> Module::parameters() const {
   return params;
 }
 
+// Returns a mapping for all attributes that requires_grad=True in a module.
+// This behavior differs from full torch script modules. This is a bug,
+// but currently there is no way to correctly label parameters in the
+// loading of a mobile module. TODO
 const std::map<std::string, at::Tensor> Module::named_parameters() const {
   std::map<std::string, at::Tensor> params;
   const std::string name = "";
@@ -154,8 +120,19 @@ const std::map<std::string, at::Tensor> Module::named_parameters() const {
   return params;
 }
 
+// We will continue to support this API for now as this is being relied upon
+// for profiling.
+// We really need to change this part, so in the next step for profiling support
+// for delegates, the first thing will be to rewrite how profiling is done
+// for lite interpreter.
 std::string Module::get_forward_method_debug_info(size_t pc) const {
-  return find_method("forward")->get_module_debug_info(pc);
+  auto debug_handle = find_method("forward")->get_debug_handle(pc);
+#if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
+  return getDebugTable().getModuleHierarchyInfo(
+      debug_handle, getTopModuleTypeName(*this));
+#else
+  return "";
+#endif
 }
 
 void Module::train(bool on) {
@@ -169,19 +146,97 @@ bool Module::is_training() const {
   return true;
 }
 
-Method::Method(
-    c10::intrusive_ptr<c10::ivalue::Object> owner,
-    Function* function)
-    : owner_(std::move(owner)), function_(function) {}
-
-void Method::run(Stack& stack) {
-  stack.insert(stack.begin(), owner_);
-  function_->run(stack);
+const std::vector<Method> Module::get_methods() const {
+  std::vector<Method> methods;
+  for (std::unique_ptr<Function>& fn : cu_->methods()) {
+    methods.emplace_back(this, fn.get());
+  }
+  return methods;
 }
 
-c10::IValue Method::operator()(std::vector<IValue> stack) {
-  stack.insert(stack.begin(), owner_);
-  return (*function_)(stack);
+Method::Method(const Module* owner, Function* function)
+    : owner_(owner), function_(function) {}
+
+void Method::run(Stack& stack) const {
+  auto observer = torch::observerConfig().getModuleObserver();
+  // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
+  auto instance_key = std::rand();
+  /* if the metadata dict doesn't contain "model_name", copy the metadata and
+  set the value of "model_name" as name() */
+  std::unordered_map<std::string, std::string> copied_metadata =
+      owner_->metadata();
+  if (owner_->metadata().find("model_name") == owner_->metadata().end()) {
+    copied_metadata["model_name"] = owner_->name();
+  }
+  if (observer) {
+    observer->onEnterRunMethod(
+        copied_metadata, instance_key, function_->name());
+  }
+
+  auto debug_info = std::make_shared<MobileDebugInfo>();
+  std::string name = copied_metadata["model_name"];
+  debug_info->setModelName(name);
+  debug_info->setMethodName(function_->name());
+  at::DebugInfoGuard guard(at::DebugInfoKind::MOBILE_RUNTIME_INFO, debug_info);
+
+  try {
+    stack.insert(stack.begin(), owner_->_ivalue()); // self
+    function_->run(stack);
+    if (observer) {
+      observer->onExitRunMethod(instance_key);
+    }
+    // This exception must be caught first as it derived from c10::Error
+  } catch (c10::BackendRuntimeException& e) {
+#if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
+    e.pushDebugHandle(function_->getExceptionDebugHandle());
+    // symbolicate all handles
+    e.add_context(owner_->getDebugTable().getSourceDebugString(
+        e.getDebugHandles(), getTopModuleTypeName(*owner_)));
+#endif
+    if (observer) {
+      observer->onFailRunMethod(instance_key, e.what());
+    }
+    TORCH_RETHROW(e);
+  } catch (c10::Error& error) {
+#if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
+    auto debug_string = owner_->getDebugTable().getSourceDebugString(
+        function_->getExceptionDebugHandle(), getTopModuleTypeName(*owner_));
+    error.add_context(debug_string);
+#endif
+    if (observer) {
+      observer->onFailRunMethod(instance_key, error.what());
+    }
+    TORCH_RETHROW(error);
+  } catch (...) {
+    auto currentException = std::current_exception();
+    try {
+      if (!currentException) {
+        TORCH_CHECK(false, "Unknown exception");
+      } else {
+        try {
+          std::rethrow_exception(currentException);
+        } catch (const std::exception& e) {
+          TORCH_CHECK(false, e.what());
+        }
+      }
+    } catch (c10::Error& error) {
+#if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
+      auto debug_string = owner_->getDebugTable().getSourceDebugString(
+          function_->getExceptionDebugHandle(), getTopModuleTypeName(*owner_));
+      error.add_context(debug_string);
+#endif
+      if (observer) {
+        observer->onFailRunMethod(instance_key, error.what());
+      }
+      TORCH_RETHROW(error);
+    }
+  }
+}
+
+c10::IValue Method::operator()(std::vector<c10::IValue> stack) const {
+  run(stack);
+  TORCH_INTERNAL_ASSERT(!stack.empty());
+  return stack.front();
 }
 
 } // namespace mobile

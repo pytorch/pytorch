@@ -33,6 +33,7 @@ bool WeightedSampleOp<float, CPUContext>::RunOnDevice() {
     }
 
     for (int i = 0; i < batch_size; i++) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       float r;
       int offset = i * weights_dim;
 
@@ -56,6 +57,7 @@ bool WeightedSampleOp<float, CPUContext>::RunOnDevice() {
       }
     }
   } else {
+    // NOLINTNEXTLINE(clang-diagnostic-unused-variable,clang-analyzer-deadcode.DeadStores)
     auto* out_idx = Output(0, {0}, at::dtype<int>());
     if (OutputSize() == 2) {
       auto* out_value = Output(1, {0}, at::dtype<float>());
@@ -66,8 +68,10 @@ bool WeightedSampleOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(WeightedSample, WeightedSampleOp<float, CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(WeightedSample)
     .NumInputs(1, 2)
     .NumOutputs(1, 2)
@@ -110,5 +114,6 @@ contains the index(es) of the sampled output.
         "The output tensor contains value(s) selected by the sampled index(es)"
         "It is a 1-D Tensor of size (batch_size x 1)");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(WeightedSample);
 } // namespace caffe2

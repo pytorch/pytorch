@@ -43,7 +43,7 @@ set(EigenBlas_SRCS
   ${EIGEN_BLAS_SRC_DIR}/f2c/complexdots.c
 )
 
-add_library(eigen_blas ${EigenBlas_SRCS})
+add_library(eigen_blas STATIC ${EigenBlas_SRCS})
 
 # We build static versions of eigen blas but link into a shared library, so they need PIC.
 set_property(TARGET eigen_blas PROPERTY POSITION_INDEPENDENT_CODE ON)

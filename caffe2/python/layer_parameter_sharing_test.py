@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core, scope
 from caffe2.python.modeling.parameter_sharing import (
@@ -9,7 +9,6 @@ from caffe2.python.modeling.parameter_sharing import (
 )
 from caffe2.python.optimizer import AdagradOptimizer, AdamOptimizer
 from caffe2.python.layer_test_util import LayersTestCase
-import six
 
 
 class ParameterSharingTest(LayersTestCase):
@@ -116,7 +115,7 @@ class ParameterSharingTest(LayersTestCase):
                 self.assertEquals(self.model.layers[-1].w,
                                   'global_scope/fc/w')
 
-                with six.assertRaisesRegex(self, ValueError, 'Got inconsistent shapes .*'):
+                with self.assertRaisesRegex(ValueError, 'Got inconsistent shapes .*'):
                     self.model.FC(
                         self.model.input_feature_schema.float_features,
                         output_dims + 1

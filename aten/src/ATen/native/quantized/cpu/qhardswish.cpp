@@ -12,6 +12,7 @@
 namespace at {
 namespace native {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qhardswish_stub);
 
 namespace {
@@ -38,6 +39,10 @@ Tensor qnnpack_hardswish(const Tensor& qx, Tensor& qy) {
     std::numeric_limits<uint8_t>::max(), // output max
     0, // flags
     &hardswish_op);
+
+  std::unique_ptr<pytorch_qnnp_operator, QnnpackOperatorDeleter>
+      qnnpack_uniq_ptr(hardswish_op);
+
   TORCH_INTERNAL_ASSERT(createStatus == pytorch_qnnp_status_success,
                         "failed to create QNNPACK Hardswish operator");
 
@@ -85,7 +90,7 @@ Tensor quantized_hardswish(const Tensor& qx, double output_scale, int64_t output
 }
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl("hardswish", TORCH_FN(quantized_hardswish));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::hardswish"), TORCH_FN(quantized_hardswish));
 }
 
 }}  // namespace at::native

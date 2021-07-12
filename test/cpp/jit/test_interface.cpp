@@ -1,5 +1,5 @@
+#include <gtest/gtest.h>
 
-#include <test/cpp/jit/test_base.h>
 #include <test/cpp/jit/test_utils.h>
 
 #include <ATen/core/qualified_name.h>
@@ -44,7 +44,8 @@ static void import_libs(
   si.loadType(QualifiedName(class_name));
 }
 
-void testModuleInterfaceSerialization() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(InterfaceTest, ModuleInterfaceSerialization) {
   auto cu = std::make_shared<CompilationUnit>();
   Module parentMod("parentMod", cu);
   Module subMod("subMod", cu);
@@ -63,6 +64,7 @@ void testModuleInterfaceSerialization() {
       "subMod",
       cu->get_interface("__torch__.OneForward"),
       subMod._ivalue(),
+      // NOLINTNEXTLINE(bugprone-argument-comment)
       /*is_parameter=*/false);
   parentMod.define(parentForward, nativeResolver());
   ASSERT_TRUE(parentMod.hasattr("subMod"));

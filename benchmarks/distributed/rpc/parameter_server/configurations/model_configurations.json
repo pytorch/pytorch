@@ -1,0 +1,22 @@
+{
+    "DummyModel": {
+        "model_class": "DummyModel",
+        "configurations": {
+            "num_embeddings": 100,
+            "embedding_dim": 100,
+            "dense_input_size": 100,
+            "dense_output_size": 100,
+            "sparse": false
+        }
+    },
+    "DummyModelSparse": {
+        "model_class": "DummyModel",
+        "configurations": {
+            "num_embeddings": 100,
+            "embedding_dim": 100,
+            "dense_input_size": 100,
+            "dense_output_size": 100,
+            "sparse": true
+        }
+    }
+}

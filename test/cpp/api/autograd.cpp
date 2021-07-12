@@ -7,6 +7,7 @@
 #include <test/cpp/api/support.h>
 
 using namespace torch::autograd;
+using namespace torch::test;
 
 #define ASSERT_VARIABLE_EQ(a,b) ASSERT_TRUE(torch::allclose((a),(b)))
 #define EXPECT_VARIABLE_EQ(a,b) EXPECT_TRUE(torch::allclose((a),(b)))
@@ -27,6 +28,7 @@ Variable simple_fn(const Variable& x, const Variable& y) {
   return x + 2 * y + x * y;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AutogradAPITests, BackwardSimpleTest) {
   Variable x = torch::randn({2, 2}, torch::requires_grad());
   Variable y = torch::randn({2, 2}, torch::requires_grad());
@@ -37,6 +39,7 @@ TEST(AutogradAPITests, BackwardSimpleTest) {
   ASSERT_VARIABLE_EQ(y.grad(), x + torch::ones({2, 2})*2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AutogradAPITests, BackwardTest) {
   Variable x = torch::randn({2, 2}, torch::requires_grad());
   Variable y = torch::randn({2, 2}, torch::requires_grad());
@@ -49,6 +52,7 @@ TEST(AutogradAPITests, BackwardTest) {
   ASSERT_VARIABLE_EQ(y.grad(), 2 * (x + torch::ones({2, 2})*2));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AutogradAPITests, GradSimpleTest) {
   // basic grad
   Variable x = torch::randn({2,2}, torch::requires_grad());
@@ -60,6 +64,7 @@ TEST(AutogradAPITests, GradSimpleTest) {
   ASSERT_VARIABLE_EQ(grad_res[1], x + torch::ones({2, 2}) * 2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AutogradAPITests, GradTest) {
   Variable x = torch::randn({2, 2}, torch::requires_grad());
   Variable y = torch::randn({2, 2}, torch::requires_grad());
@@ -79,6 +84,7 @@ TEST(AutogradAPITests, GradTest) {
   ASSERT_VARIABLE_EQ(y.grad(), y_grad);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AutogradAPITests, GradNonLeafTest) {
   Variable x_init = torch::randn({2, 2}, torch::requires_grad());
   Variable x = x_init;
@@ -105,6 +111,7 @@ TEST(AutogradAPITests, GradNonLeafTest) {
   ASSERT_TRUE(y.grad().defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AutogradAPITests, GradUnreachableTest) {
   Variable x = torch::ones({1}, torch::requires_grad());
   Variable y = torch::ones({1}, torch::requires_grad());
@@ -128,18 +135,67 @@ TEST(AutogradAPITests, GradUnreachableTest) {
   ASSERT_THROWS_WITH(grad({x * 2}, {x, y}, {}, {}, false, false), "Set allow_unused=True");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(CustomAutogradTest, GradUnreachableDiscoveryTest) {
+  // Test that certain nodes are not erroneously executed when an input
+  // is unreachable. See #39784
+  struct MyFunction : public Function<MyFunction> {
+    static Variable forward(AutogradContext *ctx, Variable var) {
+      return var;
+    }
+
+    static variable_list backward(AutogradContext *ctx, variable_list grad_output) {
+      ADD_FAILURE() << "This node should not be executed!";
+      return grad_output;
+    }
+  };
+
+  auto x = torch::randn(1, torch::requires_grad());
+  auto x1 = torch::randn(1);
+  auto x2 = MyFunction::apply(x + x1);
+
+  auto y = torch::randn(1, torch::requires_grad());
+  auto grad_res = torch::autograd::grad({x2}, {y}, {}, {}, false, true);
+  ASSERT_FALSE(grad_res[0].defined());
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(AutogradAPITests, EmptyInput) {
+  Variable x = torch::ones({1}, torch::requires_grad());
+  ASSERT_THROWS_WITH(grad({x * 2}, /*inputs=*/{}, {x}),
+                     "grad requires non-empty inputs.");
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AutogradAPITests, RetainGrad) {
   auto input = torch::rand({1, 3}, torch::requires_grad());
   auto h1 = input * 3;
   auto out = (h1 * h1).sum();
 
+  {
+    // Warning when grad is accessed for non-leaf tensor
+    WarningCapture warnings;
+    ASSERT_FALSE(h1.grad().defined());
+    ASSERT_TRUE(
+      warnings.str().find("is not a leaf") != std::string::npos);
+  }
   // It should be possible to call retain_grad() multiple times
   h1.retain_grad();
   h1.retain_grad();
+  {
+    // If retain_grad is true for a non-leaf tensor,
+    // there should not be any warning when grad is accessed
+    WarningCapture warnings;
+    ASSERT_FALSE(h1.grad().defined());
+    ASSERT_FALSE(
+      warnings.str().find("is not a leaf") != std::string::npos);
+  }
 
   // Gradient should be accumulated
+  // NOLINTNEXTLINE(bugprone-argument-comment)
   out.backward({}, /*keep_graph=*/true);
   ASSERT_VARIABLE_EQ(h1 * 2, h1.grad());
+  // NOLINTNEXTLINE(bugprone-argument-comment)
   out.backward({}, /*keep_graph=*/true);
   ASSERT_VARIABLE_EQ(h1 * 4, h1.grad());
 
@@ -154,6 +210,42 @@ TEST(AutogradAPITests, RetainGrad) {
   ASSERT_VARIABLE_EQ(input * 18, input.grad());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(AutogradAPITests, AnomalyMode) {
+  // Needs to have backtrace as warning and then throw an error
+  torch::autograd::DetectAnomalyGuard detect_anomaly;
+  {
+    WarningCapture warnings;
+    auto x = torch::tensor({5.0}, torch::requires_grad());
+    auto y = x * x;
+    auto z = y * y;
+    y += 1;
+    ASSERT_THROWS_WITH(z.backward(), "inplace");
+    ASSERT_TRUE(
+        warnings.str().find("Traceback of forward") != std::string::npos);
+  }
+  {
+    WarningCapture warnings;
+    // Double backward
+    auto x = torch::tensor({0.0}, torch::requires_grad());
+    auto y = x.pow(1.5);
+    auto gr =
+        // NOLINTNEXTLINE(bugprone-argument-comment)
+        grad({y}, {x}, {}, /*retain_graph=*/true, /*create_backward=*/true);
+    ASSERT_THROWS_WITH(grad({gr[0]}, {x}, {torch::tensor({0.0})});, "returned nan");
+    auto msgs = warnings.messages();
+    ASSERT_EQ(msgs.size(), 2);
+    ASSERT_TRUE(
+        msgs[0].find("Traceback of forward call that caused the error") !=
+        std::string::npos);
+    ASSERT_TRUE(
+        msgs[1].find(
+            "Traceback of forward call that induced the previous calculation") !=
+        std::string::npos);
+  }
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, CustomFunction) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext *ctx, Variable var1, int mul, Variable var2) {
@@ -182,6 +274,7 @@ TEST(CustomAutogradTest, CustomFunction) {
   ASSERT_VARIABLE_EQ(y.grad(), x + torch::ones({5,5})*2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, FunctionReturnsInput) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext *ctx, Variable var1) {
@@ -198,6 +291,7 @@ TEST(CustomAutogradTest, FunctionReturnsInput) {
   ASSERT_VARIABLE_EQ(x.grad(), torch::full(1, 2.));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, FunctionReturnsUndefined) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext *ctx, Variable var) {
@@ -211,7 +305,7 @@ TEST(CustomAutogradTest, FunctionReturnsUndefined) {
   };
 
   auto x = torch::ones(1, torch::requires_grad());
-  
+
   MyFunction::apply(x).backward();
   ASSERT_FALSE(x.grad().defined());
 
@@ -225,6 +319,7 @@ TEST(CustomAutogradTest, FunctionReturnsUndefined) {
     {MyFunction::apply(x)}, {x}, {}, false, false, true)[0].defined());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, MaterializeGrads) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext *ctx, Variable var) {
@@ -241,6 +336,7 @@ TEST(CustomAutogradTest, MaterializeGrads) {
   UndefinedGrad().apply({MyFunction::apply(x)})[0].backward();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, DontMaterializeGrads) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext *ctx, Variable var) {
@@ -258,6 +354,7 @@ TEST(CustomAutogradTest, DontMaterializeGrads) {
   UndefinedGrad().apply({MyFunction::apply(x)})[0].backward();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, NoGradCustomFunction) {
   // Custom Function should respect grad mode
  struct MyOp : public Function<MyOp> {
@@ -278,6 +375,7 @@ TEST(CustomAutogradTest, NoGradCustomFunction) {
  }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, MarkDirty) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext *ctx, Variable v) {
@@ -302,6 +400,7 @@ TEST(CustomAutogradTest, MarkDirty) {
   out.sum().backward();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, MarkNonDifferentiable) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext *ctx, Variable v) {
@@ -322,6 +421,7 @@ TEST(CustomAutogradTest, MarkNonDifferentiable) {
   y.sum().backward();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, MarkNonDifferentiableMixed) {
   struct MyFunction : public Function<MyFunction> {
     static variable_list forward(AutogradContext *ctx, Variable input) {
@@ -348,6 +448,7 @@ TEST(CustomAutogradTest, MarkNonDifferentiableMixed) {
   ASSERT_VARIABLE_EQ(x.grad(), torch::ones({5,5}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, MarkNonDifferentiableNone) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext *ctx, Variable input) {
@@ -366,6 +467,7 @@ TEST(CustomAutogradTest, MarkNonDifferentiableNone) {
   (r * x).sum().backward();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, ReturnLeafInplace) {
   struct Inplace : public Function<Inplace> {
     static variable_list forward(AutogradContext *ctx, Variable a, Variable b) {
@@ -389,6 +491,7 @@ TEST(CustomAutogradTest, ReturnLeafInplace) {
   ASSERT_VARIABLE_EQ(y.grad(), torch::ones({5,5}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, ReturnDuplicateInplace) {
   struct DoubleInplace : public Function<DoubleInplace> {
     static variable_list forward(AutogradContext *ctx, Variable x) {
@@ -411,6 +514,7 @@ TEST(CustomAutogradTest, ReturnDuplicateInplace) {
   ASSERT_TRUE(torch::equal(out[0],out[1]));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, ReturnDuplicate) {
   struct DoubleDuplicate : public Function<DoubleDuplicate> {
     static variable_list forward(AutogradContext *ctx, Variable x) {
@@ -428,6 +532,7 @@ TEST(CustomAutogradTest, ReturnDuplicate) {
   ASSERT_TRUE(torch::equal(out[0],out[1]));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, SaveEmptyForBackward) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext *ctx, Variable input) {
@@ -449,6 +554,7 @@ TEST(CustomAutogradTest, SaveEmptyForBackward) {
   ASSERT_VARIABLE_EQ(x.grad(), 2*x);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, InvalidGradients) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext *ctx, Variable x) {
@@ -466,6 +572,7 @@ TEST(CustomAutogradTest, InvalidGradients) {
   auto input2 = torch::randn(10, torch::dtype(torch::kDouble).requires_grad(true));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, NoGradInput) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext*, Variable x) {
@@ -488,6 +595,7 @@ TEST(CustomAutogradTest, NoGradInput) {
   ASSERT_FALSE(y.grad_fn());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, TooManyGrads) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext*, Variable input) {
@@ -501,6 +609,7 @@ TEST(CustomAutogradTest, TooManyGrads) {
   };
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, DepNoGrad) {
   struct F1 : public Function<F1> {
     static variable_list forward(AutogradContext *ctx, Variable input) {
@@ -536,6 +645,7 @@ TEST(CustomAutogradTest, DepNoGrad) {
   ASSERT_VARIABLE_EQ(x.grad(), torch::ones(x.sizes()));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, Reentrant) {
   static Variable y_data = torch::randn({2, 2});
   struct Reenter : public Function<Reenter> {
@@ -573,6 +683,7 @@ TEST(CustomAutogradTest, Reentrant) {
 
 // NOTE: If this fails for apparently unrelated reasons in TSAN be aware of
 // the TSAN limit on mutex: https://github.com/google/sanitizers/issues/950
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, DeepReentrant) {
   struct DeepReenter : public Function<DeepReenter> {
     static Variable forward(AutogradContext *ctx, Variable x) {
@@ -600,6 +711,7 @@ TEST(CustomAutogradTest, DeepReentrant) {
   DeepReenter::apply(v).sum().backward();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, ReentrantPriority) {
   static std::vector<int> order;
 
@@ -647,8 +759,11 @@ TEST(CustomAutogradTest, ReentrantPriority) {
   ASSERT_EQ(order.size(), 10);
   ASSERT_EQ(std::count(order.begin(), order.end(), 1), 9);
   ASSERT_EQ(order.back(), 0);
+  // Clear static variable in case test get executed in a loop
+  order.clear();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, Hooks) {
   Variable x = torch::ones({5,5}, torch::requires_grad());
   Variable y = torch::ones({5,5})*4;
@@ -698,6 +813,7 @@ TEST(CustomAutogradTest, Hooks) {
   ASSERT_THROWS_WITH(y.remove_hook(3), "Invalid index");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomAutogradTest, HookNone) {
   struct NoneGradientFunction : public Function<NoneGradientFunction> {
     static variable_list forward(AutogradContext *ctx, Variable x, Variable y) {
@@ -726,6 +842,67 @@ TEST(CustomAutogradTest, HookNone) {
   ry.register_hook(hook);
   (rx+ry).sum().backward();
   ASSERT_TRUE(was_called);
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(CustomAutogradTest, BackwardWithInputs) {
+  Variable x = torch::randn({5,5}, torch::requires_grad());
+  Variable y = torch::randn({5,5}, torch::requires_grad());
+  Variable z = x * x + x * y + y * y;
+  Variable x_grad_expected = 2 * x + y;
+  Variable y_grad_expected = x + 2 * y;
+
+  z.backward(torch::ones({5, 5}), false, false, {x});
+
+  ASSERT_VARIABLE_EQ(x.grad(), x_grad_expected);
+  ASSERT_FALSE(y.grad().defined());
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(CustomAutogradTest, BackwardWithEmptyInputs) {
+  Variable x = torch::randn({5,5}, torch::requires_grad());
+  Variable y = torch::randn({5,5}, torch::requires_grad());
+  Variable z = x * x + x * y + y * y;
+  Variable x_grad_expected = 2 * x + y;
+  Variable y_grad_expected = x + 2 * y;
+  ASSERT_THROWS_WITH(z.backward(torch::ones({5, 5}), false, false, std::vector<Variable>{}), "cannot be empty");
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(CustomAutogradTest, BackwardWithNonLeafInputs) {
+  Variable x = torch::randn({5,5}, torch::requires_grad());
+  Variable y = torch::randn({5,5}, torch::requires_grad());
+  Variable z = x * x;
+  Variable w = y * z + x * y + y * y;
+
+  Variable x_grad_expected = 2 * x * y + y;
+  Variable z_grad_expected = y;
+
+  w.backward(torch::ones({5, 5}), false, false, std::vector<Variable>{x, z});
+
+  ASSERT_VARIABLE_EQ(x.grad(), x_grad_expected);
+  ASSERT_VARIABLE_EQ(z.grad(), z_grad_expected);
+  ASSERT_FALSE(y.grad().defined());
+}
+
+TEST(CustomAutogradTest, BackwardWithCreateGraphWarns) {
+  c10::Warning::WarnAlways guard(true);
+
+  torch::Tensor x = torch::randn({5,5}).set_requires_grad(true);
+  auto z = x * x;
+  {
+    WarningCapture warnings;
+    z.backward(torch::ones({5, 5}), c10::nullopt, true);
+    ASSERT_TRUE(
+        warnings.str().find("Using backward() with create_graph=True") != std::string::npos);
+  }
+
+  {
+    WarningCapture warnings;
+    torch::autograd::backward({z}, {torch::ones({5, 5})}, c10::nullopt, true);
+    ASSERT_TRUE(
+        warnings.str().find("Using backward() with create_graph=True") != std::string::npos);
+  }
 }
 
 // TODO add these tests if needed

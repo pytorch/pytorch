@@ -110,7 +110,7 @@ C10_EXPORT void Gemm<float, CPUContext>(
           return;
         default:
           LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for trans_B";
-          return;  // The line above calls `abort()`. Should never reach here.
+          return; // The line above calls `abort()`. Should never reach here.
       }
     }
     case CblasTrans: {
@@ -127,7 +127,7 @@ C10_EXPORT void Gemm<float, CPUContext>(
           return;
         default:
           LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for trans_B";
-          return;  // The line above calls `abort()`. Should never reach here.
+          return; // The line above calls `abort()`. Should never reach here.
       }
     }
     default:
@@ -177,7 +177,7 @@ C10_EXPORT void GemmEx<float, CPUContext>(
           return;
         default:
           LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for trans_B";
-          return;  // The line above calls `abort()`. Should never reach here.
+          return; // The line above calls `abort()`. Should never reach here.
       }
     }
     case CblasTrans: {
@@ -201,7 +201,7 @@ C10_EXPORT void GemmEx<float, CPUContext>(
           return;
         default:
           LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for trans_B";
-          return;  // The line above calls `abort()`. Should never reach here.
+          return; // The line above calls `abort()`. Should never reach here.
       }
     }
     default:
@@ -487,6 +487,7 @@ C10_EXPORT void BroadcastImpl(
   }
   X_dims = X_dims_vector.data();
   const int Y_size =
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       std::accumulate(Y_dims, Y_dims + Y_ndim, 1, std::multiplies<int>());
   std::vector<int> index(Y_ndim, 0);
   for (int Y_index = 0; Y_index < Y_size; ++Y_index) {
@@ -807,6 +808,7 @@ C10_EXPORT void BroadcastBinaryOpImpl(
     TOut* C) {
   std::vector<int> index(ndim, 0);
   const int C_size =
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       std::accumulate(C_dims, C_dims + ndim, 1, std::multiplies<int>());
   for (int C_index = 0; C_index < C_size; ++C_index) {
     const int A_index = utils::GetIndexFromDims(ndim, A_dims, index.data());
@@ -869,17 +871,26 @@ C10_EXPORT void BroadcastBinaryOpImpl(
   DELEGATE_2D_BROADCAST_BINARY_FUNCTION(std::int64_t, bool, Func, Op) \
   DELEGATE_2D_BROADCAST_BINARY_FUNCTION(bool, bool, Func, Op)
 
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DEFINE_2D_COMPARE_FUNCTION(EQ, std::equal_to)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DEFINE_2D_COMPARE_FUNCTION(NE, std::not_equal_to)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DEFINE_2D_COMPARE_FUNCTION(LT, std::less)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DEFINE_2D_COMPARE_FUNCTION(LE, std::less_equal)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DEFINE_2D_COMPARE_FUNCTION(GT, std::greater)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DEFINE_2D_COMPARE_FUNCTION(GE, std::greater_equal)
 
 #undef DEFINE_2D_COMPARE_FUNCTION
 
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_2D_BROADCAST_BINARY_FUNCTION(bool, bool, And, std::logical_and)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_2D_BROADCAST_BINARY_FUNCTION(bool, bool, Or, std::logical_or)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_2D_BROADCAST_BINARY_FUNCTION(bool, bool, Xor, std::bit_xor)
 
 #define DEFINE_2D_BROADCAST_BITWISE_BINARY_FUNCTION(Func, Op)                 \
@@ -887,8 +898,11 @@ DELEGATE_2D_BROADCAST_BINARY_FUNCTION(bool, bool, Xor, std::bit_xor)
   DELEGATE_2D_BROADCAST_BINARY_FUNCTION(std::int32_t, std::int32_t, Func, Op) \
   DELEGATE_2D_BROADCAST_BINARY_FUNCTION(std::int64_t, std::int64_t, Func, Op)
 
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DEFINE_2D_BROADCAST_BITWISE_BINARY_FUNCTION(BitwiseAnd, std::bit_and)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DEFINE_2D_BROADCAST_BITWISE_BINARY_FUNCTION(BitwiseOr, std::bit_or)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DEFINE_2D_BROADCAST_BITWISE_BINARY_FUNCTION(BitwiseXor, std::bit_xor)
 
 #undef DEFINE_2D_BROADCAST_BITWISE_BINARY_FUNCTION
@@ -918,7 +932,9 @@ DEFINE_2D_BROADCAST_BITWISE_BINARY_FUNCTION(BitwiseXor, std::bit_xor)
     ColwiseBinaryOp<T, T, std::divides<T>, true>(  \
         rows, cols, std::divides<T>(), A, B, C);   \
   }
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DEFINE_2D_BROADCAST_1ST_DIV_FUNCTION(std::int32_t)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DEFINE_2D_BROADCAST_1ST_DIV_FUNCTION(std::int64_t)
 #undef DEFINE_2D_BROADCAST_1ST_DIV_FUNCTION
 
@@ -1026,11 +1042,17 @@ DEFINE_2D_BROADCAST_1ST_DIV_FUNCTION(std::int64_t)
   DELEGATE_BROADCAST_BINARY_FUNCTION(std::int64_t, bool, Func, Op) \
   DELEGATE_BROADCAST_BINARY_FUNCTION(bool, bool, Func, Op)
 
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DEFINE_BROADCAST_COMPARE_FUNCTION(EQ, std::equal_to)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DEFINE_BROADCAST_COMPARE_FUNCTION(NE, std::not_equal_to)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DEFINE_BROADCAST_COMPARE_FUNCTION(LT, std::less)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DEFINE_BROADCAST_COMPARE_FUNCTION(LE, std::less_equal)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DEFINE_BROADCAST_COMPARE_FUNCTION(GT, std::greater)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DEFINE_BROADCAST_COMPARE_FUNCTION(GE, std::greater_equal)
 
 #undef DEFINE_BROADCAST_COMPARE_FUNCTION
@@ -1041,15 +1063,22 @@ DEFINE_BROADCAST_COMPARE_FUNCTION(GE, std::greater_equal)
   DELEGATE_BROADCAST_BINARY_FUNCTION(std::int32_t, std::int32_t, Func, Op) \
   DELEGATE_BROADCAST_BINARY_FUNCTION(std::int64_t, std::int64_t, Func, Op)
 
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DEFINE_BROADCAST_BINARY_FUNCTION(Add, std::plus)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DEFINE_BROADCAST_BINARY_FUNCTION(Sub, std::minus)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DEFINE_BROADCAST_BINARY_FUNCTION(Mul, std::multiplies)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DEFINE_BROADCAST_BINARY_FUNCTION(Div, std::divides)
 
 #undef DEFINE_BROADCAST_BINARY_FUNCTION
 
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_BROADCAST_BINARY_FUNCTION(bool, bool, And, std::logical_and)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_BROADCAST_BINARY_FUNCTION(bool, bool, Or, std::logical_or)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DELEGATE_BROADCAST_BINARY_FUNCTION(bool, bool, Xor, std::bit_xor)
 
 #define DEFINE_BROADCAST_BITWISE_BINARY_FUNCTION(Func, Op)                 \
@@ -1057,19 +1086,34 @@ DELEGATE_BROADCAST_BINARY_FUNCTION(bool, bool, Xor, std::bit_xor)
   DELEGATE_BROADCAST_BINARY_FUNCTION(std::int32_t, std::int32_t, Func, Op) \
   DELEGATE_BROADCAST_BINARY_FUNCTION(std::int64_t, std::int64_t, Func, Op)
 
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DEFINE_BROADCAST_BITWISE_BINARY_FUNCTION(BitwiseAnd, std::bit_and)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DEFINE_BROADCAST_BITWISE_BINARY_FUNCTION(BitwiseOr, std::bit_or)
+// NOLINTNEXTLINE(modernize-use-transparent-functors)
 DEFINE_BROADCAST_BITWISE_BINARY_FUNCTION(BitwiseXor, std::bit_xor)
 
 #undef DEFINE_BITWISE_BROADCAST_BINARY_FUNCTION
 
 #undef DELEGATE_BROADCAST_BINARY_FUNCTION
 
+namespace {
+// incrementIfNotMax increments the number if the value is not max for that
+// datatype. This ensures that the value never overflows.
+template <typename T>
+inline T incrementIfNotMax(T a) {
+  if (a == std::numeric_limits<T>::max()) {
+    return a;
+  }
+  return a + 1;
+}
+} // namespace
+
 #define CAFFE2_RAND_UNIFORM_REAL(T)                                      \
   template <>                                                            \
   C10_EXPORT void RandUniform<T, CPUContext>(                            \
       const size_t n, const T a, const T b, T* r, CPUContext* context) { \
-    std::uniform_real_distribution<T> distribution(a, b);                \
+    at::uniform_real_distribution<T> distribution(a, b);                 \
     for (size_t i = 0; i < n; ++i) {                                     \
       r[i] = distribution(context->RandGenerator());                     \
     }                                                                    \
@@ -1078,14 +1122,15 @@ CAFFE2_RAND_UNIFORM_REAL(float);
 CAFFE2_RAND_UNIFORM_REAL(double);
 #undef CAFFE2_RAND_UNIFORM_REAL
 
-#define CAFFE2_RAND_UNIFORM_CHAR(T)                                        \
-  template <>                                                              \
-  C10_EXPORT void RandUniform<T, CPUContext>(                              \
-      const size_t n, const T a, const T b, T* r, CPUContext* context) {   \
-    std::uniform_int_distribution<short> distribution((short)a, (short)b); \
-    for (size_t i = 0; i < n; ++i) {                                       \
-      r[i] = static_cast<T>(distribution(context->RandGenerator()));       \
-    }                                                                      \
+#define CAFFE2_RAND_UNIFORM_CHAR(T)                                      \
+  template <>                                                            \
+  C10_EXPORT void RandUniform<T, CPUContext>(                            \
+      const size_t n, const T a, const T b, T* r, CPUContext* context) { \
+    at::uniform_int_from_to_distribution<short> distribution(            \
+        incrementIfNotMax(b - a), a);                                    \
+    for (size_t i = 0; i < n; ++i) {                                     \
+      r[i] = static_cast<T>(distribution(context->RandGenerator()));     \
+    }                                                                    \
   }
 CAFFE2_RAND_UNIFORM_CHAR(int8_t);
 CAFFE2_RAND_UNIFORM_CHAR(uint8_t);
@@ -1095,7 +1140,10 @@ CAFFE2_RAND_UNIFORM_CHAR(uint8_t);
   template <>                                                            \
   C10_EXPORT void RandUniform<T, CPUContext>(                            \
       const size_t n, const T a, const T b, T* r, CPUContext* context) { \
-    std::uniform_int_distribution<T> distribution(a, b);                 \
+    at::uniform_int_from_to_distribution<T> distribution(                \
+        incrementIfNotMax(                                               \
+            static_cast<uint64_t>(b) - static_cast<uint64_t>(a)),        \
+        a);                                                              \
     for (size_t i = 0; i < n; ++i) {                                     \
       r[i] = distribution(context->RandGenerator());                     \
     }                                                                    \
@@ -1135,7 +1183,7 @@ CAFFE2_RAND_UNIFORM_INT(uint64_t);
       auto remaining_numbers = n - 1 - i;                                 \
       double mean = (sum - current_sum) / (remaining_numbers + 1);        \
       double stdev = std::min(mean - a, b - mean);                        \
-      std::normal_distribution<double> distribution{mean, stdev / 4.0};   \
+      at::normal_distribution<double> distribution{mean, stdev / 4.0};    \
       T value, remaining_sum_test;                                        \
       do {                                                                \
         value = distribution(context->RandGenerator());                   \
@@ -1156,13 +1204,21 @@ CAFFE2_RAND_UNIFORM_INT(uint64_t);
   }
 CAFFE2_RAND_FIXED_SUM(float);
 CAFFE2_RAND_FIXED_SUM(double);
+// NOLINTNEXTLINE(clang-diagnostic-sign-compare,bugprone-integer-division)
 CAFFE2_RAND_FIXED_SUM(int8_t);
+// NOLINTNEXTLINE(clang-diagnostic-sign-compare,bugprone-integer-division)
 CAFFE2_RAND_FIXED_SUM(int16_t);
+// NOLINTNEXTLINE(clang-diagnostic-sign-compare,bugprone-integer-division)
 CAFFE2_RAND_FIXED_SUM(int32_t);
+// NOLINTNEXTLINE(clang-diagnostic-sign-compare,bugprone-integer-division)
 CAFFE2_RAND_FIXED_SUM(int64_t);
+// NOLINTNEXTLINE(bugprone-integer-division)
 CAFFE2_RAND_FIXED_SUM(uint8_t);
+// NOLINTNEXTLINE(bugprone-integer-division)
 CAFFE2_RAND_FIXED_SUM(uint16_t);
+// NOLINTNEXTLINE(bugprone-integer-division)
 CAFFE2_RAND_FIXED_SUM(uint32_t);
+// NOLINTNEXTLINE(bugprone-integer-division)
 CAFFE2_RAND_FIXED_SUM(uint64_t);
 #undef CAFFE2_RAND_FIXED_SUM
 
@@ -1275,11 +1331,15 @@ C10_EXPORT void generate_trace_lru(
     // patch mem_ref to be within range
     // WARNING: this should not be needed if instantiation type and distribution
     // choice is correct. It is remeding a symptom of earlier mistakes.
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     if (mem_ref < min) {
+      // NOLINTNEXTLINE(bugprone-signed-char-misuse)
       mem_ref = min;
       // std::cout << "clamping (min) mem_ref=" << mem_ref << std::endl;
     }
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     if (mem_ref > max) {
+      // NOLINTNEXTLINE(bugprone-signed-char-misuse)
       mem_ref = max; // mem_ref % max;
       // std::cout << "clamping (max) mem_ref=" << mem_ref << std::endl;
     }
@@ -1320,15 +1380,25 @@ C10_EXPORT void generate_trace_lru(
         mem_ref, cum_val, cum_dis, cum_map, context, cache_line, n, a, b, r); \
   }
 
+// NOLINTNEXTLINE(clang-diagnostic-sign-compare)
 CAFFE2_RAND_SYNTHETIC_DATA(float);
+// NOLINTNEXTLINE(clang-diagnostic-sign-compare)
 CAFFE2_RAND_SYNTHETIC_DATA(double);
+// NOLINTNEXTLINE(clang-diagnostic-sign-compare)
 CAFFE2_RAND_SYNTHETIC_DATA(int8_t);
+// NOLINTNEXTLINE(clang-diagnostic-sign-compare)
 CAFFE2_RAND_SYNTHETIC_DATA(int16_t);
+// NOLINTNEXTLINE(clang-diagnostic-sign-compare)
 CAFFE2_RAND_SYNTHETIC_DATA(int32_t);
+// NOLINTNEXTLINE(clang-diagnostic-sign-compare)
 CAFFE2_RAND_SYNTHETIC_DATA(int64_t);
+// NOLINTNEXTLINE(clang-diagnostic-sign-compare)
 CAFFE2_RAND_SYNTHETIC_DATA(uint8_t);
+// NOLINTNEXTLINE(clang-diagnostic-sign-compare)
 CAFFE2_RAND_SYNTHETIC_DATA(uint16_t);
+// NOLINTNEXTLINE(clang-diagnostic-sign-compare)
 CAFFE2_RAND_SYNTHETIC_DATA(uint32_t);
+// NOLINTNEXTLINE(clang-diagnostic-sign-compare)
 CAFFE2_RAND_SYNTHETIC_DATA(uint64_t);
 #undef CAFFE2_RAND_SYNTHETIC_DATA
 
@@ -1350,7 +1420,8 @@ CAFFE2_RAND_SYNTHETIC_DATA(uint64_t);
       CAFFE_ENFORCE_EQ(                                              \
           m, avoid_set.size(), "AC10_EXPORT void should be unique"); \
     }                                                                \
-    std::uniform_int_distribution<T> distribution(a, b);             \
+    at::uniform_int_from_to_distribution<T> distribution(            \
+        incrementIfNotMax(b - a), a);                                \
     T v = 0;                                                         \
     for (size_t i = 0; i < n; ++i) {                                 \
       do {                                                           \
@@ -1372,7 +1443,7 @@ C10_EXPORT void RandGaussian<float, CPUContext>(
     const float std,
     float* r,
     CPUContext* context) {
-  std::normal_distribution<float> distribution(mean, std);
+  at::normal_distribution<float> distribution(mean, std);
   for (size_t i = 0; i < n; ++i) {
     r[i] = distribution(context->RandGenerator());
   }
@@ -1734,6 +1805,7 @@ C10_EXPORT void Im2ColNdNCHWImpl(
   const int outer_size = col_shape[0];
   const int inner_size = col_size / outer_size;
   const int kernel_size = std::accumulate(
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       kernel_shape, kernel_shape + N, 1, std::multiplies<int>());
   std::vector<FixedDivisor<int>> kernel_shape_div(N);
   for (int i = 0; i < N; ++i) {

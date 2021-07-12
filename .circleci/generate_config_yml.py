@@ -11,7 +11,6 @@ import sys
 from collections import namedtuple
 
 import cimodel.data.binary_build_definitions as binary_build_definitions
-import cimodel.data.caffe2_build_definitions as caffe2_build_definitions
 import cimodel.data.pytorch_build_definitions as pytorch_build_definitions
 import cimodel.data.simple.android_definitions
 import cimodel.data.simple.bazel_definitions
@@ -23,6 +22,7 @@ import cimodel.data.simple.macos_definitions
 import cimodel.data.simple.mobile_definitions
 import cimodel.data.simple.nightly_android
 import cimodel.data.simple.nightly_ios
+import cimodel.data.simple.anaconda_prune_defintions
 import cimodel.data.windows_build_definitions as windows_build_definitions
 import cimodel.lib.miniutils as miniutils
 import cimodel.lib.miniyaml as miniyaml
@@ -80,6 +80,52 @@ class Header(object):
         for line in filter(None, lines):
             output_filehandle.write(line + "\n")
 
+def filter_master_only_jobs(items):
+    def _for_all_items(items, functor) -> None:
+        if isinstance(items, list):
+            for item in items:
+                _for_all_items(item, functor)
+        if isinstance(items, dict) and len(items) == 1:
+            item_type, item = next(iter(items.items()))
+            functor(item_type, item)
+
+    def _is_master_item(item):
+        filters = item.get('filters', None)
+        branches = filters.get('branches', None) if filters is not None else None
+        branches_only = branches.get('only', None) if branches is not None else None
+        return 'master' in branches_only if branches_only is not None else False
+
+    master_deps = set()
+
+    def _save_requires_if_master(item_type, item):
+        requires = item.get('requires', None)
+        item_name = item.get("name", None)
+        if not isinstance(requires, list):
+            return
+        if _is_master_item(item) or item_name in master_deps:
+            master_deps.update([n.strip('"') for n in requires])
+
+    def _do_filtering(items):
+        if isinstance(items, list):
+            rc = [_do_filtering(item) for item in items]
+            return [item for item in rc if len(item if item is not None else []) > 0]
+        assert isinstance(items, dict) and len(items) == 1
+        item_type, item = next(iter(items.items()))
+        item_name = item.get("name", None)
+        item_name = item_name.strip('"') if item_name is not None else None
+        if not _is_master_item(item) and item_name not in master_deps:
+            return None
+        if 'filters' in item:
+            item = item.copy()
+            item.pop('filters')
+        return {item_type: item}
+
+    # Scan of dependencies twice to pick up nested required jobs
+    # I.e. jobs depending on jobs that master-only job depend on
+    _for_all_items(items, _save_requires_if_master)
+    _for_all_items(items, _save_requires_if_master)
+    return _do_filtering(items)
+
 
 def gen_build_workflows_tree():
     build_workflows_functions = [
@@ -91,14 +137,16 @@ def gen_build_workflows_tree():
         cimodel.data.simple.mobile_definitions.get_workflow_jobs,
         cimodel.data.simple.ge_config_tests.get_workflow_jobs,
         cimodel.data.simple.bazel_definitions.get_workflow_jobs,
-        caffe2_build_definitions.get_workflow_jobs,
         cimodel.data.simple.binary_smoketest.get_workflow_jobs,
         cimodel.data.simple.nightly_ios.get_workflow_jobs,
         cimodel.data.simple.nightly_android.get_workflow_jobs,
+        cimodel.data.simple.anaconda_prune_defintions.get_workflow_jobs,
         windows_build_definitions.get_windows_workflows,
         binary_build_definitions.get_post_upload_jobs,
         binary_build_definitions.get_binary_smoke_test_jobs,
     ]
+    build_jobs = [f() for f in build_workflows_functions]
+    master_build_jobs = filter_master_only_jobs(build_jobs)
 
     binary_build_functions = [
         binary_build_definitions.get_binary_build_jobs,
@@ -106,13 +154,26 @@ def gen_build_workflows_tree():
         binary_build_definitions.get_nightly_uploads,
     ]
 
+    slow_gradcheck_jobs = pytorch_build_definitions.get_workflow_jobs(only_slow_gradcheck=True)
+
     return {
         "workflows": {
             "binary_builds": {
                 "when": r"<< pipeline.parameters.run_binary_tests >>",
                 "jobs": [f() for f in binary_build_functions],
             },
-            "build": {"jobs": [f() for f in build_workflows_functions]},
+            "build": {
+                "when": r"<< pipeline.parameters.run_build >>",
+                "jobs": build_jobs,
+            },
+            "master_build": {
+                "when": r"<< pipeline.parameters.run_master_build >>",
+                "jobs": master_build_jobs,
+            },
+            "slow_gradcheck_build": {
+                "when": r"<< pipeline.parameters.run_slow_gradcheck_build >>",
+                "jobs": slow_gradcheck_jobs,
+            },
         }
     }
 
@@ -124,12 +185,10 @@ YAML_SOURCES = [
     File("nightly-binary-build-defaults.yml"),
     Header("Build parameters"),
     File("build-parameters/pytorch-build-params.yml"),
-    File("build-parameters/caffe2-build-params.yml"),
     File("build-parameters/binary-build-params.yml"),
     File("build-parameters/promote-build-params.yml"),
     Header("Job specs"),
     File("job-specs/pytorch-job-specs.yml"),
-    File("job-specs/caffe2-job-specs.yml"),
     File("job-specs/binary-job-specs.yml"),
     File("job-specs/job-specs-custom.yml"),
     File("job-specs/job-specs-promote.yml"),
@@ -138,6 +197,7 @@ YAML_SOURCES = [
     File("job-specs/docker_jobs.yml"),
     Header("Workflows"),
     Treegen(gen_build_workflows_tree, 0),
+    File("workflows/workflows-scheduled-ci.yml"),
     File("workflows/workflows-ecr-gc.yml"),
     File("workflows/workflows-promote.yml"),
 ]

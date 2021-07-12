@@ -1,11 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import numpy as np
 
 import caffe2.python.fakelowp.init_shared_libs  # noqa
+import datetime
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from caffe2.proto import caffe2_pb2
@@ -22,8 +18,6 @@ kEpsilon = 1e-8
 
 
 class ArithmeticOpsTest(serial.SerializedTestCase):
-    @given(seed=st.integers(0, 65534))
-    @settings(deadline=None)
     def _test_binary_op_graph(self, name, seed):
         np.random.seed(seed)
         workspace.ResetWorkspace()
@@ -105,28 +99,24 @@ class ArithmeticOpsTest(serial.SerializedTestCase):
                 assert(0)
 
     @given(seed=st.integers(0, 65534))
-    @settings(deadline=None)
+    @settings(deadline=datetime.timedelta(seconds=10))
     def test_add_graph(self, seed):
-        np.random.seed(seed)
-        self._test_binary_op_graph("Add")
+        self._test_binary_op_graph("Add", seed)
 
     @given(seed=st.integers(0, 65534))
-    @settings(deadline=None)
+    @settings(deadline=datetime.timedelta(seconds=10))
     def test_sub_graph(self, seed):
-        np.random.seed(seed)
-        self._test_binary_op_graph("Sub")
+        self._test_binary_op_graph("Sub", seed)
 
     @given(seed=st.integers(0, 65534))
-    @settings(deadline=None)
+    @settings(deadline=datetime.timedelta(seconds=10))
     def test_mul_graph(self, seed):
-        np.random.seed(seed)
-        self._test_binary_op_graph("Mul")
+        self._test_binary_op_graph("Mul", seed)
 
     @given(seed=st.integers(0, 65534))
-    @settings(deadline=None)
+    @settings(deadline=datetime.timedelta(seconds=10))
     def test_div_graph(self, seed):
-        np.random.seed(seed)
-        self._test_binary_op_graph("Div")
+        self._test_binary_op_graph("Div", seed)
 
 
 class UnaryOpTest(serial.SerializedTestCase):
@@ -205,7 +195,7 @@ class UnaryOpTest(serial.SerializedTestCase):
     # Once hypothesis.testing version is updated, we can re-enable
     # testing with different hypothesis examples.
     @given(seed=st.integers(0, 65534))
-    @settings(deadline=None)
+    @settings(deadline=datetime.timedelta(seconds=20))
     def test_sigmoid(self, seed):
         np.random.seed(seed)
         opname = "Sigmoid"
@@ -219,7 +209,7 @@ class UnaryOpTest(serial.SerializedTestCase):
     # Once hypothesis.testing version is updated, we can re-enable
     # testing with different hypothesis examples.
     @given(seed=st.integers(0, 65534))
-    @settings(deadline=None)
+    @settings(deadline=datetime.timedelta(seconds=20))
     def test_tanh(self, seed):
         np.random.seed(seed)
         opname = "Tanh"
@@ -236,7 +226,7 @@ class UnaryOpTest(serial.SerializedTestCase):
     # testing with different hypothesis examples.
     # TODO: move atol to 1e-8 once we get a non-lowered swish implementation
     @given(seed=st.integers(0, 65534))
-    @settings(deadline=None)
+    @settings(deadline=datetime.timedelta(seconds=10))
     def test_swish(self, seed):
         np.random.seed(seed)
         opname = "Swish"
@@ -249,7 +239,7 @@ class UnaryOpTest(serial.SerializedTestCase):
     # Once hypothesis.testing version is updated, we can re-enable
     # testing with different hypothesis examples.
     @given(seed=st.integers(0, 65534))
-    @settings(deadline=None)
+    @settings(deadline=datetime.timedelta(seconds=10))
     def test_logit(self, seed):
         np.random.seed(seed)
         workspace.ResetWorkspace()
@@ -315,7 +305,7 @@ class UnaryOpTest(serial.SerializedTestCase):
 
 class ReluTest(serial.SerializedTestCase):
     @given(seed=st.integers(0, 65534))
-    @settings(deadline=None)
+    @settings(deadline=datetime.timedelta(seconds=10))
     def relu_test(self, inputs, gc, dc, seed):
         np.random.seed(seed)
         inputs = np.random.rand(1).astype(np.float32)

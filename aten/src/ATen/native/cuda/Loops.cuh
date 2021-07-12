@@ -1,6 +1,13 @@
 
 #pragma once
 
+#include <ATen/detail/FunctionTraits.h>
+#include <ATen/native/TensorIterator.h>
+#include <ATen/native/TensorIteratorDynamicCasting.h>
+#include <ATen/cuda/detail/OffsetCalculator.cuh>
+
+#include <thrust/tuple.h>
+
 #define NUM_THREADS (C10_WARP_SIZE * 2)
 #define THREAD_WORK_SIZE 4
 #define BLOCK_WORK_SIZE (THREAD_WORK_SIZE * num_threads)
@@ -9,18 +16,12 @@ constexpr int num_threads = NUM_THREADS;
 constexpr int thread_work_size = THREAD_WORK_SIZE;
 constexpr int block_work_size = BLOCK_WORK_SIZE;
 
-#include <ATen/detail/FunctionTraits.h>
-#include <ATen/native/TensorIterator.h>
-#include <ATen/native/TensorIteratorDynamicCasting.h>
-#include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/cuda/MemoryAccess.cuh>
-
-#include <thrust/tuple.h>
 
 namespace at { namespace native {
 
 template<int N>
-static OffsetCalculator<N> make_input_offset_calculator(const TensorIterator& iter) {
+static OffsetCalculator<N> make_input_offset_calculator(const TensorIteratorBase& iter) {
   // array size can not be 0, this happens when N == 0
   constexpr int array_size = std::max<int>(N, 1);
   TORCH_INTERNAL_ASSERT(N == iter.ntensors() - iter.noutputs());
@@ -34,7 +35,7 @@ static OffsetCalculator<N> make_input_offset_calculator(const TensorIterator& it
 }
 
 template <int num_outputs = 1>
-static OffsetCalculator<num_outputs> make_output_offset_calculator(const TensorIterator& iter) {
+static OffsetCalculator<num_outputs> make_output_offset_calculator(const TensorIteratorBase& iter) {
   TORCH_INTERNAL_ASSERT(num_outputs == iter.noutputs());
   std::array<const int64_t*, num_outputs> strides;
   int64_t element_sizes[num_outputs];
@@ -88,10 +89,12 @@ __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
 namespace at { namespace native {
 
 template <typename func_t>
-void gpu_kernel(TensorIterator& iter, const func_t& f) {
+void gpu_kernel(TensorIteratorBase& iter, const func_t& f) {
 
   for (int arg = 0; arg < iter.ntensors(); arg++) {
-    TORCH_INTERNAL_ASSERT(iter.device(arg).is_cuda());
+    TORCH_INTERNAL_ASSERT(
+      iter.device(arg).is_cuda(),
+      "argument ", arg, ": expected a CUDA device but found ", iter.device(arg));
   }
 
   if (iter.numel() == 0) {
@@ -139,8 +142,7 @@ struct BUnaryFunctor {
 };
 
 template <typename func_t>
-void gpu_kernel_with_scalars(TensorIterator& iter, const func_t& f) {
-  ASSERT_HOST_DEVICE_LAMBDA(func_t);
+void gpu_kernel_with_scalars(TensorIteratorBase& iter, const func_t& f) {
   TORCH_INTERNAL_ASSERT(iter.ntensors() == 3);
 
   using traits = function_traits<func_t>;
@@ -153,6 +155,11 @@ void gpu_kernel_with_scalars(TensorIterator& iter, const func_t& f) {
   if (iter.is_cpu_scalar(1)) {
     AUnaryFunctor<func_t> af(f, iter.scalar_value<arg1_t>(1));
     iter.remove_operand(1);
+    // TODO: When all kernels that use gpu_kernel_with_scalars are
+    // ported to structured, this device guard can be deleted.  This
+    // works around incorrect device guard generation for pre-structured
+    // kernels device guards, but structured kernels do it right and
+    // we can assume the device is already set correctly
     const OptionalDeviceGuard device_guard(device_of(iter.tensor(1)));
     gpu_kernel(iter, af);
   } else if (iter.is_cpu_scalar(2)) {
@@ -184,11 +191,11 @@ static inline void launch_unrolled_kernel_for_multi_outputs(int64_t N, const fun
   int64_t grid = (N + block_work_size - 1) / block_work_size;
   auto stream = at::cuda::getCurrentCUDAStream();
   unrolled_elementwise_kernel_for_multi_outputs<num_outputs, func_t, array_t><<<grid, num_threads, 0, stream>>>(N, f, data, ic, oc);
-  AT_CUDA_CHECK(cudaGetLastError());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <typename func_t>
-void gpu_kernel_multiple_outputs_impl(TensorIterator& iter, const func_t& f) {
+void gpu_kernel_multiple_outputs_impl(TensorIteratorBase& iter, const func_t& f) {
   using traits = function_traits<func_t>;
   using output_t = typename traits::result_type;
   static_assert(is_tuple<output_t>::value, "f's return type must be `thrust::tuple`");
@@ -219,7 +226,7 @@ void gpu_kernel_multiple_outputs_impl(TensorIterator& iter, const func_t& f) {
 } // namespace
 
 template <typename func_t>
-void gpu_kernel_multiple_outputs(TensorIterator& iter, const func_t& f) {
+void gpu_kernel_multiple_outputs(TensorIteratorBase& iter, const func_t& f) {
   ASSERT_HOST_DEVICE_LAMBDA(func_t);
 
   for (int arg = 0; arg < iter.ntensors(); arg++) {

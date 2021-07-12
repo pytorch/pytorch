@@ -3,8 +3,10 @@
 
 #include <torch/library.h>
 #include <ATen/ATen.h>
+#include <ATen/core/dispatch/Dispatcher.h>
 
 #include <pybind11/operators.h>
+#include <pybind11/stl.h>
 
 #include <iostream>
 
@@ -27,11 +29,14 @@ torch::Library::Kind parseKind(const std::string& k) {
 
 c10::optional<c10::DispatchKey> parseDispatchKey(const std::string& k) {
   static std::unordered_map<std::string, c10::DispatchKey> key_map = {
-    {"cpu", c10::DispatchKey::CPU},
-    {"cuda", c10::DispatchKey::CUDA},
-    {"xla", c10::DispatchKey::XLA},
-    {"autograd", c10::DispatchKey::Autograd},
-    {"autogradcpu", c10::DispatchKey::AutogradCPU},
+    {"CPU", c10::DispatchKey::CPU},
+    {"CUDA", c10::DispatchKey::CUDA},
+    {"XLA", c10::DispatchKey::XLA},
+    {"QuantizedCPU", c10::DispatchKey::QuantizedCPU},
+    {"CompositeImplicitAutograd", c10::DispatchKey::CompositeImplicitAutograd},
+    {"Autograd", c10::DispatchKey::Autograd},
+    {"CompositeExplicitAutograd", c10::DispatchKey::CompositeExplicitAutograd},
+    {"AutogradCPU", c10::DispatchKey::AutogradCPU},
     {"", c10::DispatchKey::Undefined},
   };
   auto it = key_map.find(k);
@@ -179,6 +184,18 @@ void initDispatchBindings(PyObject* module) {
 
   m.def("_dispatch_check_all_invariants", []() {
     c10::Dispatcher::singleton().checkInvariants();
+  });
+
+  m.def("_dispatch_find_dangling_impls", []() -> std::vector<std::string> {
+    auto danglingImpls =  c10::Dispatcher::singleton().findDanglingImpls();
+
+    std::vector<std::string> states;
+    states.reserve(danglingImpls.size());
+    for (auto& danglingImpl : danglingImpls) {
+      states.push_back(danglingImpl.dumpState());
+    }
+
+    return states;
   });
 }
 

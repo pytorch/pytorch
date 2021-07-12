@@ -1,9 +1,4 @@
-#! /usr/bin/env python
-
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+#! /usr/bin/env python3
 
 import onnx.backend
 
@@ -11,15 +6,12 @@ import argparse
 import caffe2.python.workspace as c2_workspace
 import glob
 import json
-import math
 import numpy as np
 import onnx
 import caffe2.python.onnx.frontend
 import caffe2.python.onnx.backend
 import os
 import shutil
-import subprocess
-import sys
 import tarfile
 import tempfile
 
@@ -30,7 +22,6 @@ from six.moves.urllib.request import urlretrieve
 from caffe2.python.models.download import downloadFromURLToFile, getURLFromName, deleteDirectory
 from caffe2.proto import caffe2_pb2
 from onnx import numpy_helper
-from filechunkio import FileChunkIO
 
 
 """A script converting Caffe2 models to ONNX, and updating ONNX model zoos.

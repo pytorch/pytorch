@@ -1,9 +1,9 @@
 ## @package timeout_guard
 # Module caffe2.python.timeout_guard
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import contextlib
 import threading
@@ -55,6 +55,7 @@ class WatcherThread(threading.Thread):
                 log.info("Prepared output, dumping threads. ")
                 print("Caller thread was: {}".format(self.caller_thread))
                 print("-----After force------")
+                log.info("-----After force------")
                 import sys
                 import traceback
                 code = []
@@ -66,7 +67,9 @@ class WatcherThread(threading.Thread):
                             if line:
                                 code.append("  %s" % (line.strip()))
 
+                # Log also with logger, as it is comment practice to suppress print().
                 print("\n".join(code))
+                log.info("\n".join(code))
                 log.error("Process did not terminate cleanly in 10 s, forcing")
                 os.abort()
 
@@ -85,7 +88,9 @@ class WatcherThread(threading.Thread):
                     if line:
                         code.append("  %s" % (line.strip()))
 
+            # Log also with logger, as it is comment practice to suppress print().
             print("\n".join(code))
+            log.info("\n".join(code))
             os.kill(os.getpid(), signal.SIGINT)
 
 

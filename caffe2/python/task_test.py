@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import unittest
 from caffe2.python import task
 
@@ -22,3 +17,8 @@ class TestTask(unittest.TestCase):
         ]
         for obj, want in cases:
             self.assertEqual(obj.__repr__(), want)
+
+    def testEffectlessRepr(self):
+        task_group = task.TaskGroup()
+        _repr = task_group.__repr__()
+        self.assertFalse(task_group._already_used)

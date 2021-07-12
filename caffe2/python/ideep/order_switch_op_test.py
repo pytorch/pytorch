@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import unittest
 import numpy as np
@@ -10,7 +10,6 @@ import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.ideep_test_util as mu
 
 from hypothesis import given, settings
-from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 
 

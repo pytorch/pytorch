@@ -10,10 +10,12 @@
 #include <cub/block/block_reduce.cuh>
 #include <cub/cub.cuh>
 
+#include <thrust/host_vector.h>
 #include <thrust/device_vector.h>
 #include <thrust/functional.h>
 
 #include "caffe2/core/context_gpu.h"
+#include "caffe2/utils/GpuAtomics.cuh"
 #include "caffe2/utils/conversions.h"
 
 #include "caffe2/utils/fixed_divisor.h"
@@ -168,12 +170,14 @@ CAFFE2_CUDA_EXPORT void BinaryOpWith2DBroadcasting(
              CAFFE_CUDA_NUM_THREADS,
              0,
              context->cuda_stream()>>>(size, cols_div, op, A, B, C);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
       RowwiseBinaryOpCUDAKenel<TIn, TOut, BinaryOperator, false>
           <<<CAFFE_GET_BLOCKS(size),
              CAFFE_CUDA_NUM_THREADS,
              0,
              context->cuda_stream()>>>(size, cols_div, op, A, B, C);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   } else {
     if (broadcast_1st) {
@@ -182,12 +186,14 @@ CAFFE2_CUDA_EXPORT void BinaryOpWith2DBroadcasting(
              CAFFE_CUDA_NUM_THREADS,
              0,
              context->cuda_stream()>>>(size, cols_div, op, A, B, C);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
       ColwiseBinaryOpCUDAKenel<TIn, TOut, BinaryOperator, false>
           <<<CAFFE_GET_BLOCKS(size),
              CAFFE_CUDA_NUM_THREADS,
              0,
              context->cuda_stream()>>>(size, cols_div, op, A, B, C);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   }
 }
@@ -225,6 +231,7 @@ CAFFE2_CUDA_EXPORT void BroadcastBinaryOpImpl(
          0,
          context->cuda_stream()>>>(
           size, A_strides_array, B_strides_array, C_dims_array, op, A, B, C);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <typename TIn, typename TOut, class BinaryOperator>
@@ -258,6 +265,7 @@ CAFFE2_CUDA_EXPORT void BroadcastBinaryOp(
            CAFFE_CUDA_NUM_THREADS,
            0,
            context->cuda_stream()>>>(size, op, A, B, C);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
     return;
   }
   int rows;
@@ -322,6 +330,7 @@ CAFFE2_CUDA_EXPORT void BroadcastBinaryOp(
            CAFFE_CUDA_NUM_THREADS,                                        \
            0,                                                             \
            context->cuda_stream()>>>(size, cols_div, Op<TIn>(), A, B, C); \
+    C10_CUDA_KERNEL_LAUNCH_CHECK();                                       \
   }                                                                       \
   template <>                                                             \
   CAFFE2_CUDA_EXPORT void Rowwise##Func<TIn, CUDAContext, false>(         \
@@ -341,6 +350,7 @@ CAFFE2_CUDA_EXPORT void BroadcastBinaryOp(
            CAFFE_CUDA_NUM_THREADS,                                        \
            0,                                                             \
            context->cuda_stream()>>>(size, cols_div, Op<TIn>(), A, B, C); \
+    C10_CUDA_KERNEL_LAUNCH_CHECK();                                       \
   }                                                                       \
   template <>                                                             \
   CAFFE2_CUDA_EXPORT void Colwise##Func<TIn, CUDAContext, true>(          \
@@ -360,6 +370,7 @@ CAFFE2_CUDA_EXPORT void BroadcastBinaryOp(
            CAFFE_CUDA_NUM_THREADS,                                        \
            0,                                                             \
            context->cuda_stream()>>>(size, cols_div, Op<TIn>(), A, B, C); \
+    C10_CUDA_KERNEL_LAUNCH_CHECK();                                       \
   }                                                                       \
   template <>                                                             \
   CAFFE2_CUDA_EXPORT void Colwise##Func<TIn, CUDAContext, false>(         \
@@ -379,6 +390,7 @@ CAFFE2_CUDA_EXPORT void BroadcastBinaryOp(
            CAFFE_CUDA_NUM_THREADS,                                        \
            0,                                                             \
            context->cuda_stream()>>>(size, cols_div, Op<TIn>(), A, B, C); \
+    C10_CUDA_KERNEL_LAUNCH_CHECK();                                       \
   }
 
 #define DEFINE_2D_BROADCAST_CUDA_COMPARE_FUNCTION(Func, Op)                \
@@ -1521,6 +1533,7 @@ __global__ void AddStripedBatchKernel(
            CAFFE_CUDA_NUM_THREADS,                                \
            0,                                                     \
            context->cuda_stream()>>>(N, first, Y, stripe, batch); \
+    C10_CUDA_KERNEL_LAUNCH_CHECK();                               \
   }
 
 CAFFE2_SPECIALIZED_CUDA_ADD_STRIPED_BATCH(float);
@@ -1560,6 +1573,7 @@ CAFFE2_CUDA_EXPORT void RandUniform<float, CUDAContext>(
          CAFFE_CUDA_NUM_THREADS,
          0,
          context->cuda_stream()>>>(n, min, max, r);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <>
@@ -1576,6 +1590,7 @@ CAFFE2_CUDA_EXPORT void RandUniform<double, CUDAContext>(
          CAFFE_CUDA_NUM_THREADS,
          0,
          context->cuda_stream()>>>(n, min, max, r);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <>
@@ -1593,6 +1608,7 @@ CAFFE2_CUDA_EXPORT void RandUniform<int, CUDAContext>(
       0,
       context->cuda_stream()>>>(
       n, min, max, reinterpret_cast<unsigned int*>(r));
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <typename T>
@@ -1786,6 +1802,7 @@ CAFFE2_CUDA_EXPORT void Sum<float, CUDAContext>(
   } else {
     SumKernel<<<1, SUM_KERNEL_NTHREADS, 0, context->cuda_stream()>>>(
         N, x, y, false);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }
 
@@ -1801,6 +1818,7 @@ CAFFE2_CUDA_EXPORT void Sum<int32_t, CUDAContext>(
   } else {
     SumKernel<<<1, SUM_KERNEL_NTHREADS, 0, context->cuda_stream()>>>(
         N, x, y, false);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }
 
@@ -1828,9 +1846,11 @@ struct FloatTransform {
       float* sum = nullptr;                                               \
       SumGenericIter<float>(N, it, sum, context, scratch_ptr);            \
       SumConvertKernel<<<1, 1, 0, context->cuda_stream()>>>(sum, y);      \
+      C10_CUDA_KERNEL_LAUNCH_CHECK();                                     \
     } else {                                                              \
       SumKernel<<<1, SUM_KERNEL_NTHREADS, 0, context->cuda_stream()>>>(   \
           N, x, y, false);                                                \
+      C10_CUDA_KERNEL_LAUNCH_CHECK();                                     \
     }                                                                     \
   }
 
@@ -1861,6 +1881,7 @@ CAFFE2_CUDA_EXPORT void SumSqr<float, CUDAContext>(
   } else {
     SumKernel<<<1, SUM_KERNEL_NTHREADS, 0, context->cuda_stream()>>>(
         N, x, y, true);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }
 
@@ -1885,9 +1906,11 @@ CAFFE2_CUDA_EXPORT void SumSqr<float, CUDAContext>(
       float* sum = nullptr;                                             \
       SumGenericIter<float>(N, it, sum, context, scratch_ptr);          \
       SumConvertKernel<<<1, 1, 0, context->cuda_stream()>>>(sum, y);    \
+      C10_CUDA_KERNEL_LAUNCH_CHECK();                                   \
     } else {                                                            \
       SumKernel<<<1, SUM_KERNEL_NTHREADS, 0, context->cuda_stream()>>>( \
           N, x, y, true);                                               \
+      C10_CUDA_KERNEL_LAUNCH_CHECK();                                   \
     }                                                                   \
   }
 
@@ -1918,6 +1941,7 @@ CAFFE2_CUDA_EXPORT void Select<float, CUDAContext>(
          CAFFE_CUDA_NUM_THREADS,
          0,
          context->cuda_stream()>>>(N, D, x, idx, y);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <>
@@ -1933,6 +1957,7 @@ CAFFE2_CUDA_EXPORT void Select<at::Half, CUDAContext>(
          CAFFE_CUDA_NUM_THREADS,
          0,
          context->cuda_stream()>>>(N, D, x, idx, y);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 namespace {
@@ -2194,13 +2219,13 @@ __global__ void Im2ColNdNCHWCUDAKernel(
       if (!kCol2Im) {
         Y_data[col_index] = is_padding ? 0 : __ldg(X_data + img_index);
       } else if (!is_padding) {
-        atomicAdd(Y_data + img_index, __ldg(X_data + col_index));
+        gpu_atomic_add(Y_data + img_index, __ldg(X_data + col_index));
       }
 #else
       if (!kCol2Im) {
         Y_data[col_index] = is_padding ? 0 : X_data[img_index];
       } else if (!is_padding) {
-        atomicAdd(Y_data + img_index, X_data[col_index]);
+        gpu_atomic_add(Y_data + img_index, X_data[col_index]);
       }
 #endif
     }
@@ -2252,6 +2277,7 @@ CAFFE2_CUDA_EXPORT void Im2ColNdNCHWCUDAImpl(
           pad_array,
           img_data,
           col_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <typename T, int N>
@@ -2300,6 +2326,7 @@ CAFFE2_CUDA_EXPORT void Col2ImNdNCHWCUDAImpl(
           pad_array,
           col_data,
           img_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 } // namespace
@@ -2348,6 +2375,7 @@ CAFFE2_CUDA_EXPORT void Im2Col<float, CUDAContext, StorageOrder::NCHW>(
           output_w,
           img_data,
           col_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <>
@@ -2396,6 +2424,7 @@ CAFFE2_CUDA_EXPORT void Im2Col<float, CUDAContext, StorageOrder::NHWC>(
           channels,
           img_data,
           col_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <>
@@ -2443,6 +2472,7 @@ CAFFE2_CUDA_EXPORT void Col2Im<float, CUDAContext, StorageOrder::NCHW>(
           output_w,
           col_data,
           img_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <>
@@ -2491,6 +2521,7 @@ CAFFE2_CUDA_EXPORT void Col2Im<float, CUDAContext, StorageOrder::NHWC>(
           output_w,
           col_data,
           img_data);
+C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <>
@@ -2742,6 +2773,7 @@ __global__ void ColwiseReduceKernel(
         0,                                                                \
         context->cuda_stream()>>>(                                        \
         N, D, cub::Max(), std::numeric_limits<T>::lowest(), T(1), x, y);  \
+    C10_CUDA_KERNEL_LAUNCH_CHECK();                                       \
   }
 CAFFE2_SPECIALIZED_CUDA_ROWWISE_MAX(float)
 #undef CAFFE2_SPECIALIZED_CUDA_ROWWISE_MAX
@@ -2756,6 +2788,7 @@ CAFFE2_SPECIALIZED_CUDA_ROWWISE_MAX(float)
         0,                                                                \
         context->cuda_stream()>>>(                                        \
         N, D, cub::Max(), std::numeric_limits<T>::lowest(), T(1), x, y);  \
+  C10_CUDA_KERNEL_LAUNCH_CHECK();                                         \
   }
 CAFFE2_SPECIALIZED_CUDA_COLWISE_MAX(float)
 #undef CAFFE2_SPECIALIZED_CUDA_COLWISE_MAX
@@ -2781,6 +2814,7 @@ CAFFE2_CUDA_EXPORT void Maximum(
       CAFFE_CUDA_NUM_THREADS,
       0,
       context->cuda_stream()>>>(N, alpha, x, y);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 namespace {
@@ -2843,6 +2877,7 @@ CAFFE2_CUDA_EXPORT void BroadcastCUDAImpl(
          0,
          context->cuda_stream()>>>(
           Y_size, X_strides_array, Y_dims_array, alpha, X, Y);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 } // namespace
@@ -2909,6 +2944,7 @@ DELEGATE_INV_STD_KERNEL_FUNCTION(float, rsqrtf)
            CAFFE_CUDA_NUM_THREADS,                              \
            0,                                                   \
            context->cuda_stream()>>>(N, epsilon, var, inv_std); \
+    C10_CUDA_KERNEL_LAUNCH_CHECK();                             \
   }
 CAFFE2_SPECIALIZED_CUDA_INV_STD(float)
 #undef CAFFE2_SPECIALIZED_CUDA_INV_STD

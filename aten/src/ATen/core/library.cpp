@@ -1,5 +1,7 @@
 #include <torch/library.h>
 
+#include <ATen/core/dispatch/Dispatcher.h>
+
 namespace torch {
 
 namespace {
@@ -32,6 +34,7 @@ namespace {
 
 CppFunction::CppFunction(c10::KernelFunction func, c10::optional<c10::impl::CppSignature> cpp_signature, std::unique_ptr<c10::FunctionSchema> schema)
   : func_(std::move(func))
+  // NOLINTNEXTLINE(performance-move-const-arg)
   , cpp_signature_(std::move(cpp_signature))
   , schema_(std::move(schema))
   , debug_()
@@ -150,6 +153,7 @@ Library& Library::_def(c10::either<c10::OperatorName, c10::FunctionSchema>&& nam
       std::move(name),
       dispatch_key,
       std::move(f.func_),
+      // NOLINTNEXTLINE(performance-move-const-arg)
       std::move(f.cpp_signature_),
       std::move(f.schema_),
       debugString(std::move(f.debug_), file_, line_)
@@ -195,6 +199,7 @@ Library& Library::_impl(const char* name_str, CppFunction&& f) & {
       std::move(name),
       dispatch_key,
       std::move(f.func_),
+      // NOLINTNEXTLINE(performance-move-const-arg)
       std::move(f.cpp_signature_),
       std::move(f.schema_),
       debugString(std::move(f.debug_), file_, line_)
@@ -217,7 +222,9 @@ Library& Library::_fallback(CppFunction&& f) & {
     "this fallback function globally, please define a separate block:\n\n",
     "    TORCH_LIBRARY_IMPL(_, ", *dispatch_key, ", m) { m.fallback(...); }\n\n",
     ERROR_CONTEXT);
-  for (auto k : c10::getRuntimeDispatchKeys(*dispatch_key)) {
+  // Note if dispatch_key is DispatchKey::Undefined, it'll be ignored here since Undefined
+  // isn't a runtime key, you shouldn't register anything to it at all.
+  for (auto k : c10::getRuntimeDispatchKeySet(*dispatch_key)) {
     registrars_.emplace_back(
       c10::Dispatcher::singleton().registerFallback(
         k,

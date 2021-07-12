@@ -1,11 +1,16 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 
 import os
+import sys
 
 import numpy as np
 import torch
-import torch.distributed as c10d
 from torch import nn
+import torch.distributed as dist
+
+if not dist.is_available():
+    print("Distributed not available, skipping tests", file=sys.stderr)
+    sys.exit(0)
+
 from torch.distributed.algorithms.ddp_comm_hooks import (
     DDPCommHookType,
     register_ddp_comm_hook,

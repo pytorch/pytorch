@@ -1,13 +1,17 @@
 #include <torch/csrc/jit/codegen/cuda/compute_at.h>
+#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 
+#include <c10/util/irange.h>
+
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 ComputeAtData::ComputeAtData(TensorView* tv)
     : tv_ref_(tv),
@@ -20,11 +24,10 @@ ComputeAtData::ComputeAtData(TensorView* tv)
 void ComputeAtData::clearPass() {
   // If the last pass set a position, update the new_compute_at_position if
   // latest position would be greater than previously set.
-  auto pass_pos = current_traversal_position_set ? current_traversal_position
-                                                 : new_compute_at_position;
-
-  new_compute_at_position =
-      pass_pos > new_compute_at_position ? pass_pos : new_compute_at_position;
+  if (current_traversal_position_set &&
+      current_traversal_position > new_compute_at_position) {
+    new_compute_at_position = current_traversal_position;
+  }
 
   current_traversal_position_set = false;
   current_traversal_position = 0;
@@ -52,16 +55,19 @@ void ComputeAtData::setPassPosition(unsigned int pos) {
 }
 
 unsigned int ComputeAtData::getNewPosition() const {
-  // If the last pass set a position, update the new_compute_at_position if
-  // latest position would be greater than previously set.
-  auto pass_pos = current_traversal_position_set ? current_traversal_position
-                                                 : new_compute_at_position;
-
-  return pass_pos > new_compute_at_position ? pass_pos
-                                            : new_compute_at_position;
+  // If the last pass set a position, return the latest position if
+  // it would be greater than previously set.
+  if (current_traversal_position_set &&
+      current_traversal_position > new_compute_at_position) {
+    return current_traversal_position;
+  } else {
+    return new_compute_at_position;
+  }
 }
 
 void ComputeAtData::validateNewComputeAt() const {
+  FUSER_PERF_SCOPE("validateNewComputeAt");
+
   TORCH_INTERNAL_ASSERT(
       getNewPosition() >= original_compute_at_position,
       "Invalid computeAt detected. This computeAt would invalidate the set computeAt on ",
@@ -82,7 +88,22 @@ void ComputeAtData::validateNewComputeAt() const {
       ".");
 }
 
+void ComputeAtData::setComputeAtDomain(TensorDomain* td) {
+  if (new_compute_at_domain_ != original_domain_) {
+    TORCH_INTERNAL_ASSERT(
+        *new_compute_at_domain_ == *td,
+        "TensorDomain, ",
+        td,
+        ", does not match with the previously set domain of ",
+        tv_ref_,
+        ", which is ",
+        new_compute_at_domain_);
+  }
+  new_compute_at_domain_ = td;
+}
+
 namespace {
+
 // Wrapper around set_intersection
 template <typename T>
 std::set<T> set_intersection(const std::set<T>& set1, const std::set<T>& set2) {
@@ -116,17 +137,20 @@ T1 tvIterable(const T2& val_iterable) {
 std::deque<std::deque<TensorView*>> tvChains(
     std::deque<std::deque<Val*>> val_chains) {
   std::deque<std::deque<TensorView*>> tv_chains(val_chains.size());
-  for (size_t i = 0; i < val_chains.size(); i++) {
+  for (const auto i : c10::irange(val_chains.size())) {
     tv_chains[i] = tvIterable<std::deque<TensorView*>>(val_chains[i]);
   }
   return tv_chains;
 }
+
 } // namespace
 
 void ComputeAt::run(
     TensorView* producer,
     TensorView* consumer,
     unsigned int consumer_position) {
+  FUSER_PERF_SCOPE("ComputeAt::run");
+
   // Make sure the correct fusion is setup between this and consumer.
   TORCH_CHECK(
       producer->fusion() == consumer->fusion(),
@@ -160,6 +184,9 @@ void ComputeAt::run(
     // Check all dependency chains, select the next TV after producer towards
     // consumer. These are the TVs we're going to actually call computeAt on.
     for (const auto& tv_chain : all_chains) {
+      // When a chain only has two tensors, they must be the producer,
+      // which is an input, and the consumer. There is nothing we need
+      // to do for such chains.
       if (tv_chain.size() > 2) {
         // Make sure we only add once, but we want to add in a determinsitic
         // order
@@ -188,6 +215,8 @@ unsigned int ComputeAt::backwardComputeAt_impl(
     TensorView* producer,
     TensorView* consumer,
     unsigned int consumer_compute_at_axis) {
+  FUSER_PERF_SCOPE("backwardComputeAt_impl");
+
   auto& producer_entry = tv_data.at(producer);
 
   // Use TensorDomain interface so it doesn't set computeAt automatically
@@ -209,6 +238,8 @@ unsigned int ComputeAt::forwardComputeAt_impl(
     TensorView* producer,
     TensorView* consumer,
     unsigned int producer_compute_at_axis) {
+  FUSER_PERF_SCOPE("forwardComputeAt_impl");
+
   auto& consumer_entry = tv_data.at(consumer);
   const auto& producer_entry = tv_data.at(producer);
 
@@ -229,6 +260,8 @@ unsigned int ComputeAt::forwardComputeAt_impl(
 }
 
 void ComputeAt::setCommonConsumer() {
+  FUSER_PERF_SCOPE("ComputeAt::setCommonConsumer");
+
   // Convert the first chain to a set.
   std::set<TensorView*> common_consumers(
       producer_use_chains_.front().begin(), producer_use_chains_.front().end());
@@ -281,6 +314,8 @@ void ComputeAt::setCommonConsumer() {
 // Similar to backward traversal in traverseAllKnown but we should only apply
 // computeAt if it will increase computeAt positions.
 void ComputeAt::traverseBackward() {
+  FUSER_PERF_SCOPE("ComputeAt::traverseBackward");
+
   // propagate *backward* through all *producer* use_chains or from *producer*
   // to common_consumer if common_consumer exists. Only apply transform if
   // increases computeAt position.
@@ -307,6 +342,8 @@ void ComputeAt::traverseBackward() {
 }
 
 void ComputeAt::traverseForward() {
+  FUSER_PERF_SCOPE("ComputeAt::traverseForward");
+
   // propagate forward through all *producer* use_chains or from *producer* to
   // common_consumer if common_consumer exists.
   auto chains = producer_use_chains_;
@@ -338,6 +375,8 @@ void ComputeAt::traverseForward() {
 }
 
 void ComputeAt::runPass() {
+  FUSER_PERF_SCOPE("ComputeAt::runPass");
+
   // Initialize tv_data for all TensorViews we may modify
   auto chains = producer_use_chains_;
   if (common_consumer_ != nullptr) {
@@ -382,6 +421,8 @@ void ComputeAt::runPass() {
 }
 
 void ComputeAt::setupOutputs() {
+  FUSER_PERF_SCOPE("ComputeAt::setupOutputs");
+
   if (common_consumer_ != nullptr)
     return;
 
@@ -421,9 +462,6 @@ ComputeAt::ComputeAt(
     : producer_(_producer),
       consumer_(_consumer),
       consumer_position_(_consumer_position) {
-  if (consumer_position_ < 0)
-    consumer_position_ += consumer_->nDims();
-
   TORCH_INTERNAL_ASSERT(
       consumer_position_ >= 0 && consumer_position_ <= consumer_->nDims(),
       "Invalid computeAt axis, received ",
@@ -442,6 +480,7 @@ ComputeAt::ComputeAt(
   setCommonConsumer();
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

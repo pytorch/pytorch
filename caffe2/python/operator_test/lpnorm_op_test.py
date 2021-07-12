@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import numpy as np
 from caffe2.python import core, workspace
@@ -16,7 +16,7 @@ class LpnormTest(hu.HypothesisTestCase):
                              max_dim=3,
                              dtype=np.float32),
            **hu.gcs)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_Lp_Norm(self, inputs, gc, dc):
         X = inputs[0]
         # avoid kinks by moving away from 0

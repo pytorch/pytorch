@@ -1,12 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import numpy
 
 from caffe2.python import core
-from hypothesis import given
+from hypothesis import given, settings
 
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
@@ -16,7 +11,8 @@ import numpy as np
 @st.composite
 def _data(draw):
     return draw(
-        hu.tensor(dtype=np.int64,
+        hu.tensor(
+            dtype=np.int64,
             elements=st.integers(
                 min_value=np.iinfo(np.int64).min, max_value=np.iinfo(np.int64).max
             )
@@ -25,6 +21,7 @@ def _data(draw):
 
 
 class TestMod(hu.HypothesisTestCase):
+    @settings(deadline=None)
     @given(
         data=_data(),
         divisor=st.integers(
@@ -32,7 +29,7 @@ class TestMod(hu.HypothesisTestCase):
         ),
         inplace=st.booleans(),
         sign_follow_divisor=st.booleans(),
-        **hu.gcs_cpu_only
+        **hu.gcs
     )
     def test_mod(
         self, data, divisor, inplace, sign_follow_divisor, gc, dc

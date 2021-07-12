@@ -7,8 +7,8 @@
 namespace at {
 namespace native {
 
-Tensor& resize_cuda_(
-    Tensor& self,
+const Tensor& resize_cuda_(
+    const Tensor& self,
     IntArrayRef size,
     c10::optional<MemoryFormat> optional_memory_format) {
   if (self.has_names()) {

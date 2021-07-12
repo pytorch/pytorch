@@ -2,6 +2,7 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <memory>
 #include <string>
+#include <unordered_map>
 
 // `TorchScript` offers a simple logging facility that can enabled by setting an
 // environment variable `PYTORCH_JIT_LOG_LEVEL`.
@@ -25,15 +26,16 @@
 // * `GRAPH_DEBUG` should be used for providing information useful for debugging
 //   the internals of a particular optimization pass or analysis
 
-// The current logging level is `GRAPH_UPDATE` meaning that both `GRAPH_DUMP`
-// and `GRAPH_UPDATE` will be enabled when
-// one specifies a file(s) in `PYTORCH_JIT_LOG_LEVEL`.
+// The default logging level is `GRAPH_DUMP` meaning that only `GRAPH_DUMP`
+// statements will be enabled when one specifies a file(s) in
+// `PYTORCH_JIT_LOG_LEVEL`.
 
-// `GRAPH_DEBUG` can be enabled by prefixing a file name with an `>` as in
+// `GRAPH_UPDATE` can be enabled by prefixing a file name with an `>` as in
 // `>alias_analysis`.
-// `>>` and `>>>` are also valid and **currently** are equivalent to
-// `GRAPH_DEBUG` as there is no logging level that is
-// higher than `GRAPH_DEBUG`.
+// `GRAPH_DEBUG` can be enabled by prefixing a file name with an `>>` as in
+// `>>alias_analysis`.
+// `>>>` is also valid and **currently** is equivalent to `GRAPH_DEBUG` as there
+// is no logging level that is higher than `GRAPH_DEBUG`.
 
 namespace torch {
 namespace jit {
@@ -46,6 +48,45 @@ enum class JitLoggingLevels {
   GRAPH_UPDATE,
   GRAPH_DEBUG,
 };
+
+class JitLoggingConfig {
+ public:
+  static JitLoggingConfig& getInstance() {
+    static JitLoggingConfig instance;
+    return instance;
+  }
+  JitLoggingConfig(JitLoggingConfig const&) = delete;
+  void operator=(JitLoggingConfig const&) = delete;
+
+ private:
+  std::string logging_levels;
+  std::unordered_map<std::string, size_t> files_to_levels;
+
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  JitLoggingConfig() {
+    const char* jit_log_level = std::getenv("PYTORCH_JIT_LOG_LEVEL");
+    logging_levels.assign(jit_log_level == nullptr ? "" : jit_log_level);
+    parse();
+  }
+  void parse();
+
+ public:
+  std::string getLoggingLevels() {
+    return this->logging_levels;
+  }
+  void setLoggingLevels(std::string levels) {
+    this->logging_levels = levels;
+    parse();
+  }
+
+  std::unordered_map<std::string, size_t> getFilesToLevels() {
+    return this->files_to_levels;
+  }
+};
+
+std::string TORCH_API get_jit_logging_levels();
+
+void TORCH_API set_jit_logging_levels(std::string level);
 
 std::string TORCH_API getHeader(const Node* node);
 
@@ -97,5 +138,12 @@ TORCH_API std::ostream& operator<<(
 // pass
 #define GRAPH_DEBUG(...) \
   JIT_LOG(::torch::jit::JitLoggingLevels::GRAPH_DEBUG, __VA_ARGS__);
+
+#define GRAPH_DUMP_ENABLED \
+  (is_enabled(__FILE__, ::torch::jit::JitLoggingLevels::GRAPH_DUMP))
+#define GRAPH_UPDATE_ENABLED \
+  (is_enabled(__FILE__, ::torch::jit::JitLoggingLevels::GRAPH_UPDATE))
+#define GRAPH_DEBUG_ENABLED \
+  (is_enabled(__FILE__, ::torch::jit::JitLoggingLevels::GRAPH_DEBUG))
 } // namespace jit
 } // namespace torch

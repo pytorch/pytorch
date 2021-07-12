@@ -60,7 +60,16 @@ class BoxWithNMSLimitOp final : public Operator<Context> {
 
   ~BoxWithNMSLimitOp() {}
 
-  bool RunOnDevice() override;
+  bool RunOnDevice() override {
+    if (InputSize() > 2) {
+      return DispatchHelper<TensorTypes<int, float>>::call(this, Input(2));
+    } else {
+      return DoRunWithType<float>();
+    }
+  }
+
+  template <typename T>
+  bool DoRunWithType();
 
  protected:
   // TEST.SCORE_THRESH

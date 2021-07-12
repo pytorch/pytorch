@@ -107,7 +107,7 @@ class MIOPENPoolOp : public ConvPoolOpBase<HIPContext> {
                     pad_l(),
                     stride_h(),
                     stride_w()));
-    
+
     MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(top_desc_, miopenTypeWrapper<T>::type, N_out, C_out, H_out, W_out));
     MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(bottom_desc_, miopenTypeWrapper<T>::type, N, C, H, W));
 #endif
@@ -237,11 +237,11 @@ class MIOPENPoolGradientOp : public ConvPoolOpBase<HIPContext> {
         kernel_.data(),
         pads_.data(),
         stride_.data()));
-    
+
     miopenIndexType_t index_type = miopenIndexUint64;
     MIOPEN_ENFORCE(miopenSetPoolingIndexType(
         pooling_desc_, index_type));
-    
+
     mio_input_dims = X.sizes().vec();
     std::vector<int> input_dims (begin(mio_input_dims), end(mio_input_dims));
     MIOPEN_ENFORCE(miopenSetTensorDescriptor(

@@ -22,14 +22,16 @@ namespace at { namespace cuda {
 // IT IS AN ERROR TO TRY TO CALL ANY nvrtc* or cu* FUNCTION DIRECTLY.
 // INSTEAD USE, e.g.
 //   detail::getCUDAHooks().nvrtc().cuLoadModule(...)
-// oe
+// or
 //   globalContext().getNVRTC().cuLoadModule(...)
 //
-// If a function is missing add it to the list in ATen/cuda/nvrtc_stub/ATenNVRTC.h.
+// If a function is missing add it to the list in ATen/cuda/nvrtc_stub/ATenNVRTC.h
+// and edit ATen/cuda/detail/LazyNVRTC.cpp accordingly (e.g., via one of the stub
+// macros).
 
 #ifndef __HIP_PLATFORM_HCC__
 
-#define AT_FORALL_NVRTC(_)                       \
+#define AT_FORALL_NVRTC_BASE(_)                  \
   _(nvrtcVersion)                                \
   _(nvrtcAddNameExpression)                      \
   _(nvrtcCreateProgram)                          \
@@ -42,6 +44,7 @@ namespace at { namespace cuda {
   _(nvrtcGetProgramLog)                          \
   _(nvrtcGetLoweredName)                         \
   _(cuModuleLoadData)                            \
+  _(cuModuleLoadDataEx)                          \
   _(cuModuleGetFunction)                         \
   _(cuOccupancyMaxActiveBlocksPerMultiprocessor) \
   _(cuGetErrorString)                            \
@@ -52,6 +55,16 @@ namespace at { namespace cuda {
   _(cuLinkCreate)                                \
   _(cuLinkAddData)                               \
   _(cuLinkComplete)
+
+#if CUDA_VERSION >= 11010
+#define AT_FORALL_NVRTC(_) \
+  AT_FORALL_NVRTC_BASE(_)  \
+  _(nvrtcGetCUBINSize)     \
+  _(nvrtcGetCUBIN)
+#else
+#define AT_FORALL_NVRTC(_) \
+  AT_FORALL_NVRTC_BASE(_)
+#endif
 
 #else
 
@@ -76,22 +89,24 @@ namespace at { namespace cuda {
 #define HIPOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSOR cuOccupancyMaxActiveBlocksPerMultiprocessor
 #endif
 
-#define AT_FORALL_NVRTC(_)                       \
-  _(nvrtcVersion)                                \
-  _(nvrtcCreateProgram)                          \
-  _(nvrtcDestroyProgram)                         \
-  _(nvrtcGetPTXSize)                             \
-  _(nvrtcGetPTX)                                 \
-  _(cuModuleLoadData)                            \
-  _(cuModuleGetFunction)                         \
-  _(HIPOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSOR)\
-  _(nvrtcGetErrorString)                         \
-  _(nvrtcGetProgramLogSize)                      \
-  _(nvrtcGetProgramLog)                          \
-  _(cuLaunchKernel)                              \
-  _(nvrtcCompileProgram)                         \
-  _(cuCtxGetCurrent)                             \
-  _(cuModuleUnload)                              \
+#define AT_FORALL_NVRTC(_)                        \
+  _(nvrtcVersion)                                 \
+  _(nvrtcCreateProgram)                           \
+  _(nvrtcAddNameExpression)                       \
+  _(nvrtcDestroyProgram)                          \
+  _(nvrtcGetPTXSize)                              \
+  _(nvrtcGetPTX)                                  \
+  _(cuModuleLoadData)                             \
+  _(cuModuleGetFunction)                          \
+  _(HIPOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSOR) \
+  _(nvrtcGetErrorString)                          \
+  _(nvrtcGetProgramLogSize)                       \
+  _(nvrtcGetProgramLog)                           \
+  _(cuLaunchKernel)                               \
+  _(nvrtcCompileProgram)                          \
+  _(cuCtxGetCurrent)                              \
+  _(nvrtcGetLoweredName)                          \
+  _(cuModuleUnload)                               \
   _(cuDevicePrimaryCtxGetState)
 
 #endif
@@ -102,6 +117,5 @@ extern "C" typedef struct NVRTC {
 #undef CREATE_MEMBER
 } NVRTC;
 
-extern "C" TORCH_CUDA_API NVRTC* load_nvrtc();
-
+extern "C" TORCH_CUDA_CPP_API NVRTC* load_nvrtc();
 }} // at::cuda

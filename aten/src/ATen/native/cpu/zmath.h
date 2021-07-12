@@ -3,6 +3,7 @@
 // Complex number math operations that act as no-ops for other dtypes.
 #include <c10/util/complex.h>
 #include <c10/util/math_compat.h>
+#include <c10/util/MathConstants.h>
 #include<ATen/NumericUtils.h>
 
 namespace at { namespace native {
@@ -33,9 +34,18 @@ inline double zabs <c10::complex<double>, double> (c10::complex<double> z) {
   return std::abs(z);
 }
 
+// This overload corresponds to non-complex dtypes.
+// The function is consistent with its NumPy equivalent
+// for non-complex dtypes where `pi` is returned for
+// negative real numbers and `0` is returned for 0 or positive
+// real numbers.
+// Note: `nan` is propagated.
 template <typename SCALAR_TYPE, typename VALUE_TYPE=SCALAR_TYPE>
 inline VALUE_TYPE angle_impl (SCALAR_TYPE z) {
-  return 0;
+  if (at::_isnan(z)) {
+    return z;
+  }
+  return z < 0 ? c10::pi<double> : 0;
 }
 
 template<>
@@ -136,6 +146,15 @@ inline c10::complex<float> ceil_impl (c10::complex<float> z) {
 template <>
 inline c10::complex<double> ceil_impl (c10::complex<double> z) {
   return c10::complex<double>(std::ceil(z.real()), std::ceil(z.imag()));
+}
+
+template<typename T>
+inline c10::complex<T> sgn_impl (c10::complex<T> z) {
+  if (z == c10::complex<T>(0, 0)) {
+    return c10::complex<T>(0, 0);
+  } else {
+    return z / zabs(z);
+  }
 }
 
 template <typename TYPE>

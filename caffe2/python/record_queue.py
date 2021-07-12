@@ -3,10 +3,10 @@
 """
 Implementation of a queue wrapper.
 """
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core
 from caffe2.python.dataio import Reader, Writer

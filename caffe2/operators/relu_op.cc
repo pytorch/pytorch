@@ -42,6 +42,7 @@ bool ReluGradientFunctor<CPUContext>::Forward(
     T* dX,
     CPUContext* /* context */) const {
   const int size = std::accumulate(
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       Y_dims.cbegin(), Y_dims.cend(), 1, std::multiplies<int>());
   EigenVectorArrayMap<T>(dX, size) =
       (ConstEigenVectorArrayMap<T>(Y, size) > T(0))
@@ -61,12 +62,14 @@ OpSchema::Cost CostInferenceForRelu(
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     Relu,
     UnaryElementwiseOp<
         TensorTypes<float>,
         CPUContext,
         ReluFunctor<CPUContext>>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_GRADIENT_OPERATOR(
     ReluGradient,
     BinaryElementwiseOp<
@@ -75,6 +78,7 @@ REGISTER_CPU_GRADIENT_OPERATOR(
         ReluGradientFunctor<CPUContext>>);
 
 // Input: X, output: Y
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Relu)
     .NumInputs(1)
     .NumOutputs(1)
@@ -140,6 +144,7 @@ Y:
     .InheritOnnxSchema();
 
 // Input: Y, dY, output: dX
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 GRADIENT_OPERATOR_SCHEMA(ReluGradient)
     .NumInputs(2)
     .NumOutputs(1)
@@ -165,6 +170,7 @@ class GetReluGradient : public GradientMakerBase {
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Relu, GetReluGradient);
 
 } // namespace caffe2

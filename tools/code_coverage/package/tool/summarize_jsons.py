@@ -19,7 +19,11 @@ from ..util.utils import (
 from .parser.coverage_record import CoverageRecord
 from .parser.gcov_coverage_parser import GcovCoverageParser
 from .parser.llvm_coverage_parser import LlvmCoverageParser
-from .print_report import file_oriented_report, line_oriented_report
+from .print_report import (
+    file_oriented_report,
+    html_oriented_report,
+    line_oriented_report,
+)
 
 
 # coverage_records: Dict[str, LineInfo] = dict()
@@ -51,7 +55,7 @@ def transform_file_name(
 
 def is_intrested_file(
     file_path: str, interested_folders: List[str], platform: TestPlatform
-):
+) -> bool:
     ignored_patterns = ["cuda", "aten/gen_aten", "aten/aten_", "build/"]
     if any([pattern in file_path for pattern in ignored_patterns]):
         return False
@@ -186,26 +190,27 @@ def summarize_jsons(
     interested_folders: List[str],
     coverage_only: List[str],
     platform: TestPlatform,
-    program_start_time: float,
 ) -> None:
     start_time = time.time()
-    parse_jsons(test_list, interested_folders, platform)
-    update_set()
-    line_oriented_report(
-        test_list,
-        tests_type,
-        interested_folders,
-        coverage_only,
-        covered_lines,
-        uncovered_lines,
-    )
-    file_oriented_report(
-        test_list,
-        tests_type,
-        interested_folders,
-        coverage_only,
-        program_start_time,
-        covered_lines,
-        uncovered_lines,
-    )
+    if detect_compiler_type(platform) == CompilerType.GCC:
+        html_oriented_report()
+    else:
+        parse_jsons(test_list, interested_folders, platform)
+        update_set()
+        line_oriented_report(
+            test_list,
+            tests_type,
+            interested_folders,
+            coverage_only,
+            covered_lines,
+            uncovered_lines,
+        )
+        file_oriented_report(
+            test_list,
+            tests_type,
+            interested_folders,
+            coverage_only,
+            covered_lines,
+            uncovered_lines,
+        )
     print_time("summary jsons take time: ", start_time)

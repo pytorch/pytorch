@@ -1,12 +1,11 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import unittest
 import hypothesis.strategies as st
-from hypothesis import given, settings
-import copy
+from hypothesis import given
 import numpy as np
 import math
 from caffe2.proto import caffe2_pb2

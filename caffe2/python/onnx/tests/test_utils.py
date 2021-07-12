@@ -1,12 +1,11 @@
 ## @package onnx
 # Module caffe2.python.onnx.tests.test_utils
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 
-import os
+
+
+
+
 import unittest
 
 import numpy as np
@@ -28,4 +27,3 @@ class TestCase(unittest.TestCase):
         if hasattr(self, name):
             raise ValueError('Duplicated test name: {}'.format(name))
         setattr(self, name, test_func)
-

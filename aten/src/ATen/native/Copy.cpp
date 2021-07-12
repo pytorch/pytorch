@@ -5,11 +5,19 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/quantized/Copy.h>
+#include <ATen/native/vulkan/ops/Copy.h>
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/vulkan/Context.h>
+#include <ATen/metal/Context.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/Parallel.h>
 #include <torch/library.h>
+
+#ifdef USE_FBGEMM
+#include <fbgemm/Fbgemm.h>
+#include <fbgemm/FbgemmConvert.h>
+#endif
 
 namespace {
 
@@ -26,15 +34,18 @@ bool copy_transpose_valid(const Tensor& self, const Tensor& src) {
 // special case copy where tensor is contiguous and src is a transposed matrix
 // This can be generalized to most copies, but it's trickier
 void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t BLOCK_SZ;
   if (self.scalar_type() == kByte) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     BLOCK_SZ = 120;
   } else {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     BLOCK_SZ = 60;
   }
   Tensor buf = empty({BLOCK_SZ, BLOCK_SZ}, self.options());
 
-  AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBool, kBFloat16, self.scalar_type(), "copy_", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBool, kBFloat16, self.scalar_type(), "copy_", [&] {
     scalar_t* sp = src.data_ptr<scalar_t>();
     scalar_t* rp = self.data_ptr<scalar_t>();
     scalar_t* bp = buf.data_ptr<scalar_t>();
@@ -79,7 +90,7 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
 // (e.g. XLA) may be supported by overriding copy_ and _copy_from.
 bool is_supported_device(Device device) {
   DeviceType device_type = device.type();
-  return device_type == kCPU || device_type == kCUDA || device_type == kHIP || device_type == kVulkan;
+  return device_type == kCPU || device_type == kCUDA || device_type == kHIP || device_type == kVulkan || device_type == kMetal;
 }
 
 } // namespace
@@ -92,6 +103,55 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   TORCH_CHECK(self.defined(), "self is undefined");
   TORCH_CHECK(src.defined(), "src is undefined");
 
+  // FBGeMM kernel support exists only for the following case,
+  // 1. Memory Format for source and destination tensors is contiguous.
+  // 2. Device for both the source and destination tensor is CPU.
+  // 3. dtype conversion between FP32->FP16 and FP16->FP32.
+  #ifdef USE_FBGEMM
+    if (((self.dtype() == at::kFloat && src.dtype() == at::kHalf) ||
+         (self.dtype() == at::kHalf && src.dtype() == at::kFloat)) &&
+        (self.device().is_cpu() && src.device().is_cpu()) &&
+        !self.is_sparse() && !src.is_sparse() &&
+        ((self.is_contiguous() && src.is_contiguous()) ||
+         (self.is_non_overlapping_and_dense() && self.strides() == src.strides()))) {
+      if (src.dtype() == at::kFloat && self.dtype() == at::kHalf) {
+        auto* output_ptr =
+            reinterpret_cast<fbgemm::float16*>(self.data_ptr<at::Half>());
+        if (self.numel() < at::internal::GRAIN_SIZE) {
+          fbgemm::FloatToFloat16_simd(src.data_ptr<float>(), output_ptr, self.numel());
+        } else {
+          at::parallel_for(
+              0,
+              self.numel(),
+              at::internal::GRAIN_SIZE,
+              [&](int64_t begin, int64_t end) {
+                fbgemm::FloatToFloat16_simd(
+                    src.data_ptr<float>() + begin,
+                    output_ptr + begin,
+                  end - begin);
+              });
+        }
+      } else {
+        auto in_data = reinterpret_cast<fbgemm::float16*>(
+            src.data_ptr<at::Half>());
+        auto* output_ptr = self.data_ptr<float>();
+        if (self.numel() < at::internal::GRAIN_SIZE) {
+          fbgemm::Float16ToFloat_simd(in_data, output_ptr, self.numel());
+        } else {
+          at::parallel_for(
+              0,
+              self.numel(),
+              at::internal::GRAIN_SIZE,
+              [&](int64_t begin, int64_t end) {
+                fbgemm::Float16ToFloat_simd(
+                    in_data + begin, output_ptr + begin, end - begin);
+              });
+        }
+      }
+      return self;
+    }
+  #endif
+
   if (self.is_sparse() && src.is_sparse()) {
     return at::copy_sparse_to_sparse_(self, src, non_blocking);
   } else if (self.is_sparse() || src.is_sparse()) {
@@ -101,6 +161,16 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
 
   if (self.is_same(src)) {
     return self;
+  }
+
+  // Copies into meta self are OK and just ignored (similar to inplace)
+  if (self.is_meta()) {
+    // TODO: need to see if there is extra error checking needed
+    return self;
+  }
+
+  if (src.is_meta()) {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "Cannot copy out of meta tensor; no data!")
   }
 
   // Re-dispatch copies when either src or self device not implemented here (e.g. XLA).
@@ -122,7 +192,7 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     TORCH_CHECK(self.qscheme() == src.qscheme(),
                 "Quantized Copy only works with same qscheme");
     TORCH_CHECK(self.scalar_type() == src.scalar_type());
-    self.set_quantizer_(src.quantizer());
+    set_quantizer_(self, src.quantizer());
   }
 
   if (!self.is_quantized() && src.is_quantized()) {
@@ -130,7 +200,15 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   }
 
   if (self.device().type() == at::kVulkan || src.device().type() == at::kVulkan) {
+  #ifdef USE_VULKAN_API
+    return vulkan::ops::copy_(self, src);
+  #else
     return at::vulkan::vulkan_copy_(self, src);
+  #endif
+  }
+
+  if (self.device().type() == at::kMetal || src.device().type() == at::kMetal) {
+    return at::metal::metal_copy_(self, src);
   }
 
   auto iter = TensorIteratorConfig()
@@ -161,7 +239,6 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   if(!self.is_complex() && src.is_complex()) {
     TORCH_WARN_ONCE("Casting complex values to real discards the imaginary part");
   }
-
   copy_stub(device_type, iter, non_blocking);
   return self;
 }
@@ -176,6 +253,7 @@ Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {
   return self;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(copy_stub);
 
 } // namespace native

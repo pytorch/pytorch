@@ -1,4 +1,5 @@
 #include <torch/csrc/distributed/autograd/context/container.h>
+
 #include <c10/util/Exception.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.h>
 
@@ -14,9 +15,11 @@ constexpr int kNumCleanupContextRetries = 20;
 constexpr int64_t kInvalidContextId = -1;
 
 // Each thread has a single autograd_context_id valid at any point in time.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static thread_local int64_t current_context_id_ = kInvalidContextId;
 
 // Lock to ensure DistAutogradContainer is initialized only once.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::mutex dist_container_init_lock_;
 
 DistAutogradContainer::DistAutogradContainer(uint32_t num_shards)
@@ -98,6 +101,7 @@ DistAutogradContainer& DistAutogradContainer::getInstance() {
 
 DistAutogradContainer& DistAutogradContainer::getInstanceInternal() {
   // Leaky singleton to avoid module destructor race.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static DistAutogradContainer* container =
       new DistAutogradContainer(computeNumShards());
   return *container;
@@ -246,13 +250,13 @@ void DistAutogradContainer::sendReleaseContextRpc(
           options);
 
       cleanupFuture->addCallback(
-          [worker_id](const rpc::FutureMessage& cleanupFuture) {
-            if (cleanupFuture.hasError()) {
+          [worker_id](rpc::JitFuture& future) {
+            if (future.hasError()) {
               std::string errorMsg = c10::str(
                   "Could not release Dist Autograd Context on node ",
                   worker_id,
                   ": ",
-                  cleanupFuture.error()->what());
+                  future.tryRetrieveErrorMessage());
               LOG(ERROR) << errorMsg;
               return;
             }

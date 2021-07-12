@@ -10,7 +10,7 @@
 
 namespace caffe2 {
 
-class CAFFE2_API StoreHandler {
+class TORCH_API StoreHandler {
  public:
   static constexpr std::chrono::milliseconds kDefaultTimeout =
       std::chrono::seconds(30);
@@ -42,6 +42,16 @@ class CAFFE2_API StoreHandler {
   virtual int64_t add(const std::string& name, int64_t value) = 0;
 
   /*
+   * Returns the number of keys in this store.
+   */
+  virtual int64_t getNumKeys() = 0;
+
+  /*
+   * Removes the specified key from the store.
+   */
+  virtual bool deleteKey(const std::string& key) = 0;
+
+  /*
    * Check if a keys exist in the store.
    */
   virtual bool check(const std::vector<std::string>& names) = 0;
@@ -57,7 +67,7 @@ class CAFFE2_API StoreHandler {
 /*
  * The backing store is no longer available. It may have been deleted.
  */
-struct CAFFE2_API StoreHandlerNotAvailableException
+struct TORCH_API StoreHandlerNotAvailableException
     : public std::runtime_error {
   explicit StoreHandlerNotAvailableException(const std::string& msg)
       : std::runtime_error(msg) {}
@@ -70,7 +80,7 @@ struct CAFFE2_API StoreHandlerNotAvailableException
 /*
  * Timeout accessing the store.
  */
-struct CAFFE2_API StoreHandlerTimeoutException : public std::runtime_error {
+struct TORCH_API StoreHandlerTimeoutException : public std::runtime_error {
   explicit StoreHandlerTimeoutException(const std::string& msg)
       : std::runtime_error(msg) {}
 };

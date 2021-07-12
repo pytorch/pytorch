@@ -44,7 +44,7 @@ def _replicatable_module(module, memo=None):
     if memo is None:
         memo = set()
 
-    # memorize visited modules
+    # memoize visited modules
     memo.add(module)
     if _is_script_module(module):
         memo.update(descendant_modules(module))
@@ -80,7 +80,10 @@ def replicate(network, devices, detach=False):
         raise RuntimeError("Cannot replicate network where python modules are "
                            "childrens of ScriptModule")
 
-    devices = list(map(lambda x: _get_device_index(x, True), devices))
+    if not devices:
+        return []
+
+    devices = [_get_device_index(x, True) for x in devices]
     num_replicas = len(devices)
 
     params = list(network.parameters())
@@ -105,7 +108,6 @@ def replicate(network, devices, detach=False):
     modules = list(network.modules())
     module_copies = [[] for device in devices]
     module_indices = {}
-    scriptmodule_skip_attr = {"_parameters", "_buffers", "_modules", "forward", "_c"}
 
     for i, module in enumerate(modules):
         module_indices[module] = i

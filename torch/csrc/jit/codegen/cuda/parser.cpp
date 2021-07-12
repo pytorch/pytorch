@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 
 #include <torch/csrc/jit/codegen/cuda/arith.h>
+#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 
@@ -32,37 +33,6 @@ typedef Expr* CgOp;
 typedef void (*ParseFuncPtr)(const Node*, std::unordered_map<size_t, CgValue>&);
 typedef bool (*MergeQueryFuncPtr)(const Node*);
 
-std::vector<int> reductionAxes(TensorView* tv) {
-  size_t n_dims = tv->nDims();
-  std::vector<int> reduction_axes;
-  for (size_t i = 0; i < n_dims; i++) {
-    if (tv->axis(i)->isReduction()) {
-      reduction_axes.emplace_back(i);
-    }
-  }
-  return reduction_axes;
-}
-
-// coalesces all reduction to the right side and returns total number of
-// reduction axes
-size_t coalescReduction(TensorView* tv) {
-  auto reduction_axes = reductionAxes(tv);
-  size_t n_dims = tv->nDims();
-  std::unordered_map<int, int> coalesc_permute;
-  for (size_t i = 0; i < reduction_axes.size(); i++) {
-    size_t new_pos = i + n_dims - reduction_axes.size();
-    if (new_pos == size_t(reduction_axes[i])) {
-      break;
-    } else {
-      coalesc_permute[reduction_axes[i]] = new_pos;
-    }
-  }
-  if (!coalesc_permute.empty()) {
-    tv->reorder(coalesc_permute);
-  }
-  return reduction_axes.size();
-}
-
 // TODO: add a mutex to make it thread safe.
 class IrParser {
   class RegistrationEntry {
@@ -87,6 +57,7 @@ class IrParser {
   };
 
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   IrParser(std::shared_ptr<Graph> graph) : graph_(std::move(graph)) {
     if (init_registry_) {
       registerJitOperator();
@@ -97,6 +68,7 @@ class IrParser {
   // Fuses pointwise ops with loop unrolling (factor = 4).
   std::unique_ptr<Fusion> parse() {
     auto fusion = std::make_unique<Fusion>();
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     FusionGuard fg(fusion.get());
     auto block = graph_->block();
 
@@ -124,9 +96,11 @@ class IrParser {
     for (const JitOp* node : block->nodes()) {
       processJitNode(node);
       if (node->kind() == aten::rand_like) {
+        // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
         disable_unroll = true;
       }
       if (node->kind() == aten::sum) {
+        // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
         has_reduction = true;
       }
     }
@@ -504,9 +478,17 @@ class IrParser {
             value_map.emplace(node->output()->unique(), out);
           },
           [](const Node* node) -> bool {
-            // we don't support cast of output types yet;
+            // TODO: support cast of output types yet;
             if (!node->inputs()[3]->type()->isSubtypeOf(
                     static_cast<c10::TypePtr>(NoneType::get()))) {
+              // We can only handle output as half and float;
+              if (const auto opt_ivalue = toIValue(node->input(3))) {
+                const auto scalar_type = opt_ivalue->toScalarType();
+                if (scalar_type == at::ScalarType::Float ||
+                    scalar_type == at::ScalarType::Half) {
+                  return true;
+                }
+              }
               return false;
             }
             // we don't support dynamic reduction axes;
@@ -562,7 +544,9 @@ class IrParser {
 
   bool registerScalar(const JitValue* val) {
     if (val->type()->isSubtypeOf(static_cast<c10::TypePtr>(FloatType::get()))) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       CgValue cg_val;
+      // NOLINTNEXTLINE(bugprone-branch-clone)
       if (auto ival = constant_as<float>(val)) {
         cg_val = new Float(ival.value());
       } else {
@@ -572,7 +556,9 @@ class IrParser {
       return true;
     } else if (val->type()->isSubtypeOf(
                    static_cast<c10::TypePtr>(IntType::get()))) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       CgValue cg_val;
+      // NOLINTNEXTLINE(bugprone-branch-clone)
       if (auto ival = constant_as<int>(val)) {
         cg_val = new Int(ival.value());
       } else {
@@ -582,7 +568,9 @@ class IrParser {
       return true;
     } else if (val->type()->isSubtypeOf(
                    static_cast<c10::TypePtr>(BoolType::get()))) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       CgValue cg_val;
+      // NOLINTNEXTLINE(bugprone-branch-clone)
       if (auto ival = constant_as<bool>(val)) {
         cg_val = new Bool(ival.value());
       } else {
@@ -604,6 +592,7 @@ class IrParser {
   }
 
   bool registerTensor(const JitValue* val) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     CgValue cg_val;
     if (auto tensor_type = val->type()->cast<TensorType>()) {
       // TODO: make this a static function in Tensor class;
@@ -624,7 +613,9 @@ class IrParser {
       Symbol,
       std::vector<std::pair<std::shared_ptr<Operator>, RegistrationEntry>>>
       jit_operator_registry_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static std::unordered_set<Symbol> jit_reduction_op_registry_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static bool init_registry_;
 };
 
@@ -633,7 +624,9 @@ std::unordered_map<
     std::vector<
         std::pair<std::shared_ptr<Operator>, IrParser::RegistrationEntry>>>
     IrParser::jit_operator_registry_;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::unordered_set<Symbol> IrParser::jit_reduction_op_registry_;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 bool IrParser::init_registry_ = true;
 
 } // namespace
@@ -660,7 +653,9 @@ bool isNodeParsible(const Node* node) {
   return IrParser::canParseNode(node);
 }
 
-std::unique_ptr<Fusion> parseJitIR(std::shared_ptr<Graph>& graph) {
+std::unique_ptr<Fusion> parseJitIR(const std::shared_ptr<Graph>& graph) {
+  FUSER_PERF_SCOPE("parseJitIR");
+
   IrParser parser(graph);
   return parser.parse();
 }

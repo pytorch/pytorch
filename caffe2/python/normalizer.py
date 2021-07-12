@@ -1,6 +1,6 @@
 # @package optimizer
 # Module caffe2.python.normalizer
-from __future__ import absolute_import, division, print_function, unicode_literals
+
 
 
 class Normalizer(object):

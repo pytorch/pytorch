@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import operator_benchmark as op_bench
 import torch
 
@@ -41,16 +36,19 @@ channel_shuffle_short_configs = op_bench.config_list(
 
 class ChannelSHuffleBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, batch_size, channels_per_group, height, width, groups, channel_last):
-        self.groups = groups
         channels = channels_per_group * groups
         data_shape = (batch_size, channels, height, width)
-        self.input_data = torch.rand(data_shape)
+        input_data = torch.rand(data_shape)
         if channel_last:
-            self.input_data = self.input_data.contiguous(memory_format=torch.channels_last)
+            input_data = input_data.contiguous(memory_format=torch.channels_last)
+        self.inputs = {
+            "input_data": input_data,
+            "groups": groups
+        }
         self.set_module_name('channel_shuffle')
 
-    def forward(self):
-        return torch.channel_shuffle(self.input_data, self.groups)
+    def forward(self, input_data, groups: int):
+        return torch.channel_shuffle(input_data, groups)
 
 
 op_bench.generate_pt_test(channel_shuffle_short_configs + channel_shuffle_long_configs,

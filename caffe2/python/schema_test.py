@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core, schema
 import numpy as np
@@ -9,6 +9,31 @@ import numpy as np
 import unittest
 import pickle
 import random
+
+class TestField(unittest.TestCase):
+    def testInitShouldSetEmptyParent(self):
+        f = schema.Field([])
+        self.assertTupleEqual(f._parent, (None, 0))
+
+    def testInitShouldSetFieldOffsets(self):
+        f = schema.Field([
+            schema.Scalar(dtype=np.int32),
+            schema.Struct(
+                ('field1', schema.Scalar(dtype=np.int32)),
+                ('field2', schema.List(schema.Scalar(dtype=str))),
+            ),
+            schema.Scalar(dtype=np.int32),
+            schema.Struct(
+                ('field3', schema.Scalar(dtype=np.int32)),
+                ('field4', schema.List(schema.Scalar(dtype=str)))
+            ),
+            schema.Scalar(dtype=np.int32),
+        ])
+        self.assertListEqual(f._field_offsets, [0, 1, 4, 5, 8, 9])
+
+    def testInitShouldSetFieldOffsetsIfNoChildren(self):
+        f = schema.Field([])
+        self.assertListEqual(f._field_offsets, [0])
 
 
 class TestDB(unittest.TestCase):

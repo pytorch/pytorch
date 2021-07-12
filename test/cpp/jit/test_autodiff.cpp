@@ -1,4 +1,5 @@
-#include "test/cpp/jit/test_base.h"
+#include <gtest/gtest.h>
+
 #include "test/cpp/jit/test_utils.h"
 #include "torch/csrc/jit/frontend/tracer.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
@@ -30,7 +31,9 @@ using test_fn_type = std::function<variable_list(const variable_list&)>;
 struct ADTestSpec {
   ADTestSpec(
       const char* name,
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       var_meta_list input_meta,
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       test_fn_type test_fn,
       float clampMax = -1.0f)
       : name(name),
@@ -80,10 +83,12 @@ variable_list grad(
       grad_outputs,
       true,
       false,
+      false,
       fmap(inputs, get_edge));
 }
 
-void testADFormulas() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(AutodiffTest, ADFormulas) {
   const auto cast = [](const Variable& v) {
     return static_cast<at::Tensor>(v);
   };
@@ -174,7 +179,8 @@ void testADFormulas() {
   }
 }
 
-void testDifferentiate() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(AutodiffTest, Differentiate) {
   // Note: can't use IRParser for this test due to issue #23989
   auto graph = std::make_shared<Graph>();
   std::vector<int64_t> sizes{2, 3, 4};
@@ -229,7 +235,8 @@ void testDifferentiate() {
       ->run(*grad_spec.df);
 }
 
-void testDifferentiateWithRequiresGrad() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(AutodiffTest, DifferentiateWithRequiresGrad) {
   const auto graph_string = R"IR(
     graph(%0 : Tensor,
           %1 : Tensor):

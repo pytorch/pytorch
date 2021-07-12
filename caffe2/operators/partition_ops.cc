@@ -3,10 +3,14 @@
 namespace caffe2 {
 namespace {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Partition, PartitionOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(LengthsPartition, LengthsPartitionOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(GatherByKey, GatherByKeyOp);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(GatherByKey)
     .NumInputs(2, INT_MAX)
     .NumOutputs(1)
@@ -28,6 +32,7 @@ Partition.
         "Subsequented inputs are sharded values tensors.")
     .Output(0, "values", "Reconstructed values tensor.");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Partition)
     .NumInputsOutputs([](int in, int out) {
       return in > 0 && out > 0 && out % in == 0;
@@ -65,6 +70,7 @@ X_0_part_0, X_1_part_0, ..., X_N-1_part_0, X_0_part_1, ..., X_N-1_part_K-1
         "Output Partitions. The number of output tensors has to be a "
         "multiple of the number of input tensors.");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(LengthsPartition)
     .NumInputsOutputs([](int in, int out) {
       return in >= 2 && out > 0 && out % in == 0;
@@ -118,6 +124,7 @@ class GetGatherByKeyGradient : public GradientMakerBase {
     Argument packArg = MakeArgument<int>("pack_first_input", pack_first_input);
     if (g_output_[0].IsDense()) {
       std::vector<std::string> inputs;
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int i = 1; i < g_input_.size(); ++i) {
         inputs.push_back("_" + GI(i) + "_keys");
         inputs.push_back(GI(i));
@@ -130,6 +137,7 @@ class GetGatherByKeyGradient : public GradientMakerBase {
           std::vector<Argument>{packArg});
     } else {
       std::vector<std::string> inputs;
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int i = 1; i < g_input_.size(); ++i) {
         inputs.push_back("_" + GI_I(i) + "_keys");
         inputs.push_back(GI_I(i));
@@ -150,8 +158,11 @@ class GetGatherByKeyGradient : public GradientMakerBase {
 // This should actually have gradient, but for now nothing uses it.
 // Because gradient computation right now is not input/output aware it can't be
 // GRADIENT_NOT_IMPLEMENTEDYET
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(Partition);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(LengthsPartition);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(GatherByKey, GetGatherByKeyGradient);
 } // namespace
 } // namespace caffe2

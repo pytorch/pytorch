@@ -1,14 +1,13 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 from caffe2.python import core, workspace
 from caffe2.python.core import CreatePythonOperator
 import caffe2.python.hypothesis_test_util as hu
 from hypothesis import given, settings
 import hypothesis.strategies as st
 import numpy as np
-import six
 
 
 class CustomError(Exception):
@@ -55,12 +54,12 @@ class PythonOpTest(hu.HypothesisTestCase):
 
     def test_exception(self):
         op = CreatePythonOperator(MainOpFunctionThatThrowsCustomError, [], [])
-        with six.assertRaisesRegex(self, CustomError, "This is an intentional exception."):
+        with self.assertRaisesRegex(CustomError, "This is an intentional exception."):
             workspace.RunOperatorOnce(op)
 
     def test_exception_builder(self):
         op = CreatePythonOperator(MainOpFunctionThatThrowsCustomErrorInBuilder, [], [])
-        with six.assertRaisesRegex(self, CustomError, "This is an intentional exception in builder."):
+        with self.assertRaisesRegex(CustomError, "This is an intentional exception in builder."):
             workspace.RunOperatorOnce(op)
 
     @given(x=hu.tensor())

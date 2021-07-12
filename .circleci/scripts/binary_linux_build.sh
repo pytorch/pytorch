@@ -4,10 +4,16 @@ echo "RUNNING ON $(uname -a) WITH $(nproc) CPUS AND $(free -m)"
 set -eux -o pipefail
 source /env
 
-# Defaults here so they can be changed in one place
-# This script is run inside Docker.2XLarge+ container that has 20 CPU cores
-# But ncpu will return total number of cores on the system
-export MAX_JOBS=18
+# Because most Circle executors only have 20 CPUs, using more causes OOMs w/ Ninja and nvcc parallelization
+MEMORY_LIMIT_MAX_JOBS=18
+NUM_CPUS=$(( $(nproc) - 2 ))
+
+# Defaults here for **binary** linux builds so they can be changed in one place
+export MAX_JOBS=${MAX_JOBS:-$(( ${NUM_CPUS} > ${MEMORY_LIMIT_MAX_JOBS} ? ${MEMORY_LIMIT_MAX_JOBS} : ${NUM_CPUS} ))}
+
+if [[ "${DESIRED_CUDA}" == "cu111" || "${DESIRED_CUDA}" == "cu113" ]]; then
+  export BUILD_SPLIT_CUDA="ON"
+fi
 
 # Parse the parameters
 if [[ "$PACKAGE_TYPE" == 'conda' ]]; then
@@ -20,5 +26,9 @@ else
   build_script='manywheel/build.sh'
 fi
 
+if [[ "$CIRCLE_BRANCH" == "master" ]] || [[ "$CIRCLE_BRANCH" == release/* ]]; then
+  export BUILD_DEBUG_INFO=1
+fi
+
 # Build the package
-SKIP_ALL_TESTS=1 stdbuf -i0 -o0 -e0 "/builder/$build_script"
+SKIP_ALL_TESTS=1 "/builder/$build_script"

@@ -10,6 +10,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 class TensorDomain;
 class TensorView;
@@ -17,8 +18,10 @@ class TensorView;
 // We're going to keep data related to the computeAt pass for each TensorView in
 // this structure, this will allow us to keep a single entry in a map from a
 // TensorView to this one.
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class ComputeAtData {
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   ComputeAtData() = default;
   ComputeAtData(TensorView* tv);
 
@@ -56,9 +59,7 @@ class ComputeAtData {
   // If we set computeAt, save the domain so we can reset it after traversal.
   // Traversal state can deviate from the domain we will want to save after the
   // entire computeAt pass.
-  void setComputeAtDomain(TensorDomain* td) {
-    new_compute_at_domain_ = td;
-  }
+  void setComputeAtDomain(TensorDomain* td);
 
   // Return domain set in setComputeAtDomain
   TensorDomain* getComputeAtDomain() const {
@@ -101,6 +102,10 @@ class ComputeAt {
       TensorView* _producer,
       TensorView* _consumer,
       unsigned int _consumer_position);
+
+  ComputeAt() = delete;
+  ComputeAt(ComputeAt&) = delete;
+  ComputeAt& operator=(const ComputeAt& other) = delete;
 
  private:
   TensorView* producer_;
@@ -154,12 +159,10 @@ class ComputeAt {
       TensorView* _consumer,
       unsigned int _consumer_position);
 
-  ComputeAt() = delete;
   ~ComputeAt() = default;
-  ComputeAt(ComputeAt&) = delete;
-  ComputeAt& operator=(const ComputeAt& other) = delete;
 };
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

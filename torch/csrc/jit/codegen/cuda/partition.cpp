@@ -1,5 +1,8 @@
 #include <torch/csrc/jit/codegen/cuda/partition.h>
+
 #include <ATen/core/jit_type.h>
+#include <c10/util/irange.h>
+#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 
 namespace torch {
@@ -18,7 +21,7 @@ static c10::optional<c10::Device> getDevice(const Value* value) {
     // not tensor type, return false as the op is not outputing scalar.
     return c10::nullopt;
   }
-  return value->type()->expect<TensorType>()->device();
+  return value->type()->expectRef<TensorType>().device();
 }
 
 static c10::optional<c10::Device> getDevice(const Node* node) {
@@ -110,83 +113,82 @@ bool maybeBroadcastOnShape(
   return false;
 };
 
-// [ Note - tricky broadcasting ]
-//
-// github issue # 190
-//
-// To extend the issue further, we consider two difficult broadcasting cases
-// that is difficult to naively schedule:
-//   scenario 1: single tensor with multiple broadcasting semantics;
-//               ```
-//                   %t = op(...)
-//                   %t0_o = op0(%t, %t0)
-//                   %t1_o = op1(%t, %t1)
-//               ```
-//               It's hard to check/validate whether `%t0` and `%t1` implies
-//               identical broadcasting for `%t` so that we can simply broadcast
-//               it to their common shape and use the broadcasted tensor view in
-//               both `op0` and `op1`; or, if `%t0` and `%t1` has different
-//               shapes, we would need differently broadcasted `%t` for the two
-//               ops.
-//               Even with this condition sorted out, scheduling is challenging.
-//               As we cannot inline the computation of `%t` to the downstream
-//               consumer of `%t0_o` and `%t1_o` easily, because `computeAt`
-//               could propagate contradicting transformations on the common
-//               ancestor `%t`.
-//               See footnote*;
-//   scenario 2: output tensor_view which is broadcasted later;
-//               ```
-//                   %t = op(...)
-//                   %t0_o = op0(%t, %t0)
-//                   return (%t, %t0_o)
-//               ```
-//               Similarly, if we need to broadcast `%t` to `%t0` for `op0`, and
-//               use it as output, it also complicates schedule.
-//
-// Currently we just avoid the two cases in our graph partitioning.
-//
-// We bake the implementation along with our partition, where we merge nodes
-// from producer to consumer. In the example down, we list all "type"s of edges
-// among producer/consumer and the out side world.
-//
-//   %input_t0, %input_t1, %input_t2 # inputs from outside world feeding
-//                                   # producer/consumer pair
-//   %p_out_t0, %p_out_t1 = producer(%input_t0, %input_t1)
-//   %c_out_t, ... = consumer(%input_t0, %input_t2, %p_out_t0)
-//
-// producer/consumer : the nodes that we are trying to merge, each node could be
-//                     a parsible real operation or a `CudaFusionGroup`.
-// %input_t0         : inputs shared by both producer & consumer
-// %input_t1         : inputs feed only to producer, but not to consumer
-// %input_t2         : inputs feed only to consumer, but not to producer
-// %p_put_t0         : outputs of producer that is fed to consumer
-// %p_put_t1         : outputs of producer that is not fed to consumer
-// %c_put_t0         : outputs of consumer
-//
-// We can see that after merging consumer & producer, we will have:
-//   %input_t0, %input_t1, %input_t2 # inputs from outside world feeding
-//                                   # producer/consumer pair
-//   %p_out_t, %c_out_t = group(%input_t0, %input_t1, %input_t2)
-//
-// Under the assumption that any existing `CudaFusionGroup` does not have
-// violating broadcasting semantics mentioned above.
-//
-// If we examine the `group`, new cases of scenario 1 (multiple broadcast) could
-// only be created by merging new edges in the new `group`, that is:
-//   case 1. `%input_t0`, shared by `producer` and `consumer`
-//   case 2. `%p_out_t0`, produced by `producer` and fed to `consumer`
-//
-// new cases of scenario 2 (output was broadcasted later) could only be added
-// via:
-//   case 3. `%p_out_t0`, produced by `producer` and fed to `consumer`, which
-//           could be broadcasted in the consumer subgraph.
-//
-// footnote*:
-// We are only disabling multiple broadcast right on the tensor, instead of
-// tracing all the broadcast further down.
-// I don't think we need to worry about broadcasting further down the dependency
-// chain, as those would create new IterDomain, which doesn't have th problem of
-// conflicting broadcasting.
+//! [ Note - tricky broadcasting ]
+//!
+//! github issue # 190
+//!
+//! To extend the issue further, we consider two difficult broadcasting cases
+//! that is difficult to naively schedule:
+//!   scenario 1: single tensor with multiple broadcasting semantics;
+//!               ```
+//!                   %t = op(...)
+//!                   %t0_o = op0(%t, %t0)
+//!                   %t1_o = op1(%t, %t1)
+//!               ```
+//!               It's hard to check/validate whether `%t0` and `%t1` implies
+//!               identical broadcasting for `%t` so that we can simply
+//!               broadcast it to their common shape and use the broadcasted
+//!               tensor view in both `op0` and `op1`; or, if `%t0` and `%t1`
+//!               has different shapes, we would need differently broadcasted
+//!               `%t` for the two ops. Even with this condition sorted out,
+//!               scheduling is challenging. As we cannot inline the computation
+//!               of `%t` to the downstream consumer of `%t0_o` and `%t1_o`
+//!               easily, because `computeAt` could propagate contradicting
+//!               transformations on the common ancestor `%t`. See footnote*;
+//!   scenario 2: output tensor_view which is broadcasted later;
+//!               ```
+//!                   %t = op(...)
+//!                   %t0_o = op0(%t, %t0)
+//!                   return (%t, %t0_o)
+//!               ```
+//!               Similarly, if we need to broadcast `%t` to `%t0` for `op0`,
+//!               and use it as output, it also complicates schedule.
+//!
+//! Currently we just avoid the two cases in our graph partitioning.
+//!
+//! We bake the implementation along with our partition, where we merge nodes
+//! from producer to consumer. In the example down, we list all "type"s of edges
+//! among producer/consumer and the out side world.
+//!
+//!   %input_t0, %input_t1, %input_t2 # inputs from outside world feeding
+//!                                   # producer/consumer pair
+//!   %p_out_t0, %p_out_t1 = producer(%input_t0, %input_t1)
+//!   %c_out_t, ... = consumer(%input_t0, %input_t2, %p_out_t0)
+//!
+//! producer/consumer : the nodes that we are trying to merge, each node could
+//! be
+//!                     a parsible real operation or a `CudaFusionGroup`.
+//! %input_t0         : inputs shared by both producer & consumer
+//! %input_t1         : inputs feed only to producer, but not to consumer
+//! %input_t2         : inputs feed only to consumer, but not to producer
+//! %p_put_t0         : outputs of producer that is fed to consumer
+//! %p_put_t1         : outputs of producer that is not fed to consumer
+//! %c_put_t0         : outputs of consumer
+//!
+//! We can see that after merging consumer & producer, we will have:
+//!   %input_t0, %input_t1, %input_t2 # inputs from outside world feeding
+//!                                   # producer/consumer pair
+//!   %p_out_t, %c_out_t = group(%input_t0, %input_t1, %input_t2)
+//!
+//! Under the assumption that any existing `CudaFusionGroup` does not have
+//! violating broadcasting semantics mentioned above.
+//!
+//! If we examine the `group`, new cases of scenario 1 (multiple broadcast)
+//! could only be created by merging new edges in the new `group`, that is:
+//!   case 1. `%input_t0`, shared by `producer` and `consumer`
+//!   case 2. `%p_out_t0`, produced by `producer` and fed to `consumer`
+//!
+//! new cases of scenario 2 (output was broadcasted later) could only be added
+//! via:
+//!   case 3. `%p_out_t0`, produced by `producer` and fed to `consumer`, which
+//!           could be broadcasted in the consumer subgraph.
+//!
+//! footnote*:
+//! We are only disabling multiple broadcast right on the tensor, instead of
+//! tracing all the broadcast further down.
+//! I don't think we need to worry about broadcasting further down the
+//! dependency chain, as those would create new IterDomain, which doesn't have
+//! th problem of conflicting broadcasting.
 bool createTrickyBroadcast(const Node* consumer, const Node* producer) {
   auto count_broadcasting_in_node =
       [](const Node* node,
@@ -212,7 +214,7 @@ bool createTrickyBroadcast(const Node* consumer, const Node* producer) {
       };
 
   // case 1. We check shared inputs to `producer` & `consumer`;
-  for (int i = 0; i < static_cast<int>(producer->inputs().size()); i++) {
+  for (const auto i : c10::irange(producer->inputs().size())) {
     auto n_input = producer->input(i);
     auto n_input_type = n_input->type()->cast<TensorType>();
     if (n_input_type != nullptr && n_input_type->sizes().sizes()) {
@@ -248,7 +250,7 @@ bool createTrickyBroadcast(const Node* consumer, const Node* producer) {
 
   // case 2. We check input to `consumer` that is also the output from
   // `producer`
-  for (int i = 0; i < static_cast<int>(producer->outputs().size()); i++) {
+  for (const auto i : c10::irange(producer->outputs().size())) {
     auto n_output = producer->output(i);
     auto n_output_type = n_output->type()->cast<TensorType>();
     if (n_output_type != nullptr && n_output_type->sizes().sizes()) {
@@ -290,6 +292,8 @@ bool createTrickyBroadcast(const Node* consumer, const Node* producer) {
 } // namespace
 
 bool isFusableCudaFusionGroup(const Node* node) {
+  FUSER_PERF_SCOPE("isFusableCudaFusionGroup");
+
   if (isFusableNode(node)) {
     return isFusableDevice(node);
   }
@@ -297,6 +301,8 @@ bool isFusableCudaFusionGroup(const Node* node) {
 }
 
 bool isFusableCudaFusionGroup(const Node* fusion, const Node* node) {
+  FUSER_PERF_SCOPE("isFusableCudaFusionGroup");
+
   // TODO: lift the restriction of not fusing producer containing reduction when
   //       we have proper scheduling.
   if (isFusableCudaFusionGroup(node) && !hasReductionOperation(node) &&

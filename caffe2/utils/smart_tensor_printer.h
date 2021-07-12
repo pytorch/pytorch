@@ -8,7 +8,7 @@ namespace caffe2 {
 // explicit specify the type of the tensor while calling the Print() method.
 // It also supports a convenience function with a default constructed printer as
 // a static method.
-class CAFFE2_API SmartTensorPrinter {
+class TORCH_API SmartTensorPrinter {
  public:
   // The proliferation of constructors is to give the feature parity with
   // TensorPrinter

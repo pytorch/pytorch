@@ -11,6 +11,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 namespace {
 
@@ -38,14 +39,21 @@ struct id_int_lt {
 //
 // If error_on_failure = false, replay will replay everything it can, and ignore
 // operations it can't.
-class TORCH_CUDA_API ReplayTransformations : public IterVisitor {
+class TORCH_CUDA_CU_API ReplayTransformations : public IterVisitor {
  protected:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const std::vector<IterDomain*>& target_domain_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unordered_map<IterDomain*, IterDomain*> id_map_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unordered_map<IterDomain*, size_t> leaf_ids_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<IterDomain*> leaf_vec_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   size_t counter = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool error_on_failure_ = true;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool ran_replay = false; // Mark if replay has been run
   using IterVisitor::handle;
 
@@ -147,13 +155,15 @@ class TORCH_CUDA_API ReplayTransformations : public IterVisitor {
  * history replay_domain
  */
 
-class TORCH_CUDA_API BestEffortReplay {
+class TORCH_CUDA_CU_API BestEffortReplay {
  private:
   std::unordered_map<IterDomain*, IterDomain*> id_map_;
   std::unordered_map<IterDomain*, size_t> leaf_ids_;
   size_t counter = 0;
 
  public:
+  // replay_map: mapping of target root domains to corresponding
+  // replay root domains
   BestEffortReplay(
       const std::vector<IterDomain*>& replay_domain,
       const std::vector<IterDomain*>& target_domain,
@@ -194,6 +204,7 @@ class TORCH_CUDA_API BestEffortReplay {
       const TensorDomain* td2);
 };
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

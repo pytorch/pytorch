@@ -11,11 +11,13 @@ namespace caffe2 {
   };                                                                   \
   REGISTER_CPU_OPERATOR(OP_NAME, TemplatePutOp<STAT_NAME>);
 
+// NOLINTNEXTLINE(modernize-pass-by-value,cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_TEMPLATED_STAT_PUT_OP(
     AveragePut,
     AveragePutStat,
     CAFFE_AVG_EXPORTED_STAT)
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(AveragePut)
     .NumInputs(1)
     .NumOutputs(0)
@@ -43,11 +45,13 @@ OPERATOR_SCHEMA(AveragePut)
         "value",
         "(*Tensor`<number>`*): A scalar tensor, representing any numeric value");
 
+// NOLINTNEXTLINE(modernize-pass-by-value,cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_TEMPLATED_STAT_PUT_OP(
     IncrementPut,
     IncrementPutStat,
     CAFFE_EXPORTED_STAT)
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(IncrementPut)
     .NumInputs(1)
     .NumOutputs(0)
@@ -75,11 +79,13 @@ OPERATOR_SCHEMA(IncrementPut)
         "value",
         "(*Tensor`<number>`*): A scalar tensor, representing any numeric value");
 
+// NOLINTNEXTLINE(modernize-pass-by-value,cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_TEMPLATED_STAT_PUT_OP(
     StdDevPut,
     StdDevPutStat,
     CAFFE_STDDEV_EXPORTED_STAT)
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(StdDevPut)
     .NumInputs(1)
     .NumOutputs(0)

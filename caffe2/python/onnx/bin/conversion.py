@@ -1,16 +1,15 @@
 ## @package onnx
 # Module caffe2.python.onnx.bin.conversion
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+
+
+
 
 import json
 
 from caffe2.proto import caffe2_pb2
 import click
-import numpy as np
-from onnx import checker, ModelProto
+from onnx import ModelProto
 
 from caffe2.python.onnx.backend import Caffe2Backend as c2
 import caffe2.python.onnx.frontend as c2_onnx

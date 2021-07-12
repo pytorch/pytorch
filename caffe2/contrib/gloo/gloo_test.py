@@ -1,9 +1,9 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from hypothesis import given, settings
 import hypothesis.strategies as st
@@ -26,7 +26,6 @@ dyndep.InitOpsLibrary("@/caffe2/caffe2/contrib/gloo:gloo_ops")
 dyndep.InitOpsLibrary("@/caffe2/caffe2/contrib/gloo:gloo_ops_gpu")
 
 op_engine = 'GLOO'
-
 
 class TemporaryDirectory:
     def __enter__(self):

@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
@@ -17,7 +17,7 @@ class TestMarginRankingCriterion(serial.SerializedTestCase):
            seed=st.integers(min_value=0, max_value=65535),
            margin=st.floats(min_value=-0.5, max_value=0.5),
            **hu.gcs)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_margin_ranking_criterion(self, N, seed, margin, gc, dc):
         np.random.seed(seed)
         X1 = np.random.randn(N).astype(np.float32)

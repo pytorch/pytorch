@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core
 from hypothesis import given, settings
@@ -61,7 +61,7 @@ class TestWeightedSumOp(serial.SerializedTestCase):
     @given(n=st.integers(1, 8), m=st.integers(1, 10), d=st.integers(1, 4),
            grad_on_w=st.booleans(),
            seed=st.integers(min_value=0, max_value=65535), **hu.gcs_cpu_only)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_weighted_sum_grad(
             self, n, m, d, grad_on_w, seed, gc, dc):
         input_names = []

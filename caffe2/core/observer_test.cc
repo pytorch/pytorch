@@ -11,6 +11,7 @@ namespace caffe2 {
 
 namespace {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<int> counter;
 
 template <class T>
@@ -20,6 +21,7 @@ class DummyObserver final : public ObserverBase<T> {
   void Start() override;
   void Stop() override;
 
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~DummyObserver() override {}
 };
 
@@ -57,9 +59,12 @@ class ObsTestDummyOp final : public OperatorBase {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ObsTestDummy, ObsTestDummyOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CUDA_OPERATOR(ObsTestDummy, ObsTestDummyOp);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ObsTestDummy)
     .NumInputs(0, INT_MAX)
     .NumOutputs(0, INT_MAX)
@@ -89,6 +94,7 @@ unique_ptr<NetBase> CreateNetTestHelper(Workspace* ws, bool isDAG = false) {
 }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ObserverTest, TestNotify) {
   auto count_before = counter.load();
   Workspace ws;
@@ -104,6 +110,7 @@ TEST(ObserverTest, TestNotify) {
   EXPECT_EQ(1212, count_after - count_before);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ObserverTest, TestUniqueMap) {
   auto count_before = counter.load();
   Workspace ws;
@@ -121,6 +128,7 @@ TEST(ObserverTest, TestUniqueMap) {
   EXPECT_EQ(1212, count_after - count_before);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ObserverTest, TestNotifyAfterDetach) {
   auto count_before = counter.load();
   Workspace ws;
@@ -136,6 +144,7 @@ TEST(ObserverTest, TestNotifyAfterDetach) {
   EXPECT_EQ(0, count_after - count_before);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ObserverTest, TestDAGNetBase) {
   auto count_before = counter.load();
   Workspace ws;

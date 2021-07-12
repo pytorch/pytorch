@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
+
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/serialization/source_range_serialization_impl.h>
@@ -30,6 +31,7 @@ std::shared_ptr<Source> findSourceInArchiveFromQualifier(
     return nullptr;
   }
   at::DataPtr data;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   size_t size;
   std::tie(data, size) = reader.getRecord(path);
 
@@ -38,6 +40,7 @@ std::shared_ptr<Source> findSourceInArchiveFromQualifier(
   std::string debug_file = path + ".debug_pkl";
   if (reader.hasRecord(debug_file)) {
     at::DataPtr debug_data;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t debug_size;
     std::tie(debug_data, debug_size) = reader.getRecord(debug_file);
     gen_ranges = std::make_shared<ConcreteSourceRangeUnpickler>(

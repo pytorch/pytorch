@@ -50,7 +50,7 @@ void Fused8BitRowwiseEmbeddingLookupIdx(
     const std::int64_t data_size,
     const InType* input,
     const IndexType* indices,
-    const int64_t* offsets,
+    const IndexType* offsets,
     const float* weights, // optional, can be null for non-weighted sum
     bool normalize_by_lengths,
     OutType* out);

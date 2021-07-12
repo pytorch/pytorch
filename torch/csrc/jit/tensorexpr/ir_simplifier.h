@@ -91,6 +91,7 @@ inline const Expr* newBinaryOpOfType(
     const Expr* rhs,
     bool option) {
   switch (expr_type) {
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     case IRNodeType::kAdd:
       return new Add(lhs, rhs);
     case IRNodeType::kSub:
@@ -132,7 +133,7 @@ inline Expr* evaluateOp(const Expr* v) {
     Type val = eval.value<Type>();                            \
     return getImmediateByType(v->dtype().scalar_type(), val); \
   }
-    AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+    AT_FORALL_SCALAR_TYPES_AND2(Half, Bool, TYPE_CASE);
 #undef TYPE_CASE
     default:
       LOG(FATAL) << "Unsupported datatype: " << v->dtype();
@@ -146,6 +147,7 @@ inline Expr* evaluateOp(const Expr* v) {
 class Term : public ExprNode<Term> {
  public:
   template <class... Args>
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Term(HashProvider& hasher, const Expr* s, Args... ts)
       : ExprNodeBase(promoteTypesVar(s, ts...)), scalar_(s), hasher_(hasher) {
     CHECK(s->isConstant());
@@ -153,6 +155,7 @@ class Term : public ExprNode<Term> {
     sort();
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Term(HashProvider& hasher, const Expr* s, std::vector<const Expr*> v)
       : ExprNodeBase(promoteTypesVec(s, v)),
         variables_(std::move(v)),
@@ -162,6 +165,7 @@ class Term : public ExprNode<Term> {
   }
 
   // Convenience constructor from a map of hash -> var, used when merging Terms.
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Term(
       HashProvider& hasher,
       const Expr* s,
@@ -212,6 +216,7 @@ class Term : public ExprNode<Term> {
 class Polynomial : public ExprNode<Polynomial> {
  public:
   template <class... Args>
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Polynomial(HashProvider& hasher, const Expr* s, Args... ts)
       : ExprNodeBase(promoteTypesVar(s, ts...)), scalar_(s), hasher_(hasher) {
     CHECK(s->isConstant());
@@ -219,6 +224,7 @@ class Polynomial : public ExprNode<Polynomial> {
     sort();
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Polynomial(HashProvider& hasher, const Expr* s, std::vector<const Term*> v)
       : ExprNodeBase(promoteTypesVec(s, v)),
         variables_(std::move(v)),
@@ -228,6 +234,7 @@ class Polynomial : public ExprNode<Polynomial> {
   }
 
   // Helper constructor for list of terms with no scalar component.
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Polynomial(HashProvider& hasher, std::vector<const Term*> terms)
       : ExprNodeBase(promoteTypesVec(terms)),
         variables_(std::move(terms)),
@@ -238,6 +245,7 @@ class Polynomial : public ExprNode<Polynomial> {
 
   // Convenience constructor for map of hash -> var, used when merging
   // Polynomials.
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Polynomial(
       HashProvider& hasher,
       const Expr* s,
@@ -282,24 +290,151 @@ class Polynomial : public ExprNode<Polynomial> {
 class RoundOff : public BinaryOpNode<RoundOff> {
  public:
   RoundOff(const Expr* lhs, const Expr* rhs)
-      : BinaryOpNode(lhs, rhs, IRNodeType::kRoundOff) {}
+      : BinaryOpNode(lhs, rhs, IRNodeType::kOther) {}
+};
+
+class MaxTerm : public ExprNode<MaxTerm> {
+ public:
+  template <class... Args>
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  MaxTerm(HashProvider& hasher, const Expr* s, bool p, Args... ts)
+      : ExprNodeBase(s ? promoteTypesVar(s, ts...) : promoteTypesVar(ts...)),
+        scalar_(s),
+        hasher_(hasher),
+        propagate_nans_(p) {
+    addComponent(ts...);
+    uniquefy();
+  }
+
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  MaxTerm(
+      HashProvider& hasher,
+      const Expr* s,
+      bool p,
+      std::vector<const Expr*> v)
+      : ExprNodeBase(s ? promoteTypesVec(s, v) : promoteTypesVec(v)),
+        variables_(std::move(v)),
+        scalar_(s),
+        hasher_(hasher),
+        propagate_nans_(p) {
+    uniquefy();
+  }
+
+  bool propagate_nans() const {
+    return propagate_nans_;
+  }
+
+  const Expr* scalar() const {
+    return scalar_;
+  }
+  const std::vector<const Expr*>& variables() const {
+    return variables_;
+  }
+  HashProvider& hasher() const {
+    return hasher_;
+  }
+
+ private:
+  std::vector<const Expr*> variables_;
+  const Expr* scalar_;
+  HashProvider& hasher_;
+  bool propagate_nans_;
+
+  void addComponent() {}
+  void addComponent(const Expr* e) {
+    variables_.push_back(e);
+  }
+  template <class... Es>
+  void addComponent(const Expr* e, Es... es) {
+    addComponent(e);
+    addComponent(es...);
+  }
+
+  // Uniquefy the terms using their hash.
+  void uniquefy();
+};
+
+class MinTerm : public ExprNode<MinTerm> {
+ public:
+  template <class... Args>
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  MinTerm(HashProvider& hasher, const Expr* s, bool p, Args... ts)
+      : ExprNodeBase(s ? promoteTypesVar(s, ts...) : promoteTypesVar(ts...)),
+        scalar_(s),
+        hasher_(hasher),
+        propagate_nans_(p) {
+    addComponent(ts...);
+    uniquefy();
+  }
+
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  MinTerm(
+      HashProvider& hasher,
+      const Expr* s,
+      bool p,
+      std::vector<const Expr*> v)
+      : ExprNodeBase(s ? promoteTypesVec(s, v) : promoteTypesVec(v)),
+        variables_(std::move(v)),
+        scalar_(s),
+        hasher_(hasher),
+        propagate_nans_(p) {
+    uniquefy();
+  }
+
+  bool propagate_nans() const {
+    return propagate_nans_;
+  }
+
+  const Expr* scalar() const {
+    return scalar_;
+  }
+  const std::vector<const Expr*>& variables() const {
+    return variables_;
+  }
+  HashProvider& hasher() const {
+    return hasher_;
+  }
+
+ private:
+  std::vector<const Expr*> variables_;
+  const Expr* scalar_;
+  HashProvider& hasher_;
+  bool propagate_nans_;
+
+  void addComponent() {}
+  void addComponent(const Expr* e) {
+    variables_.push_back(e);
+  }
+  template <class... Es>
+  void addComponent(const Expr* e, Es... es) {
+    addComponent(e);
+    addComponent(es...);
+  }
+
+  // Uniquefy the terms using their hash.
+  void uniquefy();
 };
 
 // Stmt simplification should occur in both modes.
 class TORCH_API IRSimplifierBase : public IRMutator {
  public:
-  virtual ~IRSimplifierBase() {}
+  ~IRSimplifierBase() override = default;
+
   Stmt* mutate(const Block* v) override;
 
   Stmt* mutate(const Cond* v) override;
 
   Stmt* mutate(const For* v) override;
 
+  // Trivially factorize terms by GCD of scalar components.
+  const Term* factorizePolynomial(const Polynomial* poly);
+
   HashProvider& hasher() {
     return hasher_;
   }
 
  protected:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   HashProvider hasher_;
 };
 
@@ -352,9 +487,7 @@ class TORCH_API PolynomialTransformer : public IRSimplifierBase {
 
   const Expr* mutate(const Div* v) override;
 
-  const Expr* mutate(const Mod* v) override {
-    return mutateBinaryOp(v, this);
-  }
+  const Expr* mutate(const Mod* v) override;
 
   const Expr* mutate(const And* v) override {
     return mutateBinaryOp(v, this);
@@ -421,6 +554,7 @@ class TORCH_API TermExpander : public IRSimplifierBase {
 
  public:
   using IRSimplifierBase::mutate;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   TermExpander(PolynomialTransformer* simplifier) : simplifier_(simplifier) {}
   bool check_safe() {
     return eliminated_allocations_.empty();
@@ -429,19 +563,26 @@ class TORCH_API TermExpander : public IRSimplifierBase {
   // Expand Terms out to a series of Muls.
   const Expr* mutate(const Term* v) override;
 
-  // Trivially factorize terms by GCD of scalar components.
-  const Expr* factorizePolynomial(const Polynomial* poly);
-
   // Expand Polynomials out to a series of Adds.
   const Expr* mutate(const Polynomial* v) override;
+
+  // Expand MaxTerms to a series of Max ops.
+  const Expr* mutate(const MaxTerm* v) override;
+
+  // Expand MinTerms to a series of Min ops.
+  const Expr* mutate(const MinTerm* v) override;
 
   // Expand RoundOff to it's component: Mul(Div(lhs, rhs), rhs).
   const Expr* mutate(const RoundOff* v) override;
 
   // Eliminate zero length allocations.
   Stmt* mutate(const Allocate* v) override;
-
   Stmt* mutate(const Free* v) override;
+
+  // Override to enable condition fusing.
+  Block* fuseConditions(Block* v);
+  Stmt* fuseSyncThreads(Block* block);
+  Stmt* mutate(const Block* v) override;
 };
 
 class TORCH_API IRSimplifier {
@@ -453,6 +594,7 @@ class TORCH_API IRSimplifier {
     // There may be terms left in the IR, expand them.
     TermExpander expander(&simplifier);
     e = e->accept_mutator(&expander);
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     if (!expander.check_safe()) {
       throw malformed_input("eliminated null Allocation without free");
     }
@@ -467,6 +609,9 @@ class TORCH_API IRSimplifier {
   static Stmt* simplify(Stmt* s) {
     PolynomialTransformer simplifier;
     s = s->accept_mutator(&simplifier);
+    if (s == nullptr) {
+      return nullptr;
+    }
 
     // There may be terms left in the IR, expand them.
     TermExpander expander(&simplifier);
@@ -479,6 +624,8 @@ class TORCH_API IRSimplifier {
   }
 };
 
+// Flattens the buf and performs the simplifier on the flattened dims.
+const Expr* buf_flat_size(const Buf* v);
 // Returns true if expressions A and B can be simplified to an equal expression.
 TORCH_API bool exprEquals(const Expr* A, const Expr* B);
 

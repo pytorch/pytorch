@@ -17,6 +17,7 @@ using VarMapping = std::vector<std::pair<const Var*, const Expr*>>;
 
 class VarSubMutator : public IRMutator {
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   VarSubMutator(const VarMapping& var_mapping) {
     for (const auto& entry : var_mapping) {
       const Var* key_var = entry.first;
@@ -37,13 +38,9 @@ class VarSubMutator : public IRMutator {
   }
 
   const Expr* mutate(const ReduceOp* var) override {
-    auto body = var->body().node()->accept_mutator(this);
-    std::vector<const Expr*> new_outer;
+    auto body = var->body()->accept_mutator(this);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<const Var*> new_inner;
-
-    for (auto* v : var->output_args()) {
-      new_outer.push_back(v->accept_mutator(this));
-    }
 
     for (auto* v : var->reduce_args()) {
       const Expr* e = v->accept_mutator(this);
@@ -57,12 +54,7 @@ class VarSubMutator : public IRMutator {
       }
     }
 
-    return new ReduceOp(
-        const_cast<Buf*>(var->accumulator()),
-        ExprHandle(body),
-        var->interaction(),
-        new_outer,
-        new_inner);
+    return new ReduceOp(body, new_inner, var->reducer());
   }
 
  private:

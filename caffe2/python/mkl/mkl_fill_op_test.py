@@ -1,12 +1,11 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import unittest
 import hypothesis.strategies as st
-from hypothesis import given, settings
-import numpy as np
+from hypothesis import given
 from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.mkl_test_util as mu

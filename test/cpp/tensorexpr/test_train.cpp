@@ -1,10 +1,10 @@
-#include "test/cpp/tensorexpr/test_train.h"
+#include <gtest/gtest.h>
+
 #include "test/cpp/tensorexpr/padded_buffer.h"
 #include "test/cpp/tensorexpr/test_base.h"
+#include "test/cpp/tensorexpr/test_train.h"
 #include "test/cpp/tensorexpr/test_utils.h"
-#include "torch/csrc/jit/tensorexpr/buffer.h"
 #include "torch/csrc/jit/tensorexpr/eval.h"
-#include "torch/csrc/jit/tensorexpr/function.h"
 #include "torch/csrc/jit/tensorexpr/ir.h"
 #include "torch/csrc/jit/tensorexpr/ir_printer.h"
 #include "torch/csrc/jit/tensorexpr/loopnest.h"
@@ -48,15 +48,17 @@ struct T {
   }
 };
 
-void testTrainBasic() {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Train, TrainBasic) {
   {
     VGraph graph;
     auto A = graph.create_tensor({"K"});
     auto B = graph.create_tensor({"K"});
     auto C = call("mul", {A, B})[0];
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Stmt* s;
-    std::map<const VTensor*, Buffer> inputs;
+    std::map<const VTensor*, Placeholder> inputs;
     std::map<const VTensor*, Tensor*> bindings;
     std::map<std::string, VarHandle> vbindings;
 
@@ -84,8 +86,9 @@ void testTrainBasic() {
     // dD/dA = 2*(A*B)*B = 2*A*B^2
     auto dA = grad(D, A, ones);
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Stmt* s;
-    std::map<const VTensor*, Buffer> inputs;
+    std::map<const VTensor*, Placeholder> inputs;
     std::map<const VTensor*, Tensor*> bindings;
     std::map<std::string, VarHandle> vbindings;
 
@@ -116,8 +119,9 @@ void testTrainBasic() {
     auto B = T(g.create_tensor({"K"}));
     auto C = A + B;
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Stmt* s;
-    std::map<const VTensor*, Buffer> inputs;
+    std::map<const VTensor*, Placeholder> inputs;
     std::map<const VTensor*, Tensor*> bindings;
     std::map<std::string, VarHandle> vbindings;
 
@@ -145,8 +149,9 @@ void testTrainBasic() {
     // dD/dA = 2*(A*B)*B = 2*A*B^2
     auto dA = D.grad(A, ones);
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Stmt* s;
-    std::map<const VTensor*, Buffer> inputs;
+    std::map<const VTensor*, Placeholder> inputs;
     std::map<const VTensor*, Tensor*> bindings;
     std::map<std::string, VarHandle> vbindings;
 
@@ -180,8 +185,9 @@ void testTrainBasic() {
     // d (A^2 / B)^2 / dB = -2 A^4 / B^3
     auto dC = (C * C).grad(B, ones);
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Stmt* s;
-    std::map<const VTensor*, Buffer> inputs;
+    std::map<const VTensor*, Placeholder> inputs;
     std::map<const VTensor*, Tensor*> bindings;
     std::map<std::string, VarHandle> vbindings;
 
@@ -208,8 +214,9 @@ void testTrainBasic() {
     VGraph g;
     auto X = T(g, {"K"});
     auto Y = X.sum();
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Stmt* s;
-    std::map<const VTensor*, Buffer> inputs;
+    std::map<const VTensor*, Placeholder> inputs;
     std::map<const VTensor*, Tensor*> bindings;
     std::map<std::string, VarHandle> vbindings;
 
@@ -228,8 +235,9 @@ void testTrainBasic() {
     auto X = T(g, {"K"});
     auto Y = X.sum();
     auto Z = Y.broadcast_like(X);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Stmt* s;
-    std::map<const VTensor*, Buffer> inputs;
+    std::map<const VTensor*, Placeholder> inputs;
     std::map<const VTensor*, Tensor*> bindings;
     std::map<std::string, VarHandle> vbindings;
 
@@ -265,8 +273,9 @@ void testTrainBasic() {
     W_grad = W_grad * LR.broadcast_like(W_grad);
     auto new_W = W - W_grad;
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Stmt* s;
-    std::map<const VTensor*, Buffer> inputs;
+    std::map<const VTensor*, Placeholder> inputs;
     std::map<const VTensor*, Tensor*> bindings;
     std::map<std::string, VarHandle> vbindings;
 
@@ -304,14 +313,15 @@ void testTrainBasic() {
 
     for (auto i = 0; i < 100; ++i) {
       std::generate(X_.begin(), X_.end(), gen);
-      cg.call({X_.data(),
-               W_ref_.data(),
-               W_.data(),
-               one_.data(),
-               K_.data(),
-               LR_.data(),
-               W_.data(),
-               N});
+      cg.call(
+          {X_.data(),
+           W_ref_.data(),
+           W_.data(),
+           one_.data(),
+           K_.data(),
+           LR_.data(),
+           W_.data(),
+           N});
     }
     // Less than 1% difference after running regression
     for (auto i = 0; i < W_.size(); ++i) {

@@ -82,6 +82,9 @@ void PythonRpcHandler::init() {
     pyDeserialize_ = getFunction(rpcInternal, "deserialize");
     pyHandleException_ = getFunction(rpcInternal, "_handle_exception");
 
+    rrefTypeFunctions_.onOwner_ = getFunction(rpcApi, "_rref_typeof_on_owner");
+    rrefTypeFunctions_.onUser_ = getFunction(rpcApi, "_rref_typeof_on_user");
+
     rrefProxyFunctions_.rpcSync_ = getFunction(rpcApi, "rpc_sync");
     rrefProxyFunctions_.rpcAsync_ = getFunction(rpcApi, "rpc_async");
     rrefProxyFunctions_.remote_ = getFunction(rpcApi, "remote");
@@ -125,6 +128,7 @@ PythonRpcHandler& PythonRpcHandler::getInstance() {
   // release GIL to avoid this situation.
   TORCH_INTERNAL_ASSERT(!PyGILState_Check());
   // Leaky singleton to avoid module destructor race.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static PythonRpcHandler* handler = new PythonRpcHandler();
   handler->init();
   return *handler;
@@ -187,6 +191,11 @@ TypePtr PythonRpcHandler::parseTypeFromStr(const std::string& type_str) {
 const PythonRpcHandler::RRefProxyFunctions& PythonRpcHandler::
     getRRefProxyFunctions() const {
   return rrefProxyFunctions_;
+}
+
+const PythonRpcHandler::RRefTypeFunctions& PythonRpcHandler::
+    getRRefTypeFunctions() const {
+  return rrefTypeFunctions_;
 }
 
 } // namespace rpc

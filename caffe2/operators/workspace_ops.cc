@@ -24,7 +24,9 @@ class GetAllBlobNamesOp final : public Operator<CPUContext> {
   Workspace* ws_;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(GetAllBlobNames, GetAllBlobNamesOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(GetAllBlobNames)
     .NumInputs(0)
     .NumOutputs(1)
@@ -37,6 +39,7 @@ of each blob in the active workspace.
         "(bool, default true) Whether to include blobs "
         "inherited from parent workspaces.")
     .Output(0, "blob_names", "1D tensor of strings containing blob names.");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(GetAllBlobNamesOp);
 }
 }

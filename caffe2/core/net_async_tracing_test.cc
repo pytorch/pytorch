@@ -25,6 +25,7 @@ void testExtractShardId(const string& name, int expectedId) {
   EXPECT_EQ(extractShardId(name), expectedId);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NetAsyncTracingTest, ExtractShardId) {
   testExtractShardId("ABCDEFshard:1705!!A", 1705);
   // Should use the last one
@@ -37,6 +38,7 @@ TEST(NetAsyncTracingTest, ExtractShardId) {
   testExtractShardId("FC:shard:15", 15);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NetAsyncTracingTest, EveryKIteration) {
   const auto spec = R"DOC(
       name: "example"
@@ -75,6 +77,7 @@ TEST(NetAsyncTracingTest, EveryKIteration) {
   net->Run();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NetAsyncTracingTest, GlobalTimeSlice) {
   const auto spec = R"DOC(
       name: "example"
