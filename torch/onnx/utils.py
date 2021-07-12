@@ -500,8 +500,9 @@ def _model_to_graph(model, args, verbose=False,
     flatten_args, _ = torch._C._jit_flatten(args)
     assert len(params) + len(flatten_args) == sum(1 for _ in graph.inputs())
 
+    params_dict = _get_named_param_dict(graph, params)
+
     allow_adjust_graph_inputs = (export_params and not keep_initializers_as_inputs)
-    # allow_adjust_graph_inputs = True
     if (training is None or training == TrainingMode.EVAL):
         params_dict = torch._C._jit_pass_onnx_eval_peephole(graph, params_dict, allow_adjust_graph_inputs)
 
