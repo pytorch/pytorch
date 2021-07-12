@@ -68,18 +68,18 @@ void flatten_rec(PyObject* obj, ParsedArgs& args) {
     args.desc.structure.push_back(D::Variable);
   } else if (strcmp(THPUtils_typename(obj), "NoneType") == 0) {
     args.desc.structure.push_back(D::NoneType);
-  } else if (PyBool_Check(obj)) { // Wrap integers in bool tensors
+  } else if (PyBool_Check(obj)) { // Wrap bools in Bool tensors
     at::Tensor var = scalar_to_tensor(at::Scalar(THPUtils_unpackBool(obj)));
     args.vars.push_back(var);
     args.desc.metadata.emplace_back(var);
     args.desc.structure.push_back(D::Bool);
-  } else if (PyLong_Check(obj)) { // Wrap integers in long tensors
+  } else if (PyLong_Check(obj)) { // Wrap longs in Long tensors
     at::Tensor var = scalar_to_tensor(
         at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(obj))));
     args.vars.push_back(var);
     args.desc.metadata.emplace_back(var);
     args.desc.structure.push_back(D::Long);
-  } else if (PyFloat_Check(obj)) { // Wrap floating points in double tensors
+  } else if (PyFloat_Check(obj)) { // Wrap floats in Double tensors
     at::Tensor var = scalar_to_tensor(THPUtils_unpackDouble(obj));
     args.vars.push_back(var);
     args.desc.metadata.emplace_back(var);
