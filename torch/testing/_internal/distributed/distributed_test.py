@@ -5761,10 +5761,10 @@ class DistributedTest:
         )
         def test_broadcast_object_list(self):
             # Only set device for NCCL backend since it must use GPUs.
+            # Case where rank != GPU device.
+            next_rank = (self.rank + 1) % int(self.world_size)
             backend = os.environ["BACKEND"]
             if backend == "nccl":
-                # Case where rank != GPU device.
-                next_rank = (self.rank + 1) % int(self.world_size)
                 torch.cuda.set_device(next_rank)
 
             src_rank = 0
@@ -5779,12 +5779,12 @@ class DistributedTest:
             )
 
             # Single object test with device specified
-            if backend == "nccl":
-                single_obj_list = [objects[0]]
-                if self.rank != src_rank:
-                    self.assertNotEqual(single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0])
-                dist.broadcast_object_list(single_obj_list, src=0, group=None, device=torch.device(next_rank))
-                self.assertEqual(single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0])
+            single_obj_list = [objects[0]]
+            if self.rank != src_rank:
+                self.assertNotEqual(single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0])
+
+            dist.broadcast_object_list(single_obj_list, src=0, group=None, device=torch.device(next_rank))
+            self.assertEqual(single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0])
 
             # Single object test: backward compatibility with device unspecified
             single_obj_list = [objects[0]]
