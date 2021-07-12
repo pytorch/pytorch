@@ -875,11 +875,6 @@ def insert_observers_for_model(
 
     for node in nodes_before_observation:
 
-        # check for matches
-        root_node, matched_nodes, pattern, qhandler, qconfig = matches.get(
-            node.name, (None, None, None, None, None))
-        equalization_qconfig = equalization_config_map.get(node.name, None)
-
         if node.op == 'placeholder':
             # if a graph input is in fp32, it does not need observation
             # if a graph input is in int8, we assume the observation happens
@@ -887,7 +882,11 @@ def insert_observers_for_model(
             pass
 
         elif node.op in ('call_module', 'call_method', 'call_function', 'output'):
-            modules = dict(model.named_modules(remove_duplicate=False))
+            # check for matches
+            root_node, matched_nodes, pattern, qhandler, qconfig = matches.get(
+                node.name, (None, None, None, None, None))
+            equalization_qconfig = equalization_config_map.get(node.name, None)
+
             this_node_dtype = node_name_to_target_dtype[node.name]
             output_not_a_tensor = this_node_dtype is None
             # TODO(future PR): consider stopping matching getitem
@@ -901,6 +900,7 @@ def insert_observers_for_model(
             ) and (not node.op == 'output')
 
             if not skip_inserting_observers:
+                modules = dict(model.named_modules(remove_duplicate=False))
                 if node.op != 'output':
                     # this modifies node inplace
                     maybe_insert_input_observers_for_node(

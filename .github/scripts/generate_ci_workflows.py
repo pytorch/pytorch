@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
 
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import jinja2
+from typing_extensions import Literal
 
 DOCKER_REGISTRY = "308535385114.dkr.ecr.us-east-1.amazonaws.com"
 
-GITHUB_DIR = Path(__file__).parent.parent
+GITHUB_DIR = Path(__file__).resolve().parent.parent
 
 
 # it would be nice to statically specify that build_environment must be
 # present, but currently Python has no easy way to do that
 # https://github.com/python/mypy/issues/4617
 PyTorchWorkflow = Dict[str, Any]
+
+YamlShellBool = Literal["''", 1]
 
 WINDOWS_CPU_TEST_RUNNER = "windows.4xlarge"
 WINDOWS_CUDA_TEST_RUNNER = "windows.8xlarge.nvidia.gpu"
@@ -27,6 +30,7 @@ def PyTorchWindowsWorkflow(
     on_pull_request: bool = False,
     only_build_on_pull_request: bool = False,
     num_test_shards: int = 1,
+    is_scheduled: Optional[str] = None,
 ) -> PyTorchWorkflow:
     return {
         "build_environment": build_environment,
@@ -34,6 +38,7 @@ def PyTorchWindowsWorkflow(
         "cuda_version": cuda_version,
         "on_pull_request": on_pull_request,
         "only_build_on_pull_request": only_build_on_pull_request and on_pull_request,
+        "is_scheduled": is_scheduled,
         "num_test_shards": num_test_shards,
     }
 
@@ -49,14 +54,26 @@ def PyTorchLinuxWorkflow(
     test_runner_type: str,
     on_pull_request: bool = False,
     enable_doc_jobs: bool = False,
+    enable_jit_legacy_test: YamlShellBool = "''",
+    enable_multigpu_test: YamlShellBool = "''",
+    enable_nogpu_no_avx_test: YamlShellBool = "''",
+    enable_nogpu_no_avx2_test: YamlShellBool = "''",
+    enable_slow_test: YamlShellBool = "''",
     num_test_shards: int = 1,
+    is_scheduled: Optional[str] = None,
 ) -> PyTorchWorkflow:
     return {
         "build_environment": build_environment,
         "docker_image_base": docker_image_base,
         "test_runner_type": test_runner_type,
         "on_pull_request": on_pull_request,
+        "is_scheduled": is_scheduled,
         "enable_doc_jobs": enable_doc_jobs,
+        "enable_jit_legacy_test": enable_jit_legacy_test,
+        "enable_multigpu_test": enable_multigpu_test,
+        "enable_nogpu_no_avx_test": enable_nogpu_no_avx_test,
+        "enable_nogpu_no_avx2_test": enable_nogpu_no_avx2_test,
+        "enable_slow_test": enable_slow_test,
         "num_test_shards": num_test_shards,
     }
 
@@ -95,7 +112,14 @@ WINDOWS_WORKFLOWS = [
         cuda_version="11.1",
         test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
         num_test_shards=2,
-    )
+    ),
+    PyTorchWindowsWorkflow(
+        build_environment="periodic-pytorch-win-vs2019-cuda11-cudnn8-py3",
+        cuda_version="11.3",
+        test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
+        num_test_shards=2,
+        is_scheduled="45 0,4,8,12,16,20 * * *",
+    ),
 ]
 
 LINUX_WORKFLOWS = [
@@ -141,16 +165,24 @@ LINUX_WORKFLOWS = [
         build_environment="pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
+        num_test_shards=2,
     ),
     PyTorchLinuxWorkflow(
         build_environment="pytorch-linux-xenial-cuda10.2-cudnn7-py3.6-gcc7",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
+        enable_jit_legacy_test=1,
+        enable_multigpu_test=1,
+        enable_nogpu_no_avx_test=1,
+        enable_nogpu_no_avx2_test=1,
+        enable_slow_test=1,
+        num_test_shards=2,
     ),
     PyTorchLinuxWorkflow(
         build_environment="pytorch-linux-xenial-cuda11.1-cudnn8-py3.6-gcc7",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
+        num_test_shards=2,
     ),
     # PyTorchLinuxWorkflow(
     #     build_environment="pytorch-libtorch-linux-xenial-cuda11.1-cudnn8-py3.6-gcc7",
@@ -172,11 +204,13 @@ LINUX_WORKFLOWS = [
     #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-py3.6-clang9",
     #     test_runner_type=LINUX_CPU_TEST_RUNNER,
     # ),
-    # PyTorchLinuxWorkflow(
-    #     build_environment="pytorch-linux-bionic-py3.8-gcc9-coverage",
-    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-py3.8-gcc9",
-    #     test_runner_type=LINUX_CPU_TEST_RUNNER,
-    # ),
+    PyTorchLinuxWorkflow(
+        build_environment="pytorch-linux-bionic-py3.8-gcc9-coverage",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-py3.8-gcc9",
+        test_runner_type=LINUX_CPU_TEST_RUNNER,
+        on_pull_request=True,
+        num_test_shards=2,
+    ),
     # PyTorchLinuxWorkflow(
     #     build_environment="pytorch-linux-bionic-rocm3.9-py3.6",
     #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm3.9-py3.6",
@@ -224,6 +258,15 @@ LINUX_WORKFLOWS = [
     # ),
 ]
 
+
+BAZEL_WORKFLOWS = [
+    PyTorchLinuxWorkflow(
+        build_environment="pytorch-linux-xenial-py3.6-gcc7-bazel-test",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc7",
+        test_runner_type=LINUX_CPU_TEST_RUNNER,
+    ),
+]
+
 if __name__ == "__main__":
     jinja_env = jinja2.Environment(
         variable_start_string="!{{",
@@ -231,7 +274,8 @@ if __name__ == "__main__":
     )
     template_and_workflows = [
         (jinja_env.get_template("linux_ci_workflow.yml.j2"), LINUX_WORKFLOWS),
-        (jinja_env.get_template("windows_ci_workflow.yml.j2"), WINDOWS_WORKFLOWS)
+        (jinja_env.get_template("windows_ci_workflow.yml.j2"), WINDOWS_WORKFLOWS),
+        (jinja_env.get_template("bazel_ci_workflow.yml.j2"), BAZEL_WORKFLOWS),
     ]
     for template, workflows in template_and_workflows:
         for workflow in workflows:
