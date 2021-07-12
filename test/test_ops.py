@@ -195,7 +195,7 @@ class TestCommon(TestCase):
     #   values on the tensors from sample_inputs func for the corresponding op.
     @onlyOnCPUAndCUDA
     @suppress_warnings
-    @ops(_ref_test_ops, allowed_dtypes=(torch.float32, torch.long))
+    @ops(_ref_test_ops, allowed_dtypes=(torch.float32, torch.long, torch.complex64))
     def test_reference_testing(self, device, dtype, op):
         sample_inputs = op.sample_inputs(device, dtype)
         for sample_input in sample_inputs:
