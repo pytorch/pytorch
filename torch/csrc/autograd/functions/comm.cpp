@@ -31,8 +31,7 @@ Scatter::Scatter(
       streams_(streams),
       unsqueeze_scalars_(unsqueeze_scalars) {}
 
-// NOLINTNEXTLINE(modernize-use-equals-default)
-Scatter::~Scatter() {}
+Scatter::~Scatter() = default;
 
 variable_list Scatter::apply(variable_list&& inputs) {
   AT_ASSERT(inputs.size() == 1);
@@ -52,7 +51,6 @@ variable_list Scatter::apply(variable_list&& inputs) {
       // NOLINTNEXTLINE(performance-move-const-arg)
       std::move(input), device_indices, chunk_sizes_, dim_, streams_);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<Variable> variables;
   variables.reserve(tensors.size());
   for (auto& tensor : tensors) {
@@ -75,8 +73,7 @@ variable_list Scatter::apply(variable_list&& inputs) {
 Gather::Gather(const at::Device& destination_device, int64_t dim)
     : destination_device_(destination_device), dim_(dim) {}
 
-// NOLINTNEXTLINE(modernize-use-equals-default)
-Gather::~Gather() {}
+Gather::~Gather() = default;
 
 variable_list Gather::apply(variable_list&& inputs) {
   bool all_are_zero_dim = true;
