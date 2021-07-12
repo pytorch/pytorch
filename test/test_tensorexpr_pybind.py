@@ -334,6 +334,41 @@ graph(%a.1 : Float(3, 4, 5, strides=[20, 5, 1], requires_grad=0, device=cpu)):
         np.testing.assert_allclose(res2.numpy(), correct.numpy(), atol=2e-3)
 
     @unittest.skipIf(not LLVM_ENABLED, "LLVM backend not enabled")
+    def test_kernel_with_custom_lowering(self):
+        def f(a):
+            return a.nan_to_num()
+
+        device = 'cpu'
+        x = torch.ones((2, 2), device=device)
+        x[0, 0] = x[1, 1] = torch.nan
+        graph_str = """
+graph(%x : Float(2, 2, strides=[2, 1], requires_grad=0, device=cpu)):
+    %none : NoneType = prim::Constant()
+    %y : Float(2, 2, strides=[2, 1], requires_grad=0, device=cpu) = aten::nan_to_num(%x, %none, %none, %none)
+    return (%y)
+        """
+        graph = torch._C.parse_ir(graph_str)
+
+        def my_custom_lowering(inputs, out_shape, out_type, device):
+            def get_dim_args(dims):
+                dim_args = []
+                for dim in dims:
+                    dim_args.append(te.DimArg(dim, 'i' + str(len(dim_args))))
+                return dim_args
+
+            def compute(idxs):
+                load = inputs[0].as_buf().load(idxs)
+                return te.ifThenElse(te.ExprHandle.isnan(load), te.ExprHandle.float(0.), load)
+            return te.Compute2("custom_nan_to_num", get_dim_args(out_shape), compute)
+
+        kernel = torch._C._te.TensorExprKernel(graph, {'aten::nan_to_num' : my_custom_lowering})
+        res1 = kernel.run((x,))
+        res2 = kernel.fallback((x,))
+        correct = f(x)
+        np.testing.assert_allclose(res1.numpy(), correct.numpy(), atol=2e-3)
+        np.testing.assert_allclose(res2.numpy(), correct.numpy(), atol=2e-3)
+
+    @unittest.skipIf(not LLVM_ENABLED, "LLVM backend not enabled")
     def test_kernel_with_expand(self):
         def f(a):
             return a.expand((2, 3, 4))
