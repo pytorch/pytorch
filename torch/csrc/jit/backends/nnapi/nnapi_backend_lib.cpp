@@ -4,6 +4,9 @@
 namespace torch {
 namespace jit {
 
+// This file has no implementation yet, but the declarations are necessary to
+// register the backend properly and test preprocess
+// TODO T91991928: implement compile() and execute()
 class NnapiBackend : public PyTorchBackendInterface {
  public:
   // Constructor.

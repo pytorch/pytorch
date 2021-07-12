@@ -6,9 +6,12 @@
 namespace py = pybind11;
 
 // Converts model to nnapi and serializes it for mobile
-// Returns a dictionary string with one entry
+// Returns a dictionary string with one entry:
 // Key: "NnapiModule"
 // Value: a string of the nnapi module, saved for mobile
+//
+// method_compile_spec should contain an input Tensor with the following format:
+// {"forward": {"inputs": Tensor}}
 c10::IValue preprocess(
     const torch::jit::Module& mod,
     const c10::Dict<c10::IValue, c10::IValue>& method_compile_spec,
