@@ -153,11 +153,10 @@ jobs:
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
           CIRCLE_WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         run: |
-          export PYTHONPATH=$PWD
           COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
           export COMMIT_TIME
           pip3 install requests
-          python3 tools/stats/upload_binary_size_to_scuba.py || exit 0
+          python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
       - name: Chown workspace
         run: |
           # Ensure the working directory gets chowned back to the current user
@@ -195,9 +194,14 @@ jobs:
     runs-on: ubuntu-18.04
     env:
       TEST_RUNNER_TYPE: linux.2xlarge
+      ENABLE_JIT_LEGACY_TEST: ''
       ENABLE_MULTIGPU_TEST: ''
+      ENABLE_NOGPU_NO_AVX_TEST: ''
+      ENABLE_NOGPU_NO_AVX2_TEST: ''
+      ENABLE_SLOW_TEST: ''
       NUM_TEST_SHARDS: 2
       MULTIGPU_RUNNER_TYPE: linux.16xlarge.nvidia.gpu
+      NOGPU_RUNNER_TYPE: linux.2xlarge
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
       render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
@@ -245,7 +249,7 @@ jobs:
         run: |
           docker pull "${DOCKER_IMAGE}"
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        if: ${{ contains(env.BUILD_ENVIRONMENT, 'cuda') }}
+        if: ${{ contains(env.BUILD_ENVIRONMENT, 'cuda') && !contains(matrix.config, 'nogpu') }}
         run: |
           bash .github/scripts/install_nvidia_utils_linux.sh
           echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
@@ -295,6 +299,8 @@ jobs:
             -e IN_CI \
             -e SHARD_NUMBER \
             -e JOB_BASE_NAME \
+            -e TEST_CONFIG \
+            -e NUM_TEST_SHARDS \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
@@ -401,8 +407,7 @@ jobs:
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
           CIRCLE_WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         run: |
-          export PYTHONPATH=$PWD
-          python tools/stats/print_test_stats.py --upload-to-s3 --compare-with-s3 test
+          python -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
 
   pytorch_python_doc_build:
     runs-on: linux.2xlarge
