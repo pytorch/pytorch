@@ -628,38 +628,6 @@ class StartProcessesNotCITest(StartProcessesTest):
                 self.assert_in_file(["hello stderr from 0"], stderr_log)
             worker_finished_event_mock.wait.assert_called_once()
 
-    def test_function_failure_signal(self):
-        """
-        run 2x copies of echo3, induce a segfault on first
-        """
-        SEGFAULT = True
-        for start_method, redirs in product(self._start_methods, redirects_all()):
-            with self.subTest(start_method=start_method):
-                log_dir = self.log_dir()
-                pc = start_processes(
-                    name="echo",
-                    entrypoint=echo3,
-                    args={0: ("hello", SEGFAULT), 1: ("world",)},
-                    envs={0: {}, 1: {}},
-                    log_dir=log_dir,
-                    start_method=start_method,
-                    redirects=redirs,
-                )
-
-                results = pc.wait(period=0.1)
-
-                self.assert_pids_noexist(pc.pids())
-                self.assertEqual(1, len(results.failures))
-                self.assertFalse(results.return_values)
-
-                failure = results.failures[0]
-                error_file = failure.error_file
-
-                self.assertEqual(-signal.SIGSEGV, failure.exitcode)
-                self.assertEqual("SIGSEGV", failure.signal_name())
-                self.assertEqual(pc.pids()[0], failure.pid)
-                self.assertEqual(os.path.join(log_dir, "0", "error.json"), error_file)
-
     def test_binary_signal(self):
         pc = start_processes(
             name="echo",

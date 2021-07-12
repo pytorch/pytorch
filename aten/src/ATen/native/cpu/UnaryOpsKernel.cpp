@@ -55,8 +55,9 @@ template <typename T>
 void VmlLog(int64_t N, const T* X, T* Y) {
   constexpr int64_t K = Vectorized<T>::size();
   at::parallel_for(0, N, K, [=](int64_t begin, int64_t end) {
+    using VT = vec::vec_scalar_t<T>;
     vec::map(
-        [](Vectorized<T> x_vec) { return x_vec.log(); },
+        [](Vectorized<VT> x_vec) { return x_vec.log(); },
         Y + begin,
         X + begin,
         end - begin);
@@ -632,6 +633,14 @@ static void i1e_kernel(TensorIteratorBase& iter) {
   });
 }
 
+static void erfcx_kernel(TensorIteratorBase& iter){
+  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "erfcx_cpu", [&]() {
+    cpu_kernel(
+      iter,
+      [](scalar_t a) -> scalar_t { return calc_erfcx(a); });
+  });
+}
+
 // TODO: Disable cont. branch to test more risky code
 
 #define IMPLEMENT_ITERATOR_LAMBDA(op)                                         \
@@ -777,6 +786,8 @@ REGISTER_DISPATCH(special_ndtri_stub, &CPU_CAPABILITY::ndtri_kernel);
 REGISTER_DISPATCH(special_i1_stub, &CPU_CAPABILITY::i1_kernel);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(special_i1e_stub, &CPU_CAPABILITY::i1e_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(special_erfcx_stub, &CPU_CAPABILITY::erfcx_kernel);
 
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)

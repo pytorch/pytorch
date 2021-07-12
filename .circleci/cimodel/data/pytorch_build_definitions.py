@@ -31,6 +31,7 @@ class Conf:
     is_libtorch: bool = False
     is_important: bool = False
     parallel_backend: Optional[str] = None
+    build_only: bool = False
 
     @staticmethod
     def is_test_phase(phase):
@@ -112,6 +113,8 @@ class Conf:
             parameters["resource_class"] = "xlarge"
         if hasattr(self, 'filters'):
             parameters['filters'] = self.filters
+        if self.build_only:
+            parameters['build_only'] = miniutils.quote(str(int(True)))
         return parameters
 
     def gen_workflow_job(self, phase):
@@ -369,6 +372,7 @@ def instantiate_configs(only_slow_gradcheck):
             is_libtorch=is_libtorch,
             is_important=is_important,
             parallel_backend=parallel_backend,
+            build_only=build_only,
         )
 
         # run docs builds on "pytorch-linux-xenial-py3.6-gcc5.4". Docs builds

@@ -114,6 +114,7 @@ Padding Layers
 
     nn.ReflectionPad1d
     nn.ReflectionPad2d
+    nn.ReflectionPad3d
     nn.ReplicationPad1d
     nn.ReplicationPad2d
     nn.ReplicationPad3d
@@ -154,6 +155,7 @@ Non-linear Activations (weighted sum, nonlinearity)
     nn.Tanh
     nn.Tanhshrink
     nn.Threshold
+    nn.GLU
 
 Non-linear Activations (other)
 ------------------------------
@@ -246,6 +248,7 @@ Dropout Layers
     nn.Dropout2d
     nn.Dropout3d
     nn.AlphaDropout
+    nn.FeatureAlphaDropout
 
 Sparse Layers
 -------------
