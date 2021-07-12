@@ -308,20 +308,20 @@ class AbstractTestCases:
             x = torch.arange(100 * 100, dtype=torch.float).reshape(100, 100).t()
             y = torch.empty(100, 100, dtype=torch.float)
             y.copy_(x)
-            self.assertEqual(y[:, 0], range(100))
-            self.assertEqual(y[:, 40], range(4000, 4100))
+            self.assertEqual(y[:, 0], torch.tensor(range(100)).to(y))
+            self.assertEqual(y[:, 40], torch.tensor(range(4000, 4100)).to(y))
 
             y = torch.empty(100, 100, dtype=torch.double)
             y.copy_(x)
-            self.assertEqual(y[:, 0], range(100))
-            self.assertEqual(y[:, 40], range(4000, 4100))
+            self.assertEqual(y[:, 0], torch.tensor(range(100)).to(y))
+            self.assertEqual(y[:, 40], torch.tensor(range(4000, 4100)).to(y))
 
             # Validates regression reported in https://github.com/pytorch/pytorch/issues/45269
             x = torch.arange(100 * 100).reshape(100, 100).to(dtype=torch.cfloat).t()
             y = torch.empty(100, 100, dtype=torch.cfloat)
             y.copy_(x)
-            self.assertEqual(y[:, 0], range(100))
-            self.assertEqual(y[:, 40], range(4000, 4100))
+            self.assertEqual(y[:, 0], torch.tensor(range(100)).to(y))
+            self.assertEqual(y[:, 40], torch.tensor(range(4000, 4100)).to(y))
 
         def test_device(self):
             cpu = torch.device('cpu')
@@ -573,10 +573,10 @@ class AbstractTestCases:
             # out of bounds is also empty
             self.assertEqual(x[10:12], empty)
             # additional correctness checks
-            self.assertEqual(x[:1].tolist(), [[0, 1, 2, 3]])
-            self.assertEqual(x[:-3].tolist(), [[0, 1, 2, 3]])
-            self.assertEqual(x[:, -2:3].tolist(), [[2], [6], [10], [14]])
-            self.assertEqual(x[0:-1:2].tolist(), [[0, 1, 2, 3], [8, 9, 10, 11]])
+            self.assertEqual(x[:1].tolist(), [[0.0, 1.0, 2.0, 3.0]])
+            self.assertEqual(x[:-3].tolist(), [[0.0, 1.0, 2.0, 3.0]])
+            self.assertEqual(x[:, -2:3].tolist(), [[2.0], [6.0], [10.0], [14.0]])
+            self.assertEqual(x[0:-1:2].tolist(), [[0.0, 1.0, 2.0, 3.0], [8.0, 9.0, 10.0, 11.0]])
 
         @unittest.skip("Not implemented yet")
         def test_conv2(self):
@@ -1479,6 +1479,8 @@ class AbstractTestCases:
 
             g1.seed()
             g2.seed()
+            print(g1.initial_seed(), g1.initial_seed() > (2 ** 63 - 1))
+            print(g2.initial_seed(), g2.initial_seed() > (2 ** 63 - 1))
             self.assertNotEqual(g1.initial_seed(), g2.initial_seed())
 
             g1 = torch.Generator()
@@ -1768,21 +1770,21 @@ class AbstractTestCases:
 
             floatStorage = storage.float()
             self.assertEqual(floatStorage.size(), 6)
-            self.assertEqual(floatStorage.tolist(), [-1, 0, 1, 2, 3, 4])
+            self.assertEqual(floatStorage.tolist(), [-1.0, 0.0, 1.0, 2.0, 3.0, 4.0])
             self.assertEqual(floatStorage.type(), 'torch.FloatStorage')
             self.assertEqual(floatStorage.int().tolist(), [-1, 0, 1, 2, 3, 4])
             self.assertIs(floatStorage.dtype, torch.float32)
 
             halfStorage = storage.half()
             self.assertEqual(halfStorage.size(), 6)
-            self.assertEqual(halfStorage.tolist(), [-1, 0, 1, 2, 3, 4])
+            self.assertEqual(halfStorage.tolist(), [-1.0, 0.0, 1.0, 2.0, 3.0, 4.0])
             self.assertEqual(halfStorage.type(), 'torch.HalfStorage')
             self.assertEqual(halfStorage.int().tolist(), [-1, 0, 1, 2, 3, 4])
             self.assertIs(halfStorage.dtype, torch.float16)
 
             bfloat16Storage = storage.bfloat16()
             self.assertEqual(bfloat16Storage.size(), 6)
-            self.assertEqual(bfloat16Storage.tolist(), [-1, 0, 1, 2, 3, 4])
+            self.assertEqual(bfloat16Storage.tolist(), [-1.0, 0.0, 1.0, 2.0, 3.0, 4.0])
             self.assertEqual(bfloat16Storage.type(), 'torch.BFloat16Storage')
             self.assertEqual(bfloat16Storage.int().tolist(), [-1, 0, 1, 2, 3, 4])
             self.assertIs(bfloat16Storage.dtype, torch.bfloat16)
@@ -1810,7 +1812,7 @@ class AbstractTestCases:
 
             charStorage = storage.char()
             self.assertEqual(charStorage.size(), 6)
-            self.assertEqual(charStorage.tolist(), [-1.0, 0.0, 1.0, 2.0, 3.0, 4.0])
+            self.assertEqual(charStorage.tolist(), [-1, 0, 1, 2, 3, 4])
             self.assertEqual(charStorage.type(), 'torch.CharStorage')
             self.assertEqual(charStorage.int().tolist(), [-1, 0, 1, 2, 3, 4])
             self.assertIs(charStorage.dtype, torch.int8)
@@ -1831,13 +1833,13 @@ class AbstractTestCases:
 
             complexfloat_storage = torch.ComplexFloatStorage([-1, 0, 1 + 2j, 2.5j, 3.5, 4 - 2j])
             self.assertEqual(complexfloat_storage.size(), 6)
-            self.assertEqual(complexfloat_storage.tolist(), [-1, 0, 1 + 2j, 2.5j, 3.5, 4 - 2j])
+            self.assertEqual(complexfloat_storage.tolist(), [-1 + 0j, 0j, 1 + 2j, 2.5j, 3.5 + 0j, 4 - 2j])
             self.assertEqual(complexfloat_storage.type(), 'torch.ComplexFloatStorage')
             self.assertIs(complexfloat_storage.dtype, torch.complex64)
 
             complexdouble_storage = complexfloat_storage.complex_double()
             self.assertEqual(complexdouble_storage.size(), 6)
-            self.assertEqual(complexdouble_storage.tolist(), [-1, 0, 1 + 2j, 2.5j, 3.5, 4 - 2j])
+            self.assertEqual(complexdouble_storage.tolist(), [-1 + 0j, 0j, 1 + 2j, 2.5j, 3.5 + 0j, 4 - 2j])
             self.assertEqual(complexdouble_storage.type(), 'torch.ComplexDoubleStorage')
             self.assertIs(complexdouble_storage.dtype, torch.complex128)
 
@@ -2177,9 +2179,9 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         def test_assertEqual(self) -> None:
             x = torch.FloatTensor([0])
-            self.assertEqual(x, 0)
+            self.assertEqual(x.item(), 0.0)
             xv = torch.autograd.Variable(x)
-            self.assertEqual(xv, 0)
+            self.assertEqual(xv.item(), 0.0)
             self.assertEqual(x, xv)
             self.assertEqual(xv, x)
 
@@ -2201,11 +2203,10 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             self.assertEqual(x.new(1, 2).shape, [1, 2])
             self.assertEqual(x.new(torch.Size([3, 4])).shape, [3, 4])
             self.assertEqual(x.new([3, 4]).shape, [2])
-            self.assertEqual(x.new([3, 4]).tolist(), [3, 4])
-            self.assertEqual(x.new((3, 4)).tolist(), [3, 4])
-            self.assertEqual(x.new([np.int32(3), np.float64(4)]).tolist(), [3, 4])
-            self.assertEqual(x.new(np.array((3, 4))).tolist(), [3, 4])
-            self.assertEqual(x.new([z[2], z[0] + 3]).tolist(), [3, 4])
+            self.assertEqual(x.new([3, 4]).tolist(), [3.0, 4.0])
+            self.assertEqual(x.new([np.int32(3), np.float64(4)]).tolist(), [3.0, 4.0])
+            self.assertEqual(x.new(np.array((3, 4))).tolist(), [3.0, 4.0])
+            self.assertEqual(x.new([z[2], z[0] + 3]).tolist(), [3.0, 4.0])
             self.assertEqual(x.new(size=(3, 4)).shape, [3, 4])
             self.assertEqual(x.new(()).shape, [0])
             self.assertEqual(x.new(y.storage()).data_ptr(), y.data_ptr())
@@ -7529,7 +7530,10 @@ else:
                 self.assertEqual(b._per_optimizer_states["fdsa"],
                                  torch.cuda.amp.grad_scaler._refresh_per_optimizer_state())
                 if lazy_init_scale:
-                    self.assertEqual(b.scale(torch.tensor([4.0], dtype=torch.float32, device=device)), 12.0)
+                    self.assertEqual(
+                        b.scale(torch.tensor([4.0], dtype=torch.float32, device=device)),
+                        torch.tensor([12.0])
+                    )
 
     def test_multinomial_invalid(self, device):
         def test(probs):
@@ -7948,6 +7952,9 @@ def disable_gc():
 
 class TestTorch(AbstractTestCases._TestTorchMixin):
     exact_dtype = True
+
+    def test_copy_transpose(self):
+        super().test_copy_transpose()
 
     def test_tensor_ctor_scalar(self):
         x = torch.Tensor(torch.tensor(1.0))

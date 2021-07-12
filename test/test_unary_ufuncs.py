@@ -253,50 +253,37 @@ class TestUnaryUfuncs(TestCase):
 
     # Helper for comparing torch tensors and numpy arrays
     # TODO: should this or assertEqual also validate that strides are equal?
-    def assertEqualHelper(self, actual, expected, msg, *, dtype, exact_dtype=True, **kwargs):
+    def assertEqualHelper(self, actual, expected, msg, *, exact_dtype=True, **kwargs):
         assert isinstance(actual, torch.Tensor)
 
         # Some NumPy functions return scalars, not arrays
         if isinstance(expected, Number):
-            self.assertEqual(actual.item(), expected, **kwargs)
+            self.assertEqual(actual.item(), expected, exact_dtype=exact_dtype, **kwargs)
         elif isinstance(expected, np.ndarray):
-            # Handles exact dtype comparisons between arrays and tensors
-            if exact_dtype:
-                # Allows array dtype to be float32 when comparing with bfloat16 tensors
-                #   since NumPy doesn't support the bfloat16 dtype
-                # Also ops like scipy.special.erf, scipy.special.erfc, etc, promote float16
-                # to float32
-                if expected.dtype == np.float32:
-                    assert actual.dtype in (torch.float16, torch.bfloat16, torch.float32)
-                else:
-                    assert expected.dtype == torch_to_numpy_dtype_dict[actual.dtype]
-
             self.assertEqual(actual,
-                             torch.from_numpy(expected).to(actual.dtype),
+                             torch.from_numpy(expected),
                              msg,
+                             exact_dtype=exact_dtype,
                              exact_device=False,
                              **kwargs)
         else:
-            self.assertEqual(actual, expected, msg, exact_device=False, **kwargs)
+            self.assertEqual(actual, expected, msg, exact_dtype=exact_dtype, exact_device=False, **kwargs)
 
     # Tests that the function and its (array-accepting) reference produce the same
     #   values on given tensors
     def _test_reference_numerics(self, dtype, op, tensors, equal_nan=True):
-        def _helper_reference_numerics(expected, actual, msg, exact_dtype, equal_nan=True):
-            if not torch.can_cast(numpy_to_torch_dtype_dict[expected.dtype.type], dtype):
-                exact_dtype = False
-
+        def _helper_reference_numerics(expected, actual, msg, equal_nan=True):
             if dtype in [torch.uint8, torch.int8, torch.bool]:
                 # NOTE: For these dtypes, PyTorch computes in the default scalar type (float)
                 # while NumPy computes in float16
-                self.assertEqualHelper(actual, expected, msg, dtype=dtype,
-                                       exact_dtype=exact_dtype, rtol=1e-3, atol=1e-2)
+                self.assertEqualHelper(actual, expected, msg,
+                                       exact_dtype=False, rtol=1e-3, atol=1e-2)
             elif dtype is torch.bfloat16:
                 # Ref: https://github.com/pytorch/pytorch/blob/master/torch/testing/_internal/common_utils.py#L1149
-                self.assertEqualHelper(actual, expected, msg, dtype=dtype,
-                                       exact_dtype=exact_dtype, rtol=16e-3, atol=1e-5)
+                self.assertEqualHelper(actual, expected, msg,
+                                       exact_dtype=False, rtol=16e-3, atol=1e-5)
             else:
-                self.assertEqualHelper(actual, expected, msg, dtype=dtype, equal_nan=equal_nan, exact_dtype=exact_dtype)
+                self.assertEqualHelper(actual, expected, msg, equal_nan=equal_nan, exact_dtype=False)
 
         for t in tensors:
             torch_kwargs, numpy_kwargs = op.sample_kwargs(t.device, dtype, t)
@@ -316,13 +303,12 @@ class TestUnaryUfuncs(TestCase):
             else:
                 msg = None
 
-            exact_dtype = True
             if isinstance(actual, torch.Tensor):
-                _helper_reference_numerics(expected, actual, msg, exact_dtype, equal_nan)
+                _helper_reference_numerics(expected, actual, msg, equal_nan)
             else:
                 for x, y in zip(expected, actual):
                     # testing multi-outputs results
-                    _helper_reference_numerics(x, y, msg, exact_dtype, equal_nan)
+                    _helper_reference_numerics(x, y, msg, equal_nan)
 
     # Tests that the function and its (array-accepting) reference produce the same
     #   values on a range of tensors, including empty tensors, scalar tensors,
