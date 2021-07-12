@@ -1417,9 +1417,9 @@ struct to_ir {
         // for backwards compatibility, e.g. `x: Dict[int, T]` should
         // be a valid lhs for an rhs key of type `number`
         bool is_key_subtype =
-            k->type()->isSubtypeOfExt(dict_type_hint->getKeyType(), &ss)
-            || (k->type() == NumberType::get()
-                && dict_type_hint->getKeyType()->isSubtypeOfExt(k->type()));
+            k->type()->isSubtypeOfExt(dict_type_hint->getKeyType(), &ss) ||
+            (k->type() == NumberType::get() &&
+             dict_type_hint->getKeyType()->isSubtypeOfExt(k->type()));
 
         if (!is_key_subtype) {
           err << "Dict type annotation `" << dict_type_hint->repr_str()
@@ -1431,14 +1431,13 @@ struct to_ir {
 
         ss.str(std::string());
 
-
         // Special-case annotations that are a subset of NumberType
         // for backwards compatibility, e.g. `x: Dict[T, int]` should
         // be a valid lhs for an rhs value of type `number`
         bool is_value_subtype =
-            v->type()->isSubtypeOfExt(dict_type_hint->getValueType(), &ss)
-            || (v->type() == NumberType::get()
-                && dict_type_hint->getValueType()->isSubtypeOfExt(v->type()));
+            v->type()->isSubtypeOfExt(dict_type_hint->getValueType(), &ss) ||
+            (v->type() == NumberType::get() &&
+             dict_type_hint->getValueType()->isSubtypeOfExt(v->type()));
 
         if (!is_value_subtype) {
           err << "Dict type annotation `" << dict_type_hint->repr_str()
