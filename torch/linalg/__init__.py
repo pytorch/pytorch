@@ -1492,6 +1492,8 @@ Differences with `numpy.linalg.svd`:
              The gradient will also be numerically unstable when :attr:`A` has small singular
              values, as it also depends on the computaiton of :math:`\frac{1}{\sigma_i}`.
 
+.. warning:: Backpropagation is only supported for input matrices with at most one zero eigenvalue.
+
 .. seealso::
 
         :func:`torch.linalg.svdvals` computes only the singular values.
