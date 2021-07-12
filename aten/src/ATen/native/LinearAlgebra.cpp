@@ -29,6 +29,9 @@ namespace meta {
 TORCH_META_FUNC(addmm)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
   TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix, got ", mat1.dim(), "-D tensor");
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix, got ", mat2.dim(), "-D tensor");
+  TORCH_CHECK(
+      mat1.sizes()[1] == mat2.sizes()[0], "mat1 and mat2 shapes cannot be multiplied (",
+      mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
 
   auto names = at::namedinference::propagate_names_for_addmm(mat1, mat2, self);
   set_output(0, {mat1.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
@@ -42,6 +45,9 @@ TORCH_META_FUNC(addmm)(const Tensor& self, const Tensor& mat1, const Tensor& mat
 TORCH_META_FUNC(mm)(const Tensor & self, const Tensor & mat2) {
   TORCH_CHECK(self.dim() == 2, "self must be a matrix");
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
+  TORCH_CHECK(
+      self.sizes()[1] == mat2.sizes()[0], "mat1 and mat2 shapes cannot be multiplied (",
+      self.sizes()[0], "x", self.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
 
   auto names = at::namedinference::compute_matmul_outnames(self, mat2);
   set_output(0, {self.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
@@ -944,12 +950,6 @@ static void addmm_impl_cpu_(
   auto m1_sizes = m1.sizes();
   auto m2_strides = m2.strides();
   auto m2_sizes = m2.sizes();
-
-  // keeping TORCH_CHECKs here because othe mm methods also utilize this impl.
-  // TODO move this to meta once all methods have migrated to structured kernel.
-  TORCH_CHECK(
-      m1_sizes[1] == m2_sizes[0], "mat1 and mat2 shapes cannot be multiplied (",
-      m1_sizes[0], "x", m1_sizes[1], " and ", m2_sizes[0], "x", m2_sizes[1], ")");
 
   TORCH_CHECK(
       self_sizes[0] == m1_sizes[0] && self_sizes[1] == m2_sizes[1],
