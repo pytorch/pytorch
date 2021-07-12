@@ -1,7 +1,7 @@
 from functools import total_ordering
 from typing import Iterable, Union
 
-from packaging.version import InvalidVersion, Version # type: ignore[import]
+from packaging.version import InvalidVersion, Version  # type: ignore[import]
 
 from .version import __version__ as internal_version
 
