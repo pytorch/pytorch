@@ -127,6 +127,9 @@ struct MathOpFallback {
       _set_bit(mutable_input, true);
     }
   }
+
+  virtual ~MathOpFallback() = default;
+
   DispatchKey key;
   string op_name;
 };
