@@ -243,6 +243,7 @@ class TestProfiler(TestCase):
                         if evt["name"] == "[memory]":
                             found_memory_events = True
                             assert "args" in evt
+                            assert "Addr" in evt["args"]
                             assert "Device Type" in evt["args"]
                             assert "Device Id" in evt["args"]
                             assert "Bytes" in evt["args"]
