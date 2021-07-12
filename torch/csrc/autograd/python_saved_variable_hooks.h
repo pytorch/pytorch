@@ -11,21 +11,14 @@ namespace py = pybind11;
 namespace torch { namespace autograd {
 
 struct TORCH_API PySavedVariableHooks : public SavedVariableHooks {
-    PySavedVariableHooks(py::function &pack_hook, py::function &unpack_hook) : pack_hook_(pack_hook), unpack_hook_(unpack_hook){}
+  PySavedVariableHooks(py::function &pack_hook, py::function &unpack_hook);
+  void call_pack_hook(at::Tensor &tensor) override;
+  at::Tensor call_unpack_hook() override;
+  ~PySavedVariableHooks() override = default;
 
-    void call_pack_hook(at::Tensor &tensor) override {
-      TORCH_CHECK_NOT_IMPLEMENTED(false, "Hooks are not implemented yet");
-    }
-
-    at::Tensor call_unpack_hook() override {
-      TORCH_CHECK_NOT_IMPLEMENTED(false, "Hooks are not implemented yet");
-    }
-
-    ~PySavedVariableHooks() override = default;
-
-  private:
-    py::function pack_hook_;
-    py::function unpack_hook_;
+private:
+  py::function pack_hook_;
+  py::function unpack_hook_;
 };
 
 }}
