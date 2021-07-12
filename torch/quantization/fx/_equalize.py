@@ -83,6 +83,8 @@ class _InputEqualizationObserver(nn.Module):
         return (self.input_obs.min_vals, self.input_obs.max_vals)
 
     def set_equalization_scale(self, equalization_scale):
+        # Reshape the equalization scale along axis=1 so that it can be
+        # multiplied with the input along axis=1
         self.equalization_scale = torch.reshape(equalization_scale, self.equalization_shape)
 
     def calculate_scaled_minmax(self):
@@ -228,11 +230,9 @@ def node_supports_equalization(node: Node, modules) -> bool:
     Currently we only support nn.Linear/F.Linear and nn.Conv/F.conv layers
     """
     if node.op == 'call_module':
-        return (isinstance(modules[node.target], nn.Linear) or
-                isinstance(modules[node.target], nni.LinearReLU) or
-                isinstance(modules[node.target], nn.Conv2d))
+        return type(modules[node.target]) in [nn.Linear, nni.LinearReLU, nn.Conv2d]
     elif node.op == 'call_function':
-        return node.target == F.linear or node.target == F.conv2d
+        return node.target in [F.linear, F.conv2d]
     return False
 
 def is_equalization_observer(observer: nn.Module) -> bool:
@@ -393,6 +393,7 @@ def scale_weight_node(
     assert(isinstance(weight, torch.Tensor))
 
     # Scale the weights by the reciprocal of the equalization scale
+    # Reshape the equalization scale so that we can multiply it to the weight along axis=1
     equalization_scale_reshaped = reshape_scale(equalization_scale, 1, weight)
     scaled_weight = torch.mul(weight, torch.reciprocal(equalization_scale_reshaped))
 
@@ -401,6 +402,7 @@ def scale_weight_node(
         return
 
     # Multiply the weights row wise by the next equalization scale
+    # Reshape the equalization scale so that we can multiply it to the weight along axis=0
     next_equalization_scale_reshaped = reshape_scale(next_equalization_scale, 0, weight)
     scaled_weight = torch.mul(scaled_weight, next_equalization_scale_reshaped)
 
@@ -412,6 +414,7 @@ def scale_weight_node(
         return
     assert(isinstance(bias, torch.Tensor))
 
+    # Reshape the equalization scale so that we can multiply it element-wise to the bias
     next_equalization_scale_reshaped = reshape_scale(next_equalization_scale, 0, bias)
     scaled_bias = torch.mul(bias, next_equalization_scale_reshaped)
     op_module.bias = nn.Parameter(scaled_bias)
@@ -455,6 +458,7 @@ def scale_weight_functional(
 
     # Scale the weights for input-weight equalization
     # If the following layer needs to be equalized then we will multiply its scale
+    # Reshape the equalization scale so that we can multiply it to the weight along axis=1
     equalization_scale_reshaped = reshape_scale(equalization_scale, 1, weight)
     scaled_weight = torch.mul(weight, torch.reciprocal(equalization_scale_reshaped))
 
@@ -463,6 +467,7 @@ def scale_weight_functional(
         return
 
     # Multiply the weights row wise by the next equalization scale
+    # Reshape the equalization scale so that we can multiply it to the weight along axis=1
     next_equalization_scale_reshaped = reshape_scale(next_equalization_scale, 0, scaled_weight)
     scaled_weight = torch.mul(scaled_weight, next_equalization_scale_reshaped)
 
@@ -482,6 +487,7 @@ def scale_weight_functional(
     bias_parent_name, bias_name = _parent_name(bias_node.target)
     bias = getattr(modules[bias_parent_name], bias_name)
 
+    # Reshape the equalization scale so that we can multiply it element-wise to the bias
     next_equalization_scale_reshaped = reshape_scale(next_equalization_scale, 0, bias)
     scaled_bias = torch.mul(bias, next_equalization_scale_reshaped)
     setattr(modules[bias_parent_name], bias_name, scaled_bias)
