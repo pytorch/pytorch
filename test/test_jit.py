@@ -10562,7 +10562,7 @@ dedent """
         with self.assertRaisesRegex(RuntimeError, r'Expected a value of'
                                     r' type \'List\[int\]\' for argument'
                                     r' \'size\' but instead found type '
-                                    r'\'List\[Any\]\''):
+                                    r'\'List\[Union\[List\[int\], int\]\]'):
             @torch.jit.script
             def f6(a):
                 a.expand(size=[3, [4]])
