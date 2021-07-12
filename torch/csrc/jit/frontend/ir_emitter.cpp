@@ -1401,6 +1401,10 @@ struct to_ir {
     auto* comprehension_block = n->addBlock();
     pushFrame(comprehension_block);
     WithInsertPoint guard(comprehension_block);
+
+    std::stringstream ss;
+    std::stringstream err;
+
     auto emit_body = [&]() {
       auto k = emitExpr(dc.key());
       auto v = emitExpr(dc.value());
@@ -1409,9 +1413,6 @@ struct to_ir {
       // annotatated key/value types
       if (type_hint) {
         DictTypePtr dict_type_hint = type_hint->expect<DictType>();
-
-        std::stringstream ss;
-        std::stringstream err;
 
         // Special-case annotations that are a subset of NumberType
         // for backwards compatibility, e.g. `x: Dict[int, T]` should
@@ -3838,8 +3839,9 @@ struct to_ir {
         }
         AT_ASSERT(key_type != nullptr && value_type != nullptr);
 
+        std::stringstream ss;
         for (size_t i = 0; i < keys.size(); ++i) {
-          std::stringstream ss;
+          ss.str("");
           if (!keys[i]->type()->isSubtypeOfExt(key_type, &ss)) {
             throw ErrorReport(key_trees[i])
                 << "Dict keys must contain "
