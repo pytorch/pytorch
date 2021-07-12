@@ -5782,8 +5782,8 @@ class DistributedTest:
             single_obj_list = [objects[0]]
             if self.rank != src_rank:
                 self.assertNotEqual(single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0])
-
-            dist.broadcast_object_list(single_obj_list, src=0, group=None, device=torch.device(next_rank))
+            device = torch.device('cpu') if backend == 'gloo' else torch.device(next_rank)
+            dist.broadcast_object_list(single_obj_list, src=0, group=None, device=device)
             self.assertEqual(single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0])
 
             # Single object test: backward compatibility with device unspecified
