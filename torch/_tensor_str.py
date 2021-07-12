@@ -235,7 +235,8 @@ def _tensor_str(self, indent):
     summarize = self.numel() > PRINT_OPTS.threshold
 
     # handle the negative bit
-    self = self.resolve_neg()
+    if self.is_neg():
+        self = self.resolve_neg()
 
     if self.dtype is torch.float16 or self.dtype is torch.bfloat16:
         self = self.float()
