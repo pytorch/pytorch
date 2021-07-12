@@ -7563,7 +7563,7 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, input):
                 amax = torch.ones(4)
                 scale = amax / 127.
-                zero_point = torch.zeros_like(amax, dtype=torch.long)
+                zero_point = torch.zeros_like(amax, dtype=torch.int)
                 # Quantize twice to test differnet branches
                 y = torch.fake_quantize_per_channel_affine(input, scale, zero_point, 1, 0, 255)
                 return torch.fake_quantize_per_channel_affine(y, scale, zero_point, 1, -128, 127)
