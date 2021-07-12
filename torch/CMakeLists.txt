@@ -347,7 +347,7 @@ else()
 endif()
 
 add_custom_command(
-  OUTPUT ${TORCH_SRC_DIR}/version.py
+  OUTPUT ${TORCH_SRC_DIR}/_version.py
   COMMAND
     "${PYTHON_EXECUTABLE}" -c \"from pathlib import Path\; Path('${TOOLS_PATH}/generate_torch_version.py').touch()\"
   COMMAND
@@ -360,6 +360,6 @@ add_custom_command(
 )
 add_custom_target(
   gen_torch_version ALL
-  DEPENDS ${TORCH_SRC_DIR}/version.py
+  DEPENDS ${TORCH_SRC_DIR}/_version.py
 )
 add_dependencies(torch_python gen_torch_version)
