@@ -1357,7 +1357,6 @@ ProcessedNode::ProcessedNode(
   }
   {
     const Operator& op = node->getOperator();
-    TORCH_CHECK(op.hasOperation());
     op_ = op.getOperation(node);
     VLOG(1) << "Fallback interpreter for node: " << PrintNode(node);
   }
