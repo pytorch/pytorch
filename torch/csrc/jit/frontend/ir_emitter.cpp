@@ -1419,7 +1419,7 @@ struct to_ir {
         bool is_key_subtype =
             k->type()->isSubtypeOfExt(dict_type_hint->getKeyType(), &ss) ||
             (k->type() == NumberType::get() &&
-             dict_type_hint->getKeyType()->isSubtypeOfExt(k->type()));
+             dict_type_hint->getKeyType()->isSubtypeOfExt(k->type(), &ss));
 
         if (!is_key_subtype) {
           err << "Dict type annotation `" << dict_type_hint->repr_str()
@@ -1437,7 +1437,7 @@ struct to_ir {
         bool is_value_subtype =
             v->type()->isSubtypeOfExt(dict_type_hint->getValueType(), &ss) ||
             (v->type() == NumberType::get() &&
-             dict_type_hint->getValueType()->isSubtypeOfExt(v->type()));
+             dict_type_hint->getValueType()->isSubtypeOfExt(v->type(), &ss));
 
         if (!is_value_subtype) {
           err << "Dict type annotation `" << dict_type_hint->repr_str()
