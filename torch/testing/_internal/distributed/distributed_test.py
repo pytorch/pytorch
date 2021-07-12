@@ -499,9 +499,7 @@ class TestDistBackend(MultiProcessTestCase):
         Barrier.init()
         # Skip return code checking for following tests as they are expected to
         # crash a process due to NCCL_ASYNC_ERROR_HANDLING.
-        self.skip_return_code_checks = [
-            self.test_ddp_model_diff_across_ranks.__wrapped__,
-        ]
+        self.skip_return_code_checks = []
 
     def tearDown(self):
         cleanup_temp_dir()
@@ -6442,6 +6440,17 @@ class DistributedTest:
         @skip_if_lt_x_gpu(2)
         @skip_if_rocm
         def test_ddp_model_diff_across_ranks(self):
+            group_gloo = dist.new_group(
+                timeout=timedelta(seconds=60),
+                backend=dist.Backend.GLOO
+            )
+            # Set NCCL_BLOCKING_WAIT and use a new NCCL group to improve test
+            # determinism.
+            os.environ["NCCL_BLOCKING_WAIT"] = "1"
+            group_to_use = dist.new_group(
+                backend=dist.get_backend(),
+                timeout=timedelta(seconds=5)
+            )
             torch.cuda.set_device(self.rank)
             # Creates network with different sized embedding table on different
             # ranks. This should throw an error during DDP init.
@@ -6454,8 +6463,11 @@ class DistributedTest:
                 dist._get_debug_mode() == dist._DistributedDebugLevel.DETAIL
             )
             rank_0_ctx = (
-                suppress()
-                if dist.get_backend() == dist.Backend.NCCL and not is_detail_dbg_mode
+                self.assertRaisesRegex(
+                    RuntimeError,
+                    "Caught collective operation timeout"
+                )
+                if dist.get_backend(group_to_use) == dist.Backend.NCCL and not is_detail_dbg_mode
                 # Gloo can raise various exception messages, so just assert
                 # Runtime error here.
                 else self.assertRaises(RuntimeError)
@@ -6467,9 +6479,15 @@ class DistributedTest:
             )
             with ctx:
                 net = torch.nn.parallel.DistributedDataParallel(
-                    net.to(self.rank), device_ids=[self.rank]
+                    net.to(self.rank), device_ids=[self.rank], process_group=group_to_use,
                 )
-                dist.barrier()
+                # Should only be run by rank 0, and blocking_wait catches and
+                # reports exception.
+                dist.barrier(group_to_use)
+
+            # Perform gloo-based barrier to ensure one rank doesn't exit test
+            # early which causes failure with Barrier.sync.
+            dist.barrier(group_gloo)
 
         def _test_output_unused_in_loss(self, module_cls, gradient_as_bucket_view):
             model = module_cls()
