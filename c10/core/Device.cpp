@@ -53,7 +53,7 @@ DeviceType parse_type(const std::string& device_string) {
   auto device = std::find_if(
       types.begin(),
       types.end(),
-      [device_string](const std::pair<const char*, DeviceType>& p) {
+      [&device_string](const std::pair<const char*, DeviceType>& p) {
         return p.first == device_string;
       });
   if (device != types.end()) {
