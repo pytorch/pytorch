@@ -39,7 +39,15 @@ TORCH_META_FUNC(nll_loss_forward)
       " but got weight tensor of shape: ",
       weight.sizes());
 
-  set_output(0, {0}, self.options());
+  const auto n_dims = self.dim();
+  const auto batch_size = self.size(0);
+
+  if (reduction == Reduction::None && n_dims == 2) {
+    set_output(0, {batch_size}, self.options());
+  } else {
+    set_output(0, {}, self.options());
+  }
+
   set_output(1, {}, self.options());
 }
 } // namespace meta

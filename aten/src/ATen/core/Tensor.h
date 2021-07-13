@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/core/TensorBody.h>
+#include <c10/util/Exception.h>
 
 namespace at {
 class TORCH_API OptionalTensorRef {
@@ -9,7 +10,9 @@ class TORCH_API OptionalTensorRef {
   OptionalTensorRef(const Tensor& src)
       : ref_(c10::intrusive_ptr<TensorImpl>(
             src.unsafeGetTensorImpl(),
-            c10::raw::DontIncreaseRefcount{})) {}
+            c10::raw::DontIncreaseRefcount{})) {
+    TORCH_INTERNAL_ASSERT(src.defined());
+  }
 
   ~OptionalTensorRef() {
     ref_.unsafeReleaseTensorImpl();
