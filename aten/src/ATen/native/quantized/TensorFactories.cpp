@@ -116,7 +116,7 @@ Tensor empty_quantized(
     c10::optional<c10::MemoryFormat> memory_format) {
   TensorOptions specified_options =
       TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
-  
+
   TORCH_CHECK(
       !(specified_options.has_memory_format() && memory_format.has_value()),
       "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
