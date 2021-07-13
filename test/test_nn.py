@@ -13144,7 +13144,6 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(x.grad, ref_x.grad)
 
     @onlyCUDA   # Test if CPU and GPU results match
-    @unittest.skipIf(True, "temporarily disabled")
     def test_ReflectionPad3d_large(self, device):
         shapes = ([2, 1000, 7, 7, 7], [1000, 2, 7, 7, 7])
         pad = (1, 2, 3, 4, 5, 6)
