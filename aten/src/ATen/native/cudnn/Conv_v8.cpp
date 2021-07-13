@@ -102,13 +102,13 @@ void filterEngineConfigs(
 {
   auto filter = [=](cudnnBackendDescriptor_t c) {
     if (deterministic) {
-      if (cudnn_frontend::hasNumericalNote<CUDNN_NUMERICAL_NOTE_NONDETERMINISTIC>(c)) return true;
+      if (cudnn_frontend::hasNumericalNote<CUDNN_NUMERICAL_NOTE_NONDETERMINISTIC>(c)) {return true;}
     }
-    if (scalar_type == kFloat && !allow_tf32) {
-      if (cudnn_frontend::hasNumericalNote<CUDNN_NUMERICAL_NOTE_TENSOR_CORE>(c)) return true;
+    if (cudnn_frontend::hasNumericalNote<CUDNN_NUMERICAL_NOTE_DOWN_CONVERT_INPUTS>(c)) {return true;}
+    if (scalar_type == kFloat) {
+      // TODO: check under which conditions this is OK
+      if (!allow_tf32 && cudnn_frontend::hasNumericalNote<CUDNN_NUMERICAL_NOTE_TENSOR_CORE>(c)) {return true;}
     }
-    // TODO: check under which conditions this is OK
-    if (cudnn_frontend::hasNumericalNote<CUDNN_NUMERICAL_NOTE_DOWN_CONVERT_INPUTS>(c)) return true;
     return false;
   };
   cudnn_frontend::filter(from, to, filter);
@@ -222,6 +222,7 @@ size_t get_available_workspace() {
 }
 
 auto get_plans_from_find(const cudnnHandle_t handle, const cudnnBackendDescriptorType_t desc, const Tensor& x, const Tensor& y, const Tensor& w, const CacheKey& key, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, const bool deterministic, const bool allow_tf32) {
+  if (debug) {std::cout << "get plans from find" << std::endl;}
   auto opGraph = build_opgraph(handle, desc, x, y, w, key, padding, stride, dilation);
   void *data_ptrs[] = {x.data_ptr(), y.data_ptr(), w.data_ptr()};
   int64_t uids[] = {'x', 'y', 'w'};
@@ -358,6 +359,9 @@ void run_single_conv(const cudnnBackendDescriptorType_t operation,
                                                                  x, y, w, key,
                                                                  padding, stride, dilation,
                                                                  deterministic, allow_tf32);
+    // Replicate v7 behavior: clear cached blocks as benchmark incurs
+    // significant memory consumptiont that is not needed after this step
+    c10::cuda::CUDACachingAllocator::emptyCache();
     try_plans(plans, key, handle, x, y, w);
   }
 }
