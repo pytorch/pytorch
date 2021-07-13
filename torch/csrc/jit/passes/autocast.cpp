@@ -311,6 +311,13 @@ void handleBlock(Block* block, bool initial_state) {
       case aten::index_put:
       case aten::stack:
       case aten::tensordot:
+      // add, sub, mul, div were added to autocast jit, because aten implicit
+      // type promotion is not visible to JIT and could cause dtype mismatch on
+      // backward
+      case aten::add:
+      case aten::sub:
+      case aten::mul:
+      case aten::div:
         if (current_state() && !node->schema().is_mutable()) {
           castInputsToWidestType(node);
         }
