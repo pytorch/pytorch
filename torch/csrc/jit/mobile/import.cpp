@@ -677,14 +677,19 @@ mobile::Module _load_for_mobile_impl(
 
   try {
     mobile::Module result = deserializer.deserialize(device, extra_files);
-    std::unordered_map<std::string, std::string> copied_metadata =
-        result.metadata();
-    if (result.metadata().find("model_name") == result.metadata().end()) {
-      copied_metadata["model_name"] = result.name();
-    }
-    copied_metadata["model_size"] = c10::guts::to_string(model_size);
     if (observer) {
-      observer->onExitLoadModel(instance_key, copied_metadata);
+      auto defaultExtraFileList = observer->getDefaultExtraFiles();
+      // Copy extra_files to metadata_map
+      auto metadata_map = extra_files;
+      for (const auto& fileName : defaultExtraFileList) {
+        metadata_map.insert(std::make_pair(fileName, ""));
+      }
+      // Deserialize mobile_info.json and producer_info.json
+      deserializer.deserialize_only_extra(device, metadata_map);
+      metadata_map.insert(std::make_pair("model_name", result.name()));
+      metadata_map.insert(
+          std::make_pair("model_size", c10::guts::to_string(model_size)));
+      observer->onExitLoadModel(instance_key, metadata_map);
     }
     guard.release();
     return result;
