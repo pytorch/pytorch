@@ -58,8 +58,20 @@ Tensor empty_per_channel_affine_quantized(
   TORCH_CHECK(
       options.has_dtype(),
       "Must provide data type for Tensor creation functions.");
+
+  Tensor new_scales;
+  Tensor new_zero_points;
+  if(options.device().type() == DeviceType::CPU){
+    new_scales=scales.cpu();
+    new_zero_points=zero_points.cpu();
+  } else {
+    new_scales=scales.cuda();
+    new_zero_points=zero_points.cuda();
+  }
+
   QuantizerPtr quantizer = make_per_channel_affine_quantizer(
-          scales, zero_points, axis, typeMetaToScalarType(options.dtype()));
+          new_scales, new_zero_points, axis, typeMetaToScalarType(options.dtype()));
+
   return new_qtensor(
       size,
       options,
@@ -104,7 +116,7 @@ Tensor empty_quantized(
     c10::optional<c10::MemoryFormat> memory_format) {
   TensorOptions specified_options =
       TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
-
+  
   TORCH_CHECK(
       !(specified_options.has_memory_format() && memory_format.has_value()),
       "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
