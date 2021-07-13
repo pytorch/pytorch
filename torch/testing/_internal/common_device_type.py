@@ -798,7 +798,9 @@ class enableLayout(_TestParametrizer):
                  only_cuda: bool = False,
                  skip_cuda_if_no_cusparse: bool = True):
         if not isinstance(layout, torch.layout):
-            raise RuntimeError("Expected to get torch.layout as layout, but got ", layout)
+            raise RuntimeError(f"Expected to get torch.layout as layout, but got {type(layout)} instead.")
+        if layout == torch.strided:
+            raise RuntimeError(f"This test parametrization is not intended to be used with torch.strided layout.")
         self.layout = layout
         self.dtypes = set(dtypes) if dtypes is not None else None
         self.dtypes_cpu = set(dtypes_cpu) if dtypes_cpu is not None else None
