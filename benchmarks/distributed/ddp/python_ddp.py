@@ -83,19 +83,53 @@ class PythonDDP(nn.Module):
             else:
                 print('Warning current param should requires_grad as True')
 
-    # TODO(bowangbj): Rename for better name.
     def _on_param_grad_ready(self, param):
         print('== bowangbj _on_param_grad_ready invoked')
 
+        # Get the bucket holding param and its offset.
         bucket = self.param_to_bucket.get(param)
         assert bucket is not None
         offset = bucket.param_to_offset.get(param)
         assert offset is not None
-        print('bowangbj bucket is ' + str(bucket))
 
-        # TODO(bowangbj): Copy grad from param to bucket
-        # TODO(bowangbj): increate n_ready_grad count to bucket
-        # TODO(bowangbj): kickoff all_reduce ASYNC flow
+        # Allocate bucket buffer when not-initiated yet. This happens mainly for the
+        # 1st ready param in the bucket during backward.
+        if bucket.buffer is None:
+            print('bowangbj buffer not ready, allocating')
+            bucket.buffer = param.new(bucket.total_elements)
+        else:
+            print('bowang bj bucket buffer allocated')
+
+        # Copy grad to bucket
+        print('bowang copying grad to bucket')
+        sz = param.numel()
+        if param.grad is not None:
+            # TODO(bowangbj) : remve debug info.
+            for _ in range(1000):
+                print('bowang grad is not None')
+            bucket.buffer[offset : offset + sz].copy_(param.grad.data.view(-1))
+        else:
+            print('WARNING param.grad is None. Zeroing it.')
+            bucket.buffer[offset : offset + sz].zero_()
+
+        # Increment ready_param_grad_count by 1. Note each param triggers its
+        # hook once.
+        bucket.ready_param_grad_count += 1
+
+        bucket_is_full = bucket.ready_param_grad_count == len(bucket.param_to_offset)
+        if bucket_is_full:
+            print('bowangbj bucket_is_full')
+            bucket.buffer.div_(self.world_size)
+            utils.all_reduce(bucket.buffer, self.process_group)
+            # copy reduced-grad back into their original place
+            for cur_p, cur_offset in bucket.param_to_offset.items():
+                sz = cur_p.numel()
+                if cur_p.grad is not None:
+                    cur_p.grad.data.copy_(bucket.buffer[cur_offset : cur_offset + sz].view_as(cur_p))
+                else:
+                    cur_p.grad = bucket.buffer[cur_offset : cur_offset + sz].view_as(cur_p).clone()
+
+        # TODO(bowangbj): kickoff all_reduce ASYNC flow - False and True
 
     def forward(self, *inputs, **kwargs):
         return self.module(*inputs, **kwargs)
@@ -108,6 +142,11 @@ class PythonDDP(nn.Module):
         gradients. There is no automatic hook like c10d.
         """
 
+        # print('bowangbj === all_reduce_grads === invoked')
+        # for p, bucket in self.param_to_bucket.items():
+        #     n = p.numel()
+        #     bucket_is_full = bucket.ready_param_grad_count == len(bucket.param_to_offset)
+        #     assert bucket_is_full
         pass
         # def all_reduce_params(params):
         #     buffer = self.buffer

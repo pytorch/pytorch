@@ -2,8 +2,8 @@
 # [Done] 2 Measure forward and backward -- collect the metrics
 # [Done] 3 Pure Python DDP -- copy research code -- measure and compare
 # [Done] 3.1 Process Group - Not work -- Bo can refer to Shen's benchmark code. use gloo instead
+# 4. Debug why the hook is not invoked correctly
 # 4 Modify Pure Python -- re-run
-# algo - Build ParamBucket Mapping.
 # 5 Send out code review
 
 import legacy_distributed_data_parallel as legacy_ddp
@@ -113,7 +113,7 @@ def run_ddp(rank, world_size, epochs, ddp_option):
         start.record()
         loss_fn(outputs, labels).backward()
         # Reduce all grads in sync.
-        if (ddp_option == DDPOption.LEGACY_DISTRIBUTED_DATA_PARALLEL):
+        if ddp_option != DDPOption.DDP_CPP_CORE:
             ddp_model.all_reduce_grads()
         optimizer.step()
         optimizer.zero_grad()
