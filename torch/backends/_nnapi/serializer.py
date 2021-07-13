@@ -935,7 +935,7 @@ class _NnapiSerializer(object):
         assert node.inputsSize() == 3
         assert node.outputsSize() == 1
 
-        in_id, in_oper = self.get_tensor_operand_by_jitval_fixed_size(node.inputsAt(0))
+        in_id, in_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
 
         start_ctype, start_dim = self.get_constant_value(node.inputsAt(1), "IntType")
         end_ctype, end_dim = self.get_constant_value(node.inputsAt(2), "IntType")
@@ -956,23 +956,26 @@ class _NnapiSerializer(object):
             in_oper.shape[end_dim + 1:]
         )
 
-        # TODO(axit): To add support for runtime
-        # if any(dim == 0 for dim in in_oper.shape[start_dim: end_dim + 1]):
-        #     raise Exception("Flattened dims can't be flexible")
-        # non_flattened_dims = in_oper.shape[: start_dim] + in_oper.shape[end_dim + 1:]
-        # if non_flattened_dims.count(0) > 1:
-        #     raise Exception("Only 1 dim can be flexible")
-        # out_shape = tuple(
-        #     dim if dim != 0 else -1
-        #     for dim in out_shape
-        # )
+        if any(dim == 0 for dim in in_oper.shape[start_dim: end_dim + 1]):
+            raise Exception("Flattening flexible dims is not supported yet")
+        non_flattened_dims = in_oper.shape[: start_dim] + in_oper.shape[end_dim + 1:]
+        if non_flattened_dims.count(0) > 1:
+            raise Exception("Only 1 dim can be flexible")
 
         out_oper = in_oper._replace(shape=out_shape)
         out_id = self.add_tensor_operand(node.outputsAt(0), out_oper)
 
+        for idx, dim in enumerate(out_shape):
+            if dim == 0:
+                self.forward_operand_shape(out_id, idx, in_id, in_oper.shape.index(0))
+
+        inputs_1 = tuple(
+            dim if dim != 0 else -1
+            for dim in out_shape
+        )
         inputs = [None] * 2
         inputs[0] = in_id
-        inputs[1] = self.add_immediate_int_vector(out_shape)
+        inputs[1] = self.add_immediate_int_vector(inputs_1)
 
         outputs = [None] * 1
         outputs[0] = out_id
