@@ -3582,6 +3582,18 @@ Tensor lu_backward_base(
   const Tensor& P,
   const Tensor& L,
   const Tensor& U) {
+  auto eps = at::native::_get_epsilon(c10::toValueType(self.scalar_type()));
+  auto eps_tensor = at::tensor(eps, self.options());
+  auto condition_diagonal = [&](const Tensor& x) {
+    auto x_diag = x.diagonal(0, -2, -1);
+    auto x_diag_conditioned = at::where(
+      x_diag == 0.0,
+      eps_tensor,
+      x_diag
+    );
+    x_diag.copy_(x_diag_conditioned);
+  };
+
   auto L_grad = grads[0];
   auto U_grad = grads[1];
 
@@ -3593,6 +3605,7 @@ Tensor lu_backward_base(
   auto L_square_H = L_square.transpose(-2, -1).conj();
   auto L_grad_square = L_grad.narrow(-2, 0, k).narrow(-1, 0, k);
   auto U_square = U.narrow(-2, 0, k).narrow(-1, 0, k);
+  condition_diagonal(U_square);
   auto U_square_H = U_square.transpose(-2, -1).conj();
   auto U_grad_square = U_grad.narrow(-2, 0, k).narrow(-1, 0, k);
 
