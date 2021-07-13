@@ -226,11 +226,11 @@ default_equalization_qconfig = EqualizationQConfig(input_activation=input_equali
 
 
 def fused_module_supports_equalization(module) -> bool:
-    """ Checks if the fused node supports equalization. """ 
+    """ Checks if the fused node supports equalization. """
     return type(module) in [nni.LinearReLU, nni.ConvReLU1d, nni.ConvReLU2d, nni.ConvReLU3d]
 
 def nn_module_supports_equalization(module) -> bool:
-    """ Checks if the torch.nn node supports equalization. """ 
+    """ Checks if the torch.nn node supports equalization. """
     return type(module) in [nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d]
 
 def node_supports_equalization(node: Node, modules) -> bool:
