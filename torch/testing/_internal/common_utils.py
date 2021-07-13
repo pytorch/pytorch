@@ -23,7 +23,6 @@ import warnings
 import random
 import contextlib
 import shutil
-import datetime
 import pathlib
 import socket
 import subprocess
@@ -37,7 +36,6 @@ from copy import deepcopy
 from numbers import Number
 import tempfile
 import json
-from urllib.request import urlopen
 import __main__  # type: ignore[import]
 import errno
 from typing import cast, Any, Dict, Iterable, Iterator, Optional, Union
@@ -68,6 +66,12 @@ IS_IN_CI = os.getenv('IN_CI') == '1'
 IS_SANDCASTLE = os.getenv('SANDCASTLE') == '1' or os.getenv('TW_JOB_USER') == 'sandcastle'
 IS_FBCODE = os.getenv('PYTORCH_TEST_FBCODE') == '1'
 IS_REMOTE_GPU = os.getenv('PYTORCH_TEST_REMOTE_GPU') == '1'
+
+DISABLED_TESTS_FILE = '.pytorch-disabled-tests.json'
+SLOW_TESTS_FILE = '.pytorch-slow-tests.json'
+
+slow_tests_dict: Optional[Dict[str, Any]] = None
+disabled_tests_dict: Optional[Dict[str, Any]] = None
 
 class ProfilingMode(Enum):
     LEGACY = 1
@@ -164,6 +168,8 @@ parser.add_argument('--save-xml', nargs='?', type=str,
 parser.add_argument('--discover-tests', action='store_true')
 parser.add_argument('--log-suffix', type=str, default="")
 parser.add_argument('--run-parallel', type=int, default=1)
+parser.add_argument('--import-slow-tests', type=str, nargs='?', const=SLOW_TESTS_FILE)
+parser.add_argument('--import-disabled-tests', type=str, nargs='?', const=DISABLED_TESTS_FILE)
 
 args, remaining = parser.parse_known_args()
 if args.jit_executor == 'legacy':
@@ -177,6 +183,8 @@ else:
     GRAPH_EXECUTOR = cppProfilingFlagsToProfilingMode()
 
 
+IMPORT_SLOW_TESTS = args.import_slow_tests
+IMPORT_DISABLED_TESTS = args.import_disabled_tests
 LOG_SUFFIX = args.log_suffix
 RUN_PARALLEL = args.run_parallel
 TEST_BAILOUTS = args.test_bailouts
@@ -263,6 +271,16 @@ def sanitize_test_filename(filename):
     return re.sub('/', r'.', strip_py)
 
 def run_tests(argv=UNITTEST_ARGS):
+    # import test files.
+    if IMPORT_SLOW_TESTS:
+        global slow_tests_dict
+        with open(IMPORT_SLOW_TESTS, 'r') as fp:
+            slow_tests_dict = json.load(fp)
+    if IMPORT_DISABLED_TESTS:
+        global disabled_tests_dict
+        with open(IMPORT_DISABLED_TESTS, 'r') as fp:
+            disabled_tests_dict = json.load(fp)
+    # Determine the test launch mechanism
     if TEST_DISCOVER:
         suite = unittest.TestLoader().loadTestsFromModule(__main__)
         test_cases = discover_test_cases_recursively(suite)
@@ -842,93 +860,16 @@ try:
 except ImportError:
     print('Fail to import hypothesis in common_utils, tests are not derandomized')
 
-
-FILE_CACHE_LIFESPAN_SECONDS = datetime.timedelta(hours=3).seconds
-
-def fetch_and_cache(name: str, url: str):
-    """
-    Some tests run in a different process so globals like `slow_test_dict` won't
-    always be filled even though the test file was already downloaded on this
-    machine, so cache it on disk
-    """
-    path = os.path.join(tempfile.gettempdir(), name)
-
-    def is_cached_file_valid():
-        # Check if the file is new enough (say 1 hour for now). A real check
-        # could make a HEAD request and check/store the file's ETag
-        fname = pathlib.Path(path)
-        now = datetime.datetime.now()
-        mtime = datetime.datetime.fromtimestamp(fname.stat().st_mtime)
-        diff = now - mtime
-        return diff.total_seconds() < FILE_CACHE_LIFESPAN_SECONDS
-
-    if os.path.exists(path) and is_cached_file_valid():
-        # Another test process already downloaded the file, so don't re-do it
-        with open(path, "r") as f:
-            return json.load(f)
-    try:
-        contents = urlopen(url, timeout=1).read().decode('utf-8')
-        with open(path, "w") as f:
-            f.write(contents)
-        return json.loads(contents)
-    except Exception as e:
-        print(f'Could not download {url} because of error {e}.')
-        return {}
-
-
-slow_tests_dict: Optional[Dict[str, float]] = None
-def check_slow_test_from_stats(test):
-    global slow_tests_dict
-    if slow_tests_dict is None:
-        if not IS_SANDCASTLE:
-            url = "https://raw.githubusercontent.com/pytorch/test-infra/master/stats/slow-tests.json"
-            slow_tests_dict = fetch_and_cache(".pytorch-slow-tests.json", url)
-        else:
-            slow_tests_dict = {}
+def check_if_enable(test: unittest.TestCase):
     test_suite = str(test.__class__).split('\'')[1]
     test_name = f'{test._testMethodName} ({test_suite})'
-
-    if test_name in slow_tests_dict:
+    if slow_tests_dict is not None and test_name in slow_tests_dict:
         getattr(test, test._testMethodName).__dict__['slow_test'] = True
         if not TEST_WITH_SLOW:
             raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
-
-
-disabled_test_from_issues: Optional[Dict[str, Any]] = None
-def check_disabled(test_name):
-    global disabled_test_from_issues
-    if disabled_test_from_issues is None:
-        _disabled_test_from_issues: Dict = {}
-
-        def read_and_process():
-            url = 'https://raw.githubusercontent.com/pytorch/test-infra/master/stats/disabled-tests.json'
-            the_response = fetch_and_cache(".pytorch-disabled-tests", url)
-            for item in the_response['items']:
-                title = item['title']
-                key = 'DISABLED '
-                if title.startswith(key):
-                    test_name = title[len(key):].strip()
-                    body = item['body']
-                    platforms_to_skip = []
-                    key = 'platforms:'
-                    for line in body.splitlines():
-                        line = line.lower()
-                        if line.startswith(key):
-                            pattern = re.compile(r"^\s+|\s*,\s*|\s+$")
-                            platforms_to_skip.extend([x for x in pattern.split(line[len(key):]) if x])
-                    _disabled_test_from_issues[test_name] = (item['html_url'], platforms_to_skip)
-
-        if not IS_SANDCASTLE and os.getenv("PYTORCH_RUN_DISABLED_TESTS", "0") != "1":
-            try:
-                read_and_process()
-                disabled_test_from_issues = _disabled_test_from_issues
-            except Exception:
-                print("Couldn't download test skip set, leaving all tests enabled...")
-                disabled_test_from_issues = {}
-
-    if disabled_test_from_issues is not None:
-        if test_name in disabled_test_from_issues:
-            issue_url, platforms = disabled_test_from_issues[test_name]
+    if not IS_SANDCASTLE and disabled_tests_dict is not None:
+        if test_name in disabled_tests_dict:
+            issue_url, platforms = disabled_tests_dict[test_name]
             platform_to_conditional: Dict = {
                 "mac": IS_MACOS,
                 "macos": IS_MACOS,
@@ -940,7 +881,9 @@ def check_disabled(test_name):
                     f"Test is disabled because an issue exists disabling it: {issue_url}" +
                     f" for {'all' if platforms == [] else ''}platform(s) {', '.join(platforms)}." +
                     " To enable, set the environment variable PYTORCH_RUN_DISABLED_TESTS=1")
-
+    if TEST_SKIP_FAST:
+        if not getattr(test, test._testMethodName).__dict__.get('slow_test', False):
+            raise unittest.SkipTest("test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST")
 
 # Acquires the comparison dtype, required since isclose
 # requires both inputs have the same dtype, and isclose is not supported
@@ -1106,12 +1049,7 @@ class TestCase(expecttest.TestCase):
             result.stop()
 
     def setUp(self):
-        check_slow_test_from_stats(self)
-        if TEST_SKIP_FAST:
-            if not getattr(self, self._testMethodName).__dict__.get('slow_test', False):
-                raise unittest.SkipTest("test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST")
-        check_disabled(str(self))
-
+        check_if_enable(self)
         set_rng_seed(SEED)
 
     @staticmethod
