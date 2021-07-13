@@ -13,5 +13,12 @@ namespace torch { namespace autograd {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Hooks are not implemented yet");
   }
 
-  PySavedVariableHooks::~PySavedVariableHooks() = default;
+  PySavedVariableHooks::~PySavedVariableHooks() {
+        // If python is already dead, leak the wrapped python objects
+    if (Py_IsInitialized()) {
+      pybind11::gil_scoped_acquire gil;
+      pack_hook_.release();
+      unpack_hook_.release();
+    }
+  }
 }}
