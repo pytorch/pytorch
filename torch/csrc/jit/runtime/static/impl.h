@@ -405,6 +405,8 @@ class ProcessedNode {
     return static_cast<bool>(fn_);
   }
 
+  bool verify_outputs_not_overlapping_with_immutable_inputs() const;
+
  private:
   Node* node_;
   c10::optional<Operation> op_;
