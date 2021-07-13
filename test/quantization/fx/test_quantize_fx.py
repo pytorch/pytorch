@@ -1,4 +1,3 @@
-from torch.quantization.fx.qconfig_utils import add_device_to_obs_ctr_in_qconfig
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
