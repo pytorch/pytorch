@@ -1,6 +1,5 @@
 #include <ATen/ATen.h>
 #include <c10/util/irange.h>
-#include <torch/script.h>
 #include <cmath>
 #include <tuple>
 #include <vector>
