@@ -905,6 +905,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/ao_sparse/quantized/cpu/qlinear_prepack.cpp",
     "aten/src/ATen/native/ao_sparse/quantized/cpu/qlinear_unpack.cpp",
     "aten/src/ATen/native/quantized/cpu/fbgemm_utils.cpp",
+    "aten/src/ATen/native/quantized/cpu/fused_obs_fake_quant.cpp",
     "aten/src/ATen/native/quantized/cpu/int_repr_quant.cpp",
     "aten/src/ATen/native/quantized/cpu/make_per_tensor_quantized_tensor.cpp",
     "aten/src/ATen/native/quantized/cpu/q_adaavgpool.cpp",

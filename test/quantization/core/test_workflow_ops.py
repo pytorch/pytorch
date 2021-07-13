@@ -1,4 +1,6 @@
 import torch
+import math
+from typing import Tuple
 from torch.quantization import (
     FakeQuantize,
     MovingAverageMinMaxObserver,
@@ -21,7 +23,7 @@ import unittest
 import numpy as np
 
 # Testing utils
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
@@ -148,6 +150,80 @@ def _fake_quantize_learnable_per_channel_affine_grad_reference(
         grad_scale[i] = grad_scale_i
         grad_zero_point[i] = grad_zp_i
     return grad_X, grad_scale, grad_zero_point
+
+def _get_tensor_min_max(
+        X: torch.Tensor,
+        running_min: float = float("inf"),
+        running_max: float = float("-inf"),
+        averaging_const: float = 0.01) -> Tuple[float, float]:
+    min_val = X.min().to(dtype=torch.float32).item()
+    max_val = X.max().to(dtype=torch.float32).item()
+
+    if not math.isinf(running_min):
+        min_val = running_min + averaging_const * (min_val - running_min)
+    if not math.isinf(running_max):
+        max_val = running_max + averaging_const * (max_val - running_max)
+
+    return min_val, max_val
+
+def _get_scale_zp(
+        min_val: float,
+        max_val: float,
+        dtype: torch.dtype,
+        reduce_range: bool = False,
+        preserve_sparsity: bool = False) -> Tuple[float, int]:
+    """
+    Calculate the quantization parameters (scale, zero_point)
+    based on the min and max element of the tensor
+    """
+    if dtype == torch.qint8:
+        if reduce_range:
+            qmin, qmax = -64, 63
+        else:
+            qmin, qmax = -128, 127
+    else:
+        if reduce_range:
+            qmin, qmax = 0, 127
+        else:
+            qmin, qmax = 0, 255
+
+    if min_val < 0 and max_val > 0 and preserve_sparsity:
+        symmetric_qmin = int(-((qmax - qmin) / 2 + 1))
+        symmetric_qmax = int((qmax - qmin) / 2)
+        max_scale = max(
+            abs(min_val / symmetric_qmin), abs(max_val / symmetric_qmax)
+        )
+        min_val = max_scale * symmetric_qmin
+        max_val = max_scale * symmetric_qmax
+    min_val = min(min_val, 0.0)
+    max_val = max(max_val, 0.0)
+    scale = (max_val - min_val) / (qmax - qmin)
+    if scale == 0.0 or math.isinf(1.0 / scale):
+        scale = 0.1
+        zero_point = 0
+
+    zero_point_from_min = qmin - min_val / float(scale)
+    zero_point_from_max = qmax - max_val / float(scale)
+    zero_point_from_min_error = abs(qmin) - abs(min_val / float(scale))
+    zero_point_from_max_error = abs(qmax) - abs(max_val / float(scale))
+    if zero_point_from_min_error < zero_point_from_max_error:
+        initial_zero_point = zero_point_from_min
+    else:
+        initial_zero_point = zero_point_from_max
+
+    if min_val < 0 and max_val > 0 and preserve_sparsity:
+        initial_zero_point = (qmin + qmax) / 2 + 1
+
+    nudged_zero_point = 0
+
+    if initial_zero_point < qmin:
+        nudged_zero_point = qmin
+    elif initial_zero_point > qmax:
+        nudged_zero_point = qmax
+    else:
+        nudged_zero_point = int(round(initial_zero_point))
+
+    return (scale, int(nudged_zero_point))
 
 NP_RANDOM_SEED = 19
 tolerance = 1e-6
@@ -869,6 +945,136 @@ class TestFakeQuantizeOps(TestCase):
                         Y, Y_prime, "Difference found between dequant+quant_per_channel and fake_quantize_per_channel")
                 self.assertTrue(test_was_run)
 
+class TestFusedObsFakeQuant(TestCase):
+    @given(  # device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
+        symmetric_quant=st.booleans())
+    @settings(deadline=None)
+    def test_fused_obs_fake_quant_moving_avg(self, symmetric_quant) -> None:
+        """
+        Tests the case where we call the fused_obs_fake_quant op multiple times
+        and update the running_min and max of the activation tensors.
+        """
+        device = 'cpu'  # TODO add cuda in future PR
+        in_running_min_ref = out_running_min_ref = float("inf")
+        in_running_min_op = torch.tensor(float("inf"), device=device)
+        in_running_max_ref = out_running_max_ref = float("-inf")
+        in_running_max_op = torch.tensor(float("-inf"), device=device)
+        avg_const = torch.tensor(0.01, dtype=torch.float, device=device)
+        scale = torch.tensor([1.0], device=device)
+        zero_point = torch.tensor([0], dtype=torch.int, device=device)
+        observer_on = fake_quant_on = 0
+
+        pt_op = torch.fused_moving_avg_obs_fake_quant
+        # enable observer after 2 iterations and fake_quant after 4 iterations
+        for i in range(10):
+            if i > 2:
+                observer_on = 1
+            if i > 4:
+                fake_quant_on = 1
+
+            x = torch.randn(5, 5, device=device)
+            out = pt_op(
+                x,
+                torch.tensor(observer_on, device=device),
+                torch.tensor(fake_quant_on, device=device),
+                avg_const,
+                in_running_min_op,
+                in_running_max_op,
+                scale,
+                zero_point,
+                0,
+                255,
+                0,
+                False,
+                symmetric_quant,
+            )
+            if observer_on:
+                (
+                    in_running_min_ref,
+                    in_running_max_ref,
+                ) = _get_tensor_min_max(
+                    x,
+                    running_min=in_running_min_ref,
+                    running_max=in_running_max_ref,
+                    averaging_const=0.01,
+                )
+
+            if fake_quant_on:
+                x_scale, x_zero_point = _get_scale_zp(
+                    in_running_min_ref,
+                    in_running_max_ref,
+                    torch.quint8,
+                    preserve_sparsity=symmetric_quant,
+                )
+                x_in = _fake_quantize_per_tensor_affine_reference(
+                    x, x_scale, x_zero_point, 0, 255
+                )
+                self.assertEqual(scale, x_scale)
+                self.assertEqual(zero_point, x_zero_point)
+            else:
+                x_in = x
+
+            self.assertEqual(in_running_min_ref, in_running_min_op)
+            self.assertEqual(in_running_max_ref, in_running_max_op)
+            torch.testing.assert_allclose(out, x_in)
+    '''
+    def test_fused_obs_fake_quant_backward_op(self) -> None:
+        device = 'cpu'
+        n = m = k = 5
+        input_shape = (m, n)
+        output_shape = (m, n)
+
+        x = torch.randn(input_shape, device=device, requires_grad=True)
+
+        dOut = torch.rand(output_shape, device=device)
+        running_min = torch.tensor(0.1, device=device)
+        running_max = torch.tensor(1.0, device=device)
+        avg_const = torch.tensor(0.01, dtype=torch.float, device=device)
+        scale = torch.tensor([1.0], device=device)
+        zero_point = torch.tensor([0], dtype=torch.int, device=device)
+
+        x_min, x_max = running_min.cpu().numpy(), running_max.cpu().numpy()
+        x_min, x_max = _get_tensor_min_max(
+            x,
+            running_min=running_min.item(),
+            running_max=running_max.item(),
+            averaging_const=0.01,
+        )
+        x_in = x
+        x_scale, x_zero_point = _get_scale_zp(
+            x_min, x_max, torch.quint8
+        )
+
+        x_scale = torch.tensor(x_scale, device=device)
+        x_zero_point = torch.tensor(x_zero_point, dtype=torch.int, device=device)
+        x_fake_quant = torch.fake_quantize_per_tensor_affine(
+            x_in, x_scale, x_zero_point, 0, 255
+        )
+        loss_ref = (x_fake_quant - dOut).sum()
+        grads_ref = torch.autograd.grad(loss_ref, [x_in])
+
+        # fused fake quant linear operator
+        pt_op = torch.fused_moving_avg_obs_fake_quant
+        out = pt_op(
+            x,
+            torch.tensor(1, device=device),
+            torch.tensor(1, device=device),
+            avg_const,
+            running_min,
+            running_max,
+            scale,
+            zero_point,
+            0,
+            255,
+            0,
+            False,
+        )
+        loss = (out - dOut).sum()
+        grads = torch.autograd.grad(loss, [x])
+        torch.testing.assert_allclose(
+            grads[0].cpu().detach(), grads_ref[0].cpu().detach()
+        )
+    '''
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
                        "\tpython test/test_quantization.py TESTNAME\n\n"
