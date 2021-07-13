@@ -799,8 +799,7 @@ class DeviceCachingAllocator {
     if (it == graph_pools.end()) {
       // mempool_id does not reference an existing pool. Make a new pool for
       // this capture.
-      graph_pools.emplace(std::make_pair(
-          mempool_id, std::unique_ptr<PrivatePool>(new PrivatePool)));
+      graph_pools.emplace(mempool_id, std::make_unique<PrivatePool>());
     } else {
       // mempool_id references an existing pool, which the current capture will
       // share. Check this pool is live (at least one other capture already
@@ -1339,8 +1338,7 @@ class THCCachingAllocator {
     if (size < device_count) {
       device_allocator.resize(device_count);
       for (const auto i : c10::irange(size, device_count)) {
-        device_allocator[i] = std::unique_ptr<DeviceCachingAllocator>(
-            new DeviceCachingAllocator());
+        device_allocator[i] = std::make_unique<DeviceCachingAllocator>();
       }
     }
   }
