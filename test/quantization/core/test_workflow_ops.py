@@ -946,15 +946,14 @@ class TestFakeQuantizeOps(TestCase):
                 self.assertTrue(test_was_run)
 
 class TestFusedObsFakeQuant(TestCase):
-    @given(  # device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
-        symmetric_quant=st.booleans())
+    @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
+           symmetric_quant=st.booleans())
     @settings(deadline=None)
-    def test_fused_obs_fake_quant_moving_avg(self, symmetric_quant) -> None:
+    def test_fused_obs_fake_quant_moving_avg(self, device, symmetric_quant) -> None:
         """
         Tests the case where we call the fused_obs_fake_quant op multiple times
         and update the running_min and max of the activation tensors.
         """
-        device = 'cpu'  # TODO add cuda in future PR
         in_running_min_ref = out_running_min_ref = float("inf")
         in_running_min_op = torch.tensor(float("inf"), device=device)
         in_running_max_ref = out_running_max_ref = float("-inf")
@@ -987,7 +986,7 @@ class TestFusedObsFakeQuant(TestCase):
                 0,
                 False,
                 symmetric_quant,
-            )
+            )[0]
             if observer_on:
                 (
                     in_running_min_ref,
@@ -1017,30 +1016,21 @@ class TestFusedObsFakeQuant(TestCase):
             self.assertEqual(in_running_min_ref, in_running_min_op)
             self.assertEqual(in_running_max_ref, in_running_max_op)
             torch.testing.assert_allclose(out, x_in)
-    '''
-    def test_fused_obs_fake_quant_backward_op(self) -> None:
-        device = 'cpu'
-        n = m = k = 5
+
+    @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),)
+    @settings(deadline=None)
+    def test_fused_obs_fake_quant_backward_op(self, device) -> None:
+        n = m = k = 10
         input_shape = (m, n)
         output_shape = (m, n)
 
         x = torch.randn(input_shape, device=device, requires_grad=True)
 
-        dOut = torch.rand(output_shape, device=device)
-        running_min = torch.tensor(0.1, device=device)
-        running_max = torch.tensor(1.0, device=device)
         avg_const = torch.tensor(0.01, dtype=torch.float, device=device)
         scale = torch.tensor([1.0], device=device)
         zero_point = torch.tensor([0], dtype=torch.int, device=device)
 
-        x_min, x_max = running_min.cpu().numpy(), running_max.cpu().numpy()
-        x_min, x_max = _get_tensor_min_max(
-            x,
-            running_min=running_min.item(),
-            running_max=running_max.item(),
-            averaging_const=0.01,
-        )
-        x_in = x
+        x_min, x_max = _get_tensor_min_max(x)
         x_scale, x_zero_point = _get_scale_zp(
             x_min, x_max, torch.quint8
         )
@@ -1048,33 +1038,36 @@ class TestFusedObsFakeQuant(TestCase):
         x_scale = torch.tensor(x_scale, device=device)
         x_zero_point = torch.tensor(x_zero_point, dtype=torch.int, device=device)
         x_fake_quant = torch.fake_quantize_per_tensor_affine(
-            x_in, x_scale, x_zero_point, 0, 255
+            x, x_scale, x_zero_point, 0, 255
         )
-        loss_ref = (x_fake_quant - dOut).sum()
-        grads_ref = torch.autograd.grad(loss_ref, [x_in])
 
-        # fused fake quant linear operator
         pt_op = torch.fused_moving_avg_obs_fake_quant
         out = pt_op(
             x,
             torch.tensor(1, device=device),
             torch.tensor(1, device=device),
             avg_const,
-            running_min,
-            running_max,
+            torch.tensor(x_min, device=device),
+            torch.tensor(x_max, device=device),
             scale,
             zero_point,
             0,
             255,
             0,
             False,
-        )
-        loss = (out - dOut).sum()
-        grads = torch.autograd.grad(loss, [x])
-        torch.testing.assert_allclose(
-            grads[0].cpu().detach(), grads_ref[0].cpu().detach()
-        )
-    '''
+        )[0]
+        # verify the output matches
+        torch.testing.assert_allclose(out, x_fake_quant)
+
+        # verify the gradient matches expectation of fake_quant op
+        dout = torch.rand_like(x, dtype=torch.float).to(device)
+        out.backward(dout)
+
+        dX = _fake_quantize_per_tensor_affine_grad_reference(
+            dout, x, x_scale, x_zero_point, 0, 255)
+        self.assertTrue(torch.allclose(dX, x.grad))
+        self.assertTrue(x.grad.dtype == torch.float32)
+
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
                        "\tpython test/test_quantization.py TESTNAME\n\n"

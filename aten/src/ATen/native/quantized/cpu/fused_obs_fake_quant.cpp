@@ -4,8 +4,6 @@
 #include <tuple>
 #include <vector>
 
-#include "ATen/core/interned_strings.h"
-//#include "caffe2/core/tensor.h"
 #ifdef USE_FBGEMM
 #include <fbgemm/QuantUtils.h>
 #endif
@@ -34,7 +32,7 @@ void calculate_moving_average(
   return;
 }
 
-at::Tensor choose_qparams_fake_quant(
+std::tuple<at::Tensor, at::Tensor> choose_qparams_fake_quant(
     const at::Tensor& x,
     const at::Tensor& inp_running_min,
     const at::Tensor& inp_running_max,
@@ -45,7 +43,7 @@ at::Tensor choose_qparams_fake_quant(
     int qmin,
     int qmax,
     int ch_axis) {
-  at::Tensor fake_quant_x;
+  std::tuple<at::Tensor, at::Tensor> fake_quant_out;
   at::Tensor x_min, x_max;
 
   if (per_row_fake_quant) {
@@ -79,7 +77,7 @@ at::Tensor choose_qparams_fake_quant(
       zero_point[i] = x_qparams.zero_point;
 #endif
     }
-    fake_quant_x = at::fake_quantize_per_channel_affine(
+    fake_quant_out = at::fake_quantize_per_channel_affine_cachemask(
         x, scale, zero_point, ch_axis, qmin, qmax);
   } else {
 #ifdef USE_FBGEMM
@@ -108,18 +106,19 @@ at::Tensor choose_qparams_fake_quant(
     scale[0] = x_qparams.scale;
     zero_point[0] = x_qparams.zero_point;
 #endif
-    fake_quant_x = at::fake_quantize_per_tensor_affine(
-        x, scale.item().toFloat(), zero_point.item().toInt(), qmin, qmax);
+    fake_quant_out =
+        at::_fake_quantize_per_tensor_affine_cachemask_tensor_qparams(
+            x, scale, zero_point, qmin, qmax);
   }
-  return fake_quant_x;
+  return fake_quant_out;
 }
 } // namespace
 
 namespace at {
 namespace native {
 
-Tensor fused_moving_avg_obs_fake_quant_cpu(
-    const at::Tensor& x,
+std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cpu(
+    const at::Tensor& self,
     const at::Tensor& observer_on,
     const at::Tensor& fake_quant_on,
     const at::Tensor& averaging_const,
@@ -132,16 +131,17 @@ Tensor fused_moving_avg_obs_fake_quant_cpu(
     const int64_t ch_axis,
     bool per_row_fake_quant,
     bool symmetric_quant) {
+  auto mask = at::ones_like(self, at::kBool, MemoryFormat::Preserve);
   // Calculate min/max
   auto observe = observer_on.item().toInt();
   if (observe) {
-    calculate_moving_average(x, averaging_const, running_min, running_max);
+    calculate_moving_average(self, averaging_const, running_min, running_max);
   }
   // Calculate qparams and fake_quantize
   auto fake_quant = fake_quant_on.item().toInt();
   if (fake_quant) {
-    auto fake_quant_x = choose_qparams_fake_quant(
-        x,
+    return choose_qparams_fake_quant(
+        self,
         running_min,
         running_max,
         scale,
@@ -151,9 +151,8 @@ Tensor fused_moving_avg_obs_fake_quant_cpu(
         quant_min,
         quant_max,
         ch_axis);
-    return fake_quant_x;
   }
-  return x;
+  return std::make_tuple(self, mask);
 }
 } // namespace native
 } // namespace at
