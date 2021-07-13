@@ -4882,10 +4882,6 @@ op_db: List[OpInfo] = [
            dtypesIfROCM=floating_types_and(torch.half),
            supports_inplace_autograd=False,
            supports_forward_ad=True,
-           skips=(
-               # Reference: https://github.com/pytorch/pytorch/issues/55589
-               SkipInfo('TestCommon', 'test_variant_consistency_eager'),
-           ),
            sample_inputs_func=sample_inputs_addmv),
     OpInfo('addbmm',
            dtypes=floating_types(),
