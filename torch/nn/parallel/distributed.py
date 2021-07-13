@@ -12,7 +12,6 @@ from torch.autograd import Function, Variable
 from torch.distributed.algorithms.join import (
     _Join,
     _Joinable,
-    _JoinConfig,
     _JoinHook,
 )
 from torch.utils._pytree import tree_flatten, tree_unflatten
