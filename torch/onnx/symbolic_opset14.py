@@ -3,7 +3,6 @@
 
 # This file exports ONNX ops for opset 14
 import torch
-from torch.onnx.symbolic_opset9 import _var_mean
 
 import torch.onnx.symbolic_helper as sym_help
 from torch.onnx.symbolic_helper import parse_args
