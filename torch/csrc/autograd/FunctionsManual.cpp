@@ -3673,8 +3673,17 @@ Tensor plu_backward_base(
     phi_complement.diagonal(0, -2, -1).fill_(0.0);
     phi.sub_(phi_complement);
 
+    // recall the result for X1_grad and X2_grad from above.
+    // It can be rewritten as
+    // (X1_grad | X2_grad) = P L^{-H} psi, where
+    // psi = (psi1 | psi2)
+    //     = ([L^H L_grad o 1_L + U1_grad U1^H o 1_U - U2_grad U2^H o 1_L] U1^{-H} | U2_grad),
+    // so it is filled in parts.
+    //
+    // fill psi2 in
     psi.narrow(-2, 0, k).narrow(-1, k, n - k).copy_(U_grad_complement);
 
+    // solve for psi1 to avoid the inversion of U1^H
     auto psi_principal = std::get<0>(at::triangular_solve(
       phi.transpose(-2, -1).conj(),
       U_principal,
@@ -3684,6 +3693,7 @@ Tensor plu_backward_base(
     )).transpose(-2, -1).conj();
     psi.narrow(-2, 0, k).narrow(-1, 0, k).copy_(psi_principal);
 
+    // solve for the grad to avoid the inversion of L1^H
     self_grad = P.matmul(
       std::get<0>(at::triangular_solve(
         psi,
@@ -3694,7 +3704,9 @@ Tensor plu_backward_base(
       ))
     );
   }
-  else if (m > n) {
+  else {
+    // variables psi and phi carry the same meaning as in the case (m <= n),
+    // albeit they are differently defined.
     auto L_complement = L.narrow(-2, k, m - k).narrow(-1, 0, k);
     auto L_grad_complement = L_grad.narrow(-2, k, m - k).narrow(-1, 0, k);
 
