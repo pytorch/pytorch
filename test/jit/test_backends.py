@@ -690,9 +690,9 @@ class TestBackendsWithCompiler(JitTestCase):
 """
 Unit Tests for Nnapi backend with delegate
 """
-class NnapiBackendPreLuTest(JitTestCase):
+class NnapiBackendPReLUTest(JitTestCase):
     """
-    Test lowering a simple Prelu module to Nnapi backend.
+    Test lowering a simple PRelU module to Nnapi backend.
     TODO: After Nnapi delegate is finished T91991928,
     add tests for running the module (currently only lowers the model)
     """
@@ -716,15 +716,21 @@ class NnapiBackendPreLuTest(JitTestCase):
             self.can_run_nnapi = False
 
     def test_execution(self):
-        # Change dtype from float64 to float32
-        torch.set_default_dtype(torch.float32)
-        args = torch.tensor([[1.0, -1.0, 2.0, -2.0]]).unsqueeze(-1).unsqueeze(-1)
+        # Save default dtype
         module = torch.nn.PReLU()
+        default_dtype = module.weight.dtype
+        # Change dtype to float32 (since float 64 is not supported)
+        torch.set_default_dtype(torch.float32)
+        module = torch.nn.PReLU()
+        args = torch.tensor([[1.0, -1.0, 2.0, -2.0]]).unsqueeze(-1).unsqueeze(-1)
 
         # Trace and lower PreLu module
         traced = torch.jit.trace(module, args)
         compile_spec = {"forward": {"inputs": args}}
         nnapi_model = torch._C._jit_to_backend("nnapi", traced, compile_spec)
+
+        # Change dtype back to the default
+        torch.set_default_dtype(default_dtype)
 
 # This is needed for IS_WINDOWS or IS_MACOS to skip the tests.
 @unittest.skipIf(TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE,
@@ -736,7 +742,7 @@ class TestNnapiBackend(JitTestCase):
     """
     def __init__(self, name):
         super().__init__(name)
-        self.prelu_test = NnapiBackendPreLuTest(name)
+        self.prelu_test = NnapiBackendPReLUTest(name)
 
     def setUp(self):
         if not TEST_WITH_ROCM:
