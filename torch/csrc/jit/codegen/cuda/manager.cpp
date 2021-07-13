@@ -87,8 +87,8 @@ class CudaFusionManager {
   };
 
   void unregisterCacheId(std::shared_ptr<Graph>& graph) {
-    Canonicalize(graph, false);
-    auto repr = graph->toString(false);
+    auto canonical_graph = Canonicalize(graph, false);
+    auto repr = canonical_graph->toString(false);
 
     // create new graph_cache_ids_ entry if none existed yet;
     if (graph_cache_ids_.count(repr) > 0) {
@@ -102,6 +102,8 @@ class CudaFusionManager {
       int32_t kernel_id,
       const at::ArrayRef<IValue> inputs) {
     std::lock_guard<std::mutex> guard(mutex_);
+    TORCH_INTERNAL_ASSERT(
+        graph_cache_.count(kernel_id) > 0, "graph cache miss at run time");
     return graph_cache_[kernel_id]->runGraphWithInputs(inputs);
   }
 
