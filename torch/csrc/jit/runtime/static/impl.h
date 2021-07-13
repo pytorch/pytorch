@@ -12,6 +12,8 @@
 namespace torch {
 namespace jit {
 
+bool CanEnableStaticRuntime(const std::shared_ptr<torch::jit::Graph>& graph);
+
 struct TORCH_API StaticModuleOptions {
   // to batch allocate (deallocate) tensor storage for all non-escaping
   // temporary tensors

@@ -21,6 +21,32 @@
 namespace torch {
 namespace jit {
 
+// graph must be frozen or CanEnableStaticRuntime would return false if there's
+// any prim::CallMethod op left in the graph
+bool CanEnableStaticRuntime(const std::shared_ptr<torch::jit::Graph>& graph) {
+  // check for sub-blocks
+  bool can_support = true;
+  for (auto* node : graph->block()->nodes()) {
+    for (Block* sub_block : node->blocks()) {
+      VLOG(1) << "Found nested sub-blocks in graph at node: "
+              << PrintNode(node);
+      can_support = false;
+    }
+    if (node->kind() == prim::Constant) {
+      continue;
+    }
+    // check if can get op from Node
+    const Operator* op = node->maybeOperator();
+    if (!op) {
+      if (!nativeOpIsRegistered(node->kind())) {
+        can_support = false;
+        LOG(ERROR) << "Found unsupported op: " << node->kind().toQualString();
+      }
+    }
+  }
+  return can_support;
+}
+
 namespace {
 
 void OptimizeGraph(
@@ -44,20 +70,6 @@ void OptimizeGraph(
   }
 #endif
   ConstantPropagation(graph);
-}
-
-bool CheckGraphEligibility(const std::shared_ptr<torch::jit::Graph>& graph) {
-  // check for sub-blocks
-  bool can_support = true;
-  for (auto* node : graph->block()->nodes()) {
-    for (Block* sub_block : node->blocks()) {
-      VLOG(1) << "Found nested sub-blocks in graph at node: "
-              << PrintNode(node);
-      can_support = false;
-    }
-  }
-
-  return can_support;
 }
 
 // remove unused input 0 from graph
@@ -464,8 +476,7 @@ GenerateSameStorageValues(
 void PrepareGraphForStaticModule(
     std::shared_ptr<torch::jit::Graph> graph,
     const StaticModuleOptions& opts) {
-  // TODO: call CheckGraphEligibility before trying to enable static runtime
-  TORCH_CHECK(CheckGraphEligibility(graph));
+  TORCH_CHECK(CanEnableStaticRuntime(graph));
   OptimizeGraph(graph, opts);
 }
 
