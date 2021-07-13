@@ -230,14 +230,6 @@ class _DDPJoinHook(_JoinHook):
         """
         self.ddp._sync_final_model(is_last_joiner)
 
-    @property
-    def device(self):
-        return self.ddp.device
-
-    @property
-    def process_group(self):
-        return self.ddp.process_group
-
 
 class DistributedDataParallel(Module, _Joinable):
     r"""Implements distributed data parallelism that is based on
@@ -691,14 +683,12 @@ class DistributedDataParallel(Module, _Joinable):
         del attrs["process_group"]
         del attrs["reducer"]
         del attrs["logger"]
-        del attrs["_join_config"]
         return attrs
 
     def __setstate__(self, state):
         # If serializable, then the process group should be the default one
         self.process_group = _get_default_group()
         super(DistributedDataParallel, self).__setstate__(state)
-        self._join_config = _JoinConfig.construct_disabled_join_config()
         self.__dict__.setdefault("require_forward_param_sync", True)
         self.__dict__.setdefault("require_backward_grad_sync", True)
         parameters, expect_sparse_gradient = self._build_params_for_reducer()
@@ -1219,6 +1209,14 @@ class DistributedDataParallel(Module, _Joinable):
             self,
             divide_by_initial_world_size=divide_by_initial_world_size
         )
+
+    @property
+    def _join_device(self):
+        return self.device
+
+    @property
+    def _join_process_group(self):
+        return self.process_group
 
     def register_comm_hook(self, state: object, hook: callable):
         r"""

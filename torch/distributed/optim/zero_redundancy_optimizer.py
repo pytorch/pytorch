@@ -118,14 +118,6 @@ class _ZeROJoinHook(_JoinHook):
         """
         self.zero.step()
 
-    @property
-    def device(self) -> torch.device:
-        return self.zero._default_device
-
-    @property
-    def process_group(self) -> Any:
-        return self.zero.process_group
-
 
 class ZeroRedundancyOptimizer(Optimizer, _Joinable):
     r"""
@@ -538,6 +530,14 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
             are forwarded the same value for ``kwargs``.
         """
         return _ZeROJoinHook(self)
+
+    @property
+    def _join_device(self) -> torch.device:
+        return self._default_device
+
+    @property
+    def _join_process_group(self) -> Any:
+        return self.process_group
 
     def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
         r"""

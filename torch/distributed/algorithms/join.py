@@ -39,23 +39,6 @@ class _JoinHook(ABC):
         """
         ...
 
-    @property
-    @abstractmethod
-    def device(self):
-        r"""
-        Returns the device from which to perform collective communications
-        needed for the join context manager implementation itself.
-        """
-        ...
-
-    @property
-    @abstractmethod
-    def process_group(self):
-        r"""
-        Returns the process group for join-related collective communications.
-        """
-        ...
-
 
 class _Joinable(ABC):
     r"""
@@ -80,6 +63,23 @@ class _Joinable(ABC):
         """
         ...
 
+    @property
+    @abstractmethod
+    def _join_device(self) -> torch.device:
+        r"""
+        Returns the device from which to perform collective communications
+        needed for the join context manager implementation itself.
+        """
+        ...
+
+    @property
+    @abstractmethod
+    def _join_process_group(self) -> Any:
+        r"""
+        Returns the process group for join-related collective communications.
+        """
+        ...
+
 
 class _JoinConfig(NamedTuple):
     r"""
@@ -88,8 +88,6 @@ class _JoinConfig(NamedTuple):
     """
     enable: bool
     throw_on_early_termination: bool
-    device: torch.device
-    process_group: Any
     is_first_joinable: bool
 
     @staticmethod
@@ -102,8 +100,6 @@ class _JoinConfig(NamedTuple):
         return _JoinConfig(
             enable=False,
             throw_on_early_termination=False,
-            device=torch.device("cpu"),
-            process_group=dist.group.WORLD,
             is_first_joinable=False
         )
 
@@ -166,14 +162,11 @@ class _Join():
         Sets the :class:`_JoinConfig` of each participating :class:`_Joinable`.
         """
         assert len(self._joinables) > 0
-        assert len(self._joinables) == len(self._join_hooks)
         is_first_joinable = True
-        for joinable, join_hook in zip(self._joinables, self._join_hooks):
+        for joinable in self._joinables:
             joinable._join_config = _JoinConfig(
                 enable=self._enable,
                 throw_on_early_termination=self._throw_on_early_termination,
-                device=join_hook.device,
-                process_group=join_hook.process_group,
                 is_first_joinable=is_first_joinable
             )
             is_first_joinable = False
@@ -194,13 +187,13 @@ class _Join():
         """
         process_group = None
         device = None
-        for join_hook in self._join_hooks:
+        for joinable in self._joinables:
             if process_group is None:
-                process_group = join_hook.process_group
-            elif process_group != join_hook.process_group:
+                process_group = joinable._join_process_group
+            elif process_group != joinable._join_process_group:
                 raise ValueError("Using join context manager with multiple process groups")
             if device is None:
-                device = join_hook.device
+                device = joinable._join_device
         self._process_group = process_group
         self._rank = dist.get_rank(self._process_group)
         self._device = device
@@ -311,8 +304,8 @@ class _Join():
         if not join_config.is_first_joinable or not join_config.enable:
             return None
 
-        device = join_config.device
-        process_group = join_config.process_group
+        device = joinable._join_device
+        process_group = joinable._join_process_group
 
         # Schedule an all-reduce to indicate that the caller has not yet joined
         ones = torch.ones(1, device=device)

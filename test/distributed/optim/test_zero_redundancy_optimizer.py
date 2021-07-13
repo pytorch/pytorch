@@ -731,15 +731,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                 grads = self.zero._join_grad_info.grads[self.zero._join_grad_info.index]
                 self.zero._join_grad_info.index += 1
                 for p, grad in zip(self.zero._all_params, grads):
-                    p.grad = grad.detach().clone().to(self.device)
-
-            @property
-            def device(self):
-                return device
-
-            @property
-            def process_group(self):
-                return dist.group.WORLD
+                    p.grad = grad.detach().clone().to(device)
 
         class _GradientSetter(_Joinable):
             def __init__(self):
@@ -751,6 +743,14 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                 zero_optim = kwargs["zero_optim"]
                 grads = kwargs["grads"]
                 return _SetGradsJoinHook(zero_optim, grads)
+
+            @property
+            def _join_device(self):
+                return device
+
+            @property
+            def _join_process_group(self):
+                return dist.group.WORLD
 
         num_grads_after_joining = NUM_EPOCHS * (world_size - rank - 1)
         grads = grads_at_each_iter[-num_grads_after_joining:]
