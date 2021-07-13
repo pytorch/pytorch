@@ -8038,6 +8038,10 @@ Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
     possible to satisfy the definition of a modulo operation with complex numbers.
     See :func:`torch.fmod` for how division by zero is handled.
 
+.. note::
+    This is different to `math.remainder _https://docs.python.org/dev/library/math.html#math.remainder>`_ (from Python 3.7) and C++'s `std::remainder <https://en.cppreference.com/w/cpp/numeric/math/remainder>`_
+    functions both of which compute IEEE 754-style remainder.
+
 Args:
     input (Tensor or Scalar): the dividend
     other (Tensor or Scalar): the divisor
