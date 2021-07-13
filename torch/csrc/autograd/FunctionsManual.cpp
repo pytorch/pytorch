@@ -3576,6 +3576,67 @@ Tensor gather_with_keepdimed_indices(const Tensor& input, int64_t dim, const Ten
   return out_fw_grad;
 }
 
+// Let X in \C^{m \times n}, then its pivoted LU decomposition is
+// X = P L U, where P is a permutation matrix.
+//
+// Useful notation:
+// Let o denote the elementwise, or Hadamard, product.
+// k := min(m, n)
+// 1 := ones(k, k),
+// 1_U = 1.tril();
+// 1_L = 1 - 1_U (note the diagonal is zero)
+// For a matrix A, A^H := A.transpose(-2, -1).conj()
+//
+// Below we derive the backward algorithm for the case when m <= n.
+// The case m > n could be obtained using the same idea.
+// Since we assume m <= n, the LU decomposition of X could be written as
+// X = (X1 | X2) = P L (U1 | U2) where X1, U1 in \C^{m \times m}, X2, U2 in \C^{m, n - m}
+//
+// Forward AD:
+//
+// dX = P dL U + P L dU => [left-multiply P^T]
+// (P^T dX1 | P^T dX2) = (dL U1 + L dU1 | dL U2 + L dU2) (*)
+// From (*):
+// P^T dX1 = dL U1 + L dU1 => [lef-multiply by L^{-1}, right-multiply by U1^{-1}]
+// L^{-1} P^T dX1 U1^{-1} = L^{-1} dL + dU1 U1^{-1} (**).
+// Note, L is lower-triangular, and so is its inverse, hence L^{-1} L is lower-triangular.
+// Also, since the diagonal of L (all ones) is never exposed explicity (packed representation),
+// the diagonal of dL is zero, and hence diag(L^{-1} dL) = 0.
+// Similarly, dU1 U1^{-1} is upper-triangular.
+// Combining these observations we conclude:
+//
+// L^{-1} dL = (L^{-1} P^T dX1 U1^{-1}) o 1_L,
+// dU1 U1^{-1} = (L^{-1} P^T dX1 U1^{-1}) o 1_U.
+//
+// Hence,
+// dL = L [(L^{-1} P^T dX1 U1^{-1}) o 1_L],
+// dU1 = [(L^{-1} P^T dX1 U1^{-1}) o 1_U] U1.
+// As for dU2, from (*) it follows
+// P^T dX2 = dL U2 + L dU2 =>
+// dU2 = L^{-1} (P^T dX2 - dL U2).
+//
+// Backward AD:
+//
+// The following equality comes very handy:
+// Tr(A (B o C)) = Tr((A o B^T) C) (!)
+//
+// Tr(X_grad^H dX) = Tr(L_grad^H dL) + Tr(U_grad^H dU), then
+//
+// Tr(L_grad^H dL) = Tr(L_grad^H L [(L^{-1} P^T dX1 U1^{-1}) o 1_L] = [using (!)]
+//                 = Tr((L_grad^H L o 1_L^T) L^{-1} P^T dX1 U1^{-1}) = [using the cyclic property of Tr]
+//                 = Tr(U1^{-1} (L_grad^H L o 1_L^T) L^{-1} P^T dX1)
+//
+// Similar, using (!) and the cyclic property of the trace operator:
+// Tr(U_grad^H dU) = Tr(U1_grad^H dU1) + Tr(U2_grad^H dU2)
+//                 = Tr(U1^{-1} (U1 U1_grad^H o 1_U^T) L^{-1} P^T dX1)
+//                 + Tr(U2_grad^H L^{-1} P^T dX2)
+//                 - Tr(U1^{-1} (U2 U2_grad^H o 1_L^T) L^{-1} P^T dX1)
+//
+// By combining the matrices to the left from dX1 and dX2 and then applying conjugate transposition,
+// we finally arrive at:
+//
+// X1_grad = P L^{-H} [L^H L_grad o 1_L + U1_grad U1^H o 1_U - U2_grad U2^H o 1_L] U1^{-H},
+// X2_grad = P L^{-H} U2_grad
 Tensor plu_backward_base(
   const variable_list& grads,
   const Tensor& self,
