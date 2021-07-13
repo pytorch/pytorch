@@ -797,17 +797,15 @@ class TestQuantizedTensor(TestCase):
             selected = torch.randperm(dims)[:2].to(device)
             scale = 1
             zp = 0
-
             x = torch.randn([3] * dims, device=device) * 10
-            q = torch.quantize_per_tensor(x, scale, zp, quant_type)
-            qs = torch.index_select(q, index, selected)
-            for altered_index in range(2):
-                for i in range(3):
-                    for j in range(3):
-                        qs_coord, q_coord = [i, j], [i, j]
-                        qs_coord.insert(index, altered_index)
-                        q_coord.insert(index, selected[altered_index])
-                        self.assertEqual(qs[tuple(qs_coord)].item(), q[tuple(q_coord)].item())
+
+            x_selected = torch.index_select(x, index, selected)
+            x_selected_quantized = torch.quantize_per_tensor(x_selected, scale, zp, quant_type)
+
+            x_quantized = torch.quantize_per_tensor(x, scale, zp, quant_type)
+            x_quantized_selected = torch.index_select(x_quantized, index, selected)
+
+            self.assertEqual(x_quantized_selected, x_selected_quantized)
 
     def test_qtensor_view(self):
         scale, zero_point, dtype = 1.0, 2, torch.uint8
