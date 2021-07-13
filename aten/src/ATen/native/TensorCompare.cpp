@@ -128,13 +128,13 @@ Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol
 
   // Computes allowed and actual error
   Tensor cast_self, cast_other;
+  cast_self = self.scalar_type() == at::kBool ? self.to(at::get_default_dtype()) : self;
   if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
-    cast_self = self.to(at::get_default_dtype());
     cast_other = other.to(at::get_default_dtype());
   } else {
-    cast_self = self;
     cast_other = other;
   }
+
   Tensor allowed_error = atol + (rtol * cast_other).abs();
   Tensor actual_error = (cast_self - cast_other).abs();
 
