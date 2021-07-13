@@ -501,8 +501,9 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
 
 istft = _add_docstr(
     torch.istft,
+    "istft(input, n_fft, hop_length=None, win_length=None, window=None, center=True,"
+    "normalized=False, onesided=None, length=None, return_complex=False) -> Tensor:\n"
     r"""
-istft(input, n_fft, hop_length=None, win_length=None, window=None, center=True, normalized=False, onesided=None, length=None, return_complex=False) -> Tensor:
 Inverse short time Fourier Transform. This is expected to be the inverse of :func:`~torch.stft`.
 
 It has the same parameters (+ additional optional parameter of :attr:`length`) and it should return the
