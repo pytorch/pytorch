@@ -746,7 +746,7 @@ def _batchnorm_helper(g, input, weight, bias, running_mean, running_var):
     if running_mean is None or _is_none(running_mean) or running_var is None or _is_none(running_var):
         assert batch_size is not None and channel_size is not None
         reshape_in = _reshape_helper(g, input,
-                                     g.op("Constant", value_t=torch.tensor([batch_size, channel_size, -1], 
+                                     g.op("Constant", value_t=torch.tensor([batch_size, channel_size, -1],
                                           dtype=torch.int64)))
         trans_in = g.op("Transpose", reshape_in, perm_i=[0, 2, 1])
         running_var, running_mean = _var_mean(g, trans_in,
