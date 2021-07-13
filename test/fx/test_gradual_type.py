@@ -784,6 +784,10 @@ class TypeCheckerTest(unittest.TestCase):
         ShapeProp(gm_run).propagate(sample_input)
 
         gm_static = symbolic_trace(resnet50())
+
+        for n in gm_static.graph.nodes:
+            n.type = None
+
         g = GraphTypeChecker({}, gm_static)
         g.type_check()
         # here we are checking for consistency with fully dynamic nodes
