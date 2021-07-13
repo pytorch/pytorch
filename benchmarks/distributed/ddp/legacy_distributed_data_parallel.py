@@ -43,7 +43,7 @@ class LegacyDistributedDataParallel(nn.Module):
         self.buffer = None
 
         # We can also forcibly accumulate grads locally and only do the
-        # all-reduce at some later time
+        # all-reduce at some later time.
         self.accumulate_grads = False
 
         # make per-device lists of parameters

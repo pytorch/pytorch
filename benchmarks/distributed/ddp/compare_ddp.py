@@ -3,11 +3,13 @@
 # [Done] 3 Pure Python DDP -- copy research code -- measure and compare
 # [Done] 3.1 Process Group - Not work -- Bo can refer to Shen's benchmark code. use gloo instead
 # 4 Modify Pure Python -- re-run
+# algo - Build ParamBucket Mapping.
 # 5 Send out code review
 
 import legacy_distributed_data_parallel as legacy_ddp
 import numpy as np
 import os
+import python_ddp
 import torch
 import torch.cuda as cuda
 import torch.distributed as dist
@@ -19,10 +21,24 @@ import torchvision.models as models
 from enum import Enum
 from torch.nn.parallel import DistributedDataParallel as DDP
 
+# TODO(bowangbj): Use Toy model to debug. Remove after debugging.
+# resnet50 or toy
+debug_model = "resnet50"
+
+class ToyModel(nn.Module):
+    def __init__(self):
+        super(ToyModel, self).__init__()
+        self.net1 = nn.Linear(10, 10)
+        self.relu = nn.ReLU()
+        self.net2 = nn.Linear(10, 5)
+
+    def forward(self, x):
+        return self.net2(self.relu(self.net1(x)))
+
 class DDPOption(Enum):
     DDP_CPP_CORE = 1
     LEGACY_DISTRIBUTED_DATA_PARALLEL = 2
-    PYTHON_ONLY_DDP = 3
+    PYTHON_DDP = 3
 
 def _setup(rank, world_size):
     os.environ['MASTER_ADDR'] = 'localhost'
@@ -38,8 +54,9 @@ def _create_ddp_model(module, rank, pg, ddp_option):
         ddp_model._set_static_graph()
         return ddp_model
     elif ddp_option == DDPOption.LEGACY_DISTRIBUTED_DATA_PARALLEL:
-        legacy_ddp_module = legacy_ddp.LegacyDistributedDataParallel(module, pg)
-        return legacy_ddp_module
+        return legacy_ddp.LegacyDistributedDataParallel(module, pg)
+    elif ddp_option == DDPOption.PYTHON_DDP:
+        return python_ddp.PythonDDP(module, pg)
     else:
         raise NotImplementedError('only DDP CPP is supported')
 
@@ -56,6 +73,8 @@ def run_ddp(rank, world_size, epochs, ddp_option):
 
     # Create ResNet50
     model = models.resnet50().to(device)
+    if debug_model == "toy":
+        model = ToyModel().to(device)
 
     # Wrap in DDP Model
     pg = dist.distributed_c10d._get_default_group()
@@ -70,7 +89,7 @@ def run_ddp(rank, world_size, epochs, ddp_option):
     metrics = {MODEL_FORWARD: [], MODEL_BACKWARD: []}
 
     for epoch in range(epochs):
-        if epoch % 2 == 0:
+        if epoch % 1 == 0:
             print(f'Training epoch: {epoch} ... ')
 
         start = torch.cuda.Event(enable_timing=True)
@@ -79,6 +98,9 @@ def run_ddp(rank, world_size, epochs, ddp_option):
         # TODO(bowangbj): Use real training set.
         inputs = torch.rand([32, 3, 224, 224], device=device)
         labels = torch.rand([32, 1000], device=device)
+        if debug_model == "toy":
+            inputs = torch.rand([20, 10], device=device)
+            labels = torch.rand([20, 5], device=device)
 
         # Forward
         start.record()
@@ -89,12 +111,12 @@ def run_ddp(rank, world_size, epochs, ddp_option):
 
         # Backward
         start.record()
-        optimizer.zero_grad()
         loss_fn(outputs, labels).backward()
         # Reduce all grads in sync.
         if (ddp_option == DDPOption.LEGACY_DISTRIBUTED_DATA_PARALLEL):
             ddp_model.all_reduce_grads()
         optimizer.step()
+        optimizer.zero_grad()
         end.record()
         torch.cuda.synchronize()
         metrics[MODEL_BACKWARD].append(start.elapsed_time(end))
@@ -106,6 +128,7 @@ def run_ddp(rank, world_size, epochs, ddp_option):
             print(' {N} iterations, {event}, mean={mean} ms, median={median} ms, p90={p90} ms, p99={p99} ms'.format(
                 N=len(A), event=step, mean=np.mean(A), median=np.percentile(A, 50), p90=np.percentile(A, 90), p99=np.percentile(A, 99)))
 
+# TODO(bowangbj): Cleanup
 # for DDP Core
 #  2 iterations, forward, mean=103.61008399963379 ms, median=101.85004806518555 ms, p90=102.2405387878418 ms, p99=105.0716464233407 ms
 #  2 iterations, backward, mean=213.5088494873047 ms, median=212.78219604492188 ms, p90=213.6462875366211 ms, p99=215.36632751464887 ms
@@ -116,10 +139,10 @@ def run_ddp(rank, world_size, epochs, ddp_option):
 
 def main():
     world_size = 2
-    epochs = 100
+    epochs = 50
 
     # valid options: DDP_CPP_CORE, LEGACY_DISTRIBUTED_DATA_PARALLEL
-    ddp_option = DDPOption.DDP_CPP_CORE
+    ddp_option = DDPOption.PYTHON_DDP
     print('ddp_option=' + str(ddp_option))
 
     mp.spawn(run_ddp,
