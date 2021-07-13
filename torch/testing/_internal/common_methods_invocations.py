@@ -1344,7 +1344,7 @@ def sample_inputs_addbmm(op_info, device, dtype, requires_grad, **kwargs):
                   ((), (S, S, S), (S, S, M), 1, 1),
                   ((), (S, S, S), (S, S, M), 0.6, 0.2),
                   ]
-
+    sample_inputs = []
     for input_args in test_cases:
         args = (make_tensor(input_args[0], device, dtype,
                             low=None, high=None,
