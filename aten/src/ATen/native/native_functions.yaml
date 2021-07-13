@@ -5281,7 +5281,7 @@
 - func: fused_moving_avg_obs_fake_quant(Tensor x, Tensor observer_on, Tensor fake_quant_on, Tensor averaging_const, Tensor(a!) running_min, Tensor(b!) running_max, Tensor(c!) scale, Tensor(d!) zero_point, int quant_min, int quant_max, int ch_axis, bool per_row_fake_quant=False, bool symmetric_quant=False) -> Tensor
   dispatch:
     CPU: fused_moving_avg_obs_fake_quant_cpu
-    #CUDA: fused_moving_avg_obs_fake_quant_cuda
+    CUDA: fused_moving_avg_obs_fake_quant_cuda
 
 - func: _choose_qparams_per_tensor(Tensor self, bool reduce_range=False) -> (float, int)
   variants: function
