@@ -156,8 +156,11 @@ void EvalPeepholeONNX(
   buildParamsMapFromValueToParamsMap(valsToParamsMap, paramsDict);
 }
 
-void EvalPeepholeONNX(std::shared_ptr<Graph>& g, ParamMap& paramsDict) {
-  EvalPeepholeONNX(g->block(), paramsDict);
+void EvalPeepholeONNX(
+    std::shared_ptr<Graph>& g,
+    ParamMap& paramsDict,
+    bool isAllowedToAdjustGraphInputs) {
+  EvalPeepholeONNX(g->block(), paramsDict, isAllowedToAdjustGraphInputs);
   GRAPH_DUMP("After EvalPeepholeONNX:", g);
 }
 
