@@ -15,7 +15,9 @@ namespace jit {
 // in the top level environment, and then recurses into a parent
 // environment if the key is not found.)
 struct TemplateEnv {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   TemplateEnv() : parent(nullptr) {}
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   TemplateEnv(TemplateEnv& parent) : parent(&parent) {}
 
   using string_list = std::vector<std::string>;

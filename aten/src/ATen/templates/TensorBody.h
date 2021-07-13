@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/Operators.h>
 #include <c10/core/Device.h>
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
@@ -366,8 +367,15 @@ class TORCH_API Tensor {
   bool is_alias_of(const at::Tensor& other) const{
     return impl_->storage().is_alias_of(other.storage());
   }
-  Tensor toType(ScalarType t) const;
-  Tensor toBackend(Backend b) const;
+
+  Tensor toType(ScalarType t) const {
+    return to(options().dtype(t), /*non_blocking*/ false, /*copy*/ false);
+  }
+
+  // TODO: Deprecate me
+  Tensor toBackend(Backend b) const {
+    return to(options().device(backendToDeviceType(b)).layout(layout_from_backend(b)), /*non_blocking*/ false, /*copy*/ false);
+  }
 
   C10_DEPRECATED_MESSAGE("Tensor.is_variable() is deprecated; everything is a variable now. (If you want to assert that variable has been appropriately handled already, use at::impl::variable_excluded_from_dispatch())")
   bool is_variable() const noexcept {
@@ -521,7 +529,11 @@ class TORCH_API Tensor {
 
   /// Returns the `TensorOptions` corresponding to this `Tensor`. Defined in
   /// TensorOptions.h.
-  TensorOptions options() const;
+  TensorOptions options() const {
+    return TensorOptions().dtype(dtype())
+                          .device(device())
+                          .layout(layout());
+  }
 
   void* data_ptr() const {
     return this->unsafeGetTensorImpl()->data();
@@ -615,12 +627,30 @@ class TORCH_API Tensor {
   Tensor & index_put_(std::initializer_list<at::indexing::TensorIndex> indices, Tensor const & rhs);
   Tensor & index_put_(std::initializer_list<at::indexing::TensorIndex> indices, const Scalar& v);
 
-  Tensor cpu() const;
-  Tensor cuda() const;
-  Tensor hip() const;
-  Tensor ve() const;
-  Tensor vulkan() const;
-  Tensor metal() const;
+  Tensor cpu() const {
+    return to(options().device(DeviceType::CPU), /*non_blocking*/ false, /*copy*/ false);
+  }
+
+  // TODO: The Python version also accepts arguments
+  Tensor cuda() const {
+    return to(options().device(DeviceType::CUDA), /*non_blocking*/ false, /*copy*/ false);
+  }
+
+  Tensor hip() const {
+    return to(options().device(DeviceType::HIP), /*non_blocking*/ false, /*copy*/ false);
+  }
+
+  Tensor ve() const {
+    return to(options().device(DeviceType::VE), /*non_blocking*/ false, /*copy*/ false);
+  }
+
+  Tensor vulkan() const {
+    return to(options().device(DeviceType::Vulkan), /*non_blocking*/ false, /*copy*/ false);
+  }
+
+  Tensor metal() const {
+    return to(options().device(DeviceType::Metal), /*non_blocking*/ false, /*copy*/ false);
+  }
 
   // ~~~~~ Autograd API ~~~~~
 
@@ -691,8 +721,11 @@ class TORCH_API Tensor {
   /// \param inputs Inputs w.r.t. which the gradient will be accumulated into
   ///     ``at::Tensor::grad``. All other Tensors will be ignored. If not
   ///     provided, the gradient is accumulated into all the leaf Tensors
-  ///     that were used to compute the current tensor. All the provided inputs
-  ///     must be leaf Tensors.
+  ///     that were used to compute the current tensor.
+  ///     When inputs are provided and a given input is not a leaf,
+  ///     the current implementation will call its grad_fn (even though it is not strictly needed to get this gradients).
+  ///     It is an implementation detail on which the user should not rely.
+  ///     See https://github.com/pytorch/pytorch/pull/60521#issuecomment-867061780 for more details.
   void backward(const Tensor & gradient={}, c10::optional<bool> retain_graph=c10::nullopt, bool create_graph=false, c10::optional<TensorList> inputs=c10::nullopt) const {
     // NB: Adding this wrapper to _backward here because we'd like our
     // 'backwards' api to accept the 'inputs' argument optionally. Since code gen
@@ -984,6 +1017,13 @@ static inline DispatchKey legacyExtractDispatchKey(const Tensor& t) {
 }
 
 } // namespace at
+
+// See Note [Avoiding Include Cycles In Static Dispatch]
+${static_dispatch_extra_headers}
+namespace at {
+${tensor_method_definitions}
+} // namespace at
+
 
 namespace c10 {
 template <>

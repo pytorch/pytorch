@@ -11,6 +11,9 @@ using namespace torch;
 using namespace torch::jit;
 using c10::IValue;
 
+C10_DECLARE_bool(
+    static_runtime_enable_fast_math);
+
 namespace {
 static at::Tensor getTensor(const at::IValue& ival) {
   if (ival.isTensor()) {
@@ -62,15 +65,41 @@ void compareTensorLists(
 }
 
 void compareResults(const IValue& expect, const IValue& actual) {
-  if (expect.isTuple()) {
-    compareTensorLists(
-        expect.toTuple()->elements(), actual.toTuple()->elements());
-  } else if (expect.isList()) {
-    compareTensorLists(expect.toTensorVector(), actual.toTensorVector());
-  } else {
+  if (expect.isTensor()) {
     VLOG(2) << "expect " << expect.toTensor() << std::endl;
     VLOG(2) << "output " << actual.toTensor() << std::endl;
+    EXPECT_TRUE(actual.isTensor());
     EXPECT_TRUE(expect.toTensor().equal(actual.toTensor()));
+    return;
+  } else if (expect.isTuple()) {
+    EXPECT_TRUE(actual.isTuple());
+    auto lhs = expect.toTuple()->elements();
+    auto rhs = actual.toTuple()->elements();
+    EXPECT_TRUE(lhs.size() == rhs.size());
+    for (size_t i = 0; i < lhs.size(); i++) {
+      compareResults(lhs[i], rhs[i]);
+    }
+  } else if (expect.isList()) {
+    EXPECT_TRUE(actual.isList());
+    auto lhs = expect.toList();
+    auto rhs = actual.toList();
+    EXPECT_TRUE(lhs.size() == rhs.size());
+    for (size_t i = 0; i < lhs.size(); i++) {
+      compareResults(lhs[i], rhs[i]);
+    }
+  } else if (expect.isGenericDict()) {
+    EXPECT_TRUE(actual.isGenericDict());
+    auto lhs = expect.toGenericDict();
+    auto rhs = actual.toGenericDict();
+    EXPECT_TRUE(lhs.size() == rhs.size());
+    for (auto& lh : lhs) {
+      auto f = rhs.find(lh.key());
+      EXPECT_FALSE(f == rhs.end());
+      compareResults(lh.value(), f->value());
+    }
+  } else {
+    // fall back to the default comparison impl in IValue
+    EXPECT_TRUE(expect == actual);
   }
 }
 
@@ -94,32 +123,35 @@ void testStaticRuntime(
 
   auto expect = module.forward(args);
 
-  torch::jit::StaticModule smodule(module, {true, true, true});
-  auto actual = smodule(args, {});
-  smodule.runtime().check_for_memory_leak();
-  // first run
-  compareResults(expect, actual);
-
-  // args2 is used to check for dynamic shapes
-  // it also exercises the memory planner
-  if (!args2.empty()) {
-    expect = module.forward(args2);
-    actual = smodule(args2, {});
+  for (bool enable_out_variant : {true, false}) {
+    torch::jit::StaticModule smodule(
+        module, {true, enable_out_variant, enable_out_variant});
+    auto actual = smodule(args, {});
     smodule.runtime().check_for_memory_leak();
-    // second run
+    // first run
     compareResults(expect, actual);
 
-    expect = module.forward(args);
-    actual = smodule(args, {});
-    smodule.runtime().check_for_memory_leak();
-    // third run
-    compareResults(expect, actual);
-  } else {
-    // run static runtime again to exercise the memory planner
-    actual = smodule(args, {});
-    smodule.runtime().check_for_memory_leak();
-    // second run
-    compareResults(expect, actual);
+    // args2 is used to check for dynamic shapes
+    // it also exercises the memory planner
+    if (!args2.empty()) {
+      expect = module.forward(args2);
+      actual = smodule(args2, {});
+      smodule.runtime().check_for_memory_leak();
+      // second run
+      compareResults(expect, actual);
+
+      expect = module.forward(args);
+      actual = smodule(args, {});
+      smodule.runtime().check_for_memory_leak();
+      // third run
+      compareResults(expect, actual);
+    } else {
+      // run static runtime again to exercise the memory planner
+      actual = smodule(args, {});
+      smodule.runtime().check_for_memory_leak();
+      // second run
+      compareResults(expect, actual);
+    }
   }
 
   // make sure inputs were not modified
@@ -136,12 +168,45 @@ bool testHasInplaceOp(const std::string& jit_script) {
   torch::jit::AliasDb alias_db(graph);
   return torch::jit::HasInplaceOp(graph, alias_db);
 }
+
+static Node* getNodeWithKind(const torch::jit::StaticModule& smodule, const string& kind) {
+  for (auto& pnode : smodule.nodes()) {
+    if (std::string(pnode.node()->kind().toQualString()) == kind) {
+      return pnode.node();
+    }
+  }
+  return nullptr;
+}
+
 } // namespace
 
 TEST(StaticRuntime, InPlace) {
   EXPECT_TRUE(testHasInplaceOp(reshape_inplace_script));
   EXPECT_TRUE(testHasInplaceOp(sigmoid_inplace_script));
   EXPECT_FALSE(testHasInplaceOp(sigmoid_out_script));
+}
+
+TEST(StaticRuntime, NestedOutput) {
+  auto run_test = [](std::vector<int64_t> shapes) {
+    auto a = at::randn(shapes);
+    auto b = at::randn(shapes);
+
+    std::vector<IValue> args{a, b};
+    testStaticRuntime(nested_output_script_0, args);
+    testStaticRuntime(nested_output_script_1, args);
+    testStaticRuntime(nested_output_script_2, args);
+    testStaticRuntime(nested_output_script_3, args);
+
+    if (shapes.size() > 0 && shapes[0] != 0) {
+      shapes[0] *= 2;
+      testStaticRuntime(
+          nested_output_script_0, args, {at::randn(shapes), at::randn(shapes)});
+      testStaticRuntime(
+          nested_output_script_1, args, {at::randn(shapes), at::randn(shapes)});
+    }
+  };
+  run_test({2, 3, 1, 4});
+  run_test({2, 3});
 }
 
 TEST(StaticRuntime, UnaryOps) {
@@ -162,6 +227,21 @@ TEST(StaticRuntime, UnaryOps) {
   testStaticRuntime(aten_sum_1, args, args2);
   testStaticRuntime(aten_sum_0_true, args, args2);
   testStaticRuntime(aten_sum_1_true, args, args2);
+}
+
+TEST(StaticRuntime, Sigmoid) {
+  auto a = at::randn({2, 3});
+  auto b = at::randn({4, 3, 2});
+
+  std::vector<IValue> args{a}, args2{b};
+
+  testStaticRuntime(sigmoid_script, args);
+  testStaticRuntime(sigmoid_script, args, {args2});
+
+  FLAGS_static_runtime_enable_fast_math = false;
+  testStaticRuntime(sigmoid_script, args);
+  testStaticRuntime(sigmoid_script, args, {args2});
+  FLAGS_static_runtime_enable_fast_math = true;
 }
 
 TEST(StaticRuntime, Clone) {
@@ -254,6 +334,36 @@ TEST(StaticRuntime, LayerNorm) {
   }
 }
 
+TEST(StaticRuntime, Bmm) {
+  auto a = at::randn({10, 4, 5});
+  auto b = at::randn({10, 5, 6});
+
+  auto c = at::randn({12, 5, 6});
+  auto d = at::randn({12, 6, 7});
+
+  std::vector<IValue> args{a, b};
+  std::vector<IValue> args1{c, d};
+  testStaticRuntime(bmm_script, args);
+  testStaticRuntime(bmm_script, args1);
+  testStaticRuntime(bmm_script, args, args1);
+}
+
+TEST(StaticRuntime, Addmm) {
+  auto inp1 = at::randn({5});
+  auto mat1 = at::randn({3, 4});
+  auto mat2 = at::randn({4, 5});
+
+  auto inp2 = at::randn({3, 7});
+  auto mat3 = at::randn({3, 6});
+  auto mat4 = at::randn({6, 7});
+
+  std::vector<IValue> args{inp1, mat1, mat2, 1.0, 2.0};
+  std::vector<IValue> args1{inp2, mat3, mat4, 2.0, 1.0};
+  testStaticRuntime(addmm_script, args);
+  testStaticRuntime(addmm_script, args1);
+  testStaticRuntime(addmm_script, args, args1);
+}
+
 TEST(StaticRuntime, IndividualOps_Binary) {
   auto a = at::randn({2, 3});
   auto b = at::ones({2, 3});
@@ -294,6 +404,15 @@ TEST(StaticRuntime, IndividualOps_Binary_MatMul) {
   testStaticRuntime(aten_matmul, args3, args4);
 }
 
+TEST(StaticRuntime, IndividualOps_Sign) {
+  auto a = at::randn({2, 3});
+  auto b = at::randn({4, 3, 2});
+
+  std::vector<IValue> args{a};
+  testStaticRuntime(sign_tensor, args);
+  testStaticRuntime(sign_tensor, args, {b});
+}
+
 TEST(StaticRuntime, IndividualOps_Div) {
   auto a = at::randn({2, 3});
   auto b = at::randn({2, 3});
@@ -315,6 +434,16 @@ TEST(StaticRuntime, IndividualOps_Div) {
   std::vector<IValue> args3{a, 2.3, "trunc"};
   testStaticRuntime(div_scalar_mode, args3);
   testStaticRuntime(div_scalar_mode, args3, {a, 1.5, "trunc"});
+}
+
+TEST(StaticRuntime, IndividualOps_Log) {
+  // Ensure that the input values are valid.
+  auto a = at::abs(at::randn({2, 3}));
+  auto b = at::abs(at::randn({4, 3, 2}));
+
+  std::vector<IValue> args{a};
+  testStaticRuntime(log_tensor, args);
+  testStaticRuntime(log_tensor, args, {b});
 }
 
 TEST(StaticRuntime, IndividualOps_Sub) {
@@ -737,4 +866,40 @@ TEST(StaticRuntime, FusionPass) {
       EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
     }
   }
+}
+
+TEST(ProcessedNode, VerifyOutputsNotOverlappingWithImmutableInputsWithImmutableArguments) {
+  script::Module module("module");
+  // Not using out= variant.
+  module.define(sigmoid_script);
+  torch::jit::StaticModule smodule(module);
+  Node* sigmoid_node = getNodeWithKind(smodule, "aten::sigmoid");
+  const at::IValue a = torch::randn({2, 3});
+  at::IValue b = torch::randn({3, 1});
+  std::vector<const IValue*> ivalue_inputs{&a};
+  ProcessedNode pnode(sigmoid_node, std::move(ivalue_inputs), true);
+
+  pnode.Output(0) = b;
+  EXPECT_TRUE(pnode.verify_outputs_not_overlapping_with_immutable_inputs());
+
+  pnode.Output(0) = a;
+  EXPECT_FALSE(pnode.verify_outputs_not_overlapping_with_immutable_inputs());
+}
+
+TEST(ProcessedNode, VerifyOutputsNotOverlappingWithImmutableInputsWithMutableArguments) {
+  script::Module module("module");
+  // Using out= variant.
+  module.define(sigmoid_inplace_script);
+  torch::jit::StaticModule smodule(module);
+  Node* sigmoid_node = getNodeWithKind(smodule, "aten::sigmoid");
+  const at::IValue a = torch::randn({2, 3});
+  at::IValue b = torch::randn({3, 1});
+  std::vector<const IValue*> ivalue_inputs{&a};
+  ProcessedNode pnode(sigmoid_node, std::move(ivalue_inputs), true);
+
+  pnode.Output(0) = b;
+  EXPECT_TRUE(pnode.verify_outputs_not_overlapping_with_immutable_inputs());
+
+  pnode.Output(0) = a;
+  EXPECT_TRUE(pnode.verify_outputs_not_overlapping_with_immutable_inputs());
 }

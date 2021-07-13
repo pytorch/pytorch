@@ -263,7 +263,7 @@ BC note: Using grads on the default stream
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 In prior versions of Pytorch (1.9 and earlier), the autograd engine always synced
-the default stream with all backward ops, so the following pattern:
+the default stream with all backward ops, so the following pattern::
 
     with torch.cuda.stream(s):
         loss.backward()
@@ -271,7 +271,7 @@ the default stream with all backward ops, so the following pattern:
 
 was safe as long as ``use grads`` happened on the default stream.
 In present Pytorch, that pattern is no longer safe. If ``backward()``
-and ``use grads`` are in different stream contexts, you must sync the streams:
+and ``use grads`` are in different stream contexts, you must sync the streams::
 
     with torch.cuda.stream(s):
         loss.backward()
