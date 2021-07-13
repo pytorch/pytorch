@@ -3,6 +3,7 @@ import io
 import os
 import sys
 import unittest
+import ctypes
 
 import torch
 import torch._C
@@ -685,3 +686,62 @@ class TestBackendsWithCompiler(JitTestCase):
     @skipIfRocm
     def test_errors(self):
         self.error_module_compiler_test.test_errors()
+
+"""
+Unit Tests for Nnapi backend with delegate
+"""
+class NnapiBackendPreLuTest(JitTestCase):
+    """
+    Test lowering a simple Prelu module to Nnapi backend.
+    TODO: After Nnapi delegate is finished T91991928,
+    add tests for running the module (currently only lowers the model)
+    """
+    def setUp(self):
+        super().setUp()
+        # Load nnapi delegate library
+        torch_root = Path(__file__).resolve().parent.parent.parent
+        p = torch_root / 'build' / 'lib' / 'libnnapi_backend.so'
+        torch.ops.load_library(str(p))
+
+        # Nnapi set up
+        # Avoid saturation in fbgemm
+        torch.backends.quantized.engine = 'qnnpack'
+
+        libneuralnetworks_path = os.environ.get("LIBNEURALNETWORKS_PATH")
+        if libneuralnetworks_path:
+            ctypes.cdll.LoadLibrary(libneuralnetworks_path)
+            print("Will attempt to run NNAPI models.")
+            self.can_run_nnapi = True
+        else:
+            self.can_run_nnapi = False
+
+    def test_execution(self):
+        # Change dtype from float64 to float32
+        torch.set_default_dtype(torch.float32)
+        args = torch.tensor([[1.0, -1.0, 2.0, -2.0]]).unsqueeze(-1).unsqueeze(-1)
+        module = torch.nn.PReLU()
+
+        # Trace and lower PreLu module
+        traced = torch.jit.trace(module, args)
+        compile_spec = {"forward": {"inputs": args}}
+        nnapi_model = torch._C._jit_to_backend("nnapi", traced, compile_spec)
+
+# This is needed for IS_WINDOWS or IS_MACOS to skip the tests.
+@unittest.skipIf(TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE,
+                 "Non-portable load_library call used in test")
+class TestNnapiBackend(JitTestCase):
+    """
+    This class wraps all Nnapi test classes
+    TODO: Add more comprehensive Nnapi tests (currently only a basic one)
+    """
+    def __init__(self, name):
+        super().__init__(name)
+        self.prelu_test = NnapiBackendPreLuTest(name)
+
+    def setUp(self):
+        if not TEST_WITH_ROCM:
+            self.prelu_test.setUp()
+
+    @skipIfRocm
+    def test_execution(self):
+        self.prelu_test.test_execution()
