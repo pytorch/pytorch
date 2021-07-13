@@ -91,6 +91,8 @@ jobs:
     env:
       TEST_RUNNER_TYPE: windows.8xlarge.nvidia.gpu
       NUM_TEST_SHARDS: 2
+      NOGPU_RUNNER_TYPE: windows.4xlarge
+      ENABLE_FORCE_ON_CPU_TEST: ''
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
       render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
