@@ -521,6 +521,14 @@ void initTensorExprBindings(PyObject* module) {
           [](For* f) { return LoopNest::distributeLoopOverInnerLoops(f); },
           py::return_value_policy::reference)
       .def_static(
+          "unsafe_fuse_loops",
+          [](const std::vector<For*>& loops) {
+            For* fused_loop = nullptr;
+            LoopNest::unsafeFuseLoops(loops, &fused_loop);
+            return fused_loop;
+          },
+          py::return_value_policy::reference)
+      .def_static(
           "fuse_loops",
           [](const std::vector<For*>& loops) {
             For* fused_loop = nullptr;
@@ -635,9 +643,47 @@ void initTensorExprBindings(PyObject* module) {
             op, argInputs, outputShape, outputType.scalar_type());
       });
 
+  py::class_<ArgValue>(te, "ArgValue")
+      .def(py::init([](py::handle inp) {
+        return std::make_unique<ArgValue>(convertPyToArgValue(inp));
+      }))
+      .def(
+          "as_buf",
+          [](const ArgValue& self) { return c10::get<BufHandle>(self); })
+      .def(
+          "as_var",
+          [](const ArgValue& self) { return c10::get<VarHandle>(self); })
+      .def(
+          "as_float",
+          [](const ArgValue& self) { return c10::get<double>(self); })
+      .def(
+          "as_int",
+          [](const ArgValue& self) { return c10::get<int64_t>(self); })
+      .def("as_bool", [](const ArgValue& self) { return c10::get<bool>(self); })
+      .def(
+          "as_none",
+          [](const ArgValue& self) { return c10::get<ArgNone>(self); })
+      .def(
+          "as_buflist",
+          [](const ArgValue& self) { return c10::get<BufList>(self); })
+      .def("as_intlist", [](const ArgValue& self) {
+        return c10::get<IntList>(self);
+      });
+
+  py::class_<c10::ScalarType>(te, "ScalarType");
+
   using TSGraph = std::shared_ptr<Graph>;
   py::class_<TensorExprKernel>(te, "TensorExprKernel")
       .def(py::init<const TSGraph&>())
+      .def(py::init([](const TSGraph& g,
+                       std::unordered_map<std::string, NNCLoweringFunction>
+                           custom_lowerings_str) {
+        std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings;
+        for (const auto& kv : custom_lowerings_str) {
+          custom_lowerings[c10::Symbol::fromQualString(kv.first)] = kv.second;
+        }
+        return std::make_unique<TensorExprKernel>(g, custom_lowerings);
+      }))
       .def(
           "run",
           [](TensorExprKernel& self, const py::tuple& inputs) {
