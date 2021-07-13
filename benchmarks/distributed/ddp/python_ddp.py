@@ -1,135 +1,122 @@
+import functools
 import torch
 import torch.nn as nn
 import utils
 
 from collections import OrderedDict
 
-# TODO(bowangbj): move into util
-class Bucket:
-    def __init__(self, max_buffer_size):
-        self.param_to_offset = {}
-        # buffer will be allocated in param.grad hook if None
-        self.buffer = None
-        self.ready_param_grad_count = 0
-        self.total_elements = 0
-        self._MAX_BUFFER_SIZE = max_buffer_size
-
-    def __str__(self):
-        return "num_param={}, total_elements={}".format(
-            len(self.param_to_offset), self.total_elements)
-
-    # Checks whether current bucket hold the param.
-    # Returns true if current bucket can hold current param.
-    # Otherwise False.
-    def find_space_for_param(self, param):
-        if self.total_elements + param.numel() <= self._MAX_BUFFER_SIZE :
-            self.param_to_offset[param] = self.total_elements
-            self.total_elements += param.numel()
-            return True
-        else:
-            return False
-
-# TODO(bowangbj): move into class member func
-# Distribute params into list of buckets.
-# Returns params to bucket which contains actual position for the corresponding param.
-def build_buckets_for_params(params, max_buffer_size):
-    params_to_buckets = {}
-    cur_bucket = Bucket(max_buffer_size)
-    for param in params:
-        print('bowang_bj param.sumel ' + str(param.numel()))
-        if not param.requires_grad:
-            print('Warning: param.requires_grad should be True')
-            continue
-        if cur_bucket.find_space_for_param(param):
-           params_to_buckets[param] = cur_bucket
-        else:
-            new_bucket = Bucket(max_buffer_size)
-            assert new_bucket.find_space_for_param(param)
-            params_to_buckets[param] = new_bucket
-            cur_bucket = new_bucket
-    return params_to_buckets
-
 class PythonDDP(nn.Module):
 
-    def __init__(self, module, process_group, buffer_size=2 ** 28):
+    class Bucket:
+        def __init__(self, max_buffer_size):
+            self.param_to_offset = {}
+            # buffer would be allocated in backward callback.
+            self.buffer = None
+            self.ready_param_grad_count = 0
+            self.total_elements = 0
+            self._MAX_BUFFER_SIZE = max_buffer_size
+
+        def __str__(self):
+            return "bucket: num_param={}, total_elements={}, ready_param_grad_count={}".format(
+                len(self.param_to_offset),
+                self.total_elements,
+                self.ready_param_grad_count
+            )
+
+        def is_full(self):
+            assert self.ready_param_grad_count >= 0
+            assert self.ready_param_grad_count <= len(self.param_to_offset)
+            return len(self.param_to_offset) == self.ready_param_grad_count
+
+        # Checks whether current bucket hold the param.
+        # Returns true if current bucket can hold current param.
+        # Otherwise False.
+        def try_hold_param(self, param):
+            if self.total_elements + param.numel() <= self._MAX_BUFFER_SIZE :
+                self.param_to_offset[param] = self.total_elements
+                self.total_elements += param.numel()
+                return True
+            else:
+                return False
+
+    def __init__(self, module, process_group, buffer_size=2 ** 22):
         super(PythonDDP, self).__init__()
 
         self.module = module
         self.process_group = process_group
         self.world_size = utils.get_world_size(self.process_group)
 
-        # TODO(bowangbj): Remove unused params
-        # Never use a bigger buffer than the number of model params (elements)
-        self.buffer_size = min(buffer_size, sum(p.numel() for p in module.parameters()))
-        self.buffer = None
-
         # Ensure buffer size is large enough to hold largest param
-        self.max_buffer_size = max(buffer_size, max(p.numel() for p in module.parameters()))
+        max_numel = max(p.numel() for p in module.parameters())
+        assert buffer_size > max_numel, "buffer_size: {} should be larger than largest param: {}".format(buffer_size, max_numel)
 
-        # Distribute params into multiple buckets.
-        # param_to_bucket maps param to corresponding bucket, which has detailed position info
-        self.param_to_bucket = build_buckets_for_params(self.module.parameters(), self.max_buffer_size)
-        # debug only
-        for bucket in self.param_to_bucket.values():
-            num = len(bucket.param_to_offset)
-            print(f'bowangbj bucket has {num} params, toal={bucket.total_elements}')
+        # Build buckets for params
+        self.param_to_bucket, self.buckets = self.build_buckets_for_params(buffer_size)
 
-        # Register per-parameter hook
+        # Register per-parameter backward grad ready hook
+        for p in self.module.parameters():
+            assert p.requires_grad is True
+            p.register_hook(functools.partial(self._on_param_grad_ready, p))
+
+    # Distribute params into list of buckets.
+    # Return (param_to_buckets, buckets)
+    def build_buckets_for_params(self, max_buffer_size):
+        print("build_buckets_for_params ... ")
+        params_to_buckets = {}
+        buckets = set()
+        cur_bucket = self.Bucket(max_buffer_size)
+        total_param = 0
         for param in self.module.parameters():
-            if param.requires_grad:
-                p_tmp = param.expand_as(param)
-                grad_acc = p_tmp.grad_fn.next_functions[0][0]
-                grad_acc.register_hook(self._on_param_grad_ready(param))
+            total_param += 1
+            assert param.requires_grad, "param.requires_grad must be True"
+            if cur_bucket.try_hold_param(param):
+                params_to_buckets[param] = cur_bucket
+                buckets.add(cur_bucket)
             else:
-                print('Warning current param should requires_grad as True')
+                new_bucket = self.Bucket(max_buffer_size)
+                assert new_bucket.try_hold_param(param), "param must be holded in a empty bucket!"
+                params_to_buckets[param] = new_bucket
+                buckets.add(new_bucket)
+                cur_bucket = new_bucket
 
-    def _on_param_grad_ready(self, param):
-        print('== bowangbj _on_param_grad_ready invoked')
+        print('allocating buffer for buckets')
+        first_param = next(self.module.parameters())
+        for bucket in buckets:
+            bucket.buffer = first_param.new(bucket.total_elements)
+            assert bucket.buffer is not None, 'bucket.buffer should not be None'
+        print("len(param_to_bucket)={}, len(buckets)={}".format(
+            len(params_to_buckets), len(buckets)))
 
-        # Get the bucket holding param and its offset.
+        print("bowangbj model.params count = {}".format(total_param))
+        total_params_in_buckets = 0
+        for bucket in buckets:
+            total_params_in_buckets += len(bucket.param_to_offset)
+        print(f"bowangbj total_params_in_buckets = {total_params_in_buckets}")
+
+        return params_to_buckets, buckets
+
+    # Callback when param.grad is ready. Note during callback, param.grad won't
+    # be ready yet, we MUST use the given ''grad'' which would be passed upon
+    # callback.
+    def _on_param_grad_ready(self, param, grad):
+        # print('== bowangbj _on_param_grad_ready invoked')
+
+        # Find the bucket holding param and corresponding offset
         bucket = self.param_to_bucket.get(param)
-        assert bucket is not None
+        assert bucket is not None, "Failed to find bucket for param"
         offset = bucket.param_to_offset.get(param)
-        assert offset is not None
+        assert offset is not None, "offset must be set for param"
+        assert bucket.buffer is not None, "buffer not allocated"
 
-        # Allocate bucket buffer when not-initiated yet. This happens mainly for the
-        # 1st ready param in the bucket during backward.
-        if bucket.buffer is None:
-            print('bowangbj buffer not ready, allocating')
-            bucket.buffer = param.new(bucket.total_elements)
-        else:
-            print('bowang bj bucket buffer allocated')
-
-        # Copy grad to bucket
-        print('bowang copying grad to bucket')
+        # Copy grad to bucket, note param.grad isn't ready yet.
+        # print('bowang copying grad to bucket')
         sz = param.numel()
-        if param.grad is not None:
-            # TODO(bowangbj) : remve debug info.
-            for _ in range(1000):
-                print('bowang grad is not None')
-            bucket.buffer[offset : offset + sz].copy_(param.grad.data.view(-1))
-        else:
-            print('WARNING param.grad is None. Zeroing it.')
-            bucket.buffer[offset : offset + sz].zero_()
-
-        # Increment ready_param_grad_count by 1. Note each param triggers its
-        # hook once.
+        # assert param.grad is None
+        assert grad is not None, 'grad should be set'
+        assert param.requires_grad
+        assert param.numel() == grad.numel(), 'sz of param and grad must be equal'
+        bucket.buffer[offset : offset + sz].copy_(grad.data.view(-1))
         bucket.ready_param_grad_count += 1
-
-        bucket_is_full = bucket.ready_param_grad_count == len(bucket.param_to_offset)
-        if bucket_is_full:
-            print('bowangbj bucket_is_full')
-            bucket.buffer.div_(self.world_size)
-            utils.all_reduce(bucket.buffer, self.process_group)
-            # copy reduced-grad back into their original place
-            for cur_p, cur_offset in bucket.param_to_offset.items():
-                sz = cur_p.numel()
-                if cur_p.grad is not None:
-                    cur_p.grad.data.copy_(bucket.buffer[cur_offset : cur_offset + sz].view_as(cur_p))
-                else:
-                    cur_p.grad = bucket.buffer[cur_offset : cur_offset + sz].view_as(cur_p).clone()
-
-        # TODO(bowangbj): kickoff all_reduce ASYNC flow - False and True
 
     def forward(self, *inputs, **kwargs):
         return self.module(*inputs, **kwargs)
@@ -137,10 +124,27 @@ class PythonDDP(nn.Module):
     # TODO(bowangbj): Call Wait for all bucket reduction handle.
     # TODO(bowangbj): Update with Async All Reduce
     def all_reduce_grads(self):
-        """
-        This function must be called explicitly after backward to reduce
-        gradients. There is no automatic hook like c10d.
-        """
+        print('bowangbj all_reduce_grads invoked, {} buckets'.format(len(self.buckets)))
+        for bucket in self.buckets:
+            print('bowangbj bucket is full: {}'.format(bucket.is_full()))
+            assert bucket.is_full()
+
+            # TODO(bowangbj): use ASYNC flow.
+            bucket.buffer.div_(self.world_size)
+            utils.all_reduce(bucket.buffer, self.process_group)
+            # Copy reduced-grad back into original place
+            for cur_p, cur_offset in bucket.param_to_offset.items():
+                sz = cur_p.numel()
+                if cur_p.grad is not None:
+                    # print('bowangbj copy_')
+                    cur_p.grad.data.copy_(bucket.buffer[cur_offset : cur_offset + sz].view_as(cur_p))
+                else:
+                    # print('bowang clone')
+                    cur_p.grad = bucket.buffer[cur_offset : cur_offset + sz].view_as(cur_p).clone()
+
+        print('resetting buffer for next iteration')
+        for bucket in self.buckets:
+            bucket.ready_param_grad_count = 0
 
         # print('bowangbj === all_reduce_grads === invoked')
         # for p, bucket in self.param_to_bucket.items():

@@ -90,7 +90,7 @@ def run_ddp(rank, world_size, epochs, ddp_option):
 
     for epoch in range(epochs):
         if epoch % 1 == 0:
-            print(f'Training epoch: {epoch} ... ')
+            print(f'============================== Epoch {epoch} =========================== ........ ')
 
         start = torch.cuda.Event(enable_timing=True)
         end = torch.cuda.Event(enable_timing=True)
@@ -129,17 +129,22 @@ def run_ddp(rank, world_size, epochs, ddp_option):
                 N=len(A), event=step, mean=np.mean(A), median=np.percentile(A, 50), p90=np.percentile(A, 90), p99=np.percentile(A, 99)))
 
 # TODO(bowangbj): Cleanup
-# for DDP Core
-#  2 iterations, forward, mean=103.61008399963379 ms, median=101.85004806518555 ms, p90=102.2405387878418 ms, p99=105.0716464233407 ms
-#  2 iterations, backward, mean=213.5088494873047 ms, median=212.78219604492188 ms, p90=213.6462875366211 ms, p99=215.36632751464887 ms
+# metrics for GPU 0 ddp_option DDPOption.DDP_CPP_CORE:
+#  100 iterations, forward, mean=104.12376266479492 ms, median=102.2904167175293 ms, p90=102.72983627319336 ms, p99=107.12981872558682 ms
+#  100 iterations, backward, mean=213.57994995117187 ms, median=212.90614318847656 ms, p90=214.0695571899414 ms, p99=215.7702992248539 ms
 
 # for Legacy
-#  2 iterations, forward, mean=101.43609024047852 ms, median=99.59231948852539 ms, p90=99.70504302978516 ms, p99=101.76909767150973 ms
-#  2 iterations, backward, mean=322.808251953125 ms, median=305.6283874511719 ms, p90=309.16234436035154 ms, p99=340.09537322998887 ms
+# metrics for GPU 0 ddp_option DDPOption.LEGACY_DISTRIBUTED_DATA_PARALLEL:
+#  100 iterations, forward, mean=102.34731399536133 ms, median=99.68880081176758 ms, p90=99.8280258178711 ms, p99=102.78610168457168 ms
+#  100 iterations, backward, mean=343.8858123779297 ms, median=325.28955078125 ms, p90=329.9462463378906 ms, p99=359.72328094483333 ms
+
+# for PythonDDP.SYNC
+# 100 iterations, forward, mean=101.77955757141113 ms, median=99.89172744750977 ms, p90=99.98208389282226 ms, p99=101.96920883178808 ms
+# 100 iterations, backward, mean=308.90806060791016 ms, median=288.6599426269531 ms, p90=306.85809631347655 ms, p99=326.2959661865321 ms
 
 def main():
     world_size = 2
-    epochs = 50
+    epochs = 100
 
     # valid options: DDP_CPP_CORE, LEGACY_DISTRIBUTED_DATA_PARALLEL
     ddp_option = DDPOption.PYTHON_DDP

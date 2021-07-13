@@ -31,14 +31,14 @@ class LegacyDistributedDataParallel(nn.Module):
             performing all-reduce (default: 256M).
     """
 
-    def __init__(self, module, process_group, buffer_size=2 ** 28):
+    def __init__(self, module, process_group, buffer_size=2 ** 22):
         super(LegacyDistributedDataParallel, self).__init__()
 
         self.module = module
         self.process_group = process_group
         self.world_size = utils.get_world_size(self.process_group)
 
-        # Never use a bigger buffer than the number of model params
+        # Never use a bigger buffer than the number of model params (elements)
         self.buffer_size = min(buffer_size, sum(p.numel() for p in module.parameters()))
         self.buffer = None
 
