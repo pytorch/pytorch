@@ -27,8 +27,13 @@ class TracerBase:
     def proxy(self, node: Node) -> 'Proxy':
         return Proxy(node, self)
 
+    def fixed_shape_param_proxy(self, node: Node, name,
+                                param: Optional[Any]) -> 'FixedShapeParam':
+        return FixedShapeParam(node, self, name, param)
+
     def create_proxy(self, kind: str, target: Target, args: Tuple[Any, ...], kwargs: Dict[str, Any],
-                     name: Optional[str] = None, type_expr : Optional[Any] = None):
+                     name: Optional[str] = None, type_expr : Optional[Any] = None,
+                     obj_proxied: Optional[Any] = None):
         '''
         Create a Node from the given arguments, then return the Node
         wrapped in a Proxy object.
@@ -37,13 +42,24 @@ class TracerBase:
         represents the parameter of a function. If we need to encode
         a default parameter, we use the ``args`` tuple. ``args`` is
         otherwise empty for ``placeholder`` Nodes.
+
+        obj_proxied is the actual runtime Python value for which this proxy is created, only used
+        for param_shapes_constant support for now.
         '''
 
         args_ = self.create_arg(args)
         kwargs_ = self.create_arg(kwargs)
         assert isinstance(args_, tuple)
         assert isinstance(kwargs_, dict)
-        proxy = self.proxy(self.create_node(kind, target, args_, kwargs_, name, type_expr))
+
+        node_kind = kind if kind != 'fixed_shape_param' else 'get_attr'
+        node = self.create_node(node_kind, target, args_, kwargs_, name, type_expr)
+        if kind != 'fixed_shape_param':
+            proxy = self.proxy(node)
+        else:
+            # a special proxy which lets "shape" attribute accesses pass through to the underlying
+            # module parameter object, so that if tests on parameter shapes can appear in foward()
+            proxy = self.fixed_shape_param_proxy(node, target, obj_proxied)
 
         # Optionally set stack trace on the created Node for debugging purposes
         if self.record_stack_traces:
@@ -260,6 +276,24 @@ class Attribute(Proxy):
 
     def __call__(self, *args, **kwargs):
         return self.tracer.create_proxy('call_method', self.attr, (self.root,) + args, kwargs)
+
+
+class FixedShapeParam(Proxy):
+    def __init__(self, node: Node, tracer, name, param):
+        super().__init__(node, tracer)
+        assert(isinstance(param, torch.nn.Parameter))
+        self.param = param
+        self.name = name
+
+    def __repr__(self) -> str:
+        return f'Parameter({self.name})'
+
+    def __getattr__(self, k):
+        if k == 'shape':
+            return getattr(self.param, k)
+        else:
+            return super().__getattr__(k)
+
 
 for method in magic_methods:
     def scope(method):
