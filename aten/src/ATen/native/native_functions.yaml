@@ -9878,6 +9878,10 @@
   python_module: special
   variants: function
 
+- func: special_log_softmax(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
+  python_module: special
+  variants: function
+
 ## Functions related to the fast Fourier transform and the torch.fft namespace
 # Note [FFT namespace binding]
 # Functions in the fft python module should have their names start with
