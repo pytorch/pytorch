@@ -8,6 +8,8 @@ import torch.distributed as dist
 
 T_co = TypeVar('T_co', covariant=True)
 
+# https://github.com/pytorch/pytorch/blob/44cc873fba5e5ffc4d4d4eef3bd370b653ce1ce1/c10/core/GeneratorImpl.h#L56-L58
+_DIST_SAMPLER_DEFAULT_SEED = 67280421310721
 
 class DistributedSampler(Sampler[T_co]):
     r"""Sampler that restricts data loading to a subset of the dataset.
@@ -58,7 +60,7 @@ class DistributedSampler(Sampler[T_co]):
 
     def __init__(self, dataset: Dataset, num_replicas: Optional[int] = None,
                  rank: Optional[int] = None, shuffle: bool = True,
-                 seed: int = 524287, drop_last: bool = False) -> None:
+                 seed: int = _DIST_SAMPLER_DEFAULT_SEED, drop_last: bool = False) -> None:
         if num_replicas is None:
             if not dist.is_available():
                 raise RuntimeError("Requires distributed package to be available")
