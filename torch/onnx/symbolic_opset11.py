@@ -1007,4 +1007,3 @@ def normal(g, loc, scale, seed):
     # is a sample with mean μ and variance σ's square.
     result = mul(g, scale, g.op("RandomNormalLike", loc))
     return add(g, result, loc)
-

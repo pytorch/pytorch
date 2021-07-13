@@ -723,6 +723,37 @@ def _reshape_helper(g, input, shape, allowzero=1):
     else:
         return g.op("Reshape", input, shape, allowzero_i=allowzero)
 
+def _batchnorm_helper(g, input, weight, bias, running_mean, running_var):
+    from torch.onnx.symbolic_opset9 import _var_mean
+    batch_size = _get_tensor_dim_size(input, 0)
+    channel_size = _get_tensor_dim_size(input, 1)
+
+    if weight is None or _is_none(weight):
+        if channel_size is None:
+            raise RuntimeError("Unsupported: ONNX export of batch_norm for unknown "
+                               "channel size.")
+        weight_value = torch.tensor([1.] * channel_size).type(
+            "torch." + input.type().scalarType() + "Tensor")
+        weight = g.op("Constant", value_t=weight_value)
+    if bias is None or _is_none(bias):
+        if channel_size is None:
+            raise RuntimeError("Unsupported: ONNX export of batch_norm for unknown "
+                               "channel size.")
+        bias_value = torch.tensor([0.] * channel_size).type(
+            "torch." + input.type().scalarType() + "Tensor")
+        bias = g.op("Constant", value_t=bias_value)
+    # If track_running_stats is set to False batch statistics are instead used during evaluation time
+    if running_mean is None or _is_none(running_mean) or running_var is None or _is_none(running_var):
+        assert batch_size is not None and channel_size is not None
+        reshape_in = _reshape_helper(g, input,
+                                              g.op("Constant", value_t=torch.tensor([batch_size, channel_size, -1],
+                                                   dtype=torch.int64)))
+        trans_in = g.op("Transpose", reshape_in, perm_i=[0, 2, 1])
+        running_var, running_mean = _var_mean(g, trans_in,
+                                              g.op("Constant", value_t=torch.tensor([0, 1], dtype=torch.int64)),
+                                              False, False)
+    return weight, bias, running_mean, running_var
+
 def _avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, name):
     if divisor_override and divisor_override.node().kind() != "prim::Constant":
         return _unimplemented(name, "divisor_override")
