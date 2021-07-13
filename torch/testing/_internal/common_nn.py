@@ -1248,6 +1248,16 @@ def fractional_max_pool3d_test(test_case):
             fullname='FractionalMaxPool3d_asymsize')
 
 
+def single_batch_reference_fn(input, parameters, module):
+    """Reference function for modules supporting no batch dimensions.
+
+    The module is passed the input and target in batched form with a single item.
+    The output is squeezed to compare with the no-batch input.
+    """
+    single_batch_input = input.unsqueeze(0)
+    with freeze_rng_state():
+        return module(single_batch_input).squeeze(0)
+
 new_module_tests = [
     poissonnllloss_no_reduce_test(),
     bceloss_no_reduce_test(),
@@ -3187,6 +3197,14 @@ new_module_tests = [
         constructor_args=(3,),
         cpp_constructor_args='torch::nn::AdaptiveAvgPool1dOptions(3)',
         input_fn=lambda: torch.rand(1, 3, 5),
+    ),
+    dict(
+        module_name='AdaptiveAvgPool1d',
+        constructor_args=(3,),
+        cpp_constructor_args='torch::nn::AdaptiveAvgPool1dOptions(3)',
+        input_fn=lambda: torch.rand(3, 5),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
     ),
     dict(
         module_name='AdaptiveAvgPool1d',

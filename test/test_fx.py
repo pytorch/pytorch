@@ -2255,8 +2255,10 @@ class TestFX(JitTestCase):
 
         conv = [n for n in a.graph.nodes if n.target == "net_b.net_c.conv"][-1]
         with a.graph.inserting_before(conv):
-            dropout = a.graph.call_module(module_name="net_b.net_c.dropout",
-                                          args=conv.args)
+            with warnings.catch_warnings(record=True) as w:
+                dropout = a.graph.call_module(module_name="net_b.net_c.dropout",
+                                              args=conv.args)
+                self.assertEqual(len(w), 0)
 
         conv.replace_all_uses_with(dropout)
         a.graph.erase_node(conv)

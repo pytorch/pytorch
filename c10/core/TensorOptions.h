@@ -211,7 +211,7 @@ struct C10_API TensorOptions {
   /// TODO: This function encourages bad behavior (assuming CUDA is
   /// the only device that matters).  Get rid of it / rename it.
   C10_NODISCARD TensorOptions
-  device_index(int16_t device_index) const noexcept {
+  device_index(c10::DeviceIndex device_index) const noexcept {
     return device(Device::Type::CUDA, device_index);
   }
 

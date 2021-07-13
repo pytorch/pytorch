@@ -10151,76 +10151,6 @@ class TestNN(NNTestCase):
             out_t_5 = m(in_t_9[:, :, :5])
         self.assertEqual(out_t_9[:, :, :15], out_t_5)
 
-    def test_upsamplingNearest2d(self):
-        for memory_format in [torch.contiguous_format, torch.channels_last]:
-            m = nn.Upsample(size=4, mode='nearest')
-            in_t = torch.ones(1, 2, 2, 2).contiguous(memory_format=memory_format)
-            in_uint8_t = torch.ones(1, 2, 2, 2, dtype=torch.uint8).contiguous(memory_format=memory_format)
-            with warnings.catch_warnings(record=True) as w:
-                out_t = m(in_t)
-                out_uint8_t = m(in_uint8_t)
-            self.assertEqual(torch.ones(1, 2, 4, 4), out_t)
-            self.assertEqual(torch.ones(1, 2, 4, 4, dtype=torch.uint8), out_uint8_t)
-            # Assert that memory format is carried through to the output
-            self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
-
-            # test forward when input's height is not same as width
-            m = nn.Upsample(size=(4, 2), mode='nearest')
-            in_t = torch.ones(1, 2, 2, 1).contiguous(memory_format=memory_format)
-            with warnings.catch_warnings(record=True) as w:
-                out_t = m(in_t)
-            self.assertEqual(torch.ones(1, 2, 4, 2), out_t)
-            self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
-
-            # test backward when input's height is not same as width
-            input = torch.ones(1, 2, 2, 1, requires_grad=True).contiguous(memory_format=memory_format)
-            gradcheck(lambda x: F.interpolate(x, size=(4, 2), mode='nearest'), [input])
-            gradgradcheck(lambda x: F.interpolate(x, size=(4, 2), mode='nearest'), [input])
-
-            input = torch.randn(1, 2, 2, 2, requires_grad=True).contiguous(memory_format=memory_format)
-            self.assertEqual(
-                F.interpolate(input, 4, mode='nearest'),
-                F.interpolate(input, scale_factor=2, mode='nearest'))
-            gradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [input])
-            gradgradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [input])
-
-            # Assert that cpu and cuda handle channels_last memory format in the same way
-            # https://github.com/pytorch/pytorch/issues/54590
-            if torch.cuda.is_available():
-                a = torch.ones(2, 2, 3, 4, requires_grad=True).contiguous(memory_format=torch.channels_last)
-                # make the data asymmetric; ensure that cuda/cpu handle channels_last appropriately.
-                a[1][1][2][2] = a[1][1][2][3] = 0
-
-                out_cpu = torch.nn.functional.interpolate(a, scale_factor=2, mode='nearest')
-                out_cuda = torch.nn.functional.interpolate(a.to('cuda'), scale_factor=2, mode='nearest')
-                self.assertEqual(out_cpu, out_cuda.to('cpu'))
-
-                gradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [a])
-                gradgradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [a])
-
-                gradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [a.to('cuda')])
-                gradgradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [a.to('cuda')])
-
-    def test_upsamplingBilinear2d(self):
-        for align_corners in [True, False]:
-            kwargs = dict(mode='bilinear', align_corners=align_corners)
-
-            for memory_format in [torch.contiguous_format, torch.channels_last]:
-
-                # test float scale factor up & downsampling
-                for scale_factor in [0.5, 1.5, 2]:
-                    m = nn.Upsample(scale_factor=scale_factor, **kwargs)
-                    in_t = torch.ones(1, 2, 2, 2).contiguous(memory_format=memory_format)
-                    out_size = int(math.floor(in_t.shape[-1] * scale_factor))
-                    with warnings.catch_warnings(record=True) as w:
-                        out_t = m(in_t)
-                    self.assertEqual(torch.ones(1, 2, out_size, out_size), out_t.data)
-                    # Assert that memory format is carried through to the output
-                    self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
-
-                    input = torch.randn(1, 2, 2, 2, requires_grad=True)
-                    gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
-
     def test_upsamplingBicubic2d(self):
         # test output against known input: align_corners=False result must match opencv
         in_t = torch.arange(8.).view(1, 2, 2, 2)
@@ -13223,7 +13153,6 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(x.grad, ref_x.grad)
 
     @onlyCUDA   # Test if CPU and GPU results match
-    @unittest.skipIf(True, "temporarily disabled")
     def test_ReflectionPad3d_large(self, device):
         shapes = ([2, 1000, 7, 7, 7], [1000, 2, 7, 7, 7])
         pad = (1, 2, 3, 4, 5, 6)
@@ -13918,6 +13847,104 @@ class TestNNDeviceType(NNTestCase):
 
         helper(2, 8, 4, 4, ks=2)
         helper(None, 3, 50, 50, ks=5)
+
+    def test_upsamplingNearest2d(self, device):
+        for memory_format in [torch.contiguous_format, torch.channels_last]:
+            in_t = torch.ones(1, 2, 2, 2, device=device).contiguous(memory_format=memory_format)
+            in_uint8_t = torch.ones(1, 2, 2, 2, dtype=torch.uint8, device=device).contiguous(memory_format=memory_format)
+            with warnings.catch_warnings(record=True) as w:
+                out_t = F.interpolate(in_t, size=4, mode='nearest')
+                out_uint8_t = F.interpolate(in_uint8_t, size=4, mode='nearest')
+            self.assertEqual(torch.ones(1, 2, 4, 4, device=device), out_t)
+            self.assertEqual(torch.ones(1, 2, 4, 4, dtype=torch.uint8, device=device), out_uint8_t)
+            # Assert that memory format is carried through to the output
+            self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
+
+            # test forward when input's height is not same as width
+            in_t = torch.ones(1, 2, 2, 1, device=device).contiguous(memory_format=memory_format).requires_grad_()
+            with warnings.catch_warnings(record=True) as w:
+                out_t = F.interpolate(in_t, size=(4, 2), mode='nearest')
+            self.assertEqual(torch.ones(1, 2, 4, 2, device=device), out_t)
+            self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
+
+            out_t.backward(torch.randn_like(out_t))
+            self.assertTrue(in_t.grad.is_contiguous(memory_format=memory_format))
+
+            # test backward when input's height is not same as width
+            input = torch.ones(1, 2, 2, 1, requires_grad=True, device=device).contiguous(memory_format=memory_format)
+            gradcheck(lambda x: F.interpolate(x, size=(4, 2), mode='nearest'), [input])
+            gradgradcheck(lambda x: F.interpolate(x, size=(4, 2), mode='nearest'), [input])
+
+            input = torch.randn(1, 2, 2, 2, requires_grad=True, device=device).contiguous(memory_format=memory_format)
+            self.assertEqual(
+                F.interpolate(input, 4, mode='nearest'),
+                F.interpolate(input, scale_factor=2, mode='nearest'))
+            gradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [input])
+            gradgradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [input])
+
+            # Assert that cpu and cuda handle channels_last memory format in the same way
+            # https://github.com/pytorch/pytorch/issues/54590
+            if torch.device(device).type == 'cuda':
+                for shapes, scale_factor in product([
+                    (2, 2, 3, 4), (2, 3, 4, 5), (3, 1, 2, 2), (1, 5, 3, 2)
+                ], [0.5, 1.5, 2]):
+                    a_cuda = torch.randn(*shapes, device=device).contiguous(memory_format=memory_format).requires_grad_()
+                    a_cpu = a_cuda.detach().cpu().requires_grad_()
+
+                    with warnings.catch_warnings(record=True):
+                        out_cuda = F.interpolate(a_cuda, scale_factor=scale_factor, mode='nearest')
+                        out_cpu = F.interpolate(a_cpu, scale_factor=scale_factor, mode='nearest')
+
+                    self.assertEqual(out_cpu.cuda(), out_cuda)
+
+                    g_cuda = torch.randn_like(out_cuda)
+                    g_cpu = g_cuda.cpu()
+
+                    out_cuda.backward(g_cuda)
+                    out_cpu.backward(g_cpu)
+
+                    self.assertEqual(a_cuda.grad, a_cpu.grad)
+
+    def test_upsamplingBilinear2d(self, device):
+        for align_corners in [True, False]:
+            kwargs = dict(mode='bilinear', align_corners=align_corners)
+            for memory_format in [torch.contiguous_format, torch.channels_last]:
+                # test float scale factor up & downsampling
+                for scale_factor in [0.5, 1.5, 2]:
+                    in_t = torch.ones(1, 2, 2, 2, device=device).contiguous(memory_format=memory_format).requires_grad_()
+                    out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+                    with warnings.catch_warnings(record=True) as w:
+                        out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
+                    self.assertEqual(torch.ones(1, 2, out_size, out_size, device=device), out_t.data)
+                    # Assert that memory format is carried through to the output
+                    self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
+                    out_t.backward(torch.randn_like(out_t))
+                    self.assertTrue(in_t.grad.is_contiguous(memory_format=memory_format))
+
+                    input = torch.randn(1, 2, 2, 2, device=device).contiguous(memory_format=memory_format).requires_grad_()
+                    gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
+
+                    # Assert that cpu and cuda give same results
+                    if torch.device(device).type == 'cuda':
+                        for shapes in [
+                            (2, 2, 3, 4), (2, 3, 4, 5), (3, 1, 2, 2), (1, 5, 3, 2)
+                        ]:
+                            a_cuda = torch.randn(*shapes, device=device).contiguous(memory_format=memory_format).requires_grad_()
+                            a_cpu = a_cuda.detach().cpu().requires_grad_()
+
+                            with warnings.catch_warnings(record=True):
+                                out_cuda = F.interpolate(a_cuda, scale_factor=scale_factor, **kwargs)
+                                out_cpu = F.interpolate(a_cpu, scale_factor=scale_factor, **kwargs)
+
+                            self.assertEqual(out_cpu.cuda(), out_cuda)
+
+                            g_cuda = torch.randn_like(out_cuda)
+                            g_cpu = g_cuda.cpu()
+
+                            out_cuda.backward(g_cuda)
+                            out_cpu.backward(g_cpu)
+
+                            self.assertEqual(a_cuda.grad, a_cpu.grad)
 
     @onlyCPU
     @dtypes(torch.float, torch.double)

@@ -23,7 +23,7 @@ from .._core import _dispatch_dtypes
 from torch.testing._internal.common_device_type import \
     (skipIf, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
      skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIfRocm, precisionOverride, toleranceOverride, tol)
-from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater
+from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater, SM60OrLater
 from torch.testing._internal.common_utils import \
     (is_iterable_of_tensors,
      random_symmetric_matrix, random_symmetric_psd_matrix,
@@ -3630,13 +3630,13 @@ def sample_inputs_log_softmax(op_info, device, dtype, requires_grad, with_dtype=
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     if with_dtype:
-        cases = (((S, S, S), (1, torch.float64)),)
+        cases = (((S, S, S), (1, ), {'dtype': torch.float64}),)
     else:
-        cases = (((S, S, S), (1,)),)  # type:ignore[assignment]
+        cases = (((S, S, S), (1,), {}),)  # type:ignore[assignment]
 
     def generator():
-        for shape, args in cases:
-            yield SampleInput(make_arg(shape), args=args)
+        for shape, args, kwargs in cases:
+            yield SampleInput(make_arg(shape), args=args, kwargs=kwargs)
 
     return list(generator())
 
@@ -4873,6 +4873,8 @@ op_db: List[OpInfo] = [
                                 dtypes=[torch.cdouble]),
                    )),
     OpInfo('add',
+           # NumPy has no builtin reference for the alpha kwarg, but it is easy enough to emulate
+           ref=lambda input, other, *, alpha=1: np.add(input, np.multiply(alpha, other)),
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            assert_autodiffed=True,
            sample_inputs_func=partial(sample_inputs_binary_pwise, alpha=2),
@@ -4885,6 +4887,8 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_binary_pwise),
     OpInfo('sub',
+           # NumPy has no builtin reference for the alpha kwarg, but it is easy enough to emulate
+           ref=lambda input, other, *, alpha=1: np.subtract(input, np.multiply(alpha, other)),
            aliases=('subtract',),
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
            assert_autodiffed=True,
@@ -6111,13 +6115,11 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=all_types_and_complex(),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            dtypesIfROCM=floating_types_and(torch.half, torch.bfloat16),
-           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16),
+           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
+                                                                *[torch.bfloat16] if (SM60OrLater and CUDA11OrLater) else []),
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_matmul,
            skips=(
-               # FIXME: bfloat16 backward support likely depends on CUDA11+
-               #   and SM53+
-               SkipInfo('TestCommon', 'test_dtypes', active_if=IS_WINDOWS),
                # matmul does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),
                SkipInfo('TestCommon', 'test_conj_view', device_type='cpu'),
@@ -6634,14 +6636,13 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=all_types_and_complex(),
            dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else [],
                                            torch.complex64, torch.complex128),
-           backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128),
+           backward_dtypesIfCUDA=floating_types_and(torch.float16,
+                                                    *[torch.bfloat16] if (SM60OrLater and CUDA11OrLater) else [],
+                                                    torch.complex64, torch.complex128),
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_matmul,
            supports_out=False,
            skips=(
-               # FIXME: bfloat16 backward support likely depends on CUDA11+
-               #   and SM53+
-               SkipInfo('TestCommon', 'test_dtypes', active_if=IS_WINDOWS),
                SkipInfo('TestJit', 'test_variant_consistency_jit',),
            )),
     OpInfo('__rmod__',
@@ -6993,13 +6994,11 @@ op_db: List[OpInfo] = [
            op=lambda tensors, equation: torch.einsum(equation, tensors),
            dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, *[torch.bfloat16] if CUDA11OrLater else []),
-           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.half),
+           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.half,
+                                                                *[torch.bfloat16] if (SM60OrLater and CUDA11OrLater) else []),
            supports_out=False,
            sample_inputs_func=sample_inputs_einsum,
            skips=(
-               # FIXME: bfloat16 backward support likely depends on CUDA11+
-               #   and SM53+
-               SkipInfo('TestCommon', 'test_dtypes', active_if=IS_WINDOWS),
                # test does not work with passing lambda for op
                # there's a test `test_einsum` in `test_jit.py` to handle this case
                SkipInfo('TestJit', 'test_variant_consistency_jit'),
@@ -7670,6 +7669,7 @@ op_db: List[OpInfo] = [
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
     OpInfo(
         'log_softmax',
+        aliases=('special.log_softmax', 'nn.functional.log_softmax'),
         supports_out=False,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
@@ -7678,9 +7678,27 @@ op_db: List[OpInfo] = [
     OpInfo(
         'log_softmax',
         variant_test_name='dtype',
+        aliases=('special.log_softmax', 'nn.functional.log_softmax'),
         supports_out=False,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         sample_inputs_func=partial(sample_inputs_log_softmax, with_dtype=True),
+        skips=(
+            # NOTE: This should work once https://github.com/pytorch/pytorch/pull/58838 is in
+            # RuntimeError:
+            # Unknown type name 'dtype':
+            # File "<string>", line 2
+            #         def _fn(t0, s0: int, dtype: dtype = torch.float64):
+            #                                     ~~~~~ <--- HERE
+            #             return variant(t0, s0, dtype=torch.float64)
+
+            # 'defaults' is being compiled since it was called from '_fn'
+            # File "<string>", line 2
+            #         def _fn(t0, s0: int, dtype: dtype = torch.float64):
+            #             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            #             return variant(t0, s0, dtype=torch.float64)
+            #             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
+            SkipInfo('TestJit', 'test_jit_alias_remapping'),
+        ),
         assert_autodiffed=True),
     UnaryUfuncInfo('logit',
                    ref=scipy.special.logit if TEST_SCIPY else _NOTHING,
