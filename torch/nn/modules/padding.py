@@ -6,8 +6,6 @@ from torch import Tensor
 from ..common_types import _size_2_t, _size_4_t, _size_6_t
 from typing import Sequence, Tuple
 
-import torch
-
 
 # TODO: grad_output size asserts in THNN
 
@@ -318,14 +316,6 @@ class ReflectionPad3d(_ReflectionPadNd):
     def __init__(self, padding: _size_6_t) -> None:
         super(ReflectionPad3d, self).__init__()
         self.padding = _ntuple(6)(padding)
-
-    # TODO: Remove this forward() implementation and fallback to base implementation
-    # once the FC window for the new op has passed. This hack is temporarily provided
-    # to avoid breaking JIT-serialized models that rely on _pad() but not reflection_pad3d.
-    def forward(self, input: Tensor) -> Tensor:
-        assert len(self.padding) % 2 == 0, "Padding length must be divisible by 2"
-        assert len(self.padding) // 2 <= input.dim(), "Padding length too large"
-        return torch._C._nn.reflection_pad3d(input, self.padding)
 
 
 class _ReplicationPadNd(Module):
