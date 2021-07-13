@@ -458,12 +458,13 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             optimizer_state_dict = {}
 
         optimizer_state_dict_list = [optimizer_state_dict]
-        dist.broadcast_object_list(
-            optimizer_state_dict_list,
-            src=RECIPIENT_RANK,
-            group=dist.group.WORLD,
-            map_location=self.device
-        )
+        with torch.cuda.device(self.device):
+            dist.broadcast_object_list(
+                optimizer_state_dict_list,
+                src=RECIPIENT_RANK,
+                group=dist.group.WORLD,
+                map_location=self.device
+            )
         optimizer_state_dict = optimizer_state_dict_list[0]
 
         # Load the optimizer state dict, check that no exception is raised
