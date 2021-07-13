@@ -13,4 +13,5 @@ namespace torch { namespace autograd {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Hooks are not implemented yet");
   }
 
+  PySavedVariableHooks::~PySavedVariableHooks() = default;
 }}
