@@ -85,6 +85,7 @@
           python_version: "3.8"
           use_cuda: "1"
           vc_product: BuildTools
+          vs_version: "16.8.6"
           vc_version: "14.28.29333"
           vc_year: "2019"
           filters:
@@ -103,6 +104,7 @@
           test_name: pytorch-windows-test1
           use_cuda: "1"
           vc_product: BuildTools
+          vs_version: "16.8.6"
           vc_version: "14.28.29333"
           vc_year: "2019"
           filters:
@@ -121,6 +123,7 @@
           test_name: pytorch-windows-test2
           use_cuda: "1"
           vc_product: BuildTools
+          vs_version: "16.8.6"
           vc_version: "14.28.29333"
           vc_year: "2019"
           filters:
