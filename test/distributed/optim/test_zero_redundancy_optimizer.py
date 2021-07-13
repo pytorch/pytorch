@@ -822,7 +822,6 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         dev1 = 2 * self.rank + 1
         mp_model = ModelParallelModel(dev0, dev1)
         ddp_model = DDP(mp_model)
-        print(ddp_model._join_config)
         local_model = LocalModel()
         cpu_device = torch.device("cpu")
         # Ensure the parameters are the same across the two models

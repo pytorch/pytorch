@@ -525,9 +525,9 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
 
         Arguments:
             kwargs (dict): a :class:`dict` containing any keyword arguments
-            to modify the behavior of the join hook at run time; all
-            :class:`_Joinable` instances sharing the same join context manager
-            are forwarded the same value for ``kwargs``.
+                to modify the behavior of the join hook at run time; all
+                :class:`_Joinable` instances sharing the same join context
+                manager are forwarded the same value for ``kwargs``.
         """
         return _ZeROJoinHook(self)
 

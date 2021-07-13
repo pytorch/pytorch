@@ -48,6 +48,7 @@ class _Joinable(ABC):
     """
     @abstractmethod
     def __init__(self):
+        super(_Joinable, self).__init__()
         self._join_config = _JoinConfig.construct_disabled_join_config()
 
     @abstractmethod
@@ -57,9 +58,9 @@ class _Joinable(ABC):
 
         Arguments:
             kwargs (dict): a :class:`dict` containing any keyword arguments
-            to modify the behavior of the join hook at run time; all
-            :class:`_Joinable` instances sharing the same join context manager
-            are forwarded the same value for ``kwargs``.
+                to modify the behavior of the join hook at run time; all
+                :class:`_Joinable` instances sharing the same join context
+                manager are forwarded the same value for ``kwargs``.
         """
         ...
 
