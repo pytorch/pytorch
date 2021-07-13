@@ -5913,17 +5913,17 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         if layout == torch.sparse_csr and m.dtype == torch.float16:
             self.precision = 1e-1
 
-        def to_sparse_csr(mat):
+        def convert_layout(mat):
             if layout == torch.sparse_csr:
                 return mat.to_sparse_csr()
             else:
                 return mat
 
-        res1 = f(t, to_sparse_csr(m), v, alpha=alpha, beta=beta)
+        res1 = f(t, convert_layout(m), v, alpha=alpha, beta=beta)
         res2 = torch.full_like(res1, math.nan)
         if transpose_out:
             res2 = res2.t().clone(memory_format=torch.contiguous_format).t()
-        f(t, to_sparse_csr(m), v, alpha=alpha, beta=beta, out=res2)
+        f(t, convert_layout(m), v, alpha=alpha, beta=beta, out=res2)
         res3 = alpha * (m.to(numpy_dtype).cpu().numpy() @ v.to(numpy_dtype).cpu().numpy())
         if beta != 0:
             res3 += (beta * t).to(numpy_dtype).cpu().numpy()
