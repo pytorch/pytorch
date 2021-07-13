@@ -6,20 +6,8 @@ from torch.fx.annotate import annotate
 from torch.fx.experimental.graph_gradual_typechecker import GraphTypeChecker, broadcast_types
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx import GraphModule
-from benchmarks.functional_autograd_benchmark.torchvision_models import resnet50
-
-class MyShapeProp(torch.fx.Interpreter):
-
-    def run_node(self, n):
-        result = super().run_node(n)
-        if isinstance(result, torch.Tensor):
-            n.shape = result.shape
-            n.dtype = result.dtype
-        return result
-
-    def propagate(self, *args):
-        return super().run(*args)
-
+from torchvision.models import resnet50
+from torch.fx.passes.shape_prop import ShapeProp
 
 def conv3x3(in_planes, out_planes, stride=1, groups=1, dilation=1):
     """3x3 convolution with padding"""
@@ -793,14 +781,14 @@ class TypeCheckerTest(unittest.TestCase):
         sample_input = torch.randn(1, 3, 224, 224)
 
         # run our nodes
-        MyShapeProp(gm_run).propagate(sample_input)
+        ShapeProp(gm_run).propagate(sample_input)
 
         gm_static = symbolic_trace(resnet50())
         g = GraphTypeChecker({}, gm_static)
         g.type_check()
         # here we are checking for consistency with fully dynamic nodes
         for n1, n2 in zip(gm_static.graph.nodes, gm_run.graph.nodes):
-            assert is_consistent(n1.type, TensorType(n2.shape))
+            assert is_consistent(n1.type, TensorType(n2.meta['tensor_meta'].shape))
 
         # here we give the same input as to runtume
         gm_static_with_types = symbolic_trace(resnet50())
@@ -813,7 +801,7 @@ class TypeCheckerTest(unittest.TestCase):
         g = GraphTypeChecker({}, gm_static_with_types)
         g.type_check()
         for n1, n2 in zip(gm_static_with_types.graph.nodes, gm_run.graph.nodes):
-            assert n1.type == TensorType(n2.shape)
+            assert n1.type == TensorType(n2.meta['tensor_meta'].shape)
 
 
 if __name__ == '__main__':
