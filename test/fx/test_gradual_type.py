@@ -9,6 +9,8 @@ from torch.fx import GraphModule
 from torchvision.models import resnet50
 from torch.fx.passes.shape_prop import ShapeProp
 
+skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
+
 def conv3x3(in_planes, out_planes, stride=1, groups=1, dilation=1):
     """3x3 convolution with padding"""
     return torch.nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
@@ -775,7 +777,7 @@ class TypeCheckerTest(unittest.TestCase):
                 if n.op == 'output':
                     assert is_consistent(n.type, TensorType(b.size()))
 
-
+    @skipIfNoTorchVision
     def test_resnet50(self):
         gm_run = symbolic_trace(resnet50())
         sample_input = torch.randn(1, 3, 224, 224)
