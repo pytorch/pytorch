@@ -1157,7 +1157,7 @@ class TestQuantizeFx(QuantizationTestCase):
             "": global_qconfig,
             "object_type": [(nn.Conv2d, object_type_qconfig)],
             "module_name_regex": [("module_conv*", module_name_regex_qconfig)],
-            "module_name": [("module_conv2", module_name_qconfig)]}     
+            "module_name": [("module_conv2", module_name_qconfig)]}
         m = prepare_fx(m, qconfig_dict)
         self.assertEqual(m.linear.qconfig, qconfig_dict[""])
         self.assertEqual(m.conv.qconfig, object_type_qconfig)
