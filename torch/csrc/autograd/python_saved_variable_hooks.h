@@ -14,7 +14,7 @@ struct TORCH_API PySavedVariableHooks : public SavedVariableHooks {
   PySavedVariableHooks(py::function &pack_hook, py::function &unpack_hook);
   void call_pack_hook(at::Tensor &tensor) override;
   at::Tensor call_unpack_hook() override;
-  ~PySavedVariableHooks() override = default;
+  ~PySavedVariableHooks() override;
 
 private:
   py::function pack_hook_;
