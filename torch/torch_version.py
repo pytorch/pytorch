@@ -1,7 +1,9 @@
 from functools import total_ordering
 from typing import Iterable, Union
 
-from packaging.version import InvalidVersion, Version  # type: ignore[import]
+from pkg_resources import packaging
+Version = packaging.version.Version
+InvalidVersion = packaging.version.InvalidVersion
 
 from .version import __version__ as internal_version
 
@@ -18,15 +20,15 @@ class TorchVersion(str):
 
     Examples:
         Comparing a TorchVersion object to a Version object
-        >>> TorchVersion('1.10.0a') > Version('1.10.0a')
+            TorchVersion('1.10.0a') > Version('1.10.0a')
 
         Comparing a TorchVersion object to a Tuple object
-        >>> TorchVersion('1.10.0a') > (1, 2)    # 1.2
-        >>> TorchVersion('1.10.0a') > (1, 2, 1) # 1.2.1
+            TorchVersion('1.10.0a') > (1, 2)    # 1.2
+            TorchVersion('1.10.0a') > (1, 2, 1) # 1.2.1
 
         Comparing a TorchVersion object against a string
-        >>> TorchVersion('1.10.0a') > '1.2'
-        >>> TorchVersion('1.10.0a') > '1.2.1'
+            TorchVersion('1.10.0a') > '1.2'
+            TorchVersion('1.10.0a') > '1.2.1'
     """
     def _convert_to_version(self, inp: Union[Version, str, Iterable]) -> Version:
         if isinstance(inp, Version):
