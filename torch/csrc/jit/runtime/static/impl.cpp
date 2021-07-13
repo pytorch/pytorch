@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/runtime/static/impl.h>
 
+#include <ATen/MemoryOverlap.h>
 #include <ATen/core/interned_strings.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/core/InferenceMode.h>
@@ -1357,13 +1358,13 @@ ProcessedNode::ProcessedNode(
   }
   {
     const Operator& op = node->getOperator();
-    TORCH_CHECK(op.hasOperation());
     op_ = op.getOperation(node);
     VLOG(1) << "Fallback interpreter for node: " << PrintNode(node);
   }
 }
 
 void ProcessedNode::run() {
+  DCHECK(verify_outputs_not_overlapping_with_immutable_inputs());
   if (fn_) {
     fn_(this);
   } else if (native_fn_) {
@@ -1384,6 +1385,31 @@ void ProcessedNode::run() {
       Output(i) = std::move(stack[i]);
     }
   }
+}
+
+bool ProcessedNode::verify_outputs_not_overlapping_with_immutable_inputs()
+    const {
+  auto schema = node()->maybeSchema();
+  if (!schema || schema->is_mutable()) {
+    return true;
+  }
+  for (const IValue* in : inputs_) {
+    if (!in->isTensor()) {
+      continue;
+    }
+    const auto& in_t = in->toTensor();
+    for (const IValue& out : outputs_) {
+      if (!out.isTensor()) {
+        continue;
+      }
+      const auto& out_t = out.toTensor();
+      at::MemOverlapStatus status = at::get_overlap_status(in_t, out_t);
+      if (status != at::MemOverlapStatus::NO) {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 } // namespace jit
