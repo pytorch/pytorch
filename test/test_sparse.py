@@ -2319,7 +2319,7 @@ class TestSparse(TestCase):
                                 if use_tensor_val:
                                     values = torch.tensor([1.], dtype=dtype)
                                 else:
-                                    values = 1.
+                                    values = [1.]
                             if include_size:
                                 sparse_tensor = torch.sparse_coo_tensor(indices, values, size, dtype=dtype,
                                                                         device=device, requires_grad=True)
