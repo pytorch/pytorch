@@ -24,4 +24,9 @@ namespace torch { namespace autograd {
     // obj and res are decrefed on exit
   }
 
+  PySavedVariableHooks::~PySavedVariableHooks() {
+    if (data_) {
+      Py_DECREF(data_);
+    }
+  }
 }}
