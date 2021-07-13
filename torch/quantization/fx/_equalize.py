@@ -61,9 +61,8 @@ class _InputEqualizationObserver(nn.Module):
         self.equalization_scale = torch.empty(0)
 
     def forward(self, x_orig):
-        # TODO: Allow for convoluational layers
-        if not (x_orig.ndim == 2):
-            raise ValueError("InputEqualizationObserver only supports Linear layers")
+        if not (x_orig.ndim >= 2 and x_orig.ndim <= 5):
+            raise ValueError("InputEqualizationObserver only supports Linear and Conv layers")
 
         return self.input_obs(x_orig)
 
@@ -133,9 +132,9 @@ class _WeightEqualizationObserver(nn.Module):
         self.equalization_scale = torch.empty(0)
 
     def forward(self, w_orig):
-        # TODO: Allow for convoluational layers
-        if not (w_orig.ndim == 2):
-            raise ValueError("WeightEqualizationObserver only supports Linear layers")
+        if not (w_orig.ndim >= 2 and w_orig.ndim <= 5):
+            raise ValueError("InputEqualizationObserver only supports Linear and Conv layers")
+
         return self.weight_col_obs(w_orig)
 
     def get_weight_col_minmax(self):
