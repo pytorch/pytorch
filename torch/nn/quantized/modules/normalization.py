@@ -33,7 +33,8 @@ class LayerNorm(torch.nn.LayerNorm):
     def from_float(cls, mod):
         scale, zero_point = mod.activation_post_process.calculate_qparams()
         new_mod = cls(
-            mod.normalized_shape, mod.weight, mod.bias, scale.to(torch.float), zero_point.to(torch.long), mod.eps, mod.elementwise_affine)
+            mod.normalized_shape, mod.weight, mod.bias, float(scale),
+            int(zero_point), mod.eps, mod.elementwise_affine)
         return new_mod
 
 class GroupNorm(torch.nn.GroupNorm):
@@ -68,7 +69,7 @@ class GroupNorm(torch.nn.GroupNorm):
     def from_float(cls, mod):
         scale, zero_point = mod.activation_post_process.calculate_qparams()
         new_mod = cls(
-            mod.num_groups, mod.num_channels, mod.weight, mod.bias, scale.to(torch.float), zero_point.to(torch.long),
+            mod.num_groups, mod.num_channels, mod.weight, mod.bias, float(scale), int(zero_point),
             mod.eps, mod.affine)
         return new_mod
 
@@ -103,7 +104,7 @@ class InstanceNorm1d(torch.nn.InstanceNorm1d):
     def from_float(cls, mod):
         scale, zero_point = mod.activation_post_process.calculate_qparams()
         new_mod = cls(
-            mod.num_features, mod.weight, mod.bias, scale.to(torch.float), zero_point.to(torch.long),
+            mod.num_features, mod.weight, mod.bias, float(scale), int(zero_point),
             mod.eps, mod.affine)
         return new_mod
 
@@ -138,7 +139,7 @@ class InstanceNorm2d(torch.nn.InstanceNorm2d):
     def from_float(cls, mod):
         scale, zero_point = mod.activation_post_process.calculate_qparams()
         new_mod = cls(
-            mod.num_features, mod.weight, mod.bias, scale.to(torch.float), zero_point.to(torch.long),
+            mod.num_features, mod.weight, mod.bias, float(scale), int(zero_point),
             mod.eps, mod.affine)
         return new_mod
 
@@ -173,6 +174,6 @@ class InstanceNorm3d(torch.nn.InstanceNorm3d):
     def from_float(cls, mod):
         scale, zero_point = mod.activation_post_process.calculate_qparams()
         new_mod = cls(
-            mod.num_features, mod.weight, mod.bias, scale.to(torch.float), zero_point.to(torch.long),
+            mod.num_features, mod.weight, mod.bias, float(scale), int(zero_point),
             mod.eps, mod.affine)
         return new_mod

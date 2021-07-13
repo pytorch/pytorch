@@ -60,7 +60,7 @@ class Hardswish(torch.nn.Hardswish):
     @staticmethod
     def from_float(mod):
         scale, zero_point = mod.activation_post_process.calculate_qparams()
-        return Hardswish(scale.to(torch.float), zero_point.to(torch.long))
+        return Hardswish(float(scale), int(zero_point))
 
 class ELU(torch.nn.ELU):
     r"""This is the quantized equivalent of :class:`~torch.nn.ELU`.
@@ -85,7 +85,7 @@ class ELU(torch.nn.ELU):
     @staticmethod
     def from_float(mod):
         scale, zero_point = mod.activation_post_process.calculate_qparams()
-        return ELU(scale.to(torch.float), zero_point.to(torch.long), mod.alpha)
+        return ELU(float(scale), int(zero_point), mod.alpha)
 
 class LeakyReLU(torch.nn.LeakyReLU):
     r"""This is the quantized equivalent of :class:`~torch.nn.LeakyReLU`.
@@ -112,7 +112,7 @@ class LeakyReLU(torch.nn.LeakyReLU):
     @classmethod
     def from_float(cls, mod):
         scale, zero_point = mod.activation_post_process.calculate_qparams()
-        return cls(scale.to(torch.float), zero_point.to(torch.long), mod.negative_slope, mod.inplace)
+        return cls(float(scale), int(zero_point), mod.negative_slope, mod.inplace)
 
 class Sigmoid(torch.nn.Sigmoid):
     r"""This is the quantized equivalent of :class:`~torch.nn.Sigmoid`.
@@ -133,4 +133,4 @@ class Sigmoid(torch.nn.Sigmoid):
     @classmethod
     def from_float(cls, mod):
         output_scale, output_zero_point = mod.activation_post_process.calculate_qparams()
-        return cls(output_scale.to(torch.float), output_zero_point.to(torch.long))
+        return cls(float(output_scale), int(output_zero_point))

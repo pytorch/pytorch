@@ -127,10 +127,12 @@ def get_quantize_node_info(activation_post_process: Callable) -> Tuple[str, Unio
         node_type = "call_function"
         scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore[attr-defined]
         if is_per_channel(activation_post_process.qscheme):  # type: ignore[attr-defined]
-            ch_axis = activation_post_process.ch_axis  # type: ignore[attr-defined]
+            ch_axis = int(activation_post_process.ch_axis)  # type: ignore[attr-defined]
             qparams = {"_scale_": scale, "_zero_point_": zero_point, "_axis_": ch_axis, "_dtype_": dtype}
             quantize_op = torch.quantize_per_channel
         else:
+            scale = float(scale)
+            zero_point = int(zero_point)
             qparams = {"_scale_": scale, "_zero_point_": zero_point, "_dtype_": dtype}
             quantize_op = torch.quantize_per_tensor
     elif dtype == torch.float16:
@@ -358,8 +360,8 @@ def create_getattr_from_value(module: torch.nn.Module, graph: Graph, prefix: str
     """
     get_new_attr_name = get_new_attr_name_with_prefix(prefix)
     attr_name = get_new_attr_name(module)
-    # works with tensors and non-tensors through tensors throw a warning
-    module.register_buffer(attr_name, torch.tensor(value))
+    device = assert_and_get_unique_device(module)
+    module.register_buffer(attr_name, torch.tensor(value).to(device))
     # Create get_attr with value
     attr_node = graph.create_node("get_attr", attr_name)
     return attr_node

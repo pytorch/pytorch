@@ -14,20 +14,21 @@ QConfigAny = Union[torch.quantization.QConfig,
                    torch.quantization.QConfigDynamic, None]
 
 def add_device_to_obs_ctr_in_qconfig(qconfig_dict, device='cpu'):
-    if '' in qconfig_dict.keys() and isinstance(qconfig_dict[''], torch.quantization.QConfig):
-        factory_kwargs = {'device': device}
-        new_activation = qconfig_dict[''].activation.with_args(factory_kwargs=factory_kwargs)
-        new_weight = qconfig_dict[''].weight.with_args(factory_kwargs=factory_kwargs)
-        if isinstance(qconfig_dict[''], torch.quantization.QConfigDynamic):
-            qconfig_dict[''] = torch.quantization.QConfigDynamic(
-                activation=new_activation,
-                weight=new_weight
-            )
-        else:
-            qconfig_dict[''] = torch.quantization.QConfig(
-                activation=new_activation,
-                weight=new_weight
-            )
+    for key in qconfig_dict.keys():
+        if isinstance(qconfig_dict[key], torch.quantization.QConfig):
+            factory_kwargs = {'device': device}
+            new_activation = qconfig_dict[key].activation.with_args(factory_kwargs=factory_kwargs)
+            new_weight = qconfig_dict[key].weight.with_args(factory_kwargs=factory_kwargs)
+            if isinstance(qconfig_dict[key], torch.quantization.QConfigDynamic):
+                qconfig_dict[key] = torch.quantization.QConfigDynamic(
+                    activation=new_activation,
+                    weight=new_weight
+                )
+            else:
+                qconfig_dict[key] = torch.quantization.QConfig(
+                    activation=new_activation,
+                    weight=new_weight
+                )
 
 def get_flattened_qconfig_dict(qconfig_dict):
     """ flatten the global, object_type and module_name qconfig

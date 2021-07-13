@@ -273,7 +273,7 @@ class _ObserverBase(ObserverBase):
             zero_points: Zero points tensor of shape (#channels,)
         """
         if not check_min_max_valid(min_val, max_val):
-            return torch.tensor([1.0]).to(self.min_val.device.type), torch.tensor([0]).to(self.min_val.device.type)
+            return torch.tensor([1.0]).to(min_val.device.type), torch.tensor([0]).to(min_val.device.type)
 
         quant_min, quant_max = self._calculate_qmin_qmax()
         min_val_neg = torch.min(min_val, torch.zeros_like(min_val))

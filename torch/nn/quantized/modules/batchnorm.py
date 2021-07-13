@@ -31,8 +31,8 @@ class BatchNorm2d(torch.nn.BatchNorm2d):
         new_mod.bias = mod.bias
         new_mod.running_mean = mod.running_mean
         new_mod.running_var = mod.running_var
-        new_mod.scale = scale.to(torch.float)
-        new_mod.zero_point = zero_point.to(torch.long)
+        new_mod.scale = float(scale)
+        new_mod.zero_point = int(zero_point)
         return new_mod
 
 # TODO: dedup with BatchNorm2d
