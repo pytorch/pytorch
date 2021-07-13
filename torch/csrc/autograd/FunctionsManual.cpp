@@ -3616,7 +3616,6 @@ Tensor plu_backward_base(
   auto phi = phi_L + phi_U;
   auto psi = at::zeros_like(self);
 
-  // TODO: consider the squared case separately
   Tensor self_grad;
   if (m <= n) {
     auto U_complement = U.narrow(-2, 0, k).narrow(-1, k, n - k);
