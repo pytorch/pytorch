@@ -21,7 +21,7 @@ if (${env:INSTALL_WINDOWS_SDK} -eq "1") {
 if (Test-Path "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe") {
     $VS_VERSION_major = [int] ${env:VS_VERSION}.split(".")[0]
     $existingPath = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -products "Microsoft.VisualStudio.Product.BuildTools" -version "[${env:VS_VERSION}, ${env:VS_VERSION_major + 1})" -property installationPath
-    if ($existingPath -ne $null) {
+    if (($existingPath -ne $null) -and (!${env:CIRCLECI})) {
         echo "Found correctly versioned existing BuildTools installation in $existingPath"
         exit 0
     }

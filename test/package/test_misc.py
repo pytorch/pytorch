@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 import inspect
 from io import BytesIO
+from sys import version_info
 from textwrap import dedent
+from unittest import skipIf
 
 from torch.package import PackageExporter, PackageImporter, is_from_package
 from torch.package.package_exporter import PackagingError
@@ -116,6 +118,7 @@ class TestMisc(PackageTestCase):
         self.assertTrue(file_structure.has_file("package_a/subpackage.py"))
         self.assertFalse(file_structure.has_file("package_a/subpackage"))
 
+    @skipIf(version_info < (3, 7), "mock uses __getattr__ a 3.7 feature")
     def test_exporter_content_lists(self):
         """
         Test content list API for PackageExporter's contained modules.
