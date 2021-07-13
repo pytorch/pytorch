@@ -1195,6 +1195,8 @@ class _TensorExtractor(pickle.Pickler):
         # the means to access a value.
         if isinstance(obj, CFuture) or is_rref_instance(obj):
             return ""
+        if isinstance(obj, torch.cuda.Event):
+            return ""
         return None
 
 
