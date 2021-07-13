@@ -924,21 +924,6 @@ TestUtilityFuns_opset14 = type(str("TestUtilityFuns_opset14"),
                                (TestCase,),
                                dict(TestUtilityFuns.__dict__, opset_version=14))
 
-# opset 11 tests
-TestUtilityFuns_opset11_new_jit_API = type(str("TestUtilityFuns_opset11_new_jit_API"),
-                                           (TestCase,),
-                                           dict(TestUtilityFuns.__dict__, opset_version=11))
-
-# opset 12 tests
-TestUtilityFuns_opset12_new_jit_API = type(str("TestUtilityFuns_opset12_new_jit_API"),
-                                           (TestCase,),
-                                           dict(TestUtilityFuns.__dict__, opset_version=12))
-
-# opset 13 tests
-TestUtilityFuns_opset13_new_jit_API = type(str("TestUtilityFuns_opset13_new_jit_API"),
-                                           (TestCase,),
-                                           dict(TestUtilityFuns.__dict__, opset_version=13))
-
 
 if __name__ == "__main__":
     run_tests()
