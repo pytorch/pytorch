@@ -3576,7 +3576,7 @@ Tensor gather_with_keepdimed_indices(const Tensor& input, int64_t dim, const Ten
   return out_fw_grad;
 }
 
-Tensor lu_backward_base(
+Tensor plu_backward_base(
   const variable_list& grads,
   const Tensor& self,
   const Tensor& P,
@@ -3601,17 +3601,17 @@ Tensor lu_backward_base(
   auto n = self.size(-1);
   auto k = std::min(m, n);
 
-  auto L_square = L.narrow(-2, 0, k).narrow(-1, 0, k);
-  auto L_square_H = L_square.transpose(-2, -1).conj();
-  auto L_grad_square = L_grad.narrow(-2, 0, k).narrow(-1, 0, k);
-  auto U_square = U.narrow(-2, 0, k).narrow(-1, 0, k);
-  condition_diagonal(U_square);
-  auto U_square_H = U_square.transpose(-2, -1).conj();
-  auto U_grad_square = U_grad.narrow(-2, 0, k).narrow(-1, 0, k);
+  auto L_principal = L.narrow(-2, 0, k).narrow(-1, 0, k);
+  auto L_principal_H = L_principal.transpose(-2, -1).conj();
+  auto L_grad_principal = L_grad.narrow(-2, 0, k).narrow(-1, 0, k);
+  auto U_principal = U.narrow(-2, 0, k).narrow(-1, 0, k);
+  condition_diagonal(U_principal);
+  auto U_principal_H = U_principal.transpose(-2, -1).conj();
+  auto U_grad_principal = U_grad.narrow(-2, 0, k).narrow(-1, 0, k);
 
-  auto phi_L = L_square_H.matmul(L_grad_square).tril_();
+  auto phi_L = L_principal_H.matmul(L_grad_principal).tril_();
   phi_L.diagonal(0, -2, -1).fill_(0.0);
-  auto phi_U = U_grad_square.matmul(U_square_H).triu_();
+  auto phi_U = U_grad_principal.matmul(U_principal_H).triu_();
 
   auto phi = phi_L + phi_U;
   auto psi = at::zeros_like(self);
@@ -3628,19 +3628,19 @@ Tensor lu_backward_base(
 
     psi.narrow(-2, 0, k).narrow(-1, k, n - k).copy_(U_grad_complement);
 
-    auto psi_square = std::get<0>(at::triangular_solve(
+    auto psi_principal = std::get<0>(at::triangular_solve(
       phi.transpose(-2, -1).conj(),
-      U_square,
+      U_principal,
       /*upper=*/true,
       /*transpose=*/false,
       /*unitriangular=*/false
     )).transpose(-2, -1).conj();
-    psi.narrow(-2, 0, k).narrow(-1, 0, k).copy_(psi_square);
+    psi.narrow(-2, 0, k).narrow(-1, 0, k).copy_(psi_principal);
 
     self_grad = P.matmul(
       std::get<0>(at::triangular_solve(
         psi,
-        L_square_H,
+        L_principal_H,
         /*upper=*/true,
         /*transpose=*/false,
         /*unitriangular=*/true
@@ -3656,18 +3656,18 @@ Tensor lu_backward_base(
 
     psi.narrow(-2, k, m - k).narrow(-1, 0, k).copy_(L_grad_complement);
 
-    auto psi_square = std::get<0>(at::triangular_solve(
+    auto psi_principal = std::get<0>(at::triangular_solve(
       phi,
-      L_square_H,
+      L_principal_H,
       /*upper=*/true,
       /*transpose=*/false,
       /*unitriangular=*/true
     ));
-    psi.narrow(-2, 0, k).narrow(-1, 0, k).copy_(psi_square);
+    psi.narrow(-2, 0, k).narrow(-1, 0, k).copy_(psi_principal);
 
     self_grad = std::get<0>(at::triangular_solve(
       psi.transpose(-2, -1).conj(),
-      U_square,
+      U_principal,
       /*upper=*/true,
       /*transpose=*/false,
       /*unitriangular=*/false
@@ -3688,7 +3688,7 @@ Tensor _lu_with_info_backward(
   // LU = L + U - I, hence
   // L_grad = LU_grad,
   // U_grad = LU_grad.
-  return lu_backward_base({/*L_grad=*/grad, /*U_grad=*/grad}, self, P, L, U);
+  return plu_backward_base({/*L_grad=*/grad, /*U_grad=*/grad}, self, P, L, U);
 }
 
 } // namespace details
