@@ -6,10 +6,20 @@ from torch.fx.annotate import annotate
 from torch.fx.experimental.graph_gradual_typechecker import GraphTypeChecker, broadcast_types
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx import GraphModule
-from torchvision.models import resnet50
 from torch.fx.passes.shape_prop import ShapeProp
 
+try:
+    from torchvision.models import resnet50
+
+    HAS_TORCHVISION = True
+except ImportError:
+    HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
+skipIfNoMkldnn = unittest.skipIf(
+    not (torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available()),
+    "no MKLDNN",
+)
+
 
 def conv3x3(in_planes, out_planes, stride=1, groups=1, dilation=1):
     """3x3 convolution with padding"""
