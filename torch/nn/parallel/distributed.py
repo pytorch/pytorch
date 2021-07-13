@@ -9,7 +9,12 @@ from contextlib import contextmanager
 import torch
 import torch.distributed as dist
 from torch.autograd import Function, Variable
-from torch.distributed.algorithms.join import _Join, _Joinable, _JoinHook
+from torch.distributed.algorithms.join import (
+    _Join,
+    _Joinable,
+    _JoinConfig,
+    _JoinHook,
+)
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
 RPC_AVAILABLE = False
@@ -686,12 +691,14 @@ class DistributedDataParallel(Module, _Joinable):
         del attrs["process_group"]
         del attrs["reducer"]
         del attrs["logger"]
+        del attrs["_join_config"]
         return attrs
 
     def __setstate__(self, state):
         # If serializable, then the process group should be the default one
         self.process_group = _get_default_group()
         super(DistributedDataParallel, self).__setstate__(state)
+        self._join_config = _JoinConfig.construct_disabled_join_config()
         self.__dict__.setdefault("require_forward_param_sync", True)
         self.__dict__.setdefault("require_backward_grad_sync", True)
         parameters, expect_sparse_gradient = self._build_params_for_reducer()
