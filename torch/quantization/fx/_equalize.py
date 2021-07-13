@@ -225,14 +225,23 @@ default_equalization_qconfig = EqualizationQConfig(input_activation=input_equali
                                                    weight=weight_equalization_observer)
 
 
+def fused_module_supports_equalization(module) -> bool:
+    """ Checks if the fused node supports equalization. """
+    return type(module) in [nni.LinearReLU, nni.ConvReLU1d, nni.ConvReLU2d, nni.ConvReLU3d]
+
+def nn_module_supports_equalization(module) -> bool:
+    """ Checks if the torch.nn node supports equalization. """
+    return type(module) in [nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d]
+
 def node_supports_equalization(node: Node, modules) -> bool:
     """ Checks if the current node supports equalization
     Currently we only support nn.Linear/F.Linear and nn.Conv/F.conv layers
     """
     if node.op == 'call_module':
-        return type(modules[node.target]) in [nn.Linear, nni.LinearReLU, nn.Conv2d]
+        return nn_module_supports_equalization(modules[str(node.target)]) or \
+            fused_module_supports_equalization(modules[str(node.target)])
     elif node.op == 'call_function':
-        return node.target in [F.linear, F.conv2d]
+        return node.target in [F.linear, F.conv1d, F.conv2d, F.conv3d]
     return False
 
 def is_equalization_observer(observer: nn.Module) -> bool:
@@ -379,13 +388,11 @@ def scale_weight_node(
         next_equalization_scale: Next node's calculated equalization scale if
            the following node needs to be equalized, 1 otherwise
     """
-    if isinstance(modules[str(node.target)], nni.LinearReLU):
+    if fused_module_supports_equalization(modules[str(node.target)]):
         op_module = modules[str(node.target)][0]    # type: ignore[index]
-        assert(isinstance(op_module, nn.Linear))
     else:
         op_module = modules[str(node.target)]
-        assert(isinstance(modules[str(node.target)], nn.Linear) or
-               isinstance(modules[str(node.target)], nn.Conv2d))
+    assert(nn_module_supports_equalization(op_module))
 
     # Scale the weights for input-weight equalization
     # If the following layer needs to be equalized then we will multiply its scale
@@ -544,10 +551,10 @@ def update_obs_for_equalization(model: GraphModule, modules: Dict[str, nn.Module
             if op_node.op == 'call_module':
                 # Calibrate the weight equalization observer since it has just
                 # been created
-                if isinstance(modules[str(op_node.target)], nni.LinearReLU):
-                    linear_node = modules[str(op_node.target)][0]   # type: ignore[index]
-                    assert(isinstance(linear_node, nn.Linear))
-                    weight_eq_obs(linear_node.weight)
+                if fused_module_supports_equalization(modules[str(op_node.target)]):
+                    module = modules[str(op_node.target)][0]   # type: ignore[index]
+                    assert(nn_module_supports_equalization(module))
+                    weight_eq_obs(module.weight)
                 else:
                     weight_eq_obs(modules[str(op_node.target)].weight)
 
