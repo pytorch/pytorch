@@ -45,7 +45,7 @@ namespace c10 {
   _(AnyTupleType)           \
   _(AnyClassType)           \
   _(UnionType)              \
-  _(Pybind11_OptionalType)
+  _(OptionalType)
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,

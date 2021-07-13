@@ -152,15 +152,15 @@ struct TORCH_API UnionType : public Type {
 // internal code! The only reason we have this struct is that we can't
 // bind `UnionType` to more than one PyObject, but we still need to
 // expose both `OptionalType` and `UnionType` to our users
-struct Pybind11_OptionalType;
-using Pybind11_OptionalTypePtr = std::shared_ptr<Pybind11_OptionalType>;
-struct TORCH_API Pybind11_OptionalType : public UnionType {
-  static Pybind11_OptionalTypePtr create(std::vector<TypePtr> types);
+struct OptionalType;
+using OptionalTypePtr = std::shared_ptr<OptionalType>;
+struct TORCH_API OptionalType : public UnionType {
+  static OptionalTypePtr create(std::vector<TypePtr> types);
 
   static UnionTypePtr legacy_OptionalOfTensor();
 
  protected:
-  explicit Pybind11_OptionalType(std::vector<TypePtr> types) : UnionType(std::move(types)) {}
+  explicit OptionalType(std::vector<TypePtr> types) : UnionType(std::move(types)) {}
 };
 
 template <typename T>
@@ -1599,13 +1599,13 @@ inline at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
 TORCH_API c10::optional<TypePtr> unifyTypes(
     const TypePtr& t1,
     const TypePtr& t2,
-    bool default_to_any = false,
+    bool default_to_union = false,
     TypePtr type_hint = nullptr);
 
 TORCH_API c10::optional<TypePtr> unifyTypeList(
     at::ArrayRef<TypePtr> elements,
     std::ostream& why_not,
-    bool default_to_any = false,
+    bool default_to_union = false,
     TypePtr type_hint = nullptr);
 
 namespace detail {
