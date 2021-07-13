@@ -193,56 +193,9 @@ void _calc_moving_avg_qparams_helper(
   }
 }
 
-at::Tensor _observe_and_fake_quant_gpu(
-    const at::Tensor& x,
-    const at::Tensor& observer_on,
-    const at::Tensor& fake_quant_on,
-    const at::Tensor& averaging_const,
-    at::Tensor& running_min,
-    at::Tensor& running_max,
-    at::Tensor& scale,
-    at::Tensor& zero_point,
-    const int64_t qmin,
-    const int64_t qmax,
-    const int64_t ch_axis,
-    bool per_row_fq,
-    bool symmetric_quant) {
-  const auto x_contig = x.contiguous();
-  _calculate_moving_average(
-      x_contig, observer_on, averaging_const, running_min, running_max);
-
-  auto fake_quant = fake_quant_on.item().toInt();
-
-  if (fake_quant == 1) {
-    int64_t size = per_row_fq ? x.size(0) : 1;
-    float* scale_ptr = scale.data_ptr<float>();
-    int32_t* zp_ptr = zero_point.data_ptr<int32_t>();
-
-    _calc_moving_avg_qparams_helper(
-        x_contig,
-        running_min,
-        running_max,
-        scale_ptr,
-        zp_ptr,
-        qmin,
-        qmax,
-        symmetric_quant, /* preserve_sparsity */
-        per_row_fq);
-
-    at::Tensor output = at::empty_like(x, x.options(), MemoryFormat::Preserve);
-    if (per_row_fq) {
-      return at::fake_quantize_per_channel_affine(
-          x, scale, zero_point, 0, qmin, qmax);
-    } else {
-      return at::fake_quantize_per_tensor_affine(
-          x, scale, zero_point, qmin, qmax);
-    }
-  }
-  return x;
-}
 } // namespace
 
-Tensor fused_moving_avg_obs_fake_quant_cuda(
+std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cuda(
     const at::Tensor& x,
     const at::Tensor& observer_on,
     const at::Tensor& fake_quant_on,
@@ -256,6 +209,7 @@ Tensor fused_moving_avg_obs_fake_quant_cuda(
     const int64_t ch_axis,
     bool per_row_fq,
     bool symmetric_quant) {
+  auto mask = at::ones_like(x, at::kBool, MemoryFormat::Preserve);
   const auto x_contig = x.contiguous();
   _calculate_moving_average(
       x_contig, observer_on, averaging_const, running_min, running_max);
@@ -280,14 +234,14 @@ Tensor fused_moving_avg_obs_fake_quant_cuda(
 
     at::Tensor output = at::empty_like(x, x.options(), MemoryFormat::Preserve);
     if (per_row_fq) {
-      return at::fake_quantize_per_channel_affine(
+      return at::fake_quantize_per_channel_affine_cachemask(
           x, scale, zero_point, 0, qmin, qmax);
     } else {
-      return at::fake_quantize_per_tensor_affine(
+      return at::_fake_quantize_per_tensor_affine_cachemask_tensor_qparams(
           x, scale, zero_point, qmin, qmax);
     }
   }
-  return x;
+  return std::make_tuple(x, mask);
 }
 } // namespace native
 } // namespace at
