@@ -5900,7 +5900,7 @@ class DistributedTest:
                 if isinstance(obj, collections.abc.Mapping):
                     values_match = [_check_tensor_map_location(v, device) for _, v in obj.items()]
                     return all(values_match)
-                return True
+                return False
 
             def _copy_to_device(obj, device):
                 # Copies `obj` to `device`

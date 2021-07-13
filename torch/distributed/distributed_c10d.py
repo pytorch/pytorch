@@ -1816,6 +1816,7 @@ def broadcast_object_list(object_list, src=0, group=None, device=None, map_locat
             if obj_view.device != torch.device("cpu"):
                 obj_view = obj_view.cpu()
             offset += obj_size
+            # Deserialize contained tensors directly to `map_location`
             object_list[i] = _tensor_to_object(obj_view, obj_size, map_location)
 
 
