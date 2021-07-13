@@ -38,7 +38,8 @@ class ToyModel(nn.Module):
 class DDPOption(Enum):
     DDP_CPP_CORE = 1
     LEGACY_DISTRIBUTED_DATA_PARALLEL = 2
-    PYTHON_DDP = 3
+    PYTHON_DDP_SYNC = 3
+    PYTHON_DDP_ASYNC = 4
 
 def _setup(rank, world_size):
     os.environ['MASTER_ADDR'] = 'localhost'
@@ -48,19 +49,21 @@ def _setup(rank, world_size):
     dist.init_process_group("gloo", rank=rank, world_size=world_size)
 
 # Helper to create a DDP Model.
-def _create_ddp_model(module, rank, pg, ddp_option):
+def _create_ddp_model(module, rank, pg, ddp_option, buffer_size):
     if ddp_option == DDPOption.DDP_CPP_CORE:
         ddp_model = DDP(module, device_ids=[rank], process_group=pg)
         ddp_model._set_static_graph()
         return ddp_model
     elif ddp_option == DDPOption.LEGACY_DISTRIBUTED_DATA_PARALLEL:
-        return legacy_ddp.LegacyDistributedDataParallel(module, pg)
-    elif ddp_option == DDPOption.PYTHON_DDP:
-        return python_ddp.PythonDDP(module, pg)
+        return legacy_ddp.LegacyDistributedDataParallel(module, pg, buffer_size)
+    elif ddp_option == DDPOption.PYTHON_DDP_SYNC:
+        return python_ddp.PythonDDP(module, pg, False, buffer_size)
+    elif ddp_option == DDPOption.PYTHON_DDP_ASYNC:
+        return python_ddp.PythonDDP(module, pg, True, buffer_size)
     else:
         raise NotImplementedError('only DDP CPP is supported')
 
-def run_ddp(rank, world_size, epochs, ddp_option):
+def run_ddp(rank, world_size, epochs, ddp_option, buffer_size):
     print(f'bowangbj run_ddp rank {rank}')
 
     # Setup
@@ -78,7 +81,7 @@ def run_ddp(rank, world_size, epochs, ddp_option):
 
     # Wrap in DDP Model
     pg = dist.distributed_c10d._get_default_group()
-    ddp_model = _create_ddp_model(model, rank, pg, ddp_option)
+    ddp_model = _create_ddp_model(model, rank, pg, ddp_option, buffer_size)
 
     loss_fn = nn.MSELoss()
     optimizer = optim.SGD(ddp_model.parameters(),lr=0.001)
@@ -90,7 +93,7 @@ def run_ddp(rank, world_size, epochs, ddp_option):
 
     for epoch in range(epochs):
         if epoch % 1 == 0:
-            print(f'Training epoch: {epoch} ... ')
+            print(f'============================== Epoch {epoch} =========================== ........ ')
 
         start = torch.cuda.Event(enable_timing=True)
         end = torch.cuda.Event(enable_timing=True)
@@ -129,26 +132,42 @@ def run_ddp(rank, world_size, epochs, ddp_option):
                 N=len(A), event=step, mean=np.mean(A), median=np.percentile(A, 50), p90=np.percentile(A, 90), p99=np.percentile(A, 99)))
 
 # TODO(bowangbj): Cleanup
-# for DDP Core
-#  2 iterations, forward, mean=103.61008399963379 ms, median=101.85004806518555 ms, p90=102.2405387878418 ms, p99=105.0716464233407 ms
-#  2 iterations, backward, mean=213.5088494873047 ms, median=212.78219604492188 ms, p90=213.6462875366211 ms, p99=215.36632751464887 ms
+# metrics for GPU 0 ddp_option DDPOption.DDP_CPP_CORE:
+#  100 iterations, forward, mean=104.12376266479492 ms, median=102.2904167175293 ms, p90=102.72983627319336 ms, p99=107.12981872558682 ms
+#  100 iterations, backward, mean=213.57994995117187 ms, median=212.90614318847656 ms, p90=214.0695571899414 ms, p99=215.7702992248539 ms
 
 # for Legacy
-#  2 iterations, forward, mean=101.43609024047852 ms, median=99.59231948852539 ms, p90=99.70504302978516 ms, p99=101.76909767150973 ms
-#  2 iterations, backward, mean=322.808251953125 ms, median=305.6283874511719 ms, p90=309.16234436035154 ms, p99=340.09537322998887 ms
+# metrics for GPU 0 ddp_option DDPOption.LEGACY_DISTRIBUTED_DATA_PARALLEL:
+#  100 iterations, forward, mean=102.34731399536133 ms, median=99.68880081176758 ms, p90=99.8280258178711 ms, p99=102.78610168457168 ms
+#  100 iterations, backward, mean=343.8858123779297 ms, median=325.28955078125 ms, p90=329.9462463378906 ms, p99=359.72328094483333 ms
+
+# for PythonDDP.SYNC
+# 100 iterations, forward, mean=101.77955757141113 ms, median=99.89172744750977 ms, p90=99.98208389282226 ms, p99=101.96920883178808 ms
+# 100 iterations, backward, mean=308.90806060791016 ms, median=288.6599426269531 ms, p90=306.85809631347655 ms, p99=326.2959661865321 ms
+
+# For PythonDDP.ASYNC
+# metrics for GPU 0 ddp_option DDPOption.PYTHON_DDP:
+#  100 iterations, forward, mean=101.73365325927735 ms, median=99.90008163452148 ms, p90=100.05296020507812 ms, p99=102.16290603637789 ms
+#  100 iterations, backward, mean=237.14536087036132 ms, median=220.486572265625 ms, p90=222.4979248046875 ms, p99=240.30343261719605 ms
 
 def main():
     world_size = 2
-    epochs = 50
+    epochs = 100
+    buffer_size = 2 ** 22
 
-    # valid options: DDP_CPP_CORE, LEGACY_DISTRIBUTED_DATA_PARALLEL
-    ddp_option = DDPOption.PYTHON_DDP
-    print('ddp_option=' + str(ddp_option))
+    options = [
+        DDPOption.DDP_CPP_CORE,
+        DDPOption.LEGACY_DISTRIBUTED_DATA_PARALLEL,
+        DDPOption.PYTHON_DDP_SYNC,
+        DDPOption.PYTHON_DDP_ASYNC
+    ]
 
-    mp.spawn(run_ddp,
-        args=(world_size, epochs, ddp_option),
-        nprocs=world_size,
-        join=True)
+    for option in options:
+        print("option: {}".format(option))
+        mp.spawn(run_ddp,
+            args=(world_size, epochs, option, buffer_size),
+            nprocs=world_size,
+            join=True)
 
 if __name__=="__main__":
     main()
