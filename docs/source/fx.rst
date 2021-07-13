@@ -429,7 +429,7 @@ Common Pitfalls in Transform Authoring
   The recommended alternative is to use a ``dict`` data type, which is
   `insertion ordered <https://mail.python.org/pipermail/python-dev/2017-December/151283.html>`_
   as of Python 3.7 (and as of cPython 3.6). A ``dict`` can be used equivalently
-  to a set by storing the same in the keys of the ``dict``.
+  to a set by storing values to be deduplicated in the keys of the ``dict``.
 
 Checking Correctness of Modules
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
