@@ -183,8 +183,6 @@ class DdpTrainer(TrainerBase):
 
     def __init__(
         self,
-        rank,
-        trainer_count,
         process_group,
         use_cuda_rpc,
         server_rref,
@@ -201,8 +199,6 @@ class DdpTrainer(TrainerBase):
         A trainer that implements a DDP training algorithm using a simple hook that performs allreduce
         using the process_group implementation.
         Args:
-            rank (int): worker rank
-            trainer_count (int): count of trainer in the world
             process_group (ProcessGroup): distributed process group
             use_cuda_rpc (bool): indicator for CUDA RPC
             server_rref (RRef): remote reference to the server
@@ -217,9 +213,7 @@ class DdpTrainer(TrainerBase):
             hook (function): ddp communication hook
             iteration_step (function): will perform 1 step of training
         """
-        super().__init__(rank)
-        self.rank = rank
-        self.trainer_count = trainer_count
+        super().__init__(process_group.rank())
         self.process_group = process_group
         self.use_cuda_rpc = use_cuda_rpc
         self.server_rref = server_rref
@@ -231,6 +225,9 @@ class DdpTrainer(TrainerBase):
         self.hook_state_class = hook_state_class
         self.hook = hook
         self.iteration_step = iteration_step
+        
+        self.rank = process_group.rank()
+        self.trainer_count = process_group.size()
 
     def epoch_key(self, epoch, index):
         r"""
@@ -251,7 +248,7 @@ class DdpTrainer(TrainerBase):
         """
         model = model.cuda(self.rank)
         data = self.preprocess_data(self.rank, data)
-        criterion = self.create_criterion(self.rank, model)
+        criterion = self.create_criterion(self.rank)
         ddp_model, hook_state = self.create_ddp_model(
             self, self.rank, model, self.process_group, self.hook_state_class, self.hook
         )

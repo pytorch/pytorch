@@ -151,8 +151,6 @@ def run_trainer(
     # check if this a cudatrainer
     use_cuda_rpc = rank >= args.ntrainer
     trainer = trainer_class(
-        rank,
-        args.ntrainer + args.ncudatrainer,
         process_group,
         use_cuda_rpc,
         server_rref,

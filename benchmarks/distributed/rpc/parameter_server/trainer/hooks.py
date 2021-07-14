@@ -30,7 +30,9 @@ def allreduce_hook(state, bucket):
 
 def hybrid_hook(state, bucket):
     r"""
-    A ddp communication hook that uses two process groups.
+    A ddp communication hook that uses Gloo default process
+    group for sparse gradients and NCCL non-default process
+    group for dense gradients.
     Args:
         state (object): maintains state during the training process
         bucket (GradBucket): gradient bucket
