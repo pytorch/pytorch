@@ -11,16 +11,16 @@ namespace py = pybind11;
 
 namespace torch { namespace autograd {
 
-struct THP_CLASS PySavedVariableHooks : public SavedVariableHooks {
+struct PySavedVariableHooks : public SavedVariableHooks {
   PySavedVariableHooks(py::function &pack_hook, py::function &unpack_hook);
-  void THP_CLASS call_pack_hook(at::Tensor &tensor) override;
-  at::Tensor THP_CLASS call_unpack_hook() override;
+  void call_pack_hook(at::Tensor &tensor) override;
+  at::Tensor call_unpack_hook() override;
   ~PySavedVariableHooks() override;
 
-  private:
-    py::function pack_hook_;
-    py::function unpack_hook_;
-    PyObject* data_ = nullptr;
+private:
+  PyObject* pack_hook_;
+  PyObject* unpack_hook_;
+  PyObject* data_ = nullptr;
 };
 
 }}
