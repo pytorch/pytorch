@@ -166,6 +166,28 @@ def _get_tensor_min_max(
 
     return min_val, max_val
 
+def _get_per_row_min_max(
+        x: torch.Tensor,
+        min_vals: torch.Tensor,
+        max_vals: torch.Tensor,
+        axis: int = 0,
+        averaging_const: float = 0.01) -> Tuple[torch.Tensor, torch.Tensor]:
+    x_dim = x.size()
+    new_axis_list = [i for i in range(len(x_dim))]  # noqa: C416
+    new_axis_list[axis] = 0
+    new_axis_list[0] = axis
+    y = x.permute(*new_axis_list)
+
+    y = torch.flatten(y, start_dim=1)
+    # min_vals, max_vals = torch._aminmax(y, 1)
+    if math.isinf(min_vals[0]) or math.isinf(max_vals[0]):
+        min_vals, max_vals = torch._aminmax(y, 1)
+    else:
+        min_vals_cur, max_vals_cur = torch._aminmax(y, 1)
+        min_vals = min_vals + averaging_const * (min_vals_cur - min_vals)
+        max_vals = max_vals + averaging_const * (max_vals_cur - max_vals)
+    return min_vals, max_vals
+
 def _get_scale_zp(
         min_val: float,
         max_val: float,
@@ -1014,6 +1036,78 @@ class TestFusedObsFakeQuant(TestCase):
             else:
                 x_in = x
 
+            self.assertEqual(in_running_min_ref, in_running_min_op)
+            self.assertEqual(in_running_max_ref, in_running_max_op)
+            torch.testing.assert_allclose(out, x_in)
+
+    @given(  # device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
+        symmetric_quant=st.booleans())
+    @settings(deadline=None)
+    def test_fused_obs_fake_quant_moving_avg_per_channel(self, symmetric_quant) -> None:
+        """
+        Tests the case where we call the fused_obs_fake_quant op multiple times
+        and update the running_min and max of the activation tensors.
+        """
+        device = 'cpu'  # TODO add cuda in future PR
+        m = n = 5
+        in_running_min_ref = torch.empty(m, device=device).fill_(float("inf"))
+        in_running_min_op = torch.empty(m, device=device).fill_(float("inf"))
+        in_running_max_ref = torch.empty(m, device=device).fill_(float("-inf"))
+        in_running_max_op = torch.empty(m, device=device).fill_(float("-inf"))
+        avg_const = torch.tensor(0.01, dtype=torch.float, device=device)
+
+        scale = torch.empty(m, device=device).fill_(0.1)
+        zero_point = torch.empty(m, dtype=torch.int, device=device).fill_(0)
+
+        observer_on = fake_quant_on = 0
+
+        pt_op = torch.fused_moving_avg_obs_fake_quant
+        # enable observer after 2 iterations and fake_quant after 4 iterations
+        for i in range(10):
+            if i > 2:
+                observer_on = 1
+            if i > 4:
+                fake_quant_on = 1
+
+            x = torch.randn(m, n, device=device)
+            out = pt_op(
+                x,
+                torch.tensor(observer_on, device=device),
+                torch.tensor(fake_quant_on, device=device),
+                avg_const,
+                in_running_min_op,
+                in_running_max_op,
+                scale,
+                zero_point,
+                0,
+                255,
+                0,
+                True,  # per_channel_enabled
+                symmetric_quant,
+            )[0]
+            if observer_on:
+                (
+                    in_running_min_ref,
+                    in_running_max_ref,
+                ) = _get_per_row_min_max(x, in_running_min_ref, in_running_max_ref)
+            if fake_quant_on:
+                x_scale = torch.empty(m, device=device)
+                x_zero_point = torch.empty(m, dtype=torch.int, device=device)
+
+                for i in range(x_scale.numel()):
+                    x_scale[i], x_zero_point[i] = _get_scale_zp(
+                        in_running_min_ref[i].item(),
+                        in_running_max_ref[i].item(),
+                        torch.quint8,
+                        preserve_sparsity=symmetric_quant,
+                    )
+                x_in = _fake_quantize_per_channel_affine_reference(
+                    x, x_scale, x_zero_point, 0, 0, 255
+                )
+                self.assertEqual(scale, x_scale)
+                self.assertEqual(zero_point, x_zero_point)
+            else:
+                x_in = x
             self.assertEqual(in_running_min_ref, in_running_min_op)
             self.assertEqual(in_running_max_ref, in_running_max_op)
             torch.testing.assert_allclose(out, x_in)
