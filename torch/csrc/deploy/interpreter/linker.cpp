@@ -829,11 +829,26 @@ struct CustomLibraryImpl
   }
 
   void check_library_format() {
-    DEPLOY_CHECK(0 == memcmp(header_->e_ident, ELFMAG, SELFMAG), "{}: not an ELF file", this->name_);
-    DEPLOY_CHECK(header_->e_type == ET_DYN, "{}: is not shared object file", this->name_);
-    DEPLOY_CHECK(header_->e_ident[EI_CLASS] == ELFCLASS64, "{}: is not ELF64 format", this->name_);
-    DEPLOY_CHECK(header_->e_ident[EI_DATA] == ELFDATA2LSB, "{}: is not 2's complement, little endian", this->name_);
-    DEPLOY_CHECK(header_->e_machine == EM_X86_64, "{}: is not in x86_64 format", this->name_);
+    DEPLOY_CHECK(
+        0 == memcmp(header_->e_ident, ELFMAG, SELFMAG),
+        "{}: not an ELF file",
+        this->name_);
+    DEPLOY_CHECK(
+        header_->e_type == ET_DYN,
+        "{}: is not shared object file",
+        this->name_);
+    DEPLOY_CHECK(
+        header_->e_ident[EI_CLASS] == ELFCLASS64,
+        "{}: is not ELF64 format",
+        this->name_);
+    DEPLOY_CHECK(
+        header_->e_ident[EI_DATA] == ELFDATA2LSB,
+        "{}: is not 2's complement, little endian",
+        this->name_);
+    DEPLOY_CHECK(
+        header_->e_machine == EM_X86_64,
+        "{}: is not in x86_64 format",
+        this->name_);
   }
 
   void reserve_address_space() {
