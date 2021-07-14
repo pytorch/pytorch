@@ -13,7 +13,6 @@ glob or regular expressions.
 """
 
 
-
 import collections
 import fnmatch
 import json
@@ -52,7 +51,9 @@ def map_filename(build_folder: str, fname: str) -> str:
     build_cpu_prefix = os.path.join(build_folder, native_cpu_prefix, "")
     default_arch_suffix = ".DEFAULT.cpp"
     if fname.startswith(native_cpu_prefix) and fname.endswith(".cpp"):
-        return f"{build_cpu_prefix}{fname[len(native_cpu_prefix):]}{default_arch_suffix}"
+        return (
+            f"{build_cpu_prefix}{fname[len(native_cpu_prefix):]}{default_arch_suffix}"
+        )
     if fname.startswith(build_cpu_prefix) and fname.endswith(default_arch_suffix):
         return f"{native_cpu_prefix}{fname[len(build_cpu_prefix):-len(default_arch_suffix)]}"
     return fname
@@ -165,11 +166,12 @@ build {i}: do_cmd
 
 def run_shell_commands_in_parallel(commands: Iterable[List[str]]) -> str:
     """runs all the commands in parallel with ninja, commands is a List[List[str]]"""
+
     async def run_command(cmd: List[str]) -> str:
         proc = await asyncio.create_subprocess_shell(
-            ' '.join(shlex.quote(x) for x in cmd),  # type: ignore[attr-defined]
+            " ".join(shlex.quote(x) for x in cmd),  # type: ignore[attr-defined]
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
+            stderr=asyncio.subprocess.PIPE,
         )
         stdout, stderr = await proc.communicate()
         return f">>>\nstdout:\n{stdout.decode()}\nstderr:\n{stderr.decode()}\n<<<"
@@ -181,7 +183,9 @@ def run_shell_commands_in_parallel(commands: Iterable[List[str]]) -> str:
             async with semaphore:
                 return await task
 
-        return await asyncio.gather(*(sem_task(task) for task in tasks), return_exceptions=True)
+        return await asyncio.gather(
+            *(sem_task(task) for task in tasks), return_exceptions=True
+        )
 
     async def helper() -> Any:
         coros = [run_command(cmd) for cmd in commands]
@@ -192,7 +196,9 @@ def run_shell_commands_in_parallel(commands: Iterable[List[str]]) -> str:
     return "\n".join(results)
 
 
-def run_clang_tidy(options: Any, line_filters: List[Dict[str, Any]], files: Iterable[str]) -> str:
+def run_clang_tidy(
+    options: Any, line_filters: List[Dict[str, Any]], files: Iterable[str]
+) -> str:
     """Executes the actual clang-tidy command in the shell."""
     command = [options.clang_tidy_exe, "-p", options.compile_commands_dir]
     if not options.config_file and os.path.exists(".clang-tidy"):
@@ -202,7 +208,10 @@ def run_clang_tidy(options: Any, line_filters: List[Dict[str, Any]], files: Iter
 
         with open(options.config_file) as config:
             # Here we convert the YAML config file to a JSON blob.
-            command += ["-config", json.dumps(yaml.load(config, Loader=yaml.SafeLoader))]
+            command += [
+                "-config",
+                json.dumps(yaml.load(config, Loader=yaml.SafeLoader)),
+            ]
     if options.print_include_paths:
         command += ["--extra-arg", "-v"]
     if options.include_dir:
@@ -215,7 +224,10 @@ def run_clang_tidy(options: Any, line_filters: List[Dict[str, Any]], files: Iter
         command += ["-line-filter", json.dumps(line_filters)]
 
     if options.parallel:
-        commands = [list(command) + [map_filename(options.compile_commands_dir, f)] for f in files]
+        commands = [
+            list(command) + [map_filename(options.compile_commands_dir, f)]
+            for f in files
+        ]
         output = run_shell_commands_in_parallel(commands)
     else:
         command += map_filenames(options.compile_commands_dir, files)
@@ -232,7 +244,9 @@ def run_clang_tidy(options: Any, line_filters: List[Dict[str, Any]], files: Iter
     return output
 
 
-def extract_warnings(output: str, base_dir: str = ".") -> Dict[str, Dict[int, Set[str]]]:
+def extract_warnings(
+    output: str, base_dir: str = "."
+) -> Dict[str, Dict[int, Set[str]]]:
     rc: Dict[str, Dict[int, Set[str]]] = {}
     for line in output.split("\n"):
         p = CLANG_WARNING_PATTERN.match(line)
@@ -258,17 +272,50 @@ def apply_nolint(fname: str, warnings: Dict[int, Set[str]]) -> None:
 
     line_offset = -1  # As in .cpp files lines are numbered starting from 1
     for line_no in sorted(warnings.keys()):
-        nolint_diagnostics = ','.join(warnings[line_no])
+        nolint_diagnostics = ",".join(warnings[line_no])
         line_no += line_offset
-        indent = ' ' * (len(lines[line_no]) - len(lines[line_no].lstrip(' ')))
-        lines.insert(line_no, f'{indent}// NOLINTNEXTLINE({nolint_diagnostics})\n')
+        indent = " " * (len(lines[line_no]) - len(lines[line_no].lstrip(" ")))
+        lines.insert(line_no, f"{indent}// NOLINTNEXTLINE({nolint_diagnostics})\n")
         line_offset += 1
 
     with open(fname, mode="w") as f:
         f.write("".join(lines))
 
 
-def run(options: Any) -> None:
+def filter_from_diff(
+    paths: List[str], diffs: List[str]
+) -> Tuple[List[str], List[Dict[Any, Any]]]:
+    files = []
+    line_filters = []
+
+    for diff in diffs:
+        changed_files = find_changed_lines(diff)
+        changed_files = {
+            filename: v
+            for filename, v in changed_files.items()
+            if any(filename.startswith(path) for path in paths)
+        }
+        line_filters += [
+            {"name": name, "lines": lines} for name, lines, in changed_files.items()
+        ]
+        files += list(changed_files.keys())
+
+    return files, line_filters
+
+
+def filter_from_diff_file(
+    paths: List[str], filename: str
+) -> Tuple[List[str], List[Dict[Any, Any]]]:
+    with open(filename, "r") as f:
+        diff = f.read()
+    return filter_from_diff(paths, [diff])
+
+
+def filter_default(paths: List[str]) -> Tuple[List[str], List[Dict[Any, Any]]]:
+    return get_all_files(paths), []
+
+
+def run(options: Any) -> int:
     # This flag is pervasive enough to set it globally. It makes the code
     # cleaner compared to threading it through every single function.
     global VERBOSE
@@ -276,25 +323,12 @@ def run(options: Any) -> None:
 
     # Normalize the paths first.
     paths = [path.rstrip("/") for path in options.paths]
+
     if options.diff_file:
-        with open(options.diff_file, "r") as f:
-            changed_files = find_changed_lines(f.read())
-            changed_files = {
-                filename: v
-                for filename, v in changed_files.items()
-                if any(filename.startswith(path) for path in options.paths)
-            }
-            line_filters = [
-                {"name": name, "lines": lines} for name, lines, in changed_files.items()
-            ]
-            files = list(changed_files.keys())
-            # Since header files are excluded, add .cpp file if it exists in the same folder
-            cpp_files = [f[:-1] + "cpp" for f in files if f.endswith(".h")]
-            cpp_files = [f for f in cpp_files if os.path.exists(f)]
-            files = list(set(files + cpp_files))
+        files, line_filters = filter_from_diff_file(options.paths, options.diff_file)
     else:
-        line_filters = []
-        files = get_all_files(paths)
+        files, line_filters = filter_default(options.paths)
+
     file_patterns = get_file_patterns(options.glob, options.regex)
     files = list(filter_files(files, file_patterns))
 
@@ -304,8 +338,13 @@ def run(options: Any) -> None:
         sys.exit()
 
     clang_tidy_output = run_clang_tidy(options, line_filters, files)
+    warnings = extract_warnings(
+        clang_tidy_output, base_dir=options.compile_commands_dir
+    )
     if options.suppress_diagnostics:
-        warnings = extract_warnings(clang_tidy_output, base_dir=options.compile_commands_dir)
+        warnings = extract_warnings(
+            clang_tidy_output, base_dir=options.compile_commands_dir
+        )
         for fname in warnings.keys():
             mapped_fname = map_filename(options.compile_commands_dir, fname)
             print(f"Applying fixes to {mapped_fname}")
@@ -318,4 +357,6 @@ def run(options: Any) -> None:
         print(clang_tidy_output)
     for line in clang_tidy_output.splitlines():
         if line.startswith(pwd):
-            print(line[len(pwd):])
+            print(line[len(pwd) :])
+
+    return len(warnings.keys())
