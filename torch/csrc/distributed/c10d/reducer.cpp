@@ -391,12 +391,24 @@ void Reducer::mark_variable_ready_dense(size_t variable_index) {
       // to bucket_view. If grad has already been set as views of buckets in
       // previous iterations, no copy is needed.
       if (!grad.is_alias_of(bucket_view)) {
-        bucket_view.copy_(grad);
+        if (comm_hook_ == nullptr) {
+          auto wrapped = at::native::wrapped_scalar_tensor(double(1.) / div_factor_);
+          // Divides while copying into the bucket view to save one scan over all the input parameters.
+          at::mul_out(bucket_view, grad, wrapped);
+        } else {
+          bucket_view.copy_(grad);
+        }
+
         if (gradient_as_bucket_view_) {
           // Let grad point to bucket_view buffer.
           grad = bucket_view;
           // The grad is modified and need to be written back.
           return true;
+        }
+      } else {
+        // If grad and bucket view point to the same storage, no need to copy.
+        if (comm_hook_ == nullptr) {
+          bucket_view.div_(div_factor_);
         }
       }
     } else {
@@ -854,9 +866,7 @@ void Reducer::mark_variable_ready(size_t variable_index) {
 c10::intrusive_ptr<c10::ivalue::Future> Reducer::run_comm_hook(
     GradBucket& grad_bucket) {
   if (comm_hook_ == nullptr) {
-    _AllReduceCommHookWithDivFactorState state(
-        process_group_.get(), div_factor_);
-    _AllReduceCommHookWithDivFactor allreduce_hook(state);
+    _AllReduceBySumCommHook allreduce_hook(process_group_.get());
     return allreduce_hook.runHook(grad_bucket);
   } else {
     return comm_hook_->runHook(grad_bucket);
@@ -1445,10 +1455,6 @@ void Reducer::finalize_backward() {
   require_finalize_ = false;
   in_ddp_backwards_ = false;
 
-  // Unset allreduce division factor, as it may change in next backwards pass
-  // when running with DDP join mode.
-  div_factor_ = kUnsetDivFactor;
-
   // Wait for asynchronous reduction to complete and unflatten contents.
   for (auto& bucket : buckets_) {
     // See Note [DDP Communication Hook]
@@ -1463,6 +1469,11 @@ void Reducer::finalize_backward() {
     for (const auto i : c10::irange(future_result.size())) {
       auto& replica = bucket.replicas[i];
       if (bucket.expect_sparse_gradient) {
+        // If no DDP comm hook is registered,
+        // the allreduce only sums up the value, and a separate division is required.
+        if (comm_hook_ == nullptr) {
+          future_result[i].div_(div_factor_);
+        }
         replica.contents.copy_(future_result[i]);
       } else {
         // Reinitialize only `bucket_views_out` with the future_result by
@@ -1470,6 +1481,10 @@ void Reducer::finalize_backward() {
         populate_bucket_views_out(replica, future_result[i]);
       }
     }
+
+    // Unset allreduce division factor, as it may change in next backwards pass
+    // when running with DDP join mode.
+    div_factor_ = kUnsetDivFactor;
 
     if (!bucket.expect_sparse_gradient) {
       // We don't need to finalize the sparse bucket since the sparse grad and
