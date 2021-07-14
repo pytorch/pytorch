@@ -1,6 +1,6 @@
 call %SCRIPT_HELPERS_DIR%\setup_pytorch_env.bat
 
-git submodule update --init --recursive third_party/pybind11
+git submodule update --init --recursive --jobs 0 third_party/pybind11
 cd test\custom_backend
 
 :: Build the custom backend library.
