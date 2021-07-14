@@ -12,8 +12,10 @@
 // to simply copy the contents of this symbol to disk and dlopen it to create an
 // instance of python.
 extern "C" __attribute__((
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     __weak__)) char _binary_libtorch_deployinterpreter_so_start[];
 extern "C"
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     __attribute__((__weak__)) char _binary_libtorch_deployinterpreter_so_end[];
 #ifdef FBCODE_CAFFE2
 // in fbcode, we build the interpreter version with cuda bindings explicitly and
@@ -28,6 +30,35 @@ extern "C" __attribute__((
 
 namespace torch {
 namespace deploy {
+
+InterpreterManager::InterpreterManager(size_t n_interp) : resources_(n_interp) {
+  TORCH_DEPLOY_TRY
+  for (const auto i : c10::irange(n_interp)) {
+    instances_.emplace_back(this);
+    auto I = instances_.back().acquire_session();
+    // make torch.version.interp be the interpreter id
+    // can be used for balancing work across GPUs
+    I.global("torch", "version").attr("__setattr__")({"interp", int(i)});
+    // std::cerr << "Interpreter " << i << " initialized\n";
+    instances_.back().pImpl_->set_find_module(
+        [this](const std::string& name) -> at::optional<std::string> {
+          auto it = registered_module_sources_.find(name);
+          if (it != registered_module_sources_.end()) {
+            return it->second;
+          } else {
+            return at::nullopt;
+          }
+        });
+  }
+
+  // Pre-registered modules.
+  // TODO(jwtan): Make the discovery of these modules easier.
+  register_module_source(
+      "GetArgumentNamesModule",
+      "from inspect import signature\n"
+      "def getArgumentNames(function): return list(signature(function).parameters.keys())\n");
+  TORCH_DEPLOY_SAFE_CATCH_RETHROW
+}
 
 Package InterpreterManager::load_package(const std::string& uri) {
   TORCH_DEPLOY_TRY
@@ -59,6 +90,7 @@ InterpreterSession ReplicatedObj::acquire_session(
   TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 InterpreterSession::~InterpreterSession() {
   if (manager_ && notify_idx_ >= 0) {
     manager_->resources_.free(notify_idx_);
@@ -80,6 +112,7 @@ void ReplicatedObjImpl::unload(const Interpreter* on_this_interpreter) {
   TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 ReplicatedObjImpl::~ReplicatedObjImpl() {
   unload(nullptr);
 }

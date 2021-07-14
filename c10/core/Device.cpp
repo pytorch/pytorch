@@ -30,7 +30,7 @@ namespace c10 {
 namespace {
 DeviceType parse_type(const std::string& device_string) {
   static const std::array<
-      std::pair<std::string, DeviceType>,
+      std::pair<const char*, DeviceType>,
       static_cast<size_t>(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)>
       types = {{
           {"cpu", DeviceType::CPU},
@@ -41,6 +41,7 @@ DeviceType parse_type(const std::string& device_string) {
           {"opencl", DeviceType::OPENCL},
           {"ideep", DeviceType::IDEEP},
           {"hip", DeviceType::HIP},
+          {"ve", DeviceType::VE},
           {"fpga", DeviceType::FPGA},
           {"msnpu", DeviceType::MSNPU},
           {"xla", DeviceType::XLA},
@@ -52,15 +53,15 @@ DeviceType parse_type(const std::string& device_string) {
   auto device = std::find_if(
       types.begin(),
       types.end(),
-      [device_string](const std::pair<std::string, DeviceType>& p) {
-        return p.first == device_string;
+      [&device_string](const std::pair<const char*, DeviceType>& p) {
+        return p.first && p.first == device_string;
       });
   if (device != types.end()) {
     return device->second;
   }
   TORCH_CHECK(
       false,
-      "Expected one of cpu, cuda, xpu, mkldnn, opengl, opencl, ideep, hip, msnpu, mlc, xla, vulkan, meta, hpu device type at start of device string: ",
+      "Expected one of cpu, cuda, xpu, mkldnn, opengl, opencl, ideep, hip, ve, msnpu, mlc, xla, vulkan, meta, hpu device type at start of device string: ",
       device_string);
 }
 } // namespace

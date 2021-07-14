@@ -50,6 +50,15 @@ class TorchTensorEngine(object):
     def cat(self, inputs, dim=0):
         return torch.cat(inputs, dim=dim)
 
+    def clamp(self, data, min, max):
+        return torch.clamp(data, min=min, max=max)
+
+    def relu(self, data):
+        return torch.nn.functional.relu(data)
+
+    def tanh(self, data):
+        return torch.tanh(data)
+
     def max_pool2d(self, data, kernel_size, stride=1):
         return torch.nn.functional.max_pool2d(data, kernel_size, stride=stride)
 

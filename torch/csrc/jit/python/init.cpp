@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/irparser.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/canonicalize_graph_fuser_ops.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
@@ -93,7 +94,6 @@
 #include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import.h>
-#include <torch/csrc/jit/tensorexpr/execution_counter.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/jit/tensorexpr/tensorexpr_init.h>
 
@@ -203,7 +203,7 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_onnx_eval_peephole",
           [](std::shared_ptr<Graph>& graph,
              std::map<std::string, IValue>& paramsDict) {
-            EvalPeepholeONNX(graph->block(), paramsDict);
+            EvalPeepholeONNX(graph, paramsDict);
             return paramsDict;
           },
           pybind11::return_value_policy::move)
@@ -216,7 +216,7 @@ void initJITBindings(PyObject* module) {
              std::map<std::string, IValue>& paramsDict,
              int opset_version) {
             ConstantFoldONNX(
-                graph->block(),
+                graph,
                 paramsDict,
                 opset_version); // overload resolution
             return paramsDict;
@@ -407,9 +407,6 @@ void initJITBindings(PyObject* module) {
           py::arg("g"),
           py::arg("value_name_pairs") =
               std::vector<std::pair<std::string, std::string>>())
-      .def(
-          "_jit_pass_remove_inplace_ops",
-          [](const std::shared_ptr<Graph>& g) { return RemoveInplaceOps(g); })
       .def("_jit_pass_constant_pooling", ConstantPooling)
       .def(
           "_jit_pass_create_functional_graphs",
@@ -560,9 +557,6 @@ void initJITBindings(PyObject* module) {
           })
       .def("_jit_pass_onnx_block", BlockToONNX)
       .def(
-          "_jit_pass_onnx_encapsulate_pattern_into_subblock",
-          EncapsulatePatternIntoSubblock)
-      .def(
           "_jit_onnx_convert_pattern_from_subblock", ConvertPatternFromSubblock)
       .def("_jit_pass_fixup_onnx_controlflow_node", FixupONNXControlflowNode)
       .def("_jit_pass_canonicalize_graph_fuser_ops", CanonicalizeOps)
@@ -640,17 +634,17 @@ void initJITBindings(PyObject* module) {
           "_jit_get_inline_everything_mode",
           []() { return getInlineEverythingMode(); })
       .def(
+          "_jit_get_logging_option",
+          []() { return ::torch::jit::get_jit_logging_levels(); })
+      .def(
+          "_jit_set_logging_option",
+          [](std::string loggingOption) -> void {
+            ::torch::jit::set_jit_logging_levels(loggingOption);
+          })
+      .def(
           "_jit_try_infer_type",
           [](py::object obj) -> InferredType {
             return tryToInferType(std::move(obj));
-          })
-      .def(
-          "_jit_get_trigger_value",
-          [](const std::string& trigger_name) -> int {
-            using namespace torch::jit::tensorexpr;
-            ExecutionTrigger* trigger =
-                ExecutionTriggerList::GetInstance().FindByName(trigger_name);
-            return trigger->value();
           })
       .def(
           "_jit_get_te_cuda_pointwise_loop_levels",
@@ -1117,12 +1111,14 @@ void initJITBindings(PyObject* module) {
 
   // Used by torch.Package to coordinate deserialization of storages across
   // ScriptModules and eager modules
-  py::class_<StorageContext, std::shared_ptr<StorageContext>>(
-      m, "StorageContext")
+  py::class_<
+      DeserializationStorageContext,
+      std::shared_ptr<DeserializationStorageContext>>(
+      m, "DeserializationStorageContext")
       .def(py::init<>())
       .def(
           "get_storage",
-          [](StorageContext& self,
+          [](DeserializationStorageContext& self,
              const std::string& name,
              py::object data_type_obj) {
             c10::Storage storage = self.getStorage(name);
@@ -1138,12 +1134,12 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "add_storage",
-          [](StorageContext& self,
+          [](DeserializationStorageContext& self,
              const std::string& name,
              const at::Tensor& tensor) {
-            self.addStorage(name, tensor.storage());
+            return self.addStorage(name, tensor.storage());
           })
-      .def("has_storage", &StorageContext::hasStorage);
+      .def("has_storage", &DeserializationStorageContext::hasStorage);
 
   m.def(
       "_jit_get_operation",

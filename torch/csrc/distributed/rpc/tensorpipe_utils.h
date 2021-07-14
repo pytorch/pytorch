@@ -2,12 +2,7 @@
 
 #ifdef USE_TENSORPIPE
 
-#include <torch/csrc/distributed/rpc/macros.h>
 #include <torch/csrc/distributed/rpc/utils.h>
-
-#ifdef USE_CUDA_NOT_ROCM
-#include <c10/cuda/CUDAStream.h>
-#endif
 
 namespace tensorpipe {
 class Message;
@@ -19,9 +14,58 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-const c10::Stream& getStreamForDevice(
+TORCH_API const c10::Stream& getStreamForDevice(
     const std::vector<c10::Stream>& streams,
     const c10::Device& device);
+
+// Inspired by c10/core/impl/DeviceGuardImplInterface.h.
+
+class TensorpipeDeviceTypeConverter {
+ public:
+  // Ideally we'd want this to also return a tensorpipe::Message::Tensor object
+  // but we cannot forward-declare that class (because it's nested), and we
+  // cannot include the TensorPipe headers because it's a private dependency.
+  // Thus we bend over backwards and entrust this method with appending that
+  // object to the `tensors` field of the tensorpipe::Message object we pass.
+  virtual c10::optional<std::vector<char>> prepareTensorForSending(
+      const c10::Storage& storage,
+      const std::vector<c10::Stream>& streams,
+      tensorpipe::Message& message) const = 0;
+
+  // Same as above: this method cannot return a tensorpipe::Allocation::Tensor,
+  // thus it appends it to the `tensors` field of the tensorpipe::Allocation.
+  virtual at::DataPtr allocateTensorForReceiving(
+      int deviceIndex,
+      size_t length,
+      const std::vector<c10::Stream>& streams,
+      tensorpipe::Allocation& allocation) const = 0;
+
+  virtual ~TensorpipeDeviceTypeConverter() = default;
+};
+
+extern TORCH_API std::array<
+    std::atomic<const TensorpipeDeviceTypeConverter*>,
+    static_cast<size_t>(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)>
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+    device_type_converter_registry;
+
+class TORCH_API TensorpipeDeviceTypeConverterRegistrar {
+ public:
+  TensorpipeDeviceTypeConverterRegistrar(
+      DeviceType,
+      const TensorpipeDeviceTypeConverter*);
+};
+
+#define C10_REGISTER_TENSORPIPE_DEVICE_TYPE_CONVERTER(                     \
+    DevType, TensorpipeDeviceTypeConverter)                                \
+  static ::torch::distributed::rpc::TensorpipeDeviceTypeConverterRegistrar \
+      C10_ANONYMOUS_VARIABLE(g_##DeviceType)(                              \
+          ::c10::DeviceType::DevType, new TensorpipeDeviceTypeConverter());
+
+inline const TensorpipeDeviceTypeConverter* getDeviceTypeConverter(
+    DeviceType type) {
+  return device_type_converter_registry[static_cast<size_t>(type)].load();
+}
 
 // A struct that holds pointers that keep alive all the memory that will be
 // accessed by TensorPipe during a write operation.

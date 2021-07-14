@@ -1,9 +1,10 @@
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/SpectralOpsUtils.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/NativeFunctions.h>
+#include <c10/util/irange.h>
 
 #include <algorithm>
 #include <vector>
@@ -73,8 +74,7 @@ Tensor resize_fft_input(Tensor x, IntArrayRef dims, IntArrayRef sizes) {
   bool must_copy = false;
   auto x_sizes = x.sizes();
   DimVector pad_amount(x_sizes.size() * 2);
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (int64_t i = 0; i < dims.size(); ++i) {
+  for (const auto i : c10::irange(dims.size())) {
     if (sizes[i] == -1) {
       continue;
     }
@@ -236,16 +236,14 @@ ShapeAndDims canonicalize_fft_shape_and_dim_args(
   } else {
     // No shape, has dim
     ret.shape.resize(ret.dim.size());
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (int64_t i = 0; i < ret.dim.size(); ++i) {
+    for (const auto i : c10::irange(ret.dim.size())) {
       ret.shape[i] = input_sizes[ret.dim[i]];
     }
   }
 
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (int64_t i = 0; i < ret.shape.size(); ++i) {
-    TORCH_CHECK(ret.shape[i] > 0,
-                "Invalid number of data points (", ret.shape[i], ") specified");
+  for (const auto & shape : ret.shape) {
+    TORCH_CHECK(shape > 0,
+                "Invalid number of data points (", shape, ") specified");
   }
 
   return ret;
@@ -552,8 +550,7 @@ DimVector default_alldims(const Tensor& self, c10::optional<IntArrayRef> dim_opt
   if (dim_opt) {
     IntArrayRef dim_unwrapped = *dim_opt;
     dim.resize(dim_unwrapped.size());
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (int64_t i = 0; i < dim.size(); ++i) {
+    for (const auto i : c10::irange(dim.size())) {
       dim[i] = maybe_wrap_dim(dim_unwrapped[i], self.dim());
     }
   } else {
@@ -568,8 +565,7 @@ Tensor fft_fftshift(const Tensor& x, c10::optional<IntArrayRef> dim_opt) {
 
   IntArrayRef x_sizes = x.sizes();
   DimVector shift(dim.size());
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (int64_t i = 0; i < dim.size(); ++i) {
+  for (const auto i : c10::irange(dim.size())) {
     shift[i] = x_sizes[dim[i]] / 2;
   }
 
@@ -581,8 +577,7 @@ Tensor fft_ifftshift(const Tensor& x, c10::optional<IntArrayRef> dim_opt) {
 
   IntArrayRef x_sizes = x.sizes();
   DimVector shift(dim.size());
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (int64_t i = 0; i < dim.size(); ++i) {
+  for (const auto i : c10::irange(dim.size())) {
     shift[i] = (x_sizes[dim[i]] + 1) / 2;
   }
 
@@ -816,7 +811,7 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
       "istft will require a complex-valued input tensor in a future PyTorch release. "
       "Matching the output from stft with return_complex=True. ");
   }
-  Tensor input = self.is_complex() ? at::view_as_real(self) : self;
+  Tensor input = self.is_complex() ? self.is_conj() ? at::view_as_real(self.resolve_conj()) : at::view_as_real(self) : self;
   const auto input_dim = input.dim();
   const auto n_frames = input.size(-2);
   const auto fft_size = input.size(-3);
@@ -1000,8 +995,7 @@ void _fft_fill_with_conjugate_symmetry_(const Tensor& input, IntArrayRef dim_) {
 
   // Take transformed dimensions directly from the input
   const auto element_size = iter.element_size(0);
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (int64_t i = 0; i < dim.size(); ++i) {
+  for (const auto i : c10::irange(dim.size())) {
     // Convert to byte strides to match TensorIterator
     in_strides[iter_strides.size() + i] = input_strides[dim[i]] * element_size;
     signal_half_sizes[iter_strides.size() + i] = input_sizes[dim[i]];
@@ -1028,8 +1022,7 @@ void _fft_fill_with_conjugate_symmetry_(const Tensor& input, IntArrayRef dim_) {
   DimVector temp(ndim);
   auto apply_permutation = [&] (DimVector & vec) {
     // Do permuted index copy into a temporary, then copy back
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (int64_t i = 0; i < ndim; ++i) {
+    for (const auto i : c10::irange(ndim)) {
       temp[i] = vec[dim_permute[i]];
     }
     vec = temp;
@@ -1042,8 +1035,7 @@ void _fft_fill_with_conjugate_symmetry_(const Tensor& input, IntArrayRef dim_) {
   // These are the dimensions that need explicit Hermitian mirroring
   DimVector mirror_dims;
   mirror_dims.reserve(dim.size() - 1);
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (int64_t i = 0; i < ndim; ++i) {
+  for (const auto i : c10::irange(ndim)) {
     // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     if (dim_permute[i] >= iter_strides.size() &&  // Not a batch dimension
         // NOLINTNEXTLINE(clang-diagnostic-sign-compare)

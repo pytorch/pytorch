@@ -85,8 +85,7 @@ inline void throw_error_for_complex_autograd(const Tensor& tensor, const char* n
 }
 
 inline void throw_error_for_complex_autograd(const TensorList& tensorlist, const char* name) {
-  // NOLINTNEXTLINE(performance-for-range-copy)
-  for (auto tensor: tensorlist) {
+  for (const auto& tensor: tensorlist) {
     throw_error_for_complex_autograd(tensor, name);
   }
 }
@@ -293,32 +292,37 @@ inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor>& ten
   return tensors;
 }
 
-inline void check_no_requires_grad(const Tensor& tensor, const char* name) {
-  auto& var = static_cast<const Variable&>(tensor);
-  if (var.defined() && var.requires_grad()) {
-    std::string msg = "the derivative for '";
-    msg += name;
-    msg += "' is not implemented";
-    TORCH_CHECK(false, msg);
-  }
+inline void check_no_requires_grad(const Tensor& tensor, const char* name,
+                                   const char* fn_name="", bool check_grad_mode=true) {
+  TORCH_CHECK(!(tensor.defined() && tensor.requires_grad()) || !(check_grad_mode && GradMode::is_enabled()),
+              "The function '", fn_name, "' is not differentiable with respect to argument '", name,
+              "'. This input cannot have requires_grad True.");
 }
 
-inline void check_no_requires_grad(const c10::optional<Tensor>& tensor, const char* name) {
+inline void check_no_requires_grad(const c10::optional<Tensor>& tensor, const char* name, const char* fn_name="") {
   if (tensor.has_value()) {
-    check_no_requires_grad(*tensor, name);
+    check_no_requires_grad(*tensor, name, fn_name);
   }
 }
 
-inline void check_no_requires_grad(TensorList tensors, const char* name) {
+inline void check_no_requires_grad(TensorList tensors, const char* name, const char* fn_name="") {
+  // GradMode check is expensive, so check it only once for TensorLists
+  if (!GradMode::is_enabled()) {
+    return;
+  }
   for (auto& tensor : tensors) {
-    check_no_requires_grad(tensor, name);
+    check_no_requires_grad(tensor, name, fn_name, /*check_grad_mode*/ false);
   }
 }
 
-inline void check_no_requires_grad(const c10::List<c10::optional<Tensor>>& tensors, const char* name) {
+inline void check_no_requires_grad(const c10::List<c10::optional<Tensor>>& tensors, const char* name, const char* fn_name="") {
+  // GradMode check is expensive, so check it only once for TensorLists
+  if (!GradMode::is_enabled()) {
+    return;
+  }
   for (c10::optional<Tensor> tensor : tensors) {
     if (tensor.has_value()) {
-      check_no_requires_grad(*tensor, name);
+      check_no_requires_grad(*tensor, name, fn_name, /*check_grad_mode*/ false);
     }
   }
 }

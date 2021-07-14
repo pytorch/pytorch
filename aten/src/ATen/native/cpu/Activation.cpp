@@ -634,7 +634,7 @@ void silu_kernel(TensorIteratorBase& iter) {
       });
 }
 
-void silu_backward_kernel(TensorIterator& iter) {
+void silu_backward_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
       kBFloat16, iter.dtype(), "silu_backward_cpu", [&]() {
         const Vectorized<scalar_t> kOneVec(scalar_t(1));
@@ -692,7 +692,7 @@ void mish_backward_kernel(TensorIterator& iter) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(log_sigmoid_cpu_stub, &log_sigmoid_cpu_kernel);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_DISPATCH(log_sigmoid_backward_cpu_stub, &log_sigmoid_backward_cpu_kernel);
+REGISTER_DISPATCH(log_sigmoid_backward_stub, &log_sigmoid_backward_cpu_kernel);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(threshold_stub, &threshold_kernel);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
