@@ -1957,10 +1957,11 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         By default, the tensor's values are in the range [-9, 9] for most dtypes. If low
         and/or high are specified then the values will be in the range [low, high). If low
         and/or high are passed as -inf/inf (respectively), then the values will be minimum
-        and maximum limit of the respective dtype.
+        and maximum limit of the respective dtype, however if low is passed as inf and high
+        is passed as -inf, then a ValueError is raised (the same is true if a nan value is passed).
 
-        For unsigned types the default range is [0, 9] and for complex types the real and imaginary
-        parts each have the default range as [-9, 9].
+        For unsigned types the default range is [0, 10) and for complex types the real and imaginary
+        parts each have the default range as [-9, 10).
 
         If noncontiguous=True, a noncontiguous tensor with the given size will be returned unless the size
         specifies a tensor with a 1 or 0 elements in which case the noncontiguous parameter is ignored because
@@ -1970,6 +1971,42 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         created tensor are replaced with an epsilon value if floating type, [`eps + `eps`.j] if
         complex type and 1 if integer/boolean type.
     """
+    def _modify_low_high(ranges, input_low, input_high, default_values, is_integral_dtype=False):
+        """
+        Modifies (and raises ValueError when appropriate) low and high values given by the user (input_low, input_high) if required.
+        """
+        # This dict contains important values used for comparisons in _for_val helper function
+        # Format: key (low/high): ["value of low/high", "default value passed to this function", "extremals for low/high"]
+        # We consider float('inf') as an extremal for low and float('-inf') as an extremal for high, while float('nan') is considered extremal for both
+        _vals_dict = {'low': [input_low, default_values[0], [float('nan'), float('inf')]], 'high': [input_high, default_values[1], [float('nan'), float('-inf')]]}
+
+        def _for_val(inp):
+            val, default_val, extremal_values = _vals_dict[inp][0], _vals_dict[inp][1], _vals_dict[inp][2]
+
+            if val in extremal_values:
+                raise ValueError(f"Found invalid value {val} for {inp}")
+            elif val is None:
+                return default_val 
+            elif inp == 'low':
+                if (val == float('-inf') or val < ranges[0]):
+                    return ranges[0]
+                elif val > ranges[1]:
+                    raise ValueError(f"Expected low value < maximum limit for the dtype, but found {val} > {ranges[1]}")
+                else:
+                    return val
+            elif inp == 'high':
+                if (val == float('inf') or val > ranges[1]):
+                    return ranges[1]
+                elif val < ranges[0]:
+                    raise ValueError(f"Expected high value > minimum limit for the dtype, but found {val} < {ranges[0]}")
+                else:
+                    return val
+            else:
+                raise ValueError(f"Invalid input, only low/high expected but found {inp}")
+
+        low = _for_val('low')
+        high = _for_val('high')
+        return (math.floor(low), math.ceil(high)) if is_integral_dtype else (low, high)
 
     if low is not None and high is not None:
         assert low <= high, "Expected low value to be lower than or equal to high, but found higher instead."
@@ -1979,18 +2016,15 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         result = torch.randint(0, 2, size, device=device, dtype=dtype)
     elif dtype is torch.uint8:
         ranges = (torch.iinfo(dtype).min, torch.iinfo(dtype).max)
-        low = math.floor(ranges[0] if low is float('-inf') else 0 if low is None or low < ranges[0] else low)
-        high = math.ceil(ranges[1] if high is float('inf') else 10 if high is None or high >= ranges[1] else high)
+        low, high = _modify_low_high(ranges, low, high, default_values=(0, 10), is_integral_dtype=True)
         result = torch.randint(low, high, size, device=device, dtype=dtype)
     elif dtype in integral_types():
         ranges = (torch.iinfo(dtype).min, torch.iinfo(dtype).max)
-        low = math.floor(ranges[0] if low is float('-inf') else -9 if low is None or low < ranges[0] else low)
-        high = math.ceil(ranges[1] if high is float('inf') else 10 if high is None or high >= ranges[1] else high)
+        low, high = _modify_low_high(ranges, low, high, default_values=(-9, 10), is_integral_dtype=True)
         result = torch.randint(low, high, size, device=device, dtype=dtype)
     elif dtype in floating_types_and(torch.half, torch.bfloat16):
         ranges_floats = (torch.finfo(dtype).min, torch.finfo(dtype).max)
-        low = ranges_floats[0] if low is float('-inf') else -9 if low is None or low < ranges_floats[0] else low
-        high = ranges_floats[1] if high is float('inf') else 9 if high is None or high >= ranges_floats[1] else high
+        low, high = _modify_low_high(ranges_floats, low, high, default_values=(-9, 9))
         span = high - low
         # Windows doesn't support torch.rand(bfloat16) on CUDA
         if IS_WINDOWS and torch.device(device).type == 'cuda' and dtype is torch.bfloat16:
@@ -2001,8 +2035,7 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         assert dtype in complex_types()
         float_dtype = torch.float if dtype is torch.cfloat else torch.double
         ranges_floats = (torch.finfo(dtype).min, torch.finfo(dtype).max)
-        low = ranges_floats[0] if low is float('-inf') else -9 if low is None or low < ranges_floats[0] else low
-        high = ranges_floats[1] if high is float('inf') else 9 if high is None or high >= ranges_floats[1] else high
+        low, high = _modify_low_high(ranges_floats, low, high, default_values=(-9, 9))
         span = high - low
         real = torch.rand(size, device=device, dtype=float_dtype) * span + low
         imag = torch.rand(size, device=device, dtype=float_dtype) * span + low
