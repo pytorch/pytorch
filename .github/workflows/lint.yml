@@ -361,7 +361,7 @@ jobs:
           cd "${GITHUB_WORKSPACE}"
           set -eu
           cat "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
-          if grep -i "[clang-tidy] Warning detected in" "${GITHUB_WORKSPACE}"/clang-tidy-output.txt ]; then
+          if grep -i "[clang-tidy] Warning detected in" "${GITHUB_WORKSPACE}"/clang-tidy-output.txt; then
             echo 'Please fix the above clang-tidy warnings.'
             false
           fi
