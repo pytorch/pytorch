@@ -1,3 +1,4 @@
+import os
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
@@ -89,6 +90,11 @@ import operator
 import unittest
 import io
 from typing import Callable
+
+TEST_WITH_ROCM = os.getenv('PYTORCH_TEST_WITH_ROCM', '0') == '1'
+
+def get_supported_device_types():
+    return ['cpu', 'cuda'] if torch.cuda.is_available() and not TEST_WITH_ROCM else ['cpu']
 
 class BinaryOp(torch.nn.Module):
     def __init__(self, binary_op, ibinary_op, is_inplace, is_scalar):
@@ -1129,40 +1135,47 @@ class TestQuantizeFx(QuantizationTestCase):
         self.checkGraphModuleNodes(m, expected_node_list=node_list)
 
     def test_qconfig_precedence(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-                self.linear = nn.Linear(1, 1)
-                self.conv = nn.Conv2d(1, 1, 1)
-                self.module_conv1 = nn.Conv2d(1, 1, 1)
-                self.module_conv2 = nn.Conv2d(1, 1, 1)
+        for device in get_supported_device_types():
+            class M(torch.nn.Module):
+                def __init__(self):
+                    super(M, self).__init__()
+                    self.linear = nn.Linear(1, 1)
+                    self.conv = nn.Conv2d(1, 1, 1)
+                    self.module_conv1 = nn.Conv2d(1, 1, 1)
+                    self.module_conv2 = nn.Conv2d(1, 1, 1)
 
-            def forward(self, x):
-                # global
-                x = self.linear(x)
-                # global + object_type --> object_type
-                x = self.conv(x)
-                # global + object_type + module_name_regex --> module_name_regex
-                x = self.module_conv1(x)
-                # global + object_type + module_name_regex + module_name --> module_name
-                x = self.module_conv2(x)
-                return x
+                def forward(self, x):
+                    # global
+                    x = self.linear(x)
+                    # global + object_type --> object_type
+                    x = self.conv(x)
+                    # global + object_type + module_name_regex --> module_name_regex
+                    x = self.module_conv1(x)
+                    # global + object_type + module_name_regex + module_name --> module_name
+                    x = self.module_conv2(x)
+                    return x
 
-        m = M().eval()
-        global_qconfig = default_qconfig
-        object_type_qconfig = default_dynamic_qconfig
-        module_name_regex_qconfig = float16_dynamic_qconfig
-        module_name_qconfig = default_qat_qconfig
-        qconfig_dict = {
-            "": global_qconfig,
-            "object_type": [(nn.Conv2d, object_type_qconfig)],
-            "module_name_regex": [("module_conv*", module_name_regex_qconfig)],
-            "module_name": [("module_conv2", module_name_qconfig)]}
-        m = prepare_fx(m, qconfig_dict)
-        self.assertEqual(m.linear.qconfig, global_qconfig)
-        self.assertEqual(m.conv.qconfig, object_type_qconfig)
-        self.assertEqual(m.module_conv1.qconfig, module_name_regex_qconfig)
-        self.assertEqual(m.module_conv2.qconfig, module_name_qconfig)
+            m = M().to(device).eval()
+
+            def update(qconfig, model):
+                device = torch.quantization.fx.utils.assert_and_get_unique_device(model)
+                return torch.quantization.fx.qconfig_utils.add_device_to_obs_ctr_in_qconfig(qconfig, torch.device(device))
+
+            global_qconfig = default_qconfig
+            object_type_qconfig = default_dynamic_qconfig
+            module_name_regex_qconfig = float16_dynamic_qconfig
+            module_name_qconfig = default_qat_qconfig
+            qconfig_dict = {
+                "": global_qconfig,
+                "object_type": [(nn.Conv2d, object_type_qconfig)],
+                "module_name_regex": [("module_conv*", module_name_regex_qconfig)],
+                "module_name": [("module_conv2", module_name_qconfig)]}
+            m = prepare_fx(m, qconfig_dict)
+
+            self.assertEqual(str(m.linear.qconfig), str(update(global_qconfig, m)))
+            self.assertEqual(str(m.conv.qconfig), str(update(object_type_qconfig, m)))
+            self.assertEqual(str(m.module_conv1.qconfig), str(update(module_name_regex_qconfig, m)))
+            self.assertEqual(str(m.module_conv2.qconfig), str(update(module_name_qconfig, m)))
 
     def test_qconfig_module_name_object_type_order(self):
         class M1(torch.nn.Module):

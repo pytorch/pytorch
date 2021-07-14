@@ -52,7 +52,10 @@ def _propagate_qconfig_helper(module, qconfig_dict, allow_list=None,
 
     torch.quantization.qconfig.assert_valid_qconfig(module_qconfig, module)
 
+    device = torch.quantization.fx.utils.assert_and_get_unique_device(module)
+    module_qconfig = torch.quantization.fx.qconfig_utils.add_device_to_obs_ctr_in_qconfig(module_qconfig, device)
     module.qconfig = module_qconfig
+
     for name, child in module.named_children():
         module_prefix = prefix + '.' + name if prefix else name
         _propagate_qconfig_helper(child, qconfig_dict, allow_list,

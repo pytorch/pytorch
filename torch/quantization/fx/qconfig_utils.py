@@ -14,6 +14,24 @@ QConfigAny = Union[torch.quantization.QConfig,
                    torch.quantization.QConfigDynamic, None]
 
 
+def add_device_to_obs_ctr_in_qconfig(qconfig, device='cpu'):
+    factory_kwargs = {'device': device}
+    if device is None:
+        return qconfig
+    elif isinstance(qconfig, torch.quantization.QConfig):
+        return torch.quantization.QConfig(
+            activation=qconfig.activation.with_args(factory_kwargs=factory_kwargs),
+            weight=qconfig.weight.with_args(factory_kwargs=factory_kwargs)
+        )
+    elif isinstance(qconfig, torch.quantization.QConfigDynamic):
+        return torch.quantization.QConfigDynamic(
+            activation=qconfig.activation.with_args(factory_kwargs=factory_kwargs),
+            weight=qconfig.weight.with_args(factory_kwargs=factory_kwargs)
+        )
+    else:
+        return qconfig
+
+
 def get_flattened_qconfig_dict(qconfig_dict):
     """ flatten the global, object_type and module_name qconfig
     to the same qconfig_dict so that it can be used by
@@ -152,10 +170,13 @@ def generate_qconfig_map(
 
     for node in input_graph.nodes:
         qconfig = None
+        device = None if node.target not in modules else torch.quantization.fx.utils.assert_and_get_unique_device(
+            modules[node.target])
         if node.op == "get_attr":
             module_name, _ = _parent_name(node.target)
             qconfig = maybe_adjust_qconfig_for_module_type_or_name(
                 qconfig_dict, type(modules[module_name]), module_name, global_qconfig)
+            qconfig = torch.quantization.fx.qconfig_utils.add_device_to_obs_ctr_in_qconfig(qconfig, device)
         elif node.op == "call_function":
             # precedence: module_name_qconfig
             # > function_qconfig > global_qconfig
@@ -172,6 +193,7 @@ def generate_qconfig_map(
             qconfig = maybe_adjust_qconfig_for_module_name_object_type_order(
                 qconfig_dict, module_path, node.target, cur_object_type_idx,
                 qconfig)
+            qconfig = torch.quantization.fx.qconfig_utils.add_device_to_obs_ctr_in_qconfig(qconfig, device)
 
         elif node.op == "call_method":
             module_path, module_type = node_name_to_scope[node.name]
@@ -180,6 +202,7 @@ def generate_qconfig_map(
                 qconfig_dict, module_type, module_path, global_qconfig)
             # Currently call_method does not support modifying qconfig
             # by order, we can add this later if it is needed.
+            qconfig = torch.quantization.fx.qconfig_utils.add_device_to_obs_ctr_in_qconfig(qconfig, device)
 
         elif node.op == 'call_module':
             qconfig = maybe_adjust_qconfig_for_module_type_or_name(
@@ -196,6 +219,7 @@ def generate_qconfig_map(
             qconfig = maybe_adjust_qconfig_for_module_name_object_type_order(
                 qconfig_dict, parent_name, module_type, cur_object_type_idx,
                 qconfig)
+            qconfig = torch.quantization.fx.qconfig_utils.add_device_to_obs_ctr_in_qconfig(qconfig, device)
 
             # regex is not supported eager mode propagate_qconfig_, we'll
             # need to set the qconfig explicitly here in case regex
