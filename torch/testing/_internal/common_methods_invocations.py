@@ -2973,6 +2973,31 @@ def sample_inputs_lu(op_info, device, dtype, requires_grad=False, **kwargs):
     return list(generate_samples())
 
 
+def sample_inputs_lu_solve(op_info, device, dtype, requires_grad=False, **kwargs):
+    from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+
+    batches = [(), (0, ), (2, )]
+    ns = [5, 3, 0]
+    nrhs = [0, 1, 6]
+
+    def generate_samples():
+        for n, batch, rhs in product(ns, batches, nrhs):
+            a = random_fullrank_matrix_distinct_singular_value(n, *batch, dtype=dtype, device=device)
+            lu, pivs = a.lu()
+            lu.requires_grad = requires_grad
+            b = torch.randn(*batch, n, rhs, dtype=dtype, device=device)
+            b.requires_grad = requires_grad
+            yield SampleInput(b, args=(lu, pivs))
+            if requires_grad:
+                b.requires_grad = False
+                yield SampleInput(b, args=(lu, pivs))
+                b.requires_grad = True
+                lu.requires_grad = False
+                yield SampleInput(b, args=(lu, pivs))
+
+    return list(generate_samples())
+
+
 def sample_inputs_lu_unpack(op_info, device, dtype, requires_grad=False, **kwargs):
     # not needed once OpInfo tests support Iterables
     def generate_samples():
@@ -6079,6 +6104,12 @@ op_db: List[OpInfo] = [
                # Skip operator schema test because this is a functional and not an operator
                SkipInfo('TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
            )),
+    OpInfo('lu_solve',
+           op=torch.lu_solve,
+           dtypes=floating_and_complex_types(),
+           check_batched_gradgrad=False,
+           sample_inputs_func=sample_inputs_lu_solve,
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack]),
     OpInfo('lu_unpack',
            op=torch.lu_unpack,
            dtypes=floating_and_complex_types(),
