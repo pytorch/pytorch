@@ -3,7 +3,7 @@
 namespace py = pybind11;
 
 namespace torch { namespace autograd {
-  PySavedVariableHooks::PySavedVariableHooks(py::function &pack_hook, py::function &unpack_hook) : pack_hook_(pack_hook), unpack_hook_(unpack_hook){}
+  PySavedVariableHooks::PySavedVariableHooks(py::function &pack_hook, py::function &unpack_hook) : pack_hook_(pack_hook.release().ptr()), unpack_hook_(unpack_hook.release().ptr()){}
 
   void PySavedVariableHooks::call_pack_hook(at::Tensor &tensor) {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Hooks are not implemented yet");
@@ -17,8 +17,8 @@ namespace torch { namespace autograd {
         // If python is already dead, leak the wrapped python objects
     if (Py_IsInitialized()) {
       pybind11::gil_scoped_acquire gil;
-      pack_hook_.release();
-      unpack_hook_.release();
+      Py_XDECREF(pack_hook_);
+      Py_XDECREF(unpack_hook_);
     }
   }
 }}
