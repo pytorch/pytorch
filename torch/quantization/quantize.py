@@ -19,9 +19,9 @@ from .quantization_mappings import (
 
 from .stubs import DeQuantStub, QuantWrapper
 from .qconfig import (
-    add_device_to_obs_ctr_in_qconfig, 
-    default_dynamic_qconfig, 
-    float16_dynamic_qconfig, 
+    add_device_to_obs_ctr_in_qconfig,
+    default_dynamic_qconfig,
+    float16_dynamic_qconfig,
     float_qparams_weight_only_qconfig)
 
 def is_activation_post_process(module):
