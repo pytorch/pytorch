@@ -139,7 +139,6 @@ void adaptive_avg_pool3d_out_cpu_template(
               istrideW);
         });
   } else {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     output.resize_({input.size(-5), sizeD, osizeT, osizeH, osizeW});
     int64_t n = input.size(0);
 

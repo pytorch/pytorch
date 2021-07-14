@@ -5,7 +5,6 @@ namespace caffe2 {
 REGISTER_CPU_OPERATOR(LSTMUnit, LSTMUnitOp<CPUContext>);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(LSTMUnit)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(4, 5)
     .NumOutputs(2)
     .SetDoc(R"DOC(
@@ -27,7 +26,6 @@ value at X{t][n] >= seqLengths[n].
 REGISTER_CPU_OPERATOR(LSTMUnitGradient, LSTMUnitGradientOp<CPUContext>);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(LSTMUnitGradient)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(8, 9)
     .NumOutputs(3)
     .Arg(

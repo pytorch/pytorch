@@ -103,10 +103,7 @@ void free_cpu(void* data) {
 }
 
 struct C10_API DefaultCPUAllocator final : at::Allocator {
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  DefaultCPUAllocator() {}
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  ~DefaultCPUAllocator() override {}
+  DefaultCPUAllocator() = default;
   at::DataPtr allocate(size_t nbytes) const override {
     void* data = alloc_cpu(nbytes);
     profiledCPUMemoryReporter().New(data, nbytes);
@@ -308,9 +305,13 @@ void ProfiledCPUMemoryReporter::Delete(void* ptr) {
       nbytes = it->second;
       size_table_.erase(it);
     } else {
-      C10_LOG_EVERY_MS(WARNING, 1000)
-          << "Memory block of unknown size was allocated before the profiling started, "
-          << "profiler results will not include the deallocation event";
+      // C10_LOG_EVERY_MS might log every time in some builds,
+      // using a simple counter to avoid spammy logs
+      if (log_cnt_++ % 1000 == 0) {
+        LOG(WARNING) << "Memory block of unknown size was allocated before "
+                     << "the profiling started, profiler results will not "
+                     << "include the deallocation event";
+      }
     }
   }
   if (nbytes == 0) {

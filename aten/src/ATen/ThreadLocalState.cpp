@@ -38,7 +38,7 @@ void ThreadLocalState::setThreadLocalState(
 
   c10::impl::_force_tls_local_dispatch_key_set(state.dispatch_key_);
 
-  c10::InferenceMode::set_enabled(state.inference_mode_enabled_);
+  c10::InferenceMode::_set_enabled(state.inference_mode_enabled_);
 }
 
 } // namespace at

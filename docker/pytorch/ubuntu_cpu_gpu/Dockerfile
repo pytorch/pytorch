@@ -49,8 +49,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         cmake \
         curl \
         git \
+        git-lfs \
         libjpeg-dev \
         libpng-dev \
+        openmpi-bin \
         wget && \
     rm -rf /var/lib/apt/lists/*
 RUN /usr/sbin/update-ccache-symlinks
@@ -86,7 +88,10 @@ ARG TORCH_CUDA_ARCH_LIST_VAR
 RUN if [ -z "$TORCH_CUDA_ARCH_LIST_VAR" ] ; then \
     echo "Continuing CPU build ..."; \
   else \
-    echo "Setting CUDA env vars ..."; \
+    echo "Setting CUDA env vars and installing openmpi ..."; \
+    # Set MPI links to avoid libmpi_cxx.so.1 not found error
+    ln -s /usr/lib/x86_64-linux-gnu/libmpi_cxx.so.20 /usr/lib/x86_64-linux-gnu/libmpi_cxx.so.1; \
+    ln -s /usr/lib/x86_64-linux-gnu/libmpi.so.20.10.1 /usr/lib/x86_64-linux-gnu/libmpi.so.12; \
   fi
 # If the build argument TORCH_CUDA_ARCH_LIST_VAR is given, container will be
 # set for GPU/CUDA build, else for CPU build.

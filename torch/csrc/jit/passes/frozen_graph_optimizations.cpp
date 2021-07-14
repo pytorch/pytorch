@@ -1,6 +1,6 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir_views.h>
-#include <torch/csrc/jit/passes/frozen_conv_add_relu_fusion.h>
 #include <torch/csrc/jit/passes/frozen_conv_folding.h>
 #include <torch/csrc/jit/passes/frozen_graph_optimizations.h>
 #include <torch/csrc/jit/passes/remove_dropout.h>
@@ -16,13 +16,13 @@ void OptimizeFrozenGraph(
   removeDropout(graph);
   // run a couple times to capture Conv -> Mul -> Add etc
   if (optimize_numerics) {
-    for (size_t i = 0; i < 2; i++) {
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
+    for (const auto i : c10::irange(2)) {
       FoldFrozenConvBatchnorm(graph);
       FoldFrozenConvAddOrSub(graph);
       FoldFrozenConvMulOrDiv(graph);
     }
   }
-  FuseFrozenConvAddRelu(graph);
 }
 
 } // namespace jit

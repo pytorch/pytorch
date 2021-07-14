@@ -262,7 +262,7 @@ __global__ void atomicadaptivemaxgradinput(
       int64_t *ptr_ind = indices_dt + oh*osizeW + ow;
       T grad_delta = *ptr_gradOutput;
       int64_t argmax = (*ptr_ind);
-      gpuAtomicAdd(&(gradInput_d[argmax]), grad_delta);
+      gpuAtomicAddNoReturn(&(gradInput_d[argmax]), grad_delta);
     }
   }
 }
@@ -304,7 +304,7 @@ TORCH_IMPL_FUNC(adaptive_max_pool3d_out_cuda)
   TensorArg input_arg{input, "input", 3};
 
   checkAllSameGPU(
-      "adaptive_max_pool3d_cuda", {output_arg, indices_arg, input_arg});
+      __func__, {output_arg, indices_arg, input_arg});
 
   int64_t osizeT = output_size[0];
   int64_t osizeH = output_size[1];
@@ -378,7 +378,7 @@ TORCH_IMPL_FUNC(adaptive_max_pool3d_backward_out_cuda)
   TensorArg indices_arg{indices, "indices", 4};
 
   checkAllSameGPU(
-      "adaptive_max_pool3d_backward_cuda",
+      __func__,
       {grad_input_arg, grad_output_arg, input_arg, indices_arg});
 
   const Tensor gradOutput_ = gradOutput.contiguous();

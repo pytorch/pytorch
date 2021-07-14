@@ -137,7 +137,7 @@ Tensor & _cat_out_cpu(TensorList tensors, int64_t dim, Tensor& result) {
   }
   at::assert_no_internal_overlap(result);
 
-  const Tensor* pnotSkippedTensor = [](TensorList tensors) -> const Tensor* {
+  const Tensor* pnotSkippedTensor = [](const TensorList &tensors) -> const Tensor* {
     for (auto const &tensor : tensors) {
       if (should_skip(tensor)) {
         continue;
@@ -307,8 +307,7 @@ static bool sizes_match_except(IntArrayRef s1, IntArrayRef s2, int64_t dim_excep
   if (s1.size() != s2.size()) {
     return false;
   }
-  for (const auto i : c10::irange(s1.size())) {
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+  for (const auto i : c10::irange(static_cast<int64_t>(s1.size()))) {
     if (i != dim_except && s1[i] != s2[i]) {
       return false;
     }
@@ -623,7 +622,6 @@ std::vector<Tensor> unsafe_chunk(const Tensor& self, int64_t chunks, int64_t dim
   TORCH_CHECK(chunks > 0,
            "chunk expects `chunks` to be greater than 0, got: ", chunks);
 
-  std::vector<Tensor> result;
   const auto dim_size = self.size(dim);
   int64_t split_size = (dim_size + chunks - 1) / chunks;
 
@@ -833,8 +831,7 @@ Tensor& narrow_copy_dense_cpu_out(
   if (dim < 0) {
     dim = at::maybe_wrap_dim(dim, self_sizes.size());
   } else {
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    TORCH_CHECK(dim < self_sizes.size());
+    TORCH_CHECK(dim < static_cast<int64_t>(self_sizes.size()));
   }
 
   // wrap start and do bound check
@@ -1313,7 +1310,7 @@ std::vector<Tensor> unsafe_split(const Tensor& self, int64_t split_size, int64_t
   auto result = at::native::split(self, split_size, dim);
   for (auto& t : result) {
     // TODO(Ailing): do we need to set version_counter here?
-    if (!t.unsafeGetTensorImpl()->is_inference_tensor()) {
+    if (!t.is_inference()) {
       t.unsafeGetTensorImpl()->set_version_counter(c10::VariableVersion(/*version=*/0));
     }
   }
@@ -1364,7 +1361,7 @@ std::vector<Tensor> unsafe_split_with_sizes(const Tensor& self, IntArrayRef spli
   auto result = at::native::split_with_sizes(self, split_sizes, dim);
   for (auto& t : result) {
     // TODO(Ailing): do we need to set version_counter here?
-    if (!t.unsafeGetTensorImpl()->is_inference_tensor()) {
+    if (!t.is_inference()) {
       t.unsafeGetTensorImpl()->set_version_counter(c10::VariableVersion(/*version=*/0));
     }
   }
@@ -1886,9 +1883,10 @@ Tensor & squeeze_(Tensor& self, int64_t dim) {
   return self;
 }
 
+// NOTE [ Unsafe View ]
 // _unsafe_view() differs from view() in that the returned tensor isn't treated
 // as a view for the purposes of automatic differentiation. (It's not listed in
-// VIEW_FUNCTIONS in gen_autograd.py).  It's only safe to use if the `self` tensor
+// VIEW_FUNCTIONS in gen_inplace_or_view_type.py).  It's only safe to use if the `self` tensor
 // is temporary. For example, the viewed tensor here (a + b) is discarded immediately
 // after viewing:
 //
@@ -2170,6 +2168,12 @@ Tensor alias(const Tensor& self) {
     return alias_with_sizes_and_strides(self, self.sizes(), self.strides());
 }
 
+Tensor detach(const Tensor& self) {
+  // this just exists to give us a hook in VariableType and an entry in Declarations.yaml
+  //AT_ERROR("detach is not implemented for Tensor");
+  return native::alias(self);
+}
+
 Tensor unfold(const Tensor& self, int64_t dimension, int64_t size, int64_t step) {
   // some special handling to deal with allow dimension == 0 when self.dim() == 0
   dimension = at::maybe_wrap_dim(dimension, self.dim(), /*wrap_scalar=*/true);
@@ -2390,6 +2394,33 @@ Tensor swapdims(const Tensor& self, int64_t dim0, int64_t dim1) {
 
 Tensor& swapdims_(Tensor& self, int64_t dim0, int64_t dim1) {
   return self.transpose_(dim0, dim1);
+}
+
+Tensor flatten_dense_tensors(TensorList tensors) {
+  static auto flatten = [](const Tensor &t) { return t.contiguous().view({-1}); };
+  if (tensors.size() == 1)
+    return flatten(tensors[0]);
+  return at::cat(fmap(tensors, flatten));
+}
+
+std::vector<Tensor> unflatten_dense_tensors(const Tensor& flat, TensorList tensors) {
+  std::vector<Tensor> outputs;
+  outputs.reserve(tensors.size());
+  size_t offset = 0;
+  for (const auto & tensor : tensors) {
+    auto numel = tensor.numel();
+    // If unflatten an empty tensor, create a new empty tensor using
+    // flat tensor Options.
+    // This can avoid the unflattened empty tensor to share the same storage
+    // with other unflatten tensors.
+    if (numel == 0) {
+      outputs.push_back(at::empty({0}, flat.options()));
+    } else {
+      outputs.push_back(flat.narrow(0, offset, numel).view(tensor.sizes()));
+      offset += numel;
+    }
+  }
+  return outputs;
 }
 
 }} // at::native

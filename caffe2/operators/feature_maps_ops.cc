@@ -197,7 +197,6 @@ OPERATOR_SCHEMA(MergeSingleMapFeatureTensors)
         "multi-feature tensor." +
         doc)
     .NumInputs([](int n) { return n >= 4 && n % 4 == 0; })
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumOutputs(5)
     .Input(0, "in1_lengths", ".lengths")
     .Input(1, "in1_keys", ".keys")
@@ -392,9 +391,7 @@ REGISTER_CPU_OPERATOR(
 OPERATOR_SCHEMA(MergeMultiMapFeatureTensors)
     .SetDoc(
         "Merge given multi-feature tensors with map features into one." + doc)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs([](int n) { return n >= 5 && n % 5 == 0; })
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumOutputs(5)
     .Input(0, "in1_lengths", ".lengths")
     .Input(1, "in1_keys", ".keys")

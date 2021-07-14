@@ -560,7 +560,6 @@ Tensor slow_conv_dilated3d_cpu(
       stride_size,
       pad_size,
       dilation_size);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto is_batch = input.dim() == 5;
   auto options = input.options();
   // calculate output tensor size
@@ -610,7 +609,6 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated3d_backward_cpu(
       stride_size,
       pad_size,
       dilation_size);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto is_batch = input.dim() == 5;
   auto options = grad_output.options();
   // template function assumes batched tensors.  unsqueeze(0) will

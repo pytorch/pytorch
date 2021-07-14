@@ -18,14 +18,10 @@ namespace torch {
 namespace optim {
 
 struct TORCH_API AdamOptions : public OptimizerCloneableOptions<AdamOptions> {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   AdamOptions(double lr = 1e-3);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, lr) = 1e-3;
   typedef std::tuple<double, double> betas_t;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(betas_t, betas) = std::make_tuple(0.9, 0.999);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, eps) = 1e-8;
   TORCH_ARG(double, weight_decay) = 0;
   TORCH_ARG(bool, amsgrad) = false;

@@ -9,6 +9,8 @@
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/onnx/pattern_conversion/pattern_encapsulation.h>
 
+#include <c10/util/irange.h>
+
 #include <limits>
 
 namespace torch {
@@ -270,8 +272,15 @@ static std::pair<Value*, Value*> PrepareListAppendAndInsertForONNX(Node* n) {
   return std::make_pair(n->input(0), n->output());
 }
 
-static std::pair<Value*, Value*> PrepareListSetItemForONNX(Node* n) {
+static std::pair<Value*, Value*> PrepareSetItemForONNX(Node* n) {
   TORCH_INTERNAL_ASSERT(n->kind() == aten::_set_item);
+  // It seems the JIT does not always produce an output for _set_item.
+  // In particular it seems to for list but not for dict.
+  // So we add one if needed.
+  if (n->outputs().size() == 0) {
+    n->addOutput();
+    n->output()->setType(n->inputs().at(0)->type());
+  }
   return std::make_pair(n->input(0), n->output());
 }
 
@@ -323,6 +332,7 @@ static void PrepareForRemoveMutations(MutationRemover& mr, Block* b) {
 static void PrepareForRemoveMutations(std::shared_ptr<Graph> graph) {
   MutationRemover mr(graph);
   PrepareForRemoveMutations(mr, graph->block());
+  GRAPH_DUMP("After PrepareForRemoveMutations: ", graph);
 }
 
 // findSubModuleAttr function chases getAttr chains backwards to locate the
@@ -760,10 +770,10 @@ void InplaceConverter::replaceAttrWithInplaceOps(
 void InplaceConverter::convertGetSetAttrToInplaceOps(Block* block) {
   std::unordered_map<std::string, Value*> attr_name_value_map = {};
   std::unordered_map<Node*, std::string> attr_node_fullname_map = {};
-  // First pass over graph, to gather all attribute names, and their intial
+  // First pass over graph, to gather all attribute names, and their initial
   // values. Create dummy initial values for attributes if necessary. By the end
   // of this pass, these dummy initial values should have zero uses, and can be
-  // safely removed. Otherwise it will imply error in model for using
+  // safely removed. Otherwise it will imply an error in the model for using
   // uninitialized values.
   gatherAttrNameInitialValueMap(
       block, attr_name_value_map, attr_node_fullname_map);
@@ -807,7 +817,7 @@ void InplaceConverter::convertInplaceOpsAndTrackAlias(Block* block) {
       } else if (nkind == aten::Delete) {
         std::tie(orig_data, new_out) = PrepareListDeleteForONNX(n);
       } else if (nkind == aten::_set_item) {
-        std::tie(orig_data, new_out) = PrepareListSetItemForONNX(n);
+        std::tie(orig_data, new_out) = PrepareSetItemForONNX(n);
       } else {
         // Not inplace op.
         continue;

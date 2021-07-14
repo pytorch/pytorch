@@ -88,7 +88,6 @@ void check(
 TEST(splitSparseLengthsSumSparse, sweep) {
   std::vector<bool> has_weights = {true, false};
   std::vector<bool> fallbacks = {true, false};
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> bits = {2, 4, 8};
   for (const auto has_weight : has_weights) {
     for (const auto bit : bits) {

@@ -100,8 +100,8 @@ __global__ void upsample_linear1d_out_frame_backward(
     for (int n = 0; n < batchsize; n++) {
       for (int c = 0; c < channels; ++c) {
         const scalar_t d2val = odata[n][c][w2];
-        gpuAtomicAdd(&idata[n][c][w1], static_cast<scalar_t>(w0lambda * d2val));
-        gpuAtomicAdd(
+        gpuAtomicAddNoReturn(&idata[n][c][w1], static_cast<scalar_t>(w0lambda * d2val));
+        gpuAtomicAddNoReturn(
             &idata[n][c][w1 + w1p], static_cast<scalar_t>(w1lambda * d2val));
       }
     }
@@ -115,7 +115,7 @@ static void upsample_linear1d_out_cuda_template(
     bool align_corners,
     c10::optional<double> scales) {
   TensorArg input_arg{input, "input", 1}, output_arg{output, "output", 2};
-  checkAllSameGPU("upsample_linear1d_out_cuda", {input_arg, output_arg});
+  checkAllSameGPU(__func__, {input_arg, output_arg});
 
   int output_width = output_size[0];
 
@@ -160,8 +160,7 @@ static void upsample_linear1d_backward_out_cuda_template(
     c10::optional<double> scales) {
   TensorArg grad_output_arg{grad_output_, "grad_output_", 1},
       grad_input_arg{grad_input, "grad_input", 2};
-  checkAllSameGPU(
-      "upsample_linear1d_backward_out_cuda", {grad_output_arg, grad_input_arg});
+  checkAllSameGPU(__func__, {grad_output_arg, grad_input_arg});
 
   int output_width = output_size[0];
 

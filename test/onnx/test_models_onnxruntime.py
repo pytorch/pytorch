@@ -39,5 +39,5 @@ TestModels_new_jit_API = type(str("TestModels_new_jit_API"),
                                    onnx_shape_inference=True))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

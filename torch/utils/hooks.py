@@ -136,12 +136,13 @@ class BackwardHook(object):
         new_tensors = torch.nn.modules._functions.BackwardHookFunction.apply(*tensors)
         if len(new_tensors) == 0:
             raise RuntimeError("Cannot set Module backward hook for a Module with no input Tensors.")
-        grad_fn = new_tensors[0].grad_fn
-        if not grad_fn.name() == "BackwardHookFunctionBackward":
+
+        grad_fns = [t.grad_fn for t in new_tensors if t.grad_fn is not None and t.grad_fn.name() == "BackwardHookFunctionBackward"]
+        if len(grad_fns) == 0:
             raise RuntimeError("Error while setting up backward hooks. Please open "
                                "an issue with a code sample to reproduce this.")
 
-        fn(grad_fn)
+        fn(grad_fns[0])
 
         arg_list = list(args)
         for idx, val in zip(tensors_idx, new_tensors):

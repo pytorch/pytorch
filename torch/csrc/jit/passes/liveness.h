@@ -13,7 +13,6 @@
 namespace torch {
 namespace jit {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 using SparseBitVector = ::c10::SparseBitVector<256>;
 
 // BuildLivenessSets computes "bailout" liveness which is equivalent to

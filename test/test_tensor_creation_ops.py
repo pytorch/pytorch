@@ -1290,6 +1290,7 @@ class TestTensorCreation(TestCase):
             ('new_full', [size, 1]),
             ('new_empty', [size]),
             ('new_zeros', [size]),
+            ('new_ones', [size]),
         ]
         for method_name, args in test_cases:
             x = torch.randn(size)
@@ -1938,6 +1939,13 @@ class TestTensorCreation(TestCase):
         self.assertRaises(RuntimeError, lambda: torch.Tensor(torch.Size([2, 3, 4]), device='cuda'))
         self.assertRaises(RuntimeError, lambda: torch.Tensor((2.0, 3.0), device='cuda'))
 
+        # Tensor constructor/new with Tensor argument shouldn't work with device specified
+        i = torch.tensor([1], device='cpu')
+        self.assertRaises(RuntimeError, lambda: torch.Tensor(i, device='cpu'))
+        self.assertRaises(RuntimeError, lambda: i.new(i, device='cpu'))
+        self.assertRaises(RuntimeError, lambda: torch.Tensor(i, device='cuda'))
+        self.assertRaises(RuntimeError, lambda: i.new(i, device='cuda'))
+
         x = torch.randn((3,), device='cpu')
         self.assertRaises(RuntimeError, lambda: x.new(device='cuda'))
         self.assertRaises(RuntimeError, lambda: x.new(torch.Size([2, 3, 4]), device='cuda'))
@@ -1947,6 +1955,13 @@ class TestTensorCreation(TestCase):
             self.assertRaises(RuntimeError, lambda: torch.cuda.FloatTensor(device='cpu'))
             self.assertRaises(RuntimeError, lambda: torch.cuda.FloatTensor(torch.Size([2, 3, 4]), device='cpu'))
             self.assertRaises(RuntimeError, lambda: torch.cuda.FloatTensor((2.0, 3.0), device='cpu'))
+
+            # Tensor constructor/new with Tensor argument shouldn't work with device specified
+            i = torch.tensor([1], device='cuda')
+            self.assertRaises(RuntimeError, lambda: torch.Tensor(i, device='cuda'))
+            self.assertRaises(RuntimeError, lambda: i.new(i, device='cuda'))
+            self.assertRaises(RuntimeError, lambda: torch.Tensor(i, device='cpu'))
+            self.assertRaises(RuntimeError, lambda: i.new(i, device='cpu'))
 
             default_type = torch.Tensor().type()
             torch.set_default_tensor_type(torch.cuda.FloatTensor)
@@ -2739,6 +2754,15 @@ class TestTensorCreation(TestCase):
         # steps = 0
         self.assertEqual(torch.linspace(0, 1, 0, device=device, dtype=dtype).numel(), 0, atol=0, rtol=0)
 
+        if dtype == torch.float:
+            # passed dtype can't be safely casted to inferred dtype
+            with self.assertRaisesRegex(RuntimeError, r"torch.linspace\(\): inferred dtype"):
+                torch.linspace(0, 1j, 5, device=device, dtype=dtype)
+            with self.assertRaisesRegex(RuntimeError, r"torch.linspace\(\): inferred dtype"):
+                torch.linspace(0j, 1, 5, device=device, dtype=dtype)
+            with self.assertRaisesRegex(RuntimeError, r"torch.linspace\(\): inferred dtype"):
+                torch.linspace(0j, 1j, 5, device=device, dtype=dtype)
+
         # Check linspace for generating the correct output for each dtype.
         start = 0 if dtype == torch.uint8 else -100
         expected_lin = torch.tensor([start + .5 * i for i in range(401)], device=device, dtype=torch.double)
@@ -2782,14 +2806,7 @@ class TestTensorCreation(TestCase):
             if isinstance(start, complex) or isinstance(end, complex):
                 dtype = torch.cfloat
 
-            if dtype == torch.cfloat:
-                # TODO(kshitij12345): Fix unnecessary warning
-                # Reference: https://github.com/pytorch/pytorch/issues/53171
-                with self.assertWarnsRegex(UserWarning,
-                                           "As either `start` or `stop` is complex"):
-                    self.assertEqual(fn(start, end, steps=100, device=device).dtype, dtype)
-            else:
-                self.assertEqual(fn(start, end, steps=100, device=device).dtype, dtype)
+            self.assertEqual(fn(start, end, steps=100, device=device).dtype, dtype)
 
     def test_linspace_deduction(self, device):
         # Test deduction from input parameters.
@@ -2880,6 +2897,15 @@ class TestTensorCreation(TestCase):
         self.assertRaises(RuntimeError, lambda: torch.logspace(0, 1, -1, device=device, dtype=dtype))
         self.assertEqual(torch.logspace(0, 1, 1, device=device, dtype=dtype),
                          torch.ones(1, device=device, dtype=dtype), atol=0, rtol=0)
+
+        if dtype == torch.float:
+            # passed dtype can't be safely casted to inferred dtype
+            with self.assertRaisesRegex(RuntimeError, r"torch.logspace\(\): inferred dtype"):
+                torch.logspace(0, 1j, 5, device=device, dtype=dtype)
+            with self.assertRaisesRegex(RuntimeError, r"torch.logspace\(\): inferred dtype"):
+                torch.logspace(0j, 1, 5, device=device, dtype=dtype)
+            with self.assertRaisesRegex(RuntimeError, r"torch.logspace\(\): inferred dtype"):
+                torch.logspace(0j, 1j, 5, device=device, dtype=dtype)
 
         # Check precision - start, stop and base are chosen to avoid overflow
         # steps is chosen so that step size is not subject to rounding error
@@ -3313,8 +3339,28 @@ class TestRandomTensorCreation(TestCase):
     def test_randperm_device_compatibility(self, device):
         cuda_gen = torch.Generator(device='cuda')
         cpu_gen = torch.Generator(device='cpu')
-        for n in (0, 3, 100, 30000):
-            regex = 'Expected a .* generator device but found .*'
+
+        # n=0 is a special case that we don't need to use generator, thus no error even if
+        # device and generator don't match
+        torch.randperm(0, device='cuda:0', generator=torch.Generator(device='cuda:1'))
+        if torch.cuda.device_count() > 1:
+            torch.randperm(0, device='cuda:1', generator=torch.Generator(device='cuda:0'))
+        torch.randperm(0, device='cuda', generator=torch.Generator(device='cpu'))
+        torch.randperm(0, device='cpu', generator=torch.Generator(device='cuda'))
+
+        for n in (1, 3, 100, 30000):
+            torch.randperm(n, device='cuda', generator=torch.Generator(device='cuda:0'))
+            torch.randperm(n, device='cuda:0', generator=torch.Generator(device='cuda'))
+            # For cuda:0 to match cuda:1, we are making consistent device type matching
+            # behavior just like torch.randint. Longer term, generator should ignore
+            # device ordinal, since it's not used anyway.
+            torch.randint(low=0, high=n + 1, size=(1,), device="cuda:0", generator=torch.Generator(device='cuda:1'))
+            torch.randperm(n, device='cuda:0', generator=torch.Generator(device='cuda:1'))
+            if torch.cuda.device_count() > 1:
+                torch.randint(low=0, high=n + 1, size=(1,), device="cuda:1", generator=torch.Generator(device='cuda:0'))
+                torch.randperm(n, device='cuda:1', generator=torch.Generator(device='cuda:0'))
+
+            regex = 'Expected a .* device type for generator but found .*'
             cuda_t = torch.tensor(n, device='cuda')
             self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, device='cuda', generator=cpu_gen))
             self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, device='cuda', generator=cpu_gen, out=cuda_t))

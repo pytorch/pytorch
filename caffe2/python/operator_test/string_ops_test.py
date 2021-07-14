@@ -20,7 +20,7 @@ def _string_lists(alphabet=None):
 
 class TestStringOps(serial.SerializedTestCase):
     @given(strings=_string_lists())
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_string_prefix(self, strings):
         length = 3
         # although we are utf-8 encoding below to avoid python exceptions,
@@ -48,7 +48,7 @@ class TestStringOps(serial.SerializedTestCase):
             string_prefix_ref)
 
     @given(strings=_string_lists())
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_string_suffix(self, strings):
         length = 3
         strings = np.array(
@@ -72,7 +72,7 @@ class TestStringOps(serial.SerializedTestCase):
             string_suffix_ref)
 
     @given(strings=st.text(alphabet=['a', 'b']))
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_string_starts_with(self, strings):
         prefix = 'a'
         strings = np.array(
@@ -96,7 +96,7 @@ class TestStringOps(serial.SerializedTestCase):
             string_starts_with_ref)
 
     @given(strings=st.text(alphabet=['a', 'b']))
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_string_ends_with(self, strings):
         suffix = 'a'
         strings = np.array(
@@ -120,7 +120,7 @@ class TestStringOps(serial.SerializedTestCase):
             string_ends_with_ref)
 
     @given(strings=st.text(alphabet=['a', 'b']))
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_string_equals(self, strings):
         text = ""
         if strings:

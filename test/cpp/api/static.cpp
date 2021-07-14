@@ -51,7 +51,6 @@ TEST(TestStatic, EnableIfModule) {
 
 struct A : torch::nn::Module {
   int forward() {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     return 5;
   }
 };
@@ -64,7 +63,6 @@ struct B : torch::nn::Module {
 
 struct C : torch::nn::Module {
   float forward(torch::Tensor& tensor) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     return 5.0;
   }
 };
@@ -100,7 +98,6 @@ TEST(TestStatic, ReturnTypeOfForward) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestStatic, Apply) {
   std::vector<int> v;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   torch::apply([&v](int x) { v.push_back(x); }, 1, 2, 3, 4, 5);
   ASSERT_EQ(v.size(), 5);
   for (size_t i = 0; i < v.size(); ++i) {

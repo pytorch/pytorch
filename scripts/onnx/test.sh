@@ -74,7 +74,8 @@ if [[ "$BUILD_ENVIRONMENT" == *ort_test1* ]]; then
     "$top_dir/test/onnx/test_models_onnxruntime.py" \
     "$top_dir/test/onnx/test_utility_funs.py" \
     "$top_dir/test/onnx/test_pytorch_onnx_caffe2.py" \
-    "$top_dir/test/onnx/test_pytorch_onnx_caffe2_quantized.py"
+    "$top_dir/test/onnx/test_pytorch_onnx_caffe2_quantized.py" \
+    "$top_dir/test/onnx/test_pytorch_onnx_shape_inference.py"
 fi
 if [[ "$BUILD_ENVIRONMENT" == *ort_test2* ]]; then
   # Update the loop for new opsets

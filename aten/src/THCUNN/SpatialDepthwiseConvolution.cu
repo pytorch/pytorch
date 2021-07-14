@@ -7,7 +7,6 @@
 #include <THC/THCDeviceTensorUtils.cuh>
 #include <THC/THCNumerics.cuh>
 #include <THC/THCReduceApplyUtils.cuh>
-#include <THC/THCSortUtils.cuh>
 #include <THC/THCTensorMathReduce.cuh>
 #include <THCUNN/SharedMem.cuh>
 #include <THCUNN/common.h>

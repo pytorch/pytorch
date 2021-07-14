@@ -143,7 +143,6 @@ SHOULD_NOT_DO_GRADIENT(Ftrl);
 REGISTER_CPU_OPERATOR(SparseFtrl, SparseFtrlOp<float>);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseFtrl)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(4, 5)
     .NumOutputs(2)
     .EnforceInplace({{0, 0}, {1, 1}});

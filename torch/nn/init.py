@@ -458,7 +458,7 @@ def orthogonal_(tensor, gain=1):
         flattened.t_()
 
     # Compute the qr factorization
-    q, r = torch.qr(flattened)
+    q, r = torch.linalg.qr(flattened)
     # Make Q uniform according to https://arxiv.org/pdf/math-ph/0609050.pdf
     d = torch.diag(r, 0)
     ph = d.sign()

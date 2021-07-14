@@ -5,8 +5,6 @@
 #
 # NOTE (Apr, 5, 2021): Linux runners are currently all an amazonlinux2
 #
-# NOTE (Apr, 5, 2021): Windows runners are currently unavailable
-#
 # TODO: Add some documentation on how the auto-scaling works
 #
 # NOTE: Default values,
@@ -29,3 +27,18 @@ runner_types:
     os: linux
     max_available: 50
     disk_size: 150
+  linux.16xlarge.nvidia.gpu:
+    instance_type: g3.16xlarge
+    os: linux
+    max_available: 10
+    disk_size: 150
+  windows.4xlarge:
+    instance_type: c5d.4xlarge
+    os: windows
+    max_available: 200
+    disk_size: 256
+  windows.8xlarge.nvidia.gpu:
+    instance_type: p3.2xlarge
+    os: windows
+    max_available: 25
+    disk_size: 256

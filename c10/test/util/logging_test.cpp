@@ -32,7 +32,6 @@ TEST(LoggingTest, TestEnforceFalse) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoggingTest, TestEnforceEquals) {
   int x = 4;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int y = 5;
   int z = 0;
   try {

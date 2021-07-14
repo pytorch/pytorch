@@ -5,23 +5,17 @@ namespace {
 
 namespace test_min {
 using c10::guts::min;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(min(3, 5) == 3, "");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(min(5, 3) == 3, "");
 static_assert(min(3, 3) == 3, "");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(min(3.0, 3.1) == 3.0, "");
 } // namespace test_min
 
 namespace test_max {
 using c10::guts::max;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(max(3, 5) == 5, "");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(max(5, 3) == 5, "");
 static_assert(max(3, 3) == 3, "");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 static_assert(max(3.0, 3.1) == 3.1, "");
 } // namespace test_max
 
@@ -107,7 +101,6 @@ TEST(if_constexpr, otherCaseCanHaveInvalidCode) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(if_constexpr, worksWithoutElseCase_withIdentityArg) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int var = 5;
   if_constexpr<false>([&](auto) { var = 3; });
   EXPECT_EQ(5, var);
@@ -117,7 +110,6 @@ TEST(if_constexpr, worksWithoutElseCase_withIdentityArg) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(if_constexpr, worksWithoutElseCase_withoutIdentityArg) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int var = 5;
   if_constexpr<false>([&] { var = 3; });
   EXPECT_EQ(5, var);

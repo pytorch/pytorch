@@ -22,10 +22,10 @@ namespace torch { namespace autograd {
 // A Function which is implemented by a Python object (i.e., a THPFunction).
 // Calls to 'apply' are forwarded to the Python method implementation.
 struct PyNode : public Node {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   PyNode(THPObjectPtr obj) : obj(obj.release()) {}
 
   variable_list apply(variable_list&& inputs) override;
-  variable_list legacy_apply(const variable_list& inputs);
 
   // Throw a python_error with the PyErr state persisted, so that we
   // don't lose the error state if the GIL is released when we don't
@@ -75,6 +75,7 @@ inline bool ensure_tuple(THPObjectPtr& obj) {
 
 }} // namespace torch::autograd
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct THPFunction {
     PyObject_HEAD
 
