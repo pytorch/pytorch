@@ -1997,14 +1997,17 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         Modifies (and raises ValueError when appropriate) low and high values given by the user (input_low, input_high) if required.
         """
         # This dict contains important values used for comparisons in _for_val helper function
-        # Format: key (low/high): ["value of low/high", "default value passed to this function", "extremals for low/high"]
-        # We consider float('inf') as an extremal for low and float('-inf') as an extremal for high, while float('nan') is considered extremal for both
-        _vals_dict = {'low': [input_low, default_values[0], [float('nan'), float('inf')]], 'high': [input_high, default_values[1], [float('nan'), float('-inf')]]}
+        # Format: key (low/high): ["value of low/high", "default value", "extremal for low/high"]
+        # We consider float('inf') as an extremal for low and float('-inf') as an extremal for high,
+        # while float('nan') is considered extremal for both
+        _vals_dict = {'low': [input_low, default_values[0], float('inf')],
+                      'high': [input_high, default_values[1], float('-inf')]}
 
         def _for_val(inp):
-            val, default_val, extremal_values = _vals_dict[inp][0], _vals_dict[inp][1], _vals_dict[inp][2]
+            val, default_val, extremal_val = _vals_dict[inp][0], _vals_dict[inp][1], _vals_dict[inp][2]
 
-            if val in extremal_values:
+            # val != val returns True if val is float('nan')
+            if val != val or val == extremal_val:
                 raise ValueError(f"Found invalid value {val} for {inp}")
             elif val is None:
                 return default_val
