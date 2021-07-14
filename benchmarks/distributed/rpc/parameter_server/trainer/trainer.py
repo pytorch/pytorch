@@ -225,7 +225,7 @@ class DdpTrainer(TrainerBase):
         self.hook_state_class = hook_state_class
         self.hook = hook
         self.iteration_step = iteration_step
-        
+
         self.rank = process_group.rank()
         self.trainer_count = process_group.size()
 
