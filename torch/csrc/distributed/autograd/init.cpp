@@ -96,7 +96,8 @@ PyObject* dist_autograd_init(PyObject* _unused, PyObject* noargs) {
       [](int64_t context_id) -> const ContextPtr {
         return DistAutogradContainer::getInstance().retrieveContext(context_id);
       },
-      py::return_value_policy::reference);
+      py::return_value_policy::reference,
+      py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "_current_context",
@@ -168,7 +169,11 @@ Example::
       [](int64_t contextId) -> py::dict {
         const auto& autogradContext =
             DistAutogradContainer::getInstance().retrieveContext(contextId);
-        return torch::jit::toPyObject(IValue(autogradContext->getGradients()));
+        auto ival = IValue(autogradContext->getGradients());
+
+        // Acquire GIL only for pyobject conversion.
+        pybind11::gil_scoped_acquire ag;
+        return torch::jit::toPyObject(ival);
       },
       R"(
 get_gradients(context_id: int) -> Dict[Tensor, Tensor]
@@ -196,7 +201,8 @@ Example::
     >>>     print(grads[t1])
     >>>     print(grads[t2])
 )",
-      py::arg("context_id"));
+      py::arg("context_id"),
+      py::call_guard<py::gil_scoped_release>());
 
   Py_RETURN_TRUE;
 }
