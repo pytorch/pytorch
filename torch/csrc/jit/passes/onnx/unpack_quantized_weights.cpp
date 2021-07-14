@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <stack>
@@ -487,6 +488,7 @@ void UnpackQuantizedWeights(
       qconv3d_relu,
       "quantized::conv3d_unpack",
       QuantizedParamsType::CONV);
+  GRAPH_DUMP("After UnpackQuantizedWeights: ", graph);
 }
 
 // Caffe2 expects quantized ops to be in NHWC format while pytorch inputs are in
@@ -543,6 +545,7 @@ void insertPermutes(
   insertPermutesHelper(graph, paramsDict, qconv);
   insertPermutesHelper(graph, paramsDict, qconv_relu);
   insertPermutesHelper(graph, paramsDict, qconv_transpose);
+  GRAPH_DUMP("After insertPermutes: ", graph);
 }
 
 } // namespace jit
