@@ -168,12 +168,37 @@ bool testHasInplaceOp(const std::string& jit_script) {
   torch::jit::AliasDb alias_db(graph);
   return torch::jit::HasInplaceOp(graph, alias_db);
 }
+
+static Node* getNodeWithKind(const torch::jit::StaticModule& smodule, const string& kind) {
+  for (auto& pnode : smodule.nodes()) {
+    if (std::string(pnode.node()->kind().toQualString()) == kind) {
+      return pnode.node();
+    }
+  }
+  return nullptr;
+}
+
+bool testCanEnableStaticRuntime(const std::string& jit_script) {
+  script::Module module("module");
+  module.define(jit_script);
+
+  Method method = module.get_method("forward");
+  auto graph = module.get_method("forward").graph();
+
+  // here we do not freeze graph
+  return torch::jit::canEnableStaticRuntime(graph);
+}
 } // namespace
 
 TEST(StaticRuntime, InPlace) {
   EXPECT_TRUE(testHasInplaceOp(reshape_inplace_script));
   EXPECT_TRUE(testHasInplaceOp(sigmoid_inplace_script));
   EXPECT_FALSE(testHasInplaceOp(sigmoid_out_script));
+}
+
+TEST(StaticRuntime, CanEnableStaticRuntime) {
+  EXPECT_TRUE(testCanEnableStaticRuntime(reshape_inplace_script));
+  EXPECT_FALSE(testCanEnableStaticRuntime(if_script));
 }
 
 TEST(StaticRuntime, NestedOutput) {
@@ -856,4 +881,40 @@ TEST(StaticRuntime, FusionPass) {
       EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
     }
   }
+}
+
+TEST(ProcessedNode, VerifyOutputsNotOverlappingWithImmutableInputsWithImmutableArguments) {
+  script::Module module("module");
+  // Not using out= variant.
+  module.define(sigmoid_script);
+  torch::jit::StaticModule smodule(module);
+  Node* sigmoid_node = getNodeWithKind(smodule, "aten::sigmoid");
+  const at::IValue a = torch::randn({2, 3});
+  at::IValue b = torch::randn({3, 1});
+  std::vector<const IValue*> ivalue_inputs{&a};
+  ProcessedNode pnode(sigmoid_node, std::move(ivalue_inputs), true);
+
+  pnode.Output(0) = b;
+  EXPECT_TRUE(pnode.verify_outputs_not_overlapping_with_immutable_inputs());
+
+  pnode.Output(0) = a;
+  EXPECT_FALSE(pnode.verify_outputs_not_overlapping_with_immutable_inputs());
+}
+
+TEST(ProcessedNode, VerifyOutputsNotOverlappingWithImmutableInputsWithMutableArguments) {
+  script::Module module("module");
+  // Using out= variant.
+  module.define(sigmoid_inplace_script);
+  torch::jit::StaticModule smodule(module);
+  Node* sigmoid_node = getNodeWithKind(smodule, "aten::sigmoid");
+  const at::IValue a = torch::randn({2, 3});
+  at::IValue b = torch::randn({3, 1});
+  std::vector<const IValue*> ivalue_inputs{&a};
+  ProcessedNode pnode(sigmoid_node, std::move(ivalue_inputs), true);
+
+  pnode.Output(0) = b;
+  EXPECT_TRUE(pnode.verify_outputs_not_overlapping_with_immutable_inputs());
+
+  pnode.Output(0) = a;
+  EXPECT_TRUE(pnode.verify_outputs_not_overlapping_with_immutable_inputs());
 }
