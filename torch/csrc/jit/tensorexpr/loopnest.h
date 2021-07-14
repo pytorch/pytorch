@@ -276,6 +276,14 @@ class TORCH_API LoopNest {
   // S6:    for k
   // S7:      B[m] = B[m] +
   //
+  // This transformation is unsafe as it simply add all loops into the body of
+  // the first loop for fusion without correctness checks.
+  //
+  // Below are the two requirements to apply unsafeFuseLoops:
+  //  * All the loops have the same parent.
+  //  * There are no statements between these loops in their parent body.
+  static bool unsafeFuseLoops(const std::vector<For*>& loops, For** fused);
+
   // Loop fusion is done only when all the conditions below are satisfied.
   //  * All the loops have the same parent.
   //  * There are no statements between these loops in their parent body.
@@ -307,28 +315,6 @@ class TORCH_API LoopNest {
   static std::vector<For*> reorder(
       const std::vector<For*>& loops,
       const std::vector<size_t>& permutation);
-
-  // Shuffles the statements in the given block according to the permutation
-  // specified. `permutation[i]` represents the position of the statement in
-  // the input block which will end up at position `i` after the shuffle.
-  //
-  // Returns true if the shuffle is done successfully.
-  //
-  // NOTE: This API does not check if dependences between statements are
-  // violated due to the shuffle. It is the responsibility of the caller to
-  // ensure that all dependences are honored after the shuffle.
-  //
-  // For example, consider the following code:
-  //   for i
-  //      A[i] = 10;
-  //      B[i] = 20;
-  //      C[i] = 30;
-  // shuffle(forI->body(), {1, 2, 0}) will transform the code to:
-  //   for i
-  //      B[i] = 20;
-  //      C[i] = 30;
-  //      A[i] = 10;
-  static bool shuffle(Block* block, const std::vector<size_t>& permutation);
 
   // Tile takes a 2d domain (x, y) and splits it into small rectangular blocks
   // each with shape (x_factor, y_factor). The traversal over the domain turns
