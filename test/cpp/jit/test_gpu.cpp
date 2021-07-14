@@ -13988,6 +13988,43 @@ TEST(NVFuserTest, FusionValidateParallelize5_CUDA) {
   fe.compileFusion(&fusion);
 }
 
+// See issue #995
+TEST(NVFuserTest, FusionValidateParallelize6_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(3);
+  auto tv1 = makeSymbolicTensor(4);
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  auto tv2 = add(tv0, new Double(1));
+  auto tv3 = broadcast(tv2, {true, false, false, false});
+  auto tv4 = add(tv3, tv1);
+  fusion.addOutput(tv4);
+
+  tv4->merge(0);
+  tv4->merge(0);
+  tv4->merge(0);
+  tv4->split(0, 128);
+  tv4->split(0, 1);
+  tv4->split(0, 1);
+
+  TransformPropagator::from(tv4);
+
+  tv0->computeAt(tv2, 2);
+  tv3->computeAt(tv4, 2);
+
+  tv4->axis(0)->parallelize(ParallelType::BIDx);
+  tv4->axis(-1)->parallelize(ParallelType::TIDx);
+  tv2->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+
+  // Validation should throw an exception saying the first axes of tv2
+  // and tv3 have incompatible parallelization. See also issue #995.
+  ASSERT_ANY_THROW(fusion.printKernel());
+}
+
 TEST(NVFuserTest, FusionDAGMerging_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);

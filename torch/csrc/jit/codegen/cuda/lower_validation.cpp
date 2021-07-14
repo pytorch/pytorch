@@ -448,12 +448,35 @@ void validateVectorize(Fusion* fusion) {
   }
 }
 
+namespace {
+
+//! Return true if axis is derived from a root axis that is an input
+//! to a CA leaf axis.
+bool derivedFromRootCAAxes(TensorView* tv, IterDomain* axis) {
+  std::vector<IterDomain*> ca_axes(
+      tv->domain()->domain().begin(),
+      tv->domain()->domain().begin() + tv->getComputeAtPosition());
+
+  auto ca_root_vals = IterVisitor::getInputsTo(
+      std::vector<Val*>(ca_axes.begin(), ca_axes.end()));
+
+  auto root_vals = IterVisitor::getInputsTo({axis});
+
+  return std::any_of(
+      root_vals.begin(), root_vals.end(), [&ca_root_vals](auto root) {
+        return ca_root_vals.count(root) > 0;
+      });
+}
+
+} // namespace
+
 void validateParallelize(Fusion* fusion) {
   FUSER_PERF_SCOPE("validateParallelize");
   FusionGuard fg(fusion);
 
   const auto& par_map = GpuLower::current()->caParallelMap();
   const auto& loop_map = GpuLower::current()->caLoopMap();
+  const auto& index_map = GpuLower::current()->caIndexMap();
 
   auto exprs = ExprSort::getExprs(fusion);
 
@@ -492,15 +515,28 @@ void validateParallelize(Fusion* fusion) {
         if (producer_axis->isReduction()) {
           continue;
         }
-        // There must be a mappable consumer axis that has the same
-        // parallel type.
+        // There must be a consumer axis that uses the same indexing
+        // with the same parallel type as the producer axis. The index
+        // map is used to to find such an axis. In addition, even when
+        // no mapped axis is found in the index map, but when an
+        // mapped axis exists in the loop map, the producer and
+        // consumer axes may still use the same indexing. That only
+        // happens when the producer is derived from a root axis that
+        // is an input to any leaf CA axes. In such a case, the axis
+        // in the reference tensor that maps to
+        // the producer axis is created based on the consumer, so both
+        // the producer and consumer axes should have the same
+        // indexing. See issue #995 as well as the
+        // FusionValidateParallelize6 test for a concrete example.
         for (auto consumer :
              ir_utils::filterByType<TensorView>(expr->outputs())) {
           auto it = std::find_if(
               consumer->domain()->domain().begin(),
               consumer->domain()->domain().end(),
               [&](IterDomain* consumer_axis) {
-                return loop_map.areMapped(producer_axis, consumer_axis);
+                return index_map.areMapped(producer_axis, consumer_axis) ||
+                    (loop_map.areMapped(producer_axis, consumer_axis) &&
+                     derivedFromRootCAAxes(producer, producer_axis));
               });
           TORCH_INTERNAL_ASSERT(
               it != consumer->domain()->domain().end(),
