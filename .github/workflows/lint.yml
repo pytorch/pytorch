@@ -332,9 +332,14 @@ jobs:
         run: |
           cd "${GITHUB_WORKSPACE}"
           wget -O pr.diff "https://patch-diff.githubusercontent.com/raw/pytorch/pytorch/pull/$PR_NUMBER.diff"
+      - name: Generate build files
+        run: |
+          cd "{GITHUB_WORKSPACE}"
+          python3 -m tools.linter.clang_tidy.generate_build_files
       - name: Run clang-tidy
         run: |
           cd "${GITHUB_WORKSPACE}"
+
           # The Docker image has our custom build, so we don't need to install it
           python3 -m tools.linter.clang_tidy \
             --clang-tidy-exe "$(which clang-tidy)" \
@@ -361,7 +366,7 @@ jobs:
           cd "${GITHUB_WORKSPACE}"
           set -eu
           cat "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
-          if grep -i "[clang-tidy] Warning detected in" "${GITHUB_WORKSPACE}"/clang-tidy-output.txt; then
+          if grep -i "\[clang\-tidy\] Warning detected in" "${GITHUB_WORKSPACE}"/clang-tidy-output.txt; then
             echo 'Please fix the above clang-tidy warnings.'
             false
           fi
