@@ -11,6 +11,16 @@ namespace at {
 namespace native {
 namespace {
 
+template <typename T>
+struct mnt_wrapper {
+	static constexpr int MAX_NUM_THREADS=1024;
+};
+
+template <>
+struct mnt_wrapper<double> {
+	static constexpr int MAX_NUM_THREADS=512;
+};
+  
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(1024)
 __global__ void upsample_bicubic2d_out_frame(
@@ -87,7 +97,7 @@ __global__ void upsample_bicubic2d_out_frame(
 
 // Backward (adjoint) operation 1 <- 2 (accumulates)
 template <typename scalar_t, typename accscalar_t>
-C10_LAUNCH_BOUNDS_1(1024)
+C10_LAUNCH_BOUNDS_1(mnt_wrapper<scalar_t>::MAX_NUM_THREADS)
 __global__ void upsample_bicubic2d_backward_out_frame(
     const int num_elements,
     const accscalar_t height_scale,
@@ -178,8 +188,6 @@ static void upsample_bicubic2d_out_cuda_template(
   output.zero_();
 
   const int num_output_elements = output_height * output_width;
-  const int max_threads = std::min(
-      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
 
   // Launch kernel
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
@@ -197,6 +205,9 @@ static void upsample_bicubic2d_out_cuda_template(
         const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
             input_width, output_width, align_corners, scales_w);
 
+  			const int max_threads = std::min(
+      		at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
+			
         upsample_bicubic2d_out_frame<scalar_t, accscalar_t>
             <<<cuda::ATenCeilDiv(num_output_elements, max_threads),
                max_threads,
@@ -237,8 +248,6 @@ static void upsample_bicubic2d_backward_out_cuda_template(
   grad_input.zero_();
 
   const int num_kernels = output_height * output_width;
-  const int num_threads = std::min(
-      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
@@ -253,7 +262,10 @@ static void upsample_bicubic2d_backward_out_cuda_template(
         const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
             input_width, output_width, align_corners, scales_w);
 
-        upsample_bicubic2d_backward_out_frame<scalar_t, accscalar_t>
+  			const int num_threads = std::min(
+      		at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, mnt_wrapper<scalar_t>::MAX_NUM_THREADS);
+        
+				upsample_bicubic2d_backward_out_frame<scalar_t, accscalar_t>
             <<<cuda::ATenCeilDiv(num_kernels, num_threads),
                num_threads,
                0,
