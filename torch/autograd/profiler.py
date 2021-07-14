@@ -740,13 +740,14 @@ class emit_nvtx(object):
             raise RuntimeError("NVTX annotation context manager is not reentrant")
         self.entered = True
         torch.cuda.synchronize()
-        torch.autograd._enable_profiler_legacy(
+        torch.autograd._enable_profiler(
             torch.autograd.ProfilerConfig(
                 ProfilerState.NVTX,
                 self.record_shapes,
                 False,
                 False,
-                False)
+                False),
+            set()
         )
         return self
 
@@ -754,7 +755,7 @@ class emit_nvtx(object):
         if not self.enabled:
             return
         torch.cuda.synchronize()
-        torch.autograd._disable_profiler_legacy()
+        torch.autograd._disable_profiler()
         return False
 
 

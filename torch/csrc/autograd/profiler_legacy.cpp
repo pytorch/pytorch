@@ -295,11 +295,11 @@ bool ProfilerThreadLocalState::memoryProfilingEnabled() const {
   return config_.profile_memory;
 }
 
-std::string ProfilerThreadLocalState::getNvtxStr(
+std::string getNvtxStr(
     const at::StringView& name,
     const char* msg,
     int64_t sequence_nr,
-    const std::vector<std::vector<int64_t>>& shapes) const {
+    const std::vector<std::vector<int64_t>>& shapes) {
   if (sequence_nr >= -1 || shapes.size() > 0) {
     std::stringstream s;
 #ifdef __HIP_PLATFORM_HCC__
