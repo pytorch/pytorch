@@ -371,6 +371,93 @@ static std::function<void(at::Tensor output, at::Tensor input)> clamp_helper(
   };
 }
 
+template <typename Key>
+using KeyFactory = std::function<Key(Stack*)>;
+
+static std::vector<size_t> linear_key_ctor(Stack* stack) {
+
+  auto x = peek(stack, 0, 3).toTensor();
+  auto w = peek(stack, 1, 3).toTensor();
+  auto b = peek(stack, 2, 3).toOptional<Tensor>();
+
+  auto x_sizes = x.sizes();
+  auto K = std::accumulate(x_sizes.begin() + 1, x_sizes.end(), 0.);
+  return {x_sizes[0], K, w.sizes().at(1)};
+}
+
+template<typename Key>
+struct SimpleOnlineAlgorithmAutotuner {
+  SimpleOnlineAlgorithmAutotuner(KeyFactory<Key> kf, std::vector<Operation> algos, size_t ct, size_t warmup): 
+    key_factory_(kf),
+    algorithms_(algos),
+    confidence_threshold_(ct),
+    warmup_(warmup),
+    samples_counter_(0)
+   {};
+  
+  void operator()(Stack* stack) {
+
+    auto key = key_factory_(stack);
+    auto it = best_fits_.find(key);
+
+    if (it != best_fits_.end()) {
+      algorithms_[it->second](stack);
+      return;
+    }
+
+    collectSample(key, stack);
+  };
+
+
+  void collectSample(Key k, Stack* stack) {
+    auto& op_sample_map = samples_[k];
+    
+    // init samples for each algorithm
+    if (op_sample_map.empty()) {
+      for (size_t i = 0; i < algorithms_.size(); i++) {
+        op_sample_map.insert({i, {}});
+      }
+    }
+
+    auto curr_algo = samples_counter_ % algorithms_.size();
+    GRAPH_DEBUG("Counter ", samples_counter_, " curr_algo ", curr_algo);
+
+    if (samples_counter_ == algorithms_.size() * (confidence_threshold_ + warmup_)) {
+      auto min_it = min_element(op_sample_map.begin(), op_sample_map.end(),
+              [this](const auto& l, const auto& r) {
+                // skip warm ups
+                auto l_sum = std::accumulate(l.second.begin() + warmup_, l.second.end(), 0.);
+                auto r_sum = std::accumulate(r.second.begin() + warmup_, r.second.end(), 0.);
+                GRAPH_DEBUG("Comparing ", l_sum, " with ", r_sum, " after warmup ", *(r.second.begin() + warmup_));
+                return l_sum < r_sum; 
+              });
+
+      best_fits_.insert({k, min_it->first});
+      GRAPH_DEBUG("Algorithm ", min_it->first, " is the best for ", " key = ", c10::Join(",", k));
+      algorithms_[min_it->first](stack);
+      return;
+    }
+
+    auto start_time = std::chrono::system_clock::now();
+    algorithms_[curr_algo](stack);
+    auto end_time = std::chrono::system_clock::now();
+    auto sample_time = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count() / 1000.;
+    GRAPH_DEBUG("Adding sample_time no.", op_sample_map[curr_algo].size(), " ", sample_time, " to algorithm ", curr_algo, " key = ", c10::Join(",", k));
+    op_sample_map[curr_algo].push_back(sample_time);
+    samples_counter_++;
+  }
+
+  KeyFactory<Key> key_factory_;
+  std::vector<Operation> algorithms_;
+  std::map<Key, std::map<size_t, std::vector<double>>> samples_;
+  std::map<Key, size_t> best_fits_;
+  
+  size_t confidence_threshold_;
+  size_t warmup_;
+  size_t samples_counter_;
+};
+
+
 // any op added to this registry needs to meet
 // the precondition: `aten_op(0) == 0`
 const RegisterOperators MKLDNNHardSwishOpReg({
@@ -381,6 +468,73 @@ const RegisterOperators MKLDNNHardSwishOpReg({
               at::cpu::hardswish_out(output, input);
             },
             true),
+        AliasAnalysisKind::FROM_SCHEMA),
+    torch::jit::Operator(
+        "prim::AutoLinear(Tensor self, Tensor weight, Tensor? bias=None) -> Tensor", 
+        SimpleOnlineAlgorithmAutotuner<std::vector<size_t>>(linear_key_ctor, {
+          [](Stack* stack){
+              Tensor x, w;
+              c10::optional<Tensor> b;
+              pop(stack, x, w, b);
+              auto y = at::native::linear(x, w, b);
+              push(stack, y);
+          },
+          [](Stack* stack) {
+              Tensor x, w;
+              c10::optional<Tensor> b;
+              pop(stack, x, w, b);
+
+              auto start_time = std::chrono::system_clock::now();
+              // inner product will transpose
+
+              //  if (!x.is_contiguous() || MKLDNNTranspose(x.sizes(), w.sizes())) {
+              //   auto y = at::native::linear(x, w, b);
+              //   push(stack, y);
+              //   return;
+              //  }
+
+              c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
+              auto x_reshaped = x.dim() == 2 ? x : x.reshape({-1, x.size(x.dim() - 1)});
+              auto start_time3 = std::chrono::system_clock::now();
+              auto ix = ideep::tensor({x_reshaped.sizes().vec(), ideep::data_type::f32, x_reshaped.strides().vec()}, x.data_ptr());
+              auto end_time3 = std::chrono::system_clock::now();
+              auto x_opt = x.options();
+              auto start_time4 = std::chrono::system_clock::now();
+              auto iw = ideep::tensor({w.sizes().vec(), ideep::data_type::f32, w.strides().vec()}, w.data_ptr());
+              auto end_time4 = std::chrono::system_clock::now();
+              std::vector<int64_t> squeezed_out_size = {x_reshaped.size(0), w.size(0)};
+              std::vector<int64_t> output_size(x.sizes().begin(), x.sizes().end() - 1);
+              output_size.push_back(w.size(0));
+
+              auto start_time2 = std::chrono::system_clock::now();
+              auto y = at::empty(output_size, x_opt);
+              auto end_time2 = std::chrono::system_clock::now();
+              if (squeezed_out_size[0] * squeezed_out_size[1] == 0) {
+                push(stack, y);
+                return;
+              }
+              auto start_time5 = std::chrono::system_clock::now();
+              auto iy = ideep::tensor(squeezed_out_size, ideep::data_type::f32, y.data_ptr());
+              auto end_time5 = std::chrono::system_clock::now();
+              if (b.has_value()) {
+                  auto ib = ideep::tensor({b->sizes().vec(), ideep::data_type::f32, b->strides().vec()}, b->data_ptr());
+                  ideep::inner_product_forward::compute(ix, iw, ib, iy);
+                } else {
+                  ideep::inner_product_forward::compute(ix, iw, iy);
+              }
+            auto end_time = std::chrono::system_clock::now();
+              std::cout << "at::MKLDNNLinear: input = " << c10::Join(",", x.sizes()) << " weight = " 
+              << c10::Join(",", w.sizes()) << " time = " 
+              << (std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count() / 1000.) 
+              << " empty time = " << (std::chrono::duration_cast<std::chrono::microseconds>(end_time2 - start_time2).count() / 1000.) 
+              << " x time = " << (std::chrono::duration_cast<std::chrono::microseconds>(end_time3 - start_time3).count() / 1000.)
+              << " w time = " << (std::chrono::duration_cast<std::chrono::microseconds>(end_time4 - start_time4).count() / 1000.)
+              << " y time = " << (std::chrono::duration_cast<std::chrono::microseconds>(end_time5 - start_time5).count() / 1000.) 
+              << std::endl;
+            push(stack, y);
+            return;
+          }
+        }, 3, 3),
         AliasAnalysisKind::FROM_SCHEMA),
     torch::jit::Operator(
         "prim::MKLDNNHardSigmoid_(Tensor(a!) self) -> Tensor(a!)",
@@ -725,6 +879,39 @@ bool nonConstantParameters(Node* n) {
   return false;
 }
 
+bool ComputeSingletonLinear(Node* subgraph_node) {
+
+  const auto static ENABLE_INNER = std::getenv("ENABLE_INNER");
+  if (!ENABLE_INNER) {
+    return false;
+  }
+  auto graph = SubgraphUtils::getSubgraph(subgraph_node);
+
+  Node* singleton = nullptr;
+  size_t num_nodes = 0;
+  size_t num_constants = 0;
+  size_t num_linear = 0;
+  for (auto n: graph->block()->nodes()) {
+    if (n->kind() == prim::Constant) {
+      num_constants++;
+    }
+    if (n->kind() == aten::linear) {
+      num_linear++;
+    }
+    num_nodes++;
+    singleton = n;
+  }
+
+
+  if (num_constants + num_linear == num_nodes && num_linear == 1) {
+    singleton->replaceWithNewSymbol(Symbol::prim("AutoLinear"));
+    singleton->destroy();
+    return true;
+  }
+
+  return false;
+}
+
 bool frozenMkldnnCompatibleLinearNode(Node* n) {
   if (nonConstantParameters(n)) {
     return false;
@@ -925,8 +1112,10 @@ class MKLDNNSubgraphSlicer {
     while (curNode != *block_->nodes().end()) {
       auto nextNode = curNode->next();
       if (curNode->kind() == prim::MKLDNNGroup) {
-        ComputeSubgraphInMKLDNN(curNode);
-        InplaceMKLDNNSubgraph(SubgraphUtils::getSubgraph(curNode));
+        if (!ComputeSingletonLinear(curNode)) {
+          ComputeSubgraphInMKLDNN(curNode);
+          InplaceMKLDNNSubgraph(SubgraphUtils::getSubgraph(curNode));
+        }
         SubgraphUtils::unmergeSubgraph(curNode);
       }
       curNode = nextNode;
