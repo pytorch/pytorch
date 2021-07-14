@@ -3487,6 +3487,8 @@ Tensor lu_solve_backward_self(
 ) {
   Tensor P, L, U;
   std::tie(P, L, U) = at::lu_unpack(LU_data, LU_pivots);
+
+  // self_grad = [grad^H U^{-1} L^{-1} P^T]^H = [U^{-1} L^{-1} P^T]^H grad
   return std::get<0>(at::triangular_solve(
     std::get<0>(at::triangular_solve(
       P.transpose(-2, -1),
