@@ -17,9 +17,9 @@ namespace torch { namespace autograd {
   }
 
   PySavedVariableHooks::~PySavedVariableHooks() {
-      // If python is already dead, leak the wrapped python objects
+    // If python is already dead, leak the wrapped python objects
     if (Py_IsInitialized()) {
-      pybind11::gil_scoped_acquire gil;
+      py::gil_scoped_acquire gil;
       Py_XDECREF(pack_hook_);
       Py_XDECREF(unpack_hook_);
     }
