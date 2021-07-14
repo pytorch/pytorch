@@ -2007,7 +2007,7 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
             if val in extremal_values:
                 raise ValueError(f"Found invalid value {val} for {inp}")
             elif val is None:
-                return default_val 
+                return default_val
             elif inp == 'low':
                 if (val == float('-inf') or val < ranges[0]):
                     return ranges[0]
