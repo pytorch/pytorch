@@ -432,16 +432,12 @@ TORCH_IMPL_FUNC(max_out)
       values.fill_(self);
       indices.fill_(0);
     } else {
-      auto& values_mut = const_cast<Tensor&>(values);
-      auto& indices_mut = const_cast<Tensor&>(indices);
-      max_stub(self.device().type(), values_mut, indices_mut, self, dim, keepdim);
+      max_stub(self.device().type(), values, indices, self, dim, keepdim);
     }
   }
 }
 
-std::tuple<Tensor, Tensor> max(const Tensor& self, int64_t dim, bool keepdim) {
-  // CUDA and CPU dispatch keys are handled by the structured kernel implementation.
-  TORCH_INTERNAL_ASSERT(self.is_quantized());
+std::tuple<Tensor, Tensor> qmax(const Tensor& self, int64_t dim, bool keepdim) {
   Tensor max_indices = at::empty({0}, self.options().dtype(kLong));
   Tensor max = at::empty({0}, self.options().dtype(toUnderlying(self.scalar_type())));
   at::max_outf(self.int_repr(), dim, keepdim, max, max_indices);
