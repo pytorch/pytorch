@@ -153,6 +153,11 @@ enum class DispatchKey : uint8_t {
   // This is implemented at a dispatch level right before any backends run
   Conjugate,
 
+  // The Negative dispatch key is set for any tensors that need to perform
+  // negation
+  // This is implemented at a dispatch level right before any backends run
+  Negative,
+
   // See Note [Out-of-tree vmap+grad prototype]. The purpose of this key
   // is to insert code after the "autograd subsystem" runs, so this key should
   // be directly after ADInplaceOrView and all of the autograd keys.
