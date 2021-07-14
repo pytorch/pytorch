@@ -129,8 +129,9 @@ def run_ddp(rank, world_size, epochs, ddp_option, buffer_size):
 
 def main():
     world_size = 2
-    epochs = 100
-    # 4 MB
+    epochs = 1000
+    # 4 MB. Note this is model dependent since # of buckets highly depends on
+    # number of params and element number of params.
     buffer_size = 2 ** 22
 
     options = [
