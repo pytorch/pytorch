@@ -196,13 +196,13 @@ def filter_files(files: Iterable[str], file_patterns: Patterns) -> Iterable[str]
                 yield file
                 continue
         if VERBOSE:
-            print("{} omitted due to file filters".format(file))
+            print(f"{file} omitted due to file filters")
 
 
 def get_all_files(paths: List[str]) -> List[str]:
     """Returns all files that are tracked by git in the given paths."""
     returncode, output = run_shell_command(["git", "ls-files"] + paths)
-    return output.split("\n")
+    return output.strip().split("\n")
 
 
 def find_changed_lines(diff: str) -> Dict[str, List[Tuple[int, int]]]:
@@ -263,7 +263,7 @@ def run_shell_commands_in_parallel(
         returncode = proc.returncode if proc.returncode is not None else -1
 
         if returncode != 0:
-            progress_meter.print(f"Warning detected in {filename}")
+            progress_meter.print(f"[clang-tidy] Warning detected in {filename}")
         progress_meter.update(f"Processed {filename}")
 
         return returncode, stdout.decode("utf-8"), stderr.decode("utf-8")
