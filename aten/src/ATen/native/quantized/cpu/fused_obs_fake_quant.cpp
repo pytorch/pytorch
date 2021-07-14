@@ -142,7 +142,6 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cpu(
     const int64_t ch_axis,
     bool per_row_fake_quant,
     bool symmetric_quant) {
-  auto mask = at::ones_like(self, at::kBool, MemoryFormat::Preserve);
   // Calculate min/max
   auto observe = observer_on.item().toInt();
   if (observe) {
@@ -169,7 +168,39 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cpu(
         quant_max,
         ch_axis);
   }
-  return std::make_tuple(self, mask);
+  auto mask = at::ones_like(self, at::kBool, MemoryFormat::Preserve);
+  return std::make_tuple(self.alias(), mask);
+}
+
+at::Tensor fused_moving_avg_obs_fake_quant(
+    const at::Tensor& self,
+    const at::Tensor& observer_on,
+    const at::Tensor& fake_quant_on,
+    const at::Tensor& averaging_const,
+    at::Tensor& running_min,
+    at::Tensor& running_max,
+    at::Tensor& scale,
+    at::Tensor& zero_point,
+    const int64_t quant_min,
+    const int64_t quant_max,
+    const int64_t ch_axis,
+    bool per_row_fake_quant,
+    bool symmetric_quant) {
+  const auto res = at::_fused_moving_avg_obs_fq_helper(
+      self,
+      observer_on,
+      fake_quant_on,
+      averaging_const,
+      running_min,
+      running_max,
+      scale,
+      zero_point,
+      quant_min,
+      quant_max,
+      ch_axis,
+      per_row_fake_quant,
+      symmetric_quant);
+  return std::get<0>(res);
 }
 } // namespace native
 } // namespace at
