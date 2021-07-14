@@ -3247,7 +3247,7 @@ class TestSparse(TestCase):
                 mat2 = scipy.sparse.coo_matrix((values_2, (indices_2[0], indices_2[1])), shape=b.shape)
                 result = mat1.dot(mat2).tocoo()
                 return torch.sparse_coo_tensor([result.row, result.col], result.data, result.shape,
-                                               dtype=dtype, device=device)
+                                               dtype=dtype, device=device).coalesce()
             else:
                 assert a.shape[1] == b.shape[0]
                 n, p = a.shape
