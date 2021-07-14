@@ -3479,6 +3479,29 @@ Tensor i1e_backward(
   });
 }
 
+Tensor lu_solve_backward_self(
+  const Tensor& grad,
+  const Tensor& self,
+  const Tensor& LU_data,
+  const Tensor& LU_pivots
+) {
+  Tensor P, L, U;
+  std::tie(P, L, U) = at::lu_unpack(LU_data, LU_pivots);
+  return std::get<0>(at::triangular_solve(
+    std::get<0>(at::triangular_solve(
+      P.transpose(-2, -1),
+      L,
+      /*upper=*/false,
+      /*transpose=*/false,
+      /*unitriangular=*/true
+    )),
+    U,
+    /*upper=*/true,
+    /*transpose=*/false,
+    /*unitriangular=*/false
+  )).transpose(-2, -1).conj().matmul(grad);
+}
+
 Tensor lu_unpack_backward(
   const variable_list& grads,
   const Tensor& LU_data,

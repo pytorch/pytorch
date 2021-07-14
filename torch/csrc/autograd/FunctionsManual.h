@@ -247,6 +247,12 @@ Tensor i1e_backward(
     const Tensor& grad,
     const Tensor& self,
     const Tensor& result);
+Tensor lu_solve_backward_self(
+  const Tensor& grad,
+  const Tensor& self,
+  const Tensor& LU_data,
+  const Tensor& LU_pivots
+);
 Tensor lu_unpack_backward(
   const variable_list& grads,
   const Tensor& LU_data,
