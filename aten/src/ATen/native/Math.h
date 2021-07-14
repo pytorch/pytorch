@@ -195,7 +195,7 @@ C10_HOST_DEVICE static inline scalar_t zeta(scalar_t x, scalar_t q) __ubsan_igno
    * https://dlmf.nist.gov/25.11#E43
    */
   if (q > acc_t{1e8}) {
-    return (one / (x - one) + one / (acct_t{2} * q)) * ::pow(q, one - x);
+    return (one / (x - one) + one / (acc_t{2} * q)) * ::pow(q, one - x);
   }
 
   /* Euler-Maclaurin summation formula */
