@@ -337,7 +337,8 @@ jobs:
           cd "${GITHUB_WORKSPACE}"
           python3 -m tools.linter.clang_tidy \
             --diff-file pr.diff \
-            --verbose |& tee "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
+            --verbose \
+            --disable-progress-bar |& tee "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
       - name: Annotate output
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}

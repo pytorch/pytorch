@@ -80,6 +80,7 @@ DEFAULTS = {
     "parallel": True,
     "compile-commands-dir": "build",
     "config-file": ".clang-tidy",
+    "disable-progress-bar": False,
 }
 
 
@@ -169,6 +170,12 @@ def parse_args() -> argparse.Namespace:
         help="Add NOLINT to suppress clang-tidy violations",
     )
     parser.add_argument(
+        "--disable-progress-bar",
+        action="store_true",
+        default=DEFAULTS["disable-progress-bar"],
+        help="Disable the progress bar",
+    )
+    parser.add_argument(
         "extra_args", nargs="*", help="Extra arguments to forward to clang-tidy"
     )
     return parser.parse_args()
@@ -194,7 +201,8 @@ def main() -> None:
 
     return_code = run(options)
     if return_code != 0:
-        raise RuntimeError("Warnings found in clang-tidy output!")
+        raise RuntimeError("Your code is not clang-tidy clean!")
 
+    print("Passed clang-tidy!")
 
 main()
