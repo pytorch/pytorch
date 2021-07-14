@@ -32,11 +32,14 @@ namespace {
 
 int v8_flag = -1;
 int debug = -1;
+auto heuristic_mode = CUDNN_HEUR_MODE_INSTANT;
+int printcount = 0;
 
 bool use_v8() {
   if (v8_flag < 0) {
     auto val = c10::utils::check_env("CUDNN_V8_API_ENABLED");
     auto debug_val = c10::utils::check_env("CUDNN_V8_API_DEBUG");
+    auto heuristic_val = c10::utils::check_env("USE_HEURISTIC_MODE_B");
     if (val == true) {
       v8_flag = 1;
     } else {
@@ -47,9 +50,13 @@ bool use_v8() {
     } else {
       debug = 0;
     }
+    if (heuristic_val == true) {
+      heuristic_mode = CUDNN_HEUR_MODE_B;
+    }
   }
-  if (debug == 1) {
-    TORCH_WARN("CUDNN_V8_DEBUG ON, V8_FLAG: ", v8_flag);
+  if (debug == 1 && printcount < 10) {
+    TORCH_WARN("CUDNN_V8_DEBUG ON, V8_FLAG: ", v8_flag, " HEURISTIC_MODE B: ", heuristic_mode == CUDNN_HEUR_MODE_B);
+    printcount++;
   }
   return v8_flag == 1;
 }
@@ -222,11 +229,10 @@ size_t get_available_workspace() {
 }
 
 auto get_plans_from_find(const cudnnHandle_t handle, const cudnnBackendDescriptorType_t desc, const Tensor& x, const Tensor& y, const Tensor& w, const CacheKey& key, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, const bool deterministic, const bool allow_tf32) {
-  if (debug) {std::cout << "get plans from find" << std::endl;}
   auto opGraph = build_opgraph(handle, desc, x, y, w, key, padding, stride, dilation);
   void *data_ptrs[] = {x.data_ptr(), y.data_ptr(), w.data_ptr()};
   int64_t uids[] = {'x', 'y', 'w'};
-
+  // We don't care about getting the best ordering of algos if we're roing to run all of them
   auto sources = get_generator_sources(desc, x, deterministic, allow_tf32, CUDNN_HEUR_MODE_INSTANT);
   auto initial_predicate_function = [&](cudnn_frontend::ExecutionPlan const& plan) -> bool {
     return false;
@@ -290,7 +296,7 @@ auto get_configs_from_heuristics(const cudnnHandle_t handle, const cudnnBackendD
     return plan.getWorkspaceSize() > workspace_size;
   };
 
-  auto sources = get_generator_sources(desc, x, deterministic, allow_tf32, CUDNN_HEUR_MODE_INSTANT);
+  auto sources = get_generator_sources(desc, x, deterministic, allow_tf32, heuristic_mode);
 
   cudnn_frontend::EngineConfigGenerator generator(sources.size(), sources.data());
   auto configs = generator.generate_engine_config(opGraph);
