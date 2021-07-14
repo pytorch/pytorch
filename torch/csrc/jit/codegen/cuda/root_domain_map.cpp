@@ -722,7 +722,14 @@ void ComputeAtRootDomainMapBuilder::mapPointwiseOrReductionOp(Expr* e) {
     const TensorDomain* in_td = i->domain();
     std::vector<IterDomain*> in_root =
         TensorDomain::noReductions(i->getMaybeRFactorDomain());
-    TORCH_INTERNAL_ASSERT(in_root.size() == out_root.size());
+    TORCH_INTERNAL_ASSERT(
+        in_root.size() == out_root.size(),
+        "\nExpression: ",
+        e,
+        "\nInput root domain: ",
+        in_root,
+        "\nOutput root domain: ",
+        out_root);
     for (size_t it = 0; it < in_root.size(); it++) {
       if (e->outputs().size() > 1) {
         TORCH_INTERNAL_ASSERT(
