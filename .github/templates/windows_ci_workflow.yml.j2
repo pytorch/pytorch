@@ -6,10 +6,15 @@ on:
 {%- if on_pull_request %}
   pull_request:
 {%- endif %}
+{%- if is_scheduled %}
+  schedule:
+    - cron: !{{ is_scheduled }}
+{%- else %}
   push:
     branches:
       - master
       - release/*
+{%- endif %}
   workflow_dispatch:
 
 env:
@@ -22,6 +27,7 @@ env:
   SCCACHE_BUCKET: "ossci-compiler-cache"
   VC_PRODUCT: "BuildTools"
   VC_VERSION: ""
+  VS_VERSION: "16.8.6"
   VC_YEAR: "2019"
 {%- if cuda_version != "cpu" %}
   TORCH_CUDA_ARCH_LIST: "7.0"
@@ -62,6 +68,8 @@ jobs:
 {%- endif %}
       - name: Build
         shell: bash
+        env:
+          PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
         run: |
           .jenkins/pytorch/win-build.sh
       # Upload to github so that people can click and download artifacts
@@ -74,7 +82,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           name: ${{ env.BUILD_ENVIRONMENT }}
-          path: C:\w\build-results
+          path: C:\${{ github.run_id }}\build-results
       - name: Upload artifacts to s3
         if: always()
         uses: seemethere/upload-artifact-s3@9d7ceb0ab39c2c88d93ef7792b27425b27d59162
@@ -82,7 +90,13 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           name: ${{ env.BUILD_ENVIRONMENT }}
-          path: C:\w\build-results
+          path: C:\${{ github.run_id }}\build-results
+      - name: Cleanup build-results
+        shell: bash
+        env:
+          PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
+        run: |
+          rm -rf "${PYTORCH_FINAL_PACKAGE_DIR}"
 
   generate-test-matrix:
 {%- if only_build_on_pull_request %}
@@ -92,37 +106,37 @@ jobs:
 {%- endif %}
     runs-on: ubuntu-18.04
     env:
+      TEST_RUNNER_TYPE: !{{ test_runner_type }}
       NUM_TEST_SHARDS: !{{ num_test_shards }}
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
+      render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
     container:
       image: python:3.9
     steps:
+      - name: Install dependencies
+        run: pip install typing-extensions
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - name: Generating test matrix
         id: set-matrix
-        run: |
-          # outputting for debugging purposes
-          MATRIX=$(python .github/scripts/generate_pytorch_test_matrix.py)
-          echo "${MATRIX}"
-          echo "::set-output name=matrix::${MATRIX}"
+        run: .github/scripts/generate_pytorch_test_matrix.py
 
   test:
 {%- if only_build_on_pull_request %}
     if: ${{ github.event_name == 'push' }}
 {%- endif %}
-    runs-on: !{{ test_runner_type }}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-test
-      NUM_TEST_SHARDS: !{{ num_test_shards }}
-      TEST_CONFIG: ${{ matrix.test_config }}
+      SHARD_NUMBER: ${{ matrix.shard }}
+      NUM_TEST_SHARDS: ${{ matrix.num_shards }}
     needs:
       - build
       - generate-test-matrix
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
       fail-fast: false
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
@@ -165,9 +179,7 @@ jobs:
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
         run: |
-            if [[ $NUM_TEST_SHARDS -eq 2 ]]; then
-              export SHARD_NUMBER=$TEST_CONFIG
-            else
+            if [[ $NUM_TEST_SHARDS -ne 2 ]]; then
               export SHARD_NUMBER=0
             fi
             if [[ -n $GITHUB_HEAD_REF && "$USE_CUDA" == 1 ]]; then
@@ -184,7 +196,7 @@ jobs:
         name: Store PyTorch Test Reports
         if: always()
         with:
-          name: test-reports
+          name: test-reports-${{ matrix.config }}
           retention-days: 14
           if-no-files-found: error
           path:
@@ -202,8 +214,12 @@ jobs:
     if: always()
 {%- endif %}
     needs:
+      - generate-test-matrix
       - test
     runs-on: ubuntu-18.04
+    strategy:
+      matrix: ${{ fromJson(needs.generate-test-matrix.outputs.render-matrix) }}
+      fail-fast: false
     # TODO: Make this into a composite step
     steps:
       - name: Checkout PyTorch
@@ -214,7 +230,7 @@ jobs:
       - uses: actions/download-artifact@v2
         name: Download PyTorch Test Reports
         with:
-          name: test-reports
+          name: test-reports-${{ matrix.config }}
           path: .
       - name: Unzip test reports
         run: |
@@ -247,5 +263,4 @@ jobs:
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
           CIRCLE_WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         run: |
-          export PYTHONPATH=$PWD
-          python tools/stats/print_test_stats.py --upload-to-s3 --compare-with-s3 test
+          python -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test

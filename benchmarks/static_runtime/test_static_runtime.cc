@@ -11,6 +11,9 @@ using namespace torch;
 using namespace torch::jit;
 using c10::IValue;
 
+C10_DECLARE_bool(
+    static_runtime_enable_fast_math);
+
 namespace {
 static at::Tensor getTensor(const at::IValue& ival) {
   if (ival.isTensor()) {
@@ -165,6 +168,16 @@ bool testHasInplaceOp(const std::string& jit_script) {
   torch::jit::AliasDb alias_db(graph);
   return torch::jit::HasInplaceOp(graph, alias_db);
 }
+
+static Node* getNodeWithKind(const torch::jit::StaticModule& smodule, const string& kind) {
+  for (auto& pnode : smodule.nodes()) {
+    if (std::string(pnode.node()->kind().toQualString()) == kind) {
+      return pnode.node();
+    }
+  }
+  return nullptr;
+}
+
 } // namespace
 
 TEST(StaticRuntime, InPlace) {
@@ -214,6 +227,21 @@ TEST(StaticRuntime, UnaryOps) {
   testStaticRuntime(aten_sum_1, args, args2);
   testStaticRuntime(aten_sum_0_true, args, args2);
   testStaticRuntime(aten_sum_1_true, args, args2);
+}
+
+TEST(StaticRuntime, Sigmoid) {
+  auto a = at::randn({2, 3});
+  auto b = at::randn({4, 3, 2});
+
+  std::vector<IValue> args{a}, args2{b};
+
+  testStaticRuntime(sigmoid_script, args);
+  testStaticRuntime(sigmoid_script, args, {args2});
+
+  FLAGS_static_runtime_enable_fast_math = false;
+  testStaticRuntime(sigmoid_script, args);
+  testStaticRuntime(sigmoid_script, args, {args2});
+  FLAGS_static_runtime_enable_fast_math = true;
 }
 
 TEST(StaticRuntime, Clone) {
@@ -306,6 +334,36 @@ TEST(StaticRuntime, LayerNorm) {
   }
 }
 
+TEST(StaticRuntime, Bmm) {
+  auto a = at::randn({10, 4, 5});
+  auto b = at::randn({10, 5, 6});
+
+  auto c = at::randn({12, 5, 6});
+  auto d = at::randn({12, 6, 7});
+
+  std::vector<IValue> args{a, b};
+  std::vector<IValue> args1{c, d};
+  testStaticRuntime(bmm_script, args);
+  testStaticRuntime(bmm_script, args1);
+  testStaticRuntime(bmm_script, args, args1);
+}
+
+TEST(StaticRuntime, Addmm) {
+  auto inp1 = at::randn({5});
+  auto mat1 = at::randn({3, 4});
+  auto mat2 = at::randn({4, 5});
+
+  auto inp2 = at::randn({3, 7});
+  auto mat3 = at::randn({3, 6});
+  auto mat4 = at::randn({6, 7});
+
+  std::vector<IValue> args{inp1, mat1, mat2, 1.0, 2.0};
+  std::vector<IValue> args1{inp2, mat3, mat4, 2.0, 1.0};
+  testStaticRuntime(addmm_script, args);
+  testStaticRuntime(addmm_script, args1);
+  testStaticRuntime(addmm_script, args, args1);
+}
+
 TEST(StaticRuntime, IndividualOps_Binary) {
   auto a = at::randn({2, 3});
   auto b = at::ones({2, 3});
@@ -346,6 +404,15 @@ TEST(StaticRuntime, IndividualOps_Binary_MatMul) {
   testStaticRuntime(aten_matmul, args3, args4);
 }
 
+TEST(StaticRuntime, IndividualOps_Sign) {
+  auto a = at::randn({2, 3});
+  auto b = at::randn({4, 3, 2});
+
+  std::vector<IValue> args{a};
+  testStaticRuntime(sign_tensor, args);
+  testStaticRuntime(sign_tensor, args, {b});
+}
+
 TEST(StaticRuntime, IndividualOps_Div) {
   auto a = at::randn({2, 3});
   auto b = at::randn({2, 3});
@@ -367,6 +434,16 @@ TEST(StaticRuntime, IndividualOps_Div) {
   std::vector<IValue> args3{a, 2.3, "trunc"};
   testStaticRuntime(div_scalar_mode, args3);
   testStaticRuntime(div_scalar_mode, args3, {a, 1.5, "trunc"});
+}
+
+TEST(StaticRuntime, IndividualOps_Log) {
+  // Ensure that the input values are valid.
+  auto a = at::abs(at::randn({2, 3}));
+  auto b = at::abs(at::randn({4, 3, 2}));
+
+  std::vector<IValue> args{a};
+  testStaticRuntime(log_tensor, args);
+  testStaticRuntime(log_tensor, args, {b});
 }
 
 TEST(StaticRuntime, IndividualOps_Sub) {
@@ -789,4 +866,40 @@ TEST(StaticRuntime, FusionPass) {
       EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
     }
   }
+}
+
+TEST(ProcessedNode, VerifyOutputsNotOverlappingWithImmutableInputsWithImmutableArguments) {
+  script::Module module("module");
+  // Not using out= variant.
+  module.define(sigmoid_script);
+  torch::jit::StaticModule smodule(module);
+  Node* sigmoid_node = getNodeWithKind(smodule, "aten::sigmoid");
+  const at::IValue a = torch::randn({2, 3});
+  at::IValue b = torch::randn({3, 1});
+  std::vector<const IValue*> ivalue_inputs{&a};
+  ProcessedNode pnode(sigmoid_node, std::move(ivalue_inputs), true);
+
+  pnode.Output(0) = b;
+  EXPECT_TRUE(pnode.verify_outputs_not_overlapping_with_immutable_inputs());
+
+  pnode.Output(0) = a;
+  EXPECT_FALSE(pnode.verify_outputs_not_overlapping_with_immutable_inputs());
+}
+
+TEST(ProcessedNode, VerifyOutputsNotOverlappingWithImmutableInputsWithMutableArguments) {
+  script::Module module("module");
+  // Using out= variant.
+  module.define(sigmoid_inplace_script);
+  torch::jit::StaticModule smodule(module);
+  Node* sigmoid_node = getNodeWithKind(smodule, "aten::sigmoid");
+  const at::IValue a = torch::randn({2, 3});
+  at::IValue b = torch::randn({3, 1});
+  std::vector<const IValue*> ivalue_inputs{&a};
+  ProcessedNode pnode(sigmoid_node, std::move(ivalue_inputs), true);
+
+  pnode.Output(0) = b;
+  EXPECT_TRUE(pnode.verify_outputs_not_overlapping_with_immutable_inputs());
+
+  pnode.Output(0) = a;
+  EXPECT_TRUE(pnode.verify_outputs_not_overlapping_with_immutable_inputs());
 }
