@@ -1545,12 +1545,12 @@ def build_table(
 
     def auto_scale_flops(flops):
         flop_headers = [
-            'FLOPS',
-            'KFLOPS',
-            'MFLOPS',
-            'GFLOPS',
-            'TFLOPS',
-            'PFLOPS',
+            ('FLOPS/sec', 'FLOPS'),
+            ('KFLOPS/sec', 'KFLOPS'),
+            ('MFLOPS/sec', 'MFLOPS'),
+            ('GFLOPS/sec', 'GFLOPS'),
+            ('TFLOPS/sec', 'TFLOPS'),
+            ('PFLOPS/sec', 'PFLOPS'),
         ]
         assert flops > 0
         log_flops = max(0, min(math.log10(flops) / 3, float(len(flop_headers) - 1)))
@@ -1582,13 +1582,18 @@ def build_table(
     if with_flops:
         # Auto-scaling of flops header
         raw_flops = []
+        raw_flops_rate = []
         for evt in events:
             rate = flops_rate(evt)
-            if rate > 0:
-                raw_flops.append(rate)
+            if evt.flops > 0:
+                raw_flops.append(evt.flops)
+                raw_flops_rate.append(rate)
+
         if len(raw_flops) != 0:
-            (flops_scale, flops_header) = auto_scale_flops(min(raw_flops))
-            headers.append(flops_header)
+            (flops_scale, flops_header) = auto_scale_flops(min(raw_flops_rate))
+            headers.append(flops_header[0])
+            add_column(flops_column_width)
+            headers.append(flops_header[1])
             add_column(flops_column_width)
         else:
             with_flops = False  # can't find any valid flops
@@ -1690,10 +1695,13 @@ def build_table(
             row_values.append(str(evt.input_shapes)[:shapes_column_width])
         if with_flops:
             rate = flops_rate(evt)
-            if rate <= 0.0:
-                row_values.append("--")
-            else:
+            if evt.flops > 0:
                 row_values.append('{0:8.3f}'.format(rate * flops_scale))
+                row_values.append('{0:8.3f}'.format(evt.flops * flops_scale))
+            else:
+                row_values.append("--")
+                row_values.append("--")
+
         if has_stack:
             src_field = ""
             if len(evt.stack) > 0:
