@@ -534,8 +534,8 @@ TensorView* TensorView::welfordRfactorHelper(
 
 WelfordResult TensorView::rFactor(
     const std::vector<int>& axes,
-    TensorView* var,
     TensorView* avg,
+    TensorView* var,
     TensorView* n) {
   TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to rFactor a 0-dim TensorView");
   FusionGuard fg(fusion());
@@ -558,7 +558,7 @@ WelfordResult TensorView::rFactor(
       n->sameAs(wop->outN()), "Welford rfactor not used correctly");
 
   std::unordered_map<TensorView*, TensorView*> tv2rf{
-      {var, nullptr}, {avg, nullptr}, {n, nullptr}};
+      {avg, nullptr}, {var, nullptr}, {n, nullptr}};
 
   // Make sure this gets rfactored last so everybody gets
   //  replayed correctly
@@ -574,36 +574,36 @@ WelfordResult TensorView::rFactor(
     }
   }
 
-  TensorView* producer_var = tv2rf.at(var);
   TensorView* producer_avg = tv2rf.at(avg);
+  TensorView* producer_var = tv2rf.at(var);
   TensorView* producer_n = tv2rf.at(n);
 
   // Setup dependency chain, inserting producer before this op.
   // Expr* producer_definition =
   new WelfordOp(
-      producer_var,
       producer_avg,
+      producer_var,
       producer_n, /*out var/avg/count */
-      wop->initVar(),
       wop->initAvg(),
+      wop->initVar(),
       wop->initN(), /*init var/avg/count */
-      wop->inVar(),
       wop->inAvg(),
+      wop->inVar(),
       wop->inN());
 
   // Expr* consumer_definition =
   new WelfordOp(
-      var,
       avg,
+      var,
       n,
-      wop->initVar(),
       wop->initAvg(),
+      wop->initVar(),
       wop->initN(),
-      producer_var,
       producer_avg,
+      producer_var,
       producer_n);
 
-  return WelfordResult(producer_var, producer_avg, producer_n);
+  return WelfordResult(producer_avg, producer_var, producer_n);
 }
 
 TensorView* TensorView::cache_before() {

@@ -324,28 +324,28 @@ ReductionOp::ReductionOp(
 }
 
 WelfordOp::WelfordOp(
-    Val* out_var,
     Val* out_avg,
+    Val* out_var,
     Val* out_N,
-    Val* init_var,
     Val* init_avg,
+    Val* init_var,
     Val* init_N,
-    Val* in_var,
     Val* in_avg,
+    Val* in_var,
     Val* in_N)
     : Expr(ExprType::WelfordOp),
-      out_var_(out_var),
       out_avg_(out_avg),
+      out_var_(out_var),
       out_N_(out_N),
-      init_var_(init_var),
       init_avg_(init_avg),
+      init_var_(init_var),
       init_N_(init_N),
-      in_var_(in_var),
       in_avg_(in_avg),
+      in_var_(in_var),
       in_N_(in_N) {
   // Check output type
-  TORCH_INTERNAL_ASSERT(out_var->getValType().value() == ValType::TensorView);
   TORCH_INTERNAL_ASSERT(out_avg->getValType().value() == ValType::TensorView);
+  TORCH_INTERNAL_ASSERT(out_var->getValType().value() == ValType::TensorView);
   TORCH_INTERNAL_ASSERT(out_N->getValType().value() == ValType::TensorView);
 
   // check initial value
@@ -355,17 +355,17 @@ WelfordOp::WelfordOp(
     // initial value with a count of 1 is un-common enough that I'll push
     // the responsibility of creating all-zero var tensors to the user
     TORCH_INTERNAL_ASSERT(
-        init_var && init_var->getValType().value() == ValType::TensorView);
-    TORCH_INTERNAL_ASSERT(
         init_avg && init_avg->getValType().value() == ValType::TensorView);
+    TORCH_INTERNAL_ASSERT(
+        init_var && init_var->getValType().value() == ValType::TensorView);
   }
 
+  TORCH_INTERNAL_ASSERT(
+      in_avg && in_avg->getValType().value() == ValType::TensorView);
   // check input
   TORCH_INTERNAL_ASSERT(
       in_N->getValType().value() == ValType::Scalar ||
       in_N->getValType().value() == ValType::TensorView);
-  TORCH_INTERNAL_ASSERT(
-      in_avg && in_avg->getValType().value() == ValType::TensorView);
   if (!in_N->isOneInt()) {
     // when input is only one value, only the value is required through avg
     // input the var part is implicitly 0 and codegen will handle that.
@@ -377,11 +377,11 @@ WelfordOp::WelfordOp(
   addOutput(out_var);
   addOutput(out_N);
 
+  addInput(in_avg);
   // Conditionally adding this input?
   if (!in_N->isOneInt()) {
     addInput(in_var);
   }
-  addInput(in_avg);
   addInput(in_N);
 
   name_ = FusionGuard::getCurFusion()->registerExpr(this);
@@ -389,14 +389,14 @@ WelfordOp::WelfordOp(
 
 WelfordOp::WelfordOp(const WelfordOp* src, IrCloner* ir_cloner)
     : Expr(src, ir_cloner),
-      out_var_(ir_cloner->clone(src->out_var_)),
       out_avg_(ir_cloner->clone(src->out_avg_)),
+      out_var_(ir_cloner->clone(src->out_var_)),
       out_N_(ir_cloner->clone(src->out_N_)),
-      init_var_(src->init_var_ ? ir_cloner->clone(src->init_var_) : nullptr),
       init_avg_(src->init_avg_ ? ir_cloner->clone(src->init_avg_) : nullptr),
+      init_var_(src->init_var_ ? ir_cloner->clone(src->init_var_) : nullptr),
       init_N_(ir_cloner->clone(src->init_N_)),
-      in_var_(src->in_var_ ? ir_cloner->clone(src->in_var_) : nullptr),
       in_avg_(ir_cloner->clone(src->in_avg_)),
+      in_var_(src->in_var_ ? ir_cloner->clone(src->in_var_) : nullptr),
       in_N_(ir_cloner->clone(src->in_N_)) {}
 
 namespace {
@@ -410,11 +410,11 @@ bool WelfordOp::sameAs(const Statement* other) const {
     return true;
   }
   if (auto other_wop = dynamic_cast<const WelfordOp*>(other)) {
-    return sameOptionalVal(in_var_, other_wop->in_var_) &&
-        in_avg_->sameAs(other_wop->in_avg_) &&
+    return in_avg_->sameAs(other_wop->in_avg_) &&
+        sameOptionalVal(in_var_, other_wop->in_var_) &&
         in_N_->sameAs(other_wop->in_N_) &&
-        sameOptionalVal(init_var_, other_wop->init_var_) &&
         sameOptionalVal(init_avg_, other_wop->init_avg_) &&
+        sameOptionalVal(init_var_, other_wop->init_var_) &&
         init_N_->sameAs(other_wop->init_N_);
   }
   return false;

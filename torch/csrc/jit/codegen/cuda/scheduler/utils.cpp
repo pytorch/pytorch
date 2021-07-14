@@ -72,11 +72,11 @@ TensorView* rfactorHelper(TensorView* red_tv, const std::vector<int>& axes) {
     return red_tv->rFactor(axes);
   }
   auto welford = red_tv->definition()->as<WelfordOp>();
-  auto w_var = welford->outVar()->as<TensorView>();
   auto w_avg = welford->outAvg()->as<TensorView>();
+  auto w_var = welford->outVar()->as<TensorView>();
   auto w_n = welford->outN()->as<TensorView>();
 
-  WelfordResult rtvs = red_tv->rFactor(axes, w_var, w_avg, w_n);
+  WelfordResult rtvs = red_tv->rFactor(axes, w_avg, w_var, w_n);
 
   // TODO: this can be more generic, using avg because
   //      WelfordOp::out() returns the avg

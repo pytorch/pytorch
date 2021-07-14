@@ -167,14 +167,14 @@ class TORCH_CUDA_CU_API ReductionOp : public Expr {
 class TORCH_CUDA_CU_API WelfordOp : public Expr {
  public:
   WelfordOp(
-      Val* out_var,
       Val* out_avg,
+      Val* out_var,
       Val* out_N,
-      Val* init_var,
       Val* init_avg,
+      Val* init_var,
       Val* init_N,
-      Val* in_var,
       Val* in_avg,
+      Val* in_var,
       Val* in_N);
 
   WelfordOp(const WelfordOp* src, IrCloner* ir_cloner);
@@ -195,36 +195,36 @@ class TORCH_CUDA_CU_API WelfordOp : public Expr {
 
   // Welford Accessors
   // TODO clean up
-  Val* outVar() const {
-    return out_var_;
-  }
-
   Val* outAvg() const {
     return out_avg_;
+  }
+
+  Val* outVar() const {
+    return out_var_;
   }
 
   Val* outN() const {
     return out_N_;
   }
 
-  Val* inVar() const {
-    return in_var_;
-  }
-
   Val* inAvg() const {
     return in_avg_;
+  }
+
+  Val* inVar() const {
+    return in_var_;
   }
 
   Val* inN() const {
     return in_N_;
   }
 
-  Val* initVar() const {
-    return init_var_;
-  }
-
   Val* initAvg() const {
     return init_avg_;
+  }
+
+  Val* initVar() const {
+    return init_var_;
   }
 
   Val* initN() const {
@@ -240,14 +240,14 @@ class TORCH_CUDA_CU_API WelfordOp : public Expr {
   }
 
  private:
-  Val* const out_var_;
   Val* const out_avg_;
+  Val* const out_var_;
   Val* const out_N_;
-  Val* const init_var_;
   Val* const init_avg_;
+  Val* const init_var_;
   Val* const init_N_;
-  Val* const in_var_;
   Val* const in_avg_;
+  Val* const in_var_;
   Val* const in_N_;
 };
 

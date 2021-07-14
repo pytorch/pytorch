@@ -213,45 +213,45 @@ struct SubstituteInExpr : public OptInDispatch {
   }
 
   void handle(WelfordOp* welford_expr) final {
-    auto out_var = reference_->sameAs(welford_expr->outVar())
-        ? substitute_->as<TensorView>()
-        : welford_expr->outVar();
     auto out_avg = reference_->sameAs(welford_expr->outAvg())
         ? substitute_->as<TensorView>()
         : welford_expr->outAvg();
+    auto out_var = reference_->sameAs(welford_expr->outVar())
+        ? substitute_->as<TensorView>()
+        : welford_expr->outVar();
     auto out_N = reference_->sameAs(welford_expr->outN())
         ? substitute_->as<TensorView>()
         : welford_expr->outN();
+    auto in_avg = reference_->sameAs(welford_expr->inAvg())
+        ? substitute_->as<TensorView>()
+        : welford_expr->inAvg();
     auto in_var =
         welford_expr->inVar() && reference_->sameAs(welford_expr->inVar())
         ? substitute_->as<TensorView>()
         : welford_expr->inVar();
-    auto in_avg = reference_->sameAs(welford_expr->inAvg())
-        ? substitute_->as<TensorView>()
-        : welford_expr->inAvg();
     auto in_N = reference_->sameAs(welford_expr->inN()) ? substitute_
                                                         : welford_expr->inN();
-    auto init_var =
-        welford_expr->initVar() && reference_->sameAs(welford_expr->initVar())
-        ? substitute_->as<TensorView>()
-        : welford_expr->initVar();
     auto init_avg =
         welford_expr->initAvg() && reference_->sameAs(welford_expr->initAvg())
         ? substitute_->as<TensorView>()
         : welford_expr->initAvg();
+    auto init_var =
+        welford_expr->initVar() && reference_->sameAs(welford_expr->initVar())
+        ? substitute_->as<TensorView>()
+        : welford_expr->initVar();
     auto init_N =
         welford_expr->initN() && reference_->sameAs(welford_expr->initN())
         ? substitute_
         : welford_expr->initN();
     expr_ = new WelfordOp(
-        out_var,
         out_avg,
+        out_var,
         out_N,
-        init_var,
         init_avg,
+        init_var,
         init_N,
-        in_var,
         in_avg,
+        in_var,
         in_N);
   }
 

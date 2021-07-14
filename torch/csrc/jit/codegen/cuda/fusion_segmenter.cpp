@@ -1854,8 +1854,8 @@ void TranslateApplicableWelford::translateSingleWelford(WelfordOp* welford) {
 
   // Grab the inputs and outputs of the welford
   auto in_val = welford->in()->as<TensorView>();
-  auto out_var = welford->outVar()->as<TensorView>();
   auto out_avg = welford->outAvg()->as<TensorView>();
+  auto out_var = welford->outVar()->as<TensorView>();
   auto out_N = welford->outN()->as<TensorView>();
 
   fusion->removeExpr(welford);

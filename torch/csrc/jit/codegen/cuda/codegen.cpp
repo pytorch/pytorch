@@ -699,16 +699,16 @@ class CudaKernelGenerator : private kir::IrVisitor {
     if (!has_block_reduce && !has_grid_reduce) {
       indent() << "welfordCombine ("
                << "\n";
-      indent() << " " << gen(out_var) << ",\n";
       indent() << " " << gen(out_avg) << ",\n";
+      indent() << " " << gen(out_var) << ",\n";
       indent() << " " << gen(out_N) << ",\n";
+      indent() << " " << gen(in_avg) << ",\n";
       if (in_var) {
         indent() << " " << gen(in_var) << ",\n";
       } else {
         indent() << " (" << in_avg->dtype() << ") 0"
                  << ",\n";
       }
-      indent() << " " << gen(in_avg) << ",\n";
       indent() << " (" << out_N->dtype() << ")" << gen(in_N) << ");\n";
       return;
     }
@@ -724,9 +724,9 @@ class CudaKernelGenerator : private kir::IrVisitor {
       if (has_grid_reduce) {
         // allocate block result
         indent() << data_type << " "
-                 << "block_result_var = " << gen(node->initVar()) << ";\n";
-        indent() << data_type << " "
                  << "block_result_avg = " << gen(node->initAvg()) << ";\n";
+        indent() << data_type << " "
+                 << "block_result_var = " << gen(node->initVar()) << ";\n";
         indent() << DataType::Int << " "
                  << "block_result_n = " << gen(node->initN()) << ";\n";
       }
@@ -734,31 +734,31 @@ class CudaKernelGenerator : private kir::IrVisitor {
                << (tidy ? "true" : "false") << ", " << (tidz ? "true" : "false")
                << ">(\n";
       if (has_grid_reduce) {
-        indent() << kTab << "block_result_var"
+        indent() << kTab << "block_result_avg"
                  << ",\n"
-                 << kTab << "block_result_avg"
+                 << kTab << "block_result_var"
                  << ",\n"
                  << kTab << "block_result_n"
                  << ",\n";
       } else {
-        indent() << kTab << gen(node->outVar()) << ",\n";
         indent() << kTab << gen(node->outAvg()) << ",\n";
+        indent() << kTab << gen(node->outVar()) << ",\n";
         indent() << kTab << gen(node->outN()) << ",\n";
       }
+      indent() << " " << gen(in_avg) << ",\n";
       if (in_var) {
         indent() << " " << gen(in_var) << ",\n";
       } else {
         indent() << " (" << in_avg->dtype() << ") 0"
                  << ",\n";
       }
-      indent() << " " << gen(in_avg) << ",\n";
       indent() << out_N->dtype() << "(" << gen(in_N) << "),\n";
       indent() << kTab << "threadIdx,\n";
       indent() << kTab << "blockDim,\n";
       indent() << kTab << "reinterpret_cast<" << data_type
-               << "*>(shared_mem_var),\n";
-      indent() << kTab << "reinterpret_cast<" << data_type
                << "*>(shared_mem_avg),\n";
+      indent() << kTab << "reinterpret_cast<" << data_type
+               << "*>(shared_mem_var),\n";
       indent() << kTab << "reinterpret_cast<" << DataType::Int
                << "*>(shared_mem_n),\n";
       TORCH_INTERNAL_ASSERT(node->predicate() != nullptr);
@@ -866,8 +866,8 @@ class CudaKernelGenerator : private kir::IrVisitor {
     TORCH_INTERNAL_ASSERT(
         node->sync_buffer()->buffer()->isA<kir::TensorView>());
 
-    const auto var_buffer = node->var_buffer()->buffer()->as<kir::TensorView>();
     const auto avg_buffer = node->avg_buffer()->buffer()->as<kir::TensorView>();
+    const auto var_buffer = node->var_buffer()->buffer()->as<kir::TensorView>();
     const auto n_buffer = node->N_buffer()->buffer()->as<kir::TensorView>();
     const auto sync_buffer =
         node->sync_buffer()->buffer()->as<kir::TensorView>();
@@ -879,31 +879,31 @@ class CudaKernelGenerator : private kir::IrVisitor {
     // with tidx/y/z being true do not participate in the grid reduction.
     indent() << kir::GridWelford::getPredicateFlagName(out->view()) << " = "
              << "welford::gridWelford<" << flags_str << ">(\n";
-    indent() << kTab << gen(wop->outVar()) << ",\n"
-             << kTab << gen(wop->outAvg()) << ",\n"
+    indent() << kTab << gen(wop->outAvg()) << ",\n"
+             << kTab << gen(wop->outVar()) << ",\n"
              << kTab << gen(wop->outN()) << ",\n";
     if (domain->hasBlockReduction()) {
-      indent() << kTab << "block_result_var,\n"
-               << kTab << "block_result_avg,\n"
+      indent() << kTab << "block_result_avg,\n"
+               << kTab << "block_result_var,\n"
                << kTab << "block_result_n,\n";
     } else {
+      indent() << kTab << gen(wop->inAvg()) << ",\n";
       if (wop->inVar() == nullptr) {
         indent() << kTab << "(" << data_type << ") 0,\n";
       } else {
         indent() << kTab << gen(wop->inVar()) << ",\n";
       }
-      indent() << kTab << gen(wop->inAvg()) << ",\n";
       indent() << kTab << "(" << wop->outN()->dtype() << ")" << gen(wop->inN())
                << ",\n";
     }
-    indent() << kTab << "&" << varName(var_buffer) << "[0],\n";
     indent() << kTab << "&" << varName(avg_buffer) << "[0],\n";
+    indent() << kTab << "&" << varName(var_buffer) << "[0],\n";
     indent() << kTab << "&" << varName(n_buffer) << "[0],\n";
     indent() << kTab << varName(sync_buffer) << ",\n";
     indent() << kTab << "reinterpret_cast<" << data_type
-             << "*>(shared_mem_var),\n";
-    indent() << kTab << "reinterpret_cast<" << data_type
              << "*>(shared_mem_avg),\n";
+    indent() << kTab << "reinterpret_cast<" << data_type
+             << "*>(shared_mem_var),\n";
     indent() << kTab << "reinterpret_cast<" << wop->outN()->dtype()
              << "*>(shared_mem_n),\n";
     TORCH_INTERNAL_ASSERT(

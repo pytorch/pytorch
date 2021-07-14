@@ -56,13 +56,13 @@ TORCH_CUDA_CU_API TensorView* reductionOp(
 //! a single welford op in ternsorview
 class TORCH_CUDA_CU_API WelfordResult {
  public:
-  TensorView* var_sum;
   TensorView* avg;
+  TensorView* var_sum;
   TensorView* n;
 
   explicit WelfordResult(
-      TensorView* in_var_sum,
       TensorView* in_avg,
+      TensorView* in_var_sum,
       TensorView* in_n);
 
   WelfordResult rFactor(const std::vector<int>& axes);
@@ -74,8 +74,8 @@ class TORCH_CUDA_CU_API WelfordResult {
 TORCH_CUDA_CU_API WelfordResult Welford(
     TensorView* tv,
     const std::vector<int>& axes,
-    TensorView* init_var = nullptr,
     TensorView* init_avg = nullptr,
+    TensorView* init_var = nullptr,
     Int* init_N = new Int(0));
 
 // UNARY OPERATIONS

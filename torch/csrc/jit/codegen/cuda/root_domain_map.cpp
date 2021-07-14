@@ -287,8 +287,8 @@ void UnmappableReductionDomains::handle(ReductionOp* op) {
 
 void UnmappableReductionDomains::handle(WelfordOp* op) {
   // Builds a map from reduction domains to consumer domains.
-  handleReductionOutput(op->outVar()->as<TensorView>());
   handleReductionOutput(op->outAvg()->as<TensorView>());
+  handleReductionOutput(op->outVar()->as<TensorView>());
   handleReductionOutput(op->outN()->as<TensorView>());
 }
 

@@ -5,11 +5,11 @@
 // two welford results
 template <typename T, typename TN>
 __inline__ __device__ void welfordCombine(
-    T& a_M2,
     T& a_avg,
+    T& a_M2,
     TN& a_N,
-    const T& b_M2,
     const T& b_avg,
+    const T& b_M2,
     TN b_N) {
   if (b_N == 0) {
     return;
@@ -32,16 +32,16 @@ template <
     typename _dim3ti,
     typename _dim3bd>
 __inline__ __device__ void blockWelford(
-    T& out_M2,
     T& out_avg,
+    T& out_M2,
     TN& out_N,
-    const T& in_M2,
     const T& in_avg,
+    const T& in_M2,
     const TN& in_N,
     const _dim3ti& thread_idx,
     const _dim3bd& block_dim,
-    T* shared_mem_M2,
     T* shared_mem_avg,
+    T* shared_mem_M2,
     TN* shared_mem_N,
     bool read_write_pred,
     T init_val) {
@@ -80,12 +80,12 @@ __inline__ __device__ void blockWelford(
   }
   assert(reduction_stride != 0);
   if (read_write_pred) {
-    shared_mem_M2[linear_tid] = in_M2;
     shared_mem_avg[linear_tid] = in_avg;
+    shared_mem_M2[linear_tid] = in_M2;
     shared_mem_N[linear_tid] = in_N;
   } else {
-    shared_mem_M2[linear_tid] = init_val;
     shared_mem_avg[linear_tid] = init_val;
+    shared_mem_M2[linear_tid] = init_val;
     shared_mem_N[linear_tid] = 0;
   }
   block_sync::sync();
@@ -94,11 +94,11 @@ __inline__ __device__ void blockWelford(
   if (reduction_tid < np2) {
     if (reduction_tid + np2 < reduction_size) {
       welfordCombine(
-          shared_mem_M2[linear_tid],
           shared_mem_avg[linear_tid],
+          shared_mem_M2[linear_tid],
           shared_mem_N[linear_tid],
-          shared_mem_M2[linear_tid + np2 * reduction_stride],
           shared_mem_avg[linear_tid + np2 * reduction_stride],
+          shared_mem_M2[linear_tid + np2 * reduction_stride],
           shared_mem_N[linear_tid + np2 * reduction_stride]);
     }
   }
@@ -108,37 +108,37 @@ __inline__ __device__ void blockWelford(
   for (int factor = np2 / 2; factor > 1; factor >>= 1) {
     if (reduction_tid < factor) {
       welfordCombine(
-          shared_mem_M2[linear_tid],
           shared_mem_avg[linear_tid],
+          shared_mem_M2[linear_tid],
           shared_mem_N[linear_tid],
-          shared_mem_M2[linear_tid + factor * reduction_stride],
           shared_mem_avg[linear_tid + factor * reduction_stride],
+          shared_mem_M2[linear_tid + factor * reduction_stride],
           shared_mem_N[linear_tid + factor * reduction_stride]);
     }
     block_sync::sync();
   }
   if (should_write && read_write_pred) {
-    T res_M2 = out_M2;
     T res_avg = out_avg;
+    T res_M2 = out_M2;
     TN res_N = out_N;
     welfordCombine(
-        res_M2,
         res_avg,
+        res_M2,
         res_N,
-        shared_mem_M2[linear_tid],
         shared_mem_avg[linear_tid],
+        shared_mem_M2[linear_tid],
         shared_mem_N[linear_tid]);
     if (reduction_size > 1) {
       welfordCombine(
-          res_M2,
           res_avg,
+          res_M2,
           res_N,
-          shared_mem_M2[linear_tid + reduction_stride],
           shared_mem_avg[linear_tid + reduction_stride],
+          shared_mem_M2[linear_tid + reduction_stride],
           shared_mem_N[linear_tid + reduction_stride]);
     }
-    out_M2 = res_M2;
     out_avg = res_avg;
+    out_M2 = res_M2;
     out_N = res_N;
   }
   block_sync::sync();
@@ -267,15 +267,15 @@ __host__ __device__ int offset_in_reduction_block(
 
 template <bool X_THREAD, bool Y_THREAD, bool Z_THREAD, typename T, typename TN>
 __device__ void gridWelfordLastBlock(
-    T& out_M2,
     T& out_avg,
+    T& out_M2,
     TN& out_N,
-    const T* in_M2,
     const T* in_avg,
+    const T* in_M2,
     const TN* in_N,
     const nvfuser_index_t in_size,
-    T* shared_buf_M2,
     T* shared_buf_avg,
+    T* shared_buf_M2,
     TN* shared_buf_N,
     bool read_write_pred,
     T init_val) {
@@ -284,16 +284,16 @@ __device__ void gridWelfordLastBlock(
   const int rblock_size =
       size_of_reduction_block<X_THREAD, Y_THREAD, Z_THREAD>(blockDim);
 
-  T inp_M2 = init_val;
   T inp_avg = init_val;
+  T inp_M2 = init_val;
   TN inp_N = 0;
   if (tid < in_size) {
-    inp_M2 = in_M2[tid];
     inp_avg = in_avg[tid];
+    inp_M2 = in_M2[tid];
     inp_N = in_N[tid];
   }
   for (nvfuser_index_t i = tid + block_size; i < in_size; i += block_size) {
-    welfordCombine(inp_M2, inp_avg, inp_N, in_M2[i], in_avg[i], in_N[i]);
+    welfordCombine(inp_avg, inp_M2, inp_N, in_avg[i], in_M2[i], in_N[i]);
   }
   const auto should_write = (X_THREAD || threadIdx.x == 0) &&
       (Y_THREAD || threadIdx.y == 0) && (Z_THREAD || threadIdx.z == 0);
@@ -303,27 +303,27 @@ __device__ void gridWelfordLastBlock(
   if (rem_size > 1) {
     const int rblock_offset = tid % rblock_size;
     const int rblock_idx = tid / rblock_size;
-    T inp_M2_tmp = init_val;
     T inp_avg_tmp = init_val;
+    T inp_M2_tmp = init_val;
     TN inp_N_tmp = 0;
     blockWelford<false, true, false>(
-        inp_M2_tmp,
         inp_avg_tmp,
+        inp_M2_tmp,
         inp_N_tmp,
-        inp_M2,
         inp_avg,
+        inp_M2,
         inp_N,
         dim3{(unsigned)rblock_offset, (unsigned)rblock_idx, 0},
         dim3{(unsigned)rblock_size, (unsigned)rem_size},
-        shared_buf_M2,
         shared_buf_avg,
+        shared_buf_M2,
         shared_buf_N,
         true,
         init_val);
     block_sync::sync();
     if (tid < rblock_size) {
-      shared_buf_M2[tid] = inp_M2_tmp;
       shared_buf_avg[tid] = inp_avg_tmp;
+      shared_buf_M2[tid] = inp_M2_tmp;
       shared_buf_N[tid] = inp_N_tmp;
     }
     block_sync::sync();
@@ -331,14 +331,14 @@ __device__ void gridWelfordLastBlock(
       nvfuser_index_t offset_write =
           offset_in_reduction_block<X_THREAD, Y_THREAD, Z_THREAD>(
               threadIdx, blockDim);
-      inp_M2 = shared_buf_M2[offset_write];
       inp_avg = shared_buf_avg[offset_write];
+      inp_M2 = shared_buf_M2[offset_write];
       inp_N = shared_buf_N[offset_write];
     }
   }
 
   if (should_write && read_write_pred) {
-    welfordCombine(out_M2, out_avg, out_N, inp_M2, inp_avg, inp_N);
+    welfordCombine(out_avg, out_M2, out_N, inp_avg, inp_M2, inp_N);
   }
 }
 
@@ -353,18 +353,18 @@ template <
     typename T,
     typename TN>
 __device__ bool gridWelford(
-    T& out_M2,
     T& out_avg,
+    T& out_M2,
     TN& out_N,
-    const T& inp_M2,
     const T& inp_avg,
+    const T& inp_M2,
     const TN& inp_N,
-    volatile T* work_buf_M2,
     volatile T* work_buf_avg,
+    volatile T* work_buf_M2,
     volatile TN* work_buf_N,
     Tensor<int64_t, 1> sync_flags,
-    T* shared_buf_M2,
     T* shared_buf_avg,
+    T* shared_buf_M2,
     TN* shared_buf_N,
     bool read_write_pred,
     T init_val) {
@@ -381,8 +381,8 @@ __device__ bool gridWelford(
   const auto rblock_size =
       size_of_reduction_block<X_THREAD, Y_THREAD, Z_THREAD>(blockDim);
 
-  work_buf_M2 += seg_idx * seg_size * rblock_size;
   work_buf_avg += seg_idx * seg_size * rblock_size;
+  work_buf_M2 += seg_idx * seg_size * rblock_size;
   work_buf_N += seg_idx * seg_size * rblock_size;
 
   if ((X_THREAD || threadIdx.x == 0) && (Y_THREAD || threadIdx.y == 0) &&
@@ -394,12 +394,12 @@ __device__ bool gridWelford(
             threadIdx, blockDim);
     auto work_buf_offset = rblock_size * rblock_offset + thread_offset;
     if (read_write_pred) {
-      work_buf_M2[work_buf_offset] = inp_M2;
       work_buf_avg[work_buf_offset] = inp_avg;
+      work_buf_M2[work_buf_offset] = inp_M2;
       work_buf_N[work_buf_offset] = inp_N;
     } else {
-      work_buf_M2[work_buf_offset] = init_val;
       work_buf_avg[work_buf_offset] = init_val;
+      work_buf_M2[work_buf_offset] = init_val;
       work_buf_N[work_buf_offset] = 0;
     }
   }
@@ -416,15 +416,15 @@ __device__ bool gridWelford(
   if (last_block) {
     // final reduction
     gridWelfordLastBlock<X_THREAD, Y_THREAD, Z_THREAD>(
-        out_M2,
         out_avg,
+        out_M2,
         out_N,
-        (T*)work_buf_M2,
         (T*)work_buf_avg,
+        (T*)work_buf_M2,
         (TN*)work_buf_N,
         seg_size * rblock_size,
-        shared_buf_M2,
         shared_buf_avg,
+        shared_buf_M2,
         shared_buf_N,
         read_write_pred,
         init_val);

@@ -32,6 +32,7 @@ class ValidateParallelType : public IterVisitor {
 
  private:
   using IterVisitor::handle;
+  // Parallelize id1 and id0 consistently if one is serial and the other isn't
   void convertIterDomain(IterDomain* id0, IterDomain* id1) {
     const auto ptype0 = id0->getParallelType();
     const auto ptype1 = id1->getParallelType();
@@ -62,14 +63,14 @@ class ValidateParallelType : public IterVisitor {
   }
 
   void handle(WelfordOp* wop) override {
-    auto out_var = wop->outVar()->as<TensorView>();
     auto out_avg = wop->outAvg()->as<TensorView>();
+    auto out_var = wop->outVar()->as<TensorView>();
     auto out_n = wop->outN()->as<TensorView>();
-    TORCH_INTERNAL_ASSERT(out_var->nDims() == out_avg->nDims());
-    TORCH_INTERNAL_ASSERT(out_var->nDims() == out_n->nDims());
-    for (size_t i = 0; i < out_var->nDims(); i++) {
+    TORCH_INTERNAL_ASSERT(out_avg->nDims() == out_var->nDims());
+    TORCH_INTERNAL_ASSERT(out_avg->nDims() == out_n->nDims());
+    for (size_t i = 0; i < out_avg->nDims(); i++) {
       // TODO: can be cleaner.
-      convertIterDomain(out_var->axis(i), out_avg->axis(i));
+      convertIterDomain(out_avg->axis(i), out_var->axis(i));
       convertIterDomain(out_avg->axis(i), out_n->axis(i));
       convertIterDomain(out_n->axis(i), out_var->axis(i));
     }

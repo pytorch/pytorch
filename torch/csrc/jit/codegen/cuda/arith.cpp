@@ -737,8 +737,8 @@ TensorView* broadcast(
 WelfordResult Welford(
     TensorView* tv,
     const std::vector<int>& axes,
-    TensorView* init_var,
     TensorView* init_avg,
+    TensorView* init_var,
     Int* init_N) {
   TORCH_CHECK(
       TensorDomain::sameAs(tv->getRootDomain(), tv->domain()->domain()),
@@ -750,26 +750,25 @@ WelfordResult Welford(
   // Initial values for welford op are tensors, so their dims have to match the
   // output dim,
   // i.e. original_dims - dims_to_be_reduced
-  Val* init_var_val = nullptr;
   Val* init_avg_val = nullptr;
-
+  Val* init_var_val = nullptr;
   if (!init_N->isZeroInt()) {
     TORCH_CHECK(
-        init_avg != nullptr && init_N != nullptr && init_var != nullptr,
+        init_avg != nullptr && init_var != nullptr && init_N != nullptr,
         "welford op: all init values need to be provided");
-    TORCH_CHECK(
-        (axes.size() + init_var->getRootDomain().size()) ==
-            tv->getRootDomain().size(),
-        "welford op: initial tensor mismatch");
     TORCH_CHECK(
         (axes.size() + init_avg->getRootDomain().size()) ==
             tv->getRootDomain().size(),
         "welford op: initial tensor mismatch");
-    init_var_val = init_var;
+    TORCH_CHECK(
+        (axes.size() + init_var->getRootDomain().size()) ==
+            tv->getRootDomain().size(),
+        "welford op: initial tensor mismatch");
     init_avg_val = init_avg;
+    init_var_val = init_var;
   } else {
-    init_var_val = new Double(0);
     init_avg_val = new Double(0);
+    init_var_val = new Double(0);
   }
 
   // Check and collect reduction axes
@@ -790,36 +789,36 @@ WelfordResult Welford(
   }
 
   // Create tensor outputs
-  TensorView* out_var = newForReduction(tv, uint_axes);
   TensorView* out_avg = newForReduction(tv, uint_axes);
+  TensorView* out_var = newForReduction(tv, uint_axes);
   TensorView* out_N = newForReduction(tv, uint_axes, DataType::Int);
 
   new WelfordOp(
-      out_var,
       out_avg,
+      out_var,
       out_N, /*out var/avg/count */
-      init_var_val,
       init_avg_val,
+      init_var_val,
       init_N, /*init var/avg/count */
-      nullptr,
       tv,
+      nullptr,
       new Int(1)); /*in var/avg/count */
 
-  return WelfordResult(out_var, out_avg, out_N);
+  return WelfordResult(out_avg, out_var, out_N);
 }
 
 WelfordResult::WelfordResult(
-    TensorView* in_var_sum,
     TensorView* in_avg,
+    TensorView* in_var_sum,
     TensorView* in_n)
-    : var_sum(in_var_sum), avg(in_avg), n(in_n) {
-  TORCH_INTERNAL_ASSERT(var_sum->definition()->sameAs(avg->definition()));
-  TORCH_INTERNAL_ASSERT(var_sum->definition()->sameAs(n->definition()));
+    : avg(in_avg), var_sum(in_var_sum), n(in_n) {
+  TORCH_INTERNAL_ASSERT(avg->definition()->sameAs(var_sum->definition()));
+  TORCH_INTERNAL_ASSERT(avg->definition()->sameAs(n->definition()));
 }
 
 WelfordResult WelfordResult::rFactor(const std::vector<int>& axes) {
-  auto o_tv = var_sum->definition()->as<WelfordOp>()->out()->as<TensorView>();
-  return o_tv->rFactor(axes, var_sum, avg, n);
+  auto o_tv = avg->definition()->as<WelfordOp>()->out()->as<TensorView>();
+  return o_tv->rFactor(axes, avg, var_sum, n);
 }
 
 TensorView* transpose(
