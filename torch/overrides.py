@@ -232,6 +232,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._python_dispatch.__get__,
         Tensor._conj,
         Tensor._conj_physical,
+        Tensor._neg_view,
     }
 
 
@@ -384,6 +385,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.conj: lambda input, out=None: -1,
         torch.conj_physical: lambda input, out=None: -1,
         torch.resolve_conj: lambda input, out=None: -1,
+        torch.resolve_neg: lambda input, out=None: -1,
         torch.constant_pad_nd: lambda input, pad, value=0: -1,
         torch.conv1d: lambda input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1: -1,
         torch.conv2d: lambda input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1: -1,
@@ -539,6 +541,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.linalg.inv_ex: lambda input, check_errors=False, out=None: -1,
         torch.is_complex: lambda input: -1,
         torch.is_conj: lambda input: -1,
+        torch.is_neg: lambda input: -1,
         torch.is_distributed: lambda input: -1,
         torch.is_inference: lambda input: -1,
         torch.is_floating_point: lambda input: -1,
@@ -836,7 +839,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.real: lambda input, out=None: -1,
         torch.vdot: lambda input, other, out=None: -1,
         torch.view_as_real: lambda input: -1,
-        torch._view_as_real_physical: lambda input: -1,
         torch.view_as_complex: lambda input: -1,
         torch.reciprocal: lambda input, out=None: -1,
         torch.relu: lambda input, inplace=False: -1,

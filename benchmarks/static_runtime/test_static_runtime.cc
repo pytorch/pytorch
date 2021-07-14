@@ -178,12 +178,27 @@ static Node* getNodeWithKind(const torch::jit::StaticModule& smodule, const stri
   return nullptr;
 }
 
+bool testCanEnableStaticRuntime(const std::string& jit_script) {
+  script::Module module("module");
+  module.define(jit_script);
+
+  Method method = module.get_method("forward");
+  auto graph = module.get_method("forward").graph();
+
+  // here we do not freeze graph
+  return torch::jit::canEnableStaticRuntime(graph);
+}
 } // namespace
 
 TEST(StaticRuntime, InPlace) {
   EXPECT_TRUE(testHasInplaceOp(reshape_inplace_script));
   EXPECT_TRUE(testHasInplaceOp(sigmoid_inplace_script));
   EXPECT_FALSE(testHasInplaceOp(sigmoid_out_script));
+}
+
+TEST(StaticRuntime, CanEnableStaticRuntime) {
+  EXPECT_TRUE(testCanEnableStaticRuntime(reshape_inplace_script));
+  EXPECT_FALSE(testCanEnableStaticRuntime(if_script));
 }
 
 TEST(StaticRuntime, NestedOutput) {
