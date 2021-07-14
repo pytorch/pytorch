@@ -83,12 +83,12 @@ class ProgressMeter:
         if self.disable_progress_bar:
             return
 
-        # Once processed all items, clear the progress bar
+        # Once we've processed all items, clear the progress bar
         if self.num_processed == self.num_items - 1:
             self._write(self._clear_to_end)
             return
 
-        # NOP if already processed all items
+        # NOP if we've already processed all items
         if self.num_processed > self.num_items:
             return
 
