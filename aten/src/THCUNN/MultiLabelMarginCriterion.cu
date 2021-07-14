@@ -6,6 +6,8 @@
 #include <THC/THCNumerics.cuh>
 #include <c10/macros/Macros.h>
 
+#include <ATen/CUDAFunctions.h>
+
 #include <thrust/functional.h>
 
 #define MULTILABELMARGIN_THREADS 1024

@@ -29,6 +29,24 @@
 #include <type_traits>
 
 namespace at {
+namespace native {
+
+inline ScalarType get_dtype_from_self(
+    const Tensor& self,
+    optional<ScalarType> dtype,
+    bool promote_integers) {
+  if (dtype.has_value()) {
+    return dtype.value();
+  }
+  ScalarType src_type = self.scalar_type();
+  if (promote_integers && at::isIntegralType(src_type, /*includeBool=*/true)) {
+    return kLong;
+  }
+  return src_type;
+}
+
+} // namespace native
+
 namespace meta {
 
 ScalarType check_allany_and_get_output_dtype(
@@ -114,6 +132,13 @@ TORCH_META_FUNC(argmax)
 TORCH_META_FUNC(argmin)
 (const Tensor& self, c10::optional<int64_t> dim, bool keepdim) {
   check_argmax_argmin(*this, "argmin", self, dim, keepdim);
+}
+
+TORCH_META_FUNC2(sum, dim_IntList)
+(const Tensor& self, IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
+  ScalarType dtype = at::native::get_dtype_from_self(self, opt_dtype, true);
+  auto shape = get_reduction_shape(self, dim, keepdim);
+  set_output(shape, self.options().dtype(dtype));
 }
 
 } // namespace meta
@@ -875,38 +900,22 @@ inline ScalarType get_dtype_from_result(Tensor& result, optional<ScalarType> dty
   }
 }
 
-inline ScalarType get_dtype_from_self(const Tensor& self, optional<ScalarType> dtype,
-                            bool promote_integers) {
-  if (dtype.has_value()) {
-    return dtype.value();
-  }
-  ScalarType src_type = self.scalar_type();
-  if (promote_integers && at::isIntegralType(src_type, /*includeBool=*/true)) {
-    return kLong;
-  }
-  return src_type;
-}
-
-Tensor& sum_out(const Tensor& self, IntArrayRef dim,
-                       bool keepdim, optional<ScalarType> opt_dtype, Tensor& result) {
-  ScalarType dtype = get_dtype_from_result(result, opt_dtype);
-  auto iter = make_reduction("sum", result, self, dim, keepdim, dtype);
+TORCH_IMPL_FUNC(sum_out)
+(const Tensor& self,
+ IntArrayRef dim,
+ bool keepdim,
+ optional<ScalarType> opt_dtype,
+ const Tensor& result) {
+  auto iter = meta::make_reduction_from_out_ty(self, result, dim, keepdim, result.scalar_type());
   if (iter.numel() == 0) {
     result.zero_();
   } else {
     sum_stub(iter.device_type(), iter);
   }
-  return result;
 }
 
 Tensor sum(const Tensor &self, c10::optional<ScalarType> dtype) {
-  return at::native::sum(self, std::vector<int64_t>{}, false, dtype);
-}
-
-Tensor sum(const Tensor& self, IntArrayRef dim, bool keepdim, c10::optional<ScalarType> opt_dtype) {
-  ScalarType dtype = get_dtype_from_self(self, opt_dtype, true);
-  Tensor result = create_reduction_result(self, dim, keepdim, dtype);
-  return at::native::sum_out(self, dim, keepdim, dtype, result);
+  return at::sum(self, IntArrayRef{}, false, dtype);
 }
 
 Tensor sum(const Tensor& self, DimnameList dim, bool keepdim, c10::optional<ScalarType> dtype) {

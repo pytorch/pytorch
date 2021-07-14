@@ -1058,7 +1058,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::sum, aten_sum, [](Node* n) -> SROperator {
     }
     auto& output = p_node->Output(0).toTensor();
     fastResizeToZero(output);
-    at::native::sum_out(self, dim, keepdim, dtype, output);
+    at::cpu::sum_out(output, self, dim, keepdim, dtype);
   };
 });
 
