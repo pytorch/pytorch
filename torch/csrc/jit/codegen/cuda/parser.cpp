@@ -341,7 +341,6 @@ class IrParser {
                 {aten::reciprocal, UnaryOpType::Reciprocal},
                 {aten::relu, UnaryOpType::Relu},
                 {aten::sigmoid, UnaryOpType::Sigmoid},
-                {aten::gelu, UnaryOpType::Gelu},
             });
             auto operand = value_map[node->input()->unique()];
 
@@ -502,6 +501,28 @@ class IrParser {
             return true;
           },
           true);
+    }
+
+    {
+      auto ptr_op = getOperatorForLiteral(
+          "aten::gelu(Tensor self, bool approximate) -> Tensor");
+      registerParseRule(
+          ptr_op,
+          [](const Node* node,
+             std::unordered_map<size_t, CgValue>& value_map) -> void {
+            auto self = value_map[node->inputs()[0]->unique()];
+            auto approximate = constant_as<bool>(node->input(1));
+            TORCH_INTERNAL_ASSERT(
+                approximate.has_value(),
+                "The approximate (bool) parameter is required.");
+            const bool kApproximate = approximate.value();
+
+	    TORCH_INTERNAL_ASSERT(!kApproximate,
+			    "The Tanh Gelu approximation is not supported");
+
+            auto output = unaryOp(UnaryOpType::Gelu, self);
+            value_map.emplace(node->output()->unique(), output);
+          });
     }
   }
 

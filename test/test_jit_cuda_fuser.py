@@ -404,8 +404,7 @@ class TestCudaFuser(JitTestCase):
                       torch.reciprocal,
                       torch.relu,
                       torch.sigmoid,
-                      torch.tanh,
-                      torch.nn.functional.gelu]
+                      torch.tanh]
         for op in operations:
             self._unary_test_helper(op)
 
@@ -838,7 +837,7 @@ class TestCudaFuser(JitTestCase):
         grads = torch.randn([64, 128, 1024], dtype=dtype, device=device)
 
         def t(x: torch.Tensor):
-            o = torch.nn.functional.gelu(x)
+            o = torch.nn.functional.gelu(x, False)
             o = o * 1.0
             return o
 
