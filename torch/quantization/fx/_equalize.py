@@ -94,10 +94,10 @@ class _InputEqualizationObserver(nn.Module):
         """
         if self.equalization_scale.nelement() == 1 and self.equalization_scale == torch.tensor(1):
             warnings.warn(
-                "Must call calculate_equalization_scale before calling calculate_qparams. " +
-                "Returning default min and max input."
+                "Must call calculate_equalization_scale before calling calculate_scaled_minmax. " +
+                "Will not scale the next quantization observer."
             )
-            return torch.tensor([0]), torch.tensor([0])
+            return None, None
 
         # Calculate qparams for the scaled min/max inputs
         # Scale the input by the equalization scale located at the same column
@@ -379,6 +379,8 @@ def scale_input_observer(node: Node, modules: Dict[str, nn.Module]) -> None:
         return
 
     min_input_scaled, max_input_scaled = input_eq_obs.calculate_scaled_minmax()
+    if min_input_scaled is None and max_input_scaled is None:
+        return
     input_quant_obs.min_val = min_input_scaled
     input_quant_obs.max_val = max_input_scaled
 
