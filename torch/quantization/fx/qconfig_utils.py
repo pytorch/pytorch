@@ -33,7 +33,6 @@ def add_device_to_obs_ctr_in_qconfig(qconfig: QConfigAny, device='cpu'):
     else:
         return qconfig
 
-
 def get_flattened_qconfig_dict(qconfig_dict):
     """ flatten the global, object_type and module_name qconfig
     to the same qconfig_dict so that it can be used by

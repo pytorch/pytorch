@@ -10,6 +10,9 @@ from itertools import product
 import torch
 import torch.quantization as tq
 
+import torch.quantization.fx.utils
+import torch.quantization.fx.qconfig_utils
+
 from torch import nn
 from torch.ao.nn.sparse import quantized as ao_nn_sq
 from torch.ao.nn.sparse.quantized.utils import LinearBlockSparsePattern
