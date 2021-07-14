@@ -18,7 +18,7 @@ from .quantization_mappings import (
 )
 
 from .stubs import DeQuantStub, QuantWrapper
-from .qconfig import default_dynamic_qconfig, float16_dynamic_qconfig, float_qparams_weight_only_qconfig
+from .qconfig import add_device_to_obs_ctr_in_qconfig, default_dynamic_qconfig, float16_dynamic_qconfig, float_qparams_weight_only_qconfig
 
 def is_activation_post_process(module):
     return (isinstance(module, torch.quantization.ObserverBase) or
@@ -53,8 +53,7 @@ def _propagate_qconfig_helper(module, qconfig_dict, allow_list=None,
     torch.quantization.qconfig.assert_valid_qconfig(module_qconfig, module)
 
     # TODO refactor so these are imported
-    device = torch.quantization.fx.utils.assert_and_get_unique_device(module)
-    module_qconfig = torch.quantization.fx.qconfig_utils.add_device_to_obs_ctr_in_qconfig(module_qconfig, device)
+    module_qconfig = add_device_to_obs_ctr_in_qconfig(module_qconfig, module)
     module.qconfig = module_qconfig
 
     for name, child in module.named_children():

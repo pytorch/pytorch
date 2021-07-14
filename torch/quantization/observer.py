@@ -1180,9 +1180,9 @@ class PlaceholderObserver(ObserverBase):
     """
 
     def __init__(
-        self, dtype=torch.float32, custom_op_name="", compute_dtype=None, factory_kwargs=None,
+        self, dtype=torch.float32, custom_op_name="", compute_dtype=None, **kwargs,
     ) -> None:
-        super(PlaceholderObserver, self).__init__(dtype=dtype)
+        super(PlaceholderObserver, self).__init__(dtype=dtype, **kwargs)
         # dtype of input of the target operator, e.g. for dynamic quantization
         # ops, the dtype will be float32
         self.dtype = dtype
@@ -1243,8 +1243,8 @@ class NoopObserver(ObserverBase):
                         (Can be used in Graph Mode Passes for special case ops).
     """
 
-    def __init__(self, dtype=torch.float16, custom_op_name="", factory_kwargs=None) -> None:
-        super(NoopObserver, self).__init__(dtype=dtype, factory_kwargs=factory_kwargs)
+    def __init__(self, dtype=torch.float16, custom_op_name="", **kwargs) -> None:
+        super(NoopObserver, self).__init__(dtype=dtype, **kwargs)
         self.dtype = dtype
         self.custom_op = custom_op_name
 

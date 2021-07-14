@@ -11,7 +11,7 @@ from .fake_quantize import (FakeQuantize, default_fake_quant,
 import torch
 import torch.nn as nn
 
-from typing import Union, Optional
+from typing import Union, Optional, Any
 
 class QConfig(namedtuple('QConfig', ['activation', 'weight'])):
     """
@@ -138,3 +138,36 @@ def assert_valid_qconfig(qconfig: Optional[Union[QConfig, QConfigDynamic]],
         )
         assert not is_per_channel, \
             'Per channel weight observer is not supported yet for ConvTranspose{n}d.'
+
+QConfigAny = Union[QConfig, QConfigDynamic, None]
+
+# should probably be in qconfig_utils but get circular reference issues TODO
+def add_device_to_obs_ctr_in_qconfig(qconfig: QConfigAny, module: torch.nn.Module):
+    def assert_and_get_unique_device(module: torch.nn.Module) -> Any:
+        devices = {p.device for p in module.parameters()} | \
+            {p.device for p in module.buffers()}
+        assert len(devices) <= 1, (
+            "prepare only works with cpu or single-device CUDA modules, "
+            "but got devices {}".format(devices)
+        )
+        device = next(iter(devices)) if len(devices) > 0 else None
+        return device
+
+    device = None if module is None else assert_and_get_unique_device(module)
+    factory_kwargs = {'device': device}
+    if (device is None or qconfig is None or
+            qconfig.activation.__module__ != 'torch.quantization.observer' or
+            qconfig.weight.__module__ != 'torch.quantization.observer'):
+        return qconfig
+    elif isinstance(qconfig, torch.quantization.QConfig):
+        return torch.quantization.QConfig(
+            activation=qconfig.activation.with_args(factory_kwargs=factory_kwargs),
+            weight=qconfig.weight.with_args(factory_kwargs=factory_kwargs)
+        )
+    elif isinstance(qconfig, torch.quantization.QConfigDynamic):
+        return torch.quantization.QConfigDynamic(
+            activation=qconfig.activation.with_args(factory_kwargs=factory_kwargs),
+            weight=qconfig.weight.with_args(factory_kwargs=factory_kwargs)
+        )
+    else:
+        return qconfig
