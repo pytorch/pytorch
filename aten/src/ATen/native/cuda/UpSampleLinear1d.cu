@@ -100,8 +100,8 @@ __global__ void upsample_linear1d_out_frame_backward(
     for (int n = 0; n < batchsize; n++) {
       for (int c = 0; c < channels; ++c) {
         const scalar_t d2val = odata[n][c][w2];
-        gpuAtomicAdd(&idata[n][c][w1], static_cast<scalar_t>(w0lambda * d2val));
-        gpuAtomicAdd(
+        gpuAtomicAddNoReturn(&idata[n][c][w1], static_cast<scalar_t>(w0lambda * d2val));
+        gpuAtomicAddNoReturn(
             &idata[n][c][w1 + w1p], static_cast<scalar_t>(w1lambda * d2val));
       }
     }

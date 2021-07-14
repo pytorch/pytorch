@@ -212,7 +212,7 @@ commands:
             cd ~/project
             export ANDROID_BUILD_TYPE="<< parameters.build_type >>"
             export COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
-            python3 .circleci/scripts/upload_binary_size_to_scuba.py android
+            python3 tools/stats/upload_binary_size_to_scuba.py android
 
 ##############################################################################
 # Binary build (nightlies nightly build) defaults
@@ -283,11 +283,15 @@ pytorch_params: &pytorch_params
     build_only:
       type: string
       default: ""
+    ci_master:
+      type: string
+      default: ""
   environment:
     BUILD_ENVIRONMENT: << parameters.build_environment >>
     DOCKER_IMAGE: << parameters.docker_image >>
     USE_CUDA_DOCKER_RUNTIME: << parameters.use_cuda_docker_runtime >>
     BUILD_ONLY: << parameters.build_only >>
+    CI_MASTER: << pipeline.parameters.run_master_build >>
   resource_class: << parameters.resource_class >>
 
 pytorch_android_params: &pytorch_android_params
@@ -353,6 +357,9 @@ pytorch_windows_params: &pytorch_windows_params
     python_version:
       type: string
       default: "3.8"
+    vs_version:
+      type: string
+      default: "16.8.6"
     vc_version:
       type: string
       default: "14.16"
@@ -370,6 +377,7 @@ pytorch_windows_params: &pytorch_windows_params
     SCCACHE_BUCKET: "ossci-compiler-cache"
     CUDA_VERSION: <<parameters.cuda_version>>
     PYTHON_VERSION: <<parameters.python_version>>
+    VS_VERSION: <<parameters.vs_version>>
     VC_VERSION: <<parameters.vc_version>>
     VC_YEAR: <<parameters.vc_year>>
     VC_PRODUCT: <<parameters.vc_product>>
@@ -492,11 +500,11 @@ jobs:
           time docker pull ${DOCKER_IMAGE}:${DOCKER_TAG} >/dev/null
           export id=$(docker run --env-file "${BASH_ENV}" --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE}:${DOCKER_TAG})
 
-          git submodule sync && git submodule update -q --init --recursive --depth 1
+          git submodule sync && git submodule update -q --init --recursive --depth 1 --jobs 0
 
           docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
 
-          export COMMAND='((echo "sudo chown -R jenkins workspace && export CIRCLE_JOB="$CIRCLE_JOB" && cd workspace && .jenkins/pytorch/build.sh && find ${BUILD_ROOT} -type f -name "*.a" -or -name "*.o" -delete") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          export COMMAND='((echo "sudo chown -R jenkins workspace && export JOB_BASE_NAME="$CIRCLE_JOB" && cd workspace && .jenkins/pytorch/build.sh && find ${BUILD_ROOT} -type f -name "*.a" -or -name "*.o" -delete") | docker exec -u jenkins -i "$id" bash) 2>&1'
 
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
@@ -543,7 +551,7 @@ jobs:
             cd /pytorch && export COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
             python3 -mpip install requests && \
             SCRIBE_GRAPHQL_ACCESS_TOKEN=${SCRIBE_GRAPHQL_ACCESS_TOKEN} \
-            python3 .circleci/scripts/upload_binary_size_to_scuba.py || exit 0
+            python3 tools/stats/upload_binary_size_to_scuba.py || exit 0
     - store_artifacts:
         path: /home/circleci/project/dist
 
@@ -635,7 +643,7 @@ jobs:
           # =================== The following code will be executed inside Docker container ===================
           set -ex
           export SCRIBE_GRAPHQL_ACCESS_TOKEN="${SCRIBE_GRAPHQL_ACCESS_TOKEN}"
-          export CIRCLE_JOB="$CIRCLE_JOB"
+          export JOB_BASE_NAME="$CIRCLE_JOB"
           ${PARALLEL_FLAGS}
           cd workspace
           EOL
@@ -682,11 +690,10 @@ jobs:
           export CIRCLE_SHA1="$CIRCLE_SHA1"
           export CIRCLE_PR_NUMBER="${CIRCLE_PR_NUMBER:-}"
           export CIRCLE_BRANCH="$CIRCLE_BRANCH"
-          export CIRCLE_JOB="$CIRCLE_JOB"
+          export JOB_BASE_NAME="$CIRCLE_JOB"
           export CIRCLE_WORKFLOW_ID="$CIRCLE_WORKFLOW_ID"
           cd workspace
-          export PYTHONPATH="\${PWD}"
-          python tools/print_test_stats.py --upload-to-s3 --compare-with-s3 test
+          python -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
           EOL
           echo "(cat docker_commands.sh | docker exec -u jenkins -e LANG=C.UTF-8 -i "$id" bash) 2>&1" > command.sh
           unbuffer bash command.sh | ts
@@ -716,6 +723,9 @@ jobs:
       python_version:
         type: string
         default: "3.8"
+      vs_version:
+        type: string
+        default: "16.8.6"
       vc_version:
         type: string
         default: "14.16"
@@ -783,6 +793,9 @@ jobs:
       python_version:
         type: string
         default: "3.8"
+      vs_version:
+        type: string
+        default: "16.8.6"
       vc_version:
         type: string
         default: "14.16"
@@ -838,9 +851,8 @@ jobs:
             set -ex
             export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_WIN_BUILD_V1}
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_WIN_BUILD_V1}
-            export PYTHONPATH="$PWD"
             pip install typing_extensions boto3
-            python tools/print_test_stats.py --upload-to-s3 --compare-with-s3 test
+            python -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
           when: always
       - store_test_results:
           path: test/test-reports
@@ -877,7 +889,7 @@ jobs:
             cd /pytorch && export COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
             python3 -mpip install requests && \
             SCRIBE_GRAPHQL_ACCESS_TOKEN=${SCRIBE_GRAPHQL_ACCESS_TOKEN} \
-            python3 /pytorch/.circleci/scripts/upload_binary_size_to_scuba.py || exit 0
+            python3 /pytorch/tools/stats/upload_binary_size_to_scuba.py || exit 0
     - persist_to_workspace:
         root: /
         paths: final_pkgs
@@ -1450,12 +1462,11 @@ jobs:
             set -ex
             source /Users/distiller/workspace/miniconda3/bin/activate
             pip install boto3
-            export PYTHONPATH="$PWD"
 
             # Using the same IAM user to write stats to our OSS bucket
             export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4}
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4}
-            python tools/print_test_stats.py --upload-to-s3 --compare-with-s3 test
+            python -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
           when: always
       - store_test_results:
           path: test/test-reports
@@ -1673,7 +1684,7 @@ jobs:
           echo "DOCKER_IMAGE: ${DOCKER_IMAGE}:${DOCKER_TAG}"
           time docker pull ${DOCKER_IMAGE}:${DOCKER_TAG} >/dev/null
 
-          git submodule sync && git submodule update -q --init --recursive --depth 1
+          git submodule sync && git submodule update -q --init --recursive --depth 1 --jobs 0
           VOLUME_MOUNTS="-v /home/circleci/project/:/var/lib/jenkins/workspace"
           export id=$(docker run --env-file "${BASH_ENV}" ${VOLUME_MOUNTS} --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE}:${DOCKER_TAG})
 
@@ -1742,7 +1753,7 @@ jobs:
             # sync submodules
             cd ${PROJ_ROOT}
             git submodule sync
-            git submodule update --init --recursive --depth 1
+            git submodule update --init --recursive --depth 1 --jobs 0
 
             # export
             export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
@@ -1835,7 +1846,7 @@ jobs:
 
           echo "Do NOT merge master branch into $CIRCLE_BRANCH in environment $BUILD_ENVIRONMENT"
 
-          git submodule sync && git submodule update -q --init --recursive --depth 1
+          git submodule sync && git submodule update -q --init --recursive --depth 1 --jobs 0
 
           docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
 
@@ -7063,6 +7074,7 @@ workflows:
                 - /release\/.*/
           build_environment: "pytorch-libtorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
+          build_only: "1"
       - pytorch_linux_build:
           name: pytorch_linux_xenial_cuda11_1_cudnn8_py3_gcc7_build
           requires:
@@ -7097,6 +7109,7 @@ workflows:
                 - /release\/.*/
           build_environment: "pytorch-libtorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7"
+          build_only: "1"
       - pytorch_linux_build:
           name: pytorch_linux_bionic_py3_6_clang9_noarch_build
           requires:
@@ -7159,32 +7172,13 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - pytorch_linux_build:
-          name: pytorch_linux_bionic_py3_8_gcc9_coverage_build
-          requires:
-            - "docker-pytorch-linux-bionic-py3.8-gcc9"
-          build_environment: "pytorch-linux-bionic-py3.8-gcc9-coverage-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-py3.8-gcc9"
-      - pytorch_linux_test:
-          name: pytorch_linux_bionic_py3_8_gcc9_coverage_test1
-          requires:
-            - pytorch_linux_bionic_py3_8_gcc9_coverage_build
-          build_environment: "pytorch-linux-bionic-py3.8-gcc9-coverage-test1"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-py3.8-gcc9"
-          resource_class: large
-      - pytorch_linux_test:
-          name: pytorch_linux_bionic_py3_8_gcc9_coverage_test2
-          requires:
-            - pytorch_linux_bionic_py3_8_gcc9_coverage_build
-          build_environment: "pytorch-linux-bionic-py3.8-gcc9-coverage-test2"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-py3.8-gcc9"
-          resource_class: large
-      - pytorch_linux_build:
           name: pytorch_linux_bionic_rocm3_9_py3_6_build
           requires:
             - "docker-pytorch-linux-bionic-rocm3.9-py3.6"
           build_environment: "pytorch-linux-bionic-rocm3.9-py3.6-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-rocm3.9-py3.6"
           resource_class: xlarge
+          build_only: "1"
       - pytorch_macos_10_15_py3_build:
           name: pytorch_macos_10_15_py3_build
       - pytorch_macos_10_13_py3_build:
@@ -7637,44 +7631,7 @@ workflows:
           vc_product: BuildTools
           vc_version: ""
           vc_year: "2019"
-      - pytorch_windows_test:
-          build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
-          cuda_version: "10.1"
-          executor: windows-with-nvidia-gpu
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
-          name: pytorch_windows_vs2019_py38_cuda10.1_test1
-          python_version: "3.8"
-          requires:
-            - pytorch_windows_vs2019_py38_cuda10.1_build
-          test_name: pytorch-windows-test1
-          use_cuda: "1"
-          vc_product: BuildTools
-          vc_version: ""
-          vc_year: "2019"
-      - pytorch_windows_test:
-          build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
-          cuda_version: "10.1"
-          executor: windows-with-nvidia-gpu
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
-          name: pytorch_windows_vs2019_py38_cuda10.1_test2
-          python_version: "3.8"
-          requires:
-            - pytorch_windows_vs2019_py38_cuda10.1_build
-          test_name: pytorch-windows-test2
-          use_cuda: "1"
-          vc_product: BuildTools
-          vc_version: ""
-          vc_year: "2019"
+          vs_version: "16.8.6"
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
           cuda_version: "10.1"
@@ -7693,53 +7650,7 @@ workflows:
           vc_product: BuildTools
           vc_version: ""
           vc_year: "2019"
-      - pytorch_windows_build:
-          build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
-          cuda_version: "11.1"
-          name: pytorch_windows_vs2019_py38_cuda11.1_build
-          python_version: "3.8"
-          use_cuda: "1"
-          vc_product: BuildTools
-          vc_version: ""
-          vc_year: "2019"
-      - pytorch_windows_test:
-          build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
-          cuda_version: "11.1"
-          executor: windows-with-nvidia-gpu
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
-          name: pytorch_windows_vs2019_py38_cuda11.1_test1
-          python_version: "3.8"
-          requires:
-            - pytorch_windows_vs2019_py38_cuda11.1_build
-          test_name: pytorch-windows-test1
-          use_cuda: "1"
-          vc_product: BuildTools
-          vc_version: ""
-          vc_year: "2019"
-      - pytorch_windows_test:
-          build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
-          cuda_version: "11.1"
-          executor: windows-with-nvidia-gpu
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
-          name: pytorch_windows_vs2019_py38_cuda11.1_test2
-          python_version: "3.8"
-          requires:
-            - pytorch_windows_vs2019_py38_cuda11.1_build
-          test_name: pytorch-windows-test2
-          use_cuda: "1"
-          vc_product: BuildTools
-          vc_version: ""
-          vc_year: "2019"
+          vs_version: "16.8.6"
       - update_s3_htmls:
           context: org-member
           filters:
@@ -9163,12 +9074,14 @@ workflows:
             - "docker-pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
           build_environment: "pytorch-libtorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
+          build_only: "1"
       - pytorch_linux_build:
           name: pytorch_libtorch_linux_xenial_cuda11_1_cudnn8_py3_gcc7_build
           requires:
             - "docker-pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7"
           build_environment: "pytorch-libtorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7"
+          build_only: "1"
       - pytorch_linux_build:
           build_environment: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_32-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c"
@@ -9278,32 +9191,7 @@ workflows:
           vc_product: BuildTools
           vc_version: ""
           vc_year: "2019"
-      - pytorch_windows_test:
-          build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
-          cuda_version: "10.1"
-          executor: windows-with-nvidia-gpu
-          name: pytorch_windows_vs2019_py38_cuda10.1_test1
-          python_version: "3.8"
-          requires:
-            - pytorch_windows_vs2019_py38_cuda10.1_build
-          test_name: pytorch-windows-test1
-          use_cuda: "1"
-          vc_product: BuildTools
-          vc_version: ""
-          vc_year: "2019"
-      - pytorch_windows_test:
-          build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
-          cuda_version: "10.1"
-          executor: windows-with-nvidia-gpu
-          name: pytorch_windows_vs2019_py38_cuda10.1_test2
-          python_version: "3.8"
-          requires:
-            - pytorch_windows_vs2019_py38_cuda10.1_build
-          test_name: pytorch-windows-test2
-          use_cuda: "1"
-          vc_product: BuildTools
-          vc_version: ""
-          vc_year: "2019"
+          vs_version: "16.8.6"
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
           cuda_version: "10.1"
@@ -9316,41 +9204,7 @@ workflows:
           vc_product: BuildTools
           vc_version: ""
           vc_year: "2019"
-      - pytorch_windows_build:
-          build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
-          cuda_version: "11.1"
-          name: pytorch_windows_vs2019_py38_cuda11.1_build
-          python_version: "3.8"
-          use_cuda: "1"
-          vc_product: BuildTools
-          vc_version: ""
-          vc_year: "2019"
-      - pytorch_windows_test:
-          build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
-          cuda_version: "11.1"
-          executor: windows-with-nvidia-gpu
-          name: pytorch_windows_vs2019_py38_cuda11.1_test1
-          python_version: "3.8"
-          requires:
-            - pytorch_windows_vs2019_py38_cuda11.1_build
-          test_name: pytorch-windows-test1
-          use_cuda: "1"
-          vc_product: BuildTools
-          vc_version: ""
-          vc_year: "2019"
-      - pytorch_windows_test:
-          build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
-          cuda_version: "11.1"
-          executor: windows-with-nvidia-gpu
-          name: pytorch_windows_vs2019_py38_cuda11.1_test2
-          python_version: "3.8"
-          requires:
-            - pytorch_windows_vs2019_py38_cuda11.1_build
-          test_name: pytorch-windows-test2
-          use_cuda: "1"
-          vc_product: BuildTools
-          vc_version: ""
-          vc_year: "2019"
+          vs_version: "16.8.6"
     when: << pipeline.parameters.run_master_build >>
   slow_gradcheck_build:
     jobs:
@@ -9410,41 +9264,6 @@ workflows:
             - "docker-pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7"
           build_environment: "pytorch-libtorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7"
-      - pytorch_windows_build:
-          build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
-          cuda_version: "11.3"
-          name: periodic_pytorch_windows_cuda11.3_build
-          python_version: "3.8"
-          use_cuda: "1"
-          vc_product: BuildTools
-          vc_version: "14.28.29333"
-          vc_year: "2019"
-      - pytorch_windows_test:
-          build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
-          cuda_version: "11.3"
-          executor: windows-with-nvidia-gpu
-          name: periodic_pytorch_windows_cuda11.3_test1
-          python_version: "3.8"
-          requires:
-            - periodic_pytorch_windows_cuda11.3_build
-          test_name: pytorch-windows-test1
-          use_cuda: "1"
-          vc_product: BuildTools
-          vc_version: "14.28.29333"
-          vc_year: "2019"
-      - pytorch_windows_test:
-          build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
-          cuda_version: "11.3"
-          executor: windows-with-nvidia-gpu
-          name: periodic_pytorch_windows_cuda11.3_test2
-          python_version: "3.8"
-          requires:
-            - periodic_pytorch_windows_cuda11.3_build
-          test_name: pytorch-windows-test2
-          use_cuda: "1"
-          vc_product: BuildTools
-          vc_version: "14.28.29333"
-          vc_year: "2019"
 
   # The following allows these jobs to run on ci-all and release branches
   debuggable-scheduled-ci:
@@ -9499,6 +9318,7 @@ workflows:
           python_version: "3.8"
           use_cuda: "1"
           vc_product: BuildTools
+          vs_version: "16.8.6"
           vc_version: "14.28.29333"
           vc_year: "2019"
           filters:
@@ -9517,6 +9337,7 @@ workflows:
           test_name: pytorch-windows-test1
           use_cuda: "1"
           vc_product: BuildTools
+          vs_version: "16.8.6"
           vc_version: "14.28.29333"
           vc_year: "2019"
           filters:
@@ -9535,6 +9356,7 @@ workflows:
           test_name: pytorch-windows-test2
           use_cuda: "1"
           vc_product: BuildTools
+          vs_version: "16.8.6"
           vc_version: "14.28.29333"
           vc_year: "2019"
           filters:

@@ -62,7 +62,7 @@ class ChunkShardingSpec(ShardingSpec):
             The dimension to shard on, could be an integer representing the
             dimension or a string in case of named tensors where dimensions are
             named.
-        placement(List[Device] or List[PlacementSpec]):
+        placement(List[Device]):
             Specifies the placement of each shard of the Tensor. The size of
             the list represents the number of shards to be created. This
             parameter can be a list of devices
@@ -77,10 +77,9 @@ class ChunkShardingSpec(ShardingSpec):
     """
 
     ShardingDim = Union[int, str]
-    ShardPlacements = List[Union[Device, PlacementSpec]]
 
     dim: ShardingDim
-    placements: ShardPlacements
+    placements: List[Device]
 
     def __post_init__(self):
         self._verify_dim(self.dim)
@@ -91,7 +90,7 @@ class ChunkShardingSpec(ShardingSpec):
         if placements is None or len(placements) == 0:
             raise ValueError(f'None/Empty placement provided: {placements}')
         for dev in placements:
-            if not isinstance(dev, PlacementSpec) and not is_valid_device(dev):
+            if not is_valid_device(dev):
                 raise ValueError(f'{dev} is not a valid device')
 
     @staticmethod
@@ -113,30 +112,24 @@ class ShardMetadata(object):
         shard_lengths(List[int]): Lengths indicating the length of each
             dimension for this shard. Should have the same rank as the
             original tensor.
-        placement(List[Device or PlacementSpec]):
-            Specifies the placement of each shard of the Tensor. The size of
-            the list represents the number of shards to be created. This
-            parameter can be a list of devices
-            (ex: ["rank:0/cuda:0", "rank:1/cuda:1"]) or a list of custom
-            placement specs.
+        placement(Device):
+            Specifies the placement of this shard.
 
-            The device can be a local device or a remote device specified by one
+            The placement can be a local device or a remote device specified by one
             of the following remote formats:
 
                 1. "rank:<rank>/<device>" (ex: "rank:0/cuda:0").
                 2. "<worker_name>/<device>" (ex: "trainer0/cuda:0").
     """
 
-    ShardPlacement = Union[Device, PlacementSpec]
-
     __slots__ = ['shard_offsets', 'shard_lengths', 'placement']
 
     shard_offsets: List[int]
     shard_lengths: List[int]
-    placement: ShardPlacement
+    placement: Device
 
     def __post_init__(self):
-        if not isinstance(self.placement, PlacementSpec) and not is_valid_device(self.placement):
+        if not is_valid_device(self.placement):
             raise ValueError(f'{self.placement} is not a valid device')
 
         if len(self.shard_offsets) != len(self.shard_lengths):

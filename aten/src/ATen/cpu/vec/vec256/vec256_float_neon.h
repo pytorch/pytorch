@@ -296,7 +296,7 @@ public:
     }
     return loadu(res);
   };
-  Vectorized<float> map(float (*f)(float)) const {
+  Vectorized<float> map(float (*const f)(float)) const {
     __at_align32__ float tmp[size()];
     store(tmp);
     for (int64_t i = 0; i < size(); i++) {

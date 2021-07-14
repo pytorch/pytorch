@@ -61,6 +61,9 @@ class AutocastTestLists(object):
             ("add", pointwise0_fp32 + pointwise1_fp16, torch.float32),
             ("div", pointwise0_fp32 + pointwise1_fp16, torch.float32),
             ("mul", pointwise0_fp32 + pointwise1_fp16, torch.float32),
+            ("cat", (pointwise0_fp16 + pointwise1_fp32,), torch.float32),
+            ("equal", pointwise0_fp32 + pointwise1_fp16, torch.float32),
+            ("stack", (pointwise0_fp16 + pointwise1_fp32,), torch.float32),
         ]
         self.methods_expect_builtin_promote = [
             ("__eq__", pointwise0_fp32 + pointwise1_fp16, torch.bool),
@@ -174,9 +177,6 @@ class AutocastTestLists(object):
             ("renorm", mat0_fp16 + (2, 0, 1.0)),
             ("sum", pointwise0_fp16),
             ("sum", mat0_fp16 + (1,)),
-            ("grid_sampler", (torch.randn((2, 3, 33, 22), dtype=torch.float16, device=dev),
-                              torch.randn((2, 22, 11, 2), dtype=torch.float16, device=dev),
-                              0, 0, False)),
         ]
         self.torch_need_autocast_promote = [
             ("addcdiv", pointwise0_fp32 + pointwise1_fp16 + (pointwise2_fp16[0].clamp(0.1, 100),)),
@@ -188,14 +188,14 @@ class AutocastTestLists(object):
                           torch.randn((1,), dtype=torch.float32, device=dev))),
             ("cross", (torch.randn(3, dtype=torch.float32, device=dev),
                        torch.randn(3, dtype=torch.float16, device=dev))),
-            ("cat", (pointwise0_fp16 + pointwise1_fp32,)),
             ("dot", pointwise0_fp16 + pointwise1_fp32),
-            ("equal", pointwise0_fp32 + pointwise1_fp16),
+            ("grid_sampler", (torch.randn((2, 3, 33, 22), dtype=torch.float16, device=dev),
+                              torch.randn((2, 22, 11, 2), dtype=torch.float32, device=dev),
+                              0, 0, False)),
             ("index_put", pointwise0_fp32 + ((torch.tensor([1], device=dev, dtype=torch.long),),
                                              torch.randn(1, device=dev, dtype=torch.float16))),
             ("index_put", pointwise0_fp16 + ((torch.tensor([1], device=dev, dtype=torch.long),),
                                              torch.randn(1, device=dev, dtype=torch.float32))),
-            ("stack", (pointwise0_fp16 + pointwise1_fp32,)),
             ("tensordot", (torch.randn((2, 2, 2), dtype=torch.float32, device=dev),
                            torch.randn((2, 2, 2), dtype=torch.float16, device=dev))),
             ("scatter_add", (torch.zeros(2, 2, 2, dtype=torch.float32, device=dev),
@@ -212,7 +212,6 @@ class AutocastTestLists(object):
         ]
         self.nn_fp32 = [
             ("softplus", pointwise0_fp16),
-            ("gelu", pointwise0_fp16),
             ("nll_loss", (torch.rand((n, n), device=dev, dtype=torch.float),
                           torch.zeros((n,), device=dev, dtype=torch.long))),
             ("nll_loss2d", (torch.rand((n, n, n, n), device=dev, dtype=torch.half),

@@ -33,11 +33,16 @@ static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, b
                   (options.layout() == c10::kStrided));
 
   if (memory_format == MemoryFormat::Preserve) {
-    if (self.is_non_overlapping_and_dense()) {
-      // Copy all strides
-      auto r = at::empty_strided(self.sizes(),
-                                 self.strides(),
-                                 options.memory_format(c10::nullopt).pinned_memory(pin_out));
+    if (self.is_non_overlapping_and_dense() && options.device().supports_as_strided()) {
+      Tensor r;
+      if (self.is_quantized()) {
+        r = at::empty_quantized(self.sizes(), self, options);
+      } else {
+        r = at::empty_strided(
+            self.sizes(),
+            self.strides(),
+            options.memory_format(c10::nullopt).pinned_memory(pin_out));
+      }
       r.copy_(self, non_blocking);
       return r;
     } else {
@@ -62,18 +67,12 @@ Tensor to(
   bool copy,
   c10::optional<c10::MemoryFormat> optional_memory_format
 ) {
-  // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions options_ = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
-
-  TORCH_CHECK(
-    !(options_.has_memory_format() && optional_memory_format.has_value()),
-    "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
-    "the redundant setter.");
-  auto options = options_.merge_memory_format(optional_memory_format);
-
-  TORCH_CHECK(options.requires_grad_opt() == c10::nullopt,
-           "to(options) expects unset requires_grad flag, but got "
-           "options.requires_grad set as ", options.requires_grad());
+  TensorOptions options = TensorOptions()
+      .dtype(dtype)
+      .layout(layout)
+      .device(device)
+      .pinned_memory(pin_memory)
+      .memory_format(optional_memory_format);
 
   TORCH_CHECK(!options.has_layout() || self.layout() == options.layout(),
            "to(options) doesn't support converting to a different layout, "
@@ -138,9 +137,8 @@ Tensor view_dtype(const Tensor& self, ScalarType dtype) {
   if (self.scalar_type() == dtype) {
     return self;
   }
-  auto type_meta = c10::scalarTypeToTypeMeta(dtype);
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  TORCH_CHECK(self.element_size() == type_meta.itemsize(),
+  const auto type_meta = c10::scalarTypeToTypeMeta(dtype);
+  TORCH_CHECK(self.element_size() == static_cast<int64_t>(type_meta.itemsize()),
     "Viewing a tensor as a new dtype with a different number of bytes per element is not supported.");
   Storage storage = self.storage();
   auto new_tensor = detail::make_tensor<TensorImpl>(

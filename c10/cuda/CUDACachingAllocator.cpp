@@ -15,6 +15,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <regex>
 #include <set>
 #include <unordered_map>
 #include <unordered_set>
@@ -35,13 +36,18 @@ namespace CUDACachingAllocator {
 // - The allocator attempts to find the smallest cached block that will fit the
 //   requested size. If the block is larger than the requested size, it may be
 //   split. If no block is found, the allocator will delegate to cudaMalloc.
-// - If the cudaMalloc fails, the allocator will free all cached blocks that
-//   are not split and retry the allocation.
+// - If the cudaMalloc fails, the allocator will attempt to free one cached
+//   block of sufficient size that is not split and retry the allocation.
+//   If this also fails, the allocator will attempt to free all cached blocks
+//   that are not split and retry the allocation.
 // - Large (>1MB) and small allocations are stored in separate pools.
 //   Small requests are packed into 2MB buffers. Large requests will use the
 //   smallest available free block or allocate a new block using cudaMalloc.
-//   To reduce fragmentation, requests between 1MB and 10MB will allocate and
+// - To reduce fragmentation, requests between 1MB and 10MB will allocate and
 //   split a 20MB block, if no free block of sufficient size is available.
+// - To further reduce fragmentation, blocks >= 200MB are not allowed to be
+//   split. These oversize cached blocks will still satisfy requests within
+//   20MB of the oversize cached block size.
 //
 // With this allocator, allocations and frees should logically be considered
 // "usages" of the memory segment associated with streams, just like kernel
@@ -243,13 +249,13 @@ struct AllocParams {
         block(nullptr),
         err(cudaSuccess) {}
 
-  int device() {
+  int device() const {
     return search_key.device;
   }
-  cudaStream_t stream() {
+  cudaStream_t stream() const {
     return search_key.stream;
   }
-  size_t size() {
+  size_t size() const {
     return search_key.size;
   }
 
@@ -310,6 +316,67 @@ cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
 
 } // namespace
 
+class CachingAllocatorConfig {
+ public:
+  static size_t max_split_size() {
+    return instance().m_max_split_size;
+  }
+
+ private:
+  static std::once_flag s_flag;
+  static CachingAllocatorConfig* s_instance;
+  static CachingAllocatorConfig& instance() {
+    std::call_once(s_flag, &CachingAllocatorConfig::init);
+    return *s_instance;
+  }
+  static void init() {
+    s_instance = new CachingAllocatorConfig();
+    s_instance->parseArgs();
+  }
+
+  CachingAllocatorConfig()
+      : m_max_split_size(std::numeric_limits<size_t>::max()) {}
+  size_t m_max_split_size;
+
+  void parseArgs() {
+    const char* val = getenv("PYTORCH_CUDA_ALLOC_CONF");
+    if (val != NULL) {
+      const std::string config(val);
+
+      std::regex exp("[\\s,]+");
+      std::sregex_token_iterator it(config.begin(), config.end(), exp, -1);
+      std::sregex_token_iterator end;
+      std::vector<std::string> options(it, end);
+
+      for (auto option : options) {
+        std::regex exp2("[:]+");
+        std::sregex_token_iterator it2(option.begin(), option.end(), exp2, -1);
+        std::sregex_token_iterator end2;
+        std::vector<std::string> kv(it2, end2);
+        if (kv.size() >= 2) {
+          /* Maximum split size in MB.  Limited to large size blocks */
+          if (kv[0].compare("max_split_size_mb") == 0) {
+            size_t val2 = stoi(kv[1]);
+            TORCH_CHECK(
+                val2 > kLargeBuffer / (1024 * 1024),
+                "CachingAllocator option max_split_size_mb too small, must be >= ",
+                kLargeBuffer / (1024 * 1024),
+                "");
+            val2 = std::max(val2, kLargeBuffer / (1024 * 1024));
+            val2 = std::min(
+                val2, (std::numeric_limits<size_t>::max() / (1024 * 1024)));
+            m_max_split_size = val2 * 1024 * 1024;
+          } else {
+            TORCH_CHECK(false, "Unrecognized CachingAllocator option: ", kv[0]);
+          }
+        }
+      }
+    }
+  }
+};
+CachingAllocatorConfig* CachingAllocatorConfig::s_instance;
+std::once_flag CachingAllocatorConfig::s_flag;
+
 class DeviceCachingAllocator {
  private:
   // lock around all operations
@@ -363,7 +430,9 @@ class DeviceCachingAllocator {
  public:
   DeviceCachingAllocator()
       : large_blocks(BlockComparator, /*is_small=*/false),
-        small_blocks(BlockComparator, /*is_small=*/true) {}
+        small_blocks(BlockComparator, /*is_small=*/true) {
+    stats.max_split_size = CachingAllocatorConfig::max_split_size();
+  }
 
   // All public methods (except the above) acquire the allocator mutex.
   // Thus, do not call a public method from another public method.
@@ -399,8 +468,11 @@ class DeviceCachingAllocator {
         || (trigger_free_memory_callbacks(params) && get_free_block(params))
         // Attempt allocate
         || alloc_block(params, false)
+        // Free enough available cached blocks to satisfy alloc and retry alloc.
+        ||
+        (release_available_cached_blocks(params) && alloc_block(params, false))
         // Free all non-split cached blocks and retry alloc.
-        || (free_cached_blocks() && alloc_block(params, true));
+        || (release_cached_blocks() && alloc_block(params, true));
 
     if (!block_found) {
       // For any error code other than cudaErrorMemoryAllocation,
@@ -456,7 +528,10 @@ class DeviceCachingAllocator {
           format_size(
               stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)]
                   .current),
-          " reserved in total by PyTorch)");
+          " reserved in total by PyTorch)",
+          " If reserved memory is >> allocated memory try setting max_split_size_mb to avoid"
+          " fragmentation.  See documentation for Memory Management and PYTORCH_CUDA_ALLOC_CONF",
+          "");
     }
 
     TORCH_INTERNAL_ASSERT(
@@ -511,6 +586,8 @@ class DeviceCachingAllocator {
     update_stat_array(stats.allocated_bytes, block->size, params.stat_types);
     update_stat_array(stats.active, 1, params.stat_types);
     update_stat_array(stats.active_bytes, block->size, params.stat_types);
+    if (block->size >= CachingAllocatorConfig::max_split_size())
+      update_stat(stats.oversize_allocations, 1);
 
     return block;
   }
@@ -529,6 +606,8 @@ class DeviceCachingAllocator {
         true;
     update_stat_array(stats.allocation, -1, {stat_types});
     update_stat_array(stats.allocated_bytes, -block->size, {stat_types});
+    if (block->size >= CachingAllocatorConfig::max_split_size())
+      update_stat(stats.oversize_allocations, -1);
 
     if (!block->stream_uses.empty()) {
       if (C10_UNLIKELY(captures_underway)) {
@@ -584,7 +663,7 @@ class DeviceCachingAllocator {
   /** returns cached blocks to the system allocator **/
   void emptyCache() {
     std::lock_guard<std::recursive_mutex> lock(mutex);
-    free_cached_blocks();
+    release_cached_blocks();
   }
 
   /** Retrieves info (total size + largest block) of the memory cache **/
@@ -629,6 +708,8 @@ class DeviceCachingAllocator {
 
     stats.num_alloc_retries = 0;
     stats.num_ooms = 0;
+    reset_accumulated_stat(stats.oversize_allocations);
+    reset_accumulated_stat(stats.oversize_segments);
   }
 
   /** Resets the historical peak stats for the device **/
@@ -646,6 +727,8 @@ class DeviceCachingAllocator {
       reset_peak_stat(stats.active_bytes[statType]);
       reset_peak_stat(stats.inactive_split_bytes[statType]);
     }
+    reset_peak_stat(stats.oversize_allocations);
+    reset_peak_stat(stats.oversize_segments);
   }
 
   /** Dump a complete snapshot of the memory held by the allocator. Potentially
@@ -716,8 +799,7 @@ class DeviceCachingAllocator {
     if (it == graph_pools.end()) {
       // mempool_id does not reference an existing pool. Make a new pool for
       // this capture.
-      graph_pools.emplace(std::make_pair(
-          mempool_id, std::unique_ptr<PrivatePool>(new PrivatePool)));
+      graph_pools.emplace(mempool_id, std::make_unique<PrivatePool>());
     } else {
       // mempool_id references an existing pool, which the current capture will
       // share. Check this pool is live (at least one other capture already
@@ -905,8 +987,12 @@ class DeviceCachingAllocator {
 
   bool should_split(const Block* block, size_t size) {
     size_t remaining = block->size - size;
-    return (block->pool->is_small) ? (remaining >= kMinBlockSize)
-                                   : (remaining > kSmallSize);
+    if (block->pool->is_small) {
+      return remaining >= kMinBlockSize;
+    } else {
+      return (size < CachingAllocatorConfig::max_split_size()) &&
+          (remaining > kSmallSize);
+    }
   }
 
   static size_t get_allocation_size(size_t size) {
@@ -923,6 +1009,14 @@ class DeviceCachingAllocator {
     BlockPool& pool = *p.pool;
     auto it = pool.blocks.lower_bound(&p.search_key);
     if (it == pool.blocks.end() || (*it)->stream != p.stream())
+      return false;
+    // Do not return an oversized block for a large request
+    if ((p.size() < CachingAllocatorConfig::max_split_size()) &&
+        ((*it)->size >= CachingAllocatorConfig::max_split_size()))
+      return false;
+    // Allow oversized block size to be rounded up but within a limit
+    if ((p.size() >= CachingAllocatorConfig::max_split_size()) &&
+        ((*it)->size >= p.size() + kLargeBuffer))
       return false;
     p.block = *it;
     pool.blocks.erase(it);
@@ -985,27 +1079,71 @@ class DeviceCachingAllocator {
     p.block = new Block(p.device(), p.stream(), size, p.pool, (char*)ptr);
     update_stat_array(stats.segment, 1, p.stat_types);
     update_stat_array(stats.reserved_bytes, size, p.stat_types);
+    if (size >= CachingAllocatorConfig::max_split_size())
+      update_stat(stats.oversize_segments, 1);
 
     // p.block came from new, not cudaMalloc. It should not be nullptr here.
     TORCH_INTERNAL_ASSERT(p.block != nullptr && p.block->ptr != nullptr);
     return true;
   }
 
-  bool free_cached_blocks() {
+  /** Free one or more oversize blocks to the system allocator.  But only enough
+   * **/
+  /** to satisfy the target size **/
+  bool release_available_cached_blocks(const AllocParams& p) {
+    if (CachingAllocatorConfig::max_split_size() ==
+        std::numeric_limits<size_t>::max())
+      return false;
+    BlockPool& pool = *p.pool;
+    Block key = p.search_key;
+    key.size = (key.size < CachingAllocatorConfig::max_split_size())
+        ? CachingAllocatorConfig::max_split_size()
+        : key.size;
+    auto it = pool.blocks.lower_bound(&key);
+    if (it == pool.blocks.end() || (*it)->stream != p.stream()) {
+      // No single block is large enough; free multiple oversize blocks,
+      // starting with the largest
+      if (it == pool.blocks.begin())
+        return false;
+      size_t totalReleased = 0;
+      --it; // Back up one item.  Now on the largest block for the correct
+            // stream
+      while ((totalReleased < key.size) &&
+             ((*it)->size >= CachingAllocatorConfig::max_split_size()) &&
+             ((*it)->stream == p.stream())) {
+        auto cur = it;
+        totalReleased += (*it)->size;
+        if (it != pool.blocks.begin()) {
+          --it;
+          release_block(*cur);
+        } else {
+          release_block(*cur);
+          break;
+        }
+      }
+      if (totalReleased < key.size)
+        return false;
+    } else {
+      release_block(*it);
+    }
+    return true;
+  }
+
+  bool release_cached_blocks() {
     // First ensure that all blocks that can't currently be allocated due to
     // outstanding events are returned to the pool.
     synchronize_and_free_events();
 
-    // Free all non-split cached blocks
-    free_blocks(large_blocks);
-    free_blocks(small_blocks);
+    // Free all non-split cached blocks to system allocator
+    release_blocks(large_blocks);
+    release_blocks(small_blocks);
 
     for (auto it = graph_pools_freeable.begin();
          it != graph_pools_freeable.end();) {
       // See notifyCaptureDestroy for the strategy here.
       TORCH_INTERNAL_ASSERT(it->second->use_count == 0);
-      free_blocks(it->second->small_blocks);
-      free_blocks(it->second->large_blocks);
+      release_blocks(it->second->small_blocks);
+      release_blocks(it->second->large_blocks);
       if (it->second->cudaMalloc_count == 0) {
         auto erase_count = graph_pools.erase(it->first);
         TORCH_INTERNAL_ASSERT(erase_count == 1);
@@ -1018,33 +1156,37 @@ class DeviceCachingAllocator {
     return true;
   }
 
-  void free_blocks(BlockPool& pool) {
+  void release_block(Block* block) {
+    C10_CUDA_CHECK(cudaFree((void*)block->ptr));
+    total_allocated_memory -= block->size;
+
+    StatTypes stat_types;
+    stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
+    stat_types[static_cast<size_t>(get_stat_type_for_pool(*(block->pool)))] =
+        true;
+    update_stat_array(stats.segment, -1, stat_types);
+    update_stat_array(stats.reserved_bytes, -block->size, stat_types);
+    if (block->size >= CachingAllocatorConfig::max_split_size())
+      update_stat(stats.oversize_segments, -1);
+
+    block->pool->blocks.erase(block);
+    delete block;
+  }
+
+  void release_blocks(BlockPool& pool) {
     // Frees all non-split blocks
     auto it = pool.blocks.begin();
     while (it != pool.blocks.end()) {
       Block* block = *it;
+      ++it;
       if (!block->prev && !block->next) {
-        C10_CUDA_CHECK(cudaFree((void*)block->ptr));
-        total_allocated_memory -= block->size;
+        release_block(block);
 
         if (pool.owner_PrivatePool) {
           // The cudaFreed block belonged to a CUDA graph's PrivatePool.
           TORCH_INTERNAL_ASSERT(pool.owner_PrivatePool->cudaMalloc_count > 0);
           pool.owner_PrivatePool->cudaMalloc_count--;
         }
-
-        StatTypes stat_types;
-        stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
-        stat_types[static_cast<size_t>(get_stat_type_for_pool(pool))] = true;
-        update_stat_array(stats.segment, -1, stat_types);
-        update_stat_array(stats.reserved_bytes, -block->size, stat_types);
-
-        auto cur = it;
-        ++it;
-        pool.blocks.erase(cur);
-        delete block;
-      } else {
-        ++it;
       }
     }
   }
@@ -1196,8 +1338,7 @@ class THCCachingAllocator {
     if (size < device_count) {
       device_allocator.resize(device_count);
       for (const auto i : c10::irange(size, device_count)) {
-        device_allocator[i] = std::unique_ptr<DeviceCachingAllocator>(
-            new DeviceCachingAllocator());
+        device_allocator[i] = std::make_unique<DeviceCachingAllocator>();
       }
     }
   }

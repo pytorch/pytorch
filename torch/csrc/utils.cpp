@@ -57,7 +57,7 @@ bool THPUtils_tryUnpackLongs(PyObject *arg, THLongStoragePtr& result) {
   bool list = PyList_Check(arg);
   if (tuple || list) {
     // NOLINTNEXTLINE(bugprone-branch-clone)
-    int nDim = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
+    const auto nDim = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
     THLongStoragePtr storage(THLongStorage_newWithSize(nDim));
     for (int i = 0; i != nDim; ++i) {
       PyObject* item = tuple ? PyTuple_GET_ITEM(arg, i) : PyList_GET_ITEM(arg, i);
@@ -77,7 +77,7 @@ std::vector<int64_t> THPUtils_unpackLongs(PyObject *arg) {
   bool list = PyList_Check(arg);
   if (tuple || list) {
     // NOLINTNEXTLINE(bugprone-branch-clone)
-    int nDim = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
+    const auto nDim = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
     std::vector<int64_t> sizes(nDim);
     for (int i = 0; i != nDim; ++i) {
       PyObject* item = tuple ? PyTuple_GET_ITEM(arg, i) : PyList_GET_ITEM(arg, i);
@@ -202,6 +202,7 @@ void THPUtils_invalidArguments(PyObject *given_args, PyObject *given_kwargs,
   std::vector<std::string> option_strings;
   va_list option_list;
   va_start(option_list, num_options);
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   for(const auto i : c10::irange(num_options))
     option_strings.emplace_back(va_arg(option_list, const char*));
   va_end(option_list);

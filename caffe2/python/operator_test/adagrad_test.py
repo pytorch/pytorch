@@ -1,5 +1,3 @@
-
-
 import functools
 
 import caffe2.python.hypothesis_test_util as hu
@@ -193,16 +191,15 @@ class TestAdagrad(serial.SerializedTestCase):
     @settings(suppress_health_check=[HealthCheck.filter_too_much], deadline=10000)
     @given(
         inputs=hu.tensors(n=3),
-        lr=st.floats(
-            min_value=0.01, max_value=0.99, allow_nan=False, allow_infinity=False
-        ),
-        epsilon=st.floats(
-            min_value=0.01, max_value=0.99, allow_nan=False, allow_infinity=False
-        ),
+        lr=st.sampled_from([0.01, 0.99]),
+        epsilon=st.sampled_from([0.01, 0.99]),
         weight_decay=st.sampled_from([0.0, 0.1]),
+        counter_halflife=st.sampled_from([-1, 5]),
         **hu.gcs
     )
-    def test_row_wise_sparse_adagrad(self, inputs, lr, epsilon, weight_decay, gc, dc):
+    def test_row_wise_sparse_adagrad(
+        self, inputs, lr, epsilon, weight_decay, counter_halflife, gc, dc
+    ):
         adagrad_sparse_test_helper(
             self,
             inputs,
@@ -214,6 +211,7 @@ class TestAdagrad(serial.SerializedTestCase):
             dc,
             row_wise=True,
             weight_decay=weight_decay,
+            counter_halflife=counter_halflife,
         )
 
     @given(

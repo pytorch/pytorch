@@ -34,7 +34,6 @@ extern "C" dl_funcptr _PyImport_FindSharedFuncptr(
   ss << prefix << "_" << shortname;
   auto r = (dl_funcptr)lib.sym(ss.str().c_str()).value();
   assert(r);
-  // std::cout << "LOADED " << pathname << "\n";
   return r;
 }
 

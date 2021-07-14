@@ -51,13 +51,16 @@
 #include <stdexcept>
 #include <thread>
 #include <vector>
+// Get PAGE_SIZE and PAGE_MASK.
+#include <sys/user.h>
 
 #include <c10/util/Optional.h>
 
 #include <fmt/format.h>
 #include <linker.h>
 
-namespace torch { namespace deploy {
+namespace torch {
+namespace deploy {
 
 #define DEPLOY_ERROR(msg_fmt, ...) \
   throw DeployLinkerError(fmt::format(msg_fmt, ##__VA_ARGS__))
@@ -127,10 +130,6 @@ std::string stringf(const char* format, Args... args) {
   snprintf((char*)result.data(), size_s + 1, format, args...);
   return result;
 }
-
-// Get PAGE_SIZE and PAGE_MASK.
-#include <sys/user.h>
-
 // Returns the address of the page containing address 'x'.
 #define PAGE_START(x) ((x)&PAGE_MASK)
 
@@ -362,7 +361,9 @@ struct SystemLibraryImpl : public SystemLibrary {
 std::shared_ptr<SystemLibrary> SystemLibrary::create(void* handle, bool steal) {
   return std::make_shared<SystemLibraryImpl>(handle, steal);
 }
-std::shared_ptr<SystemLibrary> SystemLibrary::create(const char* path, int flags) {
+std::shared_ptr<SystemLibrary> SystemLibrary::create(
+    const char* path,
+    int flags) {
   void* handle = dlopen(path, flags);
   return SystemLibrary::create(handle, handle != nullptr);
 }
@@ -433,19 +434,19 @@ struct ElfDynamicInfo {
   std::string name_;
   const Elf64_Dyn* dynamic_;
   Elf64_Addr load_bias_;
-  const Elf64_Sym* symtab_;
-  const char* strtab_;
-  size_t strtab_size_;
-  Elf64_Rela* plt_rela_;
-  size_t n_plt_rela_;
-  Elf64_Rela* rela_;
-  size_t n_rela_;
-  linker_ctor_function_t init_func_;
-  linker_ctor_function_t* init_array_;
-  linker_dtor_function_t fini_func_;
-  linker_dtor_function_t* fini_array_;
-  size_t n_init_array_;
-  size_t n_fini_array_;
+  const Elf64_Sym* symtab_ = nullptr;
+  const char* strtab_ = nullptr;
+  size_t strtab_size_ = 0;
+  Elf64_Rela* plt_rela_ = nullptr;
+  size_t n_plt_rela_ = 0;
+  Elf64_Rela* rela_ = nullptr;
+  size_t n_rela_ = 0;
+  linker_ctor_function_t init_func_ = nullptr;
+  linker_ctor_function_t* init_array_ = nullptr;
+  linker_dtor_function_t fini_func_ = nullptr;
+  linker_dtor_function_t* fini_array_ = nullptr;
+  size_t n_init_array_ = 0;
+  size_t n_fini_array_ = 0;
   size_t gnu_nbucket_;
   uint32_t* gnu_bucket_ = nullptr;
   uint32_t* gnu_chain_;
@@ -605,9 +606,7 @@ struct ElfDynamicInfo {
         if (static_cast<size_t>(sym->st_name) + name_len + 1 <= strtab_size_ &&
             memcmp(strtab_ + sym->st_name, name, name_len + 1) == 0) {
           // found the matching entry, is it defined?
-          if ((ELF64_ST_BIND(sym->st_info) == STB_GLOBAL ||
-               ELF64_ST_BIND(sym->st_info) == STB_WEAK) &&
-              sym->st_shndx != 0) {
+          if (sym->st_shndx != 0) {
             return sym->st_value +
                 ((ELF64_ST_TYPE(sym->st_info) == STT_TLS) ? 0 : load_bias_);
           }
@@ -799,10 +798,7 @@ void resolve_needed_libraries(
     // std::cout << "OPENING " << library_path << "\n";
     handle = dlopen(library_path.c_str(), base_flags);
     DEPLOY_CHECK(
-        handle,
-        "{}: could not load library, dlopen says: {}",
-        name,
-        dlerror());
+        handle, "{}: could not load library, dlopen says: {}", name, dlerror());
     libraries.emplace_back(SystemLibrary::create(handle, true));
   }
 
@@ -813,7 +809,9 @@ void resolve_needed_libraries(
 
 extern "C" void* __dso_handle;
 
-struct CustomLibraryImpl : public std::enable_shared_from_this<CustomLibraryImpl>, public CustomLibrary {
+struct CustomLibraryImpl
+    : public std::enable_shared_from_this<CustomLibraryImpl>,
+      public CustomLibrary {
   CustomLibraryImpl(const char* filename, int argc, const char** argv)
       : contents_(filename),
         mapped_library_(nullptr),
@@ -826,9 +824,18 @@ struct CustomLibraryImpl : public std::enable_shared_from_this<CustomLibraryImpl
     program_headers_ = (Elf64_Phdr*)(data_ + header_->e_phoff);
     n_program_headers_ = header_->e_phnum;
   }
-  void add_search_library(std::shared_ptr<SymbolProvider> lib) {
+  void add_search_library(std::shared_ptr<SymbolProvider> lib) override {
     symbol_search_path_.emplace_back(std::move(lib));
   }
+
+  void check_library_format() {
+    DEPLOY_CHECK(0 == memcmp(header_->e_ident, ELFMAG, SELFMAG), "{}: not an ELF file", this->name_);
+    DEPLOY_CHECK(header_->e_type == ET_DYN, "{}: is not shared object file", this->name_);
+    DEPLOY_CHECK(header_->e_ident[EI_CLASS] == ELFCLASS64, "{}: is not ELF64 format", this->name_);
+    DEPLOY_CHECK(header_->e_ident[EI_DATA] == ELFDATA2LSB, "{}: is not 2's complement, little endian", this->name_);
+    DEPLOY_CHECK(header_->e_machine == EM_X86_64, "{}: is not in x86_64 format", this->name_);
+  }
+
   void reserve_address_space() {
     Elf64_Addr min_vaddr, max_vaddr;
     mapped_size_ = phdr_table_get_load_size(
@@ -1133,7 +1140,8 @@ struct CustomLibraryImpl : public std::enable_shared_from_this<CustomLibraryImpl
     __deploy_register_code();
   }
 
-  void load() {
+  void load() override {
+    check_library_format();
     reserve_address_space();
     load_segments();
     read_dynamic_section();
@@ -1219,7 +1227,10 @@ struct CustomLibraryImpl : public std::enable_shared_from_this<CustomLibraryImpl
   std::vector<std::shared_ptr<SymbolProvider>> symbol_search_path_;
 };
 
-std::shared_ptr<CustomLibrary> CustomLibrary::create(const char* filename, int argc, const char** argv) {
+std::shared_ptr<CustomLibrary> CustomLibrary::create(
+    const char* filename,
+    int argc,
+    const char** argv) {
   return std::make_shared<CustomLibraryImpl>(filename, argc, argv);
 }
 
@@ -1231,4 +1242,5 @@ static void* local__tls_get_addr(TLSIndex* idx) {
   return __tls_get_addr(idx);
 }
 
-}}
+} // namespace deploy
+} // namespace torch

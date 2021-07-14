@@ -45,8 +45,8 @@ TypePtr MergeInferredType(TypePtr existing_type, TypePtr inferred_type) {
 
   if (new_tensor_type && old_tensor_type) {
     if (!old_tensor_type->device()) {
-      // device not avaible means this is an invalid tensor type (most likely an
-      // empty one) return inferred type directly.
+      // device not available means this is an invalid tensor type (most likely
+      // an empty one) -> return inferred type directly.
       return new_tensor_type;
     }
     auto type = old_tensor_type;
@@ -94,8 +94,7 @@ TensorTypePtr TorchTensorTypeFromONNX(
       {});
   if (onnx_tensor_type.has_shape()) {
     std::vector<c10::ShapeSymbol> sizes;
-    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-    auto onnx_shape = onnx_tensor_type.shape();
+    const auto& onnx_shape = onnx_tensor_type.shape();
 
     for (int i = 0; i < onnx_shape.dim_size(); ++i) {
       auto& dim = onnx_shape.dim(i);
@@ -108,8 +107,7 @@ TensorTypePtr TorchTensorTypeFromONNX(
           // Search if this is already known,
           // and assign the same Symbol.
           GRAPH_UPDATE("Got dim_param:", dim.dim_param());
-          // NOLINTNEXTLINE(performance-for-range-copy)
-          for (auto pair : symbol_map) {
+          for (const auto& pair : symbol_map) {
             if (pair.second == dim.dim_param()) {
               sym = pair.first;
               break;
@@ -146,12 +144,10 @@ ListTypePtr TorchListTypeFromONNX(
     SymbolDimMap& symbol_map) {
   c10::optional<at::ScalarType> scalar_type;
   if (onnx_sequence_type.has_elem_type()) {
-    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-    auto onnx_seq_elem_type = onnx_sequence_type.elem_type();
+    const auto& onnx_seq_elem_type = onnx_sequence_type.elem_type();
     if (onnx_seq_elem_type.has_tensor_type()) {
-      // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-      auto onnx_tensor_type = onnx_seq_elem_type.tensor_type();
-      auto v_tensor_type =
+      const auto& onnx_tensor_type = onnx_seq_elem_type.tensor_type();
+      const auto v_tensor_type =
           TorchTensorTypeFromONNX(onnx_tensor_type, symbol_map);
       auto v_type = ListType::create(v_tensor_type);
       return v_type;
@@ -168,16 +164,15 @@ void UpdateTorchValueByOnnxValueInfo(
     return;
   }
 
-  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-  auto p_type = p_info.type();
+  const auto& p_type = p_info.type();
   if (p_type.has_tensor_type()) {
-    auto torch_tensor_type =
+    const auto torch_tensor_type =
         TorchTensorTypeFromONNX(p_type.tensor_type(), symbol_map);
     if (torch_tensor_type) {
       v->setType(MergeInferredType(v->type(), torch_tensor_type));
     }
   } else if (p_type.has_sequence_type()) {
-    auto torch_list_type =
+    const auto torch_list_type =
         TorchListTypeFromONNX(p_type.sequence_type(), symbol_map);
     if (torch_list_type) {
       v->setType(MergeInferredType(v->type(), torch_list_type));
@@ -1029,6 +1024,32 @@ void ComputeConstant(Node* n, int opset_version) {
       ProcessTimeSeriesNode(n);
       break;
     }
+    case ::c10::onnx::Size: {
+      if (ConstantValueMap::HasShape(n->input(0)->debugName())) {
+        auto input0_shape_size =
+            ConstantValueMap::GetShape(n->input(0)->debugName())
+                .value()
+                .sizes();
+        if (input0_shape_size.has_value()) {
+          auto input0_shape_value = input0_shape_size.value();
+          int64_t total_size = 1;
+          auto is_full_static = true;
+          for (auto i = 0; i < input0_shape_value.size(); i++) {
+            if (input0_shape_value[i].is_static()) {
+              total_size *= input0_shape_value[i].static_size();
+            } else {
+              is_full_static = false;
+              break;
+            }
+          }
+          if (is_full_static) {
+            auto f_final = onnx_constant_fold::IntToTensor(total_size);
+            ConstantValueMap::SetValue(n->output(0)->debugName(), f_final);
+          }
+        }
+      }
+      break;
+    }
     case ::c10::onnx::Slice: {
       ProcessSliceNode(n, opset_version);
       break;
@@ -1153,17 +1174,6 @@ void ProcessConstantValueMap(Node* n, int opset_version) {
 // Any additional post process that are specific to individual node kind.
 void SpecialPostProcess(Node* n) {
   switch (n->kind()) {
-    case ::c10::onnx::If: {
-      if (!IsBlockReturnTypeSame(n) && IsStaticConditionONNX(n)) {
-        auto cond = ConditionValueONNX(n);
-        auto block_idx = cond ? 0 : 1;
-        for (const auto i : c10::irange(n->outputs().size())) {
-          n->outputs()[i]->setType(
-              n->blocks()[block_idx]->outputs()[i]->type());
-        }
-      }
-      break;
-    }
     case ::c10::onnx::SequenceInsert: {
       // Special case when input sequence to SequenceInsert is empty.
       // onnx Sequence type requires element type to be set.
@@ -1236,12 +1246,7 @@ void SpecialPostProcess(Node* n) {
       };
 
       if (seq_node && t_type && t_type->scalarType()) {
-        if (seq_node->kind() == prim::ListConstruct &&
-            seq_node->inputs().size() != 0) {
-          // When prim::ListConstruct is not yet converted to
-          // onnx::SequenceEmpty
-          n->output()->setType(ListType::create(t_type));
-        } else if (seq_node->kind() == ::c10::onnx::SequenceEmpty) {
+        if (seq_node->kind() == ::c10::onnx::SequenceEmpty) {
           update_sequence_empty_dtype(seq_node, t_type);
         } else if (seq_node->kind() == prim::Param) {
           // Try to find original onnx::SequenceEmpty node in outer block.
@@ -1250,6 +1255,7 @@ void SpecialPostProcess(Node* n) {
             update_sequence_empty_dtype(seq_empty_n, t_type);
           }
         }
+        n->output()->setType(ListType::create(t_type));
       }
 
       break;
@@ -1316,11 +1322,10 @@ void UpdateOutputTypeByONNXProto(
     Node* clone_node,
     const onnx::ModelProto& model_proto,
     SymbolDimMap& symbol_map) {
-  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-  auto graph_proto = model_proto.graph();
+  const auto& graph_proto = model_proto.graph();
 
   // get data from value_info and updated original graph.
-  auto updateNodeOutputsByONNXValueInfo =
+  const auto updateNodeOutputsByONNXValueInfo =
       [&](const onnx::ValueInfoProto& v_info) {
         for (size_t i = 0; i < n->outputs().size(); ++i) {
           if (clone_node->output(i)->debugName() == v_info.name()) {
@@ -1486,10 +1491,9 @@ void ONNXSetDynamicInputShape(
           shape_ref.has_value(), "Input tensor shape should have value.");
       auto shape = shape_ref.value();
 
-      // NOLINTNEXTLINE(performance-for-range-copy)
-      for (auto pair : axes_names) {
-        auto axis = pair.first;
-        auto name = pair.second;
+      for (const auto& pair : axes_names) {
+        const auto axis = pair.first;
+        const auto name = pair.second;
         if (name_to_sym.find(name) == name_to_sym.end()) {
           name_to_sym[name] = ::c10::ShapeSymbol::newSymbol();
         }
@@ -1547,8 +1551,7 @@ size_t ONNXAssignOutputShape(
   index_check();
 
   if (THPVariable_Check(output_obj)) {
-    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-    at::Tensor var = THPVariable_Unpack(output_obj);
+    const at::Tensor& var = THPVariable_Unpack(output_obj);
     ONNXUpdateTypeFromTensor(
         graph->outputs().at(outputs_index), var, onnx_shape_inference);
     outputs_index++;
@@ -1562,7 +1565,7 @@ size_t ONNXAssignOutputShape(
           onnx_shape_inference);
     }
   } else if (PyList_Check(output_obj)) {
-    size_t list_len = PyList_GET_SIZE(output_obj);
+    const auto list_len = PyList_GET_SIZE(output_obj);
     if (HasSequenceTypeOutput(graph->outputs().at(outputs_index)->node())) {
       auto output_type = graph->outputs().at(outputs_index)->type();
       TORCH_CHECK(
@@ -1579,7 +1582,8 @@ size_t ONNXAssignOutputShape(
           auto& new_var = THPVariable_Unpack(list_elem);
           TORCH_CHECK(
               var.scalar_type() == new_var.scalar_type(),
-              "Unsupported sequence type in model outputs. ONNX supports sequences of elements of the same data type.");
+              "Unsupported sequence with mixed elment types in model outputs. "
+              "ONNX supports only sequences of elements of the same data type.");
         }
         auto elem_type = graph->outputs()
                              .at(outputs_index)
@@ -1633,9 +1637,8 @@ size_t ONNXAssignOutputShape(
     // outputs have been disabled.
   } else {
     std::string msg =
-        "Only tuples, lists and Variables are supported as JIT inputs/outputs. "
-        "Dictionaries and strings are also accepted, but their usage is not "
-        "recommended. Here, received an input of unsupported type: ";
+        ("Model output has unsupported type. See "
+         "https://pytorch.org/docs/stable/onnx.html#types. Got type: ");
     msg += THPUtils_typename(output_obj);
     throw std::runtime_error(msg);
   }
@@ -1662,6 +1665,7 @@ void ONNXAssignOutputShape(
       "Incorrect number of elements provided as example outputs.");
 
   Py_DECREF(py_obj);
+  GRAPH_DUMP("After ONNXAssignOutputShape", graph);
 }
 
 void ONNXShapeTypeInference(

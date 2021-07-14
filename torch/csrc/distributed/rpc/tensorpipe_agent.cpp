@@ -10,7 +10,6 @@
 #include <tensorpipe/tensorpipe.h>
 
 #include <torch/csrc/distributed/rpc/agent_utils.h>
-#include <torch/csrc/distributed/rpc/macros.h>
 #include <torch/csrc/distributed/rpc/tensorpipe_utils.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
@@ -136,9 +135,9 @@ std::vector<c10::Device> getDevicesOfTensors(
   }
   std::vector<c10::Device> devices;
   devices.reserve(deviceCount);
-  for (c10::DeviceIndex idx = 0; idx < indexBitset.size(); idx++) {
+  for (const auto idx : c10::irange(indexBitset.size())) {
     if (indexBitset[idx]) {
-      devices.emplace_back(impl->type(), idx);
+      devices.emplace_back(impl->type(), static_cast<c10::DeviceIndex>(idx));
     }
   }
   return devices;
@@ -159,10 +158,14 @@ void makeStreamsWaitOnOthers(
 } // namespace
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-C10_DEFINE_REGISTRY(TensorPipeTransportRegistry, TransportRegistration);
+C10_DEFINE_REGISTRY_WITHOUT_WARNING(
+    TensorPipeTransportRegistry,
+    TransportRegistration);
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-C10_DEFINE_REGISTRY(TensorPipeChannelRegistry, ChannelRegistration);
+C10_DEFINE_REGISTRY_WITHOUT_WARNING(
+    TensorPipeChannelRegistry,
+    ChannelRegistration);
 
 const std::string& TensorPipeAgent::guessAddress() {
   static const std::string uvAddress = []() {
@@ -194,36 +197,6 @@ const std::string& TensorPipeAgent::guessAddress() {
 }
 
 namespace {
-
-// These priorities instruct TensorPipe on which transport/channel to pick
-// during handshake. Higher priorities will take precedence over lower ones.
-// The transport with lowest priority will be the one used to bootstrap pipes.
-
-constexpr int64_t kShmTransportPriority = 200;
-constexpr int64_t kIbvTransportPriority = 100;
-// The UV transport just uses TCP and should work everywhere, thus keep it last.
-constexpr int64_t kUvTransportPriority = 0;
-
-constexpr int64_t kCmaChannelPriority = 1200;
-constexpr int64_t kMultiplexedUvChannelPriority = 1100;
-// The basic channel reuses a transport as a channel, and is thus our fallback.
-constexpr int64_t kBasicChannelPriority = 1000;
-
-// CPU channel have higher priority than CUDA channels, since the latter might
-// handle CPU-to-CPU transfers, but will always be less efficient than their
-// CPU-only counterparts.
-#if TENSORPIPE_HAS_CUDA_IPC_CHANNEL && defined(USE_CUDA_NOT_ROCM)
-constexpr int64_t kCudaIpcChannelPriority = 300;
-#endif
-
-#if TENSORPIPE_HAS_CUDA_GDR_CHANNEL && defined(USE_CUDA_NOT_ROCM)
-constexpr int64_t kCudaGdrChannelPriority = 200;
-#endif
-
-#ifdef USE_CUDA_NOT_ROCM
-constexpr int64_t kCudaXthChannelPriority = 400;
-constexpr int64_t kCudaBasicChannelPriority = 0;
-#endif
 
 std::unique_ptr<TransportRegistration> makeUvTransport() {
   auto context = tensorpipe::transport::uv::create();
@@ -319,7 +292,7 @@ constexpr static int kNumUvThreads = 16;
 std::unique_ptr<ChannelRegistration> makeMultiplexedUvChannel() {
   std::vector<std::shared_ptr<tensorpipe::transport::Context>> contexts;
   std::vector<std::shared_ptr<tensorpipe::transport::Listener>> listeners;
-  for (const auto laneIdx : c10::irange(kNumUvThreads)) {
+  for (const auto laneIdx C10_UNUSED : c10::irange(kNumUvThreads)) {
     auto context = tensorpipe::transport::uv::create();
     std::string address = TensorPipeAgent::guessAddress();
     contexts.push_back(std::move(context));
@@ -342,69 +315,6 @@ C10_REGISTER_CREATOR(
     TensorPipeChannelRegistry,
     mpt_uv,
     makeMultiplexedUvChannel);
-
-#if TENSORPIPE_HAS_CUDA_IPC_CHANNEL && defined(USE_CUDA_NOT_ROCM)
-
-std::unique_ptr<ChannelRegistration> makeCudaIpcChannel() {
-  auto context = tensorpipe::channel::cuda_ipc::create();
-  return std::make_unique<ChannelRegistration>(
-      ChannelRegistration{std::move(context), kCudaIpcChannelPriority});
-}
-
-// The cuda_ipc channels use cudaMemcpy to transmit CUDA tensor across processes
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-C10_REGISTER_CREATOR(TensorPipeChannelRegistry, cuda_ipc, makeCudaIpcChannel);
-
-#endif
-
-#if TENSORPIPE_HAS_CUDA_GDR_CHANNEL && defined(USE_CUDA_NOT_ROCM)
-
-std::unique_ptr<ChannelRegistration> makeCudaGdrChannel() {
-  auto context = tensorpipe::channel::cuda_gdr::create();
-  return std::make_unique<ChannelRegistration>(
-      ChannelRegistration{std::move(context), kCudaGdrChannelPriority});
-}
-
-// The cuda_gdr channel sends CUDA memory over InfiniBand using GPUDirect RDMA.
-// It directly registers the user-provided tensor with libibverbs, an operation
-// which is expensive the first time, but it then caches the registration in
-// order to amortize the cost and get low latency for subsequent transfers. A
-// ready-to-send/ready-to-receive handshake is still needed before the transfer
-// in order to ensure readiness and to agree on the device indices and thus the
-// queue pair to use. It automatically pairs each GPU to the "closest" NIC if
-// there are multiple of them (closest = longest prefix match in PCI tree).
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-C10_REGISTER_CREATOR(TensorPipeChannelRegistry, cuda_gdr, makeCudaGdrChannel);
-
-#endif
-
-#ifdef USE_CUDA_NOT_ROCM
-
-std::unique_ptr<ChannelRegistration> makeCudaXthChannel() {
-  auto context = tensorpipe::channel::cuda_xth::create();
-  return std::make_unique<ChannelRegistration>(
-      ChannelRegistration{std::move(context), kCudaXthChannelPriority});
-}
-
-// The cuda_xth channel supports same-process GPU-to-GPU comm
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-C10_REGISTER_CREATOR(TensorPipeChannelRegistry, cuda_xth, makeCudaXthChannel);
-
-std::unique_ptr<ChannelRegistration> makeCudaBasicChannel() {
-  auto context = tensorpipe::channel::cuda_basic::create(
-      tensorpipe::channel::basic::create());
-  return std::make_unique<ChannelRegistration>(
-      ChannelRegistration{std::move(context), kCudaBasicChannelPriority});
-}
-
-// The cuda_basic is the fallback channel for GPU-to-GPU comm
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-C10_REGISTER_CREATOR(
-    TensorPipeChannelRegistry,
-    cuda_basic,
-    makeCudaBasicChannel);
-
-#endif
 
 } // namespace
 
@@ -1339,10 +1249,10 @@ void TensorPipeAgent::markFutureAsComplete(
                      message{std::move(message)},
                      streams{std::move(streams)}]() mutable {
       c10::MultiStreamGuard guard(streams);
-      std::vector<std::reference_wrapper<const at::DataPtr>> data_ptrs =
-          message->getDataPtrs();
+      std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> storages =
+          message->getStorages();
       atomicFuture->jitFuture->markCompleted(
-          std::move(message), std::move(data_ptrs));
+          std::move(message), std::move(storages));
       // The future's callbacks may schedule further RPCs, increasing the count.
       // Thus we must decrease it after completing the future, otherwise it may
       // briefly dip to zero and trick join into thinking all work is done.

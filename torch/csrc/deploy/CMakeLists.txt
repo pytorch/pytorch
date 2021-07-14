@@ -12,6 +12,7 @@ add_custom_command(
 )
 
 add_library(torch_deploy libtorch_deployinterpreter.o ${DEPLOY_DIR}/deploy.cpp)
+target_link_libraries(torch_deploy PRIVATE crypt crypto ssl pthread dl util m z ffi lzma readline nsl ncursesw panelw) # for python builtins
 target_link_libraries(torch_deploy PUBLIC "-Wl,--no-as-needed" shm torch protobuf::libprotobuf-lite)
 
 

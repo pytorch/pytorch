@@ -99,6 +99,12 @@ add_dependencies(torch_python_obj cpython)
 
 target_include_directories(torch_deployinterpreter PRIVATE ${INTERPRETER_DIR})
 target_include_directories(torch_deployinterpreter PUBLIC ${PYTHON_INC_DIR})
+
+# we do not want to have torch_deployinterpreter linked against libc++ because
+# when loading it with RTLD_DEEPBIND it will resolve std::cout to the copy in libc++ instead of the
+# one in the main process (see https://gcc.gnu.org/bugzilla/show_bug.cgi?id=42679).
+# nostdlib excludes all the standard libraries then -lc and -lgcc adds back the libraries for for libc
+# which are necessary to be there otherwise Python does not initialize properly.
+target_link_libraries(torch_deployinterpreter PRIVATE -nostdlib -lc -lgcc)
 target_link_libraries(torch_deployinterpreter PRIVATE ${PYTHON_LIB} ${PYTHON_STDLIB} torch_python_static)
-target_link_libraries(torch_deployinterpreter PRIVATE crypt crypto ssl pthread dl util m z ffi lzma readline nsl ncursesw panelw) # for python builtins
 target_link_libraries(torch_deployinterpreter PRIVATE fmt::fmt-header-only protobuf::libprotobuf-lite)

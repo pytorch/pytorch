@@ -119,8 +119,6 @@ std::vector<Value*> ConvertSequenceDependencies(Node* node, int opset_version) {
   }
 
   auto* loop_node = node;
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
-  auto* graph = loop_node->owningGraph();
 
   TORCH_INTERNAL_ASSERT(loop_node->blocks().size() == 1);
   auto* sub_block = loop_node->blocks()[0];
@@ -379,8 +377,6 @@ std::vector<Value*> FixupONNXIfNode(Node* node, int opset_version) {
   }
   GRAPH_DUMP("Graph before fixing controlflow: ", node->owningGraph());
   auto* if_node = node;
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
-  auto* graph = if_node->owningGraph();
   FixupONNXSubblockOutputs(node);
   ONNXFixupUninitializedOutput(if_node);
   // Copy type of block output to node output.

@@ -285,7 +285,8 @@ class Module:
             name (string): name of the buffer. The buffer can be accessed
                 from this module using the given name
             tensor (Tensor or None): buffer to be registered. If ``None``, then operations
-                that run on buffers, such as :attr:`cuda`, are ignored.
+                that run on buffers, such as :attr:`cuda`, are ignored. If ``None``,
+                the buffer is **not** included in the module's :attr:`state_dict`.
             persistent (bool): whether the buffer is part of this module's
                 :attr:`state_dict`.
 
@@ -330,7 +331,8 @@ class Module:
                 from this module using the given name
             param (Parameter or None): parameter to be added to the module. If
                 ``None``, then operations that run on parameters, such as :attr:`cuda`,
-                are ignored.
+                are ignored. If ``None``, the parameter is **not** included in the
+                module's :attr:`state_dict`.
         """
         if '_parameters' not in self.__dict__:
             raise AttributeError(
@@ -766,7 +768,7 @@ class Module:
         .. function:: to(memory_format=torch.channels_last)
 
         Its signature is similar to :meth:`torch.Tensor.to`, but only accepts
-        floating point or complex :attr:`dtype`s. In addition, this method will
+        floating point or complex :attr:`dtype`\ s. In addition, this method will
         only cast the floating point or complex parameters and buffers to :attr:`dtype`
         (if given). The integral parameters and buffers will be moved
         :attr:`device`, if that is given, but with dtypes unchanged. When
@@ -1057,9 +1059,7 @@ class Module:
         if self._backward_hooks or _global_backward_hooks:
             full_backward_hooks, non_full_backward_hooks = self._get_backward_hooks()
         if _global_forward_pre_hooks or self._forward_pre_hooks:
-            for hook in itertools.chain(
-                    _global_forward_pre_hooks.values(),
-                    self._forward_pre_hooks.values()):
+            for hook in (*_global_forward_pre_hooks.values(), *self._forward_pre_hooks.values()):
                 result = hook(self, input)
                 if result is not None:
                     if not isinstance(result, tuple):
@@ -1073,9 +1073,7 @@ class Module:
 
         result = forward_call(*input, **kwargs)
         if _global_forward_hooks or self._forward_hooks:
-            for hook in itertools.chain(
-                    _global_forward_hooks.values(),
-                    self._forward_hooks.values()):
+            for hook in (*_global_forward_hooks.values(), *self._forward_hooks.values()):
                 hook_result = hook(self, input, result)
                 if hook_result is not None:
                     result = hook_result
@@ -1373,6 +1371,11 @@ class Module:
             ``NamedTuple`` with ``missing_keys`` and ``unexpected_keys`` fields:
                 * **missing_keys** is a list of str containing the missing keys
                 * **unexpected_keys** is a list of str containing the unexpected keys
+
+        Note:
+            If a parameter or buffer is registered as ``None`` and its corresponding key
+            exists in :attr:`state_dict`, :meth:`load_state_dict` will raise a
+            ``RuntimeError``.
         """
         missing_keys: List[str] = []
         unexpected_keys: List[str] = []

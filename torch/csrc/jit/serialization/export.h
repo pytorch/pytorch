@@ -3,9 +3,9 @@
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/jit/serialization/python_print.h>
+#include <torch/csrc/jit/serialization/storage_context.h>
 #include <torch/csrc/jit/serialization/type_name_uniquer.h>
 #include <torch/csrc/onnx/onnx.h>
 
@@ -70,6 +70,7 @@ class TORCH_API ScriptModuleSerializer {
       bool bytecode_format,
       bool save_mobile_debug_info);
   void serialize_unified_format(Module& module, uint64_t script_module_id);
+  SerializationStorageContext& storage_context();
 
   ~ScriptModuleSerializer() = default;
 
@@ -86,7 +87,7 @@ class TORCH_API ScriptModuleSerializer {
       const std::string& archive_name,
       const std::string& archive_dir,
       const std::string& tensor_dir,
-      bool tensor_cdata_naming_scheme = false);
+      bool use_storage_context = false);
   void updateSourceRangeTags(const SourceRangeRecords& ranges);
 
   caffe2::serialize::PyTorchStreamWriter& writer_;
@@ -100,8 +101,9 @@ class TORCH_API ScriptModuleSerializer {
   OrderedDict<std::string, PythonPrint> file_streams_;
   // Used to keep references of storages around during serialization to solve
   // for ABA memory reuse problem hit when storages are created/destroyed
-  // during serializaiton process.
-  StorageContext storage_context_;
+  // during serialization process. Also used to coordinate sharing of storages
+  // between Script and eager modules in torch.package.
+  SerializationStorageContext storage_context_;
 
   // Uniquely identifies a SourceRange in a model.
   // SourceRanges are associated with Nodes of Graphs.
@@ -192,6 +194,26 @@ TORCH_API void SetExportModuleMobileInfoConverter(
  * list of ops call _export_operator_list instead.
  */
 TORCH_API std::vector<std::string> export_opnames(const Module& m);
+
+struct TORCH_API BytecodeEmitDefaultValueForUnspecifiedArgMode {
+  static bool is_enabled();
+  static void set_enabled(bool enabled);
+};
+
+// RAII guard to switch the way JIT emits the bytecode for inputs.
+// true: instruction of default argument values (like LOADC) is emitted.
+// false: instruction of default argument values are not emitted. Instead
+// they are fetched from operator schema.
+struct TORCH_API BytecodeEmitDefaultInputsGuard {
+  BytecodeEmitDefaultInputsGuard(bool enable)
+      : prev_mode(BytecodeEmitDefaultValueForUnspecifiedArgMode::is_enabled()) {
+    BytecodeEmitDefaultValueForUnspecifiedArgMode::set_enabled(enable);
+  }
+  ~BytecodeEmitDefaultInputsGuard() {
+    BytecodeEmitDefaultValueForUnspecifiedArgMode::set_enabled(prev_mode);
+  }
+  bool prev_mode;
+};
 
 } // namespace jit
 } // namespace torch

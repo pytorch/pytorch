@@ -85,8 +85,7 @@ void assertNonTensorTypeDoesNotContainTensors(TypePtr type) {
   if (type->cast<TensorType>()) {
     return;
   }
-  // NOLINTNEXTLINE(performance-for-range-copy)
-  for (auto t : type->containedTypes()) {
+  for (const auto& t : type->containedTypes()) {
     TORCH_INTERNAL_ASSERT(!t->cast<TensorType>());
   }
 }

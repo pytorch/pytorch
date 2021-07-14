@@ -28,7 +28,7 @@ from .gen_trace_type import (
 #
 # A map: function name => name of the argument that all outputs are view of
 
-VIEW_FUNCTIONS_WITH_METADATA_CHANGE = ['view_as_complex', '_view_as_real_physical', 'view_as_real', '_conj']
+VIEW_FUNCTIONS_WITH_METADATA_CHANGE = ['view_as_complex', 'view_as_real', '_conj', '_neg_view']
 
 VIEW_FUNCTIONS = {
     'numpy_T': 'self',
@@ -73,6 +73,16 @@ RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({
     'expand_as', 'view_as', 'real', 'imag', 'narrow', 'movedim',
     'tensor_split', 'swapdims', 'swapaxes'
 })
+
+# These are the functions we consider views for the purposes of validating
+# StorageImpl and TensorImpl in gen_variable_type.
+# `_unsafe_view` is not included in VIEW_FUNCTIONS above because it is not a
+# view for the purposes of ADInplaceOrView kernel, we do not want to call as_view
+# See NOTE [Unsafe View] for more info.
+ALL_VIEW_FUNCTIONS = {
+    **VIEW_FUNCTIONS,
+    '_unsafe_view': 'self',
+}
 
 ARRAYREF_TO_VEC = CodeTemplate("""\
 auto ${vec} = ${arg}.vec();
@@ -147,6 +157,9 @@ def is_tensor_list_type(t: Type) -> bool:
 UNPACK_TENSOR = CodeTemplate("""\
 auto${ref} ${arg_name}_ = unpack${suffix}(${arg_name}, "${arg_name}", ${arg_pos});""")
 
+def unpacked_name(arg_name: str) -> str:
+    return arg_name + '_'
+
 @with_native_function
 def unpack_args(f: NativeFunction) -> Tuple[List[str], List[Binding]]:
     body: List[str] = []
@@ -179,7 +192,7 @@ def unpack_args(f: NativeFunction) -> Tuple[List[str], List[Binding]]:
             ref='&' if ref else '',
         ))
         unpacked_bindings.append(Binding(
-            name=binding.name + '_',
+            name=unpacked_name(binding.name),
             nctype=binding.nctype,
             argument=binding.argument,
             default=binding.default,
