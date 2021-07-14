@@ -230,20 +230,6 @@ def find_changed_lines(diff: str) -> Dict[str, List[Tuple[int, int]]]:
     return dict(files)
 
 
-ninja_template = """
-rule do_cmd
-  command = $cmd
-  description = Running clang-tidy
-
-{build_rules}
-"""
-
-build_template = """
-build {i}: do_cmd
-  cmd = {cmd}
-"""
-
-
 def run_shell_commands_in_parallel(
     commands: List[Tuple[List[str], str]], disable_progress_bar: bool
 ) -> List[Tuple[int, str, str]]:

@@ -149,7 +149,7 @@ def parse_args() -> argparse.Namespace:
         "--parallel",
         action="store_true",
         default=DEFAULTS["parallel"],
-        help="Run clang tidy in parallel per-file (requires ninja to be installed).",
+        help="Run clang tidy in parallel per-file",
     )
     parser.add_argument(
         "--print-include-paths",
