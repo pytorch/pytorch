@@ -1748,7 +1748,7 @@ def log_softmax(input: Tensor, dim: Optional[int] = None, _stacklevel: int = 3, 
     r"""Applies a softmax followed by a logarithm.
 
     While mathematically equivalent to log(softmax(x)), doing these two
-    operations separately is slower, and numerically unstable. This function
+    operations separately is slower and numerically unstable. This function
     uses an alternative formulation to compute the output and gradient correctly.
 
     See :class:`~torch.nn.LogSoftmax` for more details.
@@ -1757,7 +1757,7 @@ def log_softmax(input: Tensor, dim: Optional[int] = None, _stacklevel: int = 3, 
         input (Tensor): input
         dim (int): A dimension along which log_softmax will be computed.
         dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-          If specified, the input tensor is casted to :attr:`dtype` before the operation
+          If specified, the input tensor is cast to :attr:`dtype` before the operation
           is performed. This is useful for preventing data type overflows. Default: None.
     """
     if has_torch_function_unary(input):
@@ -4036,7 +4036,7 @@ def affine_grid(theta: Tensor, size: List[int], align_corners: Optional[bool] = 
         Up to version 1.2.0, all grid points along a unit dimension were
         considered arbitrarily to be at ``-1``.
         From version 1.3.0, under ``align_corners = True`` all grid points
-        along a unit dimension are considered to be at ```0``
+        along a unit dimension are considered to be at ``0``
         (the center of the input image).
     """
     if has_torch_function_unary(theta):
@@ -4179,7 +4179,7 @@ def _pad(input: Tensor, pad: List[int], mode: str = "constant", value: float = 0
         elif input.dim() == 5:
             assert len(pad) == 6, "5D tensors expect 6 values for padding"
             if mode == "reflect":
-                raise NotImplementedError
+                return torch._C._nn.reflection_pad3d(input, pad)
             elif mode == "replicate":
                 return torch._C._nn.replication_pad3d(input, pad)
             elif mode == "circular":
