@@ -7530,22 +7530,31 @@ class DistributedTest:
                 idx_to_model_params = bucket.get_grad_index_to_variable_mapping()
                 # Verify mapping is correct by ensuring param.grad is equal to
                 # the grad we get using the mapping.
-                for grad_tensor_idx, model_param in idx_to_model_params.items():
-                    self.assertEqual(model_param.grad, per_param_grad_tensors[grad_tensor_idx])
-                # Return completed future.
+                m = {i : p.shape for i, p in idx_to_model_params.items()}
+                for i in range(len(per_param_grad_tensors)):
+                    grad = per_param_grad_tensors[i]
+                    model_param = idx_to_model_params[i]
+                    self.assertEqual(model_param.grad, grad)
+                 # Return completed future.
                 fut = torch.futures.Future()
                 fut.set_result([bucket.get_tensor()])
                 return fut
 
+            models_to_test = [
+                (Net, torch.randn(2, 2)),
+                (LargeNet, torch.randn(2, 1000)),
+            ]
+
             torch.cuda.set_device(self.rank)
-            model = Net().cuda()
-            ddp_model = torch.nn.parallel.DistributedDataParallel(
-                model,
-                device_ids=[self.rank]
-            )
-            ddp_model.register_comm_hook(None, _test_hook)
-            inp = torch.randn(2, 2).cuda()
-            for _ in range(6):
-                out = ddp_model(inp)
-                loss = out.sum()
-                loss.backward()
+            for (model_cls, inp) in models_to_test:
+                model = model_cls().cuda()
+                ddp_model = torch.nn.parallel.DistributedDataParallel(
+                    model,
+                    device_ids=[self.rank]
+                )
+                ddp_model.register_comm_hook(None, _test_hook)
+                inp = inp.cuda()
+                for i in range(6):
+                    out = ddp_model(inp)
+                    loss = out.sum()
+                    loss.backward()

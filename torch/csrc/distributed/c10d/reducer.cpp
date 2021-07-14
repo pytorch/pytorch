@@ -461,7 +461,7 @@ std::vector<c10d::GradBucket> Reducer::get_grad_buckets(
   gradBuckets.reserve(buckets_.size());
   for (size_t i = 0; i < buckets_.size(); ++i) {
     auto& bucket = buckets_[i];
-    auto bucket_idx_to_variable = get_variables_for_bucket(bucket);
+    auto bucket_idx_to_variable = get_variables_for_bucket(i, bucket);
     gradBuckets.emplace_back(
       i,
       return_zero_tensors ? at::zeros_like(bucket.replicas[0].contents)
@@ -892,7 +892,7 @@ void Reducer::all_reduce_bucket(Bucket& bucket) {
     tensors.push_back(replica.contents);
   }
 
-  auto bucket_idx_to_variable = get_variables_for_bucket(bucket);
+  auto bucket_idx_to_variable = get_variables_for_bucket(next_bucket_, bucket);
   GradBucket grad_bucket(
       next_bucket_,
       tensors[0],
@@ -906,11 +906,14 @@ void Reducer::all_reduce_bucket(Bucket& bucket) {
 }
 
 std::unordered_map<size_t, at::Tensor> Reducer::get_variables_for_bucket(
+    size_t bucket_index,
     const Bucket& bucket) const {
-      // Check if we have cached mapping previously.
-      if (has_rebuilt_bucket_ && !cached_variables_for_bucket_.empty()) {
-        return cached_variables_for_bucket_;
-      }
+  // Check if we have cached mapping previously.
+  if (has_rebuilt_bucket_ &&
+      cached_variables_for_bucket_.find(bucket_index) !=
+          cached_variables_for_bucket_.end()) {
+    return cached_variables_for_bucket_[bucket_index];
+  }
   std::unordered_map<size_t, at::Tensor> variables_for_bucket;
   for (const auto& variable_index : bucket.variable_indices) {
     auto& replica = bucket.replicas[0];
@@ -924,13 +927,15 @@ std::unordered_map<size_t, at::Tensor> Reducer::get_variables_for_bucket(
   }
 
   if (has_rebuilt_bucket_) {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(cached_variables_for_bucket_.empty());
-    cached_variables_for_bucket_ = std::move(variables_for_bucket);
-    return cached_variables_for_bucket_;
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        cached_variables_for_bucket_.find(bucket_index) ==
+        cached_variables_for_bucket_.end());
+    cached_variables_for_bucket_.insert(
+        {bucket_index, std::move(variables_for_bucket)});
+    return cached_variables_for_bucket_[bucket_index];
   } else {
     return variables_for_bucket;
   }
-
 }
 
 // Called when the bucket at the specified index is ready to be reduced.
