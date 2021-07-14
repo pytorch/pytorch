@@ -1363,8 +1363,8 @@ class TestCase(expecttest.TestCase):
                 equal_nan=equal_nan,
                 msg=msg,
             )
-        elif isinstance(x, Number) or isinstance(y, Number):
-            # torch.testing.assert_close does not allow Tensor vs. Number comparisons
+        elif isinstance(x, (Number, bool, np.bool_)) or isinstance(y, (Number, bool, np.bool_)):
+            # torch.testing.assert_close does not allow Tensor vs. scalar comparisons
             dtype: Optional[torch.dtype]
             if isinstance(x, torch.Tensor):
                 dtype = x.dtype
@@ -1375,8 +1375,12 @@ class TestCase(expecttest.TestCase):
                     dtype = torch.complex128
                 elif isinstance(x, float) or isinstance(y, float):
                     dtype = torch.float64
-                else:
+                elif isinstance(x, int) or isinstance(y, int):
                     dtype = torch.int64
+                elif isinstance(x, (bool, np.bool_)) or isinstance(y, (bool, np.bool_)):
+                    dtype = torch.bool
+                else:
+                    raise TypeError(f"Unknown types {type(x)} / {type(y)}")
 
             try:
                 x = torch.as_tensor(x, dtype=dtype)

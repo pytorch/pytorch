@@ -785,7 +785,7 @@ class TestReductions(TestCase):
 
         # Stability for outer dimensions
         tensor = tensor.unsqueeze(1)
-        self.assertEqual(tensor.var(0), 0.03125)
+        self.assertEqual(tensor.var(0).item(), 0.03125)
 
     @onlyCPU
     @dtypes(torch.bool, torch.double)
