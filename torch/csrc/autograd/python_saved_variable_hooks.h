@@ -13,8 +13,8 @@ namespace torch { namespace autograd {
 
 struct THP_CLASS PySavedVariableHooks : public SavedVariableHooks {
   PySavedVariableHooks(py::function &pack_hook, py::function &unpack_hook);
-  void call_pack_hook(at::Tensor &tensor) override;
-  at::Tensor call_unpack_hook() override;
+  void THP_CLASS call_pack_hook(at::Tensor &tensor) override;
+  at::Tensor THP_CLASS call_unpack_hook() override;
   ~PySavedVariableHooks() override;
 
   private:
