@@ -5329,14 +5329,14 @@ TEST(LoopNest, DistributeLoopAndParentsWithoutAnyPivot) {
     auto forM = For::make(m, 0, 50, newForI);
     auto par = Block::make({forM});
     LoopNest nest(par, {a_buf.node(), b_buf.node()});
-    auto new_loops = LoopNest::distributeLoopAndParents(newForI);
+    auto newLoops = LoopNest::distributeLoopAndParents(newForI);
 
     std::ostringstream oss;
     oss << *par;
     torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
     // The first loop after distribution must be same as the original For.
-    ASSERT_EQ(new_loops.front(), forM);
+    ASSERT_EQ(newLoops.front(), forM);
   }
 
   {
@@ -5361,14 +5361,14 @@ TEST(LoopNest, DistributeLoopAndParentsWithoutAnyPivot) {
     auto forM = For::make(m, 0, 50, newForI);
     auto par = Block::make({forM});
     LoopNest nest(par, {a_buf.node(), b_buf.node()});
-    auto new_loops = LoopNest::distributeLoopAndParentsOverInnerLoops(newForI);
+    auto newLoops = LoopNest::distributeLoopAndParentsOverInnerLoops(newForI);
 
     std::ostringstream oss;
     oss << *par;
     torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
     // The first loop after distribution must be same as the original For.
-    ASSERT_EQ(new_loops.front(), forM);
+    ASSERT_EQ(newLoops.front(), forM);
   }
 }
 
@@ -6640,97 +6640,6 @@ TEST(LoopNest, reorderInvalidLoopNest) {
   ASSERT_THROWS_WITH(
       LoopNest::reorder({forI, forJ, forK}, {1, 0, 2}),
       "reorder is only allowed on perfectly nested loops");
-}
-
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(LoopNest, shuffleInALoop) {
-  KernelScope kernel_scope;
-
-  // Input IR:
-  //   for (int i = 0; i < 100; ++i) {
-  //     A[i] = i * 10;
-  //     B[i] = i << 2;
-  //   }
-  BufHandle a_buf("A", {100}, kInt);
-  BufHandle b_buf("B", {100}, kInt);
-  VarHandle i("i", kInt);
-  auto storeA = Store::make(a_buf, {i}, i * 10);
-  auto storeB = Store::make(b_buf, {i}, i << 2);
-  auto forI = For::make(i, 0, 100, Block::make({storeA, storeB}));
-
-  ASSERT_TRUE(LoopNest::shuffle(forI->body(), {1, 0}));
-  ASSERT_EQ(forI->body()->front(), storeB);
-  ASSERT_EQ(forI->body()->back(), storeA);
-}
-
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(LoopNest, shuffleInNestedLoop) {
-  KernelScope kernel_scope;
-
-  // Input IR:
-  //   for (int i = 0; i < 100; ++i) {
-  //     for (int j = 0; j < 50; ++j) {
-  //       A[i,j] = i * j;
-  //       B[i,j] = i + j;
-  //       C[i,j] = i - j;
-  //     }
-  //   }
-  BufHandle a_buf("A", {100, 50}, kInt);
-  BufHandle b_buf("B", {100, 50}, kInt);
-  BufHandle c_buf("C", {100, 50}, kInt);
-  VarHandle i("i", kInt);
-  VarHandle j("j", kInt);
-  auto storeA = Store::make(a_buf, {i, j}, i * j);
-  auto storeB = Store::make(b_buf, {i, j}, i + j);
-  auto storeC = Store::make(c_buf, {i, j}, i - j);
-  auto forJ = For::make(j, 0, 50, Block::make({storeA, storeB, storeC}));
-  auto forI = For::make(i, 0, 100, forJ);
-
-  // Invalid permutation size
-  ASSERT_FALSE(LoopNest::shuffle(forI->body(), {1, 0}));
-
-  // Invalid permutations
-  ASSERT_FALSE(LoopNest::shuffle(forJ->body(), {2, 1, 3}));
-  ASSERT_FALSE(LoopNest::shuffle(forJ->body(), {2, 1, 1}));
-  ASSERT_FALSE(LoopNest::shuffle(forJ->body(), {1, 0, 0}));
-
-  // Trivial permutation
-  ASSERT_TRUE(LoopNest::shuffle(forJ->body(), {0, 1, 2}));
-  ASSERT_EQ(forJ->body()->stmts(), std::list<Stmt*>({storeA, storeB, storeC}));
-
-  // Valid permutation
-  ASSERT_TRUE(LoopNest::shuffle(forJ->body(), {1, 2, 0}));
-  ASSERT_EQ(forJ->body()->stmts(), std::list<Stmt*>({storeB, storeC, storeA}));
-}
-
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(LoopNest, shuffleWithMixedStmts) {
-  KernelScope kernel_scope;
-
-  // Input IR:
-  //   {
-  //     for (int i = 0; i < 100; ++i) {
-  //       A[i] = i + 20;
-  //     }
-  //     B[0] = 0;
-  //     for (int j = 1; j < 50; ++j) {
-  //       B[j] = A[j];
-  //     }
-  //   }
-  BufHandle a_buf("A", {100}, kInt);
-  BufHandle b_buf("B", {100}, kInt);
-  VarHandle i("i", kInt);
-  VarHandle j("j", kInt);
-  auto storeA = Store::make(a_buf, {i}, i + 20);
-  auto forI = For::make(i, 0, 100, storeA);
-  auto initB = Store::make(b_buf, {0}, 0);
-  auto storeB = Store::make(b_buf, {j}, Load::make(a_buf, {j}));
-  auto forJ = For::make(j, 0, 50, storeB);
-  auto par = Block::make({forI, initB, forJ});
-
-  ASSERT_EQ(par->stmts(), std::list<Stmt*>({forI, initB, forJ}));
-  ASSERT_TRUE(LoopNest::shuffle(par, {1, 0, 2}));
-  ASSERT_EQ(par->stmts(), std::list<Stmt*>({initB, forI, forJ}));
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)

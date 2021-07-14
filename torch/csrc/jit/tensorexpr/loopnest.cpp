@@ -1678,7 +1678,7 @@ bool LoopNest::hasLoopCarriedDependence(For* loop) {
   return false;
 }
 
-bool LoopNest::fuseLoops(const std::vector<For*>& loops, For** fused) {
+bool LoopNest::unsafeFuseLoops(const std::vector<For*>& loops, For** fused) {
   if (loops.empty()) {
     return false;
   }
@@ -1721,6 +1721,30 @@ bool LoopNest::fuseLoops(const std::vector<For*>& loops, For** fused) {
     ++it;
   }
 
+  auto first_loop = loops.front();
+  // Fuse the loops by taking all the statements from the second loops
+  // onwards and moving them into the first loop's body.
+  // This way the final fused loop will be the same as the first loop.
+  for (size_t i = 1; i < loops.size(); ++i) {
+    auto body = dynamic_cast<Block*>(Substitute(
+        Stmt::clone(loops[i]->body()), {{loops[i]->var(), first_loop->var()}}));
+    first_loop->body()->splice(first_loop->body()->end(), body);
+    root_block->remove_stmt(loops[i]);
+  }
+
+  *fused = loops.front();
+  return true;
+}
+
+bool LoopNest::fuseLoops(const std::vector<For*>& loops, For** fused) {
+  if (loops.empty()) {
+    return false;
+  }
+  if (loops.size() == 1) {
+    *fused = loops.front();
+    return true;
+  }
+
   // Check if bounds are the same for all the loops.
   auto first_loop = loops.front();
   auto first_loop_start = IRSimplifier::simplify(first_loop->start());
@@ -1737,41 +1761,27 @@ bool LoopNest::fuseLoops(const std::vector<For*>& loops, For** fused) {
     }
   }
 
-  // A lambda to fuse all the given loops.
-  auto fuse_all_loops = [](const std::vector<For*>& loops) {
-    auto first_loop = loops.front();
-    // Fuse the loops by taking all the statements from the second loops
-    // onwards and moving them into the first loop's body.
-    // This way the final fused loop will be the same as the first loop.
-    for (size_t i = 1; i < loops.size(); ++i) {
-      auto body = dynamic_cast<Block*>(Substitute(
-          Stmt::clone(loops[i]->body()),
-          {{loops[i]->var(), first_loop->var()}}));
-      first_loop->body()->splice(first_loop->body()->end(), body);
-    }
-  };
-
   // We need to check if fusing the loops results in a loop-carried dependence.
   // This check can be done only after the loops are fused into one. But if the
   // check is violated, we need to return the given loops in the original form.
   // So, we create a clone of all the loops, fuse them and check for this.
   std::vector<For*> loops_copy;
   loops_copy.reserve(loops.size());
+  Block* parent = new Block({});
   for (const auto& l : loops) {
-    loops_copy.push_back(dynamic_cast<For*>(Stmt::clone(l)));
+    auto l_copy = Stmt::clone(l);
+    loops_copy.push_back(dynamic_cast<For*>(l_copy));
+    parent->append_stmt(l_copy);
   }
-  fuse_all_loops(loops_copy);
-  if (hasLoopCarriedDependence(loops_copy.front())) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  For* fused_copy;
+  bool ret = unsafeFuseLoops(loops_copy, &fused_copy);
+  if (!ret || hasLoopCarriedDependence(fused_copy)) {
     return false;
   }
 
   // Now that all conditions are satisfied, we fuse the given loops.
-  fuse_all_loops(loops);
-  *fused = loops.front();
-  for (size_t i = 1; i < loops.size(); ++i) {
-    root_block->remove_stmt(loops[i]);
-  }
-  return true;
+  return unsafeFuseLoops(loops, fused);
 }
 
 For* findOuterFor(For* a, For* b) {
@@ -1987,31 +1997,6 @@ std::vector<For*> LoopNest::reorder(
   result.back()->setBody(innermost_body);
   parent->replace_stmt(empty_block, result.front());
   return result;
-}
-
-bool LoopNest::shuffle(Block* block, const std::vector<size_t>& permutation) {
-  if (permutation.size() != static_cast<size_t>(block->nstmts())) {
-    return false; // invalid permutation size
-  }
-  if (isTrivialPermutation(permutation)) {
-    return true;
-  }
-  if (!isValidPermutation(permutation)) {
-    return false; // invalid permutation
-  }
-  // Remove all statements from the block and shuffle them as per the
-  // given permutation.
-  std::vector<Stmt*> result(permutation.size());
-  std::vector<Stmt*> curr_stmts(block->begin(), block->end());
-  for (size_t i = 0; i < permutation.size(); ++i) {
-    result[i] = curr_stmts[permutation[i]];
-  }
-  block->clear();
-  // Add the statements back in the shuffled order.
-  for (auto st : result) {
-    block->append_stmt(st);
-  }
-  return true;
 }
 
 For* LoopNest::getLoopAt(For* root, const std::vector<int>& indices) const {
