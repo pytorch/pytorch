@@ -334,7 +334,7 @@ jobs:
           wget -O pr.diff "https://patch-diff.githubusercontent.com/raw/pytorch/pytorch/pull/$PR_NUMBER.diff"
       - name: Generate build files
         run: |
-          cd "{GITHUB_WORKSPACE}"
+          cd "${GITHUB_WORKSPACE}"
           python3 -m tools.linter.clang_tidy.generate_build_files
       - name: Run clang-tidy
         run: |
