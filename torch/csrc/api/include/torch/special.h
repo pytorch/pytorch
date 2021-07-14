@@ -133,6 +133,22 @@ inline Tensor& erfinv_out(Tensor& result, const Tensor& self) {
   return torch::special_erfinv_out(result, self);
 }
 
+/// Computes the log of summed exponentials of each row of input in the given dimension dim
+/// See https://pytorch.org/docs/master/special.html#torch.special.logsumexp.
+///
+/// Example:
+/// ```
+/// auto t = torch::randn(3, 3);
+/// torch::special::logsumexp(t, 1);
+/// ```
+inline Tensor logsumexp(const Tensor& self, IntArrayRef dims, bool keepdim) {
+  return torch::special_logsumexp(self, dims, keepdim);
+}
+
+inline Tensor& logsumexp_out(Tensor& result, const Tensor& self, IntArrayRef dims, bool keepdim) {
+  return torch::special_logsumexp_out(result, self, dims, keepdim);
+}
+
 inline Tensor ndtri(const Tensor& self) {
   return torch::special_ndtri(self);
 }
@@ -398,6 +414,18 @@ inline Tensor log1p(const Tensor& self) {
 
 inline Tensor& log1p_out(Tensor& result, const Tensor& self) {
   return torch::special_log1p_out(result, self);
+}
+
+/// Computes log followed by softmax(x) of the input
+/// See https://pytorch.org/docs/master/special.html#torch.special.log_softmax.
+///
+/// Example:
+/// ```
+/// auto t = torch::randn(128, 128, dtype=kDouble);
+/// torch::special::log_softmax(t, 0);
+/// ```
+inline Tensor log_softmax(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
+  return torch::special_log_softmax(self, dim, dtype);
 }
 
 }} // torch::special
