@@ -24,7 +24,6 @@ import numpy as np
 import os
 import python_ddp
 import torch
-import torch.cuda as cuda
 import torch.distributed as dist
 import torch.multiprocessing as mp
 import torch.nn as nn
@@ -80,7 +79,7 @@ def run_ddp(rank, world_size, epochs, ddp_option, buffer_size):
     assert ddp_model is not None
 
     loss_fn = nn.MSELoss()
-    optimizer = optim.SGD(ddp_model.parameters(),lr=0.001)
+    optimizer = optim.SGD(ddp_model.parameters(), lr=0.001)
 
     # Container to hold: event -> list of events in milliseconds
     MODEL_FORWARD = "forward"
@@ -137,15 +136,15 @@ def main():
     options = [
         DDPOption.DDP_CPP_CORE,
         DDPOption.PYTHON_DDP_ASYNC,
-         DDPOption.PYTHON_DDP_SYNC,
+        DDPOption.PYTHON_DDP_SYNC,
         DDPOption.LEGACY_DISTRIBUTED_DATA_PARALLEL]
 
     for option in options:
         print("option: {}".format(option))
         mp.spawn(run_ddp,
-            args=(world_size, epochs, option, buffer_size),
-            nprocs=world_size,
-            join=True)
+                 args=(world_size, epochs, option, buffer_size),
+                 nprocs=world_size,
+                 join=True)
 
 if __name__=="__main__":
     main()
