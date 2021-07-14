@@ -82,6 +82,18 @@ Tensor trapezoid(const Tensor& y, const Scalar& dx, int64_t dim) {
     return do_trapezoid(y, dx.toDouble(), dim);
 }
 
+Tensor& trapezoid_out(const Tensor& y, const Tensor& x, int64_t dim, Tensor& result) {
+    //TODO: Need to copy data over. See wiki.
+    result = at::native:: trapezoid(y, x, dim);
+    return result;
+}
+
+Tensor& trapezoid_out(const Tensor& y, const Scalar& dx, int64_t dim, Tensor& result) {
+    //TODO: Need to copy data over. See wiki.
+    result = at::native:: trapezoid(y, dx, dim);
+    return result;
+}
+
 Tensor trapz(const Tensor& y, const Tensor& x, int64_t dim) {
     return at::native::trapezoid(y, x, dim);
 }
@@ -122,6 +134,18 @@ Tensor cumulative_trapezoid(const Tensor& y, const Scalar& dx, int64_t dim) {
     TORCH_CHECK(!(dx.isComplex() or dx.isBoolean()), "trapezoid: Currently, we only support dx as a real number.");
     Tensor d = at::range(0, y.size(dim), dx);
     return do_cumulative_trapezoid(y, d, dim);
+}
+
+Tensor& cumulative_trapezoid_out(const Tensor& y, const Tensor& x, int64_t dim, Tensor& result) {
+    //TODO: Need to copy data over. See wiki.
+    result =  at::native::cumulative_trapezoid(y, x, dim);
+    return result;
+}
+
+Tensor& cumulative_trapezoid_out(const Tensor& y, const Scalar& dx, int64_t dim, Tensor& result) {
+    //TODO: Need to copy data over. See wiki.
+    result =  at::native::cumulative_trapezoid(y, dx, dim);
+    return result;
 }
 
 }} // namespace at::native
