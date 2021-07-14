@@ -9,12 +9,12 @@ This version also supports the *no_sync* context manager, which allows faster
 training with `--update-freq`.
 """
 
+import torch
+import torch.distributed as dist
+import torch.nn as nn
+
 from collections import OrderedDict
 from contextlib import contextmanager
-
-import utils
-import torch
-import torch.nn as nn
 
 class LegacyDistributedDataParallel(nn.Module):
     """Implements distributed data parallelism at the module level.
@@ -31,12 +31,12 @@ class LegacyDistributedDataParallel(nn.Module):
             performing all-reduce (default: 256M).
     """
 
-    def __init__(self, module, process_group, buffer_size=2 ** 22):
+    def __init__(self, module, process_group, buffer_size=2 ** 28):
         super(LegacyDistributedDataParallel, self).__init__()
 
         self.module = module
         self.process_group = process_group
-        self.world_size = utils.get_world_size(self.process_group)
+        self.world_size = dist.get_world_size(group=self.process_group)
 
         # Never use a bigger buffer than the number of model params (elements)
         self.buffer_size = min(buffer_size, sum(p.numel() for p in module.parameters()))
@@ -100,7 +100,7 @@ class LegacyDistributedDataParallel(nn.Module):
             if nonzero_buffer:
                 buffer.div_(self.world_size)
 
-            utils.all_reduce(buffer, self.process_group)
+            dist.all_reduce(buffer, dist.ReduceOp.SUM, self.process_group)
 
             # copy all-reduced grads back into their original place
             offset = 0
