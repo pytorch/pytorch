@@ -2029,9 +2029,8 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         high = _for_val('high')
         return (math.floor(low), math.ceil(high)) if is_integral_dtype else (low, high)
 
-    if low is not None and high is not None:
-        assert low <= high, "Expected low value to be lower than or equal to high, but found higher instead."
-        assert high >= low, "Expected high value to be higher than or equal to low, but found lower instead."
+    if low is not None and high is not None and low > high:
+        raise ValueError(f"Expected low <= high, but got {low} > {high}")
 
     if dtype is torch.bool:
         result = torch.randint(0, 2, size, device=device, dtype=dtype)
