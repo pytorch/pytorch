@@ -923,6 +923,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.special.log_softmax: lambda input, dim, dtype=None: -1,
         torch.special.round: lambda input: -1,
         torch.special.sinc: lambda input: -1,
+        torch.special.multigammaln: lambda input, p: -1,
         torch.special.ndtri: lambda input: -1,
         torch.special.ndtr: lambda input: -1,
         torch.special.xlog1py: lambda input, other, out=None: -1,

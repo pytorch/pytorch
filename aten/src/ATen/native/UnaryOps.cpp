@@ -728,6 +728,10 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
   return self.copy_(args.lgamma_().sum(-1).add_(p2_sub_p * std::log(c10::pi<double>) * QUARTER));
 }
 
+Tensor special_multigammaln(const Tensor& self, int64_t p) {
+  return self.mvlgamma(p);
+};
+
 std::tuple<Tensor, Tensor> frexp(const Tensor& self) {
   Tensor mantissa = at::empty_like(self);
   Tensor exponent = at::empty_like(self, self.options().dtype(at::kInt));
