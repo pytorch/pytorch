@@ -2713,7 +2713,7 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
-    QuantizedCPU, QuantizedCUDA: max
+    QuantizedCPU, QuantizedCUDA: qmax
 
 - func: max.dim_max(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) max, Tensor(b!) max_values) -> (Tensor(a!) values, Tensor(b!) indices)
   structured: True
@@ -2851,7 +2851,7 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
-    QuantizedCPU, QuantizedCUDA: min
+    QuantizedCPU, QuantizedCUDA: qmin
 
 - func: min.dim_min(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) min, Tensor(b!) min_indices) -> (Tensor(a!) values, Tensor(b!) indices)
   structured: True

@@ -9,9 +9,11 @@ namespace at { namespace native {
 
 using reduce_minmax_fn =
     void (*)(Tensor&, Tensor&, const Tensor&, int64_t, bool);
+using structured_reduce_minmax_fn =
+    void (*)(const Tensor&, const Tensor&, const Tensor&, int64_t, bool);
 
-DECLARE_DISPATCH(reduce_minmax_fn, max_stub);
-DECLARE_DISPATCH(reduce_minmax_fn, min_stub);
+DECLARE_DISPATCH(structured_reduce_minmax_fn, max_stub);
+DECLARE_DISPATCH(structured_reduce_minmax_fn, min_stub);
 DECLARE_DISPATCH(reduce_minmax_fn, _aminmax_stub);
 
 using where_fn = void (*)(TensorIterator &, ScalarType);

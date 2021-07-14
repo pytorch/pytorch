@@ -338,6 +338,28 @@ static TensorIterator make_reduction(
   return TensorIterator::reduce_op(viewed_result, self.to(in_dtype));
 }
 
+static TensorIterator make_reduction(
+    const Tensor& self,
+    const Tensor& result1,
+    const Tensor& result2,
+    IntArrayRef dims,
+    bool keepdim,
+    ScalarType dtype1,
+    ScalarType dtype2) {
+  int64_t ndim = self.dim();
+  auto mask = at::native::make_dim_mask(dims, ndim);
+  auto viewed_result1 = at::native::review_reduce_result(result1, ndim, mask, keepdim);
+  auto viewed_result2 = at::native::review_reduce_result(result2, ndim, mask, keepdim);
+  // special case for type promotion in mixed precision, improves computational efficiency.
+  // We don't generalize this to common mismatched input/output types to avoid cross product
+  // of templated kernel launches.
+  if (self.scalar_type() == dtype1 ||
+      (self.is_cuda() && self.scalar_type() == kHalf && dtype1 == kFloat)) {
+    return TensorIterator::reduce_op(viewed_result1, viewed_result2, self);
+  }
+  return TensorIterator::reduce_op(viewed_result1, viewed_result2, self.to(dtype1));
+}
+
 static TensorIterator make_reduction_from_out_ty(
     const Tensor& self,
     const Tensor& result,
