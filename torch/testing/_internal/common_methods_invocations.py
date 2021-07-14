@@ -518,6 +518,7 @@ class OpInfo(object):
 
                  # the following metadata relates to complex support and is checked in test_ops.py
                  test_conjugated_samples=True,
+                 test_neg_view=True,
                  ):
 
         dtypes_args = (dtypes, dtypesIfCPU, dtypesIfCUDA, dtypesIfROCM)
@@ -615,6 +616,7 @@ class OpInfo(object):
             self.aliases = tuple(AliasInfo(a) for a in aliases)  # type: ignore[assignment]
 
         self.test_conjugated_samples = test_conjugated_samples
+        self.test_neg_view = test_neg_view
 
     def __call__(self, *args, **kwargs):
         """Calls the function variant of the operator."""
@@ -5195,6 +5197,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_linalg_cholesky,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
+           # RuntimeError: torch.cholesky: U(1,1) is zero, singular U.
+           test_neg_view=False,
            skips=(
                # Gradcheck for complex generates invalid inputs for this function
                SkipInfo('TestGradients', 'test_forward_mode_AD', dtypes=complex_types()),)),
@@ -5289,6 +5293,12 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_out=False,
            ),
+    OpInfo('resolve_neg',
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_view_as_real,
+           supports_forward_ad=True,
+           supports_out=False,
+           ),
     OpInfo('view_as_real',
            dtypes=complex_types(),
            supports_forward_ad=True,
@@ -5299,6 +5309,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_types_and(torch.half),
            supports_out=False,
            supports_forward_ad=True,
+           test_neg_view=False,
            sample_inputs_func=sample_inputs_view_as_complex),
     OpInfo('complex',
            dtypes=floating_types(),
@@ -5749,8 +5760,6 @@ op_db: List[OpInfo] = [
                    dtypes=complex_types(),
                    supports_out=False,
                    supports_forward_ad=True,
-                   # TODO(@anjali411): Test this once neg bit is added.
-                   test_conjugated_samples=False,
                    skips=(
                        # Skip since real and imag don't have out variants.
                        SkipInfo('TestUnaryUfuncs', 'test_out_arg_all_dtypes'),
@@ -5824,9 +5833,11 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_linalg_cholesky,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
+           # RuntimeError: torch.linalg.cholesky: U(1,1) is zero, singular U.
+           test_neg_view=False,
            skips=(
                # Gradcheck for complex generates invalid inputs for this function
-               SkipInfo('TestGradients', 'test_forward_mode_AD', dtypes=complex_types()),)
+               SkipInfo('TestGradients', 'test_forward_mode_AD', dtypes=complex_types()),),
            ),
     OpInfo('linalg.cholesky_ex',
            aten_name='linalg_cholesky_ex',
@@ -6434,7 +6445,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_pow,
            skips=(
-               SkipInfo('TestCommon', 'test_conj_view', device_type='cuda'),),),
+               SkipInfo('TestMathBits', 'test_conj_view', device_type='cuda'),),),
     OpInfo('prod',
            dtypes=all_types_and_complex_and(torch.bool),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -6472,6 +6483,7 @@ op_db: List[OpInfo] = [
                    ref=np.real,
                    dtypes=complex_types(),
                    supports_out=False,
+                   supports_forward_ad=True,
                    skips=(
                        # Skip since real and imag don't have out variants.
                        SkipInfo('TestUnaryUfuncs', 'test_out_arg_all_dtypes'),
@@ -7230,6 +7242,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_inplace_autograd=True,
            supports_forward_ad=True,
+           test_neg_view=False,
            sample_inputs_func=sample_inputs_index_put,
            skips=(
                SkipInfo('TestJit', 'test_variant_consistency_jit'),
