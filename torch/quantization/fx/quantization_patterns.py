@@ -754,10 +754,8 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                         bias = load_arg(quantized=torch.float)(self.linear_node.args[2])
                         other_args = other_args[1:]  # remove the bias argument
                     else:
-                        assert 'bias' in kwargs, \
-                            'expect bias provided as a keyword argument when it is not a positional argument'
-                        bias = kwargs['bias']
-                        kwargs.pop('bias')
+                        bias = kwargs.pop('bias', None)
+
                     prepack_args = (linear_weight, bias)
                     prepack_op = get_linear_prepack_op_for_dtype(weight_dtype)
                     packed_weight = quantized_graph.create_node(
