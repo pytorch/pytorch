@@ -520,6 +520,10 @@ class TORCH_API Reducer {
   // Retrieves parameter corresponding to the given VariableIndex.
   at::Tensor& get_param_from_index(size_t index);
 
+  // Cached bucket index to model parameter mapping. Populated after buckets
+  // are rebuilt after which this mapping is static.
+  mutable std::unordered_map<size_t, at::Tensor> cached_variables_for_bucket_;
+
   friend class Logger;
 };
 

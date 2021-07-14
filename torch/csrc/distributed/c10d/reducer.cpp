@@ -907,6 +907,10 @@ void Reducer::all_reduce_bucket(Bucket& bucket) {
 
 std::unordered_map<size_t, at::Tensor> Reducer::get_variables_for_bucket(
     const Bucket& bucket) const {
+      // Check if we have cached mapping previously.
+      if (has_rebuilt_bucket_ && !cached_variables_for_bucket_.empty()) {
+        return cached_variables_for_bucket_;
+      }
   std::unordered_map<size_t, at::Tensor> variables_for_bucket;
   for (const auto& variable_index : bucket.variable_indices) {
     auto& replica = bucket.replicas[0];
@@ -918,7 +922,15 @@ std::unordered_map<size_t, at::Tensor> Reducer::get_variables_for_bucket(
     variables_for_bucket.insert(
         {bucket_index_for_variable.intra_bucket_index, variable});
   }
-  return variables_for_bucket;
+
+  if (has_rebuilt_bucket_) {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(cached_variables_for_bucket_.empty());
+    cached_variables_for_bucket_ = std::move(variables_for_bucket);
+    return cached_variables_for_bucket_;
+  } else {
+    return variables_for_bucket;
+  }
+
 }
 
 // Called when the bucket at the specified index is ready to be reduced.
