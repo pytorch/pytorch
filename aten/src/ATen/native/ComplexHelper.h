@@ -31,16 +31,8 @@ inline DimVector computeStrideForViewAsReal(IntArrayRef oldstride) {
   return res;
 }
 
-// expects as input a complex tensor and returns back a tensor
-// with corresponding real dtype containing the complex values
-// in the last two dimensions
-Tensor view_as_real(const Tensor& self) {
-  TORCH_CHECK(!self.is_conj(), "view_as_real doesn't work on unresolved conjugated tensors.  To resolve the conjugate tensor so you can view it as real, use self.resolve_conj(); however, be warned that the resulting tensor will NOT alias the original.");
-  return native::_view_as_real_physical(self);
-}
-
 Tensor _view_as_real_physical(const Tensor& self) {
-  TORCH_CHECK(self.is_complex(), "view_as_real_physical is only supported for complex tensors");
+  TORCH_CHECK(self.is_complex(), "view_as_real is only supported for complex tensors");
   auto old_sizes = self.sizes();
   DimVector new_sizes(old_sizes.size() + 1);
   std::copy(old_sizes.begin(), old_sizes.end(), new_sizes.begin());
@@ -51,6 +43,14 @@ Tensor _view_as_real_physical(const Tensor& self) {
   const auto float_type = c10::toValueType(self.scalar_type());
   auto real_tensor = view_tensor(self, float_type, new_storage_offset, new_sizes, new_strides);
   return real_tensor;
+}
+
+// expects as input a complex tensor and returns back a tensor
+// with corresponding real dtype containing the complex values
+// in the last two dimensions
+Tensor view_as_real(const Tensor& self) {
+  TORCH_CHECK(!self.is_conj(), "view_as_real doesn't work on unresolved conjugated tensors.  To resolve the conjugate tensor so you can view it as real, use self.resolve_conj(); however, be warned that the resulting tensor will NOT alias the original.");
+  return _view_as_real_physical(self);
 }
 
 inline DimVector computeStrideForViewAsComplex(IntArrayRef oldstride) {
