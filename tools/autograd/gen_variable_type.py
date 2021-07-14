@@ -230,7 +230,7 @@ DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
 
     # The below failed StorageImpl use_count check but we skip tensor_impl check
     # just in case
-    '_cudnn_rnn', 'dequantize_self', 'fused_moving_avg_obs_fake_quant',
+    '_cudnn_rnn', 'dequantize_self',
 }
 
 DONT_ENFORCE_STORAGE_IMPL_USE_COUNT = {
