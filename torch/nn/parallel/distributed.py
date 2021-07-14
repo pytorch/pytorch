@@ -1258,21 +1258,23 @@ class DistributedDataParallel(Module):
 
                             It is locally stored by each worker
                             and shared by all the gradient tensors on the worker.
-            hook (callable): Averages gradient tensors across workers and defined as:
-                             ``hook(state: object, bucket: dist.GradBucket) -> torch.futures.Future``:
+            hook (callable): Callable with the following signature:
+                             ``hook(state: object, bucket: dist.GradBucket) -> torch.futures.Future[List[torch.tensor]]``:
 
                              This function is called once the bucket is ready. The
                              hook can perform whatever processing is needed and return
                              a Future indicating completion of any async work (ex: allreduce).
-                             If the hook doesn't perform any communication, it can also
-                             just return a completed Future. The Future should hold the
+                             If the hook doesn't perform any communication, it still
+                             must return a completed Future. The Future should hold the
                              new value of grad bucket's tensors. Once a bucket is ready,
                              c10d reducer would call this hook and use the tensors returned
                              by the Future and copy grads to individual parameters.
+                             Note that the future's return type must be a list with a
+                             tensor as its single element.
 
                              We also provide an API called ``get_future`` to retrieve a
-                             Future associated with the completion of ``c10d.ProcessGroup.work``.
-                             ``get_future`` is currently supported for MPI and also supported for most
+                             Future associated with the completion of ``c10d.ProcessGroup.Work``.
+                             ``get_future`` is currently supported for NCCL and also supported for most
                              operations on GLOO and MPI, except for peer to peer operations (send/recv).
 
         .. warning ::
@@ -1284,8 +1286,8 @@ class DistributedDataParallel(Module):
             before calling backward.
 
         .. warning ::
-            The Future object that hook returns should contain a result that has the same
-            shape with the tensors inside grad bucket.
+            The Future object that hook returns should contain a list that contains a
+            single tensor that has the same shape with the tensors inside grad bucket.
 
         .. warning ::
             DDP communication hook does not support single-process multiple-device mode.
