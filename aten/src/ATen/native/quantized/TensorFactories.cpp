@@ -58,20 +58,8 @@ Tensor empty_per_channel_affine_quantized(
   TORCH_CHECK(
       options.has_dtype(),
       "Must provide data type for Tensor creation functions.");
-
-  Tensor new_scales;
-  Tensor new_zero_points;
-  if(options.device().type() == DeviceType::CPU){
-    new_scales=scales.cpu();
-    new_zero_points=zero_points.cpu();
-  } else {
-    new_scales=scales.cuda();
-    new_zero_points=zero_points.cuda();
-  }
-
   QuantizerPtr quantizer = make_per_channel_affine_quantizer(
-          new_scales, new_zero_points, axis, typeMetaToScalarType(options.dtype()));
-
+          scales.to(options.device()), zero_points.to(options.device()), axis, typeMetaToScalarType(options.dtype()));
   return new_qtensor(
       size,
       options,
