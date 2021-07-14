@@ -670,7 +670,7 @@ def convert_eq_obs(
             assert(isinstance(weight_eq_obs, _WeightEqualizationObserver))
             equalization_scale = weight_eq_obs.equalization_scale
             if equalization_scale.nelement() == 0:
-                equalization_scale = None
+                equalization_scale = None  # type: ignore[assignment]
             maybe_next_equalization_scale = maybe_get_next_equalization_scale(node, modules)
 
             # Scale the weight nodes
