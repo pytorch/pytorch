@@ -65,6 +65,51 @@ def fp16_compress_hook(
     return fut.then(decompress)
 
 
+class OptimizerHookState(object):
+    """
+    Holds state for running optimizer in-line after DDP communication hook.
+    Currently contains optimizer class as well as optimizer args.
+    """
+    __slots__ = ['functional_optim_cls', 'functional_optim_args', 'functional_optimizer']
+
+    def __init__(self, functional_optim_cls, *functional_optim_args):
+        # TODO: Support kwargs
+        self.functional_optim_cls = functional_optim_cls
+        self.functional_optim_args = functional_optim_args
+        self.functional_optimizer = self.functional_optim_cls(
+            [],
+            *self.functional_optim_args,
+            allow_empty_param_list=True
+        )
+        if not hasattr(self.functional_optimizer, 'step_param'):
+            raise ValueError(
+                f"Class {self.functional_optim_cls} must implement method step_param."
+            )
+
+def hook_then_optimizer(
+    hook: Callable[[Any, dist.GradBucket], torch.futures.Future], optimizer_state: OptimizerHookState
+) -> Callable[[Any, dist.GradBucket], torch.futures.Future]:
+    """Runs optimizer in a functional fashion after DDP communication hook."""
+
+    def hook_then_optimizer_wrapper(
+        hook_state, bucket: dist.GradBucket
+    ) -> torch.futures.Future:
+        # Run original hook
+        fut = hook(hook_state, bucket)
+
+        def optimizer_step(fut):
+            gradient_tensors = bucket.get_per_parameter_tensors()
+            idx_to_model_param = bucket.get_grad_index_to_variable_mapping()
+            for grad_idx, model_param in idx_to_model_param.items():
+                grad = gradient_tensors[grad_idx]
+                # Note: Cannot use param.grad here, since bucket grads may have
+                # not yet been written back.
+                optimizer_state.functional_optimizer.step_param(model_param, grad)
+            return [bucket.get_tensor()]
+        return fut.then(optimizer_step)
+
+    return hook_then_optimizer_wrapper
+
 def fp16_compress_wrapper(
     hook: Callable[[Any, dist.GradBucket], torch.futures.Future]
 ) -> Callable[[Any, dist.GradBucket], torch.futures.Future]:

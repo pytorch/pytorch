@@ -20,6 +20,7 @@ import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
 import torch.distributed.algorithms.ddp_comm_hooks.post_localSGD_hook as post_localSGD
 import torch.distributed.algorithms.model_averaging.averagers as averagers
 import torch.distributed.algorithms.model_averaging.utils as model_averaging_utils
+from torch.distributed.optim.functional_sgd import _FunctionalSGD
 import torch.nn as nn
 import torch.nn.functional as F
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
@@ -3796,6 +3797,90 @@ class DistributedTest:
             # thus accesses std::map, which fills in a default value for the
             # type if it didn't exist.
             self.assertEqual(ddp_logging_data.get("comm_hook", ""), "")
+
+
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        @skip_if_lt_x_gpu(2)
+        def test_ddp_hook_with_optimizer_parity(self):
+            rank = self.rank
+            torch.cuda.set_device(rank)
+            model = LargeNet()
+            sgd_lr = 1e-2
+            ddp_model_with_optimizer_hook = torch.nn.parallel.DistributedDataParallel(
+                copy.deepcopy(model).cuda(),
+                device_ids=[self.rank],
+            )
+            ddp_model_with_allreduce_hook = torch.nn.parallel.DistributedDataParallel(
+                copy.deepcopy(model).cuda(),
+                device_ids=[self.rank],
+            )
+            sgd_allreduce_hook = torch.optim.SGD(
+                ddp_model_with_allreduce_hook.parameters(),
+                lr=sgd_lr
+             )
+            ddp_model_with_no_hook = torch.nn.parallel.DistributedDataParallel(
+                copy.deepcopy(model).cuda(),
+                device_ids=[self.rank],
+            )
+            sgd_no_hook = torch.optim.SGD(
+                ddp_model_with_no_hook.parameters(),
+                lr=sgd_lr
+            )
+            allreduce_hook = default.allreduce_hook
+            opt_hook_state = default.OptimizerHookState(
+                _FunctionalSGD,
+                sgd_lr,
+            )
+            ddp_model_with_optimizer_hook.register_comm_hook(
+                None,
+                default.hook_then_optimizer(allreduce_hook, opt_hook_state),
+            )
+            ddp_model_with_allreduce_hook.register_comm_hook(
+                None,
+                default.allreduce_hook,
+            )
+
+            inp = torch.randn(1, 1000).cuda()
+            # Verify params initially
+            for hook_param, allreduce_param, no_hook_param in zip(
+                ddp_model_with_optimizer_hook.parameters(),
+                ddp_model_with_allreduce_hook.parameters(),
+                ddp_model_with_no_hook.parameters()
+            ):
+                self.assertEqual(hook_param, allreduce_param)
+                self.assertEqual(hook_param, no_hook_param)
+
+            old_hook_params = copy.deepcopy(
+                list(ddp_model_with_optimizer_hook.parameters())
+            )
+            for i in range(6):
+                out = ddp_model_with_optimizer_hook(inp)
+                loss = out.sum()
+                loss.backward()
+                out = ddp_model_with_allreduce_hook(inp)
+                loss = out.sum()
+                loss.backward()
+                sgd_allreduce_hook.step()
+                out = ddp_model_with_no_hook(inp)
+                loss = out.sum()
+                loss.backward()
+                sgd_no_hook.step()
+                for hook_param, allreduce_param, no_hook_param in zip(
+                    ddp_model_with_optimizer_hook.parameters(),
+                    ddp_model_with_allreduce_hook.parameters(),
+                    ddp_model_with_no_hook.parameters()
+                ):
+                    self.assertEqual(hook_param, allreduce_param)
+                    self.assertEqual(hook_param, no_hook_param)
+                # Assert parameters have changed from initial, otherwise the
+                # above would be trivially true.
+                self.assertNotEqual(
+                    old_hook_params,
+                    list(ddp_model_with_optimizer_hook.parameters())
+                )
 
         def _test_ddp_hook_parity(self, state, hook):
             rank = self.rank
