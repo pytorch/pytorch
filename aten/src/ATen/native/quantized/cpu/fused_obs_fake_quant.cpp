@@ -14,21 +14,33 @@ void calculate_moving_average(
     const at::Tensor& x,
     const at::Tensor& averaging_const,
     at::Tensor& running_min,
-    at::Tensor& running_max) {
+    at::Tensor& running_max,
+    bool per_row_fake_quant,
+    int ch_axis) {
   at::Tensor x_min, x_max;
-  std::tie(x_min, x_max) = at::_aminmax(x);
-  const float min_curr_val = x_min.item().toFloat();
-  const float max_curr_val = x_max.item().toFloat();
+  if (per_row_fake_quant) {
+    TORCH_CHECK(
+        ch_axis == 0,
+        "Per-channel FakeQuant in fused_moving_avg_obs_fake_quant is only supported on axis == 0");
+    std::tie(x_min, x_max) = at::_aminmax(x, 1);
+  } else {
+    std::tie(x_min, x_max) = at::_aminmax(x);
+  }
+  const float* min_curr_val = x_min.data_ptr<float>();
+  const float* max_curr_val = x_max.data_ptr<float>();
   // Moving Average Min/Max observer for input tensor
   float* running_min_val = running_min.data_ptr<float>();
   float* running_max_val = running_max.data_ptr<float>();
   float* averaging_const_val = averaging_const.data_ptr<float>();
-  *running_min_val = std::isinf(*running_min_val) ? min_curr_val
-                                                  : *running_min_val +
-          *averaging_const_val * (min_curr_val - *running_min_val);
-  *running_max_val = std::isinf(*running_max_val) ? max_curr_val
-                                                  : *running_max_val +
-          *averaging_const_val * (max_curr_val - *running_max_val);
+  for (const auto i : c10::irange(x_min.numel())) {
+    running_min_val[i] = std::isinf(running_min_val[i]) ? min_curr_val[i]
+                                                        : running_min_val[i] +
+            *averaging_const_val * (min_curr_val[i] - running_min_val[i]);
+    running_max_val[i] = std::isinf(running_max_val[i]) ? max_curr_val[i]
+                                                        : running_max_val[i] +
+            *averaging_const_val * (max_curr_val[i] - running_max_val[i]);
+  }
+
   return;
 }
 
@@ -45,12 +57,11 @@ std::tuple<at::Tensor, at::Tensor> choose_qparams_fake_quant(
     int ch_axis) {
   std::tuple<at::Tensor, at::Tensor> fake_quant_out;
   at::Tensor x_min, x_max;
-
   if (per_row_fake_quant) {
     float* x_min_data = inp_running_min.data_ptr<float>();
     float* x_max_data = inp_running_max.data_ptr<float>();
 
-    for (const auto i : c10::irange(x_min.numel())) {
+    for (const auto i : c10::irange(inp_running_min.numel())) {
 #ifdef USE_FBGEMM
       fbgemm::TensorQuantizationParams x_qparams{};
       x_qparams = fbgemm::ChooseQuantizationParams(
@@ -135,7 +146,13 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cpu(
   // Calculate min/max
   auto observe = observer_on.item().toInt();
   if (observe) {
-    calculate_moving_average(self, averaging_const, running_min, running_max);
+    calculate_moving_average(
+        self,
+        averaging_const,
+        running_min,
+        running_max,
+        per_row_fake_quant,
+        ch_axis);
   }
   // Calculate qparams and fake_quantize
   auto fake_quant = fake_quant_on.item().toInt();

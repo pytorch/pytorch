@@ -209,7 +209,6 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cuda(
     const int64_t ch_axis,
     bool per_row_fq,
     bool symmetric_quant) {
-  auto mask = at::ones_like(x, at::kBool, MemoryFormat::Preserve);
   const auto x_contig = x.contiguous();
   _calculate_moving_average(
       x_contig, observer_on, averaging_const, running_min, running_max);
@@ -241,6 +240,7 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cuda(
           x, scale, zero_point, qmin, qmax);
     }
   }
+  auto mask = at::ones_like(x, at::kBool, MemoryFormat::Preserve);
   return std::make_tuple(x, mask);
 }
 } // namespace native
