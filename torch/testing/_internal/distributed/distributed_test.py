@@ -5781,8 +5781,8 @@ class DistributedTest:
                     expected_grad = sum(i for i in range(world_size)) / world_size
                     self.assertEqual(net.module.weight.grad.item(), expected_grad)
 
-            join_config = net.ddp_uneven_inputs_config
-            self.assertFalse(join_config.ddp_join_enabled)
+            join_config = net._join_config
+            self.assertFalse(join_config.enable)
             self.validate_net_equivalence(net)
 
         @skip_if_lt_x_gpu(2)

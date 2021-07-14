@@ -14,9 +14,11 @@ QConfigAny = Union[torch.quantization.QConfig,
                    torch.quantization.QConfigDynamic, None]
 
 
-def add_device_to_obs_ctr_in_qconfig(qconfig, device='cpu'):
+def add_device_to_obs_ctr_in_qconfig(qconfig: QConfigAny, device='cpu'):
     factory_kwargs = {'device': device}
-    if device is None:
+    if (device is None or qconfig is None or
+            qconfig.activation.__module__ != 'torch.quantization.observer' or
+            qconfig.weight.__module__ != 'torch.quantization.observer'):
         return qconfig
     elif isinstance(qconfig, torch.quantization.QConfig):
         return torch.quantization.QConfig(
