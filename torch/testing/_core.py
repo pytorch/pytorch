@@ -137,8 +137,6 @@ def _compare_tensors_internal(a: torch.Tensor, b: torch.Tensor, *, rtol, atol, e
     # Compares complex tensors' real and imaginary parts separately.
     # (see NOTE Test Framework Tensor "Equality")
     if a.is_complex():
-        a = a.resolve_conj()
-        b = b.resolve_conj()
         if equal_nan == "relaxed":
             a = a.clone()
             b = b.clone()
