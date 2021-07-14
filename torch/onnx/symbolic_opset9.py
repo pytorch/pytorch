@@ -461,7 +461,7 @@ def expand(g, self, size, implicit):
         # Expand with -1 dim value means dim is unchanged.
         # Since onnx::expand supports two-way broadcasting,
         # -1 dim value can be exported to onnx as 1
-        size = sym_help._reshape_helper(g, stack(g, size, 0), g.op("Constant", value_t=torch.tensor([-1])), allowzero=0)
+        size = sym_help._reshape_helper(g, stack(g, size, 0), g.op("Constant", value_t=torch.tensor([-1])))
     dtype = 4  # dim type is int64
     ones = ones_like(g, size, dtype)
     neg_ones = mul(g, ones, g.op("Constant", value_t=torch.tensor(-1)))
@@ -2032,7 +2032,7 @@ def repeat_interleave(g, self, repeats, dim=None, output_size=None):
     # if dim is None flatten
     # By default, use the flattened input array, and return a flat output array
     if sym_help._is_none(dim):
-        input = sym_help._reshape_helper(g, self, g.op("Constant", value_t=torch.tensor([-1])), allowzero=0)
+        input = sym_help._reshape_helper(g, self, g.op("Constant", value_t=torch.tensor([-1])))
         dim = 0
     else:
         dim = sym_help._maybe_get_scalar(dim)
@@ -2503,7 +2503,7 @@ def narrow(g, input, dim, start, length):
 
 def argmax(g, input, dim, keepdim):
     if sym_help._is_none(dim):
-        flattened = sym_help._reshape_helper(g, input, g.op("Constant", value_t=torch.tensor([-1])), allowzero=0)
+        flattened = sym_help._reshape_helper(g, input, g.op("Constant", value_t=torch.tensor([-1])))
         return g.op("ArgMax", flattened, axis_i=0, keepdims_i=False)
     else:
         dim = _parse_arg(dim, "i")
@@ -2513,7 +2513,7 @@ def argmax(g, input, dim, keepdim):
 
 def argmin(g, input, dim, keepdim):
     if sym_help._is_none(dim):
-        flattened = sym_help._reshape_helper(g, input, g.op("Constant", value_t=torch.tensor([-1])), allowzero=0)
+        flattened = sym_help._reshape_helper(g, input, g.op("Constant", value_t=torch.tensor([-1])))
         return g.op("ArgMin", flattened, axis_i=0, keepdims_i=False)
     else:
         dim = _parse_arg(dim, "i")
@@ -2846,7 +2846,7 @@ def index(g, self, index):
                 folded_adv_idx_shape_list = [g.op("Constant", value_t=torch.LongTensor([-1]))]  \
                     + [dim_tensor_list[i] for i in range(rank) if i not in adv_idx_indices]
                 folded_adv_idx_shape = g.op("Concat", *folded_adv_idx_shape_list, axis_i=0)
-                self = sym_help._reshape_helper(g, self, folded_adv_idx_shape, allowzero=0)
+                self = sym_help._reshape_helper(g, self, folded_adv_idx_shape)
 
                 # Transpose folded advanced indexed axis to its original location.
                 adv_idx_permute = list(range(1, adv_idx_indices[0] + 1))                    \
@@ -2897,7 +2897,7 @@ def baddbmm(g, self, batch1, batch2, beta, alpha):
 
 
 def meshgrid(g, tensor_list):
-    tensors = [sym_help._reshape_helper(g, t, g.op("Constant", value_t=torch.LongTensor([-1])), allowzero=0)
+    tensors = [sym_help._reshape_helper(g, t, g.op("Constant", value_t=torch.LongTensor([-1])))
                for t in sym_help._unpack_list(tensor_list)]
     tensors_shape = [g.op("Shape", t) for t in tensors]
     out_shape = g.op("Concat", *tensors_shape, axis_i=0)
@@ -2939,7 +2939,7 @@ def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
     # 0 in the shape list keeps dimension value unchanged.
     shape = [0, num_groups, -1]
     input_reshaped = sym_help._reshape_helper(g, input,
-                                              g.op("Constant", value_t=torch.LongTensor(shape)), allowzero=0)
+                                              g.op("Constant", value_t=torch.LongTensor(shape)))
 
     # C is always divisible by num_groups
     # Due to shape difference. we need to apply weight and bias after
@@ -3007,7 +3007,7 @@ def item(g, self):
 
 
 def take(g, self, index):
-    self_flattened = sym_help._reshape_helper(g, self, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64)), allowzero=0)
+    self_flattened = sym_help._reshape_helper(g, self, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64)))
     out = index_select(g, self_flattened, 0, index)
     out = reshape_as(g, out, index)
     return out
@@ -3051,7 +3051,7 @@ def kl_div(g, input, target, reduction, log_target):
 def as_strided(g, self, sizes, strides, offset=None):
     sizes = sym_help._maybe_get_const(sizes, "is")
     rank = len(strides)
-    self_1d = sym_help._reshape_helper(g, self, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64)), allowzero=0)
+    self_1d = sym_help._reshape_helper(g, self, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64)))
     ind: Optional[torch.Tensor]
     if not sym_help._is_value(sizes):
         ind = torch.tensor([0], dtype=torch.long)
@@ -3069,7 +3069,7 @@ def as_strided(g, self, sizes, strides, offset=None):
             r_size[i] = -1
             size = select(g, sizes, g.op("Constant", value_t=torch.tensor([0])), g.op("Constant", value_t=torch.tensor(i)))
             tmp_ind = sym_help._reshape_helper(g, arange(g, size, 4, None, None, None),
-                                               g.op("Constant", value_t=torch.tensor(r_size)), allowzero=0)
+                                               g.op("Constant", value_t=torch.tensor(r_size)))
             tmp_ind = g.op("Mul", tmp_ind, g.op("Constant", value_t=torch.tensor([stride])))
             if ind is None:
                 ind = tmp_ind
