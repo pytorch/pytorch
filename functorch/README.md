@@ -280,3 +280,16 @@ prototype.
 
 ## License
 Functorch has a BSD-style license, as found in the [LICENSE](LICENSE) file.
+
+## Citing functorch
+
+If you use functorch in your publication, please cite it by using the following BibTeX entry.
+
+```
+@Misc{functorch2021,
+  author =       {functorch authors},
+  title =        {functorch: JAX-like composable function transforms for PyTorch},
+  howpublished = {\url{https://github.com/facebookresearch/functorch}},
+  year =         {2021}
+}
+```
