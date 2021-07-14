@@ -187,9 +187,8 @@ def main() -> None:
     options = parse_args()
 
     # Check if clang-tidy executable exists
-    exists = os.access(options.clang_tidy_exe, os.X_OK) or shutil.which(
-        options.clang_tidy_exe
-    )
+    exists = os.access(options.clang_tidy_exe, os.X_OK)
+
     if not exists:
         msg = (
             "Could not find 'clang-tidy' binary\n"
@@ -197,7 +196,7 @@ def main() -> None:
             "   python3 tools/linter/install/clang_tidy.py"
         )
         print(msg)
-        sys.exit(1)
+        raise RuntimeError("Could not find clang-tidy binary")
 
     return_code = run(options)
     if return_code != 0:
