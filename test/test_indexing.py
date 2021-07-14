@@ -800,9 +800,11 @@ class TestIndexing(TestCase):
         def fn1(x):
             x[x < 50] = 1.0
             return x
+        
         def fn2(x):
             x[0:50] = 1.0
             return x
+        
         scripted_fn1 = torch.jit.script(fn1)
         scripted_fn2 = torch.jit.script(fn2)
         data = torch.arange(100, device=device, dtype=torch.float)
