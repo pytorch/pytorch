@@ -143,8 +143,6 @@ QConfigAny = Union[QConfig, QConfigDynamic, None]
 
 # should probably be in qconfig_utils but get circular reference issues TODO
 def add_device_to_obs_ctr_in_qconfig(qconfig: QConfigAny, module: torch.nn.Module):
-    print(qconfig.activation.__module__)
-
     def assert_and_get_unique_device(module: torch.nn.Module) -> Any:
         devices = {p.device for p in module.parameters()} | \
             {p.device for p in module.buffers()}
