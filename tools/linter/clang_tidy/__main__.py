@@ -197,7 +197,7 @@ def main() -> None:
             "   python3 tools/linter/install/clang_tidy.py"
         )
         print(msg)
-        exit(1)
+        sys.exit(1)
 
     return_code = run(options)
     if return_code != 0:
