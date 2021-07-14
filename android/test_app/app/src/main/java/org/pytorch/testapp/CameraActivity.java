@@ -170,7 +170,7 @@ public class CameraActivity extends AppCompatActivity {
     Log.i(TAG, String.format("analyzeImage(%s, %d)", image, rotationDegrees));
     if (mModule == null) {
       Log.i(TAG, "Loading module from asset '" + BuildConfig.MODULE_ASSET_NAME + "'");
-      mModule = PyTorchAndroid.loadModuleFromAsset(getAssets(), BuildConfig.MODULE_ASSET_NAME);
+      mModule = LiteModuleLoader.loadModuleFromAsset(getAssets(), BuildConfig.MODULE_ASSET_NAME);
       mInputTensorBuffer = Tensor.allocateFloatBuffer(3 * TENSOR_WIDTH * TENSOR_HEIGHT);
       mInputTensor =
           Tensor.fromBlob(mInputTensorBuffer, new long[] {1, 3, TENSOR_WIDTH, TENSOR_HEIGHT});

@@ -63,7 +63,7 @@ android {
         mnet {
             dimension "model"
             applicationIdSuffix ".mnet"
-            buildConfigField("String", "MODULE_ASSET_NAME", "\"mnet.pt\"")
+            buildConfigField("String", "MODULE_ASSET_NAME", "\"mnet.ptl\"")
             addManifestPlaceholders([APP_NAME: "MNET"])
             buildConfigField("String", "LOGCAT_TAG", "\"pytorch-mnet\"")
         }

@@ -19,6 +19,7 @@ import java.io.OutputStream;
 import java.nio.FloatBuffer;
 import org.pytorch.Device;
 import org.pytorch.IValue;
+import org.pytorch.LiteModuleLoader;
 import org.pytorch.MemoryFormat;
 import org.pytorch.Module;
 import org.pytorch.PyTorchAndroid;
@@ -129,12 +130,11 @@ public class MainActivity extends AppCompatActivity {
       mInputTensor =
           Tensor.fromBlob(
               mInputTensorBuffer, BuildConfig.INPUT_TENSOR_SHAPE, MemoryFormat.CHANNELS_LAST);
-      PyTorchAndroid.setNumThreads(1);
       mModule =
           BuildConfig.USE_VULKAN_DEVICE
-              ? PyTorchAndroid.loadModuleFromAsset(
+              ? LiteModuleLoader.loadModuleFromAsset(
                   getAssets(), BuildConfig.MODULE_ASSET_NAME, Device.VULKAN)
-              : PyTorchAndroid.loadModuleFromAsset(getAssets(), BuildConfig.MODULE_ASSET_NAME);
+              : LiteModuleLoader.loadModuleFromAsset(getAssets(), BuildConfig.MODULE_ASSET_NAME);
     }
 
     final long startTime = SystemClock.elapsedRealtime();
