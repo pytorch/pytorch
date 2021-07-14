@@ -1,4 +1,4 @@
-import lldb
+import lldb  # type: ignore
 # load into lldb instance with:
 #   command script import tools/lldb/deploy_debugger.py
 
