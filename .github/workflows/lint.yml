@@ -337,10 +337,9 @@ jobs:
           cd "${GITHUB_WORKSPACE}"
           # The Docker image has our custom build, so we don't need to install it
           python3 -m tools.linter.clang_tidy \
-            --clang-tidy-exe clang-tidy \
+            --clang-tidy-exe $(which clang-tidy) \
             --diff-file pr.diff \
-            --verbose \
-            --disable-progress-bar 2>&1 | tee "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
+            --verbose 2>&1 | tee "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
       - name: Annotate output
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
