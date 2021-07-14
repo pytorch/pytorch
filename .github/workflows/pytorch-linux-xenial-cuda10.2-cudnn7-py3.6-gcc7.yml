@@ -152,11 +152,10 @@ jobs:
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
           CIRCLE_WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         run: |
-          export PYTHONPATH=$PWD
           COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
           export COMMIT_TIME
           pip3 install requests
-          python3 .circleci/scripts/upload_binary_size_to_scuba.py || exit 0
+          python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
       - name: Chown workspace
         run: |
           # Ensure the working directory gets chowned back to the current user
@@ -193,24 +192,30 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: ubuntu-18.04
     env:
+      TEST_RUNNER_TYPE: linux.8xlarge.nvidia.gpu
+      ENABLE_JIT_LEGACY_TEST: 1
+      ENABLE_MULTIGPU_TEST: 1
+      ENABLE_NOGPU_NO_AVX_TEST: 1
+      ENABLE_NOGPU_NO_AVX2_TEST: 1
+      ENABLE_SLOW_TEST: 1
       NUM_TEST_SHARDS: 2
+      MULTIGPU_RUNNER_TYPE: linux.16xlarge.nvidia.gpu
+      NOGPU_RUNNER_TYPE: linux.2xlarge
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
+      render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
     container:
       image: python:3.9
     steps:
+      - name: Install dependencies
+        run: pip install typing-extensions
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - name: Generating test matrix
         id: set-matrix
-        run: |
-          # outputting for debugging purposes
-          MATRIX=$(python .github/scripts/generate_pytorch_test_matrix.py)
-          echo "${MATRIX}"
-          echo "::set-output name=matrix::${MATRIX}"
+        run: .github/scripts/generate_pytorch_test_matrix.py
 
   test:
-    runs-on: linux.8xlarge.nvidia.gpu
     needs:
       - calculate-docker-image
       - build
@@ -218,11 +223,13 @@ jobs:
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
       fail-fast: false
+    runs-on: ${{ matrix.runner }}
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
       JOB_BASE_NAME: pytorch-linux-xenial-cuda10.2-cudnn7-py3.6-gcc7-test
-      NUM_TEST_SHARDS: 2
-      TEST_CONFIG: ${{ matrix.test_config }}
+      TEST_CONFIG: ${{ matrix.config }}
+      SHARD_NUMBER: ${{ matrix.shard }}
+      NUM_TEST_SHARDS: ${{ matrix.num_shards }}
     steps:
       - name: Log in to ECR
         run: |
@@ -241,7 +248,7 @@ jobs:
         run: |
           docker pull "${DOCKER_IMAGE}"
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        if: ${{ contains(env.BUILD_ENVIRONMENT, 'cuda') }}
+        if: ${{ contains(env.BUILD_ENVIRONMENT, 'cuda') && !contains(matrix.config, 'nogpu') }}
         run: |
           bash .github/scripts/install_nvidia_utils_linux.sh
           echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
@@ -272,9 +279,12 @@ jobs:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Test PyTorch
         run: |
-          if [[ $NUM_TEST_SHARDS -eq 2 ]]; then
-            export SHARD_NUMBER=$TEST_CONFIG
+          if [[ $TEST_CONFIG == 'multigpu' ]]; then
+            TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
           else
+            TEST_COMMAND=.jenkins/pytorch/test.sh
+          fi
+          if [[ $NUM_TEST_SHARDS -ne 2 ]]; then
             export SHARD_NUMBER=0
           fi
           # TODO: Stop building test binaries as part of the build phase
@@ -288,7 +298,10 @@ jobs:
             -e IN_CI \
             -e SHARD_NUMBER \
             -e JOB_BASE_NAME \
+            -e TEST_CONFIG \
+            -e NUM_TEST_SHARDS \
             -e MAX_JOBS="$(nproc --ignore=2)" \
+            -e SCCACHE_BUCKET \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
@@ -298,7 +311,7 @@ jobs:
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}" \
-            sh -c 'sudo chown -R jenkins . && pip install dist/*.whl && .jenkins/pytorch/test.sh'
+            sh -c 'sudo chown -R jenkins . && pip install dist/*.whl && '$TEST_COMMAND
       - name: Chown workspace
         if: always()
         run: |
@@ -314,7 +327,16 @@ jobs:
         name: Store PyTorch Test Reports
         if: always()
         with:
-          name: test-reports
+          name: test-reports-${{ matrix.config }}
+          retention-days: 14
+          if-no-files-found: error
+          path:
+            test-reports-*.zip
+      - uses: seemethere/upload-artifact-s3@9d7ceb0ab39c2c88d93ef7792b27425b27d59162
+        name: Store PyTorch Test Reports on S3
+        if: always()
+        with:
+          name: test-reports-${{ matrix.config }}
           retention-days: 14
           if-no-files-found: error
           path:
@@ -335,8 +357,12 @@ jobs:
   render_test_results:
     if: always()
     needs:
+      - generate-test-matrix
       - test
     runs-on: ubuntu-18.04
+    strategy:
+      matrix: ${{ fromJson(needs.generate-test-matrix.outputs.render-matrix) }}
+      fail-fast: false
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
@@ -346,7 +372,7 @@ jobs:
       - uses: actions/download-artifact@v2
         name: Download PyTorch Test Reports
         with:
-          name: test-reports
+          name: test-reports-${{ matrix.config }}
           path: .
       - name: Unzip test reports
         run: |
@@ -380,5 +406,4 @@ jobs:
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
           CIRCLE_WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         run: |
-          export PYTHONPATH=$PWD
-          python tools/stats/print_test_stats.py --upload-to-s3 --compare-with-s3 test
+          python -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test

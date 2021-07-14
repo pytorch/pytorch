@@ -30,7 +30,7 @@ jobs:
           time docker pull ${DOCKER_IMAGE}:${DOCKER_TAG} >/dev/null
           export id=$(docker run --env-file "${BASH_ENV}" --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE}:${DOCKER_TAG})
 
-          git submodule sync && git submodule update -q --init --recursive --depth 1
+          git submodule sync && git submodule update -q --init --recursive --depth 1 --jobs 0
 
           docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
 
@@ -81,7 +81,7 @@ jobs:
             cd /pytorch && export COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
             python3 -mpip install requests && \
             SCRIBE_GRAPHQL_ACCESS_TOKEN=${SCRIBE_GRAPHQL_ACCESS_TOKEN} \
-            python3 .circleci/scripts/upload_binary_size_to_scuba.py || exit 0
+            python3 tools/stats/upload_binary_size_to_scuba.py || exit 0
     - store_artifacts:
         path: /home/circleci/project/dist
 
@@ -223,8 +223,7 @@ jobs:
           export JOB_BASE_NAME="$CIRCLE_JOB"
           export CIRCLE_WORKFLOW_ID="$CIRCLE_WORKFLOW_ID"
           cd workspace
-          export PYTHONPATH="\${PWD}"
-          python tools/stats/print_test_stats.py --upload-to-s3 --compare-with-s3 test
+          python -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
           EOL
           echo "(cat docker_commands.sh | docker exec -u jenkins -e LANG=C.UTF-8 -i "$id" bash) 2>&1" > command.sh
           unbuffer bash command.sh | ts
@@ -254,6 +253,9 @@ jobs:
       python_version:
         type: string
         default: "3.8"
+      vs_version:
+        type: string
+        default: "16.8.6"
       vc_version:
         type: string
         default: "14.16"
@@ -321,6 +323,9 @@ jobs:
       python_version:
         type: string
         default: "3.8"
+      vs_version:
+        type: string
+        default: "16.8.6"
       vc_version:
         type: string
         default: "14.16"
@@ -376,9 +381,8 @@ jobs:
             set -ex
             export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_WIN_BUILD_V1}
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_WIN_BUILD_V1}
-            export PYTHONPATH="$PWD"
             pip install typing_extensions boto3
-            python tools/stats/print_test_stats.py --upload-to-s3 --compare-with-s3 test
+            python -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
           when: always
       - store_test_results:
           path: test/test-reports

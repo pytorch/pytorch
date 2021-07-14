@@ -17,7 +17,7 @@ DECLARE_DISPATCH(reduce_minmax_fn, _aminmax_stub);
 using where_fn = void (*)(TensorIterator &, ScalarType);
 DECLARE_DISPATCH(where_fn, where_kernel);
 
-using is_infinity_op_fn = void (*)(TensorIterator &);
+using is_infinity_op_fn = void (*)(TensorIteratorBase &);
 DECLARE_DISPATCH(is_infinity_op_fn, isposinf_stub);
 DECLARE_DISPATCH(is_infinity_op_fn, isneginf_stub);
 

@@ -32,7 +32,7 @@ void check_tensor_memory_format(const Tensor& ref, const Tensor& other) {
   TORCH_CHECK(
       other.is_contiguous(ref.suggest_memory_format()),
       "Float tensor should be contiguous "
-      "in same memory format as quantizd tensor");
+      "in same memory format as quantized tensor");
 }
 
 // ****************** HEY YOU! YES YOU! Read this! ********************
@@ -2059,14 +2059,15 @@ void q_batch_norm_kernel(
 
 }
 
-void fake_quantize_tensor_cachemask_kernel(
-    Tensor& output,
-    Tensor& mask,
-    const Tensor& input,
-    float sc,
-    int64_t z_point,
-    int64_t quant_min,
-    int64_t quant_max) {
+void _fake_quantize_tensor_helper(
+  Tensor& output,
+  Tensor& mask,
+  const Tensor& input,
+  float sc,
+  int64_t z_point,
+  int64_t quant_min,
+  int64_t quant_max) {
+
   float inv_scale = 1.0f / sc;
 
   auto iter_combined = TensorIteratorConfig()
@@ -2089,7 +2090,28 @@ void fake_quantize_tensor_cachemask_kernel(
       }
     });
   });
+  }
 
+void fake_quantize_tensor_cachemask_kernel(
+    Tensor& output,
+    Tensor& mask,
+    const Tensor& input,
+    float sc,
+    int64_t z_point,
+    int64_t quant_min,
+    int64_t quant_max) {
+  _fake_quantize_tensor_helper(output, mask, input, sc, z_point, quant_min, quant_max);
+}
+
+void fake_quantize_tensor_cachemask_tensor_qparams_kernel(
+    Tensor& output,
+    Tensor& mask,
+    const Tensor& input,
+    const Tensor& sc,
+    const Tensor& z_point,
+    int64_t quant_min,
+    int64_t quant_max) {
+  _fake_quantize_tensor_helper(output, mask, input, sc.item().toFloat(), z_point.item().toInt(), quant_min, quant_max);
 }
 
 void fake_quantize_learnable_tensor_grad_kernel_cpu(
@@ -2154,14 +2176,14 @@ void fake_quant_per_channel_cachemask_cpu(
   //   for simplicity, as we do not expect this to be a bottleneck.
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "fake_quantize_channel_cachemask_cpu_type_handling", [&] {
     // write mask
-    cpu_kernel(iter_mask, [=](scalar_t self, float scale, int64_t zero_point) -> bool {
+    cpu_kernel(iter_mask, [=](scalar_t self, float scale, int32_t zero_point) -> bool {
       float inv_scale = 1.0f / scale;
       const auto qval = static_cast<int64_t>(zero_point + std::nearbyint(self * inv_scale));
       return ((quant_min <= qval) && (qval <= quant_max));
     });
 
     // write fake_quant
-    cpu_kernel(iter, [=](scalar_t self, float scale, int64_t zero_point) -> scalar_t {
+    cpu_kernel(iter, [=](scalar_t self, float scale, int32_t zero_point) -> scalar_t {
       float inv_scale = 1.0f / scale;
       // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       return (std::fmin(
@@ -3083,6 +3105,9 @@ REGISTER_DISPATCH(fake_quant_per_channel_cachemask_stub, &fake_quant_per_channel
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(fake_quant_tensor_cachemask_stub,
                   &fake_quantize_tensor_cachemask_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(fake_quant_tensor_cachemask_tensor_qparams_stub,
+                  &fake_quantize_tensor_cachemask_tensor_qparams_kernel);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(qadaptive_avg_pool2d_nhwc_stub,
                   &qadaptive_avg_pool2d_nhwc_kernel);

@@ -18,7 +18,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, onlyCPU, dtypes, dtypesIfCUDA,
     dtypesIfCPU, deviceCountAtLeast, precisionOverride, onlyOnCPUAndCUDA,
     skipCUDAIfRocm, skipIf)
-from torch.testing import all_types_and_complex_and
+from torch.testing import all_types_and_complex_and, integral_types_and
 
 if TEST_SCIPY:
     import scipy.special
@@ -223,44 +223,53 @@ class TestBinaryUfuncs(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
             self.assertTrue(ts2 != t2)
 
-    # TODO: update to work on CUDA, too
-    @onlyCPU
-    def test_bitwise_ops(self, device):
-        x = torch.randn(5, 5).gt(0)
-        y = torch.randn(5, 5).gt(0)
+    # Tests that the binary operators and, or, and xor (as well as their reflected and inplace versions)
+    # work properly (AKA &, ||, ^ and &=, |=, ^=)
+    @dtypes(*integral_types_and(torch.bool))
+    def test_bitwise_ops(self, device, dtype):
+        # Tensor x Tensor and Tensor x Scalar ops
+        ops = (operator.and_, operator.iand, operator.or_, operator.ior, operator.xor, operator.ixor)
+        inplace_ops = (operator.iand, operator.ior, operator.ixor)
+        shapes = ((5,), (15, 15), (500, 500))
 
-        and_result = x & y
-        for idx in iter_indices(x):
-            if and_result[idx]:
-                self.assertTrue(x[idx] and y[idx])
-            else:
-                self.assertFalse(x[idx] and y[idx])
+        for op, shape in itertools.product(ops, shapes):
+            # Tests tensor x tensor case
+            a = make_tensor(shape, device=device, dtype=dtype)
+            b = make_tensor(shape, device=device, dtype=dtype)
+            a_np = a.cpu().clone().numpy()
+            b_np = b.cpu().clone().numpy()
+            self.assertEqual(op(a, b), op(a_np, b_np))
 
-        or_result = x | y
-        for idx in iter_indices(x):
-            if or_result[idx]:
-                self.assertTrue(x[idx] or y[idx])
-            else:
-                self.assertFalse(x[idx] or y[idx])
+            # Tests tensor x scalar case
+            a = make_tensor(shape, device=device, dtype=dtype)
+            b_scalar = make_tensor((), device='cpu', dtype=dtype).item()
+            a_np = a.cpu().clone().numpy()
+            self.assertEqual(op(a, b_scalar), op(a_np, b_scalar))
 
-        xor_result = x ^ y
-        for idx in iter_indices(x):
-            if xor_result[idx]:
-                self.assertTrue(x[idx] ^ y[idx])
-            else:
-                self.assertFalse(x[idx] ^ y[idx])
+            # Tests scalar x tensor case
+            a_scalar = make_tensor((), device='cpu', dtype=dtype).item()
+            b = make_tensor(shape, device=device, dtype=dtype)
+            b_np = b.cpu().clone().numpy()
+            self.assertEqual(op(a_scalar, b), op(a_scalar, b_np))
 
-        x_clone = x.clone()
-        x_clone &= y
-        self.assertEqual(x_clone, and_result)
+            # Tests scalar x tensor case (for ops which aren't inplace)
+            if op in inplace_ops:
+                # Tests tensor x tensor case
+                a = make_tensor(shape, device=device, dtype=dtype)
+                b = make_tensor(shape, device=device, dtype=dtype)
+                a_np = a.cpu().clone().numpy()
+                b_np = b.cpu().clone().numpy()
+                op(a, b)
+                op(a_np, b_np)
+                self.assertEqual(a, a_np)
 
-        x_clone = x.clone()
-        x_clone |= y
-        self.assertEqual(x_clone, or_result)
-
-        x_clone = x.clone()
-        x_clone ^= y
-        self.assertEqual(x_clone, xor_result)
+                # Tests tensor x scalar case
+                a = make_tensor(shape, device=device, dtype=dtype)
+                b_scalar = make_tensor((), device='cpu', dtype=dtype).item()
+                a_np = a.cpu().clone().numpy()
+                op(a, b_scalar)
+                op(a_np, b_scalar)
+                self.assertEqual(a, a_np)
 
     def test_inplace_division(self, device):
         t = torch.rand(5, 5, device=device)
@@ -840,15 +849,15 @@ class TestBinaryUfuncs(TestCase):
             self.assertNotEqual(out_uint8_computation, out_int64_computation)
             self.assertEqual(out_uint8_computation.to(dtype=torch.uint8), out_int64_computation.to(dtype=torch.uint8))
 
-    def test_tensor_pow_tensor(self, dev):
+    def test_tensor_pow_tensor(self, device):
         def rotate(l, n):
             return l[-n:] + l[:-n]
 
         def test_tensor_pow_tensor(values, torch_type, numpy_type):
-            vals_tensor = torch.tensor(values, dtype=torch_type, device=dev)
+            vals_tensor = torch.tensor(values, dtype=torch_type, device=device)
             for i in range(len(values)):
                 pows = rotate(values, i)
-                pows_tensor = torch.tensor(pows, dtype=torch_type, device=dev)
+                pows_tensor = torch.tensor(pows, dtype=torch_type, device=device)
                 self._test_pow(vals_tensor, pows_tensor)
 
         ints = [0, 1, 2, 3]
@@ -2879,14 +2888,13 @@ tensor_binary_ops = [
     '__pow__', '__rpow__', '__ipow__',
     '__lshift__', '__rlshift__', '__ilshift__',
     '__rshift__', '__rrshift__', '__irshift__',
-    '__and__', '__iand__',
-    '__xor__', '__ixor__',
-    '__or__', '__ior__',
+    '__and__', '__rand__', '__iand__',
+    '__xor__', '__rxor__', '__ixor__',
+    '__or__', '__ror__', '__ior__',
 
     # Unsupported operators
     # '__imatmul__',
     # '__divmod__', '__rdivmod__', '__idivmod__',
-    # '__rand__', '__ror__', '__rxor__',
 ]
 
 # Test that binary math operations return NotImplemented for unknown types.
