@@ -371,14 +371,6 @@ static void digamma_kernel(TensorIteratorBase& iter) {
   });
 }
 
-static void trigamma_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "trigamma", [&]() {
-    cpu_kernel(
-        iter,
-        [=](scalar_t a) -> scalar_t { return trigamma(a); });
-  });
-}
-
 static void exp2_kernel(TensorIteratorBase& iter) {
   // Supports only floating types as std::exp2 doesn't have
   // complex overloads.
@@ -392,8 +384,6 @@ static void exp2_kernel(TensorIteratorBase& iter) {
 static void polygamma_kernel(TensorIteratorBase& iter, int64_t n) {
   if (n == 0) {
     digamma_kernel(iter);
-  } else if (n == 1) {
-    trigamma_kernel(iter);
   } else {
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "polygamma", [&]() {
       cpu_kernel(

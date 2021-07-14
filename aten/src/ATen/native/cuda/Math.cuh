@@ -73,29 +73,6 @@ static inline C10_HOST_DEVICE scalar_t calc_digamma(scalar_t in) {
 }
 
 template <typename scalar_t>
-static inline C10_HOST_DEVICE scalar_t calc_trigamma(scalar_t in) {
-  using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
-  const accscalar_t PI = 3.14159265358979323846;
-  accscalar_t x = static_cast<accscalar_t>(in);
-  accscalar_t sign = +1;
-  accscalar_t result = 0;
-  if (x < 0.5f) {
-    sign = -1;
-    accscalar_t sin_pi_x = ::sin(PI * x);
-    result -= (PI * PI) / (sin_pi_x * sin_pi_x);
-    x = 1 - x;
-  }
-  for (int i = 0; i < 6; ++i) {
-    result += 1 / (x * x);
-    x += 1;
-  }
-  const accscalar_t one = static_cast<scalar_t>(1);
-  const accscalar_t ixx = 1 / (x*x);
-  result += (1 + 1 / (2*x) + ixx * (one/6 - ixx * (one/30 - ixx * (one/42)))) / x;
-  return static_cast<scalar_t>(sign * result);
-}
-
-template <typename scalar_t>
 static inline C10_HOST_DEVICE scalar_t calc_gcd(scalar_t a_in, scalar_t b_in) {
   scalar_t a = ::abs(a_in);
   scalar_t b = ::abs(b_in);

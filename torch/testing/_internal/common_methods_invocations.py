@@ -7083,10 +7083,6 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestGradients'),
                        SkipInfo('TestJit'),
                        SkipInfo('TestCommon'),
-                       # Mismatch: https://github.com/pytorch/pytorch/issues/55357
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal'),
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard'),
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal'),
                    ),
                    sample_kwargs=lambda device, dtype, input: ({'n': 1}, {'n': 1})),
     UnaryUfuncInfo('polygamma',
@@ -7103,8 +7099,8 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestGradients'),
                        SkipInfo('TestJit'),
                        SkipInfo('TestCommon'),
-                       # Mismatch: https://github.com/pytorch/pytorch/issues/55357
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal'),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                active_if=TEST_WITH_ROCM),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
                                 active_if=TEST_WITH_ROCM),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal',
@@ -7124,8 +7120,8 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestGradients'),
                        SkipInfo('TestJit'),
                        SkipInfo('TestCommon'),
-                       # Mismatch: https://github.com/pytorch/pytorch/issues/55357
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal'),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                active_if=TEST_WITH_ROCM),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
                                 active_if=TEST_WITH_ROCM),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal',
@@ -7146,8 +7142,8 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestGradients'),
                        SkipInfo('TestJit'),
                        SkipInfo('TestCommon'),
-                       # Mismatch: https://github.com/pytorch/pytorch/issues/55357
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal'),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                active_if=TEST_WITH_ROCM),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
                                 active_if=TEST_WITH_ROCM),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal',
