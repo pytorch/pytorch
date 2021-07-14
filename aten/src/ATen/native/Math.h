@@ -194,8 +194,8 @@ C10_HOST_DEVICE static inline scalar_t zeta(scalar_t x, scalar_t q) __ubsan_igno
   /* Asymptotic expansion
    * https://dlmf.nist.gov/25.11#E43
    */
-  if (q > 1e8) {
-      return (1/(x - 1) + 1/(2*q)) * ::pow(q, 1 - x);
+  if (q > acc_t{1e8}) {
+    return (one / (x - one) + one / (acct_t{2} * q)) * ::pow(q, one - x);
   }
 
   /* Euler-Maclaurin summation formula */
