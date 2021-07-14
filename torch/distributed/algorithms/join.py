@@ -282,7 +282,8 @@ class _Join():
 
         This method should be called from a :class:`_Joinable` object before
         its per-iteration collective communications. For example, this should
-        be called at the beginning of the forward pass in DDP.
+        be called at the beginning of the forward pass in
+        :class:`DistributedDataParallel`.
 
         Only the first :class:`_Joinable` object passed into the context
         manager performs the collective communications in this method, and
@@ -297,8 +298,9 @@ class _Join():
             manager that the process has not yet joined if ``joinable`` is the
             first one passed into the context manager; ``None`` otherwise.
         """
-        if not hasattr(joinable, "_join_config"):
-            return None
+        assert hasattr(joinable, "_join_config"), \
+            f"Check that the {type(joinable)} constructor calls the " \
+            "``_Joinable`` constructor"
 
         join_config = joinable._join_config
         # First joinable is responsible for the collective communications
