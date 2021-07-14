@@ -302,6 +302,11 @@ Returns:
     A list of ``torch.Tensor``. Each tensor in the list corresponds to a parameter.
 )")
       .def(
+          "get_grad_index_to_variable_mapping",
+          &::c10d::GradBucket::getGradIndexToVariableMapping,
+          py::call_guard<py::gil_scoped_release>()
+      )
+      .def(
           "is_the_last_bucket_to_allreduce",
           &::c10d::GradBucket::isTheLastBucketToAllreduce,
           py::call_guard<py::gil_scoped_release>(),

@@ -7513,3 +7513,39 @@ class DistributedTest:
                 [param.grad for param in model_local.parameters()]
             )
             self.assertEqual(dist_grad_tensor, local_grad_tensor)
+
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "MPI backend does not support DDP communication hook on CUDA devices",
+        )
+        @skip_if_lt_x_gpu(2)
+        @skip_if_rocm
+        def test_hook_grad_idx_to_bucket_mapping(self):
+            # Test hook to ensure get_grad_index_to_variable_mapping works appropriately.
+            def _test_hook(hook_state, bucket: dist.GradBucket) -> torch.futures.Future:
+                # Run allreduce and wait for it to complete
+                allreduce_fut = default._allreduce_fut(None, bucket.get_tensor())
+                allreduce_fut.wait()
+                per_param_grad_tensors = bucket.get_per_parameter_tensors()
+                idx_to_model_params = bucket.get_grad_index_to_variable_mapping()
+                # Verify mapping is correct by ensuring param.grad is equal to
+                # the grad we get using the mapping.
+                for grad_tensor_idx, model_param in idx_to_model_params.items():
+                    self.assertEqual(model_param.grad, per_param_grad_tensors[grad_tensor_idx])
+                # Return completed future.
+                fut = torch.futures.Future()
+                fut.set_result([bucket.get_tensor()])
+                return fut
+
+            torch.cuda.set_device(self.rank)
+            model = Net().cuda()
+            ddp_model = torch.nn.parallel.DistributedDataParallel(
+                model,
+                device_ids=[self.rank]
+            )
+            ddp_model.register_comm_hook(None, _test_hook)
+            inp = torch.randn(2, 2).cuda()
+            for _ in range(6):
+                out = ddp_model(inp)
+                loss = out.sum()
+                loss.backward()
