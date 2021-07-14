@@ -1095,9 +1095,9 @@ class {test_classname}(torch.nn.Module):
                     ("output", "output"),
                 }
                 self.assertTrue(
-					# AnnotateTypesWithSchema doesn't work with bound C++ functions
-					isinstance(node.target, BuiltinFunctionType) or
-					check in excluded_nodes)
+                    # AnnotateTypesWithSchema doesn't work with bound C++ functions
+                    isinstance(node.target, BuiltinFunctionType) or
+                    check in excluded_nodes)
 
         # Smoke test torchscript compilation since now we're emitting type annotations
         torch.jit.script(traced_functionals_annotated)
