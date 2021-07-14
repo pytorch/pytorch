@@ -1,4 +1,4 @@
-
+int x;
 #include <cstdlib>
 #include <iomanip>
 #include <sstream>
