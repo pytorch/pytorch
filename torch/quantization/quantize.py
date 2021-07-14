@@ -135,7 +135,8 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
         # We don't insert observer/fake_quantize for DeQuantStub
         if needs_observation(m) and not isinstance(m, DeQuantStub):
             # observer and hook will be gone after we swap the module
-            m.add_module('activation_post_process', get_activation_post_process(m.qconfig, device, special_act_post_process))
+            m.add_module('activation_post_process', get_activation_post_process(
+                m.qconfig, device, special_act_post_process))
             # Register observer as the first entry in the hook list
             # All post forward hooks are preserved and will be executed after the observer before convert
             handle = register_activation_post_process_hook(m)
