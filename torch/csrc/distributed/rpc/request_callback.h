@@ -16,8 +16,7 @@ class TORCH_API RequestCallback {
       Message& request,
       std::vector<c10::Stream> streams) const;
 
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  virtual ~RequestCallback() {}
+  virtual ~RequestCallback() = default;
 
  protected:
   // RpcAgent implementation should invoke ``RequestCallback`` to process
