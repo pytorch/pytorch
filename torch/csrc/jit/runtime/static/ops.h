@@ -124,7 +124,6 @@ bool isOptimizableContainerType(Node* n);
 
 std::function<void(ProcessedNode*)> getOutOfPlaceOperation(Node* n);
 
-bool mayRunNatively(Node* n);
 std::function<void(ProcessedNode*)> getNativeOperation(Node* n);
 
 inline std::string PrintNode(const Node* node) {
