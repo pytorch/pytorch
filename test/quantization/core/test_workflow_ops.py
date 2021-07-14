@@ -1008,7 +1008,7 @@ class TestFusedObsFakeQuant(TestCase):
                 0,
                 False,
                 symmetric_quant,
-            )[0]
+            )
             if observer_on:
                 (
                     in_running_min_ref,
@@ -1083,7 +1083,7 @@ class TestFusedObsFakeQuant(TestCase):
                 0,
                 True,  # per_channel_enabled
                 symmetric_quant,
-            )[0]
+            )
             if observer_on:
                 (
                     in_running_min_ref,
@@ -1149,9 +1149,54 @@ class TestFusedObsFakeQuant(TestCase):
             255,
             0,
             False,
-        )[0]
+        )
         # verify the output matches
         torch.testing.assert_allclose(out, x_fake_quant)
+
+        # verify the gradient matches expectation of fake_quant op
+        dout = torch.rand_like(x, dtype=torch.float).to(device)
+        out.backward(dout)
+
+        dX = _fake_quantize_per_tensor_affine_grad_reference(
+            dout, x, x_scale, x_zero_point, 0, 255)
+        self.assertTrue(torch.allclose(dX, x.grad))
+        self.assertTrue(x.grad.dtype == torch.float32)
+
+    def test_fused_backward_op_fake_quant_off(self) -> None:
+        device = 'cpu'
+        n = m = k = 4
+        input_shape = (m, n)
+        output_shape = (m, n)
+
+        x = torch.randn(input_shape, device=device, requires_grad=True)
+
+        avg_const = torch.tensor(0.01, dtype=torch.float, device=device)
+        scale = torch.tensor([1.0], device=device)
+        zero_point = torch.tensor([0], dtype=torch.int, device=device)
+
+        x_min, x_max = _get_tensor_min_max(x)
+        x_scale, x_zero_point = _get_scale_zp(
+            x_min, x_max, torch.quint8
+        )
+
+
+        pt_op = torch.fused_moving_avg_obs_fake_quant
+        out = pt_op(
+            x,
+            torch.tensor(0, device=device),
+            torch.tensor(0, device=device),
+            avg_const,
+            torch.tensor(x_min, device=device),
+            torch.tensor(x_max, device=device),
+            scale,
+            zero_point,
+            0,
+            255,
+            0,
+            False,
+        )
+        # verify the output matches
+        torch.testing.assert_allclose(out, x)
 
         # verify the gradient matches expectation of fake_quant op
         dout = torch.rand_like(x, dtype=torch.float).to(device)
