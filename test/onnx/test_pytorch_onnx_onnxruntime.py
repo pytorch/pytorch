@@ -1932,17 +1932,95 @@ class TestONNXRuntime(unittest.TestCase):
                       input_names=["x", "y"], dynamic_axes={"x": [0, 1, 2]})
         self.run_test(ArangeStartOutModel(), (x, y), remained_onnx_input_idx=[1])
 
-    @skipIfUnsupportedMinOpsetVersion(11)
-    def test_arange(self):
-        class ArangeModel(torch.nn.Module):
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_linspace(self):
+        class LinspaceModel(torch.nn.Module):
+            def forward(self, start, end, steps):
+                return torch.linspace(start, end, steps)
+
+        x = torch.tensor(3, dtype=torch.float)
+        y = torch.tensor(10, dtype=torch.float)
+        z = torch.tensor(5, dtype=torch.int)
+        self.run_test(LinspaceModel(), (x, y, z))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_arange_with_floats_out(self):
+        class ArangeModelEnd(torch.nn.Module):
+            def forward(self, end):
+                out_t = torch.tensor([1], dtype=torch.float)
+                return torch.arange(end, out=out_t)
+
+        y = torch.tensor(8.5, dtype=torch.float)
+        self.run_test(ArangeModelEnd(), (y))
+
+        class ArangeModelStep(torch.nn.Module):
+            def forward(self, start, end):
+                out_t = torch.tensor([1], dtype=torch.float)
+                return torch.arange(start.size(0), end, 1.5, out=out_t)
+
+        x = torch.randn(2, 3, 4)
+        y = torch.tensor(8.5, dtype=torch.float)
+        self.run_test(ArangeModelStep(), (x, y), input_names=["x", "y"],
+                      dynamic_axes={"x": [0, 1, 2]})
+        self.run_test(ArangeModelStep(), (x, y), remained_onnx_input_idx=[1])
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_arange_with_floats(self):
+        class ArangeModelEnd(torch.nn.Module):
+            def forward(self, end):
+                return torch.arange(end)
+
+        y = torch.tensor(8.5, dtype=torch.float)
+        self.run_test(ArangeModelEnd(), (y))
+
+        class ArangeModelStep(torch.nn.Module):
+            def forward(self, start, end):
+                return torch.arange(start.size(0), end, 1.5)
+
+        x = torch.randn(2, 3, 4)
+        y = torch.tensor(8.5, dtype=torch.float)
+        self.run_test(ArangeModelStep(), (x, y), input_names=["x", "y"],
+                      dynamic_axes={"x": [0, 1, 2]})
+        self.run_test(ArangeModelStep(), (x, y), remained_onnx_input_idx=[1])
+
+        class ArangeModelStepNeg(torch.nn.Module):
+            def forward(self, start, end):
+                return torch.arange(end, start.size(0), -1.5)
+
+        x = torch.randn(2, 3, 4)
+        y = torch.tensor(8.5, dtype=torch.float)
+        self.run_test(ArangeModelStepNeg(), (x, y), input_names=["x", "y"],
+                      dynamic_axes={"x": [0, 1, 2]})
+        self.run_test(ArangeModelStepNeg(), (x, y), remained_onnx_input_idx=[1])
+
+        class ArangeModelStart(torch.nn.Module):
+            def forward(self, start, end):
+                return torch.arange(start.size(0), end)
+
+        x = torch.randn(2, 3, 4)
+        y = torch.tensor(8.5, dtype=torch.float)
+        self.run_test(ArangeModelStart(), (x, y), input_names=["x", "y"],
+                      dynamic_axes={"x": [0, 1, 2]})
+        self.run_test(ArangeModelStart(), (x, y), remained_onnx_input_idx=[1])
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_arange_with_floats_override(self):
+        class ArangeModelEnd(torch.nn.Module):
+            def forward(self, end):
+                return torch.arange(end, dtype=torch.int64)
+
+        y = torch.tensor(8.5, dtype=torch.float)
+        self.run_test(ArangeModelEnd(), (y))
+
+        class ArangeModelStep(torch.nn.Module):
             def forward(self, start, end):
                 return torch.arange(start.size(0), end, 1.5, dtype=torch.int64)
 
         x = torch.randn(2, 3, 4)
         y = torch.tensor(8.5, dtype=torch.float)
-        self.run_test(ArangeModel(), (x, y), input_names=["x", "y"],
+        self.run_test(ArangeModelStep(), (x, y), input_names=["x", "y"],
                       dynamic_axes={"x": [0, 1, 2]})
-        self.run_test(ArangeModel(), (x, y), remained_onnx_input_idx=[1])
+        self.run_test(ArangeModelStep(), (x, y), remained_onnx_input_idx=[1])
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_arange_out(self):
@@ -4634,6 +4712,32 @@ class TestONNXRuntime(unittest.TestCase):
                           input_names=["x"],
                           dynamic_axes={"x": {0: "batch_size", 1: "dims"}})
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_dynamic_chunk(self):
+        class ChunkModel(torch.nn.Module):
+            def __init__(self, dim=1):
+                super(ChunkModel, self).__init__()
+                self.dim = dim
+
+            def forward(self, x):
+                return torch.chunk(x, x.size(0), dim=self.dim)
+
+        model = ChunkModel()
+        model.eval()
+        model_neg_dim = ChunkModel(-1)
+        model_neg_dim.eval()
+        x = torch.randn(3, 18)
+
+        for dim_size_ in range(13, 16):
+            y = torch.randn(3, dim_size_)
+            self.run_test(model, x, test_with_inputs=[y],
+                          input_names=["x"],
+                          dynamic_axes={"x": {0: "batch_size", 1: "dims"}})
+
+            self.run_test(model_neg_dim, x, test_with_inputs=[y],
+                          input_names=["x"],
+                          dynamic_axes={"x": {0: "batch_size", 1: "dims"}})
+
     def test_concat(self):
         class ConcatModel(torch.nn.Module):
             def forward(self, x, y, z):
@@ -6236,6 +6340,21 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(DimModel(), empty_input)
         self.run_test(DimModel(), multi_dim_input)
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_dim_1(self):
+        class M(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, poses):
+                boxes = torch.zeros([poses.shape[0], 2, 4])
+                batch_boxes = []
+                for kp_boxes in boxes:
+                    kp_boxes = torchvision.ops.clip_boxes_to_image(kp_boxes, (2, 3))
+                    batch_boxes.append(kp_boxes)
+                return batch_boxes
+
+        dummy_inputs = torch.rand(2, 2, 3)
+        self.run_test(M(), (dummy_inputs, ), input_names=['x'], dynamic_axes={"x": [0]})
+
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_outer(self):
         class Outer(torch.nn.Module):
@@ -7444,7 +7563,7 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, input):
                 amax = torch.ones(4)
                 scale = amax / 127.
-                zero_point = torch.zeros_like(amax, dtype=torch.long)
+                zero_point = torch.zeros_like(amax, dtype=torch.int)
                 # Quantize twice to test differnet branches
                 y = torch.fake_quantize_per_channel_affine(input, scale, zero_point, 1, 0, 255)
                 return torch.fake_quantize_per_channel_affine(y, scale, zero_point, 1, -128, 127)
@@ -9061,16 +9180,28 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(M(2, 1), (x,))
         self.run_test(M([-1, 3], [-2, -1]), (x,))
 
+    def test_sum(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.sum(x)
+
+        x = torch.ones(12, 3)
+        self.run_test(M(), (x,), input_names=['x'], dynamic_axes={'x': [0]})
+
     def test_sum_empty_tensor(self):
         class M(torch.nn.Module):
             def forward(self, x):
-                return x[0:0].sum()
+                return x[0:0].sum(), x.sum()
 
         x = torch.ones(12)
         self.run_test(M(), (x,))
 
         x = torch.ones(2, 0, 3)
         self.run_test(M(), (x,))
+
+        x = torch.ones(0)
+        self.run_test(M(), (x,))
+
 
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout, script_test_min_opset_version,
