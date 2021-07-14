@@ -3,6 +3,7 @@
 #include <ATen/WrapDimUtils.h>
 #include <ATen/core/DimVector.h>
 #include <c10/util/Exception.h>
+#include <c10/core/ScalarType.h>
 
 namespace at {
 namespace native {
@@ -45,6 +46,7 @@ Tensor trapezoid(const Tensor& y, const Tensor& x, int64_t dim) {
     if (y.size(dim) == 0) {
         return zeros_like_except(y, dim);
     }
+    TORCH_CHECK(y.scalar_type() != kBool && x.scalar_type() != kBool, "trapezoid: received a bool input for `x` or `y`, but bool is not supported")
     Tensor x_viewed;
     if (x.dim() == 1) {
         TORCH_CHECK(x.size(0) == y.size(dim), "trapezoid: There must be one `x` value for each sample point");
@@ -66,18 +68,9 @@ Tensor trapezoid(const Tensor& y, const Scalar& dx, int64_t dim) {
     if (y.size(dim) == 0) {
         return zeros_like_except(y, dim);
     }
-    TORCH_CHECK(dx.isFloatingPoint(), "trapezoid: Currently, we only support dx as a double.");
+    TORCH_CHECK(y.scalar_type() != kBool, "trapezoid: received a bool input for `y`, but bool is not supported")
+    TORCH_CHECK(!(dx.isComplex() or dx.isBoolean()), "trapezoid: Currently, we only support dx as a real number.");
     return do_trapezoid(y, dx.toDouble(), dim);
-}
-
-Tensor& trapezoid_out(const Tensor& y, const Tensor& x, int64_t dim, Tensor& self) {
-    // TODO: Make an actual out version
-    return self;
-}
-
-Tensor& trapezoid_out(const Tensor& y, const Scalar& dx, int64_t dim, Tensor& self) {
-    // TODO: Make an actual out version
-    return self;
 }
 
 Tensor trapz(const Tensor& y, const Tensor& x, int64_t dim) {
@@ -89,7 +82,5 @@ Tensor trapz(const Tensor& y, double dx, int64_t dim) {
 }
 
 }
-
-
 
 } // namespace at::native

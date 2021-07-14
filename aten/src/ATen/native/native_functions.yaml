@@ -4303,13 +4303,9 @@
 
 - func: trapezoid.dx(Tensor y, *, Scalar dx=1, int dim=-1) -> Tensor
 
-- func: trapezoid.x_out(Tensor y, Tensor x, *, int dim=-1, Tensor(a!) out) -> Tensor(a!)
-
-- func: trapezoid.dx_out(Tensor y, *, Scalar dx=1, int dim=-1, Tensor(a!) out) -> Tensor(a!)
-
 - func: trapz.x(Tensor y, Tensor x, *, int dim=-1) -> Tensor
 
-- func: trapz.dx(Tensor y, *, float dx=1, int dim=-1) -> Tensor
+- func: trapz.dx(Tensor y, *, float dx=1.0, int dim=-1) -> Tensor
 
 - func: _trilinear(Tensor i1, Tensor i2, Tensor i3, int[] expand1, int[] expand2, int[] expand3, int[] sumdim, int unroll_dim=1) -> Tensor
   dispatch:
