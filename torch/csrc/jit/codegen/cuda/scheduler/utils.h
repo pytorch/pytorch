@@ -51,6 +51,7 @@ std::vector<TensorView*> inputTvsOf(std::vector<TensorView*> tvs);
 // Returns consumers of tvs that are outputs of fusion
 std::vector<TensorView*> outputTvsOf(std::vector<TensorView*> tvs);
 
+// returns all tensor views in fusion that are used between outputs and inputs.
 TORCH_CUDA_CU_API std::vector<TensorView*> allTvs(Fusion* fusion);
 
 TORCH_CUDA_CU_API void parallelizeAllLike(
