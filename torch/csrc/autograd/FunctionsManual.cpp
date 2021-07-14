@@ -3479,6 +3479,62 @@ Tensor i1e_backward(
   });
 }
 
+Tensor lu_solve_backward_lu_data(
+  const Tensor& grad,
+  const Tensor& self,
+  const Tensor& LU_data,
+  const Tensor& LU_pivots
+) {
+  Tensor P, L, U;
+  std::tie(P, L, U) = at::lu_unpack(LU_data, LU_pivots);
+
+  auto n = LU_data.size(-1);
+  auto nrhs = self.size(-1);
+
+  // X = -L^{-1} P^T B grad^H
+  auto X = -std::get<0>(at::triangular_solve(
+    (nrhs < n) ? P.transpose(-2, -1).matmul(self) : P.transpose(-2, -1),
+    L,
+    /*upper=*/false,
+    /*transpose=*/false,
+    /*unitriangular=*/true
+  ));
+  if (nrhs >= n) {
+    X = X.matmul(self);
+  }
+  X = X.matmul(grad.transpose(-2, -1).conj());
+
+  // X <- X U^{-1}
+  X = std::get<0>(at::triangular_solve(
+    X.transpose(-2, -1).conj(),
+    U.transpose(-2, -1).conj(),
+    /*upper=*/false,
+    /*transpose=*/false,
+    /*unitriangular=*/false
+  )).transpose(-2, -1).conj();
+
+  auto U_grad = std::get<0>(at::triangular_solve(
+    X,
+    U,
+    /*upper=*/true,
+    /*transpose=*/false,
+    /*unitriangular=*/false
+  )).transpose(-2, -1).conj();
+
+  auto L_grad = std::get<0>(at::triangular_solve(
+    X.transpose(-2, -1).conj(),
+    L.transpose(-2, -1).conj(),
+    /*upper=*/true,
+    /*transpose=*/false,
+    /*unitriangular=*/true
+  ));
+
+  auto L_grad_diag_embed = at::diag_embed(L_grad.diagonal(0, -2, -1));
+
+  auto LU_data_grad = L_grad.tril() - L_grad_diag_embed + U_grad.triu();
+  return LU_data_grad;
+}
+
 Tensor lu_solve_backward_self(
   const Tensor& grad,
   const Tensor& self,

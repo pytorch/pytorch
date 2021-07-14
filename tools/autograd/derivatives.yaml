@@ -857,6 +857,7 @@
 
 - name: lu_solve(Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
   self: lu_solve_backward_self(grad, self, LU_data, LU_pivots)
+  LU_data: lu_solve_backward_lu_data(grad, self, LU_data, LU_pivots)
   LU_pivots: non_differentiable
 
 - name: lu_unpack(Tensor LU_data, Tensor LU_pivots, bool unpack_data=True, bool unpack_pivots=True) -> (Tensor P, Tensor L, Tensor U)
