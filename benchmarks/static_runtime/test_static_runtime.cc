@@ -426,6 +426,16 @@ TEST(StaticRuntime, IndividualOps_Div) {
   testStaticRuntime(div_scalar_mode, args3, {a, 1.5, "trunc"});
 }
 
+TEST(StaticRuntime, IndividualOps_Log) {
+  // Ensure that the input values are valid.
+  auto a = at::abs(at::randn({2, 3}));
+  auto b = at::abs(at::randn({4, 3, 2}));
+
+  std::vector<IValue> args{a};
+  testStaticRuntime(log_tensor, args);
+  testStaticRuntime(log_tensor, args, {b});
+}
+
 TEST(StaticRuntime, IndividualOps_Sub) {
   auto a = at::randn({2, 3});
   auto b = at::randn({2, 3});
