@@ -1845,7 +1845,7 @@ Shape:
 bilinear = _add_docstr(
     torch.bilinear,
     r"""
-linear(input1, input2, weight, bias=None) -> Tensor
+bilinear(input1, input2, weight, bias=None) -> Tensor
 
 Applies a bilinear transformation to the incoming data:
 :math:`y = x_1^T A x_2 + b`

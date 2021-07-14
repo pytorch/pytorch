@@ -3,7 +3,7 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "input"
+    input: "0"
     input: "weight"
     input: "bias"
     output: "3"
@@ -40,7 +40,7 @@ graph {
     raw_data: "\324BO\276@\245T>\350\377\245\275\374u\336\276&\212\304>"
   }
   input {
-    name: "input"
+    name: "0"
     type {
       tensor_type {
         elem_type: 1
