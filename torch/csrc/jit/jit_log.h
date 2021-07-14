@@ -97,7 +97,7 @@ std::string TORCH_API get_jit_logging_levels();
 
 void TORCH_API set_jit_logging_levels(std::string level);
 
-std::ostringstream& TORCH_API get_jit_logging_output_stream();
+TORCH_API std::ostringstream& get_jit_logging_output_stream();
 
 void TORCH_API set_jit_logging_output_stream(std::ostringstream& stream);
 
