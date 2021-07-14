@@ -14,8 +14,11 @@ namespace jit {
  */
 TORCH_API void FuseLinear(std::shared_ptr<Graph>& graph);
 
-/** \brief Match functional.linear calls and replace with a single at::linear */
+/** Swap functional linear CallFunctions to aten::linear
+ */
 TORCH_API void SwapFunctionalLinear(std::shared_ptr<Graph>& graph);
+/** Swap all functional linear CallFunctions in module
+ */
 TORCH_API void SwapFunctionalLinear(Module& module);
 } // namespace jit
 } // namespace torch
