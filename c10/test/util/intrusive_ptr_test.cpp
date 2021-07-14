@@ -104,7 +104,6 @@ TEST(MakeIntrusiveTest, ClassWith0Parameters) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MakeIntrusiveTest, ClassWith1Parameter) {
   intrusive_ptr<SomeClass1Parameter> var =
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       make_intrusive<SomeClass1Parameter>(5);
   EXPECT_EQ(5, var->param);
 }
@@ -112,7 +111,6 @@ TEST(MakeIntrusiveTest, ClassWith1Parameter) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MakeIntrusiveTest, ClassWith2Parameters) {
   intrusive_ptr<SomeClass2Parameters> var =
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       make_intrusive<SomeClass2Parameters>(7, 2);
   EXPECT_EQ(7, var->param1);
   EXPECT_EQ(2, var->param2);
@@ -139,7 +137,6 @@ TEST(IntrusivePtrTargetTest, whenAllocatedOnStack_thenDoesntCrash) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenValidPtr_whenCallingGet_thenReturnsObject) {
   intrusive_ptr<SomeClass1Parameter> obj =
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       make_intrusive<SomeClass1Parameter>(5);
   EXPECT_EQ(5, obj.get()->param);
 }
@@ -160,7 +157,6 @@ TEST(IntrusivePtrTest, givenInvalidPtr_whenCallingGet_thenReturnsNullptr) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, givenValidPtr_whenDereferencing_thenReturnsObject) {
   intrusive_ptr<SomeClass1Parameter> obj =
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       make_intrusive<SomeClass1Parameter>(5);
   EXPECT_EQ(5, (*obj).param);
 }
@@ -296,7 +292,6 @@ TEST(
 TEST(
     IntrusivePtrTest,
     givenInvalidPtr_whenMoveAssigningToBaseClass_thenNewInstanceIsValid) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   intrusive_ptr<SomeChildClass> obj1 = make_intrusive<SomeChildClass>(5);
   intrusive_ptr<SomeBaseClass> obj2;
   // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
@@ -309,7 +304,6 @@ TEST(
 TEST(
     IntrusivePtrTest,
     givenInvalidPtr_whenMoveAssigningToBaseClass_thenPointsToSameObject) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   intrusive_ptr<SomeChildClass> obj1 = make_intrusive<SomeChildClass>(5);
   intrusive_ptr<SomeBaseClass> obj2;
   SomeBaseClass* obj1ptr = obj1.get();
@@ -407,7 +401,6 @@ TEST(
     IntrusivePtrTest,
     givenValidPtr_whenCopyAssigningToBaseClass_thenPointsToSameObject) {
   intrusive_ptr<SomeChildClass> child = make_intrusive<SomeChildClass>(3);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   intrusive_ptr<SomeBaseClass> base = make_intrusive<SomeBaseClass>(10);
   base = child;
   EXPECT_EQ(3, base->v);
@@ -418,7 +411,6 @@ TEST(
     IntrusivePtrTest,
     givenValidPtr_whenCopyAssigningToBaseClass_thenOldInstanceInvalid) {
   intrusive_ptr<SomeChildClass> obj1 = make_intrusive<SomeChildClass>(3);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   intrusive_ptr<SomeBaseClass> obj2 = make_intrusive<SomeBaseClass>(10);
   obj2 = obj1;
   EXPECT_TRUE(obj1.defined());
@@ -428,7 +420,6 @@ TEST(
 TEST(
     IntrusivePtrTest,
     givenInvalidPtr_whenCopyAssigningToBaseClass_thenNewInstanceIsValid) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   intrusive_ptr<SomeChildClass> obj1 = make_intrusive<SomeChildClass>(5);
   intrusive_ptr<SomeBaseClass> obj2;
   // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
@@ -441,7 +432,6 @@ TEST(
 TEST(
     IntrusivePtrTest,
     givenInvalidPtr_whenCopyAssigningToBaseClass_thenPointsToSameObject) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   intrusive_ptr<SomeChildClass> obj1 = make_intrusive<SomeChildClass>(5);
   intrusive_ptr<SomeBaseClass> obj2;
   SomeBaseClass* obj1ptr = obj1.get();
@@ -734,7 +724,6 @@ TEST(IntrusivePtrTest, SwapMethodInvalidWithInvalid) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, CanBePutInContainer) {
   std::vector<intrusive_ptr<SomeClass1Parameter>> vec;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   vec.push_back(make_intrusive<SomeClass1Parameter>(5));
   EXPECT_EQ(5, vec[0]->param);
 }
@@ -742,7 +731,6 @@ TEST(IntrusivePtrTest, CanBePutInContainer) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, CanBePutInSet) {
   std::set<intrusive_ptr<SomeClass1Parameter>> set;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   set.insert(make_intrusive<SomeClass1Parameter>(5));
   EXPECT_EQ(5, (*set.begin())->param);
 }
@@ -750,7 +738,6 @@ TEST(IntrusivePtrTest, CanBePutInSet) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IntrusivePtrTest, CanBePutInUnorderedSet) {
   std::unordered_set<intrusive_ptr<SomeClass1Parameter>> set;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   set.insert(make_intrusive<SomeClass1Parameter>(5));
   EXPECT_EQ(5, (*set.begin())->param);
 }
@@ -762,7 +749,6 @@ TEST(IntrusivePtrTest, CanBePutInMap) {
       intrusive_ptr<SomeClass1Parameter>>
       map;
   map.insert(std::make_pair(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       make_intrusive<SomeClass1Parameter>(5),
       make_intrusive<SomeClass1Parameter>(3)));
   EXPECT_EQ(5, map.begin()->first->param);
@@ -777,7 +763,6 @@ TEST(IntrusivePtrTest, CanBePutInUnorderedMap) {
       map;
   map.insert(std::make_pair(
       make_intrusive<SomeClass1Parameter>(3),
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       make_intrusive<SomeClass1Parameter>(5)));
   EXPECT_EQ(3, map.begin()->first->param);
   EXPECT_EQ(5, map.begin()->second->param);
@@ -2086,7 +2071,6 @@ TEST(
     WeakIntrusivePtrTest,
     givenInvalidPtr_whenMoveAssigningToBaseClass_thenNewInstanceIsValid) {
   IntrusiveAndWeak<SomeChildClass> obj1 =
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       make_weak_intrusive<SomeChildClass>(5);
   weak_intrusive_ptr<SomeBaseClass> obj2 = make_invalid_weak<SomeBaseClass>();
   // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
@@ -2100,7 +2084,6 @@ TEST(
     WeakIntrusivePtrTest,
     givenInvalidPtr_whenMoveAssigningToBaseClass_thenPointsToSameObject) {
   IntrusiveAndWeak<SomeChildClass> obj1 =
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       make_weak_intrusive<SomeChildClass>(5);
   weak_intrusive_ptr<SomeBaseClass> obj2 = make_invalid_weak<SomeBaseClass>();
   SomeBaseClass* obj1ptr = obj1.weak.lock().get();
@@ -2125,7 +2108,6 @@ TEST(
     WeakIntrusivePtrTest,
     givenWeakOnlyPtr_whenMoveAssigningToBaseClass_thenNewInstanceIsValid) {
   IntrusiveAndWeak<SomeChildClass> obj1 =
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       make_weak_intrusive<SomeChildClass>(5);
   weak_intrusive_ptr<SomeBaseClass> obj2 = make_weak_only<SomeBaseClass>(2);
   // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
@@ -2139,7 +2121,6 @@ TEST(
     WeakIntrusivePtrTest,
     givenWeakOnlyPtr_whenMoveAssigningToBaseClass_thenPointsToSameObject) {
   IntrusiveAndWeak<SomeChildClass> obj1 =
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       make_weak_intrusive<SomeChildClass>(5);
   weak_intrusive_ptr<SomeBaseClass> obj2 = make_weak_only<SomeBaseClass>(2);
   SomeBaseClass* obj1ptr = obj1.weak.lock().get();
@@ -2152,7 +2133,6 @@ TEST(
 TEST(
     WeakIntrusivePtrTest,
     givenWeakOnlyPtr_whenMoveAssigningInvalidPtrToBaseClass_thenNewInstanceIsValid) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   weak_intrusive_ptr<SomeChildClass> obj1 = make_weak_only<SomeChildClass>(5);
   IntrusiveAndWeak<SomeBaseClass> obj2 = make_weak_intrusive<SomeBaseClass>(2);
   EXPECT_FALSE(obj2.weak.expired());
@@ -2289,7 +2269,6 @@ TEST(
     givenValidPtr_whenCopyAssigningToBaseClass_thenPointsToSameObject) {
   IntrusiveAndWeak<SomeChildClass> child =
       make_weak_intrusive<SomeChildClass>(3);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   IntrusiveAndWeak<SomeBaseClass> base = make_weak_intrusive<SomeBaseClass>(10);
   base.weak = child.weak;
   EXPECT_EQ(3, base.weak.lock()->v);
@@ -2301,7 +2280,6 @@ TEST(
     givenValidPtr_whenCopyAssigningToBaseClass_thenOldInstanceInvalid) {
   IntrusiveAndWeak<SomeChildClass> obj1 =
       make_weak_intrusive<SomeChildClass>(3);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   IntrusiveAndWeak<SomeBaseClass> obj2 = make_weak_intrusive<SomeBaseClass>(10);
   obj2.weak = obj1.weak;
   EXPECT_FALSE(obj1.weak.expired());
@@ -2312,7 +2290,6 @@ TEST(
     WeakIntrusivePtrTest,
     givenInvalidPtr_whenCopyAssigningToBaseClass_thenNewInstanceIsValid) {
   IntrusiveAndWeak<SomeChildClass> obj1 =
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       make_weak_intrusive<SomeChildClass>(5);
   weak_intrusive_ptr<SomeBaseClass> obj2 = make_invalid_weak<SomeBaseClass>();
   // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
@@ -2326,7 +2303,6 @@ TEST(
     WeakIntrusivePtrTest,
     givenInvalidPtr_whenCopyAssigningToBaseClass_thenPointsToSameObject) {
   IntrusiveAndWeak<SomeChildClass> obj1 =
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       make_weak_intrusive<SomeChildClass>(5);
   weak_intrusive_ptr<SomeBaseClass> obj2 = make_invalid_weak<SomeBaseClass>();
   SomeBaseClass* obj1ptr = obj1.weak.lock().get();
@@ -2351,7 +2327,6 @@ TEST(
     WeakIntrusivePtrTest,
     givenWeakOnlyPtr_whenCopyAssigningToBaseClass_thenNewInstanceIsValid) {
   IntrusiveAndWeak<SomeChildClass> obj1 =
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       make_weak_intrusive<SomeChildClass>(5);
   weak_intrusive_ptr<SomeBaseClass> obj2 = make_weak_only<SomeBaseClass>(2);
   // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
@@ -2365,7 +2340,6 @@ TEST(
     WeakIntrusivePtrTest,
     givenWeakOnlyPtr_whenCopyAssigningToBaseClass_thenPointsToSameObject) {
   IntrusiveAndWeak<SomeChildClass> obj1 =
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       make_weak_intrusive<SomeChildClass>(5);
   weak_intrusive_ptr<SomeBaseClass> obj2 = make_weak_only<SomeBaseClass>(2);
   SomeBaseClass* obj1ptr = obj1.weak.lock().get();
@@ -2763,7 +2737,6 @@ TEST(WeakIntrusivePtrTest, SwapMethodWeakOnlyPtrWithWeakOnlyPtr) {
 TEST(WeakIntrusivePtrTest, CanBePutInContainer) {
   std::vector<weak_intrusive_ptr<SomeClass1Parameter>> vec;
   IntrusiveAndWeak<SomeClass1Parameter> obj =
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       make_weak_intrusive<SomeClass1Parameter>(5);
   vec.push_back(obj.weak);
   EXPECT_EQ(5, vec[0].lock()->param);
@@ -2773,7 +2746,6 @@ TEST(WeakIntrusivePtrTest, CanBePutInContainer) {
 TEST(WeakIntrusivePtrTest, CanBePutInSet) {
   std::set<weak_intrusive_ptr<SomeClass1Parameter>> set;
   IntrusiveAndWeak<SomeClass1Parameter> obj =
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       make_weak_intrusive<SomeClass1Parameter>(5);
   set.insert(obj.weak);
   EXPECT_EQ(5, set.begin()->lock()->param);
@@ -2783,7 +2755,6 @@ TEST(WeakIntrusivePtrTest, CanBePutInSet) {
 TEST(WeakIntrusivePtrTest, CanBePutInUnorderedSet) {
   std::unordered_set<weak_intrusive_ptr<SomeClass1Parameter>> set;
   IntrusiveAndWeak<SomeClass1Parameter> obj =
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       make_weak_intrusive<SomeClass1Parameter>(5);
   set.insert(obj.weak);
   EXPECT_EQ(5, set.begin()->lock()->param);
@@ -2796,7 +2767,6 @@ TEST(WeakIntrusivePtrTest, CanBePutInMap) {
       weak_intrusive_ptr<SomeClass1Parameter>>
       map;
   IntrusiveAndWeak<SomeClass1Parameter> obj1 =
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       make_weak_intrusive<SomeClass1Parameter>(5);
   IntrusiveAndWeak<SomeClass1Parameter> obj2 =
       make_weak_intrusive<SomeClass1Parameter>(3);
@@ -2812,7 +2782,6 @@ TEST(WeakIntrusivePtrTest, CanBePutInUnorderedMap) {
       weak_intrusive_ptr<SomeClass1Parameter>>
       map;
   IntrusiveAndWeak<SomeClass1Parameter> obj1 =
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       make_weak_intrusive<SomeClass1Parameter>(5);
   IntrusiveAndWeak<SomeClass1Parameter> obj2 =
       make_weak_intrusive<SomeClass1Parameter>(3);

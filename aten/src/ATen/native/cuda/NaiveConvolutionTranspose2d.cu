@@ -6,7 +6,6 @@
 
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 
 #include <ATen/native/cuda/im2col.cuh>
 
@@ -175,7 +174,7 @@ void slow_conv_transpose2d_out_cuda_template(
       columns_arg{columns_, "columns", 5}, ones_arg{ones_, "ones", 6};
 
   checkAllSameGPU(
-      "slow_conv_transpose2d_out_cuda",
+      __func__,
       {input_arg, output_arg, weight_arg, bias_arg, columns_arg, ones_arg});
 
   int n_input_plane = weight_.size(0);
@@ -390,7 +389,7 @@ static void slow_conv_transpose2d_backward_out_cuda_template(
       grad_input_arg{grad_input, "grad_input", 5};
 
   checkAllSameGPU(
-      "slow_conv_transpose2d_backward_out_cuda",
+      __func__,
       {input_arg,
        grad_output_arg,
        weight_arg,
@@ -578,7 +577,7 @@ void slow_conv_transpose2d_acc_grad_parameters_cuda_template(
       columns_arg{columns_, "columns", 5}, ones_arg{ones_, "ones", 6};
 
   checkAllSameGPU(
-      "slow_conv_transpose2d_acc_grad_parameters_cuda",
+      __func__,
       {input_arg,
        grad_output_arg,
        grad_weight_arg,

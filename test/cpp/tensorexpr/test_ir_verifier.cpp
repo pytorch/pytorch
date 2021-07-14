@@ -52,7 +52,6 @@ TEST(IRVerifier, BitwiseOps) {
 TEST(IRVerifier, CompareSelect) {
   KernelScope kernel_scope;
   const Expr* X = new IntImm(1);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   const Expr* Y = new FloatImm(3.14f);
   {
     auto a = new CompareSelect(X, X, X, Y, kEQ);
@@ -84,7 +83,6 @@ TEST(IRVerifier, Load) {
   const Var* I = new Var("i", kInt);
   const Var* J = new Var("j", kLong);
   const Var* K = new Var("k", kFloat);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   const Buf* B = new Buf("b", {new IntImm(10), new IntImm(20)}, kFloat);
   {
     // Indices with different int dtypes (kInt, kLong) are ok
@@ -151,7 +149,6 @@ TEST(IRVerifier, For) {
 TEST(IRVerifier, Block) {
   KernelScope kernel_scope;
   const Var* I = new Var("i", kInt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   const Buf* B = new Buf("B", {new IntImm(10)}, kInt);
   {
     Stmt* store = new Store(B, {I}, I);
@@ -172,7 +169,6 @@ TEST(IRVerifier, Store) {
   const Var* I = new Var("i", kInt);
   const Var* J = new Var("j", kLong);
   const Var* K = new Var("k", kFloat);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   const Buf* B = new Buf("b", {new IntImm(10), new IntImm(20)}, kFloat);
   {
     // Indices with different int dtypes (kInt, kLong) are ok

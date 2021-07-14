@@ -532,15 +532,10 @@ class Depthwise3x3ConvOp final : public ConvPoolOpBase<CPUContext> {
           size_t(stride_w()),
           size_t(pad_t()),
           gmacs,
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           t.Seconds() * 1E3,
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           0 * 1E3,
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           0 * 1E3,
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           0 * 1E3,
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           0 * 1E3,
           gflops);
       CAFFE_ENFORCE(ret > 0);

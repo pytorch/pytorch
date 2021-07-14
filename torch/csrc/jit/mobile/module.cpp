@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/mobile/module.h>
 
+#include <torch/csrc/jit/backends/backend_exception.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/observer.h>
 #include <torch/csrc/jit/runtime/jit_exception.h>
@@ -184,6 +185,18 @@ void Method::run(Stack& stack) const {
     if (observer) {
       observer->onExitRunMethod(instance_key);
     }
+    // This exception must be caught first as it derived from c10::Error
+  } catch (c10::BackendRuntimeException& e) {
+#if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
+    e.pushDebugHandle(function_->getExceptionDebugHandle());
+    // symbolicate all handles
+    e.add_context(owner_->getDebugTable().getSourceDebugString(
+        e.getDebugHandles(), getTopModuleTypeName(*owner_)));
+#endif
+    if (observer) {
+      observer->onFailRunMethod(instance_key, e.what());
+    }
+    TORCH_RETHROW(e);
   } catch (c10::Error& error) {
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
     auto debug_string = owner_->getDebugTable().getSourceDebugString(

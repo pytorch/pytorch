@@ -20,9 +20,11 @@ class Quantize(torch.nn.Module):
      `scale`: scale of the output Quantized Tensor
      `zero_point`: zero_point of output Quantized Tensor
      `dtype`: data type of output Quantized Tensor
-
-    Attributes:
-      `scale`, `zero_point`, `dtype`
+     `factory_kwargs`: Dictionary of kwargs used for configuring initialization
+         of internal buffers. Currently, `device` and `dtype` are supported.
+         Example: `factory_kwargs={'device': 'cuda', 'dtype': torch.float64}`
+         will initialize internal buffers as type `torch.float64` on the current CUDA device.
+         Note that `dtype` only applies to floating-point buffers.
 
     Examples::
         >>> t = torch.tensor([[1., -1.], [1., -1.]])

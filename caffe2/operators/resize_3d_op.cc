@@ -70,7 +70,6 @@ bool ResizeNearest3DOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   float* Ydata = Y->template mutable_data<float>();
 
   // Specialized implementation for fast 2x upsampling
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (width_scale_ == 2.0 && height_scale_ == 2.0) {
     CAFFE_ENFORCE(temporal_scale_ == 1 || temporal_scale_ == 2,
       "temporal_scale must be either 1 or 2");

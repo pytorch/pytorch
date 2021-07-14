@@ -35,7 +35,7 @@ void bernoulli_tensor_kernel(Tensor& self, const Tensor& p_, c10::optional<Gener
 }
 
 void bernoulli_scalar_kernel(Tensor& self, double p, c10::optional<Generator> gen) {
-  auto iter = TensorIterator::nullary_op(self);
+  auto iter = TensorIterator::borrowing_nullary_op(self);
   auto generator = get_generator_or_default<CUDAGeneratorImpl>(gen, cuda::detail::getDefaultCUDAGenerator());
   at::native::templates::cuda::bernoulli_kernel(iter, p, generator);
 }

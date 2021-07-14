@@ -42,7 +42,6 @@ TEST(TestHalf, Comparisions) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestHalf, Cast) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Half value = 1.5f;
   ASSERT_EQ((int)value, 1);
   ASSERT_EQ((short)value, 1);
@@ -126,7 +125,6 @@ ASSERT_SAME_TYPE(tinyness_before);
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestHalf, CommonMath) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   float threshold = 0.00001;
   assert(std::abs(std::lgamma(Half(10.0)) - std::lgamma(10.0f)) <= threshold);
   assert(std::abs(std::exp(Half(1.0)) - std::exp(1.0f)) <= threshold);

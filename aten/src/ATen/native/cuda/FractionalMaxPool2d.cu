@@ -114,7 +114,7 @@ __global__ void fractional_max_pool2d_backward_out_cuda_frame(
     int inputH = index / gradInput.size(3);
     assert(inputH < gradInput.size(2));
 
-    gpuAtomicAdd(
+    gpuAtomicAddNoReturn(
       &gradInput[batch][plane][inputH][inputW],
       gradOutput[batch][plane][outputH][outputW]
     );
@@ -134,12 +134,10 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_out_cuda) (
   int planeDim = 0;
   int dimh = 1;
   int dimw = 2;
-  int numBatch = 1;
 
   int ndims = input.ndimension();
 
   if (ndims == 4) {
-    numBatch = input.size(0);
     planeDim++;
     dimh++;
     dimw++;

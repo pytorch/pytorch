@@ -31,7 +31,6 @@ TEST(CustomOperatorTest, InferredSchema) {
   ASSERT_EQ(op->schema().returns()[0].type()->kind(), TypeKind::TensorType);
 
   Stack stack;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   push(stack, 2.0f, at::ones(5));
   op->getOperation()(&stack);
   at::Tensor output;
@@ -63,7 +62,6 @@ TEST(CustomOperatorTest, ExplicitSchema) {
   ASSERT_EQ(op->schema().returns()[0].type()->kind(), TypeKind::TensorType);
 
   Stack stack;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   push(stack, 2.0f, at::ones(5));
   op->getOperation()(&stack);
   at::Tensor output;
@@ -108,14 +106,11 @@ TEST(CustomOperatorTest, ListParameters) {
 
   Stack stack;
   push(stack, c10::List<int64_t>({1, 2}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   push(stack, c10::List<double>({1.0, 2.0}));
   push(
       stack,
       c10::List<c10::complex<double>>(
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           {c10::complex<double>(2.4, -5.5), c10::complex<double>(-1.3, 2)}));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   push(stack, c10::List<at::Tensor>({at::ones(5)}));
   op->getOperation()(&stack);
   c10::List<double> output;
@@ -148,7 +143,6 @@ TEST(CustomOperatorTest, ListParameters2) {
       op->schema().returns()[0].type()->isSubtypeOf(ListType::ofTensors()));
 
   Stack stack;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   push(stack, c10::List<at::Tensor>({at::ones(5)}));
   op->getOperation()(&stack);
   c10::List<at::Tensor> output;
@@ -261,7 +255,6 @@ TEST(TestCustomOperator, OperatorGeneratorBasic) {
   ASSERT_EQ(op->schema().returns()[0].type()->kind(), TypeKind::TensorType);
 
   Stack stack;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   push(stack, 2.0f, at::ones(5));
   op->getOperation()(&stack);
   at::Tensor output;

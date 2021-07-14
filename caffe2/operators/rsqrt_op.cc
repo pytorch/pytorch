@@ -21,7 +21,6 @@ bool RsqrtGradientFunctor<CPUContext>::Forward(
       // NOLINTNEXTLINE(modernize-use-transparent-functors)
       dY_dims.cbegin(), dY_dims.cend(), 1, std::multiplies<int>());
   EigenVectorMap<T>(dX, size) = ConstEigenVectorMap<T>(dY, size).array() *
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       ConstEigenVectorMap<T>(Y, size).array().cube() * static_cast<T>(-0.5);
   return true;
 }

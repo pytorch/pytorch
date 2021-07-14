@@ -84,9 +84,7 @@ Tensor& tril_cuda_(Tensor &self, int64_t k) {
 }
 
 Tensor& tril_cuda_out(const Tensor& self, int64_t k, Tensor &result) {
-  if (result.sizes() != self.sizes()) {
-    result.resize_as_(self);
-  }
+  at::native::resize_output(result, self.sizes());
   if (self.numel() == 0) {
     return result;
   }
@@ -98,9 +96,7 @@ Tensor& triu_cuda_(Tensor &self, int64_t k) {
 }
 
 Tensor& triu_cuda_out(const Tensor& self, int64_t k, Tensor &result) {
-  if (result.sizes() != self.sizes()) {
-    result.resize_as_(self);
-  }
+  at::native::resize_output(result, self.sizes());
   if (self.numel() == 0) {
     return result;
   }
@@ -150,8 +146,8 @@ Tensor& apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
 
   TensorArg result_arg{result, "result", 1};
   TensorArg self_arg{self, "self", 2};
-  checkAllSameGPU("diag", {result_arg, self_arg});
-  checkSameType("diag", result_arg, self_arg);
+  checkAllSameGPU(__func__, {result_arg, self_arg});
+  checkSameType(__func__, result_arg, self_arg);
 
   int nDimension = self.dim();
   if (nDimension == 2) {
@@ -224,9 +220,12 @@ Tensor& apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
 }
 
 Tensor& diag_cuda_out(const Tensor& self, int64_t dimension, Tensor& result) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(ScalarType::Half, ScalarType::Bool, self.scalar_type(), "diag_cuda", [&] {
-    apply_diag<scalar_t>(result, self, dimension);
-  });
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+      ScalarType::Half, ScalarType::BFloat16, ScalarType::Bool,
+      self.scalar_type(), "diag_cuda",
+      [&] {
+        apply_diag<scalar_t>(result, self, dimension);
+      });
   return result;
 }
 

@@ -164,16 +164,11 @@ TEST_F(ModuleListTest, AccessWithPtr) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleListTest, SanityCheckForHoldingStandardModules) {
   ModuleList list(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Linear(10, 3),
       Conv2d(1, 2, 3),
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Dropout(0.5),
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       BatchNorm2d(5),
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Embedding(4, 10),
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       LSTM(4, 5));
 }
 
@@ -210,7 +205,6 @@ TEST_F(ModuleListTest, ExtendPushesModulesFromOtherModuleList) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleListTest, HasReferenceSemantics) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ModuleList first(Linear(2, 3), Linear(4, 4), Linear(4, 5));
   ModuleList second(first);
 
@@ -259,7 +253,6 @@ TEST_F(ModuleListTest, IsCloneable) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleListTest, RegistersElementsAsSubmodules) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ModuleList list(Linear(10, 3), Conv2d(1, 2, 3), Dropout2d(0.5));
 
   auto modules = list->children();
@@ -292,16 +285,11 @@ TEST_F(ModuleListTest, CloneToDevice_CUDA) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModuleListTest, PrettyPrintModuleList) {
   ModuleList list(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Linear(10, 3),
       Conv2d(1, 2, 3),
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Dropout(0.5),
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       BatchNorm2d(5),
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       Embedding(4, 10),
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       LSTM(4, 5));
   ASSERT_EQ(
       c10::str(list),
@@ -320,7 +308,6 @@ TEST_F(ModuleListTest, RangeBasedForLoop) {
   torch::nn::ModuleList mlist(
     torch::nn::Linear(3, 4),
     torch::nn::BatchNorm1d(4),
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     torch::nn::Dropout(0.5)
   );
 

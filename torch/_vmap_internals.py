@@ -153,15 +153,20 @@ def vmap(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0) -> Ca
     examples with `vmap(func)`. vmap can also be used to compute batched
     gradients when composed with autograd.
 
+    .. note::
+        We are actively developing a different and improved vmap prototype
+        `here. <https://github.com/zou3519/functorch>`_ The improved
+        prototype is able to arbitrarily compose with gradient computation.
+        Please give that a try if that is what you're looking for.
+
+        Furthermore, if you're interested in using vmap for your use case,
+        please `contact us! <https://github.com/pytorch/pytorch/issues/42368>`_
+        We're interested in gathering feedback from early adopters to inform
+        the design.
+
     .. warning::
         torch.vmap is an experimental prototype that is subject to
         change and/or deletion. Please use at your own risk.
-
-    .. note::
-        If you're interested in using vmap for your use case, please
-        `contact us! <https://github.com/pytorch/pytorch/issues/42368>`_
-        We're interested in gathering feedback from early adopters to inform
-        the design.
 
     Args:
         func (function): A Python function that takes one or more arguments.

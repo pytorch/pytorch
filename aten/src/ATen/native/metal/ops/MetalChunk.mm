@@ -2,8 +2,8 @@
 #import <ATen/native/metal/MetalCommandBuffer.h>
 #import <ATen/native/metal/MetalTensorImpl.h>
 #import <ATen/native/metal/MetalTensorImplStorage.h>
-#import <ATen/native/metal/MetalUtils.h>
-#import <ATen/native/metal/mpscnn/MPSCNNContext.h>
+#import <ATen/native/metal/MetalTensorUtils.h>
+#import <ATen/native/metal/MetalContext.h>
 #import <ATen/native/metal/mpscnn/MPSCNNUtils.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
 #import <ATen/native/metal/mpscnn/MPSImageUtils.h>
@@ -28,7 +28,7 @@ std::vector<Tensor> chunk(const Tensor& input, int64_t chunks, int64_t dim) {
   std::vector<Tensor> splits(num_splits);
   int64_t last_split_size = split_size - (split_size * num_splits - dim_size);
   MPSImage* X = imageFromTensor(input);
-  MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
+  MetalCommandBuffer* commandBuffer = getCommandBuffer(input);
   auto outputSize1 = {input.size(0), split_size, input.size(2), input.size(3)};
   auto outputSize2 = {input.size(0), last_split_size, input.size(2), input.size(3)};
   MetalTensorImplStorage mt1(outputSize1);
@@ -37,9 +37,8 @@ std::vector<Tensor> chunk(const Tensor& input, int64_t chunks, int64_t dim) {
   mt2.texture()->allocateTemporaryStorage(outputSize2, commandBuffer);
   MPSImage* Y1 = mt1.texture()->image();
   MPSImage* Y2 = mt2.texture()->image();
-  NSString* kernelFunc = @"split_channels";
-  id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
-      specializedPipelineState:kernelFunc
+  id<MTLComputePipelineState> state = [[MetalContext sharedInstance]
+      specializedPipelineState:"split_channels"
                      Constants:@[
                          @(X.featureChannels),
                          @(Y1.featureChannels),
@@ -55,9 +54,6 @@ std::vector<Tensor> chunk(const Tensor& input, int64_t chunks, int64_t dim) {
   [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
           threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
   [encoder endEncoding];
-  [X markRead];
-  [Y1 markRead];
-  [Y2 markRead];
   auto output1 = makeTensor(std::move(mt1), input.options());
   auto output2 = makeTensor(std::move(mt2), input.options());
   return {output1, output2};

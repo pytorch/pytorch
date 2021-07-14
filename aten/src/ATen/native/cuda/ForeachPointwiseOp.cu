@@ -105,7 +105,7 @@ std::vector<Tensor> foreach_pointwise_op(TensorList input, TensorList tensors1, 
 std::vector<Tensor> foreach_tensor_##NAME##_scalar_cuda(TensorList input, TensorList tensors1, TensorList tensors2, const Scalar& scalar) {  \
     check_foreach_api_restrictions(input, tensors1, tensors2);                                                                        \
                                                                                                                                       \
-    if (!can_use_fast_route({input, tensors1, tensors2}, scalar)) {                                                                   \
+    if (!can_use_fast_route({input, tensors1, tensors2}, scalar) || has_integral_tensor(input, /* includeBool */ true)) {             \
         return at::native::foreach_tensor_##NAME##_scalar_slow(input, tensors1, tensors2, scalar);                                    \
     }                                                                                                                                 \
                                                                                                                                       \
@@ -115,7 +115,7 @@ std::vector<Tensor> foreach_tensor_##NAME##_scalar_cuda(TensorList input, Tensor
 void foreach_tensor_##NAME##_scalar_cuda_(TensorList input, TensorList tensors1, TensorList tensors2, const Scalar& scalar) {                \
     check_foreach_api_restrictions(input, tensors1, tensors2);                                                                        \
                                                                                                                                       \
-    if (!can_use_fast_route({input, tensors1, tensors2}, scalar)) {                                                                   \
+    if (!can_use_fast_route({input, tensors1, tensors2}, scalar) || has_integral_tensor(input, /* includeBool */ true)) {             \
         return at::native::foreach_tensor_##NAME##_scalar_slow_(input, tensors1, tensors2, scalar);                                   \
     }                                                                                                                                 \
                                                                                                                                       \
@@ -127,7 +127,7 @@ void foreach_tensor_##NAME##_scalar_cuda_(TensorList input, TensorList tensors1,
 std::vector<Tensor> foreach_tensor_##NAME##_scalarlist_cuda(TensorList input, TensorList tensors1, TensorList tensors2, at::ArrayRef<Scalar> scalars) {  \
     check_foreach_api_restrictions(input, tensors1, tensors2, scalars);                                                                                  \
                                                                                                                                                          \
-    if (!can_use_fast_route({input, tensors1, tensors2}, scalars)) {                                                                                     \
+    if (!can_use_fast_route({input, tensors1, tensors2}, scalars) || has_integral_tensor(input, /* includeBool */ true)) {                               \
         return at::native::foreach_tensor_##NAME##_scalarlist_slow(input, tensors1, tensors2, scalars);                                                  \
     }                                                                                                                                                    \
                                                                                                                                                          \
@@ -137,7 +137,7 @@ std::vector<Tensor> foreach_tensor_##NAME##_scalarlist_cuda(TensorList input, Te
 void foreach_tensor_##NAME##_scalarlist_cuda_(TensorList input, TensorList tensors1, TensorList tensors2, at::ArrayRef<Scalar> scalars) {                \
     check_foreach_api_restrictions(input, tensors1, tensors2, scalars);                                                                                  \
                                                                                                                                                          \
-    if (!can_use_fast_route({input, tensors1, tensors2}, scalars)) {                                                                                     \
+    if (!can_use_fast_route({input, tensors1, tensors2}, scalars) || has_integral_tensor(input, /* includeBool */ true)) {                               \
         return at::native::foreach_tensor_##NAME##_scalarlist_slow_(input, tensors1, tensors2, scalars);                                                 \
     }                                                                                                                                                    \
                                                                                                                                                          \
@@ -149,10 +149,14 @@ FOREACH_POINTWISE_OP_SCALAR(addcdiv, std::divides);
 FOREACH_POINTWISE_OP_SCALARLIST(addcmul, std::multiplies);
 FOREACH_POINTWISE_OP_SCALARLIST(addcdiv, std::divides);
 
+
+// Why bool tensors are pushed to slowpath?
+// Because `AT_DISPATCH_ALL_TYPES_AND` is used below.
+// TODO(mkozuki): Check whether it's possible to handle bool tensors in fastpath.
 #define FOREACH_MAXIMUM_MINIMUM_OP(NAME, OP)                                                               \
 std::vector<Tensor> foreach_tensor_##NAME##_cuda(TensorList tensors1, TensorList tensors2) {               \
     check_foreach_api_restrictions(tensors1, tensors2);                                                    \
-    if (!can_use_fast_route({tensors1, tensors2})) {                                                       \
+    if (!can_use_fast_route({tensors1, tensors2}) || has_bool_tensor(tensors1)) {                          \
         return at::native::foreach_tensor_##NAME##_slow(tensors1, tensors2);                               \
     }                                                                                                      \
                                                                                                            \

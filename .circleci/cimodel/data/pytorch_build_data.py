@@ -35,6 +35,11 @@ CONFIG_TREE_DATA = [
             ("10.2", [
                 ("3.6", [
                     ("shard_test", [X(True)]),
+                    ("slow_gradcheck", [
+                        (True, [
+                            ('shard_test', [XImportant(True)]),
+                        ]),
+                    ]),
                     ("libtorch", [
                         (True, [
                             ('build_only', [X(True)]),
@@ -47,7 +52,7 @@ CONFIG_TREE_DATA = [
                     ("shard_test", [XImportant(True)]),
                     ("libtorch", [
                         (True, [
-                            ('build_only', [XImportant(True)]),
+                            ('build_only', [X(True)]),
                         ]),
                     ]),
                 ]),
@@ -68,14 +73,10 @@ CONFIG_TREE_DATA = [
                 ]),
             ]),
         ]),
-        ("gcc", [
-            ("9", [
-                ("3.8", [
-                    ("coverage", [
-                        (True, [
-                            ("shard_test", [XImportant(True)]),
-                        ]),
-                    ]),
+        ("cuda", [
+            ("10.2", [
+                ("3.9", [
+                    ("shard_test", [XImportant(True)]),
                 ]),
             ]),
         ]),
@@ -138,6 +139,8 @@ class PyVerConfigNode(TreeConfigNode):
     def init2(self, node_name):
         self.props["pyver"] = node_name
         self.props["abbreviated_pyver"] = get_major_pyver(node_name)
+        if node_name == "3.9":
+            self.props["abbreviated_pyver"] = "py3.9"
 
     # noinspection PyMethodMayBeStatic
     def child_constructor(self):
@@ -167,9 +170,17 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
             "cuda_gcc_override": CudaGccOverrideConfigNode,
             "coverage": CoverageConfigNode,
             "pure_torch": PureTorchConfigNode,
+            "slow_gradcheck": SlowGradcheckConfigNode,
         }
         return next_nodes[experimental_feature]
 
+
+class SlowGradcheckConfigNode(TreeConfigNode):
+    def init2(self, node_name):
+        self.props["is_slow_gradcheck"] = True
+
+    def child_constructor(self):
+        return ExperimentalFeatureConfigNode
 
 class PureTorchConfigNode(TreeConfigNode):
     def modify_label(self, label):

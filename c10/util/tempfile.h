@@ -104,19 +104,15 @@ struct TempDir {
     return *this;
   }
 
+  ~TempDir() {
+    if (!name.empty()) {
 #if !defined(_WIN32)
-  ~TempDir() {
-    if (!name.empty()) {
       rmdir(name.c_str());
-    }
-  }
 #else // defined(_WIN32)
-  ~TempDir() {
-    if (!name.empty()) {
       RemoveDirectoryA(name.c_str());
+#endif // defined(_WIN32)
     }
   }
-#endif // defined(_WIN32)
 
   std::string name;
 };

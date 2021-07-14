@@ -8,6 +8,8 @@
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
 #include <torch/csrc/jit/tensorexpr/stmt.h>
 
+#include <c10/util/irange.h>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -163,7 +165,7 @@ std::vector<const Expr*> getBoundExtents(
   // Find the safe size of the temprorary buffer by determining the outer
   // extents of a union of all bounds.
   for (const TensorAccessBoundsInfo& p : infos) {
-    for (size_t i = 0; i < p.start.size(); i++) {
+    for (const auto i : c10::irange(p.start.size())) {
       if (starts.size() <= i) {
         starts.push_back(p.start[i]);
       } else {

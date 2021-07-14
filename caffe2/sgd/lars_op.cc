@@ -25,7 +25,6 @@ REGISTER_CPU_OPERATOR(Lars, LarsOp<float, CPUContext>);
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Lars)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(5)
     .NumOutputs(1)
     .SetDoc(R"DOC(

@@ -15,7 +15,6 @@ using dict_int_int =
     ska_ordered::order_preserving_flat_hash_map<int64_t, int64_t>;
 
 dict_int_int test_dict(dict_int_int& dict) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int64_t i = 0; i < 100; ++i) {
     dict[i] = i + 1;
   }
@@ -27,7 +26,6 @@ dict_int_int test_dict(dict_int_int& dict) {
   }
 
   // erase a few entries by themselves
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::unordered_set<int64_t> erase_set = {0, 2, 9, 71};
   for (auto erase : erase_set) {
     dict.erase(erase);
@@ -35,12 +33,10 @@ dict_int_int test_dict(dict_int_int& dict) {
 
   // erase via iterators
   auto begin = dict.begin();
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (size_t i = 0; i < 20; ++i)
     begin++;
 
   auto end = begin;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (size_t i = 0; i < 20; ++i) {
     erase_set.insert(end->first);
     end++;
@@ -48,7 +44,6 @@ dict_int_int test_dict(dict_int_int& dict) {
   dict.erase(begin, end);
 
   std::vector<size_t> order;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (size_t i = 0; i < 100; ++i) {
     if (!erase_set.count(i)) {
       order.push_back(i);
@@ -133,7 +128,6 @@ TEST(OrderedPreservingDictTest, DictCollisions) {
     }
 
     // erase a few entries;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::unordered_set<int64_t> erase_set = {0, 2, 9};
     for (auto erase : erase_set) {
       dict.erase(erase);
@@ -141,12 +135,10 @@ TEST(OrderedPreservingDictTest, DictCollisions) {
 
     // erase a few entries via iterator
     auto begin = dict.begin();
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (size_t i = 0; i < 10; ++i) {
       begin++;
     }
     auto end = begin;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (size_t i = 0; i < 7; ++i) {
       erase_set.insert(end->first);
       end++;
@@ -186,7 +178,6 @@ TEST(OrderedPreservingDictTest, test_range_insert) {
   }
 
   dict_int_int map = {{-1, 0}, {-2, 0}};
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   map.insert(values.begin() + 10, values.end() - 5);
 
   TORCH_INTERNAL_ASSERT(map.size(), 987);
@@ -195,7 +186,6 @@ TEST(OrderedPreservingDictTest, test_range_insert) {
 
   ASSERT_EQUAL_PRIM(map.at(-2), 0);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 10, j = 2; i < nb_values - 5; i++, j++) {
     ASSERT_EQUAL_PRIM(map.at(i), i + 1);
   }
@@ -231,9 +221,7 @@ TEST(OrderedPreservingDictTest, test_range_erase) {
     }
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto it_first = std::next(map.begin(), 10);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto it_last = std::next(map.begin(), 220);
 
   auto it = map.erase(it_first, it_last);
@@ -248,7 +236,6 @@ TEST(OrderedPreservingDictTest, test_range_erase) {
   // Check order
   it = map.begin();
   for (std::size_t i = 0; i < nb_values; i++) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (i >= 10 && i < 220) {
       continue;
     }
@@ -363,7 +350,6 @@ TEST(OrderedPreservingDictTest, test_copy_constructor_empty) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, test_copy_operator_empty) {
   ska_ordered::order_preserving_flat_hash_map<std::string, int> map(0);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ska_ordered::order_preserving_flat_hash_map<std::string, int> map_copy(16);
   map_copy = map;
 
@@ -399,7 +385,6 @@ TEST(OrderedPreservingDictTest, test_at) {
  */
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, test_equal_range) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ska_ordered::order_preserving_flat_hash_map<std::int64_t, std::int64_t> map =
       {{0, 10}, {-2, 20}};
 
@@ -418,7 +403,6 @@ TEST(OrderedPreservingDictTest, test_equal_range) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, test_access_operator) {
   // insert x values, use at for known and unknown values.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ska_ordered::order_preserving_flat_hash_map<std::int64_t, std::int64_t> map =
       {{0, 10}, {-2, 20}};
 
@@ -434,10 +418,8 @@ TEST(OrderedPreservingDictTest, test_access_operator) {
  */
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, test_swap) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ska_ordered::order_preserving_flat_hash_map<std::int64_t, std::int64_t> map =
       {{1, 10}, {8, 80}, {3, 30}};
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ska_ordered::order_preserving_flat_hash_map<std::int64_t, std::int64_t> map2 =
       {{4, 40}, {5, 50}};
 
@@ -453,9 +435,7 @@ TEST(OrderedPreservingDictTest, test_swap) {
       (ska_ordered::order_preserving_flat_hash_map<std::int64_t, std::int64_t>{
           {1, 10}, {8, 80}, {3, 30}}));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   map.insert({6, 60});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   map2.insert({4, 40});
 
   TORCH_INTERNAL_ASSERT(
@@ -470,7 +450,6 @@ TEST(OrderedPreservingDictTest, test_swap) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OrderedPreservingDictTest, test_swap_empty) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ska_ordered::order_preserving_flat_hash_map<std::int64_t, std::int64_t> map =
       {{1, 10}, {8, 80}, {3, 30}};
   ska_ordered::order_preserving_flat_hash_map<std::int64_t, std::int64_t> map2;
@@ -487,9 +466,7 @@ TEST(OrderedPreservingDictTest, test_swap_empty) {
       (ska_ordered::order_preserving_flat_hash_map<std::int64_t, std::int64_t>{
           {1, 10}, {8, 80}, {3, 30}}));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   map.insert({6, 60});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   map2.insert({4, 40});
 
   TORCH_INTERNAL_ASSERT(

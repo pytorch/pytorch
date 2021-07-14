@@ -1,5 +1,6 @@
 import copy
 import os
+import sys
 import tempfile
 import unittest
 
@@ -15,6 +16,7 @@ from torch.testing._internal.common_utils import TEST_WITH_TSAN
 from torch.testing._internal.common_utils import TestCase, run_tests
 
 
+@unittest.skipIf(sys.version_info >= (3, 9), "Fails on Python-3.9, see https://github.com/pytorch/pytorch/issues/51619")
 class ProcessGroupShareTensorTest(test_c10d_spawn.AbstractProcessGroupShareTensorTest, TestCase):
 
     @classmethod

@@ -36,9 +36,7 @@ TensorQuantizationParams P99::ChooseQuantizationParams(
     sum += bins_f[i];
     CDF[i] = (double)sum / total_sum;
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   CAFFE_ENFORCE(threshold_ > 0.5 && threshold_ < 1);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   double left_quantile = (1.0f - threshold_) / 2.0f;
   double right_quantile = 1.0f - left_quantile;
   int i_begin = 0;

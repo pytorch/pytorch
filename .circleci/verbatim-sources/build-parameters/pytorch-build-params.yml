@@ -15,12 +15,34 @@ pytorch_params: &pytorch_params
     build_only:
       type: string
       default: ""
+    ci_master:
+      type: string
+      default: ""
   environment:
     BUILD_ENVIRONMENT: << parameters.build_environment >>
     DOCKER_IMAGE: << parameters.docker_image >>
     USE_CUDA_DOCKER_RUNTIME: << parameters.use_cuda_docker_runtime >>
     BUILD_ONLY: << parameters.build_only >>
+    CI_MASTER: << pipeline.parameters.run_master_build >>
   resource_class: << parameters.resource_class >>
+
+pytorch_android_params: &pytorch_android_params
+  parameters:
+    build_environment:
+      type: string
+      default: ""
+    op_list:
+      type: string
+      default: ""
+    lite_interpreter:
+      type: string
+      default: "1"
+  environment:
+    BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single
+    DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c"
+    PYTHON_VERSION: "3.6"
+    SELECTED_OP_LIST: << parameters.op_list >>
+    BUILD_LITE_INTERPRETER: << parameters.lite_interpreter >>
 
 pytorch_ios_params: &pytorch_ios_params
   parameters:
@@ -41,7 +63,7 @@ pytorch_ios_params: &pytorch_ios_params
       default: "0"
     lite_interpreter:
       type: string
-      default: "0"
+      default: "1"
   environment:
     BUILD_ENVIRONMENT: << parameters.build_environment >>
     IOS_ARCH: << parameters.ios_arch >>
@@ -66,7 +88,10 @@ pytorch_windows_params: &pytorch_windows_params
       default: "10.1"
     python_version:
       type: string
-      default: "3.6"
+      default: "3.8"
+    vs_version:
+      type: string
+      default: "16.8.6"
     vc_version:
       type: string
       default: "14.16"
@@ -84,6 +109,7 @@ pytorch_windows_params: &pytorch_windows_params
     SCCACHE_BUCKET: "ossci-compiler-cache"
     CUDA_VERSION: <<parameters.cuda_version>>
     PYTHON_VERSION: <<parameters.python_version>>
+    VS_VERSION: <<parameters.vs_version>>
     VC_VERSION: <<parameters.vc_version>>
     VC_YEAR: <<parameters.vc_year>>
     VC_PRODUCT: <<parameters.vc_product>>

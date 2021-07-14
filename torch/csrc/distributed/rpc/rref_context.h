@@ -87,8 +87,7 @@ class TORCH_API RRefContext {
   // it is not yet available.
   c10::intrusive_ptr<OwnerRRef> getOrCreateOwnerRRef(
       const RRefId& rrefId,
-      const TypePtr& type,
-      std::vector<c10::DeviceIndex> devices = {});
+      const TypePtr& type);
 
   // Create an empty owner rref of type.
   // This method is called to first time generate an ``OwnerRRef``, e.g.,
@@ -96,9 +95,7 @@ class TORCH_API RRefContext {
   // 2) create the ``OwnerRRef`` on `rpc.remote()` caller side.
   // What's common in these two cases are, 1) the RRefId hasn't been generated
   // 2) the TypePtr is presented.
-  c10::intrusive_ptr<OwnerRRef> createOwnerRRef(
-      const TypePtr& type,
-      std::vector<c10::DeviceIndex> devices = {});
+  c10::intrusive_ptr<OwnerRRef> createOwnerRRef(const TypePtr& type);
 
   // Returns a Future of the OwnerRRef, which will be marked completed when
   // ``OwnerRRef`` is created. This method is used when the TypePtr is not
@@ -240,6 +237,7 @@ class TORCH_API RRefContext {
   // If there is any leak on any RRef, this method will throw an error.
   void checkRRefLeaks(bool ignoreRRefLeak);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static std::atomic<local_id_t> nextLocalId_;
 
   const std::shared_ptr<RpcAgent> agent_;
@@ -307,6 +305,7 @@ class TORCH_API RRefContext {
 
   // Thread local states to keep UserRRefs deserialized from user function
   // arguments.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static thread_local std::vector<std::shared_ptr<PendingUserState>> userTable_;
   // A flag indicating whether subsequently created UserRRefs should be added to
   // the thread_local userTable_. The flag is set to true before serializing
@@ -331,6 +330,7 @@ class TORCH_API RRefContext {
   // without confirmation is OK, because the creator would either call to_here
   // or forward the UserRRef, and both would then require confirmations from the
   // owner.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static thread_local bool recording_;
 };
 

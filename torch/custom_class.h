@@ -18,38 +18,6 @@
 
 namespace torch {
 
-/// This struct is used to represent default values for arguments
-/// when registering methods for custom classes.
-///     static auto register_foo = torch::class_<Foo>("myclasses", "Foo")
-///       .def("myMethod", &Foo::myMethod, {torch::arg("name") = name});
-struct arg {
-  // Static method for representing a default value of None. This is meant to
-  // be used like so:
-  //     torch::arg("name") = torch::arg::none
-  // and is identical to:
-  //     torch::arg("name") = IValue()
-  static c10::IValue none() {
-    return c10::IValue();
-  }
-
-  // Explicit constructor.
-  explicit arg(std::string name) : name_(std::move(name)), value_(c10::nullopt) {}
-  // Assignment operator. This enables the pybind-like syntax of
-  // torch::arg("name") = value.
-  arg& operator=(const c10::IValue& rhs) {
-    value_ = rhs;
-    return *this;
-  }
-
-  // The name of the argument. This is copied to the schema; argument
-  // names cannot be extracted from the C++ declaration.
-  std::string name_;
-  // IValue's default constructor makes it None, which is not distinguishable from
-  // an actual, user-provided default value that is None. This boolean
-  // helps distinguish between the two cases.
-  c10::optional<c10::IValue> value_;
-};
-
 /// This function is used in conjunction with `class_::def()` to register
 /// a constructor for a given C++ class type. For example,
 /// `torch::init<int, std::string>()` would register a two-argument constructor
@@ -93,7 +61,7 @@ decltype(auto) init(Func&& f) {
 /// a pointer to the Foo class's `myMethod()` method. `lambdaMethod()`
 /// is registered with a C++ lambda expression.
 template <class CurClass>
-class class_ {
+class class_ : public ::torch::detail::class_base {
   static_assert(std::is_base_of<CustomClassHolder, CurClass>::value,
     "torch::class_<T> requires T to inherit from CustomClassHolder");
 
@@ -105,25 +73,8 @@ class class_ {
   /// see this class exposed as in Python and TorchScript. For example, if
   /// you pass `foo` as the namespace name and `Bar` as the className, the
   /// class will appear as `torch.classes.foo.Bar` in Python and TorchScript
-  explicit class_(const std::string& namespaceName, const std::string& className, std::string doc_string = "") {
-    detail::checkValidIdent(namespaceName, "Namespace name");
-    detail::checkValidIdent(className, "Class name");
-    qualClassName = std::string("__torch__.torch.classes.") + namespaceName + "." + className;
-
-    classTypePtr = at::ClassType::create(
-        c10::QualifiedName(qualClassName),
-        std::weak_ptr<jit::CompilationUnit>(),
-        /*is_module=*/false,
-        std::move(doc_string));
-    classTypePtr->addAttribute("capsule", at::CapsuleType::get());
-
-    c10::getCustomClassTypeMap().insert(
-        {std::type_index(typeid(c10::intrusive_ptr<CurClass>)), classTypePtr});
-    c10::getCustomClassTypeMap().insert(
-        {std::type_index(typeid(c10::tagged_capsule<CurClass>)), classTypePtr});
-
-    registerCustomClass(classTypePtr);
-  }
+  explicit class_(const std::string& namespaceName, const std::string& className, std::string doc_string = "")
+      : class_base(namespaceName, className, std::move(doc_string), typeid(c10::intrusive_ptr<CurClass>), typeid(c10::tagged_capsule<CurClass>)) {}
 
   /// def() can be used in conjunction with `torch::init()` to register
   /// a constructor for a given C++ class type. For example, passing
@@ -272,12 +223,12 @@ class class_ {
   /// Property registration API for properties with read-write access.
   template <typename T>
   class_& def_readwrite(const std::string& name, T CurClass::*field) {
-    auto getter_func =
-        [field = std::move(field)](const c10::intrusive_ptr<CurClass>& self) {
-          return self.get()->*field;
-        };
+    auto getter_func = [field =
+                            field](const c10::intrusive_ptr<CurClass>& self) {
+      return self.get()->*field;
+    };
 
-    auto setter_func = [field = std::move(field)](
+    auto setter_func = [field = field](
                            const c10::intrusive_ptr<CurClass>& self, T value) {
       self.get()->*field = value;
     };
@@ -419,31 +370,15 @@ class class_ {
     // extracted by inferFunctionSchemaSingleReturn, and so there must be a
     // torch::arg instance in default_args even for arguments that do not
     // have an actual default value provided.
-        TORCH_CHECK(
-            default_args.size() == 0 ||
-                default_args.size() == schema.arguments().size() - 1,
-            "Default values must be specified for none or all arguments");
+    TORCH_CHECK(
+        default_args.size() == 0 ||
+        default_args.size() == schema.arguments().size() - 1,
+        "Default values must be specified for none or all arguments");
 
     // If there are default args, copy the argument names and default values to the
     // function schema.
     if (default_args.size() > 0) {
-      const auto& old_args = schema.arguments();
-      std::vector<c10::Argument> new_args;
-      new_args.reserve(old_args.size());
-      std::vector<arg> default_args_v(default_args);
-
-      new_args.emplace_back(old_args[0]);
-      for (size_t i = 0; i < default_args_v.size(); ++i) {
-        // Skip self.
-        auto& arg = old_args[i+1];
-        new_args.emplace_back(c10::Argument(
-            std::move(default_args_v[i].name_),
-            arg.type(),
-            arg.N(),
-            default_args_v[i].value_.has_value() ? std::move(*default_args_v[i].value_) : c10::nullopt));
-      }
-
-      schema = schema.cloneWithArguments(new_args);
+      schema = withNewArguments(schema, default_args);
     }
 
     auto wrapped_func =
@@ -467,9 +402,6 @@ class class_ {
     registerCustomClassMethod(std::move(method));
     return method_val;
   }
-
-  std::string qualClassName;
-  at::ClassTypePtr classTypePtr;
 };
 
 /// make_custom_class() is a convenient way to create an instance of a registered

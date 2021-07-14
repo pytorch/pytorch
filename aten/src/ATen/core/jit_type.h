@@ -186,6 +186,10 @@ struct TORCH_API Stride {
         stride_ == b.stride_;
   }
 
+  bool isComplete() const {
+    return stride_index_ && contiguous_ && stride_;
+  }
+
   c10::optional<size_t> stride_index_;
   c10::optional<bool> contiguous_;
   c10::optional<size_t> stride_;
@@ -237,6 +241,10 @@ struct TORCH_API ShapeSymbol {
   }
   int64_t static_size() const {
     TORCH_CHECK(is_static());
+    return value_;
+  };
+
+  int64_t value() const {
     return value_;
   };
 
@@ -296,6 +304,8 @@ struct TORCH_API SymbolicShape {
     dims_ = shape_symbols;
   }
 
+  void dump() const;
+
   SymbolicShape(std::vector<ShapeSymbol> dims) : dims_(std::move(dims)) {}
 
   SymbolicShape(c10::IntArrayRef dims) {
@@ -308,6 +318,13 @@ struct TORCH_API SymbolicShape {
   }
 
   ShapeSymbol operator[](size_t i) const {
+    if (!dims_) {
+      throw std::runtime_error("Rank isn't fixed");
+    }
+    return (*dims_).at(i);
+  }
+
+  ShapeSymbol at(size_t i) const {
     if (!dims_) {
       throw std::runtime_error("Rank isn't fixed");
     }
@@ -350,6 +367,17 @@ struct TORCH_API SymbolicShape {
   private:
     c10::optional<std::vector<ShapeSymbol>> dims_;
 };
+
+namespace detail {
+inline bool isComplete(const Stride& s) {
+  return s.isComplete();
+}
+
+template<typename T>
+inline bool isComplete(const T& t) {
+  return true;
+}
+}
 
 template <typename T>
 struct VaryingShape {
@@ -414,7 +442,7 @@ struct VaryingShape {
       return false;
     }
     for (auto d : *dims_) {
-      if(!d) {
+      if (!d || !detail::isComplete(*d)) {
         return false;
       }
     }
@@ -706,6 +734,7 @@ struct TORCH_API ListType
 
   // common cast List[Tensor]
   static ListTypePtr ofTensors();
+  static ListTypePtr ofOptionalTensors();
   static ListTypePtr ofInts();
   static ListTypePtr ofFloats();
   static ListTypePtr ofComplexDoubles();
@@ -921,15 +950,25 @@ using TupleTypePtr = std::shared_ptr<TupleType>;
 using NameList = std::vector<std::string>;
 // This type represents a Tuple
 struct TORCH_API TupleType : public NamedType {
+
   static TupleTypePtr createNamed(const c10::optional<c10::QualifiedName>& name,
       const std::vector<std::string>& field_names,
-      const std::vector<TypePtr>& types);
+      const std::vector<TypePtr>& field_types,
+      std::vector<IValue>& field_defaults);
+
+  static TupleTypePtr createNamed(const c10::optional<c10::QualifiedName>& name,
+      const std::vector<std::string>& field_names,
+      const std::vector<TypePtr>& field_types);
+
   static TupleTypePtr create(
       std::vector<TypePtr> types) {
     return TupleTypePtr(new TupleType(
         std::move(types),
         c10::nullopt,
         nullptr)); // NOLINT(modernize-make-shared)
+  }
+  static TupleTypePtr create() {
+    return create({});
   }
 
   at::ArrayRef<TypePtr> elements() const {
@@ -1467,6 +1506,7 @@ enum class TypeVerbosity {
   Type,
   TypeAndStride,
   Full,
+  Symbolic,
   Default = Full,
 };
 
@@ -1499,6 +1539,8 @@ inline TypePtr TensorType::fromNumberType(TypePtr typ) {
     return TensorType::createContiguous(at::kDouble, at::kCPU, {});
   } else if (typ->isSubtypeOf(BoolType::get())) {
     return TensorType::createContiguous(at::kBool, at::kCPU, {});
+  } else if (typ->kind() == NumberType::Kind) {
+    return TensorType::create(c10::nullopt, at::kCPU, {}, c10::nullopt);
   }
   TORCH_CHECK(false, "Unknown number type: ", typ->str());
 }
@@ -1532,15 +1574,21 @@ inline at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
 // then t2 will be returned (and vice versa).
 // Two different tensortypes will return dynamic.
 // Currently we chose not to support returning a NumberType for a float & int
-// input because of a lack of operator support for NumberType
+// input because of a lack of operator support for NumberType.
+// If `type_hint` is an `InterfaceType`, then we can use that as a
+// potential supertype for `ClassType`s in the list. Otherwise, we have
+// no way to find and use some common interface type
 TORCH_API c10::optional<TypePtr> unifyTypes(
     const TypePtr& t1,
     const TypePtr& t2,
-    bool default_to_any = false);
+    bool default_to_any = false,
+    TypePtr type_hint=nullptr);
 
 TORCH_API c10::optional<TypePtr> unifyTypeList(
     at::ArrayRef<TypePtr> elements,
-    std::ostream& why_not);
+    std::ostream& why_not,
+    bool default_to_any=false,
+    TypePtr type_hint=nullptr);
 
 namespace detail {
 template <typename T>
@@ -1655,6 +1703,12 @@ struct getTypePtr_<at::Generator> final {
 };
 template <>
 struct getTypePtr_<std::string> final {
+  static TypePtr call() {
+    return StringType::get();
+  }
+};
+template <>
+struct getTypePtr_<c10::string_view> final {
   static TypePtr call() {
     return StringType::get();
   }
@@ -1996,8 +2050,8 @@ struct TORCH_API ClassType : public NamedType {
   c10::optional<ClassType::Property> getProperty(const std::string& name);
   // Add a property named \p name with \p getter and \p setter as its getter and setter.
   void addProperty(const std::string& name, torch::jit::Function* getter, torch::jit::Function* setter);
-
-  const std::vector<Property> properties() const {
+  // Get a list of all properties.
+  const std::vector<Property>& properties() const {
     return properties_;
   }
 

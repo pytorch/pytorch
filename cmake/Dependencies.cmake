@@ -216,6 +216,18 @@ if(USE_FFTW OR NOT MKL_FOUND)
   endif()
 endif()
 
+# --- [ PocketFFT
+set(AT_POCKETFFT_ENABLED 0)
+if(NOT MKL_FOUND)
+  find_path(POCKETFFT_INCLUDE_DIR NAMES pocketfft_hdronly.h
+            PATHS /usr/local/include
+            PATHS $ENV{POCKETFFT_HOME}
+           )
+  if(POCKETFFT_INCLUDE_DIR)
+    set(AT_POCKETFFT_ENABLED 1)
+  endif()
+endif()
+
 # ---[ Dependencies
 # NNPACK and family (QNNPACK, PYTORCH_QNNPACK, and XNNPACK) can download and
 # compile their dependencies in isolation as part of their build.  These dependencies
@@ -905,7 +917,7 @@ include_directories(SYSTEM ${EIGEN3_INCLUDE_DIR})
 # ---[ Python + Numpy
 if(BUILD_PYTHON)
   # If not given a Python installation, then use the current active Python
-  if(NOT DEFINED PYTHON_EXECUTABLE)
+  if(NOT PYTHON_EXECUTABLE)
     execute_process(
       COMMAND "which" "python" RESULT_VARIABLE _exitcode OUTPUT_VARIABLE _py_exe)
     if(${_exitcode} EQUAL 0)
@@ -934,7 +946,7 @@ if(BUILD_PYTHON)
   # executable that we already found (if we didn't actually find an executable
   # then these will just use "python", but at least they'll be consistent with
   # each other).
-  if(NOT DEFINED PYTHON_INCLUDE_DIR)
+  if(NOT PYTHON_INCLUDE_DIR)
     # TODO: Verify that sysconfig isn't inaccurate
     pycmd_no_exit(_py_inc _exitcode "import sysconfig; print(sysconfig.get_path('include'))")
     if("${_exitcode}" EQUAL 0 AND IS_DIRECTORY "${_py_inc}")
@@ -943,9 +955,9 @@ if(BUILD_PYTHON)
     else()
       message(WARNING "Could not set Python's include dir to ${_py_inc} from sysconfig")
     endif()
-  endif(NOT DEFINED PYTHON_INCLUDE_DIR)
+  endif(NOT PYTHON_INCLUDE_DIR)
 
-  if(NOT DEFINED PYTHON_LIBRARY)
+  if(NOT PYTHON_LIBRARY)
     pycmd_no_exit(_py_lib _exitcode "import sysconfig; print(sysconfig.get_path('stdlib'))")
     if("${_exitcode}" EQUAL 0 AND EXISTS "${_py_lib}" AND EXISTS "${_py_lib}")
       set(PYTHON_LIBRARY "${_py_lib}")
@@ -955,7 +967,7 @@ if(BUILD_PYTHON)
       endif()
       message(STATUS "Setting Python's library to ${PYTHON_LIBRARY}")
     endif()
-  endif(NOT DEFINED PYTHON_LIBRARY)
+  endif(NOT PYTHON_LIBRARY)
 
   # These should fill in the rest of the variables, like versions, but resepct
   # the variables we set above
@@ -999,24 +1011,20 @@ if(BUILD_PYTHON)
 endif()
 
 # ---[ pybind11
-if(NOT pybind11_PREFER_third_party)
+if(USE_SYSTEM_BIND11)
   find_package(pybind11 CONFIG)
   if(NOT pybind11_FOUND)
     find_package(pybind11)
   endif()
-endif()
-
-if(pybind11_FOUND)
-    message(STATUS "System pybind11 found")
+  if(NOT pybind11_FOUND)
+    message(FATAL "Cannot find system pybind11")
+  endif()
 else()
     message(STATUS "Using third_party/pybind11.")
     set(pybind11_INCLUDE_DIRS ${CMAKE_CURRENT_LIST_DIR}/../third_party/pybind11/include)
     install(DIRECTORY ${pybind11_INCLUDE_DIRS}
             DESTINATION ${CMAKE_INSTALL_PREFIX}
             FILES_MATCHING PATTERN "*.h")
-    set(pybind11_PREFER_third_party ON CACHE BOOL
-        "Use the third_party/pybind11 submodule, instead of looking for system
-        installation of pybind11")
 endif()
 message(STATUS "pybind11 include dirs: " "${pybind11_INCLUDE_DIRS}")
 include_directories(SYSTEM ${pybind11_INCLUDE_DIRS})
@@ -1165,7 +1173,7 @@ if(USE_CUDA)
       caffe2_update_option(USE_NVRTC OFF)
     endif()
     if(CAFFE2_USE_CUDNN)
-      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cudnn)
+      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cudnn-public)
     else()
       caffe2_update_option(USE_CUDNN OFF)
     endif()
@@ -1187,6 +1195,12 @@ if(USE_CUDA)
     set(CAFFE2_USE_NVRTC OFF)
     set(CAFFE2_USE_TENSORRT OFF)
   endif()
+endif()
+
+# ---[ cuDNN
+if(USE_CUDNN)
+  set(CUDNN_FRONTEND_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/cudnn_frontend/include)
+  include_directories(${CUDNN_FRONTEND_INCLUDE_DIR})
 endif()
 
 # ---[ HIP
@@ -1216,8 +1230,8 @@ if(USE_ROCM)
     list(APPEND HIP_CXX_FLAGS -Wno-implicit-int-float-conversion)
     list(APPEND HIP_CXX_FLAGS -DCAFFE2_USE_MIOPEN)
     list(APPEND HIP_CXX_FLAGS -DTHRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_HIP)
-    list(APPEND HIP_CXX_FLAGS -DROCM_VERSION=${ROCM_VERSION_DEV_INT})
     list(APPEND HIP_CXX_FLAGS -std=c++14)
+    add_definitions(-DROCM_VERSION=${ROCM_VERSION_DEV_INT})
 
     if(CMAKE_BUILD_TYPE MATCHES Debug)
        list(APPEND HIP_CXX_FLAGS -g2)
@@ -1308,7 +1322,13 @@ if(USE_GLOO)
     message(WARNING "Gloo can only be used on 64-bit systems.")
     caffe2_update_option(USE_GLOO OFF)
   else()
-    set(GLOO_INSTALL ON CACHE BOOL "" FORCE)
+    if(MSVC)
+      # Don't install gloo on Windows
+      # It is already handled in builder scripts
+      set(GLOO_INSTALL OFF CACHE BOOL "" FORCE)
+    else()
+      set(GLOO_INSTALL ON CACHE BOOL "" FORCE)
+    endif()
     set(GLOO_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
 
     # Temporarily override variables to avoid building Gloo tests/benchmarks
@@ -1369,6 +1389,13 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
     add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe)
 
     list(APPEND Caffe2_DEPENDENCY_LIBS tensorpipe)
+    if(USE_CUDA)
+      list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS tensorpipe_cuda)
+    elseif(USE_ROCM)
+      message(WARNING "TensorPipe doesn't yet support ROCm")
+      # Not yet...
+      # list(APPEND Caffe2_HIP_DEPENDENCY_LIBS tensorpipe_hip)
+    endif()
   endif()
 endif()
 
@@ -1454,7 +1481,7 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
   if(NOT USE_SYSTEM_ONNX)
     include_directories(${ONNX_INCLUDE_DIRS})
     # In mobile build we care about code size, and so we need drop
-    # everything (e.g. checker, optimizer) in onnx but the pb definition.
+    # everything (e.g. checker) in onnx but the pb definition.
     if(ANDROID OR IOS)
       caffe2_interface_library(onnx_proto onnx_library)
     else()
@@ -1512,6 +1539,8 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
 endif()
 
 # --[ ATen checks
+set(USE_LAPACK 0)
+
 if(NOT INTERN_BUILD_MOBILE)
   set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
   set(TORCH_NVCC_FLAGS $ENV{TORCH_NVCC_FLAGS})
@@ -1694,8 +1723,6 @@ if(NOT INTERN_BUILD_MOBILE)
   if(LAPACK_FOUND)
     set(USE_LAPACK 1)
     list(APPEND Caffe2_PRIVATE_DEPENDENCY_LIBS ${LAPACK_LIBRARIES})
-  else()
-    set(USE_LAPACK 0)
   endif()
 
   if(NOT USE_CUDA)
@@ -1824,22 +1851,26 @@ if(USE_KINETO AND INTERN_BUILD_MOBILE)
   message(STATUS "Not using libkineto in a mobile build.")
   set(USE_KINETO OFF)
 endif()
-if(USE_KINETO AND MSVC)
-  message(STATUS "Not using libkineto in a Windows build.")
-  set(USE_KINETO OFF)
-endif()
-if(USE_KINETO AND APPLE)
-  message(STATUS "Not using libkineto in a Mac build.")
-  set(USE_KINETO OFF)
-endif()
-if(USE_KINETO AND (NOT USE_CUDA))
-  set(LIBKINETO_NOCUPTI ON CACHE STRING "")
-  message(STATUS "Using CPU-only Kineto in the non-CUDA build.")
-else()
-  set(LIBKINETO_NOCUPTI OFF CACHE STRING "")
-  message(STATUS "CUDA build detected, configuring Kineto with CUPTI support.")
-endif()
+
 if(USE_KINETO)
+  if((NOT USE_CUDA) OR MSVC)
+    set(LIBKINETO_NOCUPTI ON CACHE STRING "" FORCE)
+  else()
+    set(LIBKINETO_NOCUPTI OFF CACHE STRING "")
+    message(STATUS "Using Kineto with CUPTI support")
+  endif()
+
+  if(NOT USE_ROCM)
+    set(LIBKINETO_NOROCTRACER ON CACHE STRING "" FORCE)
+  else()
+    set(LIBKINETO_NOROCTRACER OFF CACHE STRING "")
+    message(STATUS "Using Kineto with Roctracer support")
+  endif()
+
+  if(LIBKINETO_NOCUPTI AND LIBKINETO_NOROCTRACER)
+    message(STATUS "Using CPU-only version of Kineto")
+  endif()
+
   set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party" CACHE STRING "")
   set(KINETO_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/kineto/libkineto" CACHE STRING "")
   set(KINETO_BUILD_TESTS OFF CACHE BOOL "")
@@ -1853,51 +1884,56 @@ if(USE_KINETO)
   if(NOT LIBKINETO_NOCUPTI)
     set(CUDA_SOURCE_DIR "${CUDA_TOOLKIT_ROOT_DIR}" CACHE STRING "")
     message(STATUS "  CUDA_SOURCE_DIR = ${CUDA_SOURCE_DIR}")
+    message(STATUS "  CUDA_INCLUDE_DIRS = ${CUDA_INCLUDE_DIRS}")
 
-    if(EXISTS ${CUDA_SOURCE_DIR}/extras/CUPTI/lib64/libcupti_static.a)
-      set(CUDA_cupti_LIBRARY "${CUDA_SOURCE_DIR}/extras/CUPTI/lib64/libcupti_static.a")
-    elseif(EXISTS ${CUDA_SOURCE_DIR}/lib64/libcupti_static.a)
-      set(CUDA_cupti_LIBRARY "${CUDA_SOURCE_DIR}/lib64/libcupti_static.a")
-    elseif(USE_CUPTI_SO)
-      if(EXISTS ${CUDA_SOURCE_DIR}/extras/CUPTI/lib64/libcupti.so)
-        set(CUDA_cupti_LIBRARY "${CUDA_SOURCE_DIR}/extras/CUPTI/lib64/libcupti.so")
-      elseif(EXISTS ${CUDA_SOURCE_DIR}/lib64/libcupti.so)
-        set(CUDA_cupti_LIBRARY "${CUDA_SOURCE_DIR}/lib64/libcupti.so")
+    if(NOT MSVC)
+      if(USE_CUPTI_SO)
+        set(CUPTI_LIB_NAME "libcupti.so")
+      else()
+        set(CUPTI_LIB_NAME "libcupti_static.a")
       endif()
-    endif()
-
-    if(EXISTS ${CUDA_SOURCE_DIR}/extras/CUPTI/include)
-      set(CUPTI_INCLUDE_DIR "${CUDA_SOURCE_DIR}/extras/CUPTI/include")
-    elseif(EXISTS ${CUDA_SOURCE_DIR}/include/cupti.h)
-      set(CUPTI_INCLUDE_DIR "${CUDA_SOURCE_DIR}/include")
-    endif()
-
-    set(FOUND_CUPTI FALSE)
-    if((DEFINED CUPTI_INCLUDE_DIR) AND (DEFINED CUDA_cupti_LIBRARY))
-      if((CUDA_cupti_LIBRARY MATCHES "libcupti_static.a") OR ((CUDA_cupti_LIBRARY MATCHES "libcupti.so") AND (USE_CUPTI_SO)))
-        set(FOUND_CUPTI TRUE)
-      endif()
-    endif()
-
-    if(FOUND_CUPTI)
-      message(STATUS "  CUDA_cupti_LIBRARY = ${CUDA_cupti_LIBRARY}")
-      message(STATUS "  CUPTI_INCLUDE_DIR = ${CUPTI_INCLUDE_DIR}")
-      if(NOT TARGET kineto)
-        add_subdirectory("${KINETO_SOURCE_DIR}")
-      endif()
-      string(APPEND CMAKE_CXX_FLAGS " -DUSE_KINETO")
-      list(APPEND Caffe2_DEPENDENCY_LIBS kineto)
-      message(STATUS "Configured Kineto")
     else()
-      message(STATUS "Could not find CUPTI library, skipping Kineto build")
-      set(USE_KINETO OFF)
+      set(CUPTI_LIB_NAME "cupti.lib")
     endif()
+
+    find_library(CUPTI_LIBRARY_PATH ${CUPTI_LIB_NAME} PATHS
+        ${CUDA_SOURCE_DIR}
+        ${CUDA_SOURCE_DIR}/extras/CUPTI/lib64
+        ${CUDA_SOURCE_DIR}/lib64)
+
+    find_path(CUPTI_INCLUDE_DIR cupti.h PATHS
+        ${CUDA_INCLUDE_DIRS}
+        ${CUDA_SOURCE_DIR}
+        ${CUDA_SOURCE_DIR}/extras/CUPTI/include
+        ${CUDA_SOURCE_DIR}/include)
+
+    if(CUPTI_LIBRARY_PATH AND CUPTI_INCLUDE_DIR)
+      message(STATUS "  CUPTI_INCLUDE_DIR = ${CUPTI_INCLUDE_DIR}")
+      set(CUDA_cupti_LIBRARY ${CUPTI_LIBRARY_PATH})
+      message(STATUS "  CUDA_cupti_LIBRARY = ${CUDA_cupti_LIBRARY}")
+      message(STATUS "Found CUPTI")
+      set(LIBKINETO_NOCUPTI OFF CACHE STRING "" FORCE)
+    else()
+      message(STATUS "Could not find CUPTI library, using CPU-only Kineto build")
+      set(LIBKINETO_NOCUPTI ON CACHE STRING "" FORCE)
+    endif()
+  endif()
+
+  if(NOT LIBKINETO_NOROCTRACER)
+    if(NOT ENV{ROCM_SOURCE_DIR})
+      set(ENV{ROCM_SOURCE_DIR} "/opt/rocm")
+    endif()
+  endif()
+
+  if(NOT TARGET kineto)
+    add_subdirectory("${KINETO_SOURCE_DIR}")
+  endif()
+  list(APPEND Caffe2_DEPENDENCY_LIBS kineto)
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_KINETO")
+  if(LIBKINETO_NOCUPTI)
+    string(APPEND CMAKE_CXX_FLAGS " -DLIBKINETO_NOCUPTI")
+    message(STATUS "Configured Kineto (CPU)")
   else()
-      if(NOT TARGET kineto)
-        add_subdirectory("${KINETO_SOURCE_DIR}")
-      endif()
-      string(APPEND CMAKE_CXX_FLAGS " -DUSE_KINETO")
-      list(APPEND Caffe2_DEPENDENCY_LIBS kineto)
-      message(STATUS "Configured Kineto (CPU)")
+    message(STATUS "Configured Kineto")
   endif()
 endif()

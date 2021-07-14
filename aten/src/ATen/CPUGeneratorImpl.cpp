@@ -71,7 +71,6 @@ Generator createCPUGenerator(uint64_t seed_val) {
  * and return them as a 64 bit unsigned int
  */
 inline uint64_t make64BitsFrom32Bits(uint32_t hi, uint32_t lo) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return (static_cast<uint64_t>(hi) << 32) | lo;
 }
 
@@ -157,7 +156,6 @@ void CPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
     // intermediate values.
     if (legacy_pod->normal_is_valid) {
       auto r = legacy_pod->normal_rho;
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       auto theta = 2.0 * c10::pi<double> * legacy_pod->normal_x;
       // we return the sin version of the normal sample when in caching mode
       double_normal_sample = c10::optional<double>(r * ::sin(theta));

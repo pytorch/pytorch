@@ -1,6 +1,8 @@
 #include <ATen/record_function.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/ThreadLocal.h>
+
 #include <algorithm>
 #include <cstdlib>
 #include <random>
@@ -20,8 +22,17 @@ RecordFunctionHandle next_unique_record_function_handle() {
   return RecordFunctionHandle(unique_rf_id++);
 }
 
+RecordFunctionTLS& rf_tls() {
+#if defined(C10_PREFER_CUSTOM_THREAD_LOCAL_STORAGE)
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-thread_local RecordFunctionTLS rf_tls_;
+  static c10::ThreadLocal<RecordFunctionTLS> rf_tls_;
+  return rf_tls_.get();
+#else // defined(C10_PREFER_CUSTOM_THREAD_LOCAL_STORAGE)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+  static thread_local RecordFunctionTLS rf_tls_;
+  return rf_tls_;
+#endif // defined(C10_PREFER_CUSTOM_THREAD_LOCAL_STORAGE)
+}
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<int64_t> defaultNodeId(-1);
@@ -47,29 +58,95 @@ struct CoinflipTLS {
 
 CoinflipTLS::CoinflipTLS()
     : tries_left_(0), genGeo_(std::random_device()()), genZeroOne_(std::random_device()()), distGeo_(kLowProb), distZeroOne_(0.0, 1.0) {}
+
+CoinflipTLS& coinflip_tls() {
+#if defined(C10_PREFER_CUSTOM_THREAD_LOCAL_STORAGE)
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-thread_local CoinflipTLS coinflip_tls_;
+  static c10::ThreadLocal<CoinflipTLS> coinflip_tls_;
+  return coinflip_tls_.get();
+#else // defined(C10_PREFER_CUSTOM_THREAD_LOCAL_STORAGE)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+  static thread_local CoinflipTLS coinflip_tls_;
+  return coinflip_tls_;
+#endif // defined(C10_PREFER_CUSTOM_THREAD_LOCAL_STORAGE)
+}
 
 int sample_geometric() {
-  return coinflip_tls_.distGeo_(coinflip_tls_.genGeo_);
+  return coinflip_tls().distGeo_(coinflip_tls().genGeo_);
 }
 
 double sample_zero_one() {
-  return coinflip_tls_.distZeroOne_(coinflip_tls_.genZeroOne_);
+  return coinflip_tls().distZeroOne_(coinflip_tls().genZeroOne_);
 }
 
 } // namespace
 
 const RecordFunctionTLS& get_record_function_tls_() {
-  return rf_tls_;
+  return rf_tls();
 }
 
 void set_record_function_tls_(const RecordFunctionTLS& tls) {
-  rf_tls_ = tls;
+  rf_tls() = tls;
+}
+
+enum class ToggledCallbackResult {
+  NotFound,
+  FoundButNotToggled,
+  FoundAndToggled,
+};
+
+template <typename RecordFunctionCallbacks>
+static ToggledCallbackResult findAndToggleCallback(
+    RecordFunctionCallbacks& cbs, CallbackHandle handle, bool enabled) {
+  auto it = std::find_if(
+      cbs.begin(), cbs.end(),
+      [handle](
+          const auto& el) {
+        return el.handle == handle;
+      });
+  if (it != cbs.end()) {
+    bool changed = enabled ? it->enable() : it->disable();
+    if (!changed) {
+      return ToggledCallbackResult::FoundButNotToggled;
+    }
+    if (it->callback.samplingProb() > kLowProb) {
+      // try to disable/restore pre-sampling of RecordFunction
+      if (enabled) {
+        at::bumpRecordAllFunctions();
+      } else {
+        at::releaseRecordAllFunctions();
+      }
+    }
+    return ToggledCallbackResult::FoundAndToggled;
+  }
+  return ToggledCallbackResult::NotFound;
+}
+
+template <typename RecordFunctionCallbacks>
+static bool findAndRemoveCallback(
+    RecordFunctionCallbacks& cbs, CallbackHandle handle) {
+  auto it = std::find_if(
+      cbs.begin(), cbs.end(),
+      [handle](
+          const auto& el) {
+        return el.handle == handle;
+      });
+  if (it != cbs.end()) {
+    // We do not need to try to call releaseRecordAllFunctions here
+    // because findAndRemoveCallback is used only as a helper in
+    // removeCallback. removeCallback calls disableCallback, which
+    // calls findAndToggleCallback, which already will do a
+    // releaseRecordAllFunctions for us.
+    cbs.erase(it);
+    return true;
+  }
+  return false;
 }
 
 class CallbackManager {
  public:
+  CallbackManager() : num_enabled_global_callbacks_(0) {}
+
   CallbackHandle addThreadLocalCallback(RecordFunctionCallback cb) {
     if (cb.samplingProb() > kLowProb) {
       // pre-sampling of RecordFunction with prob. kLowProb cannot be used
@@ -78,8 +155,7 @@ class CallbackManager {
     // note: monotonically increasing callbacks_unique_id keeps
     // sorted_tls_callbacks_ sorted
     auto handle = next_unique_callback_handle();
-    // NOLINTNEXTLINE(performance-move-const-arg)
-    rf_tls_.sorted_tls_callbacks_.emplace_back(std::move(cb), handle);
+    rf_tls().sorted_tls_callbacks_.emplace_back(std::move(cb), handle);
     return handle;
   }
 
@@ -91,53 +167,71 @@ class CallbackManager {
     auto handle = next_unique_callback_handle();
     // NOLINTNEXTLINE(performance-move-const-arg)
     sorted_global_callbacks_.emplace_back(std::move(cb), handle);
+    num_enabled_global_callbacks_.fetch_add(1, std::memory_order_relaxed);
     return handle;
   }
 
   void removeCallback(CallbackHandle handle) {
-    auto find_and_remove = [handle](RecordFunctionCallbacks& cbs) {
-      auto it = std::find_if(
-        cbs.begin(), cbs.end(),
-        [handle](
-            const std::pair<
-                RecordFunctionCallback,
-                CallbackHandle>& el) {
-          return el.second == handle;
-        });
-      if (it != cbs.end()) {
-        if (it->first.samplingProb() > kLowProb) {
-          // try to restore pre-sampling of RecordFunction
-          at::releaseRecordAllFunctions();
-        }
-        // keeps it sorted
-        cbs.erase(it);
-        return true;
-      }
-      return false;
-    };
-    auto found = find_and_remove(rf_tls_.sorted_tls_callbacks_);
+    // This could be implemented more efficiently, but callback
+    // addition/removal is not intended to run in performance-critical
+    // paths (it's not thread-safe and should be done during
+    // initialization).
+    disableCallback(handle);
+    auto found = findAndRemoveCallback(rf_tls().sorted_tls_callbacks_, handle);
     if (!found) {
-      found = find_and_remove(sorted_global_callbacks_);
+      found = findAndRemoveCallback(sorted_global_callbacks_, handle);
     }
     if (!found) {
       LOG(WARNING) << "Requested callback is not found";
     }
   }
 
+  void disableCallback(CallbackHandle handle) {
+    auto found = findAndToggleCallback(
+        rf_tls().sorted_tls_callbacks_, handle, false);
+    if (found == ToggledCallbackResult::NotFound) {
+      found = findAndToggleCallback(
+          sorted_global_callbacks_, handle, false);
+      if (found == ToggledCallbackResult::FoundAndToggled) {
+        const auto previousCount = num_enabled_global_callbacks_.fetch_sub(1, std::memory_order_relaxed);
+        TORCH_CHECK(previousCount > 0, previousCount);
+      }
+    }
+    if (found == ToggledCallbackResult::NotFound) {
+      LOG(WARNING) << "Requested callback is not found";
+    }
+  }
+
+  void reenableCallback(CallbackHandle handle) {
+    auto found = findAndToggleCallback(
+        rf_tls().sorted_tls_callbacks_, handle, true);
+    if (found == ToggledCallbackResult::NotFound) {
+      found = findAndToggleCallback(
+          sorted_global_callbacks_, handle, true);
+      if (found == ToggledCallbackResult::FoundAndToggled) {
+        num_enabled_global_callbacks_.fetch_add(1, std::memory_order_relaxed);
+      }
+    }
+    if (found == ToggledCallbackResult::NotFound) {
+      LOG(WARNING) << "Requested callback is not found";
+    }
+  }
+
   void clearGlobalCallbacks() {
     sorted_global_callbacks_.clear();
+    num_enabled_global_callbacks_ = 0;
   }
 
   void clearThreadLocalCallbacks() {
-    rf_tls_.sorted_tls_callbacks_.clear();
+    rf_tls().sorted_tls_callbacks_.clear();
   }
 
   inline bool hasGlobalCallbacks() const {
-    return !sorted_global_callbacks_.empty();
+    return num_enabled_global_callbacks_.load(std::memory_order_relaxed) > 0;
   }
 
   inline bool hasThreadLocalCallbacks() const {
-    return !rf_tls_.sorted_tls_callbacks_.empty();
+    return !rf_tls().sorted_tls_callbacks_.empty();
   }
 
   // We need this function to be inlined: init() is a hot path and
@@ -156,10 +250,6 @@ class CallbackManager {
     if (!cb.checkScope(scope)) {
       return false;
     }
-    // if we have registered should_run_ function, use it
-    if (cb.should_run_) {
-      return cb.should_run_(cb);
-    }
 
     // otherwise potentially do the sampling
     double sampling_prob = cb.sampling_prob_;
@@ -176,11 +266,11 @@ class CallbackManager {
       // flip for kLowProb with a thread local number of tries tries_left_
       // sampled from the geometric distribution.
       if (sampling_prob < kLowProb) {
-        if (coinflip_tls_.tries_left_ == 0) {
-          coinflip_tls_.tries_left_ = sample_geometric();
+        if (coinflip_tls().tries_left_ == 0) {
+          coinflip_tls().tries_left_ = sample_geometric();
           return (sample_zero_one() < sampling_prob / kLowProb);
         } else {
-          --coinflip_tls_.tries_left_;
+          --coinflip_tls().tries_left_;
           return false;
         }
       } else {
@@ -199,39 +289,39 @@ class CallbackManager {
     bool found_needs_outputs = false;
     bool found_needs_ids = false;
 
-    for (const auto& cb: rf_tls_.sorted_tls_callbacks_) {
-      if (callbackShouldRun(cb.first, scope, pre_sampled)) {
-        if (cb.first.needsInputs()) {
+    for (const auto& cb: rf_tls().sorted_tls_callbacks_) {
+      if (cb.isEnabled() && callbackShouldRun(cb.callback, scope, pre_sampled)) {
+        if (cb.callback.needsInputs()) {
           found_needs_inputs = true;
         }
-        if (cb.first.needsOutputs()) {
+        if (cb.callback.needsOutputs()) {
           found_needs_outputs = true;
         }
-        if (cb.first.needsIds()) {
+        if (cb.callback.needsIds()) {
           found_needs_ids = true;
         }
         if (!rec_fn.state_) {
           rec_fn.state_ = std::make_unique<RecordFunction::State>(scope);
         }
-        rec_fn.state_->sorted_active_tls_handles_.push_back(cb.second);
+        rec_fn.state_->sorted_active_tls_handles_.push_back(cb.handle);
       }
     }
 
     for (const auto& cb: sorted_global_callbacks_) {
-      if (callbackShouldRun(cb.first, scope, pre_sampled)) {
-        if (cb.first.needsInputs()) {
+      if (cb.isEnabled() && callbackShouldRun(cb.callback, scope, pre_sampled)) {
+        if (cb.callback.needsInputs()) {
           found_needs_inputs = true;
         }
-        if (cb.first.needsOutputs()) {
+        if (cb.callback.needsOutputs()) {
           found_needs_outputs = true;
         }
-        if (cb.first.needsIds()) {
+        if (cb.callback.needsIds()) {
           found_needs_ids = true;
         }
         if (!rec_fn.state_) {
           rec_fn.state_ = std::make_unique<RecordFunction::State>(scope);
         }
-        rec_fn.state_->sorted_active_global_handles_.push_back(cb.second);
+        rec_fn.state_->sorted_active_global_handles_.push_back(cb.handle);
       }
     }
 
@@ -258,7 +348,7 @@ class CallbackManager {
         /* is_start */ true,
         rf);
     mergeRunCallbacks(
-        rf_tls_.sorted_tls_callbacks_,
+        rf_tls().sorted_tls_callbacks_,
         rf.state_->sorted_active_tls_handles_,
         rf.state_->tls_ctx_,
         /* is_start */ true,
@@ -274,7 +364,7 @@ class CallbackManager {
         /* is_start */ false,
         rf);
     mergeRunCallbacks(
-        rf_tls_.sorted_tls_callbacks_,
+        rf_tls().sorted_tls_callbacks_,
         rf.state_->sorted_active_tls_handles_,
         rf.state_->tls_ctx_,
         /* is_start */ false,
@@ -282,7 +372,8 @@ class CallbackManager {
   }
 
   // Global callbacks; must be sorted in increasing handle order
-  RecordFunctionCallbacks sorted_global_callbacks_;
+  GlobalRecordFunctionCallbacks sorted_global_callbacks_;
+  std::atomic<uint_fast32_t> num_enabled_global_callbacks_;
 
  private:
   bool tryRunCallback(
@@ -311,6 +402,7 @@ class CallbackManager {
     }
   }
 
+  template <typename RecordFunctionCallbacks>
   void mergeRunCallbacks(
       const RecordFunctionCallbacks& sorted_callbacks,
       const CallbackHandles& sorted_handles,
@@ -321,14 +413,14 @@ class CallbackManager {
     size_t idx_c = 0;
     for (size_t idx_h = 0; idx_h < sorted_handles.size() && idx_h < ctx_list.size(); ++idx_h) {
       while (idx_c < sorted_callbacks.size() &&
-            sorted_callbacks[idx_c].second < sorted_handles[idx_h]) {
+            sorted_callbacks[idx_c].handle < sorted_handles[idx_h]) {
         ++idx_c;
       }
       if (idx_c >= sorted_callbacks.size()) {
         break;
       }
-      if (sorted_callbacks[idx_c].second == sorted_handles[idx_h]) {
-        tryRunCallback(sorted_callbacks[idx_c].first, rf, ctx_list[idx_h], is_start);
+      if (sorted_callbacks[idx_c].handle == sorted_handles[idx_h]) {
+        tryRunCallback(sorted_callbacks[idx_c].callback, rf, ctx_list[idx_h], is_start);
         ++num_executed;
       }
     }
@@ -349,22 +441,6 @@ namespace {
     return _manager;
   }
 } // namespace
-
-RecordFunctionCallbacks _getTLSCallbacks() {
-  return rf_tls_.sorted_tls_callbacks_;
-}
-
-void _setTLSCallbacks(const RecordFunctionCallbacks& callbacks) {
-  // keep the original handles
-  rf_tls_.sorted_tls_callbacks_ = callbacks;
-  std::sort(
-      rf_tls_.sorted_tls_callbacks_.begin(),
-      rf_tls_.sorted_tls_callbacks_.end(),
-      [](const std::pair<RecordFunctionCallback, CallbackHandle>& l,
-          const std::pair<RecordFunctionCallback, CallbackHandle>& r) {
-        return l.second < r.second;
-  });
-}
 
 bool hasCallbacks() {
   auto& m = manager();
@@ -395,6 +471,14 @@ void removeCallback(CallbackHandle handle) {
   manager().removeCallback(handle);
 }
 
+void disableCallback(CallbackHandle handle) {
+  manager().disableCallback(handle);
+}
+
+void reenableCallback(CallbackHandle handle) {
+  manager().reenableCallback(handle);
+}
+
 void clearGlobalCallbacks() {
   manager().clearGlobalCallbacks();
 }
@@ -410,15 +494,15 @@ void clearCallbacks() {
 }
 
 bool isRecordFunctionEnabled() {
-  return rf_tls_.tls_record_function_enabled_;
+  return rf_tls().tls_record_function_enabled_;
 }
 
 void enableRecordFunction(bool enable) {
-  rf_tls_.tls_record_function_enabled_ = enable;
+  rf_tls().tls_record_function_enabled_ = enable;
 }
 
 RecordFunction::RecordFunction(RecordScope scope, bool pre_sampled) {
-  auto* rf_tls_ptr = &rf_tls_;
+  auto* rf_tls_ptr = &rf_tls();
   if (rf_tls_ptr->tls_record_function_enabled_) {
     auto& m = manager();
     if (!m.sorted_global_callbacks_.empty() || !rf_tls_ptr->sorted_tls_callbacks_.empty()) {
@@ -522,7 +606,7 @@ void bumpRecordAllFunctions() {
 }
 
 void releaseRecordAllFunctions() {
-  TORCH_CHECK(global_record_all_functions_.fetch_sub(1, std::memory_order_relaxed) >= 0);
+  TORCH_CHECK(global_record_all_functions_.fetch_sub(1, std::memory_order_relaxed) > 0);
 }
 
 bool checkRecordAllFunctions() {
@@ -530,7 +614,7 @@ bool checkRecordAllFunctions() {
 }
 
 bool shouldRunRecordFunction(bool* pre_sampled) {
-  auto* rf_tls_ptr = &rf_tls_;
+  auto* rf_tls_ptr = &rf_tls();
   if (rf_tls_ptr->sorted_tls_callbacks_.empty() && !manager().hasGlobalCallbacks()) {
     *pre_sampled = false;
     return false;
@@ -545,7 +629,7 @@ bool shouldRunRecordFunction(bool* pre_sampled) {
   }
 
   *pre_sampled = true;
-  auto* coinflip_tls_ptr = &coinflip_tls_;
+  auto* coinflip_tls_ptr = &coinflip_tls();
   if (coinflip_tls_ptr->tries_left_ == 0) {
     coinflip_tls_ptr->tries_left_ = sample_geometric();
     return true;

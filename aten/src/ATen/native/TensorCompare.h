@@ -17,7 +17,7 @@ DECLARE_DISPATCH(reduce_minmax_fn, _aminmax_stub);
 using where_fn = void (*)(TensorIterator &, ScalarType);
 DECLARE_DISPATCH(where_fn, where_kernel);
 
-using is_infinity_op_fn = void (*)(TensorIterator &);
+using is_infinity_op_fn = void (*)(TensorIteratorBase &);
 DECLARE_DISPATCH(is_infinity_op_fn, isposinf_stub);
 DECLARE_DISPATCH(is_infinity_op_fn, isneginf_stub);
 
@@ -33,4 +33,6 @@ DECLARE_DISPATCH(void (*)(TensorIterator &, Scalar, Scalar), clamp_scalar_stub);
 DECLARE_DISPATCH(void (*)(TensorIterator &, Scalar), clamp_min_scalar_stub);
 DECLARE_DISPATCH(void (*)(TensorIterator &, Scalar), clamp_max_scalar_stub);
 
+using isin_default_fn = void (*)(const Tensor&, const Tensor&, bool, const Tensor&);
+DECLARE_DISPATCH(isin_default_fn, isin_default_stub);
 }} // namespace at::native

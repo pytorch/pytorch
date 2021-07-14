@@ -29,7 +29,10 @@ fi
 # system; to find out more, grep for this string in ossci-job-dsl.
 echo "ENTERED_USER_LAND"
 
-export IS_PYTORCH_CI=1
+# Previously IN_CI is only set in .circleci/scripts/setup_ci_environment.sh,
+# this means other CI system doesn't actually have this flag properly set.
+# Now we explicitly export IN_CI environment variable here.
+export IN_CI=1
 
 # compositional trap taken from https://stackoverflow.com/a/7287873/23845
 
@@ -70,7 +73,7 @@ trap_add cleanup EXIT
 if [[ "$BUILD_ENVIRONMENT" != *pytorch-win-* ]]; then
   if which sccache > /dev/null; then
     # Save sccache logs to file
-    sccache --stop-server || true
+    sccache --stop-server > /dev/null  2>&1 || true
     rm ~/sccache_error.log || true
     if [[ -n "${SKIP_SCCACHE_INITIALIZATION:-}" ]]; then
       # sccache --start-server seems to hang forever on self hosted runners for GHA

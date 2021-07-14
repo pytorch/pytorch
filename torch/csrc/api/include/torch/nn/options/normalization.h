@@ -19,7 +19,6 @@ struct TORCH_API LayerNormOptions {
   /// input shape from an expected input.
   TORCH_ARG(std::vector<int64_t>, normalized_shape);
   /// a value added to the denominator for numerical stability. ``Default: 1e-5``.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, eps) = 1e-5;
   /// a boolean value that when set to ``true``, this module
   /// has learnable per-element affine parameters initialized to ones (for weights)
@@ -48,7 +47,6 @@ struct TORCH_API LayerNormFuncOptions {
   TORCH_ARG(Tensor, bias) = {};
 
   /// a value added to the denominator for numerical stability. ``Default: 1e-5``.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, eps) = 1e-5;
 };
 
@@ -68,11 +66,9 @@ struct TORCH_API LocalResponseNormOptions {
   TORCH_ARG(int64_t, size);
 
   /// multiplicative factor. Default: 1e-4
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, alpha) = 1e-4;
 
   /// exponent. Default: 0.75
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, beta) = 0.75;
 
   /// additive factor. Default: 1
@@ -106,10 +102,8 @@ struct TORCH_API CrossMapLRN2dOptions {
 
   TORCH_ARG(int64_t, size);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, alpha) = 1e-4;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, beta) = 0.75;
 
   TORCH_ARG(int64_t, k) = 1;
@@ -129,12 +123,10 @@ namespace functional {
 /// ```
 struct TORCH_API NormalizeFuncOptions {
   /// The exponent value in the norm formulation. Default: 2.0
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, p) = 2.0;
   /// The dimension to reduce. Default: 1
   TORCH_ARG(int64_t, dim) = 1;
   /// Small value to avoid division by zero. Default: 1e-12
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, eps) = 1e-12;
   /// the output tensor. If `out` is used, this
   /// operation won't be differentiable.
@@ -159,7 +151,6 @@ struct TORCH_API GroupNormOptions {
   /// number of channels expected in input
   TORCH_ARG(int64_t, num_channels);
   /// a value added to the denominator for numerical stability. Default: 1e-5
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, eps) = 1e-5;
   /// a boolean value that when set to ``true``, this module
   /// has learnable per-channel affine parameters initialized to ones (for weights)
@@ -189,7 +180,6 @@ struct TORCH_API GroupNormFuncOptions {
   TORCH_ARG(Tensor, bias) = {};
 
   /// a value added to the denominator for numerical stability. Default: 1e-5
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, eps) = 1e-5;
 };
 

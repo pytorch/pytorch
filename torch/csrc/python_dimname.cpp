@@ -63,7 +63,7 @@ bool THPUtils_checkDimnameList(PyObject* obj) {
     return false;
   }
   // NOLINTNEXTLINE(bugprone-branch-clone)
-  auto size = tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
+  const auto size = tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
   if (size == 0) {
     return true;
   }

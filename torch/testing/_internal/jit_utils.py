@@ -425,6 +425,10 @@ class JitTestCase(JitCommonTestCase):
                     profiling=ProfilingMode.PROFILING,
                     atol=None,
                     rtol=None):
+        """
+        Checks that a given script generates the same output as the Python
+        version using the given inputs.
+        """
         with torch.jit.optimized_execution(optimize):
             with enable_profiling_mode_for_profiling_tests():
                 extra_profile_runs = any(isinstance(x, torch.Tensor) and x.requires_grad for x in inputs)
