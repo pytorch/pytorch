@@ -606,45 +606,6 @@ WelfordResult TensorView::rFactor(
   return WelfordResult(producer_var, producer_avg, producer_n);
 }
 
-std::vector<TensorView*> TensorView::duplicate() {
-  FusionGuard fg(fusion());
-
-  TORCH_CHECK(
-      !fusion()->hasInput(this) && !fusion()->hasOutput(this),
-      "Cannot duplicate input or output tensors");
-
-  auto usages = fusion()->unordered_uses(this);
-  TORCH_CHECK(
-      usages.size() > 1, "Cannot duplicate TensorView that is only used once");
-
-  // Warning: error may occur if the same TensorView
-  // is used multiple times in the same expression
-  std::vector<TensorView*> duplicates;
-  size_t count = 0;
-  for (auto expr : usages) {
-    // Skip the first usage to reuse original TensorView
-    if (count > 0) {
-      auto root_domain = getRootDomain();
-      TensorView* producer = new TensorView(
-          new TensorDomain(
-              root_domain, std::vector<bool>(root_domain.size(), true)),
-          getDataType().value());
-
-      producer->setDomain(
-          TransformReplay::fullSelfReplay(producer->domain(), this->domain()));
-
-      ir_utils::replaceValInExpr(definition(), this, producer);
-      ir_utils::replaceValInExpr(expr, this, producer);
-
-      // Set ComputeAt position for this duplicate TV
-      producer->setComputeAt(getComputeAtPosition());
-      duplicates.push_back(producer);
-    }
-    ++count;
-  }
-  return duplicates;
-}
-
 TensorView* TensorView::cache_before() {
   FusionGuard fg(fusion());
 
@@ -680,45 +641,29 @@ TensorView* TensorView::cache_before() {
   }
 
   // Create Producer Domain
-  // This domain will be the consumer, so create the producer
+  // This domain will be the consumer which needs a new domain, so replace the
+  // producers domain with this domain.
   auto root_domain = getRootDomain();
+
   TensorView* producer = new TensorView(
       new TensorDomain(
-          IterDomain::clone(root_domain),
-          std::vector<bool>(root_domain.size(), true)),
+          domain()->getRootDomain(),
+          domain()->domain(),
+          domain()->contiguity()),
       getDataType().value());
 
   // Set domain of consumer
   TensorView* consumer = this;
 
-  // Avoid replaying cache redundantly. Just for efficiency; not
-  // required for correctness.
-  bool cache_replayed = false;
-
-  // this TV is an output and its definition is a reduction
-  // remove reduction axis from this tv
-  bool consumer_replay_needed = false;
-  if (definition()->getExprType() == ExprType::ReductionOp ||
-      definition()->getExprType() == ExprType::WelfordOp) {
-    size_t i = 0;
-    auto no_reduction_root_domain = TensorDomain::noReductions(getRootDomain());
-    std::vector<IterDomain*> new_root_domain(no_reduction_root_domain.size());
-    for (const auto& dom : no_reduction_root_domain) {
-      new_root_domain[i++] = dom->clone();
-    }
-    // Transform producer like consumer. Note replayPasC not possible yet as
-    // there is no producer-consumer relationship.
-    producer->setDomain(TransformReplay::fullSelfReplay(
-        producer->domain(), consumer->domain()));
-    cache_replayed = true;
-    consumer->setDomain(new TensorDomain(
-        new_root_domain, std::vector<bool>(new_root_domain.size(), true)));
-    // The consumer domain should be transformed like the producer,
-    // but replayCasP can't be used yet as there is no
-    // producer-consumer relationship established yet. Just track
-    // it here and replay later after the expression is set.
-    consumer_replay_needed = true;
+  size_t i = 0;
+  auto no_reduction_root_domain = TensorDomain::noReductions(getRootDomain());
+  std::vector<IterDomain*> new_root_domain(no_reduction_root_domain.size());
+  for (const auto& dom : no_reduction_root_domain) {
+    new_root_domain[i++] = dom->clone();
   }
+
+  consumer->setDomain(new TensorDomain(
+      new_root_domain, std::vector<bool>(new_root_domain.size(), true)));
 
   // Insert producer - Cache_Before (CB) - before this TV.
   // Before: Prev TV -> [Definition Op] -> This TV
@@ -735,11 +680,9 @@ TensorView* TensorView::cache_before() {
   // definition_ is no longer valid
   // setDefinition(nullptr);
 
-  if (consumer_replay_needed) {
-    auto replayed_consumer_pair =
-        TransformReplay::replayCasP(consumer, producer, -1);
-    consumer->setDomain(replayed_consumer_pair.first);
-  }
+  auto replayed_consumer_pair =
+      TransformReplay::replayCasP(consumer, producer, -1);
+  consumer->setDomain(replayed_consumer_pair.first);
 
   return producer;
 }
