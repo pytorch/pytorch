@@ -16,7 +16,8 @@ all_operators_with_namedtuple_return = {
     'triangular_solve', 'cummax', 'cummin', 'linalg_eigh', "_unpack_dual", 'linalg_qr',
     '_svd_helper', 'linalg_svd', 'linalg_slogdet', 'fake_quantize_per_tensor_affine_cachemask',
     'fake_quantize_per_channel_affine_cachemask', 'linalg_lstsq', 'linalg_eig', 'linalg_cholesky_ex',
-    'frexp', 'lu_unpack', 'histogram', '_fake_quantize_per_tensor_affine_cachemask_tensor_qparams'
+    'frexp', 'lu_unpack', 'histogram', '_fake_quantize_per_tensor_affine_cachemask_tensor_qparams',
+    'fused_moving_avg_obs_fake_quant'
 }
 
 
@@ -90,6 +91,9 @@ class TestNamedTupleAPI(TestCase):
             op(operators=['histogram'], input=(1,), names=('hist', 'bin_edges'), hasout=True),
             op(operators=['_fake_quantize_per_tensor_affine_cachemask_tensor_qparams'],
                input=(torch.tensor([1.0]), torch.tensor([0], dtype=torch.int), 0, 255), names=('output', 'mask',), hasout=False),
+            op(operators=['fused_moving_avg_obs_fake_quant'],
+               input=(torch.tensor([1]), torch.tensor([1]), torch.tensor([0.1]), torch.tensor([0.1]), torch.tensor([0.1]),
+               torch.tensor([0.1]), torch.tensor([1]), 0, 255, 0), names=('output', 'mask',), hasout=False),
         ]
 
         def get_func(f):

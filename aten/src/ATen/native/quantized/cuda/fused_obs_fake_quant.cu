@@ -40,7 +40,7 @@ __global__ void ChooseQuantizationParamsKernelImpl(
 
     // Moving this check outside this function would result in extra Device to
     // Host copy of the min and max val which would result in a perf hit.
-    if (scale[i] == 0.0f || std::isinf(1.0f / scale[i])) {
+    if (scale[i] == 0.0f || ::isinf(1.0f / scale[i])) {
       scale[i] = 0.1;
     }
 
@@ -94,7 +94,7 @@ __global__ void MovingAverageMinMax(
     const float* averaging_const,
     const bool validate) {
   if (validate && *observer_on == 0) {
-    if (std::isinf(*running_min) || std::isinf(*running_max)) {
+    if (::isinf(*running_min) || ::isinf(*running_max)) {
       CUDA_KERNEL_ASSERT(
           false &&
           "Expected running_min/max values to not be inf when FakeQuant is ON and Observer is OFF");
@@ -105,11 +105,11 @@ __global__ void MovingAverageMinMax(
     float curr_min = *x_min;
     float curr_max = *x_max;
 
-    float adjusted_min = std::isinf(*running_min)
+    float adjusted_min = ::isinf(*running_min)
         ? curr_min
         : (*running_min) + *averaging_const * (curr_min - (*running_min));
 
-    float adjusted_max = std::isinf(*running_max)
+    float adjusted_max = ::isinf(*running_max)
         ? curr_max
         : (*running_max) + *averaging_const * (curr_max - (*running_max));
 
