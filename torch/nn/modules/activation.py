@@ -655,6 +655,9 @@ class GELU(Module):
     When the approximate flag is enabled, Gelu is estimated with:
         :math::  \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt(2 / \pi) * (x + 0.044715 * x^3)))
 
+    Args:
+        approximate: Use tanh gelu approximation if flag is enabled. Default: False
+
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
           dimensions
@@ -671,7 +674,7 @@ class GELU(Module):
     __constants__ = ['approximate']
     approximate: bool
 
-    def __init__(self, approximate: bool = False) -> Tensor:
+    def __init__(self, approximate: bool = False) -> None:
         super(GELU, self).__init__()
         self.approximate = approximate
 
