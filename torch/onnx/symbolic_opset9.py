@@ -2926,11 +2926,11 @@ def gelu(g, self, approximate):
 
         beta = torch.tensor(kBeta, dtype=torch.double)
         kappa = torch.tensor(kKappa, dtype=torch.double)
-        three = torch.tensor(3, dtype=torch.double)
-        one = torch.tensor(1, dtype=torch.double)
+        one = torch.tensor(1., dtype=torch.double)
         half = torch.tensor(0.5, dtype=torch.double)
 
-        inner = mul(g, beta, add(g, self, mul(g, kappa, g.op("Pow", self, three))))
+        self_cube = mul(g, self, mul(g, self, self))
+        inner = mul(g, beta, add(g, self, mul(g, kappa, self_cube)))
         return mul(g, half, mul(g, self, add(g, one, g.op("Tanh", inner))))
     else:
         _sqrt2 = 1.4142135623730951
