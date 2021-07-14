@@ -337,7 +337,6 @@ jobs:
           cd "${GITHUB_WORKSPACE}"
           python3 -m tools.linter.clang_tidy \
             --diff-file pr.diff \
-            --parallel \
             --verbose \
             "$@" >"${GITHUB_WORKSPACE}"/clang-tidy-output.txt
           cat "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
