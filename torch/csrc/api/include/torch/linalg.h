@@ -222,7 +222,7 @@ inline Tensor cholesky_out(Tensor& result, const Tensor& self) {
   return detail::cholesky_out(result, self);
 }
 
-/// DEPRECATED
+// C10_DEPRECATED_MESSAGE("linalg_det is deprecated, use det instead.")
 inline Tensor linalg_det(const Tensor& self) {
   return detail::det(self);
 }
@@ -302,22 +302,22 @@ inline std::tuple<Tensor, Tensor, Tensor, Tensor> lstsq(const Tensor& self, cons
   return detail::lstsq(self, b, cond, driver);
 }
 
-/// DEPRECATED
+// C10_DEPRECATED_MESSAGE("linalg_norm is deprecated, use norm instead.")
 inline Tensor linalg_norm(const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return detail::norm(self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
 
-/// DEPRECATED
+// C10_DEPRECATED_MESSAGE("linalg_norm is deprecated, use norm instead.")
 inline Tensor linalg_norm(const Tensor& self, c10::string_view ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return detail::norm(self, ord, opt_dim, keepdim, opt_dtype);
 }
 
-/// DEPRECATED
+// C10_DEPRECATED_MESSAGE("linalg_norm_out is deprecated, use norm_out instead.")
 inline Tensor& linalg_norm_out(Tensor& result, const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return detail::norm_out(result, self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
 
-/// DEPRECATED
+// C10_DEPRECATED_MESSAGE("linalg_norm_out is deprecated, use norm_out instead.")
 inline Tensor& linalg_norm_out(Tensor& result, const Tensor& self, c10::string_view ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return detail::norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
 }
