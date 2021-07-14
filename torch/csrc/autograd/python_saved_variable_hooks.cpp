@@ -1,5 +1,7 @@
 #include <torch/csrc/autograd/python_saved_variable_hooks.h>
 
+#include <torch/csrc/THP.h>
+
 namespace py = pybind11;
 
 namespace torch { namespace autograd {
