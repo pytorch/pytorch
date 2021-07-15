@@ -4775,7 +4775,6 @@ class TestQuantizeFxModels(QuantizationTestCase):
             quant_min=0,
             quant_max=255,
             dtype=torch.quint8,
-            qscheme=torch.per_tensor_affine,
             reduce_range=False,
         )
         ref_weight_fake_quant = FakeQuantize.with_args(
@@ -4783,7 +4782,6 @@ class TestQuantizeFxModels(QuantizationTestCase):
             quant_min=-128,
             quant_max=127,
             dtype=torch.qint8,
-            qscheme=torch.per_tensor_affine,
             reduce_range=False,
         )
         ref_qat_qconfig = QConfig(
@@ -4798,7 +4796,6 @@ class TestQuantizeFxModels(QuantizationTestCase):
             quant_min=0,
             quant_max=255,
             dtype=torch.quint8,
-            qscheme=torch.per_tensor_affine,
             reduce_range=False,
         )
         custom_weight_fake_quant = FusedMovingAvgObsFakeQuantize.with_args(
@@ -4806,7 +4803,6 @@ class TestQuantizeFxModels(QuantizationTestCase):
             quant_min=-128,
             quant_max=127,
             dtype=torch.qint8,
-            qscheme=torch.per_tensor_affine,
             reduce_range=False,
         )
         custom_qconfig = QConfig(
