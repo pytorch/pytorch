@@ -92,11 +92,8 @@ static inline Tensor to_impl(
     c10::optional<c10::MemoryFormat> optional_memory_format) {
   auto memory_format = optional_memory_format.value_or(MemoryFormat::Preserve);
 
-  if (device.has_value()) {
-    device = ensure_has_index(device.value());
-  }
-
-  if (is_null_or_equal_to(dtype, typeMetaToScalarType(self.dtype())) &&
+  // fast path
+  if (is_null_or_equal_to(dtype, self.dtype().toScalarType()) &&
       is_null_or_equal_to(layout, self.layout()) &&
       is_null_or_equal_to(device, self.device()) &&
       !copy &&
@@ -123,7 +120,7 @@ Tensor to(
       self,
       dtype,
       layout,
-      device,
+      device.has_value() ? ensure_has_index(*device) : device,
       pin_memory,
       non_blocking,
       copy,
@@ -135,7 +132,7 @@ Tensor to(const Tensor& self, Device device, ScalarType dtype, bool non_blocking
       self,
       dtype,
       nullopt,
-      device,
+      ensure_has_index(device),
       nullopt,
       non_blocking,
       copy,
@@ -158,7 +155,7 @@ Tensor to(const Tensor& self, const Tensor& other, bool non_blocking, bool copy,
   auto options = other.options();
   return to_impl(
       self,
-      typeMetaToScalarType(options.dtype()),
+      options.dtype().toScalarType(),
       options.layout(),
       options.device(),
       options.pinned_memory(),
