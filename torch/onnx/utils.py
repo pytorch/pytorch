@@ -740,7 +740,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                 raise RuntimeError("Unknown export type")
 
             if operator_export_type is OperatorExportTypes.ONNX and \
-                not val_use_external_data_format:
+               not val_use_external_data_format:
                 # Only run checker if we are using ONNX export type and
                 # large model format export in not enabled.
                 _check_onnx_proto(proto)
