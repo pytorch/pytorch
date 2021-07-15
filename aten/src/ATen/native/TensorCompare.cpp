@@ -116,7 +116,7 @@ Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol
   }
 
   // In case of zero tolerances the closeness inequality degenerates to an equality check.
-  // In these cases this short-circuit prevents false positives as detailed below.
+  // In this case, the short-circuit prevents false positives as detailed in the paragraph below.
   if (rtol == 0 && atol == 0){
       return close;
   }
