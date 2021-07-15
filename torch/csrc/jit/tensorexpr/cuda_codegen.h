@@ -22,7 +22,6 @@ namespace tensorexpr {
 // A class that analyzes the given program relevant for Cuda backends.
 class CudaAnalysis : public IRVisitor {
  public:
-  // NOLINTNEXTLINE(modernize-use-equals-default,cppcoreguidelines-pro-type-member-init)
   CudaAnalysis() {
     gpu_block_extents_ = {new IntImm(1), new IntImm(1), new IntImm(1)};
     gpu_thread_extents_ = {new IntImm(1), new IntImm(1), new IntImm(1)};
