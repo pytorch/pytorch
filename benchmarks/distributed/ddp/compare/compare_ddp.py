@@ -225,7 +225,7 @@ def print_summary(buffer_size_to_metrics):
 
 def main():
     world_size = 2
-    epochs = 40
+    epochs = 120
 
     # resnet50 model facts:
     # total_param_count = 161
