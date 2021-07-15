@@ -333,7 +333,8 @@ DeployModuleInfo __deploy_module_info;
 }
 
 // RAII wrapper around dlopen
-struct __attribute__((visibility("hidden"))) SystemLibraryImpl : public SystemLibrary {
+struct __attribute__((visibility("hidden"))) SystemLibraryImpl
+    : public SystemLibrary {
   SystemLibraryImpl(void* handle, bool steal)
       : handle_(handle), own_handle_(steal && handle != RTLD_DEFAULT) {}
 

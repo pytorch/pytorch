@@ -11,8 +11,7 @@ static void* deploy_self = nullptr;
 
 extern "C" {
 
-__attribute__((visibility("default"))) void deploy_set_self(
-    void* v) {
+__attribute__((visibility("default"))) void deploy_set_self(void* v) {
   deploy_self = v;
 }
 
@@ -38,9 +37,7 @@ extern "C" dl_funcptr _PyImport_FindSharedFuncptr(
   assert(r);
   return r;
 }
- __attribute__((visibility("default"))) void
-deploy_flush_python_libs() {
+__attribute__((visibility("default"))) void deploy_flush_python_libs() {
   loaded_files_.clear();
 }
-
 }
