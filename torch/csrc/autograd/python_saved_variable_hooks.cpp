@@ -8,6 +8,7 @@ namespace torch { namespace autograd {
     pack_hook_(pack_hook.release().ptr()),
     unpack_hook_(unpack_hook.release().ptr()) {}
 
+  // NOLINTNEXTLINE(clang-diagnostic-unused-parameter)
   void PySavedVariableHooks::call_pack_hook(at::Tensor &tensor) {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Hooks are not implemented yet");
   }
