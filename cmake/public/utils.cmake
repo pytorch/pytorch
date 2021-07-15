@@ -364,8 +364,8 @@ macro(torch_hip_get_arch_list store_var)
   else()
     # Use arch of installed GPUs as default
     execute_process(COMMAND "rocm_agent_enumerator" COMMAND bash "-c" "grep -v gfx000 | sort -u | xargs | tr -d '\n'"
-		    RESULT_VARIABLE ROCM_AGENT_ENUMERATOR_RESULT
-		    OUTPUT_VARIABLE ROCM_ARCH_INSTALLED)
+                    RESULT_VARIABLE ROCM_AGENT_ENUMERATOR_RESULT
+                    OUTPUT_VARIABLE ROCM_ARCH_INSTALLED)
     if(NOT ROCM_AGENT_ENUMERATOR_RESULT EQUAL 0)
       message(FATAL_ERROR " Could not detect ROCm arch for GPUs on machine. Result: '${ROCM_AGENT_ENUMERATOR_RESULT}'")
     endif()
