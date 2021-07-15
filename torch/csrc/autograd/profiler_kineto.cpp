@@ -276,13 +276,12 @@ void pushProfilingCallbacks() {
           }
           return ctx_ptr;
         } else if (config.state == ProfilerState::NVTX) {
-          auto* msg = (fn.seqNr() >= 0) ? ", seq = " : "";
           std::vector<std::vector<int64_t>> shapes;
           if (config.report_input_shapes) {
             shapes = inputSizes(fn);
           }
           cudaStubs()->nvtxRangePushA(getNvtxStr(
-            fn.name(), msg, fn.seqNr(), shapes).c_str());
+            fn.name(), fn.seqNr(), shapes).c_str());
         }
         return nullptr;
       },

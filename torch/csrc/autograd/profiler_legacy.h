@@ -394,7 +394,6 @@ struct RangeEventList {
 
 std::string getNvtxStr(
     const at::StringView& name,
-    const char* msg,
     int64_t sequence_nr,
     const std::vector<std::vector<int64_t>>& shapes);
 
@@ -549,7 +548,6 @@ struct TORCH_API ProfilerThreadLocalState : public c10::MemoryReportingInfoBase 
   void pushRange(
       const at::RecordFunction& fn,
       const bool record_cuda,
-      const char* msg = "",
       std::vector<std::vector<int64_t>>&& shapes = {});
 
   void popRange(const at::RecordFunction& fn, const bool record_cuda);
