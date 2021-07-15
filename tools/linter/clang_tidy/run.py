@@ -39,6 +39,7 @@ DEFAULT_FILE_PATTERN = re.compile(r"^.*\.c(c|pp)?$")
 CLANG_WARNING_PATTERN = re.compile(
     r"([^:]+):(\d+):\d+:\s+(warning|error):.*\[([^\]]+)\]"
 )
+EXPORT_FIXES_PREFIX = "ctidy-fixes"
 
 
 # Set from command line arguments in main().
@@ -302,10 +303,14 @@ def run_clang_tidy(
         command += ["-line-filter", json.dumps(line_filters)]
 
     if options.parallel:
-        commands = [
-            (list(command) + [map_filename(options.compile_commands_dir, f)], f)
-            for f in files
-        ]
+        commands = []
+
+        for f in files:
+            new_command = list(command) + [map_filename(options.compile_commands_dir, f)]
+            if options.export_fixes:
+                suffix = "-".join(f.split(os.sep))
+                new_command += [f"--export-fixes={EXPORT_FIXES_PREFIX}-{suffix}.yml"]
+            commands.append((new_command, f))
         result = run_shell_commands_in_parallel(commands, options.disable_progress_bar)
         returncode = (
             0
@@ -317,6 +322,8 @@ def run_clang_tidy(
         )
     else:
         command += map_filenames(options.compile_commands_dir, files)
+        if options.export_fixes:
+            command += [f"--export-fixes={EXPORT_FIXES_PREFIX}.yml"]
         if options.dry_run:
             command = [re.sub(r"^([{[].*[]}])$", r"'\1'", arg) for arg in command]
             return 0, " ".join(command)
