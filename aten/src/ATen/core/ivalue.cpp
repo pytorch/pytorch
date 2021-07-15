@@ -945,9 +945,9 @@ getClassConverter() {
 }
 
 // Needs to be in this .cpp file to access the full definition of PyObjectHolder
-std::vector<c10::Storage> ivalue::Future::extractStorages(
+std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> ivalue::Future::extractStorages(
     const at::IValue& value) {
-  std::vector<c10::Storage> storages;
+  std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> weakStorageImpls;
   // getSubValues works poorly on Python objects: it only works if they can be
   // converted to a "regular" IValue type hence, for example, it doesn't support
   // custom subclasses. Thus, instead, we extract the tensors through pickling.
@@ -966,16 +966,16 @@ std::vector<c10::Storage> ivalue::Future::extractStorages(
         num_storages += 1;
       }
     }
-    storages.reserve(num_storages);
+    weakStorageImpls.reserve(num_storages);
     for (const at::Tensor& tensor : tensors) {
       if (tensor.is_sparse()) {
         // Sparse tensor is indices and values. Both are tensors
         // and contain storage.
-        storages.push_back(tensor.indices().storage());
-        storages.push_back(tensor.values().storage());
+        weakStorageImpls.push_back(tensor.indices().storage().getWeakStorageImpl());
+        weakStorageImpls.push_back(tensor.values().storage().getWeakStorageImpl());
       } else {
         // A dense/strided tensor contains 1 storage
-        storages.push_back(tensor.storage());
+        weakStorageImpls.push_back(tensor.storage().getWeakStorageImpl());
       }
     }
   } else {
@@ -985,11 +985,11 @@ std::vector<c10::Storage> ivalue::Future::extractStorages(
     value.getSubValues(sub_values);
     for (const at::IValue& sub_value : sub_values) {
       if (sub_value.isTensor()) {
-        storages.push_back(sub_value.toTensor().storage());
+        weakStorageImpls.push_back(sub_value.toTensor().storage().getWeakStorageImpl());
       }
     }
   }
-  return storages;
+  return weakStorageImpls;
 }
 
 TORCH_API intrusive_ptr<ivalue::Future> collectAll(
