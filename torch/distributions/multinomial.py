@@ -103,6 +103,10 @@ class Multinomial(Distribution):
         counts.scatter_add_(-1, samples, torch.ones_like(samples))
         return counts.type_as(self.probs)
 
+    def entropy(self):
+        # add code to compute entropy
+        pass    
+
     def log_prob(self, value):
         if self._validate_args:
             self._validate_sample(value)
