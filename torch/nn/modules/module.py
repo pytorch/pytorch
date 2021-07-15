@@ -264,6 +264,7 @@ class Module:
         self._state_dict_hooks = OrderedDict()
         self._load_state_dict_pre_hooks = OrderedDict()
         self._modules = OrderedDict()
+        self.name = None
 
     forward: Callable[..., Any] = _forward_unimplemented
 
@@ -386,6 +387,7 @@ class Module:
         elif name == '':
             raise KeyError("module name can't be empty string \"\"")
         self._modules[name] = module
+        module.name = name
 
     def get_submodule(self, target: str) -> "Module":
         """
@@ -1114,6 +1116,8 @@ class Module:
             self._non_persistent_buffers_set = set()
         if '_is_full_backward_hook' not in self.__dict__:
             self._is_full_backward_hook = None
+        if 'name' not in self.__dict__:
+            self.name = None
 
     def __getattr__(self, name: str) -> Union[Tensor, 'Module']:
         if '_parameters' in self.__dict__:
@@ -1161,6 +1165,7 @@ class Module:
                         "cannot assign module before Module.__init__() call")
                 remove_from(self.__dict__, self._parameters, self._buffers, self._non_persistent_buffers_set)
                 modules[name] = value
+                value.name = name
             elif modules is not None and name in modules:
                 if value is not None:
                     raise TypeError("cannot assign '{}' as child module '{}' "
