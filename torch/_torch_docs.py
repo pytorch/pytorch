@@ -7130,6 +7130,8 @@ numel(input) -> int
 
 Returns the total number of elements in the :attr:`input` tensor.
 
+This function can also be used with a ``torch.Size`` tensor, but has to be called on it directly and not passed as an argument. See the example.
+
 Args:
     {input}
 
@@ -7140,6 +7142,10 @@ Example::
     120
     >>> a = torch.zeros(4,4)
     >>> torch.numel(a)
+    16
+    >>> a.numel()
+    16
+    >>> a.shape.numel()
     16
 
 """.format(**common_args))
