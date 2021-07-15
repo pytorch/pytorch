@@ -17,6 +17,7 @@ import torch
 import torch.cuda
 import torch.distributed as dist
 import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
+import torch.distributed.algorithms.ddp_comm_hooks.post_localSGD_hook as post_localSGD
 import torch.distributed.algorithms.model_averaging.averagers as averagers
 import torch.distributed.algorithms.model_averaging.utils as model_averaging_utils
 import torch.nn as nn
@@ -59,6 +60,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     FILE_SCHEMA,
     IS_FBCODE,
+    NO_MULTIPROCESSING_SPAWN,
 )
 from torch.utils.data.distributed import DistributedSampler
 
@@ -520,7 +522,7 @@ class TestDistBackend(MultiProcessTestCase):
         if torch.cuda.is_available() and torch.cuda.device_count() < int(
             self.world_size
         ):
-            sys.exit(TEST_SKIPS["multi-gpu"].exit_code)
+            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
         try:
             pg_timeout_seconds = CUSTOM_PG_TIMEOUT.get(test_name, default_pg_timeout)
             timeout = timedelta(seconds=pg_timeout_seconds)
@@ -1008,16 +1010,18 @@ class DistributedTest:
             param = next(model.parameters())
             tensor = torch.ones_like(param.data) * rank
             expected_avg_tensor = torch.ones_like(param.data) * sum(range(world_size)) / world_size
-            averager = averagers.PeriodicModelAverager(model, warmup_steps=10, period=4)
-            for step in range(0, 20):
-                # Reset the parameters at every step.
-                param.data = copy.deepcopy(tensor)
-                averager.average_parameters()
-                if step < 10 or step % 4 == 0:
-                    self.assertEqual(param.data, expected_avg_tensor)
-                else:
-                    # No model averaging, so the parameters are not updated.
-                    self.assertEqual(param.data, tensor)
+            period = 4
+            for warmup_steps in [12, 13, 14, 15]:
+                averager = averagers.PeriodicModelAverager(model, warmup_steps=warmup_steps, period=period)
+                for step in range(0, 20):
+                    # Reset the parameters at every step.
+                    param.data = copy.deepcopy(tensor)
+                    averager.average_parameters()
+                    if step >= warmup_steps and (step - warmup_steps) % period == 0:
+                        self.assertEqual(param.data, expected_avg_tensor)
+                    else:
+                        # No model averaging, so the parameters are not updated.
+                        self.assertEqual(param.data, tensor)
 
         # NCCL Batch SEND RECV
         @skip_if_no_gpu
@@ -3895,6 +3899,25 @@ class DistributedTest:
                     state=powersgd_state, hook=powerSGD.powerSGD_hook
                 )
 
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "MPI backend does not support DDP communication hook on CUDA devices",
+        )
+        @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
+                         don't support multiprocessing with spawn start method")
+        @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+        @skip_if_rocm
+        def test_ddp_hook_parity_post_localSGD(self):
+            # Although we start run local SGD at iteration 10, since we still use the global process group to run it,
+            # the post-LocalSGD actually still allreduces gradients globally for the remaining iterations.
+            state = post_localSGD.PostLocalSGDState(process_group=None, subgroup=dist.group.WORLD, start_localSGD_iter=10)
+            self._test_ddp_hook_parity(state=state, hook=post_localSGD.post_localSGD_hook)
+
+            # Since we start local SGD later than the total number of 100 iterations,
+            # no local SGD actually is executed, and we don't even need to provide a subgroup for this case.
+            state = post_localSGD.PostLocalSGDState(process_group=None, subgroup=None, start_localSGD_iter=1000)
+            self._test_ddp_hook_parity(state=state, hook=post_localSGD.post_localSGD_hook)
+
         def _prepare_single_device_module(
             self,
             rank,
@@ -5758,8 +5781,8 @@ class DistributedTest:
                     expected_grad = sum(i for i in range(world_size)) / world_size
                     self.assertEqual(net.module.weight.grad.item(), expected_grad)
 
-            join_config = net.ddp_uneven_inputs_config
-            self.assertFalse(join_config.ddp_join_enabled)
+            join_config = net._join_config
+            self.assertFalse(join_config.enable)
             self.validate_net_equivalence(net)
 
         @skip_if_lt_x_gpu(2)
@@ -5797,10 +5820,10 @@ class DistributedTest:
         )
         def test_broadcast_object_list(self):
             # Only set device for NCCL backend since it must use GPUs.
+            # Case where rank != GPU device.
+            next_rank = (self.rank + 1) % int(self.world_size)
             backend = os.environ["BACKEND"]
             if backend == "nccl":
-                # Case where rank != GPU device.
-                next_rank = (self.rank + 1) % int(self.world_size)
                 torch.cuda.set_device(next_rank)
 
             src_rank = 0
@@ -5814,7 +5837,33 @@ class DistributedTest:
                 else [None for _ in COLLECTIVES_OBJECT_TEST_LIST]
             )
 
-            # Single object test
+            # Single object test with device specified. Backend="gloo", device=cpu
+            if backend != "nccl":
+                single_obj_list = [objects[0]]
+                if self.rank != src_rank:
+                    self.assertNotEqual(single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0])
+                dist.broadcast_object_list(single_obj_list, src=0, group=None, device=torch.device('cpu'))
+                self.assertEqual(single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0])
+
+            # Single object test with device specified. Backend="gloo", device=current_device+1
+            # The test is gated by the fact GPU count is the same as world size to avoid the case
+            # when backend is gloo but there is no multiple GPU devices.
+            if backend != "nccl" and torch.cuda.device_count() == int(self.world_size):
+                single_obj_list = [objects[0]]
+                if self.rank != src_rank:
+                    self.assertNotEqual(single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0])
+                dist.broadcast_object_list(single_obj_list, src=0, group=None, device=torch.device(next_rank))
+                self.assertEqual(single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0])
+
+            # Single object test with device specified. Backend="nccl", device=current_device+1
+            if backend == "nccl" and torch.cuda.device_count() == int(self.world_size):
+                single_obj_list = [objects[0]]
+                if self.rank != src_rank:
+                    self.assertNotEqual(single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0])
+                dist.broadcast_object_list(single_obj_list, src=0, group=None, device=torch.device(next_rank))
+                self.assertEqual(single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0])
+
+            # Single object test: backward compatibility with device unspecified
             single_obj_list = [objects[0]]
             if self.rank != src_rank:
                 self.assertNotEqual(single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0])
@@ -7057,6 +7106,7 @@ class DistributedTest:
             # certain parameters.
             self._test_ddp_multiple_nested_unused_params_error(ignore_sparse=True)
 
+        @unittest.skip("See: https://github.com/pytorch/pytorch/issues/61481")
         @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                          "Only Nccl & Gloo backend support DistributedDataParallel")
         @skip_if_lt_x_gpu(2)
@@ -7074,9 +7124,9 @@ class DistributedTest:
             syncbn_model = nn.SyncBatchNorm(
                 2, momentum=0.99, track_running_stats=False
             ).cuda()
-            local_syncbn_model = copy.deepcopy(model)
+            local_syncbn_model = copy.deepcopy(syncbn_model)
             syncbn_model = torch.nn.parallel.DistributedDataParallel(
-                model,
+                syncbn_model,
                 device_ids=[rank]
             )
             inp = torch.randn(10, 2, device=rank)
@@ -7095,7 +7145,7 @@ class DistributedTest:
                                 test_local_model(test_inp)
                             )
 
-                    model.eval()
+                    test_model.eval()
                     for _ in range(6):
                         self.assertEqual(
                             test_model(test_inp),
