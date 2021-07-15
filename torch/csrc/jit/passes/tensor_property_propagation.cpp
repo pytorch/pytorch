@@ -161,11 +161,6 @@ static std::vector<std::pair<OperatorSet, dtype_func_t>>
 struct TensorPropertyPropagationPass {
   TensorPropertyPropagationPass(std::shared_ptr<Graph> graph)
       : graph_(std::move(graph)) {
-    // FIXME (penguin): multi-threading? how do I initialize things once for
-    // all?
-    if (dtype_transfer_functions.empty()) {
-      initializeTransferFunctions();
-    }
   }
 
   // returns true if at least one node has its scalar type set on a tensor node
@@ -470,71 +465,6 @@ struct TensorPropertyPropagationPass {
     TORCH_INTERNAL_ASSERT(false, "not implemented");
   }
 
-  // Initialize all transfer functions for OperatorSet
-  static void initializeTransferFunctions() {
-    // transfer functions take a node as input and propagate properties to the
-    // outputs of the node, return true if output node properties are updated.
-    struct register_transfer_func_for {
-      register_transfer_func_for(OperatorSet operators, dtype_func_t tfunc) {
-        dtype_transfer_functions.emplace_back(
-            std::move(operators), std::move(tfunc));
-      }
-    };
-
-    static const register_transfer_func_for simple_ops_with_common_type_promotion{
-        {
-            "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
-            // TODO: use mutation variant rules
-            "aten::add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha) -> Tensor(a!)",
-            "aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
-            "aten::div(Tensor self, Tensor other) -> Tensor",
-            "aten::mul(Tensor self, Tensor other) -> Tensor",
-            "aten::floor_divide(Tensor self, Tensor other) -> Tensor",
-            // TODO: use meta-tensor rules
-            "aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha) -> Tensor",
-        },
-        [](Node* node) -> c10::optional<ScalarType> {
-          return simpleTypeTransferFunction(node, true);
-        }};
-
-    // simply return the dtype of the 1st operand
-    static const register_transfer_func_for ops_return_with_first_operand_type{
-        {
-            "aten::hardsigmoid(Tensor self) -> Tensor",
-            "aten::hardswish(Tensor self) -> Tensor",
-            "aten::hardtanh(Tensor self, Scalar min_val, Scalar max_val) -> Tensor",
-            "aten::relu(Tensor self) -> Tensor",
-            "aten::transpose.int(Tensor(a) self, int dim0, int dim1) -> Tensor(a)",
-            "aten::transpose.Dimname(Tensor(a) self, Dimname dim0, Dimname dim1) -> Tensor(a)",
-            "aten::view(Tensor(a) self, int[] size) -> Tensor(a)",
-            "aten::flatten.using_ints(Tensor(a) self, int start_dim, int end_dim) -> Tensor(a)",
-            "aten::flatten.named_out_dim(Tensor(a) self, int start_dim, int end_dim, Dimname out_dim) -> Tensor(a)",
-            "aten::flatten.using_names(Tensor(a) self, Dimname start_dim, Dimname end_dim, Dimname out_dim) -> Tensor(a)",
-            "aten::flatten.DimnameList(Tensor(a) self, Dimname[] dims, Dimname out_dim) -> Tensor(a)",
-            "aten::max_pool2d(Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, bool ceil_mode) -> Tensor",
-            "aten::chunk(Tensor(a) self, int chunks, int dim) -> Tensor(a)[]",
-            "aten::contiguous(Tensor(a) self, *, MemoryFormat memory_format) -> Tensor(a)",
-            "aten::adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor",
-            "aten::avg_pool2d(Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, bool ceil_mode, bool count_include_pad, int? divisor_override) -> Tensor",
-            "aten::cat(Tensor[] tensors, int dim) -> Tensor",
-            "aten::expand_as(Tensor(a) self, Tensor other) -> Tensor(a)",
-            // TODO: need validation
-            "aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor",
-            "aten::linear(Tensor input, Tensor weight, Tensor? bias) -> Tensor",
-            "aten::matmul(Tensor self, Tensor other) -> Tensor",
-            "aten::conv2d(Tensor input, Tensor weight, Tensor? bias, int[2] stride, int[2] padding, int[2] dilation, int groups) -> Tensor",
-            "aten::conv2d.padding(Tensor input, Tensor weight, Tensor? bias, int[2] stride, str padding, int[2] dilation, int groups) -> Tensor",
-            // TODO: use out variant rules
-            "aten::adaptive_avg_pool2d.out(Tensor self, int[2] output_size, *, Tensor(a!) out) -> Tensor(a!)",
-            "aten::avg_pool2d.out(Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, bool ceil_mode, bool count_include_pad, int? divisor_override, *, Tensor(a!) out) -> Tensor(a!)",
-            "aten::addmm.out(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha, Tensor(a!) out) -> Tensor(a!)",
-            "aten::matmul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)",
-            "aten::cat.out(Tensor[] tensors, int dim, *, Tensor(a!) out) -> Tensor(a!)",
-        },
-        [](Node* node) -> c10::optional<ScalarType> {
-          return typeOfNthOperand(node, 0);
-        }};
-  }
 
   /*
   // This one is a special rule -- mean take the ScalarType if specified,
