@@ -70,6 +70,8 @@ setup_lint:
 		--job 'shellcheck' --step 'Install ShellCheck' --no-quiet; \
 	fi
 	pip install jinja2
+	pip install -r tools/linter/clang_tidy/requirements.txt
+	$(PYTHON) -m tools.linter.install.clang_tidy
 
 quick_checks:
 # TODO: This is broken when 'git config submodule.recurse' is 'true' since the
@@ -103,9 +105,10 @@ cmakelint:
 		--job 'cmakelint' \
 		--step 'Run cmakelint'
 
-clang_tidy:
-	echo "clang-tidy local lint is not yet implemented"
-	exit 1
+clang-tidy:
+	@$(PYTHON) tools/actions_local_runner.py \
+		$(CHANGED_ONLY) \
+		--job 'clang-tidy'
 
 toc:
 	@$(PYTHON) tools/actions_local_runner.py \
@@ -116,4 +119,4 @@ toc:
 lint: flake8 mypy quick_checks cmakelint shellcheck
 
 quicklint: CHANGED_ONLY=--changed-only
-quicklint: mypy flake8 mypy quick_checks cmakelint shellcheck
+quicklint: mypy flake8 quick_checks cmakelint shellcheck clang-tidy
