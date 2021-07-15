@@ -326,7 +326,8 @@ class TransformerEncoderLayer(Module):
 
         # self-attention block
         def mha(x):
-            x = self.self_attn(x, x, x, attn_mask=src_mask, key_padding_mask=src_key_padding_mask)[0]
+            x = self.self_attn(x, x, x, key_padding_mask=src_key_padding_mask,
+                               need_weights=False, attn_mask=src_mask)[0]
             return self.dropout1(x)
 
         # feed forward block
