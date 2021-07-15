@@ -288,7 +288,7 @@ struct InitLockAcquire {
   std::mutex& init_lock_;
 };
 
-struct ConcreteInterpreterImpl : public torch::deploy::InterpreterImpl {
+struct __attribute__((visibility("hidden"))) ConcreteInterpreterImpl : public torch::deploy::InterpreterImpl {
   ConcreteInterpreterImpl() {
 #define APPEND_INIT(name) PyImport_AppendInittab(#name, PyInit_##name);
     FOREACH_LIBRARY(APPEND_INIT)
