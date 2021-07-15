@@ -4518,6 +4518,34 @@ class TestQuantizeFxModels(QuantizationTestCase):
         out = model_quantized(input)
         self.assertEqual(out.device.type, 'cuda')
 
+    @skipIfNoFBGEMM
+    @unittest.skipIf(not TEST_CUDA, "gpu is not available.")
+    def test_switch_device_prepare_convert(self):
+
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.relu1 = nn.ReLU()
+                self.conv1 = nn.Conv2d(1, 6, 5)
+                self.linear1 = nn.Linear(120, 1)
+
+            def forward(self, x):
+                x = self.relu1(self.conv1(x))
+                y = self.linear1(x.view(-1))
+                return y
+
+        for device in ['cuda', 'cpu']:
+            device_after = 'cuda' if device == 'cpu' else 'cpu'
+            input = torch.randn((5, 1, 6, 6)).to(device)
+            model = Net().to(device).eval()
+            qconfig_dict = {"": torch.quantization.get_default_qconfig('fbgemm')}
+            model_prepared = prepare_fx(model, qconfig_dict)
+            model_prepared(input)
+            model_prepared.to(device_after)
+            model_quantized = convert_fx(model_prepared, is_reference=True)
+            out = model_quantized(input.to(device_after))
+            self.assertEqual(out.device.type, device_after)
+
     def _test_model_impl(
             self, mode, name, model, eager_quantizable_model,
             check_with_eager=True,

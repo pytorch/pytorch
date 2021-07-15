@@ -143,6 +143,11 @@ QConfigAny = Union[QConfig, QConfigDynamic, None]
 
 # should probably be in qconfig_utils but get circular reference issues TODO
 def add_device_to_obs_ctr_in_qconfig(qconfig: QConfigAny, module: torch.nn.Module):
+    if (module is None or qconfig is None or
+            qconfig.activation.__module__ != 'torch.quantization.observer' or
+            qconfig.weight.__module__ != 'torch.quantization.observer'):
+        return qconfig
+
     def assert_and_get_unique_device(module: torch.nn.Module) -> Any:
         devices = {p.device for p in module.parameters()} | \
             {p.device for p in module.buffers()}
@@ -153,21 +158,23 @@ def add_device_to_obs_ctr_in_qconfig(qconfig: QConfigAny, module: torch.nn.Modul
         device = next(iter(devices)) if len(devices) > 0 else None
         return device
 
-    device = None if module is None else assert_and_get_unique_device(module)
-    factory_kwargs = {'device': device}
-    if (device is None or qconfig is None or
-            qconfig.activation.__module__ != 'torch.quantization.observer' or
-            qconfig.weight.__module__ != 'torch.quantization.observer'):
-        return qconfig
-    elif isinstance(qconfig, torch.quantization.QConfig):
+    def get_activation():
+        obs_ctr = qconfig.activation.with_args(factory_kwargs={'device': None if module is None else assert_and_get_unique_device(module)})
+        return obs_ctr()
+
+    def get_weight():
+        obs_ctr = qconfig.weight.with_args(factory_kwargs={'device': None if module is None else assert_and_get_unique_device(module)})
+        return obs_ctr()
+
+    if isinstance(qconfig, torch.quantization.QConfig):
         return torch.quantization.QConfig(
-            activation=qconfig.activation.with_args(factory_kwargs=factory_kwargs),
-            weight=qconfig.weight.with_args(factory_kwargs=factory_kwargs)
+            activation=get_activation,
+            weight=get_weight
         )
     elif isinstance(qconfig, torch.quantization.QConfigDynamic):
         return torch.quantization.QConfigDynamic(
-            activation=qconfig.activation.with_args(factory_kwargs=factory_kwargs),
-            weight=qconfig.weight.with_args(factory_kwargs=factory_kwargs)
+            activation=get_activation,
+            weight=get_weight
         )
     else:
         return qconfig
