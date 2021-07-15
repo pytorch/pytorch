@@ -4808,7 +4808,13 @@ for shape in [(1,), ()]:
         with self.assertRaisesRegex(RuntimeError, "None is forbidden"):
             saved[1].register_hooks(lambda x: x, lambda x: x)
 
+        with self.assertRaisesRegex(TypeError, "incompatible function arguments"):
+            saved[0].register_hooks(lambda x: x)
+        with self.assertRaisesRegex(TypeError, "incompatible function arguments"):
+            saved[0].register_hooks(1, 1)
         saved[0].register_hooks(lambda x: x, lambda x: x)
+        with self.assertRaisesRegex(RuntimeError, "already been set"):
+            saved[0].register_hooks(lambda x: x, lambda x: x)
         y.sum().backward()
 
         # Using a reference to the SavedTensor object after the
@@ -8575,6 +8581,18 @@ class TestAutogradDeviceType(TestCase):
         _tensor_tensor_helper(y, x)
         _tensor_tensor_helper(x, x)
         _tensor_tensor_helper(y, y)
+
+    def test_copy_r_to_c(self, device):
+        out_c = torch.empty(3, 2, dtype=torch.cdouble, device=device)
+        inp_r = torch.randn(3, 2, dtype=torch.double, device=device,
+                            requires_grad=True)
+
+        def do_test():
+            out_c.copy_(inp_r)
+            out_c.sum().backward()
+            self.assertEqual(inp_r.grad, torch.ones_like(inp_r))
+
+        self.assertNotWarn(do_test)
 
 
 class TestAutogradInferenceMode(TestCase):
