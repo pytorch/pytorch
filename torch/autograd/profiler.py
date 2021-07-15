@@ -1223,7 +1223,7 @@ def parse_kineto_results(result):
                 fwd_thread=mem_record[0].thread_id(),
                 input_shapes=[],
                 stack=[],
-                scope=0, # function
+                scope=0,  # function
                 cpu_memory_usage=_cpu_memory_usage(mem_record[0]),
                 cuda_memory_usage=_cuda_memory_usage(mem_record[0]),
                 is_async=False,
