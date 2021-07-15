@@ -7130,7 +7130,8 @@ numel(input) -> int
 
 Returns the total number of elements in the :attr:`input` tensor.
 
-This function can also be used with a ``torch.Size`` tensor, but has to be called on it directly and not passed as an argument. See the example.
+This function can also be used with a ``torch.Size`` tensor, but has to be called on it directly and
+not passed as an argument. See the example.
 
 Args:
     {input}
