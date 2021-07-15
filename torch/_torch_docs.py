@@ -1932,6 +1932,8 @@ matrices.
 
         U = torch.linalg.cholesky(A).transpose(-2, -1).conj()
 
+    This transform will produce equivalent results for all valid (symmetric positive definite) inputs.
+
 Args:
     input (Tensor): the input tensor :math:`A` of size :math:`(*, n, n)` where `*` is zero or more
                 batch dimensions consisting of symmetric positive-definite matrices.
