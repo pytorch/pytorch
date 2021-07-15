@@ -290,6 +290,7 @@ class TransformerEncoderLayer(Module):
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
         super(TransformerEncoderLayer, self).__init__()
+
         self.self_attn = MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=batch_first,
                                             **factory_kwargs)
         # Implementation of Feedforward model
@@ -321,13 +322,16 @@ class TransformerEncoderLayer(Module):
         Shape:
             see the docs in Transformer class.
         """
+
+        # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
+
         if self.norm_first:
-            src = self.norm1(src)
-            src2 = self.self_attn(src, src, src, attn_mask=src_mask,
+            src2 = self.norm1(src)
+            src2 = self.self_attn(src2, src2, src2, attn_mask=src_mask,
                                   key_padding_mask=src_key_padding_mask)[0]
             src = src + self.dropout1(src2)
-            src = self.norm2(src)
-            src2 = self.linear2(self.dropout(self.activation(self.linear1(src))))
+            src2 = self.norm2(src2)
+            src2 = self.linear2(self.dropout(self.activation(self.linear1(src2))))
             src = src + self.dropout2(src2)
             return src
 
