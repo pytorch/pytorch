@@ -3,7 +3,8 @@ from tools.codegen.api.types import (BaseCType, Binding, ConstRefCType,
                                      Expr, MutRefCType, OptionalCType,
                                      NamedCType, SpecialArgName, tensorT,
                                      memoryFormatT, tensorOptionsT, scalarTypeT,
-                                     optionalScalarRefT, boolT, deviceT, layoutT)
+                                     optionalScalarRefT, boolT, deviceT, layoutT,
+                                     scalarT)
 
 # This file implements a small program synthesis engine that implements
 # conversions between one API to another.
@@ -94,9 +95,7 @@ def translate(
             ctx[NamedCType(t.elem.elem.name, ConstRefCType(BaseCType(tensorT)))] = \
                 f'({b.expr}.has_value() ? *{b.expr} : at::Tensor())'
 
-        if isinstance(t, NamedCType) and isinstance(t.type, ConstRefCType) and \
-                isinstance(t.type.elem, OptionalCType) and isinstance(t.type.elem.elem, BaseCType) \
-                        and str(t.type.elem.elem.type) == 'at::Scalar':
+        if t.type == ConstRefCType(OptionalCType(BaseCType(scalarT))):
             ctx[NamedCType(t.name, BaseCType(optionalScalarRefT))] = \
                 f'({b.expr}.has_value() ? *{b.expr} : at::OptionalScalarRef())'
 

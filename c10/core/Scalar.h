@@ -24,6 +24,11 @@ namespace c10 {
  */
 class C10_API Scalar {
  public:
+  // constructor tag used by empty scalar constructor
+  struct MakeEmptyScalar {};
+
+  explicit Scalar(MakeEmptyScalar) : tag(Tag::HAS_n) {}
+
   Scalar() : Scalar(int64_t(0)) {}
 
 #define DEFINE_IMPLICIT_CTOR(type, name) \
@@ -147,6 +152,10 @@ class C10_API Scalar {
     }
   }
 
+  bool hasValue() const {
+    return Tag::HAS_n != tag;
+  }
+
  private:
   template <
       typename T,
@@ -176,7 +185,7 @@ class C10_API Scalar {
   // We can't set v in the initializer list using the
   // syntax v{ .member = ... } because it doesn't work on MSVC
 
-  enum class Tag { HAS_d, HAS_i, HAS_z, HAS_b };
+  enum class Tag { HAS_d, HAS_i, HAS_z, HAS_b, HAS_n };
   Tag tag;
   union v_t {
     double d;
@@ -187,11 +196,11 @@ class C10_API Scalar {
 };
 
 struct OptionalScalarRef {
-  OptionalScalarRef() : sentinel_(), scalar_(sentinel_), valid_(false) {}
-  OptionalScalarRef(const Scalar& scalar) : scalar_(scalar), valid_(true) {}
+  OptionalScalarRef() : empty_(Scalar::MakeEmptyScalar{}), scalar_(empty_) {}
+  OptionalScalarRef(const Scalar& scalar) : scalar_(scalar) {}
 
   bool has_value() const {
-    return valid_;
+    return scalar_.hasValue();
   }
 
   const Scalar& toScalar() const {
@@ -199,13 +208,12 @@ struct OptionalScalarRef {
   }
 
   operator bool() const {
-    return valid_;
+    return has_value();
   }
 
-private:
-  const Scalar sentinel_;
+ private:
+  const Scalar empty_;
   const Scalar& scalar_;
-  bool valid_;
 };
 
 // define the scalar.to<int64_t>() specializations
