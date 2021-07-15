@@ -137,7 +137,7 @@ Tensor & _cat_out_cpu(TensorList tensors, int64_t dim, Tensor& result) {
   }
   at::assert_no_internal_overlap(result);
 
-  const Tensor* pnotSkippedTensor = [](TensorList tensors) -> const Tensor* {
+  const Tensor* pnotSkippedTensor = [](const TensorList &tensors) -> const Tensor* {
     for (auto const &tensor : tensors) {
       if (should_skip(tensor)) {
         continue;
@@ -1030,6 +1030,10 @@ Tensor alias_with_sizes_and_strides(
   return self_;
 }
 
+Tensor alias_to_shape(const Tensor& self, IntArrayRef sizes, IntArrayRef strides) {
+  return alias_with_sizes_and_strides(self, sizes, strides);
+}
+
 Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
   if (self.is_sparse()) {
     AT_ERROR("reshape is not implemented for sparse tensors");
@@ -1051,17 +1055,9 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
   if (stride.has_value()) {
     // Instead of delegating to .view() which repeats some of the above work
     // directly return an alias.
-    return self._unsafe_reshape_alias(IntArrayRef(shape), IntArrayRef(stride.value()));
+    return self.alias_to_shape(IntArrayRef(shape), IntArrayRef(stride.value()));
   }
   return at::_unsafe_view(self.clone(at::MemoryFormat::Contiguous), shape);
-}
-
-Tensor _unsafe_reshape_alias(const Tensor& self, IntArrayRef size, IntArrayRef strides) {
-  // `_unsafe_reshape_alias` is used when a `reshape` operation does not require
-  // a copy and can be done by returning a view. This helper is used to skip
-  // unnecessary/extraneous if we just call `view`, and to enable gradients to
-  // be calculated since `reshape` is only differentiable if it is a view.
-  return alias_with_sizes_and_strides(self, size, strides);
 }
 
 Tensor reshape_as(const Tensor& self, const Tensor& other) {
