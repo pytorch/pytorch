@@ -10,7 +10,6 @@ namespace torch { namespace autograd {
     pack_hook_(pack_hook.release().ptr()),
     unpack_hook_(unpack_hook.release().ptr()) {}
 
-  // NOLINTNEXTLINE(clang-diagnostic-unused-parameter)
   void PySavedVariableHooks::call_pack_hook(at::Tensor &tensor) {
     py::gil_scoped_acquire acquire;
     auto pack_hook = py::reinterpret_borrow<py::function>(pack_hook_); // borrows the reference to the hook
@@ -25,7 +24,7 @@ namespace torch { namespace autograd {
   at::Tensor PySavedVariableHooks::call_unpack_hook() {
     py::gil_scoped_acquire acquire;
     auto unpack_hook = py::reinterpret_borrow<py::function>(unpack_hook_);
-    py::object obj = py::cast<py::object>(data_); // copies the content of data_
+    py::object obj = py::cast<py::object>(data_); // creates a new reference
     py::object res = unpack_hook(obj); // new object, comes with a reference
     PyObject* ptr = res.ptr(); // borrows from, we only need this to be alive as long as res is alive
     TORCH_CHECK_TYPE(THPVariable_Check(ptr), "Output of saved tensor unpack_hook expected to be a Tensor but got result of type ", THPUtils_typename(ptr));

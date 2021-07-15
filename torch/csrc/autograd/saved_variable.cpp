@@ -192,6 +192,9 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
 }
 
 void SavedVariable::register_hooks(std::unique_ptr<SavedVariableHooks>&& hooks) {
+  TORCH_CHECK(!hooks_,
+    "Calling register_hooks on a saved tensor whose hooks have already been set. "
+    "Hint: only one pair of hooks is allowed at a time.");
   if (!data_.defined()) {
     if (!was_default_constructed_) {
       TORCH_CHECK(false,
@@ -205,9 +208,6 @@ void SavedVariable::register_hooks(std::unique_ptr<SavedVariableHooks>&& hooks) 
         "Calling register_hooks on a saved tensor with value None is forbidden");
     }
   }
-  TORCH_CHECK(!hooks_,
-    "Calling register_hooks on a saved tensor whose hooks have already been set. "
-    "Hint: only one pair of hooks is allowed at a time.");
   hooks_ = std::move(hooks);
 
   // If we didn't save the original variable, we already have all we need to reconstruct it
