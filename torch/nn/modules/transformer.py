@@ -324,25 +324,27 @@ class TransformerEncoderLayer(Module):
 
         # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
 
-        if self.norm_first:
-            src2 = self.norm1(src)
-            src2 = self.self_attn(src2, src2, src2, attn_mask=src_mask,
-                                  key_padding_mask=src_key_padding_mask)[0]
-            src = src + self.dropout1(src2)
-            src2 = self.norm2(src)
-            src2 = self.linear2(self.dropout(self.activation(self.linear1(src2))))
-            src = src + self.dropout2(src2)
-            return src
+        # self-attention block
+        def mha(x):
+            x = self.self_attn(x, x, x, attn_mask=src_mask, key_padding_mask=src_key_padding_mask)[0]
+            return self.dropout1(x)
 
-        # norm last
-        src2 = self.self_attn(src, src, src, attn_mask=src_mask,
-                              key_padding_mask=src_key_padding_mask)[0]
-        src = src + self.dropout1(src2)
-        src = self.norm1(src)
-        src2 = self.linear2(self.dropout(self.activation(self.linear1(src))))
-        src = src + self.dropout2(src2)
-        src = self.norm2(src)
-        return src
+        # feed forward block
+        def ff(x):
+            x = self.linear2(self.dropout(self.activation(self.linear1(x))))
+            return self.dropout2(x)
+
+        if self.norm_first:
+            x = src + mha(self.norm1(src))
+        else:
+            x = self.norm1(src + mha(src))
+
+        if self.norm_first:
+            x = x + ff(self.norm2(x))
+        else:
+            x = self.norm2(x + ff(x))
+
+        return x
 
 
 class TransformerDecoderLayer(Module):
