@@ -1494,16 +1494,16 @@ def all_gather_multigpu(
 
 def _object_to_tensor(obj):
     f = io.BytesIO()
-    _pickler(f).dump(obj)
+    torch.save(obj, f)
     byte_storage = torch.ByteStorage.from_buffer(f.getvalue())  # type: ignore[attr-defined]
     byte_tensor = torch.tensor(byte_storage, dtype=torch.uint8)
     local_size = torch.tensor([byte_tensor.numel()], dtype=torch.long)
     return byte_tensor, local_size
 
 
-def _tensor_to_object(tensor, tensor_size):
+def _tensor_to_object(tensor, tensor_size, map_location=None):
     buf = tensor.numpy().tobytes()[:tensor_size]
-    return _unpickler(io.BytesIO(buf)).load()
+    return torch.load(io.BytesIO(buf), map_location=map_location)
 
 
 def all_gather_object(object_list, obj, group=None):
@@ -1611,8 +1611,9 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
             collective and will contain the output. Must be ``None`` on non-dst
             ranks. (default is ``None``)
         dst (int, optional): Destination rank. (default is 0)
-        group: (ProcessGroup, optional): The process group to work on. If None,
-            the default process group will be used. Default is ``None``.
+        group: (ProcessGroup, optional): The process group to work on. If
+            ``None``, the default process group will be used. Default is
+            ``None``.
 
     Returns:
         None. On the ``dst`` rank, ``object_gather_list`` will contain the
@@ -1700,7 +1701,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
         object_gather_list[i] = _tensor_to_object(tensor, tensor_size)
 
 
-def broadcast_object_list(object_list, src=0, group=None):
+def broadcast_object_list(object_list, src=0, group=None, device=None, map_location=None):
     """
     Broadcasts picklable objects in ``object_list`` to the whole group. Similar
     to :func:`broadcast`, but Python objects can be passed in.
@@ -1714,6 +1715,13 @@ def broadcast_object_list(object_list, src=0, group=None):
         src (int): Source rank from which to broadcast ``object_list``.
         group: (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used. Default is ``None``.
+        device (torch.device, optional): If not ``None``, the objects are
+            serialized and converted to tensors which are moved to the
+            ``device`` before broadcasting. Default is ``None``.
+        map_location (torch.device, optional): The device to load tensors
+            contained in the received objects; this argument does not affect
+            the source rank. If ``None``, the tensors are loaded to the device
+            they were on when passed into this function. Default is ``None``.
 
     Returns:
         ``None``. If rank is part of the group, ``object_list`` will contain the
@@ -1744,7 +1752,9 @@ def broadcast_object_list(object_list, src=0, group=None):
         >>>     objects = ["foo", 12, {1: 2}] # any picklable object
         >>> else:
         >>>     objects = [None, None, None]
-        >>> dist.broadcast_object_list(objects, src=0)
+        >>> # Assumes backend is not NCCL
+        >>> device = torch.device("cpu")
+        >>> dist.broadcast_object_list(objects, src=0, device=device)
         >>> broadcast_objects
         ['foo', 12, {1: 2}]
     """
@@ -1759,15 +1769,27 @@ def broadcast_object_list(object_list, src=0, group=None):
     else:
         object_sizes_tensor = torch.empty(len(object_list), dtype=torch.long)
 
+    # Current device selection.
+    # To preserve backwards compatibility, ``device`` is default to ``None``
+    # in which case we run current logic of device selection, i.e.
+    # ``current_device`` is CUDA if backend is NCCL otherwise CPU device. In the
+    # case it is not ``None`` we move the size and object tensors to be
+    # broadcasted to this device.
     group_backend = get_backend(group)
     is_nccl_backend = group_backend == Backend.NCCL
-    current_device = torch.device("cpu")
+    current_device = None
+    if device is not None:
+        if is_nccl_backend and device.type != 'cuda':
+            raise ValueError('device type must be cuda for nccl backend')
+        current_device = device
+    else:
+        current_device = torch.device("cpu")
+        if is_nccl_backend:
+            # See note about using torch.cuda.current_device() here in
+            # docstring. We cannot simply use my_rank since rank == device is
+            # not necessarily true.
+            current_device = torch.device("cuda", torch.cuda.current_device())
     if is_nccl_backend:
-        # See note about using torch.cuda.current_device() here in docstring.
-        # We cannot simply use my_rank since rank == device is not necessarily
-        # true.
-        current_device = torch.device("cuda", torch.cuda.current_device())
-        object_sizes_tensor = object_sizes_tensor.to(current_device)
         object_sizes_tensor = object_sizes_tensor.to(current_device)
 
     # Broadcast object sizes
@@ -1794,7 +1816,8 @@ def broadcast_object_list(object_list, src=0, group=None):
             if obj_view.device != torch.device("cpu"):
                 obj_view = obj_view.cpu()
             offset += obj_size
-            object_list[i] = _tensor_to_object(obj_view, obj_size)
+            # Deserialize contained tensors directly to `map_location`
+            object_list[i] = _tensor_to_object(obj_view, obj_size, map_location)
 
 
 def scatter_object_list(

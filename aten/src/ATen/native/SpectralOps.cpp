@@ -811,7 +811,7 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
       "istft will require a complex-valued input tensor in a future PyTorch release. "
       "Matching the output from stft with return_complex=True. ");
   }
-  Tensor input = self.is_complex() ? at::view_as_real(self) : self;
+  Tensor input = self.is_complex() ? self.is_conj() ? at::view_as_real(self.resolve_conj()) : at::view_as_real(self) : self;
   const auto input_dim = input.dim();
   const auto n_frames = input.size(-2);
   const auto fft_size = input.size(-3);
