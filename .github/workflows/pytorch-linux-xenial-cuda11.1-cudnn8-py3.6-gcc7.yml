@@ -31,7 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     if: >-
       github.event_name != 'pull_request' ||
-      contains(github.event.pull_request.labels.*.name, 'cuda11')
+      contains(github.event.pull_request.labels.*.name, 'ci/future')
     steps:
       - run: echo "noop"
   calculate-docker-image:
