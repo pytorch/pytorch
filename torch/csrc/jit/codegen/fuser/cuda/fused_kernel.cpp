@@ -254,7 +254,6 @@ void FusedKernelCUDA::launch_raw(
   at::cuda::set_device(prior_device);
 }
 
-// NOLINTNEXTLINE(modernize-use-equals-default)
 FusedKernelCUDA::~FusedKernelCUDA() {
   nvrtc().cuModuleUnload(module_);
 }
