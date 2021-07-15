@@ -78,6 +78,7 @@ class WindowsJob:
             props_dict = {
                 "build_environment": build_environment_string,
                 "python_version": miniutils.quote(python_version),
+                "vs_version": miniutils.quote("16.8.6"),
                 "vc_version": miniutils.quote(self.vscode_spec.dotted_version()),
                 "vc_year": miniutils.quote(str(self.vscode_spec.year)),
                 "vc_product": self.vscode_spec.get_product(),
