@@ -64,12 +64,16 @@ void compareTensorLists(
   }
 }
 
-void compareResults(const IValue& expect, const IValue& actual) {
+void compareResults(const IValue& expect, const IValue& actual, const bool use_allclose=false) {
   if (expect.isTensor()) {
     VLOG(2) << "expect " << expect.toTensor() << std::endl;
     VLOG(2) << "output " << actual.toTensor() << std::endl;
     EXPECT_TRUE(actual.isTensor());
-    EXPECT_TRUE(expect.toTensor().equal(actual.toTensor()));
+    if (use_allclose) {
+      EXPECT_TRUE(at::allclose(expect.toTensor(), actual.toTensor()));
+    } else {
+      EXPECT_TRUE(expect.toTensor().equal(actual.toTensor()));
+    }
     return;
   } else if (expect.isTuple()) {
     EXPECT_TRUE(actual.isTuple());
@@ -108,7 +112,8 @@ void compareResults(const IValue& expect, const IValue& actual) {
 void testStaticRuntime(
     const std::string& jit_script,
     const std::vector<IValue>& args,
-    const std::vector<IValue>& args2 = {}) {
+    const std::vector<IValue>& args2 = {},
+    const bool use_allclose = false) {
   script::Module module("module");
   module.define(jit_script);
 
@@ -129,7 +134,7 @@ void testStaticRuntime(
     auto actual = smodule(args, {});
     smodule.runtime().check_for_memory_leak();
     // first run
-    compareResults(expect, actual);
+    compareResults(expect, actual, use_allclose);
 
     // args2 is used to check for dynamic shapes
     // it also exercises the memory planner
@@ -138,19 +143,19 @@ void testStaticRuntime(
       actual = smodule(args2, {});
       smodule.runtime().check_for_memory_leak();
       // second run
-      compareResults(expect, actual);
+      compareResults(expect, actual, use_allclose);
 
       expect = module.forward(args);
       actual = smodule(args, {});
       smodule.runtime().check_for_memory_leak();
       // third run
-      compareResults(expect, actual);
+      compareResults(expect, actual, use_allclose);
     } else {
       // run static runtime again to exercise the memory planner
       actual = smodule(args, {});
       smodule.runtime().check_for_memory_leak();
       // second run
-      compareResults(expect, actual);
+      compareResults(expect, actual, use_allclose);
     }
   }
 
@@ -250,12 +255,12 @@ TEST(StaticRuntime, Sigmoid) {
 
   std::vector<IValue> args{a}, args2{b};
 
-  testStaticRuntime(sigmoid_script, args);
-  testStaticRuntime(sigmoid_script, args, {args2});
+  testStaticRuntime(sigmoid_script, args, /*args2=*/{}, /*use_allclose=*/true);
+  testStaticRuntime(sigmoid_script, args, {args2}, /*use_allclose=*/true);
 
   FLAGS_static_runtime_enable_fast_math = false;
-  testStaticRuntime(sigmoid_script, args);
-  testStaticRuntime(sigmoid_script, args, {args2});
+  testStaticRuntime(sigmoid_script, args, /*args2=*/{}, /*use_allclose=*/true);
+  testStaticRuntime(sigmoid_script, args, {args2}, /*use_allclose=*/true);
   FLAGS_static_runtime_enable_fast_math = true;
 }
 
