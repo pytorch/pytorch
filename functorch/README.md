@@ -287,7 +287,7 @@ If you use functorch in your publication, please cite it by using the following 
 
 ```
 @Misc{functorch2021,
-  author =       {functorch authors},
+  author =       {Horace He, Richard Zou},
   title =        {functorch: JAX-like composable function transforms for PyTorch},
   howpublished = {\url{https://github.com/facebookresearch/functorch}},
   year =         {2021}
