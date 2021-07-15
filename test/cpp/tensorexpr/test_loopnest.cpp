@@ -7,6 +7,7 @@
 #include <unordered_map>
 
 #include <test/cpp/tensorexpr/padded_buffer.h>
+#include <test/cpp/tensorexpr/test_utils.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/bounds_inference.h>
 #include <torch/csrc/jit/tensorexpr/eval.h>
@@ -6685,8 +6686,8 @@ TEST(LoopNest, compressBufferSimple) {
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
   ASSERT_EQ(aBuf.node()->ndim(), 2);
-  ASSERT_EQ(dynamic_cast<const IntImm*>(aBuf.node()->dim(0))->value(), 1);
-  ASSERT_EQ(dynamic_cast<const IntImm*>(aBuf.node()->dim(1))->value(), 200);
+  IS_IMM_WITH_VAL(Int, aBuf.node()->dim(0), 1);
+  IS_IMM_WITH_VAL(Int, aBuf.node()->dim(1), 200);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -6726,8 +6727,8 @@ TEST(LoopNest, compressBufferMultipleDims) {
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
   ASSERT_EQ(aBuf.node()->ndim(), 2);
-  ASSERT_EQ(dynamic_cast<const IntImm*>(aBuf.node()->dim(0))->value(), 1);
-  ASSERT_EQ(dynamic_cast<const IntImm*>(aBuf.node()->dim(1))->value(), 1);
+  IS_IMM_WITH_VAL(Int, aBuf.node()->dim(0), 1);
+  IS_IMM_WITH_VAL(Int, aBuf.node()->dim(1), 1);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -6776,9 +6777,9 @@ TEST(LoopNest, compressBufferMultipleDims2) {
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
   ASSERT_EQ(aBuf.node()->ndim(), 3);
-  ASSERT_EQ(dynamic_cast<const IntImm*>(aBuf.node()->dim(0))->value(), 1);
-  ASSERT_EQ(dynamic_cast<const IntImm*>(aBuf.node()->dim(1))->value(), 1);
-  ASSERT_EQ(dynamic_cast<const IntImm*>(aBuf.node()->dim(2))->value(), 300);
+  IS_IMM_WITH_VAL(Int, aBuf.node()->dim(0), 1);
+  IS_IMM_WITH_VAL(Int, aBuf.node()->dim(1), 1);
+  IS_IMM_WITH_VAL(Int, aBuf.node()->dim(2), 300);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -6824,8 +6825,8 @@ TEST(LoopNest, compressBufferDifferentOrderIndices) {
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
   ASSERT_EQ(aBuf.node()->ndim(), 2);
-  ASSERT_EQ(dynamic_cast<const IntImm*>(aBuf.node()->dim(0))->value(), 100);
-  ASSERT_EQ(dynamic_cast<const IntImm*>(aBuf.node()->dim(1))->value(), 1);
+  IS_IMM_WITH_VAL(Int, aBuf.node()->dim(0), 100);
+  IS_IMM_WITH_VAL(Int, aBuf.node()->dim(1), 1);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -6874,8 +6875,8 @@ TEST(LoopNest, compressBufferVariableBounds) {
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
   ASSERT_EQ(aBuf.node()->ndim(), 2);
-  ASSERT_EQ(dynamic_cast<const IntImm*>(aBuf.node()->dim(0))->value(), 1);
-  ASSERT_EQ(dynamic_cast<const IntImm*>(aBuf.node()->dim(1))->value(), 200);
+  IS_IMM_WITH_VAL(Int, aBuf.node()->dim(0), 1);
+  IS_IMM_WITH_VAL(Int, aBuf.node()->dim(1), 200);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -6926,8 +6927,8 @@ TEST(LoopNest, compressBufferNoCommonParentLoops) {
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
   ASSERT_EQ(aBuf.node()->ndim(), 2);
-  ASSERT_EQ(dynamic_cast<const IntImm*>(aBuf.node()->dim(0))->value(), 100);
-  ASSERT_EQ(dynamic_cast<const IntImm*>(aBuf.node()->dim(1))->value(), 200);
+  IS_IMM_WITH_VAL(Int, aBuf.node()->dim(0), 100);
+  IS_IMM_WITH_VAL(Int, aBuf.node()->dim(1), 200);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -6975,8 +6976,8 @@ TEST(LoopNest, compressBufferIndicesMixed) {
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
   ASSERT_EQ(aBuf.node()->ndim(), 2);
-  ASSERT_EQ(dynamic_cast<const IntImm*>(aBuf.node()->dim(0))->value(), 300);
-  ASSERT_EQ(dynamic_cast<const IntImm*>(aBuf.node()->dim(1))->value(), 200);
+  IS_IMM_WITH_VAL(Int, aBuf.node()->dim(0), 300);
+  IS_IMM_WITH_VAL(Int, aBuf.node()->dim(1), 200);
 }
 
 TEST(LoopNest, compressMultipleBuffers) {
@@ -7036,14 +7037,14 @@ TEST(LoopNest, compressMultipleBuffers) {
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
   ASSERT_EQ(aBuf.node()->ndim(), 2);
-  ASSERT_EQ(dynamic_cast<const IntImm*>(aBuf.node()->dim(0))->value(), 1);
-  ASSERT_EQ(dynamic_cast<const IntImm*>(aBuf.node()->dim(1))->value(), 200);
+  IS_IMM_WITH_VAL(Int, aBuf.node()->dim(0), 1);
+  IS_IMM_WITH_VAL(Int, aBuf.node()->dim(1), 200);
   ASSERT_EQ(bBuf.node()->ndim(), 2);
-  ASSERT_EQ(dynamic_cast<const IntImm*>(bBuf.node()->dim(0))->value(), 1);
-  ASSERT_EQ(dynamic_cast<const IntImm*>(bBuf.node()->dim(1))->value(), 200);
+  IS_IMM_WITH_VAL(Int, bBuf.node()->dim(0), 1);
+  IS_IMM_WITH_VAL(Int, bBuf.node()->dim(1), 200);
   ASSERT_EQ(cBuf.node()->ndim(), 2);
-  ASSERT_EQ(dynamic_cast<const IntImm*>(cBuf.node()->dim(0))->value(), 1);
-  ASSERT_EQ(dynamic_cast<const IntImm*>(cBuf.node()->dim(1))->value(), 1);
+  IS_IMM_WITH_VAL(Int, cBuf.node()->dim(0), 1);
+  IS_IMM_WITH_VAL(Int, cBuf.node()->dim(1), 1);
 }
 
 } // namespace jit
