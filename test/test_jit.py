@@ -10584,7 +10584,10 @@ dedent """
             def f5(a):
                 torch.cat([3])
 
-        with self.assertRaisesRegex(RuntimeError, 'Lists must contain only a single type'):
+        with self.assertRaisesRegex(RuntimeError, r'Expected a value of'
+                                    r' type \'List\[int\]\' for argument'
+                                    r' \'size\' but instead found type '
+                                    r'\'List\[Any\]\''):
             @torch.jit.script
             def f6(a):
                 a.expand(size=[3, [4]])
