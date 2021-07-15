@@ -1497,11 +1497,11 @@ the input tensor.
 .. note::
 
     This function may return less then the specified number of chunks!
-    
+
 .. seealso::
 
     :func:`torch.tensor_split` a function that always returns exactly the specified number of chunks
-    
+
 If the tensor size along the given dimesion :attr:`dim` is divisible by :attr:`chunks`,
 all returned chunks will be the same size.
 If the tensor size along the given dimension :attr:`dim` is not divisible by :attr:`chunks`,
@@ -1513,7 +1513,7 @@ Arguments:
     input (Tensor): the tensor to split
     chunks (int): number of chunks to return
     dim (int): dimension along which to split the tensor
-    
+
 Example::
     >>> torch.arange(11).chunk(6)
     (tensor([0, 1]),
