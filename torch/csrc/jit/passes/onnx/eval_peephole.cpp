@@ -48,6 +48,9 @@ static void fuseConvBatchNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
     }
     if (it->kind() == onnx::Conv) {
       auto oldConv = *it;
+      if (oldConv->outputs().at(0)->uses().size() != 1) {
+        continue;
+      }
       auto bnNode = oldConv->outputs().at(0)->uses()[0].user;
       if (bnNode->kind() != onnx::BatchNormalization) {
         continue;
