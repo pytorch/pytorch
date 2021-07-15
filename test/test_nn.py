@@ -4518,6 +4518,124 @@ class TestNN(NNTestCase):
         m = pickle.loads(pickle.dumps(m))
         self.assertIsInstance(m, nn.Linear)
 
+    def test_orthogonal_parametrization(self):
+        # Orthogonal implements 6 algorithms (3x parametrizations times 2 options of extra_memory)
+
+        def assert_is_orthogonal(X):
+            n, k = X.size(-2), X.size(-1)
+            if n < k:
+                X = X.transpose(-2, -1)
+                n, k = k, n
+            Id = torch.eye(k, dtype=X.dtype, device=X.device).expand(*(X.size()[:-2]), k, k)
+            eps = 10 * n * torch.finfo(X.dtype).eps
+            torch.testing.assert_allclose(X.transpose(-2, -1).conj() @ X, Id, atol=eps, rtol=0.)
+
+        for shape, dtype, batched, in product(((4, 4), (5, 3), (3, 5)),  # square/ tall / wide
+                                              (torch.float32, torch.complex64),
+                                              (False, True)):
+            # Conv2d does not support complex yet
+            if batched and dtype.is_complex:
+                continue
+
+            if batched:
+                input = torch.randn(2, 2, shape[0] + 2, shape[1] + 1, dtype=dtype)
+            else:
+                input = torch.randn(3, shape[0], dtype=dtype)
+
+            for parametrization, extra_memory in product(("matrix_exp", "cayley", "householder"),
+                                                         (False, True)):
+                # right_inverse for Cayley and matrix_exp not implemented for extra_memory=False
+                # See Note [right_inverse expm cayley]
+                can_initialize = extra_memory or parametrization == "householder"
+
+                # We generate them every time to always start with fresh weights
+                if batched:
+                    m = nn.Conv2d(2, 3, shape, dtype=dtype)
+                else:
+                    m = nn.Linear(*shape, dtype=dtype)
+
+                # We do not support householder for complex inputs
+                # See Note [Householder complex]
+                w_init = m.weight.clone()
+                if parametrization == "householder" and m.weight.is_complex():
+                    with self.assertRaisesRegex(ValueError, "householder parametrization does not support complex tensors"):
+                        torch.nn.utils.parametrizations.orthogonal(m,
+                                                                   "weight",
+                                                                   parametrization,
+                                                                   extra_memory=extra_memory)
+                    continue
+
+                torch.nn.utils.parametrizations.orthogonal(m,
+                                                           "weight",
+                                                           parametrization,
+                                                           extra_memory=extra_memory)
+                # Forwards works as expected
+                self.assertEqual(w_init.shape, m.weight.shape)
+                assert_is_orthogonal(m.weight)
+                if can_initialize:
+                    # We are initialising the weight to the Q part of the QR decomposition of w_init
+                    # (or of its transpose if the matrix is wide)
+                    transpose = w_init.size(-2) < w_init.size(-1)
+                    if transpose:
+                        w_init = w_init.transpose(-2, -1)
+                    Q, R = torch.linalg.qr(w_init)
+                    Q *= R.diagonal(dim1=-2, dim2=-1).sgn().unsqueeze(-2)
+                    if transpose:
+                        Q = Q.transpose(-2, -1)
+                    torch.testing.assert_allclose(Q, m.weight, atol=1e-5, rtol=0.)
+
+                # Intializing with a given orthogonal matrix works
+                X = torch.randn_like(m.weight)
+                transpose = X.size(-2) < X.size(-1)
+                if transpose:
+                    X = X.transpose(-2, -1)
+                w_new = torch.linalg.qr(X).Q
+                if transpose:
+                    w_new = w_new.transpose(-2, -1)
+                if can_initialize:
+                    m.weight = w_new
+                    torch.testing.assert_allclose(w_new, m.weight, atol=1e-5, rtol=0.)
+                else:
+                    with self.assertRaisesRegex(NotImplementedError, "assign to the matrix exponential or the Cayley parametrization"):
+                        m.weight = w_new
+
+                # Intializing with a non-orthogonal matrix works
+                w_new = torch.randn_like(m.weight)
+                if can_initialize:
+                    m.weight = w_new
+                    transpose = w_new.size(-2) < w_new.size(-1)
+                    if transpose:
+                        w_new = w_new.transpose(-2, -1)
+                    Q, R = torch.linalg.qr(w_new)
+                    Q *= R.diagonal(dim1=-2, dim2=-1).sgn().unsqueeze(-2)
+                    if transpose:
+                        Q = Q.transpose(-2, -1)
+                    torch.testing.assert_allclose(Q, m.weight, atol=1e-5, rtol=0.)
+                else:
+                    with self.assertRaisesRegex(NotImplementedError, "assign to the matrix exponential or the Cayley parametrization"):
+                        m.weight = w_new
+
+                opt = torch.optim.SGD(m.parameters(), lr=0.1)
+                for _ in range(2):
+                    opt.zero_grad()
+                    m(input).norm().backward()
+                    grad = m.parametrizations.weight.original.grad
+                    self.assertIsNotNone(grad)
+                    # We do not update the upper triangular part of the matrix if tall tril if wide
+                    if grad.size(-2) >= grad.size(-1):
+                        zeros_grad = grad.triu(1)
+                    else:
+                        zeros_grad = grad.tril(-1)
+                    self.assertEqual(zeros_grad, torch.zeros_like(zeros_grad))
+                    # The gradient in the diagonal can be just imaginary because a skew-Hermitian
+                    # matrix has imaginary diagonal
+                    diag_grad = grad.diagonal(dim1=-2, dim2=-1)
+                    if grad.is_complex():
+                        diag_grad = diag_grad.real
+                    self.assertEqual(diag_grad, torch.zeros_like(diag_grad))
+                    opt.step()
+                    assert_is_orthogonal(m.weight)
+
     def test_threshold_int(self):
         x = torch.tensor([-3, -2, -1, 0, 1, 2, 3])
         expected = torch.tensor([99, 99, 99, 99, 1, 2, 3])
