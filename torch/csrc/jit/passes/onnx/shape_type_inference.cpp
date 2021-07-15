@@ -1583,8 +1583,8 @@ void ONNXShapeTypeInference(
         }
       }
     }
-    UpdateReliable(n);
   }
+  UpdateReliable(n);
 
   GRAPH_DEBUG(
       "Torch graph after shape inference:", n->owningGraph()->toString());
