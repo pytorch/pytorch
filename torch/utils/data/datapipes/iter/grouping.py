@@ -10,6 +10,26 @@ from typing import Any, Callable, Dict, Iterator, List, Optional, Sized, Tuple, 
 T_co = TypeVar('T_co', covariant=True)
 
 
+@functional_datapipe('sharding_filter')
+class ShardingFilterIterDataPipe(IterDataPipe):
+    def __init__(self, source_datapipe):
+        self.source_datapipe = source_datapipe
+        self.num_of_instances = 1
+        self.instance_id = 0
+
+    def is_shardable(self):
+        return True
+
+    def apply_sharding(self, num_of_instances, instance_id):
+        self.num_of_instances = num_of_instances
+        self.instance_id = instance_id
+
+    def __iter__(self):
+        for i, item in enumerate(self.source_datapipe):
+            if i % self.num_of_instances == self.instance_id:
+                yield item
+
+
 @functional_datapipe('batch')
 class BatchIterDataPipe(IterDataPipe[List[T_co]]):
     r""" :class:`BatchIterDataPipe`.
