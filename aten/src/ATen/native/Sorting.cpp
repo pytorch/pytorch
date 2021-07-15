@@ -479,6 +479,12 @@ Tensor median_impl(const Tensor& self, bool ignore_nan) {
     scalar_t* first = in.data_ptr<scalar_t>();
     scalar_t* last = first + size;
 
+    // Return nan for empty tensors
+    if (size == 0) {
+      *op = std::numeric_limits<scalar_t>::quiet_NaN();
+      return;
+    }
+
     // For torch.median, if there are nan values return nan
     if (!ignore_nan && std::any_of(first, last, _isnan<scalar_t>)) {
       *op = std::numeric_limits<scalar_t>::quiet_NaN();
