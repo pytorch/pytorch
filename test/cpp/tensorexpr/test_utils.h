@@ -3,8 +3,8 @@
 #include <memory>
 #include <vector>
 
-#include "test/cpp/tensorexpr/test_base.h"
-#include "torch/csrc/jit/testing/file_check.h"
+#include <test/cpp/tensorexpr/test_base.h>
+#include <torch/csrc/jit/testing/file_check.h>
 
 namespace torch {
 namespace jit {
