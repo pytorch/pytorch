@@ -735,6 +735,7 @@ class NnapiBackendPReLUTest(JitTestCase):
 # This is needed for IS_WINDOWS or IS_MACOS to skip the tests.
 @unittest.skipIf(TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE,
                  "Non-portable load_library call used in test")
+@unittest.skipIf(TEST_WITH_ASAN, "Cannot test with ASAN")
 class TestNnapiBackend(JitTestCase):
     """
     This class wraps all Nnapi test classes
