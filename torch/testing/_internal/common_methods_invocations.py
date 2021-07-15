@@ -4853,6 +4853,9 @@ op_db: List[OpInfo] = [
            # This addmm OpInfo is for when alpha and beta are not both equal to 1.
            # alpha=beta=1 is tested in the following opinfo, because that special case will
            # trigger addmm being decomposed by a jit pass.
+           # dtypes of beta and alpha should not affect the output type, hence the type conversion
+           ref=lambda M, mat_x, mat_y, beta, alpha: np.add(np.multiply(np.asarray(beta, dtype=M.dtype), M),
+           np.multiply(np.asarray(alpha, dtype=mat_x.dtype), np.matmul(mat_x, mat_y))),
            dtypes=floating_and_complex_types_and(torch.float16),
            dtypesIfCPU=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfROCM=floating_and_complex_types_and(torch.float16, torch.bfloat16),
@@ -4864,6 +4867,9 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_addmm),
     OpInfo('addmm',
            # When alpha=beta=1 as compile-time constants, JIT will decompose addmm into mm and add.
+           # dtypes of beta and alpha should not affect the output type, hence the type conversion
+           ref=lambda M, mat_x, mat_y, beta, alpha: np.add(np.multiply(np.asarray(beta, dtype=M.dtype), M),
+           np.multiply(np.asarray(alpha, dtype=mat_x.dtype), np.matmul(mat_x, mat_y))),
            variant_test_name='decomposed',
            dtypes=floating_and_complex_types_and(torch.float16),
            dtypesIfCPU=all_types_and_complex_and(torch.float16, torch.bfloat16),
@@ -4876,7 +4882,9 @@ op_db: List[OpInfo] = [
            autodiff_nonfusible_nodes=['aten::add', 'aten::mm'],
            sample_inputs_func=partial(sample_inputs_addmm, alpha=1, beta=1)),
     OpInfo('addmv',
-           ref=lambda input, mat, vec, beta, alpha: beta * input + alpha * np.multiply(mat, vec),
+           # dtypes of beta and alpha should not affect the output type, hence the type conversion
+           ref=lambda M, mat, vec, beta, alpha: np.add(np.multiply(np.asarray(beta, dtype=M.dtype), M),
+           np.multiply(np.asarray(alpha, dtype=mat.dtype), np.dot(mat, vec))),
            dtypes=floating_types(),
            dtypesIfCPU=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128,
@@ -4893,7 +4901,6 @@ op_db: List[OpInfo] = [
            ),
            sample_inputs_func=sample_inputs_addmv),
     OpInfo('addbmm',
-           ref=lambda M, x, y, alpha, beta: np.add(np.mul(alpha, M), np.sum(np.matmul(x, y).numpy(), axis=0))
            dtypes=floating_types(),
            dtypesIfCPU=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
