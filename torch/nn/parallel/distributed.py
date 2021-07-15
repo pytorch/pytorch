@@ -130,22 +130,14 @@ def _dump_DDP_relevant_env_vars():
 # is completed.
 class _DDPSink(Function):
     @staticmethod
-    def forward(ctx, reducer, state_dict, *inputs):
-        # set_materialize_grads(False) will ensure that None gradients stay as
-        # None and are not filled with zeros.
-        ctx.set_materialize_grads(False)
+    def forward(ctx, reducer, *inputs):
         ctx.reducer = reducer
-        ctx.state_dict = state_dict
         return inputs
 
     @staticmethod
     def backward(ctx, *grad_outputs):
-        state_dict = ctx.state_dict
-        static_graph_training = ctx.state_dict['static_graph']
-        if static_graph_training and ctx.state_dict['num_iterations'] == 1:
-            Variable._execution_engine.queue_callback(ctx.reducer._delay_all_reduce)
-
-        return (None, None, *grad_outputs)
+        Variable._execution_engine.queue_callback(ctx.reducer._delay_all_reduce)
+        return (None, *grad_outputs)
 
 
 class _DDPJoinHook(_JoinHook):
@@ -842,8 +834,7 @@ class DistributedDataParallel(Module, _Joinable):
     def forward(self, *inputs, **kwargs):
         with torch.autograd.profiler.record_function("DistributedDataParallel.forward"):
             self.reducer.save_thread_local_state()
-            grad_enabled = torch.is_grad_enabled()
-            if grad_enabled and self.require_backward_grad_sync:
+            if torch.is_grad_enabled() and self.require_backward_grad_sync:
                 self.logger.set_runtime_stats_and_log()
                 self.num_iterations += 1
                 self.reducer.prepare_for_forward()
@@ -863,7 +854,7 @@ class DistributedDataParallel(Module, _Joinable):
             # call _rebuild_buckets before the peak memory usage increases
             # during forward computation.
             # This should be called only once during whole training period.
-            if grad_enabled and self.reducer._rebuild_buckets():
+            if torch.is_grad_enabled() and self.reducer._rebuild_buckets():
                 logging.info("Reducer buckets have been rebuilt in this iteration.")
 
             if self.require_forward_param_sync:
@@ -879,51 +870,36 @@ class DistributedDataParallel(Module, _Joinable):
             else:
                 output = self.module(*inputs, **kwargs)
 
-            if grad_enabled and self.require_backward_grad_sync:
+            if torch.is_grad_enabled() and self.require_backward_grad_sync:
                 self.require_forward_param_sync = True
-                # Static graph does not need to conduct unused parameter search
-                # as it finds unused parameters by keeping track of how many
-                # times grad hooks have been fired.
-                if self.static_graph or not self.find_unused_parameters:
-                    self.reducer.prepare_for_backward([])
-                else:
+                # We'll return the output object verbatim since it is a freeform
+                # object. We need to find any tensors in this object, though,
+                # because we need to figure out which parameters were used during
+                # this forward pass, to ensure we short circuit reduction for any
+                # unused parameters. Only if `find_unused_parameters` is set.
+                if self.find_unused_parameters and not self.static_graph:
+                    # Do not need to populate this for static graph.
                     self.reducer.prepare_for_backward(list(_find_tensors(output)))
+                else:
+                    self.reducer.prepare_for_backward([])
             else:
                 self.require_forward_param_sync = False
 
-        # TODO: DDPSink is currently enabled for unused parameter detection and
-        # static graph training for first iteration, in the future we plan to
-        # enable this passthrough for all training use cases.
-        if (self.find_unused_parameters and not self.static_graph) or (
-            self.static_graph and self.num_iterations == 1
-        ):
-            state_dict = {
-                'static_graph': self.static_graph,
-                'num_iterations': self.num_iterations,
-            }
-
-            output_tensor_list, treespec, output_is_rref = _tree_flatten_with_rref(
-                output
-            )
-            output_placeholders = [None for _ in range(len(output_tensor_list))]
-            # Do not touch tensors that have no grad_fn, which can cause issues
-            # such as https://github.com/pytorch/pytorch/issues/60733
-            for i, output in enumerate(output_tensor_list):
-                if torch.is_tensor(output) and output.grad_fn is None:
-                    output_placeholders[i] = output
-
+        # TODO. Right now we add this sink for static_graph training only. once
+        # this feature is stable, we will add this sink for all cases. E.g.
+        # This sink can help capture more accuracte backward start time as well.
+        if self.static_graph and self.num_iterations == 1:
+            # Need to grab list of tensors from user output in order to pass
+            # to custom autograd function.
+            output_tensor_list, treespec, output_is_rref = _tree_flatten_with_rref(output)
             passthrough_tensor_list = _DDPSink.apply(
                 self.reducer,
-                state_dict,
-                *output_tensor_list,
+                *output_tensor_list
             )
-            for i in range(len(output_placeholders)):
-                if output_placeholders[i] is None:
-                    output_placeholders[i] = passthrough_tensor_list[i]
 
             # Reconstruct output data structure.
             output = _tree_unflatten_with_rref(
-                output_placeholders, treespec, output_is_rref
+                passthrough_tensor_list, treespec, output_is_rref
             )
         return output
 
