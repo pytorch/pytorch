@@ -42,7 +42,18 @@ class Tensor;
 
 namespace c10 {
 class Scalar;
+struct IValue;
 struct Storage;
+class OperatorHandle;
+} // namespace c10
+
+namespace torch {
+namespace jit {
+using Stack = std::vector<c10::IValue>;
+}
+} // namespace torch
+
+namespace c10 {
 
 /**
  * A utility function to convert vector<int> to vector<int64_t>.
@@ -239,14 +250,27 @@ struct PyInterpreter;
 struct C10_API PyInterpreter {
   using name_sig = std::string(const PyInterpreter*);
   using decref_sig = void(const PyInterpreter*, PyObject*);
+  using detach_sig =
+      c10::intrusive_ptr<TensorImpl>(const PyInterpreter*, const TensorImpl*);
+  using dispatch_sig = void(
+      const PyInterpreter*,
+      const c10::OperatorHandle&,
+      torch::jit::Stack* stack);
 
-  PyInterpreter(name_sig* name_fn, decref_sig* decref_fn)
-      : name_fn_(name_fn), decref_fn_(decref_fn) {}
+  PyInterpreter(
+      name_sig* name_fn,
+      decref_sig* decref_fn,
+      detach_sig* detach,
+      dispatch_sig* dispatch)
+      : name_fn_(name_fn),
+        decref_fn_(decref_fn),
+        detach_fn_(detach),
+        dispatch_fn_(dispatch) {}
 
-  // For debugging purposes only
   name_sig* name_fn_;
-
   decref_sig* decref_fn_;
+  detach_sig* detach_fn_;
+  dispatch_sig* dispatch_fn_;
 
   // UBSAN suppression fixes: "call to function
   // (anonymous namespace)::concrete_decref_fn(c10::impl::PyInterpreter const*,
@@ -254,6 +278,7 @@ struct C10_API PyInterpreter {
   // c10::impl::PyInterpreter *, _object *)'" See
   // https://github.com/google/sanitizers/issues/911
 
+  // Report the name of this interpreter
   __ubsan_ignore_function__ std::string name() const {
     return (*name_fn_)(this);
   }
@@ -261,6 +286,21 @@ struct C10_API PyInterpreter {
   // Run Py_DECREF on a PyObject.  We DO NOT assume the GIL is held on call
   __ubsan_ignore_function__ void decref(PyObject* pyobj) const {
     return (*decref_fn_)(this, pyobj);
+  }
+
+  // Perform a detach by deferring to the __torch_dispatch__ implementation of
+  // detach, which will also arrange for the PyObject to get copied in this
+  // situation
+  __ubsan_ignore_function__ c10::intrusive_ptr<TensorImpl> detach(
+      const TensorImpl* self) const {
+    return (*detach_fn_)(this, self);
+  }
+
+  // Invoke the Python boxed fallback dispatch to go back into Python
+  __ubsan_ignore_function__ void dispatch(
+      const c10::OperatorHandle& op,
+      torch::jit::Stack* stack) const {
+    return (*dispatch_fn_)(this, op, stack);
   }
 
   // Disarm this PyInterpreter, making all of its methods noops.
@@ -1321,6 +1361,18 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     }
   }
 
+  void set_python_dispatch(bool k) {
+    if (k) {
+      key_set_ = key_set_.add(DispatchKey::Python);
+    } else {
+      key_set_ = key_set_.remove(DispatchKey::Python);
+    }
+  }
+
+  bool is_python_dispatch() const {
+    return key_set_.has(DispatchKey::Python);
+  }
+
   /**
    * Return the pointer to named tensor metadata.
    */
@@ -1508,6 +1560,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // possible to conflict with another zero interpreter as access is protected
     // by GIL
     pyobj_ = pyobj;
+  }
+
+  // Query the PyObject interpreter.  This may return null if there is no
+  // interpreter.  This is racy!
+  impl::PyInterpreter* pyobj_interpreter() {
+    return pyobj_interpreter_.load(std::memory_order_acquire);
   }
 
   // Test the interpreter tag.  If tagged for the current interpreter, return

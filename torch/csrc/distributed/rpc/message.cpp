@@ -66,14 +66,13 @@ void Message::setId(int64_t id) {
   id_ = id;
 }
 
-std::vector<std::reference_wrapper<const at::DataPtr>> Message::getDataPtrs()
-    const {
-  std::vector<std::reference_wrapper<const at::DataPtr>> dataPtrs;
-  dataPtrs.reserve(tensors_.size());
+std::vector<c10::Storage> Message::getStorages() const {
+  std::vector<c10::Storage> storages;
+  storages.reserve(tensors_.size());
   for (const auto& tensor : tensors_) {
-    dataPtrs.emplace_back(tensor.storage().data_ptr());
+    storages.emplace_back(tensor.storage());
   }
-  return dataPtrs;
+  return storages;
 }
 
 c10::intrusive_ptr<Message> createExceptionResponse(

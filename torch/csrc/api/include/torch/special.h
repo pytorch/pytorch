@@ -133,6 +133,22 @@ inline Tensor& erfinv_out(Tensor& result, const Tensor& self) {
   return torch::special_erfinv_out(result, self);
 }
 
+/// Computes the log of summed exponentials of each row of input in the given dimension dim
+/// See https://pytorch.org/docs/master/special.html#torch.special.logsumexp.
+///
+/// Example:
+/// ```
+/// auto t = torch::randn(3, 3);
+/// torch::special::logsumexp(t, 1);
+/// ```
+inline Tensor logsumexp(const Tensor& self, IntArrayRef dims, bool keepdim) {
+  return torch::special_logsumexp(self, dims, keepdim);
+}
+
+inline Tensor& logsumexp_out(Tensor& result, const Tensor& self, IntArrayRef dims, bool keepdim) {
+  return torch::special_logsumexp_out(result, self, dims, keepdim);
+}
+
 inline Tensor ndtri(const Tensor& self) {
   return torch::special_ndtri(self);
 }
@@ -236,6 +252,39 @@ inline Tensor& xlog1py_out(Tensor& result, const Scalar& self, const Tensor& oth
 
 inline Tensor& xlog1py_out(Tensor& result, const Tensor& self, const Scalar& other) {
   return torch::special_xlog1py_out(result, self, other);
+}
+
+/// Computes Hurwitz Zeta function for inputs, elementwise
+/// See https://pytorch.org/docs/master/special.html#torch.special.zeta.
+///
+/// Example:
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+/// auto y = torch::randn(128, dtype=kDouble);
+/// torch::special::zeta(x, y);
+/// ```
+inline Tensor zeta(const Tensor& self, const Tensor& other) {
+  return torch::special_zeta(self, other);
+}
+
+inline Tensor zeta(const Scalar& self, const Tensor& other) {
+  return torch::special_zeta(self, other);
+}
+
+inline Tensor zeta(const Tensor& self, const Scalar& other) {
+  return torch::special_zeta(self, other);
+}
+
+inline Tensor& zeta_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  return torch::special_zeta_out(result, self, other);
+}
+
+inline Tensor& zeta_out(Tensor& result, const Scalar& self, const Tensor& other) {
+  return torch::special_zeta_out(result, self, other);
+}
+
+inline Tensor& zeta_out(Tensor& result, const Tensor& self, const Scalar& other) {
+  return torch::special_zeta_out(result, self, other);
 }
 
 /// Computes the zeroth order modified Bessel function of the first kind of input, elementwise
