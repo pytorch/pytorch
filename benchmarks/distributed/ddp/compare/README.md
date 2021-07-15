@@ -10,6 +10,8 @@ Key takeaway:
 
 The following is generated summary from compare_ddp.py
 
+```
+
 === Summary for buffer_size: 3M ===
 DDP: [forward]                           Mean     delta%     mean     delta%      p90    delta%      p95    delta%%      p99    delta%
 ------------------------------------  -------  ---------  -------  ---------  -------  --------  -------  ---------  -------  --------
@@ -381,3 +383,5 @@ DDP: [backward]                          Mean    delta%     mean    delta%      
 DDPOption.DDP_CPP_CORE                475.294    0       475.299    0       476.014    0       476.119     0       476.351    0
 DDPOption.PYTHON_DDP_ASYNC_REDUCTION  570.313   19.9917  572.485   20.4473  574.882   20.77    575.329    20.8371  576.284   20.9788
 DDPOption.PYTHON_DDP_SYNC_REDUCTION   571.216   20.1816  572.884   20.5313  574.973   20.7891  575.856    20.9478  576.293   20.9807
+
+```
