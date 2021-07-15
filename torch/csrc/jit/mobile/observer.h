@@ -84,6 +84,8 @@ class MobileModuleObserver {
       const char*,
       const std::unordered_map<std::string, std::string>&) {}
   virtual std::vector<std::string> getDefaultExtraFiles() = 0;
+  virtual std::unordered_map<std::string, std::string> processMetadataFromExtra(
+      const std::unordered_map<std::string, std::string>&) = 0;
 };
 
 class MobileObserverConfig {

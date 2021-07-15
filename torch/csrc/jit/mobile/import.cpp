@@ -630,40 +630,54 @@ mobile::Module _load_for_mobile_impl(
   auto observer = torch::observerConfig().getModuleObserver();
   // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
   auto instance_key = std::rand();
-  // Copy extra_files to metadata_map
-  std::unordered_map<std::string, std::string> metadata_map;
+
   if (observer) {
     observer->onEnterLoadModel(instance_key);
-    auto defaultExtraFileList = observer->getDefaultExtraFiles();
-    // Add files in defaultExtraFileList to metadata_map
-    for (const auto& fileName : defaultExtraFileList) {
-      metadata_map.insert(std::make_pair(fileName, ""));
-    }
   }
 
   const size_t model_size = rai != nullptr ? rai->size() : 0;
   auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
   BytecodeDeserializer deserializer(std::move(reader), module_load_options);
-  deserializer.deserialize_only_extra(device, metadata_map);
+
+  std::unordered_map<std::string, std::string> fail_extra_files;
+
+  if (observer) {
+    auto defaultExtraFileList = observer->getDefaultExtraFiles();
+    // Add files in defaultExtraFileList to fail_extra_files and extra_files
+    for (const auto& fileName : defaultExtraFileList) {
+      fail_extra_files.insert(std::make_pair(fileName, ""));
+      extra_files.insert(std::make_pair(fileName, ""));
+    }
+  }
+
   std::string error_message;
   auto guard = c10::make_scope_exit([&]() {
     if (!observer) {
       return;
     }
 
+    deserializer.deserialize_only_extra(device, fail_extra_files);
+
+    std::unordered_map<std::string, std::string> fail_metadata_map;
+    if (observer) {
+      fail_metadata_map = observer->processMetadataFromExtra(fail_extra_files);
+    }
+
     observer->onFailLoadModel(
         instance_key,
         error_message.empty() ? "Unknown exception" : error_message.c_str(),
-        metadata_map);
+        fail_metadata_map);
   });
 
   try {
     mobile::Module result = deserializer.deserialize(device, extra_files);
+    std::unordered_map<std::string, std::string> metadata_map;
     if (observer) {
       // Add model_name and model_size to metadata_map
-      metadata_map.insert(std::make_pair("model_name", result.name()));
-      metadata_map.insert(
+      extra_files.insert(std::make_pair("model_name", result.name()));
+      extra_files.insert(
           std::make_pair("model_size", c10::guts::to_string(model_size)));
+      metadata_map = observer->processMetadataFromExtra(extra_files);
       observer->onExitLoadModel(instance_key, metadata_map);
     }
     result.setMetadata(metadata_map);
