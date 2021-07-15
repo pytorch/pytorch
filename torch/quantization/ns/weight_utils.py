@@ -100,7 +100,7 @@ def get_linear_fun_weight(node: Node, gm: GraphModule) -> torch.Tensor:
             assert weight_node.op == 'get_attr'
             weight = getattr_from_fqn(gm, weight_node.target)  # type: ignore[arg-type]
             return weight.detach()
-        else:
+        elif linear_second_arg.op == 'call_method':
             # weight -> to(torch.float16) -> dequantize -> linear
             assert linear_second_arg.op == 'call_method'
             dequant_node = node.args[1]
@@ -115,6 +115,10 @@ def get_linear_fun_weight(node: Node, gm: GraphModule) -> torch.Tensor:
             weight = getattr_from_fqn(gm, weight_node.target)  # type: ignore[arg-type]
             # return the weight with fp16 cast
             return weight.detach().to(target_dtype)
+        else:
+            assert linear_second_arg.op == 'get_attr'
+            weight = getattr_from_fqn(gm, linear_second_arg.target)  # type: ignore[arg-type]
+            return weight.detach()
 
     else:
         assert node.target in (toq.linear, toq.linear_relu)

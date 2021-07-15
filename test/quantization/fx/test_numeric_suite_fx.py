@@ -762,6 +762,7 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
     def _test_extract_weights(
         self, m, results_len=0, qconfig_dict=None, prepare_fn=prepare_fx
     ):
+        m = torch.fx.symbolic_trace(m)
         if qconfig_dict is None:
             qconfig_dict = {'': torch.quantization.default_qconfig}
         mp = prepare_fn(copy.deepcopy(m), qconfig_dict)
@@ -772,7 +773,7 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
         for extract_weights_fun in (extract_weights, _extract_weights_impl):
             # test both m vs mp and mp vs mq
             for m1, m2 in ((m, mp), (mp, mq)):
-                results = extract_weights_fun('a', mp, 'b', mq)
+                results = extract_weights_fun('a', m1, 'b', m2)
                 self.assertTrue(
                     len(results) == results_len,
                     f"expected len {results_len}, got len {len(results)}")
