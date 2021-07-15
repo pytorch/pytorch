@@ -264,9 +264,15 @@ class Module:
         self._state_dict_hooks = OrderedDict()
         self._load_state_dict_pre_hooks = OrderedDict()
         self._modules = OrderedDict()
-        self.name = None
 
     forward: Callable[..., Any] = _forward_unimplemented
+
+    @property
+    def name(self):
+        if hasattr(self, 'name'):
+            object.__getattr__(self, 'name')
+        else:
+            return None
 
     def register_buffer(self, name: str, tensor: Optional[Tensor], persistent: bool = True) -> None:
         r"""Adds a buffer to the module.
@@ -1116,8 +1122,6 @@ class Module:
             self._non_persistent_buffers_set = set()
         if '_is_full_backward_hook' not in self.__dict__:
             self._is_full_backward_hook = None
-        if 'name' not in self.__dict__:
-            self.name = None
 
     def __getattr__(self, name: str) -> Union[Tensor, 'Module']:
         if '_parameters' in self.__dict__:
