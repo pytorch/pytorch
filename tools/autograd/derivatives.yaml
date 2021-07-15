@@ -388,7 +388,7 @@
 
 - name: complex(Tensor real, Tensor imag) -> Tensor
   real: at::real(grad)
-  imag: at::imag(grad.resolve_conj())
+  imag: at::imag(grad)
   result: at::complex(real_t, imag_t)
 
 - name: polar(Tensor abs, Tensor angle) -> Tensor
@@ -397,6 +397,10 @@
 - name: _conj(Tensor(a) self) -> Tensor(a)
   self: grad.conj()
   result: self_t.conj()
+
+- name: _neg_view(Tensor(a) self) -> Tensor(a)
+  self: grad.neg()
+  result: self_t.neg()
 
 - name: _conj_physical(Tensor self) -> Tensor
   self: grad.conj_physical()
@@ -551,6 +555,9 @@
   self: zeros_like(grad)
 
 - name: fake_quantize_per_tensor_affine_cachemask(Tensor self, float scale, int zero_point, int quant_min, int quant_max) -> (Tensor output, Tensor mask)
+  self: fake_quantize_per_tensor_affine_cachemask_backward(grad, mask)
+
+- name: _fake_quantize_per_tensor_affine_cachemask_tensor_qparams(Tensor self, Tensor scale, Tensor zero_point, int quant_min, int quant_max) -> (Tensor output, Tensor mask)
   self: fake_quantize_per_tensor_affine_cachemask_backward(grad, mask)
 
 - name: _fake_quantize_learnable_per_tensor_affine(Tensor self, Tensor scale, Tensor zero_point, int quant_min, int quant_max, float grad_factor=1.0) -> Tensor
@@ -1395,10 +1402,6 @@
 - name: view.dtype(Tensor(a) self, ScalarType dtype) -> Tensor(a)
   output_differentiability: [False]
 
-# If the conj bit for self is set, this is effectively a fused conj() and view_as_real
-- name: _view_as_real_physical(Tensor(a) self) -> Tensor(a)
-  self: "self.is_conj() ? at::view_as_complex(grad.contiguous()) : at::view_as_complex(grad.contiguous()).conj()"
-
 - name: view_as_real(Tensor(a) self) -> Tensor(a)
   self: at::view_as_complex(grad.contiguous()) # gx0 + 1j * gx1
   result: at::view_as_real(self_t)
@@ -2208,3 +2211,6 @@
 
 - name: segment_reduce(Tensor data, str reduce, *, Tensor? lengths=None, Tensor? indices=None, int axis=0, bool unsafe=False, Scalar? initial=None) -> Tensor
   data: _segment_reduce_backward(grad, result, data, reduce, lengths)
+
+- name: _pin_memory(Tensor self, Device? device=None) -> Tensor
+  self: grad
