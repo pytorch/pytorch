@@ -355,7 +355,7 @@ jobs:
           cd "${GITHUB_WORKSPACE}"
 
           python3 -m tools.linter.clang_tidy \
-            --paths torch/csrc/fx  
+            --paths torch/csrc/fx \
             --clang-tidy-exe "$(which clang-tidy)" \
             --diff-file pr.diff \
             --verbose \
