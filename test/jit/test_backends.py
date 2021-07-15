@@ -1,13 +1,13 @@
-from torch.testing._internal.jit_utils import JitTestCase
+import ctypes
 import io
 import os
 import sys
 import unittest
-import ctypes
 
 import torch
 import torch._C
 from torch.testing import FileCheck
+from torch.testing._internal.jit_utils import JitTestCase
 from torch.jit.mobile import _load_for_lite_interpreter
 from pathlib import Path
 
@@ -723,7 +723,9 @@ class NnapiBackendPReLUTest(JitTestCase):
         # Save default dtype
         module = torch.nn.PReLU()
         default_dtype = module.weight.dtype
-        # Change dtype to float32 (since float 64 is not supported)
+        # Change dtype to float32 (since a different unit test changed dtype to float64,
+        # which is not supported by the Android NNAPI delegate)
+        # Float32 should typically be the default in other files.
         torch.set_default_dtype(torch.float32)
         module = torch.nn.PReLU()
         args = torch.tensor([[1.0, -1.0, 2.0, -2.0]]).unsqueeze(-1).unsqueeze(-1)
@@ -738,8 +740,7 @@ class NnapiBackendPReLUTest(JitTestCase):
 
 # First skip is needed for IS_WINDOWS or IS_MACOS to skip the tests.
 # Second skip is because ASAN is currently causing an error.
-# It is still unclear how to resolve this.
-# See https://fb.workplace.com/groups/1144215345733672/permalink/2010505639104634/
+# It is still unclear how to resolve this. T95764916
 @unittest.skipIf(TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE,
                  "Non-portable load_library call used in test")
 @unittest.skipIf(TEST_WITH_ASAN, "Unresolved bug with ASAN")
