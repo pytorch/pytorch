@@ -1341,7 +1341,7 @@
   self: zeros_like(grad)
 
 - name: _to_copy(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, bool non_blocking=False, MemoryFormat? memory_format=None) -> Tensor
-  self: grad.to(result) # _to_always_copy_backward(grad, result.options())
+  self: _to_copy_backward(grad, self.options())
 
 - name: to_dense(Tensor self, ScalarType? dtype=None) -> Tensor
   self: to_dense_backward(grad, self)
