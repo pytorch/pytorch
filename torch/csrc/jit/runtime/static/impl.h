@@ -12,6 +12,8 @@
 namespace torch {
 namespace jit {
 
+bool canEnableStaticRuntime(const std::shared_ptr<torch::jit::Graph>& graph);
+
 struct TORCH_API StaticModuleOptions {
   // to batch allocate (deallocate) tensor storage for all non-escaping
   // temporary tensors
@@ -92,9 +94,8 @@ class TORCH_API StaticModule {
 
  private:
   explicit StaticModule(
-      std::pair<
-          std::shared_ptr<torch::jit::Graph>,
-          c10::optional<c10::FunctionSchema>> graph_and_schema,
+      std::pair<std::shared_ptr<torch::jit::Graph>, std::shared_ptr<Module>>
+          graph_and_module,
       const StaticModuleOptions& opts);
 
   // for <kind, idx>
@@ -114,6 +115,10 @@ class TORCH_API StaticModule {
 
   const Graph& graph() const {
     return *graph_;
+  }
+
+  const Module& module() const {
+    return *module_;
   }
 
   const StaticModuleOptions& opts() const;
@@ -149,11 +154,17 @@ class TORCH_API StaticModule {
     return external_values_;
   }
 
+  bool first_input_is_self() const {
+    return first_input_is_self_;
+  }
+
   StaticRuntime& runtime();
 
  private:
   StaticModuleOptions opts_;
+  bool first_input_is_self_{false};
   std::shared_ptr<torch::jit::Graph> graph_;
+  std::shared_ptr<torch::jit::Module> module_;
   c10::optional<c10::FunctionSchema> schema_;
   std::unique_ptr<StaticRuntime> cached_runtime_;
 
@@ -188,7 +199,9 @@ class TORCH_API StaticRuntime {
       const std::vector<c10::IValue>& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
 
-  void display_nodes(const std::vector<c10::IValue>& args);
+  void display_nodes(
+      const std::vector<c10::IValue>& args,
+      const std::unordered_map<std::string, c10::IValue>& kwargs);
 
   void benchmark(
       const std::vector<c10::IValue>& args,
@@ -254,6 +267,18 @@ class TORCH_API StaticRuntime {
   void check_for_memory_leak(bool output_returned = true);
 
  private:
+  // helper method for copying input args/kwargs into inputs_
+  void set_inputs(
+      const std::vector<c10::IValue>& args,
+      const std::unordered_map<std::string, c10::IValue>& kwargs);
+
+  // clean up owning refs of input IValues
+  void clean_up_input_ivalues() {
+    for (IValue& ival : inputs_) {
+      ival = IValue();
+    }
+  }
+
   // Memory planning is only enabled if sm->opts().cleanup_activations is true.
   // Otherwise, the memory used by activations is cached inside the static
   // runtime.
@@ -381,6 +406,8 @@ class ProcessedNode {
   bool has_out_variant() const {
     return static_cast<bool>(fn_);
   }
+
+  bool verify_outputs_not_overlapping_with_immutable_inputs() const;
 
  private:
   Node* node_;

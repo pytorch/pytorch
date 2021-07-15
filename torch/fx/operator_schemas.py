@@ -317,7 +317,7 @@ def _args_kwargs_to_normalized_args_kwargs(sig : inspect.Signature, args : Tuple
 
         target (inspect.Signature): Signature object for the target
         args (Tuple): Arguments that appear at the callsite for `target`
-        kwargs (Dict): Keyword arugments that appear at the callsite for `target`
+        kwargs (Dict): Keyword arguments that appear at the callsite for `target`
         normalize_to_only_use_kwargs (bool): Whether to normalize to only use kwargs.
 
     Returns:
