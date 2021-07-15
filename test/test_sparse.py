@@ -3431,6 +3431,21 @@ class TestSparseOneOff(TestCase):
         with self.assertRaisesRegex(RuntimeError, "add: expected 'self' to be a CUDA tensor, but got a CPU tensor"):
             x + sparse_y
 
+    def test_cpu_sparse_dense_mul(self):
+        # general multiplication is not supported, but 0dim multiplication is supported
+        s = torch.sparse_coo_tensor([[0], [1]], [5.0], (2, 3))
+        t23 = s.to_dense()
+        t0 = torch.tensor(2.0)
+        with self.assertRaisesRegex(RuntimeError, r"mul\(sparse, dense\) is not supported"):
+            s * t23
+        with self.assertRaisesRegex(RuntimeError, r"mul\(dense, sparse\) is not supported"):
+            t23 * s
+        r = s * 2.0
+        self.assertEqual(r, 2.0 * s)
+        self.assertEqual(r, t0 * s)
+        self.assertEqual(r, s * t0)
+
+
 class TestSparseUnaryUfuncs(TestCase):
     exact_dtype = True
 
