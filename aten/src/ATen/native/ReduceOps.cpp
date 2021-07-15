@@ -147,21 +147,24 @@ TORCH_META_FUNC2(sum, dim_IntList)
 
   auto shape = get_reduction_shape(self, dim, keepdim);
   set_output(shape, self.options().dtype(dtype));
+  namedinference::propagate_names_for_reduction(result, self, dim, keepdim);
 }
 
 TORCH_META_FUNC2(mean, dim)
 (const Tensor& self, IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  DimVector dims(dim);
-  maybe_wrap_dims(dims, self.dim());
-
   ScalarType dtype = at::native::get_dtype_from_self(self, opt_dtype, true);
-  DimVector shape = get_reduction_shape(self, dims, keepdim);
-  set_output(shape, self.options().dtype(dtype));
 
   TORCH_CHECK(
       at::isFloatingType(dtype) || at::isComplexType(dtype),
       "Can only calculate the mean of floating types. Got ",
       toString(dtype), " instead.");
+
+  DimVector dims(dim);
+  DimVector shape = get_reduction_shape(self, dims, keepdim);
+
+  maybe_wrap_dims(dims, self.dim());
+  set_output(shape, self.options().dtype(dtype));
+  namedinference::propagate_names_for_reduction(result, self, dim, keepdim);
 }
 
 } // namespace meta
