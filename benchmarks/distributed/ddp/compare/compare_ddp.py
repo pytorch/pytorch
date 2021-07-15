@@ -28,7 +28,6 @@ import torch.optim as optim
 import torchvision.models as models
 
 from collections import OrderedDict
-from dataclasses import dataclass
 from enum import Enum
 from tabulate import tabulate
 from torch.nn.parallel import DistributedDataParallel as DDP
