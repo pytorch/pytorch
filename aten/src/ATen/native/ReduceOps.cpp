@@ -136,7 +136,15 @@ TORCH_META_FUNC(argmin)
 
 TORCH_META_FUNC2(sum, dim_IntList)
 (const Tensor& self, IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  ScalarType dtype = at::native::get_dtype_from_self(self, opt_dtype, true);
+  ScalarType dtype;
+  const auto& result = maybe_get_output();
+
+  if (result.defined()) {
+    dtype = opt_dtype.value_or(result.scalar_type());
+  } else {
+    dtype = at::native::get_dtype_from_self(self, opt_dtype, true);
+  }
+
   auto shape = get_reduction_shape(self, dim, keepdim);
   set_output(shape, self.options().dtype(dtype));
 }
