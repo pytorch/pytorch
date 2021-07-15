@@ -86,8 +86,7 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
             _retain_param_name=_retain_param_name, do_constant_folding=do_constant_folding,
             example_outputs=example_outputs, strip_doc_string=strip_doc_string,
             dynamic_axes=dynamic_axes, keep_initializers_as_inputs=keep_initializers_as_inputs,
-            custom_opsets=custom_opsets, enable_onnx_checker=enable_onnx_checker,
-            use_external_data_format=use_external_data_format)
+            custom_opsets=custom_opsets, use_external_data_format=use_external_data_format)
 
 
 def _is_constant_tensor_list(node):
@@ -636,8 +635,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             opset_version=None, _retain_param_name=False, do_constant_folding=True,
             strip_doc_string=True, dynamic_axes=None, keep_initializers_as_inputs=None,
             fixed_batch_size=False, custom_opsets=None, add_node_names=True,
-            enable_onnx_checker=True, use_external_data_format=False,
-            onnx_shape_inference=True):
+            use_external_data_format=False, onnx_shape_inference=True):
 
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError("torch.nn.DataParallel is not supported by ONNX "
@@ -710,13 +708,6 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                     strip_doc_string, val_keep_init_as_ip, custom_opsets, val_add_node_names,
                     val_use_external_data_format, model_file_location)
 
-            if enable_onnx_checker and \
-                operator_export_type is OperatorExportTypes.ONNX and \
-                    not val_use_external_data_format:
-                # Only run checker if enabled and we are using ONNX export type and
-                # large model format export in not enabled.
-                _check_onnx_proto(proto)
-
             if export_type == ExportTypes.PROTOBUF_FILE:
                 assert(len(export_map) == 0)
                 with torch.serialization._open_file_like(f, "wb") as opened_file:
@@ -747,6 +738,12 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                         opened_file.write(v)
             else:
                 raise RuntimeError("Unknown export type")
+
+            if operator_export_type is OperatorExportTypes.ONNX and \
+                not val_use_external_data_format:
+                # Only run checker if we are using ONNX export type and
+                # large model format export in not enabled.
+                _check_onnx_proto(proto)
     finally:
         assert __IN_ONNX_EXPORT
         __IN_ONNX_EXPORT = False
