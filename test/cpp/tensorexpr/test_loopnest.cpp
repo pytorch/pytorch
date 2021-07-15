@@ -6364,14 +6364,14 @@ TEST(LoopNest, reorderNestedLoops3D) {
   auto forI = For::make(i, 0, 20, forJ);
   auto par = Block::make({forI});
 
-  auto reordered = LoopNest::reorder({forI, forJ, forK}, {2, 1, 0});
+  auto reordered = LoopNest::reorder({forI, forJ, forK}, {2, 0, 1});
 
   ASSERT_EQ(reordered[0], forK);
-  ASSERT_EQ(reordered[1], forJ);
-  ASSERT_EQ(reordered[2], forI);
-  ASSERT_TRUE(LoopNest::areLoopsPerfectlyNested({forK, forJ, forI}));
+  ASSERT_EQ(reordered[1], forI);
+  ASSERT_EQ(reordered[2], forJ);
+  ASSERT_TRUE(LoopNest::areLoopsPerfectlyNested({forK, forI, forJ}));
   ASSERT_EQ(forK->get_parent(), par);
-  ASSERT_EQ(store->get_parent(), forI->body());
+  ASSERT_EQ(store->get_parent(), forJ->body());
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -6403,13 +6403,13 @@ TEST(LoopNest, reorderNestedLoops4D) {
   auto forI = For::make(i, 0, 20, forJ);
   auto par = Block::make({forI});
 
-  auto reordered = LoopNest::reorder({forI, forJ, forK, forL}, {2, 3, 0, 1});
+  auto reordered = LoopNest::reorder({forI, forJ, forK, forL}, {2, 0, 3, 1});
 
   ASSERT_EQ(reordered[0], forK);
-  ASSERT_EQ(reordered[1], forL);
-  ASSERT_EQ(reordered[2], forI);
+  ASSERT_EQ(reordered[1], forI);
+  ASSERT_EQ(reordered[2], forL);
   ASSERT_EQ(reordered[3], forJ);
-  ASSERT_TRUE(LoopNest::areLoopsPerfectlyNested({forK, forL, forI, forJ}));
+  ASSERT_TRUE(LoopNest::areLoopsPerfectlyNested({forK, forI, forL, forJ}));
   ASSERT_EQ(forK->get_parent(), par);
   ASSERT_EQ(store->get_parent(), forJ->body());
 }
