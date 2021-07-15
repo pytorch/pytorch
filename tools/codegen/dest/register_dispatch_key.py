@@ -62,6 +62,14 @@ class RegisterDispatchKey:
     # The namespace that the kernels are written in. This is just `at::native` for in-tree kernels.
     cpp_namespace: str
 
+    # The class that all unstructured native functions live under. This is used to improve
+    # compiler error messages when a kernel writer adds a native function with the wrong signature.
+    # This is only used in unstructured kernels, since structured kernels already live in a class.
+    # Finally, this field is currently Optional because it is only used by external backends.
+    # It would be nice if we can add the same logic to in-tree kernels too, but that requires updating
+    # all of the existing kernel signatures scattered across aten/src/ATen/native.
+    class_method_name: Optional[str]
+
     @staticmethod
     def gen_device_check(type: DeviceCheckType, args: List[Argument], method_name: str) -> str:
         if type == DeviceCheckType.NoCheck:
@@ -123,9 +131,10 @@ class RegisterDispatchKey:
             returns = ret_name
 
         functional_sig = self.wrapper_kernel_sig(g.functional)
+        wrapper_name = sig.name()
 
         return f"""\
-{sig.defn()} {{
+{sig.defn(name=wrapper_name)} {{
   auto {func_res} = {functional_sig.name()}({", ".join(e.expr for e in translate(sig.arguments(), functional_sig.arguments()))});
   {updates}
   return {returns};
@@ -151,6 +160,7 @@ class RegisterDispatchKey:
             self.selector,
             self.rocm,
             self.cpp_namespace,
+            self.class_method_name,
             g
         )
         return list(mapMaybe(structured_gen.gen_one, g.functions()))
@@ -227,7 +237,10 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 metadata = self.backend_index.get_kernel(f)
                 if metadata is None:
                     return None
-                impl_name = f"{self.cpp_namespace}::{metadata.kernel}"
+                if self.class_method_name is None:
+                    impl_name = f"{self.cpp_namespace}::{metadata.kernel}"
+                else:
+                    impl_name = f"{self.cpp_namespace}::{self.class_method_name}::{metadata.kernel}"
 
                 args_exprs_str = ', '.join(a.name for a in args)
 
@@ -301,12 +314,13 @@ class StructuredRegisterDispatchKey(RegisterDispatchKey):
             set_output_super = f"{parent_class}::set_output(output_idx, sizes, strides, options, names);"
         else:
             set_output_super = ""
+        maybe_star = "*" if k is SchemaKind.functional else ""
         return f"""
 void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides,
                 TensorOptions options, DimnameList names) override {{
 {textwrap.indent(self.gen_class_set_output_body(k), "    ")}
     if (!names.empty()) {{
-      namedinference::propagate_names(outputs_[output_idx], names);
+      namedinference::propagate_names({maybe_star}outputs_[output_idx], names);
     }}
     // super must happen after, so that downstream can use maybe_get_output
     // to retrieve the output
@@ -404,8 +418,10 @@ if (resized) {{
     def gen_class(
         self, f: NativeFunction, k: SchemaKind, *, class_name: str, parent_class: str, generate_super: bool
     ) -> str:
+        maybe_star = ''
         if k is SchemaKind.functional:
-            output_type = "Tensor"
+            output_type = "c10::ExclusivelyOwned<Tensor>"
+            maybe_star = '*'
         elif k is SchemaKind.inplace:
             output_type = "std::reference_wrapper<Tensor>"
         elif k is SchemaKind.out:
@@ -428,7 +444,7 @@ if (resized) {{
             f"{textwrap.indent(class_ctor_str, indent)}",
             f"{textwrap.indent(self.gen_class_set_output(k, parent_class, generate_super), indent)}",
             "    const Tensor& maybe_get_output(int64_t output_idx) override {",
-            "        return outputs_[output_idx];",
+            f"        return {maybe_star}outputs_[output_idx];",
             "    }",
             f"    std::array<{output_type}, {len(f.func.returns)}> outputs_;",
             f"{textwrap.indent(guard_field, indent)}",
@@ -542,10 +558,11 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
             # After running meta, op.outputs_ is guaranteed to be valid;
             # add it to the context
             out_args = structured.out_arguments(self.g)
+            maybe_star = '*' if k is SchemaKind.functional else ''
             for i, out_arg in enumerate(out_args):
                 assert ConstRefCType(BaseCType(tensorT)) == out_arg.nctype.type
                 context.append(Expr(
-                    expr=f"op.outputs_[{i}]",
+                    expr=f"{maybe_star}op.outputs_[{i}]",
                     # TODO: Stop hardcoding that the output type is a Tensor.  Note
                     # that for the codegen here this is fine because outputs_ is
                     # hardcoded to be tensor already
@@ -592,9 +609,9 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
             # TODO: Do this in translate instead
             if k is SchemaKind.functional:
                 if len(f.func.returns) == 1:
-                    ret_expr = "std::move(op.outputs_[0])"  # small optimization
+                    ret_expr = "std::move(op.outputs_[0]).take()"  # small optimization
                 else:
-                    moved = ', '.join(f"std::move(op.outputs_[{i}])" for i in range(len(f.func.returns)))
+                    moved = ', '.join(f"std::move(op.outputs_[{i}]).take()" for i in range(len(f.func.returns)))
                     ret_expr = f"std::make_tuple({moved})"
             elif k is SchemaKind.inplace:
                 ret_expr = "self"
