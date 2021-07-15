@@ -266,7 +266,7 @@ class FusedMovingAvgObsFakeQuantize(FakeQuantize):
 
     def __init__(
         self,
-        observer: torch.nn.Module = MovingAverageMinMaxObserver,
+        observer: Any = MovingAverageMinMaxObserver,
         quant_min: int = 0,
         quant_max: int = 255,
         **observer_kwargs: Any
@@ -279,7 +279,7 @@ class FusedMovingAvgObsFakeQuantize(FakeQuantize):
         self.quant_max: int = quant_max
         self.register_buffer(
             "averaging_constant",
-            torch.tensor(self.activation_post_process.averaging_constant),
+            torch.tensor(self.activation_post_process.averaging_constant, dtype=torch.float),
         )
         self.register_buffer("fake_quant_enabled", torch.tensor([0], dtype=torch.long))
         self.register_buffer("observer_enabled", torch.tensor([0], dtype=torch.long))
@@ -306,7 +306,7 @@ class FusedMovingAvgObsFakeQuantize(FakeQuantize):
         )
 
     def forward(self, X: torch.Tensor) -> torch.Tensor:
-        fake_quant_x = torch.fused_moving_avg_obs_fake_quant(
+        return torch.fused_moving_avg_obs_fake_quant(
             X,
             self.observer_enabled,
             self.fake_quant_enabled,
@@ -321,7 +321,6 @@ class FusedMovingAvgObsFakeQuantize(FakeQuantize):
             self.is_per_channel,
             self.is_symmetric_quant,
         )
-        return fake_quant_x
 
 default_fake_quant = FakeQuantize.with_args(observer=MovingAverageMinMaxObserver, quant_min=0, quant_max=255,
                                             dtype=torch.quint8, qscheme=torch.per_tensor_affine, reduce_range=True)
