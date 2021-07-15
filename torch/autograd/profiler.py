@@ -1116,28 +1116,29 @@ def rewrite_name(name, with_wildcard=False):
 # Parsing of kineto profiler events
 def parse_kineto_results(result):
     # result.events() has most of the events - PyTorch op-level and device-level events
-    # result.legacy_events() has events not yet ported to kineto
-    # (e.g. start/stop marks, tensor memory allocator events)
+    # result.memory_events() has PyTorch allocator events
 
-    # First, find __start_profile mark to get the absolute time of the start of the trace;
-    # save memory allocation records
-    start_record = None
-    mem_records = []
-    for record in itertools.chain(*result.legacy_events()):
-        if record.kind() == 'mark' and record.name() == '__start_profile':
-            assert start_record is None
-            start_record = record
-        if record.kind() == 'memory_alloc':
-            mem_records.append([record, False])
-    assert start_record is not None, "Invalid profiler output, __start_profile is missing"
+    trace_start_us = result.trace_start_us()
+    mem_records = [[evt, False] for evt in result.memory_events()]
+
+    def _cpu_memory_usage(mem_record):
+        return mem_record.nbytes() if \
+            mem_record.device_type in [DeviceType.CPU, DeviceType.MKLDNN, DeviceType.IDEEP] \
+            else 0
+
+    def _cuda_memory_usage(mem_record):
+        return mem_record.nbytes() if \
+            mem_record.device_type in [DeviceType.CUDA, DeviceType.HIP] \
+            else 0
 
     # Create and return FunctionEvent list
     function_events = []
     cuda_corr_map: Dict[int, List[FunctionEvent]] = {}
+    max_evt_id = 0
     for kineto_event in result.events():
         if filter_name(kineto_event.name()):
             continue
-        rel_start_us = kineto_event.start_us() - start_record.start_us()
+        rel_start_us = kineto_event.start_us() - trace_start_us
         rel_end_us = rel_start_us + kineto_event.duration_us()
         abs_end_us = kineto_event.start_us() + kineto_event.duration_us()
 
@@ -1146,11 +1147,11 @@ def parse_kineto_results(result):
         if kineto_event.device_type() == DeviceType.CPU:
             # find the corresponding memory allocation events
             for mem_record in mem_records:
-                if (mem_record[0].start_us() >= kineto_event.start_us() and
-                        mem_record[0].start_us() <= abs_end_us):
-                    cpu_memory_usage += mem_record[0].cpu_memory_usage()
-                    cuda_memory_usage += mem_record[0].cuda_memory_usage()
-                    mem_record[1] = True
+                mem_record[1] = True
+                if (mem_record[0].timestamp_us() >= kineto_event.start_us() and
+                        mem_record[0].timestamp_us() <= abs_end_us):
+                    cpu_memory_usage += _cpu_memory_usage(mem_record[0])
+                    cuda_memory_usage += _cuda_memory_usage(mem_record[0])
 
         is_async = kineto_event.is_async() or (
             kineto_event.start_thread_id() != kineto_event.end_thread_id()
@@ -1174,6 +1175,7 @@ def parse_kineto_results(result):
             device_index=kineto_event.device_index(),
             flops=kineto_event.flops(),
         )
+        max_evt_id = fe.id if fe.id > max_evt_id else max_evt_id
         if fe.device_type == DeviceType.CPU and not fe.is_async:
             # Check if we have CUDA time as a fallback
             cuda_time = kineto_event.cuda_elapsed_us()
@@ -1209,20 +1211,21 @@ def parse_kineto_results(result):
     # output top-level memory events
     for mem_record in mem_records:
         if not mem_record[1]:
-            rel_start_us = mem_record[0].start_us() - start_record.start_us()
+            rel_start_us = mem_record[0].timestamp_us() - trace_start_us
+            max_evt_id += 1
             fe = FunctionEvent(
-                id=mem_record[0].handle(),
+                id=max_evt_id,
                 name="[memory]",
                 trace_name=None,  # not outputting in the trace
                 thread=mem_record[0].thread_id(),
                 start_us=rel_start_us,
                 end_us=rel_start_us,  # no duration
-                fwd_thread=mem_record[0].fwd_thread_id(),
+                fwd_thread=mem_record[0].thread_id(),
                 input_shapes=[],
                 stack=[],
-                scope=mem_record[0].scope(),
-                cpu_memory_usage=mem_record[0].cpu_memory_usage(),
-                cuda_memory_usage=mem_record[0].cuda_memory_usage(),
+                scope=0, # function
+                cpu_memory_usage=_cpu_memory_usage(mem_record[0]),
+                cuda_memory_usage=_cuda_memory_usage(mem_record[0]),
                 is_async=False,
                 sequence_nr=-1,
                 device_type=DeviceType.CPU,

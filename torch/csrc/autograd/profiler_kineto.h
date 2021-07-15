@@ -219,6 +219,17 @@ struct TORCH_API KinetoEvent {
   CUDAEventStub cuda_event_end_ = nullptr;
 };
 
+// PyTorchMemoryEvent holds information about memory
+// allocs/frees done by PyTorch memory allocator
+struct TORCH_API PyTorchMemoryEvent {
+  uint64_t timestamp_us_;
+  uint64_t thread_id_;
+  uint64_t system_thread_id_;
+  c10::DeviceType device_type_;
+  uint8_t device_index_;
+  int64_t nbytes_;
+};
+
 // Consolidating events returned directly from Kineto
 // with events manually created by us (e.g. start/stop marks,
 // memory allocation events)
@@ -226,24 +237,29 @@ struct TORCH_API ProfilerResult {
   ProfilerResult();
   ProfilerResult(
       std::vector<KinetoEvent> events,
-      thread_event_lists legacy_events,
+      std::vector<PyTorchMemoryEvent> memory_events,
       std::unique_ptr<libkineto::ActivityTraceInterface> trace);
   ~ProfilerResult();
+
+  uint64_t trace_start_us() const {
+    return trace_start_us_;
+  }
 
   const std::vector<KinetoEvent>& events() const {
     return events_;
   }
 
-  const thread_event_lists& legacy_events() const {
-    return legacy_events_;
+  const std::vector<PyTorchMemoryEvent>& memory_events() const {
+    return memory_events_;
   }
 
   void save(const std::string& path);
 
  private:
   bool saved_ = false;
+  uint64_t trace_start_us_ = 0;
   std::vector<KinetoEvent> events_;
-  thread_event_lists legacy_events_;
+  std::vector<PyTorchMemoryEvent> memory_events_;
   std::unique_ptr<libkineto::ActivityTraceInterface> trace_;
 };
 
