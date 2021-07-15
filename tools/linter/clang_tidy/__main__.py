@@ -182,9 +182,10 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    options = parse_args()
+
     if not pathlib.Path("build").exists():
         generate_build_files()
-    options = parse_args()
 
     # Check if clang-tidy executable exists
     exists = os.access(options.clang_tidy_exe, os.X_OK)
@@ -204,4 +205,6 @@ def main() -> None:
 
     print("Passed clang-tidy!")
 
-main()
+
+if __name__ == "__main__":
+    main()
