@@ -8,6 +8,8 @@
 #include <torch/csrc/jit/passes/tensor_property_propagation.h>
 #include <torch/library.h>
 #include <torch/types.h>
+#include <stdexcept>
+#include "jit/runtime/operator.h"
 
 namespace torch {
 namespace jit {
@@ -20,10 +22,9 @@ static OperatorMap<ArgumentCreator>&  getArgumentCreatorMap() {
   static ArgumentCreator defaultArgumentCreator = [](Node* n) -> c10::optional<Stack> {
 
     std::vector<IValue> stack;
-    for (auto inp : n->inputs()) {
-        
+    for (auto inp : n->inputs()) {      
         if (auto tp = inp->type()->cast<TensorType>()) {
-          stack.push_back(at::empty({1}, at::TensorOptions(at::kMeta).dtype(*tp->scalarType())));
+          stack.push_back(at::empty({2}, at::TensorOptions(at::kMeta).dtype(*tp->scalarType())));
         } else if (inp->type() == FloatType::get()) {
           stack.push_back(0.);
         } else if (inp->type() == IntType::get()) {
@@ -38,11 +39,75 @@ static OperatorMap<ArgumentCreator>&  getArgumentCreatorMap() {
   static OperatorMap<ArgumentCreator> ops {
     {"aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor", defaultArgumentCreator},
     {"aten::div(Tensor self, Tensor other) -> Tensor", defaultArgumentCreator},
-    {"aten::mul(Tensor self, Tensor other) -> Tensor", defaultArgumentCreator}
+    {"aten::mul(Tensor self, Tensor other) -> Tensor", defaultArgumentCreator},
+    {"aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor", defaultArgumentCreator},
+    // TODO: use mutation variant rules
+    {"aten::add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha) -> Tensor(a!)", defaultArgumentCreator},
+    {"aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor", defaultArgumentCreator},
+    {"aten::div(Tensor self, Tensor other) -> Tensor", defaultArgumentCreator},
+    {"aten::mul(Tensor self, Tensor other) -> Tensor", defaultArgumentCreator},
+    {"aten::floor_divide(Tensor self, Tensor other) -> Tensor", defaultArgumentCreator},
+    // TODO: use meta-tensor rules
+    {"aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha) -> Tensor", defaultArgumentCreator},
+    //
+    {"aten::hardsigmoid(Tensor self) -> Tensor", defaultArgumentCreator},
+    {"aten::hardswish(Tensor self) -> Tensor", defaultArgumentCreator},
+    {"aten::hardtanh(Tensor self, Scalar min_val, Scalar max_val) -> Tensor", defaultArgumentCreator},
+    {"aten::relu(Tensor self) -> Tensor", defaultArgumentCreator},
+    {"aten::transpose.int(Tensor(a) self, int dim0, int dim1) -> Tensor(a)", defaultArgumentCreator},
+    {"aten::transpose.Dimname(Tensor(a) self, Dimname dim0, Dimname dim1) -> Tensor(a)", defaultArgumentCreator},
+    {"aten::view(Tensor(a) self, int[] size) -> Tensor(a)", defaultArgumentCreator},
+    {"aten::flatten.using_ints(Tensor(a) self, int start_dim, int end_dim) -> Tensor(a)", defaultArgumentCreator},
+    {"aten::flatten.named_out_dim(Tensor(a) self, int start_dim, int end_dim, Dimname out_dim) -> Tensor(a)", defaultArgumentCreator},
+    {"aten::flatten.using_names(Tensor(a) self, Dimname start_dim, Dimname end_dim, Dimname out_dim) -> Tensor(a)", defaultArgumentCreator},
+    {"aten::flatten.DimnameList(Tensor(a) self, Dimname[] dims, Dimname out_dim) -> Tensor(a)", defaultArgumentCreator},
+    {"aten::max_pool2d(Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, bool ceil_mode) -> Tensor", defaultArgumentCreator},
+    {"aten::chunk(Tensor(a) self, int chunks, int dim) -> Tensor(a)[]", defaultArgumentCreator},
+    {"aten::contiguous(Tensor(a) self, *, MemoryFormat memory_format) -> Tensor(a)", defaultArgumentCreator},
+    {"aten::adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor", defaultArgumentCreator},
+    {"aten::avg_pool2d(Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, bool ceil_mode, bool count_include_pad, int? divisor_override) -> Tensor", defaultArgumentCreator},
+    {"aten::cat(Tensor[] tensors, int dim) -> Tensor", defaultArgumentCreator},
+    {"aten::expand_as(Tensor(a) self, Tensor other) -> Tensor(a)", defaultArgumentCreator},
+    // TODO: need validation
+    {"aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor", defaultArgumentCreator},
+    {"aten::linear(Tensor input, Tensor weight, Tensor? bias) -> Tensor", defaultArgumentCreator},
+    {"aten::matmul(Tensor self, Tensor other) -> Tensor", defaultArgumentCreator},
+    {"aten::conv2d(Tensor input, Tensor weight, Tensor? bias, int[2] stride, int[2] padding, int[2] dilation, int groups) -> Tensor", defaultArgumentCreator},
+    {"aten::conv2d.padding(Tensor input, Tensor weight, Tensor? bias, int[2] stride, str padding, int[2] dilation, int groups) -> Tensor", defaultArgumentCreator},
+    // TODO: use out variant rules
+    {"aten::adaptive_avg_pool2d.out(Tensor self, int[2] output_size, *, Tensor(a!) out) -> Tensor(a!)", defaultArgumentCreator},
+    {"aten::avg_pool2d.out(Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, bool ceil_mode, bool count_include_pad, int? divisor_override, *, Tensor(a!) out) -> Tensor(a!)", defaultArgumentCreator},
+    {"aten::addmm.out(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha, Tensor(a!) out) -> Tensor(a!)", defaultArgumentCreator},
+    {"aten::matmul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)", defaultArgumentCreator},
+    {"aten::cat.out(Tensor[] tensors, int dim, *, Tensor(a!) out) -> Tensor(a!)", defaultArgumentCreator},
   };
 
   return ops;
 }
+
+bool TryRegisterArgumentCreatorFor(const char* schema, ArgumentCreator creator) {
+  static std::mutex mut;
+  std::lock_guard<std::mutex> lock(mut);
+  auto op = getOperatorForLiteral(schema);
+  if (!op) {
+    return false;
+  }
+
+  auto& map = getArgumentCreatorMap();
+  if (map.contains(*op)) {
+    return false;
+  }
+  getArgumentCreatorMap().insert(op, creator);
+  return true;
+}
+
+void RegisterArgumentCreatorFor(const char* schema, ArgumentCreator creator) {
+
+  if (!TryRegisterArgumentCreatorFor(schema, creator)) {
+    throw std::runtime_error(std::string("Couldn't register ArgumentCreator for ") + schema);
+  }
+}
+
 
 static bool canBeInferredWithMetaTensor(Node* n) {
   auto opt_op = n->maybeOperator();
@@ -59,6 +124,10 @@ c10::optional<c10::ScalarType> inferWithMetaTensor(Node* n) {
 
     GRAPH_DEBUG("inferWithMetaTensor");
     auto argument_creator = *getArgumentCreatorMap().find(n->getOperator());
+    bool args_have_dtypes = std::all_of(n->inputs().begin(), n->inputs().end(), [](Value* v) { return !v->type()->cast<TensorType>() || v->type()->expect<TensorType>()->scalarType().has_value(); });
+    if (!args_have_dtypes) {
+      return c10::nullopt;
+    }
     Stack stack = *argument_creator(n);
     auto op = n->getOperation();
     try {
@@ -312,29 +381,6 @@ struct TensorPropertyPropagationPass {
       found = true;
     } else {
       switch (n->kind()) {
-        case aten::mul:
-          scalarType = promoteWithMeta(n);
-          found = true;
-          break;
-        case aten::eq:
-        case aten::lt:
-        case aten::gt:
-        case aten::ne:
-          scalarType = kBool;
-          found = true;
-          break;
-        case aten::dim:
-          scalarType = kInt64;
-          found = true;
-          break;
-        case aten::size:
-        case aten::len:
-          scalarType = kInt;
-          found = true;
-          break;
-        case aten::format: // note: returns string but ScalarType does not include
-                          // string
-          break;
         case aten::append:
           // TODO: add
           break;
