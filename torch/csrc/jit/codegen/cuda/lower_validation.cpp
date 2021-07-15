@@ -478,6 +478,7 @@ void validateParallelize(Fusion* fusion) {
   const auto& par_map = GpuLower::current()->caParallelMap();
   const auto& loop_map = GpuLower::current()->caLoopMap();
   const auto& index_map = GpuLower::current()->caIndexMap();
+  const auto& pred_map = GpuLower::current()->threadPredMap();
 
   auto exprs = ExprSort::getExprs(fusion);
 
@@ -490,6 +491,8 @@ void validateParallelize(Fusion* fusion) {
       if (producer->isFusionInput()) {
         continue;
       }
+      const auto parallel_bcast_doms =
+          pred_map.getParallelBroadcastDomains(producer);
       for (size_t i = 0; i < producer->nDims(); ++i) {
         // If a producer axis is threaded, either with threadIdx or
         // blockIdx, there must be a mapped consumer axis with the
@@ -502,6 +505,11 @@ void validateParallelize(Fusion* fusion) {
         auto producer_ptype =
             par_map.getConcreteMappedID(producer_axis)->getParallelType();
         if (!isParallelTypeThread(producer_ptype)) {
+          continue;
+        }
+        // When the producer axis is a broadcast, it is not really
+        // parallelized unless thread-predicated
+        if (parallel_bcast_doms.none()) {
           continue;
         }
         // No constraint on the consumer tensor when the producer
