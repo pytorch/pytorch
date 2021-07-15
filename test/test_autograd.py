@@ -5719,9 +5719,11 @@ for shape in [(1,), ()]:
         a = torch.ones(5, requires_grad=True)
         t = a * a
 
-        t.grad_fn._raw_saved_self.register_hooks(inplace_double, lambda x: x /2)
+        t.grad_fn._raw_saved_self.register_hooks(inplace_double, lambda x: x / 2)
         y = t * 2
-        with self.assertRaisesRegex(RuntimeError, "one of the variables needed for gradient computation has been modified by an inplace operation"):
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "one of the variables needed for gradient computation has been modified by an inplace operation"):
             y.sum().backward()
 
 
