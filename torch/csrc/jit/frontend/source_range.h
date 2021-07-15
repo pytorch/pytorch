@@ -19,7 +19,6 @@ struct SourceRange;
 //  - starting_line_no : represents the line in the original file where the
 //                       code segment started.
 struct Source {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit Source(
       std::string text,
       std::shared_ptr<SourceRangeUnpickler> gen_ranges = nullptr)
@@ -30,7 +29,6 @@ struct Source {
     calc_line_start_offsets();
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Source(
       std::string text,
       c10::optional<std::string> filename,
