@@ -554,6 +554,7 @@ ProfilerResult::ProfilerResult(
   : events_(std::move(events)),
     legacy_events_(std::move(legacy_events)),
     trace_(std::move(trace)) {}
+ProfilerResult::ProfilerResult() = default;
 ProfilerResult::~ProfilerResult() = default;
 
 void ProfilerResult::save(const std::string& path) {
