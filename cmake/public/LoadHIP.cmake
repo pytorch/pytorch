@@ -130,11 +130,11 @@ else()
   set(MAGMA_HOME $ENV{MAGMA_HOME})
 endif()
 
-if(NOT DEFINED ENV{PYTORCH_ROCM_ARCH})
-  set(PYTORCH_ROCM_ARCH gfx803;gfx900;gfx906;gfx908)
-else()
-  set(PYTORCH_ROCM_ARCH $ENV{PYTORCH_ROCM_ARCH})
+torch_hip_get_arch_list(PYTORCH_ROCM_ARCH)
+if(PYTORCH_ROCM_ARCH STREQUAL "")
+  message(FATAL_ERROR "No GPU arch specified for ROCm build. Please use PYTORCH_ROCM_ARCH environment variable to specify GPU archs to build for.")
 endif()
+message("Building PyTorch for GPU arch: ${PYTORCH_ROCM_ARCH}")
 
 # Add HIP to the CMAKE Module Path
 set(CMAKE_MODULE_PATH ${HIP_PATH}/cmake ${CMAKE_MODULE_PATH})
