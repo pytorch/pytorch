@@ -19,7 +19,6 @@ if not dist.is_available():
     sys.exit(0)
 from torch.distributed.algorithms.join import _Join, _Joinable, _JoinHook
 from torch.distributed.optim import ZeroRedundancyOptimizer
-from torch.distributed.optim.zero_redundancy_optimizer import _broadcast_object
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim import SGD
 from torch.testing._internal import common_distributed, common_utils
@@ -458,12 +457,15 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         else:
             optimizer_state_dict = {}
 
-        optimizer_state_dict = _broadcast_object(
-            optimizer_state_dict,
-            src_rank=RECIPIENT_RANK,
-            group=dist.group.WORLD,
-            device=self.device,
-        )
+        optimizer_state_dict_list = [optimizer_state_dict]
+        with torch.cuda.device(self.device):
+            dist.broadcast_object_list(
+                optimizer_state_dict_list,
+                src=RECIPIENT_RANK,
+                group=dist.group.WORLD,
+                map_location=self.device
+            )
+        optimizer_state_dict = optimizer_state_dict_list[0]
 
         # Load the optimizer state dict, check that no exception is raised
         optimizer.load_state_dict(optimizer_state_dict)
@@ -707,12 +709,14 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         # Broadcast the saved gradients and parameters to all of the other
         # ranks (which joined early)
         grads_and_params = [grads_at_each_iter, params_at_each_iter]
-        grads_and_params = _broadcast_object(grads_and_params, src_rank=world_size - 1, group=dist.group.WORLD, device=device)
+        dist.broadcast_object_list(
+            grads_and_params,
+            src=world_size - 1,
+            group=dist.group.WORLD,
+            map_location=device
+        )
         grads_at_each_iter = grads_and_params[0]
         params_at_each_iter = grads_and_params[1]
-        # TODO: Replace this `_broadcast_object` with `broadcast_object_list`
-        # once the latter supports loading to the destination device instead
-        # of the source device
 
         # A process must still set the remaining gradients after joining, so we
         # define a join hook to do this before the ZeRO join hook
