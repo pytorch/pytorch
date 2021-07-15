@@ -185,9 +185,12 @@ Interpreter::Interpreter(InterpreterManager* manager)
   // new_intepreter_impl, comment out this line so that the so lasts long enough
   // for the debugger to see it.
   unlink(library_name_.c_str());
+
+#ifndef FBCODE_CAFFE2
   auto deploy_set_self_ptr = (void (*)(void*))dlsym(handle_, "deploy_set_self");
   AT_ASSERT(deploy_set_self_ptr);
   deploy_set_self_ptr(handle_);
+#endif
 
   void* new_interpreter_impl = dlsym(handle_, "new_interpreter_impl");
   AT_ASSERT(new_interpreter_impl);

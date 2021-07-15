@@ -333,7 +333,7 @@ DeployModuleInfo __deploy_module_info;
 }
 
 // RAII wrapper around dlopen
-struct SystemLibraryImpl : public SystemLibrary {
+struct __attribute__((visibility("hidden"))) SystemLibraryImpl : public SystemLibrary {
   SystemLibraryImpl(void* handle, bool steal)
       : handle_(handle), own_handle_(steal && handle != RTLD_DEFAULT) {}
 
@@ -809,7 +809,7 @@ void resolve_needed_libraries(
 
 extern "C" void* __dso_handle;
 
-struct CustomLibraryImpl
+struct __attribute__((visibility("hidden"))) CustomLibraryImpl
     : public std::enable_shared_from_this<CustomLibraryImpl>,
       public CustomLibrary {
   CustomLibraryImpl(const char* filename, int argc, const char** argv)

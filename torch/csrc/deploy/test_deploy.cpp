@@ -262,6 +262,7 @@ TEST(TorchpyTest, RegisterModule) {
   }
 }
 
+#ifndef FBCODE_CAFFE2
 thread_local int in_another_module = 5;
 
 TEST(TorchpyTest, SharedLibraryLoad) {
@@ -317,3 +318,4 @@ TEST(TorchpyTest, SharedLibraryLoad) {
     I.global("libtest_deploy_lib", "set_bar")({12});
   }
 }
+#endif
