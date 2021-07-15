@@ -1519,10 +1519,28 @@ std::vector<For*> LoopNest::distributeLoop(For* loop) {
   return distributeLoop(loop, stmtsInBlock);
 }
 
+std::vector<For*> LoopNest::distributeLoopAndParents(For* loop) {
+  auto parentLoop = getParentLoop(loop);
+  auto result = distributeLoop(loop);
+  if (parentLoop) {
+    return distributeLoopAndParents(parentLoop);
+  }
+  return result;
+}
+
 std::vector<For*> LoopNest::distributeLoopOverInnerLoops(For* loop) {
   auto loops = NodeFinder<For>::find(loop);
   std::unordered_set<Stmt*> loopsSet(loops.begin(), loops.end());
   return distributeLoop(loop, loopsSet);
+}
+
+std::vector<For*> LoopNest::distributeLoopAndParentsOverInnerLoops(For* loop) {
+  auto parentLoop = getParentLoop(loop);
+  auto result = distributeLoopOverInnerLoops(loop);
+  if (parentLoop) {
+    return distributeLoopAndParentsOverInnerLoops(parentLoop);
+  }
+  return result;
 }
 
 bool areEqual(const Expr* expr1, const Expr* expr2) {
