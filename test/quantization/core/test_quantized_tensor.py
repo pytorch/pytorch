@@ -399,7 +399,7 @@ class TestQuantizedTensor(TestCase):
             qtr_cuda = torch.quantize_per_tensor(r.to(device), scale, zero_point, dtype)
             dqtr_cuda = qtr_cuda.dequantize()
             self.assertEqual(qtr.int_repr(), qtr_cuda.int_repr())
-            self.assertTrue(np.allclose(dqtr.numpy(), dqtr_cuda.cpu().numpy()))
+            self.assertTrue(np.allclose(dqtr, dqtr_cuda.cpu()))
 
     @unittest.skipIf(not torch.cuda.is_available() or TEST_WITH_ROCM, 'CUDA is not available')
     def test_compare_per_channel_device_numerics(self):
@@ -782,6 +782,30 @@ class TestQuantizedTensor(TestCase):
             # Make sure the scale and zero_point don't change
             self.assertEqual(q_filled.q_scale(), scale)
             self.assertEqual(q_filled.q_zero_point(), zero_point)
+
+    @unittest.skipIf(not TEST_CUDA, "No gpu is available.")
+    def test_qtensor_index_select_cuda(self):
+        self._test_qtensor_index_select('cuda')
+
+    def test_qtensor_index_select_cpu(self):
+        self._test_qtensor_index_select('cpu')
+
+    def _test_qtensor_index_select(self, device):
+        for quant_type in [torch.quint8, torch.qint8]:
+            dims = 3
+            index = torch.randint(dims, [1]).item()
+            selected = torch.randperm(dims)[:2].to(device)
+            scale = 1
+            zp = 0
+            x = torch.randn([3] * dims, device=device) * 10
+
+            x_selected = torch.index_select(x, index, selected)
+            x_selected_quantized = torch.quantize_per_tensor(x_selected, scale, zp, quant_type)
+
+            x_quantized = torch.quantize_per_tensor(x, scale, zp, quant_type)
+            x_quantized_selected = torch.index_select(x_quantized, index, selected)
+
+            self.assertEqual(x_quantized_selected, x_selected_quantized)
 
     def test_qtensor_view(self):
         scale, zero_point, dtype = 1.0, 2, torch.uint8
