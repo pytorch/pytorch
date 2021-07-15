@@ -736,6 +736,8 @@ class NnapiBackendPReLUTest(JitTestCase):
 # This is needed for IS_WINDOWS or IS_MACOS to skip the tests.
 @unittest.skipIf(TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE,
                  "Non-portable load_library call used in test")
+# ASAN is currently causing an error. It is still unclear how to resolve this.
+# See https://fb.workplace.com/groups/1144215345733672/permalink/2010505639104634/
 @unittest.skipIf(TEST_WITH_ASAN, "Cannot test with ASAN")
 class TestNnapiBackend(JitTestCase):
     """
