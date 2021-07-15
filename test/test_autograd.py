@@ -5709,7 +5709,7 @@ for shape in [(1,), ()]:
         a = torch.randn(5, requires_grad=True)
         y = a * a
         y.grad_fn._raw_saved_self.register_hooks(lambda x: x, lambda x: 1)
-        with self.assertRaiseRegex(TypeError, "Output of unpack_hook expected to be a Tensor"):
+        with self.assertRaisesRegex(TypeError, "Output of unpack_hook expected to be a Tensor"):
             print(y.grad_fn._saved_self)
 
 

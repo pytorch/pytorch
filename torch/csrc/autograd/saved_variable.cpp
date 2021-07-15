@@ -235,10 +235,8 @@ void SavedVariable::register_hooks(std::unique_ptr<SavedVariableHooks>&& hooks) 
     data_ = data_.tensor_data();
   }
 
-  const bool prev = GradMode::is_enabled();
-  GradMode::set_enabled(false);
+  at::NoGradGuard guard;
   hooks_->call_pack_hook(data_);
-  GradMode::set_enabled(prev);
   data_.reset();
 }
 

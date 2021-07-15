@@ -58,7 +58,7 @@ class TORCH_API SavedVariable {
   // that case was_default_constructed_ will be kept at true
   // 2. The saved variable has been released by calling SavedVariable::reset_data(), typically
   // during the backward pass
-  // 3. Hooks have been registered. In that case, hooks_ and py_data_ will be defined instead.
+  // 3. Hooks have been registered. In that case, hooks_ will be defined instead.
   // Note that the value of saved_original_ only reflects what happened during the construction
   // of the SavedVariable. If saved_original_ is true, we saved the original tensor in data_,
   // but we may no longer have it if the user registered hooks.
