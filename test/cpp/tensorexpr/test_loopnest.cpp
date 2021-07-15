@@ -1862,8 +1862,8 @@ TEST(LoopNest, LoopNestComputeAt_1) {
   Stmt* s = l.root_stmt();
 
   checkIR(s, R"IR(
+# CHECK: Allocate(temp); // dtype=int, dims=[1]
 # CHECK: for (int i_b = 0; i_b < N; i_b++)
-# CHECK:   Allocate(temp); // dtype=int, dims=[1]
 # CHECK:   temp[
 # CHECK-NOT: A[
 # CHECK:   B[i_b] = temp[0]
@@ -1930,15 +1930,16 @@ TEST(LoopNest, LoopNestComputeAt_2) {
     Stmt* s = l.root_stmt();
 
     // Check the IR we produced
+    std::clog << *s << "\n";
     checkIR(s, R"IR(
+# CHECK: Allocate(temp); // dtype=int, dims=[2, W + 1]
 # CHECK: for (int cy = 0; cy < H; cy++)
-# CHECK:   Allocate(temp); // dtype=int, dims=[2, W + 1]
 # CHECK:   for
 # CHECK:     for
 # CHECK:   for (int cx = 0; cx < W; cx++)
 # CHECK-NOT: prod[
 # CHECK:     cons[
-# CHECK:   Free(temp))IR");
+# CHECK: Free(temp))IR");
 
     // Now check that the loop still produces the correct result.
     std::vector<int> c_data(kW * kH, 0);
@@ -1957,14 +1958,14 @@ TEST(LoopNest, LoopNestComputeAt_2) {
 
     // Check the IR we produced
     checkIR(s, R"IR(
+# CHECK: Allocate(temp); // dtype=int, dims=[2, 2]
 # CHECK: for (int cy = 0; cy < H; cy++)
 # CHECK:   for (int cx = 0; cx < W; cx++)
-# CHECK:     Allocate(temp); // dtype=int, dims=[2, 2]
 # CHECK:     for
 # CHECK:       for
 # CHECK-NOT: prod[
 # CHECK:     cons[
-# CHECK:     Free(temp))IR");
+# CHECK: Free(temp))IR");
 
     // Now check that the loop still produces the correct result.
     std::vector<int> c_data(kW * kH, 0);
@@ -2031,6 +2032,7 @@ TEST(LoopNest, LoopNestComputeAt_3) {
 
     // Check the IR we produced
     checkIR(s, R"IR(
+# CHECK: Allocate(temp); // dtype=int, dims=[1, W]
 # CHECK: for (int ay = 0; ay < H + 1; ay++)
 # CHECK:   for (int ax = 0; ax < W + 1; ax++)
 # CHECK:     A[
@@ -2041,7 +2043,6 @@ TEST(LoopNest, LoopNestComputeAt_3) {
 # CHECK:   for (int cx = 0; cx < W; cx++)
 # CHECK:     C[
 # CHECK: for (int dy = 0; dy < H; dy++)
-# CHECK:   Allocate(temp); // dtype=int, dims=[1, W]
 # CHECK:   for (int dx = 0; dx < W; dx++)
 # CHECK-NOT: A[)IR");
 
@@ -2062,6 +2063,7 @@ TEST(LoopNest, LoopNestComputeAt_3) {
 
     // Check the IR we produced
     checkIR(s, R"IR(
+# CHECK: Allocate(temp); // dtype=int, dims=[1, 1]
 # CHECK: for (int ay = 0; ay < H + 1; ay++)
 # CHECK:   for (int ax = 0; ax < W + 1; ax++)
 # CHECK:     A[
@@ -2073,7 +2075,6 @@ TEST(LoopNest, LoopNestComputeAt_3) {
 # CHECK:     C[
 # CHECK: for (int dy = 0; dy < H; dy++)
 # CHECK:   for (int dx = 0; dx < W; dx++)
-# CHECK:     Allocate(temp); // dtype=int, dims=[1, 1]
 # CHECK-NOT: A[)IR");
 
     // Now check that the loop still produces the correct result.
@@ -2142,8 +2143,8 @@ TEST(LoopNest, Reduce2dComputeAt) {
     l.eliminateDeadStores();
     l.prepareForCodegen();
     checkIR(l.root_stmt(), R"IR(
+# CHECK: Allocate(temp); // dtype=int, dims=[2, W + 1]
 # CHECK: for (int cy = 0; cy < H; cy++) {
-# CHECK:   Allocate(temp); // dtype=int, dims=[2, W + 1]
 # CHECK:   for (int idx0 = 0; idx0 < 2; idx0++) {
 # CHECK:     for (int idx1 = 0; idx1 < W + 1; idx1++) {
 # CHECK:       temp[(0 + idx0 * (1 * (W + 1))) + idx1 * 1] = (idx0 + cy) * (idx1 + 0);
@@ -2157,8 +2158,8 @@ TEST(LoopNest, Reduce2dComputeAt) {
 # CHECK:       }
 # CHECK:     }
 # CHECK:   }
-# CHECK:   Free(temp);
 # CHECK: }
+# CHECK: Free(temp);
 )IR");
     Stmt* s = l.root_stmt();
 
@@ -2177,9 +2178,9 @@ TEST(LoopNest, Reduce2dComputeAt) {
     l.eliminateDeadStores();
     l.prepareForCodegen();
     checkIR(l.root_stmt(), R"IR(
+# CHECK: Allocate(temp); // dtype=int, dims=[2, 2]
 # CHECK: for (int cy = 0; cy < H; cy++) {
 # CHECK:   for (int cx = 0; cx < W; cx++) {
-# CHECK:     Allocate(temp); // dtype=int, dims=[2, 2]
 # CHECK:     for (int idx0 = 0; idx0 < 2; idx0++) {
 # CHECK:       for (int idx1 = 0; idx1 < 2; idx1++) {
 # CHECK:         temp[(0 + idx0 * (1 * 2)) + idx1 * 1] = (cy + idx0) * (cx + idx1);
@@ -2191,9 +2192,9 @@ TEST(LoopNest, Reduce2dComputeAt) {
 # CHECK:         cons[(0 + cy * (1 * W)) + cx * 1] = (cons[(0 + cy * (1 * W)) + cx * 1]) + (temp[(0 + r * (1 * 2)) + s * 1]);
 # CHECK:       }
 # CHECK:     }
-# CHECK:     Free(temp);
 # CHECK:   }
 # CHECK: }
+# CHECK: Free(temp);
 )IR");
     Stmt* s = l.root_stmt();
 
@@ -3757,26 +3758,26 @@ TEST(LoopNest, CacheReadsSimple) {
   // just this once: verify the whole thing.
   checkIR(result, R"IR(
 #CHECK: Allocate(A); // dtype=int, dims=[64, 64]
+#CHECK: Allocate(A_local); // dtype=int, dims=[1, 10]
 #CHECK: for (int i
 #CHECK:  for (int j
 #CHECK:   A[
 #CHECK:  }
 #CHECK: }
 #CHECK: for (int i_1
-#CHECK:  Allocate(A_local); // dtype=int, dims=[1, 10]
 #CHECK:  for (int j_1
 #CHECK:   A_local[j_1] = A[
 #CHECK:  }
 #CHECK:  for (int j_2
 #CHECK:   B[10 * i_1 + j_2] = A_local[j_2];
 #CHECK:  }
-#CHECK:  Free(A_local);
 #CHECK: }
 #CHECK: for (int i_2
 #CHECK:  for (int j_3
 #CHECK:   C[
 #CHECK:  }
 #CHECK: }
+#CHECK: Free(A_local);
 #CHECK: Free(A);
       )IR");
 

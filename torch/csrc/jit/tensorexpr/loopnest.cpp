@@ -897,14 +897,10 @@ Stmt* LoopNest::insertAllocFree(Stmt* stmt) {
 
   std::unordered_map<const Buf*, std::vector<BufLoadOrStoreUse>> uses =
       findLoadOrStoreUses(stmt);
-  // Insert allocations and frees for temporary buffers in the innermost
-  // possible scope.
+  // Insert allocations and frees for temporary buffers at global scope.
   for (const Buf* buf : intermediate_bufs) {
-    Stmt* alloc = new Allocate(buf);
-    Stmt* free = new Free(buf);
-    Block* alloc_block = findLowestContainingBlock(uses.at(buf));
-    alloc_block->prepend_stmt(alloc);
-    alloc_block->append_stmt(free);
+    b->prepend_stmt(new Allocate(buf));
+    b->append_stmt(new Free(buf));
   }
 
   return b;
