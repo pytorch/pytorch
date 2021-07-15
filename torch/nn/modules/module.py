@@ -264,15 +264,9 @@ class Module:
         self._state_dict_hooks = OrderedDict()
         self._load_state_dict_pre_hooks = OrderedDict()
         self._modules = OrderedDict()
+        self._name = None
 
     forward: Callable[..., Any] = _forward_unimplemented
-
-    @property
-    def name(self):
-        if hasattr(self, '_name'):
-            return object.__getattribute__(self, '_name')
-        else:
-            return None
 
     def register_buffer(self, name: str, tensor: Optional[Tensor], persistent: bool = True) -> None:
         r"""Adds a buffer to the module.
@@ -1228,6 +1222,7 @@ class Module:
         for name, buf in self._buffers.items():
             if buf is not None and name not in self._non_persistent_buffers_set:
                 destination[prefix + name] = buf if keep_vars else buf.detach()
+        destination[prefix + '_name'] = self._name
 
     # The user can pass an optional arbitrary mappable object to `state_dict`, in which case `state_dict` returns
     # back that same object. But if they pass nothing, an `OrederedDict` is created and returned.
