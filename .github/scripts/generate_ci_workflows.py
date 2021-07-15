@@ -61,6 +61,7 @@ def PyTorchLinuxWorkflow(
     enable_slow_test: YamlShellBool = "''",
     num_test_shards: int = 1,
     is_scheduled: Optional[str] = None,
+    enabled_by_label: str = "",
 ) -> PyTorchWorkflow:
     return {
         "build_environment": build_environment,
@@ -75,6 +76,7 @@ def PyTorchLinuxWorkflow(
         "enable_nogpu_no_avx2_test": enable_nogpu_no_avx2_test,
         "enable_slow_test": enable_slow_test,
         "num_test_shards": num_test_shards,
+        "enabled_by_label": enabled_by_label,
     }
 
 
@@ -182,6 +184,7 @@ LINUX_WORKFLOWS = [
         build_environment="pytorch-linux-xenial-cuda11.1-cudnn8-py3.6-gcc7",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
+        enabled_by_label="cuda11",
         num_test_shards=2,
     ),
     # PyTorchLinuxWorkflow(

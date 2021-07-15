@@ -7,7 +7,7 @@ name: Linux CI (!{{ build_environment }})
 
 on:
   # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
-{%- if on_pull_request %}
+{%- if on_pull_request or enabled_by_label != "" %}
   pull_request:
 {%- endif %}
 {%- if is_scheduled %}
@@ -36,11 +36,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+{%- if enabled_by_label != "" %}
+  should-run:
+    runs-ons: ubuntu-latest
+    if: >-
+      github.event_name != 'pull_request' ||
+      contains(github.event.pull_request.labels.*.name, "!{{enabled_by_label}}")
+    steps:
+      - run: echo "noop"
+{%- endif %}
   calculate-docker-image:
     runs-on: linux.2xlarge
     env:
       DOCKER_BUILDKIT: 1
     timeout-minutes: 90
+{%- if enabled_by_label != "" %}
+    needs: should-run
+{%- endif %}
     outputs:
       docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
     steps:
@@ -224,6 +236,9 @@ jobs:
       render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
     container:
       image: python:3.9
+{%- if enabled_by_label != "" %}
+    needs: should-run
+{%- endif %}
     steps:
       - name: Install dependencies
         run: pip install typing-extensions
