@@ -100,9 +100,8 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'replication_pad1d_backward', 'replication_pad2d_backward', 'replication_pad3d_backward',
     'diag', 'masked_scatter', 'masked_select', 'index_fill', 'trace', 'polar', 'cumsum', 'rsub',
     'eig', 'lerp', 'linalg_vector_norm', 'cumprod', 'prod', 'index_copy', 'lu', 'unfold', 'unfold_backward',
-    'index', 'masked_fill', 'cross', 'lu_unpack', 'renorm', '_view_as_real_physical', '_conj_physical',
-    'scatter', 'scatter_add', 'sigmoid', 'sigmoid_backward',
-    'conj_physical_'
+    'index', 'masked_fill', 'cross', 'lu_unpack', 'renorm', '_conj_physical',
+    'scatter', 'scatter_add', 'sigmoid', 'sigmoid_backward', 'conj_physical_', '_neg_view'
 }
 
 GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
@@ -226,7 +225,7 @@ DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
     # See https://github.com/pytorch/pytorch/issues/60426 for more information
     '_embedding_bag', '_embedding_bag_forward_only',
     'q_per_channel_scales', 'q_per_channel_zero_points',
-    'lu_unpack', '_cudnn_rnn_backward',
+    'lu_unpack', '_cudnn_rnn_backward', '_fused_moving_avg_obs_fq_helper',
 
     # The below failed StorageImpl use_count check but we skip tensor_impl check
     # just in case
