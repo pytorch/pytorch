@@ -32,7 +32,7 @@ from torch.testing._internal.common_utils import \
      make_symmetric_pd_matrices, random_square_matrix_of_rank,
      random_fullrank_matrix_distinct_singular_value,
      TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor, TEST_SCIPY,
-     torch_to_numpy_dtype_dict, slowTest, TEST_WITH_ASAN,
+     torch_to_numpy_dtype_dict, TEST_WITH_ASAN,
      GRADCHECK_NONDET_TOL,)
 import torch.testing._internal.opinfo_helper as opinfo_helper
 
@@ -2685,8 +2685,6 @@ class SpectralFuncInfo(OpInfo):
         decorators += [
             skipCPUIfNoFFT,
             skipCUDAIfRocm,
-            # gradgrad is quite slow
-            DecorateInfo(slowTest, 'TestGradients', 'test_fn_gradgrad'),
         ]
 
         super().__init__(name=name,
