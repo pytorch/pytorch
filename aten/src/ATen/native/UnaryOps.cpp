@@ -367,17 +367,35 @@ Tensor angle(const Tensor& self) {
 
 Tensor real(const Tensor& self) {
   if (self.is_complex()) {
-    // real is never affected by conjugate bit, safe to use physical version
-    auto real_tensor = at::_view_as_real_physical(self);
+    Tensor real_tensor;
+    if (self.is_conj()) {
+      real_tensor = at::view_as_real(self._conj());
+    } else {
+      real_tensor = at::view_as_real(self);
+    }
     return at::select(real_tensor, real_tensor.dim() - 1, 0);
   } else {
     TORCH_CHECK(false, "real is not implemented for tensors with non-complex dtypes.");
   }
 }
 
+Tensor _neg_view(const Tensor& self) {
+  Tensor self_ = self.alias();
+  self_._set_neg(!self.is_neg());
+  namedinference::propagate_names(self_, self);
+  return self_;
+}
+
 Tensor imag(const Tensor& self) {
   if (self.is_complex()) {
-    auto real_tensor = at::view_as_real(self);
+    Tensor real_tensor;
+    if (self.is_conj()) {
+      real_tensor = at::view_as_real(self._conj());
+      // preemptively set the negative flag for the final imag tensor
+      real_tensor = real_tensor._neg_view();
+    } else {
+      real_tensor = at::view_as_real(self);
+    }
     return at::select(real_tensor, real_tensor.dim() - 1, 1);
   } else {
     TORCH_CHECK(false, "imag is not implemented for tensors with non-complex dtypes.");
@@ -405,10 +423,20 @@ Tensor& conj_physical_(Tensor& self) {
   return unary_op_impl_out(self, self, conj_physical_stub);
 }
 
+// No op if the neg bit is not set
+// else returns a new negated tensor with neg bit set to 0
+Tensor resolve_neg(const Tensor& self) {
+  if (!self.is_neg()) { return self; }
+  // negation is materialized in `copy_()` that clone ultimately calls into
+  return self.clone();
+}
+
+// No op if the conj bit is not set
+// else returns a new negated tensor with neg bit set to 0
 Tensor resolve_conj(const Tensor& self) {
   if (!self.is_conj()) { return self; }
-  // conjugation is handled in `copy_()` that clone ultimately calls into
-  return self.clone(self.suggest_memory_format());
+  // conjugation is materialized in `copy_()` that clone ultimately calls into
+  return self.clone();
 }
 
 Tensor _conj(const Tensor& self) {

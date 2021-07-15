@@ -48,8 +48,7 @@ from tools.codegen.utils import mapMaybe
 from tools.codegen.model import (Argument, NativeFunction, SchemaKind,
                                  SelfArgument, TensorOptionsArguments,
                                  BaseType, ListType)
-from typing import Callable, List, Optional, Sequence, Union, Pattern, Set
-import re
+from typing import Callable, List, Optional, Sequence, Union
 
 # We don't set or modify grad_fn on these methods. Generally, they return
 # tensors that have requires_grad=False. In-place functions listed here will
@@ -101,9 +100,8 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'replication_pad1d_backward', 'replication_pad2d_backward', 'replication_pad3d_backward',
     'diag', 'masked_scatter', 'masked_select', 'index_fill', 'trace', 'polar', 'cumsum', 'rsub',
     'eig', 'lerp', 'linalg_vector_norm', 'cumprod', 'prod', 'index_copy', 'lu', 'unfold', 'unfold_backward',
-    'index', 'masked_fill', 'cross', 'lu_unpack', 'renorm', '_view_as_real_physical', '_conj_physical',
-    'scatter', 'scatter_add', 'sigmoid', 'sigmoid_backward',
-    'conj_physical_'
+    'index', 'masked_fill', 'cross', 'lu_unpack', 'renorm', '_conj_physical',
+    'scatter', 'scatter_add', 'sigmoid', 'sigmoid_backward', 'conj_physical_', '_neg_view'
 }
 
 GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
@@ -180,8 +178,8 @@ ENFORCE_SAME_TENSOR_IMPL = CodeTemplate("""\
 if (${tensor_name}_impl_saved) AT_ASSERT(${tensor_name}_impl_saved == ${tensor_name}.getIntrusivePtr());
 """)
 
-ENFORCE_TENSOR_IMPL_USE_COUNT_EQUALS_ONE = CodeTemplate("""\
-AT_ASSERT(${tensor_name}.use_count() == 1, "function: ${fn_name}");
+ENFORCE_TENSOR_IMPL_USE_COUNT_LT_OR_EQ_ONE = CodeTemplate("""\
+AT_ASSERT(${tensor_name}.use_count() <= 1, "function: ${fn_name}");
 """)
 
 ENFORCE_TENSOR_STORAGE_USE_COUNT_EQUALS_ONE = CodeTemplate("""\
@@ -221,25 +219,20 @@ DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE = {
     # These functions are expected to change impl or storage of input tensors
     'set_', '_cudnn_rnn_flatten_weight',
 }
-DONT_ENFORCE_TENSOR_IMPL_USE_COUNT: Set[Union[str, Pattern[str]]] = {
-    # These non-inplace, non-out functions return tensors with use_count != 1
+DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
+    # These non-inplace, non-out functions return tensors with use_count > 1
     # Therefore, they MAY (but not necessarily) return one of its inputs as-is
     # See https://github.com/pytorch/pytorch/issues/60426 for more information
-    'native_batch_norm', 'native_batch_norm_backward', 'native_group_norm_backward',
-    'cudnn_batch_norm', 'native_layer_norm_backward',
-
-    # TODO: we probably dont' want to skip all conv.*_backward
-    re.compile(r'conv.*_backward'),
     '_embedding_bag', '_embedding_bag_forward_only',
     'q_per_channel_scales', 'q_per_channel_zero_points',
-    'lu_unpack',
+    'lu_unpack', '_cudnn_rnn_backward',
 
     # The below failed StorageImpl use_count check but we skip tensor_impl check
     # just in case
     '_cudnn_rnn', 'dequantize_self',
 }
 
-DONT_ENFORCE_STORAGE_IMPL_USE_COUNT: Set[Union[str, Pattern[str]]] = {
+DONT_ENFORCE_STORAGE_IMPL_USE_COUNT = {
     # These non-view functions return tensors with storage use_count != 1
     'thnn_conv2d_forward', 'slow_conv3d_forward', 'channel_shuffle',
 
@@ -247,16 +240,6 @@ DONT_ENFORCE_STORAGE_IMPL_USE_COUNT: Set[Union[str, Pattern[str]]] = {
     # use count to be 1 either.
     *DONT_ENFORCE_TENSOR_IMPL_USE_COUNT,
 }
-
-def contains_string_or_matching_pattern(list: Set[Union[str, Pattern[str]]], cpp_name: str) -> bool:
-    for pattern in list:
-        if isinstance(pattern, str):
-            if cpp_name == pattern:
-                return True
-        else:
-            if pattern.search(cpp_name) is not None:
-                return True
-    return False
 # END CHECKS FOR [ TensorImpl and Storage Pointer Sanity Checks ]
 
 DECLARE_GRAD_FN = CodeTemplate("""\
@@ -750,12 +733,12 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                         stmts_after_call += [ENFORCE_SAME_TENSOR_STORAGE.substitute(tensor_name=aliased_arg_name,
                                                                                     out_tensor_name=ret_name)]
                     else:
-                        if not contains_string_or_matching_pattern(DONT_ENFORCE_STORAGE_IMPL_USE_COUNT, type_wrapper_name(f)):
+                        if type_wrapper_name(f) not in DONT_ENFORCE_STORAGE_IMPL_USE_COUNT:
                             stmts_after_call += [ENFORCE_TENSOR_STORAGE_USE_COUNT_EQUALS_ONE.substitute(
                                 tensor_name=ret_name, fn_name=type_wrapper_name(f))]
 
-                    if not contains_string_or_matching_pattern(DONT_ENFORCE_TENSOR_IMPL_USE_COUNT, type_wrapper_name(f)):
-                        stmts_after_call += [ENFORCE_TENSOR_IMPL_USE_COUNT_EQUALS_ONE.substitute(
+                    if type_wrapper_name(f) not in DONT_ENFORCE_TENSOR_IMPL_USE_COUNT:
+                        stmts_after_call += [ENFORCE_TENSOR_IMPL_USE_COUNT_LT_OR_EQ_ONE.substitute(
                             tensor_name=ret_name, fn_name=type_wrapper_name(f))]
 
                 # Currently we don't have any functions that return the following types, but

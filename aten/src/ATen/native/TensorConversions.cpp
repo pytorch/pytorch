@@ -19,7 +19,7 @@ static inline Device ensure_has_index(Device device) {
   return impl->getDevice();
 }
 
-Tensor _to_always_copies(
+Tensor _to_copy(
     const Tensor& self,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
@@ -105,7 +105,7 @@ static inline Tensor to_impl(
     return self;
   }
 
-  return at::_to_always_copy(
+  return at::_to_copy(
       self, dtype, layout, device, pin_memory, non_blocking, memory_format);
 }
 
