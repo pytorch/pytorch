@@ -264,7 +264,7 @@ class Module:
         self._state_dict_hooks = OrderedDict()
         self._load_state_dict_pre_hooks = OrderedDict()
         self._modules = OrderedDict()
-        self._name = None
+        self.__dict__["name"] = None
 
     forward: Callable[..., Any] = _forward_unimplemented
 
@@ -387,7 +387,7 @@ class Module:
         elif name == '':
             raise KeyError("module name can't be empty string \"\"")
         self._modules[name] = module
-        object.__setattr__(module, '_name', name)
+        module.__dict__["name"] = name
 
     def get_submodule(self, target: str) -> "Module":
         """
@@ -1163,7 +1163,7 @@ class Module:
                         "cannot assign module before Module.__init__() call")
                 remove_from(self.__dict__, self._parameters, self._buffers, self._non_persistent_buffers_set)
                 modules[name] = value
-                object.__setattr__(value, '_name', name)
+                value.__dict__["name"] = name
             elif modules is not None and name in modules:
                 if value is not None:
                     raise TypeError("cannot assign '{}' as child module '{}' "
@@ -1222,7 +1222,7 @@ class Module:
         for name, buf in self._buffers.items():
             if buf is not None and name not in self._non_persistent_buffers_set:
                 destination[prefix + name] = buf if keep_vars else buf.detach()
-        destination[prefix + '_name'] = self._name
+        destination[prefix + 'name'] = self.name
 
     # The user can pass an optional arbitrary mappable object to `state_dict`, in which case `state_dict` returns
     # back that same object. But if they pass nothing, an `OrederedDict` is created and returned.
@@ -1354,7 +1354,7 @@ class Module:
                 if key.startswith(prefix):
                     input_name = key[len(prefix):]
                     input_name = input_name.split('.', 1)[0]  # get the name of param/buffer/child
-                    if input_name not in self._modules and input_name not in local_state:
+                    if input_name not in self._modules and input_name not in local_state and input_name != 'name':
                         unexpected_keys.append(key)
 
     def load_state_dict(self, state_dict: 'OrderedDict[str, Tensor]',
