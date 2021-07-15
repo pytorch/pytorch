@@ -334,11 +334,12 @@ class TransformerEncoderLayer(Module):
             x = self.linear2(self.dropout(self.activation(self.linear1(x))))
             return self.dropout2(x)
 
+        x = src
         if self.norm_first:
-            x = src + mha(self.norm1(src))
+            x = x + mha(self.norm1(x))
             x = x + ff(self.norm2(x))
         else:
-            x = self.norm1(src + mha(src))
+            x = self.norm1(x + mha(x))
             x = self.norm2(x + ff(x))
 
         return x
