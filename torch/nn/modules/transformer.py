@@ -336,12 +336,9 @@ class TransformerEncoderLayer(Module):
 
         if self.norm_first:
             x = src + mha(self.norm1(src))
-        else:
-            x = self.norm1(src + mha(src))
-
-        if self.norm_first:
             x = x + ff(self.norm2(x))
         else:
+            x = self.norm1(src + mha(src))
             x = self.norm2(x + ff(x))
 
         return x
