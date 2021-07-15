@@ -28,7 +28,7 @@ concurrency:
 
 jobs:
   should-run:
-    runs-ons: ubuntu-latest
+    runs-on: ubuntu-latest
     if: >-
       github.event_name != 'pull_request' ||
       contains(github.event.pull_request.labels.*.name, "cuda11")
