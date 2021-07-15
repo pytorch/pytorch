@@ -269,7 +269,10 @@ class Module:
 
     @property
     def name(self):
-        return getattr(self, '_name', None)
+        if hasattr(self, '_name'):
+            return object.__getattribute__(self, '_name')
+        else:
+            return None
 
     def register_buffer(self, name: str, tensor: Optional[Tensor], persistent: bool = True) -> None:
         r"""Adds a buffer to the module.
