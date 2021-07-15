@@ -7,8 +7,11 @@ name: Linux CI (!{{ build_environment }})
 
 on:
   # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
-{%- if on_pull_request or enabled_by_label != "" %}
+{%- if on_pull_request %}
   pull_request:
+{%- elif enabled_by_label %}
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
 {%- endif %}
 {%- if is_scheduled %}
   schedule:
