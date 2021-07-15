@@ -1,0 +1,13 @@
+---
+# NOTE there must be no spaces before the '-', so put the comma last.
+InheritParentConfig: true
+Checks: '
+-*,
+misc-max-tokens
+'
+HeaderFilterRegex: 'torch/csrc/.*'
+AnalyzeTemporaryDtors: false
+CheckOptions:
+  - key: misc-max-tokens.FMaxTokens
+    value: '1'
+...
