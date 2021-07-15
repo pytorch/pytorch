@@ -83,9 +83,9 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
             operator_export_type = OperatorExportTypes.ONNX
     _export(model, args, f, export_params, verbose, training, input_names, output_names,
             operator_export_type=operator_export_type, opset_version=opset_version,
-            _retain_param_name=_retain_param_name, do_constant_folding=do_constant_folding,
-            example_outputs=example_outputs, strip_doc_string=strip_doc_string,
-            dynamic_axes=dynamic_axes, keep_initializers_as_inputs=keep_initializers_as_inputs,
+            do_constant_folding=do_constant_folding, example_outputs=example_outputs,
+            strip_doc_string=strip_doc_string, dynamic_axes=dynamic_axes,
+            keep_initializers_as_inputs=keep_initializers_as_inputs,
             custom_opsets=custom_opsets, enable_onnx_checker=enable_onnx_checker,
             use_external_data_format=use_external_data_format)
 
@@ -384,7 +384,7 @@ def _get_param_count_list(method_graph, args_params):
     return param_count_list
 
 
-def _create_jit_graph(model, args, _retain_param_name):
+def _create_jit_graph(model, args):
     torch_out = None
     params: Union[List, Tuple]
     if isinstance(model, torch.jit.ScriptModule):
@@ -415,13 +415,12 @@ def _create_jit_graph(model, args, _retain_param_name):
         graph, torch_out = _trace_and_get_graph_from_model(model, args)
         state_dict = _unique_state_dict(model)
         params = list(state_dict.values())
-        if _retain_param_name:
-            graph_inputs = list(graph.inputs())
-            user_input_num = len(graph_inputs) - len(state_dict)
-            param_names = list(state_dict.keys())
-            for i, inp in enumerate(graph_inputs):
-                if i >= user_input_num:
-                    inp.setDebugName(param_names[i - user_input_num])
+        graph_inputs = list(graph.inputs())
+        user_input_num = len(graph_inputs) - len(state_dict)
+        param_names = list(state_dict.keys())
+        for i, inp in enumerate(graph_inputs):
+            if i >= user_input_num:
+                inp.setDebugName(param_names[i - user_input_num])
         torch._C._jit_pass_onnx_function_substitution(graph)
         return graph, params, torch_out, None
 
@@ -436,8 +435,7 @@ def _get_named_param_dict(graph, params):
 def _model_to_graph(model, args, verbose=False,
                     input_names=None, output_names=None,
                     operator_export_type=OperatorExportTypes.ONNX,
-                    example_outputs=None,
-                    _retain_param_name=False, do_constant_folding=True,
+                    example_outputs=None, do_constant_folding=True,
                     _disable_torch_constant_prop=False, fixed_batch_size=False,
                     training=None, dynamic_axes=None, export_params=True,
                     keep_initializers_as_inputs=False):
@@ -460,8 +458,7 @@ def _model_to_graph(model, args, verbose=False,
     if isinstance(example_outputs, (torch.Tensor, int, float, bool)):
         example_outputs = (example_outputs,)
 
-    graph, params, torch_out, module = _create_jit_graph(model, args,
-                                                         _retain_param_name)
+    graph, params, torch_out, module = _create_jit_graph(model, args)
 
     params_dict = _get_named_param_dict(graph, params)
 
@@ -537,8 +534,7 @@ def export_to_pretty_string(model, args, f, export_params=True, verbose=False, t
     return _export_to_pretty_string(model, args, f, export_params, verbose, training,
                                     input_names, output_names, operator_export_type,
                                     export_type, example_outputs, google_printer,
-                                    opset_version, _retain_param_name,
-                                    do_constant_folding=do_constant_folding,
+                                    opset_version, do_constant_folding=do_constant_folding,
                                     add_node_names=add_node_names,
                                     keep_initializers_as_inputs=keep_initializers_as_inputs,
                                     custom_opsets=custom_opsets, dynamic_axes=dynamic_axes)
@@ -547,7 +543,7 @@ def export_to_pretty_string(model, args, f, export_params=True, verbose=False, t
 def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, training=None,
                              input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
                              export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None,
-                             google_printer=False, opset_version=None, _retain_param_name=False,
+                             google_printer=False, opset_version=None,
                              do_constant_folding=True, keep_initializers_as_inputs=None,
                              fixed_batch_size=False, custom_opsets=None, add_node_names=True,
                              onnx_shape_inference=True, dynamic_axes=None):
@@ -633,8 +629,8 @@ def _find_missing_ops_onnx_export(model, args, f, verbose=False, training=Traini
 def _export(model, args, f, export_params=True, verbose=False, training=None,
             input_names=None, output_names=None, operator_export_type=None,
             export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None,
-            opset_version=None, _retain_param_name=False, do_constant_folding=True,
-            strip_doc_string=True, dynamic_axes=None, keep_initializers_as_inputs=None,
+            opset_version=None, do_constant_folding=True, strip_doc_string=True,
+            dynamic_axes=None, keep_initializers_as_inputs=None,
             fixed_batch_size=False, custom_opsets=None, add_node_names=True,
             enable_onnx_checker=True, use_external_data_format=False,
             onnx_shape_inference=True):
@@ -686,8 +682,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             graph, params_dict, torch_out = \
                 _model_to_graph(model, args, verbose, input_names,
                                 output_names, operator_export_type,
-                                example_outputs, _retain_param_name,
-                                val_do_constant_folding,
+                                example_outputs, val_do_constant_folding,
                                 fixed_batch_size=fixed_batch_size,
                                 training=training,
                                 dynamic_axes=dynamic_axes,
