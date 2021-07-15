@@ -269,10 +269,7 @@ class Module:
 
     @property
     def name(self):
-        if hasattr(self, 'name'):
-            object.__getattr__(self, 'name')
-        else:
-            return None
+        return getattr(self, '_name', None)
 
     def register_buffer(self, name: str, tensor: Optional[Tensor], persistent: bool = True) -> None:
         r"""Adds a buffer to the module.
@@ -393,7 +390,7 @@ class Module:
         elif name == '':
             raise KeyError("module name can't be empty string \"\"")
         self._modules[name] = module
-        object.__setattr__(module, 'name', name)
+        object.__setattr__(module, '_name', name)
 
     def get_submodule(self, target: str) -> "Module":
         """
@@ -1169,7 +1166,7 @@ class Module:
                         "cannot assign module before Module.__init__() call")
                 remove_from(self.__dict__, self._parameters, self._buffers, self._non_persistent_buffers_set)
                 modules[name] = value
-                object.__setattr__(value, 'name', name)
+                object.__setattr__(value, '_name', name)
             elif modules is not None and name in modules:
                 if value is not None:
                     raise TypeError("cannot assign '{}' as child module '{}' "
