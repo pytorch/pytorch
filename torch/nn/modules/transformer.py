@@ -329,7 +329,7 @@ class TransformerEncoderLayer(Module):
             src2 = self.self_attn(src2, src2, src2, attn_mask=src_mask,
                                   key_padding_mask=src_key_padding_mask)[0]
             src = src + self.dropout1(src2)
-            src2 = self.norm2(src2)
+            src2 = self.norm2(src)
             src2 = self.linear2(self.dropout(self.activation(self.linear1(src2))))
             src = src + self.dropout2(src2)
             return src
