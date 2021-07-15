@@ -32,8 +32,8 @@ def _export(*args, **kwargs):
 def export(model, args, f, export_params=True, verbose=False, training=TrainingMode.EVAL,
            input_names=None, output_names=None, aten=False,
            operator_export_type=None, opset_version=None, _retain_param_name=True,
-           do_constant_folding=True, example_outputs=None, strip_doc_string=True,
-           dynamic_axes=None, keep_initializers_as_inputs=None, custom_opsets=None,
+           do_constant_folding=True, example_outputs=None, dynamic_axes=None,
+           keep_initializers_as_inputs=None, custom_opsets=None,
            enable_onnx_checker=True, use_external_data_format=False):
     r"""
     Exports a model into ONNX format. If ``model`` is not a
@@ -105,7 +105,9 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             In this case, the exported model will first take all of its parameters
             as arguments, with the ordering as specified by ``model.state_dict().values()``
         verbose (bool, default False): if True, prints a description of the
-            model being exported to stdout.
+            model being exported to stdout. And the final ONNX graph will include the field
+            ``doc_string``` from the exported model which mentions the source code locations
+            for ``model``.
         training (enum, default TrainingMode.EVAL):
             * ``TrainingMode.EVAL``: export the model in inference mode.
             * ``TrainingMode.PRESERVE``: export the model in inference mode if model.training is
@@ -185,9 +187,6 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             Must be provided when exporting a ScriptModule or ScriptFunction, ignored otherwise.
             Used to determine the type and shape of the outputs without tracing the execution of
             the model. A single object is treated as equivalent to a tuple of one element.
-        strip_doc_string (bool, default True): do not include the field
-            ``doc_string``` from the exported model. Otherwise the field will mention the source
-            code locations for ``model``.
         dynamic_axes (dict<string, dict<int, string>> or dict<string, list(int)>, default empty dict):
 
             By default the exported model will have the shapes of all input and output tensors
@@ -305,9 +304,9 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
     return utils.export(model, args, f, export_params, verbose, training,
                         input_names, output_names, aten,
                         operator_export_type, opset_version, _retain_param_name,
-                        do_constant_folding, example_outputs,
-                        strip_doc_string, dynamic_axes, keep_initializers_as_inputs,
-                        custom_opsets, enable_onnx_checker, use_external_data_format)
+                        do_constant_folding, example_outputs, dynamic_axes,
+                        keep_initializers_as_inputs, custom_opsets, enable_onnx_checker,
+                        use_external_data_format)
 
 
 def export_to_pretty_string(*args, **kwargs):

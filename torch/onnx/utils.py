@@ -73,8 +73,8 @@ def select_model_mode_for_export(model, mode):
 def export(model, args, f, export_params=True, verbose=False, training=None,
            input_names=None, output_names=None, aten=False,
            operator_export_type=None, opset_version=None, _retain_param_name=True,
-           do_constant_folding=True, example_outputs=None, strip_doc_string=True,
-           dynamic_axes=None, keep_initializers_as_inputs=None, custom_opsets=None,
+           do_constant_folding=True, example_outputs=None, dynamic_axes=None,
+           keep_initializers_as_inputs=None, custom_opsets=None,
            enable_onnx_checker=True, use_external_data_format=False):
     if aten:
         assert operator_export_type is None
@@ -87,8 +87,8 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
     _export(model, args, f, export_params, verbose, training, input_names, output_names,
             operator_export_type=operator_export_type, opset_version=opset_version,
             _retain_param_name=_retain_param_name, do_constant_folding=do_constant_folding,
-            example_outputs=example_outputs, strip_doc_string=strip_doc_string,
-            dynamic_axes=dynamic_axes, keep_initializers_as_inputs=keep_initializers_as_inputs,
+            example_outputs=example_outputs, dynamic_axes=dynamic_axes,
+            keep_initializers_as_inputs=keep_initializers_as_inputs,
             custom_opsets=custom_opsets, enable_onnx_checker=enable_onnx_checker,
             use_external_data_format=use_external_data_format)
 
@@ -639,7 +639,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             input_names=None, output_names=None, operator_export_type=None,
             export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None,
             opset_version=None, _retain_param_name=False, do_constant_folding=True,
-            strip_doc_string=True, dynamic_axes=None, keep_initializers_as_inputs=None,
+            dynamic_axes=None, keep_initializers_as_inputs=None,
             fixed_batch_size=False, custom_opsets=None, add_node_names=True,
             enable_onnx_checker=True, use_external_data_format=False,
             onnx_shape_inference=True):
@@ -705,12 +705,12 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             if export_params:
                 proto, export_map = graph._export_onnx(
                     params_dict, opset_version, dynamic_axes, defer_weight_export,
-                    operator_export_type, strip_doc_string, val_keep_init_as_ip, custom_opsets,
+                    operator_export_type, not verbose, val_keep_init_as_ip, custom_opsets,
                     val_add_node_names, val_use_external_data_format, model_file_location)
             else:
                 proto, export_map = graph._export_onnx(
                     {}, opset_version, dynamic_axes, False, operator_export_type,
-                    strip_doc_string, val_keep_init_as_ip, custom_opsets, val_add_node_names,
+                    not verbose, val_keep_init_as_ip, custom_opsets, val_add_node_names,
                     val_use_external_data_format, model_file_location)
 
             if enable_onnx_checker and \
