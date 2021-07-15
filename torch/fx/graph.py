@@ -603,7 +603,7 @@ class Graph:
             as :meth:`Graph.create_node`.
         """
         if (self.owning_module and
-                self.owning_module.get_submodule(module_name) is not None):
+                self.owning_module.get_submodule(module_name) is None):
             warnings.warn("Attempted to insert a call_module Node with "
                           "no underlying reference in the owning "
                           "GraphModule! Call "
