@@ -387,7 +387,7 @@ class Module:
         elif name == '':
             raise KeyError("module name can't be empty string \"\"")
         self._modules[name] = module
-        module.name = name
+        object.__setattr__(module, 'name', name)
 
     def get_submodule(self, target: str) -> "Module":
         """
@@ -1165,7 +1165,7 @@ class Module:
                         "cannot assign module before Module.__init__() call")
                 remove_from(self.__dict__, self._parameters, self._buffers, self._non_persistent_buffers_set)
                 modules[name] = value
-                value.name = name
+                object.__setattr__(value, 'name', name)
             elif modules is not None and name in modules:
                 if value is not None:
                     raise TypeError("cannot assign '{}' as child module '{}' "
