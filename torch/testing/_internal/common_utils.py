@@ -1363,6 +1363,41 @@ class TestCase(expecttest.TestCase):
                 equal_nan=equal_nan,
                 msg=msg,
             )
+        elif isinstance(x, np.ndarray) or isinstance(y, np.ndarray):
+            # torch.testing.assert_close does not allow Tensor vs. ndarray comparisons
+            def maybe_to_tensor(a: Any) -> Any:
+                try:
+                    return torch.as_tensor(a)
+                except TypeError:
+                    # This happens for example if the numpy dtype is non-numeric or not supported by torch
+                    return a
+
+            def maybe_to_list(a: Any) -> Any:
+                if not isinstance(a, (np.ndarray, torch.Tensor)):
+                    return a
+
+                return a.tolist()
+
+            x = maybe_to_tensor(x)
+            y = maybe_to_tensor(y)
+
+            if not (isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor)):
+                # In case we can't convert the inputs to a tensor, we fall back to comparing x and y as iterables
+                x = maybe_to_list(x)
+                y = maybe_to_list(y)
+
+            self.assertEqual(
+                x,
+                y,
+                msg=msg,
+                atol=atol,
+                rtol=rtol,
+                equal_nan=equal_nan,
+                exact_dtype=exact_dtype,
+                exact_device=exact_device,
+                exact_stride=exact_stride,
+                exact_is_coalesced=exact_is_coalesced,
+            )
         elif isinstance(x, (Number, bool, np.bool_)) or isinstance(y, (Number, bool, np.bool_)):
             # torch.testing.assert_close does not allow Tensor vs. scalar comparisons
             dtype: Optional[torch.dtype]
@@ -1396,41 +1431,6 @@ class TestCase(expecttest.TestCase):
                     y.item() if isinstance(y, torch.Tensor) else y,
                     msg,
                 )
-
-            self.assertEqual(
-                x,
-                y,
-                msg=msg,
-                atol=atol,
-                rtol=rtol,
-                equal_nan=equal_nan,
-                exact_dtype=exact_dtype,
-                exact_device=exact_device,
-                exact_stride=exact_stride,
-                exact_is_coalesced=exact_is_coalesced,
-            )
-        elif isinstance(x, np.ndarray) or isinstance(y, np.ndarray):
-            # torch.testing.assert_close does not allow Tensor vs. ndarray comparisons
-            def maybe_to_tensor(a: Any) -> Any:
-                try:
-                    return torch.as_tensor(a)
-                except TypeError:
-                    # This happens for example if the numpy dtype is non-numeric or not supported by torch
-                    return a
-
-            def maybe_to_list(a: Any) -> Any:
-                if not isinstance(a, (np.ndarray, torch.Tensor)):
-                    return a
-
-                return a.tolist()
-
-            x = maybe_to_tensor(x)
-            y = maybe_to_tensor(y)
-
-            if not (isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor)):
-                # In case we can't convert the inputs to a tensor, we fall back to comparing x and y as iterables
-                x = maybe_to_list(x)
-                y = maybe_to_list(y)
 
             self.assertEqual(
                 x,

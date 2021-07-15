@@ -1803,7 +1803,7 @@ class TestReductions(TestCase):
             if t.numel() % 2 == 1:
                 # We can only test agains numpy for odd reductions because numpy
                 # returns the mean of the two medians and torch returns the lower
-                self.assertEqual(res.cpu().numpy(), np.median(t_numpy))
+                self.assertEqual(res, np.median(t_numpy))
             for dim in range(t.ndim):
                 res = t.median(dim, True)
                 self.assertEqual(res, t.nanmedian(dim, True))
@@ -1814,7 +1814,7 @@ class TestReductions(TestCase):
                 if size % 2 == 1:
                     # We can only test agains numpy for odd reductions because numpy
                     # returns the mean of the two medians and torch returns the lower
-                    self.assertEqual(res[0].cpu().numpy(), np.median(t_numpy, dim, keepdims=True), exact_dtype=False)
+                    self.assertEqual(res[0], np.median(t_numpy, dim, keepdims=True), exact_dtype=False)
 
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)

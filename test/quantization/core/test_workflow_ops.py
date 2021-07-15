@@ -463,7 +463,7 @@ class TestFakeQuantizeOps(TestCase):
             X = torch.tensor([-5, -3.5, -2, 0, 3, 5, 7], dtype=torch.float32)
             y_ref = fq_module(X)
             state_dict = fq_module.state_dict()
-            self.assertEqual(state_dict['scale'].item(), 0.094488)
+            self.assertEqual(state_dict['scale'].item(), 0.094488, atol=2e-7, rtol=0)
             self.assertEqual(state_dict['zero_point'].item(), 53)
             b = io.BytesIO()
             torch.save(state_dict, b)
