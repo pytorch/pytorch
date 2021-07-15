@@ -223,7 +223,6 @@ jobs:
         run: .github/scripts/generate_pytorch_test_matrix.py
 
   test:
-    if: True
     needs:
       - calculate-docker-image
       - build
@@ -359,6 +358,7 @@ jobs:
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
           # Prune all of the docker images
           docker system prune -af
+
 
   # this is a separate step from test because the log files from test are too
   # long: basically, GitHub tries to render all of the log files when you click

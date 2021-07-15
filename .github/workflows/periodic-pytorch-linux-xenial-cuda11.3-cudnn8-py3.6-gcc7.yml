@@ -5,6 +5,7 @@ name: Linux CI (periodic-pytorch-linux-xenial-cuda11.3-cudnn8-py3.6-gcc7)
 
 on:
   # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
+  pull_request:
   schedule:
     - cron: 45 0,4,8,12,16,20 * * *
   workflow_dispatch:
@@ -220,7 +221,6 @@ jobs:
         run: .github/scripts/generate_pytorch_test_matrix.py
 
   test:
-    if: True
     needs:
       - calculate-docker-image
       - build
@@ -356,6 +356,7 @@ jobs:
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
           # Prune all of the docker images
           docker system prune -af
+
 
   # this is a separate step from test because the log files from test are too
   # long: basically, GitHub tries to render all of the log files when you click
