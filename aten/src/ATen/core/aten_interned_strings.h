@@ -241,6 +241,7 @@ _(aten, conj) \
 _(aten, conj_physical) \
 _(aten, conj_physical_) \
 _(aten, resolve_conj) \
+_(aten, resolve_neg) \
 _(aten, complex) \
 _(aten, copysign) \
 _(aten, polar) \
@@ -439,7 +440,6 @@ _(aten, log_normal) \
 _(aten, log_sigmoid) \
 _(aten, log_sigmoid_backward) \
 _(aten, log_sigmoid_forward) \
-_(aten, log_softmax) \
 _(aten, _log_softmax) \
 _(aten, _log_softmax_backward_data) \
 _(aten, logcumsumexp) \
@@ -769,7 +769,6 @@ _(aten, zeros_like) \
 _(aten, real) \
 _(aten, imag) \
 _(aten, view_as_real) \
-_(aten, _view_as_real_physical) \
 _(aten, view_as_complex) \
 /* nothing */
 
