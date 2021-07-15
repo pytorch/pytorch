@@ -359,7 +359,7 @@ endmacro()
 #   torch_hip_get_arch_list(variable_to_store_flags)
 #
 macro(torch_hip_get_arch_list store_var)
-  if (DEFINED ENV{PYTORCH_ROCM_ARCH})
+  if(DEFINED ENV{PYTORCH_ROCM_ARCH})
     set(_TMP $ENV{PYTORCH_ROCM_ARCH})
   else()
     # Use arch of installed GPUs as default
