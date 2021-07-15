@@ -691,6 +691,9 @@ class TestBackendsWithCompiler(JitTestCase):
 """
 Unit Tests for Nnapi backend with delegate
 """
+# This is needed for IS_WINDOWS or IS_MACOS to skip the tests.
+@unittest.skipIf(TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE,
+                 "Non-portable load_library call used in test")
 class NnapiBackendPReLUTest(JitTestCase):
     """
     Test lowering a simple PRelU module to Nnapi backend.
