@@ -1635,9 +1635,9 @@ def _get_rocm_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
     # Allow env var to override, just like during initial cmake build.
     archs = os.environ.get('PYTORCH_ROCM_ARCH', None)
     if not archs:
-      archs = torch.cuda.get_arch_list()
+        archs = torch.cuda.get_arch_list()
     else:
-      archs = archs.replace(' ', ';').split(';')
+        archs = archs.replace(' ', ';').split(';')
     flags = ['--amdgpu-target=%s' % arch for arch in archs]
     flags += ['-fno-gpu-rdc']
     return flags
