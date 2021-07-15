@@ -7520,7 +7520,7 @@ class DistributedTest:
         )
         @skip_if_lt_x_gpu(2)
         @skip_if_rocm
-        def test_hook_grad_idx_to_bucket_mapping(self):
+        def test_grad_bucket_retrieve_model_params(self):
             torch.manual_seed(self.rank)
             # Test hook to ensure get_grad_index_to_variable_mapping works appropriately.
 

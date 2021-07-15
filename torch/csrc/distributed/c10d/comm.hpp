@@ -22,7 +22,7 @@ class TORCH_API GradBucket {
       const std::vector<size_t>& offsets,
       const std::vector<size_t>& lengths,
       const std::vector<c10::IntArrayRef>& sizes_vec,
-      std::vector<at::Tensor>& model_params_for_bucket)
+      const std::vector<at::Tensor>& model_params_for_bucket)
       : index_(index),
         tensor_(tensor),
         offsets_(offsets),
@@ -57,7 +57,7 @@ class TORCH_API GradBucket {
   // same order as gradient tensors via getPerParameterTensors(). For example,
   // getModelParamsForBucket[i] will have its gradient stored in
   // getPerParameterTensors[i]
-  std::vector<at::Tensor> getModelParamsForBucket() const {
+  const std::vector<at::Tensor> getModelParamsForBucket() const {
     return model_params_for_bucket_;
   }
 
@@ -75,7 +75,7 @@ class TORCH_API GradBucket {
   std::vector<size_t> lengths_;
   std::vector<c10::IntArrayRef> sizes_vec_;
   // Model parameters for this bucket.
-  std::vector<at::Tensor> model_params_for_bucket_;
+  const std::vector<at::Tensor> model_params_for_bucket_;
 };
 
 // Base class of both `PythonCommHook` and `CppCommHook`.
