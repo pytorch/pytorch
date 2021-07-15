@@ -517,8 +517,8 @@ class IrParser {
                 "The approximate (bool) parameter is required.");
             const bool kApproximate = approximate.value();
 
-	    TORCH_INTERNAL_ASSERT(!kApproximate,
-			    "The Tanh Gelu approximation is not supported");
+            TORCH_INTERNAL_ASSERT(!kApproximate,
+                           "The Tanh Gelu approximation is not supported");
 
             auto output = unaryOp(UnaryOpType::Gelu, self);
             value_map.emplace(node->output()->unique(), output);
