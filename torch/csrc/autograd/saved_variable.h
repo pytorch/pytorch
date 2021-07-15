@@ -95,5 +95,7 @@ class TORCH_API SavedVariable {
   std::shared_ptr<Node> grad_fn_;
   std::weak_ptr<Node> grad_accumulator_;
   bool requires_grad_ = false;
+
+  void save_common_metadata(const Variable& data);
 };
 }} // namespace torch::autograd

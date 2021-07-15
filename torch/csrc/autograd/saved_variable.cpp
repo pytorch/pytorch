@@ -60,25 +60,33 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output, bool is_i
     // From now on, we can assume the variable is not a leaf and is an output.
 
     is_inplace_on_view_ = is_inplace_on_view;
-    output_nr_ = variable.output_nr();
-    version_counter_ = version_counter;
-
-    // These copies are all shared_ptr copies, so slightly more expensive.
-    // Do them here instead of in the init list in case data is undefined.
-    data_ = variable.tensor_data();
 
     if(is_inplace_on_view) {
       weak_grad_fn_ = variable.grad_fn();
     }
 
-    // TODO(albanD) This needs to be updated when moving to multiple levels
-    const auto& fw_grad = variable._fw_grad(/* level */ 0);
-    if (fw_grad.defined()) {
-      fw_grad_ = std::make_shared<ForwardGrad>();
-      fw_grad_->set_value(fw_grad, /* level */ 0);
-    }
+    save_common_metadata(variable);
+
+    // These copies are all shared_ptr copies, so slightly more expensive.
+    // Do them here instead of in the init list in case data is undefined.
+    data_ = variable.tensor_data();
   }
 }
+
+void SavedVariable::save_common_metadata(const Variable& data) {
+  // Saved output number, version counter and fw_grad if needed
+
+  output_nr_ = data.output_nr();
+  version_counter_ = impl::version_counter(data);
+
+  // TODO(albanD) This needs to be updated when moving to multiple levels
+  const auto& fw_grad = data._fw_grad(/* level */ 0);
+  if (fw_grad.defined()) {
+    fw_grad_ = std::make_shared<ForwardGrad>();
+    fw_grad_->set_value(fw_grad, /* level */ 0);
+  }
+}
+
 
 void SavedVariable::reset_data() {
   hooks_.reset();
@@ -100,12 +108,6 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
 
   // We want grad_fn here to provide the most helpful debug message to the user
   // if versions don't match
-
-  // TODO(varal7): delete this comment
-  // auto grad_fn = !hooks_ ? (saved_original_ ? data_.grad_fn()
-  //                                           : is_inplace_on_view_ ? weak_grad_fn_.lock()
-  //                                                                 : nullptr)
-  //                        : (is_inplace_on_view_ ? weak_grad_fn_.lock() : grad_fn_);
 
   auto grad_fn = is_inplace_on_view_ ? weak_grad_fn_.lock()
                                      : !hooks_ ? saved_original_ ? data_.grad_fn() : nullptr
@@ -212,16 +214,7 @@ void SavedVariable::register_hooks(std::unique_ptr<SavedVariableHooks>&& hooks) 
 
   // If we didn't save the original variable, we already have all we need to reconstruct it
   if (saved_original_) {
-    // TODO(varal7) refactor the next 10 lines
-    output_nr_ = data_.output_nr();
-    version_counter_ = impl::version_counter(data_);
-
-    // TODO(albanD) This needs to be updated when moving to multiple levels
-    const auto& fw_grad = data_._fw_grad(/* level */ 0);
-    if (fw_grad.defined()) {
-      fw_grad_ = std::make_shared<ForwardGrad>();
-      fw_grad_->set_value(fw_grad, /* level */ 0);
-    }
+    save_common_metadata(data_);
 
     if (is_leaf_) {
       grad_accumulator_ = impl::grad_accumulator(data_);
@@ -232,6 +225,7 @@ void SavedVariable::register_hooks(std::unique_ptr<SavedVariableHooks>&& hooks) 
       // Current code assumes that the original variable is saved if and only if (is_leaf_ || !is_output)
       TORCH_INTERNAL_ASSERT(false);
     }
+
     data_ = data_.tensor_data();
   }
 
