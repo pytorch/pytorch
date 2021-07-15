@@ -1414,7 +1414,8 @@ void addGlobalMethods(py::module& m) {
           shapes.emplace_back(GetTensorShapeOfBlob(blob));
         }
         const auto c = schema->InferCost(def, shapes);
-        return std::make_tuple(c.flops, c.bytes_written);
+        return std::make_tuple(
+            c.flops, c.bytes_written, c.bytes_read, c.params_bytes);
       });
   m.def("run_net_once", [](const py::bytes& net_def) {
     CAFFE_ENFORCE(gWorkspace);
