@@ -329,7 +329,7 @@ class TransformerEncoderLayer(Module):
             x = self.self_attn(x, x, x,
                                attn_mask=src_mask,
                                key_padding_mask=src_key_padding_mask,
-                               neet_weights=False)[0]
+                               need_weights=False)[0]
             return self.dropout1(x)
 
         # feed forward block
