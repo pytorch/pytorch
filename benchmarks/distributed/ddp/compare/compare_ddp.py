@@ -28,6 +28,7 @@ import torch.optim as optim
 import torchvision.models as models
 
 from collections import OrderedDict
+from dataclasses import dataclass
 from enum import Enum
 from tabulate import tabulate
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -38,6 +39,8 @@ class DDPOption(Enum):
     PYTHON_DDP_ASYNC_REDUCTION = 3
 
 class LatencyData:
+    __slots__ = ["buffer_size_in_M", "ddp_option", "rank", "metrics"]
+
     def __init__(self, buffer_size_in_M, ddp_option, rank, metrics):
         self.buffer_size_in_M = buffer_size_in_M
         self.ddp_option = ddp_option
@@ -214,15 +217,15 @@ def print_summary(buffer_size_to_metrics):
                 data.append(row)
 
             # Output buffer_size, step as a table.
-            print (tabulate(data,
-                            headers=[f"DDP: [{step}]", "Mean", "delta%",
-                                     "mean", "delta%", "p90", "delta%",
-                                     "p95",  "delta%%", "p99", "delta%"]))
+            print(tabulate(data,
+                           headers=[f"DDP: [{step}]", "Mean", "delta%",
+                                    "mean", "delta%", "p90", "delta%",
+                                    "p95", "delta%%", "p99", "delta%"]))
             print("\n")
 
 def main():
     world_size = 2
-    epochs = 120
+    epochs = 40
 
     # resnet50 model facts:
     # total_param_count = 161
@@ -242,9 +245,9 @@ def main():
         for option in options:
             print("Measuring option: {} ... ".format(option))
             mp.spawn(run_ddp,
-                    args=(world_size, epochs, option, buffer_size_in_M),
-                    nprocs=world_size,
-                    join=True)
+                     args=(world_size, epochs, option, buffer_size_in_M),
+                     nprocs=world_size,
+                     join=True)
 
     print("\n Generating summaries ... ")
     buffer_size_to_metrics = load_detailed_metrics(data_dir="./tmp", ext="ddpraw")

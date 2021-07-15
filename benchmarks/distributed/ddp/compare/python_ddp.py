@@ -12,7 +12,7 @@ class PythonDDP(nn.Module):
     synchronization and reduction. The only C++ dependency is the common utils:
     ``dist.all_reduce``
 
-    The idea: parallize gradient calculation and reduction, the same algo as
+    The idea: parallelize gradient calculation and reduction, the same algo as
     https://pytorch.org/docs/stable/notes/ddp.html, main steps:
     1. Distribute params into list of buckets.
     2. Register per-param hook to be invoked when grad is ready during backward

@@ -1,11 +1,11 @@
 Sample result of DDP benchmark:
 
 Key takeaway:
-1) In the forward path, Python impl is 1% faster than DPP Core. Python SYNC and ASYNC is on-par
-2) re2 backward, speed rank: DDPCore > Python Async > Python SYNC.
+1) In the forward path, Python impl is 1% faster than DPP Core. Python SYNC and ASYNC are on-par
+2) re2 backward, speed ranking: DDPCore > Python Async > Python SYNC.
 3) Python ASYNC - backward is [2%-20%] slower than DDPCore, varies by buffer size slightly
-   * It's expected since larger buffer size means less paralleziatio as number of buckets decreases
-   * No difference once buffer size larger than total elements (24.37M) such as 25M, 26M, 27M
+   * It's expected since larger buffer size means less parallelization as number of buckets decreases
+   * No difference once buffer size is larger than total elements (24.37M) such as 25M, 26M, 27M
 3) Python SYNC - backward is 20% slower than DDP Core, independent of buffer size
 
 The following is generated summary from compare_ddp.py
