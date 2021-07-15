@@ -68,6 +68,7 @@ _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING = (
     # The two attributes below are generated methods, not available at pickling time.
     "forward_async",
     "forward",
+    "name",
 )
 
 # RPC handler.
