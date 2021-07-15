@@ -416,4 +416,16 @@ inline Tensor& log1p_out(Tensor& result, const Tensor& self) {
   return torch::special_log1p_out(result, self);
 }
 
+/// Computes log followed by softmax(x) of the input
+/// See https://pytorch.org/docs/master/special.html#torch.special.log_softmax.
+///
+/// Example:
+/// ```
+/// auto t = torch::randn(128, 128, dtype=kDouble);
+/// torch::special::log_softmax(t, 0);
+/// ```
+inline Tensor log_softmax(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
+  return torch::special_log_softmax(self, dim, dtype);
+}
+
 }} // torch::special
