@@ -4895,7 +4895,7 @@ op_db: List[OpInfo] = [
            # trigger addmm being decomposed by a jit pass.
            # dtypes of beta and alpha should not affect the output type, hence the type conversion
            ref=lambda M, mat_x, mat_y, beta, alpha: np.add(np.multiply(np.asarray(beta, dtype=M.dtype), M),
-           np.multiply(np.asarray(alpha, dtype=mat_x.dtype), np.matmul(mat_x, mat_y))),
+                                                           np.multiply(np.asarray(alpha, dtype=mat_x.dtype), np.matmul(mat_x, mat_y))),
            dtypes=floating_and_complex_types_and(torch.float16),
            dtypesIfCPU=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfROCM=floating_and_complex_types_and(torch.float16, torch.bfloat16),
@@ -4909,7 +4909,7 @@ op_db: List[OpInfo] = [
            # When alpha=beta=1 as compile-time constants, JIT will decompose addmm into mm and add.
            # dtypes of beta and alpha should not affect the output type, hence the type conversion
            ref=lambda M, mat_x, mat_y, beta, alpha: np.add(np.multiply(np.asarray(beta, dtype=M.dtype), M),
-           np.multiply(np.asarray(alpha, dtype=mat_x.dtype), np.matmul(mat_x, mat_y))),
+                                                           np.multiply(np.asarray(alpha, dtype=mat_x.dtype), np.matmul(mat_x, mat_y))),
            variant_test_name='decomposed',
            dtypes=floating_and_complex_types_and(torch.float16),
            dtypesIfCPU=all_types_and_complex_and(torch.float16, torch.bfloat16),
@@ -4924,7 +4924,7 @@ op_db: List[OpInfo] = [
     OpInfo('addmv',
            # dtypes of beta and alpha should not affect the output type, hence the type conversion
            ref=lambda M, mat, vec, beta, alpha: np.add(np.multiply(np.asarray(beta, dtype=M.dtype), M),
-           np.multiply(np.asarray(alpha, dtype=mat.dtype), np.dot(mat, vec))),
+                                                       np.multiply(np.asarray(alpha, dtype=mat.dtype), np.dot(mat, vec))),
            dtypes=floating_types(),
            dtypesIfCPU=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128,
