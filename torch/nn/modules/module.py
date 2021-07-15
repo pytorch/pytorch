@@ -1222,7 +1222,7 @@ class Module:
         for name, buf in self._buffers.items():
             if buf is not None and name not in self._non_persistent_buffers_set:
                 destination[prefix + name] = buf if keep_vars else buf.detach()
-        destination[prefix + 'name'] = self.name
+        # destination[prefix + 'name'] = self.name
 
     # The user can pass an optional arbitrary mappable object to `state_dict`, in which case `state_dict` returns
     # back that same object. But if they pass nothing, an `OrederedDict` is created and returned.
@@ -1354,7 +1354,7 @@ class Module:
                 if key.startswith(prefix):
                     input_name = key[len(prefix):]
                     input_name = input_name.split('.', 1)[0]  # get the name of param/buffer/child
-                    if input_name not in self._modules and input_name not in local_state and input_name != 'name':
+                    if input_name not in self._modules and input_name not in local_state: # and input_name != 'name':
                         unexpected_keys.append(key)
 
     def load_state_dict(self, state_dict: 'OrderedDict[str, Tensor]',
