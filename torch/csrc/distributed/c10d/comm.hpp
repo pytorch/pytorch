@@ -22,13 +22,13 @@ class TORCH_API GradBucket {
       const std::vector<size_t>& offsets,
       const std::vector<size_t>& lengths,
       const std::vector<c10::IntArrayRef>& sizes_vec,
-      const std::unordered_map<size_t, at::Tensor>& bucket_idx_to_variable)
+      std::vector<at::Tensor>& model_params_for_bucket)
       : index_(index),
         tensor_(tensor),
         offsets_(offsets),
         lengths_(lengths),
         sizes_vec_(sizes_vec),
-        bucket_idx_to_variable_(bucket_idx_to_variable) {}
+        model_params_for_bucket_(model_params_for_bucket) {}
 
   // Returns the index of the bucket, which is unique across all the buckets.
   size_t getIndex() const {
@@ -53,13 +53,12 @@ class TORCH_API GradBucket {
   // parameter.
   std::vector<at::Tensor> getPerParameterTensors() const;
 
-  // Returns mapping of gradient index in bucket to model parameter. Practically
-  // this can be used in conjunction with getPeraParameterTensors() as follows:
-  // auto grads = getPerParameterTensors(); // grad tensors for this bucket
-  // auto mapping = getGradIndexToVariable();
-  // now mapping[i] will be the model parameter corresponding to grads[i].
-  std::unordered_map<size_t, at::Tensor> getGradIndexToVariableMapping() const {
-    return bucket_idx_to_variable_;
+  // Returns model parameters belonging to this bucket. They are returned in the
+  // same order as gradient tensors via getPerParameterTensors(). For example,
+  // getModelParamsForBucket[i] will have its gradient stored in
+  // getPerParameterTensors[i]
+  std::vector<at::Tensor> getModelParamsForBucket() const {
+    return model_params_for_bucket_;
   }
 
   // Returns whther this bucket is the last bucket to allreduce in an iteration.
@@ -75,8 +74,8 @@ class TORCH_API GradBucket {
   std::vector<size_t> offsets_;
   std::vector<size_t> lengths_;
   std::vector<c10::IntArrayRef> sizes_vec_;
-  // Maps gradient index to model parameter corresponding to gradient.
-  std::unordered_map<size_t, at::Tensor> bucket_idx_to_variable_;
+  // Model parameters for this bucket.
+  std::vector<at::Tensor> model_params_for_bucket_;
 };
 
 // Base class of both `PythonCommHook` and `CppCommHook`.

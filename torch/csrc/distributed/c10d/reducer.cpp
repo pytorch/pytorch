@@ -461,7 +461,7 @@ std::vector<c10d::GradBucket> Reducer::get_grad_buckets(
   gradBuckets.reserve(buckets_.size());
   for (size_t i = 0; i < buckets_.size(); ++i) {
     auto& bucket = buckets_[i];
-    auto bucket_idx_to_variable = get_variables_for_bucket(i, bucket);
+    auto variables_for_bucket = get_variables_for_bucket(i, bucket);
     gradBuckets.emplace_back(
       i,
       return_zero_tensors ? at::zeros_like(bucket.replicas[0].contents)
@@ -469,7 +469,7 @@ std::vector<c10d::GradBucket> Reducer::get_grad_buckets(
       bucket.replicas[0].offsets,
       bucket.replicas[0].lengths,
       bucket.replicas[0].sizes_vec,
-      bucket_idx_to_variable
+      variables_for_bucket
     );
   }
   return gradBuckets;
@@ -892,7 +892,7 @@ void Reducer::all_reduce_bucket(Bucket& bucket) {
     tensors.push_back(replica.contents);
   }
 
-  auto bucket_idx_to_variable = get_variables_for_bucket(next_bucket_, bucket);
+  auto variables_for_bucket = get_variables_for_bucket(next_bucket_, bucket);
   GradBucket grad_bucket(
       next_bucket_,
       tensors[0],
@@ -901,20 +901,21 @@ void Reducer::all_reduce_bucket(Bucket& bucket) {
       bucket.replicas[0].offsets,
       bucket.replicas[0].lengths,
       bucket.replicas[0].sizes_vec,
-      bucket_idx_to_variable);
+      variables_for_bucket);
   bucket.future_work = run_comm_hook(grad_bucket);
 }
 
-std::unordered_map<size_t, at::Tensor> Reducer::get_variables_for_bucket(
+std::vector<at::Tensor> Reducer::get_variables_for_bucket(
     size_t bucket_index,
     const Bucket& bucket) const {
   // Check if we have cached mapping previously.
   if (has_rebuilt_bucket_ &&
       cached_variables_for_bucket_.find(bucket_index) !=
           cached_variables_for_bucket_.end()) {
-    return cached_variables_for_bucket_[bucket_index];
+     return cached_variables_for_bucket_[bucket_index];
   }
-  std::unordered_map<size_t, at::Tensor> variables_for_bucket;
+  std::vector<at::Tensor> variables_for_bucket;
+  variables_for_bucket.reserve(bucket.variable_indices.size());
   for (const auto& variable_index : bucket.variable_indices) {
     auto& replica = bucket.replicas[0];
     // Grab bucket index where gradient is located using variable_locators_.
@@ -922,8 +923,7 @@ std::unordered_map<size_t, at::Tensor> Reducer::get_variables_for_bucket(
     // Grab the actual model parameter.
     auto& variable =
         replica.variables[bucket_index_for_variable.intra_bucket_index];
-    variables_for_bucket.insert(
-        {bucket_index_for_variable.intra_bucket_index, variable});
+    variables_for_bucket.emplace_back(variable);
   }
 
   if (has_rebuilt_bucket_) {
