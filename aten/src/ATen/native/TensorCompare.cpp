@@ -115,6 +115,8 @@ Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol
       close.__ior__((self != self).__iand__(other != other));
   }
 
+  // In case of zero tolerances the closeness inequality degenerates to an equality check.
+  // In these cases this short-circuit prevents false positives as detailed below.
   if (rtol == 0 && atol == 0){
       return close;
   }
