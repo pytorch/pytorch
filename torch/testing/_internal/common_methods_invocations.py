@@ -1265,25 +1265,29 @@ def sample_inputs_mm(op_info, device, dtype, requires_grad, **kwargs):
     return inputs
 
 def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
-    alpha_val = kwargs.get('alpha', 2 + 3j if dtype.is_complex else 0.6)
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
     beta_val = kwargs.get('beta', 1 + 2j if dtype.is_complex else 0.2)
-    tests_list = [
+    alpha_val = kwargs.get('alpha', 2 + 3j if dtype.is_complex else 0.6)
+
+    test_cases = (
+        ((2, 3), (2, 2), (2, 3), False),
         ((2, 3), (2, 2), (2, 3), False)
-    ]
-    tests_with_lhs_broadcasting = [
+    )
+
+    test_cases_with_lhs_broadcasting = (
         ((1,), (2, 2), (2, 3), True),
         ((), (2, 2), (2, 3), True)
-    ]
-    test_cases = tests_list + tests_with_lhs_broadcasting  # type: ignore[operator]
-    inputs = tuple(SampleInput(make_tensor(shape_a, device, dtype, requires_grad=requires_grad),
-                               args=(make_tensor(shape_b, device, dtype,
-                                                 requires_grad=requires_grad),
-                                     make_tensor(shape_c, device, dtype,
-                                                 requires_grad=requires_grad)),
-                               kwargs={'alpha': alpha_val, 'beta': beta_val},
-                               broadcasts_input=broadcasts_input)
-                   for shape_a, shape_b, shape_c, broadcasts_input in test_cases)
-    return inputs
+    )
+
+    cases = test_cases + test_cases_with_lhs_broadcasting
+
+    def generator():
+        for shape_input, shape_mat_x, shape_mat_y, broadcasts_input in test_cases:
+            yield SampleInput(make_arg(shape_input), args=(make_arg(shape_mat_x), make_arg(shape_mat_y)),
+                              kwargs={'beta': beta_val, 'alpha': alpha_val}, broadcasts_input=broadcasts_input)
+
+    return list(generator())
 
 def sample_inputs_mv(self, device, dtype, requires_grad, **kwargs):
     return (
@@ -1316,6 +1320,8 @@ def sample_inputs_dot_vdot(self, device, dtype, requires_grad, **kwargs):
     )
 
 def sample_inputs_addmv(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
     test_cases = (((S,), (S, M), (M,), 1, 1, False),
                   ((S,), (S, M), (M,), 0.2, 0.6, False),
                   )
@@ -1326,23 +1332,22 @@ def sample_inputs_addmv(op_info, device, dtype, requires_grad, **kwargs):
                                  ((), (S, M), (M,), 0.2, 0.6, True),
                                  )
 
-    cases = test_cases + test_cases_with_broadcast
-    sample_inputs = []
-    for input_args in cases:
-        args = (make_tensor(input_args[0], device, dtype,
-                            low=None, high=None,
-                            requires_grad=requires_grad),
-                make_tensor(input_args[1], device, dtype,
-                            low=None, high=None,
-                            requires_grad=requires_grad),
-                make_tensor(input_args[2], device, dtype,
-                            low=None, high=None,
-                            requires_grad=requires_grad))
-        alpha, beta = input_args[3], input_args[4]
-        broadcasts_input = input_args[5]
-        sample_inputs.append(SampleInput(args[0], args=(args[1], args[2]), kwargs=dict(beta=beta, alpha=alpha),
-                                         broadcasts_input=broadcasts_input))
-    return tuple(sample_inputs)
+    if dtype.is_complex:
+        test_cases_complex = (((S,), (S, M), (M, ), (1, 2), (3, 4), False),
+                              ((S,), (S, M), (M, ), (1.2, 2.3), (3.4, 4), False),
+                              )
+        cases = test_cases + test_cases_with_broadcast + test_cases_complex
+    else:
+        cases = test_cases + test_cases_with_broadcast  # type: ignore[assignment]
+
+    def generator():
+        for shape_input, shape_mat, shape_vec, beta, alpha, broadcasts_input in cases:
+            beta = complex(*beta) if isinstance(beta, tuple) else beta
+            alpha = complex(*alpha) if isinstance(alpha, tuple) else alpha
+            yield SampleInput(make_arg(shape_input), args=(make_arg(shape_mat), make_arg(shape_vec)),
+                              kwargs=dict(beta=beta, alpha=alpha), broadcasts_input=broadcasts_input)
+
+    return list(generator())
 
 def sample_inputs_addbmm(op_info, device, dtype, requires_grad, **kwargs):
     test_cases = [((S, M), (S, S, S), (S, S, M), 1, 1),
