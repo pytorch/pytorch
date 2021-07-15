@@ -828,6 +828,7 @@ void gather(
   const auto* sendbuff = reinterpret_cast<char*>(inputs.data_ptr());
 
   NCCL_CHECK(ncclGroupStart());
+  NCCL_CHECK(ncclSend(sendbuff, count, type, root, comm, stream));
   if (cur_rank == root)
   {
     for (int r = 0; r < numranks; r++)
@@ -836,7 +837,6 @@ void gather(
       NCCL_CHECK(ncclRecv(recvbuff, count, type, r, comm, stream));
     }
   }
-  NCCL_CHECK(ncclSend(sendbuff, count, type, root, comm, stream));
   NCCL_CHECK(ncclGroupEnd());
 
 #else
