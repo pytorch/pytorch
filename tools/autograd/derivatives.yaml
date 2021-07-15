@@ -466,9 +466,8 @@
   self: deg2rad_backward(grad)
   result: auto_element_wise
 
-- name: _det_lu_based_helper(Tensor self) -> (Tensor det, Tensor lu, Tensor pivs)
-  self: _det_lu_based_helper_backward(grad, det, self, lu, pivs)
-  output_differentiability: [True, False, False]
+- name: linalg_det(Tensor self) -> Tensor
+  self: linalg_det_backward(grad, self, result)
 
 - name: diag(Tensor self, int diagonal=0) -> Tensor
   self: diag_backward(grad, self.sizes(), diagonal)
