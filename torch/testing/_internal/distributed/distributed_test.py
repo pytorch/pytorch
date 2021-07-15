@@ -1,3 +1,4 @@
+import collections
 import copy
 import itertools
 import math
@@ -11,13 +12,13 @@ from collections import namedtuple
 from contextlib import contextmanager, suppress
 from datetime import timedelta
 from functools import reduce
-from typing import Union, NamedTuple, Callable, Any
+from typing import Any, Callable, NamedTuple, Union
 
 import torch
 import torch.cuda
 import torch.distributed as dist
-import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
 import torch.distributed.algorithms.ddp_comm_hooks.post_localSGD_hook as post_localSGD
+import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
 import torch.distributed.algorithms.model_averaging.averagers as averagers
 import torch.distributed.algorithms.model_averaging.utils as model_averaging_utils
 import torch.nn as nn
@@ -25,41 +26,43 @@ import torch.nn.functional as F
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
 from torch.cuda.amp import GradScaler, autocast
-from torch.distributed.algorithms.ddp_comm_hooks import default_hooks as default
+from torch.distributed.algorithms.ddp_comm_hooks import (
+    default_hooks as default,
+)
 from torch.distributed.algorithms.ddp_comm_hooks import (
     quantization as quantization_hooks,
 )
 from torch.distributed.distributed_c10d import (
-    get_world_size,
-    _get_default_group,
     AllreduceOptions,
     GroupMember,
+    _get_default_group,
+    get_world_size,
 )
 from torch.nn.parallel import DistributedDataParallel
 from torch.nn.parallel.distributed import _dump_DDP_relevant_env_vars
 from torch.testing._internal.common_distributed import (
-    MultiProcessTestCase,
     TEST_SKIPS,
-    initialize_temp_directories,
+    MultiProcessTestCase,
+    captured_output,
     cleanup_temp_dir,
-    simple_sparse_reduce_tests,
-    skip_if_rocm,
-    skip_if_small_worldsize,
-    skip_if_lt_x_gpu,
+    initialize_temp_directories,
     nccl_skip_if_lt_x_gpu,
-    skip_if_no_gpu,
     require_n_gpus_for_nccl_backend,
     requires_nccl_version,
-    captured_output,
-    with_nccl_blocking_wait,
-    with_dist_debug_levels,
+    simple_sparse_reduce_tests,
+    skip_if_lt_x_gpu,
+    skip_if_no_gpu,
+    skip_if_rocm,
+    skip_if_small_worldsize,
     verify_ddp_error_logged,
+    with_dist_debug_levels,
+    with_nccl_blocking_wait,
 )
 from torch.testing._internal.common_utils import (
-    IS_MACOS,
-    IS_WINDOWS,
     FILE_SCHEMA,
     IS_FBCODE,
+    IS_MACOS,
+    IS_WINDOWS,
     NO_MULTIPROCESSING_SPAWN,
 )
 from torch.utils.data.distributed import DistributedSampler
@@ -5867,14 +5870,82 @@ class DistributedTest:
             single_obj_list = [objects[0]]
             if self.rank != src_rank:
                 self.assertNotEqual(single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0])
-            dist.broadcast_object_list(single_obj_list, src=0)
+            dist.broadcast_object_list(single_obj_list, src=src_rank)
             self.assertEqual(single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0])
 
             # Multiple input objects test
             if self.rank != src_rank:
                 self.assertNotEqual(objects, COLLECTIVES_OBJECT_TEST_LIST)
-            dist.broadcast_object_list(objects, src=0)
+            dist.broadcast_object_list(objects, src=src_rank)
             self.assertEqual(objects, COLLECTIVES_OBJECT_TEST_LIST)
+
+        @require_backend({"nccl", "gloo"})
+        @require_n_gpus_for_nccl_backend(
+            int(os.environ["WORLD_SIZE"]), os.environ["BACKEND"]
+        )
+        def test_broadcast_object_list_map_location(self):
+            # Test the `map_location` argument
+            backend = os.environ["BACKEND"]
+            if backend == "nccl":
+                torch.cuda.set_device(self.rank)
+
+            def _check_tensor_map_location(obj, device):
+                # Checks that all tensors contained in `obj` are on `device`
+                # Does not account for tensors stored as fields of a class
+                if isinstance(obj, torch.Tensor):
+                    return obj.device == device
+                if isinstance(obj, (list, tuple)):
+                    elems_match = [_check_tensor_map_location(e, device) for e in obj]
+                    return all(elems_match)
+                if isinstance(obj, collections.abc.Mapping):
+                    values_match = [_check_tensor_map_location(v, device) for _, v in obj.items()]
+                    return all(values_match)
+                return False
+
+            def _copy_to_device(obj, device):
+                # Copies `obj` to `device`
+                if isinstance(obj, torch.Tensor):
+                    return obj.to(device)
+                if isinstance(obj, (list, tuple)):
+                    elems = [_copy_to_device(elem, device=device) for elem in obj]
+                    return elems if isinstance(obj, list) else tuple(elems)
+                if isinstance(obj, collections.abc.Mapping):
+                    return {k: _copy_to_device(v, device=device) for k, v in obj.items()}
+                return obj
+
+            src_rank = 0
+            device = torch.device(f"cuda:{src_rank}") if backend == "nccl" else torch.device("cpu")
+            source_objects = [
+                torch.ones(1, device=device),
+                {"key": torch.ones(1, device=device)},
+                [torch.ones(1, device=device)],
+            ]
+            objects = source_objects if self.rank == src_rank else [None for _ in source_objects]
+
+            # `map_location` as CPU test
+            map_location = torch.device("cpu")
+            if self.rank != src_rank:
+                self.assertNotEqual(objects, source_objects)
+            dist.broadcast_object_list(objects, src=src_rank, map_location=map_location)
+            if self.rank != src_rank:
+                self.assertTrue(_check_tensor_map_location(objects, map_location))
+                self.assertEqual(_copy_to_device(source_objects, map_location), objects)
+            else:
+                self.assertEqual(source_objects, objects)
+
+            # `map_location` as GPU test
+            if not torch.cuda.is_available():
+                return
+            map_location = torch.device("cuda:0")
+            objects = source_objects if self.rank == src_rank else [None for _ in source_objects]
+            if self.rank != src_rank:
+                self.assertNotEqual(objects, source_objects)
+            dist.broadcast_object_list(objects, src=src_rank, map_location=map_location)
+            if self.rank != src_rank:
+                self.assertTrue(_check_tensor_map_location(objects, map_location))
+                self.assertEqual(_copy_to_device(source_objects, map_location), objects)
+            else:
+                self.assertEqual(source_objects, objects)
 
         def _test_ddp_ignore_params_arg(self, static_graph=False):
             class TestModel(nn.Module):
