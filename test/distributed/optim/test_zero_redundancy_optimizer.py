@@ -366,7 +366,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
 
         NOTE: The correctness of this test depends on the ZeRO implementation
         using the sorted-greedy partitioning algorithm. For details, see
-        `ZeroRedundancyOptimizer.partition_parameters()` in
+        `ZeroRedundancyOptimizer._partition_parameters()` in
         `zero_redundancy_optimizer.py`.
         """
         self.dist_init(self.rank)
@@ -383,7 +383,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
 
         NOTE: The correctness of this test depends on the ZeRO implementation
         using the sorted-greedy partitioning algorithm. For details, see
-        `ZeroRedundancyOptimizer.partition_parameters()` in
+        `ZeroRedundancyOptimizer._partition_parameters()` in
         `zero_redundancy_optimizer.py`.
         """
         self.dist_init(self.rank)
@@ -476,7 +476,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             optimizer_state_dict,
             src_rank=RECIPIENT_RANK,
             group=dist.group.WORLD,
-            dist_device=self.device,
+            device=self.device,
         )
 
         # Load the optimizer state dict, check that no exception is raised

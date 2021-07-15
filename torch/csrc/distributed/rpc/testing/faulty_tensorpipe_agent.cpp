@@ -72,36 +72,37 @@ c10::intrusive_ptr<JitFuture> FaultyTensorPipeAgent::send(
     c10::intrusive_ptr<Message> message,
     const float rpcTimeoutSeconds,
     const std::unordered_map<c10::Device, c10::Device>& /* unused */) {
+  // std::unordered_map<c10::Device, c10::Device> map = std::unordered_map<c10::Device, c10::Device>();
   return TensorPipeAgent::send(to, std::move(message), rpcTimeoutSeconds);
 
 
-  // We only fail control messages that have been specified by the test case.
-  // For all other messages, we just send them without any failures.
-  if (!shouldFailMessage(message->type())) {
-    return TensorPipeAgent::send(to, std::move(message), rpcTimeoutSeconds);
-  }
-  // This send function checks the failMessageCountMap_ to check whether
-  // we must fail the next send. If the send must be failed, we set an error
-  // on the returned future immediately and increment the counter in the map,
-  // otherwise we just call the ProcessGroupAgent send.
-  const auto key = fromVecToString(message->payload());
-  std::unique_lock<std::mutex> lock(failMapMutex_);
-  auto it = failMessageCountMap_.find(key);
-  if (it == failMessageCountMap_.end()) {
-    failMessageCountMap_[key] = 0;
-  }
-  if (failMessageCountMap_[key] < failNumSends_) {
-    failMessageCountMap_[key]++;
-    lock.unlock();
-    auto jitFuture = c10::make_intrusive<JitFuture>(at::AnyClassType::get());
-    jitFuture->setError(std::make_exception_ptr(std::runtime_error(makeRPCError(
-        c10::str("Send attempt failed intentionally for ", key),
-        RPCErrorType::INTENTIONAL_FAILURE))));
-    return jitFuture;
-  } else {
-    lock.unlock();
-    return TensorPipeAgent::send(to, std::move(message), rpcTimeoutSeconds);
-  }
+  // // We only fail control messages that have been specified by the test case.
+  // // For all other messages, we just send them without any failures.
+  // if (!shouldFailMessage(message->type())) {
+  //   return TensorPipeAgent::send(to, std::move(message), rpcTimeoutSeconds);
+  // }
+  // // This send function checks the failMessageCountMap_ to check whether
+  // // we must fail the next send. If the send must be failed, we set an error
+  // // on the returned future immediately and increment the counter in the map,
+  // // otherwise we just call the ProcessGroupAgent send.
+  // const auto key = fromVecToString(message->payload());
+  // std::unique_lock<std::mutex> lock(failMapMutex_);
+  // auto it = failMessageCountMap_.find(key);
+  // if (it == failMessageCountMap_.end()) {
+  //   failMessageCountMap_[key] = 0;
+  // }
+  // if (failMessageCountMap_[key] < failNumSends_) {
+  //   failMessageCountMap_[key]++;
+  //   lock.unlock();
+  //   auto jitFuture = c10::make_intrusive<JitFuture>(at::AnyClassType::get());
+  //   jitFuture->setError(std::make_exception_ptr(std::runtime_error(makeRPCError(
+  //       c10::str("Send attempt failed intentionally for ", key),
+  //       RPCErrorType::INTENTIONAL_FAILURE))));
+  //   return jitFuture;
+  // } else {
+  //   lock.unlock();
+  //   return TensorPipeAgent::send(to, std::move(message), rpcTimeoutSeconds);
+  // }
 }
 
 // void FaultyTensorPipeAgent::enqueueSend(SendWork work) {
@@ -125,10 +126,11 @@ c10::intrusive_ptr<JitFuture> FaultyTensorPipeAgent::send(
 // }
 
 bool FaultyTensorPipeAgent::shouldFailMessage(MessageType type) const {
+  return false;
   // Return true if the input message type is in the messageTypesToFail_ list
-  return (
-      std::find(messageTypesToFail_.begin(), messageTypesToFail_.end(), type) !=
-      messageTypesToFail_.end());
+  // return (
+  //     std::find(messageTypesToFail_.begin(), messageTypesToFail_.end(), type) !=
+  //     messageTypesToFail_.end());
 }
 
 float FaultyTensorPipeAgent::getDelayForMessage(MessageType type) const {

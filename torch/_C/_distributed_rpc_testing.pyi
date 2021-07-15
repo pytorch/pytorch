@@ -65,6 +65,7 @@ class FaultyTensorPipeAgent(TensorPipeAgent):
         rank: int,
         world_size: int,
         process_group: ProcessGroup,
+        options: FaultyTensorPipeRpcBackendOptions,
         num_send_recv_threads: int,
         rpc_timeout: timedelta,
         messages_to_fail: List[str],

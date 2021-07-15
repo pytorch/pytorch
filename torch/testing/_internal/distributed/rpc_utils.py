@@ -200,4 +200,5 @@ def generate_tests(
                 class_ = type(name, (test_class, mixin, mp_helper), dict())
                 class_.__module__ = module_name
                 ret[name] = class_
+    print(f"in generate_tests {ret=}")
     return ret
