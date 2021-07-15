@@ -18,6 +18,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     TEST_WITH_ROCM,
     skipIfRocm,
+    TEST_WITH_ASAN
 )
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
