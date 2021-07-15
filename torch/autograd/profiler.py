@@ -1123,12 +1123,12 @@ def parse_kineto_results(result):
 
     def _cpu_memory_usage(mem_record):
         return mem_record.nbytes() if \
-            mem_record.device_type in [DeviceType.CPU, DeviceType.MKLDNN, DeviceType.IDEEP] \
+            mem_record.device_type() in [DeviceType.CPU, DeviceType.MKLDNN, DeviceType.IDEEP] \
             else 0
 
     def _cuda_memory_usage(mem_record):
         return mem_record.nbytes() if \
-            mem_record.device_type in [DeviceType.CUDA, DeviceType.HIP] \
+            mem_record.device_type() in [DeviceType.CUDA, DeviceType.HIP] \
             else 0
 
     # Create and return FunctionEvent list
@@ -1147,9 +1147,9 @@ def parse_kineto_results(result):
         if kineto_event.device_type() == DeviceType.CPU:
             # find the corresponding memory allocation events
             for mem_record in mem_records:
-                mem_record[1] = True
                 if (mem_record[0].timestamp_us() >= kineto_event.start_us() and
                         mem_record[0].timestamp_us() <= abs_end_us):
+                    mem_record[1] = True
                     cpu_memory_usage += _cpu_memory_usage(mem_record[0])
                     cuda_memory_usage += _cuda_memory_usage(mem_record[0])
 
