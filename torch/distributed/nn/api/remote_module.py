@@ -65,10 +65,11 @@ _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING = (
     "_state_dict_hooks",
     "_load_state_dict_pre_hooks",
     "_modules",
+    "__module_name__",
+
     # The two attributes below are generated methods, not available at pickling time.
     "forward_async",
     "forward",
-    "name",
 )
 
 # RPC handler.
