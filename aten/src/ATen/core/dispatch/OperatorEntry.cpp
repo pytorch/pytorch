@@ -170,7 +170,16 @@ const KernelFunction& OperatorEntry::computeDispatchTableEntry(const c10::Dispat
 bool OperatorEntry::hasKernelForAnyDispatchKey(DispatchKeySet ks) const {
   TORCH_INTERNAL_ASSERT(kernels_.find(DispatchKey::Undefined) == kernels_.end());
   for (auto& kv : kernels_) {
-    if (ks.has(kv.first)) return true;
+    // Note [No Alias Keys in DispatchKeySet]
+    if (!isAliasDispatchKey(kv.first) && ks.has(kv.first)) return true;
+  }
+  return false;
+}
+
+bool OperatorEntry::hasKernelForDispatchKey(DispatchKey k) const {
+  TORCH_INTERNAL_ASSERT(kernels_.find(DispatchKey::Undefined) == kernels_.end());
+  for (auto& kv : kernels_) {
+    if (k == kv.first) return true;
   }
   return false;
 }
@@ -232,7 +241,9 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   // Note when there's direct registration to CompositeExplicitAutograd, this code path will only be hit by
   // non backend keys (e.g AutogradXXX, Batched etc) due to (2.1).
   bool has_backend_kernel =
-    hasKernelForAnyDispatchKey(getBackendKeySetFromAutograd(dispatch_key).add(DispatchKey::CompositeExplicitAutograd));
+    hasKernelForAnyDispatchKey(getBackendKeySetFromAutograd(dispatch_key)) ||
+    // See Note [No Alias Keys in DispatchKeySet]
+    hasKernelForDispatchKey(DispatchKey::CompositeExplicitAutograd);
 
   // 2.2. Use CompositeImplicitAutograd kernel if available. For autograd keys, we only use kernel from CompositeImplicitAutograd
   //      when there's no direct registration to its corresponding backend key or CompositeExplicitAutograd.
