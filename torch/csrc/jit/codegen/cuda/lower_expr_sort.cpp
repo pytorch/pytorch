@@ -55,10 +55,7 @@ struct ExprGroupConnections;
 class ExprSegmentationSorter;
 
 // Debug printing disabled due to clang tidy, see below for definitions
-// std::ostream& operator<<(std::ostream& os, const ExprGroupConnections* edge);
 // std::ostream& operator<<(std::ostream& os, const ExprGroup* group);
-// std::ostream& operator<<(std::ostream& os, const ExprSegmentationSorter*
-// scf);
 
 // Wrapper for values, these are edges between expr groups. Multiple edges can
 // exist between expr groups, and the same Val can show up more than once in
@@ -318,35 +315,10 @@ class ExprSegmentationSorter {
   bool fallback_mode_enabled_ = false;
 };
 
-// Debug printing, disabled due to clang-tidy see above for declarations.
+// // Debug printing, disabled due to clang-tidy see above for declarations.
 // std::ostream& operator<<(std::ostream& os, ExprGroup* group) {
-//   os << "g{";
-//   for (size_t i = 0; i < group->exprs().size(); i++) {
-//     os << group->exprs()[i]->name();
-//     if (i + 1 != group->exprs().size())
-//       os << ", ";
-//   }
-//   os << "} producers(";
-//   for(auto p_e : group->producerEdges()){
-//     auto producer_group = p_e->from;
-//     os << "g{";
-//     for (size_t i = 0; i < producer_group->exprs().size(); i++) {
-//       os << producer_group->exprs()[i]->name();
-//       if (i + 1 != producer_group->exprs().size())
-//         os << ", ";
-//     } os<<" }, ";
-//   }
-//   os << ") consumers (";
-//   for(auto c_e : group->consumerEdges()){
-//     auto consumer_group = c_e->to;
-//     os << "g{";
-//     for (size_t i = 0; i < consumer_group->exprs().size(); i++) {
-//       os << consumer_group->exprs()[i]->name();
-//       if (i + 1 != consumer_group->exprs().size())
-//         os << ", ";
-//     } os<<" }, ";
-//   }
-//   os << ") ca, pa (" << group->payload()->ca_domains_.size() << ", "
+//   os << "Group Start{\n  ca, pa ("
+//      << group->payload()->ca_domains_.size() << ", "
 //      << group->payload()->pa_domains_.size() << ")";
 //   os << " ca_ids {";
 //   for (size_t i = 0; i < group->payload()->ca_domains_.size(); i++) {
@@ -361,18 +333,12 @@ class ExprSegmentationSorter {
 //       os << ", ";
 //   }
 //   os << "}";
+//   os << "\nExprs {\n";
+//   for(auto expr : group->exprs()){
+//     os << expr;
+//   }
+//    os << "}Group End\n";
 //   return os;
-// }
-
-// std::ostream& operator<<(std::ostream& os, const ExprGroupConnections* edge)
-// {
-//   os << "e{ " << edge->from << " -> " << edge->to << " }" << std::endl;
-//   return os;
-// }
-
-// std::ostream& operator<<(std::ostream& os, const ExprSegmentationSorter* scf)
-// {
-//   return os << scf->toString();
 // }
 
 std::vector<ExprGroup*> ExprGroup::getNeighbors() {
@@ -581,10 +547,9 @@ std::string ExprSegmentationSorter::toString(int verbosity) const {
 
     if (verbosity > 1) {
       if (group->producerEdges().size() > 0) {
-        ss << "    produced by groups: { \n";
+        ss << "Produced by groups with edges: { \n";
         for (auto producer_edge : group->producerEdges()) {
-          ss << "      " << producer_edge->from << " via "
-             << producer_edge->producer_val_ << " -> "
+          ss << producer_edge->producer_val_ << " -> "
              << producer_edge->consumer_val_ << "\n";
         }
         ss << "    }"
@@ -592,23 +557,16 @@ std::string ExprSegmentationSorter::toString(int verbosity) const {
       }
     }
 
-    if (verbosity > 0) {
+    if (verbosity > 1) {
       if (group->consumerEdges().size() > 0) {
-        ss << "    Consumed by groups: { \n";
+        ss << "Consumed by groups with edges: { \n";
         for (auto consumer_edge : group->consumerEdges()) {
-          ss << "      " << consumer_edge->to << "\n";
+          ss << consumer_edge->producer_val_ << " -> "
+             << consumer_edge->consumer_val_ << "\n";
         }
         ss << "    }"
            << "\n";
       }
-    }
-
-    if (verbosity > 2) {
-      ss << "    Exprs{\n";
-      for (auto expr : group->exprs()) {
-        ss << expr;
-      }
-      ss << "    }\n";
     }
   }
   ss << "}\n";
@@ -840,45 +798,56 @@ ExprGroup* ExprSegmentationSorter::makeMergedNode(
   return joined_groups;
 }
 
-bool canReduceCA(ExprGroup* group) {
-  IterDomain* g_last_id = nullptr;
-
-  if (group->payload()->ca_domains_.size() > 0) {
-    g_last_id = group->payload()->ca_domains_.back();
-  }
-  if (g_last_id == nullptr) {
+bool canReducePA(ExprGroup* group) {
+  if (group->payload()->pa_domains_.empty()) {
     return false;
   }
 
-  // Compute at can sometimes get in a strange position as the update rules are
-  // not fool proof. All consumers should have a match to this groups inner most
-  // compute at axis, otherwise it should be lowered.
-  for (auto consumer_edge : group->consumerEdges()) {
-    auto consumer = consumer_edge->to;
-    for (auto c_id : consumer->payload()->pa_domains_) {
-      if (GpuLower::current()->caLoopMap().areMapped(c_id, g_last_id)) {
-        return false;
+  IterDomain* group_pa_last_id = group->payload()->pa_domains_.back();
+
+  // Look through producer edges to see if we can reduce our produce at domain
+  for (auto producer_edge : group->producerEdges()) {
+    auto producer_val = producer_edge->producer_val_;
+    auto consumer_val = producer_edge->consumer_val_;
+
+    // If producer isn't a tensor view it can't be mapped into a producer dim of
+    // this group
+    if (!(consumer_val->isA<TensorView>() && producer_val->isA<TensorView>())) {
+      continue;
+    }
+
+    // If the compute at domains of the producer group is empty, it can't map to
+    // the produce at domains of this group
+    auto producer_group = producer_edge->from;
+    if (producer_group->payload()->ca_domains_.empty()) {
+      continue;
+    }
+
+    auto producer_tv = producer_val->as<TensorView>();
+    auto consumer_tv = consumer_val->as<TensorView>();
+
+    // If this consumer_tv doesn't map to the last producer domain of this group
+    // it can't decide if it can be reduced
+    bool has_matching_pa = false;
+    for (int i = 0; i < consumer_tv->getMaxProducerPosition(); i++) {
+      if (GpuLower::current()->caLoopMap().areMapped(
+              consumer_tv->axis(i), group_pa_last_id)) {
+        has_matching_pa = true;
+        break;
       }
     }
-  }
 
-  return true;
-}
+    if (!has_matching_pa) {
+      continue;
+    }
 
-bool canReducePA(ExprGroup* group) {
-  IterDomain* g_last_id = nullptr;
-
-  if (group->payload()->pa_domains_.size() > 0) {
-    g_last_id = group->payload()->pa_domains_.back();
-  }
-  if (g_last_id == nullptr) {
-    return false;
-  }
-
-  for (auto producer_edge : group->producerEdges()) {
-    auto producer = producer_edge->from;
-    for (auto p_id : producer->payload()->ca_domains_) {
-      if (GpuLower::current()->caLoopMap().areMapped(p_id, g_last_id)) {
+    // If any compute at positions of producers directly map to the last produce
+    // at position it can't be lowered.
+    for (int producer_pos_i = producer_tv->getComputeAtPosition();
+         producer_pos_i > 0;
+         producer_pos_i--) {
+      if (GpuLower::current()->caLoopMap().areMapped(
+              producer_tv->axis(producer_pos_i - 1), group_pa_last_id)) {
         return false;
       }
     }
@@ -897,11 +866,6 @@ bool ExprSegmentationSorter::interIterUpdate() {
   // lowered
   bool lowered_a_domain = false;
   for (auto& group : groups_) {
-    while (canReduceCA(group.get())) {
-      group->payload()->ca_domains_.pop_back();
-      lowered_a_domain = true;
-    }
-
     if (canReducePA(group.get())) {
       group->payload()->pa_domains_.pop_back();
       lowered_a_domain = true;
@@ -989,8 +953,44 @@ bool ExprSegmentationSorter::supportedMerge(ExprGroup* sg1, ExprGroup* sg2) {
     return false;
   }
 
-  return GpuLower::current()->caLoopMap().areMapped(
-      producer_domain.back(), consumer_domain.back());
+  for (auto edge : producer_group->consumerEdges()) {
+    if (edge->to != consumer_group) {
+      continue;
+    }
+    auto producer_val = edge->producer_val_;
+    auto consumer_val = edge->consumer_val_;
+
+    if (!producer_val->isA<TensorView>()) {
+      continue;
+    }
+
+    TORCH_INTERNAL_ASSERT(
+        consumer_val->isA<TensorView>(),
+        "Mismatched tensorview to non-tensorview in expression sorting. ",
+        producer_val,
+        " is consumed by ",
+        consumer_val);
+    auto producer_tv = producer_val->as<TensorView>();
+    auto compute_at_pos = producer_tv->getComputeAtPosition();
+    auto compute_at_dim = compute_at_pos > 0
+        ? producer_tv->axis(producer_tv->getComputeAtPosition() - 1)
+        : nullptr;
+
+    if (compute_at_dim == nullptr) {
+      continue;
+    }
+
+    if (!GpuLower::current()->caLoopMap().areMapped(
+            compute_at_dim, producer_domain.back())) {
+      continue;
+    }
+
+    if (GpuLower::current()->caLoopMap().areMapped(
+            compute_at_dim, consumer_domain.back())) {
+      return true;
+    }
+  }
+  return false;
 }
 
 bool ExprSegmentationSorter::testStillDag(ExprGroup* sg1, ExprGroup* sg2) {

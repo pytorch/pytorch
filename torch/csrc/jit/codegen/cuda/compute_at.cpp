@@ -527,30 +527,48 @@ unsigned int getInnermostNonBroadcastIdFrom(TensorView* tv) {
 //  checking on actual producer-consumer relationship.
 unsigned int getConsumerPosAlignedToProducerCA(
     TensorView* consumer,
-    TensorView* producer,
-    ComputeAtRootDomainMap& root_map) {
+    TensorView* producer) {
   unsigned int producer_ca_pos = producer->getComputeAtPosition();
   // Locate consumer's position that aligns with
-  //  the producer's new compute at axis.
-  auto p2c_map = BestEffortReplay::replayCasP(
-                     consumer, producer, producer_ca_pos, root_map)
-                     .getReplay();
+  //  the producer's new compute at axis. We need broadcast axes forwarded so we
+  //  need to replay PasC as CasP will not forward braodcast dims. For example
+  //  if we have:
+  // T2[ iS22{( 3 * 1 )} ] ca_pos( 1 ) = broadcast( T1[ iS1{3} ] ca_pos( 1 )
+  // produce_pos( 1) ) CasP will have the mapping iS1{3} -> iS2{3} and PasC will
+  // have the mapping iS22{( 3 * 1 )} <- iS1{3} We need the latter. Refer to
+  // NVFuserTest.FusionComplexBCast1_CUDA
 
-  // Collect the set of iterdomains that are mapped from
-  //  producer ids within the compute at pos
-  std::unordered_set<IterDomain*> mapped_id_from_producer;
-  for (unsigned int producer_i = 0; producer_i < producer_ca_pos;
-       producer_i++) {
-    auto mapped_it = p2c_map.find(producer->axis(producer_i));
-    TORCH_INTERNAL_ASSERT(mapped_it != p2c_map.end());
-    mapped_id_from_producer.insert(mapped_it->second);
-  }
+  auto c2p_map =
+      BestEffortReplay::replayPasC(
+          producer,
+          consumer,
+          consumer->getMaxProducerPosition(),
+          // Compute at root domain may not be valid here, as all
+          // producers don't have to be able to map into consumer at
+          // max producer position. Since computeAt should be valid
+          // and this mechanism is only intended to lower produce
+          // position of consumer, we can simply use the pairwise map.
+          PairwiseRootDomainMap(producer, consumer))
+          .getReplay();
 
   // Find the innermost position of consumer that has
   //  been mapped within the producer ca axis.
   unsigned int consumer_pos = consumer->nDims();
-  while (consumer_pos > 0 &&
-         !mapped_id_from_producer.count(consumer->axis(consumer_pos - 1))) {
+  while (consumer_pos > 0) {
+    auto consumer_id = consumer->axis(consumer_pos - 1);
+    auto p_dom = producer->domain()->domain();
+    if (std::any_of(
+            p_dom.begin(),
+            p_dom.begin() + producer->getComputeAtPosition(),
+            [&consumer_id, &c2p_map](IterDomain* p_id) {
+              auto c_id_it = c2p_map.find(consumer_id);
+              if (c_id_it != c2p_map.end()) {
+                return c_id_it->second == p_id;
+              }
+              return false;
+            })) {
+      break;
+    }
     consumer_pos--;
   }
 
@@ -603,7 +621,7 @@ void ComputeAt::hoistInnermostBroadcast() {
         // Locate consumer's position that aligns with
         //  the producer's new compute at axis.
         unsigned int inp_ca_pos_to_consumer =
-            getConsumerPosAlignedToProducerCA(running_consumer, inp, root_map_);
+            getConsumerPosAlignedToProducerCA(running_consumer, inp);
 
         // Populate the max consumer position required by
         //  producer compute at.
@@ -619,6 +637,63 @@ void ComputeAt::hoistInnermostBroadcast() {
   }
 }
 
+void ComputeAt::updateSiblings() {
+  auto updateSiblingsOfTv = [](TensorView* tv) {
+    if (tv->definition() == nullptr) {
+      return;
+    }
+    if (tv->definition()->outputs().size() > 1) {
+      auto outs = tv->definition()->outputs();
+      auto out_tvs = ir_utils::filterByType<TensorView>(outs);
+      for (auto sibling_tv : out_tvs) {
+        if (sibling_tv == tv) {
+          continue;
+        }
+
+        std::unordered_map<IterDomain*, IterDomain*> tv_to_sibling_map;
+        TORCH_INTERNAL_ASSERT(
+            tv->getRootDomain().size() == sibling_tv->getRootDomain().size(),
+            "Error replaying multiple output expressions in computeAt.");
+
+        // Propagate any root parallelization as fullSelfReplay expects it.
+        for (int i = 0; i < sibling_tv->getRootDomain().size(); i++) {
+          auto id = tv->getRootDomain()[i];
+          auto sibling_id = sibling_tv->getRootDomain()[i];
+          if (id->getParallelType() != ParallelType::Serial &&
+              sibling_id->getParallelType() == ParallelType::Serial) {
+            sibling_id->parallelize(id->getParallelType());
+          } else if (
+              id->getParallelType() == ParallelType::Serial &&
+              sibling_id->getParallelType() != ParallelType::Serial) {
+            id->parallelize(sibling_id->getParallelType());
+          }
+        }
+        auto sibling_domain =
+            TransformReplay::fullSelfReplay(sibling_tv->domain(), tv->domain());
+        sibling_tv->setDomain(sibling_domain);
+        sibling_tv->setComputeAt(tv->getComputeAtPosition());
+        sibling_tv->setMaxProducer(tv->getMaxProducerPosition());
+      }
+    }
+  };
+
+  // Find all tensor views that may have been modified
+  auto chains = producer_use_chains_;
+  if (common_consumer_ != nullptr) {
+    chains = tvChains(
+        DependencyCheck::getAllDependencyChains(producer_, common_consumer_));
+  }
+
+  std::unordered_set<TensorView*> participating_tvs;
+  for (auto chain : chains) {
+    participating_tvs.insert(chain.begin(), chain.end());
+  }
+
+  for (auto tv : participating_tvs) {
+    updateSiblingsOfTv(tv);
+  }
+}
+
 void ComputeAt::runPass() {
   FUSER_PERF_SCOPE("ComputeAt::runPass");
 
@@ -630,6 +705,9 @@ void ComputeAt::runPass() {
 
   // Back off on inlining the inner broadcast axes
   hoistInnermostBroadcast();
+
+  // Update siblings of multi output expressions
+  updateSiblings();
 }
 
 ComputeAt::ComputeAt(

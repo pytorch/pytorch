@@ -59,7 +59,7 @@ class ReplaySelf : public ReplayTransformations {
         new Int(0),
         s->innerSplit() ? s->factor() : remainder->as<Int>(),
         s->inner()->getParallelType(),
-        s->outer()->getIterType(),
+        s->inner()->getIterType(),
         s->inner()->isRFactorProduct());
 
     // Generate the split node
@@ -136,7 +136,7 @@ TensorDomain* TransformReplay::fullSelfReplay(
   FUSER_PERF_SCOPE("fullSelfReplay");
 
   TORCH_INTERNAL_ASSERT(
-      new_self_root->nDims() == self->getRootDomain().size(),
+      new_self_root->getRootDomain().size() == self->getRootDomain().size(),
       "Invalid number of IterDomains provided.");
 
   // Map for replay, should be pretty simple.
@@ -145,17 +145,28 @@ TensorDomain* TransformReplay::fullSelfReplay(
     size_t i = 0;
     for (auto id : self->getRootDomain()) {
       TORCH_INTERNAL_ASSERT(
-          new_self_root->axis(i)->start() == id->start(),
-          "Replay does not support IterDomains that do not start at 0.");
+          new_self_root->getRootDomain()[i]->start()->isZeroInt() &&
+              id->start()->isZeroInt(),
+          "Replay does not support IterDomains that do not start at 0, received: ",
+          new_self_root->getRootDomain()[i]->start(),
+          " and ",
+          id->start()->isZeroInt());
 
       TORCH_INTERNAL_ASSERT(
-          new_self_root->axis(i)->getParallelType() == id->getParallelType() &&
-              new_self_root->axis(i)->isReduction() == id->isReduction() &&
-              new_self_root->axis(i)->isRFactorProduct() ==
+          new_self_root->getRootDomain()[i]->getParallelType() ==
+                  id->getParallelType() &&
+              new_self_root->getRootDomain()[i]->isReduction() ==
+                  id->isReduction() &&
+              new_self_root->getRootDomain()[i]->isRFactorProduct() ==
                   id->isRFactorProduct() &&
-              new_self_root->axis(i)->isBroadcast() == id->isBroadcast(),
-          "Axes do not match for self replay.");
-      axis_map[id] = new_self_root->axis(i);
+              new_self_root->getRootDomain()[i]->isBroadcast() ==
+                  id->isBroadcast(),
+          "Axes ",
+          id,
+          " and ",
+          new_self_root->getRootDomain()[i],
+          " do not match for self replay.");
+      axis_map[id] = new_self_root->getRootDomain()[i];
       i++;
     }
   }
@@ -173,10 +184,28 @@ TensorDomain* TransformReplay::fullSelfReplay(
           "Error during replay, didn't replay an axis.");
       new_domain[i++] = it->second;
     }
+
+    if (self->hasRFactor()) {
+      std::vector<IterDomain*> new_rfactor_domain(
+          self->getMaybeRFactorDomain().size(), nullptr);
+      size_t i = 0;
+      for (auto id : self->getMaybeRFactorDomain()) {
+        auto it = replay.getReplay().find(id);
+        TORCH_INTERNAL_ASSERT(
+            it != replay.getReplay().end(),
+            "Error during replay, didn't replay an axis.");
+        new_rfactor_domain[i++] = it->second;
+      }
+      return new TensorDomain(
+          new_self_root->getRootDomain(),
+          new_rfactor_domain,
+          new_domain,
+          new_self_root->contiguity());
+    }
   }
 
   return new TensorDomain(
-      new_self_root->domain(), new_domain, self->contiguity());
+      new_self_root->getRootDomain(), new_domain, new_self_root->contiguity());
 }
 
 // Producer could have rfactor axes which consumer may want replayed. We can

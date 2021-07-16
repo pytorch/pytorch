@@ -76,6 +76,12 @@ class ComputeAt {
   //  to avoid generating repeated block broadcasts
   void hoistInnermostBroadcast();
 
+  // Update multi-output expressions. If one output is modified, all outputs
+  // should be modified as well. Propagate transformations, compute at, and
+  // produce at from tv to siblings. Run as final pass as it will invalidate the
+  // computeAt map originally computed.
+  void updateSiblings();
+
   // Run the computeAt pass
   void runPass();
 
