@@ -73,28 +73,34 @@ public:
     }
     return b;
   }
+  static __m256i mask(int64_t count) {
+    // A constant array to initialize an AVX2 register to be used as a 32-bit
+    // granularity mask.
+    alignas(64) constexpr int32_t tbl[9][8] = {
+      // clang-format off
+      {  0,  0,  0,  0,  0,  0,  0,  0,  },
+      { -1,  0,  0,  0,  0,  0,  0,  0,  },
+      { -1, -1,  0,  0,  0,  0,  0,  0,  },
+      { -1, -1, -1,  0,  0,  0,  0,  0,  },
+      { -1, -1, -1, -1,  0,  0,  0,  0,  },
+      { -1, -1, -1, -1, -1,  0,  0,  0,  },
+      { -1, -1, -1, -1, -1, -1,  0,  0,  },
+      { -1, -1, -1, -1, -1, -1, -1,  0,  },
+      { -1, -1, -1, -1, -1, -1, -1, -1,  },
+      // clang-format on
+    };
+    return _mm256_load_si256(reinterpret_cast<const __m256i*>(tbl[count]));
+  }
   static Vectorized<float> loadu(const void* ptr, int64_t count = size()) {
     if (count == size())
       return _mm256_loadu_ps(reinterpret_cast<const float*>(ptr));
-    __at_align32__ float tmp_values[size()];
-    // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
-    // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
-    // instructions while a loop would be compiled to one instruction.
-    for (auto i = 0; i < size(); ++i) {
-      tmp_values[i] = 0.0;
-    }
-    std::memcpy(
-        tmp_values, reinterpret_cast<const float*>(ptr), count * sizeof(float));
-    return _mm256_loadu_ps(tmp_values);
+    return _mm256_maskload_ps(reinterpret_cast<const float*>(ptr), mask(count));
   }
   void store(void* ptr, int64_t count = size()) const {
     if (count == size()) {
       _mm256_storeu_ps(reinterpret_cast<float*>(ptr), values);
-    } else if (count > 0) {
-      float tmp_values[size()];
-      _mm256_storeu_ps(reinterpret_cast<float*>(tmp_values), values);
-      std::memcpy(ptr, tmp_values, count * sizeof(float));
     }
+    _mm256_maskstore_ps(reinterpret_cast<float*>(ptr), mask(count), values);
   }
   const float& operator[](int idx) const  = delete;
   float& operator[](int idx) = delete;
