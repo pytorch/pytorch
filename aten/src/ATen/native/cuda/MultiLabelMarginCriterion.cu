@@ -3,16 +3,15 @@
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
 #include <c10/macros/Macros.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/native/cuda/block_reduce.cuh>
 
-#include <THC/THCReduceApplyUtils.cuh>
-#include <THC/THCTensorMathReduce.cuh>
 
 namespace at {
 namespace native {
 
 namespace {
-const int MULTILABELMARGIN_THREADS = 32;
+const int MULTILABELMARGIN_THREADS = 1024;
 
 void check_shape(const Tensor& input, const Tensor& target) {
   int64_t ndims = input.dim();
@@ -57,8 +56,6 @@ __global__ void multilabel_margin_loss_forward_kernel(
     int nframe,
     int dim,
     bool size_average) {
-  // Temporary sums (for mapreduce)
-  __shared__ accscalar_t sums[MULTILABELMARGIN_THREADS];
 
   // vectors:
   int k = blockIdx.x;
@@ -109,10 +106,9 @@ __global__ void multilabel_margin_loss_forward_kernel(
     }
   }
 
-  // reduce
-  using Op = ReduceAdd<accscalar_t>;
-  accscalar_t total_sum = reduceBlock<accscalar_t>(
-      sums, blockDim.x, sum, Op(), static_cast<accscalar_t>(0));
+  // Temporary sums (for mapreduce)
+  __shared__ accscalar_t smem[MULTILABELMARGIN_THREADS];
+  accscalar_t total_sum = cuda_utils::BlockReduceSum(sum, smem);
   if (threadIdx.x == 0) {
     if (size_average) {
       *output_k = static_cast<scalar_t>((total_sum / dim) / nframe);
@@ -134,8 +130,6 @@ __global__ void multilabel_margin_loss_backward_kernel(
     int dim,
     bool size_average,
     bool reduce) {
-  // Temporary sums (for mapreduce)
-  __shared__ accscalar_t sums[MULTILABELMARGIN_THREADS];
 
   int k = blockIdx.x;
   scalar_t* input_k = input + k * dim;
@@ -184,10 +178,9 @@ __global__ void multilabel_margin_loss_backward_kernel(
     }
     __syncthreads();
 
-    // reduce sum
-    using Op = ReduceAdd<accscalar_t>;
-    accscalar_t total_sum = reduceBlock<accscalar_t>(
-        sums, blockDim.x, sum, Op(), static_cast<accscalar_t>(0));
+    // Temporary sums (for mapreduce)
+    __shared__ accscalar_t smem[MULTILABELMARGIN_THREADS];
+    accscalar_t total_sum = cuda_utils::BlockReduceSum(sum, smem);
     if (threadIdx.x == 0) {
       grad_input_k[target_idx] += static_cast<scalar_t>(total_sum);
     }
@@ -359,10 +352,7 @@ void multilabel_margin_loss_backward_cuda_out_template(
         (input_.size(1) != 0) && (target_.dim() == 2) &&
             (target_.size(0) == nframe) && (target_.size(1) == dim),
         "inconsistent target size");
-    TORCH_CHECK(
-        (is_target_.dim() == 2) && (is_target.size(0) == nframe) &&
-            (is_target.size(1) == dim),
-        "inconsistent is_target size");
+    TORCH_CHECK(target_.sizes() == is_target_.sizes(), "inconsistent is_target size");
     dim3 blocks(grad_input.size(0));
     dim3 threads(MULTILABELMARGIN_THREADS);
 
