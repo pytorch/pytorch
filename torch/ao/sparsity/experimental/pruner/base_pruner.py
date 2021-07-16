@@ -59,6 +59,8 @@ class BasePruner(abc.ABC):
 
         self.module_groups = []
         self.enable_mask_update = False
+        self.activation_handles = []
+        self.bias_handles = []
 
         self.model = model
         # If no config -- try getting all the supported layers
@@ -130,15 +132,14 @@ class BasePruner(abc.ABC):
                                                  param(module.mask),
                                                  unsafe=True)
 
-            module.register_forward_hook(
+            self.activation_handles.append(module.register_forward_hook(
                 ActivationReconstruction(module.parametrizations.weight[0])
-            )
+            ))
 
             if module.bias is not None:
                 module.register_parameter('_bias', nn.Parameter(module.bias.detach()))
                 module.bias = None
-            module.register_forward_hook(self.bias_hook)
-
+            self.bias_handles.append(module.register_forward_hook(self.bias_hook))
 
     def convert(self, use_path=False, *args, **kwargs):
         for config in self.module_groups:

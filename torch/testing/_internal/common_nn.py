@@ -3200,6 +3200,14 @@ new_module_tests = [
     ),
     dict(
         module_name='AdaptiveAvgPool1d',
+        constructor_args=(3,),
+        cpp_constructor_args='torch::nn::AdaptiveAvgPool1dOptions(3)',
+        input_fn=lambda: torch.rand(3, 5),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
+    ),
+    dict(
+        module_name='AdaptiveAvgPool1d',
         constructor_args=(1,),
         cpp_constructor_args='torch::nn::AdaptiveAvgPool1dOptions(1)',
         input_fn=lambda: torch.rand(1, 3, 5),
