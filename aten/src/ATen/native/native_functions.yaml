@@ -943,11 +943,6 @@
     SparseCPU: bmm_sparse_cpu
     SparseCUDA: bmm_sparse_cuda
 
-- func: _bmm(Tensor self, Tensor mat2, *, bool deterministic=False) -> Tensor
-  variants: function
-  dispatch:
-    SparseCUDA: _bmm_sparse_cuda
-
 - func: bmm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
@@ -955,11 +950,6 @@
     CUDA: bmm_out_cuda
     SparseCPU: bmm_out_sparse_cpu
     SparseCUDA: bmm_out_sparse_cuda
-
-- func: _bmm.out(Tensor self, Tensor mat2, *, bool deterministic=False, Tensor(a!) out) -> Tensor(a!)
-  variants: function
-  dispatch:
-    SparseCUDA: _bmm_out_sparse_cuda
 
 - func: broadcast_tensors(Tensor[] tensors) -> Tensor[]
   device_check: NoCheck
