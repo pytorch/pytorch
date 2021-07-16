@@ -320,7 +320,7 @@ class Graph:
         """
         return _node_list(self)
 
-    def graph_copy(self, g : 'Graph', val_map : Dict[Node, Node]) -> 'Optional[Argument]':
+    def graph_copy(self, g : 'Graph', val_map : Dict[Node, Node], return_output_node=False) -> 'Optional[Argument]':
         """
         Copy all nodes from a given graph into ``self``.
 
@@ -342,7 +342,7 @@ class Graph:
                 continue
             if node.op == 'output':
                 rv = map_arg(node.args[0], lambda n: val_map[n])
-                return rv
+                return rv if not return_output_node else (rv, node)
             val_map[node] = self.node_copy(node, lambda n : val_map[n])
         return None
 
@@ -356,11 +356,13 @@ class Graph:
         """
         memo = memo if memo else {}
         g = Graph()
-        output_val = g.graph_copy(self, val_map=memo)
-        g.output(output_val)
-        for n, m in zip(g.nodes, self.nodes):
-            if n.op == 'output' and hasattr(m, 'type'):
-                n.type = m.type
+        output_vals = g.graph_copy(self, val_map=memo, return_output_node=True)
+        assert isinstance(output_vals, tuple)
+        output_val, old_output_val = output_vals
+        if hasattr(old_output_val, 'type'):
+            g.output(output_val, old_output_val.type)
+        else:
+            g.output(output_val)
         return g
 
     def create_node(self, op: str, target: 'Target',
