@@ -5106,43 +5106,8 @@ add_docstr(torch.xlogy,
            r"""
 xlogy(input, other, *, out=None) -> Tensor
 
-Computes ``input * log(other)`` with the following cases.
-
-.. math::
-    \text{out}_{i} = \begin{cases}
-        \text{NaN} & \text{if } \text{other}_{i} = \text{NaN} \\
-        0 & \text{if } \text{input}_{i} = 0.0 \\
-        \text{input}_{i} * \log{(\text{other}_{i})} & \text{otherwise}
-    \end{cases}
-
-Similar to SciPy's `scipy.special.xlogy`.
-
-""" + r"""
-
-Args:
-    input (Number or Tensor) : Multiplier
-    other (Number or Tensor) : Argument
-
-.. note:: At least one of :attr:`input` or :attr:`other` must be a tensor.
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> x = torch.zeros(5,)
-    >>> y = torch.tensor([-1, 0, 1, float('inf'), float('nan')])
-    >>> torch.xlogy(x, y)
-    tensor([0., 0., 0., 0., nan])
-    >>> x = torch.tensor([1, 2, 3])
-    >>> y = torch.tensor([3, 2, 1])
-    >>> torch.xlogy(x, y)
-    tensor([1.0986, 1.3863, 0.0000])
-    >>> torch.xlogy(x, 4)
-    tensor([1.3863, 2.7726, 4.1589])
-    >>> torch.xlogy(2, y)
-    tensor([2.1972, 1.3863, 0.0000])
-""".format(**common_args))
+Alias for :func:`torch.special.xlogy`.
+""")
 
 add_docstr(torch.logical_and,
            r"""
@@ -7275,33 +7240,7 @@ add_docstr(torch.polygamma,
            r"""
 polygamma(n, input, *, out=None) -> Tensor
 
-Computes the :math:`n^{th}` derivative of the digamma function on :attr:`input`.
-:math:`n \geq 0` is called the order of the polygamma function.
-
-.. math::
-    \psi^{(n)}(x) = \frac{d^{(n)}}{dx^{(n)}} \psi(x)
-
-.. note::
-    This function is implemented only for nonnegative integers :math:`n \geq 0`.
-""" + """
-Args:
-    n (int): the order of the polygamma function
-    {input}
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> a = torch.tensor([1, 0.5])
-    >>> torch.polygamma(1, a)
-    tensor([1.64493, 4.9348])
-    >>> torch.polygamma(2, a)
-    tensor([ -2.4041, -16.8288])
-    >>> torch.polygamma(3, a)
-    tensor([ 6.4939, 97.4091])
-    >>> torch.polygamma(4, a)
-    tensor([ -24.8863, -771.4742])
+Alias for :func:`torch.special.polygamma`.
 """.format(**common_args))
 
 add_docstr(torch.positive,
@@ -8427,8 +8366,6 @@ the order of equivalent elements.
 A namedtuple of (values, indices) is returned, where the `values` are the
 sorted values and `indices` are the indices of the elements in the original
 `input` tensor.
-
-.. warning:: `stable=True` only works on the CPU for now.
 
 Args:
     {input}

@@ -445,8 +445,6 @@ _(aten, _log_softmax_backward_data) \
 _(aten, logcumsumexp) \
 _(aten, logdet) \
 _(aten, logspace) \
-_(aten, xlogy) \
-_(aten, special_xlog1py) \
 _(aten, lstm) \
 _(aten, lstm_cell) \
 _(aten, lstsq) \
@@ -565,7 +563,6 @@ _(aten, pinverse) \
 _(aten, pixel_shuffle) \
 _(aten, pixel_unshuffle) \
 _(aten, poisson) \
-_(aten, polygamma) \
 _(aten, pow) \
 _(aten, float_power) \
 _(aten, prelu) \

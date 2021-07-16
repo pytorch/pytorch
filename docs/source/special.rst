@@ -27,6 +27,7 @@ Functions
 .. autofunction:: expm1
 .. autofunction:: exp2
 .. autofunction:: gammaln
+.. autofunction:: polygamma
 .. autofunction:: digamma
 .. autofunction:: psi
 .. autofunction:: i0
@@ -43,4 +44,5 @@ Functions
 .. autofunction:: round
 .. autofunction:: sinc
 .. autofunction:: xlog1py
+.. autofunction:: xlogy
 .. autofunction:: zeta
