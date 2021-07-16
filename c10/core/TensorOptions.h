@@ -667,6 +667,8 @@ inline DispatchKey computeDispatchKey(
           return DispatchKey::MSNPU;
         case DeviceType::XLA:
           return DispatchKey::XLA;
+        case DeviceType::Lazy:
+          return DispatchKey::Lazy;
         case DeviceType::MLC:
           return DispatchKey::MLC;
         case DeviceType::Vulkan:
@@ -768,6 +770,9 @@ inline DeviceType dispatchKeyToDeviceType(DispatchKey dispatch_key) {
     case DispatchKey::XLA:
     case DispatchKey::AutogradXLA:
       return DeviceType::XLA;
+    case DispatchKey::Lazy:
+    case DispatchKey::AutogradLazy:
+      return DeviceType::Lazy;
     case DispatchKey::Vulkan:
       return DeviceType::Vulkan;
     case DispatchKey::Meta:

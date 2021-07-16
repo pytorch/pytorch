@@ -840,6 +840,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return key_set_.has(DispatchKey::XLA);
   }
 
+  bool is_lazy() const {
+    return key_set_.has(DispatchKey::Lazy);
+  }
+
   bool is_hip() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.

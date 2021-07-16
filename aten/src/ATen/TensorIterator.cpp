@@ -1335,9 +1335,9 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
 
   if (is_meta_) return;
 
-  // XLA tensors don't have storage, so they don't have an underlying data pointer.
+  // XLA and lazy tensors don't have storage, so they don't have an underlying data pointer.
   // Nothing beyond this point is important for meta functions, so it's fine to exit early here.
-  if (common_device_.type() == DeviceType::XLA) return;
+  if (common_device_.type() == DeviceType::XLA || common_device_.type() == DeviceType::Lazy) return;
 
   for (auto& op : operands_) {
     TORCH_INTERNAL_ASSERT(op.tensor->defined());
