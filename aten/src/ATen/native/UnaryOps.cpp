@@ -367,17 +367,35 @@ Tensor angle(const Tensor& self) {
 
 Tensor real(const Tensor& self) {
   if (self.is_complex()) {
-    // real is never affected by conjugate bit, safe to use physical version
-    auto real_tensor = at::_view_as_real_physical(self);
+    Tensor real_tensor;
+    if (self.is_conj()) {
+      real_tensor = at::view_as_real(self._conj());
+    } else {
+      real_tensor = at::view_as_real(self);
+    }
     return at::select(real_tensor, real_tensor.dim() - 1, 0);
   } else {
     TORCH_CHECK(false, "real is not implemented for tensors with non-complex dtypes.");
   }
 }
 
+Tensor _neg_view(const Tensor& self) {
+  Tensor self_ = self.alias();
+  self_._set_neg(!self.is_neg());
+  namedinference::propagate_names(self_, self);
+  return self_;
+}
+
 Tensor imag(const Tensor& self) {
   if (self.is_complex()) {
-    auto real_tensor = at::view_as_real(self);
+    Tensor real_tensor;
+    if (self.is_conj()) {
+      real_tensor = at::view_as_real(self._conj());
+      // preemptively set the negative flag for the final imag tensor
+      real_tensor = real_tensor._neg_view();
+    } else {
+      real_tensor = at::view_as_real(self);
+    }
     return at::select(real_tensor, real_tensor.dim() - 1, 1);
   } else {
     TORCH_CHECK(false, "imag is not implemented for tensors with non-complex dtypes.");
@@ -405,10 +423,20 @@ Tensor& conj_physical_(Tensor& self) {
   return unary_op_impl_out(self, self, conj_physical_stub);
 }
 
+// No op if the neg bit is not set
+// else returns a new negated tensor with neg bit set to 0
+Tensor resolve_neg(const Tensor& self) {
+  if (!self.is_neg()) { return self; }
+  // negation is materialized in `copy_()` that clone ultimately calls into
+  return self.clone();
+}
+
+// No op if the conj bit is not set
+// else returns a new negated tensor with neg bit set to 0
 Tensor resolve_conj(const Tensor& self) {
   if (!self.is_conj()) { return self; }
-  // conjugation is handled in `copy_()` that clone ultimately calls into
-  return self.clone(self.suggest_memory_format());
+  // conjugation is materialized in `copy_()` that clone ultimately calls into
+  return self.clone();
 }
 
 Tensor _conj(const Tensor& self) {
@@ -443,6 +471,10 @@ Tensor special_erfc(const Tensor& self) { return self.erfc(); }
 // special_erfinv, alias for erfinv
 Tensor& special_erfinv_out(const Tensor& self, Tensor& result) { return at::erfinv_out(result, self); }
 Tensor special_erfinv(const Tensor& self) { return self.erfinv(); }
+
+// special_polygamma, alias for polygamma
+Tensor& special_polygamma_out(int64_t n, const Tensor& self, Tensor& result) { return at::polygamma_out(result, n, self); }
+Tensor special_polygamma(int64_t n, const Tensor& self) { return self.polygamma(n); }
 
 // special_psi, alias for digamma
 Tensor& special_psi_out(const Tensor& self, Tensor& result) { return at::digamma_out(result, self); }
