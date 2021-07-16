@@ -68,7 +68,6 @@ struct mnt_wrapper <c10::complex<double>>{
 };
 
 struct ReduceConfig {
-
   static constexpr int BLOCK_X = 0;
   static constexpr int BLOCK_Y = 1;
   static constexpr int CTA = 2;
@@ -79,7 +78,8 @@ struct ReduceConfig {
     : element_size_bytes(element_size_bytes)
     , num_inputs(num_inputs)
     , num_outputs(num_outputs) {}
-  int element_size_bytes;
+  
+	int element_size_bytes;
   int num_inputs;
   int num_outputs;
   int step_input = 1;
@@ -1035,7 +1035,7 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
   }
 
   // Adjust block_width and block_height
-	config.set_block_dimension<scalar_t>(dim0, dim1);
+  config.set_block_dimension<scalar_t>(dim0, dim1);
 
   int block_width = config.block_width;
   int block_height = config.block_height;
