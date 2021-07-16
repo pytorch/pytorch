@@ -487,6 +487,7 @@
 - func: all.out(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   structured: True
+  precomputed: int64_t dim
   dispatch:
     CPU, CUDA: all_out
 
@@ -508,6 +509,7 @@
 - func: any.out(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   structured: True
+  precomputed: int64_t dim
   dispatch:
     CPU, CUDA: any_out
 

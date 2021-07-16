@@ -447,9 +447,12 @@ def compute_meta_function_declaration(g: NativeFunctionsGroup) -> Optional[str]:
         parent_class = g.out.structured_inherits
         if parent_class is None:
             parent_class = "at::impl::MetaBase"
+        precomputed = "" if not g.structured else g.out.precomputed
+
         return f"""\
 struct TORCH_API structured_{name} : public {parent_class} {{
     void meta({args_str});
+    {precomputed if precomputed is not None else ""};
 }};
 """
 
