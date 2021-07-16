@@ -1156,6 +1156,18 @@ class DistributedDataParallel(Module, _Joinable):
                 to modify the behavior of the join hook at run time; all
                 :class:`_Joinable` instances sharing the same join context
                 manager are forwarded the same value for ``kwargs``.
+
+        The hook supports the following keyword arguments:
+            divide_by_initial_world_size (bool, optional):
+                If ``True``, then gradients are divided by the initial world
+                size that DDP was launched with.
+                If ``False``, then gradients are divided by the effective world
+                size (i.e. the number of non-joined processes), meaning that
+                the uneven inputs contribute more toward the global gradient.
+                Typically, this should be set to ``True`` if the degree of
+                unevenness is small but can be set to ``False`` in extreme
+                cases for possibly better results.
+                Default is ``True``.
         """
         divide_by_initial_world_size = kwargs.get("divide_by_initial_world_size", True)
         return _DDPJoinHook(
