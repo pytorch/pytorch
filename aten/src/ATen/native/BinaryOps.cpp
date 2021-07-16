@@ -368,8 +368,16 @@ Tensor add_relu(const Tensor& self, const Tensor& other, const Scalar& alpha) {
   return add_relu_impl(result, self, other, alpha);
 }
 
+Tensor add_relu(const Tensor& self, const Scalar& other, const Scalar& alpha) {
+  return add_relu(self, wrapped_scalar_tensor(other), alpha);
+}
+
 Tensor& add_relu_(Tensor& self, const Tensor& other, const Scalar& alpha) {
   return add_relu_impl(self, self, other, alpha);
+}
+
+Tensor& add_relu_(Tensor& self, const Scalar& other, const Scalar& alpha) {
+  return add_relu_(self, wrapped_scalar_tensor(other), alpha);
 }
 
 TORCH_IMPL_FUNC(copysign_out) (
