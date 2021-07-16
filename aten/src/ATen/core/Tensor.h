@@ -11,8 +11,13 @@ class TORCH_API OptionalTensorRef {
       : ref_(c10::intrusive_ptr<TensorImpl>(
             src.unsafeGetTensorImpl(),
             c10::raw::DontIncreaseRefcount{})) {
-    TORCH_INTERNAL_ASSERT(src.defined());
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(src.defined());
   }
+
+  OptionalTensorRef(const OptionalTensorRef& rhs)
+      : ref_(c10::intrusive_ptr<TensorImpl>(
+            rhs.ref_.unsafeGetTensorImpl(),
+            c10::raw::DontIncreaseRefcount{})) {}
 
   ~OptionalTensorRef() {
     ref_.unsafeReleaseTensorImpl();

@@ -45,6 +45,7 @@ TORCH_META_FUNC(nll_loss_forward)
   if (reduction == Reduction::None && n_dims == 2) {
     set_output(0, {batch_size}, self.options());
   } else {
+    // produce scalar output when reducing or input is 1d
     set_output(0, {}, self.options());
   }
 
@@ -90,7 +91,6 @@ static void nll_loss_out_frame(
 
   if (reduction == Reduction::None && n_dims == 2) {
     const auto batch_size = input.size(0);
-    output.resize_({batch_size});
 
     auto input_acc = input.accessor<scalar_t, 2>();
     auto target_acc = target.accessor<target_t, 1>();
@@ -119,9 +119,6 @@ static void nll_loss_out_frame(
 
     return;
   }
-
-  // produce scalar output when reducing or input is 1d
-  output.resize_({});
 
   auto input_contiguous = input.contiguous();
   auto target_contiguous = target.contiguous();
