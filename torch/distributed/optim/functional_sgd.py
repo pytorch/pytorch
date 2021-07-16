@@ -45,6 +45,8 @@ class _FunctionalSGD(object):
         """ Similar to self.step, but operates on a single parameter and
             its gradient.
         """
+        # TODO: Once step_param interface is robust, refactor step to call
+        # step param on each param.
         weight_decay = self.defaults['weight_decay']
         momentum = self.defaults['momentum']
         dampening = self.defaults['dampening']
