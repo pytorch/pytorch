@@ -5,7 +5,6 @@ name: Linux CI (periodic-pytorch-linux-xenial-cuda11.3-cudnn8-py3.6-gcc7)
 
 on:
   # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
-  pull_request:
   schedule:
     - cron: 45 0,4,8,12,16,20 * * *
   workflow_dispatch:
