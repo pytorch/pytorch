@@ -85,7 +85,7 @@ __global__ void upsample_nearest2d_nhwc_out_frame(
     const size_t h1 = height1 == height2 ? h2 : nearest_neighbor_compute_source_index(height_scale, h2, height1);
     const size_t w1 = width1 == width2 ? w2 : nearest_neighbor_compute_source_index(width_scale, w2, width1);
 
-    odata[index] = idata[idx_cl(n, h1, w1, c, height1, width1, channels)];
+    odata[index] = idata[idx_2d_cl(n, h1, w1, c, height1, width1, channels)];
   }
 }
 
@@ -176,7 +176,7 @@ __global__ void upsample_nearest2d_backward_nhwc_out_frame(
     accscalar_t grad = 0;
     for (int ih = h1; ih < h1_up; ih++) {
       for (int iw = w1; iw < w1_up; iw++) {
-        grad += go[idx_cl(n, ih, iw, c, height1, width1, channels)];
+        grad += go[idx_2d_cl(n, ih, iw, c, height1, width1, channels)];
       }
     }
     gi[index] = static_cast<scalar_t>(grad);

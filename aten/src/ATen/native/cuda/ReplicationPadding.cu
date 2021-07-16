@@ -53,7 +53,7 @@ template <typename scalar_t>
 __global__ void replication_pad_backward_kernel1d(
     PackedTensorAccessor64<scalar_t, 3> gradInput,
     PackedTensorAccessor64<scalar_t, 3> gradOutput,
-    int padL, int padR, int channel, int height, int gi_numel, int y_shift, int z_shift) {
+    int padL, int padR, int channel, int height, size_t gi_numel, int y_shift, int z_shift) {
 
   int outputPointId = threadIdx.x + blockIdx.x * blockDim.x;
   int plane = blockIdx.y + y_shift;
@@ -110,7 +110,7 @@ __global__ void replication_pad_backward_kernel2d(
     PackedTensorAccessor64<scalar_t, 4> gradInput,
     PackedTensorAccessor64<scalar_t, 4> gradOutput,
     int padT, int padB, int padL, int padR,
-    int channel, int height, int width, int gi_numel,
+    int channel, int height, int width, size_t gi_numel,
     int y_shift, int z_shift) {
 
   int outputPointId = threadIdx.x + blockIdx.x * blockDim.x;
@@ -181,7 +181,7 @@ __global__ void replication_pad_backward_kernel3d(
     PackedTensorAccessor64<scalar_t, 5> gradInput,
     PackedTensorAccessor64<scalar_t, 5> gradOutput,
     int pfront, int pback, int ptop, int pbottom, int pleft, int pright,
-    int channel, int depth, int height, int width, int gi_numel,
+    int channel, int depth, int height, int width, size_t gi_numel,
     int y_shift, int z_shift) {
   int outputPointId = threadIdx.x + blockIdx.x * blockDim.x;
   int plane = blockIdx.y + y_shift;

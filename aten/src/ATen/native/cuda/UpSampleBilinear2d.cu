@@ -104,13 +104,13 @@ __global__ void upsample_bilinear2d_nhwc_out_frame(
     const accscalar_t w0lambda = static_cast<accscalar_t>(1) - w1lambda;
 
     const accscalar_t val = h0lambda * (
-        w0lambda * idata[idx_cl(n, h1, w1, c, height1, width1, channels)] +
-        w1lambda * idata[idx_cl(n, h1, w1 + w1p, c, height1, width1, channels)]
+        w0lambda * idata[idx_2d_cl(n, h1, w1, c, height1, width1, channels)] +
+        w1lambda * idata[idx_2d_cl(n, h1, w1 + w1p, c, height1, width1, channels)]
       ) + h1lambda * (
-        w0lambda * idata[idx_cl(n, h1 + h1p, w1, c, height1, width1, channels)] +
-        w1lambda * idata[idx_cl(n, h1 + h1p, w1 + w1p, c, height1, width1, channels)]
+        w0lambda * idata[idx_2d_cl(n, h1 + h1p, w1, c, height1, width1, channels)] +
+        w1lambda * idata[idx_2d_cl(n, h1 + h1p, w1 + w1p, c, height1, width1, channels)]
       );
-    odata[idx_cl(n, h2, w2, c, height2, width2, channels)] = static_cast<scalar_t>(val);
+    odata[idx_2d_cl(n, h2, w2, c, height2, width2, channels)] = static_cast<scalar_t>(val);
   }
 }
 
@@ -155,25 +155,25 @@ __global__ void upsample_bilinear2d_backward_out_frame(
     const scalar_t d2val = odata[index];
     fastAtomicAdd(
         idata,
-        idx(nc, height1, width1, h1, w1),
+        idx_2d(nc, height1, width1, h1, w1),
         i_numel,
         static_cast<scalar_t>(h0lambda * w0lambda * d2val),
         true);
     fastAtomicAdd(
         idata,
-        idx(nc, height1, width1, h1, w1 + w1p),
+        idx_2d(nc, height1, width1, h1, w1 + w1p),
         i_numel,
         static_cast<scalar_t>(h0lambda * w1lambda * d2val),
         true);
     fastAtomicAdd(
         idata,
-        idx(nc, height1, width1, h1 + h1p, w1),
+        idx_2d(nc, height1, width1, h1 + h1p, w1),
         i_numel,
         static_cast<scalar_t>(h1lambda * w0lambda * d2val),
         true);
     fastAtomicAdd(
         idata,
-        idx(nc, height1, width1, h1 + h1p, w1 + w1p),
+        idx_2d(nc, height1, width1, h1 + h1p, w1 + w1p),
         i_numel,
         static_cast<scalar_t>(h1lambda * w1lambda * d2val),
         true);
@@ -222,25 +222,25 @@ __global__ void upsample_bilinear2d_backward_nhwc_out_frame(
     const scalar_t d2val = odata[index];
     fastAtomicAdd(
         idata,
-        idx_cl(n, h1, w1, c, height1, width1, channels),
+        idx_2d_cl(n, h1, w1, c, height1, width1, channels),
         i_numel,
         static_cast<scalar_t>(h0lambda * w0lambda * d2val),
         true);
     fastAtomicAdd(
         idata,
-        idx_cl(n, h1, w1 + w1p, c, height1, width1, channels),
+        idx_2d_cl(n, h1, w1 + w1p, c, height1, width1, channels),
         i_numel,
         static_cast<scalar_t>(h0lambda * w1lambda * d2val),
         true);
     fastAtomicAdd(
         idata,
-        idx_cl(n, h1 + h1p, w1, c, height1, width1, channels),
+        idx_2d_cl(n, h1 + h1p, w1, c, height1, width1, channels),
         i_numel,
         static_cast<scalar_t>(h1lambda * w0lambda * d2val),
         true);
     fastAtomicAdd(
         idata,
-        idx_cl(n, h1 + h1p, w1 + w1p, c, height1, width1, channels),
+        idx_2d_cl(n, h1 + h1p, w1 + w1p, c, height1, width1, channels),
         i_numel,
         static_cast<scalar_t>(h1lambda * w1lambda * d2val),
         true);

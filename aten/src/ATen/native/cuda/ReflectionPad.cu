@@ -520,7 +520,7 @@ TORCH_IMPL_FUNC(reflection_pad1d_backward_out_cuda)(const Tensor& grad_output_,
       reflection_pad1d_backward_out_kernel<<<
         grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
           grad_input.data_ptr<scalar_t>(), grad_output.data_ptr<scalar_t>(),
-          input_w, pad_l, pad_r);
+          input_w, pad_l, pad_r, grad_input.numel());
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   );
