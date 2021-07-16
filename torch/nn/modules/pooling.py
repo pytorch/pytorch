@@ -140,7 +140,6 @@ class MaxPool2d(_MaxPoolNd):
               W_{out} = \left\lfloor\frac{W_{in} + 2 * \text{padding[1]} - \text{dilation[1]}
                     \times (\text{kernel\_size[1]} - 1) - 1}{\text{stride[1]}} + 1\right\rfloor
 
-
     Examples::
 
         >>> # pool of square window of size=3, stride=2
