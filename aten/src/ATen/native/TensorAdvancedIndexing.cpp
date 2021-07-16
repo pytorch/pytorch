@@ -510,7 +510,7 @@ Tensor & _index_put_impl_(Tensor & self, const torch::List<c10::optional<Tensor>
     }
   }
   auto value_ = value;
-  if (value.device() != self.device() && value.numel() == 1) {
+  if (value.device() != self.device() && value.numel() == 1 && value.dim() == 0) {
     value_ = value.to(self.device());
   }
   at::assert_no_overlap(self, value);
