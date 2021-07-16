@@ -74,10 +74,10 @@ class ProgressMeter:
             self._flush()
 
     def _write(self, s: str) -> None:
-        sys.stdout.write(s)
+        sys.stderr.write(s)
 
     def _flush(self) -> None:
-        sys.stdout.flush()
+        sys.stderr.flush()
 
     def update(self, msg: str) -> None:
         if self.disable_progress_bar:
@@ -152,8 +152,12 @@ def run_shell_command(args: List[str]) -> Tuple[int, str]:
     if VERBOSE:
         print("Running: ", " ".join(args))
     result = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    stdout, stderr = result.stdout.decode("utf-8"), result.stderr.decode("utf-8")
-    return result.returncode, f"{stdout}\n{stderr}\n"
+    stdout, stderr = (
+        result.stdout.decode("utf-8").strip(),
+        result.stderr.decode("utf-8").strip(),
+    )
+    output = f"{stdout}\n{stderr}"
+    return result.returncode, output
 
 
 def split_negative_from_positive_patterns(patterns: Iterable[str]) -> Patterns:
@@ -201,8 +205,8 @@ def filter_files(files: Iterable[str], file_patterns: Patterns) -> Iterable[str]
 
 def get_all_files(paths: List[str]) -> List[str]:
     """Returns all files that are tracked by git in the given paths."""
-    returncode, output = run_shell_command(["git", "ls-files"] + paths)
-    return output.strip().split("\n")
+    _, output = run_shell_command(["git", "ls-files"] + paths)
+    return output.strip().splitlines()
 
 
 def find_changed_lines(diff: str) -> Dict[str, List[Tuple[int, int]]]:
@@ -245,14 +249,18 @@ def run_shell_commands_in_parallel(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await proc.communicate()
+        out = await proc.communicate()
+        stdout, stderr = out[0].decode("utf-8").strip(), out[1].decode("utf-8").strip()
         returncode = proc.returncode if proc.returncode is not None else -1
 
         if returncode != 0:
-            progress_meter.print(f"[clang-tidy] Warning detected in {filename}")
+            msg = f"Warning detected in {filename}\n{stdout}"
+            if VERBOSE:
+                msg += f"\n{stderr}"
+            progress_meter.print(msg)
         progress_meter.update(f"Processed {filename}")
 
-        return returncode, stdout.decode("utf-8"), stderr.decode("utf-8")
+        return returncode, stdout, stderr
 
     async def gather_with_concurrency(n: int, tasks: List[Any]) -> Any:
         semaphore = asyncio.Semaphore(n)
@@ -301,30 +309,17 @@ def run_clang_tidy(
     if line_filters:
         command += ["-line-filter", json.dumps(line_filters)]
 
-    if options.parallel:
-        commands = [
-            (list(command) + [map_filename(options.compile_commands_dir, f)], f)
-            for f in files
-        ]
-        result = run_shell_commands_in_parallel(commands, options.disable_progress_bar)
-        returncode = (
-            0
-            if sum([returncode for (returncode, stdout, stderr) in result]) == 0
-            else -1
-        )
-        output = "\n".join(
-            [f"{stdout}\n{stderr}\n" for (returncode, stdout, stderr) in result]
-        )
-    else:
-        command += map_filenames(options.compile_commands_dir, files)
-        if options.dry_run:
-            command = [re.sub(r"^([{[].*[]}])$", r"'\1'", arg) for arg in command]
-            return 0, " ".join(command)
-        returncode, output = run_shell_command(command)
+    commands = [
+        (list(command) + [map_filename(options.compile_commands_dir, f)], f)
+        for f in files
+    ]
 
-    if not options.keep_going and "[clang-diagnostic-error]" in output:
-        message = "Found clang-diagnostic-errors in clang-tidy output: {}"
-        raise RuntimeError(message.format(output))
+    if options.dry_run:
+        return 0, str([c for c, _ in commands])
+
+    result = run_shell_commands_in_parallel(commands, options.disable_progress_bar)
+    returncode = 0 if sum([returncode for (returncode, _, _) in result]) == 0 else -1
+    output = "\n".join([f"{stdout}\n{stderr}" for (_, stdout, stderr) in result])
 
     return returncode, output
 
@@ -333,7 +328,7 @@ def extract_warnings(
     output: str, base_dir: str = "."
 ) -> Dict[str, Dict[int, Set[str]]]:
     rc: Dict[str, Dict[int, Set[str]]] = {}
-    for line in output.split("\n"):
+    for line in output.splitlines():
         p = CLANG_WARNING_PATTERN.match(line)
         if p is None:
             continue
@@ -424,8 +419,7 @@ def run(options: Any) -> int:
         print("No files detected.")
         sys.exit()
 
-    returncode, output = run_clang_tidy(options, line_filters, files)
-    clang_tidy_output = output
+    returncode, clang_tidy_output = run_clang_tidy(options, line_filters, files)
 
     if options.suppress_diagnostics:
         warnings = extract_warnings(
@@ -437,10 +431,16 @@ def run(options: Any) -> int:
             apply_nolint(fname, warnings[fname])
             if os.path.relpath(fname) != mapped_fname:
                 shutil.copyfile(fname, mapped_fname)
+
     if options.dry_run:
         print(clang_tidy_output)
-    pwd = os.getcwd() + "/"
-    for line in clang_tidy_output.splitlines():
-        if line.startswith(pwd):
-            print(line[len(pwd) :])
+    elif returncode != 0:
+        print("[clang-tidy] Warnings detected!")
+        print("Summary:")
+        pwd = os.getcwd() + "/"
+        for line in clang_tidy_output.splitlines():
+            if line.startswith(pwd):
+                print(line[len(pwd) :])
+        print()
+
     return returncode
