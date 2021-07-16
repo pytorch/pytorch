@@ -211,7 +211,6 @@ struct ReduceConfig {
   }
 };
 
-
 std::ostream& operator<<(std::ostream& out, const ReduceConfig& config);
 
 template<int nt, int output_vec_size, typename R>
@@ -1036,7 +1035,8 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
 
   // Adjust block_width and block_height
   config.set_block_dimension<scalar_t>(dim0, dim1);
-  int block_width = config.block_width;
+  
+	int block_width = config.block_width;
   int block_height = config.block_height;
 
   if (iter.ndim() == 0 || reduction_on_fastest_striding_dimension) {
