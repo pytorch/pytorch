@@ -3728,8 +3728,6 @@ std::tuple<Tensor&,Tensor&> legacy_lstsq_out(
   return std::tuple<Tensor&, Tensor&>(B_out, A_out);
 }
 
-// The backward for this function is just a specialized version of
-// lu.backward, which is implemented in /torch/_autograd_functions.py
 Tensor _det_lu_based_helper_backward_helper(
   const Tensor& det_grad,
   const Tensor& det,
