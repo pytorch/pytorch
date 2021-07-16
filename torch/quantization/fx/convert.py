@@ -157,10 +157,6 @@ def convert(model: GraphModule, is_reference: bool = False,
     patterns, node_name_to_scope, prepare_custom_config_dict = restore_state(model)
     qconfig_map: Dict[str, QConfigAny] = model._qconfig_map  # type: ignore[assignment]
 
-    # move to cpu since we only have quantized cpu kernels
-    model.eval()
-    if not is_reference:
-        model.cpu()
     # mapping from fully qualified module name to module instance
     # for example,
     # {
