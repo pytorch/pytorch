@@ -49,9 +49,6 @@ Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Ten
 static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArrayRef sum_dims_, bool keepdim) {
   // assumes that tensors have been pre-unsqueezed (so that all dimensions match - after broadcasting)
   // but makes no other assumptions on the order of dimensions
-  if (left_.dim() != right_.dim())
-    std::raise(SIGINT);
-  
   TORCH_CHECK(left_.dim()==right_.dim(), "number of dimensions must match");
   if (sum_dims_.size() == 0)
     return at::mul(left_, right_);
@@ -551,31 +548,32 @@ Tensor _trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
   int64_t slicemul3 = (expand3[unroll_dim] ? 0 : 1);
 
   auto output = at::zeros(output_size, i1.options());
-  std::cout << "output: " << output << " output_size: " << output_size << std::endl;
-  if (output_size[0] == 0 && output.numel() == 0) {
-    return output;
-  }
-  
-  if (! sumdim[unroll_dim]) {
-    for (const auto k : c10::irange(unroll_size)) {
-      Tensor buf = at::native::sumproduct_pair(i1.narrow(unroll_dim, k * slicemul1, 1),
-                                               i2.narrow(unroll_dim, k * slicemul2, 1),
-                                               sum_dims_12, true);
-      buf = at::native::sumproduct_pair(buf, i3.narrow(unroll_dim, k * slicemul3, 1), sum_dims_23, true);
-      output.narrow(unroll_dim, k, 1).add_(buf);
+
+  // Three conditionals are necessary since this function is meant to work for both
+  // forward and backward, which changes the dimensions of the inputs.
+  if (output.numel() != 0 && i1.numel() != 0 && i2.numel() != 0) {
+    if (! sumdim[unroll_dim]) {
+      for (const auto k : c10::irange(unroll_size)) {
+        Tensor buf = at::native::sumproduct_pair(i1.narrow(unroll_dim, k * slicemul1, 1),
+                                                 i2.narrow(unroll_dim, k * slicemul2, 1),
+                                                 sum_dims_12, true);
+        buf = at::native::sumproduct_pair(buf, i3.narrow(unroll_dim, k * slicemul3, 1), sum_dims_23, true);
+        output.narrow(unroll_dim, k, 1).add_(buf);
+      }
     }
-  }
-  else {
-    for (const auto k : c10::irange(unroll_size)) {
-      Tensor buf = at::native::sumproduct_pair(i1.narrow(unroll_dim, k*slicemul1, 1),
-                                               i2.narrow(unroll_dim, k*slicemul2, 1), sum_dims_12, true);
-      buf = at::native::sumproduct_pair(buf, i3.narrow(unroll_dim, k*slicemul3, 1), sum_dims_23, true);
-      output.add_(buf);
+    else {
+      for (const auto k : c10::irange(unroll_size)) {
+        Tensor buf = at::native::sumproduct_pair(i1.narrow(unroll_dim, k*slicemul1, 1),
+                                                 i2.narrow(unroll_dim, k*slicemul2, 1), sum_dims_12, true);
+        buf = at::native::sumproduct_pair(buf, i3.narrow(unroll_dim, k*slicemul3, 1), sum_dims_23, true);
+        output.add_(buf);
+      }
     }
   }
   for (int64_t i = output.dim()-1; i >= 0; i--)
     if (sumdim[i])
       output.squeeze_(i);
+
   return output;
 }
 
@@ -603,8 +601,10 @@ Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor& weight
   auto size1 = input1.sizes();
   output_size.insert(output_size.end(), size1.begin(), size1.end() - 1);
   output_size.push_back(weight.size(0));
+
   auto input1_flattened = input1.reshape({-1, input1.size(-1)});
   auto input2_flattened = input2.reshape({-1, input2.size(-1)});
+
   Tensor output = at::_trilinear(input1_flattened, weight, input2_flattened, {1,3}, {0}, {1,2}, {2,3}).reshape(output_size);
   if (bias.defined()) {
     output = output + bias;

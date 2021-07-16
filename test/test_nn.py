@@ -13144,11 +13144,18 @@ class TestNNDeviceType(NNTestCase):
         mod = torch.nn.Bilinear(20, 30, 40)
         inp1 = torch.randn(0, 10, 20)
         inp2 = torch.randn(0, 10, 30)
+        inp1.requires_grad_(True)
+        inp2.requires_grad_(True)
+
         output = mod(inp1, inp2)
-        output.sum().backward()
+        g0 = torch.rand_like(output)
+        output.backward(g0)
 
         self.assertEqual(inp1, torch.zeros_like(inp1))
         self.assertEqual(inp2, torch.zeros_like(inp2))
+
+        self.assertEqual(inp1.grad, torch.zeros_like(inp1))
+        self.assertEqual(inp2.grad, torch.zeros_like(inp2))
 
     @dtypes(torch.float32, torch.complex64)
     def test_ReflectionPad_empty(self, device, dtype):
