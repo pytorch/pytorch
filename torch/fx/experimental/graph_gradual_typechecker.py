@@ -6,8 +6,11 @@ from typing import Callable, Dict
 from torch.fx.node import Target, Node
 from torch.nn.modules.batchnorm import BatchNorm2d
 from torch.nn.modules.conv import Conv2d
+from torch.fx.experimental.refinement_types import Equality
+from unification import Var
 
 _INFERENCE_RULES: Dict[Target, Callable] = {}
+_REFINEMENT_RULES: Dict[Target, Callable] = {}
 
 
 def expand_to_tensor_dim(t, n):
@@ -68,6 +71,14 @@ def register_inference_rule(call_target):
         if call_target in _INFERENCE_RULES:
             raise RuntimeError('Inference rule already registered for {call_target}!')
         _INFERENCE_RULES[call_target] = fn
+        return fn
+    return register
+
+def register_refinement_rule(call_target):
+    def register(fn):
+        if call_target in _REFINEMENT_RULES:
+            raise RuntimeError('Refinement rule already registered for {call_target}!')
+        _REFINEMENT_RULES[call_target] = fn
         return fn
     return register
 
@@ -213,11 +224,11 @@ def calculate_out_dimension(d_in, module_instance, index):
     """
     padding = (module_instance.padding, module_instance.padding) \
         if isinstance(module_instance.padding, int) else module_instance.padding
-    kernel_size = (module_instance.kernel_size, module_instance.kernel_size)\
+    kernel_size = (module_instance.kernel_size, module_instance.kernel_size) \
         if isinstance(module_instance.kernel_size, int) else module_instance.kernel_size
     stride = (module_instance.stride, module_instance.stride) \
         if isinstance(module_instance.stride, int) else module_instance.stride
-    dilation = (module_instance.dilation, module_instance.dilation)\
+    dilation = (module_instance.dilation, module_instance.dilation) \
         if isinstance(module_instance.dilation, int) else module_instance.dilation
 
     if d_in == Dyn:
@@ -500,3 +511,109 @@ class GraphTypeChecker:
 
         else:
             raise NotImplementedError("Method not yet implemented")
+
+
+@register_refinement_rule(Conv2d)
+def conv2d_refinement_rule(n: Node):
+    assert isinstance(n.args[0], Node)
+    arg_type = n.args[0].type
+    if isinstance(arg_type, TensorType) and isinstance(n.type, TensorType):
+        return [Equality(arg_type.__args__[0], n.type.__args__[0])]
+
+# todo needs review for addition. Is this constraint correct?
+@register_refinement_rule(BatchNorm2d)
+@register_refinement_rule(torch.nn.ReLU)
+@register_refinement_rule(torch.nn.AdaptiveAvgPool2d)
+@register_refinement_rule(torch.add)
+@register_refinement_rule(operator.add)
+def all_eq(n: Node):
+    assert isinstance(n.args[0], Node)
+    arg_type = n.args[0].type
+    if isinstance(arg_type, TensorType) and isinstance(n.type, TensorType):
+        args1 = arg_type.__args__
+        args2 = n.type.__args__
+        return [Equality(args1[i], args2[i]) for i in range(len(args1))]
+
+
+@register_refinement_rule(torch.nn.MaxPool2d)
+def first_two(n: Node):
+    assert isinstance(n.args[0], Node)
+    arg_type = n.args[0].type
+    if isinstance(arg_type, TensorType) and isinstance(n.type, TensorType):
+        args1 = arg_type.__args__
+        args2 = n.type.__args__
+        return [Equality(args1[0], args2[0]), Equality(args1[1], args2[1])]
+
+class Refine:
+    def __init__(self, traced):
+        self.constraints = []
+        self.traced = traced
+        self.curr_symbol = self.symbol_gen()
+
+    def symbol_gen(self):
+        val = [0]
+        def inc():
+            val[0] += 1
+            return val[0]
+        return inc
+
+    def refine(self):
+        """
+        A gradual type checker for graphs
+        Effect: every node's field type will be
+        populated with a type after type-checking is done
+        """
+        graph = self.traced.graph
+
+        # type check every node with gradual type rules
+        # if any node does not type check return false
+        for n in graph.nodes:
+            self.refine_node(n)
+        return True
+
+    def replace_dyn_with_fresh_var(self, typ):
+        if typ == Dyn:
+            new_symbol = Var(self.curr_symbol())
+            return new_symbol
+        elif isinstance(typ, TensorType):
+            new_args = []
+            for a in typ.__args__:
+                if a == Dyn:
+                    new_symbol = Var(self.curr_symbol())
+                    new_args.append(new_symbol)
+                else:
+                    new_args.append(a)
+            return TensorType(tuple(new_args))
+        else:
+            return typ
+
+    def refine_node(self, n: Node):
+        if n.type is None:
+            n.type = Dyn
+
+        n.type = self.replace_dyn_with_fresh_var(n.type)
+
+        # if n.op == 'placeholder':
+        #     pass
+
+        if n.op == 'call_function':
+            if n.target in _REFINEMENT_RULES:
+                self.constraints += _REFINEMENT_RULES[n.target](n)
+            else:
+                pass
+                # raise RuntimeError(f'No refinement rule registered for target {n.target}!')
+
+        if n.op == 'call_module':
+            module_instance = self.traced.get_submodule(n.target)
+            if type(module_instance) in _REFINEMENT_RULES:
+                self.constraints += _REFINEMENT_RULES[type(module_instance)](n)
+            else:
+                pass
+                # raise RuntimeError(f'No inference rule registered for class {type(module_instance)}!')
+
+        # if n.op == 'output':
+        #     assert isinstance(n.args[0], Node)
+        #     pass
+
+        else:
+            pass
