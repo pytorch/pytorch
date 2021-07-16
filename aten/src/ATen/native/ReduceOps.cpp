@@ -145,24 +145,29 @@ TORCH_META_FUNC2(sum, dim_IntList)
     dtype = at::native::get_dtype_from_self(self, opt_dtype, true);
   }
 
-  auto shape = get_reduction_shape(self, dim, keepdim);
+  DimVector dims(dim);
+  maybe_wrap_dims(dims, self.dim());
+
+  auto shape = get_reduction_shape(self, dims, keepdim);
   set_output(shape, self.options().dtype(dtype));
-  namedinference::propagate_names_for_reduction(result, self, dim, keepdim);
+  namedinference::propagate_names_for_reduction(result, self, dims, keepdim);
 }
 
 TORCH_META_FUNC2(mean, dim)
 (const Tensor& self, IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  ScalarType dtype = at::native::get_dtype_from_self(self, opt_dtype, true);
+  ScalarType dtype;
+  const auto& result = maybe_get_output();
 
-  TORCH_CHECK(
-      at::isFloatingType(dtype) || at::isComplexType(dtype),
-      "Can only calculate the mean of floating types. Got ",
-      toString(dtype), " instead.");
+  if (result.defined()) {
+    dtype = opt_dtype.value_or(result.scalar_type());
+  } else {
+    dtype = at::native::get_dtype_from_self(self, opt_dtype, true);
+  }
 
   DimVector dims(dim);
-  DimVector shape = get_reduction_shape(self, dims, keepdim);
-
   maybe_wrap_dims(dims, self.dim());
+
+  DimVector shape = get_reduction_shape(self, dims, keepdim);
   set_output(shape, self.options().dtype(dtype));
   namedinference::propagate_names_for_reduction(result, self, dim, keepdim);
 }
