@@ -5,10 +5,13 @@ These **needs** to be in global scope since Py2 doesn't support serializing
 static methods.
 """
 
-import torch
-import re
 import collections
+import numpy as np
+import re
+
 from torch._six import string_classes
+
+import torch
 
 np_str_obj_array_pattern = re.compile(r'[SaUO]')
 
@@ -18,10 +21,8 @@ def default_convert(data):
     elem_type = type(data)
     if isinstance(data, torch.Tensor):
         return data
-    elif elem_type.__module__ == 'numpy' and elem_type.__name__ != 'str_' \
-            and elem_type.__name__ != 'string_':
-        # array of string classes and object
-        if elem_type.__name__ == 'ndarray' \
+    elif isinstance(data, (np.generic, np.ndarray)) and not isinstance(data, np.flexible):
+        if isinstance(data, np.ndarray) \
                 and np_str_obj_array_pattern.search(data.dtype.str) is not None:
             return data
         return torch.as_tensor(data)
@@ -54,10 +55,10 @@ def default_collate(batch):
             storage = elem.storage()._new_shared(numel)
             out = elem.new(storage)
         return torch.stack(batch, 0, out=out)
-    elif elem_type.__module__ == 'numpy' and elem_type.__name__ != 'str_' \
-            and elem_type.__name__ != 'string_':
-        if elem_type.__name__ == 'ndarray' or elem_type.__name__ == 'memmap':
-            # array of string classes and object
+    # Exclude non-numerical type
+    elif isinstance(elem, (np.generic, np.ndarray)) and not isinstance(elem, np.flexible):
+        # For both ndarray and memmap
+        if isinstance(elem, np.ndarray):
             if np_str_obj_array_pattern.search(elem.dtype.str) is not None:
                 raise TypeError(default_collate_err_msg_format.format(elem.dtype))
 
