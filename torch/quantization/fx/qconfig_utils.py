@@ -1,7 +1,7 @@
 import torch
 from collections import OrderedDict, defaultdict
 from typing import Union, Callable, Any, Dict, Tuple, Set
-from torch.quantization.qconfig import add_device_to_obs_ctr_in_qconfig
+from torch.quantization.qconfig import create_qconfig_with_module
 
 import re
 
@@ -158,7 +158,7 @@ def generate_qconfig_map(
             module_name, _ = _parent_name(node.target)
             qconfig = maybe_adjust_qconfig_for_module_type_or_name(
                 qconfig_dict, type(modules[module_name]), module_name, global_qconfig)
-            qconfig = add_device_to_obs_ctr_in_qconfig(qconfig, modules.get(node.target, None))
+            qconfig = create_qconfig_with_module(qconfig, modules.get(node.target, None))
         elif node.op == "call_function":
             # precedence: module_name_qconfig
             # > function_qconfig > global_qconfig
@@ -175,7 +175,7 @@ def generate_qconfig_map(
             qconfig = maybe_adjust_qconfig_for_module_name_object_type_order(
                 qconfig_dict, module_path, node.target, cur_object_type_idx,
                 qconfig)
-            qconfig = add_device_to_obs_ctr_in_qconfig(qconfig, modules.get(node.target, None))
+            qconfig = create_qconfig_with_module(qconfig, modules.get(node.target, None))
 
         elif node.op == "call_method":
             module_path, module_type = node_name_to_scope[node.name]
@@ -184,7 +184,7 @@ def generate_qconfig_map(
                 qconfig_dict, module_type, module_path, global_qconfig)
             # Currently call_method does not support modifying qconfig
             # by order, we can add this later if it is needed.
-            qconfig = add_device_to_obs_ctr_in_qconfig(qconfig, modules.get(node.target, None))
+            qconfig = create_qconfig_with_module(qconfig, modules.get(node.target, None))
 
         elif node.op == 'call_module':
             qconfig = maybe_adjust_qconfig_for_module_type_or_name(
@@ -201,7 +201,7 @@ def generate_qconfig_map(
             qconfig = maybe_adjust_qconfig_for_module_name_object_type_order(
                 qconfig_dict, parent_name, module_type, cur_object_type_idx,
                 qconfig)
-            qconfig = add_device_to_obs_ctr_in_qconfig(qconfig, modules.get(node.target, None))
+            qconfig = create_qconfig_with_module(qconfig, modules.get(node.target, None))
 
             # regex is not supported eager mode propagate_qconfig_, we'll
             # need to set the qconfig explicitly here in case regex

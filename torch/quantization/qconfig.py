@@ -122,7 +122,61 @@ def get_default_qat_qconfig(backend='fbgemm'):
         qconfig = default_qat_qconfig
     return qconfig
 
-def assert_valid_qconfig(qconfig: Optional[Union[QConfig, QConfigDynamic]],
+class QConfigWithModule(namedtuple('QConfigWithModule', ['activation', 'weight'])):
+    """
+
+    It's like QConfig and QConfigDynamic but intended to be used once the qconfig is placed
+    onto a specific module. if create_qconfig_on_module is used, this includes transforming the activation 
+    and weight obs constructors such that they create the obs on the same device as module.
+
+    The __new__ method to create this type of object is not intended to be used directly, 
+    instead use create_qconfig_with_module(qconfig,module). Without __new__ set up like this, deepcopy
+    will not work.
+
+    Note that QConfigWithModule needs to contain observer **classes** (like MinMaxObserver) or a callable constructor that returns
+    instances on invocation, not the concrete observer instances themselves (like MinMaxObserver()).
+    Quantization function will instantiate observers multiple times for each of the layers.
+
+    Observer classes have usually reasonable default arguments, but they can be overwritten with `with_args`
+    method (that behaves like functools.partial). The observer classes/constructors in QConfigWithModule are intended 
+    to be used with `with_callable_args` which operates similarly to `with_args` but calls the arg when the constructor is invoked.
+    This is how the constructors check the module device at invocation time rather than when the constructor is set up.
+    """
+    def __new__(cls, activation=torch.nn.Identity, weight=torch.nn.Identity):
+        # catch common mistakes
+        if isinstance(weight, nn.Module):
+            raise ValueError("QConfigWithModule received observer instance, please pass observer class instead. " +
+                             "Use MyObserver.with_args(x=1) to override arguments to constructor if needed")
+        return super(QConfigWithModule, cls).__new__(cls, activation, weight)
+
+    def get_module():
+        return None
+
+def create_qconfig_with_module(qconfig: Any, module: nn.Module):
+    if (module is None or qconfig is None or
+            qconfig.activation.__module__ != 'torch.quantization.observer' or
+            qconfig.weight.__module__ != 'torch.quantization.observer'):
+        return qconfig
+
+    # need to make sure observer can accept factory_kwargs as an argument
+    try:
+        qconfig.activation(factory_kwargs=None)
+        qconfig.weight(factory_kwargs=None)
+    except TypeError:
+        return qconfig
+
+    def get_factory_kwargs_based_on_module_device() -> Any:
+        devices = {p.device for p in module.parameters()} | \
+            {p.device for p in module.buffers()}
+        device = next(iter(devices)) if len(devices) > 0 else None
+        return None if device is None else {'device': device}
+
+    activation = qconfig.activation.with_callable_args(factory_kwargs=get_factory_kwargs_based_on_module_device)
+    weight = qconfig.weight.with_callable_args(factory_kwargs=get_factory_kwargs_based_on_module_device)
+
+    return QConfigWithModule(activation, weight)
+
+def assert_valid_qconfig(qconfig: Optional[Union[QConfig, QConfigDynamic, QConfigWithModule]],
                          mod: torch.nn.Module) -> None:
     if qconfig is None:
         return
@@ -138,43 +192,3 @@ def assert_valid_qconfig(qconfig: Optional[Union[QConfig, QConfigDynamic]],
         )
         assert not is_per_channel, \
             'Per channel weight observer is not supported yet for ConvTranspose{n}d.'
-
-QConfigAny = Union[QConfig, QConfigDynamic, None]
-
-# should probably be in qconfig_utils but get circular reference issues TODO
-def add_device_to_obs_ctr_in_qconfig(qconfig: QConfigAny, module: torch.nn.Module):
-    if (module is None or qconfig is None or
-            qconfig.activation.__module__ != 'torch.quantization.observer' or
-            qconfig.weight.__module__ != 'torch.quantization.observer'):
-        return qconfig
-
-    def assert_and_get_unique_device(module: torch.nn.Module) -> Any:
-        devices = {p.device for p in module.parameters()} | \
-            {p.device for p in module.buffers()}
-        assert len(devices) <= 1, (
-            "prepare only works with cpu or single-device CUDA modules, "
-            "but got devices {}".format(devices)
-        )
-        device = next(iter(devices)) if len(devices) > 0 else None
-        return device
-
-    def get_activation():
-        obs_ctr = qconfig.activation.with_args(factory_kwargs={'device': None if module is None else assert_and_get_unique_device(module)})
-        return obs_ctr()
-
-    def get_weight():
-        obs_ctr = qconfig.weight.with_args(factory_kwargs={'device': None if module is None else assert_and_get_unique_device(module)})
-        return obs_ctr()
-
-    if isinstance(qconfig, torch.quantization.QConfig):
-        return torch.quantization.QConfig(
-            activation=get_activation,
-            weight=get_weight
-        )
-    elif isinstance(qconfig, torch.quantization.QConfigDynamic):
-        return torch.quantization.QConfigDynamic(
-            activation=get_activation,
-            weight=get_weight
-        )
-    else:
-        return qconfig

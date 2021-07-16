@@ -9,8 +9,9 @@ import sys
 import time
 import zipfile
 
+import requests
+
 from typing import Any, Dict, Generator, List
-from tools.stats.scribe import send_to_scribe
 
 
 def get_size(file_dir: str) -> int:
@@ -51,18 +52,28 @@ def build_message(size: int) -> Dict[str, Any]:
 
 
 def send_message(messages: List[Dict[str, Any]]) -> None:
-    logs = json.dumps(
-        [
-            {
-                "category": "perfpipe_pytorch_binary_size",
-                "message": json.dumps(message),
-                "line_escape": False,
-            }
-            for message in messages
-        ]
+    access_token = os.environ.get("SCRIBE_GRAPHQL_ACCESS_TOKEN")
+    if not access_token:
+        raise ValueError("Can't find access token from environment variable")
+    url = "https://graph.facebook.com/scribe_logs"
+    r = requests.post(
+        url,
+        data={
+            "access_token": access_token,
+            "logs": json.dumps(
+                [
+                    {
+                        "category": "perfpipe_pytorch_binary_size",
+                        "message": json.dumps(message),
+                        "line_escape": False,
+                    }
+                    for message in messages
+                ]
+            ),
+        },
     )
-    res = send_to_scribe(logs)
-    print(res)
+    print(r.text)
+    r.raise_for_status()
 
 
 def report_android_sizes(file_dir: str) -> None:
