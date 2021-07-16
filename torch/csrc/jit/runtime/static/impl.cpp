@@ -63,9 +63,9 @@ void OptimizeGraph(
   ConstantPropagation(graph);
   RemoveTensorMutation(graph);
   ConstantPropagation(graph);
-  UseVariadicCat(graph);
   EliminateDeadCode(graph);
   FuseInferenceOpsForSparseNN(graph);
+  UseVariadicCat(graph);
 
   // TODO: we can avoid this guard by moving operations
   // to exposed folders.

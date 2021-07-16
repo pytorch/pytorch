@@ -1573,7 +1573,7 @@ REGISTER_OPERATOR_FUNCTOR(prim::Concat, prim_Concat, [](Node* n) -> SROperator {
     const size_t num_inputs = p_node->inputs().size();
     std::vector<at::Tensor> inputs(num_inputs - 1);
     for (const auto i : c10::irange(num_inputs - 1)) {
-      inputs[i] = p_node->Input(i).toTensor();
+      inputs[i] = std::move(p_node->Input(i).toTensor());
     }
     const auto dim = p_node->Input(num_inputs - 1).toInt();
     if (p_node->Output(0).isNone()) {
