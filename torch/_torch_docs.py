@@ -8451,8 +8451,6 @@ A namedtuple of (values, indices) is returned, where the `values` are the
 sorted values and `indices` are the indices of the elements in the original
 `input` tensor.
 
-.. warning:: `stable=True` only works on the CPU for now.
-
 Args:
     {input}
     dim (int, optional): the dimension to sort along
