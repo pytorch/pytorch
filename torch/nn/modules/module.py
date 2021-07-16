@@ -1117,6 +1117,8 @@ class Module:
             self._non_persistent_buffers_set = set()
         if '_is_full_backward_hook' not in self.__dict__:
             self._is_full_backward_hook = None
+        if '__module_name__' not in self.__dict__:
+            self.__dict__['__module_name__'] = None
 
     def __getattr__(self, name: str) -> Union[Tensor, 'Module']:
         if '_parameters' in self.__dict__:
@@ -1223,7 +1225,7 @@ class Module:
         for name, buf in self._buffers.items():
             if buf is not None and name not in self._non_persistent_buffers_set:
                 destination[prefix + name] = buf if keep_vars else buf.detach()
-        destination[prefix + '__module_name__'] = self.__dict__['__module_name__']
+        # destination[prefix + '__module_name__'] = self.__dict__['__module_name__']
 
     # The user can pass an optional arbitrary mappable object to `state_dict`, in which case `state_dict` returns
     # back that same object. But if they pass nothing, an `OrederedDict` is created and returned.
@@ -1355,7 +1357,7 @@ class Module:
                 if key.startswith(prefix):
                     input_name = key[len(prefix):]
                     input_name = input_name.split('.', 1)[0]  # get the name of param/buffer/child
-                    if input_name not in self._modules and input_name not in local_state and input_name != '__module_name__':
+                    if input_name not in self._modules and input_name not in local_state: #and input_name != '__module_name__':
                         unexpected_keys.append(key)
 
     def load_state_dict(self, state_dict: 'OrderedDict[str, Tensor]',
