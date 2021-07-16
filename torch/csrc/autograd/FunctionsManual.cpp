@@ -248,7 +248,7 @@ Tensor pow_backward_self(Tensor grad, const Tensor & self, const Tensor & expone
 Tensor pow_backward_exponent(Tensor grad, const Tensor& self, const Tensor& exponent, Tensor result) {
   Tensor cond;
   if (exponent.is_complex()) {
-    auto is_real_exp = at::logical_and(at::imag(exponent.resolve_conj()) == 0, at::real(exponent) >= 0);
+    auto is_real_exp = at::logical_and(at::imag(exponent) == 0, at::real(exponent) >= 0);
     cond = at::logical_and(self == 0, is_real_exp);
   } else {
     cond = at::logical_and(self == 0, exponent >= 0);
@@ -264,7 +264,7 @@ Tensor pow_backward_exponent(Tensor grad, const Scalar & base, const Tensor& exp
   if (base.equal(0.0)) {
     auto cond = [](auto exp) {
       if (exp.is_complex()) {
-        return at::logical_and(at::imag(exp.resolve_conj()) == 0, at::real(exp) >= 0);
+        return at::logical_and(at::imag(exp) == 0, at::real(exp) >= 0);
       } else {
         return exp >=0;
       }
@@ -2174,7 +2174,7 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   if (self.is_complex() && gu.defined()) {
     Tensor L = at::matmul(uh, gu).diagonal(0, -2, -1);
     at::real(L).zero_();
-    at::imag(L.resolve_conj()).mul_(sigma_inv);
+    at::imag(L).mul_(sigma_inv);
     Tensor imag_term = at::matmul(u * L.unsqueeze(-2), vh);
     return u_term + sigma_term + v_term + imag_term;
   }
@@ -2214,7 +2214,7 @@ Tensor eig_backward(const std::vector<torch::autograd::Variable> &grads, const T
     }
     // path for torch.linalg.eig with always a complex tensor of eigenvalues
     else {
-      is_imag_eigvals_zero = (at::imag(D.resolve_conj()) == 0.0).min().item<bool>();
+      is_imag_eigvals_zero = (at::imag(D) == 0.0).min().item<bool>();
       // insert an additional dimension to be compatible with torch.eig.
       // Recall that it produces 2D tensors.
       // We extract only the real parts as there is no support for
@@ -2591,60 +2591,37 @@ Tensor linalg_qr_backward(const std::vector<torch::autograd::Variable> &grads, c
   }
 }
 
-// Invertible case is derived from Jacobi's formula, and also can be found at:
-// http://eprints.maths.ox.ac.uk/1079/1/NA-08-01.pdf
-Tensor linalg_det_backward(const Tensor & grad, const Tensor& self, const Tensor& det) {
-  auto singular_case_backward = [&](const Tensor& grad, const Tensor& self, const Tensor& det) -> Tensor {
-    Tensor u, sigma, vh;
-    std::tie(u, sigma, vh) = at::linalg_svd(self, false);
-    Tensor v = vh.conj().transpose(-2, -1);
-    auto gsigma = prod_backward(grad.unsqueeze(-1), sigma, det.unsqueeze(-1));
-    return svd_backward({{}, gsigma, {}}, self, true, true, u, sigma, v);
-  };
-
-  auto nonsingular_case_backward = [&](const Tensor& grad, const Tensor& self, const Tensor& det) -> Tensor {
-    return unsqueeze_multiple(grad * det, {-1, -2}, self.dim()) * self.inverse().transpose(-2, -1);
-  };
-
-  if (self.dim() == 2) {
-    if (det.item<double>() == 0) {
-      return singular_case_backward(grad, self, det);
-    } else {
-      return nonsingular_case_backward(grad, self, det);
-    }
-  } else {
-    auto nonzero_det_indices = at::native::toListOfOptionalTensors(at::where(det));
-    c10::optional<Tensor> first_nonzero_det_index = nonzero_det_indices[0];
-
-    if (first_nonzero_det_index->size(0) == det.numel()) {  // all determinants are nonzero (non-singular)
-      return nonsingular_case_backward(grad, self, det);
-    }
-
-    auto zero_det_indices = at::native::toListOfOptionalTensors(at::where(det == 0));
-    c10::optional<Tensor> first_zero_det_index = zero_det_indices[0];
-
-    if (first_zero_det_index->size(0) == det.numel()) {  // all determinants are zero (singular)
-      return singular_case_backward(grad, self, det);
-    }
-
-    Tensor grad_det = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-
-    // invertible case
-    grad_det.index_put_(/*indices=*/nonzero_det_indices,
-                        // NOLINTNEXTLINE(bugprone-argument-comment)
-                        /*value=*/nonsingular_case_backward(grad.index(nonzero_det_indices),
-                                                            self.index(nonzero_det_indices),
-                                                            det.index(nonzero_det_indices)));
-
-    // non-invertible case, uses SVD
-    grad_det.index_put_(/*indices=*/zero_det_indices,
-                        // NOLINTNEXTLINE(bugprone-argument-comment)
-                        /*value=*/singular_case_backward(grad.index(zero_det_indices),
-                                                         self.index(zero_det_indices),
-                                                         det.index(zero_det_indices)));
-
-    return grad_det;
+// The backward for this function is just a specialized version of
+// lu.backward, which is implemented in /torch/_autograd_functions.py
+Tensor _det_lu_based_helper_backward(
+  const Tensor& det_grad,
+  const Tensor& det,
+  const Tensor& self,
+  const Tensor& lu,
+  const Tensor& pivs
+) {
+  if (!self.numel()) {
+    return at::zeros_like(self, at::MemoryFormat::Contiguous);
   }
+  if (!det_grad.defined()) {
+    return Tensor();
+  }
+
+  // lu_solve does not support double backward yet.
+  // Hence, if double backward, we use the eigendecomposition.
+  if (at::GradMode::is_enabled()) {
+    Tensor l, v;
+    std::tie(l, v) = at::linalg_eig(self);
+
+    auto l_grad = prod_backward(det_grad, l, l.prod(-1), -1, false);
+
+    return linalg_eig_backward({l_grad, {}}, self, l, v);
+  }
+
+  // we use a sequence of kernels to avoid memory copies and checks,
+  // as in the implementation of this function we are 100% sure that
+  // `lu` and `pivs` are coming from a LAPACK routine.
+  return at::_det_lu_based_helper_backward_helper(det_grad, det, self, lu, pivs);
 }
 
 Tensor logdet_backward(const Tensor & grad, const Tensor& self, const Tensor& logdet) {
