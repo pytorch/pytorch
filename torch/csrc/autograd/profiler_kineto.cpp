@@ -113,15 +113,27 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
       std::lock_guard<std::mutex> guard(state_mutex_);
       libkineto::api().activityProfiler().recordThreadInfo();
 
-      PyTorchMemoryEvent evt;
-      evt.timestamp_us_ = getTimeUs();
-      evt.thread_id_ = at::RecordFunction::currentThreadId();
-      evt.system_thread_id_ = libkineto::systemThreadId();
-      evt.device_type_ = device.type();
-      evt.device_index_ = device.index();
-      evt.nbytes_ = alloc_size;
+      cpu_trace->activities.emplace_back(
+          libkineto::GenericTraceActivity(
+            cpu_trace->span,
+            libkineto::ActivityType::CPU_INSTANT_EVENT,
+            "[memory]"));
+      auto& act = cpu_trace->activities.back();
+      act.device = libkineto::processId();
+      act.resource = libkineto::systemThreadId();
 
-      memory_events_.emplace_back(std::move(evt));
+      act.startTime = getTimeUs();
+      act.addMetadata("Device Type", std::to_string((int8_t)device.type()));
+      act.addMetadata("Device Id", std::to_string(device.index()));
+      act.addMetadata("Bytes", std::to_string(alloc_size));
+
+      kineto_events_.emplace_back();
+      auto& evt = kineto_events_.back();
+      evt.activity(act)
+        .deviceType(device.type())
+        .deviceIndex(device.index())
+        .nBytes(alloc_size)
+        .startThreadId(at::RecordFunction::currentThreadId());
     }
   }
 
@@ -130,8 +142,8 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
     for (const auto& ev_ptr : events) {
       // These events are already processed
       if (ev_ptr->type() != libkineto::ActivityType::CPU_OP &&
-          ev_ptr->type() != libkineto::ActivityType::CPU_INSTANT_EVENT
-          && ev_ptr->type() != libkineto::ActivityType::USER_ANNOTATION
+          ev_ptr->type() != libkineto::ActivityType::CPU_INSTANT_EVENT &&
+          ev_ptr->type() != libkineto::ActivityType::USER_ANNOTATION
       ) {
         kineto_events_.emplace_back();
         kineto_events_.back()
@@ -167,26 +179,9 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
             std::to_string(kineto_event.sequenceNr()));
       }
     }
-
-    for (const auto& evt : memory_events_) {
-      cpu_trace->activities.emplace_back(
-          libkineto::GenericTraceActivity(
-            cpu_trace->span,
-            libkineto::ActivityType::CPU_INSTANT_EVENT,
-            "[memory]"));
-      auto& act = cpu_trace->activities.back();
-      act.device = libkineto::processId();
-      act.resource = evt.system_thread_id_;
-
-      act.startTime = evt.timestamp_us_;
-      act.addMetadata("Device Type", std::to_string((int8_t)evt.device_type_));
-      act.addMetadata("Device Id", std::to_string(evt.device_index_));
-      act.addMetadata("Bytes", std::to_string(evt.nbytes_));
-    }
   }
 
   std::vector<KinetoEvent> kineto_events_;
-  std::vector<PyTorchMemoryEvent> memory_events_;
   std::unique_ptr<libkineto::CpuTraceBuffer> cpu_trace;
 };
 
@@ -475,7 +470,6 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
   state_ptr->addTraceEvents(*trace);
   return std::make_unique<ProfilerResult>(
       std::move(state_ptr->kineto_events_),
-      std::move(state_ptr->memory_events_),
       std::move(trace));
 }
 
@@ -521,6 +515,10 @@ int64_t KinetoEvent::cudaElapsedUs() const {
 }
 
 c10::DeviceType KinetoEvent::deviceType() const {
+  if (device_type_ >= 0) {
+    return (c10::DeviceType)device_type_;
+  }
+  // determine device type from the activity type;
   // fallthrough
   switch (activity_type_) {
     case (uint8_t)libkineto::ActivityType::GPU_MEMCPY:
@@ -540,10 +538,8 @@ c10::DeviceType KinetoEvent::deviceType() const {
 
 ProfilerResult::ProfilerResult(
     std::vector<KinetoEvent> events,
-    std::vector<PyTorchMemoryEvent> memory_events,
     std::unique_ptr<libkineto::ActivityTraceInterface> trace)
   : events_(std::move(events)),
-    memory_events_(std::move(memory_events)),
     trace_(std::move(trace)) {}
 ProfilerResult::ProfilerResult() = default;
 ProfilerResult::~ProfilerResult() = default;

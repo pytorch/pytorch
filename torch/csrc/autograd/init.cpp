@@ -174,7 +174,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
         return e.scope();
       })
       // device number, for CPU - process id
-      .def("device_index", &KinetoEvent::deviceIndex)
+      .def("device_index", [](const KinetoEvent& e) {
+        return e.deviceIndex();
+      })
       // for CUDA - stream id, for CPU - start thread id
       .def("device_resource_id", &KinetoEvent::deviceResourceId)
       // device type
@@ -191,32 +193,14 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .def("is_async", [](const KinetoEvent& e) {
         return e.isAsync();
       })
-      .def("cuda_elapsed_us", &KinetoEvent::cudaElapsedUs);
-
-  py::class_<PyTorchMemoryEvent>(m, "_PyTorchMemoryEvent")
-    .def("timestamp_us", [](const PyTorchMemoryEvent& evt) {
-      return evt.timestamp_us_;
-    })
-    .def("thread_id", [](const PyTorchMemoryEvent& evt) {
-      return evt.thread_id_;
-    })
-    .def("system_thread_id", [](const PyTorchMemoryEvent& evt) {
-      return evt.system_thread_id_;
-    })
-    .def("device_type", [](const PyTorchMemoryEvent& evt) {
-      return evt.device_type_;
-    })
-    .def("device_index", [](const PyTorchMemoryEvent& evt) {
-      return evt.device_index_;
-    })
-    .def("nbytes", [](const PyTorchMemoryEvent& evt) {
-      return evt.nbytes_;
-    });
+      .def("cuda_elapsed_us", &KinetoEvent::cudaElapsedUs)
+      .def("nbytes", [](const KinetoEvent& e) {
+        return e.nBytes();
+      });
 
   py::class_<ProfilerResult>(m, "_ProfilerResult")
     .def("trace_start_us", &ProfilerResult::trace_start_us)
     .def("events", &ProfilerResult::events)
-    .def("memory_events", &ProfilerResult::memory_events)
     .def("save", &ProfilerResult::save);
 
   m.def("_enable_profiler", enableProfiler);

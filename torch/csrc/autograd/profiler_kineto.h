@@ -149,6 +149,21 @@ struct TORCH_API KinetoEvent {
     return *this;
   }
 
+  KinetoEvent& deviceType(c10::DeviceType device_type) {
+    device_type_ = (int8_t)device_type;
+    return *this;
+  }
+
+  KinetoEvent& deviceIndex(uint8_t device_index) {
+    device_index_ = device_index;
+    return *this;
+  }
+
+  KinetoEvent& nBytes(int64_t nbytes) {
+    nbytes_ = nbytes;
+    return *this;
+  }
+
   // Kineto fields
 
   KinetoEvent& activity(const libkineto::TraceActivity& activity);
@@ -161,7 +176,7 @@ struct TORCH_API KinetoEvent {
     return is_async_;
   }
 
-  uint64_t deviceIndex() const {
+  uint8_t deviceIndex() const {
     return device_index_;
   }
 
@@ -190,6 +205,10 @@ struct TORCH_API KinetoEvent {
     return device_resource_id_;
   }
 
+  int64_t nBytes() const {
+    return nbytes_;
+  }
+
   c10::DeviceType deviceType() const;
 
   int64_t cudaElapsedUs() const;
@@ -207,27 +226,18 @@ struct TORCH_API KinetoEvent {
   uint64_t flops_ = 0;
 
   std::string name_;
-  uint64_t device_index_ = 0;
+  uint8_t device_index_ = 0;
+  int8_t device_type_ = -1;
   uint64_t start_us_ = 0;
   uint64_t duration_us_ = 0;
   uint64_t correlation_id_ = 0;
   uint64_t linked_correlation_id_ = 0;
   int64_t device_resource_id_ = 0;
+  int64_t nbytes_ = 0;
   bool is_async_{false};
 
   CUDAEventStub cuda_event_start_ = nullptr;
   CUDAEventStub cuda_event_end_ = nullptr;
-};
-
-// PyTorchMemoryEvent holds information about memory
-// allocs/frees done by PyTorch memory allocator
-struct TORCH_API PyTorchMemoryEvent {
-  uint64_t timestamp_us_;
-  uint64_t thread_id_;
-  uint64_t system_thread_id_;
-  c10::DeviceType device_type_;
-  uint8_t device_index_;
-  int64_t nbytes_;
 };
 
 // Consolidating events returned directly from Kineto
@@ -237,7 +247,6 @@ struct TORCH_API ProfilerResult {
   ProfilerResult();
   ProfilerResult(
       std::vector<KinetoEvent> events,
-      std::vector<PyTorchMemoryEvent> memory_events,
       std::unique_ptr<libkineto::ActivityTraceInterface> trace);
   ~ProfilerResult();
 
@@ -249,17 +258,12 @@ struct TORCH_API ProfilerResult {
     return events_;
   }
 
-  const std::vector<PyTorchMemoryEvent>& memory_events() const {
-    return memory_events_;
-  }
-
   void save(const std::string& path);
 
  private:
   bool saved_ = false;
   uint64_t trace_start_us_ = 0;
   std::vector<KinetoEvent> events_;
-  std::vector<PyTorchMemoryEvent> memory_events_;
   std::unique_ptr<libkineto::ActivityTraceInterface> trace_;
 };
 

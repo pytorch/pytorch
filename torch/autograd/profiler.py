@@ -1093,6 +1093,7 @@ def filter_stack_entry(entry):
 def filter_name(name):
     # ignoring the following utility ops
     filtered_out_names = [
+        "[memory]",
         "profiler::_record_function_enter",
         "profiler::_record_function_exit",
         "aten::is_leaf",
@@ -1116,10 +1117,9 @@ def rewrite_name(name, with_wildcard=False):
 # Parsing of kineto profiler events
 def parse_kineto_results(result):
     # result.events() has most of the events - PyTorch op-level and device-level events
-    # result.memory_events() has PyTorch allocator events
 
     trace_start_us = result.trace_start_us()
-    mem_records = [[evt, False] for evt in result.memory_events()]
+    mem_records = [[evt, False] for evt in result.events() if evt.name() == "[memory]"]
 
     def _cpu_memory_usage(mem_record):
         return mem_record.nbytes() if \
@@ -1147,8 +1147,8 @@ def parse_kineto_results(result):
         if kineto_event.device_type() == DeviceType.CPU:
             # find the corresponding memory allocation events
             for mem_record in mem_records:
-                if (mem_record[0].timestamp_us() >= kineto_event.start_us() and
-                        mem_record[0].timestamp_us() <= abs_end_us):
+                if (mem_record[0].start_us() >= kineto_event.start_us() and
+                        mem_record[0].start_us() <= abs_end_us):
                     mem_record[1] = True
                     cpu_memory_usage += _cpu_memory_usage(mem_record[0])
                     cuda_memory_usage += _cuda_memory_usage(mem_record[0])
@@ -1211,16 +1211,16 @@ def parse_kineto_results(result):
     # output top-level memory events
     for mem_record in mem_records:
         if not mem_record[1]:
-            rel_start_us = mem_record[0].timestamp_us() - trace_start_us
+            rel_start_us = mem_record[0].start_us() - trace_start_us
             max_evt_id += 1
             fe = FunctionEvent(
                 id=max_evt_id,
                 name="[memory]",
                 trace_name=None,  # not outputting in the trace
-                thread=mem_record[0].thread_id(),
+                thread=mem_record[0].start_thread_id(),
                 start_us=rel_start_us,
                 end_us=rel_start_us,  # no duration
-                fwd_thread=mem_record[0].thread_id(),
+                fwd_thread=mem_record[0].start_thread_id(),
                 input_shapes=[],
                 stack=[],
                 scope=0,  # function
