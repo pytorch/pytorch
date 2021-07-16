@@ -564,7 +564,6 @@ _(aten, pinverse) \
 _(aten, pixel_shuffle) \
 _(aten, pixel_unshuffle) \
 _(aten, poisson) \
-_(aten, polygamma) \
 _(aten, pow) \
 _(aten, float_power) \
 _(aten, prelu) \
