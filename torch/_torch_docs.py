@@ -2430,6 +2430,30 @@ Example::
 
 """)
 
+add_docstr(torch.resolve_neg,
+           r"""
+resolve_neg(input) -> Tensor
+
+Returns a new tensor with materialized negation if :attr:`input`'s negative bit is set to `True`,
+else returns :attr:`input`. The output tensor will always have its negative bit set to `False`.
+Args:
+    {input}
+
+Example::
+
+    >>> x = torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j])
+    >>> y = x.conj()
+    >>> z = y.imag
+    >>> z.is_neg()
+    True
+    >>> out = y.resolve_neg()
+    >>> out
+    tensor([-1, -2, -3])
+    >>> out.is_neg()
+    False
+
+""".format(**common_args))
+
 add_docstr(torch.copysign,
            r"""
 copysign(input, other, *, out=None) -> Tensor
@@ -5312,12 +5336,13 @@ Args:
 Keyword args:
     {out}
 
-
 Example::
 
     >>> a = torch.randn(3, 3)
     >>> torch.logsumexp(a, 1)
-    tensor([ 0.8442,  1.4322,  0.8711])
+    tensor([1.4907, 1.0593, 1.5696])
+    >>> torch.dist(torch.logsumexp(a, 1), torch.log(torch.sum(torch.exp(a), 1)))
+    tensor(1.6859e-07)
 """.format(**multi_dim_common))
 
 add_docstr(torch.lstsq,
@@ -9010,9 +9035,9 @@ always be real-valued, even if :attr:`input` is complex.
                default value for both is `True`, so the default behavior is
                effectively the opposite.
              * :func:`torch.svd` returns `V`, whereas :func:`torch.linalg.svd` returns
-               `Vh`, that is, `Vᴴ`.
+               `Vᴴ`.
              * If :attr:`compute_uv` is `False`, :func:`torch.svd` returns zero-filled
-               tensors for `U` and `Vh`, whereas :func:`torch.linalg.svd` returns
+               tensors for `U` and `Vᴴ`, whereas :func:`torch.linalg.svd` returns
                empty tensors.
 
 .. note:: The singular values are returned in descending order. If :attr:`input` is a batch of matrices,
