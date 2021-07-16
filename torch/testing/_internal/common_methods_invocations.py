@@ -32,7 +32,7 @@ from torch.testing._internal.common_utils import \
      make_symmetric_pd_matrices,
      random_fullrank_matrix_distinct_singular_value,
      TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor, TEST_SCIPY,
-     torch_to_numpy_dtype_dict, slowTest, TEST_WITH_ASAN,
+     torch_to_numpy_dtype_dict, TEST_WITH_ASAN,
      GRADCHECK_NONDET_TOL,)
 import torch.testing._internal.opinfo_helper as opinfo_helper
 
@@ -1320,7 +1320,7 @@ def sample_inputs_dot_vdot(self, device, dtype, requires_grad, **kwargs):
     )
 
 def sample_inputs_addmv(op_info, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
     test_cases = (((S,), (S, M), (M,), 1, 1, False),
                   ((S,), (S, M), (M,), 0.2, 0.6, False),
@@ -1341,6 +1341,7 @@ def sample_inputs_addmv(op_info, device, dtype, requires_grad, **kwargs):
         cases = test_cases + test_cases_with_broadcast  # type: ignore[assignment]
 
     def generator():
+        # addmv performs: beta * input + alpha * (mat @ vec)
         for shape_input, shape_mat, shape_vec, beta, alpha, broadcasts_input in cases:
             beta = complex(*beta) if isinstance(beta, tuple) else beta
             alpha = complex(*alpha) if isinstance(alpha, tuple) else alpha
@@ -2656,8 +2657,6 @@ class SpectralFuncInfo(OpInfo):
         decorators += [
             skipCPUIfNoFFT,
             skipCUDAIfRocm,
-            # gradgrad is quite slow
-            DecorateInfo(slowTest, 'TestGradients', 'test_fn_gradgrad'),
         ]
 
         super().__init__(name=name,
@@ -4939,13 +4938,6 @@ op_db: List[OpInfo] = [
            dtypesIfROCM=floating_types_and(torch.half),
            supports_inplace_autograd=False,
            supports_forward_ad=True,
-           skips=(
-               # issue may fix: https://github.com/pytorch/pytorch/issues/55589
-               # AssertionError: UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
-               SkipInfo('TestCommon', 'test_out', dtypes=(torch.float32,)),
-               # Reference: https://github.com/pytorch/pytorch/issues/55589
-               SkipInfo('TestCommon', 'test_variant_consistency_eager'),
-           ),
            sample_inputs_func=sample_inputs_addmv),
     OpInfo('addbmm',
            dtypes=floating_types(),
@@ -7446,10 +7438,8 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            ),
     OpInfo('xlogy',
-           dtypes=all_types_and(torch.bool),
-           dtypesIfCPU=all_types_and(torch.bool, torch.half, torch.bfloat16),
-           dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
-           supports_inplace_autograd=True,
+           aliases=('special.xlogy',),
+           dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
            supports_forward_ad=True,
            safe_casts_outputs=True,
            sample_inputs_func=sample_inputs_xlogy),
