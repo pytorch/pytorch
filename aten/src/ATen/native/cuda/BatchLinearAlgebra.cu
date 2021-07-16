@@ -2732,6 +2732,21 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda(const Tensor& self, bool som
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lu_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+#ifdef USE_MAGMA
+magma_trans_t _get_magma_trans(char trans) {
+  switch (trans) {
+    case 'N':
+      return MagmaNoTrans;
+    case 'T':
+      return MagmaTrans;
+    case 'C':
+      return MagmaConjTrans;
+    default:
+      return MagmaNoTrans;
+  }
+}
+#endif
+
 /*
   Solves the matrix equation A X = B
   X and B are n-by-nrhs matrices, A is represented using the LU factorization.
@@ -2747,13 +2762,14 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda(const Tensor& self, bool som
   For further details, please see the MAGMA documentation for magma_dgetrs_gpu.
 */
 template <typename scalar_t>
-static void apply_lu_solve_looped_magma(const Tensor& b, const Tensor& lu, const Tensor& pivots, magma_trans_t trans) {
+static void apply_lu_solve_looped_magma(const Tensor& b, const Tensor& lu, const Tensor& pivots, char lapack_trans) {
 #ifndef USE_MAGMA
   TORCH_CHECK(
       false,
       "Calling torch.lu_solve on a CUDA tensor requires compiling ",
       "PyTorch with MAGMA. lease rebuild with MAGMA.");
 #else
+  auto trans = _get_magma_trans(lapack_trans);
   auto b_data = b.data_ptr<scalar_t>();
   auto lu_data = lu.data_ptr<scalar_t>();
 
@@ -2800,13 +2816,14 @@ static void apply_lu_solve_looped_magma(const Tensor& b, const Tensor& lu, const
   For further details, please see the MAGMA documentation for magma_dgetrs_batched.
 */
 template <typename scalar_t>
-static void apply_lu_solve_batched_magma(const Tensor& b, const Tensor& lu, const Tensor& pivots, magma_trans_t trans) {
+static void apply_lu_solve_batched_magma(const Tensor& b, const Tensor& lu, const Tensor& pivots, char lapack_trans) {
 #ifndef USE_MAGMA
   TORCH_CHECK(
       false,
       "Calling torch.lu_solve on a CUDA tensor requires compiling ",
       "PyTorch with MAGMA. lease rebuild with MAGMA.");
 #else
+  auto trans = _get_magma_trans(lapack_trans);
   auto b_data = b.data_ptr<scalar_t>();
   auto lu_data = lu.data_ptr<scalar_t>();
 
@@ -2860,15 +2877,15 @@ static void apply_lu_solve_batched_magma(const Tensor& b, const Tensor& lu, cons
 #endif
 }
 
-static void lu_solve_batched_magma(const Tensor& b, const Tensor& lu, const Tensor& pivots, magma_trans_t trans) {
+static void lu_solve_batched_magma(const Tensor& b, const Tensor& lu, const Tensor& pivots, char lapack_trans) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(b.scalar_type(), "lu_solve_batched_magma", [&]{
-    apply_lu_solve_batched_magma<scalar_t>(b, lu, pivots, trans);
+    apply_lu_solve_batched_magma<scalar_t>(b, lu, pivots, lapack_trans);
   });
 }
 
-static void lu_solve_looped_magma(const Tensor& b, const Tensor& lu, const Tensor& pivots, magma_trans_t trans) {
+static void lu_solve_looped_magma(const Tensor& b, const Tensor& lu, const Tensor& pivots, char lapack_trans) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(b.scalar_type(), "lu_solve_looped_magma", [&]{
-    apply_lu_solve_looped_magma<scalar_t>(b, lu, pivots, trans);
+    apply_lu_solve_looped_magma<scalar_t>(b, lu, pivots, lapack_trans);
   });
 }
 
@@ -2887,19 +2904,6 @@ cublasOperation_t _get_cublas_trans(char trans) {
 }
 #endif
 
-magma_trans_t _get_magma_trans(char trans) {
-  switch (trans) {
-    case 'N':
-      return MagmaNoTrans;
-    case 'T':
-      return MagmaTrans;
-    case 'C':
-      return MagmaConjTrans;
-    default:
-      return MagmaNoTrans;
-  }
-}
-
 static void lu_solve_trans_dispatch(const Tensor& b, const Tensor& lu, const Tensor& pivots, char trans) {
   auto batch_size = batchCount(lu);
   auto m = lu.size(-2);
@@ -2909,7 +2913,7 @@ static void lu_solve_trans_dispatch(const Tensor& b, const Tensor& lu, const Ten
   }
 #else
   if (batch_size == 1) {
-    lu_solve_looped_magma(b, lu, pivots, _get_magma_trans(trans));
+    lu_solve_looped_magma(b, lu, pivots, trans);
   }
 #endif // ifdef USE_CUSOLVER
 #ifdef CUDART_VERSION
@@ -2918,7 +2922,7 @@ static void lu_solve_trans_dispatch(const Tensor& b, const Tensor& lu, const Ten
   }
 #endif // ifdef CUDART_VERSION
   else {
-    lu_solve_batched_magma(b, lu, pivots, _get_magma_trans(trans));
+    lu_solve_batched_magma(b, lu, pivots, trans);
   }
 }
 
