@@ -358,6 +358,9 @@ class Graph:
         g = Graph()
         output_val = g.graph_copy(self, val_map=memo)
         g.output(output_val)
+        for n, m in zip(g.nodes, self.nodes):
+            if n.op == 'output' and hasattr(m, 'type'):
+                n.type = m.type
         return g
 
     def create_node(self, op: str, target: 'Target',
