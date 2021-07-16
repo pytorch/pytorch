@@ -175,8 +175,10 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   // should have saved the grad accumulator. Even if the Variable is no longer
   // alive, the accumulator should be kept alive by the references in the
   // graph.
-  if (requires_grad_ && !var.grad_fn() && grad_accumulator_.expired()) {
-    TORCH_INTERNAL_ASSERT(false, "No grad accumulator for a saved leaf");
+  if (is_leaf_ && requires_grad_) {
+    TORCH_INTERNAL_ASSERT(
+        !grad_accumulator_.expired(),
+        "No grad accumulator for a saved leaf");
   }
   impl::set_grad_accumulator(var, grad_accumulator_);
 
