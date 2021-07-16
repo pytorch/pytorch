@@ -46,6 +46,13 @@ Tensor do_cumulative_trapezoid(const Tensor& y, const Tensor& dx, int64_t dim) {
     return ((left + right) * dx).cumsum(dim) / 2.;
 }
 
+Tensor do_cumulative_trapezoid(const Tensor& y, double dx, int64_t dim) {
+    Tensor left = y.slice(dim, 0, -1);
+    Tensor right = y.slice(dim, 1);
+
+    return (dx /2. * (left + right)).cumsum(dim);
+}
+
 }
 
 Tensor trapezoid(const Tensor& y, const Tensor& x, int64_t dim) {
@@ -99,11 +106,6 @@ Tensor trapz(const Tensor& y, double dx, int64_t dim) {
 
 Tensor cumulative_trapezoid(const Tensor& y, const Tensor& x, int64_t dim) {
     dim = maybe_wrap_dim(dim, y);
-    // asking for the integral with zero samples is a bit nonsensical,
-    // but we'll return "0" to match numpy behavior.
-    if (y.size(dim) == 0) {
-      return zeros_like_except(y, dim);
-    }
     TORCH_CHECK(y.scalar_type() != kBool && x.scalar_type() != kBool, "cumulative_trapezoid: received a bool input for `x` or `y`, but bool is not supported")
     Tensor x_viewed;
     if (x.dim() == 1) {
@@ -111,9 +113,9 @@ Tensor cumulative_trapezoid(const Tensor& y, const Tensor& x, int64_t dim) {
         DimVector sizes(y.dim(), 1); // shape = [1] * y.
         sizes[dim] = x.size(0); // shape[axis] = d.shape[0]
         x_viewed = x.view(sizes);
-        } else {
-            x_viewed = x;
-        }
+    } else {
+        x_viewed = x;
+    }
     Tensor x_left = x_viewed.slice(dim, 0, -1);
     Tensor x_right = x_viewed.slice(dim, 1);
     Tensor dx = x_right - x_left;
@@ -122,13 +124,10 @@ Tensor cumulative_trapezoid(const Tensor& y, const Tensor& x, int64_t dim) {
 }
 
 Tensor cumulative_trapezoid(const Tensor& y, const Scalar& dx, int64_t dim) {
-    if (y.size(dim) == 0) {
-      return zeros_like_except(y, dim);
-    }
     TORCH_CHECK(y.scalar_type() != kBool, "cumulative_trapezoid: received a bool input for `y`, but bool is not supported")
     TORCH_CHECK(!(dx.isComplex() or dx.isBoolean()), "trapezoid: Currently, we only support dx as a real number.");
-    Tensor d = at::range(0, y.size(dim), dx);
-    return do_cumulative_trapezoid(y, d, dim);
+
+    return do_cumulative_trapezoid(y, dx.toDouble(), dim);
 }
 
 }} // namespace at::native

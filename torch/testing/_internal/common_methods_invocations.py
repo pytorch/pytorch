@@ -2545,8 +2545,8 @@ def sample_cumulative_trapezoid(op_info, device, dtype, requires_grad, **kwargs)
         ((2, 3), (1, 3), {}),
         ((3, 3), (3, 3), {}),
         ((3, 3), (3, 3), {'dim': -2}),
-        ((5,), None, {'dx': 2}),
-        ((2, 2), None, {'dx': 3})
+        ((5,), None, {'dx': 2.0}),
+        ((2, 2), None, {'dx': 3.0})
     ]
     samples = []
     for y_shape, x_shape, kwarg in y_shape_x_shape_and_kwargs:
@@ -7695,7 +7695,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            sample_inputs_func=sample_trapezoid),
     OpInfo('cumulative_trapezoid',
-           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           dtypes=all_types_and_complex_and(),
            supports_out=False,
            sample_inputs_func=sample_cumulative_trapezoid),
     OpInfo('unsqueeze',
