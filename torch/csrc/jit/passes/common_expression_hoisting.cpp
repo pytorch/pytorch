@@ -141,10 +141,12 @@ bool HoistCommonExpression(const std::shared_ptr<Graph>& graph) {
   // This moves common subexpressions from the two sides of an
   // if block out of the if block.
 
-  GRAPH_DUMP("Before CSE", graph);
+  GRAPH_DUMP("Before CEH", graph);
   CommonExpressionHoister ceh(graph);
   bool changed = ceh.run();
-  GRAPH_DUMP("After CSE", graph);
+  if (changed) {
+    GRAPH_DUMP("After CEH Changes", graph);
+  }
   return changed;
 }
 } // namespace jit
