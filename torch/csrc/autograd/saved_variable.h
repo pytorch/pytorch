@@ -61,7 +61,8 @@ class TORCH_API SavedVariable {
   // 3. Hooks have been registered. In that case, hooks_ will be defined instead.
   // Note that the value of saved_original_ only reflects what happened during the construction
   // of the SavedVariable. If saved_original_ is true, we saved the original tensor in data_,
-  // but we may no longer have it if the user registered hooks.
+  // but if the user registers hooks, we will no longer have it (despite the saved_original_ still
+  // being true)
   at::Tensor data_;
 
   // This field is used to store the forward AD gradients associated with

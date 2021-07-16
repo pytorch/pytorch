@@ -74,7 +74,7 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output, bool is_i
 }
 
 void SavedVariable::save_common_metadata(const Variable& data) {
-  // Saved output number, version counter and fw_grad if needed
+  // Save output number, version counter and fw_grad if needed
 
   output_nr_ = data.output_nr();
   version_counter_ = impl::version_counter(data);
@@ -114,7 +114,7 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
                                                : grad_fn_;
 
   if (!is_leaf_ && !grad_fn) {
-    TORCH_CHECK(saved_for, "No grad_fn for non-leaf saved variable");
+    TORCH_INTERNAL_ASSERT(saved_for, "No grad_fn for non-leaf saved tensor");
     grad_fn = std::move(saved_for);
   }
 
@@ -176,7 +176,7 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   // alive, the accumulator should be kept alive by the references in the
   // graph.
   if (requires_grad_ && !var.grad_fn() && grad_accumulator_.expired()) {
-    TORCH_CHECK(false, "No grad accumulator for a saved leaf!");
+    TORCH_INTERNAL_ASSERT(false, "No grad accumulator for a saved leaf");
   }
   impl::set_grad_accumulator(var, grad_accumulator_);
 
