@@ -222,6 +222,7 @@ jobs:
         run: .github/scripts/generate_pytorch_test_matrix.py
 
   test:
+    if: True
     needs:
       - calculate-docker-image
       - build
