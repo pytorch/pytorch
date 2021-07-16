@@ -19,7 +19,7 @@ Tensor mkldnn_relu_backward(const Tensor& grad_output, const Tensor& input, cons
   TORCH_CHECK(false, "mkldnn_relu_backward: ATen not compiled with MKLDNN support");
 }
 
-Tensor mkldnn_gelu(const Tensor& input) {
+Tensor mkldnn_gelu(const Tensor& input, bool approximate) {
   TORCH_CHECK(false, "mkldnn_gelu: ATen not compiled with MKLDNN support");
 }
 
@@ -69,11 +69,14 @@ Tensor mkldnn_relu_backward(const Tensor& grad_output, const Tensor& input, cons
                                  grad_output.options().device_opt());
 }
 
-Tensor mkldnn_gelu(const Tensor& input) {
+Tensor mkldnn_gelu(const Tensor& input, bool approximate) {
   if (input.scalar_type() == ScalarType::BFloat16) {
     TORCH_CHECK(mkldnn_bf16_device_check(),
         "mkldnn_gelu: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
   }
+
+  TORCH_CHECK(!approximate,
+                  "mkldnn_gelu: fast, approximate gelu is not supported");
 
   const ideep::tensor& x = itensor_from_mkldnn(input);
   ideep::tensor y;

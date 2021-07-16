@@ -2951,9 +2951,21 @@ TEST_F(ModulesTest, GLU) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, GELU) {
-  GELU model;
+  bool approximate = false;
+  GELU model(GELUOptions().approximate(approximate));
   const auto x = torch::linspace(-3.0, 3.0, 100);
   const auto y_exp = x * 0.5 * (1.0 + torch::erf(x / std::sqrt(2.0)));
+  const auto y = model(x);
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST_F(ModulesTest, TanhGELU) {
+  bool approximate = true;
+  GELU model(GELUOptions().approximate(approximate));
+  const auto x = torch::linspace(-3.0, 3.0, 100);
+  const auto inner = std::sqrt(2 / M_PI) * (x + 0.044715 * x.pow(3.0));
+  const auto y_exp = 0.5 * x * (1.0 + inner.tanh());
   const auto y = model(x);
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }

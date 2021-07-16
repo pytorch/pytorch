@@ -83,9 +83,58 @@ LstmResult lstm(
   return {cell, hidden};
 }
 
+Val* fast_gelu(Val* x) {
+  TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid");
+
+  constexpr double kBeta = M_SQRT2 * M_2_SQRTPI * 0.5;
+  constexpr double kKappa = 0.044715;
+
+  auto x_cube = mul(x, mul(x, x));
+
+  auto inner_1 = mul(new Double(kKappa), x_cube);
+  auto inner_2 = add(x, inner_1);
+  auto inner_3 = mul(new Double(kBeta), inner_2);
+  auto tanh_inner = unaryOp(UnaryOpType::Tanh, inner_3);
+
+  auto out = mul(x, add(new Double(1.), tanh_inner));
+  auto y = mul(new Double(0.5), out);
+  return y;
+}
+
+Val* fast_gelu_backward(Val* dy, Val* x) {
+  TORCH_INTERNAL_ASSERT(dy != nullptr, "Grad Output is invalid.");
+  TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid");
+
+  constexpr double kBeta = M_SQRT2 * M_2_SQRTPI * 0.5;
+  constexpr double kKappa = 0.044715;
+
+  auto x_sq = mul(x, x);
+  auto x_cube = mul(x, x_sq);
+
+  auto inner_1 = mul(new Double(kKappa), x_cube);
+  auto inner_2 = add(x, inner_1);
+  auto inner_3 = mul(new Double(kBeta), inner_2);
+  auto tanh_inner = unaryOp(UnaryOpType::Tanh, inner_3);
+
+  auto left = mul(new Double(0.5), x);
+  auto right = add(new Double(1.), tanh_inner);
+
+  auto left_derivative = mul(new Double(0.5), right);
+
+  auto tanh_inner_sq = mul(tanh_inner, tanh_inner);
+  auto tanh_derivative = sub(new Double(1), tanh_inner_sq);
+
+  auto constant_mul_x_sq = mul(new Double(kBeta * 3 * kKappa), x_sq);
+  auto inner_derivative = add(new Double(kBeta), constant_mul_x_sq);
+  auto right_derivative = mul(left, mul(tanh_derivative, inner_derivative));
+
+  auto dx = mul(dy, add(left_derivative, right_derivative));
+  return dx;
+}
+
 Val* gelu_backward(Val* dy, Val* x) {
   TORCH_INTERNAL_ASSERT(dy != nullptr, "Grad Output is invalid.");
-  TORCH_INTERNAL_ASSERT(x != nullptr, "Mask is invalid");
+  TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid");
 
   constexpr double kAlpha = M_2_SQRTPI * M_SQRT1_2 * 0.5;
   const double kHalf = 0.5;

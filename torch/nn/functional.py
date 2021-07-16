@@ -1540,19 +1540,22 @@ See :class:`~torch.nn.LogSigmoid` for more details.
 )
 
 
-def gelu(input):
-    r"""gelu(input) -> Tensor
+def gelu(input: Tensor, approximate: bool = False) -> Tensor:
+    r"""gelu(input, approximate) -> Tensor
 
     Applies element-wise the function
     :math:`\text{GELU}(x) = x * \Phi(x)`
 
     where :math:`\Phi(x)` is the Cumulative Distribution Function for Gaussian Distribution.
 
+    When the approximate flag is enabled, Gelu is estimated with:
+        :math::  \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt(2 / \pi) * (x + 0.044715 * x^3)))
+
     See `Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`_.
     """
     if has_torch_function_unary(input):
-        return handle_torch_function(gelu, (input,), input)
-    return torch._C._nn.gelu(input)
+        return handle_torch_function(gelu, (input,), input, approximate=approximate)
+    return torch._C._nn.gelu(input, approximate)
 
 
 def hardshrink(input: Tensor, lambd: float = 0.5) -> Tensor:

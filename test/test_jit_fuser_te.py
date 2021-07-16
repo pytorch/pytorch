@@ -1927,7 +1927,6 @@ works_list = [
     'mul',
     'ne',
     'neg',
-    'nn.functional.gelu',
     'nn.functional.hardshrink',
     'nn.functional.hardsigmoid',
     'nn.functional.hardswish',
@@ -1969,7 +1968,10 @@ skip_ops = [
     # Causing SIGSEGV
     # Reference: https://github.com/pytorch/pytorch/pull/59442/checks?check_run_id=2746156896
     't',
-    'conj'
+    'conj',
+    # Tanh Gelu approximation is not supported
+    # Reference: https://github.com/pytorch/pytorch/pull/61439
+    'nn.functional.gelu'
 ]
 
 def get_name(op):

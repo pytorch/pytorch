@@ -155,12 +155,12 @@ TORCH_META_FUNC(softshrink_backward) (
   build_borrowing_binary_op(maybe_get_output(), grad, self);
 }
 
-TORCH_META_FUNC(gelu) (const Tensor & self) {
+TORCH_META_FUNC(gelu) (const Tensor & self, bool approximate) {
   build_unary_op(maybe_get_output(), self);
 }
 
 TORCH_META_FUNC(gelu_backward) (
-  const Tensor& grad, const Tensor& self
+  const Tensor& grad, const Tensor& self, bool approximate
 ) {
   build_borrowing_binary_op(maybe_get_output(), grad, self);
 }
@@ -315,15 +315,15 @@ TORCH_IMPL_FUNC(softshrink_backward_out) (
 }
 
 TORCH_IMPL_FUNC(gelu_out_cpu) (
-  const Tensor& self, const Tensor& result
+  const Tensor& self, bool approximate, const Tensor& result
 ) {
-  GeluKernel(kCPU, *this);
+  GeluKernel(kCPU, *this, approximate);
 }
 
 TORCH_IMPL_FUNC(gelu_backward_out_cpu) (
-  const Tensor& grad, const Tensor& self, const Tensor& grad_input
+  const Tensor& grad_output, const Tensor& self, bool approximate, const Tensor& grad_input
 ) {
-  GeluBackwardKernel(kCPU, *this);
+  GeluBackwardKernel(kCPU, *this, approximate);
 }
 
 Tensor hardtanh(const Tensor& self, const Scalar& min, const Scalar& max) {

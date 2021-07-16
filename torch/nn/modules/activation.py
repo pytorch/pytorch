@@ -652,6 +652,12 @@ class GELU(Module):
 
     where :math:`\Phi(x)` is the Cumulative Distribution Function for Gaussian Distribution.
 
+    When the approximate flag is enabled, Gelu is estimated with:
+        :math::  \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt(2 / \pi) * (x + 0.044715 * x^3)))
+
+    Args:
+        approximate: Use tanh gelu approximation if flag is enabled. Default: False
+
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
           dimensions
@@ -665,8 +671,18 @@ class GELU(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+    __constants__ = ['approximate']
+    approximate: bool
+
+    def __init__(self, approximate: bool = False) -> None:
+        super(GELU, self).__init__()
+        self.approximate = approximate
+
     def forward(self, input: Tensor) -> Tensor:
-        return F.gelu(input)
+        return F.gelu(input, self.approximate)
+
+    def extra_repr(self) -> str:
+        return 'approximate={}'.format(self.approximate)
 
 
 class Hardshrink(Module):

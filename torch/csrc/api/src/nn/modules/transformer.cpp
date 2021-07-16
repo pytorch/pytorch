@@ -66,7 +66,7 @@ Tensor TransformerEncoderLayerImpl::forward(
 
   // feedforward
   if (c10::get_if<enumtype::kGELU>(&options.activation())) {
-    src2 = linear2(dropout(F::gelu(linear1(ret))));
+    src2 = linear2(dropout(F::gelu(linear1(ret), false)));
   }
   else if (c10::get_if<enumtype::kReLU>(&options.activation())) {
     src2 = linear2(dropout(F::relu(linear1(ret))));
@@ -182,7 +182,7 @@ Tensor TransformerDecoderLayerImpl::forward(
 
 Tensor TransformerDecoderLayerImpl::activation(const Tensor& input){
   if (c10::get_if<enumtype::kGELU>(&options.activation())) {
-    return F::gelu(input);
+    return F::gelu(input, false);
   } else if (c10::get_if<enumtype::kReLU>(&options.activation())) {
     return F::relu(input);
   } else {

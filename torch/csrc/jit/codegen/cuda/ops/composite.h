@@ -45,6 +45,8 @@ TORCH_CUDA_CU_API LstmResult lstm(
     TensorView* cell_x,
     TensorView* out_x);
 
+TORCH_CUDA_CU_API Val* fast_gelu(Val* x);
+TORCH_CUDA_CU_API Val* fast_gelu_backward(Val* dy, Val* x);
 TORCH_CUDA_CU_API Val* gelu_backward(Val* dy, Val* x);
 
 } // namespace cuda

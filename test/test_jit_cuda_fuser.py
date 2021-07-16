@@ -452,7 +452,6 @@ class TestCudaFuser(JitTestCase):
                       torch.relu,
                       torch.sigmoid,
                       torch.tanh,
-                      torch.nn.functional.gelu,
                       torch.nn.functional.silu]
         for op in operations:
             self._unary_test_helper(op)
@@ -531,7 +530,6 @@ class TestCudaFuser(JitTestCase):
                       torch.relu,
                       torch.sigmoid,
                       torch.tanh,
-                      torch.nn.functional.gelu,
                       torch.nn.functional.silu]
         prev_fallback = os.environ['PYTORCH_NVFUSER_DISABLE_FALLBACK']
         os.environ['PYTORCH_NVFUSER_DISABLE_FALLBACK'] = '0'
@@ -1894,14 +1892,15 @@ class TestCudaFuser(JitTestCase):
         x = torch.randn([1024, 1024], dtype=dtype, device=device, requires_grad=True)
         grads = torch.randn([1024, 1024], dtype=dtype, device=device, requires_grad=False)
 
-        def t(x: torch.Tensor):
-            o = torch.nn.functional.gelu(x)
+        def t(x: torch.Tensor, fast : bool):
+            o = torch.nn.functional.gelu(x, fast)
             o = o * 1.0
             return o
 
         t_jit = torch.jit.script(t)
 
-        self._run_training_helper(t_jit, t, grads, x)
+        for approximate in [False, True]:
+            self._run_training_helper(t_jit, t, grads, x, approximate)
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
