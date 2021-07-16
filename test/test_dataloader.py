@@ -1871,6 +1871,43 @@ except RuntimeError as e:
         self.assertEqual(arr, _utils.collate.default_collate(arr))
 
     @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
+    def test_default_collate_numpy_types(self):
+        import numpy as np
+
+        dtypes = {
+            np.float64: torch.float64,
+            np.float32: torch.float32,
+            np.float16: torch.float16,
+            np.complex64: torch.complex64,
+            np.complex128: torch.complex128,
+            np.int64: torch.int64,
+            np.int32: torch.int32,
+            np.int16: torch.int16,
+            np.int8: torch.int8,
+            np.uint8: torch.uint8,
+        }
+
+        for dt, tt in dtypes.items():
+            arr = np.array([0, 1], dtype=dt)
+            res = _utils.collate.default_collate(arr)
+            self.assertEqual(torch.tensor([0, 1], dtype=tt), res)
+
+            arr = np.array([[0], [1]], dtype=dt)
+            res = _utils.collate.default_collate(arr)
+            self.assertEqual(torch.tensor([[0], [1]], dtype=tt), res)
+
+    @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
+    def test_default_collate_numpy_subtypes(self):
+        import numpy as np
+
+        class SubArray(np.ndarray):
+            pass
+
+        arr = np.zeros(10, dtype=np.int32).view(SubArray)
+        res = _utils.collate.default_collate(arr)
+        self.assertEqual(torch.zeros(10, dtype=torch.int32), res)
+
+    @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
     def test_default_collate_bad_numpy_types(self):
         import numpy as np
 
