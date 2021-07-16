@@ -332,7 +332,6 @@ def run_tests(argv=UNITTEST_ARGS):
             if not unittest.main(exit=False, argv=argv).result.wasSuccessful():
                 sys.exit(-1)
     else:
-        print("unittest main")
         unittest.main(argv=argv)
 
 IS_LINUX = sys.platform == "linux"

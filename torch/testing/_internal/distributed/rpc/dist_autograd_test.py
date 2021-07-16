@@ -2236,7 +2236,7 @@ class FaultyAgentDistAutogradTest(RpcAgentTestFixture):
         t2 = torch.zeros(3, 3, requires_grad=True)
         self.context_cleanup_test_helper(rpc_args=(t1, t2), func=torch.add)
 
-    @dist_init(clean_shutdown=False)
+    @dist_init
     def test_verify_backend_options(self):
         # self.assertEqual(self.rpc_backend, rpc.backend_registry.BackendType.FAULTY_PROCESS_GROUP)
         self.assertEqual(self.rpc_backend, rpc.backend_registry.BackendType.FAULTY_TENSORPIPE)

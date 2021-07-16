@@ -4177,7 +4177,7 @@ class FaultyAgentRpcTest(RpcAgentTestFixture):
         # explicitly delete all User RRefs
         _delete_all_user_and_unforked_owner_rrefs()
 
-    @dist_init(clean_shutdown=False)
+    @dist_init
     def test_verify_backend_options(self):
         # self.assertEqual(self.rpc_backend, rpc.backend_registry.BackendType.FAULTY_PROCESS_GROUP)
         self.assertEqual(self.rpc_backend, rpc.backend_registry.BackendType.FAULTY_TENSORPIPE)
@@ -4195,34 +4195,9 @@ class FaultyAgentRpcTest(RpcAgentTestFixture):
             set(self.rpc_backend_options.messages_to_fail),
         )
 
-    @dist_init(clean_shutdown=False)
-    def test_faulty_agent(self):
-        if self.rank  == 0:
-            print("=" * 100, rpc.rpc_sync(worker_name(1), torch.add, args=(torch.zeros(2), 1)))
-        else:
-            time.sleep(10)
-
     @dist_init(faulty_messages=[])
     def test_no_faulty_messages(self):
-        # print(self.rank, self.rpc_backend, self.world_size, self.rpc_backend_options)
-        
-        # import torch.distributed.rpc.api as api
-
-        # api._ignore_rref_leak = False
-
-        # self.worker_id = self.rank
-
-        # self.setup_fault_injection(None, None)
-
-        # rpc.init_rpc(
-        #     name="worker%d" % self.rank,
-        #     backend=self.rpc_backend,
-        #     rank=self.rank,
-        #     world_size=self.world_size,
-        #     rpc_backend_options=self.rpc_backend_options,
-        # )
         self.assertEqual(len(self.rpc_backend_options.messages_to_fail), 0)
-        # rpc.shutdown()
 
     @dist_init(messages_to_delay={"SCRIPT_CALL": 1.5})
     def test_custom_messages_to_delay(self):
@@ -4275,7 +4250,7 @@ class FaultyAgentRpcTest(RpcAgentTestFixture):
         # on the owning nodes, this is expected because the OwnerRRef was never
         # successfully created. Therefore, delAllUsers will work as expected.
 
-    @dist_init(faulty_messages=["SCRIPT_REMOTE_CALL"], clean_shutdown=False)
+    @dist_init(faulty_messages=["SCRIPT_REMOTE_CALL"])
     def test_builtin_remote_message_dropped_timeout(self):
         func = torch.add
         args = (torch.tensor(1), torch.tensor(1))

@@ -156,11 +156,6 @@ def _faulty_tensorpipe_init_backend_handler(
         # CUDA-related RPC request to this process before user code in this
         # process initializes its PyTorch CUDA states.
         torch.cuda.init()
-        device_count = torch.cuda.device_count()
-    else:
-        device_count = 0
-
-    print("CREATING AGENT")
 
     agent = FaultyTensorPipeAgent(
         store,
