@@ -223,6 +223,10 @@ if(USE_DEPLOY)
 
   target_compile_options(torch_python_obj PRIVATE ${TORCH_PYTHON_COMPILE_OPTIONS})
 
+  if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+    target_compile_options(torch_python_obj PRIVATE -fno-gnu-unique)
+  endif()
+
   target_include_directories(torch_python_obj PUBLIC ${TORCH_PYTHON_INCLUDE_DIRECTORIES})
   target_include_directories(torch_python_obj PRIVATE ../third_party/fmt/include)
 

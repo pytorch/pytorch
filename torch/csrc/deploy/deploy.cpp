@@ -137,9 +137,7 @@ ReplicatedObj InterpreterSession::create_movable(Obj obj) {
 void write_tmp_lib(FILE* dst, char* lib_start, char* lib_end) {
   TORCH_INTERNAL_ASSERT(dst);
   size_t size = lib_end - lib_start;
-  std::cout << "WRITING " << size / (1024.0*1024.0) << "MB\n";
   TORCH_INTERNAL_ASSERT(size == fwrite(lib_start, 1, size, dst));
-  std::cout << "DONE\n";
 }
 
 Interpreter::Interpreter(InterpreterManager* manager)

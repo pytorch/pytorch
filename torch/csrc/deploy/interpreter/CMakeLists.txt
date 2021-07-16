@@ -96,6 +96,9 @@ add_library(torch_deployinterpreter ${INTERPRETER_LIB_SOURCES} ${LINKER_SCRIPT})
 # but cpp themselves don't clearly depend on cpython so there is a race otherwise
 add_dependencies(torch_deployinterpreter cpython)
 add_dependencies(torch_python_obj cpython)
+if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+  target_compile_options(torch_deployinterpreter PRIVATE -fno-gnu-unique)
+endif()
 
 target_include_directories(torch_deployinterpreter PRIVATE ${INTERPRETER_DIR})
 target_include_directories(torch_deployinterpreter PUBLIC ${PYTHON_INC_DIR})
