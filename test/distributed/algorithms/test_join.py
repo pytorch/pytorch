@@ -411,7 +411,7 @@ class TestJoin(MultiProcessTestCase):
         expected_total = self.world_size * BASE_NUM_INPUTS
         for num_joined in range(1, self.rank + 1):
             expected_total += (self.world_size - num_joined) * OFFSET
-        # The expected total is now multiplied by a factor of `NUM_JOINABLES`
+        # The expected total is now multiplied by a factor of `NUM_ALLREDUCES`
         expected_total *= NUM_ALLREDUCES
         self.assertEqual(allreduce_total, expected_total)
 
