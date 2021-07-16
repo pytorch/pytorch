@@ -241,6 +241,7 @@ _(aten, conj) \
 _(aten, conj_physical) \
 _(aten, conj_physical_) \
 _(aten, resolve_conj) \
+_(aten, resolve_neg) \
 _(aten, complex) \
 _(aten, copysign) \
 _(aten, polar) \
@@ -444,8 +445,6 @@ _(aten, _log_softmax_backward_data) \
 _(aten, logcumsumexp) \
 _(aten, logdet) \
 _(aten, logspace) \
-_(aten, xlogy) \
-_(aten, special_xlog1py) \
 _(aten, lstm) \
 _(aten, lstm_cell) \
 _(aten, lstsq) \
@@ -768,7 +767,6 @@ _(aten, zeros_like) \
 _(aten, real) \
 _(aten, imag) \
 _(aten, view_as_real) \
-_(aten, _view_as_real_physical) \
 _(aten, view_as_complex) \
 /* nothing */
 
