@@ -2708,6 +2708,38 @@ class TestQuantizeFx(QuantizationTestCase):
                     actpp_module_count += 1
             self.assertEqual(actpp_module_count, 1)
 
+            m_copy = copy.deepcopy(m)
+            m = convert_fx(m)
+            m_reference = convert_fx(m_copy, is_reference=True)
+
+            # checks for non-reference quantized model
+            node_occurrence = {
+                ns.call_function(torch.quantize_per_tensor): 1,
+                ns.call_method("dequantize"): 1
+            }
+            node_list = [
+                ns.call_function(torch.quantize_per_tensor),
+                ns.call_module(torch.nn.MaxPool2d),
+                ns.call_method("dequantize"),
+            ]
+            self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence, expected_node_list=node_list)
+
+            # checks for reference quantized model, for copy nodes we'll have
+            # dequant - copy_node - quant patterns which will be fused later
+            # in the backend lowering step
+            node_occurrence = {
+                ns.call_function(torch.quantize_per_tensor): 2,
+                ns.call_method("dequantize"): 2
+            }
+            node_list = [
+                ns.call_function(torch.quantize_per_tensor),
+                ns.call_method("dequantize"),
+                ns.call_module(torch.nn.MaxPool2d),
+                ns.call_function(torch.quantize_per_tensor),
+                ns.call_method("dequantize"),
+            ]
+            self.checkGraphModuleNodes(m_reference, expected_node_occurrence=node_occurrence, expected_node_list=node_list)
+
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
@@ -2921,13 +2953,18 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 # activation, weight, bias and output
                 ns.call_module(torch.quantization.PlaceholderObserver): 3 + int(use_bias) + int(not has_relu)
             }
+            # We have extra to and dequantize when is_reference is True
+            # and has_relu is False since when has_relu is False, we
+            # have an nn.Identity in the model, which is a CopyNode
+            # and we would add extra quant - dequant for CopyNode in
+            # reference patterns
             convert_node_occurrence = {
                 # we don't support static fp16 ops, so the linear function
                 # is unfused
                 linear_fun: 1,
                 # activation, weight, bias and output
-                ns.call_method("to"): 3 + int(use_bias),
-                ns.call_method("dequantize"): 3 + int(use_bias)
+                ns.call_method("to"): 3 + int(use_bias) + int(not has_relu and is_reference),
+                ns.call_method("dequantize"): 3 + int(use_bias) + int(not has_relu and is_reference)
             }
             self.checkGraphModeFxOp(
                 model, data, QuantType.DYNAMIC, linear_fun,
