@@ -52,6 +52,11 @@ Tensor channel_shuffle(const Tensor& self, int64_t groups) {
       input_reshaped.permute({0 /* b */, 2 /* oc */, 1 /* groups */, 3})
       .contiguous()
       .reshape(self.sizes());
+
+  if (groups == 1 || oc == 1) { // result of permute is contiguous
+    // Copy so that input is not aliased with output
+    output_tensor = output_tensor.clone();
+  }
   return namedinference::propagate_names_if_nonempty(
       output_tensor,
       self.has_names() ? self.names() : at::ArrayRef<Dimname>{});
