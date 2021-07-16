@@ -45,7 +45,6 @@ _REMOTE_MODULE_PICKLED_ATTRIBUTES = (
     "is_scriptable",
     "generated_methods",
     "module_rref",
-    "__module_name__",
 )
 
 _SerializedRemoteModule = collections.namedtuple("_SerializedRemoteModule", _REMOTE_MODULE_PICKLED_ATTRIBUTES)  # type: ignore[misc]
@@ -66,6 +65,7 @@ _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING = (
     "_state_dict_hooks",
     "_load_state_dict_pre_hooks",
     "_modules",
+    "__module_name__",
 
     # The two attributes below are generated methods, not available at pickling time.
     "forward_async",
