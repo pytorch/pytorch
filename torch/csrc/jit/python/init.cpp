@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/irparser.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/canonicalize_graph_fuser_ops.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
@@ -31,6 +32,7 @@
 #include <torch/csrc/jit/passes/graph_fuser.h>
 #include <torch/csrc/jit/passes/inline_fork_wait.h>
 #include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/passes/integer_value_refinement.h>
 #include <torch/csrc/jit/passes/loop_unrolling.h>
 #include <torch/csrc/jit/passes/lower_graph.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
@@ -55,6 +57,7 @@
 #include <torch/csrc/jit/passes/onnx/shape_type_inference.h>
 #include <torch/csrc/jit/passes/onnx/unpack_quantized_weights.h>
 #include <torch/csrc/jit/passes/peephole.h>
+#include <torch/csrc/jit/passes/peephole_list_idioms.h>
 #include <torch/csrc/jit/passes/quantization/dedup_module_uses.h>
 #include <torch/csrc/jit/passes/quantization/finalize.h>
 #include <torch/csrc/jit/passes/quantization/fusion_passes.h>
@@ -65,9 +68,11 @@
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/remove_inplace_ops.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
+#include <torch/csrc/jit/passes/restore_mutation.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
+#include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/passes/utils/check_alias_annotation.h>
 #include <torch/csrc/jit/passes/vulkan_rewrite.h>
@@ -86,9 +91,9 @@
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/print_handler.h>
 #include <torch/csrc/jit/runtime/static/init.h>
+#include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import.h>
-#include <torch/csrc/jit/tensorexpr/execution_counter.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/jit/tensorexpr/tensorexpr_init.h>
 
@@ -161,7 +166,26 @@ void initJITBindings(PyObject* module) {
             ONNXAssignOutputShape(graph, tensors, desc, onnx_shape_inference);
           })
       .def("_jit_pass_lower_all_tuples", LowerAllTuples)
+      .def(
+          "_new_symbolic_shape_symbol",
+          []() { return c10::ShapeSymbol::newSymbol().value(); })
+      .def(
+          "_jit_shape_compute_graph_for_node",
+          [](Node* n) -> c10::optional<std::shared_ptr<Graph>> {
+            if (!n->maybeSchema()) {
+              return c10::nullopt;
+            }
+            return shapeComputeGraphForSchema(n->schema());
+          })
+      .def("_jit_pass_propagate_shapes_on_graph", PropagateShapesOnGraph)
       .def("_jit_pass_onnx_function_substitution", ONNXFunctionCallSubstitution)
+      .def("_jit_pass_integer_value_refinement", RefineIntegerValues)
+      .def(
+          "_jit_set_symbolic_shapes_test_mode",
+          &setSymbolicShapeAnalysisTestMode)
+      .def(
+          "_jit_symbolic_shapes_test_mode_enabled",
+          &symbolicShapeAnalysisTestModeEnabled)
       .def(
           "_jit_pass_onnx_fold_if",
           [](std::shared_ptr<Graph>& graph) {
@@ -179,7 +203,7 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_onnx_eval_peephole",
           [](std::shared_ptr<Graph>& graph,
              std::map<std::string, IValue>& paramsDict) {
-            EvalPeepholeONNX(graph->block(), paramsDict);
+            EvalPeepholeONNX(graph, paramsDict);
             return paramsDict;
           },
           pybind11::return_value_policy::move)
@@ -192,7 +216,7 @@ void initJITBindings(PyObject* module) {
              std::map<std::string, IValue>& paramsDict,
              int opset_version) {
             ConstantFoldONNX(
-                graph->block(),
+                graph,
                 paramsDict,
                 opset_version); // overload resolution
             return paramsDict;
@@ -370,14 +394,19 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_custom_pattern_based_rewrite_graph",
           [](const std::string& pattern,
              const std::string& fused_node_name,
-             std::shared_ptr<Graph> g) {
+             std::shared_ptr<Graph> g,
+             const std::vector<std::pair<std::string, std::string>>&
+                 value_name_pairs) {
             SubgraphRewriter subgraph_rewriter;
-            subgraph_rewriter.RegisterRewritePattern(pattern, fused_node_name);
+            subgraph_rewriter.RegisterRewritePattern(
+                pattern, fused_node_name, value_name_pairs);
             subgraph_rewriter.runOnGraph(g);
-          })
-      .def(
-          "_jit_pass_remove_inplace_ops",
-          [](const std::shared_ptr<Graph>& g) { return RemoveInplaceOps(g); })
+          },
+          py::arg("pattern"),
+          py::arg("fused_node_name"),
+          py::arg("g"),
+          py::arg("value_name_pairs") =
+              std::vector<std::pair<std::string, std::string>>())
       .def("_jit_pass_constant_pooling", ConstantPooling)
       .def(
           "_jit_pass_create_functional_graphs",
@@ -389,6 +418,16 @@ void initJITBindings(PyObject* module) {
             return RemoveTensorMutation(g);
           })
       .def(
+          "_jit_pass_functional_to_inplace_activation",
+          [](std::shared_ptr<Graph>& g) {
+            return FunctionalToInplaceActivation(g);
+          })
+      .def(
+          "_jit_pass_inplace_to_functional_activation",
+          [](std::shared_ptr<Graph>& g) {
+            return InplaceToFunctionalActivation(g);
+          })
+      .def(
           "_jit_pass_inline_functional_graphs",
           [](std::shared_ptr<Graph>& g) { return InlineFunctionalGraphs(g); })
       .def(
@@ -398,6 +437,16 @@ void initJITBindings(PyObject* module) {
           },
           py::arg("graph"),
           py::arg("addmm_fusion_enabled") = false)
+      .def(
+          "_jit_pass_peephole_list_idioms",
+          [](const std::shared_ptr<Graph>& g, bool refine_list_len) {
+            return PeepholeOptimizeListIdioms(g, refine_list_len);
+          },
+          py::arg("graph"),
+          py::arg("refine_list_len") = false)
+      .def(
+          "_jit_pass_refine_integer_values",
+          [](std::shared_ptr<Graph>& g) { return RefineIntegerValues(g); })
       .def(
           "_jit_pass_fuse_addmm",
           [](std::shared_ptr<Graph>& g) { return FuseAddMM(g); })
@@ -508,9 +557,6 @@ void initJITBindings(PyObject* module) {
           })
       .def("_jit_pass_onnx_block", BlockToONNX)
       .def(
-          "_jit_pass_onnx_encapsulate_pattern_into_subblock",
-          EncapsulatePatternIntoSubblock)
-      .def(
           "_jit_onnx_convert_pattern_from_subblock", ConvertPatternFromSubblock)
       .def("_jit_pass_fixup_onnx_controlflow_node", FixupONNXControlflowNode)
       .def("_jit_pass_canonicalize_graph_fuser_ops", CanonicalizeOps)
@@ -588,17 +634,17 @@ void initJITBindings(PyObject* module) {
           "_jit_get_inline_everything_mode",
           []() { return getInlineEverythingMode(); })
       .def(
+          "_jit_get_logging_option",
+          []() { return ::torch::jit::get_jit_logging_levels(); })
+      .def(
+          "_jit_set_logging_option",
+          [](std::string loggingOption) -> void {
+            ::torch::jit::set_jit_logging_levels(loggingOption);
+          })
+      .def(
           "_jit_try_infer_type",
           [](py::object obj) -> InferredType {
             return tryToInferType(std::move(obj));
-          })
-      .def(
-          "_jit_get_trigger_value",
-          [](const std::string& trigger_name) -> int {
-            using namespace torch::jit::tensorexpr;
-            ExecutionTrigger* trigger =
-                ExecutionTriggerList::GetInstance().FindByName(trigger_name);
-            return trigger->value();
           })
       .def(
           "_jit_get_te_cuda_pointwise_loop_levels",
@@ -675,6 +721,12 @@ void initJITBindings(PyObject* module) {
             getCatWoConditionals() = optimize_cat;
           })
       .def(
+          "_jit_opt_conditionals",
+          [](bool opt_conds) {
+            using namespace torch::jit::tensorexpr;
+            getOptConditionals() = opt_conds;
+          })
+      .def(
           "_llvm_enabled",
           []() {
 #ifdef TORCH_ENABLE_LLVM
@@ -727,6 +779,19 @@ void initJITBindings(PyObject* module) {
              std::vector<std::string>& preserved_methods) {
             return optimizeForMobile(
                 module, optimization_blocklist, preserved_methods);
+          })
+      .def(
+          "_hack_do_not_use_clone_module_with_class",
+          [](script::Module& module,
+             std::vector<std::string>& ignored_methods,
+             std::vector<std::string>& ignored_attributes) {
+            const bool inplace = false;
+            const std::unordered_set<std::string> ignored_methods_set(
+                ignored_methods.begin(), ignored_methods.end());
+            const std::unordered_set<std::string> ignored_attributes_set(
+                ignored_attributes.begin(), ignored_attributes.end());
+            return module.clone(
+                inplace, ignored_methods_set, ignored_attributes_set);
           })
       .def(
           "_jit_pass_vulkan_insert_prepacked_ops",
@@ -1044,6 +1109,38 @@ void initJITBindings(PyObject* module) {
         return self.getAllRecords();
       });
 
+  // Used by torch.Package to coordinate deserialization of storages across
+  // ScriptModules and eager modules
+  py::class_<
+      DeserializationStorageContext,
+      std::shared_ptr<DeserializationStorageContext>>(
+      m, "DeserializationStorageContext")
+      .def(py::init<>())
+      .def(
+          "get_storage",
+          [](DeserializationStorageContext& self,
+             const std::string& name,
+             py::object data_type_obj) {
+            c10::Storage storage = self.getStorage(name);
+            auto scalar_type =
+                reinterpret_cast<THPDtype*>(data_type_obj.ptr())->scalar_type;
+            auto ptr =
+                c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
+                    std::move(storage),
+                    at::DispatchKeySet(),
+                    at::CPU(scalar_type).typeMeta());
+
+            return at::Tensor(std::move(ptr));
+          })
+      .def(
+          "add_storage",
+          [](DeserializationStorageContext& self,
+             const std::string& name,
+             const at::Tensor& tensor) {
+            return self.addStorage(name, tensor.storage());
+          })
+      .def("has_storage", &DeserializationStorageContext::hasStorage);
+
   m.def(
       "_jit_get_operation",
       [](const std::string& op_name) {
@@ -1360,7 +1457,8 @@ void initJITBindings(PyObject* module) {
                 fut->wait();
               }
             });
-      });
+      },
+      py::call_guard<py::gil_scoped_release>());
 
   m.def("_jit_assert_is_instance", [](py::object obj, const TypePtr& type) {
     toIValue(std::move(obj), type);

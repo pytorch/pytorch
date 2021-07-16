@@ -36,8 +36,9 @@ import torch
 torch.set_default_dtype(torch.double)
 
 from torch._six import inf
-from torch.testing._internal.common_utils import TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests, \
-    gradcheck
+from torch.testing._internal.common_utils import \
+    (TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests,
+     gradcheck, IS_MACOS)
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.autograd import grad
 from torch.autograd.functional import jacobian
@@ -1027,6 +1028,7 @@ class TestDistributions(TestCase):
         self.assertEqual(Geometric(p).entropy(), scipy.stats.geom(p.detach().numpy(), loc=-1).entropy(), atol=1e-3, rtol=0)
         self.assertEqual(float(Geometric(s).entropy()), scipy.stats.geom(s, loc=-1).entropy().item(), atol=1e-3, rtol=0)
 
+    @unittest.skipIf(IS_MACOS, "See https://github.com/pytorch/pytorch/issues/60347")
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_geometric_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
@@ -1043,6 +1045,7 @@ class TestDistributions(TestCase):
         self.assertRaises(NotImplementedError, Binomial(10, p).rsample)
         self.assertRaises(NotImplementedError, Binomial(10, p).entropy)
 
+    @unittest.skipIf(IS_MACOS, "See https://github.com/pytorch/pytorch/issues/60347")
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_binomial_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
@@ -1323,6 +1326,7 @@ class TestDistributions(TestCase):
         self._gradcheck_log_prob(Poisson, (rate,))
         self._gradcheck_log_prob(Poisson, (rate_1d,))
 
+    @unittest.skipIf(IS_MACOS, "See https://github.com/pytorch/pytorch/issues/60347")
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_poisson_sample(self):
         set_rng_seed(1)  # see Note [Randomized statistical tests]
@@ -1975,13 +1979,13 @@ class TestDistributions(TestCase):
         tmp = torch.randn(3, 10)
         cov = (torch.matmul(tmp, tmp.t()) / tmp.size(-1)).requires_grad_()
         prec = cov.inverse().requires_grad_()
-        scale_tril = torch.cholesky(cov, upper=False).requires_grad_()
+        scale_tril = torch.linalg.cholesky(cov).requires_grad_()
 
         # construct batch of PSD covariances
         tmp = torch.randn(6, 5, 3, 10)
         cov_batched = (tmp.unsqueeze(-2) * tmp.unsqueeze(-3)).mean(-1).requires_grad_()
         prec_batched = cov_batched.inverse()
-        scale_tril_batched = cov_batched.cholesky(upper=False)
+        scale_tril_batched = torch.linalg.cholesky(cov_batched)
 
         # ensure that sample, batch, event shapes all handled correctly
         self.assertEqual(MultivariateNormal(mean, cov).sample().size(), (5, 3))
@@ -2036,7 +2040,7 @@ class TestDistributions(TestCase):
         tmp = torch.randn(3, 10)
         cov = (torch.matmul(tmp, tmp.t()) / tmp.size(-1)).requires_grad_()
         prec = cov.inverse().requires_grad_()
-        scale_tril = torch.cholesky(cov, upper=False).requires_grad_()
+        scale_tril = torch.linalg.cholesky(cov).requires_grad_()
 
         # check that logprob values match scipy logpdf,
         # and that covariance and scale_tril parameters are equivalent
@@ -2074,7 +2078,7 @@ class TestDistributions(TestCase):
         tmp = torch.randn(3, 10)
         cov = (torch.matmul(tmp, tmp.t()) / tmp.size(-1)).requires_grad_()
         prec = cov.inverse().requires_grad_()
-        scale_tril = torch.cholesky(cov, upper=False).requires_grad_()
+        scale_tril = torch.linalg.cholesky(cov).requires_grad_()
 
         self._check_sampler_sampler(MultivariateNormal(mean, cov),
                                     scipy.stats.multivariate_normal(mean.detach().numpy(), cov.detach().numpy()),
@@ -2095,7 +2099,7 @@ class TestDistributions(TestCase):
         m = MultivariateNormal(loc=loc, scale_tril=scale_tril)
         self.assertEqual(m.covariance_matrix, m.scale_tril.mm(m.scale_tril.t()))
         self.assertEqual(m.covariance_matrix.mm(m.precision_matrix), torch.eye(m.event_shape[0]))
-        self.assertEqual(m.scale_tril, torch.cholesky(m.covariance_matrix, upper=False))
+        self.assertEqual(m.scale_tril, torch.linalg.cholesky(m.covariance_matrix))
 
     def test_multivariate_normal_moments(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
@@ -2606,7 +2610,7 @@ class TestDistributions(TestCase):
             # correlation matrices.
             if dim == 2:
                 # for dim=2, pdf = 0.5 (jacobian adjustment factor is 0.)
-                self.assertTrue(all([x == torch.tensor(0.5).log() for x in log_probs]))
+                self.assertTrue(all(torch.allclose(x, torch.tensor(0.5).log(), atol=1e-10) for x in log_probs))
             self.assertEqual(log_probs[0], log_probs[1])
             invalid_sample = torch.cat([sample, sample.new_ones(1, dim)], dim=0)
             self.assertRaises(ValueError, lambda: lkj.log_prob(invalid_sample))
@@ -4525,7 +4529,7 @@ class TestValidation(TestCase):
                 # TransformedDistribution has a distribution instance
                 # as the argument, so we cannot do much about that
                 continue
-            for param in params:
+            for i, param in enumerate(params):
                 d_nonval = Dist(validate_args=False, **param)
                 d_val = Dist(validate_args=True, **param)
                 for v in torch.tensor([-2.0, -1.0, 0.0, 1.0, 2.0]):
@@ -4546,6 +4550,25 @@ class TestValidation(TestCase):
                             except RuntimeError:
                                 pass
 
+                # check correct samples are ok
+                valid_value = d_val.sample()
+                d_val.log_prob(valid_value)
+                # check invalid values raise ValueError
+                if valid_value.dtype == torch.long:
+                    valid_value = valid_value.float()
+                invalid_value = torch.full_like(valid_value, math.nan)
+                try:
+                    with self.assertRaisesRegex(
+                        ValueError,
+                        "Expected value argument .* to be within the support .*",
+                    ):
+                        d_val.log_prob(invalid_value)
+                except AssertionError as e:
+                    fail_string = "Support ValueError not raised for {} example {}/{}"
+                    raise AssertionError(
+                        fail_string.format(Dist.__name__, i + 1, len(params))
+                    ) from e
+
     @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")
     def test_invalid(self):
         for Dist, params in BAD_EXAMPLES:
@@ -4554,8 +4577,10 @@ class TestValidation(TestCase):
                     with self.assertRaises(ValueError):
                         Dist(validate_args=True, **param)
                 except AssertionError as e:
-                    fail_string = 'ValueError not raised for {} example {}/{}'
-                    raise AssertionError(fail_string.format(Dist.__name__, i + 1, len(params))) from e
+                    fail_string = "ValueError not raised for {} example {}/{}"
+                    raise AssertionError(
+                        fail_string.format(Dist.__name__, i + 1, len(params))
+                    ) from e
 
     def test_warning_unimplemented_constraints(self):
         class Delta(Distribution):

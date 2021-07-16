@@ -16,8 +16,6 @@
 #include <memory>
 #include <vector>
 
-using namespace torch::nn::utils::rnn;
-
 namespace torch {
 namespace nn {
 
@@ -113,7 +111,7 @@ class TORCH_API RNNImpl : public detail::RNNImplBase<RNNImpl> {
   FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(Tensor())})
 
  public:
-  std::tuple<PackedSequence, Tensor> forward_with_packed_input(const PackedSequence& packed_input, Tensor hx = {});
+  std::tuple<torch::nn::utils::rnn::PackedSequence, Tensor> forward_with_packed_input(const torch::nn::utils::rnn::PackedSequence& packed_input, Tensor hx = {});
 
   RNNOptions options;
 
@@ -159,8 +157,8 @@ class TORCH_API LSTMImpl : public detail::RNNImplBase<LSTMImpl> {
   FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(torch::optional<std::tuple<Tensor, Tensor>>())})
 
  public:
-  std::tuple<PackedSequence, std::tuple<Tensor, Tensor>> forward_with_packed_input(
-    const PackedSequence& packed_input, torch::optional<std::tuple<Tensor, Tensor>> hx_opt = {});
+  std::tuple<torch::nn::utils::rnn::PackedSequence, std::tuple<Tensor, Tensor>> forward_with_packed_input(
+    const torch::nn::utils::rnn::PackedSequence& packed_input, torch::optional<std::tuple<Tensor, Tensor>> hx_opt = {});
 
   LSTMOptions options;
 
@@ -211,7 +209,7 @@ class TORCH_API GRUImpl : public detail::RNNImplBase<GRUImpl> {
   FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(torch::Tensor())})
 
  public:
-  std::tuple<PackedSequence, Tensor> forward_with_packed_input(const PackedSequence& packed_input, Tensor hx = {});
+  std::tuple<torch::nn::utils::rnn::PackedSequence, Tensor> forward_with_packed_input(const torch::nn::utils::rnn::PackedSequence& packed_input, Tensor hx = {});
 
   GRUOptions options;
 

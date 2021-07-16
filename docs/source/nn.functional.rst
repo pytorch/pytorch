@@ -89,6 +89,7 @@ Non-linear activation functions
     sigmoid
     hardsigmoid
     silu
+    mish
     batch_norm
     group_norm
     instance_norm

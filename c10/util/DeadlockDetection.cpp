@@ -8,7 +8,9 @@ PythonGILHooks* python_gil_hooks = nullptr;
 }
 
 bool check_python_gil() {
-  if (!python_gil_hooks) return false;
+  if (!python_gil_hooks) {
+    return false;
+  }
   return python_gil_hooks->check_python_gil();
 }
 

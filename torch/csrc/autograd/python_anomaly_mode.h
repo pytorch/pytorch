@@ -18,8 +18,11 @@ struct PyAnomalyMetadata : public AnomalyMetadata {
     dict_ = PyDict_New();
   }
   ~PyAnomalyMetadata() override {
-    pybind11::gil_scoped_acquire gil;
-    Py_DECREF(dict_);
+    // If python is already dead, leak the wrapped python objects
+    if (Py_IsInitialized()) {
+      pybind11::gil_scoped_acquire gil;
+      Py_DECREF(dict_);
+    }
   }
   void store_stack() override;
   void print_stack(const std::string& current_node_name) override;

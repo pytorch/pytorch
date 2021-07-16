@@ -25,7 +25,6 @@ namespace fbgemm_utils {
 namespace {
 
 bool IsChannelsLast3d(const Tensor& tensor) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (tensor.dim() != 5) {
     return false;
   }
@@ -376,7 +375,7 @@ Tensor ConvertConvWeightsToChannelLastTensor<3>(
         // serialization versions.
         [](c10::IValue v)
         -> c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> { // __setstate__
-          ConvParamsSerializationType state = parse_conv_serialized_state<kSpatialDim>(v);
+          ConvParamsSerializationTypeV3 state = parse_conv_serialized_state<kSpatialDim>(v);
           return deserialize_conv<kSpatialDim>(state);
         })
     .def("weight", [](const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& self) {

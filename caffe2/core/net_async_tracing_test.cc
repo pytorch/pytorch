@@ -27,18 +27,14 @@ void testExtractShardId(const string& name, int expectedId) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NetAsyncTracingTest, ExtractShardId) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   testExtractShardId("ABCDEFshard:1705!!A", 1705);
   // Should use the last one
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   testExtractShardId("ABCDEFshard:4324!!Ashard:01220b", 1220);
   // Nothing to extract
   testExtractShardId("ABCDEFsha:222", -1);
   // Regular cases
   testExtractShardId("FC:shard:0", 0);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   testExtractShardId("FC:shard:10", 10);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   testExtractShardId("FC:shard:15", 15);
 }
 

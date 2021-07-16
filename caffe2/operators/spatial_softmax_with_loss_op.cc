@@ -101,7 +101,6 @@ bool SpatialSoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
     for (int y = 0; y < H; ++y) {
       for (int x = 0; x < W; ++x) {
         // Subtract max on each cell for numerical reasons
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         float max_val = (-1e20f);
         for (int c = 0; c < D; ++c) {
           // TODO optimize
@@ -152,7 +151,6 @@ bool SpatialSoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
           // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
           float w = weights ? weights[label_idx] : 1.0;
           total_weight += w;
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           sum_label_xent += -log(std::max(Pdata[idx], 1e-20f)) * w;
         }
       }

@@ -12,7 +12,6 @@ namespace {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t kFieldAlignment = 64L;
 
   std::ostringstream oss;

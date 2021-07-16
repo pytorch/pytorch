@@ -404,7 +404,7 @@ class TestSpatialBN(serial.SerializedTestCase):
            in_place=st.booleans(),
            engine=st.sampled_from(["", "CUDNN"]),
            **hu.gcs)
-    @settings(deadline=1000)
+    @settings(deadline=None)
     def test_spatial_bn_multi_batch_grad(
             self, N, C, H, W, epsilon, order, num_batches, in_place, engine,
             gc, dc):

@@ -16,7 +16,6 @@ namespace caffe2 {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Float16, SimpleTest) {
   Workspace ws;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   vector<float> data = {0.1f, 0.23f, 1.6f, 8.2f, -13.9f};
 
   // loading input data
@@ -75,18 +74,14 @@ TEST(Float16, UniformDistributionTest) {
   OperatorDef def;
   def.set_name("test");
   def.set_type("Float16UniformFill");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t size = 5000000L;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int64_t> shape = {size, 32};
   long tot_size = shape[0];
   for (const auto i : c10::irange(1, shape.size())) {
     tot_size *= shape[i];
   }
   caffe2::AddArgument<std::vector<int64_t>>("shape", shape, &def);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   caffe2::AddArgument<float>("min", -20.0, &def);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   caffe2::AddArgument<float>("max", 20.0, &def);
   def.add_output("result");
 

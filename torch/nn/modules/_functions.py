@@ -27,15 +27,31 @@ class SyncBatchNorm(Function):
         num_channels = input.shape[1]
         # C, C, 1 -> (2C + 1)
         combined = torch.cat([mean, invstd, count], dim=0)
-        # world_size * (2C + 1)
-        combined_list = [
-            torch.empty_like(combined) for k in range(world_size)
-        ]
-        # Use allgather instead of allreduce since I don't trust in-place operations ..
-        dist.all_gather(combined_list, combined, process_group, async_op=False)
-        combined = torch.stack(combined_list, dim=0)
-        # world_size * (2C + 1) -> world_size * C, world_size * C, world_size * 1
-        mean_all, invstd_all, count_all = torch.split(combined, num_channels, dim=1)
+        # Use allgather instead of allreduce because count could be different across
+        # ranks, simple all reduce op can not give correct results.
+        # batch_norm_gather_stats_with_counts calculates global mean & invstd based on
+        # all gathered mean, invstd and count.
+        # for nccl backend, use the optimized version of all gather.
+        if process_group._get_backend_name() == 'nccl':
+            # world_size * (2C + 1)
+            combined_size = combined.numel()
+            combined_flat = torch.empty(1,
+                                        combined_size * world_size,
+                                        dtype=combined.dtype,
+                                        device=combined.device)
+            dist._all_gather_base(combined_flat, combined, process_group, async_op=False)
+            combined = torch.reshape(combined_flat, (world_size, combined_size))
+            # world_size * (2C + 1) -> world_size * C, world_size * C, world_size * 1
+            mean_all, invstd_all, count_all = torch.split(combined, num_channels, dim=1)
+        else:
+            # world_size * (2C + 1)
+            combined_list = [
+                torch.empty_like(combined) for k in range(world_size)
+            ]
+            dist.all_gather(combined_list, combined, process_group, async_op=False)
+            combined = torch.stack(combined_list, dim=0)
+            # world_size * (2C + 1) -> world_size * C, world_size * C, world_size * 1
+            mean_all, invstd_all, count_all = torch.split(combined, num_channels, dim=1)
 
         # calculate global mean & invstd
         mean, invstd = torch.batch_norm_gather_stats_with_counts(

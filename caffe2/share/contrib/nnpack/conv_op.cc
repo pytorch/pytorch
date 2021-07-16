@@ -421,15 +421,10 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
               size_t(output_subsample.width),
               size_t(padding.top),
               gmacs,
-              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               profile.total * 1E3,
-              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               profile.input_transform * 1E3,
-              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               profile.kernel_transform * 1E3,
-              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               profile.block_multiplication * 1E3,
-              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               profile.output_transform * 1E3,
               gflops);
           CAFFE_ENFORCE(ret > 0);

@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
 #include <torch/csrc/jit/runtime/slice_indices_adjust.h>
+#include <limits>
 
 #include <c10/util/irange.h>
 
@@ -397,7 +398,7 @@ void listMulIntLeftInPlace(Stack* stack) {
   } else if (n > 1) {
     size_t list_size = list.size();
     for (int64_t i = 1; i < n; i++) {
-      for (size_t j = 0; j < list_size; j++) {
+      for (const auto j : c10::irange(list_size)) {
         list.push_back(list.get(j));
       }
     }
@@ -443,9 +444,19 @@ void listMulIntRight(Stack* stack) {
 }
 
 void listSlice(Stack* stack) {
-  int64_t step = pop(stack).to<int64_t>();
-  int64_t end = pop(stack).to<int64_t>();
-  int64_t start = pop(stack).to<int64_t>();
+  auto step_val = pop(stack);
+  auto end_val = pop(stack);
+  auto start_val = pop(stack);
+
+  // By default, both start and end will be None.
+  // By python convention, they will be translated into
+  // INT64_MAX. If the step size is not given, it will be 1.
+  int64_t step = step_val.isInt() ? step_val.to<int64_t>() : 1;
+  int64_t end = end_val.isInt() ? end_val.to<int64_t>()
+                                : std::numeric_limits<int64_t>::max();
+  int64_t start = start_val.isInt() ? start_val.to<int64_t>()
+                                    : std::numeric_limits<int64_t>::max();
+
   c10::List<IValue> list = pop(stack).to<c10::List<IValue>>();
 
   const int64_t list_size = list.size();

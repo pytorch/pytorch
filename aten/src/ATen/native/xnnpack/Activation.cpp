@@ -22,11 +22,10 @@ Tensor& hardswish_impl(Tensor& input, Tensor& output) {
   using namespace internal;
 
   xnn_operator_t hardswish_op{};
-  const auto channels = Layout::ActivationND::channel(input.sizes());
   const xnn_status create_status = xnn_create_hardswish_nc_f32(
-    channels, // channels
-    channels, // input stride
-    channels, // output stride
+    1, // channels
+    1, // input stride
+    1, // output stride
     0, // flags
     &hardswish_op);
 
@@ -38,7 +37,7 @@ Tensor& hardswish_impl(Tensor& input, Tensor& output) {
 
   const xnn_status setup_status = xnn_setup_hardswish_nc_f32(
     hardswish_op,
-    Layout::ActivationND::batch(input.sizes()),  // Batch
+    input.numel(),  // Batch
     input.data_ptr<float>(),
     output.data_ptr<float>(),
     caffe2::pthreadpool_());  // threadpool
@@ -73,10 +72,22 @@ Tensor hardswish(const Tensor& input) {
 }
 
 Tensor& hardswish_(Tensor& input) {
-  using namespace internal;
+  Tensor padded_input = mobile::allocate_padded_contiguous_if_needed(
+    input, input.suggest_memory_format());
 
-  hardswish_impl(input, input);
-  return input;
+  // Don't need to allocate output if input is contiguous & already padded
+  if (input.data_ptr() == padded_input.data_ptr()) {
+    hardswish_impl(input, input);
+    return input;
+  } else {
+    Tensor output = mobile::empty_with_tail_padding(
+      padded_input.sizes(),
+      padded_input.options().dtype(),
+      input.suggest_memory_format(),
+      padded_input.names());
+    hardswish_impl(padded_input, output);
+    return input.copy_(output);
+  }
 }
 
 }

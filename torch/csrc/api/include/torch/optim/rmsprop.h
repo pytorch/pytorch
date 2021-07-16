@@ -22,13 +22,9 @@ namespace torch {
 namespace optim {
 
 struct TORCH_API RMSpropOptions : public OptimizerCloneableOptions<RMSpropOptions> {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   RMSpropOptions(double lr = 1e-2);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, lr) = 1e-2;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, alpha) = 0.99;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, eps) = 1e-8;
   TORCH_ARG(double, weight_decay) = 0;
   TORCH_ARG(double, momentum) = 0;

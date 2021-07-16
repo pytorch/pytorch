@@ -77,9 +77,11 @@ def _convert_jit(model, inplace=False, debug=False, quant_type=QuantType.STATIC,
     model_c = model._c
     model_c = torch._C._jit_pass_insert_quant_dequant(model_c, 'forward', inplace, debug, quant_type)
     if not debug:
-        # Moving model parameters to CPU since quantized operators
-        # are only supported on CPU right now
-        model.cpu()
+        is_xpu = all(p.device.type == 'xpu' for p in model.parameters())
+        if not is_xpu:
+            # Moving model parameters to CPU since quantized operators
+            # are only supported on CPU and XPU right now
+            model.cpu()
         if preserved_attrs is None:
             preserved_attrs = []
         model_c = torch._C._jit_pass_quant_finalize(model_c, quant_type, preserved_attrs)

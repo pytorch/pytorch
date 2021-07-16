@@ -263,12 +263,11 @@ TEST(ListTest_IValueBasedList, whenIterating_thenFindsElements) {
   List<string> list({"3", "5"});
   bool found_first = false;
   bool found_second = false;
-  // NOLINTNEXTLINE(modernize-loop-convert)
-  for (List<string>::iterator iter = list.begin(); iter != list.end(); ++iter) {
-    if (static_cast<string>(*iter) == "3") {
+  for (const auto && iter : list) {
+    if (static_cast<string>(iter) == "3") {
       EXPECT_FALSE(found_first);
       found_first = true;
-    } else if (static_cast<string>(*iter) == "5") {
+    } else if (static_cast<string>(iter) == "5") {
       EXPECT_FALSE(found_second);
       found_second = true;
     } else {
@@ -324,7 +323,6 @@ TEST(ListTest_IValueBasedList, givenList_whenErasingFullRange_thenIsEmpty) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ListTest_IValueBasedList, whenCallingReserve_thenDoesntCrash) {
   List<string> list;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   list.reserve(100);
 }
 
@@ -680,7 +678,6 @@ TEST(ListTest_NonIValueBasedList, whenCallingExtractWithNonExistingPosition_then
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ListTest_NonIValueBasedList, whenCallingCopyingSetWithExistingPosition_thenChangesElement) {
   List<int64_t> list({3, 4});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t value = 5;
   list.set(1, value);
   EXPECT_EQ(3, list.get(0));
@@ -690,7 +687,6 @@ TEST(ListTest_NonIValueBasedList, whenCallingCopyingSetWithExistingPosition_then
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ListTest_NonIValueBasedList, whenCallingMovingSetWithExistingPosition_thenChangesElement) {
   List<int64_t> list({3, 4});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t value = 5;
   // NOLINTNEXTLINE(performance-move-const-arg)
   list.set(1, std::move(value));
@@ -701,7 +697,6 @@ TEST(ListTest_NonIValueBasedList, whenCallingMovingSetWithExistingPosition_thenC
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ListTest_NonIValueBasedList, whenCallingCopyingSetWithNonExistingPosition_thenThrowsException) {
   List<int64_t> list({3, 4});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t value = 5;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   EXPECT_THROW(list.set(2, value), std::out_of_range);
@@ -710,7 +705,6 @@ TEST(ListTest_NonIValueBasedList, whenCallingCopyingSetWithNonExistingPosition_t
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ListTest_NonIValueBasedList, whenCallingMovingSetWithNonExistingPosition_thenThrowsException) {
   List<int64_t> list({3, 4});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t value = 5;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,performance-move-const-arg,hicpp-avoid-goto)
   EXPECT_THROW(list.set(2, std::move(value)), std::out_of_range);
@@ -725,9 +719,7 @@ TEST(ListTest_NonIValueBasedList, whenCallingAccessOperatorWithExistingPosition_
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ListTest_NonIValueBasedList, whenAssigningToAccessOperatorWithExistingPosition_thenSetsElement) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   List<int64_t> list({3, 4, 5});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   list[1] = 6;
   EXPECT_EQ(3, list.get(0));
   EXPECT_EQ(6, list.get(1));
@@ -736,7 +728,6 @@ TEST(ListTest_NonIValueBasedList, whenAssigningToAccessOperatorWithExistingPosit
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ListTest_NonIValueBasedList, whenAssigningToAccessOperatorFromAccessOperator_thenSetsElement) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   List<int64_t> list({3, 4, 5});
   list[1] = list[2];
   EXPECT_EQ(3, list.get(0));
@@ -746,7 +737,6 @@ TEST(ListTest_NonIValueBasedList, whenAssigningToAccessOperatorFromAccessOperato
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ListTest_NonIValueBasedList, whenSwappingFromAccessOperator_thenSwapsElements) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   List<int64_t> list({3, 4, 5});
   swap(list[1], list[2]);
   EXPECT_EQ(3, list.get(0));
@@ -763,9 +753,7 @@ TEST(ListTest_NonIValueBasedList, whenCallingAccessOperatorWithNonExistingPositi
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ListTest_NonIValueBasedList, whenCallingInsertOnIteratorWithLValue_thenInsertsElement) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   List<int64_t> list({3, 4, 6});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t v = 5;
   list.insert(list.begin() + 2, v);
   EXPECT_EQ(4, list.size());
@@ -774,9 +762,7 @@ TEST(ListTest_NonIValueBasedList, whenCallingInsertOnIteratorWithLValue_thenInse
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ListTest_NonIValueBasedList, whenCallingInsertOnIteratorWithRValue_thenInsertsElement) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   List<int64_t> list({3, 4, 6});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t v = 5;
   // NOLINTNEXTLINE(performance-move-const-arg)
   list.insert(list.begin() + 2, std::move(v));
@@ -786,9 +772,7 @@ TEST(ListTest_NonIValueBasedList, whenCallingInsertOnIteratorWithRValue_thenInse
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ListTest_NonIValueBasedList, whenCallingInsertWithLValue_thenReturnsIteratorToNewElement) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   List<int64_t> list({3, 4, 6});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t v = 5;
   List<int64_t>::iterator result = list.insert(list.begin() + 2, v);
   EXPECT_EQ(list.begin() + 2, result);
@@ -796,9 +780,7 @@ TEST(ListTest_NonIValueBasedList, whenCallingInsertWithLValue_thenReturnsIterato
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ListTest_NonIValueBasedList, whenCallingInsertWithRValue_thenReturnsIteratorToNewElement) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   List<int64_t> list({3, 4, 6});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t v = 5;
   // NOLINTNEXTLINE(performance-move-const-arg)
   List<int64_t>::iterator result = list.insert(list.begin() + 2, std::move(v));
@@ -807,9 +789,7 @@ TEST(ListTest_NonIValueBasedList, whenCallingInsertWithRValue_thenReturnsIterato
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ListTest_NonIValueBasedList, whenCallingEmplaceWithLValue_thenInsertsElement) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   List<int64_t> list({3, 4, 6});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t v = 5;
   list.emplace(list.begin() + 2, v);
   EXPECT_EQ(4, list.size());
@@ -818,9 +798,7 @@ TEST(ListTest_NonIValueBasedList, whenCallingEmplaceWithLValue_thenInsertsElemen
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ListTest_NonIValueBasedList, whenCallingEmplaceWithRValue_thenInsertsElement) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   List<int64_t> list({3, 4, 6});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t v = 5;
   // NOLINTNEXTLINE(performance-move-const-arg)
   list.emplace(list.begin() + 2, std::move(v));
@@ -830,9 +808,7 @@ TEST(ListTest_NonIValueBasedList, whenCallingEmplaceWithRValue_thenInsertsElemen
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ListTest_NonIValueBasedList, whenCallingEmplaceWithConstructorArg_thenInsertsElement) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   List<int64_t> list({3, 4, 6});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   list.emplace(list.begin() + 2, 5); // const char* is a constructor arg to std::int64_t
   EXPECT_EQ(4, list.size());
   EXPECT_EQ(5, list.get(2));
@@ -841,7 +817,6 @@ TEST(ListTest_NonIValueBasedList, whenCallingEmplaceWithConstructorArg_thenInser
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ListTest_NonIValueBasedList, whenCallingPushBackWithLValue_ThenInsertsElement) {
   List<int64_t> list;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t v = 5;
   list.push_back(v);
   EXPECT_EQ(1, list.size());
@@ -851,7 +826,6 @@ TEST(ListTest_NonIValueBasedList, whenCallingPushBackWithLValue_ThenInsertsEleme
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ListTest_NonIValueBasedList, whenCallingPushBackWithRValue_ThenInsertsElement) {
   List<int64_t> list;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t v = 5;
   // NOLINTNEXTLINE(performance-move-const-arg)
   list.push_back(std::move(v));
@@ -862,7 +836,6 @@ TEST(ListTest_NonIValueBasedList, whenCallingPushBackWithRValue_ThenInsertsEleme
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ListTest_NonIValueBasedList, whenCallingEmplaceBackWithLValue_ThenInsertsElement) {
   List<int64_t> list;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t v = 5;
   list.emplace_back(v);
   EXPECT_EQ(1, list.size());
@@ -872,7 +845,6 @@ TEST(ListTest_NonIValueBasedList, whenCallingEmplaceBackWithLValue_ThenInsertsEl
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ListTest_NonIValueBasedList, whenCallingEmplaceBackWithRValue_ThenInsertsElement) {
   List<int64_t> list;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t v = 5;
   // NOLINTNEXTLINE(performance-move-const-arg)
   list.emplace_back(std::move(v));
@@ -883,7 +855,6 @@ TEST(ListTest_NonIValueBasedList, whenCallingEmplaceBackWithRValue_ThenInsertsEl
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ListTest_NonIValueBasedList, whenCallingEmplaceBackWithConstructorArg_ThenInsertsElement) {
   List<int64_t> list;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   list.emplace_back(5);  // const char* is a constructor arg to std::int64_t
   EXPECT_EQ(1, list.size());
   EXPECT_EQ(5, list.get(0));
@@ -901,17 +872,14 @@ TEST(ListTest_NonIValueBasedList, givenEmptyList_whenIterating_thenBeginIsEnd) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ListTest_NonIValueBasedList, whenIterating_thenFindsElements) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   List<int64_t> list({3, 5});
   bool found_first = false;
   bool found_second = false;
-  // NOLINTNEXTLINE(modernize-loop-convert)
-  for (List<int64_t>::iterator iter = list.begin(); iter != list.end(); ++iter) {
-    if (static_cast<int64_t>(*iter) == 3) {
+  for (const auto && iter : list) {
+    if (static_cast<int64_t>(iter) == 3) {
       EXPECT_FALSE(found_first);
       found_first = true;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-    } else if (static_cast<int64_t>(*iter) == 5) {
+    } else if (static_cast<int64_t>(iter) == 5) {
       EXPECT_FALSE(found_second);
       found_second = true;
     } else {
@@ -924,7 +892,6 @@ TEST(ListTest_NonIValueBasedList, whenIterating_thenFindsElements) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ListTest_NonIValueBasedList, whenIteratingWithForeach_thenFindsElements) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   List<int64_t> list({3, 5});
   bool found_first = false;
   bool found_second = false;
@@ -933,7 +900,6 @@ TEST(ListTest_NonIValueBasedList, whenIteratingWithForeach_thenFindsElements) {
     if (elem == 3) {
       EXPECT_FALSE(found_first);
       found_first = true;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     } else if (elem == 5) {
       EXPECT_FALSE(found_second);
       found_second = true;
@@ -969,7 +935,6 @@ TEST(ListTest_NonIValueBasedList, givenList_whenErasingFullRange_thenIsEmpty) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ListTest_NonIValueBasedList, whenCallingReserve_thenDoesntCrash) {
   List<int64_t> list;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   list.reserve(100);
 }
 
@@ -1092,7 +1057,6 @@ TEST(ListTest_NonIValueBasedList, givenIterator_whenPrefixDecrementing_thenMoves
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ListTest_NonIValueBasedList, givenIterator_whenIncreasing_thenMovesToNextAndReturnsNewPosition) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   List<int64_t> list({3, 4, 5});
 
   List<int64_t>::iterator iter1 = list.begin();
@@ -1103,7 +1067,6 @@ TEST(ListTest_NonIValueBasedList, givenIterator_whenIncreasing_thenMovesToNextAn
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ListTest_NonIValueBasedList, givenIterator_whenDecreasing_thenMovesToNextAndReturnsNewPosition) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   List<int64_t> list({3, 4, 5});
 
   List<int64_t>::iterator iter1 = list.end();
@@ -1114,7 +1077,6 @@ TEST(ListTest_NonIValueBasedList, givenIterator_whenDecreasing_thenMovesToNextAn
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ListTest_NonIValueBasedList, givenIterator_whenAdding_thenReturnsNewIterator) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   List<int64_t> list({3, 4, 5});
 
   List<int64_t>::iterator iter1 = list.begin();
@@ -1125,7 +1087,6 @@ TEST(ListTest_NonIValueBasedList, givenIterator_whenAdding_thenReturnsNewIterato
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ListTest_NonIValueBasedList, givenIterator_whenSubtracting_thenReturnsNewIterator) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   List<int64_t> list({3, 4, 5});
 
   List<int64_t>::iterator iter1 = list.end() - 1;
@@ -1218,7 +1179,6 @@ TEST(ListTest_NonIValueBasedList, givenEmptyList_whenCallingResize_thenResizesAn
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ListTest_NonIValueBasedList, givenEmptyList_whenCallingResizeWithValue_thenResizesAndSetsValue) {
   List<int64_t> list;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   list.resize(2, 5);
   EXPECT_EQ(2, list.size());
   EXPECT_EQ(5, list.get(0));

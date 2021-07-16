@@ -184,7 +184,6 @@ TEST(AutodiffTest, Differentiate) {
   // Note: can't use IRParser for this test due to issue #23989
   auto graph = std::make_shared<Graph>();
   std::vector<int64_t> sizes{2, 3, 4};
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int64_t> strides{12, 4, 1};
   const auto type = TensorType::create(
       at::ScalarType::Float,
@@ -216,7 +215,6 @@ TEST(AutodiffTest, Differentiate) {
 
   auto grad_spec = differentiate(graph);
   std::vector<size_t> expected_captured_inputs = {0, 1};
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<size_t> expected_captured_outputs = {1, 2, 3, 4, 5, 6, 7};
   std::vector<size_t> expected_input_vjps = {0, 1};
   std::vector<size_t> expected_output_vjps = {0, 1};

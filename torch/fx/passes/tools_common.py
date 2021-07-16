@@ -10,6 +10,7 @@ Tensors = Union[Tuple[torch.Tensor], List[torch.Tensor]]
 TensorOrTensors = Union[torch.Tensor, Tensors]
 NodeList = List[torch.fx.Node]
 NodeSet = Set[torch.fx.Node]
+Names = List[str]
 CALLABLE_NODE_OPS = {"call_module", "call_function", "call_method"}
 
 
@@ -143,6 +144,7 @@ class FxNetAccFusionsFinder:
             )
             while fusion_group.nodes_need_process:
                 node = fusion_group.nodes_need_process.pop()
+                self.recursive_add_node(fusion_group, fusion_group.inputs)
 
                 # Optionally add downstream nodes
                 if "tensor_meta" not in node.meta:
@@ -164,9 +166,9 @@ class FxNetAccFusionsFinder:
                     if arg in fusion_group.nodes:
                         continue
 
-                    fusion_group.add_node(user)
+                    fusion_group.add_node(arg)
                     fusion_group.top_node_idx = min(
-                        fusion_group.top_node_idx, self.nodes.index(user)
+                        fusion_group.top_node_idx, self.nodes.index(arg)
                     )
                     self.recursive_add_node(fusion_group, fusion_group.inputs)
 

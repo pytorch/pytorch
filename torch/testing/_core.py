@@ -17,12 +17,15 @@ __all__ = [
     "all_types_and",
     "all_types_and_complex",
     "all_types_and_complex_and",
+    "all_types_and_half",
     "assert_allclose",
     "complex_types",
+    "empty_types",
     "floating_and_complex_types",
     "floating_and_complex_types_and",
     "floating_types",
     "floating_types_and",
+    "floating_types_and_half",
     "get_all_complex_dtypes",
     "get_all_dtypes",
     "get_all_device_types",
@@ -219,12 +222,15 @@ def _compare_scalars_internal(a, b, *, rtol: float, atol: float, equal_nan: Unio
 
         msg = None
         if not result:
-            msg = ("Comparing" + s + "{0} and {1} gives a "
-                   "difference of {2}, but the allowed difference "
-                   "with rtol={3} and atol={4} is "
-                   "only {5}!").format(a, b, diff,
-                                       rtol, atol, allowed_diff)
-
+            if rtol == 0 and atol == 0:
+                msg = f"{a} != {b}"
+            else:
+                msg = (
+                    f"Comparing{s}{a} and {b} gives a "
+                    f"difference of {diff}, but the allowed difference "
+                    f"with rtol={rtol} and atol={atol} is "
+                    f"only {allowed_diff}!"
+                )
         return result, msg
 
     if isinstance(a, complex) or isinstance(b, complex):
@@ -312,6 +318,10 @@ class _dispatch_dtypes(tuple):
     def __add__(self, other):
         assert isinstance(other, tuple)
         return _dispatch_dtypes(tuple.__add__(self, other))
+
+_empty_types = _dispatch_dtypes(())
+def empty_types():
+    return _empty_types
 
 _floating_types = _dispatch_dtypes((torch.float32, torch.float64))
 def floating_types():

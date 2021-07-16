@@ -23,17 +23,14 @@ void AddNoiseInput(
   tensor->Resize(shape);
 
   math::RandGaussian<float, CPUContext>(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       tensor->size(), 0.0f, 3.0f, tensor->mutable_data<float>(), &context);
   for (auto i = 0; i < tensor->size(); ++i) {
     tensor->mutable_data<float>()[i] =
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         std::min(-5.0f, std::max(5.0f, tensor->mutable_data<float>()[i]));
   }
 }
 
 inline float relativeError(float a, float b) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return std::abs(a - b) / (0.5f * (std::abs(a) + std::abs(b)));
 }
 
@@ -134,7 +131,6 @@ void compare(
     EXPECT_NE(nullptr, activationOp.get());
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (auto i = 0; i < 10; ++i) {
     EXPECT_TRUE(nnpackOp->Run());
   }
@@ -142,7 +138,6 @@ void compare(
   EXPECT_NE(nullptr, nnpackOutputBlob);
   auto& nnpackOutput = nnpackOutputBlob->Get<TensorCPU>();
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (auto i = 0; i < 10; ++i) {
     EXPECT_TRUE(referenceOp->Run());
     if (activationOp) {
@@ -204,16 +199,12 @@ void runConv(
     int strideW,
     int group = 1,
     std::string algo = "",
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     int planesIn = randInt(1, 6),
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     int planesOut = randInt(1, 6),
     int n = randInt(1, 2),
     std::string convolutionTransformStrategy = "COMPUTE",
     std::string activation = "identity") {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int h = randInt(20, 100);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int w = randInt(20, 100);
   // This pad restriction is imposed by NNPACK
   int padT = std::min(randInt(0, 3), kernelH - 1);
@@ -239,9 +230,7 @@ void runConv(
       algo,
       convolutionTransformStrategy,
       activation,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       0.05f,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       0.1f);
 }
 
@@ -267,9 +256,7 @@ TEST(NNPACK, Conv_3x3s1_precompute) {
         1,
         group,
         "WINOGRAD",
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         group * randInt(1, 8),
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         group * randInt(1, 8),
         1,
         "PRECOMPUTE");
@@ -294,9 +281,7 @@ TEST(NNPACK, Conv_3x3s1_FP16_precompute) {
         1,
         group,
         "WINOGRAD_FP16",
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         group * randInt(1, 8),
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         group * randInt(1, 8),
         1,
         "PRECOMPUTE");
@@ -306,7 +291,6 @@ TEST(NNPACK, Conv_3x3s1_FP16_precompute) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NNPACK, Conv_NxNs1) {
   for (int i = 0; i < kIters; ++i) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     int kernel = randInt(2, 10);
     runConv(kernel, kernel, 1, 1);
   }
@@ -316,9 +300,7 @@ TEST(NNPACK, Conv_NxNs1) {
 TEST(NNPACK, Conv_1x1s1) {
   for (int i = 0; i < kIters; ++i) {
     auto group = randInt(1, 3);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto inChannels = randInt(1, 8) * group;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto outChannels = randInt(1, 8) * group;
     auto n = 1;
     runConv(1, 1, 1, 1, group, "DIRECT", inChannels, outChannels, n);
@@ -329,9 +311,7 @@ TEST(NNPACK, Conv_1x1s1) {
 TEST(NNPACK, ConvRelu_1x1s1) {
   for (int i = 0; i < kIters; ++i) {
     auto group = randInt(1, 3);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto inChannels = randInt(1, 8) * group;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto outChannels = randInt(1, 8) * group;
     auto n = 1;
     runConv(
@@ -353,9 +333,7 @@ TEST(NNPACK, ConvRelu_1x1s1) {
 TEST(NNPACK, Conv_1x1s1_precompute) {
   for (int i = 0; i < kIters; ++i) {
     auto group = randInt(1, 3);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto inChannels = randInt(1, 8) * group;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto outChannels = randInt(1, 8) * group;
     auto n = 1;
     runConv(
@@ -367,11 +345,8 @@ TEST(NNPACK, Conv_1x1s1_precompute) {
 TEST(NNPACK, Conv_NxNs_grouped) {
   for (int i = 0; i < kIters; ++i) {
     int group = randInt(2, 3);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     int iC = randInt(1, 6) * group;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     int oC = randInt(1, 6) * group;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     int kernel = randInt(2, 10);
     int n = randInt(1, 2);
     runConv(kernel, kernel, 1, 1, group, "", iC, oC, n);
@@ -382,11 +357,8 @@ TEST(NNPACK, Conv_NxNs_grouped) {
 TEST(NNPACK, Conv_NxNs_grouped_precompute) {
   for (int i = 0; i < kIters; ++i) {
     int group = randInt(2, 3);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     int iC = randInt(1, 6) * group;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     int oC = randInt(1, 6) * group;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     int kernel = randInt(2, 10);
     int n = randInt(1, 2);
     runConv(kernel, kernel, 1, 1, group, "", iC, oC, n, "PRECOMPUTE");
@@ -396,7 +368,6 @@ TEST(NNPACK, Conv_NxNs_grouped_precompute) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NNPACK, Conv_NxNsW) {
   for (int i = 0; i < 3; ++i) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     int kernel = randInt(3, 5);
     int stride = randInt(1, kernel - 1);
     runConv(kernel, kernel, stride, stride);
@@ -406,7 +377,6 @@ TEST(NNPACK, Conv_NxNsW) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NNPACK, ConvRelu_NxNsW) {
   for (int i = 0; i < 3; ++i) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     int kernel = randInt(3, 5);
     int stride = randInt(1, kernel - 1);
     runConv(kernel, kernel, stride, stride, 1, "", 1, 1, 1, "COMPUTE", "Relu");
@@ -416,9 +386,7 @@ TEST(NNPACK, ConvRelu_NxNsW) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NNPACK, Conv_HxWsHxW) {
   for (int i = 0; i < 3; ++i) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     int kernelH = randInt(2, 5);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     int kernelW = randInt(2, 5);
     int strideH = randInt(1, kernelH - 1);
     int strideW = randInt(1, kernelW - 1);

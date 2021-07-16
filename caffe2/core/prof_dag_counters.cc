@@ -189,9 +189,7 @@ void ProfDAGReport::PrintStats() {
     const auto& moments = item.second.computeMoments();
     const auto& times_moments =
         times_per_run_per_type_total_[item.first].computeMoments();
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     debug_out << std::setw(10) << std::setfill(' ') << moments.first
-              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               << " ms/run (" << std::setw(10) << std::setfill(' ')
               << moments.second << " ms/run) "
               << " Op count per run: " << times_moments.first << "  "

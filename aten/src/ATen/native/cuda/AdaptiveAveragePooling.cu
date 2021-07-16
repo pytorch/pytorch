@@ -200,7 +200,7 @@ namespace {
         for(ih = 0; ih < kH; ++ih) {
           for(iw = 0; iw < kW; ++iw) {
             // atomic add since different threads could update same variable
-            gpuAtomicAdd(&(ptr_gradInput[iw]), grad_delta);
+            gpuAtomicAddNoReturn(&(ptr_gradInput[iw]), grad_delta);
           }
           ptr_gradInput += isizeW; // next input line
         }
@@ -432,7 +432,7 @@ namespace {
   {
     TensorArg input_arg{ input, "input", 1 },
               output_arg{ output, "output", 2 };
-    checkAllSameGPU("cudnn_adaptive_avg_pooling2d", {input_arg, output_arg});
+    checkAllSameGPU(__func__, {input_arg, output_arg});
 
     for (int64_t i = 0; i < input.ndimension(); i++) {
       TORCH_CHECK(input.size(i) > 0,
@@ -583,8 +583,7 @@ namespace {
     TensorArg grad_input_arg{ gradInput, "gradInput", 1 },
               grad_output_arg{ gradOutput_, "gradOutput_", 2 },
               input_arg{ input, "input", 3 };
-    checkAllSameGPU("cudnn_adaptive_avg_pooling2d_out",
-                    {grad_input_arg, grad_output_arg, input_arg});
+    checkAllSameGPU(__func__, {grad_input_arg, grad_output_arg, input_arg});
 
     switch (input.suggest_memory_format()) {
       case at::MemoryFormat::ChannelsLast: {
