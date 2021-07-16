@@ -91,6 +91,45 @@ OPERATOR_SCHEMA(SparseAdam)
     .Arg("epsilon", "Default 1e-5")
     .Arg("enableRAdam", "Default false");
 
+REGISTER_CPU_OPERATOR(SmartDecaySparseAdam, SmartDecaySparseAdamOp<float, CPUContext>);
+OPERATOR_SCHEMA(SmartDecaySparseAdam)
+    .NumInputs(8)
+    .NumOutputs(4)
+    .EnforceInplace({{0, 0}, {1, 1}, {2, 2}, {3, 3}})
+    .DeviceInferenceFunction([](const OperatorDef& def) {
+      auto op_device =
+          def.has_device_option() ? def.device_option() : DeviceOption();
+      vector<DeviceOption> in_dev(def.input_size(), op_device);
+      vector<DeviceOption> out_dev(def.output_size(), op_device);
+      // ITER input lives on CPU
+      in_dev[7] = DeviceOption();
+      return std::make_pair(in_dev, out_dev);
+    })
+    .SetDoc(R"DOC(
+
+    Computes the Adam Update for the sparse case.
+    Given inputs (param, moment1, moment2, indices, grad, lr, iter), runs the dense
+    Adam on (param, moment1[indices], momemnt2[indices], lr, iter) and returns
+    (new_param, new_moment1, new_moment2) as in dense case.
+    Adam can be customized as Rectified Adam (RAdam) by setting enableRAdam = true.
+
+    )DOC")
+    .Input(0, "param", "Parameters to be updated")
+    .Input(1, "moment_1", "First moment history")
+    .Input(2, "moment_2", "Second moment history")
+    .Input(3, "last_seen", "Minibatch index when each weight was last seen")
+    .Input(4, "indices", "Sparse indices")
+    .Input(5, "grad", "Gradient computed")
+    .Input(6, "lr", "learning rate")
+    .Input(7, "iter", "iteration number")
+    .Output(0, "output_param", "Updated parameters")
+    .Output(1, "output_moment_1", "Updated first moment")
+    .Output(2, "output_moment_2", "Updated second moment")
+    .Output(3, "output_last_seen", "Updated minibatch index when each weight was last seen")
+    .Arg("beta1", "Default 0.9")
+    .Arg("beta2", "Default 0.999")
+    .Arg("epsilon", "Default 1e-5");
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     RowWiseSparseAdam,

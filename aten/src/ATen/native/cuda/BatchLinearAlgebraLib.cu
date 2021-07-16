@@ -70,11 +70,10 @@ void geqrf_batched_cublas(const Tensor& input, const Tensor& tau) {
 }
 
 template <typename scalar_t>
-static void apply_lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
+static void apply_lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, const Tensor& pivots, cublasOperation_t trans) {
 #ifndef CUDART_VERSION
   TORCH_CHECK(false, "lu_solve: cuBLAS backend for lu_solve is not available.")
 #else
-  cublasOperation_t trans = CUBLAS_OP_N;
 
   auto pivots_data = pivots.data_ptr<int>();
   auto batch_size = cuda_int_cast(batchCount(lu), "batch_size");;
@@ -95,9 +94,9 @@ static void apply_lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, con
 #endif
 }
 
-void lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
+void lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, const Tensor& pivots, cublasOperation_t trans) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(lu.scalar_type(), "lu_solve_cublas", [&]{
-    apply_lu_solve_batched_cublas<scalar_t>(b, lu, pivots);
+    apply_lu_solve_batched_cublas<scalar_t>(b, lu, pivots, trans);
   });
 }
 
@@ -255,7 +254,7 @@ inline static void _apply_single_inverse_helper(scalar_t* self_ptr, scalar_t* se
 
   auto handle = at::cuda::getCurrentCUDASolverDnHandle();
   at::cuda::solver::getrf<scalar_t>(handle, n, n, self_ptr, lda, ipiv_ptr, info_getrf_ptr);
-  at::cuda::solver::getrs<scalar_t>(handle, n, n, self_ptr, lda, ipiv_ptr, self_inv_ptr, lda, info_getrs_ptr);
+  at::cuda::solver::getrs<scalar_t>(handle, n, n, self_ptr, lda, ipiv_ptr, self_inv_ptr, lda, info_getrs_ptr, CUBLAS_OP_N);
 }
 
 template <typename scalar_t>
@@ -1313,7 +1312,7 @@ void lu_looped_cusolver(const Tensor& self, const Tensor& pivots, const Tensor& 
   }
 }
 
-void lu_solve_looped_cusolver(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
+void lu_solve_looped_cusolver(const Tensor& b, const Tensor& lu, const Tensor& pivots, cublasOperation_t trans) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(b.scalar_type(), "lu_solve_cusolver", [&] {
     int n = cuda_int_cast(lu.size(-2), "n");
     int nrhs = cuda_int_cast(b.size(-1), "nrhs");
@@ -1339,7 +1338,8 @@ void lu_solve_looped_cusolver(const Tensor& b, const Tensor& lu, const Tensor& p
         pivots_data + batch * pivots_stride,
         b_data + batch * b_stride,
         leading_dimension,
-        info_data);
+        info_data,
+        trans);
 
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info.item().toInt() == 0);
     }
