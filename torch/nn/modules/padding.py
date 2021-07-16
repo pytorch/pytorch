@@ -141,7 +141,7 @@ class ConstantPad3d(_ConstantPadNd):
     Shape:
         - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})` or :math:`(C, D_{in}, H_{in}, W_{in})`.
         - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})` or
-          :math:`(N, C, D_{out}, H_{out}, W_{out})`, where
+          :math:`(C, D_{out}, H_{out}, W_{out})`, where
 
           :math:`D_{out} = D_{in} + \text{padding\_front} + \text{padding\_back}`
 
