@@ -11371,17 +11371,17 @@ __global__ void kernel1(
                     tmp_avg,
                     tmp_M2,
                     tmp_N,
-                    0.f,
                     inp[i0*inp.stride[0]+
                         i1*inp.stride[1]+
                         i2*inp.stride[2]],
+                    0.f,
                     (long)1
                 );
             }
         }
         out_var[i0*out_var.stride[0]]=
             tmp_M2/(tmp_N);
-        out_avg[i0*out_var.stride[0]]=
+        out_avg[i0*out_avg.stride[0]]=
             tmp_avg;
     }
 }
@@ -11428,15 +11428,15 @@ __global__ void kernel1(
     __shared__ long mem_N[512];
     float in=inp[threadIdx.x*inp.stride[0]+
                         threadIdx.y*inp.stride[1]];
-    float tmp_M2=0;
     float tmp_avg=0;
+    float tmp_M2=0;
     long tmp_N=0;
     blockWelford<false,true,false>(
         tmp_avg,
         tmp_M2,
         tmp_N,
-        0.f,
         in,
+        0.f,
         (long)1,
         threadIdx,
         blockDim,
@@ -11487,7 +11487,7 @@ __global__ void kernel1(
   // run kernel
   auto out_var = at::zeros({x}, options);
   auto out_avg = at::zeros({x}, options);
-  fe.runRtc(lp, {in0, out_var, out_avg, init_var, init_avg, init_N});
+  fe.runRtc(lp, {in0, out_avg, out_var, init_avg, init_var, init_N});
 
   // compare with reference output
   auto cat_tensor = at::cat({init_in, in0}, 1);
@@ -11504,8 +11504,8 @@ TEST(NVFuserTest, blockWelfordNoInit) {
   std::string kernel = R"(
 __global__ void kernel1(
     Tensor<float,3> inp,
-    Tensor<float,1> out_var,
-    Tensor<float,1> out_avg
+    Tensor<float,1> out_avg,
+    Tensor<float,1> out_var
 ){
     //actual generated kernel will use dynamic shared mem,
     // here is just for prototype
@@ -11523,8 +11523,8 @@ __global__ void kernel1(
         tmp_avg,
         tmp_M2,
         tmp_N,
-        0.f,
         in,
+        0.f,
         (long) 1,
         threadIdx,
         blockDim,
@@ -11556,7 +11556,7 @@ __global__ void kernel1(
   auto in0 = at::randn(tensor_dims, options);
   auto out_var = at::empty({x}, options);
   auto out_avg = at::empty({x}, options);
-  fe.runRtc(lp, {in0, out_var, out_avg});
+  fe.runRtc(lp, {in0, out_avg, out_var});
 
   TORCH_CHECK(in0.var({1, 2}, false).allclose(out_var));
   TORCH_CHECK(in0.mean({1, 2}).allclose(out_avg, /*rtol*/ 1e-5, /*atol*/ 1e-6));
@@ -11594,8 +11594,8 @@ __global__ void kernel1(
         tmp_avg,
         tmp_M2,
         tmp_N,
-        0.f,
         in,
+        0.f,
         (long) 1,
         &work_buf_avg[0],
         &work_buf_M2[0],
