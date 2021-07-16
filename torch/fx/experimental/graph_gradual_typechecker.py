@@ -101,6 +101,13 @@ def add_inference_rule(n: Node):
         return n.type
 
     (new_t1, new_t2) = broadcast_types(t1, t2)
+
+    if new_t1 != t1:
+        n.args[0].broadcast = True
+
+    if new_t2 != t2:
+        n.args[1].broadcast = True
+
     n.args[0].type = new_t1
     n.args[1].type = new_t2
 
@@ -485,6 +492,8 @@ class GraphTypeChecker:
         - adaptiveavgpool2d
         - linear
         """
+        n.broadcast = False
+
         if n.type is None:
             n.type = Dyn
 

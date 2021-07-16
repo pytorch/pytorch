@@ -114,8 +114,11 @@ class TypeCheckerTest(unittest.TestCase):
                              TensorType((1, 2, 3, Dyn)),
                              TensorType((1, 2, 3, Dyn))]
         expected_iter = iter(expected_ph_types)
+        broadcast_iter = iter([False, True])
 
         for n in symbolic_traced.graph.nodes:
+            if n.op == 'placeholder':
+                assert n.broadcast == next(broadcast_iter)
             assert n.type == next(expected_iter)
 
     def test_type_check_add_with_scalar(self):
