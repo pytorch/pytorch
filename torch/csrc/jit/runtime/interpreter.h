@@ -154,6 +154,7 @@ TORCH_API at::TensorTypePtr tensorTypeInCurrentExecutionContext(
 
 // current (TLS) TorchScript interpreter callstack
 TORCH_API std::vector<StackEntry> currentCallstack();
+TORCH_API std::string currentModuleHierarchy();
 
 } // namespace jit
 } // namespace torch

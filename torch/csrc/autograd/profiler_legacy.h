@@ -408,18 +408,21 @@ struct TORCH_API ProfilerConfig {
       bool report_input_shapes = false,
       bool profile_memory = false,
       bool with_stack = false,
-      bool with_flops = false)
+      bool with_flops = false,
+      bool with_module_hierarchy = false)
       : state(state),
         report_input_shapes(report_input_shapes),
         profile_memory(profile_memory),
         with_stack(with_stack),
-        with_flops(with_flops) {}
+        with_flops(with_flops),
+        with_module_hierarchy(with_module_hierarchy) {}
   ~ProfilerConfig() = default;
   ProfilerState state;
   bool report_input_shapes;
   bool profile_memory;
   bool with_stack;
   bool with_flops;
+  bool with_module_hierarchy;
 
   // Returns IValues corresponding to ProfilerConfig struct, to be used for
   // serialization.

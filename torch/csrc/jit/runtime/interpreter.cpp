@@ -777,6 +777,79 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   }
 
  public:
+  std::string moduleHierarchy() const {
+    std::string module_hierarchy("TOP");
+    std::vector<StackEntry> entries;
+    for (size_t i = 0; i < frames.size(); ++i) {
+      const Frame& frame = frames[i];
+      std::string fn_name = frame.function->function_name_;
+      // For each frame, type of the class with which the function is
+      // associated, is queried here. And the type name is added to
+      // module hierarchy.
+      const auto& g = frame.function->graph_;
+      std::string g_self_type;
+      if (g && g->inputs().size() > 0) {
+        const auto& g_self_type_ptr =
+            g->inputs()[0]->type()->cast<c10::ClassType>();
+        if (g_self_type_ptr) {
+          g_self_type = g_self_type_ptr->name()->qualifiedName();
+          g_self_type = g_self_type.substr(g_self_type.find_last_of('.') + 1);
+        }
+      }
+      module_hierarchy += "(" + g_self_type + ")::" + fn_name;
+
+      size_t pc = frame.pc;
+      // CALL nodes have already advanced the pc, so
+      // undo that to report the call node
+      if (i + 1 < frames.size()) {
+        --pc;
+      }
+
+      Node* node = frame.function->instructions_source_[pc];
+      if (node->callstack()) {
+        for (const auto& p : (*node->callstack())->vec()) {
+          fn_name = std::get<0>(p)->name();
+          const auto& opt_module_info = std::get<2>(p);
+          if (opt_module_info.has_value()) {
+            const auto& module_instance_info = opt_module_info.value();
+            module_hierarchy.append(".");
+            module_hierarchy.append(
+                utils::get_module_info(module_instance_info));
+            module_hierarchy.append("::" + fn_name);
+          } else {
+            // This is likely a call to free function, not associated with
+            // any class
+            module_hierarchy += ".::" + fn_name;
+          }
+        }
+      }
+      // If this node is of type callMethod then the following frame
+      // will contain the op being executed.
+      // For such callMethod node, we add the object instance name
+      // associated with it, since the following frame will not have it.
+      if (node->kind() == prim::CallMethod) {
+        std::string class_instance_name;
+        if (node->input(0)->node()->kind() == prim::GetAttr) {
+          class_instance_name = node->input(0)->node()->s(attr::name);
+        } else if (
+            node->owningGraph()->inputs().size() > 0 &&
+            node->input(0) == node->owningGraph()->inputs()[0]) {
+          class_instance_name = "SELF";
+        } else {
+          class_instance_name = "INSTANCE_NAME_UNKNOWN";
+        }
+        module_hierarchy += "." + class_instance_name;
+      } else if (node->kind() == prim::CallFunction) {
+        auto function_constant = node->input(0)->node();
+        auto fun_type =
+            function_constant->output()->type()->expect<FunctionType>();
+        auto fun_name = fun_type->function()->name();
+        module_hierarchy += ".CALL_FUNCTION::" + fun_name;
+      }
+    }
+    return module_hierarchy;
+  }
+
   std::vector<StackEntry> callstack() const {
     std::vector<StackEntry> entries;
     for (size_t i = 0; i < frames.size(); ++i) {
@@ -839,6 +912,13 @@ std::vector<StackEntry> currentCallstack() {
     return cs;
   }
   return std::vector<StackEntry>();
+}
+
+std::string currentModuleHierarchy() {
+  if (tls_int_state_ptr_) {
+    return tls_int_state_ptr_->moduleHierarchy();
+  }
+  return std::string();
 }
 
 std::ostream& operator<<(std::ostream& out, const Code& code) {
