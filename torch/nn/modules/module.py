@@ -549,30 +549,32 @@ class Module:
                 return False
 
         for key, param in self._parameters.items():
-            if param is not None:
-                # Tensors stored in modules are graph leaves, and we don't want to
-                # track autograd history of `param_applied`, so we have to use
-                # `with torch.no_grad():`
-                with torch.no_grad():
-                    param_applied = fn(param)
-                should_use_set_data = compute_should_use_set_data(param, param_applied)
-                if should_use_set_data:
-                    param.data = param_applied
-                else:
-                    assert isinstance(param, Parameter)
-                    assert param.is_leaf
-                    self._parameters[key] = Parameter(param_applied, param.requires_grad)
+            if param is None:
+                continue
+            # Tensors stored in modules are graph leaves, and we don't want to
+            # track autograd history of `param_applied`, so we have to use
+            # `with torch.no_grad():`
+            with torch.no_grad():
+                param_applied = fn(param)
+            should_use_set_data = compute_should_use_set_data(param, param_applied)
+            if should_use_set_data:
+                param.data = param_applied
+                out_param = param
+            else:
+                assert isinstance(param, Parameter)
+                assert param.is_leaf
+                out_param = Parameter(param_applied, param.requires_grad)
+                self._parameters[key] = out_param
 
-                if param.grad is not None:
-                    with torch.no_grad():
-                        grad_applied = fn(param.grad)
-                    should_use_set_data = compute_should_use_set_data(param.grad, grad_applied)
-                    if should_use_set_data:
-                        param.grad.data = grad_applied
-                    else:
-                        assert param.grad.is_leaf
-                        self._parameters[key].grad = grad_applied.requires_grad_(  # type: ignore[union-attr]
-                            param.grad.requires_grad)
+            if param.grad is not None:
+                with torch.no_grad():
+                    grad_applied = fn(param.grad)
+                should_use_set_data = compute_should_use_set_data(param.grad, grad_applied)
+                if should_use_set_data:
+                    out_param.grad.data = grad_applied
+                else:
+                    assert param.grad.is_leaf
+                    out_param.grad = grad_applied.requires_grad_(param.grad.requires_grad)
 
         for key, buf in self._buffers.items():
             if buf is not None:
