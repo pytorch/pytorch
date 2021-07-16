@@ -297,12 +297,14 @@ const Tensor& value){
   }
   int64_t num_ind = 0;
   Tensor mask;
+  auto self_device = self.device();
   for (const c10::optional<Tensor> i: indices) {
     if (!i.has_value() || !(*i).defined()){
       num_ind++;
     } else {
       Tensor index = std::move(*i);
-      if ((index.scalar_type() != kByte && index.scalar_type() != kBool) || mask.defined()){
+      if ((index.scalar_type() != kByte && index.scalar_type() != kBool) ||
+          index.device() != self_device || mask.defined()){
         return std::make_tuple(false, Tensor());
       } else {
         mask = index;
