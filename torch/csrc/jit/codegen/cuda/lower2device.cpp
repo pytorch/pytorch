@@ -174,7 +174,7 @@ std::unordered_map<Val*, Val*> getSimplificationMap(Fusion* fusion) {
 
 } // namespace
 void GpuLower::replaceSymbolicSizes() {
-  FUSER_PERF_SCOPE("replaceSymbolicSizes");
+  FUSER_PERF_SCOPE("GpuLower::Lower::replaceSymbolicSizes");
 
   kir::IrBuilder ir_builder(kernel());
 

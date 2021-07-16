@@ -582,7 +582,7 @@ class AllocationInserter : public kir::MutableIrVisitor {
 
 std::vector<kir::Expr*> insertAllocations(
     const std::vector<kir::Expr*>& exprs) {
-  FUSER_PERF_SCOPE("insertAllocations");
+  FUSER_PERF_SCOPE("GpuLower::Lower::insertAllocations");
   return AllocationInserter::insert(exprs);
 }
 

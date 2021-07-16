@@ -260,7 +260,7 @@ bool UnrollPass::canOmitElseClause(kir::ForLoop* fl) const {
 
 // Generate the loop nest structure and place it in lowered_exprs
 UnrollPass::UnrollPass(const std::vector<kir::Expr*>& exprs) {
-  FUSER_PERF_SCOPE("UnrollPass::computeMap");
+  FUSER_PERF_SCOPE("GpuLower::Lower::UnrollPass::computeMap");
 
   // Run through loop nests and further lower the expressions
   for (auto* expr : exprs) {
@@ -271,7 +271,7 @@ UnrollPass::UnrollPass(const std::vector<kir::Expr*>& exprs) {
 std::vector<kir::Expr*> UnrollPass::runPass(
     Fusion* fusion,
     const std::vector<kir::Expr*>& exprs) {
-  FUSER_PERF_SCOPE("UnrollPass::runPass");
+  FUSER_PERF_SCOPE("GpuLower::Lower::UnrollPass::runPass");
 
   UnrollPass unroll_pass(exprs);
 

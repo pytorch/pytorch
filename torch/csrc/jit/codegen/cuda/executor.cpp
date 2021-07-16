@@ -333,7 +333,7 @@ uint64_t FusionExecutor::computeSharedMemory(
 LaunchParams FusionExecutor::computeLaunchParams(
     const LaunchParams& launch_constraints,
     kir::ExpressionEvaluator& expr_eval) {
-  FUSER_PERF_SCOPE("computeLaunchParams");
+  FUSER_PERF_SCOPE("FusionExecutor::ComputeLaunchParams");
 
   LaunchParams launch_params;
 
@@ -444,7 +444,7 @@ LaunchParams FusionExecutor::computeLaunchParams(
 
 FusionExecutor::GlobalBuffers FusionExecutor::allocGlobalVals(
     kir::ExpressionEvaluator& expr_eval) {
-  FUSER_PERF_SCOPE("allocGlobalVals");
+  FUSER_PERF_SCOPE("FusionExecutor::AllocGlobalVals");
   GlobalBuffers global_buffers;
   const auto kernel = lowered_.kernel();
   const auto& kernel_summary = lowered_.kernel()->summary();
@@ -471,7 +471,7 @@ FusionExecutor::GlobalBuffers FusionExecutor::allocGlobalVals(
 std::vector<at::Tensor> FusionExecutor::allocOutputs(
     kir::ExpressionEvaluator& expr_eval,
     const std::unordered_set<int>& alias_indices) {
-  FUSER_PERF_SCOPE("allocOutputs");
+  FUSER_PERF_SCOPE("FusionExecutor::AllocOutputs");
   const auto kernel = lowered_.kernel();
   std::vector<at::Tensor> outputs;
   for (size_t i = 0; i < kernel->outputs().size(); ++i) {
@@ -504,7 +504,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     const std::vector<at::Tensor>& outputs,
     const LaunchParams& launch_constraints,
     const c10::optional<size_t>& opt_code) {
-  FUSER_PERF_SCOPE("runFusion");
+  FUSER_PERF_SCOPE("FusionExecutor::RunFusion");
 
   TORCH_INTERNAL_ASSERT(
       fusion_id_ > 0, "Cannot run fusion, it was not compiled.");
@@ -529,11 +529,12 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
   if (executor_entry && executor_entry->init) {
     {
       // context manager to disable auto grad for `empty_cuda` calls later
-      at::AutoNonVariableTypeMode non_variable_type_mode;
+      at::AutoDispatchBelowADInplaceOrView non_variable_type_mode;
       // take the short-cut for launch if we see a recorded input set again
       launch_params = executor_entry->launch_params;
       // only allocate outputs when not given
       if (outputs.empty()) {
+        FUSER_PERF_SCOPE("ExecutorRunFusion::OutputAlloc");
         for (const auto i : c10::irange(executor_entry->output_sizes.size())) {
           allocated_outputs.push_back(at::native::empty_cuda(
               executor_entry->output_sizes[i],
@@ -553,25 +554,33 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
             __func__,
             " provided number of outputs does match fusion output");
       }
-      for (const auto i :
-           c10::irange(executor_entry->empty_buffer_sizes.size())) {
-        global_buffers.empty_buffers.push_back(at::native::empty_cuda(
-            executor_entry->empty_buffer_sizes[i],
-            executor_entry->empty_buffer_types[i],
-            c10::nullopt,
-            options_.device,
-            c10::nullopt));
+      {
+        FUSER_PERF_SCOPE("ExecutorRunFusion::IntermediateBufferAlloc");
+        for (const auto i :
+             c10::irange(executor_entry->empty_buffer_sizes.size())) {
+          global_buffers.empty_buffers.push_back(at::native::empty_cuda(
+              executor_entry->empty_buffer_sizes[i],
+              executor_entry->empty_buffer_types[i],
+              c10::nullopt,
+              options_.device,
+              c10::nullopt));
+        }
       }
-    }
-    for (const auto i : c10::irange(executor_entry->zero_buffer_sizes.size())) {
-      auto tensor_options = at::TensorOptions()
-                                .dtype(executor_entry->zero_buffer_types[i])
-                                .device(options_.device);
-      global_buffers.zero_buffers.push_back(
-          at::zeros(executor_entry->zero_buffer_sizes[i], tensor_options));
+      {
+        FUSER_PERF_SCOPE("ExecutorRunFusion::IntermediateBufferAlloc");
+        for (const auto i :
+             c10::irange(executor_entry->zero_buffer_sizes.size())) {
+          auto tensor_options = at::TensorOptions()
+                                    .dtype(executor_entry->zero_buffer_types[i])
+                                    .device(options_.device);
+          global_buffers.zero_buffers.push_back(
+              at::zeros(executor_entry->zero_buffer_sizes[i], tensor_options));
+        }
+      }
     }
     rand_offset = executor_entry->rand_offset;
   } else {
+    FUSER_PERF_SCOPE("ExecutorRunFusion::ValidateAndInitialize");
     // code path to take when either:
     //   1. no opt_code is provided or
     //   2. `executor_entry` is not initialized
@@ -626,6 +635,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     // This is the entry when we have provided `opt_code` but the entry has not
     // been initialized yet.
     if (executor_entry) {
+      FUSER_PERF_SCOPE("ExecutorRunFusion::FillCacheEntry");
       // record the the short-cut executor entry for the given input set;
       executor_entry->launch_params = launch_params;
       executor_entry->io_alias_indices = alias_indices;
@@ -647,12 +657,15 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
   }
 
   KernelArgumentHolder kernel_arguments(options_.index_mode);
-  kernel_arguments.push(inputs);
-  kernel_arguments.push(allocated_outputs);
-  kernel_arguments.push(global_buffers.empty_buffers);
-  kernel_arguments.push(global_buffers.zero_buffers);
-  if (lowered_.kernel()->summary().is_stochastic) {
-    kernel_arguments.appendPhiloxRNGSeed(rand_offset);
+  {
+    FUSER_PERF_SCOPE("ExecutorRunFusion::FillKernelArgStructure");
+    kernel_arguments.push(inputs);
+    kernel_arguments.push(allocated_outputs);
+    kernel_arguments.push(global_buffers.empty_buffers);
+    kernel_arguments.push(global_buffers.zero_buffers);
+    if (lowered_.kernel()->summary().is_stochastic) {
+      kernel_arguments.appendPhiloxRNGSeed(rand_offset);
+    }
   }
 
   if (isDebugDumpEnabled(DebugDumpOption::PrintRuntimeArgs)) {
@@ -693,7 +706,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
   }
 
   if (execute_kernel_) {
-    FUSER_PERF_SCOPE("cuLaunchKernel");
+    FUSER_PERF_SCOPE("ExecutorRunFusion::cuLaunchKernel");
     AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuLaunchKernel(
         compiled_kernel_.function,
         launch_params.gdimx(),
@@ -744,6 +757,7 @@ void FusionExecutor::compileRtc(
     const std::string& code,
     const std::string& name,
     bool structured) {
+  FUSER_PERF_SCOPE("ExecutorRunFusion::compileRtc");
   std::string scode;
   if (!structured) {
     scode = getStructuredCode(code);

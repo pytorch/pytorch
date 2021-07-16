@@ -218,7 +218,7 @@ class CudaFusionManager {
 } // namespace
 
 void compileCudaFusionGroup(Node* fusion_node) {
-  FUSER_PERF_SCOPE("compileCudaFusionGroup");
+  FUSER_PERF_SCOPE("nvFuser::Manager::compileCudaFusionGroup");
 
   TORCH_CHECK(
       fusion_node->kind() == prim::CudaFusionGroup,
@@ -259,7 +259,7 @@ void compileCudaFusionGroup(Node* fusion_node) {
 }
 
 void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
-  FUSER_PERF_SCOPE("runCudaFusionGroup");
+  FUSER_PERF_SCOPE("nvFuser::Manager::runCudaFusionGroup");
 
   // Fallback to use if anything goes wrong
   auto take_fallback = [&]() {

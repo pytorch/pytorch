@@ -21,7 +21,7 @@ namespace cuda {
 
 std::vector<kir::Expr*> LoopNestGenerator::loweredExprs(
     const std::vector<Expr*>& exprs) {
-  FUSER_PERF_SCOPE("LoopNestGenerator::loweredExprs");
+  FUSER_PERF_SCOPE("GpuLower::Lower::LoopNestGenerator::loweredExprs");
   TORCH_INTERNAL_ASSERT(FusionGuard::getCurFusion() != nullptr);
   LoopNestGenerator generator(exprs);
   return generator.lowered_exprs_;

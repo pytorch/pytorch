@@ -294,7 +294,7 @@ FusionExecutorCache::FusionExecutorCache(std::unique_ptr<Fusion> fusion)
 
 std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
     const at::ArrayRef<IValue>& inputs) {
-  FUSER_PERF_SCOPE("runFusionWithInputs");
+  FUSER_PERF_SCOPE("FusionExecutorCache::runFusionWithInputs");
 
   SchedulerRuntimeInfo runtime_info(fusion(), inputs);
 
@@ -425,6 +425,7 @@ std::vector<at::Tensor> FusionKernelRuntime::runKernelWithInput(
     const at::ArrayRef<IValue>& inputs,
     size_t input_id,
     SegmentedGroup* sg) {
+  FUSER_PERF_SCOPE("FusionKernelRuntime::runKernelWithInput");
   // This function will be called once on un-segmented fusion,
   //  for segmented fusion, this function will be called on each segment
   //  In the case of segmented fusion, segmented group needs to be given so
@@ -443,6 +444,7 @@ std::vector<at::Tensor> FusionKernelRuntime::runKernelWithInput(
   TORCH_INTERNAL_ASSERT(!sg || scheduler_entry->heuristc() == sg->heuristic());
 
   if (!executors_[group_id].compiled()) {
+    FUSER_PERF_SCOPE("FusionKernelRuntime::runKernelWithInput::Compile");
     std::unique_ptr<Fusion> fusion_to_run;
     if (sg) {
       // Running a segment group as a single kernel,
@@ -467,6 +469,7 @@ std::vector<at::Tensor> FusionKernelRuntime::runKernelWithInput(
     executors_[group_id].compileFusion(
         fusion_to_run.get(), options, inputs, launch_params);
   } else {
+    FUSER_PERF_SCOPE("FusionKernelRuntime::runKernelWithInput::FetchFromCache");
     // Load launch params for reduction and normalization kernels
     if (scheduler_entry->hasReductionParam()) {
       launch_params = scheduler_entry->reductionParams().lparams;
@@ -476,6 +479,7 @@ std::vector<at::Tensor> FusionKernelRuntime::runKernelWithInput(
   }
 
   if (profiling_) {
+    FUSER_PERF_SCOPE("FusionKernelRuntime::runKernelWithInput::profiling_");
     most_recent_executor_log_.fusion_executor = &executors_[group_id];
     most_recent_executor_log_.launch_constraints = launch_params;
     if (scheduler_entry->hasReductionParam()) {
@@ -493,6 +497,8 @@ std::vector<at::Tensor> FusionKernelRuntime::runKernelWithInput(
 std::vector<at::Tensor> FusionKernelRuntime::runMultiKernelWithInput(
     const at::ArrayRef<IValue>& inputs,
     size_t input_id) {
+  FUSER_PERF_SCOPE("FusionKernelRuntime::runMultiKernelWithInput");
+
   TORCH_INTERNAL_ASSERT(
       inputs.size() == segmented_fusion_->inputs().size(),
       "Inputs were not set up correctly, recieved ",
@@ -615,6 +621,7 @@ const std::vector<FusionKernelRuntime::SchedulerEntryPtr>& FusionKernelRuntime::
 
 void FusionKernelRuntime::updateHeuristicsLaunchParams(
     FusionHeuristics* update_heuristics) {
+  FUSER_PERF_SCOPE("FusionKernelRuntime::updateHeuristicsLaunchParams");
   auto scheduler_list_length = heuristics_->heuristicsList().size();
   TORCH_INTERNAL_ASSERT(
       update_heuristics->heuristicsList().size() == scheduler_list_length);
@@ -632,6 +639,7 @@ void FusionKernelRuntime::updateHeuristicsLaunchParams(
 
 c10::optional<FusionKernelRuntime::HeuristicsPtr> FusionKernelRuntime::
     getMaybeHeuristicsFor(const at::ArrayRef<IValue>& inputs) {
+  FUSER_PERF_SCOPE("FusionKernelRuntime::getMaybeHeuristicsFor");
   auto complete_fusion = is_segmented_ ? segmented_fusion_->completeFusion()
                                        : single_kernel_fusion_.get();
   SchedulerRuntimeInfo runtime_info(complete_fusion, inputs, true);
@@ -842,7 +850,7 @@ GraphCache::GraphCache(const std::shared_ptr<Graph>& graph) {
 
 std::vector<at::Tensor> GraphCache::runGraphWithInputs(
     const at::ArrayRef<IValue>& inputs) {
-  FUSER_PERF_SCOPE("runGraphWithInputs");
+  FUSER_PERF_SCOPE("GraphCache::runGraphWithInputs");
 
   // GraphCache need to permute inputs/outputs to accommodate dimension
   // coalescing

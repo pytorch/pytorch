@@ -82,7 +82,7 @@ class ValidateParallelType : public IterVisitor {
 // created during lowering, which relies on the unique usage of
 // IterDomains.
 void validateIterDomainUsage(Fusion* fusion) {
-  FUSER_PERF_SCOPE("validateIterDomainUse");
+  FUSER_PERF_SCOPE("GpuLower::Lower::validateIterDomainUse");
   FusionGuard fg(fusion);
 
   auto used_vals = fusion->usedMathVals();
@@ -123,7 +123,7 @@ void validateIterDomainUsage(Fusion* fusion) {
 } // namespace
 
 void validateIr(Fusion* fusion) {
-  FUSER_PERF_SCOPE("validateIr");
+  FUSER_PERF_SCOPE("GpuLower::Lower::validateIr");
 
   FusionGuard fg(fusion);
 
@@ -382,7 +382,7 @@ class VectorizeValidator : public OptInDispatch {
 } // namespace
 
 void validateVectorize(Fusion* fusion) {
-  FUSER_PERF_SCOPE("validateVectorize");
+  FUSER_PERF_SCOPE("GpuLower::Lower::validateVectorize");
   FusionGuard fg(fusion);
 
   auto used_vals = fusion->usedMathVals();
@@ -472,7 +472,7 @@ bool derivedFromRootCAAxes(TensorView* tv, IterDomain* axis) {
 } // namespace
 
 void validateParallelize(Fusion* fusion) {
-  FUSER_PERF_SCOPE("validateParallelize");
+  FUSER_PERF_SCOPE("GpuLower::Lower::validateParallelize");
   FusionGuard fg(fusion);
 
   const auto& par_map = GpuLower::current()->caParallelMap();

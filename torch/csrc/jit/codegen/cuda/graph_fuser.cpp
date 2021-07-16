@@ -1678,7 +1678,7 @@ void markMissingType(Block* block) {
 } // anonymous namespace
 
 void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
-  FUSER_PERF_SCOPE("CudaFuseGraph");
+  FUSER_PERF_SCOPE("nvFuser::Manager::CudaFuseGraph");
   GRAPH_DUMP("Before Fusion: ", graph);
 
   // TODO: extract & guard profile_ivalue; but how do we restore it???

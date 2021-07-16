@@ -103,7 +103,7 @@ class MagicZeroInserter : public kir::MutableIrVisitor {
 } // namespace
 
 std::vector<kir::Expr*> insertMagicZero(const std::vector<kir::Expr*>& exprs) {
-  FUSER_PERF_SCOPE("insertMagicZero");
+  FUSER_PERF_SCOPE("GpuLower::Lower::insertMagicZero");
   // Check if magic zero was even used, if not we don't have to define it or
   // update it.
   bool has_magic_zero = false;

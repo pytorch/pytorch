@@ -269,7 +269,7 @@ void validateKernelInputs(
     Fusion* fusion,
     const at::ArrayRef<IValue>& inputs,
     const c10::Device& device) {
-  FUSER_PERF_SCOPE("validateKernelInputs");
+  FUSER_PERF_SCOPE("executor_utils::ValidateKernelInputs");
 
   // This is necessary as we were traversing the fusion graph later in the check
   FusionGuard fg(fusion);
@@ -293,7 +293,7 @@ void validateKernelOutputs(
     Fusion* fusion,
     const std::vector<at::Tensor>& outputs,
     const c10::Device& device) {
-  FUSER_PERF_SCOPE("validateKernelOutputs");
+  FUSER_PERF_SCOPE("executor_utils::ValidateKernelOutputs");
 
   TORCH_INTERNAL_ASSERT(
       fusion->outputs().size() != 0,
@@ -517,7 +517,7 @@ void validateVectorizedTensors(
 kir::ExpressionEvaluator bindKernelInputs(
     const at::ArrayRef<IValue>& aten_inputs,
     kir::Kernel* kernel) {
-  FUSER_PERF_SCOPE("bindKernelInputs");
+  FUSER_PERF_SCOPE("executor_utils::BindKernelInputs");
 
   TORCH_INTERNAL_ASSERT(
       kernel->inputs().size() == aten_inputs.size(),
@@ -572,7 +572,7 @@ kir::ExpressionEvaluator bindKernelInputs(
 ExpressionEvaluator bindFusionInputs(
     const at::ArrayRef<IValue>& aten_inputs,
     Fusion* fusion) {
-  FUSER_PERF_SCOPE("bindFusionInputs");
+  FUSER_PERF_SCOPE("executor_utils::BindFusionInputs");
 
   TORCH_INTERNAL_ASSERT(
       fusion->inputs().size() == aten_inputs.size(),
@@ -630,7 +630,7 @@ NvrtcFunction nvrtcCompile(
     const std::string& func_name,
     int id,
     c10::optional<int> opt_block_size) {
-  FUSER_PERF_SCOPE("NVRTC");
+  FUSER_PERF_SCOPE("executor_utils::NVRTC");
 
   // lazily construct context if non-existing yet;
   CUcontext pctx = nullptr;
@@ -650,13 +650,13 @@ NvrtcFunction nvrtcCompile(
   nvrtcProgram program; // NOLINT(cppcoreguidelines-init-variables)
 
   {
-    FUSER_PERF_SCOPE("nvrtcCreateProgram");
+    FUSER_PERF_SCOPE("executor_utils::NvrtcCreateProgram");
     AT_CUDA_NVRTC_CHECK(at::globalContext().getNVRTC().nvrtcCreateProgram(
         &program, code.c_str(), nullptr, 0, nullptr, nullptr));
   }
 
   ResourceGuard holdProgram([&] {
-    FUSER_PERF_SCOPE("nvrtcDestroyProgram");
+    FUSER_PERF_SCOPE("executor_utils::NvrtcDestroyProgram");
     AT_CUDA_NVRTC_CHECK(
         at::globalContext().getNVRTC().nvrtcDestroyProgram(&program));
   });
@@ -771,7 +771,7 @@ NvrtcFunction nvrtcCompile(
       program, func_name.c_str());
 
   {
-    FUSER_PERF_SCOPE("nvrtcCompileProgram");
+    FUSER_PERF_SCOPE("executor_utils::Nvrtc::CompileProgram");
 
     const auto result = at::globalContext().getNVRTC().nvrtcCompileProgram(
         program, args.size(), args.data());
@@ -806,7 +806,7 @@ NvrtcFunction nvrtcCompile(
   std::vector<char> ptx;
 
   {
-    FUSER_PERF_SCOPE("get PTX");
+    FUSER_PERF_SCOPE("executor_utils::Nvrtc::GetPTX");
 #if CUDA_VERSION >= 11010
     // compile_to_sass determines whether we are generating SASS or PTX, hence
     // the different API.
@@ -832,7 +832,7 @@ NvrtcFunction nvrtcCompile(
 #ifndef __HIP_PLATFORM_HCC__
   const char* prefix_env = getenv("PYTORCH_NVFUSER_CUBIN");
   if (prefix_env) {
-    FUSER_PERF_SCOPE("load CUBIN");
+    FUSER_PERF_SCOPE("executor_utils::Nvrtc::LoadCUBIN");
 
     // Output ptx file
     std::stringstream output_file_name;
@@ -845,7 +845,7 @@ NvrtcFunction nvrtcCompile(
     }
 
     if (compile_to_sass) {
-      FUSER_PERF_SCOPE("load PTX");
+      FUSER_PERF_SCOPE("executor_utils::Nvrtc::LoadPTX");
 
       // load sass directly
       AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuModuleLoadDataEx(
@@ -894,7 +894,7 @@ NvrtcFunction nvrtcCompile(
           &(compiled_kernel_.module), cubin));
     }
   } else {
-    FUSER_PERF_SCOPE("load PTX");
+    FUSER_PERF_SCOPE("executor_utils::Nvrtc::LoadPTX");
 
     // load ptx directly
     AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuModuleLoadDataEx(

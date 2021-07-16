@@ -234,7 +234,7 @@ class AllocateReuseModifier {
 
 std::vector<kir::Expr*> reuseMemoryAllocations(
     const std::vector<kir::Expr*>& exprs) {
-  FUSER_PERF_SCOPE("reuseMemoryAllocations");
+  FUSER_PERF_SCOPE("GpuLower::Lower::reuseMemoryAllocations");
   AllocateReuseModifier arm;
   arm.modify(exprs);
   return exprs;

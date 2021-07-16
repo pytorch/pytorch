@@ -18,7 +18,7 @@ class TORCH_CUDA_CU_API IndexLowering : private kir::IrVisitor {
  public:
   static std::vector<kir::Expr*> getIndexedExprs(
       std::vector<kir::Expr*> incoming_exprs) {
-    FUSER_PERF_SCOPE("IndexLowering::getIndexedExprs");
+    FUSER_PERF_SCOPE("GpuLower::Lower::IndexLowering::getIndexedExprs");
     IndexLowering il;
     il.generate(incoming_exprs);
     return il.lowered_exprs_;

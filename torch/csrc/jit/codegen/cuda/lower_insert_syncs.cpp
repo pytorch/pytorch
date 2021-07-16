@@ -550,13 +550,13 @@ class ReadAfterWriteSyncs : public kir::MutableIrVisitor {
 
 std::vector<kir::Expr*> insertRawThreadSynchronization(
     const std::vector<kir::Expr*>& exprs) {
-  FUSER_PERF_SCOPE("insertRawThreadSynchronization");
+  FUSER_PERF_SCOPE("GpuLower::Lower::insertRawThreadSynchronization");
   return ReadAfterWriteSyncs::insert(exprs);
 }
 
 std::vector<kir::Expr*> insertWarThreadSynchronization(
     const std::vector<kir::Expr*>& exprs) {
-  FUSER_PERF_SCOPE("insertWarThreadSynchronization");
+  FUSER_PERF_SCOPE("GpuLower::Lower::insertWarThreadSynchronization");
   LocalSyncInserter::insertSyncs(exprs);
   return exprs;
 }

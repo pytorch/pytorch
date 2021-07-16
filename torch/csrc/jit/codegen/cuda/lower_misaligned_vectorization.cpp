@@ -21,7 +21,8 @@ namespace {
 class MisalignedVectorizationModifier {
  public:
   void process(const std::vector<kir::Expr*>& exprs) {
-    FUSER_PERF_SCOPE("MisalignedVectorizationModifier::process");
+    FUSER_PERF_SCOPE(
+        "GpuLower::Lower::MisalignedVectorizationModifier::process");
     // Run through loop nests
     // Find for-loops with misaligned vectorization domains
     for (auto* expr : exprs) {
@@ -569,7 +570,7 @@ class MisalignedVectorizationModifier {
 std::vector<kir::Expr*> processMisalignedVectorization(
     Fusion* fusion,
     const std::vector<kir::Expr*>& exprs) {
-  FUSER_PERF_SCOPE("processMisalignedVectorization");
+  FUSER_PERF_SCOPE("GpuLower::Lower::processMisalignedVectorization");
 
   MisalignedVectorizationModifier mvm;
   mvm.process(exprs);

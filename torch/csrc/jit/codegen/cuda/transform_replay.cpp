@@ -133,7 +133,7 @@ class ReplaySelf : public ReplayTransformations {
 TensorDomain* TransformReplay::fullSelfReplay(
     const TensorDomain* new_self_root,
     const TensorDomain* self) {
-  FUSER_PERF_SCOPE("fullSelfReplay");
+  FUSER_PERF_SCOPE("TransformReplay::fullSelfReplay");
 
   TORCH_INTERNAL_ASSERT(
       new_self_root->getRootDomain().size() == self->getRootDomain().size(),
@@ -218,7 +218,7 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayPasC(
     const TensorView* consumer,
     int consumer_compute_at_axis,
     const RootDomainMap& root_map) {
-  FUSER_PERF_SCOPE("replayPasC");
+  FUSER_PERF_SCOPE("TransformReplay::replayPasC");
 
   // If this is a reduction operation, we may call transform_replay on the
   // tensor view. When this happens, just return thet target view.
@@ -407,7 +407,7 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayCasP(
     const TensorView* producer,
     int producer_compute_at_axis,
     const RootDomainMap& root_map) {
-  FUSER_PERF_SCOPE("replayCasP");
+  FUSER_PERF_SCOPE("TransformReplay::replayCasP");
 
   // If this is a reduction operation, we may call transform_replay on the same
   // tensor view. When this happens, just return thet target view.

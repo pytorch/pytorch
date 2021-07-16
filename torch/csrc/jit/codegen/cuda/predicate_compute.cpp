@@ -59,7 +59,7 @@ kir::Bool* PredicateCompute::getInlinePredicate(
     const std::vector<kir::ForLoop*>& loops,
     kir::Bool* thread_pred,
     PredicateType pred_type) {
-  FUSER_PERF_SCOPE("getInlinePredicate");
+  FUSER_PERF_SCOPE("GpuLower::Lower::getInlinePredicate");
 
   const auto gpu_lower = GpuLower::current();
   kir::IrBuilder ir_builder(gpu_lower->kernel());
@@ -112,7 +112,7 @@ kir::Bool* PredicateCompute::getInlinePredicate(
 kir::Bool* UnswitchPredicate::get(
     const std::vector<kir::ForLoop*>& outer_loops,
     kir::ForLoop* unrolled_loop) {
-  FUSER_PERF_SCOPE("UnswitchPredicate::get");
+  FUSER_PERF_SCOPE("GpuLower::Lower::UnswitchPredicate::get");
 
   kir::IrBuilder ir_builder(GpuLower::current()->kernel());
 
@@ -134,7 +134,7 @@ kir::Bool* UnswitchPredicate::get(
 }
 
 void UnswitchPredicate::predicateOn(kir::Expr* tv_expr) {
-  FUSER_PERF_SCOPE("UnswitchPredicate::predicateOn");
+  FUSER_PERF_SCOPE("GpuLower::Lower::UnswitchPredicate::predicateOn");
 
   if (for_loops_.empty()) {
     return;
@@ -174,7 +174,7 @@ void UnswitchPredicate::predicateOn(kir::Expr* tv_expr) {
 }
 
 void UnswitchPredicate::openLoop(kir::ForLoop* fl) {
-  FUSER_PERF_SCOPE("UnswitchPredicate::openLoop");
+  FUSER_PERF_SCOPE("GpuLower::Lower::UnswitchPredicate::openLoop");
 
   for_loops_.push_back(fl);
 
@@ -192,7 +192,7 @@ void UnswitchPredicate::openLoop(kir::ForLoop* fl) {
 }
 
 void UnswitchPredicate::openIte(kir::IfThenElse* ite) {
-  FUSER_PERF_SCOPE("UnswitchPredicate::openIte");
+  FUSER_PERF_SCOPE("GpuLower::Lower::UnswitchPredicate::openIte");
 
   // only expand the ite thenBody
   for (auto expr : ite->thenBody().exprs()) {

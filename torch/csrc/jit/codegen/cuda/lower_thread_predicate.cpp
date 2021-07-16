@@ -121,7 +121,7 @@ ParallelTypeBitmap avoidRedundantWritesToSmem(
 
 // Update the reduction_deps bitset based on provided Expr
 void ThreadPredicateMap::updateBitSet(const Expr* expr) {
-  FUSER_PERF_SCOPE("ThreadPredicateMap::updateBitSet");
+  FUSER_PERF_SCOPE("GpuLower::Lower::ThreadPredicateMap::updateBitSet");
 
   // Which predicates were set for the inputs
   ParallelTypeBitmap input_preds;
@@ -223,7 +223,7 @@ void ThreadPredicateMap::updateBitSet(const Expr* expr) {
 }
 
 void ThreadPredicateMap::build(Fusion* fusion) {
-  FUSER_PERF_SCOPE("ThreadPredicateMap");
+  FUSER_PERF_SCOPE("GpuLower::Lower::ThreadPredicateMap");
 
   // Initialize mapping for input tensors
   for (auto inp : fusion->inputs()) {

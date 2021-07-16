@@ -568,7 +568,7 @@ IndexCompute::IndexCompute(
       zero_merged_in_(std::move(zero_merged_in)),
       preferred_paths_(std::move(preferred_paths)),
       reference_halo_extent_map_(std::move(reference_halo_extent_map)) {
-  FUSER_PERF_SCOPE("IndexCompute::IndexCompute");
+  FUSER_PERF_SCOPE("GpuLower::Lower::IndexCompute::IndexCompute");
 
   // Make sure we recompute any indices we can that map to a contiguous access
   // in physical memory.
@@ -616,7 +616,7 @@ IndexCompute IndexCompute::updateIndexCompute(
     const std::vector<bool>& root_contiguity,
     const std::unordered_map<kir::IterDomain*, kir::Val*>&
         reference_halo_extent_map) {
-  FUSER_PERF_SCOPE("updateIndexCompute");
+  FUSER_PERF_SCOPE("GpuLower::Lower::updateIndexCompute");
 
   const auto gpu_lower = GpuLower::current();
 
@@ -853,7 +853,7 @@ std::vector<kir::Val*> Index::getGlobalProducerStridedIndices(
     TensorView* producer_tv,
     const TensorView* consumer_tv,
     const std::vector<kir::ForLoop*>& loops) {
-  FUSER_PERF_SCOPE("getGlobalProducerIndex");
+  FUSER_PERF_SCOPE("GpuLower::Lower::getGlobalProducerIndex");
   const auto gpu_lower = GpuLower::current();
   kir::IrBuilder ir_builder(gpu_lower->kernel());
 
@@ -1352,7 +1352,7 @@ std::vector<kir::Val*> Index::getNonGlobalProducerStridedIndices(
 std::vector<kir::Val*> Index::getGlobalConsumerStridedIndices(
     const TensorView* consumer_tv,
     const std::vector<kir::ForLoop*>& loops) {
-  FUSER_PERF_SCOPE("getGlobalConsumerIndex");
+  FUSER_PERF_SCOPE("GpuLower::Lower::getGlobalConsumerIndex");
   const auto gpu_lower = GpuLower::current();
   kir::IrBuilder ir_builder(gpu_lower->kernel());
 
@@ -1672,7 +1672,7 @@ std::vector<kir::Val*> Index::getProducerStridedIndices(
     TensorView* producer,
     const TensorView* consumer,
     const std::vector<kir::ForLoop*>& loops) {
-  FUSER_PERF_SCOPE("Index::getProducerStridedIndices");
+  FUSER_PERF_SCOPE("GpuLower::Lower::Index::getProducerStridedIndices");
   const auto gpu_lower = GpuLower::current();
   kir::IrBuilder ir_builder(gpu_lower->kernel());
 
@@ -1711,7 +1711,7 @@ kir::TensorIndex* Index::getProducerIndex(
 std::vector<kir::Val*> Index::getConsumerStridedIndices(
     const TensorView* consumer,
     const std::vector<kir::ForLoop*>& loops) {
-  FUSER_PERF_SCOPE("Index::getConsumerStridedIndices");
+  FUSER_PERF_SCOPE("GpuLower::Lower::Index::getConsumerStridedIndices");
   const auto gpu_lower = GpuLower::current();
   kir::IrBuilder ir_builder(gpu_lower->kernel());
 
@@ -1754,7 +1754,7 @@ std::pair<std::vector<kir::Val*>, bool> Index::getConsumerRootPredIndices(
     const std::vector<kir::ForLoop*>& loops,
     const std::vector<bool>& root_contiguity,
     bool unswitch) {
-  FUSER_PERF_SCOPE("Index::getConsumerRootPredIndices");
+  FUSER_PERF_SCOPE("GpuLower::Lower::Index::getConsumerRootPredIndices");
 
   auto consumer_tv = kir_consumer_tv->fuserTv();
 
@@ -1958,7 +1958,7 @@ Index::getReferenceRootPredicates(
     const kir::TensorView* kir_consumer_tv,
     const std::vector<kir::ForLoop*>& loops,
     bool unswitch) {
-  FUSER_PERF_SCOPE("Index::getReferenceRootPredicates");
+  FUSER_PERF_SCOPE("GpuLower::Lower::Index::getReferenceRootPredicates");
 
   const auto gpu_lower = GpuLower::current();
   kir::IrBuilder ir_builder(gpu_lower->kernel());

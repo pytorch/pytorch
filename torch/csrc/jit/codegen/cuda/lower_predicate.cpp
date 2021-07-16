@@ -26,7 +26,8 @@ namespace {
 class ConditionalFromPredicateModifier {
  public:
   ConditionalFromPredicateModifier(const std::vector<kir::Expr*>& exprs) {
-    FUSER_PERF_SCOPE("ConditionalFromPredicateModifier::process");
+    FUSER_PERF_SCOPE(
+        "GpuLower::Lower::ConditionalFromPredicateModifier::process");
     for (auto* expr : exprs) {
       handle(expr);
     }
@@ -163,7 +164,7 @@ class ConditionalFromPredicateModifier {
 std::vector<kir::Expr*> generateConditionalFromPredicate(
     Fusion* fusion,
     const std::vector<kir::Expr*>& exprs) {
-  FUSER_PERF_SCOPE("generateConditionalFromPredicate");
+  FUSER_PERF_SCOPE("GpuLower::Lower::generateConditionalFromPredicate");
 
   ConditionalFromPredicateModifier p2cm(exprs);
 

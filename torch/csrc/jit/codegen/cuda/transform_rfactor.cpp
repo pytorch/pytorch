@@ -153,7 +153,7 @@ class ReplayRFactor : public ReplayTransformations {
 TensorDomain* TransformRFactor::runReplay(
     TensorDomain* orig_td,
     std::vector<int> axes) {
-  FUSER_PERF_SCOPE("runReplay");
+  FUSER_PERF_SCOPE("TransformRFactor::runReplay");
 
   TORCH_CHECK(!axes.empty(), "No axes provided to rfactor replay.");
 
@@ -304,7 +304,7 @@ TensorDomain* TransformRFactor::runReplay(
 TensorDomain* TransformRFactor::runReplay2(
     TensorDomain* orig_td,
     std::vector<int> axes) {
-  FUSER_PERF_SCOPE("runReplay2");
+  FUSER_PERF_SCOPE("TransformRFactor::runReplay2");
 
   int ndims = (int)orig_td->nDims();
 
